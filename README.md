@@ -1,2 +1,3 @@
-# gastrolog
-Simple, yet powerful log management system.
+# GastroLog
+
+Simple, yet powerful log management system. I hope.
