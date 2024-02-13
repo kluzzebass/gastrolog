@@ -2,8 +2,6 @@ package syslog
 
 import (
 	"context"
-	"errors"
-	"io"
 	"log/slog"
 	"net"
 	"sync"
@@ -113,6 +111,10 @@ func (i *SyslogTCPIngester) Cancel() {
 		return
 	}
 	i.cancelled = true
+
+	// This will terminate Accept()
+	i.ln.Close()
+
 	slog.Debug("cancelling ingester")
 	i.cancel()
 	slog.Debug("waiting for ingester to finish", "wg", &i.wg)
@@ -139,11 +141,13 @@ func (i *SyslogTCPIngester) ingest(ctx context.Context) {
 		}
 
 		// accept a connection
+		slog.Debug("accepting connections")
 		conn, err := i.ln.Accept()
 		if err != nil {
 			slog.Debug("failed to accept connection", "err", err)
 			continue
 		}
+		slog.Debug("accepted a connection")
 
 		go i.handleConn(ctx, conn)
 	}
@@ -220,21 +224,6 @@ func (i *SyslogTCPIngester) lineReader(ctx context.Context, conn net.Conn, lchan
 		chunk := make([]byte, i.maxMessageSize)
 		n, err := reader.Read(chunk)
 		if err != nil {
-			if errors.Is(err, cancelreader.ErrCanceled) {
-				slog.Debug("canceled!")
-				qchan <- struct{}{}
-				return
-			}
-			if errors.Is(err, io.EOF) {
-				slog.Debug("received EOF")
-				qchan <- struct{}{}
-				return
-			}
-			if errors.Is(err, io.ErrClosedPipe) {
-				slog.Debug("received closed pipe")
-				qchan <- struct{}{}
-				return
-			}
 			if err, ok := err.(net.Error); ok && err.Timeout() {
 				slog.Debug("Timeout", "err", err)
 				continue

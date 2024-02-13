@@ -23,3 +23,5 @@ go.work
 # Local .env file
 .env
 
+# Visual Studio Code workspace file
+*.code-workspace
