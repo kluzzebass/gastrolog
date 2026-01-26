@@ -9,88 +9,93 @@ import (
 
 var ErrUnknownSourceLocalID = errors.New("unknown source local id")
 
-type recordReader struct {
-	reader  recordReadAt
-	resolve func(uint32) (chunk.SourceID, bool)
-	offset  int64
-	done    bool
-}
-
 type recordReadAt interface {
 	ReadRecordAt(offset int64) (chunk.Record, uint32, int64, error)
 	Close() error
 }
-
-func newRecordReader(reader recordReadAt, resolve func(uint32) (chunk.SourceID, bool)) *recordReader {
-	return &recordReader{reader: reader, resolve: resolve}
-}
-
-func (r *recordReader) Next() (chunk.Record, error) {
-	if r.done {
-		return chunk.Record{}, chunk.ErrNoMoreRecords
-	}
-	record, localID, next, err := r.reader.ReadRecordAt(r.offset)
-	if err != nil {
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			r.done = true
-			return chunk.Record{}, chunk.ErrNoMoreRecords
-		}
-		return chunk.Record{}, err
-	}
-	sourceID, ok := r.resolve(localID)
-	if !ok {
-		return chunk.Record{}, ErrUnknownSourceLocalID
-	}
-	record.SourceID = sourceID
-	r.offset = next
-	return record, nil
-}
-
-func (r *recordReader) Close() error {
-	return r.reader.Close()
-}
-
-var _ chunk.RecordReader = (*recordReader)(nil)
 
 type recordReadBefore interface {
 	recordReadAt
 	ReadRecordBefore(offset int64) (chunk.Record, uint32, int64, error)
 }
 
-type reverseRecordReader struct {
-	reader  recordReadBefore
-	resolve func(uint32) (chunk.SourceID, bool)
-	offset  int64
-	done    bool
+type recordReader struct {
+	reader    recordReadBefore
+	resolve   func(uint32) (chunk.SourceID, bool)
+	chunkID   chunk.ChunkID
+	offset    int64
+	endOffset int64
+	fwdDone   bool
+	revDone   bool
 }
 
-func newReverseRecordReader(reader recordReadBefore, resolve func(uint32) (chunk.SourceID, bool), endOffset int64) *reverseRecordReader {
-	return &reverseRecordReader{reader: reader, resolve: resolve, offset: endOffset}
-}
-
-func (r *reverseRecordReader) Next() (chunk.Record, error) {
-	if r.done {
-		return chunk.Record{}, chunk.ErrNoMoreRecords
+func newRecordReader(reader recordReadBefore, resolve func(uint32) (chunk.SourceID, bool), chunkID chunk.ChunkID, endOffset int64) *recordReader {
+	return &recordReader{
+		reader:    reader,
+		resolve:   resolve,
+		chunkID:   chunkID,
+		offset:    0,
+		endOffset: endOffset,
 	}
-	record, localID, prevOffset, err := r.reader.ReadRecordBefore(r.offset)
+}
+
+func (r *recordReader) Next() (chunk.Record, chunk.RecordRef, error) {
+	if r.fwdDone {
+		return chunk.Record{}, chunk.RecordRef{}, chunk.ErrNoMoreRecords
+	}
+	pos := r.offset
+	record, localID, next, err := r.reader.ReadRecordAt(pos)
 	if err != nil {
-		if err == ErrNoPreviousRecord {
-			r.done = true
-			return chunk.Record{}, chunk.ErrNoMoreRecords
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			r.fwdDone = true
+			return chunk.Record{}, chunk.RecordRef{}, chunk.ErrNoMoreRecords
 		}
-		return chunk.Record{}, err
+		return chunk.Record{}, chunk.RecordRef{}, err
 	}
 	sourceID, ok := r.resolve(localID)
 	if !ok {
-		return chunk.Record{}, ErrUnknownSourceLocalID
+		return chunk.Record{}, chunk.RecordRef{}, ErrUnknownSourceLocalID
 	}
 	record.SourceID = sourceID
-	r.offset = prevOffset
-	return record, nil
+	r.offset = next
+	r.fwdDone = false
+	r.revDone = false
+	return record, chunk.RecordRef{ChunkID: r.chunkID, Pos: pos}, nil
 }
 
-func (r *reverseRecordReader) Close() error {
+func (r *recordReader) Prev() (chunk.Record, chunk.RecordRef, error) {
+	if r.revDone {
+		return chunk.Record{}, chunk.RecordRef{}, chunk.ErrNoMoreRecords
+	}
+	record, localID, prevOffset, err := r.reader.ReadRecordBefore(r.endOffset)
+	if err != nil {
+		if err == ErrNoPreviousRecord {
+			r.revDone = true
+			return chunk.Record{}, chunk.RecordRef{}, chunk.ErrNoMoreRecords
+		}
+		return chunk.Record{}, chunk.RecordRef{}, err
+	}
+	sourceID, ok := r.resolve(localID)
+	if !ok {
+		return chunk.Record{}, chunk.RecordRef{}, ErrUnknownSourceLocalID
+	}
+	record.SourceID = sourceID
+	r.endOffset = prevOffset
+	r.fwdDone = false
+	r.revDone = false
+	return record, chunk.RecordRef{ChunkID: r.chunkID, Pos: prevOffset}, nil
+}
+
+func (r *recordReader) Seek(ref chunk.RecordRef) error {
+	r.offset = ref.Pos
+	r.endOffset = ref.Pos
+	r.fwdDone = false
+	r.revDone = false
+	return nil
+}
+
+func (r *recordReader) Close() error {
 	return r.reader.Close()
 }
 
-var _ chunk.RecordReader = (*reverseRecordReader)(nil)
+var _ chunk.RecordCursor = (*recordReader)(nil)

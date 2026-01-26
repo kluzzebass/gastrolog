@@ -127,41 +127,7 @@ func (m *Manager) List() ([]chunk.ChunkMeta, error) {
 	return out, nil
 }
 
-func (m *Manager) OpenReader(id chunk.ChunkID) (chunk.RecordReader, error) {
-	m.mu.Lock()
-	meta, ok := m.metas[id]
-	sourceMap := m.sources[id]
-	m.mu.Unlock()
-	if !ok {
-		return nil, chunk.ErrChunkNotFound
-	}
-	if sourceMap == nil {
-		var err error
-		sourceMap, err = m.loadSourceMap(id)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	recordsPath := m.recordsPath(id)
-	var reader recordReadAt
-	if meta.Sealed {
-		r, err := OpenMmapReader(recordsPath)
-		if err != nil {
-			return nil, err
-		}
-		reader = r
-	} else {
-		r, err := OpenReader(recordsPath)
-		if err != nil {
-			return nil, err
-		}
-		reader = r
-	}
-	return newRecordReader(reader, sourceMap.Resolve), nil
-}
-
-func (m *Manager) OpenReverseReader(id chunk.ChunkID) (chunk.RecordReader, error) {
+func (m *Manager) OpenReader(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	m.mu.Lock()
 	meta, ok := m.metas[id]
 	sourceMap := m.sources[id]
@@ -183,7 +149,7 @@ func (m *Manager) OpenReverseReader(id chunk.ChunkID) (chunk.RecordReader, error
 		if err != nil {
 			return nil, err
 		}
-		return newReverseRecordReader(r, sourceMap.Resolve, int64(len(r.data))), nil
+		return newRecordReader(r, sourceMap.Resolve, id, int64(len(r.data))), nil
 	}
 
 	r, err := OpenReader(recordsPath)
@@ -195,7 +161,7 @@ func (m *Manager) OpenReverseReader(id chunk.ChunkID) (chunk.RecordReader, error
 		r.Close()
 		return nil, err
 	}
-	return newReverseRecordReader(r, sourceMap.Resolve, info.Size()), nil
+	return newRecordReader(r, sourceMap.Resolve, id, info.Size()), nil
 }
 
 func (m *Manager) loadExisting() error {

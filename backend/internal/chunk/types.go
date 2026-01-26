@@ -47,6 +47,11 @@ func (id SourceID) String() string {
 	return uuid.UUID(id).String()
 }
 
+type RecordRef struct {
+	ChunkID ChunkID
+	Pos     int64
+}
+
 type ChunkMeta struct {
 	ID      ChunkID
 	StartTS int64
@@ -60,11 +65,13 @@ type ChunkManager interface {
 	Seal() error
 	Active() *ChunkMeta
 	List() ([]ChunkMeta, error)
-	OpenReader(id ChunkID) (RecordReader, error)
+	OpenReader(id ChunkID) (RecordCursor, error)
 }
 
-type RecordReader interface {
-	Next() (Record, error)
+type RecordCursor interface {
+	Next() (Record, RecordRef, error)
+	Prev() (Record, RecordRef, error)
+	Seek(ref RecordRef) error
 	Close() error
 }
 

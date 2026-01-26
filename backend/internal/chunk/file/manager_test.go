@@ -110,7 +110,7 @@ func TestFileChunkManagerAppendSealOpenReader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open unsealed reader: %v", err)
 	}
-	unsealedGot, err := unsealedReader.Next()
+	unsealedGot, _, err := unsealedReader.Next()
 	if err != nil {
 		t.Fatalf("unsealed next: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestFileChunkManagerAppendSealOpenReader(t *testing.T) {
 	if string(unsealedGot.Raw) != string(record.Raw) {
 		t.Fatalf("unsealed raw: expected %q got %q", record.Raw, unsealedGot.Raw)
 	}
-	if _, err := unsealedReader.Next(); err != chunk.ErrNoMoreRecords {
+	if _, _, err := unsealedReader.Next(); err != chunk.ErrNoMoreRecords {
 		t.Fatalf("unsealed: expected end of records, got %v", err)
 	}
 	unsealedReader.Close()
@@ -135,14 +135,14 @@ func TestFileChunkManagerAppendSealOpenReader(t *testing.T) {
 	}
 	defer reader.Close()
 
-	got, err := reader.Next()
+	got, _, err := reader.Next()
 	if err != nil {
 		t.Fatalf("next: %v", err)
 	}
 	if got.SourceID != record.SourceID {
 		t.Fatalf("expected source id %s got %s", record.SourceID.String(), got.SourceID.String())
 	}
-	if _, err := reader.Next(); err != chunk.ErrNoMoreRecords {
+	if _, _, err := reader.Next(); err != chunk.ErrNoMoreRecords {
 		t.Fatalf("expected end of records, got %v", err)
 	}
 
@@ -182,14 +182,14 @@ func TestFileChunkManagerReverseReader(t *testing.T) {
 	}
 
 	// Reverse read from unsealed chunk (file I/O reader).
-	revReader, err := manager.OpenReverseReader(chunkID)
+	reader, err := manager.OpenReader(chunkID)
 	if err != nil {
-		t.Fatalf("open reverse reader (unsealed): %v", err)
+		t.Fatalf("open reader (unsealed): %v", err)
 	}
 	for i := len(records) - 1; i >= 0; i-- {
-		got, err := revReader.Next()
+		got, _, err := reader.Prev()
 		if err != nil {
-			t.Fatalf("reverse next (unsealed) record %d: %v", i, err)
+			t.Fatalf("prev (unsealed) record %d: %v", i, err)
 		}
 		if got.SourceID != sourceID {
 			t.Fatalf("record %d: source id want %s got %s", i, sourceID.String(), got.SourceID.String())
@@ -198,24 +198,24 @@ func TestFileChunkManagerReverseReader(t *testing.T) {
 			t.Fatalf("record %d: raw want %q got %q", i, records[i].Raw, got.Raw)
 		}
 	}
-	if _, err := revReader.Next(); err != chunk.ErrNoMoreRecords {
-		t.Fatalf("reverse reader (unsealed): expected ErrNoMoreRecords, got %v", err)
+	if _, _, err := reader.Prev(); err != chunk.ErrNoMoreRecords {
+		t.Fatalf("prev (unsealed): expected ErrNoMoreRecords, got %v", err)
 	}
-	revReader.Close()
+	reader.Close()
 
 	// Seal and reverse read again (mmap reader).
 	if err := manager.Seal(); err != nil {
 		t.Fatalf("seal: %v", err)
 	}
-	revReader, err = manager.OpenReverseReader(chunkID)
+	reader, err = manager.OpenReader(chunkID)
 	if err != nil {
-		t.Fatalf("open reverse reader (sealed): %v", err)
+		t.Fatalf("open reader (sealed): %v", err)
 	}
-	defer revReader.Close()
+	defer reader.Close()
 	for i := len(records) - 1; i >= 0; i-- {
-		got, err := revReader.Next()
+		got, _, err := reader.Prev()
 		if err != nil {
-			t.Fatalf("reverse next (sealed) record %d: %v", i, err)
+			t.Fatalf("prev (sealed) record %d: %v", i, err)
 		}
 		if got.SourceID != sourceID {
 			t.Fatalf("record %d: source id want %s got %s", i, sourceID.String(), got.SourceID.String())
@@ -224,7 +224,7 @@ func TestFileChunkManagerReverseReader(t *testing.T) {
 			t.Fatalf("record %d: raw want %q got %q", i, records[i].Raw, got.Raw)
 		}
 	}
-	if _, err := revReader.Next(); err != chunk.ErrNoMoreRecords {
-		t.Fatalf("reverse reader (sealed): expected ErrNoMoreRecords, got %v", err)
+	if _, _, err := reader.Prev(); err != chunk.ErrNoMoreRecords {
+		t.Fatalf("prev (sealed): expected ErrNoMoreRecords, got %v", err)
 	}
 }

@@ -37,14 +37,14 @@ func TestMemoryChunkManagerAppendSealOpenReader(t *testing.T) {
 	}
 	defer reader.Close()
 
-	got, err := reader.Next()
+	got, _, err := reader.Next()
 	if err != nil {
 		t.Fatalf("next: %v", err)
 	}
 	if got.SourceID != record.SourceID {
 		t.Fatalf("expected source id %s got %s", record.SourceID.String(), got.SourceID.String())
 	}
-	if _, err := reader.Next(); err != chunk.ErrNoMoreRecords {
+	if _, _, err := reader.Next(); err != chunk.ErrNoMoreRecords {
 		t.Fatalf("expected end of records, got %v", err)
 	}
 }

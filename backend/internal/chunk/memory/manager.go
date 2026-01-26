@@ -91,7 +91,7 @@ func (m *Manager) List() ([]chunk.ChunkMeta, error) {
 	return out, nil
 }
 
-func (m *Manager) OpenReader(id chunk.ChunkID) (chunk.RecordReader, error) {
+func (m *Manager) OpenReader(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	m.mu.Lock()
 	state := m.findChunkLocked(id)
 	m.mu.Unlock()
@@ -101,7 +101,7 @@ func (m *Manager) OpenReader(id chunk.ChunkID) (chunk.RecordReader, error) {
 	if !state.meta.Sealed {
 		return nil, chunk.ErrChunkNotSealed
 	}
-	return newRecordReader(state.records), nil
+	return newRecordReader(state.records, id), nil
 }
 
 func (m *Manager) shouldRotate(nextSize int64) bool {
