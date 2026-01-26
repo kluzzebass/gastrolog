@@ -106,7 +106,7 @@ func TestFileChunkManagerAppendSealOpenReader(t *testing.T) {
 	}
 
 	// Read from the unsealed (active) chunk via file I/O reader.
-	unsealedReader, err := manager.OpenReader(chunkID)
+	unsealedReader, err := manager.OpenCursor(chunkID)
 	if err != nil {
 		t.Fatalf("open unsealed reader: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestFileChunkManagerAppendSealOpenReader(t *testing.T) {
 		t.Fatalf("seal: %v", err)
 	}
 
-	reader, err := manager.OpenReader(chunkID)
+	reader, err := manager.OpenCursor(chunkID)
 	if err != nil {
 		t.Fatalf("open reader: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestFileChunkManagerReverseReader(t *testing.T) {
 	}
 
 	// Reverse read from unsealed chunk (file I/O reader).
-	reader, err := manager.OpenReader(chunkID)
+	reader, err := manager.OpenCursor(chunkID)
 	if err != nil {
 		t.Fatalf("open reader (unsealed): %v", err)
 	}
@@ -207,7 +207,7 @@ func TestFileChunkManagerReverseReader(t *testing.T) {
 	if err := manager.Seal(); err != nil {
 		t.Fatalf("seal: %v", err)
 	}
-	reader, err = manager.OpenReader(chunkID)
+	reader, err = manager.OpenCursor(chunkID)
 	if err != nil {
 		t.Fatalf("open reader (sealed): %v", err)
 	}

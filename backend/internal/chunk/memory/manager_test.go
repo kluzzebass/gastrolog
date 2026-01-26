@@ -23,7 +23,7 @@ func TestMemoryChunkManagerAppendSealOpenReader(t *testing.T) {
 		t.Fatalf("expected offset 0, got %d", offset)
 	}
 
-	if _, err := manager.OpenReader(chunkID); err != chunk.ErrChunkNotSealed {
+	if _, err := manager.OpenCursor(chunkID); err != chunk.ErrChunkNotSealed {
 		t.Fatalf("expected not sealed error, got %v", err)
 	}
 
@@ -31,7 +31,7 @@ func TestMemoryChunkManagerAppendSealOpenReader(t *testing.T) {
 		t.Fatalf("seal: %v", err)
 	}
 
-	reader, err := manager.OpenReader(chunkID)
+	reader, err := manager.OpenCursor(chunkID)
 	if err != nil {
 		t.Fatalf("open reader: %v", err)
 	}

@@ -127,7 +127,7 @@ func (m *Manager) List() ([]chunk.ChunkMeta, error) {
 	return out, nil
 }
 
-func (m *Manager) OpenReader(id chunk.ChunkID) (chunk.RecordCursor, error) {
+func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	m.mu.Lock()
 	meta, ok := m.metas[id]
 	sourceMap := m.sources[id]

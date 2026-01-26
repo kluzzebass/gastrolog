@@ -65,7 +65,7 @@ type ChunkManager interface {
 	Seal() error
 	Active() *ChunkMeta
 	List() ([]ChunkMeta, error)
-	OpenReader(id ChunkID) (RecordCursor, error)
+	OpenCursor(id ChunkID) (RecordCursor, error)
 }
 
 type RecordCursor interface {
