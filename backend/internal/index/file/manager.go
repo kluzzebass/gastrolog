@@ -13,22 +13,19 @@ import (
 type Manager struct {
 	dir      string
 	indexers []index.Indexer
+	builder  *index.BuildHelper
 }
 
 func NewManager(dir string, indexers []index.Indexer) *Manager {
 	return &Manager{
 		dir:      dir,
 		indexers: indexers,
+		builder:  index.NewBuildHelper(),
 	}
 }
 
 func (m *Manager) BuildIndexes(ctx context.Context, chunkID chunk.ChunkID) error {
-	for _, idx := range m.indexers {
-		if err := idx.Build(ctx, chunkID); err != nil {
-			return fmt.Errorf("build %s index: %w", idx.Name(), err)
-		}
-	}
-	return nil
+	return m.builder.Build(ctx, chunkID, m.indexers)
 }
 
 func (m *Manager) OpenTimeIndex(chunkID chunk.ChunkID) (*index.Index[index.TimeIndexEntry], error) {

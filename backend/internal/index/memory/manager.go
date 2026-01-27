@@ -2,7 +2,6 @@ package memory
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/kluzzebass/gastrolog/internal/chunk"
 	"github.com/kluzzebass/gastrolog/internal/index"
@@ -16,6 +15,7 @@ type Manager struct {
 	indexers    []index.Indexer
 	timeStore   IndexStore[index.TimeIndexEntry]
 	sourceStore IndexStore[index.SourceIndexEntry]
+	builder     *index.BuildHelper
 }
 
 func NewManager(indexers []index.Indexer, timeStore IndexStore[index.TimeIndexEntry], sourceStore IndexStore[index.SourceIndexEntry]) *Manager {
@@ -23,16 +23,12 @@ func NewManager(indexers []index.Indexer, timeStore IndexStore[index.TimeIndexEn
 		indexers:    indexers,
 		timeStore:   timeStore,
 		sourceStore: sourceStore,
+		builder:     index.NewBuildHelper(),
 	}
 }
 
 func (m *Manager) BuildIndexes(ctx context.Context, chunkID chunk.ChunkID) error {
-	for _, idx := range m.indexers {
-		if err := idx.Build(ctx, chunkID); err != nil {
-			return fmt.Errorf("build %s index: %w", idx.Name(), err)
-		}
-	}
-	return nil
+	return m.builder.Build(ctx, chunkID, m.indexers)
 }
 
 func (m *Manager) OpenTimeIndex(chunkID chunk.ChunkID) (*index.Index[index.TimeIndexEntry], error) {
