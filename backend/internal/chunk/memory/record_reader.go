@@ -22,7 +22,7 @@ func (r *recordReader) Next() (chunk.Record, chunk.RecordRef, error) {
 	pos := r.fwdIndex
 	record := r.records[pos]
 	r.fwdIndex++
-	return record, chunk.RecordRef{ChunkID: r.chunkID, Pos: int64(pos)}, nil
+	return record, chunk.RecordRef{ChunkID: r.chunkID, Pos: uint64(pos)}, nil
 }
 
 func (r *recordReader) Prev() (chunk.Record, chunk.RecordRef, error) {
@@ -32,7 +32,7 @@ func (r *recordReader) Prev() (chunk.Record, chunk.RecordRef, error) {
 	r.revIndex--
 	pos := r.revIndex
 	record := r.records[pos]
-	return record, chunk.RecordRef{ChunkID: r.chunkID, Pos: int64(pos)}, nil
+	return record, chunk.RecordRef{ChunkID: r.chunkID, Pos: uint64(pos)}, nil
 }
 
 func (r *recordReader) Seek(ref chunk.RecordRef) error {

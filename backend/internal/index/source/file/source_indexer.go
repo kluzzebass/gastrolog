@@ -7,39 +7,38 @@ import (
 	"path/filepath"
 
 	"github.com/kluzzebass/gastrolog/internal/chunk"
-	indextime "github.com/kluzzebass/gastrolog/internal/index/time"
+	indexsource "github.com/kluzzebass/gastrolog/internal/index/source"
 )
 
-// TimeIndexer builds a sparse time index for sealed chunks.
-// For each chunk, it samples every N-th record's (IngestTS, RecordPos)
-// and writes the result to <dir>/<chunkID>/time.idx.
-type TimeIndexer struct {
-	dir      string
-	manager  chunk.ChunkManager
-	sparsity int
+// SourceIndexer builds a source index for sealed chunks.
+// For each chunk, it maps every distinct SourceID to the list of
+// record positions where that source appears, and writes the result
+// to <dir>/<chunkID>/_source.idx.
+type SourceIndexer struct {
+	dir     string
+	manager chunk.ChunkManager
 }
 
-func NewTimeIndexer(dir string, manager chunk.ChunkManager, sparsity int) *TimeIndexer {
-	return &TimeIndexer{
-		dir:      dir,
-		manager:  manager,
-		sparsity: sparsity,
+func NewSourceIndexer(dir string, manager chunk.ChunkManager) *SourceIndexer {
+	return &SourceIndexer{
+		dir:     dir,
+		manager: manager,
 	}
 }
 
-func (t *TimeIndexer) Name() string {
-	return "time"
+func (s *SourceIndexer) Name() string {
+	return "source"
 }
 
-func (t *TimeIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
-	cursor, err := t.manager.OpenCursor(chunkID)
+func (s *SourceIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
+	cursor, err := s.manager.OpenCursor(chunkID)
 	if err != nil {
 		return fmt.Errorf("open cursor: %w", err)
 	}
 	defer cursor.Close()
 
-	var entries []indextime.IndexEntry
-	n := 0
+	// Single-pass scan: accumulate positions per source.
+	posMap := make(map[chunk.SourceID][]uint64)
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -54,18 +53,21 @@ func (t *TimeIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 			return fmt.Errorf("read record: %w", err)
 		}
 
-		if n == 0 || n%t.sparsity == 0 {
-			entries = append(entries, indextime.IndexEntry{
-				TimestampUS: rec.IngestTS.UnixMicro(),
-				RecordPos:   ref.Pos,
-			})
-		}
-		n++
+		posMap[rec.SourceID] = append(posMap[rec.SourceID], ref.Pos)
+	}
+
+	// Convert map to sorted slice.
+	entries := make([]indexsource.IndexEntry, 0, len(posMap))
+	for sid, positions := range posMap {
+		entries = append(entries, indexsource.IndexEntry{
+			SourceID:  sid,
+			Positions: positions,
+		})
 	}
 
 	data := encodeIndex(entries)
 
-	chunkDir := filepath.Join(t.dir, chunkID.String())
+	chunkDir := filepath.Join(s.dir, chunkID.String())
 	if err := os.MkdirAll(chunkDir, 0o755); err != nil {
 		return fmt.Errorf("create index dir: %w", err)
 	}

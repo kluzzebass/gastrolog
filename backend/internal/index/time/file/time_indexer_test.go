@@ -277,7 +277,7 @@ func TestTimeIndexerBuildRecordPos(t *testing.T) {
 		t.Fatalf("record size: %v", err)
 	}
 	for i, e := range entries {
-		expectedPos := int64(i) * int64(recordSize)
+		expectedPos := uint64(i) * uint64(recordSize)
 		if e.RecordPos != expectedPos {
 			t.Fatalf("entry %d: expected pos %d, got %d", i, expectedPos, e.RecordPos)
 		}
@@ -322,6 +322,20 @@ func TestTimeIndexerBuildReadOnlyDir(t *testing.T) {
 	}
 }
 
+func TestSignature(t *testing.T) {
+	entries := []indextime.IndexEntry{
+		{TimestampUS: 1000, RecordPos: 0},
+	}
+
+	data := encodeIndex(entries)
+	if data[0] != signatureByte {
+		t.Fatalf("expected signature byte 0x%02x, got 0x%02x", signatureByte, data[0])
+	}
+	if data[1] != typeByte {
+		t.Fatalf("expected type byte '%c', got 0x%02x", typeByte, data[1])
+	}
+}
+
 func TestEncodeDecodeRoundTrip(t *testing.T) {
 	entries := []indextime.IndexEntry{
 		{TimestampUS: 1000, RecordPos: 0},
@@ -358,23 +372,45 @@ func TestEncodeDecodeEmpty(t *testing.T) {
 
 func TestDecodeErrors(t *testing.T) {
 	// Too small.
-	if _, err := decodeIndex([]byte{0x01}); err != ErrIndexTooSmall {
+	if _, err := decodeIndex([]byte{'i'}); err != ErrIndexTooSmall {
 		t.Fatalf("expected ErrIndexTooSmall, got %v", err)
 	}
 
-	// Wrong version.
+	// Wrong signature.
 	bad := make([]byte, headerSize)
 	bad[0] = 0xFF
-	if _, err := decodeIndex(bad); err != ErrVersionMismatch {
+	bad[1] = typeByte
+	bad[2] = versionByte
+	if _, err := decodeIndex(bad); err != ErrSignatureMismatch {
+		t.Fatalf("expected ErrSignatureMismatch, got %v", err)
+	}
+
+	// Wrong type byte.
+	bad1b := make([]byte, headerSize)
+	bad1b[0] = signatureByte
+	bad1b[1] = 'x'
+	bad1b[2] = versionByte
+	if _, err := decodeIndex(bad1b); err != ErrSignatureMismatch {
+		t.Fatalf("expected ErrSignatureMismatch for wrong type byte, got %v", err)
+	}
+
+	// Wrong version.
+	bad2 := make([]byte, headerSize)
+	bad2[0] = signatureByte
+	bad2[1] = typeByte
+	bad2[2] = 0xFF
+	if _, err := decodeIndex(bad2); err != ErrVersionMismatch {
 		t.Fatalf("expected ErrVersionMismatch, got %v", err)
 	}
 
 	// Count mismatch: header says 1 entry but no entry data.
-	bad2 := make([]byte, headerSize)
-	bad2[0] = versionByte
-	bad2[1] = flagsByte
-	bad2[2] = 1 // entry_count = 1
-	if _, err := decodeIndex(bad2); err != ErrEntrySizeMismatch {
+	bad3 := make([]byte, headerSize)
+	bad3[0] = signatureByte
+	bad3[1] = typeByte
+	bad3[2] = versionByte
+	bad3[3] = flagsByte
+	bad3[4] = 1 // entry_count = 1
+	if _, err := decodeIndex(bad3); err != ErrEntrySizeMismatch {
 		t.Fatalf("expected ErrEntrySizeMismatch, got %v", err)
 	}
 }

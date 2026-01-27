@@ -8,23 +8,28 @@ import (
 )
 
 const (
-	versionByte = 0x01
-	flagsByte   = 0x00
+	signatureByte = 'i'
+	typeByte      = 't'
+	versionByte   = 0x01
+	flagsByte     = 0x00
 
+	signatureSize  = 1
+	typeSize       = 1
 	versionSize    = 1
 	flagsSize      = 1
 	entryCountSize = 4
 	timestampSize  = 8
 	recordPosSize  = 8
 
-	headerSize = versionSize + flagsSize + entryCountSize
+	headerSize = signatureSize + typeSize + versionSize + flagsSize + entryCountSize
 	entrySize  = timestampSize + recordPosSize
 
-	indexFileName = "time.idx"
+	indexFileName = "_time.idx"
 )
 
 var (
 	ErrIndexTooSmall     = errors.New("time index too small")
+	ErrSignatureMismatch = errors.New("time index signature mismatch")
 	ErrVersionMismatch   = errors.New("time index version mismatch")
 	ErrEntrySizeMismatch = errors.New("time index entry size mismatch")
 )
@@ -33,6 +38,10 @@ func encodeIndex(entries []indextime.IndexEntry) []byte {
 	buf := make([]byte, headerSize+len(entries)*entrySize)
 
 	cursor := 0
+	buf[cursor] = signatureByte
+	cursor += signatureSize
+	buf[cursor] = typeByte
+	cursor += typeSize
 	buf[cursor] = versionByte
 	cursor += versionSize
 	buf[cursor] = flagsByte
@@ -43,7 +52,7 @@ func encodeIndex(entries []indextime.IndexEntry) []byte {
 	for _, e := range entries {
 		binary.LittleEndian.PutUint64(buf[cursor:cursor+timestampSize], uint64(e.TimestampUS))
 		cursor += timestampSize
-		binary.LittleEndian.PutUint64(buf[cursor:cursor+recordPosSize], uint64(e.RecordPos))
+		binary.LittleEndian.PutUint64(buf[cursor:cursor+recordPosSize], e.RecordPos)
 		cursor += recordPosSize
 	}
 
@@ -56,6 +65,10 @@ func decodeIndex(data []byte) ([]indextime.IndexEntry, error) {
 	}
 
 	cursor := 0
+	if data[cursor] != signatureByte || data[cursor+signatureSize] != typeByte {
+		return nil, ErrSignatureMismatch
+	}
+	cursor += signatureSize + typeSize
 	if data[cursor] != versionByte {
 		return nil, ErrVersionMismatch
 	}
@@ -73,7 +86,7 @@ func decodeIndex(data []byte) ([]indextime.IndexEntry, error) {
 	for i := range entries {
 		entries[i].TimestampUS = int64(binary.LittleEndian.Uint64(data[cursor : cursor+timestampSize]))
 		cursor += timestampSize
-		entries[i].RecordPos = int64(binary.LittleEndian.Uint64(data[cursor : cursor+recordPosSize]))
+		entries[i].RecordPos = binary.LittleEndian.Uint64(data[cursor : cursor+recordPosSize])
 		cursor += recordPosSize
 	}
 

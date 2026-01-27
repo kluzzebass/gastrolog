@@ -205,7 +205,7 @@ func TestTimeIndexerBuildRecordPos(t *testing.T) {
 
 	// Memory manager uses slice indices: 0, 1, 2.
 	for i, e := range entries {
-		if e.RecordPos != int64(i) {
+		if e.RecordPos != uint64(i) {
 			t.Fatalf("entry %d: expected pos %d, got %d", i, i, e.RecordPos)
 		}
 	}

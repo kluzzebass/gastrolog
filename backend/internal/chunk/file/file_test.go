@@ -33,7 +33,7 @@ func TestFileWriterReaderRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("append record: %v", err)
 		}
-		offsets = append(offsets, offset)
+		offsets = append(offsets, int64(offset))
 	}
 	reader, err := OpenReader(path)
 	if err != nil {
@@ -221,7 +221,7 @@ func TestFileReaderSizeMismatch(t *testing.T) {
 	corrupt := size + 1
 	var buf [SizeFieldBytes]byte
 	binary.LittleEndian.PutUint32(buf[:], corrupt)
-	if _, err := file.WriteAt(buf[:], offset+int64(size)-SizeFieldBytes); err != nil {
+	if _, err := file.WriteAt(buf[:], int64(offset)+int64(size)-SizeFieldBytes); err != nil {
 		t.Fatalf("write corrupt size: %v", err)
 	}
 
@@ -231,7 +231,7 @@ func TestFileReaderSizeMismatch(t *testing.T) {
 	}
 	defer reader.Close()
 
-	if _, _, _, err := reader.ReadRecordAt(offset); err != ErrSizeMismatch {
+	if _, _, _, err := reader.ReadRecordAt(int64(offset)); err != ErrSizeMismatch {
 		t.Fatalf("expected size mismatch, got %v", err)
 	}
 }

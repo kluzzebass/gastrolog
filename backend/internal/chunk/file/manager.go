@@ -65,7 +65,7 @@ func NewManager(cfg Config) (*Manager, error) {
 	return manager, nil
 }
 
-func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, int64, error) {
+func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -262,7 +262,7 @@ func (m *Manager) sealLocked() error {
 	return nil
 }
 
-func (m *Manager) updateMetaLocked(ts time.Time, offset int64, size uint32) {
+func (m *Manager) updateMetaLocked(ts time.Time, offset uint64, size uint32) {
 	micros := ts.UnixMicro()
 	if ts.IsZero() {
 		micros = 0
@@ -271,7 +271,7 @@ func (m *Manager) updateMetaLocked(ts time.Time, offset int64, size uint32) {
 		m.active.meta.StartTS = micros
 	}
 	m.active.meta.EndTS = micros
-	m.active.meta.Size = offset + int64(size)
+	m.active.meta.Size = int64(offset) + int64(size)
 }
 
 func (m *Manager) chunkDir(id chunk.ChunkID) string {
@@ -282,12 +282,12 @@ func (m *Manager) recordsPath(id chunk.ChunkID) string {
 	return filepath.Join(m.chunkDir(id), recordsFileName)
 }
 
-func appendRecord(file *os.File, record chunk.Record, localID uint32) (int64, uint32, error) {
+func appendRecord(file *os.File, record chunk.Record, localID uint32) (uint64, uint32, error) {
 	info, err := file.Stat()
 	if err != nil {
 		return 0, 0, err
 	}
-	offset := info.Size()
+	offset := uint64(info.Size())
 	buf, err := EncodeRecord(record, localID)
 	if err != nil {
 		return offset, 0, err

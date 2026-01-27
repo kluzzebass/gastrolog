@@ -49,7 +49,7 @@ func (id SourceID) String() string {
 
 type RecordRef struct {
 	ChunkID ChunkID
-	Pos     int64
+	Pos     uint64
 }
 
 type ChunkMeta struct {
@@ -61,7 +61,7 @@ type ChunkMeta struct {
 }
 
 type ChunkManager interface {
-	Append(record Record) (ChunkID, int64, error)
+	Append(record Record) (ChunkID, uint64, error)
 	Seal() error
 	Active() *ChunkMeta
 	List() ([]ChunkMeta, error)

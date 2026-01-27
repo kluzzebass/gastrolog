@@ -40,7 +40,7 @@ func NewManager(cfg Config) (*Manager, error) {
 	return manager, nil
 }
 
-func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, int64, error) {
+func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -53,7 +53,7 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, int64, error) {
 		}
 	}
 
-	offset := int64(len(m.active.records))
+	offset := uint64(len(m.active.records))
 	m.active.records = append(m.active.records, record)
 	m.active.size = int64(len(m.active.records))
 	m.updateMetaLocked(record.IngestTS, m.active.size)
