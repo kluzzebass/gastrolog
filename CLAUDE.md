@@ -16,6 +16,7 @@ go test ./...                                     # Run all tests
 go test -v ./internal/chunk/file/                 # Run tests for a specific package
 go test -v -run TestRecordRoundTrip ./internal/chunk/file/  # Run a single test
 go test -cover ./...                              # Test with coverage
+go test -race ./internal/index/...                # Race detector on index packages
 go mod tidy                                       # Clean dependencies
 ```
 
@@ -27,15 +28,34 @@ go mod tidy                                       # Clean dependencies
 - **RecordCursor** interface: `Next`, `Prev`, `Seek`, `Close` -- bidirectional record iteration
 - **MetaStore** interface: `Save`, `Load`, `List`
 - **Record** -- log entry with `IngestTS` (`time.Time`), `SourceID` (UUID), and `Raw` payload
-- **RecordRef** -- `ChunkID` + byte offset `Pos` (`uint64`)
+- **RecordRef** -- `ChunkID` + byte offset `Pos` (`uint64`); used for cursor positioning via `Seek`
 - **ChunkMeta** -- `ID`, `StartTS`, `EndTS` (`time.Time`), `Size`, `Sealed`
-- **ChunkID** / **SourceID** -- UUID-based typed identifiers
+- **ChunkID** / **SourceID** -- UUID v7 typed identifiers (time-ordered, sortable)
 
-### Indexer interface (`backend/internal/index/index.go`)
+### Index package (`backend/internal/index/`)
+
+**Shared types (`index.go`):**
 
 - **Indexer** interface: `Name() string`, `Build(ctx, chunkID) error`
-- Indexers only operate on sealed chunks (reject unsealed with `ErrChunkNotSealed`)
-- Build is idempotent -- overwrites existing artifacts
+- **IndexManager** interface: `BuildIndexes`, `OpenTimeIndex`, `OpenSourceIndex`
+- **Index[T]** -- generic read-only wrapper over `[]T` with `Entries()` method
+- **TimeIndexEntry** -- `{Timestamp time.Time, RecordPos uint64}`
+- **SourceIndexEntry** -- `{SourceID chunk.SourceID, Positions []uint64}`
+
+**BuildHelper (`build.go`):**
+
+Shared concurrency primitive used by both file and memory managers:
+- `singleflight.DoChan` deduplicates concurrent `BuildIndexes` calls for the same chunkID
+- `errgroup.WithContext` parallelizes individual indexers within a single build
+- `context.WithoutCancel` detaches the build from the initiator's context so one caller cancelling doesn't abort the shared build
+- Early `ctx.Err()` check bails out immediately on already-cancelled contexts
+
+**TimeIndexReader (`time_reader.go`):**
+
+Shared binary search positioning over time index entries:
+- `NewTimeIndexReader(chunkID, entries)` wraps decoded entries
+- `FindStart(tStart)` returns `(RecordRef, true)` for the latest entry at or before `tStart`, or `(zero, false)` if `tStart` is before all entries (caller should scan from beginning)
+- Uses `sort.Search` on timestamp-sorted entries
 
 ### File-based chunk storage (`backend/internal/chunk/file/`)
 
@@ -51,21 +71,19 @@ Disk-persisted storage with custom binary formats:
 
 In-memory implementation of the same interfaces. Rotates chunks based on record count. Useful for testing.
 
-### Indexers (`backend/internal/index/`)
+### File-based index manager (`backend/internal/index/file/`)
 
-Each indexer type follows a sub-package pattern: shared types in the parent package, file-based and memory-based implementations in sub-packages.
+- `manager.go` -- `IndexManager` implementation; delegates `BuildIndexes` to `BuildHelper`
+- `time/` -- time indexer: sparse index mapping sampled timestamps to record positions; writes `_time.idx`
+  - `reader.go` -- `Open` loads and validates index file, returns shared `*index.TimeIndexReader`
+- `source/` -- source indexer: inverted index mapping SourceIDs to record positions; writes `_source.idx`
 
-**Time indexer** (`index/time/`):
-- Sparse time index mapping sampled timestamps to record positions
-- Shared type: `IndexEntry{Timestamp time.Time, RecordPos uint64}`
-- File-based (`time/file/`): writes `_time.idx` with binary header + entries
-- Memory-based (`time/memory/`): in-memory map
+### Memory-based index manager (`backend/internal/index/memory/`)
 
-**Source indexer** (`index/source/`):
-- Inverted index mapping each SourceID to its record positions
-- Shared type: `IndexEntry{SourceID chunk.SourceID, Positions []uint64}`
-- File-based (`source/file/`): writes `_source.idx` with header + key table + posting blob
-- Memory-based (`source/memory/`): in-memory map
+- `manager.go` -- `IndexManager` implementation with generic `IndexStore[T]` interface; delegates `BuildIndexes` to `BuildHelper`
+- `time/` -- in-memory time indexer with `Get(chunkID)` satisfying `IndexStore[T]`
+  - `reader.go` -- `Open` retrieves entries from indexer, returns shared `*index.TimeIndexReader`
+- `source/` -- in-memory source indexer with `Get(chunkID)` satisfying `IndexStore[T]`
 
 ## Binary Format Conventions
 
@@ -84,14 +102,16 @@ Record and source map files use leading+trailing size fields for bidirectional t
 
 ## Key Design Patterns
 
-- Interface segregation: consumers depend on `chunk.ChunkManager` / `index.Indexer`, not concrete types
+- Interface segregation: consumers depend on `chunk.ChunkManager` / `index.Indexer` / `index.IndexManager`, not concrete types
+- Generics used to eliminate duplication: `Index[T]` for index entries, `IndexStore[T]` for memory stores
+- `BuildHelper` provides singleflight deduplication + errgroup parallelism for concurrent index builds
 - All managers are mutex-protected for concurrent access
 - Atomic file operations for metadata and indexes (temp file then rename)
 - `time.Time` used throughout the domain; int64 microseconds only at file encode/decode boundaries
 - Cursors work on both sealed and unsealed chunks; indexers explicitly reject unsealed chunks
 - Named constants for all binary format sizes (no magic numbers in encode/decode)
 - Sentinel errors for all validation failures (`ErrSignatureMismatch`, `ErrVersionMismatch`, etc.)
-- Use UUID v7 for all generated IDs (ChunkID, SourceID) -- v7 UUIDs are time-ordered, which makes them sortable and indexable
+- Sub-package pattern: `file/{time,source}` and `memory/{time,source}` avoid symbol prefixing (e.g. `time.NewIndexer` not `NewTimeIndexer`)
 
 ## Directory Layout
 
@@ -103,15 +123,25 @@ backend/
       file/                     File-based chunk manager
       memory/                   Memory-based chunk manager
     index/
-      index.go                  Indexer interface
-      time/
-        format.go               Shared IndexEntry type
-        file/                   File-based time indexer
-        memory/                 Memory-based time indexer
-      source/
-        format.go               Shared IndexEntry type
-        file/                   File-based source indexer
-        memory/                 Memory-based source indexer
+      index.go                  Shared types, Indexer/IndexManager interfaces, generic Index[T]
+      build.go                  BuildHelper (singleflight + errgroup)
+      time_reader.go            Shared TimeIndexReader with FindStart binary search
+      file/
+        manager.go              File-based IndexManager
+        time/
+          format.go             Binary encode/decode for _time.idx
+          indexer.go            File-based time indexer
+          reader.go             Open → *index.TimeIndexReader
+        source/
+          format.go             Binary encode/decode for _source.idx
+          indexer.go            File-based source indexer
+      memory/
+        manager.go              Memory-based IndexManager with generic IndexStore[T]
+        time/
+          indexer.go            Memory-based time indexer
+          reader.go             Open → *index.TimeIndexReader
+        source/
+          indexer.go            Memory-based source indexer
   docs/
     file_formats.md             Binary format specifications
 ```
