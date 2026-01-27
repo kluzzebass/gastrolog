@@ -659,3 +659,27 @@ func TestSourceIndexerZeroAndMaxUUIDSortOrder(t *testing.T) {
 		t.Fatalf("expected max UUID last, got %s", lastStr)
 	}
 }
+
+func TestSourceIndexerBuildUnsealedChunk(t *testing.T) {
+	manager, err := chunkmemory.NewManager(chunkmemory.Config{})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+
+	src := chunk.NewSourceID()
+	chunkID, _, err := manager.Append(chunk.Record{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte("x")})
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	// Do not seal — Build should reject.
+	indexer := NewSourceIndexer(manager)
+
+	err = indexer.Build(context.Background(), chunkID)
+	if err == nil {
+		t.Fatal("expected error building index on unsealed chunk, got nil")
+	}
+	if err != chunk.ErrChunkNotSealed {
+		t.Fatalf("expected ErrChunkNotSealed, got %v", err)
+	}
+}

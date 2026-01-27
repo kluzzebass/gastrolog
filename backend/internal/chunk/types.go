@@ -54,8 +54,8 @@ type RecordRef struct {
 
 type ChunkMeta struct {
 	ID      ChunkID
-	StartTS int64
-	EndTS   int64
+	StartTS time.Time
+	EndTS   time.Time
 	Size    int64
 	Sealed  bool
 }
@@ -64,6 +64,7 @@ type ChunkManager interface {
 	Append(record Record) (ChunkID, uint64, error)
 	Seal() error
 	Active() *ChunkMeta
+	Meta(id ChunkID) (ChunkMeta, error)
 	List() ([]ChunkMeta, error)
 	OpenCursor(id ChunkID) (RecordCursor, error)
 }

@@ -86,6 +86,16 @@ func (m *Manager) Active() *chunk.ChunkMeta {
 	return &meta
 }
 
+func (m *Manager) Meta(id chunk.ChunkID) (chunk.ChunkMeta, error) {
+	m.mu.Lock()
+	state := m.findChunkLocked(id)
+	m.mu.Unlock()
+	if state == nil {
+		return chunk.ChunkMeta{}, chunk.ErrChunkNotFound
+	}
+	return state.meta, nil
+}
+
 func (m *Manager) List() ([]chunk.ChunkMeta, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -102,9 +112,6 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	m.mu.Unlock()
 	if state == nil {
 		return nil, chunk.ErrChunkNotFound
-	}
-	if !state.meta.Sealed {
-		return nil, chunk.ErrChunkNotSealed
 	}
 	return newRecordReader(state.records, id), nil
 }
@@ -144,14 +151,10 @@ func (m *Manager) sealLocked() error {
 }
 
 func (m *Manager) updateMetaLocked(ts time.Time, size int64) {
-	micros := ts.UnixMicro()
-	if ts.IsZero() {
-		micros = 0
+	if m.active.meta.StartTS.IsZero() {
+		m.active.meta.StartTS = ts
 	}
-	if m.active.meta.StartTS == 0 {
-		m.active.meta.StartTS = micros
-	}
-	m.active.meta.EndTS = micros
+	m.active.meta.EndTS = ts
 	m.active.meta.Size = size
 }
 

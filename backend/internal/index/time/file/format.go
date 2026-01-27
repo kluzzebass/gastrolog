@@ -3,6 +3,7 @@ package file
 import (
 	"encoding/binary"
 	"errors"
+	"time"
 
 	indextime "github.com/kluzzebass/gastrolog/internal/index/time"
 )
@@ -50,7 +51,7 @@ func encodeIndex(entries []indextime.IndexEntry) []byte {
 	cursor += entryCountSize
 
 	for _, e := range entries {
-		binary.LittleEndian.PutUint64(buf[cursor:cursor+timestampSize], uint64(e.TimestampUS))
+		binary.LittleEndian.PutUint64(buf[cursor:cursor+timestampSize], uint64(e.Timestamp.UnixMicro()))
 		cursor += timestampSize
 		binary.LittleEndian.PutUint64(buf[cursor:cursor+recordPosSize], e.RecordPos)
 		cursor += recordPosSize
@@ -84,7 +85,8 @@ func decodeIndex(data []byte) ([]indextime.IndexEntry, error) {
 
 	entries := make([]indextime.IndexEntry, count)
 	for i := range entries {
-		entries[i].TimestampUS = int64(binary.LittleEndian.Uint64(data[cursor : cursor+timestampSize]))
+		micros := int64(binary.LittleEndian.Uint64(data[cursor : cursor+timestampSize]))
+		entries[i].Timestamp = time.UnixMicro(micros)
 		cursor += timestampSize
 		entries[i].RecordPos = binary.LittleEndian.Uint64(data[cursor : cursor+recordPosSize])
 		cursor += recordPosSize

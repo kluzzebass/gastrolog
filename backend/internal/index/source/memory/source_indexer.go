@@ -31,6 +31,14 @@ func (s *SourceIndexer) Name() string {
 }
 
 func (s *SourceIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
+	meta, err := s.manager.Meta(chunkID)
+	if err != nil {
+		return fmt.Errorf("get chunk meta: %w", err)
+	}
+	if !meta.Sealed {
+		return chunk.ErrChunkNotSealed
+	}
+
 	cursor, err := s.manager.OpenCursor(chunkID)
 	if err != nil {
 		return fmt.Errorf("open cursor: %w", err)

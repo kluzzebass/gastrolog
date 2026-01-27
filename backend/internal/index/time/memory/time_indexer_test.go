@@ -64,10 +64,10 @@ func TestTimeIndexerBuild(t *testing.T) {
 		t.Fatalf("expected 3 entries, got %d", len(entries))
 	}
 
-	expectedTS := []int64{1000, 3000, 5000}
+	expectedTS := []gotime.Time{gotime.UnixMicro(1000), gotime.UnixMicro(3000), gotime.UnixMicro(5000)}
 	for i, e := range entries {
-		if e.TimestampUS != expectedTS[i] {
-			t.Fatalf("entry %d: expected timestamp %d, got %d", i, expectedTS[i], e.TimestampUS)
+		if !e.Timestamp.Equal(expectedTS[i]) {
+			t.Fatalf("entry %d: expected timestamp %v, got %v", i, expectedTS[i], e.Timestamp)
 		}
 	}
 }
@@ -172,8 +172,8 @@ func TestTimeIndexerBuildSingleRecord(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(entries))
 	}
-	if entries[0].TimestampUS != 42 {
-		t.Fatalf("expected timestamp 42, got %d", entries[0].TimestampUS)
+	if !entries[0].Timestamp.Equal(gotime.UnixMicro(42)) {
+		t.Fatalf("expected timestamp %v, got %v", gotime.UnixMicro(42), entries[0].Timestamp)
 	}
 	if entries[0].RecordPos != 0 {
 		t.Fatalf("expected record pos 0, got %d", entries[0].RecordPos)
@@ -293,8 +293,8 @@ func TestTimeIndexerMultipleChunks(t *testing.T) {
 	if len(entries1) != 1 {
 		t.Fatalf("chunk 1: expected 1 entry, got %d", len(entries1))
 	}
-	if entries1[0].TimestampUS != 100 {
-		t.Fatalf("chunk 1: expected timestamp 100, got %d", entries1[0].TimestampUS)
+	if !entries1[0].Timestamp.Equal(gotime.UnixMicro(100)) {
+		t.Fatalf("chunk 1: expected timestamp %v, got %v", gotime.UnixMicro(100), entries1[0].Timestamp)
 	}
 
 	entries2, ok := indexer.Get(id2)
@@ -304,10 +304,34 @@ func TestTimeIndexerMultipleChunks(t *testing.T) {
 	if len(entries2) != 2 {
 		t.Fatalf("chunk 2: expected 2 entries, got %d", len(entries2))
 	}
-	if entries2[0].TimestampUS != 200 {
-		t.Fatalf("chunk 2 entry 0: expected timestamp 200, got %d", entries2[0].TimestampUS)
+	if !entries2[0].Timestamp.Equal(gotime.UnixMicro(200)) {
+		t.Fatalf("chunk 2 entry 0: expected timestamp %v, got %v", gotime.UnixMicro(200), entries2[0].Timestamp)
 	}
-	if entries2[1].TimestampUS != 300 {
-		t.Fatalf("chunk 2 entry 1: expected timestamp 300, got %d", entries2[1].TimestampUS)
+	if !entries2[1].Timestamp.Equal(gotime.UnixMicro(300)) {
+		t.Fatalf("chunk 2 entry 1: expected timestamp %v, got %v", gotime.UnixMicro(300), entries2[1].Timestamp)
+	}
+}
+
+func TestTimeIndexerBuildUnsealedChunk(t *testing.T) {
+	manager, err := chunkmemory.NewManager(chunkmemory.Config{})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+
+	sourceID := chunk.NewSourceID()
+	chunkID, _, err := manager.Append(chunk.Record{IngestTS: gotime.UnixMicro(1), SourceID: sourceID, Raw: []byte("x")})
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	// Do not seal — Build should reject.
+	indexer := NewTimeIndexer(manager, 1)
+
+	err = indexer.Build(context.Background(), chunkID)
+	if err == nil {
+		t.Fatal("expected error building index on unsealed chunk, got nil")
+	}
+	if err != chunk.ErrChunkNotSealed {
+		t.Fatalf("expected ErrChunkNotSealed, got %v", err)
 	}
 }

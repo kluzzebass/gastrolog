@@ -32,6 +32,14 @@ func (t *TimeIndexer) Name() string {
 }
 
 func (t *TimeIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
+	meta, err := t.manager.Meta(chunkID)
+	if err != nil {
+		return fmt.Errorf("get chunk meta: %w", err)
+	}
+	if !meta.Sealed {
+		return chunk.ErrChunkNotSealed
+	}
+
 	cursor, err := t.manager.OpenCursor(chunkID)
 	if err != nil {
 		return fmt.Errorf("open cursor: %w", err)
@@ -56,8 +64,8 @@ func (t *TimeIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 
 		if n == 0 || n%t.sparsity == 0 {
 			entries = append(entries, indextime.IndexEntry{
-				TimestampUS: rec.IngestTS.UnixMicro(),
-				RecordPos:   ref.Pos,
+				Timestamp: rec.IngestTS,
+				RecordPos: ref.Pos,
 			})
 		}
 		n++

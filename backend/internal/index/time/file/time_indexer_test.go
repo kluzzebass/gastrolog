@@ -75,10 +75,10 @@ func TestTimeIndexerBuild(t *testing.T) {
 		t.Fatalf("expected 3 entries, got %d", len(entries))
 	}
 
-	expectedTS := []int64{1000, 3000, 5000}
+	expectedTS := []gotime.Time{gotime.UnixMicro(1000), gotime.UnixMicro(3000), gotime.UnixMicro(5000)}
 	for i, e := range entries {
-		if e.TimestampUS != expectedTS[i] {
-			t.Fatalf("entry %d: expected timestamp %d, got %d", i, expectedTS[i], e.TimestampUS)
+		if !e.Timestamp.Equal(expectedTS[i]) {
+			t.Fatalf("entry %d: expected timestamp %v, got %v", i, expectedTS[i], e.Timestamp)
 		}
 	}
 }
@@ -191,8 +191,8 @@ func TestTimeIndexerBuildSingleRecord(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(entries))
 	}
-	if entries[0].TimestampUS != 42 {
-		t.Fatalf("expected timestamp 42, got %d", entries[0].TimestampUS)
+	if !entries[0].Timestamp.Equal(gotime.UnixMicro(42)) {
+		t.Fatalf("expected timestamp %v, got %v", gotime.UnixMicro(42), entries[0].Timestamp)
 	}
 	if entries[0].RecordPos != 0 {
 		t.Fatalf("expected record pos 0, got %d", entries[0].RecordPos)
@@ -231,10 +231,10 @@ func TestTimeIndexerBuildSparsityOne(t *testing.T) {
 		t.Fatalf("expected 4 entries, got %d", len(entries))
 	}
 
-	expectedTS := []int64{10, 20, 30, 40}
+	expectedTS := []gotime.Time{gotime.UnixMicro(10), gotime.UnixMicro(20), gotime.UnixMicro(30), gotime.UnixMicro(40)}
 	for i, e := range entries {
-		if e.TimestampUS != expectedTS[i] {
-			t.Fatalf("entry %d: expected timestamp %d, got %d", i, expectedTS[i], e.TimestampUS)
+		if !e.Timestamp.Equal(expectedTS[i]) {
+			t.Fatalf("entry %d: expected timestamp %v, got %v", i, expectedTS[i], e.Timestamp)
 		}
 	}
 }
@@ -324,7 +324,7 @@ func TestTimeIndexerBuildReadOnlyDir(t *testing.T) {
 
 func TestSignature(t *testing.T) {
 	entries := []indextime.IndexEntry{
-		{TimestampUS: 1000, RecordPos: 0},
+		{Timestamp: gotime.UnixMicro(1000), RecordPos: 0},
 	}
 
 	data := encodeIndex(entries)
@@ -338,9 +338,9 @@ func TestSignature(t *testing.T) {
 
 func TestEncodeDecodeRoundTrip(t *testing.T) {
 	entries := []indextime.IndexEntry{
-		{TimestampUS: 1000, RecordPos: 0},
-		{TimestampUS: 2000, RecordPos: 128},
-		{TimestampUS: 3000, RecordPos: 256},
+		{Timestamp: gotime.UnixMicro(1000), RecordPos: 0},
+		{Timestamp: gotime.UnixMicro(2000), RecordPos: 128},
+		{Timestamp: gotime.UnixMicro(3000), RecordPos: 256},
 	}
 
 	data := encodeIndex(entries)
@@ -353,8 +353,11 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 		t.Fatalf("expected %d entries, got %d", len(entries), len(got))
 	}
 	for i := range entries {
-		if got[i] != entries[i] {
-			t.Fatalf("entry %d: expected %+v, got %+v", i, entries[i], got[i])
+		if !got[i].Timestamp.Equal(entries[i].Timestamp) {
+			t.Fatalf("entry %d: expected timestamp %v, got %v", i, entries[i].Timestamp, got[i].Timestamp)
+		}
+		if got[i].RecordPos != entries[i].RecordPos {
+			t.Fatalf("entry %d: expected pos %d, got %d", i, entries[i].RecordPos, got[i].RecordPos)
 		}
 	}
 }
@@ -412,5 +415,31 @@ func TestDecodeErrors(t *testing.T) {
 	bad3[4] = 1 // entry_count = 1
 	if _, err := decodeIndex(bad3); err != ErrEntrySizeMismatch {
 		t.Fatalf("expected ErrEntrySizeMismatch, got %v", err)
+	}
+}
+
+func TestTimeIndexerBuildUnsealedChunk(t *testing.T) {
+	dir := t.TempDir()
+	manager, err := chunkfile.NewManager(chunkfile.Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+
+	sourceID := chunk.NewSourceID()
+	chunkID, _, err := manager.Append(chunk.Record{IngestTS: gotime.UnixMicro(1), SourceID: sourceID, Raw: []byte("x")})
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	// Do not seal — Build should reject.
+	indexDir := t.TempDir()
+	indexer := NewTimeIndexer(indexDir, manager, 1)
+
+	err = indexer.Build(context.Background(), chunkID)
+	if err == nil {
+		t.Fatal("expected error building index on unsealed chunk, got nil")
+	}
+	if err != chunk.ErrChunkNotSealed {
+		t.Fatalf("expected ErrChunkNotSealed, got %v", err)
 	}
 }

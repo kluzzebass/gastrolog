@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/kluzzebass/gastrolog/internal/chunk"
@@ -118,9 +119,9 @@ func encodeMeta(meta chunk.ChunkMeta) []byte {
 	cursor += metaVersionBytes
 	copy(buf[cursor:cursor+metaChunkIDBytes], uuidBytes(meta.ID))
 	cursor += metaChunkIDBytes
-	binary.LittleEndian.PutUint64(buf[cursor:cursor+metaTSBytes], uint64(meta.StartTS))
+	binary.LittleEndian.PutUint64(buf[cursor:cursor+metaTSBytes], uint64(meta.StartTS.UnixMicro()))
 	cursor += metaTSBytes
-	binary.LittleEndian.PutUint64(buf[cursor:cursor+metaTSBytes], uint64(meta.EndTS))
+	binary.LittleEndian.PutUint64(buf[cursor:cursor+metaTSBytes], uint64(meta.EndTS.UnixMicro()))
 	cursor += metaTSBytes
 	binary.LittleEndian.PutUint64(buf[cursor:cursor+metaSizeBytes], uint64(meta.Size))
 	cursor += metaSizeBytes
@@ -145,9 +146,9 @@ func decodeMeta(buf []byte) (chunk.ChunkMeta, error) {
 	cursor += metaVersionBytes
 	idBytes := buf[cursor : cursor+metaChunkIDBytes]
 	cursor += metaChunkIDBytes
-	startTS := int64(binary.LittleEndian.Uint64(buf[cursor : cursor+metaTSBytes]))
+	startMicros := int64(binary.LittleEndian.Uint64(buf[cursor : cursor+metaTSBytes]))
 	cursor += metaTSBytes
-	endTS := int64(binary.LittleEndian.Uint64(buf[cursor : cursor+metaTSBytes]))
+	endMicros := int64(binary.LittleEndian.Uint64(buf[cursor : cursor+metaTSBytes]))
 	cursor += metaTSBytes
 	sizeBytes := int64(binary.LittleEndian.Uint64(buf[cursor : cursor+metaSizeBytes]))
 	cursor += metaSizeBytes
@@ -160,8 +161,8 @@ func decodeMeta(buf []byte) (chunk.ChunkMeta, error) {
 	id := chunkIDFromBytes(idBytes)
 	return chunk.ChunkMeta{
 		ID:      id,
-		StartTS: startTS,
-		EndTS:   endTS,
+		StartTS: time.UnixMicro(startMicros),
+		EndTS:   time.UnixMicro(endMicros),
 		Size:    sizeBytes,
 		Sealed:  flags&metaFlagSealed != 0,
 	}, nil

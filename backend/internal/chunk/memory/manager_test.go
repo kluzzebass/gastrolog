@@ -23,9 +23,19 @@ func TestMemoryChunkManagerAppendSealOpenReader(t *testing.T) {
 		t.Fatalf("expected offset 0, got %d", offset)
 	}
 
-	if _, err := manager.OpenCursor(chunkID); err != chunk.ErrChunkNotSealed {
-		t.Fatalf("expected not sealed error, got %v", err)
+	// Cursor on unsealed chunk should work.
+	unsealedCursor, err := manager.OpenCursor(chunkID)
+	if err != nil {
+		t.Fatalf("open cursor on unsealed chunk: %v", err)
 	}
+	gotUnsealed, _, err := unsealedCursor.Next()
+	if err != nil {
+		t.Fatalf("next on unsealed cursor: %v", err)
+	}
+	if gotUnsealed.SourceID != record.SourceID {
+		t.Fatalf("unsealed: expected source id %s got %s", record.SourceID.String(), gotUnsealed.SourceID.String())
+	}
+	unsealedCursor.Close()
 
 	if err := manager.Seal(); err != nil {
 		t.Fatalf("seal: %v", err)
