@@ -272,10 +272,12 @@ func TestTimeIndexerBuildRecordPos(t *testing.T) {
 		t.Fatalf("expected 3 entries, got %d", len(entries))
 	}
 
-	// Each record: MinRecordSize (26) + 3 bytes payload = 29 bytes.
-	recordSize := int64(26 + 3)
+	recordSize, err := chunkfile.RecordSize(len(records[0].Raw))
+	if err != nil {
+		t.Fatalf("record size: %v", err)
+	}
 	for i, e := range entries {
-		expectedPos := int64(i) * recordSize
+		expectedPos := int64(i) * int64(recordSize)
 		if e.RecordPos != expectedPos {
 			t.Fatalf("entry %d: expected pos %d, got %d", i, expectedPos, e.RecordPos)
 		}
