@@ -22,7 +22,7 @@ func writeIndex(t *testing.T, dir string, chunkID chunk.ChunkID, entries []index
 	}
 }
 
-func TestFindStartBeforeAllEntries(t *testing.T) {
+func TestOpenAndFindStartRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	id := chunk.NewChunkID()
 	entries := []index.TimeIndexEntry{
@@ -37,31 +37,14 @@ func TestFindStartBeforeAllEntries(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 
+	// Before all entries.
 	ref, ok := reader.FindStart(gotime.UnixMicro(500))
 	if ok {
 		t.Fatalf("expected ok=false, got ref %+v", ref)
 	}
-	if ref != (chunk.RecordRef{}) {
-		t.Fatalf("expected zero RecordRef, got %+v", ref)
-	}
-}
 
-func TestFindStartAtExactEntry(t *testing.T) {
-	dir := t.TempDir()
-	id := chunk.NewChunkID()
-	entries := []index.TimeIndexEntry{
-		{Timestamp: gotime.UnixMicro(1000), RecordPos: 0},
-		{Timestamp: gotime.UnixMicro(2000), RecordPos: 64},
-		{Timestamp: gotime.UnixMicro(3000), RecordPos: 128},
-	}
-	writeIndex(t, dir, id, entries)
-
-	reader, err := Open(dir, id)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-
-	ref, ok := reader.FindStart(gotime.UnixMicro(2000))
+	// Between entries.
+	ref, ok = reader.FindStart(gotime.UnixMicro(2500))
 	if !ok {
 		t.Fatal("expected ok=true")
 	}
@@ -70,112 +53,6 @@ func TestFindStartAtExactEntry(t *testing.T) {
 	}
 	if ref.Pos != 64 {
 		t.Fatalf("expected pos 64, got %d", ref.Pos)
-	}
-}
-
-func TestFindStartBetweenEntries(t *testing.T) {
-	dir := t.TempDir()
-	id := chunk.NewChunkID()
-	entries := []index.TimeIndexEntry{
-		{Timestamp: gotime.UnixMicro(1000), RecordPos: 0},
-		{Timestamp: gotime.UnixMicro(2000), RecordPos: 64},
-		{Timestamp: gotime.UnixMicro(3000), RecordPos: 128},
-	}
-	writeIndex(t, dir, id, entries)
-
-	reader, err := Open(dir, id)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-
-	// Between entry 1 (ts=2000) and entry 2 (ts=3000) — should return entry 1.
-	ref, ok := reader.FindStart(gotime.UnixMicro(2500))
-	if !ok {
-		t.Fatal("expected ok=true")
-	}
-	if ref.Pos != 64 {
-		t.Fatalf("expected pos 64, got %d", ref.Pos)
-	}
-}
-
-func TestFindStartAfterAllEntries(t *testing.T) {
-	dir := t.TempDir()
-	id := chunk.NewChunkID()
-	entries := []index.TimeIndexEntry{
-		{Timestamp: gotime.UnixMicro(1000), RecordPos: 0},
-		{Timestamp: gotime.UnixMicro(2000), RecordPos: 64},
-		{Timestamp: gotime.UnixMicro(3000), RecordPos: 128},
-	}
-	writeIndex(t, dir, id, entries)
-
-	reader, err := Open(dir, id)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-
-	ref, ok := reader.FindStart(gotime.UnixMicro(9999))
-	if !ok {
-		t.Fatal("expected ok=true")
-	}
-	if ref.Pos != 128 {
-		t.Fatalf("expected pos 128 (last entry), got %d", ref.Pos)
-	}
-}
-
-func TestFindStartSingleEntry(t *testing.T) {
-	dir := t.TempDir()
-	id := chunk.NewChunkID()
-	entries := []index.TimeIndexEntry{
-		{Timestamp: gotime.UnixMicro(5000), RecordPos: 0},
-	}
-	writeIndex(t, dir, id, entries)
-
-	reader, err := Open(dir, id)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-
-	// Before the only entry.
-	ref, ok := reader.FindStart(gotime.UnixMicro(4000))
-	if ok {
-		t.Fatalf("expected ok=false for time before single entry, got ref %+v", ref)
-	}
-
-	// At the exact entry.
-	ref, ok = reader.FindStart(gotime.UnixMicro(5000))
-	if !ok {
-		t.Fatal("expected ok=true for exact match")
-	}
-	if ref.Pos != 0 {
-		t.Fatalf("expected pos 0, got %d", ref.Pos)
-	}
-
-	// After the only entry.
-	ref, ok = reader.FindStart(gotime.UnixMicro(6000))
-	if !ok {
-		t.Fatal("expected ok=true for time after single entry")
-	}
-	if ref.Pos != 0 {
-		t.Fatalf("expected pos 0, got %d", ref.Pos)
-	}
-}
-
-func TestFindStartEmptyIndex(t *testing.T) {
-	dir := t.TempDir()
-	id := chunk.NewChunkID()
-	writeIndex(t, dir, id, nil)
-
-	reader, err := Open(dir, id)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-
-	ref, ok := reader.FindStart(gotime.UnixMicro(1000))
-	if ok {
-		t.Fatalf("expected ok=false for empty index, got ref %+v", ref)
-	}
-	if ref != (chunk.RecordRef{}) {
-		t.Fatalf("expected zero RecordRef, got %+v", ref)
 	}
 }
 

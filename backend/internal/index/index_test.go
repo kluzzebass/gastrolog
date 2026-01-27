@@ -95,3 +95,125 @@ func TestNewIndexWithIntType(t *testing.T) {
 		t.Fatalf("expected [1 2 3], got %v", got)
 	}
 }
+
+// TimeIndexReader tests
+
+func TestFindStartBeforeAllEntries(t *testing.T) {
+	id := chunk.NewChunkID()
+	entries := []TimeIndexEntry{
+		{Timestamp: time.UnixMicro(1000), RecordPos: 0},
+		{Timestamp: time.UnixMicro(2000), RecordPos: 64},
+		{Timestamp: time.UnixMicro(3000), RecordPos: 128},
+	}
+	reader := NewTimeIndexReader(id, entries)
+
+	ref, ok := reader.FindStart(time.UnixMicro(500))
+	if ok {
+		t.Fatalf("expected ok=false, got ref %+v", ref)
+	}
+	if ref != (chunk.RecordRef{}) {
+		t.Fatalf("expected zero RecordRef, got %+v", ref)
+	}
+}
+
+func TestFindStartAtExactEntry(t *testing.T) {
+	id := chunk.NewChunkID()
+	entries := []TimeIndexEntry{
+		{Timestamp: time.UnixMicro(1000), RecordPos: 0},
+		{Timestamp: time.UnixMicro(2000), RecordPos: 64},
+		{Timestamp: time.UnixMicro(3000), RecordPos: 128},
+	}
+	reader := NewTimeIndexReader(id, entries)
+
+	ref, ok := reader.FindStart(time.UnixMicro(2000))
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if ref.ChunkID != id {
+		t.Fatalf("expected chunkID %s, got %s", id, ref.ChunkID)
+	}
+	if ref.Pos != 64 {
+		t.Fatalf("expected pos 64, got %d", ref.Pos)
+	}
+}
+
+func TestFindStartBetweenEntries(t *testing.T) {
+	id := chunk.NewChunkID()
+	entries := []TimeIndexEntry{
+		{Timestamp: time.UnixMicro(1000), RecordPos: 0},
+		{Timestamp: time.UnixMicro(2000), RecordPos: 64},
+		{Timestamp: time.UnixMicro(3000), RecordPos: 128},
+	}
+	reader := NewTimeIndexReader(id, entries)
+
+	ref, ok := reader.FindStart(time.UnixMicro(2500))
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if ref.Pos != 64 {
+		t.Fatalf("expected pos 64, got %d", ref.Pos)
+	}
+}
+
+func TestFindStartAfterAllEntries(t *testing.T) {
+	id := chunk.NewChunkID()
+	entries := []TimeIndexEntry{
+		{Timestamp: time.UnixMicro(1000), RecordPos: 0},
+		{Timestamp: time.UnixMicro(2000), RecordPos: 64},
+		{Timestamp: time.UnixMicro(3000), RecordPos: 128},
+	}
+	reader := NewTimeIndexReader(id, entries)
+
+	ref, ok := reader.FindStart(time.UnixMicro(9999))
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if ref.Pos != 128 {
+		t.Fatalf("expected pos 128, got %d", ref.Pos)
+	}
+}
+
+func TestFindStartSingleEntry(t *testing.T) {
+	id := chunk.NewChunkID()
+	entries := []TimeIndexEntry{
+		{Timestamp: time.UnixMicro(5000), RecordPos: 0},
+	}
+	reader := NewTimeIndexReader(id, entries)
+
+	// Before the only entry.
+	ref, ok := reader.FindStart(time.UnixMicro(4000))
+	if ok {
+		t.Fatalf("expected ok=false, got ref %+v", ref)
+	}
+
+	// At the exact entry.
+	ref, ok = reader.FindStart(time.UnixMicro(5000))
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if ref.Pos != 0 {
+		t.Fatalf("expected pos 0, got %d", ref.Pos)
+	}
+
+	// After the only entry.
+	ref, ok = reader.FindStart(time.UnixMicro(6000))
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if ref.Pos != 0 {
+		t.Fatalf("expected pos 0, got %d", ref.Pos)
+	}
+}
+
+func TestFindStartEmptyIndex(t *testing.T) {
+	id := chunk.NewChunkID()
+	reader := NewTimeIndexReader(id, nil)
+
+	ref, ok := reader.FindStart(time.UnixMicro(1000))
+	if ok {
+		t.Fatalf("expected ok=false, got ref %+v", ref)
+	}
+	if ref != (chunk.RecordRef{}) {
+		t.Fatalf("expected zero RecordRef, got %+v", ref)
+	}
+}
