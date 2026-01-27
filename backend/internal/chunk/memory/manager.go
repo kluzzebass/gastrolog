@@ -68,6 +68,11 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, int64, error) {
 func (m *Manager) Seal() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.active == nil {
+		if err := m.openLocked(); err != nil {
+			return err
+		}
+	}
 	return m.sealLocked()
 }
 

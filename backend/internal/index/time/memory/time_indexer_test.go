@@ -1,0 +1,313 @@
+package memory
+
+import (
+	"context"
+	"testing"
+	gotime "time"
+
+	"github.com/kluzzebass/gastrolog/internal/chunk"
+	chunkmemory "github.com/kluzzebass/gastrolog/internal/chunk/memory"
+)
+
+func setupChunkManager(t *testing.T, records []chunk.Record) (chunk.ChunkManager, chunk.ChunkID) {
+	t.Helper()
+	manager, err := chunkmemory.NewManager(chunkmemory.Config{})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	for _, rec := range records {
+		if _, _, err := manager.Append(rec); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+	if err := manager.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	metas, err := manager.List()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(metas) != 1 {
+		t.Fatalf("expected 1 chunk, got %d", len(metas))
+	}
+	return manager, metas[0].ID
+}
+
+func TestTimeIndexerBuild(t *testing.T) {
+	sourceID := chunk.NewSourceID()
+	records := []chunk.Record{
+		{IngestTS: gotime.UnixMicro(1000), SourceID: sourceID, Raw: []byte("one")},
+		{IngestTS: gotime.UnixMicro(2000), SourceID: sourceID, Raw: []byte("two")},
+		{IngestTS: gotime.UnixMicro(3000), SourceID: sourceID, Raw: []byte("three")},
+		{IngestTS: gotime.UnixMicro(4000), SourceID: sourceID, Raw: []byte("four")},
+		{IngestTS: gotime.UnixMicro(5000), SourceID: sourceID, Raw: []byte("five")},
+	}
+
+	manager, chunkID := setupChunkManager(t, records)
+	indexer := NewTimeIndexer(manager, 2)
+
+	if indexer.Name() != "time" {
+		t.Fatalf("expected name %q, got %q", "time", indexer.Name())
+	}
+
+	if err := indexer.Build(context.Background(), chunkID); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	entries, ok := indexer.Get(chunkID)
+	if !ok {
+		t.Fatal("expected index to exist after build")
+	}
+
+	// With sparsity=2 and 5 records: record 0 (always first), record 2, record 4.
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
+	}
+
+	expectedTS := []int64{1000, 3000, 5000}
+	for i, e := range entries {
+		if e.TimestampUS != expectedTS[i] {
+			t.Fatalf("entry %d: expected timestamp %d, got %d", i, expectedTS[i], e.TimestampUS)
+		}
+	}
+}
+
+func TestTimeIndexerIdempotent(t *testing.T) {
+	sourceID := chunk.NewSourceID()
+	records := []chunk.Record{
+		{IngestTS: gotime.UnixMicro(100), SourceID: sourceID, Raw: []byte("alpha")},
+		{IngestTS: gotime.UnixMicro(200), SourceID: sourceID, Raw: []byte("beta")},
+	}
+
+	manager, chunkID := setupChunkManager(t, records)
+	indexer := NewTimeIndexer(manager, 1)
+
+	if err := indexer.Build(context.Background(), chunkID); err != nil {
+		t.Fatalf("first build: %v", err)
+	}
+	if err := indexer.Build(context.Background(), chunkID); err != nil {
+		t.Fatalf("second build: %v", err)
+	}
+
+	entries, ok := indexer.Get(chunkID)
+	if !ok {
+		t.Fatal("expected index to exist after build")
+	}
+
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+}
+
+func TestTimeIndexerCancelledContext(t *testing.T) {
+	sourceID := chunk.NewSourceID()
+	records := []chunk.Record{
+		{IngestTS: gotime.UnixMicro(100), SourceID: sourceID, Raw: []byte("data")},
+	}
+
+	manager, chunkID := setupChunkManager(t, records)
+	indexer := NewTimeIndexer(manager, 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := indexer.Build(ctx, chunkID)
+	if err == nil {
+		t.Fatal("expected error from cancelled context, got nil")
+	}
+	if err != context.Canceled {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestTimeIndexerGetUnbuilt(t *testing.T) {
+	sourceID := chunk.NewSourceID()
+	records := []chunk.Record{
+		{IngestTS: gotime.UnixMicro(100), SourceID: sourceID, Raw: []byte("data")},
+	}
+
+	manager, chunkID := setupChunkManager(t, records)
+	indexer := NewTimeIndexer(manager, 1)
+
+	_, ok := indexer.Get(chunkID)
+	if ok {
+		t.Fatal("expected Get to return false for unbuilt chunk")
+	}
+}
+
+func TestTimeIndexerBuildEmptyChunk(t *testing.T) {
+	manager, chunkID := setupChunkManager(t, nil)
+	indexer := NewTimeIndexer(manager, 1)
+
+	if err := indexer.Build(context.Background(), chunkID); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	entries, ok := indexer.Get(chunkID)
+	if !ok {
+		t.Fatal("expected index to exist after build")
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected 0 entries, got %d", len(entries))
+	}
+}
+
+func TestTimeIndexerBuildSingleRecord(t *testing.T) {
+	sourceID := chunk.NewSourceID()
+	records := []chunk.Record{
+		{IngestTS: gotime.UnixMicro(42), SourceID: sourceID, Raw: []byte("only")},
+	}
+
+	manager, chunkID := setupChunkManager(t, records)
+	indexer := NewTimeIndexer(manager, 10)
+
+	if err := indexer.Build(context.Background(), chunkID); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	entries, ok := indexer.Get(chunkID)
+	if !ok {
+		t.Fatal("expected index to exist after build")
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].TimestampUS != 42 {
+		t.Fatalf("expected timestamp 42, got %d", entries[0].TimestampUS)
+	}
+	if entries[0].RecordPos != 0 {
+		t.Fatalf("expected record pos 0, got %d", entries[0].RecordPos)
+	}
+}
+
+func TestTimeIndexerBuildRecordPos(t *testing.T) {
+	sourceID := chunk.NewSourceID()
+	records := []chunk.Record{
+		{IngestTS: gotime.UnixMicro(1), SourceID: sourceID, Raw: []byte("aaa")},
+		{IngestTS: gotime.UnixMicro(2), SourceID: sourceID, Raw: []byte("bbb")},
+		{IngestTS: gotime.UnixMicro(3), SourceID: sourceID, Raw: []byte("ccc")},
+	}
+
+	manager, chunkID := setupChunkManager(t, records)
+	indexer := NewTimeIndexer(manager, 1)
+
+	if err := indexer.Build(context.Background(), chunkID); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	entries, ok := indexer.Get(chunkID)
+	if !ok {
+		t.Fatal("expected index to exist after build")
+	}
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
+	}
+
+	// Memory manager uses slice indices: 0, 1, 2.
+	for i, e := range entries {
+		if e.RecordPos != int64(i) {
+			t.Fatalf("entry %d: expected pos %d, got %d", i, i, e.RecordPos)
+		}
+	}
+}
+
+func TestTimeIndexerBuildInvalidChunkID(t *testing.T) {
+	sourceID := chunk.NewSourceID()
+	records := []chunk.Record{
+		{IngestTS: gotime.UnixMicro(1), SourceID: sourceID, Raw: []byte("x")},
+	}
+
+	manager, _ := setupChunkManager(t, records)
+	indexer := NewTimeIndexer(manager, 1)
+
+	bogusID := chunk.NewChunkID()
+	err := indexer.Build(context.Background(), bogusID)
+	if err == nil {
+		t.Fatal("expected error for invalid chunk ID, got nil")
+	}
+}
+
+func TestTimeIndexerCancelledContextNoPartialData(t *testing.T) {
+	sourceID := chunk.NewSourceID()
+	records := []chunk.Record{
+		{IngestTS: gotime.UnixMicro(100), SourceID: sourceID, Raw: []byte("data")},
+	}
+
+	manager, chunkID := setupChunkManager(t, records)
+	indexer := NewTimeIndexer(manager, 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_ = indexer.Build(ctx, chunkID)
+
+	_, ok := indexer.Get(chunkID)
+	if ok {
+		t.Fatal("expected no index after failed build")
+	}
+}
+
+func TestTimeIndexerMultipleChunks(t *testing.T) {
+	manager, err := chunkmemory.NewManager(chunkmemory.Config{})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+
+	sourceID := chunk.NewSourceID()
+
+	// First chunk.
+	id1, _, err := manager.Append(chunk.Record{IngestTS: gotime.UnixMicro(100), SourceID: sourceID, Raw: []byte("a")})
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := manager.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	// Second chunk.
+	id2, _, err := manager.Append(chunk.Record{IngestTS: gotime.UnixMicro(200), SourceID: sourceID, Raw: []byte("b")})
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	_, _, err = manager.Append(chunk.Record{IngestTS: gotime.UnixMicro(300), SourceID: sourceID, Raw: []byte("c")})
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := manager.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	indexer := NewTimeIndexer(manager, 1)
+
+	if err := indexer.Build(context.Background(), id1); err != nil {
+		t.Fatalf("build chunk 1: %v", err)
+	}
+	if err := indexer.Build(context.Background(), id2); err != nil {
+		t.Fatalf("build chunk 2: %v", err)
+	}
+
+	entries1, ok := indexer.Get(id1)
+	if !ok {
+		t.Fatal("expected index for chunk 1")
+	}
+	if len(entries1) != 1 {
+		t.Fatalf("chunk 1: expected 1 entry, got %d", len(entries1))
+	}
+	if entries1[0].TimestampUS != 100 {
+		t.Fatalf("chunk 1: expected timestamp 100, got %d", entries1[0].TimestampUS)
+	}
+
+	entries2, ok := indexer.Get(id2)
+	if !ok {
+		t.Fatal("expected index for chunk 2")
+	}
+	if len(entries2) != 2 {
+		t.Fatalf("chunk 2: expected 2 entries, got %d", len(entries2))
+	}
+	if entries2[0].TimestampUS != 200 {
+		t.Fatalf("chunk 2 entry 0: expected timestamp 200, got %d", entries2[0].TimestampUS)
+	}
+	if entries2[1].TimestampUS != 300 {
+		t.Fatalf("chunk 2 entry 1: expected timestamp 300, got %d", entries2[1].TimestampUS)
+	}
+}

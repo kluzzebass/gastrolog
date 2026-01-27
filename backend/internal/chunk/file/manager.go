@@ -104,6 +104,11 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, int64, error) {
 func (m *Manager) Seal() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.active == nil {
+		if err := m.openLocked(); err != nil {
+			return err
+		}
+	}
 	return m.sealLocked()
 }
 
@@ -145,6 +150,17 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 
 	recordsPath := m.recordsPath(id)
 	if meta.Sealed {
+		info, err := os.Stat(recordsPath)
+		if err != nil {
+			return nil, err
+		}
+		if info.Size() == 0 {
+			r, err := OpenReader(recordsPath)
+			if err != nil {
+				return nil, err
+			}
+			return newRecordReader(r, sourceMap.Resolve, id, 0), nil
+		}
 		r, err := OpenMmapReader(recordsPath)
 		if err != nil {
 			return nil, err

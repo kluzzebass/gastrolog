@@ -48,3 +48,41 @@ func TestMemoryChunkManagerAppendSealOpenReader(t *testing.T) {
 		t.Fatalf("expected end of records, got %v", err)
 	}
 }
+
+func TestMemoryChunkManagerEmptyChunk(t *testing.T) {
+	manager, err := NewManager(Config{})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+
+	// Seal with no prior append creates an empty sealed chunk.
+	if err := manager.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	metas, err := manager.List()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(metas) != 1 {
+		t.Fatalf("expected 1 chunk, got %d", len(metas))
+	}
+	meta := metas[0]
+	if !meta.Sealed {
+		t.Fatal("expected chunk to be sealed")
+	}
+
+	cursor, err := manager.OpenCursor(meta.ID)
+	if err != nil {
+		t.Fatalf("open cursor: %v", err)
+	}
+	defer cursor.Close()
+
+	if _, _, err := cursor.Next(); err != chunk.ErrNoMoreRecords {
+		t.Fatalf("expected ErrNoMoreRecords, got %v", err)
+	}
+
+	if _, _, err := cursor.Prev(); err != chunk.ErrNoMoreRecords {
+		t.Fatalf("expected ErrNoMoreRecords from Prev, got %v", err)
+	}
+}

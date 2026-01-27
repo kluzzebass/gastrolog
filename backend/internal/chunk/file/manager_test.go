@@ -228,3 +228,225 @@ func TestFileChunkManagerReverseReader(t *testing.T) {
 		t.Fatalf("prev (sealed): expected ErrNoMoreRecords, got %v", err)
 	}
 }
+
+func TestFileChunkManagerCursorSeek(t *testing.T) {
+	dir := t.TempDir()
+	manager, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+
+	sourceID := chunk.NewSourceID()
+	records := []chunk.Record{
+		{IngestTS: time.UnixMicro(100), SourceID: sourceID, Raw: []byte("alpha")},
+		{IngestTS: time.UnixMicro(200), SourceID: sourceID, Raw: []byte("beta")},
+		{IngestTS: time.UnixMicro(300), SourceID: sourceID, Raw: []byte("gamma")},
+		{IngestTS: time.UnixMicro(400), SourceID: sourceID, Raw: []byte("delta")},
+	}
+
+	var chunkID chunk.ChunkID
+	for _, rec := range records {
+		id, _, err := manager.Append(rec)
+		if err != nil {
+			t.Fatalf("append: %v", err)
+		}
+		chunkID = id
+	}
+	if err := manager.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	cursor, err := manager.OpenCursor(chunkID)
+	if err != nil {
+		t.Fatalf("open cursor: %v", err)
+	}
+	defer cursor.Close()
+
+	// Read forward to collect refs for all records.
+	refs := make([]chunk.RecordRef, len(records))
+	for i := range records {
+		_, ref, err := cursor.Next()
+		if err != nil {
+			t.Fatalf("next record %d: %v", i, err)
+		}
+		refs[i] = ref
+	}
+
+	// Seek to the second record and read forward from there.
+	if err := cursor.Seek(refs[1]); err != nil {
+		t.Fatalf("seek to record 1: %v", err)
+	}
+	got, ref, err := cursor.Next()
+	if err != nil {
+		t.Fatalf("next after seek: %v", err)
+	}
+	if string(got.Raw) != "beta" {
+		t.Fatalf("expected %q after seek, got %q", "beta", got.Raw)
+	}
+	if ref.Pos != refs[1].Pos {
+		t.Fatalf("ref pos: want %d got %d", refs[1].Pos, ref.Pos)
+	}
+
+	// Continue forward — should get gamma.
+	got, _, err = cursor.Next()
+	if err != nil {
+		t.Fatalf("next after seek+1: %v", err)
+	}
+	if string(got.Raw) != "gamma" {
+		t.Fatalf("expected %q, got %q", "gamma", got.Raw)
+	}
+
+	// Seek to the third record and read backward from there.
+	if err := cursor.Seek(refs[2]); err != nil {
+		t.Fatalf("seek to record 2: %v", err)
+	}
+	got, ref, err = cursor.Prev()
+	if err != nil {
+		t.Fatalf("prev after seek: %v", err)
+	}
+	// Prev from the start of record 2 should return record 1.
+	if string(got.Raw) != "beta" {
+		t.Fatalf("expected %q from prev after seek, got %q", "beta", got.Raw)
+	}
+	if ref.Pos != refs[1].Pos {
+		t.Fatalf("prev ref pos: want %d got %d", refs[1].Pos, ref.Pos)
+	}
+
+	// Seek to beginning (first record ref), Prev should return ErrNoMoreRecords.
+	if err := cursor.Seek(refs[0]); err != nil {
+		t.Fatalf("seek to record 0: %v", err)
+	}
+	if _, _, err := cursor.Prev(); err != chunk.ErrNoMoreRecords {
+		t.Fatalf("expected ErrNoMoreRecords at start, got %v", err)
+	}
+}
+
+func TestFileChunkManagerCursorMixedNextPrev(t *testing.T) {
+	dir := t.TempDir()
+	manager, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+
+	sourceID := chunk.NewSourceID()
+	records := []chunk.Record{
+		{IngestTS: time.UnixMicro(100), SourceID: sourceID, Raw: []byte("one")},
+		{IngestTS: time.UnixMicro(200), SourceID: sourceID, Raw: []byte("two")},
+		{IngestTS: time.UnixMicro(300), SourceID: sourceID, Raw: []byte("three")},
+		{IngestTS: time.UnixMicro(400), SourceID: sourceID, Raw: []byte("four")},
+	}
+
+	var chunkID chunk.ChunkID
+	for _, rec := range records {
+		id, _, err := manager.Append(rec)
+		if err != nil {
+			t.Fatalf("append: %v", err)
+		}
+		chunkID = id
+	}
+	if err := manager.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	cursor, err := manager.OpenCursor(chunkID)
+	if err != nil {
+		t.Fatalf("open cursor: %v", err)
+	}
+	defer cursor.Close()
+
+	// Next: one
+	got, _, err := cursor.Next()
+	if err != nil {
+		t.Fatalf("next 1: %v", err)
+	}
+	if string(got.Raw) != "one" {
+		t.Fatalf("expected %q, got %q", "one", got.Raw)
+	}
+
+	// Next: two
+	got, ref, err := cursor.Next()
+	if err != nil {
+		t.Fatalf("next 2: %v", err)
+	}
+	if string(got.Raw) != "two" {
+		t.Fatalf("expected %q, got %q", "two", got.Raw)
+	}
+
+	// Seek to the ref returned by "two", then Prev should give "one".
+	if err := cursor.Seek(ref); err != nil {
+		t.Fatalf("seek: %v", err)
+	}
+	got, _, err = cursor.Prev()
+	if err != nil {
+		t.Fatalf("prev after seek: %v", err)
+	}
+	if string(got.Raw) != "one" {
+		t.Fatalf("expected %q, got %q", "one", got.Raw)
+	}
+
+	// Prev again should be ErrNoMoreRecords (at start of file).
+	if _, _, err := cursor.Prev(); err != chunk.ErrNoMoreRecords {
+		t.Fatalf("expected ErrNoMoreRecords, got %v", err)
+	}
+
+	// Seek back to "two" ref, Next should give "two", then "three", then "four".
+	if err := cursor.Seek(ref); err != nil {
+		t.Fatalf("seek back: %v", err)
+	}
+	for _, expected := range []string{"two", "three", "four"} {
+		got, _, err = cursor.Next()
+		if err != nil {
+			t.Fatalf("next %q: %v", expected, err)
+		}
+		if string(got.Raw) != expected {
+			t.Fatalf("expected %q, got %q", expected, got.Raw)
+		}
+	}
+
+	// Next past end should be ErrNoMoreRecords.
+	if _, _, err := cursor.Next(); err != chunk.ErrNoMoreRecords {
+		t.Fatalf("expected ErrNoMoreRecords at end, got %v", err)
+	}
+}
+
+func TestFileChunkManagerEmptyChunk(t *testing.T) {
+	dir := t.TempDir()
+	manager, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+
+	// Seal with no prior append creates an empty sealed chunk.
+	if err := manager.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	metas, err := manager.List()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(metas) != 1 {
+		t.Fatalf("expected 1 chunk, got %d", len(metas))
+	}
+	meta := metas[0]
+	if !meta.Sealed {
+		t.Fatal("expected chunk to be sealed")
+	}
+
+	// Open a cursor on the empty sealed chunk.
+	cursor, err := manager.OpenCursor(meta.ID)
+	if err != nil {
+		t.Fatalf("open cursor: %v", err)
+	}
+	defer cursor.Close()
+
+	// Next should immediately return ErrNoMoreRecords.
+	if _, _, err := cursor.Next(); err != chunk.ErrNoMoreRecords {
+		t.Fatalf("expected ErrNoMoreRecords, got %v", err)
+	}
+
+	// Prev should immediately return ErrNoMoreRecords.
+	if _, _, err := cursor.Prev(); err != chunk.ErrNoMoreRecords {
+		t.Fatalf("expected ErrNoMoreRecords from Prev, got %v", err)
+	}
+}
