@@ -5,6 +5,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/kluzzebass/gastrolog/internal/chunk"
 	indextime "github.com/kluzzebass/gastrolog/internal/index/time"
 )
 
@@ -18,11 +20,12 @@ const (
 	typeSize       = 1
 	versionSize    = 1
 	flagsSize      = 1
+	chunkIDSize    = 16
 	entryCountSize = 4
 	timestampSize  = 8
 	recordPosSize  = 8
 
-	headerSize = signatureSize + typeSize + versionSize + flagsSize + entryCountSize
+	headerSize = signatureSize + typeSize + versionSize + flagsSize + chunkIDSize + entryCountSize
 	entrySize  = timestampSize + recordPosSize
 
 	indexFileName = "_time.idx"
@@ -32,10 +35,11 @@ var (
 	ErrIndexTooSmall     = errors.New("time index too small")
 	ErrSignatureMismatch = errors.New("time index signature mismatch")
 	ErrVersionMismatch   = errors.New("time index version mismatch")
+	ErrChunkIDMismatch   = errors.New("time index chunk ID mismatch")
 	ErrEntrySizeMismatch = errors.New("time index entry size mismatch")
 )
 
-func encodeIndex(entries []indextime.IndexEntry) []byte {
+func encodeIndex(chunkID chunk.ChunkID, entries []indextime.IndexEntry) []byte {
 	buf := make([]byte, headerSize+len(entries)*entrySize)
 
 	cursor := 0
@@ -47,6 +51,9 @@ func encodeIndex(entries []indextime.IndexEntry) []byte {
 	cursor += versionSize
 	buf[cursor] = flagsByte
 	cursor += flagsSize
+	uid := uuid.UUID(chunkID)
+	copy(buf[cursor:cursor+chunkIDSize], uid[:])
+	cursor += chunkIDSize
 	binary.LittleEndian.PutUint32(buf[cursor:cursor+entryCountSize], uint32(len(entries)))
 	cursor += entryCountSize
 
@@ -60,7 +67,7 @@ func encodeIndex(entries []indextime.IndexEntry) []byte {
 	return buf
 }
 
-func decodeIndex(data []byte) ([]indextime.IndexEntry, error) {
+func decodeIndex(chunkID chunk.ChunkID, data []byte) ([]indextime.IndexEntry, error) {
 	if len(data) < headerSize {
 		return nil, ErrIndexTooSmall
 	}
@@ -74,6 +81,14 @@ func decodeIndex(data []byte) ([]indextime.IndexEntry, error) {
 		return nil, ErrVersionMismatch
 	}
 	cursor += versionSize + flagsSize
+
+	var storedID uuid.UUID
+	copy(storedID[:], data[cursor:cursor+chunkIDSize])
+	expectedID := uuid.UUID(chunkID)
+	if storedID != expectedID {
+		return nil, ErrChunkIDMismatch
+	}
+	cursor += chunkIDSize
 
 	count := binary.LittleEndian.Uint32(data[cursor : cursor+entryCountSize])
 	cursor += entryCountSize

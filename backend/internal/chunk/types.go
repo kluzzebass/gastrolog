@@ -14,7 +14,7 @@ var ErrChunkNotFound = errors.New("chunk not found")
 type ChunkID uuid.UUID
 
 func NewChunkID() ChunkID {
-	return ChunkID(uuid.New())
+	return ChunkID(uuid.Must(uuid.NewV7()))
 }
 
 func ParseChunkID(value string) (ChunkID, error) {
@@ -32,7 +32,7 @@ func (id ChunkID) String() string {
 type SourceID uuid.UUID
 
 func NewSourceID() SourceID {
-	return SourceID(uuid.New())
+	return SourceID(uuid.Must(uuid.NewV7()))
 }
 
 func ParseSourceID(value string) (SourceID, error) {

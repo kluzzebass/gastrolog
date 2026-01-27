@@ -12,27 +12,29 @@ import (
 )
 
 const (
-	metaVersion     = 0x01
-	metaFileName    = "meta.bin"
-	recordsFileName = "records.log"
+	metaSignatureByte = 'i'
+	metaTypeByte      = 'm'
+	metaVersion       = 0x01
+	metaFileName      = "meta.bin"
+	recordsFileName   = "records.log"
 
-	metaSizeFieldBytes = 4
+	metaSignatureBytes = 1
+	metaTypeBytes      = 1
 	metaVersionBytes   = 1
 	metaChunkIDBytes   = 16
 	metaTSBytes        = 8
 	metaSizeBytes      = 8
 	metaFlagsBytes     = 1
 
-	metaPayloadBytes = metaVersionBytes + metaChunkIDBytes + metaTSBytes + metaTSBytes + metaSizeBytes + metaFlagsBytes
-	metaTotalBytes   = metaSizeFieldBytes + metaPayloadBytes + metaSizeFieldBytes
+	metaTotalBytes = metaSignatureBytes + metaTypeBytes + metaVersionBytes + metaFlagsBytes + metaChunkIDBytes + metaTSBytes + metaTSBytes + metaSizeBytes
 )
 
 const (
 	metaFlagSealed = 0x01
 )
 
-var ErrMetaSizeMismatch = errors.New("meta size mismatch")
 var ErrMetaTooSmall = errors.New("meta size too small")
+var ErrMetaSignatureMismatch = errors.New("meta signature mismatch")
 var ErrMetaVersionMismatch = errors.New("meta version mismatch")
 
 type MetaStore struct {
@@ -113,10 +115,15 @@ func (s *MetaStore) List() ([]chunk.ChunkMeta, error) {
 
 func encodeMeta(meta chunk.ChunkMeta) []byte {
 	buf := make([]byte, metaTotalBytes)
-	binary.LittleEndian.PutUint32(buf[:metaSizeFieldBytes], uint32(metaTotalBytes))
-	cursor := metaSizeFieldBytes
+	cursor := 0
+	buf[cursor] = metaSignatureByte
+	cursor += metaSignatureBytes
+	buf[cursor] = metaTypeByte
+	cursor += metaTypeBytes
 	buf[cursor] = metaVersion
 	cursor += metaVersionBytes
+	buf[cursor] = metaFlags(meta)
+	cursor += metaFlagsBytes
 	copy(buf[cursor:cursor+metaChunkIDBytes], uuidBytes(meta.ID))
 	cursor += metaChunkIDBytes
 	binary.LittleEndian.PutUint64(buf[cursor:cursor+metaTSBytes], uint64(meta.StartTS.UnixMicro()))
@@ -124,26 +131,24 @@ func encodeMeta(meta chunk.ChunkMeta) []byte {
 	binary.LittleEndian.PutUint64(buf[cursor:cursor+metaTSBytes], uint64(meta.EndTS.UnixMicro()))
 	cursor += metaTSBytes
 	binary.LittleEndian.PutUint64(buf[cursor:cursor+metaSizeBytes], uint64(meta.Size))
-	cursor += metaSizeBytes
-	buf[cursor] = metaFlags(meta)
-	cursor += metaFlagsBytes
-	binary.LittleEndian.PutUint32(buf[cursor:cursor+metaSizeFieldBytes], uint32(metaTotalBytes))
 	return buf
 }
 
 func decodeMeta(buf []byte) (chunk.ChunkMeta, error) {
-	if len(buf) < metaTotalBytes {
+	if len(buf) != metaTotalBytes {
 		return chunk.ChunkMeta{}, ErrMetaTooSmall
 	}
-	size := binary.LittleEndian.Uint32(buf[:metaSizeFieldBytes])
-	if int(size) != len(buf) || int(size) != metaTotalBytes {
-		return chunk.ChunkMeta{}, ErrMetaSizeMismatch
+	cursor := 0
+	if buf[cursor] != metaSignatureByte || buf[cursor+metaSignatureBytes] != metaTypeByte {
+		return chunk.ChunkMeta{}, ErrMetaSignatureMismatch
 	}
-	cursor := metaSizeFieldBytes
+	cursor += metaSignatureBytes + metaTypeBytes
 	if buf[cursor] != metaVersion {
 		return chunk.ChunkMeta{}, ErrMetaVersionMismatch
 	}
 	cursor += metaVersionBytes
+	flags := buf[cursor]
+	cursor += metaFlagsBytes
 	idBytes := buf[cursor : cursor+metaChunkIDBytes]
 	cursor += metaChunkIDBytes
 	startMicros := int64(binary.LittleEndian.Uint64(buf[cursor : cursor+metaTSBytes]))
@@ -151,13 +156,6 @@ func decodeMeta(buf []byte) (chunk.ChunkMeta, error) {
 	endMicros := int64(binary.LittleEndian.Uint64(buf[cursor : cursor+metaTSBytes]))
 	cursor += metaTSBytes
 	sizeBytes := int64(binary.LittleEndian.Uint64(buf[cursor : cursor+metaSizeBytes]))
-	cursor += metaSizeBytes
-	flags := buf[cursor]
-	cursor += metaFlagsBytes
-	trailing := binary.LittleEndian.Uint32(buf[cursor : cursor+metaSizeFieldBytes])
-	if trailing != size {
-		return chunk.ChunkMeta{}, ErrMetaSizeMismatch
-	}
 	id := chunkIDFromBytes(idBytes)
 	return chunk.ChunkMeta{
 		ID:      id,

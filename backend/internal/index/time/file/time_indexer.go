@@ -71,7 +71,7 @@ func (t *TimeIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 		n++
 	}
 
-	data := encodeIndex(entries)
+	data := encodeIndex(chunkID, entries)
 
 	chunkDir := filepath.Join(t.dir, chunkID.String())
 	if err := os.MkdirAll(chunkDir, 0o755); err != nil {

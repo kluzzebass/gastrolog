@@ -20,8 +20,9 @@ const (
 	typeSize      = 1
 	versionSize   = 1
 	flagsSize     = 1
+	chunkIDSize   = 16
 	keyCountSize  = 4
-	headerSize    = signatureSize + typeSize + versionSize + flagsSize + keyCountSize
+	headerSize    = signatureSize + typeSize + versionSize + flagsSize + chunkIDSize + keyCountSize
 
 	sourceIDSize      = 16
 	postingOffsetSize = 8
@@ -37,6 +38,7 @@ var (
 	ErrIndexTooSmall       = errors.New("source index too small")
 	ErrSignatureMismatch   = errors.New("source index signature mismatch")
 	ErrVersionMismatch     = errors.New("source index version mismatch")
+	ErrChunkIDMismatch     = errors.New("source index chunk ID mismatch")
 	ErrKeySizeMismatch     = errors.New("source index key table size mismatch")
 	ErrPostingSizeMismatch = errors.New("source index posting list size mismatch")
 )
@@ -46,10 +48,10 @@ var (
 //
 // Layout:
 //
-//	Header:  signature (1) | type (1) | version (1) | flags (1) | keyCount (4)
+//	Header:  signature (1) | type (1) | version (1) | flags (1) | chunkID (16) | keyCount (4)
 //	Keys:    sourceID (16) | postingOffset (8) | postingCount (4)  (repeated keyCount times)
 //	Postings: position (8)  (flat, referenced by offset/count in keys)
-func encodeIndex(entries []indexsource.IndexEntry) []byte {
+func encodeIndex(chunkID chunk.ChunkID, entries []indexsource.IndexEntry) []byte {
 	// Sort entries by SourceID bytes for deterministic output.
 	sorted := make([]indexsource.IndexEntry, len(entries))
 	copy(sorted, entries)
@@ -79,6 +81,9 @@ func encodeIndex(entries []indexsource.IndexEntry) []byte {
 	cursor += versionSize
 	buf[cursor] = flagsByte
 	cursor += flagsSize
+	uid := uuid.UUID(chunkID)
+	copy(buf[cursor:cursor+chunkIDSize], uid[:])
+	cursor += chunkIDSize
 	binary.LittleEndian.PutUint32(buf[cursor:cursor+keyCountSize], uint32(len(sorted)))
 	cursor += keyCountSize
 
@@ -115,7 +120,7 @@ func encodeIndex(entries []indexsource.IndexEntry) []byte {
 }
 
 // decodeIndex decodes binary source index data back into entries.
-func decodeIndex(data []byte) ([]indexsource.IndexEntry, error) {
+func decodeIndex(chunkID chunk.ChunkID, data []byte) ([]indexsource.IndexEntry, error) {
 	if len(data) < headerSize {
 		return nil, ErrIndexTooSmall
 	}
@@ -129,6 +134,14 @@ func decodeIndex(data []byte) ([]indexsource.IndexEntry, error) {
 		return nil, ErrVersionMismatch
 	}
 	cursor += versionSize + flagsSize
+
+	var storedID uuid.UUID
+	copy(storedID[:], data[cursor:cursor+chunkIDSize])
+	expectedID := uuid.UUID(chunkID)
+	if storedID != expectedID {
+		return nil, ErrChunkIDMismatch
+	}
+	cursor += chunkIDSize
 
 	keyCount := binary.LittleEndian.Uint32(data[cursor : cursor+keyCountSize])
 	cursor += keyCountSize
