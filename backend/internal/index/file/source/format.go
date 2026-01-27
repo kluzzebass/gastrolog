@@ -1,13 +1,16 @@
-package file
+package source
 
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/google/uuid"
 	"github.com/kluzzebass/gastrolog/internal/chunk"
-	indexsource "github.com/kluzzebass/gastrolog/internal/index/source"
+	"github.com/kluzzebass/gastrolog/internal/index"
 )
 
 const (
@@ -51,9 +54,9 @@ var (
 //	Header:  signature (1) | type (1) | version (1) | flags (1) | chunkID (16) | keyCount (4)
 //	Keys:    sourceID (16) | postingOffset (8) | postingCount (4)  (repeated keyCount times)
 //	Postings: position (8)  (flat, referenced by offset/count in keys)
-func encodeIndex(chunkID chunk.ChunkID, entries []indexsource.IndexEntry) []byte {
+func encodeIndex(chunkID chunk.ChunkID, entries []index.SourceIndexEntry) []byte {
 	// Sort entries by SourceID bytes for deterministic output.
-	sorted := make([]indexsource.IndexEntry, len(entries))
+	sorted := make([]index.SourceIndexEntry, len(entries))
 	copy(sorted, entries)
 	sort.Slice(sorted, func(i, j int) bool {
 		a := uuid.UUID(sorted[i].SourceID)
@@ -88,26 +91,21 @@ func encodeIndex(chunkID chunk.ChunkID, entries []indexsource.IndexEntry) []byte
 	cursor += keyCountSize
 
 	// Write key table and posting blob.
-	// postingOffset is relative to the start of the posting blob.
 	keyCursor := cursor
 	postingCursor := headerSize + keyTableSize
 	postingOffset := 0
 
 	for _, e := range sorted {
-		// sourceID (16 bytes)
 		uid := uuid.UUID(e.SourceID)
 		copy(buf[keyCursor:keyCursor+sourceIDSize], uid[:])
 		keyCursor += sourceIDSize
 
-		// postingOffset (8 bytes) — byte offset into posting blob
 		binary.LittleEndian.PutUint64(buf[keyCursor:keyCursor+postingOffsetSize], uint64(postingOffset))
 		keyCursor += postingOffsetSize
 
-		// postingCount (4 bytes)
 		binary.LittleEndian.PutUint32(buf[keyCursor:keyCursor+postingCountSize], uint32(len(e.Positions)))
 		keyCursor += postingCountSize
 
-		// Write positions into posting blob.
 		for _, pos := range e.Positions {
 			binary.LittleEndian.PutUint64(buf[postingCursor:postingCursor+positionSize], pos)
 			postingCursor += positionSize
@@ -120,7 +118,7 @@ func encodeIndex(chunkID chunk.ChunkID, entries []indexsource.IndexEntry) []byte
 }
 
 // decodeIndex decodes binary source index data back into entries.
-func decodeIndex(chunkID chunk.ChunkID, data []byte) ([]indexsource.IndexEntry, error) {
+func decodeIndex(chunkID chunk.ChunkID, data []byte) ([]index.SourceIndexEntry, error) {
 	if len(data) < headerSize {
 		return nil, ErrIndexTooSmall
 	}
@@ -154,29 +152,24 @@ func decodeIndex(chunkID chunk.ChunkID, data []byte) ([]indexsource.IndexEntry, 
 	postingBlobStart := headerSize + keyTableSize
 	postingBlobSize := len(data) - postingBlobStart
 
-	entries := make([]indexsource.IndexEntry, keyCount)
+	entries := make([]index.SourceIndexEntry, keyCount)
 	for i := range entries {
-		// sourceID
 		var uid uuid.UUID
 		copy(uid[:], data[cursor:cursor+sourceIDSize])
 		entries[i].SourceID = chunk.SourceID(uid)
 		cursor += sourceIDSize
 
-		// postingOffset
 		pOffset := int(binary.LittleEndian.Uint64(data[cursor : cursor+postingOffsetSize]))
 		cursor += postingOffsetSize
 
-		// postingCount
 		pCount := int(binary.LittleEndian.Uint32(data[cursor : cursor+postingCountSize]))
 		cursor += postingCountSize
 
-		// Validate posting range.
 		pEnd := pOffset + pCount*positionSize
 		if pEnd > postingBlobSize {
 			return nil, ErrPostingSizeMismatch
 		}
 
-		// Read positions from posting blob.
 		entries[i].Positions = make([]uint64, pCount)
 		pCursor := postingBlobStart + pOffset
 		for j := 0; j < pCount; j++ {
@@ -186,4 +179,13 @@ func decodeIndex(chunkID chunk.ChunkID, data []byte) ([]indexsource.IndexEntry, 
 	}
 
 	return entries, nil
+}
+
+func LoadIndex(dir string, chunkID chunk.ChunkID) ([]index.SourceIndexEntry, error) {
+	path := filepath.Join(dir, chunkID.String(), indexFileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read source index: %w", err)
+	}
+	return decodeIndex(chunkID, data)
 }

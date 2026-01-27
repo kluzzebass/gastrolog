@@ -1,4 +1,4 @@
-package memory
+package time
 
 import (
 	"context"
@@ -33,7 +33,7 @@ func setupChunkManager(t *testing.T, records []chunk.Record) (chunk.ChunkManager
 	return manager, metas[0].ID
 }
 
-func TestTimeIndexerBuild(t *testing.T) {
+func TestIndexerBuild(t *testing.T) {
 	sourceID := chunk.NewSourceID()
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(1000), SourceID: sourceID, Raw: []byte("one")},
@@ -44,7 +44,7 @@ func TestTimeIndexerBuild(t *testing.T) {
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
-	indexer := NewTimeIndexer(manager, 2)
+	indexer := NewIndexer(manager, 2)
 
 	if indexer.Name() != "time" {
 		t.Fatalf("expected name %q, got %q", "time", indexer.Name())
@@ -59,7 +59,6 @@ func TestTimeIndexerBuild(t *testing.T) {
 		t.Fatal("expected index to exist after build")
 	}
 
-	// With sparsity=2 and 5 records: record 0 (always first), record 2, record 4.
 	if len(entries) != 3 {
 		t.Fatalf("expected 3 entries, got %d", len(entries))
 	}
@@ -72,7 +71,7 @@ func TestTimeIndexerBuild(t *testing.T) {
 	}
 }
 
-func TestTimeIndexerIdempotent(t *testing.T) {
+func TestIndexerIdempotent(t *testing.T) {
 	sourceID := chunk.NewSourceID()
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(100), SourceID: sourceID, Raw: []byte("alpha")},
@@ -80,7 +79,7 @@ func TestTimeIndexerIdempotent(t *testing.T) {
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
-	indexer := NewTimeIndexer(manager, 1)
+	indexer := NewIndexer(manager, 1)
 
 	if err := indexer.Build(context.Background(), chunkID); err != nil {
 		t.Fatalf("first build: %v", err)
@@ -99,14 +98,14 @@ func TestTimeIndexerIdempotent(t *testing.T) {
 	}
 }
 
-func TestTimeIndexerCancelledContext(t *testing.T) {
+func TestIndexerCancelledContext(t *testing.T) {
 	sourceID := chunk.NewSourceID()
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(100), SourceID: sourceID, Raw: []byte("data")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
-	indexer := NewTimeIndexer(manager, 1)
+	indexer := NewIndexer(manager, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -120,14 +119,14 @@ func TestTimeIndexerCancelledContext(t *testing.T) {
 	}
 }
 
-func TestTimeIndexerGetUnbuilt(t *testing.T) {
+func TestIndexerGetUnbuilt(t *testing.T) {
 	sourceID := chunk.NewSourceID()
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(100), SourceID: sourceID, Raw: []byte("data")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
-	indexer := NewTimeIndexer(manager, 1)
+	indexer := NewIndexer(manager, 1)
 
 	_, ok := indexer.Get(chunkID)
 	if ok {
@@ -135,9 +134,9 @@ func TestTimeIndexerGetUnbuilt(t *testing.T) {
 	}
 }
 
-func TestTimeIndexerBuildEmptyChunk(t *testing.T) {
+func TestIndexerBuildEmptyChunk(t *testing.T) {
 	manager, chunkID := setupChunkManager(t, nil)
-	indexer := NewTimeIndexer(manager, 1)
+	indexer := NewIndexer(manager, 1)
 
 	if err := indexer.Build(context.Background(), chunkID); err != nil {
 		t.Fatalf("build: %v", err)
@@ -152,14 +151,14 @@ func TestTimeIndexerBuildEmptyChunk(t *testing.T) {
 	}
 }
 
-func TestTimeIndexerBuildSingleRecord(t *testing.T) {
+func TestIndexerBuildSingleRecord(t *testing.T) {
 	sourceID := chunk.NewSourceID()
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(42), SourceID: sourceID, Raw: []byte("only")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
-	indexer := NewTimeIndexer(manager, 10)
+	indexer := NewIndexer(manager, 10)
 
 	if err := indexer.Build(context.Background(), chunkID); err != nil {
 		t.Fatalf("build: %v", err)
@@ -180,7 +179,7 @@ func TestTimeIndexerBuildSingleRecord(t *testing.T) {
 	}
 }
 
-func TestTimeIndexerBuildRecordPos(t *testing.T) {
+func TestIndexerBuildRecordPos(t *testing.T) {
 	sourceID := chunk.NewSourceID()
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(1), SourceID: sourceID, Raw: []byte("aaa")},
@@ -189,7 +188,7 @@ func TestTimeIndexerBuildRecordPos(t *testing.T) {
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
-	indexer := NewTimeIndexer(manager, 1)
+	indexer := NewIndexer(manager, 1)
 
 	if err := indexer.Build(context.Background(), chunkID); err != nil {
 		t.Fatalf("build: %v", err)
@@ -211,14 +210,14 @@ func TestTimeIndexerBuildRecordPos(t *testing.T) {
 	}
 }
 
-func TestTimeIndexerBuildInvalidChunkID(t *testing.T) {
+func TestIndexerBuildInvalidChunkID(t *testing.T) {
 	sourceID := chunk.NewSourceID()
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(1), SourceID: sourceID, Raw: []byte("x")},
 	}
 
 	manager, _ := setupChunkManager(t, records)
-	indexer := NewTimeIndexer(manager, 1)
+	indexer := NewIndexer(manager, 1)
 
 	bogusID := chunk.NewChunkID()
 	err := indexer.Build(context.Background(), bogusID)
@@ -227,14 +226,14 @@ func TestTimeIndexerBuildInvalidChunkID(t *testing.T) {
 	}
 }
 
-func TestTimeIndexerCancelledContextNoPartialData(t *testing.T) {
+func TestIndexerCancelledContextNoPartialData(t *testing.T) {
 	sourceID := chunk.NewSourceID()
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(100), SourceID: sourceID, Raw: []byte("data")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
-	indexer := NewTimeIndexer(manager, 1)
+	indexer := NewIndexer(manager, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -247,7 +246,7 @@ func TestTimeIndexerCancelledContextNoPartialData(t *testing.T) {
 	}
 }
 
-func TestTimeIndexerMultipleChunks(t *testing.T) {
+func TestIndexerMultipleChunks(t *testing.T) {
 	manager, err := chunkmemory.NewManager(chunkmemory.Config{})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
@@ -277,7 +276,7 @@ func TestTimeIndexerMultipleChunks(t *testing.T) {
 		t.Fatalf("seal: %v", err)
 	}
 
-	indexer := NewTimeIndexer(manager, 1)
+	indexer := NewIndexer(manager, 1)
 
 	if err := indexer.Build(context.Background(), id1); err != nil {
 		t.Fatalf("build chunk 1: %v", err)
@@ -312,7 +311,7 @@ func TestTimeIndexerMultipleChunks(t *testing.T) {
 	}
 }
 
-func TestTimeIndexerBuildUnsealedChunk(t *testing.T) {
+func TestIndexerBuildUnsealedChunk(t *testing.T) {
 	manager, err := chunkmemory.NewManager(chunkmemory.Config{})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
@@ -324,8 +323,7 @@ func TestTimeIndexerBuildUnsealedChunk(t *testing.T) {
 		t.Fatalf("append: %v", err)
 	}
 
-	// Do not seal — Build should reject.
-	indexer := NewTimeIndexer(manager, 1)
+	indexer := NewIndexer(manager, 1)
 
 	err = indexer.Build(context.Background(), chunkID)
 	if err == nil {

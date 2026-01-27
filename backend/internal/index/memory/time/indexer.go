@@ -1,4 +1,4 @@
-package memory
+package time
 
 import (
 	"context"
@@ -6,31 +6,31 @@ import (
 	"sync"
 
 	"github.com/kluzzebass/gastrolog/internal/chunk"
-	indextime "github.com/kluzzebass/gastrolog/internal/index/time"
+	"github.com/kluzzebass/gastrolog/internal/index"
 )
 
-// TimeIndexer builds a sparse time index for sealed chunks,
+// Indexer builds a sparse time index for sealed chunks,
 // storing the result in memory.
-type TimeIndexer struct {
+type Indexer struct {
 	manager  chunk.ChunkManager
 	sparsity int
 	mu       sync.Mutex
-	indices  map[chunk.ChunkID][]indextime.IndexEntry
+	indices  map[chunk.ChunkID][]index.TimeIndexEntry
 }
 
-func NewTimeIndexer(manager chunk.ChunkManager, sparsity int) *TimeIndexer {
-	return &TimeIndexer{
+func NewIndexer(manager chunk.ChunkManager, sparsity int) *Indexer {
+	return &Indexer{
 		manager:  manager,
 		sparsity: sparsity,
-		indices:  make(map[chunk.ChunkID][]indextime.IndexEntry),
+		indices:  make(map[chunk.ChunkID][]index.TimeIndexEntry),
 	}
 }
 
-func (t *TimeIndexer) Name() string {
+func (t *Indexer) Name() string {
 	return "time"
 }
 
-func (t *TimeIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
+func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	meta, err := t.manager.Meta(chunkID)
 	if err != nil {
 		return fmt.Errorf("get chunk meta: %w", err)
@@ -45,7 +45,7 @@ func (t *TimeIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	}
 	defer cursor.Close()
 
-	var entries []indextime.IndexEntry
+	var entries []index.TimeIndexEntry
 	n := 0
 
 	for {
@@ -62,7 +62,7 @@ func (t *TimeIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 		}
 
 		if n == 0 || n%t.sparsity == 0 {
-			entries = append(entries, indextime.IndexEntry{
+			entries = append(entries, index.TimeIndexEntry{
 				Timestamp: rec.IngestTS,
 				RecordPos: ref.Pos,
 			})
@@ -77,7 +77,7 @@ func (t *TimeIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	return nil
 }
 
-func (t *TimeIndexer) Get(chunkID chunk.ChunkID) ([]indextime.IndexEntry, bool) {
+func (t *Indexer) Get(chunkID chunk.ChunkID) ([]index.TimeIndexEntry, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	entries, ok := t.indices[chunkID]

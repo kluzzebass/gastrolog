@@ -1,4 +1,4 @@
-package file
+package source
 
 import (
 	"context"
@@ -7,30 +7,30 @@ import (
 	"path/filepath"
 
 	"github.com/kluzzebass/gastrolog/internal/chunk"
-	indexsource "github.com/kluzzebass/gastrolog/internal/index/source"
+	"github.com/kluzzebass/gastrolog/internal/index"
 )
 
-// SourceIndexer builds a source index for sealed chunks.
+// Indexer builds a source index for sealed chunks.
 // For each chunk, it maps every distinct SourceID to the list of
 // record positions where that source appears, and writes the result
 // to <dir>/<chunkID>/_source.idx.
-type SourceIndexer struct {
+type Indexer struct {
 	dir     string
 	manager chunk.ChunkManager
 }
 
-func NewSourceIndexer(dir string, manager chunk.ChunkManager) *SourceIndexer {
-	return &SourceIndexer{
+func NewIndexer(dir string, manager chunk.ChunkManager) *Indexer {
+	return &Indexer{
 		dir:     dir,
 		manager: manager,
 	}
 }
 
-func (s *SourceIndexer) Name() string {
+func (s *Indexer) Name() string {
 	return "source"
 }
 
-func (s *SourceIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
+func (s *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	meta, err := s.manager.Meta(chunkID)
 	if err != nil {
 		return fmt.Errorf("get chunk meta: %w", err)
@@ -65,9 +65,9 @@ func (s *SourceIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error 
 	}
 
 	// Convert map to sorted slice.
-	entries := make([]indexsource.IndexEntry, 0, len(posMap))
+	entries := make([]index.SourceIndexEntry, 0, len(posMap))
 	for sid, positions := range posMap {
-		entries = append(entries, indexsource.IndexEntry{
+		entries = append(entries, index.SourceIndexEntry{
 			SourceID:  sid,
 			Positions: positions,
 		})

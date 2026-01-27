@@ -1,13 +1,16 @@
-package file
+package time
 
 import (
 	"encoding/binary"
 	"errors"
-	"time"
+	"fmt"
+	"os"
+	"path/filepath"
+	gotime "time"
 
 	"github.com/google/uuid"
 	"github.com/kluzzebass/gastrolog/internal/chunk"
-	indextime "github.com/kluzzebass/gastrolog/internal/index/time"
+	"github.com/kluzzebass/gastrolog/internal/index"
 )
 
 const (
@@ -39,7 +42,7 @@ var (
 	ErrEntrySizeMismatch = errors.New("time index entry size mismatch")
 )
 
-func encodeIndex(chunkID chunk.ChunkID, entries []indextime.IndexEntry) []byte {
+func encodeIndex(chunkID chunk.ChunkID, entries []index.TimeIndexEntry) []byte {
 	buf := make([]byte, headerSize+len(entries)*entrySize)
 
 	cursor := 0
@@ -67,7 +70,7 @@ func encodeIndex(chunkID chunk.ChunkID, entries []indextime.IndexEntry) []byte {
 	return buf
 }
 
-func decodeIndex(chunkID chunk.ChunkID, data []byte) ([]indextime.IndexEntry, error) {
+func decodeIndex(chunkID chunk.ChunkID, data []byte) ([]index.TimeIndexEntry, error) {
 	if len(data) < headerSize {
 		return nil, ErrIndexTooSmall
 	}
@@ -98,14 +101,23 @@ func decodeIndex(chunkID chunk.ChunkID, data []byte) ([]indextime.IndexEntry, er
 		return nil, ErrEntrySizeMismatch
 	}
 
-	entries := make([]indextime.IndexEntry, count)
+	entries := make([]index.TimeIndexEntry, count)
 	for i := range entries {
 		micros := int64(binary.LittleEndian.Uint64(data[cursor : cursor+timestampSize]))
-		entries[i].Timestamp = time.UnixMicro(micros)
+		entries[i].Timestamp = gotime.UnixMicro(micros)
 		cursor += timestampSize
 		entries[i].RecordPos = binary.LittleEndian.Uint64(data[cursor : cursor+recordPosSize])
 		cursor += recordPosSize
 	}
 
 	return entries, nil
+}
+
+func LoadIndex(dir string, chunkID chunk.ChunkID) ([]index.TimeIndexEntry, error) {
+	path := filepath.Join(dir, chunkID.String(), indexFileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read time index: %w", err)
+	}
+	return decodeIndex(chunkID, data)
 }

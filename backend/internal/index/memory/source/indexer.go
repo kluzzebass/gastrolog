@@ -1,4 +1,4 @@
-package memory
+package source
 
 import (
 	"context"
@@ -8,29 +8,29 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kluzzebass/gastrolog/internal/chunk"
-	indexsource "github.com/kluzzebass/gastrolog/internal/index/source"
+	"github.com/kluzzebass/gastrolog/internal/index"
 )
 
-// SourceIndexer builds a source index for sealed chunks,
+// Indexer builds a source index for sealed chunks,
 // storing the result in memory.
-type SourceIndexer struct {
+type Indexer struct {
 	manager chunk.ChunkManager
 	mu      sync.Mutex
-	indices map[chunk.ChunkID][]indexsource.IndexEntry
+	indices map[chunk.ChunkID][]index.SourceIndexEntry
 }
 
-func NewSourceIndexer(manager chunk.ChunkManager) *SourceIndexer {
-	return &SourceIndexer{
+func NewIndexer(manager chunk.ChunkManager) *Indexer {
+	return &Indexer{
 		manager: manager,
-		indices: make(map[chunk.ChunkID][]indexsource.IndexEntry),
+		indices: make(map[chunk.ChunkID][]index.SourceIndexEntry),
 	}
 }
 
-func (s *SourceIndexer) Name() string {
+func (s *Indexer) Name() string {
 	return "source"
 }
 
-func (s *SourceIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
+func (s *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	meta, err := s.manager.Meta(chunkID)
 	if err != nil {
 		return fmt.Errorf("get chunk meta: %w", err)
@@ -65,9 +65,9 @@ func (s *SourceIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error 
 	}
 
 	// Convert map to sorted slice for deterministic output.
-	entries := make([]indexsource.IndexEntry, 0, len(posMap))
+	entries := make([]index.SourceIndexEntry, 0, len(posMap))
 	for sid, positions := range posMap {
-		entries = append(entries, indexsource.IndexEntry{
+		entries = append(entries, index.SourceIndexEntry{
 			SourceID:  sid,
 			Positions: positions,
 		})
@@ -85,7 +85,7 @@ func (s *SourceIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error 
 	return nil
 }
 
-func (s *SourceIndexer) Get(chunkID chunk.ChunkID) ([]indexsource.IndexEntry, bool) {
+func (s *Indexer) Get(chunkID chunk.ChunkID) ([]index.SourceIndexEntry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entries, ok := s.indices[chunkID]

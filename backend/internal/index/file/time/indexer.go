@@ -1,4 +1,4 @@
-package file
+package time
 
 import (
 	"context"
@@ -7,31 +7,31 @@ import (
 	"path/filepath"
 
 	"github.com/kluzzebass/gastrolog/internal/chunk"
-	indextime "github.com/kluzzebass/gastrolog/internal/index/time"
+	"github.com/kluzzebass/gastrolog/internal/index"
 )
 
-// TimeIndexer builds a sparse time index for sealed chunks.
+// Indexer builds a sparse time index for sealed chunks.
 // For each chunk, it samples every N-th record's (IngestTS, RecordPos)
-// and writes the result to <dir>/<chunkID>/time.idx.
-type TimeIndexer struct {
+// and writes the result to <dir>/<chunkID>/_time.idx.
+type Indexer struct {
 	dir      string
 	manager  chunk.ChunkManager
 	sparsity int
 }
 
-func NewTimeIndexer(dir string, manager chunk.ChunkManager, sparsity int) *TimeIndexer {
-	return &TimeIndexer{
+func NewIndexer(dir string, manager chunk.ChunkManager, sparsity int) *Indexer {
+	return &Indexer{
 		dir:      dir,
 		manager:  manager,
 		sparsity: sparsity,
 	}
 }
 
-func (t *TimeIndexer) Name() string {
+func (t *Indexer) Name() string {
 	return "time"
 }
 
-func (t *TimeIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
+func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	meta, err := t.manager.Meta(chunkID)
 	if err != nil {
 		return fmt.Errorf("get chunk meta: %w", err)
@@ -46,7 +46,7 @@ func (t *TimeIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	}
 	defer cursor.Close()
 
-	var entries []indextime.IndexEntry
+	var entries []index.TimeIndexEntry
 	n := 0
 
 	for {
@@ -63,7 +63,7 @@ func (t *TimeIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 		}
 
 		if n == 0 || n%t.sparsity == 0 {
-			entries = append(entries, indextime.IndexEntry{
+			entries = append(entries, index.TimeIndexEntry{
 				Timestamp: rec.IngestTS,
 				RecordPos: ref.Pos,
 			})
