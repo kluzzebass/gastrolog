@@ -1,6 +1,7 @@
 package source
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -40,12 +41,12 @@ func setupChunkManager(t *testing.T, records []chunk.Record) (chunk.ChunkManager
 	return manager, metas[0].ID
 }
 
-// sortEntries sorts entries by SourceID string for deterministic comparison.
+// sortEntries sorts entries by SourceID raw bytes for deterministic comparison.
 func sortEntries(entries []index.SourceIndexEntry) {
 	sort.Slice(entries, func(i, j int) bool {
-		a := uuid.UUID(entries[i].SourceID)
-		b := uuid.UUID(entries[j].SourceID)
-		return a.String() < b.String()
+		a := [16]byte(entries[i].SourceID)
+		b := [16]byte(entries[j].SourceID)
+		return bytes.Compare(a[:], b[:]) < 0
 	})
 }
 
@@ -475,12 +476,10 @@ func TestIndexerConcurrentBuild(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make([]error, 8)
 	for i := range errs {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
+		wg.Go(func() {
 			indexer := NewIndexer(indexDir, manager)
-			errs[idx] = indexer.Build(context.Background(), chunkID)
-		}(i)
+			errs[i] = indexer.Build(context.Background(), chunkID)
+		})
 	}
 	wg.Wait()
 
@@ -717,16 +716,11 @@ func TestIndexerZeroAndMaxUUIDSortOrder(t *testing.T) {
 		t.Fatalf("expected 2 entries, got %d", len(entries))
 	}
 
-	zeroStr := uuid.UUID(zeroSource).String()
-	firstStr := uuid.UUID(entries[0].SourceID).String()
-	maxStr := uuid.UUID(maxSource).String()
-	lastStr := uuid.UUID(entries[1].SourceID).String()
-
-	if firstStr != zeroStr {
-		t.Fatalf("expected zero UUID first, got %s", firstStr)
+	if entries[0].SourceID != zeroSource {
+		t.Fatalf("expected zero UUID first, got %s", entries[0].SourceID)
 	}
-	if lastStr != maxStr {
-		t.Fatalf("expected max UUID last, got %s", lastStr)
+	if entries[1].SourceID != maxSource {
+		t.Fatalf("expected max UUID last, got %s", entries[1].SourceID)
 	}
 }
 

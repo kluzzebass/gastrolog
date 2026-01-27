@@ -3,15 +3,15 @@ package index
 import (
 	"context"
 
+	"github.com/kluzzebass/gastrolog/internal/callgroup"
 	"github.com/kluzzebass/gastrolog/internal/chunk"
 	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/singleflight"
 )
 
 // BuildHelper deduplicates concurrent BuildIndexes calls for the same chunkID
 // and parallelizes individual indexers within a single build.
 type BuildHelper struct {
-	group singleflight.Group
+	group callgroup.Group[chunk.ChunkID]
 }
 
 func NewBuildHelper() *BuildHelper {
@@ -27,8 +27,7 @@ func (h *BuildHelper) Build(ctx context.Context, chunkID chunk.ChunkID, indexers
 		return err
 	}
 
-	key := chunkID.String()
-	ch := h.group.DoChan(key, func() (interface{}, error) {
+	ch := h.group.DoChan(chunkID, func() error {
 		// Detach from the initiator's context so that cancelling one caller
 		// does not abort the shared build. Individual callers still exit
 		// early via the select on their own ctx.Done() below.
@@ -38,12 +37,12 @@ func (h *BuildHelper) Build(ctx context.Context, chunkID chunk.ChunkID, indexers
 				return idx.Build(gctx, chunkID)
 			})
 		}
-		return nil, g.Wait()
+		return g.Wait()
 	})
 
 	select {
-	case res := <-ch:
-		return res.Err
+	case err := <-ch:
+		return err
 	case <-ctx.Done():
 		return ctx.Err()
 	}

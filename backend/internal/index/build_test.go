@@ -45,20 +45,16 @@ func TestBuildHelperDeduplication(t *testing.T) {
 	errs := make([]error, n)
 
 	// Launch first caller to establish the in-flight build.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		errs[0] = helper.Build(context.Background(), chunkID, []index.Indexer{idx})
-	}()
+	})
 
 	// Wait for the build to start, then launch remaining callers.
 	<-started
 	for i := 1; i < n; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			errs[i] = helper.Build(context.Background(), chunkID, []index.Indexer{idx})
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -154,25 +150,21 @@ func TestBuildHelperWaiterContextCancellation(t *testing.T) {
 
 	// Caller A: initiates the build.
 	var wg sync.WaitGroup
-	wg.Add(1)
 	var errA error
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		errA = helper.Build(context.Background(), chunkID, []index.Indexer{idx})
-	}()
+	})
 
 	<-buildStarted
 
 	// Caller B: waits with a cancellable context.
 	ctxB, cancelB := context.WithCancel(context.Background())
-	wg.Add(1)
 	var errB error
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		errB = helper.Build(ctxB, chunkID, []index.Indexer{idx})
-	}()
+	})
 
-	// Give B time to enter the singleflight wait, then cancel it.
+	// Give B time to enter the callgroup wait, then cancel it.
 	time.Sleep(10 * time.Millisecond)
 	cancelB()
 
@@ -208,13 +200,11 @@ func TestBuildHelperIndependentChunkIDs(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for _, id := range []chunk.ChunkID{id1, id2} {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if err := helper.Build(context.Background(), id, []index.Indexer{idx}); err != nil {
 				t.Errorf("Build(%s) error: %v", id, err)
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

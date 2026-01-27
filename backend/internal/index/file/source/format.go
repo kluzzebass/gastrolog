@@ -1,6 +1,7 @@
 package source
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -59,9 +60,9 @@ func encodeIndex(chunkID chunk.ChunkID, entries []index.SourceIndexEntry) []byte
 	sorted := make([]index.SourceIndexEntry, len(entries))
 	copy(sorted, entries)
 	sort.Slice(sorted, func(i, j int) bool {
-		a := uuid.UUID(sorted[i].SourceID)
-		b := uuid.UUID(sorted[j].SourceID)
-		return a.String() < b.String()
+		a := [16]byte(sorted[i].SourceID)
+		b := [16]byte(sorted[j].SourceID)
+		return bytes.Compare(a[:], b[:]) < 0
 	})
 
 	// Count total positions for sizing.

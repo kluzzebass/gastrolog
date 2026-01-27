@@ -369,21 +369,17 @@ func TestIndexerConcurrentBuildAndGet(t *testing.T) {
 
 	buildErrs := make([]error, 8)
 	for i := range buildErrs {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			buildErrs[idx] = indexer.Build(context.Background(), chunkID)
-		}(i)
+		wg.Go(func() {
+			buildErrs[i] = indexer.Build(context.Background(), chunkID)
+		})
 	}
 
 	getResults := make([]bool, 8)
 	for i := range getResults {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
+		wg.Go(func() {
 			_, ok := indexer.Get(chunkID)
-			getResults[idx] = ok
-		}(i)
+			getResults[i] = ok
+		})
 	}
 
 	wg.Wait()
@@ -639,16 +635,11 @@ func TestIndexerZeroAndMaxUUIDSortOrder(t *testing.T) {
 		t.Fatalf("expected 2 entries, got %d", len(entries))
 	}
 
-	zeroStr := uuid.UUID(zeroSource).String()
-	firstStr := uuid.UUID(entries[0].SourceID).String()
-	maxStr := uuid.UUID(maxSource).String()
-	lastStr := uuid.UUID(entries[1].SourceID).String()
-
-	if firstStr != zeroStr {
-		t.Fatalf("expected zero UUID first, got %s", firstStr)
+	if entries[0].SourceID != zeroSource {
+		t.Fatalf("expected zero UUID first, got %s", entries[0].SourceID)
 	}
-	if lastStr != maxStr {
-		t.Fatalf("expected max UUID last, got %s", lastStr)
+	if entries[1].SourceID != maxSource {
+		t.Fatalf("expected max UUID last, got %s", entries[1].SourceID)
 	}
 }
 

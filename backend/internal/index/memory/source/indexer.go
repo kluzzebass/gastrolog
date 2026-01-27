@@ -1,12 +1,12 @@
 package source
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sort"
 	"sync"
 
-	"github.com/google/uuid"
 	"github.com/kluzzebass/gastrolog/internal/chunk"
 	"github.com/kluzzebass/gastrolog/internal/index"
 )
@@ -73,9 +73,9 @@ func (s *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 		})
 	}
 	sort.Slice(entries, func(i, j int) bool {
-		a := uuid.UUID(entries[i].SourceID)
-		b := uuid.UUID(entries[j].SourceID)
-		return a.String() < b.String()
+		a := [16]byte(entries[i].SourceID)
+		b := [16]byte(entries[j].SourceID)
+		return bytes.Compare(a[:], b[:]) < 0
 	})
 
 	s.mu.Lock()
