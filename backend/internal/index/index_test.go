@@ -2,7 +2,7 @@ package index
 
 import (
 	"bytes"
-	"sort"
+	"slices"
 	"testing"
 	"time"
 
@@ -226,10 +226,10 @@ func TestFindStartEmptyIndex(t *testing.T) {
 func sortEntries(entries []SourceIndexEntry) []SourceIndexEntry {
 	sorted := make([]SourceIndexEntry, len(entries))
 	copy(sorted, entries)
-	sort.Slice(sorted, func(i, j int) bool {
-		a := [16]byte(sorted[i].SourceID)
-		b := [16]byte(sorted[j].SourceID)
-		return bytes.Compare(a[:], b[:]) < 0
+	slices.SortFunc(sorted, func(a, b SourceIndexEntry) int {
+		ab := [16]byte(a.SourceID)
+		bb := [16]byte(b.SourceID)
+		return bytes.Compare(ab[:], bb[:])
 	})
 	return sorted
 }

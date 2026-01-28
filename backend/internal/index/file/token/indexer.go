@@ -1,11 +1,12 @@
 package token
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 
 	"github.com/kluzzebass/gastrolog/internal/chunk"
 	"github.com/kluzzebass/gastrolog/internal/index"
@@ -81,8 +82,8 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 			Positions: positions,
 		})
 	}
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Token < entries[j].Token
+	slices.SortFunc(entries, func(a, b index.TokenIndexEntry) int {
+		return cmp.Compare(a.Token, b.Token)
 	})
 
 	data := encodeIndex(chunkID, entries)

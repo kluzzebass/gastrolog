@@ -5,7 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"sync"
 	"testing"
 	gotime "time"
@@ -43,10 +43,10 @@ func setupChunkManager(t *testing.T, records []chunk.Record) (chunk.ChunkManager
 
 // sortEntries sorts entries by SourceID raw bytes for deterministic comparison.
 func sortEntries(entries []index.SourceIndexEntry) {
-	sort.Slice(entries, func(i, j int) bool {
-		a := [16]byte(entries[i].SourceID)
-		b := [16]byte(entries[j].SourceID)
-		return bytes.Compare(a[:], b[:]) < 0
+	slices.SortFunc(entries, func(a, b index.SourceIndexEntry) int {
+		ab := [16]byte(a.SourceID)
+		bb := [16]byte(b.SourceID)
+		return bytes.Compare(ab[:], bb[:])
 	})
 }
 

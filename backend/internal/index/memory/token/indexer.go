@@ -1,9 +1,10 @@
 package token
 
 import (
+	"cmp"
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 	"sync"
 
 	"github.com/kluzzebass/gastrolog/internal/chunk"
@@ -79,8 +80,8 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 			Positions: positions,
 		})
 	}
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Token < entries[j].Token
+	slices.SortFunc(entries, func(a, b index.TokenIndexEntry) int {
+		return cmp.Compare(a.Token, b.Token)
 	})
 
 	t.mu.Lock()

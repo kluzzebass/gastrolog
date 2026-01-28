@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 	"sync"
 
 	"github.com/kluzzebass/gastrolog/internal/chunk"
@@ -72,10 +72,10 @@ func (s *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 			Positions: positions,
 		})
 	}
-	sort.Slice(entries, func(i, j int) bool {
-		a := [16]byte(entries[i].SourceID)
-		b := [16]byte(entries[j].SourceID)
-		return bytes.Compare(a[:], b[:]) < 0
+	slices.SortFunc(entries, func(a, b index.SourceIndexEntry) int {
+		ab := [16]byte(a.SourceID)
+		bb := [16]byte(b.SourceID)
+		return bytes.Compare(ab[:], bb[:])
 	})
 
 	s.mu.Lock()

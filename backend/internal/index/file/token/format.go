@@ -1,12 +1,13 @@
 package token
 
 import (
+	"cmp"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 
 	"github.com/google/uuid"
 	"github.com/kluzzebass/gastrolog/internal/chunk"
@@ -57,8 +58,8 @@ func encodeIndex(chunkID chunk.ChunkID, entries []index.TokenIndexEntry) []byte 
 	// Sort entries by Token for deterministic output and binary search.
 	sorted := make([]index.TokenIndexEntry, len(entries))
 	copy(sorted, entries)
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].Token < sorted[j].Token
+	slices.SortFunc(sorted, func(a, b index.TokenIndexEntry) int {
+		return cmp.Compare(a.Token, b.Token)
 	})
 
 	// Count total positions and token bytes for sizing.
