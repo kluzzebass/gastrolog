@@ -15,7 +15,7 @@ import (
 
 const (
 	signatureByte = 'i'
-	typeByte      = 't'
+	typeByte      = 'k'
 	versionByte   = 0x01
 	flagsByte     = 0x00
 
