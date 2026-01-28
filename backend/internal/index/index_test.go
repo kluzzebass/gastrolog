@@ -340,3 +340,138 @@ func TestLookupCorrectPositions(t *testing.T) {
 		t.Fatalf("src2: expected [32 96], got %v", pos2)
 	}
 }
+
+// TokenIndexReader tests
+
+func TestTokenLookupFound(t *testing.T) {
+	id := chunk.NewChunkID()
+	entries := []TokenIndexEntry{
+		{Token: "apple", Positions: []uint64{0, 128}},
+		{Token: "banana", Positions: []uint64{64}},
+		{Token: "cherry", Positions: []uint64{192, 256}},
+	}
+
+	reader := NewTokenIndexReader(id, entries)
+
+	for _, e := range entries {
+		positions, ok := reader.Lookup(e.Token)
+		if !ok {
+			t.Fatalf("expected to find token %q", e.Token)
+		}
+		if len(positions) != len(e.Positions) {
+			t.Fatalf("token %q: expected %d positions, got %d", e.Token, len(e.Positions), len(positions))
+		}
+		for i, p := range positions {
+			if p != e.Positions[i] {
+				t.Fatalf("token %q pos %d: expected %d, got %d", e.Token, i, e.Positions[i], p)
+			}
+		}
+	}
+}
+
+func TestTokenLookupNotFound(t *testing.T) {
+	id := chunk.NewChunkID()
+	entries := []TokenIndexEntry{
+		{Token: "error", Positions: []uint64{0}},
+		{Token: "warning", Positions: []uint64{64}},
+	}
+
+	reader := NewTokenIndexReader(id, entries)
+
+	positions, ok := reader.Lookup("info")
+	if ok {
+		t.Fatalf("expected ok=false for missing token, got positions %v", positions)
+	}
+	if positions != nil {
+		t.Fatalf("expected nil positions, got %v", positions)
+	}
+}
+
+func TestTokenLookupEmptyIndex(t *testing.T) {
+	id := chunk.NewChunkID()
+	reader := NewTokenIndexReader(id, nil)
+
+	positions, ok := reader.Lookup("anything")
+	if ok {
+		t.Fatalf("expected ok=false for empty index, got positions %v", positions)
+	}
+	if positions != nil {
+		t.Fatalf("expected nil positions, got %v", positions)
+	}
+}
+
+func TestTokenLookupSingleEntry(t *testing.T) {
+	id := chunk.NewChunkID()
+	entries := []TokenIndexEntry{
+		{Token: "error", Positions: []uint64{42, 84}},
+	}
+
+	reader := NewTokenIndexReader(id, entries)
+
+	positions, ok := reader.Lookup("error")
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if len(positions) != 2 || positions[0] != 42 || positions[1] != 84 {
+		t.Fatalf("expected [42 84], got %v", positions)
+	}
+}
+
+func TestTokenLookupFirstEntry(t *testing.T) {
+	id := chunk.NewChunkID()
+	entries := []TokenIndexEntry{
+		{Token: "aaa", Positions: []uint64{0}},
+		{Token: "bbb", Positions: []uint64{64}},
+		{Token: "ccc", Positions: []uint64{128}},
+	}
+
+	reader := NewTokenIndexReader(id, entries)
+
+	positions, ok := reader.Lookup("aaa")
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if len(positions) != 1 || positions[0] != 0 {
+		t.Fatalf("expected [0], got %v", positions)
+	}
+}
+
+func TestTokenLookupLastEntry(t *testing.T) {
+	id := chunk.NewChunkID()
+	entries := []TokenIndexEntry{
+		{Token: "aaa", Positions: []uint64{0}},
+		{Token: "bbb", Positions: []uint64{64}},
+		{Token: "zzz", Positions: []uint64{128}},
+	}
+
+	reader := NewTokenIndexReader(id, entries)
+
+	positions, ok := reader.Lookup("zzz")
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if len(positions) != 1 || positions[0] != 128 {
+		t.Fatalf("expected [128], got %v", positions)
+	}
+}
+
+func TestTokenLookupCaseSensitive(t *testing.T) {
+	id := chunk.NewChunkID()
+	entries := []TokenIndexEntry{
+		{Token: "error", Positions: []uint64{0}},
+	}
+
+	reader := NewTokenIndexReader(id, entries)
+
+	// Tokens are stored lowercase by the indexer, so uppercase lookup should fail.
+	_, ok := reader.Lookup("ERROR")
+	if ok {
+		t.Fatal("expected ok=false for case mismatch")
+	}
+
+	// Lowercase should work.
+	_, ok = reader.Lookup("error")
+	if !ok {
+		t.Fatal("expected ok=true for exact match")
+	}
+}
