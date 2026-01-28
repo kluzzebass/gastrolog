@@ -9,7 +9,7 @@ import (
 
 	"github.com/kluzzebass/gastrolog/internal/chunk"
 	"github.com/kluzzebass/gastrolog/internal/index"
-	memtoken "github.com/kluzzebass/gastrolog/internal/index/memory/token"
+	"github.com/kluzzebass/gastrolog/internal/index/token"
 )
 
 // Indexer builds a token index for sealed chunks.
@@ -63,7 +63,7 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 			return fmt.Errorf("read record: %w", err)
 		}
 
-		tokens := memtoken.Tokenize(rec.Raw)
+		tokens := token.Tokenize(rec.Raw)
 		seen := make(map[string]bool) // dedupe within same record
 		for _, tok := range tokens {
 			if !seen[tok] {
