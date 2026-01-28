@@ -69,6 +69,16 @@ func (o *Orchestrator) RegisterQueryEngine(key string, qe *query.Engine) {
 // Ingest routes a record to all registered chunk managers.
 // If a chunk is sealed as a result of the append, index builds are
 // scheduled asynchronously for that chunk.
+//
+// Seal detection: compares Active() before/after append to detect when
+// the active chunk changes (indicating the previous chunk was sealed).
+// This assumes:
+//   - ChunkManagers are append-serialized (single writer per CM)
+//   - No concurrent Ingest calls to the same Orchestrator
+//   - No delayed/async sealing within ChunkManager
+//
+// Future improvement: have ChunkManager.Append() return sealed chunk ID,
+// or emit seal events via callback.
 func (o *Orchestrator) Ingest(rec chunk.Record) error {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
