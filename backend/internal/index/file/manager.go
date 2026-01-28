@@ -8,6 +8,7 @@ import (
 	"github.com/kluzzebass/gastrolog/internal/index"
 	filesource "github.com/kluzzebass/gastrolog/internal/index/file/source"
 	filetime "github.com/kluzzebass/gastrolog/internal/index/file/time"
+	filetoken "github.com/kluzzebass/gastrolog/internal/index/file/token"
 )
 
 type Manager struct {
@@ -45,6 +46,9 @@ func (m *Manager) OpenSourceIndex(chunkID chunk.ChunkID) (*index.Index[index.Sou
 }
 
 func (m *Manager) OpenTokenIndex(chunkID chunk.ChunkID) (*index.Index[index.TokenIndexEntry], error) {
-	// TODO: implement file-based token index
-	return nil, index.ErrIndexNotFound
+	entries, err := filetoken.LoadIndex(m.dir, chunkID)
+	if err != nil {
+		return nil, fmt.Errorf("open token index: %w", err)
+	}
+	return index.NewIndex(entries), nil
 }
