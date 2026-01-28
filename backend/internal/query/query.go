@@ -13,6 +13,7 @@ import (
 
 	"github.com/kluzzebass/gastrolog/internal/chunk"
 	"github.com/kluzzebass/gastrolog/internal/index"
+	"github.com/kluzzebass/gastrolog/internal/index/token"
 )
 
 // Query describes what records to search for.
@@ -22,7 +23,8 @@ type Query struct {
 	End   time.Time // exclusive upper bound (zero = no upper bound)
 
 	// Optional filters
-	Source *chunk.SourceID // filter by source (nil = no filter)
+	Sources []chunk.SourceID // filter by sources (nil = no filter, OR semantics)
+	Tokens  []string         // filter by tokens (nil = no filter, AND semantics)
 
 	// Result control
 	Limit int // max results (0 = unlimited)
@@ -129,20 +131,71 @@ func (e *Engine) searchChunk(ctx context.Context, q Query, meta chunk.ChunkMeta)
 			return
 		}
 
-		// Source filter: if set, get positions from source index.
+		// Token filter: if set, get positions from token index and intersect.
+		var tokenPositions []uint64
+		var hasTokenFilter bool
+		if len(q.Tokens) > 0 {
+			hasTokenFilter = true
+			tokIdx, err := e.indexes.OpenTokenIndex(meta.ID)
+			if err != nil {
+				yield(chunk.Record{}, err)
+				return
+			}
+			reader := index.NewTokenIndexReader(meta.ID, tokIdx.Entries())
+
+			// Look up each token and intersect positions.
+			for i, tok := range q.Tokens {
+				positions, found := reader.Lookup(tok)
+				if !found {
+					return // token not in this chunk, no matches possible
+				}
+				if i == 0 {
+					tokenPositions = positions
+				} else {
+					tokenPositions = intersectPositions(tokenPositions, positions)
+					if len(tokenPositions) == 0 {
+						return // no records contain all tokens
+					}
+				}
+			}
+		}
+
+		// Source filter: if set, get positions from source index (OR semantics).
 		var sourcePositions []uint64
-		if q.Source != nil {
+		var hasSourceFilter bool
+		if len(q.Sources) > 0 {
+			hasSourceFilter = true
 			srcIdx, err := e.indexes.OpenSourceIndex(meta.ID)
 			if err != nil {
 				yield(chunk.Record{}, err)
 				return
 			}
 			reader := index.NewSourceIndexReader(meta.ID, srcIdx.Entries())
-			positions, found := reader.Lookup(*q.Source)
-			if !found {
-				return // source not in this chunk
+
+			// Union positions from all requested sources.
+			for _, src := range q.Sources {
+				positions, found := reader.Lookup(src)
+				if found {
+					sourcePositions = unionPositions(sourcePositions, positions)
+				}
 			}
-			sourcePositions = positions
+			if len(sourcePositions) == 0 {
+				return // no requested sources in this chunk
+			}
+		}
+
+		// Combine token and source positions if both are set.
+		var finalPositions []uint64
+		hasPositionFilter := hasTokenFilter || hasSourceFilter
+		if hasTokenFilter && hasSourceFilter {
+			finalPositions = intersectPositions(tokenPositions, sourcePositions)
+			if len(finalPositions) == 0 {
+				return // no records match both filters
+			}
+		} else if hasTokenFilter {
+			finalPositions = tokenPositions
+		} else if hasSourceFilter {
+			finalPositions = sourcePositions
 		}
 
 		// Time index: find start position.
@@ -166,8 +219,8 @@ func (e *Engine) searchChunk(ctx context.Context, q Query, meta chunk.ChunkMeta)
 		}
 
 		var scanner iter.Seq2[chunk.Record, error]
-		if q.Source != nil {
-			scanner = e.scanByPositions(cursor, q, meta.ID, seekRef, hasSeek, sourcePositions)
+		if hasPositionFilter {
+			scanner = e.scanByPositions(cursor, q, meta.ID, seekRef, hasSeek, finalPositions)
 		} else {
 			scanner = e.scanSequential(cursor, q)
 		}
@@ -182,6 +235,64 @@ func (e *Engine) searchChunk(ctx context.Context, q Query, meta chunk.ChunkMeta)
 			}
 		}
 	}
+}
+
+// intersectPositions returns positions present in both sorted slices.
+func intersectPositions(a, b []uint64) []uint64 {
+	var result []uint64
+	i, j := 0, 0
+	for i < len(a) && j < len(b) {
+		if a[i] == b[j] {
+			result = append(result, a[i])
+			i++
+			j++
+		} else if a[i] < b[j] {
+			i++
+		} else {
+			j++
+		}
+	}
+	return result
+}
+
+// unionPositions returns all unique positions from both sorted slices, in sorted order.
+func unionPositions(a, b []uint64) []uint64 {
+	result := make([]uint64, 0, len(a)+len(b))
+	i, j := 0, 0
+	for i < len(a) && j < len(b) {
+		if a[i] == b[j] {
+			result = append(result, a[i])
+			i++
+			j++
+		} else if a[i] < b[j] {
+			result = append(result, a[i])
+			i++
+		} else {
+			result = append(result, b[j])
+			j++
+		}
+	}
+	result = append(result, a[i:]...)
+	result = append(result, b[j:]...)
+	return result
+}
+
+// matchesTokens checks if the record's raw data contains all query tokens.
+func matchesTokens(raw []byte, queryTokens []string) bool {
+	if len(queryTokens) == 0 {
+		return true
+	}
+	recordTokens := token.Simple(raw)
+	tokenSet := make(map[string]bool, len(recordTokens))
+	for _, t := range recordTokens {
+		tokenSet[t] = true
+	}
+	for _, qt := range queryTokens {
+		if !tokenSet[qt] {
+			return false
+		}
+	}
+	return true
 }
 
 // scanSequential reads records sequentially from the cursor, applying all filters.
@@ -203,7 +314,10 @@ func (e *Engine) scanSequential(cursor chunk.RecordCursor, q Query) iter.Seq2[ch
 			if !q.End.IsZero() && !rec.IngestTS.Before(q.End) {
 				return
 			}
-			if q.Source != nil && rec.SourceID != *q.Source {
+			if len(q.Sources) > 0 && !slices.Contains(q.Sources, rec.SourceID) {
+				continue
+			}
+			if !matchesTokens(rec.Raw, q.Tokens) {
 				continue
 			}
 

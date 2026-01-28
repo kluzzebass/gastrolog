@@ -12,6 +12,7 @@ import (
 	indexmem "github.com/kluzzebass/gastrolog/internal/index/memory"
 	memsource "github.com/kluzzebass/gastrolog/internal/index/memory/source"
 	memtime "github.com/kluzzebass/gastrolog/internal/index/memory/time"
+	memtoken "github.com/kluzzebass/gastrolog/internal/index/memory/token"
 	"github.com/kluzzebass/gastrolog/internal/query"
 )
 
@@ -108,12 +109,13 @@ func setup(t *testing.T, batches ...[]chunk.Record) *query.Engine {
 
 	timeIdx := memtime.NewIndexer(cm, 1) // sparsity 1 = index every record
 	srcIdx := memsource.NewIndexer(cm)
+	tokIdx := memtoken.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, srcIdx},
+		[]index.Indexer{timeIdx, srcIdx, tokIdx},
 		timeIdx,
 		srcIdx,
-		nil, // no token index
+		tokIdx,
 	)
 
 	buildIndexes(t, cm, im)
@@ -154,12 +156,13 @@ func setupWithActive(t *testing.T, sealed [][]chunk.Record, active []chunk.Recor
 
 	timeIdx := memtime.NewIndexer(cm, 1)
 	srcIdx := memsource.NewIndexer(cm)
+	tokIdx := memtoken.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, srcIdx},
+		[]index.Indexer{timeIdx, srcIdx, tokIdx},
 		timeIdx,
 		srcIdx,
-		nil, // no token index
+		tokIdx,
 	)
 
 	buildIndexes(t, cm, im)
@@ -236,7 +239,7 @@ func TestSearchActiveChunkWithSourceFilter(t *testing.T) {
 
 	eng := setupWithActive(t, nil, active)
 
-	results, err := collect(eng.Search(context.Background(), query.Query{Source: &srcA}))
+	results, err := collect(eng.Search(context.Background(), query.Query{Sources: []chunk.SourceID{srcA}}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -337,7 +340,7 @@ func TestSearchSourceFilter(t *testing.T) {
 
 	eng := setup(t, records)
 
-	results, err := collect(eng.Search(context.Background(), query.Query{Source: &srcA}))
+	results, err := collect(eng.Search(context.Background(), query.Query{Sources: []chunk.SourceID{srcA}}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -365,9 +368,9 @@ func TestSearchCombinedTimeAndSource(t *testing.T) {
 
 	// Source A, time [t2, t5) → a2 (t3) and a3 (t4)
 	results, err := collect(eng.Search(context.Background(), query.Query{
-		Start:  t2,
-		End:    t5,
-		Source: &srcA,
+		Start:   t2,
+		End:     t5,
+		Sources: []chunk.SourceID{srcA},
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -514,7 +517,7 @@ func TestSearchSourceNotInChunk(t *testing.T) {
 	eng := setup(t, records)
 
 	// srcB is not in this chunk
-	results, err := collect(eng.Search(context.Background(), query.Query{Source: &srcB}))
+	results, err := collect(eng.Search(context.Background(), query.Query{Sources: []chunk.SourceID{srcB}}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -656,7 +659,7 @@ func TestSearchLimitWithSourceFilter(t *testing.T) {
 	eng := setup(t, records)
 
 	// Source A has 3 records, limit to 2
-	results, err := collect(eng.Search(context.Background(), query.Query{Source: &srcA, Limit: 2}))
+	results, err := collect(eng.Search(context.Background(), query.Query{Sources: []chunk.SourceID{srcA}, Limit: 2}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -720,5 +723,288 @@ func TestSearchActiveChunkWithLimit(t *testing.T) {
 	}
 	if string(results[1].Raw) != "two" {
 		t.Errorf("result[1]: got %q, want %q", results[1].Raw, "two")
+	}
+}
+
+func TestSearchMultiSourceFilter(t *testing.T) {
+	srcC := chunk.NewSourceID()
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("from A")},
+		{IngestTS: t2, SourceID: srcB, Raw: []byte("from B")},
+		{IngestTS: t3, SourceID: srcC, Raw: []byte("from C")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("from A again")},
+	}
+
+	eng := setup(t, records)
+
+	// Search for records from srcA OR srcC
+	results, err := collect(eng.Search(context.Background(), query.Query{
+		Sources: []chunk.SourceID{srcA, srcC},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+	if string(results[0].Raw) != "from A" {
+		t.Errorf("result[0]: got %q", results[0].Raw)
+	}
+	if string(results[1].Raw) != "from C" {
+		t.Errorf("result[1]: got %q", results[1].Raw)
+	}
+	if string(results[2].Raw) != "from A again" {
+		t.Errorf("result[2]: got %q", results[2].Raw)
+	}
+}
+
+func TestSearchMultiSourceActiveChunk(t *testing.T) {
+	srcC := chunk.NewSourceID()
+	active := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("from A")},
+		{IngestTS: t2, SourceID: srcB, Raw: []byte("from B")},
+		{IngestTS: t3, SourceID: srcC, Raw: []byte("from C")},
+	}
+
+	eng := setupWithActive(t, nil, active)
+
+	// Multi-source filter on active chunk
+	results, err := collect(eng.Search(context.Background(), query.Query{
+		Sources: []chunk.SourceID{srcA, srcC},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if string(results[0].Raw) != "from A" {
+		t.Errorf("result[0]: got %q", results[0].Raw)
+	}
+	if string(results[1].Raw) != "from C" {
+		t.Errorf("result[1]: got %q", results[1].Raw)
+	}
+}
+
+func TestSearchMultiSourceWithTokens(t *testing.T) {
+	srcC := chunk.NewSourceID()
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("error from A")},
+		{IngestTS: t2, SourceID: srcB, Raw: []byte("error from B")},
+		{IngestTS: t3, SourceID: srcC, Raw: []byte("error from C")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("warning from A")},
+	}
+
+	eng := setup(t, records)
+
+	// Search for "error" from srcA OR srcC
+	results, err := collect(eng.Search(context.Background(), query.Query{
+		Tokens:  []string{"error"},
+		Sources: []chunk.SourceID{srcA, srcC},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if string(results[0].Raw) != "error from A" {
+		t.Errorf("result[0]: got %q", results[0].Raw)
+	}
+	if string(results[1].Raw) != "error from C" {
+		t.Errorf("result[1]: got %q", results[1].Raw)
+	}
+}
+
+func TestSearchTokenFilter(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("error connecting to database")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("connection established")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("error timeout waiting for response")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("request completed successfully")},
+	}
+
+	eng := setup(t, records)
+
+	// Search for "error" - should match records 1 and 3
+	results, err := collect(eng.Search(context.Background(), query.Query{Tokens: []string{"error"}}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if string(results[0].Raw) != "error connecting to database" {
+		t.Errorf("result[0]: got %q", results[0].Raw)
+	}
+	if string(results[1].Raw) != "error timeout waiting for response" {
+		t.Errorf("result[1]: got %q", results[1].Raw)
+	}
+}
+
+func TestSearchMultiTokenFilter(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("error connecting to database")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("error timeout waiting")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("timeout connecting to server")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("request completed")},
+	}
+
+	eng := setup(t, records)
+
+	// Search for "error" AND "connecting" - only record 1 matches
+	results, err := collect(eng.Search(context.Background(), query.Query{Tokens: []string{"error", "connecting"}}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if string(results[0].Raw) != "error connecting to database" {
+		t.Errorf("result[0]: got %q", results[0].Raw)
+	}
+}
+
+func TestSearchTokenNotFound(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("hello world")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("foo bar")},
+	}
+
+	eng := setup(t, records)
+
+	results, err := collect(eng.Search(context.Background(), query.Query{Tokens: []string{"notfound"}}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results, got %d", len(results))
+	}
+}
+
+func TestSearchTokenWithSourceFilter(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("error from source A")},
+		{IngestTS: t2, SourceID: srcB, Raw: []byte("error from source B")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("warning from source A")},
+	}
+
+	eng := setup(t, records)
+
+	// Search for "error" from srcA only
+	results, err := collect(eng.Search(context.Background(), query.Query{
+		Tokens:  []string{"error"},
+		Sources: []chunk.SourceID{srcA},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if string(results[0].Raw) != "error from source A" {
+		t.Errorf("result[0]: got %q", results[0].Raw)
+	}
+}
+
+func TestSearchTokenWithTimeFilter(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("error early")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("error middle")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("error late")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("success late")},
+	}
+
+	eng := setup(t, records)
+
+	// Search for "error" in time range [t2, t4)
+	results, err := collect(eng.Search(context.Background(), query.Query{
+		Tokens: []string{"error"},
+		Start:  t2,
+		End:    t4,
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if string(results[0].Raw) != "error middle" {
+		t.Errorf("result[0]: got %q", results[0].Raw)
+	}
+	if string(results[1].Raw) != "error late" {
+		t.Errorf("result[1]: got %q", results[1].Raw)
+	}
+}
+
+func TestSearchTokenActiveChunk(t *testing.T) {
+	active := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("error connecting")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("connection ok")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("error timeout")},
+	}
+
+	eng := setupWithActive(t, nil, active)
+
+	// Token search on active chunk uses on-the-fly tokenization
+	results, err := collect(eng.Search(context.Background(), query.Query{Tokens: []string{"error"}}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if string(results[0].Raw) != "error connecting" {
+		t.Errorf("result[0]: got %q", results[0].Raw)
+	}
+	if string(results[1].Raw) != "error timeout" {
+		t.Errorf("result[1]: got %q", results[1].Raw)
+	}
+}
+
+func TestSearchTokenWithLimit(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("error one")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("error two")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("error three")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("error four")},
+	}
+
+	eng := setup(t, records)
+
+	results, err := collect(eng.Search(context.Background(), query.Query{
+		Tokens: []string{"error"},
+		Limit:  2,
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if string(results[0].Raw) != "error one" {
+		t.Errorf("result[0]: got %q", results[0].Raw)
+	}
+	if string(results[1].Raw) != "error two" {
+		t.Errorf("result[1]: got %q", results[1].Raw)
+	}
+}
+
+func TestSearchTokenCaseInsensitive(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("ERROR uppercase")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("Error mixed")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("error lowercase")},
+	}
+
+	eng := setup(t, records)
+
+	// All should match since tokenizer lowercases
+	results, err := collect(eng.Search(context.Background(), query.Query{Tokens: []string{"error"}}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
 	}
 }
