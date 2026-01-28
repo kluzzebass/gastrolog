@@ -28,6 +28,15 @@ var (
 // index builds, and delegates queries to query engines.
 //
 // Orchestrator does not contain business logic - it only wires components.
+//
+// Concurrency model:
+//   - Register* methods are expected to be called at startup only, before
+//     any Ingest or Search calls. After setup, registries are effectively
+//     read-only. This is enforced by convention, not by the type system.
+//   - Ingest is serialized (one writer at a time) to support seal detection.
+//   - Search methods can run concurrently with each other and with Ingest.
+//   - A RWMutex protects registry access: Register* takes write lock,
+//     Ingest and Search* take read lock.
 type Orchestrator struct {
 	mu sync.RWMutex
 
@@ -70,18 +79,22 @@ func (o *Orchestrator) RegisterQueryEngine(key string, qe *query.Engine) {
 // If a chunk is sealed as a result of the append, index builds are
 // scheduled asynchronously for that chunk.
 //
+// Ingest acquires an exclusive lock to serialize seal detection. This
+// means only one Ingest call runs at a time, but Search calls can still
+// run concurrently (they only need the registry snapshot, not the lock
+// during iteration).
+//
 // Seal detection: compares Active() before/after append to detect when
 // the active chunk changes (indicating the previous chunk was sealed).
 // This assumes:
 //   - ChunkManagers are append-serialized (single writer per CM)
-//   - No concurrent Ingest calls to the same Orchestrator
 //   - No delayed/async sealing within ChunkManager
 //
 // Future improvement: have ChunkManager.Append() return sealed chunk ID,
 // or emit seal events via callback.
 func (o *Orchestrator) Ingest(rec chunk.Record) error {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
+	o.mu.Lock()
+	defer o.mu.Unlock()
 
 	if len(o.chunks) == 0 {
 		return ErrNoChunkManagers
