@@ -15,6 +15,20 @@ import (
 	"github.com/kluzzebass/gastrolog/internal/query"
 )
 
+// collect gathers all records from the iterator, returning the first error encountered.
+func collect(it func(yield func(chunk.Record, error) bool)) ([]chunk.Record, error) {
+	var results []chunk.Record
+	var firstErr error
+	for rec, err := range it {
+		if err != nil {
+			firstErr = err
+			break
+		}
+		results = append(results, rec)
+	}
+	return results, firstErr
+}
+
 // buildIndexes builds indexes for all sealed chunks.
 func buildIndexes(t *testing.T, cm chunk.ChunkManager, im index.IndexManager) {
 	t.Helper()
@@ -99,6 +113,7 @@ func setup(t *testing.T, batches ...[]chunk.Record) *query.Engine {
 		[]index.Indexer{timeIdx, srcIdx},
 		timeIdx,
 		srcIdx,
+		nil, // no token index
 	)
 
 	buildIndexes(t, cm, im)
@@ -144,6 +159,7 @@ func setupWithActive(t *testing.T, sealed [][]chunk.Record, active []chunk.Recor
 		[]index.Indexer{timeIdx, srcIdx},
 		timeIdx,
 		srcIdx,
+		nil, // no token index
 	)
 
 	buildIndexes(t, cm, im)
@@ -154,7 +170,7 @@ func setupWithActive(t *testing.T, sealed [][]chunk.Record, active []chunk.Recor
 func TestSearchNoChunks(t *testing.T) {
 	eng := setup(t)
 
-	results, err := eng.Search(context.Background(), query.Query{})
+	results, err := collect(eng.Search(context.Background(), query.Query{}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -172,7 +188,7 @@ func TestSearchActiveChunkNoFilters(t *testing.T) {
 
 	eng := setupWithActive(t, nil, active)
 
-	results, err := eng.Search(context.Background(), query.Query{})
+	results, err := collect(eng.Search(context.Background(), query.Query{}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -196,7 +212,7 @@ func TestSearchActiveChunkWithTimeFilter(t *testing.T) {
 
 	eng := setupWithActive(t, nil, active)
 
-	results, err := eng.Search(context.Background(), query.Query{Start: t2, End: t4})
+	results, err := collect(eng.Search(context.Background(), query.Query{Start: t2, End: t4}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -220,7 +236,7 @@ func TestSearchActiveChunkWithSourceFilter(t *testing.T) {
 
 	eng := setupWithActive(t, nil, active)
 
-	results, err := eng.Search(context.Background(), query.Query{Source: &srcA})
+	results, err := collect(eng.Search(context.Background(), query.Query{Source: &srcA}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -247,7 +263,7 @@ func TestSearchSealedAndActiveChunks(t *testing.T) {
 
 	eng := setupWithActive(t, [][]chunk.Record{sealed}, active)
 
-	results, err := eng.Search(context.Background(), query.Query{})
+	results, err := collect(eng.Search(context.Background(), query.Query{}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -271,7 +287,7 @@ func TestSearchSingleChunkNoFilters(t *testing.T) {
 
 	eng := setup(t, records)
 
-	results, err := eng.Search(context.Background(), query.Query{})
+	results, err := collect(eng.Search(context.Background(), query.Query{}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -296,7 +312,7 @@ func TestSearchTimeRangeFilter(t *testing.T) {
 	eng := setup(t, records)
 
 	// Start=t2, End=t4 → records at t2 and t3
-	results, err := eng.Search(context.Background(), query.Query{Start: t2, End: t4})
+	results, err := collect(eng.Search(context.Background(), query.Query{Start: t2, End: t4}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -321,7 +337,7 @@ func TestSearchSourceFilter(t *testing.T) {
 
 	eng := setup(t, records)
 
-	results, err := eng.Search(context.Background(), query.Query{Source: &srcA})
+	results, err := collect(eng.Search(context.Background(), query.Query{Source: &srcA}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -348,11 +364,11 @@ func TestSearchCombinedTimeAndSource(t *testing.T) {
 	eng := setup(t, records)
 
 	// Source A, time [t2, t5) → a2 (t3) and a3 (t4)
-	results, err := eng.Search(context.Background(), query.Query{
+	results, err := collect(eng.Search(context.Background(), query.Query{
 		Start:  t2,
 		End:    t5,
 		Source: &srcA,
-	})
+	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -377,7 +393,7 @@ func TestSearchLimit(t *testing.T) {
 
 	eng := setup(t, records)
 
-	results, err := eng.Search(context.Background(), query.Query{Limit: 2})
+	results, err := collect(eng.Search(context.Background(), query.Query{Limit: 2}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -404,7 +420,7 @@ func TestSearchMultiChunkMerge(t *testing.T) {
 
 	eng := setup(t, batch1, batch2)
 
-	results, err := eng.Search(context.Background(), query.Query{})
+	results, err := collect(eng.Search(context.Background(), query.Query{}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -432,7 +448,7 @@ func TestSearchMultiChunkLimit(t *testing.T) {
 	eng := setup(t, batch1, batch2)
 
 	// Limit 3 across 2 chunks (2 + 1)
-	results, err := eng.Search(context.Background(), query.Query{Limit: 3})
+	results, err := collect(eng.Search(context.Background(), query.Query{Limit: 3}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -457,7 +473,7 @@ func TestSearchContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := eng.Search(ctx, query.Query{})
+	_, err := collect(eng.Search(ctx, query.Query{}))
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
@@ -477,7 +493,7 @@ func TestSearchSkipsNonOverlappingChunks(t *testing.T) {
 	eng := setup(t, early, mid, late)
 
 	// Query [t1, t4) — only "mid" chunk overlaps
-	results, err := eng.Search(context.Background(), query.Query{Start: t1, End: t4})
+	results, err := collect(eng.Search(context.Background(), query.Query{Start: t1, End: t4}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -498,11 +514,211 @@ func TestSearchSourceNotInChunk(t *testing.T) {
 	eng := setup(t, records)
 
 	// srcB is not in this chunk
-	results, err := eng.Search(context.Background(), query.Query{Source: &srcB})
+	results, err := collect(eng.Search(context.Background(), query.Query{Source: &srcB}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(results) != 0 {
 		t.Fatalf("expected 0 results, got %d", len(results))
+	}
+}
+
+func TestSearchEarlyBreak(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+	}
+
+	eng := setup(t, records)
+
+	// Consume only the first 2 records by breaking early.
+	var results []chunk.Record
+	for rec, err := range eng.Search(context.Background(), query.Query{}) {
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		results = append(results, rec)
+		if len(results) == 2 {
+			break
+		}
+	}
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if string(results[0].Raw) != "one" {
+		t.Errorf("result[0]: got %q, want %q", results[0].Raw, "one")
+	}
+	if string(results[1].Raw) != "two" {
+		t.Errorf("result[1]: got %q, want %q", results[1].Raw, "two")
+	}
+}
+
+func TestSearchContextCancelledMidIteration(t *testing.T) {
+	batch1 := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("c1r1")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("c1r2")},
+	}
+	batch2 := []chunk.Record{
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("c2r1")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("c2r2")},
+	}
+
+	eng := setup(t, batch1, batch2)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	var results []chunk.Record
+	var gotErr error
+	for rec, err := range eng.Search(ctx, query.Query{}) {
+		if err != nil {
+			gotErr = err
+			break
+		}
+		results = append(results, rec)
+		// Cancel after first chunk
+		if len(results) == 2 {
+			cancel()
+		}
+	}
+
+	if !errors.Is(gotErr, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", gotErr)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results before cancellation, got %d", len(results))
+	}
+}
+
+func TestSearchStartOnlyFilter(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+	}
+
+	eng := setup(t, records)
+
+	// Start=t3, no End → records at t3 and t4
+	results, err := collect(eng.Search(context.Background(), query.Query{Start: t3}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if string(results[0].Raw) != "three" {
+		t.Errorf("result[0]: got %q, want %q", results[0].Raw, "three")
+	}
+	if string(results[1].Raw) != "four" {
+		t.Errorf("result[1]: got %q, want %q", results[1].Raw, "four")
+	}
+}
+
+func TestSearchEndOnlyFilter(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+	}
+
+	eng := setup(t, records)
+
+	// No Start, End=t3 → records at t1 and t2
+	results, err := collect(eng.Search(context.Background(), query.Query{End: t3}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if string(results[0].Raw) != "one" {
+		t.Errorf("result[0]: got %q, want %q", results[0].Raw, "one")
+	}
+	if string(results[1].Raw) != "two" {
+		t.Errorf("result[1]: got %q, want %q", results[1].Raw, "two")
+	}
+}
+
+func TestSearchLimitWithSourceFilter(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("a1")},
+		{IngestTS: t2, SourceID: srcB, Raw: []byte("b1")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("a2")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("a3")},
+		{IngestTS: t5, SourceID: srcB, Raw: []byte("b2")},
+	}
+
+	eng := setup(t, records)
+
+	// Source A has 3 records, limit to 2
+	results, err := collect(eng.Search(context.Background(), query.Query{Source: &srcA, Limit: 2}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if string(results[0].Raw) != "a1" {
+		t.Errorf("result[0]: got %q, want %q", results[0].Raw, "a1")
+	}
+	if string(results[1].Raw) != "a2" {
+		t.Errorf("result[1]: got %q, want %q", results[1].Raw, "a2")
+	}
+}
+
+func TestSearchLimitWithTimeFilter(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+		{IngestTS: t5, SourceID: srcA, Raw: []byte("five")},
+	}
+
+	eng := setup(t, records)
+
+	// Time range [t2, t5) has 3 records, limit to 2
+	results, err := collect(eng.Search(context.Background(), query.Query{Start: t2, End: t5, Limit: 2}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if string(results[0].Raw) != "two" {
+		t.Errorf("result[0]: got %q, want %q", results[0].Raw, "two")
+	}
+	if string(results[1].Raw) != "three" {
+		t.Errorf("result[1]: got %q, want %q", results[1].Raw, "three")
+	}
+}
+
+func TestSearchActiveChunkWithLimit(t *testing.T) {
+	active := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+	}
+
+	eng := setupWithActive(t, nil, active)
+
+	results, err := collect(eng.Search(context.Background(), query.Query{Limit: 2}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if string(results[0].Raw) != "one" {
+		t.Errorf("result[0]: got %q, want %q", results[0].Raw, "one")
+	}
+	if string(results[1].Raw) != "two" {
+		t.Errorf("result[1]: got %q, want %q", results[1].Raw, "two")
 	}
 }

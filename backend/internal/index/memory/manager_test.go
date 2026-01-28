@@ -55,6 +55,7 @@ func setupManager(t *testing.T, records []chunk.Record) (*Manager, chunk.ChunkMa
 		[]index.Indexer{timeIndexer, sourceIndexer},
 		timeIndexer,
 		sourceIndexer,
+		nil,
 	)
 	return mgr, chunkMgr, chunkID
 }
@@ -107,6 +108,7 @@ func TestBuildIndexesUnsealedChunk(t *testing.T) {
 		[]index.Indexer{timeIndexer, sourceIndexer},
 		timeIndexer,
 		sourceIndexer,
+		nil,
 	)
 
 	err = mgr.BuildIndexes(context.Background(), chunkID)
@@ -152,6 +154,7 @@ func TestOpenTimeIndexNotBuilt(t *testing.T) {
 		[]index.Indexer{timeIndexer, sourceIndexer},
 		timeIndexer,
 		sourceIndexer,
+		nil,
 	)
 
 	_, err = mgr.OpenTimeIndex(chunk.NewChunkID())
@@ -190,6 +193,7 @@ func TestOpenSourceIndexNotBuilt(t *testing.T) {
 		[]index.Indexer{timeIndexer, sourceIndexer},
 		timeIndexer,
 		sourceIndexer,
+		nil,
 	)
 
 	_, err = mgr.OpenSourceIndex(chunk.NewChunkID())

@@ -43,3 +43,8 @@ func (m *Manager) OpenSourceIndex(chunkID chunk.ChunkID) (*index.Index[index.Sou
 	}
 	return index.NewIndex(entries), nil
 }
+
+func (m *Manager) OpenTokenIndex(chunkID chunk.ChunkID) (*index.Index[index.TokenIndexEntry], error) {
+	// TODO: implement file-based token index
+	return nil, index.ErrIndexNotFound
+}

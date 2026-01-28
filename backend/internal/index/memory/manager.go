@@ -15,14 +15,21 @@ type Manager struct {
 	indexers    []index.Indexer
 	timeStore   IndexStore[index.TimeIndexEntry]
 	sourceStore IndexStore[index.SourceIndexEntry]
+	tokenStore  IndexStore[index.TokenIndexEntry]
 	builder     *index.BuildHelper
 }
 
-func NewManager(indexers []index.Indexer, timeStore IndexStore[index.TimeIndexEntry], sourceStore IndexStore[index.SourceIndexEntry]) *Manager {
+func NewManager(
+	indexers []index.Indexer,
+	timeStore IndexStore[index.TimeIndexEntry],
+	sourceStore IndexStore[index.SourceIndexEntry],
+	tokenStore IndexStore[index.TokenIndexEntry],
+) *Manager {
 	return &Manager{
 		indexers:    indexers,
 		timeStore:   timeStore,
 		sourceStore: sourceStore,
+		tokenStore:  tokenStore,
 		builder:     index.NewBuildHelper(),
 	}
 }
@@ -41,6 +48,17 @@ func (m *Manager) OpenTimeIndex(chunkID chunk.ChunkID) (*index.Index[index.TimeI
 
 func (m *Manager) OpenSourceIndex(chunkID chunk.ChunkID) (*index.Index[index.SourceIndexEntry], error) {
 	entries, ok := m.sourceStore.Get(chunkID)
+	if !ok {
+		return nil, index.ErrIndexNotFound
+	}
+	return index.NewIndex(entries), nil
+}
+
+func (m *Manager) OpenTokenIndex(chunkID chunk.ChunkID) (*index.Index[index.TokenIndexEntry], error) {
+	if m.tokenStore == nil {
+		return nil, index.ErrIndexNotFound
+	}
+	entries, ok := m.tokenStore.Get(chunkID)
 	if !ok {
 		return nil, index.ErrIndexNotFound
 	}

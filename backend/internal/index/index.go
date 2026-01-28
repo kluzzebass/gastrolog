@@ -37,6 +37,12 @@ type SourceIndexEntry struct {
 	Positions []uint64
 }
 
+// TokenIndexEntry holds all record positions for a single token within a chunk.
+type TokenIndexEntry struct {
+	Token     string
+	Positions []uint64
+}
+
 // Index provides read access to a built index of any entry type.
 type Index[T any] struct {
 	entries []T
@@ -55,4 +61,5 @@ type IndexManager interface {
 	BuildIndexes(ctx context.Context, chunkID chunk.ChunkID) error
 	OpenTimeIndex(chunkID chunk.ChunkID) (*Index[TimeIndexEntry], error)
 	OpenSourceIndex(chunkID chunk.ChunkID) (*Index[SourceIndexEntry], error)
+	OpenTokenIndex(chunkID chunk.ChunkID) (*Index[TokenIndexEntry], error)
 }

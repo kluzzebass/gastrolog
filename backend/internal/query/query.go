@@ -6,6 +6,7 @@ package query
 import (
 	"context"
 	"errors"
+	"iter"
 	"slices"
 	"sort"
 	"time"
@@ -38,41 +39,48 @@ func New(chunks chunk.ChunkManager, indexes index.IndexManager) *Engine {
 	return &Engine{chunks: chunks, indexes: indexes}
 }
 
-// Search returns records matching the query, ordered by ingest timestamp.
-func (e *Engine) Search(ctx context.Context, q Query) ([]chunk.Record, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	metas, err := e.chunks.List()
-	if err != nil {
-		return nil, err
-	}
-
-	candidates := e.selectChunks(metas, q)
-
-	var results []chunk.Record
-	for _, meta := range candidates {
+// Search returns an iterator over records matching the query, ordered by ingest timestamp.
+// The iterator yields (record, nil) for each match, or (zero, err) on error.
+// After yielding an error, iteration stops.
+func (e *Engine) Search(ctx context.Context, q Query) iter.Seq2[chunk.Record, error] {
+	return func(yield func(chunk.Record, error) bool) {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			yield(chunk.Record{}, err)
+			return
 		}
 
-		remaining := 0
-		if q.Limit > 0 {
-			remaining = q.Limit - len(results)
-			if remaining <= 0 {
-				break
+		metas, err := e.chunks.List()
+		if err != nil {
+			yield(chunk.Record{}, err)
+			return
+		}
+
+		candidates := e.selectChunks(metas, q)
+
+		count := 0
+		for _, meta := range candidates {
+			if err := ctx.Err(); err != nil {
+				yield(chunk.Record{}, err)
+				return
+			}
+
+			for rec, err := range e.searchChunk(ctx, q, meta) {
+				if err != nil {
+					yield(chunk.Record{}, err)
+					return
+				}
+
+				if !yield(rec, nil) {
+					return
+				}
+
+				count++
+				if q.Limit > 0 && count >= q.Limit {
+					return
+				}
 			}
 		}
-
-		found, err := e.searchChunk(q, meta, remaining)
-		if err != nil {
-			return nil, err
-		}
-		results = append(results, found...)
 	}
-
-	return results, nil
 }
 
 // selectChunks filters to chunks that overlap the query time range,
@@ -97,126 +105,153 @@ func (e *Engine) selectChunks(metas []chunk.ChunkMeta, q Query) []chunk.ChunkMet
 	return out
 }
 
-// searchChunk scans a single chunk using indexes and a cursor.
-// limit is the max records to return (0 = unlimited).
+// searchChunk returns an iterator over records in a single chunk.
 // Unsealed chunks are scanned sequentially without indexes.
-func (e *Engine) searchChunk(q Query, meta chunk.ChunkMeta, limit int) ([]chunk.Record, error) {
-	cursor, err := e.chunks.OpenCursor(meta.ID)
-	if err != nil {
-		return nil, err
-	}
-	defer cursor.Close()
-
-	if !meta.Sealed {
-		return e.scanSequential(cursor, q, limit)
-	}
-
-	// Source filter: if set, get positions from source index.
-	var sourcePositions []uint64
-	if q.Source != nil {
-		srcIdx, err := e.indexes.OpenSourceIndex(meta.ID)
+func (e *Engine) searchChunk(ctx context.Context, q Query, meta chunk.ChunkMeta) iter.Seq2[chunk.Record, error] {
+	return func(yield func(chunk.Record, error) bool) {
+		cursor, err := e.chunks.OpenCursor(meta.ID)
 		if err != nil {
-			return nil, err
+			yield(chunk.Record{}, err)
+			return
 		}
-		reader := index.NewSourceIndexReader(meta.ID, srcIdx.Entries())
-		positions, found := reader.Lookup(*q.Source)
-		if !found {
-			return nil, nil // source not in this chunk
-		}
-		sourcePositions = positions
-	}
+		defer cursor.Close()
 
-	// Time index: find start position.
-	var seekRef chunk.RecordRef
-	var hasSeek bool
-	if !q.Start.IsZero() {
-		timeIdx, err := e.indexes.OpenTimeIndex(meta.ID)
-		if err != nil {
-			return nil, err
+		if !meta.Sealed {
+			for rec, err := range e.scanSequential(cursor, q) {
+				if err != nil {
+					yield(chunk.Record{}, err)
+					return
+				}
+				if !yield(rec, nil) {
+					return
+				}
+			}
+			return
 		}
-		reader := index.NewTimeIndexReader(meta.ID, timeIdx.Entries())
-		seekRef, hasSeek = reader.FindStart(q.Start)
-	}
 
-	if hasSeek {
-		if err := cursor.Seek(seekRef); err != nil {
-			return nil, err
+		// Source filter: if set, get positions from source index.
+		var sourcePositions []uint64
+		if q.Source != nil {
+			srcIdx, err := e.indexes.OpenSourceIndex(meta.ID)
+			if err != nil {
+				yield(chunk.Record{}, err)
+				return
+			}
+			reader := index.NewSourceIndexReader(meta.ID, srcIdx.Entries())
+			positions, found := reader.Lookup(*q.Source)
+			if !found {
+				return // source not in this chunk
+			}
+			sourcePositions = positions
+		}
+
+		// Time index: find start position.
+		var seekRef chunk.RecordRef
+		var hasSeek bool
+		if !q.Start.IsZero() {
+			timeIdx, err := e.indexes.OpenTimeIndex(meta.ID)
+			if err != nil {
+				yield(chunk.Record{}, err)
+				return
+			}
+			reader := index.NewTimeIndexReader(meta.ID, timeIdx.Entries())
+			seekRef, hasSeek = reader.FindStart(q.Start)
+		}
+
+		if hasSeek {
+			if err := cursor.Seek(seekRef); err != nil {
+				yield(chunk.Record{}, err)
+				return
+			}
+		}
+
+		var scanner iter.Seq2[chunk.Record, error]
+		if q.Source != nil {
+			scanner = e.scanByPositions(cursor, q, meta.ID, seekRef, hasSeek, sourcePositions)
+		} else {
+			scanner = e.scanSequential(cursor, q)
+		}
+
+		for rec, err := range scanner {
+			if err != nil {
+				yield(chunk.Record{}, err)
+				return
+			}
+			if !yield(rec, nil) {
+				return
+			}
 		}
 	}
-
-	if q.Source != nil {
-		return e.scanByPositions(cursor, q, meta.ID, seekRef, hasSeek, sourcePositions, limit)
-	}
-	return e.scanSequential(cursor, q, limit)
 }
 
 // scanSequential reads records sequentially from the cursor, applying all filters.
-func (e *Engine) scanSequential(cursor chunk.RecordCursor, q Query, limit int) ([]chunk.Record, error) {
-	var results []chunk.Record
-	for {
-		rec, _, err := cursor.Next()
-		if errors.Is(err, chunk.ErrNoMoreRecords) {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
+func (e *Engine) scanSequential(cursor chunk.RecordCursor, q Query) iter.Seq2[chunk.Record, error] {
+	return func(yield func(chunk.Record, error) bool) {
+		for {
+			rec, _, err := cursor.Next()
+			if errors.Is(err, chunk.ErrNoMoreRecords) {
+				return
+			}
+			if err != nil {
+				yield(chunk.Record{}, err)
+				return
+			}
 
-		if !q.Start.IsZero() && rec.IngestTS.Before(q.Start) {
-			continue
-		}
-		if !q.End.IsZero() && !rec.IngestTS.Before(q.End) {
-			break
-		}
-		if q.Source != nil && rec.SourceID != *q.Source {
-			continue
-		}
+			if !q.Start.IsZero() && rec.IngestTS.Before(q.Start) {
+				continue
+			}
+			if !q.End.IsZero() && !rec.IngestTS.Before(q.End) {
+				return
+			}
+			if q.Source != nil && rec.SourceID != *q.Source {
+				continue
+			}
 
-		results = append(results, rec)
-		if limit > 0 && len(results) >= limit {
-			break
+			if !yield(rec, nil) {
+				return
+			}
 		}
 	}
-	return results, nil
 }
 
 // scanByPositions seeks to specific positions from the source index,
 // applying time filters to each record.
-func (e *Engine) scanByPositions(cursor chunk.RecordCursor, q Query, chunkID chunk.ChunkID, seekRef chunk.RecordRef, hasSeek bool, positions []uint64, limit int) ([]chunk.Record, error) {
-	// Filter positions to those at or after the time index start position.
-	startIdx := 0
-	if hasSeek {
-		startIdx = sort.Search(len(positions), func(i int) bool {
-			return positions[i] >= seekRef.Pos
-		})
+func (e *Engine) scanByPositions(cursor chunk.RecordCursor, q Query, chunkID chunk.ChunkID, seekRef chunk.RecordRef, hasSeek bool, positions []uint64) iter.Seq2[chunk.Record, error] {
+	return func(yield func(chunk.Record, error) bool) {
+		// Filter positions to those at or after the time index start position.
+		startIdx := 0
+		if hasSeek {
+			startIdx = sort.Search(len(positions), func(i int) bool {
+				return positions[i] >= seekRef.Pos
+			})
+		}
+
+		for _, pos := range positions[startIdx:] {
+			ref := chunk.RecordRef{ChunkID: chunkID, Pos: pos}
+			if err := cursor.Seek(ref); err != nil {
+				yield(chunk.Record{}, err)
+				return
+			}
+
+			rec, _, err := cursor.Next()
+			if errors.Is(err, chunk.ErrNoMoreRecords) {
+				return
+			}
+			if err != nil {
+				yield(chunk.Record{}, err)
+				return
+			}
+
+			if !q.Start.IsZero() && rec.IngestTS.Before(q.Start) {
+				continue
+			}
+			if !q.End.IsZero() && !rec.IngestTS.Before(q.End) {
+				return
+			}
+
+			if !yield(rec, nil) {
+				return
+			}
+		}
 	}
-
-	var results []chunk.Record
-	for _, pos := range positions[startIdx:] {
-		ref := chunk.RecordRef{ChunkID: chunkID, Pos: pos}
-		if err := cursor.Seek(ref); err != nil {
-			return nil, err
-		}
-
-		rec, _, err := cursor.Next()
-		if errors.Is(err, chunk.ErrNoMoreRecords) {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-
-		if !q.Start.IsZero() && rec.IngestTS.Before(q.Start) {
-			continue
-		}
-		if !q.End.IsZero() && !rec.IngestTS.Before(q.End) {
-			break
-		}
-
-		results = append(results, rec)
-		if limit > 0 && len(results) >= limit {
-			break
-		}
-	}
-	return results, nil
 }

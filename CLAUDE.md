@@ -108,7 +108,7 @@ Use the **memory-based managers** (`chunk/memory` and `index/memory`) for integr
 cm, _ := chunkmem.NewManager(chunkmem.Config{MaxChunkBytes: 1 << 20})
 timeIdx := memtime.NewIndexer(cm, 1)   // sparsity 1 = index every record
 srcIdx := memsource.NewIndexer(cm)
-im := indexmem.NewManager([]index.Indexer{timeIdx, srcIdx}, timeIdx, srcIdx)
+im := indexmem.NewManager([]index.Indexer{timeIdx, srcIdx}, timeIdx, srcIdx, nil)
 ```
 
 Append records, seal chunks, then pass `cm` and `im` to the code under test. See `query/query_test.go` for an example.
