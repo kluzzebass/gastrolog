@@ -131,6 +131,19 @@ func (e *Engine) searchChunk(ctx context.Context, q Query, meta chunk.ChunkMeta)
 			return
 		}
 
+		// Time index: find start position first to prune posting lists.
+		var seekRef chunk.RecordRef
+		var hasSeek bool
+		if !q.Start.IsZero() {
+			timeIdx, err := e.indexes.OpenTimeIndex(meta.ID)
+			if err != nil {
+				yield(chunk.Record{}, err)
+				return
+			}
+			reader := index.NewTimeIndexReader(meta.ID, timeIdx.Entries())
+			seekRef, hasSeek = reader.FindStart(q.Start)
+		}
+
 		// Token filter: if set, get positions from token index and intersect.
 		var tokenPositions []uint64
 		var hasTokenFilter bool
@@ -148,6 +161,13 @@ func (e *Engine) searchChunk(ctx context.Context, q Query, meta chunk.ChunkMeta)
 				positions, found := reader.Lookup(tok)
 				if !found {
 					return // token not in this chunk, no matches possible
+				}
+				// Prune positions before time start.
+				if hasSeek {
+					positions = prunePositions(positions, seekRef.Pos)
+					if len(positions) == 0 {
+						return // no positions after time start
+					}
 				}
 				if i == 0 {
 					tokenPositions = positions
@@ -176,6 +196,10 @@ func (e *Engine) searchChunk(ctx context.Context, q Query, meta chunk.ChunkMeta)
 			for _, src := range q.Sources {
 				positions, found := reader.Lookup(src)
 				if found {
+					// Prune positions before time start.
+					if hasSeek {
+						positions = prunePositions(positions, seekRef.Pos)
+					}
 					sourcePositions = unionPositions(sourcePositions, positions)
 				}
 			}
@@ -198,19 +222,6 @@ func (e *Engine) searchChunk(ctx context.Context, q Query, meta chunk.ChunkMeta)
 			finalPositions = sourcePositions
 		}
 
-		// Time index: find start position.
-		var seekRef chunk.RecordRef
-		var hasSeek bool
-		if !q.Start.IsZero() {
-			timeIdx, err := e.indexes.OpenTimeIndex(meta.ID)
-			if err != nil {
-				yield(chunk.Record{}, err)
-				return
-			}
-			reader := index.NewTimeIndexReader(meta.ID, timeIdx.Entries())
-			seekRef, hasSeek = reader.FindStart(q.Start)
-		}
-
 		if hasSeek {
 			if err := cursor.Seek(seekRef); err != nil {
 				yield(chunk.Record{}, err)
@@ -220,7 +231,7 @@ func (e *Engine) searchChunk(ctx context.Context, q Query, meta chunk.ChunkMeta)
 
 		var scanner iter.Seq2[chunk.Record, error]
 		if hasPositionFilter {
-			scanner = e.scanByPositions(cursor, q, meta.ID, seekRef, hasSeek, finalPositions)
+			scanner = e.scanByPositions(cursor, q, meta.ID, finalPositions)
 		} else {
 			scanner = e.scanSequential(cursor, q)
 		}
@@ -235,6 +246,14 @@ func (e *Engine) searchChunk(ctx context.Context, q Query, meta chunk.ChunkMeta)
 			}
 		}
 	}
+}
+
+// prunePositions returns positions >= minPos from a sorted slice.
+func prunePositions(positions []uint64, minPos uint64) []uint64 {
+	idx := sort.Search(len(positions), func(i int) bool {
+		return positions[i] >= minPos
+	})
+	return positions[idx:]
 }
 
 // intersectPositions returns positions present in both sorted slices.
@@ -328,19 +347,11 @@ func (e *Engine) scanSequential(cursor chunk.RecordCursor, q Query) iter.Seq2[ch
 	}
 }
 
-// scanByPositions seeks to specific positions from the source index,
-// applying time filters to each record.
-func (e *Engine) scanByPositions(cursor chunk.RecordCursor, q Query, chunkID chunk.ChunkID, seekRef chunk.RecordRef, hasSeek bool, positions []uint64) iter.Seq2[chunk.Record, error] {
+// scanByPositions seeks to specific positions, applying time filters to each record.
+// Positions are assumed to already be pruned to >= time start.
+func (e *Engine) scanByPositions(cursor chunk.RecordCursor, q Query, chunkID chunk.ChunkID, positions []uint64) iter.Seq2[chunk.Record, error] {
 	return func(yield func(chunk.Record, error) bool) {
-		// Filter positions to those at or after the time index start position.
-		startIdx := 0
-		if hasSeek {
-			startIdx = sort.Search(len(positions), func(i int) bool {
-				return positions[i] >= seekRef.Pos
-			})
-		}
-
-		for _, pos := range positions[startIdx:] {
+		for _, pos := range positions {
 			ref := chunk.RecordRef{ChunkID: chunkID, Pos: pos}
 			if err := cursor.Seek(ref); err != nil {
 				yield(chunk.Record{}, err)
