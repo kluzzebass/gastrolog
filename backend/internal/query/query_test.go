@@ -17,10 +17,10 @@ import (
 )
 
 // collect gathers all records from the iterator, returning the first error encountered.
-func collect(it func(yield func(chunk.Record, error) bool)) ([]chunk.Record, error) {
+func collect(seq func(yield func(chunk.Record, error) bool)) ([]chunk.Record, error) {
 	var results []chunk.Record
 	var firstErr error
-	for rec, err := range it {
+	for rec, err := range seq {
 		if err != nil {
 			firstErr = err
 			break
@@ -28,6 +28,12 @@ func collect(it func(yield func(chunk.Record, error) bool)) ([]chunk.Record, err
 		results = append(results, rec)
 	}
 	return results, firstErr
+}
+
+// search is a helper that calls Search with nil resume and returns just the iterator.
+func search(eng *query.Engine, ctx context.Context, q query.Query) func(yield func(chunk.Record, error) bool) {
+	seq, _ := eng.Search(ctx, q, nil)
+	return seq
 }
 
 // buildIndexes builds indexes for all sealed chunks.
@@ -173,7 +179,7 @@ func setupWithActive(t *testing.T, sealed [][]chunk.Record, active []chunk.Recor
 func TestSearchNoChunks(t *testing.T) {
 	eng := setup(t)
 
-	results, err := collect(eng.Search(context.Background(), query.Query{}))
+	results, err := collect(search(eng, context.Background(), query.Query{}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -191,7 +197,7 @@ func TestSearchActiveChunkNoFilters(t *testing.T) {
 
 	eng := setupWithActive(t, nil, active)
 
-	results, err := collect(eng.Search(context.Background(), query.Query{}))
+	results, err := collect(search(eng, context.Background(), query.Query{}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -215,7 +221,7 @@ func TestSearchActiveChunkWithTimeFilter(t *testing.T) {
 
 	eng := setupWithActive(t, nil, active)
 
-	results, err := collect(eng.Search(context.Background(), query.Query{Start: t2, End: t4}))
+	results, err := collect(search(eng, context.Background(), query.Query{Start: t2, End: t4}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -239,7 +245,7 @@ func TestSearchActiveChunkWithSourceFilter(t *testing.T) {
 
 	eng := setupWithActive(t, nil, active)
 
-	results, err := collect(eng.Search(context.Background(), query.Query{Sources: []chunk.SourceID{srcA}}))
+	results, err := collect(search(eng, context.Background(), query.Query{Sources: []chunk.SourceID{srcA}}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -266,7 +272,7 @@ func TestSearchSealedAndActiveChunks(t *testing.T) {
 
 	eng := setupWithActive(t, [][]chunk.Record{sealed}, active)
 
-	results, err := collect(eng.Search(context.Background(), query.Query{}))
+	results, err := collect(search(eng, context.Background(), query.Query{}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -290,7 +296,7 @@ func TestSearchSingleChunkNoFilters(t *testing.T) {
 
 	eng := setup(t, records)
 
-	results, err := collect(eng.Search(context.Background(), query.Query{}))
+	results, err := collect(search(eng, context.Background(), query.Query{}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -315,7 +321,7 @@ func TestSearchTimeRangeFilter(t *testing.T) {
 	eng := setup(t, records)
 
 	// Start=t2, End=t4 → records at t2 and t3
-	results, err := collect(eng.Search(context.Background(), query.Query{Start: t2, End: t4}))
+	results, err := collect(search(eng, context.Background(), query.Query{Start: t2, End: t4}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -340,7 +346,7 @@ func TestSearchSourceFilter(t *testing.T) {
 
 	eng := setup(t, records)
 
-	results, err := collect(eng.Search(context.Background(), query.Query{Sources: []chunk.SourceID{srcA}}))
+	results, err := collect(search(eng, context.Background(), query.Query{Sources: []chunk.SourceID{srcA}}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -367,7 +373,7 @@ func TestSearchCombinedTimeAndSource(t *testing.T) {
 	eng := setup(t, records)
 
 	// Source A, time [t2, t5) → a2 (t3) and a3 (t4)
-	results, err := collect(eng.Search(context.Background(), query.Query{
+	results, err := collect(search(eng, context.Background(), query.Query{
 		Start:   t2,
 		End:     t5,
 		Sources: []chunk.SourceID{srcA},
@@ -396,7 +402,7 @@ func TestSearchLimit(t *testing.T) {
 
 	eng := setup(t, records)
 
-	results, err := collect(eng.Search(context.Background(), query.Query{Limit: 2}))
+	results, err := collect(search(eng, context.Background(), query.Query{Limit: 2}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -423,7 +429,7 @@ func TestSearchMultiChunkMerge(t *testing.T) {
 
 	eng := setup(t, batch1, batch2)
 
-	results, err := collect(eng.Search(context.Background(), query.Query{}))
+	results, err := collect(search(eng, context.Background(), query.Query{}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -451,7 +457,7 @@ func TestSearchMultiChunkLimit(t *testing.T) {
 	eng := setup(t, batch1, batch2)
 
 	// Limit 3 across 2 chunks (2 + 1)
-	results, err := collect(eng.Search(context.Background(), query.Query{Limit: 3}))
+	results, err := collect(search(eng, context.Background(), query.Query{Limit: 3}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -476,7 +482,7 @@ func TestSearchContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := collect(eng.Search(ctx, query.Query{}))
+	_, err := collect(search(eng, ctx, query.Query{}))
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
@@ -496,7 +502,7 @@ func TestSearchSkipsNonOverlappingChunks(t *testing.T) {
 	eng := setup(t, early, mid, late)
 
 	// Query [t1, t4) — only "mid" chunk overlaps
-	results, err := collect(eng.Search(context.Background(), query.Query{Start: t1, End: t4}))
+	results, err := collect(search(eng, context.Background(), query.Query{Start: t1, End: t4}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -517,7 +523,7 @@ func TestSearchSourceNotInChunk(t *testing.T) {
 	eng := setup(t, records)
 
 	// srcB is not in this chunk
-	results, err := collect(eng.Search(context.Background(), query.Query{Sources: []chunk.SourceID{srcB}}))
+	results, err := collect(search(eng, context.Background(), query.Query{Sources: []chunk.SourceID{srcB}}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -538,7 +544,7 @@ func TestSearchEarlyBreak(t *testing.T) {
 
 	// Consume only the first 2 records by breaking early.
 	var results []chunk.Record
-	for rec, err := range eng.Search(context.Background(), query.Query{}) {
+	for rec, err := range search(eng, context.Background(), query.Query{}) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -575,7 +581,7 @@ func TestSearchContextCancelledMidIteration(t *testing.T) {
 
 	var results []chunk.Record
 	var gotErr error
-	for rec, err := range eng.Search(ctx, query.Query{}) {
+	for rec, err := range search(eng, ctx, query.Query{}) {
 		if err != nil {
 			gotErr = err
 			break
@@ -606,7 +612,7 @@ func TestSearchStartOnlyFilter(t *testing.T) {
 	eng := setup(t, records)
 
 	// Start=t3, no End → records at t3 and t4
-	results, err := collect(eng.Search(context.Background(), query.Query{Start: t3}))
+	results, err := collect(search(eng, context.Background(), query.Query{Start: t3}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -632,7 +638,7 @@ func TestSearchEndOnlyFilter(t *testing.T) {
 	eng := setup(t, records)
 
 	// No Start, End=t3 → records at t1 and t2
-	results, err := collect(eng.Search(context.Background(), query.Query{End: t3}))
+	results, err := collect(search(eng, context.Background(), query.Query{End: t3}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -659,7 +665,7 @@ func TestSearchLimitWithSourceFilter(t *testing.T) {
 	eng := setup(t, records)
 
 	// Source A has 3 records, limit to 2
-	results, err := collect(eng.Search(context.Background(), query.Query{Sources: []chunk.SourceID{srcA}, Limit: 2}))
+	results, err := collect(search(eng, context.Background(), query.Query{Sources: []chunk.SourceID{srcA}, Limit: 2}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -686,7 +692,7 @@ func TestSearchLimitWithTimeFilter(t *testing.T) {
 	eng := setup(t, records)
 
 	// Time range [t2, t5) has 3 records, limit to 2
-	results, err := collect(eng.Search(context.Background(), query.Query{Start: t2, End: t5, Limit: 2}))
+	results, err := collect(search(eng, context.Background(), query.Query{Start: t2, End: t5, Limit: 2}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -711,7 +717,7 @@ func TestSearchActiveChunkWithLimit(t *testing.T) {
 
 	eng := setupWithActive(t, nil, active)
 
-	results, err := collect(eng.Search(context.Background(), query.Query{Limit: 2}))
+	results, err := collect(search(eng, context.Background(), query.Query{Limit: 2}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -738,7 +744,7 @@ func TestSearchMultiSourceFilter(t *testing.T) {
 	eng := setup(t, records)
 
 	// Search for records from srcA OR srcC
-	results, err := collect(eng.Search(context.Background(), query.Query{
+	results, err := collect(search(eng, context.Background(), query.Query{
 		Sources: []chunk.SourceID{srcA, srcC},
 	}))
 	if err != nil {
@@ -769,7 +775,7 @@ func TestSearchMultiSourceActiveChunk(t *testing.T) {
 	eng := setupWithActive(t, nil, active)
 
 	// Multi-source filter on active chunk
-	results, err := collect(eng.Search(context.Background(), query.Query{
+	results, err := collect(search(eng, context.Background(), query.Query{
 		Sources: []chunk.SourceID{srcA, srcC},
 	}))
 	if err != nil {
@@ -798,7 +804,7 @@ func TestSearchMultiSourceWithTokens(t *testing.T) {
 	eng := setup(t, records)
 
 	// Search for "error" from srcA OR srcC
-	results, err := collect(eng.Search(context.Background(), query.Query{
+	results, err := collect(search(eng, context.Background(), query.Query{
 		Tokens:  []string{"error"},
 		Sources: []chunk.SourceID{srcA, srcC},
 	}))
@@ -827,7 +833,7 @@ func TestSearchTokenFilter(t *testing.T) {
 	eng := setup(t, records)
 
 	// Search for "error" - should match records 1 and 3
-	results, err := collect(eng.Search(context.Background(), query.Query{Tokens: []string{"error"}}))
+	results, err := collect(search(eng, context.Background(), query.Query{Tokens: []string{"error"}}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -853,7 +859,7 @@ func TestSearchMultiTokenFilter(t *testing.T) {
 	eng := setup(t, records)
 
 	// Search for "error" AND "connecting" - only record 1 matches
-	results, err := collect(eng.Search(context.Background(), query.Query{Tokens: []string{"error", "connecting"}}))
+	results, err := collect(search(eng, context.Background(), query.Query{Tokens: []string{"error", "connecting"}}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -873,7 +879,7 @@ func TestSearchTokenNotFound(t *testing.T) {
 
 	eng := setup(t, records)
 
-	results, err := collect(eng.Search(context.Background(), query.Query{Tokens: []string{"notfound"}}))
+	results, err := collect(search(eng, context.Background(), query.Query{Tokens: []string{"notfound"}}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -892,7 +898,7 @@ func TestSearchTokenWithSourceFilter(t *testing.T) {
 	eng := setup(t, records)
 
 	// Search for "error" from srcA only
-	results, err := collect(eng.Search(context.Background(), query.Query{
+	results, err := collect(search(eng, context.Background(), query.Query{
 		Tokens:  []string{"error"},
 		Sources: []chunk.SourceID{srcA},
 	}))
@@ -918,7 +924,7 @@ func TestSearchTokenWithTimeFilter(t *testing.T) {
 	eng := setup(t, records)
 
 	// Search for "error" in time range [t2, t4)
-	results, err := collect(eng.Search(context.Background(), query.Query{
+	results, err := collect(search(eng, context.Background(), query.Query{
 		Tokens: []string{"error"},
 		Start:  t2,
 		End:    t4,
@@ -947,7 +953,7 @@ func TestSearchTokenActiveChunk(t *testing.T) {
 	eng := setupWithActive(t, nil, active)
 
 	// Token search on active chunk uses on-the-fly tokenization
-	results, err := collect(eng.Search(context.Background(), query.Query{Tokens: []string{"error"}}))
+	results, err := collect(search(eng, context.Background(), query.Query{Tokens: []string{"error"}}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -976,7 +982,7 @@ func TestSearchTokenSealedNoMatchActiveMatch(t *testing.T) {
 
 	eng := setupWithActive(t, [][]chunk.Record{sealed}, active)
 
-	results, err := collect(eng.Search(context.Background(), query.Query{Tokens: []string{"error"}}))
+	results, err := collect(search(eng, context.Background(), query.Query{Tokens: []string{"error"}}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1002,7 +1008,7 @@ func TestSearchTokenAndSourceSealedNoMatchActiveMatch(t *testing.T) {
 	eng := setupWithActive(t, [][]chunk.Record{sealed}, active)
 
 	// Search for "error" from srcA - only active chunk matches
-	results, err := collect(eng.Search(context.Background(), query.Query{
+	results, err := collect(search(eng, context.Background(), query.Query{
 		Tokens:  []string{"error"},
 		Sources: []chunk.SourceID{srcA},
 	}))
@@ -1027,7 +1033,7 @@ func TestSearchTokenWithLimit(t *testing.T) {
 
 	eng := setup(t, records)
 
-	results, err := collect(eng.Search(context.Background(), query.Query{
+	results, err := collect(search(eng, context.Background(), query.Query{
 		Tokens: []string{"error"},
 		Limit:  2,
 	}))
@@ -1055,11 +1061,689 @@ func TestSearchTokenCaseInsensitive(t *testing.T) {
 	eng := setup(t, records)
 
 	// All should match since tokenizer lowercases
-	results, err := collect(eng.Search(context.Background(), query.Query{Tokens: []string{"error"}}))
+	results, err := collect(search(eng, context.Background(), query.Query{Tokens: []string{"error"}}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(results) != 3 {
 		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+}
+
+func TestSearchPaginationWithLimit(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+	}
+
+	eng := setup(t, records)
+
+	// First page: limit 2
+	seq1, nextToken1 := eng.Search(context.Background(), query.Query{Limit: 2}, nil)
+	results1, err := collect(seq1)
+	if err != nil {
+		t.Fatalf("page 1: unexpected error: %v", err)
+	}
+	if len(results1) != 2 {
+		t.Fatalf("page 1: expected 2 results, got %d", len(results1))
+	}
+	if string(results1[0].Raw) != "one" || string(results1[1].Raw) != "two" {
+		t.Errorf("page 1: got %q, %q", results1[0].Raw, results1[1].Raw)
+	}
+
+	token := nextToken1()
+	if token == nil {
+		t.Fatal("expected resume token after page 1")
+	}
+
+	// Second page: resume with same limit
+	seq2, nextToken2 := eng.Search(context.Background(), query.Query{Limit: 2}, token)
+	results2, err := collect(seq2)
+	if err != nil {
+		t.Fatalf("page 2: unexpected error: %v", err)
+	}
+	if len(results2) != 2 {
+		t.Fatalf("page 2: expected 2 results, got %d", len(results2))
+	}
+	if string(results2[0].Raw) != "three" || string(results2[1].Raw) != "four" {
+		t.Errorf("page 2: got %q, %q", results2[0].Raw, results2[1].Raw)
+	}
+
+	// Token is returned because limit was hit (we don't know if more records exist).
+	// Try to resume - should get 0 results and nil token.
+	token = nextToken2()
+	if token == nil {
+		t.Fatal("expected token after hitting limit")
+	}
+
+	// Third page: should be empty
+	seq3, nextToken3 := eng.Search(context.Background(), query.Query{Limit: 2}, token)
+	results3, err := collect(seq3)
+	if err != nil {
+		t.Fatalf("page 3: unexpected error: %v", err)
+	}
+	if len(results3) != 0 {
+		t.Fatalf("page 3: expected 0 results, got %d", len(results3))
+	}
+
+	token = nextToken3()
+	if token != nil {
+		t.Errorf("expected nil token after empty page, got %+v", token)
+	}
+}
+
+func TestSearchPaginationAcrossChunks(t *testing.T) {
+	batch1 := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("c1r1")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("c1r2")},
+	}
+	batch2 := []chunk.Record{
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("c2r1")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("c2r2")},
+	}
+
+	eng := setup(t, batch1, batch2)
+
+	// First page: limit 3 (spans both chunks)
+	seq1, nextToken1 := eng.Search(context.Background(), query.Query{Limit: 3}, nil)
+	results1, err := collect(seq1)
+	if err != nil {
+		t.Fatalf("page 1: unexpected error: %v", err)
+	}
+	if len(results1) != 3 {
+		t.Fatalf("page 1: expected 3 results, got %d", len(results1))
+	}
+	want := []string{"c1r1", "c1r2", "c2r1"}
+	for i, w := range want {
+		if string(results1[i].Raw) != w {
+			t.Errorf("page 1 result[%d]: got %q, want %q", i, results1[i].Raw, w)
+		}
+	}
+
+	token := nextToken1()
+	if token == nil {
+		t.Fatal("expected resume token after page 1")
+	}
+
+	// Second page: resume, should get remaining record
+	seq2, nextToken2 := eng.Search(context.Background(), query.Query{Limit: 3}, token)
+	results2, err := collect(seq2)
+	if err != nil {
+		t.Fatalf("page 2: unexpected error: %v", err)
+	}
+	if len(results2) != 1 {
+		t.Fatalf("page 2: expected 1 result, got %d", len(results2))
+	}
+	if string(results2[0].Raw) != "c2r2" {
+		t.Errorf("page 2: got %q, want %q", results2[0].Raw, "c2r2")
+	}
+
+	// Iteration completed fully (got fewer than limit), so nil token.
+	token = nextToken2()
+	if token != nil {
+		t.Errorf("expected nil token after last page, got %+v", token)
+	}
+}
+
+func TestSearchPaginationWithEarlyBreak(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+	}
+
+	eng := setup(t, records)
+
+	// Break after 2 records (no limit set)
+	seq1, nextToken1 := eng.Search(context.Background(), query.Query{}, nil)
+	var results1 []chunk.Record
+	for rec, err := range seq1 {
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		results1 = append(results1, rec)
+		if len(results1) == 2 {
+			break
+		}
+	}
+
+	if len(results1) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results1))
+	}
+
+	token := nextToken1()
+	if token == nil {
+		t.Fatal("expected resume token after early break")
+	}
+
+	// Resume from where we left off
+	seq2, nextToken2 := eng.Search(context.Background(), query.Query{}, token)
+	results2, err := collect(seq2)
+	if err != nil {
+		t.Fatalf("page 2: unexpected error: %v", err)
+	}
+	if len(results2) != 2 {
+		t.Fatalf("page 2: expected 2 results, got %d", len(results2))
+	}
+	if string(results2[0].Raw) != "three" || string(results2[1].Raw) != "four" {
+		t.Errorf("page 2: got %q, %q", results2[0].Raw, results2[1].Raw)
+	}
+
+	token = nextToken2()
+	if token != nil {
+		t.Errorf("expected nil token after completion, got %+v", token)
+	}
+}
+
+func TestSearchPaginationActiveChunk(t *testing.T) {
+	active := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
+	}
+
+	eng := setupWithActive(t, nil, active)
+
+	// First page
+	seq1, nextToken1 := eng.Search(context.Background(), query.Query{Limit: 2}, nil)
+	results1, err := collect(seq1)
+	if err != nil {
+		t.Fatalf("page 1: unexpected error: %v", err)
+	}
+	if len(results1) != 2 {
+		t.Fatalf("page 1: expected 2 results, got %d", len(results1))
+	}
+
+	token := nextToken1()
+	if token == nil {
+		t.Fatal("expected resume token after page 1")
+	}
+
+	// Second page
+	seq2, nextToken2 := eng.Search(context.Background(), query.Query{Limit: 2}, token)
+	results2, err := collect(seq2)
+	if err != nil {
+		t.Fatalf("page 2: unexpected error: %v", err)
+	}
+	if len(results2) != 1 {
+		t.Fatalf("page 2: expected 1 result, got %d", len(results2))
+	}
+	if string(results2[0].Raw) != "three" {
+		t.Errorf("page 2: got %q, want %q", results2[0].Raw, "three")
+	}
+
+	token = nextToken2()
+	if token != nil {
+		t.Errorf("expected nil token after last page, got %+v", token)
+	}
+}
+
+func TestSearchPaginationWithFilters(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("error one")},
+		{IngestTS: t2, SourceID: srcB, Raw: []byte("error two")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("error three")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("warning four")},
+		{IngestTS: t5, SourceID: srcA, Raw: []byte("error five")},
+	}
+
+	eng := setup(t, records)
+
+	// Search for "error" from srcA with pagination
+	q := query.Query{
+		Tokens:  []string{"error"},
+		Sources: []chunk.SourceID{srcA},
+		Limit:   2,
+	}
+
+	// First page: should get "error one" and "error three"
+	seq1, nextToken1 := eng.Search(context.Background(), q, nil)
+	results1, err := collect(seq1)
+	if err != nil {
+		t.Fatalf("page 1: unexpected error: %v", err)
+	}
+	if len(results1) != 2 {
+		t.Fatalf("page 1: expected 2 results, got %d", len(results1))
+	}
+	if string(results1[0].Raw) != "error one" || string(results1[1].Raw) != "error three" {
+		t.Errorf("page 1: got %q, %q", results1[0].Raw, results1[1].Raw)
+	}
+
+	token := nextToken1()
+	if token == nil {
+		t.Fatal("expected resume token after page 1")
+	}
+
+	// Second page: should get "error five"
+	seq2, nextToken2 := eng.Search(context.Background(), q, token)
+	results2, err := collect(seq2)
+	if err != nil {
+		t.Fatalf("page 2: unexpected error: %v", err)
+	}
+	if len(results2) != 1 {
+		t.Fatalf("page 2: expected 1 result, got %d", len(results2))
+	}
+	if string(results2[0].Raw) != "error five" {
+		t.Errorf("page 2: got %q, want %q", results2[0].Raw, "error five")
+	}
+
+	token = nextToken2()
+	if token != nil {
+		t.Errorf("expected nil token after last page, got %+v", token)
+	}
+}
+
+func TestSearchNoResultsNoToken(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("hello")},
+	}
+
+	eng := setup(t, records)
+
+	// Search for something that doesn't exist
+	seq, nextToken := eng.Search(context.Background(), query.Query{Tokens: []string{"notfound"}}, nil)
+	results, err := collect(seq)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results, got %d", len(results))
+	}
+
+	token := nextToken()
+	if token != nil {
+		t.Errorf("expected nil token for empty results, got %+v", token)
+	}
+}
+
+func TestSearchInvalidResumeToken(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("hello")},
+	}
+
+	eng := setup(t, records)
+
+	// Create a token with a non-existent chunk ID
+	badToken := &query.ResumeToken{
+		Next: chunk.RecordRef{
+			ChunkID: chunk.NewChunkID(), // random, doesn't exist
+			Pos:     0,
+		},
+	}
+
+	seq, _ := eng.Search(context.Background(), query.Query{}, badToken)
+	_, err := collect(seq)
+	if !errors.Is(err, query.ErrInvalidResumeToken) {
+		t.Fatalf("expected ErrInvalidResumeToken, got %v", err)
+	}
+}
+
+func TestSearchReverseOrder(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+	}
+
+	eng := setup(t, records)
+
+	// Reverse order: End < Start (t4 down to t1)
+	results, err := collect(search(eng, context.Background(), query.Query{Start: t5, End: t0}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 4 {
+		t.Fatalf("expected 4 results, got %d", len(results))
+	}
+	// Results should be newest first
+	want := []string{"four", "three", "two", "one"}
+	for i, w := range want {
+		if string(results[i].Raw) != w {
+			t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, w)
+		}
+	}
+}
+
+func TestSearchReverseOrderWithTimeFilter(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+	}
+
+	eng := setup(t, records)
+
+	// Reverse in range [t2, t4): should get three, two in that order
+	// In reverse: Start is upper bound (exclusive), End is lower bound (inclusive)
+	results, err := collect(search(eng, context.Background(), query.Query{Start: t4, End: t2}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if string(results[0].Raw) != "three" {
+		t.Errorf("result[0]: got %q, want %q", results[0].Raw, "three")
+	}
+	if string(results[1].Raw) != "two" {
+		t.Errorf("result[1]: got %q, want %q", results[1].Raw, "two")
+	}
+}
+
+func TestSearchReverseOrderWithSourceFilter(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("a1")},
+		{IngestTS: t2, SourceID: srcB, Raw: []byte("b1")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("a2")},
+		{IngestTS: t4, SourceID: srcB, Raw: []byte("b2")},
+	}
+
+	eng := setup(t, records)
+
+	// Reverse order, source A only
+	results, err := collect(search(eng, context.Background(), query.Query{
+		Start:   t5,
+		End:     t0,
+		Sources: []chunk.SourceID{srcA},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if string(results[0].Raw) != "a2" {
+		t.Errorf("result[0]: got %q, want %q", results[0].Raw, "a2")
+	}
+	if string(results[1].Raw) != "a1" {
+		t.Errorf("result[1]: got %q, want %q", results[1].Raw, "a1")
+	}
+}
+
+func TestSearchReverseOrderWithTokenFilter(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("error early")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("info message")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("error middle")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("error late")},
+	}
+
+	eng := setup(t, records)
+
+	// Reverse order with token filter
+	results, err := collect(search(eng, context.Background(), query.Query{
+		Start:  t5,
+		End:    t0,
+		Tokens: []string{"error"},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+	want := []string{"error late", "error middle", "error early"}
+	for i, w := range want {
+		if string(results[i].Raw) != w {
+			t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, w)
+		}
+	}
+}
+
+func TestSearchReverseOrderWithLimit(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+	}
+
+	eng := setup(t, records)
+
+	// Reverse with limit
+	results, err := collect(search(eng, context.Background(), query.Query{
+		Start: t5,
+		End:   t0,
+		Limit: 2,
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if string(results[0].Raw) != "four" {
+		t.Errorf("result[0]: got %q, want %q", results[0].Raw, "four")
+	}
+	if string(results[1].Raw) != "three" {
+		t.Errorf("result[1]: got %q, want %q", results[1].Raw, "three")
+	}
+}
+
+func TestSearchReverseOrderActiveChunk(t *testing.T) {
+	active := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
+	}
+
+	eng := setupWithActive(t, nil, active)
+
+	// Reverse on active chunk
+	results, err := collect(search(eng, context.Background(), query.Query{Start: t4, End: t0}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+	want := []string{"three", "two", "one"}
+	for i, w := range want {
+		if string(results[i].Raw) != w {
+			t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, w)
+		}
+	}
+}
+
+func TestSearchReverseOrderMultiChunk(t *testing.T) {
+	batch1 := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("c1r1")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("c1r2")},
+	}
+	batch2 := []chunk.Record{
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("c2r1")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("c2r2")},
+	}
+
+	eng := setup(t, batch1, batch2)
+
+	// Reverse across multiple chunks
+	results, err := collect(search(eng, context.Background(), query.Query{Start: t5, End: t0}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 4 {
+		t.Fatalf("expected 4 results, got %d", len(results))
+	}
+	// Should process chunk2 first (newer), then chunk1
+	want := []string{"c2r2", "c2r1", "c1r2", "c1r1"}
+	for i, w := range want {
+		if string(results[i].Raw) != w {
+			t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, w)
+		}
+	}
+}
+
+func TestSearchReverseOrderPagination(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+	}
+
+	eng := setup(t, records)
+
+	// First page: reverse with limit 2
+	q := query.Query{Start: t5, End: t0, Limit: 2}
+	seq1, nextToken1 := eng.Search(context.Background(), q, nil)
+	results1, err := collect(seq1)
+	if err != nil {
+		t.Fatalf("page 1: unexpected error: %v", err)
+	}
+	if len(results1) != 2 {
+		t.Fatalf("page 1: expected 2 results, got %d", len(results1))
+	}
+	if string(results1[0].Raw) != "four" || string(results1[1].Raw) != "three" {
+		t.Errorf("page 1: got %q, %q", results1[0].Raw, results1[1].Raw)
+	}
+
+	token := nextToken1()
+	if token == nil {
+		t.Fatal("expected resume token after page 1")
+	}
+
+	// Second page
+	seq2, nextToken2 := eng.Search(context.Background(), q, token)
+	results2, err := collect(seq2)
+	if err != nil {
+		t.Fatalf("page 2: unexpected error: %v", err)
+	}
+	if len(results2) != 2 {
+		t.Fatalf("page 2: expected 2 results, got %d", len(results2))
+	}
+	if string(results2[0].Raw) != "two" || string(results2[1].Raw) != "one" {
+		t.Errorf("page 2: got %q, %q", results2[0].Raw, results2[1].Raw)
+	}
+
+	// Try to get more - should be empty
+	token = nextToken2()
+	if token == nil {
+		t.Fatal("expected token after hitting limit")
+	}
+
+	seq3, nextToken3 := eng.Search(context.Background(), q, token)
+	results3, err := collect(seq3)
+	if err != nil {
+		t.Fatalf("page 3: unexpected error: %v", err)
+	}
+	if len(results3) != 0 {
+		t.Fatalf("page 3: expected 0 results, got %d", len(results3))
+	}
+
+	token = nextToken3()
+	if token != nil {
+		t.Errorf("expected nil token after empty page, got %+v", token)
+	}
+}
+
+func TestSearchReverseOrderPaginationAcrossChunks(t *testing.T) {
+	batch1 := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("c1r1")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("c1r2")},
+	}
+	batch2 := []chunk.Record{
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("c2r1")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("c2r2")},
+	}
+
+	eng := setup(t, batch1, batch2)
+
+	// First page: limit 3, reverse
+	q := query.Query{Start: t5, End: t0, Limit: 3}
+	seq1, nextToken1 := eng.Search(context.Background(), q, nil)
+	results1, err := collect(seq1)
+	if err != nil {
+		t.Fatalf("page 1: unexpected error: %v", err)
+	}
+	if len(results1) != 3 {
+		t.Fatalf("page 1: expected 3 results, got %d", len(results1))
+	}
+	// c2r2, c2r1, c1r2
+	want := []string{"c2r2", "c2r1", "c1r2"}
+	for i, w := range want {
+		if string(results1[i].Raw) != w {
+			t.Errorf("page 1 result[%d]: got %q, want %q", i, results1[i].Raw, w)
+		}
+	}
+
+	token := nextToken1()
+	if token == nil {
+		t.Fatal("expected resume token after page 1")
+	}
+
+	// Second page: should get remaining record
+	seq2, nextToken2 := eng.Search(context.Background(), q, token)
+	results2, err := collect(seq2)
+	if err != nil {
+		t.Fatalf("page 2: unexpected error: %v", err)
+	}
+	if len(results2) != 1 {
+		t.Fatalf("page 2: expected 1 result, got %d", len(results2))
+	}
+	if string(results2[0].Raw) != "c1r1" {
+		t.Errorf("page 2: got %q, want %q", results2[0].Raw, "c1r1")
+	}
+
+	token = nextToken2()
+	if token != nil {
+		t.Errorf("expected nil token after last page, got %+v", token)
+	}
+}
+
+func TestQueryReverse(t *testing.T) {
+	// Test Query.Reverse() method
+	tests := []struct {
+		name    string
+		q       query.Query
+		reverse bool
+	}{
+		{"forward: both set, Start < End", query.Query{Start: t1, End: t3}, false},
+		{"reverse: both set, End < Start", query.Query{Start: t3, End: t1}, true},
+		{"forward: only Start set", query.Query{Start: t1}, false},
+		{"forward: only End set", query.Query{End: t3}, false},
+		{"forward: neither set", query.Query{}, false},
+		{"forward: equal times", query.Query{Start: t1, End: t1}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.q.Reverse(); got != tt.reverse {
+				t.Errorf("Query.Reverse() = %v, want %v", got, tt.reverse)
+			}
+		})
+	}
+}
+
+func TestQueryTimeBounds(t *testing.T) {
+	// Test Query.TimeBounds() method
+	tests := []struct {
+		name      string
+		q         query.Query
+		wantLower time.Time
+		wantUpper time.Time
+	}{
+		{"forward", query.Query{Start: t1, End: t3}, t1, t3},
+		{"reverse", query.Query{Start: t3, End: t1}, t1, t3},
+		{"only Start", query.Query{Start: t2}, t2, time.Time{}},
+		{"only End", query.Query{End: t2}, time.Time{}, t2},
+		{"neither", query.Query{}, time.Time{}, time.Time{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lower, upper := tt.q.TimeBounds()
+			if !lower.Equal(tt.wantLower) {
+				t.Errorf("TimeBounds() lower = %v, want %v", lower, tt.wantLower)
+			}
+			if !upper.Equal(tt.wantUpper) {
+				t.Errorf("TimeBounds() upper = %v, want %v", upper, tt.wantUpper)
+			}
+		})
 	}
 }
