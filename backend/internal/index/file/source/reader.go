@@ -1,8 +1,8 @@
 package source
 
 import (
-	"github.com/kluzzebass/gastrolog/internal/chunk"
-	"github.com/kluzzebass/gastrolog/internal/index"
+	"gastrolog/internal/chunk"
+	"gastrolog/internal/index"
 )
 
 // Open loads and validates a source index file, returning a reader for

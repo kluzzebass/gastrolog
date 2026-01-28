@@ -1,6 +1,6 @@
 package memory
 
-import "github.com/kluzzebass/gastrolog/internal/chunk"
+import "gastrolog/internal/chunk"
 
 type recordReader struct {
 	records  []chunk.Record

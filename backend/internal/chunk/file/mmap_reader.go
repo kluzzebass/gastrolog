@@ -7,7 +7,7 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
+	"gastrolog/internal/chunk"
 )
 
 var ErrMmapEmpty = errors.New("mmap file is empty")

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"sort"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
+	"gastrolog/internal/chunk"
 )
 
 // SourceIndexReader provides binary search lookup over a loaded source index.

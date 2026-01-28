@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
+	"gastrolog/internal/chunk"
 )
 
 func TestFileWriterReaderRoundTrip(t *testing.T) {

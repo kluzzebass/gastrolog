@@ -5,11 +5,11 @@ import (
 	"testing"
 	gotime "time"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
-	chunkmemory "github.com/kluzzebass/gastrolog/internal/chunk/memory"
-	"github.com/kluzzebass/gastrolog/internal/index"
-	memorysource "github.com/kluzzebass/gastrolog/internal/index/memory/source"
-	memorytime "github.com/kluzzebass/gastrolog/internal/index/memory/time"
+	"gastrolog/internal/chunk"
+	chunkmemory "gastrolog/internal/chunk/memory"
+	"gastrolog/internal/index"
+	memorysource "gastrolog/internal/index/memory/source"
+	memorytime "gastrolog/internal/index/memory/time"
 )
 
 func setupChunkManager(t *testing.T, records []chunk.Record) (chunk.ChunkManager, chunk.ChunkID) {

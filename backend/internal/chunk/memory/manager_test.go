@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
+	"gastrolog/internal/chunk"
 )
 
 func TestMemoryChunkManagerAppendSealOpenReader(t *testing.T) {

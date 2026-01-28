@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
-	"github.com/kluzzebass/gastrolog/internal/index"
+	"gastrolog/internal/chunk"
+	"gastrolog/internal/index"
 )
 
 func writeIndex(t *testing.T, dir string, chunkID chunk.ChunkID, entries []index.SourceIndexEntry) {

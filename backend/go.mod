@@ -1,4 +1,4 @@
-module github.com/kluzzebass/gastrolog
+module gastrolog
 
 go 1.25.5
 

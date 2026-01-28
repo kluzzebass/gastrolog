@@ -5,9 +5,9 @@ import (
 	"testing"
 	gotime "time"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
-	chunkmemory "github.com/kluzzebass/gastrolog/internal/chunk/memory"
-	"github.com/kluzzebass/gastrolog/internal/index"
+	"gastrolog/internal/chunk"
+	chunkmemory "gastrolog/internal/chunk/memory"
+	"gastrolog/internal/index"
 )
 
 func setupReaderTest(t *testing.T, records []chunk.Record, sparsity int) (*Indexer, chunk.ChunkID) {

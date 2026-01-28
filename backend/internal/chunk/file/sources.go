@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
-	"github.com/kluzzebass/gastrolog/internal/chunk"
+	"gastrolog/internal/chunk"
 )
 
 const (

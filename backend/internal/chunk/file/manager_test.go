@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
+	"gastrolog/internal/chunk"
 )
 
 func TestFileChunkManagerDirectoryLayout(t *testing.T) {

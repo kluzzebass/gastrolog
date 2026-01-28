@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
+	"gastrolog/internal/chunk"
 )
 
 type Reader struct {

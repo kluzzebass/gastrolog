@@ -7,9 +7,9 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
-	"github.com/kluzzebass/gastrolog/internal/index"
-	"github.com/kluzzebass/gastrolog/internal/index/token"
+	"gastrolog/internal/chunk"
+	"gastrolog/internal/index"
+	"gastrolog/internal/index/token"
 )
 
 // Indexer builds a token index for sealed chunks,

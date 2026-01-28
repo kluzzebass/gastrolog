@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
-	"github.com/kluzzebass/gastrolog/internal/index"
+	"gastrolog/internal/chunk"
+	"gastrolog/internal/index"
 )
 
 // Indexer builds a sparse time index for sealed chunks,

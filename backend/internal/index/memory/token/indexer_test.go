@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
-	chunkmemory "github.com/kluzzebass/gastrolog/internal/chunk/memory"
+	"gastrolog/internal/chunk"
+	chunkmemory "gastrolog/internal/chunk/memory"
 )
 
 func setupChunkManager(t *testing.T, records []chunk.Record) (chunk.ChunkManager, chunk.ChunkID) {

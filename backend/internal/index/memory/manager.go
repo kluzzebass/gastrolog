@@ -3,8 +3,8 @@ package memory
 import (
 	"context"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
-	"github.com/kluzzebass/gastrolog/internal/index"
+	"gastrolog/internal/chunk"
+	"gastrolog/internal/index"
 )
 
 type IndexStore[T any] interface {

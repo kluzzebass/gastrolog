@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
-	"github.com/kluzzebass/gastrolog/internal/index"
-	filesource "github.com/kluzzebass/gastrolog/internal/index/file/source"
-	filetime "github.com/kluzzebass/gastrolog/internal/index/file/time"
-	filetoken "github.com/kluzzebass/gastrolog/internal/index/file/token"
+	"gastrolog/internal/chunk"
+	"gastrolog/internal/index"
+	filesource "gastrolog/internal/index/file/source"
+	filetime "gastrolog/internal/index/file/time"
+	filetoken "gastrolog/internal/index/file/token"
 )
 
 type Manager struct {

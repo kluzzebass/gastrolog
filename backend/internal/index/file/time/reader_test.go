@@ -6,8 +6,8 @@ import (
 	"testing"
 	gotime "time"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
-	"github.com/kluzzebass/gastrolog/internal/index"
+	"gastrolog/internal/chunk"
+	"gastrolog/internal/index"
 )
 
 func writeIndex(t *testing.T, dir string, chunkID chunk.ChunkID, entries []index.TimeIndexEntry) {

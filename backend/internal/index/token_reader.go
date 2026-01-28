@@ -3,7 +3,7 @@ package index
 import (
 	"sort"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
+	"gastrolog/internal/chunk"
 )
 
 // TokenIndexReader provides binary search lookup over a loaded token index.

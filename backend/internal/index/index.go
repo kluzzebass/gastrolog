@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
+	"gastrolog/internal/chunk"
 )
 
 var ErrIndexNotFound = errors.New("index not found")

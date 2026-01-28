@@ -11,9 +11,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
-	"github.com/kluzzebass/gastrolog/internal/index"
-	"github.com/kluzzebass/gastrolog/internal/index/token"
+	"gastrolog/internal/chunk"
+	"gastrolog/internal/index"
+	"gastrolog/internal/index/token"
 )
 
 // Query describes what records to search for.

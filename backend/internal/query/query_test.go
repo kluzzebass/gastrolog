@@ -6,14 +6,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
-	chunkmem "github.com/kluzzebass/gastrolog/internal/chunk/memory"
-	"github.com/kluzzebass/gastrolog/internal/index"
-	indexmem "github.com/kluzzebass/gastrolog/internal/index/memory"
-	memsource "github.com/kluzzebass/gastrolog/internal/index/memory/source"
-	memtime "github.com/kluzzebass/gastrolog/internal/index/memory/time"
-	memtoken "github.com/kluzzebass/gastrolog/internal/index/memory/token"
-	"github.com/kluzzebass/gastrolog/internal/query"
+	"gastrolog/internal/chunk"
+	chunkmem "gastrolog/internal/chunk/memory"
+	"gastrolog/internal/index"
+	indexmem "gastrolog/internal/index/memory"
+	memsource "gastrolog/internal/index/memory/source"
+	memtime "gastrolog/internal/index/memory/time"
+	memtoken "gastrolog/internal/index/memory/token"
+	"gastrolog/internal/query"
 )
 
 // collect gathers all records from the iterator, returning the first error encountered.

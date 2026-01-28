@@ -3,8 +3,8 @@ package index
 import (
 	"context"
 
-	"github.com/kluzzebass/gastrolog/internal/callgroup"
-	"github.com/kluzzebass/gastrolog/internal/chunk"
+	"gastrolog/internal/callgroup"
+	"gastrolog/internal/chunk"
 	"golang.org/x/sync/errgroup"
 )
 

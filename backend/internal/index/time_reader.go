@@ -4,7 +4,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
+	"gastrolog/internal/chunk"
 )
 
 // TimeIndexReader provides binary search over a loaded time index.

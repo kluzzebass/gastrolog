@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
+	"gastrolog/internal/chunk"
 )
 
 type Config struct {

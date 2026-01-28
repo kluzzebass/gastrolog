@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
+	"gastrolog/internal/chunk"
 )
 
 var ErrMissingDir = errors.New("file chunk manager dir is required")

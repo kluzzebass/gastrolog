@@ -8,9 +8,9 @@ import (
 	"testing"
 	gotime "time"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
-	chunkfile "github.com/kluzzebass/gastrolog/internal/chunk/file"
-	"github.com/kluzzebass/gastrolog/internal/index"
+	"gastrolog/internal/chunk"
+	chunkfile "gastrolog/internal/chunk/file"
+	"gastrolog/internal/index"
 )
 
 func setupChunkManager(t *testing.T, records []chunk.Record) (chunk.ChunkManager, chunk.ChunkID) {

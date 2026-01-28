@@ -9,8 +9,8 @@ import (
 	gotime "time"
 
 	"github.com/google/uuid"
-	"github.com/kluzzebass/gastrolog/internal/chunk"
-	"github.com/kluzzebass/gastrolog/internal/index"
+	"gastrolog/internal/chunk"
+	"gastrolog/internal/index"
 )
 
 const (

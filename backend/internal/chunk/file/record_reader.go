@@ -4,7 +4,7 @@ import (
 	"errors"
 	"io"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
+	"gastrolog/internal/chunk"
 )
 
 var ErrUnknownSourceLocalID = errors.New("unknown source local id")

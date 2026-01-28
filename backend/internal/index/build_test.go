@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kluzzebass/gastrolog/internal/chunk"
-	"github.com/kluzzebass/gastrolog/internal/index"
+	"gastrolog/internal/chunk"
+	"gastrolog/internal/index"
 )
 
 // mockIndexer is a configurable test double for index.Indexer.
