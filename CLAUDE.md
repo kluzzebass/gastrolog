@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 GastroLog is a Go-based log management system built around chunk-based storage and indexing. The backend is written in Go 1.25.5. The project is in active development.
 
+Module name: `gastrolog` (local module, not intended for external import)
+
 ## Build & Test Commands
 
 All commands run from the `backend/` directory:
@@ -32,15 +34,38 @@ go mod tidy                                       # Clean dependencies
 - **ChunkMeta** -- `ID`, `StartTS`, `EndTS` (`time.Time`), `Size`, `Sealed`
 - **ChunkID** / **SourceID** -- UUID v7 typed identifiers (time-ordered, sortable)
 
+### Query package (`backend/internal/query/`)
+
+High-level search API over chunks and indexes:
+
+- **Engine** -- created with `New(ChunkManager, IndexManager)`, executes queries
+- **Query** struct:
+  - `Start`, `End` -- time bounds (if `End < Start`, results returned in reverse/newest-first order)
+  - `Sources` -- filter by source IDs (OR semantics, nil = no filter)
+  - `Tokens` -- filter by tokens (AND semantics, nil = no filter)
+  - `Limit` -- max results (0 = unlimited)
+- **Search(ctx, query, resume)** returns `(iter.Seq2[Record, error], func() *ResumeToken)`
+  - Iterator yields records in timestamp order (forward or reverse)
+  - Resume token enables pagination; valid as long as referenced chunk exists
+  - `ErrInvalidResumeToken` returned if chunk was deleted
+
+Query execution:
+1. Selects chunks overlapping time range (sorted by StartTS, ascending or descending)
+2. For sealed chunks: uses time/source/token indexes to find candidate positions
+3. For active chunks: scans sequentially with on-the-fly filtering
+4. Applies time bounds, source filter, token filter to each record
+5. Respects limit, tracks position for resume token
+
 ### Index package (`backend/internal/index/`)
 
 **Shared types (`index.go`):**
 
 - **Indexer** interface: `Name() string`, `Build(ctx, chunkID) error`
-- **IndexManager** interface: `BuildIndexes`, `OpenTimeIndex`, `OpenSourceIndex`
+- **IndexManager** interface: `BuildIndexes`, `OpenTimeIndex`, `OpenSourceIndex`, `OpenTokenIndex`
 - **Index[T]** -- generic read-only wrapper over `[]T` with `Entries()` method
 - **TimeIndexEntry** -- `{Timestamp time.Time, RecordPos uint64}`
 - **SourceIndexEntry** -- `{SourceID chunk.SourceID, Positions []uint64}`
+- **TokenIndexEntry** -- `{Token string, Positions []uint64}`
 
 **BuildHelper (`build.go`):**
 
@@ -56,6 +81,18 @@ Shared binary search positioning over time index entries:
 - `NewTimeIndexReader(chunkID, entries)` wraps decoded entries
 - `FindStart(tStart)` returns `(RecordRef, true)` for the latest entry at or before `tStart`, or `(zero, false)` if `tStart` is before all entries (caller should scan from beginning)
 - Uses `sort.Search` on timestamp-sorted entries
+
+**SourceIndexReader / TokenIndexReader:**
+
+Binary search lookup for inverted indexes:
+- `Lookup(key)` returns `(positions []uint64, found bool)`
+- Entries sorted by key for binary search
+
+**Tokenizer (`token/tokenize.go`):**
+
+Simple tokenizer used for both indexing and query-time matching:
+- `Simple([]byte) []string` -- splits on non-alphanumeric, lowercases, returns unique tokens
+- Same tokenizer used at index time and query time ensures consistent matching
 
 ### File-based chunk storage (`backend/internal/chunk/file/`)
 
@@ -77,6 +114,7 @@ In-memory implementation of the same interfaces. Rotates chunks based on record 
 - `time/` -- time indexer: sparse index mapping sampled timestamps to record positions; writes `_time.idx`
   - `reader.go` -- `Open` loads and validates index file, returns shared `*index.TimeIndexReader`
 - `source/` -- source indexer: inverted index mapping SourceIDs to record positions; writes `_source.idx`
+- `token/` -- token indexer: inverted index mapping tokens to record positions; writes `_token.idx`
 
 ### Memory-based index manager (`backend/internal/index/memory/`)
 
@@ -84,6 +122,7 @@ In-memory implementation of the same interfaces. Rotates chunks based on record 
 - `time/` -- in-memory time indexer with `Get(chunkID)` satisfying `IndexStore[T]`
   - `reader.go` -- `Open` retrieves entries from indexer, returns shared `*index.TimeIndexReader`
 - `source/` -- in-memory source indexer with `Get(chunkID)` satisfying `IndexStore[T]`
+- `token/` -- in-memory token indexer with `Get(chunkID)` satisfying `IndexStore[T]`
 
 ## Binary Format Conventions
 
@@ -94,7 +133,7 @@ Common header prefix for index files and meta file:
 signature (1 byte, 0x69 'i') | type (1 byte) | version (1 byte) | flags (1 byte)
 ```
 
-Type bytes: `'m'` = meta, `'t'` = time index, `'s'` = source index.
+Type bytes: `'m'` = meta, `'t'` = time index, `'s'` = source index, `'k'` = token index.
 
 Index file headers include the chunk ID (16 bytes) after the common prefix. See `docs/file_formats.md` for full binary format specifications.
 
@@ -108,7 +147,8 @@ Use the **memory-based managers** (`chunk/memory` and `index/memory`) for integr
 cm, _ := chunkmem.NewManager(chunkmem.Config{MaxChunkBytes: 1 << 20})
 timeIdx := memtime.NewIndexer(cm, 1)   // sparsity 1 = index every record
 srcIdx := memsource.NewIndexer(cm)
-im := indexmem.NewManager([]index.Indexer{timeIdx, srcIdx}, timeIdx, srcIdx, nil)
+tokIdx := memtoken.NewIndexer(cm)
+im := indexmem.NewManager([]index.Indexer{timeIdx, srcIdx, tokIdx}, timeIdx, srcIdx, tokIdx)
 ```
 
 Append records, seal chunks, then pass `cm` and `im` to the code under test. See `query/query_test.go` for an example.
@@ -124,13 +164,15 @@ Append records, seal chunks, then pass `cm` and `im` to the code under test. See
 - Cursors work on both sealed and unsealed chunks; indexers explicitly reject unsealed chunks
 - Named constants for all binary format sizes (no magic numbers in encode/decode)
 - Sentinel errors for all validation failures (`ErrSignatureMismatch`, `ErrVersionMismatch`, etc.)
-- Sub-package pattern: `file/{time,source}` and `memory/{time,source}` avoid symbol prefixing (e.g. `time.NewIndexer` not `NewTimeIndexer`)
+- Sub-package pattern: `file/{time,source,token}` and `memory/{time,source,token}` avoid symbol prefixing (e.g. `time.NewIndexer` not `NewTimeIndexer`)
+- Query uses `End < Start` convention for reverse order instead of separate bool field
 
 ## Directory Layout
 
 ```
 backend/
   internal/
+    callgroup/                  Singleflight-like concurrency primitive
     chunk/
       types.go                  Core interfaces and types
       file/                     File-based chunk manager
@@ -139,22 +181,22 @@ backend/
       index.go                  Shared types, Indexer/IndexManager interfaces, generic Index[T]
       build.go                  BuildHelper (singleflight + errgroup)
       time_reader.go            Shared TimeIndexReader with FindStart binary search
+      source_reader.go          Shared SourceIndexReader with Lookup
+      token_reader.go           Shared TokenIndexReader with Lookup
+      token/
+        tokenize.go             Simple tokenizer (split, lowercase, dedupe)
       file/
         manager.go              File-based IndexManager
-        time/
-          format.go             Binary encode/decode for _time.idx
-          indexer.go            File-based time indexer
-          reader.go             Open → *index.TimeIndexReader
-        source/
-          format.go             Binary encode/decode for _source.idx
-          indexer.go            File-based source indexer
+        time/                   File-based time indexer (_time.idx)
+        source/                 File-based source indexer (_source.idx)
+        token/                  File-based token indexer (_token.idx)
       memory/
         manager.go              Memory-based IndexManager with generic IndexStore[T]
-        time/
-          indexer.go            Memory-based time indexer
-          reader.go             Open → *index.TimeIndexReader
-        source/
-          indexer.go            Memory-based source indexer
+        time/                   Memory-based time indexer
+        source/                 Memory-based source indexer
+        token/                  Memory-based token indexer
+    query/
+      query.go                  Query engine with Search API
   docs/
     file_formats.md             Binary format specifications
 ```

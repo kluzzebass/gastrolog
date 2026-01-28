@@ -14,6 +14,7 @@ All multi-byte integers are **little-endian**. UUIDs are stored as raw 16-byte v
     <chunk-uuid>/
       _time.idx         Sparse time index
       _source.idx       Source index (inverted posting list)
+      _token.idx        Token index (inverted posting list)
 ```
 
 ## Common Header Pattern
@@ -23,7 +24,7 @@ Index files and the meta file share a common header prefix:
 | Field     | Size | Description                              |
 |-----------|------|------------------------------------------|
 | signature | 1    | Always `0x69` (`'i'`)                    |
-| type      | 1    | File type: `'m'` meta, `'t'` time, `'s'` source |
+| type      | 1    | File type: `'m'` meta, `'t'` time, `'s'` source, `'k'` token |
 | version   | 1    | Format version (`0x01`)                  |
 | flags     | 1    | Bit flags (file-type specific)           |
 
@@ -213,25 +214,6 @@ Sparse time index mapping sampled timestamps to record positions within a chunk.
 
 Entries are written in cursor traversal order (the order records appear in `records.log`). A sparsity parameter controls how many records are sampled: with sparsity N, every N-th record is indexed (plus the first record always).
 
-```mermaid
-block-beta
-  columns 4
-  block:header:4
-    sig["sig 'i'"] type["type 't'"] ver["ver 0x01"] flags["0x00"]
-  end
-  chunkid["chunkID (16 bytes)"]:4
-  ecount["entryCount (4 bytes)"]:4
-  block:e0:4
-    ts0["timestamp (8)"] pos0["recordPos (8)"]
-  end
-  block:e1:4
-    ts1["timestamp (8)"] pos1["recordPos (8)"]
-  end
-  block:eN:4
-    tsN["..."] posN["..."]
-  end
-```
-
 ---
 
 ## _source.idx -- Source Index
@@ -271,7 +253,7 @@ Inverted index mapping each `SourceID` to the list of record positions where tha
 | 16     | 8    | postingOffset | Byte offset into posting blob (uint64)       |
 | 24     | 4    | postingCount  | Number of positions for this source (uint32) |
 
-Key entries are sorted by `sourceID` string representation for deterministic output.
+Key entries are sorted by `sourceID` string representation for deterministic output and binary search.
 
 ### Posting Blob
 
@@ -279,30 +261,55 @@ Flat array of `uint64` record positions (8 bytes each). Each key entry reference
 
 **Total file size: 24 + (keyCount x 28) + (totalPositions x 8) bytes**
 
-```mermaid
-block-beta
-  columns 4
-  block:header:4
-    sig["sig 'i'"] type["type 's'"] ver["ver 0x01"] flags["0x00"]
-  end
-  chunkid["chunkID (16 bytes)"]:4
-  kcount["keyCount (4 bytes)"]:4
+---
 
-  block:k0:4
-    sid0["sourceID (16)"]
-    off0["postingOffset (8)"]
-    cnt0["postingCount (4)"]
-  end
-  block:k1:4
-    sid1["sourceID (16)"]
-    off1["postingOffset (8)"]
-    cnt1["postingCount (4)"]
-  end
+## _token.idx -- Token Index
 
-  block:postings:4
-    p0["pos0 (8)"] p1["pos1 (8)"] p2["pos2 (8)"] pN["..."]
-  end
+Inverted index mapping each token (lowercase word) to the list of record positions where that token appears within a chunk. Only built for sealed chunks.
+
+Tokens are extracted using a simple tokenizer: split on non-alphanumeric characters, convert to lowercase, deduplicate.
+
+### Layout
+
 ```
++---------------------------+
+|          Header           |
++---------------------------+
+|     Key Table             |
+|  (keyCount entries)       |
++---------------------------+
+|     Posting Blob          |
+|  (flat uint64 positions)  |
++---------------------------+
+```
+
+### Header (24 bytes)
+
+| Offset | Size | Field    | Description                        |
+|--------|------|----------|------------------------------------|
+| 0      | 1    | signature| `0x69` (`'i'`)                     |
+| 1      | 1    | type     | `0x6B` (`'k'`)                     |
+| 2      | 1    | version  | `0x01`                             |
+| 3      | 1    | flags    | `0x00` (reserved)                  |
+| 4      | 16   | chunkID  | Chunk UUID (raw bytes)             |
+| 20     | 4    | keyCount | Number of distinct tokens (uint32) |
+
+### Key Table Entry (variable size)
+
+| Offset | Size      | Field         | Description                                  |
+|--------|-----------|---------------|----------------------------------------------|
+| 0      | 2         | tokenLen      | Length of token string (uint16)              |
+| 2      | tokenLen  | token         | Token string (UTF-8 bytes)                   |
+| 2+N    | 8         | postingOffset | Byte offset into posting blob (uint64)       |
+| 10+N   | 4         | postingCount  | Number of positions for this token (uint32)  |
+
+Key entries are sorted by token string for deterministic output and binary search.
+
+### Posting Blob
+
+Flat array of `uint64` record positions (8 bytes each). Each key entry references a contiguous slice of this blob via `postingOffset` (byte offset from the start of the posting blob) and `postingCount` (number of positions).
+
+**Total file size: 24 + (sum of key entry sizes) + (totalPositions x 8) bytes**
 
 ---
 
@@ -317,3 +324,4 @@ All file formats include validation checks on decode:
 | records.log  | Min size, magic, version, size match, rawLen match, trailing   |
 | _time.idx    | Min size, signature+type, version, chunkID, entry size match   |
 | _source.idx  | Min size, signature+type, version, chunkID, key size, posting size |
+| _token.idx   | Min size, signature+type, version, chunkID, key size, posting size |
