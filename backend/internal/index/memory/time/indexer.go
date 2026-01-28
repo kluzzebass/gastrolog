@@ -63,7 +63,7 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 
 		if n == 0 || n%t.sparsity == 0 {
 			entries = append(entries, index.TimeIndexEntry{
-				Timestamp: rec.IngestTS,
+				Timestamp: rec.WriteTS,
 				RecordPos: ref.Pos,
 			})
 		}

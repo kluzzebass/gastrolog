@@ -11,7 +11,17 @@ import (
 
 func setupChunkManager(t *testing.T, records []chunk.Record) (chunk.ChunkManager, chunk.ChunkID) {
 	t.Helper()
-	manager, err := chunkmemory.NewManager(chunkmemory.Config{})
+	callIdx := 0
+	manager, err := chunkmemory.NewManager(chunkmemory.Config{
+		Now: func() gotime.Time {
+			if callIdx < len(records) {
+				ts := records[callIdx].IngestTS
+				callIdx++
+				return ts
+			}
+			return gotime.Now()
+		},
+	})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}
@@ -247,7 +257,19 @@ func TestIndexerCancelledContextNoPartialData(t *testing.T) {
 }
 
 func TestIndexerMultipleChunks(t *testing.T) {
-	manager, err := chunkmemory.NewManager(chunkmemory.Config{})
+	writeTSValues := []gotime.Time{
+		gotime.UnixMicro(100),
+		gotime.UnixMicro(200),
+		gotime.UnixMicro(300),
+	}
+	callIdx := 0
+	manager, err := chunkmemory.NewManager(chunkmemory.Config{
+		Now: func() gotime.Time {
+			ts := writeTSValues[callIdx]
+			callIdx++
+			return ts
+		},
+	})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}
@@ -312,7 +334,15 @@ func TestIndexerMultipleChunks(t *testing.T) {
 }
 
 func TestIndexerBuildUnsealedChunk(t *testing.T) {
-	manager, err := chunkmemory.NewManager(chunkmemory.Config{})
+	callIdx := 0
+	writeTSValues := []gotime.Time{gotime.UnixMicro(1)}
+	manager, err := chunkmemory.NewManager(chunkmemory.Config{
+		Now: func() gotime.Time {
+			ts := writeTSValues[callIdx]
+			callIdx++
+			return ts
+		},
+	})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}

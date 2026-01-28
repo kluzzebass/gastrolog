@@ -12,6 +12,7 @@ import (
 func TestEncodeDecodeRecordRoundTrip(t *testing.T) {
 	record := chunk.Record{
 		IngestTS: time.UnixMicro(123456),
+		WriteTS:  time.UnixMicro(789012),
 		SourceID: chunk.NewSourceID(),
 		Raw:      []byte("payload"),
 	}
@@ -28,6 +29,9 @@ func TestEncodeDecodeRecordRoundTrip(t *testing.T) {
 	}
 	if !record.IngestTS.Equal(got.IngestTS) {
 		t.Fatalf("ingest ts: want %v got %v", record.IngestTS, got.IngestTS)
+	}
+	if !record.WriteTS.Equal(got.WriteTS) {
+		t.Fatalf("write ts: want %v got %v", record.WriteTS, got.WriteTS)
 	}
 	if !bytes.Equal(record.Raw, got.Raw) {
 		t.Fatalf("raw: want %q got %q", record.Raw, got.Raw)
@@ -76,7 +80,7 @@ func TestDecodeRecordRawLengthMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode record: %v", err)
 	}
-	rawLenOffset := SizeFieldBytes + MagicFieldBytes + VersionBytes + IngestTSBytes + SourceLocalIDBytes
+	rawLenOffset := SizeFieldBytes + MagicFieldBytes + VersionBytes + IngestTSBytes + WriteTSBytes + SourceLocalIDBytes
 	binary.LittleEndian.PutUint32(buf[rawLenOffset:rawLenOffset+RawLenBytes], 99)
 	if _, _, err := DecodeRecord(buf); err != ErrRawLengthMismatch {
 		t.Fatalf("expected raw length mismatch, got %v", err)

@@ -17,10 +17,11 @@ const (
 	MagicFieldBytes    = 1
 	VersionBytes       = 1
 	IngestTSBytes      = 8
+	WriteTSBytes       = 8
 	SourceLocalIDBytes = 4
 	RawLenBytes        = 4
 
-	HeaderBytes   = SizeFieldBytes + MagicFieldBytes + VersionBytes + IngestTSBytes + SourceLocalIDBytes + RawLenBytes
+	HeaderBytes   = SizeFieldBytes + MagicFieldBytes + VersionBytes + IngestTSBytes + WriteTSBytes + SourceLocalIDBytes + RawLenBytes
 	MinRecordSize = HeaderBytes + SizeFieldBytes
 )
 
@@ -62,6 +63,8 @@ func EncodeRecord(record chunk.Record, localID uint32) ([]byte, error) {
 	cursor += VersionBytes
 	binary.LittleEndian.PutUint64(buf[cursor:cursor+IngestTSBytes], uint64(record.IngestTS.UnixMicro()))
 	cursor += IngestTSBytes
+	binary.LittleEndian.PutUint64(buf[cursor:cursor+WriteTSBytes], uint64(record.WriteTS.UnixMicro()))
+	cursor += WriteTSBytes
 	binary.LittleEndian.PutUint32(buf[cursor:cursor+SourceLocalIDBytes], localID)
 	cursor += SourceLocalIDBytes
 	binary.LittleEndian.PutUint32(buf[cursor:cursor+RawLenBytes], uint32(rawLen))
@@ -94,6 +97,8 @@ func DecodeRecord(buf []byte) (chunk.Record, uint32, error) {
 
 	ingestTS := binary.LittleEndian.Uint64(buf[cursor : cursor+IngestTSBytes])
 	cursor += IngestTSBytes
+	writeTS := binary.LittleEndian.Uint64(buf[cursor : cursor+WriteTSBytes])
+	cursor += WriteTSBytes
 	localID := binary.LittleEndian.Uint32(buf[cursor : cursor+SourceLocalIDBytes])
 	cursor += SourceLocalIDBytes
 	rawLen := binary.LittleEndian.Uint32(buf[cursor : cursor+RawLenBytes])
@@ -113,6 +118,7 @@ func DecodeRecord(buf []byte) (chunk.Record, uint32, error) {
 
 	return chunk.Record{
 		IngestTS: time.UnixMicro(int64(ingestTS)),
+		WriteTS:  time.UnixMicro(int64(writeTS)),
 		Raw:      raw,
 	}, localID, nil
 }

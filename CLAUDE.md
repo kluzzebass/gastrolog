@@ -100,6 +100,19 @@ Index file headers include the chunk ID (16 bytes) after the common prefix. See 
 
 Record and source map files use leading+trailing size fields for bidirectional traversal.
 
+## Testing
+
+Use the **memory-based managers** (`chunk/memory` and `index/memory`) for integration tests instead of mocks. They implement the full `ChunkManager` and `IndexManager` interfaces in-memory:
+
+```go
+cm, _ := chunkmem.NewManager(chunkmem.Config{MaxChunkBytes: 1 << 20})
+timeIdx := memtime.NewIndexer(cm, 1)   // sparsity 1 = index every record
+srcIdx := memsource.NewIndexer(cm)
+im := indexmem.NewManager([]index.Indexer{timeIdx, srcIdx}, timeIdx, srcIdx)
+```
+
+Append records, seal chunks, then pass `cm` and `im` to the code under test. See `query/query_test.go` for an example.
+
 ## Key Design Patterns
 
 - Interface segregation: consumers depend on `chunk.ChunkManager` / `index.Indexer` / `index.IndexManager`, not concrete types

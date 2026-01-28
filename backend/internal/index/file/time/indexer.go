@@ -11,7 +11,7 @@ import (
 )
 
 // Indexer builds a sparse time index for sealed chunks.
-// For each chunk, it samples every N-th record's (IngestTS, RecordPos)
+// For each chunk, it samples every N-th record's (WriteTS, RecordPos)
 // and writes the result to <dir>/<chunkID>/_time.idx.
 type Indexer struct {
 	dir      string
@@ -64,7 +64,7 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 
 		if n == 0 || n%t.sparsity == 0 {
 			entries = append(entries, index.TimeIndexEntry{
-				Timestamp: rec.IngestTS,
+				Timestamp: rec.WriteTS,
 				RecordPos: ref.Pos,
 			})
 		}

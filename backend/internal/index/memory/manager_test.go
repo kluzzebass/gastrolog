@@ -14,7 +14,17 @@ import (
 
 func setupChunkManager(t *testing.T, records []chunk.Record) (chunk.ChunkManager, chunk.ChunkID) {
 	t.Helper()
-	manager, err := chunkmemory.NewManager(chunkmemory.Config{})
+	callIdx := 0
+	manager, err := chunkmemory.NewManager(chunkmemory.Config{
+		Now: func() gotime.Time {
+			if callIdx < len(records) {
+				ts := records[callIdx].IngestTS
+				callIdx++
+				return ts
+			}
+			return gotime.Now()
+		},
+	})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}

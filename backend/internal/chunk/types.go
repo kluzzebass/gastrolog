@@ -84,6 +84,7 @@ type MetaStore interface {
 
 type Record struct {
 	IngestTS time.Time
+	WriteTS  time.Time
 	SourceID SourceID
 	Raw      []byte
 }

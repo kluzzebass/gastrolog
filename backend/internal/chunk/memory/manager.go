@@ -53,10 +53,15 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 		}
 	}
 
+	// WriteTS is assigned by the chunk manager, not the caller.
+	// Monotonic by construction since writes are mutex-serialized.
+	// Uses m.cfg.Now (defaults to time.Now) so tests can inject a fake clock.
+	record.WriteTS = m.cfg.Now()
+
 	offset := uint64(len(m.active.records))
 	m.active.records = append(m.active.records, record)
 	m.active.size = int64(len(m.active.records))
-	m.updateMetaLocked(record.IngestTS, m.active.size)
+	m.updateMetaLocked(record.WriteTS, m.active.size)
 
 	if err := m.cfg.MetaStore.Save(m.active.meta); err != nil {
 		return chunk.ChunkID{}, 0, err

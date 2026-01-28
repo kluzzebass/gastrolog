@@ -83,6 +83,11 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 		}
 	}
 
+	// WriteTS is assigned by the chunk manager, not the caller.
+	// Monotonic by construction since writes are mutex-serialized.
+	// Uses m.cfg.Now (defaults to time.Now) so tests can inject a fake clock.
+	record.WriteTS = m.cfg.Now()
+
 	localID, _, err := m.active.sources.GetOrAssign(record.SourceID)
 	if err != nil {
 		return chunk.ChunkID{}, 0, err
@@ -91,7 +96,7 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 	if err != nil {
 		return chunk.ChunkID{}, 0, err
 	}
-	m.updateMetaLocked(record.IngestTS, offset, size)
+	m.updateMetaLocked(record.WriteTS, offset, size)
 
 	if err := m.cfg.MetaStore.Save(m.active.meta); err != nil {
 		return chunk.ChunkID{}, 0, err
