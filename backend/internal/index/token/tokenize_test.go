@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestTokenizeBasic(t *testing.T) {
+func TestSimpleBasic(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
@@ -75,15 +75,15 @@ func TestTokenizeBasic(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := Tokenize([]byte(tt.input))
+			got := Simple([]byte(tt.input))
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("Tokenize(%q) = %v, want %v", tt.input, got, tt.want)
+				t.Errorf("Simple(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestTokenizeUTF8(t *testing.T) {
+func TestSimpleHighBytes(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
@@ -108,9 +108,9 @@ func TestTokenizeUTF8(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := Tokenize([]byte(tt.input))
+			got := Simple([]byte(tt.input))
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("Tokenize(%q) = %v, want %v", tt.input, got, tt.want)
+				t.Errorf("Simple(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
 	}

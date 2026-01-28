@@ -1,12 +1,12 @@
 package token
 
-// Tokenize extracts tokens from raw log data.
+// Simple extracts tokens from raw log data using basic byte-level rules.
 //
 // Token rules:
-//   - Word bytes: a-z, A-Z (lowercased), 0-9, 0x80-0x9F, 0xA1-0xFF
+//   - Word bytes: a-z, A-Z (lowercased), 0-9, any byte >= 0x80 (except 0xA0)
 //   - Delimiters: everything else (ASCII control/punctuation/space, 0xA0)
 //   - Tokens shorter than 2 bytes are skipped
-func Tokenize(data []byte) []string {
+func Simple(data []byte) []string {
 	var tokens []string
 	var current []byte
 

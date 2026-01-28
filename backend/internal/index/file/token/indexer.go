@@ -63,7 +63,7 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 			return fmt.Errorf("read record: %w", err)
 		}
 
-		tokens := token.Tokenize(rec.Raw)
+		tokens := token.Simple(rec.Raw)
 		seen := make(map[string]bool) // dedupe within same record
 		for _, tok := range tokens {
 			if !seen[tok] {
