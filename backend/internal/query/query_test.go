@@ -962,6 +962,61 @@ func TestSearchTokenActiveChunk(t *testing.T) {
 	}
 }
 
+func TestSearchTokenSealedNoMatchActiveMatch(t *testing.T) {
+	// Sealed chunk has no matching tokens, active chunk does.
+	// Guards against accidental early pruning or index-only logic.
+	sealed := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("hello world")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("foo bar")},
+	}
+	active := []chunk.Record{
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("error happened")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("all good")},
+	}
+
+	eng := setupWithActive(t, [][]chunk.Record{sealed}, active)
+
+	results, err := collect(eng.Search(context.Background(), query.Query{Tokens: []string{"error"}}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if string(results[0].Raw) != "error happened" {
+		t.Errorf("result[0]: got %q", results[0].Raw)
+	}
+}
+
+func TestSearchTokenAndSourceSealedNoMatchActiveMatch(t *testing.T) {
+	// Combined token + source filter: sealed has neither, active has both.
+	sealed := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("hello world")},
+		{IngestTS: t2, SourceID: srcB, Raw: []byte("error from B")},
+	}
+	active := []chunk.Record{
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("error from A")},
+		{IngestTS: t4, SourceID: srcB, Raw: []byte("warning from B")},
+	}
+
+	eng := setupWithActive(t, [][]chunk.Record{sealed}, active)
+
+	// Search for "error" from srcA - only active chunk matches
+	results, err := collect(eng.Search(context.Background(), query.Query{
+		Tokens:  []string{"error"},
+		Sources: []chunk.SourceID{srcA},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if string(results[0].Raw) != "error from A" {
+		t.Errorf("result[0]: got %q", results[0].Raw)
+	}
+}
+
 func TestSearchTokenWithLimit(t *testing.T) {
 	records := []chunk.Record{
 		{IngestTS: t1, SourceID: srcA, Raw: []byte("error one")},
