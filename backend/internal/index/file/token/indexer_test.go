@@ -377,6 +377,26 @@ func TestDecodeErrors(t *testing.T) {
 	if _, err := decodeIndex(wrongChunkID, data); err != ErrChunkIDMismatch {
 		t.Fatalf("expected ErrChunkIDMismatch, got %v", err)
 	}
+
+	// Key size mismatch: header says 1 key but no key data.
+	bad3 := encodeIndex(testChunkID, nil)
+	bad3[signatureSize+typeSize+versionSize+flagsSize+chunkIDSize] = 1
+	if _, err := decodeIndex(testChunkID, bad3); err != ErrKeySizeMismatch {
+		t.Fatalf("expected ErrKeySizeMismatch, got %v", err)
+	}
+
+	// Posting size mismatch: valid header+key with truncated postings.
+	bad4 := encodeIndex(testChunkID, []index.TokenIndexEntry{
+		{Token: "test", Positions: []uint64{0, 64}},
+	})
+	// Truncate to remove posting data
+	keyStart := headerSize
+	tokenLen := 4 // "test"
+	keyEntrySize := tokenLenSize + tokenLen + postingOffsetSize + postingCountSize
+	bad4 = bad4[:keyStart+keyEntrySize]
+	if _, err := decodeIndex(testChunkID, bad4); err != ErrPostingSizeMismatch {
+		t.Fatalf("expected ErrPostingSizeMismatch, got %v", err)
+	}
 }
 
 func TestIndexerConcurrentBuild(t *testing.T) {
@@ -766,5 +786,117 @@ func TestOpenReader(t *testing.T) {
 	_, found = reader.Lookup("notfound")
 	if found {
 		t.Fatal("expected not to find token 'notfound'")
+	}
+}
+
+func TestIndexerHighByteTokens(t *testing.T) {
+	src := chunk.NewSourceID()
+	// German umlauts: "über" and "größe" contain high bytes
+	records := []chunk.Record{
+		{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte("über größe")},
+	}
+
+	manager, chunkID := setupChunkManager(t, records)
+	indexDir := t.TempDir()
+	indexer := NewIndexer(indexDir, manager)
+
+	if err := indexer.Build(context.Background(), chunkID); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	entries, err := LoadIndex(indexDir, chunkID)
+	if err != nil {
+		t.Fatalf("load index: %v", err)
+	}
+
+	// Should have 2 tokens
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(entries))
+	}
+
+	// Verify we can look them up via reader
+	reader, err := Open(indexDir, chunkID)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+
+	// The tokens should be lowercased but high bytes preserved
+	_, found := reader.Lookup("über")
+	if !found {
+		t.Fatal("expected to find token 'über'")
+	}
+	_, found = reader.Lookup("größe")
+	if !found {
+		t.Fatal("expected to find token 'größe'")
+	}
+}
+
+func TestIndexerLongToken(t *testing.T) {
+	src := chunk.NewSourceID()
+	// Create a long token (200 chars)
+	longToken := ""
+	for i := 0; i < 200; i++ {
+		longToken += "a"
+	}
+	records := []chunk.Record{
+		{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte(longToken)},
+	}
+
+	manager, chunkID := setupChunkManager(t, records)
+	indexDir := t.TempDir()
+	indexer := NewIndexer(indexDir, manager)
+
+	if err := indexer.Build(context.Background(), chunkID); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	entries, err := LoadIndex(indexDir, chunkID)
+	if err != nil {
+		t.Fatalf("load index: %v", err)
+	}
+
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].Token != longToken {
+		t.Fatalf("token mismatch: expected len %d, got len %d", len(longToken), len(entries[0].Token))
+	}
+}
+
+func TestOpenReaderLookupFirstLast(t *testing.T) {
+	src := chunk.NewSourceID()
+	records := []chunk.Record{
+		{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte("aardvark middle zebra")},
+	}
+
+	manager, chunkID := setupChunkManager(t, records)
+	indexDir := t.TempDir()
+	indexer := NewIndexer(indexDir, manager)
+
+	if err := indexer.Build(context.Background(), chunkID); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	reader, err := Open(indexDir, chunkID)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+
+	// First entry (alphabetically)
+	_, found := reader.Lookup("aardvark")
+	if !found {
+		t.Fatal("expected to find first token 'aardvark'")
+	}
+
+	// Last entry
+	_, found = reader.Lookup("zebra")
+	if !found {
+		t.Fatal("expected to find last token 'zebra'")
+	}
+
+	// Middle entry
+	_, found = reader.Lookup("middle")
+	if !found {
+		t.Fatal("expected to find middle token 'middle'")
 	}
 }
