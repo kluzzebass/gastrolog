@@ -1747,3 +1747,505 @@ func TestQueryTimeBounds(t *testing.T) {
 		})
 	}
 }
+
+// =============================================================================
+// SearchThenFollow tests
+// =============================================================================
+
+func TestSearchThenFollowSealedChunk(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("info start")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("error happened")},
+		{IngestTS: t3, SourceID: srcB, Raw: []byte("info from B")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("info recovery")},
+	}
+
+	eng := setup(t, records)
+
+	// Search for "error", then follow all subsequent records.
+	seq, _ := eng.SearchThenFollow(context.Background(), query.Query{
+		Tokens: []string{"error"},
+	}, nil)
+
+	results, err := collect(seq)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should get: error record + all following records (regardless of source/token)
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+	want := []string{"error happened", "info from B", "info recovery"}
+	for i, w := range want {
+		if string(results[i].Raw) != w {
+			t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, w)
+		}
+	}
+}
+
+func TestSearchThenFollowSealedAndActive(t *testing.T) {
+	sealed := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("info one")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("error found")},
+	}
+	active := []chunk.Record{
+		{IngestTS: t3, SourceID: srcB, Raw: []byte("active one")},
+		{IngestTS: t4, SourceID: srcB, Raw: []byte("active two")},
+	}
+
+	eng := setupWithActive(t, [][]chunk.Record{sealed}, active)
+
+	// Search for "error", then follow into active chunk.
+	seq, _ := eng.SearchThenFollow(context.Background(), query.Query{
+		Tokens: []string{"error"},
+	}, nil)
+
+	results, err := collect(seq)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should get: error record + all following (crossing into active chunk)
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+	want := []string{"error found", "active one", "active two"}
+	for i, w := range want {
+		if string(results[i].Raw) != w {
+			t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, w)
+		}
+	}
+}
+
+func TestSearchThenFollowWithSourceFilter(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("A info")},
+		{IngestTS: t2, SourceID: srcB, Raw: []byte("B info")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("A error")},
+		{IngestTS: t4, SourceID: srcB, Raw: []byte("B after")},
+		{IngestTS: t5, SourceID: srcA, Raw: []byte("A after")},
+	}
+
+	eng := setup(t, records)
+
+	// Search for "error" from srcA, then follow all.
+	seq, _ := eng.SearchThenFollow(context.Background(), query.Query{
+		Tokens:  []string{"error"},
+		Sources: []chunk.SourceID{srcA},
+	}, nil)
+
+	results, err := collect(seq)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should get: A error + B after + A after (source filter dropped after match)
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+	want := []string{"A error", "B after", "A after"}
+	for i, w := range want {
+		if string(results[i].Raw) != w {
+			t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, w)
+		}
+	}
+}
+
+func TestSearchThenFollowWithLimit(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("info")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("error")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("after1")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("after2")},
+		{IngestTS: t5, SourceID: srcA, Raw: []byte("after3")},
+	}
+
+	eng := setup(t, records)
+
+	// Search for "error", follow with limit 3.
+	seq, _ := eng.SearchThenFollow(context.Background(), query.Query{
+		Tokens: []string{"error"},
+		Limit:  3,
+	}, nil)
+
+	results, err := collect(seq)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+	want := []string{"error", "after1", "after2"}
+	for i, w := range want {
+		if string(results[i].Raw) != w {
+			t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, w)
+		}
+	}
+}
+
+func TestSearchThenFollowNoMatch(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("info one")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("info two")},
+	}
+
+	eng := setup(t, records)
+
+	// Search for "error" - no match.
+	seq, _ := eng.SearchThenFollow(context.Background(), query.Query{
+		Tokens: []string{"error"},
+	}, nil)
+
+	results, err := collect(seq)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results, got %d", len(results))
+	}
+}
+
+// =============================================================================
+// SearchWithContext tests
+// =============================================================================
+
+func TestSearchWithContextBeforeAndAfter(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("before2")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("before1")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("error match")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("after1")},
+		{IngestTS: t5, SourceID: srcA, Raw: []byte("after2")},
+	}
+
+	eng := setup(t, records)
+
+	seq, _ := eng.SearchWithContext(context.Background(), query.Query{
+		Tokens:        []string{"error"},
+		ContextBefore: 2,
+		ContextAfter:  2,
+	})
+
+	results, err := collect(seq)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should get: 2 before + match + 2 after = 5
+	if len(results) != 5 {
+		t.Fatalf("expected 5 results, got %d", len(results))
+	}
+	want := []string{"before2", "before1", "error match", "after1", "after2"}
+	for i, w := range want {
+		if string(results[i].Raw) != w {
+			t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, w)
+		}
+	}
+}
+
+func TestSearchWithContextBeforeOnly(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("ctx1")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("ctx2")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("ctx3")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("error")},
+		{IngestTS: t5, SourceID: srcA, Raw: []byte("after")},
+	}
+
+	eng := setup(t, records)
+
+	seq, _ := eng.SearchWithContext(context.Background(), query.Query{
+		Tokens:        []string{"error"},
+		ContextBefore: 2,
+	})
+
+	results, err := collect(seq)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should get: 2 before + match = 3
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+	want := []string{"ctx2", "ctx3", "error"}
+	for i, w := range want {
+		if string(results[i].Raw) != w {
+			t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, w)
+		}
+	}
+}
+
+func TestSearchWithContextAfterOnly(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("before")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("error")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("after1")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("after2")},
+		{IngestTS: t5, SourceID: srcA, Raw: []byte("after3")},
+	}
+
+	eng := setup(t, records)
+
+	seq, _ := eng.SearchWithContext(context.Background(), query.Query{
+		Tokens:       []string{"error"},
+		ContextAfter: 2,
+	})
+
+	results, err := collect(seq)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should get: match + 2 after = 3
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+	want := []string{"error", "after1", "after2"}
+	for i, w := range want {
+		if string(results[i].Raw) != w {
+			t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, w)
+		}
+	}
+}
+
+func TestSearchWithContextCrossChunkBefore(t *testing.T) {
+	batch1 := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("chunk1 rec1")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("chunk1 rec2")},
+	}
+	batch2 := []chunk.Record{
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("error in chunk2")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("chunk2 after")},
+	}
+
+	eng := setup(t, batch1, batch2)
+
+	seq, _ := eng.SearchWithContext(context.Background(), query.Query{
+		Tokens:        []string{"error"},
+		ContextBefore: 3, // Request 3, but only 2 exist before
+	})
+
+	results, err := collect(seq)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should get: 2 from chunk1 + match = 3
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+	want := []string{"chunk1 rec1", "chunk1 rec2", "error in chunk2"}
+	for i, w := range want {
+		if string(results[i].Raw) != w {
+			t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, w)
+		}
+	}
+}
+
+func TestSearchWithContextCrossChunkAfter(t *testing.T) {
+	batch1 := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("before")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("error in chunk1")},
+	}
+	batch2 := []chunk.Record{
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("chunk2 rec1")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("chunk2 rec2")},
+	}
+
+	eng := setup(t, batch1, batch2)
+
+	seq, _ := eng.SearchWithContext(context.Background(), query.Query{
+		Tokens:       []string{"error"},
+		ContextAfter: 3, // Request 3, but only 2 exist after
+	})
+
+	results, err := collect(seq)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should get: match + 2 from chunk2 = 3
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+	want := []string{"error in chunk1", "chunk2 rec1", "chunk2 rec2"}
+	for i, w := range want {
+		if string(results[i].Raw) != w {
+			t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, w)
+		}
+	}
+}
+
+func TestSearchWithContextActiveChunk(t *testing.T) {
+	sealed := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("sealed before")},
+	}
+	active := []chunk.Record{
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("active before")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("error active")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("active after")},
+	}
+
+	eng := setupWithActive(t, [][]chunk.Record{sealed}, active)
+
+	seq, _ := eng.SearchWithContext(context.Background(), query.Query{
+		Tokens:        []string{"error"},
+		ContextBefore: 2,
+		ContextAfter:  1,
+	})
+
+	results, err := collect(seq)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should get: 2 before (crossing from sealed) + match + 1 after = 4
+	if len(results) != 4 {
+		t.Fatalf("expected 4 results, got %d", len(results))
+	}
+	want := []string{"sealed before", "active before", "error active", "active after"}
+	for i, w := range want {
+		if string(results[i].Raw) != w {
+			t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, w)
+		}
+	}
+}
+
+func TestSearchWithContextReverse(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("oldest")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("before match")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("error match")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("after match")},
+		{IngestTS: t5, SourceID: srcA, Raw: []byte("newest")},
+	}
+
+	eng := setup(t, records)
+
+	// Reverse search with context.
+	// In reverse, "before" means chronologically after, "after" means chronologically before.
+	seq, _ := eng.SearchWithContext(context.Background(), query.Query{
+		Start:         t5.Add(time.Second), // Upper bound (exclusive in forward terms)
+		End:           t0,                  // Lower bound
+		Tokens:        []string{"error"},
+		ContextBefore: 1, // 1 record that comes before in iteration order (newer)
+		ContextAfter:  1, // 1 record that comes after in iteration order (older)
+	})
+
+	results, err := collect(seq)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// In reverse: iteration yields newest first.
+	// Context before (in iteration order) = after match (newer)
+	// Context after (in iteration order) = before match (older)
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+	// Reverse iteration order: after match, error match, before match
+	want := []string{"after match", "error match", "before match"}
+	for i, w := range want {
+		if string(results[i].Raw) != w {
+			t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, w)
+		}
+	}
+}
+
+func TestSearchWithContextMultipleMatches(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("ctx1")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("error one")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("middle")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("error two")},
+		{IngestTS: t5, SourceID: srcA, Raw: []byte("ctx2")},
+	}
+
+	eng := setup(t, records)
+
+	seq, _ := eng.SearchWithContext(context.Background(), query.Query{
+		Tokens:        []string{"error"},
+		ContextBefore: 1,
+		ContextAfter:  1,
+	})
+
+	results, err := collect(seq)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// First match: ctx1, error one, middle
+	// Second match: middle, error two, ctx2
+	// Total: 6 records (middle appears twice)
+	if len(results) != 6 {
+		t.Fatalf("expected 6 results, got %d", len(results))
+	}
+	want := []string{"ctx1", "error one", "middle", "middle", "error two", "ctx2"}
+	for i, w := range want {
+		if string(results[i].Raw) != w {
+			t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, w)
+		}
+	}
+}
+
+func TestSearchWithContextNoMatch(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("info one")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("info two")},
+	}
+
+	eng := setup(t, records)
+
+	seq, _ := eng.SearchWithContext(context.Background(), query.Query{
+		Tokens:        []string{"error"},
+		ContextBefore: 2,
+		ContextAfter:  2,
+	})
+
+	results, err := collect(seq)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results, got %d", len(results))
+	}
+}
+
+func TestSearchWithContextLimit(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("before")},
+		{IngestTS: t2, SourceID: srcA, Raw: []byte("error")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("after1")},
+		{IngestTS: t4, SourceID: srcA, Raw: []byte("after2")},
+	}
+
+	eng := setup(t, records)
+
+	seq, _ := eng.SearchWithContext(context.Background(), query.Query{
+		Tokens:        []string{"error"},
+		ContextBefore: 1,
+		ContextAfter:  2,
+		Limit:         3, // Limit to 3 total
+	})
+
+	results, err := collect(seq)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should get: before + error + after1 = 3 (limit reached)
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+	want := []string{"before", "error", "after1"}
+	for i, w := range want {
+		if string(results[i].Raw) != w {
+			t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, w)
+		}
+	}
+}
