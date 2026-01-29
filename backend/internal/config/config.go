@@ -23,6 +23,11 @@ import "context"
 //
 // Store is not accessed on the ingest or query hot path. Persistence must
 // not block ingestion or queries.
+//
+// Validation: Store does not validate config semantics. It only ensures
+// the data can be serialized/deserialized. Semantic validation (duplicate
+// IDs, unknown types, dangling route references) is the responsibility of
+// the component that consumes the config (e.g., Orchestrator at startup).
 type Store interface {
 	// Load reads the configuration. Returns nil config if none exists.
 	Load(ctx context.Context) (*Config, error)
