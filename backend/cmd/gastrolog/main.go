@@ -10,7 +10,7 @@ package main
 import (
 	"context"
 	"flag"
-	"log"
+	"fmt"
 	"log/slog"
 	"net/http"
 	_ "net/http/pprof"
@@ -24,6 +24,7 @@ import (
 	"gastrolog/internal/index"
 	indexfile "gastrolog/internal/index/file"
 	indexmem "gastrolog/internal/index/memory"
+	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/receiver/chatterbox"
 	"gastrolog/internal/source"
@@ -36,11 +37,18 @@ func main() {
 	pprofAddr := flag.String("pprof", "", "pprof HTTP server address (e.g. localhost:6060)")
 	flag.Parse()
 
+	// Create base logger with ComponentFilterHandler for dynamic log level control.
+	baseHandler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelDebug, // Allow all levels; filtering done by ComponentFilterHandler
+	})
+	filterHandler := logging.NewComponentFilterHandler(baseHandler, slog.LevelInfo)
+	logger := slog.New(filterHandler)
+
 	if *pprofAddr != "" {
 		go func() {
-			log.Printf("pprof server listening on %s", *pprofAddr)
+			logger.Info("pprof server listening", "addr", *pprofAddr)
 			if err := http.ListenAndServe(*pprofAddr, nil); err != nil {
-				log.Printf("pprof server error: %v", err)
+				logger.Error("pprof server error", "error", err)
 			}
 		}()
 	}
@@ -48,31 +56,27 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	if err := run(ctx, *configPath, *sourcesPath); err != nil {
-		log.Fatal(err)
+	if err := run(ctx, logger, *configPath, *sourcesPath); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, configPath, sourcesPath string) error {
-	// Create base logger.
-	// This is the only place where logger configuration happens.
-	// All components receive this logger (or a child) via dependency injection.
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
-
+func run(ctx context.Context, logger *slog.Logger, configPath, sourcesPath string) error {
 	// Load configuration.
-	log.Printf("loading config from %s", configPath)
+	logger.Info("loading config", "path", configPath)
 	cfgStore := configfile.NewStore(configPath)
 	cfg, err := cfgStore.Load(ctx)
 	if err != nil {
 		return err
 	}
 	if cfg == nil {
-		log.Printf("no config found, running with empty configuration")
+		logger.Info("no config found, running with empty configuration")
 	} else {
-		log.Printf("loaded config: %d receivers, %d stores, %d routes",
-			len(cfg.Receivers), len(cfg.Stores), len(cfg.Routes))
+		logger.Info("loaded config",
+			"receivers", len(cfg.Receivers),
+			"stores", len(cfg.Stores),
+			"routes", len(cfg.Routes))
 	}
 
 	// Create source registry.
@@ -98,21 +102,21 @@ func run(ctx context.Context, configPath, sourcesPath string) error {
 	}
 
 	// Start the orchestrator.
-	log.Printf("starting orchestrator")
+	logger.Info("starting orchestrator")
 	if err := orch.Start(ctx); err != nil {
 		return err
 	}
-	log.Printf("orchestrator started, waiting for shutdown signal")
+	logger.Info("orchestrator started, waiting for shutdown signal")
 
 	// Wait for shutdown signal.
 	<-ctx.Done()
 
 	// Stop the orchestrator.
-	log.Printf("shutting down")
+	logger.Info("shutting down")
 	if err := orch.Stop(); err != nil {
 		return err
 	}
-	log.Printf("shutdown complete")
+	logger.Info("shutdown complete")
 	return nil
 }
 
