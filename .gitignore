@@ -27,6 +27,7 @@ go.work
 *.code-workspace
 .vscode/
 
-# Service artifact
+# Service artifacts
 config.json
 sources.json
+data

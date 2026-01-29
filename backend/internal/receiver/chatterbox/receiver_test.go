@@ -12,14 +12,14 @@ import (
 func TestNewReceiver_Defaults(t *testing.T) {
 	r, err := NewReceiver(nil)
 	if err != nil {
-		t.Fatalf("New(nil) failed: %v", err)
+		t.Fatalf("NewReceiver(nil) failed: %v", err)
 	}
 	recv := r.(*Receiver)
 	if recv.minInterval != 100*time.Millisecond {
 		t.Errorf("minInterval = %v, want 100ms", recv.minInterval)
 	}
-	if recv.maxInterval != 1000*time.Millisecond {
-		t.Errorf("maxInterval = %v, want 1000ms", recv.maxInterval)
+	if recv.maxInterval != 1*time.Second {
+		t.Errorf("maxInterval = %v, want 1s", recv.maxInterval)
 	}
 	if recv.instance != "default" {
 		t.Errorf("instance = %q, want %q", recv.instance, "default")
@@ -28,13 +28,13 @@ func TestNewReceiver_Defaults(t *testing.T) {
 
 func TestNewReceiver_CustomParams(t *testing.T) {
 	params := map[string]string{
-		"min_interval_ms": "50",
-		"max_interval_ms": "200",
-		"instance":        "test-instance",
+		"min_interval": "50ms",
+		"max_interval": "200ms",
+		"instance":     "test-instance",
 	}
 	r, err := NewReceiver(params)
 	if err != nil {
-		t.Fatalf("New(params) failed: %v", err)
+		t.Fatalf("NewReceiver(params) failed: %v", err)
 	}
 	recv := r.(*Receiver)
 	if recv.minInterval != 50*time.Millisecond {
@@ -48,42 +48,78 @@ func TestNewReceiver_CustomParams(t *testing.T) {
 	}
 }
 
+func TestNewReceiver_SubMillisecond(t *testing.T) {
+	params := map[string]string{
+		"min_interval": "100us",
+		"max_interval": "500us",
+	}
+	r, err := NewReceiver(params)
+	if err != nil {
+		t.Fatalf("NewReceiver(params) failed: %v", err)
+	}
+	recv := r.(*Receiver)
+	if recv.minInterval != 100*time.Microsecond {
+		t.Errorf("minInterval = %v, want 100us", recv.minInterval)
+	}
+	if recv.maxInterval != 500*time.Microsecond {
+		t.Errorf("maxInterval = %v, want 500us", recv.maxInterval)
+	}
+}
+
+func TestNewReceiver_MixedUnits(t *testing.T) {
+	params := map[string]string{
+		"min_interval": "1.5ms",
+		"max_interval": "2s",
+	}
+	r, err := NewReceiver(params)
+	if err != nil {
+		t.Fatalf("NewReceiver(params) failed: %v", err)
+	}
+	recv := r.(*Receiver)
+	if recv.minInterval != 1500*time.Microsecond {
+		t.Errorf("minInterval = %v, want 1.5ms", recv.minInterval)
+	}
+	if recv.maxInterval != 2*time.Second {
+		t.Errorf("maxInterval = %v, want 2s", recv.maxInterval)
+	}
+}
+
 func TestNewReceiver_InvalidMinInterval(t *testing.T) {
-	params := map[string]string{"min_interval_ms": "not-a-number"}
+	params := map[string]string{"min_interval": "not-a-duration"}
 	_, err := NewReceiver(params)
 	if err == nil {
-		t.Error("expected error for invalid min_interval_ms")
+		t.Error("expected error for invalid min_interval")
 	}
 }
 
 func TestNewReceiver_InvalidMaxInterval(t *testing.T) {
-	params := map[string]string{"max_interval_ms": "not-a-number"}
+	params := map[string]string{"max_interval": "not-a-duration"}
 	_, err := NewReceiver(params)
 	if err == nil {
-		t.Error("expected error for invalid max_interval_ms")
+		t.Error("expected error for invalid max_interval")
 	}
 }
 
 func TestNewReceiver_NegativeMinInterval(t *testing.T) {
-	params := map[string]string{"min_interval_ms": "-10"}
+	params := map[string]string{"min_interval": "-10ms"}
 	_, err := NewReceiver(params)
 	if err == nil {
-		t.Error("expected error for negative min_interval_ms")
+		t.Error("expected error for negative min_interval")
 	}
 }
 
 func TestNewReceiver_NegativeMaxInterval(t *testing.T) {
-	params := map[string]string{"max_interval_ms": "-10"}
+	params := map[string]string{"max_interval": "-10ms"}
 	_, err := NewReceiver(params)
 	if err == nil {
-		t.Error("expected error for negative max_interval_ms")
+		t.Error("expected error for negative max_interval")
 	}
 }
 
 func TestNewReceiver_MinExceedsMax(t *testing.T) {
 	params := map[string]string{
-		"min_interval_ms": "500",
-		"max_interval_ms": "100",
+		"min_interval": "500ms",
+		"max_interval": "100ms",
 	}
 	_, err := NewReceiver(params)
 	if err == nil {
@@ -93,12 +129,12 @@ func TestNewReceiver_MinExceedsMax(t *testing.T) {
 
 func TestNewReceiver_EqualMinMax(t *testing.T) {
 	params := map[string]string{
-		"min_interval_ms": "100",
-		"max_interval_ms": "100",
+		"min_interval": "100ms",
+		"max_interval": "100ms",
 	}
 	r, err := NewReceiver(params)
 	if err != nil {
-		t.Fatalf("New with min=max should succeed: %v", err)
+		t.Fatalf("NewReceiver with min=max should succeed: %v", err)
 	}
 	recv := r.(*Receiver)
 	if recv.minInterval != recv.maxInterval {
@@ -108,13 +144,13 @@ func TestNewReceiver_EqualMinMax(t *testing.T) {
 
 func TestRun_EmitsMessages(t *testing.T) {
 	params := map[string]string{
-		"min_interval_ms": "1",
-		"max_interval_ms": "5",
-		"instance":        "emit-test",
+		"min_interval": "1ms",
+		"max_interval": "5ms",
+		"instance":     "emit-test",
 	}
 	r, err := NewReceiver(params)
 	if err != nil {
-		t.Fatalf("New failed: %v", err)
+		t.Fatalf("NewReceiver failed: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -163,12 +199,12 @@ func TestRun_EmitsMessages(t *testing.T) {
 
 func TestRun_StopsOnContextCancel(t *testing.T) {
 	params := map[string]string{
-		"min_interval_ms": "1000",
-		"max_interval_ms": "2000",
+		"min_interval": "1s",
+		"max_interval": "2s",
 	}
 	r, err := NewReceiver(params)
 	if err != nil {
-		t.Fatalf("New failed: %v", err)
+		t.Fatalf("NewReceiver failed: %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -193,14 +229,14 @@ func TestRun_StopsOnContextCancel(t *testing.T) {
 
 func TestRun_MultipleInstances(t *testing.T) {
 	params1 := map[string]string{
-		"min_interval_ms": "1",
-		"max_interval_ms": "5",
-		"instance":        "instance-1",
+		"min_interval": "1ms",
+		"max_interval": "5ms",
+		"instance":     "instance-1",
 	}
 	params2 := map[string]string{
-		"min_interval_ms": "1",
-		"max_interval_ms": "5",
-		"instance":        "instance-2",
+		"min_interval": "1ms",
+		"max_interval": "5ms",
+		"instance":     "instance-2",
 	}
 
 	r1, err := NewReceiver(params1)
@@ -209,7 +245,7 @@ func TestRun_MultipleInstances(t *testing.T) {
 	}
 	r2, err := NewReceiver(params2)
 	if err != nil {
-		t.Fatalf("New(params2) failed: %v", err)
+		t.Fatalf("NewReceiver(params2) failed: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -255,7 +291,7 @@ func TestRun_MultipleInstances(t *testing.T) {
 func TestRun_ReturnsNilOnCancel(t *testing.T) {
 	r, err := NewReceiver(nil)
 	if err != nil {
-		t.Fatalf("New failed: %v", err)
+		t.Fatalf("NewReceiver failed: %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -279,7 +315,7 @@ func TestRun_ReturnsNilOnCancel(t *testing.T) {
 func TestGenerateMessage_Format(t *testing.T) {
 	r, err := NewReceiver(map[string]string{"instance": "format-test"})
 	if err != nil {
-		t.Fatalf("New failed: %v", err)
+		t.Fatalf("NewReceiver failed: %v", err)
 	}
 	recv := r.(*Receiver)
 
@@ -307,11 +343,11 @@ func TestGenerateMessage_Format(t *testing.T) {
 
 func TestRandomInterval_Bounds(t *testing.T) {
 	r, err := NewReceiver(map[string]string{
-		"min_interval_ms": "10",
-		"max_interval_ms": "20",
+		"min_interval": "10ms",
+		"max_interval": "20ms",
 	})
 	if err != nil {
-		t.Fatalf("New failed: %v", err)
+		t.Fatalf("NewReceiver failed: %v", err)
 	}
 	recv := r.(*Receiver)
 
@@ -325,11 +361,11 @@ func TestRandomInterval_Bounds(t *testing.T) {
 
 func TestRandomInterval_EqualBounds(t *testing.T) {
 	r, err := NewReceiver(map[string]string{
-		"min_interval_ms": "50",
-		"max_interval_ms": "50",
+		"min_interval": "50ms",
+		"max_interval": "50ms",
 	})
 	if err != nil {
-		t.Fatalf("New failed: %v", err)
+		t.Fatalf("NewReceiver failed: %v", err)
 	}
 	recv := r.(*Receiver)
 
