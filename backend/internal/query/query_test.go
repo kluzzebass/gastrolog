@@ -122,11 +122,12 @@ func setup(t *testing.T, batches ...[]chunk.Record) *query.Engine {
 		timeIdx,
 		srcIdx,
 		tokIdx,
+		nil,
 	)
 
 	buildIndexes(t, cm, im)
 
-	return query.New(cm, im)
+	return query.New(cm, im, nil)
 }
 
 // setupWithActive is like setup but leaves the last batch unsealed (active chunk).
@@ -169,11 +170,12 @@ func setupWithActive(t *testing.T, sealed [][]chunk.Record, active []chunk.Recor
 		timeIdx,
 		srcIdx,
 		tokIdx,
+		nil,
 	)
 
 	buildIndexes(t, cm, im)
 
-	return query.New(cm, im)
+	return query.New(cm, im, nil)
 }
 
 func TestSearchNoChunks(t *testing.T) {
@@ -2289,10 +2291,11 @@ func TestSearchSealedWithoutIndexes(t *testing.T) {
 		timeIdx,
 		srcIdx,
 		tokIdx,
+		nil,
 	)
 	// Note: NOT calling buildIndexes - indexes don't exist.
 
-	eng := query.New(cm, im)
+	eng := query.New(cm, im, nil)
 
 	// Query with time filter - should fall back to sequential scan.
 	t.Run("time filter", func(t *testing.T) {

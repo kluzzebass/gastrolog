@@ -1,10 +1,17 @@
 // Command gastrolog runs the log aggregation service.
+//
+// Logging:
+//   - Base logger is created here with output format and level
+//   - Logger is passed to all components via dependency injection
+//   - No global slog configuration (no slog.SetDefault)
+//   - Components scope loggers with their own attributes
 package main
 
 import (
 	"context"
 	"flag"
 	"log"
+	"log/slog"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -47,6 +54,13 @@ func main() {
 }
 
 func run(ctx context.Context, configPath, sourcesPath string) error {
+	// Create base logger.
+	// This is the only place where logger configuration happens.
+	// All components receive this logger (or a child) via dependency injection.
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+
 	// Load configuration.
 	log.Printf("loading config from %s", configPath)
 	cfgStore := configfile.NewStore(configPath)
@@ -64,7 +78,8 @@ func run(ctx context.Context, configPath, sourcesPath string) error {
 	// Create source registry.
 	sourceStore := sourcefile.NewStore(sourcesPath)
 	sources, err := source.NewRegistry(source.Config{
-		Store: sourceStore,
+		Store:  sourceStore,
+		Logger: logger,
 	})
 	if err != nil {
 		return err
@@ -74,10 +89,11 @@ func run(ctx context.Context, configPath, sourcesPath string) error {
 	// Create orchestrator.
 	orch := orchestrator.New(orchestrator.Config{
 		Sources: sources,
+		Logger:  logger,
 	})
 
 	// Apply configuration with factories.
-	if err := orch.ApplyConfig(cfg, buildFactories()); err != nil {
+	if err := orch.ApplyConfig(cfg, buildFactories(logger)); err != nil {
 		return err
 	}
 
@@ -101,7 +117,8 @@ func run(ctx context.Context, configPath, sourcesPath string) error {
 }
 
 // buildFactories creates the factory maps for all supported component types.
-func buildFactories() orchestrator.Factories {
+// The logger is passed to component factories for structured logging.
+func buildFactories(logger *slog.Logger) orchestrator.Factories {
 	return orchestrator.Factories{
 		Receivers: map[string]orchestrator.ReceiverFactory{
 			"chatterbox": chatterbox.NewReceiver,
@@ -114,5 +131,6 @@ func buildFactories() orchestrator.Factories {
 			"file":   indexfile.NewFactory(),
 			"memory": indexmem.NewFactory(),
 		},
+		Logger: logger,
 	}
 }

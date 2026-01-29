@@ -3,12 +3,14 @@ package file
 import (
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/logging"
 )
 
 var ErrMissingDir = errors.New("file chunk manager dir is required")
@@ -29,8 +31,19 @@ type Config struct {
 	// Zero means use DefaultMetaFlushInterval. Negative disables background
 	// flushing (meta is only written on Seal/Close).
 	MetaFlushInterval time.Duration
+
+	// Logger for structured logging. If nil, logging is disabled.
+	// The manager scopes this logger with component="chunk-manager".
+	Logger *slog.Logger
 }
 
+// Manager manages file-based chunk storage.
+//
+// Logging:
+//   - Logger is dependency-injected via Config.Logger
+//   - Manager owns its scoped logger (component="chunk-manager", type="file")
+//   - Logging is intentionally sparse; only lifecycle events are logged
+//   - No logging in hot paths (Append, cursor iteration)
 type Manager struct {
 	mu      sync.Mutex
 	cfg     Config
@@ -43,6 +56,10 @@ type Manager struct {
 	metaDirty   bool
 	flushStopCh chan struct{}
 	flushWg     sync.WaitGroup
+
+	// Logger for this manager instance.
+	// Scoped with component="chunk-manager", type="file" at construction time.
+	logger *slog.Logger
 }
 
 type chunkState struct {
@@ -72,11 +89,15 @@ func NewManager(cfg Config) (*Manager, error) {
 		return nil, err
 	}
 
+	// Scope logger with component identity.
+	logger := logging.Default(cfg.Logger).With("component", "chunk-manager", "type", "file")
+
 	manager := &Manager{
 		cfg:         cfg,
 		metas:       make(map[chunk.ChunkID]chunk.ChunkMeta),
 		sources:     make(map[chunk.ChunkID]*SourceMap),
 		flushStopCh: make(chan struct{}),
+		logger:      logger,
 	}
 	if err := manager.loadExisting(); err != nil {
 		return nil, err

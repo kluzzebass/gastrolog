@@ -2,9 +2,11 @@ package chatterbox
 
 import (
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
 	"time"
 
+	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -23,9 +25,11 @@ const (
 //
 // Intervals use Go duration format: "100us", "1.5ms", "2s", etc.
 //
+// If logger is nil, logging is disabled.
+//
 // Returns an error if parameters are invalid (e.g., unparseable duration,
 // min > max, negative values).
-func NewReceiver(params map[string]string) (orchestrator.Receiver, error) {
+func NewReceiver(params map[string]string, logger *slog.Logger) (orchestrator.Receiver, error) {
 	minInterval := defaultMinInterval
 	maxInterval := defaultMaxInterval
 	instance := defaultInstance
@@ -60,10 +64,18 @@ func NewReceiver(params map[string]string) (orchestrator.Receiver, error) {
 		instance = v
 	}
 
+	// Scope logger with component identity.
+	scopedLogger := logging.Default(logger).With(
+		"component", "receiver",
+		"type", "chatterbox",
+		"instance", instance,
+	)
+
 	return &Receiver{
 		minInterval: minInterval,
 		maxInterval: maxInterval,
 		instance:    instance,
 		rng:         rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64())),
+		logger:      scopedLogger,
 	}, nil
 }

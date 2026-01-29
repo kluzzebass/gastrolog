@@ -1,10 +1,12 @@
 package source
 
 import (
+	"log/slog"
 	"sync"
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/logging"
 )
 
 // Registry manages source identity and metadata.
@@ -15,6 +17,11 @@ import (
 //   - New or updated sources are queued for async persistence
 //   - Persistence failures do not break ingestion
 //   - On startup, registry loads existing sources from store (best effort)
+//
+// Logging:
+//   - Logger is dependency-injected via Config.Logger
+//   - Registry owns its scoped logger (component="source-registry")
+//   - Logging is intentionally sparse; only lifecycle events are logged
 type Registry struct {
 	mu sync.RWMutex
 
@@ -33,6 +40,10 @@ type Registry struct {
 
 	// Clock for testing
 	now func() time.Time
+
+	// Logger for this registry instance.
+	// Scoped with component="source-registry" at construction time.
+	logger *slog.Logger
 }
 
 // Config configures a Registry.
@@ -46,6 +57,10 @@ type Config struct {
 
 	// Now returns the current time. Defaults to time.Now.
 	Now func() time.Time
+
+	// Logger for structured logging. If nil, logging is disabled.
+	// The registry scopes this logger with component="source-registry".
+	Logger *slog.Logger
 }
 
 // NewRegistry creates a Registry with the given configuration.
@@ -58,6 +73,9 @@ func NewRegistry(cfg Config) (*Registry, error) {
 		cfg.Now = time.Now
 	}
 
+	// Scope logger with component identity.
+	logger := logging.Default(cfg.Logger).With("component", "source-registry")
+
 	r := &Registry{
 		byKey:     make(map[sourceKey]*Source),
 		byID:      make(map[chunk.SourceID]*Source),
@@ -65,6 +83,7 @@ func NewRegistry(cfg Config) (*Registry, error) {
 		persistCh: make(chan *Source, cfg.PersistQueueSize),
 		stopCh:    make(chan struct{}),
 		now:       cfg.Now,
+		logger:    logger,
 	}
 
 	// Load existing sources from store.

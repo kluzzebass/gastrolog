@@ -5,6 +5,7 @@ package chatterbox
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
 	"time"
 
@@ -13,11 +14,21 @@ import (
 
 // Receiver emits random log-like messages at random intervals.
 // It implements orchestrator.Receiver.
+//
+// Logging:
+//   - Logger is dependency-injected via the factory
+//   - Receiver owns its scoped logger (component="receiver", type="chatterbox")
+//   - Logging is intentionally sparse; only lifecycle events are logged
+//   - No logging in the message generation loop
 type Receiver struct {
 	minInterval time.Duration
 	maxInterval time.Duration
 	instance    string
 	rng         *rand.Rand
+
+	// Logger for this receiver instance.
+	// Scoped with component="receiver", type="chatterbox" at construction time.
+	logger *slog.Logger
 }
 
 // Run starts the receiver and emits messages to the output channel.

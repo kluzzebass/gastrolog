@@ -55,7 +55,7 @@ func setupManager(t *testing.T, records []chunk.Record) (*Manager, chunk.ChunkMa
 	indexDir := t.TempDir()
 	timeIndexer := filetime.NewIndexer(indexDir, chunkMgr, 1)
 	sourceIndexer := filesource.NewIndexer(indexDir, chunkMgr)
-	mgr := NewManager(indexDir, []index.Indexer{timeIndexer, sourceIndexer})
+	mgr := NewManager(indexDir, []index.Indexer{timeIndexer, sourceIndexer}, nil)
 	return mgr, chunkMgr, chunkID
 }
 
@@ -104,7 +104,7 @@ func TestBuildIndexesUnsealedChunk(t *testing.T) {
 
 	indexDir := t.TempDir()
 	timeIndexer := filetime.NewIndexer(indexDir, chunkMgr, 1)
-	mgr := NewManager(indexDir, []index.Indexer{timeIndexer})
+	mgr := NewManager(indexDir, []index.Indexer{timeIndexer}, nil)
 
 	err = mgr.BuildIndexes(context.Background(), chunkID)
 	if err == nil {
@@ -139,7 +139,7 @@ func TestOpenTimeIndex(t *testing.T) {
 
 func TestOpenTimeIndexNotBuilt(t *testing.T) {
 	indexDir := t.TempDir()
-	mgr := NewManager(indexDir, nil)
+	mgr := NewManager(indexDir, nil, nil)
 
 	_, err := mgr.OpenTimeIndex(chunk.NewChunkID())
 	if err == nil {
@@ -168,7 +168,7 @@ func TestOpenSourceIndex(t *testing.T) {
 
 func TestOpenSourceIndexNotBuilt(t *testing.T) {
 	indexDir := t.TempDir()
-	mgr := NewManager(indexDir, nil)
+	mgr := NewManager(indexDir, nil, nil)
 
 	_, err := mgr.OpenSourceIndex(chunk.NewChunkID())
 	if err == nil {

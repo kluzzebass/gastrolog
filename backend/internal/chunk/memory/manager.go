@@ -1,23 +1,40 @@
 package memory
 
 import (
+	"log/slog"
 	"sync"
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/logging"
 )
 
 type Config struct {
 	MaxChunkBytes int64
 	Now           func() time.Time
 	MetaStore     chunk.MetaStore
+
+	// Logger for structured logging. If nil, logging is disabled.
+	// The manager scopes this logger with component="chunk-manager".
+	Logger *slog.Logger
 }
 
+// Manager manages in-memory chunk storage.
+//
+// Logging:
+//   - Logger is dependency-injected via Config.Logger
+//   - Manager owns its scoped logger (component="chunk-manager", type="memory")
+//   - Logging is intentionally sparse; only lifecycle events are logged
+//   - No logging in hot paths (Append, cursor iteration)
 type Manager struct {
 	mu     sync.Mutex
 	cfg    Config
 	active *chunkState
 	chunks []*chunkState
+
+	// Logger for this manager instance.
+	// Scoped with component="chunk-manager", type="memory" at construction time.
+	logger *slog.Logger
 }
 
 type chunkState struct {
@@ -33,9 +50,14 @@ func NewManager(cfg Config) (*Manager, error) {
 	if cfg.MetaStore == nil {
 		cfg.MetaStore = NewMetaStore()
 	}
+
+	// Scope logger with component identity.
+	logger := logging.Default(cfg.Logger).With("component", "chunk-manager", "type", "memory")
+
 	manager := &Manager{
 		cfg:    cfg,
 		chunks: make([]*chunkState, 0),
+		logger: logger,
 	}
 	return manager, nil
 }

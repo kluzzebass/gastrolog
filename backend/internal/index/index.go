@@ -3,6 +3,7 @@ package index
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"gastrolog/internal/chunk"
@@ -17,7 +18,10 @@ var ErrIndexNotFound = errors.New("index not found")
 //
 // The chunkManager parameter is required because indexers need to read
 // chunk data to build indexes.
-type ManagerFactory func(params map[string]string, chunkManager chunk.ChunkManager) (IndexManager, error)
+//
+// The logger parameter is optional. If nil, the manager disables logging.
+// Factories should scope the logger with component-specific attributes.
+type ManagerFactory func(params map[string]string, chunkManager chunk.ChunkManager, logger *slog.Logger) (IndexManager, error)
 
 type Indexer interface {
 	// Name returns a stable identifier for this indexer

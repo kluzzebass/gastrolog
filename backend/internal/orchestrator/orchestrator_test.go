@@ -54,10 +54,11 @@ func newTestSetup(maxChunkBytes int64) (*orchestrator.Orchestrator, chunk.ChunkM
 		timeIdx,
 		srcIdx,
 		tokIdx,
+		nil,
 	)
 
 	tracker := &trackingIndexManager{IndexManager: im}
-	qe := query.New(cm, im)
+	qe := query.New(cm, im, nil)
 
 	orch := orchestrator.New(orchestrator.Config{})
 	orch.RegisterChunkManager("default", cm)
@@ -230,7 +231,7 @@ func TestSearchViaOrchestrator(t *testing.T) {
 	}
 
 	// Compare with direct query engine call.
-	qe := query.New(cm, indexmem.NewManager(nil, nil, nil, nil))
+	qe := query.New(cm, indexmem.NewManager(nil, nil, nil, nil, nil), nil)
 	directSeq, _ := qe.Search(context.Background(), query.Query{}, nil)
 
 	var directResults []string
@@ -498,9 +499,10 @@ func newReceiverTestSetup() (*orchestrator.Orchestrator, chunk.ChunkManager, *so
 		timeIdx,
 		srcIdx,
 		tokIdx,
+		nil,
 	)
 
-	qe := query.New(cm, im)
+	qe := query.New(cm, im, nil)
 	srcReg, _ := source.NewRegistry(source.Config{})
 
 	orch := orchestrator.New(orchestrator.Config{
@@ -707,10 +709,11 @@ func TestReceiverIndexBuildOnSeal(t *testing.T) {
 		timeIdx,
 		srcIdx,
 		tokIdx,
+		nil,
 	)
 
 	tracker := &trackingIndexManager{IndexManager: im}
-	qe := query.New(cm, im)
+	qe := query.New(cm, im, nil)
 	srcReg, _ := source.NewRegistry(source.Config{})
 
 	orch := orchestrator.New(orchestrator.Config{

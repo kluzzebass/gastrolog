@@ -6,11 +6,13 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
+	"gastrolog/internal/logging"
 	"gastrolog/internal/query"
 	"gastrolog/internal/source"
 )
@@ -48,6 +50,12 @@ var (
 //   - Start() launches one goroutine per receiver plus an ingest loop.
 //   - Stop() cancels all receivers and the ingest loop via context.
 //   - Receivers emit IngestMessages; orchestrator resolves identity and routes.
+//
+// Logging:
+//   - Logger is dependency-injected via Config.Logger
+//   - Orchestrator owns its scoped logger (component="orchestrator")
+//   - Subcomponents receive child loggers with additional context
+//   - Logging is intentionally sparse; only lifecycle events are logged
 type Orchestrator struct {
 	mu sync.RWMutex
 
@@ -76,6 +84,10 @@ type Orchestrator struct {
 
 	// Clock for testing.
 	now func() time.Time
+
+	// Logger for this orchestrator instance.
+	// Scoped with component="orchestrator" at construction time.
+	logger *slog.Logger
 }
 
 // Config configures an Orchestrator.
@@ -89,6 +101,10 @@ type Config struct {
 
 	// Now returns the current time. Defaults to time.Now.
 	Now func() time.Time
+
+	// Logger for structured logging. If nil, logging is disabled.
+	// The orchestrator scopes this logger with component="orchestrator".
+	Logger *slog.Logger
 }
 
 // New creates an Orchestrator with empty registries.
@@ -104,6 +120,9 @@ func New(cfg Config) *Orchestrator {
 	// This is replaced with a fresh context if Start() is called.
 	indexCtx, indexCancel := context.WithCancel(context.Background())
 
+	// Scope logger with component identity.
+	logger := logging.Default(cfg.Logger).With("component", "orchestrator")
+
 	return &Orchestrator{
 		chunks:      make(map[string]chunk.ChunkManager),
 		indexes:     make(map[string]index.IndexManager),
@@ -114,5 +133,12 @@ func New(cfg Config) *Orchestrator {
 		now:         cfg.Now,
 		indexCtx:    indexCtx,
 		indexCancel: indexCancel,
+		logger:      logger,
 	}
+}
+
+// Logger returns a child logger scoped for a subcomponent.
+// Use this when passing loggers to components created by the orchestrator.
+func (o *Orchestrator) Logger() *slog.Logger {
+	return o.logger
 }

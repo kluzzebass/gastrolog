@@ -3,6 +3,7 @@ package file
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 
 	"gastrolog/internal/chunk"
@@ -29,7 +30,7 @@ var (
 
 // NewFactory returns a factory function that creates file-based IndexManagers.
 func NewFactory() index.ManagerFactory {
-	return func(params map[string]string, chunkManager chunk.ChunkManager) (index.IndexManager, error) {
+	return func(params map[string]string, chunkManager chunk.ChunkManager, logger *slog.Logger) (index.IndexManager, error) {
 		dir, ok := params[ParamDir]
 		if !ok || dir == "" {
 			return nil, ErrMissingDirParam
@@ -53,6 +54,6 @@ func NewFactory() index.ManagerFactory {
 			filetoken.NewIndexer(dir, chunkManager),
 		}
 
-		return NewManager(dir, indexers), nil
+		return NewManager(dir, indexers, logger), nil
 	}
 }

@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 
 	"gastrolog/internal/chunk"
@@ -66,7 +67,7 @@ func TestApplyConfigStores(t *testing.T) {
 			},
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": func(params map[string]string, cm chunk.ChunkManager) (index.IndexManager, error) {
+			"memory": func(params map[string]string, cm chunk.ChunkManager, logger *slog.Logger) (index.IndexManager, error) {
 				return &fakeIndexManager{}, nil
 			},
 		},
@@ -101,7 +102,7 @@ func TestApplyConfigReceivers(t *testing.T) {
 
 	factories := Factories{
 		Receivers: map[string]ReceiverFactory{
-			"test": func(params map[string]string) (Receiver, error) {
+			"test": func(params map[string]string, logger *slog.Logger) (Receiver, error) {
 				return &fakeReceiver{}, nil
 			},
 		},
@@ -193,7 +194,7 @@ func TestApplyConfigDuplicateStoreID(t *testing.T) {
 			},
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": func(params map[string]string, cm chunk.ChunkManager) (index.IndexManager, error) {
+			"memory": func(params map[string]string, cm chunk.ChunkManager, logger *slog.Logger) (index.IndexManager, error) {
 				return &fakeIndexManager{}, nil
 			},
 		},
@@ -217,7 +218,7 @@ func TestApplyConfigDuplicateReceiverID(t *testing.T) {
 
 	factories := Factories{
 		Receivers: map[string]ReceiverFactory{
-			"test": func(params map[string]string) (Receiver, error) {
+			"test": func(params map[string]string, logger *slog.Logger) (Receiver, error) {
 				return &fakeReceiver{}, nil
 			},
 		},
@@ -246,7 +247,7 @@ func TestApplyConfigChunkManagerFactoryError(t *testing.T) {
 			},
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": func(params map[string]string, cm chunk.ChunkManager) (index.IndexManager, error) {
+			"memory": func(params map[string]string, cm chunk.ChunkManager, logger *slog.Logger) (index.IndexManager, error) {
 				return &fakeIndexManager{}, nil
 			},
 		},
@@ -274,7 +275,7 @@ func TestApplyConfigIndexManagerFactoryError(t *testing.T) {
 			},
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"memory": func(params map[string]string, cm chunk.ChunkManager) (index.IndexManager, error) {
+			"memory": func(params map[string]string, cm chunk.ChunkManager, logger *slog.Logger) (index.IndexManager, error) {
 				return nil, errors.New("factory error")
 			},
 		},
@@ -297,7 +298,7 @@ func TestApplyConfigReceiverFactoryError(t *testing.T) {
 
 	factories := Factories{
 		Receivers: map[string]ReceiverFactory{
-			"test": func(params map[string]string) (Receiver, error) {
+			"test": func(params map[string]string, logger *slog.Logger) (Receiver, error) {
 				return nil, errors.New("factory error")
 			},
 		},
@@ -321,7 +322,7 @@ func TestApplyConfigParamsPassedToReceiverFactory(t *testing.T) {
 	var receivedParams map[string]string
 	factories := Factories{
 		Receivers: map[string]ReceiverFactory{
-			"test": func(params map[string]string) (Receiver, error) {
+			"test": func(params map[string]string, logger *slog.Logger) (Receiver, error) {
 				receivedParams = params
 				return &fakeReceiver{}, nil
 			},
@@ -364,7 +365,7 @@ func TestApplyConfigParamsPassedToStoreFactories(t *testing.T) {
 			},
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"test": func(params map[string]string, cm chunk.ChunkManager) (index.IndexManager, error) {
+			"test": func(params map[string]string, cm chunk.ChunkManager, logger *slog.Logger) (index.IndexManager, error) {
 				imReceivedParams = params
 				return &fakeIndexManager{}, nil
 			},
@@ -415,7 +416,7 @@ func TestApplyConfigIndexManagerReceivesChunkManager(t *testing.T) {
 			},
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"test": func(params map[string]string, cm chunk.ChunkManager) (index.IndexManager, error) {
+			"test": func(params map[string]string, cm chunk.ChunkManager, logger *slog.Logger) (index.IndexManager, error) {
 				receivedCM = cm
 				return &fakeIndexManager{}, nil
 			},

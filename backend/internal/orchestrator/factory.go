@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"fmt"
+	"log/slog"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
@@ -17,14 +18,24 @@ import (
 // The caller (typically main or a bootstrap package) populates these maps
 // by importing concrete implementation packages and calling their NewFactory()
 // functions.
+//
+// Logging:
+//   - Logger is passed to factories that support it
+//   - Factories create child loggers scoped to their component
+//   - If Logger is nil, components use discard loggers
 type Factories struct {
 	Receivers     map[string]ReceiverFactory
 	ChunkManagers map[string]chunk.ManagerFactory
 	IndexManagers map[string]index.ManagerFactory
 
+	// Logger is the base logger passed to component factories.
+	// Components derive child loggers with their own scope.
+	// If nil, components use discard loggers.
+	Logger *slog.Logger
+
 	// Note: No QueryEngineFactory is needed because QueryEngine construction
-	// is trivial and uniform (query.New(cm, im)). If QueryEngine ever requires
-	// configuration, add a factory here.
+	// is trivial and uniform (query.New(cm, im, logger)). If QueryEngine ever
+	// requires configuration, add a factory here.
 }
 
 // ApplyConfig creates and registers components based on the provided configuration.
@@ -84,13 +95,21 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 		}
 
 		// Create index manager (needs chunk manager for reading data).
-		im, err := imFactory(storeCfg.Params, cm)
+		var imLogger *slog.Logger
+		if factories.Logger != nil {
+			imLogger = factories.Logger.With("store", storeCfg.ID)
+		}
+		im, err := imFactory(storeCfg.Params, cm, imLogger)
 		if err != nil {
 			return fmt.Errorf("create index manager %s: %w", storeCfg.ID, err)
 		}
 
-		// Create query engine.
-		qe := query.New(cm, im)
+		// Create query engine with scoped logger.
+		var qeLogger *slog.Logger
+		if factories.Logger != nil {
+			qeLogger = factories.Logger.With("store", storeCfg.ID)
+		}
+		qe := query.New(cm, im, qeLogger)
 
 		// Register all components.
 		o.RegisterChunkManager(storeCfg.ID, cm)
@@ -111,8 +130,12 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 			return fmt.Errorf("unknown receiver type: %s", recvCfg.Type)
 		}
 
-		// Create receiver.
-		recv, err := recvFactory(recvCfg.Params)
+		// Create receiver with scoped logger.
+		var recvLogger *slog.Logger
+		if factories.Logger != nil {
+			recvLogger = factories.Logger.With("receiver_id", recvCfg.ID)
+		}
+		recv, err := recvFactory(recvCfg.Params, recvLogger)
 		if err != nil {
 			return fmt.Errorf("create receiver %s: %w", recvCfg.ID, err)
 		}

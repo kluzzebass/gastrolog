@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"log/slog"
 	"time"
 )
 
@@ -29,8 +30,11 @@ type Receiver interface {
 // constructed receiver or a descriptive error.
 // Factories must not start goroutines or perform I/O beyond validation.
 //
+// The logger parameter is optional. If nil, the receiver disables logging.
+// Factories should scope the logger with component-specific attributes.
+//
 // This type is defined in the orchestrator package because Receiver is
 // defined here. Concrete factory implementations live in their respective
 // receiver packages (e.g., syslog.NewFactory()). The orchestrator never
 // contains receiver construction logic - it only calls factories.
-type ReceiverFactory func(params map[string]string) (Receiver, error)
+type ReceiverFactory func(params map[string]string, logger *slog.Logger) (Receiver, error)

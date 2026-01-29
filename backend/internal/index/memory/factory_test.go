@@ -10,7 +10,7 @@ func TestFactoryDefaultValues(t *testing.T) {
 	factory := NewFactory()
 	cm, _ := chunkmem.NewManager(chunkmem.Config{})
 
-	im, err := factory(map[string]string{}, cm)
+	im, err := factory(map[string]string{}, cm, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestFactoryCustomTimeSparsity(t *testing.T) {
 
 	_, err := factory(map[string]string{
 		ParamTimeSparsity: "500",
-	}, cm)
+	}, cm, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -44,21 +44,21 @@ func TestFactoryInvalidTimeSparsity(t *testing.T) {
 
 	_, err := factory(map[string]string{
 		ParamTimeSparsity: "not-a-number",
-	}, cm)
+	}, cm, nil)
 	if err == nil {
 		t.Error("expected error for invalid time_sparsity")
 	}
 
 	_, err = factory(map[string]string{
 		ParamTimeSparsity: "0",
-	}, cm)
+	}, cm, nil)
 	if err == nil {
 		t.Error("expected error for zero time_sparsity")
 	}
 
 	_, err = factory(map[string]string{
 		ParamTimeSparsity: "-1",
-	}, cm)
+	}, cm, nil)
 	if err == nil {
 		t.Error("expected error for negative time_sparsity")
 	}

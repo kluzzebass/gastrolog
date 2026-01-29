@@ -7,11 +7,13 @@ import (
 	"context"
 	"errors"
 	"iter"
+	"log/slog"
 	"slices"
 	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
+	"gastrolog/internal/logging"
 )
 
 // Query describes what records to search for.
@@ -64,14 +66,29 @@ type recordWithRef struct {
 }
 
 // Engine executes queries against chunk and index managers.
+//
+// Logging:
+//   - Logger is dependency-injected via the constructor
+//   - Engine owns its scoped logger (component="query-engine")
+//   - Logging is intentionally sparse; only lifecycle events are logged
+//   - No logging in hot paths (search iteration, filtering)
 type Engine struct {
 	chunks  chunk.ChunkManager
 	indexes index.IndexManager
+
+	// Logger for this engine instance.
+	// Scoped with component="query-engine" at construction time.
+	logger *slog.Logger
 }
 
 // New creates a query engine backed by the given chunk and index managers.
-func New(chunks chunk.ChunkManager, indexes index.IndexManager) *Engine {
-	return &Engine{chunks: chunks, indexes: indexes}
+// If logger is nil, logging is disabled.
+func New(chunks chunk.ChunkManager, indexes index.IndexManager, logger *slog.Logger) *Engine {
+	return &Engine{
+		chunks:  chunks,
+		indexes: indexes,
+		logger:  logging.Default(logger).With("component", "query-engine"),
+	}
 }
 
 // selectChunks filters to chunks that overlap the query time range,

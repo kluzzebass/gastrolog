@@ -2,6 +2,7 @@ package memory
 
 import (
 	"fmt"
+	"log/slog"
 	"strconv"
 
 	"gastrolog/internal/chunk"
@@ -23,7 +24,7 @@ const (
 
 // NewFactory returns a factory function that creates in-memory IndexManagers.
 func NewFactory() index.ManagerFactory {
-	return func(params map[string]string, chunkManager chunk.ChunkManager) (index.IndexManager, error) {
+	return func(params map[string]string, chunkManager chunk.ChunkManager, logger *slog.Logger) (index.IndexManager, error) {
 		timeSparsity := DefaultTimeSparsity
 		if v, ok := params[ParamTimeSparsity]; ok {
 			n, err := strconv.Atoi(v)
@@ -42,6 +43,6 @@ func NewFactory() index.ManagerFactory {
 
 		indexers := []index.Indexer{timeIdx, srcIdx, tokIdx}
 
-		return NewManager(indexers, timeIdx, srcIdx, tokIdx), nil
+		return NewManager(indexers, timeIdx, srcIdx, tokIdx, logger), nil
 	}
 }
