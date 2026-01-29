@@ -33,6 +33,15 @@ Module name: `gastrolog` (local module, not intended for external import)
 - Use descriptive error names (`ErrSignatureMismatch`, not `ErrInvalid`)
 - Wrap errors with context using `fmt.Errorf("operation: %w", err)`
 
+**Logging:**
+
+- Use `slog` for structured logging (Go 1.21+)
+- Dependency-inject loggers; never use `slog.SetDefault()` or global state
+- Each component owns its scoped logger, created at construction with `slog.With()`
+- If no logger provided, default to discard logger via `logging.Default(logger)`
+- No logging in hot paths (tokenization, scanning, indexing inner loops)
+- Standard component attributes: `component`, `type`, `instance` where applicable
+
 **Code organization:**
 
 - Keep implementations boring and explicit
@@ -66,6 +75,22 @@ go mod tidy                                       # Clean dependencies
 - **ChunkMeta** -- `ID`, `StartTS`, `EndTS` (`time.Time`), `Size`, `Sealed`
 - **ChunkID** / **SourceID** -- UUID v7 typed identifiers (time-ordered, sortable)
 
+### Logging package (`backend/internal/logging/`)
+
+Provides helpers for structured logging with `slog`:
+
+- `Discard() *slog.Logger` -- returns a logger that discards all output
+- `Default(logger *slog.Logger) *slog.Logger` -- returns logger if non-nil, otherwise returns Discard()
+
+Used by all components to handle nil logger gracefully:
+```go
+func New(cfg Config) *Foo {
+    return &Foo{
+        logger: logging.Default(cfg.Logger).With("component", "foo"),
+    }
+}
+```
+
 ### Orchestrator package (`backend/internal/orchestrator/`)
 
 Coordinates ingestion, indexing, and querying without owning business logic:
@@ -73,6 +98,7 @@ Coordinates ingestion, indexing, and querying without owning business logic:
 - **Orchestrator** -- routes records to chunk managers, triggers index builds on seal, delegates queries
 - **Receiver** interface -- sources of log messages; emit `IngestMessage` to shared channel
 - **IngestMessage** -- `{Attrs, Raw, IngestTS}` where `IngestTS` is set by receiver at receive time
+- **Factories** -- holds factory functions and shared `Logger` for component creation
 - Registries keyed by string for future multi-tenant support
 
 **Lifecycle:**
@@ -257,6 +283,8 @@ Append records, seal chunks, then pass `cm` and `im` to the code under test. See
 backend/
   internal/
     callgroup/                  Singleflight-like concurrency primitive
+    logging/
+      logging.go                Discard() and Default() helpers for slog
     orchestrator/
       orchestrator.go           Orchestrator struct and New()
       lifecycle.go              Start() and Stop() methods
