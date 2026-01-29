@@ -14,12 +14,19 @@ import (
 var ErrMissingDir = errors.New("file chunk manager dir is required")
 var ErrMultipleActiveChunks = errors.New("multiple active chunks found")
 
+// Default meta flush interval.
+const DefaultMetaFlushInterval = 5 * time.Second
+
 type Config struct {
 	Dir           string
 	MaxChunkBytes int64
 	FileMode      os.FileMode
 	Now           func() time.Time
 	MetaStore     chunk.MetaStore
+
+	// MetaFlushInterval controls how often dirty metadata is flushed to disk.
+	// Zero means use DefaultMetaFlushInterval. Negative means flush on every write.
+	MetaFlushInterval time.Duration
 }
 
 type Manager struct {
@@ -28,6 +35,10 @@ type Manager struct {
 	active  *chunkState
 	metas   map[chunk.ChunkID]chunk.ChunkMeta
 	sources map[chunk.ChunkID]*SourceMap
+
+	// Meta flush state.
+	metaDirty     bool
+	lastMetaFlush time.Time
 }
 
 type chunkState struct {
@@ -48,6 +59,9 @@ func NewManager(cfg Config) (*Manager, error) {
 	}
 	if cfg.MetaStore == nil {
 		cfg.MetaStore = NewMetaStore(cfg.Dir, cfg.FileMode)
+	}
+	if cfg.MetaFlushInterval == 0 {
+		cfg.MetaFlushInterval = DefaultMetaFlushInterval
 	}
 
 	if err := os.MkdirAll(cfg.Dir, 0o755); err != nil {
@@ -97,11 +111,13 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 		return chunk.ChunkID{}, 0, err
 	}
 	m.updateMetaLocked(record.WriteTS, offset, size)
+	m.metas[m.active.meta.ID] = m.active.meta
+	m.metaDirty = true
 
-	if err := m.cfg.MetaStore.Save(m.active.meta); err != nil {
+	// Flush meta periodically or on every write if interval is negative.
+	if err := m.maybeFlushMetaLocked(record.WriteTS); err != nil {
 		return chunk.ChunkID{}, 0, err
 	}
-	m.metas[m.active.meta.ID] = m.active.meta
 
 	return m.active.meta.ID, offset, nil
 }
@@ -266,13 +282,17 @@ func (m *Manager) sealLocked() error {
 		return nil
 	}
 	m.active.meta.Sealed = true
+	m.metas[m.active.meta.ID] = m.active.meta
+
+	// Always flush meta on seal.
 	if err := m.cfg.MetaStore.Save(m.active.meta); err != nil {
 		return err
 	}
+	m.metaDirty = false
+
 	if err := m.active.file.Close(); err != nil {
 		return err
 	}
-	m.metas[m.active.meta.ID] = m.active.meta
 	m.active = nil
 	return nil
 }
@@ -283,6 +303,80 @@ func (m *Manager) updateMetaLocked(ts time.Time, offset uint64, size uint32) {
 	}
 	m.active.meta.EndTS = ts
 	m.active.meta.Size = int64(offset) + int64(size)
+}
+
+// maybeFlushMetaLocked flushes metadata if dirty and the flush interval has elapsed.
+// If MetaFlushInterval is negative, flushes on every call (legacy behavior).
+// The writeTS parameter is used to avoid an extra clock call.
+func (m *Manager) maybeFlushMetaLocked(writeTS time.Time) error {
+	if !m.metaDirty || m.active == nil {
+		return nil
+	}
+
+	// Negative interval means flush every write.
+	if m.cfg.MetaFlushInterval < 0 {
+		if err := m.cfg.MetaStore.Save(m.active.meta); err != nil {
+			return err
+		}
+		m.metaDirty = false
+		m.lastMetaFlush = writeTS
+		return nil
+	}
+
+	// Check if enough time has passed since last flush.
+	if writeTS.Sub(m.lastMetaFlush) >= m.cfg.MetaFlushInterval {
+		if err := m.cfg.MetaStore.Save(m.active.meta); err != nil {
+			return err
+		}
+		m.metaDirty = false
+		m.lastMetaFlush = writeTS
+	}
+
+	return nil
+}
+
+// Flush persists any dirty metadata to disk immediately.
+// Call this before graceful shutdown to minimize data loss.
+func (m *Manager) Flush() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.metaDirty || m.active == nil {
+		return nil
+	}
+
+	if err := m.cfg.MetaStore.Save(m.active.meta); err != nil {
+		return err
+	}
+	m.metaDirty = false
+	m.lastMetaFlush = m.cfg.Now()
+	return nil
+}
+
+// Close flushes any dirty metadata and closes the active chunk file.
+// The manager should not be used after Close is called.
+func (m *Manager) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.active == nil {
+		return nil
+	}
+
+	// Flush dirty meta.
+	if m.metaDirty {
+		if err := m.cfg.MetaStore.Save(m.active.meta); err != nil {
+			return err
+		}
+		m.metaDirty = false
+	}
+
+	// Close file but don't seal (chunk remains active for recovery).
+	if err := m.active.file.Close(); err != nil {
+		return err
+	}
+	m.active.file = nil
+	return nil
 }
 
 func (m *Manager) chunkDir(id chunk.ChunkID) string {
