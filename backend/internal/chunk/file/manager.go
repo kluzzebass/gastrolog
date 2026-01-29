@@ -13,6 +13,7 @@ import (
 
 var ErrMissingDir = errors.New("file chunk manager dir is required")
 var ErrMultipleActiveChunks = errors.New("multiple active chunks found")
+var ErrManagerClosed = errors.New("manager is closed")
 
 // Default meta flush interval.
 const DefaultMetaFlushInterval = 5 * time.Second
@@ -25,7 +26,8 @@ type Config struct {
 	MetaStore     chunk.MetaStore
 
 	// MetaFlushInterval controls how often dirty metadata is flushed to disk.
-	// Zero means use DefaultMetaFlushInterval. Negative means flush on every write.
+	// Zero means use DefaultMetaFlushInterval. Negative disables background
+	// flushing (meta is only written on Seal/Close).
 	MetaFlushInterval time.Duration
 }
 
@@ -35,10 +37,12 @@ type Manager struct {
 	active  *chunkState
 	metas   map[chunk.ChunkID]chunk.ChunkMeta
 	sources map[chunk.ChunkID]*SourceMap
+	closed  bool
 
-	// Meta flush state.
-	metaDirty     bool
-	lastMetaFlush time.Time
+	// Async meta flush.
+	metaDirty   bool
+	flushStopCh chan struct{}
+	flushWg     sync.WaitGroup
 }
 
 type chunkState struct {
@@ -69,19 +73,55 @@ func NewManager(cfg Config) (*Manager, error) {
 	}
 
 	manager := &Manager{
-		cfg:     cfg,
-		metas:   make(map[chunk.ChunkID]chunk.ChunkMeta),
-		sources: make(map[chunk.ChunkID]*SourceMap),
+		cfg:         cfg,
+		metas:       make(map[chunk.ChunkID]chunk.ChunkMeta),
+		sources:     make(map[chunk.ChunkID]*SourceMap),
+		flushStopCh: make(chan struct{}),
 	}
 	if err := manager.loadExisting(); err != nil {
 		return nil, err
 	}
+
+	// Start background flush goroutine if interval is positive.
+	if cfg.MetaFlushInterval > 0 {
+		manager.flushWg.Add(1)
+		go manager.flushLoop()
+	}
+
 	return manager, nil
+}
+
+// flushLoop periodically flushes dirty metadata in the background.
+func (m *Manager) flushLoop() {
+	defer m.flushWg.Done()
+
+	ticker := time.NewTicker(m.cfg.MetaFlushInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.flushStopCh:
+			return
+		case <-ticker.C:
+			m.mu.Lock()
+			if m.metaDirty && m.active != nil {
+				// Best effort - ignore errors in background flush.
+				// Final flush on Close() will report errors.
+				_ = m.cfg.MetaStore.Save(m.active.meta)
+				m.metaDirty = false
+			}
+			m.mu.Unlock()
+		}
+	}
 }
 
 func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if m.closed {
+		return chunk.ChunkID{}, 0, ErrManagerClosed
+	}
 
 	recordSize, err := RecordSize(len(record.Raw))
 	if err != nil {
@@ -114,10 +154,7 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 	m.metas[m.active.meta.ID] = m.active.meta
 	m.metaDirty = true
 
-	// Flush meta periodically or on every write if interval is negative.
-	if err := m.maybeFlushMetaLocked(record.WriteTS); err != nil {
-		return chunk.ChunkID{}, 0, err
-	}
+	// Meta flush happens asynchronously in flushLoop, not here.
 
 	return m.active.meta.ID, offset, nil
 }
@@ -125,6 +162,11 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 func (m *Manager) Seal() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if m.closed {
+		return ErrManagerClosed
+	}
+
 	if m.active == nil {
 		if err := m.openLocked(); err != nil {
 			return err
@@ -258,6 +300,7 @@ func (m *Manager) openLocked() error {
 		ID:     id,
 		Sealed: false,
 	}
+	// Write initial meta synchronously - this is rare (only on new chunk).
 	if err := m.cfg.MetaStore.Save(meta); err != nil {
 		_ = file.Close()
 		return err
@@ -284,7 +327,7 @@ func (m *Manager) sealLocked() error {
 	m.active.meta.Sealed = true
 	m.metas[m.active.meta.ID] = m.active.meta
 
-	// Always flush meta on seal.
+	// Always flush meta synchronously on seal.
 	if err := m.cfg.MetaStore.Save(m.active.meta); err != nil {
 		return err
 	}
@@ -305,36 +348,6 @@ func (m *Manager) updateMetaLocked(ts time.Time, offset uint64, size uint32) {
 	m.active.meta.Size = int64(offset) + int64(size)
 }
 
-// maybeFlushMetaLocked flushes metadata if dirty and the flush interval has elapsed.
-// If MetaFlushInterval is negative, flushes on every call (legacy behavior).
-// The writeTS parameter is used to avoid an extra clock call.
-func (m *Manager) maybeFlushMetaLocked(writeTS time.Time) error {
-	if !m.metaDirty || m.active == nil {
-		return nil
-	}
-
-	// Negative interval means flush every write.
-	if m.cfg.MetaFlushInterval < 0 {
-		if err := m.cfg.MetaStore.Save(m.active.meta); err != nil {
-			return err
-		}
-		m.metaDirty = false
-		m.lastMetaFlush = writeTS
-		return nil
-	}
-
-	// Check if enough time has passed since last flush.
-	if writeTS.Sub(m.lastMetaFlush) >= m.cfg.MetaFlushInterval {
-		if err := m.cfg.MetaStore.Save(m.active.meta); err != nil {
-			return err
-		}
-		m.metaDirty = false
-		m.lastMetaFlush = writeTS
-	}
-
-	return nil
-}
-
 // Flush persists any dirty metadata to disk immediately.
 // Call this before graceful shutdown to minimize data loss.
 func (m *Manager) Flush() error {
@@ -349,15 +362,24 @@ func (m *Manager) Flush() error {
 		return err
 	}
 	m.metaDirty = false
-	m.lastMetaFlush = m.cfg.Now()
 	return nil
 }
 
-// Close flushes any dirty metadata and closes the active chunk file.
-// The manager should not be used after Close is called.
+// Close stops the background flush goroutine, flushes any dirty metadata,
+// and closes the active chunk file. The manager should not be used after
+// Close is called.
 func (m *Manager) Close() error {
+	// Stop background flush goroutine first.
+	close(m.flushStopCh)
+	m.flushWg.Wait()
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if m.closed {
+		return nil
+	}
+	m.closed = true
 
 	if m.active == nil {
 		return nil
