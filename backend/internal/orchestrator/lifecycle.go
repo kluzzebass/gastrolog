@@ -73,6 +73,15 @@ func (o *Orchestrator) runReceiver(ctx context.Context, id string, r Receiver) {
 }
 
 // ingestLoop receives messages from the ingest channel and routes them.
+//
+// Throughput: A single goroutine processes all messages sequentially.
+// This is intentional because:
+//   - Chunk append is serialized anyway (single writer per ChunkManager)
+//   - Identity resolution is cheap (in-memory map lookup)
+//   - Index scheduling is async (fire-and-forget goroutine)
+//
+// If this becomes a bottleneck, parallelization can be added later
+// (e.g., worker pool with per-ChunkManager routing).
 func (o *Orchestrator) ingestLoop(ctx context.Context) {
 	defer close(o.done)
 
