@@ -29,6 +29,8 @@ func (id ChunkID) String() string {
 	return uuid.UUID(id).String()
 }
 
+// SourceID identifies the source of a record.
+// A zero-valued SourceID indicates an unknown or unresolved source.
 type SourceID uuid.UUID
 
 func NewSourceID() SourceID {
