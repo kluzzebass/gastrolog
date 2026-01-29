@@ -23,7 +23,7 @@ import (
 
 func main() {
 	configPath := flag.String("config", "config.json", "path to configuration file")
-	sourcesPath := flag.String("sources", "sources.json", "path to sources registry file")
+	sourcesPath := flag.String("sources", "sources.db", "path to sources registry file")
 	flag.Parse()
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)

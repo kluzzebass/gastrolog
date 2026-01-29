@@ -26,3 +26,7 @@ go.work
 # Visual Studio Code workspace file
 *.code-workspace
 .vscode/
+
+# Service artifact
+config.json
+sources.json
