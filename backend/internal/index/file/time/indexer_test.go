@@ -9,6 +9,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
+	"gastrolog/internal/format"
 	"gastrolog/internal/index"
 )
 
@@ -337,11 +338,11 @@ func TestSignature(t *testing.T) {
 	}
 
 	data := encodeIndex(testChunkID, entries)
-	if data[0] != signatureByte {
-		t.Fatalf("expected signature byte 0x%02x, got 0x%02x", signatureByte, data[0])
+	if data[0] != format.Signature {
+		t.Fatalf("expected signature byte 0x%02x, got 0x%02x", format.Signature, data[0])
 	}
-	if data[1] != typeByte {
-		t.Fatalf("expected type byte '%c', got 0x%02x", typeByte, data[1])
+	if data[1] != format.TypeTimeIndex {
+		t.Fatalf("expected type byte '%c', got 0x%02x", format.TypeTimeIndex, data[1])
 	}
 }
 
@@ -395,28 +396,28 @@ func TestDecodeErrors(t *testing.T) {
 	// Wrong signature.
 	bad := make([]byte, headerSize)
 	bad[0] = 0xFF
-	bad[1] = typeByte
-	bad[2] = versionByte
-	if _, err := decodeIndex(testChunkID, bad); err != ErrSignatureMismatch {
-		t.Fatalf("expected ErrSignatureMismatch, got %v", err)
+	bad[1] = format.TypeTimeIndex
+	bad[2] = currentVersion
+	if _, err := decodeIndex(testChunkID, bad); err == nil {
+		t.Fatal("expected error for wrong signature, got nil")
 	}
 
 	// Wrong type byte.
 	bad1b := make([]byte, headerSize)
-	bad1b[0] = signatureByte
+	bad1b[0] = format.Signature
 	bad1b[1] = 'x'
-	bad1b[2] = versionByte
-	if _, err := decodeIndex(testChunkID, bad1b); err != ErrSignatureMismatch {
-		t.Fatalf("expected ErrSignatureMismatch for wrong type byte, got %v", err)
+	bad1b[2] = currentVersion
+	if _, err := decodeIndex(testChunkID, bad1b); err == nil {
+		t.Fatal("expected error for wrong type byte, got nil")
 	}
 
 	// Wrong version.
 	bad2 := make([]byte, headerSize)
-	bad2[0] = signatureByte
-	bad2[1] = typeByte
+	bad2[0] = format.Signature
+	bad2[1] = format.TypeTimeIndex
 	bad2[2] = 0xFF
-	if _, err := decodeIndex(testChunkID, bad2); err != ErrVersionMismatch {
-		t.Fatalf("expected ErrVersionMismatch, got %v", err)
+	if _, err := decodeIndex(testChunkID, bad2); err == nil {
+		t.Fatal("expected error for wrong version, got nil")
 	}
 
 	// Chunk ID mismatch.
@@ -428,7 +429,7 @@ func TestDecodeErrors(t *testing.T) {
 
 	// Count mismatch: header says 1 entry but no entry data.
 	bad3 := encodeIndex(testChunkID, nil)
-	bad3[signatureSize+typeSize+versionSize+flagsSize+chunkIDSize] = 1
+	bad3[format.HeaderSize+chunkIDSize] = 1
 	if _, err := decodeIndex(testChunkID, bad3); err != ErrEntrySizeMismatch {
 		t.Fatalf("expected ErrEntrySizeMismatch, got %v", err)
 	}

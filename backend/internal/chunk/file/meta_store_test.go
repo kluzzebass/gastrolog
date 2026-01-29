@@ -215,8 +215,8 @@ func TestDecodeMetaSignatureMismatch(t *testing.T) {
 	data := encodeMeta(testMeta())
 	data[0] = 0xFF
 	_, err := decodeMeta(data)
-	if err != ErrMetaSignatureMismatch {
-		t.Fatalf("expected ErrMetaSignatureMismatch, got %v", err)
+	if err == nil {
+		t.Fatal("expected error for signature mismatch, got nil")
 	}
 }
 
@@ -224,8 +224,8 @@ func TestDecodeMetaTypeMismatch(t *testing.T) {
 	data := encodeMeta(testMeta())
 	data[1] = 'x'
 	_, err := decodeMeta(data)
-	if err != ErrMetaSignatureMismatch {
-		t.Fatalf("expected ErrMetaSignatureMismatch, got %v", err)
+	if err == nil {
+		t.Fatal("expected error for type mismatch, got nil")
 	}
 }
 
@@ -233,8 +233,8 @@ func TestDecodeMetaVersionMismatch(t *testing.T) {
 	data := encodeMeta(testMeta())
 	data[2] = 0xFF
 	_, err := decodeMeta(data)
-	if err != ErrMetaVersionMismatch {
-		t.Fatalf("expected ErrMetaVersionMismatch, got %v", err)
+	if err == nil {
+		t.Fatal("expected error for version mismatch, got nil")
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	gotime "time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/format"
 	"gastrolog/internal/index"
 )
 
@@ -77,8 +78,8 @@ func TestOpenValidatesHeader(t *testing.T) {
 	// Write a file with a bad signature byte.
 	bad := make([]byte, headerSize)
 	bad[0] = 0xFF
-	bad[1] = typeByte
-	bad[2] = versionByte
+	bad[1] = format.TypeTimeIndex
+	bad[2] = currentVersion
 	if err := os.WriteFile(filepath.Join(chunkDir, indexFileName), bad, 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}

@@ -3,7 +3,6 @@ package file
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,22 +11,12 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/format"
 	"gastrolog/internal/source"
 )
 
-// File format constants.
 const (
-	fileSignature = 'i'
-	fileType      = 'z' // 'z' for source registry
-	fileVersion   = 1
-)
-
-// File format errors.
-var (
-	ErrSignatureMismatch = errors.New("signature mismatch")
-	ErrTypeMismatch      = errors.New("type mismatch")
-	ErrVersionMismatch   = errors.New("version mismatch")
-	ErrCorruptedFile     = errors.New("corrupted file")
+	currentVersion = 1
 )
 
 // Store persists sources to disk using atomic writes.
@@ -125,8 +114,9 @@ func (s *Store) writeFile() error {
 	}
 
 	// Write header.
-	header := []byte{fileSignature, fileType, fileVersion, 0}
-	if _, err := f.Write(header); err != nil {
+	h := format.Header{Type: format.TypeSourceRegistry, Version: currentVersion, Flags: 0}
+	header := h.Encode()
+	if _, err := f.Write(header[:]); err != nil {
 		f.Close()
 		os.Remove(tmpPath)
 		return fmt.Errorf("write header: %w", err)
@@ -219,7 +209,7 @@ func (s *Store) writeSource(w io.Writer, src *source.Source) error {
 // readFile reads all sources from the reader.
 func (s *Store) readFile(r io.Reader) ([]*source.Source, error) {
 	// Read header.
-	header := make([]byte, 4)
+	header := make([]byte, format.HeaderSize)
 	if _, err := io.ReadFull(r, header); err != nil {
 		if err == io.EOF {
 			return nil, nil
@@ -227,14 +217,9 @@ func (s *Store) readFile(r io.Reader) ([]*source.Source, error) {
 		return nil, fmt.Errorf("read header: %w", err)
 	}
 
-	if header[0] != fileSignature {
-		return nil, ErrSignatureMismatch
-	}
-	if header[1] != fileType {
-		return nil, ErrTypeMismatch
-	}
-	if header[2] != fileVersion {
-		return nil, ErrVersionMismatch
+	_, err := format.DecodeAndValidate(header, format.TypeSourceRegistry, currentVersion)
+	if err != nil {
+		return nil, fmt.Errorf("source registry: %w", err)
 	}
 
 	// Read source count.

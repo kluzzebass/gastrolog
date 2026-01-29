@@ -9,24 +9,19 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/google/uuid"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/format"
 	"gastrolog/internal/index"
+
+	"github.com/google/uuid"
 )
 
 const (
-	signatureByte = 'i'
-	typeByte      = 's'
-	versionByte   = 0x01
-	flagsByte     = 0x00
+	currentVersion = 0x01
 
-	signatureSize = 1
-	typeSize      = 1
-	versionSize   = 1
-	flagsSize     = 1
-	chunkIDSize   = 16
-	keyCountSize  = 4
-	headerSize    = signatureSize + typeSize + versionSize + flagsSize + chunkIDSize + keyCountSize
+	chunkIDSize  = 16
+	keyCountSize = 4
+	headerSize   = format.HeaderSize + chunkIDSize + keyCountSize
 
 	sourceIDSize      = 16
 	postingOffsetSize = 8
@@ -40,8 +35,6 @@ const (
 
 var (
 	ErrIndexTooSmall       = errors.New("source index too small")
-	ErrSignatureMismatch   = errors.New("source index signature mismatch")
-	ErrVersionMismatch     = errors.New("source index version mismatch")
 	ErrChunkIDMismatch     = errors.New("source index chunk ID mismatch")
 	ErrKeySizeMismatch     = errors.New("source index key table size mismatch")
 	ErrPostingSizeMismatch = errors.New("source index posting list size mismatch")
@@ -77,14 +70,9 @@ func encodeIndex(chunkID chunk.ChunkID, entries []index.SourceIndexEntry) []byte
 
 	// Write header.
 	cursor := 0
-	buf[cursor] = signatureByte
-	cursor += signatureSize
-	buf[cursor] = typeByte
-	cursor += typeSize
-	buf[cursor] = versionByte
-	cursor += versionSize
-	buf[cursor] = flagsByte
-	cursor += flagsSize
+	h := format.Header{Type: format.TypeSourceIndex, Version: currentVersion, Flags: 0}
+	cursor += h.EncodeInto(buf[cursor:])
+
 	uid := uuid.UUID(chunkID)
 	copy(buf[cursor:cursor+chunkIDSize], uid[:])
 	cursor += chunkIDSize
@@ -124,15 +112,11 @@ func decodeIndex(chunkID chunk.ChunkID, data []byte) ([]index.SourceIndexEntry, 
 		return nil, ErrIndexTooSmall
 	}
 
-	cursor := 0
-	if data[cursor] != signatureByte || data[cursor+signatureSize] != typeByte {
-		return nil, ErrSignatureMismatch
+	_, err := format.DecodeAndValidate(data, format.TypeSourceIndex, currentVersion)
+	if err != nil {
+		return nil, fmt.Errorf("source index: %w", err)
 	}
-	cursor += signatureSize + typeSize
-	if data[cursor] != versionByte {
-		return nil, ErrVersionMismatch
-	}
-	cursor += versionSize + flagsSize
+	cursor := format.HeaderSize
 
 	var storedID uuid.UUID
 	copy(storedID[:], data[cursor:cursor+chunkIDSize])

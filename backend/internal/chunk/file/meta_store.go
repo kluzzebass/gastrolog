@@ -3,31 +3,27 @@ package file
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/format"
 
 	"github.com/google/uuid"
 )
 
 const (
-	metaSignatureByte = 'i'
-	metaTypeByte      = 'm'
-	metaVersion       = 0x01
-	metaFileName      = "meta.bin"
-	recordsFileName   = "records.log"
+	currentMetaVersion = 0x01
+	metaFileName       = "meta.bin"
+	recordsFileName    = "records.log"
 
-	metaSignatureBytes = 1
-	metaTypeBytes      = 1
-	metaVersionBytes   = 1
-	metaChunkIDBytes   = 16
-	metaTSBytes        = 8
-	metaSizeBytes      = 8
-	metaFlagsBytes     = 1
+	metaChunkIDBytes = 16
+	metaTSBytes      = 8
+	metaSizeBytes    = 8
 
-	metaTotalBytes = metaSignatureBytes + metaTypeBytes + metaVersionBytes + metaFlagsBytes + metaChunkIDBytes + metaTSBytes + metaTSBytes + metaSizeBytes
+	metaTotalBytes = format.HeaderSize + metaChunkIDBytes + metaTSBytes + metaTSBytes + metaSizeBytes
 )
 
 const (
@@ -35,8 +31,6 @@ const (
 )
 
 var ErrMetaTooSmall = errors.New("meta size too small")
-var ErrMetaSignatureMismatch = errors.New("meta signature mismatch")
-var ErrMetaVersionMismatch = errors.New("meta version mismatch")
 
 type MetaStore struct {
 	dir      string
@@ -129,14 +123,10 @@ func (s *MetaStore) List() ([]chunk.ChunkMeta, error) {
 func encodeMeta(meta chunk.ChunkMeta) []byte {
 	buf := make([]byte, metaTotalBytes)
 	cursor := 0
-	buf[cursor] = metaSignatureByte
-	cursor += metaSignatureBytes
-	buf[cursor] = metaTypeByte
-	cursor += metaTypeBytes
-	buf[cursor] = metaVersion
-	cursor += metaVersionBytes
-	buf[cursor] = metaFlags(meta)
-	cursor += metaFlagsBytes
+
+	h := format.Header{Type: format.TypeChunkMeta, Version: currentMetaVersion, Flags: metaFlags(meta)}
+	cursor += h.EncodeInto(buf[cursor:])
+
 	copy(buf[cursor:cursor+metaChunkIDBytes], uuidBytes(meta.ID))
 	cursor += metaChunkIDBytes
 	binary.LittleEndian.PutUint64(buf[cursor:cursor+metaTSBytes], uint64(meta.StartTS.UnixMicro()))
@@ -151,17 +141,13 @@ func decodeMeta(buf []byte) (chunk.ChunkMeta, error) {
 	if len(buf) != metaTotalBytes {
 		return chunk.ChunkMeta{}, ErrMetaTooSmall
 	}
-	cursor := 0
-	if buf[cursor] != metaSignatureByte || buf[cursor+metaSignatureBytes] != metaTypeByte {
-		return chunk.ChunkMeta{}, ErrMetaSignatureMismatch
+
+	h, err := format.DecodeAndValidate(buf, format.TypeChunkMeta, currentMetaVersion)
+	if err != nil {
+		return chunk.ChunkMeta{}, fmt.Errorf("chunk meta: %w", err)
 	}
-	cursor += metaSignatureBytes + metaTypeBytes
-	if buf[cursor] != metaVersion {
-		return chunk.ChunkMeta{}, ErrMetaVersionMismatch
-	}
-	cursor += metaVersionBytes
-	flags := buf[cursor]
-	cursor += metaFlagsBytes
+	cursor := format.HeaderSize
+
 	idBytes := buf[cursor : cursor+metaChunkIDBytes]
 	cursor += metaChunkIDBytes
 	startMicros := int64(binary.LittleEndian.Uint64(buf[cursor : cursor+metaTSBytes]))
@@ -175,7 +161,7 @@ func decodeMeta(buf []byte) (chunk.ChunkMeta, error) {
 		StartTS: time.UnixMicro(startMicros),
 		EndTS:   time.UnixMicro(endMicros),
 		Size:    sizeBytes,
-		Sealed:  flags&metaFlagSealed != 0,
+		Sealed:  h.Flags&metaFlagSealed != 0,
 	}, nil
 }
 
