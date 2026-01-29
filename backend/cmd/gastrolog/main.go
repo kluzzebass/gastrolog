@@ -36,10 +36,17 @@ func main() {
 
 func run(ctx context.Context, configPath, sourcesPath string) error {
 	// Load configuration.
+	log.Printf("loading config from %s", configPath)
 	cfgStore := configfile.NewStore(configPath)
 	cfg, err := cfgStore.Load(ctx)
 	if err != nil {
 		return err
+	}
+	if cfg == nil {
+		log.Printf("no config found, running with empty configuration")
+	} else {
+		log.Printf("loaded config: %d receivers, %d stores, %d routes",
+			len(cfg.Receivers), len(cfg.Stores), len(cfg.Routes))
 	}
 
 	// Create source registry.
@@ -63,15 +70,22 @@ func run(ctx context.Context, configPath, sourcesPath string) error {
 	}
 
 	// Start the orchestrator.
+	log.Printf("starting orchestrator")
 	if err := orch.Start(ctx); err != nil {
 		return err
 	}
+	log.Printf("orchestrator started, waiting for shutdown signal")
 
 	// Wait for shutdown signal.
 	<-ctx.Done()
 
 	// Stop the orchestrator.
-	return orch.Stop()
+	log.Printf("shutting down")
+	if err := orch.Stop(); err != nil {
+		return err
+	}
+	log.Printf("shutdown complete")
+	return nil
 }
 
 // buildFactories creates the factory maps for all supported component types.
