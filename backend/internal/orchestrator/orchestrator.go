@@ -84,6 +84,12 @@ func (o *Orchestrator) RegisterQueryEngine(key string, qe *query.Engine) {
 // run concurrently (they only need the registry snapshot, not the lock
 // during iteration).
 //
+// Error semantics: This is fan-out with partial failure. If CM A succeeds
+// and CM B fails, the record is persisted in A but not B, and the error
+// from B is returned. There is no rollback. This is acceptable for now
+// since we typically have one CM per registry key, but callers should be
+// aware of this behavior.
+//
 // Seal detection: compares Active() before/after append to detect when
 // the active chunk changes (indicating the previous chunk was sealed).
 // This assumes:
