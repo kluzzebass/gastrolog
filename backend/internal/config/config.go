@@ -28,6 +28,10 @@ import "context"
 // the data can be serialized/deserialized. Semantic validation (duplicate
 // IDs, unknown types, dangling route references) is the responsibility of
 // the component that consumes the config (e.g., Orchestrator at startup).
+//
+// Note on duplicate JSON keys: Go's encoding/json silently accepts duplicate
+// keys and uses the last value. Detecting this would require a custom parser.
+// This is a known limitation of the JSON format/decoder.
 type Store interface {
 	// Load reads the configuration. Returns nil config if none exists.
 	Load(ctx context.Context) (*Config, error)
