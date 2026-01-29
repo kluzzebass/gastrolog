@@ -1,0 +1,92 @@
+// Command gastrolog runs the log aggregation service.
+package main
+
+import (
+	"context"
+	"flag"
+	"log"
+	"os"
+	"os/signal"
+
+	"gastrolog/internal/chunk"
+	chunkfile "gastrolog/internal/chunk/file"
+	chunkmem "gastrolog/internal/chunk/memory"
+	configfile "gastrolog/internal/config/file"
+	"gastrolog/internal/index"
+	indexfile "gastrolog/internal/index/file"
+	indexmem "gastrolog/internal/index/memory"
+	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/receiver/chatterbox"
+	"gastrolog/internal/source"
+	sourcefile "gastrolog/internal/source/file"
+)
+
+func main() {
+	configPath := flag.String("config", "config.json", "path to configuration file")
+	sourcesPath := flag.String("sources", "sources.json", "path to sources registry file")
+	flag.Parse()
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
+	if err := run(ctx, *configPath, *sourcesPath); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run(ctx context.Context, configPath, sourcesPath string) error {
+	// Load configuration.
+	cfgStore := configfile.NewStore(configPath)
+	cfg, err := cfgStore.Load(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Create source registry.
+	sourceStore := sourcefile.NewStore(sourcesPath)
+	sources, err := source.NewRegistry(source.Config{
+		Store: sourceStore,
+	})
+	if err != nil {
+		return err
+	}
+	defer sources.Close()
+
+	// Create orchestrator.
+	orch := orchestrator.New(orchestrator.Config{
+		Sources: sources,
+	})
+
+	// Apply configuration with factories.
+	if err := orch.ApplyConfig(cfg, buildFactories()); err != nil {
+		return err
+	}
+
+	// Start the orchestrator.
+	if err := orch.Start(ctx); err != nil {
+		return err
+	}
+
+	// Wait for shutdown signal.
+	<-ctx.Done()
+
+	// Stop the orchestrator.
+	return orch.Stop()
+}
+
+// buildFactories creates the factory maps for all supported component types.
+func buildFactories() orchestrator.Factories {
+	return orchestrator.Factories{
+		Receivers: map[string]orchestrator.ReceiverFactory{
+			"chatterbox": chatterbox.NewReceiver,
+		},
+		ChunkManagers: map[string]chunk.ManagerFactory{
+			"file":   chunkfile.NewFactory(),
+			"memory": chunkmem.NewFactory(),
+		},
+		IndexManagers: map[string]index.ManagerFactory{
+			"file":   indexfile.NewFactory(),
+			"memory": indexmem.NewFactory(),
+		},
+	}
+}
