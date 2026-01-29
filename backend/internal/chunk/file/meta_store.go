@@ -7,8 +7,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/google/uuid"
 	"gastrolog/internal/chunk"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -113,6 +114,18 @@ func (s *MetaStore) List() ([]chunk.ChunkMeta, error) {
 	return metas, nil
 }
 
+// encodeMeta encodes chunk metadata into binary format.
+//
+// Layout (44 bytes total):
+//
+//	signature (1 byte, 'i')
+//	type (1 byte, 'm')
+//	version (1 byte, 0x01)
+//	flags (1 byte, bit 0 = sealed)
+//	chunkID (16 bytes, UUID)
+//	startTS (8 bytes, Unix microseconds, little-endian int64)
+//	endTS (8 bytes, Unix microseconds, little-endian int64)
+//	size (8 bytes, little-endian int64, chunk size in bytes)
 func encodeMeta(meta chunk.ChunkMeta) []byte {
 	buf := make([]byte, metaTotalBytes)
 	cursor := 0

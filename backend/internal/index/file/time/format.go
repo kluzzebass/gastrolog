@@ -8,9 +8,10 @@ import (
 	"path/filepath"
 	gotime "time"
 
-	"github.com/google/uuid"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -42,6 +43,21 @@ var (
 	ErrEntrySizeMismatch = errors.New("time index entry size mismatch")
 )
 
+// encodeIndex encodes time index entries into binary format.
+//
+// Layout:
+//
+//	Header (24 bytes):
+//	  signature (1 byte, 'i')
+//	  type (1 byte, 't')
+//	  version (1 byte)
+//	  flags (1 byte, reserved)
+//	  chunkID (16 bytes, UUID)
+//	  entryCount (4 bytes, little-endian uint32)
+//
+//	Entries (16 bytes each):
+//	  timestamp (8 bytes, Unix microseconds, little-endian int64)
+//	  recordPos (8 bytes, little-endian uint64)
 func encodeIndex(chunkID chunk.ChunkID, entries []index.TimeIndexEntry) []byte {
 	buf := make([]byte, headerSize+len(entries)*entrySize)
 

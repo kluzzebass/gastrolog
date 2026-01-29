@@ -47,6 +47,19 @@ func RecordSize(rawLen int) (uint32, error) {
 	return uint32(size), nil
 }
 
+// EncodeRecord encodes a record into binary format.
+//
+// Layout:
+//
+//	size (4 bytes, little-endian uint32, total record size including this field)
+//	magic (1 byte, 0x69)
+//	version (1 byte, 0x01)
+//	ingestTS (8 bytes, Unix microseconds, little-endian int64)
+//	writeTS (8 bytes, Unix microseconds, little-endian int64)
+//	sourceLocalID (4 bytes, little-endian uint32, chunk-local source ID)
+//	rawLen (4 bytes, little-endian uint32)
+//	raw (variable, rawLen bytes)
+//	size (4 bytes, little-endian uint32, repeated for reverse scanning)
 func EncodeRecord(record chunk.Record, localID uint32) ([]byte, error) {
 	rawLen := len(record.Raw)
 	size, err := RecordSize(rawLen)

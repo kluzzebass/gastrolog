@@ -8,8 +8,9 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/google/uuid"
 	"gastrolog/internal/chunk"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -139,6 +140,17 @@ type sourceRecord struct {
 	localID  uint32
 }
 
+// encodeSourceRecord encodes a source mapping into binary format.
+// The source map file is append-only, with each record mapping a global
+// SourceID (UUID) to a chunk-local uint32 ID for compact storage in records.
+//
+// Layout (30 bytes per record):
+//
+//	size (4 bytes, little-endian uint32, always 30)
+//	version (1 byte, 0x01)
+//	sourceID (16 bytes, UUID)
+//	localID (4 bytes, little-endian uint32)
+//	size (4 bytes, little-endian uint32, repeated for validation)
 func encodeSourceRecord(sourceID chunk.SourceID, localID uint32) []byte {
 	buf := make([]byte, sourceTotalBytes)
 	binary.LittleEndian.PutUint32(buf[:sourceSizeFieldBytes], uint32(sourceTotalBytes))
