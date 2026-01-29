@@ -15,7 +15,7 @@ const (
 	defaultInstance      = "default"
 )
 
-// New creates a new chatterbox receiver from configuration parameters.
+// NewReceiver creates a new chatterbox receiver from configuration parameters.
 //
 // Supported parameters:
 //   - "min_interval_ms": minimum delay between messages (default: 100)
@@ -24,7 +24,7 @@ const (
 //
 // Returns an error if parameters are invalid (e.g., non-numeric intervals,
 // min > max, negative values).
-func New(params map[string]string) (orchestrator.Receiver, error) {
+func NewReceiver(params map[string]string) (orchestrator.Receiver, error) {
 	minMs := defaultMinIntervalMs
 	maxMs := defaultMaxIntervalMs
 	instance := defaultInstance

@@ -23,12 +23,14 @@ type Receiver struct {
 // Run starts the receiver and emits messages to the output channel.
 // Run blocks until ctx is cancelled. Returns nil on normal cancellation.
 func (r *Receiver) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+	timer := time.NewTimer(r.randomInterval())
+	defer timer.Stop()
+
 	for {
-		interval := r.randomInterval()
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-time.After(interval):
+		case <-timer.C:
 		}
 
 		msg := r.generateMessage()
@@ -37,6 +39,8 @@ func (r *Receiver) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 		case <-ctx.Done():
 			return nil
 		}
+
+		timer.Reset(r.randomInterval())
 	}
 }
 

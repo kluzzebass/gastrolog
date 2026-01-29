@@ -1,3 +1,3 @@
 # GastroLog
 
-Simple, yet powerful log management system. I hope.
+## Generalized Automatic System for Temporal Record Organization and Logging

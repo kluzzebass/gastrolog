@@ -9,8 +9,8 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
-func TestNew_Defaults(t *testing.T) {
-	r, err := New(nil)
+func TestNewReceiver_Defaults(t *testing.T) {
+	r, err := NewReceiver(nil)
 	if err != nil {
 		t.Fatalf("New(nil) failed: %v", err)
 	}
@@ -26,13 +26,13 @@ func TestNew_Defaults(t *testing.T) {
 	}
 }
 
-func TestNew_CustomParams(t *testing.T) {
+func TestNewReceiver_CustomParams(t *testing.T) {
 	params := map[string]string{
 		"min_interval_ms": "50",
 		"max_interval_ms": "200",
 		"instance":        "test-instance",
 	}
-	r, err := New(params)
+	r, err := NewReceiver(params)
 	if err != nil {
 		t.Fatalf("New(params) failed: %v", err)
 	}
@@ -48,55 +48,55 @@ func TestNew_CustomParams(t *testing.T) {
 	}
 }
 
-func TestNew_InvalidMinInterval(t *testing.T) {
+func TestNewReceiver_InvalidMinInterval(t *testing.T) {
 	params := map[string]string{"min_interval_ms": "not-a-number"}
-	_, err := New(params)
+	_, err := NewReceiver(params)
 	if err == nil {
 		t.Error("expected error for invalid min_interval_ms")
 	}
 }
 
-func TestNew_InvalidMaxInterval(t *testing.T) {
+func TestNewReceiver_InvalidMaxInterval(t *testing.T) {
 	params := map[string]string{"max_interval_ms": "not-a-number"}
-	_, err := New(params)
+	_, err := NewReceiver(params)
 	if err == nil {
 		t.Error("expected error for invalid max_interval_ms")
 	}
 }
 
-func TestNew_NegativeMinInterval(t *testing.T) {
+func TestNewReceiver_NegativeMinInterval(t *testing.T) {
 	params := map[string]string{"min_interval_ms": "-10"}
-	_, err := New(params)
+	_, err := NewReceiver(params)
 	if err == nil {
 		t.Error("expected error for negative min_interval_ms")
 	}
 }
 
-func TestNew_NegativeMaxInterval(t *testing.T) {
+func TestNewReceiver_NegativeMaxInterval(t *testing.T) {
 	params := map[string]string{"max_interval_ms": "-10"}
-	_, err := New(params)
+	_, err := NewReceiver(params)
 	if err == nil {
 		t.Error("expected error for negative max_interval_ms")
 	}
 }
 
-func TestNew_MinExceedsMax(t *testing.T) {
+func TestNewReceiver_MinExceedsMax(t *testing.T) {
 	params := map[string]string{
 		"min_interval_ms": "500",
 		"max_interval_ms": "100",
 	}
-	_, err := New(params)
+	_, err := NewReceiver(params)
 	if err == nil {
 		t.Error("expected error when min > max")
 	}
 }
 
-func TestNew_EqualMinMax(t *testing.T) {
+func TestNewReceiver_EqualMinMax(t *testing.T) {
 	params := map[string]string{
 		"min_interval_ms": "100",
 		"max_interval_ms": "100",
 	}
-	r, err := New(params)
+	r, err := NewReceiver(params)
 	if err != nil {
 		t.Fatalf("New with min=max should succeed: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestRun_EmitsMessages(t *testing.T) {
 		"max_interval_ms": "5",
 		"instance":        "emit-test",
 	}
-	r, err := New(params)
+	r, err := NewReceiver(params)
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestRun_StopsOnContextCancel(t *testing.T) {
 		"min_interval_ms": "1000",
 		"max_interval_ms": "2000",
 	}
-	r, err := New(params)
+	r, err := NewReceiver(params)
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
 	}
@@ -203,11 +203,11 @@ func TestRun_MultipleInstances(t *testing.T) {
 		"instance":        "instance-2",
 	}
 
-	r1, err := New(params1)
+	r1, err := NewReceiver(params1)
 	if err != nil {
-		t.Fatalf("New(params1) failed: %v", err)
+		t.Fatalf("NewReceiver(params1) failed: %v", err)
 	}
-	r2, err := New(params2)
+	r2, err := NewReceiver(params2)
 	if err != nil {
 		t.Fatalf("New(params2) failed: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestRun_MultipleInstances(t *testing.T) {
 }
 
 func TestRun_ReturnsNilOnCancel(t *testing.T) {
-	r, err := New(nil)
+	r, err := NewReceiver(nil)
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestRun_ReturnsNilOnCancel(t *testing.T) {
 }
 
 func TestGenerateMessage_Format(t *testing.T) {
-	r, err := New(map[string]string{"instance": "format-test"})
+	r, err := NewReceiver(map[string]string{"instance": "format-test"})
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestGenerateMessage_Format(t *testing.T) {
 }
 
 func TestRandomInterval_Bounds(t *testing.T) {
-	r, err := New(map[string]string{
+	r, err := NewReceiver(map[string]string{
 		"min_interval_ms": "10",
 		"max_interval_ms": "20",
 	})
@@ -324,7 +324,7 @@ func TestRandomInterval_Bounds(t *testing.T) {
 }
 
 func TestRandomInterval_EqualBounds(t *testing.T) {
-	r, err := New(map[string]string{
+	r, err := NewReceiver(map[string]string{
 		"min_interval_ms": "50",
 		"max_interval_ms": "50",
 	})
