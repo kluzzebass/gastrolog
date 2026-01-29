@@ -81,6 +81,7 @@ Provides helpers for structured logging with `slog`:
 
 - `Discard() *slog.Logger` -- returns a logger that discards all output
 - `Default(logger *slog.Logger) *slog.Logger` -- returns logger if non-nil, otherwise returns Discard()
+- `ComponentFilterHandler` -- wraps an slog.Handler to filter logs by component-specific levels
 
 Used by all components to handle nil logger gracefully:
 ```go
@@ -90,6 +91,29 @@ func New(cfg Config) *Foo {
     }
 }
 ```
+
+**ComponentFilterHandler** enables dynamic, attribute-based logging control:
+- Inspects each log record for a "component" attribute
+- Maintains a per-component minimum level map (copy-on-write for thread-safety)
+- Records below the minimum level are dropped; others pass to wrapped handler
+- Components without explicit levels fall back to a default level
+
+```go
+// Setup in main():
+base := slog.NewTextHandler(os.Stderr, nil)
+filter := logging.NewComponentFilterHandler(base, slog.LevelInfo)
+logger := slog.New(filter)
+
+// Runtime control (e.g., from control plane):
+filter.SetLevel("orchestrator", slog.LevelDebug)  // Enable debug for one component
+filter.ClearLevel("orchestrator")                  // Revert to default
+```
+
+Key design points:
+- Loggers remain immutable; components never mutate logging state
+- Filtering is centralized; policy lives outside components
+- Lock-free reads in Handle() via atomic pointer to map
+- Handlers created via `logger.With()` share the same level configuration
 
 ### Orchestrator package (`backend/internal/orchestrator/`)
 
