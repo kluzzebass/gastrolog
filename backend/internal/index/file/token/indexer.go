@@ -14,6 +14,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/format"
 	"gastrolog/internal/index/token"
+	"gastrolog/internal/logging"
 
 	"github.com/google/uuid"
 )
@@ -39,12 +40,14 @@ const (
 type Indexer struct {
 	dir     string
 	manager chunk.ChunkManager
+	logger  *slog.Logger
 }
 
-func NewIndexer(dir string, manager chunk.ChunkManager) *Indexer {
+func NewIndexer(dir string, manager chunk.ChunkManager, logger *slog.Logger) *Indexer {
 	return &Indexer{
 		dir:     dir,
 		manager: manager,
+		logger:  logging.Default(logger).With("component", "indexer", "type", "token"),
 	}
 }
 
@@ -162,7 +165,7 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 
 	totalDuration := time.Since(buildStart)
 
-	slog.Info("token index built",
+	t.logger.Info("token index built",
 		"chunk", chunkID.String(),
 		"chunk_start", meta.StartTS,
 		"chunk_end", meta.EndTS,

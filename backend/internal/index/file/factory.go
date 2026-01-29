@@ -51,7 +51,7 @@ func NewFactory() index.ManagerFactory {
 		indexers := []index.Indexer{
 			filetime.NewIndexer(dir, chunkManager, timeSparsity),
 			filesource.NewIndexer(dir, chunkManager),
-			filetoken.NewIndexer(dir, chunkManager),
+			filetoken.NewIndexer(dir, chunkManager, logger),
 		}
 
 		return NewManager(dir, indexers, logger), nil
