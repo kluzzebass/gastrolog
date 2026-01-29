@@ -34,6 +34,25 @@ go mod tidy                                       # Clean dependencies
 - **ChunkMeta** -- `ID`, `StartTS`, `EndTS` (`time.Time`), `Size`, `Sealed`
 - **ChunkID** / **SourceID** -- UUID v7 typed identifiers (time-ordered, sortable)
 
+### Orchestrator package (`backend/internal/orchestrator/`)
+
+Coordinates ingestion, indexing, and querying without owning business logic:
+
+- **Orchestrator** -- routes records to chunk managers, triggers index builds on seal, delegates queries
+- Registries keyed by string for future multi-tenant support
+- `Ingest(Record)` -- fans out to all registered ChunkManagers, detects seals, schedules async index builds
+- `Search/SearchThenFollow/SearchWithContext` -- delegates to registered QueryEngines
+
+**Concurrency model:**
+- `Register*` methods are startup-only by convention (read-only after setup)
+- `Ingest` serialized via exclusive lock (required for seal detection)
+- `Search*` methods use read lock, can run concurrently
+
+**Known limitations (documented, acceptable for now):**
+- Seal detection via Active() before/after comparison assumes single writer, no async sealing
+- Goroutine lifecycle for index builds: fire-and-forget, no cancellation/shutdown coordination
+- Partial failure on fan-out: if CM A succeeds and CM B fails, no rollback
+
 ### Query package (`backend/internal/query/`)
 
 High-level search API over chunks and indexes:
@@ -173,6 +192,7 @@ Append records, seal chunks, then pass `cm` and `im` to the code under test. See
 backend/
   internal/
     callgroup/                  Singleflight-like concurrency primitive
+    orchestrator/               Coordination layer (ingest routing, index scheduling, query delegation)
     chunk/
       types.go                  Core interfaces and types
       file/                     File-based chunk manager
