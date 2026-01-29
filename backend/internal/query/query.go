@@ -8,12 +8,10 @@ import (
 	"errors"
 	"iter"
 	"slices"
-	"sort"
 	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
-	"gastrolog/internal/index/token"
 )
 
 // Query describes what records to search for.
@@ -665,169 +663,12 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, meta chunk.Chu
 			}
 		}
 
-		if !meta.Sealed {
-			var scanner iter.Seq2[recordWithRef, error]
-			if q.Reverse() {
-				scanner = e.scanSequentialReverseWithRef(cursor, q, meta.ID)
-			} else {
-				scanner = e.scanSequentialWithRef(cursor, q, meta.ID)
-			}
-			for rr, err := range scanner {
-				if err != nil {
-					yield(rr, err)
-					return
-				}
-				if !yield(rr, nil) {
-					return
-				}
-			}
+		// Try to use indexes for sealed chunks, fall back to sequential scan
+		// if indexes aren't available yet (chunk sealed but not yet indexed).
+		scanner, err := e.buildScanner(cursor, q, meta, startPos)
+		if err != nil {
+			yield(recordWithRef{}, err)
 			return
-		}
-
-		// Time index: find start position first to prune posting lists.
-		// For forward queries, we seek to Start (lower bound).
-		// For reverse queries, we seek to End (which is the lower bound).
-		lower, _ := q.TimeBounds()
-		var seekRef chunk.RecordRef
-		var hasSeek bool
-		if !lower.IsZero() {
-			timeIdx, err := e.indexes.OpenTimeIndex(meta.ID)
-			if err != nil {
-				yield(recordWithRef{}, err)
-				return
-			}
-			reader := index.NewTimeIndexReader(meta.ID, timeIdx.Entries())
-			seekRef, hasSeek = reader.FindStart(lower)
-		}
-
-		// If we have a resume position, use the larger of time index and resume.
-		if startPos != nil {
-			if !hasSeek || *startPos > seekRef.Pos {
-				seekRef = chunk.RecordRef{ChunkID: meta.ID, Pos: *startPos}
-				hasSeek = true
-			}
-		}
-
-		// Token filter: if set, get positions from token index and intersect.
-		var tokenPositions []uint64
-		var hasTokenFilter bool
-		if len(q.Tokens) > 0 {
-			hasTokenFilter = true
-			tokIdx, err := e.indexes.OpenTokenIndex(meta.ID)
-			if err != nil {
-				yield(recordWithRef{}, err)
-				return
-			}
-			reader := index.NewTokenIndexReader(meta.ID, tokIdx.Entries())
-
-			// Look up each token and intersect positions.
-			for i, tok := range q.Tokens {
-				positions, found := reader.Lookup(tok)
-				if !found {
-					return // token not in this chunk, no matches possible
-				}
-				// Prune positions before start.
-				if hasSeek {
-					positions = prunePositions(positions, seekRef.Pos)
-					if len(positions) == 0 {
-						return // no positions after start
-					}
-				}
-				if i == 0 {
-					tokenPositions = positions
-				} else {
-					tokenPositions = intersectPositions(tokenPositions, positions)
-					if len(tokenPositions) == 0 {
-						return // no records contain all tokens
-					}
-				}
-			}
-		}
-
-		// Source filter: if set, get positions from source index (OR semantics).
-		var sourcePositions []uint64
-		var hasSourceFilter bool
-		if len(q.Sources) > 0 {
-			hasSourceFilter = true
-			srcIdx, err := e.indexes.OpenSourceIndex(meta.ID)
-			if err != nil {
-				yield(recordWithRef{}, err)
-				return
-			}
-			reader := index.NewSourceIndexReader(meta.ID, srcIdx.Entries())
-
-			// Union positions from all requested sources.
-			for _, src := range q.Sources {
-				positions, found := reader.Lookup(src)
-				if found {
-					// Prune positions before start.
-					if hasSeek {
-						positions = prunePositions(positions, seekRef.Pos)
-					}
-					sourcePositions = unionPositions(sourcePositions, positions)
-				}
-			}
-			if len(sourcePositions) == 0 {
-				return // no requested sources in this chunk
-			}
-		}
-
-		// Combine token and source positions if both are set.
-		var finalPositions []uint64
-		hasPositionFilter := hasTokenFilter || hasSourceFilter
-		if hasTokenFilter && hasSourceFilter {
-			finalPositions = intersectPositions(tokenPositions, sourcePositions)
-			if len(finalPositions) == 0 {
-				return // no records match both filters
-			}
-		} else if hasTokenFilter {
-			finalPositions = tokenPositions
-		} else if hasSourceFilter {
-			finalPositions = sourcePositions
-		}
-
-		// If resuming, exclude the exact resume position (already returned).
-		if startPos != nil && len(finalPositions) > 0 {
-			if q.Reverse() {
-				// In reverse, resume position is at the end of the list we care about.
-				if finalPositions[len(finalPositions)-1] == *startPos {
-					finalPositions = finalPositions[:len(finalPositions)-1]
-					if len(finalPositions) == 0 {
-						return // no more positions before resume point
-					}
-				}
-			} else {
-				// In forward, resume position is at the start.
-				if finalPositions[0] == *startPos {
-					finalPositions = finalPositions[1:]
-					if len(finalPositions) == 0 {
-						return // no more positions after resume point
-					}
-				}
-			}
-		}
-
-		if hasSeek && startPos == nil && !q.Reverse() {
-			// Only seek if we haven't already seeked for resume (forward only).
-			if err := cursor.Seek(seekRef); err != nil {
-				yield(recordWithRef{}, err)
-				return
-			}
-		}
-
-		var scanner iter.Seq2[recordWithRef, error]
-		if hasPositionFilter {
-			if q.Reverse() {
-				scanner = e.scanByPositionsReverseWithRef(cursor, q, meta.ID, finalPositions)
-			} else {
-				scanner = e.scanByPositionsWithRef(cursor, q, meta.ID, finalPositions)
-			}
-		} else {
-			if q.Reverse() {
-				scanner = e.scanSequentialReverseWithRef(cursor, q, meta.ID)
-			} else {
-				scanner = e.scanSequentialWithRef(cursor, q, meta.ID)
-			}
 		}
 
 		for rr, err := range scanner {
@@ -842,215 +683,80 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, meta chunk.Chu
 	}
 }
 
-// prunePositions returns positions >= minPos from a sorted slice.
-func prunePositions(positions []uint64, minPos uint64) []uint64 {
-	idx := sort.Search(len(positions), func(i int) bool {
-		return positions[i] >= minPos
-	})
-	return positions[idx:]
-}
+// buildScanner creates a scanner for a chunk using the composable filter pipeline.
+// It tries to use indexes when available, falling back to runtime filters when not.
+func (e *Engine) buildScanner(cursor chunk.RecordCursor, q Query, meta chunk.ChunkMeta, startPos *uint64) (iter.Seq2[recordWithRef, error], error) {
+	b := newScannerBuilder(meta.ID)
 
-// intersectPositions returns positions present in both sorted slices.
-func intersectPositions(a, b []uint64) []uint64 {
-	var result []uint64
-	i, j := 0, 0
-	for i < len(a) && j < len(b) {
-		if a[i] == b[j] {
-			result = append(result, a[i])
-			i++
-			j++
-		} else if a[i] < b[j] {
-			i++
+	// Set minimum position from time index (for sealed chunks) or resume position.
+	lower, _ := q.TimeBounds()
+	if meta.Sealed && !lower.IsZero() {
+		timeIdx, err := e.indexes.OpenTimeIndex(meta.ID)
+		if err == nil {
+			reader := index.NewTimeIndexReader(meta.ID, timeIdx.Entries())
+			if seekRef, found := reader.FindStart(lower); found {
+				b.setMinPosition(seekRef.Pos)
+			}
+		}
+		// If time index not available, we'll filter at runtime (time bounds are always checked).
+	}
+
+	// Resume position takes precedence over time-based start.
+	if startPos != nil {
+		b.setMinPosition(*startPos)
+	}
+
+	// Apply source filter: try index first, fall back to runtime filter.
+	// Source filter is applied before token filter (cheap before expensive).
+	if len(q.Sources) > 0 {
+		if meta.Sealed {
+			ok, empty := applySourceIndex(b, e.indexes, meta.ID, q.Sources)
+			if empty {
+				return emptyScanner(), nil
+			}
+			if !ok {
+				// Index not available, use runtime filter.
+				b.addFilter(sourceFilter(q.Sources))
+			}
 		} else {
-			j++
+			// Unsealed chunks don't have indexes.
+			b.addFilter(sourceFilter(q.Sources))
 		}
 	}
-	return result
-}
 
-// unionPositions returns all unique positions from both sorted slices, in sorted order.
-func unionPositions(a, b []uint64) []uint64 {
-	result := make([]uint64, 0, len(a)+len(b))
-	i, j := 0, 0
-	for i < len(a) && j < len(b) {
-		if a[i] == b[j] {
-			result = append(result, a[i])
-			i++
-			j++
-		} else if a[i] < b[j] {
-			result = append(result, a[i])
-			i++
+	// Apply token filter: try index first, fall back to runtime filter.
+	if len(q.Tokens) > 0 {
+		if meta.Sealed {
+			ok, empty := applyTokenIndex(b, e.indexes, meta.ID, q.Tokens)
+			if empty {
+				return emptyScanner(), nil
+			}
+			if !ok {
+				// Index not available, use runtime filter.
+				b.addFilter(tokenFilter(q.Tokens))
+			}
 		} else {
-			result = append(result, b[j])
-			j++
+			// Unsealed chunks don't have indexes.
+			b.addFilter(tokenFilter(q.Tokens))
 		}
 	}
-	result = append(result, a[i:]...)
-	result = append(result, b[j:]...)
-	return result
+
+	// Exclude resume position (already returned).
+	if startPos != nil {
+		b.excludePosition(*startPos, q.Reverse())
+	}
+
+	// Seek cursor to start position if we have one and not using positions.
+	if b.isSequential() && b.hasMinPos && startPos == nil && !q.Reverse() {
+		if err := cursor.Seek(chunk.RecordRef{ChunkID: meta.ID, Pos: b.minPos}); err != nil {
+			return nil, err
+		}
+	}
+
+	return b.build(cursor, q), nil
 }
 
-// matchesTokens checks if the record's raw data contains all query tokens.
-func matchesTokens(raw []byte, queryTokens []string) bool {
-	if len(queryTokens) == 0 {
-		return true
-	}
-	recordTokens := token.Simple(raw)
-	tokenSet := make(map[string]bool, len(recordTokens))
-	for _, t := range recordTokens {
-		tokenSet[t] = true
-	}
-	for _, qt := range queryTokens {
-		if !tokenSet[qt] {
-			return false
-		}
-	}
-	return true
-}
-
-// scanSequentialWithRef reads records sequentially from the cursor, applying all filters.
-func (e *Engine) scanSequentialWithRef(cursor chunk.RecordCursor, q Query, chunkID chunk.ChunkID) iter.Seq2[recordWithRef, error] {
-	lower, upper := q.TimeBounds()
-
-	return func(yield func(recordWithRef, error) bool) {
-		for {
-			rec, ref, err := cursor.Next()
-			if errors.Is(err, chunk.ErrNoMoreRecords) {
-				return
-			}
-			if err != nil {
-				yield(recordWithRef{Ref: ref}, err)
-				return
-			}
-
-			if !lower.IsZero() && rec.IngestTS.Before(lower) {
-				continue
-			}
-			if !upper.IsZero() && !rec.IngestTS.Before(upper) {
-				return
-			}
-			if len(q.Sources) > 0 && !slices.Contains(q.Sources, rec.SourceID) {
-				continue
-			}
-			if !matchesTokens(rec.Raw, q.Tokens) {
-				continue
-			}
-
-			if !yield(recordWithRef{Record: rec, Ref: ref}, nil) {
-				return
-			}
-		}
-	}
-}
-
-// scanByPositionsWithRef seeks to specific positions, applying time filters to each record.
-// Positions are assumed to already be pruned to >= time start.
-func (e *Engine) scanByPositionsWithRef(cursor chunk.RecordCursor, q Query, chunkID chunk.ChunkID, positions []uint64) iter.Seq2[recordWithRef, error] {
-	lower, upper := q.TimeBounds()
-
-	return func(yield func(recordWithRef, error) bool) {
-		for _, pos := range positions {
-			ref := chunk.RecordRef{ChunkID: chunkID, Pos: pos}
-			if err := cursor.Seek(ref); err != nil {
-				yield(recordWithRef{Ref: ref}, err)
-				return
-			}
-
-			rec, ref, err := cursor.Next()
-			if errors.Is(err, chunk.ErrNoMoreRecords) {
-				return
-			}
-			if err != nil {
-				yield(recordWithRef{Ref: ref}, err)
-				return
-			}
-
-			if !lower.IsZero() && rec.IngestTS.Before(lower) {
-				continue
-			}
-			if !upper.IsZero() && !rec.IngestTS.Before(upper) {
-				return
-			}
-
-			if !yield(recordWithRef{Record: rec, Ref: ref}, nil) {
-				return
-			}
-		}
-	}
-}
-
-// scanSequentialReverseWithRef reads records in reverse from the cursor, applying all filters.
-func (e *Engine) scanSequentialReverseWithRef(cursor chunk.RecordCursor, q Query, chunkID chunk.ChunkID) iter.Seq2[recordWithRef, error] {
-	lower, upper := q.TimeBounds()
-
-	return func(yield func(recordWithRef, error) bool) {
-		for {
-			rec, ref, err := cursor.Prev()
-			if errors.Is(err, chunk.ErrNoMoreRecords) {
-				return
-			}
-			if err != nil {
-				yield(recordWithRef{Ref: ref}, err)
-				return
-			}
-
-			// In reverse, we stop when we go below lower bound (too old).
-			if !lower.IsZero() && rec.IngestTS.Before(lower) {
-				return
-			}
-			// In reverse, we skip records at or after upper bound (too new).
-			if !upper.IsZero() && !rec.IngestTS.Before(upper) {
-				continue
-			}
-			if len(q.Sources) > 0 && !slices.Contains(q.Sources, rec.SourceID) {
-				continue
-			}
-			if !matchesTokens(rec.Raw, q.Tokens) {
-				continue
-			}
-
-			if !yield(recordWithRef{Record: rec, Ref: ref}, nil) {
-				return
-			}
-		}
-	}
-}
-
-// scanByPositionsReverseWithRef seeks to specific positions in reverse order.
-func (e *Engine) scanByPositionsReverseWithRef(cursor chunk.RecordCursor, q Query, chunkID chunk.ChunkID, positions []uint64) iter.Seq2[recordWithRef, error] {
-	lower, upper := q.TimeBounds()
-
-	return func(yield func(recordWithRef, error) bool) {
-		// Iterate positions in reverse order.
-		for i := len(positions) - 1; i >= 0; i-- {
-			pos := positions[i]
-			ref := chunk.RecordRef{ChunkID: chunkID, Pos: pos}
-			if err := cursor.Seek(ref); err != nil {
-				yield(recordWithRef{Ref: ref}, err)
-				return
-			}
-
-			rec, ref, err := cursor.Next()
-			if errors.Is(err, chunk.ErrNoMoreRecords) {
-				return
-			}
-			if err != nil {
-				yield(recordWithRef{Ref: ref}, err)
-				return
-			}
-
-			// In reverse, we stop when we go below lower bound.
-			if !lower.IsZero() && rec.IngestTS.Before(lower) {
-				return
-			}
-			// In reverse, we skip records at or after upper bound.
-			if !upper.IsZero() && !rec.IngestTS.Before(upper) {
-				continue
-			}
-
-			if !yield(recordWithRef{Record: rec, Ref: ref}, nil) {
-				return
-			}
-		}
-	}
+// emptyScanner returns a scanner that yields no records.
+func emptyScanner() iter.Seq2[recordWithRef, error] {
+	return func(yield func(recordWithRef, error) bool) {}
 }

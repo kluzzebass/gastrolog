@@ -31,12 +31,13 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	o.ingestCh = make(chan IngestMessage, o.ingestSize)
 
 	// Launch receiver goroutines.
-	for id, r := range o.receivers {
-		go o.runReceiver(ctx, id, r)
+	for _, r := range o.receivers {
+		r := r // capture for closure
+		o.receiverWg.Go(func() { r.Run(ctx, o.ingestCh) })
 	}
 
 	// Launch ingest loop.
-	go o.ingestLoop(ctx)
+	o.ingestLoopWg.Go(func() { o.ingestLoop(ctx) })
 
 	return nil
 }
@@ -50,8 +51,8 @@ func (o *Orchestrator) Stop() error {
 		return ErrNotRunning
 	}
 	cancel := o.cancel
-	done := o.done
 	indexCancel := o.indexCancel
+	ingestCh := o.ingestCh
 	o.mu.Unlock()
 
 	// Cancel receivers and ingest loop.
@@ -60,8 +61,12 @@ func (o *Orchestrator) Stop() error {
 	// Cancel in-flight index builds.
 	indexCancel()
 
+	// Wait for receivers to exit, then close the ingest channel.
+	o.receiverWg.Wait()
+	close(ingestCh)
+
 	// Wait for ingest loop to finish.
-	<-done
+	o.ingestLoopWg.Wait()
 
 	// Wait for index builds to exit.
 	o.indexWg.Wait()
@@ -76,13 +81,6 @@ func (o *Orchestrator) Stop() error {
 	o.mu.Unlock()
 
 	return nil
-}
-
-// runReceiver runs a single receiver, recovering from panics.
-func (o *Orchestrator) runReceiver(ctx context.Context, id string, r Receiver) {
-	// Receiver.Run blocks until ctx is cancelled or error.
-	// Errors are currently ignored - future: add error callback or logging.
-	_ = r.Run(ctx, o.ingestCh)
 }
 
 // ingestLoop receives messages from the ingest channel and routes them.
@@ -101,6 +99,11 @@ func (o *Orchestrator) ingestLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			// Context cancelled, but drain remaining messages from channel.
+			// Channel will be closed after receivers exit.
+			for msg := range o.ingestCh {
+				o.processMessage(msg)
+			}
 			return
 		case msg, ok := <-o.ingestCh:
 			if !ok {
@@ -120,10 +123,10 @@ func (o *Orchestrator) processMessage(msg IngestMessage) {
 	}
 
 	// Construct record.
-	now := o.now()
+	// IngestTS comes from the receiver (when message was received).
+	// WriteTS is set by ChunkManager on append.
 	rec := chunk.Record{
-		WriteTS:  now,
-		IngestTS: now,
+		IngestTS: msg.IngestTS,
 		SourceID: sourceID,
 		Raw:      msg.Raw,
 	}

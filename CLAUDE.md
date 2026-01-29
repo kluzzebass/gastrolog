@@ -8,6 +8,38 @@ GastroLog is a Go-based log management system built around chunk-based storage a
 
 Module name: `gastrolog` (local module, not intended for external import)
 
+## Go Style Rules
+
+**Always write modern Go code targeting Go 1.25+:**
+
+- Use `sync.WaitGroup.Go(func())` instead of `Add(1)` + `go func()` + `defer Done()`
+- Use `iter.Seq2` for dual-value iterators (record + error)
+- Use `slices` and `maps` packages instead of hand-rolled loops where appropriate
+- Use `context.WithoutCancel` when a goroutine should outlive its initiator
+- Use `errors.Is` / `errors.As` for error checking, never `==`
+- Use `cmp.Or` for default values where appropriate
+
+**Concurrency patterns:**
+
+- All goroutines must be tracked with `sync.WaitGroup` for clean shutdown
+- Use `WaitGroup.Go()` to launch and track goroutines in one call
+- Channels should be explicitly closed by the sender when done
+- Always select on `ctx.Done()` in long-running goroutines
+- Copy values under lock, release lock before waiting (prevents deadlock)
+
+**Error handling:**
+
+- Return sentinel errors for all validation failures
+- Use descriptive error names (`ErrSignatureMismatch`, not `ErrInvalid`)
+- Wrap errors with context using `fmt.Errorf("operation: %w", err)`
+
+**Code organization:**
+
+- Keep implementations boring and explicit
+- No magic, no clever tricks
+- Prefer composition over inheritance
+- Use sub-packages to avoid symbol prefixing (`time.NewIndexer` not `NewTimeIndexer`)
+
 ## Build & Test Commands
 
 All commands run from the `backend/` directory:
@@ -39,9 +71,23 @@ go mod tidy                                       # Clean dependencies
 Coordinates ingestion, indexing, and querying without owning business logic:
 
 - **Orchestrator** -- routes records to chunk managers, triggers index builds on seal, delegates queries
+- **Receiver** interface -- sources of log messages; emit `IngestMessage` to shared channel
+- **IngestMessage** -- `{Attrs, Raw, IngestTS}` where `IngestTS` is set by receiver at receive time
 - Registries keyed by string for future multi-tenant support
-- `Ingest(Record)` -- fans out to all registered ChunkManagers, detects seals, schedules async index builds
-- `Search/SearchThenFollow/SearchWithContext` -- delegates to registered QueryEngines
+
+**Lifecycle:**
+- `Start(ctx)` -- launches receiver goroutines + ingest loop, returns immediately
+- `Stop()` -- cancels context, waits for receivers, closes channel, waits for ingest loop, waits for index builds
+- All goroutines tracked with `sync.WaitGroup.Go()` for clean shutdown
+- Double start returns `ErrAlreadyRunning`, stop without start returns `ErrNotRunning`
+
+**Shutdown order:**
+1. Cancel context (signals receivers and ingest loop)
+2. Wait for receivers to exit (`receiverWg.Wait()`)
+3. Close ingest channel
+4. Ingest loop drains remaining messages, then exits
+5. Wait for ingest loop (`ingestLoopWg.Wait()`)
+6. Wait for index builds (`indexWg.Wait()`)
 
 **Concurrency model:**
 - `Register*` methods are startup-only by convention (read-only after setup)
@@ -50,7 +96,7 @@ Coordinates ingestion, indexing, and querying without owning business logic:
 
 **Known limitations (documented, acceptable for now):**
 - Seal detection via Active() before/after comparison assumes single writer, no async sealing
-- Goroutine lifecycle for index builds: fire-and-forget, no cancellation/shutdown coordination
+- Receiver errors currently ignored (future: add error callback)
 - Partial failure on fan-out: if CM A succeeds and CM B fails, no rollback
 
 ### Query package (`backend/internal/query/`)
@@ -68,12 +114,31 @@ High-level search API over chunks and indexes:
   - Resume token enables pagination; valid as long as referenced chunk exists
   - `ErrInvalidResumeToken` returned if chunk was deleted
 
+**Scanner pipeline (`scanner.go`):**
+
+Uses composable filter pipeline to avoid combinatorial explosion of if-else branches:
+
+- **scannerBuilder** -- accumulates position sources and runtime filters
+  - `positions []uint64`: nil = sequential scan, empty = no matches, non-empty = seek positions
+  - `filters []recordFilter`: applied in order (cheap filters first)
+- **Index application functions** -- each tries to use an index, falls back to runtime filter if unavailable
+  - `applySourceIndex()` -- contributes positions or adds `sourceFilter`
+  - `applyTokenIndex()` -- contributes positions or adds `tokenFilter`
+- **Graceful fallback** -- if index returns `ErrIndexNotFound` (sealed but not yet indexed), falls back to sequential scan
+
+Adding a new filter type requires:
+1. One `applyXxxIndex(builder, indexes, chunkID, params) (ok, empty bool)` function
+2. One `xxxFilter(params) recordFilter` function
+3. A few lines in `buildScanner` to call them
+
 Query execution:
 1. Selects chunks overlapping time range (sorted by StartTS, ascending or descending)
-2. For sealed chunks: uses time/source/token indexes to find candidate positions
-3. For active chunks: scans sequentially with on-the-fly filtering
-4. Applies time bounds, source filter, token filter to each record
-5. Respects limit, tracks position for resume token
+2. For each chunk, builds scanner via pipeline:
+   - Try time index for start position
+   - Try source/token indexes for position lists (intersected)
+   - If index unavailable, add runtime filter instead
+3. Scanner iterates positions (or sequentially) applying time bounds and filters
+4. Respects limit, tracks position for resume token
 
 ### Index package (`backend/internal/index/`)
 
@@ -192,13 +257,21 @@ Append records, seal chunks, then pass `cm` and `im` to the code under test. See
 backend/
   internal/
     callgroup/                  Singleflight-like concurrency primitive
-    orchestrator/               Coordination layer (ingest routing, index scheduling, query delegation)
+    orchestrator/
+      orchestrator.go           Orchestrator struct and New()
+      lifecycle.go              Start() and Stop() methods
+      ingest.go                 Ingest routing and seal detection
+      search.go                 Search delegation to query engines
+      receiver.go               Receiver interface, IngestMessage, ReceiverFactory
+      registry.go               Register* methods for components
+      factory.go                Factories struct and ApplyConfig
     chunk/
-      types.go                  Core interfaces and types
+      chunk.go                  Interfaces (ChunkManager, RecordCursor, MetaStore), ManagerFactory
+      types.go                  Data types (Record, ChunkMeta, ChunkID, SourceID, RecordRef)
       file/                     File-based chunk manager
       memory/                   Memory-based chunk manager
     index/
-      index.go                  Shared types, Indexer/IndexManager interfaces, generic Index[T]
+      index.go                  Shared types, Indexer/IndexManager interfaces, generic Index[T], ManagerFactory
       build.go                  BuildHelper (singleflight + errgroup)
       time_reader.go            Shared TimeIndexReader with FindStart binary search
       source_reader.go          Shared SourceIndexReader with Lookup
@@ -217,6 +290,15 @@ backend/
         token/                  Memory-based token indexer
     query/
       query.go                  Query engine with Search API
+      scanner.go                Composable scanner pipeline (scannerBuilder, filters)
+    source/
+      registry.go               Source identity resolution and persistence
+      file/                     File-based source store
+      memory/                   Memory-based source store
+    config/
+      config.go                 Config types (Store, Receiver definitions)
+      file/                     File-based config store
+      memory/                   Memory-based config store
   docs/
     file_formats.md             Binary format specifications
 ```

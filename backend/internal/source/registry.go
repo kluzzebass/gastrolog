@@ -83,8 +83,7 @@ func NewRegistry(cfg Config) (*Registry, error) {
 		}
 
 		// Start persistence goroutine.
-		r.persistWg.Add(1)
-		go r.persistLoop()
+		r.persistWg.Go(r.persistLoop)
 	}
 
 	return r, nil
@@ -181,8 +180,6 @@ func (r *Registry) queuePersist(src *Source) {
 
 // persistLoop processes the persistence queue.
 func (r *Registry) persistLoop() {
-	defer r.persistWg.Done()
-
 	for {
 		select {
 		case <-r.stopCh:

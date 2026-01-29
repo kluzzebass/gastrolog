@@ -450,6 +450,8 @@ func (r *mockReceiver) Run(ctx context.Context, out chan<- orchestrator.IngestMe
 	defer close(r.stopped)
 
 	for _, msg := range r.messages {
+		// Set IngestTS to now, simulating when the receiver received the message.
+		msg.IngestTS = time.Now()
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -793,8 +795,9 @@ func (r *countingReceiver) Run(ctx context.Context, out chan<- orchestrator.Inge
 		case <-ctx.Done():
 			return ctx.Err()
 		case out <- orchestrator.IngestMessage{
-			Attrs: map[string]string{"index": string(rune('a' + i))},
-			Raw:   []byte("message"),
+			Attrs:    map[string]string{"index": string(rune('a' + i))},
+			Raw:      []byte("message"),
+			IngestTS: time.Now(),
 		}:
 		}
 	}

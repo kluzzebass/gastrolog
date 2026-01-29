@@ -1,13 +1,17 @@
 package orchestrator
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // IngestMessage is the data emitted by receivers for ingestion.
 // Receivers provide attributes for identity resolution; the orchestrator
 // resolves these to a SourceID via the SourceRegistry.
 type IngestMessage struct {
-	Attrs map[string]string
-	Raw   []byte
+	Attrs    map[string]string
+	Raw      []byte
+	IngestTS time.Time // when the receiver received this message
 }
 
 // Receiver is a source of log messages.

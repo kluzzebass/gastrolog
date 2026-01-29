@@ -76,9 +76,7 @@ func (o *Orchestrator) scheduleIndexBuild(registryKey string, chunkID chunk.Chun
 		return
 	}
 
-	o.indexWg.Add(1)
-	go func() {
-		defer o.indexWg.Done()
+	o.indexWg.Go(func() {
 		_ = im.BuildIndexes(o.indexCtx, chunkID)
-	}()
+	})
 }

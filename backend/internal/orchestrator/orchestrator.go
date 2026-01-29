@@ -61,11 +61,13 @@ type Orchestrator struct {
 	sources   *source.Registry
 
 	// Ingest channel and lifecycle.
-	ingestCh   chan IngestMessage
-	ingestSize int
-	cancel     context.CancelFunc
-	done       chan struct{}
-	running    bool
+	ingestCh     chan IngestMessage
+	ingestSize   int
+	cancel       context.CancelFunc
+	done         chan struct{}
+	running      bool
+	receiverWg   sync.WaitGroup // tracks receiver goroutines
+	ingestLoopWg sync.WaitGroup // tracks ingest loop goroutine
 
 	// Index build lifecycle.
 	indexCtx    context.Context

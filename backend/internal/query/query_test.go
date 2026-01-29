@@ -2249,3 +2249,112 @@ func TestSearchWithContextLimit(t *testing.T) {
 		}
 	}
 }
+
+// TestSearchSealedWithoutIndexes verifies that sealed chunks without indexes
+// fall back to sequential scanning instead of returning an error.
+func TestSearchSealedWithoutIndexes(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, SourceID: srcA, Raw: []byte("error one")},
+		{IngestTS: t2, SourceID: srcB, Raw: []byte("warning two")},
+		{IngestTS: t3, SourceID: srcA, Raw: []byte("error three")},
+	}
+
+	// Create chunk manager and append records.
+	all := records
+	cm, err := chunkmem.NewManager(chunkmem.Config{
+		MaxChunkBytes: 1 << 20,
+		Now:           fakeClock(all),
+	})
+	if err != nil {
+		t.Fatalf("new chunk manager: %v", err)
+	}
+
+	for _, rec := range records {
+		if _, _, err := cm.Append(rec); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+
+	// Seal the chunk but DO NOT build indexes.
+	if err := cm.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	// Create index manager that will return ErrIndexNotFound.
+	timeIdx := memtime.NewIndexer(cm, 1)
+	srcIdx := memsource.NewIndexer(cm)
+	tokIdx := memtoken.NewIndexer(cm)
+	im := indexmem.NewManager(
+		[]index.Indexer{timeIdx, srcIdx, tokIdx},
+		timeIdx,
+		srcIdx,
+		tokIdx,
+	)
+	// Note: NOT calling buildIndexes - indexes don't exist.
+
+	eng := query.New(cm, im)
+
+	// Query with time filter - should fall back to sequential scan.
+	t.Run("time filter", func(t *testing.T) {
+		seq := search(eng, context.Background(), query.Query{
+			Start: t1,
+			End:   t4,
+		})
+		results, err := collect(seq)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(results) != 3 {
+			t.Fatalf("expected 3 results, got %d", len(results))
+		}
+	})
+
+	// Query with source filter - should fall back to sequential scan.
+	t.Run("source filter", func(t *testing.T) {
+		seq := search(eng, context.Background(), query.Query{
+			Sources: []chunk.SourceID{srcA},
+		})
+		results, err := collect(seq)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(results) != 2 {
+			t.Fatalf("expected 2 results, got %d", len(results))
+		}
+		if string(results[0].Raw) != "error one" || string(results[1].Raw) != "error three" {
+			t.Errorf("unexpected results: %v", results)
+		}
+	})
+
+	// Query with token filter - should fall back to sequential scan.
+	t.Run("token filter", func(t *testing.T) {
+		seq := search(eng, context.Background(), query.Query{
+			Tokens: []string{"error"},
+		})
+		results, err := collect(seq)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(results) != 2 {
+			t.Fatalf("expected 2 results, got %d", len(results))
+		}
+		if string(results[0].Raw) != "error one" || string(results[1].Raw) != "error three" {
+			t.Errorf("unexpected results: %v", results)
+		}
+	})
+
+	// Combined filters - should fall back to sequential scan.
+	t.Run("combined filters", func(t *testing.T) {
+		seq := search(eng, context.Background(), query.Query{
+			Sources: []chunk.SourceID{srcA},
+			Tokens:  []string{"error"},
+		})
+		results, err := collect(seq)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(results) != 2 {
+			t.Fatalf("expected 2 results, got %d", len(results))
+		}
+	})
+}
