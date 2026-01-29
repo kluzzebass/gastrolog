@@ -6,6 +6,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/source"
+	sourcemem "gastrolog/internal/source/memory"
 )
 
 func TestResolveCreatesNewSource(t *testing.T) {
@@ -236,7 +237,7 @@ func TestCreatedAtIsSet(t *testing.T) {
 }
 
 func TestPersistenceOnNewSource(t *testing.T) {
-	store := source.NewMemoryStore()
+	store := sourcemem.NewStore()
 	reg, err := source.NewRegistry(source.Config{
 		Store: store,
 	})
@@ -258,7 +259,7 @@ func TestPersistenceOnNewSource(t *testing.T) {
 }
 
 func TestLoadOnStartup(t *testing.T) {
-	store := source.NewMemoryStore()
+	store := sourcemem.NewStore()
 
 	// Create registry, add source, close.
 	reg1, _ := source.NewRegistry(source.Config{Store: store})

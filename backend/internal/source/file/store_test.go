@@ -1,4 +1,4 @@
-package source_test
+package file_test
 
 import (
 	"os"
@@ -8,13 +8,14 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/source"
+	"gastrolog/internal/source/file"
 )
 
-func TestFileStoreRoundTrip(t *testing.T) {
+func TestStoreRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sources.bin")
 
-	store := source.NewFileStore(path)
+	store := file.NewStore(path)
 
 	// Create and save a source.
 	src := &source.Source{
@@ -28,7 +29,7 @@ func TestFileStoreRoundTrip(t *testing.T) {
 	}
 
 	// Load from fresh store.
-	store2 := source.NewFileStore(path)
+	store2 := file.NewStore(path)
 	sources, err := store2.LoadAll()
 	if err != nil {
 		t.Fatalf("LoadAll: %v", err)
@@ -53,11 +54,11 @@ func TestFileStoreRoundTrip(t *testing.T) {
 	}
 }
 
-func TestFileStoreMultipleSources(t *testing.T) {
+func TestStoreMultipleSources(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sources.bin")
 
-	store := source.NewFileStore(path)
+	store := file.NewStore(path)
 
 	// Save multiple sources.
 	for i := 0; i < 3; i++ {
@@ -82,11 +83,11 @@ func TestFileStoreMultipleSources(t *testing.T) {
 	}
 }
 
-func TestFileStoreUpdateSource(t *testing.T) {
+func TestStoreUpdateSource(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sources.bin")
 
-	store := source.NewFileStore(path)
+	store := file.NewStore(path)
 
 	id := chunk.NewSourceID()
 
@@ -125,11 +126,11 @@ func TestFileStoreUpdateSource(t *testing.T) {
 	}
 }
 
-func TestFileStoreEmptyFile(t *testing.T) {
+func TestStoreEmptyFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sources.bin")
 
-	store := source.NewFileStore(path)
+	store := file.NewStore(path)
 
 	// LoadAll on non-existent file.
 	sources, err := store.LoadAll()
@@ -142,11 +143,11 @@ func TestFileStoreEmptyFile(t *testing.T) {
 	}
 }
 
-func TestFileStoreAtomicWrite(t *testing.T) {
+func TestStoreAtomicWrite(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sources.bin")
 
-	store := source.NewFileStore(path)
+	store := file.NewStore(path)
 
 	// Save a source.
 	src := &source.Source{
@@ -170,11 +171,11 @@ func TestFileStoreAtomicWrite(t *testing.T) {
 	}
 }
 
-func TestFileStoreEmptyAttributes(t *testing.T) {
+func TestStoreEmptyAttributes(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sources.bin")
 
-	store := source.NewFileStore(path)
+	store := file.NewStore(path)
 
 	src := &source.Source{
 		ID:         chunk.NewSourceID(),
@@ -200,11 +201,11 @@ func TestFileStoreEmptyAttributes(t *testing.T) {
 	}
 }
 
-func TestFileStoreCreatesDirectory(t *testing.T) {
+func TestStoreCreatesDirectory(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "subdir", "nested", "sources.bin")
 
-	store := source.NewFileStore(path)
+	store := file.NewStore(path)
 
 	src := &source.Source{
 		ID:         chunk.NewSourceID(),
@@ -222,11 +223,11 @@ func TestFileStoreCreatesDirectory(t *testing.T) {
 	}
 }
 
-func TestFileStoreWithRegistry(t *testing.T) {
+func TestStoreWithRegistry(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sources.bin")
 
-	store := source.NewFileStore(path)
+	store := file.NewStore(path)
 
 	// Create registry with file store.
 	reg1, _ := source.NewRegistry(source.Config{Store: store})
@@ -235,7 +236,7 @@ func TestFileStoreWithRegistry(t *testing.T) {
 	time.Sleep(20 * time.Millisecond) // Allow async persist.
 
 	// Create new registry with fresh file store (simulates restart).
-	store2 := source.NewFileStore(path)
+	store2 := file.NewStore(path)
 	reg2, _ := source.NewRegistry(source.Config{Store: store2})
 	defer reg2.Close()
 

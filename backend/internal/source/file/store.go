@@ -1,4 +1,5 @@
-package source
+// Package file provides file-based persistence for source metadata.
+package file
 
 import (
 	"encoding/binary"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/source"
 )
 
 // File format constants.
@@ -28,7 +30,7 @@ var (
 	ErrCorruptedFile     = errors.New("corrupted file")
 )
 
-// FileStore persists sources to disk using atomic writes.
+// Store persists sources to disk using atomic writes.
 //
 // File format:
 //
@@ -49,24 +51,24 @@ var (
 //	    Key (variable)
 //	    Value length (2 bytes, little-endian uint16)
 //	    Value (variable)
-type FileStore struct {
+type Store struct {
 	mu   sync.Mutex
 	path string
 
 	// In-memory cache of all sources for atomic writes.
-	sources map[string]*Source
+	sources map[string]*source.Source
 }
 
-// NewFileStore creates a FileStore that persists to the given path.
-func NewFileStore(path string) *FileStore {
-	return &FileStore{
+// NewStore creates a Store that persists to the given path.
+func NewStore(path string) *Store {
+	return &Store{
 		path:    path,
-		sources: make(map[string]*Source),
+		sources: make(map[string]*source.Source),
 	}
 }
 
 // Save persists a source. The entire file is rewritten atomically.
-func (s *FileStore) Save(src *Source) error {
+func (s *Store) Save(src *source.Source) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -78,7 +80,7 @@ func (s *FileStore) Save(src *Source) error {
 }
 
 // LoadAll reads all sources from disk.
-func (s *FileStore) LoadAll() ([]*Source, error) {
+func (s *Store) LoadAll() ([]*source.Source, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -99,7 +101,7 @@ func (s *FileStore) LoadAll() ([]*Source, error) {
 	}
 
 	// Populate in-memory cache.
-	s.sources = make(map[string]*Source, len(sources))
+	s.sources = make(map[string]*source.Source, len(sources))
 	for _, src := range sources {
 		s.sources[src.ID.String()] = src
 	}
@@ -108,7 +110,7 @@ func (s *FileStore) LoadAll() ([]*Source, error) {
 }
 
 // writeFile writes all sources to disk atomically.
-func (s *FileStore) writeFile() error {
+func (s *Store) writeFile() error {
 	// Ensure directory exists.
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -169,7 +171,7 @@ func (s *FileStore) writeFile() error {
 }
 
 // writeSource writes a single source to the writer.
-func (s *FileStore) writeSource(w io.Writer, src *Source) error {
+func (s *Store) writeSource(w io.Writer, src *source.Source) error {
 	// SourceID (16 bytes).
 	if _, err := w.Write(src.ID[:]); err != nil {
 		return err
@@ -215,7 +217,7 @@ func (s *FileStore) writeSource(w io.Writer, src *Source) error {
 }
 
 // readFile reads all sources from the reader.
-func (s *FileStore) readFile(r io.Reader) ([]*Source, error) {
+func (s *Store) readFile(r io.Reader) ([]*source.Source, error) {
 	// Read header.
 	header := make([]byte, 4)
 	if _, err := io.ReadFull(r, header); err != nil {
@@ -243,7 +245,7 @@ func (s *FileStore) readFile(r io.Reader) ([]*Source, error) {
 	count := binary.LittleEndian.Uint32(countBuf)
 
 	// Read sources.
-	sources := make([]*Source, 0, count)
+	sources := make([]*source.Source, 0, count)
 	for i := uint32(0); i < count; i++ {
 		src, err := s.readSource(r)
 		if err != nil {
@@ -256,7 +258,7 @@ func (s *FileStore) readFile(r io.Reader) ([]*Source, error) {
 }
 
 // readSource reads a single source from the reader.
-func (s *FileStore) readSource(r io.Reader) (*Source, error) {
+func (s *Store) readSource(r io.Reader) (*source.Source, error) {
 	// SourceID (16 bytes).
 	var id chunk.SourceID
 	if _, err := io.ReadFull(r, id[:]); err != nil {
@@ -304,9 +306,22 @@ func (s *FileStore) readSource(r io.Reader) (*Source, error) {
 		attrs[string(keyBuf)] = string(valBuf)
 	}
 
-	return &Source{
+	return &source.Source{
 		ID:         id,
 		Attributes: attrs,
 		CreatedAt:  createdAt,
 	}, nil
+}
+
+// copySource creates a copy of a Source.
+func copySource(src *source.Source) *source.Source {
+	attrs := make(map[string]string, len(src.Attributes))
+	for k, v := range src.Attributes {
+		attrs[k] = v
+	}
+	return &source.Source{
+		ID:         src.ID,
+		Attributes: attrs,
+		CreatedAt:  src.CreatedAt,
+	}
 }
