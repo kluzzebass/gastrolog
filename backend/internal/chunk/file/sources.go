@@ -3,32 +3,32 @@ package file
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sync"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/format"
 
 	"github.com/google/uuid"
 )
 
 const (
-	sourcesFileName = "sources.bin"
-	sourceVersion   = 0x01
+	sourcesFileName      = "sources.bin"
+	currentSourceVersion = 0x01
 
 	sourceSizeFieldBytes = 4
-	sourceVersionBytes   = 1
 	sourceUUIDBytes      = 16
 	sourceLocalIDBytes   = 4
 
-	sourcePayloadBytes = sourceVersionBytes + sourceUUIDBytes + sourceLocalIDBytes
+	sourcePayloadBytes = format.HeaderSize + sourceUUIDBytes + sourceLocalIDBytes
 	sourceTotalBytes   = sourceSizeFieldBytes + sourcePayloadBytes + sourceSizeFieldBytes
 )
 
 var ErrSourceSizeMismatch = errors.New("source map size mismatch")
 var ErrSourceTooSmall = errors.New("source map size too small")
-var ErrSourceVersionMismatch = errors.New("source map version mismatch")
 
 type SourceMap struct {
 	mu       sync.Mutex
@@ -144,23 +144,32 @@ type sourceRecord struct {
 // The source map file is append-only, with each record mapping a global
 // SourceID (UUID) to a chunk-local uint32 ID for compact storage in records.
 //
-// Layout (30 bytes per record):
+// Layout (32 bytes per record):
 //
-//	size (4 bytes, little-endian uint32, always 30)
+//	size (4 bytes, little-endian uint32, always 32)
+//	signature (1 byte, 'i')
+//	type (1 byte, 'c')
 //	version (1 byte, 0x01)
+//	flags (1 byte, reserved)
 //	sourceID (16 bytes, UUID)
 //	localID (4 bytes, little-endian uint32)
 //	size (4 bytes, little-endian uint32, repeated for validation)
 func encodeSourceRecord(sourceID chunk.SourceID, localID uint32) []byte {
 	buf := make([]byte, sourceTotalBytes)
-	binary.LittleEndian.PutUint32(buf[:sourceSizeFieldBytes], uint32(sourceTotalBytes))
-	cursor := sourceSizeFieldBytes
-	buf[cursor] = sourceVersion
-	cursor += sourceVersionBytes
+	cursor := 0
+
+	binary.LittleEndian.PutUint32(buf[cursor:cursor+sourceSizeFieldBytes], uint32(sourceTotalBytes))
+	cursor += sourceSizeFieldBytes
+
+	h := format.Header{Type: format.TypeChunkSourceMap, Version: currentSourceVersion, Flags: 0}
+	cursor += h.EncodeInto(buf[cursor:])
+
 	copy(buf[cursor:cursor+sourceUUIDBytes], sourceIDBytes(sourceID))
 	cursor += sourceUUIDBytes
+
 	binary.LittleEndian.PutUint32(buf[cursor:cursor+sourceLocalIDBytes], localID)
 	cursor += sourceLocalIDBytes
+
 	binary.LittleEndian.PutUint32(buf[cursor:cursor+sourceSizeFieldBytes], uint32(sourceTotalBytes))
 	return buf
 }
@@ -169,19 +178,24 @@ func decodeSourceRecord(payload []byte) (sourceRecord, error) {
 	if len(payload) < sourcePayloadBytes+sourceSizeFieldBytes {
 		return sourceRecord{}, ErrSourceTooSmall
 	}
-	cursor := 0
-	if payload[cursor] != sourceVersion {
-		return sourceRecord{}, ErrSourceVersionMismatch
+
+	_, err := format.DecodeAndValidate(payload, format.TypeChunkSourceMap, currentSourceVersion)
+	if err != nil {
+		return sourceRecord{}, fmt.Errorf("chunk source map: %w", err)
 	}
-	cursor += sourceVersionBytes
+	cursor := format.HeaderSize
+
 	idBytes := payload[cursor : cursor+sourceUUIDBytes]
 	cursor += sourceUUIDBytes
+
 	localID := binary.LittleEndian.Uint32(payload[cursor : cursor+sourceLocalIDBytes])
 	cursor += sourceLocalIDBytes
+
 	trailing := binary.LittleEndian.Uint32(payload[cursor : cursor+sourceSizeFieldBytes])
 	if trailing != uint32(sourceTotalBytes) {
 		return sourceRecord{}, ErrSourceSizeMismatch
 	}
+
 	return sourceRecord{
 		sourceID: sourceIDFromBytes(idBytes),
 		localID:  localID,

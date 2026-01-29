@@ -17,6 +17,7 @@ import "errors"
 //	'k' = token index
 //	'm' = chunk metadata
 //	'z' = source registry
+//	'c' = chunk source map
 const (
 	Signature  = 'i'
 	HeaderSize = 4
@@ -26,6 +27,7 @@ const (
 	TypeTokenIndex     = 'k'
 	TypeChunkMeta      = 'm'
 	TypeSourceRegistry = 'z'
+	TypeChunkSourceMap = 'c'
 )
 
 var (
