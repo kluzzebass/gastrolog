@@ -10,6 +10,15 @@ import (
 
 var ErrIndexNotFound = errors.New("index not found")
 
+// ManagerFactory creates an IndexManager from configuration parameters.
+// Factories validate required params, apply defaults, and return a fully
+// constructed manager or a descriptive error.
+// Factories must not start goroutines or perform I/O beyond validation.
+//
+// The chunkManager parameter is required because indexers need to read
+// chunk data to build indexes.
+type ManagerFactory func(params map[string]string, chunkManager chunk.ChunkManager) (IndexManager, error)
+
 type Indexer interface {
 	// Name returns a stable identifier for this indexer
 	// (e.g. "time", "source", "token").

@@ -24,6 +24,9 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	o.done = make(chan struct{})
 	o.running = true
 
+	// Create fresh index context for this run cycle.
+	o.indexCtx, o.indexCancel = context.WithCancel(context.Background())
+
 	// Create ingest channel.
 	o.ingestCh = make(chan IngestMessage, o.ingestSize)
 
@@ -38,7 +41,8 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop cancels all receivers and the ingest loop, then waits for completion.
+// Stop cancels all receivers, the ingest loop, and in-flight index builds,
+// then waits for everything to finish.
 func (o *Orchestrator) Stop() error {
 	o.mu.Lock()
 	if !o.running {
@@ -47,19 +51,28 @@ func (o *Orchestrator) Stop() error {
 	}
 	cancel := o.cancel
 	done := o.done
+	indexCancel := o.indexCancel
 	o.mu.Unlock()
 
-	// Cancel context to stop receivers and ingest loop.
+	// Cancel receivers and ingest loop.
 	cancel()
+
+	// Cancel in-flight index builds.
+	indexCancel()
 
 	// Wait for ingest loop to finish.
 	<-done
+
+	// Wait for index builds to exit.
+	o.indexWg.Wait()
 
 	o.mu.Lock()
 	o.running = false
 	o.cancel = nil
 	o.done = nil
 	o.ingestCh = nil
+	o.indexCtx = nil
+	o.indexCancel = nil
 	o.mu.Unlock()
 
 	return nil

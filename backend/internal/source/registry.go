@@ -29,6 +29,7 @@ type Registry struct {
 	persistCh chan *Source
 	stopCh    chan struct{}
 	stopOnce  sync.Once
+	persistWg sync.WaitGroup
 
 	// Clock for testing
 	now func() time.Time
@@ -82,6 +83,7 @@ func NewRegistry(cfg Config) (*Registry, error) {
 		}
 
 		// Start persistence goroutine.
+		r.persistWg.Add(1)
 		go r.persistLoop()
 	}
 
@@ -153,11 +155,12 @@ func (r *Registry) Query(filters map[string]string) []chunk.SourceID {
 }
 
 // Close stops the persistence goroutine and waits for it to finish.
-// Any pending persistence operations are drained.
+// Any pending persistence operations are drained before Close returns.
 func (r *Registry) Close() error {
 	r.stopOnce.Do(func() {
 		close(r.stopCh)
 	})
+	r.persistWg.Wait()
 	return nil
 }
 
@@ -178,6 +181,8 @@ func (r *Registry) queuePersist(src *Source) {
 
 // persistLoop processes the persistence queue.
 func (r *Registry) persistLoop() {
+	defer r.persistWg.Done()
+
 	for {
 		select {
 		case <-r.stopCh:

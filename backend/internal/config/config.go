@@ -56,7 +56,9 @@ type ReceiverConfig struct {
 	// Type identifies the receiver implementation (e.g., "syslog-udp", "file").
 	Type string
 
-	// Params contains type-specific configuration.
+	// Params contains type-specific configuration as opaque string key-value pairs.
+	// Parsing and validation are the responsibility of the factory that consumes
+	// the params. There is no schema enforcement at the ConfigStore level.
 	Params map[string]string
 }
 
@@ -68,7 +70,9 @@ type StoreConfig struct {
 	// Type identifies the store implementation (e.g., "file", "memory").
 	Type string
 
-	// Params contains type-specific configuration.
+	// Params contains type-specific configuration as opaque string key-value pairs.
+	// Parsing and validation are the responsibility of the factory that consumes
+	// the params. There is no schema enforcement at the ConfigStore level.
 	Params map[string]string
 }
 

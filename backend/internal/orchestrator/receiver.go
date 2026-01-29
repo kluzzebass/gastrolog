@@ -19,3 +19,14 @@ type Receiver interface {
 	// Receivers must select on ctx.Done() to ensure prompt shutdown.
 	Run(ctx context.Context, out chan<- IngestMessage) error
 }
+
+// ReceiverFactory creates a Receiver from configuration parameters.
+// Factories validate required params, apply defaults, and return a fully
+// constructed receiver or a descriptive error.
+// Factories must not start goroutines or perform I/O beyond validation.
+//
+// This type is defined in the orchestrator package because Receiver is
+// defined here. Concrete factory implementations live in their respective
+// receiver packages (e.g., syslog.NewFactory()). The orchestrator never
+// contains receiver construction logic - it only calls factories.
+type ReceiverFactory func(params map[string]string) (Receiver, error)

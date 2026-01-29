@@ -67,6 +67,11 @@ type Orchestrator struct {
 	done       chan struct{}
 	running    bool
 
+	// Index build lifecycle.
+	indexCtx    context.Context
+	indexCancel context.CancelFunc
+	indexWg     sync.WaitGroup
+
 	// Clock for testing.
 	now func() time.Time
 }
@@ -93,13 +98,19 @@ func New(cfg Config) *Orchestrator {
 		cfg.Now = time.Now
 	}
 
+	// Initialize index build context for standalone Ingest() calls.
+	// This is replaced with a fresh context if Start() is called.
+	indexCtx, indexCancel := context.WithCancel(context.Background())
+
 	return &Orchestrator{
-		chunks:     make(map[string]chunk.ChunkManager),
-		indexes:    make(map[string]index.IndexManager),
-		queries:    make(map[string]*query.Engine),
-		receivers:  make(map[string]Receiver),
-		sources:    cfg.Sources,
-		ingestSize: cfg.IngestChannelSize,
-		now:        cfg.Now,
+		chunks:      make(map[string]chunk.ChunkManager),
+		indexes:     make(map[string]index.IndexManager),
+		queries:     make(map[string]*query.Engine),
+		receivers:   make(map[string]Receiver),
+		sources:     cfg.Sources,
+		ingestSize:  cfg.IngestChannelSize,
+		now:         cfg.Now,
+		indexCtx:    indexCtx,
+		indexCancel: indexCancel,
 	}
 }

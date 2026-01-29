@@ -1,16 +1,12 @@
 package chunk
 
 import (
-	"errors"
 	"time"
 
 	"github.com/google/uuid"
 )
 
-var ErrNoMoreRecords = errors.New("no more records")
-var ErrChunkNotSealed = errors.New("chunk is not sealed")
-var ErrChunkNotFound = errors.New("chunk not found")
-
+// ChunkID uniquely identifies a chunk.
 type ChunkID uuid.UUID
 
 func NewChunkID() ChunkID {
@@ -49,11 +45,13 @@ func (id SourceID) String() string {
 	return uuid.UUID(id).String()
 }
 
+// RecordRef is a reference to a record within a chunk.
 type RecordRef struct {
 	ChunkID ChunkID
 	Pos     uint64
 }
 
+// ChunkMeta contains metadata about a chunk.
 type ChunkMeta struct {
 	ID      ChunkID
 	StartTS time.Time
@@ -62,28 +60,7 @@ type ChunkMeta struct {
 	Sealed  bool
 }
 
-type ChunkManager interface {
-	Append(record Record) (ChunkID, uint64, error)
-	Seal() error
-	Active() *ChunkMeta
-	Meta(id ChunkID) (ChunkMeta, error)
-	List() ([]ChunkMeta, error)
-	OpenCursor(id ChunkID) (RecordCursor, error)
-}
-
-type RecordCursor interface {
-	Next() (Record, RecordRef, error)
-	Prev() (Record, RecordRef, error)
-	Seek(ref RecordRef) error
-	Close() error
-}
-
-type MetaStore interface {
-	Save(meta ChunkMeta) error
-	Load(id ChunkID) (ChunkMeta, error)
-	List() ([]ChunkMeta, error)
-}
-
+// Record is a single log entry.
 type Record struct {
 	IngestTS time.Time
 	WriteTS  time.Time

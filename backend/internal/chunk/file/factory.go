@@ -1,0 +1,64 @@
+package file
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"strconv"
+
+	"gastrolog/internal/chunk"
+)
+
+// Factory parameter keys.
+const (
+	ParamDir           = "dir"
+	ParamMaxChunkBytes = "max_chunk_bytes"
+	ParamFileMode      = "file_mode"
+)
+
+// Default values.
+const (
+	DefaultMaxChunkBytes = 64 * 1024 * 1024 // 64 MiB
+	DefaultFileMode      = 0o644
+)
+
+var (
+	ErrMissingDirParam = errors.New("missing required parameter: dir")
+)
+
+// NewFactory returns a factory function that creates file-based ChunkManagers.
+func NewFactory() chunk.ManagerFactory {
+	return func(params map[string]string) (chunk.ChunkManager, error) {
+		dir, ok := params[ParamDir]
+		if !ok || dir == "" {
+			return nil, ErrMissingDirParam
+		}
+
+		cfg := Config{
+			Dir:           dir,
+			MaxChunkBytes: DefaultMaxChunkBytes,
+			FileMode:      DefaultFileMode,
+		}
+
+		if v, ok := params[ParamMaxChunkBytes]; ok {
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("invalid %s: %w", ParamMaxChunkBytes, err)
+			}
+			if n <= 0 {
+				return nil, fmt.Errorf("invalid %s: must be positive", ParamMaxChunkBytes)
+			}
+			cfg.MaxChunkBytes = n
+		}
+
+		if v, ok := params[ParamFileMode]; ok {
+			n, err := strconv.ParseUint(v, 8, 32)
+			if err != nil {
+				return nil, fmt.Errorf("invalid %s: %w", ParamFileMode, err)
+			}
+			cfg.FileMode = os.FileMode(n)
+		}
+
+		return NewManager(cfg)
+	}
+}
