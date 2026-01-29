@@ -7,3 +7,7 @@ _default:
 # Runs the gastrolog backend with the specified configuration and sources.
 run:
   go run ./cmd/gastrolog -config config.json -sources sources.json
+
+# Runs the gastrolog backend with the specified configuration, sources, and pprof server.
+run-pprof:
+  go run ./cmd/gastrolog -config config.json -sources sources.json -pprof localhost:6060

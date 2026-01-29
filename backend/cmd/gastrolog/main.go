@@ -5,6 +5,8 @@ import (
 	"context"
 	"flag"
 	"log"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 
@@ -24,7 +26,17 @@ import (
 func main() {
 	configPath := flag.String("config", "config.json", "path to configuration file")
 	sourcesPath := flag.String("sources", "sources.db", "path to sources registry file")
+	pprofAddr := flag.String("pprof", "", "pprof HTTP server address (e.g. localhost:6060)")
 	flag.Parse()
+
+	if *pprofAddr != "" {
+		go func() {
+			log.Printf("pprof server listening on %s", *pprofAddr)
+			if err := http.ListenAndServe(*pprofAddr, nil); err != nil {
+				log.Printf("pprof server error: %v", err)
+			}
+		}()
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()

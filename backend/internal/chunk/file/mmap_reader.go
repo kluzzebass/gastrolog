@@ -58,7 +58,8 @@ func (r *MmapReader) ReadRecordAt(offset int64) (chunk.Record, uint32, int64, er
 		return chunk.Record{}, 0, offset, io.ErrUnexpectedEOF
 	}
 
-	record, localID, err := DecodeRecord(r.data[offset:end])
+	// Use no-copy variant - the mmap buffer is stable for the lifetime of the reader.
+	record, localID, err := DecodeRecordNoCopy(r.data[offset:end])
 	if err != nil {
 		return chunk.Record{}, 0, offset, err
 	}

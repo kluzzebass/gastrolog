@@ -90,6 +90,24 @@ func EncodeRecord(record chunk.Record, localID uint32) ([]byte, error) {
 }
 
 func DecodeRecord(buf []byte) (chunk.Record, uint32, error) {
+	rec, localID, err := DecodeRecordNoCopy(buf)
+	if err != nil {
+		return chunk.Record{}, 0, err
+	}
+	// Make a copy of Raw since the caller may retain it.
+	raw := make([]byte, len(rec.Raw))
+	copy(raw, rec.Raw)
+	rec.Raw = raw
+	return rec, localID, nil
+}
+
+// DecodeRecordNoCopy decodes a record without copying the Raw bytes.
+// The returned record's Raw slice points directly into buf.
+//
+// IMPORTANT: The caller must NOT modify the returned Raw slice.
+// When used with mmap'd files, writes will cause a segfault (PROT_READ).
+// Caller must not retain Raw after buf is reused or unmapped.
+func DecodeRecordNoCopy(buf []byte) (chunk.Record, uint32, error) {
 	if len(buf) < int(MinRecordSize) {
 		return chunk.Record{}, 0, ErrRecordTooSmall
 	}
@@ -121,8 +139,8 @@ func DecodeRecord(buf []byte) (chunk.Record, uint32, error) {
 		return chunk.Record{}, 0, ErrRawLengthMismatch
 	}
 
-	raw := make([]byte, rawLen)
-	copy(raw, buf[cursor:rawEnd])
+	// No copy - slice directly into buf.
+	raw := buf[cursor:rawEnd]
 	cursor = rawEnd
 	trailing := binary.LittleEndian.Uint32(buf[cursor : cursor+SizeFieldBytes])
 	if trailing != size {
