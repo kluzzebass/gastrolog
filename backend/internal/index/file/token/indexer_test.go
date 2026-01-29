@@ -2,6 +2,7 @@ package token
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -137,7 +138,7 @@ func TestIndexerCancelledContext(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from cancelled context, got nil")
 	}
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 }
