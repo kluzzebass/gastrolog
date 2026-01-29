@@ -8,10 +8,12 @@ import (
 	"errors"
 	"iter"
 	"sync"
+	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
 	"gastrolog/internal/query"
+	"gastrolog/internal/source"
 )
 
 var (
@@ -21,6 +23,10 @@ var (
 	ErrNoQueryEngines = errors.New("no query engines registered")
 	// ErrUnknownRegistry is returned when a registry key is not found.
 	ErrUnknownRegistry = errors.New("unknown registry key")
+	// ErrAlreadyRunning is returned when Start is called on a running orchestrator.
+	ErrAlreadyRunning = errors.New("orchestrator already running")
+	// ErrNotRunning is returned when Stop is called on a stopped orchestrator.
+	ErrNotRunning = errors.New("orchestrator not running")
 )
 
 // Orchestrator coordinates ingestion, indexing, and querying.
@@ -37,20 +43,65 @@ var (
 //   - Search methods can run concurrently with each other and with Ingest.
 //   - A RWMutex protects registry access: Register* takes write lock,
 //     Ingest and Search* take read lock.
+//
+// Receiver lifecycle:
+//   - Receivers are registered before Start() is called.
+//   - Start() launches one goroutine per receiver plus an ingest loop.
+//   - Stop() cancels all receivers and the ingest loop via context.
+//   - Receivers emit IngestMessages; orchestrator resolves identity and routes.
 type Orchestrator struct {
 	mu sync.RWMutex
 
+	// Component registries.
 	chunks  map[string]chunk.ChunkManager
 	indexes map[string]index.IndexManager
 	queries map[string]*query.Engine
+
+	// Receiver management.
+	receivers map[string]Receiver
+	sources   *source.Registry
+
+	// Ingest channel and lifecycle.
+	ingestCh   chan IngestMessage
+	ingestSize int
+	cancel     context.CancelFunc
+	done       chan struct{}
+	running    bool
+
+	// Clock for testing.
+	now func() time.Time
+}
+
+// Config configures an Orchestrator.
+type Config struct {
+	// SourceRegistry for identity resolution. Required for receiver-based ingestion.
+	Sources *source.Registry
+
+	// IngestChannelSize is the buffer size for the ingest channel.
+	// Defaults to 1000 if not set.
+	IngestChannelSize int
+
+	// Now returns the current time. Defaults to time.Now.
+	Now func() time.Time
 }
 
 // New creates an Orchestrator with empty registries.
-func New() *Orchestrator {
+func New(cfg Config) *Orchestrator {
+	if cfg.IngestChannelSize <= 0 {
+		cfg.IngestChannelSize = 1000
+	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+
 	return &Orchestrator{
-		chunks:  make(map[string]chunk.ChunkManager),
-		indexes: make(map[string]index.IndexManager),
-		queries: make(map[string]*query.Engine),
+		chunks:     make(map[string]chunk.ChunkManager),
+		indexes:    make(map[string]index.IndexManager),
+		queries:    make(map[string]*query.Engine),
+		receivers:  make(map[string]Receiver),
+		sources:    cfg.Sources,
+		ingestSize: cfg.IngestChannelSize,
+		now:        cfg.Now,
 	}
 }
 
@@ -75,9 +126,160 @@ func (o *Orchestrator) RegisterQueryEngine(key string, qe *query.Engine) {
 	o.queries[key] = qe
 }
 
+// RegisterReceiver adds a receiver to the registry.
+// Must be called before Start().
+func (o *Orchestrator) RegisterReceiver(id string, r Receiver) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.receivers[id] = r
+}
+
+// UnregisterReceiver removes a receiver from the registry.
+// Must be called before Start() or after Stop().
+func (o *Orchestrator) UnregisterReceiver(id string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	delete(o.receivers, id)
+}
+
+// Start launches all receivers and the ingest loop.
+// Each receiver runs in its own goroutine, emitting messages to a shared channel.
+// The ingest loop receives messages, resolves identity, and routes to chunk managers.
+// Start returns immediately; use Stop() to shut down.
+func (o *Orchestrator) Start(ctx context.Context) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	if o.running {
+		return ErrAlreadyRunning
+	}
+
+	// Create cancellable context for all receivers and ingest loop.
+	ctx, cancel := context.WithCancel(ctx)
+	o.cancel = cancel
+	o.done = make(chan struct{})
+	o.running = true
+
+	// Create ingest channel.
+	o.ingestCh = make(chan IngestMessage, o.ingestSize)
+
+	// Launch receiver goroutines.
+	for id, r := range o.receivers {
+		go o.runReceiver(ctx, id, r)
+	}
+
+	// Launch ingest loop.
+	go o.ingestLoop(ctx)
+
+	return nil
+}
+
+// Stop cancels all receivers and the ingest loop, then waits for completion.
+func (o *Orchestrator) Stop() error {
+	o.mu.Lock()
+	if !o.running {
+		o.mu.Unlock()
+		return ErrNotRunning
+	}
+	cancel := o.cancel
+	done := o.done
+	o.mu.Unlock()
+
+	// Cancel context to stop receivers and ingest loop.
+	cancel()
+
+	// Wait for ingest loop to finish.
+	<-done
+
+	o.mu.Lock()
+	o.running = false
+	o.cancel = nil
+	o.done = nil
+	o.ingestCh = nil
+	o.mu.Unlock()
+
+	return nil
+}
+
+// runReceiver runs a single receiver, recovering from panics.
+func (o *Orchestrator) runReceiver(ctx context.Context, id string, r Receiver) {
+	// Receiver.Run blocks until ctx is cancelled or error.
+	// Errors are currently ignored - future: add error callback or logging.
+	_ = r.Run(ctx, o.ingestCh)
+}
+
+// ingestLoop receives messages from the ingest channel and routes them.
+func (o *Orchestrator) ingestLoop(ctx context.Context) {
+	defer close(o.done)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-o.ingestCh:
+			if !ok {
+				return
+			}
+			o.processMessage(msg)
+		}
+	}
+}
+
+// processMessage resolves identity and routes to chunk managers.
+func (o *Orchestrator) processMessage(msg IngestMessage) {
+	// Resolve source identity.
+	var sourceID chunk.SourceID
+	if o.sources != nil {
+		sourceID = o.sources.Resolve(msg.Attrs)
+	}
+
+	// Construct record.
+	now := o.now()
+	rec := chunk.Record{
+		WriteTS:  now,
+		IngestTS: now,
+		SourceID: sourceID,
+		Raw:      msg.Raw,
+	}
+
+	// Route to chunk managers (reuses existing Ingest logic).
+	_ = o.ingest(rec)
+}
+
+// ingest is the internal ingest implementation, called by processMessage.
+// Extracted from Ingest to allow both direct and channel-based ingestion.
+func (o *Orchestrator) ingest(rec chunk.Record) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	if len(o.chunks) == 0 {
+		return ErrNoChunkManagers
+	}
+
+	for key, cm := range o.chunks {
+		activeBefore := cm.Active()
+
+		_, _, err := cm.Append(rec)
+		if err != nil {
+			return err
+		}
+
+		activeAfter := cm.Active()
+		if activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID) {
+			o.scheduleIndexBuild(key, activeBefore.ID)
+		}
+	}
+
+	return nil
+}
+
 // Ingest routes a record to all registered chunk managers.
 // If a chunk is sealed as a result of the append, index builds are
 // scheduled asynchronously for that chunk.
+//
+// This is the direct ingestion API for pre-constructed records.
+// For receiver-based ingestion, use Start() which runs an ingest loop
+// that receives IngestMessages, resolves identity, and calls this internally.
 //
 // Ingest acquires an exclusive lock to serialize seal detection. This
 // means only one Ingest call runs at a time, but Search calls can still
@@ -99,31 +301,7 @@ func (o *Orchestrator) RegisterQueryEngine(key string, qe *query.Engine) {
 // Future improvement: have ChunkManager.Append() return sealed chunk ID,
 // or emit seal events via callback.
 func (o *Orchestrator) Ingest(rec chunk.Record) error {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-
-	if len(o.chunks) == 0 {
-		return ErrNoChunkManagers
-	}
-
-	for key, cm := range o.chunks {
-		// Capture state before append to detect sealing.
-		activeBefore := cm.Active()
-
-		_, _, err := cm.Append(rec)
-		if err != nil {
-			return err
-		}
-
-		// Check if a chunk was sealed (active chunk changed).
-		activeAfter := cm.Active()
-		if activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID) {
-			// The previous active chunk was sealed.
-			o.scheduleIndexBuild(key, activeBefore.ID)
-		}
-	}
-
-	return nil
+	return o.ingest(rec)
 }
 
 // scheduleIndexBuild triggers an asynchronous index build for the given chunk.
