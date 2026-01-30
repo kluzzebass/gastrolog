@@ -27,6 +27,7 @@ import (
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/receiver/chatterbox"
+	"gastrolog/internal/repl"
 	"gastrolog/internal/source"
 	sourcefile "gastrolog/internal/source/file"
 )
@@ -35,6 +36,7 @@ func main() {
 	configPath := flag.String("config", "config.json", "path to configuration file")
 	sourcesPath := flag.String("sources", "sources.db", "path to sources registry file")
 	pprofAddr := flag.String("pprof", "", "pprof HTTP server address (e.g. localhost:6060)")
+	replMode := flag.Bool("repl", false, "start interactive REPL after system is running")
 	flag.Parse()
 
 	// Create base logger with ComponentFilterHandler for dynamic log level control.
@@ -56,13 +58,13 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	if err := run(ctx, logger, *configPath, *sourcesPath); err != nil {
+	if err := run(ctx, logger, *configPath, *sourcesPath, *replMode); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, logger *slog.Logger, configPath, sourcesPath string) error {
+func run(ctx context.Context, logger *slog.Logger, configPath, sourcesPath string, replMode bool) error {
 	// Load configuration.
 	logger.Info("loading config", "path", configPath)
 	cfgStore := configfile.NewStore(configPath)
@@ -114,8 +116,16 @@ func run(ctx context.Context, logger *slog.Logger, configPath, sourcesPath strin
 	}
 	logger.Info("orchestrator started, waiting for shutdown signal")
 
-	// Wait for shutdown signal.
-	<-ctx.Done()
+	if replMode {
+		// Run REPL in foreground. REPL exit triggers shutdown.
+		r := repl.New(orch, sources, os.Stdin, os.Stdout)
+		if err := r.Run(); err != nil && err != context.Canceled {
+			logger.Error("repl error", "error", err)
+		}
+	} else {
+		// Wait for shutdown signal.
+		<-ctx.Done()
+	}
 
 	// Stop the orchestrator.
 	logger.Info("shutting down")
