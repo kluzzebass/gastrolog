@@ -2,12 +2,14 @@ package file
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
 	"sync"
+	"syscall"
 	"time"
 
 	"gastrolog/internal/chunk"
@@ -23,8 +25,9 @@ const (
 )
 
 var (
-	ErrMissingDir    = errors.New("file chunk manager dir is required")
-	ErrManagerClosed = errors.New("manager is closed")
+	ErrMissingDir      = errors.New("file chunk manager dir is required")
+	ErrManagerClosed   = errors.New("manager is closed")
+	ErrDirectoryLocked = errors.New("data directory is locked by another process")
 )
 
 type Config struct {
@@ -53,12 +56,13 @@ type Config struct {
 //   - Logging is intentionally sparse; only lifecycle events are logged
 //   - No logging in hot paths (Append, cursor iteration)
 type Manager struct {
-	mu      sync.Mutex
-	cfg     Config
-	active  *chunkState
-	metas   map[chunk.ChunkID]*chunkMeta // In-memory chunk metadata
-	sources map[chunk.ChunkID]*SourceMap
-	closed  bool
+	mu       sync.Mutex
+	cfg      Config
+	lockFile *os.File // Exclusive lock on data directory
+	active   *chunkState
+	metas    map[chunk.ChunkID]*chunkMeta // In-memory chunk metadata
+	sources  map[chunk.ChunkID]*SourceMap
+	closed   bool
 
 	// Logger for this manager instance.
 	// Scoped with component="chunk-manager", type="file" at construction time.
@@ -93,6 +97,8 @@ type chunkState struct {
 	recordCount uint64 // Number of records written
 }
 
+const lockFileName = ".lock"
+
 func NewManager(cfg Config) (*Manager, error) {
 	if cfg.Dir == "" {
 		return nil, ErrMissingDir
@@ -108,16 +114,29 @@ func NewManager(cfg Config) (*Manager, error) {
 		return nil, err
 	}
 
+	// Acquire exclusive lock on data directory.
+	lockPath := filepath.Join(cfg.Dir, lockFileName)
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, cfg.FileMode)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		lockFile.Close()
+		return nil, fmt.Errorf("%w: %s", ErrDirectoryLocked, cfg.Dir)
+	}
+
 	// Scope logger with component identity.
 	logger := logging.Default(cfg.Logger).With("component", "chunk-manager", "type", "file")
 
 	manager := &Manager{
-		cfg:     cfg,
-		metas:   make(map[chunk.ChunkID]*chunkMeta),
-		sources: make(map[chunk.ChunkID]*SourceMap),
-		logger:  logger,
+		cfg:      cfg,
+		lockFile: lockFile,
+		metas:    make(map[chunk.ChunkID]*chunkMeta),
+		sources:  make(map[chunk.ChunkID]*SourceMap),
+		logger:   logger,
 	}
 	if err := manager.loadExisting(); err != nil {
+		lockFile.Close()
 		return nil, err
 	}
 
@@ -679,20 +698,26 @@ func (m *Manager) Close() error {
 	}
 	m.closed = true
 
-	if m.active == nil {
-		return nil
-	}
-
-	// Close files but don't seal (chunk remains active for recovery).
 	var errs []error
-	if err := m.active.rawFile.Close(); err != nil {
-		errs = append(errs, err)
-	}
-	if err := m.active.idxFile.Close(); err != nil {
-		errs = append(errs, err)
+
+	// Close active chunk files but don't seal (chunk remains active for recovery).
+	if m.active != nil {
+		if err := m.active.rawFile.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		if err := m.active.idxFile.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		m.active = nil
 	}
 
-	m.active = nil
+	// Release directory lock.
+	if m.lockFile != nil {
+		if err := m.lockFile.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		m.lockFile = nil
+	}
 
 	if len(errs) > 0 {
 		return errs[0]
