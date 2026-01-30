@@ -32,3 +32,5 @@ config.json
 sources.json
 sources.db
 data
+*.log
+*.log.*
