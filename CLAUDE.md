@@ -150,6 +150,7 @@ Coordinates ingestion, indexing, and querying without owning business logic:
 - Seal detection via Active() before/after comparison assumes single writer, no async sealing
 - Receiver errors currently ignored (future: add error callback)
 - Partial failure on fan-out: if CM A succeeds and CM B fails, no rollback
+- No routing logic: all records go to all registered chunk managers (fan-out only)
 
 ### Source package (`backend/internal/source/`)
 
