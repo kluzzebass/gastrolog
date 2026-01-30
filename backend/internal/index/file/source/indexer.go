@@ -3,11 +3,14 @@ package source
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
+	"gastrolog/internal/logging"
 )
 
 // Indexer builds a source index for sealed chunks.
@@ -17,12 +20,14 @@ import (
 type Indexer struct {
 	dir     string
 	manager chunk.ChunkManager
+	logger  *slog.Logger
 }
 
-func NewIndexer(dir string, manager chunk.ChunkManager) *Indexer {
+func NewIndexer(dir string, manager chunk.ChunkManager, logger *slog.Logger) *Indexer {
 	return &Indexer{
 		dir:     dir,
 		manager: manager,
+		logger:  logging.Default(logger).With("component", "indexer", "type", "source"),
 	}
 }
 
@@ -31,6 +36,8 @@ func (s *Indexer) Name() string {
 }
 
 func (s *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
+	buildStart := time.Now()
+
 	meta, err := s.manager.Meta(chunkID)
 	if err != nil {
 		return fmt.Errorf("get chunk meta: %w", err)
@@ -47,6 +54,7 @@ func (s *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 
 	// Single-pass scan: accumulate positions per source.
 	posMap := make(map[chunk.SourceID][]uint64)
+	var recordCount uint64
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -62,6 +70,7 @@ func (s *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 		}
 
 		posMap[rec.SourceID] = append(posMap[rec.SourceID], ref.Pos)
+		recordCount++
 	}
 
 	// Convert map to sorted slice.
@@ -108,6 +117,23 @@ func (s *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 		os.Remove(tmpName)
 		return fmt.Errorf("rename index: %w", err)
 	}
+
+	var totalPositions uint64
+	for _, e := range entries {
+		totalPositions += uint64(len(e.Positions))
+	}
+
+	s.logger.Debug("source index built",
+		"chunk", chunkID.String(),
+		"chunk_start", meta.StartTS,
+		"chunk_end", meta.EndTS,
+		"chunk_duration", meta.EndTS.Sub(meta.StartTS),
+		"records", recordCount,
+		"sources", len(entries),
+		"positions", totalPositions,
+		"file_size", len(data),
+		"duration", time.Since(buildStart),
+	)
 
 	return nil
 }

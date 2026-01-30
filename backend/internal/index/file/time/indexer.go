@@ -3,11 +3,14 @@ package time
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
+	"gastrolog/internal/logging"
 )
 
 // Indexer builds a sparse time index for sealed chunks.
@@ -17,13 +20,15 @@ type Indexer struct {
 	dir      string
 	manager  chunk.ChunkManager
 	sparsity int
+	logger   *slog.Logger
 }
 
-func NewIndexer(dir string, manager chunk.ChunkManager, sparsity int) *Indexer {
+func NewIndexer(dir string, manager chunk.ChunkManager, sparsity int, logger *slog.Logger) *Indexer {
 	return &Indexer{
 		dir:      dir,
 		manager:  manager,
 		sparsity: sparsity,
+		logger:   logging.Default(logger).With("component", "indexer", "type", "time"),
 	}
 }
 
@@ -32,6 +37,8 @@ func (t *Indexer) Name() string {
 }
 
 func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
+	buildStart := time.Now()
+
 	meta, err := t.manager.Meta(chunkID)
 	if err != nil {
 		return fmt.Errorf("get chunk meta: %w", err)
@@ -47,7 +54,7 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	defer cursor.Close()
 
 	var entries []index.TimeIndexEntry
-	n := 0
+	var recordCount uint64
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -62,13 +69,13 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 			return fmt.Errorf("read record: %w", err)
 		}
 
-		if n == 0 || n%t.sparsity == 0 {
+		if recordCount == 0 || recordCount%uint64(t.sparsity) == 0 {
 			entries = append(entries, index.TimeIndexEntry{
 				Timestamp: rec.WriteTS,
 				RecordPos: ref.Pos,
 			})
 		}
-		n++
+		recordCount++
 	}
 
 	data := encodeIndex(chunkID, entries)
@@ -106,6 +113,18 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 		os.Remove(tmpName)
 		return fmt.Errorf("rename index: %w", err)
 	}
+
+	t.logger.Debug("time index built",
+		"chunk", chunkID.String(),
+		"chunk_start", meta.StartTS,
+		"chunk_end", meta.EndTS,
+		"chunk_duration", meta.EndTS.Sub(meta.StartTS),
+		"records", recordCount,
+		"entries", len(entries),
+		"sparsity", t.sparsity,
+		"file_size", len(data),
+		"duration", time.Since(buildStart),
+	)
 
 	return nil
 }

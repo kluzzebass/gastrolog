@@ -171,7 +171,7 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 
 	totalDuration := time.Since(buildStart)
 
-	t.logger.Info("token index built",
+	t.logger.Debug("token index built",
 		"chunk", chunkID.String(),
 		"chunk_start", meta.StartTS,
 		"chunk_end", meta.EndTS,

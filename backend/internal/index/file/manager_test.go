@@ -52,8 +52,8 @@ func setupManager(t *testing.T, records []chunk.Record) (*Manager, chunk.ChunkMa
 	t.Helper()
 	chunkMgr, chunkID := setupChunkManager(t, records)
 	indexDir := t.TempDir()
-	timeIndexer := filetime.NewIndexer(indexDir, chunkMgr, 1)
-	sourceIndexer := filesource.NewIndexer(indexDir, chunkMgr)
+	timeIndexer := filetime.NewIndexer(indexDir, chunkMgr, 1, nil)
+	sourceIndexer := filesource.NewIndexer(indexDir, chunkMgr, nil)
 	mgr := NewManager(indexDir, []index.Indexer{timeIndexer, sourceIndexer}, nil)
 	return mgr, chunkMgr, chunkID
 }
@@ -102,7 +102,7 @@ func TestBuildIndexesUnsealedChunk(t *testing.T) {
 	}
 
 	indexDir := t.TempDir()
-	timeIndexer := filetime.NewIndexer(indexDir, chunkMgr, 1)
+	timeIndexer := filetime.NewIndexer(indexDir, chunkMgr, 1, nil)
 	mgr := NewManager(indexDir, []index.Indexer{timeIndexer}, nil)
 
 	err = mgr.BuildIndexes(context.Background(), chunkID)

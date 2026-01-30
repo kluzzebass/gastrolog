@@ -61,7 +61,7 @@ func TestIndexerBuild(t *testing.T) {
 
 	manager, chunkID := setupChunkManager(t, records)
 	indexDir := t.TempDir()
-	indexer := NewIndexer(indexDir, manager, 2)
+	indexer := NewIndexer(indexDir, manager, 2, nil)
 
 	if indexer.Name() != "time" {
 		t.Fatalf("expected name %q, got %q", "time", indexer.Name())
@@ -104,7 +104,7 @@ func TestIndexerIdempotent(t *testing.T) {
 
 	manager, chunkID := setupChunkManager(t, records)
 	indexDir := t.TempDir()
-	indexer := NewIndexer(indexDir, manager, 1)
+	indexer := NewIndexer(indexDir, manager, 1, nil)
 
 	if err := indexer.Build(context.Background(), chunkID); err != nil {
 		t.Fatalf("first build: %v", err)
@@ -136,7 +136,7 @@ func TestIndexerCancelledContext(t *testing.T) {
 
 	manager, chunkID := setupChunkManager(t, records)
 	indexDir := t.TempDir()
-	indexer := NewIndexer(indexDir, manager, 1)
+	indexer := NewIndexer(indexDir, manager, 1, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -153,7 +153,7 @@ func TestIndexerCancelledContext(t *testing.T) {
 func TestIndexerBuildEmptyChunk(t *testing.T) {
 	manager, chunkID := setupChunkManager(t, nil)
 	indexDir := t.TempDir()
-	indexer := NewIndexer(indexDir, manager, 1)
+	indexer := NewIndexer(indexDir, manager, 1, nil)
 
 	if err := indexer.Build(context.Background(), chunkID); err != nil {
 		t.Fatalf("build: %v", err)
@@ -183,7 +183,7 @@ func TestIndexerBuildSingleRecord(t *testing.T) {
 
 	manager, chunkID := setupChunkManager(t, records)
 	indexDir := t.TempDir()
-	indexer := NewIndexer(indexDir, manager, 10)
+	indexer := NewIndexer(indexDir, manager, 10, nil)
 
 	if err := indexer.Build(context.Background(), chunkID); err != nil {
 		t.Fatalf("build: %v", err)
@@ -222,7 +222,7 @@ func TestIndexerBuildSparsityOne(t *testing.T) {
 
 	manager, chunkID := setupChunkManager(t, records)
 	indexDir := t.TempDir()
-	indexer := NewIndexer(indexDir, manager, 1)
+	indexer := NewIndexer(indexDir, manager, 1, nil)
 
 	if err := indexer.Build(context.Background(), chunkID); err != nil {
 		t.Fatalf("build: %v", err)
@@ -261,7 +261,7 @@ func TestIndexerBuildRecordPos(t *testing.T) {
 
 	manager, chunkID := setupChunkManager(t, records)
 	indexDir := t.TempDir()
-	indexer := NewIndexer(indexDir, manager, 1)
+	indexer := NewIndexer(indexDir, manager, 1, nil)
 
 	if err := indexer.Build(context.Background(), chunkID); err != nil {
 		t.Fatalf("build: %v", err)
@@ -299,7 +299,7 @@ func TestIndexerBuildInvalidChunkID(t *testing.T) {
 
 	manager, _ := setupChunkManager(t, records)
 	indexDir := t.TempDir()
-	indexer := NewIndexer(indexDir, manager, 1)
+	indexer := NewIndexer(indexDir, manager, 1, nil)
 
 	bogusID := chunk.NewChunkID()
 	err := indexer.Build(context.Background(), bogusID)
@@ -321,7 +321,7 @@ func TestIndexerBuildReadOnlyDir(t *testing.T) {
 	}
 	defer os.Chmod(indexDir, 0o755)
 
-	indexer := NewIndexer(indexDir, manager, 1)
+	indexer := NewIndexer(indexDir, manager, 1, nil)
 	err := indexer.Build(context.Background(), chunkID)
 	if err == nil {
 		t.Fatal("expected error writing to read-only dir, got nil")
@@ -446,7 +446,7 @@ func TestIndexerBuildUnsealedChunk(t *testing.T) {
 	}
 
 	indexDir := t.TempDir()
-	indexer := NewIndexer(indexDir, manager, 1)
+	indexer := NewIndexer(indexDir, manager, 1, nil)
 
 	err = indexer.Build(context.Background(), chunkID)
 	if err == nil {
@@ -467,7 +467,7 @@ func TestLoadIndex(t *testing.T) {
 
 	manager, chunkID := setupChunkManager(t, records)
 	indexDir := t.TempDir()
-	indexer := NewIndexer(indexDir, manager, 1)
+	indexer := NewIndexer(indexDir, manager, 1, nil)
 
 	if err := indexer.Build(context.Background(), chunkID); err != nil {
 		t.Fatalf("build: %v", err)
