@@ -61,9 +61,26 @@ type ChunkMeta struct {
 }
 
 // Record is a single log entry.
+//
+// Note: When reading from file-backed chunks, Raw may be a slice into mmap'd
+// memory that becomes invalid when the cursor is closed. Callers that need
+// the record to outlive the cursor should call Copy().
 type Record struct {
 	IngestTS time.Time
 	WriteTS  time.Time
 	SourceID SourceID
 	Raw      []byte
+}
+
+// Copy returns a deep copy of the record with its own Raw slice.
+// Use this when the record needs to outlive the cursor that created it.
+func (r Record) Copy() Record {
+	raw := make([]byte, len(r.Raw))
+	copy(raw, r.Raw)
+	return Record{
+		IngestTS: r.IngestTS,
+		WriteTS:  r.WriteTS,
+		SourceID: r.SourceID,
+		Raw:      raw,
+	}
 }

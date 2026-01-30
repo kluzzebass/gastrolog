@@ -149,15 +149,15 @@ func (c *mmapCursor) readRecord(index uint64) (chunk.Record, error) {
 	}
 	entry := DecodeIdxEntry(c.idxData[idxOffset : idxOffset+IdxEntrySize])
 
-	// Read raw data. Copy to avoid returning a slice into mmap'd memory
-	// which becomes invalid after Close().
+	// Read raw data. Note: this returns a slice into mmap'd memory.
+	// The slice is only valid until Close() is called. Callers that need
+	// the data to outlive the cursor must copy it.
 	rawStart := int(format.HeaderSize) + int(entry.RawOffset)
 	rawEnd := rawStart + int(entry.RawSize)
 	if rawEnd > len(c.rawData) {
 		return chunk.Record{}, ErrInvalidEntry
 	}
-	raw := make([]byte, entry.RawSize)
-	copy(raw, c.rawData[rawStart:rawEnd])
+	raw := c.rawData[rawStart:rawEnd]
 
 	// Resolve source ID.
 	sourceID, ok := c.resolve(entry.SourceLocalID)

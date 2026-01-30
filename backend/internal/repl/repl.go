@@ -249,13 +249,30 @@ func (r *REPL) cmdQuery(args []string) {
 		return
 	}
 
+	// Wrap iterator to copy records. Record.Raw may point to mmap'd memory
+	// that becomes invalid when the cursor is closed, so we must copy before
+	// sending over the channel.
+	copySeq := func(yield func(chunk.Record, error) bool) {
+		for rec, err := range seq {
+			if err != nil {
+				if !yield(rec, err) {
+					return
+				}
+				continue
+			}
+			if !yield(rec.Copy(), nil) {
+				return
+			}
+		}
+	}
+
 	// Store query state
 	r.lastQuery = &q
 	r.getToken = getToken
 	r.resumeToken = nil
 
 	// Create iterator wrapper
-	next, stop := pullIter(seq)
+	next, stop := pullIter(copySeq)
 	r.resultIter = next
 	_ = stop // We don't call stop; iterator exhausts naturally or on reset
 
