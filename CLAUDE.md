@@ -307,6 +307,12 @@ Disk-persisted storage with split file format:
 - ChunkMeta derived from idx.log (no separate meta.bin file)
 - Sealed flag stored in header flags byte of both files
 
+**Directory locking:**
+- `.lock` file in data directory with exclusive flock
+- Prevents multiple processes from corrupting shared data
+- Lock acquired on `NewManager`, released on `Close`
+- Second process attempting to open same directory fails with `ErrDirectoryLocked`
+
 ### Memory-based chunk storage (`backend/internal/chunk/memory/`)
 
 In-memory implementation of the same interfaces. Rotates chunks based on record count. Useful for testing.
@@ -326,6 +332,34 @@ In-memory implementation of the same interfaces. Rotates chunks based on record 
   - `reader.go` -- `Open` retrieves entries from indexer, returns shared `*index.TimeIndexReader`
 - `source/` -- in-memory source indexer with `Get(chunkID)` satisfying `IndexStore[T]`
 - `token/` -- in-memory token indexer with `Get(chunkID)` satisfying `IndexStore[T]`
+
+### REPL package (`backend/internal/repl/`)
+
+Interactive command-line interface for querying a running GastroLog system:
+
+- Built on bubbletea for terminal UI with history, tab completion
+- Observes system via public APIs only (no lifecycle control)
+
+**Commands:**
+- `query key=value ...` -- execute query with filters (start=, end=, source=, token=, limit=)
+- `follow key=value ...` -- stream new records in real-time (like tail -f)
+- `next [count]` -- fetch next page of results
+- `sources [key=value ...]` -- list sources matching attribute filters
+- `store [name]` -- get/set target store
+- `set key=value` -- configure REPL settings
+- `reset` -- clear query state
+- `help` / `?` -- show help
+- `exit` / `quit` / Ctrl-D -- exit
+
+**Settings (via `set`):**
+- `pager=N` -- records per page (0 = no paging, show all at once)
+
+**Query semantics:**
+- `limit=N` limits total results from query engine
+- Pagination via `next` is separate from limit
+- Time format: RFC3339 (`2024-01-01T00:00:00Z`) or Unix timestamp
+- Multiple `token=` filters use AND semantics
+- Multiple `source=` filters use OR semantics
 
 ## Binary Format Conventions
 
@@ -439,6 +473,11 @@ backend/
       config.go                 Config types (Store, Receiver definitions)
       file/                     File-based config store
       memory/                   Memory-based config store
+    repl/
+      repl.go                   Interactive REPL with bubbletea
+  cmd/
+    gastrolog/
+      main.go                   Main entry point
 docs/
   file_formats.md               Binary format specifications
 ```
