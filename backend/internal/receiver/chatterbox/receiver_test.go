@@ -2,6 +2,7 @@ package chatterbox
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -374,5 +375,284 @@ func TestRandomInterval_EqualBounds(t *testing.T) {
 		if interval != 50*time.Millisecond {
 			t.Errorf("interval = %v, want 50ms", interval)
 		}
+	}
+}
+
+func TestNewReceiver_Formats(t *testing.T) {
+	params := map[string]string{
+		"formats": "json,kv",
+	}
+	r, err := NewReceiver(params, nil)
+	if err != nil {
+		t.Fatalf("NewReceiver failed: %v", err)
+	}
+	recv := r.(*Receiver)
+	if len(recv.formats) != 2 {
+		t.Errorf("expected 2 formats, got %d", len(recv.formats))
+	}
+}
+
+func TestNewReceiver_AllFormats(t *testing.T) {
+	r, err := NewReceiver(nil, nil)
+	if err != nil {
+		t.Fatalf("NewReceiver failed: %v", err)
+	}
+	recv := r.(*Receiver)
+	if len(recv.formats) != 6 {
+		t.Errorf("expected 6 formats (all), got %d", len(recv.formats))
+	}
+}
+
+func TestNewReceiver_UnknownFormat(t *testing.T) {
+	params := map[string]string{
+		"formats": "json,invalid",
+	}
+	_, err := NewReceiver(params, nil)
+	if err == nil {
+		t.Error("expected error for unknown format")
+	}
+}
+
+func TestNewReceiver_FormatWeights(t *testing.T) {
+	params := map[string]string{
+		"formats":        "json,kv",
+		"format_weights": "json=10,kv=5",
+	}
+	r, err := NewReceiver(params, nil)
+	if err != nil {
+		t.Fatalf("NewReceiver failed: %v", err)
+	}
+	recv := r.(*Receiver)
+	if recv.totalWeight != 15 {
+		t.Errorf("totalWeight = %d, want 15", recv.totalWeight)
+	}
+	// Cumulative weights: json=10, kv=15
+	if recv.weights[0] != 10 || recv.weights[1] != 15 {
+		t.Errorf("weights = %v, want [10, 15]", recv.weights)
+	}
+}
+
+func TestNewReceiver_InvalidWeight(t *testing.T) {
+	params := map[string]string{
+		"formats":        "json",
+		"format_weights": "json=notanumber",
+	}
+	_, err := NewReceiver(params, nil)
+	if err == nil {
+		t.Error("expected error for invalid weight")
+	}
+}
+
+func TestNewReceiver_ZeroWeight(t *testing.T) {
+	params := map[string]string{
+		"formats":        "json",
+		"format_weights": "json=0",
+	}
+	_, err := NewReceiver(params, nil)
+	if err == nil {
+		t.Error("expected error for zero weight")
+	}
+}
+
+func TestNewReceiver_NegativeWeight(t *testing.T) {
+	params := map[string]string{
+		"formats":        "json",
+		"format_weights": "json=-5",
+	}
+	_, err := NewReceiver(params, nil)
+	if err == nil {
+		t.Error("expected error for negative weight")
+	}
+}
+
+func TestNewReceiver_HostCount(t *testing.T) {
+	params := map[string]string{
+		"host_count": "20",
+	}
+	r, err := NewReceiver(params, nil)
+	if err != nil {
+		t.Fatalf("NewReceiver failed: %v", err)
+	}
+	recv := r.(*Receiver)
+
+	// Generate messages and collect hosts
+	hosts := make(map[string]bool)
+	for i := 0; i < 1000; i++ {
+		msg := recv.generateMessage()
+		if h := msg.Attrs["host"]; h != "" {
+			hosts[h] = true
+		}
+	}
+
+	// With 20 hosts, we should see variety
+	if len(hosts) < 10 {
+		t.Errorf("expected at least 10 distinct hosts with host_count=20, got %d", len(hosts))
+	}
+}
+
+func TestNewReceiver_InvalidHostCount(t *testing.T) {
+	params := map[string]string{
+		"host_count": "invalid",
+	}
+	_, err := NewReceiver(params, nil)
+	if err == nil {
+		t.Error("expected error for invalid host_count")
+	}
+}
+
+func TestNewReceiver_ZeroHostCount(t *testing.T) {
+	params := map[string]string{
+		"host_count": "0",
+	}
+	_, err := NewReceiver(params, nil)
+	if err == nil {
+		t.Error("expected error for zero host_count")
+	}
+}
+
+func TestNewReceiver_ServiceCount(t *testing.T) {
+	params := map[string]string{
+		"service_count": "3",
+		"formats":       "plain", // plain format uses service attr
+	}
+	r, err := NewReceiver(params, nil)
+	if err != nil {
+		t.Fatalf("NewReceiver failed: %v", err)
+	}
+	recv := r.(*Receiver)
+
+	// Generate messages and collect services
+	services := make(map[string]bool)
+	for i := 0; i < 500; i++ {
+		msg := recv.generateMessage()
+		if s := msg.Attrs["service"]; s != "" {
+			services[s] = true
+		}
+	}
+
+	// Should have exactly 3 distinct services
+	if len(services) > 3 {
+		t.Errorf("expected at most 3 distinct services with service_count=3, got %d", len(services))
+	}
+}
+
+func TestNewReceiver_InvalidServiceCount(t *testing.T) {
+	params := map[string]string{
+		"service_count": "invalid",
+	}
+	_, err := NewReceiver(params, nil)
+	if err == nil {
+		t.Error("expected error for invalid service_count")
+	}
+}
+
+func TestNewReceiver_ZeroServiceCount(t *testing.T) {
+	params := map[string]string{
+		"service_count": "0",
+	}
+	_, err := NewReceiver(params, nil)
+	if err == nil {
+		t.Error("expected error for zero service_count")
+	}
+}
+
+func TestGenerateMessage_MultipleFormats(t *testing.T) {
+	params := map[string]string{
+		"min_interval": "1ms",
+		"max_interval": "5ms",
+		"formats":      "plain,json,kv,access,syslog",
+	}
+	r, err := NewReceiver(params, nil)
+	if err != nil {
+		t.Fatalf("NewReceiver failed: %v", err)
+	}
+	recv := r.(*Receiver)
+
+	// Generate many messages and check for variety in raw formats
+	jsonCount := 0
+	accessCount := 0
+	syslogCount := 0
+
+	for i := 0; i < 1000; i++ {
+		msg := recv.generateMessage()
+		raw := string(msg.Raw)
+		if len(raw) > 0 && raw[0] == '{' {
+			jsonCount++
+		}
+		if strings.Contains(raw, "HTTP/") {
+			accessCount++
+		}
+		if len(raw) > 0 && raw[0] == '<' {
+			syslogCount++
+		}
+	}
+
+	// With equal weights and 5 formats, each should get ~200 hits
+	// Allow for statistical variation
+	if jsonCount < 50 {
+		t.Errorf("expected at least 50 JSON messages, got %d", jsonCount)
+	}
+	if accessCount < 50 {
+		t.Errorf("expected at least 50 access log messages, got %d", accessCount)
+	}
+	if syslogCount < 50 {
+		t.Errorf("expected at least 50 syslog messages, got %d", syslogCount)
+	}
+}
+
+func TestGenerateMessage_WeightedSelection(t *testing.T) {
+	params := map[string]string{
+		"formats":        "json,plain",
+		"format_weights": "json=90,plain=10",
+	}
+	r, err := NewReceiver(params, nil)
+	if err != nil {
+		t.Fatalf("NewReceiver failed: %v", err)
+	}
+	recv := r.(*Receiver)
+
+	jsonCount := 0
+	for i := 0; i < 1000; i++ {
+		msg := recv.generateMessage()
+		raw := string(msg.Raw)
+		if len(raw) > 0 && raw[0] == '{' {
+			jsonCount++
+		}
+	}
+
+	// With 90% weight on JSON, we should see ~900 JSON messages
+	// Allow for statistical variation (should be at least 800)
+	if jsonCount < 800 {
+		t.Errorf("expected at least 800 JSON messages with 90%% weight, got %d", jsonCount)
+	}
+}
+
+func TestGenerateMessage_AttrsIncludeReceiverAndInstance(t *testing.T) {
+	params := map[string]string{
+		"instance": "test-instance",
+		"formats":  "json",
+	}
+	r, err := NewReceiver(params, nil)
+	if err != nil {
+		t.Fatalf("NewReceiver failed: %v", err)
+	}
+	recv := r.(*Receiver)
+
+	msg := recv.generateMessage()
+
+	// Base attrs should always be present
+	if msg.Attrs["receiver"] != "chatterbox" {
+		t.Errorf("receiver = %q, want %q", msg.Attrs["receiver"], "chatterbox")
+	}
+	if msg.Attrs["instance"] != "test-instance" {
+		t.Errorf("instance = %q, want %q", msg.Attrs["instance"], "test-instance")
+	}
+
+	// Format-specific attrs should also be present (JSON format adds these)
+	if msg.Attrs["service"] == "" {
+		t.Error("expected service attr from format")
+	}
+	if msg.Attrs["host"] == "" {
+		t.Error("expected host attr from format")
 	}
 }

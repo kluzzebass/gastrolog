@@ -4,7 +4,6 @@ package chatterbox
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"time"
@@ -25,6 +24,14 @@ type Receiver struct {
 	maxInterval time.Duration
 	instance    string
 	rng         *rand.Rand
+
+	// formats holds the available log format generators.
+	formats []LogFormat
+	// weights holds the cumulative weights for format selection.
+	// weights[i] = sum of weights[0..i], used for weighted random selection.
+	weights []int
+	// totalWeight is the sum of all format weights.
+	totalWeight int
 
 	// Logger for this receiver instance.
 	// Scoped with component="receiver", type="chatterbox" at construction time.
@@ -66,37 +73,40 @@ func (r *Receiver) randomInterval() time.Duration {
 
 // generateMessage creates a random log-like message.
 func (r *Receiver) generateMessage() orchestrator.IngestMessage {
+	// Select a format using weighted random selection.
+	format := r.selectFormat()
+
+	// Generate raw bytes and format-specific attributes.
+	raw, formatAttrs := format.Generate(r.rng)
+
+	// Merge base attrs with format attrs.
+	// Base attrs take precedence (receiver, instance are always set).
+	attrs := make(map[string]string, len(formatAttrs)+2)
+	for k, v := range formatAttrs {
+		attrs[k] = v
+	}
+	attrs["receiver"] = "chatterbox"
+	attrs["instance"] = r.instance
+
 	return orchestrator.IngestMessage{
-		Attrs: map[string]string{
-			"receiver": "chatterbox",
-			"instance": r.instance,
-		},
-		Raw:      r.randomLogLine(),
+		Attrs:    attrs,
+		Raw:      raw,
 		IngestTS: time.Now(),
 	}
 }
 
-// randomLogLine generates a random log-like string.
-func (r *Receiver) randomLogLine() []byte {
-	levels := []string{"DEBUG", "INFO", "WARN", "ERROR"}
-	messages := []string{
-		"request processed",
-		"connection established",
-		"cache miss",
-		"user authenticated",
-		"job completed",
-		"retry attempt",
-		"resource allocated",
-		"timeout occurred",
-		"validation failed",
-		"data synced",
+// selectFormat returns a randomly selected format based on weights.
+func (r *Receiver) selectFormat() LogFormat {
+	if len(r.formats) == 1 {
+		return r.formats[0]
 	}
 
-	level := levels[r.rng.IntN(len(levels))]
-	msg := messages[r.rng.IntN(len(messages))]
-	id := r.rng.IntN(100000)
-	duration := r.rng.IntN(1000)
-
-	line := fmt.Sprintf("level=%s msg=%q id=%d duration_ms=%d", level, msg, id, duration)
-	return []byte(line)
+	n := r.rng.IntN(r.totalWeight)
+	for i, w := range r.weights {
+		if n < w {
+			return r.formats[i]
+		}
+	}
+	// Fallback (shouldn't happen if weights are set up correctly).
+	return r.formats[len(r.formats)-1]
 }
