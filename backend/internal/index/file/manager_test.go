@@ -26,7 +26,6 @@ func setupChunkManager(t *testing.T, records []chunk.Record) (chunk.ChunkManager
 			}
 			return gotime.Now()
 		},
-		MetaFlushInterval: gotime.Hour, // Disable periodic flush during tests.
 	})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)

@@ -8,7 +8,7 @@ import (
 	gotime "time"
 
 	"gastrolog/internal/chunk"
-	chunkfile "gastrolog/internal/chunk/file"
+	"gastrolog/internal/chunk/file"
 	"gastrolog/internal/format"
 	"gastrolog/internal/index"
 )
@@ -17,7 +17,7 @@ func setupChunkManager(t *testing.T, records []chunk.Record) (chunk.ChunkManager
 	t.Helper()
 	dir := t.TempDir()
 	callIdx := 0
-	manager, err := chunkfile.NewManager(chunkfile.Config{
+	manager, err := file.NewManager(file.Config{
 		Dir: dir,
 		Now: func() gotime.Time {
 			if callIdx < len(records) {
@@ -27,7 +27,6 @@ func setupChunkManager(t *testing.T, records []chunk.Record) (chunk.ChunkManager
 			}
 			return gotime.Now()
 		},
-		MetaFlushInterval: gotime.Hour, // Disable periodic flush during tests.
 	})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
@@ -283,12 +282,9 @@ func TestIndexerBuildRecordPos(t *testing.T) {
 		t.Fatalf("expected 3 entries, got %d", len(entries))
 	}
 
-	recordSize, err := chunkfile.RecordSize(len(records[0].Raw))
-	if err != nil {
-		t.Fatalf("record size: %v", err)
-	}
+	// Positions are now record indices (0, 1, 2, ...) not byte offsets.
 	for i, e := range entries {
-		expectedPos := uint64(i) * uint64(recordSize)
+		expectedPos := uint64(i)
 		if e.RecordPos != expectedPos {
 			t.Fatalf("entry %d: expected pos %d, got %d", i, expectedPos, e.RecordPos)
 		}
@@ -438,7 +434,7 @@ func TestDecodeErrors(t *testing.T) {
 
 func TestIndexerBuildUnsealedChunk(t *testing.T) {
 	dir := t.TempDir()
-	manager, err := chunkfile.NewManager(chunkfile.Config{Dir: dir})
+	manager, err := file.NewManager(file.Config{Dir: dir})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}

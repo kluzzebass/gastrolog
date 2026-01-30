@@ -292,12 +292,9 @@ func TestIndexerBuildRecordPos(t *testing.T) {
 		t.Fatalf("expected 1 entry, got %d", len(entries))
 	}
 
-	recordSize, err := chunkfile.RecordSize(len(records[0].Raw))
-	if err != nil {
-		t.Fatalf("record size: %v", err)
-	}
+	// Positions are now record indices (0, 1, 2, ...) not byte offsets.
 	for i, pos := range entries[0].Positions {
-		expectedPos := uint64(i) * uint64(recordSize)
+		expectedPos := uint64(i)
 		if pos != expectedPos {
 			t.Fatalf("position %d: expected %d, got %d", i, expectedPos, pos)
 		}

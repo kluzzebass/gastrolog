@@ -70,9 +70,11 @@ go mod tidy                                       # Clean dependencies
 - **ChunkManager** interface: `Append`, `Seal`, `Active`, `Meta`, `List`, `OpenCursor`
 - **RecordCursor** interface: `Next`, `Prev`, `Seek`, `Close` -- bidirectional record iteration
 - **MetaStore** interface: `Save`, `Load`, `List`
-- **Record** -- log entry with `IngestTS` (`time.Time`), `SourceID` (UUID), and `Raw` payload
-- **RecordRef** -- `ChunkID` + byte offset `Pos` (`uint64`); used for cursor positioning via `Seek`
-- **ChunkMeta** -- `ID`, `StartTS`, `EndTS` (`time.Time`), `Size`, `Sealed`
+- **Record** -- log entry with `IngestTS`, `WriteTS` (both `time.Time`), `SourceID` (UUID), and `Raw` payload
+  - `IngestTS` -- when the receiver received the message
+  - `WriteTS` -- when the chunk manager appended the record (monotonic within a chunk)
+- **RecordRef** -- `ChunkID` + record index `Pos` (`uint64`); used for cursor positioning via `Seek`
+- **ChunkMeta** -- `ID`, `StartTS`, `EndTS` (`time.Time`), `Sealed`
 - **ChunkID** / **SourceID** -- UUID v7 typed identifiers (time-ordered, sortable)
 
 ### Logging package (`backend/internal/logging/`)
@@ -149,6 +151,43 @@ Coordinates ingestion, indexing, and querying without owning business logic:
 - Receiver errors currently ignored (future: add error callback)
 - Partial failure on fan-out: if CM A succeeds and CM B fails, no rollback
 
+### Source package (`backend/internal/source/`)
+
+Manages source identity and metadata with fast in-memory resolution:
+
+- **Registry** -- maps attribute sets to SourceIDs, creates new sources on demand
+- **Source** -- `{ID, Attributes, CreatedAt}` representing a log source
+- **Store** interface -- persistence layer (`Save`, `LoadAll`)
+
+**Concurrency model:**
+- `Resolve(attrs)` is fast and fully in-memory (read-lock fast path, write-lock for creation)
+- New sources queued for async persistence via buffered channel (non-blocking, best-effort)
+- Persistence failures do not break ingestion
+- On startup, loads existing sources from store
+
+**Key methods:**
+- `Resolve(attrs map[string]string) SourceID` -- returns existing or creates new source
+- `Get(id) (*Source, bool)` -- retrieve source by ID
+- `Query(filters map[string]string) []SourceID` -- find sources matching attribute filters
+- `Close()` -- drains persist queue and stops background goroutine
+
+### Receiver package (`backend/internal/receiver/`)
+
+Contains receiver implementations. Receivers emit `IngestMessage` to the orchestrator's ingest channel.
+
+**Chatterbox receiver (`chatterbox/`):**
+
+Test receiver that generates random log messages at configurable intervals:
+- Six log format generators with weighted random selection:
+  - `PlainTextFormat` -- simple unstructured messages
+  - `KeyValueFormat` -- structured key=value lines
+  - `JSONFormat` -- JSON-structured logs with varied field schemas
+  - `AccessLogFormat` -- Apache/Nginx-style access logs
+  - `SyslogFormat` -- RFC 3164-style syslog messages
+  - `WeirdFormat` -- malformed/edge-case data for tokenization stress testing
+- `AttributePools` -- pre-generated pools of hosts, services, envs for consistent cardinality
+- Configurable min/max intervals, instance ID, format weights
+
 ### Query package (`backend/internal/query/`)
 
 High-level search API over chunks and indexes:
@@ -159,6 +198,7 @@ High-level search API over chunks and indexes:
   - `Sources` -- filter by source IDs (OR semantics, nil = no filter)
   - `Tokens` -- filter by tokens (AND semantics, nil = no filter)
   - `Limit` -- max results (0 = unlimited)
+  - `ContextBefore`, `ContextAfter` -- records to include around matches (for context windows)
 - **Search(ctx, query, resume)** returns `(iter.Seq2[Record, error], func() *ResumeToken)`
   - Iterator yields records in timestamp order (forward or reverse)
   - Resume token enables pagination; valid as long as referenced chunk exists
@@ -190,6 +230,23 @@ Query execution:
 3. Scanner iterates positions (or sequentially) applying time bounds and filters
 4. Respects limit, tracks position for resume token
 
+### Callgroup package (`backend/internal/callgroup/`)
+
+Generic call deduplication primitive:
+- `Group[K comparable]` -- deduplicates concurrent function calls by key
+- `DoChan(key, fn) <-chan error` -- if no call in flight for key, executes fn; otherwise returns channel that receives the existing call's result
+- Once fn returns, the key is forgotten and future calls trigger new execution
+- Used by `BuildHelper` to deduplicate concurrent index builds for the same chunk
+
+### Format package (`backend/internal/format/`)
+
+Shared binary format utilities for the common 4-byte header:
+- `Header` struct with `Type`, `Version`, `Flags` fields
+- `Encode() [4]byte` / `EncodeInto(buf) int` -- encode header
+- `Decode(buf) (Header, error)` -- decode and validate signature
+- `DecodeAndValidate(buf, expectedType, expectedVersion) (Header, error)` -- full validation
+- Eliminates duplication across index and metadata file readers
+
 ### Index package (`backend/internal/index/`)
 
 **Shared types (`index.go`):**
@@ -204,7 +261,7 @@ Query execution:
 **BuildHelper (`build.go`):**
 
 Shared concurrency primitive used by both file and memory managers:
-- `singleflight.DoChan` deduplicates concurrent `BuildIndexes` calls for the same chunkID
+- Uses `callgroup.Group[ChunkID]` to deduplicate concurrent `BuildIndexes` calls for the same chunkID
 - `errgroup.WithContext` parallelizes individual indexers within a single build
 - `context.WithoutCancel` detaches the build from the initiator's context so one caller cancelling doesn't abort the shared build
 - Early `ctx.Err()` check bails out immediately on already-cancelled contexts
@@ -224,19 +281,30 @@ Binary search lookup for inverted indexes:
 
 **Tokenizer (`token/tokenize.go`):**
 
-Simple tokenizer used for both indexing and query-time matching:
-- `Simple([]byte) []string` -- splits on non-alphanumeric, lowercases, returns unique tokens
+Tokenizer used for both indexing and query-time matching:
+- `Simple([]byte) []string` -- extracts indexable tokens using `DefaultMaxTokenLen` (16)
+- `SimpleWithMaxLen([]byte, int) []string` -- extracts tokens with custom max length
+- `IterBytes(data, buf, maxLen, fn)` -- zero-allocation iterator for hot paths
+- Token rules:
+  - Valid characters: a-z, A-Z (lowercased), 0-9, underscore, hyphen (ASCII only)
+  - Length: 2 to maxLen bytes (default 16)
+  - Excluded: numeric tokens (decimal, hex, octal, binary), hex-with-hyphens, canonical UUIDs
 - Same tokenizer used at index time and query time ensures consistent matching
 
 ### File-based chunk storage (`backend/internal/chunk/file/`)
 
-Disk-persisted storage with custom binary formats:
-- `manager.go` -- chunk lifecycle: rotation based on MaxChunkBytes, one active writable chunk, lazy loading from disk
-- `record.go` -- binary record format with magic `0x69`, version `0x01`, leading+trailing size for bidirectional traversal
-- `meta_store.go` -- per-chunk `meta.bin` with signature `'i'+'m'`, atomic writes (temp file + rename)
+Disk-persisted storage with split file format:
+- `manager.go` -- chunk lifecycle: rotation based on MaxChunkBytes (soft) or 4GB (hard), one active writable chunk, lazy loading from disk
+- `record.go` -- idx.log entry format (28 bytes): IngestTS, WriteTS, SourceLocalID, RawOffset, RawSize
 - `sources.go` -- bidirectional UUID-to-uint32 source ID mapping per chunk (`sources.bin`)
-- `record_reader.go` -- `RecordCursor` implementation for file-based chunks
-- `reader.go` / `mmap_reader.go` -- standard I/O and memory-mapped readers; mmap preferred for sealed chunks
+- `record_reader.go` -- `RecordCursor` implementation with mmap for sealed chunks, stdio for active chunks
+
+**Split file format:**
+- `raw.log` (type 'r') -- 4-byte header + concatenated raw log bytes (no framing)
+- `idx.log` (type 'i') -- 4-byte header + fixed-size 28-byte entries per record
+- Position semantics: record indices (0, 1, 2, ...) not byte offsets
+- ChunkMeta derived from idx.log (no separate meta.bin file)
+- Sealed flag stored in header flags byte of both files
 
 ### Memory-based chunk storage (`backend/internal/chunk/memory/`)
 
@@ -245,10 +313,10 @@ In-memory implementation of the same interfaces. Rotates chunks based on record 
 ### File-based index manager (`backend/internal/index/file/`)
 
 - `manager.go` -- `IndexManager` implementation; delegates `BuildIndexes` to `BuildHelper`
-- `time/` -- time indexer: sparse index mapping sampled timestamps to record positions; writes `_time.idx`
+- `time/` -- time indexer: sparse index mapping sampled timestamps to record indices; writes `_time.idx`
   - `reader.go` -- `Open` loads and validates index file, returns shared `*index.TimeIndexReader`
-- `source/` -- source indexer: inverted index mapping SourceIDs to record positions; writes `_source.idx`
-- `token/` -- token indexer: inverted index mapping tokens to record positions; writes `_token.idx`
+- `source/` -- source indexer: inverted index mapping SourceIDs to record indices; writes `_source.idx`
+- `token/` -- token indexer: inverted index mapping tokens to record indices; writes `_token.idx`
 
 ### Memory-based index manager (`backend/internal/index/memory/`)
 
@@ -262,16 +330,20 @@ In-memory implementation of the same interfaces. Rotates chunks based on record 
 
 All binary files use **little-endian** byte order. Timestamps stored on disk are **int64 Unix microseconds** (converted to/from `time.Time` at the encode/decode boundary).
 
-Common header prefix for index files and meta file:
+Common 4-byte header prefix for all binary files:
 ```
 signature (1 byte, 0x69 'i') | type (1 byte) | version (1 byte) | flags (1 byte)
 ```
 
-Type bytes: `'m'` = meta, `'t'` = time index, `'s'` = source index, `'k'` = token index.
+Type bytes: `'r'` = raw.log, `'i'` = idx.log, `'t'` = time index, `'s'` = source index, `'k'` = token index, `'z'` = source registry, `'c'` = chunk source map.
 
-Index file headers include the chunk ID (16 bytes) after the common prefix. See `docs/file_formats.md` for full binary format specifications.
+Flags: bit 0 (`0x01`) = sealed.
 
-Record and source map files use leading+trailing size fields for bidirectional traversal.
+The `format` package (`internal/format/`) provides shared encoding/decoding utilities for the common header.
+
+Index file headers include the chunk ID (16 bytes) after the common 4-byte prefix. See `docs/file_formats.md` for full binary format specifications.
+
+Source map files use leading+trailing size fields for bidirectional traversal.
 
 ## Testing
 
@@ -291,7 +363,7 @@ Append records, seal chunks, then pass `cm` and `im` to the code under test. See
 
 - Interface segregation: consumers depend on `chunk.ChunkManager` / `index.Indexer` / `index.IndexManager`, not concrete types
 - Generics used to eliminate duplication: `Index[T]` for index entries, `IndexStore[T]` for memory stores
-- `BuildHelper` provides singleflight deduplication + errgroup parallelism for concurrent index builds
+- `BuildHelper` provides callgroup deduplication + errgroup parallelism for concurrent index builds
 - All managers are mutex-protected for concurrent access
 - Atomic file operations for metadata and indexes (temp file then rename)
 - `time.Time` used throughout the domain; int64 microseconds only at file encode/decode boundaries
@@ -306,9 +378,13 @@ Append records, seal chunks, then pass `cm` and `im` to the code under test. See
 ```
 backend/
   internal/
-    callgroup/                  Singleflight-like concurrency primitive
+    callgroup/
+      callgroup.go              Generic call deduplication by key (Group[K])
+    format/
+      header.go                 Shared binary header encoding/decoding
     logging/
       logging.go                Discard() and Default() helpers for slog
+      filter.go                 ComponentFilterHandler for per-component log levels
     orchestrator/
       orchestrator.go           Orchestrator struct and New()
       lifecycle.go              Start() and Stop() methods
@@ -317,6 +393,17 @@ backend/
       receiver.go               Receiver interface, IngestMessage, ReceiverFactory
       registry.go               Register* methods for components
       factory.go                Factories struct and ApplyConfig
+    receiver/
+      chatterbox/               Test receiver generating random log messages
+        receiver.go             Receiver implementation
+        format.go               LogFormat interface and AttributePools
+        format_plain.go         Plain text format
+        format_kv.go            Key-value format
+        format_json.go          JSON format
+        format_access.go        Apache/Nginx access log format
+        format_syslog.go        Syslog format
+        format_weird.go         Edge-case/malformed data format
+        factory.go              ReceiverFactory implementation
     chunk/
       chunk.go                  Interfaces (ChunkManager, RecordCursor, MetaStore), ManagerFactory
       types.go                  Data types (Record, ChunkMeta, ChunkID, SourceID, RecordRef)
@@ -324,12 +411,12 @@ backend/
       memory/                   Memory-based chunk manager
     index/
       index.go                  Shared types, Indexer/IndexManager interfaces, generic Index[T], ManagerFactory
-      build.go                  BuildHelper (singleflight + errgroup)
+      build.go                  BuildHelper (callgroup + errgroup)
       time_reader.go            Shared TimeIndexReader with FindStart binary search
       source_reader.go          Shared SourceIndexReader with Lookup
       token_reader.go           Shared TokenIndexReader with Lookup
       token/
-        tokenize.go             Simple tokenizer (split, lowercase, dedupe)
+        tokenize.go             Tokenizer with configurable max length
       file/
         manager.go              File-based IndexManager
         time/                   File-based time indexer (_time.idx)
@@ -341,16 +428,16 @@ backend/
         source/                 Memory-based source indexer
         token/                  Memory-based token indexer
     query/
-      query.go                  Query engine with Search API
+      query.go                  Query engine with Search API, context windows support
       scanner.go                Composable scanner pipeline (scannerBuilder, filters)
     source/
-      registry.go               Source identity resolution and persistence
+      registry.go               Source identity resolution with async persistence
       file/                     File-based source store
       memory/                   Memory-based source store
     config/
       config.go                 Config types (Store, Receiver definitions)
       file/                     File-based config store
       memory/                   Memory-based config store
-  docs/
-    file_formats.md             Binary format specifications
+docs/
+  file_formats.md               Binary format specifications
 ```

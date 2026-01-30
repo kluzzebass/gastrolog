@@ -7,73 +7,26 @@ All multi-byte integers are **little-endian**. UUIDs are stored as raw 16-byte v
 ```
 <data_dir>/
   <chunk-uuid>/
-    meta.bin            Chunk metadata
+    raw.log             Raw log bytes (append-only)
+    idx.log             Record metadata entries (append-only)
     sources.bin         SourceID-to-LocalID mapping table
-    records.log         Append-only record log
-  <index_dir>/
-    <chunk-uuid>/
-      _time.idx         Sparse time index
-      _source.idx       Source index (inverted posting list)
-      _token.idx        Token index (inverted posting list)
+    _time.idx           Sparse time index
+    _source.idx         Source index (inverted posting list)
+    _token.idx          Token index (inverted posting list)
 ```
+
+Each chunk has its own subdirectory named by its UUID.
 
 ## Common Header Pattern
 
-Index files and the meta file share a common header prefix:
+All binary files share a common 4-byte header prefix:
 
 | Field     | Size | Description                              |
 |-----------|------|------------------------------------------|
 | signature | 1    | Always `0x69` (`'i'`)                    |
-| type      | 1    | File type: `'m'` meta, `'t'` time, `'s'` source, `'k'` token |
+| type      | 1    | File type: `'r'` raw, `'i'` idx, `'t'` time, `'s'` source, `'k'` token |
 | version   | 1    | Format version (file-type specific)      |
 | flags     | 1    | Bit flags (file-type specific)           |
-
----
-
-## meta.bin -- Chunk Metadata
-
-Fixed-size file (44 bytes). Validated on decode by checking that the file size matches exactly.
-
-### Layout
-
-```
- 0                   1                   2                   3
- 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|  sig (0x69)   |  type ('m')   |  version (1)  |    flags      |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                                                               |
-+                        chunkID (16 bytes)                     +
-|                                                               |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                                                               |
-+                     startTS (int64 micros)                    +
-|                                                               |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                                                               |
-+                      endTS (int64 micros)                     +
-|                                                               |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                                                               |
-+                      dataSize (int64 bytes)                   +
-|                                                               |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-```
-
-### Fields
-
-| Offset | Size | Field     | Description                              |
-|--------|------|-----------|------------------------------------------|
-| 0      | 1    | signature | `0x69` (`'i'`)                           |
-| 1      | 1    | type      | `0x6D` (`'m'`)                           |
-| 2      | 1    | version   | `0x01`                                   |
-| 3      | 1    | flags     | Bit 0: sealed (`0x01` = sealed)          |
-| 4      | 16   | chunkID   | Chunk UUID (raw bytes)                   |
-| 20     | 8    | startTS   | First record timestamp (Unix micros)     |
-| 28     | 8    | endTS     | Last record timestamp (Unix micros)      |
-| 36     | 8    | dataSize  | Total records.log size in bytes          |
-
-**Total: 44 bytes**
 
 ### Flags
 
@@ -83,9 +36,103 @@ Fixed-size file (44 bytes). Validated on decode by checking that the file size m
 
 ---
 
+## raw.log -- Raw Log Bytes
+
+Append-only file containing concatenated raw log message bytes. The chunk ID is derived from the directory name (authoritative).
+
+### Layout
+
+```
++---------------------------+
+|     Header (4 bytes)      |
++---------------------------+
+|     Raw log bytes         |
+|     (concatenated)        |
++---------------------------+
+```
+
+### Header (4 bytes)
+
+| Offset | Size | Field     | Description                              |
+|--------|------|-----------|------------------------------------------|
+| 0      | 1    | signature | `0x69` (`'i'`)                           |
+| 1      | 1    | type      | `0x72` (`'r'`)                           |
+| 2      | 1    | version   | `0x01`                                   |
+| 3      | 1    | flags     | Bit 0: sealed (`0x01` = sealed)          |
+
+### Data Section
+
+Raw log bytes are concatenated with no framing. The offset and size of each record's raw data is stored in the corresponding idx.log entry.
+
+**Maximum file size: 4 GB** (limited by uint32 rawOffset field in idx.log entries)
+
+---
+
+## idx.log -- Record Metadata Index
+
+Append-only file containing fixed-size metadata entries for each record. The chunk ID is derived from the directory name (authoritative).
+
+### Layout
+
+```
++---------------------------+
+|     Header (4 bytes)      |
++---------------------------+
+|     Entry 0 (28 bytes)    |
++---------------------------+
+|     Entry 1 (28 bytes)    |
++---------------------------+
+|     ...                   |
++---------------------------+
+|     Entry N-1 (28 bytes)  |
++---------------------------+
+```
+
+### Header (4 bytes)
+
+| Offset | Size | Field     | Description                              |
+|--------|------|-----------|------------------------------------------|
+| 0      | 1    | signature | `0x69` (`'i'`)                           |
+| 1      | 1    | type      | `0x69` (`'i'`)                           |
+| 2      | 1    | version   | `0x01`                                   |
+| 3      | 1    | flags     | Bit 0: sealed (`0x01` = sealed)          |
+
+### Entry (28 bytes each)
+
+| Offset | Size | Field         | Description                                  |
+|--------|------|---------------|----------------------------------------------|
+| 0      | 8    | ingestTS      | Ingest timestamp (int64 Unix micros)         |
+| 8      | 8    | writeTS       | Write timestamp (int64 Unix micros)          |
+| 16     | 4    | sourceLocalID | Local source ID (from sources.bin, uint32)   |
+| 20     | 4    | rawOffset     | Byte offset into raw.log data section (uint32)|
+| 24     | 4    | rawSize       | Length of raw data in bytes (uint32)         |
+
+### Position Semantics
+
+Record positions throughout the system are **record indices** (0, 1, 2, ...), not byte offsets. To compute the file offset for record N:
+
+```
+idx_file_offset = 4 + (N * 28)
+```
+
+This enables O(1) seeking by record number and trivial bidirectional traversal.
+
+### Deriving ChunkMeta
+
+The `ChunkMeta` is derived from idx.log without a separate metadata file:
+
+| ChunkMeta Field | Source                                      |
+|-----------------|---------------------------------------------|
+| ID              | Directory name (authoritative)              |
+| StartTS         | Entry 0, writeTS field                      |
+| EndTS           | Last entry, writeTS field                   |
+| Sealed          | flags byte in header (bit 0)                |
+
+---
+
 ## sources.bin -- Source ID Mapping Table
 
-Append-only sequence of fixed-size records. Each record maps one `SourceID` (UUID) to a `localID` (uint32) used in `records.log`.
+Append-only sequence of fixed-size records. Each record maps one `SourceID` (UUID) to a `localID` (uint32) used in idx.log entries.
 
 ### Record Layout
 
@@ -121,62 +168,9 @@ Local IDs are assigned sequentially starting from 1. The file contains one recor
 
 ---
 
-## records.log -- Record Log
-
-Append-only sequence of variable-length records. Each record is framed with leading and trailing size fields to support both forward and backward traversal.
-
-### Record Layout
-
-```
- 0                   1                   2                   3
- 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                        size (uint32)                          |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|  magic (0x69) |  version (1)  |                               |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+                               +
-|                                                               |
-+                     ingestTS (uint64 micros)                  +
-|                               +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                               |     sourceLocalID (uint32)    |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                        rawLen (uint32)                        |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                                                               |
-~                       raw (rawLen bytes)                      ~
-|                                                               |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                     trailing size (uint32)                    |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-```
-
-### Fields
-
-| Offset | Size    | Field         | Description                            |
-|--------|---------|---------------|----------------------------------------|
-| 0      | 4       | size          | Total record size including this field |
-| 4      | 1       | magic         | `0x69`                                 |
-| 5      | 1       | version       | `0x01`                                 |
-| 6      | 8       | ingestTS      | Ingest timestamp (Unix micros)         |
-| 14     | 4       | sourceLocalID | Local source ID (from sources.bin)     |
-| 18     | 4       | rawLen        | Length of raw payload                  |
-| 22     | rawLen  | raw           | Raw log message bytes                  |
-| 22+N   | 4       | trailing size | Repeat of size field (must match)      |
-
-**Minimum size: 26 bytes** (empty payload)
-**Maximum size: ~4 GB** (limited by uint32 size field)
-
-The `sourceLocalID` references a mapping in `sources.bin`. To resolve back to a full UUID, look up the local ID in the source map.
-
-The leading and trailing size fields enable bidirectional cursor traversal: forward by reading the leading size and skipping ahead, backward by reading the trailing size and jumping back.
-
----
-
 ## _time.idx -- Time Index
 
-Sparse time index mapping sampled timestamps to record positions within a chunk. Only built for sealed chunks.
-
-Positions are stored as uint32, limiting chunk size to 4GB.
+Sparse time index mapping sampled timestamps to record indices within a chunk. Only built for sealed chunks.
 
 ### Layout
 
@@ -210,19 +204,17 @@ Positions are stored as uint32, limiting chunk size to 4GB.
 | Offset | Size | Field     | Description                          |
 |--------|------|-----------|--------------------------------------|
 | 0      | 8    | timestamp | Record timestamp (int64 Unix micros) |
-| 8      | 4    | recordPos | Byte offset into records.log (uint32)|
+| 8      | 4    | recordPos | Record index (uint32)                |
 
 **Total file size: 24 + (entryCount x 12) bytes**
 
-Entries are written in cursor traversal order (the order records appear in `records.log`). A sparsity parameter controls how many records are sampled: with sparsity N, every N-th record is indexed (plus the first record always).
+Entries are written in record order (the order records appear in idx.log). A sparsity parameter controls how many records are sampled: with sparsity N, every N-th record is indexed (plus the first record always).
 
 ---
 
 ## _source.idx -- Source Index
 
-Inverted index mapping each `SourceID` to the list of record positions where that source appears within a chunk. Only built for sealed chunks.
-
-Positions are stored as uint32, limiting chunk size to 4GB.
+Inverted index mapping each `SourceID` to the list of record indices where that source appears within a chunk. Only built for sealed chunks.
 
 ### Layout
 
@@ -261,17 +253,15 @@ Key entries are sorted by `sourceID` string representation for deterministic out
 
 ### Posting Blob
 
-Flat array of `uint32` record positions (4 bytes each). Each key entry references a contiguous slice of this blob via `postingOffset` (byte offset from the start of the posting blob) and `postingCount` (number of positions).
+Flat array of `uint32` record indices (4 bytes each). Each key entry references a contiguous slice of this blob via `postingOffset` (byte offset from the start of the posting blob) and `postingCount` (number of indices).
 
-**Total file size: 24 + (keyCount x 24) + (totalPositions x 4) bytes**
+**Total file size: 24 + (keyCount x 24) + (totalIndices x 4) bytes**
 
 ---
 
 ## _token.idx -- Token Index
 
-Inverted index mapping each token to the list of record positions where that token appears within a chunk. Only built for sealed chunks.
-
-Positions are stored as uint32, limiting chunk size to 4GB.
+Inverted index mapping each token to the list of record indices where that token appears within a chunk. Only built for sealed chunks.
 
 ### Tokenization Rules
 
@@ -322,9 +312,9 @@ Key entries are sorted by token string for deterministic output and binary searc
 
 ### Posting Blob
 
-Flat array of `uint32` record positions (4 bytes each). Each key entry references a contiguous slice of this blob via `postingOffset` (byte offset from the start of the posting blob) and `postingCount` (number of positions).
+Flat array of `uint32` record indices (4 bytes each). Each key entry references a contiguous slice of this blob via `postingOffset` (byte offset from the start of the posting blob) and `postingCount` (number of indices).
 
-**Total file size: 24 + (sum of key entry sizes) + (totalPositions x 4) bytes**
+**Total file size: 24 + (sum of key entry sizes) + (totalIndices x 4) bytes**
 
 ---
 
@@ -334,9 +324,9 @@ All file formats include validation checks on decode:
 
 | File         | Checks                                                         |
 |--------------|----------------------------------------------------------------|
-| meta.bin     | Exact size, signature, type, version                           |
+| raw.log      | Min size (4 bytes), signature, type, version                   |
+| idx.log      | Min size (4 bytes), signature, type, version, entry alignment  |
 | sources.bin  | Min size, version, trailing size match                         |
-| records.log  | Min size, magic, version, size match, rawLen match, trailing   |
 | _time.idx    | Min size, signature+type, version, chunkID, entry size match   |
 | _source.idx  | Min size, signature+type, version, chunkID, key size, posting size |
 | _token.idx   | Min size, signature+type, version, chunkID, key size, posting size |

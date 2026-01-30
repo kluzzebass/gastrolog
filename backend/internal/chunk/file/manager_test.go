@@ -63,7 +63,7 @@ func TestFileChunkManagerDirectoryLayout(t *testing.T) {
 	}
 
 	// Each chunk directory should contain exactly the three expected files.
-	expectedFiles := []string{recordsFileName, metaFileName, sourcesFileName}
+	expectedFiles := []string{rawLogFileName, idxLogFileName, sourcesFileName}
 	for _, id := range []chunk.ChunkID{chunkID1, chunkID2} {
 		chunkDir := filepath.Join(dir, id.String())
 		files, err := os.ReadDir(chunkDir)
@@ -147,11 +147,11 @@ func TestFileChunkManagerAppendSealOpenReader(t *testing.T) {
 	}
 
 	chunkDir := filepath.Join(dir, chunkID.String())
-	if _, err := os.Stat(filepath.Join(chunkDir, recordsFileName)); err != nil {
-		t.Fatalf("records file missing: %v", err)
+	if _, err := os.Stat(filepath.Join(chunkDir, rawLogFileName)); err != nil {
+		t.Fatalf("raw.log file missing: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(chunkDir, metaFileName)); err != nil {
-		t.Fatalf("meta file missing: %v", err)
+	if _, err := os.Stat(filepath.Join(chunkDir, idxLogFileName)); err != nil {
+		t.Fatalf("idx.log file missing: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(chunkDir, sourcesFileName)); err != nil {
 		t.Fatalf("sources file missing: %v", err)

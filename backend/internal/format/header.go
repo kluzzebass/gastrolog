@@ -15,9 +15,11 @@ import "errors"
 //	't' = time index
 //	's' = source index
 //	'k' = token index
-//	'm' = chunk metadata
+//	'm' = chunk metadata (deprecated)
 //	'z' = source registry
 //	'c' = chunk source map
+//	'r' = raw log data
+//	'i' = index log (record metadata)
 const (
 	Signature  = 'i'
 	HeaderSize = 4
@@ -25,9 +27,14 @@ const (
 	TypeTimeIndex      = 't'
 	TypeSourceIndex    = 's'
 	TypeTokenIndex     = 'k'
-	TypeChunkMeta      = 'm'
+	TypeChunkMeta      = 'm' // Deprecated: meta.bin no longer used
 	TypeSourceRegistry = 'z'
 	TypeChunkSourceMap = 'c'
+	TypeRawLog         = 'r'
+	TypeIdxLog         = 'i'
+
+	// Flag bits for raw.log and idx.log headers.
+	FlagSealed = 0x01
 )
 
 var (

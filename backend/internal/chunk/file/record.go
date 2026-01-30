@@ -3,153 +3,110 @@ package file
 import (
 	"encoding/binary"
 	"errors"
-	"math"
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/format"
 )
 
+// idx.log entry layout (28 bytes):
+//
+//	ingestTS      (8 bytes, int64, Unix microseconds)
+//	writeTS       (8 bytes, int64, Unix microseconds)
+//	sourceLocalID (4 bytes, uint32, chunk-local source ID)
+//	rawOffset     (4 bytes, uint32, byte offset into raw.log data section)
+//	rawSize       (4 bytes, uint32, length of raw data)
 const (
-	MagicByte   = 0x69
-	VersionByte = 0x01
+	IdxEntrySize = 28
 
-	SizeFieldBytes     = 4
-	MagicFieldBytes    = 1
-	VersionBytes       = 1
-	IngestTSBytes      = 8
-	WriteTSBytes       = 8
-	SourceLocalIDBytes = 4
-	RawLenBytes        = 4
+	idxIngestTSOffset      = 0
+	idxWriteTSOffset       = 8
+	idxSourceLocalIDOffset = 16
+	idxRawOffsetOffset     = 20
+	idxRawSizeOffset       = 24
 
-	HeaderBytes   = SizeFieldBytes + MagicFieldBytes + VersionBytes + IngestTSBytes + WriteTSBytes + SourceLocalIDBytes + RawLenBytes
-	MinRecordSize = HeaderBytes + SizeFieldBytes
+	// File versions.
+	RawLogVersion = 0x01
+	IdxLogVersion = 0x01
+
+	// MaxRawLogSize is the hard limit for raw.log (4GB - 1).
+	// This ensures rawOffset (uint32) can address all bytes.
+	MaxRawLogSize = 1<<32 - 1
 )
 
 var (
-	ErrRecordTooSmall    = errors.New("record size too small")
-	ErrRecordTooLarge    = errors.New("record size too large")
-	ErrMagicMismatch     = errors.New("record magic mismatch")
-	ErrVersionMismatch   = errors.New("record version mismatch")
-	ErrSizeMismatch      = errors.New("record size mismatch")
-	ErrRawLengthInvalid  = errors.New("record raw length invalid")
-	ErrRawLengthMismatch = errors.New("record raw length mismatch")
-	ErrNoPreviousRecord  = errors.New("no previous record")
+	ErrRawTooLarge      = errors.New("raw data would exceed max raw.log size")
+	ErrInvalidEntry     = errors.New("invalid idx.log entry")
+	ErrInvalidRecordIdx = errors.New("invalid record index")
 )
 
-func RecordSize(rawLen int) (uint32, error) {
-	if rawLen < 0 {
-		return 0, ErrRawLengthInvalid
-	}
-	size := uint64(MinRecordSize) + uint64(rawLen)
-	if size > math.MaxUint32 {
-		return 0, ErrRecordTooLarge
-	}
-	return uint32(size), nil
+// IdxEntry represents a single entry in idx.log.
+type IdxEntry struct {
+	IngestTS      time.Time
+	WriteTS       time.Time
+	SourceLocalID uint32
+	RawOffset     uint32 // Byte offset into raw.log (after header)
+	RawSize       uint32
 }
 
-// EncodeRecord encodes a record into binary format.
-//
-// Layout:
-//
-//	size (4 bytes, little-endian uint32, total record size including this field)
-//	magic (1 byte, 0x69)
-//	version (1 byte, 0x01)
-//	ingestTS (8 bytes, Unix microseconds, little-endian int64)
-//	writeTS (8 bytes, Unix microseconds, little-endian int64)
-//	sourceLocalID (4 bytes, little-endian uint32, chunk-local source ID)
-//	rawLen (4 bytes, little-endian uint32)
-//	raw (variable, rawLen bytes)
-//	size (4 bytes, little-endian uint32, repeated for reverse scanning)
-func EncodeRecord(record chunk.Record, localID uint32) ([]byte, error) {
-	rawLen := len(record.Raw)
-	size, err := RecordSize(rawLen)
-	if err != nil {
-		return nil, err
-	}
-
-	buf := make([]byte, size)
-	binary.LittleEndian.PutUint32(buf[:SizeFieldBytes], size)
-	cursor := SizeFieldBytes
-	buf[cursor] = MagicByte
-	cursor += MagicFieldBytes
-	buf[cursor] = VersionByte
-	cursor += VersionBytes
-	binary.LittleEndian.PutUint64(buf[cursor:cursor+IngestTSBytes], uint64(record.IngestTS.UnixMicro()))
-	cursor += IngestTSBytes
-	binary.LittleEndian.PutUint64(buf[cursor:cursor+WriteTSBytes], uint64(record.WriteTS.UnixMicro()))
-	cursor += WriteTSBytes
-	binary.LittleEndian.PutUint32(buf[cursor:cursor+SourceLocalIDBytes], localID)
-	cursor += SourceLocalIDBytes
-	binary.LittleEndian.PutUint32(buf[cursor:cursor+RawLenBytes], uint32(rawLen))
-	cursor += RawLenBytes
-	copy(buf[cursor:cursor+rawLen], record.Raw)
-	cursor += rawLen
-	binary.LittleEndian.PutUint32(buf[cursor:cursor+SizeFieldBytes], size)
-
-	return buf, nil
+// EncodeIdxEntry encodes an idx.log entry into a 28-byte buffer.
+func EncodeIdxEntry(e IdxEntry, buf []byte) {
+	binary.LittleEndian.PutUint64(buf[idxIngestTSOffset:], uint64(e.IngestTS.UnixMicro()))
+	binary.LittleEndian.PutUint64(buf[idxWriteTSOffset:], uint64(e.WriteTS.UnixMicro()))
+	binary.LittleEndian.PutUint32(buf[idxSourceLocalIDOffset:], e.SourceLocalID)
+	binary.LittleEndian.PutUint32(buf[idxRawOffsetOffset:], e.RawOffset)
+	binary.LittleEndian.PutUint32(buf[idxRawSizeOffset:], e.RawSize)
 }
 
-func DecodeRecord(buf []byte) (chunk.Record, uint32, error) {
-	rec, localID, err := DecodeRecordNoCopy(buf)
-	if err != nil {
-		return chunk.Record{}, 0, err
+// DecodeIdxEntry decodes an idx.log entry from a 28-byte buffer.
+func DecodeIdxEntry(buf []byte) IdxEntry {
+	return IdxEntry{
+		IngestTS:      time.UnixMicro(int64(binary.LittleEndian.Uint64(buf[idxIngestTSOffset:]))),
+		WriteTS:       time.UnixMicro(int64(binary.LittleEndian.Uint64(buf[idxWriteTSOffset:]))),
+		SourceLocalID: binary.LittleEndian.Uint32(buf[idxSourceLocalIDOffset:]),
+		RawOffset:     binary.LittleEndian.Uint32(buf[idxRawOffsetOffset:]),
+		RawSize:       binary.LittleEndian.Uint32(buf[idxRawSizeOffset:]),
 	}
-	// Make a copy of Raw since the caller may retain it.
-	raw := make([]byte, len(rec.Raw))
-	copy(raw, rec.Raw)
-	rec.Raw = raw
-	return rec, localID, nil
 }
 
-// DecodeRecordNoCopy decodes a record without copying the Raw bytes.
-// The returned record's Raw slice points directly into buf.
-//
-// IMPORTANT: The caller must NOT modify the returned Raw slice.
-// When used with mmap'd files, writes will cause a segfault (PROT_READ).
-// Caller must not retain Raw after buf is reused or unmapped.
-func DecodeRecordNoCopy(buf []byte) (chunk.Record, uint32, error) {
-	if len(buf) < int(MinRecordSize) {
-		return chunk.Record{}, 0, ErrRecordTooSmall
-	}
-	size := binary.LittleEndian.Uint32(buf[:SizeFieldBytes])
-	if size != uint32(len(buf)) {
-		return chunk.Record{}, 0, ErrSizeMismatch
-	}
+// IdxFileOffset returns the byte offset in idx.log for a given record index.
+func IdxFileOffset(recordIndex uint64) int64 {
+	return int64(format.HeaderSize) + int64(recordIndex)*int64(IdxEntrySize)
+}
 
-	cursor := SizeFieldBytes
-	if buf[cursor] != MagicByte {
-		return chunk.Record{}, 0, ErrMagicMismatch
+// RecordCount returns the number of records in an idx.log file given its size.
+func RecordCount(idxFileSize int64) uint64 {
+	if idxFileSize <= int64(format.HeaderSize) {
+		return 0
 	}
-	cursor += MagicFieldBytes
-	if buf[cursor] != VersionByte {
-		return chunk.Record{}, 0, ErrVersionMismatch
-	}
-	cursor += VersionBytes
+	return uint64(idxFileSize-int64(format.HeaderSize)) / uint64(IdxEntrySize)
+}
 
-	ingestTS := binary.LittleEndian.Uint64(buf[cursor : cursor+IngestTSBytes])
-	cursor += IngestTSBytes
-	writeTS := binary.LittleEndian.Uint64(buf[cursor : cursor+WriteTSBytes])
-	cursor += WriteTSBytes
-	localID := binary.LittleEndian.Uint32(buf[cursor : cursor+SourceLocalIDBytes])
-	cursor += SourceLocalIDBytes
-	rawLen := binary.LittleEndian.Uint32(buf[cursor : cursor+RawLenBytes])
-	cursor += RawLenBytes
-	rawEnd := cursor + int(rawLen)
-	if rawEnd+SizeFieldBytes != len(buf) {
-		return chunk.Record{}, 0, ErrRawLengthMismatch
-	}
+// RawDataOffset returns the byte offset in raw.log where data begins (after header).
+func RawDataOffset() int64 {
+	return int64(format.HeaderSize)
+}
 
-	// No copy - slice directly into buf.
-	raw := buf[cursor:rawEnd]
-	cursor = rawEnd
-	trailing := binary.LittleEndian.Uint32(buf[cursor : cursor+SizeFieldBytes])
-	if trailing != size {
-		return chunk.Record{}, 0, ErrSizeMismatch
-	}
-
+// BuildRecord constructs a chunk.Record from an IdxEntry and raw data.
+// The raw slice is used directly (no copy).
+func BuildRecord(entry IdxEntry, raw []byte, sourceID chunk.SourceID) chunk.Record {
 	return chunk.Record{
-		IngestTS: time.UnixMicro(int64(ingestTS)),
-		WriteTS:  time.UnixMicro(int64(writeTS)),
+		IngestTS: entry.IngestTS,
+		WriteTS:  entry.WriteTS,
+		SourceID: sourceID,
 		Raw:      raw,
-	}, localID, nil
+	}
+}
+
+// BuildRecordCopy constructs a chunk.Record from an IdxEntry and raw data.
+// The raw data is copied.
+func BuildRecordCopy(entry IdxEntry, raw []byte, sourceID chunk.SourceID) chunk.Record {
+	rawCopy := make([]byte, len(raw))
+	copy(rawCopy, raw)
+	return chunk.Record{
+		IngestTS: entry.IngestTS,
+		WriteTS:  entry.WriteTS,
+		SourceID: sourceID,
+		Raw:      rawCopy,
+	}
 }

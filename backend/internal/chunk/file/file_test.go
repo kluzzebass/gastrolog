@@ -2,249 +2,491 @@ package file
 
 import (
 	"bytes"
-	"encoding/binary"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/format"
 )
 
-func TestFileWriterReaderRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "records.log")
-
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		t.Fatalf("open file: %v", err)
+func TestIdxEntryRoundTrip(t *testing.T) {
+	entry := IdxEntry{
+		IngestTS:      time.UnixMicro(123456789),
+		WriteTS:       time.UnixMicro(987654321),
+		SourceLocalID: 42,
+		RawOffset:     1000,
+		RawSize:       500,
 	}
-	defer file.Close()
 
+	var buf [IdxEntrySize]byte
+	EncodeIdxEntry(entry, buf[:])
+
+	decoded := DecodeIdxEntry(buf[:])
+
+	if !decoded.IngestTS.Equal(entry.IngestTS) {
+		t.Errorf("IngestTS: want %v, got %v", entry.IngestTS, decoded.IngestTS)
+	}
+	if !decoded.WriteTS.Equal(entry.WriteTS) {
+		t.Errorf("WriteTS: want %v, got %v", entry.WriteTS, decoded.WriteTS)
+	}
+	if decoded.SourceLocalID != entry.SourceLocalID {
+		t.Errorf("SourceLocalID: want %d, got %d", entry.SourceLocalID, decoded.SourceLocalID)
+	}
+	if decoded.RawOffset != entry.RawOffset {
+		t.Errorf("RawOffset: want %d, got %d", entry.RawOffset, decoded.RawOffset)
+	}
+	if decoded.RawSize != entry.RawSize {
+		t.Errorf("RawSize: want %d, got %d", entry.RawSize, decoded.RawSize)
+	}
+}
+
+func TestIdxFileOffset(t *testing.T) {
+	tests := []struct {
+		index    uint64
+		expected int64
+	}{
+		{0, int64(format.HeaderSize)},
+		{1, int64(format.HeaderSize) + IdxEntrySize},
+		{2, int64(format.HeaderSize) + 2*IdxEntrySize},
+		{100, int64(format.HeaderSize) + 100*IdxEntrySize},
+	}
+
+	for _, tt := range tests {
+		got := IdxFileOffset(tt.index)
+		if got != tt.expected {
+			t.Errorf("IdxFileOffset(%d): want %d, got %d", tt.index, tt.expected, got)
+		}
+	}
+}
+
+func TestRecordCount(t *testing.T) {
+	tests := []struct {
+		fileSize int64
+		expected uint64
+	}{
+		{0, 0},
+		{int64(format.HeaderSize), 0},
+		{int64(format.HeaderSize) + IdxEntrySize, 1},
+		{int64(format.HeaderSize) + 2*IdxEntrySize, 2},
+		{int64(format.HeaderSize) + 100*IdxEntrySize, 100},
+		// Partial entry is not counted
+		{int64(format.HeaderSize) + IdxEntrySize + 10, 1},
+	}
+
+	for _, tt := range tests {
+		got := RecordCount(tt.fileSize)
+		if got != tt.expected {
+			t.Errorf("RecordCount(%d): want %d, got %d", tt.fileSize, tt.expected, got)
+		}
+	}
+}
+
+func TestManagerAppendAndCursor(t *testing.T) {
+	dir := t.TempDir()
+
+	mgr, err := NewManager(Config{
+		Dir:           dir,
+		MaxChunkBytes: 1 << 20, // 1MB
+	})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer mgr.Close()
+
+	sourceID := chunk.NewSourceID()
 	records := []chunk.Record{
-		{IngestTS: time.UnixMicro(111), SourceID: chunk.SourceID{}, Raw: []byte("alpha")},
-		{IngestTS: time.UnixMicro(222), SourceID: chunk.SourceID{}, Raw: []byte("beta-gamma")},
+		{IngestTS: time.UnixMicro(100), SourceID: sourceID, Raw: []byte("first record")},
+		{IngestTS: time.UnixMicro(200), SourceID: sourceID, Raw: []byte("second record with more data")},
+		{IngestTS: time.UnixMicro(300), SourceID: sourceID, Raw: []byte("third")},
 	}
-	localIDs := []uint32{1, 2}
 
-	var offsets []int64
-	for i, rec := range records {
-		offset, _, err := appendRecord(file, rec, localIDs[i])
+	var chunkID chunk.ChunkID
+	var positions []uint64
+	for _, rec := range records {
+		id, pos, err := mgr.Append(rec)
 		if err != nil {
-			t.Fatalf("append record: %v", err)
+			t.Fatalf("Append: %v", err)
 		}
-		offsets = append(offsets, int64(offset))
+		chunkID = id
+		positions = append(positions, pos)
 	}
-	reader, err := OpenReader(path)
+
+	// Positions should be record indices (0, 1, 2)
+	for i, pos := range positions {
+		if pos != uint64(i) {
+			t.Errorf("Position %d: want %d, got %d", i, i, pos)
+		}
+	}
+
+	// Verify files exist
+	chunkDir := filepath.Join(dir, chunkID.String())
+	if _, err := os.Stat(filepath.Join(chunkDir, rawLogFileName)); err != nil {
+		t.Errorf("raw.log not found: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(chunkDir, idxLogFileName)); err != nil {
+		t.Errorf("idx.log not found: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(chunkDir, sourcesFileName)); err != nil {
+		t.Errorf("sources.bin not found: %v", err)
+	}
+
+	// Open cursor and read records (unsealed chunk uses stdio)
+	cursor, err := mgr.OpenCursor(chunkID)
 	if err != nil {
-		t.Fatalf("open reader: %v", err)
+		t.Fatalf("OpenCursor: %v", err)
 	}
-	defer reader.Close()
+	defer cursor.Close()
 
-	for i, offset := range offsets {
-		got, localID, next, err := reader.ReadRecordAt(offset)
+	for i, want := range records {
+		got, ref, err := cursor.Next()
 		if err != nil {
-			t.Fatalf("read record: %v", err)
+			t.Fatalf("Next %d: %v", i, err)
 		}
-		if next <= offset {
-			t.Fatalf("expected next offset > %d, got %d", offset, next)
+		if ref.Pos != uint64(i) {
+			t.Errorf("Record %d position: want %d, got %d", i, i, ref.Pos)
 		}
-		if localID != localIDs[i] {
-			t.Fatalf("local id: want %d got %d", localIDs[i], localID)
+		if !bytes.Equal(got.Raw, want.Raw) {
+			t.Errorf("Record %d raw: want %q, got %q", i, want.Raw, got.Raw)
 		}
-		assertRecordEqual(t, records[i], got)
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read file: %v", err)
-	}
-	byteReader := NewReader(bytes.NewReader(data), nil)
-	for i, offset := range offsets {
-		got, localID, _, err := byteReader.ReadRecordAt(offset)
-		if err != nil {
-			t.Fatalf("read record via bytes: %v", err)
+		if got.SourceID != want.SourceID {
+			t.Errorf("Record %d sourceID: want %s, got %s", i, want.SourceID, got.SourceID)
 		}
-		if localID != localIDs[i] {
-			t.Fatalf("local id: want %d got %d", localIDs[i], localID)
-		}
-		assertRecordEqual(t, records[i], got)
 	}
 
-	mapped, err := OpenMmapReader(path)
-	if err != nil {
-		t.Fatalf("open mmap reader: %v", err)
-	}
-	defer mapped.Close()
-	for i, offset := range offsets {
-		got, localID, _, err := mapped.ReadRecordAt(offset)
-		if err != nil {
-			t.Fatalf("read record via mmap: %v", err)
-		}
-		if localID != localIDs[i] {
-			t.Fatalf("local id: want %d got %d", localIDs[i], localID)
-		}
-		assertRecordEqual(t, records[i], got)
+	// Next should return ErrNoMoreRecords
+	if _, _, err := cursor.Next(); err != chunk.ErrNoMoreRecords {
+		t.Errorf("Expected ErrNoMoreRecords, got %v", err)
 	}
 }
 
-func TestReadRecordBeforeMultipleRecords(t *testing.T) {
+func TestManagerSealAndMmapCursor(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "records.log")
 
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	mgr, err := NewManager(Config{
+		Dir:           dir,
+		MaxChunkBytes: 1 << 20,
+	})
 	if err != nil {
-		t.Fatalf("open file: %v", err)
+		t.Fatalf("NewManager: %v", err)
 	}
+	defer mgr.Close()
 
+	sourceID := chunk.NewSourceID()
 	records := []chunk.Record{
-		{IngestTS: time.UnixMicro(100), SourceID: chunk.SourceID{}, Raw: []byte("first")},
-		{IngestTS: time.UnixMicro(200), SourceID: chunk.SourceID{}, Raw: []byte("second-longer")},
-		{IngestTS: time.UnixMicro(300), SourceID: chunk.SourceID{}, Raw: []byte("third")},
+		{IngestTS: time.UnixMicro(100), SourceID: sourceID, Raw: []byte("alpha")},
+		{IngestTS: time.UnixMicro(200), SourceID: sourceID, Raw: []byte("beta")},
+		{IngestTS: time.UnixMicro(300), SourceID: sourceID, Raw: []byte("gamma")},
 	}
-	localIDs := []uint32{1, 2, 3}
 
-	var totalSize int64
-	for i, rec := range records {
-		_, size, err := appendRecord(file, rec, localIDs[i])
+	var chunkID chunk.ChunkID
+	for _, rec := range records {
+		id, _, err := mgr.Append(rec)
 		if err != nil {
-			t.Fatalf("append record %d: %v", i, err)
+			t.Fatalf("Append: %v", err)
 		}
-		totalSize += int64(size)
+		chunkID = id
 	}
-	file.Close()
 
-	// Test backward seek with file Reader.
-	reader, err := OpenReader(path)
+	// Seal the chunk
+	if err := mgr.Seal(); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+
+	// Verify sealed flag in meta
+	meta, err := mgr.Meta(chunkID)
 	if err != nil {
-		t.Fatalf("open reader: %v", err)
+		t.Fatalf("Meta: %v", err)
 	}
-	defer reader.Close()
-
-	offset := totalSize
-	for i := len(records) - 1; i >= 0; i-- {
-		got, localID, prev, err := reader.ReadRecordBefore(offset)
-		if err != nil {
-			t.Fatalf("ReadRecordBefore at offset %d (record %d): %v", offset, i, err)
-		}
-		if localID != localIDs[i] {
-			t.Fatalf("record %d: local id want %d got %d", i, localIDs[i], localID)
-		}
-		assertRecordEqual(t, records[i], got)
-		offset = prev
+	if !meta.Sealed {
+		t.Error("Chunk should be sealed")
 	}
 
-	// Should get ErrNoPreviousRecord at beginning of file.
-	if _, _, _, err := reader.ReadRecordBefore(offset); err != ErrNoPreviousRecord {
-		t.Fatalf("expected ErrNoPreviousRecord at offset %d, got %v", offset, err)
-	}
-
-	// Test backward seek with MmapReader.
-	mapped, err := OpenMmapReader(path)
+	// Open cursor (sealed chunk uses mmap)
+	cursor, err := mgr.OpenCursor(chunkID)
 	if err != nil {
-		t.Fatalf("open mmap reader: %v", err)
+		t.Fatalf("OpenCursor: %v", err)
 	}
-	defer mapped.Close()
+	defer cursor.Close()
 
-	offset = totalSize
-	for i := len(records) - 1; i >= 0; i-- {
-		got, localID, prev, err := mapped.ReadRecordBefore(offset)
+	// Forward iteration
+	for i, want := range records {
+		got, ref, err := cursor.Next()
 		if err != nil {
-			t.Fatalf("mmap ReadRecordBefore at offset %d (record %d): %v", offset, i, err)
+			t.Fatalf("Next %d: %v", i, err)
 		}
-		if localID != localIDs[i] {
-			t.Fatalf("mmap record %d: local id want %d got %d", i, localIDs[i], localID)
+		if ref.Pos != uint64(i) {
+			t.Errorf("Record %d position: want %d, got %d", i, i, ref.Pos)
 		}
-		assertRecordEqual(t, records[i], got)
-		offset = prev
-	}
-
-	if _, _, _, err := mapped.ReadRecordBefore(offset); err != ErrNoPreviousRecord {
-		t.Fatalf("mmap: expected ErrNoPreviousRecord at offset %d, got %v", offset, err)
+		if !bytes.Equal(got.Raw, want.Raw) {
+			t.Errorf("Record %d raw: want %q, got %q", i, want.Raw, got.Raw)
+		}
 	}
 }
 
-func TestReadRecordBeforeBoundary(t *testing.T) {
+func TestCursorSeekAndPrev(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "records.log")
 
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	mgr, err := NewManager(Config{
+		Dir:           dir,
+		MaxChunkBytes: 1 << 20,
+	})
 	if err != nil {
-		t.Fatalf("open file: %v", err)
+		t.Fatalf("NewManager: %v", err)
 	}
-	rec := chunk.Record{IngestTS: time.UnixMicro(1), SourceID: chunk.SourceID{}, Raw: []byte("x")}
-	_, _, err = appendRecord(file, rec, 1)
-	if err != nil {
-		t.Fatalf("append: %v", err)
-	}
-	file.Close()
+	defer mgr.Close()
 
-	reader, err := OpenReader(path)
-	if err != nil {
-		t.Fatalf("open reader: %v", err)
+	sourceID := chunk.NewSourceID()
+	records := []chunk.Record{
+		{IngestTS: time.UnixMicro(100), SourceID: sourceID, Raw: []byte("zero")},
+		{IngestTS: time.UnixMicro(200), SourceID: sourceID, Raw: []byte("one")},
+		{IngestTS: time.UnixMicro(300), SourceID: sourceID, Raw: []byte("two")},
+		{IngestTS: time.UnixMicro(400), SourceID: sourceID, Raw: []byte("three")},
 	}
-	defer reader.Close()
 
-	// offset 0 is before any record
-	if _, _, _, err := reader.ReadRecordBefore(0); err != ErrNoPreviousRecord {
-		t.Fatalf("expected ErrNoPreviousRecord at offset 0, got %v", err)
+	var chunkID chunk.ChunkID
+	for _, rec := range records {
+		id, _, err := mgr.Append(rec)
+		if err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+		chunkID = id
 	}
-	// offset less than MinRecordSize
-	if _, _, _, err := reader.ReadRecordBefore(SizeFieldBytes); err != ErrNoPreviousRecord {
-		t.Fatalf("expected ErrNoPreviousRecord at offset %d, got %v", SizeFieldBytes, err)
+
+	if err := mgr.Seal(); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+
+	cursor, err := mgr.OpenCursor(chunkID)
+	if err != nil {
+		t.Fatalf("OpenCursor: %v", err)
+	}
+	defer cursor.Close()
+
+	// Seek to record 2
+	if err := cursor.Seek(chunk.RecordRef{ChunkID: chunkID, Pos: 2}); err != nil {
+		t.Fatalf("Seek: %v", err)
+	}
+
+	// Next should return record 2
+	got, ref, err := cursor.Next()
+	if err != nil {
+		t.Fatalf("Next after seek: %v", err)
+	}
+	if ref.Pos != 2 {
+		t.Errorf("Position after seek: want 2, got %d", ref.Pos)
+	}
+	if !bytes.Equal(got.Raw, records[2].Raw) {
+		t.Errorf("Raw after seek: want %q, got %q", records[2].Raw, got.Raw)
+	}
+
+	// Seek to end (position 4 = after last record)
+	if err := cursor.Seek(chunk.RecordRef{ChunkID: chunkID, Pos: 4}); err != nil {
+		t.Fatalf("Seek to end: %v", err)
+	}
+
+	// Prev should return record 3
+	got, ref, err = cursor.Prev()
+	if err != nil {
+		t.Fatalf("Prev from end: %v", err)
+	}
+	if ref.Pos != 3 {
+		t.Errorf("Position from Prev: want 3, got %d", ref.Pos)
+	}
+	if !bytes.Equal(got.Raw, records[3].Raw) {
+		t.Errorf("Raw from Prev: want %q, got %q", records[3].Raw, got.Raw)
+	}
+
+	// Continue Prev to beginning
+	for i := 2; i >= 0; i-- {
+		got, ref, err := cursor.Prev()
+		if err != nil {
+			t.Fatalf("Prev %d: %v", i, err)
+		}
+		if ref.Pos != uint64(i) {
+			t.Errorf("Prev position: want %d, got %d", i, ref.Pos)
+		}
+		if !bytes.Equal(got.Raw, records[i].Raw) {
+			t.Errorf("Prev raw: want %q, got %q", records[i].Raw, got.Raw)
+		}
+	}
+
+	// Prev at beginning should return ErrNoMoreRecords
+	if _, _, err := cursor.Prev(); err != chunk.ErrNoMoreRecords {
+		t.Errorf("Expected ErrNoMoreRecords at beginning, got %v", err)
 	}
 }
 
-func TestFileReaderSizeMismatch(t *testing.T) {
+func TestEmptyChunkCursor(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "records.log")
 
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	mgr, err := NewManager(Config{
+		Dir:           dir,
+		MaxChunkBytes: 1 << 20,
+	})
 	if err != nil {
-		t.Fatalf("open file: %v", err)
+		t.Fatalf("NewManager: %v", err)
 	}
-	record := chunk.Record{IngestTS: time.UnixMicro(123), SourceID: chunk.NewSourceID(), Raw: []byte("payload")}
-	offset, size, err := appendRecord(file, record, 1)
+	defer mgr.Close()
+
+	// Create and seal an empty chunk
+	if err := mgr.Seal(); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+
+	meta := mgr.Active()
+	if meta != nil {
+		t.Error("Active should be nil after seal")
+	}
+
+	// List should have one chunk
+	metas, err := mgr.List()
 	if err != nil {
-		t.Fatalf("append record: %v", err)
+		t.Fatalf("List: %v", err)
 	}
-	if err := file.Close(); err != nil {
-		t.Fatalf("close file: %v", err)
+	if len(metas) != 1 {
+		t.Fatalf("Expected 1 chunk, got %d", len(metas))
 	}
 
-	file, err = os.OpenFile(path, os.O_RDWR, 0)
+	cursor, err := mgr.OpenCursor(metas[0].ID)
 	if err != nil {
-		t.Fatalf("open file: %v", err)
+		t.Fatalf("OpenCursor: %v", err)
 	}
-	defer file.Close()
+	defer cursor.Close()
 
-	corrupt := size + 1
-	var buf [SizeFieldBytes]byte
-	binary.LittleEndian.PutUint32(buf[:], corrupt)
-	if _, err := file.WriteAt(buf[:], int64(offset)+int64(size)-SizeFieldBytes); err != nil {
-		t.Fatalf("write corrupt size: %v", err)
+	// Next on empty chunk should return ErrNoMoreRecords
+	if _, _, err := cursor.Next(); err != chunk.ErrNoMoreRecords {
+		t.Errorf("Expected ErrNoMoreRecords on empty chunk, got %v", err)
 	}
 
-	reader, err := OpenReader(path)
-	if err != nil {
-		t.Fatalf("open reader: %v", err)
-	}
-	defer reader.Close()
-
-	if _, _, _, err := reader.ReadRecordAt(int64(offset)); err != ErrSizeMismatch {
-		t.Fatalf("expected size mismatch, got %v", err)
+	// Prev on empty chunk should return ErrNoMoreRecords
+	if _, _, err := cursor.Prev(); err != chunk.ErrNoMoreRecords {
+		t.Errorf("Expected ErrNoMoreRecords on empty chunk Prev, got %v", err)
 	}
 }
 
-func assertRecordEqual(t *testing.T, want, got chunk.Record) {
-	t.Helper()
-	if !want.IngestTS.Equal(got.IngestTS) {
-		t.Fatalf("ingest ts: want %v got %v", want.IngestTS, got.IngestTS)
+func TestManagerReload(t *testing.T) {
+	dir := t.TempDir()
+
+	sourceID := chunk.NewSourceID()
+	var chunkID chunk.ChunkID
+
+	// Create manager, write records, seal, close
+	{
+		mgr, err := NewManager(Config{Dir: dir})
+		if err != nil {
+			t.Fatalf("NewManager: %v", err)
+		}
+
+		for i := 0; i < 3; i++ {
+			id, _, err := mgr.Append(chunk.Record{
+				IngestTS: time.UnixMicro(int64(i * 100)),
+				SourceID: sourceID,
+				Raw:      []byte("record"),
+			})
+			if err != nil {
+				t.Fatalf("Append: %v", err)
+			}
+			chunkID = id
+		}
+
+		if err := mgr.Seal(); err != nil {
+			t.Fatalf("Seal: %v", err)
+		}
+
+		if err := mgr.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
 	}
-	if want.SourceID != (chunk.SourceID{}) && want.SourceID != got.SourceID {
-		t.Fatalf("source id: want %s got %s", want.SourceID.String(), got.SourceID.String())
+
+	// Reopen manager, verify data
+	{
+		mgr, err := NewManager(Config{Dir: dir})
+		if err != nil {
+			t.Fatalf("NewManager (reload): %v", err)
+		}
+		defer mgr.Close()
+
+		meta, err := mgr.Meta(chunkID)
+		if err != nil {
+			t.Fatalf("Meta: %v", err)
+		}
+		if !meta.Sealed {
+			t.Error("Chunk should be sealed after reload")
+		}
+
+		cursor, err := mgr.OpenCursor(chunkID)
+		if err != nil {
+			t.Fatalf("OpenCursor: %v", err)
+		}
+		defer cursor.Close()
+
+		count := 0
+		for {
+			_, _, err := cursor.Next()
+			if err == chunk.ErrNoMoreRecords {
+				break
+			}
+			if err != nil {
+				t.Fatalf("Next: %v", err)
+			}
+			count++
+		}
+		if count != 3 {
+			t.Errorf("Expected 3 records, got %d", count)
+		}
 	}
-	if !bytes.Equal(want.Raw, got.Raw) {
-		t.Fatalf("raw: want %q got %q", want.Raw, got.Raw)
+}
+
+func TestRotationOnMaxChunkBytes(t *testing.T) {
+	dir := t.TempDir()
+
+	// Very small max to force rotation
+	mgr, err := NewManager(Config{
+		Dir:           dir,
+		MaxChunkBytes: 50, // Will fit ~1 record
+	})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer mgr.Close()
+
+	sourceID := chunk.NewSourceID()
+	var chunkIDs []chunk.ChunkID
+
+	for i := 0; i < 5; i++ {
+		id, _, err := mgr.Append(chunk.Record{
+			IngestTS: time.UnixMicro(int64(i * 100)),
+			SourceID: sourceID,
+			Raw:      []byte("some data here"),
+		})
+		if err != nil {
+			t.Fatalf("Append %d: %v", i, err)
+		}
+		if len(chunkIDs) == 0 || chunkIDs[len(chunkIDs)-1] != id {
+			chunkIDs = append(chunkIDs, id)
+		}
+	}
+
+	// Should have multiple chunks due to rotation
+	if len(chunkIDs) < 2 {
+		t.Errorf("Expected multiple chunks due to rotation, got %d", len(chunkIDs))
+	}
+
+	// All but last should be sealed
+	metas, err := mgr.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	sealedCount := 0
+	for _, m := range metas {
+		if m.Sealed {
+			sealedCount++
+		}
+	}
+	if sealedCount != len(metas)-1 {
+		t.Errorf("Expected %d sealed chunks, got %d", len(metas)-1, sealedCount)
 	}
 }
