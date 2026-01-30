@@ -491,6 +491,101 @@ func TestRotationOnMaxChunkBytes(t *testing.T) {
 	}
 }
 
+func TestCrashRecoveryTruncatesOrphanedRawData(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create manager, write some records, close without sealing.
+	var chunkID chunk.ChunkID
+	{
+		mgr, err := NewManager(Config{Dir: dir})
+		if err != nil {
+			t.Fatalf("NewManager: %v", err)
+		}
+
+		sourceID := chunk.NewSourceID()
+		for i := 0; i < 3; i++ {
+			id, _, err := mgr.Append(chunk.Record{
+				IngestTS: time.UnixMicro(int64(i * 100)),
+				SourceID: sourceID,
+				Raw:      []byte("record"),
+			})
+			if err != nil {
+				t.Fatalf("Append: %v", err)
+			}
+			chunkID = id
+		}
+
+		if err := mgr.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	}
+
+	// Simulate crash: append garbage to raw.log (as if raw write succeeded but idx write didn't).
+	rawPath := filepath.Join(dir, chunkID.String(), rawLogFileName)
+	f, err := os.OpenFile(rawPath, os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Fatalf("Open raw.log: %v", err)
+	}
+	orphanedData := []byte("orphaned data from crash")
+	if _, err := f.Write(orphanedData); err != nil {
+		f.Close()
+		t.Fatalf("Write orphaned data: %v", err)
+	}
+	f.Close()
+
+	// Get raw.log size before recovery.
+	rawInfoBefore, err := os.Stat(rawPath)
+	if err != nil {
+		t.Fatalf("Stat before: %v", err)
+	}
+
+	// Reopen manager - should truncate orphaned data.
+	mgr, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("NewManager (reload): %v", err)
+	}
+	defer mgr.Close()
+
+	// Get raw.log size after recovery.
+	rawInfoAfter, err := os.Stat(rawPath)
+	if err != nil {
+		t.Fatalf("Stat after: %v", err)
+	}
+
+	if rawInfoAfter.Size() >= rawInfoBefore.Size() {
+		t.Errorf("Expected raw.log to be truncated: before=%d, after=%d",
+			rawInfoBefore.Size(), rawInfoAfter.Size())
+	}
+
+	expectedTruncation := int64(len(orphanedData))
+	actualTruncation := rawInfoBefore.Size() - rawInfoAfter.Size()
+	if actualTruncation != expectedTruncation {
+		t.Errorf("Expected truncation of %d bytes, got %d", expectedTruncation, actualTruncation)
+	}
+
+	// Verify we can still read the original records.
+	cursor, err := mgr.OpenCursor(chunkID)
+	if err != nil {
+		t.Fatalf("OpenCursor: %v", err)
+	}
+	defer cursor.Close()
+
+	count := 0
+	for {
+		_, _, err := cursor.Next()
+		if err == chunk.ErrNoMoreRecords {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		count++
+	}
+	if count != 3 {
+		t.Errorf("Expected 3 records after recovery, got %d", count)
+	}
+}
+
 func TestFindStartPosition(t *testing.T) {
 	dir := t.TempDir()
 

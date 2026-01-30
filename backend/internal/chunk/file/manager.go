@@ -310,15 +310,6 @@ func (m *Manager) loadExisting() error {
 				return err
 			}
 
-			// Compute rawOffset from raw.log file size.
-			rawInfo, err := rawFile.Stat()
-			if err != nil {
-				rawFile.Close()
-				idxFile.Close()
-				return err
-			}
-			rawOffset := uint64(rawInfo.Size()) - uint64(format.HeaderSize)
-
 			// Compute record count from idx.log file size.
 			idxInfo, err := idxFile.Stat()
 			if err != nil {
@@ -327,6 +318,48 @@ func (m *Manager) loadExisting() error {
 				return err
 			}
 			recordCount := RecordCount(idxInfo.Size())
+
+			// Compute expected raw.log size from idx.log.
+			// If raw.log has extra data (crash between raw write and idx write),
+			// truncate it to match what idx.log expects.
+			var expectedRawSize int64
+			if recordCount > 0 {
+				// Read last idx.log entry to get expected raw.log end position.
+				lastOffset := IdxFileOffset(recordCount - 1)
+				var entryBuf [IdxEntrySize]byte
+				if _, err := idxFile.ReadAt(entryBuf[:], lastOffset); err != nil {
+					rawFile.Close()
+					idxFile.Close()
+					return err
+				}
+				lastEntry := DecodeIdxEntry(entryBuf[:])
+				expectedRawSize = int64(format.HeaderSize) + int64(lastEntry.RawOffset) + int64(lastEntry.RawSize)
+			} else {
+				expectedRawSize = int64(format.HeaderSize)
+			}
+
+			rawInfo, err := rawFile.Stat()
+			if err != nil {
+				rawFile.Close()
+				idxFile.Close()
+				return err
+			}
+			actualRawSize := rawInfo.Size()
+
+			if actualRawSize > expectedRawSize {
+				// Truncate orphaned raw data from crashed write.
+				if err := rawFile.Truncate(expectedRawSize); err != nil {
+					rawFile.Close()
+					idxFile.Close()
+					return err
+				}
+				m.logger.Info("truncated orphaned raw.log data",
+					"chunk", id.String(),
+					"expected", expectedRawSize,
+					"actual", actualRawSize)
+			}
+
+			rawOffset := uint64(expectedRawSize) - uint64(format.HeaderSize)
 
 			m.active = &chunkState{
 				meta:        meta,
