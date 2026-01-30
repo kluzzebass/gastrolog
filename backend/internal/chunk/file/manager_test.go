@@ -450,3 +450,53 @@ func TestFileChunkManagerEmptyChunk(t *testing.T) {
 		t.Fatalf("expected ErrNoMoreRecords from Prev, got %v", err)
 	}
 }
+
+// TestListReturnsSortedChunks verifies that List() returns chunks sorted by StartTS.
+func TestListReturnsSortedChunks(t *testing.T) {
+	dir := t.TempDir()
+	sourceID := chunk.NewSourceID()
+
+	// Controlled clock - increments by 1 second each call
+	ts := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	clock := func() time.Time {
+		result := ts
+		ts = ts.Add(time.Second)
+		return result
+	}
+
+	manager, err := NewManager(Config{Dir: dir, Now: clock})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+
+	// Create 3 chunks with 1 record each
+	for i := 0; i < 3; i++ {
+		rec := chunk.Record{
+			IngestTS: clock(),
+			SourceID: sourceID,
+			Raw:      []byte("data"),
+		}
+		if _, _, err := manager.Append(rec); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+		if err := manager.Seal(); err != nil {
+			t.Fatalf("seal %d: %v", i, err)
+		}
+	}
+
+	metas, err := manager.List()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(metas) != 3 {
+		t.Fatalf("expected 3 chunks, got %d", len(metas))
+	}
+
+	// Verify sorted by StartTS ascending
+	for i := 1; i < len(metas); i++ {
+		if !metas[i].StartTS.After(metas[i-1].StartTS) {
+			t.Errorf("not sorted: metas[%d].StartTS=%v <= metas[%d].StartTS=%v",
+				i, metas[i].StartTS, i-1, metas[i-1].StartTS)
+		}
+	}
+}

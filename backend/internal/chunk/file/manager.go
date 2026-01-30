@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -235,6 +236,10 @@ func (m *Manager) List() ([]chunk.ChunkMeta, error) {
 	for _, meta := range m.metas {
 		out = append(out, meta.toChunkMeta())
 	}
+	// Sort by StartTS to ensure consistent ordering.
+	slices.SortFunc(out, func(a, b chunk.ChunkMeta) int {
+		return a.StartTS.Compare(b.StartTS)
+	})
 	return out, nil
 }
 
@@ -258,10 +263,20 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	idxPath := m.idxLogPath(id)
 
 	if meta.sealed {
-		return newMmapCursor(id, rawPath, idxPath, sourceMap.Resolve)
+		return newMmapCursor(id, rawPath, idxPath, sourceMap)
 	}
 
-	// Active chunk: use standard I/O reader.
+	// Active chunk: use the sourceMap directly. Since SourceMap.Resolve()
+	// locks its own mutex, it will see updates from concurrent Append() calls.
+	// But we need to handle the case where the chunk was sealed between when
+	// we checked meta.sealed and now - in that case, m.active might have changed.
+	// Re-fetch to be safe.
+	m.mu.Lock()
+	if m.active != nil && m.active.meta.id == id {
+		// Use the live source map from the active chunk state
+		sourceMap = m.active.sources
+	}
+	m.mu.Unlock()
 	return newStdioCursor(id, rawPath, idxPath, sourceMap.Resolve)
 }
 
@@ -709,14 +724,19 @@ func (m *Manager) sourceMap(id chunk.ChunkID) *SourceMap {
 func (m *Manager) loadSourceMap(id chunk.ChunkID) (*SourceMap, error) {
 	m.mu.Lock()
 	sourceMap, ok := m.sources[id]
-	if !ok {
-		sourceMap = NewSourceMap(m.chunkDir(id), m.cfg.FileMode)
-		m.sources[id] = sourceMap
+	if ok {
+		// Already loaded (active chunk or previously loaded sealed chunk)
+		m.mu.Unlock()
+		return sourceMap, nil
 	}
-	m.mu.Unlock()
+	// Create new source map for sealed chunk and load from disk
+	sourceMap = NewSourceMap(m.chunkDir(id), m.cfg.FileMode)
 	if err := sourceMap.Load(); err != nil {
+		m.mu.Unlock()
 		return nil, err
 	}
+	m.sources[id] = sourceMap
+	m.mu.Unlock()
 	return sourceMap, nil
 }
 

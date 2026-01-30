@@ -117,6 +117,20 @@ func (m *SourceMap) Resolve(localID uint32) (chunk.SourceID, bool) {
 	return id, ok
 }
 
+// ResolveWithLen is like Resolve but also returns the map length for debugging.
+func (m *SourceMap) ResolveWithLen(localID uint32) (chunk.SourceID, bool, int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	id, ok := m.reverse[localID]
+	return id, ok, len(m.reverse)
+}
+
+func (m *SourceMap) Len() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.reverse)
+}
+
 func (m *SourceMap) appendLocked(sourceID chunk.SourceID, localID uint32) error {
 	record := encodeSourceRecord(sourceID, localID)
 	file, err := os.OpenFile(m.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, m.fileMode)

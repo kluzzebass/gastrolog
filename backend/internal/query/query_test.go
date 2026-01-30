@@ -2361,3 +2361,242 @@ func TestSearchSealedWithoutIndexes(t *testing.T) {
 		}
 	})
 }
+
+// TestCrossChunkOrdering verifies that records are returned in correct order
+// when spanning multiple chunks.
+func TestCrossChunkOrdering(t *testing.T) {
+	// Create multiple chunks with sequential timestamps
+	chunk1 := []chunk.Record{
+		{IngestTS: t0.Add(0 * time.Second), SourceID: srcA, Raw: []byte("c1-r1")},
+		{IngestTS: t0.Add(1 * time.Second), SourceID: srcA, Raw: []byte("c1-r2")},
+		{IngestTS: t0.Add(2 * time.Second), SourceID: srcA, Raw: []byte("c1-r3")},
+	}
+	chunk2 := []chunk.Record{
+		{IngestTS: t0.Add(3 * time.Second), SourceID: srcA, Raw: []byte("c2-r1")},
+		{IngestTS: t0.Add(4 * time.Second), SourceID: srcA, Raw: []byte("c2-r2")},
+		{IngestTS: t0.Add(5 * time.Second), SourceID: srcA, Raw: []byte("c2-r3")},
+	}
+	chunk3 := []chunk.Record{
+		{IngestTS: t0.Add(6 * time.Second), SourceID: srcA, Raw: []byte("c3-r1")},
+		{IngestTS: t0.Add(7 * time.Second), SourceID: srcA, Raw: []byte("c3-r2")},
+		{IngestTS: t0.Add(8 * time.Second), SourceID: srcA, Raw: []byte("c3-r3")},
+	}
+
+	eng := setup(t, chunk1, chunk2, chunk3)
+
+	t.Run("full scan ordering", func(t *testing.T) {
+		results, err := collect(search(eng, context.Background(), query.Query{}))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(results) != 9 {
+			t.Fatalf("expected 9 results, got %d", len(results))
+		}
+
+		// Verify strict ordering
+		want := []string{"c1-r1", "c1-r2", "c1-r3", "c2-r1", "c2-r2", "c2-r3", "c3-r1", "c3-r2", "c3-r3"}
+		for i, w := range want {
+			if string(results[i].Raw) != w {
+				t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, w)
+			}
+		}
+
+		// Verify timestamps are monotonically increasing
+		for i := 1; i < len(results); i++ {
+			if !results[i].IngestTS.After(results[i-1].IngestTS) {
+				t.Errorf("timestamp not monotonic at %d: %v <= %v",
+					i, results[i].IngestTS, results[i-1].IngestTS)
+			}
+		}
+	})
+
+	t.Run("time range spanning chunks", func(t *testing.T) {
+		// Query from middle of chunk1 to middle of chunk3
+		start := t0.Add(1 * time.Second) // c1-r2
+		end := t0.Add(7 * time.Second)   // exclusive, so up to c3-r1
+
+		results, err := collect(search(eng, context.Background(), query.Query{Start: start, End: end}))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []string{"c1-r2", "c1-r3", "c2-r1", "c2-r2", "c2-r3", "c3-r1"}
+		if len(results) != len(want) {
+			t.Fatalf("expected %d results, got %d", len(want), len(results))
+		}
+		for i, w := range want {
+			if string(results[i].Raw) != w {
+				t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, w)
+			}
+		}
+	})
+}
+
+// TestCrossChunkResume verifies that resume tokens work correctly across chunk boundaries.
+func TestCrossChunkResume(t *testing.T) {
+	chunk1 := []chunk.Record{
+		{IngestTS: t0.Add(0 * time.Second), SourceID: srcA, Raw: []byte("c1-r1")},
+		{IngestTS: t0.Add(1 * time.Second), SourceID: srcA, Raw: []byte("c1-r2")},
+	}
+	chunk2 := []chunk.Record{
+		{IngestTS: t0.Add(2 * time.Second), SourceID: srcA, Raw: []byte("c2-r1")},
+		{IngestTS: t0.Add(3 * time.Second), SourceID: srcA, Raw: []byte("c2-r2")},
+	}
+
+	eng := setup(t, chunk1, chunk2)
+
+	t.Run("resume at chunk boundary", func(t *testing.T) {
+		// Get first 2 records (all of chunk1)
+		seq, getToken := eng.Search(context.Background(), query.Query{Limit: 2}, nil)
+		results, err := collect(seq)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(results) != 2 {
+			t.Fatalf("expected 2 results, got %d", len(results))
+		}
+
+		// Resume should get chunk2
+		token := getToken()
+		if token == nil {
+			t.Fatal("expected non-nil resume token")
+		}
+
+		seq2, _ := eng.Search(context.Background(), query.Query{}, token)
+		results2, err := collect(seq2)
+		if err != nil {
+			t.Fatalf("unexpected error on resume: %v", err)
+		}
+		if len(results2) != 2 {
+			t.Fatalf("expected 2 results on resume, got %d", len(results2))
+		}
+
+		want := []string{"c2-r1", "c2-r2"}
+		for i, w := range want {
+			if string(results2[i].Raw) != w {
+				t.Errorf("result[%d]: got %q, want %q", i, results2[i].Raw, w)
+			}
+		}
+	})
+
+	t.Run("resume mid-chunk", func(t *testing.T) {
+		// Get first 3 records (all of chunk1 + first of chunk2)
+		seq, getToken := eng.Search(context.Background(), query.Query{Limit: 3}, nil)
+		results, err := collect(seq)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(results) != 3 {
+			t.Fatalf("expected 3 results, got %d", len(results))
+		}
+
+		// Resume should get last record of chunk2
+		token := getToken()
+		if token == nil {
+			t.Fatal("expected non-nil resume token")
+		}
+
+		seq2, _ := eng.Search(context.Background(), query.Query{}, token)
+		results2, err := collect(seq2)
+		if err != nil {
+			t.Fatalf("unexpected error on resume: %v", err)
+		}
+		if len(results2) != 1 {
+			t.Fatalf("expected 1 result on resume, got %d", len(results2))
+		}
+		if string(results2[0].Raw) != "c2-r2" {
+			t.Errorf("got %q, want %q", results2[0].Raw, "c2-r2")
+		}
+	})
+
+	t.Run("repeated resume with no new records", func(t *testing.T) {
+		// Get all 4 records
+		seq, getToken := eng.Search(context.Background(), query.Query{}, nil)
+		results, err := collect(seq)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(results) != 4 {
+			t.Fatalf("expected 4 results, got %d", len(results))
+		}
+
+		// Token after completion should be nil (fully consumed)
+		token := getToken()
+		if token != nil {
+			// If token is non-nil, resuming should return empty
+			seq2, _ := eng.Search(context.Background(), query.Query{}, token)
+			results2, err := collect(seq2)
+			if err != nil {
+				t.Fatalf("unexpected error on resume: %v", err)
+			}
+			if len(results2) != 0 {
+				t.Errorf("expected 0 results on resume after full consumption, got %d", len(results2))
+			}
+		}
+	})
+}
+
+// TestCrossChunkWithActiveChunk verifies ordering when there's an unsealed chunk.
+func TestCrossChunkWithActiveChunk(t *testing.T) {
+	sealed1 := []chunk.Record{
+		{IngestTS: t0.Add(0 * time.Second), SourceID: srcA, Raw: []byte("s1-r1")},
+		{IngestTS: t0.Add(1 * time.Second), SourceID: srcA, Raw: []byte("s1-r2")},
+	}
+	sealed2 := []chunk.Record{
+		{IngestTS: t0.Add(2 * time.Second), SourceID: srcA, Raw: []byte("s2-r1")},
+		{IngestTS: t0.Add(3 * time.Second), SourceID: srcA, Raw: []byte("s2-r2")},
+	}
+	active := []chunk.Record{
+		{IngestTS: t0.Add(4 * time.Second), SourceID: srcA, Raw: []byte("a-r1")},
+		{IngestTS: t0.Add(5 * time.Second), SourceID: srcA, Raw: []byte("a-r2")},
+	}
+
+	eng := setupWithActive(t, [][]chunk.Record{sealed1, sealed2}, active)
+
+	t.Run("full scan includes active", func(t *testing.T) {
+		results, err := collect(search(eng, context.Background(), query.Query{}))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		want := []string{"s1-r1", "s1-r2", "s2-r1", "s2-r2", "a-r1", "a-r2"}
+		if len(results) != len(want) {
+			t.Fatalf("expected %d results, got %d", len(want), len(results))
+		}
+		for i, w := range want {
+			if string(results[i].Raw) != w {
+				t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, w)
+			}
+		}
+	})
+
+	t.Run("resume into active chunk", func(t *testing.T) {
+		// Get first 5 records (all sealed + first active)
+		seq, getToken := eng.Search(context.Background(), query.Query{Limit: 5}, nil)
+		results, err := collect(seq)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(results) != 5 {
+			t.Fatalf("expected 5 results, got %d", len(results))
+		}
+
+		// Resume should get last active record
+		token := getToken()
+		if token == nil {
+			t.Fatal("expected non-nil resume token")
+		}
+
+		seq2, _ := eng.Search(context.Background(), query.Query{}, token)
+		results2, err := collect(seq2)
+		if err != nil {
+			t.Fatalf("unexpected error on resume: %v", err)
+		}
+		if len(results2) != 1 {
+			t.Fatalf("expected 1 result on resume, got %d", len(results2))
+		}
+		if string(results2[0].Raw) != "a-r2" {
+			t.Errorf("got %q, want %q", results2[0].Raw, "a-r2")
+		}
+	})
+}

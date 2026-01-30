@@ -7,13 +7,18 @@
 package repl
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/orchestrator"
@@ -21,112 +26,475 @@ import (
 	"gastrolog/internal/source"
 )
 
+// recordResult holds a record or error from the iterator channel.
+type recordResult struct {
+	rec chunk.Record
+	err error
+}
+
 // REPL provides an interactive read-eval-print loop for querying a running
 // GastroLog system. It interacts only through exported, stable interfaces.
 type REPL struct {
 	orch    *orchestrator.Orchestrator
 	sources *source.Registry
 
-	// I/O
-	in  *bufio.Scanner
-	out io.Writer
-
 	// Query state
-	store       string                             // target store for queries
-	lastQuery   *query.Query                       // last executed query
-	resumeToken *query.ResumeToken                 // resume token for pagination
-	resultIter  func() (chunk.Record, error, bool) // current result iterator
-	getToken    func() *query.ResumeToken          // get resume token function
+	store       string                    // target store for queries
+	lastQuery   *query.Query              // last executed query
+	resumeToken *query.ResumeToken        // resume token for pagination
+	resultChan  chan recordResult         // channel for receiving records
+	getToken    func() *query.ResumeToken // get resume token function
+	queryCancel context.CancelFunc        // cancels the active query goroutine
+
+	// Config
+	pageSize int // records per page (0 = no paging, show all)
 
 	// Lifecycle
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// History
+	history      []string
+	historyIndex int
+	historyFile  string
+}
+
+// model is the bubbletea model for the REPL.
+type model struct {
+	repl      *REPL
+	textInput textinput.Model
+	output    *strings.Builder
+	quitting  bool
+	following bool // true when in follow mode
+}
+
+// tickMsg is sent periodically during follow mode to poll for new records.
+type tickMsg time.Time
+
+// followTick returns a command that sends a tick after a delay.
+func followTick() tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
 }
 
 // New creates a REPL attached to an already-running system.
 // All components must be live and concurrent.
-func New(orch *orchestrator.Orchestrator, sources *source.Registry, in io.Reader, out io.Writer) *REPL {
+func New(orch *orchestrator.Orchestrator, sources *source.Registry) *REPL {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &REPL{
-		orch:    orch,
-		sources: sources,
-		in:      bufio.NewScanner(in),
-		out:     out,
-		store:   "default",
-		ctx:     ctx,
-		cancel:  cancel,
+
+	r := &REPL{
+		orch:         orch,
+		sources:      sources,
+		store:        "default",
+		pageSize:     defaultPageSize,
+		ctx:          ctx,
+		cancel:       cancel,
+		history:      make([]string, 0),
+		historyIndex: -1,
+	}
+
+	// Set up history file in user's home directory.
+	if home, err := os.UserHomeDir(); err == nil {
+		r.historyFile = filepath.Join(home, ".gastrolog_history")
+		r.loadHistory()
+	}
+
+	return r
+}
+
+// NewSimple creates a REPL for testing without bubbletea.
+// This version reads commands from the provided input and writes output to out.
+func NewSimple(orch *orchestrator.Orchestrator, sources *source.Registry, in io.Reader, out io.Writer) *simpleREPL {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	return &simpleREPL{
+		repl: &REPL{
+			orch:         orch,
+			sources:      sources,
+			store:        "default",
+			ctx:          ctx,
+			cancel:       cancel,
+			history:      make([]string, 0),
+			historyIndex: -1,
+		},
+		in:  in,
+		out: out,
 	}
 }
 
-// Run starts the REPL loop. It blocks until the user exits or context is cancelled.
-func (r *REPL) Run() error {
-	r.printf("GastroLog REPL. Type 'help' for commands.\n")
-	r.printf("> ")
+// simpleREPL is a test-friendly REPL that doesn't use bubbletea.
+type simpleREPL struct {
+	repl *REPL
+	in   io.Reader
+	out  io.Writer
+}
 
-	for r.in.Scan() {
-		if err := r.ctx.Err(); err != nil {
-			return err
-		}
+// Run starts the simple REPL loop for testing.
+func (s *simpleREPL) Run() error {
+	fmt.Fprintln(s.out, "GastroLog REPL. Type 'help' for commands.")
 
-		line := strings.TrimSpace(r.in.Text())
+	scanner := newLineScanner(s.in)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
-			r.printf("> ")
 			continue
 		}
 
-		if exit := r.execute(line); exit {
+		output, exit, _ := s.repl.execute(line)
+		if output != "" {
+			fmt.Fprint(s.out, output)
+		}
+		if exit {
 			return nil
 		}
-
-		r.printf("> ")
+		// Note: follow mode not supported in simple REPL (for testing)
 	}
 
-	if err := r.in.Err(); err != nil {
-		return err
-	}
-	return nil
+	return scanner.Err()
 }
 
-// execute parses and executes a single command. Returns true if REPL should exit.
-func (r *REPL) execute(line string) bool {
+// lineScanner wraps bufio.Scanner-like behavior for io.Reader
+type lineScanner struct {
+	reader io.Reader
+	buf    []byte
+	line   string
+	err    error
+}
+
+func newLineScanner(r io.Reader) *lineScanner {
+	return &lineScanner{reader: r, buf: make([]byte, 0, 4096)}
+}
+
+func (s *lineScanner) Scan() bool {
+	for {
+		// Check for newline in buffer
+		if idx := strings.IndexByte(string(s.buf), '\n'); idx >= 0 {
+			s.line = string(s.buf[:idx])
+			s.buf = s.buf[idx+1:]
+			return true
+		}
+
+		// Read more data
+		tmp := make([]byte, 1024)
+		n, err := s.reader.Read(tmp)
+		if n > 0 {
+			s.buf = append(s.buf, tmp[:n]...)
+		}
+		if err != nil {
+			if err == io.EOF && len(s.buf) > 0 {
+				s.line = string(s.buf)
+				s.buf = nil
+				return true
+			}
+			if err != io.EOF {
+				s.err = err
+			}
+			return false
+		}
+	}
+}
+
+func (s *lineScanner) Text() string { return s.line }
+func (s *lineScanner) Err() error   { return s.err }
+
+// defaultPageSize is the number of records shown per page in query results.
+const defaultPageSize = 10
+
+// commands is the list of available REPL commands for tab completion.
+var commands = []string{"help", "sources", "store", "query", "follow", "next", "reset", "set", "exit", "quit"}
+
+// queryFilters is the list of query filter keys for tab completion.
+var queryFilters = []string{"start=", "end=", "source=", "token=", "limit="}
+
+// Run starts the REPL loop using bubbletea.
+func (r *REPL) Run() error {
+	ti := textinput.New()
+	ti.Placeholder = ""
+	ti.Focus()
+	ti.Prompt = "> "
+	ti.CharLimit = 1024
+	ti.Width = 80
+	ti.ShowSuggestions = true
+	ti.SetSuggestions(commands)
+
+	output := &strings.Builder{}
+	output.WriteString("GastroLog REPL. Type 'help' for commands.\n")
+
+	m := model{
+		repl:      r,
+		textInput: ti,
+		output:    output,
+	}
+
+	p := tea.NewProgram(m)
+	_, err := p.Run()
+	return err
+}
+
+func (m model) Init() tea.Cmd {
+	return textinput.Blink
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case tickMsg:
+		// Poll for new records in follow mode
+		if !m.following {
+			return m, nil
+		}
+		if m.repl.resultChan == nil {
+			// Channel gone but still in follow mode - shouldn't happen
+			m.following = false
+			m.output.WriteString("--- Follow ended (no channel) ---\n")
+			return m, nil
+		}
+		// Drain all available records without blocking
+		for {
+			select {
+			case result, ok := <-m.repl.resultChan:
+				if !ok {
+					// Channel closed
+					m.following = false
+					m.repl.resultChan = nil
+					m.output.WriteString("--- End of follow ---\n")
+					return m, nil
+				}
+				if result.err != nil {
+					m.output.WriteString("--- Error: " + result.err.Error() + " ---\n")
+					continue
+				}
+				m.output.WriteString(m.repl.formatRecord(result.rec))
+				m.output.WriteByte('\n')
+			default:
+				// No more records right now, schedule next tick
+				return m, followTick()
+			}
+		}
+
+	case tea.KeyMsg:
+		// Any key press stops follow mode
+		if m.following {
+			m.following = false
+			if m.repl.queryCancel != nil {
+				m.repl.queryCancel()
+			}
+			m.output.WriteString("--- Follow stopped ---\n")
+			return m, nil
+		}
+
+		switch msg.Type {
+		case tea.KeyCtrlC, tea.KeyCtrlD:
+			m.quitting = true
+			return m, tea.Quit
+
+		case tea.KeyEnter:
+			line := strings.TrimSpace(m.textInput.Value())
+			if line != "" {
+				m.repl.addHistory(line)
+				m.output.WriteString("> " + line + "\n")
+				output, exit, follow := m.repl.execute(line)
+				if output != "" {
+					m.output.WriteString(output)
+				}
+				if exit {
+					m.quitting = true
+					return m, tea.Quit
+				}
+				if follow {
+					m.following = true
+					m.textInput.SetValue("")
+					m.textInput.SetSuggestions(commands)
+					m.repl.historyIndex = -1
+					m.output.WriteString("--- Following (press any key to stop) ---\n")
+					return m, followTick()
+				}
+			}
+			m.textInput.SetValue("")
+			m.textInput.SetSuggestions(commands)
+			m.repl.historyIndex = -1
+			return m, nil
+
+		case tea.KeyUp:
+			// Navigate history backward
+			if len(m.repl.history) > 0 {
+				if m.repl.historyIndex < len(m.repl.history)-1 {
+					m.repl.historyIndex++
+					idx := len(m.repl.history) - 1 - m.repl.historyIndex
+					m.textInput.SetValue(m.repl.history[idx])
+					m.textInput.CursorEnd()
+				}
+			}
+			return m, nil
+
+		case tea.KeyDown:
+			// Navigate history forward
+			if m.repl.historyIndex > 0 {
+				m.repl.historyIndex--
+				idx := len(m.repl.history) - 1 - m.repl.historyIndex
+				m.textInput.SetValue(m.repl.history[idx])
+				m.textInput.CursorEnd()
+			} else if m.repl.historyIndex == 0 {
+				m.repl.historyIndex = -1
+				m.textInput.SetValue("")
+			}
+			return m, nil
+		}
+	}
+
+	m.textInput, cmd = m.textInput.Update(msg)
+
+	// Update suggestions based on current input
+	m.updateSuggestions()
+
+	return m, cmd
+}
+
+// updateSuggestions sets appropriate suggestions based on current input.
+func (m *model) updateSuggestions() {
+	val := m.textInput.Value()
+	parts := strings.Fields(val)
+
+	if len(parts) == 0 {
+		// No input yet - suggest commands
+		m.textInput.SetSuggestions(commands)
+		return
+	}
+
+	cmd := parts[0]
+
+	// If we're still typing the first word, suggest commands
+	if len(parts) == 1 && !strings.HasSuffix(val, " ") {
+		m.textInput.SetSuggestions(commands)
+		return
+	}
+
+	// After command, suggest based on command type
+	switch cmd {
+	case "query", "sources":
+		// Suggest filter keys, prefixed with current input
+		var suggestions []string
+		prefix := val
+		if !strings.HasSuffix(prefix, " ") {
+			// Still typing a filter, find the last space
+			lastSpace := strings.LastIndex(prefix, " ")
+			if lastSpace >= 0 {
+				prefix = prefix[:lastSpace+1]
+			}
+		}
+		for _, f := range queryFilters {
+			suggestions = append(suggestions, prefix+f)
+		}
+		m.textInput.SetSuggestions(suggestions)
+	default:
+		// No suggestions for other commands
+		m.textInput.SetSuggestions(nil)
+	}
+}
+
+func (m model) View() string {
+	if m.quitting {
+		return ""
+	}
+	if m.following {
+		return m.output.String()
+	}
+	return m.output.String() + m.textInput.View()
+}
+
+// loadHistory reads history from file.
+func (r *REPL) loadHistory() {
+	if r.historyFile == "" {
+		return
+	}
+	data, err := os.ReadFile(r.historyFile)
+	if err != nil {
+		return
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			r.history = append(r.history, line)
+		}
+	}
+}
+
+// addHistory adds a command to history and saves to file.
+func (r *REPL) addHistory(cmd string) {
+	// Don't add duplicates of the last command
+	if len(r.history) > 0 && r.history[len(r.history)-1] == cmd {
+		return
+	}
+	r.history = append(r.history, cmd)
+	r.saveHistory()
+}
+
+// saveHistory writes history to file.
+func (r *REPL) saveHistory() {
+	if r.historyFile == "" {
+		return
+	}
+	// Keep last 1000 entries
+	start := 0
+	if len(r.history) > 1000 {
+		start = len(r.history) - 1000
+	}
+	data := strings.Join(r.history[start:], "\n") + "\n"
+	_ = os.WriteFile(r.historyFile, []byte(data), 0600)
+}
+
+// execute parses and executes a single command. Returns output and whether to exit.
+func (r *REPL) execute(line string) (output string, exit bool, follow bool) {
 	parts := strings.Fields(line)
 	if len(parts) == 0 {
-		return false
+		return "", false, false
 	}
 
 	cmd := parts[0]
 	args := parts[1:]
 
+	var out strings.Builder
+
 	switch cmd {
-	case "help":
-		r.cmdHelp()
+	case "help", "?":
+		r.cmdHelp(&out)
 	case "sources":
-		r.cmdSources(args)
+		r.cmdSources(&out, args)
 	case "query":
-		r.cmdQuery(args)
+		r.cmdQuery(&out, args, false)
+	case "follow":
+		r.cmdQuery(&out, args, true)
+		return out.String(), false, true
 	case "next":
-		r.cmdNext(args)
+		r.cmdNext(&out, args)
 	case "reset":
-		r.cmdReset()
+		r.cmdReset(&out)
+	case "set":
+		r.cmdSet(&out, args)
 	case "store":
-		r.cmdStore(args)
+		r.cmdStore(&out, args)
 	case "exit", "quit":
-		return true
+		return "", true, false
 	default:
-		r.printf("Unknown command: %s. Type 'help' for commands.\n", cmd)
+		fmt.Fprintf(&out, "Unknown command: %s. Type 'help' for commands.\n", cmd)
 	}
 
-	return false
+	return out.String(), false, false
 }
 
-func (r *REPL) cmdHelp() {
-	r.printf(`Commands:
+func (r *REPL) cmdHelp(out *strings.Builder) {
+	out.WriteString(`Commands:
   help                     Show this help
   sources [key=value ...]  List sources matching filters
   store [name]             Get or set target store (default: "default")
   query key=value ...      Execute a query with filters
-  next [count]             Fetch next page of results (default: 10)
+  follow key=value ...     Continuously stream new results (press any key to stop)
+  next [count]             Fetch next page of results
   reset                    Clear current query state
+  set [key=value]          Get or set config (no args shows current settings)
   exit                     Exit the REPL
 
 Query filters:
@@ -134,21 +502,25 @@ Query filters:
   end=TIME                 End time (RFC3339 or Unix timestamp)
   source=ID                Filter by source ID (can repeat)
   token=WORD               Filter by token (can repeat, AND semantics)
-  limit=N                  Maximum results
+  limit=N                  Maximum total results
+
+Settings:
+  pager=N                  Records per page (0 = no paging, show all)
 
 Examples:
   sources env=prod
   query start=2024-01-01T00:00:00Z end=2024-01-02T00:00:00Z token=error
+  set pager=50
   next 20
 `)
 }
 
-func (r *REPL) cmdSources(args []string) {
+func (r *REPL) cmdSources(out *strings.Builder, args []string) {
 	filters := make(map[string]string)
 	for _, arg := range args {
 		k, v, ok := strings.Cut(arg, "=")
 		if !ok {
-			r.printf("Invalid filter: %s (expected key=value)\n", arg)
+			fmt.Fprintf(out, "Invalid filter: %s (expected key=value)\n", arg)
 			return
 		}
 		filters[k] = v
@@ -156,7 +528,7 @@ func (r *REPL) cmdSources(args []string) {
 
 	ids := r.sources.Query(filters)
 	if len(ids) == 0 {
-		r.printf("No sources found.\n")
+		out.WriteString("No sources found.\n")
 		return
 	}
 
@@ -165,28 +537,28 @@ func (r *REPL) cmdSources(args []string) {
 		if !ok {
 			continue
 		}
-		r.printf("%s", id.String())
+		out.WriteString(id.String())
 		if len(src.Attributes) > 0 {
 			var attrs []string
 			for k, v := range src.Attributes {
 				attrs = append(attrs, fmt.Sprintf("%s=%s", k, v))
 			}
-			r.printf(" %s", strings.Join(attrs, " "))
+			out.WriteString(" " + strings.Join(attrs, " "))
 		}
-		r.printf("\n")
+		out.WriteString("\n")
 	}
 }
 
-func (r *REPL) cmdStore(args []string) {
+func (r *REPL) cmdStore(out *strings.Builder, args []string) {
 	if len(args) == 0 {
-		r.printf("Current store: %s\n", r.store)
+		fmt.Fprintf(out, "Current store: %s\n", r.store)
 		return
 	}
 	r.store = args[0]
-	r.printf("Store set to: %s\n", r.store)
+	fmt.Fprintf(out, "Store set to: %s\n", r.store)
 }
 
-func (r *REPL) cmdQuery(args []string) {
+func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
 	q := query.Query{}
 	var sourceIDs []chunk.SourceID
 	var tokens []string
@@ -194,7 +566,7 @@ func (r *REPL) cmdQuery(args []string) {
 	for _, arg := range args {
 		k, v, ok := strings.Cut(arg, "=")
 		if !ok {
-			r.printf("Invalid filter: %s (expected key=value)\n", arg)
+			fmt.Fprintf(out, "Invalid filter: %s (expected key=value)\n", arg)
 			return
 		}
 
@@ -202,21 +574,21 @@ func (r *REPL) cmdQuery(args []string) {
 		case "start":
 			t, err := parseTime(v)
 			if err != nil {
-				r.printf("Invalid start time: %v\n", err)
+				fmt.Fprintf(out, "Invalid start time: %v\n", err)
 				return
 			}
 			q.Start = t
 		case "end":
 			t, err := parseTime(v)
 			if err != nil {
-				r.printf("Invalid end time: %v\n", err)
+				fmt.Fprintf(out, "Invalid end time: %v\n", err)
 				return
 			}
 			q.End = t
 		case "source":
 			id, err := chunk.ParseSourceID(v)
 			if err != nil {
-				r.printf("Invalid source ID: %v\n", err)
+				fmt.Fprintf(out, "Invalid source ID: %v\n", err)
 				return
 			}
 			sourceIDs = append(sourceIDs, id)
@@ -225,12 +597,12 @@ func (r *REPL) cmdQuery(args []string) {
 		case "limit":
 			var n int
 			if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
-				r.printf("Invalid limit: %v\n", err)
+				fmt.Fprintf(out, "Invalid limit: %v\n", err)
 				return
 			}
 			q.Limit = n
 		default:
-			r.printf("Unknown filter: %s\n", k)
+			fmt.Fprintf(out, "Unknown filter: %s\n", k)
 			return
 		}
 	}
@@ -242,160 +614,341 @@ func (r *REPL) cmdQuery(args []string) {
 		q.Tokens = tokens
 	}
 
-	// Execute query
-	seq, getToken, err := r.orch.Search(r.ctx, r.store, q, nil)
-	if err != nil {
-		r.printf("Query error: %v\n", err)
-		return
+	// Cancel any previous query goroutine
+	if r.queryCancel != nil {
+		r.queryCancel()
 	}
 
-	// Wrap iterator to copy records. Record.Raw may point to mmap'd memory
-	// that becomes invalid when the cursor is closed, so we must copy before
-	// sending over the channel.
-	copySeq := func(yield func(chunk.Record, error) bool) {
-		for rec, err := range seq {
-			if err != nil {
-				if !yield(rec, err) {
-					return
-				}
-				continue
-			}
-			if !yield(rec.Copy(), nil) {
-				return
-			}
-		}
-	}
+	// Create cancellable context for this query
+	queryCtx, queryCancel := context.WithCancel(r.ctx)
+	r.queryCancel = queryCancel
 
-	// Store query state
-	r.lastQuery = &q
-	r.getToken = getToken
-	r.resumeToken = nil
+	// Create channel and start goroutine to feed records.
+	// Records are copied because Raw may point to mmap'd memory.
+	ch := make(chan recordResult, 100)
+	r.resultChan = ch
 
-	// Create iterator wrapper
-	next, stop := pullIter(copySeq)
-	r.resultIter = next
-	_ = stop // We don't call stop; iterator exhausts naturally or on reset
-
-	// Fetch first page
-	r.fetchAndPrint(10)
-}
-
-func (r *REPL) cmdNext(args []string) {
-	if r.resultIter == nil {
-		r.printf("No active query. Use 'query' first.\n")
-		return
-	}
-
-	count := 10
-	if len(args) > 0 {
-		if _, err := fmt.Sscanf(args[0], "%d", &count); err != nil {
-			r.printf("Invalid count: %v\n", err)
+	if follow {
+		// Follow mode: stream records from the active chunk in WriteTS order.
+		// This is like "tail -f" - we only watch the active chunk where new
+		// records arrive, and we track position to avoid re-sending records.
+		go r.runFollowMode(queryCtx, ch, q)
+	} else {
+		// Execute query
+		seq, getToken, err := r.orch.Search(r.ctx, r.store, q, nil)
+		if err != nil {
+			fmt.Fprintf(out, "Query error: %v\n", err)
 			return
 		}
-	}
 
-	r.fetchAndPrint(count)
+		// Store query state
+		r.lastQuery = &q
+		r.getToken = getToken
+		r.resumeToken = nil
+
+		go func() {
+			defer close(ch)
+			for rec, err := range seq {
+				select {
+				case <-queryCtx.Done():
+					return
+				default:
+				}
+				if err != nil {
+					ch <- recordResult{err: err}
+					continue
+				}
+				ch <- recordResult{rec: rec.Copy()}
+			}
+		}()
+
+		r.fetchAndPrint(out)
+	}
 }
 
-func (r *REPL) fetchAndPrint(count int) {
-	if r.resultIter == nil {
-		r.printf("No active query.\n")
+// runFollowMode streams new records from the active chunk as they arrive (like tail -f).
+// It does NOT show existing records - use 'query' for that.
+func (r *REPL) runFollowMode(ctx context.Context, ch chan<- recordResult, q query.Query) {
+	defer close(ch)
+
+	cm := r.orch.ChunkManager(r.store)
+	if cm == nil {
+		ch <- recordResult{err: errors.New("chunk manager not found for store")}
+		return
+	}
+
+	// Start from current end of active chunk - only show NEW records
+	var currentChunkID chunk.ChunkID
+	var nextPos uint64
+
+	if active := cm.Active(); active != nil {
+		currentChunkID = active.ID
+		// Find current end position
+		if cursor, err := cm.OpenCursor(active.ID); err == nil {
+			for {
+				_, ref, err := cursor.Next()
+				if errors.Is(err, chunk.ErrNoMoreRecords) {
+					break
+				}
+				if err != nil {
+					break
+				}
+				nextPos = ref.Pos + 1
+			}
+			cursor.Close()
+		}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		// Get the active chunk
+		active := cm.Active()
+		if active == nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(100 * time.Millisecond):
+				continue
+			}
+		}
+
+		// If chunk changed (sealed and new one created), start from beginning of new chunk
+		if active.ID != currentChunkID {
+			currentChunkID = active.ID
+			nextPos = 0
+		}
+
+		// Open cursor and seek to our position
+		cursor, err := cm.OpenCursor(currentChunkID)
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(100 * time.Millisecond):
+				continue
+			}
+		}
+
+		if nextPos > 0 {
+			if err := cursor.Seek(chunk.RecordRef{ChunkID: currentChunkID, Pos: nextPos}); err != nil {
+				cursor.Close()
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(100 * time.Millisecond):
+					continue
+				}
+			}
+		}
+
+		// Read new records
+		for {
+			rec, ref, err := cursor.Next()
+			if errors.Is(err, chunk.ErrNoMoreRecords) {
+				break
+			}
+			if err != nil {
+				ch <- recordResult{err: err}
+				break
+			}
+
+			nextPos = ref.Pos + 1
+
+			// Apply source filter
+			if len(q.Sources) > 0 && !slices.Contains(q.Sources, rec.SourceID) {
+				continue
+			}
+
+			// Apply token filter (AND semantics)
+			if len(q.Tokens) > 0 && !matchesAllTokens(rec.Raw, q.Tokens) {
+				continue
+			}
+
+			select {
+			case <-ctx.Done():
+				cursor.Close()
+				return
+			case ch <- recordResult{rec: rec.Copy()}:
+			}
+		}
+
+		cursor.Close()
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+// matchesAllTokens checks if the raw data contains all query tokens.
+func matchesAllTokens(raw []byte, tokens []string) bool {
+	rawLower := strings.ToLower(string(raw))
+	for _, tok := range tokens {
+		if !strings.Contains(rawLower, strings.ToLower(tok)) {
+			return false
+		}
+	}
+	return true
+}
+
+func (r *REPL) cmdNext(out *strings.Builder, args []string) {
+	if r.resultChan == nil {
+		out.WriteString("No active query. Use 'query' first.\n")
+		return
+	}
+
+	// Allow override for this call only
+	if len(args) > 0 {
+		var count int
+		if _, err := fmt.Sscanf(args[0], "%d", &count); err != nil {
+			fmt.Fprintf(out, "Invalid count: %v\n", err)
+			return
+		}
+		r.fetchAndPrintN(out, count)
+		return
+	}
+
+	r.fetchAndPrint(out)
+}
+
+func (r *REPL) fetchAndPrint(out *strings.Builder) {
+	if r.pageSize == 0 {
+		// No paging - fetch all
+		r.fetchAndPrintN(out, 0)
+	} else {
+		r.fetchAndPrintN(out, r.pageSize)
+	}
+}
+
+func (r *REPL) fetchAndPrintN(out *strings.Builder, count int) {
+	if r.resultChan == nil {
+		out.WriteString("No active query.\n")
 		return
 	}
 
 	printed := 0
-	for i := 0; i < count; i++ {
-		rec, err, ok := r.resultIter()
+	for {
+		if count > 0 && printed >= count {
+			break
+		}
+		result, ok := <-r.resultChan
 		if !ok {
 			if printed == 0 {
-				r.printf("No more results.\n")
+				out.WriteString("No more results.\n")
+			} else {
+				fmt.Fprintf(out, "--- %d records (end of results) ---\n", printed)
 			}
-			r.resultIter = nil
+			r.resultChan = nil
 			return
 		}
-		if err != nil {
-			if errors.Is(err, query.ErrInvalidResumeToken) {
-				r.printf("Resume token invalid (chunk deleted). Use 'reset' and re-query.\n")
-				r.resultIter = nil
+		if result.err != nil {
+			if errors.Is(result.err, query.ErrInvalidResumeToken) {
+				out.WriteString("Resume token invalid (chunk deleted). Use 'reset' and re-query.\n")
+				r.resultChan = nil
 				return
 			}
-			r.printf("Error: %v\n", err)
+			fmt.Fprintf(out, "Error: %v\n", result.err)
 			return
 		}
 
-		r.printRecord(rec)
+		r.printRecord(out, result.rec)
 		printed++
 	}
 
 	if printed > 0 {
-		r.printf("--- %d records shown. Use 'next' for more. ---\n", printed)
+		fmt.Fprintf(out, "--- %d records shown. Use 'next' for more. ---\n", printed)
 	}
 }
 
-func (r *REPL) printRecord(rec chunk.Record) {
-	// Format: TIMESTAMP SOURCE_ID RAW
-	ts := rec.WriteTS.Format(time.RFC3339Nano)
-	r.printf("%s %s %s\n", ts, rec.SourceID.String(), string(rec.Raw))
+func (r *REPL) formatRecord(rec chunk.Record) string {
+	// Format: TIMESTAMP SOURCE_ATTRS RAW
+	ts := rec.IngestTS.Format(time.RFC3339Nano)
+
+	// Look up source attributes
+	sourceStr := rec.SourceID.String()[:8] // fallback: short UUID
+	if src, ok := r.sources.Get(rec.SourceID); ok && len(src.Attributes) > 0 {
+		keys := make([]string, 0, len(src.Attributes))
+		for k := range src.Attributes {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		var attrs []string
+		for _, k := range keys {
+			attrs = append(attrs, k+"="+src.Attributes[k])
+		}
+		sourceStr = strings.Join(attrs, ",")
+	}
+
+	return fmt.Sprintf("%s %s %s", ts, sourceStr, string(rec.Raw))
 }
 
-func (r *REPL) cmdReset() {
+func (r *REPL) printRecord(out *strings.Builder, rec chunk.Record) {
+	out.WriteString(r.formatRecord(rec))
+	out.WriteByte('\n')
+}
+
+func (r *REPL) cmdReset(out *strings.Builder) {
 	r.lastQuery = nil
 	r.resumeToken = nil
-	r.resultIter = nil
+	r.resultChan = nil
 	r.getToken = nil
-	r.printf("Query state cleared.\n")
+	out.WriteString("Query state cleared.\n")
 }
 
-func (r *REPL) printf(format string, args ...any) {
-	fmt.Fprintf(r.out, format, args...)
+func (r *REPL) cmdSet(out *strings.Builder, args []string) {
+	if len(args) == 0 {
+		// Show current settings
+		fmt.Fprintf(out, "pager=%d\n", r.pageSize)
+		return
+	}
+
+	for _, arg := range args {
+		k, v, ok := strings.Cut(arg, "=")
+		if !ok {
+			fmt.Fprintf(out, "Invalid setting: %s (expected key=value)\n", arg)
+			return
+		}
+
+		switch k {
+		case "pager":
+			var n int
+			if _, err := fmt.Sscanf(v, "%d", &n); err != nil || n < 0 {
+				fmt.Fprintf(out, "Invalid pager value: %s (expected non-negative integer)\n", v)
+				return
+			}
+			r.pageSize = n
+			if n == 0 {
+				out.WriteString("Pager disabled (showing all results).\n")
+			} else {
+				fmt.Fprintf(out, "Pager set to %d.\n", n)
+			}
+		default:
+			fmt.Fprintf(out, "Unknown setting: %s\n", k)
+		}
+	}
 }
 
 // parseTime parses a time string in RFC3339 format or as a Unix timestamp.
 func parseTime(s string) (time.Time, error) {
-	// Try RFC3339 first
+	// Try RFC3339 (with timezone)
 	if t, err := time.Parse(time.RFC3339, s); err == nil {
 		return t, nil
 	}
-	// Try RFC3339Nano
+	// Try RFC3339Nano (with timezone)
 	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
 		return t, nil
 	}
-	// Try Unix timestamp (seconds)
+	// Try Unix timestamp (must be all digits)
 	var unix int64
-	if _, err := fmt.Sscanf(s, "%d", &unix); err == nil {
+	if n, err := fmt.Sscanf(s, "%d", &unix); err == nil && n == 1 && fmt.Sprintf("%d", unix) == s {
 		return time.Unix(unix, 0), nil
 	}
-	return time.Time{}, fmt.Errorf("cannot parse time: %s", s)
-}
-
-// pullIter converts an iter.Seq2 into a pull-style iterator.
-// Returns a next function and a stop function.
-func pullIter[T any, E error](seq func(yield func(T, E) bool)) (next func() (T, E, bool), stop func()) {
-	ch := make(chan struct {
-		val T
-		err E
-	})
-	done := make(chan struct{})
-
-	go func() {
-		defer close(ch)
-		seq(func(val T, err E) bool {
-			select {
-			case ch <- struct {
-				val T
-				err E
-			}{val, err}:
-				return true
-			case <-done:
-				return false
-			}
-		})
-	}()
-
-	return func() (T, E, bool) {
-			result, ok := <-ch
-			return result.val, result.err, ok
-		}, func() {
-			close(done)
-		}
+	return time.Time{}, fmt.Errorf("invalid time format: %s (use RFC3339: 2006-01-02T15:04:05Z or 2006-01-02T15:04:05+01:00)", s)
 }

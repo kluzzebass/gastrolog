@@ -61,7 +61,7 @@ func TestREPL_Help(t *testing.T) {
 	input := "help\nexit\n"
 	output := &bytes.Buffer{}
 
-	r := New(orch, sources, strings.NewReader(input), output)
+	r := NewSimple(orch, sources, strings.NewReader(input), output)
 	if err := r.Run(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestREPL_Sources(t *testing.T) {
 		input := "sources\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := New(orch, sources, strings.NewReader(input), output)
+		r := NewSimple(orch, sources, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -114,7 +114,7 @@ func TestREPL_Sources(t *testing.T) {
 		input := "sources env=prod\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := New(orch, sources, strings.NewReader(input), output)
+		r := NewSimple(orch, sources, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -136,7 +136,7 @@ func TestREPL_Sources(t *testing.T) {
 		input := "sources env=staging\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := New(orch, sources, strings.NewReader(input), output)
+		r := NewSimple(orch, sources, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -188,7 +188,7 @@ func TestREPL_Query(t *testing.T) {
 		input := "query\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := New(orch, sources, strings.NewReader(input), output)
+		r := NewSimple(orch, sources, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -203,7 +203,7 @@ func TestREPL_Query(t *testing.T) {
 		input := "query token=error\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := New(orch, sources, strings.NewReader(input), output)
+		r := NewSimple(orch, sources, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -219,7 +219,7 @@ func TestREPL_Query(t *testing.T) {
 		input := "query limit=3\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := New(orch, sources, strings.NewReader(input), output)
+		r := NewSimple(orch, sources, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -268,7 +268,7 @@ func TestREPL_NextAndReset(t *testing.T) {
 		input := "query\nnext\nnext\nnext\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := New(orch, sources, strings.NewReader(input), output)
+		r := NewSimple(orch, sources, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -296,7 +296,7 @@ func TestREPL_NextAndReset(t *testing.T) {
 		input := "next\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := New(orch, sources, strings.NewReader(input), output)
+		r := NewSimple(orch, sources, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -311,7 +311,7 @@ func TestREPL_NextAndReset(t *testing.T) {
 		input := "query\nreset\nnext\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := New(orch, sources, strings.NewReader(input), output)
+		r := NewSimple(orch, sources, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -334,7 +334,7 @@ func TestREPL_Store(t *testing.T) {
 		input := "store\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := New(orch, sources, strings.NewReader(input), output)
+		r := NewSimple(orch, sources, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -349,7 +349,7 @@ func TestREPL_Store(t *testing.T) {
 		input := "store archive\nstore\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := New(orch, sources, strings.NewReader(input), output)
+		r := NewSimple(orch, sources, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -371,7 +371,7 @@ func TestREPL_UnknownCommand(t *testing.T) {
 	input := "foobar\nexit\n"
 	output := &bytes.Buffer{}
 
-	r := New(orch, sources, strings.NewReader(input), output)
+	r := NewSimple(orch, sources, strings.NewReader(input), output)
 	if err := r.Run(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -391,7 +391,7 @@ func TestREPL_Exit(t *testing.T) {
 			input := cmd + "\n"
 			output := &bytes.Buffer{}
 
-			r := New(orch, sources, strings.NewReader(input), output)
+			r := NewSimple(orch, sources, strings.NewReader(input), output)
 			if err := r.Run(); err != nil {
 				t.Fatalf("run: %v", err)
 			}

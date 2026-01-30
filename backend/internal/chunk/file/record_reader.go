@@ -2,6 +2,7 @@ package file
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"syscall"
 
@@ -17,12 +18,12 @@ var (
 // mmapCursor is a RecordCursor backed by mmap'd raw.log and idx.log files.
 // Used for sealed chunks.
 type mmapCursor struct {
-	chunkID chunk.ChunkID
-	rawData []byte
-	idxData []byte
-	rawFile *os.File
-	idxFile *os.File
-	resolve func(uint32) (chunk.SourceID, bool)
+	chunkID   chunk.ChunkID
+	rawData   []byte
+	idxData   []byte
+	rawFile   *os.File
+	idxFile   *os.File
+	sourceMap *SourceMap
 
 	recordCount uint64 // Total records in chunk
 	fwdIndex    uint64 // Current forward iteration index
@@ -31,7 +32,7 @@ type mmapCursor struct {
 	revDone     bool
 }
 
-func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath string, resolve func(uint32) (chunk.SourceID, bool)) (*mmapCursor, error) {
+func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath string, sourceMap *SourceMap) (*mmapCursor, error) {
 	// Open and mmap idx.log.
 	idxFile, err := os.Open(idxPath)
 	if err != nil {
@@ -50,7 +51,7 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath string, resolve func(
 		idxFile.Close()
 		return &mmapCursor{
 			chunkID:     chunkID,
-			resolve:     resolve,
+			sourceMap:   sourceMap,
 			recordCount: 0,
 			fwdDone:     true,
 			revDone:     true,
@@ -92,7 +93,7 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath string, resolve func(
 		idxData:     idxData,
 		rawFile:     rawFile,
 		idxFile:     idxFile,
-		resolve:     resolve,
+		sourceMap:   sourceMap,
 		recordCount: recordCount,
 		fwdIndex:    0,
 		revIndex:    recordCount, // Start past end for reverse iteration
@@ -160,9 +161,9 @@ func (c *mmapCursor) readRecord(index uint64) (chunk.Record, error) {
 	raw := c.rawData[rawStart:rawEnd]
 
 	// Resolve source ID.
-	sourceID, ok := c.resolve(entry.SourceLocalID)
+	sourceID, ok := c.sourceMap.Resolve(entry.SourceLocalID)
 	if !ok {
-		return chunk.Record{}, ErrUnknownSourceLocalID
+		return chunk.Record{}, fmt.Errorf("%w: localID=%d at index=%d chunk=%s", ErrUnknownSourceLocalID, entry.SourceLocalID, index, c.chunkID)
 	}
 
 	return BuildRecord(entry, raw, sourceID), nil
@@ -321,7 +322,7 @@ func (c *stdioCursor) readRecord(index uint64) (chunk.Record, error) {
 	// Resolve source ID.
 	sourceID, ok := c.resolve(entry.SourceLocalID)
 	if !ok {
-		return chunk.Record{}, ErrUnknownSourceLocalID
+		return chunk.Record{}, fmt.Errorf("%w: localID=%d at index=%d", ErrUnknownSourceLocalID, entry.SourceLocalID, index)
 	}
 
 	return BuildRecordCopy(entry, raw, sourceID), nil

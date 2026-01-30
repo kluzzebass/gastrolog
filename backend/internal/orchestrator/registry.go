@@ -42,3 +42,14 @@ func (o *Orchestrator) UnregisterReceiver(id string) {
 	defer o.mu.Unlock()
 	delete(o.receivers, id)
 }
+
+// ChunkManager returns the chunk manager registered under the given key.
+// Returns nil if not found.
+func (o *Orchestrator) ChunkManager(key string) chunk.ChunkManager {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if key == "" {
+		key = "default"
+	}
+	return o.chunks[key]
+}

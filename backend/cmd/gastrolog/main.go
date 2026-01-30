@@ -39,12 +39,18 @@ func main() {
 	replMode := flag.Bool("repl", false, "start interactive REPL after system is running")
 	flag.Parse()
 
-	// Create base logger with ComponentFilterHandler for dynamic log level control.
-	baseHandler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelDebug, // Allow all levels; filtering done by ComponentFilterHandler
-	})
-	filterHandler := logging.NewComponentFilterHandler(baseHandler, slog.LevelInfo)
-	logger := slog.New(filterHandler)
+	// Create base logger. In REPL mode, use discard logger to avoid interfering
+	// with readline. Otherwise use ComponentFilterHandler for dynamic log level control.
+	var logger *slog.Logger
+	if *replMode {
+		logger = logging.Discard()
+	} else {
+		baseHandler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+			Level: slog.LevelDebug, // Allow all levels; filtering done by ComponentFilterHandler
+		})
+		filterHandler := logging.NewComponentFilterHandler(baseHandler, slog.LevelInfo)
+		logger = slog.New(filterHandler)
+	}
 
 	if *pprofAddr != "" {
 		go func() {
@@ -118,7 +124,7 @@ func run(ctx context.Context, logger *slog.Logger, configPath, sourcesPath strin
 
 	if replMode {
 		// Run REPL in foreground. REPL exit triggers shutdown.
-		r := repl.New(orch, sources, os.Stdin, os.Stdout)
+		r := repl.New(orch, sources)
 		if err := r.Run(); err != nil && err != context.Canceled {
 			logger.Error("repl error", "error", err)
 		}
