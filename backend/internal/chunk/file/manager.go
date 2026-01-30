@@ -22,9 +22,8 @@ const (
 )
 
 var (
-	ErrMissingDir           = errors.New("file chunk manager dir is required")
-	ErrMultipleActiveChunks = errors.New("multiple active chunks found")
-	ErrManagerClosed        = errors.New("manager is closed")
+	ErrMissingDir    = errors.New("file chunk manager dir is required")
+	ErrManagerClosed = errors.New("manager is closed")
 )
 
 type Config struct {
@@ -272,6 +271,9 @@ func (m *Manager) loadExisting() error {
 		return err
 	}
 
+	// Collect all unsealed chunks to find the newest one.
+	var unsealedIDs []chunk.ChunkID
+
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -290,87 +292,155 @@ func (m *Manager) loadExisting() error {
 
 		m.metas[id] = meta
 
-		sourceMap, err := m.loadSourceMap(id)
-		if err != nil {
+		if _, err := m.loadSourceMap(id); err != nil {
 			return err
 		}
 
 		if !meta.sealed {
-			if m.active != nil {
-				return ErrMultipleActiveChunks
-			}
-
-			rawFile, err := m.openRawFile(id)
-			if err != nil {
-				return err
-			}
-			idxFile, err := m.openIdxFile(id)
-			if err != nil {
-				rawFile.Close()
-				return err
-			}
-
-			// Compute record count from idx.log file size.
-			idxInfo, err := idxFile.Stat()
-			if err != nil {
-				rawFile.Close()
-				idxFile.Close()
-				return err
-			}
-			recordCount := RecordCount(idxInfo.Size())
-
-			// Compute expected raw.log size from idx.log.
-			// If raw.log has extra data (crash between raw write and idx write),
-			// truncate it to match what idx.log expects.
-			var expectedRawSize int64
-			if recordCount > 0 {
-				// Read last idx.log entry to get expected raw.log end position.
-				lastOffset := IdxFileOffset(recordCount - 1)
-				var entryBuf [IdxEntrySize]byte
-				if _, err := idxFile.ReadAt(entryBuf[:], lastOffset); err != nil {
-					rawFile.Close()
-					idxFile.Close()
-					return err
-				}
-				lastEntry := DecodeIdxEntry(entryBuf[:])
-				expectedRawSize = int64(format.HeaderSize) + int64(lastEntry.RawOffset) + int64(lastEntry.RawSize)
-			} else {
-				expectedRawSize = int64(format.HeaderSize)
-			}
-
-			rawInfo, err := rawFile.Stat()
-			if err != nil {
-				rawFile.Close()
-				idxFile.Close()
-				return err
-			}
-			actualRawSize := rawInfo.Size()
-
-			if actualRawSize > expectedRawSize {
-				// Truncate orphaned raw data from crashed write.
-				if err := rawFile.Truncate(expectedRawSize); err != nil {
-					rawFile.Close()
-					idxFile.Close()
-					return err
-				}
-				m.logger.Info("truncated orphaned raw.log data",
-					"chunk", id.String(),
-					"expected", expectedRawSize,
-					"actual", actualRawSize)
-			}
-
-			rawOffset := uint64(expectedRawSize) - uint64(format.HeaderSize)
-
-			m.active = &chunkState{
-				meta:        meta,
-				rawFile:     rawFile,
-				idxFile:     idxFile,
-				sources:     sourceMap,
-				rawOffset:   rawOffset,
-				recordCount: recordCount,
-			}
+			unsealedIDs = append(unsealedIDs, id)
 		}
 	}
+
+	// If multiple unsealed chunks, seal all but the newest (by ChunkID, which is time-ordered).
+	if len(unsealedIDs) > 1 {
+		// Sort by ChunkID (UUID v7, time-ordered) - newest last.
+		for i := 0; i < len(unsealedIDs)-1; i++ {
+			for j := i + 1; j < len(unsealedIDs); j++ {
+				if unsealedIDs[i].String() > unsealedIDs[j].String() {
+					unsealedIDs[i], unsealedIDs[j] = unsealedIDs[j], unsealedIDs[i]
+				}
+			}
+		}
+
+		// Seal all but the last (newest).
+		for _, id := range unsealedIDs[:len(unsealedIDs)-1] {
+			m.logger.Info("sealing orphaned active chunk", "chunk", id.String())
+			if err := m.sealChunkOnDisk(id); err != nil {
+				return err
+			}
+			m.metas[id].sealed = true
+		}
+
+		// Keep only the newest as active candidate.
+		unsealedIDs = unsealedIDs[len(unsealedIDs)-1:]
+	}
+
+	// Open the single remaining unsealed chunk as active.
+	if len(unsealedIDs) == 1 {
+		id := unsealedIDs[0]
+		if err := m.openActiveChunk(id); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// sealChunkOnDisk sets the sealed flag in the chunk's file headers without opening it as active.
+func (m *Manager) sealChunkOnDisk(id chunk.ChunkID) error {
+	rawPath := m.rawLogPath(id)
+	idxPath := m.idxLogPath(id)
+
+	// Set sealed flag in raw.log header.
+	rawFile, err := os.OpenFile(rawPath, os.O_RDWR, m.cfg.FileMode)
+	if err != nil {
+		return err
+	}
+	if err := m.setSealedFlag(rawFile); err != nil {
+		rawFile.Close()
+		return err
+	}
+	rawFile.Close()
+
+	// Set sealed flag in idx.log header.
+	idxFile, err := os.OpenFile(idxPath, os.O_RDWR, m.cfg.FileMode)
+	if err != nil {
+		return err
+	}
+	if err := m.setSealedFlag(idxFile); err != nil {
+		idxFile.Close()
+		return err
+	}
+	idxFile.Close()
+
+	return nil
+}
+
+// openActiveChunk opens an unsealed chunk as the active chunk, with crash recovery.
+func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
+	meta := m.metas[id]
+	sourceMap := m.sources[id]
+
+	rawFile, err := m.openRawFile(id)
+	if err != nil {
+		return err
+	}
+	idxFile, err := m.openIdxFile(id)
+	if err != nil {
+		rawFile.Close()
+		return err
+	}
+
+	// Compute record count from idx.log file size.
+	idxInfo, err := idxFile.Stat()
+	if err != nil {
+		rawFile.Close()
+		idxFile.Close()
+		return err
+	}
+	recordCount := RecordCount(idxInfo.Size())
+
+	// Compute expected raw.log size from idx.log.
+	// If raw.log has extra data (crash between raw write and idx write),
+	// truncate it to match what idx.log expects.
+	var expectedRawSize int64
+	if recordCount > 0 {
+		// Read last idx.log entry to get expected raw.log end position.
+		lastOffset := IdxFileOffset(recordCount - 1)
+		var entryBuf [IdxEntrySize]byte
+		if _, err := idxFile.ReadAt(entryBuf[:], lastOffset); err != nil {
+			rawFile.Close()
+			idxFile.Close()
+			return err
+		}
+		lastEntry := DecodeIdxEntry(entryBuf[:])
+		expectedRawSize = int64(format.HeaderSize) + int64(lastEntry.RawOffset) + int64(lastEntry.RawSize)
+	} else {
+		expectedRawSize = int64(format.HeaderSize)
+	}
+
+	rawInfo, err := rawFile.Stat()
+	if err != nil {
+		rawFile.Close()
+		idxFile.Close()
+		return err
+	}
+	actualRawSize := rawInfo.Size()
+
+	if actualRawSize > expectedRawSize {
+		// Truncate orphaned raw data from crashed write.
+		if err := rawFile.Truncate(expectedRawSize); err != nil {
+			rawFile.Close()
+			idxFile.Close()
+			return err
+		}
+		m.logger.Info("truncated orphaned raw.log data",
+			"chunk", id.String(),
+			"expected", expectedRawSize,
+			"actual", actualRawSize)
+	}
+
+	rawOffset := uint64(expectedRawSize) - uint64(format.HeaderSize)
+
+	m.active = &chunkState{
+		meta:        meta,
+		rawFile:     rawFile,
+		idxFile:     idxFile,
+		sources:     sourceMap,
+		rawOffset:   rawOffset,
+		recordCount: recordCount,
+	}
+
 	return nil
 }
 
