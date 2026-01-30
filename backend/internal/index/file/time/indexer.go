@@ -86,6 +86,12 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	}
 	tmpName := tmpFile.Name()
 
+	if err := tmpFile.Chmod(0o644); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("chmod temp index: %w", err)
+	}
+
 	if _, err := tmpFile.Write(data); err != nil {
 		tmpFile.Close()
 		os.Remove(tmpName)
