@@ -101,6 +101,12 @@ func run(ctx context.Context, logger *slog.Logger, configPath, sourcesPath strin
 		return err
 	}
 
+	// Rebuild any missing indexes from interrupted builds.
+	logger.Info("checking for missing indexes")
+	if err := orch.RebuildMissingIndexes(ctx); err != nil {
+		return err
+	}
+
 	// Start the orchestrator.
 	logger.Info("starting orchestrator")
 	if err := orch.Start(ctx); err != nil {
