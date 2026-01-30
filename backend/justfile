@@ -9,5 +9,9 @@ run:
   go run ./cmd/gastrolog -config config.json -sources sources.json
 
 # Runs the gastrolog backend with the specified configuration, sources, and pprof server.
-run-pprof:
+pprof:
   go run ./cmd/gastrolog -config config.json -sources sources.json -pprof localhost:6060
+
+# Runs the gastrolog backend with the specified configuration, sources, and REPL.
+repl:
+  go run ./cmd/gastrolog -config config.json -sources sources.json -repl

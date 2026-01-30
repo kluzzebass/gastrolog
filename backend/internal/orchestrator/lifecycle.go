@@ -2,9 +2,9 @@ package orchestrator
 
 import (
 	"context"
-	"sync"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/index"
 )
 
 // Start launches all receivers and the ingest loop.
@@ -139,12 +139,13 @@ func (o *Orchestrator) processMessage(msg IngestMessage) {
 // RebuildMissingIndexes checks all sealed chunks and rebuilds indexes for any
 // that are incomplete. This should be called before Start() to recover from
 // interrupted index builds.
+// RebuildMissingIndexes scans all sealed chunks and triggers index builds
+// for any that are missing indexes. Builds run in the background using the
+// orchestrator's indexWg, so this method returns immediately after launching
+// the builds.
 func (o *Orchestrator) RebuildMissingIndexes(ctx context.Context) error {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-
-	var wg sync.WaitGroup
-	errCh := make(chan error, len(o.chunks))
 
 	for storeID, cm := range o.chunks {
 		im, ok := o.indexes[storeID]
@@ -168,31 +169,22 @@ func (o *Orchestrator) RebuildMissingIndexes(ctx context.Context) error {
 			}
 
 			if !complete {
-				wg.Add(1)
-				go func(storeID string, chunkID chunk.ChunkID) {
-					defer wg.Done()
-					o.logger.Info("rebuilding missing indexes",
-						"store", storeID,
-						"chunk", chunkID.String())
+				o.logger.Info("rebuilding missing indexes",
+					"store", storeID,
+					"chunk", meta.ID.String())
+
+				// Use the same indexWg as seal-triggered builds.
+				o.indexWg.Add(1)
+				go func(storeID string, chunkID chunk.ChunkID, im index.IndexManager) {
+					defer o.indexWg.Done()
 					if err := im.BuildIndexes(ctx, chunkID); err != nil {
 						o.logger.Error("failed to rebuild indexes",
 							"store", storeID,
 							"chunk", chunkID.String(),
 							"error", err)
-						errCh <- err
 					}
-				}(storeID, meta.ID)
+				}(storeID, meta.ID, im)
 			}
-		}
-	}
-
-	wg.Wait()
-	close(errCh)
-
-	// Return first error if any.
-	for err := range errCh {
-		if err != nil {
-			return err
 		}
 	}
 
