@@ -1,28 +1,42 @@
 package token
 
-// IterBytes calls fn for each token in data, passing the raw bytes.
+const (
+	minTokenLen        = 2
+	DefaultMaxTokenLen = 16
+)
+
+// IterBytes calls fn for each indexable token in data, passing the raw bytes.
 // The byte slice passed to fn is reused between calls and must not be retained.
 // If fn returns false, iteration stops early.
 //
 // The buf parameter is a reusable buffer for building tokens. Pass nil to
-// allocate a new buffer, or pass a slice with capacity >= 64 for zero allocations.
+// allocate a new buffer, or pass a slice with capacity >= maxLen for zero allocations.
 //
-// Token rules are the same as Simple().
-func IterBytes(data []byte, buf []byte, fn func(token []byte) bool) {
+// The maxLen parameter sets the maximum token length. Tokens longer than this
+// are truncated. Use DefaultMaxTokenLen for the standard limit.
+//
+// See package documentation for token rules.
+func IterBytes(data []byte, buf []byte, maxLen int, fn func(token []byte) bool) {
 	if len(data) == 0 {
 		return
 	}
+	if maxLen <= 0 {
+		maxLen = DefaultMaxTokenLen
+	}
 
 	current := buf[:0]
-	if cap(current) < 64 {
-		current = make([]byte, 0, 64)
+	if cap(current) < maxLen {
+		current = make([]byte, 0, maxLen)
 	}
 
 	for _, b := range data {
-		if isWordByte(b) {
-			current = append(current, lowercase(b))
+		if isTokenByte(b) {
+			if len(current) < maxLen {
+				current = append(current, lowercase(b))
+			}
+			// If at max length, keep consuming but don't append.
 		} else {
-			if len(current) >= 2 {
+			if len(current) >= minTokenLen && isIndexable(current) {
 				if !fn(current) {
 					return
 				}
@@ -32,35 +46,45 @@ func IterBytes(data []byte, buf []byte, fn func(token []byte) bool) {
 	}
 
 	// Don't forget trailing token.
-	if len(current) >= 2 {
+	if len(current) >= minTokenLen && isIndexable(current) {
 		fn(current)
 	}
 }
 
-// Simple extracts tokens from raw log data using basic byte-level rules.
+// Simple extracts indexable tokens from raw log data using DefaultMaxTokenLen.
 //
-// Token rules:
-//   - Word bytes: a-z, A-Z (lowercased), 0-9, any byte >= 0x80 (except 0xA0)
-//   - Delimiters: everything else (ASCII control/punctuation/space, 0xA0)
-//   - Tokens shorter than 2 bytes are skipped
+// Token characters (ASCII only):
+//   - 'a'-'z', 'A'-'Z' (lowercased)
+//   - '0'-'9'
+//   - '_', '-'
+//
+// All other bytes are delimiters.
+//
+// Tokens must be 2-16 bytes. Numeric and UUID tokens are excluded.
 func Simple(data []byte) []string {
+	return SimpleWithMaxLen(data, DefaultMaxTokenLen)
+}
+
+// SimpleWithMaxLen extracts indexable tokens with a custom max length.
+func SimpleWithMaxLen(data []byte, maxLen int) []string {
 	if len(data) == 0 {
 		return nil
 	}
+	if maxLen <= 0 {
+		maxLen = DefaultMaxTokenLen
+	}
 
-	// Pre-allocate buffer for building tokens. Max token length 64 bytes.
-	current := make([]byte, 0, 64)
-
-	// Delay slice allocation until we find the first token.
+	current := make([]byte, 0, maxLen)
 	var tokens []string
 
 	for _, b := range data {
-		if isWordByte(b) {
-			current = append(current, lowercase(b))
+		if isTokenByte(b) {
+			if len(current) < maxLen {
+				current = append(current, lowercase(b))
+			}
 		} else {
-			if len(current) >= 2 {
+			if len(current) >= minTokenLen && isIndexable(current) {
 				if tokens == nil {
-					// Allocate on first token. Estimate ~1 token per 8 bytes.
 					tokens = make([]string, 0, len(data)/8)
 				}
 				tokens = append(tokens, string(current))
@@ -69,8 +93,7 @@ func Simple(data []byte) []string {
 		}
 	}
 
-	// Don't forget trailing token.
-	if len(current) >= 2 {
+	if len(current) >= minTokenLen && isIndexable(current) {
 		if tokens == nil {
 			tokens = make([]string, 0, 1)
 		}
@@ -80,8 +103,9 @@ func Simple(data []byte) []string {
 	return tokens
 }
 
-// isWordByte returns true if b is part of a token.
-func isWordByte(b byte) bool {
+// isTokenByte returns true if b is a valid token character.
+// Only ASCII: a-z, A-Z, 0-9, underscore, hyphen.
+func isTokenByte(b byte) bool {
 	switch {
 	case b >= 'a' && b <= 'z':
 		return true
@@ -89,19 +113,124 @@ func isWordByte(b byte) bool {
 		return true
 	case b >= '0' && b <= '9':
 		return true
-	case b >= 0x80 && b <= 0x9F:
-		return true
-	case b >= 0xA1: // 0xA1-0xFF (excludes 0xA0 non-breaking space)
+	case b == '_' || b == '-':
 		return true
 	default:
 		return false
 	}
 }
 
-// lowercase converts ASCII uppercase to lowercase, leaves other bytes unchanged.
+// lowercase converts ASCII uppercase to lowercase.
 func lowercase(b byte) byte {
 	if b >= 'A' && b <= 'Z' {
 		return b + ('a' - 'A')
 	}
 	return b
+}
+
+// isIndexable returns true if the token should be indexed.
+// Excludes numeric-like tokens and UUIDs.
+func isIndexable(tok []byte) bool {
+	if isNumeric(tok) {
+		return false
+	}
+	if isUUID(tok) {
+		return false
+	}
+	return true
+}
+
+// isNumeric returns true if tok looks like a number in any common base.
+// This includes pure decimal, hex (0x prefix or all hex digits), octal, binary.
+// Also catches hex-with-hyphens (like UUIDs or partial UUIDs).
+func isNumeric(tok []byte) bool {
+	if len(tok) == 0 {
+		return false
+	}
+
+	// Check for prefixed forms: 0x, 0o, 0b
+	if len(tok) >= 2 && tok[0] == '0' {
+		switch tok[1] {
+		case 'x', 'b':
+			// 0x... or 0b... - check rest are valid digits
+			return isPrefixedNumber(tok)
+		case 'o':
+			// 0o... octal
+			return isPrefixedNumber(tok)
+		}
+	}
+
+	// Check if all characters are hex digits or hyphens
+	// This catches: "15", "404", "deadbeef", "a1b2c3d4", "019c0bc0-d19f-77db", etc.
+	allHexOrHyphen := true
+	hasHex := false
+	for _, b := range tok {
+		if isHexDigit(b) {
+			hasHex = true
+		} else if b != '-' {
+			allHexOrHyphen = false
+			break
+		}
+	}
+	if allHexOrHyphen && hasHex {
+		return true
+	}
+
+	return false
+}
+
+// isPrefixedNumber checks if tok is a valid 0x/0o/0b prefixed number.
+func isPrefixedNumber(tok []byte) bool {
+	if len(tok) < 3 {
+		return false
+	}
+	base := tok[1]
+	for _, b := range tok[2:] {
+		switch base {
+		case 'x':
+			if !isHexDigit(b) {
+				return false
+			}
+		case 'o':
+			if b < '0' || b > '7' {
+				return false
+			}
+		case 'b':
+			if b != '0' && b != '1' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// isHexDigit returns true if b is 0-9 or a-f.
+func isHexDigit(b byte) bool {
+	return (b >= '0' && b <= '9') || (b >= 'a' && b <= 'f')
+}
+
+// isUUID checks if tok matches the canonical UUID format: 8-4-4-4-12 hex digits.
+// Example: 019c0bc0-d19f-77db-bbdf-4c36766e13ca
+func isUUID(tok []byte) bool {
+	// UUID is exactly 36 bytes: 8 + 1 + 4 + 1 + 4 + 1 + 4 + 1 + 12
+	if len(tok) != 36 {
+		return false
+	}
+
+	// Check hyphens at positions 8, 13, 18, 23
+	if tok[8] != '-' || tok[13] != '-' || tok[18] != '-' || tok[23] != '-' {
+		return false
+	}
+
+	// Check hex digits at all other positions
+	for i, b := range tok {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			continue
+		}
+		if !isHexDigit(b) {
+			return false
+		}
+	}
+
+	return true
 }

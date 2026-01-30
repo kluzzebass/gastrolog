@@ -730,7 +730,8 @@ func TestIndexerCaseFolding(t *testing.T) {
 func TestIndexerShortTokensSkipped(t *testing.T) {
 	src := chunk.NewSourceID()
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte("a bb ccc")},
+		// "a" is 1 char (skipped), "zz" and "zzz" are 2+ chars and not hex
+		{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte("a zz zzz")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -752,7 +753,7 @@ func TestIndexerShortTokensSkipped(t *testing.T) {
 		t.Fatalf("decode index: %v", err)
 	}
 
-	// "a" should be skipped (1 char), "bb" and "ccc" kept
+	// "a" should be skipped (1 char), "zz" and "zzz" kept
 	if len(entries) != 2 {
 		t.Fatalf("expected 2 entries, got %d", len(entries))
 	}
@@ -791,9 +792,10 @@ func TestOpenReader(t *testing.T) {
 	}
 }
 
-func TestIndexerHighByteTokens(t *testing.T) {
+func TestIndexerHighBytesAreDelimiters(t *testing.T) {
 	src := chunk.NewSourceID()
-	// German umlauts: "über" and "größe" contain high bytes
+	// High bytes (UTF-8) are now delimiters, so "über" becomes "ber" and "größe" becomes "gr" and "e"
+	// Only ASCII alphanumeric, underscore, and hyphen are token characters
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte("über größe")},
 	}
@@ -811,9 +813,11 @@ func TestIndexerHighByteTokens(t *testing.T) {
 		t.Fatalf("load index: %v", err)
 	}
 
-	// Should have 2 tokens
+	// "über" -> "ber" (3 chars, 'g' not hex -> kept)
+	// "größe" -> "gr" (2 chars, 'g' not hex -> kept), "e" (1 char -> skipped)
+	// So "ber" and "gr" should be indexed
 	if len(entries) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(entries))
+		t.Fatalf("expected 2 entries, got %d: %v", len(entries), entries)
 	}
 
 	// Verify we can look them up via reader
@@ -822,26 +826,26 @@ func TestIndexerHighByteTokens(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 
-	// The tokens should be lowercased but high bytes preserved
-	_, found := reader.Lookup("über")
+	_, found := reader.Lookup("ber")
 	if !found {
-		t.Fatal("expected to find token 'über'")
+		t.Fatal("expected to find token 'ber'")
 	}
-	_, found = reader.Lookup("größe")
+	_, found = reader.Lookup("gr")
 	if !found {
-		t.Fatal("expected to find token 'größe'")
+		t.Fatal("expected to find token 'gr'")
 	}
 }
 
-func TestIndexerLongToken(t *testing.T) {
+func TestIndexerLongTokenTruncated(t *testing.T) {
 	src := chunk.NewSourceID()
-	// Create a long token (200 chars)
-	longToken := ""
+	// Create a long token (200 chars) using 'z' (not hex)
+	// Max token length is 16, so it should be truncated
+	longInput := ""
 	for i := 0; i < 200; i++ {
-		longToken += "a"
+		longInput += "z"
 	}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte(longToken)},
+		{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte(longInput)},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -860,8 +864,9 @@ func TestIndexerLongToken(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(entries))
 	}
-	if entries[0].Token != longToken {
-		t.Fatalf("token mismatch: expected len %d, got len %d", len(longToken), len(entries[0].Token))
+	// Token should be truncated to 16 characters
+	if len(entries[0].Token) != 16 {
+		t.Fatalf("expected token length 16, got %d", len(entries[0].Token))
 	}
 }
 

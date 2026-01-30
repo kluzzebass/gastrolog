@@ -27,14 +27,24 @@ func TestSimpleBasic(t *testing.T) {
 			want:  []string{"hello", "world"},
 		},
 		{
-			name:  "with numbers",
+			name:  "pure numbers excluded",
 			input: "error 404 not found",
-			want:  []string{"error", "404", "not", "found"},
+			want:  []string{"error", "not", "found"},
 		},
 		{
-			name:  "punctuation splits",
+			name:  "hyphen kept in token",
+			input: "user-agent mozilla",
+			want:  []string{"user-agent", "mozilla"},
+		},
+		{
+			name:  "underscore kept in token",
+			input: "user_id timeout",
+			want:  []string{"user_id", "timeout"},
+		},
+		{
+			name:  "colon splits",
 			input: "user-agent: mozilla/5.0",
-			want:  []string{"user", "agent", "mozilla"},
+			want:  []string{"user-agent", "mozilla"},
 		},
 		{
 			name:  "json-like",
@@ -42,14 +52,14 @@ func TestSimpleBasic(t *testing.T) {
 			want:  []string{"level", "error", "msg", "failed"},
 		},
 		{
-			name:  "key=value",
+			name:  "key=value with number suffix kept",
 			input: "status=200 duration=15ms",
-			want:  []string{"status", "200", "duration", "15ms"},
+			want:  []string{"status", "duration", "15ms"},
 		},
 		{
 			name:  "single char tokens skipped",
 			input: "a b c de fg",
-			want:  []string{"de", "fg"},
+			want:  []string{"fg"}, // "de" is pure hex, excluded
 		},
 		{
 			name:  "empty input",
@@ -58,12 +68,12 @@ func TestSimpleBasic(t *testing.T) {
 		},
 		{
 			name:  "only delimiters",
-			input: "   ---   ",
+			input: "   ...   ",
 			want:  nil,
 		},
 		{
 			name:  "only single chars",
-			input: "a b c 1 2 3",
+			input: "a b c",
 			want:  nil,
 		},
 		{
@@ -83,26 +93,46 @@ func TestSimpleBasic(t *testing.T) {
 	}
 }
 
-func TestSimpleHighBytes(t *testing.T) {
+func TestNumericExclusion(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
 		want  []string
 	}{
 		{
-			name:  "german umlauts",
-			input: "Größe überschritten",
-			want:  []string{"größe", "überschritten"},
+			name:  "decimal excluded",
+			input: "15 404 99999",
+			want:  nil,
 		},
 		{
-			name:  "mixed ascii and utf8",
-			input: "error: Verbindungsfehler aufgetreten",
-			want:  []string{"error", "verbindungsfehler", "aufgetreten"},
+			name:  "hex prefix excluded",
+			input: "0xdeadbeef 0x1234",
+			want:  nil,
 		},
 		{
-			name:  "non-breaking space splits",
-			input: "hello\xA0world", // 0xA0 non-breaking space (raw byte)
-			want:  []string{"hello", "world"},
+			name:  "octal prefix excluded",
+			input: "0o755 0o644",
+			want:  nil,
+		},
+		{
+			name:  "binary prefix excluded",
+			input: "0b101010 0b1111",
+			want:  nil,
+		},
+		{
+			name:  "pure hex excluded",
+			input: "deadbeef a1b2c3d4 cafe",
+			want:  nil,
+		},
+		{
+			name:  "mixed with letters kept",
+			input: "15ms timeout 404error",
+			want:  []string{"15ms", "timeout", "404error"},
+		},
+		{
+			name:  "hex-like with g kept",
+			input: "deadbeeg cafeg",
+			want:  []string{"deadbeeg", "cafeg"},
 		},
 	}
 
@@ -116,51 +146,140 @@ func TestSimpleHighBytes(t *testing.T) {
 	}
 }
 
-func TestIsWordByte(t *testing.T) {
+func TestUUIDExclusion(t *testing.T) {
+	// UUIDs and hex-with-hyphens are excluded by the numeric rule.
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{
+			name:  "uuid excluded",
+			input: "id=019c0bc0-d19f-77db-bbdf-4c36766e13ca",
+			want:  []string{"id"}, // hex with hyphens, excluded
+		},
+		{
+			name:  "short uuid-like excluded",
+			input: "id=0000-1111-2222",
+			want:  []string{"id"}, // hex with hyphens, excluded
+		},
+		{
+			name:  "pure hex excluded",
+			input: "019c0bc0d19f77dbbbdf4c36766e13ca",
+			want:  nil, // pure hex, excluded
+		},
+		{
+			name:  "hex with hyphens excluded",
+			input: "dead-beef-cafe",
+			want:  nil, // hex with hyphens, excluded
+		},
+		{
+			name:  "not hex kept",
+			input: "hello-world",
+			want:  []string{"hello-world"}, // has non-hex letters
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Simple([]byte(tt.input))
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Simple(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHighBytesExcluded(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{
+			name:  "utf8 splits token",
+			input: "Größe überschritten",
+			want:  []string{"gr", "berschritten"}, // ö and ü are high bytes (multi-byte UTF-8), act as delimiters
+		},
+		{
+			name:  "pure ascii extracted",
+			input: "error: 日本語 message",
+			want:  []string{"error", "message"},
+		},
+		{
+			name:  "emoji splits",
+			input: "fire🔥error",
+			want:  []string{"fire", "error"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Simple([]byte(tt.input))
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Simple(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMaxTokenLength(t *testing.T) {
+	// Token longer than 16 bytes should be truncated
+	long := "abcdefghijklmnopqrstuvwxyz"
+	got := Simple([]byte(long))
+	if len(got) != 1 {
+		t.Fatalf("expected 1 token, got %d", len(got))
+	}
+	if len(got[0]) != 16 {
+		t.Errorf("expected token length 16, got %d", len(got[0]))
+	}
+}
+
+func TestIsTokenByte(t *testing.T) {
 	// ASCII lowercase
 	for b := byte('a'); b <= 'z'; b++ {
-		if !isWordByte(b) {
-			t.Errorf("isWordByte(%c) = false, want true", b)
+		if !isTokenByte(b) {
+			t.Errorf("isTokenByte(%c) = false, want true", b)
 		}
 	}
 
 	// ASCII uppercase
 	for b := byte('A'); b <= 'Z'; b++ {
-		if !isWordByte(b) {
-			t.Errorf("isWordByte(%c) = false, want true", b)
+		if !isTokenByte(b) {
+			t.Errorf("isTokenByte(%c) = false, want true", b)
 		}
 	}
 
 	// Digits
 	for b := byte('0'); b <= '9'; b++ {
-		if !isWordByte(b) {
-			t.Errorf("isWordByte(%c) = false, want true", b)
+		if !isTokenByte(b) {
+			t.Errorf("isTokenByte(%c) = false, want true", b)
 		}
 	}
 
-	// High bytes (except 0xA0)
-	for b := byte(0x80); b <= 0x9F; b++ {
-		if !isWordByte(b) {
-			t.Errorf("isWordByte(0x%02X) = false, want true", b)
-		}
+	// Underscore and hyphen
+	if !isTokenByte('_') {
+		t.Error("isTokenByte('_') = false, want true")
 	}
-	if isWordByte(0xA0) {
-		t.Error("isWordByte(0xA0) = true, want false (non-breaking space)")
+	if !isTokenByte('-') {
+		t.Error("isTokenByte('-') = false, want true")
 	}
-	for b := byte(0xA1); b != 0; b++ { // 0xA1 to 0xFF, wraps to 0
-		if !isWordByte(b) {
-			t.Errorf("isWordByte(0x%02X) = false, want true", b)
+
+	// High bytes excluded
+	for b := byte(0x80); b != 0; b++ {
+		if isTokenByte(b) {
+			t.Errorf("isTokenByte(0x%02X) = true, want false", b)
 		}
 		if b == 0xFF {
 			break
 		}
 	}
 
-	// Delimiters
-	delimiters := []byte{' ', '\t', '\n', '\r', '.', ',', ':', ';', '!', '?', '"', '\'', '(', ')', '[', ']', '{', '}', '/', '\\', '=', '+', '-', '*', '&', '^', '%', '$', '#', '@', '`', '~', '<', '>', '|'}
+	// Punctuation excluded
+	delimiters := []byte{' ', '\t', '\n', '\r', '.', ',', ':', ';', '!', '?', '"', '\'', '(', ')', '[', ']', '{', '}', '/', '\\', '=', '+', '*', '&', '^', '%', '$', '#', '@', '`', '~', '<', '>', '|'}
 	for _, b := range delimiters {
-		if isWordByte(b) {
-			t.Errorf("isWordByte(%c) = true, want false", b)
+		if isTokenByte(b) {
+			t.Errorf("isTokenByte(%c) = true, want false", b)
 		}
 	}
 }
@@ -188,9 +307,95 @@ func TestLowercase(t *testing.T) {
 			t.Errorf("lowercase(%c) = %c, want %c", b, lowercase(b), b)
 		}
 	}
+}
 
-	// High bytes unchanged (no Unicode lowercasing)
-	if lowercase(0xC4) != 0xC4 { // Ä in Latin-1
-		t.Errorf("lowercase(0xC4) changed, should be unchanged")
+func TestIsNumeric(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"15", true},
+		{"404", true},
+		{"0", true},
+		{"0x1234", true},
+		{"0xdeadbeef", true},
+		{"0o755", true},
+		{"0b101010", true},
+		{"deadbeef", true},
+		{"a1b2c3d4", true},
+		{"cafe", true},
+		{"dead-beef", true},      // hex with hyphens
+		{"0000-1111-2222", true}, // hex with hyphens (UUID-like)
+		{"15ms", false},
+		{"timeout", false},
+		{"hello-world", false}, // has non-hex letters
+		{"deadbeeg", false},    // 'g' is not hex
+		{"0xghij", false},      // invalid hex
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := isNumeric([]byte(tt.input))
+			if got != tt.want {
+				t.Errorf("isNumeric(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsUUID(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"019c0bc0-d19f-77db-bbdf-4c36766e13ca", true},
+		{"00000000-0000-0000-0000-000000000000", true},
+		{"ffffffff-ffff-ffff-ffff-ffffffffffff", true},
+		{"019c0bc0d19f77dbbbdf4c36766e13ca", false},      // no hyphens
+		{"019c0bc0-d19f-77db-bbdf-4c36766e13c", false},   // too short
+		{"019c0bc0-d19f-77db-bbdf-4c36766e13caa", false}, // too long
+		{"019c0bc0-d19f-77db-bbdf-4c36766e13cg", false},  // 'g' not hex
+		{"hello-world", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := isUUID([]byte(tt.input))
+			if got != tt.want {
+				t.Errorf("isUUID(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIterBytes(t *testing.T) {
+	input := "hello world timeout"
+	var tokens []string
+	buf := make([]byte, 0, 64)
+
+	IterBytes([]byte(input), buf, DefaultMaxTokenLen, func(tok []byte) bool {
+		tokens = append(tokens, string(tok))
+		return true
+	})
+
+	want := []string{"hello", "world", "timeout"}
+	if !reflect.DeepEqual(tokens, want) {
+		t.Errorf("IterBytes(%q) = %v, want %v", input, tokens, want)
+	}
+}
+
+func TestIterBytesEarlyStop(t *testing.T) {
+	input := "one two three four"
+	var tokens []string
+	buf := make([]byte, 0, 64)
+
+	IterBytes([]byte(input), buf, DefaultMaxTokenLen, func(tok []byte) bool {
+		tokens = append(tokens, string(tok))
+		return len(tokens) < 2 // stop after 2
+	})
+
+	want := []string{"one", "two"}
+	if !reflect.DeepEqual(tokens, want) {
+		t.Errorf("IterBytes early stop: got %v, want %v", tokens, want)
 	}
 }

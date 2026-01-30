@@ -16,6 +16,11 @@ import (
 var ErrMissingDir = errors.New("file chunk manager dir is required")
 var ErrMultipleActiveChunks = errors.New("multiple active chunks found")
 var ErrManagerClosed = errors.New("manager is closed")
+var ErrChunkTooLarge = errors.New("chunk would exceed 4GB limit")
+
+// MaxChunkSize is the hard limit for chunk size (4GB).
+// Record positions are stored as uint32, so chunks cannot exceed this.
+const MaxChunkSize = 1 << 32 // 4GB
 
 // Default meta flush interval.
 const DefaultMetaFlushInterval = 5 * time.Second
@@ -300,10 +305,19 @@ func (m *Manager) loadExisting() error {
 }
 
 func (m *Manager) shouldRotate(nextSize int64) bool {
-	if m.active == nil || m.cfg.MaxChunkBytes <= 0 {
+	if m.active == nil {
 		return false
 	}
-	return m.active.meta.Size+nextSize > m.cfg.MaxChunkBytes
+	newSize := m.active.meta.Size + nextSize
+	// Always rotate if we would exceed 4GB hard limit.
+	if newSize > MaxChunkSize {
+		return true
+	}
+	// Rotate if configured max is set and exceeded.
+	if m.cfg.MaxChunkBytes > 0 && newSize > m.cfg.MaxChunkBytes {
+		return true
+	}
+	return false
 }
 
 func (m *Manager) openLocked() error {

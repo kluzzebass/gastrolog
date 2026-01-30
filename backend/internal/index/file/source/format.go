@@ -17,18 +17,18 @@ import (
 )
 
 const (
-	currentVersion = 0x01
+	currentVersion = 0x02 // v2: uint32 positions
 
 	chunkIDSize  = 16
 	keyCountSize = 4
 	headerSize   = format.HeaderSize + chunkIDSize + keyCountSize
 
 	sourceIDSize      = 16
-	postingOffsetSize = 8
+	postingOffsetSize = 4 // uint32 byte offset into posting blob
 	postingCountSize  = 4
 	keyEntrySize      = sourceIDSize + postingOffsetSize + postingCountSize
 
-	positionSize = 8
+	positionSize = 4 // uint32 (4GB max chunk size)
 
 	indexFileName = "_source.idx"
 )
@@ -89,14 +89,14 @@ func encodeIndex(chunkID chunk.ChunkID, entries []index.SourceIndexEntry) []byte
 		copy(buf[keyCursor:keyCursor+sourceIDSize], uid[:])
 		keyCursor += sourceIDSize
 
-		binary.LittleEndian.PutUint64(buf[keyCursor:keyCursor+postingOffsetSize], uint64(postingOffset))
+		binary.LittleEndian.PutUint32(buf[keyCursor:keyCursor+postingOffsetSize], uint32(postingOffset))
 		keyCursor += postingOffsetSize
 
 		binary.LittleEndian.PutUint32(buf[keyCursor:keyCursor+postingCountSize], uint32(len(e.Positions)))
 		keyCursor += postingCountSize
 
 		for _, pos := range e.Positions {
-			binary.LittleEndian.PutUint64(buf[postingCursor:postingCursor+positionSize], pos)
+			binary.LittleEndian.PutUint32(buf[postingCursor:postingCursor+positionSize], uint32(pos))
 			postingCursor += positionSize
 		}
 
@@ -144,7 +144,7 @@ func decodeIndex(chunkID chunk.ChunkID, data []byte) ([]index.SourceIndexEntry, 
 		entries[i].SourceID = chunk.SourceID(uid)
 		cursor += sourceIDSize
 
-		pOffset := int(binary.LittleEndian.Uint64(data[cursor : cursor+postingOffsetSize]))
+		pOffset := int(binary.LittleEndian.Uint32(data[cursor : cursor+postingOffsetSize]))
 		cursor += postingOffsetSize
 
 		pCount := int(binary.LittleEndian.Uint32(data[cursor : cursor+postingCountSize]))
@@ -158,7 +158,7 @@ func decodeIndex(chunkID chunk.ChunkID, data []byte) ([]index.SourceIndexEntry, 
 		entries[i].Positions = make([]uint64, pCount)
 		pCursor := postingBlobStart + pOffset
 		for j := 0; j < pCount; j++ {
-			entries[i].Positions[j] = binary.LittleEndian.Uint64(data[pCursor : pCursor+positionSize])
+			entries[i].Positions[j] = uint64(binary.LittleEndian.Uint32(data[pCursor : pCursor+positionSize]))
 			pCursor += positionSize
 		}
 	}

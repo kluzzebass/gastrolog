@@ -16,12 +16,12 @@ import (
 )
 
 const (
-	currentVersion = 0x01
+	currentVersion = 0x02 // v2: uint32 positions
 
 	chunkIDSize    = 16
 	entryCountSize = 4
 	timestampSize  = 8
-	recordPosSize  = 8
+	recordPosSize  = 4 // uint32 (4GB max chunk size)
 
 	headerSize = format.HeaderSize + chunkIDSize + entryCountSize
 	entrySize  = timestampSize + recordPosSize
@@ -66,7 +66,7 @@ func encodeIndex(chunkID chunk.ChunkID, entries []index.TimeIndexEntry) []byte {
 	for _, e := range entries {
 		binary.LittleEndian.PutUint64(buf[cursor:cursor+timestampSize], uint64(e.Timestamp.UnixMicro()))
 		cursor += timestampSize
-		binary.LittleEndian.PutUint64(buf[cursor:cursor+recordPosSize], e.RecordPos)
+		binary.LittleEndian.PutUint32(buf[cursor:cursor+recordPosSize], uint32(e.RecordPos))
 		cursor += recordPosSize
 	}
 
@@ -105,7 +105,7 @@ func decodeIndex(chunkID chunk.ChunkID, data []byte) ([]index.TimeIndexEntry, er
 		micros := int64(binary.LittleEndian.Uint64(data[cursor : cursor+timestampSize]))
 		entries[i].Timestamp = gotime.UnixMicro(micros)
 		cursor += timestampSize
-		entries[i].RecordPos = binary.LittleEndian.Uint64(data[cursor : cursor+recordPosSize])
+		entries[i].RecordPos = uint64(binary.LittleEndian.Uint32(data[cursor : cursor+recordPosSize]))
 		cursor += recordPosSize
 	}
 

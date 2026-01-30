@@ -149,7 +149,7 @@ func TestIndexerBuildEmptyChunk(t *testing.T) {
 func TestIndexerBuildNoTokensInRecord(t *testing.T) {
 	sourceID := chunk.NewSourceID()
 	records := []chunk.Record{
-		{SourceID: sourceID, Raw: []byte("... --- ...")}, // only delimiters and single chars
+		{SourceID: sourceID, Raw: []byte("a . b : c")}, // only single chars and delimiters
 	}
 
 	manager, chunkID := setupChunkManager(t, records)

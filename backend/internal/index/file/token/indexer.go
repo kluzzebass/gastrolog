@@ -69,7 +69,7 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	// PASS 1: Count token occurrences, intern all distinct tokens.
 	pass1Start := time.Now()
 	intern := newTokenIntern()
-	counts, err := t.countTokens(ctx, chunkID, intern)
+	counts, recordCount, err := t.countTokens(ctx, chunkID, intern)
 	if err != nil {
 		return fmt.Errorf("pass 1 (count): %w", err)
 	}
@@ -96,15 +96,15 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	// Compute each token's offset into the posting blob, and its write cursor.
 	// fileOffset[tok] = absolute file position where this token's postings start
 	// writeIdx[tok] = how many positions written so far for this token
-	fileOffset := make(map[string]int64, len(counts))
+	fileOffset := make(map[string]uint32, len(counts))
 	writeIdx := make(map[string]uint32, len(counts))
-	offset := postingBlobStart
+	offset := uint32(postingBlobStart)
 	for _, tok := range sortedTokens {
 		fileOffset[tok] = offset
 		writeIdx[tok] = 0
-		offset += int64(counts[tok]) * positionSize
+		offset += counts[tok] * positionSize
 	}
-	totalFileSize := offset
+	totalFileSize := int64(offset)
 
 	// Create temp file and pre-allocate space.
 	chunkDir := filepath.Join(t.dir, chunkID.String())
@@ -134,14 +134,14 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	}
 
 	// Write key table.
-	postingOffset := int64(0) // relative offset within posting blob
+	postingOffset := uint32(0) // relative offset within posting blob
 	for _, tok := range sortedTokens {
-		if err := writeKeyEntry(tmpFile, tok, uint64(postingOffset), counts[tok]); err != nil {
+		if err := writeKeyEntry(tmpFile, tok, postingOffset, counts[tok]); err != nil {
 			tmpFile.Close()
 			os.Remove(tmpName)
 			return fmt.Errorf("write key entry: %w", err)
 		}
-		postingOffset += int64(counts[tok]) * positionSize
+		postingOffset += counts[tok] * positionSize
 	}
 
 	// PASS 2: Write positions directly to file at pre-computed offsets.
@@ -170,6 +170,7 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 		"chunk_start", meta.StartTS,
 		"chunk_end", meta.EndTS,
 		"chunk_duration", meta.EndTS.Sub(meta.StartTS),
+		"records", recordCount,
 		"tokens", len(counts),
 		"positions", totalPositions,
 		"file_size", totalFileSize,
@@ -279,7 +280,7 @@ func writeIndexHeader(w *os.File, chunkID chunk.ChunkID, keyCount uint32) error 
 }
 
 // writeKeyEntry writes a single key table entry.
-func writeKeyEntry(w *os.File, tok string, postingOffset uint64, postingCount uint32) error {
+func writeKeyEntry(w *os.File, tok string, postingOffset uint32, postingCount uint32) error {
 	buf := make([]byte, tokenLenSize+len(tok)+postingOffsetSize+postingCountSize)
 	cursor := 0
 
@@ -289,7 +290,7 @@ func writeKeyEntry(w *os.File, tok string, postingOffset uint64, postingCount ui
 	copy(buf[cursor:cursor+len(tok)], tok)
 	cursor += len(tok)
 
-	binary.LittleEndian.PutUint64(buf[cursor:cursor+postingOffsetSize], postingOffset)
+	binary.LittleEndian.PutUint32(buf[cursor:cursor+postingOffsetSize], postingOffset)
 	cursor += postingOffsetSize
 
 	binary.LittleEndian.PutUint32(buf[cursor:cursor+postingCountSize], postingCount)
@@ -300,15 +301,16 @@ func writeKeyEntry(w *os.File, tok string, postingOffset uint64, postingCount ui
 
 // countTokens performs pass 1: count occurrences of each token.
 // All tokens are interned via the intern pool.
-// Returns map[interned_token]count.
-func (t *Indexer) countTokens(ctx context.Context, chunkID chunk.ChunkID, intern *tokenIntern) (map[string]uint32, error) {
+// Returns map[interned_token]count and total record count.
+func (t *Indexer) countTokens(ctx context.Context, chunkID chunk.ChunkID, intern *tokenIntern) (map[string]uint32, uint64, error) {
 	cursor, err := t.manager.OpenCursor(chunkID)
 	if err != nil {
-		return nil, fmt.Errorf("open cursor: %w", err)
+		return nil, 0, fmt.Errorf("open cursor: %w", err)
 	}
 	defer cursor.Close()
 
 	counts := make(map[string]uint32)
+	var recordCount uint64
 
 	// Reusable per-record deduplication buffer.
 	// Stores interned string pointers, cleared between records.
@@ -319,7 +321,7 @@ func (t *Indexer) countTokens(ctx context.Context, chunkID chunk.ChunkID, intern
 
 	for {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 
 		rec, _, err := cursor.Next()
@@ -327,13 +329,14 @@ func (t *Indexer) countTokens(ctx context.Context, chunkID chunk.ChunkID, intern
 			if err == chunk.ErrNoMoreRecords {
 				break
 			}
-			return nil, fmt.Errorf("read record: %w", err)
+			return nil, 0, fmt.Errorf("read record: %w", err)
 		}
+		recordCount++
 
 		// Clear seen set for this record (reuse map to avoid allocs).
 		clear(seenInRecord)
 
-		token.IterBytes(rec.Raw, tokBuf, func(tokBytes []byte) bool {
+		token.IterBytes(rec.Raw, tokBuf, token.DefaultMaxTokenLen, func(tokBytes []byte) bool {
 			// Intern the token (allocates only on first global occurrence).
 			tok := intern.intern(tokBytes)
 
@@ -348,12 +351,12 @@ func (t *Indexer) countTokens(ctx context.Context, chunkID chunk.ChunkID, intern
 		})
 	}
 
-	return counts, nil
+	return counts, recordCount, nil
 }
 
 // fillPostingsToFile performs pass 2: write positions directly to mmap'd file.
 // Uses only interned tokens from pass 1. No posting lists held in memory.
-func (t *Indexer) fillPostingsToFile(ctx context.Context, chunkID chunk.ChunkID, intern *tokenIntern, f *os.File, fileOffset map[string]int64, writeIdx map[string]uint32, fileSize int64) error {
+func (t *Indexer) fillPostingsToFile(ctx context.Context, chunkID chunk.ChunkID, intern *tokenIntern, f *os.File, fileOffset map[string]uint32, writeIdx map[string]uint32, fileSize int64) error {
 	cursor, err := t.manager.OpenCursor(chunkID)
 	if err != nil {
 		return fmt.Errorf("open cursor: %w", err)
@@ -389,7 +392,7 @@ func (t *Indexer) fillPostingsToFile(ctx context.Context, chunkID chunk.ChunkID,
 		// Clear seen set for this record.
 		clear(seenInRecord)
 
-		token.IterBytes(rec.Raw, tokBuf, func(tokBytes []byte) bool {
+		token.IterBytes(rec.Raw, tokBuf, token.DefaultMaxTokenLen, func(tokBytes []byte) bool {
 			// Look up the interned token (no allocation).
 			tok := intern.lookup(tokBytes)
 
@@ -401,8 +404,8 @@ func (t *Indexer) fillPostingsToFile(ctx context.Context, chunkID chunk.ChunkID,
 
 			// Write position directly to mmap'd memory.
 			idx := writeIdx[tok]
-			offset := fileOffset[tok] + int64(idx)*positionSize
-			binary.LittleEndian.PutUint64(data[offset:], ref.Pos)
+			offset := fileOffset[tok] + idx*positionSize
+			binary.LittleEndian.PutUint32(data[offset:], uint32(ref.Pos))
 			writeIdx[tok] = idx + 1
 			return true
 		})
