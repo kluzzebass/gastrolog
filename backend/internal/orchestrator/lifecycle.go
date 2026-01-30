@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"sync"
 
 	"gastrolog/internal/chunk"
 )
@@ -133,4 +134,67 @@ func (o *Orchestrator) processMessage(msg IngestMessage) {
 
 	// Route to chunk managers (reuses existing Ingest logic).
 	_ = o.ingest(rec)
+}
+
+// RebuildMissingIndexes checks all sealed chunks and rebuilds indexes for any
+// that are incomplete. This should be called before Start() to recover from
+// interrupted index builds.
+func (o *Orchestrator) RebuildMissingIndexes(ctx context.Context) error {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(o.chunks))
+
+	for storeID, cm := range o.chunks {
+		im, ok := o.indexes[storeID]
+		if !ok {
+			continue
+		}
+
+		metas, err := cm.List()
+		if err != nil {
+			return err
+		}
+
+		for _, meta := range metas {
+			if !meta.Sealed {
+				continue
+			}
+
+			complete, err := im.IndexesComplete(meta.ID)
+			if err != nil {
+				return err
+			}
+
+			if !complete {
+				wg.Add(1)
+				go func(storeID string, chunkID chunk.ChunkID) {
+					defer wg.Done()
+					o.logger.Info("rebuilding missing indexes",
+						"store", storeID,
+						"chunk", chunkID.String())
+					if err := im.BuildIndexes(ctx, chunkID); err != nil {
+						o.logger.Error("failed to rebuild indexes",
+							"store", storeID,
+							"chunk", chunkID.String(),
+							"error", err)
+						errCh <- err
+					}
+				}(storeID, meta.ID)
+			}
+		}
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	// Return first error if any.
+	for err := range errCh {
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

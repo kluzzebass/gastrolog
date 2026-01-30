@@ -253,10 +253,20 @@ func decodeIndex(chunkID chunk.ChunkID, data []byte) ([]index.TokenIndexEntry, e
 }
 
 func LoadIndex(dir string, chunkID chunk.ChunkID) ([]index.TokenIndexEntry, error) {
-	path := filepath.Join(dir, chunkID.String(), indexFileName)
+	path := IndexPath(dir, chunkID)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read token index: %w", err)
 	}
 	return decodeIndex(chunkID, data)
+}
+
+// IndexPath returns the path to the token index file for a chunk.
+func IndexPath(dir string, chunkID chunk.ChunkID) string {
+	return filepath.Join(dir, chunkID.String(), indexFileName)
+}
+
+// TempFilePattern returns the glob pattern for temporary index files.
+func TempFilePattern(dir string, chunkID chunk.ChunkID) string {
+	return filepath.Join(dir, chunkID.String(), indexFileName+".tmp.*")
 }

@@ -81,3 +81,20 @@ func (m *Manager) OpenTokenIndex(chunkID chunk.ChunkID) (*index.Index[index.Toke
 	}
 	return index.NewIndex(entries), nil
 }
+
+// IndexesComplete reports whether all indexes exist for the given chunk.
+// For in-memory indexes, this checks if all stores have entries for the chunk.
+func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
+	if _, ok := m.timeStore.Get(chunkID); !ok {
+		return false, nil
+	}
+	if _, ok := m.sourceStore.Get(chunkID); !ok {
+		return false, nil
+	}
+	if m.tokenStore != nil {
+		if _, ok := m.tokenStore.Get(chunkID); !ok {
+			return false, nil
+		}
+	}
+	return true, nil
+}

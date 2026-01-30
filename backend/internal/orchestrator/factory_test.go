@@ -44,6 +44,9 @@ func (f *fakeIndexManager) OpenSourceIndex(chunkID chunk.ChunkID) (*index.Index[
 func (f *fakeIndexManager) OpenTokenIndex(chunkID chunk.ChunkID) (*index.Index[index.TokenIndexEntry], error) {
 	return nil, nil
 }
+func (f *fakeIndexManager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
+	return true, nil
+}
 
 // fakeReceiver implements Receiver for testing.
 type fakeReceiver struct{}

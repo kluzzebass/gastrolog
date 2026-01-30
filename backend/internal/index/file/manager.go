@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
@@ -67,4 +69,48 @@ func (m *Manager) OpenTokenIndex(chunkID chunk.ChunkID) (*index.Index[index.Toke
 		return nil, fmt.Errorf("open token index: %w", err)
 	}
 	return index.NewIndex(entries), nil
+}
+
+// IndexesComplete reports whether all indexes exist for the given chunk.
+// Also cleans up any orphaned temporary files from interrupted builds.
+func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
+	// Check if all index files exist.
+	indexPaths := []string{
+		filetime.IndexPath(m.dir, chunkID),
+		filesource.IndexPath(m.dir, chunkID),
+		filetoken.IndexPath(m.dir, chunkID),
+	}
+
+	for _, path := range indexPaths {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return false, nil
+		} else if err != nil {
+			return false, err
+		}
+	}
+
+	// Clean up orphaned temp files.
+	tempPatterns := []string{
+		filetime.TempFilePattern(m.dir, chunkID),
+		filesource.TempFilePattern(m.dir, chunkID),
+		filetoken.TempFilePattern(m.dir, chunkID),
+	}
+
+	for _, pattern := range tempPatterns {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			return false, err
+		}
+		for _, match := range matches {
+			if err := os.Remove(match); err != nil {
+				m.logger.Warn("failed to remove orphaned temp file",
+					"path", match,
+					"error", err)
+			} else {
+				m.logger.Info("removed orphaned temp file", "path", match)
+			}
+		}
+	}
+
+	return true, nil
 }

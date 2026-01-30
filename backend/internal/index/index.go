@@ -75,4 +75,9 @@ type IndexManager interface {
 	OpenTimeIndex(chunkID chunk.ChunkID) (*Index[TimeIndexEntry], error)
 	OpenSourceIndex(chunkID chunk.ChunkID) (*Index[SourceIndexEntry], error)
 	OpenTokenIndex(chunkID chunk.ChunkID) (*Index[TokenIndexEntry], error)
+
+	// IndexesComplete reports whether all indexes exist for the given chunk.
+	// Returns true if all indexes are present, false if any are missing.
+	// May clean up orphaned temporary files as a side effect.
+	IndexesComplete(chunkID chunk.ChunkID) (bool, error)
 }

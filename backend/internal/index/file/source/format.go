@@ -167,10 +167,20 @@ func decodeIndex(chunkID chunk.ChunkID, data []byte) ([]index.SourceIndexEntry, 
 }
 
 func LoadIndex(dir string, chunkID chunk.ChunkID) ([]index.SourceIndexEntry, error) {
-	path := filepath.Join(dir, chunkID.String(), indexFileName)
+	path := IndexPath(dir, chunkID)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read source index: %w", err)
 	}
 	return decodeIndex(chunkID, data)
+}
+
+// IndexPath returns the path to the source index file for a chunk.
+func IndexPath(dir string, chunkID chunk.ChunkID) string {
+	return filepath.Join(dir, chunkID.String(), indexFileName)
+}
+
+// TempFilePattern returns the glob pattern for temporary index files.
+func TempFilePattern(dir string, chunkID chunk.ChunkID) string {
+	return filepath.Join(dir, chunkID.String(), indexFileName+".tmp.*")
 }
