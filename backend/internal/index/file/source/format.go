@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	currentVersion = 0x02 // v2: uint32 positions
+	currentVersion = 0x01
 
 	chunkIDSize  = 16
 	keyCountSize = 4

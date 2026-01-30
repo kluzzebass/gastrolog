@@ -25,7 +25,7 @@ Index files and the meta file share a common header prefix:
 |-----------|------|------------------------------------------|
 | signature | 1    | Always `0x69` (`'i'`)                    |
 | type      | 1    | File type: `'m'` meta, `'t'` time, `'s'` source, `'k'` token |
-| version   | 1    | Format version (`0x01`)                  |
+| version   | 1    | Format version (file-type specific)      |
 | flags     | 1    | Bit flags (file-type specific)           |
 
 ---
@@ -176,6 +176,8 @@ The leading and trailing size fields enable bidirectional cursor traversal: forw
 
 Sparse time index mapping sampled timestamps to record positions within a chunk. Only built for sealed chunks.
 
+Positions are stored as uint32, limiting chunk size to 4GB.
+
 ### Layout
 
 ```
@@ -203,14 +205,14 @@ Sparse time index mapping sampled timestamps to record positions within a chunk.
 | 4      | 16   | chunkID    | Chunk UUID (raw bytes)             |
 | 20     | 4    | entryCount | Number of index entries (uint32)   |
 
-### Entry (16 bytes each)
+### Entry (12 bytes each)
 
 | Offset | Size | Field     | Description                          |
 |--------|------|-----------|--------------------------------------|
 | 0      | 8    | timestamp | Record timestamp (int64 Unix micros) |
-| 8      | 8    | recordPos | Byte offset into records.log (uint64)|
+| 8      | 4    | recordPos | Byte offset into records.log (uint32)|
 
-**Total file size: 24 + (entryCount x 16) bytes**
+**Total file size: 24 + (entryCount x 12) bytes**
 
 Entries are written in cursor traversal order (the order records appear in `records.log`). A sparsity parameter controls how many records are sampled: with sparsity N, every N-th record is indexed (plus the first record always).
 
@@ -219,6 +221,8 @@ Entries are written in cursor traversal order (the order records appear in `reco
 ## _source.idx -- Source Index
 
 Inverted index mapping each `SourceID` to the list of record positions where that source appears within a chunk. Only built for sealed chunks.
+
+Positions are stored as uint32, limiting chunk size to 4GB.
 
 ### Layout
 
@@ -230,7 +234,7 @@ Inverted index mapping each `SourceID` to the list of record positions where tha
 |  (keyCount entries)       |
 +---------------------------+
 |     Posting Blob          |
-|  (flat uint64 positions)  |
+|  (flat uint32 positions)  |
 +---------------------------+
 ```
 
@@ -245,29 +249,40 @@ Inverted index mapping each `SourceID` to the list of record positions where tha
 | 4      | 16   | chunkID  | Chunk UUID (raw bytes)             |
 | 20     | 4    | keyCount | Number of distinct sources (uint32)|
 
-### Key Table Entry (28 bytes each)
+### Key Table Entry (24 bytes each)
 
 | Offset | Size | Field         | Description                                  |
 |--------|------|---------------|----------------------------------------------|
 | 0      | 16   | sourceID      | Source UUID (raw bytes)                       |
-| 16     | 8    | postingOffset | Byte offset into posting blob (uint64)       |
-| 24     | 4    | postingCount  | Number of positions for this source (uint32) |
+| 16     | 4    | postingOffset | Byte offset into posting blob (uint32)       |
+| 20     | 4    | postingCount  | Number of positions for this source (uint32) |
 
 Key entries are sorted by `sourceID` string representation for deterministic output and binary search.
 
 ### Posting Blob
 
-Flat array of `uint64` record positions (8 bytes each). Each key entry references a contiguous slice of this blob via `postingOffset` (byte offset from the start of the posting blob) and `postingCount` (number of positions).
+Flat array of `uint32` record positions (4 bytes each). Each key entry references a contiguous slice of this blob via `postingOffset` (byte offset from the start of the posting blob) and `postingCount` (number of positions).
 
-**Total file size: 24 + (keyCount x 28) + (totalPositions x 8) bytes**
+**Total file size: 24 + (keyCount x 24) + (totalPositions x 4) bytes**
 
 ---
 
 ## _token.idx -- Token Index
 
-Inverted index mapping each token (lowercase word) to the list of record positions where that token appears within a chunk. Only built for sealed chunks.
+Inverted index mapping each token to the list of record positions where that token appears within a chunk. Only built for sealed chunks.
 
-Tokens are extracted using a simple tokenizer: split on non-alphanumeric characters, convert to lowercase, deduplicate.
+Positions are stored as uint32, limiting chunk size to 4GB.
+
+### Tokenization Rules
+
+Tokens are extracted with the following rules:
+
+- **Valid characters**: ASCII only: a-z, A-Z (lowercased), 0-9, underscore, hyphen
+- **Length**: 2-16 bytes (configurable max)
+- **Excluded**: Numeric tokens (decimal, hex, octal, binary), hex-with-hyphens patterns
+- **Delimiter**: Any byte outside the valid character set (including high bytes ≥0x80)
+
+Each record is deduplicated: a token appears at most once per record in the posting list.
 
 ### Layout
 
@@ -279,7 +294,7 @@ Tokens are extracted using a simple tokenizer: split on non-alphanumeric charact
 |  (keyCount entries)       |
 +---------------------------+
 |     Posting Blob          |
-|  (flat uint64 positions)  |
+|  (flat uint32 positions)  |
 +---------------------------+
 ```
 
@@ -299,17 +314,17 @@ Tokens are extracted using a simple tokenizer: split on non-alphanumeric charact
 | Offset | Size      | Field         | Description                                  |
 |--------|-----------|---------------|----------------------------------------------|
 | 0      | 2         | tokenLen      | Length of token string (uint16)              |
-| 2      | tokenLen  | token         | Token string (UTF-8 bytes)                   |
-| 2+N    | 8         | postingOffset | Byte offset into posting blob (uint64)       |
-| 10+N   | 4         | postingCount  | Number of positions for this token (uint32)  |
+| 2      | tokenLen  | token         | Token string (UTF-8 bytes, lowercased)       |
+| 2+N    | 4         | postingOffset | Byte offset into posting blob (uint32)       |
+| 6+N    | 4         | postingCount  | Number of positions for this token (uint32)  |
 
 Key entries are sorted by token string for deterministic output and binary search.
 
 ### Posting Blob
 
-Flat array of `uint64` record positions (8 bytes each). Each key entry references a contiguous slice of this blob via `postingOffset` (byte offset from the start of the posting blob) and `postingCount` (number of positions).
+Flat array of `uint32` record positions (4 bytes each). Each key entry references a contiguous slice of this blob via `postingOffset` (byte offset from the start of the posting blob) and `postingCount` (number of positions).
 
-**Total file size: 24 + (sum of key entry sizes) + (totalPositions x 8) bytes**
+**Total file size: 24 + (sum of key entry sizes) + (totalPositions x 4) bytes**
 
 ---
 
