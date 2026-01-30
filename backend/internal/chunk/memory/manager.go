@@ -194,4 +194,41 @@ func (m *Manager) findChunkLocked(id chunk.ChunkID) *chunkState {
 	return nil
 }
 
+// FindStartPosition binary searches for the record at or before the given timestamp.
+// Uses WriteTS for the search since it's monotonically increasing within a chunk.
+func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	m.mu.Lock()
+	state := m.findChunkLocked(id)
+	m.mu.Unlock()
+	if state == nil {
+		return 0, false, chunk.ErrChunkNotFound
+	}
+
+	if len(state.records) == 0 {
+		return 0, false, nil
+	}
+
+	// Quick bounds check.
+	if ts.Before(state.records[0].WriteTS) {
+		return 0, false, nil
+	}
+
+	// Binary search for the latest record with WriteTS <= ts.
+	lo, hi := 0, len(state.records)
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		if state.records[mid].WriteTS.After(ts) {
+			hi = mid
+		} else {
+			lo = mid + 1
+		}
+	}
+
+	if lo == 0 {
+		return 0, false, nil
+	}
+
+	return uint64(lo - 1), true, nil
+}
+
 var _ chunk.ChunkManager = (*Manager)(nil)

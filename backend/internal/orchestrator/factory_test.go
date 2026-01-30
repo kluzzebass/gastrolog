@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"testing"
+	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
@@ -24,6 +25,9 @@ func (f *fakeChunkManager) Meta(id chunk.ChunkID) (chunk.ChunkMeta, error) {
 }
 func (f *fakeChunkManager) List() ([]chunk.ChunkMeta, error)                        { return nil, nil }
 func (f *fakeChunkManager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) { return nil, nil }
+func (f *fakeChunkManager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	return 0, false, nil
+}
 
 // fakeIndexManager implements index.IndexManager for testing.
 type fakeIndexManager struct{}

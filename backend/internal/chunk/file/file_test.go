@@ -490,3 +490,98 @@ func TestRotationOnMaxChunkBytes(t *testing.T) {
 		t.Errorf("Expected %d sealed chunks, got %d", len(metas)-1, sealedCount)
 	}
 }
+
+func TestFindStartPosition(t *testing.T) {
+	dir := t.TempDir()
+
+	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	currentTime := baseTime
+
+	mgr, err := NewManager(Config{
+		Dir: dir,
+		Now: func() time.Time {
+			t := currentTime
+			currentTime = currentTime.Add(time.Second)
+			return t
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer mgr.Close()
+
+	sourceID := chunk.NewSourceID()
+	var chunkID chunk.ChunkID
+
+	// Append 10 records with timestamps 1 second apart
+	for i := 0; i < 10; i++ {
+		id, _, err := mgr.Append(chunk.Record{
+			IngestTS: baseTime.Add(time.Duration(i) * time.Second),
+			SourceID: sourceID,
+			Raw:      []byte("record"),
+		})
+		if err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+		chunkID = id
+	}
+
+	tests := []struct {
+		name      string
+		ts        time.Time
+		wantPos   uint64
+		wantFound bool
+	}{
+		{
+			name:      "before all records",
+			ts:        baseTime.Add(-time.Hour),
+			wantPos:   0,
+			wantFound: false,
+		},
+		{
+			name:      "exactly first record",
+			ts:        baseTime,
+			wantPos:   0,
+			wantFound: true,
+		},
+		{
+			name:      "between first and second",
+			ts:        baseTime.Add(500 * time.Millisecond),
+			wantPos:   0,
+			wantFound: true,
+		},
+		{
+			name:      "exactly fifth record",
+			ts:        baseTime.Add(4 * time.Second),
+			wantPos:   4,
+			wantFound: true,
+		},
+		{
+			name:      "after last record",
+			ts:        baseTime.Add(time.Hour),
+			wantPos:   9,
+			wantFound: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pos, found, err := mgr.FindStartPosition(chunkID, tt.ts)
+			if err != nil {
+				t.Fatalf("FindStartPosition: %v", err)
+			}
+			if found != tt.wantFound {
+				t.Errorf("found: got %v, want %v", found, tt.wantFound)
+			}
+			if found && pos != tt.wantPos {
+				t.Errorf("pos: got %d, want %d", pos, tt.wantPos)
+			}
+		})
+	}
+
+	// Test with non-existent chunk
+	_, _, err = mgr.FindStartPosition(chunk.NewChunkID(), baseTime)
+	if err != chunk.ErrChunkNotFound {
+		t.Errorf("Expected ErrChunkNotFound for non-existent chunk, got %v", err)
+	}
+}

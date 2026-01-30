@@ -183,17 +183,35 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, meta chunk.Chu
 func (e *Engine) buildScanner(cursor chunk.RecordCursor, q Query, meta chunk.ChunkMeta, startPos *uint64) (iter.Seq2[recordWithRef, error], error) {
 	b := newScannerBuilder(meta.ID)
 
-	// Set minimum position from time index (for sealed chunks) or resume position.
+	// Set minimum position from time index or binary search on idx.log.
 	lower, _ := q.TimeBounds()
-	if meta.Sealed && !lower.IsZero() {
-		timeIdx, err := e.indexes.OpenTimeIndex(meta.ID)
-		if err == nil {
-			reader := index.NewTimeIndexReader(meta.ID, timeIdx.Entries())
-			if seekRef, found := reader.FindStart(lower); found {
-				b.setMinPosition(seekRef.Pos)
+	if !lower.IsZero() {
+		var foundPos bool
+		var pos uint64
+
+		// Try time index first (only available for sealed chunks).
+		if meta.Sealed {
+			timeIdx, err := e.indexes.OpenTimeIndex(meta.ID)
+			if err == nil {
+				reader := index.NewTimeIndexReader(meta.ID, timeIdx.Entries())
+				if seekRef, found := reader.FindStart(lower); found {
+					pos = seekRef.Pos
+					foundPos = true
+				}
 			}
 		}
-		// If time index not available, we'll filter at runtime (time bounds are always checked).
+
+		// Fall back to binary search on idx.log (works for both sealed and unsealed).
+		if !foundPos {
+			if p, found, err := e.chunks.FindStartPosition(meta.ID, lower); err == nil && found {
+				pos = p
+				foundPos = true
+			}
+		}
+
+		if foundPos {
+			b.setMinPosition(pos)
+		}
 	}
 
 	// Resume position takes precedence over time-based start.

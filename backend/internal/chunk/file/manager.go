@@ -617,4 +617,64 @@ func (m *Manager) loadSourceMap(id chunk.ChunkID) (*SourceMap, error) {
 	return sourceMap, nil
 }
 
+// FindStartPosition binary searches idx.log for the record at or before the given timestamp.
+// Uses WriteTS for the search since it's monotonically increasing within a chunk.
+func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	m.mu.Lock()
+	meta, ok := m.metas[id]
+	m.mu.Unlock()
+	if !ok {
+		return 0, false, chunk.ErrChunkNotFound
+	}
+
+	// Quick bounds check using cached time bounds.
+	if ts.Before(meta.startTS) {
+		return 0, false, nil // Before all records
+	}
+
+	idxPath := m.idxLogPath(id)
+	idxFile, err := os.Open(idxPath)
+	if err != nil {
+		return 0, false, err
+	}
+	defer idxFile.Close()
+
+	info, err := idxFile.Stat()
+	if err != nil {
+		return 0, false, err
+	}
+	recordCount := RecordCount(info.Size())
+	if recordCount == 0 {
+		return 0, false, nil
+	}
+
+	// Binary search for the latest entry with WriteTS <= ts.
+	// We're looking for the rightmost position where WriteTS <= ts.
+	lo, hi := uint64(0), recordCount
+	var entryBuf [IdxEntrySize]byte
+
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+
+		offset := IdxFileOffset(mid)
+		if _, err := idxFile.ReadAt(entryBuf[:], offset); err != nil {
+			return 0, false, err
+		}
+		entry := DecodeIdxEntry(entryBuf[:])
+
+		if entry.WriteTS.After(ts) {
+			hi = mid
+		} else {
+			lo = mid + 1
+		}
+	}
+
+	// lo is the count of entries with WriteTS <= ts.
+	if lo == 0 {
+		return 0, false, nil
+	}
+
+	return lo - 1, true, nil
+}
+
 var _ chunk.ChunkManager = (*Manager)(nil)

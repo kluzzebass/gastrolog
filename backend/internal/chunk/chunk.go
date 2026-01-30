@@ -4,7 +4,10 @@
 // RecordCursor provides bidirectional iteration over records.
 package chunk
 
-import "errors"
+import (
+	"errors"
+	"time"
+)
 
 var (
 	ErrNoMoreRecords  = errors.New("no more records")
@@ -28,6 +31,11 @@ type ChunkManager interface {
 	Meta(id ChunkID) (ChunkMeta, error)
 	List() ([]ChunkMeta, error)
 	OpenCursor(id ChunkID) (RecordCursor, error)
+
+	// FindStartPosition binary searches for the record index at or before the given timestamp.
+	// Returns (pos, true, nil) if found, (0, false, nil) if timestamp is before all records.
+	// This enables time-based seeking without requiring the time index to be built.
+	FindStartPosition(id ChunkID, ts time.Time) (uint64, bool, error)
 }
 
 // RecordCursor provides bidirectional iteration over records in a chunk.
