@@ -2,6 +2,8 @@ package memory
 
 import (
 	"testing"
+
+	"gastrolog/internal/chunk"
 )
 
 func TestFactoryDefaultValues(t *testing.T) {
@@ -17,8 +19,23 @@ func TestFactoryDefaultValues(t *testing.T) {
 		t.Fatal("expected *Manager")
 	}
 
-	if mgr.cfg.MaxRecords != DefaultMaxRecords {
-		t.Errorf("expected MaxRecords=%d, got %d", DefaultMaxRecords, mgr.cfg.MaxRecords)
+	// Verify rotation policy is set
+	if mgr.cfg.RotationPolicy == nil {
+		t.Fatal("expected RotationPolicy to be set")
+	}
+
+	// Test that default policy triggers rotation at default record count
+	state := chunk.ActiveChunkState{Records: DefaultMaxRecords}
+	next := chunk.Record{Raw: []byte("x")}
+
+	if !mgr.cfg.RotationPolicy.ShouldRotate(state, next) {
+		t.Error("expected rotation policy to trigger at default max records")
+	}
+
+	// Under limit should not rotate
+	state.Records = DefaultMaxRecords - 1
+	if mgr.cfg.RotationPolicy.ShouldRotate(state, next) {
+		t.Error("should not rotate when under limit")
 	}
 }
 
@@ -37,8 +54,17 @@ func TestFactoryCustomValues(t *testing.T) {
 		t.Fatal("expected *Manager")
 	}
 
-	if mgr.cfg.MaxRecords != 2048 {
-		t.Errorf("expected MaxRecords=2048, got %d", mgr.cfg.MaxRecords)
+	// Test that custom policy works
+	state := chunk.ActiveChunkState{Records: 2047}
+	next := chunk.Record{Raw: []byte("x")}
+
+	if mgr.cfg.RotationPolicy.ShouldRotate(state, next) {
+		t.Error("should not rotate when under limit")
+	}
+
+	state.Records = 2048
+	if !mgr.cfg.RotationPolicy.ShouldRotate(state, next) {
+		t.Error("should rotate when at limit")
 	}
 }
 

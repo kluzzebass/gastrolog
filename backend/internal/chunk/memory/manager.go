@@ -10,9 +10,12 @@ import (
 )
 
 type Config struct {
-	MaxRecords int64
-	Now        func() time.Time
-	MetaStore  chunk.MetaStore
+	// RotationPolicy determines when to rotate to a new chunk.
+	// If nil, defaults to a record count policy of 10000 records.
+	RotationPolicy chunk.RotationPolicy
+
+	Now       func() time.Time
+	MetaStore chunk.MetaStore
 
 	// Logger for structured logging. If nil, logging is disabled.
 	// The manager scopes this logger with component="chunk-manager".
@@ -38,9 +41,10 @@ type Manager struct {
 }
 
 type chunkState struct {
-	meta    chunk.ChunkMeta
-	records []chunk.Record
-	size    int64
+	meta      chunk.ChunkMeta
+	records   []chunk.Record
+	size      int64
+	createdAt time.Time // Wall-clock time when chunk was created
 }
 
 func NewManager(cfg Config) (*Manager, error) {
@@ -49,6 +53,9 @@ func NewManager(cfg Config) (*Manager, error) {
 	}
 	if cfg.MetaStore == nil {
 		cfg.MetaStore = NewMetaStore()
+	}
+	if cfg.RotationPolicy == nil {
+		cfg.RotationPolicy = chunk.NewRecordCountPolicy(10000)
 	}
 
 	// Scope logger with component identity.
@@ -66,7 +73,16 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.active == nil || m.shouldRotate(1) {
+	// Ensure we have an active chunk.
+	if m.active == nil {
+		if err := m.openLocked(); err != nil {
+			return chunk.ChunkID{}, 0, err
+		}
+	}
+
+	// Check rotation policy before append.
+	state := m.activeChunkState()
+	if m.cfg.RotationPolicy.ShouldRotate(state, record) {
 		if err := m.sealLocked(); err != nil {
 			return chunk.ChunkID{}, 0, err
 		}
@@ -90,6 +106,23 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 	}
 
 	return m.active.meta.ID, offset, nil
+}
+
+// activeChunkState returns an immutable snapshot of the active chunk state.
+func (m *Manager) activeChunkState() chunk.ActiveChunkState {
+	if m.active == nil {
+		return chunk.ActiveChunkState{}
+	}
+	// For memory manager, Bytes approximates record storage (simplified).
+	// In practice, memory chunks don't have the same byte-level concerns as file chunks.
+	return chunk.ActiveChunkState{
+		ChunkID:     m.active.meta.ID,
+		StartTS:     m.active.meta.StartTS,
+		LastWriteTS: m.active.meta.EndTS,
+		CreatedAt:   m.active.createdAt,
+		Bytes:       uint64(m.active.size), // Record count used as proxy for bytes in memory
+		Records:     uint64(m.active.size),
+	}
 }
 
 func (m *Manager) Seal() error {
@@ -143,13 +176,6 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	return newRecordReader(state.records, id), nil
 }
 
-func (m *Manager) shouldRotate(nextCount int64) bool {
-	if m.active == nil || m.cfg.MaxRecords <= 0 {
-		return false
-	}
-	return m.active.meta.RecordCount+nextCount > m.cfg.MaxRecords
-}
-
 func (m *Manager) openLocked() error {
 	id := chunk.NewChunkID()
 	meta := chunk.ChunkMeta{ID: id}
@@ -157,9 +183,10 @@ func (m *Manager) openLocked() error {
 		return err
 	}
 	m.active = &chunkState{
-		meta:    meta,
-		records: nil,
-		size:    0,
+		meta:      meta,
+		records:   nil,
+		size:      0,
+		createdAt: m.cfg.Now(),
 	}
 	m.chunks = append(m.chunks, m.active)
 	return nil

@@ -91,8 +91,8 @@ func TestManagerAppendAndCursor(t *testing.T) {
 	dir := t.TempDir()
 
 	mgr, err := NewManager(Config{
-		Dir:           dir,
-		MaxChunkBytes: 1 << 20, // 1MB
+		Dir:            dir,
+		RotationPolicy: chunk.NewSizePolicy(1 << 20), // 1MB
 	})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
@@ -166,8 +166,8 @@ func TestManagerSealAndMmapCursor(t *testing.T) {
 	dir := t.TempDir()
 
 	mgr, err := NewManager(Config{
-		Dir:           dir,
-		MaxChunkBytes: 1 << 20,
+		Dir:            dir,
+		RotationPolicy: chunk.NewSizePolicy(1 << 20),
 	})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
@@ -230,8 +230,8 @@ func TestCursorSeekAndPrev(t *testing.T) {
 	dir := t.TempDir()
 
 	mgr, err := NewManager(Config{
-		Dir:           dir,
-		MaxChunkBytes: 1 << 20,
+		Dir:            dir,
+		RotationPolicy: chunk.NewSizePolicy(1 << 20),
 	})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
@@ -323,8 +323,8 @@ func TestEmptyChunkCursor(t *testing.T) {
 	dir := t.TempDir()
 
 	mgr, err := NewManager(Config{
-		Dir:           dir,
-		MaxChunkBytes: 1 << 20,
+		Dir:            dir,
+		RotationPolicy: chunk.NewSizePolicy(1 << 20),
 	})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
@@ -445,8 +445,8 @@ func TestRotationOnMaxChunkBytes(t *testing.T) {
 
 	// Very small max to force rotation
 	mgr, err := NewManager(Config{
-		Dir:           dir,
-		MaxChunkBytes: 50, // Will fit ~1 record
+		Dir:            dir,
+		RotationPolicy: chunk.NewSizePolicy(50), // Will fit ~1 record
 	})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
@@ -591,7 +591,10 @@ func TestFindStartPosition(t *testing.T) {
 	dir := t.TempDir()
 
 	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	currentTime := baseTime
+	// Start 1 second before baseTime to account for Now() call when opening the chunk.
+	// First call: createdAt = baseTime-1s, then increments to baseTime.
+	// Second call (first record): WriteTS = baseTime.
+	currentTime := baseTime.Add(-time.Second)
 
 	mgr, err := NewManager(Config{
 		Dir: dir,

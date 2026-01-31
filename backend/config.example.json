@@ -1,0 +1,33 @@
+{
+  "stores": [
+    {
+      "id": "default",
+      "type": "file",
+      "params": {
+        "dir": "./data/chunks",
+        "max_chunk_bytes": "1048576",
+        "max_chunk_age": "30s"
+      }
+    }
+  ],
+  "receivers": [
+    {
+      "id": "chatterbox",
+      "type": "chatterbox",
+      "params": {
+        "min_interval": "10ms",
+        "max_interval": "50ms",
+        "instance": "test",
+        "formats": "plain,json,kv",
+        "host_count": "5",
+        "service_count": "3"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "receiverId": "chatterbox",
+      "storeId": "default"
+    }
+  ]
+}

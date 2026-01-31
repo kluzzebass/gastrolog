@@ -31,10 +31,14 @@ var (
 )
 
 type Config struct {
-	Dir           string
-	MaxChunkBytes int64 // Soft limit for raw.log size (0 = no soft limit)
-	FileMode      os.FileMode
-	Now           func() time.Time
+	Dir      string
+	FileMode os.FileMode
+	Now      func() time.Time
+
+	// RotationPolicy determines when to rotate chunks.
+	// If nil, a default policy with 4GB hard limits is used.
+	// Use chunk.NewCompositePolicy to combine multiple policies.
+	RotationPolicy chunk.RotationPolicy
 
 	// Logger for structured logging. If nil, logging is disabled.
 	// The manager scopes this logger with component="chunk-manager".
@@ -93,9 +97,10 @@ type chunkState struct {
 	rawFile     *os.File
 	idxFile     *os.File
 	attrFile    *os.File
-	rawOffset   uint64 // Current write position in raw.log (after header)
-	attrOffset  uint64 // Current write position in attr.log (after header)
-	recordCount uint64 // Number of records written
+	rawOffset   uint64    // Current write position in raw.log (after header)
+	attrOffset  uint64    // Current write position in attr.log (after header)
+	recordCount uint64    // Number of records written
+	createdAt   time.Time // Wall-clock time when chunk was opened
 }
 
 const lockFileName = ".lock"
@@ -109,6 +114,10 @@ func NewManager(cfg Config) (*Manager, error) {
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
+	}
+	if cfg.RotationPolicy == nil {
+		// Default policy: only hard limits (4GB for uint32 offsets)
+		cfg.RotationPolicy = chunk.NewHardLimitPolicy(MaxRawLogSize, MaxAttrLogSize)
 	}
 
 	if err := os.MkdirAll(cfg.Dir, 0o755); err != nil {
@@ -151,16 +160,24 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 		return chunk.ChunkID{}, 0, ErrManagerClosed
 	}
 
-	// Encode attributes upfront to check size limits.
+	// Encode attributes upfront to check size limits and for policy decisions.
 	attrBytes, err := record.Attrs.Encode()
 	if err != nil {
 		return chunk.ChunkID{}, 0, err
 	}
 
-	rawLen := uint64(len(record.Raw))
-	attrLen := uint64(len(attrBytes))
+	// Ensure we have an active chunk.
+	if m.active == nil {
+		if err := m.openLocked(); err != nil {
+			return chunk.ChunkID{}, 0, err
+		}
+	}
 
-	if m.active == nil || m.shouldRotate(rawLen, attrLen) {
+	// Build state snapshot for rotation decision.
+	state := m.activeChunkState()
+
+	// Check rotation policy before append.
+	if m.cfg.RotationPolicy.ShouldRotate(state, record) {
 		if err := m.sealLocked(); err != nil {
 			return chunk.ChunkID{}, 0, err
 		}
@@ -172,6 +189,9 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 	// WriteTS is assigned by the chunk manager, not the caller.
 	// Monotonic by construction since writes are mutex-serialized.
 	record.WriteTS = m.cfg.Now()
+
+	rawLen := uint64(len(record.Raw))
+	attrLen := uint64(len(attrBytes))
 
 	// Write raw data to raw.log.
 	n, err := m.active.rawFile.Write(record.Raw)
@@ -224,6 +244,27 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 	m.active.meta.endTS = record.WriteTS
 
 	return m.active.meta.id, recordIndex, nil
+}
+
+// activeChunkState creates an immutable snapshot of the active chunk's state.
+// Must be called with m.mu held.
+func (m *Manager) activeChunkState() chunk.ActiveChunkState {
+	if m.active == nil {
+		return chunk.ActiveChunkState{}
+	}
+
+	// Calculate total on-disk bytes: raw + attrs + idx entries
+	// (not counting headers, which are fixed overhead)
+	totalBytes := m.active.rawOffset + m.active.attrOffset + (m.active.recordCount * IdxEntrySize)
+
+	return chunk.ActiveChunkState{
+		ChunkID:     m.active.meta.id,
+		StartTS:     m.active.meta.startTS,
+		LastWriteTS: m.active.meta.endTS,
+		CreatedAt:   m.active.createdAt,
+		Bytes:       totalBytes,
+		Records:     m.active.recordCount,
+	}
 }
 
 func (m *Manager) Seal() error {
@@ -502,6 +543,7 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 		rawOffset:   rawOffset,
 		attrOffset:  attrOffset,
 		recordCount: recordCount,
+		createdAt:   m.cfg.Now(), // Use current time for reopened chunks (original creation time unknown)
 	}
 
 	return nil
@@ -566,27 +608,6 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 	return meta, nil
 }
 
-func (m *Manager) shouldRotate(rawLen, attrLen uint64) bool {
-	if m.active == nil {
-		return false
-	}
-
-	newRawOffset := m.active.rawOffset + rawLen
-	newAttrOffset := m.active.attrOffset + attrLen
-
-	// Hard limit: raw.log and attr.log must stay under 4GB (uint32 max for offset fields).
-	if newRawOffset > MaxRawLogSize || newAttrOffset > MaxAttrLogSize {
-		return true
-	}
-
-	// Soft limit: user-configurable max chunk size (applies to raw.log only).
-	if m.cfg.MaxChunkBytes > 0 && newRawOffset > uint64(m.cfg.MaxChunkBytes) {
-		return true
-	}
-
-	return false
-}
-
 func (m *Manager) openLocked() error {
 	id := chunk.NewChunkID()
 	chunkDir := m.chunkDir(id)
@@ -628,6 +649,7 @@ func (m *Manager) openLocked() error {
 		rawOffset:   0, // Data starts after header
 		attrOffset:  0, // Data starts after header
 		recordCount: 0,
+		createdAt:   m.cfg.Now(), // Wall-clock time when chunk was opened
 	}
 	m.metas[id] = meta
 	return nil

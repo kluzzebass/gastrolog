@@ -13,12 +13,19 @@ import (
 
 func setupChunkManager(t *testing.T, records []chunk.Record) (chunk.ChunkManager, chunk.ChunkID) {
 	t.Helper()
-	callIdx := 0
+	// recordIdx tracks which record's timestamp to return for WriteTS.
+	// skipNext handles the initial Now() call for createdAt (before first Append).
+	recordIdx := 0
+	skipNext := true
 	manager, err := chunkmemory.NewManager(chunkmemory.Config{
 		Now: func() gotime.Time {
-			if callIdx < len(records) {
-				ts := records[callIdx].IngestTS
-				callIdx++
+			if skipNext {
+				skipNext = false
+				return gotime.UnixMicro(0) // createdAt value (ignored by tests)
+			}
+			if recordIdx < len(records) {
+				ts := records[recordIdx].IngestTS
+				recordIdx++
 				return ts
 			}
 			return gotime.Now()

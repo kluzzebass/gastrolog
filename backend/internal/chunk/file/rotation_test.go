@@ -18,10 +18,10 @@ import (
 func TestRotationOnMaxChunkBytesWithAttributes(t *testing.T) {
 	dir := t.TempDir()
 
-	// Small MaxChunkBytes to trigger rotation quickly
+	// Small size policy to trigger rotation quickly
 	manager, err := NewManager(Config{
-		Dir:           dir,
-		MaxChunkBytes: 500, // Very small
+		Dir:            dir,
+		RotationPolicy: chunk.NewSizePolicy(500), // Very small
 	})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
@@ -111,8 +111,8 @@ func TestRotationPreservesAttributesAcrossChunks(t *testing.T) {
 	dir := t.TempDir()
 
 	manager, err := NewManager(Config{
-		Dir:           dir,
-		MaxChunkBytes: 200, // Small to force rotation
+		Dir:            dir,
+		RotationPolicy: chunk.NewSizePolicy(200), // Small to force rotation
 	})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)

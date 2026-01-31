@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 
 	"gastrolog/internal/chunk"
 )
@@ -13,6 +14,7 @@ import (
 const (
 	ParamDir           = "dir"
 	ParamMaxChunkBytes = "max_chunk_bytes"
+	ParamMaxChunkAge   = "max_chunk_age"
 	ParamFileMode      = "file_mode"
 )
 
@@ -35,11 +37,17 @@ func NewFactory() chunk.ManagerFactory {
 		}
 
 		cfg := Config{
-			Dir:           dir,
-			MaxChunkBytes: DefaultMaxChunkBytes,
-			FileMode:      DefaultFileMode,
+			Dir:      dir,
+			FileMode: DefaultFileMode,
 		}
 
+		// Build rotation policy from params
+		var policies []chunk.RotationPolicy
+
+		// Always include hard limits first (they always win)
+		policies = append(policies, chunk.NewHardLimitPolicy(MaxRawLogSize, MaxAttrLogSize))
+
+		// Add size policy if specified
 		if v, ok := params[ParamMaxChunkBytes]; ok {
 			n, err := strconv.ParseInt(v, 10, 64)
 			if err != nil {
@@ -48,8 +56,25 @@ func NewFactory() chunk.ManagerFactory {
 			if n <= 0 {
 				return nil, fmt.Errorf("invalid %s: must be positive", ParamMaxChunkBytes)
 			}
-			cfg.MaxChunkBytes = n
+			policies = append(policies, chunk.NewSizePolicy(uint64(n)))
+		} else {
+			// Use default size limit
+			policies = append(policies, chunk.NewSizePolicy(DefaultMaxChunkBytes))
 		}
+
+		// Add age policy if specified
+		if v, ok := params[ParamMaxChunkAge]; ok {
+			d, err := time.ParseDuration(v)
+			if err != nil {
+				return nil, fmt.Errorf("invalid %s: %w", ParamMaxChunkAge, err)
+			}
+			if d <= 0 {
+				return nil, fmt.Errorf("invalid %s: must be positive", ParamMaxChunkAge)
+			}
+			policies = append(policies, chunk.NewAgePolicy(d, nil))
+		}
+
+		cfg.RotationPolicy = chunk.NewCompositePolicy(policies...)
 
 		if v, ok := params[ParamFileMode]; ok {
 			n, err := strconv.ParseUint(v, 8, 32)

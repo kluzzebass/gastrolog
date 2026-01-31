@@ -87,15 +87,36 @@ func fakeClock(records []chunk.Record) func() time.Time {
 	}
 }
 
+// fakeClockForBatches creates a clock that handles interleaved chunk opens and appends.
+// For each batch, the first Now() call is for createdAt (returns dummy), the rest are for records.
+func fakeClockForBatches(batches [][]chunk.Record) func() time.Time {
+	// Build a sequence of timestamps: for each batch, [dummy, record1, record2, ...]
+	var seq []time.Time
+	for _, batch := range batches {
+		seq = append(seq, time.UnixMicro(0)) // dummy for createdAt
+		for _, rec := range batch {
+			seq = append(seq, rec.IngestTS)
+		}
+	}
+	idx := 0
+	return func() time.Time {
+		if idx < len(seq) {
+			ts := seq[idx]
+			idx++
+			return ts
+		}
+		return time.Now()
+	}
+}
+
 // setup creates a memory chunk manager, appends records, seals the chunk,
 // and wires up a memory index manager. Returns the query engine ready to use.
 func setup(t *testing.T, batches ...[]chunk.Record) *query.Engine {
 	t.Helper()
 
-	all := allRecords(batches)
 	cm, err := chunkmem.NewManager(chunkmem.Config{
-		MaxRecords: 10000, // Large enough to not auto-rotate
-		Now:        fakeClock(all),
+		RotationPolicy: chunk.NewRecordCountPolicy(10000), // Large enough to not auto-rotate
+		Now:            fakeClockForBatches(batches),
 	})
 	if err != nil {
 		t.Fatalf("new chunk manager: %v", err)
@@ -131,10 +152,11 @@ func setup(t *testing.T, batches ...[]chunk.Record) *query.Engine {
 func setupWithActive(t *testing.T, sealed [][]chunk.Record, active []chunk.Record) *query.Engine {
 	t.Helper()
 
-	all := append(allRecords(sealed), active...)
+	// Combine sealed batches with active batch for clock generation
+	allBatches := append(sealed, active)
 	cm, err := chunkmem.NewManager(chunkmem.Config{
-		MaxRecords: 10000,
-		Now:        fakeClock(all),
+		RotationPolicy: chunk.NewRecordCountPolicy(10000),
+		Now:            fakeClockForBatches(allBatches),
 	})
 	if err != nil {
 		t.Fatalf("new chunk manager: %v", err)
@@ -1869,10 +1891,9 @@ func TestSearchSealedWithoutIndexes(t *testing.T) {
 	}
 
 	// Create chunk manager and append records.
-	all := records
 	cm, err := chunkmem.NewManager(chunkmem.Config{
-		MaxRecords: 10000,
-		Now:        fakeClock(all),
+		RotationPolicy: chunk.NewRecordCountPolicy(10000),
+		Now:            fakeClockForBatches([][]chunk.Record{records}),
 	})
 	if err != nil {
 		t.Fatalf("new chunk manager: %v", err)

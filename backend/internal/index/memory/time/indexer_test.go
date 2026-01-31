@@ -11,12 +11,19 @@ import (
 
 func setupChunkManager(t *testing.T, records []chunk.Record) (chunk.ChunkManager, chunk.ChunkID) {
 	t.Helper()
-	callIdx := 0
+	// recordIdx tracks which record's timestamp to return for WriteTS.
+	// skipNext handles the initial Now() call for createdAt (before first Append).
+	recordIdx := 0
+	skipNext := true
 	manager, err := chunkmemory.NewManager(chunkmemory.Config{
 		Now: func() gotime.Time {
-			if callIdx < len(records) {
-				ts := records[callIdx].IngestTS
-				callIdx++
+			if skipNext {
+				skipNext = false
+				return gotime.UnixMicro(0) // createdAt value (ignored by tests)
+			}
+			if recordIdx < len(records) {
+				ts := records[recordIdx].IngestTS
+				recordIdx++
 				return ts
 			}
 			return gotime.Now()
@@ -257,10 +264,13 @@ func TestIndexerCancelledContextNoPartialData(t *testing.T) {
 }
 
 func TestIndexerMultipleChunks(t *testing.T) {
+	// Now() is called for: chunk1 createdAt, record1 WriteTS, chunk2 createdAt, record2 WriteTS, record3 WriteTS
 	writeTSValues := []gotime.Time{
-		gotime.UnixMicro(100),
-		gotime.UnixMicro(200),
-		gotime.UnixMicro(300),
+		gotime.UnixMicro(50),  // chunk1 createdAt (ignored)
+		gotime.UnixMicro(100), // record1 WriteTS
+		gotime.UnixMicro(150), // chunk2 createdAt (ignored)
+		gotime.UnixMicro(200), // record2 WriteTS
+		gotime.UnixMicro(300), // record3 WriteTS
 	}
 	callIdx := 0
 	manager, err := chunkmemory.NewManager(chunkmemory.Config{
@@ -334,8 +344,12 @@ func TestIndexerMultipleChunks(t *testing.T) {
 }
 
 func TestIndexerBuildUnsealedChunk(t *testing.T) {
+	// Now() is called for: createdAt, record WriteTS
 	callIdx := 0
-	writeTSValues := []gotime.Time{gotime.UnixMicro(1)}
+	writeTSValues := []gotime.Time{
+		gotime.UnixMicro(0), // createdAt (ignored)
+		gotime.UnixMicro(1), // record WriteTS
+	}
 	manager, err := chunkmemory.NewManager(chunkmemory.Config{
 		Now: func() gotime.Time {
 			ts := writeTSValues[callIdx]

@@ -21,7 +21,9 @@ func setupTestSystem(t *testing.T) (*orchestrator.Orchestrator, chunk.ChunkManag
 	t.Helper()
 
 	// Create memory-based chunk manager.
-	cm, err := chunkmem.NewManager(chunkmem.Config{MaxRecords: 10000})
+	cm, err := chunkmem.NewManager(chunkmem.Config{
+		RotationPolicy: chunk.NewRecordCountPolicy(10000),
+	})
 	if err != nil {
 		t.Fatalf("create chunk manager: %v", err)
 	}

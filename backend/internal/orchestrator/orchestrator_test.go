@@ -16,6 +16,11 @@ import (
 	"gastrolog/internal/query"
 )
 
+// recordCountPolicy creates a rotation policy for testing that rotates at maxRecords.
+func recordCountPolicy(maxRecords int64) chunk.RotationPolicy {
+	return chunk.NewRecordCountPolicy(uint64(maxRecords))
+}
+
 var (
 	t0 = time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	t1 = t0.Add(1 * time.Second)
@@ -40,7 +45,7 @@ func (t *trackingIndexManager) BuildIndexes(ctx context.Context, chunkID chunk.C
 
 func newTestSetup(maxRecords int64) (*orchestrator.Orchestrator, chunk.ChunkManager, *trackingIndexManager) {
 	cm, _ := chunkmem.NewManager(chunkmem.Config{
-		MaxRecords: maxRecords,
+		RotationPolicy: recordCountPolicy(maxRecords),
 	})
 
 	timeIdx := memtime.NewIndexer(cm, 1)
@@ -442,7 +447,7 @@ func (r *blockingReceiver) Run(ctx context.Context, out chan<- orchestrator.Inge
 
 func newReceiverTestSetup() (*orchestrator.Orchestrator, chunk.ChunkManager) {
 	cm, _ := chunkmem.NewManager(chunkmem.Config{
-		MaxRecords: 10000,
+		RotationPolicy: recordCountPolicy(10000),
 	})
 
 	timeIdx := memtime.NewIndexer(cm, 1)
@@ -602,7 +607,7 @@ func TestStopNotRunning(t *testing.T) {
 func TestReceiverIndexBuildOnSeal(t *testing.T) {
 	// Set up with small chunk size to trigger seal.
 	cm, _ := chunkmem.NewManager(chunkmem.Config{
-		MaxRecords: 2, // 2 records per chunk
+		RotationPolicy: recordCountPolicy(2), // 2 records per chunk
 	})
 
 	timeIdx := memtime.NewIndexer(cm, 1)

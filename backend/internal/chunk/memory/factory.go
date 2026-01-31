@@ -20,10 +20,9 @@ const (
 // NewFactory returns a factory function that creates in-memory ChunkManagers.
 func NewFactory() chunk.ManagerFactory {
 	return func(params map[string]string) (chunk.ChunkManager, error) {
-		cfg := Config{
-			MaxRecords: DefaultMaxRecords,
-		}
+		cfg := Config{}
 
+		maxRecords := int64(DefaultMaxRecords)
 		if v, ok := params[ParamMaxRecords]; ok {
 			n, err := strconv.ParseInt(v, 10, 64)
 			if err != nil {
@@ -32,8 +31,10 @@ func NewFactory() chunk.ManagerFactory {
 			if n <= 0 {
 				return nil, fmt.Errorf("invalid %s: must be positive", ParamMaxRecords)
 			}
-			cfg.MaxRecords = n
+			maxRecords = n
 		}
+
+		cfg.RotationPolicy = chunk.NewRecordCountPolicy(uint64(maxRecords))
 
 		return NewManager(cfg)
 	}
