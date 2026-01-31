@@ -15,7 +15,7 @@ import (
 // Factory parameter keys.
 const (
 	ParamDir          = "dir"
-	ParamTimeSparsity = "time_sparsity"
+	ParamTimeSparsity = "timeSparsity"
 )
 
 // Default values.

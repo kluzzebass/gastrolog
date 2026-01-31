@@ -29,9 +29,9 @@ func TestNewReceiver_Defaults(t *testing.T) {
 
 func TestNewReceiver_CustomParams(t *testing.T) {
 	params := map[string]string{
-		"min_interval": "50ms",
-		"max_interval": "200ms",
-		"instance":     "test-instance",
+		"minInterval": "50ms",
+		"maxInterval": "200ms",
+		"instance":    "test-instance",
 	}
 	r, err := NewReceiver(params, nil)
 	if err != nil {
@@ -51,8 +51,8 @@ func TestNewReceiver_CustomParams(t *testing.T) {
 
 func TestNewReceiver_SubMillisecond(t *testing.T) {
 	params := map[string]string{
-		"min_interval": "100us",
-		"max_interval": "500us",
+		"minInterval": "100us",
+		"maxInterval": "500us",
 	}
 	r, err := NewReceiver(params, nil)
 	if err != nil {
@@ -69,8 +69,8 @@ func TestNewReceiver_SubMillisecond(t *testing.T) {
 
 func TestNewReceiver_MixedUnits(t *testing.T) {
 	params := map[string]string{
-		"min_interval": "1.5ms",
-		"max_interval": "2s",
+		"minInterval": "1.5ms",
+		"maxInterval": "2s",
 	}
 	r, err := NewReceiver(params, nil)
 	if err != nil {
@@ -86,7 +86,7 @@ func TestNewReceiver_MixedUnits(t *testing.T) {
 }
 
 func TestNewReceiver_InvalidMinInterval(t *testing.T) {
-	params := map[string]string{"min_interval": "not-a-duration"}
+	params := map[string]string{"minInterval": "not-a-duration"}
 	_, err := NewReceiver(params, nil)
 	if err == nil {
 		t.Error("expected error for invalid min_interval")
@@ -94,7 +94,7 @@ func TestNewReceiver_InvalidMinInterval(t *testing.T) {
 }
 
 func TestNewReceiver_InvalidMaxInterval(t *testing.T) {
-	params := map[string]string{"max_interval": "not-a-duration"}
+	params := map[string]string{"maxInterval": "not-a-duration"}
 	_, err := NewReceiver(params, nil)
 	if err == nil {
 		t.Error("expected error for invalid max_interval")
@@ -102,7 +102,7 @@ func TestNewReceiver_InvalidMaxInterval(t *testing.T) {
 }
 
 func TestNewReceiver_NegativeMinInterval(t *testing.T) {
-	params := map[string]string{"min_interval": "-10ms"}
+	params := map[string]string{"minInterval": "-10ms"}
 	_, err := NewReceiver(params, nil)
 	if err == nil {
 		t.Error("expected error for negative min_interval")
@@ -110,7 +110,7 @@ func TestNewReceiver_NegativeMinInterval(t *testing.T) {
 }
 
 func TestNewReceiver_NegativeMaxInterval(t *testing.T) {
-	params := map[string]string{"max_interval": "-10ms"}
+	params := map[string]string{"maxInterval": "-10ms"}
 	_, err := NewReceiver(params, nil)
 	if err == nil {
 		t.Error("expected error for negative max_interval")
@@ -119,8 +119,8 @@ func TestNewReceiver_NegativeMaxInterval(t *testing.T) {
 
 func TestNewReceiver_MinExceedsMax(t *testing.T) {
 	params := map[string]string{
-		"min_interval": "500ms",
-		"max_interval": "100ms",
+		"minInterval": "500ms",
+		"maxInterval": "100ms",
 	}
 	_, err := NewReceiver(params, nil)
 	if err == nil {
@@ -130,8 +130,8 @@ func TestNewReceiver_MinExceedsMax(t *testing.T) {
 
 func TestNewReceiver_EqualMinMax(t *testing.T) {
 	params := map[string]string{
-		"min_interval": "100ms",
-		"max_interval": "100ms",
+		"minInterval": "100ms",
+		"maxInterval": "100ms",
 	}
 	r, err := NewReceiver(params, nil)
 	if err != nil {
@@ -145,9 +145,9 @@ func TestNewReceiver_EqualMinMax(t *testing.T) {
 
 func TestRun_EmitsMessages(t *testing.T) {
 	params := map[string]string{
-		"min_interval": "1ms",
-		"max_interval": "5ms",
-		"instance":     "emit-test",
+		"minInterval": "1ms",
+		"maxInterval": "5ms",
+		"instance":    "emit-test",
 	}
 	r, err := NewReceiver(params, nil)
 	if err != nil {
@@ -200,8 +200,8 @@ func TestRun_EmitsMessages(t *testing.T) {
 
 func TestRun_StopsOnContextCancel(t *testing.T) {
 	params := map[string]string{
-		"min_interval": "1s",
-		"max_interval": "2s",
+		"minInterval": "1s",
+		"maxInterval": "2s",
 	}
 	r, err := NewReceiver(params, nil)
 	if err != nil {
@@ -230,14 +230,14 @@ func TestRun_StopsOnContextCancel(t *testing.T) {
 
 func TestRun_MultipleInstances(t *testing.T) {
 	params1 := map[string]string{
-		"min_interval": "1ms",
-		"max_interval": "5ms",
-		"instance":     "instance-1",
+		"minInterval": "1ms",
+		"maxInterval": "5ms",
+		"instance":    "instance-1",
 	}
 	params2 := map[string]string{
-		"min_interval": "1ms",
-		"max_interval": "5ms",
-		"instance":     "instance-2",
+		"minInterval": "1ms",
+		"maxInterval": "5ms",
+		"instance":    "instance-2",
 	}
 
 	r1, err := NewReceiver(params1, nil)
@@ -344,8 +344,8 @@ func TestGenerateMessage_Format(t *testing.T) {
 
 func TestRandomInterval_Bounds(t *testing.T) {
 	r, err := NewReceiver(map[string]string{
-		"min_interval": "10ms",
-		"max_interval": "20ms",
+		"minInterval": "10ms",
+		"maxInterval": "20ms",
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewReceiver failed: %v", err)
@@ -362,8 +362,8 @@ func TestRandomInterval_Bounds(t *testing.T) {
 
 func TestRandomInterval_EqualBounds(t *testing.T) {
 	r, err := NewReceiver(map[string]string{
-		"min_interval": "50ms",
-		"max_interval": "50ms",
+		"minInterval": "50ms",
+		"maxInterval": "50ms",
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewReceiver failed: %v", err)
@@ -415,8 +415,8 @@ func TestNewReceiver_UnknownFormat(t *testing.T) {
 
 func TestNewReceiver_FormatWeights(t *testing.T) {
 	params := map[string]string{
-		"formats":        "json,kv",
-		"format_weights": "json=10,kv=5",
+		"formats":       "json,kv",
+		"formatWeights": "json=10,kv=5",
 	}
 	r, err := NewReceiver(params, nil)
 	if err != nil {
@@ -434,8 +434,8 @@ func TestNewReceiver_FormatWeights(t *testing.T) {
 
 func TestNewReceiver_InvalidWeight(t *testing.T) {
 	params := map[string]string{
-		"formats":        "json",
-		"format_weights": "json=notanumber",
+		"formats":       "json",
+		"formatWeights": "json=notanumber",
 	}
 	_, err := NewReceiver(params, nil)
 	if err == nil {
@@ -445,8 +445,8 @@ func TestNewReceiver_InvalidWeight(t *testing.T) {
 
 func TestNewReceiver_ZeroWeight(t *testing.T) {
 	params := map[string]string{
-		"formats":        "json",
-		"format_weights": "json=0",
+		"formats":       "json",
+		"formatWeights": "json=0",
 	}
 	_, err := NewReceiver(params, nil)
 	if err == nil {
@@ -456,8 +456,8 @@ func TestNewReceiver_ZeroWeight(t *testing.T) {
 
 func TestNewReceiver_NegativeWeight(t *testing.T) {
 	params := map[string]string{
-		"formats":        "json",
-		"format_weights": "json=-5",
+		"formats":       "json",
+		"formatWeights": "json=-5",
 	}
 	_, err := NewReceiver(params, nil)
 	if err == nil {
@@ -467,7 +467,7 @@ func TestNewReceiver_NegativeWeight(t *testing.T) {
 
 func TestNewReceiver_HostCount(t *testing.T) {
 	params := map[string]string{
-		"host_count": "20",
+		"hostCount": "20",
 	}
 	r, err := NewReceiver(params, nil)
 	if err != nil {
@@ -492,7 +492,7 @@ func TestNewReceiver_HostCount(t *testing.T) {
 
 func TestNewReceiver_InvalidHostCount(t *testing.T) {
 	params := map[string]string{
-		"host_count": "invalid",
+		"hostCount": "invalid",
 	}
 	_, err := NewReceiver(params, nil)
 	if err == nil {
@@ -502,7 +502,7 @@ func TestNewReceiver_InvalidHostCount(t *testing.T) {
 
 func TestNewReceiver_ZeroHostCount(t *testing.T) {
 	params := map[string]string{
-		"host_count": "0",
+		"hostCount": "0",
 	}
 	_, err := NewReceiver(params, nil)
 	if err == nil {
@@ -512,8 +512,8 @@ func TestNewReceiver_ZeroHostCount(t *testing.T) {
 
 func TestNewReceiver_ServiceCount(t *testing.T) {
 	params := map[string]string{
-		"service_count": "3",
-		"formats":       "plain", // plain format uses service attr
+		"serviceCount": "3",
+		"formats":      "plain", // plain format uses service attr
 	}
 	r, err := NewReceiver(params, nil)
 	if err != nil {
@@ -538,7 +538,7 @@ func TestNewReceiver_ServiceCount(t *testing.T) {
 
 func TestNewReceiver_InvalidServiceCount(t *testing.T) {
 	params := map[string]string{
-		"service_count": "invalid",
+		"serviceCount": "invalid",
 	}
 	_, err := NewReceiver(params, nil)
 	if err == nil {
@@ -548,7 +548,7 @@ func TestNewReceiver_InvalidServiceCount(t *testing.T) {
 
 func TestNewReceiver_ZeroServiceCount(t *testing.T) {
 	params := map[string]string{
-		"service_count": "0",
+		"serviceCount": "0",
 	}
 	_, err := NewReceiver(params, nil)
 	if err == nil {
@@ -558,9 +558,9 @@ func TestNewReceiver_ZeroServiceCount(t *testing.T) {
 
 func TestGenerateMessage_MultipleFormats(t *testing.T) {
 	params := map[string]string{
-		"min_interval": "1ms",
-		"max_interval": "5ms",
-		"formats":      "plain,json,kv,access,syslog",
+		"minInterval": "1ms",
+		"maxInterval": "5ms",
+		"formats":     "plain,json,kv,access,syslog",
 	}
 	r, err := NewReceiver(params, nil)
 	if err != nil {
@@ -602,8 +602,8 @@ func TestGenerateMessage_MultipleFormats(t *testing.T) {
 
 func TestGenerateMessage_WeightedSelection(t *testing.T) {
 	params := map[string]string{
-		"formats":        "json,plain",
-		"format_weights": "json=90,plain=10",
+		"formats":       "json,plain",
+		"formatWeights": "json=90,plain=10",
 	}
 	r, err := NewReceiver(params, nil)
 	if err != nil {

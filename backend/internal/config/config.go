@@ -43,44 +43,44 @@ type Store interface {
 // Config describes the desired system shape.
 // It is declarative: it defines what should exist, not how to create it.
 type Config struct {
-	Receivers []ReceiverConfig
-	Stores    []StoreConfig
-	Routes    []RouteConfig
+	Receivers []ReceiverConfig `json:"receivers,omitempty"`
+	Stores    []StoreConfig    `json:"stores,omitempty"`
+	Routes    []RouteConfig    `json:"routes,omitempty"`
 }
 
 // ReceiverConfig describes a receiver to instantiate.
 type ReceiverConfig struct {
 	// ID is a unique identifier for this receiver.
-	ID string
+	ID string `json:"id"`
 
 	// Type identifies the receiver implementation (e.g., "syslog-udp", "file").
-	Type string
+	Type string `json:"type"`
 
 	// Params contains type-specific configuration as opaque string key-value pairs.
 	// Parsing and validation are the responsibility of the factory that consumes
 	// the params. There is no schema enforcement at the ConfigStore level.
-	Params map[string]string
+	Params map[string]string `json:"params,omitempty"`
 }
 
 // StoreConfig describes a storage backend to instantiate.
 type StoreConfig struct {
 	// ID is a unique identifier for this store.
-	ID string
+	ID string `json:"id"`
 
 	// Type identifies the store implementation (e.g., "file", "memory").
-	Type string
+	Type string `json:"type"`
 
 	// Params contains type-specific configuration as opaque string key-value pairs.
 	// Parsing and validation are the responsibility of the factory that consumes
 	// the params. There is no schema enforcement at the ConfigStore level.
-	Params map[string]string
+	Params map[string]string `json:"params,omitempty"`
 }
 
 // RouteConfig describes a routing rule from receiver to store.
 type RouteConfig struct {
 	// ReceiverID references a receiver by ID.
-	ReceiverID string
+	ReceiverID string `json:"receiverId"`
 
 	// StoreID references a store by ID.
-	StoreID string
+	StoreID string `json:"storeId"`
 }

@@ -36,15 +36,15 @@ var allFormats = []string{FormatPlain, FormatKV, FormatJSON, FormatAccess, Forma
 // NewReceiver creates a new chatterbox receiver from configuration parameters.
 //
 // Supported parameters:
-//   - "min_interval": minimum delay between messages (default: "100ms")
-//   - "max_interval": maximum delay between messages (default: "1s")
+//   - "minInterval": minimum delay between messages (default: "100ms")
+//   - "maxInterval": maximum delay between messages (default: "1s")
 //   - "instance": instance identifier for source attribution (default: "default")
 //   - "formats": comma-separated list of enabled formats (default: all)
 //     Valid formats: plain, kv, json, access, syslog, weird
-//   - "format_weights": comma-separated format=weight pairs (default: equal weights)
+//   - "formatWeights": comma-separated format=weight pairs (default: equal weights)
 //     Example: "plain=30,json=20,kv=25,access=10,syslog=10,weird=5"
-//   - "host_count": number of distinct hosts to generate (default: 10)
-//   - "service_count": number of distinct services to generate (default: 5)
+//   - "hostCount": number of distinct hosts to generate (default: 10)
+//   - "serviceCount": number of distinct services to generate (default: 5)
 //
 // Intervals use Go duration format: "100us", "1.5ms", "2s", etc.
 //
@@ -59,54 +59,54 @@ func NewReceiver(params map[string]string, logger *slog.Logger) (orchestrator.Re
 	hostCount := defaultHostCount
 	serviceCount := defaultServiceCount
 
-	if v, ok := params["min_interval"]; ok {
+	if v, ok := params["minInterval"]; ok {
 		parsed, err := time.ParseDuration(v)
 		if err != nil {
-			return nil, fmt.Errorf("invalid min_interval %q: %w", v, err)
+			return nil, fmt.Errorf("invalid minInterval %q: %w", v, err)
 		}
 		if parsed < 0 {
-			return nil, fmt.Errorf("min_interval must be non-negative, got %v", parsed)
+			return nil, fmt.Errorf("minInterval must be non-negative, got %v", parsed)
 		}
 		minInterval = parsed
 	}
 
-	if v, ok := params["max_interval"]; ok {
+	if v, ok := params["maxInterval"]; ok {
 		parsed, err := time.ParseDuration(v)
 		if err != nil {
-			return nil, fmt.Errorf("invalid max_interval %q: %w", v, err)
+			return nil, fmt.Errorf("invalid maxInterval %q: %w", v, err)
 		}
 		if parsed < 0 {
-			return nil, fmt.Errorf("max_interval must be non-negative, got %v", parsed)
+			return nil, fmt.Errorf("maxInterval must be non-negative, got %v", parsed)
 		}
 		maxInterval = parsed
 	}
 
 	if minInterval > maxInterval {
-		return nil, fmt.Errorf("min_interval (%v) must not exceed max_interval (%v)", minInterval, maxInterval)
+		return nil, fmt.Errorf("minInterval (%v) must not exceed maxInterval (%v)", minInterval, maxInterval)
 	}
 
 	if v, ok := params["instance"]; ok && v != "" {
 		instance = v
 	}
 
-	if v, ok := params["host_count"]; ok {
+	if v, ok := params["hostCount"]; ok {
 		n, err := strconv.Atoi(v)
 		if err != nil {
-			return nil, fmt.Errorf("invalid host_count %q: %w", v, err)
+			return nil, fmt.Errorf("invalid hostCount %q: %w", v, err)
 		}
 		if n <= 0 {
-			return nil, fmt.Errorf("host_count must be positive, got %d", n)
+			return nil, fmt.Errorf("hostCount must be positive, got %d", n)
 		}
 		hostCount = n
 	}
 
-	if v, ok := params["service_count"]; ok {
+	if v, ok := params["serviceCount"]; ok {
 		n, err := strconv.Atoi(v)
 		if err != nil {
-			return nil, fmt.Errorf("invalid service_count %q: %w", v, err)
+			return nil, fmt.Errorf("invalid serviceCount %q: %w", v, err)
 		}
 		if n <= 0 {
-			return nil, fmt.Errorf("service_count must be positive, got %d", n)
+			return nil, fmt.Errorf("serviceCount must be positive, got %d", n)
 		}
 		serviceCount = n
 	}
@@ -117,7 +117,7 @@ func NewReceiver(params map[string]string, logger *slog.Logger) (orchestrator.Re
 		return nil, err
 	}
 
-	weights, err := parseWeights(params["format_weights"], enabledFormats)
+	weights, err := parseWeights(params["formatWeights"], enabledFormats)
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +190,7 @@ func isValidFormat(name string) bool {
 	return false
 }
 
-// parseWeights parses the format_weights parameter into a weight map.
+// parseWeights parses the formatWeights parameter into a weight map.
 // If empty, returns equal weights for all enabled formats.
 func parseWeights(weightsParam string, enabledFormats []string) (map[string]int, error) {
 	weights := make(map[string]int)

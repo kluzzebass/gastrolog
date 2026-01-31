@@ -9,7 +9,7 @@ import (
 
 // Factory parameter keys.
 const (
-	ParamMaxRecords = "max_records"
+	ParamMaxRecords = "maxRecords"
 )
 
 // Default values.

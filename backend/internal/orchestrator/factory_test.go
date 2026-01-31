@@ -379,8 +379,8 @@ func TestApplyConfigParamsPassedToStoreFactories(t *testing.T) {
 	cfg := &config.Config{
 		Stores: []config.StoreConfig{
 			{ID: "store1", Type: "test", Params: map[string]string{
-				"dir":           "/data/chunks",
-				"time_sparsity": "500",
+				"dir":          "/data/chunks",
+				"timeSparsity": "500",
 			}},
 		},
 	}
@@ -394,16 +394,16 @@ func TestApplyConfigParamsPassedToStoreFactories(t *testing.T) {
 	if cmReceivedParams["dir"] != "/data/chunks" {
 		t.Errorf("chunk manager: expected dir=/data/chunks, got %s", cmReceivedParams["dir"])
 	}
-	if cmReceivedParams["time_sparsity"] != "500" {
-		t.Errorf("chunk manager: expected time_sparsity=500, got %s", cmReceivedParams["time_sparsity"])
+	if cmReceivedParams["timeSparsity"] != "500" {
+		t.Errorf("chunk manager: expected timeSparsity=500, got %s", cmReceivedParams["timeSparsity"])
 	}
 
 	// Verify params passed to index manager factory.
 	if imReceivedParams["dir"] != "/data/chunks" {
 		t.Errorf("index manager: expected dir=/data/chunks, got %s", imReceivedParams["dir"])
 	}
-	if imReceivedParams["time_sparsity"] != "500" {
-		t.Errorf("index manager: expected time_sparsity=500, got %s", imReceivedParams["time_sparsity"])
+	if imReceivedParams["timeSparsity"] != "500" {
+		t.Errorf("index manager: expected timeSparsity=500, got %s", imReceivedParams["timeSparsity"])
 	}
 }
 

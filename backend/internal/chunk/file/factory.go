@@ -13,9 +13,9 @@ import (
 // Factory parameter keys.
 const (
 	ParamDir           = "dir"
-	ParamMaxChunkBytes = "max_chunk_bytes"
-	ParamMaxChunkAge   = "max_chunk_age"
-	ParamFileMode      = "file_mode"
+	ParamMaxChunkBytes = "maxChunkBytes"
+	ParamMaxChunkAge   = "maxChunkAge"
+	ParamFileMode      = "fileMode"
 )
 
 // Default values.
