@@ -11,15 +11,13 @@ import (
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/index"
 	indexmem "gastrolog/internal/index/memory"
-	memsource "gastrolog/internal/index/memory/source"
 	memtime "gastrolog/internal/index/memory/time"
 	memtoken "gastrolog/internal/index/memory/token"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
-	"gastrolog/internal/source"
 )
 
-func setupTestSystem(t *testing.T) (*orchestrator.Orchestrator, *source.Registry, chunk.ChunkManager) {
+func setupTestSystem(t *testing.T) (*orchestrator.Orchestrator, chunk.ChunkManager) {
 	t.Helper()
 
 	// Create memory-based chunk manager.
@@ -30,38 +28,28 @@ func setupTestSystem(t *testing.T) (*orchestrator.Orchestrator, *source.Registry
 
 	// Create memory-based index manager.
 	timeIdx := memtime.NewIndexer(cm, 1)
-	srcIdx := memsource.NewIndexer(cm)
 	tokIdx := memtoken.NewIndexer(cm)
-	im := indexmem.NewManager([]index.Indexer{timeIdx, srcIdx, tokIdx}, timeIdx, srcIdx, tokIdx, nil)
-
-	// Create source registry.
-	sources, err := source.NewRegistry(source.Config{})
-	if err != nil {
-		t.Fatalf("create source registry: %v", err)
-	}
+	im := indexmem.NewManager([]index.Indexer{timeIdx, tokIdx}, timeIdx, tokIdx, nil)
 
 	// Create query engine.
 	qe := query.New(cm, im, nil)
 
 	// Create orchestrator.
-	orch := orchestrator.New(orchestrator.Config{
-		Sources: sources,
-	})
+	orch := orchestrator.New(orchestrator.Config{})
 	orch.RegisterChunkManager("default", cm)
 	orch.RegisterIndexManager("default", im)
 	orch.RegisterQueryEngine("default", qe)
 
-	return orch, sources, cm
+	return orch, cm
 }
 
 func TestREPL_Help(t *testing.T) {
-	orch, sources, _ := setupTestSystem(t)
-	defer sources.Close()
+	orch, _ := setupTestSystem(t)
 
 	input := "help\nexit\n"
 	output := &bytes.Buffer{}
 
-	r := NewSimple(orch, sources, strings.NewReader(input), output)
+	r := NewSimple(orch, strings.NewReader(input), output)
 	if err := r.Run(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -70,87 +58,13 @@ func TestREPL_Help(t *testing.T) {
 	if !strings.Contains(out, "Commands:") {
 		t.Errorf("help output missing 'Commands:': %s", out)
 	}
-	if !strings.Contains(out, "sources") {
-		t.Errorf("help output missing 'sources': %s", out)
-	}
 	if !strings.Contains(out, "query") {
 		t.Errorf("help output missing 'query': %s", out)
 	}
 }
 
-func TestREPL_Sources(t *testing.T) {
-	orch, sources, _ := setupTestSystem(t)
-	defer sources.Close()
-
-	// Create some sources.
-	sources.Resolve(map[string]string{"env": "prod", "service": "api"})
-	sources.Resolve(map[string]string{"env": "prod", "service": "web"})
-	sources.Resolve(map[string]string{"env": "dev", "service": "api"})
-
-	t.Run("list all", func(t *testing.T) {
-		input := "sources\nexit\n"
-		output := &bytes.Buffer{}
-
-		r := NewSimple(orch, sources, strings.NewReader(input), output)
-		if err := r.Run(); err != nil {
-			t.Fatalf("run: %v", err)
-		}
-
-		out := output.String()
-		// Should show all 3 sources.
-		lines := strings.Split(out, "\n")
-		sourceLines := 0
-		for _, line := range lines {
-			if strings.Contains(line, "env=") {
-				sourceLines++
-			}
-		}
-		if sourceLines != 3 {
-			t.Errorf("expected 3 source lines, got %d: %s", sourceLines, out)
-		}
-	})
-
-	t.Run("filter by attribute", func(t *testing.T) {
-		input := "sources env=prod\nexit\n"
-		output := &bytes.Buffer{}
-
-		r := NewSimple(orch, sources, strings.NewReader(input), output)
-		if err := r.Run(); err != nil {
-			t.Fatalf("run: %v", err)
-		}
-
-		out := output.String()
-		lines := strings.Split(out, "\n")
-		sourceLines := 0
-		for _, line := range lines {
-			if strings.Contains(line, "env=") {
-				sourceLines++
-			}
-		}
-		if sourceLines != 2 {
-			t.Errorf("expected 2 source lines for env=prod, got %d: %s", sourceLines, out)
-		}
-	})
-
-	t.Run("no matches", func(t *testing.T) {
-		input := "sources env=staging\nexit\n"
-		output := &bytes.Buffer{}
-
-		r := NewSimple(orch, sources, strings.NewReader(input), output)
-		if err := r.Run(); err != nil {
-			t.Fatalf("run: %v", err)
-		}
-
-		out := output.String()
-		if !strings.Contains(out, "No sources found") {
-			t.Errorf("expected 'No sources found', got: %s", out)
-		}
-	})
-}
-
 func TestREPL_Query(t *testing.T) {
-	orch, sources, cm := setupTestSystem(t)
-	defer sources.Close()
+	orch, cm := setupTestSystem(t)
 
 	// Start orchestrator for ingestion.
 	if err := orch.Start(context.Background()); err != nil {
@@ -159,14 +73,14 @@ func TestREPL_Query(t *testing.T) {
 	defer orch.Stop()
 
 	// Ingest some records.
-	src1 := sources.Resolve(map[string]string{"service": "api"})
-	src2 := sources.Resolve(map[string]string{"service": "web"})
+	attrsApi := chunk.Attributes{"service": "api"}
+	attrsWeb := chunk.Attributes{"service": "web"}
 
 	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	for i := 0; i < 5; i++ {
 		rec := chunk.Record{
 			IngestTS: baseTime.Add(time.Duration(i) * time.Second),
-			SourceID: src1,
+			Attrs:    attrsApi,
 			Raw:      []byte("error from api"),
 		}
 		if _, _, err := cm.Append(rec); err != nil {
@@ -176,7 +90,7 @@ func TestREPL_Query(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		rec := chunk.Record{
 			IngestTS: baseTime.Add(time.Duration(i) * time.Second),
-			SourceID: src2,
+			Attrs:    attrsWeb,
 			Raw:      []byte("info from web"),
 		}
 		if _, _, err := cm.Append(rec); err != nil {
@@ -188,7 +102,7 @@ func TestREPL_Query(t *testing.T) {
 		input := "query\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := NewSimple(orch, sources, strings.NewReader(input), output)
+		r := NewSimple(orch, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -204,7 +118,7 @@ func TestREPL_Query(t *testing.T) {
 		input := "query token=error\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := NewSimple(orch, sources, strings.NewReader(input), output)
+		r := NewSimple(orch, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -220,17 +134,16 @@ func TestREPL_Query(t *testing.T) {
 		input := "query limit=3\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := NewSimple(orch, sources, strings.NewReader(input), output)
+		r := NewSimple(orch, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
 
 		out := output.String()
-		// Count actual record lines (lines containing the source ID pattern).
+		// Count actual record lines.
 		lines := strings.Split(out, "\n")
 		recordLines := 0
 		for _, line := range lines {
-			// Record lines have a UUID pattern and a timestamp.
 			if strings.Contains(line, "error from api") || strings.Contains(line, "info from web") {
 				recordLines++
 			}
@@ -242,8 +155,7 @@ func TestREPL_Query(t *testing.T) {
 }
 
 func TestREPL_NextAndReset(t *testing.T) {
-	orch, sources, cm := setupTestSystem(t)
-	defer sources.Close()
+	orch, cm := setupTestSystem(t)
 
 	// Start orchestrator for ingestion.
 	if err := orch.Start(context.Background()); err != nil {
@@ -252,12 +164,12 @@ func TestREPL_NextAndReset(t *testing.T) {
 	defer orch.Stop()
 
 	// Ingest 25 records.
-	src := sources.Resolve(map[string]string{"service": "api"})
+	attrs := chunk.Attributes{"service": "api"}
 	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	for i := 0; i < 25; i++ {
 		rec := chunk.Record{
 			IngestTS: baseTime.Add(time.Duration(i) * time.Second),
-			SourceID: src,
+			Attrs:    attrs,
 			Raw:      []byte("log message"),
 		}
 		if _, _, err := cm.Append(rec); err != nil {
@@ -269,7 +181,7 @@ func TestREPL_NextAndReset(t *testing.T) {
 		input := "query\nnext\nnext\nnext\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := NewSimple(orch, sources, strings.NewReader(input), output)
+		r := NewSimple(orch, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -297,7 +209,7 @@ func TestREPL_NextAndReset(t *testing.T) {
 		input := "next\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := NewSimple(orch, sources, strings.NewReader(input), output)
+		r := NewSimple(orch, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -312,7 +224,7 @@ func TestREPL_NextAndReset(t *testing.T) {
 		input := "query\nreset\nnext\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := NewSimple(orch, sources, strings.NewReader(input), output)
+		r := NewSimple(orch, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -328,14 +240,13 @@ func TestREPL_NextAndReset(t *testing.T) {
 }
 
 func TestREPL_Store(t *testing.T) {
-	orch, sources, _ := setupTestSystem(t)
-	defer sources.Close()
+	orch, _ := setupTestSystem(t)
 
 	t.Run("get default store", func(t *testing.T) {
 		input := "store\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := NewSimple(orch, sources, strings.NewReader(input), output)
+		r := NewSimple(orch, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -350,7 +261,7 @@ func TestREPL_Store(t *testing.T) {
 		input := "store archive\nstore\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := NewSimple(orch, sources, strings.NewReader(input), output)
+		r := NewSimple(orch, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -366,13 +277,12 @@ func TestREPL_Store(t *testing.T) {
 }
 
 func TestREPL_UnknownCommand(t *testing.T) {
-	orch, sources, _ := setupTestSystem(t)
-	defer sources.Close()
+	orch, _ := setupTestSystem(t)
 
 	input := "foobar\nexit\n"
 	output := &bytes.Buffer{}
 
-	r := NewSimple(orch, sources, strings.NewReader(input), output)
+	r := NewSimple(orch, strings.NewReader(input), output)
 	if err := r.Run(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -384,15 +294,14 @@ func TestREPL_UnknownCommand(t *testing.T) {
 }
 
 func TestREPL_Exit(t *testing.T) {
-	orch, sources, _ := setupTestSystem(t)
-	defer sources.Close()
+	orch, _ := setupTestSystem(t)
 
 	for _, cmd := range []string{"exit", "quit"} {
 		t.Run(cmd, func(t *testing.T) {
 			input := cmd + "\n"
 			output := &bytes.Buffer{}
 
-			r := NewSimple(orch, sources, strings.NewReader(input), output)
+			r := NewSimple(orch, strings.NewReader(input), output)
 			if err := r.Run(); err != nil {
 				t.Fatalf("run: %v", err)
 			}

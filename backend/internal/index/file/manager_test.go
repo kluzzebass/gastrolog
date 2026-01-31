@@ -8,7 +8,6 @@ import (
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
 	"gastrolog/internal/index"
-	filesource "gastrolog/internal/index/file/source"
 	filetime "gastrolog/internal/index/file/time"
 )
 
@@ -53,18 +52,17 @@ func setupManager(t *testing.T, records []chunk.Record) (*Manager, chunk.ChunkMa
 	chunkMgr, chunkID := setupChunkManager(t, records)
 	indexDir := t.TempDir()
 	timeIndexer := filetime.NewIndexer(indexDir, chunkMgr, 1, nil)
-	sourceIndexer := filesource.NewIndexer(indexDir, chunkMgr, nil)
-	mgr := NewManager(indexDir, []index.Indexer{timeIndexer, sourceIndexer}, nil)
+	mgr := NewManager(indexDir, []index.Indexer{timeIndexer}, nil)
 	return mgr, chunkMgr, chunkID
 }
 
 func testRecords() []chunk.Record {
-	src1 := chunk.NewSourceID()
-	src2 := chunk.NewSourceID()
+	attrs1 := chunk.Attributes{"source": "src1"}
+	attrs2 := chunk.Attributes{"source": "src2"}
 	return []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1000), SourceID: src1, Raw: []byte("one")},
-		{IngestTS: gotime.UnixMicro(2000), SourceID: src2, Raw: []byte("two")},
-		{IngestTS: gotime.UnixMicro(3000), SourceID: src1, Raw: []byte("three")},
+		{IngestTS: gotime.UnixMicro(1000), Attrs: attrs1, Raw: []byte("one")},
+		{IngestTS: gotime.UnixMicro(2000), Attrs: attrs2, Raw: []byte("two")},
+		{IngestTS: gotime.UnixMicro(3000), Attrs: attrs1, Raw: []byte("three")},
 	}
 }
 
@@ -95,8 +93,8 @@ func TestBuildIndexesUnsealedChunk(t *testing.T) {
 		t.Fatalf("new manager: %v", err)
 	}
 
-	src := chunk.NewSourceID()
-	chunkID, _, err := chunkMgr.Append(chunk.Record{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte("x")})
+	attrs := chunk.Attributes{"source": "test"}
+	chunkID, _, err := chunkMgr.Append(chunk.Record{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("x")})
 	if err != nil {
 		t.Fatalf("append: %v", err)
 	}
@@ -146,35 +144,6 @@ func TestOpenTimeIndexNotBuilt(t *testing.T) {
 	}
 }
 
-func TestOpenSourceIndex(t *testing.T) {
-	records := testRecords()
-	mgr, _, chunkID := setupManager(t, records)
-
-	if err := mgr.BuildIndexes(context.Background(), chunkID); err != nil {
-		t.Fatalf("build: %v", err)
-	}
-
-	idx, err := mgr.OpenSourceIndex(chunkID)
-	if err != nil {
-		t.Fatalf("open source index: %v", err)
-	}
-
-	entries := idx.Entries()
-	if len(entries) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(entries))
-	}
-}
-
-func TestOpenSourceIndexNotBuilt(t *testing.T) {
-	indexDir := t.TempDir()
-	mgr := NewManager(indexDir, nil, nil)
-
-	_, err := mgr.OpenSourceIndex(chunk.NewChunkID())
-	if err == nil {
-		t.Fatal("expected error opening unbuilt source index, got nil")
-	}
-}
-
 func TestBuildAndOpenRoundTrip(t *testing.T) {
 	records := testRecords()
 	mgr, _, chunkID := setupManager(t, records)
@@ -196,22 +165,5 @@ func TestBuildAndOpenRoundTrip(t *testing.T) {
 		if !timeEntries[i].Timestamp.After(timeEntries[i-1].Timestamp) {
 			t.Fatalf("time entries not in order at index %d", i)
 		}
-	}
-
-	// Source index round-trip.
-	sourceIdx, err := mgr.OpenSourceIndex(chunkID)
-	if err != nil {
-		t.Fatalf("open source index: %v", err)
-	}
-	sourceEntries := sourceIdx.Entries()
-	if len(sourceEntries) != 2 {
-		t.Fatalf("source: expected 2 entries, got %d", len(sourceEntries))
-	}
-	totalPositions := 0
-	for _, e := range sourceEntries {
-		totalPositions += len(e.Positions)
-	}
-	if totalPositions != 3 {
-		t.Fatalf("source: expected 3 total positions, got %d", totalPositions)
 	}
 }

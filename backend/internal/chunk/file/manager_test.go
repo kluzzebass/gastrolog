@@ -17,8 +17,8 @@ func TestFileChunkManagerDirectoryLayout(t *testing.T) {
 	}
 
 	// Append to first chunk, seal it, then append to a second chunk and seal.
-	sourceID := chunk.NewSourceID()
-	rec := chunk.Record{IngestTS: time.UnixMicro(1), SourceID: sourceID, Raw: []byte("one")}
+	attrs := chunk.Attributes{"source": "test"}
+	rec := chunk.Record{IngestTS: time.UnixMicro(1), Attrs: attrs, Raw: []byte("one")}
 	chunkID1, _, err := manager.Append(rec)
 	if err != nil {
 		t.Fatalf("append chunk 1: %v", err)
@@ -27,7 +27,7 @@ func TestFileChunkManagerDirectoryLayout(t *testing.T) {
 		t.Fatalf("seal chunk 1: %v", err)
 	}
 
-	rec2 := chunk.Record{IngestTS: time.UnixMicro(2), SourceID: sourceID, Raw: []byte("two")}
+	rec2 := chunk.Record{IngestTS: time.UnixMicro(2), Attrs: attrs, Raw: []byte("two")}
 	chunkID2, _, err := manager.Append(rec2)
 	if err != nil {
 		t.Fatalf("append chunk 2: %v", err)
@@ -70,7 +70,7 @@ func TestFileChunkManagerDirectoryLayout(t *testing.T) {
 	}
 
 	// Each chunk directory should contain exactly the three expected files.
-	expectedFiles := []string{rawLogFileName, idxLogFileName, sourcesFileName}
+	expectedFiles := []string{rawLogFileName, idxLogFileName, attrLogFileName}
 	for _, id := range []chunk.ChunkID{chunkID1, chunkID2} {
 		chunkDir := filepath.Join(dir, id.String())
 		files, err := os.ReadDir(chunkDir)
@@ -102,8 +102,8 @@ func TestFileChunkManagerAppendSealOpenReader(t *testing.T) {
 		t.Fatalf("new manager: %v", err)
 	}
 
-	sourceID := chunk.NewSourceID()
-	record := chunk.Record{IngestTS: time.UnixMicro(100), SourceID: sourceID, Raw: []byte("alpha")}
+	attrs := chunk.Attributes{"source": "test"}
+	record := chunk.Record{IngestTS: time.UnixMicro(100), Attrs: attrs, Raw: []byte("alpha")}
 	chunkID, offset, err := manager.Append(record)
 	if err != nil {
 		t.Fatalf("append: %v", err)
@@ -121,8 +121,8 @@ func TestFileChunkManagerAppendSealOpenReader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unsealed next: %v", err)
 	}
-	if unsealedGot.SourceID != record.SourceID {
-		t.Fatalf("unsealed source id: expected %s got %s", record.SourceID.String(), unsealedGot.SourceID.String())
+	if unsealedGot.Attrs["source"] != record.Attrs["source"] {
+		t.Fatalf("unsealed attrs: expected %v got %v", record.Attrs, unsealedGot.Attrs)
 	}
 	if string(unsealedGot.Raw) != string(record.Raw) {
 		t.Fatalf("unsealed raw: expected %q got %q", record.Raw, unsealedGot.Raw)
@@ -146,8 +146,8 @@ func TestFileChunkManagerAppendSealOpenReader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("next: %v", err)
 	}
-	if got.SourceID != record.SourceID {
-		t.Fatalf("expected source id %s got %s", record.SourceID.String(), got.SourceID.String())
+	if got.Attrs["source"] != record.Attrs["source"] {
+		t.Fatalf("expected attrs %v got %v", record.Attrs, got.Attrs)
 	}
 	if _, _, err := reader.Next(); err != chunk.ErrNoMoreRecords {
 		t.Fatalf("expected end of records, got %v", err)
@@ -160,8 +160,8 @@ func TestFileChunkManagerAppendSealOpenReader(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(chunkDir, idxLogFileName)); err != nil {
 		t.Fatalf("idx.log file missing: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(chunkDir, sourcesFileName)); err != nil {
-		t.Fatalf("sources file missing: %v", err)
+	if _, err := os.Stat(filepath.Join(chunkDir, attrLogFileName)); err != nil {
+		t.Fatalf("attr.log file missing: %v", err)
 	}
 }
 
@@ -172,11 +172,11 @@ func TestFileChunkManagerReverseReader(t *testing.T) {
 		t.Fatalf("new manager: %v", err)
 	}
 
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: time.UnixMicro(100), SourceID: sourceID, Raw: []byte("first")},
-		{IngestTS: time.UnixMicro(200), SourceID: sourceID, Raw: []byte("second")},
-		{IngestTS: time.UnixMicro(300), SourceID: sourceID, Raw: []byte("third")},
+		{IngestTS: time.UnixMicro(100), Attrs: attrs, Raw: []byte("first")},
+		{IngestTS: time.UnixMicro(200), Attrs: attrs, Raw: []byte("second")},
+		{IngestTS: time.UnixMicro(300), Attrs: attrs, Raw: []byte("third")},
 	}
 
 	var chunkID chunk.ChunkID
@@ -198,8 +198,8 @@ func TestFileChunkManagerReverseReader(t *testing.T) {
 		if err != nil {
 			t.Fatalf("prev (unsealed) record %d: %v", i, err)
 		}
-		if got.SourceID != sourceID {
-			t.Fatalf("record %d: source id want %s got %s", i, sourceID.String(), got.SourceID.String())
+		if got.Attrs["source"] != attrs["source"] {
+			t.Fatalf("record %d: attrs want %v got %v", i, attrs, got.Attrs)
 		}
 		if string(got.Raw) != string(records[i].Raw) {
 			t.Fatalf("record %d: raw want %q got %q", i, records[i].Raw, got.Raw)
@@ -224,8 +224,8 @@ func TestFileChunkManagerReverseReader(t *testing.T) {
 		if err != nil {
 			t.Fatalf("prev (sealed) record %d: %v", i, err)
 		}
-		if got.SourceID != sourceID {
-			t.Fatalf("record %d: source id want %s got %s", i, sourceID.String(), got.SourceID.String())
+		if got.Attrs["source"] != attrs["source"] {
+			t.Fatalf("record %d: attrs want %v got %v", i, attrs, got.Attrs)
 		}
 		if string(got.Raw) != string(records[i].Raw) {
 			t.Fatalf("record %d: raw want %q got %q", i, records[i].Raw, got.Raw)
@@ -243,12 +243,12 @@ func TestFileChunkManagerCursorSeek(t *testing.T) {
 		t.Fatalf("new manager: %v", err)
 	}
 
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: time.UnixMicro(100), SourceID: sourceID, Raw: []byte("alpha")},
-		{IngestTS: time.UnixMicro(200), SourceID: sourceID, Raw: []byte("beta")},
-		{IngestTS: time.UnixMicro(300), SourceID: sourceID, Raw: []byte("gamma")},
-		{IngestTS: time.UnixMicro(400), SourceID: sourceID, Raw: []byte("delta")},
+		{IngestTS: time.UnixMicro(100), Attrs: attrs, Raw: []byte("alpha")},
+		{IngestTS: time.UnixMicro(200), Attrs: attrs, Raw: []byte("beta")},
+		{IngestTS: time.UnixMicro(300), Attrs: attrs, Raw: []byte("gamma")},
+		{IngestTS: time.UnixMicro(400), Attrs: attrs, Raw: []byte("delta")},
 	}
 
 	var chunkID chunk.ChunkID
@@ -335,12 +335,12 @@ func TestFileChunkManagerCursorMixedNextPrev(t *testing.T) {
 		t.Fatalf("new manager: %v", err)
 	}
 
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: time.UnixMicro(100), SourceID: sourceID, Raw: []byte("one")},
-		{IngestTS: time.UnixMicro(200), SourceID: sourceID, Raw: []byte("two")},
-		{IngestTS: time.UnixMicro(300), SourceID: sourceID, Raw: []byte("three")},
-		{IngestTS: time.UnixMicro(400), SourceID: sourceID, Raw: []byte("four")},
+		{IngestTS: time.UnixMicro(100), Attrs: attrs, Raw: []byte("one")},
+		{IngestTS: time.UnixMicro(200), Attrs: attrs, Raw: []byte("two")},
+		{IngestTS: time.UnixMicro(300), Attrs: attrs, Raw: []byte("three")},
+		{IngestTS: time.UnixMicro(400), Attrs: attrs, Raw: []byte("four")},
 	}
 
 	var chunkID chunk.ChunkID
@@ -461,7 +461,7 @@ func TestFileChunkManagerEmptyChunk(t *testing.T) {
 // TestListReturnsSortedChunks verifies that List() returns chunks sorted by StartTS.
 func TestListReturnsSortedChunks(t *testing.T) {
 	dir := t.TempDir()
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 
 	// Controlled clock - increments by 1 second each call
 	ts := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -480,7 +480,7 @@ func TestListReturnsSortedChunks(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		rec := chunk.Record{
 			IngestTS: clock(),
-			SourceID: sourceID,
+			Attrs:    attrs,
 			Raw:      []byte("data"),
 		}
 		if _, _, err := manager.Append(rec); err != nil {

@@ -9,7 +9,6 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
-	filesource "gastrolog/internal/index/file/source"
 	filetime "gastrolog/internal/index/file/time"
 	filetoken "gastrolog/internal/index/file/token"
 	"gastrolog/internal/logging"
@@ -55,14 +54,6 @@ func (m *Manager) OpenTimeIndex(chunkID chunk.ChunkID) (*index.Index[index.TimeI
 	return index.NewIndex(entries), nil
 }
 
-func (m *Manager) OpenSourceIndex(chunkID chunk.ChunkID) (*index.Index[index.SourceIndexEntry], error) {
-	entries, err := filesource.LoadIndex(m.dir, chunkID)
-	if err != nil {
-		return nil, fmt.Errorf("open source index: %w", err)
-	}
-	return index.NewIndex(entries), nil
-}
-
 func (m *Manager) OpenTokenIndex(chunkID chunk.ChunkID) (*index.Index[index.TokenIndexEntry], error) {
 	entries, err := filetoken.LoadIndex(m.dir, chunkID)
 	if err != nil {
@@ -77,7 +68,6 @@ func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
 	// Check if all index files exist.
 	indexPaths := []string{
 		filetime.IndexPath(m.dir, chunkID),
-		filesource.IndexPath(m.dir, chunkID),
 		filetoken.IndexPath(m.dir, chunkID),
 	}
 
@@ -92,7 +82,6 @@ func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
 	// Clean up orphaned temp files.
 	tempPatterns := []string{
 		filetime.TempFilePattern(m.dir, chunkID),
-		filesource.TempFilePattern(m.dir, chunkID),
 		filetoken.TempFilePattern(m.dir, chunkID),
 	}
 

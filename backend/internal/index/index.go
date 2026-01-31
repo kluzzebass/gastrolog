@@ -44,12 +44,6 @@ type TimeIndexEntry struct {
 	RecordPos uint64
 }
 
-// SourceIndexEntry holds all record positions for a single source within a chunk.
-type SourceIndexEntry struct {
-	SourceID  chunk.SourceID
-	Positions []uint64
-}
-
 // TokenIndexEntry holds all record positions for a single token within a chunk.
 type TokenIndexEntry struct {
 	Token     string
@@ -73,7 +67,6 @@ func (idx *Index[T]) Entries() []T {
 type IndexManager interface {
 	BuildIndexes(ctx context.Context, chunkID chunk.ChunkID) error
 	OpenTimeIndex(chunkID chunk.ChunkID) (*Index[TimeIndexEntry], error)
-	OpenSourceIndex(chunkID chunk.ChunkID) (*Index[SourceIndexEntry], error)
 	OpenTokenIndex(chunkID chunk.ChunkID) (*Index[TokenIndexEntry], error)
 
 	// IndexesComplete reports whether all indexes exist for the given chunk.

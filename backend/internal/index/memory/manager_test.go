@@ -8,7 +8,6 @@ import (
 	"gastrolog/internal/chunk"
 	chunkmemory "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/index"
-	memorysource "gastrolog/internal/index/memory/source"
 	memorytime "gastrolog/internal/index/memory/time"
 )
 
@@ -50,11 +49,9 @@ func setupManager(t *testing.T, records []chunk.Record) (*Manager, chunk.ChunkMa
 	t.Helper()
 	chunkMgr, chunkID := setupChunkManager(t, records)
 	timeIndexer := memorytime.NewIndexer(chunkMgr, 1)
-	sourceIndexer := memorysource.NewIndexer(chunkMgr)
 	mgr := NewManager(
-		[]index.Indexer{timeIndexer, sourceIndexer},
+		[]index.Indexer{timeIndexer},
 		timeIndexer,
-		sourceIndexer,
 		nil,
 		nil,
 	)
@@ -62,12 +59,12 @@ func setupManager(t *testing.T, records []chunk.Record) (*Manager, chunk.ChunkMa
 }
 
 func testRecords() []chunk.Record {
-	src1 := chunk.NewSourceID()
-	src2 := chunk.NewSourceID()
+	attrs1 := chunk.Attributes{"source": "src1"}
+	attrs2 := chunk.Attributes{"source": "src2"}
 	return []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1000), SourceID: src1, Raw: []byte("one")},
-		{IngestTS: gotime.UnixMicro(2000), SourceID: src2, Raw: []byte("two")},
-		{IngestTS: gotime.UnixMicro(3000), SourceID: src1, Raw: []byte("three")},
+		{IngestTS: gotime.UnixMicro(1000), Attrs: attrs1, Raw: []byte("one")},
+		{IngestTS: gotime.UnixMicro(2000), Attrs: attrs2, Raw: []byte("two")},
+		{IngestTS: gotime.UnixMicro(3000), Attrs: attrs1, Raw: []byte("three")},
 	}
 }
 
@@ -97,18 +94,16 @@ func TestBuildIndexesUnsealedChunk(t *testing.T) {
 		t.Fatalf("new manager: %v", err)
 	}
 
-	src := chunk.NewSourceID()
-	chunkID, _, err := chunkMgr.Append(chunk.Record{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte("x")})
+	attrs := chunk.Attributes{"source": "test"}
+	chunkID, _, err := chunkMgr.Append(chunk.Record{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("x")})
 	if err != nil {
 		t.Fatalf("append: %v", err)
 	}
 
 	timeIndexer := memorytime.NewIndexer(chunkMgr, 1)
-	sourceIndexer := memorysource.NewIndexer(chunkMgr)
 	mgr := NewManager(
-		[]index.Indexer{timeIndexer, sourceIndexer},
+		[]index.Indexer{timeIndexer},
 		timeIndexer,
-		sourceIndexer,
 		nil,
 		nil,
 	)
@@ -151,56 +146,14 @@ func TestOpenTimeIndexNotBuilt(t *testing.T) {
 	}
 
 	timeIndexer := memorytime.NewIndexer(chunkMgr, 1)
-	sourceIndexer := memorysource.NewIndexer(chunkMgr)
 	mgr := NewManager(
-		[]index.Indexer{timeIndexer, sourceIndexer},
+		[]index.Indexer{timeIndexer},
 		timeIndexer,
-		sourceIndexer,
 		nil,
 		nil,
 	)
 
 	_, err = mgr.OpenTimeIndex(chunk.NewChunkID())
-	if err != index.ErrIndexNotFound {
-		t.Fatalf("expected ErrIndexNotFound, got %v", err)
-	}
-}
-
-func TestOpenSourceIndex(t *testing.T) {
-	mgr, _, chunkID := setupManager(t, testRecords())
-
-	if err := mgr.BuildIndexes(context.Background(), chunkID); err != nil {
-		t.Fatalf("build: %v", err)
-	}
-
-	idx, err := mgr.OpenSourceIndex(chunkID)
-	if err != nil {
-		t.Fatalf("open source index: %v", err)
-	}
-
-	entries := idx.Entries()
-	if len(entries) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(entries))
-	}
-}
-
-func TestOpenSourceIndexNotBuilt(t *testing.T) {
-	chunkMgr, err := chunkmemory.NewManager(chunkmemory.Config{})
-	if err != nil {
-		t.Fatalf("new manager: %v", err)
-	}
-
-	timeIndexer := memorytime.NewIndexer(chunkMgr, 1)
-	sourceIndexer := memorysource.NewIndexer(chunkMgr)
-	mgr := NewManager(
-		[]index.Indexer{timeIndexer, sourceIndexer},
-		timeIndexer,
-		sourceIndexer,
-		nil,
-		nil,
-	)
-
-	_, err = mgr.OpenSourceIndex(chunk.NewChunkID())
 	if err != index.ErrIndexNotFound {
 		t.Fatalf("expected ErrIndexNotFound, got %v", err)
 	}
@@ -227,22 +180,5 @@ func TestBuildAndOpenRoundTrip(t *testing.T) {
 		if !timeEntries[i].Timestamp.After(timeEntries[i-1].Timestamp) {
 			t.Fatalf("time entries not in order at index %d", i)
 		}
-	}
-
-	// Source index round-trip.
-	sourceIdx, err := mgr.OpenSourceIndex(chunkID)
-	if err != nil {
-		t.Fatalf("open source index: %v", err)
-	}
-	sourceEntries := sourceIdx.Entries()
-	if len(sourceEntries) != 2 {
-		t.Fatalf("source: expected 2 entries, got %d", len(sourceEntries))
-	}
-	totalPositions := 0
-	for _, e := range sourceEntries {
-		totalPositions += len(e.Positions)
-	}
-	if totalPositions != 3 {
-		t.Fatalf("source: expected 3 total positions, got %d", totalPositions)
 	}
 }

@@ -10,12 +10,10 @@ import (
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/index"
 	indexmem "gastrolog/internal/index/memory"
-	memsource "gastrolog/internal/index/memory/source"
 	memtime "gastrolog/internal/index/memory/time"
 	memtoken "gastrolog/internal/index/memory/token"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
-	"gastrolog/internal/source"
 )
 
 var (
@@ -24,7 +22,7 @@ var (
 	t2 = t0.Add(2 * time.Second)
 	t3 = t0.Add(3 * time.Second)
 
-	srcA = chunk.NewSourceID()
+	attrsA = chunk.Attributes{"source": "srcA"}
 )
 
 // trackingIndexManager wraps an IndexManager to track BuildIndexes calls.
@@ -46,13 +44,11 @@ func newTestSetup(maxRecords int64) (*orchestrator.Orchestrator, chunk.ChunkMana
 	})
 
 	timeIdx := memtime.NewIndexer(cm, 1)
-	srcIdx := memsource.NewIndexer(cm)
 	tokIdx := memtoken.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, srcIdx, tokIdx},
+		[]index.Indexer{timeIdx, tokIdx},
 		timeIdx,
-		srcIdx,
 		tokIdx,
 		nil,
 	)
@@ -73,7 +69,7 @@ func TestIngestReachesChunkManager(t *testing.T) {
 
 	rec := chunk.Record{
 		IngestTS: t1,
-		SourceID: srcA,
+		Attrs:    attrsA,
 		Raw:      []byte("test message"),
 	}
 
@@ -102,9 +98,9 @@ func TestIngestMultipleRecords(t *testing.T) {
 	orch, cm, _ := newTestSetup(1 << 20)
 
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("three")},
 	}
 
 	for _, rec := range records {
@@ -151,7 +147,7 @@ func TestSealedChunkTriggersIndexBuild(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		rec := chunk.Record{
 			IngestTS: t1.Add(time.Duration(i) * time.Second),
-			SourceID: srcA,
+			Attrs:    attrsA,
 			Raw:      []byte("record"),
 		}
 		if err := orch.Ingest(rec); err != nil {
@@ -183,7 +179,7 @@ func TestIndexBuildTriggeredOncePerSeal(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		rec := chunk.Record{
 			IngestTS: t1.Add(time.Duration(i) * time.Second),
-			SourceID: srcA,
+			Attrs:    attrsA,
 			Raw:      []byte("record"),
 		}
 		if err := orch.Ingest(rec); err != nil {
@@ -204,9 +200,9 @@ func TestSearchViaOrchestrator(t *testing.T) {
 	orch, cm, _ := newTestSetup(1 << 20)
 
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("three")},
 	}
 
 	for _, rec := range records {
@@ -230,7 +226,7 @@ func TestSearchViaOrchestrator(t *testing.T) {
 	}
 
 	// Compare with direct query engine call.
-	qe := query.New(cm, indexmem.NewManager(nil, nil, nil, nil, nil), nil)
+	qe := query.New(cm, indexmem.NewManager(nil, nil, nil, nil), nil)
 	directSeq, _ := qe.Search(context.Background(), query.Query{}, nil)
 
 	var directResults []string
@@ -252,50 +248,10 @@ func TestSearchViaOrchestrator(t *testing.T) {
 	}
 }
 
-func TestSearchWithFilter(t *testing.T) {
-	orch, _, _ := newTestSetup(1 << 20)
-
-	srcB := chunk.NewSourceID()
-	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("from A")},
-		{IngestTS: t2, SourceID: srcB, Raw: []byte("from B")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("from A again")},
-	}
-
-	for _, rec := range records {
-		if err := orch.Ingest(rec); err != nil {
-			t.Fatalf("Ingest failed: %v", err)
-		}
-	}
-
-	// Search with source filter.
-	seq, _, err := orch.Search(context.Background(), "default", query.Query{
-		Sources: []chunk.SourceID{srcA},
-	}, nil)
-	if err != nil {
-		t.Fatalf("Search failed: %v", err)
-	}
-
-	var results []string
-	for rec, err := range seq {
-		if err != nil {
-			t.Fatalf("iteration error: %v", err)
-		}
-		results = append(results, string(rec.Raw))
-	}
-
-	if len(results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(results))
-	}
-	if results[0] != "from A" || results[1] != "from A again" {
-		t.Errorf("unexpected results: %v", results)
-	}
-}
-
 func TestSearchDefaultKey(t *testing.T) {
 	orch, _, _ := newTestSetup(1 << 20)
 
-	rec := chunk.Record{IngestTS: t1, SourceID: srcA, Raw: []byte("test")}
+	rec := chunk.Record{IngestTS: t1, Attrs: attrsA, Raw: []byte("test")}
 	if err := orch.Ingest(rec); err != nil {
 		t.Fatalf("Ingest failed: %v", err)
 	}
@@ -331,7 +287,7 @@ func TestSearchUnknownRegistry(t *testing.T) {
 func TestIngestNoChunkManagers(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
-	rec := chunk.Record{IngestTS: t1, SourceID: srcA, Raw: []byte("test")}
+	rec := chunk.Record{IngestTS: t1, Attrs: attrsA, Raw: []byte("test")}
 	err := orch.Ingest(rec)
 	if err != orchestrator.ErrNoChunkManagers {
 		t.Errorf("expected ErrNoChunkManagers, got %v", err)
@@ -351,9 +307,9 @@ func TestSearchThenFollowViaOrchestrator(t *testing.T) {
 	orch, _, _ := newTestSetup(1 << 20)
 
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("info")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("error found")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("after")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("info")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("error found")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("after")},
 	}
 
 	for _, rec := range records {
@@ -390,9 +346,9 @@ func TestSearchWithContextViaOrchestrator(t *testing.T) {
 	orch, _, _ := newTestSetup(1 << 20)
 
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("before")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("error match")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("after")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("before")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("error match")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("after")},
 	}
 
 	for _, rec := range records {
@@ -484,38 +440,33 @@ func (r *blockingReceiver) Run(ctx context.Context, out chan<- orchestrator.Inge
 	return ctx.Err()
 }
 
-func newReceiverTestSetup() (*orchestrator.Orchestrator, chunk.ChunkManager, *source.Registry) {
+func newReceiverTestSetup() (*orchestrator.Orchestrator, chunk.ChunkManager) {
 	cm, _ := chunkmem.NewManager(chunkmem.Config{
 		MaxRecords: 10000,
 	})
 
 	timeIdx := memtime.NewIndexer(cm, 1)
-	srcIdx := memsource.NewIndexer(cm)
 	tokIdx := memtoken.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, srcIdx, tokIdx},
+		[]index.Indexer{timeIdx, tokIdx},
 		timeIdx,
-		srcIdx,
 		tokIdx,
 		nil,
 	)
 
 	qe := query.New(cm, im, nil)
-	srcReg, _ := source.NewRegistry(source.Config{})
 
-	orch := orchestrator.New(orchestrator.Config{
-		Sources: srcReg,
-	})
+	orch := orchestrator.New(orchestrator.Config{})
 	orch.RegisterChunkManager("default", cm)
 	orch.RegisterIndexManager("default", im)
 	orch.RegisterQueryEngine("default", qe)
 
-	return orch, cm, srcReg
+	return orch, cm
 }
 
 func TestReceiverMessageReachesChunkManager(t *testing.T) {
-	orch, cm, _ := newReceiverTestSetup()
+	orch, cm := newReceiverTestSetup()
 
 	recv := newMockReceiver([]orchestrator.IngestMessage{
 		{Attrs: map[string]string{"host": "server1"}, Raw: []byte("test message")},
@@ -552,53 +503,8 @@ func TestReceiverMessageReachesChunkManager(t *testing.T) {
 	}
 }
 
-func TestReceiverSourceResolution(t *testing.T) {
-	orch, cm, srcReg := newReceiverTestSetup()
-
-	recv := newMockReceiver([]orchestrator.IngestMessage{
-		{Attrs: map[string]string{"host": "server1", "app": "nginx"}, Raw: []byte("message 1")},
-		{Attrs: map[string]string{"host": "server1", "app": "nginx"}, Raw: []byte("message 2")},
-		{Attrs: map[string]string{"host": "server2", "app": "nginx"}, Raw: []byte("message 3")},
-	})
-	orch.RegisterReceiver("test", recv)
-
-	if err := orch.Start(context.Background()); err != nil {
-		t.Fatalf("Start failed: %v", err)
-	}
-
-	<-recv.started
-	time.Sleep(50 * time.Millisecond)
-
-	if err := orch.Stop(); err != nil {
-		t.Fatalf("Stop failed: %v", err)
-	}
-
-	// Verify source resolution.
-	ids := srcReg.Query(map[string]string{"app": "nginx"})
-	if len(ids) != 2 {
-		t.Errorf("expected 2 sources, got %d", len(ids))
-	}
-
-	// Verify records have correct source IDs.
-	cursor, _ := cm.OpenCursor(cm.Active().ID)
-	defer cursor.Close()
-
-	rec1, _, _ := cursor.Next()
-	rec2, _, _ := cursor.Next()
-	rec3, _, _ := cursor.Next()
-
-	// First two should have same source ID.
-	if rec1.SourceID != rec2.SourceID {
-		t.Errorf("expected same source ID for records 1 and 2")
-	}
-	// Third should have different source ID.
-	if rec1.SourceID == rec3.SourceID {
-		t.Errorf("expected different source ID for record 3")
-	}
-}
-
 func TestReceiverContextCancellation(t *testing.T) {
-	orch, _, _ := newReceiverTestSetup()
+	orch, _ := newReceiverTestSetup()
 
 	recv := newBlockingReceiver()
 	orch.RegisterReceiver("test", recv)
@@ -625,7 +531,7 @@ func TestReceiverContextCancellation(t *testing.T) {
 }
 
 func TestMultipleReceivers(t *testing.T) {
-	orch, cm, _ := newReceiverTestSetup()
+	orch, cm := newReceiverTestSetup()
 
 	recv1 := newMockReceiver([]orchestrator.IngestMessage{
 		{Attrs: map[string]string{"source": "recv1"}, Raw: []byte("from recv1")},
@@ -671,7 +577,7 @@ func TestMultipleReceivers(t *testing.T) {
 }
 
 func TestStartAlreadyRunning(t *testing.T) {
-	orch, _, _ := newReceiverTestSetup()
+	orch, _ := newReceiverTestSetup()
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -685,7 +591,7 @@ func TestStartAlreadyRunning(t *testing.T) {
 }
 
 func TestStopNotRunning(t *testing.T) {
-	orch, _, _ := newReceiverTestSetup()
+	orch, _ := newReceiverTestSetup()
 
 	err := orch.Stop()
 	if err != orchestrator.ErrNotRunning {
@@ -700,24 +606,19 @@ func TestReceiverIndexBuildOnSeal(t *testing.T) {
 	})
 
 	timeIdx := memtime.NewIndexer(cm, 1)
-	srcIdx := memsource.NewIndexer(cm)
 	tokIdx := memtoken.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, srcIdx, tokIdx},
+		[]index.Indexer{timeIdx, tokIdx},
 		timeIdx,
-		srcIdx,
 		tokIdx,
 		nil,
 	)
 
 	tracker := &trackingIndexManager{IndexManager: im}
 	qe := query.New(cm, im, nil)
-	srcReg, _ := source.NewRegistry(source.Config{})
 
-	orch := orchestrator.New(orchestrator.Config{
-		Sources: srcReg,
-	})
+	orch := orchestrator.New(orchestrator.Config{})
 	orch.RegisterChunkManager("default", cm)
 	orch.RegisterIndexManager("default", tracker)
 	orch.RegisterQueryEngine("default", qe)
@@ -749,7 +650,7 @@ func TestReceiverIndexBuildOnSeal(t *testing.T) {
 }
 
 func TestUnregisterReceiver(t *testing.T) {
-	orch, _, _ := newReceiverTestSetup()
+	orch, _ := newReceiverTestSetup()
 
 	recv := newBlockingReceiver()
 	orch.RegisterReceiver("test", recv)
@@ -809,7 +710,7 @@ func (r *countingReceiver) Run(ctx context.Context, out chan<- orchestrator.Inge
 }
 
 func TestHighVolumeIngestion(t *testing.T) {
-	orch, cm, _ := newReceiverTestSetup()
+	orch, cm := newReceiverTestSetup()
 
 	recv := newCountingReceiver(100)
 	orch.RegisterReceiver("test", recv)

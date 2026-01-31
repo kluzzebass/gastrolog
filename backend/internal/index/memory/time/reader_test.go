@@ -51,11 +51,11 @@ func setupReaderTest(t *testing.T, records []chunk.Record, sparsity int) (*Index
 }
 
 func TestOpenAndFindStartRoundTrip(t *testing.T) {
-	src := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1000), SourceID: src, Raw: []byte("a")},
-		{IngestTS: gotime.UnixMicro(2000), SourceID: src, Raw: []byte("b")},
-		{IngestTS: gotime.UnixMicro(3000), SourceID: src, Raw: []byte("c")},
+		{IngestTS: gotime.UnixMicro(1000), Attrs: attrs, Raw: []byte("a")},
+		{IngestTS: gotime.UnixMicro(2000), Attrs: attrs, Raw: []byte("b")},
+		{IngestTS: gotime.UnixMicro(3000), Attrs: attrs, Raw: []byte("c")},
 	}
 	indexer, chunkID := setupReaderTest(t, records, 1)
 

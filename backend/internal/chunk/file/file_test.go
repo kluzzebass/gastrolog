@@ -13,11 +13,12 @@ import (
 
 func TestIdxEntryRoundTrip(t *testing.T) {
 	entry := IdxEntry{
-		IngestTS:      time.UnixMicro(123456789),
-		WriteTS:       time.UnixMicro(987654321),
-		SourceLocalID: 42,
-		RawOffset:     1000,
-		RawSize:       500,
+		IngestTS:   time.UnixMicro(123456789),
+		WriteTS:    time.UnixMicro(987654321),
+		RawOffset:  1000,
+		RawSize:    500,
+		AttrOffset: 200,
+		AttrSize:   50,
 	}
 
 	var buf [IdxEntrySize]byte
@@ -31,14 +32,17 @@ func TestIdxEntryRoundTrip(t *testing.T) {
 	if !decoded.WriteTS.Equal(entry.WriteTS) {
 		t.Errorf("WriteTS: want %v, got %v", entry.WriteTS, decoded.WriteTS)
 	}
-	if decoded.SourceLocalID != entry.SourceLocalID {
-		t.Errorf("SourceLocalID: want %d, got %d", entry.SourceLocalID, decoded.SourceLocalID)
-	}
 	if decoded.RawOffset != entry.RawOffset {
 		t.Errorf("RawOffset: want %d, got %d", entry.RawOffset, decoded.RawOffset)
 	}
 	if decoded.RawSize != entry.RawSize {
 		t.Errorf("RawSize: want %d, got %d", entry.RawSize, decoded.RawSize)
+	}
+	if decoded.AttrOffset != entry.AttrOffset {
+		t.Errorf("AttrOffset: want %d, got %d", entry.AttrOffset, decoded.AttrOffset)
+	}
+	if decoded.AttrSize != entry.AttrSize {
+		t.Errorf("AttrSize: want %d, got %d", entry.AttrSize, decoded.AttrSize)
 	}
 }
 
@@ -95,11 +99,11 @@ func TestManagerAppendAndCursor(t *testing.T) {
 	}
 	defer mgr.Close()
 
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: time.UnixMicro(100), SourceID: sourceID, Raw: []byte("first record")},
-		{IngestTS: time.UnixMicro(200), SourceID: sourceID, Raw: []byte("second record with more data")},
-		{IngestTS: time.UnixMicro(300), SourceID: sourceID, Raw: []byte("third")},
+		{IngestTS: time.UnixMicro(100), Attrs: attrs, Raw: []byte("first record")},
+		{IngestTS: time.UnixMicro(200), Attrs: attrs, Raw: []byte("second record with more data")},
+		{IngestTS: time.UnixMicro(300), Attrs: attrs, Raw: []byte("third")},
 	}
 
 	var chunkID chunk.ChunkID
@@ -128,8 +132,8 @@ func TestManagerAppendAndCursor(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(chunkDir, idxLogFileName)); err != nil {
 		t.Errorf("idx.log not found: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(chunkDir, sourcesFileName)); err != nil {
-		t.Errorf("sources.bin not found: %v", err)
+	if _, err := os.Stat(filepath.Join(chunkDir, attrLogFileName)); err != nil {
+		t.Errorf("attr.log not found: %v", err)
 	}
 
 	// Open cursor and read records (unsealed chunk uses stdio)
@@ -149,9 +153,6 @@ func TestManagerAppendAndCursor(t *testing.T) {
 		}
 		if !bytes.Equal(got.Raw, want.Raw) {
 			t.Errorf("Record %d raw: want %q, got %q", i, want.Raw, got.Raw)
-		}
-		if got.SourceID != want.SourceID {
-			t.Errorf("Record %d sourceID: want %s, got %s", i, want.SourceID, got.SourceID)
 		}
 	}
 
@@ -173,11 +174,11 @@ func TestManagerSealAndMmapCursor(t *testing.T) {
 	}
 	defer mgr.Close()
 
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: time.UnixMicro(100), SourceID: sourceID, Raw: []byte("alpha")},
-		{IngestTS: time.UnixMicro(200), SourceID: sourceID, Raw: []byte("beta")},
-		{IngestTS: time.UnixMicro(300), SourceID: sourceID, Raw: []byte("gamma")},
+		{IngestTS: time.UnixMicro(100), Attrs: attrs, Raw: []byte("alpha")},
+		{IngestTS: time.UnixMicro(200), Attrs: attrs, Raw: []byte("beta")},
+		{IngestTS: time.UnixMicro(300), Attrs: attrs, Raw: []byte("gamma")},
 	}
 
 	var chunkID chunk.ChunkID
@@ -237,12 +238,12 @@ func TestCursorSeekAndPrev(t *testing.T) {
 	}
 	defer mgr.Close()
 
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: time.UnixMicro(100), SourceID: sourceID, Raw: []byte("zero")},
-		{IngestTS: time.UnixMicro(200), SourceID: sourceID, Raw: []byte("one")},
-		{IngestTS: time.UnixMicro(300), SourceID: sourceID, Raw: []byte("two")},
-		{IngestTS: time.UnixMicro(400), SourceID: sourceID, Raw: []byte("three")},
+		{IngestTS: time.UnixMicro(100), Attrs: attrs, Raw: []byte("zero")},
+		{IngestTS: time.UnixMicro(200), Attrs: attrs, Raw: []byte("one")},
+		{IngestTS: time.UnixMicro(300), Attrs: attrs, Raw: []byte("two")},
+		{IngestTS: time.UnixMicro(400), Attrs: attrs, Raw: []byte("three")},
 	}
 
 	var chunkID chunk.ChunkID
@@ -369,7 +370,7 @@ func TestEmptyChunkCursor(t *testing.T) {
 func TestManagerReload(t *testing.T) {
 	dir := t.TempDir()
 
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	var chunkID chunk.ChunkID
 
 	// Create manager, write records, seal, close
@@ -382,7 +383,7 @@ func TestManagerReload(t *testing.T) {
 		for i := 0; i < 3; i++ {
 			id, _, err := mgr.Append(chunk.Record{
 				IngestTS: time.UnixMicro(int64(i * 100)),
-				SourceID: sourceID,
+				Attrs:    attrs,
 				Raw:      []byte("record"),
 			})
 			if err != nil {
@@ -452,13 +453,13 @@ func TestRotationOnMaxChunkBytes(t *testing.T) {
 	}
 	defer mgr.Close()
 
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	var chunkIDs []chunk.ChunkID
 
 	for i := 0; i < 5; i++ {
 		id, _, err := mgr.Append(chunk.Record{
 			IngestTS: time.UnixMicro(int64(i * 100)),
-			SourceID: sourceID,
+			Attrs:    attrs,
 			Raw:      []byte("some data here"),
 		})
 		if err != nil {
@@ -502,11 +503,11 @@ func TestCrashRecoveryTruncatesOrphanedRawData(t *testing.T) {
 			t.Fatalf("NewManager: %v", err)
 		}
 
-		sourceID := chunk.NewSourceID()
+		attrs := chunk.Attributes{"source": "test"}
 		for i := 0; i < 3; i++ {
 			id, _, err := mgr.Append(chunk.Record{
 				IngestTS: time.UnixMicro(int64(i * 100)),
-				SourceID: sourceID,
+				Attrs:    attrs,
 				Raw:      []byte("record"),
 			})
 			if err != nil {
@@ -605,14 +606,14 @@ func TestFindStartPosition(t *testing.T) {
 	}
 	defer mgr.Close()
 
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	var chunkID chunk.ChunkID
 
 	// Append 10 records with timestamps 1 second apart
 	for i := 0; i < 10; i++ {
 		id, _, err := mgr.Append(chunk.Record{
 			IngestTS: baseTime.Add(time.Duration(i) * time.Second),
-			SourceID: sourceID,
+			Attrs:    attrs,
 			Raw:      []byte("record"),
 		})
 		if err != nil {

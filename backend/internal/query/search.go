@@ -143,9 +143,8 @@ func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeTo
 			}
 		}
 
-		// Create a follow query that removes source/token filters.
+		// Create a follow query that removes token filters.
 		followQuery := q
-		followQuery.Sources = nil
 		followQuery.Tokens = nil
 
 		count := 0

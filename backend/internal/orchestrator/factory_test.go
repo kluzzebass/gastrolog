@@ -38,9 +38,6 @@ func (f *fakeIndexManager) BuildIndexes(ctx context.Context, chunkID chunk.Chunk
 func (f *fakeIndexManager) OpenTimeIndex(chunkID chunk.ChunkID) (*index.Index[index.TimeIndexEntry], error) {
 	return nil, nil
 }
-func (f *fakeIndexManager) OpenSourceIndex(chunkID chunk.ChunkID) (*index.Index[index.SourceIndexEntry], error) {
-	return nil, nil
-}
 func (f *fakeIndexManager) OpenTokenIndex(chunkID chunk.ChunkID) (*index.Index[index.TokenIndexEntry], error) {
 	return nil, nil
 }

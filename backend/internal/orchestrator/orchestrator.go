@@ -14,7 +14,6 @@ import (
 	"gastrolog/internal/index"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/query"
-	"gastrolog/internal/source"
 )
 
 var (
@@ -66,7 +65,6 @@ type Orchestrator struct {
 
 	// Receiver management.
 	receivers map[string]Receiver
-	sources   *source.Registry
 
 	// Ingest channel and lifecycle.
 	ingestCh     chan IngestMessage
@@ -92,9 +90,6 @@ type Orchestrator struct {
 
 // Config configures an Orchestrator.
 type Config struct {
-	// SourceRegistry for identity resolution. Required for receiver-based ingestion.
-	Sources *source.Registry
-
 	// IngestChannelSize is the buffer size for the ingest channel.
 	// Defaults to 1000 if not set.
 	IngestChannelSize int
@@ -128,7 +123,6 @@ func New(cfg Config) *Orchestrator {
 		indexes:     make(map[string]index.IndexManager),
 		queries:     make(map[string]*query.Engine),
 		receivers:   make(map[string]Receiver),
-		sources:     cfg.Sources,
 		ingestSize:  cfg.IngestChannelSize,
 		now:         cfg.Now,
 		indexCtx:    indexCtx,

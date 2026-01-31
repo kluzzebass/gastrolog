@@ -25,15 +25,16 @@ const (
 	HeaderSize = 4
 
 	TypeTimeIndex      = 't'
-	TypeSourceIndex    = 's'
+	TypeSourceIndex    = 's' // Deprecated: source index no longer used
 	TypeTokenIndex     = 'k'
 	TypeChunkMeta      = 'm' // Deprecated: meta.bin no longer used
-	TypeSourceRegistry = 'z'
-	TypeChunkSourceMap = 'c'
+	TypeSourceRegistry = 'z' // Deprecated: source registry no longer used
+	TypeChunkSourceMap = 'c' // Deprecated: sources.bin no longer used
 	TypeRawLog         = 'r'
 	TypeIdxLog         = 'i'
+	TypeAttrLog        = 'a'
 
-	// Flag bits for raw.log and idx.log headers.
+	// Flag bits for raw.log, idx.log, and attr.log headers.
 	FlagSealed = 0x01
 )
 

@@ -24,7 +24,6 @@ import (
 	"gastrolog/internal/index"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
-	"gastrolog/internal/source"
 )
 
 // recordResult holds a record or error from the iterator channel.
@@ -36,8 +35,7 @@ type recordResult struct {
 // REPL provides an interactive read-eval-print loop for querying a running
 // GastroLog system. It interacts only through exported, stable interfaces.
 type REPL struct {
-	orch    *orchestrator.Orchestrator
-	sources *source.Registry
+	orch *orchestrator.Orchestrator
 
 	// Query state
 	store       string                    // target store for queries
@@ -81,12 +79,11 @@ func followTick() tea.Cmd {
 
 // New creates a REPL attached to an already-running system.
 // All components must be live and concurrent.
-func New(orch *orchestrator.Orchestrator, sources *source.Registry) *REPL {
+func New(orch *orchestrator.Orchestrator) *REPL {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	r := &REPL{
 		orch:         orch,
-		sources:      sources,
 		store:        "default",
 		pageSize:     defaultPageSize,
 		ctx:          ctx,
@@ -106,13 +103,12 @@ func New(orch *orchestrator.Orchestrator, sources *source.Registry) *REPL {
 
 // NewSimple creates a REPL for testing without bubbletea.
 // This version reads commands from the provided input and writes output to out.
-func NewSimple(orch *orchestrator.Orchestrator, sources *source.Registry, in io.Reader, out io.Writer) *simpleREPL {
+func NewSimple(orch *orchestrator.Orchestrator, in io.Reader, out io.Writer) *simpleREPL {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &simpleREPL{
 		repl: &REPL{
 			orch:         orch,
-			sources:      sources,
 			store:        "default",
 			ctx:          ctx,
 			cancel:       cancel,
@@ -203,10 +199,10 @@ func (s *lineScanner) Err() error   { return s.err }
 const defaultPageSize = 10
 
 // commands is the list of available REPL commands for tab completion.
-var commands = []string{"help", "sources", "store", "query", "follow", "next", "reset", "set", "chunks", "chunk", "indexes", "stats", "status", "exit", "quit"}
+var commands = []string{"help", "store", "query", "follow", "next", "reset", "set", "chunks", "chunk", "indexes", "stats", "status", "exit", "quit"}
 
 // queryFilters is the list of query filter keys for tab completion.
-var queryFilters = []string{"start=", "end=", "source=", "token=", "limit="}
+var queryFilters = []string{"start=", "end=", "token=", "limit="}
 
 // Run starts the REPL loop using bubbletea.
 func (r *REPL) Run() error {
@@ -462,8 +458,6 @@ func (r *REPL) execute(line string) (output string, exit bool, follow bool) {
 	switch cmd {
 	case "help", "?":
 		r.cmdHelp(&out)
-	case "sources":
-		r.cmdSources(&out, args)
 	case "query":
 		r.cmdQuery(&out, args, false)
 	case "follow":
@@ -499,7 +493,6 @@ func (r *REPL) execute(line string) (output string, exit bool, follow bool) {
 func (r *REPL) cmdHelp(out *strings.Builder) {
 	out.WriteString(`Commands:
   help                     Show this help
-  sources [key=value ...]  List sources matching filters
   store [name]             Get or set target store (default: "default")
   query key=value ...      Execute a query with filters
   follow key=value ...     Continuously stream new results (press any key to stop)
@@ -517,7 +510,6 @@ Inspection:
 Query filters:
   start=TIME               Start time (RFC3339 or Unix timestamp)
   end=TIME                 End time (RFC3339 or Unix timestamp)
-  source=ID                Filter by source ID (can repeat)
   token=WORD               Filter by token (can repeat, AND semantics)
   limit=N                  Maximum total results
 
@@ -525,46 +517,11 @@ Settings:
   pager=N                  Records per page (0 = no paging, show all)
 
 Examples:
-  sources env=prod
   query start=2024-01-01T00:00:00Z end=2024-01-02T00:00:00Z token=error
   set pager=50
   chunks
   chunk 019c10bb-a3a8-7ad9-9e8e-890bf77a84d3
 `)
-}
-
-func (r *REPL) cmdSources(out *strings.Builder, args []string) {
-	filters := make(map[string]string)
-	for _, arg := range args {
-		k, v, ok := strings.Cut(arg, "=")
-		if !ok {
-			fmt.Fprintf(out, "Invalid filter: %s (expected key=value)\n", arg)
-			return
-		}
-		filters[k] = v
-	}
-
-	ids := r.sources.Query(filters)
-	if len(ids) == 0 {
-		out.WriteString("No sources found.\n")
-		return
-	}
-
-	for _, id := range ids {
-		src, ok := r.sources.Get(id)
-		if !ok {
-			continue
-		}
-		out.WriteString(id.String())
-		if len(src.Attributes) > 0 {
-			var attrs []string
-			for k, v := range src.Attributes {
-				attrs = append(attrs, fmt.Sprintf("%s=%s", k, v))
-			}
-			out.WriteString(" " + strings.Join(attrs, " "))
-		}
-		out.WriteString("\n")
-	}
 }
 
 func (r *REPL) cmdStore(out *strings.Builder, args []string) {
@@ -578,7 +535,6 @@ func (r *REPL) cmdStore(out *strings.Builder, args []string) {
 
 func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
 	q := query.Query{}
-	var sourceIDs []chunk.SourceID
 	var tokens []string
 
 	for _, arg := range args {
@@ -603,13 +559,6 @@ func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
 				return
 			}
 			q.End = t
-		case "source":
-			id, err := chunk.ParseSourceID(v)
-			if err != nil {
-				fmt.Fprintf(out, "Invalid source ID: %v\n", err)
-				return
-			}
-			sourceIDs = append(sourceIDs, id)
 		case "token":
 			tokens = append(tokens, v)
 		case "limit":
@@ -625,9 +574,6 @@ func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
 		}
 	}
 
-	if len(sourceIDs) > 0 {
-		q.Sources = sourceIDs
-	}
 	if len(tokens) > 0 {
 		q.Tokens = tokens
 	}
@@ -777,11 +723,6 @@ func (r *REPL) runFollowMode(ctx context.Context, ch chan<- recordResult, q quer
 
 			nextPos = ref.Pos + 1
 
-			// Apply source filter
-			if len(q.Sources) > 0 && !slices.Contains(q.Sources, rec.SourceID) {
-				continue
-			}
-
 			// Apply token filter (AND semantics)
 			if len(q.Tokens) > 0 && !matchesAllTokens(rec.Raw, q.Tokens) {
 				continue
@@ -886,25 +827,27 @@ func (r *REPL) fetchAndPrintN(out *strings.Builder, count int) {
 }
 
 func (r *REPL) formatRecord(rec chunk.Record) string {
-	// Format: TIMESTAMP SOURCE_ATTRS RAW
+	// Format: TIMESTAMP ATTRS RAW
 	ts := rec.IngestTS.Format(time.RFC3339Nano)
 
-	// Look up source attributes
-	sourceStr := rec.SourceID.String()[:8] // fallback: short UUID
-	if src, ok := r.sources.Get(rec.SourceID); ok && len(src.Attributes) > 0 {
-		keys := make([]string, 0, len(src.Attributes))
-		for k := range src.Attributes {
+	// Format attributes
+	var attrStr string
+	if len(rec.Attrs) > 0 {
+		keys := make([]string, 0, len(rec.Attrs))
+		for k := range rec.Attrs {
 			keys = append(keys, k)
 		}
 		slices.Sort(keys)
 		var attrs []string
 		for _, k := range keys {
-			attrs = append(attrs, k+"="+src.Attributes[k])
+			attrs = append(attrs, k+"="+rec.Attrs[k])
 		}
-		sourceStr = strings.Join(attrs, ",")
+		attrStr = strings.Join(attrs, ",")
+	} else {
+		attrStr = "-"
 	}
 
-	return fmt.Sprintf("%s %s %s", ts, sourceStr, string(rec.Raw))
+	return fmt.Sprintf("%s %s %s", ts, attrStr, string(rec.Raw))
 }
 
 func (r *REPL) printRecord(out *strings.Builder, rec chunk.Record) {
@@ -1157,18 +1100,6 @@ func (r *REPL) cmdIndexes(out *strings.Builder, args []string) {
 		}
 	}
 
-	// Source index
-	if srcIdx, err := im.OpenSourceIndex(chunkID); err != nil {
-		fmt.Fprintf(out, "  source: not available (%v)\n", err)
-	} else {
-		entries := srcIdx.Entries()
-		totalPositions := 0
-		for _, e := range entries {
-			totalPositions += len(e.Positions)
-		}
-		fmt.Fprintf(out, "  source: %d sources, %d positions\n", len(entries), totalPositions)
-	}
-
 	// Token index
 	if tokIdx, err := im.OpenTokenIndex(chunkID); err != nil {
 		fmt.Fprintf(out, "  token:  not available (%v)\n", err)
@@ -1219,13 +1150,6 @@ func (r *REPL) cmdStats(out *strings.Builder) {
 	fmt.Fprintf(out, "  Chunks:      %d total (%d sealed, %d active)\n",
 		totalChunks, totalSealed, totalActive)
 	fmt.Fprintf(out, "  Records:     %d\n", totalRecords)
-
-	// Source stats
-	sourceCount := 0
-	if r.sources != nil {
-		sourceCount = r.sources.Count()
-	}
-	fmt.Fprintf(out, "  Sources:     %d\n", sourceCount)
 
 	// Receiver stats
 	receivers := r.orch.Receivers()

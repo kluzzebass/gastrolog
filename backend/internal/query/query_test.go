@@ -10,7 +10,6 @@ import (
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/index"
 	indexmem "gastrolog/internal/index/memory"
-	memsource "gastrolog/internal/index/memory/source"
 	memtime "gastrolog/internal/index/memory/time"
 	memtoken "gastrolog/internal/index/memory/token"
 	"gastrolog/internal/query"
@@ -61,8 +60,8 @@ var (
 	t4 = t0.Add(4 * time.Second)
 	t5 = t0.Add(5 * time.Second)
 
-	srcA = chunk.NewSourceID()
-	srcB = chunk.NewSourceID()
+	attrsA = chunk.Attributes{"source": "srcA"}
+	attrsB = chunk.Attributes{"source": "srcB"}
 )
 
 // allRecords collects all records from batches in order, for building a fake clock.
@@ -114,13 +113,11 @@ func setup(t *testing.T, batches ...[]chunk.Record) *query.Engine {
 	}
 
 	timeIdx := memtime.NewIndexer(cm, 1) // sparsity 1 = index every record
-	srcIdx := memsource.NewIndexer(cm)
 	tokIdx := memtoken.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, srcIdx, tokIdx},
+		[]index.Indexer{timeIdx, tokIdx},
 		timeIdx,
-		srcIdx,
 		tokIdx,
 		nil,
 	)
@@ -162,13 +159,11 @@ func setupWithActive(t *testing.T, sealed [][]chunk.Record, active []chunk.Recor
 	}
 
 	timeIdx := memtime.NewIndexer(cm, 1)
-	srcIdx := memsource.NewIndexer(cm)
 	tokIdx := memtoken.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, srcIdx, tokIdx},
+		[]index.Indexer{timeIdx, tokIdx},
 		timeIdx,
-		srcIdx,
 		tokIdx,
 		nil,
 	)
@@ -192,9 +187,9 @@ func TestSearchNoChunks(t *testing.T) {
 
 func TestSearchActiveChunkNoFilters(t *testing.T) {
 	active := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
-		{IngestTS: t2, SourceID: srcB, Raw: []byte("two")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
+		{IngestTS: t2, Attrs: attrsB, Raw: []byte("two")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("three")},
 	}
 
 	eng := setupWithActive(t, nil, active)
@@ -215,10 +210,10 @@ func TestSearchActiveChunkNoFilters(t *testing.T) {
 
 func TestSearchActiveChunkWithTimeFilter(t *testing.T) {
 	active := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("three")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("four")},
 	}
 
 	eng := setupWithActive(t, nil, active)
@@ -238,38 +233,14 @@ func TestSearchActiveChunkWithTimeFilter(t *testing.T) {
 	}
 }
 
-func TestSearchActiveChunkWithSourceFilter(t *testing.T) {
-	active := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("a1")},
-		{IngestTS: t2, SourceID: srcB, Raw: []byte("b1")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("a2")},
-	}
-
-	eng := setupWithActive(t, nil, active)
-
-	results, err := collect(search(eng, context.Background(), query.Query{Sources: []chunk.SourceID{srcA}}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(results))
-	}
-	if string(results[0].Raw) != "a1" {
-		t.Errorf("result[0]: got %q, want %q", results[0].Raw, "a1")
-	}
-	if string(results[1].Raw) != "a2" {
-		t.Errorf("result[1]: got %q, want %q", results[1].Raw, "a2")
-	}
-}
-
 func TestSearchSealedAndActiveChunks(t *testing.T) {
 	sealed := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("s1")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("s2")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("s1")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("s2")},
 	}
 	active := []chunk.Record{
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("a1")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("a2")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("a1")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("a2")},
 	}
 
 	eng := setupWithActive(t, [][]chunk.Record{sealed}, active)
@@ -291,9 +262,9 @@ func TestSearchSealedAndActiveChunks(t *testing.T) {
 
 func TestSearchSingleChunkNoFilters(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
-		{IngestTS: t3, SourceID: srcB, Raw: []byte("three")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
+		{IngestTS: t3, Attrs: attrsB, Raw: []byte("three")},
 	}
 
 	eng := setup(t, records)
@@ -314,10 +285,10 @@ func TestSearchSingleChunkNoFilters(t *testing.T) {
 
 func TestSearchTimeRangeFilter(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("three")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("four")},
 	}
 
 	eng := setup(t, records)
@@ -338,68 +309,12 @@ func TestSearchTimeRangeFilter(t *testing.T) {
 	}
 }
 
-func TestSearchSourceFilter(t *testing.T) {
-	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("a1")},
-		{IngestTS: t2, SourceID: srcB, Raw: []byte("b1")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("a2")},
-		{IngestTS: t4, SourceID: srcB, Raw: []byte("b2")},
-	}
-
-	eng := setup(t, records)
-
-	results, err := collect(search(eng, context.Background(), query.Query{Sources: []chunk.SourceID{srcA}}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(results))
-	}
-	if string(results[0].Raw) != "a1" {
-		t.Errorf("result[0]: got %q, want %q", results[0].Raw, "a1")
-	}
-	if string(results[1].Raw) != "a2" {
-		t.Errorf("result[1]: got %q, want %q", results[1].Raw, "a2")
-	}
-}
-
-func TestSearchCombinedTimeAndSource(t *testing.T) {
-	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("a1")},
-		{IngestTS: t2, SourceID: srcB, Raw: []byte("b1")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("a2")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("a3")},
-		{IngestTS: t5, SourceID: srcB, Raw: []byte("b2")},
-	}
-
-	eng := setup(t, records)
-
-	// Source A, time [t2, t5) → a2 (t3) and a3 (t4)
-	results, err := collect(search(eng, context.Background(), query.Query{
-		Start:   t2,
-		End:     t5,
-		Sources: []chunk.SourceID{srcA},
-	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(results))
-	}
-	if string(results[0].Raw) != "a2" {
-		t.Errorf("result[0]: got %q, want %q", results[0].Raw, "a2")
-	}
-	if string(results[1].Raw) != "a3" {
-		t.Errorf("result[1]: got %q, want %q", results[1].Raw, "a3")
-	}
-}
-
 func TestSearchLimit(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("three")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("four")},
 	}
 
 	eng := setup(t, records)
@@ -421,12 +336,12 @@ func TestSearchLimit(t *testing.T) {
 
 func TestSearchMultiChunkMerge(t *testing.T) {
 	batch1 := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("c1r1")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("c1r2")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("c1r1")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("c1r2")},
 	}
 	batch2 := []chunk.Record{
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("c2r1")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("c2r2")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("c2r1")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("c2r2")},
 	}
 
 	eng := setup(t, batch1, batch2)
@@ -448,12 +363,12 @@ func TestSearchMultiChunkMerge(t *testing.T) {
 
 func TestSearchMultiChunkLimit(t *testing.T) {
 	batch1 := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("c1r1")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("c1r2")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("c1r1")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("c1r2")},
 	}
 	batch2 := []chunk.Record{
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("c2r1")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("c2r2")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("c2r1")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("c2r2")},
 	}
 
 	eng := setup(t, batch1, batch2)
@@ -476,7 +391,7 @@ func TestSearchMultiChunkLimit(t *testing.T) {
 
 func TestSearchContextCancellation(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
 	}
 
 	eng := setup(t, records)
@@ -492,13 +407,13 @@ func TestSearchContextCancellation(t *testing.T) {
 
 func TestSearchSkipsNonOverlappingChunks(t *testing.T) {
 	early := []chunk.Record{
-		{IngestTS: t0, SourceID: srcA, Raw: []byte("early")},
+		{IngestTS: t0, Attrs: attrsA, Raw: []byte("early")},
 	}
 	mid := []chunk.Record{
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("mid")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("mid")},
 	}
 	late := []chunk.Record{
-		{IngestTS: t5, SourceID: srcA, Raw: []byte("late")},
+		{IngestTS: t5, Attrs: attrsA, Raw: []byte("late")},
 	}
 
 	eng := setup(t, early, mid, late)
@@ -516,30 +431,12 @@ func TestSearchSkipsNonOverlappingChunks(t *testing.T) {
 	}
 }
 
-func TestSearchSourceNotInChunk(t *testing.T) {
-	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("a1")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("a2")},
-	}
-
-	eng := setup(t, records)
-
-	// srcB is not in this chunk
-	results, err := collect(search(eng, context.Background(), query.Query{Sources: []chunk.SourceID{srcB}}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(results) != 0 {
-		t.Fatalf("expected 0 results, got %d", len(results))
-	}
-}
-
 func TestSearchEarlyBreak(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("three")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("four")},
 	}
 
 	eng := setup(t, records)
@@ -569,12 +466,12 @@ func TestSearchEarlyBreak(t *testing.T) {
 
 func TestSearchContextCancelledMidIteration(t *testing.T) {
 	batch1 := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("c1r1")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("c1r2")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("c1r1")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("c1r2")},
 	}
 	batch2 := []chunk.Record{
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("c2r1")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("c2r2")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("c2r1")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("c2r2")},
 	}
 
 	eng := setup(t, batch1, batch2)
@@ -605,10 +502,10 @@ func TestSearchContextCancelledMidIteration(t *testing.T) {
 
 func TestSearchStartOnlyFilter(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("three")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("four")},
 	}
 
 	eng := setup(t, records)
@@ -631,10 +528,10 @@ func TestSearchStartOnlyFilter(t *testing.T) {
 
 func TestSearchEndOnlyFilter(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("three")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("four")},
 	}
 
 	eng := setup(t, records)
@@ -655,40 +552,13 @@ func TestSearchEndOnlyFilter(t *testing.T) {
 	}
 }
 
-func TestSearchLimitWithSourceFilter(t *testing.T) {
-	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("a1")},
-		{IngestTS: t2, SourceID: srcB, Raw: []byte("b1")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("a2")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("a3")},
-		{IngestTS: t5, SourceID: srcB, Raw: []byte("b2")},
-	}
-
-	eng := setup(t, records)
-
-	// Source A has 3 records, limit to 2
-	results, err := collect(search(eng, context.Background(), query.Query{Sources: []chunk.SourceID{srcA}, Limit: 2}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(results))
-	}
-	if string(results[0].Raw) != "a1" {
-		t.Errorf("result[0]: got %q, want %q", results[0].Raw, "a1")
-	}
-	if string(results[1].Raw) != "a2" {
-		t.Errorf("result[1]: got %q, want %q", results[1].Raw, "a2")
-	}
-}
-
 func TestSearchLimitWithTimeFilter(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
-		{IngestTS: t5, SourceID: srcA, Raw: []byte("five")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("three")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("four")},
+		{IngestTS: t5, Attrs: attrsA, Raw: []byte("five")},
 	}
 
 	eng := setup(t, records)
@@ -711,10 +581,10 @@ func TestSearchLimitWithTimeFilter(t *testing.T) {
 
 func TestSearchActiveChunkWithLimit(t *testing.T) {
 	active := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("three")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("four")},
 	}
 
 	eng := setupWithActive(t, nil, active)
@@ -734,102 +604,12 @@ func TestSearchActiveChunkWithLimit(t *testing.T) {
 	}
 }
 
-func TestSearchMultiSourceFilter(t *testing.T) {
-	srcC := chunk.NewSourceID()
-	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("from A")},
-		{IngestTS: t2, SourceID: srcB, Raw: []byte("from B")},
-		{IngestTS: t3, SourceID: srcC, Raw: []byte("from C")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("from A again")},
-	}
-
-	eng := setup(t, records)
-
-	// Search for records from srcA OR srcC
-	results, err := collect(search(eng, context.Background(), query.Query{
-		Sources: []chunk.SourceID{srcA, srcC},
-	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(results) != 3 {
-		t.Fatalf("expected 3 results, got %d", len(results))
-	}
-	if string(results[0].Raw) != "from A" {
-		t.Errorf("result[0]: got %q", results[0].Raw)
-	}
-	if string(results[1].Raw) != "from C" {
-		t.Errorf("result[1]: got %q", results[1].Raw)
-	}
-	if string(results[2].Raw) != "from A again" {
-		t.Errorf("result[2]: got %q", results[2].Raw)
-	}
-}
-
-func TestSearchMultiSourceActiveChunk(t *testing.T) {
-	srcC := chunk.NewSourceID()
-	active := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("from A")},
-		{IngestTS: t2, SourceID: srcB, Raw: []byte("from B")},
-		{IngestTS: t3, SourceID: srcC, Raw: []byte("from C")},
-	}
-
-	eng := setupWithActive(t, nil, active)
-
-	// Multi-source filter on active chunk
-	results, err := collect(search(eng, context.Background(), query.Query{
-		Sources: []chunk.SourceID{srcA, srcC},
-	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(results))
-	}
-	if string(results[0].Raw) != "from A" {
-		t.Errorf("result[0]: got %q", results[0].Raw)
-	}
-	if string(results[1].Raw) != "from C" {
-		t.Errorf("result[1]: got %q", results[1].Raw)
-	}
-}
-
-func TestSearchMultiSourceWithTokens(t *testing.T) {
-	srcC := chunk.NewSourceID()
-	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("error from A")},
-		{IngestTS: t2, SourceID: srcB, Raw: []byte("error from B")},
-		{IngestTS: t3, SourceID: srcC, Raw: []byte("error from C")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("warning from A")},
-	}
-
-	eng := setup(t, records)
-
-	// Search for "error" from srcA OR srcC
-	results, err := collect(search(eng, context.Background(), query.Query{
-		Tokens:  []string{"error"},
-		Sources: []chunk.SourceID{srcA, srcC},
-	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(results))
-	}
-	if string(results[0].Raw) != "error from A" {
-		t.Errorf("result[0]: got %q", results[0].Raw)
-	}
-	if string(results[1].Raw) != "error from C" {
-		t.Errorf("result[1]: got %q", results[1].Raw)
-	}
-}
-
 func TestSearchTokenFilter(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("error connecting to database")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("connection established")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("error timeout waiting for response")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("request completed successfully")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("error connecting to database")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("connection established")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("error timeout waiting for response")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("request completed successfully")},
 	}
 
 	eng := setup(t, records)
@@ -852,10 +632,10 @@ func TestSearchTokenFilter(t *testing.T) {
 
 func TestSearchMultiTokenFilter(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("error connecting to database")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("error timeout waiting")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("timeout connecting to server")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("request completed")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("error connecting to database")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("error timeout waiting")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("timeout connecting to server")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("request completed")},
 	}
 
 	eng := setup(t, records)
@@ -875,8 +655,8 @@ func TestSearchMultiTokenFilter(t *testing.T) {
 
 func TestSearchTokenNotFound(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("hello world")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("foo bar")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("hello world")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("foo bar")},
 	}
 
 	eng := setup(t, records)
@@ -890,37 +670,12 @@ func TestSearchTokenNotFound(t *testing.T) {
 	}
 }
 
-func TestSearchTokenWithSourceFilter(t *testing.T) {
-	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("error from source A")},
-		{IngestTS: t2, SourceID: srcB, Raw: []byte("error from source B")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("warning from source A")},
-	}
-
-	eng := setup(t, records)
-
-	// Search for "error" from srcA only
-	results, err := collect(search(eng, context.Background(), query.Query{
-		Tokens:  []string{"error"},
-		Sources: []chunk.SourceID{srcA},
-	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
-	if string(results[0].Raw) != "error from source A" {
-		t.Errorf("result[0]: got %q", results[0].Raw)
-	}
-}
-
 func TestSearchTokenWithTimeFilter(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("error early")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("error middle")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("error late")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("success late")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("error early")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("error middle")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("error late")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("success late")},
 	}
 
 	eng := setup(t, records)
@@ -947,9 +702,9 @@ func TestSearchTokenWithTimeFilter(t *testing.T) {
 
 func TestSearchTokenActiveChunk(t *testing.T) {
 	active := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("error connecting")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("connection ok")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("error timeout")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("error connecting")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("connection ok")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("error timeout")},
 	}
 
 	eng := setupWithActive(t, nil, active)
@@ -974,12 +729,12 @@ func TestSearchTokenSealedNoMatchActiveMatch(t *testing.T) {
 	// Sealed chunk has no matching tokens, active chunk does.
 	// Guards against accidental early pruning or index-only logic.
 	sealed := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("hello world")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("foo bar")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("hello world")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("foo bar")},
 	}
 	active := []chunk.Record{
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("error happened")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("all good")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("error happened")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("all good")},
 	}
 
 	eng := setupWithActive(t, [][]chunk.Record{sealed}, active)
@@ -996,41 +751,12 @@ func TestSearchTokenSealedNoMatchActiveMatch(t *testing.T) {
 	}
 }
 
-func TestSearchTokenAndSourceSealedNoMatchActiveMatch(t *testing.T) {
-	// Combined token + source filter: sealed has neither, active has both.
-	sealed := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("hello world")},
-		{IngestTS: t2, SourceID: srcB, Raw: []byte("error from B")},
-	}
-	active := []chunk.Record{
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("error from A")},
-		{IngestTS: t4, SourceID: srcB, Raw: []byte("warning from B")},
-	}
-
-	eng := setupWithActive(t, [][]chunk.Record{sealed}, active)
-
-	// Search for "error" from srcA - only active chunk matches
-	results, err := collect(search(eng, context.Background(), query.Query{
-		Tokens:  []string{"error"},
-		Sources: []chunk.SourceID{srcA},
-	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
-	}
-	if string(results[0].Raw) != "error from A" {
-		t.Errorf("result[0]: got %q", results[0].Raw)
-	}
-}
-
 func TestSearchTokenWithLimit(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("error one")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("error two")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("error three")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("error four")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("error one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("error two")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("error three")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("error four")},
 	}
 
 	eng := setup(t, records)
@@ -1055,9 +781,9 @@ func TestSearchTokenWithLimit(t *testing.T) {
 
 func TestSearchTokenCaseInsensitive(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("ERROR uppercase")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("Error mixed")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("error lowercase")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("ERROR uppercase")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("Error mixed")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("error lowercase")},
 	}
 
 	eng := setup(t, records)
@@ -1074,10 +800,10 @@ func TestSearchTokenCaseInsensitive(t *testing.T) {
 
 func TestSearchPaginationWithLimit(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("three")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("four")},
 	}
 
 	eng := setup(t, records)
@@ -1138,12 +864,12 @@ func TestSearchPaginationWithLimit(t *testing.T) {
 
 func TestSearchPaginationAcrossChunks(t *testing.T) {
 	batch1 := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("c1r1")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("c1r2")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("c1r1")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("c1r2")},
 	}
 	batch2 := []chunk.Record{
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("c2r1")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("c2r2")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("c2r1")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("c2r2")},
 	}
 
 	eng := setup(t, batch1, batch2)
@@ -1191,10 +917,10 @@ func TestSearchPaginationAcrossChunks(t *testing.T) {
 
 func TestSearchPaginationWithEarlyBreak(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("three")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("four")},
 	}
 
 	eng := setup(t, records)
@@ -1242,9 +968,9 @@ func TestSearchPaginationWithEarlyBreak(t *testing.T) {
 
 func TestSearchPaginationActiveChunk(t *testing.T) {
 	active := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("three")},
 	}
 
 	eng := setupWithActive(t, nil, active)
@@ -1283,64 +1009,9 @@ func TestSearchPaginationActiveChunk(t *testing.T) {
 	}
 }
 
-func TestSearchPaginationWithFilters(t *testing.T) {
-	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("error one")},
-		{IngestTS: t2, SourceID: srcB, Raw: []byte("error two")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("error three")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("warning four")},
-		{IngestTS: t5, SourceID: srcA, Raw: []byte("error five")},
-	}
-
-	eng := setup(t, records)
-
-	// Search for "error" from srcA with pagination
-	q := query.Query{
-		Tokens:  []string{"error"},
-		Sources: []chunk.SourceID{srcA},
-		Limit:   2,
-	}
-
-	// First page: should get "error one" and "error three"
-	seq1, nextToken1 := eng.Search(context.Background(), q, nil)
-	results1, err := collect(seq1)
-	if err != nil {
-		t.Fatalf("page 1: unexpected error: %v", err)
-	}
-	if len(results1) != 2 {
-		t.Fatalf("page 1: expected 2 results, got %d", len(results1))
-	}
-	if string(results1[0].Raw) != "error one" || string(results1[1].Raw) != "error three" {
-		t.Errorf("page 1: got %q, %q", results1[0].Raw, results1[1].Raw)
-	}
-
-	token := nextToken1()
-	if token == nil {
-		t.Fatal("expected resume token after page 1")
-	}
-
-	// Second page: should get "error five"
-	seq2, nextToken2 := eng.Search(context.Background(), q, token)
-	results2, err := collect(seq2)
-	if err != nil {
-		t.Fatalf("page 2: unexpected error: %v", err)
-	}
-	if len(results2) != 1 {
-		t.Fatalf("page 2: expected 1 result, got %d", len(results2))
-	}
-	if string(results2[0].Raw) != "error five" {
-		t.Errorf("page 2: got %q, want %q", results2[0].Raw, "error five")
-	}
-
-	token = nextToken2()
-	if token != nil {
-		t.Errorf("expected nil token after last page, got %+v", token)
-	}
-}
-
 func TestSearchNoResultsNoToken(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("hello")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("hello")},
 	}
 
 	eng := setup(t, records)
@@ -1363,7 +1034,7 @@ func TestSearchNoResultsNoToken(t *testing.T) {
 
 func TestSearchInvalidResumeToken(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("hello")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("hello")},
 	}
 
 	eng := setup(t, records)
@@ -1385,10 +1056,10 @@ func TestSearchInvalidResumeToken(t *testing.T) {
 
 func TestSearchReverseOrder(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("three")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("four")},
 	}
 
 	eng := setup(t, records)
@@ -1412,10 +1083,10 @@ func TestSearchReverseOrder(t *testing.T) {
 
 func TestSearchReverseOrderWithTimeFilter(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("three")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("four")},
 	}
 
 	eng := setup(t, records)
@@ -1437,42 +1108,12 @@ func TestSearchReverseOrderWithTimeFilter(t *testing.T) {
 	}
 }
 
-func TestSearchReverseOrderWithSourceFilter(t *testing.T) {
-	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("a1")},
-		{IngestTS: t2, SourceID: srcB, Raw: []byte("b1")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("a2")},
-		{IngestTS: t4, SourceID: srcB, Raw: []byte("b2")},
-	}
-
-	eng := setup(t, records)
-
-	// Reverse order, source A only
-	results, err := collect(search(eng, context.Background(), query.Query{
-		Start:   t5,
-		End:     t0,
-		Sources: []chunk.SourceID{srcA},
-	}))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(results))
-	}
-	if string(results[0].Raw) != "a2" {
-		t.Errorf("result[0]: got %q, want %q", results[0].Raw, "a2")
-	}
-	if string(results[1].Raw) != "a1" {
-		t.Errorf("result[1]: got %q, want %q", results[1].Raw, "a1")
-	}
-}
-
 func TestSearchReverseOrderWithTokenFilter(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("error early")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("info message")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("error middle")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("error late")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("error early")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("info message")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("error middle")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("error late")},
 	}
 
 	eng := setup(t, records)
@@ -1499,10 +1140,10 @@ func TestSearchReverseOrderWithTokenFilter(t *testing.T) {
 
 func TestSearchReverseOrderWithLimit(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("three")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("four")},
 	}
 
 	eng := setup(t, records)
@@ -1529,9 +1170,9 @@ func TestSearchReverseOrderWithLimit(t *testing.T) {
 
 func TestSearchReverseOrderActiveChunk(t *testing.T) {
 	active := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("three")},
 	}
 
 	eng := setupWithActive(t, nil, active)
@@ -1554,12 +1195,12 @@ func TestSearchReverseOrderActiveChunk(t *testing.T) {
 
 func TestSearchReverseOrderMultiChunk(t *testing.T) {
 	batch1 := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("c1r1")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("c1r2")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("c1r1")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("c1r2")},
 	}
 	batch2 := []chunk.Record{
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("c2r1")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("c2r2")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("c2r1")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("c2r2")},
 	}
 
 	eng := setup(t, batch1, batch2)
@@ -1583,10 +1224,10 @@ func TestSearchReverseOrderMultiChunk(t *testing.T) {
 
 func TestSearchReverseOrderPagination(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("one")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("two")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("three")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("four")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("three")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("four")},
 	}
 
 	eng := setup(t, records)
@@ -1646,12 +1287,12 @@ func TestSearchReverseOrderPagination(t *testing.T) {
 
 func TestSearchReverseOrderPaginationAcrossChunks(t *testing.T) {
 	batch1 := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("c1r1")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("c1r2")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("c1r1")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("c1r2")},
 	}
 	batch2 := []chunk.Record{
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("c2r1")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("c2r2")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("c2r1")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("c2r2")},
 	}
 
 	eng := setup(t, batch1, batch2)
@@ -1756,10 +1397,10 @@ func TestQueryTimeBounds(t *testing.T) {
 
 func TestSearchThenFollowSealedChunk(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("info start")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("error happened")},
-		{IngestTS: t3, SourceID: srcB, Raw: []byte("info from B")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("info recovery")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("info start")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("error happened")},
+		{IngestTS: t3, Attrs: attrsB, Raw: []byte("info from B")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("info recovery")},
 	}
 
 	eng := setup(t, records)
@@ -1788,12 +1429,12 @@ func TestSearchThenFollowSealedChunk(t *testing.T) {
 
 func TestSearchThenFollowSealedAndActive(t *testing.T) {
 	sealed := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("info one")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("error found")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("info one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("error found")},
 	}
 	active := []chunk.Record{
-		{IngestTS: t3, SourceID: srcB, Raw: []byte("active one")},
-		{IngestTS: t4, SourceID: srcB, Raw: []byte("active two")},
+		{IngestTS: t3, Attrs: attrsB, Raw: []byte("active one")},
+		{IngestTS: t4, Attrs: attrsB, Raw: []byte("active two")},
 	}
 
 	eng := setupWithActive(t, [][]chunk.Record{sealed}, active)
@@ -1820,47 +1461,13 @@ func TestSearchThenFollowSealedAndActive(t *testing.T) {
 	}
 }
 
-func TestSearchThenFollowWithSourceFilter(t *testing.T) {
-	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("A info")},
-		{IngestTS: t2, SourceID: srcB, Raw: []byte("B info")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("A error")},
-		{IngestTS: t4, SourceID: srcB, Raw: []byte("B after")},
-		{IngestTS: t5, SourceID: srcA, Raw: []byte("A after")},
-	}
-
-	eng := setup(t, records)
-
-	// Search for "error" from srcA, then follow all.
-	seq, _ := eng.SearchThenFollow(context.Background(), query.Query{
-		Tokens:  []string{"error"},
-		Sources: []chunk.SourceID{srcA},
-	}, nil)
-
-	results, err := collect(seq)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Should get: A error + B after + A after (source filter dropped after match)
-	if len(results) != 3 {
-		t.Fatalf("expected 3 results, got %d", len(results))
-	}
-	want := []string{"A error", "B after", "A after"}
-	for i, w := range want {
-		if string(results[i].Raw) != w {
-			t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, w)
-		}
-	}
-}
-
 func TestSearchThenFollowWithLimit(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("info")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("error")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("after1")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("after2")},
-		{IngestTS: t5, SourceID: srcA, Raw: []byte("after3")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("info")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("error")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("after1")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("after2")},
+		{IngestTS: t5, Attrs: attrsA, Raw: []byte("after3")},
 	}
 
 	eng := setup(t, records)
@@ -1889,8 +1496,8 @@ func TestSearchThenFollowWithLimit(t *testing.T) {
 
 func TestSearchThenFollowNoMatch(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("info one")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("info two")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("info one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("info two")},
 	}
 
 	eng := setup(t, records)
@@ -1916,11 +1523,11 @@ func TestSearchThenFollowNoMatch(t *testing.T) {
 
 func TestSearchWithContextBeforeAndAfter(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("before2")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("before1")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("error match")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("after1")},
-		{IngestTS: t5, SourceID: srcA, Raw: []byte("after2")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("before2")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("before1")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("error match")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("after1")},
+		{IngestTS: t5, Attrs: attrsA, Raw: []byte("after2")},
 	}
 
 	eng := setup(t, records)
@@ -1950,11 +1557,11 @@ func TestSearchWithContextBeforeAndAfter(t *testing.T) {
 
 func TestSearchWithContextBeforeOnly(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("ctx1")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("ctx2")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("ctx3")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("error")},
-		{IngestTS: t5, SourceID: srcA, Raw: []byte("after")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("ctx1")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("ctx2")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("ctx3")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("error")},
+		{IngestTS: t5, Attrs: attrsA, Raw: []byte("after")},
 	}
 
 	eng := setup(t, records)
@@ -1983,11 +1590,11 @@ func TestSearchWithContextBeforeOnly(t *testing.T) {
 
 func TestSearchWithContextAfterOnly(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("before")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("error")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("after1")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("after2")},
-		{IngestTS: t5, SourceID: srcA, Raw: []byte("after3")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("before")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("error")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("after1")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("after2")},
+		{IngestTS: t5, Attrs: attrsA, Raw: []byte("after3")},
 	}
 
 	eng := setup(t, records)
@@ -2016,12 +1623,12 @@ func TestSearchWithContextAfterOnly(t *testing.T) {
 
 func TestSearchWithContextCrossChunkBefore(t *testing.T) {
 	batch1 := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("chunk1 rec1")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("chunk1 rec2")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("chunk1 rec1")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("chunk1 rec2")},
 	}
 	batch2 := []chunk.Record{
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("error in chunk2")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("chunk2 after")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("error in chunk2")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("chunk2 after")},
 	}
 
 	eng := setup(t, batch1, batch2)
@@ -2050,12 +1657,12 @@ func TestSearchWithContextCrossChunkBefore(t *testing.T) {
 
 func TestSearchWithContextCrossChunkAfter(t *testing.T) {
 	batch1 := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("before")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("error in chunk1")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("before")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("error in chunk1")},
 	}
 	batch2 := []chunk.Record{
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("chunk2 rec1")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("chunk2 rec2")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("chunk2 rec1")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("chunk2 rec2")},
 	}
 
 	eng := setup(t, batch1, batch2)
@@ -2084,12 +1691,12 @@ func TestSearchWithContextCrossChunkAfter(t *testing.T) {
 
 func TestSearchWithContextActiveChunk(t *testing.T) {
 	sealed := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("sealed before")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("sealed before")},
 	}
 	active := []chunk.Record{
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("active before")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("error active")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("active after")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("active before")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("error active")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("active after")},
 	}
 
 	eng := setupWithActive(t, [][]chunk.Record{sealed}, active)
@@ -2119,11 +1726,11 @@ func TestSearchWithContextActiveChunk(t *testing.T) {
 
 func TestSearchWithContextReverse(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("oldest")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("before match")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("error match")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("after match")},
-		{IngestTS: t5, SourceID: srcA, Raw: []byte("newest")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("oldest")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("before match")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("error match")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("after match")},
+		{IngestTS: t5, Attrs: attrsA, Raw: []byte("newest")},
 	}
 
 	eng := setup(t, records)
@@ -2160,11 +1767,11 @@ func TestSearchWithContextReverse(t *testing.T) {
 
 func TestSearchWithContextMultipleMatches(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("ctx1")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("error one")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("middle")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("error two")},
-		{IngestTS: t5, SourceID: srcA, Raw: []byte("ctx2")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("ctx1")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("error one")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("middle")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("error two")},
+		{IngestTS: t5, Attrs: attrsA, Raw: []byte("ctx2")},
 	}
 
 	eng := setup(t, records)
@@ -2196,8 +1803,8 @@ func TestSearchWithContextMultipleMatches(t *testing.T) {
 
 func TestSearchWithContextNoMatch(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("info one")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("info two")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("info one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("info two")},
 	}
 
 	eng := setup(t, records)
@@ -2220,10 +1827,10 @@ func TestSearchWithContextNoMatch(t *testing.T) {
 
 func TestSearchWithContextLimit(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("before")},
-		{IngestTS: t2, SourceID: srcA, Raw: []byte("error")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("after1")},
-		{IngestTS: t4, SourceID: srcA, Raw: []byte("after2")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("before")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("error")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("after1")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("after2")},
 	}
 
 	eng := setup(t, records)
@@ -2256,9 +1863,9 @@ func TestSearchWithContextLimit(t *testing.T) {
 // fall back to sequential scanning instead of returning an error.
 func TestSearchSealedWithoutIndexes(t *testing.T) {
 	records := []chunk.Record{
-		{IngestTS: t1, SourceID: srcA, Raw: []byte("error one")},
-		{IngestTS: t2, SourceID: srcB, Raw: []byte("warning two")},
-		{IngestTS: t3, SourceID: srcA, Raw: []byte("error three")},
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("error one")},
+		{IngestTS: t2, Attrs: attrsB, Raw: []byte("warning two")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("error three")},
 	}
 
 	// Create chunk manager and append records.
@@ -2284,12 +1891,10 @@ func TestSearchSealedWithoutIndexes(t *testing.T) {
 
 	// Create index manager that will return ErrIndexNotFound.
 	timeIdx := memtime.NewIndexer(cm, 1)
-	srcIdx := memsource.NewIndexer(cm)
 	tokIdx := memtoken.NewIndexer(cm)
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, srcIdx, tokIdx},
+		[]index.Indexer{timeIdx, tokIdx},
 		timeIdx,
-		srcIdx,
 		tokIdx,
 		nil,
 	)
@@ -2312,23 +1917,6 @@ func TestSearchSealedWithoutIndexes(t *testing.T) {
 		}
 	})
 
-	// Query with source filter - should fall back to sequential scan.
-	t.Run("source filter", func(t *testing.T) {
-		seq := search(eng, context.Background(), query.Query{
-			Sources: []chunk.SourceID{srcA},
-		})
-		results, err := collect(seq)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if len(results) != 2 {
-			t.Fatalf("expected 2 results, got %d", len(results))
-		}
-		if string(results[0].Raw) != "error one" || string(results[1].Raw) != "error three" {
-			t.Errorf("unexpected results: %v", results)
-		}
-	})
-
 	// Query with token filter - should fall back to sequential scan.
 	t.Run("token filter", func(t *testing.T) {
 		seq := search(eng, context.Background(), query.Query{
@@ -2345,21 +1933,6 @@ func TestSearchSealedWithoutIndexes(t *testing.T) {
 			t.Errorf("unexpected results: %v", results)
 		}
 	})
-
-	// Combined filters - should fall back to sequential scan.
-	t.Run("combined filters", func(t *testing.T) {
-		seq := search(eng, context.Background(), query.Query{
-			Sources: []chunk.SourceID{srcA},
-			Tokens:  []string{"error"},
-		})
-		results, err := collect(seq)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if len(results) != 2 {
-			t.Fatalf("expected 2 results, got %d", len(results))
-		}
-	})
 }
 
 // TestCrossChunkOrdering verifies that records are returned in correct order
@@ -2367,19 +1940,19 @@ func TestSearchSealedWithoutIndexes(t *testing.T) {
 func TestCrossChunkOrdering(t *testing.T) {
 	// Create multiple chunks with sequential timestamps
 	chunk1 := []chunk.Record{
-		{IngestTS: t0.Add(0 * time.Second), SourceID: srcA, Raw: []byte("c1-r1")},
-		{IngestTS: t0.Add(1 * time.Second), SourceID: srcA, Raw: []byte("c1-r2")},
-		{IngestTS: t0.Add(2 * time.Second), SourceID: srcA, Raw: []byte("c1-r3")},
+		{IngestTS: t0.Add(0 * time.Second), Attrs: attrsA, Raw: []byte("c1-r1")},
+		{IngestTS: t0.Add(1 * time.Second), Attrs: attrsA, Raw: []byte("c1-r2")},
+		{IngestTS: t0.Add(2 * time.Second), Attrs: attrsA, Raw: []byte("c1-r3")},
 	}
 	chunk2 := []chunk.Record{
-		{IngestTS: t0.Add(3 * time.Second), SourceID: srcA, Raw: []byte("c2-r1")},
-		{IngestTS: t0.Add(4 * time.Second), SourceID: srcA, Raw: []byte("c2-r2")},
-		{IngestTS: t0.Add(5 * time.Second), SourceID: srcA, Raw: []byte("c2-r3")},
+		{IngestTS: t0.Add(3 * time.Second), Attrs: attrsA, Raw: []byte("c2-r1")},
+		{IngestTS: t0.Add(4 * time.Second), Attrs: attrsA, Raw: []byte("c2-r2")},
+		{IngestTS: t0.Add(5 * time.Second), Attrs: attrsA, Raw: []byte("c2-r3")},
 	}
 	chunk3 := []chunk.Record{
-		{IngestTS: t0.Add(6 * time.Second), SourceID: srcA, Raw: []byte("c3-r1")},
-		{IngestTS: t0.Add(7 * time.Second), SourceID: srcA, Raw: []byte("c3-r2")},
-		{IngestTS: t0.Add(8 * time.Second), SourceID: srcA, Raw: []byte("c3-r3")},
+		{IngestTS: t0.Add(6 * time.Second), Attrs: attrsA, Raw: []byte("c3-r1")},
+		{IngestTS: t0.Add(7 * time.Second), Attrs: attrsA, Raw: []byte("c3-r2")},
+		{IngestTS: t0.Add(8 * time.Second), Attrs: attrsA, Raw: []byte("c3-r3")},
 	}
 
 	eng := setup(t, chunk1, chunk2, chunk3)
@@ -2435,12 +2008,12 @@ func TestCrossChunkOrdering(t *testing.T) {
 // TestCrossChunkResume verifies that resume tokens work correctly across chunk boundaries.
 func TestCrossChunkResume(t *testing.T) {
 	chunk1 := []chunk.Record{
-		{IngestTS: t0.Add(0 * time.Second), SourceID: srcA, Raw: []byte("c1-r1")},
-		{IngestTS: t0.Add(1 * time.Second), SourceID: srcA, Raw: []byte("c1-r2")},
+		{IngestTS: t0.Add(0 * time.Second), Attrs: attrsA, Raw: []byte("c1-r1")},
+		{IngestTS: t0.Add(1 * time.Second), Attrs: attrsA, Raw: []byte("c1-r2")},
 	}
 	chunk2 := []chunk.Record{
-		{IngestTS: t0.Add(2 * time.Second), SourceID: srcA, Raw: []byte("c2-r1")},
-		{IngestTS: t0.Add(3 * time.Second), SourceID: srcA, Raw: []byte("c2-r2")},
+		{IngestTS: t0.Add(2 * time.Second), Attrs: attrsA, Raw: []byte("c2-r1")},
+		{IngestTS: t0.Add(3 * time.Second), Attrs: attrsA, Raw: []byte("c2-r2")},
 	}
 
 	eng := setup(t, chunk1, chunk2)
@@ -2539,16 +2112,16 @@ func TestCrossChunkResume(t *testing.T) {
 // TestCrossChunkWithActiveChunk verifies ordering when there's an unsealed chunk.
 func TestCrossChunkWithActiveChunk(t *testing.T) {
 	sealed1 := []chunk.Record{
-		{IngestTS: t0.Add(0 * time.Second), SourceID: srcA, Raw: []byte("s1-r1")},
-		{IngestTS: t0.Add(1 * time.Second), SourceID: srcA, Raw: []byte("s1-r2")},
+		{IngestTS: t0.Add(0 * time.Second), Attrs: attrsA, Raw: []byte("s1-r1")},
+		{IngestTS: t0.Add(1 * time.Second), Attrs: attrsA, Raw: []byte("s1-r2")},
 	}
 	sealed2 := []chunk.Record{
-		{IngestTS: t0.Add(2 * time.Second), SourceID: srcA, Raw: []byte("s2-r1")},
-		{IngestTS: t0.Add(3 * time.Second), SourceID: srcA, Raw: []byte("s2-r2")},
+		{IngestTS: t0.Add(2 * time.Second), Attrs: attrsA, Raw: []byte("s2-r1")},
+		{IngestTS: t0.Add(3 * time.Second), Attrs: attrsA, Raw: []byte("s2-r2")},
 	}
 	active := []chunk.Record{
-		{IngestTS: t0.Add(4 * time.Second), SourceID: srcA, Raw: []byte("a-r1")},
-		{IngestTS: t0.Add(5 * time.Second), SourceID: srcA, Raw: []byte("a-r2")},
+		{IngestTS: t0.Add(4 * time.Second), Attrs: attrsA, Raw: []byte("a-r1")},
+		{IngestTS: t0.Add(5 * time.Second), Attrs: attrsA, Raw: []byte("a-r2")},
 	}
 
 	eng := setupWithActive(t, [][]chunk.Record{sealed1, sealed2}, active)

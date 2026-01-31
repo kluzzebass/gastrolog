@@ -9,13 +9,12 @@ All multi-byte integers are **little-endian**. UUIDs are stored as raw 16-byte v
   <chunk-uuid>/
     raw.log             Raw log bytes (append-only)
     idx.log             Record metadata entries (append-only)
-    sources.bin         SourceID-to-LocalID mapping table
+    attr.log            Record attributes (append-only)
     _time.idx           Sparse time index
-    _source.idx         Source index (inverted posting list)
     _token.idx          Token index (inverted posting list)
 ```
 
-Each chunk has its own subdirectory named by its UUID.
+Each chunk has its own subdirectory named by its UUID. Chunks are self-contained: all data needed to reconstruct records is stored within the chunk directory.
 
 ## Common Header Pattern
 
@@ -24,7 +23,7 @@ All binary files share a common 4-byte header prefix:
 | Field     | Size | Description                              |
 |-----------|------|------------------------------------------|
 | signature | 1    | Always `0x69` (`'i'`)                    |
-| type      | 1    | File type: `'r'` raw, `'i'` idx, `'t'` time, `'s'` source, `'k'` token |
+| type      | 1    | File type: `'r'` raw, `'i'` idx, `'a'` attr, `'t'` time, `'k'` token |
 | version   | 1    | Format version (file-type specific)      |
 | flags     | 1    | Bit flags (file-type specific)           |
 
@@ -68,6 +67,61 @@ Raw log bytes are concatenated with no framing. The offset and size of each reco
 
 ---
 
+## attr.log -- Record Attributes
+
+Append-only file containing encoded attribute records. Each record's attributes are stored as a length-prefixed key-value sequence.
+
+### Layout
+
+```
++---------------------------+
+|     Header (4 bytes)      |
++---------------------------+
+|   Attribute Record 0      |
++---------------------------+
+|   Attribute Record 1      |
++---------------------------+
+|     ...                   |
++---------------------------+
+|   Attribute Record N-1    |
++---------------------------+
+```
+
+### Header (4 bytes)
+
+| Offset | Size | Field     | Description                              |
+|--------|------|-----------|------------------------------------------|
+| 0      | 1    | signature | `0x69` (`'i'`)                           |
+| 1      | 1    | type      | `0x61` (`'a'`)                           |
+| 2      | 1    | version   | `0x01`                                   |
+| 3      | 1    | flags     | Bit 0: sealed (`0x01` = sealed)          |
+
+### Attribute Record (variable size)
+
+Each attribute record encodes a set of key-value string pairs:
+
+| Offset | Size      | Field    | Description                              |
+|--------|-----------|----------|------------------------------------------|
+| 0      | 2         | count    | Number of key-value pairs (uint16)       |
+| 2      | varies    | pairs    | Repeated key-value entries               |
+
+Each key-value pair:
+
+| Offset | Size      | Field    | Description                              |
+|--------|-----------|----------|------------------------------------------|
+| 0      | 2         | keyLen   | Length of key string (uint16)            |
+| 2      | keyLen    | key      | Key string bytes (UTF-8)                 |
+| 2+K    | 2         | valLen   | Length of value string (uint16)          |
+| 4+K    | valLen    | value    | Value string bytes (UTF-8)               |
+
+The pairs are repeated `count` times. An empty attribute set (count=0) uses 2 bytes.
+
+**Maximum file size: 4 GB** (limited by uint32 attrOffset field in idx.log entries)
+
+**Maximum record attributes: 64 KB** (limited by uint16 attrSize field in idx.log entries)
+
+---
+
 ## idx.log -- Record Metadata Index
 
 Append-only file containing fixed-size metadata entries for each record. The chunk ID is derived from the directory name (authoritative).
@@ -78,13 +132,13 @@ Append-only file containing fixed-size metadata entries for each record. The chu
 +---------------------------+
 |     Header (4 bytes)      |
 +---------------------------+
-|     Entry 0 (28 bytes)    |
+|     Entry 0 (30 bytes)    |
 +---------------------------+
-|     Entry 1 (28 bytes)    |
+|     Entry 1 (30 bytes)    |
 +---------------------------+
 |     ...                   |
 +---------------------------+
-|     Entry N-1 (28 bytes)  |
+|     Entry N-1 (30 bytes)  |
 +---------------------------+
 ```
 
@@ -97,22 +151,23 @@ Append-only file containing fixed-size metadata entries for each record. The chu
 | 2      | 1    | version   | `0x01`                                   |
 | 3      | 1    | flags     | Bit 0: sealed (`0x01` = sealed)          |
 
-### Entry (28 bytes each)
+### Entry (30 bytes each)
 
-| Offset | Size | Field         | Description                                  |
-|--------|------|---------------|----------------------------------------------|
-| 0      | 8    | ingestTS      | Ingest timestamp (int64 Unix micros)         |
-| 8      | 8    | writeTS       | Write timestamp (int64 Unix micros)          |
-| 16     | 4    | sourceLocalID | Local source ID (from sources.bin, uint32)   |
-| 20     | 4    | rawOffset     | Byte offset into raw.log data section (uint32)|
-| 24     | 4    | rawSize       | Length of raw data in bytes (uint32)         |
+| Offset | Size | Field         | Description                                   |
+|--------|------|---------------|-----------------------------------------------|
+| 0      | 8    | ingestTS      | Ingest timestamp (int64 Unix micros)          |
+| 8      | 8    | writeTS       | Write timestamp (int64 Unix micros)           |
+| 16     | 4    | rawOffset     | Byte offset into raw.log data section (uint32)|
+| 20     | 4    | rawSize       | Length of raw data in bytes (uint32)          |
+| 24     | 4    | attrOffset    | Byte offset into attr.log data section (uint32)|
+| 28     | 2    | attrSize      | Length of encoded attributes in bytes (uint16)|
 
 ### Position Semantics
 
 Record positions throughout the system are **record indices** (0, 1, 2, ...), not byte offsets. To compute the file offset for record N:
 
 ```
-idx_file_offset = 4 + (N * 28)
+idx_file_offset = 4 + (N * 30)
 ```
 
 This enables O(1) seeking by record number and trivial bidirectional traversal.
@@ -127,44 +182,6 @@ The `ChunkMeta` is derived from idx.log without a separate metadata file:
 | StartTS         | Entry 0, writeTS field                      |
 | EndTS           | Last entry, writeTS field                   |
 | Sealed          | flags byte in header (bit 0)                |
-
----
-
-## sources.bin -- Source ID Mapping Table
-
-Append-only sequence of fixed-size records. Each record maps one `SourceID` (UUID) to a `localID` (uint32) used in idx.log entries.
-
-### Record Layout
-
-```
- 0                   1                   2                   3
- 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                        size (uint32)                          |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|  version (1)  |                                               |
-+-+-+-+-+-+-+-+-+                                               +
-|                        sourceID (16 bytes)                    |
-+               +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|               |                  localID (uint32)             |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                     trailing size (uint32)                    |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-```
-
-### Fields
-
-| Offset | Size | Field         | Description                              |
-|--------|------|---------------|------------------------------------------|
-| 0      | 4    | size          | Total record size (always 29)            |
-| 4      | 1    | version       | `0x01`                                   |
-| 5      | 16   | sourceID      | Source UUID (raw bytes)                  |
-| 21     | 4    | localID       | Local uint32 identifier (starts at 1)   |
-| 25     | 4    | trailing size | Repeat of size field (must match)        |
-
-**Total: 29 bytes per record**
-
-Local IDs are assigned sequentially starting from 1. The file contains one record per distinct source seen by the chunk.
 
 ---
 
@@ -209,53 +226,6 @@ Sparse time index mapping sampled timestamps to record indices within a chunk. O
 **Total file size: 24 + (entryCount x 12) bytes**
 
 Entries are written in record order (the order records appear in idx.log). A sparsity parameter controls how many records are sampled: with sparsity N, every N-th record is indexed (plus the first record always).
-
----
-
-## _source.idx -- Source Index
-
-Inverted index mapping each `SourceID` to the list of record indices where that source appears within a chunk. Only built for sealed chunks.
-
-### Layout
-
-```
-+---------------------------+
-|          Header           |
-+---------------------------+
-|     Key Table             |
-|  (keyCount entries)       |
-+---------------------------+
-|     Posting Blob          |
-|  (flat uint32 positions)  |
-+---------------------------+
-```
-
-### Header (24 bytes)
-
-| Offset | Size | Field    | Description                        |
-|--------|------|----------|------------------------------------|
-| 0      | 1    | signature| `0x69` (`'i'`)                     |
-| 1      | 1    | type     | `0x73` (`'s'`)                     |
-| 2      | 1    | version  | `0x01`                             |
-| 3      | 1    | flags    | `0x00` (reserved)                  |
-| 4      | 16   | chunkID  | Chunk UUID (raw bytes)             |
-| 20     | 4    | keyCount | Number of distinct sources (uint32)|
-
-### Key Table Entry (24 bytes each)
-
-| Offset | Size | Field         | Description                                  |
-|--------|------|---------------|----------------------------------------------|
-| 0      | 16   | sourceID      | Source UUID (raw bytes)                       |
-| 16     | 4    | postingOffset | Byte offset into posting blob (uint32)       |
-| 20     | 4    | postingCount  | Number of positions for this source (uint32) |
-
-Key entries are sorted by `sourceID` string representation for deterministic output and binary search.
-
-### Posting Blob
-
-Flat array of `uint32` record indices (4 bytes each). Each key entry references a contiguous slice of this blob via `postingOffset` (byte offset from the start of the posting blob) and `postingCount` (number of indices).
-
-**Total file size: 24 + (keyCount x 24) + (totalIndices x 4) bytes**
 
 ---
 
@@ -326,7 +296,6 @@ All file formats include validation checks on decode:
 |--------------|----------------------------------------------------------------|
 | raw.log      | Min size (4 bytes), signature, type, version                   |
 | idx.log      | Min size (4 bytes), signature, type, version, entry alignment  |
-| sources.bin  | Min size, version, trailing size match                         |
+| attr.log     | Min size (4 bytes), signature, type, version                   |
 | _time.idx    | Min size, signature+type, version, chunkID, entry size match   |
-| _source.idx  | Min size, signature+type, version, chunkID, key size, posting size |
 | _token.idx   | Min size, signature+type, version, chunkID, key size, posting size |

@@ -19,9 +19,9 @@ import (
 
 // File names within a chunk directory.
 const (
-	rawLogFileName = "raw.log"
-	idxLogFileName = "idx.log"
-	// sourcesFileName is declared in sources.go
+	rawLogFileName  = "raw.log"
+	idxLogFileName  = "idx.log"
+	attrLogFileName = "attr.log"
 )
 
 var (
@@ -45,8 +45,8 @@ type Config struct {
 //
 // File layout per chunk:
 //   - raw.log: 4-byte header + concatenated raw log bytes
-//   - idx.log: 4-byte header + fixed-size (28-byte) entries
-//   - sources.bin: sourceID to localID mappings
+//   - idx.log: 4-byte header + fixed-size (30-byte) entries
+//   - attr.log: 4-byte header + concatenated attribute records
 //
 // Position semantics: RecordRef.Pos is a record index (0, 1, 2, ...), not a byte offset.
 //
@@ -61,7 +61,6 @@ type Manager struct {
 	lockFile *os.File // Exclusive lock on data directory
 	active   *chunkState
 	metas    map[chunk.ChunkID]*chunkMeta // In-memory chunk metadata
-	sources  map[chunk.ChunkID]*SourceMap
 	closed   bool
 
 	// Logger for this manager instance.
@@ -93,8 +92,9 @@ type chunkState struct {
 	meta        *chunkMeta
 	rawFile     *os.File
 	idxFile     *os.File
-	sources     *SourceMap
+	attrFile    *os.File
 	rawOffset   uint64 // Current write position in raw.log (after header)
+	attrOffset  uint64 // Current write position in attr.log (after header)
 	recordCount uint64 // Number of records written
 }
 
@@ -133,7 +133,6 @@ func NewManager(cfg Config) (*Manager, error) {
 		cfg:      cfg,
 		lockFile: lockFile,
 		metas:    make(map[chunk.ChunkID]*chunkMeta),
-		sources:  make(map[chunk.ChunkID]*SourceMap),
 		logger:   logger,
 	}
 	if err := manager.loadExisting(); err != nil {
@@ -152,9 +151,16 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 		return chunk.ChunkID{}, 0, ErrManagerClosed
 	}
 
-	rawLen := uint64(len(record.Raw))
+	// Encode attributes upfront to check size limits.
+	attrBytes, err := record.Attrs.Encode()
+	if err != nil {
+		return chunk.ChunkID{}, 0, err
+	}
 
-	if m.active == nil || m.shouldRotate(rawLen) {
+	rawLen := uint64(len(record.Raw))
+	attrLen := uint64(len(attrBytes))
+
+	if m.active == nil || m.shouldRotate(rawLen, attrLen) {
 		if err := m.sealLocked(); err != nil {
 			return chunk.ChunkID{}, 0, err
 		}
@@ -167,11 +173,6 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 	// Monotonic by construction since writes are mutex-serialized.
 	record.WriteTS = m.cfg.Now()
 
-	localID, _, err := m.active.sources.GetOrAssign(record.SourceID)
-	if err != nil {
-		return chunk.ChunkID{}, 0, err
-	}
-
 	// Write raw data to raw.log.
 	n, err := m.active.rawFile.Write(record.Raw)
 	if err != nil {
@@ -181,13 +182,23 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 		return chunk.ChunkID{}, 0, io.ErrShortWrite
 	}
 
+	// Write attributes to attr.log.
+	n, err = m.active.attrFile.Write(attrBytes)
+	if err != nil {
+		return chunk.ChunkID{}, 0, err
+	}
+	if n != len(attrBytes) {
+		return chunk.ChunkID{}, 0, io.ErrShortWrite
+	}
+
 	// Build and write idx.log entry.
 	entry := IdxEntry{
-		IngestTS:      record.IngestTS,
-		WriteTS:       record.WriteTS,
-		SourceLocalID: localID,
-		RawOffset:     uint32(m.active.rawOffset),
-		RawSize:       uint32(rawLen),
+		IngestTS:   record.IngestTS,
+		WriteTS:    record.WriteTS,
+		RawOffset:  uint32(m.active.rawOffset),
+		RawSize:    uint32(rawLen),
+		AttrOffset: uint32(m.active.attrOffset),
+		AttrSize:   uint16(attrLen),
 	}
 	var entryBuf [IdxEntrySize]byte
 	EncodeIdxEntry(entry, entryBuf[:])
@@ -202,6 +213,7 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 	// Update in-memory state.
 	recordIndex := m.active.recordCount
 	m.active.rawOffset += rawLen
+	m.active.attrOffset += attrLen
 	m.active.recordCount++
 	m.active.meta.recordCount = int64(m.active.recordCount)
 
@@ -267,38 +279,20 @@ func (m *Manager) List() ([]chunk.ChunkMeta, error) {
 func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	m.mu.Lock()
 	meta, ok := m.metas[id]
-	sourceMap := m.sources[id]
 	m.mu.Unlock()
 	if !ok {
 		return nil, chunk.ErrChunkNotFound
 	}
-	if sourceMap == nil {
-		var err error
-		sourceMap, err = m.loadSourceMap(id)
-		if err != nil {
-			return nil, err
-		}
-	}
 
 	rawPath := m.rawLogPath(id)
 	idxPath := m.idxLogPath(id)
+	attrPath := m.attrLogPath(id)
 
 	if meta.sealed {
-		return newMmapCursor(id, rawPath, idxPath, sourceMap)
+		return newMmapCursor(id, rawPath, idxPath, attrPath)
 	}
 
-	// Active chunk: use the sourceMap directly. Since SourceMap.Resolve()
-	// locks its own mutex, it will see updates from concurrent Append() calls.
-	// But we need to handle the case where the chunk was sealed between when
-	// we checked meta.sealed and now - in that case, m.active might have changed.
-	// Re-fetch to be safe.
-	m.mu.Lock()
-	if m.active != nil && m.active.meta.id == id {
-		// Use the live source map from the active chunk state
-		sourceMap = m.active.sources
-	}
-	m.mu.Unlock()
-	return newStdioCursor(id, rawPath, idxPath, sourceMap.Resolve)
+	return newStdioCursor(id, rawPath, idxPath, attrPath)
 }
 
 func (m *Manager) loadExisting() error {
@@ -327,10 +321,6 @@ func (m *Manager) loadExisting() error {
 		}
 
 		m.metas[id] = meta
-
-		if _, err := m.loadSourceMap(id); err != nil {
-			return err
-		}
 
 		if !meta.sealed {
 			unsealedIDs = append(unsealedIDs, id)
@@ -376,6 +366,7 @@ func (m *Manager) loadExisting() error {
 func (m *Manager) sealChunkOnDisk(id chunk.ChunkID) error {
 	rawPath := m.rawLogPath(id)
 	idxPath := m.idxLogPath(id)
+	attrPath := m.attrLogPath(id)
 
 	// Set sealed flag in raw.log header.
 	rawFile, err := os.OpenFile(rawPath, os.O_RDWR, m.cfg.FileMode)
@@ -399,13 +390,23 @@ func (m *Manager) sealChunkOnDisk(id chunk.ChunkID) error {
 	}
 	idxFile.Close()
 
+	// Set sealed flag in attr.log header.
+	attrFile, err := os.OpenFile(attrPath, os.O_RDWR, m.cfg.FileMode)
+	if err != nil {
+		return err
+	}
+	if err := m.setSealedFlag(attrFile); err != nil {
+		attrFile.Close()
+		return err
+	}
+	attrFile.Close()
+
 	return nil
 }
 
 // openActiveChunk opens an unsealed chunk as the active chunk, with crash recovery.
 func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 	meta := m.metas[id]
-	sourceMap := m.sources[id]
 
 	rawFile, err := m.openRawFile(id)
 	if err != nil {
@@ -416,64 +417,90 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 		rawFile.Close()
 		return err
 	}
+	attrFile, err := m.openAttrFile(id)
+	if err != nil {
+		rawFile.Close()
+		idxFile.Close()
+		return err
+	}
+
+	closeAll := func() {
+		rawFile.Close()
+		idxFile.Close()
+		attrFile.Close()
+	}
 
 	// Compute record count from idx.log file size.
 	idxInfo, err := idxFile.Stat()
 	if err != nil {
-		rawFile.Close()
-		idxFile.Close()
+		closeAll()
 		return err
 	}
 	recordCount := RecordCount(idxInfo.Size())
 
-	// Compute expected raw.log size from idx.log.
-	// If raw.log has extra data (crash between raw write and idx write),
-	// truncate it to match what idx.log expects.
-	var expectedRawSize int64
+	// Compute expected raw.log and attr.log sizes from idx.log.
+	// If files have extra data (crash between writes), truncate them.
+	var expectedRawSize, expectedAttrSize int64
 	if recordCount > 0 {
-		// Read last idx.log entry to get expected raw.log end position.
+		// Read last idx.log entry to get expected end positions.
 		lastOffset := IdxFileOffset(recordCount - 1)
 		var entryBuf [IdxEntrySize]byte
 		if _, err := idxFile.ReadAt(entryBuf[:], lastOffset); err != nil {
-			rawFile.Close()
-			idxFile.Close()
+			closeAll()
 			return err
 		}
 		lastEntry := DecodeIdxEntry(entryBuf[:])
 		expectedRawSize = int64(format.HeaderSize) + int64(lastEntry.RawOffset) + int64(lastEntry.RawSize)
+		expectedAttrSize = int64(format.HeaderSize) + int64(lastEntry.AttrOffset) + int64(lastEntry.AttrSize)
 	} else {
 		expectedRawSize = int64(format.HeaderSize)
+		expectedAttrSize = int64(format.HeaderSize)
 	}
 
+	// Truncate raw.log if needed.
 	rawInfo, err := rawFile.Stat()
 	if err != nil {
-		rawFile.Close()
-		idxFile.Close()
+		closeAll()
 		return err
 	}
-	actualRawSize := rawInfo.Size()
-
-	if actualRawSize > expectedRawSize {
-		// Truncate orphaned raw data from crashed write.
+	if rawInfo.Size() > expectedRawSize {
 		if err := rawFile.Truncate(expectedRawSize); err != nil {
-			rawFile.Close()
-			idxFile.Close()
+			closeAll()
 			return err
 		}
 		m.logger.Info("truncated orphaned raw.log data",
 			"chunk", id.String(),
 			"expected", expectedRawSize,
-			"actual", actualRawSize)
+			"actual", rawInfo.Size())
+	}
+
+	// Truncate attr.log if needed.
+	attrInfo, err := attrFile.Stat()
+	if err != nil {
+		closeAll()
+		return err
+	}
+	if attrInfo.Size() > expectedAttrSize {
+		if err := attrFile.Truncate(expectedAttrSize); err != nil {
+			closeAll()
+			return err
+		}
+		m.logger.Info("truncated orphaned attr.log data",
+			"chunk", id.String(),
+			"expected", expectedAttrSize,
+			"actual", attrInfo.Size())
 	}
 
 	rawOffset := uint64(expectedRawSize) - uint64(format.HeaderSize)
+	attrOffset := uint64(expectedAttrSize) - uint64(format.HeaderSize)
 
 	m.active = &chunkState{
 		meta:        meta,
 		rawFile:     rawFile,
 		idxFile:     idxFile,
-		sources:     sourceMap,
+		attrFile:    attrFile,
 		rawOffset:   rawOffset,
+		attrOffset:  attrOffset,
 		recordCount: recordCount,
 	}
 
@@ -539,19 +566,20 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 	return meta, nil
 }
 
-func (m *Manager) shouldRotate(rawLen uint64) bool {
+func (m *Manager) shouldRotate(rawLen, attrLen uint64) bool {
 	if m.active == nil {
 		return false
 	}
 
 	newRawOffset := m.active.rawOffset + rawLen
+	newAttrOffset := m.active.attrOffset + attrLen
 
-	// Hard limit: raw.log must stay under 4GB (uint32 max for rawOffset field).
-	if newRawOffset > MaxRawLogSize {
+	// Hard limit: raw.log and attr.log must stay under 4GB (uint32 max for offset fields).
+	if newRawOffset > MaxRawLogSize || newAttrOffset > MaxAttrLogSize {
 		return true
 	}
 
-	// Soft limit: user-configurable max chunk size.
+	// Soft limit: user-configurable max chunk size (applies to raw.log only).
 	if m.cfg.MaxChunkBytes > 0 && newRawOffset > uint64(m.cfg.MaxChunkBytes) {
 		return true
 	}
@@ -579,7 +607,14 @@ func (m *Manager) openLocked() error {
 		return err
 	}
 
-	sourceMap := m.sourceMap(id)
+	// Create and initialize attr.log with header.
+	attrFile, err := m.createAttrFile(id)
+	if err != nil {
+		rawFile.Close()
+		idxFile.Close()
+		return err
+	}
+
 	meta := &chunkMeta{
 		id:     id,
 		sealed: false,
@@ -589,12 +624,12 @@ func (m *Manager) openLocked() error {
 		meta:        meta,
 		rawFile:     rawFile,
 		idxFile:     idxFile,
-		sources:     sourceMap,
+		attrFile:    attrFile,
 		rawOffset:   0, // Data starts after header
+		attrOffset:  0, // Data starts after header
 		recordCount: 0,
 	}
 	m.metas[id] = meta
-	m.sources[id] = sourceMap
 	return nil
 }
 
@@ -642,6 +677,28 @@ func (m *Manager) createIdxFile(id chunk.ChunkID) (*os.File, error) {
 	return file, nil
 }
 
+func (m *Manager) createAttrFile(id chunk.ChunkID) (*os.File, error) {
+	path := m.attrLogPath(id)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, m.cfg.FileMode)
+	if err != nil {
+		return nil, err
+	}
+
+	// Write header.
+	header := format.Header{
+		Type:    format.TypeAttrLog,
+		Version: AttrLogVersion,
+		Flags:   0,
+	}
+	headerBytes := header.Encode()
+	if _, err := file.Write(headerBytes[:]); err != nil {
+		file.Close()
+		return nil, err
+	}
+
+	return file, nil
+}
+
 func (m *Manager) openRawFile(id chunk.ChunkID) (*os.File, error) {
 	path := m.rawLogPath(id)
 	return os.OpenFile(path, os.O_RDWR|os.O_APPEND, m.cfg.FileMode)
@@ -652,6 +709,11 @@ func (m *Manager) openIdxFile(id chunk.ChunkID) (*os.File, error) {
 	return os.OpenFile(path, os.O_RDWR|os.O_APPEND, m.cfg.FileMode)
 }
 
+func (m *Manager) openAttrFile(id chunk.ChunkID) (*os.File, error) {
+	path := m.attrLogPath(id)
+	return os.OpenFile(path, os.O_RDWR|os.O_APPEND, m.cfg.FileMode)
+}
+
 func (m *Manager) sealLocked() error {
 	if m.active == nil {
 		return nil
@@ -659,11 +721,14 @@ func (m *Manager) sealLocked() error {
 
 	m.active.meta.sealed = true
 
-	// Update sealed flag in both file headers.
+	// Update sealed flag in all file headers.
 	if err := m.setSealedFlag(m.active.rawFile); err != nil {
 		return err
 	}
 	if err := m.setSealedFlag(m.active.idxFile); err != nil {
+		return err
+	}
+	if err := m.setSealedFlag(m.active.attrFile); err != nil {
 		return err
 	}
 
@@ -672,6 +737,9 @@ func (m *Manager) sealLocked() error {
 		return err
 	}
 	if err := m.active.idxFile.Close(); err != nil {
+		return err
+	}
+	if err := m.active.attrFile.Close(); err != nil {
 		return err
 	}
 
@@ -711,6 +779,9 @@ func (m *Manager) Close() error {
 		if err := m.active.idxFile.Close(); err != nil {
 			errs = append(errs, err)
 		}
+		if err := m.active.attrFile.Close(); err != nil {
+			errs = append(errs, err)
+		}
 		m.active = nil
 	}
 
@@ -740,32 +811,8 @@ func (m *Manager) idxLogPath(id chunk.ChunkID) string {
 	return filepath.Join(m.chunkDir(id), idxLogFileName)
 }
 
-func (m *Manager) sourceMap(id chunk.ChunkID) *SourceMap {
-	if sourceMap, ok := m.sources[id]; ok {
-		return sourceMap
-	}
-	sourceMap := NewSourceMap(m.chunkDir(id), m.cfg.FileMode)
-	m.sources[id] = sourceMap
-	return sourceMap
-}
-
-func (m *Manager) loadSourceMap(id chunk.ChunkID) (*SourceMap, error) {
-	m.mu.Lock()
-	sourceMap, ok := m.sources[id]
-	if ok {
-		// Already loaded (active chunk or previously loaded sealed chunk)
-		m.mu.Unlock()
-		return sourceMap, nil
-	}
-	// Create new source map for sealed chunk and load from disk
-	sourceMap = NewSourceMap(m.chunkDir(id), m.cfg.FileMode)
-	if err := sourceMap.Load(); err != nil {
-		m.mu.Unlock()
-		return nil, err
-	}
-	m.sources[id] = sourceMap
-	m.mu.Unlock()
-	return sourceMap, nil
+func (m *Manager) attrLogPath(id chunk.ChunkID) string {
+	return filepath.Join(m.chunkDir(id), attrLogFileName)
 }
 
 // FindStartPosition binary searches idx.log for the record at or before the given timestamp.
