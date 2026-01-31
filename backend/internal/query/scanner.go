@@ -3,7 +3,6 @@ package query
 import (
 	"errors"
 	"iter"
-	"slices"
 	"sort"
 
 	"gastrolog/internal/chunk"
@@ -335,13 +334,6 @@ func applyFilters(rec chunk.Record, filters []recordFilter) bool {
 
 // Filter functions for common filter types.
 
-// sourceFilter returns a filter that matches records from any of the given sources.
-func sourceFilter(sources []chunk.SourceID) recordFilter {
-	return func(rec chunk.Record) bool {
-		return slices.Contains(sources, rec.SourceID)
-	}
-}
-
 // tokenFilter returns a filter that matches records containing all given tokens.
 func tokenFilter(tokens []string) recordFilter {
 	return func(rec chunk.Record) bool {
@@ -375,36 +367,6 @@ func applyTimeIndex(b *scannerBuilder, indexes index.IndexManager, chunkID chunk
 	// Time index is only used for seeking, not for position filtering.
 	// The actual time filtering is done in the scanner.
 	return true
-}
-
-// applySourceIndex tries to use the source index for position filtering.
-// Returns true if successful, false if index not available.
-func applySourceIndex(b *scannerBuilder, indexes index.IndexManager, chunkID chunk.ChunkID, sources []chunk.SourceID) (ok bool, empty bool) {
-	if len(sources) == 0 {
-		return true, false
-	}
-
-	srcIdx, err := indexes.OpenSourceIndex(chunkID)
-	if errors.Is(err, index.ErrIndexNotFound) {
-		return false, false
-	}
-	if err != nil {
-		return false, false // treat other errors as index not available
-	}
-
-	reader := index.NewSourceIndexReader(chunkID, srcIdx.Entries())
-	var accumulated []uint64
-	for _, src := range sources {
-		if positions, found := reader.Lookup(src); found {
-			b.unionPositionsInto(&accumulated, positions)
-		}
-	}
-
-	if len(accumulated) == 0 {
-		return true, true // index available but no matches
-	}
-
-	return b.addPositions(accumulated), false
 }
 
 // applyTokenIndex tries to use the token index for position filtering.

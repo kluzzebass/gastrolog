@@ -28,13 +28,10 @@ import (
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/receiver/chatterbox"
 	"gastrolog/internal/repl"
-	"gastrolog/internal/source"
-	sourcefile "gastrolog/internal/source/file"
 )
 
 func main() {
 	configPath := flag.String("config", "config.json", "path to configuration file")
-	sourcesPath := flag.String("sources", "sources.db", "path to sources registry file")
 	pprofAddr := flag.String("pprof", "", "pprof HTTP server address (e.g. localhost:6060)")
 	replMode := flag.Bool("repl", false, "start interactive REPL after system is running")
 	flag.Parse()
@@ -64,13 +61,13 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	if err := run(ctx, logger, *configPath, *sourcesPath, *replMode); err != nil {
+	if err := run(ctx, logger, *configPath, *replMode); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, logger *slog.Logger, configPath, sourcesPath string, replMode bool) error {
+func run(ctx context.Context, logger *slog.Logger, configPath string, replMode bool) error {
 	// Load configuration.
 	logger.Info("loading config", "path", configPath)
 	cfgStore := configfile.NewStore(configPath)
@@ -87,21 +84,9 @@ func run(ctx context.Context, logger *slog.Logger, configPath, sourcesPath strin
 			"routes", len(cfg.Routes))
 	}
 
-	// Create source registry.
-	sourceStore := sourcefile.NewStore(sourcesPath)
-	sources, err := source.NewRegistry(source.Config{
-		Store:  sourceStore,
-		Logger: logger,
-	})
-	if err != nil {
-		return err
-	}
-	defer sources.Close()
-
 	// Create orchestrator.
 	orch := orchestrator.New(orchestrator.Config{
-		Sources: sources,
-		Logger:  logger,
+		Logger: logger,
 	})
 
 	// Apply configuration with factories.
@@ -124,7 +109,7 @@ func run(ctx context.Context, logger *slog.Logger, configPath, sourcesPath strin
 
 	if replMode {
 		// Run REPL in foreground. REPL exit triggers shutdown.
-		r := repl.New(orch, sources)
+		r := repl.New(orch)
 		if err := r.Run(); err != nil && err != context.Canceled {
 			logger.Error("repl error", "error", err)
 		}

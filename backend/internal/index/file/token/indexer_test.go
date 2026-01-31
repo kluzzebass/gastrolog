@@ -41,11 +41,11 @@ func setupChunkManager(t *testing.T, records []chunk.Record) (chunk.ChunkManager
 }
 
 func TestIndexerBuild(t *testing.T) {
-	src := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1000), SourceID: src, Raw: []byte("connecting to server")},
-		{IngestTS: gotime.UnixMicro(2000), SourceID: src, Raw: []byte("connection established")},
-		{IngestTS: gotime.UnixMicro(3000), SourceID: src, Raw: []byte("server timeout error")},
+		{IngestTS: gotime.UnixMicro(1000), Attrs: attrs, Raw: []byte("connecting to server")},
+		{IngestTS: gotime.UnixMicro(2000), Attrs: attrs, Raw: []byte("connection established")},
+		{IngestTS: gotime.UnixMicro(3000), Attrs: attrs, Raw: []byte("server timeout error")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -89,10 +89,10 @@ func TestIndexerBuild(t *testing.T) {
 }
 
 func TestIndexerIdempotent(t *testing.T) {
-	src := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(100), SourceID: src, Raw: []byte("alpha beta")},
-		{IngestTS: gotime.UnixMicro(200), SourceID: src, Raw: []byte("gamma delta")},
+		{IngestTS: gotime.UnixMicro(100), Attrs: attrs, Raw: []byte("alpha beta")},
+		{IngestTS: gotime.UnixMicro(200), Attrs: attrs, Raw: []byte("gamma delta")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -122,9 +122,9 @@ func TestIndexerIdempotent(t *testing.T) {
 }
 
 func TestIndexerCancelledContext(t *testing.T) {
-	src := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(100), SourceID: src, Raw: []byte("data")},
+		{IngestTS: gotime.UnixMicro(100), Attrs: attrs, Raw: []byte("data")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -169,11 +169,11 @@ func TestIndexerBuildEmptyChunk(t *testing.T) {
 }
 
 func TestIndexerBuildSingleToken(t *testing.T) {
-	src := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(10), SourceID: src, Raw: []byte("hello")},
-		{IngestTS: gotime.UnixMicro(20), SourceID: src, Raw: []byte("hello")},
-		{IngestTS: gotime.UnixMicro(30), SourceID: src, Raw: []byte("hello")},
+		{IngestTS: gotime.UnixMicro(10), Attrs: attrs, Raw: []byte("hello")},
+		{IngestTS: gotime.UnixMicro(20), Attrs: attrs, Raw: []byte("hello")},
+		{IngestTS: gotime.UnixMicro(30), Attrs: attrs, Raw: []byte("hello")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -207,9 +207,9 @@ func TestIndexerBuildSingleToken(t *testing.T) {
 }
 
 func TestIndexerBuildSingleRecord(t *testing.T) {
-	src := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(42), SourceID: src, Raw: []byte("only")},
+		{IngestTS: gotime.UnixMicro(42), Attrs: attrs, Raw: []byte("only")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -243,9 +243,9 @@ func TestIndexerBuildSingleRecord(t *testing.T) {
 }
 
 func TestIndexerBuildInvalidChunkID(t *testing.T) {
-	src := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte("test")},
+		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("test")},
 	}
 
 	manager, _ := setupChunkManager(t, records)
@@ -260,9 +260,9 @@ func TestIndexerBuildInvalidChunkID(t *testing.T) {
 }
 
 func TestIndexerBuildReadOnlyDir(t *testing.T) {
-	src := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte("test")},
+		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("test")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -402,10 +402,10 @@ func TestDecodeErrors(t *testing.T) {
 }
 
 func TestIndexerConcurrentBuild(t *testing.T) {
-	src := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte("alpha beta")},
-		{IngestTS: gotime.UnixMicro(2), SourceID: src, Raw: []byte("gamma delta")},
+		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("alpha beta")},
+		{IngestTS: gotime.UnixMicro(2), Attrs: attrs, Raw: []byte("gamma delta")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -442,13 +442,13 @@ func TestIndexerConcurrentBuild(t *testing.T) {
 }
 
 func TestIndexerBuildLargePostingList(t *testing.T) {
-	src := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	const numRecords = 1000
 	records := make([]chunk.Record, numRecords)
 	for i := range records {
 		records[i] = chunk.Record{
 			IngestTS: gotime.UnixMicro(int64(i + 1)),
-			SourceID: src,
+			Attrs:    attrs,
 			Raw:      []byte("payload"),
 		}
 	}
@@ -490,13 +490,13 @@ func TestIndexerBuildLargePostingList(t *testing.T) {
 }
 
 func TestIndexerPositionsAscending(t *testing.T) {
-	src := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte("word aaa")},
-		{IngestTS: gotime.UnixMicro(2), SourceID: src, Raw: []byte("bbb ccc")},
-		{IngestTS: gotime.UnixMicro(3), SourceID: src, Raw: []byte("word ddd")},
-		{IngestTS: gotime.UnixMicro(4), SourceID: src, Raw: []byte("eee fff")},
-		{IngestTS: gotime.UnixMicro(5), SourceID: src, Raw: []byte("word ggg")},
+		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("word aaa")},
+		{IngestTS: gotime.UnixMicro(2), Attrs: attrs, Raw: []byte("bbb ccc")},
+		{IngestTS: gotime.UnixMicro(3), Attrs: attrs, Raw: []byte("word ddd")},
+		{IngestTS: gotime.UnixMicro(4), Attrs: attrs, Raw: []byte("eee fff")},
+		{IngestTS: gotime.UnixMicro(5), Attrs: attrs, Raw: []byte("word ggg")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -550,9 +550,9 @@ func TestDecodeExtraTrailingBytes(t *testing.T) {
 }
 
 func TestIndexerTokensSorted(t *testing.T) {
-	src := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte("zebra alpha mango")},
+		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("zebra alpha mango")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -592,8 +592,8 @@ func TestIndexerBuildUnsealedChunk(t *testing.T) {
 		t.Fatalf("new manager: %v", err)
 	}
 
-	src := chunk.NewSourceID()
-	chunkID, _, err := manager.Append(chunk.Record{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte("test")})
+	attrs := chunk.Attributes{"source": "test"}
+	chunkID, _, err := manager.Append(chunk.Record{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("test")})
 	if err != nil {
 		t.Fatalf("append: %v", err)
 	}
@@ -611,11 +611,11 @@ func TestIndexerBuildUnsealedChunk(t *testing.T) {
 }
 
 func TestLoadIndex(t *testing.T) {
-	src := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte("one two")},
-		{IngestTS: gotime.UnixMicro(2), SourceID: src, Raw: []byte("two three")},
-		{IngestTS: gotime.UnixMicro(3), SourceID: src, Raw: []byte("one three")},
+		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("one two")},
+		{IngestTS: gotime.UnixMicro(2), Attrs: attrs, Raw: []byte("two three")},
+		{IngestTS: gotime.UnixMicro(3), Attrs: attrs, Raw: []byte("one three")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -661,9 +661,9 @@ func TestLoadIndexNotFound(t *testing.T) {
 }
 
 func TestIndexerTokenDeduplication(t *testing.T) {
-	src := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte("error error error")},
+		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("error error error")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -695,9 +695,9 @@ func TestIndexerTokenDeduplication(t *testing.T) {
 }
 
 func TestIndexerCaseFolding(t *testing.T) {
-	src := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte("ERROR Error error")},
+		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("ERROR Error error")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -728,10 +728,10 @@ func TestIndexerCaseFolding(t *testing.T) {
 }
 
 func TestIndexerShortTokensSkipped(t *testing.T) {
-	src := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		// "a" is 1 char (skipped), "zz" and "zzz" are 2+ chars and not hex
-		{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte("a zz zzz")},
+		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("a zz zzz")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -760,9 +760,9 @@ func TestIndexerShortTokensSkipped(t *testing.T) {
 }
 
 func TestOpenReader(t *testing.T) {
-	src := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte("alpha beta gamma")},
+		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("alpha beta gamma")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -793,11 +793,11 @@ func TestOpenReader(t *testing.T) {
 }
 
 func TestIndexerHighBytesAreDelimiters(t *testing.T) {
-	src := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	// High bytes (UTF-8) are now delimiters, so "über" becomes "ber" and "größe" becomes "gr" and "e"
 	// Only ASCII alphanumeric, underscore, and hyphen are token characters
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte("über größe")},
+		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("über größe")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -837,7 +837,7 @@ func TestIndexerHighBytesAreDelimiters(t *testing.T) {
 }
 
 func TestIndexerLongTokenTruncated(t *testing.T) {
-	src := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	// Create a long token (200 chars) using 'z' (not hex)
 	// Max token length is 16, so it should be truncated
 	longInput := ""
@@ -845,7 +845,7 @@ func TestIndexerLongTokenTruncated(t *testing.T) {
 		longInput += "z"
 	}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte(longInput)},
+		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte(longInput)},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -871,9 +871,9 @@ func TestIndexerLongTokenTruncated(t *testing.T) {
 }
 
 func TestOpenReaderLookupFirstLast(t *testing.T) {
-	src := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1), SourceID: src, Raw: []byte("aardvark middle zebra")},
+		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("aardvark middle zebra")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)

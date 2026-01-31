@@ -2,7 +2,6 @@ package file
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"syscall"
 
@@ -11,19 +10,19 @@ import (
 )
 
 var (
-	ErrUnknownSourceLocalID = errors.New("unknown source local id")
-	ErrMmapEmpty            = errors.New("cannot mmap empty file")
+	ErrMmapEmpty = errors.New("cannot mmap empty file")
 )
 
-// mmapCursor is a RecordCursor backed by mmap'd raw.log and idx.log files.
+// mmapCursor is a RecordCursor backed by mmap'd raw.log, idx.log, and attr.log files.
 // Used for sealed chunks.
 type mmapCursor struct {
-	chunkID   chunk.ChunkID
-	rawData   []byte
-	idxData   []byte
-	rawFile   *os.File
-	idxFile   *os.File
-	sourceMap *SourceMap
+	chunkID  chunk.ChunkID
+	rawData  []byte
+	idxData  []byte
+	attrData []byte
+	rawFile  *os.File
+	idxFile  *os.File
+	attrFile *os.File
 
 	recordCount uint64 // Total records in chunk
 	fwdIndex    uint64 // Current forward iteration index
@@ -32,7 +31,7 @@ type mmapCursor struct {
 	revDone     bool
 }
 
-func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath string, sourceMap *SourceMap) (*mmapCursor, error) {
+func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath string) (*mmapCursor, error) {
 	// Open and mmap idx.log.
 	idxFile, err := os.Open(idxPath)
 	if err != nil {
@@ -51,7 +50,6 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath string, sourceMap *So
 		idxFile.Close()
 		return &mmapCursor{
 			chunkID:     chunkID,
-			sourceMap:   sourceMap,
 			recordCount: 0,
 			fwdDone:     true,
 			revDone:     true,
@@ -87,13 +85,43 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath string, sourceMap *So
 		return nil, err
 	}
 
+	// Open and mmap attr.log.
+	attrFile, err := os.Open(attrPath)
+	if err != nil {
+		syscall.Munmap(rawData)
+		rawFile.Close()
+		syscall.Munmap(idxData)
+		idxFile.Close()
+		return nil, err
+	}
+	attrInfo, err := attrFile.Stat()
+	if err != nil {
+		attrFile.Close()
+		syscall.Munmap(rawData)
+		rawFile.Close()
+		syscall.Munmap(idxData)
+		idxFile.Close()
+		return nil, err
+	}
+
+	attrData, err := syscall.Mmap(int(attrFile.Fd()), 0, int(attrInfo.Size()), syscall.PROT_READ, syscall.MAP_SHARED)
+	if err != nil {
+		attrFile.Close()
+		syscall.Munmap(rawData)
+		rawFile.Close()
+		syscall.Munmap(idxData)
+		idxFile.Close()
+		return nil, err
+	}
+
 	return &mmapCursor{
 		chunkID:     chunkID,
 		rawData:     rawData,
 		idxData:     idxData,
+		attrData:    attrData,
 		rawFile:     rawFile,
 		idxFile:     idxFile,
-		sourceMap:   sourceMap,
+		attrFile:    attrFile,
 		recordCount: recordCount,
 		fwdIndex:    0,
 		revIndex:    recordCount, // Start past end for reverse iteration
@@ -160,13 +188,18 @@ func (c *mmapCursor) readRecord(index uint64) (chunk.Record, error) {
 	}
 	raw := c.rawData[rawStart:rawEnd]
 
-	// Resolve source ID.
-	sourceID, ok := c.sourceMap.Resolve(entry.SourceLocalID)
-	if !ok {
-		return chunk.Record{}, fmt.Errorf("%w: localID=%d at index=%d chunk=%s", ErrUnknownSourceLocalID, entry.SourceLocalID, index, c.chunkID)
+	// Read and decode attributes.
+	attrStart := int(format.HeaderSize) + int(entry.AttrOffset)
+	attrEnd := attrStart + int(entry.AttrSize)
+	if attrEnd > len(c.attrData) {
+		return chunk.Record{}, ErrInvalidEntry
+	}
+	attrs, err := chunk.DecodeAttributes(c.attrData[attrStart:attrEnd])
+	if err != nil {
+		return chunk.Record{}, err
 	}
 
-	return BuildRecord(entry, raw, sourceID), nil
+	return BuildRecord(entry, raw, attrs), nil
 }
 
 func (c *mmapCursor) Close() error {
@@ -184,6 +217,12 @@ func (c *mmapCursor) Close() error {
 		}
 		c.idxData = nil
 	}
+	if c.attrData != nil {
+		if err := syscall.Munmap(c.attrData); err != nil {
+			errs = append(errs, err)
+		}
+		c.attrData = nil
+	}
 	if c.rawFile != nil {
 		if err := c.rawFile.Close(); err != nil {
 			errs = append(errs, err)
@@ -195,6 +234,12 @@ func (c *mmapCursor) Close() error {
 			errs = append(errs, err)
 		}
 		c.idxFile = nil
+	}
+	if c.attrFile != nil {
+		if err := c.attrFile.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		c.attrFile = nil
 	}
 
 	if len(errs) > 0 {
@@ -208,10 +253,10 @@ var _ chunk.RecordCursor = (*mmapCursor)(nil)
 // stdioCursor is a RecordCursor backed by standard file I/O.
 // Used for active (unsealed) chunks where files may still be growing.
 type stdioCursor struct {
-	chunkID chunk.ChunkID
-	rawFile *os.File
-	idxFile *os.File
-	resolve func(uint32) (chunk.SourceID, bool)
+	chunkID  chunk.ChunkID
+	rawFile  *os.File
+	idxFile  *os.File
+	attrFile *os.File
 
 	fwdIndex uint64 // Current forward iteration index
 	revIndex uint64 // Current reverse iteration index
@@ -219,7 +264,7 @@ type stdioCursor struct {
 	revDone  bool
 }
 
-func newStdioCursor(chunkID chunk.ChunkID, rawPath, idxPath string, resolve func(uint32) (chunk.SourceID, bool)) (*stdioCursor, error) {
+func newStdioCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath string) (*stdioCursor, error) {
 	rawFile, err := os.Open(rawPath)
 	if err != nil {
 		return nil, err
@@ -231,11 +276,19 @@ func newStdioCursor(chunkID chunk.ChunkID, rawPath, idxPath string, resolve func
 		return nil, err
 	}
 
+	attrFile, err := os.Open(attrPath)
+	if err != nil {
+		rawFile.Close()
+		idxFile.Close()
+		return nil, err
+	}
+
 	// Get current record count for reverse iteration starting point.
 	idxInfo, err := idxFile.Stat()
 	if err != nil {
 		rawFile.Close()
 		idxFile.Close()
+		attrFile.Close()
 		return nil, err
 	}
 	recordCount := RecordCount(idxInfo.Size())
@@ -244,7 +297,7 @@ func newStdioCursor(chunkID chunk.ChunkID, rawPath, idxPath string, resolve func
 		chunkID:  chunkID,
 		rawFile:  rawFile,
 		idxFile:  idxFile,
-		resolve:  resolve,
+		attrFile: attrFile,
 		fwdIndex: 0,
 		revIndex: recordCount,
 	}, nil
@@ -319,13 +372,18 @@ func (c *stdioCursor) readRecord(index uint64) (chunk.Record, error) {
 		return chunk.Record{}, err
 	}
 
-	// Resolve source ID.
-	sourceID, ok := c.resolve(entry.SourceLocalID)
-	if !ok {
-		return chunk.Record{}, fmt.Errorf("%w: localID=%d at index=%d", ErrUnknownSourceLocalID, entry.SourceLocalID, index)
+	// Read and decode attributes.
+	attrOffset := int64(format.HeaderSize) + int64(entry.AttrOffset)
+	attrBuf := make([]byte, entry.AttrSize)
+	if _, err := c.attrFile.ReadAt(attrBuf, attrOffset); err != nil {
+		return chunk.Record{}, err
+	}
+	attrs, err := chunk.DecodeAttributes(attrBuf)
+	if err != nil {
+		return chunk.Record{}, err
 	}
 
-	return BuildRecordCopy(entry, raw, sourceID), nil
+	return BuildRecordCopy(entry, raw, attrs), nil
 }
 
 func (c *stdioCursor) Close() error {
@@ -342,6 +400,12 @@ func (c *stdioCursor) Close() error {
 			errs = append(errs, err)
 		}
 		c.idxFile = nil
+	}
+	if c.attrFile != nil {
+		if err := c.attrFile.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		c.attrFile = nil
 	}
 
 	if len(errs) > 0 {

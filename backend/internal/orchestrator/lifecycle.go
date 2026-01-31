@@ -115,20 +115,15 @@ func (o *Orchestrator) ingestLoop(ctx context.Context) {
 	}
 }
 
-// processMessage resolves identity and routes to chunk managers.
+// processMessage routes incoming messages to chunk managers.
 func (o *Orchestrator) processMessage(msg IngestMessage) {
-	// Resolve source identity.
-	var sourceID chunk.SourceID
-	if o.sources != nil {
-		sourceID = o.sources.Resolve(msg.Attrs)
-	}
-
 	// Construct record.
 	// IngestTS comes from the receiver (when message was received).
 	// WriteTS is set by ChunkManager on append.
+	// Attrs are passed through directly from the receiver.
 	rec := chunk.Record{
 		IngestTS: msg.IngestTS,
-		SourceID: sourceID,
+		Attrs:    msg.Attrs,
 		Raw:      msg.Raw,
 	}
 

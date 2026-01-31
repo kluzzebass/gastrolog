@@ -13,8 +13,8 @@ func TestMemoryChunkManagerAppendSealOpenReader(t *testing.T) {
 		t.Fatalf("new manager: %v", err)
 	}
 
-	sourceID := chunk.NewSourceID()
-	record := chunk.Record{IngestTS: time.UnixMicro(100), SourceID: sourceID, Raw: []byte("alpha")}
+	attrs := chunk.Attributes{"source": "test"}
+	record := chunk.Record{IngestTS: time.UnixMicro(100), Attrs: attrs, Raw: []byte("alpha")}
 	chunkID, offset, err := manager.Append(record)
 	if err != nil {
 		t.Fatalf("append: %v", err)
@@ -32,8 +32,8 @@ func TestMemoryChunkManagerAppendSealOpenReader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("next on unsealed cursor: %v", err)
 	}
-	if gotUnsealed.SourceID != record.SourceID {
-		t.Fatalf("unsealed: expected source id %s got %s", record.SourceID.String(), gotUnsealed.SourceID.String())
+	if gotUnsealed.Attrs["source"] != record.Attrs["source"] {
+		t.Fatalf("unsealed: expected attrs %v got %v", record.Attrs, gotUnsealed.Attrs)
 	}
 	unsealedCursor.Close()
 
@@ -51,8 +51,8 @@ func TestMemoryChunkManagerAppendSealOpenReader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("next: %v", err)
 	}
-	if got.SourceID != record.SourceID {
-		t.Fatalf("expected source id %s got %s", record.SourceID.String(), got.SourceID.String())
+	if got.Attrs["source"] != record.Attrs["source"] {
+		t.Fatalf("expected attrs %v got %v", record.Attrs, got.Attrs)
 	}
 	if _, _, err := reader.Next(); err != chunk.ErrNoMoreRecords {
 		t.Fatalf("expected end of records, got %v", err)

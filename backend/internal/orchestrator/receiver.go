@@ -7,8 +7,8 @@ import (
 )
 
 // IngestMessage is the data emitted by receivers for ingestion.
-// Receivers provide attributes for identity resolution; the orchestrator
-// resolves these to a SourceID via the SourceRegistry.
+// Receivers provide attributes that are stored alongside the raw log data.
+// Attributes are passed through directly to chunk storage without transformation.
 type IngestMessage struct {
 	Attrs    map[string]string
 	Raw      []byte

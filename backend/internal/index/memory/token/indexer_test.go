@@ -33,11 +33,11 @@ func setupChunkManager(t *testing.T, records []chunk.Record) (chunk.ChunkManager
 }
 
 func TestIndexerBuild(t *testing.T) {
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{SourceID: sourceID, Raw: []byte("error connecting to database")},
-		{SourceID: sourceID, Raw: []byte("warning: slow query detected")},
-		{SourceID: sourceID, Raw: []byte("error: connection timeout")},
+		{Attrs: attrs, Raw: []byte("error connecting to database")},
+		{Attrs: attrs, Raw: []byte("warning: slow query detected")},
+		{Attrs: attrs, Raw: []byte("error: connection timeout")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -97,9 +97,9 @@ func TestIndexerBuild(t *testing.T) {
 }
 
 func TestIndexerBuildDedupeWithinRecord(t *testing.T) {
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{SourceID: sourceID, Raw: []byte("error error error multiple errors")},
+		{Attrs: attrs, Raw: []byte("error error error multiple errors")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -147,9 +147,9 @@ func TestIndexerBuildEmptyChunk(t *testing.T) {
 }
 
 func TestIndexerBuildNoTokensInRecord(t *testing.T) {
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{SourceID: sourceID, Raw: []byte("a . b : c")}, // only single chars and delimiters
+		{Attrs: attrs, Raw: []byte("a . b : c")}, // only single chars and delimiters
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -169,9 +169,9 @@ func TestIndexerBuildNoTokensInRecord(t *testing.T) {
 }
 
 func TestIndexerBuildSorted(t *testing.T) {
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{SourceID: sourceID, Raw: []byte("zebra apple mango")},
+		{Attrs: attrs, Raw: []byte("zebra apple mango")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -211,8 +211,8 @@ func TestIndexerBuildUnsealedChunk(t *testing.T) {
 		t.Fatalf("new manager: %v", err)
 	}
 
-	sourceID := chunk.NewSourceID()
-	chunkID, _, err := manager.Append(chunk.Record{SourceID: sourceID, Raw: []byte("test")})
+	attrs := chunk.Attributes{"source": "test"}
+	chunkID, _, err := manager.Append(chunk.Record{Attrs: attrs, Raw: []byte("test")})
 	if err != nil {
 		t.Fatalf("append: %v", err)
 	}
@@ -229,9 +229,9 @@ func TestIndexerBuildUnsealedChunk(t *testing.T) {
 }
 
 func TestIndexerBuildCancelledContext(t *testing.T) {
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{SourceID: sourceID, Raw: []byte("test data")},
+		{Attrs: attrs, Raw: []byte("test data")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -250,9 +250,9 @@ func TestIndexerBuildCancelledContext(t *testing.T) {
 }
 
 func TestIndexerGetUnbuilt(t *testing.T) {
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{SourceID: sourceID, Raw: []byte("test")},
+		{Attrs: attrs, Raw: []byte("test")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -265,9 +265,9 @@ func TestIndexerGetUnbuilt(t *testing.T) {
 }
 
 func TestIndexerBuildInvalidChunkID(t *testing.T) {
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{SourceID: sourceID, Raw: []byte("test")},
+		{Attrs: attrs, Raw: []byte("test")},
 	}
 
 	manager, _ := setupChunkManager(t, records)
@@ -281,9 +281,9 @@ func TestIndexerBuildInvalidChunkID(t *testing.T) {
 }
 
 func TestIndexerIdempotent(t *testing.T) {
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{SourceID: sourceID, Raw: []byte("hello world")},
+		{Attrs: attrs, Raw: []byte("hello world")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)

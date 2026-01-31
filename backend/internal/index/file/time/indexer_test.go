@@ -50,13 +50,13 @@ func setupChunkManager(t *testing.T, records []chunk.Record) (chunk.ChunkManager
 }
 
 func TestIndexerBuild(t *testing.T) {
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1000), SourceID: sourceID, Raw: []byte("one")},
-		{IngestTS: gotime.UnixMicro(2000), SourceID: sourceID, Raw: []byte("two")},
-		{IngestTS: gotime.UnixMicro(3000), SourceID: sourceID, Raw: []byte("three")},
-		{IngestTS: gotime.UnixMicro(4000), SourceID: sourceID, Raw: []byte("four")},
-		{IngestTS: gotime.UnixMicro(5000), SourceID: sourceID, Raw: []byte("five")},
+		{IngestTS: gotime.UnixMicro(1000), Attrs: attrs, Raw: []byte("one")},
+		{IngestTS: gotime.UnixMicro(2000), Attrs: attrs, Raw: []byte("two")},
+		{IngestTS: gotime.UnixMicro(3000), Attrs: attrs, Raw: []byte("three")},
+		{IngestTS: gotime.UnixMicro(4000), Attrs: attrs, Raw: []byte("four")},
+		{IngestTS: gotime.UnixMicro(5000), Attrs: attrs, Raw: []byte("five")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -96,10 +96,10 @@ func TestIndexerBuild(t *testing.T) {
 }
 
 func TestIndexerIdempotent(t *testing.T) {
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(100), SourceID: sourceID, Raw: []byte("alpha")},
-		{IngestTS: gotime.UnixMicro(200), SourceID: sourceID, Raw: []byte("beta")},
+		{IngestTS: gotime.UnixMicro(100), Attrs: attrs, Raw: []byte("alpha")},
+		{IngestTS: gotime.UnixMicro(200), Attrs: attrs, Raw: []byte("beta")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -129,9 +129,9 @@ func TestIndexerIdempotent(t *testing.T) {
 }
 
 func TestIndexerCancelledContext(t *testing.T) {
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(100), SourceID: sourceID, Raw: []byte("data")},
+		{IngestTS: gotime.UnixMicro(100), Attrs: attrs, Raw: []byte("data")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -176,9 +176,9 @@ func TestIndexerBuildEmptyChunk(t *testing.T) {
 }
 
 func TestIndexerBuildSingleRecord(t *testing.T) {
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(42), SourceID: sourceID, Raw: []byte("only")},
+		{IngestTS: gotime.UnixMicro(42), Attrs: attrs, Raw: []byte("only")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -212,12 +212,12 @@ func TestIndexerBuildSingleRecord(t *testing.T) {
 }
 
 func TestIndexerBuildSparsityOne(t *testing.T) {
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(10), SourceID: sourceID, Raw: []byte("a")},
-		{IngestTS: gotime.UnixMicro(20), SourceID: sourceID, Raw: []byte("b")},
-		{IngestTS: gotime.UnixMicro(30), SourceID: sourceID, Raw: []byte("c")},
-		{IngestTS: gotime.UnixMicro(40), SourceID: sourceID, Raw: []byte("d")},
+		{IngestTS: gotime.UnixMicro(10), Attrs: attrs, Raw: []byte("a")},
+		{IngestTS: gotime.UnixMicro(20), Attrs: attrs, Raw: []byte("b")},
+		{IngestTS: gotime.UnixMicro(30), Attrs: attrs, Raw: []byte("c")},
+		{IngestTS: gotime.UnixMicro(40), Attrs: attrs, Raw: []byte("d")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -252,11 +252,11 @@ func TestIndexerBuildSparsityOne(t *testing.T) {
 }
 
 func TestIndexerBuildRecordPos(t *testing.T) {
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1), SourceID: sourceID, Raw: []byte("aaa")},
-		{IngestTS: gotime.UnixMicro(2), SourceID: sourceID, Raw: []byte("bbb")},
-		{IngestTS: gotime.UnixMicro(3), SourceID: sourceID, Raw: []byte("ccc")},
+		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("aaa")},
+		{IngestTS: gotime.UnixMicro(2), Attrs: attrs, Raw: []byte("bbb")},
+		{IngestTS: gotime.UnixMicro(3), Attrs: attrs, Raw: []byte("ccc")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -292,9 +292,9 @@ func TestIndexerBuildRecordPos(t *testing.T) {
 }
 
 func TestIndexerBuildInvalidChunkID(t *testing.T) {
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1), SourceID: sourceID, Raw: []byte("x")},
+		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("x")},
 	}
 
 	manager, _ := setupChunkManager(t, records)
@@ -309,9 +309,9 @@ func TestIndexerBuildInvalidChunkID(t *testing.T) {
 }
 
 func TestIndexerBuildReadOnlyDir(t *testing.T) {
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1), SourceID: sourceID, Raw: []byte("x")},
+		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("x")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)
@@ -439,8 +439,8 @@ func TestIndexerBuildUnsealedChunk(t *testing.T) {
 		t.Fatalf("new manager: %v", err)
 	}
 
-	sourceID := chunk.NewSourceID()
-	chunkID, _, err := manager.Append(chunk.Record{IngestTS: gotime.UnixMicro(1), SourceID: sourceID, Raw: []byte("x")})
+	attrs := chunk.Attributes{"source": "test"}
+	chunkID, _, err := manager.Append(chunk.Record{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("x")})
 	if err != nil {
 		t.Fatalf("append: %v", err)
 	}
@@ -458,11 +458,11 @@ func TestIndexerBuildUnsealedChunk(t *testing.T) {
 }
 
 func TestLoadIndex(t *testing.T) {
-	sourceID := chunk.NewSourceID()
+	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1000), SourceID: sourceID, Raw: []byte("one")},
-		{IngestTS: gotime.UnixMicro(2000), SourceID: sourceID, Raw: []byte("two")},
-		{IngestTS: gotime.UnixMicro(3000), SourceID: sourceID, Raw: []byte("three")},
+		{IngestTS: gotime.UnixMicro(1000), Attrs: attrs, Raw: []byte("one")},
+		{IngestTS: gotime.UnixMicro(2000), Attrs: attrs, Raw: []byte("two")},
+		{IngestTS: gotime.UnixMicro(3000), Attrs: attrs, Raw: []byte("three")},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)

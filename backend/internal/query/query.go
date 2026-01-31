@@ -23,8 +23,7 @@ type Query struct {
 	End   time.Time // exclusive bound (upper for forward, lower for reverse)
 
 	// Optional filters
-	Sources []chunk.SourceID // filter by sources (nil = no filter, OR semantics)
-	Tokens  []string         // filter by tokens (nil = no filter, AND semantics)
+	Tokens []string // filter by tokens (nil = no filter, AND semantics)
 
 	// Result control
 	Limit int // max results (0 = unlimited)
@@ -217,24 +216,6 @@ func (e *Engine) buildScanner(cursor chunk.RecordCursor, q Query, meta chunk.Chu
 	// Resume position takes precedence over time-based start.
 	if startPos != nil {
 		b.setMinPosition(*startPos)
-	}
-
-	// Apply source filter: try index first, fall back to runtime filter.
-	// Source filter is applied before token filter (cheap before expensive).
-	if len(q.Sources) > 0 {
-		if meta.Sealed {
-			ok, empty := applySourceIndex(b, e.indexes, meta.ID, q.Sources)
-			if empty {
-				return emptyScanner(), nil
-			}
-			if !ok {
-				// Index not available, use runtime filter.
-				b.addFilter(sourceFilter(q.Sources))
-			}
-		} else {
-			// Unsealed chunks don't have indexes.
-			b.addFilter(sourceFilter(q.Sources))
-		}
 	}
 
 	// Apply token filter: try index first, fall back to runtime filter.

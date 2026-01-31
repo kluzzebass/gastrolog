@@ -1,8 +1,6 @@
 package index
 
 import (
-	"bytes"
-	"slices"
 	"testing"
 	"time"
 
@@ -29,26 +27,6 @@ func TestNewIndexTimeEntries(t *testing.T) {
 		if got[i].RecordPos != entries[i].RecordPos {
 			t.Fatalf("entry %d: expected pos %d, got %d", i, entries[i].RecordPos, got[i].RecordPos)
 		}
-	}
-}
-
-func TestNewIndexSourceEntries(t *testing.T) {
-	src := chunk.NewSourceID()
-	entries := []SourceIndexEntry{
-		{SourceID: src, Positions: []uint64{0, 64, 128}},
-	}
-
-	idx := NewIndex(entries)
-	got := idx.Entries()
-
-	if len(got) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(got))
-	}
-	if got[0].SourceID != src {
-		t.Fatalf("expected source %s, got %s", src, got[0].SourceID)
-	}
-	if len(got[0].Positions) != 3 {
-		t.Fatalf("expected 3 positions, got %d", len(got[0].Positions))
 	}
 }
 
@@ -217,127 +195,6 @@ func TestFindStartEmptyIndex(t *testing.T) {
 	}
 	if ref != (chunk.RecordRef{}) {
 		t.Fatalf("expected zero RecordRef, got %+v", ref)
-	}
-}
-
-// SourceIndexReader tests
-
-// sortEntries sorts source index entries by SourceID string, matching indexer output.
-func sortEntries(entries []SourceIndexEntry) []SourceIndexEntry {
-	sorted := make([]SourceIndexEntry, len(entries))
-	copy(sorted, entries)
-	slices.SortFunc(sorted, func(a, b SourceIndexEntry) int {
-		ab := [16]byte(a.SourceID)
-		bb := [16]byte(b.SourceID)
-		return bytes.Compare(ab[:], bb[:])
-	})
-	return sorted
-}
-
-func TestLookupFound(t *testing.T) {
-	id := chunk.NewChunkID()
-	src1 := chunk.NewSourceID()
-	src2 := chunk.NewSourceID()
-	src3 := chunk.NewSourceID()
-	entries := sortEntries([]SourceIndexEntry{
-		{SourceID: src1, Positions: []uint64{0, 128}},
-		{SourceID: src2, Positions: []uint64{64}},
-		{SourceID: src3, Positions: []uint64{192, 256, 320}},
-	})
-
-	reader := NewSourceIndexReader(id, entries)
-
-	for _, e := range entries {
-		positions, ok := reader.Lookup(e.SourceID)
-		if !ok {
-			t.Fatalf("expected to find source %s", e.SourceID)
-		}
-		if len(positions) != len(e.Positions) {
-			t.Fatalf("source %s: expected %d positions, got %d", e.SourceID, len(e.Positions), len(positions))
-		}
-		for i, p := range positions {
-			if p != e.Positions[i] {
-				t.Fatalf("source %s pos %d: expected %d, got %d", e.SourceID, i, e.Positions[i], p)
-			}
-		}
-	}
-}
-
-func TestLookupNotFound(t *testing.T) {
-	id := chunk.NewChunkID()
-	src1 := chunk.NewSourceID()
-	entries := sortEntries([]SourceIndexEntry{
-		{SourceID: src1, Positions: []uint64{0}},
-	})
-
-	reader := NewSourceIndexReader(id, entries)
-
-	missing := chunk.NewSourceID()
-	positions, ok := reader.Lookup(missing)
-	if ok {
-		t.Fatalf("expected ok=false for missing source, got positions %v", positions)
-	}
-	if positions != nil {
-		t.Fatalf("expected nil positions, got %v", positions)
-	}
-}
-
-func TestLookupEmptyIndex(t *testing.T) {
-	id := chunk.NewChunkID()
-	reader := NewSourceIndexReader(id, nil)
-
-	positions, ok := reader.Lookup(chunk.NewSourceID())
-	if ok {
-		t.Fatalf("expected ok=false for empty index, got positions %v", positions)
-	}
-	if positions != nil {
-		t.Fatalf("expected nil positions, got %v", positions)
-	}
-}
-
-func TestLookupSingleEntry(t *testing.T) {
-	id := chunk.NewChunkID()
-	src := chunk.NewSourceID()
-	entries := []SourceIndexEntry{
-		{SourceID: src, Positions: []uint64{42, 84}},
-	}
-
-	reader := NewSourceIndexReader(id, entries)
-
-	positions, ok := reader.Lookup(src)
-	if !ok {
-		t.Fatal("expected ok=true")
-	}
-	if len(positions) != 2 || positions[0] != 42 || positions[1] != 84 {
-		t.Fatalf("expected [42 84], got %v", positions)
-	}
-}
-
-func TestLookupCorrectPositions(t *testing.T) {
-	id := chunk.NewChunkID()
-	src1 := chunk.NewSourceID()
-	src2 := chunk.NewSourceID()
-	entries := sortEntries([]SourceIndexEntry{
-		{SourceID: src1, Positions: []uint64{0, 64, 128}},
-		{SourceID: src2, Positions: []uint64{32, 96}},
-	})
-
-	reader := NewSourceIndexReader(id, entries)
-
-	pos1, ok := reader.Lookup(src1)
-	if !ok {
-		t.Fatal("expected to find src1")
-	}
-	if len(pos1) != 3 || pos1[0] != 0 || pos1[1] != 64 || pos1[2] != 128 {
-		t.Fatalf("src1: expected [0 64 128], got %v", pos1)
-	}
-
-	pos2, ok := reader.Lookup(src2)
-	if !ok {
-		t.Fatal("expected to find src2")
-	}
-	if len(pos2) != 2 || pos2[0] != 32 || pos2[1] != 96 {
-		t.Fatalf("src2: expected [32 96], got %v", pos2)
 	}
 }
 
