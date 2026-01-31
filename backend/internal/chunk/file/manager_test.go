@@ -40,16 +40,23 @@ func TestFileChunkManagerDirectoryLayout(t *testing.T) {
 		t.Fatalf("expected different chunk IDs, both are %s", chunkID1.String())
 	}
 
-	// Top-level directory should contain exactly two subdirectories named by chunk ID.
+	// Top-level directory should contain exactly two subdirectories named by chunk ID,
+	// plus the .lock file for directory locking.
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("read dir: %v", err)
 	}
-	if len(entries) != 2 {
-		t.Fatalf("expected 2 entries in root dir, got %d", len(entries))
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries in root dir (2 chunks + .lock), got %d", len(entries))
 	}
 	names := map[string]bool{}
 	for _, e := range entries {
+		if e.Name() == ".lock" {
+			if e.IsDir() {
+				t.Fatalf(".lock should be a file, not a directory")
+			}
+			continue
+		}
 		if !e.IsDir() {
 			t.Fatalf("unexpected non-directory entry: %s", e.Name())
 		}

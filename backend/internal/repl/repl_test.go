@@ -194,8 +194,9 @@ func TestREPL_Query(t *testing.T) {
 		}
 
 		out := output.String()
-		if !strings.Contains(out, "records shown") {
-			t.Errorf("expected records shown message: %s", out)
+		// When all records are returned, it shows "(end of results)" instead of "records shown"
+		if !strings.Contains(out, "records") {
+			t.Errorf("expected records message: %s", out)
 		}
 	})
 

@@ -21,6 +21,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/index"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 	"gastrolog/internal/source"
@@ -202,7 +203,7 @@ func (s *lineScanner) Err() error   { return s.err }
 const defaultPageSize = 10
 
 // commands is the list of available REPL commands for tab completion.
-var commands = []string{"help", "sources", "store", "query", "follow", "next", "reset", "set", "exit", "quit"}
+var commands = []string{"help", "sources", "store", "query", "follow", "next", "reset", "set", "chunks", "chunk", "indexes", "stats", "status", "exit", "quit"}
 
 // queryFilters is the list of query filter keys for tab completion.
 var queryFilters = []string{"start=", "end=", "source=", "token=", "limit="}
@@ -476,6 +477,16 @@ func (r *REPL) execute(line string) (output string, exit bool, follow bool) {
 		r.cmdSet(&out, args)
 	case "store":
 		r.cmdStore(&out, args)
+	case "chunks":
+		r.cmdChunks(&out)
+	case "chunk":
+		r.cmdChunk(&out, args)
+	case "indexes":
+		r.cmdIndexes(&out, args)
+	case "stats":
+		r.cmdStats(&out)
+	case "status":
+		r.cmdStatus(&out)
 	case "exit", "quit":
 		return "", true, false
 	default:
@@ -495,7 +506,13 @@ func (r *REPL) cmdHelp(out *strings.Builder) {
   next [count]             Fetch next page of results
   reset                    Clear current query state
   set [key=value]          Get or set config (no args shows current settings)
-  exit                     Exit the REPL
+
+Inspection:
+  chunks                   List all chunks with metadata
+  chunk <id>               Show details for a specific chunk
+  indexes <chunk-id>       Show index status for a chunk
+  stats                    Show overall system statistics
+  status                   Show live system state
 
 Query filters:
   start=TIME               Start time (RFC3339 or Unix timestamp)
@@ -511,7 +528,8 @@ Examples:
   sources env=prod
   query start=2024-01-01T00:00:00Z end=2024-01-02T00:00:00Z token=error
   set pager=50
-  next 20
+  chunks
+  chunk 019c10bb-a3a8-7ad9-9e8e-890bf77a84d3
 `)
 }
 
@@ -951,4 +969,400 @@ func parseTime(s string) (time.Time, error) {
 		return time.Unix(unix, 0), nil
 	}
 	return time.Time{}, fmt.Errorf("invalid time format: %s (use RFC3339: 2006-01-02T15:04:05Z or 2006-01-02T15:04:05+01:00)", s)
+}
+
+// cmdChunks lists all chunks across all stores with their metadata.
+func (r *REPL) cmdChunks(out *strings.Builder) {
+	stores := r.orch.ChunkManagers()
+	if len(stores) == 0 {
+		out.WriteString("No chunk managers registered.\n")
+		return
+	}
+
+	slices.Sort(stores)
+
+	for _, store := range stores {
+		cm := r.orch.ChunkManager(store)
+		if cm == nil {
+			continue
+		}
+
+		chunks, err := cm.List()
+		if err != nil {
+			fmt.Fprintf(out, "[%s] Error listing chunks: %v\n", store, err)
+			continue
+		}
+
+		if len(chunks) == 0 {
+			fmt.Fprintf(out, "[%s] No chunks\n", store)
+			continue
+		}
+
+		// Sort by StartTS
+		slices.SortFunc(chunks, func(a, b chunk.ChunkMeta) int {
+			return a.StartTS.Compare(b.StartTS)
+		})
+
+		fmt.Fprintf(out, "[%s] %d chunks:\n", store, len(chunks))
+
+		// Check which is the active chunk
+		active := cm.Active()
+		var activeID chunk.ChunkID
+		if active != nil {
+			activeID = active.ID
+		}
+
+		for _, meta := range chunks {
+			status := "sealed"
+			if meta.ID == activeID {
+				status = "active"
+			} else if !meta.Sealed {
+				status = "open"
+			}
+
+			// Format time range
+			timeRange := fmt.Sprintf("%s - %s",
+				meta.StartTS.Format("2006-01-02 15:04:05"),
+				meta.EndTS.Format("2006-01-02 15:04:05"))
+
+			// Format size
+			sizeStr := formatBytes(meta.Size)
+
+			fmt.Fprintf(out, "  %s  %s  %s  [%s]\n",
+				meta.ID.String()[:8], timeRange, sizeStr, status)
+		}
+	}
+}
+
+// cmdChunk shows detailed information about a specific chunk.
+func (r *REPL) cmdChunk(out *strings.Builder, args []string) {
+	if len(args) == 0 {
+		out.WriteString("Usage: chunk <chunk-id>\n")
+		return
+	}
+
+	chunkID, err := chunk.ParseChunkID(args[0])
+	if err != nil {
+		fmt.Fprintf(out, "Invalid chunk ID: %v\n", err)
+		return
+	}
+
+	// Find the chunk across all stores
+	stores := r.orch.ChunkManagers()
+	var foundStore string
+	var meta chunk.ChunkMeta
+	var cm chunk.ChunkManager
+
+	for _, store := range stores {
+		cm = r.orch.ChunkManager(store)
+		if cm == nil {
+			continue
+		}
+		m, err := cm.Meta(chunkID)
+		if err == nil {
+			foundStore = store
+			meta = m
+			break
+		}
+	}
+
+	if foundStore == "" {
+		fmt.Fprintf(out, "Chunk not found: %s\n", args[0])
+		return
+	}
+
+	// Determine status
+	status := "sealed"
+	if active := cm.Active(); active != nil && active.ID == chunkID {
+		status = "active"
+	} else if !meta.Sealed {
+		status = "open"
+	}
+
+	fmt.Fprintf(out, "Chunk: %s\n", meta.ID.String())
+	fmt.Fprintf(out, "  Store:    %s\n", foundStore)
+	fmt.Fprintf(out, "  Status:   %s\n", status)
+	fmt.Fprintf(out, "  StartTS:  %s\n", meta.StartTS.Format(time.RFC3339Nano))
+	fmt.Fprintf(out, "  EndTS:    %s\n", meta.EndTS.Format(time.RFC3339Nano))
+	fmt.Fprintf(out, "  Size:     %s (%d bytes)\n", formatBytes(meta.Size), meta.Size)
+
+	// Count records by iterating
+	recordCount := 0
+	if cursor, err := cm.OpenCursor(chunkID); err == nil {
+		for {
+			_, _, err := cursor.Next()
+			if errors.Is(err, chunk.ErrNoMoreRecords) {
+				break
+			}
+			if err != nil {
+				break
+			}
+			recordCount++
+		}
+		cursor.Close()
+	}
+	fmt.Fprintf(out, "  Records:  %d\n", recordCount)
+
+	// Show index status if sealed
+	if meta.Sealed {
+		im := r.orch.IndexManager(foundStore)
+		if im != nil {
+			complete, err := im.IndexesComplete(chunkID)
+			if err != nil {
+				fmt.Fprintf(out, "  Indexes:  error checking: %v\n", err)
+			} else if complete {
+				fmt.Fprintf(out, "  Indexes:  complete\n")
+			} else {
+				fmt.Fprintf(out, "  Indexes:  incomplete\n")
+			}
+		}
+	} else {
+		fmt.Fprintf(out, "  Indexes:  n/a (not sealed)\n")
+	}
+}
+
+// cmdIndexes shows index details for a specific chunk.
+func (r *REPL) cmdIndexes(out *strings.Builder, args []string) {
+	if len(args) == 0 {
+		out.WriteString("Usage: indexes <chunk-id>\n")
+		return
+	}
+
+	chunkID, err := chunk.ParseChunkID(args[0])
+	if err != nil {
+		fmt.Fprintf(out, "Invalid chunk ID: %v\n", err)
+		return
+	}
+
+	// Find the chunk and its index manager
+	stores := r.orch.ChunkManagers()
+	var foundStore string
+	var cm chunk.ChunkManager
+	var im index.IndexManager
+
+	for _, store := range stores {
+		cm = r.orch.ChunkManager(store)
+		if cm == nil {
+			continue
+		}
+		if _, err := cm.Meta(chunkID); err == nil {
+			foundStore = store
+			im = r.orch.IndexManager(store)
+			break
+		}
+	}
+
+	if foundStore == "" {
+		fmt.Fprintf(out, "Chunk not found: %s\n", args[0])
+		return
+	}
+
+	if im == nil {
+		fmt.Fprintf(out, "No index manager for store: %s\n", foundStore)
+		return
+	}
+
+	fmt.Fprintf(out, "Indexes for chunk %s:\n", chunkID.String()[:8])
+
+	// Time index
+	if timeIdx, err := im.OpenTimeIndex(chunkID); err != nil {
+		fmt.Fprintf(out, "  time:   not available (%v)\n", err)
+	} else {
+		entries := timeIdx.Entries()
+		if len(entries) > 0 {
+			fmt.Fprintf(out, "  time:   %d entries (sparsity ~%d)\n",
+				len(entries), estimateSparsity(entries))
+		} else {
+			fmt.Fprintf(out, "  time:   0 entries\n")
+		}
+	}
+
+	// Source index
+	if srcIdx, err := im.OpenSourceIndex(chunkID); err != nil {
+		fmt.Fprintf(out, "  source: not available (%v)\n", err)
+	} else {
+		entries := srcIdx.Entries()
+		totalPositions := 0
+		for _, e := range entries {
+			totalPositions += len(e.Positions)
+		}
+		fmt.Fprintf(out, "  source: %d sources, %d positions\n", len(entries), totalPositions)
+	}
+
+	// Token index
+	if tokIdx, err := im.OpenTokenIndex(chunkID); err != nil {
+		fmt.Fprintf(out, "  token:  not available (%v)\n", err)
+	} else {
+		entries := tokIdx.Entries()
+		totalPositions := 0
+		for _, e := range entries {
+			totalPositions += len(e.Positions)
+		}
+		fmt.Fprintf(out, "  token:  %d tokens, %d positions\n", len(entries), totalPositions)
+	}
+}
+
+// cmdStats shows overall system statistics.
+func (r *REPL) cmdStats(out *strings.Builder) {
+	stores := r.orch.ChunkManagers()
+
+	var totalChunks, totalSealed, totalActive int
+	var totalSize int64
+	var totalRecords int
+
+	for _, store := range stores {
+		cm := r.orch.ChunkManager(store)
+		if cm == nil {
+			continue
+		}
+
+		chunks, err := cm.List()
+		if err != nil {
+			continue
+		}
+
+		active := cm.Active()
+
+		for _, meta := range chunks {
+			totalChunks++
+			totalSize += meta.Size
+
+			if active != nil && meta.ID == active.ID {
+				totalActive++
+			} else if meta.Sealed {
+				totalSealed++
+			}
+
+			// Count records
+			if cursor, err := cm.OpenCursor(meta.ID); err == nil {
+				for {
+					_, _, err := cursor.Next()
+					if errors.Is(err, chunk.ErrNoMoreRecords) {
+						break
+					}
+					if err != nil {
+						break
+					}
+					totalRecords++
+				}
+				cursor.Close()
+			}
+		}
+	}
+
+	fmt.Fprintf(out, "System Statistics:\n")
+	fmt.Fprintf(out, "  Stores:      %d\n", len(stores))
+	fmt.Fprintf(out, "  Chunks:      %d total (%d sealed, %d active)\n",
+		totalChunks, totalSealed, totalActive)
+	fmt.Fprintf(out, "  Records:     %d\n", totalRecords)
+	fmt.Fprintf(out, "  Total size:  %s\n", formatBytes(totalSize))
+
+	// Source stats
+	sourceCount := 0
+	if r.sources != nil {
+		sourceCount = r.sources.Count()
+	}
+	fmt.Fprintf(out, "  Sources:     %d\n", sourceCount)
+
+	// Receiver stats
+	receivers := r.orch.Receivers()
+	fmt.Fprintf(out, "  Receivers:   %d\n", len(receivers))
+}
+
+// cmdStatus shows the live system state.
+func (r *REPL) cmdStatus(out *strings.Builder) {
+	fmt.Fprintf(out, "System Status:\n")
+
+	// Orchestrator running status
+	if r.orch.Running() {
+		fmt.Fprintf(out, "  Orchestrator: running\n")
+	} else {
+		fmt.Fprintf(out, "  Orchestrator: stopped\n")
+	}
+
+	// Receivers
+	receivers := r.orch.Receivers()
+	if len(receivers) > 0 {
+		slices.Sort(receivers)
+		fmt.Fprintf(out, "  Receivers:    %s\n", strings.Join(receivers, ", "))
+	} else {
+		fmt.Fprintf(out, "  Receivers:    none\n")
+	}
+
+	// Stores and their active chunks
+	stores := r.orch.ChunkManagers()
+	slices.Sort(stores)
+
+	fmt.Fprintf(out, "  Stores:\n")
+	for _, store := range stores {
+		cm := r.orch.ChunkManager(store)
+		if cm == nil {
+			continue
+		}
+
+		active := cm.Active()
+		if active != nil {
+			fmt.Fprintf(out, "    [%s] active chunk: %s (%s)\n",
+				store, active.ID.String()[:8], formatBytes(active.Size))
+		} else {
+			fmt.Fprintf(out, "    [%s] no active chunk\n", store)
+		}
+
+		// Check for pending indexes on sealed chunks
+		im := r.orch.IndexManager(store)
+		if im != nil {
+			chunks, err := cm.List()
+			if err == nil {
+				pendingIndexes := 0
+				for _, meta := range chunks {
+					if meta.Sealed {
+						if complete, err := im.IndexesComplete(meta.ID); err == nil && !complete {
+							pendingIndexes++
+						}
+					}
+				}
+				if pendingIndexes > 0 {
+					fmt.Fprintf(out, "    [%s] pending indexes: %d chunks\n", store, pendingIndexes)
+				}
+			}
+		}
+	}
+}
+
+// formatBytes formats a byte count as a human-readable string.
+func formatBytes(bytes int64) string {
+	const (
+		KB = 1024
+		MB = KB * 1024
+		GB = MB * 1024
+	)
+
+	switch {
+	case bytes >= GB:
+		return fmt.Sprintf("%.2f GB", float64(bytes)/float64(GB))
+	case bytes >= MB:
+		return fmt.Sprintf("%.2f MB", float64(bytes)/float64(MB))
+	case bytes >= KB:
+		return fmt.Sprintf("%.2f KB", float64(bytes)/float64(KB))
+	default:
+		return fmt.Sprintf("%d B", bytes)
+	}
+}
+
+// estimateSparsity estimates the sparsity factor from time index entries.
+func estimateSparsity(entries []index.TimeIndexEntry) int {
+	if len(entries) < 2 {
+		return 1
+	}
+	// Look at position gaps between entries
+	totalGap := uint64(0)
+	for i := 1; i < len(entries); i++ {
+		gap := entries[i].RecordPos - entries[i-1].RecordPos
+		totalGap += gap
+	}
+	avgGap := totalGap / uint64(len(entries)-1)
+	if avgGap < 1 {
+		return 1
+	}
+	return int(avgGap)
 }

@@ -172,6 +172,13 @@ func (r *Registry) Query(filters map[string]string) []chunk.SourceID {
 	return results
 }
 
+// Count returns the number of sources in the registry.
+func (r *Registry) Count() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.byID)
+}
+
 // Close stops the persistence goroutine and waits for it to finish.
 // Any pending persistence operations are drained before Close returns.
 func (r *Registry) Close() error {

@@ -53,3 +53,54 @@ func (o *Orchestrator) ChunkManager(key string) chunk.ChunkManager {
 	}
 	return o.chunks[key]
 }
+
+// ChunkManagers returns all registered chunk manager keys.
+func (o *Orchestrator) ChunkManagers() []string {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	keys := make([]string, 0, len(o.chunks))
+	for k := range o.chunks {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// IndexManager returns the index manager registered under the given key.
+// Returns nil if not found.
+func (o *Orchestrator) IndexManager(key string) index.IndexManager {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if key == "" {
+		key = "default"
+	}
+	return o.indexes[key]
+}
+
+// IndexManagers returns all registered index manager keys.
+func (o *Orchestrator) IndexManagers() []string {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	keys := make([]string, 0, len(o.indexes))
+	for k := range o.indexes {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// Receivers returns all registered receiver IDs.
+func (o *Orchestrator) Receivers() []string {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	keys := make([]string, 0, len(o.receivers))
+	for k := range o.receivers {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// Running returns true if the orchestrator is running.
+func (o *Orchestrator) Running() bool {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.running
+}
