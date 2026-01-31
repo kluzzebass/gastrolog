@@ -9,11 +9,11 @@ import (
 
 func testMeta() chunk.ChunkMeta {
 	return chunk.ChunkMeta{
-		ID:      chunk.NewChunkID(),
-		StartTS: time.UnixMicro(1000),
-		EndTS:   time.UnixMicro(2000),
-		Size:    4096,
-		Sealed:  true,
+		ID:          chunk.NewChunkID(),
+		StartTS:     time.UnixMicro(1000),
+		EndTS:       time.UnixMicro(2000),
+		RecordCount: 4096,
+		Sealed:      true,
 	}
 }
 
@@ -39,8 +39,8 @@ func TestMetaStoreSaveLoad(t *testing.T) {
 	if !got.EndTS.Equal(meta.EndTS) {
 		t.Fatalf("EndTS: expected %v, got %v", meta.EndTS, got.EndTS)
 	}
-	if got.Size != meta.Size {
-		t.Fatalf("Size: expected %d, got %d", meta.Size, got.Size)
+	if got.RecordCount != meta.RecordCount {
+		t.Fatalf("RecordCount: expected %d, got %d", meta.RecordCount, got.RecordCount)
 	}
 	if got.Sealed != meta.Sealed {
 		t.Fatalf("Sealed: expected %v, got %v", meta.Sealed, got.Sealed)
@@ -57,7 +57,7 @@ func TestMetaStoreOverwrite(t *testing.T) {
 	}
 
 	meta.Sealed = true
-	meta.Size = 8192
+	meta.RecordCount = 8192
 	if err := store.Save(meta); err != nil {
 		t.Fatalf("save overwrite: %v", err)
 	}
@@ -70,8 +70,8 @@ func TestMetaStoreOverwrite(t *testing.T) {
 	if !got.Sealed {
 		t.Fatal("expected Sealed=true after overwrite")
 	}
-	if got.Size != 8192 {
-		t.Fatalf("expected Size=8192, got %d", got.Size)
+	if got.RecordCount != 8192 {
+		t.Fatalf("expected RecordCount=8192, got %d", got.RecordCount)
 	}
 }
 

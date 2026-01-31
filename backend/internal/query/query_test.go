@@ -95,8 +95,8 @@ func setup(t *testing.T, batches ...[]chunk.Record) *query.Engine {
 
 	all := allRecords(batches)
 	cm, err := chunkmem.NewManager(chunkmem.Config{
-		MaxChunkBytes: 1 << 20, // 1 MiB per chunk — large enough to not auto-rotate
-		Now:           fakeClock(all),
+		MaxRecords: 10000, // Large enough to not auto-rotate
+		Now:        fakeClock(all),
 	})
 	if err != nil {
 		t.Fatalf("new chunk manager: %v", err)
@@ -136,8 +136,8 @@ func setupWithActive(t *testing.T, sealed [][]chunk.Record, active []chunk.Recor
 
 	all := append(allRecords(sealed), active...)
 	cm, err := chunkmem.NewManager(chunkmem.Config{
-		MaxChunkBytes: 1 << 20,
-		Now:           fakeClock(all),
+		MaxRecords: 10000,
+		Now:        fakeClock(all),
 	})
 	if err != nil {
 		t.Fatalf("new chunk manager: %v", err)
@@ -2264,8 +2264,8 @@ func TestSearchSealedWithoutIndexes(t *testing.T) {
 	// Create chunk manager and append records.
 	all := records
 	cm, err := chunkmem.NewManager(chunkmem.Config{
-		MaxChunkBytes: 1 << 20,
-		Now:           fakeClock(all),
+		MaxRecords: 10000,
+		Now:        fakeClock(all),
 	})
 	if err != nil {
 		t.Fatalf("new chunk manager: %v", err)

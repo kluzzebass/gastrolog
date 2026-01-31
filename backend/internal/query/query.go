@@ -152,7 +152,7 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, meta chunk.Chu
 			}
 		} else if q.Reverse() {
 			// For reverse without resume, seek to end of chunk.
-			if err := cursor.Seek(chunk.RecordRef{ChunkID: meta.ID, Pos: uint64(meta.Size)}); err != nil {
+			if err := cursor.Seek(chunk.RecordRef{ChunkID: meta.ID, Pos: uint64(meta.RecordCount)}); err != nil {
 				yield(recordWithRef{}, err)
 				return
 			}

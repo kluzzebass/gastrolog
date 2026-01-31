@@ -10,9 +10,9 @@ import (
 )
 
 type Config struct {
-	MaxChunkBytes int64
-	Now           func() time.Time
-	MetaStore     chunk.MetaStore
+	MaxRecords int64
+	Now        func() time.Time
+	MetaStore  chunk.MetaStore
 
 	// Logger for structured logging. If nil, logging is disabled.
 	// The manager scopes this logger with component="chunk-manager".
@@ -143,11 +143,11 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	return newRecordReader(state.records, id), nil
 }
 
-func (m *Manager) shouldRotate(nextSize int64) bool {
-	if m.active == nil || m.cfg.MaxChunkBytes <= 0 {
+func (m *Manager) shouldRotate(nextCount int64) bool {
+	if m.active == nil || m.cfg.MaxRecords <= 0 {
 		return false
 	}
-	return m.active.meta.Size+nextSize > m.cfg.MaxChunkBytes
+	return m.active.meta.RecordCount+nextCount > m.cfg.MaxRecords
 }
 
 func (m *Manager) openLocked() error {
@@ -177,12 +177,12 @@ func (m *Manager) sealLocked() error {
 	return nil
 }
 
-func (m *Manager) updateMetaLocked(ts time.Time, size int64) {
+func (m *Manager) updateMetaLocked(ts time.Time, recordCount int64) {
 	if m.active.meta.StartTS.IsZero() {
 		m.active.meta.StartTS = ts
 	}
 	m.active.meta.EndTS = ts
-	m.active.meta.Size = size
+	m.active.meta.RecordCount = recordCount
 }
 
 func (m *Manager) findChunkLocked(id chunk.ChunkID) *chunkState {

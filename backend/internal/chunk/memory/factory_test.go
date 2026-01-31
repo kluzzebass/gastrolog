@@ -17,8 +17,8 @@ func TestFactoryDefaultValues(t *testing.T) {
 		t.Fatal("expected *Manager")
 	}
 
-	if mgr.cfg.MaxChunkBytes != DefaultMaxChunkBytes {
-		t.Errorf("expected MaxChunkBytes=%d, got %d", DefaultMaxChunkBytes, mgr.cfg.MaxChunkBytes)
+	if mgr.cfg.MaxRecords != DefaultMaxRecords {
+		t.Errorf("expected MaxRecords=%d, got %d", DefaultMaxRecords, mgr.cfg.MaxRecords)
 	}
 }
 
@@ -26,7 +26,7 @@ func TestFactoryCustomValues(t *testing.T) {
 	factory := NewFactory()
 
 	cm, err := factory(map[string]string{
-		ParamMaxChunkBytes: "2048",
+		ParamMaxRecords: "2048",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -37,32 +37,32 @@ func TestFactoryCustomValues(t *testing.T) {
 		t.Fatal("expected *Manager")
 	}
 
-	if mgr.cfg.MaxChunkBytes != 2048 {
-		t.Errorf("expected MaxChunkBytes=2048, got %d", mgr.cfg.MaxChunkBytes)
+	if mgr.cfg.MaxRecords != 2048 {
+		t.Errorf("expected MaxRecords=2048, got %d", mgr.cfg.MaxRecords)
 	}
 }
 
-func TestFactoryInvalidMaxChunkBytes(t *testing.T) {
+func TestFactoryInvalidMaxRecords(t *testing.T) {
 	factory := NewFactory()
 
 	_, err := factory(map[string]string{
-		ParamMaxChunkBytes: "not-a-number",
+		ParamMaxRecords: "not-a-number",
 	})
 	if err == nil {
-		t.Error("expected error for invalid max_chunk_bytes")
+		t.Error("expected error for invalid max_records")
 	}
 
 	_, err = factory(map[string]string{
-		ParamMaxChunkBytes: "0",
+		ParamMaxRecords: "0",
 	})
 	if err == nil {
-		t.Error("expected error for zero max_chunk_bytes")
+		t.Error("expected error for zero max_records")
 	}
 
 	_, err = factory(map[string]string{
-		ParamMaxChunkBytes: "-1",
+		ParamMaxRecords: "-1",
 	})
 	if err == nil {
-		t.Error("expected error for negative max_chunk_bytes")
+		t.Error("expected error for negative max_records")
 	}
 }

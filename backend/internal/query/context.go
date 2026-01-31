@@ -47,7 +47,7 @@ func (e *Engine) gatherContextBefore(ctx context.Context, chunksAsc []chunk.Chun
 			}
 		} else {
 			// Seek to end of previous chunk.
-			if err := cursor.Seek(chunk.RecordRef{ChunkID: meta.ID, Pos: uint64(meta.Size)}); err != nil {
+			if err := cursor.Seek(chunk.RecordRef{ChunkID: meta.ID, Pos: uint64(meta.RecordCount)}); err != nil {
 				cursor.Close()
 				return nil, err
 			}

@@ -53,11 +53,11 @@ type RecordRef struct {
 
 // ChunkMeta contains metadata about a chunk.
 type ChunkMeta struct {
-	ID      ChunkID
-	StartTS time.Time
-	EndTS   time.Time
-	Size    int64
-	Sealed  bool
+	ID          ChunkID
+	StartTS     time.Time
+	EndTS       time.Time
+	RecordCount int64
+	Sealed      bool
 }
 
 // Record is a single log entry.

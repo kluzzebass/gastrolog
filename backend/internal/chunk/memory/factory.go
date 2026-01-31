@@ -9,30 +9,30 @@ import (
 
 // Factory parameter keys.
 const (
-	ParamMaxChunkBytes = "max_chunk_bytes"
+	ParamMaxRecords = "max_records"
 )
 
 // Default values.
 const (
-	DefaultMaxChunkBytes = 64 * 1024 * 1024 // 64 MiB
+	DefaultMaxRecords = 10000 // 10k records per chunk
 )
 
 // NewFactory returns a factory function that creates in-memory ChunkManagers.
 func NewFactory() chunk.ManagerFactory {
 	return func(params map[string]string) (chunk.ChunkManager, error) {
 		cfg := Config{
-			MaxChunkBytes: DefaultMaxChunkBytes,
+			MaxRecords: DefaultMaxRecords,
 		}
 
-		if v, ok := params[ParamMaxChunkBytes]; ok {
+		if v, ok := params[ParamMaxRecords]; ok {
 			n, err := strconv.ParseInt(v, 10, 64)
 			if err != nil {
-				return nil, fmt.Errorf("invalid %s: %w", ParamMaxChunkBytes, err)
+				return nil, fmt.Errorf("invalid %s: %w", ParamMaxRecords, err)
 			}
 			if n <= 0 {
-				return nil, fmt.Errorf("invalid %s: must be positive", ParamMaxChunkBytes)
+				return nil, fmt.Errorf("invalid %s: must be positive", ParamMaxRecords)
 			}
-			cfg.MaxChunkBytes = n
+			cfg.MaxRecords = n
 		}
 
 		return NewManager(cfg)

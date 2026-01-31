@@ -40,9 +40,9 @@ func (t *trackingIndexManager) BuildIndexes(ctx context.Context, chunkID chunk.C
 	return t.IndexManager.BuildIndexes(ctx, chunkID)
 }
 
-func newTestSetup(maxChunkBytes int64) (*orchestrator.Orchestrator, chunk.ChunkManager, *trackingIndexManager) {
+func newTestSetup(maxRecords int64) (*orchestrator.Orchestrator, chunk.ChunkManager, *trackingIndexManager) {
 	cm, _ := chunkmem.NewManager(chunkmem.Config{
-		MaxChunkBytes: maxChunkBytes,
+		MaxRecords: maxRecords,
 	})
 
 	timeIdx := memtime.NewIndexer(cm, 1)
@@ -144,8 +144,7 @@ func TestIngestMultipleRecords(t *testing.T) {
 }
 
 func TestSealedChunkTriggersIndexBuild(t *testing.T) {
-	// Memory manager's MaxChunkBytes is actually record count.
-	// Set to 2 so third record triggers seal.
+	// Set MaxRecords to 2 so third record triggers seal.
 	orch, _, tracker := newTestSetup(2)
 
 	// Ingest 3 records to trigger seal (chunk fills at 2, third causes seal).
@@ -487,7 +486,7 @@ func (r *blockingReceiver) Run(ctx context.Context, out chan<- orchestrator.Inge
 
 func newReceiverTestSetup() (*orchestrator.Orchestrator, chunk.ChunkManager, *source.Registry) {
 	cm, _ := chunkmem.NewManager(chunkmem.Config{
-		MaxChunkBytes: 1 << 20,
+		MaxRecords: 10000,
 	})
 
 	timeIdx := memtime.NewIndexer(cm, 1)
@@ -697,7 +696,7 @@ func TestStopNotRunning(t *testing.T) {
 func TestReceiverIndexBuildOnSeal(t *testing.T) {
 	// Set up with small chunk size to trigger seal.
 	cm, _ := chunkmem.NewManager(chunkmem.Config{
-		MaxChunkBytes: 2, // 2 records per chunk
+		MaxRecords: 2, // 2 records per chunk
 	})
 
 	timeIdx := memtime.NewIndexer(cm, 1)

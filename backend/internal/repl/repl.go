@@ -1025,8 +1025,8 @@ func (r *REPL) cmdChunks(out *strings.Builder) {
 				meta.StartTS.Format("2006-01-02 15:04:05"),
 				meta.EndTS.Format("2006-01-02 15:04:05"))
 
-			fmt.Fprintf(out, "  %s  %s  [%s]\n",
-				meta.ID.String()[:8], timeRange, status)
+			fmt.Fprintf(out, "  %s  %s  %d records  [%s]\n",
+				meta.ID.String()[:8], timeRange, meta.RecordCount, status)
 		}
 	}
 }
@@ -1081,23 +1081,7 @@ func (r *REPL) cmdChunk(out *strings.Builder, args []string) {
 	fmt.Fprintf(out, "  Status:   %s\n", status)
 	fmt.Fprintf(out, "  StartTS:  %s\n", meta.StartTS.Format(time.RFC3339Nano))
 	fmt.Fprintf(out, "  EndTS:    %s\n", meta.EndTS.Format(time.RFC3339Nano))
-
-	// Count records by iterating
-	recordCount := 0
-	if cursor, err := cm.OpenCursor(chunkID); err == nil {
-		for {
-			_, _, err := cursor.Next()
-			if errors.Is(err, chunk.ErrNoMoreRecords) {
-				break
-			}
-			if err != nil {
-				break
-			}
-			recordCount++
-		}
-		cursor.Close()
-	}
-	fmt.Fprintf(out, "  Records:  %d\n", recordCount)
+	fmt.Fprintf(out, "  Records:  %d\n", meta.RecordCount)
 
 	// Show index status if sealed
 	if meta.Sealed {
@@ -1203,7 +1187,7 @@ func (r *REPL) cmdStats(out *strings.Builder) {
 	stores := r.orch.ChunkManagers()
 
 	var totalChunks, totalSealed, totalActive int
-	var totalRecords int
+	var totalRecords int64
 
 	for _, store := range stores {
 		cm := r.orch.ChunkManager(store)
@@ -1220,26 +1204,12 @@ func (r *REPL) cmdStats(out *strings.Builder) {
 
 		for _, meta := range chunks {
 			totalChunks++
+			totalRecords += meta.RecordCount
 
 			if active != nil && meta.ID == active.ID {
 				totalActive++
 			} else if meta.Sealed {
 				totalSealed++
-			}
-
-			// Count records
-			if cursor, err := cm.OpenCursor(meta.ID); err == nil {
-				for {
-					_, _, err := cursor.Next()
-					if errors.Is(err, chunk.ErrNoMoreRecords) {
-						break
-					}
-					if err != nil {
-						break
-					}
-					totalRecords++
-				}
-				cursor.Close()
 			}
 		}
 	}

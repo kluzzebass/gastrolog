@@ -72,19 +72,20 @@ type Manager struct {
 // chunkMeta holds in-memory metadata derived from idx.log.
 // No longer persisted to meta.bin.
 type chunkMeta struct {
-	id      chunk.ChunkID
-	startTS time.Time // WriteTS of first record
-	endTS   time.Time // WriteTS of last record
-	sealed  bool
+	id          chunk.ChunkID
+	startTS     time.Time // WriteTS of first record
+	endTS       time.Time // WriteTS of last record
+	recordCount int64     // Number of records in chunk
+	sealed      bool
 }
 
 func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
 	return chunk.ChunkMeta{
-		ID:      m.id,
-		StartTS: m.startTS,
-		EndTS:   m.endTS,
-		Sealed:  m.sealed,
-		// Size is no longer tracked; callers can stat files if needed.
+		ID:          m.id,
+		StartTS:     m.startTS,
+		EndTS:       m.endTS,
+		RecordCount: m.recordCount,
+		Sealed:      m.sealed,
 	}
 }
 
@@ -202,6 +203,7 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 	recordIndex := m.active.recordCount
 	m.active.rawOffset += rawLen
 	m.active.recordCount++
+	m.active.meta.recordCount = int64(m.active.recordCount)
 
 	// Update time bounds.
 	if m.active.meta.startTS.IsZero() {
@@ -506,8 +508,9 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 	recordCount := RecordCount(info.Size())
 
 	meta := &chunkMeta{
-		id:     id,
-		sealed: sealed,
+		id:          id,
+		recordCount: int64(recordCount),
+		sealed:      sealed,
 	}
 
 	if recordCount == 0 {
