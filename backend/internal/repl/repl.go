@@ -1025,11 +1025,8 @@ func (r *REPL) cmdChunks(out *strings.Builder) {
 				meta.StartTS.Format("2006-01-02 15:04:05"),
 				meta.EndTS.Format("2006-01-02 15:04:05"))
 
-			// Format size
-			sizeStr := formatBytes(meta.Size)
-
-			fmt.Fprintf(out, "  %s  %s  %s  [%s]\n",
-				meta.ID.String()[:8], timeRange, sizeStr, status)
+			fmt.Fprintf(out, "  %s  %s  [%s]\n",
+				meta.ID.String()[:8], timeRange, status)
 		}
 	}
 }
@@ -1084,7 +1081,6 @@ func (r *REPL) cmdChunk(out *strings.Builder, args []string) {
 	fmt.Fprintf(out, "  Status:   %s\n", status)
 	fmt.Fprintf(out, "  StartTS:  %s\n", meta.StartTS.Format(time.RFC3339Nano))
 	fmt.Fprintf(out, "  EndTS:    %s\n", meta.EndTS.Format(time.RFC3339Nano))
-	fmt.Fprintf(out, "  Size:     %s (%d bytes)\n", formatBytes(meta.Size), meta.Size)
 
 	// Count records by iterating
 	recordCount := 0
@@ -1207,7 +1203,6 @@ func (r *REPL) cmdStats(out *strings.Builder) {
 	stores := r.orch.ChunkManagers()
 
 	var totalChunks, totalSealed, totalActive int
-	var totalSize int64
 	var totalRecords int
 
 	for _, store := range stores {
@@ -1225,7 +1220,6 @@ func (r *REPL) cmdStats(out *strings.Builder) {
 
 		for _, meta := range chunks {
 			totalChunks++
-			totalSize += meta.Size
 
 			if active != nil && meta.ID == active.ID {
 				totalActive++
@@ -1255,7 +1249,6 @@ func (r *REPL) cmdStats(out *strings.Builder) {
 	fmt.Fprintf(out, "  Chunks:      %d total (%d sealed, %d active)\n",
 		totalChunks, totalSealed, totalActive)
 	fmt.Fprintf(out, "  Records:     %d\n", totalRecords)
-	fmt.Fprintf(out, "  Total size:  %s\n", formatBytes(totalSize))
 
 	// Source stats
 	sourceCount := 0
@@ -1302,8 +1295,8 @@ func (r *REPL) cmdStatus(out *strings.Builder) {
 
 		active := cm.Active()
 		if active != nil {
-			fmt.Fprintf(out, "    [%s] active chunk: %s (%s)\n",
-				store, active.ID.String()[:8], formatBytes(active.Size))
+			fmt.Fprintf(out, "    [%s] active chunk: %s\n",
+				store, active.ID.String()[:8])
 		} else {
 			fmt.Fprintf(out, "    [%s] no active chunk\n", store)
 		}
@@ -1326,26 +1319,6 @@ func (r *REPL) cmdStatus(out *strings.Builder) {
 				}
 			}
 		}
-	}
-}
-
-// formatBytes formats a byte count as a human-readable string.
-func formatBytes(bytes int64) string {
-	const (
-		KB = 1024
-		MB = KB * 1024
-		GB = MB * 1024
-	)
-
-	switch {
-	case bytes >= GB:
-		return fmt.Sprintf("%.2f GB", float64(bytes)/float64(GB))
-	case bytes >= MB:
-		return fmt.Sprintf("%.2f MB", float64(bytes)/float64(MB))
-	case bytes >= KB:
-		return fmt.Sprintf("%.2f KB", float64(bytes)/float64(KB))
-	default:
-		return fmt.Sprintf("%d B", bytes)
 	}
 }
 
