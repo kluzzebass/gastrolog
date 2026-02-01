@@ -1541,7 +1541,22 @@ func (r *REPL) analyzeChunk(out *strings.Builder, chunkID chunk.ChunkID) {
 		fmt.Fprintf(out, "    Unique keys:    %d\n", as.UniqueKeys)
 		fmt.Fprintf(out, "    Unique values:  %d\n", as.UniqueValues)
 		fmt.Fprintf(out, "    Key-value pairs:%d\n", as.UniqueKeyValuePairs)
+		fmt.Fprintf(out, "    Total positions:%d\n", as.TotalOccurrences)
 		fmt.Fprintf(out, "    Coverage:       %.1f%% of records\n", as.PercentRecordsCovered)
+		if len(as.TopKeysByOccurrences) > 0 {
+			out.WriteString("    Top keys:       ")
+			for i, ks := range as.TopKeysByOccurrences {
+				if i > 0 {
+					out.WriteString(", ")
+				}
+				if i >= 5 {
+					out.WriteString("...")
+					break
+				}
+				fmt.Fprintf(out, "%s(%d)", ks.Key, ks.TotalOccurrences)
+			}
+			out.WriteByte('\n')
+		}
 	}
 
 	// KV index details
