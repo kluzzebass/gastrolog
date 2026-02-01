@@ -27,7 +27,7 @@ const (
 
 func encodeKeyIndex(entries []index.AttrKeyIndexEntry) []byte {
 	header := make([]byte, headerSize)
-	h := format.Header{Type: format.TypeAttrKeyIndex, Version: currentVersion, Flags: 0}
+	h := format.Header{Type: format.TypeAttrKeyIndex, Version: currentVersion, Flags: format.FlagComplete}
 	h.EncodeInto(header)
 	return inverted.EncodeKeyIndex(entries, header, format.HeaderSize)
 }
@@ -37,9 +37,12 @@ func decodeKeyIndex(data []byte) ([]index.AttrKeyIndexEntry, error) {
 		return nil, inverted.ErrIndexTooSmall
 	}
 
-	_, err := format.DecodeAndValidate(data, format.TypeAttrKeyIndex, currentVersion)
+	h, err := format.DecodeAndValidate(data, format.TypeAttrKeyIndex, currentVersion)
 	if err != nil {
 		return nil, fmt.Errorf("attr key index: %w", err)
+	}
+	if h.Flags&format.FlagComplete == 0 {
+		return nil, fmt.Errorf("attr key index: incomplete (missing complete flag)")
 	}
 
 	return inverted.DecodeKeyIndex(data, headerSize, func(key string, positions []uint64) index.AttrKeyIndexEntry {
@@ -51,7 +54,7 @@ func decodeKeyIndex(data []byte) ([]index.AttrKeyIndexEntry, error) {
 
 func encodeValueIndex(entries []index.AttrValueIndexEntry) []byte {
 	header := make([]byte, headerSize)
-	h := format.Header{Type: format.TypeAttrValueIndex, Version: currentVersion, Flags: 0}
+	h := format.Header{Type: format.TypeAttrValueIndex, Version: currentVersion, Flags: format.FlagComplete}
 	h.EncodeInto(header)
 	return inverted.EncodeValueIndex(entries, header, format.HeaderSize)
 }
@@ -61,9 +64,12 @@ func decodeValueIndex(data []byte) ([]index.AttrValueIndexEntry, error) {
 		return nil, inverted.ErrIndexTooSmall
 	}
 
-	_, err := format.DecodeAndValidate(data, format.TypeAttrValueIndex, currentVersion)
+	h, err := format.DecodeAndValidate(data, format.TypeAttrValueIndex, currentVersion)
 	if err != nil {
 		return nil, fmt.Errorf("attr value index: %w", err)
+	}
+	if h.Flags&format.FlagComplete == 0 {
+		return nil, fmt.Errorf("attr value index: incomplete (missing complete flag)")
 	}
 
 	return inverted.DecodeValueIndex(data, headerSize, func(value string, positions []uint64) index.AttrValueIndexEntry {
@@ -75,7 +81,7 @@ func decodeValueIndex(data []byte) ([]index.AttrValueIndexEntry, error) {
 
 func encodeKVIndex(entries []index.AttrKVIndexEntry) []byte {
 	header := make([]byte, headerSize)
-	h := format.Header{Type: format.TypeAttrKVIndex, Version: currentVersion, Flags: 0}
+	h := format.Header{Type: format.TypeAttrKVIndex, Version: currentVersion, Flags: format.FlagComplete}
 	h.EncodeInto(header)
 	return inverted.EncodeKVIndex(entries, header, format.HeaderSize)
 }
@@ -85,9 +91,12 @@ func decodeKVIndex(data []byte) ([]index.AttrKVIndexEntry, error) {
 		return nil, inverted.ErrIndexTooSmall
 	}
 
-	_, err := format.DecodeAndValidate(data, format.TypeAttrKVIndex, currentVersion)
+	h, err := format.DecodeAndValidate(data, format.TypeAttrKVIndex, currentVersion)
 	if err != nil {
 		return nil, fmt.Errorf("attr kv index: %w", err)
+	}
+	if h.Flags&format.FlagComplete == 0 {
+		return nil, fmt.Errorf("attr kv index: incomplete (missing complete flag)")
 	}
 
 	return inverted.DecodeKVIndex(data, headerSize, func(key, value string, positions []uint64) index.AttrKVIndexEntry {

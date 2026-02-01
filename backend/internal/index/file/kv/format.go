@@ -35,7 +35,7 @@ var (
 
 func encodeKeyIndex(entries []index.KVKeyIndexEntry, status index.KVIndexStatus) []byte {
 	header := make([]byte, headerSize)
-	h := format.Header{Type: format.TypeKVKeyIndex, Version: currentVersion, Flags: 0}
+	h := format.Header{Type: format.TypeKVKeyIndex, Version: currentVersion, Flags: format.FlagComplete}
 	h.EncodeInto(header)
 
 	// Status byte
@@ -53,9 +53,12 @@ func decodeKeyIndex(data []byte) ([]index.KVKeyIndexEntry, index.KVIndexStatus, 
 		return nil, index.KVComplete, inverted.ErrIndexTooSmall
 	}
 
-	_, err := format.DecodeAndValidate(data, format.TypeKVKeyIndex, currentVersion)
+	h, err := format.DecodeAndValidate(data, format.TypeKVKeyIndex, currentVersion)
 	if err != nil {
 		return nil, index.KVComplete, fmt.Errorf("kv key index: %w", err)
+	}
+	if h.Flags&format.FlagComplete == 0 {
+		return nil, index.KVComplete, fmt.Errorf("kv key index: incomplete (missing complete flag)")
 	}
 
 	// Read status
@@ -78,7 +81,7 @@ func decodeKeyIndex(data []byte) ([]index.KVKeyIndexEntry, index.KVIndexStatus, 
 
 func encodeValueIndex(entries []index.KVValueIndexEntry, status index.KVIndexStatus) []byte {
 	header := make([]byte, headerSize)
-	h := format.Header{Type: format.TypeKVValueIndex, Version: currentVersion, Flags: 0}
+	h := format.Header{Type: format.TypeKVValueIndex, Version: currentVersion, Flags: format.FlagComplete}
 	h.EncodeInto(header)
 
 	// Status byte
@@ -96,9 +99,12 @@ func decodeValueIndex(data []byte) ([]index.KVValueIndexEntry, index.KVIndexStat
 		return nil, index.KVComplete, inverted.ErrIndexTooSmall
 	}
 
-	_, err := format.DecodeAndValidate(data, format.TypeKVValueIndex, currentVersion)
+	h, err := format.DecodeAndValidate(data, format.TypeKVValueIndex, currentVersion)
 	if err != nil {
 		return nil, index.KVComplete, fmt.Errorf("kv value index: %w", err)
+	}
+	if h.Flags&format.FlagComplete == 0 {
+		return nil, index.KVComplete, fmt.Errorf("kv value index: incomplete (missing complete flag)")
 	}
 
 	// Read status
@@ -121,7 +127,7 @@ func decodeValueIndex(data []byte) ([]index.KVValueIndexEntry, index.KVIndexStat
 
 func encodeKVIndex(entries []index.KVIndexEntry, status index.KVIndexStatus) []byte {
 	header := make([]byte, headerSize)
-	h := format.Header{Type: format.TypeKVIndex, Version: currentVersion, Flags: 0}
+	h := format.Header{Type: format.TypeKVIndex, Version: currentVersion, Flags: format.FlagComplete}
 	h.EncodeInto(header)
 
 	// Status byte
@@ -139,9 +145,12 @@ func decodeKVIndex(data []byte) ([]index.KVIndexEntry, index.KVIndexStatus, erro
 		return nil, index.KVComplete, inverted.ErrIndexTooSmall
 	}
 
-	_, err := format.DecodeAndValidate(data, format.TypeKVIndex, currentVersion)
+	h, err := format.DecodeAndValidate(data, format.TypeKVIndex, currentVersion)
 	if err != nil {
 		return nil, index.KVComplete, fmt.Errorf("kv index: %w", err)
+	}
+	if h.Flags&format.FlagComplete == 0 {
+		return nil, index.KVComplete, fmt.Errorf("kv index: incomplete (missing complete flag)")
 	}
 
 	// Read status

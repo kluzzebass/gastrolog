@@ -33,6 +33,7 @@ var (
 	ErrIndexTooSmall       = errors.New("token index too small")
 	ErrKeySizeMismatch     = errors.New("token index key table size mismatch")
 	ErrPostingSizeMismatch = errors.New("token index posting list size mismatch")
+	ErrIndexIncomplete     = errors.New("token index incomplete (missing complete flag)")
 )
 
 // encodeIndexToFile writes token index entries directly to a file without
@@ -49,7 +50,7 @@ func encodeIndexToFile(w *os.File, entries []index.TokenIndexEntry) error {
 	// Write header.
 	headerBuf := make([]byte, headerSize)
 	cursor := 0
-	h := format.Header{Type: format.TypeTokenIndex, Version: currentVersion, Flags: 0}
+	h := format.Header{Type: format.TypeTokenIndex, Version: currentVersion, Flags: format.FlagComplete}
 	cursor += h.EncodeInto(headerBuf[cursor:])
 
 	binary.LittleEndian.PutUint32(headerBuf[cursor:cursor+keyCountSize], uint32(len(entries)))
@@ -136,7 +137,7 @@ func encodeIndex(entries []index.TokenIndexEntry) []byte {
 
 	// Write header.
 	cursor := 0
-	h := format.Header{Type: format.TypeTokenIndex, Version: currentVersion, Flags: 0}
+	h := format.Header{Type: format.TypeTokenIndex, Version: currentVersion, Flags: format.FlagComplete}
 	cursor += h.EncodeInto(buf[cursor:])
 
 	binary.LittleEndian.PutUint32(buf[cursor:cursor+keyCountSize], uint32(len(sorted)))
@@ -178,9 +179,12 @@ func decodeIndex(data []byte) ([]index.TokenIndexEntry, error) {
 		return nil, ErrIndexTooSmall
 	}
 
-	_, err := format.DecodeAndValidate(data, format.TypeTokenIndex, currentVersion)
+	h, err := format.DecodeAndValidate(data, format.TypeTokenIndex, currentVersion)
 	if err != nil {
 		return nil, fmt.Errorf("token index: %w", err)
+	}
+	if h.Flags&format.FlagComplete == 0 {
+		return nil, ErrIndexIncomplete
 	}
 	cursor := format.HeaderSize
 
