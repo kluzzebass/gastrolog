@@ -271,7 +271,7 @@ func (ti *tokenIntern) tokens() []string {
 func writeIndexHeader(w *os.File, keyCount uint32) error {
 	buf := make([]byte, headerSize)
 	cursor := 0
-	h := format.Header{Type: format.TypeTokenIndex, Version: currentVersion, Flags: 0}
+	h := format.Header{Type: format.TypeTokenIndex, Version: currentVersion, Flags: format.FlagComplete}
 	cursor += h.EncodeInto(buf[cursor:])
 
 	binary.LittleEndian.PutUint32(buf[cursor:cursor+keyCountSize], keyCount)

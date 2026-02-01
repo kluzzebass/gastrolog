@@ -29,6 +29,7 @@ const (
 var (
 	ErrIndexTooSmall     = errors.New("time index too small")
 	ErrEntrySizeMismatch = errors.New("time index entry size mismatch")
+	ErrIndexIncomplete   = errors.New("time index incomplete (missing complete flag)")
 )
 
 // encodeIndex encodes time index entries into binary format.
@@ -49,7 +50,7 @@ func encodeIndex(entries []index.TimeIndexEntry) []byte {
 	buf := make([]byte, headerSize+len(entries)*entrySize)
 
 	cursor := 0
-	h := format.Header{Type: format.TypeTimeIndex, Version: currentVersion, Flags: 0}
+	h := format.Header{Type: format.TypeTimeIndex, Version: currentVersion, Flags: format.FlagComplete}
 	cursor += h.EncodeInto(buf[cursor:])
 
 	binary.LittleEndian.PutUint32(buf[cursor:cursor+entryCountSize], uint32(len(entries)))
@@ -70,9 +71,12 @@ func decodeIndex(data []byte) ([]index.TimeIndexEntry, error) {
 		return nil, ErrIndexTooSmall
 	}
 
-	_, err := format.DecodeAndValidate(data, format.TypeTimeIndex, currentVersion)
+	h, err := format.DecodeAndValidate(data, format.TypeTimeIndex, currentVersion)
 	if err != nil {
 		return nil, fmt.Errorf("time index: %w", err)
+	}
+	if h.Flags&format.FlagComplete == 0 {
+		return nil, ErrIndexIncomplete
 	}
 	cursor := format.HeaderSize
 

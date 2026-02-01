@@ -8,7 +8,6 @@ package repl
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -22,10 +21,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/index"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
-	"gastrolog/internal/tokenizer"
 )
 
 // recordResult holds a record or error from the iterator channel.
@@ -201,7 +198,7 @@ func (s *lineScanner) Err() error   { return s.err }
 const defaultPageSize = 10
 
 // commands is the list of available REPL commands for tab completion.
-var commands = []string{"help", "store", "query", "follow", "next", "reset", "set", "chunks", "chunk", "indexes", "stats", "status", "exit", "quit"}
+var commands = []string{"help", "store", "query", "follow", "next", "reset", "set", "chunks", "chunk", "indexes", "analyze", "stats", "status", "exit", "quit"}
 
 // queryFilters is the list of query filter keys for tab completion.
 var queryFilters = []string{"start=", "end=", "token=", "limit="}
@@ -320,6 +317,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case tea.KeyUp:
+			// If there are suggestions, let textinput handle cycling; otherwise navigate history
+			if len(m.textInput.MatchedSuggestions()) > 0 {
+				// Let textinput handle suggestion cycling
+				break
+			}
 			// Navigate history backward
 			if len(m.repl.history) > 0 {
 				if m.repl.historyIndex < len(m.repl.history)-1 {
@@ -332,6 +334,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case tea.KeyDown:
+			// If there are suggestions, let textinput handle cycling; otherwise navigate history
+			if len(m.textInput.MatchedSuggestions()) > 0 {
+				// Let textinput handle suggestion cycling
+				break
+			}
 			// Navigate history forward
 			if m.repl.historyIndex > 0 {
 				m.repl.historyIndex--
@@ -390,10 +397,53 @@ func (m *model) updateSuggestions() {
 			suggestions = append(suggestions, prefix+f)
 		}
 		m.textInput.SetSuggestions(suggestions)
+	case "chunk", "indexes", "analyze":
+		// Suggest chunk IDs
+		m.textInput.SetSuggestions(m.getChunkIDSuggestions(val))
 	default:
 		// No suggestions for other commands
 		m.textInput.SetSuggestions(nil)
 	}
+}
+
+// getChunkIDSuggestions returns chunk ID suggestions for commands that take a chunk ID argument.
+func (m *model) getChunkIDSuggestions(currentInput string) []string {
+	parts := strings.Fields(currentInput)
+	cmd := parts[0]
+
+	// Get partial ID being typed (if any)
+	var partial string
+	if len(parts) > 1 {
+		partial = strings.ToLower(parts[1])
+	}
+
+	// Collect all chunk IDs across all stores
+	var suggestions []string
+	stores := m.repl.orch.ChunkManagers()
+
+	for _, store := range stores {
+		cm := m.repl.orch.ChunkManager(store)
+		if cm == nil {
+			continue
+		}
+		chunks, err := cm.List()
+		if err != nil {
+			continue
+		}
+		for _, meta := range chunks {
+			id := meta.ID.String()
+			// Filter by partial match if user is typing
+			if partial == "" || strings.HasPrefix(strings.ToLower(id), partial) {
+				suggestions = append(suggestions, cmd+" "+id)
+			}
+		}
+	}
+
+	// Sort suggestions (most recent chunks first based on UUID v7 ordering)
+	slices.Sort(suggestions)
+	slices.Reverse(suggestions)
+
+	return suggestions
 }
 
 func (m model) View() string {
@@ -482,6 +532,8 @@ func (r *REPL) execute(line string) (output string, exit bool, follow bool) {
 		r.cmdChunk(&out, args)
 	case "indexes":
 		r.cmdIndexes(&out, args)
+	case "analyze":
+		r.cmdAnalyze(&out, args)
 	case "stats":
 		r.cmdStats(&out)
 	case "status":
@@ -493,876 +545,4 @@ func (r *REPL) execute(line string) (output string, exit bool, follow bool) {
 	}
 
 	return out.String(), false, false
-}
-
-func (r *REPL) cmdHelp(out *strings.Builder) {
-	out.WriteString(`Commands:
-  help                     Show this help
-  store [name]             Get or set target store (default: "default")
-  query key=value ...      Execute a query with filters
-  follow key=value ...     Continuously stream new results (press any key to stop)
-  next [count]             Fetch next page of results
-  reset                    Clear current query state
-  set [key=value]          Get or set config (no args shows current settings)
-
-Inspection:
-  chunks                   List all chunks with metadata
-  chunk <id>               Show details for a specific chunk
-  indexes <chunk-id>       Show index status for a chunk
-  stats                    Show overall system statistics
-  status                   Show live system state
-
-Query filters:
-  start=TIME               Start time (RFC3339 or Unix timestamp)
-  end=TIME                 End time (RFC3339 or Unix timestamp)
-  token=WORD               Filter by token (can repeat, AND semantics)
-  limit=N                  Maximum total results
-  key=value                Filter by key=value in attrs OR message (can repeat, AND semantics)
-  key=*                    Filter by key existence (any value)
-  *=value                  Filter by value existence (any key)
-
-Settings:
-  pager=N                  Records per page (0 = no paging, show all)
-
-Examples:
-  query start=2024-01-01T00:00:00Z end=2024-01-02T00:00:00Z token=error
-  query source=nginx level=error
-  query status=500 method=POST
-  set pager=50
-  chunks
-  chunk 019c10bb-a3a8-7ad9-9e8e-890bf77a84d3
-`)
-}
-
-func (r *REPL) cmdStore(out *strings.Builder, args []string) {
-	if len(args) == 0 {
-		fmt.Fprintf(out, "Current store: %s\n", r.store)
-		return
-	}
-	r.store = args[0]
-	fmt.Fprintf(out, "Store set to: %s\n", r.store)
-}
-
-func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
-	q := query.Query{}
-	var tokens []string
-	var kvFilters []query.KeyValueFilter
-
-	for _, arg := range args {
-		k, v, ok := strings.Cut(arg, "=")
-		if !ok {
-			fmt.Fprintf(out, "Invalid filter: %s (expected key=value)\n", arg)
-			return
-		}
-
-		switch k {
-		case "start":
-			t, err := parseTime(v)
-			if err != nil {
-				fmt.Fprintf(out, "Invalid start time: %v\n", err)
-				return
-			}
-			q.Start = t
-		case "end":
-			t, err := parseTime(v)
-			if err != nil {
-				fmt.Fprintf(out, "Invalid end time: %v\n", err)
-				return
-			}
-			q.End = t
-		case "token":
-			tokens = append(tokens, v)
-		case "limit":
-			var n int
-			if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
-				fmt.Fprintf(out, "Invalid limit: %v\n", err)
-				return
-			}
-			q.Limit = n
-		default:
-			// Treat as key=value filter (searches both attrs and message body)
-			// Handle wildcard patterns: key=* and *=value
-			key := k
-			value := v
-			if k == "*" {
-				key = "" // *=value pattern
-			}
-			if v == "*" {
-				value = "" // key=* pattern
-			}
-			kvFilters = append(kvFilters, query.KeyValueFilter{Key: key, Value: value})
-		}
-	}
-
-	if len(tokens) > 0 {
-		q.Tokens = tokens
-	}
-	if len(kvFilters) > 0 {
-		q.KV = kvFilters
-	}
-
-	// Cancel any previous query goroutine
-	if r.queryCancel != nil {
-		r.queryCancel()
-	}
-
-	// Create cancellable context for this query
-	queryCtx, queryCancel := context.WithCancel(r.ctx)
-	r.queryCancel = queryCancel
-
-	// Create channel and start goroutine to feed records.
-	// Records are copied because Raw may point to mmap'd memory.
-	ch := make(chan recordResult, 100)
-	r.resultChan = ch
-
-	if follow {
-		// Follow mode: stream records from the active chunk in WriteTS order.
-		// This is like "tail -f" - we only watch the active chunk where new
-		// records arrive, and we track position to avoid re-sending records.
-		go r.runFollowMode(queryCtx, ch, q)
-	} else {
-		// Execute query
-		seq, getToken, err := r.orch.Search(r.ctx, r.store, q, nil)
-		if err != nil {
-			fmt.Fprintf(out, "Query error: %v\n", err)
-			return
-		}
-
-		// Store query state
-		r.lastQuery = &q
-		r.getToken = getToken
-		r.resumeToken = nil
-
-		go func() {
-			defer close(ch)
-			for rec, err := range seq {
-				select {
-				case <-queryCtx.Done():
-					return
-				default:
-				}
-				if err != nil {
-					ch <- recordResult{err: err}
-					continue
-				}
-				ch <- recordResult{rec: rec.Copy()}
-			}
-		}()
-
-		r.fetchAndPrint(out)
-	}
-}
-
-// runFollowMode streams new records from the active chunk as they arrive (like tail -f).
-// It does NOT show existing records - use 'query' for that.
-func (r *REPL) runFollowMode(ctx context.Context, ch chan<- recordResult, q query.Query) {
-	defer close(ch)
-
-	cm := r.orch.ChunkManager(r.store)
-	if cm == nil {
-		ch <- recordResult{err: errors.New("chunk manager not found for store")}
-		return
-	}
-
-	// Start from current end of active chunk - only show NEW records
-	var currentChunkID chunk.ChunkID
-	var nextPos uint64
-
-	if active := cm.Active(); active != nil {
-		currentChunkID = active.ID
-		// Find current end position
-		if cursor, err := cm.OpenCursor(active.ID); err == nil {
-			for {
-				_, ref, err := cursor.Next()
-				if errors.Is(err, chunk.ErrNoMoreRecords) {
-					break
-				}
-				if err != nil {
-					break
-				}
-				nextPos = ref.Pos + 1
-			}
-			cursor.Close()
-		}
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		// Get the active chunk
-		active := cm.Active()
-		if active == nil {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(100 * time.Millisecond):
-				continue
-			}
-		}
-
-		// If chunk changed (sealed and new one created), start from beginning of new chunk
-		if active.ID != currentChunkID {
-			currentChunkID = active.ID
-			nextPos = 0
-		}
-
-		// Open cursor and seek to our position
-		cursor, err := cm.OpenCursor(currentChunkID)
-		if err != nil {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(100 * time.Millisecond):
-				continue
-			}
-		}
-
-		if nextPos > 0 {
-			if err := cursor.Seek(chunk.RecordRef{ChunkID: currentChunkID, Pos: nextPos}); err != nil {
-				cursor.Close()
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(100 * time.Millisecond):
-					continue
-				}
-			}
-		}
-
-		// Read new records
-		for {
-			rec, ref, err := cursor.Next()
-			if errors.Is(err, chunk.ErrNoMoreRecords) {
-				break
-			}
-			if err != nil {
-				ch <- recordResult{err: err}
-				break
-			}
-
-			nextPos = ref.Pos + 1
-
-			// Apply token filter (AND semantics)
-			if len(q.Tokens) > 0 && !matchesAllTokens(rec.Raw, q.Tokens) {
-				continue
-			}
-
-			// Apply key=value filter (AND semantics, OR within each filter for attrs vs message)
-			if len(q.KV) > 0 && !matchesAllKeyValues(rec.Attrs, rec.Raw, q.KV) {
-				continue
-			}
-
-			select {
-			case <-ctx.Done():
-				cursor.Close()
-				return
-			case ch <- recordResult{rec: rec.Copy()}:
-			}
-		}
-
-		cursor.Close()
-
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
-}
-
-// matchesAllTokens checks if the raw data contains all query tokens.
-func matchesAllTokens(raw []byte, tokens []string) bool {
-	rawLower := strings.ToLower(string(raw))
-	for _, tok := range tokens {
-		if !strings.Contains(rawLower, strings.ToLower(tok)) {
-			return false
-		}
-	}
-	return true
-}
-
-// matchesAllKeyValues checks if all query key=value pairs are found in either
-// the record's attributes or the message body (OR semantics per pair, AND across pairs).
-//
-// Supports wildcard patterns:
-//   - Key="foo", Value="bar" - exact match for foo=bar
-//   - Key="foo", Value=""    - match if key "foo" exists (any value)
-//   - Key="", Value="bar"    - match if any key has value "bar"
-func matchesAllKeyValues(recAttrs chunk.Attributes, raw []byte, queryFilters []query.KeyValueFilter) bool {
-	if len(queryFilters) == 0 {
-		return true
-	}
-
-	// Lazily extract key=value pairs from message body only if needed.
-	var msgPairs map[string]map[string]struct{}
-	var msgValues map[string]struct{} // all values (for *=value pattern)
-	getMsgPairs := func() map[string]map[string]struct{} {
-		if msgPairs == nil {
-			pairs := tokenizer.ExtractKeyValues(raw)
-			msgPairs = make(map[string]map[string]struct{})
-			msgValues = make(map[string]struct{})
-			for _, kv := range pairs {
-				if msgPairs[kv.Key] == nil {
-					msgPairs[kv.Key] = make(map[string]struct{})
-				}
-				// Keys are already lowercase from extractor, values are preserved.
-				// For matching, we lowercase both.
-				valLower := strings.ToLower(kv.Value)
-				msgPairs[kv.Key][valLower] = struct{}{}
-				msgValues[valLower] = struct{}{}
-			}
-		}
-		return msgPairs
-	}
-	getMsgValues := func() map[string]struct{} {
-		getMsgPairs() // ensure msgValues is populated
-		return msgValues
-	}
-
-	// Check all filters (AND semantics across filters).
-	for _, f := range queryFilters {
-		keyLower := strings.ToLower(f.Key)
-		valLower := strings.ToLower(f.Value)
-
-		if f.Key == "" && f.Value == "" {
-			// Both empty - matches everything, skip this filter
-			continue
-		} else if f.Value == "" {
-			// Key only: key=* pattern (key exists with any value)
-			// Check attrs
-			found := false
-			for k := range recAttrs {
-				if strings.EqualFold(k, f.Key) {
-					found = true
-					break
-				}
-			}
-			if found {
-				continue
-			}
-			// Check message body
-			pairs := getMsgPairs()
-			if _, ok := pairs[keyLower]; ok {
-				continue
-			}
-			return false // Key not found in either location
-		} else if f.Key == "" {
-			// Value only: *=value pattern (any key has this value)
-			// Check attrs
-			found := false
-			for _, v := range recAttrs {
-				if strings.EqualFold(v, f.Value) {
-					found = true
-					break
-				}
-			}
-			if found {
-				continue
-			}
-			// Check message body
-			values := getMsgValues()
-			if _, ok := values[valLower]; ok {
-				continue
-			}
-			return false // Value not found in either location
-		} else {
-			// Both key and value: exact key=value match
-			// Check attributes first (cheaper).
-			if v, ok := recAttrs[f.Key]; ok && strings.EqualFold(v, f.Value) {
-				continue // Found in attrs, this filter passes.
-			}
-
-			// Check message body.
-			pairs := getMsgPairs()
-			if values, ok := pairs[keyLower]; ok {
-				if _, found := values[valLower]; found {
-					continue // Found in message, this filter passes.
-				}
-			}
-
-			return false // Not found in either location.
-		}
-	}
-	return true
-}
-
-func (r *REPL) cmdNext(out *strings.Builder, args []string) {
-	if r.resultChan == nil {
-		out.WriteString("No active query. Use 'query' first.\n")
-		return
-	}
-
-	// Allow override for this call only
-	if len(args) > 0 {
-		var count int
-		if _, err := fmt.Sscanf(args[0], "%d", &count); err != nil {
-			fmt.Fprintf(out, "Invalid count: %v\n", err)
-			return
-		}
-		r.fetchAndPrintN(out, count)
-		return
-	}
-
-	r.fetchAndPrint(out)
-}
-
-func (r *REPL) fetchAndPrint(out *strings.Builder) {
-	if r.pageSize == 0 {
-		// No paging - fetch all
-		r.fetchAndPrintN(out, 0)
-	} else {
-		r.fetchAndPrintN(out, r.pageSize)
-	}
-}
-
-func (r *REPL) fetchAndPrintN(out *strings.Builder, count int) {
-	if r.resultChan == nil {
-		out.WriteString("No active query.\n")
-		return
-	}
-
-	printed := 0
-	for {
-		if count > 0 && printed >= count {
-			break
-		}
-		result, ok := <-r.resultChan
-		if !ok {
-			if printed == 0 {
-				out.WriteString("No more results.\n")
-			} else {
-				fmt.Fprintf(out, "--- %d records (end of results) ---\n", printed)
-			}
-			r.resultChan = nil
-			return
-		}
-		if result.err != nil {
-			if errors.Is(result.err, query.ErrInvalidResumeToken) {
-				out.WriteString("Resume token invalid (chunk deleted). Use 'reset' and re-query.\n")
-				r.resultChan = nil
-				return
-			}
-			fmt.Fprintf(out, "Error: %v\n", result.err)
-			return
-		}
-
-		r.printRecord(out, result.rec)
-		printed++
-	}
-
-	if printed > 0 {
-		fmt.Fprintf(out, "--- %d records shown. Use 'next' for more. ---\n", printed)
-	}
-}
-
-func (r *REPL) formatRecord(rec chunk.Record) string {
-	// Format: TIMESTAMP ATTRS RAW
-	ts := rec.IngestTS.Format(time.RFC3339Nano)
-
-	// Format attributes
-	var attrStr string
-	if len(rec.Attrs) > 0 {
-		keys := make([]string, 0, len(rec.Attrs))
-		for k := range rec.Attrs {
-			keys = append(keys, k)
-		}
-		slices.Sort(keys)
-		var attrs []string
-		for _, k := range keys {
-			attrs = append(attrs, k+"="+rec.Attrs[k])
-		}
-		attrStr = strings.Join(attrs, ",")
-	} else {
-		attrStr = "-"
-	}
-
-	return fmt.Sprintf("%s %s %s", ts, attrStr, string(rec.Raw))
-}
-
-func (r *REPL) printRecord(out *strings.Builder, rec chunk.Record) {
-	out.WriteString(r.formatRecord(rec))
-	out.WriteByte('\n')
-}
-
-func (r *REPL) cmdReset(out *strings.Builder) {
-	r.lastQuery = nil
-	r.resumeToken = nil
-	r.resultChan = nil
-	r.getToken = nil
-	out.WriteString("Query state cleared.\n")
-}
-
-func (r *REPL) cmdSet(out *strings.Builder, args []string) {
-	if len(args) == 0 {
-		// Show current settings
-		fmt.Fprintf(out, "pager=%d\n", r.pageSize)
-		return
-	}
-
-	for _, arg := range args {
-		k, v, ok := strings.Cut(arg, "=")
-		if !ok {
-			fmt.Fprintf(out, "Invalid setting: %s (expected key=value)\n", arg)
-			return
-		}
-
-		switch k {
-		case "pager":
-			var n int
-			if _, err := fmt.Sscanf(v, "%d", &n); err != nil || n < 0 {
-				fmt.Fprintf(out, "Invalid pager value: %s (expected non-negative integer)\n", v)
-				return
-			}
-			r.pageSize = n
-			if n == 0 {
-				out.WriteString("Pager disabled (showing all results).\n")
-			} else {
-				fmt.Fprintf(out, "Pager set to %d.\n", n)
-			}
-		default:
-			fmt.Fprintf(out, "Unknown setting: %s\n", k)
-		}
-	}
-}
-
-// parseTime parses a time string in RFC3339 format or as a Unix timestamp.
-func parseTime(s string) (time.Time, error) {
-	// Try RFC3339 (with timezone)
-	if t, err := time.Parse(time.RFC3339, s); err == nil {
-		return t, nil
-	}
-	// Try RFC3339Nano (with timezone)
-	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
-		return t, nil
-	}
-	// Try Unix timestamp (must be all digits)
-	var unix int64
-	if n, err := fmt.Sscanf(s, "%d", &unix); err == nil && n == 1 && fmt.Sprintf("%d", unix) == s {
-		return time.Unix(unix, 0), nil
-	}
-	return time.Time{}, fmt.Errorf("invalid time format: %s (use RFC3339: 2006-01-02T15:04:05Z or 2006-01-02T15:04:05+01:00)", s)
-}
-
-// cmdChunks lists all chunks across all stores with their metadata.
-func (r *REPL) cmdChunks(out *strings.Builder) {
-	stores := r.orch.ChunkManagers()
-	if len(stores) == 0 {
-		out.WriteString("No chunk managers registered.\n")
-		return
-	}
-
-	slices.Sort(stores)
-
-	for _, store := range stores {
-		cm := r.orch.ChunkManager(store)
-		if cm == nil {
-			continue
-		}
-
-		chunks, err := cm.List()
-		if err != nil {
-			fmt.Fprintf(out, "[%s] Error listing chunks: %v\n", store, err)
-			continue
-		}
-
-		if len(chunks) == 0 {
-			fmt.Fprintf(out, "[%s] No chunks\n", store)
-			continue
-		}
-
-		// Sort by StartTS
-		slices.SortFunc(chunks, func(a, b chunk.ChunkMeta) int {
-			return a.StartTS.Compare(b.StartTS)
-		})
-
-		fmt.Fprintf(out, "[%s] %d chunks:\n", store, len(chunks))
-
-		// Check which is the active chunk
-		active := cm.Active()
-		var activeID chunk.ChunkID
-		if active != nil {
-			activeID = active.ID
-		}
-
-		for _, meta := range chunks {
-			status := "sealed"
-			if meta.ID == activeID {
-				status = "active"
-			} else if !meta.Sealed {
-				status = "open"
-			}
-
-			// Format time range
-			timeRange := fmt.Sprintf("%s - %s",
-				meta.StartTS.Format("2006-01-02 15:04:05"),
-				meta.EndTS.Format("2006-01-02 15:04:05"))
-
-			fmt.Fprintf(out, "  %s  %s  %d records  [%s]\n",
-				meta.ID.String()[:8], timeRange, meta.RecordCount, status)
-		}
-	}
-}
-
-// cmdChunk shows detailed information about a specific chunk.
-func (r *REPL) cmdChunk(out *strings.Builder, args []string) {
-	if len(args) == 0 {
-		out.WriteString("Usage: chunk <chunk-id>\n")
-		return
-	}
-
-	chunkID, err := chunk.ParseChunkID(args[0])
-	if err != nil {
-		fmt.Fprintf(out, "Invalid chunk ID: %v\n", err)
-		return
-	}
-
-	// Find the chunk across all stores
-	stores := r.orch.ChunkManagers()
-	var foundStore string
-	var meta chunk.ChunkMeta
-	var cm chunk.ChunkManager
-
-	for _, store := range stores {
-		cm = r.orch.ChunkManager(store)
-		if cm == nil {
-			continue
-		}
-		m, err := cm.Meta(chunkID)
-		if err == nil {
-			foundStore = store
-			meta = m
-			break
-		}
-	}
-
-	if foundStore == "" {
-		fmt.Fprintf(out, "Chunk not found: %s\n", args[0])
-		return
-	}
-
-	// Determine status
-	status := "sealed"
-	if active := cm.Active(); active != nil && active.ID == chunkID {
-		status = "active"
-	} else if !meta.Sealed {
-		status = "open"
-	}
-
-	fmt.Fprintf(out, "Chunk: %s\n", meta.ID.String())
-	fmt.Fprintf(out, "  Store:    %s\n", foundStore)
-	fmt.Fprintf(out, "  Status:   %s\n", status)
-	fmt.Fprintf(out, "  StartTS:  %s\n", meta.StartTS.Format(time.RFC3339Nano))
-	fmt.Fprintf(out, "  EndTS:    %s\n", meta.EndTS.Format(time.RFC3339Nano))
-	fmt.Fprintf(out, "  Records:  %d\n", meta.RecordCount)
-
-	// Show index status if sealed
-	if meta.Sealed {
-		im := r.orch.IndexManager(foundStore)
-		if im != nil {
-			complete, err := im.IndexesComplete(chunkID)
-			if err != nil {
-				fmt.Fprintf(out, "  Indexes:  error checking: %v\n", err)
-			} else if complete {
-				fmt.Fprintf(out, "  Indexes:  complete\n")
-			} else {
-				fmt.Fprintf(out, "  Indexes:  incomplete\n")
-			}
-		}
-	} else {
-		fmt.Fprintf(out, "  Indexes:  n/a (not sealed)\n")
-	}
-}
-
-// cmdIndexes shows index details for a specific chunk.
-func (r *REPL) cmdIndexes(out *strings.Builder, args []string) {
-	if len(args) == 0 {
-		out.WriteString("Usage: indexes <chunk-id>\n")
-		return
-	}
-
-	chunkID, err := chunk.ParseChunkID(args[0])
-	if err != nil {
-		fmt.Fprintf(out, "Invalid chunk ID: %v\n", err)
-		return
-	}
-
-	// Find the chunk and its index manager
-	stores := r.orch.ChunkManagers()
-	var foundStore string
-	var cm chunk.ChunkManager
-	var im index.IndexManager
-
-	for _, store := range stores {
-		cm = r.orch.ChunkManager(store)
-		if cm == nil {
-			continue
-		}
-		if _, err := cm.Meta(chunkID); err == nil {
-			foundStore = store
-			im = r.orch.IndexManager(store)
-			break
-		}
-	}
-
-	if foundStore == "" {
-		fmt.Fprintf(out, "Chunk not found: %s\n", args[0])
-		return
-	}
-
-	if im == nil {
-		fmt.Fprintf(out, "No index manager for store: %s\n", foundStore)
-		return
-	}
-
-	fmt.Fprintf(out, "Indexes for chunk %s:\n", chunkID.String()[:8])
-
-	// Time index
-	if timeIdx, err := im.OpenTimeIndex(chunkID); err != nil {
-		fmt.Fprintf(out, "  time:   not available (%v)\n", err)
-	} else {
-		entries := timeIdx.Entries()
-		if len(entries) > 0 {
-			fmt.Fprintf(out, "  time:   %d entries (sparsity ~%d)\n",
-				len(entries), estimateSparsity(entries))
-		} else {
-			fmt.Fprintf(out, "  time:   0 entries\n")
-		}
-	}
-
-	// Token index
-	if tokIdx, err := im.OpenTokenIndex(chunkID); err != nil {
-		fmt.Fprintf(out, "  token:  not available (%v)\n", err)
-	} else {
-		entries := tokIdx.Entries()
-		totalPositions := 0
-		for _, e := range entries {
-			totalPositions += len(e.Positions)
-		}
-		fmt.Fprintf(out, "  token:  %d tokens, %d positions\n", len(entries), totalPositions)
-	}
-}
-
-// cmdStats shows overall system statistics.
-func (r *REPL) cmdStats(out *strings.Builder) {
-	stores := r.orch.ChunkManagers()
-
-	var totalChunks, totalSealed, totalActive int
-	var totalRecords int64
-
-	for _, store := range stores {
-		cm := r.orch.ChunkManager(store)
-		if cm == nil {
-			continue
-		}
-
-		chunks, err := cm.List()
-		if err != nil {
-			continue
-		}
-
-		active := cm.Active()
-
-		for _, meta := range chunks {
-			totalChunks++
-			totalRecords += meta.RecordCount
-
-			if active != nil && meta.ID == active.ID {
-				totalActive++
-			} else if meta.Sealed {
-				totalSealed++
-			}
-		}
-	}
-
-	fmt.Fprintf(out, "System Statistics:\n")
-	fmt.Fprintf(out, "  Stores:      %d\n", len(stores))
-	fmt.Fprintf(out, "  Chunks:      %d total (%d sealed, %d active)\n",
-		totalChunks, totalSealed, totalActive)
-	fmt.Fprintf(out, "  Records:     %d\n", totalRecords)
-
-	// Receiver stats
-	receivers := r.orch.Receivers()
-	fmt.Fprintf(out, "  Receivers:   %d\n", len(receivers))
-}
-
-// cmdStatus shows the live system state.
-func (r *REPL) cmdStatus(out *strings.Builder) {
-	fmt.Fprintf(out, "System Status:\n")
-
-	// Orchestrator running status
-	if r.orch.Running() {
-		fmt.Fprintf(out, "  Orchestrator: running\n")
-	} else {
-		fmt.Fprintf(out, "  Orchestrator: stopped\n")
-	}
-
-	// Receivers
-	receivers := r.orch.Receivers()
-	if len(receivers) > 0 {
-		slices.Sort(receivers)
-		fmt.Fprintf(out, "  Receivers:    %s\n", strings.Join(receivers, ", "))
-	} else {
-		fmt.Fprintf(out, "  Receivers:    none\n")
-	}
-
-	// Stores and their active chunks
-	stores := r.orch.ChunkManagers()
-	slices.Sort(stores)
-
-	fmt.Fprintf(out, "  Stores:\n")
-	for _, store := range stores {
-		cm := r.orch.ChunkManager(store)
-		if cm == nil {
-			continue
-		}
-
-		active := cm.Active()
-		if active != nil {
-			fmt.Fprintf(out, "    [%s] active chunk: %s\n",
-				store, active.ID.String()[:8])
-		} else {
-			fmt.Fprintf(out, "    [%s] no active chunk\n", store)
-		}
-
-		// Check for pending indexes on sealed chunks
-		im := r.orch.IndexManager(store)
-		if im != nil {
-			chunks, err := cm.List()
-			if err == nil {
-				pendingIndexes := 0
-				for _, meta := range chunks {
-					if meta.Sealed {
-						if complete, err := im.IndexesComplete(meta.ID); err == nil && !complete {
-							pendingIndexes++
-						}
-					}
-				}
-				if pendingIndexes > 0 {
-					fmt.Fprintf(out, "    [%s] pending indexes: %d chunks\n", store, pendingIndexes)
-				}
-			}
-		}
-	}
-}
-
-// estimateSparsity estimates the sparsity factor from time index entries.
-func estimateSparsity(entries []index.TimeIndexEntry) int {
-	if len(entries) < 2 {
-		return 1
-	}
-	// Look at position gaps between entries
-	totalGap := uint64(0)
-	for i := 1; i < len(entries); i++ {
-		gap := entries[i].RecordPos - entries[i-1].RecordPos
-		totalGap += gap
-	}
-	avgGap := totalGap / uint64(len(entries)-1)
-	if avgGap < 1 {
-		return 1
-	}
-	return int(avgGap)
 }
