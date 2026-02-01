@@ -317,6 +317,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case tea.KeyUp:
+			// If there are suggestions, let textinput handle cycling; otherwise navigate history
+			if len(m.textInput.MatchedSuggestions()) > 0 {
+				// Let textinput handle suggestion cycling
+				break
+			}
 			// Navigate history backward
 			if len(m.repl.history) > 0 {
 				if m.repl.historyIndex < len(m.repl.history)-1 {
@@ -329,6 +334,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case tea.KeyDown:
+			// If there are suggestions, let textinput handle cycling; otherwise navigate history
+			if len(m.textInput.MatchedSuggestions()) > 0 {
+				// Let textinput handle suggestion cycling
+				break
+			}
 			// Navigate history forward
 			if m.repl.historyIndex > 0 {
 				m.repl.historyIndex--
