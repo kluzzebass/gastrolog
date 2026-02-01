@@ -8,6 +8,7 @@ func (r *REPL) cmdHelp(out *strings.Builder) {
   store [name]             Get or set target store (default: "default")
   query key=value ...      Execute a query with filters
   follow key=value ...     Continuously stream new results (press any key to stop)
+  explain key=value ...    Show query execution plan (which indexes will be used)
   next [count]             Fetch next page of results
   reset                    Clear current query state
   set [key=value]          Get or set config (no args shows current settings)
@@ -36,6 +37,7 @@ Examples:
   query start=2024-01-01T00:00:00Z end=2024-01-02T00:00:00Z token=error
   query source=nginx level=error
   query status=500 method=POST
+  explain token=error level=warn
   set pager=50
   chunks
   chunk 019c10bb-a3a8-7ad9-9e8e-890bf77a84d3

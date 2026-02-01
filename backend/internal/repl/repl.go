@@ -198,7 +198,7 @@ func (s *lineScanner) Err() error   { return s.err }
 const defaultPageSize = 10
 
 // commands is the list of available REPL commands for tab completion.
-var commands = []string{"help", "store", "query", "follow", "next", "reset", "set", "chunks", "chunk", "indexes", "analyze", "stats", "status", "exit", "quit"}
+var commands = []string{"help", "store", "query", "follow", "next", "reset", "set", "chunks", "chunk", "indexes", "analyze", "explain", "stats", "status", "exit", "quit"}
 
 // queryFilters is the list of query filter keys for tab completion.
 var queryFilters = []string{"start=", "end=", "token=", "limit="}
@@ -382,7 +382,7 @@ func (m *model) updateSuggestions() {
 
 	// After command, suggest based on command type
 	switch cmd {
-	case "query", "sources":
+	case "query", "follow", "explain":
 		// Suggest filter keys, prefixed with current input
 		var suggestions []string
 		prefix := val
@@ -534,6 +534,8 @@ func (r *REPL) execute(line string) (output string, exit bool, follow bool) {
 		r.cmdIndexes(&out, args)
 	case "analyze":
 		r.cmdAnalyze(&out, args)
+	case "explain":
+		r.cmdExplain(&out, args)
 	case "stats":
 		r.cmdStats(&out)
 	case "status":
