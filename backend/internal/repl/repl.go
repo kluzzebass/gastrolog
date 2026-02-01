@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -215,6 +216,9 @@ func (r *REPL) Run() error {
 	ti.ShowSuggestions = true
 	ti.SetSuggestions(commands)
 
+	// Disable cursor blink to prevent redraws that clear terminal text selection.
+	ti.Cursor.SetMode(cursor.CursorStatic)
+
 	output := &strings.Builder{}
 	output.WriteString("GastroLog REPL. Type 'help' for commands.\n")
 
@@ -230,7 +234,7 @@ func (r *REPL) Run() error {
 }
 
 func (m model) Init() tea.Cmd {
-	return textinput.Blink
+	return nil
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
