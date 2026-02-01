@@ -7,6 +7,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
+	"gastrolog/internal/index/inverted"
 )
 
 // Analyzer provides read-only analysis of index health and effectiveness.
@@ -297,6 +298,100 @@ func (a *Analyzer) analyzeTokenIndex(ca *ChunkAnalysis) {
 	})
 }
 
+// keyIndexStats holds analysis results for a key-based inverted index.
+type keyIndexStats struct {
+	uniqueKeys       int64
+	totalOccurrences int64
+	maxPos           uint64
+	topKeys          []TokenFrequency
+	indexBytes       int64
+}
+
+// analyzeKeyIndex analyzes any key-based inverted index using generics.
+func analyzeKeyIndex[T inverted.KeyEntry](entries []T) keyIndexStats {
+	stats := keyIndexStats{
+		uniqueKeys: int64(len(entries)),
+	}
+
+	type keyFreq struct {
+		key  string
+		freq int64
+	}
+	topN := make([]keyFreq, 0, len(entries))
+
+	for _, e := range entries {
+		positions := e.GetPositions()
+		freq := int64(len(positions))
+		stats.totalOccurrences += freq
+		topN = append(topN, keyFreq{e.GetKey(), freq})
+
+		for _, pos := range positions {
+			if pos > stats.maxPos {
+				stats.maxPos = pos
+			}
+		}
+
+		// Estimate bytes: 2 (keyLen) + len(key) + 4 (offset) + 4 (count) + positions*4
+		stats.indexBytes += int64(2 + len(e.GetKey()) + 4 + 4 + len(positions)*4)
+	}
+
+	// Sort and get top keys
+	slices.SortFunc(topN, func(a, b keyFreq) int {
+		return int(b.freq - a.freq)
+	})
+	limit := min(10, len(topN))
+	for i := 0; i < limit; i++ {
+		stats.topKeys = append(stats.topKeys, TokenFrequency{
+			Token:     topN[i].key,
+			Frequency: topN[i].freq,
+		})
+	}
+
+	return stats
+}
+
+// valueIndexStats holds analysis results for a value-based inverted index.
+type valueIndexStats struct {
+	uniqueValues int64
+	indexBytes   int64
+}
+
+// analyzeValueIndex analyzes any value-based inverted index using generics.
+func analyzeValueIndex[T inverted.ValueEntry](entries []T) valueIndexStats {
+	stats := valueIndexStats{
+		uniqueValues: int64(len(entries)),
+	}
+
+	for _, e := range entries {
+		positions := e.GetPositions()
+		// Estimate bytes: 2 (valLen) + len(val) + 4 (offset) + 4 (count) + positions*4
+		stats.indexBytes += int64(2 + len(e.GetValue()) + 4 + 4 + len(positions)*4)
+	}
+
+	return stats
+}
+
+// kvIndexStats holds analysis results for a key-value inverted index.
+type kvIndexStats struct {
+	uniquePairs int64
+	indexBytes  int64
+}
+
+// analyzeKVPairIndex analyzes any key-value pair inverted index using generics.
+func analyzeKVPairIndex[T inverted.KVEntry](entries []T) kvIndexStats {
+	stats := kvIndexStats{
+		uniquePairs: int64(len(entries)),
+	}
+
+	for _, e := range entries {
+		positions := e.GetPositions()
+		// Estimate bytes: 2 (keyLen) + key + 2 (valLen) + val + 4 (offset) + 4 (count) + positions*4
+		stats.indexBytes += int64(2 + len(e.GetKey()) + 2 + len(e.GetValue()) + 4 + 4 + len(positions)*4)
+	}
+
+	return stats
+}
+
 func (a *Analyzer) analyzeAttrKVIndex(ca *ChunkAnalysis) {
 	keyIdx, keyErr := a.im.OpenAttrKeyIndex(ca.ChunkID)
 	valIdx, valErr := a.im.OpenAttrValueIndex(ca.ChunkID)
@@ -313,60 +408,45 @@ func (a *Analyzer) analyzeAttrKVIndex(ca *ChunkAnalysis) {
 	}
 
 	stats := &AttrKVIndexStats{}
-	var maxPos uint64
+	var totalBytes int64 = 8 // Header for key index
 
 	// Analyze key index
 	if keyErr == nil {
-		entries := keyIdx.Entries()
-		stats.UniqueKeys = int64(len(entries))
-		for _, e := range entries {
-			stats.TotalOccurrences += int64(len(e.Positions))
-			for _, pos := range e.Positions {
-				if pos > maxPos {
-					maxPos = pos
-				}
-			}
-		}
+		keyStats := analyzeKeyIndex(keyIdx.Entries())
+		stats.UniqueKeys = keyStats.uniqueKeys
+		stats.TotalOccurrences = keyStats.totalOccurrences
+		stats.RecordsWithAttributes = int64(keyStats.maxPos + 1)
+		totalBytes += keyStats.indexBytes
 
-		// Top keys
-		type keyStats struct {
-			key   string
-			count int64
-		}
-		topN := make([]keyStats, 0, len(entries))
-		for _, e := range entries {
-			topN = append(topN, keyStats{e.Key, int64(len(e.Positions))})
-		}
-		slices.SortFunc(topN, func(a, b keyStats) int {
-			return int(b.count - a.count)
-		})
-		limit := min(10, len(topN))
-		for i := 0; i < limit; i++ {
+		// Convert top keys
+		for _, tf := range keyStats.topKeys {
 			stats.TopKeysByOccurrences = append(stats.TopKeysByOccurrences, AttrKeyStats{
-				Key:              topN[i].key,
-				TotalOccurrences: topN[i].count,
+				Key:              tf.Token,
+				TotalOccurrences: tf.Frequency,
 			})
 		}
 	}
 
 	// Analyze value index
 	if valErr == nil {
-		stats.UniqueValues = int64(len(valIdx.Entries()))
+		valStats := analyzeValueIndex(valIdx.Entries())
+		stats.UniqueValues = valStats.uniqueValues
+		totalBytes += 8 + valStats.indexBytes // Header + data
 	}
 
 	// Analyze KV index
 	if kvErr == nil {
-		stats.UniqueKeyValuePairs = int64(len(kvIdx.Entries()))
+		kvStats := analyzeKVPairIndex(kvIdx.Entries())
+		stats.UniqueKeyValuePairs = kvStats.uniquePairs
+		totalBytes += 8 + kvStats.indexBytes // Header + data
 	}
 
 	// Coverage
-	stats.RecordsWithAttributes = int64(maxPos + 1)
 	if ca.ChunkRecords > 0 {
 		stats.PercentRecordsCovered = safePercent(stats.RecordsWithAttributes, ca.ChunkRecords) * 100
 	}
 
-	// Estimate bytes (rough: sum of all three indexes)
-	stats.IndexBytes = estimateInvertedIndexBytes(keyIdx, valIdx, kvIdx)
+	stats.IndexBytes = totalBytes
 
 	ca.AttrKVStats = stats
 	ca.Summaries = append(ca.Summaries, IndexSummary{
@@ -397,45 +477,34 @@ func (a *Analyzer) analyzeKVIndex(ca *ChunkAnalysis) {
 		ValueStatus: kvStatusToIndexStatus(valStatus, valErr),
 		KVStatus:    kvStatusToIndexStatus(kvStatus, kvErr),
 	}
+	var totalBytes int64 = 9 // Header + status for key index
 
 	// Analyze key index
 	if keyErr == nil {
-		entries := keyIdx.Entries()
-		stats.KeysIndexed = int64(len(entries))
-		stats.KeysSeen = stats.KeysIndexed // We don't have actual "seen" count
+		keyStats := analyzeKeyIndex(keyIdx.Entries())
+		stats.KeysIndexed = keyStats.uniqueKeys
+		stats.KeysSeen = keyStats.uniqueKeys // We don't have actual "seen" count
+		stats.TotalOccurrences = keyStats.totalOccurrences
+		totalBytes += keyStats.indexBytes
 
-		// Top keys
-		type keyFreq struct {
-			key  string
-			freq int64
-		}
-		topN := make([]keyFreq, 0, len(entries))
-		for _, e := range entries {
-			stats.TotalOccurrences += int64(len(e.Positions))
-			topN = append(topN, keyFreq{e.Key, int64(len(e.Positions))})
-		}
-		slices.SortFunc(topN, func(a, b keyFreq) int {
-			return int(b.freq - a.freq)
-		})
-		limit := min(10, len(topN))
-		for i := 0; i < limit; i++ {
-			stats.TopKeysByFrequency = append(stats.TopKeysByFrequency, TokenFrequency{
-				Token:     topN[i].key,
-				Frequency: topN[i].freq,
-			})
-		}
+		// Convert top keys
+		stats.TopKeysByFrequency = keyStats.topKeys
 	}
 
 	// Analyze value index
 	if valErr == nil {
-		stats.ValuesIndexed = int64(len(valIdx.Entries()))
-		stats.ValuesSeen = stats.ValuesIndexed
+		valStats := analyzeValueIndex(valIdx.Entries())
+		stats.ValuesIndexed = valStats.uniqueValues
+		stats.ValuesSeen = valStats.uniqueValues
+		totalBytes += 9 + valStats.indexBytes // Header + status + data
 	}
 
 	// Analyze KV index
 	if kvErr == nil {
-		stats.PairsIndexed = int64(len(kvIdx.Entries()))
-		stats.PairsSeen = stats.PairsIndexed
+		kvStats := analyzeKVPairIndex(kvIdx.Entries())
+		stats.PairsIndexed = kvStats.uniquePairs
+		stats.PairsSeen = kvStats.uniquePairs
+		totalBytes += 9 + kvStats.indexBytes // Header + status + data
 	}
 
 	// Check for budget exhaustion
@@ -443,8 +512,7 @@ func (a *Analyzer) analyzeKVIndex(ca *ChunkAnalysis) {
 		valStatus == index.KVCapped ||
 		kvStatus == index.KVCapped
 
-	// Estimate bytes
-	stats.IndexBytes = estimateKVIndexBytes(keyIdx, valIdx, kvIdx)
+	stats.IndexBytes = totalBytes
 
 	// Determine overall status and reason
 	overallStatus := StatusEnabled
@@ -506,73 +574,4 @@ func percentile(sorted []int64, p int) int64 {
 	}
 	idx := (len(sorted) - 1) * p / 100
 	return sorted[idx]
-}
-
-func estimateInvertedIndexBytes(keyIdx *index.Index[index.AttrKeyIndexEntry],
-	valIdx *index.Index[index.AttrValueIndexEntry],
-	kvIdx *index.Index[index.AttrKVIndexEntry]) int64 {
-
-	var total int64
-
-	if keyIdx != nil {
-		entries := keyIdx.Entries()
-		for _, e := range entries {
-			// 2 (keyLen) + len(key) + 4 (offset) + 4 (count) + positions*4
-			total += int64(2 + len(e.Key) + 4 + 4 + len(e.Positions)*4)
-		}
-		total += 8 // Header
-	}
-
-	if valIdx != nil {
-		entries := valIdx.Entries()
-		for _, e := range entries {
-			total += int64(2 + len(e.Value) + 4 + 4 + len(e.Positions)*4)
-		}
-		total += 8
-	}
-
-	if kvIdx != nil {
-		entries := kvIdx.Entries()
-		for _, e := range entries {
-			// 2 (keyLen) + key + 2 (valLen) + val + 4 + 4 + positions*4
-			total += int64(2 + len(e.Key) + 2 + len(e.Value) + 4 + 4 + len(e.Positions)*4)
-		}
-		total += 8
-	}
-
-	return total
-}
-
-func estimateKVIndexBytes(keyIdx *index.Index[index.KVKeyIndexEntry],
-	valIdx *index.Index[index.KVValueIndexEntry],
-	kvIdx *index.Index[index.KVIndexEntry]) int64 {
-
-	var total int64
-
-	if keyIdx != nil {
-		entries := keyIdx.Entries()
-		for _, e := range entries {
-			// Header includes status byte: 9 bytes instead of 8
-			total += int64(2 + len(e.Key) + 4 + 4 + len(e.Positions)*4)
-		}
-		total += 9 // Header + status
-	}
-
-	if valIdx != nil {
-		entries := valIdx.Entries()
-		for _, e := range entries {
-			total += int64(2 + len(e.Value) + 4 + 4 + len(e.Positions)*4)
-		}
-		total += 9
-	}
-
-	if kvIdx != nil {
-		entries := kvIdx.Entries()
-		for _, e := range entries {
-			total += int64(2 + len(e.Key) + 2 + len(e.Value) + 4 + 4 + len(e.Positions)*4)
-		}
-		total += 9
-	}
-
-	return total
 }
