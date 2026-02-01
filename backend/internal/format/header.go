@@ -27,6 +27,9 @@ const (
 	TypeTimeIndex      = 't'
 	TypeSourceIndex    = 's' // Deprecated: source index no longer used
 	TypeTokenIndex     = 'k'
+	TypeAttrKeyIndex   = 'K' // Attribute key index
+	TypeAttrValueIndex = 'V' // Attribute value index
+	TypeAttrKVIndex    = 'P' // Attribute key-value pair index
 	TypeChunkMeta      = 'm' // Deprecated: meta.bin no longer used
 	TypeSourceRegistry = 'z' // Deprecated: source registry no longer used
 	TypeChunkSourceMap = 'c' // Deprecated: sources.bin no longer used

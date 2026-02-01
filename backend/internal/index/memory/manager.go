@@ -13,6 +13,13 @@ type IndexStore[T any] interface {
 	Get(chunkID chunk.ChunkID) ([]T, bool)
 }
 
+// AttrIndexStore provides access to all three attribute index types.
+type AttrIndexStore interface {
+	GetKey(chunkID chunk.ChunkID) ([]index.AttrKeyIndexEntry, bool)
+	GetValue(chunkID chunk.ChunkID) ([]index.AttrValueIndexEntry, bool)
+	GetKV(chunkID chunk.ChunkID) ([]index.AttrKVIndexEntry, bool)
+}
+
 // Manager manages in-memory index storage.
 //
 // Logging:
@@ -24,6 +31,7 @@ type Manager struct {
 	indexers   []index.Indexer
 	timeStore  IndexStore[index.TimeIndexEntry]
 	tokenStore IndexStore[index.TokenIndexEntry]
+	attrStore  AttrIndexStore
 	builder    *index.BuildHelper
 
 	// Logger for this manager instance.
@@ -37,12 +45,14 @@ func NewManager(
 	indexers []index.Indexer,
 	timeStore IndexStore[index.TimeIndexEntry],
 	tokenStore IndexStore[index.TokenIndexEntry],
+	attrStore AttrIndexStore,
 	logger *slog.Logger,
 ) *Manager {
 	return &Manager{
 		indexers:   indexers,
 		timeStore:  timeStore,
 		tokenStore: tokenStore,
+		attrStore:  attrStore,
 		builder:    index.NewBuildHelper(),
 		logger:     logging.Default(logger).With("component", "index-manager", "type", "memory"),
 	}
@@ -71,6 +81,39 @@ func (m *Manager) OpenTokenIndex(chunkID chunk.ChunkID) (*index.Index[index.Toke
 	return index.NewIndex(entries), nil
 }
 
+func (m *Manager) OpenAttrKeyIndex(chunkID chunk.ChunkID) (*index.Index[index.AttrKeyIndexEntry], error) {
+	if m.attrStore == nil {
+		return nil, index.ErrIndexNotFound
+	}
+	entries, ok := m.attrStore.GetKey(chunkID)
+	if !ok {
+		return nil, index.ErrIndexNotFound
+	}
+	return index.NewIndex(entries), nil
+}
+
+func (m *Manager) OpenAttrValueIndex(chunkID chunk.ChunkID) (*index.Index[index.AttrValueIndexEntry], error) {
+	if m.attrStore == nil {
+		return nil, index.ErrIndexNotFound
+	}
+	entries, ok := m.attrStore.GetValue(chunkID)
+	if !ok {
+		return nil, index.ErrIndexNotFound
+	}
+	return index.NewIndex(entries), nil
+}
+
+func (m *Manager) OpenAttrKVIndex(chunkID chunk.ChunkID) (*index.Index[index.AttrKVIndexEntry], error) {
+	if m.attrStore == nil {
+		return nil, index.ErrIndexNotFound
+	}
+	entries, ok := m.attrStore.GetKV(chunkID)
+	if !ok {
+		return nil, index.ErrIndexNotFound
+	}
+	return index.NewIndex(entries), nil
+}
+
 // IndexesComplete reports whether all indexes exist for the given chunk.
 // For in-memory indexes, this checks if all stores have entries for the chunk.
 func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
@@ -79,6 +122,17 @@ func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
 	}
 	if m.tokenStore != nil {
 		if _, ok := m.tokenStore.Get(chunkID); !ok {
+			return false, nil
+		}
+	}
+	if m.attrStore != nil {
+		if _, ok := m.attrStore.GetKey(chunkID); !ok {
+			return false, nil
+		}
+		if _, ok := m.attrStore.GetValue(chunkID); !ok {
+			return false, nil
+		}
+		if _, ok := m.attrStore.GetKV(chunkID); !ok {
 			return false, nil
 		}
 	}

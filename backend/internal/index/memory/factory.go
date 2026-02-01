@@ -7,6 +7,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
+	memattr "gastrolog/internal/index/memory/attr"
 	memtime "gastrolog/internal/index/memory/time"
 	memtoken "gastrolog/internal/index/memory/token"
 )
@@ -38,9 +39,10 @@ func NewFactory() index.ManagerFactory {
 
 		timeIdx := memtime.NewIndexer(chunkManager, timeSparsity)
 		tokIdx := memtoken.NewIndexer(chunkManager)
+		attrIdx := memattr.NewIndexer(chunkManager)
 
-		indexers := []index.Indexer{timeIdx, tokIdx}
+		indexers := []index.Indexer{timeIdx, tokIdx, attrIdx}
 
-		return NewManager(indexers, timeIdx, tokIdx, logger), nil
+		return NewManager(indexers, timeIdx, tokIdx, attrIdx, logger), nil
 	}
 }

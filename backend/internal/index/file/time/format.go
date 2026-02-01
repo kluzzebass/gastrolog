@@ -11,19 +11,16 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/format"
 	"gastrolog/internal/index"
-
-	"github.com/google/uuid"
 )
 
 const (
 	currentVersion = 0x01
 
-	chunkIDSize    = 16
 	entryCountSize = 4
 	timestampSize  = 8
 	recordPosSize  = 4 // uint32 (4GB max chunk size)
 
-	headerSize = format.HeaderSize + chunkIDSize + entryCountSize
+	headerSize = format.HeaderSize + entryCountSize
 	entrySize  = timestampSize + recordPosSize
 
 	indexFileName = "_time.idx"
@@ -31,7 +28,6 @@ const (
 
 var (
 	ErrIndexTooSmall     = errors.New("time index too small")
-	ErrChunkIDMismatch   = errors.New("time index chunk ID mismatch")
 	ErrEntrySizeMismatch = errors.New("time index entry size mismatch")
 )
 
@@ -39,27 +35,23 @@ var (
 //
 // Layout:
 //
-//	Header (24 bytes):
+//	Header (8 bytes):
 //	  signature (1 byte, 'i')
 //	  type (1 byte, 't')
 //	  version (1 byte)
 //	  flags (1 byte, reserved)
-//	  chunkID (16 bytes, UUID)
 //	  entryCount (4 bytes, little-endian uint32)
 //
-//	Entries (16 bytes each):
+//	Entries (12 bytes each):
 //	  timestamp (8 bytes, Unix microseconds, little-endian int64)
-//	  recordPos (8 bytes, little-endian uint64)
-func encodeIndex(chunkID chunk.ChunkID, entries []index.TimeIndexEntry) []byte {
+//	  recordPos (4 bytes, little-endian uint32)
+func encodeIndex(entries []index.TimeIndexEntry) []byte {
 	buf := make([]byte, headerSize+len(entries)*entrySize)
 
 	cursor := 0
 	h := format.Header{Type: format.TypeTimeIndex, Version: currentVersion, Flags: 0}
 	cursor += h.EncodeInto(buf[cursor:])
 
-	uid := uuid.UUID(chunkID)
-	copy(buf[cursor:cursor+chunkIDSize], uid[:])
-	cursor += chunkIDSize
 	binary.LittleEndian.PutUint32(buf[cursor:cursor+entryCountSize], uint32(len(entries)))
 	cursor += entryCountSize
 
@@ -73,7 +65,7 @@ func encodeIndex(chunkID chunk.ChunkID, entries []index.TimeIndexEntry) []byte {
 	return buf
 }
 
-func decodeIndex(chunkID chunk.ChunkID, data []byte) ([]index.TimeIndexEntry, error) {
+func decodeIndex(data []byte) ([]index.TimeIndexEntry, error) {
 	if len(data) < headerSize {
 		return nil, ErrIndexTooSmall
 	}
@@ -83,14 +75,6 @@ func decodeIndex(chunkID chunk.ChunkID, data []byte) ([]index.TimeIndexEntry, er
 		return nil, fmt.Errorf("time index: %w", err)
 	}
 	cursor := format.HeaderSize
-
-	var storedID uuid.UUID
-	copy(storedID[:], data[cursor:cursor+chunkIDSize])
-	expectedID := uuid.UUID(chunkID)
-	if storedID != expectedID {
-		return nil, ErrChunkIDMismatch
-	}
-	cursor += chunkIDSize
 
 	count := binary.LittleEndian.Uint32(data[cursor : cursor+entryCountSize])
 	cursor += entryCountSize
@@ -118,7 +102,7 @@ func LoadIndex(dir string, chunkID chunk.ChunkID) ([]index.TimeIndexEntry, error
 	if err != nil {
 		return nil, fmt.Errorf("read time index: %w", err)
 	}
-	return decodeIndex(chunkID, data)
+	return decodeIndex(data)
 }
 
 // IndexPath returns the path to the time index file for a chunk.

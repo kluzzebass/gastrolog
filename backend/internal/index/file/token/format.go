@@ -12,16 +12,13 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/format"
 	"gastrolog/internal/index"
-
-	"github.com/google/uuid"
 )
 
 const (
 	currentVersion = 0x01
 
-	chunkIDSize  = 16
 	keyCountSize = 4
-	headerSize   = format.HeaderSize + chunkIDSize + keyCountSize
+	headerSize   = format.HeaderSize + keyCountSize
 
 	tokenLenSize      = 2
 	postingOffsetSize = 4 // uint32 byte offset into posting blob
@@ -34,7 +31,6 @@ const (
 
 var (
 	ErrIndexTooSmall       = errors.New("token index too small")
-	ErrChunkIDMismatch     = errors.New("token index chunk ID mismatch")
 	ErrKeySizeMismatch     = errors.New("token index key table size mismatch")
 	ErrPostingSizeMismatch = errors.New("token index posting list size mismatch")
 )
@@ -44,10 +40,10 @@ var (
 //
 // Layout:
 //
-//	Header:  signature (1) | type (1) | version (1) | flags (1) | chunkID (16) | keyCount (4)
-//	Keys:    tokenLen (2) | token (variable) | postingOffset (8) | postingCount (4)  (repeated keyCount times)
-//	Postings: position (8)  (flat, referenced by offset/count in keys)
-func encodeIndexToFile(w *os.File, chunkID chunk.ChunkID, entries []index.TokenIndexEntry) error {
+//	Header:  signature (1) | type (1) | version (1) | flags (1) | keyCount (4)
+//	Keys:    tokenLen (2) | token (variable) | postingOffset (4) | postingCount (4)  (repeated keyCount times)
+//	Postings: position (4)  (flat, referenced by offset/count in keys)
+func encodeIndexToFile(w *os.File, entries []index.TokenIndexEntry) error {
 	// Entries must already be sorted by caller.
 
 	// Write header.
@@ -56,9 +52,6 @@ func encodeIndexToFile(w *os.File, chunkID chunk.ChunkID, entries []index.TokenI
 	h := format.Header{Type: format.TypeTokenIndex, Version: currentVersion, Flags: 0}
 	cursor += h.EncodeInto(headerBuf[cursor:])
 
-	uid := uuid.UUID(chunkID)
-	copy(headerBuf[cursor:cursor+chunkIDSize], uid[:])
-	cursor += chunkIDSize
 	binary.LittleEndian.PutUint32(headerBuf[cursor:cursor+keyCountSize], uint32(len(entries)))
 
 	if _, err := w.Write(headerBuf); err != nil {
@@ -120,7 +113,7 @@ func encodeIndexToFile(w *os.File, chunkID chunk.ChunkID, entries []index.TokenI
 // encodeIndex encodes token index entries into binary format.
 // NOTE: This allocates the entire index in memory. For large indexes,
 // use encodeIndexToFile instead.
-func encodeIndex(chunkID chunk.ChunkID, entries []index.TokenIndexEntry) []byte {
+func encodeIndex(entries []index.TokenIndexEntry) []byte {
 	// Sort entries by Token for deterministic output and binary search.
 	sorted := make([]index.TokenIndexEntry, len(entries))
 	copy(sorted, entries)
@@ -136,7 +129,7 @@ func encodeIndex(chunkID chunk.ChunkID, entries []index.TokenIndexEntry) []byte 
 		totalTokenBytes += len(e.Token)
 	}
 
-	// Key entry: tokenLen (2) + token (variable) + postingOffset (8) + postingCount (4)
+	// Key entry: tokenLen (2) + token (variable) + postingOffset (4) + postingCount (4)
 	keyTableSize := len(sorted)*(tokenLenSize+postingOffsetSize+postingCountSize) + totalTokenBytes
 	postingBlobSize := totalPositions * positionSize
 	buf := make([]byte, headerSize+keyTableSize+postingBlobSize)
@@ -146,9 +139,6 @@ func encodeIndex(chunkID chunk.ChunkID, entries []index.TokenIndexEntry) []byte 
 	h := format.Header{Type: format.TypeTokenIndex, Version: currentVersion, Flags: 0}
 	cursor += h.EncodeInto(buf[cursor:])
 
-	uid := uuid.UUID(chunkID)
-	copy(buf[cursor:cursor+chunkIDSize], uid[:])
-	cursor += chunkIDSize
 	binary.LittleEndian.PutUint32(buf[cursor:cursor+keyCountSize], uint32(len(sorted)))
 	cursor += keyCountSize
 
@@ -183,7 +173,7 @@ func encodeIndex(chunkID chunk.ChunkID, entries []index.TokenIndexEntry) []byte 
 }
 
 // decodeIndex decodes binary token index data back into entries.
-func decodeIndex(chunkID chunk.ChunkID, data []byte) ([]index.TokenIndexEntry, error) {
+func decodeIndex(data []byte) ([]index.TokenIndexEntry, error) {
 	if len(data) < headerSize {
 		return nil, ErrIndexTooSmall
 	}
@@ -193,14 +183,6 @@ func decodeIndex(chunkID chunk.ChunkID, data []byte) ([]index.TokenIndexEntry, e
 		return nil, fmt.Errorf("token index: %w", err)
 	}
 	cursor := format.HeaderSize
-
-	var storedID uuid.UUID
-	copy(storedID[:], data[cursor:cursor+chunkIDSize])
-	expectedID := uuid.UUID(chunkID)
-	if storedID != expectedID {
-		return nil, ErrChunkIDMismatch
-	}
-	cursor += chunkIDSize
 
 	keyCount := binary.LittleEndian.Uint32(data[cursor : cursor+keyCountSize])
 	cursor += keyCountSize
@@ -258,7 +240,7 @@ func LoadIndex(dir string, chunkID chunk.ChunkID) ([]index.TokenIndexEntry, erro
 	if err != nil {
 		return nil, fmt.Errorf("read token index: %w", err)
 	}
-	return decodeIndex(chunkID, data)
+	return decodeIndex(data)
 }
 
 // IndexPath returns the path to the token index file for a chunk.

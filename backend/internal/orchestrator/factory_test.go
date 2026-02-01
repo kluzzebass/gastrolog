@@ -41,6 +41,15 @@ func (f *fakeIndexManager) OpenTimeIndex(chunkID chunk.ChunkID) (*index.Index[in
 func (f *fakeIndexManager) OpenTokenIndex(chunkID chunk.ChunkID) (*index.Index[index.TokenIndexEntry], error) {
 	return nil, nil
 }
+func (f *fakeIndexManager) OpenAttrKeyIndex(chunkID chunk.ChunkID) (*index.Index[index.AttrKeyIndexEntry], error) {
+	return nil, nil
+}
+func (f *fakeIndexManager) OpenAttrValueIndex(chunkID chunk.ChunkID) (*index.Index[index.AttrValueIndexEntry], error) {
+	return nil, nil
+}
+func (f *fakeIndexManager) OpenAttrKVIndex(chunkID chunk.ChunkID) (*index.Index[index.AttrKVIndexEntry], error) {
+	return nil, nil
+}
 func (f *fakeIndexManager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
 	return true, nil
 }

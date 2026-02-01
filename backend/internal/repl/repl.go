@@ -512,12 +512,14 @@ Query filters:
   end=TIME                 End time (RFC3339 or Unix timestamp)
   token=WORD               Filter by token (can repeat, AND semantics)
   limit=N                  Maximum total results
+  key=value                Filter by attribute (can repeat, AND semantics)
 
 Settings:
   pager=N                  Records per page (0 = no paging, show all)
 
 Examples:
   query start=2024-01-01T00:00:00Z end=2024-01-02T00:00:00Z token=error
+  query source=nginx level=error
   set pager=50
   chunks
   chunk 019c10bb-a3a8-7ad9-9e8e-890bf77a84d3
@@ -536,6 +538,7 @@ func (r *REPL) cmdStore(out *strings.Builder, args []string) {
 func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
 	q := query.Query{}
 	var tokens []string
+	var attrs []query.AttrFilter
 
 	for _, arg := range args {
 		k, v, ok := strings.Cut(arg, "=")
@@ -569,13 +572,16 @@ func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
 			}
 			q.Limit = n
 		default:
-			fmt.Fprintf(out, "Unknown filter: %s\n", k)
-			return
+			// Treat as attribute filter (key=value)
+			attrs = append(attrs, query.AttrFilter{Key: k, Value: v})
 		}
 	}
 
 	if len(tokens) > 0 {
 		q.Tokens = tokens
+	}
+	if len(attrs) > 0 {
+		q.Attrs = attrs
 	}
 
 	// Cancel any previous query goroutine
@@ -728,6 +734,11 @@ func (r *REPL) runFollowMode(ctx context.Context, ch chan<- recordResult, q quer
 				continue
 			}
 
+			// Apply attr filter (AND semantics)
+			if len(q.Attrs) > 0 && !matchesAllAttrs(rec.Attrs, q.Attrs) {
+				continue
+			}
+
 			select {
 			case <-ctx.Done():
 				cursor.Close()
@@ -751,6 +762,17 @@ func matchesAllTokens(raw []byte, tokens []string) bool {
 	rawLower := strings.ToLower(string(raw))
 	for _, tok := range tokens {
 		if !strings.Contains(rawLower, strings.ToLower(tok)) {
+			return false
+		}
+	}
+	return true
+}
+
+// matchesAllAttrs checks if the record's attributes contain all query attrs.
+func matchesAllAttrs(recAttrs chunk.Attributes, queryAttrs []query.AttrFilter) bool {
+	for _, qa := range queryAttrs {
+		v, ok := recAttrs[qa.Key]
+		if !ok || !strings.EqualFold(v, qa.Value) {
 			return false
 		}
 	}

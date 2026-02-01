@@ -15,8 +15,6 @@ import (
 	"gastrolog/internal/format"
 	"gastrolog/internal/index/token"
 	"gastrolog/internal/logging"
-
-	"github.com/google/uuid"
 )
 
 // FNV-1a constants
@@ -133,7 +131,7 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	}
 
 	// Write header.
-	if err := writeIndexHeader(tmpFile, chunkID, uint32(len(sortedTokens))); err != nil {
+	if err := writeIndexHeader(tmpFile, uint32(len(sortedTokens))); err != nil {
 		tmpFile.Close()
 		os.Remove(tmpName)
 		return fmt.Errorf("write header: %w", err)
@@ -270,15 +268,12 @@ func (ti *tokenIntern) tokens() []string {
 }
 
 // writeIndexHeader writes the index file header.
-func writeIndexHeader(w *os.File, chunkID chunk.ChunkID, keyCount uint32) error {
+func writeIndexHeader(w *os.File, keyCount uint32) error {
 	buf := make([]byte, headerSize)
 	cursor := 0
 	h := format.Header{Type: format.TypeTokenIndex, Version: currentVersion, Flags: 0}
 	cursor += h.EncodeInto(buf[cursor:])
 
-	uid := uuid.UUID(chunkID)
-	copy(buf[cursor:cursor+chunkIDSize], uid[:])
-	cursor += chunkIDSize
 	binary.LittleEndian.PutUint32(buf[cursor:cursor+keyCountSize], keyCount)
 
 	_, err := w.Write(buf)

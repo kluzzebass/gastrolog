@@ -9,6 +9,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
+	fileattr "gastrolog/internal/index/file/attr"
 	filetime "gastrolog/internal/index/file/time"
 	filetoken "gastrolog/internal/index/file/token"
 	"gastrolog/internal/logging"
@@ -62,6 +63,30 @@ func (m *Manager) OpenTokenIndex(chunkID chunk.ChunkID) (*index.Index[index.Toke
 	return index.NewIndex(entries), nil
 }
 
+func (m *Manager) OpenAttrKeyIndex(chunkID chunk.ChunkID) (*index.Index[index.AttrKeyIndexEntry], error) {
+	entries, err := fileattr.LoadKeyIndex(m.dir, chunkID)
+	if err != nil {
+		return nil, fmt.Errorf("open attr key index: %w", err)
+	}
+	return index.NewIndex(entries), nil
+}
+
+func (m *Manager) OpenAttrValueIndex(chunkID chunk.ChunkID) (*index.Index[index.AttrValueIndexEntry], error) {
+	entries, err := fileattr.LoadValueIndex(m.dir, chunkID)
+	if err != nil {
+		return nil, fmt.Errorf("open attr value index: %w", err)
+	}
+	return index.NewIndex(entries), nil
+}
+
+func (m *Manager) OpenAttrKVIndex(chunkID chunk.ChunkID) (*index.Index[index.AttrKVIndexEntry], error) {
+	entries, err := fileattr.LoadKVIndex(m.dir, chunkID)
+	if err != nil {
+		return nil, fmt.Errorf("open attr kv index: %w", err)
+	}
+	return index.NewIndex(entries), nil
+}
+
 // IndexesComplete reports whether all indexes exist for the given chunk.
 // Also cleans up any orphaned temporary files from interrupted builds.
 func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
@@ -69,6 +94,9 @@ func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
 	indexPaths := []string{
 		filetime.IndexPath(m.dir, chunkID),
 		filetoken.IndexPath(m.dir, chunkID),
+		fileattr.KeyIndexPath(m.dir, chunkID),
+		fileattr.ValueIndexPath(m.dir, chunkID),
+		fileattr.KVIndexPath(m.dir, chunkID),
 	}
 
 	for _, path := range indexPaths {
@@ -83,6 +111,9 @@ func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
 	tempPatterns := []string{
 		filetime.TempFilePattern(m.dir, chunkID),
 		filetoken.TempFilePattern(m.dir, chunkID),
+		fileattr.KeyTempFilePattern(m.dir, chunkID),
+		fileattr.ValueTempFilePattern(m.dir, chunkID),
+		fileattr.KVTempFilePattern(m.dir, chunkID),
 	}
 
 	for _, pattern := range tempPatterns {

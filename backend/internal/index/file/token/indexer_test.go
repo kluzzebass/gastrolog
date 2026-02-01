@@ -66,7 +66,7 @@ func TestIndexerBuild(t *testing.T) {
 		t.Fatalf("read index: %v", err)
 	}
 
-	entries, err := decodeIndex(chunkID, data)
+	entries, err := decodeIndex(data)
 	if err != nil {
 		t.Fatalf("decode index: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestIndexerIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read index: %v", err)
 	}
-	entries, err := decodeIndex(chunkID, data)
+	entries, err := decodeIndex(data)
 	if err != nil {
 		t.Fatalf("decode index: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestIndexerBuildEmptyChunk(t *testing.T) {
 		t.Fatalf("read index: %v", err)
 	}
 
-	entries, err := decodeIndex(chunkID, data)
+	entries, err := decodeIndex(data)
 	if err != nil {
 		t.Fatalf("decode index: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestIndexerBuildSingleToken(t *testing.T) {
 		t.Fatalf("read index: %v", err)
 	}
 
-	entries, err := decodeIndex(chunkID, data)
+	entries, err := decodeIndex(data)
 	if err != nil {
 		t.Fatalf("decode index: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestIndexerBuildSingleRecord(t *testing.T) {
 		t.Fatalf("read index: %v", err)
 	}
 
-	entries, err := decodeIndex(chunkID, data)
+	entries, err := decodeIndex(data)
 	if err != nil {
 		t.Fatalf("decode index: %v", err)
 	}
@@ -280,12 +280,11 @@ func TestIndexerBuildReadOnlyDir(t *testing.T) {
 }
 
 func TestSignature(t *testing.T) {
-	testChunkID := chunk.NewChunkID()
 	entries := []index.TokenIndexEntry{
 		{Token: "test", Positions: []uint64{0}},
 	}
 
-	data := encodeIndex(testChunkID, entries)
+	data := encodeIndex(entries)
 	if data[0] != format.Signature {
 		t.Fatalf("expected signature byte 0x%02x, got 0x%02x", format.Signature, data[0])
 	}
@@ -295,14 +294,13 @@ func TestSignature(t *testing.T) {
 }
 
 func TestEncodeDecodeRoundTrip(t *testing.T) {
-	testChunkID := chunk.NewChunkID()
 	entries := []index.TokenIndexEntry{
 		{Token: "alpha", Positions: []uint64{0, 128, 256}},
 		{Token: "beta", Positions: []uint64{64, 192}},
 	}
 
-	data := encodeIndex(testChunkID, entries)
-	got, err := decodeIndex(testChunkID, data)
+	data := encodeIndex(entries)
+	got, err := decodeIndex(data)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -327,9 +325,8 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 }
 
 func TestEncodeDecodeEmpty(t *testing.T) {
-	testChunkID := chunk.NewChunkID()
-	data := encodeIndex(testChunkID, nil)
-	got, err := decodeIndex(testChunkID, data)
+	data := encodeIndex(nil)
+	got, err := decodeIndex(data)
 	if err != nil {
 		t.Fatalf("decode empty: %v", err)
 	}
@@ -339,10 +336,8 @@ func TestEncodeDecodeEmpty(t *testing.T) {
 }
 
 func TestDecodeErrors(t *testing.T) {
-	testChunkID := chunk.NewChunkID()
-
 	// Too small.
-	if _, err := decodeIndex(testChunkID, []byte{'i'}); err != ErrIndexTooSmall {
+	if _, err := decodeIndex([]byte{'i'}); err != ErrIndexTooSmall {
 		t.Fatalf("expected ErrIndexTooSmall, got %v", err)
 	}
 
@@ -351,7 +346,7 @@ func TestDecodeErrors(t *testing.T) {
 	bad[0] = 0xFF
 	bad[1] = format.TypeTokenIndex
 	bad[2] = currentVersion
-	if _, err := decodeIndex(testChunkID, bad); err == nil {
+	if _, err := decodeIndex(bad); err == nil {
 		t.Fatal("expected error for wrong signature, got nil")
 	}
 
@@ -360,7 +355,7 @@ func TestDecodeErrors(t *testing.T) {
 	bad1b[0] = format.Signature
 	bad1b[1] = 'x'
 	bad1b[2] = currentVersion
-	if _, err := decodeIndex(testChunkID, bad1b); err == nil {
+	if _, err := decodeIndex(bad1b); err == nil {
 		t.Fatal("expected error for wrong type byte, got nil")
 	}
 
@@ -369,26 +364,19 @@ func TestDecodeErrors(t *testing.T) {
 	bad2[0] = format.Signature
 	bad2[1] = format.TypeTokenIndex
 	bad2[2] = 0xFF
-	if _, err := decodeIndex(testChunkID, bad2); err == nil {
+	if _, err := decodeIndex(bad2); err == nil {
 		t.Fatal("expected error for wrong version, got nil")
 	}
 
-	// Chunk ID mismatch.
-	data := encodeIndex(testChunkID, nil)
-	wrongChunkID := chunk.NewChunkID()
-	if _, err := decodeIndex(wrongChunkID, data); err != ErrChunkIDMismatch {
-		t.Fatalf("expected ErrChunkIDMismatch, got %v", err)
-	}
-
 	// Key size mismatch: header says 1 key but no key data.
-	bad3 := encodeIndex(testChunkID, nil)
-	bad3[format.HeaderSize+chunkIDSize] = 1
-	if _, err := decodeIndex(testChunkID, bad3); err != ErrKeySizeMismatch {
+	bad3 := encodeIndex(nil)
+	bad3[format.HeaderSize] = 1
+	if _, err := decodeIndex(bad3); err != ErrKeySizeMismatch {
 		t.Fatalf("expected ErrKeySizeMismatch, got %v", err)
 	}
 
 	// Posting size mismatch: valid header+key with truncated postings.
-	bad4 := encodeIndex(testChunkID, []index.TokenIndexEntry{
+	bad4 := encodeIndex([]index.TokenIndexEntry{
 		{Token: "test", Positions: []uint64{0, 64}},
 	})
 	// Truncate to remove posting data
@@ -396,7 +384,7 @@ func TestDecodeErrors(t *testing.T) {
 	tokenLen := 4 // "test"
 	keyEntrySize := tokenLenSize + tokenLen + postingOffsetSize + postingCountSize
 	bad4 = bad4[:keyStart+keyEntrySize]
-	if _, err := decodeIndex(testChunkID, bad4); err != ErrPostingSizeMismatch {
+	if _, err := decodeIndex(bad4); err != ErrPostingSizeMismatch {
 		t.Fatalf("expected ErrPostingSizeMismatch, got %v", err)
 	}
 }
@@ -432,7 +420,7 @@ func TestIndexerConcurrentBuild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read index: %v", err)
 	}
-	entries, err := decodeIndex(chunkID, data)
+	entries, err := decodeIndex(data)
 	if err != nil {
 		t.Fatalf("decode index: %v", err)
 	}
@@ -466,7 +454,7 @@ func TestIndexerBuildLargePostingList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read index: %v", err)
 	}
-	entries, err := decodeIndex(chunkID, data)
+	entries, err := decodeIndex(data)
 	if err != nil {
 		t.Fatalf("decode index: %v", err)
 	}
@@ -512,7 +500,7 @@ func TestIndexerPositionsAscending(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read index: %v", err)
 	}
-	entries, err := decodeIndex(chunkID, data)
+	entries, err := decodeIndex(data)
 	if err != nil {
 		t.Fatalf("decode index: %v", err)
 	}
@@ -528,15 +516,14 @@ func TestIndexerPositionsAscending(t *testing.T) {
 }
 
 func TestDecodeExtraTrailingBytes(t *testing.T) {
-	testChunkID := chunk.NewChunkID()
 	entries := []index.TokenIndexEntry{
 		{Token: "test", Positions: []uint64{0, 64}},
 	}
 
-	data := encodeIndex(testChunkID, entries)
+	data := encodeIndex(entries)
 	data = append(data, 0xDE, 0xAD, 0xBE, 0xEF)
 
-	got, err := decodeIndex(testChunkID, data)
+	got, err := decodeIndex(data)
 	if err != nil {
 		t.Fatalf("decode with trailing bytes: %v", err)
 	}
@@ -568,7 +555,7 @@ func TestIndexerTokensSorted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read index: %v", err)
 	}
-	entries, err := decodeIndex(chunkID, data)
+	entries, err := decodeIndex(data)
 	if err != nil {
 		t.Fatalf("decode index: %v", err)
 	}
@@ -680,7 +667,7 @@ func TestIndexerTokenDeduplication(t *testing.T) {
 		t.Fatalf("read index: %v", err)
 	}
 
-	entries, err := decodeIndex(chunkID, data)
+	entries, err := decodeIndex(data)
 	if err != nil {
 		t.Fatalf("decode index: %v", err)
 	}
@@ -714,7 +701,7 @@ func TestIndexerCaseFolding(t *testing.T) {
 		t.Fatalf("read index: %v", err)
 	}
 
-	entries, err := decodeIndex(chunkID, data)
+	entries, err := decodeIndex(data)
 	if err != nil {
 		t.Fatalf("decode index: %v", err)
 	}
@@ -748,7 +735,7 @@ func TestIndexerShortTokensSkipped(t *testing.T) {
 		t.Fatalf("read index: %v", err)
 	}
 
-	entries, err := decodeIndex(chunkID, data)
+	entries, err := decodeIndex(data)
 	if err != nil {
 		t.Fatalf("decode index: %v", err)
 	}

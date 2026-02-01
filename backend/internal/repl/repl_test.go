@@ -11,6 +11,7 @@ import (
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/index"
 	indexmem "gastrolog/internal/index/memory"
+	memattr "gastrolog/internal/index/memory/attr"
 	memtime "gastrolog/internal/index/memory/time"
 	memtoken "gastrolog/internal/index/memory/token"
 	"gastrolog/internal/orchestrator"
@@ -31,7 +32,8 @@ func setupTestSystem(t *testing.T) (*orchestrator.Orchestrator, chunk.ChunkManag
 	// Create memory-based index manager.
 	timeIdx := memtime.NewIndexer(cm, 1)
 	tokIdx := memtoken.NewIndexer(cm)
-	im := indexmem.NewManager([]index.Indexer{timeIdx, tokIdx}, timeIdx, tokIdx, nil)
+	attrIdx := memattr.NewIndexer(cm)
+	im := indexmem.NewManager([]index.Indexer{timeIdx, tokIdx, attrIdx}, timeIdx, tokIdx, attrIdx, nil)
 
 	// Create query engine.
 	qe := query.New(cm, im, nil)

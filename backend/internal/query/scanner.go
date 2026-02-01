@@ -4,6 +4,7 @@ import (
 	"errors"
 	"iter"
 	"sort"
+	"strings"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
@@ -359,6 +360,27 @@ func matchesTokens(raw []byte, queryTokens []string) bool {
 	return true
 }
 
+// attrFilter returns a filter that matches records with all given key=value attrs.
+func attrFilter(attrs []AttrFilter) recordFilter {
+	return func(rec chunk.Record) bool {
+		return matchesAttrs(rec.Attrs, attrs)
+	}
+}
+
+// matchesAttrs checks if the record's attributes contain all query attrs.
+func matchesAttrs(recAttrs chunk.Attributes, queryAttrs []AttrFilter) bool {
+	if len(queryAttrs) == 0 {
+		return true
+	}
+	for _, qa := range queryAttrs {
+		v, ok := recAttrs[qa.Key]
+		if !ok || !strings.EqualFold(v, qa.Value) {
+			return false
+		}
+	}
+	return true
+}
+
 // Index application functions. Each returns true if it contributed positions,
 // false if the index wasn't available (caller should add a runtime filter).
 
@@ -391,6 +413,45 @@ func applyTokenIndex(b *scannerBuilder, indexes index.IndexManager, chunkID chun
 		positions, found := reader.Lookup(tok)
 		if !found {
 			return true, true // token not in chunk, no matches
+		}
+		if i == 0 {
+			if !b.addPositions(positions) {
+				return true, true
+			}
+		} else {
+			// Intersect with existing positions.
+			if !b.addPositions(positions) {
+				return true, true
+			}
+		}
+	}
+
+	return true, false
+}
+
+// applyAttrKVIndex tries to use the attr KV index for position filtering.
+// Returns true if successful, false if index not available.
+func applyAttrKVIndex(b *scannerBuilder, indexes index.IndexManager, chunkID chunk.ChunkID, attrs []AttrFilter) (ok bool, empty bool) {
+	if len(attrs) == 0 {
+		return true, false
+	}
+
+	kvIdx, err := indexes.OpenAttrKVIndex(chunkID)
+	if errors.Is(err, index.ErrIndexNotFound) {
+		return false, false
+	}
+	if err != nil {
+		return false, false
+	}
+
+	reader := index.NewAttrKVIndexReader(chunkID, kvIdx.Entries())
+
+	// All attrs must be present (AND semantics).
+	for i, attr := range attrs {
+		// Lowercase for case-insensitive matching (indexes store lowercase)
+		positions, found := reader.Lookup(strings.ToLower(attr.Key), strings.ToLower(attr.Value))
+		if !found {
+			return true, true // attr not in chunk, no matches
 		}
 		if i == 0 {
 			if !b.addPositions(positions) {

@@ -78,7 +78,7 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 		recordCount++
 	}
 
-	data := encodeIndex(chunkID, entries)
+	data := encodeIndex(entries)
 
 	chunkDir := filepath.Join(t.dir, chunkID.String())
 	if err := os.MkdirAll(chunkDir, 0o755); err != nil {

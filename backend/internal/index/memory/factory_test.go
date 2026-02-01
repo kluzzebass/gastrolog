@@ -20,9 +20,9 @@ func TestFactoryDefaultValues(t *testing.T) {
 		t.Fatal("expected *Manager")
 	}
 
-	// Should have 2 indexers: time, token
-	if len(mgr.indexers) != 2 {
-		t.Errorf("expected 2 indexers, got %d", len(mgr.indexers))
+	// Should have 3 indexers: time, token, attr
+	if len(mgr.indexers) != 3 {
+		t.Errorf("expected 3 indexers, got %d", len(mgr.indexers))
 	}
 }
 

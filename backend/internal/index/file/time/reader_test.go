@@ -17,7 +17,7 @@ func writeIndex(t *testing.T, dir string, chunkID chunk.ChunkID, entries []index
 	if err := os.MkdirAll(chunkDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	data := encodeIndex(chunkID, entries)
+	data := encodeIndex(entries)
 	if err := os.WriteFile(filepath.Join(chunkDir, indexFileName), data, 0o644); err != nil {
 		t.Fatalf("write index: %v", err)
 	}

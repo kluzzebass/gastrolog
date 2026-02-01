@@ -84,7 +84,7 @@ func TestIndexerBuild(t *testing.T) {
 		t.Fatalf("read index: %v", err)
 	}
 
-	entries, err := decodeIndex(chunkID, data)
+	entries, err := decodeIndex(data)
 	if err != nil {
 		t.Fatalf("decode index: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestIndexerIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read index: %v", err)
 	}
-	entries, err := decodeIndex(chunkID, data)
+	entries, err := decodeIndex(data)
 	if err != nil {
 		t.Fatalf("decode index: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestIndexerBuildEmptyChunk(t *testing.T) {
 		t.Fatalf("read index: %v", err)
 	}
 
-	entries, err := decodeIndex(chunkID, data)
+	entries, err := decodeIndex(data)
 	if err != nil {
 		t.Fatalf("decode index: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestIndexerBuildSingleRecord(t *testing.T) {
 		t.Fatalf("read index: %v", err)
 	}
 
-	entries, err := decodeIndex(chunkID, data)
+	entries, err := decodeIndex(data)
 	if err != nil {
 		t.Fatalf("decode index: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestIndexerBuildSparsityOne(t *testing.T) {
 		t.Fatalf("read index: %v", err)
 	}
 
-	entries, err := decodeIndex(chunkID, data)
+	entries, err := decodeIndex(data)
 	if err != nil {
 		t.Fatalf("decode index: %v", err)
 	}
@@ -280,7 +280,7 @@ func TestIndexerBuildRecordPos(t *testing.T) {
 		t.Fatalf("read index: %v", err)
 	}
 
-	entries, err := decodeIndex(chunkID, data)
+	entries, err := decodeIndex(data)
 	if err != nil {
 		t.Fatalf("decode index: %v", err)
 	}
@@ -336,12 +336,11 @@ func TestIndexerBuildReadOnlyDir(t *testing.T) {
 }
 
 func TestSignature(t *testing.T) {
-	testChunkID := chunk.NewChunkID()
 	entries := []index.TimeIndexEntry{
 		{Timestamp: gotime.UnixMicro(1000), RecordPos: 0},
 	}
 
-	data := encodeIndex(testChunkID, entries)
+	data := encodeIndex(entries)
 	if data[0] != format.Signature {
 		t.Fatalf("expected signature byte 0x%02x, got 0x%02x", format.Signature, data[0])
 	}
@@ -351,15 +350,14 @@ func TestSignature(t *testing.T) {
 }
 
 func TestEncodeDecodeRoundTrip(t *testing.T) {
-	testChunkID := chunk.NewChunkID()
 	entries := []index.TimeIndexEntry{
 		{Timestamp: gotime.UnixMicro(1000), RecordPos: 0},
 		{Timestamp: gotime.UnixMicro(2000), RecordPos: 128},
 		{Timestamp: gotime.UnixMicro(3000), RecordPos: 256},
 	}
 
-	data := encodeIndex(testChunkID, entries)
-	got, err := decodeIndex(testChunkID, data)
+	data := encodeIndex(entries)
+	got, err := decodeIndex(data)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -378,9 +376,8 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 }
 
 func TestEncodeDecodeEmpty(t *testing.T) {
-	testChunkID := chunk.NewChunkID()
-	data := encodeIndex(testChunkID, nil)
-	got, err := decodeIndex(testChunkID, data)
+	data := encodeIndex(nil)
+	got, err := decodeIndex(data)
 	if err != nil {
 		t.Fatalf("decode empty: %v", err)
 	}
@@ -390,10 +387,8 @@ func TestEncodeDecodeEmpty(t *testing.T) {
 }
 
 func TestDecodeErrors(t *testing.T) {
-	testChunkID := chunk.NewChunkID()
-
 	// Too small.
-	if _, err := decodeIndex(testChunkID, []byte{'i'}); err != ErrIndexTooSmall {
+	if _, err := decodeIndex([]byte{'i'}); err != ErrIndexTooSmall {
 		t.Fatalf("expected ErrIndexTooSmall, got %v", err)
 	}
 
@@ -402,7 +397,7 @@ func TestDecodeErrors(t *testing.T) {
 	bad[0] = 0xFF
 	bad[1] = format.TypeTimeIndex
 	bad[2] = currentVersion
-	if _, err := decodeIndex(testChunkID, bad); err == nil {
+	if _, err := decodeIndex(bad); err == nil {
 		t.Fatal("expected error for wrong signature, got nil")
 	}
 
@@ -411,7 +406,7 @@ func TestDecodeErrors(t *testing.T) {
 	bad1b[0] = format.Signature
 	bad1b[1] = 'x'
 	bad1b[2] = currentVersion
-	if _, err := decodeIndex(testChunkID, bad1b); err == nil {
+	if _, err := decodeIndex(bad1b); err == nil {
 		t.Fatal("expected error for wrong type byte, got nil")
 	}
 
@@ -420,21 +415,14 @@ func TestDecodeErrors(t *testing.T) {
 	bad2[0] = format.Signature
 	bad2[1] = format.TypeTimeIndex
 	bad2[2] = 0xFF
-	if _, err := decodeIndex(testChunkID, bad2); err == nil {
+	if _, err := decodeIndex(bad2); err == nil {
 		t.Fatal("expected error for wrong version, got nil")
 	}
 
-	// Chunk ID mismatch.
-	data := encodeIndex(testChunkID, nil)
-	wrongChunkID := chunk.NewChunkID()
-	if _, err := decodeIndex(wrongChunkID, data); err != ErrChunkIDMismatch {
-		t.Fatalf("expected ErrChunkIDMismatch, got %v", err)
-	}
-
 	// Count mismatch: header says 1 entry but no entry data.
-	bad3 := encodeIndex(testChunkID, nil)
-	bad3[format.HeaderSize+chunkIDSize] = 1
-	if _, err := decodeIndex(testChunkID, bad3); err != ErrEntrySizeMismatch {
+	bad3 := encodeIndex(nil)
+	bad3[format.HeaderSize] = 1
+	if _, err := decodeIndex(bad3); err != ErrEntrySizeMismatch {
 		t.Fatalf("expected ErrEntrySizeMismatch, got %v", err)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/index"
 	indexmem "gastrolog/internal/index/memory"
+	memattr "gastrolog/internal/index/memory/attr"
 	memtime "gastrolog/internal/index/memory/time"
 	memtoken "gastrolog/internal/index/memory/token"
 	"gastrolog/internal/orchestrator"
@@ -50,11 +51,13 @@ func newTestSetup(maxRecords int64) (*orchestrator.Orchestrator, chunk.ChunkMana
 
 	timeIdx := memtime.NewIndexer(cm, 1)
 	tokIdx := memtoken.NewIndexer(cm)
+	attrIdx := memattr.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, tokIdx},
+		[]index.Indexer{timeIdx, tokIdx, attrIdx},
 		timeIdx,
 		tokIdx,
+		attrIdx,
 		nil,
 	)
 
@@ -231,7 +234,7 @@ func TestSearchViaOrchestrator(t *testing.T) {
 	}
 
 	// Compare with direct query engine call.
-	qe := query.New(cm, indexmem.NewManager(nil, nil, nil, nil), nil)
+	qe := query.New(cm, indexmem.NewManager(nil, nil, nil, nil, nil), nil)
 	directSeq, _ := qe.Search(context.Background(), query.Query{}, nil)
 
 	var directResults []string
@@ -452,11 +455,13 @@ func newReceiverTestSetup() (*orchestrator.Orchestrator, chunk.ChunkManager) {
 
 	timeIdx := memtime.NewIndexer(cm, 1)
 	tokIdx := memtoken.NewIndexer(cm)
+	attrIdx := memattr.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, tokIdx},
+		[]index.Indexer{timeIdx, tokIdx, attrIdx},
 		timeIdx,
 		tokIdx,
+		attrIdx,
 		nil,
 	)
 
@@ -612,11 +617,13 @@ func TestReceiverIndexBuildOnSeal(t *testing.T) {
 
 	timeIdx := memtime.NewIndexer(cm, 1)
 	tokIdx := memtoken.NewIndexer(cm)
+	attrIdx := memattr.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, tokIdx},
+		[]index.Indexer{timeIdx, tokIdx, attrIdx},
 		timeIdx,
 		tokIdx,
+		attrIdx,
 		nil,
 	)
 

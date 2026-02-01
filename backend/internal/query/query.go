@@ -16,6 +16,12 @@ import (
 	"gastrolog/internal/logging"
 )
 
+// AttrFilter represents a key=value attribute filter.
+type AttrFilter struct {
+	Key   string
+	Value string
+}
+
 // Query describes what records to search for.
 type Query struct {
 	// Time bounds (if End < Start, results are returned in reverse/newest-first order)
@@ -23,7 +29,8 @@ type Query struct {
 	End   time.Time // exclusive bound (upper for forward, lower for reverse)
 
 	// Optional filters
-	Tokens []string // filter by tokens (nil = no filter, AND semantics)
+	Tokens []string     // filter by tokens (nil = no filter, AND semantics)
+	Attrs  []AttrFilter // filter by attributes (nil = no filter, AND semantics)
 
 	// Result control
 	Limit int // max results (0 = unlimited)
@@ -232,6 +239,23 @@ func (e *Engine) buildScanner(cursor chunk.RecordCursor, q Query, meta chunk.Chu
 		} else {
 			// Unsealed chunks don't have indexes.
 			b.addFilter(tokenFilter(q.Tokens))
+		}
+	}
+
+	// Apply attr filter: try index first, fall back to runtime filter.
+	if len(q.Attrs) > 0 {
+		if meta.Sealed {
+			ok, empty := applyAttrKVIndex(b, e.indexes, meta.ID, q.Attrs)
+			if empty {
+				return emptyScanner(), nil
+			}
+			if !ok {
+				// Index not available, use runtime filter.
+				b.addFilter(attrFilter(q.Attrs))
+			}
+		} else {
+			// Unsealed chunks don't have indexes.
+			b.addFilter(attrFilter(q.Attrs))
 		}
 	}
 

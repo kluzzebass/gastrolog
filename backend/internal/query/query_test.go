@@ -10,6 +10,7 @@ import (
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/index"
 	indexmem "gastrolog/internal/index/memory"
+	memattr "gastrolog/internal/index/memory/attr"
 	memtime "gastrolog/internal/index/memory/time"
 	memtoken "gastrolog/internal/index/memory/token"
 	"gastrolog/internal/query"
@@ -135,11 +136,13 @@ func setup(t *testing.T, batches ...[]chunk.Record) *query.Engine {
 
 	timeIdx := memtime.NewIndexer(cm, 1) // sparsity 1 = index every record
 	tokIdx := memtoken.NewIndexer(cm)
+	attrIdx := memattr.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, tokIdx},
+		[]index.Indexer{timeIdx, tokIdx, attrIdx},
 		timeIdx,
 		tokIdx,
+		attrIdx,
 		nil,
 	)
 
@@ -182,11 +185,13 @@ func setupWithActive(t *testing.T, sealed [][]chunk.Record, active []chunk.Recor
 
 	timeIdx := memtime.NewIndexer(cm, 1)
 	tokIdx := memtoken.NewIndexer(cm)
+	attrIdx := memattr.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, tokIdx},
+		[]index.Indexer{timeIdx, tokIdx, attrIdx},
 		timeIdx,
 		tokIdx,
+		attrIdx,
 		nil,
 	)
 
@@ -1913,10 +1918,12 @@ func TestSearchSealedWithoutIndexes(t *testing.T) {
 	// Create index manager that will return ErrIndexNotFound.
 	timeIdx := memtime.NewIndexer(cm, 1)
 	tokIdx := memtoken.NewIndexer(cm)
+	attrIdx := memattr.NewIndexer(cm)
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, tokIdx},
+		[]index.Indexer{timeIdx, tokIdx, attrIdx},
 		timeIdx,
 		tokIdx,
+		attrIdx,
 		nil,
 	)
 	// Note: NOT calling buildIndexes - indexes don't exist.

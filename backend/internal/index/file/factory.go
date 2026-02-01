@@ -8,6 +8,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
+	fileattr "gastrolog/internal/index/file/attr"
 	filetime "gastrolog/internal/index/file/time"
 	filetoken "gastrolog/internal/index/file/token"
 )
@@ -50,6 +51,7 @@ func NewFactory() index.ManagerFactory {
 		indexers := []index.Indexer{
 			filetime.NewIndexer(dir, chunkManager, timeSparsity, logger),
 			filetoken.NewIndexer(dir, chunkManager, logger),
+			fileattr.NewIndexer(dir, chunkManager, logger),
 		}
 
 		return NewManager(dir, indexers, logger), nil

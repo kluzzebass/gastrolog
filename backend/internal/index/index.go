@@ -50,6 +50,25 @@ type TokenIndexEntry struct {
 	Positions []uint64
 }
 
+// AttrKeyIndexEntry holds all record positions where a specific attribute key exists.
+type AttrKeyIndexEntry struct {
+	Key       string
+	Positions []uint64
+}
+
+// AttrValueIndexEntry holds all record positions where a specific attribute value exists.
+type AttrValueIndexEntry struct {
+	Value     string
+	Positions []uint64
+}
+
+// AttrKVIndexEntry holds all record positions where a specific key=value pair exists.
+type AttrKVIndexEntry struct {
+	Key       string
+	Value     string
+	Positions []uint64
+}
+
 // Index provides read access to a built index of any entry type.
 type Index[T any] struct {
 	entries []T
@@ -68,6 +87,9 @@ type IndexManager interface {
 	BuildIndexes(ctx context.Context, chunkID chunk.ChunkID) error
 	OpenTimeIndex(chunkID chunk.ChunkID) (*Index[TimeIndexEntry], error)
 	OpenTokenIndex(chunkID chunk.ChunkID) (*Index[TokenIndexEntry], error)
+	OpenAttrKeyIndex(chunkID chunk.ChunkID) (*Index[AttrKeyIndexEntry], error)
+	OpenAttrValueIndex(chunkID chunk.ChunkID) (*Index[AttrValueIndexEntry], error)
+	OpenAttrKVIndex(chunkID chunk.ChunkID) (*Index[AttrKVIndexEntry], error)
 
 	// IndexesComplete reports whether all indexes exist for the given chunk.
 	// Returns true if all indexes are present, false if any are missing.
