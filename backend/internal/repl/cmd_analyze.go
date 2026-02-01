@@ -91,8 +91,11 @@ func (r *REPL) cmdAnalyze(out *strings.Builder, args []string) {
 					break
 				}
 			}
-			fmt.Fprintf(out, "    %s  %d records  %s index bytes  [%s]\n",
-				ca.ChunkID.String(), ca.ChunkRecords, formatBytes(totalIndexBytes(ca)), status)
+			timeRange := fmt.Sprintf("%s - %s",
+				ca.ChunkStartTS.Format("2006-01-02 15:04:05"),
+				ca.ChunkEndTS.Format("2006-01-02 15:04:05"))
+			fmt.Fprintf(out, "    %s  %s  %d records  %s  [%s]\n",
+				ca.ChunkID.String(), timeRange, ca.ChunkRecords, formatBytes(totalIndexBytes(ca)), status)
 		}
 		out.WriteByte('\n')
 	}
