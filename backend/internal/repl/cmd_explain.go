@@ -20,22 +20,25 @@ type explainPlan struct {
 
 // chunkPlan describes the execution plan for a single chunk.
 type chunkPlan struct {
-	ChunkID      chunk.ChunkID
-	Sealed       bool
-	RecordCount  int
-	TimeRange    string // "StartTS - EndTS"
-	ScanStrategy string // "sequential" or "index-driven"
-	IndexesUsed  []indexUsage
-	Filters      []string // runtime filters applied
+	ChunkID       chunk.ChunkID
+	Sealed        bool
+	RecordCount   int
+	TimeRange     string // "StartTS - EndTS"
+	TimeOverlaps  bool   // whether chunk time range overlaps query
+	Pipeline      []pipelineStep
+	ScanMode      string // "index-driven", "sequential", "skipped"
+	RuntimeFilter string // runtime filter description (if any)
+	EstimatedScan int    // estimated records to scan
 }
 
-// indexUsage describes how an index is used.
-type indexUsage struct {
-	Name        string
-	Status      string // "available", "unavailable", "not applicable"
-	Purpose     string // what it's used for
-	Positions   int    // number of positions from this index (0 if N/A)
-	Description string // human-readable description
+// pipelineStep describes one step in the index application pipeline.
+type pipelineStep struct {
+	Index           string // index name/type
+	Predicate       string // what we're filtering for
+	PositionsBefore int    // positions before this step (0 = all records)
+	PositionsAfter  int    // positions after this step
+	Action          string // "indexed", "runtime", "skipped", "seek"
+	Details         string // additional details
 }
 
 func (r *REPL) cmdExplain(out *strings.Builder, args []string) {
@@ -47,8 +50,9 @@ func (r *REPL) cmdExplain(out *strings.Builder, args []string) {
 	for _, arg := range args {
 		k, v, ok := strings.Cut(arg, "=")
 		if !ok {
-			fmt.Fprintf(out, "Invalid filter: %s (expected key=value)\n", arg)
-			return
+			// Bare word without '=' - treat as token search
+			tokens = append(tokens, arg)
+			continue
 		}
 
 		switch k {
@@ -158,301 +162,362 @@ func (r *REPL) buildExplainPlan(q query.Query) (*explainPlan, error) {
 
 func (r *REPL) buildChunkPlan(q query.Query, meta chunk.ChunkMeta, cm chunk.ChunkManager, im index.IndexManager) chunkPlan {
 	cp := chunkPlan{
-		ChunkID:     meta.ID,
-		Sealed:      meta.Sealed,
-		RecordCount: int(meta.RecordCount),
-		TimeRange:   fmt.Sprintf("%s - %s", meta.StartTS.Format("2006-01-02T15:04:05"), meta.EndTS.Format("2006-01-02T15:04:05")),
+		ChunkID:      meta.ID,
+		Sealed:       meta.Sealed,
+		RecordCount:  int(meta.RecordCount),
+		TimeRange:    fmt.Sprintf("%s - %s", meta.StartTS.Format("2006-01-02T15:04:05"), meta.EndTS.Format("2006-01-02T15:04:05")),
+		TimeOverlaps: true, // if we got here, it overlaps
 	}
 
 	if !meta.Sealed {
-		cp.ScanStrategy = "sequential (unsealed)"
-		cp.Filters = r.getRuntimeFilters(q)
+		cp.ScanMode = "sequential (unsealed)"
+		cp.EstimatedScan = cp.RecordCount
+		cp.RuntimeFilter = r.buildRuntimeFilterDesc(q)
 		return cp
 	}
 
-	// Check which indexes are available and how they'd be used
-	var indexesUsed []indexUsage
-	var hasPositionSource bool
+	// Track current position count through the pipeline
+	currentPositions := cp.RecordCount // start with all records
+	var runtimeFilters []string
+	var skipped bool
 
-	// 1. Time index - used for seeking, not position filtering
+	// 1. Time index - used for seeking to start position
 	lower, _ := q.TimeBounds()
 	if !lower.IsZero() {
+		step := pipelineStep{
+			Index:           "time",
+			Predicate:       fmt.Sprintf("start >= %s", lower.Format("15:04:05")),
+			PositionsBefore: currentPositions,
+		}
+
 		timeIdx, err := im.OpenTimeIndex(meta.ID)
 		if err == nil && len(timeIdx.Entries()) > 0 {
-			indexesUsed = append(indexesUsed, indexUsage{
-				Name:        "time",
-				Status:      "available",
-				Purpose:     "seek to start position",
-				Positions:   len(timeIdx.Entries()),
-				Description: fmt.Sprintf("sparse index with %d entries, used for initial seek", len(timeIdx.Entries())),
-			})
+			// Find approximate skip count using time index
+			reader := index.NewTimeIndexReader(meta.ID, timeIdx.Entries())
+			if ref, found := reader.FindStart(lower); found {
+				skippedRecords := int(ref.Pos)
+				currentPositions = cp.RecordCount - skippedRecords
+				step.PositionsAfter = currentPositions
+				step.Action = "seek"
+				step.Details = fmt.Sprintf("skip %d records via sparse index", skippedRecords)
+			} else {
+				step.PositionsAfter = currentPositions
+				step.Action = "seek"
+				step.Details = "start before chunk, scan from beginning"
+			}
 		} else {
-			// Fall back to binary search on idx.log
-			indexesUsed = append(indexesUsed, indexUsage{
-				Name:        "time",
-				Status:      "unavailable",
-				Purpose:     "seek to start position",
-				Description: "falling back to binary search on idx.log",
-			})
+			// Fall back to binary search
+			if pos, found, err := cm.FindStartPosition(meta.ID, lower); err == nil && found {
+				skippedRecords := int(pos)
+				currentPositions = cp.RecordCount - skippedRecords
+				step.PositionsAfter = currentPositions
+				step.Action = "seek"
+				step.Details = fmt.Sprintf("skip %d records via idx.log binary search", skippedRecords)
+			} else {
+				step.PositionsAfter = currentPositions
+				step.Action = "seek"
+				step.Details = "binary search on idx.log"
+			}
 		}
+		cp.Pipeline = append(cp.Pipeline, step)
 	}
 
 	// 2. Token index
 	if len(q.Tokens) > 0 {
+		predicate := fmt.Sprintf("token(%s)", strings.Join(q.Tokens, ", "))
+		step := pipelineStep{
+			Index:           "token",
+			Predicate:       predicate,
+			PositionsBefore: currentPositions,
+		}
+
 		tokIdx, err := im.OpenTokenIndex(meta.ID)
 		if err == nil {
 			reader := index.NewTokenIndexReader(meta.ID, tokIdx.Entries())
-			var totalPositions int
+			var positions []uint64
 			allFound := true
-			for _, tok := range q.Tokens {
-				positions, found := reader.Lookup(tok)
+
+			for i, tok := range q.Tokens {
+				pos, found := reader.Lookup(tok)
 				if !found {
 					allFound = false
 					break
 				}
-				if totalPositions == 0 {
-					totalPositions = len(positions)
+				if i == 0 {
+					positions = pos
 				} else {
-					// Intersection reduces positions
-					totalPositions = min(totalPositions, len(positions))
+					positions = intersectPositions(positions, pos)
 				}
 			}
-			if allFound {
-				indexesUsed = append(indexesUsed, indexUsage{
-					Name:        "token",
-					Status:      "available",
-					Purpose:     "position filtering",
-					Positions:   totalPositions,
-					Description: fmt.Sprintf("filtering by %d token(s), ~%d positions", len(q.Tokens), totalPositions),
-				})
-				hasPositionSource = true
+
+			if !allFound {
+				// Token not in index - fall back to runtime filter
+				// (index is selective, not all tokens are indexed)
+				step.PositionsAfter = currentPositions
+				step.Action = "runtime"
+				step.Details = "token not in index, scanning with filter"
+				runtimeFilters = append(runtimeFilters, predicate)
+			} else if len(positions) == 0 {
+				// All tokens found but intersection is empty - no matches
+				step.PositionsAfter = 0
+				step.Action = "skipped"
+				step.Details = "index intersection empty, chunk skipped"
+				skipped = true
 			} else {
-				indexesUsed = append(indexesUsed, indexUsage{
-					Name:        "token",
-					Status:      "available (no match)",
-					Purpose:     "position filtering",
-					Description: "token not found in index - chunk will be skipped",
-				})
+				step.PositionsAfter = len(positions)
+				step.Action = "indexed"
+				step.Details = fmt.Sprintf("%d tokens intersected", len(q.Tokens))
+				currentPositions = len(positions)
 			}
 		} else if errors.Is(err, index.ErrIndexNotFound) {
-			indexesUsed = append(indexesUsed, indexUsage{
-				Name:        "token",
-				Status:      "unavailable",
-				Purpose:     "position filtering",
-				Description: "runtime filter will tokenize each record",
-			})
-			cp.Filters = append(cp.Filters, fmt.Sprintf("token filter: %v", q.Tokens))
+			step.PositionsAfter = currentPositions
+			step.Action = "runtime"
+			step.Details = "index unavailable, tokenizing each record"
+			runtimeFilters = append(runtimeFilters, predicate)
 		}
+		cp.Pipeline = append(cp.Pipeline, step)
 	}
 
-	// 3. Key-value indexes (attr + kv)
-	var chunkSkipped bool
-	if len(q.KV) > 0 {
-		kvUsage := r.analyzeKVIndexes(q.KV, meta.ID, im)
-		indexesUsed = append(indexesUsed, kvUsage...)
-		for _, u := range kvUsage {
-			if u.Status == "available" && u.Positions > 0 {
-				hasPositionSource = true
-			} else if u.Status == "no match" {
-				// Index available but no match - chunk will be skipped
-				chunkSkipped = true
-			} else if u.Status == "unavailable" {
-				// Index not available - need runtime filter
-				cp.Filters = append(cp.Filters, fmt.Sprintf("kv filter: %s", u.Name))
+	// 3. Key-value indexes
+	if len(q.KV) > 0 && !skipped {
+		// Open all indexes once
+		attrKVIdx, attrKVErr := im.OpenAttrKVIndex(meta.ID)
+		attrKeyIdx, attrKeyErr := im.OpenAttrKeyIndex(meta.ID)
+		attrValIdx, attrValErr := im.OpenAttrValueIndex(meta.ID)
+		kvIdx, kvStatus, kvErr := im.OpenKVIndex(meta.ID)
+		kvKeyIdx, kvKeyStatus, kvKeyErr := im.OpenKVKeyIndex(meta.ID)
+		kvValIdx, kvValStatus, kvValErr := im.OpenKVValueIndex(meta.ID)
+
+		for _, f := range q.KV {
+			predicate := formatSingleKVFilter(f)
+			step := pipelineStep{
+				Index:           "kv",
+				Predicate:       predicate,
+				PositionsBefore: currentPositions,
+			}
+
+			positions, available, details := r.lookupKVIndex(f,
+				attrKVIdx, attrKVErr, attrKeyIdx, attrKeyErr, attrValIdx, attrValErr,
+				kvIdx, kvStatus, kvErr, kvKeyIdx, kvKeyStatus, kvKeyErr, kvValIdx, kvValStatus, kvValErr,
+				meta.ID)
+
+			if !available {
+				step.PositionsAfter = currentPositions
+				step.Action = "runtime"
+				step.Details = "no index available"
+				runtimeFilters = append(runtimeFilters, predicate)
+			} else if len(positions) == 0 {
+				step.PositionsAfter = 0
+				step.Action = "skipped"
+				step.Details = fmt.Sprintf("no match (%s)", details)
+				skipped = true
+			} else {
+				// Intersect with current positions if we have a position list
+				newCount := len(positions)
+				if currentPositions < cp.RecordCount {
+					// We already have a position list, this is an estimate
+					newCount = min(currentPositions, len(positions))
+				}
+				step.PositionsAfter = newCount
+				step.Action = "indexed"
+				step.Details = details
+				currentPositions = newCount
+			}
+			cp.Pipeline = append(cp.Pipeline, step)
+
+			if skipped {
+				break
 			}
 		}
 	}
 
-	cp.IndexesUsed = indexesUsed
-
-	if chunkSkipped {
-		cp.ScanStrategy = "skipped (no index match)"
-	} else if hasPositionSource {
-		cp.ScanStrategy = "index-driven (seek to positions)"
+	// Determine final scan mode and estimated scan
+	if skipped {
+		cp.ScanMode = "skipped"
+		cp.EstimatedScan = 0
+	} else if currentPositions < cp.RecordCount {
+		cp.ScanMode = "index-driven"
+		cp.EstimatedScan = currentPositions
 	} else {
-		cp.ScanStrategy = "sequential"
+		cp.ScanMode = "sequential"
+		cp.EstimatedScan = currentPositions
 	}
 
-	// Add time bounds as runtime filter if present
+	if len(runtimeFilters) > 0 {
+		cp.RuntimeFilter = strings.Join(runtimeFilters, " AND ")
+	}
+
+	// Add time bounds to runtime filter if present (always applied)
 	if !q.Start.IsZero() || !q.End.IsZero() {
-		cp.Filters = append(cp.Filters, "time bounds check")
+		if cp.RuntimeFilter != "" {
+			cp.RuntimeFilter += " AND time bounds"
+		} else if cp.ScanMode != "skipped" {
+			cp.RuntimeFilter = "time bounds"
+		}
 	}
 
 	return cp
 }
 
-func (r *REPL) analyzeKVIndexes(filters []query.KeyValueFilter, chunkID chunk.ChunkID, im index.IndexManager) []indexUsage {
-	var usages []indexUsage
+// lookupKVIndex looks up a single KV filter across all available indexes.
+// Returns (positions, indexAvailable, details).
+func (r *REPL) lookupKVIndex(f query.KeyValueFilter,
+	attrKVIdx *index.Index[index.AttrKVIndexEntry], attrKVErr error,
+	attrKeyIdx *index.Index[index.AttrKeyIndexEntry], attrKeyErr error,
+	attrValIdx *index.Index[index.AttrValueIndexEntry], attrValErr error,
+	kvIdx *index.Index[index.KVIndexEntry], kvStatus index.KVIndexStatus, kvErr error,
+	kvKeyIdx *index.Index[index.KVKeyIndexEntry], kvKeyStatus index.KVIndexStatus, kvKeyErr error,
+	kvValIdx *index.Index[index.KVValueIndexEntry], kvValStatus index.KVIndexStatus, kvValErr error,
+	chunkID chunk.ChunkID) (positions []uint64, available bool, details string) {
 
-	// Check attr indexes - track availability separately from match
-	attrKVIdx, attrKVErr := im.OpenAttrKVIndex(chunkID)
-	attrKeyIdx, attrKeyErr := im.OpenAttrKeyIndex(chunkID)
-	attrValIdx, attrValErr := im.OpenAttrValueIndex(chunkID)
+	var detailParts []string
 
-	// Check kv indexes (message body)
-	kvIdx, kvStatus, kvErr := im.OpenKVIndex(chunkID)
-	kvKeyIdx, kvKeyStatus, kvKeyErr := im.OpenKVKeyIndex(chunkID)
-	kvValIdx, kvValStatus, kvValErr := im.OpenKVValueIndex(chunkID)
-
-	for _, f := range filters {
-		var filterUsage indexUsage
-		filterUsage.Purpose = "position filtering"
-
-		if f.Key == "" && f.Value == "" {
-			continue // matches everything
-		} else if f.Value == "" {
-			// Key only: key=* pattern
-			filterUsage.Name = fmt.Sprintf("key index (%s=*)", f.Key)
-			var positions int
-			var anyIndexAvailable bool
-			var details []string
-
-			if attrKeyErr == nil {
-				anyIndexAvailable = true
-				reader := index.NewAttrKeyIndexReader(chunkID, attrKeyIdx.Entries())
-				if pos, found := reader.Lookup(strings.ToLower(f.Key)); found {
-					positions += len(pos)
-					details = append(details, fmt.Sprintf("attr_key: %d", len(pos)))
-				} else {
-					details = append(details, "attr_key: no match")
-				}
-			}
-			if kvKeyErr == nil && kvKeyStatus != index.KVCapped {
-				anyIndexAvailable = true
-				reader := index.NewKVKeyIndexReader(chunkID, kvKeyIdx.Entries())
-				if pos, found := reader.Lookup(strings.ToLower(f.Key)); found {
-					positions += len(pos)
-					details = append(details, fmt.Sprintf("msg_key: %d", len(pos)))
-				} else {
-					details = append(details, "msg_key: no match")
-				}
-			}
-
-			if !anyIndexAvailable {
-				filterUsage.Status = "unavailable"
-				filterUsage.Description = "no key index available, using runtime filter"
-			} else if positions > 0 {
-				filterUsage.Status = "available"
-				filterUsage.Positions = positions
-				filterUsage.Description = fmt.Sprintf("%d positions (%s)", positions, strings.Join(details, ", "))
+	if f.Key == "" && f.Value == "" {
+		return nil, false, ""
+	} else if f.Value == "" {
+		// Key only: key=* pattern
+		if attrKeyErr == nil {
+			available = true
+			reader := index.NewAttrKeyIndexReader(chunkID, attrKeyIdx.Entries())
+			if pos, found := reader.Lookup(strings.ToLower(f.Key)); found {
+				positions = unionPositions(positions, pos)
+				detailParts = append(detailParts, fmt.Sprintf("attr_key:%d", len(pos)))
 			} else {
-				filterUsage.Status = "no match"
-				filterUsage.Description = fmt.Sprintf("key %q not in index (%s) - chunk skipped", f.Key, strings.Join(details, ", "))
-			}
-		} else if f.Key == "" {
-			// Value only: *=value pattern
-			filterUsage.Name = fmt.Sprintf("value index (*=%s)", f.Value)
-			var positions int
-			var anyIndexAvailable bool
-			var details []string
-
-			if attrValErr == nil {
-				anyIndexAvailable = true
-				reader := index.NewAttrValueIndexReader(chunkID, attrValIdx.Entries())
-				if pos, found := reader.Lookup(strings.ToLower(f.Value)); found {
-					positions += len(pos)
-					details = append(details, fmt.Sprintf("attr_val: %d", len(pos)))
-				} else {
-					details = append(details, "attr_val: no match")
-				}
-			}
-			if kvValErr == nil && kvValStatus != index.KVCapped {
-				anyIndexAvailable = true
-				reader := index.NewKVValueIndexReader(chunkID, kvValIdx.Entries())
-				if pos, found := reader.Lookup(strings.ToLower(f.Value)); found {
-					positions += len(pos)
-					details = append(details, fmt.Sprintf("msg_val: %d", len(pos)))
-				} else {
-					details = append(details, "msg_val: no match")
-				}
-			}
-
-			if !anyIndexAvailable {
-				filterUsage.Status = "unavailable"
-				filterUsage.Description = "no value index available, using runtime filter"
-			} else if positions > 0 {
-				filterUsage.Status = "available"
-				filterUsage.Positions = positions
-				filterUsage.Description = fmt.Sprintf("%d positions (%s)", positions, strings.Join(details, ", "))
-			} else {
-				filterUsage.Status = "no match"
-				filterUsage.Description = fmt.Sprintf("value %q not in index (%s) - chunk skipped", f.Value, strings.Join(details, ", "))
-			}
-		} else {
-			// Both key and value: exact key=value match
-			filterUsage.Name = fmt.Sprintf("kv index (%s=%s)", f.Key, f.Value)
-			var positions int
-			var anyIndexAvailable bool
-			var details []string
-
-			if attrKVErr == nil {
-				anyIndexAvailable = true
-				reader := index.NewAttrKVIndexReader(chunkID, attrKVIdx.Entries())
-				if pos, found := reader.Lookup(strings.ToLower(f.Key), strings.ToLower(f.Value)); found {
-					positions += len(pos)
-					details = append(details, fmt.Sprintf("attr_kv: %d", len(pos)))
-				} else {
-					details = append(details, "attr_kv: no match")
-				}
-			}
-			if kvErr == nil && kvStatus != index.KVCapped {
-				anyIndexAvailable = true
-				reader := index.NewKVIndexReader(chunkID, kvIdx.Entries())
-				if pos, found := reader.Lookup(f.Key, f.Value); found {
-					positions += len(pos)
-					details = append(details, fmt.Sprintf("msg_kv: %d", len(pos)))
-				} else {
-					details = append(details, "msg_kv: no match")
-				}
-			}
-
-			if !anyIndexAvailable {
-				filterUsage.Status = "unavailable"
-				filterUsage.Description = "no kv index available, using runtime filter"
-			} else if positions > 0 {
-				filterUsage.Status = "available"
-				filterUsage.Positions = positions
-				filterUsage.Description = fmt.Sprintf("%d positions (%s)", positions, strings.Join(details, ", "))
-			} else {
-				filterUsage.Status = "no match"
-				filterUsage.Description = fmt.Sprintf("%s=%s not in index (%s) - chunk skipped", f.Key, f.Value, strings.Join(details, ", "))
+				detailParts = append(detailParts, "attr_key:0")
 			}
 		}
-
-		usages = append(usages, filterUsage)
+		if kvKeyErr == nil && kvKeyStatus != index.KVCapped {
+			available = true
+			reader := index.NewKVKeyIndexReader(chunkID, kvKeyIdx.Entries())
+			if pos, found := reader.Lookup(strings.ToLower(f.Key)); found {
+				positions = unionPositions(positions, pos)
+				detailParts = append(detailParts, fmt.Sprintf("msg_key:%d", len(pos)))
+			} else {
+				detailParts = append(detailParts, "msg_key:0")
+			}
+		}
+	} else if f.Key == "" {
+		// Value only: *=value pattern
+		if attrValErr == nil {
+			available = true
+			reader := index.NewAttrValueIndexReader(chunkID, attrValIdx.Entries())
+			if pos, found := reader.Lookup(strings.ToLower(f.Value)); found {
+				positions = unionPositions(positions, pos)
+				detailParts = append(detailParts, fmt.Sprintf("attr_val:%d", len(pos)))
+			} else {
+				detailParts = append(detailParts, "attr_val:0")
+			}
+		}
+		if kvValErr == nil && kvValStatus != index.KVCapped {
+			available = true
+			reader := index.NewKVValueIndexReader(chunkID, kvValIdx.Entries())
+			if pos, found := reader.Lookup(strings.ToLower(f.Value)); found {
+				positions = unionPositions(positions, pos)
+				detailParts = append(detailParts, fmt.Sprintf("msg_val:%d", len(pos)))
+			} else {
+				detailParts = append(detailParts, "msg_val:0")
+			}
+		}
+	} else {
+		// Both key and value: exact key=value match
+		if attrKVErr == nil {
+			available = true
+			reader := index.NewAttrKVIndexReader(chunkID, attrKVIdx.Entries())
+			if pos, found := reader.Lookup(strings.ToLower(f.Key), strings.ToLower(f.Value)); found {
+				positions = unionPositions(positions, pos)
+				detailParts = append(detailParts, fmt.Sprintf("attr_kv:%d", len(pos)))
+			} else {
+				detailParts = append(detailParts, "attr_kv:0")
+			}
+		}
+		if kvErr == nil && kvStatus != index.KVCapped {
+			available = true
+			reader := index.NewKVIndexReader(chunkID, kvIdx.Entries())
+			if pos, found := reader.Lookup(f.Key, f.Value); found {
+				positions = unionPositions(positions, pos)
+				detailParts = append(detailParts, fmt.Sprintf("msg_kv:%d", len(pos)))
+			} else {
+				detailParts = append(detailParts, "msg_kv:0")
+			}
+		}
 	}
 
-	return usages
+	details = strings.Join(detailParts, ", ")
+	return positions, available, details
 }
 
-func (r *REPL) getRuntimeFilters(q query.Query) []string {
-	var filters []string
+func (r *REPL) buildRuntimeFilterDesc(q query.Query) string {
+	var parts []string
 	if len(q.Tokens) > 0 {
-		filters = append(filters, fmt.Sprintf("token filter: %v", q.Tokens))
+		parts = append(parts, fmt.Sprintf("token(%s)", strings.Join(q.Tokens, ", ")))
 	}
-	if len(q.KV) > 0 {
-		filters = append(filters, fmt.Sprintf("kv filter: %v", formatKVFilters(q.KV)))
+	for _, f := range q.KV {
+		parts = append(parts, formatSingleKVFilter(f))
 	}
 	if !q.Start.IsZero() || !q.End.IsZero() {
-		filters = append(filters, "time bounds check")
+		parts = append(parts, "time bounds")
 	}
-	return filters
+	return strings.Join(parts, " AND ")
+}
+
+func formatSingleKVFilter(f query.KeyValueFilter) string {
+	key := f.Key
+	if key == "" {
+		key = "*"
+	}
+	value := f.Value
+	if value == "" {
+		value = "*"
+	}
+	return key + "=" + value
 }
 
 func formatKVFilters(filters []query.KeyValueFilter) string {
 	var parts []string
 	for _, f := range filters {
-		key := f.Key
-		if key == "" {
-			key = "*"
-		}
-		value := f.Value
-		if value == "" {
-			value = "*"
-		}
-		parts = append(parts, key+"="+value)
+		parts = append(parts, formatSingleKVFilter(f))
 	}
 	return strings.Join(parts, ", ")
+}
+
+// intersectPositions returns positions present in both sorted slices.
+func intersectPositions(a, b []uint64) []uint64 {
+	var result []uint64
+	i, j := 0, 0
+	for i < len(a) && j < len(b) {
+		if a[i] == b[j] {
+			result = append(result, a[i])
+			i++
+			j++
+		} else if a[i] < b[j] {
+			i++
+		} else {
+			j++
+		}
+	}
+	return result
+}
+
+// unionPositions returns all unique positions from both sorted slices, in sorted order.
+func unionPositions(a, b []uint64) []uint64 {
+	result := make([]uint64, 0, len(a)+len(b))
+	i, j := 0, 0
+	for i < len(a) && j < len(b) {
+		if a[i] == b[j] {
+			result = append(result, a[i])
+			i++
+			j++
+		} else if a[i] < b[j] {
+			result = append(result, a[i])
+			i++
+		} else {
+			result = append(result, b[j])
+			j++
+		}
+	}
+	result = append(result, a[i:]...)
+	result = append(result, b[j:]...)
+	return result
 }
 
 func (r *REPL) printExplainPlan(out *strings.Builder, plan *explainPlan) {
@@ -491,25 +556,42 @@ func (r *REPL) printExplainPlan(out *strings.Builder, plan *explainPlan) {
 	for i, cp := range plan.ChunkPlans {
 		sealedStr := "sealed"
 		if !cp.Sealed {
-			sealedStr = "unsealed"
+			sealedStr = "active"
 		}
 		out.WriteString(fmt.Sprintf("Chunk %d: %s (%s)\n", i+1, cp.ChunkID.String(), sealedStr))
-		out.WriteString(fmt.Sprintf("  Time Range: %s\n", cp.TimeRange))
+		out.WriteString(fmt.Sprintf("  Time Range: %s [overlaps]\n", cp.TimeRange))
 		out.WriteString(fmt.Sprintf("  Records: %d\n", cp.RecordCount))
-		out.WriteString(fmt.Sprintf("  Strategy: %s\n", cp.ScanStrategy))
 
-		if len(cp.IndexesUsed) > 0 {
-			out.WriteString("  Indexes:\n")
-			for _, idx := range cp.IndexesUsed {
-				out.WriteString(fmt.Sprintf("    - %s [%s]: %s\n", idx.Name, idx.Status, idx.Description))
+		// Pipeline
+		if len(cp.Pipeline) > 0 {
+			out.WriteString("\n  Index Pipeline:\n")
+			for j, step := range cp.Pipeline {
+				arrow := "→"
+				afterStr := fmt.Sprintf("%d", step.PositionsAfter)
+				if step.Action == "skipped" {
+					afterStr = "0 (skip chunk)"
+				}
+				out.WriteString(fmt.Sprintf("    %d. %-14s %d %s %s [%s] %s\n",
+					j+1,
+					step.Index,
+					step.PositionsBefore,
+					arrow,
+					afterStr,
+					step.Action,
+					step.Details,
+				))
 			}
 		}
 
-		if len(cp.Filters) > 0 {
-			out.WriteString("  Runtime Filters:\n")
-			for _, f := range cp.Filters {
-				out.WriteString(fmt.Sprintf("    - %s\n", f))
-			}
+		out.WriteString("\n")
+		out.WriteString(fmt.Sprintf("  Scan: %s", cp.ScanMode))
+		if cp.ScanMode != "skipped" && cp.EstimatedScan != cp.RecordCount {
+			out.WriteString(fmt.Sprintf(", ~%d records", cp.EstimatedScan))
+		}
+		out.WriteString("\n")
+
+		if cp.RuntimeFilter != "" {
+			out.WriteString(fmt.Sprintf("  Runtime Filter: %s\n", cp.RuntimeFilter))
 		}
 
 		out.WriteString("\n")

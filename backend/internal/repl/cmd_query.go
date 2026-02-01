@@ -21,8 +21,9 @@ func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
 	for _, arg := range args {
 		k, v, ok := strings.Cut(arg, "=")
 		if !ok {
-			fmt.Fprintf(out, "Invalid filter: %s (expected key=value)\n", arg)
-			return
+			// Bare word without '=' - treat as token search
+			tokens = append(tokens, arg)
+			continue
 		}
 
 		switch k {

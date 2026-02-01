@@ -484,7 +484,10 @@ func applyTimeIndex(b *scannerBuilder, indexes index.IndexManager, chunkID chunk
 }
 
 // applyTokenIndex tries to use the token index for position filtering.
-// Returns true if successful, false if index not available.
+// Returns (true, false) if all tokens found in index and positions added.
+// Returns (false, false) if index unavailable or any token not in index (caller should use runtime filter).
+// The token index is selective - not all tokens are indexed, so a miss means
+// "can't use index" not "no matches exist".
 func applyTokenIndex(b *scannerBuilder, indexes index.IndexManager, chunkID chunk.ChunkID, tokens []string) (ok bool, empty bool) {
 	if len(tokens) == 0 {
 		return true, false
@@ -500,19 +503,24 @@ func applyTokenIndex(b *scannerBuilder, indexes index.IndexManager, chunkID chun
 
 	reader := index.NewTokenIndexReader(chunkID, tokIdx.Entries())
 
-	// All tokens must be present (AND semantics).
+	// All tokens must be present in the index (AND semantics).
+	// If any token is not in the index, fall back to runtime filtering
+	// since the index is selective and doesn't contain all tokens.
 	for i, tok := range tokens {
 		positions, found := reader.Lookup(tok)
 		if !found {
-			return true, true // token not in chunk, no matches
+			// Token not in index - can't use index, need runtime filter
+			return false, false
 		}
 		if i == 0 {
 			if !b.addPositions(positions) {
+				// Intersection resulted in empty set - no matches
 				return true, true
 			}
 		} else {
 			// Intersect with existing positions.
 			if !b.addPositions(positions) {
+				// Intersection resulted in empty set - no matches
 				return true, true
 			}
 		}
