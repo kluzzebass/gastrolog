@@ -68,7 +68,8 @@ func (a *Analyzer) AnalyzeChunk(chunkID chunk.ChunkID) (*ChunkAnalysis, error) {
 	return analysis, nil
 }
 
-// AnalyzeAll analyzes all chunks and provides aggregate statistics.
+// AnalyzeAll analyzes all sealed chunks and provides aggregate statistics.
+// Unsealed chunks are skipped since they don't have indexes yet.
 func (a *Analyzer) AnalyzeAll() (*AggregateAnalysis, error) {
 	chunks, err := a.cm.List()
 	if err != nil {
@@ -87,6 +88,11 @@ func (a *Analyzer) AnalyzeAll() (*AggregateAnalysis, error) {
 	coverageCounts := make(map[IndexType]int64)
 
 	for _, meta := range chunks {
+		// Skip unsealed chunks - they don't have indexes yet
+		if !meta.Sealed {
+			continue
+		}
+
 		ca, err := a.AnalyzeChunk(meta.ID)
 		if err != nil {
 			// Record error but continue
