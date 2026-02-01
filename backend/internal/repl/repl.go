@@ -1106,7 +1106,7 @@ func (r *REPL) cmdChunks(out *strings.Builder) {
 				meta.EndTS.Format("2006-01-02 15:04:05"))
 
 			fmt.Fprintf(out, "  %s  %s  %d records  [%s]\n",
-				meta.ID.String()[:8], timeRange, meta.RecordCount, status)
+				meta.ID.String(), timeRange, meta.RecordCount, status)
 		}
 	}
 }
