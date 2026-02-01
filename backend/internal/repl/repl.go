@@ -25,6 +25,7 @@ import (
 	"gastrolog/internal/index"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
+	"gastrolog/internal/tokenizer"
 )
 
 // recordResult holds a record or error from the iterator channel.
@@ -516,7 +517,9 @@ Query filters:
   end=TIME                 End time (RFC3339 or Unix timestamp)
   token=WORD               Filter by token (can repeat, AND semantics)
   limit=N                  Maximum total results
-  key=value                Filter by attribute (can repeat, AND semantics)
+  key=value                Filter by key=value in attrs OR message (can repeat, AND semantics)
+  key=*                    Filter by key existence (any value)
+  *=value                  Filter by value existence (any key)
 
 Settings:
   pager=N                  Records per page (0 = no paging, show all)
@@ -524,6 +527,7 @@ Settings:
 Examples:
   query start=2024-01-01T00:00:00Z end=2024-01-02T00:00:00Z token=error
   query source=nginx level=error
+  query status=500 method=POST
   set pager=50
   chunks
   chunk 019c10bb-a3a8-7ad9-9e8e-890bf77a84d3
@@ -542,7 +546,7 @@ func (r *REPL) cmdStore(out *strings.Builder, args []string) {
 func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
 	q := query.Query{}
 	var tokens []string
-	var attrs []query.AttrFilter
+	var kvFilters []query.KeyValueFilter
 
 	for _, arg := range args {
 		k, v, ok := strings.Cut(arg, "=")
@@ -576,16 +580,25 @@ func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
 			}
 			q.Limit = n
 		default:
-			// Treat as attribute filter (key=value)
-			attrs = append(attrs, query.AttrFilter{Key: k, Value: v})
+			// Treat as key=value filter (searches both attrs and message body)
+			// Handle wildcard patterns: key=* and *=value
+			key := k
+			value := v
+			if k == "*" {
+				key = "" // *=value pattern
+			}
+			if v == "*" {
+				value = "" // key=* pattern
+			}
+			kvFilters = append(kvFilters, query.KeyValueFilter{Key: key, Value: value})
 		}
 	}
 
 	if len(tokens) > 0 {
 		q.Tokens = tokens
 	}
-	if len(attrs) > 0 {
-		q.Attrs = attrs
+	if len(kvFilters) > 0 {
+		q.KV = kvFilters
 	}
 
 	// Cancel any previous query goroutine
@@ -738,8 +751,8 @@ func (r *REPL) runFollowMode(ctx context.Context, ch chan<- recordResult, q quer
 				continue
 			}
 
-			// Apply attr filter (AND semantics)
-			if len(q.Attrs) > 0 && !matchesAllAttrs(rec.Attrs, q.Attrs) {
+			// Apply key=value filter (AND semantics, OR within each filter for attrs vs message)
+			if len(q.KV) > 0 && !matchesAllKeyValues(rec.Attrs, rec.Raw, q.KV) {
 				continue
 			}
 
@@ -772,12 +785,106 @@ func matchesAllTokens(raw []byte, tokens []string) bool {
 	return true
 }
 
-// matchesAllAttrs checks if the record's attributes contain all query attrs.
-func matchesAllAttrs(recAttrs chunk.Attributes, queryAttrs []query.AttrFilter) bool {
-	for _, qa := range queryAttrs {
-		v, ok := recAttrs[qa.Key]
-		if !ok || !strings.EqualFold(v, qa.Value) {
-			return false
+// matchesAllKeyValues checks if all query key=value pairs are found in either
+// the record's attributes or the message body (OR semantics per pair, AND across pairs).
+//
+// Supports wildcard patterns:
+//   - Key="foo", Value="bar" - exact match for foo=bar
+//   - Key="foo", Value=""    - match if key "foo" exists (any value)
+//   - Key="", Value="bar"    - match if any key has value "bar"
+func matchesAllKeyValues(recAttrs chunk.Attributes, raw []byte, queryFilters []query.KeyValueFilter) bool {
+	if len(queryFilters) == 0 {
+		return true
+	}
+
+	// Lazily extract key=value pairs from message body only if needed.
+	var msgPairs map[string]map[string]struct{}
+	var msgValues map[string]struct{} // all values (for *=value pattern)
+	getMsgPairs := func() map[string]map[string]struct{} {
+		if msgPairs == nil {
+			pairs := tokenizer.ExtractKeyValues(raw)
+			msgPairs = make(map[string]map[string]struct{})
+			msgValues = make(map[string]struct{})
+			for _, kv := range pairs {
+				if msgPairs[kv.Key] == nil {
+					msgPairs[kv.Key] = make(map[string]struct{})
+				}
+				// Keys are already lowercase from extractor, values are preserved.
+				// For matching, we lowercase both.
+				valLower := strings.ToLower(kv.Value)
+				msgPairs[kv.Key][valLower] = struct{}{}
+				msgValues[valLower] = struct{}{}
+			}
+		}
+		return msgPairs
+	}
+	getMsgValues := func() map[string]struct{} {
+		getMsgPairs() // ensure msgValues is populated
+		return msgValues
+	}
+
+	// Check all filters (AND semantics across filters).
+	for _, f := range queryFilters {
+		keyLower := strings.ToLower(f.Key)
+		valLower := strings.ToLower(f.Value)
+
+		if f.Key == "" && f.Value == "" {
+			// Both empty - matches everything, skip this filter
+			continue
+		} else if f.Value == "" {
+			// Key only: key=* pattern (key exists with any value)
+			// Check attrs
+			found := false
+			for k := range recAttrs {
+				if strings.EqualFold(k, f.Key) {
+					found = true
+					break
+				}
+			}
+			if found {
+				continue
+			}
+			// Check message body
+			pairs := getMsgPairs()
+			if _, ok := pairs[keyLower]; ok {
+				continue
+			}
+			return false // Key not found in either location
+		} else if f.Key == "" {
+			// Value only: *=value pattern (any key has this value)
+			// Check attrs
+			found := false
+			for _, v := range recAttrs {
+				if strings.EqualFold(v, f.Value) {
+					found = true
+					break
+				}
+			}
+			if found {
+				continue
+			}
+			// Check message body
+			values := getMsgValues()
+			if _, ok := values[valLower]; ok {
+				continue
+			}
+			return false // Value not found in either location
+		} else {
+			// Both key and value: exact key=value match
+			// Check attributes first (cheaper).
+			if v, ok := recAttrs[f.Key]; ok && strings.EqualFold(v, f.Value) {
+				continue // Found in attrs, this filter passes.
+			}
+
+			// Check message body.
+			pairs := getMsgPairs()
+			if values, ok := pairs[keyLower]; ok {
+				if _, found := values[valLower]; found {
+					continue // Found in message, this filter passes.
+				}
+			}
+
+			return false // Not found in either location.
 		}
 	}
 	return true

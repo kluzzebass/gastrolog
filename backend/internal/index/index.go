@@ -56,11 +56,17 @@ type AttrKeyIndexEntry struct {
 	Positions []uint64
 }
 
+func (e AttrKeyIndexEntry) GetKey() string         { return e.Key }
+func (e AttrKeyIndexEntry) GetPositions() []uint64 { return e.Positions }
+
 // AttrValueIndexEntry holds all record positions where a specific attribute value exists.
 type AttrValueIndexEntry struct {
 	Value     string
 	Positions []uint64
 }
+
+func (e AttrValueIndexEntry) GetValue() string       { return e.Value }
+func (e AttrValueIndexEntry) GetPositions() []uint64 { return e.Positions }
 
 // AttrKVIndexEntry holds all record positions where a specific key=value pair exists.
 type AttrKVIndexEntry struct {
@@ -68,6 +74,53 @@ type AttrKVIndexEntry struct {
 	Value     string
 	Positions []uint64
 }
+
+func (e AttrKVIndexEntry) GetKey() string         { return e.Key }
+func (e AttrKVIndexEntry) GetValue() string       { return e.Value }
+func (e AttrKVIndexEntry) GetPositions() []uint64 { return e.Positions }
+
+// KVKeyIndexEntry holds all record positions where a specific key was extracted
+// from log message text. This is a heuristic, non-authoritative index.
+type KVKeyIndexEntry struct {
+	Key       string
+	Positions []uint64
+}
+
+func (e KVKeyIndexEntry) GetKey() string         { return e.Key }
+func (e KVKeyIndexEntry) GetPositions() []uint64 { return e.Positions }
+
+// KVValueIndexEntry holds all record positions where a specific value was extracted
+// from log message text. This is a heuristic, non-authoritative index.
+type KVValueIndexEntry struct {
+	Value     string
+	Positions []uint64
+}
+
+func (e KVValueIndexEntry) GetValue() string       { return e.Value }
+func (e KVValueIndexEntry) GetPositions() []uint64 { return e.Positions }
+
+// KVIndexEntry holds all record positions where a specific key=value pair
+// was extracted from log message text. This is a heuristic, non-authoritative index.
+type KVIndexEntry struct {
+	Key       string
+	Value     string
+	Positions []uint64
+}
+
+func (e KVIndexEntry) GetKey() string         { return e.Key }
+func (e KVIndexEntry) GetValue() string       { return e.Value }
+func (e KVIndexEntry) GetPositions() []uint64 { return e.Positions }
+
+// KVIndexStatus indicates whether the kv index is complete or capped.
+type KVIndexStatus int
+
+const (
+	// KVComplete indicates the index contains all extracted key=value pairs.
+	KVComplete KVIndexStatus = iota
+	// KVCapped indicates the index was capped due to cardinality limits.
+	// Queries must fall back to runtime filtering.
+	KVCapped
+)
 
 // Index provides read access to a built index of any entry type.
 type Index[T any] struct {
@@ -91,8 +144,26 @@ type IndexManager interface {
 	OpenAttrValueIndex(chunkID chunk.ChunkID) (*Index[AttrValueIndexEntry], error)
 	OpenAttrKVIndex(chunkID chunk.ChunkID) (*Index[AttrKVIndexEntry], error)
 
+	// OpenKVKeyIndex opens the message key index for the given chunk.
+	// Returns the index entries and a status indicating whether the index is complete.
+	// If status is KVCapped, the index was truncated due to cardinality limits.
+	OpenKVKeyIndex(chunkID chunk.ChunkID) (*Index[KVKeyIndexEntry], KVIndexStatus, error)
+
+	// OpenKVValueIndex opens the message value index for the given chunk.
+	// Returns the index entries and a status indicating whether the index is complete.
+	// If status is KVCapped, the index was truncated due to cardinality limits.
+	OpenKVValueIndex(chunkID chunk.ChunkID) (*Index[KVValueIndexEntry], KVIndexStatus, error)
+
+	// OpenKVIndex opens the kv index for the given chunk.
+	// Returns the index entries and a status indicating whether the index is complete.
+	// If status is KVCapped, the index was truncated due to cardinality limits
+	// and queries must fall back to runtime filtering.
+	// Returns ErrIndexNotFound if the index doesn't exist.
+	OpenKVIndex(chunkID chunk.ChunkID) (*Index[KVIndexEntry], KVIndexStatus, error)
+
 	// IndexesComplete reports whether all indexes exist for the given chunk.
 	// Returns true if all indexes are present, false if any are missing.
 	// May clean up orphaned temporary files as a side effect.
+	// Note: A capped kv index is still considered "complete" (it exists).
 	IndexesComplete(chunkID chunk.ChunkID) (bool, error)
 }

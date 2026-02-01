@@ -8,7 +8,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
-	"gastrolog/internal/index/token"
+	"gastrolog/internal/tokenizer"
 )
 
 // prunePositions returns positions >= minPos from a sorted slice.
@@ -347,7 +347,7 @@ func matchesTokens(raw []byte, queryTokens []string) bool {
 	if len(queryTokens) == 0 {
 		return true
 	}
-	recordTokens := token.Simple(raw)
+	recordTokens := tokenizer.Tokens(raw)
 	tokenSet := make(map[string]bool, len(recordTokens))
 	for _, t := range recordTokens {
 		tokenSet[t] = true
@@ -360,22 +360,114 @@ func matchesTokens(raw []byte, queryTokens []string) bool {
 	return true
 }
 
-// attrFilter returns a filter that matches records with all given key=value attrs.
-func attrFilter(attrs []AttrFilter) recordFilter {
+// keyValueFilter returns a filter that matches records where all key=value pairs
+// are found in either the record's attributes OR the message body.
+func keyValueFilter(filters []KeyValueFilter) recordFilter {
 	return func(rec chunk.Record) bool {
-		return matchesAttrs(rec.Attrs, attrs)
+		return matchesKeyValue(rec.Attrs, rec.Raw, filters)
 	}
 }
 
-// matchesAttrs checks if the record's attributes contain all query attrs.
-func matchesAttrs(recAttrs chunk.Attributes, queryAttrs []AttrFilter) bool {
-	if len(queryAttrs) == 0 {
+// matchesKeyValue checks if all query key=value pairs are found in either
+// the record's attributes or the message body (OR semantics per pair, AND across pairs).
+//
+// Supports wildcard patterns:
+//   - Key="foo", Value="bar" - exact match for foo=bar
+//   - Key="foo", Value=""    - match if key "foo" exists (any value)
+//   - Key="", Value="bar"    - match if any key has value "bar"
+func matchesKeyValue(recAttrs chunk.Attributes, raw []byte, queryFilters []KeyValueFilter) bool {
+	if len(queryFilters) == 0 {
 		return true
 	}
-	for _, qa := range queryAttrs {
-		v, ok := recAttrs[qa.Key]
-		if !ok || !strings.EqualFold(v, qa.Value) {
-			return false
+
+	// Lazily extract key=value pairs from message body only if needed.
+	var msgPairs map[string]map[string]struct{}
+	var msgValues map[string]struct{} // all values (for *=value pattern)
+	getMsgPairs := func() map[string]map[string]struct{} {
+		if msgPairs == nil {
+			pairs := tokenizer.ExtractKeyValues(raw)
+			msgPairs = make(map[string]map[string]struct{})
+			msgValues = make(map[string]struct{})
+			for _, kv := range pairs {
+				if msgPairs[kv.Key] == nil {
+					msgPairs[kv.Key] = make(map[string]struct{})
+				}
+				// Keys are already lowercase from extractor, values are preserved.
+				// For matching, we lowercase both.
+				valLower := strings.ToLower(kv.Value)
+				msgPairs[kv.Key][valLower] = struct{}{}
+				msgValues[valLower] = struct{}{}
+			}
+		}
+		return msgPairs
+	}
+	getMsgValues := func() map[string]struct{} {
+		getMsgPairs() // ensure msgValues is populated
+		return msgValues
+	}
+
+	// Check all filters (AND semantics across filters).
+	for _, f := range queryFilters {
+		keyLower := strings.ToLower(f.Key)
+		valLower := strings.ToLower(f.Value)
+
+		if f.Key == "" && f.Value == "" {
+			// Both empty - matches everything, skip this filter
+			continue
+		} else if f.Value == "" {
+			// Key only: key=* pattern (key exists with any value)
+			// Check attrs
+			found := false
+			for k := range recAttrs {
+				if strings.EqualFold(k, f.Key) {
+					found = true
+					break
+				}
+			}
+			if found {
+				continue
+			}
+			// Check message body
+			pairs := getMsgPairs()
+			if _, ok := pairs[keyLower]; ok {
+				continue
+			}
+			return false // Key not found in either location
+		} else if f.Key == "" {
+			// Value only: *=value pattern (any key has this value)
+			// Check attrs
+			found := false
+			for _, v := range recAttrs {
+				if strings.EqualFold(v, f.Value) {
+					found = true
+					break
+				}
+			}
+			if found {
+				continue
+			}
+			// Check message body
+			values := getMsgValues()
+			if _, ok := values[valLower]; ok {
+				continue
+			}
+			return false // Value not found in either location
+		} else {
+			// Both key and value: exact key=value match
+			// Check attributes first (cheaper).
+			if v, ok := recAttrs[f.Key]; ok && strings.EqualFold(v, f.Value) {
+				continue // Found in attrs, this filter passes.
+			}
+
+			// Check message body.
+			pairs := getMsgPairs()
+			if values, ok := pairs[keyLower]; ok {
+				if _, found := values[valLower]; found {
+					continue // Found in message, this filter passes.
+				}
+			}
+
+			return false // Not found in either location.
 		}
 	}
 	return true
@@ -429,39 +521,102 @@ func applyTokenIndex(b *scannerBuilder, indexes index.IndexManager, chunkID chun
 	return true, false
 }
 
-// applyAttrKVIndex tries to use the attr KV index for position filtering.
-// Returns true if successful, false if index not available.
-func applyAttrKVIndex(b *scannerBuilder, indexes index.IndexManager, chunkID chunk.ChunkID, attrs []AttrFilter) (ok bool, empty bool) {
-	if len(attrs) == 0 {
+// applyKeyValueIndex tries to use both attr and kv indexes for position filtering.
+// For each filter, it unions positions from both indexes (OR semantics within a filter).
+// Across filters, it intersects positions (AND semantics).
+//
+// Supports wildcard patterns:
+//   - Key="foo", Value="bar" - uses KV index for exact key=value match
+//   - Key="foo", Value=""    - uses Key index for key existence
+//   - Key="", Value="bar"    - uses Value index for value existence
+//
+// Returns (true, false) if indexes were used and have matches.
+// Returns (true, true) if indexes were used but no matches exist.
+// Returns (false, false) if indexes not available (caller should add runtime filter).
+func applyKeyValueIndex(b *scannerBuilder, indexes index.IndexManager, chunkID chunk.ChunkID, filters []KeyValueFilter) (ok bool, empty bool) {
+	if len(filters) == 0 {
 		return true, false
 	}
 
-	kvIdx, err := indexes.OpenAttrKVIndex(chunkID)
-	if errors.Is(err, index.ErrIndexNotFound) {
-		return false, false
-	}
-	if err != nil {
-		return false, false
-	}
+	// Open all indexes we might need. We'll check availability per-filter.
+	// Attr indexes (authoritative)
+	attrKVIdx, attrKVErr := indexes.OpenAttrKVIndex(chunkID)
+	attrKeyIdx, attrKeyErr := indexes.OpenAttrKeyIndex(chunkID)
+	attrValIdx, attrValErr := indexes.OpenAttrValueIndex(chunkID)
 
-	reader := index.NewAttrKVIndexReader(chunkID, kvIdx.Entries())
+	// KV indexes (heuristic, from message body)
+	kvIdx, kvStatus, kvErr := indexes.OpenKVIndex(chunkID)
+	kvKeyIdx, kvKeyStatus, kvKeyErr := indexes.OpenKVKeyIndex(chunkID)
+	kvValIdx, kvValStatus, kvValErr := indexes.OpenKVValueIndex(chunkID)
 
-	// All attrs must be present (AND semantics).
-	for i, attr := range attrs {
-		// Lowercase for case-insensitive matching (indexes store lowercase)
-		positions, found := reader.Lookup(strings.ToLower(attr.Key), strings.ToLower(attr.Value))
-		if !found {
-			return true, true // attr not in chunk, no matches
-		}
-		if i == 0 {
-			if !b.addPositions(positions) {
-				return true, true
+	// For each filter, union positions from both attr and kv indexes.
+	// Across filters, intersect positions.
+	for _, f := range filters {
+		keyLower := strings.ToLower(f.Key)
+		valLower := strings.ToLower(f.Value)
+
+		var filterPositions []uint64
+
+		if f.Key == "" && f.Value == "" {
+			// Both empty - matches everything, skip this filter
+			continue
+		} else if f.Value == "" {
+			// Key only: key=* pattern (key exists with any value)
+			// Use key indexes
+			if attrKeyErr == nil {
+				reader := index.NewAttrKeyIndexReader(chunkID, attrKeyIdx.Entries())
+				if positions, found := reader.Lookup(keyLower); found {
+					filterPositions = unionPositions(filterPositions, positions)
+				}
+			}
+			if kvKeyErr == nil && kvKeyStatus != index.KVCapped {
+				reader := index.NewKVKeyIndexReader(chunkID, kvKeyIdx.Entries())
+				if positions, found := reader.Lookup(keyLower); found {
+					filterPositions = unionPositions(filterPositions, positions)
+				}
+			}
+		} else if f.Key == "" {
+			// Value only: *=value pattern (any key has this value)
+			// Use value indexes
+			if attrValErr == nil {
+				reader := index.NewAttrValueIndexReader(chunkID, attrValIdx.Entries())
+				if positions, found := reader.Lookup(valLower); found {
+					filterPositions = unionPositions(filterPositions, positions)
+				}
+			}
+			if kvValErr == nil && kvValStatus != index.KVCapped {
+				reader := index.NewKVValueIndexReader(chunkID, kvValIdx.Entries())
+				if positions, found := reader.Lookup(valLower); found {
+					filterPositions = unionPositions(filterPositions, positions)
+				}
 			}
 		} else {
-			// Intersect with existing positions.
-			if !b.addPositions(positions) {
-				return true, true
+			// Both key and value: exact key=value match
+			// Use KV indexes
+			if attrKVErr == nil {
+				reader := index.NewAttrKVIndexReader(chunkID, attrKVIdx.Entries())
+				if positions, found := reader.Lookup(keyLower, valLower); found {
+					filterPositions = unionPositions(filterPositions, positions)
+				}
 			}
+			if kvErr == nil && kvStatus != index.KVCapped {
+				reader := index.NewKVIndexReader(chunkID, kvIdx.Entries())
+				if positions, found := reader.Lookup(f.Key, f.Value); found {
+					filterPositions = unionPositions(filterPositions, positions)
+				}
+			}
+		}
+
+		// If no positions found for this filter, fall back to runtime filtering.
+		// KV indexes are accelerators, not authorities - an index miss does NOT
+		// imply no matching records exist. The (key,value) pair might not have
+		// been admitted to the index due to budget limits or cardinality caps.
+		if len(filterPositions) == 0 {
+			return false, false
+		}
+
+		if !b.addPositions(filterPositions) {
+			return true, true
 		}
 	}
 

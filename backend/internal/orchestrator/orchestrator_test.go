@@ -11,6 +11,7 @@ import (
 	"gastrolog/internal/index"
 	indexmem "gastrolog/internal/index/memory"
 	memattr "gastrolog/internal/index/memory/attr"
+	"gastrolog/internal/index/memory/kv"
 	memtime "gastrolog/internal/index/memory/time"
 	memtoken "gastrolog/internal/index/memory/token"
 	"gastrolog/internal/orchestrator"
@@ -52,12 +53,14 @@ func newTestSetup(maxRecords int64) (*orchestrator.Orchestrator, chunk.ChunkMana
 	timeIdx := memtime.NewIndexer(cm, 1)
 	tokIdx := memtoken.NewIndexer(cm)
 	attrIdx := memattr.NewIndexer(cm)
+	kvIdx := kv.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, tokIdx, attrIdx},
+		[]index.Indexer{timeIdx, tokIdx, attrIdx, kvIdx},
 		timeIdx,
 		tokIdx,
 		attrIdx,
+		kvIdx,
 		nil,
 	)
 
@@ -234,7 +237,7 @@ func TestSearchViaOrchestrator(t *testing.T) {
 	}
 
 	// Compare with direct query engine call.
-	qe := query.New(cm, indexmem.NewManager(nil, nil, nil, nil, nil), nil)
+	qe := query.New(cm, indexmem.NewManager(nil, nil, nil, nil, nil, nil), nil)
 	directSeq, _ := qe.Search(context.Background(), query.Query{}, nil)
 
 	var directResults []string
@@ -456,12 +459,14 @@ func newReceiverTestSetup() (*orchestrator.Orchestrator, chunk.ChunkManager) {
 	timeIdx := memtime.NewIndexer(cm, 1)
 	tokIdx := memtoken.NewIndexer(cm)
 	attrIdx := memattr.NewIndexer(cm)
+	kvIdx := kv.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, tokIdx, attrIdx},
+		[]index.Indexer{timeIdx, tokIdx, attrIdx, kvIdx},
 		timeIdx,
 		tokIdx,
 		attrIdx,
+		kvIdx,
 		nil,
 	)
 
@@ -618,12 +623,14 @@ func TestReceiverIndexBuildOnSeal(t *testing.T) {
 	timeIdx := memtime.NewIndexer(cm, 1)
 	tokIdx := memtoken.NewIndexer(cm)
 	attrIdx := memattr.NewIndexer(cm)
+	kvIdx := kv.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, tokIdx, attrIdx},
+		[]index.Indexer{timeIdx, tokIdx, attrIdx, kvIdx},
 		timeIdx,
 		tokIdx,
 		attrIdx,
+		kvIdx,
 		nil,
 	)
 
@@ -756,5 +763,191 @@ func TestHighVolumeIngestion(t *testing.T) {
 
 	if count != 100 {
 		t.Errorf("expected 100 records, got %d", count)
+	}
+}
+
+// Registry accessor tests
+
+func TestChunkManagerAccessor(t *testing.T) {
+	orch, cm, _ := newTestSetup(1 << 20)
+
+	// Get by key.
+	got := orch.ChunkManager("default")
+	if got != cm {
+		t.Error("expected ChunkManager to return registered manager")
+	}
+
+	// Empty key defaults to "default".
+	got = orch.ChunkManager("")
+	if got != cm {
+		t.Error("expected empty key to default to 'default'")
+	}
+
+	// Unknown key returns nil.
+	got = orch.ChunkManager("nonexistent")
+	if got != nil {
+		t.Error("expected nil for unknown key")
+	}
+}
+
+func TestChunkManagersAccessor(t *testing.T) {
+	orch, _, _ := newTestSetup(1 << 20)
+
+	keys := orch.ChunkManagers()
+	if len(keys) != 1 {
+		t.Fatalf("expected 1 key, got %d", len(keys))
+	}
+	if keys[0] != "default" {
+		t.Errorf("expected 'default', got %q", keys[0])
+	}
+}
+
+func TestIndexManagerAccessor(t *testing.T) {
+	orch, _, tracker := newTestSetup(1 << 20)
+
+	// Get by key.
+	got := orch.IndexManager("default")
+	if got != tracker {
+		t.Error("expected IndexManager to return registered manager")
+	}
+
+	// Empty key defaults to "default".
+	got = orch.IndexManager("")
+	if got != tracker {
+		t.Error("expected empty key to default to 'default'")
+	}
+
+	// Unknown key returns nil.
+	got = orch.IndexManager("nonexistent")
+	if got != nil {
+		t.Error("expected nil for unknown key")
+	}
+}
+
+func TestIndexManagersAccessor(t *testing.T) {
+	orch, _, _ := newTestSetup(1 << 20)
+
+	keys := orch.IndexManagers()
+	if len(keys) != 1 {
+		t.Fatalf("expected 1 key, got %d", len(keys))
+	}
+	if keys[0] != "default" {
+		t.Errorf("expected 'default', got %q", keys[0])
+	}
+}
+
+func TestReceiversAccessor(t *testing.T) {
+	orch, _ := newReceiverTestSetup()
+
+	recv1 := newBlockingReceiver()
+	recv2 := newBlockingReceiver()
+	orch.RegisterReceiver("recv1", recv1)
+	orch.RegisterReceiver("recv2", recv2)
+
+	keys := orch.Receivers()
+	if len(keys) != 2 {
+		t.Fatalf("expected 2 keys, got %d", len(keys))
+	}
+
+	// Keys may be in any order.
+	found := make(map[string]bool)
+	for _, k := range keys {
+		found[k] = true
+	}
+	if !found["recv1"] || !found["recv2"] {
+		t.Errorf("expected recv1 and recv2, got %v", keys)
+	}
+}
+
+func TestRunningAccessor(t *testing.T) {
+	orch, _ := newReceiverTestSetup()
+
+	if orch.Running() {
+		t.Error("expected Running() = false before Start()")
+	}
+
+	if err := orch.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	if !orch.Running() {
+		t.Error("expected Running() = true after Start()")
+	}
+
+	if err := orch.Stop(); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+
+	if orch.Running() {
+		t.Error("expected Running() = false after Stop()")
+	}
+}
+
+func TestRebuildMissingIndexes(t *testing.T) {
+	// Set up with small chunk to seal it.
+	cm, _ := chunkmem.NewManager(chunkmem.Config{
+		RotationPolicy: recordCountPolicy(2),
+	})
+
+	// Append 3 records to seal the first chunk.
+	for i := 0; i < 3; i++ {
+		cm.Append(chunk.Record{
+			IngestTS: t1.Add(time.Duration(i) * time.Second),
+			Attrs:    attrsA,
+			Raw:      []byte("record"),
+		})
+	}
+
+	// Create fresh indexers that haven't indexed anything.
+	timeIdx := memtime.NewIndexer(cm, 1)
+	tokIdx := memtoken.NewIndexer(cm)
+	attrIdx := memattr.NewIndexer(cm)
+	kvIdx := kv.NewIndexer(cm)
+
+	im := indexmem.NewManager(
+		[]index.Indexer{timeIdx, tokIdx, attrIdx, kvIdx},
+		timeIdx,
+		tokIdx,
+		attrIdx,
+		kvIdx,
+		nil,
+	)
+
+	tracker := &trackingIndexManager{IndexManager: im}
+
+	orch := orchestrator.New(orchestrator.Config{})
+	orch.RegisterChunkManager("default", cm)
+	orch.RegisterIndexManager("default", tracker)
+
+	// RebuildMissingIndexes should find the sealed chunk and build indexes.
+	if err := orch.RebuildMissingIndexes(context.Background()); err != nil {
+		t.Fatalf("RebuildMissingIndexes failed: %v", err)
+	}
+
+	// Wait for async build.
+	time.Sleep(100 * time.Millisecond)
+
+	// Should have triggered at least one build.
+	count := tracker.buildCount.Load()
+	if count == 0 {
+		t.Error("expected at least one index build from RebuildMissingIndexes")
+	}
+}
+
+func TestSearchThenFollowUnknownRegistry(t *testing.T) {
+	orch, _, _ := newTestSetup(1 << 20)
+
+	_, _, err := orch.SearchThenFollow(context.Background(), "nonexistent", query.Query{}, nil)
+	if err != orchestrator.ErrUnknownRegistry {
+		t.Errorf("expected ErrUnknownRegistry, got %v", err)
+	}
+}
+
+func TestSearchWithContextUnknownRegistry(t *testing.T) {
+	orch, _, _ := newTestSetup(1 << 20)
+
+	_, _, err := orch.SearchWithContext(context.Background(), "nonexistent", query.Query{})
+	if err != orchestrator.ErrUnknownRegistry {
+		t.Errorf("expected ErrUnknownRegistry, got %v", err)
 	}
 }

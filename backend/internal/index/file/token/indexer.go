@@ -13,8 +13,8 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/format"
-	"gastrolog/internal/index/token"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/tokenizer"
 )
 
 // FNV-1a constants
@@ -337,7 +337,7 @@ func (t *Indexer) countTokens(ctx context.Context, chunkID chunk.ChunkID, intern
 		// Clear seen set for this record (reuse map to avoid allocs).
 		clear(seenInRecord)
 
-		token.IterBytes(rec.Raw, tokBuf, token.DefaultMaxTokenLen, func(tokBytes []byte) bool {
+		tokenizer.IterTokens(rec.Raw, tokBuf, tokenizer.DefaultMaxTokenLen, func(tokBytes []byte) bool {
 			// Intern the token (allocates only on first global occurrence).
 			tok := intern.intern(tokBytes)
 
@@ -393,7 +393,7 @@ func (t *Indexer) fillPostingsToFile(ctx context.Context, chunkID chunk.ChunkID,
 		// Clear seen set for this record.
 		clear(seenInRecord)
 
-		token.IterBytes(rec.Raw, tokBuf, token.DefaultMaxTokenLen, func(tokBytes []byte) bool {
+		tokenizer.IterTokens(rec.Raw, tokBuf, tokenizer.DefaultMaxTokenLen, func(tokBytes []byte) bool {
 			// Look up the interned token (no allocation).
 			tok := intern.lookup(tokBytes)
 

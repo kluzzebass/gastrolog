@@ -24,18 +24,21 @@ const (
 	Signature  = 'i'
 	HeaderSize = 4
 
-	TypeTimeIndex      = 't'
-	TypeSourceIndex    = 's' // Deprecated: source index no longer used
-	TypeTokenIndex     = 'k'
-	TypeAttrKeyIndex   = 'K' // Attribute key index
-	TypeAttrValueIndex = 'V' // Attribute value index
-	TypeAttrKVIndex    = 'P' // Attribute key-value pair index
-	TypeChunkMeta      = 'm' // Deprecated: meta.bin no longer used
-	TypeSourceRegistry = 'z' // Deprecated: source registry no longer used
-	TypeChunkSourceMap = 'c' // Deprecated: sources.bin no longer used
-	TypeRawLog         = 'r'
-	TypeIdxLog         = 'i'
-	TypeAttrLog        = 'a'
+	TypeTimeIndex       = 't'
+	TypeSourceIndex     = 's' // Deprecated: source index no longer used
+	TypeTokenIndex      = 'k'
+	TypeAttrKeyIndex    = 'K' // Attribute key index
+	TypeAttrValueIndex  = 'V' // Attribute value index
+	TypeAttrKVIndex     = 'P' // Attribute key-value pair index
+	TypeKVIndex      = 'M' // Key-value pair index (heuristic)
+	TypeKVKeyIndex   = 'N' // Key index (heuristic)
+	TypeKVValueIndex = 'O' // Value index (heuristic)
+	TypeChunkMeta       = 'm' // Deprecated: meta.bin no longer used
+	TypeSourceRegistry  = 'z' // Deprecated: source registry no longer used
+	TypeChunkSourceMap  = 'c' // Deprecated: sources.bin no longer used
+	TypeRawLog          = 'r'
+	TypeIdxLog          = 'i'
+	TypeAttrLog         = 'a'
 
 	// Flag bits for raw.log, idx.log, and attr.log headers.
 	FlagSealed = 0x01

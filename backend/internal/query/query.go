@@ -16,10 +16,17 @@ import (
 	"gastrolog/internal/logging"
 )
 
-// AttrFilter represents a key=value attribute filter.
-type AttrFilter struct {
-	Key   string
-	Value string
+// KeyValueFilter represents a key=value filter that searches both
+// record attributes and key=value pairs extracted from the message body.
+// The filter matches if the key=value pair is found in either location.
+//
+// Wildcard patterns:
+//   - Key="foo", Value="bar" - exact match for foo=bar
+//   - Key="foo", Value=""    - match any record with key "foo" (any value)
+//   - Key="", Value="bar"    - match any record with value "bar" (any key)
+type KeyValueFilter struct {
+	Key   string // empty string means "any key"
+	Value string // empty string means "any value"
 }
 
 // Query describes what records to search for.
@@ -29,8 +36,8 @@ type Query struct {
 	End   time.Time // exclusive bound (upper for forward, lower for reverse)
 
 	// Optional filters
-	Tokens []string     // filter by tokens (nil = no filter, AND semantics)
-	Attrs  []AttrFilter // filter by attributes (nil = no filter, AND semantics)
+	Tokens []string         // filter by tokens (nil = no filter, AND semantics)
+	KV     []KeyValueFilter // filter by key=value in attrs OR message (nil = no filter, AND semantics)
 
 	// Result control
 	Limit int // max results (0 = unlimited)
@@ -242,20 +249,21 @@ func (e *Engine) buildScanner(cursor chunk.RecordCursor, q Query, meta chunk.Chu
 		}
 	}
 
-	// Apply attr filter: try index first, fall back to runtime filter.
-	if len(q.Attrs) > 0 {
+	// Apply key=value filter: try both attr and kv indexes, union results.
+	// Falls back to runtime filter if indexes aren't available.
+	if len(q.KV) > 0 {
 		if meta.Sealed {
-			ok, empty := applyAttrKVIndex(b, e.indexes, meta.ID, q.Attrs)
+			ok, empty := applyKeyValueIndex(b, e.indexes, meta.ID, q.KV)
 			if empty {
 				return emptyScanner(), nil
 			}
 			if !ok {
 				// Index not available, use runtime filter.
-				b.addFilter(attrFilter(q.Attrs))
+				b.addFilter(keyValueFilter(q.KV))
 			}
 		} else {
 			// Unsealed chunks don't have indexes.
-			b.addFilter(attrFilter(q.Attrs))
+			b.addFilter(keyValueFilter(q.KV))
 		}
 	}
 

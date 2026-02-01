@@ -1,11 +1,11 @@
-package token
+package tokenizer
 
 const (
 	minTokenLen        = 2
 	DefaultMaxTokenLen = 16
 )
 
-// IterBytes calls fn for each indexable token in data, passing the raw bytes.
+// IterTokens calls fn for each indexable token in data, passing the raw bytes.
 // The byte slice passed to fn is reused between calls and must not be retained.
 // If fn returns false, iteration stops early.
 //
@@ -15,8 +15,14 @@ const (
 // The maxLen parameter sets the maximum token length. Tokens longer than this
 // are truncated. Use DefaultMaxTokenLen for the standard limit.
 //
-// See package documentation for token rules.
-func IterBytes(data []byte, buf []byte, maxLen int, fn func(token []byte) bool) {
+// Token characters (ASCII only):
+//   - 'a'-'z', 'A'-'Z' (lowercased)
+//   - '0'-'9'
+//   - '_', '-'
+//
+// All other bytes are delimiters.
+// Tokens must be 2-16 bytes. Numeric and UUID tokens are excluded.
+func IterTokens(data []byte, buf []byte, maxLen int, fn func(token []byte) bool) {
 	if len(data) == 0 {
 		return
 	}
@@ -32,7 +38,7 @@ func IterBytes(data []byte, buf []byte, maxLen int, fn func(token []byte) bool) 
 	for _, b := range data {
 		if isTokenByte(b) {
 			if len(current) < maxLen {
-				current = append(current, lowercase(b))
+				current = append(current, Lowercase(b))
 			}
 			// If at max length, keep consuming but don't append.
 		} else {
@@ -51,22 +57,13 @@ func IterBytes(data []byte, buf []byte, maxLen int, fn func(token []byte) bool) 
 	}
 }
 
-// Simple extracts indexable tokens from raw log data using DefaultMaxTokenLen.
-//
-// Token characters (ASCII only):
-//   - 'a'-'z', 'A'-'Z' (lowercased)
-//   - '0'-'9'
-//   - '_', '-'
-//
-// All other bytes are delimiters.
-//
-// Tokens must be 2-16 bytes. Numeric and UUID tokens are excluded.
-func Simple(data []byte) []string {
-	return SimpleWithMaxLen(data, DefaultMaxTokenLen)
+// Tokens extracts indexable tokens from raw log data using DefaultMaxTokenLen.
+func Tokens(data []byte) []string {
+	return TokensWithMaxLen(data, DefaultMaxTokenLen)
 }
 
-// SimpleWithMaxLen extracts indexable tokens with a custom max length.
-func SimpleWithMaxLen(data []byte, maxLen int) []string {
+// TokensWithMaxLen extracts indexable tokens with a custom max length.
+func TokensWithMaxLen(data []byte, maxLen int) []string {
 	if len(data) == 0 {
 		return nil
 	}
@@ -80,7 +77,7 @@ func SimpleWithMaxLen(data []byte, maxLen int) []string {
 	for _, b := range data {
 		if isTokenByte(b) {
 			if len(current) < maxLen {
-				current = append(current, lowercase(b))
+				current = append(current, Lowercase(b))
 			}
 		} else {
 			if len(current) >= minTokenLen && isIndexable(current) {
@@ -120,14 +117,6 @@ func isTokenByte(b byte) bool {
 	}
 }
 
-// lowercase converts ASCII uppercase to lowercase.
-func lowercase(b byte) byte {
-	if b >= 'A' && b <= 'Z' {
-		return b + ('a' - 'A')
-	}
-	return b
-}
-
 // isIndexable returns true if the token should be indexed.
 // Excludes numeric-like tokens and UUIDs.
 func isIndexable(tok []byte) bool {
@@ -165,7 +154,7 @@ func isNumeric(tok []byte) bool {
 	allHexOrHyphen := true
 	hasHex := false
 	for _, b := range tok {
-		if isHexDigit(b) {
+		if IsHexDigit(b) {
 			hasHex = true
 		} else if b != '-' {
 			allHexOrHyphen = false
@@ -188,7 +177,7 @@ func isPrefixedNumber(tok []byte) bool {
 	for _, b := range tok[2:] {
 		switch base {
 		case 'x':
-			if !isHexDigit(b) {
+			if !IsHexDigit(b) {
 				return false
 			}
 		case 'o':
@@ -202,11 +191,6 @@ func isPrefixedNumber(tok []byte) bool {
 		}
 	}
 	return true
-}
-
-// isHexDigit returns true if b is 0-9 or a-f.
-func isHexDigit(b byte) bool {
-	return (b >= '0' && b <= '9') || (b >= 'a' && b <= 'f')
 }
 
 // isUUID checks if tok matches the canonical UUID format: 8-4-4-4-12 hex digits.
@@ -227,7 +211,7 @@ func isUUID(tok []byte) bool {
 		if i == 8 || i == 13 || i == 18 || i == 23 {
 			continue
 		}
-		if !isHexDigit(b) {
+		if !IsHexDigit(b) {
 			return false
 		}
 	}

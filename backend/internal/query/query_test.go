@@ -11,6 +11,7 @@ import (
 	"gastrolog/internal/index"
 	indexmem "gastrolog/internal/index/memory"
 	memattr "gastrolog/internal/index/memory/attr"
+	"gastrolog/internal/index/memory/kv"
 	memtime "gastrolog/internal/index/memory/time"
 	memtoken "gastrolog/internal/index/memory/token"
 	"gastrolog/internal/query"
@@ -137,12 +138,14 @@ func setup(t *testing.T, batches ...[]chunk.Record) *query.Engine {
 	timeIdx := memtime.NewIndexer(cm, 1) // sparsity 1 = index every record
 	tokIdx := memtoken.NewIndexer(cm)
 	attrIdx := memattr.NewIndexer(cm)
+	kvIdx := kv.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, tokIdx, attrIdx},
+		[]index.Indexer{timeIdx, tokIdx, attrIdx, kvIdx},
 		timeIdx,
 		tokIdx,
 		attrIdx,
+		kvIdx,
 		nil,
 	)
 
@@ -186,12 +189,14 @@ func setupWithActive(t *testing.T, sealed [][]chunk.Record, active []chunk.Recor
 	timeIdx := memtime.NewIndexer(cm, 1)
 	tokIdx := memtoken.NewIndexer(cm)
 	attrIdx := memattr.NewIndexer(cm)
+	kvIdx := kv.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, tokIdx, attrIdx},
+		[]index.Indexer{timeIdx, tokIdx, attrIdx, kvIdx},
 		timeIdx,
 		tokIdx,
 		attrIdx,
+		kvIdx,
 		nil,
 	)
 
@@ -1919,11 +1924,13 @@ func TestSearchSealedWithoutIndexes(t *testing.T) {
 	timeIdx := memtime.NewIndexer(cm, 1)
 	tokIdx := memtoken.NewIndexer(cm)
 	attrIdx := memattr.NewIndexer(cm)
+	kvIdx := kv.NewIndexer(cm)
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, tokIdx, attrIdx},
+		[]index.Indexer{timeIdx, tokIdx, attrIdx, kvIdx},
 		timeIdx,
 		tokIdx,
 		attrIdx,
+		kvIdx,
 		nil,
 	)
 	// Note: NOT calling buildIndexes - indexes don't exist.
@@ -2200,4 +2207,326 @@ func TestCrossChunkWithActiveChunk(t *testing.T) {
 			t.Errorf("got %q, want %q", results2[0].Raw, "a-r2")
 		}
 	})
+}
+
+// =============================================================================
+// KeyValueFilter tests - unified attr + message body filtering
+// =============================================================================
+
+func TestSearchKeyValueFilterInAttrs(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, Attrs: chunk.Attributes{"level": "error", "service": "api"}, Raw: []byte("message one")},
+		{IngestTS: t2, Attrs: chunk.Attributes{"level": "info", "service": "api"}, Raw: []byte("message two")},
+		{IngestTS: t3, Attrs: chunk.Attributes{"level": "error", "service": "web"}, Raw: []byte("message three")},
+	}
+
+	eng := setup(t, records)
+
+	// Filter by attr level=error
+	results, err := collect(search(eng, context.Background(), query.Query{
+		KV: []query.KeyValueFilter{{Key: "level", Value: "error"}},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if string(results[0].Raw) != "message one" || string(results[1].Raw) != "message three" {
+		t.Errorf("unexpected results: %v", results)
+	}
+}
+
+func TestSearchKeyValueFilterInMessage(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("status=200 method=GET path=/api")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("status=500 method=POST path=/api")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("status=200 method=POST path=/web")},
+	}
+
+	eng := setup(t, records)
+
+	// Filter by message key=value status=500
+	results, err := collect(search(eng, context.Background(), query.Query{
+		KV: []query.KeyValueFilter{{Key: "status", Value: "500"}},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if string(results[0].Raw) != "status=500 method=POST path=/api" {
+		t.Errorf("unexpected result: %s", results[0].Raw)
+	}
+}
+
+func TestSearchKeyValueFilterUnionAttrsAndMessage(t *testing.T) {
+	// Test that the same key=value filter finds matches in EITHER attrs OR message body
+	records := []chunk.Record{
+		{IngestTS: t1, Attrs: chunk.Attributes{"level": "error"}, Raw: []byte("simple message")},       // match in attrs
+		{IngestTS: t2, Attrs: chunk.Attributes{}, Raw: []byte("level=error in the body")},              // match in message
+		{IngestTS: t3, Attrs: chunk.Attributes{"level": "info"}, Raw: []byte("level=error also here")}, // match in message, different attr
+		{IngestTS: t4, Attrs: chunk.Attributes{"level": "info"}, Raw: []byte("no match here")},         // no match
+	}
+
+	eng := setup(t, records)
+
+	// Filter by level=error - should find in attrs OR message
+	results, err := collect(search(eng, context.Background(), query.Query{
+		KV: []query.KeyValueFilter{{Key: "level", Value: "error"}},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+	want := []string{"simple message", "level=error in the body", "level=error also here"}
+	for i, w := range want {
+		if string(results[i].Raw) != w {
+			t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, w)
+		}
+	}
+}
+
+func TestSearchKeyValueFilterMultipleFiltersAND(t *testing.T) {
+	// Multiple filters have AND semantics - all must match (in attrs OR message)
+	records := []chunk.Record{
+		{IngestTS: t1, Attrs: chunk.Attributes{"level": "error", "service": "api"}, Raw: []byte("msg")},           // both in attrs
+		{IngestTS: t2, Attrs: chunk.Attributes{"level": "error"}, Raw: []byte("service=api here")},                // one in attrs, one in msg
+		{IngestTS: t3, Attrs: chunk.Attributes{}, Raw: []byte("level=error service=api")},                         // both in msg
+		{IngestTS: t4, Attrs: chunk.Attributes{"level": "error"}, Raw: []byte("service=web wrong")},               // level matches, service doesn't
+		{IngestTS: t5, Attrs: chunk.Attributes{"level": "info", "service": "api"}, Raw: []byte("no level match")}, // service matches, level doesn't
+	}
+
+	eng := setup(t, records)
+
+	// Filter by level=error AND service=api
+	results, err := collect(search(eng, context.Background(), query.Query{
+		KV: []query.KeyValueFilter{
+			{Key: "level", Value: "error"},
+			{Key: "service", Value: "api"},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+}
+
+func TestSearchKeyValueFilterCaseInsensitive(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, Attrs: chunk.Attributes{"Level": "ERROR"}, Raw: []byte("upper case attrs")},
+		{IngestTS: t2, Attrs: chunk.Attributes{}, Raw: []byte("LEVEL=error mixed case")},
+		{IngestTS: t3, Attrs: chunk.Attributes{"level": "error"}, Raw: []byte("lower case attrs")},
+	}
+
+	eng := setup(t, records)
+
+	// Query with lowercase - should match all due to case-insensitive comparison
+	results, err := collect(search(eng, context.Background(), query.Query{
+		KV: []query.KeyValueFilter{{Key: "level", Value: "error"}},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+}
+
+func TestSearchKeyValueFilterActiveChunk(t *testing.T) {
+	// Test key=value filtering on unsealed chunk (no indexes, runtime filter only)
+	active := []chunk.Record{
+		{IngestTS: t1, Attrs: chunk.Attributes{"env": "prod"}, Raw: []byte("prod message")},
+		{IngestTS: t2, Attrs: chunk.Attributes{"env": "dev"}, Raw: []byte("env=prod in body")},
+		{IngestTS: t3, Attrs: chunk.Attributes{"env": "dev"}, Raw: []byte("dev message")},
+	}
+
+	eng := setupWithActive(t, nil, active)
+
+	results, err := collect(search(eng, context.Background(), query.Query{
+		KV: []query.KeyValueFilter{{Key: "env", Value: "prod"}},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+}
+
+func TestSearchKeyValueFilterWithTokens(t *testing.T) {
+	// Combine key=value filter with token filter
+	records := []chunk.Record{
+		{IngestTS: t1, Attrs: chunk.Attributes{"level": "error"}, Raw: []byte("error connecting to database")},
+		{IngestTS: t2, Attrs: chunk.Attributes{"level": "error"}, Raw: []byte("timeout waiting")},
+		{IngestTS: t3, Attrs: chunk.Attributes{"level": "info"}, Raw: []byte("error is expected")},
+	}
+
+	eng := setup(t, records)
+
+	// Filter by level=error AND token "database"
+	results, err := collect(search(eng, context.Background(), query.Query{
+		KV:     []query.KeyValueFilter{{Key: "level", Value: "error"}},
+		Tokens: []string{"database"},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if string(results[0].Raw) != "error connecting to database" {
+		t.Errorf("unexpected result: %s", results[0].Raw)
+	}
+}
+
+func TestSearchKeyValueFilterNoMatch(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, Attrs: chunk.Attributes{"level": "info"}, Raw: []byte("info message")},
+		{IngestTS: t2, Attrs: chunk.Attributes{"level": "warn"}, Raw: []byte("warn message")},
+	}
+
+	eng := setup(t, records)
+
+	// Filter by nonexistent key=value
+	results, err := collect(search(eng, context.Background(), query.Query{
+		KV: []query.KeyValueFilter{{Key: "level", Value: "error"}},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results, got %d", len(results))
+	}
+}
+
+// =============================================================================
+// Wildcard KeyValueFilter tests - key=* and *=value patterns
+// =============================================================================
+
+func TestSearchKeyValueFilterKeyWildcard(t *testing.T) {
+	// key=* pattern: match any record where key exists (any value)
+	records := []chunk.Record{
+		{IngestTS: t1, Attrs: chunk.Attributes{"env": "prod"}, Raw: []byte("message one")},
+		{IngestTS: t2, Attrs: chunk.Attributes{"env": "dev"}, Raw: []byte("message two")},
+		{IngestTS: t3, Attrs: chunk.Attributes{"level": "error"}, Raw: []byte("no env attr")},
+		{IngestTS: t4, Attrs: chunk.Attributes{}, Raw: []byte("env=staging in body")},
+	}
+
+	eng := setup(t, records)
+
+	// Filter by env=* (key exists with any value)
+	results, err := collect(search(eng, context.Background(), query.Query{
+		KV: []query.KeyValueFilter{{Key: "env", Value: ""}}, // empty Value = any value
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should match: t1 (attr), t2 (attr), t4 (message body)
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+	want := []string{"message one", "message two", "env=staging in body"}
+	for i, w := range want {
+		if string(results[i].Raw) != w {
+			t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, w)
+		}
+	}
+}
+
+func TestSearchKeyValueFilterValueWildcard(t *testing.T) {
+	// *=value pattern: match any record where any key has this value
+	records := []chunk.Record{
+		{IngestTS: t1, Attrs: chunk.Attributes{"level": "error"}, Raw: []byte("level attr")},
+		{IngestTS: t2, Attrs: chunk.Attributes{"status": "error"}, Raw: []byte("status attr")},
+		{IngestTS: t3, Attrs: chunk.Attributes{"level": "info"}, Raw: []byte("result=error in body")},
+		{IngestTS: t4, Attrs: chunk.Attributes{}, Raw: []byte("no error anywhere")},
+	}
+
+	eng := setup(t, records)
+
+	// Filter by *=error (any key has value "error")
+	results, err := collect(search(eng, context.Background(), query.Query{
+		KV: []query.KeyValueFilter{{Key: "", Value: "error"}}, // empty Key = any key
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should match: t1, t2, t3 (all have "error" as a value somewhere)
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+}
+
+func TestSearchKeyValueFilterKeyWildcardActiveChunk(t *testing.T) {
+	// Test key=* on unsealed chunk (no indexes, runtime filter only)
+	active := []chunk.Record{
+		{IngestTS: t1, Attrs: chunk.Attributes{"host": "server1"}, Raw: []byte("active one")},
+		{IngestTS: t2, Attrs: chunk.Attributes{}, Raw: []byte("host=server2 in body")},
+		{IngestTS: t3, Attrs: chunk.Attributes{"service": "api"}, Raw: []byte("no host key")},
+	}
+
+	eng := setupWithActive(t, nil, active)
+
+	results, err := collect(search(eng, context.Background(), query.Query{
+		KV: []query.KeyValueFilter{{Key: "host", Value: ""}},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+}
+
+func TestSearchKeyValueFilterCombinedWildcards(t *testing.T) {
+	// Combine wildcard with exact match (AND semantics)
+	records := []chunk.Record{
+		{IngestTS: t1, Attrs: chunk.Attributes{"env": "prod", "level": "error"}, Raw: []byte("both attrs")},
+		{IngestTS: t2, Attrs: chunk.Attributes{"env": "dev", "level": "error"}, Raw: []byte("env dev")},
+		{IngestTS: t3, Attrs: chunk.Attributes{"env": "prod"}, Raw: []byte("level=info only")},
+		{IngestTS: t4, Attrs: chunk.Attributes{"level": "error"}, Raw: []byte("env=prod in body")},
+	}
+
+	eng := setup(t, records)
+
+	// Filter by env=* AND level=error
+	results, err := collect(search(eng, context.Background(), query.Query{
+		KV: []query.KeyValueFilter{
+			{Key: "env", Value: ""},        // env exists
+			{Key: "level", Value: "error"}, // level=error
+		},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should match: t1 (both in attrs), t2 (both in attrs), t4 (env in body, level in attr)
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+}
+
+func TestSearchKeyValueFilterKeyWildcardNoMatch(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, Attrs: chunk.Attributes{"level": "error"}, Raw: []byte("no env key")},
+		{IngestTS: t2, Attrs: chunk.Attributes{}, Raw: []byte("still no env")},
+	}
+
+	eng := setup(t, records)
+
+	// Filter by env=* (key exists) - no matches
+	results, err := collect(search(eng, context.Background(), query.Query{
+		KV: []query.KeyValueFilter{{Key: "env", Value: ""}},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results, got %d", len(results))
+	}
 }

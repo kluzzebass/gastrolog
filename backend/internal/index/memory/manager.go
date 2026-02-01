@@ -20,6 +20,13 @@ type AttrIndexStore interface {
 	GetKV(chunkID chunk.ChunkID) ([]index.AttrKVIndexEntry, bool)
 }
 
+// KVIndexStore provides access to all three kv index types.
+type KVIndexStore interface {
+	GetKey(chunkID chunk.ChunkID) ([]index.KVKeyIndexEntry, index.KVIndexStatus, bool)
+	GetValue(chunkID chunk.ChunkID) ([]index.KVValueIndexEntry, index.KVIndexStatus, bool)
+	GetKV(chunkID chunk.ChunkID) ([]index.KVIndexEntry, index.KVIndexStatus, bool)
+}
+
 // Manager manages in-memory index storage.
 //
 // Logging:
@@ -32,6 +39,7 @@ type Manager struct {
 	timeStore  IndexStore[index.TimeIndexEntry]
 	tokenStore IndexStore[index.TokenIndexEntry]
 	attrStore  AttrIndexStore
+	kvStore KVIndexStore
 	builder    *index.BuildHelper
 
 	// Logger for this manager instance.
@@ -46,6 +54,7 @@ func NewManager(
 	timeStore IndexStore[index.TimeIndexEntry],
 	tokenStore IndexStore[index.TokenIndexEntry],
 	attrStore AttrIndexStore,
+	kvStore KVIndexStore,
 	logger *slog.Logger,
 ) *Manager {
 	return &Manager{
@@ -53,6 +62,7 @@ func NewManager(
 		timeStore:  timeStore,
 		tokenStore: tokenStore,
 		attrStore:  attrStore,
+		kvStore: kvStore,
 		builder:    index.NewBuildHelper(),
 		logger:     logging.Default(logger).With("component", "index-manager", "type", "memory"),
 	}
@@ -114,6 +124,39 @@ func (m *Manager) OpenAttrKVIndex(chunkID chunk.ChunkID) (*index.Index[index.Att
 	return index.NewIndex(entries), nil
 }
 
+func (m *Manager) OpenKVKeyIndex(chunkID chunk.ChunkID) (*index.Index[index.KVKeyIndexEntry], index.KVIndexStatus, error) {
+	if m.kvStore == nil {
+		return nil, index.KVComplete, index.ErrIndexNotFound
+	}
+	entries, status, ok := m.kvStore.GetKey(chunkID)
+	if !ok {
+		return nil, index.KVComplete, index.ErrIndexNotFound
+	}
+	return index.NewIndex(entries), status, nil
+}
+
+func (m *Manager) OpenKVValueIndex(chunkID chunk.ChunkID) (*index.Index[index.KVValueIndexEntry], index.KVIndexStatus, error) {
+	if m.kvStore == nil {
+		return nil, index.KVComplete, index.ErrIndexNotFound
+	}
+	entries, status, ok := m.kvStore.GetValue(chunkID)
+	if !ok {
+		return nil, index.KVComplete, index.ErrIndexNotFound
+	}
+	return index.NewIndex(entries), status, nil
+}
+
+func (m *Manager) OpenKVIndex(chunkID chunk.ChunkID) (*index.Index[index.KVIndexEntry], index.KVIndexStatus, error) {
+	if m.kvStore == nil {
+		return nil, index.KVComplete, index.ErrIndexNotFound
+	}
+	entries, status, ok := m.kvStore.GetKV(chunkID)
+	if !ok {
+		return nil, index.KVComplete, index.ErrIndexNotFound
+	}
+	return index.NewIndex(entries), status, nil
+}
+
 // IndexesComplete reports whether all indexes exist for the given chunk.
 // For in-memory indexes, this checks if all stores have entries for the chunk.
 func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
@@ -133,6 +176,17 @@ func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
 			return false, nil
 		}
 		if _, ok := m.attrStore.GetKV(chunkID); !ok {
+			return false, nil
+		}
+	}
+	if m.kvStore != nil {
+		if _, _, ok := m.kvStore.GetKey(chunkID); !ok {
+			return false, nil
+		}
+		if _, _, ok := m.kvStore.GetValue(chunkID); !ok {
+			return false, nil
+		}
+		if _, _, ok := m.kvStore.GetKV(chunkID); !ok {
 			return false, nil
 		}
 	}

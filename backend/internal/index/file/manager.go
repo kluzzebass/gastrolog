@@ -10,6 +10,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
 	fileattr "gastrolog/internal/index/file/attr"
+	filekv "gastrolog/internal/index/file/kv"
 	filetime "gastrolog/internal/index/file/time"
 	filetoken "gastrolog/internal/index/file/token"
 	"gastrolog/internal/logging"
@@ -87,6 +88,30 @@ func (m *Manager) OpenAttrKVIndex(chunkID chunk.ChunkID) (*index.Index[index.Att
 	return index.NewIndex(entries), nil
 }
 
+func (m *Manager) OpenKVKeyIndex(chunkID chunk.ChunkID) (*index.Index[index.KVKeyIndexEntry], index.KVIndexStatus, error) {
+	entries, status, err := filekv.LoadKeyIndex(m.dir, chunkID)
+	if err != nil {
+		return nil, status, fmt.Errorf("open kv key index: %w", err)
+	}
+	return index.NewIndex(entries), status, nil
+}
+
+func (m *Manager) OpenKVValueIndex(chunkID chunk.ChunkID) (*index.Index[index.KVValueIndexEntry], index.KVIndexStatus, error) {
+	entries, status, err := filekv.LoadValueIndex(m.dir, chunkID)
+	if err != nil {
+		return nil, status, fmt.Errorf("open kv value index: %w", err)
+	}
+	return index.NewIndex(entries), status, nil
+}
+
+func (m *Manager) OpenKVIndex(chunkID chunk.ChunkID) (*index.Index[index.KVIndexEntry], index.KVIndexStatus, error) {
+	entries, status, err := filekv.LoadKVIndex(m.dir, chunkID)
+	if err != nil {
+		return nil, status, fmt.Errorf("open kv index: %w", err)
+	}
+	return index.NewIndex(entries), status, nil
+}
+
 // IndexesComplete reports whether all indexes exist for the given chunk.
 // Also cleans up any orphaned temporary files from interrupted builds.
 func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
@@ -97,6 +122,9 @@ func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
 		fileattr.KeyIndexPath(m.dir, chunkID),
 		fileattr.ValueIndexPath(m.dir, chunkID),
 		fileattr.KVIndexPath(m.dir, chunkID),
+		filekv.KeyIndexPath(m.dir, chunkID),
+		filekv.ValueIndexPath(m.dir, chunkID),
+		filekv.KVIndexPath(m.dir, chunkID),
 	}
 
 	for _, path := range indexPaths {
@@ -114,6 +142,9 @@ func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
 		fileattr.KeyTempFilePattern(m.dir, chunkID),
 		fileattr.ValueTempFilePattern(m.dir, chunkID),
 		fileattr.KVTempFilePattern(m.dir, chunkID),
+		filekv.KeyTempFilePattern(m.dir, chunkID),
+		filekv.ValueTempFilePattern(m.dir, chunkID),
+		filekv.KVTempFilePattern(m.dir, chunkID),
 	}
 
 	for _, pattern := range tempPatterns {

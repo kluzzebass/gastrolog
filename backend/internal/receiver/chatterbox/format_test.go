@@ -2,6 +2,7 @@ package chatterbox
 
 import (
 	"encoding/json"
+	"fmt"
 	"math/rand/v2"
 	"strings"
 	"testing"
@@ -235,5 +236,180 @@ func TestFormat_SameAttrsStableSourceID(t *testing.T) {
 	}
 	if attrs1["service"] != attrs2["service"] {
 		t.Errorf("same seed should produce same service: %q vs %q", attrs1["service"], attrs2["service"])
+	}
+}
+
+// Additional format-specific tests
+
+func TestJSONFormat_AllVariants(t *testing.T) {
+	// Test that all JSON format variants (HTTP metrics, error details, business event,
+	// system metrics, distributed tracing) can be generated without panicking.
+	pools := newTestPools()
+	format := NewJSONFormat(pools)
+
+	// Use enough iterations to hit all variants (5 variants, each has ~20% chance).
+	// With 500 iterations, extremely unlikely to miss any variant.
+	variantFields := map[string]bool{
+		"method":      false, // HTTP metrics
+		"error":       false, // Error details
+		"event_type":  false, // Business event
+		"cpu_percent": false, // System metrics
+		"trace_id":    false, // Distributed tracing
+	}
+
+	for i := 0; i < 500; i++ {
+		rng := rand.New(rand.NewPCG(uint64(i), uint64(i+1)))
+		raw, _ := format.Generate(rng)
+
+		var obj map[string]any
+		if err := json.Unmarshal(raw, &obj); err != nil {
+			t.Fatalf("iteration %d: invalid JSON: %v", i, err)
+		}
+
+		for field := range variantFields {
+			if _, ok := obj[field]; ok {
+				variantFields[field] = true
+			}
+		}
+	}
+
+	for field, seen := range variantFields {
+		if !seen {
+			t.Errorf("variant with field %q was never generated", field)
+		}
+	}
+}
+
+func TestKeyValueFormat_AllVariants(t *testing.T) {
+	// Test that all KV format variants can be generated.
+	pools := newTestPools()
+	format := NewKeyValueFormat(pools)
+
+	// Check for distinctive patterns from each variant.
+	variantPatterns := map[string]bool{
+		"method=":   false, // HTTP request style
+		"table=":    false, // Database query style
+		"user_id=":  false, // User action style
+		"trace_id=": false, // Generic with trace context
+	}
+
+	for i := 0; i < 500; i++ {
+		rng := rand.New(rand.NewPCG(uint64(i), uint64(i+1)))
+		raw, _ := format.Generate(rng)
+		line := string(raw)
+
+		for pattern := range variantPatterns {
+			if strings.Contains(line, pattern) {
+				variantPatterns[pattern] = true
+			}
+		}
+	}
+
+	for pattern, seen := range variantPatterns {
+		if !seen {
+			t.Errorf("variant with pattern %q was never generated", pattern)
+		}
+	}
+}
+
+func TestSyslogFormat_PriorityRange(t *testing.T) {
+	// Test that syslog messages have valid priority values (0-191).
+	pools := newTestPools()
+	format := NewSyslogFormat(pools)
+	rng := newTestRng()
+
+	for i := 0; i < 100; i++ {
+		raw, _ := format.Generate(rng)
+		line := string(raw)
+
+		// Extract priority: <N>...
+		if !strings.HasPrefix(line, "<") {
+			t.Errorf("iteration %d: missing priority prefix", i)
+			continue
+		}
+
+		endIdx := strings.Index(line, ">")
+		if endIdx == -1 {
+			t.Errorf("iteration %d: missing priority suffix", i)
+			continue
+		}
+
+		var priority int
+		if _, err := fmt.Sscanf(line[1:endIdx], "%d", &priority); err != nil {
+			t.Errorf("iteration %d: failed to parse priority: %v", i, err)
+			continue
+		}
+
+		// Priority = Facility * 8 + Severity
+		// Max facility = 23, max severity = 7, so max priority = 23*8+7 = 191
+		if priority < 0 || priority > 191 {
+			t.Errorf("iteration %d: priority %d out of range [0, 191]", i, priority)
+		}
+	}
+}
+
+func TestAccessLogFormat_CombinedFormat(t *testing.T) {
+	// Verify access log follows combined log format structure.
+	pools := newTestPools()
+	format := NewAccessLogFormat(pools)
+	rng := newTestRng()
+
+	for i := 0; i < 50; i++ {
+		raw, _ := format.Generate(rng)
+		line := string(raw)
+
+		// Combined log format: IP - USER [DATE] "METHOD PATH PROTOCOL" STATUS SIZE "REFERER" "USER-AGENT"
+		// Check for key markers.
+		if !strings.Contains(line, " - ") {
+			t.Errorf("iteration %d: missing ' - ' separator", i)
+		}
+		if !strings.Contains(line, "[") || !strings.Contains(line, "]") {
+			t.Errorf("iteration %d: missing timestamp brackets", i)
+		}
+		if !strings.Contains(line, "\"") {
+			t.Errorf("iteration %d: missing quoted sections", i)
+		}
+		// Check for HTTP method.
+		methods := []string{"GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH"}
+		hasMethod := false
+		for _, m := range methods {
+			if strings.Contains(line, "\""+m+" ") {
+				hasMethod = true
+				break
+			}
+		}
+		if !hasMethod {
+			t.Errorf("iteration %d: missing HTTP method in log: %s", i, line)
+		}
+	}
+}
+
+func TestWeirdFormat_Robustness(t *testing.T) {
+	// Weird format should always produce valid attrs and not panic.
+	pools := newTestPools()
+	format := NewWeirdFormat(pools)
+
+	for i := 0; i < 200; i++ {
+		rng := rand.New(rand.NewPCG(uint64(i), uint64(i+1)))
+
+		// Should not panic.
+		raw, attrs := format.Generate(rng)
+
+		// Raw may be empty, but should never be nil.
+		if raw == nil {
+			t.Errorf("iteration %d: raw is nil", i)
+		}
+
+		// Attrs should always have required fields.
+		if attrs == nil {
+			t.Errorf("iteration %d: attrs is nil", i)
+			continue
+		}
+		if attrs["service"] == "" {
+			t.Errorf("iteration %d: missing service attr", i)
+		}
+		if attrs["host"] == "" {
+			t.Errorf("iteration %d: missing host attr", i)
+		}
 	}
 }

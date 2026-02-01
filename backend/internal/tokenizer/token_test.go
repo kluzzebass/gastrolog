@@ -1,11 +1,11 @@
-package token
+package tokenizer
 
 import (
 	"reflect"
 	"testing"
 )
 
-func TestSimpleBasic(t *testing.T) {
+func TestTokensBasic(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
@@ -85,9 +85,9 @@ func TestSimpleBasic(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := Simple([]byte(tt.input))
+			got := Tokens([]byte(tt.input))
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("Simple(%q) = %v, want %v", tt.input, got, tt.want)
+				t.Errorf("Tokens(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
 	}
@@ -138,9 +138,9 @@ func TestNumericExclusion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := Simple([]byte(tt.input))
+			got := Tokens([]byte(tt.input))
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("Simple(%q) = %v, want %v", tt.input, got, tt.want)
+				t.Errorf("Tokens(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
 	}
@@ -182,9 +182,9 @@ func TestUUIDExclusion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := Simple([]byte(tt.input))
+			got := Tokens([]byte(tt.input))
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("Simple(%q) = %v, want %v", tt.input, got, tt.want)
+				t.Errorf("Tokens(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
 	}
@@ -215,9 +215,9 @@ func TestHighBytesExcluded(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := Simple([]byte(tt.input))
+			got := Tokens([]byte(tt.input))
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("Simple(%q) = %v, want %v", tt.input, got, tt.want)
+				t.Errorf("Tokens(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
 	}
@@ -226,7 +226,7 @@ func TestHighBytesExcluded(t *testing.T) {
 func TestMaxTokenLength(t *testing.T) {
 	// Token longer than 16 bytes should be truncated
 	long := "abcdefghijklmnopqrstuvwxyz"
-	got := Simple([]byte(long))
+	got := Tokens([]byte(long))
 	if len(got) != 1 {
 		t.Fatalf("expected 1 token, got %d", len(got))
 	}
@@ -284,27 +284,27 @@ func TestIsTokenByte(t *testing.T) {
 	}
 }
 
-func TestLowercase(t *testing.T) {
+func TestLowercaseFunc(t *testing.T) {
 	// ASCII uppercase -> lowercase
 	for b := byte('A'); b <= 'Z'; b++ {
-		got := lowercase(b)
+		got := Lowercase(b)
 		want := b + ('a' - 'A')
 		if got != want {
-			t.Errorf("lowercase(%c) = %c, want %c", b, got, want)
+			t.Errorf("Lowercase(%c) = %c, want %c", b, got, want)
 		}
 	}
 
 	// ASCII lowercase unchanged
 	for b := byte('a'); b <= 'z'; b++ {
-		if lowercase(b) != b {
-			t.Errorf("lowercase(%c) = %c, want %c", b, lowercase(b), b)
+		if Lowercase(b) != b {
+			t.Errorf("Lowercase(%c) = %c, want %c", b, Lowercase(b), b)
 		}
 	}
 
 	// Digits unchanged
 	for b := byte('0'); b <= '9'; b++ {
-		if lowercase(b) != b {
-			t.Errorf("lowercase(%c) = %c, want %c", b, lowercase(b), b)
+		if Lowercase(b) != b {
+			t.Errorf("Lowercase(%c) = %c, want %c", b, Lowercase(b), b)
 		}
 	}
 }
@@ -368,34 +368,34 @@ func TestIsUUID(t *testing.T) {
 	}
 }
 
-func TestIterBytes(t *testing.T) {
+func TestIterTokens(t *testing.T) {
 	input := "hello world timeout"
 	var tokens []string
 	buf := make([]byte, 0, 64)
 
-	IterBytes([]byte(input), buf, DefaultMaxTokenLen, func(tok []byte) bool {
+	IterTokens([]byte(input), buf, DefaultMaxTokenLen, func(tok []byte) bool {
 		tokens = append(tokens, string(tok))
 		return true
 	})
 
 	want := []string{"hello", "world", "timeout"}
 	if !reflect.DeepEqual(tokens, want) {
-		t.Errorf("IterBytes(%q) = %v, want %v", input, tokens, want)
+		t.Errorf("IterTokens(%q) = %v, want %v", input, tokens, want)
 	}
 }
 
-func TestIterBytesEarlyStop(t *testing.T) {
+func TestIterTokensEarlyStop(t *testing.T) {
 	input := "one two three four"
 	var tokens []string
 	buf := make([]byte, 0, 64)
 
-	IterBytes([]byte(input), buf, DefaultMaxTokenLen, func(tok []byte) bool {
+	IterTokens([]byte(input), buf, DefaultMaxTokenLen, func(tok []byte) bool {
 		tokens = append(tokens, string(tok))
 		return len(tokens) < 2 // stop after 2
 	})
 
 	want := []string{"one", "two"}
 	if !reflect.DeepEqual(tokens, want) {
-		t.Errorf("IterBytes early stop: got %v, want %v", tokens, want)
+		t.Errorf("IterTokens early stop: got %v, want %v", tokens, want)
 	}
 }

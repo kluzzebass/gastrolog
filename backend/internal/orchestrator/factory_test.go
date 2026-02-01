@@ -50,6 +50,15 @@ func (f *fakeIndexManager) OpenAttrValueIndex(chunkID chunk.ChunkID) (*index.Ind
 func (f *fakeIndexManager) OpenAttrKVIndex(chunkID chunk.ChunkID) (*index.Index[index.AttrKVIndexEntry], error) {
 	return nil, nil
 }
+func (f *fakeIndexManager) OpenKVKeyIndex(chunkID chunk.ChunkID) (*index.Index[index.KVKeyIndexEntry], index.KVIndexStatus, error) {
+	return nil, index.KVComplete, nil
+}
+func (f *fakeIndexManager) OpenKVValueIndex(chunkID chunk.ChunkID) (*index.Index[index.KVValueIndexEntry], index.KVIndexStatus, error) {
+	return nil, index.KVComplete, nil
+}
+func (f *fakeIndexManager) OpenKVIndex(chunkID chunk.ChunkID) (*index.Index[index.KVIndexEntry], index.KVIndexStatus, error) {
+	return nil, index.KVComplete, nil
+}
 func (f *fakeIndexManager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
 	return true, nil
 }
