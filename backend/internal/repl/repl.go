@@ -1265,7 +1265,7 @@ func (r *REPL) cmdIndexes(out *strings.Builder, args []string) {
 		return
 	}
 
-	fmt.Fprintf(out, "Indexes for chunk %s:\n", chunkID.String()[:8])
+	fmt.Fprintf(out, "Indexes for chunk %s:\n", chunkID.String())
 
 	// Time index
 	if timeIdx, err := im.OpenTimeIndex(chunkID); err != nil {
@@ -1370,7 +1370,7 @@ func (r *REPL) cmdStatus(out *strings.Builder) {
 		active := cm.Active()
 		if active != nil {
 			fmt.Fprintf(out, "    [%s] active chunk: %s\n",
-				store, active.ID.String()[:8])
+				store, active.ID.String())
 		} else {
 			fmt.Fprintf(out, "    [%s] no active chunk\n", store)
 		}
@@ -1478,7 +1478,7 @@ func (r *REPL) cmdAnalyze(out *strings.Builder, args []string) {
 				}
 			}
 			fmt.Fprintf(out, "    %s  %d records  %s index bytes  [%s]\n",
-				ca.ChunkID.String()[:8], ca.ChunkRecords, formatBytes(totalIndexBytes(ca)), status)
+				ca.ChunkID.String(), ca.ChunkRecords, formatBytes(totalIndexBytes(ca)), status)
 		}
 		out.WriteByte('\n')
 	}
@@ -1521,7 +1521,7 @@ func (r *REPL) analyzeChunk(out *strings.Builder, chunkID chunk.ChunkID) {
 		return
 	}
 
-	fmt.Fprintf(out, "Index Analysis for %s:\n", chunkID.String()[:8])
+	fmt.Fprintf(out, "Index Analysis for %s:\n", chunkID.String())
 	fmt.Fprintf(out, "  Store:    %s\n", foundStore)
 	fmt.Fprintf(out, "  Records:  %d\n", ca.ChunkRecords)
 	fmt.Fprintf(out, "  Raw Size: %s\n", formatBytes(ca.ChunkBytes))
