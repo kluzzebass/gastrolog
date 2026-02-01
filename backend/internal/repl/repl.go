@@ -391,10 +391,53 @@ func (m *model) updateSuggestions() {
 			suggestions = append(suggestions, prefix+f)
 		}
 		m.textInput.SetSuggestions(suggestions)
+	case "chunk", "indexes", "analyze":
+		// Suggest chunk IDs
+		m.textInput.SetSuggestions(m.getChunkIDSuggestions(val))
 	default:
 		// No suggestions for other commands
 		m.textInput.SetSuggestions(nil)
 	}
+}
+
+// getChunkIDSuggestions returns chunk ID suggestions for commands that take a chunk ID argument.
+func (m *model) getChunkIDSuggestions(currentInput string) []string {
+	parts := strings.Fields(currentInput)
+	cmd := parts[0]
+
+	// Get partial ID being typed (if any)
+	var partial string
+	if len(parts) > 1 {
+		partial = strings.ToLower(parts[1])
+	}
+
+	// Collect all chunk IDs across all stores
+	var suggestions []string
+	stores := m.repl.orch.ChunkManagers()
+
+	for _, store := range stores {
+		cm := m.repl.orch.ChunkManager(store)
+		if cm == nil {
+			continue
+		}
+		chunks, err := cm.List()
+		if err != nil {
+			continue
+		}
+		for _, meta := range chunks {
+			id := meta.ID.String()
+			// Filter by partial match if user is typing
+			if partial == "" || strings.HasPrefix(strings.ToLower(id), partial) {
+				suggestions = append(suggestions, cmd+" "+id)
+			}
+		}
+	}
+
+	// Sort suggestions (most recent chunks first based on UUID v7 ordering)
+	slices.Sort(suggestions)
+	slices.Reverse(suggestions)
+
+	return suggestions
 }
 
 func (m model) View() string {
