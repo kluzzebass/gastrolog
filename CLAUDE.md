@@ -259,17 +259,22 @@ Binary search lookup for inverted token index:
 - `Lookup(token)` returns `(positions []uint64, found bool)`
 - Entries sorted by token string for binary search
 
-**Tokenizer (`token/tokenize.go`):**
+**KVIndexReader (`kv_reader.go`):**
 
-Tokenizer used for both indexing and query-time matching:
-- `Simple([]byte) []string` -- extracts indexable tokens using `DefaultMaxTokenLen` (16)
-- `SimpleWithMaxLen([]byte, int) []string` -- extracts tokens with custom max length
-- `IterBytes(data, buf, maxLen, fn)` -- zero-allocation iterator for hot paths
-- Token rules:
-  - Valid characters: a-z, A-Z (lowercased), 0-9, underscore, hyphen (ASCII only)
-  - Length: 2 to maxLen bytes (default 16)
-  - Excluded: numeric tokens (decimal, hex, octal, binary), hex-with-hyphens, canonical UUIDs
-- Same tokenizer used at index time and query time ensures consistent matching
+Binary search lookup for KV inverted indexes (extracted key=value pairs from log text):
+- `KVKeyIndexReader` -- lookup by key string
+- `KVValueIndexReader` -- lookup by value string
+- `KVIndexReader` -- lookup by key+value pair
+- All return `(positions []uint64, found bool)`
+- Entries sorted for binary search
+
+**Inverted index format (`inverted/inverted.go`):**
+
+Shared generic encode/decode for inverted index file formats:
+- `EncodeKeyIndex[T]`, `EncodeValueIndex[T]`, `EncodeKVIndex[T]` -- generic encoding
+- `DecodeKeyIndex[T]`, `DecodeValueIndex[T]`, `DecodeKVIndex[T]` -- generic decoding
+- Used by both attr and kv index packages to eliminate duplication
+- Binary format: `[header][entry_count:u32][string_table][posting_blob]`
 
 ### File-based chunk storage (`backend/internal/chunk/file/`)
 
@@ -303,6 +308,11 @@ In-memory implementation of the same interfaces. Rotates chunks based on record 
 - `time/` -- time indexer: sparse index mapping sampled timestamps to record indices; writes `_time.idx`
   - `reader.go` -- `Open` loads and validates index file, returns shared `*index.TimeIndexReader`
 - `token/` -- token indexer: inverted index mapping tokens to record indices; writes `_token.idx`
+- `attr/` -- attribute indexer: inverted indexes for record attributes (key, value, key+value); writes `_attr_key.idx`, `_attr_val.idx`, `_attr_kv.idx`
+- `kv/` -- KV indexer: inverted indexes for key=value pairs extracted from log text; writes `_kv_key.idx`, `_kv_val.idx`, `_kv_kv.idx`
+  - Budget-based admission control with frequency-based sorting
+  - Defensive hard caps (MaxUniqueKeys, MaxValuesPerKey, MaxTotalEntries)
+  - Status byte indicates complete or capped (query must fall back to runtime filtering)
 
 ### Memory-based index manager (`backend/internal/index/memory/`)
 
@@ -310,6 +320,33 @@ In-memory implementation of the same interfaces. Rotates chunks based on record 
 - `time/` -- in-memory time indexer with `Get(chunkID)` satisfying `IndexStore[T]`
   - `reader.go` -- `Open` retrieves entries from indexer, returns shared `*index.TimeIndexReader`
 - `token/` -- in-memory token indexer with `Get(chunkID)` satisfying `IndexStore[T]`
+- `attr/` -- in-memory attribute indexer
+- `kv/` -- in-memory KV indexer with budget-based admission control
+
+### Tokenizer package (`backend/internal/tokenizer/`)
+
+Text tokenization utilities used for indexing and query-time matching:
+
+**Token extraction (`token.go`):**
+- `Simple([]byte) []string` -- extracts indexable tokens using `DefaultMaxTokenLen` (16)
+- `SimpleWithMaxLen([]byte, int) []string` -- extracts tokens with custom max length
+- `IterBytes(data, buf, maxLen, fn)` -- zero-allocation iterator for hot paths
+- Token rules:
+  - Valid characters: a-z, A-Z (lowercased), 0-9, underscore, hyphen (ASCII only)
+  - Length: 2 to maxLen bytes (default 16)
+  - Excluded: numeric tokens (decimal, hex, octal, binary), hex-with-hyphens, canonical UUIDs
+- Same tokenizer used at index time and query time ensures consistent matching
+
+**Key-value extraction (`kv.go`):**
+- `ExtractKeyValues([]byte) []KeyValue` -- extracts key=value pairs from log text
+- Handles various formats: `key=value`, `key="quoted value"`, `key='quoted'`
+- Keys and values are lowercased for case-insensitive matching
+- Used by KV indexer for heuristic log field extraction
+
+**Common utilities (`common.go`):**
+- `IsLetter`, `IsDigit`, `IsHexDigit`, `IsWhitespace` -- ASCII character classification
+- `Lowercase` -- fast ASCII lowercase for single byte
+- `ToLowerASCII` -- in-place ASCII lowercasing for byte slices
 
 ### REPL package (`backend/internal/repl/`)
 
@@ -422,19 +459,28 @@ backend/
       build.go                  BuildHelper (callgroup + errgroup)
       time_reader.go            Shared TimeIndexReader with FindStart binary search
       token_reader.go           Shared TokenIndexReader with Lookup
-      token/
-        tokenize.go             Tokenizer with configurable max length
+      kv_reader.go              Shared KV index readers (key, value, kv)
+      inverted/
+        inverted.go             Generic encode/decode for inverted index formats
       file/
         manager.go              File-based IndexManager
         time/                   File-based time indexer (_time.idx)
         token/                  File-based token indexer (_token.idx)
+        attr/                   File-based attribute indexer (_attr_*.idx)
+        kv/                     File-based KV indexer (_kv_*.idx)
       memory/
         manager.go              Memory-based IndexManager with generic IndexStore[T]
         time/                   Memory-based time indexer
         token/                  Memory-based token indexer
+        attr/                   Memory-based attribute indexer
+        kv/                     Memory-based KV indexer
     query/
       query.go                  Query engine with Search API, context windows support
       scanner.go                Composable scanner pipeline (scannerBuilder, filters)
+    tokenizer/
+      token.go                  Token extraction with configurable max length
+      kv.go                     Key-value pair extraction from log text
+      common.go                 ASCII character utilities
     config/
       config.go                 Config types (Store, Receiver definitions)
       file/                     File-based config store
