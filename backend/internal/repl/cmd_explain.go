@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
 	"gastrolog/internal/query"
+	"gastrolog/internal/tokenizer"
 )
 
 // explainPlan describes how a query will be executed.
@@ -27,7 +29,8 @@ type chunkPlan struct {
 	TimeOverlaps  bool   // whether chunk time range overlaps query
 	Pipeline      []pipelineStep
 	ScanMode      string // "index-driven", "sequential", "skipped"
-	RuntimeFilter string // runtime filter description (if any)
+	SkipReason    string // reason for skipping (if ScanMode == "skipped")
+	RuntimeFilter string // runtime filter description (empty if none)
 	EstimatedScan int    // estimated records to scan
 }
 
@@ -38,66 +41,15 @@ type pipelineStep struct {
 	PositionsBefore int    // positions before this step (0 = all records)
 	PositionsAfter  int    // positions after this step
 	Action          string // "indexed", "runtime", "skipped", "seek"
-	Details         string // additional details
+	Reason          string // explicit reason for the action
+	Details         string // additional details (e.g., attr_kv=N msg_kv=M)
 }
 
 func (r *REPL) cmdExplain(out *strings.Builder, args []string) {
-	// Parse query args (same as cmdQuery)
-	q := query.Query{}
-	var tokens []string
-	var kvFilters []query.KeyValueFilter
-
-	for _, arg := range args {
-		k, v, ok := strings.Cut(arg, "=")
-		if !ok {
-			// Bare word without '=' - treat as token search
-			tokens = append(tokens, arg)
-			continue
-		}
-
-		switch k {
-		case "start":
-			t, err := parseTime(v)
-			if err != nil {
-				fmt.Fprintf(out, "Invalid start time: %v\n", err)
-				return
-			}
-			q.Start = t
-		case "end":
-			t, err := parseTime(v)
-			if err != nil {
-				fmt.Fprintf(out, "Invalid end time: %v\n", err)
-				return
-			}
-			q.End = t
-		case "token":
-			tokens = append(tokens, v)
-		case "limit":
-			var n int
-			if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
-				fmt.Fprintf(out, "Invalid limit: %v\n", err)
-				return
-			}
-			q.Limit = n
-		default:
-			// Treat as key=value filter
-			key := k
-			value := v
-			if k == "*" {
-				key = ""
-			}
-			if v == "*" {
-				value = ""
-			}
-			kvFilters = append(kvFilters, query.KeyValueFilter{Key: key, Value: value})
-		}
-	}
-
-	if len(tokens) > 0 {
-		q.Tokens = tokens
-	}
-	if len(kvFilters) > 0 {
-		q.KV = kvFilters
+	q, errMsg := parseQueryArgs(args)
+	if errMsg != "" {
+		out.WriteString(errMsg + "\n")
+		return
 	}
 
 	// Build the explain plan
@@ -162,17 +114,21 @@ func (r *REPL) buildExplainPlan(q query.Query) (*explainPlan, error) {
 
 func (r *REPL) buildChunkPlan(q query.Query, meta chunk.ChunkMeta, cm chunk.ChunkManager, im index.IndexManager) chunkPlan {
 	cp := chunkPlan{
-		ChunkID:      meta.ID,
-		Sealed:       meta.Sealed,
-		RecordCount:  int(meta.RecordCount),
-		TimeRange:    fmt.Sprintf("%s - %s", meta.StartTS.Format("2006-01-02T15:04:05"), meta.EndTS.Format("2006-01-02T15:04:05")),
-		TimeOverlaps: true, // if we got here, it overlaps
+		ChunkID:       meta.ID,
+		Sealed:        meta.Sealed,
+		RecordCount:   int(meta.RecordCount),
+		TimeRange:     fmt.Sprintf("%s - %s", meta.StartTS.Format("2006-01-02T15:04:05"), meta.EndTS.Format("2006-01-02T15:04:05")),
+		TimeOverlaps:  true, // if we got here, it overlaps
+		RuntimeFilter: "none",
 	}
 
 	if !meta.Sealed {
-		cp.ScanMode = "sequential (unsealed)"
+		cp.ScanMode = "sequential"
 		cp.EstimatedScan = cp.RecordCount
-		cp.RuntimeFilter = r.buildRuntimeFilterDesc(q)
+		filter := r.buildRuntimeFilterDesc(q)
+		if filter != "" {
+			cp.RuntimeFilter = filter
+		}
 		return cp
 	}
 
@@ -180,6 +136,7 @@ func (r *REPL) buildChunkPlan(q query.Query, meta chunk.ChunkMeta, cm chunk.Chun
 	currentPositions := cp.RecordCount // start with all records
 	var runtimeFilters []string
 	var skipped bool
+	var skipReason string
 
 	// 1. Time index - used for seeking to start position
 	lower, _ := q.TimeBounds()
@@ -199,11 +156,13 @@ func (r *REPL) buildChunkPlan(q query.Query, meta chunk.ChunkMeta, cm chunk.Chun
 				currentPositions = cp.RecordCount - skippedRecords
 				step.PositionsAfter = currentPositions
 				step.Action = "seek"
-				step.Details = fmt.Sprintf("skip %d records via sparse index", skippedRecords)
+				step.Reason = "indexed"
+				step.Details = fmt.Sprintf("skip %d via sparse index", skippedRecords)
 			} else {
 				step.PositionsAfter = currentPositions
 				step.Action = "seek"
-				step.Details = "start before chunk, scan from beginning"
+				step.Reason = "indexed"
+				step.Details = "start before chunk"
 			}
 		} else {
 			// Fall back to binary search
@@ -212,11 +171,13 @@ func (r *REPL) buildChunkPlan(q query.Query, meta chunk.ChunkMeta, cm chunk.Chun
 				currentPositions = cp.RecordCount - skippedRecords
 				step.PositionsAfter = currentPositions
 				step.Action = "seek"
-				step.Details = fmt.Sprintf("skip %d records via idx.log binary search", skippedRecords)
+				step.Reason = "binary_search"
+				step.Details = fmt.Sprintf("skip %d via idx.log", skippedRecords)
 			} else {
 				step.PositionsAfter = currentPositions
 				step.Action = "seek"
-				step.Details = "binary search on idx.log"
+				step.Reason = "binary_search"
+				step.Details = "idx.log lookup"
 			}
 		}
 		cp.Pipeline = append(cp.Pipeline, step)
@@ -236,11 +197,15 @@ func (r *REPL) buildChunkPlan(q query.Query, meta chunk.ChunkMeta, cm chunk.Chun
 			reader := index.NewTokenIndexReader(meta.ID, tokIdx.Entries())
 			var positions []uint64
 			allFound := true
+			var missingToken string
+			var missingReason string
 
 			for i, tok := range q.Tokens {
 				pos, found := reader.Lookup(tok)
 				if !found {
 					allFound = false
+					missingToken = tok
+					missingReason = classifyTokenMiss(tok)
 					break
 				}
 				if i == 0 {
@@ -252,27 +217,31 @@ func (r *REPL) buildChunkPlan(q query.Query, meta chunk.ChunkMeta, cm chunk.Chun
 
 			if !allFound {
 				// Token not in index - fall back to runtime filter
-				// (index is selective, not all tokens are indexed)
 				step.PositionsAfter = currentPositions
 				step.Action = "runtime"
-				step.Details = "token not in index, scanning with filter"
+				step.Reason = missingReason
+				step.Details = fmt.Sprintf("'%s' not indexed", missingToken)
 				runtimeFilters = append(runtimeFilters, predicate)
 			} else if len(positions) == 0 {
 				// All tokens found but intersection is empty - no matches
 				step.PositionsAfter = 0
 				step.Action = "skipped"
-				step.Details = "index intersection empty, chunk skipped"
+				step.Reason = "empty_intersection"
+				step.Details = "no records match all tokens"
 				skipped = true
+				skipReason = fmt.Sprintf("empty intersection (%s)", predicate)
 			} else {
 				step.PositionsAfter = len(positions)
 				step.Action = "indexed"
-				step.Details = fmt.Sprintf("%d tokens intersected", len(q.Tokens))
+				step.Reason = "indexed"
+				step.Details = fmt.Sprintf("%d token(s) intersected", len(q.Tokens))
 				currentPositions = len(positions)
 			}
 		} else if errors.Is(err, index.ErrIndexNotFound) {
 			step.PositionsAfter = currentPositions
 			step.Action = "runtime"
-			step.Details = "index unavailable, tokenizing each record"
+			step.Reason = "index_missing"
+			step.Details = "no token index"
 			runtimeFilters = append(runtimeFilters, predicate)
 		}
 		cp.Pipeline = append(cp.Pipeline, step)
@@ -296,31 +265,35 @@ func (r *REPL) buildChunkPlan(q query.Query, meta chunk.ChunkMeta, cm chunk.Chun
 				PositionsBefore: currentPositions,
 			}
 
-			positions, available, details := r.lookupKVIndex(f,
+			result := r.lookupKVIndex(f,
 				attrKVIdx, attrKVErr, attrKeyIdx, attrKeyErr, attrValIdx, attrValErr,
 				kvIdx, kvStatus, kvErr, kvKeyIdx, kvKeyStatus, kvKeyErr, kvValIdx, kvValStatus, kvValErr,
 				meta.ID)
 
-			if !available {
+			if !result.available {
 				step.PositionsAfter = currentPositions
 				step.Action = "runtime"
-				step.Details = "no index available"
+				step.Reason = result.reason
+				step.Details = result.details
 				runtimeFilters = append(runtimeFilters, predicate)
-			} else if len(positions) == 0 {
+			} else if len(result.positions) == 0 {
 				step.PositionsAfter = 0
 				step.Action = "skipped"
-				step.Details = fmt.Sprintf("no match (%s)", details)
+				step.Reason = "no_match"
+				step.Details = result.details
 				skipped = true
+				skipReason = fmt.Sprintf("no match (%s)", predicate)
 			} else {
 				// Intersect with current positions if we have a position list
-				newCount := len(positions)
+				newCount := len(result.positions)
 				if currentPositions < cp.RecordCount {
 					// We already have a position list, this is an estimate
-					newCount = min(currentPositions, len(positions))
+					newCount = min(currentPositions, len(result.positions))
 				}
 				step.PositionsAfter = newCount
 				step.Action = "indexed"
-				step.Details = details
+				step.Reason = "indexed"
+				step.Details = result.details
 				currentPositions = newCount
 			}
 			cp.Pipeline = append(cp.Pipeline, step)
@@ -334,7 +307,9 @@ func (r *REPL) buildChunkPlan(q query.Query, meta chunk.ChunkMeta, cm chunk.Chun
 	// Determine final scan mode and estimated scan
 	if skipped {
 		cp.ScanMode = "skipped"
+		cp.SkipReason = skipReason
 		cp.EstimatedScan = 0
+		cp.RuntimeFilter = "" // no runtime filter for skipped chunks
 	} else if currentPositions < cp.RecordCount {
 		cp.ScanMode = "index-driven"
 		cp.EstimatedScan = currentPositions
@@ -343,24 +318,66 @@ func (r *REPL) buildChunkPlan(q query.Query, meta chunk.ChunkMeta, cm chunk.Chun
 		cp.EstimatedScan = currentPositions
 	}
 
-	if len(runtimeFilters) > 0 {
-		cp.RuntimeFilter = strings.Join(runtimeFilters, " AND ")
-	}
-
-	// Add time bounds to runtime filter if present (always applied)
-	if !q.Start.IsZero() || !q.End.IsZero() {
-		if cp.RuntimeFilter != "" {
-			cp.RuntimeFilter += " AND time bounds"
-		} else if cp.ScanMode != "skipped" {
-			cp.RuntimeFilter = "time bounds"
+	// Build runtime filter string
+	if !skipped {
+		if len(runtimeFilters) > 0 {
+			cp.RuntimeFilter = strings.Join(runtimeFilters, " AND ")
+		}
+		// Add time bounds to runtime filter if present (always applied)
+		if !q.Start.IsZero() || !q.End.IsZero() {
+			if cp.RuntimeFilter != "none" {
+				cp.RuntimeFilter += " AND time bounds"
+			} else {
+				cp.RuntimeFilter = "time bounds"
+			}
 		}
 	}
 
 	return cp
 }
 
+// classifyTokenMiss returns the reason why a token might not be in the index.
+func classifyTokenMiss(tok string) string {
+	// Check for non-ASCII
+	for _, r := range tok {
+		if r > unicode.MaxASCII {
+			return "non_ascii"
+		}
+	}
+
+	// Check if it would be excluded by tokenizer rules
+	tokBytes := []byte(strings.ToLower(tok))
+
+	// Too short
+	if len(tokBytes) < 2 {
+		return "too_short"
+	}
+
+	// Check if it looks numeric/hex (tokenizer excludes these)
+	allHex := true
+	for _, b := range tokBytes {
+		if !tokenizer.IsHexDigit(b) && b != '-' {
+			allHex = false
+			break
+		}
+	}
+	if allHex {
+		return "numeric"
+	}
+
+	// Default: token not indexed (might be low frequency or budget)
+	return "not_indexed"
+}
+
+// kvLookupResult holds the result of a KV index lookup.
+type kvLookupResult struct {
+	positions []uint64
+	available bool   // whether any index was available
+	reason    string // reason for action
+	details   string // breakdown of sources (e.g., "attr_kv=N msg_kv=M")
+}
+
 // lookupKVIndex looks up a single KV filter across all available indexes.
-// Returns (positions, indexAvailable, details).
 func (r *REPL) lookupKVIndex(f query.KeyValueFilter,
 	attrKVIdx *index.Index[index.AttrKVIndexEntry], attrKVErr error,
 	attrKeyIdx *index.Index[index.AttrKeyIndexEntry], attrKeyErr error,
@@ -368,82 +385,109 @@ func (r *REPL) lookupKVIndex(f query.KeyValueFilter,
 	kvIdx *index.Index[index.KVIndexEntry], kvStatus index.KVIndexStatus, kvErr error,
 	kvKeyIdx *index.Index[index.KVKeyIndexEntry], kvKeyStatus index.KVIndexStatus, kvKeyErr error,
 	kvValIdx *index.Index[index.KVValueIndexEntry], kvValStatus index.KVIndexStatus, kvValErr error,
-	chunkID chunk.ChunkID) (positions []uint64, available bool, details string) {
+	chunkID chunk.ChunkID) kvLookupResult {
 
+	result := kvLookupResult{}
 	var detailParts []string
 
 	if f.Key == "" && f.Value == "" {
-		return nil, false, ""
+		return result
 	} else if f.Value == "" {
 		// Key only: key=* pattern
 		if attrKeyErr == nil {
-			available = true
+			result.available = true
 			reader := index.NewAttrKeyIndexReader(chunkID, attrKeyIdx.Entries())
 			if pos, found := reader.Lookup(strings.ToLower(f.Key)); found {
-				positions = unionPositions(positions, pos)
-				detailParts = append(detailParts, fmt.Sprintf("attr_key:%d", len(pos)))
+				result.positions = unionPositions(result.positions, pos)
+				detailParts = append(detailParts, fmt.Sprintf("attr_key=%d", len(pos)))
 			} else {
-				detailParts = append(detailParts, "attr_key:0")
+				detailParts = append(detailParts, "attr_key=0")
 			}
 		}
-		if kvKeyErr == nil && kvKeyStatus != index.KVCapped {
-			available = true
-			reader := index.NewKVKeyIndexReader(chunkID, kvKeyIdx.Entries())
-			if pos, found := reader.Lookup(strings.ToLower(f.Key)); found {
-				positions = unionPositions(positions, pos)
-				detailParts = append(detailParts, fmt.Sprintf("msg_key:%d", len(pos)))
+		if kvKeyErr == nil {
+			if kvKeyStatus == index.KVCapped {
+				detailParts = append(detailParts, "msg_key=capped")
 			} else {
-				detailParts = append(detailParts, "msg_key:0")
+				result.available = true
+				reader := index.NewKVKeyIndexReader(chunkID, kvKeyIdx.Entries())
+				if pos, found := reader.Lookup(strings.ToLower(f.Key)); found {
+					result.positions = unionPositions(result.positions, pos)
+					detailParts = append(detailParts, fmt.Sprintf("msg_key=%d", len(pos)))
+				} else {
+					detailParts = append(detailParts, "msg_key=0")
+				}
 			}
 		}
 	} else if f.Key == "" {
 		// Value only: *=value pattern
 		if attrValErr == nil {
-			available = true
+			result.available = true
 			reader := index.NewAttrValueIndexReader(chunkID, attrValIdx.Entries())
 			if pos, found := reader.Lookup(strings.ToLower(f.Value)); found {
-				positions = unionPositions(positions, pos)
-				detailParts = append(detailParts, fmt.Sprintf("attr_val:%d", len(pos)))
+				result.positions = unionPositions(result.positions, pos)
+				detailParts = append(detailParts, fmt.Sprintf("attr_val=%d", len(pos)))
 			} else {
-				detailParts = append(detailParts, "attr_val:0")
+				detailParts = append(detailParts, "attr_val=0")
 			}
 		}
-		if kvValErr == nil && kvValStatus != index.KVCapped {
-			available = true
-			reader := index.NewKVValueIndexReader(chunkID, kvValIdx.Entries())
-			if pos, found := reader.Lookup(strings.ToLower(f.Value)); found {
-				positions = unionPositions(positions, pos)
-				detailParts = append(detailParts, fmt.Sprintf("msg_val:%d", len(pos)))
+		if kvValErr == nil {
+			if kvValStatus == index.KVCapped {
+				detailParts = append(detailParts, "msg_val=capped")
 			} else {
-				detailParts = append(detailParts, "msg_val:0")
+				result.available = true
+				reader := index.NewKVValueIndexReader(chunkID, kvValIdx.Entries())
+				if pos, found := reader.Lookup(strings.ToLower(f.Value)); found {
+					result.positions = unionPositions(result.positions, pos)
+					detailParts = append(detailParts, fmt.Sprintf("msg_val=%d", len(pos)))
+				} else {
+					detailParts = append(detailParts, "msg_val=0")
+				}
 			}
 		}
 	} else {
 		// Both key and value: exact key=value match
 		if attrKVErr == nil {
-			available = true
+			result.available = true
 			reader := index.NewAttrKVIndexReader(chunkID, attrKVIdx.Entries())
 			if pos, found := reader.Lookup(strings.ToLower(f.Key), strings.ToLower(f.Value)); found {
-				positions = unionPositions(positions, pos)
-				detailParts = append(detailParts, fmt.Sprintf("attr_kv:%d", len(pos)))
+				result.positions = unionPositions(result.positions, pos)
+				detailParts = append(detailParts, fmt.Sprintf("attr_kv=%d", len(pos)))
 			} else {
-				detailParts = append(detailParts, "attr_kv:0")
+				detailParts = append(detailParts, "attr_kv=0")
 			}
 		}
-		if kvErr == nil && kvStatus != index.KVCapped {
-			available = true
-			reader := index.NewKVIndexReader(chunkID, kvIdx.Entries())
-			if pos, found := reader.Lookup(f.Key, f.Value); found {
-				positions = unionPositions(positions, pos)
-				detailParts = append(detailParts, fmt.Sprintf("msg_kv:%d", len(pos)))
+		if kvErr == nil {
+			if kvStatus == index.KVCapped {
+				detailParts = append(detailParts, "msg_kv=capped")
 			} else {
-				detailParts = append(detailParts, "msg_kv:0")
+				result.available = true
+				reader := index.NewKVIndexReader(chunkID, kvIdx.Entries())
+				if pos, found := reader.Lookup(f.Key, f.Value); found {
+					result.positions = unionPositions(result.positions, pos)
+					detailParts = append(detailParts, fmt.Sprintf("msg_kv=%d", len(pos)))
+				} else {
+					detailParts = append(detailParts, "msg_kv=0")
+				}
 			}
 		}
 	}
 
-	details = strings.Join(detailParts, ", ")
-	return positions, available, details
+	result.details = strings.Join(detailParts, " ")
+
+	if !result.available {
+		result.reason = "index_missing"
+	} else if len(result.positions) == 0 {
+		// Check if any index was capped
+		for _, d := range detailParts {
+			if strings.Contains(d, "capped") {
+				result.reason = "budget_exhausted"
+				return result
+			}
+		}
+		result.reason = "value_not_indexed"
+	}
+
+	return result
 }
 
 func (r *REPL) buildRuntimeFilterDesc(q query.Query) string {
@@ -562,37 +606,32 @@ func (r *REPL) printExplainPlan(out *strings.Builder, plan *explainPlan) {
 		out.WriteString(fmt.Sprintf("  Time Range: %s [overlaps]\n", cp.TimeRange))
 		out.WriteString(fmt.Sprintf("  Records: %d\n", cp.RecordCount))
 
-		// Pipeline
+		// For skipped chunks, show skip reason and nothing else
+		if cp.ScanMode == "skipped" {
+			out.WriteString(fmt.Sprintf("\n  Chunk skipped: %s\n\n", cp.SkipReason))
+			continue
+		}
+
+		// Pipeline (only for non-skipped sealed chunks)
 		if len(cp.Pipeline) > 0 {
 			out.WriteString("\n  Index Pipeline:\n")
 			for j, step := range cp.Pipeline {
-				arrow := "→"
-				afterStr := fmt.Sprintf("%d", step.PositionsAfter)
-				if step.Action == "skipped" {
-					afterStr = "0 (skip chunk)"
-				}
-				out.WriteString(fmt.Sprintf("    %d. %-14s %d %s %s [%s] %s\n",
+				out.WriteString(fmt.Sprintf("    %d. %-14s %5d → %-5d [%s] reason=%s %s\n",
 					j+1,
 					step.Index,
 					step.PositionsBefore,
-					arrow,
-					afterStr,
+					step.PositionsAfter,
 					step.Action,
+					step.Reason,
 					step.Details,
 				))
 			}
 		}
 
 		out.WriteString("\n")
-		out.WriteString(fmt.Sprintf("  Scan: %s", cp.ScanMode))
-		if cp.ScanMode != "skipped" && cp.EstimatedScan != cp.RecordCount {
-			out.WriteString(fmt.Sprintf(", ~%d records", cp.EstimatedScan))
-		}
-		out.WriteString("\n")
-
-		if cp.RuntimeFilter != "" {
-			out.WriteString(fmt.Sprintf("  Runtime Filter: %s\n", cp.RuntimeFilter))
-		}
+		out.WriteString(fmt.Sprintf("  Scan: %s\n", cp.ScanMode))
+		out.WriteString(fmt.Sprintf("  Estimated Records Scanned: ~%d\n", cp.EstimatedScan))
+		out.WriteString(fmt.Sprintf("  Runtime Filter: %s\n", cp.RuntimeFilter))
 
 		out.WriteString("\n")
 	}

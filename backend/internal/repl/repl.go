@@ -453,7 +453,71 @@ func (m model) View() string {
 	if m.following {
 		return m.output.String()
 	}
+	// Update prompt with current status before rendering
+	m.textInput.Prompt = m.repl.buildPrompt()
 	return m.output.String() + m.textInput.View()
+}
+
+// buildPrompt constructs the REPL prompt showing current status.
+// Format: [store] or [store|query] or [store|query:N pending]
+func (r *REPL) buildPrompt() string {
+	var parts []string
+
+	// Always show store
+	parts = append(parts, r.store)
+
+	// Show query status if there's an active query
+	if r.resultChan != nil {
+		if r.lastQuery != nil {
+			queryDesc := r.describeQuery(r.lastQuery)
+			parts = append(parts, queryDesc)
+		} else {
+			parts = append(parts, "query")
+		}
+	}
+
+	return "[" + strings.Join(parts, "|") + "] > "
+}
+
+// describeQuery returns a short description of a query for the prompt.
+func (r *REPL) describeQuery(q *query.Query) string {
+	var parts []string
+
+	if len(q.Tokens) > 0 {
+		if len(q.Tokens) == 1 {
+			parts = append(parts, q.Tokens[0])
+		} else {
+			parts = append(parts, fmt.Sprintf("%d tokens", len(q.Tokens)))
+		}
+	}
+
+	if len(q.KV) > 0 {
+		if len(q.KV) == 1 {
+			f := q.KV[0]
+			key := f.Key
+			if key == "" {
+				key = "*"
+			}
+			val := f.Value
+			if val == "" {
+				val = "*"
+			}
+			parts = append(parts, key+"="+val)
+		} else {
+			parts = append(parts, fmt.Sprintf("%d filters", len(q.KV)))
+		}
+	}
+
+	if len(parts) == 0 {
+		return "query"
+	}
+
+	desc := strings.Join(parts, ",")
+	// Truncate if too long
+	if len(desc) > 20 {
+		desc = desc[:17] + "..."
+	}
+	return desc
 }
 
 // loadHistory reads history from file.
