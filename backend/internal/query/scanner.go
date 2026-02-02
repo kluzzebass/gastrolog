@@ -632,15 +632,6 @@ func applyKeyValueIndex(b *scannerBuilder, indexes index.IndexManager, chunkID c
 	return true, false
 }
 
-// boolExprFilter returns a filter that evaluates a boolean expression against a record.
-// This is used for runtime filtering when indexes cannot fully evaluate the expression
-// (e.g., NOT predicates, OR branches, or when indexes are unavailable).
-func boolExprFilter(expr querylang.Expr) recordFilter {
-	return func(rec chunk.Record) bool {
-		return evalBoolExpr(expr, rec)
-	}
-}
-
 // ConjunctionToFilters converts a DNF conjunction to tokens, KV filters, and a negation filter.
 // Positive predicates are returned as tokens/KV for index acceleration.
 // Negative predicates are returned as a runtime filter.
@@ -679,35 +670,36 @@ func negativePredicatesFilter(predicates []*querylang.PredicateExpr) recordFilte
 	}
 }
 
-// evalBoolExpr recursively evaluates a boolean expression against a record.
-func evalBoolExpr(expr querylang.Expr, rec chunk.Record) bool {
-	switch e := expr.(type) {
-	case *querylang.AndExpr:
-		for _, term := range e.Terms {
-			if !evalBoolExpr(term, rec) {
-				return false
-			}
-		}
-		return true
-
-	case *querylang.OrExpr:
-		for _, term := range e.Terms {
-			if evalBoolExpr(term, rec) {
+// dnfFilter returns a filter that accepts records matching ANY branch of a DNF.
+// A record matches a branch if it matches ALL positive predicates AND NONE of the negative predicates.
+// This evaluates only primitive predicates, not boolean logic.
+func dnfFilter(dnf *querylang.DNF) recordFilter {
+	return func(rec chunk.Record) bool {
+		for _, branch := range dnf.Branches {
+			if matchesBranch(&branch, rec) {
 				return true
 			}
 		}
 		return false
-
-	case *querylang.NotExpr:
-		return !evalBoolExpr(e.Term, rec)
-
-	case *querylang.PredicateExpr:
-		return evalPredicate(e, rec)
-
-	default:
-		// Unknown expression type - should not happen
-		return false
 	}
+}
+
+// matchesBranch checks if a record matches a single DNF branch.
+// Returns true if record matches all positive predicates and none of the negative predicates.
+func matchesBranch(branch *querylang.Conjunction, rec chunk.Record) bool {
+	// Check all positive predicates (AND semantics)
+	for _, p := range branch.Positive {
+		if !evalPredicate(p, rec) {
+			return false
+		}
+	}
+	// Check all negative predicates (must NOT match any)
+	for _, p := range branch.Negative {
+		if evalPredicate(p, rec) {
+			return false
+		}
+	}
+	return true
 }
 
 // evalPredicate evaluates a single predicate against a record.

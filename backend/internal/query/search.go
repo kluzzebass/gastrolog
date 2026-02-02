@@ -17,6 +17,9 @@ import (
 // (limit reached, caller break, error, or context cancellation), or nil if all
 // matching records were returned.
 func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter.Seq2[chunk.Record, error], func() *ResumeToken) {
+	// Normalize query to ensure BoolExpr is set (converts legacy Tokens/KV if needed).
+	q = q.Normalize()
+
 	// Track state for resume token generation.
 	var nextRef *chunk.RecordRef
 	completed := false
@@ -110,6 +113,9 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 // The source and token filters only apply to finding the first match.
 // Time bounds and limit still apply to all yielded records.
 func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeToken) (iter.Seq2[chunk.Record, error], func() *ResumeToken) {
+	// Normalize query to ensure BoolExpr is set (converts legacy Tokens/KV if needed).
+	q = q.Normalize()
+
 	var nextRef *chunk.RecordRef
 	completed := false
 
@@ -143,9 +149,9 @@ func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeTo
 			}
 		}
 
-		// Create a follow query that removes token filters.
+		// Create a follow query that removes all filters (for context window).
 		followQuery := q
-		followQuery.Tokens = nil
+		followQuery.BoolExpr = nil
 
 		count := 0
 		inFollowMode := false
@@ -267,6 +273,9 @@ func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeTo
 // Note: This method buffers context records in memory. For large context windows,
 // consider using SearchThenFollow or manual cursor operations instead.
 func (e *Engine) SearchWithContext(ctx context.Context, q Query) (iter.Seq2[chunk.Record, error], func() *ResumeToken) {
+	// Normalize query to ensure BoolExpr is set (converts legacy Tokens/KV if needed).
+	q = q.Normalize()
+
 	var nextRef *chunk.RecordRef
 	completed := false
 

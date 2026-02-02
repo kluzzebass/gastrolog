@@ -108,6 +108,27 @@ func flattenAnd(left, right Expr) Expr {
 	return &AndExpr{Terms: terms}
 }
 
+// FlattenAnd combines multiple expressions into an AndExpr, flattening nested AndExprs.
+// This is the exported version for use by other packages.
+func FlattenAnd(exprs ...Expr) Expr {
+	if len(exprs) == 0 {
+		return nil
+	}
+	if len(exprs) == 1 {
+		return exprs[0]
+	}
+
+	var terms []Expr
+	for _, e := range exprs {
+		if a, ok := e.(*AndExpr); ok {
+			terms = append(terms, a.Terms...)
+		} else {
+			terms = append(terms, e)
+		}
+	}
+	return &AndExpr{Terms: terms}
+}
+
 // flattenOr combines two expressions into an OrExpr, flattening nested OrExprs.
 func flattenOr(left, right Expr) Expr {
 	var terms []Expr

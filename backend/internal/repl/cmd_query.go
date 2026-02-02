@@ -10,7 +10,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/query"
-	"gastrolog/internal/tokenizer"
+	"gastrolog/internal/querylang"
 )
 
 func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
@@ -165,13 +165,8 @@ func (r *REPL) runFollowMode(ctx context.Context, ch chan<- recordResult, q quer
 
 			nextPos = ref.Pos + 1
 
-			// Apply token filter (AND semantics)
-			if len(q.Tokens) > 0 && !matchesAllTokens(rec.Raw, q.Tokens) {
-				continue
-			}
-
-			// Apply key=value filter (AND semantics, OR within each filter for attrs vs message)
-			if len(q.KV) > 0 && !matchesAllKeyValues(rec.Attrs, rec.Raw, q.KV) {
+			// Apply filter expression if present
+			if q.BoolExpr != nil && !matchesBoolExpr(q.BoolExpr, rec) {
 				continue
 			}
 
@@ -193,120 +188,96 @@ func (r *REPL) runFollowMode(ctx context.Context, ch chan<- recordResult, q quer
 	}
 }
 
-// matchesAllTokens checks if the raw data contains all query tokens.
-func matchesAllTokens(raw []byte, tokens []string) bool {
-	rawLower := strings.ToLower(string(raw))
-	for _, tok := range tokens {
-		if !strings.Contains(rawLower, strings.ToLower(tok)) {
+// matchesBoolExpr checks if a record matches a boolean expression using DNF evaluation.
+// This evaluates primitive predicates only, not recursive AST evaluation.
+func matchesBoolExpr(expr querylang.Expr, rec chunk.Record) bool {
+	dnf := querylang.ToDNF(expr)
+	for _, branch := range dnf.Branches {
+		if matchesBranch(&branch, rec) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesBranch checks if a record matches a single DNF branch.
+func matchesBranch(branch *querylang.Conjunction, rec chunk.Record) bool {
+	// Check all positive predicates (AND semantics)
+	for _, p := range branch.Positive {
+		if !matchesPredicate(p, rec) {
+			return false
+		}
+	}
+	// Check all negative predicates (must NOT match any)
+	for _, p := range branch.Negative {
+		if matchesPredicate(p, rec) {
 			return false
 		}
 	}
 	return true
 }
 
-// matchesAllKeyValues checks if all query key=value pairs are found in either
-// the record's attributes or the message body (OR semantics per pair, AND across pairs).
-//
-// Supports wildcard patterns:
-//   - Key="foo", Value="bar" - exact match for foo=bar
-//   - Key="foo", Value=""    - match if key "foo" exists (any value)
-//   - Key="", Value="bar"    - match if any key has value "bar"
-func matchesAllKeyValues(recAttrs chunk.Attributes, raw []byte, queryFilters []query.KeyValueFilter) bool {
-	if len(queryFilters) == 0 {
-		return true
+// matchesPredicate checks if a record matches a single predicate.
+func matchesPredicate(pred *querylang.PredicateExpr, rec chunk.Record) bool {
+	switch pred.Kind {
+	case querylang.PredToken:
+		return matchesToken(rec.Raw, pred.Value)
+	case querylang.PredKV:
+		return matchesKV(rec.Attrs, rec.Raw, pred.Key, pred.Value)
+	case querylang.PredKeyExists:
+		return matchesKeyExists(rec.Attrs, rec.Raw, pred.Key)
+	case querylang.PredValueExists:
+		return matchesValueExists(rec.Attrs, rec.Raw, pred.Value)
+	default:
+		return false
 	}
+}
 
-	// Lazily extract key=value pairs from message body only if needed.
-	var msgPairs map[string]map[string]struct{}
-	var msgValues map[string]struct{} // all values (for *=value pattern)
-	getMsgPairs := func() map[string]map[string]struct{} {
-		if msgPairs == nil {
-			pairs := tokenizer.ExtractKeyValues(raw)
-			msgPairs = make(map[string]map[string]struct{})
-			msgValues = make(map[string]struct{})
-			for _, kv := range pairs {
-				if msgPairs[kv.Key] == nil {
-					msgPairs[kv.Key] = make(map[string]struct{})
-				}
-				// Keys are already lowercase from extractor, values are preserved.
-				// For matching, we lowercase both.
-				valLower := strings.ToLower(kv.Value)
-				msgPairs[kv.Key][valLower] = struct{}{}
-				msgValues[valLower] = struct{}{}
-			}
-		}
-		return msgPairs
-	}
-	getMsgValues := func() map[string]struct{} {
-		getMsgPairs() // ensure msgValues is populated
-		return msgValues
-	}
+// matchesToken checks if raw data contains a token (case-insensitive substring match).
+func matchesToken(raw []byte, token string) bool {
+	return strings.Contains(strings.ToLower(string(raw)), strings.ToLower(token))
+}
 
-	// Check all filters (AND semantics across filters).
-	for _, f := range queryFilters {
-		keyLower := strings.ToLower(f.Key)
-		valLower := strings.ToLower(f.Value)
-
-		if f.Key == "" && f.Value == "" {
-			// Both empty - matches everything, skip this filter
-			continue
-		} else if f.Value == "" {
-			// Key only: key=* pattern (key exists with any value)
-			// Check attrs
-			found := false
-			for k := range recAttrs {
-				if strings.EqualFold(k, f.Key) {
-					found = true
-					break
-				}
-			}
-			if found {
-				continue
-			}
-			// Check message body
-			pairs := getMsgPairs()
-			if _, ok := pairs[keyLower]; ok {
-				continue
-			}
-			return false // Key not found in either location
-		} else if f.Key == "" {
-			// Value only: *=value pattern (any key has this value)
-			// Check attrs
-			found := false
-			for _, v := range recAttrs {
-				if strings.EqualFold(v, f.Value) {
-					found = true
-					break
-				}
-			}
-			if found {
-				continue
-			}
-			// Check message body
-			values := getMsgValues()
-			if _, ok := values[valLower]; ok {
-				continue
-			}
-			return false // Value not found in either location
-		} else {
-			// Both key and value: exact key=value match
-			// Check attributes first (cheaper).
-			if v, ok := recAttrs[f.Key]; ok && strings.EqualFold(v, f.Value) {
-				continue // Found in attrs, this filter passes.
-			}
-
-			// Check message body.
-			pairs := getMsgPairs()
-			if values, ok := pairs[keyLower]; ok {
-				if _, found := values[valLower]; found {
-					continue // Found in message, this filter passes.
-				}
-			}
-
-			return false // Not found in either location.
+// matchesKV checks if a record has a key=value pair in attrs or message body.
+func matchesKV(attrs chunk.Attributes, raw []byte, key, value string) bool {
+	// Check attributes
+	for k, v := range attrs {
+		if strings.EqualFold(k, key) && strings.EqualFold(v, value) {
+			return true
 		}
 	}
-	return true
+	// Check message body (simple substring for now)
+	rawLower := strings.ToLower(string(raw))
+	pattern := strings.ToLower(key) + "=" + strings.ToLower(value)
+	return strings.Contains(rawLower, pattern)
+}
+
+// matchesKeyExists checks if a record has a key in attrs or message body.
+func matchesKeyExists(attrs chunk.Attributes, raw []byte, key string) bool {
+	// Check attributes
+	for k := range attrs {
+		if strings.EqualFold(k, key) {
+			return true
+		}
+	}
+	// Check message body
+	rawLower := strings.ToLower(string(raw))
+	pattern := strings.ToLower(key) + "="
+	return strings.Contains(rawLower, pattern)
+}
+
+// matchesValueExists checks if a record has a value in attrs or message body.
+func matchesValueExists(attrs chunk.Attributes, raw []byte, value string) bool {
+	// Check attributes
+	for _, v := range attrs {
+		if strings.EqualFold(v, value) {
+			return true
+		}
+	}
+	// Check message body
+	rawLower := strings.ToLower(string(raw))
+	pattern := "=" + strings.ToLower(value)
+	return strings.Contains(rawLower, pattern)
 }
 
 func (r *REPL) cmdNext(out *strings.Builder, args []string) {

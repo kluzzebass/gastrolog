@@ -12,21 +12,15 @@ import (
 // parseQueryArgs parses command-line arguments into a Query.
 // Returns the parsed query and any error message (empty if successful).
 //
-// Supported arguments (legacy mode):
-//   - Bare words: treated as token searches (AND semantics)
-//   - start=TIME: start time bound (RFC3339 or Unix timestamp)
-//   - end=TIME: end time bound (RFC3339 or Unix timestamp)
-//   - limit=N: maximum results
-//   - key=value: filter by key=value in attrs or message body
-//   - key=*: filter by key existence
-//   - *=value: filter by value existence
+// All filter expressions are parsed through the querylang parser.
+// Control arguments (start, end, limit) are extracted first.
 //
-// Boolean query mode (triggered by parentheses, OR, or NOT):
-//   - (error OR warn) AND NOT debug
-//   - error OR "disk full"
-//   - message="out of memory" OR level=error
-//
-// Time bounds and limit are extracted first, then the rest is parsed as a boolean expression.
+// Examples:
+//   - error warn                      → AND of two token predicates
+//   - error OR warn                   → OR of two token predicates
+//   - (error OR warn) AND NOT debug   → complex boolean expression
+//   - level=error host=*              → AND of KV predicates
+//   - start=2024-01-01T00:00:00Z error → time-bounded token search
 func parseQueryArgs(args []string) (query.Query, string) {
 	if len(args) == 0 {
 		return query.Query{}, ""
@@ -71,87 +65,14 @@ func parseQueryArgs(args []string) (query.Query, string) {
 		return q, ""
 	}
 
-	// Join remaining args and check if it looks like a boolean query.
+	// All filter expressions go through the querylang parser.
+	// Simple expressions like "error warn level=info" become AND-only ASTs.
 	filterInput := strings.Join(filterArgs, " ")
-
-	if looksLikeBoolean(filterInput) {
-		// Parse as boolean expression.
-		expr, err := querylang.Parse(filterInput)
-		if err != nil {
-			return q, fmt.Sprintf("Parse error: %v", err)
-		}
-		q.BoolExpr = expr
-		return q, ""
+	expr, err := querylang.Parse(filterInput)
+	if err != nil {
+		return q, fmt.Sprintf("Parse error: %v", err)
 	}
-
-	// Legacy mode: parse as simple token and KV filters.
-	return parseLegacyFilters(q, filterArgs)
-}
-
-// looksLikeBoolean returns true if the input appears to use boolean query syntax.
-// Detection is based on presence of parentheses or boolean keywords.
-func looksLikeBoolean(input string) bool {
-	// Check for parentheses.
-	if strings.Contains(input, "(") || strings.Contains(input, ")") {
-		return true
-	}
-
-	// Check for boolean keywords as separate words.
-	// We need to be careful not to match "error" as containing "or".
-	lower := strings.ToLower(input)
-	words := strings.Fields(lower)
-	for _, word := range words {
-		if word == "or" || word == "and" || word == "not" {
-			return true
-		}
-	}
-
-	// Check for quoted strings (indicates advanced syntax).
-	if strings.Contains(input, `"`) || strings.Contains(input, `'`) {
-		return true
-	}
-
-	return false
-}
-
-// parseLegacyFilters parses filter arguments using the legacy (non-boolean) syntax.
-func parseLegacyFilters(q query.Query, args []string) (query.Query, string) {
-	var tokens []string
-	var kvFilters []query.KeyValueFilter
-
-	for _, arg := range args {
-		k, v, ok := strings.Cut(arg, "=")
-		if !ok {
-			// Bare word without '=' - treat as token search
-			tokens = append(tokens, arg)
-			continue
-		}
-
-		// Handle token= prefix for explicit token specification.
-		if k == "token" {
-			tokens = append(tokens, v)
-			continue
-		}
-
-		// Treat as key=value filter (searches both attrs and message body)
-		// Handle wildcard patterns: key=* and *=value
-		key := k
-		value := v
-		if k == "*" {
-			key = "" // *=value pattern
-		}
-		if v == "*" {
-			value = "" // key=* pattern
-		}
-		kvFilters = append(kvFilters, query.KeyValueFilter{Key: key, Value: value})
-	}
-
-	if len(tokens) > 0 {
-		q.Tokens = tokens
-	}
-	if len(kvFilters) > 0 {
-		q.KV = kvFilters
-	}
+	q.BoolExpr = expr
 
 	return q, ""
 }

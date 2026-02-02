@@ -58,6 +58,57 @@ func (q Query) Reverse() bool {
 	return !q.Start.IsZero() && !q.End.IsZero() && q.End.Before(q.Start)
 }
 
+// Normalize converts legacy Tokens/KV fields to BoolExpr if BoolExpr is not set.
+// This ensures all filtering goes through the unified BoolExpr path.
+func (q Query) Normalize() Query {
+	if q.BoolExpr != nil {
+		return q
+	}
+	if len(q.Tokens) == 0 && len(q.KV) == 0 {
+		return q
+	}
+
+	// Build predicates from legacy fields
+	var predicates []querylang.Expr
+
+	for _, tok := range q.Tokens {
+		predicates = append(predicates, &querylang.PredicateExpr{
+			Kind:  querylang.PredToken,
+			Value: tok,
+		})
+	}
+
+	for _, f := range q.KV {
+		var pred *querylang.PredicateExpr
+		if f.Key == "" && f.Value != "" {
+			pred = &querylang.PredicateExpr{Kind: querylang.PredValueExists, Value: f.Value}
+		} else if f.Key != "" && f.Value == "" {
+			pred = &querylang.PredicateExpr{Kind: querylang.PredKeyExists, Key: f.Key}
+		} else if f.Key != "" && f.Value != "" {
+			pred = &querylang.PredicateExpr{Kind: querylang.PredKV, Key: f.Key, Value: f.Value}
+		}
+		if pred != nil {
+			predicates = append(predicates, pred)
+		}
+	}
+
+	if len(predicates) == 0 {
+		return q
+	}
+
+	// Combine with AND semantics
+	var expr querylang.Expr
+	if len(predicates) == 1 {
+		expr = predicates[0]
+	} else {
+		expr = querylang.FlattenAnd(predicates...)
+	}
+
+	result := q
+	result.BoolExpr = expr
+	return result
+}
+
 // TimeBounds returns the effective lower and upper time bounds, accounting for reverse order.
 // For forward: lower=Start, upper=End
 // For reverse: lower=End, upper=Start
@@ -238,10 +289,13 @@ func (e *Engine) buildScanner(cursor chunk.RecordCursor, q Query, meta chunk.Chu
 		b.setMinPosition(*startPos)
 	}
 
-	// If BoolExpr is set, convert to DNF and process.
+	// Convert BoolExpr to DNF and process.
 	// For single-branch DNF: use index acceleration for positive predicates, runtime filter for negatives.
-	// For multi-branch DNF: this is handled by searchChunkWithRef which unions branch results.
-	if q.BoolExpr != nil {
+	// For multi-branch DNF: union positions from branches, apply DNF filter for correctness.
+	if q.BoolExpr == nil {
+		// No filter expression - return all records (subject to time bounds).
+		// This is handled by the scanner builder with no filters.
+	} else {
 		dnf := querylang.ToDNF(q.BoolExpr)
 
 		if len(dnf.Branches) == 0 {
@@ -342,46 +396,9 @@ func (e *Engine) buildScanner(cursor chunk.RecordCursor, q Query, meta chunk.Chu
 			}
 			// Note: if all branches were empty, positions stays nil (sequential scan)
 
-			// Always apply the full expression as runtime filter for correctness
-			// This handles negatives and ensures exact match semantics
-			b.addFilter(boolExprFilter(q.BoolExpr))
-		}
-	} else {
-		// Legacy API: use Tokens and KV fields.
-
-		// Apply token filter: try index first, fall back to runtime filter.
-		if len(q.Tokens) > 0 {
-			if meta.Sealed {
-				ok, empty := applyTokenIndex(b, e.indexes, meta.ID, q.Tokens)
-				if empty {
-					return emptyScanner(), nil
-				}
-				if !ok {
-					// Index not available, use runtime filter.
-					b.addFilter(tokenFilter(q.Tokens))
-				}
-			} else {
-				// Unsealed chunks don't have indexes.
-				b.addFilter(tokenFilter(q.Tokens))
-			}
-		}
-
-		// Apply key=value filter: try both attr and kv indexes, union results.
-		// Falls back to runtime filter if indexes aren't available.
-		if len(q.KV) > 0 {
-			if meta.Sealed {
-				ok, empty := applyKeyValueIndex(b, e.indexes, meta.ID, q.KV)
-				if empty {
-					return emptyScanner(), nil
-				}
-				if !ok {
-					// Index not available, use runtime filter.
-					b.addFilter(keyValueFilter(q.KV))
-				}
-			} else {
-				// Unsealed chunks don't have indexes.
-				b.addFilter(keyValueFilter(q.KV))
-			}
+			// Apply DNF filter for correctness.
+			// This evaluates primitive predicates per-branch, not recursive AST evaluation.
+			b.addFilter(dnfFilter(&dnf))
 		}
 	}
 

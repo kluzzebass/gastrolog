@@ -121,7 +121,7 @@ func TestREPL_Query(t *testing.T) {
 	})
 
 	t.Run("query with token filter", func(t *testing.T) {
-		input := "query token=error\nexit\n"
+		input := "query error\nexit\n"
 		output := &bytes.Buffer{}
 
 		r := NewSimple(orch, strings.NewReader(input), output)
