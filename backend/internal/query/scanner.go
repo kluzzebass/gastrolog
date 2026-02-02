@@ -8,6 +8,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
+	"gastrolog/internal/querylang"
 	"gastrolog/internal/tokenizer"
 )
 
@@ -629,4 +630,197 @@ func applyKeyValueIndex(b *scannerBuilder, indexes index.IndexManager, chunkID c
 	}
 
 	return true, false
+}
+
+// boolExprFilter returns a filter that evaluates a boolean expression against a record.
+// This is used for runtime filtering when indexes cannot fully evaluate the expression
+// (e.g., NOT predicates, OR branches, or when indexes are unavailable).
+func boolExprFilter(expr querylang.Expr) recordFilter {
+	return func(rec chunk.Record) bool {
+		return evalBoolExpr(expr, rec)
+	}
+}
+
+// ConjunctionToFilters converts a DNF conjunction to tokens, KV filters, and a negation filter.
+// Positive predicates are returned as tokens/KV for index acceleration.
+// Negative predicates are returned as a runtime filter.
+func ConjunctionToFilters(conj *querylang.Conjunction) (tokens []string, kv []KeyValueFilter, negFilter recordFilter) {
+	// Extract positive predicates for index acceleration
+	for _, p := range conj.Positive {
+		switch p.Kind {
+		case querylang.PredToken:
+			tokens = append(tokens, p.Value)
+		case querylang.PredKV:
+			kv = append(kv, KeyValueFilter{Key: p.Key, Value: p.Value})
+		case querylang.PredKeyExists:
+			kv = append(kv, KeyValueFilter{Key: p.Key, Value: ""})
+		case querylang.PredValueExists:
+			kv = append(kv, KeyValueFilter{Key: "", Value: p.Value})
+		}
+	}
+
+	// Build negation filter for negative predicates
+	if len(conj.Negative) > 0 {
+		negFilter = negativePredicatesFilter(conj.Negative)
+	}
+
+	return tokens, kv, negFilter
+}
+
+// negativePredicatesFilter returns a filter that rejects records matching ANY of the negative predicates.
+func negativePredicatesFilter(predicates []*querylang.PredicateExpr) recordFilter {
+	return func(rec chunk.Record) bool {
+		for _, p := range predicates {
+			if evalPredicate(p, rec) {
+				return false // matches a NOT predicate, reject
+			}
+		}
+		return true // doesn't match any NOT predicate, accept
+	}
+}
+
+// evalBoolExpr recursively evaluates a boolean expression against a record.
+func evalBoolExpr(expr querylang.Expr, rec chunk.Record) bool {
+	switch e := expr.(type) {
+	case *querylang.AndExpr:
+		for _, term := range e.Terms {
+			if !evalBoolExpr(term, rec) {
+				return false
+			}
+		}
+		return true
+
+	case *querylang.OrExpr:
+		for _, term := range e.Terms {
+			if evalBoolExpr(term, rec) {
+				return true
+			}
+		}
+		return false
+
+	case *querylang.NotExpr:
+		return !evalBoolExpr(e.Term, rec)
+
+	case *querylang.PredicateExpr:
+		return evalPredicate(e, rec)
+
+	default:
+		// Unknown expression type - should not happen
+		return false
+	}
+}
+
+// evalPredicate evaluates a single predicate against a record.
+func evalPredicate(pred *querylang.PredicateExpr, rec chunk.Record) bool {
+	switch pred.Kind {
+	case querylang.PredToken:
+		return matchesSingleToken(rec.Raw, pred.Value)
+
+	case querylang.PredKV:
+		return matchesSingleKV(rec.Attrs, rec.Raw, pred.Key, pred.Value)
+
+	case querylang.PredKeyExists:
+		return matchesKeyExists(rec.Attrs, rec.Raw, pred.Key)
+
+	case querylang.PredValueExists:
+		return matchesValueExists(rec.Attrs, rec.Raw, pred.Value)
+
+	default:
+		return false
+	}
+}
+
+// matchesSingleToken checks if a record contains a specific token.
+func matchesSingleToken(raw []byte, token string) bool {
+	// Lowercase the token for case-insensitive matching.
+	tokenLower := strings.ToLower(token)
+	recordTokens := tokenizer.Tokens(raw)
+	for _, t := range recordTokens {
+		if t == tokenLower {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesSingleKV checks if a record contains a specific key=value pair
+// in either attributes or extracted message body pairs.
+func matchesSingleKV(attrs chunk.Attributes, raw []byte, key, value string) bool {
+	keyLower := strings.ToLower(key)
+	valueLower := strings.ToLower(value)
+
+	// Check attributes (case-insensitive).
+	for k, v := range attrs {
+		if strings.EqualFold(k, key) && strings.EqualFold(v, value) {
+			return true
+		}
+	}
+
+	// Check message body.
+	pairs := tokenizer.ExtractKeyValues(raw)
+	for _, kv := range pairs {
+		if kv.Key == keyLower && strings.ToLower(kv.Value) == valueLower {
+			return true
+		}
+	}
+
+	return false
+}
+
+// matchesKeyExists checks if a record has a key (any value) in attrs or message body.
+func matchesKeyExists(attrs chunk.Attributes, raw []byte, key string) bool {
+	keyLower := strings.ToLower(key)
+
+	// Check attributes.
+	for k := range attrs {
+		if strings.EqualFold(k, key) {
+			return true
+		}
+	}
+
+	// Check message body.
+	pairs := tokenizer.ExtractKeyValues(raw)
+	for _, kv := range pairs {
+		if kv.Key == keyLower {
+			return true
+		}
+	}
+
+	return false
+}
+
+// matchesValueExists checks if a record has a value (any key) in attrs or message body.
+func matchesValueExists(attrs chunk.Attributes, raw []byte, value string) bool {
+	valueLower := strings.ToLower(value)
+
+	// Check attributes.
+	for _, v := range attrs {
+		if strings.EqualFold(v, value) {
+			return true
+		}
+	}
+
+	// Check message body.
+	pairs := tokenizer.ExtractKeyValues(raw)
+	for _, kv := range pairs {
+		if strings.ToLower(kv.Value) == valueLower {
+			return true
+		}
+	}
+
+	return false
+}
+
+// notTokenFilter returns a filter that excludes records containing any of the given tokens.
+func notTokenFilter(tokens []string) recordFilter {
+	return func(rec chunk.Record) bool {
+		return !matchesTokens(rec.Raw, tokens)
+	}
+}
+
+// notKeyValueFilter returns a filter that excludes records matching any of the given key=value pairs.
+func notKeyValueFilter(filters []KeyValueFilter) recordFilter {
+	return func(rec chunk.Record) bool {
+		return !matchesKeyValue(rec.Attrs, rec.Raw, filters)
+	}
 }

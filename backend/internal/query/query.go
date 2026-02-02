@@ -14,6 +14,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/querylang"
 )
 
 // KeyValueFilter represents a key=value filter that searches both
@@ -35,9 +36,14 @@ type Query struct {
 	Start time.Time // inclusive bound (lower for forward, upper for reverse)
 	End   time.Time // exclusive bound (upper for forward, lower for reverse)
 
-	// Optional filters
+	// Optional filters (legacy API, ignored if BoolExpr is set)
 	Tokens []string         // filter by tokens (nil = no filter, AND semantics)
 	KV     []KeyValueFilter // filter by key=value in attrs OR message (nil = no filter, AND semantics)
+
+	// BoolExpr is an optional boolean expression filter.
+	// If set, Tokens and KV are ignored; filtering is driven by this expression.
+	// This enables complex queries like "(error OR warn) AND NOT debug".
+	BoolExpr querylang.Expr
 
 	// Result control
 	Limit int // max results (0 = unlimited)
@@ -232,38 +238,150 @@ func (e *Engine) buildScanner(cursor chunk.RecordCursor, q Query, meta chunk.Chu
 		b.setMinPosition(*startPos)
 	}
 
-	// Apply token filter: try index first, fall back to runtime filter.
-	if len(q.Tokens) > 0 {
-		if meta.Sealed {
-			ok, empty := applyTokenIndex(b, e.indexes, meta.ID, q.Tokens)
-			if empty {
-				return emptyScanner(), nil
+	// If BoolExpr is set, convert to DNF and process.
+	// For single-branch DNF: use index acceleration for positive predicates, runtime filter for negatives.
+	// For multi-branch DNF: this is handled by searchChunkWithRef which unions branch results.
+	if q.BoolExpr != nil {
+		dnf := querylang.ToDNF(q.BoolExpr)
+
+		if len(dnf.Branches) == 0 {
+			// Empty DNF - no matches
+			return emptyScanner(), nil
+		}
+
+		if len(dnf.Branches) == 1 {
+			// Single branch: use index acceleration
+			tokens, kv, negFilter := ConjunctionToFilters(&dnf.Branches[0])
+
+			// Apply token filter for positive predicates
+			if len(tokens) > 0 {
+				if meta.Sealed {
+					ok, empty := applyTokenIndex(b, e.indexes, meta.ID, tokens)
+					if empty {
+						return emptyScanner(), nil
+					}
+					if !ok {
+						b.addFilter(tokenFilter(tokens))
+					}
+				} else {
+					b.addFilter(tokenFilter(tokens))
+				}
 			}
-			if !ok {
-				// Index not available, use runtime filter.
+
+			// Apply KV filter for positive predicates
+			if len(kv) > 0 {
+				if meta.Sealed {
+					ok, empty := applyKeyValueIndex(b, e.indexes, meta.ID, kv)
+					if empty {
+						return emptyScanner(), nil
+					}
+					if !ok {
+						b.addFilter(keyValueFilter(kv))
+					}
+				} else {
+					b.addFilter(keyValueFilter(kv))
+				}
+			}
+
+			// Apply negation filter for NOT predicates
+			if negFilter != nil {
+				b.addFilter(negFilter)
+			}
+		} else {
+			// Multi-branch DNF: execute each branch and union positions.
+			// Each branch can use indexes independently.
+			var allPositions []uint64
+			anyBranchHasPositions := false
+
+			for _, branch := range dnf.Branches {
+				branchBuilder := newScannerBuilder(meta.ID)
+				if b.hasMinPos {
+					branchBuilder.setMinPosition(b.minPos)
+				}
+
+				tokens, kv, _ := ConjunctionToFilters(&branch)
+				branchEmpty := false
+
+				// Try to get positions from token index
+				if len(tokens) > 0 && meta.Sealed {
+					ok, empty := applyTokenIndex(branchBuilder, e.indexes, meta.ID, tokens)
+					if empty {
+						branchEmpty = true
+					}
+					_ = ok
+				}
+
+				// Try to get positions from KV index
+				if !branchEmpty && len(kv) > 0 && meta.Sealed {
+					ok, empty := applyKeyValueIndex(branchBuilder, e.indexes, meta.ID, kv)
+					if empty {
+						branchEmpty = true
+					}
+					_ = ok
+				}
+
+				if branchEmpty {
+					continue // this branch has no matches, skip
+				}
+
+				if branchBuilder.positions != nil {
+					// This branch contributed positions - union them
+					allPositions = unionPositions(allPositions, branchBuilder.positions)
+					anyBranchHasPositions = true
+				} else {
+					// Branch requires sequential scan (no index narrowing)
+					// Fall back to full runtime filter
+					anyBranchHasPositions = false
+					break
+				}
+			}
+
+			if anyBranchHasPositions && len(allPositions) > 0 {
+				// Use unioned positions from all branches
+				b.positions = allPositions
+			}
+			// Note: if all branches were empty, positions stays nil (sequential scan)
+
+			// Always apply the full expression as runtime filter for correctness
+			// This handles negatives and ensures exact match semantics
+			b.addFilter(boolExprFilter(q.BoolExpr))
+		}
+	} else {
+		// Legacy API: use Tokens and KV fields.
+
+		// Apply token filter: try index first, fall back to runtime filter.
+		if len(q.Tokens) > 0 {
+			if meta.Sealed {
+				ok, empty := applyTokenIndex(b, e.indexes, meta.ID, q.Tokens)
+				if empty {
+					return emptyScanner(), nil
+				}
+				if !ok {
+					// Index not available, use runtime filter.
+					b.addFilter(tokenFilter(q.Tokens))
+				}
+			} else {
+				// Unsealed chunks don't have indexes.
 				b.addFilter(tokenFilter(q.Tokens))
 			}
-		} else {
-			// Unsealed chunks don't have indexes.
-			b.addFilter(tokenFilter(q.Tokens))
 		}
-	}
 
-	// Apply key=value filter: try both attr and kv indexes, union results.
-	// Falls back to runtime filter if indexes aren't available.
-	if len(q.KV) > 0 {
-		if meta.Sealed {
-			ok, empty := applyKeyValueIndex(b, e.indexes, meta.ID, q.KV)
-			if empty {
-				return emptyScanner(), nil
-			}
-			if !ok {
-				// Index not available, use runtime filter.
+		// Apply key=value filter: try both attr and kv indexes, union results.
+		// Falls back to runtime filter if indexes aren't available.
+		if len(q.KV) > 0 {
+			if meta.Sealed {
+				ok, empty := applyKeyValueIndex(b, e.indexes, meta.ID, q.KV)
+				if empty {
+					return emptyScanner(), nil
+				}
+				if !ok {
+					// Index not available, use runtime filter.
+					b.addFilter(keyValueFilter(q.KV))
+				}
+			} else {
+				// Unsealed chunks don't have indexes.
 				b.addFilter(keyValueFilter(q.KV))
 			}
-		} else {
-			// Unsealed chunks don't have indexes.
-			b.addFilter(keyValueFilter(q.KV))
 		}
 	}
 

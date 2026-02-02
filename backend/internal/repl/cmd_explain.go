@@ -9,6 +9,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
 	"gastrolog/internal/query"
+	"gastrolog/internal/querylang"
 	"gastrolog/internal/tokenizer"
 )
 
@@ -28,10 +29,20 @@ type chunkPlan struct {
 	TimeRange     string // "StartTS - EndTS"
 	TimeOverlaps  bool   // whether chunk time range overlaps query
 	Pipeline      []pipelineStep
-	ScanMode      string // "index-driven", "sequential", "skipped"
-	SkipReason    string // reason for skipping (if ScanMode == "skipped")
-	RuntimeFilter string // runtime filter description (empty if none)
-	EstimatedScan int    // estimated records to scan
+	BranchPlans   []branchPlan // per-branch plans for DNF queries
+	ScanMode      string       // "index-driven", "sequential", "skipped"
+	SkipReason    string       // reason for skipping (if ScanMode == "skipped")
+	RuntimeFilter string       // runtime filter description (empty if none)
+	EstimatedScan int          // estimated records to scan
+}
+
+// branchPlan describes the execution plan for a single DNF branch.
+type branchPlan struct {
+	BranchExpr    string         // string representation of the branch
+	Pipeline      []pipelineStep // index pipeline for this branch
+	Skipped       bool           // whether this branch is skipped
+	SkipReason    string         // reason for skipping
+	EstimatedScan int            // estimated records from this branch
 }
 
 // pipelineStep describes one step in the index application pipeline.
@@ -183,7 +194,59 @@ func (r *REPL) buildChunkPlan(q query.Query, meta chunk.ChunkMeta, cm chunk.Chun
 		cp.Pipeline = append(cp.Pipeline, step)
 	}
 
-	// 2. Token index
+	// If BoolExpr is set, convert to DNF and build per-branch plans.
+	if q.BoolExpr != nil {
+		dnf := querylang.ToDNF(q.BoolExpr)
+
+		// Open indexes once for all branches
+		tokIdx, tokErr := im.OpenTokenIndex(meta.ID)
+		attrKVIdx, attrKVErr := im.OpenAttrKVIndex(meta.ID)
+		attrKeyIdx, attrKeyErr := im.OpenAttrKeyIndex(meta.ID)
+		attrValIdx, attrValErr := im.OpenAttrValueIndex(meta.ID)
+		kvIdx, kvStatus, kvErr := im.OpenKVIndex(meta.ID)
+		kvKeyIdx, kvKeyStatus, kvKeyErr := im.OpenKVKeyIndex(meta.ID)
+		kvValIdx, kvValStatus, kvValErr := im.OpenKVValueIndex(meta.ID)
+
+		var totalEstimatedScan int
+		allBranchesSkipped := true
+
+		for _, branch := range dnf.Branches {
+			bp := r.buildBranchPlan(branch, cp.RecordCount,
+				tokIdx, tokErr,
+				attrKVIdx, attrKVErr, attrKeyIdx, attrKeyErr, attrValIdx, attrValErr,
+				kvIdx, kvStatus, kvErr, kvKeyIdx, kvKeyStatus, kvKeyErr, kvValIdx, kvValStatus, kvValErr,
+				meta.ID)
+			cp.BranchPlans = append(cp.BranchPlans, bp)
+
+			if !bp.Skipped {
+				allBranchesSkipped = false
+				totalEstimatedScan += bp.EstimatedScan
+			}
+		}
+
+		// Determine overall scan mode
+		if allBranchesSkipped {
+			cp.ScanMode = "skipped"
+			cp.SkipReason = "all branches empty"
+			cp.EstimatedScan = 0
+			cp.RuntimeFilter = ""
+		} else if totalEstimatedScan < cp.RecordCount {
+			cp.ScanMode = "index-driven"
+			cp.EstimatedScan = totalEstimatedScan
+			cp.RuntimeFilter = "per-branch negative predicates"
+		} else {
+			cp.ScanMode = "sequential"
+			cp.EstimatedScan = cp.RecordCount
+			cp.RuntimeFilter = q.BoolExpr.String()
+		}
+
+		if !allBranchesSkipped && (!q.Start.IsZero() || !q.End.IsZero()) {
+			cp.RuntimeFilter += " AND time bounds"
+		}
+		return cp
+	}
+
+	// 2. Token index (legacy mode)
 	if len(q.Tokens) > 0 {
 		predicate := fmt.Sprintf("token(%s)", strings.Join(q.Tokens, ", "))
 		step := pipelineStep{
@@ -334,6 +397,173 @@ func (r *REPL) buildChunkPlan(q query.Query, meta chunk.ChunkMeta, cm chunk.Chun
 	}
 
 	return cp
+}
+
+// buildBranchPlan builds the execution plan for a single DNF branch.
+func (r *REPL) buildBranchPlan(branch querylang.Conjunction, recordCount int,
+	tokIdx *index.Index[index.TokenIndexEntry], tokErr error,
+	attrKVIdx *index.Index[index.AttrKVIndexEntry], attrKVErr error,
+	attrKeyIdx *index.Index[index.AttrKeyIndexEntry], attrKeyErr error,
+	attrValIdx *index.Index[index.AttrValueIndexEntry], attrValErr error,
+	kvIdx *index.Index[index.KVIndexEntry], kvStatus index.KVIndexStatus, kvErr error,
+	kvKeyIdx *index.Index[index.KVKeyIndexEntry], kvKeyStatus index.KVIndexStatus, kvKeyErr error,
+	kvValIdx *index.Index[index.KVValueIndexEntry], kvValStatus index.KVIndexStatus, kvValErr error,
+	chunkID chunk.ChunkID) branchPlan {
+
+	bp := branchPlan{
+		BranchExpr:    branch.String(),
+		EstimatedScan: recordCount,
+	}
+
+	currentPositions := recordCount
+
+	// Extract tokens and KV filters from positive predicates
+	var tokens []string
+	var kvFilters []query.KeyValueFilter
+
+	for _, pred := range branch.Positive {
+		switch pred.Kind {
+		case querylang.PredToken:
+			tokens = append(tokens, strings.ToLower(pred.Value))
+		case querylang.PredKV:
+			kvFilters = append(kvFilters, query.KeyValueFilter{Key: pred.Key, Value: pred.Value})
+		case querylang.PredKeyExists:
+			kvFilters = append(kvFilters, query.KeyValueFilter{Key: pred.Key, Value: ""})
+		case querylang.PredValueExists:
+			kvFilters = append(kvFilters, query.KeyValueFilter{Key: "", Value: pred.Value})
+		}
+	}
+
+	// Apply token index
+	if len(tokens) > 0 {
+		predicate := fmt.Sprintf("token(%s)", strings.Join(tokens, ", "))
+		step := pipelineStep{
+			Index:           "token",
+			Predicate:       predicate,
+			PositionsBefore: currentPositions,
+		}
+
+		if tokErr == nil {
+			reader := index.NewTokenIndexReader(chunkID, tokIdx.Entries())
+			var positions []uint64
+			allFound := true
+			var missingToken string
+			var missingReason string
+
+			for i, tok := range tokens {
+				pos, found := reader.Lookup(tok)
+				if !found {
+					allFound = false
+					missingToken = tok
+					missingReason = classifyTokenMiss(tok)
+					break
+				}
+				if i == 0 {
+					positions = pos
+				} else {
+					positions = intersectPositions(positions, pos)
+				}
+			}
+
+			if !allFound {
+				step.PositionsAfter = currentPositions
+				step.Action = "runtime"
+				step.Reason = missingReason
+				step.Details = fmt.Sprintf("'%s' not indexed", missingToken)
+			} else if len(positions) == 0 {
+				step.PositionsAfter = 0
+				step.Action = "skipped"
+				step.Reason = "empty_intersection"
+				step.Details = "no records match all tokens"
+				bp.Skipped = true
+				bp.SkipReason = fmt.Sprintf("empty intersection (%s)", predicate)
+			} else {
+				step.PositionsAfter = len(positions)
+				step.Action = "indexed"
+				step.Reason = "indexed"
+				step.Details = fmt.Sprintf("%d token(s) intersected", len(tokens))
+				currentPositions = len(positions)
+			}
+		} else if errors.Is(tokErr, index.ErrIndexNotFound) {
+			step.PositionsAfter = currentPositions
+			step.Action = "runtime"
+			step.Reason = "index_missing"
+			step.Details = "no token index"
+		}
+		bp.Pipeline = append(bp.Pipeline, step)
+	}
+
+	// Apply KV indexes
+	if len(kvFilters) > 0 && !bp.Skipped {
+		for _, f := range kvFilters {
+			predicate := formatSingleKVFilter(f)
+			step := pipelineStep{
+				Index:           "kv",
+				Predicate:       predicate,
+				PositionsBefore: currentPositions,
+			}
+
+			result := r.lookupKVIndex(f,
+				attrKVIdx, attrKVErr, attrKeyIdx, attrKeyErr, attrValIdx, attrValErr,
+				kvIdx, kvStatus, kvErr, kvKeyIdx, kvKeyStatus, kvKeyErr, kvValIdx, kvValStatus, kvValErr,
+				chunkID)
+
+			if !result.available {
+				step.PositionsAfter = currentPositions
+				step.Action = "runtime"
+				step.Reason = result.reason
+				step.Details = result.details
+			} else if len(result.positions) == 0 {
+				step.PositionsAfter = 0
+				step.Action = "skipped"
+				step.Reason = "no_match"
+				step.Details = result.details
+				bp.Skipped = true
+				bp.SkipReason = fmt.Sprintf("no match (%s)", predicate)
+			} else {
+				newCount := len(result.positions)
+				if currentPositions < recordCount {
+					newCount = min(currentPositions, len(result.positions))
+				}
+				step.PositionsAfter = newCount
+				step.Action = "indexed"
+				step.Reason = "indexed"
+				step.Details = result.details
+				currentPositions = newCount
+			}
+			bp.Pipeline = append(bp.Pipeline, step)
+
+			if bp.Skipped {
+				break
+			}
+		}
+	}
+
+	// Add negative predicates info if present
+	if len(branch.Negative) > 0 && !bp.Skipped {
+		var negParts []string
+		for _, pred := range branch.Negative {
+			negParts = append(negParts, "NOT "+pred.String())
+		}
+		step := pipelineStep{
+			Index:           "runtime",
+			Predicate:       strings.Join(negParts, " AND "),
+			PositionsBefore: currentPositions,
+			PositionsAfter:  currentPositions, // can't estimate without scanning
+			Action:          "runtime",
+			Reason:          "negative_predicate",
+			Details:         "NOT cannot use index",
+		}
+		bp.Pipeline = append(bp.Pipeline, step)
+	}
+
+	if bp.Skipped {
+		bp.EstimatedScan = 0
+	} else {
+		bp.EstimatedScan = currentPositions
+	}
+
+	return bp
 }
 
 // classifyTokenMiss returns the reason why a token might not be in the index.
@@ -492,12 +722,19 @@ func (r *REPL) lookupKVIndex(f query.KeyValueFilter,
 
 func (r *REPL) buildRuntimeFilterDesc(q query.Query) string {
 	var parts []string
-	if len(q.Tokens) > 0 {
-		parts = append(parts, fmt.Sprintf("token(%s)", strings.Join(q.Tokens, ", ")))
+
+	// If BoolExpr is set, use it; otherwise use legacy filters
+	if q.BoolExpr != nil {
+		parts = append(parts, q.BoolExpr.String())
+	} else {
+		if len(q.Tokens) > 0 {
+			parts = append(parts, fmt.Sprintf("token(%s)", strings.Join(q.Tokens, ", ")))
+		}
+		for _, f := range q.KV {
+			parts = append(parts, formatSingleKVFilter(f))
+		}
 	}
-	for _, f := range q.KV {
-		parts = append(parts, formatSingleKVFilter(f))
-	}
+
 	if !q.Start.IsZero() || !q.End.IsZero() {
 		parts = append(parts, "time bounds")
 	}
@@ -577,12 +814,28 @@ func (r *REPL) printExplainPlan(out *strings.Builder, plan *explainPlan) {
 	if !plan.Query.End.IsZero() {
 		out.WriteString(fmt.Sprintf("  End: %s\n", plan.Query.End.Format("2006-01-02T15:04:05")))
 	}
-	if len(plan.Query.Tokens) > 0 {
-		out.WriteString(fmt.Sprintf("  Tokens: %v\n", plan.Query.Tokens))
+
+	// Show boolean expression if set
+	if plan.Query.BoolExpr != nil {
+		out.WriteString(fmt.Sprintf("  Expression: %s\n", plan.Query.BoolExpr.String()))
+		dnf := querylang.ToDNF(plan.Query.BoolExpr)
+		if len(dnf.Branches) > 1 {
+			out.WriteString(fmt.Sprintf("  DNF Branches: %d\n", len(dnf.Branches)))
+			for i, branch := range dnf.Branches {
+				out.WriteString(fmt.Sprintf("    Branch %d: %s\n", i+1, branch.String()))
+			}
+		}
+		out.WriteString("  Mode: DNF (index-accelerated branches)\n")
+	} else {
+		// Legacy filters
+		if len(plan.Query.Tokens) > 0 {
+			out.WriteString(fmt.Sprintf("  Tokens: %v\n", plan.Query.Tokens))
+		}
+		if len(plan.Query.KV) > 0 {
+			out.WriteString(fmt.Sprintf("  KV Filters: %s\n", formatKVFilters(plan.Query.KV)))
+		}
 	}
-	if len(plan.Query.KV) > 0 {
-		out.WriteString(fmt.Sprintf("  KV Filters: %s\n", formatKVFilters(plan.Query.KV)))
-	}
+
 	if plan.Query.Limit > 0 {
 		out.WriteString(fmt.Sprintf("  Limit: %d\n", plan.Query.Limit))
 	}
@@ -612,8 +865,30 @@ func (r *REPL) printExplainPlan(out *strings.Builder, plan *explainPlan) {
 			continue
 		}
 
-		// Pipeline (only for non-skipped sealed chunks)
-		if len(cp.Pipeline) > 0 {
+		// Branch plans (for DNF queries)
+		if len(cp.BranchPlans) > 0 {
+			out.WriteString("\n  DNF Branch Plans:\n")
+			for j, bp := range cp.BranchPlans {
+				out.WriteString(fmt.Sprintf("    Branch %d: %s\n", j+1, bp.BranchExpr))
+				if bp.Skipped {
+					out.WriteString(fmt.Sprintf("      Skipped: %s\n", bp.SkipReason))
+				} else {
+					for k, step := range bp.Pipeline {
+						out.WriteString(fmt.Sprintf("      %d. %-12s %5d → %-5d [%s] reason=%s %s\n",
+							k+1,
+							step.Index,
+							step.PositionsBefore,
+							step.PositionsAfter,
+							step.Action,
+							step.Reason,
+							step.Details,
+						))
+					}
+					out.WriteString(fmt.Sprintf("      Estimated: ~%d records\n", bp.EstimatedScan))
+				}
+			}
+		} else if len(cp.Pipeline) > 0 {
+			// Legacy pipeline (only for non-skipped sealed chunks without branch plans)
 			out.WriteString("\n  Index Pipeline:\n")
 			for j, step := range cp.Pipeline {
 				out.WriteString(fmt.Sprintf("    %d. %-14s %5d → %-5d [%s] reason=%s %s\n",

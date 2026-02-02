@@ -481,6 +481,17 @@ func (r *REPL) buildPrompt() string {
 
 // describeQuery returns a short description of a query for the prompt.
 func (r *REPL) describeQuery(q *query.Query) string {
+	// If BoolExpr is set, use its string representation
+	if q.BoolExpr != nil {
+		desc := q.BoolExpr.String()
+		// Truncate if too long
+		if len(desc) > 30 {
+			desc = desc[:27] + "..."
+		}
+		return desc
+	}
+
+	// Legacy API: use Tokens and KV fields
 	var parts []string
 
 	if len(q.Tokens) > 0 {
