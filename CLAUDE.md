@@ -354,25 +354,60 @@ Interactive command-line interface for querying a running GastroLog system:
 
 - Built on bubbletea for terminal UI with history, tab completion
 - Observes system via public APIs only (no lifecycle control)
+- Dynamic status prompt showing current store and active query: `[store|query] > `
 
 **Commands:**
-- `query key=value ...` -- execute query with filters (start=, end=, token=, limit=)
-- `follow key=value ...` -- stream new records in real-time (like tail -f)
+- `query [filters...]` -- execute query with filters
+- `follow [filters...]` -- stream new records in real-time (like tail -f)
+- `explain [filters...]` -- show query execution plan (which indexes will be used)
 - `next [count]` -- fetch next page of results
 - `store [name]` -- get/set target store
 - `set key=value` -- configure REPL settings
 - `reset` -- clear query state
+- `chunks` -- list all chunks with metadata
+- `chunk <id>` -- show details for a specific chunk
+- `indexes <chunk-id>` -- show index status for a chunk
+- `analyze [chunk-id]` -- analyze index health (all chunks if no ID)
+- `stats` -- show overall system statistics
+- `status` -- show live system state
 - `help` / `?` -- show help
 - `exit` / `quit` / Ctrl-D -- exit
+
+**Query filters:**
+- Bare words -- token search (AND semantics): `query error warning`
+- `start=TIME` -- start time (RFC3339 or Unix timestamp)
+- `end=TIME` -- end time (RFC3339 or Unix timestamp)
+- `limit=N` -- maximum results
+- `key=value` -- filter by key=value in attrs OR message body (AND semantics)
+- `key=*` -- filter by key existence (any value)
+- `*=value` -- filter by value existence (any key)
+
+**Explain command:**
+
+Shows query execution plan with index pipeline for each chunk:
+```
+Chunk 1: 019c1b36-... (sealed)
+  Records: 10000
+
+  Index Pipeline:
+    1. time           10000 →  9500 [seek] reason=indexed skip 500 via sparse index
+    2. token           9500 →  2500 [indexed] reason=indexed 1 token(s) intersected
+    3. kv              2500 →   800 [indexed] reason=indexed attr_kv=800 msg_kv=0
+
+  Scan: index-driven
+  Estimated Records Scanned: ~800
+  Runtime Filter: time bounds
+```
+
+Pipeline step reasons: `indexed`, `binary_search`, `index_missing`, `non_ascii`, `numeric`, `not_indexed`, `empty_intersection`, `no_match`, `budget_exhausted`, `value_not_indexed`
 
 **Settings (via `set`):**
 - `pager=N` -- records per page (0 = no paging, show all at once)
 
-**Query semantics:**
-- `limit=N` limits total results from query engine
-- Pagination via `next` is separate from limit
-- Time format: RFC3339 (`2024-01-01T00:00:00Z`) or Unix timestamp
-- Multiple `token=` filters use AND semantics
+**File organization:**
+- `repl.go` -- main REPL infrastructure, bubbletea model, prompt building
+- `parse.go` -- shared query argument parsing (used by query, follow, explain)
+- `cmd_*.go` -- one file per command group (help, query, explain, chunks, etc.)
 
 ## Binary Format Conventions
 
@@ -486,7 +521,17 @@ backend/
       file/                     File-based config store
       memory/                   Memory-based config store
     repl/
-      repl.go                   Interactive REPL with bubbletea
+      repl.go                   Interactive REPL with bubbletea, status prompt
+      parse.go                  Shared query argument parsing
+      cmd_help.go               Help command
+      cmd_query.go              Query, follow, next, reset commands
+      cmd_explain.go            Explain command with index pipeline analysis
+      cmd_store.go              Store command
+      cmd_set.go                Set command
+      cmd_chunks.go             Chunks, chunk commands
+      cmd_indexes.go            Indexes command
+      cmd_analyze.go            Analyze command
+      cmd_stats.go              Stats, status commands
   cmd/
     gastrolog/
       main.go                   Main entry point
