@@ -40,6 +40,11 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	// Launch ingest loop.
 	o.ingestLoopWg.Go(func() { o.ingestLoop(ctx) })
 
+	// Log startup info.
+	if o.router == nil {
+		o.logger.Warn("starting without router, messages will fan out to all stores")
+	}
+
 	return nil
 }
 
