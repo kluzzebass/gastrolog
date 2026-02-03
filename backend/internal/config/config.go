@@ -13,7 +13,14 @@
 //   - Watch for live changes (v1 is load-on-start only)
 package config
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"gastrolog/internal/chunk"
+	"strconv"
+	"strings"
+	"time"
+)
 
 // Store persists and loads system configuration.
 //
@@ -43,8 +50,24 @@ type Store interface {
 // Config describes the desired system shape.
 // It is declarative: it defines what should exist, not how to create it.
 type Config struct {
-	Receivers []ReceiverConfig `json:"receivers,omitempty"`
-	Stores    []StoreConfig    `json:"stores,omitempty"`
+	RotationPolicies map[string]RotationPolicyConfig `json:"rotationPolicies,omitempty"`
+	Receivers        []ReceiverConfig                `json:"receivers,omitempty"`
+	Stores           []StoreConfig                   `json:"stores,omitempty"`
+}
+
+// RotationPolicyConfig defines when chunks should be rotated.
+// Multiple conditions can be specified; rotation occurs when ANY condition is met.
+type RotationPolicyConfig struct {
+	// MaxBytes rotates when chunk size exceeds this value.
+	// Supports suffixes: B, KB, MB, GB (e.g., "64MB", "1GB").
+	MaxBytes string `json:"maxBytes,omitempty"`
+
+	// MaxAge rotates when chunk age exceeds this duration.
+	// Uses Go duration format (e.g., "1h", "30m", "24h").
+	MaxAge string `json:"maxAge,omitempty"`
+
+	// MaxRecords rotates when record count exceeds this value.
+	MaxRecords int64 `json:"maxRecords,omitempty"`
 }
 
 // ReceiverConfig describes a receiver to instantiate.
@@ -59,6 +82,82 @@ type ReceiverConfig struct {
 	// Parsing and validation are the responsibility of the factory that consumes
 	// the params. There is no schema enforcement at the ConfigStore level.
 	Params map[string]string `json:"params,omitempty"`
+}
+
+// ToRotationPolicy converts a RotationPolicyConfig to a chunk.RotationPolicy.
+// Returns nil if no conditions are specified.
+func (c RotationPolicyConfig) ToRotationPolicy() (chunk.RotationPolicy, error) {
+	var policies []chunk.RotationPolicy
+
+	if c.MaxBytes != "" {
+		bytes, err := parseBytes(c.MaxBytes)
+		if err != nil {
+			return nil, fmt.Errorf("invalid maxBytes: %w", err)
+		}
+		policies = append(policies, chunk.NewSizePolicy(bytes))
+	}
+
+	if c.MaxAge != "" {
+		d, err := time.ParseDuration(c.MaxAge)
+		if err != nil {
+			return nil, fmt.Errorf("invalid maxAge: %w", err)
+		}
+		if d <= 0 {
+			return nil, fmt.Errorf("invalid maxAge: must be positive")
+		}
+		policies = append(policies, chunk.NewAgePolicy(d, nil))
+	}
+
+	if c.MaxRecords > 0 {
+		policies = append(policies, chunk.NewRecordCountPolicy(uint64(c.MaxRecords)))
+	}
+
+	if len(policies) == 0 {
+		return nil, nil
+	}
+
+	if len(policies) == 1 {
+		return policies[0], nil
+	}
+
+	return chunk.NewCompositePolicy(policies...), nil
+}
+
+// parseBytes parses a byte size string with optional suffix (B, KB, MB, GB).
+func parseBytes(s string) (uint64, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, fmt.Errorf("empty value")
+	}
+
+	s = strings.ToUpper(s)
+
+	var multiplier uint64 = 1
+	var numStr string
+
+	switch {
+	case strings.HasSuffix(s, "GB"):
+		multiplier = 1024 * 1024 * 1024
+		numStr = strings.TrimSuffix(s, "GB")
+	case strings.HasSuffix(s, "MB"):
+		multiplier = 1024 * 1024
+		numStr = strings.TrimSuffix(s, "MB")
+	case strings.HasSuffix(s, "KB"):
+		multiplier = 1024
+		numStr = strings.TrimSuffix(s, "KB")
+	case strings.HasSuffix(s, "B"):
+		numStr = strings.TrimSuffix(s, "B")
+	default:
+		numStr = s
+	}
+
+	numStr = strings.TrimSpace(numStr)
+	n, err := strconv.ParseUint(numStr, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	return n * multiplier, nil
 }
 
 // StoreConfig describes a storage backend to instantiate.
@@ -78,6 +177,10 @@ type StoreConfig struct {
 	//     (e.g., "env=prod AND level=error")
 	// Token predicates are not allowed in routes (only attr-based filtering).
 	Route string `json:"route,omitempty"`
+
+	// Policy references a named rotation policy from Config.RotationPolicies.
+	// If empty, the store uses a default policy (type-specific).
+	Policy string `json:"policy,omitempty"`
 
 	// Params contains type-specific configuration as opaque string key-value pairs.
 	// Parsing and validation are the responsibility of the factory that consumes

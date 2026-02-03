@@ -1,32 +1,43 @@
 {
+  "rotationPolicies": {
+    "default": {
+      "maxBytes": "64MB",
+      "maxAge": "1h"
+    },
+    "fast": {
+      "maxBytes": "10MB",
+      "maxAge": "5m"
+    },
+    "large": {
+      "maxBytes": "128MB"
+    }
+  },
   "stores": [
     {
       "id": "prod",
       "type": "file",
       "route": "env=prod",
+      "policy": "default",
       "params": {
-        "dir": "./data/chunks/prod",
-        "maxChunkBytes": "67108864",
-        "maxChunkAge": "1h"
+        "dir": "./data/chunks/prod"
       }
     },
     {
       "id": "dev",
       "type": "file",
       "route": "env=dev OR env=staging",
+      "policy": "fast",
       "params": {
-        "dir": "./data/chunks/dev",
-        "maxChunkBytes": "10485760",
-        "maxChunkAge": "5m"
+        "dir": "./data/chunks/dev"
       }
     },
     {
       "id": "archive",
       "type": "file",
       "route": "+",
+      "policy": "large",
       "params": {
-        "dir": "./data/chunks/archive",
-        "maxChunkBytes": "134217728"
+        "dir": "./data/chunks/archive"
       }
     }
   ],
