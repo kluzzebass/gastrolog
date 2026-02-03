@@ -459,7 +459,7 @@ func TestStoreConfigNotFound(t *testing.T) {
 	}
 }
 
-func TestUpdateStoreConfigRoute(t *testing.T) {
+func TestUpdateStoreRoute(t *testing.T) {
 	orch, stores := newRoutedTestSetup(t)
 
 	// Set initial route: prod gets env=prod.
@@ -483,8 +483,8 @@ func TestUpdateStoreConfigRoute(t *testing.T) {
 	}
 
 	// Update prod's route to env=staging.
-	if err := orch.UpdateStoreConfig("prod", map[string]string{"route": "env=staging"}); err != nil {
-		t.Fatalf("UpdateStoreConfig: %v", err)
+	if err := orch.UpdateStoreRoute("prod", "env=staging"); err != nil {
+		t.Fatalf("UpdateStoreRoute: %v", err)
 	}
 
 	// Ingest another prod message - should NOT go to prod anymore.
@@ -508,7 +508,7 @@ func TestUpdateStoreConfigRoute(t *testing.T) {
 	}
 }
 
-func TestUpdateStoreConfigRotationPolicy(t *testing.T) {
+func TestSetRotationPolicyDirectly(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
 	// Create a store with default rotation policy (10000 records).
@@ -531,14 +531,9 @@ func TestUpdateStoreConfigRotationPolicy(t *testing.T) {
 		t.Fatalf("AddStore: %v", err)
 	}
 
-	// Update rotation policy via UpdateStoreConfig to 3 records per chunk.
-	if err := orch.UpdateStoreConfig("test-store", map[string]string{
-		"maxRecords": "3",
-	}); err != nil {
-		t.Fatalf("UpdateStoreConfig: %v", err)
-	}
-
+	// Get chunk manager and set rotation policy directly.
 	cm := orch.ChunkManager("test-store")
+	cm.SetRotationPolicy(chunk.NewRecordCountPolicy(3))
 
 	// Ingest 10 records - should trigger multiple rotations with limit of 3.
 	for i := 0; i < 10; i++ {
@@ -562,16 +557,16 @@ func TestUpdateStoreConfigRotationPolicy(t *testing.T) {
 	}
 }
 
-func TestUpdateStoreConfigNotFound(t *testing.T) {
+func TestUpdateStoreRouteNotFound(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
-	err := orch.UpdateStoreConfig("nonexistent", map[string]string{"route": "*"})
+	err := orch.UpdateStoreRoute("nonexistent", "*")
 	if err == nil {
 		t.Fatal("expected error for nonexistent store")
 	}
 }
 
-func TestUpdateStoreConfigInvalidParams(t *testing.T) {
+func TestUpdateStoreRouteInvalid(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
 	factories := orchestrator.Factories{
@@ -593,34 +588,8 @@ func TestUpdateStoreConfigInvalidParams(t *testing.T) {
 		t.Fatalf("AddStore: %v", err)
 	}
 
-	// Invalid maxChunkBytes.
-	err := orch.UpdateStoreConfig("test-store", map[string]string{
-		"maxChunkBytes": "not-a-number",
-	})
-	if err == nil {
-		t.Error("expected error for invalid maxChunkBytes")
-	}
-
-	// Negative maxChunkBytes.
-	err = orch.UpdateStoreConfig("test-store", map[string]string{
-		"maxChunkBytes": "-100",
-	})
-	if err == nil {
-		t.Error("expected error for negative maxChunkBytes")
-	}
-
-	// Invalid maxChunkAge.
-	err = orch.UpdateStoreConfig("test-store", map[string]string{
-		"maxChunkAge": "invalid",
-	})
-	if err == nil {
-		t.Error("expected error for invalid maxChunkAge")
-	}
-
 	// Invalid route expression.
-	err = orch.UpdateStoreConfig("test-store", map[string]string{
-		"route": "(unclosed",
-	})
+	err := orch.UpdateStoreRoute("test-store", "(unclosed")
 	if err == nil {
 		t.Error("expected error for invalid route expression")
 	}
