@@ -31,10 +31,12 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	// Create ingest channel.
 	o.ingestCh = make(chan IngestMessage, o.ingestSize)
 
-	// Launch receiver goroutines.
-	for _, r := range o.receivers {
-		r := r // capture for closure
-		o.receiverWg.Go(func() { r.Run(ctx, o.ingestCh) })
+	// Launch receiver goroutines with per-receiver contexts.
+	for id, r := range o.receivers {
+		id, r := id, r // capture for closure
+		recvCtx, recvCancel := context.WithCancel(ctx)
+		o.receiverCancels[id] = recvCancel
+		o.receiverWg.Go(func() { r.Run(recvCtx, o.ingestCh) })
 	}
 
 	// Launch ingest loop.
@@ -61,7 +63,14 @@ func (o *Orchestrator) Stop() error {
 	ingestCh := o.ingestCh
 	o.mu.Unlock()
 
-	// Cancel receivers and ingest loop.
+	// Cancel all receiver contexts (both initial and dynamically added).
+	o.mu.Lock()
+	for _, recvCancel := range o.receiverCancels {
+		recvCancel()
+	}
+	o.mu.Unlock()
+
+	// Cancel main context (for ingest loop).
 	cancel()
 
 	// Cancel in-flight index builds.
@@ -84,6 +93,8 @@ func (o *Orchestrator) Stop() error {
 	o.ingestCh = nil
 	o.indexCtx = nil
 	o.indexCancel = nil
+	// Clear per-receiver cancel functions.
+	o.receiverCancels = make(map[string]context.CancelFunc)
 	o.mu.Unlock()
 
 	return nil

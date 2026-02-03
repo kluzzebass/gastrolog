@@ -26,6 +26,7 @@ const (
 type CompiledRoute struct {
 	StoreID string
 	Kind    RouteKind
+	Expr    string         // original route expression (for config reconstruction)
 	DNF     *querylang.DNF // only set for RouteExpr
 }
 
@@ -36,17 +37,17 @@ func CompileRoute(storeID, route string) (*CompiledRoute, error) {
 
 	// Empty route = receives nothing
 	if route == "" {
-		return &CompiledRoute{StoreID: storeID, Kind: RouteNone}, nil
+		return &CompiledRoute{StoreID: storeID, Kind: RouteNone, Expr: ""}, nil
 	}
 
 	// Catch-all
 	if route == "*" {
-		return &CompiledRoute{StoreID: storeID, Kind: RouteCatchAll}, nil
+		return &CompiledRoute{StoreID: storeID, Kind: RouteCatchAll, Expr: "*"}, nil
 	}
 
 	// Catch-the-rest
 	if route == "+" {
-		return &CompiledRoute{StoreID: storeID, Kind: RouteCatchRest}, nil
+		return &CompiledRoute{StoreID: storeID, Kind: RouteCatchRest, Expr: "+"}, nil
 	}
 
 	// Parse as querylang expression
@@ -66,6 +67,7 @@ func CompileRoute(storeID, route string) (*CompiledRoute, error) {
 	return &CompiledRoute{
 		StoreID: storeID,
 		Kind:    RouteExpr,
+		Expr:    route,
 		DNF:     &dnf,
 	}, nil
 }
