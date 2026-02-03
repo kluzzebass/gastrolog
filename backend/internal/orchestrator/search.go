@@ -71,3 +71,23 @@ func (o *Orchestrator) SearchWithContext(ctx context.Context, key string, q quer
 	seq, nextToken := qe.SearchWithContext(ctx, q)
 	return seq, nextToken, nil
 }
+
+// Explain returns the query execution plan without executing the query.
+func (o *Orchestrator) Explain(ctx context.Context, key string, q query.Query) (*query.QueryPlan, error) {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+
+	if key == "" {
+		key = "default"
+	}
+
+	qe, ok := o.queries[key]
+	if !ok {
+		if len(o.queries) == 0 {
+			return nil, ErrNoQueryEngines
+		}
+		return nil, ErrUnknownRegistry
+	}
+
+	return qe.Explain(ctx, q)
+}
