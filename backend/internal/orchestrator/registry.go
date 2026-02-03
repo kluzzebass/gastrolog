@@ -35,6 +35,15 @@ func (o *Orchestrator) RegisterReceiver(id string, r Receiver) {
 	o.receivers[id] = r
 }
 
+// SetRouter sets the router for attribute-based message routing.
+// Must be called before Start() or Ingest().
+// If not set, messages are routed to all stores (legacy fan-out behavior).
+func (o *Orchestrator) SetRouter(r *Router) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.router = r
+}
+
 // UnregisterReceiver removes a receiver from the registry.
 // Must be called before Start() or after Stop().
 func (o *Orchestrator) UnregisterReceiver(id string) {

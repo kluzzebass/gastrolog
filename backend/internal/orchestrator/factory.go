@@ -69,12 +69,21 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 	storeIDs := make(map[string]bool)
 	receiverIDs := make(map[string]bool)
 
-	// Create stores (chunk manager + index manager + query engine).
+	// Compile routes and create stores (chunk manager + index manager + query engine).
+	var compiledRoutes []*CompiledRoute
+
 	for _, storeCfg := range cfg.Stores {
 		if storeIDs[storeCfg.ID] {
 			return fmt.Errorf("duplicate store ID: %s", storeCfg.ID)
 		}
 		storeIDs[storeCfg.ID] = true
+
+		// Compile route expression.
+		route, err := CompileRoute(storeCfg.ID, storeCfg.Route)
+		if err != nil {
+			return fmt.Errorf("invalid route for store %s: %w", storeCfg.ID, err)
+		}
+		compiledRoutes = append(compiledRoutes, route)
 
 		// Look up chunk manager factory.
 		cmFactory, ok := factories.ChunkManagers[storeCfg.Type]
@@ -115,6 +124,11 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 		o.RegisterChunkManager(storeCfg.ID, cm)
 		o.RegisterIndexManager(storeCfg.ID, im)
 		o.RegisterQueryEngine(storeCfg.ID, qe)
+	}
+
+	// Set router if any routes were compiled.
+	if len(compiledRoutes) > 0 {
+		o.SetRouter(NewRouter(compiledRoutes))
 	}
 
 	// Create receivers.

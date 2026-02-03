@@ -951,3 +951,370 @@ func TestSearchWithContextUnknownRegistry(t *testing.T) {
 		t.Errorf("expected ErrUnknownRegistry, got %v", err)
 	}
 }
+
+// newRoutedTestSetup creates an orchestrator with multiple stores and a router.
+func newRoutedTestSetup(t *testing.T) (*orchestrator.Orchestrator, map[string]chunk.ChunkManager) {
+	t.Helper()
+
+	stores := make(map[string]chunk.ChunkManager)
+	storeNames := []string{"prod", "staging", "archive", "unrouted"}
+
+	orch := orchestrator.New(orchestrator.Config{})
+
+	for _, name := range storeNames {
+		cm, err := chunkmem.NewManager(chunkmem.Config{
+			RotationPolicy: recordCountPolicy(10000),
+		})
+		if err != nil {
+			t.Fatalf("NewManager failed: %v", err)
+		}
+		stores[name] = cm
+
+		timeIdx := memtime.NewIndexer(cm, 1)
+		tokIdx := memtoken.NewIndexer(cm)
+		attrIdx := memattr.NewIndexer(cm)
+		kvIdx := kv.NewIndexer(cm)
+
+		im := indexmem.NewManager(
+			[]index.Indexer{timeIdx, tokIdx, attrIdx, kvIdx},
+			timeIdx,
+			tokIdx,
+			attrIdx,
+			kvIdx,
+			nil,
+		)
+
+		qe := query.New(cm, im, nil)
+
+		orch.RegisterChunkManager(name, cm)
+		orch.RegisterIndexManager(name, im)
+		orch.RegisterQueryEngine(name, qe)
+	}
+
+	return orch, stores
+}
+
+// countRecords counts records in a chunk manager's active chunk.
+func countRecords(t *testing.T, cm chunk.ChunkManager) int {
+	t.Helper()
+	active := cm.Active()
+	if active == nil {
+		return 0 // No active chunk means no records.
+	}
+	cursor, err := cm.OpenCursor(active.ID)
+	if err != nil {
+		t.Fatalf("OpenCursor failed: %v", err)
+	}
+	defer cursor.Close()
+
+	count := 0
+	for {
+		_, _, err := cursor.Next()
+		if err == chunk.ErrNoMoreRecords {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Next failed: %v", err)
+		}
+		count++
+	}
+	return count
+}
+
+// getRecordMessages returns all Raw messages from a chunk manager's active chunk.
+func getRecordMessages(t *testing.T, cm chunk.ChunkManager) []string {
+	t.Helper()
+	active := cm.Active()
+	if active == nil {
+		return nil // No active chunk means no records.
+	}
+	cursor, err := cm.OpenCursor(active.ID)
+	if err != nil {
+		t.Fatalf("OpenCursor failed: %v", err)
+	}
+	defer cursor.Close()
+
+	var msgs []string
+	for {
+		rec, _, err := cursor.Next()
+		if err == chunk.ErrNoMoreRecords {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Next failed: %v", err)
+		}
+		msgs = append(msgs, string(rec.Raw))
+	}
+	return msgs
+}
+
+func TestRoutingIntegration(t *testing.T) {
+	orch, stores := newRoutedTestSetup(t)
+
+	// Compile routes:
+	// - prod: receives env=prod messages
+	// - staging: receives env=staging messages
+	// - archive: catch-all (*)
+	// - unrouted: catch-the-rest (+)
+	prodRoute, err := orchestrator.CompileRoute("prod", "env=prod")
+	if err != nil {
+		t.Fatalf("CompileRoute prod failed: %v", err)
+	}
+	stagingRoute, err := orchestrator.CompileRoute("staging", "env=staging")
+	if err != nil {
+		t.Fatalf("CompileRoute staging failed: %v", err)
+	}
+	archiveRoute, err := orchestrator.CompileRoute("archive", "*")
+	if err != nil {
+		t.Fatalf("CompileRoute archive failed: %v", err)
+	}
+	unroutedRoute, err := orchestrator.CompileRoute("unrouted", "+")
+	if err != nil {
+		t.Fatalf("CompileRoute unrouted failed: %v", err)
+	}
+
+	router := orchestrator.NewRouter([]*orchestrator.CompiledRoute{
+		prodRoute,
+		stagingRoute,
+		archiveRoute,
+		unroutedRoute,
+	})
+	orch.SetRouter(router)
+
+	// Test cases: message attrs -> expected stores
+	testCases := []struct {
+		name     string
+		attrs    chunk.Attributes
+		raw      string
+		expected []string // stores that should receive the message
+	}{
+		{
+			name:     "prod message goes to prod and archive",
+			attrs:    chunk.Attributes{"env": "prod", "level": "error"},
+			raw:      "production error",
+			expected: []string{"prod", "archive"},
+		},
+		{
+			name:     "staging message goes to staging and archive",
+			attrs:    chunk.Attributes{"env": "staging", "level": "info"},
+			raw:      "staging info",
+			expected: []string{"staging", "archive"},
+		},
+		{
+			name:     "dev message goes to archive and unrouted",
+			attrs:    chunk.Attributes{"env": "dev", "level": "debug"},
+			raw:      "dev debug",
+			expected: []string{"archive", "unrouted"},
+		},
+		{
+			name:     "no env goes to archive and unrouted",
+			attrs:    chunk.Attributes{"level": "warn"},
+			raw:      "no env warn",
+			expected: []string{"archive", "unrouted"},
+		},
+	}
+
+	// Ingest all test messages.
+	for _, tc := range testCases {
+		rec := chunk.Record{
+			IngestTS: time.Now(),
+			Attrs:    tc.attrs,
+			Raw:      []byte(tc.raw),
+		}
+		if err := orch.Ingest(rec); err != nil {
+			t.Fatalf("Ingest failed for %s: %v", tc.name, err)
+		}
+	}
+
+	// Verify each store received the expected messages.
+	storeMessages := make(map[string][]string)
+	for name, cm := range stores {
+		storeMessages[name] = getRecordMessages(t, cm)
+	}
+
+	for _, tc := range testCases {
+		for _, expectedStore := range tc.expected {
+			found := false
+			for _, msg := range storeMessages[expectedStore] {
+				if msg == tc.raw {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("%s: expected message %q in store %q, but not found (store has: %v)",
+					tc.name, tc.raw, expectedStore, storeMessages[expectedStore])
+			}
+		}
+
+		// Also verify message is NOT in stores not in expected list.
+		for storeName, msgs := range storeMessages {
+			isExpected := false
+			for _, exp := range tc.expected {
+				if exp == storeName {
+					isExpected = true
+					break
+				}
+			}
+			if !isExpected {
+				for _, msg := range msgs {
+					if msg == tc.raw {
+						t.Errorf("%s: message %q should NOT be in store %q",
+							tc.name, tc.raw, storeName)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestRoutingWithReceivers(t *testing.T) {
+	orch, stores := newRoutedTestSetup(t)
+
+	// Set up routing: prod gets env=prod, archive is catch-all.
+	prodRoute, _ := orchestrator.CompileRoute("prod", "env=prod")
+	archiveRoute, _ := orchestrator.CompileRoute("archive", "*")
+
+	router := orchestrator.NewRouter([]*orchestrator.CompiledRoute{prodRoute, archiveRoute})
+	orch.SetRouter(router)
+
+	// Create a receiver that emits messages with different attrs.
+	recv := newMockReceiver([]orchestrator.IngestMessage{
+		{Attrs: map[string]string{"env": "prod"}, Raw: []byte("prod msg 1")},
+		{Attrs: map[string]string{"env": "prod"}, Raw: []byte("prod msg 2")},
+		{Attrs: map[string]string{"env": "staging"}, Raw: []byte("staging msg")},
+	})
+	orch.RegisterReceiver("test", recv)
+
+	if err := orch.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	<-recv.started
+	time.Sleep(50 * time.Millisecond)
+
+	if err := orch.Stop(); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+
+	// Verify routing: prod should have 2 messages, archive should have 3.
+	prodMsgs := getRecordMessages(t, stores["prod"])
+	archiveMsgs := getRecordMessages(t, stores["archive"])
+	stagingMsgs := getRecordMessages(t, stores["staging"])
+
+	if len(prodMsgs) != 2 {
+		t.Errorf("prod store: expected 2 messages, got %d: %v", len(prodMsgs), prodMsgs)
+	}
+	if len(archiveMsgs) != 3 {
+		t.Errorf("archive store: expected 3 messages, got %d: %v", len(archiveMsgs), archiveMsgs)
+	}
+	if len(stagingMsgs) != 0 {
+		t.Errorf("staging store: expected 0 messages, got %d: %v", len(stagingMsgs), stagingMsgs)
+	}
+}
+
+func TestRoutingNoRouterFallback(t *testing.T) {
+	orch, stores := newRoutedTestSetup(t)
+
+	// No router set - should fan out to all stores (legacy behavior).
+	rec := chunk.Record{
+		IngestTS: time.Now(),
+		Attrs:    chunk.Attributes{"env": "test"},
+		Raw:      []byte("fanout message"),
+	}
+	if err := orch.Ingest(rec); err != nil {
+		t.Fatalf("Ingest failed: %v", err)
+	}
+
+	// All stores should have the message.
+	for name, cm := range stores {
+		count := countRecords(t, cm)
+		if count != 1 {
+			t.Errorf("store %q: expected 1 record (fanout), got %d", name, count)
+		}
+	}
+}
+
+func TestRoutingEmptyRouteReceivesNothing(t *testing.T) {
+	orch, stores := newRoutedTestSetup(t)
+
+	// prod has empty route (receives nothing), archive is catch-all.
+	prodRoute, _ := orchestrator.CompileRoute("prod", "")
+	archiveRoute, _ := orchestrator.CompileRoute("archive", "*")
+
+	router := orchestrator.NewRouter([]*orchestrator.CompiledRoute{prodRoute, archiveRoute})
+	orch.SetRouter(router)
+
+	rec := chunk.Record{
+		IngestTS: time.Now(),
+		Attrs:    chunk.Attributes{"env": "prod"},
+		Raw:      []byte("should not go to prod"),
+	}
+	if err := orch.Ingest(rec); err != nil {
+		t.Fatalf("Ingest failed: %v", err)
+	}
+
+	// prod should have 0, archive should have 1.
+	if count := countRecords(t, stores["prod"]); count != 0 {
+		t.Errorf("prod store: expected 0 records (empty route), got %d", count)
+	}
+	if count := countRecords(t, stores["archive"]); count != 1 {
+		t.Errorf("archive store: expected 1 record, got %d", count)
+	}
+}
+
+func TestRoutingComplexExpression(t *testing.T) {
+	orch, stores := newRoutedTestSetup(t)
+
+	// prod receives: (env=prod AND level=error) OR (env=prod AND level=critical)
+	prodRoute, err := orchestrator.CompileRoute("prod", "(env=prod AND level=error) OR (env=prod AND level=critical)")
+	if err != nil {
+		t.Fatalf("CompileRoute failed: %v", err)
+	}
+	archiveRoute, _ := orchestrator.CompileRoute("archive", "*")
+
+	router := orchestrator.NewRouter([]*orchestrator.CompiledRoute{prodRoute, archiveRoute})
+	orch.SetRouter(router)
+
+	testCases := []struct {
+		attrs        chunk.Attributes
+		raw          string
+		expectInProd bool
+	}{
+		{chunk.Attributes{"env": "prod", "level": "error"}, "prod error", true},
+		{chunk.Attributes{"env": "prod", "level": "critical"}, "prod critical", true},
+		{chunk.Attributes{"env": "prod", "level": "info"}, "prod info", false},
+		{chunk.Attributes{"env": "staging", "level": "error"}, "staging error", false},
+	}
+
+	for _, tc := range testCases {
+		rec := chunk.Record{
+			IngestTS: time.Now(),
+			Attrs:    tc.attrs,
+			Raw:      []byte(tc.raw),
+		}
+		if err := orch.Ingest(rec); err != nil {
+			t.Fatalf("Ingest failed: %v", err)
+		}
+	}
+
+	prodMsgs := getRecordMessages(t, stores["prod"])
+
+	for _, tc := range testCases {
+		found := false
+		for _, msg := range prodMsgs {
+			if msg == tc.raw {
+				found = true
+				break
+			}
+		}
+		if found != tc.expectInProd {
+			t.Errorf("message %q: expectInProd=%v, found=%v", tc.raw, tc.expectInProd, found)
+		}
+	}
+
+	// Archive should have all 4 messages.
+	if count := countRecords(t, stores["archive"]); count != 4 {
+		t.Errorf("archive: expected 4 messages, got %d", count)
+	}
+}

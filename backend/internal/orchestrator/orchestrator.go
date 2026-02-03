@@ -50,6 +50,11 @@ var (
 //   - Stop() cancels all receivers and the ingest loop via context.
 //   - Receivers emit IngestMessages; orchestrator resolves identity and routes.
 //
+// Routing:
+//   - Each store has a route expression that determines which messages it receives.
+//   - Routes are compiled at registration time and evaluated against message attrs.
+//   - Special routes: "*" (catch-all), "+" (catch-the-rest), "" (receives nothing).
+//
 // Logging:
 //   - Logger is dependency-injected via Config.Logger
 //   - Orchestrator owns its scoped logger (component="orchestrator")
@@ -65,6 +70,9 @@ type Orchestrator struct {
 
 	// Receiver management.
 	receivers map[string]Receiver
+
+	// Routing.
+	router *Router
 
 	// Ingest channel and lifecycle.
 	ingestCh     chan IngestMessage

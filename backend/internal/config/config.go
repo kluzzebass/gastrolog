@@ -70,6 +70,16 @@ type StoreConfig struct {
 	// Type identifies the store implementation (e.g., "file", "memory").
 	Type string `json:"type"`
 
+	// Route defines which messages this store receives based on attributes.
+	// Special values:
+	//   - "" (empty): receives nothing (safe default for unconfigured stores)
+	//   - "*": catch-all, receives all messages
+	//   - "+": catch-the-rest, receives messages that matched no other route
+	//   - any other value: querylang expression matched against message attrs
+	//     (e.g., "env=prod AND level=error")
+	// Token predicates are not allowed in routes (only attr-based filtering).
+	Route string `json:"route,omitempty"`
+
 	// Params contains type-specific configuration as opaque string key-value pairs.
 	// Parsing and validation are the responsibility of the factory that consumes
 	// the params. There is no schema enforcement at the ConfigStore level.

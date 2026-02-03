@@ -45,7 +45,25 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 		return ErrNoChunkManagers
 	}
 
-	for key, cm := range o.chunks {
+	// Determine which stores should receive this message.
+	var targetStores []string
+	if o.router != nil {
+		targetStores = o.router.Route(rec.Attrs)
+	} else {
+		// Legacy behavior: fan-out to all stores.
+		targetStores = make([]string, 0, len(o.chunks))
+		for key := range o.chunks {
+			targetStores = append(targetStores, key)
+		}
+	}
+
+	// Route to target stores only.
+	for _, key := range targetStores {
+		cm, ok := o.chunks[key]
+		if !ok {
+			continue // store not registered (shouldn't happen)
+		}
+
 		activeBefore := cm.Active()
 
 		_, _, err := cm.Append(rec)
