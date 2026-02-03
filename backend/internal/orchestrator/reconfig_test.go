@@ -531,10 +531,14 @@ func TestUpdateStoreConfigRotationPolicy(t *testing.T) {
 		t.Fatalf("AddStore: %v", err)
 	}
 
-	cm := orch.ChunkManager("test-store")
+	// Update rotation policy via UpdateStoreConfig to 3 records per chunk.
+	if err := orch.UpdateStoreConfig("test-store", map[string]string{
+		"maxRecords": "3",
+	}); err != nil {
+		t.Fatalf("UpdateStoreConfig: %v", err)
+	}
 
-	// Directly set a small record count rotation policy.
-	cm.SetRotationPolicy(chunk.NewRecordCountPolicy(3))
+	cm := orch.ChunkManager("test-store")
 
 	// Ingest 10 records - should trigger multiple rotations with limit of 3.
 	for i := 0; i < 10; i++ {

@@ -303,8 +303,9 @@ func routeExpr(r *CompiledRoute) string {
 // UpdateStoreConfig updates a store's configuration.
 // Only certain params can be changed live:
 //   - route: routing expression (hot-swapped)
-//   - maxChunkBytes: rotation size threshold
+//   - maxChunkBytes: rotation size threshold (file stores)
 //   - maxChunkAge: rotation age threshold
+//   - maxRecords: rotation record count (memory stores)
 //
 // Params that cannot be changed (require restart):
 //   - dir: storage directory
@@ -338,11 +339,17 @@ func (o *Orchestrator) UpdateStoreConfig(id string, params map[string]string) er
 
 // updateRotationPolicyLocked builds and sets a new rotation policy from params.
 // Must be called with o.mu held.
+//
+// Supported params:
+//   - maxChunkBytes: size-based rotation (file stores)
+//   - maxChunkAge: age-based rotation (all stores)
+//   - maxRecords: record count rotation (memory stores)
 func (o *Orchestrator) updateRotationPolicyLocked(cm chunk.ChunkManager, params map[string]string) error {
 	maxBytesStr, hasMaxBytes := params["maxChunkBytes"]
 	maxAgeStr, hasMaxAge := params["maxChunkAge"]
+	maxRecordsStr, hasMaxRecords := params["maxRecords"]
 
-	if !hasMaxBytes && !hasMaxAge {
+	if !hasMaxBytes && !hasMaxAge && !hasMaxRecords {
 		return nil // No rotation params to update
 	}
 
@@ -362,6 +369,15 @@ func (o *Orchestrator) updateRotationPolicyLocked(cm chunk.ChunkManager, params 
 			return err
 		}
 		policies = append(policies, chunk.NewSizePolicy(uint64(n)))
+	}
+
+	// Add record count policy if specified.
+	if hasMaxRecords {
+		n, err := parsePositiveInt64(maxRecordsStr, "maxRecords")
+		if err != nil {
+			return err
+		}
+		policies = append(policies, chunk.NewRecordCountPolicy(uint64(n)))
 	}
 
 	// Add age policy if specified.
