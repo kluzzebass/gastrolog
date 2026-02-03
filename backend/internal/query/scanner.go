@@ -132,7 +132,7 @@ func (b *scannerBuilder) addFilter(f recordFilter) {
 
 // excludePosition removes a specific position (used for resume to skip already-returned record).
 func (b *scannerBuilder) excludePosition(pos uint64, reverse bool) {
-	if b.positions == nil || len(b.positions) == 0 {
+	if len(b.positions) == 0 {
 		return
 	}
 	if reverse {
