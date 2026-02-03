@@ -97,6 +97,21 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 			return fmt.Errorf("create chunk manager %s: %w", storeCfg.ID, err)
 		}
 
+		// Apply rotation policy if specified.
+		if storeCfg.Policy != "" {
+			policyCfg, ok := cfg.RotationPolicies[storeCfg.Policy]
+			if !ok {
+				return fmt.Errorf("store %s references unknown policy: %s", storeCfg.ID, storeCfg.Policy)
+			}
+			policy, err := policyCfg.ToRotationPolicy()
+			if err != nil {
+				return fmt.Errorf("invalid policy %s for store %s: %w", storeCfg.Policy, storeCfg.ID, err)
+			}
+			if policy != nil {
+				cm.SetRotationPolicy(policy)
+			}
+		}
+
 		// Look up index manager factory.
 		imFactory, ok := factories.IndexManagers[storeCfg.Type]
 		if !ok {
