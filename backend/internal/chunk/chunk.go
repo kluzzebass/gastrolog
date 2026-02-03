@@ -36,6 +36,10 @@ type ChunkManager interface {
 	// Returns (pos, true, nil) if found, (0, false, nil) if timestamp is before all records.
 	// This enables time-based seeking without requiring the time index to be built.
 	FindStartPosition(id ChunkID, ts time.Time) (uint64, bool, error)
+
+	// SetRotationPolicy updates the rotation policy for future appends.
+	// This takes effect immediately; the next append will use the new policy.
+	SetRotationPolicy(policy RotationPolicy)
 }
 
 // RecordCursor provides bidirectional iteration over records in a chunk.

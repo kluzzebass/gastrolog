@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"time"
 
+	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
 	"gastrolog/internal/query"
 )
@@ -295,4 +298,103 @@ func (o *Orchestrator) StoreConfig(id string) (config.StoreConfig, error) {
 // routeExpr returns the original route expression from a compiled route.
 func routeExpr(r *CompiledRoute) string {
 	return r.Expr
+}
+
+// UpdateStoreConfig updates a store's configuration.
+// Only certain params can be changed live:
+//   - route: routing expression (hot-swapped)
+//   - maxChunkBytes: rotation size threshold
+//   - maxChunkAge: rotation age threshold
+//
+// Params that cannot be changed (require restart):
+//   - dir: storage directory
+//   - type: store type
+//
+// Returns ErrStoreNotFound if the store doesn't exist.
+func (o *Orchestrator) UpdateStoreConfig(id string, params map[string]string) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	cm, exists := o.chunks[id]
+	if !exists {
+		return fmt.Errorf("%w: %s", ErrStoreNotFound, id)
+	}
+
+	// Update rotation policy if any rotation params changed.
+	if err := o.updateRotationPolicyLocked(cm, params); err != nil {
+		return err
+	}
+
+	// Update route if specified.
+	if route, ok := params["route"]; ok {
+		if err := o.updateRouterLocked(id, route); err != nil {
+			return err
+		}
+	}
+
+	o.logger.Info("store config updated", "id", id)
+	return nil
+}
+
+// updateRotationPolicyLocked builds and sets a new rotation policy from params.
+// Must be called with o.mu held.
+func (o *Orchestrator) updateRotationPolicyLocked(cm chunk.ChunkManager, params map[string]string) error {
+	maxBytesStr, hasMaxBytes := params["maxChunkBytes"]
+	maxAgeStr, hasMaxAge := params["maxChunkAge"]
+
+	if !hasMaxBytes && !hasMaxAge {
+		return nil // No rotation params to update
+	}
+
+	// Build new rotation policy.
+	var policies []chunk.RotationPolicy
+
+	// Always include hard limits (4GB for uint32 offsets).
+	// These constants match the file manager's limits.
+	const maxRawLogSize = 4 * 1024 * 1024 * 1024  // 4 GiB
+	const maxAttrLogSize = 4 * 1024 * 1024 * 1024 // 4 GiB
+	policies = append(policies, chunk.NewHardLimitPolicy(maxRawLogSize, maxAttrLogSize))
+
+	// Add size policy if specified.
+	if hasMaxBytes {
+		n, err := parsePositiveInt64(maxBytesStr, "maxChunkBytes")
+		if err != nil {
+			return err
+		}
+		policies = append(policies, chunk.NewSizePolicy(uint64(n)))
+	}
+
+	// Add age policy if specified.
+	if hasMaxAge {
+		d, err := parseDuration(maxAgeStr, "maxChunkAge")
+		if err != nil {
+			return err
+		}
+		policies = append(policies, chunk.NewAgePolicy(d, nil))
+	}
+
+	cm.SetRotationPolicy(chunk.NewCompositePolicy(policies...))
+	return nil
+}
+
+func parsePositiveInt64(s, name string) (int64, error) {
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s: %w", name, err)
+	}
+	if n <= 0 {
+		return 0, fmt.Errorf("invalid %s: must be positive", name)
+	}
+	return n, nil
+}
+
+func parseDuration(s, name string) (time.Duration, error) {
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s: %w", name, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("invalid %s: must be positive", name)
+	}
+	return d, nil
 }

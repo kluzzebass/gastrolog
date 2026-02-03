@@ -258,4 +258,11 @@ func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, boo
 	return uint64(lo - 1), true, nil
 }
 
+// SetRotationPolicy updates the rotation policy for future appends.
+func (m *Manager) SetRotationPolicy(policy chunk.RotationPolicy) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cfg.RotationPolicy = policy
+}
+
 var _ chunk.ChunkManager = (*Manager)(nil)

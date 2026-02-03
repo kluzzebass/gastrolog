@@ -28,6 +28,7 @@ func (f *fakeChunkManager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, err
 func (f *fakeChunkManager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	return 0, false, nil
 }
+func (f *fakeChunkManager) SetRotationPolicy(policy chunk.RotationPolicy) {}
 
 // fakeIndexManager implements index.IndexManager for testing.
 type fakeIndexManager struct{}
