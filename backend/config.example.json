@@ -1,10 +1,21 @@
 {
   "stores": [
     {
-      "id": "default",
+      "id": "prod",
       "type": "file",
+      "route": "env=prod",
       "params": {
-        "dir": "./data/chunks",
+        "dir": "./data/chunks/prod",
+        "maxChunkBytes": "1048576",
+        "maxChunkAge": "30s"
+      }
+    },
+    {
+      "id": "archive",
+      "type": "file",
+      "route": "*",
+      "params": {
+        "dir": "./data/chunks/archive",
         "maxChunkBytes": "1048576",
         "maxChunkAge": "30s"
       }
@@ -22,12 +33,6 @@
         "hostCount": "5",
         "serviceCount": "3"
       }
-    }
-  ],
-  "routes": [
-    {
-      "receiverId": "chatterbox",
-      "storeId": "default"
     }
   ]
 }

@@ -80,8 +80,7 @@ func run(ctx context.Context, logger *slog.Logger, configPath string, replMode b
 	} else {
 		logger.Info("loaded config",
 			"receivers", len(cfg.Receivers),
-			"stores", len(cfg.Stores),
-			"routes", len(cfg.Routes))
+			"stores", len(cfg.Stores))
 	}
 
 	// Create orchestrator.

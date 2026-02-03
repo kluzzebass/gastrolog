@@ -27,10 +27,7 @@ func TestStoreSaveLoad(t *testing.T) {
 			{ID: "syslog1", Type: "syslog-udp", Params: map[string]string{"port": "514"}},
 		},
 		Stores: []config.StoreConfig{
-			{ID: "main", Type: "file", Params: map[string]string{"dir": "/var/log/gastrolog"}},
-		},
-		Routes: []config.RouteConfig{
-			{ReceiverID: "syslog1", StoreID: "main"},
+			{ID: "main", Type: "file", Route: "env=prod", Params: map[string]string{"dir": "/var/log/gastrolog"}},
 		},
 	}
 
@@ -68,16 +65,8 @@ func TestStoreSaveLoad(t *testing.T) {
 	if loaded.Stores[0].ID != "main" {
 		t.Errorf("store ID: expected %q, got %q", "main", loaded.Stores[0].ID)
 	}
-
-	// Verify routes.
-	if len(loaded.Routes) != 1 {
-		t.Fatalf("expected 1 route, got %d", len(loaded.Routes))
-	}
-	if loaded.Routes[0].ReceiverID != "syslog1" {
-		t.Errorf("route ReceiverID: expected %q, got %q", "syslog1", loaded.Routes[0].ReceiverID)
-	}
-	if loaded.Routes[0].StoreID != "main" {
-		t.Errorf("route StoreID: expected %q, got %q", "main", loaded.Routes[0].StoreID)
+	if loaded.Stores[0].Route != "env=prod" {
+		t.Errorf("store Route: expected %q, got %q", "env=prod", loaded.Stores[0].Route)
 	}
 }
 
@@ -187,9 +176,6 @@ func TestStoreEmptyConfig(t *testing.T) {
 	}
 	if len(loaded.Stores) != 0 {
 		t.Errorf("expected 0 stores, got %d", len(loaded.Stores))
-	}
-	if len(loaded.Routes) != 0 {
-		t.Errorf("expected 0 routes, got %d", len(loaded.Routes))
 	}
 }
 

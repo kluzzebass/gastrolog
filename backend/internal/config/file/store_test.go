@@ -36,11 +36,7 @@ func TestStoreSaveLoad(t *testing.T) {
 			{ID: "file1", Type: "file", Params: map[string]string{"path": "/var/log/app.log"}},
 		},
 		Stores: []config.StoreConfig{
-			{ID: "main", Type: "file", Params: map[string]string{"dir": "/var/log/gastrolog"}},
-		},
-		Routes: []config.RouteConfig{
-			{ReceiverID: "syslog1", StoreID: "main"},
-			{ReceiverID: "file1", StoreID: "main"},
+			{ID: "main", Type: "file", Route: "*", Params: map[string]string{"dir": "/var/log/gastrolog"}},
 		},
 	}
 
@@ -78,10 +74,8 @@ func TestStoreSaveLoad(t *testing.T) {
 	if len(loaded.Stores) != 1 {
 		t.Fatalf("expected 1 store, got %d", len(loaded.Stores))
 	}
-
-	// Verify routes.
-	if len(loaded.Routes) != 2 {
-		t.Fatalf("expected 2 routes, got %d", len(loaded.Routes))
+	if loaded.Stores[0].Route != "*" {
+		t.Errorf("store Route: expected %q, got %q", "*", loaded.Stores[0].Route)
 	}
 }
 

@@ -51,7 +51,6 @@ func copyConfig(cfg *config.Config) *config.Config {
 	c := &config.Config{
 		Receivers: make([]config.ReceiverConfig, len(cfg.Receivers)),
 		Stores:    make([]config.StoreConfig, len(cfg.Stores)),
-		Routes:    make([]config.RouteConfig, len(cfg.Routes)),
 	}
 
 	for i, r := range cfg.Receivers {
@@ -66,11 +65,10 @@ func copyConfig(cfg *config.Config) *config.Config {
 		c.Stores[i] = config.StoreConfig{
 			ID:     st.ID,
 			Type:   st.Type,
+			Route:  st.Route,
 			Params: copyParams(st.Params),
 		}
 	}
-
-	copy(c.Routes, cfg.Routes)
 
 	return c
 }

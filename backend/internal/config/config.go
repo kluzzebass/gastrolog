@@ -45,7 +45,6 @@ type Store interface {
 type Config struct {
 	Receivers []ReceiverConfig `json:"receivers,omitempty"`
 	Stores    []StoreConfig    `json:"stores,omitempty"`
-	Routes    []RouteConfig    `json:"routes,omitempty"`
 }
 
 // ReceiverConfig describes a receiver to instantiate.
@@ -84,13 +83,4 @@ type StoreConfig struct {
 	// Parsing and validation are the responsibility of the factory that consumes
 	// the params. There is no schema enforcement at the ConfigStore level.
 	Params map[string]string `json:"params,omitempty"`
-}
-
-// RouteConfig describes a routing rule from receiver to store.
-type RouteConfig struct {
-	// ReceiverID references a receiver by ID.
-	ReceiverID string `json:"receiverId"`
-
-	// StoreID references a store by ID.
-	StoreID string `json:"storeId"`
 }
