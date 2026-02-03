@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## CRITICAL: DO NOT BUMP FILE VERSIONS OR CREATE MIGRATION CODE!
+
+This project is NOT in production. When changing file formats, just change them. Do not increment version numbers or write backward-compatibility code. Delete old data and start fresh.
+
 ## Project Overview
 
 GastroLog is a Go-based log management system built around chunk-based storage and indexing. The backend is written in Go 1.25.5. The project is in active development.
