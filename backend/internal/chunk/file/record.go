@@ -32,6 +32,10 @@ const (
 	IdxLogVersion  = 0x01
 	AttrLogVersion = 0x01
 
+	// IdxHeaderSize is the total header size for idx.log.
+	// 4 bytes common header + 8 bytes createdAt (Unix microseconds).
+	IdxHeaderSize = 12
+
 	// MaxRawLogSize is the hard limit for raw.log (4GB - 1).
 	// This ensures rawOffset (uint32) can address all bytes.
 	MaxRawLogSize = 1<<32 - 1
@@ -82,15 +86,15 @@ func DecodeIdxEntry(buf []byte) IdxEntry {
 
 // IdxFileOffset returns the byte offset in idx.log for a given record index.
 func IdxFileOffset(recordIndex uint64) int64 {
-	return int64(format.HeaderSize) + int64(recordIndex)*int64(IdxEntrySize)
+	return int64(IdxHeaderSize) + int64(recordIndex)*int64(IdxEntrySize)
 }
 
 // RecordCount returns the number of records in an idx.log file given its size.
 func RecordCount(idxFileSize int64) uint64 {
-	if idxFileSize <= int64(format.HeaderSize) {
+	if idxFileSize <= int64(IdxHeaderSize) {
 		return 0
 	}
-	return uint64(idxFileSize-int64(format.HeaderSize)) / uint64(IdxEntrySize)
+	return uint64(idxFileSize-int64(IdxHeaderSize)) / uint64(IdxEntrySize)
 }
 
 // RawDataOffset returns the byte offset in raw.log where data begins (after header).

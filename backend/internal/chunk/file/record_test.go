@@ -171,10 +171,10 @@ func TestIdxFileOffsetCalculation(t *testing.T) {
 		recordIndex uint64
 		expected    int64
 	}{
-		{0, int64(format.HeaderSize)},                             // First record: header only
-		{1, int64(format.HeaderSize) + int64(IdxEntrySize)},       // Second record
-		{10, int64(format.HeaderSize) + 10*int64(IdxEntrySize)},   // 11th record
-		{100, int64(format.HeaderSize) + 100*int64(IdxEntrySize)}, // 101st record
+		{0, int64(IdxHeaderSize)},                             // First record: header only
+		{1, int64(IdxHeaderSize) + int64(IdxEntrySize)},       // Second record
+		{10, int64(IdxHeaderSize) + 10*int64(IdxEntrySize)},   // 11th record
+		{100, int64(IdxHeaderSize) + 100*int64(IdxEntrySize)}, // 101st record
 	}
 
 	for _, tc := range testCases {
@@ -190,13 +190,13 @@ func TestRecordCountCalculation(t *testing.T) {
 		fileSize int64
 		expected uint64
 	}{
-		{0, 0},                        // Empty file
-		{int64(format.HeaderSize), 0}, // Header only
-		{int64(format.HeaderSize) + int64(IdxEntrySize), 1},       // One record
-		{int64(format.HeaderSize) + 2*int64(IdxEntrySize), 2},     // Two records
-		{int64(format.HeaderSize) + 100*int64(IdxEntrySize), 100}, // 100 records
-		{int64(format.HeaderSize) + int64(IdxEntrySize) + 10, 1},  // Partial entry ignored
-		{int64(format.HeaderSize) - 1, 0},                         // Less than header
+		{0, 0},                    // Empty file
+		{int64(IdxHeaderSize), 0}, // Header only
+		{int64(IdxHeaderSize) + int64(IdxEntrySize), 1},       // One record
+		{int64(IdxHeaderSize) + 2*int64(IdxEntrySize), 2},     // Two records
+		{int64(IdxHeaderSize) + 100*int64(IdxEntrySize), 100}, // 100 records
+		{int64(IdxHeaderSize) + int64(IdxEntrySize) + 10, 1},  // Partial entry ignored
+		{int64(IdxHeaderSize) - 1, 0},                         // Less than header
 	}
 
 	for _, tc := range testCases {
@@ -299,6 +299,10 @@ func TestFileVersionConstants(t *testing.T) {
 	}
 	if AttrLogVersion != 0x01 {
 		t.Fatalf("AttrLogVersion: want 0x01, got 0x%02x", AttrLogVersion)
+	}
+	// IdxHeaderSize should be 12 (4 byte header + 8 byte createdAt)
+	if IdxHeaderSize != 12 {
+		t.Fatalf("IdxHeaderSize: want 12, got %d", IdxHeaderSize)
 	}
 }
 

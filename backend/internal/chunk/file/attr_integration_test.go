@@ -369,12 +369,12 @@ func TestIdxLogEntryContainsAttrOffsets(t *testing.T) {
 	}
 
 	// Skip header and decode entries
-	if len(data) < format.HeaderSize+2*IdxEntrySize {
+	if len(data) < IdxHeaderSize+2*IdxEntrySize {
 		t.Fatalf("idx.log too small: %d bytes", len(data))
 	}
 
-	entry0 := DecodeIdxEntry(data[format.HeaderSize:])
-	entry1 := DecodeIdxEntry(data[format.HeaderSize+IdxEntrySize:])
+	entry0 := DecodeIdxEntry(data[IdxHeaderSize:])
+	entry1 := DecodeIdxEntry(data[IdxHeaderSize+IdxEntrySize:])
 
 	// Entry 0 should have AttrOffset 0
 	if entry0.AttrOffset != 0 {

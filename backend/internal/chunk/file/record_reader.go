@@ -172,7 +172,7 @@ func (c *mmapCursor) Seek(ref chunk.RecordRef) error {
 
 func (c *mmapCursor) readRecord(index uint64) (chunk.Record, error) {
 	// Read idx.log entry.
-	idxOffset := int(format.HeaderSize) + int(index)*IdxEntrySize
+	idxOffset := int(IdxHeaderSize) + int(index)*IdxEntrySize
 	if idxOffset+IdxEntrySize > len(c.idxData) {
 		return chunk.Record{}, ErrInvalidRecordIdx
 	}

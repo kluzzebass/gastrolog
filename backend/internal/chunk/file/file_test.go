@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/format"
 )
 
 func TestIdxEntryRoundTrip(t *testing.T) {
@@ -51,10 +50,10 @@ func TestIdxFileOffset(t *testing.T) {
 		index    uint64
 		expected int64
 	}{
-		{0, int64(format.HeaderSize)},
-		{1, int64(format.HeaderSize) + IdxEntrySize},
-		{2, int64(format.HeaderSize) + 2*IdxEntrySize},
-		{100, int64(format.HeaderSize) + 100*IdxEntrySize},
+		{0, int64(IdxHeaderSize)},
+		{1, int64(IdxHeaderSize) + IdxEntrySize},
+		{2, int64(IdxHeaderSize) + 2*IdxEntrySize},
+		{100, int64(IdxHeaderSize) + 100*IdxEntrySize},
 	}
 
 	for _, tt := range tests {
@@ -71,12 +70,12 @@ func TestRecordCount(t *testing.T) {
 		expected uint64
 	}{
 		{0, 0},
-		{int64(format.HeaderSize), 0},
-		{int64(format.HeaderSize) + IdxEntrySize, 1},
-		{int64(format.HeaderSize) + 2*IdxEntrySize, 2},
-		{int64(format.HeaderSize) + 100*IdxEntrySize, 100},
+		{int64(IdxHeaderSize), 0},
+		{int64(IdxHeaderSize) + IdxEntrySize, 1},
+		{int64(IdxHeaderSize) + 2*IdxEntrySize, 2},
+		{int64(IdxHeaderSize) + 100*IdxEntrySize, 100},
 		// Partial entry is not counted
-		{int64(format.HeaderSize) + IdxEntrySize + 10, 1},
+		{int64(IdxHeaderSize) + IdxEntrySize + 10, 1},
 	}
 
 	for _, tt := range tests {

@@ -2,6 +2,7 @@ package file
 
 import (
 	"cmp"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -476,6 +477,15 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 		attrFile.Close()
 	}
 
+	// Read idx.log header including createdAt timestamp.
+	var headerBuf [IdxHeaderSize]byte
+	if _, err := idxFile.ReadAt(headerBuf[:], 0); err != nil {
+		closeAll()
+		return err
+	}
+	createdAtMicros := binary.LittleEndian.Uint64(headerBuf[format.HeaderSize:])
+	createdAt := time.UnixMicro(int64(createdAtMicros))
+
 	// Compute record count from idx.log file size.
 	idxInfo, err := idxFile.Stat()
 	if err != nil {
@@ -548,7 +558,7 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 		rawOffset:   rawOffset,
 		attrOffset:  attrOffset,
 		recordCount: recordCount,
-		createdAt:   m.cfg.Now(), // Use current time for reopened chunks (original creation time unknown)
+		createdAt:   createdAt,
 	}
 
 	return nil
@@ -565,11 +575,11 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 	defer idxFile.Close()
 
 	// Read and validate header.
-	var headerBuf [format.HeaderSize]byte
+	var headerBuf [IdxHeaderSize]byte
 	if _, err := io.ReadFull(idxFile, headerBuf[:]); err != nil {
 		return nil, err
 	}
-	header, err := format.DecodeAndValidate(headerBuf[:], format.TypeIdxLog, IdxLogVersion)
+	header, err := format.DecodeAndValidate(headerBuf[:format.HeaderSize], format.TypeIdxLog, IdxLogVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -591,7 +601,7 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 		return meta, nil
 	}
 
-	// Read first entry for startTS.
+	// Read first entry for startTS (already positioned after header from ReadFull above).
 	var entryBuf [IdxEntrySize]byte
 	if _, err := io.ReadFull(idxFile, entryBuf[:]); err != nil {
 		return nil, err
@@ -620,14 +630,16 @@ func (m *Manager) openLocked() error {
 		return err
 	}
 
+	createdAt := m.cfg.Now()
+
 	// Create and initialize raw.log with header.
 	rawFile, err := m.createRawFile(id)
 	if err != nil {
 		return err
 	}
 
-	// Create and initialize idx.log with header.
-	idxFile, err := m.createIdxFile(id)
+	// Create and initialize idx.log with header + createdAt timestamp.
+	idxFile, err := m.createIdxFile(id, createdAt)
 	if err != nil {
 		rawFile.Close()
 		return err
@@ -654,7 +666,7 @@ func (m *Manager) openLocked() error {
 		rawOffset:   0, // Data starts after header
 		attrOffset:  0, // Data starts after header
 		recordCount: 0,
-		createdAt:   m.cfg.Now(), // Wall-clock time when chunk was opened
+		createdAt:   createdAt,
 	}
 	m.metas[id] = meta
 	return nil
@@ -682,21 +694,24 @@ func (m *Manager) createRawFile(id chunk.ChunkID) (*os.File, error) {
 	return file, nil
 }
 
-func (m *Manager) createIdxFile(id chunk.ChunkID) (*os.File, error) {
+func (m *Manager) createIdxFile(id chunk.ChunkID, createdAt time.Time) (*os.File, error) {
 	path := m.idxLogPath(id)
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, m.cfg.FileMode)
 	if err != nil {
 		return nil, err
 	}
 
-	// Write header.
+	// Write header (4 bytes) + createdAt timestamp (8 bytes).
+	var buf [IdxHeaderSize]byte
 	header := format.Header{
 		Type:    format.TypeIdxLog,
 		Version: IdxLogVersion,
 		Flags:   0,
 	}
-	headerBytes := header.Encode()
-	if _, err := file.Write(headerBytes[:]); err != nil {
+	header.EncodeInto(buf[:])
+	binary.LittleEndian.PutUint64(buf[format.HeaderSize:], uint64(createdAt.UnixMicro()))
+
+	if _, err := file.Write(buf[:]); err != nil {
 		file.Close()
 		return nil, err
 	}
