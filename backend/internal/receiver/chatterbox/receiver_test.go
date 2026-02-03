@@ -255,16 +255,8 @@ func TestRun_MultipleInstances(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 100)
 
 	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		_ = r1.Run(ctx, out)
-	}()
-	go func() {
-		defer wg.Done()
-		_ = r2.Run(ctx, out)
-	}()
-
+	wg.Go(func() { _ = r1.Run(ctx, out) })
+	wg.Go(func() { _ = r2.Run(ctx, out) })
 	wg.Wait()
 	close(out)
 

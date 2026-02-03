@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strings"
 	"sync"
 
 	"gastrolog/internal/chunk"
@@ -392,12 +391,4 @@ func (idx *Indexer) GetKV(chunkID chunk.ChunkID) ([]index.KVIndexEntry, index.KV
 		return nil, index.KVComplete, false
 	}
 	return entries, idx.status[chunkID], true
-}
-
-func splitKV(kv string) (string, string) {
-	idx := strings.IndexByte(kv, 0)
-	if idx == -1 {
-		return kv, ""
-	}
-	return kv[:idx], kv[idx+1:]
 }

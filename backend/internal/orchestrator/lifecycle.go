@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/index"
 )
 
 // Start launches all receivers and the ingest loop.
@@ -185,16 +184,15 @@ func (o *Orchestrator) RebuildMissingIndexes(ctx context.Context) error {
 					"chunk", meta.ID.String())
 
 				// Use the same indexWg as seal-triggered builds.
-				o.indexWg.Add(1)
-				go func(storeID string, chunkID chunk.ChunkID, im index.IndexManager) {
-					defer o.indexWg.Done()
+				storeID, chunkID, im := storeID, meta.ID, im
+				o.indexWg.Go(func() {
 					if err := im.BuildIndexes(ctx, chunkID); err != nil {
 						o.logger.Error("failed to rebuild indexes",
 							"store", storeID,
 							"chunk", chunkID.String(),
 							"error", err)
 					}
-				}(storeID, meta.ID, im)
+				})
 			}
 		}
 	}

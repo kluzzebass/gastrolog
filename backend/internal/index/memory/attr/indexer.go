@@ -121,7 +121,7 @@ func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 
 	kvEntries := make([]index.AttrKVIndexEntry, 0, len(kvMap))
 	for kvKey, positions := range kvMap {
-		key, val := splitKV(kvKey)
+		key, val := index.SplitKV(kvKey)
 		kvEntries = append(kvEntries, index.AttrKVIndexEntry{
 			Key:       key,
 			Value:     val,
@@ -163,13 +163,4 @@ func (idx *Indexer) GetKV(chunkID chunk.ChunkID) ([]index.AttrKVIndexEntry, bool
 	defer idx.mu.Unlock()
 	entries, ok := idx.kvIndex[chunkID]
 	return entries, ok
-}
-
-func splitKV(kv string) (string, string) {
-	for i := 0; i < len(kv); i++ {
-		if kv[i] == 0 {
-			return kv[:i], kv[i+1:]
-		}
-	}
-	return kv, ""
 }

@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"time"
 
 	"gastrolog/internal/chunk"
@@ -459,12 +458,4 @@ func (idx *Indexer) writeIndex(chunkDir, fileName string, data []byte) error {
 	}
 
 	return nil
-}
-
-func splitKV(kv string) (string, string) {
-	idx := strings.IndexByte(kv, 0)
-	if idx == -1 {
-		return kv, ""
-	}
-	return kv[:idx], kv[idx+1:]
 }

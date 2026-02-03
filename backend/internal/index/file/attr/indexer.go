@@ -150,10 +150,10 @@ func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	kvEntries := make([]index.AttrKVIndexEntry, len(sortedKVs))
 	kvWriteIdx := make(map[string]uint32)
 	for i, kv := range sortedKVs {
-		parts := splitKV(kv)
+		key, val := index.SplitKV(kv)
 		kvEntries[i] = index.AttrKVIndexEntry{
-			Key:       parts[0],
-			Value:     parts[1],
+			Key:       key,
+			Value:     val,
 			Positions: make([]uint64, 0, kvCounts[kv]),
 		}
 		kvWriteIdx[kv] = uint32(i)
@@ -286,13 +286,4 @@ func (idx *Indexer) writeIndex(chunkDir, fileName string, data []byte) error {
 	}
 
 	return nil
-}
-
-func splitKV(kv string) [2]string {
-	for i := 0; i < len(kv); i++ {
-		if kv[i] == 0 {
-			return [2]string{kv[:i], kv[i+1:]}
-		}
-	}
-	return [2]string{kv, ""}
 }

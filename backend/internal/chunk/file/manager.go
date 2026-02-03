@@ -1,6 +1,7 @@
 package file
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
@@ -109,9 +110,7 @@ func NewManager(cfg Config) (*Manager, error) {
 	if cfg.Dir == "" {
 		return nil, ErrMissingDir
 	}
-	if cfg.FileMode == 0 {
-		cfg.FileMode = 0o644
-	}
+	cfg.FileMode = cmp.Or(cfg.FileMode, 0o644)
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
