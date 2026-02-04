@@ -36,9 +36,6 @@ type fakeIndexManager struct{}
 func (f *fakeIndexManager) BuildIndexes(ctx context.Context, chunkID chunk.ChunkID) error {
 	return nil
 }
-func (f *fakeIndexManager) OpenTimeIndex(chunkID chunk.ChunkID) (*index.Index[index.TimeIndexEntry], error) {
-	return nil, nil
-}
 func (f *fakeIndexManager) OpenTokenIndex(chunkID chunk.ChunkID) (*index.Index[index.TokenIndexEntry], error) {
 	return nil, nil
 }
@@ -398,8 +395,8 @@ func TestApplyConfigParamsPassedToStoreFactories(t *testing.T) {
 	cfg := &config.Config{
 		Stores: []config.StoreConfig{
 			{ID: "store1", Type: "test", Params: map[string]string{
-				"dir":          "/data/chunks",
-				"timeSparsity": "500",
+				"dir":      "/data/chunks",
+				"kvBudget": "500",
 			}},
 		},
 	}
@@ -413,16 +410,16 @@ func TestApplyConfigParamsPassedToStoreFactories(t *testing.T) {
 	if cmReceivedParams["dir"] != "/data/chunks" {
 		t.Errorf("chunk manager: expected dir=/data/chunks, got %s", cmReceivedParams["dir"])
 	}
-	if cmReceivedParams["timeSparsity"] != "500" {
-		t.Errorf("chunk manager: expected timeSparsity=500, got %s", cmReceivedParams["timeSparsity"])
+	if cmReceivedParams["kvBudget"] != "500" {
+		t.Errorf("chunk manager: expected kvBudget=500, got %s", cmReceivedParams["kvBudget"])
 	}
 
 	// Verify params passed to index manager factory.
 	if imReceivedParams["dir"] != "/data/chunks" {
 		t.Errorf("index manager: expected dir=/data/chunks, got %s", imReceivedParams["dir"])
 	}
-	if imReceivedParams["timeSparsity"] != "500" {
-		t.Errorf("index manager: expected timeSparsity=500, got %s", imReceivedParams["timeSparsity"])
+	if imReceivedParams["kvBudget"] != "500" {
+		t.Errorf("index manager: expected kvBudget=500, got %s", imReceivedParams["kvBudget"])
 	}
 }
 

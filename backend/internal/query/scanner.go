@@ -477,13 +477,6 @@ func matchesKeyValue(recAttrs chunk.Attributes, raw []byte, queryFilters []KeyVa
 // Index application functions. Each returns true if it contributed positions,
 // false if the index wasn't available (caller should add a runtime filter).
 
-// applyTimeIndex uses the time index to set the minimum position.
-func applyTimeIndex(b *scannerBuilder, indexes index.IndexManager, chunkID chunk.ChunkID, lower, upper interface{ IsZero() bool }) bool {
-	// Time index is only used for seeking, not for position filtering.
-	// The actual time filtering is done in the scanner.
-	return true
-}
-
 // applyTokenIndex tries to use the token index for position filtering.
 // Returns (true, false) if all tokens found in index and positions added.
 // Returns (false, false) if index unavailable or any token not in index (caller should use runtime filter).

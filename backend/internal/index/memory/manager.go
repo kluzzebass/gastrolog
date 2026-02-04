@@ -36,10 +36,9 @@ type KVIndexStore interface {
 //   - No logging in hot paths (index lookups)
 type Manager struct {
 	indexers   []index.Indexer
-	timeStore  IndexStore[index.TimeIndexEntry]
 	tokenStore IndexStore[index.TokenIndexEntry]
 	attrStore  AttrIndexStore
-	kvStore KVIndexStore
+	kvStore    KVIndexStore
 	builder    *index.BuildHelper
 
 	// Logger for this manager instance.
@@ -51,7 +50,6 @@ type Manager struct {
 // If logger is nil, logging is disabled.
 func NewManager(
 	indexers []index.Indexer,
-	timeStore IndexStore[index.TimeIndexEntry],
 	tokenStore IndexStore[index.TokenIndexEntry],
 	attrStore AttrIndexStore,
 	kvStore KVIndexStore,
@@ -59,10 +57,9 @@ func NewManager(
 ) *Manager {
 	return &Manager{
 		indexers:   indexers,
-		timeStore:  timeStore,
 		tokenStore: tokenStore,
 		attrStore:  attrStore,
-		kvStore: kvStore,
+		kvStore:    kvStore,
 		builder:    index.NewBuildHelper(),
 		logger:     logging.Default(logger).With("component", "index-manager", "type", "memory"),
 	}
@@ -70,14 +67,6 @@ func NewManager(
 
 func (m *Manager) BuildIndexes(ctx context.Context, chunkID chunk.ChunkID) error {
 	return m.builder.Build(ctx, chunkID, m.indexers)
-}
-
-func (m *Manager) OpenTimeIndex(chunkID chunk.ChunkID) (*index.Index[index.TimeIndexEntry], error) {
-	entries, ok := m.timeStore.Get(chunkID)
-	if !ok {
-		return nil, index.ErrIndexNotFound
-	}
-	return index.NewIndex(entries), nil
 }
 
 func (m *Manager) OpenTokenIndex(chunkID chunk.ChunkID) (*index.Index[index.TokenIndexEntry], error) {
@@ -160,9 +149,6 @@ func (m *Manager) OpenKVIndex(chunkID chunk.ChunkID) (*index.Index[index.KVIndex
 // IndexesComplete reports whether all indexes exist for the given chunk.
 // For in-memory indexes, this checks if all stores have entries for the chunk.
 func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
-	if _, ok := m.timeStore.Get(chunkID); !ok {
-		return false, nil
-	}
 	if m.tokenStore != nil {
 		if _, ok := m.tokenStore.Get(chunkID); !ok {
 			return false, nil

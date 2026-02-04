@@ -10,7 +10,6 @@ import (
 	indexmem "gastrolog/internal/index/memory"
 	memattr "gastrolog/internal/index/memory/attr"
 	memkv "gastrolog/internal/index/memory/kv"
-	memtime "gastrolog/internal/index/memory/time"
 	memtoken "gastrolog/internal/index/memory/token"
 )
 
@@ -43,14 +42,13 @@ func setupTestSystem(t *testing.T, records []chunk.Record) (chunk.ChunkManager, 
 	}
 
 	// Create indexers
-	timeIdx := memtime.NewIndexer(cm, 1) // Sample every record
 	tokenIdx := memtoken.NewIndexer(cm)
 	attrIdx := memattr.NewIndexer(cm)
 	kvIdx := memkv.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, tokenIdx, attrIdx, kvIdx},
-		timeIdx, tokenIdx, attrIdx, kvIdx, nil,
+		[]index.Indexer{tokenIdx, attrIdx, kvIdx},
+		tokenIdx, attrIdx, kvIdx, nil,
 	)
 
 	// Build indexes
@@ -103,9 +101,9 @@ func TestAnalyzeChunk_Basic(t *testing.T) {
 		t.Error("expected chunk to be sealed")
 	}
 
-	// Should have 4 summaries (time, token, attr_kv, kv)
-	if len(analysis.Summaries) != 4 {
-		t.Errorf("summaries count: got %d, want 4", len(analysis.Summaries))
+	// Should have 3 summaries (token, attr_kv, kv)
+	if len(analysis.Summaries) != 3 {
+		t.Errorf("summaries count: got %d, want 3", len(analysis.Summaries))
 	}
 
 	// All indexes should be enabled
@@ -113,44 +111,6 @@ func TestAnalyzeChunk_Basic(t *testing.T) {
 		if s.Status != StatusEnabled {
 			t.Errorf("index %s status: got %s, want %s", s.IndexType, s.Status, StatusEnabled)
 		}
-	}
-}
-
-func TestAnalyzeChunk_TimeIndex(t *testing.T) {
-	now := time.Now()
-	records := make([]chunk.Record, 100)
-	for i := range records {
-		records[i] = chunk.Record{
-			IngestTS: now.Add(time.Duration(i) * time.Second),
-			WriteTS:  now.Add(time.Duration(i) * time.Second),
-			Raw:      []byte("test message"),
-		}
-	}
-
-	cm, im, chunkID := setupTestSystem(t, records)
-	analyzer := New(cm, im)
-
-	analysis, err := analyzer.AnalyzeChunk(chunkID)
-	if err != nil {
-		t.Fatalf("analyze chunk: %v", err)
-	}
-
-	stats := analysis.TimeStats
-	if stats == nil {
-		t.Fatal("time stats is nil")
-	}
-
-	if stats.EntriesCount != 100 {
-		t.Errorf("entries count: got %d, want 100", stats.EntriesCount)
-	}
-	if stats.EarliestTimestamp.IsZero() {
-		t.Error("earliest timestamp is zero")
-	}
-	if stats.LatestTimestamp.IsZero() {
-		t.Error("latest timestamp is zero")
-	}
-	if stats.IndexBytes <= 0 {
-		t.Errorf("index bytes should be positive: got %d", stats.IndexBytes)
 	}
 }
 
@@ -311,14 +271,13 @@ func TestAnalyzeAll(t *testing.T) {
 	chunks, _ := cm.List()
 
 	// Create indexers and build indexes
-	timeIdx := memtime.NewIndexer(cm, 1)
 	tokenIdx := memtoken.NewIndexer(cm)
 	attrIdx := memattr.NewIndexer(cm)
 	kvIdx := memkv.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, tokenIdx, attrIdx, kvIdx},
-		timeIdx, tokenIdx, attrIdx, kvIdx, nil,
+		[]index.Indexer{tokenIdx, attrIdx, kvIdx},
+		tokenIdx, attrIdx, kvIdx, nil,
 	)
 
 	for _, meta := range chunks {
@@ -341,7 +300,7 @@ func TestAnalyzeAll(t *testing.T) {
 	}
 
 	// Should have bytes for each index type
-	for _, typ := range []IndexType{IndexTypeTime, IndexTypeToken, IndexTypeAttrKV, IndexTypeKV} {
+	for _, typ := range []IndexType{IndexTypeToken, IndexTypeAttrKV, IndexTypeKV} {
 		if agg.BytesByIndexType[typ] == 0 {
 			t.Errorf("bytes for %s should be > 0", typ)
 		}
@@ -379,14 +338,13 @@ func TestAnalyzeChunk_MissingIndexes(t *testing.T) {
 	}
 
 	// Create index manager but don't build indexes
-	timeIdx := memtime.NewIndexer(cm, 1)
 	tokenIdx := memtoken.NewIndexer(cm)
 	attrIdx := memattr.NewIndexer(cm)
 	kvIdx := memkv.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, tokenIdx, attrIdx, kvIdx},
-		timeIdx, tokenIdx, attrIdx, kvIdx, nil,
+		[]index.Indexer{tokenIdx, attrIdx, kvIdx},
+		tokenIdx, attrIdx, kvIdx, nil,
 	)
 
 	analyzer := New(cm, im)

@@ -12,7 +12,6 @@ import (
 	indexmem "gastrolog/internal/index/memory"
 	memattr "gastrolog/internal/index/memory/attr"
 	"gastrolog/internal/index/memory/kv"
-	memtime "gastrolog/internal/index/memory/time"
 	memtoken "gastrolog/internal/index/memory/token"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
@@ -50,14 +49,12 @@ func newTestSetup(maxRecords int64) (*orchestrator.Orchestrator, chunk.ChunkMana
 		RotationPolicy: recordCountPolicy(maxRecords),
 	})
 
-	timeIdx := memtime.NewIndexer(cm, 1)
 	tokIdx := memtoken.NewIndexer(cm)
 	attrIdx := memattr.NewIndexer(cm)
 	kvIdx := kv.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, tokIdx, attrIdx, kvIdx},
-		timeIdx,
+		[]index.Indexer{tokIdx, attrIdx, kvIdx},
 		tokIdx,
 		attrIdx,
 		kvIdx,
@@ -237,7 +234,7 @@ func TestSearchViaOrchestrator(t *testing.T) {
 	}
 
 	// Compare with direct query engine call.
-	qe := query.New(cm, indexmem.NewManager(nil, nil, nil, nil, nil, nil), nil)
+	qe := query.New(cm, indexmem.NewManager(nil, nil, nil, nil, nil), nil)
 	directSeq, _ := qe.Search(context.Background(), query.Query{}, nil)
 
 	var directResults []string
@@ -456,14 +453,12 @@ func newReceiverTestSetup() (*orchestrator.Orchestrator, chunk.ChunkManager) {
 		RotationPolicy: recordCountPolicy(10000),
 	})
 
-	timeIdx := memtime.NewIndexer(cm, 1)
 	tokIdx := memtoken.NewIndexer(cm)
 	attrIdx := memattr.NewIndexer(cm)
 	kvIdx := kv.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, tokIdx, attrIdx, kvIdx},
-		timeIdx,
+		[]index.Indexer{tokIdx, attrIdx, kvIdx},
 		tokIdx,
 		attrIdx,
 		kvIdx,
@@ -620,14 +615,12 @@ func TestReceiverIndexBuildOnSeal(t *testing.T) {
 		RotationPolicy: recordCountPolicy(2), // 2 records per chunk
 	})
 
-	timeIdx := memtime.NewIndexer(cm, 1)
 	tokIdx := memtoken.NewIndexer(cm)
 	attrIdx := memattr.NewIndexer(cm)
 	kvIdx := kv.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, tokIdx, attrIdx, kvIdx},
-		timeIdx,
+		[]index.Indexer{tokIdx, attrIdx, kvIdx},
 		tokIdx,
 		attrIdx,
 		kvIdx,
@@ -899,14 +892,12 @@ func TestRebuildMissingIndexes(t *testing.T) {
 	}
 
 	// Create fresh indexers that haven't indexed anything.
-	timeIdx := memtime.NewIndexer(cm, 1)
 	tokIdx := memtoken.NewIndexer(cm)
 	attrIdx := memattr.NewIndexer(cm)
 	kvIdx := kv.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, tokIdx, attrIdx, kvIdx},
-		timeIdx,
+		[]index.Indexer{tokIdx, attrIdx, kvIdx},
 		tokIdx,
 		attrIdx,
 		kvIdx,
@@ -970,14 +961,12 @@ func newRoutedTestSetup(t *testing.T) (*orchestrator.Orchestrator, map[string]ch
 		}
 		stores[name] = cm
 
-		timeIdx := memtime.NewIndexer(cm, 1)
 		tokIdx := memtoken.NewIndexer(cm)
 		attrIdx := memattr.NewIndexer(cm)
 		kvIdx := kv.NewIndexer(cm)
 
 		im := indexmem.NewManager(
-			[]index.Indexer{timeIdx, tokIdx, attrIdx, kvIdx},
-			timeIdx,
+			[]index.Indexer{tokIdx, attrIdx, kvIdx},
 			tokIdx,
 			attrIdx,
 			kvIdx,

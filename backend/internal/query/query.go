@@ -253,33 +253,10 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, meta chunk.Chu
 func (e *Engine) buildScanner(cursor chunk.RecordCursor, q Query, meta chunk.ChunkMeta, startPos *uint64) (iter.Seq2[recordWithRef, error], error) {
 	b := newScannerBuilder(meta.ID)
 
-	// Set minimum position from time index or binary search on idx.log.
+	// Set minimum position from binary search on idx.log.
 	lower, _ := q.TimeBounds()
 	if !lower.IsZero() {
-		var foundPos bool
-		var pos uint64
-
-		// Try time index first (only available for sealed chunks).
-		if meta.Sealed {
-			timeIdx, err := e.indexes.OpenTimeIndex(meta.ID)
-			if err == nil {
-				reader := index.NewTimeIndexReader(meta.ID, timeIdx.Entries())
-				if seekRef, found := reader.FindStart(lower); found {
-					pos = seekRef.Pos
-					foundPos = true
-				}
-			}
-		}
-
-		// Fall back to binary search on idx.log (works for both sealed and unsealed).
-		if !foundPos {
-			if p, found, err := e.chunks.FindStartPosition(meta.ID, lower); err == nil && found {
-				pos = p
-				foundPos = true
-			}
-		}
-
-		if foundPos {
+		if pos, found, err := e.chunks.FindStartPosition(meta.ID, lower); err == nil && found {
 			b.setMinPosition(pos)
 		}
 	}

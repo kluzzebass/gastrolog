@@ -11,7 +11,6 @@ import (
 	"gastrolog/internal/index"
 	fileattr "gastrolog/internal/index/file/attr"
 	filekv "gastrolog/internal/index/file/kv"
-	filetime "gastrolog/internal/index/file/time"
 	filetoken "gastrolog/internal/index/file/token"
 	"gastrolog/internal/logging"
 )
@@ -46,14 +45,6 @@ func NewManager(dir string, indexers []index.Indexer, logger *slog.Logger) *Mana
 
 func (m *Manager) BuildIndexes(ctx context.Context, chunkID chunk.ChunkID) error {
 	return m.builder.Build(ctx, chunkID, m.indexers)
-}
-
-func (m *Manager) OpenTimeIndex(chunkID chunk.ChunkID) (*index.Index[index.TimeIndexEntry], error) {
-	entries, err := filetime.LoadIndex(m.dir, chunkID)
-	if err != nil {
-		return nil, fmt.Errorf("open time index: %w", err)
-	}
-	return index.NewIndex(entries), nil
 }
 
 func (m *Manager) OpenTokenIndex(chunkID chunk.ChunkID) (*index.Index[index.TokenIndexEntry], error) {
@@ -117,7 +108,6 @@ func (m *Manager) OpenKVIndex(chunkID chunk.ChunkID) (*index.Index[index.KVIndex
 func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
 	// Check if all index files exist.
 	indexPaths := []string{
-		filetime.IndexPath(m.dir, chunkID),
 		filetoken.IndexPath(m.dir, chunkID),
 		fileattr.KeyIndexPath(m.dir, chunkID),
 		fileattr.ValueIndexPath(m.dir, chunkID),
@@ -137,7 +127,6 @@ func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
 
 	// Clean up orphaned temp files.
 	tempPatterns := []string{
-		filetime.TempFilePattern(m.dir, chunkID),
 		filetoken.TempFilePattern(m.dir, chunkID),
 		fileattr.KeyTempFilePattern(m.dir, chunkID),
 		fileattr.ValueTempFilePattern(m.dir, chunkID),

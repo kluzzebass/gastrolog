@@ -12,7 +12,6 @@ import (
 	indexmem "gastrolog/internal/index/memory"
 	memattr "gastrolog/internal/index/memory/attr"
 	"gastrolog/internal/index/memory/kv"
-	memtime "gastrolog/internal/index/memory/time"
 	memtoken "gastrolog/internal/index/memory/token"
 	"gastrolog/internal/query"
 )
@@ -135,14 +134,12 @@ func setup(t *testing.T, batches ...[]chunk.Record) *query.Engine {
 		}
 	}
 
-	timeIdx := memtime.NewIndexer(cm, 1) // sparsity 1 = index every record
 	tokIdx := memtoken.NewIndexer(cm)
 	attrIdx := memattr.NewIndexer(cm)
 	kvIdx := kv.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, tokIdx, attrIdx, kvIdx},
-		timeIdx,
+		[]index.Indexer{tokIdx, attrIdx, kvIdx},
 		tokIdx,
 		attrIdx,
 		kvIdx,
@@ -186,14 +183,12 @@ func setupWithActive(t *testing.T, sealed [][]chunk.Record, active []chunk.Recor
 		}
 	}
 
-	timeIdx := memtime.NewIndexer(cm, 1)
 	tokIdx := memtoken.NewIndexer(cm)
 	attrIdx := memattr.NewIndexer(cm)
 	kvIdx := kv.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, tokIdx, attrIdx, kvIdx},
-		timeIdx,
+		[]index.Indexer{tokIdx, attrIdx, kvIdx},
 		tokIdx,
 		attrIdx,
 		kvIdx,
@@ -1921,13 +1916,11 @@ func TestSearchSealedWithoutIndexes(t *testing.T) {
 	}
 
 	// Create index manager that will return ErrIndexNotFound.
-	timeIdx := memtime.NewIndexer(cm, 1)
 	tokIdx := memtoken.NewIndexer(cm)
 	attrIdx := memattr.NewIndexer(cm)
 	kvIdx := kv.NewIndexer(cm)
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, tokIdx, attrIdx, kvIdx},
-		timeIdx,
+		[]index.Indexer{tokIdx, attrIdx, kvIdx},
 		tokIdx,
 		attrIdx,
 		kvIdx,

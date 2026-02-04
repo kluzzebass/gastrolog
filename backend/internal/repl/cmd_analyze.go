@@ -50,7 +50,7 @@ func (r *REPL) cmdAnalyze(out *strings.Builder, args []string) {
 
 		// Summary by index type
 		out.WriteString("\n  Bytes by Index Type:\n")
-		for _, typ := range []analyzer.IndexType{analyzer.IndexTypeTime, analyzer.IndexTypeToken, analyzer.IndexTypeAttrKV, analyzer.IndexTypeKV} {
+		for _, typ := range []analyzer.IndexType{analyzer.IndexTypeToken, analyzer.IndexTypeAttrKV, analyzer.IndexTypeKV} {
 			bytes := agg.BytesByIndexType[typ]
 			fmt.Fprintf(out, "    %-10s %s\n", typ, formatBytes(bytes))
 		}
@@ -162,20 +162,6 @@ func (r *REPL) analyzeChunk(out *strings.Builder, chunkID chunk.ChunkID) {
 		}
 		fmt.Fprintf(out, "    %-10s %s  %.1f%% of chunk  [%s]\n",
 			s.IndexType, formatBytes(s.BytesUsed), s.PercentOfChunk*100, statusStr)
-	}
-
-	// Time index details
-	if ca.TimeStats != nil {
-		ts := ca.TimeStats
-		out.WriteString("\n  Time Index:\n")
-		fmt.Fprintf(out, "    Entries:        %d\n", ts.EntriesCount)
-		fmt.Fprintf(out, "    Sampling:       every ~%d records\n", ts.SamplingIntervalRecords)
-		fmt.Fprintf(out, "    Worst-case:     %d records to scan\n", ts.WorstCaseScanRecords)
-		if len(ts.Warnings) > 0 {
-			for _, w := range ts.Warnings {
-				fmt.Fprintf(out, "    ⚠ %s\n", w)
-			}
-		}
 	}
 
 	// Token index details

@@ -12,7 +12,6 @@ import (
 	indexmem "gastrolog/internal/index/memory"
 	memattr "gastrolog/internal/index/memory/attr"
 	"gastrolog/internal/index/memory/kv"
-	memtime "gastrolog/internal/index/memory/time"
 	memtoken "gastrolog/internal/index/memory/token"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
@@ -266,14 +265,12 @@ func TestAddReceiverWhileRunning(t *testing.T) {
 		RotationPolicy: chunk.NewRecordCountPolicy(10000),
 	})
 
-	timeIdx := memtime.NewIndexer(cm, 1)
 	tokIdx := memtoken.NewIndexer(cm)
 	attrIdx := memattr.NewIndexer(cm)
 	kvIdx := kv.NewIndexer(cm)
 
 	im := indexmem.NewManager(
-		[]index.Indexer{timeIdx, tokIdx, attrIdx, kvIdx},
-		timeIdx,
+		[]index.Indexer{tokIdx, attrIdx, kvIdx},
 		tokIdx,
 		attrIdx,
 		kvIdx,

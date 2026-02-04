@@ -107,7 +107,7 @@ func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMe
 	// Track current position count through the pipeline.
 	currentPositions := cp.RecordCount
 
-	// 1. Time index - used for seeking to start position.
+	// 1. Time seek - binary search idx.log for start position.
 	lower, _ := q.TimeBounds()
 	if !lower.IsZero() {
 		step := PipelineStep{
@@ -116,37 +116,18 @@ func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMe
 			PositionsBefore: currentPositions,
 		}
 
-		timeIdx, err := e.indexes.OpenTimeIndex(meta.ID)
-		if err == nil && len(timeIdx.Entries()) > 0 {
-			reader := index.NewTimeIndexReader(meta.ID, timeIdx.Entries())
-			if ref, found := reader.FindStart(lower); found {
-				skipped := int(ref.Pos)
-				currentPositions = cp.RecordCount - skipped
-				step.PositionsAfter = currentPositions
-				step.Action = "seek"
-				step.Reason = "indexed"
-				step.Details = fmt.Sprintf("skip %d via sparse index", skipped)
-			} else {
-				step.PositionsAfter = currentPositions
-				step.Action = "seek"
-				step.Reason = "indexed"
-				step.Details = "start before chunk"
-			}
+		if pos, found, err := e.chunks.FindStartPosition(meta.ID, lower); err == nil && found {
+			skipped := int(pos)
+			currentPositions = cp.RecordCount - skipped
+			step.PositionsAfter = currentPositions
+			step.Action = "seek"
+			step.Reason = "binary_search"
+			step.Details = fmt.Sprintf("skip %d via idx.log", skipped)
 		} else {
-			// Fall back to binary search on idx.log.
-			if pos, found, err := e.chunks.FindStartPosition(meta.ID, lower); err == nil && found {
-				skipped := int(pos)
-				currentPositions = cp.RecordCount - skipped
-				step.PositionsAfter = currentPositions
-				step.Action = "seek"
-				step.Reason = "binary_search"
-				step.Details = fmt.Sprintf("skip %d via idx.log", skipped)
-			} else {
-				step.PositionsAfter = currentPositions
-				step.Action = "seek"
-				step.Reason = "binary_search"
-				step.Details = "idx.log lookup"
-			}
+			step.PositionsAfter = currentPositions
+			step.Action = "seek"
+			step.Reason = "binary_search"
+			step.Details = "start before chunk"
 		}
 		cp.Pipeline = append(cp.Pipeline, step)
 	}

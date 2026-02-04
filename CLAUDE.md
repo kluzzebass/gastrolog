@@ -209,7 +209,7 @@ Adding a new filter type requires:
 Query execution:
 1. Selects chunks overlapping time range (sorted by StartTS, ascending or descending)
 2. For each chunk, builds scanner via pipeline:
-   - Try time index for start position
+   - Use binary search on idx.log for start position (idx.log has fixed 30-byte entries with WriteTS)
    - Try token index for position lists
    - If index unavailable, add runtime filter instead
 3. Scanner iterates positions (or sequentially) applying time bounds and filters
@@ -237,9 +237,8 @@ Shared binary format utilities for the common 4-byte header:
 **Shared types (`index.go`):**
 
 - **Indexer** interface: `Name() string`, `Build(ctx, chunkID) error`
-- **IndexManager** interface: `BuildIndexes`, `OpenTimeIndex`, `OpenTokenIndex`
+- **IndexManager** interface: `BuildIndexes`, `OpenTokenIndex`
 - **Index[T]** -- generic read-only wrapper over `[]T` with `Entries()` method
-- **TimeIndexEntry** -- `{Timestamp time.Time, RecordPos uint64}`
 - **TokenIndexEntry** -- `{Token string, Positions []uint64}`
 
 **BuildHelper (`build.go`):**
@@ -249,13 +248,6 @@ Shared concurrency primitive used by both file and memory managers:
 - `errgroup.WithContext` parallelizes individual indexers within a single build
 - `context.WithoutCancel` detaches the build from the initiator's context so one caller cancelling doesn't abort the shared build
 - Early `ctx.Err()` check bails out immediately on already-cancelled contexts
-
-**TimeIndexReader (`time_reader.go`):**
-
-Shared binary search positioning over time index entries:
-- `NewTimeIndexReader(chunkID, entries)` wraps decoded entries
-- `FindStart(tStart)` returns `(RecordRef, true)` for the latest entry at or before `tStart`, or `(zero, false)` if `tStart` is before all entries (caller should scan from beginning)
-- Uses `sort.Search` on timestamp-sorted entries
 
 **TokenIndexReader (`token_reader.go`):**
 
@@ -309,8 +301,6 @@ In-memory implementation of the same interfaces. Rotates chunks based on record 
 ### File-based index manager (`backend/internal/index/file/`)
 
 - `manager.go` -- `IndexManager` implementation; delegates `BuildIndexes` to `BuildHelper`
-- `time/` -- time indexer: sparse index mapping sampled timestamps to record indices; writes `_time.idx`
-  - `reader.go` -- `Open` loads and validates index file, returns shared `*index.TimeIndexReader`
 - `token/` -- token indexer: inverted index mapping tokens to record indices; writes `_token.idx`
 - `attr/` -- attribute indexer: inverted indexes for record attributes (key, value, key+value); writes `_attr_key.idx`, `_attr_val.idx`, `_attr_kv.idx`
 - `kv/` -- KV indexer: inverted indexes for key=value pairs extracted from log text; writes `_kv_key.idx`, `_kv_val.idx`, `_kv_kv.idx`
@@ -321,8 +311,6 @@ In-memory implementation of the same interfaces. Rotates chunks based on record 
 ### Memory-based index manager (`backend/internal/index/memory/`)
 
 - `manager.go` -- `IndexManager` implementation with generic `IndexStore[T]` interface; delegates `BuildIndexes` to `BuildHelper`
-- `time/` -- in-memory time indexer with `Get(chunkID)` satisfying `IndexStore[T]`
-  - `reader.go` -- `Open` retrieves entries from indexer, returns shared `*index.TimeIndexReader`
 - `token/` -- in-memory token indexer with `Get(chunkID)` satisfying `IndexStore[T]`
 - `attr/` -- in-memory attribute indexer
 - `kv/` -- in-memory KV indexer with budget-based admission control
@@ -394,7 +382,7 @@ Chunk 1: 019c1b36-... (sealed)
   Records: 10000
 
   Index Pipeline:
-    1. time           10000 →  9500 [seek] reason=indexed skip 500 via sparse index
+    1. time           10000 →  9500 [seek] reason=binary_search skip 500 via idx.log
     2. token           9500 →  2500 [indexed] reason=indexed 1 token(s) intersected
     3. kv              2500 →   800 [indexed] reason=indexed attr_kv=800 msg_kv=0
 
@@ -422,7 +410,7 @@ Common 4-byte header prefix for all binary files:
 signature (1 byte, 0x69 'i') | type (1 byte) | version (1 byte) | flags (1 byte)
 ```
 
-Type bytes: `'r'` = raw.log, `'i'` = idx.log, `'a'` = attr.log, `'t'` = time index, `'k'` = token index.
+Type bytes: `'r'` = raw.log, `'i'` = idx.log, `'a'` = attr.log, `'k'` = token index.
 
 Flags: bit 0 (`0x01`) = sealed.
 
@@ -436,9 +424,10 @@ Use the **memory-based managers** (`chunk/memory` and `index/memory`) for integr
 
 ```go
 cm, _ := chunkmem.NewManager(chunkmem.Config{MaxChunkBytes: 1 << 20})
-timeIdx := memtime.NewIndexer(cm, 1)   // sparsity 1 = index every record
 tokIdx := memtoken.NewIndexer(cm)
-im := indexmem.NewManager([]index.Indexer{timeIdx, tokIdx}, timeIdx, tokIdx)
+attrIdx := memattr.NewIndexer(cm)
+kvIdx := kv.NewIndexer(cm)
+im := indexmem.NewManager([]index.Indexer{tokIdx, attrIdx, kvIdx}, tokIdx, attrIdx, kvIdx, nil)
 ```
 
 Append records, seal chunks, then pass `cm` and `im` to the code under test. See `query/query_test.go` for an example.
@@ -454,7 +443,7 @@ Append records, seal chunks, then pass `cm` and `im` to the code under test. See
 - Cursors work on both sealed and unsealed chunks; indexers explicitly reject unsealed chunks
 - Named constants for all binary format sizes (no magic numbers in encode/decode)
 - Sentinel errors for all validation failures (`ErrSignatureMismatch`, `ErrVersionMismatch`, etc.)
-- Sub-package pattern: `file/{time,source,token}` and `memory/{time,source,token}` avoid symbol prefixing (e.g. `time.NewIndexer` not `NewTimeIndexer`)
+- Sub-package pattern: `file/{token,attr,kv}` and `memory/{token,attr,kv}` avoid symbol prefixing
 - Query uses `End < Start` convention for reverse order instead of separate bool field
 
 ## Directory Layout
@@ -496,20 +485,17 @@ backend/
     index/
       index.go                  Shared types, Indexer/IndexManager interfaces, generic Index[T], ManagerFactory
       build.go                  BuildHelper (callgroup + errgroup)
-      time_reader.go            Shared TimeIndexReader with FindStart binary search
       token_reader.go           Shared TokenIndexReader with Lookup
       kv_reader.go              Shared KV index readers (key, value, kv)
       inverted/
         inverted.go             Generic encode/decode for inverted index formats
       file/
         manager.go              File-based IndexManager
-        time/                   File-based time indexer (_time.idx)
         token/                  File-based token indexer (_token.idx)
         attr/                   File-based attribute indexer (_attr_*.idx)
         kv/                     File-based KV indexer (_kv_*.idx)
       memory/
         manager.go              Memory-based IndexManager with generic IndexStore[T]
-        time/                   Memory-based time indexer
         token/                  Memory-based token indexer
         attr/                   Memory-based attribute indexer
         kv/                     Memory-based KV indexer

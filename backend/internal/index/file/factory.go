@@ -10,20 +10,13 @@ import (
 	"gastrolog/internal/index"
 	fileattr "gastrolog/internal/index/file/attr"
 	filekv "gastrolog/internal/index/file/kv"
-	filetime "gastrolog/internal/index/file/time"
 	filetoken "gastrolog/internal/index/file/token"
 )
 
 // Factory parameter keys.
 const (
-	ParamDir          = "dir"
-	ParamTimeSparsity = "timeSparsity"
-	ParamKVBudget     = "kvBudget"
-)
-
-// Default values.
-const (
-	DefaultTimeSparsity = 1000 // Index every 1000th record for time index
+	ParamDir      = "dir"
+	ParamKVBudget = "kvBudget"
 )
 
 var (
@@ -36,18 +29,6 @@ func NewFactory() index.ManagerFactory {
 		dir, ok := params[ParamDir]
 		if !ok || dir == "" {
 			return nil, ErrMissingDirParam
-		}
-
-		timeSparsity := DefaultTimeSparsity
-		if v, ok := params[ParamTimeSparsity]; ok {
-			n, err := strconv.Atoi(v)
-			if err != nil {
-				return nil, fmt.Errorf("invalid %s: %w", ParamTimeSparsity, err)
-			}
-			if n <= 0 {
-				return nil, fmt.Errorf("invalid %s: must be positive", ParamTimeSparsity)
-			}
-			timeSparsity = n
 		}
 
 		var kvBudget int64
@@ -63,7 +44,6 @@ func NewFactory() index.ManagerFactory {
 		}
 
 		indexers := []index.Indexer{
-			filetime.NewIndexer(dir, chunkManager, timeSparsity, logger),
 			filetoken.NewIndexer(dir, chunkManager, logger),
 			fileattr.NewIndexer(dir, chunkManager, logger),
 			filekv.NewIndexerWithConfig(dir, chunkManager, logger, filekv.Config{KVBudget: kvBudget}),

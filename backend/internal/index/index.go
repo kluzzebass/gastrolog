@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"time"
 
 	"gastrolog/internal/chunk"
 )
@@ -36,12 +35,6 @@ type Indexer interface {
 	//
 	// Build must be idempotent or overwrite existing artifacts.
 	Build(ctx context.Context, chunkID chunk.ChunkID) error
-}
-
-// TimeIndexEntry holds a single entry in a time index.
-type TimeIndexEntry struct {
-	Timestamp time.Time
-	RecordPos uint64
 }
 
 // TokenIndexEntry holds all record positions for a single token within a chunk.
@@ -149,7 +142,6 @@ func SplitKV(kv string) (key, value string) {
 
 type IndexManager interface {
 	BuildIndexes(ctx context.Context, chunkID chunk.ChunkID) error
-	OpenTimeIndex(chunkID chunk.ChunkID) (*Index[TimeIndexEntry], error)
 	OpenTokenIndex(chunkID chunk.ChunkID) (*Index[TokenIndexEntry], error)
 	OpenAttrKeyIndex(chunkID chunk.ChunkID) (*Index[AttrKeyIndexEntry], error)
 	OpenAttrValueIndex(chunkID chunk.ChunkID) (*Index[AttrValueIndexEntry], error)

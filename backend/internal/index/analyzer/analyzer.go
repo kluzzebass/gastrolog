@@ -60,7 +60,6 @@ func (a *Analyzer) AnalyzeChunk(chunkID chunk.ChunkID) (*ChunkAnalysis, error) {
 	}
 
 	// Analyze each index type
-	a.analyzeTimeIndex(analysis)
 	a.analyzeTokenIndex(analysis)
 	a.analyzeAttrKVIndex(analysis)
 	a.analyzeKVIndex(analysis)
@@ -147,76 +146,6 @@ func (a *Analyzer) AnalyzeAll() (*AggregateAnalysis, error) {
 	}
 
 	return agg, nil
-}
-
-func (a *Analyzer) analyzeTimeIndex(ca *ChunkAnalysis) {
-	idx, err := a.im.OpenTimeIndex(ca.ChunkID)
-	if err != nil {
-		ca.Summaries = append(ca.Summaries, IndexSummary{
-			IndexType: IndexTypeTime,
-			Status:    statusFromError(err),
-			Error:     errorString(err),
-		})
-		return
-	}
-
-	entries := idx.Entries()
-	stats := &TimeIndexStats{
-		EntriesCount: int64(len(entries)),
-	}
-
-	if len(entries) > 0 {
-		stats.EarliestTimestamp = entries[0].Timestamp
-		stats.LatestTimestamp = entries[len(entries)-1].Timestamp
-	}
-
-	// Estimate index bytes: header (8) + entries * 12 bytes each
-	stats.IndexBytes = 8 + int64(len(entries))*12
-
-	// Derived stats
-	if len(entries) > 0 && ca.ChunkRecords > 0 {
-		stats.AvgRecordsPerSeek = float64(ca.ChunkRecords) / float64(len(entries))
-		stats.SamplingIntervalRecords = ca.ChunkRecords / int64(len(entries))
-
-		// Worst case scan: largest gap between consecutive entries
-		var maxGap int64
-		for i := 1; i < len(entries); i++ {
-			gap := int64(entries[i].RecordPos - entries[i-1].RecordPos)
-			if gap > maxGap {
-				maxGap = gap
-			}
-		}
-		// Also consider gap from last entry to end
-		if len(entries) > 0 {
-			lastGap := ca.ChunkRecords - int64(entries[len(entries)-1].RecordPos)
-			if lastGap > maxGap {
-				maxGap = lastGap
-			}
-		}
-		stats.WorstCaseScanRecords = maxGap
-
-		// Time span per entry
-		if len(entries) > 1 {
-			totalSpan := entries[len(entries)-1].Timestamp.Sub(entries[0].Timestamp)
-			stats.TimeSpanPerEntry = totalSpan / time.Duration(len(entries)-1)
-		}
-	}
-
-	// Red flags
-	if ca.ChunkRecords > 0 && stats.WorstCaseScanRecords > ca.ChunkRecords/2 {
-		stats.Warnings = append(stats.Warnings, "worst case scan exceeds 50% of chunk")
-	}
-	if stats.EntriesCount > 0 && stats.EntriesCount < 10 && ca.ChunkRecords > 10000 {
-		stats.Warnings = append(stats.Warnings, "very sparse index on large chunk")
-	}
-
-	ca.TimeStats = stats
-	ca.Summaries = append(ca.Summaries, IndexSummary{
-		IndexType:      IndexTypeTime,
-		BytesUsed:      stats.IndexBytes,
-		PercentOfChunk: safePercent(stats.IndexBytes, ca.ChunkBytes),
-		Status:         StatusEnabled,
-	})
 }
 
 func (a *Analyzer) analyzeTokenIndex(ca *ChunkAnalysis) {

@@ -1,6 +1,6 @@
 // Package analyzer provides read-only analysis of index health and effectiveness.
 //
-// The analyzer evaluates all index types (time, token, attr, kv) to answer:
+// The analyzer evaluates all index types (token, attr, kv) to answer:
 // "Are the indexes worth the bytes and build time they cost?"
 //
 // It operates on existing index artifacts only and does not modify indexes,
@@ -17,7 +17,6 @@ import (
 type IndexType string
 
 const (
-	IndexTypeTime   IndexType = "time"
 	IndexTypeToken  IndexType = "token"
 	IndexTypeAttrKV IndexType = "attr_kv"
 	IndexTypeKV     IndexType = "kv"
@@ -51,23 +50,6 @@ type IndexSummary struct {
 	Status         IndexStatus   `json:"status"`
 	Reason         PartialReason `json:"reason,omitempty"`
 	Error          string        `json:"error,omitempty"` // Error message if status is error
-}
-
-// TimeIndexStats holds detailed statistics for a time index.
-type TimeIndexStats struct {
-	EntriesCount            int64     `json:"entries_count"`
-	SamplingIntervalRecords int64     `json:"sampling_interval_records"` // Records between samples
-	EarliestTimestamp       time.Time `json:"earliest_timestamp"`
-	LatestTimestamp         time.Time `json:"latest_timestamp"`
-	IndexBytes              int64     `json:"index_bytes"`
-
-	// Derived stats
-	AvgRecordsPerSeek    float64       `json:"avg_records_per_seek"`    // Chunk records / entries
-	WorstCaseScanRecords int64         `json:"worst_case_scan_records"` // Max records between samples
-	TimeSpanPerEntry     time.Duration `json:"time_span_per_entry_ns"`  // Avg time between entries
-
-	// Red flags
-	Warnings []string `json:"warnings,omitempty"`
 }
 
 // TokenIndexStats holds detailed statistics for a token index.
@@ -169,7 +151,6 @@ type ChunkAnalysis struct {
 	Summaries []IndexSummary `json:"summaries"`
 
 	// Detailed stats per index type
-	TimeStats   *TimeIndexStats   `json:"time_stats,omitempty"`
 	TokenStats  *TokenIndexStats  `json:"token_stats,omitempty"`
 	AttrKVStats *AttrKVIndexStats `json:"attr_kv_stats,omitempty"`
 	KVStats     *KVIndexStats     `json:"kv_stats,omitempty"`
