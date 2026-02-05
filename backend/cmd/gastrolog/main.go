@@ -107,8 +107,10 @@ func run(ctx context.Context, logger *slog.Logger, configPath string, replMode b
 	logger.Info("orchestrator started, waiting for shutdown signal")
 
 	if replMode {
-		// Run REPL in foreground. REPL exit triggers shutdown.
-		r := repl.New(repl.NewDirectClient(orch))
+		// Run REPL in foreground using embedded gRPC client.
+		// This uses an in-memory transport so the REPL talks gRPC
+		// just like a remote client, but without network overhead.
+		r := repl.New(repl.NewEmbeddedClient(orch))
 		if err := r.Run(); err != nil && err != context.Canceled {
 			logger.Error("repl error", "error", err)
 		}
