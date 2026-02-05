@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/signal"
 	"slices"
 	"strings"
 	"time"
@@ -84,6 +86,20 @@ func (r *REPL) cmdFollow(out *strings.Builder, args []string) {
 	r.queryCancel = queryCancel
 	r.queryMu.Unlock()
 
+	// Set up signal handler for Ctrl+C
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+	defer signal.Stop(sigCh)
+
+	// Cancel on signal
+	go func() {
+		select {
+		case <-sigCh:
+			queryCancel()
+		case <-queryCtx.Done():
+		}
+	}()
+
 	// Print immediately (before the blocking call)
 	fmt.Println("Following... (Ctrl+C to stop)")
 
@@ -106,7 +122,7 @@ func (r *REPL) cmdFollow(out *strings.Builder, args []string) {
 		fmt.Println(r.formatRecord(rec))
 	}
 
-	fmt.Println("Follow stopped.")
+	fmt.Println("\nFollow stopped.")
 }
 
 func (r *REPL) cmdNext(out *strings.Builder, args []string) {
