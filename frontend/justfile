@@ -12,6 +12,10 @@ install:
 dev:
     bun run dev
 
+# Generate protobuf TypeScript types
+gen:
+    bun run gen
+
 # Build for production
 build:
     bun run build

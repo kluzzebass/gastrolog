@@ -1,0 +1,12 @@
+version: v2
+plugins:
+  - local: protoc-gen-es
+    out: src/api/gen
+    opt:
+      - target=ts
+  - local: protoc-gen-connect-es
+    out: src/api/gen
+    opt:
+      - target=ts
+inputs:
+  - directory: ../backend/api/proto
