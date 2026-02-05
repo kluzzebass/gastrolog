@@ -56,8 +56,8 @@ func (r *REPL) pager(output string) {
 	}
 	defer term.Restore(int(os.Stdin.Fd()), oldState)
 
-	// Switch to alternate screen buffer
-	fmt.Print("\033[?1049h")
+	// Switch to alternate screen buffer and clear it
+	fmt.Print("\033[?1049h\033[2J")
 	defer fmt.Print("\033[?1049l")
 
 	// Hide cursor during paging
@@ -68,9 +68,6 @@ func (r *REPL) pager(output string) {
 	topLine := 0     // first visible line
 	leftCol := 0     // horizontal scroll offset
 	hScrollStep := 8 // horizontal scroll amount
-
-	// Move cursor to top-left
-	fmt.Print("\033[H")
 
 	for {
 		// Clamp topLine
@@ -96,22 +93,23 @@ func (r *REPL) pager(output string) {
 		// Draw visible lines
 		for i := 0; i < viewHeight; i++ {
 			lineIdx := topLine + i
+			var line string
 			if lineIdx < len(lines) {
-				line := lines[lineIdx]
+				line = lines[lineIdx]
 				// Apply horizontal scroll
 				if leftCol < len(line) {
 					line = line[leftCol:]
 				} else {
 					line = ""
 				}
-				// Truncate to terminal width
+				// Truncate to terminal width to prevent wrapping
 				if len(line) > width {
 					line = line[:width]
 				}
-				fmt.Print(line)
 			}
-			// Clear rest of line and move to next
-			fmt.Print("\033[K\n")
+			// Print line, clear to end of line, then move to next line
+			// In raw mode, \n only moves down, need \r to return to column 0
+			fmt.Printf("%s\033[K\r\n", line)
 		}
 
 		// Draw status bar (inverted colors)
@@ -131,7 +129,7 @@ func (r *REPL) pager(output string) {
 		if leftCol > 0 {
 			status += fmt.Sprintf(" [col %d]", leftCol+1)
 		}
-		status += " | j/k:line PgUp/Dn:page h/l:scroll g/G:start/end q:quit "
+		status += " | j/k PgUp/Dn h/l g/G q "
 
 		// Pad or truncate status to terminal width
 		if len(status) < width {
@@ -140,10 +138,11 @@ func (r *REPL) pager(output string) {
 			status = status[:width]
 		}
 
+		// Status bar with inverted colors, no newline (stay on this line)
 		fmt.Printf("\033[7m%s\033[0m", status)
 
 		// Read input
-		buf := make([]byte, 3)
+		buf := make([]byte, 4)
 		n, _ := os.Stdin.Read(buf)
 		if n == 0 {
 			continue
@@ -152,7 +151,7 @@ func (r *REPL) pager(output string) {
 		// Handle input
 		if n == 1 {
 			switch buf[0] {
-			case 'q', 'Q':
+			case 'q', 'Q', 0x1b: // q or Escape
 				return
 			case 'j': // down one line
 				topLine++
@@ -174,7 +173,7 @@ func (r *REPL) pager(output string) {
 			case '\r', '\n': // enter = down one line
 				topLine++
 			}
-		} else if n == 3 && buf[0] == 0x1b && buf[1] == '[' {
+		} else if n >= 3 && buf[0] == 0x1b && buf[1] == '[' {
 			// Escape sequences
 			switch buf[2] {
 			case 'A': // Up arrow
@@ -185,16 +184,12 @@ func (r *REPL) pager(output string) {
 				leftCol += hScrollStep
 			case 'D': // Left arrow
 				leftCol -= hScrollStep
-			case '5': // Page Up (need to read one more byte for ~)
-				extra := make([]byte, 1)
-				os.Stdin.Read(extra)
-				if extra[0] == '~' {
+			case '5': // Page Up (ESC [ 5 ~)
+				if n >= 4 && buf[3] == '~' {
 					topLine -= viewHeight
 				}
-			case '6': // Page Down
-				extra := make([]byte, 1)
-				os.Stdin.Read(extra)
-				if extra[0] == '~' {
+			case '6': // Page Down (ESC [ 6 ~)
+				if n >= 4 && buf[3] == '~' {
 					topLine += viewHeight
 				}
 			case 'H': // Home
@@ -203,16 +198,12 @@ func (r *REPL) pager(output string) {
 			case 'F': // End
 				topLine = len(lines) - viewHeight
 			case '1': // Home (alternate: ESC [ 1 ~)
-				extra := make([]byte, 1)
-				os.Stdin.Read(extra)
-				if extra[0] == '~' {
+				if n >= 4 && buf[3] == '~' {
 					topLine = 0
 					leftCol = 0
 				}
 			case '4': // End (alternate: ESC [ 4 ~)
-				extra := make([]byte, 1)
-				os.Stdin.Read(extra)
-				if extra[0] == '~' {
+				if n >= 4 && buf[3] == '~' {
 					topLine = len(lines) - viewHeight
 				}
 			}
