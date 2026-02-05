@@ -64,6 +64,33 @@ This document outlines planned features and improvements. Items are roughly grou
 - S3-compatible backend
 - Tiered storage (hot local, cold S3)
 
+## Indexing
+
+### Format-Specific Indexes
+
+Specialized indexers that parse and extract fields from known log formats. Each indexer tries to parse records and skips those that don't match. A single chunk can have entries in multiple format indexes if it contains mixed log types.
+
+- **JSON Index** - extracts fields from JSON logs
+  - Top-level fields: `level=error`, `msg=failed`
+  - Nested paths: `user.id=123`, `request.headers.content-type=application/json`
+  - Arrays: `tags[]=production`
+
+- **Apache/Nginx Index** - parses access log formats
+  - Common Log Format and Combined Log Format
+  - Fields: `method`, `path`, `status`, `bytes`, `referer`, `user_agent`, `remote_addr`
+
+- **Syslog Index** - parses RFC 3164/5424 structure
+  - Fields: `facility`, `severity`, `hostname`, `app`, `pid`, `msgid`
+
+- **Logfmt Index** - parses key=value logfmt style
+  - More structured than the heuristic KV indexer
+
+Query examples:
+```
+query status=500 method=POST    # uses apache index
+query level=error user.id=123   # uses json index
+```
+
 ## Query
 
 ### Aggregations
