@@ -5,7 +5,6 @@ import "strings"
 func (r *REPL) cmdHelp(out *strings.Builder) {
 	out.WriteString(`Commands:
   help                     Show this help
-  store [name|all]         Get/set store filter (default: all stores, use "all" to clear)
   query [filters...]       Execute a query with filters
   follow [filters...]      Continuously stream new results (press any key to stop)
   explain [filters...]     Show query execution plan (which indexes will be used)
@@ -18,6 +17,7 @@ Shortcuts:
   Escape                   Clear input and reset query state
 
 Inspection:
+  stores                   List available stores
   chunks                   List all chunks with metadata
   chunk <id>               Show details for a specific chunk
   indexes <chunk-id>       Show index status for a chunk

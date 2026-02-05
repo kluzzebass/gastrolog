@@ -34,7 +34,6 @@ func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
 	r.queryMu.Lock()
 	r.queryCancel = queryCancel
 	r.resultChan = ch
-	store := r.store
 	r.queryMu.Unlock()
 
 	if follow {
@@ -45,7 +44,7 @@ func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
 	} else {
 		// Execute query using the query context (not the REPL lifetime context)
 		// so that cancelling the query stops the search.
-		seq, getToken, err := r.client.Search(queryCtx, store, q, nil)
+		seq, getToken, err := r.client.Search(queryCtx, "", q, nil)
 		if err != nil {
 			fmt.Fprintf(out, "Query error: %v\n", err)
 			return
@@ -83,7 +82,7 @@ func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
 func (r *REPL) runFollowMode(ctx context.Context, ch chan<- recordResult, q query.Query) {
 	defer close(ch)
 
-	cm := r.client.ChunkManager(r.store)
+	cm := r.client.ChunkManager("")
 	if cm == nil {
 		ch <- recordResult{err: errors.New("chunk manager not found for store")}
 		return

@@ -38,7 +38,6 @@ type REPL struct {
 
 	// Query state (protected by queryMu)
 	queryMu     sync.Mutex
-	store       string                    // target store for queries
 	lastQuery   *query.Query              // last executed query
 	resumeToken *query.ResumeToken        // resume token for pagination
 	resultChan  chan recordResult         // channel for receiving records
@@ -83,7 +82,6 @@ func New(client Client) *REPL {
 
 	r := &REPL{
 		client:       client,
-		store:        "default",
 		pageSize:     defaultPageSize,
 		ctx:          ctx,
 		cancel:       cancel,
@@ -108,7 +106,6 @@ func NewSimple(client Client, in io.Reader, out io.Writer) *simpleREPL {
 	return &simpleREPL{
 		repl: &REPL{
 			client:       client,
-			store:        "default",
 			pageSize:     defaultPageSize,
 			ctx:          ctx,
 			cancel:       cancel,
@@ -229,7 +226,7 @@ func (r *REPL) hasActiveQuery() bool {
 }
 
 // commands is the list of available REPL commands for tab completion.
-var commands = []string{"help", "store", "query", "follow", "next", "reset", "set", "chunks", "chunk", "indexes", "analyze", "explain", "stats", "status", "exit", "quit"}
+var commands = []string{"help", "stores", "query", "follow", "next", "reset", "set", "chunks", "chunk", "indexes", "analyze", "explain", "stats", "status", "exit", "quit"}
 
 // queryFilters is the list of query filter keys for tab completion.
 var queryFilters = []string{"start=", "end=", "token=", "limit="}
@@ -649,8 +646,8 @@ func (r *REPL) execute(line string) (output string, exit bool, follow bool) {
 		r.cmdReset(&out)
 	case "set":
 		r.cmdSet(&out, args)
-	case "store":
-		r.cmdStore(&out, args)
+	case "stores":
+		r.cmdStores(&out)
 	case "chunks":
 		r.cmdChunks(&out)
 	case "chunk":
