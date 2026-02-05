@@ -91,10 +91,12 @@ func (r *Receiver) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 	// Wait for context cancellation or error.
 	select {
 	case <-ctx.Done():
+		r.logger.Info("syslog receiver stopping")
 		r.shutdown()
 		wg.Wait()
 		return nil
 	case err := <-errCh:
+		r.logger.Info("syslog receiver stopping", "error", err)
 		r.shutdown()
 		wg.Wait()
 		return err
