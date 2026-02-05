@@ -340,6 +340,8 @@ func (r *Receiver) parseMessage(data []byte, remoteIP string) orchestrator.Inges
 		attrs["remote_ip"] = remoteIP
 	}
 
+	var sourceTS time.Time
+
 	// Parse priority if present.
 	raw := data
 	if len(data) > 0 && data[0] == '<' {
@@ -358,15 +360,16 @@ func (r *Receiver) parseMessage(data []byte, remoteIP string) orchestrator.Inges
 	// Detect RFC 5424 vs RFC 3164 by looking for version number.
 	if len(data) > 2 && data[0] >= '1' && data[0] <= '9' && data[1] == ' ' {
 		// RFC 5424: version followed by space.
-		r.parseRFC5424(data, attrs)
+		sourceTS = r.parseRFC5424(data, attrs)
 	} else {
 		// RFC 3164 (BSD) format.
-		r.parseRFC3164(data, attrs)
+		sourceTS = r.parseRFC3164(data, attrs)
 	}
 
 	return orchestrator.IngestMessage{
 		Attrs:    attrs,
 		Raw:      raw,
+		SourceTS: sourceTS,
 		IngestTS: time.Now(),
 	}
 }
@@ -396,13 +399,35 @@ func parsePriority(data []byte) (int, []byte, bool) {
 
 // parseRFC3164 parses BSD syslog format.
 // Format: MMM DD HH:MM:SS HOSTNAME TAG: MESSAGE
-func (r *Receiver) parseRFC3164(data []byte, attrs map[string]string) {
+// Returns the parsed timestamp (zero if parsing fails).
+// Note: RFC 3164 timestamps have no year, so we use the current year.
+func (r *Receiver) parseRFC3164(data []byte, attrs map[string]string) time.Time {
+	var sourceTS time.Time
+
 	// Try to parse timestamp: "Jan  2 15:04:05" or "Jan 02 15:04:05"
 	if len(data) < 15 {
-		return
+		return sourceTS
 	}
 
-	// Skip timestamp for now, just try to find hostname and tag.
+	// Parse timestamp (first 15 characters).
+	// Format: "Jan  2 15:04:05" or "Jan 02 15:04:05"
+	tsStr := string(data[:15])
+	now := time.Now()
+
+	// Try both formats (single-digit day with space, double-digit day).
+	if ts, err := time.Parse("Jan  2 15:04:05", tsStr); err == nil {
+		sourceTS = ts.AddDate(now.Year(), 0, 0)
+		// Handle year rollover: if parsed time is in the future, use previous year.
+		if sourceTS.After(now.Add(24 * time.Hour)) {
+			sourceTS = sourceTS.AddDate(-1, 0, 0)
+		}
+	} else if ts, err := time.Parse("Jan 02 15:04:05", tsStr); err == nil {
+		sourceTS = ts.AddDate(now.Year(), 0, 0)
+		if sourceTS.After(now.Add(24 * time.Hour)) {
+			sourceTS = sourceTS.AddDate(-1, 0, 0)
+		}
+	}
+
 	// Find first space after timestamp area.
 	pos := 15
 	for pos < len(data) && data[pos] == ' ' {
@@ -452,14 +477,20 @@ func (r *Receiver) parseRFC3164(data []byte, attrs map[string]string) {
 			}
 		}
 	}
+
+	return sourceTS
 }
 
 // parseRFC5424 parses IETF syslog format.
 // Format: VERSION TIMESTAMP HOSTNAME APP-NAME PROCID MSGID [SD] MESSAGE
-func (r *Receiver) parseRFC5424(data []byte, attrs map[string]string) {
+// Returns the parsed timestamp (zero if parsing fails).
+// RFC 5424 timestamps are ISO 8601 format: 2003-10-11T22:14:15.003Z or 2003-10-11T22:14:15.003-07:00
+func (r *Receiver) parseRFC5424(data []byte, attrs map[string]string) time.Time {
+	var sourceTS time.Time
+
 	fields := splitFields(data, 7)
 	if len(fields) < 1 {
-		return
+		return sourceTS
 	}
 
 	// VERSION (already verified as digit)
@@ -467,7 +498,13 @@ func (r *Receiver) parseRFC5424(data []byte, attrs map[string]string) {
 
 	// TIMESTAMP
 	if len(fields) > 1 && string(fields[1]) != "-" {
-		// Store timestamp but don't parse it (we use IngestTS).
+		tsStr := string(fields[1])
+		// Try RFC 3339 (ISO 8601) formats.
+		if ts, err := time.Parse(time.RFC3339Nano, tsStr); err == nil {
+			sourceTS = ts
+		} else if ts, err := time.Parse(time.RFC3339, tsStr); err == nil {
+			sourceTS = ts
+		}
 	}
 
 	// HOSTNAME
@@ -492,6 +529,8 @@ func (r *Receiver) parseRFC5424(data []byte, attrs map[string]string) {
 
 	// STRUCTURED-DATA and MESSAGE are in fields[6] if present.
 	// We don't parse structured data into attrs to avoid the injection issue.
+
+	return sourceTS
 }
 
 // splitFields splits data into up to n space-delimited fields.

@@ -75,7 +75,8 @@ go mod tidy                                       # Clean dependencies
 - **RecordCursor** interface: `Next`, `Prev`, `Seek`, `Close` -- bidirectional record iteration
 - **MetaStore** interface: `Save`, `Load`, `List`
 - **Attributes** -- `map[string]string` with binary encode/decode methods; embedded directly in records
-- **Record** -- log entry with `IngestTS`, `WriteTS` (both `time.Time`), `Attrs` (Attributes), and `Raw` payload
+- **Record** -- log entry with `SourceTS`, `IngestTS`, `WriteTS` (all `time.Time`), `Attrs` (Attributes), and `Raw` payload
+  - `SourceTS` -- when the log was generated at the source (parsed from syslog timestamp, Loki payload, etc.; zero if unknown)
   - `IngestTS` -- when the receiver received the message
   - `WriteTS` -- when the chunk manager appended the record (monotonic within a chunk)
   - `Attrs` -- key-value metadata stored alongside the record (no central registry)
@@ -129,7 +130,7 @@ Coordinates ingestion, indexing, and querying without owning business logic:
 
 - **Orchestrator** -- routes records to chunk managers, triggers index builds on seal, delegates queries
 - **Receiver** interface -- sources of log messages; emit `IngestMessage` to shared channel
-- **IngestMessage** -- `{Attrs, Raw, IngestTS}` where `IngestTS` is set by receiver at receive time
+- **IngestMessage** -- `{Attrs, Raw, SourceTS, IngestTS}` where `SourceTS` is parsed from the log source and `IngestTS` is set by receiver at receive time
 - **Factories** -- holds factory functions and shared `Logger` for component creation
 - Registries keyed by string for future multi-tenant support
 
@@ -309,12 +310,12 @@ Shared generic encode/decode for inverted index file formats:
 
 Disk-persisted storage with split file format:
 - `manager.go` -- chunk lifecycle: rotation based on MaxChunkBytes (soft) or 4GB (hard), one active writable chunk, lazy loading from disk
-- `record.go` -- idx.log entry format (30 bytes): IngestTS, WriteTS, RawOffset, RawSize, AttrOffset, AttrSize
+- `record.go` -- idx.log entry format (38 bytes): SourceTS, IngestTS, WriteTS, RawOffset, RawSize, AttrOffset, AttrSize
 - `record_reader.go` -- `RecordCursor` implementation with mmap for sealed chunks, stdio for active chunks
 
 **Split file format:**
 - `raw.log` (type 'r') -- 4-byte header + concatenated raw log bytes (no framing)
-- `idx.log` (type 'i') -- 4-byte header + fixed-size 30-byte entries per record
+- `idx.log` (type 'i') -- 4-byte header + fixed-size 38-byte entries per record
 - `attr.log` (type 'a') -- 4-byte header + concatenated encoded attribute records
 - Position semantics: record indices (0, 1, 2, ...) not byte offsets
 - ChunkMeta derived from idx.log (no separate meta.bin file)

@@ -9,8 +9,9 @@ import (
 	"gastrolog/internal/format"
 )
 
-// idx.log entry layout (30 bytes):
+// idx.log entry layout (38 bytes):
 //
+//	sourceTS   (8 bytes, int64, Unix microseconds, 0 if not available)
 //	ingestTS   (8 bytes, int64, Unix microseconds)
 //	writeTS    (8 bytes, int64, Unix microseconds)
 //	rawOffset  (4 bytes, uint32, byte offset into raw.log data section)
@@ -18,14 +19,15 @@ import (
 //	attrOffset (4 bytes, uint32, byte offset into attr.log data section)
 //	attrSize   (2 bytes, uint16, length of encoded attributes)
 const (
-	IdxEntrySize = 30
+	IdxEntrySize = 38
 
-	idxIngestTSOffset   = 0
-	idxWriteTSOffset    = 8
-	idxRawOffsetOffset  = 16
-	idxRawSizeOffset    = 20
-	idxAttrOffsetOffset = 24
-	idxAttrSizeOffset   = 28
+	idxSourceTSOffset   = 0
+	idxIngestTSOffset   = 8
+	idxWriteTSOffset    = 16
+	idxRawOffsetOffset  = 24
+	idxRawSizeOffset    = 28
+	idxAttrOffsetOffset = 32
+	idxAttrSizeOffset   = 36
 
 	// File versions.
 	RawLogVersion  = 0x01
@@ -54,6 +56,7 @@ var (
 
 // IdxEntry represents a single entry in idx.log.
 type IdxEntry struct {
+	SourceTS   time.Time // When the log was generated (zero if not available)
 	IngestTS   time.Time
 	WriteTS    time.Time
 	RawOffset  uint32 // Byte offset into raw.log (after header)
@@ -62,8 +65,9 @@ type IdxEntry struct {
 	AttrSize   uint16 // Length of encoded attributes
 }
 
-// EncodeIdxEntry encodes an idx.log entry into a 30-byte buffer.
+// EncodeIdxEntry encodes an idx.log entry into a 38-byte buffer.
 func EncodeIdxEntry(e IdxEntry, buf []byte) {
+	binary.LittleEndian.PutUint64(buf[idxSourceTSOffset:], uint64(e.SourceTS.UnixMicro()))
 	binary.LittleEndian.PutUint64(buf[idxIngestTSOffset:], uint64(e.IngestTS.UnixMicro()))
 	binary.LittleEndian.PutUint64(buf[idxWriteTSOffset:], uint64(e.WriteTS.UnixMicro()))
 	binary.LittleEndian.PutUint32(buf[idxRawOffsetOffset:], e.RawOffset)
@@ -72,9 +76,10 @@ func EncodeIdxEntry(e IdxEntry, buf []byte) {
 	binary.LittleEndian.PutUint16(buf[idxAttrSizeOffset:], e.AttrSize)
 }
 
-// DecodeIdxEntry decodes an idx.log entry from a 30-byte buffer.
+// DecodeIdxEntry decodes an idx.log entry from a 38-byte buffer.
 func DecodeIdxEntry(buf []byte) IdxEntry {
 	return IdxEntry{
+		SourceTS:   time.UnixMicro(int64(binary.LittleEndian.Uint64(buf[idxSourceTSOffset:]))),
 		IngestTS:   time.UnixMicro(int64(binary.LittleEndian.Uint64(buf[idxIngestTSOffset:]))),
 		WriteTS:    time.UnixMicro(int64(binary.LittleEndian.Uint64(buf[idxWriteTSOffset:]))),
 		RawOffset:  binary.LittleEndian.Uint32(buf[idxRawOffsetOffset:]),
@@ -106,6 +111,7 @@ func RawDataOffset() int64 {
 // The raw slice and attrs are used directly (no copy).
 func BuildRecord(entry IdxEntry, raw []byte, attrs chunk.Attributes) chunk.Record {
 	return chunk.Record{
+		SourceTS: entry.SourceTS,
 		IngestTS: entry.IngestTS,
 		WriteTS:  entry.WriteTS,
 		Attrs:    attrs,
@@ -119,6 +125,7 @@ func BuildRecordCopy(entry IdxEntry, raw []byte, attrs chunk.Attributes) chunk.R
 	rawCopy := make([]byte, len(raw))
 	copy(rawCopy, raw)
 	return chunk.Record{
+		SourceTS: entry.SourceTS,
 		IngestTS: entry.IngestTS,
 		WriteTS:  entry.WriteTS,
 		Attrs:    attrs.Copy(),

@@ -166,10 +166,16 @@ type ChunkMeta struct {
 
 // Record is a single log entry.
 //
+// Timestamps:
+//   - SourceTS: when the log was generated at the source (e.g., parsed from syslog timestamp)
+//   - IngestTS: when our receiver received the message
+//   - WriteTS:  when the chunk manager wrote the record (monotonic within a chunk)
+//
 // Note: When reading from file-backed chunks, Raw and Attrs may reference
 // mmap'd memory that becomes invalid when the cursor is closed. Callers that
 // need the record to outlive the cursor should call Copy().
 type Record struct {
+	SourceTS time.Time
 	IngestTS time.Time
 	WriteTS  time.Time
 	Attrs    Attributes
@@ -182,6 +188,7 @@ func (r Record) Copy() Record {
 	raw := make([]byte, len(r.Raw))
 	copy(raw, r.Raw)
 	return Record{
+		SourceTS: r.SourceTS,
 		IngestTS: r.IngestTS,
 		WriteTS:  r.WriteTS,
 		Attrs:    r.Attrs.Copy(),

@@ -23,8 +23,12 @@ Inspection:
 
 Query filters:
   WORD                     Bare word - filter by token (can repeat, AND semantics)
-  start=TIME               Start time (RFC3339 or Unix timestamp)
-  end=TIME                 End time (RFC3339 or Unix timestamp)
+  start=TIME               Start time bound on WriteTS (RFC3339 or Unix timestamp)
+  end=TIME                 End time bound on WriteTS
+  source_start=TIME        Start time bound on SourceTS (when log was generated)
+  source_end=TIME          End time bound on SourceTS
+  ingest_start=TIME        Start time bound on IngestTS (when receiver got it)
+  ingest_end=TIME          End time bound on IngestTS
   limit=N                  Maximum total results
   key=value                Filter by key=value in attrs OR message (can repeat, AND semantics)
   key=*                    Filter by key existence (any value)

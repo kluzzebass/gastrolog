@@ -32,9 +32,17 @@ type KeyValueFilter struct {
 
 // Query describes what records to search for.
 type Query struct {
-	// Time bounds (if End < Start, results are returned in reverse/newest-first order)
+	// Time bounds on WriteTS (if End < Start, results are returned in reverse/newest-first order)
 	Start time.Time // inclusive bound (lower for forward, upper for reverse)
 	End   time.Time // exclusive bound (upper for forward, lower for reverse)
+
+	// Time bounds on SourceTS (optional runtime filters)
+	SourceStart time.Time // inclusive lower bound on SourceTS
+	SourceEnd   time.Time // exclusive upper bound on SourceTS
+
+	// Time bounds on IngestTS (optional runtime filters)
+	IngestStart time.Time // inclusive lower bound on IngestTS
+	IngestEnd   time.Time // exclusive upper bound on IngestTS
 
 	// Optional filters (legacy API, ignored if BoolExpr is set)
 	Tokens []string         // filter by tokens (nil = no filter, AND semantics)
@@ -502,6 +510,16 @@ func (e *Engine) buildScannerWithManagers(cursor chunk.RecordCursor, q Query, st
 	// Exclude resume position (already returned).
 	if startPos != nil {
 		b.excludePosition(*startPos, q.Reverse())
+	}
+
+	// Add SourceTS filter if bounds are set.
+	if !q.SourceStart.IsZero() || !q.SourceEnd.IsZero() {
+		b.addFilter(sourceTimeFilter(q.SourceStart, q.SourceEnd))
+	}
+
+	// Add IngestTS filter if bounds are set.
+	if !q.IngestStart.IsZero() || !q.IngestEnd.IsZero() {
+		b.addFilter(ingestTimeFilter(q.IngestStart, q.IngestEnd))
 	}
 
 	// Seek cursor to start position if we have one and not using positions.
