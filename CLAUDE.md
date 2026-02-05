@@ -162,6 +162,12 @@ Coordinates ingestion, indexing, and querying without owning business logic:
 
 Contains receiver implementations. Receivers emit `IngestMessage` to the orchestrator's ingest channel.
 
+**IngestMessage:**
+- `Attrs` -- key-value metadata (map[string]string)
+- `Raw` -- log line bytes
+- `IngestTS` -- when the receiver received this message
+- `Ack` -- optional channel for write acknowledgement (nil = fire-and-forget)
+
 **Chatterbox receiver (`chatterbox/`):**
 
 Test receiver that generates random log messages at configurable intervals:
@@ -174,6 +180,20 @@ Test receiver that generates random log messages at configurable intervals:
   - `WeirdFormat` -- malformed/edge-case data for tokenization stress testing
 - `AttributePools` -- pre-generated pools of hosts, services, envs for consistent cardinality
 - Configurable min/max intervals, instance ID, format weights
+
+**HTTP receiver (`http/`):**
+
+Loki-compatible HTTP receiver for log ingestion:
+- `POST /loki/api/v1/push` -- main endpoint (Loki Push API)
+- `POST /api/prom/push` -- legacy endpoint
+- `GET /ready` -- health check
+- JSON format: `{streams: [{stream: {labels}, values: [[ts_ns, line, metadata?]]}]}`
+- Timestamp as nanoseconds since epoch (string, per Loki spec)
+- Stream labels and structured metadata merged into attrs
+- Supports gzip compression (`Content-Encoding: gzip`)
+- Default port 3100 (Loki's default)
+- `X-Wait-Ack: true` header for acknowledged mode (GastroLog extension)
+- Compatible with Promtail, Grafana Alloy, Fluent Bit
 
 ### Query package (`backend/internal/query/`)
 
@@ -554,6 +574,9 @@ backend/
         format_access.go        Apache/Nginx access log format
         format_syslog.go        Syslog format
         format_weird.go         Edge-case/malformed data format
+        factory.go              ReceiverFactory implementation
+      http/                     Loki-compatible HTTP receiver
+        receiver.go             HTTP server with Loki Push API
         factory.go              ReceiverFactory implementation
     chunk/
       chunk.go                  Interfaces (ChunkManager, RecordCursor, MetaStore), ManagerFactory

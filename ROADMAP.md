@@ -28,25 +28,16 @@ This document outlines planned features and improvements. Items are roughly grou
 
 **Standards & Protocols:**
 - **Syslog** - UDP and TCP (RFC 3164, RFC 5424)
-- **RELP** - Reliable Event Logging Protocol with ack support
 - **OTLP** - OpenTelemetry logs (gRPC and HTTP)
-- **GELF** - Graylog Extended Log Format (UDP/TCP, Docker-native)
-- **Beats** - Elastic Beats protocol (Filebeat, etc.)
 - **Fluent Forward** - Fluent Bit/Fluentd forward protocol
 
-**Container/Orchestration:**
-- **Docker** - JSON file driver or Docker socket API
-- **Kubernetes** - Log files from /var/log/containers or API
-- **Journald** - systemd journal integration
-
 **Generic:**
-- **HTTP** - POST endpoint for log ingestion
-- **File/Tail** - Watch and tail log files
+- ✓ **HTTP/Loki** - Loki Push API (`/loki/api/v1/push`) for Promtail, Alloy, Fluent Bit compatibility
 - **Kafka** - Consumer for log pipelines
 
 ### Receiver Features
+- ✓ Optional write acknowledgement (Ack channel in IngestMessage)
 - Backpressure signaling
-- Error callbacks (currently silently ignored)
 - Per-receiver metrics
 
 ## Storage
@@ -192,7 +183,7 @@ For reference, here's what's already implemented:
 - **Indexing**: Token, attribute, and KV indexes with budget control
 - **Query**: Boolean expressions, time bounds, pagination, context windows, explain, multi-store search
 - **REPL**: 12 commands with built-in bubbletea pager, live follow mode, multi-store support
-- **Receivers**: Chatterbox (test receiver with 6 log formats)
+- **Receivers**: Chatterbox (test), HTTP/Loki (Loki Push API with optional ack)
 - **Config**: File-based with runtime reconfiguration support
 - **Connect RPC**: Server layer with 4 services, REPL client abstraction, embedded mode
 - **Lifecycle**: Health endpoint, graceful shutdown with drain, k8s probes (`/healthz`, `/readyz`)

@@ -53,6 +53,13 @@
         "hostCount": "5",
         "serviceCount": "3"
       }
+    },
+    {
+      "id": "loki",
+      "type": "http",
+      "params": {
+        "addr": ":3100"
+      }
     }
   ]
 }
