@@ -131,6 +131,40 @@ func (c *GRPCClient) Explain(ctx context.Context, store string, q query.Query) (
 	return protoToQueryPlan(resp.Msg), nil
 }
 
+func (c *GRPCClient) Follow(ctx context.Context, store string, q query.Query) (iter.Seq2[chunk.Record, error], error) {
+	// If a specific store is requested, add it as a query predicate.
+	if store != "" && store != "default" {
+		q = q.WithStorePredicate(store)
+	}
+
+	protoQuery := queryToProto(q)
+
+	req := connect.NewRequest(&apiv1.FollowRequest{
+		Query: protoQuery,
+	})
+
+	stream, err := c.query.Follow(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	seq := func(yield func(chunk.Record, error) bool) {
+		for stream.Receive() {
+			msg := stream.Msg()
+			for _, rec := range msg.Records {
+				if !yield(protoToRecord(rec), nil) {
+					return
+				}
+			}
+		}
+		if err := stream.Err(); err != nil && !errors.Is(err, io.EOF) {
+			yield(chunk.Record{}, err)
+		}
+	}
+
+	return seq, nil
+}
+
 func (c *GRPCClient) ListStores() []string {
 	resp, err := c.store.ListStores(context.Background(), connect.NewRequest(&apiv1.ListStoresRequest{}))
 	if err != nil {
@@ -404,6 +438,7 @@ func protoToQueryPlan(resp *apiv1.ExplainResponse) *query.QueryPlan {
 		}
 
 		chunks[i] = query.ChunkPlan{
+			StoreID:       cp.StoreId,
 			ChunkID:       chunkID,
 			Sealed:        cp.Sealed,
 			RecordCount:   int(cp.RecordCount),

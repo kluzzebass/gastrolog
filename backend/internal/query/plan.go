@@ -22,6 +22,7 @@ type QueryPlan struct {
 
 // ChunkPlan describes the execution plan for a single chunk.
 type ChunkPlan struct {
+	StoreID       string // store this chunk belongs to
 	ChunkID       chunk.ChunkID
 	Sealed        bool
 	RecordCount   int
@@ -56,38 +57,60 @@ type PipelineStep struct {
 }
 
 // Explain returns the query execution plan without executing the query.
+// For multi-store engines, this explains the plan across all stores.
 func (e *Engine) Explain(ctx context.Context, q Query) (*QueryPlan, error) {
 	// Normalize query to ensure BoolExpr is set.
 	q = q.Normalize()
 
-	metas, err := e.chunks.List()
-	if err != nil {
-		return nil, err
+	// Extract store predicates and get remaining query expression.
+	allStores := e.listStores()
+	selectedStores, remainingExpr := ExtractStoreFilter(q.BoolExpr, allStores)
+	if selectedStores == nil {
+		selectedStores = allStores
 	}
 
+	// Update query to use remaining expression (without store predicates).
+	queryForPlan := q
+	queryForPlan.BoolExpr = remainingExpr
+
 	plan := &QueryPlan{
-		Query:       q,
-		Direction:   "forward",
-		TotalChunks: len(metas),
+		Query:     q,
+		Direction: "forward",
 	}
 	if q.Reverse() {
 		plan.Direction = "reverse"
 	}
 
-	// Select chunks that overlap the query time range.
-	candidates := e.selectChunks(metas, q)
+	// Collect chunks from all selected stores.
+	for _, storeID := range selectedStores {
+		cm, im := e.getStoreManagers(storeID)
+		if cm == nil {
+			continue
+		}
 
-	for _, meta := range candidates {
-		cp := e.buildChunkPlan(ctx, q, meta)
-		plan.ChunkPlans = append(plan.ChunkPlans, cp)
+		metas, err := cm.List()
+		if err != nil {
+			return nil, err
+		}
+
+		plan.TotalChunks += len(metas)
+
+		// Select chunks that overlap the query time range.
+		candidates := e.selectChunks(metas, queryForPlan)
+
+		for _, meta := range candidates {
+			cp := e.buildChunkPlan(ctx, queryForPlan, meta, storeID, cm, im)
+			plan.ChunkPlans = append(plan.ChunkPlans, cp)
+		}
 	}
 
 	return plan, nil
 }
 
 // buildChunkPlan builds the execution plan for a single chunk.
-func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMeta) ChunkPlan {
+func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMeta, storeID string, cm chunk.ChunkManager, im index.IndexManager) ChunkPlan {
 	cp := ChunkPlan{
+		StoreID:       storeID,
 		ChunkID:       meta.ID,
 		Sealed:        meta.Sealed,
 		RecordCount:   int(meta.RecordCount),
@@ -116,7 +139,7 @@ func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMe
 			PositionsBefore: currentPositions,
 		}
 
-		if pos, found, err := e.chunks.FindStartPosition(meta.ID, lower); err == nil && found {
+		if pos, found, err := cm.FindStartPosition(meta.ID, lower); err == nil && found {
 			skipped := int(pos)
 			currentPositions = cp.RecordCount - skipped
 			step.PositionsAfter = currentPositions
@@ -151,7 +174,7 @@ func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMe
 			var runtimeFilters []string
 
 			currentPositions, skipped, skipReason, runtimeFilters = e.buildBranchPipeline(
-				&cp.Pipeline, branch, meta, currentPositions)
+				&cp.Pipeline, branch, meta, currentPositions, im)
 
 			if skipped {
 				cp.ScanMode = "skipped"
@@ -182,7 +205,7 @@ func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMe
 			allSkipped := true
 
 			for _, branch := range dnf.Branches {
-				bp := e.buildBranchPlan(&branch, meta, cp.RecordCount)
+				bp := e.buildBranchPlan(&branch, meta, cp.RecordCount, im)
 				cp.BranchPlans = append(cp.BranchPlans, bp)
 
 				if !bp.Skipped {
@@ -225,7 +248,7 @@ func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMe
 
 // buildBranchPipeline builds pipeline steps for a single DNF branch.
 // Returns updated position count, whether branch is skipped, skip reason, and runtime filters.
-func (e *Engine) buildBranchPipeline(pipeline *[]PipelineStep, branch *querylang.Conjunction, meta chunk.ChunkMeta, currentPositions int) (int, bool, string, []string) {
+func (e *Engine) buildBranchPipeline(pipeline *[]PipelineStep, branch *querylang.Conjunction, meta chunk.ChunkMeta, currentPositions int, im index.IndexManager) (int, bool, string, []string) {
 	var runtimeFilters []string
 
 	tokens, kv, _ := ConjunctionToFilters(branch)
@@ -239,7 +262,7 @@ func (e *Engine) buildBranchPipeline(pipeline *[]PipelineStep, branch *querylang
 			PositionsBefore: currentPositions,
 		}
 
-		tokIdx, err := e.indexes.OpenTokenIndex(meta.ID)
+		tokIdx, err := im.OpenTokenIndex(meta.ID)
 		if err == nil {
 			reader := index.NewTokenIndexReader(meta.ID, tokIdx.Entries())
 			var positions []uint64
@@ -302,7 +325,7 @@ func (e *Engine) buildBranchPipeline(pipeline *[]PipelineStep, branch *querylang
 				PositionsBefore: currentPositions,
 			}
 
-			result := e.lookupKVIndex(f, meta.ID)
+			result := e.lookupKVIndex(f, meta.ID, im)
 
 			if !result.available {
 				step.PositionsAfter = currentPositions
@@ -336,13 +359,13 @@ func (e *Engine) buildBranchPipeline(pipeline *[]PipelineStep, branch *querylang
 }
 
 // buildBranchPlan builds a plan for a single DNF branch.
-func (e *Engine) buildBranchPlan(branch *querylang.Conjunction, meta chunk.ChunkMeta, recordCount int) BranchPlan {
+func (e *Engine) buildBranchPlan(branch *querylang.Conjunction, meta chunk.ChunkMeta, recordCount int, im index.IndexManager) BranchPlan {
 	bp := BranchPlan{
 		BranchExpr:    branch.String(),
 		EstimatedScan: recordCount,
 	}
 
-	currentPositions, skipped, skipReason, _ := e.buildBranchPipeline(&bp.Pipeline, branch, meta, recordCount)
+	currentPositions, skipped, skipReason, _ := e.buildBranchPipeline(&bp.Pipeline, branch, meta, recordCount, im)
 
 	if skipped {
 		bp.Skipped = true
@@ -382,7 +405,7 @@ type kvLookupResult struct {
 }
 
 // lookupKVIndex looks up a single KV filter across all available indexes.
-func (e *Engine) lookupKVIndex(f KeyValueFilter, chunkID chunk.ChunkID) kvLookupResult {
+func (e *Engine) lookupKVIndex(f KeyValueFilter, chunkID chunk.ChunkID, im index.IndexManager) kvLookupResult {
 	result := kvLookupResult{}
 	var detailParts []string
 
@@ -390,12 +413,12 @@ func (e *Engine) lookupKVIndex(f KeyValueFilter, chunkID chunk.ChunkID) kvLookup
 	valLower := strings.ToLower(f.Value)
 
 	// Open indexes.
-	attrKVIdx, attrKVErr := e.indexes.OpenAttrKVIndex(chunkID)
-	attrKeyIdx, attrKeyErr := e.indexes.OpenAttrKeyIndex(chunkID)
-	attrValIdx, attrValErr := e.indexes.OpenAttrValueIndex(chunkID)
-	kvIdx, kvStatus, kvErr := e.indexes.OpenKVIndex(chunkID)
-	kvKeyIdx, kvKeyStatus, kvKeyErr := e.indexes.OpenKVKeyIndex(chunkID)
-	kvValIdx, kvValStatus, kvValErr := e.indexes.OpenKVValueIndex(chunkID)
+	attrKVIdx, attrKVErr := im.OpenAttrKVIndex(chunkID)
+	attrKeyIdx, attrKeyErr := im.OpenAttrKeyIndex(chunkID)
+	attrValIdx, attrValErr := im.OpenAttrValueIndex(chunkID)
+	kvIdx, kvStatus, kvErr := im.OpenKVIndex(chunkID)
+	kvKeyIdx, kvKeyStatus, kvKeyErr := im.OpenKVKeyIndex(chunkID)
+	kvValIdx, kvValStatus, kvValErr := im.OpenKVValueIndex(chunkID)
 
 	if f.Key == "" && f.Value == "" {
 		return result

@@ -705,6 +705,7 @@ type ChunkPlan struct {
 	ScanMode         string                 `protobuf:"bytes,5,opt,name=scan_mode,json=scanMode,proto3" json:"scan_mode,omitempty"` // "sequential" or "index-driven"
 	EstimatedRecords int64                  `protobuf:"varint,6,opt,name=estimated_records,json=estimatedRecords,proto3" json:"estimated_records,omitempty"`
 	RuntimeFilters   []string               `protobuf:"bytes,7,rep,name=runtime_filters,json=runtimeFilters,proto3" json:"runtime_filters,omitempty"`
+	StoreId          string                 `protobuf:"bytes,8,opt,name=store_id,json=storeId,proto3" json:"store_id,omitempty"` // Store this chunk belongs to
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -786,6 +787,13 @@ func (x *ChunkPlan) GetRuntimeFilters() []string {
 		return x.RuntimeFilters
 	}
 	return nil
+}
+
+func (x *ChunkPlan) GetStoreId() string {
+	if x != nil {
+		return x.StoreId
+	}
+	return ""
 }
 
 type PipelineStep struct {
@@ -922,7 +930,7 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\rStorePosition\x12\x19\n" +
 	"\bstore_id\x18\x01 \x01(\tR\astoreId\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\fR\achunkId\x12\x1a\n" +
-	"\bposition\x18\x03 \x01(\x04R\bposition\"\x86\x02\n" +
+	"\bposition\x18\x03 \x01(\x04R\bposition\"\xa1\x02\n" +
 	"\tChunkPlan\x12\x19\n" +
 	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x12\x16\n" +
 	"\x06sealed\x18\x02 \x01(\bR\x06sealed\x12!\n" +
@@ -930,7 +938,8 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\x05steps\x18\x04 \x03(\v2\x1a.gastrolog.v1.PipelineStepR\x05steps\x12\x1b\n" +
 	"\tscan_mode\x18\x05 \x01(\tR\bscanMode\x12+\n" +
 	"\x11estimated_records\x18\x06 \x01(\x03R\x10estimatedRecords\x12'\n" +
-	"\x0fruntime_filters\x18\a \x03(\tR\x0eruntimeFilters\"\xba\x01\n" +
+	"\x0fruntime_filters\x18\a \x03(\tR\x0eruntimeFilters\x12\x19\n" +
+	"\bstore_id\x18\b \x01(\tR\astoreId\"\xba\x01\n" +
 	"\fPipelineStep\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
 	"\x0einput_estimate\x18\x02 \x01(\x03R\rinputEstimate\x12'\n" +

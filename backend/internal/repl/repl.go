@@ -8,22 +8,21 @@ package repl
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
-	"time"
 
-	"github.com/charmbracelet/bubbles/cursor"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"github.com/chzyer/readline"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/query"
 )
+
+const defaultPageSize = 50
 
 // recordResult holds a record or error from the iterator channel.
 type recordResult struct {
@@ -50,633 +49,130 @@ type REPL struct {
 	// Lifecycle
 	ctx    context.Context
 	cancel context.CancelFunc
-
-	// History
-	history      []string
-	historyIndex int
-	historyFile  string
-}
-
-// model is the bubbletea model for the REPL.
-type model struct {
-	repl      *REPL
-	textInput textinput.Model
-	output    *strings.Builder
-	quitting  bool
-	following bool // true when in follow mode
-	paging    bool // true when in pager mode (space=next, q=quit)
-}
-
-// tickMsg is sent periodically during follow mode to poll for new records.
-type tickMsg time.Time
-
-// followTick returns a command that sends a tick after a delay.
-func followTick() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
-		return tickMsg(t)
-	})
-}
-
-// New creates a REPL using the provided client.
-func New(client Client) *REPL {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	r := &REPL{
-		client:       client,
-		pageSize:     defaultPageSize,
-		ctx:          ctx,
-		cancel:       cancel,
-		history:      make([]string, 0),
-		historyIndex: -1,
-	}
-
-	// Set up history file in user's home directory.
-	if home, err := os.UserHomeDir(); err == nil {
-		r.historyFile = filepath.Join(home, ".gastrolog_history")
-		r.loadHistory()
-	}
-
-	return r
-}
-
-// NewSimple creates a REPL for testing without bubbletea.
-// This version reads commands from the provided input and writes output to out.
-func NewSimple(client Client, in io.Reader, out io.Writer) *simpleREPL {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	return &simpleREPL{
-		repl: &REPL{
-			client:       client,
-			pageSize:     defaultPageSize,
-			ctx:          ctx,
-			cancel:       cancel,
-			history:      make([]string, 0),
-			historyIndex: -1,
-		},
-		in:  in,
-		out: out,
-	}
-}
-
-// simpleREPL is a test-friendly REPL that doesn't use bubbletea.
-type simpleREPL struct {
-	repl *REPL
-	in   io.Reader
-	out  io.Writer
-}
-
-// Run starts the simple REPL loop for testing.
-func (s *simpleREPL) Run() error {
-	fmt.Fprintln(s.out, "GastroLog REPL. Type 'help' for commands.")
-
-	scanner := newLineScanner(s.in)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-
-		output, exit, _ := s.repl.execute(line)
-		if output != "" {
-			fmt.Fprint(s.out, output)
-		}
-		if exit {
-			return nil
-		}
-		// Note: follow mode not supported in simple REPL (for testing)
-	}
-
-	return scanner.Err()
-}
-
-// lineScanner wraps bufio.Scanner-like behavior for io.Reader
-type lineScanner struct {
-	reader io.Reader
-	buf    []byte
-	line   string
-	err    error
-}
-
-func newLineScanner(r io.Reader) *lineScanner {
-	return &lineScanner{reader: r, buf: make([]byte, 0, 4096)}
-}
-
-func (s *lineScanner) Scan() bool {
-	for {
-		// Check for newline in buffer
-		if idx := strings.IndexByte(string(s.buf), '\n'); idx >= 0 {
-			s.line = string(s.buf[:idx])
-			s.buf = s.buf[idx+1:]
-			return true
-		}
-
-		// Read more data
-		tmp := make([]byte, 1024)
-		n, err := s.reader.Read(tmp)
-		if n > 0 {
-			s.buf = append(s.buf, tmp[:n]...)
-		}
-		if err != nil {
-			if err == io.EOF && len(s.buf) > 0 {
-				s.line = string(s.buf)
-				s.buf = nil
-				return true
-			}
-			if err != io.EOF {
-				s.err = err
-			}
-			return false
-		}
-	}
-}
-
-func (s *lineScanner) Text() string { return s.line }
-func (s *lineScanner) Err() error   { return s.err }
-
-// defaultPageSize is the number of records shown per page in query results.
-const defaultPageSize = 10
-
-// getResultChan returns the current result channel under lock.
-func (r *REPL) getResultChan() chan recordResult {
-	r.queryMu.Lock()
-	defer r.queryMu.Unlock()
-	return r.resultChan
-}
-
-// setResultChan sets the result channel under lock.
-func (r *REPL) setResultChan(ch chan recordResult) {
-	r.queryMu.Lock()
-	defer r.queryMu.Unlock()
-	r.resultChan = ch
-}
-
-// cancelQuery cancels the current query if one exists.
-func (r *REPL) cancelQuery() {
-	r.queryMu.Lock()
-	defer r.queryMu.Unlock()
-	if r.queryCancel != nil {
-		r.queryCancel()
-	}
-}
-
-// hasActiveQuery returns true if there's an active query.
-func (r *REPL) hasActiveQuery() bool {
-	r.queryMu.Lock()
-	defer r.queryMu.Unlock()
-	return r.resultChan != nil
 }
 
 // commands is the list of available REPL commands for tab completion.
 var commands = []string{"help", "stores", "query", "follow", "next", "reset", "set", "chunks", "chunk", "indexes", "analyze", "explain", "stats", "status", "exit", "quit"}
 
 // queryFilters is the list of query filter keys for tab completion.
-var queryFilters = []string{"start=", "end=", "token=", "limit="}
+var queryFilters = []string{"start=", "end=", "limit=", "store="}
 
-// Run starts the REPL loop using bubbletea.
-func (r *REPL) Run() error {
-	ti := textinput.New()
-	ti.Placeholder = ""
-	ti.Focus()
-	ti.Prompt = "> "
-	ti.CharLimit = 1024
-	ti.Width = 80
-	ti.ShowSuggestions = true
-	ti.SetSuggestions(commands)
+// New creates a REPL using the provided client.
+func New(client Client) *REPL {
+	ctx, cancel := context.WithCancel(context.Background())
 
-	// Disable cursor blink to prevent redraws that clear terminal text selection.
-	ti.Cursor.SetMode(cursor.CursorStatic)
-
-	output := &strings.Builder{}
-	output.WriteString("GastroLog REPL. Type 'help' for commands.\n")
-
-	m := model{
-		repl:      r,
-		textInput: ti,
-		output:    output,
+	return &REPL{
+		client:   client,
+		pageSize: defaultPageSize,
+		ctx:      ctx,
+		cancel:   cancel,
 	}
-
-	p := tea.NewProgram(m)
-	_, err := p.Run()
-	return err
 }
 
-func (m model) Init() tea.Cmd {
-	return nil
-}
+// completer provides tab completion for the REPL.
+type completer struct{}
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
+func (c *completer) Do(line []rune, pos int) (newLine [][]rune, length int) {
+	lineStr := string(line[:pos])
+	parts := strings.Fields(lineStr)
 
-	switch msg := msg.(type) {
-	case tickMsg:
-		// Poll for new records in follow mode
-		if !m.following {
-			return m, nil
+	// If empty or still typing first word, complete commands
+	if len(parts) == 0 || (len(parts) == 1 && !strings.HasSuffix(lineStr, " ")) {
+		prefix := ""
+		if len(parts) == 1 {
+			prefix = parts[0]
 		}
-		// Get channel under lock to avoid race
-		ch := m.repl.getResultChan()
-		if ch == nil {
-			// Channel gone but still in follow mode - shouldn't happen
-			m.following = false
-			m.output.WriteString("--- Follow ended (no channel) ---\n")
-			return m, nil
-		}
-		// Drain all available records without blocking.
-		// We use the local ch variable to avoid race conditions.
-		for {
-			select {
-			case result, ok := <-ch:
-				if !ok {
-					// Channel closed
-					m.following = false
-					m.repl.setResultChan(nil)
-					m.output.WriteString("--- End of follow ---\n")
-					return m, nil
-				}
-				if result.err != nil {
-					m.output.WriteString("--- Error: " + result.err.Error() + " ---\n")
-					continue
-				}
-				m.output.WriteString(m.repl.formatRecord(result.rec))
-				m.output.WriteByte('\n')
-			default:
-				// No more records right now, schedule next tick
-				return m, followTick()
+		for _, cmd := range commands {
+			if strings.HasPrefix(cmd, prefix) {
+				newLine = append(newLine, []rune(cmd[len(prefix):]))
 			}
 		}
-
-	case tea.KeyMsg:
-		// Any key press stops follow mode
-		if m.following {
-			m.following = false
-			m.repl.cancelQuery()
-			m.output.WriteString("--- Follow stopped ---\n")
-			return m, nil
-		}
-
-		// Pager mode: space=next page, q/Escape=quit pager
-		if m.paging {
-			switch msg.Type {
-			case tea.KeyCtrlC, tea.KeyCtrlD:
-				m.quitting = true
-				return m, tea.Quit
-			case tea.KeySpace, tea.KeyEnter:
-				// Fetch next page
-				output, done := m.repl.fetchPage()
-				if output != "" {
-					m.output.WriteString(output)
-				}
-				if done {
-					m.paging = false
-					m.textInput.Prompt = m.repl.buildPrompt()
-				}
-				return m, nil
-			case tea.KeyEscape:
-				// Exit pager, keep query state for later resume
-				m.paging = false
-				m.textInput.Prompt = m.repl.buildPrompt()
-				return m, nil
-			case tea.KeyRunes:
-				if string(msg.Runes) == "q" {
-					// Exit pager and reset query
-					m.paging = false
-					m.repl.cancelQuery()
-					m.repl.queryMu.Lock()
-					m.repl.lastQuery = nil
-					m.repl.resumeToken = nil
-					m.repl.resultChan = nil
-					m.repl.getToken = nil
-					m.repl.queryMu.Unlock()
-					m.textInput.Prompt = m.repl.buildPrompt()
-					return m, nil
-				}
-			}
-			return m, nil
-		}
-
-		switch msg.Type {
-		case tea.KeyCtrlC, tea.KeyCtrlD:
-			m.quitting = true
-			return m, tea.Quit
-
-		case tea.KeyEscape:
-			// Reset query state
-			if m.repl.hasActiveQuery() {
-				m.repl.cancelQuery()
-				m.repl.queryMu.Lock()
-				m.repl.lastQuery = nil
-				m.repl.resumeToken = nil
-				m.repl.resultChan = nil
-				m.repl.getToken = nil
-				m.repl.queryMu.Unlock()
-				m.textInput.Prompt = m.repl.buildPrompt()
-			}
-			m.textInput.SetValue("")
-			return m, nil
-
-		case tea.KeyEnter:
-			line := strings.TrimSpace(m.textInput.Value())
-			if line != "" {
-				m.repl.addHistory(line)
-				m.output.WriteString("> " + line + "\n")
-			}
-			output, exit, follow, paging := m.repl.executeWithPaging(line)
-			if output != "" {
-				m.output.WriteString(output)
-			}
-			if exit {
-				m.quitting = true
-				return m, tea.Quit
-			}
-			if follow {
-				m.following = true
-				m.textInput.SetValue("")
-				m.textInput.SetSuggestions(commands)
-				m.repl.historyIndex = -1
-				m.output.WriteString("--- Following (press any key to stop) ---\n")
-				return m, followTick()
-			}
-			if paging {
-				m.paging = true
-				m.textInput.Prompt = "[space=more, q=quit] "
-			}
-			m.textInput.SetValue("")
-			m.textInput.SetSuggestions(commands)
-			if !paging {
-				m.textInput.Prompt = m.repl.buildPrompt()
-			}
-			m.repl.historyIndex = -1
-			return m, nil
-
-		case tea.KeyUp:
-			// If there are suggestions, let textinput handle cycling; otherwise navigate history
-			if len(m.textInput.MatchedSuggestions()) > 0 {
-				// Let textinput handle suggestion cycling
-				break
-			}
-			// Navigate history backward
-			if len(m.repl.history) > 0 {
-				if m.repl.historyIndex < len(m.repl.history)-1 {
-					m.repl.historyIndex++
-					idx := len(m.repl.history) - 1 - m.repl.historyIndex
-					m.textInput.SetValue(m.repl.history[idx])
-					m.textInput.CursorEnd()
-				}
-			}
-			return m, nil
-
-		case tea.KeyDown:
-			// If there are suggestions, let textinput handle cycling; otherwise navigate history
-			if len(m.textInput.MatchedSuggestions()) > 0 {
-				// Let textinput handle suggestion cycling
-				break
-			}
-			// Navigate history forward
-			if m.repl.historyIndex > 0 {
-				m.repl.historyIndex--
-				idx := len(m.repl.history) - 1 - m.repl.historyIndex
-				m.textInput.SetValue(m.repl.history[idx])
-				m.textInput.CursorEnd()
-			} else if m.repl.historyIndex == 0 {
-				m.repl.historyIndex = -1
-				m.textInput.SetValue("")
-			}
-			return m, nil
-		}
-	}
-
-	m.textInput, cmd = m.textInput.Update(msg)
-
-	// Update suggestions based on current input
-	m.updateSuggestions()
-
-	// Update prompt with current status
-	m.textInput.Prompt = m.repl.buildPrompt()
-
-	return m, cmd
-}
-
-// updateSuggestions sets appropriate suggestions based on current input.
-func (m *model) updateSuggestions() {
-	val := m.textInput.Value()
-	parts := strings.Fields(val)
-
-	if len(parts) == 0 {
-		// No input yet - suggest commands
-		m.textInput.SetSuggestions(commands)
-		return
-	}
-
-	cmd := parts[0]
-
-	// If we're still typing the first word, suggest commands
-	if len(parts) == 1 && !strings.HasSuffix(val, " ") {
-		m.textInput.SetSuggestions(commands)
-		return
+		return newLine, len(prefix)
 	}
 
 	// After command, suggest based on command type
+	cmd := parts[0]
 	switch cmd {
 	case "query", "follow", "explain":
-		// Suggest filter keys, prefixed with current input
-		var suggestions []string
-		prefix := val
-		if !strings.HasSuffix(prefix, " ") {
-			// Still typing a filter, find the last space
-			lastSpace := strings.LastIndex(prefix, " ")
-			if lastSpace >= 0 {
-				prefix = prefix[:lastSpace+1]
+		// Complete filter keys
+		lastPart := ""
+		if !strings.HasSuffix(lineStr, " ") && len(parts) > 1 {
+			lastPart = parts[len(parts)-1]
+		}
+		for _, filter := range queryFilters {
+			if strings.HasPrefix(filter, lastPart) {
+				newLine = append(newLine, []rune(filter[len(lastPart):]))
 			}
 		}
-		for _, f := range queryFilters {
-			suggestions = append(suggestions, prefix+f)
-		}
-		m.textInput.SetSuggestions(suggestions)
-	case "chunk", "indexes", "analyze":
-		// Suggest chunk IDs
-		m.textInput.SetSuggestions(m.getChunkIDSuggestions(val))
-	default:
-		// No suggestions for other commands
-		m.textInput.SetSuggestions(nil)
+		return newLine, len(lastPart)
 	}
+
+	return nil, 0
 }
 
-// getChunkIDSuggestions returns chunk ID suggestions for commands that take a chunk ID argument.
-func (m *model) getChunkIDSuggestions(currentInput string) []string {
-	parts := strings.Fields(currentInput)
-	cmd := parts[0]
-
-	// Get partial ID being typed (if any)
-	var partial string
-	if len(parts) > 1 {
-		partial = strings.ToLower(parts[1])
+// Run starts the REPL loop.
+func (r *REPL) Run() error {
+	historyFile := ""
+	if home, err := os.UserHomeDir(); err == nil {
+		historyFile = filepath.Join(home, ".gastrolog_history")
 	}
 
-	// Collect all chunk IDs across all stores
-	var suggestions []string
-	stores := m.repl.client.ListStores()
-
-	for _, store := range stores {
-		cm := m.repl.client.ChunkManager(store)
-		if cm == nil {
-			continue
-		}
-		chunks, err := cm.List()
-		if err != nil {
-			continue
-		}
-		for _, meta := range chunks {
-			id := meta.ID.String()
-			// Filter by partial match if user is typing
-			if partial == "" || strings.HasPrefix(strings.ToLower(id), partial) {
-				suggestions = append(suggestions, cmd+" "+id)
-			}
-		}
-	}
-
-	// Sort suggestions (most recent chunks first based on UUID v7 ordering)
-	slices.Sort(suggestions)
-	slices.Reverse(suggestions)
-
-	return suggestions
-}
-
-func (m model) View() string {
-	if m.quitting {
-		return ""
-	}
-	if m.following {
-		return m.output.String()
-	}
-	return m.output.String() + m.textInput.View()
-}
-
-// buildPrompt constructs the REPL prompt showing current status.
-// Format: > or [query] >
-func (r *REPL) buildPrompt() string {
-	r.queryMu.Lock()
-	hasQuery := r.resultChan != nil
-	lastQuery := r.lastQuery
-	r.queryMu.Unlock()
-
-	if !hasQuery || lastQuery == nil {
-		return "> "
-	}
-
-	queryDesc := r.describeQuery(lastQuery)
-	return "[" + queryDesc + "] > "
-}
-
-// describeQuery returns a short description of a query for the prompt.
-func (r *REPL) describeQuery(q *query.Query) string {
-	// If BoolExpr is set, use its string representation
-	if q.BoolExpr != nil {
-		desc := q.BoolExpr.String()
-		// Truncate if too long
-		if len(desc) > 30 {
-			desc = desc[:27] + "..."
-		}
-		return desc
-	}
-
-	// Legacy API: use Tokens and KV fields
-	var parts []string
-
-	if len(q.Tokens) > 0 {
-		if len(q.Tokens) == 1 {
-			parts = append(parts, q.Tokens[0])
-		} else {
-			parts = append(parts, fmt.Sprintf("%d tokens", len(q.Tokens)))
-		}
-	}
-
-	if len(q.KV) > 0 {
-		if len(q.KV) == 1 {
-			f := q.KV[0]
-			key := f.Key
-			if key == "" {
-				key = "*"
-			}
-			val := f.Value
-			if val == "" {
-				val = "*"
-			}
-			parts = append(parts, key+"="+val)
-		} else {
-			parts = append(parts, fmt.Sprintf("%d filters", len(q.KV)))
-		}
-	}
-
-	if len(parts) == 0 {
-		return "query"
-	}
-
-	desc := strings.Join(parts, ",")
-	// Truncate if too long
-	if len(desc) > 20 {
-		desc = desc[:17] + "..."
-	}
-	return desc
-}
-
-// loadHistory reads history from file.
-func (r *REPL) loadHistory() {
-	if r.historyFile == "" {
-		return
-	}
-	data, err := os.ReadFile(r.historyFile)
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:          "> ",
+		HistoryFile:     historyFile,
+		AutoComplete:    &completer{},
+		InterruptPrompt: "^C",
+		EOFPrompt:       "exit",
+	})
 	if err != nil {
-		return
+		return err
 	}
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
+	defer rl.Close()
+
+	fmt.Println("GastroLog REPL. Type 'help' for commands.")
+
+	for {
+		// Update prompt based on query state
+		if r.hasActiveQuery() {
+			rl.SetPrompt("[query] > ")
+		} else {
+			rl.SetPrompt("> ")
+		}
+
+		line, err := rl.Readline()
+		if err != nil {
+			if err == readline.ErrInterrupt {
+				if r.hasActiveQuery() {
+					r.cancelQuery()
+					r.clearQueryState()
+					fmt.Println("Query cancelled.")
+					continue
+				}
+				continue
+			}
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+
 		line = strings.TrimSpace(line)
-		if line != "" {
-			r.history = append(r.history, line)
+		if line == "" {
+			continue
+		}
+
+		exit := r.execute(line)
+		if exit {
+			return nil
 		}
 	}
 }
 
-// addHistory adds a command to history and saves to file.
-func (r *REPL) addHistory(cmd string) {
-	// Don't add duplicates of the last command
-	if len(r.history) > 0 && r.history[len(r.history)-1] == cmd {
-		return
-	}
-	r.history = append(r.history, cmd)
-	r.saveHistory()
-}
-
-// saveHistory writes history to file.
-func (r *REPL) saveHistory() {
-	if r.historyFile == "" {
-		return
-	}
-	// Keep last 1000 entries
-	start := 0
-	if len(r.history) > 1000 {
-		start = len(r.history) - 1000
-	}
-	data := strings.Join(r.history[start:], "\n") + "\n"
-	_ = os.WriteFile(r.historyFile, []byte(data), 0600)
-}
-
-// execute parses and executes a single command. Returns output and whether to exit.
-func (r *REPL) execute(line string) (output string, exit bool, follow bool) {
-	out, exit, follow, _ := r.executeWithPaging(line)
-	return out, exit, follow
-}
-
-// executeWithPaging parses and executes a command, returning paging state.
-func (r *REPL) executeWithPaging(line string) (output string, exit bool, follow bool, paging bool) {
+// execute parses and executes a single command.
+func (r *REPL) execute(line string) (exit bool) {
 	parts := strings.Fields(line)
 	if len(parts) == 0 {
-		// Empty input: if there's an active query, get next batch
-		if r.hasActiveQuery() {
-			out, done := r.fetchPage()
-			return out, false, false, !done
-		}
-		return "", false, false, false
+		return false
 	}
 
 	cmd := parts[0]
@@ -688,13 +184,11 @@ func (r *REPL) executeWithPaging(line string) (output string, exit bool, follow 
 	case "help", "?":
 		r.cmdHelp(&out)
 	case "query":
-		paging = r.cmdQueryPaging(&out, args, false)
+		r.cmdQuery(&out, args, true) // interactive: use pager
 	case "follow":
-		r.cmdQueryPaging(&out, args, true)
-		return out.String(), false, true, false
+		r.cmdFollow(&out, args)
 	case "next":
 		r.cmdNext(&out, args)
-		paging = r.hasActiveQuery()
 	case "reset":
 		r.cmdReset(&out)
 	case "set":
@@ -716,17 +210,321 @@ func (r *REPL) executeWithPaging(line string) (output string, exit bool, follow 
 	case "status":
 		r.cmdStatus(&out)
 	case "exit", "quit":
-		return "", true, false, false
+		return true
 	default:
 		fmt.Fprintf(&out, "Unknown command: %s. Type 'help' for commands.\n", cmd)
 	}
 
-	return out.String(), false, false, paging
+	output := out.String()
+	if output != "" {
+		r.printOutput(output)
+	}
+
+	return false
 }
 
-// fetchPage fetches the next page of results. Returns output and whether results are exhausted.
-func (r *REPL) fetchPage() (output string, done bool) {
+// printOutput prints output, using a pager if it exceeds terminal height.
+func (r *REPL) printOutput(output string) {
+	lines := strings.Count(output, "\n")
+	termHeight := getTerminalHeight()
+
+	// Use pager if output exceeds terminal height
+	if lines >= termHeight {
+		r.pager(output)
+	} else {
+		fmt.Print(output)
+	}
+}
+
+// hasActiveQuery returns true if there's an active query with pending results.
+func (r *REPL) hasActiveQuery() bool {
+	r.queryMu.Lock()
+	defer r.queryMu.Unlock()
+	return r.resultChan != nil
+}
+
+// clearQueryState clears all query state.
+func (r *REPL) clearQueryState() {
+	r.queryMu.Lock()
+	defer r.queryMu.Unlock()
+	r.lastQuery = nil
+	r.resumeToken = nil
+	r.resultChan = nil
+	r.getToken = nil
+}
+
+// cancelQuery cancels any running query.
+func (r *REPL) cancelQuery() {
+	r.queryMu.Lock()
+	cancel := r.queryCancel
+	r.queryCancel = nil
+	r.queryMu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// getResultChan returns the current result channel.
+func (r *REPL) getResultChan() chan recordResult {
+	r.queryMu.Lock()
+	defer r.queryMu.Unlock()
+	return r.resultChan
+}
+
+// setResultChan sets the result channel.
+func (r *REPL) setResultChan(ch chan recordResult) {
+	r.queryMu.Lock()
+	defer r.queryMu.Unlock()
+	r.resultChan = ch
+}
+
+// fetchAndPrint fetches records and prints them.
+func (r *REPL) fetchAndPrint(out *strings.Builder) {
+	if r.pageSize == 0 {
+		r.fetchAndPrintN(out, 0)
+	} else {
+		r.fetchAndPrintN(out, r.pageSize)
+	}
+}
+
+// queryWithPager fetches query results and displays them in an interactive pager.
+// The pager allows fetching more results by pressing 'n'.
+func (r *REPL) queryWithPager() {
+	// Fetch first batch
 	var out strings.Builder
-	r.fetchAndPrint(&out)
-	return out.String(), !r.hasActiveQuery()
+	hasMore := r.fetchBatch(&out)
+
+	output := out.String()
+	if output == "" {
+		fmt.Println("No results.")
+		return
+	}
+
+	// If output fits on screen, just print it
+	lines := strings.Count(output, "\n")
+	termHeight := getTerminalHeight()
+	if lines < termHeight && !hasMore {
+		fmt.Print(output)
+		return
+	}
+
+	// Use pager with fetch-more support
+	var fetchMore func() string
+	if hasMore {
+		fetchMore = func() string {
+			var more strings.Builder
+			if r.fetchBatch(&more) {
+				// Still more available
+			} else {
+				// No more results - return empty to signal end
+				result := more.String()
+				if result == "" || result == "No more results.\n" {
+					return ""
+				}
+				return result
+			}
+			return more.String()
+		}
+	}
+
+	r.pagerWithFetch(output, fetchMore)
+
+	// Clear query state when done with pager
+	r.cancelQuery()
+	r.clearQueryState()
+}
+
+// fetchBatch fetches up to pageSize records into out.
+// Returns true if there may be more results available.
+func (r *REPL) fetchBatch(out *strings.Builder) bool {
+	ch := r.getResultChan()
+	if ch == nil {
+		return false
+	}
+
+	count := r.pageSize
+	if count == 0 {
+		count = 50 // default batch size
+	}
+
+	printed := 0
+	for {
+		if printed >= count {
+			return true // more may be available
+		}
+
+		select {
+		case result, ok := <-ch:
+			if !ok {
+				if printed == 0 {
+					out.WriteString("No more results.\n")
+				}
+				r.setResultChan(nil)
+				return false
+			}
+			if result.err != nil {
+				if errors.Is(result.err, query.ErrInvalidResumeToken) {
+					out.WriteString("Resume token invalid (chunk deleted).\n")
+					r.setResultChan(nil)
+					return false
+				}
+				fmt.Fprintf(out, "Error: %v\n", result.err)
+				return false
+			}
+
+			r.printRecord(out, result.rec)
+			printed++
+		}
+	}
+}
+
+// fetchAndPrintN fetches up to count records and prints them.
+func (r *REPL) fetchAndPrintN(out *strings.Builder, count int) {
+	ch := r.getResultChan()
+	if ch == nil {
+		out.WriteString("No active query.\n")
+		return
+	}
+
+	printed := 0
+	for {
+		if count > 0 && printed >= count {
+			break
+		}
+		result, ok := <-ch
+		if !ok {
+			if printed == 0 {
+				out.WriteString("No more results.\n")
+			} else {
+				fmt.Fprintf(out, "--- %d records (end of results) ---\n", printed)
+			}
+			r.setResultChan(nil)
+			return
+		}
+		if result.err != nil {
+			if errors.Is(result.err, query.ErrInvalidResumeToken) {
+				out.WriteString("Resume token invalid (chunk deleted). Use 'reset' and re-query.\n")
+				r.setResultChan(nil)
+				return
+			}
+			fmt.Fprintf(out, "Error: %v\n", result.err)
+			return
+		}
+
+		r.printRecord(out, result.rec)
+		printed++
+	}
+
+	if printed > 0 {
+		fmt.Fprintf(out, "--- %d records (more available, use 'next') ---\n", printed)
+	}
+}
+
+// printRecord formats and prints a single record.
+func (r *REPL) printRecord(out *strings.Builder, rec chunk.Record) {
+	out.WriteString(r.formatRecord(rec))
+	out.WriteByte('\n')
+}
+
+// Close shuts down the REPL.
+func (r *REPL) Close() {
+	r.cancelQuery()
+	r.cancel()
+}
+
+// simpleREPL is a non-interactive REPL for testing.
+type simpleREPL struct {
+	repl *REPL
+	in   io.Reader
+	out  io.Writer
+}
+
+// NewSimple creates a REPL for testing without readline.
+func NewSimple(client Client, in io.Reader, out io.Writer) *simpleREPL {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	return &simpleREPL{
+		repl: &REPL{
+			client:   client,
+			pageSize: defaultPageSize,
+			ctx:      ctx,
+			cancel:   cancel,
+		},
+		in:  in,
+		out: out,
+	}
+}
+
+// Run executes commands from the input reader.
+func (s *simpleREPL) Run() error {
+	buf := make([]byte, 4096)
+	var lines []string
+
+	for {
+		n, err := s.in.Read(buf)
+		if n > 0 {
+			lines = append(lines, strings.Split(string(buf[:n]), "\n")...)
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		parts := strings.Fields(line)
+		if len(parts) == 0 {
+			continue
+		}
+
+		cmd := parts[0]
+		args := parts[1:]
+
+		var out strings.Builder
+
+		switch cmd {
+		case "help", "?":
+			s.repl.cmdHelp(&out)
+		case "query":
+			s.repl.cmdQuery(&out, args, false) // non-interactive: no pager
+		case "next":
+			s.repl.cmdNext(&out, args)
+		case "reset":
+			s.repl.cmdReset(&out)
+		case "set":
+			s.repl.cmdSet(&out, args)
+		case "stores":
+			s.repl.cmdStores(&out)
+		case "chunks":
+			s.repl.cmdChunks(&out)
+		case "chunk":
+			s.repl.cmdChunk(&out, args)
+		case "indexes":
+			s.repl.cmdIndexes(&out, args)
+		case "analyze":
+			s.repl.cmdAnalyze(&out, args)
+		case "explain":
+			s.repl.cmdExplain(&out, args)
+		case "stats":
+			s.repl.cmdStats(&out)
+		case "status":
+			s.repl.cmdStatus(&out)
+		case "exit", "quit":
+			return nil
+		default:
+			fmt.Fprintf(&out, "Unknown command: %s. Type 'help' for commands.\n", cmd)
+		}
+
+		s.out.Write([]byte(out.String()))
+	}
+
+	return nil
 }
