@@ -48,6 +48,34 @@ func parseQueryArgs(args []string) (query.Query, string) {
 				}
 				q.End = t
 				continue
+			case "source_start":
+				t, err := parseTime(v)
+				if err != nil {
+					return q, fmt.Sprintf("Invalid source_start time: %v", err)
+				}
+				q.SourceStart = t
+				continue
+			case "source_end":
+				t, err := parseTime(v)
+				if err != nil {
+					return q, fmt.Sprintf("Invalid source_end time: %v", err)
+				}
+				q.SourceEnd = t
+				continue
+			case "ingest_start":
+				t, err := parseTime(v)
+				if err != nil {
+					return q, fmt.Sprintf("Invalid ingest_start time: %v", err)
+				}
+				q.IngestStart = t
+				continue
+			case "ingest_end":
+				t, err := parseTime(v)
+				if err != nil {
+					return q, fmt.Sprintf("Invalid ingest_end time: %v", err)
+				}
+				q.IngestEnd = t
+				continue
 			case "limit":
 				var n int
 				if _, err := fmt.Sscanf(v, "%d", &n); err != nil {

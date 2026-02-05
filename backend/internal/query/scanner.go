@@ -5,6 +5,7 @@ import (
 	"iter"
 	"sort"
 	"strings"
+	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
@@ -810,5 +811,36 @@ func notTokenFilter(tokens []string) recordFilter {
 func notKeyValueFilter(filters []KeyValueFilter) recordFilter {
 	return func(rec chunk.Record) bool {
 		return !matchesKeyValue(rec.Attrs, rec.Raw, filters)
+	}
+}
+
+// sourceTimeFilter returns a filter that checks SourceTS bounds.
+// Records with zero SourceTS are excluded if any bound is set.
+func sourceTimeFilter(start, end time.Time) recordFilter {
+	return func(rec chunk.Record) bool {
+		// If SourceTS is zero, we can't filter by it - exclude if bounds are set
+		if rec.SourceTS.IsZero() {
+			return false
+		}
+		if !start.IsZero() && rec.SourceTS.Before(start) {
+			return false
+		}
+		if !end.IsZero() && !rec.SourceTS.Before(end) {
+			return false
+		}
+		return true
+	}
+}
+
+// ingestTimeFilter returns a filter that checks IngestTS bounds.
+func ingestTimeFilter(start, end time.Time) recordFilter {
+	return func(rec chunk.Record) bool {
+		if !start.IsZero() && rec.IngestTS.Before(start) {
+			return false
+		}
+		if !end.IsZero() && !rec.IngestTS.Before(end) {
+			return false
+		}
+		return true
 	}
 }
