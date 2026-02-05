@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"cmp"
 	"context"
 	"iter"
 
@@ -14,9 +15,7 @@ func (o *Orchestrator) Search(ctx context.Context, key string, q query.Query, re
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
-	if key == "" {
-		key = "default"
-	}
+	key = cmp.Or(key, "default")
 
 	qe, ok := o.queries[key]
 	if !ok {
@@ -35,9 +34,7 @@ func (o *Orchestrator) SearchThenFollow(ctx context.Context, key string, q query
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
-	if key == "" {
-		key = "default"
-	}
+	key = cmp.Or(key, "default")
 
 	qe, ok := o.queries[key]
 	if !ok {
@@ -56,9 +53,7 @@ func (o *Orchestrator) SearchWithContext(ctx context.Context, key string, q quer
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
-	if key == "" {
-		key = "default"
-	}
+	key = cmp.Or(key, "default")
 
 	qe, ok := o.queries[key]
 	if !ok {
@@ -77,9 +72,7 @@ func (o *Orchestrator) Explain(ctx context.Context, key string, q query.Query) (
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
-	if key == "" {
-		key = "default"
-	}
+	key = cmp.Or(key, "default")
 
 	qe, ok := o.queries[key]
 	if !ok {

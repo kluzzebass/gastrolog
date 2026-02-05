@@ -545,9 +545,7 @@ func (e *Engine) SearchWithContext(ctx context.Context, q Query) (iter.Seq2[chun
 		})
 
 		count := 0
-		for i := 0; i < len(allChunks); i++ {
-			meta := allChunks[i]
-
+		for _, meta := range allChunks {
 			if err := ctx.Err(); err != nil {
 				yield(chunk.Record{}, err)
 				return

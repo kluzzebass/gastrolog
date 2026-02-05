@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"cmp"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
 	"gastrolog/internal/query"
@@ -57,10 +58,7 @@ func (o *Orchestrator) UnregisterReceiver(id string) {
 func (o *Orchestrator) ChunkManager(key string) chunk.ChunkManager {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	if key == "" {
-		key = "default"
-	}
-	return o.chunks[key]
+	return o.chunks[cmp.Or(key, "default")]
 }
 
 // ChunkManagers returns all registered chunk manager keys.
@@ -79,10 +77,7 @@ func (o *Orchestrator) ChunkManagers() []string {
 func (o *Orchestrator) IndexManager(key string) index.IndexManager {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	if key == "" {
-		key = "default"
-	}
-	return o.indexes[key]
+	return o.indexes[cmp.Or(key, "default")]
 }
 
 // IndexManagers returns all registered index manager keys.
@@ -136,10 +131,7 @@ func (o *Orchestrator) ListReceivers() []string {
 func (o *Orchestrator) QueryEngine(key string) *query.Engine {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	if key == "" {
-		key = "default"
-	}
-	return o.queries[key]
+	return o.queries[cmp.Or(key, "default")]
 }
 
 // MultiStoreQueryEngine returns a query engine that searches across all stores.

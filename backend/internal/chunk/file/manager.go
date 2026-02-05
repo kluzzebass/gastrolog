@@ -377,13 +377,9 @@ func (m *Manager) loadExisting() error {
 	// If multiple unsealed chunks, seal all but the newest (by ChunkID, which is time-ordered).
 	if len(unsealedIDs) > 1 {
 		// Sort by ChunkID (UUID v7, time-ordered) - newest last.
-		for i := 0; i < len(unsealedIDs)-1; i++ {
-			for j := i + 1; j < len(unsealedIDs); j++ {
-				if unsealedIDs[i].String() > unsealedIDs[j].String() {
-					unsealedIDs[i], unsealedIDs[j] = unsealedIDs[j], unsealedIDs[i]
-				}
-			}
-		}
+		slices.SortFunc(unsealedIDs, func(a, b chunk.ChunkID) int {
+			return cmp.Compare(a.String(), b.String())
+		})
 
 		// Seal all but the last (newest).
 		for _, id := range unsealedIDs[:len(unsealedIDs)-1] {

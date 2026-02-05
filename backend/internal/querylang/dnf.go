@@ -1,5 +1,7 @@
 package querylang
 
+import "slices"
+
 // DNF (Disjunctive Normal Form) conversion for boolean expressions.
 //
 // DNF is an OR of ANDs: (A AND B) OR (C AND D) OR ...
@@ -161,8 +163,8 @@ func combineLists(a, b []Conjunction) []Conjunction {
 // mergeConjunctions merges two conjunctions into one.
 func mergeConjunctions(a, b Conjunction) Conjunction {
 	return Conjunction{
-		Positive: append(append([]*PredicateExpr{}, a.Positive...), b.Positive...),
-		Negative: append(append([]*PredicateExpr{}, a.Negative...), b.Negative...),
+		Positive: slices.Concat(a.Positive, b.Positive),
+		Negative: slices.Concat(a.Negative, b.Negative),
 	}
 }
 

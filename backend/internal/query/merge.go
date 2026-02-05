@@ -2,6 +2,7 @@ package query
 
 import (
 	"container/heap"
+	"errors"
 
 	"gastrolog/internal/chunk"
 )
@@ -102,7 +103,7 @@ func mergeCursors(entries []*cursorEntry, reverse bool, advance func(*cursorEntr
 		for _, e := range entries {
 			rec, ref, err := advance(e)
 			if err != nil {
-				if err == chunk.ErrNoMoreRecords {
+				if errors.Is(err, chunk.ErrNoMoreRecords) {
 					e.cursor.Close()
 					continue
 				}
@@ -126,7 +127,7 @@ func mergeCursors(entries []*cursorEntry, reverse bool, advance func(*cursorEntr
 			// Advance this cursor
 			rec, ref, err := advance(e)
 			if err != nil {
-				if err == chunk.ErrNoMoreRecords {
+				if errors.Is(err, chunk.ErrNoMoreRecords) {
 					// Remove from active cursors
 					e.cursor.Close()
 					e.cursor = nil
