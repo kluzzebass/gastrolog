@@ -340,6 +340,31 @@ Text tokenization utilities used for indexing and query-time matching:
 - `Lowercase` -- fast ASCII lowercase for single byte
 - `ToLowerASCII` -- in-place ASCII lowercasing for byte slices
 
+### Server package (`backend/internal/server/`)
+
+Connect RPC server exposing orchestrator functionality via gRPC/HTTP:
+
+- **Server** -- main server struct, creates HTTP handler with h2c for HTTP/2 without TLS
+- **QueryServer** -- implements QueryService (Search, Follow, Explain)
+- **StoreServer** -- implements StoreService (ListStores, ListChunks, GetChunk, GetIndexes, AnalyzeChunk, GetStats)
+- **ConfigServer** -- implements ConfigService (GetConfig, UpdateStoreRoute, etc.)
+- **LifecycleServer** -- implements LifecycleService (Health, Shutdown)
+
+**Server methods:**
+- `Serve(listener)` -- serve on any net.Listener
+- `ServeUnix(path)` -- serve on Unix socket
+- `ServeTCP(addr)` -- serve on TCP address
+- `Handler()` -- returns http.Handler for embedding/testing
+- `Stop(ctx)` -- graceful shutdown
+
+**Proto definitions** in `backend/api/proto/gastrolog/v1/`:
+- `query.proto` -- Query, Record, ChunkPlan messages; streaming Search/Follow RPCs
+- `store.proto` -- StoreInfo, ChunkMeta, IndexInfo messages
+- `config.proto` -- configuration management RPCs
+- `lifecycle.proto` -- Health and Shutdown RPCs
+
+Generated code in `backend/api/gen/gastrolog/v1/`.
+
 ### REPL package (`backend/internal/repl/`)
 
 Interactive command-line interface for querying a running GastroLog system:
@@ -347,6 +372,31 @@ Interactive command-line interface for querying a running GastroLog system:
 - Built on bubbletea for terminal UI with history, tab completion
 - Observes system via public APIs only (no lifecycle control)
 - Dynamic status prompt showing current store and active query: `[store|query] > `
+
+**Client abstraction:**
+
+The REPL uses a `Client` interface to abstract the backend, enabling both local and remote operation:
+
+- **Client** interface -- `Search`, `Explain`, `ListStores`, `ChunkManager`, `IndexManager`, `Analyzer`, `IsRunning`
+- **DirectClient** -- wraps orchestrator directly (bypasses gRPC, used for testing)
+- **GRPCClient** -- makes Connect RPC calls to a remote server
+- **EmbeddedClient** -- uses in-memory HTTP transport to talk gRPC to an in-process server
+
+```go
+// Remote connection
+client := repl.NewGRPCClient("http://localhost:8080")
+
+// Unix socket connection
+client := repl.NewGRPCClientUnix("/var/run/gastrolog.sock")
+
+// Embedded mode (gRPC over in-memory transport)
+client := repl.NewEmbeddedClient(orch)
+
+// Direct mode (no gRPC, for testing)
+client := repl.NewDirectClient(orch)
+```
+
+The main binary uses `NewEmbeddedClient` in REPL mode so the REPL always talks gRPC internally, minimizing differences between standalone and client-server operation.
 
 **Commands:**
 - `query [filters...]` -- execute query with filters
@@ -522,6 +572,23 @@ backend/
       cmd_indexes.go            Indexes command
       cmd_analyze.go            Analyze command
       cmd_stats.go              Stats, status commands
+      client.go                 Client interface definition
+      client_direct.go          DirectClient wrapping orchestrator
+      client_grpc.go            GRPCClient for remote connections
+      client_embedded.go        EmbeddedClient with in-memory transport
+    server/
+      server.go                 Main server, h2c handler, lifecycle
+      query.go                  QueryServer (Search, Follow, Explain)
+      store.go                  StoreServer (ListStores, ListChunks, etc.)
+      config.go                 ConfigServer
+      lifecycle.go              LifecycleServer (Health, Shutdown)
+  api/
+    proto/gastrolog/v1/         Proto definitions
+      query.proto               Query service and messages
+      store.proto               Store service and messages
+      config.proto              Config service and messages
+      lifecycle.proto           Lifecycle service and messages
+    gen/gastrolog/v1/           Generated Go code
   cmd/
     gastrolog/
       main.go                   Main entry point

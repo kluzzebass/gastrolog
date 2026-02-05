@@ -9,10 +9,12 @@ This document outlines planned features and improvements. Items are roughly grou
 - `gastrolog repl [address]` - connect to server via socket
 - `gastrolog repl --embedded` - embedded mode for quick local debugging (no server needed)
 
-### Connect RPC API
-- gRPC over Unix socket for local REPL and CLI tools
-- Connect protocol for browser compatibility (future web UI)
-- Service definitions: query, config, lifecycle, streaming
+### Connect RPC API ✓
+- ✓ gRPC over Unix socket for local REPL and CLI tools
+- ✓ Connect protocol for browser compatibility (future web UI)
+- ✓ Service definitions: QueryService, StoreService, ConfigService, LifecycleService
+- ✓ REPL client abstraction (DirectClient, GRPCClient, EmbeddedClient)
+- ✓ Embedded mode with in-memory HTTP transport
 
 ### Config Store
 - Replace file-based config with SQLite
@@ -178,3 +180,4 @@ For reference, here's what's already implemented:
 - **REPL**: 11 commands (query, follow, explain, chunks, indexes, analyze, etc.)
 - **Receivers**: Chatterbox (test receiver with 6 log formats)
 - **Config**: File-based with runtime reconfiguration support
+- **Connect RPC**: Server layer with 4 services, REPL client abstraction, embedded mode
