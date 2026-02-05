@@ -141,3 +141,9 @@ func (o *Orchestrator) QueryEngine(key string) *query.Engine {
 	}
 	return o.queries[key]
 }
+
+// MultiStoreQueryEngine returns a query engine that searches across all stores.
+// Store predicates in queries (e.g., "store=prod") filter which stores are searched.
+func (o *Orchestrator) MultiStoreQueryEngine() *query.Engine {
+	return query.NewWithRegistry(o, o.logger)
+}

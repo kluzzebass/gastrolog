@@ -119,6 +119,24 @@ func (q Query) TimeBounds() (lower, upper time.Time) {
 	return q.Start, q.End
 }
 
+// WithStorePredicate returns a copy of the query with a store=X predicate added.
+// The predicate is ANDed with any existing BoolExpr.
+func (q Query) WithStorePredicate(storeID string) Query {
+	storePred := &querylang.PredicateExpr{
+		Kind:  querylang.PredKV,
+		Key:   "store",
+		Value: storeID,
+	}
+
+	result := q
+	if q.BoolExpr == nil {
+		result.BoolExpr = storePred
+	} else {
+		result.BoolExpr = querylang.FlattenAnd(q.BoolExpr, storePred)
+	}
+	return result
+}
+
 // MultiStorePosition represents a position within a specific store's chunk.
 type MultiStorePosition struct {
 	StoreID  string

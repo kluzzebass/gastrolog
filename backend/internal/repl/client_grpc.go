@@ -70,10 +70,14 @@ func NewGRPCClientWithHTTP(httpClient connect.HTTPClient, baseURL string) *GRPCC
 }
 
 func (c *GRPCClient) Search(ctx context.Context, store string, q query.Query, resume *query.ResumeToken) (iter.Seq2[chunk.Record, error], func() *query.ResumeToken, error) {
+	// If a specific store is requested, add it as a query predicate.
+	if store != "" && store != "default" {
+		q = q.WithStorePredicate(store)
+	}
+
 	protoQuery := queryToProto(q)
 
 	req := connect.NewRequest(&apiv1.SearchRequest{
-		Store:       store,
 		Query:       protoQuery,
 		ResumeToken: resumeTokenToBytes(resume),
 	})
@@ -108,10 +112,14 @@ func (c *GRPCClient) Search(ctx context.Context, store string, q query.Query, re
 }
 
 func (c *GRPCClient) Explain(ctx context.Context, store string, q query.Query) (*query.QueryPlan, error) {
+	// If a specific store is requested, add it as a query predicate.
+	if store != "" && store != "default" {
+		q = q.WithStorePredicate(store)
+	}
+
 	protoQuery := queryToProto(q)
 
 	req := connect.NewRequest(&apiv1.ExplainRequest{
-		Store: store,
 		Query: protoQuery,
 	})
 

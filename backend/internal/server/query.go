@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
@@ -27,27 +28,24 @@ func NewQueryServer(orch *orchestrator.Orchestrator) *QueryServer {
 }
 
 // Search executes a query and streams matching records.
+// Searches across all stores; use store=X in query expression to filter.
 func (s *QueryServer) Search(
 	ctx context.Context,
 	req *connect.Request[apiv1.SearchRequest],
 	stream *connect.ServerStream[apiv1.SearchResponse],
 ) error {
-	store := req.Msg.Store
-	if store == "" {
-		store = "default"
-	}
-
-	eng := s.orch.QueryEngine(store)
-	if eng == nil {
-		return connect.NewError(connect.CodeNotFound, errors.New("store not found"))
-	}
+	eng := s.orch.MultiStoreQueryEngine()
 
 	q := protoToQuery(req.Msg.Query)
 
 	// Parse resume token from request
 	var resume *query.ResumeToken
 	if len(req.Msg.ResumeToken) > 0 {
-		resume = protoToResumeToken(req.Msg.ResumeToken)
+		var err error
+		resume, err = protoToResumeToken(req.Msg.ResumeToken)
+		if err != nil {
+			return connect.NewError(connect.CodeInvalidArgument, err)
+		}
 	}
 
 	iter, getToken := eng.Search(ctx, q, resume)
@@ -96,20 +94,13 @@ func (s *QueryServer) Search(
 }
 
 // Follow executes a query and streams matching records, continuing with new arrivals.
+// Note: Follow currently requires a single-store query (use store=X in query expression).
 func (s *QueryServer) Follow(
 	ctx context.Context,
 	req *connect.Request[apiv1.FollowRequest],
 	stream *connect.ServerStream[apiv1.FollowResponse],
 ) error {
-	store := req.Msg.Store
-	if store == "" {
-		store = "default"
-	}
-
-	eng := s.orch.QueryEngine(store)
-	if eng == nil {
-		return connect.NewError(connect.CodeNotFound, errors.New("store not found"))
-	}
+	eng := s.orch.MultiStoreQueryEngine()
 
 	q := protoToQuery(req.Msg.Query)
 
@@ -148,19 +139,12 @@ func (s *QueryServer) Follow(
 }
 
 // Explain returns the query execution plan without executing.
+// Explains the plan for all stores; use store=X in query expression to filter.
 func (s *QueryServer) Explain(
 	ctx context.Context,
 	req *connect.Request[apiv1.ExplainRequest],
 ) (*connect.Response[apiv1.ExplainResponse], error) {
-	store := req.Msg.Store
-	if store == "" {
-		store = "default"
-	}
-
-	eng := s.orch.QueryEngine(store)
-	if eng == nil {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
-	}
+	eng := s.orch.MultiStoreQueryEngine()
 
 	q := protoToQuery(req.Msg.Query)
 
@@ -238,39 +222,58 @@ func recordToProto(rec chunk.Record) *apiv1.Record {
 }
 
 // protoToResumeToken converts a proto resume token to the internal type.
-// Resume token format: 16-byte chunk ID + 8-byte position (little-endian).
-func protoToResumeToken(data []byte) *query.ResumeToken {
-	if len(data) != 24 {
-		return nil
+// Uses protobuf encoding for the ResumeToken message.
+func protoToResumeToken(data []byte) (*query.ResumeToken, error) {
+	if len(data) == 0 {
+		return nil, nil
 	}
-	var chunkID chunk.ChunkID
-	copy(chunkID[:], data[:16])
-	pos := uint64(data[16]) | uint64(data[17])<<8 | uint64(data[18])<<16 | uint64(data[19])<<24 |
-		uint64(data[20])<<32 | uint64(data[21])<<40 | uint64(data[22])<<48 | uint64(data[23])<<56
-	return &query.ResumeToken{
-		Next: chunk.RecordRef{
-			ChunkID: chunkID,
-			Pos:     pos,
-		},
+
+	// Decode proto message
+	var protoToken apiv1.ResumeToken
+	if err := proto.Unmarshal(data, &protoToken); err != nil {
+		return nil, err
 	}
+
+	// Convert to internal type
+	token := &query.ResumeToken{
+		Positions: make([]query.MultiStorePosition, len(protoToken.Positions)),
+	}
+
+	for i, pos := range protoToken.Positions {
+		var chunkID chunk.ChunkID
+		copy(chunkID[:], pos.ChunkId)
+		token.Positions[i] = query.MultiStorePosition{
+			StoreID:  pos.StoreId,
+			ChunkID:  chunkID,
+			Position: pos.Position,
+		}
+	}
+
+	return token, nil
 }
 
 // resumeTokenToProto converts an internal resume token to proto bytes.
-// Resume token format: 16-byte chunk ID + 8-byte position (little-endian).
+// Uses protobuf encoding for the ResumeToken message.
 func resumeTokenToProto(token *query.ResumeToken) []byte {
-	if token == nil {
+	if token == nil || len(token.Positions) == 0 {
 		return nil
 	}
-	data := make([]byte, 24)
-	copy(data[:16], token.Next.ChunkID[:])
-	pos := token.Next.Pos
-	data[16] = byte(pos)
-	data[17] = byte(pos >> 8)
-	data[18] = byte(pos >> 16)
-	data[19] = byte(pos >> 24)
-	data[20] = byte(pos >> 32)
-	data[21] = byte(pos >> 40)
-	data[22] = byte(pos >> 48)
-	data[23] = byte(pos >> 56)
+
+	protoToken := &apiv1.ResumeToken{
+		Positions: make([]*apiv1.StorePosition, len(token.Positions)),
+	}
+
+	for i, pos := range token.Positions {
+		protoToken.Positions[i] = &apiv1.StorePosition{
+			StoreId:  pos.StoreID,
+			ChunkId:  pos.ChunkID[:],
+			Position: pos.Position,
+		}
+	}
+
+	data, err := proto.Marshal(protoToken)
+	if err != nil {
+		return nil // Should not happen with valid data
+	}
 	return data
 }
