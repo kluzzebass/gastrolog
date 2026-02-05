@@ -504,6 +504,7 @@ func TestSearchContextCancelledMidIteration(t *testing.T) {
 	eng := setup(t, batch1, batch2)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	var results []chunk.Record
 	var gotErr error
