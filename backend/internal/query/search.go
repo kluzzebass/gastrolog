@@ -341,18 +341,24 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 // This is useful for "find error, then show everything after" use cases.
 // The source and token filters only apply to finding the first match.
 // Time bounds and limit still apply to all yielded records.
+//
+// For multi-store engines, this searches across all stores (or stores matching
+// store=X predicates in the query) and merge-sorts results by IngestTS.
 func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeToken) (iter.Seq2[chunk.Record, error], func() *ResumeToken) {
-	// Multi-store mode not yet supported for SearchThenFollow.
-	if e.isMultiStore() {
-		return func(yield func(chunk.Record, error) bool) {
-			yield(chunk.Record{}, ErrMultiStoreNotSupported)
-		}, func() *ResumeToken { return nil }
-	}
-
 	// Normalize query to ensure BoolExpr is set (converts legacy Tokens/KV if needed).
 	q = q.Normalize()
 
-	var nextRef *chunk.RecordRef
+	// Extract store predicates and get remaining query expression.
+	allStores := e.listStores()
+	selectedStores, remainingExpr := ExtractStoreFilter(q.BoolExpr, allStores)
+	if selectedStores == nil {
+		selectedStores = allStores
+	}
+
+	// Update query to use remaining expression (without store predicates).
+	q.BoolExpr = remainingExpr
+
+	var lastRefs []MultiStorePosition
 	completed := false
 
 	seq := func(yield func(chunk.Record, error) bool) {
@@ -361,139 +367,290 @@ func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeTo
 			return
 		}
 
-		metas, err := e.chunks.List()
-		if err != nil {
-			yield(chunk.Record{}, err)
+		// Collect all chunks from selected stores with time overlap.
+		type storeChunk struct {
+			storeID string
+			meta    chunk.ChunkMeta
+		}
+		var allChunks []storeChunk
+
+		for _, storeID := range selectedStores {
+			cm, _ := e.getStoreManagers(storeID)
+			if cm == nil {
+				continue
+			}
+
+			metas, err := cm.List()
+			if err != nil {
+				yield(chunk.Record{}, err)
+				return
+			}
+
+			candidates := e.selectChunks(metas, q)
+			for _, meta := range candidates {
+				allChunks = append(allChunks, storeChunk{storeID: storeID, meta: meta})
+			}
+		}
+
+		if len(allChunks) == 0 {
+			completed = true
 			return
 		}
 
-		candidates := e.selectChunks(metas, q)
-
-		startChunkIdx := 0
-		if resume != nil {
-			found := false
-			for i, meta := range candidates {
-				if meta.ID == resume.Next.ChunkID {
-					startChunkIdx = i
-					found = true
-					break
-				}
-			}
-			if !found {
-				yield(chunk.Record{}, ErrInvalidResumeToken)
-				return
-			}
-		}
-
-		// Create a follow query that removes all filters (for context window).
+		// Create a follow query that removes all filters.
 		followQuery := q
 		followQuery.BoolExpr = nil
 
-		count := 0
-		inFollowMode := false
-		var followFromRef *chunk.RecordRef
+		// Track current position for ALL chunks (for resume token).
+		type chunkKey struct {
+			storeID string
+			chunkID chunk.ChunkID
+		}
+		chunkPositions := make(map[chunkKey]uint64)
 
-		// Phase 1: Find the first match using the filtered query.
-		for i := startChunkIdx; i < len(candidates) && !inFollowMode; i++ {
-			meta := candidates[i]
+		// Helper to build resume token from current positions.
+		buildLastRefs := func() {
+			lastRefs = nil
+			for key, pos := range chunkPositions {
+				lastRefs = append(lastRefs, MultiStorePosition{
+					StoreID:  key.storeID,
+					ChunkID:  key.chunkID,
+					Position: pos,
+				})
+			}
+		}
 
-			if err := ctx.Err(); err != nil {
+		// Track active cursors for cleanup.
+		type activeScanner struct {
+			storeID string
+			chunkID chunk.ChunkID
+			iter    func() (recordWithRef, error, bool)
+			stop    func()
+		}
+		var activeScanners []activeScanner
+		defer func() {
+			for _, s := range activeScanners {
+				if s.stop != nil {
+					s.stop()
+				}
+			}
+		}()
+
+		// Find scanner by storeID and chunkID.
+		findScanner := func(storeID string, chunkID chunk.ChunkID) *activeScanner {
+			for i := range activeScanners {
+				if activeScanners[i].storeID == storeID && activeScanners[i].chunkID == chunkID {
+					return &activeScanners[i]
+				}
+			}
+			return nil
+		}
+
+		// Initialize heap with first record from each chunk (using filtered query).
+		var h heap.Interface
+		if q.Reverse() {
+			rh := make(mergeHeapReverse, 0, len(allChunks))
+			h = &rh
+		} else {
+			fh := make(mergeHeap, 0, len(allChunks))
+			h = &fh
+		}
+
+		// Open iterators for each chunk and prime the heap.
+		for _, sc := range allChunks {
+			iterSeq := e.searchChunkWithRef(ctx, q, sc.storeID, sc.meta, nil)
+			next, stop := iter.Pull2(iterSeq)
+
+			rr, err, ok := next()
+			if !ok {
+				stop()
+				continue
+			}
+			if err != nil {
+				stop()
 				yield(chunk.Record{}, err)
 				return
 			}
 
-			var startPos *uint64
-			if resume != nil && i == startChunkIdx {
-				startPos = &resume.Next.Pos
+			entry := &cursorEntry{
+				storeID: sc.storeID,
+				chunkID: sc.meta.ID,
+				rec:     rr.Record,
+				ref:     rr.Ref,
 			}
+			heap.Push(h, entry)
 
-			for rr, err := range e.searchChunkWithRef(ctx, q, "", meta, startPos) {
+			activeScanners = append(activeScanners, activeScanner{
+				storeID: sc.storeID,
+				chunkID: sc.meta.ID,
+				iter:    next,
+				stop:    stop,
+			})
+		}
+
+		if h.Len() == 0 {
+			// No matches found.
+			completed = true
+			return
+		}
+
+		// Phase 1: Pop the first match from heap (oldest/newest depending on direction).
+		firstMatch := heap.Pop(h).(*cursorEntry)
+		key := chunkKey{storeID: firstMatch.storeID, chunkID: firstMatch.chunkID}
+		chunkPositions[key] = firstMatch.ref.Pos
+
+		if !yield(firstMatch.rec, nil) {
+			buildLastRefs()
+			return
+		}
+
+		count := 1
+		if q.Limit > 0 && count >= q.Limit {
+			buildLastRefs()
+			return
+		}
+
+		// Phase 2: Follow mode - switch all scanners to unfiltered query and continue merge.
+		// Close all existing scanners.
+		for _, s := range activeScanners {
+			if s.stop != nil {
+				s.stop()
+			}
+		}
+		activeScanners = nil
+
+		// Clear heap.
+		for h.Len() > 0 {
+			heap.Pop(h)
+		}
+
+		// For follow mode, we need to continue from the first match's position.
+		// - For the chunk containing the first match: start from position+1
+		// - For other chunks: they need to start from a position with IngestTS > firstMatch.IngestTS
+		//   We use time-based filtering by adjusting followQuery.Start
+		firstMatchTS := firstMatch.rec.IngestTS
+
+		// Reopen iterators for ALL chunks with follow query (no filters), starting appropriately.
+		for _, sc := range allChunks {
+			key := chunkKey{storeID: sc.storeID, chunkID: sc.meta.ID}
+
+			var startPos *uint64
+			if key.storeID == firstMatch.storeID && key.chunkID == firstMatch.chunkID {
+				// This chunk had the first match - start from the match position.
+				// searchChunkWithRef will skip this position (since startPos means "already returned"),
+				// so we pass the match position itself, not position+1.
+				startPos = &firstMatch.ref.Pos
+			}
+			// For other chunks, we'll rely on the heap to filter by timestamp.
+			// All chunks are iterated from start, but only records after firstMatchTS will be yielded.
+
+			iterSeq := e.searchChunkWithRef(ctx, followQuery, sc.storeID, sc.meta, startPos)
+			next, stop := iter.Pull2(iterSeq)
+
+			// Skip records until we find one with IngestTS > firstMatchTS (for non-match chunks).
+			var rr recordWithRef
+			var err error
+			var ok bool
+			for {
+				rr, err, ok = next()
+				if !ok {
+					stop()
+					chunkPositions[key] = positionExhausted
+					break
+				}
 				if err != nil {
-					nextRef = &rr.Ref
+					stop()
+					buildLastRefs()
 					yield(chunk.Record{}, err)
 					return
 				}
-
-				nextRef = &rr.Ref
-
-				if !yield(rr.Record, nil) {
-					return
+				// For the first-match chunk, we already skipped past the match.
+				// For other chunks, skip records at or before firstMatchTS.
+				if key.storeID == firstMatch.storeID && key.chunkID == firstMatch.chunkID {
+					break // Don't skip - we're already positioned correctly.
 				}
-
-				count++
-				if q.Limit > 0 && count >= q.Limit {
-					return
+				if rr.Record.IngestTS.After(firstMatchTS) {
+					break // Found a record after the first match.
 				}
-
-				// Found first match - switch to follow mode.
-				inFollowMode = true
-				followFromRef = &rr.Ref
-				break
+				// Continue to next record.
 			}
-		}
 
-		if !inFollowMode {
-			// No match found.
-			completed = true
-			return
-		}
-
-		// Phase 2: Follow mode - continue from where we left off without filters.
-		// Find which chunk contains the follow point.
-		followChunkIdx := -1
-		for i, meta := range candidates {
-			if meta.ID == followFromRef.ChunkID {
-				followChunkIdx = i
-				break
+			if !ok {
+				continue
 			}
-		}
-		if followChunkIdx < 0 {
-			completed = true
-			return
+
+			entry := &cursorEntry{
+				storeID: sc.storeID,
+				chunkID: sc.meta.ID,
+				rec:     rr.Record,
+				ref:     rr.Ref,
+			}
+			heap.Push(h, entry)
+
+			activeScanners = append(activeScanners, activeScanner{
+				storeID: sc.storeID,
+				chunkID: sc.meta.ID,
+				iter:    next,
+				stop:    stop,
+			})
 		}
 
-		// Continue from the follow position.
-		for i := followChunkIdx; i < len(candidates); i++ {
-			meta := candidates[i]
-
+		// Merge loop for follow phase.
+		for h.Len() > 0 {
 			if err := ctx.Err(); err != nil {
+				buildLastRefs()
 				yield(chunk.Record{}, err)
 				return
 			}
 
-			var startPos *uint64
-			if i == followChunkIdx {
-				startPos = &followFromRef.Pos
+			entry := heap.Pop(h).(*cursorEntry)
+			key := chunkKey{storeID: entry.storeID, chunkID: entry.chunkID}
+			chunkPositions[key] = entry.ref.Pos
+
+			if !yield(entry.rec, nil) {
+				buildLastRefs()
+				return
 			}
 
-			for rr, err := range e.searchChunkWithRef(ctx, followQuery, "", meta, startPos) {
-				if err != nil {
-					nextRef = &rr.Ref
-					yield(chunk.Record{}, err)
-					return
-				}
-
-				nextRef = &rr.Ref
-
-				if !yield(rr.Record, nil) {
-					return
-				}
-
-				count++
-				if q.Limit > 0 && count >= q.Limit {
-					return
-				}
+			count++
+			if q.Limit > 0 && count >= q.Limit {
+				buildLastRefs()
+				return
 			}
+
+			// Advance this scanner.
+			scanner := findScanner(entry.storeID, entry.chunkID)
+			if scanner == nil || scanner.iter == nil {
+				continue
+			}
+
+			rr, err, ok := scanner.iter()
+			if !ok {
+				scanner.stop()
+				scanner.iter = nil
+				scanner.stop = nil
+				chunkPositions[key] = positionExhausted
+				continue
+			}
+			if err != nil {
+				buildLastRefs()
+				yield(chunk.Record{}, err)
+				return
+			}
+
+			entry.rec = rr.Record
+			entry.ref = rr.Ref
+			heap.Push(h, entry)
 		}
 
 		completed = true
 	}
 
 	nextToken := func() *ResumeToken {
-		if completed || nextRef == nil {
+		if completed || len(lastRefs) == 0 {
 			return nil
 		}
-		return &ResumeToken{Next: *nextRef}
+		return &ResumeToken{Positions: lastRefs}
 	}
 
 	return seq, nextToken
