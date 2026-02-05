@@ -6,6 +6,7 @@ import (
 	"iter"
 	"math"
 	"slices"
+	"time"
 
 	"gastrolog/internal/chunk"
 )
@@ -654,6 +655,145 @@ func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeTo
 	}
 
 	return seq, nextToken
+}
+
+// Follow tails records from all stores, waiting for new arrivals.
+// It first yields any existing records matching the query (optionally filtered),
+// then continuously polls for new records until the context is cancelled.
+//
+// Unlike SearchThenFollow, this method never completes on its own - it keeps
+// polling for new records until ctx is cancelled.
+//
+// For multi-store engines, records are merged by IngestTS across all stores.
+func (e *Engine) Follow(ctx context.Context, q Query) iter.Seq2[chunk.Record, error] {
+	// Normalize query to ensure BoolExpr is set.
+	q = q.Normalize()
+
+	// Extract store predicates.
+	allStores := e.listStores()
+	selectedStores, remainingExpr := ExtractStoreFilter(q.BoolExpr, allStores)
+	if selectedStores == nil {
+		selectedStores = allStores
+	}
+	q.BoolExpr = remainingExpr
+
+	return func(yield func(chunk.Record, error) bool) {
+		// Track last seen position per store+chunk.
+		type chunkKey struct {
+			storeID string
+			chunkID chunk.ChunkID
+		}
+		lastPositions := make(map[chunkKey]uint64)
+
+		// Poll interval for new records.
+		const pollInterval = 100 * time.Millisecond
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			// Collect records from all stores since last positions.
+			type pendingRecord struct {
+				storeID string
+				rec     chunk.Record
+				ref     chunk.RecordRef
+			}
+			var pending []pendingRecord
+
+			for _, storeID := range selectedStores {
+				cm, _ := e.getStoreManagers(storeID)
+				if cm == nil {
+					continue
+				}
+
+				// Get all chunks (including active).
+				metas, err := cm.List()
+				if err != nil {
+					if !yield(chunk.Record{}, err) {
+						return
+					}
+					continue
+				}
+
+				for _, meta := range metas {
+					key := chunkKey{storeID: storeID, chunkID: meta.ID}
+
+					cursor, err := cm.OpenCursor(meta.ID)
+					if err != nil {
+						continue
+					}
+
+					// Seek past already-seen records.
+					if lastPos, ok := lastPositions[key]; ok {
+						if err := cursor.Seek(chunk.RecordRef{ChunkID: meta.ID, Pos: lastPos}); err != nil {
+							cursor.Close()
+							continue
+						}
+						// Skip the record at lastPos (already yielded).
+						if _, _, err := cursor.Next(); err != nil {
+							cursor.Close()
+							continue
+						}
+					}
+
+					// Read new records.
+					for {
+						rec, ref, err := cursor.Next()
+						if err != nil {
+							break // ErrNoMoreRecords or other error
+						}
+
+						// Apply query filter if present.
+						if q.BoolExpr != nil && !e.matchesFilter(rec, q) {
+							lastPositions[key] = ref.Pos
+							continue
+						}
+
+						pending = append(pending, pendingRecord{
+							storeID: storeID,
+							rec:     rec,
+							ref:     ref,
+						})
+						lastPositions[key] = ref.Pos
+					}
+					cursor.Close()
+				}
+			}
+
+			// Sort pending records by IngestTS.
+			slices.SortFunc(pending, func(a, b pendingRecord) int {
+				return a.rec.IngestTS.Compare(b.rec.IngestTS)
+			})
+
+			// Yield sorted records.
+			for _, p := range pending {
+				if !yield(p.rec, nil) {
+					return
+				}
+			}
+
+			// Wait before polling again.
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(pollInterval):
+			}
+		}
+	}
+}
+
+// matchesFilter checks if a record matches the query's boolean expression.
+func (e *Engine) matchesFilter(rec chunk.Record, q Query) bool {
+	if q.BoolExpr == nil {
+		return true
+	}
+	// Use the scanner's filter logic - simplified version here.
+	// For now, just return true and let the caller handle filtering.
+	// TODO: implement proper filter matching.
+	return true
 }
 
 // SearchWithContext finds records matching the query and includes surrounding

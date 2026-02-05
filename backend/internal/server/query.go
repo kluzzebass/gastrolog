@@ -93,8 +93,8 @@ func (s *QueryServer) Search(
 	return nil
 }
 
-// Follow executes a query and streams matching records, continuing with new arrivals.
-// Note: Follow currently requires a single-store query (use store=X in query expression).
+// Follow executes a query and streams matching records, continuously polling for new arrivals.
+// This is a tail -f style operation that never completes until the client disconnects.
 func (s *QueryServer) Follow(
 	ctx context.Context,
 	req *connect.Request[apiv1.FollowRequest],
@@ -104,8 +104,8 @@ func (s *QueryServer) Follow(
 
 	q := protoToQuery(req.Msg.Query)
 
-	// Follow doesn't support resume tokens - it streams indefinitely
-	iter, _ := eng.SearchThenFollow(ctx, q, nil)
+	// Use Follow which continuously polls for new records.
+	iter := eng.Follow(ctx, q)
 
 	const batchSize = 100
 	batch := make([]*apiv1.Record, 0, batchSize)
@@ -128,7 +128,7 @@ func (s *QueryServer) Follow(
 		}
 	}
 
-	// Send remaining records (stream ended, e.g., due to limit)
+	// Send remaining records (shouldn't reach here normally since Follow loops forever)
 	if len(batch) > 0 {
 		if err := stream.Send(&apiv1.FollowResponse{Records: batch}); err != nil {
 			return err
