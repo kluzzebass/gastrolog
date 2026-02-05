@@ -13,7 +13,7 @@ This document outlines planned features and improvements. Items are roughly grou
 - ✓ gRPC over Unix socket for local REPL and CLI tools
 - ✓ Connect protocol for browser compatibility (future web UI)
 - ✓ Service definitions: QueryService, StoreService, ConfigService, LifecycleService
-- ✓ REPL client abstraction (DirectClient, GRPCClient, EmbeddedClient)
+- ✓ REPL client abstraction (GRPCClient, EmbeddedClient)
 - ✓ Embedded mode with in-memory HTTP transport
 
 ### Config Store
