@@ -301,14 +301,6 @@ func (r *REPL) queryWithPager() {
 		return
 	}
 
-	// If output fits on screen, just print it
-	lines := strings.Count(output, "\n")
-	termHeight := getTerminalHeight()
-	if lines < termHeight && !hasMore {
-		fmt.Print(output)
-		return
-	}
-
 	// Use pager with fetch-more support
 	var fetchMore func() string
 	if hasMore {
