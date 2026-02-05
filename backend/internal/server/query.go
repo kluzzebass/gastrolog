@@ -107,9 +107,7 @@ func (s *QueryServer) Follow(
 	// Use Follow which continuously polls for new records.
 	iter := eng.Follow(ctx, q)
 
-	const batchSize = 100
-	batch := make([]*apiv1.Record, 0, batchSize)
-
+	// Send each record immediately for real-time tailing.
 	for rec, err := range iter {
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
@@ -118,19 +116,7 @@ func (s *QueryServer) Follow(
 			return connect.NewError(connect.CodeInternal, err)
 		}
 
-		batch = append(batch, recordToProto(rec))
-
-		if len(batch) >= batchSize {
-			if err := stream.Send(&apiv1.FollowResponse{Records: batch}); err != nil {
-				return err
-			}
-			batch = batch[:0]
-		}
-	}
-
-	// Send remaining records (shouldn't reach here normally since Follow loops forever)
-	if len(batch) > 0 {
-		if err := stream.Send(&apiv1.FollowResponse{Records: batch}); err != nil {
+		if err := stream.Send(&apiv1.FollowResponse{Records: []*apiv1.Record{recordToProto(rec)}}); err != nil {
 			return err
 		}
 	}
