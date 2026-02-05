@@ -1,0 +1,57 @@
+@import url("https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+
+@import "tailwindcss";
+
+@theme {
+  /* Editorial color palette */
+  --color-cream: #faf8f5;
+  --color-cream-dark: #f0ebe3;
+  --color-charcoal: #1a1a1a;
+  --color-charcoal-light: #2d2d2d;
+  --color-gold: #a88832;
+  --color-gold-muted: #8a7028;
+
+  /* Semantic colors */
+  --color-error: #b83426;
+  --color-warn: #9a7520;
+  --color-info: #3a6c49;
+  --color-debug: #666666;
+
+  /* Text colors */
+  --color-text-primary: #1a1a1a;
+  --color-text-secondary: #3a3a3a;
+  --color-text-muted: #555555;
+
+  /* Borders */
+  --color-border: #d5d0c8;
+
+  /* Highlight */
+  --color-highlight-bg: #f0e068;
+  --color-highlight-text: #1a1a1a;
+
+  /* Dark mode overrides */
+  --color-dark-bg: #1a1a1a;
+  --color-dark-bg-secondary: #252525;
+  --color-dark-bg-card: #2d2d2d;
+  --color-dark-text: #e8e6e3;
+  --color-dark-text-secondary: #b0b0b0;
+  --color-dark-text-muted: #888888;
+  --color-dark-border: #3d3d3d;
+
+  /* Fonts */
+  --font-serif: "Playfair Display", serif;
+  --font-sans: "DM Sans", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+/* Base styles */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}

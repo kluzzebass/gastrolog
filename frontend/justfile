@@ -1,0 +1,40 @@
+# GastroLog Frontend
+
+# Default recipe - show available commands
+default:
+    @just --list
+
+# Install dependencies
+install:
+    bun install
+
+# Start development server
+dev:
+    bun run dev
+
+# Build for production
+build:
+    bun run build
+
+# Preview production build
+preview:
+    bun run preview
+
+# Clean build artifacts
+clean:
+    rm -rf dist node_modules/.vite
+
+# Rebuild from scratch
+rebuild: clean install build
+
+# Type check (no emit)
+typecheck:
+    bun x tsc --noEmit
+
+# Format code with prettier (if installed)
+format:
+    bun x prettier --write "src/**/*.{ts,tsx,css}"
+
+# Lint code (if eslint configured)
+lint:
+    bun x eslint "src/**/*.{ts,tsx}"
