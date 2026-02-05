@@ -140,7 +140,7 @@ query level=error user.id=123   # uses json index
 ### Health & Lifecycle ✓
 - ✓ Health check endpoint
 - ✓ Graceful shutdown with drain (waits for in-flight requests, rejects new ones)
-- Ready/live probes for k8s
+- ✓ Ready/live probes for k8s (`/healthz`, `/readyz`)
 
 ### Deployment
 - Dockerfile
@@ -195,4 +195,4 @@ For reference, here's what's already implemented:
 - **Receivers**: Chatterbox (test receiver with 6 log formats)
 - **Config**: File-based with runtime reconfiguration support
 - **Connect RPC**: Server layer with 4 services, REPL client abstraction, embedded mode
-- **Lifecycle**: Health endpoint, graceful shutdown with drain support
+- **Lifecycle**: Health endpoint, graceful shutdown with drain, k8s probes (`/healthz`, `/readyz`)
