@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -232,24 +231,6 @@ func (r *REPL) printOutput(output string) {
 	if lines > 40 {
 		r.pager(output)
 	} else {
-		fmt.Print(output)
-	}
-}
-
-// pager pipes output through an external pager.
-func (r *REPL) pager(output string) {
-	pager := os.Getenv("PAGER")
-	if pager == "" {
-		pager = "less"
-	}
-
-	cmd := exec.Command(pager)
-	cmd.Stdin = strings.NewReader(output)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		// Fallback to direct output if pager fails
 		fmt.Print(output)
 	}
 }
