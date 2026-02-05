@@ -94,15 +94,34 @@ func (s *QueryServer) Search(
 }
 
 // Follow executes a query and streams matching records, continuing with new arrivals.
-// Note: Follow currently requires a single-store query (use store=X in query expression).
+// Follow requires a single-store query. If no store is specified, it defaults to "default".
 func (s *QueryServer) Follow(
 	ctx context.Context,
 	req *connect.Request[apiv1.FollowRequest],
 	stream *connect.ServerStream[apiv1.FollowResponse],
 ) error {
-	eng := s.orch.MultiStoreQueryEngine()
-
 	q := protoToQuery(req.Msg.Query)
+
+	// Extract store from query, or default to "default"
+	allStores := s.orch.ListStores()
+	stores, remainingExpr := query.ExtractStoreFilter(q.BoolExpr, allStores)
+
+	var storeID string
+	if len(stores) == 0 {
+		storeID = "default"
+	} else if len(stores) == 1 {
+		storeID = stores[0]
+	} else {
+		return connect.NewError(connect.CodeInvalidArgument, errors.New("follow requires a single store (use store=X)"))
+	}
+
+	eng := s.orch.QueryEngine(storeID)
+	if eng == nil {
+		return connect.NewError(connect.CodeNotFound, errors.New("store not found: "+storeID))
+	}
+
+	// Update query to remove store predicate
+	q.BoolExpr = remainingExpr
 
 	// Follow doesn't support resume tokens - it streams indefinitely
 	iter, _ := eng.SearchThenFollow(ctx, q, nil)
