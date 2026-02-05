@@ -241,6 +241,7 @@ func (r *Receiver) parseValue(val Value, streamLabels map[string]string) (orches
 	}
 
 	// Parse timestamp (nanoseconds since epoch as string).
+	// This is the source timestamp from the log shipper.
 	var tsStr string
 	if err := json.Unmarshal(val[0], &tsStr); err != nil {
 		return orchestrator.IngestMessage{}, fmt.Errorf("timestamp must be a string: %w", err)
@@ -250,7 +251,7 @@ func (r *Receiver) parseValue(val Value, streamLabels map[string]string) (orches
 	if err != nil {
 		return orchestrator.IngestMessage{}, fmt.Errorf("invalid timestamp %q: %w", tsStr, err)
 	}
-	ingestTS := time.Unix(0, tsNanos)
+	sourceTS := time.Unix(0, tsNanos)
 
 	// Parse log line.
 	var line string
@@ -282,7 +283,8 @@ func (r *Receiver) parseValue(val Value, streamLabels map[string]string) (orches
 	return orchestrator.IngestMessage{
 		Attrs:    attrs,
 		Raw:      []byte(line),
-		IngestTS: ingestTS,
+		SourceTS: sourceTS,
+		IngestTS: time.Now(),
 	}, nil
 }
 

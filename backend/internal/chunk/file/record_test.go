@@ -16,6 +16,7 @@ import (
 
 func TestIdxEntryEncodeDecode(t *testing.T) {
 	entry := IdxEntry{
+		SourceTS:   time.UnixMicro(1234567890123455),
 		IngestTS:   time.UnixMicro(1234567890123456),
 		WriteTS:    time.UnixMicro(1234567890123457),
 		RawOffset:  12345,
@@ -29,6 +30,9 @@ func TestIdxEntryEncodeDecode(t *testing.T) {
 
 	decoded := DecodeIdxEntry(buf)
 
+	if decoded.SourceTS.UnixMicro() != entry.SourceTS.UnixMicro() {
+		t.Fatalf("SourceTS: want %d, got %d", entry.SourceTS.UnixMicro(), decoded.SourceTS.UnixMicro())
+	}
 	if decoded.IngestTS.UnixMicro() != entry.IngestTS.UnixMicro() {
 		t.Fatalf("IngestTS: want %d, got %d", entry.IngestTS.UnixMicro(), decoded.IngestTS.UnixMicro())
 	}
@@ -52,6 +56,7 @@ func TestIdxEntryEncodeDecode(t *testing.T) {
 func TestIdxEntryBinaryFormat(t *testing.T) {
 	// Test exact binary layout for a known entry
 	entry := IdxEntry{
+		SourceTS:   time.UnixMicro(0x00d00d00d00d00d0),
 		IngestTS:   time.UnixMicro(0x0102030405060708),
 		WriteTS:    time.UnixMicro(0x1112131415161718),
 		RawOffset:  0x21222324,
@@ -64,38 +69,44 @@ func TestIdxEntryBinaryFormat(t *testing.T) {
 	EncodeIdxEntry(entry, buf)
 
 	// Verify each field at its expected offset
-	// IngestTS at offset 0, 8 bytes
-	ingestTS := binary.LittleEndian.Uint64(buf[0:8])
+	// SourceTS at offset 0, 8 bytes
+	sourceTS := binary.LittleEndian.Uint64(buf[0:8])
+	if sourceTS != 0x00d00d00d00d00d0 {
+		t.Fatalf("SourceTS at wrong offset or encoding: %x", sourceTS)
+	}
+
+	// IngestTS at offset 8, 8 bytes
+	ingestTS := binary.LittleEndian.Uint64(buf[8:16])
 	if ingestTS != 0x0102030405060708 {
 		t.Fatalf("IngestTS at wrong offset or encoding: %x", ingestTS)
 	}
 
-	// WriteTS at offset 8, 8 bytes
-	writeTS := binary.LittleEndian.Uint64(buf[8:16])
+	// WriteTS at offset 16, 8 bytes
+	writeTS := binary.LittleEndian.Uint64(buf[16:24])
 	if writeTS != 0x1112131415161718 {
 		t.Fatalf("WriteTS at wrong offset or encoding: %x", writeTS)
 	}
 
-	// RawOffset at offset 16, 4 bytes
-	rawOffset := binary.LittleEndian.Uint32(buf[16:20])
+	// RawOffset at offset 24, 4 bytes
+	rawOffset := binary.LittleEndian.Uint32(buf[24:28])
 	if rawOffset != 0x21222324 {
 		t.Fatalf("RawOffset at wrong offset or encoding: %x", rawOffset)
 	}
 
-	// RawSize at offset 20, 4 bytes
-	rawSize := binary.LittleEndian.Uint32(buf[20:24])
+	// RawSize at offset 28, 4 bytes
+	rawSize := binary.LittleEndian.Uint32(buf[28:32])
 	if rawSize != 0x31323334 {
 		t.Fatalf("RawSize at wrong offset or encoding: %x", rawSize)
 	}
 
-	// AttrOffset at offset 24, 4 bytes
-	attrOffset := binary.LittleEndian.Uint32(buf[24:28])
+	// AttrOffset at offset 32, 4 bytes
+	attrOffset := binary.LittleEndian.Uint32(buf[32:36])
 	if attrOffset != 0x41424344 {
 		t.Fatalf("AttrOffset at wrong offset or encoding: %x", attrOffset)
 	}
 
-	// AttrSize at offset 28, 2 bytes
-	attrSize := binary.LittleEndian.Uint16(buf[28:30])
+	// AttrSize at offset 36, 2 bytes
+	attrSize := binary.LittleEndian.Uint16(buf[36:38])
 	if attrSize != 0x5152 {
 		t.Fatalf("AttrSize at wrong offset or encoding: %x", attrSize)
 	}
@@ -103,9 +114,9 @@ func TestIdxEntryBinaryFormat(t *testing.T) {
 
 func TestIdxEntrySize(t *testing.T) {
 	// Verify the constant matches expected layout:
-	// 8 (IngestTS) + 8 (WriteTS) + 4 (RawOffset) + 4 (RawSize) + 4 (AttrOffset) + 2 (AttrSize) = 30
-	if IdxEntrySize != 30 {
-		t.Fatalf("IdxEntrySize should be 30, got %d", IdxEntrySize)
+	// 8 (SourceTS) + 8 (IngestTS) + 8 (WriteTS) + 4 (RawOffset) + 4 (RawSize) + 4 (AttrOffset) + 2 (AttrSize) = 38
+	if IdxEntrySize != 38 {
+		t.Fatalf("IdxEntrySize should be 38, got %d", IdxEntrySize)
 	}
 }
 
@@ -119,6 +130,9 @@ func TestIdxEntryZeroValues(t *testing.T) {
 
 	// Zero time.Time in Go is year 1, not Unix epoch.
 	// The encoding stores UnixMicro(), so we verify round-trip correctness.
+	if !decoded.SourceTS.Equal(entry.SourceTS) {
+		t.Fatalf("Zero SourceTS round-trip failed: want %v, got %v", entry.SourceTS, decoded.SourceTS)
+	}
 	if !decoded.IngestTS.Equal(entry.IngestTS) {
 		t.Fatalf("Zero IngestTS round-trip failed: want %v, got %v", entry.IngestTS, decoded.IngestTS)
 	}
@@ -141,7 +155,8 @@ func TestIdxEntryZeroValues(t *testing.T) {
 
 func TestIdxEntryMaxValues(t *testing.T) {
 	entry := IdxEntry{
-		IngestTS:   time.UnixMicro(1<<63 - 1), // max positive int64
+		SourceTS:   time.UnixMicro(1<<63 - 1), // max positive int64
+		IngestTS:   time.UnixMicro(1<<63 - 1),
 		WriteTS:    time.UnixMicro(1<<63 - 1),
 		RawOffset:  0xFFFFFFFF, // max uint32
 		RawSize:    0xFFFFFFFF,
@@ -520,23 +535,26 @@ func FuzzIdxEntryRoundTrip(f *testing.F) {
 
 func TestOffsetCalculationConsistency(t *testing.T) {
 	// Verify that offset constants match the actual byte positions
-	if idxIngestTSOffset != 0 {
-		t.Fatalf("idxIngestTSOffset should be 0, got %d", idxIngestTSOffset)
+	if idxSourceTSOffset != 0 {
+		t.Fatalf("idxSourceTSOffset should be 0, got %d", idxSourceTSOffset)
 	}
-	if idxWriteTSOffset != 8 {
-		t.Fatalf("idxWriteTSOffset should be 8, got %d", idxWriteTSOffset)
+	if idxIngestTSOffset != 8 {
+		t.Fatalf("idxIngestTSOffset should be 8, got %d", idxIngestTSOffset)
 	}
-	if idxRawOffsetOffset != 16 {
-		t.Fatalf("idxRawOffsetOffset should be 16, got %d", idxRawOffsetOffset)
+	if idxWriteTSOffset != 16 {
+		t.Fatalf("idxWriteTSOffset should be 16, got %d", idxWriteTSOffset)
 	}
-	if idxRawSizeOffset != 20 {
-		t.Fatalf("idxRawSizeOffset should be 20, got %d", idxRawSizeOffset)
+	if idxRawOffsetOffset != 24 {
+		t.Fatalf("idxRawOffsetOffset should be 24, got %d", idxRawOffsetOffset)
 	}
-	if idxAttrOffsetOffset != 24 {
-		t.Fatalf("idxAttrOffsetOffset should be 24, got %d", idxAttrOffsetOffset)
+	if idxRawSizeOffset != 28 {
+		t.Fatalf("idxRawSizeOffset should be 28, got %d", idxRawSizeOffset)
 	}
-	if idxAttrSizeOffset != 28 {
-		t.Fatalf("idxAttrSizeOffset should be 28, got %d", idxAttrSizeOffset)
+	if idxAttrOffsetOffset != 32 {
+		t.Fatalf("idxAttrOffsetOffset should be 32, got %d", idxAttrOffsetOffset)
+	}
+	if idxAttrSizeOffset != 36 {
+		t.Fatalf("idxAttrSizeOffset should be 36, got %d", idxAttrSizeOffset)
 	}
 
 	// Verify total size matches

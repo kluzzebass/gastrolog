@@ -219,6 +219,7 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 
 	// Build and write idx.log entry.
 	entry := IdxEntry{
+		SourceTS:   record.SourceTS,
 		IngestTS:   record.IngestTS,
 		WriteTS:    record.WriteTS,
 		RawOffset:  uint32(m.active.rawOffset),

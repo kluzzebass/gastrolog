@@ -132,13 +132,13 @@ Append-only file containing fixed-size metadata entries for each record. The chu
 +---------------------------+
 |     Header (4 bytes)      |
 +---------------------------+
-|     Entry 0 (30 bytes)    |
+|     Entry 0 (38 bytes)    |
 +---------------------------+
-|     Entry 1 (30 bytes)    |
+|     Entry 1 (38 bytes)    |
 +---------------------------+
 |     ...                   |
 +---------------------------+
-|     Entry N-1 (30 bytes)  |
+|     Entry N-1 (38 bytes)  |
 +---------------------------+
 ```
 
@@ -151,23 +151,24 @@ Append-only file containing fixed-size metadata entries for each record. The chu
 | 2      | 1    | version   | `0x01`                                   |
 | 3      | 1    | flags     | Bit 0: sealed (`0x01` = sealed)          |
 
-### Entry (30 bytes each)
+### Entry (38 bytes each)
 
 | Offset | Size | Field         | Description                                   |
 |--------|------|---------------|-----------------------------------------------|
-| 0      | 8    | ingestTS      | Ingest timestamp (int64 Unix micros)          |
-| 8      | 8    | writeTS       | Write timestamp (int64 Unix micros)           |
-| 16     | 4    | rawOffset     | Byte offset into raw.log data section (uint32)|
-| 20     | 4    | rawSize       | Length of raw data in bytes (uint32)          |
-| 24     | 4    | attrOffset    | Byte offset into attr.log data section (uint32)|
-| 28     | 2    | attrSize      | Length of encoded attributes in bytes (uint16)|
+| 0      | 8    | sourceTS      | Source timestamp (int64 Unix micros, 0 if unknown) |
+| 8      | 8    | ingestTS      | Ingest timestamp (int64 Unix micros)          |
+| 16     | 8    | writeTS       | Write timestamp (int64 Unix micros)           |
+| 24     | 4    | rawOffset     | Byte offset into raw.log data section (uint32)|
+| 28     | 4    | rawSize       | Length of raw data in bytes (uint32)          |
+| 32     | 4    | attrOffset    | Byte offset into attr.log data section (uint32)|
+| 36     | 2    | attrSize      | Length of encoded attributes in bytes (uint16)|
 
 ### Position Semantics
 
 Record positions throughout the system are **record indices** (0, 1, 2, ...), not byte offsets. To compute the file offset for record N:
 
 ```
-idx_file_offset = 4 + (N * 30)
+idx_file_offset = 4 + (N * 38)
 ```
 
 This enables O(1) seeking by record number and trivial bidirectional traversal.
