@@ -438,6 +438,7 @@ func protoToQueryPlan(resp *apiv1.ExplainResponse) *query.QueryPlan {
 		}
 
 		chunks[i] = query.ChunkPlan{
+			StoreID:       cp.StoreId,
 			ChunkID:       chunkID,
 			Sealed:        cp.Sealed,
 			RecordCount:   int(cp.RecordCount),

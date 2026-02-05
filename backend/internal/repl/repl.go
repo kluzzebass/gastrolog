@@ -184,7 +184,7 @@ func (r *REPL) execute(line string) (exit bool) {
 	case "help", "?":
 		r.cmdHelp(&out)
 	case "query":
-		r.cmdQuery(&out, args, false)
+		r.cmdQuery(&out, args, true) // interactive: use pager
 	case "follow":
 		r.cmdFollow(&out, args)
 	case "next":
@@ -285,6 +285,97 @@ func (r *REPL) fetchAndPrint(out *strings.Builder) {
 		r.fetchAndPrintN(out, 0)
 	} else {
 		r.fetchAndPrintN(out, r.pageSize)
+	}
+}
+
+// queryWithPager fetches query results and displays them in an interactive pager.
+// The pager allows fetching more results by pressing 'n'.
+func (r *REPL) queryWithPager() {
+	// Fetch first batch
+	var out strings.Builder
+	hasMore := r.fetchBatch(&out)
+
+	output := out.String()
+	if output == "" {
+		fmt.Println("No results.")
+		return
+	}
+
+	// If output fits on screen, just print it
+	lines := strings.Count(output, "\n")
+	termHeight := getTerminalHeight()
+	if lines < termHeight && !hasMore {
+		fmt.Print(output)
+		return
+	}
+
+	// Use pager with fetch-more support
+	var fetchMore func() string
+	if hasMore {
+		fetchMore = func() string {
+			var more strings.Builder
+			if r.fetchBatch(&more) {
+				// Still more available
+			} else {
+				// No more results - return empty to signal end
+				result := more.String()
+				if result == "" || result == "No more results.\n" {
+					return ""
+				}
+				return result
+			}
+			return more.String()
+		}
+	}
+
+	r.pagerWithFetch(output, fetchMore)
+
+	// Clear query state when done with pager
+	r.cancelQuery()
+	r.clearQueryState()
+}
+
+// fetchBatch fetches up to pageSize records into out.
+// Returns true if there may be more results available.
+func (r *REPL) fetchBatch(out *strings.Builder) bool {
+	ch := r.getResultChan()
+	if ch == nil {
+		return false
+	}
+
+	count := r.pageSize
+	if count == 0 {
+		count = 50 // default batch size
+	}
+
+	printed := 0
+	for {
+		if printed >= count {
+			return true // more may be available
+		}
+
+		select {
+		case result, ok := <-ch:
+			if !ok {
+				if printed == 0 {
+					out.WriteString("No more results.\n")
+				}
+				r.setResultChan(nil)
+				return false
+			}
+			if result.err != nil {
+				if errors.Is(result.err, query.ErrInvalidResumeToken) {
+					out.WriteString("Resume token invalid (chunk deleted).\n")
+					r.setResultChan(nil)
+					return false
+				}
+				fmt.Fprintf(out, "Error: %v\n", result.err)
+				return false
+			}
+
+			r.printRecord(out, result.rec)
+			printed++
+		}
 	}
 }
 
@@ -403,7 +494,7 @@ func (s *simpleREPL) Run() error {
 		case "help", "?":
 			s.repl.cmdHelp(&out)
 		case "query":
-			s.repl.cmdQuery(&out, args, false)
+			s.repl.cmdQuery(&out, args, false) // non-interactive: no pager
 		case "next":
 			s.repl.cmdNext(&out, args)
 		case "reset":

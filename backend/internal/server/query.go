@@ -145,6 +145,7 @@ func (s *QueryServer) Explain(
 
 	for _, cp := range plan.ChunkPlans {
 		chunkPlan := &apiv1.ChunkPlan{
+			StoreId:          cp.StoreID,
 			ChunkId:          cp.ChunkID[:],
 			Sealed:           cp.Sealed,
 			RecordCount:      int64(cp.RecordCount),

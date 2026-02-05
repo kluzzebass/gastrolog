@@ -4,218 +4,520 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"golang.org/x/term"
 )
 
-// pager displays output with full navigation support.
-// Navigation:
-//   - j/Down: scroll down one line
-//   - k/Up: scroll up one line
-//   - Space/PageDown: scroll down one page
-//   - b/PageUp: scroll up one page
-//   - Left/Right or h/l: scroll horizontally
-//   - Home/g: go to start
-//   - End/G: go to end
-//   - q: quit
+// sanitizeLine replaces non-printable and control characters with the
+// replacement character (U+FFFD) to prevent terminal corruption.
+func sanitizeLine(s string) string {
+	var sb strings.Builder
+	sb.Grow(len(s))
+	for _, r := range s {
+		if r == '\t' {
+			// Keep tabs, they're useful
+			sb.WriteRune(r)
+		} else if r < 32 || r == 127 || (r >= 0x80 && r < 0xA0) {
+			// Control characters and C1 control codes
+			sb.WriteRune(unicode.ReplacementChar)
+		} else if !unicode.IsPrint(r) && !unicode.IsSpace(r) {
+			// Other non-printable characters
+			sb.WriteRune(unicode.ReplacementChar)
+		} else {
+			sb.WriteRune(r)
+		}
+	}
+	return sb.String()
+}
+
+// pager displays output with full navigation support using bubbletea.
 func (r *REPL) pager(output string) {
-	lines := strings.Split(output, "\n")
-	if len(lines) == 0 {
+	r.pagerWithFetch(output, nil)
+}
+
+// pagerWithFetch displays output with navigation and optional "fetch more" support.
+func (r *REPL) pagerWithFetch(output string, fetchMore func() string) {
+	rawLines := strings.Split(output, "\n")
+	if len(rawLines) > 0 && rawLines[len(rawLines)-1] == "" {
+		rawLines = rawLines[:len(rawLines)-1]
+	}
+	if len(rawLines) == 0 {
 		return
 	}
 
-	// Remove trailing empty line from Split
-	if len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
+	// Sanitize lines to prevent terminal corruption
+	lines := make([]string, len(rawLines))
+	for i, line := range rawLines {
+		lines[i] = sanitizeLine(line)
 	}
 
-	if len(lines) == 0 {
-		return
-	}
-
-	// Get terminal size
-	width, height, err := term.GetSize(int(os.Stdout.Fd()))
+	// Save terminal state before bubbletea takes over
+	oldState, err := term.GetState(int(os.Stdin.Fd()))
 	if err != nil {
-		// Fallback: just print everything
+		// Can't save state, just print
 		fmt.Print(output)
 		return
 	}
 
-	// Reserve one line for the status bar
-	viewHeight := height - 1
-	if viewHeight < 1 {
-		viewHeight = 1
+	m := &pagerModel{
+		lines:     lines,
+		fetchMore: fetchMore,
+		hasMore:   fetchMore != nil,
 	}
 
-	// Put terminal in raw mode to read single keys
-	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p.Run()
+
+	// Restore terminal state after bubbletea exits
+	term.Restore(int(os.Stdin.Fd()), oldState)
+}
+
+// pagerLive displays a live stream of lines using bubbletea.
+func (r *REPL) pagerLive(linesChan <-chan string) {
+	// Save terminal state before bubbletea takes over
+	oldState, err := term.GetState(int(os.Stdin.Fd()))
 	if err != nil {
-		// Fallback: just print everything
-		fmt.Print(output)
+		// Can't save state, just print lines as they come
+		for line := range linesChan {
+			fmt.Println(line)
+		}
 		return
 	}
-	defer term.Restore(int(os.Stdin.Fd()), oldState)
 
-	// Switch to alternate screen buffer and clear it
-	fmt.Print("\033[?1049h\033[2J")
-	defer fmt.Print("\033[?1049l")
-
-	// Hide cursor during paging
-	fmt.Print("\033[?25l")
-	defer fmt.Print("\033[?25h")
-
-	// Viewport state
-	topLine := 0     // first visible line
-	leftCol := 0     // horizontal scroll offset
-	hScrollStep := 8 // horizontal scroll amount
-
-	for {
-		// Clamp topLine
-		maxTop := len(lines) - viewHeight
-		if maxTop < 0 {
-			maxTop = 0
-		}
-		if topLine > maxTop {
-			topLine = maxTop
-		}
-		if topLine < 0 {
-			topLine = 0
-		}
-
-		// Clamp leftCol
-		if leftCol < 0 {
-			leftCol = 0
-		}
-
-		// Move cursor to top-left
-		fmt.Print("\033[H")
-
-		// Draw visible lines
-		for i := 0; i < viewHeight; i++ {
-			lineIdx := topLine + i
-			var line string
-			if lineIdx < len(lines) {
-				line = lines[lineIdx]
-				// Apply horizontal scroll
-				if leftCol < len(line) {
-					line = line[leftCol:]
-				} else {
-					line = ""
-				}
-				// Truncate to terminal width to prevent wrapping
-				if len(line) > width {
-					line = line[:width]
-				}
-			}
-			// Print line, clear to end of line, then move to next line
-			// In raw mode, \n only moves down, need \r to return to column 0
-			fmt.Printf("%s\033[K\r\n", line)
-		}
-
-		// Draw status bar (inverted colors)
-		endLine := topLine + viewHeight
-		if endLine > len(lines) {
-			endLine = len(lines)
-		}
-		percent := 100
-		if len(lines) > viewHeight {
-			percent = (topLine + viewHeight) * 100 / len(lines)
-			if percent > 100 {
-				percent = 100
-			}
-		}
-
-		status := fmt.Sprintf(" lines %d-%d of %d (%d%%)", topLine+1, endLine, len(lines), percent)
-		if leftCol > 0 {
-			status += fmt.Sprintf(" [col %d]", leftCol+1)
-		}
-		status += " | j/k PgUp/Dn h/l g/G q "
-
-		// Pad or truncate status to terminal width
-		if len(status) < width {
-			status += strings.Repeat(" ", width-len(status))
-		} else if len(status) > width {
-			status = status[:width]
-		}
-
-		// Status bar with inverted colors, no newline (stay on this line)
-		fmt.Printf("\033[7m%s\033[0m", status)
-
-		// Read input
-		buf := make([]byte, 4)
-		n, _ := os.Stdin.Read(buf)
-		if n == 0 {
-			continue
-		}
-
-		// Handle input
-		if n == 1 {
-			switch buf[0] {
-			case 'q', 'Q', 0x1b: // q or Escape
-				return
-			case 'j': // down one line
-				topLine++
-			case 'k': // up one line
-				topLine--
-			case ' ': // page down
-				topLine += viewHeight
-			case 'b': // page up
-				topLine -= viewHeight
-			case 'h': // scroll left
-				leftCol -= hScrollStep
-			case 'l': // scroll right
-				leftCol += hScrollStep
-			case 'g': // go to start
-				topLine = 0
-				leftCol = 0
-			case 'G': // go to end
-				topLine = len(lines) - viewHeight
-			case '\r', '\n': // enter = down one line
-				topLine++
-			}
-		} else if n >= 3 && buf[0] == 0x1b && buf[1] == '[' {
-			// Escape sequences
-			switch buf[2] {
-			case 'A': // Up arrow
-				topLine--
-			case 'B': // Down arrow
-				topLine++
-			case 'C': // Right arrow
-				leftCol += hScrollStep
-			case 'D': // Left arrow
-				leftCol -= hScrollStep
-			case '5': // Page Up (ESC [ 5 ~)
-				if n >= 4 && buf[3] == '~' {
-					topLine -= viewHeight
-				}
-			case '6': // Page Down (ESC [ 6 ~)
-				if n >= 4 && buf[3] == '~' {
-					topLine += viewHeight
-				}
-			case 'H': // Home
-				topLine = 0
-				leftCol = 0
-			case 'F': // End
-				topLine = len(lines) - viewHeight
-			case '1': // Home (alternate: ESC [ 1 ~)
-				if n >= 4 && buf[3] == '~' {
-					topLine = 0
-					leftCol = 0
-				}
-			case '4': // End (alternate: ESC [ 4 ~)
-				if n >= 4 && buf[3] == '~' {
-					topLine = len(lines) - viewHeight
-				}
-			}
-		}
+	m := &livePagerModel{
+		linesChan: linesChan,
 	}
+
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p.Run()
+
+	// Restore terminal state after bubbletea exits
+	term.Restore(int(os.Stdin.Fd()), oldState)
 }
 
 // getTerminalHeight returns the terminal height, or a default if unavailable.
 func getTerminalHeight() int {
-	_, height, err := term.GetSize(int(os.Stdout.Fd()))
+	_, height, err := term.GetSize(0)
 	if err != nil {
-		return 24 // sensible default
+		return 24
 	}
 	return height
+}
+
+// pagerModel is the bubbletea model for the static pager.
+type pagerModel struct {
+	lines     []string
+	topLine   int
+	leftCol   int
+	width     int
+	height    int
+	fetchMore func() string
+	hasMore   bool
+}
+
+func (m *pagerModel) Init() tea.Cmd {
+	return nil
+}
+
+func (m *pagerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height - 1 // Reserve for status bar
+
+	case tea.MouseMsg:
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			if msg.Shift {
+				m.leftCol -= 8
+			} else {
+				m.topLine -= 3
+			}
+		case tea.MouseButtonWheelDown:
+			if msg.Shift {
+				m.leftCol += 8
+			} else {
+				m.topLine += 3
+			}
+		case tea.MouseButtonWheelLeft:
+			m.leftCol -= 8
+		case tea.MouseButtonWheelRight:
+			m.leftCol += 8
+		}
+		m.clamp()
+
+	case tea.KeyMsg:
+		viewHeight := m.height
+		if viewHeight < 1 {
+			viewHeight = 1
+		}
+
+		switch msg.String() {
+		case "q", "Q", "esc":
+			return m, tea.Quit
+
+		case "j", "down":
+			m.topLine++
+		case "k", "up":
+			m.topLine--
+		case " ", "pgdown":
+			m.topLine += viewHeight
+		case "b", "pgup":
+			m.topLine -= viewHeight
+		case "h", "left":
+			m.leftCol -= 8
+		case "l", "right":
+			m.leftCol += 8
+		case "g", "home", "alt+up":
+			m.topLine = 0
+		case "G", "end", "alt+down":
+			m.topLine = len(m.lines) - viewHeight
+		case "0", "ctrl+a":
+			m.leftCol = 0
+		case "$", "ctrl+e":
+			m.leftCol = m.maxLineWidth() - m.width
+		case "alt+b", "alt+left":
+			m.leftCol = 0
+		case "alt+f", "alt+right":
+			m.leftCol = m.maxLineWidth() - m.width
+
+		case "n", "N":
+			if m.hasMore && m.atBottom() {
+				more := m.fetchMore()
+				if more == "" {
+					m.hasMore = false
+				} else {
+					moreLines := strings.Split(more, "\n")
+					if len(moreLines) > 0 && moreLines[len(moreLines)-1] == "" {
+						moreLines = moreLines[:len(moreLines)-1]
+					}
+					m.topLine = len(m.lines)
+					for _, line := range moreLines {
+						m.lines = append(m.lines, sanitizeLine(line))
+					}
+				}
+			}
+		}
+
+		m.clamp()
+	}
+
+	return m, nil
+}
+
+func (m *pagerModel) View() string {
+	if m.width == 0 || m.height == 0 {
+		return "Loading..."
+	}
+
+	var sb strings.Builder
+	viewHeight := m.height
+
+	for i := 0; i < viewHeight; i++ {
+		lineIdx := m.topLine + i
+		var line string
+		if lineIdx < len(m.lines) {
+			line = m.lines[lineIdx]
+			if m.leftCol < len(line) {
+				line = line[m.leftCol:]
+			} else {
+				line = ""
+			}
+			if len(line) > m.width {
+				line = line[:m.width]
+			}
+		}
+		sb.WriteString(line)
+		sb.WriteString("\n")
+	}
+
+	// Status bar
+	sb.WriteString(m.statusBar())
+
+	return sb.String()
+}
+
+func (m *pagerModel) statusBar() string {
+	endLine := m.topLine + m.height
+	if endLine > len(m.lines) {
+		endLine = len(m.lines)
+	}
+	percent := 100
+	if len(m.lines) > m.height {
+		percent = (m.topLine + m.height) * 100 / len(m.lines)
+		if percent > 100 {
+			percent = 100
+		}
+	}
+
+	status := fmt.Sprintf(" lines %d-%d of %d (%d%%)", m.topLine+1, endLine, len(m.lines), percent)
+	if m.leftCol > 0 {
+		status += fmt.Sprintf(" [col %d]", m.leftCol+1)
+	}
+	status += " | j/k PgUp/Dn h/l g/G"
+	if m.hasMore && m.atBottom() {
+		status += " n:more"
+	}
+	status += " q:quit"
+
+	// Pad to width
+	if len(status) < m.width {
+		status += strings.Repeat(" ", m.width-len(status))
+	} else if len(status) > m.width {
+		status = status[:m.width]
+	}
+
+	return fmt.Sprintf("\033[7m%s\033[0m", status)
+}
+
+func (m *pagerModel) clamp() {
+	maxTop := len(m.lines) - m.height
+	if maxTop < 0 {
+		maxTop = 0
+	}
+	if m.topLine > maxTop {
+		m.topLine = maxTop
+	}
+	if m.topLine < 0 {
+		m.topLine = 0
+	}
+	if m.leftCol < 0 {
+		m.leftCol = 0
+	}
+}
+
+func (m *pagerModel) atBottom() bool {
+	maxTop := len(m.lines) - m.height
+	if maxTop < 0 {
+		maxTop = 0
+	}
+	return m.topLine >= maxTop
+}
+
+func (m *pagerModel) maxLineWidth() int {
+	maxW := 0
+	for _, line := range m.lines {
+		if len(line) > maxW {
+			maxW = len(line)
+		}
+	}
+	return maxW
+}
+
+// livePagerModel is the bubbletea model for the live/follow pager.
+type livePagerModel struct {
+	lines     []string
+	linesChan <-chan string
+	topLine   int
+	leftCol   int
+	width     int
+	height    int
+	done      bool
+}
+
+// lineMsg is sent when a new line arrives from the channel.
+type lineMsg string
+
+// doneMsg is sent when the channel is closed.
+type doneMsg struct{}
+
+func (m *livePagerModel) Init() tea.Cmd {
+	return m.waitForLine()
+}
+
+func (m *livePagerModel) waitForLine() tea.Cmd {
+	return func() tea.Msg {
+		line, ok := <-m.linesChan
+		if !ok {
+			return doneMsg{}
+		}
+		return lineMsg(line)
+	}
+}
+
+func (m *livePagerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height - 1
+
+	case tea.MouseMsg:
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			if msg.Shift {
+				m.leftCol -= 8
+			} else {
+				m.topLine -= 3
+			}
+		case tea.MouseButtonWheelDown:
+			if msg.Shift {
+				m.leftCol += 8
+			} else {
+				m.topLine += 3
+			}
+		case tea.MouseButtonWheelLeft:
+			m.leftCol -= 8
+		case tea.MouseButtonWheelRight:
+			m.leftCol += 8
+		}
+		m.clamp()
+
+	case lineMsg:
+		wasAtBottom := m.atBottom()
+		m.lines = append(m.lines, sanitizeLine(string(msg)))
+		if wasAtBottom {
+			m.scrollToBottom()
+		}
+		return m, m.waitForLine()
+
+	case doneMsg:
+		m.done = true
+		return m, nil
+
+	case tea.KeyMsg:
+		viewHeight := m.height
+		if viewHeight < 1 {
+			viewHeight = 1
+		}
+
+		switch msg.String() {
+		case "q", "Q", "esc":
+			return m, tea.Quit
+
+		case "j", "down":
+			m.topLine++
+		case "k", "up":
+			m.topLine--
+		case " ", "pgdown":
+			m.topLine += viewHeight
+		case "b", "pgup":
+			m.topLine -= viewHeight
+		case "h", "left":
+			m.leftCol -= 8
+		case "l", "right":
+			m.leftCol += 8
+		case "g", "home", "alt+up":
+			m.topLine = 0
+		case "G", "end", "alt+down":
+			m.scrollToBottom()
+		case "0", "ctrl+a":
+			m.leftCol = 0
+		case "$", "ctrl+e":
+			m.leftCol = m.maxLineWidth() - m.width
+		case "alt+b", "alt+left":
+			m.leftCol = 0
+		case "alt+f", "alt+right":
+			m.leftCol = m.maxLineWidth() - m.width
+		}
+
+		m.clamp()
+	}
+
+	return m, nil
+}
+
+func (m *livePagerModel) View() string {
+	if m.width == 0 || m.height == 0 {
+		return "Loading..."
+	}
+
+	var sb strings.Builder
+	viewHeight := m.height
+
+	for i := 0; i < viewHeight; i++ {
+		lineIdx := m.topLine + i
+		var line string
+		if lineIdx < len(m.lines) {
+			line = m.lines[lineIdx]
+			if m.leftCol < len(line) {
+				line = line[m.leftCol:]
+			} else {
+				line = ""
+			}
+			if len(line) > m.width {
+				line = line[:m.width]
+			}
+		}
+		sb.WriteString(line)
+		sb.WriteString("\n")
+	}
+
+	// Status bar
+	sb.WriteString(m.statusBar())
+
+	return sb.String()
+}
+
+func (m *livePagerModel) statusBar() string {
+	total := len(m.lines)
+	endLine := m.topLine + m.height
+	if endLine > total {
+		endLine = total
+	}
+
+	var status string
+	if total == 0 {
+		status = " Waiting for records..."
+	} else {
+		status = fmt.Sprintf(" lines %d-%d of %d", m.topLine+1, endLine, total)
+	}
+	if m.leftCol > 0 {
+		status += fmt.Sprintf(" [col %d]", m.leftCol+1)
+	}
+	if m.done {
+		status += " [END]"
+	}
+	status += " | j/k h/l g/G 0/$ q:quit"
+
+	if len(status) < m.width {
+		status += strings.Repeat(" ", m.width-len(status))
+	} else if len(status) > m.width {
+		status = status[:m.width]
+	}
+
+	return fmt.Sprintf("\033[7m%s\033[0m", status)
+}
+
+func (m *livePagerModel) clamp() {
+	maxTop := len(m.lines) - m.height
+	if maxTop < 0 {
+		maxTop = 0
+	}
+	if m.topLine > maxTop {
+		m.topLine = maxTop
+	}
+	if m.topLine < 0 {
+		m.topLine = 0
+	}
+	if m.leftCol < 0 {
+		m.leftCol = 0
+	}
+}
+
+func (m *livePagerModel) scrollToBottom() {
+	maxTop := len(m.lines) - m.height
+	if maxTop < 0 {
+		maxTop = 0
+	}
+	m.topLine = maxTop
+}
+
+func (m *livePagerModel) atBottom() bool {
+	maxTop := len(m.lines) - m.height
+	if maxTop < 0 {
+		maxTop = 0
+	}
+	return m.topLine >= maxTop
+}
+
+func (m *livePagerModel) maxLineWidth() int {
+	maxW := 0
+	for _, line := range m.lines {
+		if len(line) > maxW {
+			maxW = len(line)
+		}
+	}
+	return maxW
 }

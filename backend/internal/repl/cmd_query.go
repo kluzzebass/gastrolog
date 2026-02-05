@@ -4,16 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"os/signal"
 	"slices"
 	"strings"
-	"time"
 
 	"gastrolog/internal/chunk"
 )
 
-func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
+// cmdQuery executes a query. If usePager is true, results are displayed in an
+// interactive pager with fetch-more support. Otherwise, results are written to
+// out and the query state is preserved for subsequent 'next' commands.
+func (r *REPL) cmdQuery(out *strings.Builder, args []string, usePager bool) {
 	q, errMsg := parseQueryArgs(args)
 	if errMsg != "" {
 		out.WriteString(errMsg + "\n")
@@ -65,10 +65,16 @@ func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
 		}
 	}()
 
-	r.fetchAndPrint(out)
+	if usePager {
+		// Interactive mode: use pager with fetch-more support
+		r.queryWithPager()
+	} else {
+		// Non-interactive mode: fetch and print, keep query state for 'next'
+		r.fetchAndPrint(out)
+	}
 }
 
-// cmdFollow runs a query in follow mode, streaming results until interrupted.
+// cmdFollow runs a query in follow mode, streaming results in a live pager.
 func (r *REPL) cmdFollow(out *strings.Builder, args []string) {
 	q, errMsg := parseQueryArgs(args)
 	if errMsg != "" {
@@ -81,47 +87,43 @@ func (r *REPL) cmdFollow(out *strings.Builder, args []string) {
 
 	// Create cancellable context
 	queryCtx, queryCancel := context.WithCancel(r.ctx)
-	defer queryCancel()
 
 	r.queryMu.Lock()
 	r.queryCancel = queryCancel
 	r.queryMu.Unlock()
 
-	// Set up signal handler for Ctrl+C
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt)
-	defer signal.Stop(sigCh)
-
-	go func() {
-		select {
-		case <-sigCh:
-			queryCancel()
-		case <-queryCtx.Done():
-		}
-	}()
-
-	fmt.Println("Following... (Ctrl+C to stop)")
-
 	// Start the follow stream
 	seq, err := r.client.Follow(queryCtx, "", q)
 	if err != nil {
-		fmt.Printf("Follow error: %v\n", err)
+		queryCancel()
+		fmt.Fprintf(out, "Follow error: %v\n", err)
 		return
 	}
 
-	// Stream records until cancelled
-	for rec, err := range seq {
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				break
-			}
-			fmt.Printf("Error: %v\n", err)
-			continue
-		}
-		fmt.Println(r.formatRecord(rec))
-	}
+	// Create channel for live pager
+	linesChan := make(chan string, 100)
 
-	fmt.Println("\nFollow stopped.")
+	// Feed records to channel
+	go func() {
+		defer close(linesChan)
+		defer queryCancel()
+		for rec, err := range seq {
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					return
+				}
+				linesChan <- fmt.Sprintf("Error: %v", err)
+				continue
+			}
+			linesChan <- r.formatRecord(rec)
+		}
+	}()
+
+	// Run live pager (blocks until user quits)
+	r.pagerLive(linesChan)
+
+	// Cancel the query when pager exits
+	queryCancel()
 }
 
 func (r *REPL) cmdNext(out *strings.Builder, args []string) {
@@ -150,7 +152,8 @@ func (r *REPL) cmdReset(out *strings.Builder) {
 }
 
 func (r *REPL) formatRecord(rec chunk.Record) string {
-	ts := rec.IngestTS.Format(time.RFC3339Nano)
+	// Format timestamp with fixed width (always 30 chars: 2006-01-02T15:04:05.000000000Z)
+	ts := rec.IngestTS.Format("2006-01-02T15:04:05.000000000Z07:00")
 
 	var attrStr string
 	if len(rec.Attrs) > 0 {
@@ -168,5 +171,19 @@ func (r *REPL) formatRecord(rec chunk.Record) string {
 		attrStr = "-"
 	}
 
-	return fmt.Sprintf("%s %s %s", ts, attrStr, string(rec.Raw))
+	raw := strings.TrimRight(string(rec.Raw), "\r\n")
+
+	// Handle embedded newlines: indent continuation lines to align with the message start
+	// Prefix is: "timestamp attrs " - we'll pad continuation lines with spaces
+	prefix := ts + " " + attrStr + " "
+	if strings.ContainsAny(raw, "\r\n") {
+		indent := strings.Repeat(" ", len(prefix))
+		lines := strings.Split(raw, "\n")
+		for i := range lines {
+			lines[i] = strings.TrimRight(lines[i], "\r")
+		}
+		raw = strings.Join(lines, "\n"+indent)
+	}
+
+	return prefix + raw
 }

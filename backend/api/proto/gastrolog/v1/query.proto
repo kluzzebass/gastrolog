@@ -104,6 +104,7 @@ message ChunkPlan {
   string scan_mode = 5; // "sequential" or "index-driven"
   int64 estimated_records = 6;
   repeated string runtime_filters = 7;
+  string store_id = 8; // Store this chunk belongs to
 }
 
 message PipelineStep {

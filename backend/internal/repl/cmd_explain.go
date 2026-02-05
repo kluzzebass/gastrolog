@@ -78,7 +78,11 @@ func printExplainPlan(out *strings.Builder, plan *query.QueryPlan) {
 		if !cp.Sealed {
 			sealedStr = "active"
 		}
-		out.WriteString(fmt.Sprintf("Chunk %d: %s (%s)\n", i+1, cp.ChunkID.String(), sealedStr))
+		storePrefix := ""
+		if cp.StoreID != "" {
+			storePrefix = fmt.Sprintf("[%s] ", cp.StoreID)
+		}
+		out.WriteString(fmt.Sprintf("Chunk %d: %s%s (%s)\n", i+1, storePrefix, cp.ChunkID.String(), sealedStr))
 		out.WriteString(fmt.Sprintf("  Time Range: %s - %s [overlaps]\n",
 			cp.StartTS.Format("2006-01-02T15:04:05"),
 			cp.EndTS.Format("2006-01-02T15:04:05")))
