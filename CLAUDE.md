@@ -356,6 +356,18 @@ Connect RPC server exposing orchestrator functionality via gRPC/HTTP:
 - `ServeTCP(addr)` -- serve on TCP address
 - `Handler()` -- returns http.Handler for embedding/testing
 - `Stop(ctx)` -- graceful shutdown
+- `ShutdownChan()` -- channel closed when shutdown initiated via RPC
+
+**Graceful shutdown with drain:**
+- `inFlight sync.WaitGroup` tracks in-flight requests
+- `draining atomic.Bool` rejects new requests during drain
+- `trackingMiddleware` wraps handlers to increment/decrement WaitGroup
+- When `Shutdown(drain=true)` called, sets draining flag, waits for in-flight requests, then signals shutdown
+- When `Shutdown(drain=false)` called, signals shutdown immediately
+
+**Kubernetes probe endpoints:**
+- `/healthz` -- liveness probe, always returns 200
+- `/readyz` -- readiness probe, returns 200 when orchestrator running and not draining, 503 otherwise
 
 **Proto definitions** in `backend/api/proto/gastrolog/v1/`:
 - `query.proto` -- Query, Record, ChunkPlan messages; streaming Search/Follow RPCs
