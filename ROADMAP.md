@@ -23,11 +23,24 @@ This document outlines planned features and improvements. Items are roughly grou
 ## Receivers
 
 ### Production Receivers
+
+**Standards & Protocols:**
 - **Syslog** - UDP and TCP (RFC 3164, RFC 5424)
 - **RELP** - Reliable Event Logging Protocol with ack support
+- **OTLP** - OpenTelemetry logs (gRPC and HTTP)
+- **GELF** - Graylog Extended Log Format (UDP/TCP, Docker-native)
+- **Beats** - Elastic Beats protocol (Filebeat, etc.)
+- **Fluent Forward** - Fluent Bit/Fluentd forward protocol
+
+**Container/Orchestration:**
+- **Docker** - JSON file driver or Docker socket API
+- **Kubernetes** - Log files from /var/log/containers or API
+- **Journald** - systemd journal integration
+
+**Generic:**
 - **HTTP** - POST endpoint for log ingestion
 - **File/Tail** - Watch and tail log files
-- **Journald** - systemd journal integration
+- **Kafka** - Consumer for log pipelines
 
 ### Receiver Features
 - Backpressure signaling
