@@ -119,23 +119,71 @@ func (q Query) TimeBounds() (lower, upper time.Time) {
 	return q.Start, q.End
 }
 
+// MultiStorePosition represents a position within a specific store's chunk.
+type MultiStorePosition struct {
+	StoreID  string
+	ChunkID  chunk.ChunkID
+	Position uint64
+}
+
 // ResumeToken allows resuming a query from where it left off.
-// Next refers to the first record that has NOT yet been returned.
-// Tokens are valid as long as the referenced chunk exists.
+// For multi-store queries, Positions contains the last position in each active chunk.
+// Tokens are valid as long as the referenced chunks exist.
 type ResumeToken struct {
+	// Positions contains the last yielded position for each store/chunk combination.
+	// For single-store queries with one chunk, this will have one entry.
+	// For multi-store queries, this may have multiple entries (one per active chunk).
+	Positions []MultiStorePosition
+
+	// Legacy field for backward compatibility with single-store resume tokens.
+	// Deprecated: use Positions instead.
 	Next chunk.RecordRef
+}
+
+// Normalize converts a legacy resume token (using Next) to the new format (using Positions).
+// If Positions is already populated, returns the token unchanged.
+// The storeID parameter is used for legacy tokens that don't include store information.
+func (t *ResumeToken) Normalize(defaultStoreID string) *ResumeToken {
+	if t == nil {
+		return nil
+	}
+	// If Positions is already populated, use it as-is.
+	if len(t.Positions) > 0 {
+		return t
+	}
+	// Convert legacy Next field to Positions.
+	var zeroChunkID chunk.ChunkID
+	if t.Next.ChunkID == zeroChunkID {
+		return t
+	}
+	return &ResumeToken{
+		Positions: []MultiStorePosition{{
+			StoreID:  defaultStoreID,
+			ChunkID:  t.Next.ChunkID,
+			Position: t.Next.Pos,
+		}},
+	}
 }
 
 // ErrInvalidResumeToken is returned when a resume token references a chunk that no longer exists.
 var ErrInvalidResumeToken = errors.New("invalid resume token: chunk no longer exists")
 
+// ErrMultiStoreNotSupported is returned when an operation doesn't support multi-store mode.
+var ErrMultiStoreNotSupported = errors.New("operation not supported in multi-store mode")
+
 // recordWithRef combines a record with its reference for internal iteration.
+// StoreID is included for multi-store queries.
 type recordWithRef struct {
-	Record chunk.Record
-	Ref    chunk.RecordRef
+	StoreID string
+	Record  chunk.Record
+	Ref     chunk.RecordRef
 }
 
 // Engine executes queries against chunk and index managers.
+//
+// The engine can operate in two modes:
+//   - Single-store mode: created with New(), queries one store
+//   - Multi-store mode: created with NewWithRegistry(), queries across stores
 //
 // Logging:
 //   - Logger is dependency-injected via the constructor
@@ -143,8 +191,12 @@ type recordWithRef struct {
 //   - Logging is intentionally sparse; only lifecycle events are logged
 //   - No logging in hot paths (search iteration, filtering)
 type Engine struct {
+	// Single-store mode (legacy)
 	chunks  chunk.ChunkManager
 	indexes index.IndexManager
+
+	// Multi-store mode
+	registry StoreRegistry
 
 	// Logger for this engine instance.
 	// Scoped with component="query-engine" at construction time.
@@ -152,6 +204,7 @@ type Engine struct {
 }
 
 // New creates a query engine backed by the given chunk and index managers.
+// This creates a single-store engine for backward compatibility.
 // If logger is nil, logging is disabled.
 func New(chunks chunk.ChunkManager, indexes index.IndexManager, logger *slog.Logger) *Engine {
 	return &Engine{
@@ -159,6 +212,39 @@ func New(chunks chunk.ChunkManager, indexes index.IndexManager, logger *slog.Log
 		indexes: indexes,
 		logger:  logging.Default(logger).With("component", "query-engine"),
 	}
+}
+
+// NewWithRegistry creates a query engine that can search across multiple stores.
+// Store predicates in queries (e.g., "store=prod") filter which stores are searched.
+// If no store predicate is present, all stores are searched.
+// If logger is nil, logging is disabled.
+func NewWithRegistry(registry StoreRegistry, logger *slog.Logger) *Engine {
+	return &Engine{
+		registry: registry,
+		logger:   logging.Default(logger).With("component", "query-engine"),
+	}
+}
+
+// isMultiStore returns true if this engine operates in multi-store mode.
+func (e *Engine) isMultiStore() bool {
+	return e.registry != nil
+}
+
+// getStoreManagers returns the chunk and index managers for a store.
+// For single-store mode, storeID is ignored.
+func (e *Engine) getStoreManagers(storeID string) (chunk.ChunkManager, index.IndexManager) {
+	if e.registry != nil {
+		return e.registry.ChunkManager(storeID), e.registry.IndexManager(storeID)
+	}
+	return e.chunks, e.indexes
+}
+
+// listStores returns all store IDs this engine can query.
+func (e *Engine) listStores() []string {
+	if e.registry != nil {
+		return e.registry.ListStores()
+	}
+	return []string{"default"}
 }
 
 // selectChunks filters to chunks that overlap the query time range,
@@ -193,11 +279,18 @@ func (e *Engine) selectChunks(metas []chunk.ChunkMeta, q Query) []chunk.ChunkMet
 }
 
 // searchChunkWithRef returns an iterator over records in a single chunk, including their refs.
+// storeID identifies which store the chunk belongs to (for multi-store queries).
 // startPos allows resuming from a specific position within the chunk.
 // Unsealed chunks are scanned sequentially without indexes.
-func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, meta chunk.ChunkMeta, startPos *uint64) iter.Seq2[recordWithRef, error] {
+func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, storeID string, meta chunk.ChunkMeta, startPos *uint64) iter.Seq2[recordWithRef, error] {
 	return func(yield func(recordWithRef, error) bool) {
-		cursor, err := e.chunks.OpenCursor(meta.ID)
+		cm, im := e.getStoreManagers(storeID)
+		if cm == nil {
+			yield(recordWithRef{}, errors.New("store not found: "+storeID))
+			return
+		}
+
+		cursor, err := cm.OpenCursor(meta.ID)
 		if err != nil {
 			yield(recordWithRef{}, err)
 			return
@@ -230,7 +323,7 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, meta chunk.Chu
 
 		// Try to use indexes for sealed chunks, fall back to sequential scan
 		// if indexes aren't available yet (chunk sealed but not yet indexed).
-		scanner, err := e.buildScanner(cursor, q, meta, startPos)
+		scanner, err := e.buildScannerWithManagers(cursor, q, storeID, meta, startPos, cm, im)
 		if err != nil {
 			yield(recordWithRef{}, err)
 			return
@@ -250,13 +343,22 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, meta chunk.Chu
 
 // buildScanner creates a scanner for a chunk using the composable filter pipeline.
 // It tries to use indexes when available, falling back to runtime filters when not.
+// This is a convenience wrapper for single-store mode.
 func (e *Engine) buildScanner(cursor chunk.RecordCursor, q Query, meta chunk.ChunkMeta, startPos *uint64) (iter.Seq2[recordWithRef, error], error) {
+	return e.buildScannerWithManagers(cursor, q, "default", meta, startPos, e.chunks, e.indexes)
+}
+
+// buildScannerWithManagers creates a scanner for a chunk using the composable filter pipeline.
+// It tries to use indexes when available, falling back to runtime filters when not.
+// storeID is included in the returned recordWithRef for multi-store queries.
+func (e *Engine) buildScannerWithManagers(cursor chunk.RecordCursor, q Query, storeID string, meta chunk.ChunkMeta, startPos *uint64, cm chunk.ChunkManager, im index.IndexManager) (iter.Seq2[recordWithRef, error], error) {
 	b := newScannerBuilder(meta.ID)
+	b.storeID = storeID
 
 	// Set minimum position from binary search on idx.log.
 	lower, _ := q.TimeBounds()
 	if !lower.IsZero() {
-		if pos, found, err := e.chunks.FindStartPosition(meta.ID, lower); err == nil && found {
+		if pos, found, err := cm.FindStartPosition(meta.ID, lower); err == nil && found {
 			b.setMinPosition(pos)
 		}
 	}
@@ -287,7 +389,7 @@ func (e *Engine) buildScanner(cursor chunk.RecordCursor, q Query, meta chunk.Chu
 			// Apply token filter for positive predicates
 			if len(tokens) > 0 {
 				if meta.Sealed {
-					ok, empty := applyTokenIndex(b, e.indexes, meta.ID, tokens)
+					ok, empty := applyTokenIndex(b, im, meta.ID, tokens)
 					if empty {
 						return emptyScanner(), nil
 					}
@@ -302,7 +404,7 @@ func (e *Engine) buildScanner(cursor chunk.RecordCursor, q Query, meta chunk.Chu
 			// Apply KV filter for positive predicates
 			if len(kv) > 0 {
 				if meta.Sealed {
-					ok, empty := applyKeyValueIndex(b, e.indexes, meta.ID, kv)
+					ok, empty := applyKeyValueIndex(b, im, meta.ID, kv)
 					if empty {
 						return emptyScanner(), nil
 					}
@@ -335,7 +437,7 @@ func (e *Engine) buildScanner(cursor chunk.RecordCursor, q Query, meta chunk.Chu
 
 				// Try to get positions from token index
 				if len(tokens) > 0 && meta.Sealed {
-					ok, empty := applyTokenIndex(branchBuilder, e.indexes, meta.ID, tokens)
+					ok, empty := applyTokenIndex(branchBuilder, im, meta.ID, tokens)
 					if empty {
 						branchEmpty = true
 					}
@@ -344,7 +446,7 @@ func (e *Engine) buildScanner(cursor chunk.RecordCursor, q Query, meta chunk.Chu
 
 				// Try to get positions from KV index
 				if !branchEmpty && len(kv) > 0 && meta.Sealed {
-					ok, empty := applyKeyValueIndex(branchBuilder, e.indexes, meta.ID, kv)
+					ok, empty := applyKeyValueIndex(branchBuilder, im, meta.ID, kv)
 					if empty {
 						branchEmpty = true
 					}

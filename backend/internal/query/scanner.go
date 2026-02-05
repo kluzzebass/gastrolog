@@ -72,6 +72,7 @@ type recordFilter func(chunk.Record) bool
 //   - empty (len==0): index says no matches, skip chunk entirely
 //   - non-empty: seek to these positions only
 type scannerBuilder struct {
+	storeID   string // store ID for multi-store queries
 	chunkID   chunk.ChunkID
 	positions []uint64       // nil = sequential, empty = no matches, non-empty = seek positions
 	filters   []recordFilter // applied in order; cheap filters should be added first
@@ -177,6 +178,7 @@ func (b *scannerBuilder) build(cursor chunk.RecordCursor, q Query) iter.Seq2[rec
 func (b *scannerBuilder) buildSequentialScanner(cursor chunk.RecordCursor, q Query) iter.Seq2[recordWithRef, error] {
 	lower, upper := q.TimeBounds()
 	filters := b.filters
+	storeID := b.storeID
 
 	if q.Reverse() {
 		return func(yield func(recordWithRef, error) bool) {
@@ -186,7 +188,7 @@ func (b *scannerBuilder) buildSequentialScanner(cursor chunk.RecordCursor, q Que
 					return
 				}
 				if err != nil {
-					yield(recordWithRef{Ref: ref}, err)
+					yield(recordWithRef{StoreID: storeID, Ref: ref}, err)
 					return
 				}
 
@@ -203,7 +205,7 @@ func (b *scannerBuilder) buildSequentialScanner(cursor chunk.RecordCursor, q Que
 					continue
 				}
 
-				if !yield(recordWithRef{Record: rec, Ref: ref}, nil) {
+				if !yield(recordWithRef{StoreID: storeID, Record: rec, Ref: ref}, nil) {
 					return
 				}
 			}
@@ -217,7 +219,7 @@ func (b *scannerBuilder) buildSequentialScanner(cursor chunk.RecordCursor, q Que
 				return
 			}
 			if err != nil {
-				yield(recordWithRef{Ref: ref}, err)
+				yield(recordWithRef{StoreID: storeID, Ref: ref}, err)
 				return
 			}
 
@@ -234,7 +236,7 @@ func (b *scannerBuilder) buildSequentialScanner(cursor chunk.RecordCursor, q Que
 				continue
 			}
 
-			if !yield(recordWithRef{Record: rec, Ref: ref}, nil) {
+			if !yield(recordWithRef{StoreID: storeID, Record: rec, Ref: ref}, nil) {
 				return
 			}
 		}
@@ -246,6 +248,7 @@ func (b *scannerBuilder) buildPositionScanner(cursor chunk.RecordCursor, q Query
 	lower, upper := q.TimeBounds()
 	positions := b.positions
 	chunkID := b.chunkID
+	storeID := b.storeID
 	filters := b.filters
 
 	if q.Reverse() {
@@ -254,7 +257,7 @@ func (b *scannerBuilder) buildPositionScanner(cursor chunk.RecordCursor, q Query
 				pos := positions[i]
 				ref := chunk.RecordRef{ChunkID: chunkID, Pos: pos}
 				if err := cursor.Seek(ref); err != nil {
-					yield(recordWithRef{Ref: ref}, err)
+					yield(recordWithRef{StoreID: storeID, Ref: ref}, err)
 					return
 				}
 
@@ -263,7 +266,7 @@ func (b *scannerBuilder) buildPositionScanner(cursor chunk.RecordCursor, q Query
 					return
 				}
 				if err != nil {
-					yield(recordWithRef{Ref: ref}, err)
+					yield(recordWithRef{StoreID: storeID, Ref: ref}, err)
 					return
 				}
 
@@ -280,7 +283,7 @@ func (b *scannerBuilder) buildPositionScanner(cursor chunk.RecordCursor, q Query
 					continue
 				}
 
-				if !yield(recordWithRef{Record: rec, Ref: ref}, nil) {
+				if !yield(recordWithRef{StoreID: storeID, Record: rec, Ref: ref}, nil) {
 					return
 				}
 			}
@@ -291,7 +294,7 @@ func (b *scannerBuilder) buildPositionScanner(cursor chunk.RecordCursor, q Query
 		for _, pos := range positions {
 			ref := chunk.RecordRef{ChunkID: chunkID, Pos: pos}
 			if err := cursor.Seek(ref); err != nil {
-				yield(recordWithRef{Ref: ref}, err)
+				yield(recordWithRef{StoreID: storeID, Ref: ref}, err)
 				return
 			}
 
@@ -300,7 +303,7 @@ func (b *scannerBuilder) buildPositionScanner(cursor chunk.RecordCursor, q Query
 				return
 			}
 			if err != nil {
-				yield(recordWithRef{Ref: ref}, err)
+				yield(recordWithRef{StoreID: storeID, Ref: ref}, err)
 				return
 			}
 
@@ -317,7 +320,7 @@ func (b *scannerBuilder) buildPositionScanner(cursor chunk.RecordCursor, q Query
 				continue
 			}
 
-			if !yield(recordWithRef{Record: rec, Ref: ref}, nil) {
+			if !yield(recordWithRef{StoreID: storeID, Record: rec, Ref: ref}, nil) {
 				return
 			}
 		}
