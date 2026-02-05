@@ -686,6 +686,7 @@ func (e *Engine) Follow(ctx context.Context, q Query) iter.Seq2[chunk.Record, er
 		lastPositions := make(map[chunkKey]uint64)
 
 		// Initialize positions to end of each chunk (only show NEW records).
+		// We use positionExhausted as a marker for "skip this sealed chunk entirely".
 		for _, storeID := range selectedStores {
 			cm, _ := e.getStoreManagers(storeID)
 			if cm == nil {
@@ -697,26 +698,30 @@ func (e *Engine) Follow(ctx context.Context, q Query) iter.Seq2[chunk.Record, er
 			}
 			for _, meta := range metas {
 				key := chunkKey{storeID: storeID, chunkID: meta.ID}
-				// For sealed chunks, position at RecordCount means "at end".
-				// For active chunks, we need to find the current end.
 				if meta.Sealed {
-					lastPositions[key] = uint64(meta.RecordCount) - 1
+					// Sealed chunks won't get new records - mark as exhausted.
+					lastPositions[key] = positionExhausted
 				} else {
-					// Find current end of active chunk.
+					// For active chunk, find current end position.
 					cursor, err := cm.OpenCursor(meta.ID)
 					if err != nil {
 						continue
 					}
+					hasRecords := false
 					var lastPos uint64
 					for {
 						_, ref, err := cursor.Next()
 						if err != nil {
 							break
 						}
+						hasRecords = true
 						lastPos = ref.Pos
 					}
 					cursor.Close()
-					lastPositions[key] = lastPos
+					if hasRecords {
+						lastPositions[key] = lastPos
+					}
+					// If no records yet, don't add to lastPositions - we'll read from start.
 				}
 			}
 		}
@@ -756,6 +761,11 @@ func (e *Engine) Follow(ctx context.Context, q Query) iter.Seq2[chunk.Record, er
 
 				for _, meta := range metas {
 					key := chunkKey{storeID: storeID, chunkID: meta.ID}
+
+					// Skip exhausted chunks (sealed chunks we've already processed).
+					if lastPos, ok := lastPositions[key]; ok && lastPos == positionExhausted {
+						continue
+					}
 
 					cursor, err := cm.OpenCursor(meta.ID)
 					if err != nil {
