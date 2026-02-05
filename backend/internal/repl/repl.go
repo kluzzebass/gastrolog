@@ -223,12 +223,13 @@ func (r *REPL) execute(line string) (exit bool) {
 	return false
 }
 
-// printOutput prints output, using a pager if it's large.
+// printOutput prints output, using a pager if it exceeds terminal height.
 func (r *REPL) printOutput(output string) {
 	lines := strings.Count(output, "\n")
+	termHeight := getTerminalHeight()
 
-	// Use pager for large output (more than ~1 screen)
-	if lines > 40 {
+	// Use pager if output exceeds terminal height
+	if lines >= termHeight {
 		r.pager(output)
 	} else {
 		fmt.Print(output)
