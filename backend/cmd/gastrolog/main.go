@@ -28,6 +28,7 @@ import (
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/receiver/chatterbox"
 	recvhttp "gastrolog/internal/receiver/http"
+	recvsyslog "gastrolog/internal/receiver/syslog"
 	"gastrolog/internal/repl"
 )
 
@@ -136,6 +137,7 @@ func buildFactories(logger *slog.Logger) orchestrator.Factories {
 		Receivers: map[string]orchestrator.ReceiverFactory{
 			"chatterbox": chatterbox.NewReceiver,
 			"http":       recvhttp.NewFactory(),
+			"syslog":     recvsyslog.NewFactory(),
 		},
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"file":   chunkfile.NewFactory(),

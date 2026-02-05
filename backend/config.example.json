@@ -60,6 +60,14 @@
       "params": {
         "addr": ":3100"
       }
+    },
+    {
+      "id": "syslog",
+      "type": "syslog",
+      "params": {
+        "udp_addr": ":514",
+        "tcp_addr": ":514"
+      }
     }
   ]
 }

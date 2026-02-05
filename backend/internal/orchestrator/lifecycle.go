@@ -30,21 +30,26 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	// Create ingest channel.
 	o.ingestCh = make(chan IngestMessage, o.ingestSize)
 
+	// Log startup info.
+	o.logger.Info("starting orchestrator",
+		"stores", len(o.chunks),
+		"receivers", len(o.receivers))
+
+	if o.router == nil && len(o.chunks) > 1 {
+		o.logger.Warn("no router configured, messages will fan out to all stores")
+	}
+
 	// Launch receiver goroutines with per-receiver contexts.
 	for id, r := range o.receivers {
 		id, r := id, r // capture for closure
 		recvCtx, recvCancel := context.WithCancel(ctx)
 		o.receiverCancels[id] = recvCancel
+		o.logger.Info("starting receiver", "id", id)
 		o.receiverWg.Go(func() { r.Run(recvCtx, o.ingestCh) })
 	}
 
 	// Launch ingest loop.
 	o.ingestLoopWg.Go(func() { o.ingestLoop(ctx) })
-
-	// Log startup info.
-	if o.router == nil {
-		o.logger.Warn("starting without router, messages will fan out to all stores")
-	}
 
 	return nil
 }
