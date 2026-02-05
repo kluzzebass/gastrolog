@@ -44,7 +44,7 @@ func setupTestSystem(t *testing.T) (Client, *orchestrator.Orchestrator, chunk.Ch
 	orch.RegisterIndexManager("default", im)
 	orch.RegisterQueryEngine("default", qe)
 
-	return NewDirectClient(orch), orch, cm
+	return NewEmbeddedClient(orch), orch, cm
 }
 
 func TestREPL_Help(t *testing.T) {

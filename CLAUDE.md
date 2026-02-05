@@ -378,7 +378,6 @@ Interactive command-line interface for querying a running GastroLog system:
 The REPL uses a `Client` interface to abstract the backend, enabling both local and remote operation:
 
 - **Client** interface -- `Search`, `Explain`, `ListStores`, `ChunkManager`, `IndexManager`, `Analyzer`, `IsRunning`
-- **DirectClient** -- wraps orchestrator directly (bypasses gRPC, used for testing)
 - **GRPCClient** -- makes Connect RPC calls to a remote server
 - **EmbeddedClient** -- uses in-memory HTTP transport to talk gRPC to an in-process server
 
@@ -391,12 +390,9 @@ client := repl.NewGRPCClientUnix("/var/run/gastrolog.sock")
 
 // Embedded mode (gRPC over in-memory transport)
 client := repl.NewEmbeddedClient(orch)
-
-// Direct mode (no gRPC, for testing)
-client := repl.NewDirectClient(orch)
 ```
 
-The main binary uses `NewEmbeddedClient` in REPL mode so the REPL always talks gRPC internally, minimizing differences between standalone and client-server operation.
+The REPL always talks gRPC internally, whether connecting to a remote server or running in embedded mode. This minimizes differences between standalone and client-server operation.
 
 **Commands:**
 - `query [filters...]` -- execute query with filters
@@ -573,7 +569,6 @@ backend/
       cmd_analyze.go            Analyze command
       cmd_stats.go              Stats, status commands
       client.go                 Client interface definition
-      client_direct.go          DirectClient wrapping orchestrator
       client_grpc.go            GRPCClient for remote connections
       client_embedded.go        EmbeddedClient with in-memory transport
     server/

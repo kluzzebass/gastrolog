@@ -6,18 +6,11 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	chunkmem "gastrolog/internal/chunk/memory"
-	"gastrolog/internal/index"
-	indexmem "gastrolog/internal/index/memory"
-	memattr "gastrolog/internal/index/memory/attr"
-	"gastrolog/internal/index/memory/kv"
-	memtoken "gastrolog/internal/index/memory/token"
-	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 )
 
 func TestEmbeddedClient_ListStores(t *testing.T) {
-	client := setupEmbeddedClient(t)
+	client, _, _ := setupTestSystem(t)
 
 	stores := client.ListStores()
 	if len(stores) != 1 {
@@ -29,7 +22,7 @@ func TestEmbeddedClient_ListStores(t *testing.T) {
 }
 
 func TestEmbeddedClient_Search(t *testing.T) {
-	client, orch, cm := setupEmbeddedClientWithCM(t)
+	client, orch, cm := setupTestSystem(t)
 
 	// Start orchestrator
 	if err := orch.Start(context.Background()); err != nil {
@@ -77,10 +70,7 @@ func TestEmbeddedClient_Search(t *testing.T) {
 }
 
 func TestEmbeddedClient_IsRunning(t *testing.T) {
-	client, orch, _ := setupEmbeddedClientWithCM(t)
-
-	// Before start, should report not running (health check fails)
-	// Note: The health endpoint returns status based on orchestrator state
+	client, orch, _ := setupTestSystem(t)
 
 	// Start orchestrator
 	if err := orch.Start(context.Background()); err != nil {
@@ -92,41 +82,4 @@ func TestEmbeddedClient_IsRunning(t *testing.T) {
 	if !client.IsRunning() {
 		t.Error("expected IsRunning() to return true after start")
 	}
-}
-
-func setupEmbeddedClient(t *testing.T) *GRPCClient {
-	client, _, _ := setupEmbeddedClientWithCM(t)
-	return client
-}
-
-func setupEmbeddedClientWithCM(t *testing.T) (*GRPCClient, *orchestrator.Orchestrator, chunk.ChunkManager) {
-	t.Helper()
-
-	// Create memory-based chunk manager
-	cm, err := chunkmem.NewManager(chunkmem.Config{
-		RotationPolicy: chunk.NewRecordCountPolicy(10000),
-	})
-	if err != nil {
-		t.Fatalf("create chunk manager: %v", err)
-	}
-
-	// Create memory-based index manager
-	tokIdx := memtoken.NewIndexer(cm)
-	attrIdx := memattr.NewIndexer(cm)
-	kvIdx := kv.NewIndexer(cm)
-	im := indexmem.NewManager([]index.Indexer{tokIdx, attrIdx, kvIdx}, tokIdx, attrIdx, kvIdx, nil)
-
-	// Create query engine
-	qe := query.New(cm, im, nil)
-
-	// Create orchestrator
-	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterChunkManager("default", cm)
-	orch.RegisterIndexManager("default", im)
-	orch.RegisterQueryEngine("default", qe)
-
-	// Create embedded client
-	client := NewEmbeddedClient(orch)
-
-	return client, orch, cm
 }
