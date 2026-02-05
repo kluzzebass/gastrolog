@@ -16,6 +16,7 @@ import (
 type Client interface {
 	// Query operations
 	Search(ctx context.Context, store string, q query.Query, resume *query.ResumeToken) (iter.Seq2[chunk.Record, error], func() *query.ResumeToken, error)
+	Follow(ctx context.Context, store string, q query.Query) (iter.Seq2[chunk.Record, error], error)
 	Explain(ctx context.Context, store string, q query.Query) (*query.QueryPlan, error)
 
 	// Store operations

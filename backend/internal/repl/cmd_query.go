@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/query"
-	"gastrolog/internal/querylang"
 )
 
 func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
@@ -86,200 +84,29 @@ func (r *REPL) cmdFollow(out *strings.Builder, args []string) {
 	r.queryCancel = queryCancel
 	r.queryMu.Unlock()
 
-	out.WriteString("Following... (Ctrl+C to stop)\n")
+	// Print immediately (before the blocking call)
+	fmt.Println("Following... (Ctrl+C to stop)")
 
-	// Run follow mode synchronously (blocking)
-	r.runFollowModeBlocking(queryCtx, q, out)
-
-	out.WriteString("Follow stopped.\n")
-}
-
-// runFollowModeBlocking streams new records synchronously until context is cancelled.
-func (r *REPL) runFollowModeBlocking(ctx context.Context, q query.Query, out *strings.Builder) {
-	cm := r.client.ChunkManager("")
-	if cm == nil {
-		out.WriteString("Error: chunk manager not found\n")
+	// Start the follow stream
+	seq, err := r.client.Follow(queryCtx, "", q)
+	if err != nil {
+		fmt.Printf("Follow error: %v\n", err)
 		return
 	}
 
-	// Start from current end of active chunk - only show NEW records
-	var currentChunkID chunk.ChunkID
-	var nextPos uint64
-
-	if active := cm.Active(); active != nil {
-		currentChunkID = active.ID
-		// Find current end position
-		if cursor, err := cm.OpenCursor(active.ID); err == nil {
-			for {
-				_, ref, err := cursor.Next()
-				if errors.Is(err, chunk.ErrNoMoreRecords) {
-					break
-				}
-				if err != nil {
-					break
-				}
-				nextPos = ref.Pos + 1
-			}
-			cursor.Close()
-		}
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		// Get the active chunk
-		active := cm.Active()
-		if active == nil {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(100 * time.Millisecond):
-				continue
-			}
-		}
-
-		// If chunk changed (sealed and new one created), start from beginning of new chunk
-		if active.ID != currentChunkID {
-			currentChunkID = active.ID
-			nextPos = 0
-		}
-
-		// Open cursor and seek to our position
-		cursor, err := cm.OpenCursor(currentChunkID)
+	// Stream records until cancelled
+	for rec, err := range seq {
 		if err != nil {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(100 * time.Millisecond):
-				continue
-			}
-		}
-
-		if nextPos > 0 {
-			if err := cursor.Seek(chunk.RecordRef{ChunkID: currentChunkID, Pos: nextPos}); err != nil {
-				cursor.Close()
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(100 * time.Millisecond):
-					continue
-				}
-			}
-		}
-
-		// Read new records
-		for {
-			rec, ref, err := cursor.Next()
-			if errors.Is(err, chunk.ErrNoMoreRecords) {
+			if errors.Is(err, context.Canceled) {
 				break
 			}
-			if err != nil {
-				fmt.Fprintf(out, "Error: %v\n", err)
-				break
-			}
-
-			nextPos = ref.Pos + 1
-
-			// Apply filter expression if present
-			if q.BoolExpr != nil && !matchesBoolExpr(q.BoolExpr, rec) {
-				continue
-			}
-
-			// Print immediately
-			fmt.Print(r.formatRecord(rec) + "\n")
+			fmt.Printf("Error: %v\n", err)
+			continue
 		}
-
-		cursor.Close()
-
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(100 * time.Millisecond):
-		}
+		fmt.Println(r.formatRecord(rec))
 	}
-}
 
-// matchesBoolExpr checks if a record matches a boolean expression using DNF evaluation.
-func matchesBoolExpr(expr querylang.Expr, rec chunk.Record) bool {
-	dnf := querylang.ToDNF(expr)
-	for _, branch := range dnf.Branches {
-		if matchesBranch(&branch, rec) {
-			return true
-		}
-	}
-	return false
-}
-
-// matchesBranch checks if a record matches a single DNF branch.
-func matchesBranch(branch *querylang.Conjunction, rec chunk.Record) bool {
-	for _, p := range branch.Positive {
-		if !matchesPredicate(p, rec) {
-			return false
-		}
-	}
-	for _, p := range branch.Negative {
-		if matchesPredicate(p, rec) {
-			return false
-		}
-	}
-	return true
-}
-
-// matchesPredicate checks if a record matches a single predicate.
-func matchesPredicate(pred *querylang.PredicateExpr, rec chunk.Record) bool {
-	switch pred.Kind {
-	case querylang.PredToken:
-		return matchesToken(rec.Raw, pred.Value)
-	case querylang.PredKV:
-		return matchesKV(rec.Attrs, rec.Raw, pred.Key, pred.Value)
-	case querylang.PredKeyExists:
-		return matchesKeyExists(rec.Attrs, rec.Raw, pred.Key)
-	case querylang.PredValueExists:
-		return matchesValueExists(rec.Attrs, rec.Raw, pred.Value)
-	default:
-		return false
-	}
-}
-
-func matchesToken(raw []byte, token string) bool {
-	return strings.Contains(strings.ToLower(string(raw)), strings.ToLower(token))
-}
-
-func matchesKV(attrs chunk.Attributes, raw []byte, key, value string) bool {
-	for k, v := range attrs {
-		if strings.EqualFold(k, key) && strings.EqualFold(v, value) {
-			return true
-		}
-	}
-	rawLower := strings.ToLower(string(raw))
-	pattern := strings.ToLower(key) + "=" + strings.ToLower(value)
-	return strings.Contains(rawLower, pattern)
-}
-
-func matchesKeyExists(attrs chunk.Attributes, raw []byte, key string) bool {
-	for k := range attrs {
-		if strings.EqualFold(k, key) {
-			return true
-		}
-	}
-	rawLower := strings.ToLower(string(raw))
-	pattern := strings.ToLower(key) + "="
-	return strings.Contains(rawLower, pattern)
-}
-
-func matchesValueExists(attrs chunk.Attributes, raw []byte, value string) bool {
-	for _, v := range attrs {
-		if strings.EqualFold(v, value) {
-			return true
-		}
-	}
-	rawLower := strings.ToLower(string(raw))
-	pattern := "=" + strings.ToLower(value)
-	return strings.Contains(rawLower, pattern)
+	fmt.Println("Follow stopped.")
 }
 
 func (r *REPL) cmdNext(out *strings.Builder, args []string) {
