@@ -1,9 +1,9 @@
-// Package repl provides an in-process REPL for interacting with a running
-// GastroLog system. The REPL is a client of the orchestrator and query engine,
-// not their owner. It only observes and queries via public APIs.
+// Package repl provides an interactive REPL for interacting with a GastroLog
+// system. The REPL communicates through a Client interface, which can be
+// backed by either a direct in-process connection (embedded mode) or a
+// remote gRPC connection (client-server mode).
 //
-// The REPL does not control the system. It does not start components, stop
-// components, manage lifecycles, own goroutines, or coordinate ingestion.
+// The REPL does not control the system. It only observes and queries.
 package repl
 
 import (
@@ -21,7 +21,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 )
 
@@ -31,10 +30,10 @@ type recordResult struct {
 	err error
 }
 
-// REPL provides an interactive read-eval-print loop for querying a running
-// GastroLog system. It interacts only through exported, stable interfaces.
+// REPL provides an interactive read-eval-print loop for querying a GastroLog
+// system. It communicates through a Client interface.
 type REPL struct {
-	orch *orchestrator.Orchestrator
+	client Client
 
 	// Query state
 	store       string                    // target store for queries
@@ -76,13 +75,12 @@ func followTick() tea.Cmd {
 	})
 }
 
-// New creates a REPL attached to an already-running system.
-// All components must be live and concurrent.
-func New(orch *orchestrator.Orchestrator) *REPL {
+// New creates a REPL using the provided client.
+func New(client Client) *REPL {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	r := &REPL{
-		orch:         orch,
+		client:       client,
 		store:        "default",
 		pageSize:     defaultPageSize,
 		ctx:          ctx,
@@ -102,13 +100,14 @@ func New(orch *orchestrator.Orchestrator) *REPL {
 
 // NewSimple creates a REPL for testing without bubbletea.
 // This version reads commands from the provided input and writes output to out.
-func NewSimple(orch *orchestrator.Orchestrator, in io.Reader, out io.Writer) *simpleREPL {
+func NewSimple(client Client, in io.Reader, out io.Writer) *simpleREPL {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &simpleREPL{
 		repl: &REPL{
-			orch:         orch,
+			client:       client,
 			store:        "default",
+			pageSize:     defaultPageSize,
 			ctx:          ctx,
 			cancel:       cancel,
 			history:      make([]string, 0),
@@ -419,10 +418,10 @@ func (m *model) getChunkIDSuggestions(currentInput string) []string {
 
 	// Collect all chunk IDs across all stores
 	var suggestions []string
-	stores := m.repl.orch.ChunkManagers()
+	stores := m.repl.client.ListStores()
 
 	for _, store := range stores {
-		cm := m.repl.orch.ChunkManager(store)
+		cm := m.repl.client.ChunkManager(store)
 		if cm == nil {
 			continue
 		}

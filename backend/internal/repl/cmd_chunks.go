@@ -11,7 +11,7 @@ import (
 
 // cmdChunks lists all chunks across all stores with their metadata.
 func (r *REPL) cmdChunks(out *strings.Builder) {
-	stores := r.orch.ChunkManagers()
+	stores := r.client.ListStores()
 	if len(stores) == 0 {
 		out.WriteString("No chunk managers registered.\n")
 		return
@@ -20,7 +20,7 @@ func (r *REPL) cmdChunks(out *strings.Builder) {
 	slices.Sort(stores)
 
 	for _, store := range stores {
-		cm := r.orch.ChunkManager(store)
+		cm := r.client.ChunkManager(store)
 		if cm == nil {
 			continue
 		}
@@ -83,13 +83,13 @@ func (r *REPL) cmdChunk(out *strings.Builder, args []string) {
 	}
 
 	// Find the chunk across all stores
-	stores := r.orch.ChunkManagers()
+	stores := r.client.ListStores()
 	var foundStore string
 	var meta chunk.ChunkMeta
-	var cm chunk.ChunkManager
+	var cm ChunkReader
 
 	for _, store := range stores {
-		cm = r.orch.ChunkManager(store)
+		cm = r.client.ChunkManager(store)
 		if cm == nil {
 			continue
 		}
@@ -123,7 +123,7 @@ func (r *REPL) cmdChunk(out *strings.Builder, args []string) {
 
 	// Show index status if sealed
 	if meta.Sealed {
-		im := r.orch.IndexManager(foundStore)
+		im := r.client.IndexManager(foundStore)
 		if im != nil {
 			complete, err := im.IndexesComplete(chunkID)
 			if err != nil {

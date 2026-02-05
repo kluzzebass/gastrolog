@@ -41,7 +41,7 @@ func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
 		go r.runFollowMode(queryCtx, ch, q)
 	} else {
 		// Execute query
-		seq, getToken, err := r.orch.Search(r.ctx, r.store, q, nil)
+		seq, getToken, err := r.client.Search(r.ctx, r.store, q, nil)
 		if err != nil {
 			fmt.Fprintf(out, "Query error: %v\n", err)
 			return
@@ -77,7 +77,7 @@ func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
 func (r *REPL) runFollowMode(ctx context.Context, ch chan<- recordResult, q query.Query) {
 	defer close(ch)
 
-	cm := r.orch.ChunkManager(r.store)
+	cm := r.client.ChunkManager(r.store)
 	if cm == nil {
 		ch <- recordResult{err: errors.New("chunk manager not found for store")}
 		return

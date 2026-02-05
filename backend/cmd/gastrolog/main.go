@@ -108,7 +108,7 @@ func run(ctx context.Context, logger *slog.Logger, configPath string, replMode b
 
 	if replMode {
 		// Run REPL in foreground. REPL exit triggers shutdown.
-		r := repl.New(orch)
+		r := repl.New(repl.NewDirectClient(orch))
 		if err := r.Run(); err != nil && err != context.Canceled {
 			logger.Error("repl error", "error", err)
 		}

@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/index"
 )
 
 // cmdIndexes shows index details for a specific chunk.
@@ -22,19 +21,19 @@ func (r *REPL) cmdIndexes(out *strings.Builder, args []string) {
 	}
 
 	// Find the chunk and its index manager
-	stores := r.orch.ChunkManagers()
+	stores := r.client.ListStores()
 	var foundStore string
-	var cm chunk.ChunkManager
-	var im index.IndexManager
+	var cm ChunkReader
+	var im IndexReader
 
 	for _, store := range stores {
-		cm = r.orch.ChunkManager(store)
+		cm = r.client.ChunkManager(store)
 		if cm == nil {
 			continue
 		}
 		if _, err := cm.Meta(chunkID); err == nil {
 			foundStore = store
-			im = r.orch.IndexManager(store)
+			im = r.client.IndexManager(store)
 			break
 		}
 	}

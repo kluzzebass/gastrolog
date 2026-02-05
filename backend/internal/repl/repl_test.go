@@ -18,7 +18,7 @@ import (
 	"gastrolog/internal/query"
 )
 
-func setupTestSystem(t *testing.T) (*orchestrator.Orchestrator, chunk.ChunkManager) {
+func setupTestSystem(t *testing.T) (Client, *orchestrator.Orchestrator, chunk.ChunkManager) {
 	t.Helper()
 
 	// Create memory-based chunk manager.
@@ -44,16 +44,16 @@ func setupTestSystem(t *testing.T) (*orchestrator.Orchestrator, chunk.ChunkManag
 	orch.RegisterIndexManager("default", im)
 	orch.RegisterQueryEngine("default", qe)
 
-	return orch, cm
+	return NewDirectClient(orch), orch, cm
 }
 
 func TestREPL_Help(t *testing.T) {
-	orch, _ := setupTestSystem(t)
+	client, _, _ := setupTestSystem(t)
 
 	input := "help\nexit\n"
 	output := &bytes.Buffer{}
 
-	r := NewSimple(orch, strings.NewReader(input), output)
+	r := NewSimple(client, strings.NewReader(input), output)
 	if err := r.Run(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestREPL_Help(t *testing.T) {
 }
 
 func TestREPL_Query(t *testing.T) {
-	orch, cm := setupTestSystem(t)
+	client, orch, cm := setupTestSystem(t)
 
 	// Start orchestrator for ingestion.
 	if err := orch.Start(context.Background()); err != nil {
@@ -106,7 +106,7 @@ func TestREPL_Query(t *testing.T) {
 		input := "query\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := NewSimple(orch, strings.NewReader(input), output)
+		r := NewSimple(client, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -122,7 +122,7 @@ func TestREPL_Query(t *testing.T) {
 		input := "query error\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := NewSimple(orch, strings.NewReader(input), output)
+		r := NewSimple(client, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -138,7 +138,7 @@ func TestREPL_Query(t *testing.T) {
 		input := "query limit=3\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := NewSimple(orch, strings.NewReader(input), output)
+		r := NewSimple(client, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -159,7 +159,7 @@ func TestREPL_Query(t *testing.T) {
 }
 
 func TestREPL_NextAndReset(t *testing.T) {
-	orch, cm := setupTestSystem(t)
+	client, orch, cm := setupTestSystem(t)
 
 	// Start orchestrator for ingestion.
 	if err := orch.Start(context.Background()); err != nil {
@@ -185,7 +185,7 @@ func TestREPL_NextAndReset(t *testing.T) {
 		input := "query\nnext\nnext\nnext\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := NewSimple(orch, strings.NewReader(input), output)
+		r := NewSimple(client, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -213,7 +213,7 @@ func TestREPL_NextAndReset(t *testing.T) {
 		input := "next\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := NewSimple(orch, strings.NewReader(input), output)
+		r := NewSimple(client, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -228,7 +228,7 @@ func TestREPL_NextAndReset(t *testing.T) {
 		input := "query\nreset\nnext\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := NewSimple(orch, strings.NewReader(input), output)
+		r := NewSimple(client, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -244,13 +244,13 @@ func TestREPL_NextAndReset(t *testing.T) {
 }
 
 func TestREPL_Store(t *testing.T) {
-	orch, _ := setupTestSystem(t)
+	client, _, _ := setupTestSystem(t)
 
 	t.Run("get default store", func(t *testing.T) {
 		input := "store\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := NewSimple(orch, strings.NewReader(input), output)
+		r := NewSimple(client, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -265,7 +265,7 @@ func TestREPL_Store(t *testing.T) {
 		input := "store archive\nstore\nexit\n"
 		output := &bytes.Buffer{}
 
-		r := NewSimple(orch, strings.NewReader(input), output)
+		r := NewSimple(client, strings.NewReader(input), output)
 		if err := r.Run(); err != nil {
 			t.Fatalf("run: %v", err)
 		}
@@ -281,12 +281,12 @@ func TestREPL_Store(t *testing.T) {
 }
 
 func TestREPL_UnknownCommand(t *testing.T) {
-	orch, _ := setupTestSystem(t)
+	client, _, _ := setupTestSystem(t)
 
 	input := "foobar\nexit\n"
 	output := &bytes.Buffer{}
 
-	r := NewSimple(orch, strings.NewReader(input), output)
+	r := NewSimple(client, strings.NewReader(input), output)
 	if err := r.Run(); err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -298,14 +298,14 @@ func TestREPL_UnknownCommand(t *testing.T) {
 }
 
 func TestREPL_Exit(t *testing.T) {
-	orch, _ := setupTestSystem(t)
+	client, _, _ := setupTestSystem(t)
 
 	for _, cmd := range []string{"exit", "quit"} {
 		t.Run(cmd, func(t *testing.T) {
 			input := cmd + "\n"
 			output := &bytes.Buffer{}
 
-			r := NewSimple(orch, strings.NewReader(input), output)
+			r := NewSimple(client, strings.NewReader(input), output)
 			if err := r.Run(); err != nil {
 				t.Fatalf("run: %v", err)
 			}

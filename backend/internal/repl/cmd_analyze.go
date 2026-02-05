@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/index"
 	"gastrolog/internal/index/analyzer"
 )
 
@@ -24,22 +23,20 @@ func (r *REPL) cmdAnalyze(out *strings.Builder, args []string) {
 	}
 
 	// Analyze all chunks across all stores
-	stores := r.orch.ChunkManagers()
+	stores := r.client.ListStores()
 	if len(stores) == 0 {
-		out.WriteString("No chunk managers registered.\n")
+		out.WriteString("No stores registered.\n")
 		return
 	}
 
 	slices.Sort(stores)
 
 	for _, store := range stores {
-		cm := r.orch.ChunkManager(store)
-		im := r.orch.IndexManager(store)
-		if cm == nil || im == nil {
+		a := r.client.Analyzer(store)
+		if a == nil {
 			continue
 		}
 
-		a := analyzer.New(cm, im)
 		agg, err := a.AnalyzeAll()
 		if err != nil {
 			fmt.Fprintf(out, "[%s] Error: %v\n", store, err)
@@ -112,20 +109,19 @@ func (r *REPL) cmdAnalyze(out *strings.Builder, args []string) {
 
 // analyzeChunk analyzes a single chunk and prints detailed results.
 func (r *REPL) analyzeChunk(out *strings.Builder, chunkID chunk.ChunkID) {
-	// Find the chunk and its managers
-	stores := r.orch.ChunkManagers()
-	var cm chunk.ChunkManager
-	var im index.IndexManager
+	// Find the chunk and its analyzer
+	stores := r.client.ListStores()
+	var a AnalyzerClient
 	var foundStore string
 
 	for _, store := range stores {
-		cm = r.orch.ChunkManager(store)
+		cm := r.client.ChunkManager(store)
 		if cm == nil {
 			continue
 		}
 		if _, err := cm.Meta(chunkID); err == nil {
 			foundStore = store
-			im = r.orch.IndexManager(store)
+			a = r.client.Analyzer(store)
 			break
 		}
 	}
@@ -135,12 +131,11 @@ func (r *REPL) analyzeChunk(out *strings.Builder, chunkID chunk.ChunkID) {
 		return
 	}
 
-	if im == nil {
-		fmt.Fprintf(out, "No index manager for store: %s\n", foundStore)
+	if a == nil {
+		fmt.Fprintf(out, "No analyzer for store: %s\n", foundStore)
 		return
 	}
 
-	a := analyzer.New(cm, im)
 	ca, err := a.AnalyzeChunk(chunkID)
 	if err != nil {
 		fmt.Fprintf(out, "Error analyzing chunk: %v\n", err)

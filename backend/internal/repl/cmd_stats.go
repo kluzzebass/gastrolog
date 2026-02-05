@@ -8,13 +8,13 @@ import (
 
 // cmdStats shows overall system statistics.
 func (r *REPL) cmdStats(out *strings.Builder) {
-	stores := r.orch.ChunkManagers()
+	stores := r.client.ListStores()
 
 	var totalChunks, totalSealed, totalActive int
 	var totalRecords int64
 
 	for _, store := range stores {
-		cm := r.orch.ChunkManager(store)
+		cm := r.client.ChunkManager(store)
 		if cm == nil {
 			continue
 		}
@@ -43,10 +43,6 @@ func (r *REPL) cmdStats(out *strings.Builder) {
 	fmt.Fprintf(out, "  Chunks:      %d total (%d sealed, %d active)\n",
 		totalChunks, totalSealed, totalActive)
 	fmt.Fprintf(out, "  Records:     %d\n", totalRecords)
-
-	// Receiver stats
-	receivers := r.orch.Receivers()
-	fmt.Fprintf(out, "  Receivers:   %d\n", len(receivers))
 }
 
 // cmdStatus shows the live system state.
@@ -54,28 +50,19 @@ func (r *REPL) cmdStatus(out *strings.Builder) {
 	fmt.Fprintf(out, "System Status:\n")
 
 	// Orchestrator running status
-	if r.orch.Running() {
-		fmt.Fprintf(out, "  Orchestrator: running\n")
+	if r.client.IsRunning() {
+		fmt.Fprintf(out, "  Server: running\n")
 	} else {
-		fmt.Fprintf(out, "  Orchestrator: stopped\n")
-	}
-
-	// Receivers
-	receivers := r.orch.Receivers()
-	if len(receivers) > 0 {
-		slices.Sort(receivers)
-		fmt.Fprintf(out, "  Receivers:    %s\n", strings.Join(receivers, ", "))
-	} else {
-		fmt.Fprintf(out, "  Receivers:    none\n")
+		fmt.Fprintf(out, "  Server: stopped\n")
 	}
 
 	// Stores and their active chunks
-	stores := r.orch.ChunkManagers()
+	stores := r.client.ListStores()
 	slices.Sort(stores)
 
 	fmt.Fprintf(out, "  Stores:\n")
 	for _, store := range stores {
-		cm := r.orch.ChunkManager(store)
+		cm := r.client.ChunkManager(store)
 		if cm == nil {
 			continue
 		}
@@ -89,7 +76,7 @@ func (r *REPL) cmdStatus(out *strings.Builder) {
 		}
 
 		// Check for pending indexes on sealed chunks
-		im := r.orch.IndexManager(store)
+		im := r.client.IndexManager(store)
 		if im != nil {
 			chunks, err := cm.List()
 			if err == nil {

@@ -15,7 +15,7 @@ func (r *REPL) cmdExplain(out *strings.Builder, args []string) {
 		return
 	}
 
-	plan, err := r.orch.Explain(r.ctx, r.store, q)
+	plan, err := r.client.Explain(r.ctx, r.store, q)
 	if err != nil {
 		fmt.Fprintf(out, "Error: %v\n", err)
 		return
