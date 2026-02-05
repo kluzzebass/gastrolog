@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
@@ -32,6 +33,8 @@ type Server struct {
 	listener net.Listener
 	server   *http.Server
 	shutdown chan struct{}
+	inFlight sync.WaitGroup // tracks in-flight requests for graceful drain
+	draining atomic.Bool    // true when server is draining (rejecting new requests)
 }
 
 // New creates a new Server.
@@ -41,6 +44,19 @@ func New(orch *orchestrator.Orchestrator, cfg Config) *Server {
 		logger:   logging.Default(cfg.Logger).With("component", "server"),
 		shutdown: make(chan struct{}),
 	}
+}
+
+// trackingMiddleware wraps an http.Handler to track in-flight requests.
+func (s *Server) trackingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.draining.Load() {
+			http.Error(w, "server is draining", http.StatusServiceUnavailable)
+			return
+		}
+		s.inFlight.Add(1)
+		defer s.inFlight.Done()
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Serve starts the server on the given listener.
@@ -67,7 +83,8 @@ func (s *Server) Serve(listener net.Listener) error {
 	// Use h2c for HTTP/2 without TLS (for Unix sockets and local connections)
 	handler := h2c.NewHandler(mux, &http2.Server{})
 
-	s.server = &http.Server{Handler: handler}
+	// Wrap with tracking middleware for graceful drain
+	s.server = &http.Server{Handler: s.trackingMiddleware(handler)}
 
 	s.logger.Info("server starting", "addr", listener.Addr().String())
 
@@ -111,13 +128,33 @@ func (s *Server) Stop(ctx context.Context) error {
 }
 
 // initiateShutdown is called by the LifecycleServer to trigger shutdown.
-func (s *Server) initiateShutdown() {
+// If drain is true, it waits for in-flight requests to complete before signaling.
+func (s *Server) initiateShutdown(drain bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	alreadyShuttingDown := false
 	select {
 	case <-s.shutdown:
-		// Already shutting down
+		alreadyShuttingDown = true
+	default:
+	}
+	s.mu.Unlock()
+
+	if alreadyShuttingDown {
+		return
+	}
+
+	if drain {
+		s.logger.Info("draining in-flight requests")
+		s.draining.Store(true)
+		s.inFlight.Wait()
+		s.logger.Info("drain complete")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	select {
+	case <-s.shutdown:
+		// Already closed by another goroutine
 	default:
 		close(s.shutdown)
 	}
@@ -143,7 +180,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle(gastrologv1connect.NewConfigServiceHandler(configServer))
 	mux.Handle(gastrologv1connect.NewLifecycleServiceHandler(lifecycleServer))
 
-	return h2c.NewHandler(mux, &http2.Server{})
+	handler := h2c.NewHandler(mux, &http2.Server{})
+	return s.trackingMiddleware(handler)
 }
 
 // Client creates a set of Connect clients for the given base URL.

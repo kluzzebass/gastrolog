@@ -18,14 +18,14 @@ var Version = "dev"
 type LifecycleServer struct {
 	orch      *orchestrator.Orchestrator
 	startTime time.Time
-	shutdown  func()
+	shutdown  func(drain bool)
 }
 
 var _ gastrologv1connect.LifecycleServiceHandler = (*LifecycleServer)(nil)
 
 // NewLifecycleServer creates a new LifecycleServer.
-// The shutdown function is called when Shutdown is invoked.
-func NewLifecycleServer(orch *orchestrator.Orchestrator, shutdown func()) *LifecycleServer {
+// The shutdown function is called when Shutdown is invoked with the drain flag.
+func NewLifecycleServer(orch *orchestrator.Orchestrator, shutdown func(drain bool)) *LifecycleServer {
 	return &LifecycleServer{
 		orch:      orch,
 		startTime: time.Now(),
@@ -51,13 +51,15 @@ func (s *LifecycleServer) Health(
 }
 
 // Shutdown initiates a graceful shutdown.
+// If drain is true in the request, waits for in-flight requests to complete.
 func (s *LifecycleServer) Shutdown(
 	ctx context.Context,
 	req *connect.Request[apiv1.ShutdownRequest],
 ) (*connect.Response[apiv1.ShutdownResponse], error) {
 	if s.shutdown != nil {
+		drain := req.Msg.Drain
 		// Run shutdown in background so we can return the response
-		go s.shutdown()
+		go s.shutdown(drain)
 	}
 	return connect.NewResponse(&apiv1.ShutdownResponse{}), nil
 }
