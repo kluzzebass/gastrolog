@@ -193,7 +193,20 @@ Loki-compatible HTTP receiver for log ingestion:
 - Supports gzip compression (`Content-Encoding: gzip`)
 - Default port 3100 (Loki's default)
 - `X-Wait-Ack: true` header for acknowledged mode (GastroLog extension)
+- Attribute limits: max 32 attrs, 64 char keys, 256 char values
 - Compatible with Promtail, Grafana Alloy, Fluent Bit
+
+**Syslog receiver (`syslog/`):**
+
+Standard syslog receiver supporting both RFC 3164 (BSD) and RFC 5424 (IETF):
+- UDP and TCP listeners (configurable, can enable one or both)
+- Auto-detects RFC 3164 vs RFC 5424 format
+- TCP supports newline-delimited and octet-counted framing
+- Parses priority into `facility`, `severity`, `facility_name`, `severity_name`
+- Extracts `hostname`, `app_name`, `proc_id`, `msg_id` into attrs
+- Adds `remote_ip` attr from sender address
+- Raw message preserved as-is (including priority)
+- Default port 514 (standard syslog port)
 
 ### Query package (`backend/internal/query/`)
 
@@ -577,6 +590,9 @@ backend/
         factory.go              ReceiverFactory implementation
       http/                     Loki-compatible HTTP receiver
         receiver.go             HTTP server with Loki Push API
+        factory.go              ReceiverFactory implementation
+      syslog/                   RFC 3164/5424 syslog receiver
+        receiver.go             UDP and TCP syslog listeners
         factory.go              ReceiverFactory implementation
     chunk/
       chunk.go                  Interfaces (ChunkManager, RecordCursor, MetaStore), ManagerFactory

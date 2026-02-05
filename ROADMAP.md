@@ -27,7 +27,7 @@ This document outlines planned features and improvements. Items are roughly grou
 ### Production Receivers
 
 **Standards & Protocols:**
-- **Syslog** - UDP and TCP (RFC 3164, RFC 5424)
+- ✓ **Syslog** - UDP and TCP (RFC 3164, RFC 5424) with auto-detection
 - **OTLP** - OpenTelemetry logs (gRPC and HTTP)
 - **Fluent Forward** - Fluent Bit/Fluentd forward protocol
 
@@ -183,7 +183,7 @@ For reference, here's what's already implemented:
 - **Indexing**: Token, attribute, and KV indexes with budget control
 - **Query**: Boolean expressions, time bounds, pagination, context windows, explain, multi-store search
 - **REPL**: 12 commands with built-in bubbletea pager, live follow mode, multi-store support
-- **Receivers**: Chatterbox (test), HTTP/Loki (Loki Push API with optional ack)
+- **Receivers**: Chatterbox (test), HTTP/Loki (Loki Push API), Syslog (RFC 3164/5424, UDP+TCP)
 - **Config**: File-based with runtime reconfiguration support
 - **Connect RPC**: Server layer with 4 services, REPL client abstraction, embedded mode
 - **Lifecycle**: Health endpoint, graceful shutdown with drain, k8s probes (`/healthz`, `/readyz`)
