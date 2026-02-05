@@ -14,15 +14,10 @@ import (
 )
 
 func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
-	r.cmdQueryPaging(out, args, follow)
-}
-
-// cmdQueryPaging executes a query and returns whether paging mode should be active.
-func (r *REPL) cmdQueryPaging(out *strings.Builder, args []string, follow bool) (paging bool) {
 	q, errMsg := parseQueryArgs(args)
 	if errMsg != "" {
 		out.WriteString(errMsg + "\n")
-		return false
+		return
 	}
 
 	// Cancel any previous query goroutine (thread-safe)
@@ -32,7 +27,6 @@ func (r *REPL) cmdQueryPaging(out *strings.Builder, args []string, follow bool) 
 	queryCtx, queryCancel := context.WithCancel(r.ctx)
 
 	// Create channel and start goroutine to feed records.
-	// Records are copied because Raw may point to mmap'd memory.
 	ch := make(chan recordResult, 100)
 
 	// Update query state under lock
@@ -41,20 +35,11 @@ func (r *REPL) cmdQueryPaging(out *strings.Builder, args []string, follow bool) 
 	r.resultChan = ch
 	r.queryMu.Unlock()
 
-	if follow {
-		// Follow mode: stream records from the active chunk in WriteTS order.
-		// This is like "tail -f" - we only watch the active chunk where new
-		// records arrive, and we track position to avoid re-sending records.
-		go r.runFollowMode(queryCtx, ch, q)
-		return false
-	}
-
-	// Execute query using the query context (not the REPL lifetime context)
-	// so that cancelling the query stops the search.
+	// Execute query
 	seq, getToken, err := r.client.Search(queryCtx, "", q, nil)
 	if err != nil {
 		fmt.Fprintf(out, "Query error: %v\n", err)
-		return false
+		return
 	}
 
 	// Store query state under lock
@@ -81,17 +66,39 @@ func (r *REPL) cmdQueryPaging(out *strings.Builder, args []string, follow bool) 
 	}()
 
 	r.fetchAndPrint(out)
-	return r.hasActiveQuery()
 }
 
-// runFollowMode streams new records from the active chunk as they arrive (like tail -f).
-// It does NOT show existing records - use 'query' for that.
-func (r *REPL) runFollowMode(ctx context.Context, ch chan<- recordResult, q query.Query) {
-	defer close(ch)
+// cmdFollow runs a query in follow mode, streaming results until interrupted.
+func (r *REPL) cmdFollow(out *strings.Builder, args []string) {
+	q, errMsg := parseQueryArgs(args)
+	if errMsg != "" {
+		out.WriteString(errMsg + "\n")
+		return
+	}
 
+	// Cancel any previous query
+	r.cancelQuery()
+
+	// Create cancellable context
+	queryCtx, queryCancel := context.WithCancel(r.ctx)
+
+	r.queryMu.Lock()
+	r.queryCancel = queryCancel
+	r.queryMu.Unlock()
+
+	out.WriteString("Following... (Ctrl+C to stop)\n")
+
+	// Run follow mode synchronously (blocking)
+	r.runFollowModeBlocking(queryCtx, q, out)
+
+	out.WriteString("Follow stopped.\n")
+}
+
+// runFollowModeBlocking streams new records synchronously until context is cancelled.
+func (r *REPL) runFollowModeBlocking(ctx context.Context, q query.Query, out *strings.Builder) {
 	cm := r.client.ChunkManager("")
 	if cm == nil {
-		ch <- recordResult{err: errors.New("chunk manager not found for store")}
+		out.WriteString("Error: chunk manager not found\n")
 		return
 	}
 
@@ -171,7 +178,7 @@ func (r *REPL) runFollowMode(ctx context.Context, ch chan<- recordResult, q quer
 				break
 			}
 			if err != nil {
-				ch <- recordResult{err: err}
+				fmt.Fprintf(out, "Error: %v\n", err)
 				break
 			}
 
@@ -182,12 +189,8 @@ func (r *REPL) runFollowMode(ctx context.Context, ch chan<- recordResult, q quer
 				continue
 			}
 
-			select {
-			case <-ctx.Done():
-				cursor.Close()
-				return
-			case ch <- recordResult{rec: rec.Copy()}:
-			}
+			// Print immediately
+			fmt.Print(r.formatRecord(rec) + "\n")
 		}
 
 		cursor.Close()
@@ -201,7 +204,6 @@ func (r *REPL) runFollowMode(ctx context.Context, ch chan<- recordResult, q quer
 }
 
 // matchesBoolExpr checks if a record matches a boolean expression using DNF evaluation.
-// This evaluates primitive predicates only, not recursive AST evaluation.
 func matchesBoolExpr(expr querylang.Expr, rec chunk.Record) bool {
 	dnf := querylang.ToDNF(expr)
 	for _, branch := range dnf.Branches {
@@ -214,13 +216,11 @@ func matchesBoolExpr(expr querylang.Expr, rec chunk.Record) bool {
 
 // matchesBranch checks if a record matches a single DNF branch.
 func matchesBranch(branch *querylang.Conjunction, rec chunk.Record) bool {
-	// Check all positive predicates (AND semantics)
 	for _, p := range branch.Positive {
 		if !matchesPredicate(p, rec) {
 			return false
 		}
 	}
-	// Check all negative predicates (must NOT match any)
 	for _, p := range branch.Negative {
 		if matchesPredicate(p, rec) {
 			return false
@@ -245,48 +245,38 @@ func matchesPredicate(pred *querylang.PredicateExpr, rec chunk.Record) bool {
 	}
 }
 
-// matchesToken checks if raw data contains a token (case-insensitive substring match).
 func matchesToken(raw []byte, token string) bool {
 	return strings.Contains(strings.ToLower(string(raw)), strings.ToLower(token))
 }
 
-// matchesKV checks if a record has a key=value pair in attrs or message body.
 func matchesKV(attrs chunk.Attributes, raw []byte, key, value string) bool {
-	// Check attributes
 	for k, v := range attrs {
 		if strings.EqualFold(k, key) && strings.EqualFold(v, value) {
 			return true
 		}
 	}
-	// Check message body (simple substring for now)
 	rawLower := strings.ToLower(string(raw))
 	pattern := strings.ToLower(key) + "=" + strings.ToLower(value)
 	return strings.Contains(rawLower, pattern)
 }
 
-// matchesKeyExists checks if a record has a key in attrs or message body.
 func matchesKeyExists(attrs chunk.Attributes, raw []byte, key string) bool {
-	// Check attributes
 	for k := range attrs {
 		if strings.EqualFold(k, key) {
 			return true
 		}
 	}
-	// Check message body
 	rawLower := strings.ToLower(string(raw))
 	pattern := strings.ToLower(key) + "="
 	return strings.Contains(rawLower, pattern)
 }
 
-// matchesValueExists checks if a record has a value in attrs or message body.
 func matchesValueExists(attrs chunk.Attributes, raw []byte, value string) bool {
-	// Check attributes
 	for _, v := range attrs {
 		if strings.EqualFold(v, value) {
 			return true
 		}
 	}
-	// Check message body
 	rawLower := strings.ToLower(string(raw))
 	pattern := "=" + strings.ToLower(value)
 	return strings.Contains(rawLower, pattern)
@@ -298,7 +288,6 @@ func (r *REPL) cmdNext(out *strings.Builder, args []string) {
 		return
 	}
 
-	// Allow override for this call only
 	if len(args) > 0 {
 		var count int
 		if _, err := fmt.Sscanf(args[0], "%d", &count); err != nil {
@@ -312,62 +301,15 @@ func (r *REPL) cmdNext(out *strings.Builder, args []string) {
 	r.fetchAndPrint(out)
 }
 
-func (r *REPL) fetchAndPrint(out *strings.Builder) {
-	if r.pageSize == 0 {
-		// No paging - fetch all
-		r.fetchAndPrintN(out, 0)
-	} else {
-		r.fetchAndPrintN(out, r.pageSize)
-	}
-}
-
-func (r *REPL) fetchAndPrintN(out *strings.Builder, count int) {
-	// Get the channel under lock to avoid race
-	ch := r.getResultChan()
-	if ch == nil {
-		out.WriteString("No active query.\n")
-		return
-	}
-
-	printed := 0
-	for {
-		if count > 0 && printed >= count {
-			break
-		}
-		result, ok := <-ch
-		if !ok {
-			if printed == 0 {
-				out.WriteString("No more results.\n")
-			} else {
-				fmt.Fprintf(out, "--- %d records (end of results) ---\n", printed)
-			}
-			r.setResultChan(nil)
-			return
-		}
-		if result.err != nil {
-			if errors.Is(result.err, query.ErrInvalidResumeToken) {
-				out.WriteString("Resume token invalid (chunk deleted). Use 'reset' and re-query.\n")
-				r.setResultChan(nil)
-				return
-			}
-			fmt.Fprintf(out, "Error: %v\n", result.err)
-			return
-		}
-
-		r.printRecord(out, result.rec)
-		printed++
-	}
-
-	if printed > 0 {
-		fmt.Fprintf(out, "--- %d records ---\n", printed)
-	}
+func (r *REPL) cmdReset(out *strings.Builder) {
+	r.cancelQuery()
+	r.clearQueryState()
+	out.WriteString("Query state cleared.\n")
 }
 
 func (r *REPL) formatRecord(rec chunk.Record) string {
-	// Format: TIMESTAMP ATTRS RAW
 	ts := rec.IngestTS.Format(time.RFC3339Nano)
 
-	// Format attributes
 	var attrStr string
 	if len(rec.Attrs) > 0 {
 		keys := make([]string, 0, len(rec.Attrs))
@@ -385,19 +327,4 @@ func (r *REPL) formatRecord(rec chunk.Record) string {
 	}
 
 	return fmt.Sprintf("%s %s %s", ts, attrStr, string(rec.Raw))
-}
-
-func (r *REPL) printRecord(out *strings.Builder, rec chunk.Record) {
-	out.WriteString(r.formatRecord(rec))
-	out.WriteByte('\n')
-}
-
-func (r *REPL) cmdReset(out *strings.Builder) {
-	r.queryMu.Lock()
-	r.lastQuery = nil
-	r.resumeToken = nil
-	r.resultChan = nil
-	r.getToken = nil
-	r.queryMu.Unlock()
-	out.WriteString("Query state cleared.\n")
 }

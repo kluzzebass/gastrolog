@@ -6,17 +6,10 @@ func (r *REPL) cmdHelp(out *strings.Builder) {
 	out.WriteString(`Commands:
   help                     Show this help
   query [filters...]       Execute a query with filters
-  follow [filters...]      Continuously stream new results (press any key to stop)
-  explain [filters...]     Show query execution plan (which indexes will be used)
+  follow [filters...]      Stream new records as they arrive (Ctrl+C to stop)
   next [count]             Fetch next page of results
   reset                    Clear current query state
   set [key=value]          Get or set config (no args shows current settings)
-
-Shortcuts:
-  Space/Enter              In pager: next page
-  q                        In pager: quit and discard query
-  Escape                   In pager: exit pager (query remains active)
-                           Otherwise: reset query state
 
 Inspection:
   stores                   List available stores
@@ -24,6 +17,7 @@ Inspection:
   chunk <id>               Show details for a specific chunk
   indexes <chunk-id>       Show index status for a chunk
   analyze [chunk-id]       Analyze index health (all chunks if no ID given)
+  explain [filters...]     Show query execution plan
   stats                    Show overall system statistics
   status                   Show live system state
 
@@ -46,9 +40,8 @@ Examples:
   query start=2024-01-01T00:00:00Z end=2024-01-02T00:00:00Z error
   query source=nginx level=error
   query store=prod status=500                              Search only in "prod" store
+  follow level=error                                       Stream errors as they arrive
   explain error level=warn
   set pager=50
-  chunks
-  chunk 019c10bb-a3a8-7ad9-9e8e-890bf77a84d3
 `)
 }
