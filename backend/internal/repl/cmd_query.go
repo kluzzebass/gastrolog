@@ -81,6 +81,7 @@ func (r *REPL) cmdFollow(out *strings.Builder, args []string) {
 
 	// Create cancellable context
 	queryCtx, queryCancel := context.WithCancel(r.ctx)
+	defer queryCancel()
 
 	r.queryMu.Lock()
 	r.queryCancel = queryCancel
@@ -91,7 +92,6 @@ func (r *REPL) cmdFollow(out *strings.Builder, args []string) {
 	signal.Notify(sigCh, os.Interrupt)
 	defer signal.Stop(sigCh)
 
-	// Cancel on signal
 	go func() {
 		select {
 		case <-sigCh:
@@ -100,7 +100,6 @@ func (r *REPL) cmdFollow(out *strings.Builder, args []string) {
 		}
 	}()
 
-	// Print immediately (before the blocking call)
 	fmt.Println("Following... (Ctrl+C to stop)")
 
 	// Start the follow stream
