@@ -5,7 +5,7 @@ import "strings"
 func (r *REPL) cmdHelp(out *strings.Builder) {
 	out.WriteString(`Commands:
   help                     Show this help
-  store [name]             Get or set target store (default: "default")
+  store [name|all]         Get/set store filter (default: all stores, use "all" to clear)
   query [filters...]       Execute a query with filters
   follow [filters...]      Continuously stream new results (press any key to stop)
   explain [filters...]     Show query execution plan (which indexes will be used)
@@ -29,6 +29,7 @@ Query filters:
   key=value                Filter by key=value in attrs OR message (can repeat, AND semantics)
   key=*                    Filter by key existence (any value)
   *=value                  Filter by value existence (any key)
+  store=NAME               Filter by store (by default, searches all stores)
 
 Settings:
   pager=N                  Records per page (0 = no paging, show all)
@@ -38,7 +39,7 @@ Examples:
   query error warning                                      Search for "error" AND "warning"
   query start=2024-01-01T00:00:00Z end=2024-01-02T00:00:00Z error
   query source=nginx level=error
-  query status=500 method=POST
+  query store=prod status=500                              Search only in "prod" store
   explain error level=warn
   set pager=50
   chunks

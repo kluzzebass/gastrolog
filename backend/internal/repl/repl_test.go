@@ -246,7 +246,7 @@ func TestREPL_NextAndReset(t *testing.T) {
 func TestREPL_Store(t *testing.T) {
 	client, _, _ := setupTestSystem(t)
 
-	t.Run("get default store", func(t *testing.T) {
+	t.Run("get default store filter (all stores)", func(t *testing.T) {
 		input := "store\nexit\n"
 		output := &bytes.Buffer{}
 
@@ -256,12 +256,12 @@ func TestREPL_Store(t *testing.T) {
 		}
 
 		out := output.String()
-		if !strings.Contains(out, "Current store: default") {
-			t.Errorf("expected 'Current store: default': %s", out)
+		if !strings.Contains(out, "(all stores)") {
+			t.Errorf("expected '(all stores)': %s", out)
 		}
 	})
 
-	t.Run("set store", func(t *testing.T) {
+	t.Run("set store filter", func(t *testing.T) {
 		input := "store archive\nstore\nexit\n"
 		output := &bytes.Buffer{}
 
@@ -271,11 +271,29 @@ func TestREPL_Store(t *testing.T) {
 		}
 
 		out := output.String()
-		if !strings.Contains(out, "Store set to: archive") {
-			t.Errorf("expected 'Store set to: archive': %s", out)
+		if !strings.Contains(out, "Store filter set to: archive") {
+			t.Errorf("expected 'Store filter set to: archive': %s", out)
 		}
-		if !strings.Contains(out, "Current store: archive") {
-			t.Errorf("expected 'Current store: archive': %s", out)
+		if !strings.Contains(out, "Current store filter: archive") {
+			t.Errorf("expected 'Current store filter: archive': %s", out)
+		}
+	})
+
+	t.Run("clear store filter", func(t *testing.T) {
+		input := "store archive\nstore all\nstore\nexit\n"
+		output := &bytes.Buffer{}
+
+		r := NewSimple(client, strings.NewReader(input), output)
+		if err := r.Run(); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+
+		out := output.String()
+		if !strings.Contains(out, "Store filter cleared") {
+			t.Errorf("expected 'Store filter cleared': %s", out)
+		}
+		if !strings.Contains(out, "(all stores)") {
+			t.Errorf("expected '(all stores)' after clearing: %s", out)
 		}
 	})
 }
