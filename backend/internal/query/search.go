@@ -685,6 +685,42 @@ func (e *Engine) Follow(ctx context.Context, q Query) iter.Seq2[chunk.Record, er
 		}
 		lastPositions := make(map[chunkKey]uint64)
 
+		// Initialize positions to end of each chunk (only show NEW records).
+		for _, storeID := range selectedStores {
+			cm, _ := e.getStoreManagers(storeID)
+			if cm == nil {
+				continue
+			}
+			metas, err := cm.List()
+			if err != nil {
+				continue
+			}
+			for _, meta := range metas {
+				key := chunkKey{storeID: storeID, chunkID: meta.ID}
+				// For sealed chunks, position at RecordCount means "at end".
+				// For active chunks, we need to find the current end.
+				if meta.Sealed {
+					lastPositions[key] = uint64(meta.RecordCount) - 1
+				} else {
+					// Find current end of active chunk.
+					cursor, err := cm.OpenCursor(meta.ID)
+					if err != nil {
+						continue
+					}
+					var lastPos uint64
+					for {
+						_, ref, err := cursor.Next()
+						if err != nil {
+							break
+						}
+						lastPos = ref.Pos
+					}
+					cursor.Close()
+					lastPositions[key] = lastPos
+				}
+			}
+		}
+
 		// Poll interval for new records.
 		const pollInterval = 100 * time.Millisecond
 
