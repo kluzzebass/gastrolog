@@ -492,30 +492,19 @@ func (m model) View() string {
 }
 
 // buildPrompt constructs the REPL prompt showing current status.
-// Format: [store] or [store|query] or [store|query:N pending]
+// Format: > or [query] >
 func (r *REPL) buildPrompt() string {
 	r.queryMu.Lock()
-	store := r.store
 	hasQuery := r.resultChan != nil
 	lastQuery := r.lastQuery
 	r.queryMu.Unlock()
 
-	var parts []string
-
-	// Always show store
-	parts = append(parts, store)
-
-	// Show query status if there's an active query
-	if hasQuery {
-		if lastQuery != nil {
-			queryDesc := r.describeQuery(lastQuery)
-			parts = append(parts, queryDesc)
-		} else {
-			parts = append(parts, "query")
-		}
+	if !hasQuery || lastQuery == nil {
+		return "> "
 	}
 
-	return "[" + strings.Join(parts, "|") + "] > "
+	queryDesc := r.describeQuery(lastQuery)
+	return "[" + queryDesc + "] > "
 }
 
 // describeQuery returns a short description of a query for the prompt.
