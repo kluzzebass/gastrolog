@@ -46,6 +46,23 @@ func New(orch *orchestrator.Orchestrator, cfg Config) *Server {
 	}
 }
 
+// registerProbes adds Kubernetes liveness and readiness probe endpoints.
+func (s *Server) registerProbes(mux *http.ServeMux) {
+	// Liveness probe - returns 200 if the process is alive
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// Readiness probe - returns 200 if ready to accept traffic
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		if s.orch.IsRunning() && !s.draining.Load() {
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+	})
+}
+
 // trackingMiddleware wraps an http.Handler to track in-flight requests.
 func (s *Server) trackingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -79,6 +96,9 @@ func (s *Server) Serve(listener net.Listener) error {
 	mux.Handle(gastrologv1connect.NewStoreServiceHandler(storeServer))
 	mux.Handle(gastrologv1connect.NewConfigServiceHandler(configServer))
 	mux.Handle(gastrologv1connect.NewLifecycleServiceHandler(lifecycleServer))
+
+	// Kubernetes probe endpoints
+	s.registerProbes(mux)
 
 	// Use h2c for HTTP/2 without TLS (for Unix sockets and local connections)
 	handler := h2c.NewHandler(mux, &http2.Server{})
@@ -179,6 +199,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle(gastrologv1connect.NewStoreServiceHandler(storeServer))
 	mux.Handle(gastrologv1connect.NewConfigServiceHandler(configServer))
 	mux.Handle(gastrologv1connect.NewLifecycleServiceHandler(lifecycleServer))
+
+	s.registerProbes(mux)
 
 	handler := h2c.NewHandler(mux, &http2.Server{})
 	return s.trackingMiddleware(handler)

@@ -272,3 +272,55 @@ func TestHealth(t *testing.T) {
 		t.Error("expected version to be set")
 	}
 }
+
+func TestProbeEndpoints(t *testing.T) {
+	orch := orchestrator.New(orchestrator.Config{})
+	srv := server.New(orch, server.Config{})
+	handler := srv.Handler()
+
+	httpClient := &http.Client{
+		Transport: &embeddedTransport{handler: handler},
+	}
+
+	t.Run("healthz always returns 200", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "http://embedded/healthz", nil)
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			t.Fatalf("healthz request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("expected 200, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("readyz returns 503 when not running", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "http://embedded/readyz", nil)
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			t.Fatalf("readyz request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusServiceUnavailable {
+			t.Errorf("expected 503, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("readyz returns 200 when running", func(t *testing.T) {
+		// Start orchestrator
+		if err := orch.Start(context.Background()); err != nil {
+			t.Fatalf("failed to start orchestrator: %v", err)
+		}
+		defer orch.Stop()
+
+		req, _ := http.NewRequest("GET", "http://embedded/readyz", nil)
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			t.Fatalf("readyz request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("expected 200, got %d", resp.StatusCode)
+		}
+	})
+}
