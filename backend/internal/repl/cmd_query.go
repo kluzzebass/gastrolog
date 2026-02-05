@@ -14,10 +14,15 @@ import (
 )
 
 func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
+	r.cmdQueryPaging(out, args, follow)
+}
+
+// cmdQueryPaging executes a query and returns whether paging mode should be active.
+func (r *REPL) cmdQueryPaging(out *strings.Builder, args []string, follow bool) (paging bool) {
 	q, errMsg := parseQueryArgs(args)
 	if errMsg != "" {
 		out.WriteString(errMsg + "\n")
-		return
+		return false
 	}
 
 	// Cancel any previous query goroutine (thread-safe)
@@ -41,40 +46,42 @@ func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
 		// This is like "tail -f" - we only watch the active chunk where new
 		// records arrive, and we track position to avoid re-sending records.
 		go r.runFollowMode(queryCtx, ch, q)
-	} else {
-		// Execute query using the query context (not the REPL lifetime context)
-		// so that cancelling the query stops the search.
-		seq, getToken, err := r.client.Search(queryCtx, "", q, nil)
-		if err != nil {
-			fmt.Fprintf(out, "Query error: %v\n", err)
-			return
-		}
-
-		// Store query state under lock
-		r.queryMu.Lock()
-		r.lastQuery = &q
-		r.getToken = getToken
-		r.resumeToken = nil
-		r.queryMu.Unlock()
-
-		go func() {
-			defer close(ch)
-			for rec, err := range seq {
-				select {
-				case <-queryCtx.Done():
-					return
-				default:
-				}
-				if err != nil {
-					ch <- recordResult{err: err}
-					continue
-				}
-				ch <- recordResult{rec: rec.Copy()}
-			}
-		}()
-
-		r.fetchAndPrint(out)
+		return false
 	}
+
+	// Execute query using the query context (not the REPL lifetime context)
+	// so that cancelling the query stops the search.
+	seq, getToken, err := r.client.Search(queryCtx, "", q, nil)
+	if err != nil {
+		fmt.Fprintf(out, "Query error: %v\n", err)
+		return false
+	}
+
+	// Store query state under lock
+	r.queryMu.Lock()
+	r.lastQuery = &q
+	r.getToken = getToken
+	r.resumeToken = nil
+	r.queryMu.Unlock()
+
+	go func() {
+		defer close(ch)
+		for rec, err := range seq {
+			select {
+			case <-queryCtx.Done():
+				return
+			default:
+			}
+			if err != nil {
+				ch <- recordResult{err: err}
+				continue
+			}
+			ch <- recordResult{rec: rec.Copy()}
+		}
+	}()
+
+	r.fetchAndPrint(out)
+	return r.hasActiveQuery()
 }
 
 // runFollowMode streams new records from the active chunk as they arrive (like tail -f).
@@ -352,7 +359,7 @@ func (r *REPL) fetchAndPrintN(out *strings.Builder, count int) {
 	}
 
 	if printed > 0 {
-		fmt.Fprintf(out, "--- %d records shown. Press Enter for more. ---\n", printed)
+		fmt.Fprintf(out, "--- %d records ---\n", printed)
 	}
 }
 

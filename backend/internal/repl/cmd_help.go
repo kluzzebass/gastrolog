@@ -13,8 +13,10 @@ func (r *REPL) cmdHelp(out *strings.Builder) {
   set [key=value]          Get or set config (no args shows current settings)
 
 Shortcuts:
-  Enter                    With active query: fetch next page
-  Escape                   Clear input and reset query state
+  Space/Enter              In pager: next page
+  q                        In pager: quit and discard query
+  Escape                   In pager: exit pager (query remains active)
+                           Otherwise: reset query state
 
 Inspection:
   stores                   List available stores

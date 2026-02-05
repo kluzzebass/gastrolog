@@ -64,6 +64,7 @@ type model struct {
 	output    *strings.Builder
 	quitting  bool
 	following bool // true when in follow mode
+	paging    bool // true when in pager mode (space=next, q=quit)
 }
 
 // tickMsg is sent periodically during follow mode to poll for new records.
@@ -313,6 +314,46 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Pager mode: space=next page, q/Escape=quit pager
+		if m.paging {
+			switch msg.Type {
+			case tea.KeyCtrlC, tea.KeyCtrlD:
+				m.quitting = true
+				return m, tea.Quit
+			case tea.KeySpace, tea.KeyEnter:
+				// Fetch next page
+				output, done := m.repl.fetchPage()
+				if output != "" {
+					m.output.WriteString(output)
+				}
+				if done {
+					m.paging = false
+					m.textInput.Prompt = m.repl.buildPrompt()
+				}
+				return m, nil
+			case tea.KeyEscape:
+				// Exit pager, keep query state for later resume
+				m.paging = false
+				m.textInput.Prompt = m.repl.buildPrompt()
+				return m, nil
+			case tea.KeyRunes:
+				if string(msg.Runes) == "q" {
+					// Exit pager and reset query
+					m.paging = false
+					m.repl.cancelQuery()
+					m.repl.queryMu.Lock()
+					m.repl.lastQuery = nil
+					m.repl.resumeToken = nil
+					m.repl.resultChan = nil
+					m.repl.getToken = nil
+					m.repl.queryMu.Unlock()
+					m.textInput.Prompt = m.repl.buildPrompt()
+					return m, nil
+				}
+			}
+			return m, nil
+		}
+
 		switch msg.Type {
 		case tea.KeyCtrlC, tea.KeyCtrlD:
 			m.quitting = true
@@ -339,7 +380,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.repl.addHistory(line)
 				m.output.WriteString("> " + line + "\n")
 			}
-			output, exit, follow := m.repl.execute(line)
+			output, exit, follow, paging := m.repl.executeWithPaging(line)
 			if output != "" {
 				m.output.WriteString(output)
 			}
@@ -355,9 +396,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.output.WriteString("--- Following (press any key to stop) ---\n")
 				return m, followTick()
 			}
+			if paging {
+				m.paging = true
+				m.textInput.Prompt = "[space=more, q=quit] "
+			}
 			m.textInput.SetValue("")
 			m.textInput.SetSuggestions(commands)
-			m.textInput.Prompt = m.repl.buildPrompt()
+			if !paging {
+				m.textInput.Prompt = m.repl.buildPrompt()
+			}
 			m.repl.historyIndex = -1
 			return m, nil
 
@@ -616,15 +663,20 @@ func (r *REPL) saveHistory() {
 
 // execute parses and executes a single command. Returns output and whether to exit.
 func (r *REPL) execute(line string) (output string, exit bool, follow bool) {
+	out, exit, follow, _ := r.executeWithPaging(line)
+	return out, exit, follow
+}
+
+// executeWithPaging parses and executes a command, returning paging state.
+func (r *REPL) executeWithPaging(line string) (output string, exit bool, follow bool, paging bool) {
 	parts := strings.Fields(line)
 	if len(parts) == 0 {
 		// Empty input: if there's an active query, get next batch
 		if r.hasActiveQuery() {
-			var out strings.Builder
-			r.cmdNext(&out, nil)
-			return out.String(), false, false
+			out, done := r.fetchPage()
+			return out, false, false, !done
 		}
-		return "", false, false
+		return "", false, false, false
 	}
 
 	cmd := parts[0]
@@ -636,12 +688,13 @@ func (r *REPL) execute(line string) (output string, exit bool, follow bool) {
 	case "help", "?":
 		r.cmdHelp(&out)
 	case "query":
-		r.cmdQuery(&out, args, false)
+		paging = r.cmdQueryPaging(&out, args, false)
 	case "follow":
-		r.cmdQuery(&out, args, true)
-		return out.String(), false, true
+		r.cmdQueryPaging(&out, args, true)
+		return out.String(), false, true, false
 	case "next":
 		r.cmdNext(&out, args)
+		paging = r.hasActiveQuery()
 	case "reset":
 		r.cmdReset(&out)
 	case "set":
@@ -663,10 +716,17 @@ func (r *REPL) execute(line string) (output string, exit bool, follow bool) {
 	case "status":
 		r.cmdStatus(&out)
 	case "exit", "quit":
-		return "", true, false
+		return "", true, false, false
 	default:
 		fmt.Fprintf(&out, "Unknown command: %s. Type 'help' for commands.\n", cmd)
 	}
 
-	return out.String(), false, false
+	return out.String(), false, false, paging
+}
+
+// fetchPage fetches the next page of results. Returns output and whether results are exhausted.
+func (r *REPL) fetchPage() (output string, done bool) {
+	var out strings.Builder
+	r.fetchAndPrint(&out)
+	return out.String(), !r.hasActiveQuery()
 }
