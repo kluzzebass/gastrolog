@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -484,5 +486,88 @@ func TestReadyEndpoint(t *testing.T) {
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestLokiPushTooManyAttrs(t *testing.T) {
+	out := make(chan orchestrator.IngestMessage, 10)
+	recv := New(Config{Addr: "127.0.0.1:0"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go recv.Run(ctx, out)
+	time.Sleep(50 * time.Millisecond)
+
+	// Build stream with too many labels.
+	labels := make(map[string]string)
+	for i := 0; i < 50; i++ {
+		labels[fmt.Sprintf("key%d", i)] = fmt.Sprintf("value%d", i)
+	}
+	labelsJSON, _ := json.Marshal(labels)
+
+	ts := time.Now().UnixNano()
+	body := fmt.Sprintf(`{"streams": [{"stream": %s, "values": [["%d", "test"]]}]}`, labelsJSON, ts)
+
+	resp, err := http.Post("http://"+recv.Addr().String()+"/loki/api/v1/push", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for too many attrs, got %d", resp.StatusCode)
+	}
+}
+
+func TestLokiPushAttrKeyTooLong(t *testing.T) {
+	out := make(chan orchestrator.IngestMessage, 10)
+	recv := New(Config{Addr: "127.0.0.1:0"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go recv.Run(ctx, out)
+	time.Sleep(50 * time.Millisecond)
+
+	// Key longer than 64 chars.
+	longKey := strings.Repeat("x", 100)
+	ts := time.Now().UnixNano()
+	body := fmt.Sprintf(`{"streams": [{"stream": {"%s": "value"}, "values": [["%d", "test"]]}]}`, longKey, ts)
+
+	resp, err := http.Post("http://"+recv.Addr().String()+"/loki/api/v1/push", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for key too long, got %d", resp.StatusCode)
+	}
+}
+
+func TestLokiPushAttrValueTooLong(t *testing.T) {
+	out := make(chan orchestrator.IngestMessage, 10)
+	recv := New(Config{Addr: "127.0.0.1:0"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go recv.Run(ctx, out)
+	time.Sleep(50 * time.Millisecond)
+
+	// Value longer than 256 chars.
+	longValue := strings.Repeat("x", 300)
+	ts := time.Now().UnixNano()
+	body := fmt.Sprintf(`{"streams": [{"stream": {"key": "%s"}, "values": [["%d", "test"]]}]}`, longValue, ts)
+
+	resp, err := http.Post("http://"+recv.Addr().String()+"/loki/api/v1/push", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for value too long, got %d", resp.StatusCode)
 	}
 }

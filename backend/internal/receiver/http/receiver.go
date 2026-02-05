@@ -18,6 +18,13 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
+// Attribute limits to prevent abuse.
+const (
+	maxAttrs        = 32  // maximum number of attributes per message
+	maxAttrKeyLen   = 64  // maximum length of attribute key
+	maxAttrValueLen = 256 // maximum length of attribute value
+)
+
 // Receiver accepts log messages via the Loki Push API (POST /loki/api/v1/push).
 // It implements orchestrator.Receiver.
 //
@@ -251,10 +258,12 @@ func (r *Receiver) parseValue(val Value, streamLabels map[string]string) (orches
 		return orchestrator.IngestMessage{}, fmt.Errorf("log line must be a string: %w", err)
 	}
 
-	// Build attrs from stream labels.
-	attrs := make(map[string]string, len(streamLabels)+8)
+	// Build attrs from stream labels (with validation).
+	attrs := make(map[string]string, min(len(streamLabels), maxAttrs))
 	for k, v := range streamLabels {
-		attrs[k] = v
+		if err := addAttr(attrs, k, v); err != nil {
+			return orchestrator.IngestMessage{}, fmt.Errorf("stream label: %w", err)
+		}
 	}
 
 	// Parse optional structured metadata (third element).
@@ -264,7 +273,9 @@ func (r *Receiver) parseValue(val Value, streamLabels map[string]string) (orches
 			return orchestrator.IngestMessage{}, fmt.Errorf("metadata must be an object: %w", err)
 		}
 		for k, v := range metadata {
-			attrs[k] = v
+			if err := addAttr(attrs, k, v); err != nil {
+				return orchestrator.IngestMessage{}, fmt.Errorf("metadata: %w", err)
+			}
 		}
 	}
 
@@ -273,4 +284,19 @@ func (r *Receiver) parseValue(val Value, streamLabels map[string]string) (orches
 		Raw:      []byte(line),
 		IngestTS: ingestTS,
 	}, nil
+}
+
+// addAttr adds an attribute with validation. Returns error if limits exceeded.
+func addAttr(attrs map[string]string, key, value string) error {
+	if len(attrs) >= maxAttrs {
+		return fmt.Errorf("too many attributes (max %d)", maxAttrs)
+	}
+	if len(key) > maxAttrKeyLen {
+		return fmt.Errorf("attribute key too long: %d > %d", len(key), maxAttrKeyLen)
+	}
+	if len(value) > maxAttrValueLen {
+		return fmt.Errorf("attribute value too long: %d > %d", len(value), maxAttrValueLen)
+	}
+	attrs[key] = value
+	return nil
 }
