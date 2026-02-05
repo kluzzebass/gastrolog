@@ -149,13 +149,27 @@ query level=error user.id=123   # uses json index
 
 ## REPL Enhancements
 
+### Built-in Pager ✓
+- ✓ Full-screen pager using bubbletea for query results
+- ✓ Live pager for `follow` command with auto-scroll when at bottom
+- ✓ Keyboard navigation (vim-style j/k, arrows, page up/down, home/end)
+- ✓ Horizontal scrolling for wide log lines
+- ✓ Mouse wheel support for vertical scrolling
+- ✓ Fetch-more support (press 'n' to load next page)
+- ✓ Output sanitization to prevent terminal corruption from control characters
+- ✓ Proper terminal state save/restore for readline compatibility
+
+### Multi-store Support ✓
+- ✓ `explain` command shows store ID for each chunk
+- ✓ `follow` command works across multiple stores with merge-sort
+- ✓ `search` works across all stores with heap-based merging
+
 ### Client-Server REPL
 - Reconnection on server restart
 - Session persistence
 - Multiple concurrent sessions
 
 ### New Commands
-- `tail` - live stream with filters (like `follow` but in client mode)
 - `config` - view/edit configuration
 - `retention` - manage retention policies
 - `receivers` - list/manage receivers
@@ -176,8 +190,8 @@ For reference, here's what's already implemented:
 
 - **Core**: Chunk-based storage (file + memory), orchestrator, routing
 - **Indexing**: Token, attribute, and KV indexes with budget control
-- **Query**: Boolean expressions, time bounds, pagination, context windows, explain
-- **REPL**: 11 commands (query, follow, explain, chunks, indexes, analyze, etc.)
+- **Query**: Boolean expressions, time bounds, pagination, context windows, explain, multi-store search
+- **REPL**: 12 commands with built-in bubbletea pager, live follow mode, multi-store support
 - **Receivers**: Chatterbox (test receiver with 6 log formats)
 - **Config**: File-based with runtime reconfiguration support
 - **Connect RPC**: Server layer with 4 services, REPL client abstraction, embedded mode

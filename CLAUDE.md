@@ -369,9 +369,10 @@ Generated code in `backend/api/gen/gastrolog/v1/`.
 
 Interactive command-line interface for querying a running GastroLog system:
 
-- Built on bubbletea for terminal UI with history, tab completion
+- Built on readline for command input with history and tab completion
+- Built-in pager using bubbletea for viewing query results and live follow streams
 - Observes system via public APIs only (no lifecycle control)
-- Dynamic status prompt showing current store and active query: `[store|query] > `
+- Dynamic status prompt showing active query state: `[query] > `
 
 **Client abstraction:**
 
@@ -395,11 +396,11 @@ client := repl.NewEmbeddedClient(orch)
 The REPL always talks gRPC internally, whether connecting to a remote server or running in embedded mode. This minimizes differences between standalone and client-server operation.
 
 **Commands:**
-- `query [filters...]` -- execute query with filters
-- `follow [filters...]` -- stream new records in real-time (like tail -f)
+- `query [filters...]` -- execute query with filters, display in pager
+- `follow [filters...]` -- stream new records in real-time (like tail -f), display in live pager
 - `explain [filters...]` -- show query execution plan (which indexes will be used)
-- `next [count]` -- fetch next page of results
-- `store [name]` -- get/set target store
+- `next [count]` -- fetch next page of results (non-interactive mode only)
+- `stores` -- list available stores
 - `set key=value` -- configure REPL settings
 - `reset` -- clear query state
 - `chunks` -- list all chunks with metadata
@@ -410,6 +411,21 @@ The REPL always talks gRPC internally, whether connecting to a remote server or 
 - `status` -- show live system state
 - `help` / `?` -- show help
 - `exit` / `quit` / Ctrl-D -- exit
+
+**Built-in Pager:**
+
+Query results and follow streams display in a full-screen pager with navigation:
+- `j`/`k` or arrows -- scroll up/down one line
+- `Space`/`b` or PgDn/PgUp -- scroll up/down one page
+- `g`/`G` or Home/End or Alt+Up/Down -- jump to top/bottom
+- `h`/`l` or left/right arrows -- scroll left/right
+- `0`/`$` or Ctrl+A/Ctrl+E or Alt+Left/Right -- jump to line start/end
+- `n` -- fetch more results (query pager only)
+- `q` -- quit pager
+- Mouse wheel -- vertical scrolling
+
+The live pager (for `follow`) auto-scrolls when at the bottom, stays in place when scrolled up.
+Output is sanitized to replace control characters with � to prevent terminal corruption.
 
 **Query filters:**
 - Bare words -- token search (AND semantics): `query error warning`
@@ -422,9 +438,9 @@ The REPL always talks gRPC internally, whether connecting to a remote server or 
 
 **Explain command:**
 
-Shows query execution plan with index pipeline for each chunk:
+Shows query execution plan with index pipeline for each chunk. For multi-store queries, shows store ID:
 ```
-Chunk 1: 019c1b36-... (sealed)
+Chunk 1: [default] 019c1b36-... (sealed)
   Records: 10000
 
   Index Pipeline:
@@ -443,9 +459,13 @@ Pipeline step reasons: `indexed`, `binary_search`, `index_missing`, `non_ascii`,
 - `pager=N` -- records per page (0 = no paging, show all at once)
 
 **File organization:**
-- `repl.go` -- main REPL infrastructure, bubbletea model, prompt building
+- `repl.go` -- main REPL infrastructure, readline loop, command dispatch
+- `pager.go` -- bubbletea-based pager for static and live (follow) output
 - `parse.go` -- shared query argument parsing (used by query, follow, explain)
 - `cmd_*.go` -- one file per command group (help, query, explain, chunks, etc.)
+- `client.go` -- Client interface definition
+- `client_grpc.go` -- GRPCClient for remote/embedded connections
+- `client_embedded.go` -- EmbeddedClient with in-memory HTTP transport
 
 ## Binary Format Conventions
 
