@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/cursor"
@@ -35,7 +36,8 @@ type recordResult struct {
 type REPL struct {
 	client Client
 
-	// Query state
+	// Query state (protected by queryMu)
+	queryMu     sync.Mutex
 	store       string                    // target store for queries
 	lastQuery   *query.Query              // last executed query
 	resumeToken *query.ResumeToken        // resume token for pagination
@@ -196,6 +198,36 @@ func (s *lineScanner) Err() error   { return s.err }
 // defaultPageSize is the number of records shown per page in query results.
 const defaultPageSize = 10
 
+// getResultChan returns the current result channel under lock.
+func (r *REPL) getResultChan() chan recordResult {
+	r.queryMu.Lock()
+	defer r.queryMu.Unlock()
+	return r.resultChan
+}
+
+// setResultChan sets the result channel under lock.
+func (r *REPL) setResultChan(ch chan recordResult) {
+	r.queryMu.Lock()
+	defer r.queryMu.Unlock()
+	r.resultChan = ch
+}
+
+// cancelQuery cancels the current query if one exists.
+func (r *REPL) cancelQuery() {
+	r.queryMu.Lock()
+	defer r.queryMu.Unlock()
+	if r.queryCancel != nil {
+		r.queryCancel()
+	}
+}
+
+// hasActiveQuery returns true if there's an active query.
+func (r *REPL) hasActiveQuery() bool {
+	r.queryMu.Lock()
+	defer r.queryMu.Unlock()
+	return r.resultChan != nil
+}
+
 // commands is the list of available REPL commands for tab completion.
 var commands = []string{"help", "store", "query", "follow", "next", "reset", "set", "chunks", "chunk", "indexes", "analyze", "explain", "stats", "status", "exit", "quit"}
 
@@ -243,20 +275,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.following {
 			return m, nil
 		}
-		if m.repl.resultChan == nil {
+		// Get channel under lock to avoid race
+		ch := m.repl.getResultChan()
+		if ch == nil {
 			// Channel gone but still in follow mode - shouldn't happen
 			m.following = false
 			m.output.WriteString("--- Follow ended (no channel) ---\n")
 			return m, nil
 		}
-		// Drain all available records without blocking
+		// Drain all available records without blocking.
+		// We use the local ch variable to avoid race conditions.
 		for {
 			select {
-			case result, ok := <-m.repl.resultChan:
+			case result, ok := <-ch:
 				if !ok {
 					// Channel closed
 					m.following = false
-					m.repl.resultChan = nil
+					m.repl.setResultChan(nil)
 					m.output.WriteString("--- End of follow ---\n")
 					return m, nil
 				}
@@ -276,9 +311,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Any key press stops follow mode
 		if m.following {
 			m.following = false
-			if m.repl.queryCancel != nil {
-				m.repl.queryCancel()
-			}
+			m.repl.cancelQuery()
 			m.output.WriteString("--- Follow stopped ---\n")
 			return m, nil
 		}
@@ -356,6 +389,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Update suggestions based on current input
 	m.updateSuggestions()
+
+	// Update prompt with current status
+	m.textInput.Prompt = m.repl.buildPrompt()
 
 	return m, cmd
 }
@@ -452,23 +488,27 @@ func (m model) View() string {
 	if m.following {
 		return m.output.String()
 	}
-	// Update prompt with current status before rendering
-	m.textInput.Prompt = m.repl.buildPrompt()
 	return m.output.String() + m.textInput.View()
 }
 
 // buildPrompt constructs the REPL prompt showing current status.
 // Format: [store] or [store|query] or [store|query:N pending]
 func (r *REPL) buildPrompt() string {
+	r.queryMu.Lock()
+	store := r.store
+	hasQuery := r.resultChan != nil
+	lastQuery := r.lastQuery
+	r.queryMu.Unlock()
+
 	var parts []string
 
 	// Always show store
-	parts = append(parts, r.store)
+	parts = append(parts, store)
 
 	// Show query status if there's an active query
-	if r.resultChan != nil {
-		if r.lastQuery != nil {
-			queryDesc := r.describeQuery(r.lastQuery)
+	if hasQuery {
+		if lastQuery != nil {
+			queryDesc := r.describeQuery(lastQuery)
 			parts = append(parts, queryDesc)
 		} else {
 			parts = append(parts, "query")

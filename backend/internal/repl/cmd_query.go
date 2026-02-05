@@ -20,19 +20,22 @@ func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
 		return
 	}
 
-	// Cancel any previous query goroutine
-	if r.queryCancel != nil {
-		r.queryCancel()
-	}
+	// Cancel any previous query goroutine (thread-safe)
+	r.cancelQuery()
 
 	// Create cancellable context for this query
 	queryCtx, queryCancel := context.WithCancel(r.ctx)
-	r.queryCancel = queryCancel
 
 	// Create channel and start goroutine to feed records.
 	// Records are copied because Raw may point to mmap'd memory.
 	ch := make(chan recordResult, 100)
+
+	// Update query state under lock
+	r.queryMu.Lock()
+	r.queryCancel = queryCancel
 	r.resultChan = ch
+	store := r.store
+	r.queryMu.Unlock()
 
 	if follow {
 		// Follow mode: stream records from the active chunk in WriteTS order.
@@ -40,17 +43,20 @@ func (r *REPL) cmdQuery(out *strings.Builder, args []string, follow bool) {
 		// records arrive, and we track position to avoid re-sending records.
 		go r.runFollowMode(queryCtx, ch, q)
 	} else {
-		// Execute query
-		seq, getToken, err := r.client.Search(r.ctx, r.store, q, nil)
+		// Execute query using the query context (not the REPL lifetime context)
+		// so that cancelling the query stops the search.
+		seq, getToken, err := r.client.Search(queryCtx, store, q, nil)
 		if err != nil {
 			fmt.Fprintf(out, "Query error: %v\n", err)
 			return
 		}
 
-		// Store query state
+		// Store query state under lock
+		r.queryMu.Lock()
 		r.lastQuery = &q
 		r.getToken = getToken
 		r.resumeToken = nil
+		r.queryMu.Unlock()
 
 		go func() {
 			defer close(ch)
@@ -281,7 +287,7 @@ func matchesValueExists(attrs chunk.Attributes, raw []byte, value string) bool {
 }
 
 func (r *REPL) cmdNext(out *strings.Builder, args []string) {
-	if r.resultChan == nil {
+	if !r.hasActiveQuery() {
 		out.WriteString("No active query. Use 'query' first.\n")
 		return
 	}
@@ -310,7 +316,9 @@ func (r *REPL) fetchAndPrint(out *strings.Builder) {
 }
 
 func (r *REPL) fetchAndPrintN(out *strings.Builder, count int) {
-	if r.resultChan == nil {
+	// Get the channel under lock to avoid race
+	ch := r.getResultChan()
+	if ch == nil {
 		out.WriteString("No active query.\n")
 		return
 	}
@@ -320,20 +328,20 @@ func (r *REPL) fetchAndPrintN(out *strings.Builder, count int) {
 		if count > 0 && printed >= count {
 			break
 		}
-		result, ok := <-r.resultChan
+		result, ok := <-ch
 		if !ok {
 			if printed == 0 {
 				out.WriteString("No more results.\n")
 			} else {
 				fmt.Fprintf(out, "--- %d records (end of results) ---\n", printed)
 			}
-			r.resultChan = nil
+			r.setResultChan(nil)
 			return
 		}
 		if result.err != nil {
 			if errors.Is(result.err, query.ErrInvalidResumeToken) {
 				out.WriteString("Resume token invalid (chunk deleted). Use 'reset' and re-query.\n")
-				r.resultChan = nil
+				r.setResultChan(nil)
 				return
 			}
 			fmt.Fprintf(out, "Error: %v\n", result.err)
@@ -379,9 +387,11 @@ func (r *REPL) printRecord(out *strings.Builder, rec chunk.Record) {
 }
 
 func (r *REPL) cmdReset(out *strings.Builder) {
+	r.queryMu.Lock()
 	r.lastQuery = nil
 	r.resumeToken = nil
 	r.resultChan = nil
 	r.getToken = nil
+	r.queryMu.Unlock()
 	out.WriteString("Query state cleared.\n")
 }

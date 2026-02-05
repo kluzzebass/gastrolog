@@ -44,8 +44,13 @@ func (s *QueryServer) Search(
 
 	q := protoToQuery(req.Msg.Query)
 
-	// TODO: handle resume token
-	iter, _ := eng.Search(ctx, q, nil)
+	// Parse resume token from request
+	var resume *query.ResumeToken
+	if len(req.Msg.ResumeToken) > 0 {
+		resume = protoToResumeToken(req.Msg.ResumeToken)
+	}
+
+	iter, getToken := eng.Search(ctx, q, resume)
 
 	// Batch records for efficiency
 	const batchSize = 100
@@ -56,24 +61,35 @@ func (s *QueryServer) Search(
 			if errors.Is(err, context.Canceled) {
 				return connect.NewError(connect.CodeCanceled, err)
 			}
+			if errors.Is(err, query.ErrInvalidResumeToken) {
+				return connect.NewError(connect.CodeInvalidArgument, err)
+			}
 			return connect.NewError(connect.CodeInternal, err)
 		}
 
 		batch = append(batch, recordToProto(rec))
 
 		if len(batch) >= batchSize {
-			if err := stream.Send(&apiv1.SearchResponse{Records: batch}); err != nil {
+			if err := stream.Send(&apiv1.SearchResponse{Records: batch, HasMore: true}); err != nil {
 				return err
 			}
 			batch = batch[:0]
 		}
 	}
 
-	// Send remaining records
-	if len(batch) > 0 {
-		if err := stream.Send(&apiv1.SearchResponse{Records: batch, HasMore: false}); err != nil {
-			return err
-		}
+	// Get resume token for final response
+	var tokenBytes []byte
+	if token := getToken(); token != nil {
+		tokenBytes = resumeTokenToProto(token)
+	}
+
+	// Send remaining records with HasMore=false
+	if err := stream.Send(&apiv1.SearchResponse{
+		Records:     batch,
+		ResumeToken: tokenBytes,
+		HasMore:     false,
+	}); err != nil {
+		return err
 	}
 
 	return nil
@@ -97,6 +113,7 @@ func (s *QueryServer) Follow(
 
 	q := protoToQuery(req.Msg.Query)
 
+	// Follow doesn't support resume tokens - it streams indefinitely
 	iter, _ := eng.SearchThenFollow(ctx, q, nil)
 
 	const batchSize = 100
@@ -120,7 +137,7 @@ func (s *QueryServer) Follow(
 		}
 	}
 
-	// Send remaining records
+	// Send remaining records (stream ended, e.g., due to limit)
 	if len(batch) > 0 {
 		if err := stream.Send(&apiv1.FollowResponse{Records: batch}); err != nil {
 			return err
@@ -218,4 +235,42 @@ func recordToProto(rec chunk.Record) *apiv1.Record {
 		Raw:      rec.Raw,
 		// TODO: add RecordRef
 	}
+}
+
+// protoToResumeToken converts a proto resume token to the internal type.
+// Resume token format: 16-byte chunk ID + 8-byte position (little-endian).
+func protoToResumeToken(data []byte) *query.ResumeToken {
+	if len(data) != 24 {
+		return nil
+	}
+	var chunkID chunk.ChunkID
+	copy(chunkID[:], data[:16])
+	pos := uint64(data[16]) | uint64(data[17])<<8 | uint64(data[18])<<16 | uint64(data[19])<<24 |
+		uint64(data[20])<<32 | uint64(data[21])<<40 | uint64(data[22])<<48 | uint64(data[23])<<56
+	return &query.ResumeToken{
+		Next: chunk.RecordRef{
+			ChunkID: chunkID,
+			Pos:     pos,
+		},
+	}
+}
+
+// resumeTokenToProto converts an internal resume token to proto bytes.
+// Resume token format: 16-byte chunk ID + 8-byte position (little-endian).
+func resumeTokenToProto(token *query.ResumeToken) []byte {
+	if token == nil {
+		return nil
+	}
+	data := make([]byte, 24)
+	copy(data[:16], token.Next.ChunkID[:])
+	pos := token.Next.Pos
+	data[16] = byte(pos)
+	data[17] = byte(pos >> 8)
+	data[18] = byte(pos >> 16)
+	data[19] = byte(pos >> 24)
+	data[20] = byte(pos >> 32)
+	data[21] = byte(pos >> 40)
+	data[22] = byte(pos >> 48)
+	data[23] = byte(pos >> 56)
+	return data
 }

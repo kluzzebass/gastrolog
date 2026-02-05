@@ -245,17 +245,18 @@ func (ti *tokenIntern) intern(b []byte) string {
 }
 
 // lookup returns the interned string for the given bytes.
-// Panics if the token was not interned in pass 1 (indicates a logic error).
-func (ti *tokenIntern) lookup(b []byte) string {
+// Returns false if the token was not interned in pass 1 (indicates a logic error
+// or data changed between passes).
+func (ti *tokenIntern) lookup(b []byte) (string, bool) {
 	h := ti.hash(b)
 	bucket := ti.buckets[h]
 
 	for _, s := range bucket {
 		if equalStringBytes(s, b) {
-			return s
+			return s, true
 		}
 	}
-	panic(fmt.Sprintf("token not interned: %q", b))
+	return "", false
 }
 
 // tokens returns all interned token strings.
@@ -395,7 +396,12 @@ func (t *Indexer) fillPostingsToFile(ctx context.Context, chunkID chunk.ChunkID,
 
 		tokenizer.IterTokens(rec.Raw, tokBuf, tokenizer.DefaultMaxTokenLen, func(tokBytes []byte) bool {
 			// Look up the interned token (no allocation).
-			tok := intern.lookup(tokBytes)
+			tok, found := intern.lookup(tokBytes)
+			if !found {
+				// Token not interned - this indicates a logic error or data changed
+				// between passes. Skip silently to avoid crashing.
+				return true
+			}
 
 			// Skip if already processed in this record.
 			if _, dup := seenInRecord[tok]; dup {
