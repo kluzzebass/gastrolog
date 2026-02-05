@@ -13,6 +13,10 @@ func (r *REPL) cmdHelp(out *strings.Builder) {
   reset                    Clear current query state
   set [key=value]          Get or set config (no args shows current settings)
 
+Shortcuts:
+  Enter                    With active query: fetch next page
+  Escape                   Clear input and reset query state
+
 Inspection:
   chunks                   List all chunks with metadata
   chunk <id>               Show details for a specific chunk

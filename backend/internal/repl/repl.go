@@ -321,30 +321,46 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 
+		case tea.KeyEscape:
+			// Reset query state
+			if m.repl.hasActiveQuery() {
+				m.repl.cancelQuery()
+				m.repl.queryMu.Lock()
+				m.repl.lastQuery = nil
+				m.repl.resumeToken = nil
+				m.repl.resultChan = nil
+				m.repl.getToken = nil
+				m.repl.queryMu.Unlock()
+				m.textInput.Prompt = m.repl.buildPrompt()
+			}
+			m.textInput.SetValue("")
+			return m, nil
+
 		case tea.KeyEnter:
 			line := strings.TrimSpace(m.textInput.Value())
 			if line != "" {
 				m.repl.addHistory(line)
 				m.output.WriteString("> " + line + "\n")
-				output, exit, follow := m.repl.execute(line)
-				if output != "" {
-					m.output.WriteString(output)
-				}
-				if exit {
-					m.quitting = true
-					return m, tea.Quit
-				}
-				if follow {
-					m.following = true
-					m.textInput.SetValue("")
-					m.textInput.SetSuggestions(commands)
-					m.repl.historyIndex = -1
-					m.output.WriteString("--- Following (press any key to stop) ---\n")
-					return m, followTick()
-				}
+			}
+			output, exit, follow := m.repl.execute(line)
+			if output != "" {
+				m.output.WriteString(output)
+			}
+			if exit {
+				m.quitting = true
+				return m, tea.Quit
+			}
+			if follow {
+				m.following = true
+				m.textInput.SetValue("")
+				m.textInput.SetSuggestions(commands)
+				m.repl.historyIndex = -1
+				m.output.WriteString("--- Following (press any key to stop) ---\n")
+				return m, followTick()
 			}
 			m.textInput.SetValue("")
 			m.textInput.SetSuggestions(commands)
+			m.textInput.Prompt = m.repl.buildPrompt()
 			m.repl.historyIndex = -1
 			return m, nil
 
@@ -605,6 +621,12 @@ func (r *REPL) saveHistory() {
 func (r *REPL) execute(line string) (output string, exit bool, follow bool) {
 	parts := strings.Fields(line)
 	if len(parts) == 0 {
+		// Empty input: if there's an active query, get next batch
+		if r.hasActiveQuery() {
+			var out strings.Builder
+			r.cmdNext(&out, nil)
+			return out.String(), false, false
+		}
 		return "", false, false
 	}
 

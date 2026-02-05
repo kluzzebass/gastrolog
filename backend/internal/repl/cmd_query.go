@@ -353,7 +353,7 @@ func (r *REPL) fetchAndPrintN(out *strings.Builder, count int) {
 	}
 
 	if printed > 0 {
-		fmt.Fprintf(out, "--- %d records shown. Use 'next' for more. ---\n", printed)
+		fmt.Fprintf(out, "--- %d records shown. Press Enter for more. ---\n", printed)
 	}
 }
 
