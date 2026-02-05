@@ -143,7 +143,12 @@ func (o *Orchestrator) processMessage(msg IngestMessage) {
 	}
 
 	// Route to chunk managers (reuses existing Ingest logic).
-	_ = o.ingest(rec)
+	err := o.ingest(rec)
+
+	// Send ack if requested.
+	if msg.Ack != nil {
+		msg.Ack <- err
+	}
 }
 
 // RebuildMissingIndexes checks all sealed chunks and rebuilds indexes for any

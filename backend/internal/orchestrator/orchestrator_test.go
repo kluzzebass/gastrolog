@@ -1307,3 +1307,81 @@ func TestRoutingComplexExpression(t *testing.T) {
 		t.Errorf("archive: expected 4 messages, got %d", count)
 	}
 }
+
+func TestIngestAckSuccess(t *testing.T) {
+	orch, _ := newReceiverTestSetup()
+
+	// Create ack channel and message with ack.
+	ackCh := make(chan error, 1)
+	msg := orchestrator.IngestMessage{
+		Attrs:    map[string]string{"host": "server1"},
+		Raw:      []byte("test message with ack"),
+		IngestTS: time.Now(),
+		Ack:      ackCh,
+	}
+
+	// Register receiver before starting.
+	recv := &ackTestReceiver{
+		msg:     msg,
+		started: make(chan struct{}),
+	}
+	orch.RegisterReceiver("ack-test", recv)
+
+	if err := orch.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer orch.Stop()
+
+	// Wait for receiver to start and send message.
+	<-recv.started
+	time.Sleep(50 * time.Millisecond)
+
+	// Check that ack was received with nil error (success).
+	select {
+	case err := <-ackCh:
+		if err != nil {
+			t.Errorf("expected nil ack, got error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ack")
+	}
+}
+
+func TestIngestAckNotSentWhenNil(t *testing.T) {
+	orch, _ := newReceiverTestSetup()
+
+	// Message without ack channel (fire-and-forget).
+	recv := newMockReceiver([]orchestrator.IngestMessage{
+		{Attrs: map[string]string{"host": "server1"}, Raw: []byte("no ack message")},
+	})
+	orch.RegisterReceiver("no-ack-test", recv)
+
+	if err := orch.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer orch.Stop()
+
+	<-recv.started
+	time.Sleep(50 * time.Millisecond)
+
+	// If we got here without panic/deadlock, the nil ack channel was handled correctly.
+}
+
+// ackTestReceiver sends a single message with an ack channel.
+type ackTestReceiver struct {
+	msg     orchestrator.IngestMessage
+	started chan struct{}
+}
+
+func (r *ackTestReceiver) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+	close(r.started)
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case out <- r.msg:
+	}
+
+	<-ctx.Done()
+	return ctx.Err()
+}

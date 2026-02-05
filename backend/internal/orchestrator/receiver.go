@@ -12,7 +12,8 @@ import (
 type IngestMessage struct {
 	Attrs    map[string]string
 	Raw      []byte
-	IngestTS time.Time // when the receiver received this message
+	IngestTS time.Time    // when the receiver received this message
+	Ack      chan<- error // optional: if non-nil, receives nil on success or error on failure
 }
 
 // Receiver is a source of log messages.
