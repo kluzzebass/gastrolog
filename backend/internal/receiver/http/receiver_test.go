@@ -2,9 +2,11 @@ package http
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -12,124 +14,58 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
-func TestHTTPReceiverPlainText(t *testing.T) {
+func TestLokiPushSingleStream(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Start receiver in background.
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- recv.Run(ctx, out)
-	}()
-
-	// Wait for server to start.
+	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
 
-	// Send plain text message.
-	resp, err := http.Post("http://"+recv.Addr().String()+"/ingest", "text/plain", strings.NewReader("hello world"))
+	ts := time.Now().UnixNano()
+	body := `{
+		"streams": [{
+			"stream": {"host": "server1", "job": "app"},
+			"values": [
+				["` + strconv.FormatInt(ts, 10) + `", "hello world"]
+			]
+		}]
+	}`
+
+	resp, err := http.Post("http://"+recv.Addr().String()+"/loki/api/v1/push", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST failed: %v", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusAccepted {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("expected 202, got %d: %s", resp.StatusCode, body)
+	if resp.StatusCode != http.StatusNoContent {
+		respBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 204, got %d: %s", resp.StatusCode, respBody)
 	}
 
-	// Check message was received.
 	select {
 	case msg := <-out:
 		if string(msg.Raw) != "hello world" {
 			t.Errorf("expected 'hello world', got %q", msg.Raw)
 		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for message")
-	}
-}
-
-func TestHTTPReceiverPlainTextMultiline(t *testing.T) {
-	out := make(chan orchestrator.IngestMessage, 10)
-	recv := New(Config{Addr: "127.0.0.1:0"})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
-
-	// Send multi-line message.
-	resp, err := http.Post("http://"+recv.Addr().String()+"/ingest", "text/plain", strings.NewReader("line1\nline2\nline3"))
-	if err != nil {
-		t.Fatalf("POST failed: %v", err)
-	}
-	resp.Body.Close()
-
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("expected 202, got %d", resp.StatusCode)
-	}
-
-	// Check we got 3 messages.
-	var msgs []string
-	for i := 0; i < 3; i++ {
-		select {
-		case msg := <-out:
-			msgs = append(msgs, string(msg.Raw))
-		case <-time.After(time.Second):
-			t.Fatal("timed out waiting for message")
-		}
-	}
-
-	expected := []string{"line1", "line2", "line3"}
-	for i, exp := range expected {
-		if msgs[i] != exp {
-			t.Errorf("message %d: expected %q, got %q", i, exp, msgs[i])
-		}
-	}
-}
-
-func TestHTTPReceiverJSON(t *testing.T) {
-	out := make(chan orchestrator.IngestMessage, 10)
-	recv := New(Config{Addr: "127.0.0.1:0"})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
-
-	// Send JSON message with raw and attrs.
-	body := `{"raw": "test message", "attrs": {"host": "server1", "level": "error"}}`
-	resp, err := http.Post("http://"+recv.Addr().String()+"/ingest", "application/json", strings.NewReader(body))
-	if err != nil {
-		t.Fatalf("POST failed: %v", err)
-	}
-	resp.Body.Close()
-
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("expected 202, got %d", resp.StatusCode)
-	}
-
-	select {
-	case msg := <-out:
-		if string(msg.Raw) != "test message" {
-			t.Errorf("expected 'test message', got %q", msg.Raw)
-		}
 		if msg.Attrs["host"] != "server1" {
 			t.Errorf("expected host=server1, got %q", msg.Attrs["host"])
 		}
-		if msg.Attrs["level"] != "error" {
-			t.Errorf("expected level=error, got %q", msg.Attrs["level"])
+		if msg.Attrs["job"] != "app" {
+			t.Errorf("expected job=app, got %q", msg.Attrs["job"])
+		}
+		// Check timestamp was parsed.
+		if msg.IngestTS.UnixNano() != ts {
+			t.Errorf("expected timestamp %d, got %d", ts, msg.IngestTS.UnixNano())
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for message")
 	}
 }
 
-func TestHTTPReceiverJSONArray(t *testing.T) {
+func TestLokiPushMultipleValues(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
@@ -139,33 +75,99 @@ func TestHTTPReceiverJSONArray(t *testing.T) {
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
 
-	// Send array of messages.
-	body := `[{"raw": "msg1"}, {"raw": "msg2"}, {"raw": "msg3"}]`
-	resp, err := http.Post("http://"+recv.Addr().String()+"/ingest", "application/json", strings.NewReader(body))
+	ts := time.Now().UnixNano()
+	body := `{
+		"streams": [{
+			"stream": {"host": "server1"},
+			"values": [
+				["` + strconv.FormatInt(ts, 10) + `", "line1"],
+				["` + strconv.FormatInt(ts+1, 10) + `", "line2"],
+				["` + strconv.FormatInt(ts+2, 10) + `", "line3"]
+			]
+		}]
+	}`
+
+	resp, err := http.Post("http://"+recv.Addr().String()+"/loki/api/v1/push", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST failed: %v", err)
 	}
 	resp.Body.Close()
 
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("expected 202, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", resp.StatusCode)
 	}
 
 	// Check we got 3 messages.
-	for i := 1; i <= 3; i++ {
+	expected := []string{"line1", "line2", "line3"}
+	for i, exp := range expected {
 		select {
 		case msg := <-out:
-			expected := "msg" + string(rune('0'+i))
-			if string(msg.Raw) != expected {
-				t.Errorf("message %d: expected %q, got %q", i, expected, msg.Raw)
+			if string(msg.Raw) != exp {
+				t.Errorf("message %d: expected %q, got %q", i, exp, msg.Raw)
 			}
+			if msg.Attrs["host"] != "server1" {
+				t.Errorf("message %d: expected host=server1, got %q", i, msg.Attrs["host"])
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for message %d", i)
+		}
+	}
+}
+
+func TestLokiPushMultipleStreams(t *testing.T) {
+	out := make(chan orchestrator.IngestMessage, 10)
+	recv := New(Config{Addr: "127.0.0.1:0"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go recv.Run(ctx, out)
+	time.Sleep(50 * time.Millisecond)
+
+	ts := time.Now().UnixNano()
+	body := `{
+		"streams": [
+			{
+				"stream": {"host": "server1"},
+				"values": [["` + strconv.FormatInt(ts, 10) + `", "from server1"]]
+			},
+			{
+				"stream": {"host": "server2"},
+				"values": [["` + strconv.FormatInt(ts, 10) + `", "from server2"]]
+			}
+		]
+	}`
+
+	resp, err := http.Post("http://"+recv.Addr().String()+"/loki/api/v1/push", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", resp.StatusCode)
+	}
+
+	// Check we got 2 messages with different hosts.
+	hosts := make(map[string]string)
+	for i := 0; i < 2; i++ {
+		select {
+		case msg := <-out:
+			hosts[msg.Attrs["host"]] = string(msg.Raw)
 		case <-time.After(time.Second):
 			t.Fatal("timed out waiting for message")
 		}
 	}
+
+	if hosts["server1"] != "from server1" {
+		t.Errorf("expected 'from server1' for server1, got %q", hosts["server1"])
+	}
+	if hosts["server2"] != "from server2" {
+		t.Errorf("expected 'from server2' for server2, got %q", hosts["server2"])
+	}
 }
 
-func TestHTTPReceiverJSONRawObject(t *testing.T) {
+func TestLokiPushStructuredMetadata(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
@@ -175,30 +177,49 @@ func TestHTTPReceiverJSONRawObject(t *testing.T) {
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
 
-	// Send arbitrary JSON object (no "raw" field) - should be stored as-is.
-	body := `{"level": "error", "message": "something went wrong", "code": 500}`
-	resp, err := http.Post("http://"+recv.Addr().String()+"/ingest", "application/json", strings.NewReader(body))
+	ts := time.Now().UnixNano()
+	// Third element is structured metadata.
+	body := `{
+		"streams": [{
+			"stream": {"host": "server1"},
+			"values": [
+				["` + strconv.FormatInt(ts, 10) + `", "log with metadata", {"trace_id": "abc123", "user_id": "user42"}]
+			]
+		}]
+	}`
+
+	resp, err := http.Post("http://"+recv.Addr().String()+"/loki/api/v1/push", "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST failed: %v", err)
 	}
 	resp.Body.Close()
 
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("expected 202, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", resp.StatusCode)
 	}
 
 	select {
 	case msg := <-out:
-		// Raw should be the entire JSON object.
-		if !bytes.Contains(msg.Raw, []byte(`"level": "error"`)) {
-			t.Errorf("expected raw to contain original JSON, got %q", msg.Raw)
+		if string(msg.Raw) != "log with metadata" {
+			t.Errorf("expected 'log with metadata', got %q", msg.Raw)
+		}
+		// Stream label.
+		if msg.Attrs["host"] != "server1" {
+			t.Errorf("expected host=server1, got %q", msg.Attrs["host"])
+		}
+		// Structured metadata.
+		if msg.Attrs["trace_id"] != "abc123" {
+			t.Errorf("expected trace_id=abc123, got %q", msg.Attrs["trace_id"])
+		}
+		if msg.Attrs["user_id"] != "user42" {
+			t.Errorf("expected user_id=user42, got %q", msg.Attrs["user_id"])
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for message")
 	}
 }
 
-func TestHTTPReceiverHeaderAttrs(t *testing.T) {
+func TestLokiPushGzipCompression(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
@@ -208,11 +229,18 @@ func TestHTTPReceiverHeaderAttrs(t *testing.T) {
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
 
-	// Send message with X-Attrs-* headers.
-	req, _ := http.NewRequest("POST", "http://"+recv.Addr().String()+"/ingest", strings.NewReader("test"))
-	req.Header.Set("Content-Type", "text/plain")
-	req.Header.Set("X-Attrs-Host", "server1")
-	req.Header.Set("X-Attrs-Env", "prod")
+	ts := time.Now().UnixNano()
+	body := `{"streams": [{"stream": {"host": "server1"}, "values": [["` + strconv.FormatInt(ts, 10) + `", "gzipped message"]]}]}`
+
+	// Gzip compress the body.
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	gz.Write([]byte(body))
+	gz.Close()
+
+	req, _ := http.NewRequest("POST", "http://"+recv.Addr().String()+"/loki/api/v1/push", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -220,24 +248,21 @@ func TestHTTPReceiverHeaderAttrs(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("expected 202, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", resp.StatusCode)
 	}
 
 	select {
 	case msg := <-out:
-		if msg.Attrs["Host"] != "server1" {
-			t.Errorf("expected Host=server1, got %q", msg.Attrs["Host"])
-		}
-		if msg.Attrs["Env"] != "prod" {
-			t.Errorf("expected Env=prod, got %q", msg.Attrs["Env"])
+		if string(msg.Raw) != "gzipped message" {
+			t.Errorf("expected 'gzipped message', got %q", msg.Raw)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for message")
 	}
 }
 
-func TestHTTPReceiverWaitAck(t *testing.T) {
+func TestLokiPushWaitAck(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
@@ -247,11 +272,14 @@ func TestHTTPReceiverWaitAck(t *testing.T) {
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
 
+	ts := time.Now().UnixNano()
+	body := `{"streams": [{"stream": {}, "values": [["` + strconv.FormatInt(ts, 10) + `", "ack test"]]}]}`
+
 	// Start request with X-Wait-Ack header in background.
 	respCh := make(chan *http.Response, 1)
 	go func() {
-		req, _ := http.NewRequest("POST", "http://"+recv.Addr().String()+"/ingest", strings.NewReader("ack test"))
-		req.Header.Set("Content-Type", "text/plain")
+		req, _ := http.NewRequest("POST", "http://"+recv.Addr().String()+"/loki/api/v1/push", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-Wait-Ack", "true")
 
 		resp, err := http.DefaultClient.Do(req)
@@ -281,16 +309,16 @@ func TestHTTPReceiverWaitAck(t *testing.T) {
 	select {
 	case resp := <-respCh:
 		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			t.Errorf("expected 200, got %d: %s", resp.StatusCode, body)
+		if resp.StatusCode != http.StatusNoContent {
+			respBody, _ := io.ReadAll(resp.Body)
+			t.Errorf("expected 204, got %d: %s", resp.StatusCode, respBody)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for response")
 	}
 }
 
-func TestHTTPReceiverWaitAckError(t *testing.T) {
+func TestLokiPushWaitAckError(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
@@ -300,11 +328,14 @@ func TestHTTPReceiverWaitAckError(t *testing.T) {
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
 
+	ts := time.Now().UnixNano()
+	body := `{"streams": [{"stream": {}, "values": [["` + strconv.FormatInt(ts, 10) + `", "ack error test"]]}]}`
+
 	// Start request with X-Wait-Ack header in background.
 	respCh := make(chan *http.Response, 1)
 	go func() {
-		req, _ := http.NewRequest("POST", "http://"+recv.Addr().String()+"/ingest", strings.NewReader("ack error test"))
-		req.Header.Set("Content-Type", "text/plain")
+		req, _ := http.NewRequest("POST", "http://"+recv.Addr().String()+"/loki/api/v1/push", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-Wait-Ack", "true")
 
 		resp, err := http.DefaultClient.Do(req)
@@ -335,7 +366,7 @@ func TestHTTPReceiverWaitAckError(t *testing.T) {
 	}
 }
 
-func TestHTTPReceiverEmptyBody(t *testing.T) {
+func TestLokiPushLegacyEndpoint(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
@@ -345,7 +376,63 @@ func TestHTTPReceiverEmptyBody(t *testing.T) {
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
 
-	resp, err := http.Post("http://"+recv.Addr().String()+"/ingest", "text/plain", strings.NewReader(""))
+	ts := time.Now().UnixNano()
+	body := `{"streams": [{"stream": {}, "values": [["` + strconv.FormatInt(ts, 10) + `", "legacy endpoint"]]}]}`
+
+	// Use legacy /api/prom/push endpoint.
+	resp, err := http.Post("http://"+recv.Addr().String()+"/api/prom/push", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", resp.StatusCode)
+	}
+
+	select {
+	case msg := <-out:
+		if string(msg.Raw) != "legacy endpoint" {
+			t.Errorf("expected 'legacy endpoint', got %q", msg.Raw)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for message")
+	}
+}
+
+func TestLokiPushEmptyStreams(t *testing.T) {
+	out := make(chan orchestrator.IngestMessage, 10)
+	recv := New(Config{Addr: "127.0.0.1:0"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go recv.Run(ctx, out)
+	time.Sleep(50 * time.Millisecond)
+
+	// Empty streams array - Loki returns 204.
+	resp, err := http.Post("http://"+recv.Addr().String()+"/loki/api/v1/push", "application/json", strings.NewReader(`{"streams": []}`))
+	if err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("expected 204, got %d", resp.StatusCode)
+	}
+}
+
+func TestLokiPushInvalidJSON(t *testing.T) {
+	out := make(chan orchestrator.IngestMessage, 10)
+	recv := New(Config{Addr: "127.0.0.1:0"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go recv.Run(ctx, out)
+	time.Sleep(50 * time.Millisecond)
+
+	resp, err := http.Post("http://"+recv.Addr().String()+"/loki/api/v1/push", "application/json", strings.NewReader(`{invalid json`))
 	if err != nil {
 		t.Fatalf("POST failed: %v", err)
 	}
@@ -353,5 +440,49 @@ func TestHTTPReceiverEmptyBody(t *testing.T) {
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestLokiPushInvalidTimestamp(t *testing.T) {
+	out := make(chan orchestrator.IngestMessage, 10)
+	recv := New(Config{Addr: "127.0.0.1:0"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go recv.Run(ctx, out)
+	time.Sleep(50 * time.Millisecond)
+
+	// Timestamp as number instead of string (Loki requires string).
+	resp, err := http.Post("http://"+recv.Addr().String()+"/loki/api/v1/push", "application/json",
+		strings.NewReader(`{"streams": [{"stream": {}, "values": [[1234567890, "test"]]}]}`))
+	if err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestReadyEndpoint(t *testing.T) {
+	out := make(chan orchestrator.IngestMessage, 10)
+	recv := New(Config{Addr: "127.0.0.1:0"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go recv.Run(ctx, out)
+	time.Sleep(50 * time.Millisecond)
+
+	resp, err := http.Get("http://" + recv.Addr().String() + "/ready")
+	if err != nil {
+		t.Fatalf("GET failed: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
 	}
 }

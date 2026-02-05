@@ -12,7 +12,7 @@ func NewFactory() orchestrator.ReceiverFactory {
 	return func(params map[string]string, logger *slog.Logger) (orchestrator.Receiver, error) {
 		addr := params["addr"]
 		if addr == "" {
-			addr = ":8080"
+			addr = ":3100" // Loki's default port
 		}
 
 		// Validate addr format (basic check).
