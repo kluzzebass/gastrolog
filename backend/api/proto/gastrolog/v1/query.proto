@@ -1,0 +1,97 @@
+syntax = "proto3";
+
+package gastrolog.v1;
+
+option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
+
+import "google/protobuf/timestamp.proto";
+
+// QueryService provides log querying capabilities.
+service QueryService {
+  // Search executes a query and streams matching records.
+  rpc Search(SearchRequest) returns (stream SearchResponse);
+
+  // Follow executes a query and streams matching records, then continues
+  // streaming new records as they arrive (like tail -f).
+  rpc Follow(FollowRequest) returns (stream FollowResponse);
+
+  // Explain returns the query execution plan without executing.
+  rpc Explain(ExplainRequest) returns (ExplainResponse);
+}
+
+message SearchRequest {
+  string store = 1;
+  Query query = 2;
+  bytes resume_token = 3; // Opaque token for pagination
+}
+
+message SearchResponse {
+  repeated Record records = 1;
+  bytes resume_token = 2; // Token to continue from, if more results exist
+  bool has_more = 3;
+}
+
+message FollowRequest {
+  string store = 1;
+  Query query = 2;
+}
+
+message FollowResponse {
+  repeated Record records = 1;
+}
+
+message ExplainRequest {
+  string store = 1;
+  Query query = 2;
+}
+
+message ExplainResponse {
+  repeated ChunkPlan chunks = 1;
+}
+
+message Query {
+  google.protobuf.Timestamp start = 1;
+  google.protobuf.Timestamp end = 2;
+  repeated string tokens = 3;
+  repeated KVPredicate kv_predicates = 4;
+  int64 limit = 5;
+  int32 context_before = 6;
+  int32 context_after = 7;
+}
+
+message KVPredicate {
+  string key = 1;   // Empty for value-exists check
+  string value = 2; // Empty for key-exists check, "*" also means any
+}
+
+message Record {
+  google.protobuf.Timestamp ingest_ts = 1;
+  google.protobuf.Timestamp write_ts = 2;
+  map<string, string> attrs = 3;
+  bytes raw = 4;
+  RecordRef ref = 5;
+}
+
+message RecordRef {
+  bytes chunk_id = 1; // 16-byte UUID
+  uint64 pos = 2;
+}
+
+message ChunkPlan {
+  bytes chunk_id = 1;
+  bool sealed = 2;
+  int64 record_count = 3;
+  repeated PipelineStep steps = 4;
+  string scan_mode = 5; // "sequential" or "index-driven"
+  int64 estimated_records = 6;
+  repeated string runtime_filters = 7;
+}
+
+message PipelineStep {
+  string name = 1;
+  int64 input_estimate = 2;
+  int64 output_estimate = 3;
+  string action = 4; // "seek", "indexed", "filter"
+  string reason = 5;
+  string detail = 6;
+}

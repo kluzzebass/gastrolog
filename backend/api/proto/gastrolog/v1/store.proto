@@ -1,0 +1,134 @@
+syntax = "proto3";
+
+package gastrolog.v1;
+
+option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
+
+import "google/protobuf/timestamp.proto";
+
+// StoreService provides store and chunk management.
+service StoreService {
+  // ListStores returns all registered stores.
+  rpc ListStores(ListStoresRequest) returns (ListStoresResponse);
+
+  // GetStore returns details for a specific store.
+  rpc GetStore(GetStoreRequest) returns (GetStoreResponse);
+
+  // ListChunks returns all chunks in a store.
+  rpc ListChunks(ListChunksRequest) returns (ListChunksResponse);
+
+  // GetChunk returns details for a specific chunk.
+  rpc GetChunk(GetChunkRequest) returns (GetChunkResponse);
+
+  // GetIndexes returns index status for a chunk.
+  rpc GetIndexes(GetIndexesRequest) returns (GetIndexesResponse);
+
+  // AnalyzeChunk returns detailed index analysis for a chunk.
+  rpc AnalyzeChunk(AnalyzeChunkRequest) returns (AnalyzeChunkResponse);
+
+  // GetStats returns overall statistics for a store.
+  rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
+}
+
+message ListStoresRequest {}
+
+message ListStoresResponse {
+  repeated StoreInfo stores = 1;
+}
+
+message StoreInfo {
+  string id = 1;
+  string type = 2;
+  string route = 3;
+  int64 chunk_count = 4;
+  int64 record_count = 5;
+}
+
+message GetStoreRequest {
+  string id = 1;
+}
+
+message GetStoreResponse {
+  StoreInfo store = 1;
+}
+
+message ListChunksRequest {
+  string store = 1;
+}
+
+message ListChunksResponse {
+  repeated ChunkMeta chunks = 1;
+}
+
+message ChunkMeta {
+  bytes id = 1; // 16-byte UUID
+  google.protobuf.Timestamp start_ts = 2;
+  google.protobuf.Timestamp end_ts = 3;
+  bool sealed = 4;
+  int64 record_count = 5;
+}
+
+message GetChunkRequest {
+  string store = 1;
+  bytes chunk_id = 2;
+}
+
+message GetChunkResponse {
+  ChunkMeta chunk = 1;
+}
+
+message GetIndexesRequest {
+  string store = 1;
+  bytes chunk_id = 2;
+}
+
+message GetIndexesResponse {
+  bool sealed = 1;
+  repeated IndexInfo indexes = 2;
+}
+
+message IndexInfo {
+  string name = 1;
+  bool exists = 2;
+  int64 entry_count = 3;
+  int64 size_bytes = 4;
+}
+
+message AnalyzeChunkRequest {
+  string store = 1;
+  bytes chunk_id = 2; // If empty, analyze all chunks
+}
+
+message AnalyzeChunkResponse {
+  repeated ChunkAnalysis analyses = 1;
+}
+
+message ChunkAnalysis {
+  bytes chunk_id = 1;
+  bool sealed = 2;
+  int64 record_count = 3;
+  repeated IndexAnalysis indexes = 4;
+}
+
+message IndexAnalysis {
+  string name = 1;
+  bool complete = 2;
+  string status = 3; // "ok", "missing", "incomplete", "capped"
+  int64 entry_count = 4;
+  double coverage = 5; // 0.0 to 1.0
+  map<string, string> details = 6;
+}
+
+message GetStatsRequest {
+  string store = 1; // If empty, aggregate across all stores
+}
+
+message GetStatsResponse {
+  int64 total_stores = 1;
+  int64 total_chunks = 2;
+  int64 sealed_chunks = 3;
+  int64 total_records = 4;
+  int64 total_bytes = 5;
+  google.protobuf.Timestamp oldest_record = 6;
+  google.protobuf.Timestamp newest_record = 7;
+}

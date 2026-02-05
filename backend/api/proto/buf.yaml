@@ -1,0 +1,12 @@
+version: v2
+modules:
+  - path: .
+    name: buf.build/gastrolog/api
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - FILE
+deps:
+  - buf.build/protocolbuffers/wellknowntypes

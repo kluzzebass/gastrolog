@@ -113,3 +113,31 @@ func (o *Orchestrator) Running() bool {
 	defer o.mu.RUnlock()
 	return o.running
 }
+
+// IsRunning is an alias for Running.
+func (o *Orchestrator) IsRunning() bool {
+	return o.Running()
+}
+
+// ListStores returns all registered store IDs.
+// This is an alias for ChunkManagers.
+func (o *Orchestrator) ListStores() []string {
+	return o.ChunkManagers()
+}
+
+// ListReceivers returns all registered receiver IDs.
+// This is an alias for Receivers.
+func (o *Orchestrator) ListReceivers() []string {
+	return o.Receivers()
+}
+
+// QueryEngine returns the query engine registered under the given key.
+// Returns nil if not found.
+func (o *Orchestrator) QueryEngine(key string) *query.Engine {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if key == "" {
+		key = "default"
+	}
+	return o.queries[key]
+}

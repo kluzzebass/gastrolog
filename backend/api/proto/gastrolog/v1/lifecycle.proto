@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package gastrolog.v1;
+
+option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
+
+// LifecycleService provides server lifecycle management.
+service LifecycleService {
+  // Health returns the server health status.
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // Shutdown initiates a graceful shutdown.
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  Status status = 1;
+  string version = 2;
+  int64 uptime_seconds = 3;
+}
+
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  STATUS_HEALTHY = 1;
+  STATUS_DEGRADED = 2;
+  STATUS_UNHEALTHY = 3;
+}
+
+message ShutdownRequest {
+  bool drain = 1; // If true, wait for in-flight requests to complete
+}
+
+message ShutdownResponse {}

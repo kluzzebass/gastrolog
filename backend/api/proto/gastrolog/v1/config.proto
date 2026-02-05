@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package gastrolog.v1;
+
+option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
+
+// ConfigService provides configuration management.
+service ConfigService {
+  // GetConfig returns the current configuration.
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+
+  // UpdateStoreRoute updates a store's routing expression.
+  rpc UpdateStoreRoute(UpdateStoreRouteRequest) returns (UpdateStoreRouteResponse);
+
+  // ListReceivers returns all registered receivers.
+  rpc ListReceivers(ListReceiversRequest) returns (ListReceiversResponse);
+
+  // GetReceiverStatus returns status for a specific receiver.
+  rpc GetReceiverStatus(GetReceiverStatusRequest) returns (GetReceiverStatusResponse);
+}
+
+message GetConfigRequest {}
+
+message GetConfigResponse {
+  repeated StoreConfig stores = 1;
+  repeated ReceiverConfig receivers = 2;
+  map<string, RotationPolicyConfig> rotation_policies = 3;
+}
+
+message StoreConfig {
+  string id = 1;
+  string type = 2;
+  string route = 3;
+  string policy = 4;
+  map<string, string> params = 5;
+}
+
+message ReceiverConfig {
+  string id = 1;
+  string type = 2;
+  map<string, string> params = 3;
+}
+
+message RotationPolicyConfig {
+  int64 max_bytes = 1;
+  int64 max_records = 2;
+  int64 max_age_seconds = 3;
+}
+
+message UpdateStoreRouteRequest {
+  string store_id = 1;
+  string route = 2;
+}
+
+message UpdateStoreRouteResponse {}
+
+message ListReceiversRequest {}
+
+message ListReceiversResponse {
+  repeated ReceiverInfo receivers = 1;
+}
+
+message ReceiverInfo {
+  string id = 1;
+  string type = 2;
+  bool running = 3;
+}
+
+message GetReceiverStatusRequest {
+  string id = 1;
+}
+
+message GetReceiverStatusResponse {
+  string id = 1;
+  string type = 2;
+  bool running = 3;
+  int64 messages_received = 4;
+  int64 errors = 5;
+}
