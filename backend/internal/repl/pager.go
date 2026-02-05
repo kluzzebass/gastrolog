@@ -56,17 +56,21 @@ func (r *REPL) pager(output string) {
 	}
 	defer term.Restore(int(os.Stdin.Fd()), oldState)
 
-	// Viewport state
-	topLine := 0     // first visible line
-	leftCol := 0     // horizontal scroll offset
-	hScrollStep := 8 // horizontal scroll amount
+	// Switch to alternate screen buffer
+	fmt.Print("\033[?1049h")
+	defer fmt.Print("\033[?1049l")
 
 	// Hide cursor during paging
 	fmt.Print("\033[?25l")
 	defer fmt.Print("\033[?25h")
 
-	// Clear screen and draw initial view
-	fmt.Print("\033[2J\033[H")
+	// Viewport state
+	topLine := 0     // first visible line
+	leftCol := 0     // horizontal scroll offset
+	hScrollStep := 8 // horizontal scroll amount
+
+	// Move cursor to top-left
+	fmt.Print("\033[H")
 
 	for {
 		// Clamp topLine
@@ -149,8 +153,6 @@ func (r *REPL) pager(output string) {
 		if n == 1 {
 			switch buf[0] {
 			case 'q', 'Q':
-				// Clear screen and return
-				fmt.Print("\033[2J\033[H")
 				return
 			case 'j': // down one line
 				topLine++
