@@ -1,6 +1,9 @@
 package chatterbox
 
-import "math/rand/v2"
+import (
+	"math/rand/v2"
+	"time"
+)
 
 // PlainTextFormat generates simple unstructured log messages.
 type PlainTextFormat struct {
@@ -12,7 +15,7 @@ func NewPlainTextFormat(pools *AttributePools) *PlainTextFormat {
 	return &PlainTextFormat{pools: pools}
 }
 
-func (f *PlainTextFormat) Generate(rng *rand.Rand) ([]byte, map[string]string) {
+func (f *PlainTextFormat) Generate(rng *rand.Rand) ([]byte, map[string]string, time.Time) {
 	messages := []string{
 		"starting worker pool",
 		"connection failed",
@@ -43,5 +46,5 @@ func (f *PlainTextFormat) Generate(rng *rand.Rand) ([]byte, map[string]string) {
 		"host":    pick(rng, f.pools.Hosts),
 	}
 
-	return []byte(msg), attrs
+	return []byte(msg), attrs, time.Time{}
 }

@@ -17,7 +17,7 @@ func NewJSONFormat(pools *AttributePools) *JSONFormat {
 	return &JSONFormat{pools: pools}
 }
 
-func (f *JSONFormat) Generate(rng *rand.Rand) ([]byte, map[string]string) {
+func (f *JSONFormat) Generate(rng *rand.Rand) ([]byte, map[string]string, time.Time) {
 	levels := []string{"debug", "info", "warn", "error"}
 	messages := []string{
 		"request handled",
@@ -35,11 +35,13 @@ func (f *JSONFormat) Generate(rng *rand.Rand) ([]byte, map[string]string) {
 	level := pick(rng, levels)
 	msg := pick(rng, messages)
 
+	now := time.Now()
+
 	// Build JSON object with varied fields
 	obj := map[string]any{
 		"level": level,
 		"msg":   msg,
-		"ts":    time.Now().UnixMilli(),
+		"ts":    now.UnixMilli(),
 	}
 
 	switch rng.IntN(5) {
@@ -84,5 +86,5 @@ func (f *JSONFormat) Generate(rng *rand.Rand) ([]byte, map[string]string) {
 		"host":    pick(rng, f.pools.Hosts),
 	}
 
-	return data, attrs
+	return data, attrs, now
 }

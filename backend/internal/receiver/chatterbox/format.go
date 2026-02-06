@@ -3,14 +3,14 @@ package chatterbox
 import (
 	"fmt"
 	"math/rand/v2"
+	"time"
 )
 
 // LogFormat generates synthetic log messages with associated source attributes.
 type LogFormat interface {
-	// Generate returns a raw log message and source attributes.
-	// The attrs map should contain stable attribute dimensions that
-	// can be used to form meaningful SourceIDs.
-	Generate(rng *rand.Rand) (raw []byte, attrs map[string]string)
+	// Generate returns a raw log message, source attributes, and the source timestamp.
+	// sourceTS is the timestamp embedded in the log message (zero if the format has none).
+	Generate(rng *rand.Rand) (raw []byte, attrs map[string]string, sourceTS time.Time)
 }
 
 // AttributePools holds pre-generated pools of attribute values.

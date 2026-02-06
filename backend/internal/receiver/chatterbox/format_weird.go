@@ -1,6 +1,9 @@
 package chatterbox
 
-import "math/rand/v2"
+import (
+	"math/rand/v2"
+	"time"
+)
 
 // WeirdFormat generates random/malformed data to stress tokenization.
 type WeirdFormat struct {
@@ -12,7 +15,7 @@ func NewWeirdFormat(pools *AttributePools) *WeirdFormat {
 	return &WeirdFormat{pools: pools}
 }
 
-func (f *WeirdFormat) Generate(rng *rand.Rand) ([]byte, map[string]string) {
+func (f *WeirdFormat) Generate(rng *rand.Rand) ([]byte, map[string]string, time.Time) {
 	var data []byte
 
 	switch rng.IntN(8) {
@@ -81,5 +84,5 @@ func (f *WeirdFormat) Generate(rng *rand.Rand) ([]byte, map[string]string) {
 		"host":    pick(rng, f.pools.Hosts),
 	}
 
-	return data, attrs
+	return data, attrs, time.Time{}
 }
