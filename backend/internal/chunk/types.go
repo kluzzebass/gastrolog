@@ -1,12 +1,14 @@
 package chunk
 
 import (
+	"encoding/base32"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"slices"
+	"strings"
+	"sync/atomic"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 var (
@@ -130,23 +132,66 @@ func (a Attributes) Copy() Attributes {
 	return cp
 }
 
+// chunkIDEncoding is base32hex (RFC 4648) lowercase without padding.
+// Alphabet 0-9a-v preserves lexicographic sort order.
+var chunkIDEncoding = base32.HexEncoding.WithPadding(base32.NoPadding)
+
 // ChunkID uniquely identifies a chunk.
-type ChunkID uuid.UUID
+// It encodes a creation timestamp as big-endian uint64 unix microseconds.
+// The string representation is 13-char lowercase base32hex, lexicographically
+// sortable by creation time.
+type ChunkID [8]byte
 
+// lastChunkMicro ensures NewChunkID returns monotonically increasing IDs
+// even when called multiple times within the same microsecond.
+var lastChunkMicro atomic.Int64
+
+// NewChunkID creates a ChunkID from the current time.
+// It guarantees monotonically increasing IDs even under rapid creation.
 func NewChunkID() ChunkID {
-	return ChunkID(uuid.Must(uuid.NewV7()))
-}
-
-func ParseChunkID(value string) (ChunkID, error) {
-	parsed, err := uuid.Parse(value)
-	if err != nil {
-		return ChunkID{}, err
+	now := time.Now().UnixMicro()
+	for {
+		old := lastChunkMicro.Load()
+		next := max(now, old+1)
+		if lastChunkMicro.CompareAndSwap(old, next) {
+			var id ChunkID
+			binary.BigEndian.PutUint64(id[:], uint64(next))
+			return id
+		}
 	}
-	return ChunkID(parsed), nil
 }
 
+// ChunkIDFromTime creates a ChunkID from the given time.
+func ChunkIDFromTime(t time.Time) ChunkID {
+	var id ChunkID
+	binary.BigEndian.PutUint64(id[:], uint64(t.UnixMicro()))
+	return id
+}
+
+// ParseChunkID parses a 13-character base32hex string into a ChunkID.
+func ParseChunkID(value string) (ChunkID, error) {
+	if len(value) != 13 {
+		return ChunkID{}, fmt.Errorf("invalid chunk ID length: %d (want 13)", len(value))
+	}
+	// base32hex decode expects uppercase
+	decoded, err := chunkIDEncoding.DecodeString(strings.ToUpper(value))
+	if err != nil {
+		return ChunkID{}, fmt.Errorf("invalid chunk ID: %w", err)
+	}
+	var id ChunkID
+	copy(id[:], decoded)
+	return id, nil
+}
+
+// String returns the 13-character lowercase base32hex representation.
 func (id ChunkID) String() string {
-	return uuid.UUID(id).String()
+	return strings.ToLower(chunkIDEncoding.EncodeToString(id[:]))
+}
+
+// Time returns the creation time encoded in the ChunkID.
+func (id ChunkID) Time() time.Time {
+	us := int64(binary.BigEndian.Uint64(id[:]))
+	return time.UnixMicro(us)
 }
 
 // RecordRef is a reference to a record within a chunk.
@@ -171,6 +216,9 @@ type ChunkMeta struct {
 //   - IngestTS: when our receiver received the message
 //   - WriteTS:  when the chunk manager wrote the record (monotonic within a chunk)
 //
+// Ref and StoreID are populated by the query engine when returning search
+// results. They are zero-valued when appending records or reading via cursor.
+//
 // Note: When reading from file-backed chunks, Raw and Attrs may reference
 // mmap'd memory that becomes invalid when the cursor is closed. Callers that
 // need the record to outlive the cursor should call Copy().
@@ -180,6 +228,8 @@ type Record struct {
 	WriteTS  time.Time
 	Attrs    Attributes
 	Raw      []byte
+	Ref      RecordRef
+	StoreID  string
 }
 
 // Copy returns a deep copy of the record with its own Raw slice and Attrs map.

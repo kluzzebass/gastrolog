@@ -10,6 +10,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
 	"gastrolog/internal/querylang"
+	"gastrolog/internal/tokenizer"
 )
 
 // QueryPlan describes how a query will be executed across chunks.
@@ -269,13 +270,14 @@ func (e *Engine) buildBranchPipeline(pipeline *[]PipelineStep, branch *querylang
 			allFound := true
 			var missingToken string
 			var missingReason string
+			var missingDefinitive bool
 
 			for i, tok := range tokens {
 				pos, found := reader.Lookup(tok)
 				if !found {
 					allFound = false
 					missingToken = tok
-					missingReason = classifyTokenMiss(tok)
+					missingReason, missingDefinitive = classifyTokenMiss(tok)
 					break
 				}
 				if i == 0 {
@@ -286,10 +288,19 @@ func (e *Engine) buildBranchPipeline(pipeline *[]PipelineStep, branch *querylang
 			}
 
 			if !allFound {
+				if missingDefinitive {
+					// Token is indexable but absent — no records contain it.
+					step.PositionsAfter = 0
+					step.Action = "skipped"
+					step.Reason = "no_match"
+					step.Details = fmt.Sprintf("'%s' not in chunk", missingToken)
+					*pipeline = append(*pipeline, step)
+					return 0, true, fmt.Sprintf("no match (%s)", predicate), nil
+				}
 				step.PositionsAfter = currentPositions
 				step.Action = "runtime"
 				step.Reason = missingReason
-				step.Details = fmt.Sprintf("'%s' not indexed", missingToken)
+				step.Details = fmt.Sprintf("'%s' not indexable (%s)", missingToken, missingReason)
 				runtimeFilters = append(runtimeFilters, predicate)
 			} else if len(positions) == 0 {
 				step.PositionsAfter = 0
@@ -492,7 +503,7 @@ func (e *Engine) lookupKVIndex(f KeyValueFilter, chunkID chunk.ChunkID, im index
 			} else {
 				result.available = true
 				reader := index.NewKVIndexReader(chunkID, kvIdx.Entries())
-				if pos, found := reader.Lookup(f.Key, f.Value); found {
+				if pos, found := reader.Lookup(keyLower, valLower); found {
 					result.positions = unionPositions(result.positions, pos)
 					detailParts = append(detailParts, fmt.Sprintf("msg_kv=%d", len(pos)))
 				} else {
@@ -557,33 +568,29 @@ func formatKVFilter(f KeyValueFilter) string {
 	return key + "=" + value
 }
 
-// classifyTokenMiss returns why a token might not be in the index.
-func classifyTokenMiss(tok string) string {
+// classifyTokenMiss returns why a token is not in the index.
+// If the token is indexable (would have been indexed if present in the data),
+// its absence means no records contain it. Otherwise, the tokenizer would have
+// skipped it and we need a runtime filter.
+func classifyTokenMiss(tok string) (reason string, definitive bool) {
+	if tokenizer.IsIndexable(strings.ToLower(tok)) {
+		return "no_match", true // token is valid but not in chunk data
+	}
+
 	tokLower := strings.ToLower(tok)
 
 	// Check for non-ASCII.
 	for _, r := range tokLower {
 		if r > 127 {
-			return "non_ascii"
+			return "non_ascii", false
 		}
 	}
 
 	// Too short.
 	if len(tokLower) < 2 {
-		return "too_short"
+		return "too_short", false
 	}
 
-	// Check if it looks numeric/hex.
-	allHex := true
-	for _, b := range []byte(tokLower) {
-		if !((b >= '0' && b <= '9') || (b >= 'a' && b <= 'f') || b == '-') {
-			allHex = false
-			break
-		}
-	}
-	if allHex {
-		return "numeric"
-	}
-
-	return "not_indexed"
+	// Numeric/hex — the tokenizer skips these.
+	return "numeric", false
 }

@@ -76,8 +76,8 @@ func (r *Receiver) generateMessage() orchestrator.IngestMessage {
 	// Select a format using weighted random selection.
 	format := r.selectFormat()
 
-	// Generate raw bytes and format-specific attributes.
-	raw, formatAttrs := format.Generate(r.rng)
+	// Generate raw bytes, format-specific attributes, and source timestamp.
+	raw, formatAttrs, sourceTS := format.Generate(r.rng)
 
 	// Merge base attrs with format attrs.
 	// Base attrs take precedence (receiver, instance are always set).
@@ -91,6 +91,7 @@ func (r *Receiver) generateMessage() orchestrator.IngestMessage {
 	return orchestrator.IngestMessage{
 		Attrs:    attrs,
 		Raw:      raw,
+		SourceTS: sourceTS,
 		IngestTS: time.Now(),
 	}
 }

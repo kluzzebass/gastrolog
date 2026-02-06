@@ -1,0 +1,5 @@
+version: v2
+modules:
+  - path: ../backend/api/proto
+deps:
+  - buf.build/protocolbuffers/wellknowntypes

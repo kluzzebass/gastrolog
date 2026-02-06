@@ -502,13 +502,19 @@ func applyTokenIndex(b *scannerBuilder, indexes index.IndexManager, chunkID chun
 	reader := index.NewTokenIndexReader(chunkID, tokIdx.Entries())
 
 	// All tokens must be present in the index (AND semantics).
-	// If any token is not in the index, fall back to runtime filtering
-	// since the index is selective and doesn't contain all tokens.
 	for i, tok := range tokens {
+		tok = strings.ToLower(tok)
 		positions, found := reader.Lookup(tok)
 		if !found {
-			// Token not in index - can't use index, need runtime filter
-			return false, false
+			// Token not in index. If the tokenizer would have indexed this
+			// token (valid ASCII, right length, not numeric/UUID), then its
+			// absence means zero records contain it — skip the chunk entirely.
+			// If the tokenizer would have rejected it, we can't know from the
+			// index alone — fall back to runtime filtering.
+			if tokenizer.IsIndexable(tok) {
+				return true, true // definitive: no matches
+			}
+			return false, false // not indexable: need runtime filter
 		}
 		if i == 0 {
 			if !b.addPositions(positions) {
@@ -607,7 +613,7 @@ func applyKeyValueIndex(b *scannerBuilder, indexes index.IndexManager, chunkID c
 			}
 			if kvErr == nil && kvStatus != index.KVCapped {
 				reader := index.NewKVIndexReader(chunkID, kvIdx.Entries())
-				if positions, found := reader.Lookup(f.Key, f.Value); found {
+				if positions, found := reader.Lookup(keyLower, valLower); found {
 					filterPositions = unionPositions(filterPositions, positions)
 				}
 			}

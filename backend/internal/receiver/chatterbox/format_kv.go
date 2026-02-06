@@ -3,6 +3,7 @@ package chatterbox
 import (
 	"fmt"
 	"math/rand/v2"
+	"time"
 )
 
 // KeyValueFormat generates structured key=value log lines.
@@ -15,7 +16,7 @@ func NewKeyValueFormat(pools *AttributePools) *KeyValueFormat {
 	return &KeyValueFormat{pools: pools}
 }
 
-func (f *KeyValueFormat) Generate(rng *rand.Rand) ([]byte, map[string]string) {
+func (f *KeyValueFormat) Generate(rng *rand.Rand) ([]byte, map[string]string, time.Time) {
 	levels := []string{"DEBUG", "INFO", "WARN", "ERROR"}
 	messages := []string{
 		"request completed",
@@ -71,5 +72,5 @@ func (f *KeyValueFormat) Generate(rng *rand.Rand) ([]byte, map[string]string) {
 		"host":    pick(rng, f.pools.Hosts),
 	}
 
-	return []byte(line), attrs
+	return []byte(line), attrs, time.Time{}
 }

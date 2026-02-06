@@ -13,7 +13,7 @@ const MaxKeyLength = 64
 const MaxValueLength = 64
 
 // ExtractKeyValues extracts key=value pairs from a log message.
-// Keys are normalized to lowercase. Values are NOT normalized.
+// Both keys and values are normalized to lowercase for case-insensitive matching.
 //
 // Key grammar:
 //
@@ -78,9 +78,9 @@ func ExtractKeyValues(msg []byte) []KeyValue {
 			continue
 		}
 
-		// Normalize key to lowercase, keep value as-is
+		// Normalize both key and value to lowercase for case-insensitive matching.
 		key := ToLowerASCII(keyBytes)
-		value := string(valueBytes)
+		value := ToLowerASCII(valueBytes)
 
 		// Dedupe within message
 		kvKey := key + "\x00" + value

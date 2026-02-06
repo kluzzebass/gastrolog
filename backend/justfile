@@ -4,6 +4,10 @@ set dotenv-load
 _default:
   @just --list
 
+# Builds the gastrolog binary.
+build:
+  go build -o gastrolog ./cmd/gastrolog
+
 # Runs the gastrolog backend with the specified configuration.
 run:
   go run ./cmd/gastrolog -config config.json

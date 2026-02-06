@@ -17,6 +17,10 @@ service QueryService {
 
   // Explain returns the query execution plan without executing.
   rpc Explain(ExplainRequest) returns (ExplainResponse);
+
+  // Histogram returns record counts bucketed by time for the given query.
+  // Uses binary search on chunk indexes for O(buckets * log(n)) performance.
+  rpc Histogram(HistogramRequest) returns (HistogramResponse);
 }
 
 message SearchRequest {
@@ -53,6 +57,9 @@ message ExplainRequest {
 
 message ExplainResponse {
   repeated ChunkPlan chunks = 1;
+  string direction = 2;    // "forward" or "reverse"
+  int32 total_chunks = 3;  // Total chunks before time-range filtering
+  string expression = 4;   // Parsed boolean expression (from BoolExpr.String())
 }
 
 message Query {
@@ -63,6 +70,14 @@ message Query {
   int64 limit = 5;
   int32 context_before = 6;
   int32 context_after = 7;
+
+  // Raw query expression string, parsed server-side via querylang.
+  // When set, tokens and kv_predicates are ignored.
+  // Supports the full query language: bare words (tokens), key=value,
+  // AND/OR/NOT, parentheses, start=/end=/limit= control args.
+  // Examples: "error timeout", "(error OR warn) AND NOT debug",
+  //           "start=2024-01-01T00:00:00Z level=error store=prod"
+  string expression = 8;
 }
 
 message KVPredicate {
@@ -76,10 +91,11 @@ message Record {
   map<string, string> attrs = 3;
   bytes raw = 4;
   RecordRef ref = 5;
+  google.protobuf.Timestamp source_ts = 6;
 }
 
 message RecordRef {
-  bytes chunk_id = 1; // 16-byte UUID
+  string chunk_id = 1;
   uint64 pos = 2;
   string store_id = 3; // Store this record belongs to
 }
@@ -92,26 +108,57 @@ message ResumeToken {
 
 message StorePosition {
   string store_id = 1;
-  bytes chunk_id = 2; // 16-byte UUID
+  string chunk_id = 2;
   uint64 position = 3; // MaxUint64 indicates chunk is exhausted
 }
 
 message ChunkPlan {
-  bytes chunk_id = 1;
+  string chunk_id = 1;
   bool sealed = 2;
   int64 record_count = 3;
   repeated PipelineStep steps = 4;
-  string scan_mode = 5; // "sequential" or "index-driven"
+  string scan_mode = 5; // "sequential", "index-driven", or "skipped"
   int64 estimated_records = 6;
   repeated string runtime_filters = 7;
-  string store_id = 8; // Store this chunk belongs to
+  string store_id = 8;
+  google.protobuf.Timestamp start_ts = 9;
+  google.protobuf.Timestamp end_ts = 10;
+  string skip_reason = 11;
+  repeated BranchPlan branch_plans = 12;
+}
+
+message BranchPlan {
+  string expression = 1;          // String representation of the branch
+  repeated PipelineStep steps = 2;
+  bool skipped = 3;
+  string skip_reason = 4;
+  int64 estimated_records = 5;
 }
 
 message PipelineStep {
   string name = 1;
   int64 input_estimate = 2;
   int64 output_estimate = 3;
-  string action = 4; // "seek", "indexed", "filter"
+  string action = 4; // "seek", "indexed", "runtime", "skipped"
   string reason = 5;
   string detail = 6;
+  string predicate = 7; // What we're filtering for, e.g. "token(error, warn)"
+}
+
+message HistogramRequest {
+  google.protobuf.Timestamp start = 1;
+  google.protobuf.Timestamp end = 2;
+  int32 buckets = 3; // Number of time buckets (default 50 if 0)
+  string expression = 4; // Optional: only used to extract store= filter
+}
+
+message HistogramResponse {
+  repeated HistogramBucket buckets = 1;
+  google.protobuf.Timestamp start = 2; // Actual start of histogram range
+  google.protobuf.Timestamp end = 3;   // Actual end of histogram range
+}
+
+message HistogramBucket {
+  google.protobuf.Timestamp ts = 1; // Bucket start time
+  int64 count = 2;                  // Record count in this bucket
 }

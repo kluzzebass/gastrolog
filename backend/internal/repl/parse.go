@@ -26,11 +26,20 @@ func parseQueryArgs(args []string) (query.Query, string) {
 		return query.Query{}, ""
 	}
 
+	// Preserve original expression for gRPC serialization.
+	rawExpression := strings.Join(args, " ")
+
 	// First pass: extract control arguments (start, end, limit) and collect the rest.
-	q := query.Query{}
+	q := query.Query{RawExpression: rawExpression}
 	var filterArgs []string
 
 	for _, arg := range args {
+		// Handle bare keyword flags (no "=").
+		if arg == "reverse" {
+			q.IsReverse = true
+			continue
+		}
+
 		k, v, ok := strings.Cut(arg, "=")
 		if ok {
 			switch k {

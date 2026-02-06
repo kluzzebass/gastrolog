@@ -6,6 +6,7 @@ import (
 	"math/rand/v2"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newTestRng() *rand.Rand {
@@ -22,7 +23,7 @@ func TestPlainTextFormat_Generate(t *testing.T) {
 	rng := newTestRng()
 
 	for i := 0; i < 100; i++ {
-		raw, attrs := format.Generate(rng)
+		raw, attrs, sourceTS := format.Generate(rng)
 		if len(raw) == 0 {
 			t.Errorf("iteration %d: raw is empty", i)
 		}
@@ -31,6 +32,9 @@ func TestPlainTextFormat_Generate(t *testing.T) {
 		}
 		if attrs["host"] == "" {
 			t.Errorf("iteration %d: missing host attr", i)
+		}
+		if !sourceTS.IsZero() {
+			t.Errorf("iteration %d: plain text should have zero sourceTS", i)
 		}
 	}
 }
@@ -41,7 +45,7 @@ func TestKeyValueFormat_Generate(t *testing.T) {
 	rng := newTestRng()
 
 	for i := 0; i < 100; i++ {
-		raw, attrs := format.Generate(rng)
+		raw, attrs, sourceTS := format.Generate(rng)
 		if len(raw) == 0 {
 			t.Errorf("iteration %d: raw is empty", i)
 		}
@@ -62,6 +66,9 @@ func TestKeyValueFormat_Generate(t *testing.T) {
 		if attrs["host"] == "" {
 			t.Errorf("iteration %d: missing host attr", i)
 		}
+		if !sourceTS.IsZero() {
+			t.Errorf("iteration %d: kv format should have zero sourceTS", i)
+		}
 	}
 }
 
@@ -70,10 +77,14 @@ func TestJSONFormat_Generate(t *testing.T) {
 	format := NewJSONFormat(pools)
 	rng := newTestRng()
 
+	before := time.Now()
 	for i := 0; i < 100; i++ {
-		raw, attrs := format.Generate(rng)
+		raw, attrs, sourceTS := format.Generate(rng)
 		if len(raw) == 0 {
 			t.Errorf("iteration %d: raw is empty", i)
+		}
+		if sourceTS.Before(before) {
+			t.Errorf("iteration %d: sourceTS should be recent, got %v", i, sourceTS)
 		}
 		// Check that it's valid JSON
 		var obj map[string]any
@@ -104,8 +115,9 @@ func TestAccessLogFormat_Generate(t *testing.T) {
 	format := NewAccessLogFormat(pools)
 	rng := newTestRng()
 
+	before := time.Now()
 	for i := 0; i < 100; i++ {
-		raw, attrs := format.Generate(rng)
+		raw, attrs, sourceTS := format.Generate(rng)
 		if len(raw) == 0 {
 			t.Errorf("iteration %d: raw is empty", i)
 		}
@@ -126,6 +138,9 @@ func TestAccessLogFormat_Generate(t *testing.T) {
 		if attrs["host"] == "" {
 			t.Errorf("iteration %d: missing host attr", i)
 		}
+		if sourceTS.Before(before) {
+			t.Errorf("iteration %d: sourceTS should be recent, got %v", i, sourceTS)
+		}
 	}
 }
 
@@ -134,8 +149,9 @@ func TestSyslogFormat_Generate(t *testing.T) {
 	format := NewSyslogFormat(pools)
 	rng := newTestRng()
 
+	before := time.Now()
 	for i := 0; i < 100; i++ {
-		raw, attrs := format.Generate(rng)
+		raw, attrs, sourceTS := format.Generate(rng)
 		if len(raw) == 0 {
 			t.Errorf("iteration %d: raw is empty", i)
 		}
@@ -153,6 +169,9 @@ func TestSyslogFormat_Generate(t *testing.T) {
 		if attrs["host"] == "" {
 			t.Errorf("iteration %d: missing host attr", i)
 		}
+		if sourceTS.Before(before) {
+			t.Errorf("iteration %d: sourceTS should be recent, got %v", i, sourceTS)
+		}
 	}
 }
 
@@ -162,8 +181,11 @@ func TestWeirdFormat_Generate(t *testing.T) {
 	rng := newTestRng()
 
 	for i := 0; i < 100; i++ {
-		raw, attrs := format.Generate(rng)
+		raw, attrs, sourceTS := format.Generate(rng)
 		// Weird format may produce empty data in some cases, but attrs should always be set
+		if !sourceTS.IsZero() {
+			t.Errorf("iteration %d: weird format should have zero sourceTS", i)
+		}
 		if attrs["service"] != "unknown" {
 			t.Errorf("iteration %d: expected service=unknown, got %s", i, attrs["service"])
 		}
@@ -204,7 +226,7 @@ func TestFormat_AttributeVariation(t *testing.T) {
 	services := make(map[string]bool)
 
 	for i := 0; i < 1000; i++ {
-		_, attrs := format.Generate(rng)
+		_, attrs, _ := format.Generate(rng)
 		hosts[attrs["host"]] = true
 		services[attrs["service"]] = true
 	}
@@ -228,8 +250,8 @@ func TestFormat_SameAttrsStableSourceID(t *testing.T) {
 	rng2 := rand.New(rand.NewPCG(1, 2))
 
 	// Same seed should produce same attrs
-	_, attrs1 := format.Generate(rng1)
-	_, attrs2 := format.Generate(rng2)
+	_, attrs1, _ := format.Generate(rng1)
+	_, attrs2, _ := format.Generate(rng2)
 
 	if attrs1["host"] != attrs2["host"] {
 		t.Errorf("same seed should produce same host: %q vs %q", attrs1["host"], attrs2["host"])
@@ -259,7 +281,7 @@ func TestJSONFormat_AllVariants(t *testing.T) {
 
 	for i := 0; i < 500; i++ {
 		rng := rand.New(rand.NewPCG(uint64(i), uint64(i+1)))
-		raw, _ := format.Generate(rng)
+		raw, _, _ := format.Generate(rng)
 
 		var obj map[string]any
 		if err := json.Unmarshal(raw, &obj); err != nil {
@@ -295,7 +317,7 @@ func TestKeyValueFormat_AllVariants(t *testing.T) {
 
 	for i := 0; i < 500; i++ {
 		rng := rand.New(rand.NewPCG(uint64(i), uint64(i+1)))
-		raw, _ := format.Generate(rng)
+		raw, _, _ := format.Generate(rng)
 		line := string(raw)
 
 		for pattern := range variantPatterns {
@@ -319,7 +341,7 @@ func TestSyslogFormat_PriorityRange(t *testing.T) {
 	rng := newTestRng()
 
 	for i := 0; i < 100; i++ {
-		raw, _ := format.Generate(rng)
+		raw, _, _ := format.Generate(rng)
 		line := string(raw)
 
 		// Extract priority: <N>...
@@ -355,7 +377,7 @@ func TestAccessLogFormat_CombinedFormat(t *testing.T) {
 	rng := newTestRng()
 
 	for i := 0; i < 50; i++ {
-		raw, _ := format.Generate(rng)
+		raw, _, _ := format.Generate(rng)
 		line := string(raw)
 
 		// Combined log format: IP - USER [DATE] "METHOD PATH PROTOCOL" STATUS SIZE "REFERER" "USER-AGENT"
@@ -393,7 +415,7 @@ func TestWeirdFormat_Robustness(t *testing.T) {
 		rng := rand.New(rand.NewPCG(uint64(i), uint64(i+1)))
 
 		// Should not panic.
-		raw, attrs := format.Generate(rng)
+		raw, attrs, _ := format.Generate(rng)
 
 		// Raw may be empty, but should never be nil.
 		if raw == nil {

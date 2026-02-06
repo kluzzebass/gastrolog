@@ -16,6 +16,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"sync"
 
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
@@ -30,11 +31,13 @@ import (
 	recvhttp "gastrolog/internal/receiver/http"
 	recvsyslog "gastrolog/internal/receiver/syslog"
 	"gastrolog/internal/repl"
+	"gastrolog/internal/server"
 )
 
 func main() {
 	configPath := flag.String("config", "config.json", "path to configuration file")
 	pprofAddr := flag.String("pprof", "", "pprof HTTP server address (e.g. localhost:6060)")
+	serverAddr := flag.String("server", ":8080", "Connect RPC server address (empty to disable)")
 	replMode := flag.Bool("repl", false, "start interactive REPL after system is running")
 	flag.Parse()
 
@@ -63,13 +66,13 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	if err := run(ctx, logger, *configPath, *replMode); err != nil {
+	if err := run(ctx, logger, *configPath, *serverAddr, *replMode); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, logger *slog.Logger, configPath string, replMode bool) error {
+func run(ctx context.Context, logger *slog.Logger, configPath, serverAddr string, replMode bool) error {
 	// Load configuration.
 	logger.Info("loading config", "path", configPath)
 	cfgStore := configfile.NewStore(configPath)
@@ -106,7 +109,22 @@ func run(ctx context.Context, logger *slog.Logger, configPath string, replMode b
 	if err := orch.Start(ctx); err != nil {
 		return err
 	}
-	logger.Info("orchestrator started, waiting for shutdown signal")
+	logger.Info("orchestrator started")
+
+	// Start Connect RPC server if address is provided.
+	var srv *server.Server
+	var serverWg sync.WaitGroup
+	if serverAddr != "" {
+		srv = server.New(orch, server.Config{Logger: logger})
+		serverWg.Add(1)
+		go func() {
+			defer serverWg.Done()
+			logger.Info("starting Connect RPC server", "addr", serverAddr)
+			if err := srv.ServeTCP(serverAddr); err != nil {
+				logger.Error("server error", "error", err)
+			}
+		}()
+	}
 
 	if replMode {
 		// Run REPL in foreground using embedded gRPC client.
@@ -121,8 +139,17 @@ func run(ctx context.Context, logger *slog.Logger, configPath string, replMode b
 		<-ctx.Done()
 	}
 
+	// Stop the server first.
+	if srv != nil {
+		logger.Info("stopping server")
+		if err := srv.Stop(ctx); err != nil {
+			logger.Error("server stop error", "error", err)
+		}
+		serverWg.Wait()
+	}
+
 	// Stop the orchestrator.
-	logger.Info("shutting down")
+	logger.Info("shutting down orchestrator")
 	if err := orch.Stop(); err != nil {
 		return err
 	}

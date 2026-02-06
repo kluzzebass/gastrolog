@@ -16,7 +16,7 @@ func NewAccessLogFormat(pools *AttributePools) *AccessLogFormat {
 	return &AccessLogFormat{pools: pools}
 }
 
-func (f *AccessLogFormat) Generate(rng *rand.Rand) ([]byte, map[string]string) {
+func (f *AccessLogFormat) Generate(rng *rand.Rand) ([]byte, map[string]string, time.Time) {
 	methods := []string{"GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH"}
 	paths := []string{
 		"/",
@@ -71,7 +71,8 @@ func (f *AccessLogFormat) Generate(rng *rand.Rand) ([]byte, map[string]string) {
 	ua := pick(rng, userAgents)
 
 	// Combined log format
-	ts := time.Now().Format("02/Jan/2006:15:04:05 -0700")
+	now := time.Now()
+	ts := now.Format("02/Jan/2006:15:04:05 -0700")
 	line := fmt.Sprintf(`%s - %s [%s] "%s %s %s" %d %d "%s" "%s"`,
 		ip, user, ts, method, path, protocol, status, size, referer, ua)
 
@@ -81,5 +82,5 @@ func (f *AccessLogFormat) Generate(rng *rand.Rand) ([]byte, map[string]string) {
 		"host":    pick(rng, f.pools.Hosts),
 	}
 
-	return []byte(line), attrs
+	return []byte(line), attrs, now
 }

@@ -16,7 +16,7 @@ func NewSyslogFormat(pools *AttributePools) *SyslogFormat {
 	return &SyslogFormat{pools: pools}
 }
 
-func (f *SyslogFormat) Generate(rng *rand.Rand) ([]byte, map[string]string) {
+func (f *SyslogFormat) Generate(rng *rand.Rand) ([]byte, map[string]string, time.Time) {
 	// Facility (0-23) * 8 + Severity (0-7) = Priority
 	facilities := []struct {
 		name string
@@ -87,7 +87,8 @@ func (f *SyslogFormat) Generate(rng *rand.Rand) ([]byte, map[string]string) {
 	pid := rng.IntN(65535)
 	host := pick(rng, f.pools.Hosts)
 
-	ts := time.Now().Format("Jan  2 15:04:05")
+	now := time.Now()
+	ts := now.Format("Jan  2 15:04:05")
 	line := fmt.Sprintf("<%d>%s %s %s[%d]: %s", priority, ts, host, program.name, pid, message)
 
 	attrs := map[string]string{
@@ -96,5 +97,5 @@ func (f *SyslogFormat) Generate(rng *rand.Rand) ([]byte, map[string]string) {
 		"host":     host,
 	}
 
-	return []byte(line), attrs
+	return []byte(line), attrs, now
 }

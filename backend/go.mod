@@ -2,8 +2,6 @@ module gastrolog
 
 go 1.25.5
 
-require github.com/google/uuid v1.6.0
-
 require (
 	connectrpc.com/connect v1.19.1
 	github.com/charmbracelet/bubbletea v1.3.10
