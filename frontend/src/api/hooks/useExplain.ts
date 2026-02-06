@@ -3,6 +3,9 @@ import { queryClient, Query, ChunkPlan } from "../client";
 
 export interface ExplainState {
   chunks: ChunkPlan[];
+  direction: string;
+  totalChunks: number;
+  expression: string;
   isLoading: boolean;
   error: Error | null;
 }
@@ -10,6 +13,9 @@ export interface ExplainState {
 export function useExplain() {
   const [state, setState] = useState<ExplainState>({
     chunks: [],
+    direction: "",
+    totalChunks: 0,
+    expression: "",
     isLoading: false,
     error: null,
   });
@@ -19,22 +25,28 @@ export function useExplain() {
     const query = new Query();
     query.expression = queryStr;
 
-    setState({
-      chunks: [],
+    setState((prev) => ({
+      ...prev,
       isLoading: true,
       error: null,
-    });
+    }));
 
     try {
       const response = await queryClient.explain({ query });
       setState({
         chunks: response.chunks,
+        direction: response.direction,
+        totalChunks: response.totalChunks,
+        expression: response.expression,
         isLoading: false,
         error: null,
       });
     } catch (err) {
       setState({
         chunks: [],
+        direction: "",
+        totalChunks: 0,
+        expression: "",
         isLoading: false,
         error: err instanceof Error ? err : new Error(String(err)),
       });
@@ -44,6 +56,9 @@ export function useExplain() {
   const reset = useCallback(() => {
     setState({
       chunks: [],
+      direction: "",
+      totalChunks: 0,
+      expression: "",
       isLoading: false,
       error: null,
     });

@@ -222,6 +222,27 @@ export class ExplainResponse extends Message<ExplainResponse> {
    */
   chunks: ChunkPlan[] = [];
 
+  /**
+   * "forward" or "reverse"
+   *
+   * @generated from field: string direction = 2;
+   */
+  direction = "";
+
+  /**
+   * Total chunks before time-range filtering
+   *
+   * @generated from field: int32 total_chunks = 3;
+   */
+  totalChunks = 0;
+
+  /**
+   * Parsed boolean expression (from BoolExpr.String())
+   *
+   * @generated from field: string expression = 4;
+   */
+  expression = "";
+
   constructor(data?: PartialMessage<ExplainResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -231,6 +252,9 @@ export class ExplainResponse extends Message<ExplainResponse> {
   static readonly typeName = "gastrolog.v1.ExplainResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "chunks", kind: "message", T: ChunkPlan, repeated: true },
+    { no: 2, name: "direction", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "total_chunks", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 4, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ExplainResponse {
@@ -615,7 +639,7 @@ export class ChunkPlan extends Message<ChunkPlan> {
   steps: PipelineStep[] = [];
 
   /**
-   * "sequential" or "index-driven"
+   * "sequential", "index-driven", or "skipped"
    *
    * @generated from field: string scan_mode = 5;
    */
@@ -632,11 +656,29 @@ export class ChunkPlan extends Message<ChunkPlan> {
   runtimeFilters: string[] = [];
 
   /**
-   * Store this chunk belongs to
-   *
    * @generated from field: string store_id = 8;
    */
   storeId = "";
+
+  /**
+   * @generated from field: google.protobuf.Timestamp start_ts = 9;
+   */
+  startTs?: Timestamp;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp end_ts = 10;
+   */
+  endTs?: Timestamp;
+
+  /**
+   * @generated from field: string skip_reason = 11;
+   */
+  skipReason = "";
+
+  /**
+   * @generated from field: repeated gastrolog.v1.BranchPlan branch_plans = 12;
+   */
+  branchPlans: BranchPlan[] = [];
 
   constructor(data?: PartialMessage<ChunkPlan>) {
     super();
@@ -654,6 +696,10 @@ export class ChunkPlan extends Message<ChunkPlan> {
     { no: 6, name: "estimated_records", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 7, name: "runtime_filters", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
     { no: 8, name: "store_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 9, name: "start_ts", kind: "message", T: Timestamp },
+    { no: 10, name: "end_ts", kind: "message", T: Timestamp },
+    { no: 11, name: "skip_reason", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 12, name: "branch_plans", kind: "message", T: BranchPlan, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkPlan {
@@ -670,6 +716,69 @@ export class ChunkPlan extends Message<ChunkPlan> {
 
   static equals(a: ChunkPlan | PlainMessage<ChunkPlan> | undefined, b: ChunkPlan | PlainMessage<ChunkPlan> | undefined): boolean {
     return proto3.util.equals(ChunkPlan, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.BranchPlan
+ */
+export class BranchPlan extends Message<BranchPlan> {
+  /**
+   * String representation of the branch
+   *
+   * @generated from field: string expression = 1;
+   */
+  expression = "";
+
+  /**
+   * @generated from field: repeated gastrolog.v1.PipelineStep steps = 2;
+   */
+  steps: PipelineStep[] = [];
+
+  /**
+   * @generated from field: bool skipped = 3;
+   */
+  skipped = false;
+
+  /**
+   * @generated from field: string skip_reason = 4;
+   */
+  skipReason = "";
+
+  /**
+   * @generated from field: int64 estimated_records = 5;
+   */
+  estimatedRecords = protoInt64.zero;
+
+  constructor(data?: PartialMessage<BranchPlan>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.BranchPlan";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "steps", kind: "message", T: PipelineStep, repeated: true },
+    { no: 3, name: "skipped", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 4, name: "skip_reason", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "estimated_records", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): BranchPlan {
+    return new BranchPlan().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): BranchPlan {
+    return new BranchPlan().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): BranchPlan {
+    return new BranchPlan().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: BranchPlan | PlainMessage<BranchPlan> | undefined, b: BranchPlan | PlainMessage<BranchPlan> | undefined): boolean {
+    return proto3.util.equals(BranchPlan, a, b);
   }
 }
 
@@ -693,7 +802,7 @@ export class PipelineStep extends Message<PipelineStep> {
   outputEstimate = protoInt64.zero;
 
   /**
-   * "seek", "indexed", "filter"
+   * "seek", "indexed", "runtime", "skipped"
    *
    * @generated from field: string action = 4;
    */
@@ -709,6 +818,13 @@ export class PipelineStep extends Message<PipelineStep> {
    */
   detail = "";
 
+  /**
+   * What we're filtering for, e.g. "token(error, warn)"
+   *
+   * @generated from field: string predicate = 7;
+   */
+  predicate = "";
+
   constructor(data?: PartialMessage<PipelineStep>) {
     super();
     proto3.util.initPartial(data, this);
@@ -723,6 +839,7 @@ export class PipelineStep extends Message<PipelineStep> {
     { no: 4, name: "action", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 5, name: "reason", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 6, name: "detail", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 7, name: "predicate", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PipelineStep {

@@ -7,6 +7,7 @@ import (
 	"iter"
 	"net"
 	"net/http"
+	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -417,6 +418,22 @@ func protoToChunkMeta(meta *apiv1.ChunkMeta) chunk.ChunkMeta {
 	return m
 }
 
+func protoStepsToInternal(steps []*apiv1.PipelineStep) []query.PipelineStep {
+	out := make([]query.PipelineStep, len(steps))
+	for i, s := range steps {
+		out[i] = query.PipelineStep{
+			Index:           s.Name,
+			Predicate:       s.Predicate,
+			PositionsBefore: int(s.InputEstimate),
+			PositionsAfter:  int(s.OutputEstimate),
+			Action:          s.Action,
+			Reason:          s.Reason,
+			Details:         s.Detail,
+		}
+	}
+	return out
+}
+
 func protoToQueryPlan(resp *apiv1.ExplainResponse) *query.QueryPlan {
 	if resp == nil {
 		return nil
@@ -427,21 +444,28 @@ func protoToQueryPlan(resp *apiv1.ExplainResponse) *query.QueryPlan {
 		var chunkID chunk.ChunkID
 		copy(chunkID[:], cp.ChunkId)
 
-		steps := make([]query.PipelineStep, len(cp.Steps))
-		for j, s := range cp.Steps {
-			steps[j] = query.PipelineStep{
-				Index:           s.Name,
-				PositionsBefore: int(s.InputEstimate),
-				PositionsAfter:  int(s.OutputEstimate),
-				Action:          s.Action,
-				Reason:          s.Reason,
-				Details:         s.Detail,
-			}
-		}
-
 		runtimeFilter := ""
 		if len(cp.RuntimeFilters) > 0 {
 			runtimeFilter = cp.RuntimeFilters[0]
+		}
+
+		var startTS, endTS time.Time
+		if cp.StartTs != nil {
+			startTS = cp.StartTs.AsTime()
+		}
+		if cp.EndTs != nil {
+			endTS = cp.EndTs.AsTime()
+		}
+
+		var branchPlans []query.BranchPlan
+		for _, bp := range cp.BranchPlans {
+			branchPlans = append(branchPlans, query.BranchPlan{
+				BranchExpr:    bp.Expression,
+				Pipeline:      protoStepsToInternal(bp.Steps),
+				Skipped:       bp.Skipped,
+				SkipReason:    bp.SkipReason,
+				EstimatedScan: int(bp.EstimatedRecords),
+			})
 		}
 
 		chunks[i] = query.ChunkPlan{
@@ -449,15 +473,21 @@ func protoToQueryPlan(resp *apiv1.ExplainResponse) *query.QueryPlan {
 			ChunkID:       chunkID,
 			Sealed:        cp.Sealed,
 			RecordCount:   int(cp.RecordCount),
-			Pipeline:      steps,
+			StartTS:       startTS,
+			EndTS:         endTS,
+			Pipeline:      protoStepsToInternal(cp.Steps),
+			BranchPlans:   branchPlans,
 			ScanMode:      cp.ScanMode,
+			SkipReason:    cp.SkipReason,
 			EstimatedScan: int(cp.EstimatedRecords),
 			RuntimeFilter: runtimeFilter,
 		}
 	}
 
 	return &query.QueryPlan{
-		ChunkPlans: chunks,
+		Direction:   resp.Direction,
+		TotalChunks: int(resp.TotalChunks),
+		ChunkPlans:  chunks,
 	}
 }
 

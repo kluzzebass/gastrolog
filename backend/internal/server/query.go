@@ -154,7 +154,12 @@ func (s *QueryServer) Explain(
 	}
 
 	resp := &apiv1.ExplainResponse{
-		Chunks: make([]*apiv1.ChunkPlan, 0, len(plan.ChunkPlans)),
+		Chunks:      make([]*apiv1.ChunkPlan, 0, len(plan.ChunkPlans)),
+		Direction:   plan.Direction,
+		TotalChunks: int32(plan.TotalChunks),
+	}
+	if plan.Query.BoolExpr != nil {
+		resp.Expression = plan.Query.BoolExpr.String()
 	}
 
 	for _, cp := range plan.ChunkPlans {
@@ -166,17 +171,23 @@ func (s *QueryServer) Explain(
 			ScanMode:         cp.ScanMode,
 			EstimatedRecords: int64(cp.EstimatedScan),
 			RuntimeFilters:   []string{cp.RuntimeFilter},
-			Steps:            make([]*apiv1.PipelineStep, 0, len(cp.Pipeline)),
+			Steps:            pipelineStepsToProto(cp.Pipeline),
+			SkipReason:       cp.SkipReason,
+		}
+		if !cp.StartTS.IsZero() {
+			chunkPlan.StartTs = timestamppb.New(cp.StartTS)
+		}
+		if !cp.EndTS.IsZero() {
+			chunkPlan.EndTs = timestamppb.New(cp.EndTS)
 		}
 
-		for _, step := range cp.Pipeline {
-			chunkPlan.Steps = append(chunkPlan.Steps, &apiv1.PipelineStep{
-				Name:           step.Index,
-				InputEstimate:  int64(step.PositionsBefore),
-				OutputEstimate: int64(step.PositionsAfter),
-				Action:         step.Action,
-				Reason:         step.Reason,
-				Detail:         step.Details,
+		for _, bp := range cp.BranchPlans {
+			chunkPlan.BranchPlans = append(chunkPlan.BranchPlans, &apiv1.BranchPlan{
+				Expression:       bp.BranchExpr,
+				Steps:            pipelineStepsToProto(bp.Pipeline),
+				Skipped:          bp.Skipped,
+				SkipReason:       bp.SkipReason,
+				EstimatedRecords: int64(bp.EstimatedScan),
 			})
 		}
 
@@ -543,6 +554,23 @@ func parseTime(s string) (time.Time, error) {
 		return time.Unix(unix, 0), nil
 	}
 	return time.Time{}, fmt.Errorf("invalid time format: %s (use RFC3339 or Unix timestamp)", s)
+}
+
+// pipelineStepsToProto converts internal PipelineSteps to proto.
+func pipelineStepsToProto(steps []query.PipelineStep) []*apiv1.PipelineStep {
+	out := make([]*apiv1.PipelineStep, len(steps))
+	for i, step := range steps {
+		out[i] = &apiv1.PipelineStep{
+			Name:           step.Index,
+			InputEstimate:  int64(step.PositionsBefore),
+			OutputEstimate: int64(step.PositionsAfter),
+			Action:         step.Action,
+			Reason:         step.Reason,
+			Detail:         step.Details,
+			Predicate:      step.Predicate,
+		}
+	}
+	return out
 }
 
 // recordToProto converts an internal Record to the proto type.

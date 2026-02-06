@@ -269,6 +269,9 @@ func (x *ExplainRequest) GetQuery() *Query {
 type ExplainResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Chunks        []*ChunkPlan           `protobuf:"bytes,1,rep,name=chunks,proto3" json:"chunks,omitempty"`
+	Direction     string                 `protobuf:"bytes,2,opt,name=direction,proto3" json:"direction,omitempty"`                         // "forward" or "reverse"
+	TotalChunks   int32                  `protobuf:"varint,3,opt,name=total_chunks,json=totalChunks,proto3" json:"total_chunks,omitempty"` // Total chunks before time-range filtering
+	Expression    string                 `protobuf:"bytes,4,opt,name=expression,proto3" json:"expression,omitempty"`                       // Parsed boolean expression (from BoolExpr.String())
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -308,6 +311,27 @@ func (x *ExplainResponse) GetChunks() []*ChunkPlan {
 		return x.Chunks
 	}
 	return nil
+}
+
+func (x *ExplainResponse) GetDirection() string {
+	if x != nil {
+		return x.Direction
+	}
+	return ""
+}
+
+func (x *ExplainResponse) GetTotalChunks() int32 {
+	if x != nil {
+		return x.TotalChunks
+	}
+	return 0
+}
+
+func (x *ExplainResponse) GetExpression() string {
+	if x != nil {
+		return x.Expression
+	}
+	return ""
 }
 
 type Query struct {
@@ -717,10 +741,14 @@ type ChunkPlan struct {
 	Sealed           bool                   `protobuf:"varint,2,opt,name=sealed,proto3" json:"sealed,omitempty"`
 	RecordCount      int64                  `protobuf:"varint,3,opt,name=record_count,json=recordCount,proto3" json:"record_count,omitempty"`
 	Steps            []*PipelineStep        `protobuf:"bytes,4,rep,name=steps,proto3" json:"steps,omitempty"`
-	ScanMode         string                 `protobuf:"bytes,5,opt,name=scan_mode,json=scanMode,proto3" json:"scan_mode,omitempty"` // "sequential" or "index-driven"
+	ScanMode         string                 `protobuf:"bytes,5,opt,name=scan_mode,json=scanMode,proto3" json:"scan_mode,omitempty"` // "sequential", "index-driven", or "skipped"
 	EstimatedRecords int64                  `protobuf:"varint,6,opt,name=estimated_records,json=estimatedRecords,proto3" json:"estimated_records,omitempty"`
 	RuntimeFilters   []string               `protobuf:"bytes,7,rep,name=runtime_filters,json=runtimeFilters,proto3" json:"runtime_filters,omitempty"`
-	StoreId          string                 `protobuf:"bytes,8,opt,name=store_id,json=storeId,proto3" json:"store_id,omitempty"` // Store this chunk belongs to
+	StoreId          string                 `protobuf:"bytes,8,opt,name=store_id,json=storeId,proto3" json:"store_id,omitempty"`
+	StartTs          *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=start_ts,json=startTs,proto3" json:"start_ts,omitempty"`
+	EndTs            *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=end_ts,json=endTs,proto3" json:"end_ts,omitempty"`
+	SkipReason       string                 `protobuf:"bytes,11,opt,name=skip_reason,json=skipReason,proto3" json:"skip_reason,omitempty"`
+	BranchPlans      []*BranchPlan          `protobuf:"bytes,12,rep,name=branch_plans,json=branchPlans,proto3" json:"branch_plans,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -811,21 +839,126 @@ func (x *ChunkPlan) GetStoreId() string {
 	return ""
 }
 
+func (x *ChunkPlan) GetStartTs() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartTs
+	}
+	return nil
+}
+
+func (x *ChunkPlan) GetEndTs() *timestamppb.Timestamp {
+	if x != nil {
+		return x.EndTs
+	}
+	return nil
+}
+
+func (x *ChunkPlan) GetSkipReason() string {
+	if x != nil {
+		return x.SkipReason
+	}
+	return ""
+}
+
+func (x *ChunkPlan) GetBranchPlans() []*BranchPlan {
+	if x != nil {
+		return x.BranchPlans
+	}
+	return nil
+}
+
+type BranchPlan struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Expression       string                 `protobuf:"bytes,1,opt,name=expression,proto3" json:"expression,omitempty"` // String representation of the branch
+	Steps            []*PipelineStep        `protobuf:"bytes,2,rep,name=steps,proto3" json:"steps,omitempty"`
+	Skipped          bool                   `protobuf:"varint,3,opt,name=skipped,proto3" json:"skipped,omitempty"`
+	SkipReason       string                 `protobuf:"bytes,4,opt,name=skip_reason,json=skipReason,proto3" json:"skip_reason,omitempty"`
+	EstimatedRecords int64                  `protobuf:"varint,5,opt,name=estimated_records,json=estimatedRecords,proto3" json:"estimated_records,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *BranchPlan) Reset() {
+	*x = BranchPlan{}
+	mi := &file_gastrolog_v1_query_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BranchPlan) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BranchPlan) ProtoMessage() {}
+
+func (x *BranchPlan) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_query_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BranchPlan.ProtoReflect.Descriptor instead.
+func (*BranchPlan) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *BranchPlan) GetExpression() string {
+	if x != nil {
+		return x.Expression
+	}
+	return ""
+}
+
+func (x *BranchPlan) GetSteps() []*PipelineStep {
+	if x != nil {
+		return x.Steps
+	}
+	return nil
+}
+
+func (x *BranchPlan) GetSkipped() bool {
+	if x != nil {
+		return x.Skipped
+	}
+	return false
+}
+
+func (x *BranchPlan) GetSkipReason() string {
+	if x != nil {
+		return x.SkipReason
+	}
+	return ""
+}
+
+func (x *BranchPlan) GetEstimatedRecords() int64 {
+	if x != nil {
+		return x.EstimatedRecords
+	}
+	return 0
+}
+
 type PipelineStep struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Name           string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	InputEstimate  int64                  `protobuf:"varint,2,opt,name=input_estimate,json=inputEstimate,proto3" json:"input_estimate,omitempty"`
 	OutputEstimate int64                  `protobuf:"varint,3,opt,name=output_estimate,json=outputEstimate,proto3" json:"output_estimate,omitempty"`
-	Action         string                 `protobuf:"bytes,4,opt,name=action,proto3" json:"action,omitempty"` // "seek", "indexed", "filter"
+	Action         string                 `protobuf:"bytes,4,opt,name=action,proto3" json:"action,omitempty"` // "seek", "indexed", "runtime", "skipped"
 	Reason         string                 `protobuf:"bytes,5,opt,name=reason,proto3" json:"reason,omitempty"`
 	Detail         string                 `protobuf:"bytes,6,opt,name=detail,proto3" json:"detail,omitempty"`
+	Predicate      string                 `protobuf:"bytes,7,opt,name=predicate,proto3" json:"predicate,omitempty"` // What we're filtering for, e.g. "token(error, warn)"
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
 
 func (x *PipelineStep) Reset() {
 	*x = PipelineStep{}
-	mi := &file_gastrolog_v1_query_proto_msgTypes[13]
+	mi := &file_gastrolog_v1_query_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -837,7 +970,7 @@ func (x *PipelineStep) String() string {
 func (*PipelineStep) ProtoMessage() {}
 
 func (x *PipelineStep) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_query_proto_msgTypes[13]
+	mi := &file_gastrolog_v1_query_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -850,7 +983,7 @@ func (x *PipelineStep) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PipelineStep.ProtoReflect.Descriptor instead.
 func (*PipelineStep) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{13}
+	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *PipelineStep) GetName() string {
@@ -895,6 +1028,13 @@ func (x *PipelineStep) GetDetail() string {
 	return ""
 }
 
+func (x *PipelineStep) GetPredicate() string {
+	if x != nil {
+		return x.Predicate
+	}
+	return ""
+}
+
 type HistogramRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Start         *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=start,proto3" json:"start,omitempty"`
@@ -907,7 +1047,7 @@ type HistogramRequest struct {
 
 func (x *HistogramRequest) Reset() {
 	*x = HistogramRequest{}
-	mi := &file_gastrolog_v1_query_proto_msgTypes[14]
+	mi := &file_gastrolog_v1_query_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -919,7 +1059,7 @@ func (x *HistogramRequest) String() string {
 func (*HistogramRequest) ProtoMessage() {}
 
 func (x *HistogramRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_query_proto_msgTypes[14]
+	mi := &file_gastrolog_v1_query_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -932,7 +1072,7 @@ func (x *HistogramRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HistogramRequest.ProtoReflect.Descriptor instead.
 func (*HistogramRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{14}
+	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *HistogramRequest) GetStart() *timestamppb.Timestamp {
@@ -974,7 +1114,7 @@ type HistogramResponse struct {
 
 func (x *HistogramResponse) Reset() {
 	*x = HistogramResponse{}
-	mi := &file_gastrolog_v1_query_proto_msgTypes[15]
+	mi := &file_gastrolog_v1_query_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -986,7 +1126,7 @@ func (x *HistogramResponse) String() string {
 func (*HistogramResponse) ProtoMessage() {}
 
 func (x *HistogramResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_query_proto_msgTypes[15]
+	mi := &file_gastrolog_v1_query_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -999,7 +1139,7 @@ func (x *HistogramResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HistogramResponse.ProtoReflect.Descriptor instead.
 func (*HistogramResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{15}
+	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *HistogramResponse) GetBuckets() []*HistogramBucket {
@@ -1033,7 +1173,7 @@ type HistogramBucket struct {
 
 func (x *HistogramBucket) Reset() {
 	*x = HistogramBucket{}
-	mi := &file_gastrolog_v1_query_proto_msgTypes[16]
+	mi := &file_gastrolog_v1_query_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1045,7 +1185,7 @@ func (x *HistogramBucket) String() string {
 func (*HistogramBucket) ProtoMessage() {}
 
 func (x *HistogramBucket) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_query_proto_msgTypes[16]
+	mi := &file_gastrolog_v1_query_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1058,7 +1198,7 @@ func (x *HistogramBucket) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HistogramBucket.ProtoReflect.Descriptor instead.
 func (*HistogramBucket) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{16}
+	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *HistogramBucket) GetTs() *timestamppb.Timestamp {
@@ -1092,9 +1232,14 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\x0eFollowResponse\x12.\n" +
 	"\arecords\x18\x01 \x03(\v2\x14.gastrolog.v1.RecordR\arecords\"H\n" +
 	"\x0eExplainRequest\x12)\n" +
-	"\x05query\x18\x02 \x01(\v2\x13.gastrolog.v1.QueryR\x05queryJ\x04\b\x01\x10\x02R\x05store\"B\n" +
+	"\x05query\x18\x02 \x01(\v2\x13.gastrolog.v1.QueryR\x05queryJ\x04\b\x01\x10\x02R\x05store\"\xa3\x01\n" +
 	"\x0fExplainResponse\x12/\n" +
-	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkPlanR\x06chunks\"\xc1\x02\n" +
+	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkPlanR\x06chunks\x12\x1c\n" +
+	"\tdirection\x18\x02 \x01(\tR\tdirection\x12!\n" +
+	"\ftotal_chunks\x18\x03 \x01(\x05R\vtotalChunks\x12\x1e\n" +
+	"\n" +
+	"expression\x18\x04 \x01(\tR\n" +
+	"expression\"\xc1\x02\n" +
 	"\x05Query\x120\n" +
 	"\x05start\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x05start\x12,\n" +
 	"\x03end\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x03end\x12\x16\n" +
@@ -1128,7 +1273,7 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\rStorePosition\x12\x19\n" +
 	"\bstore_id\x18\x01 \x01(\tR\astoreId\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\fR\achunkId\x12\x1a\n" +
-	"\bposition\x18\x03 \x01(\x04R\bposition\"\xa1\x02\n" +
+	"\bposition\x18\x03 \x01(\x04R\bposition\"\xe9\x03\n" +
 	"\tChunkPlan\x12\x19\n" +
 	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x12\x16\n" +
 	"\x06sealed\x18\x02 \x01(\bR\x06sealed\x12!\n" +
@@ -1137,14 +1282,31 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\tscan_mode\x18\x05 \x01(\tR\bscanMode\x12+\n" +
 	"\x11estimated_records\x18\x06 \x01(\x03R\x10estimatedRecords\x12'\n" +
 	"\x0fruntime_filters\x18\a \x03(\tR\x0eruntimeFilters\x12\x19\n" +
-	"\bstore_id\x18\b \x01(\tR\astoreId\"\xba\x01\n" +
+	"\bstore_id\x18\b \x01(\tR\astoreId\x125\n" +
+	"\bstart_ts\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\astartTs\x121\n" +
+	"\x06end_ts\x18\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\x05endTs\x12\x1f\n" +
+	"\vskip_reason\x18\v \x01(\tR\n" +
+	"skipReason\x12;\n" +
+	"\fbranch_plans\x18\f \x03(\v2\x18.gastrolog.v1.BranchPlanR\vbranchPlans\"\xc6\x01\n" +
+	"\n" +
+	"BranchPlan\x12\x1e\n" +
+	"\n" +
+	"expression\x18\x01 \x01(\tR\n" +
+	"expression\x120\n" +
+	"\x05steps\x18\x02 \x03(\v2\x1a.gastrolog.v1.PipelineStepR\x05steps\x12\x18\n" +
+	"\askipped\x18\x03 \x01(\bR\askipped\x12\x1f\n" +
+	"\vskip_reason\x18\x04 \x01(\tR\n" +
+	"skipReason\x12+\n" +
+	"\x11estimated_records\x18\x05 \x01(\x03R\x10estimatedRecords\"\xd8\x01\n" +
 	"\fPipelineStep\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
 	"\x0einput_estimate\x18\x02 \x01(\x03R\rinputEstimate\x12'\n" +
 	"\x0foutput_estimate\x18\x03 \x01(\x03R\x0eoutputEstimate\x12\x16\n" +
 	"\x06action\x18\x04 \x01(\tR\x06action\x12\x16\n" +
 	"\x06reason\x18\x05 \x01(\tR\x06reason\x12\x16\n" +
-	"\x06detail\x18\x06 \x01(\tR\x06detail\"\xac\x01\n" +
+	"\x06detail\x18\x06 \x01(\tR\x06detail\x12\x1c\n" +
+	"\tpredicate\x18\a \x01(\tR\tpredicate\"\xac\x01\n" +
 	"\x10HistogramRequest\x120\n" +
 	"\x05start\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x05start\x12,\n" +
 	"\x03end\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x03end\x12\x18\n" +
@@ -1177,7 +1339,7 @@ func file_gastrolog_v1_query_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_query_proto_rawDescData
 }
 
-var file_gastrolog_v1_query_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_gastrolog_v1_query_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_gastrolog_v1_query_proto_goTypes = []any{
 	(*SearchRequest)(nil),         // 0: gastrolog.v1.SearchRequest
 	(*SearchResponse)(nil),        // 1: gastrolog.v1.SearchResponse
@@ -1192,12 +1354,13 @@ var file_gastrolog_v1_query_proto_goTypes = []any{
 	(*ResumeToken)(nil),           // 10: gastrolog.v1.ResumeToken
 	(*StorePosition)(nil),         // 11: gastrolog.v1.StorePosition
 	(*ChunkPlan)(nil),             // 12: gastrolog.v1.ChunkPlan
-	(*PipelineStep)(nil),          // 13: gastrolog.v1.PipelineStep
-	(*HistogramRequest)(nil),      // 14: gastrolog.v1.HistogramRequest
-	(*HistogramResponse)(nil),     // 15: gastrolog.v1.HistogramResponse
-	(*HistogramBucket)(nil),       // 16: gastrolog.v1.HistogramBucket
-	nil,                           // 17: gastrolog.v1.Record.AttrsEntry
-	(*timestamppb.Timestamp)(nil), // 18: google.protobuf.Timestamp
+	(*BranchPlan)(nil),            // 13: gastrolog.v1.BranchPlan
+	(*PipelineStep)(nil),          // 14: gastrolog.v1.PipelineStep
+	(*HistogramRequest)(nil),      // 15: gastrolog.v1.HistogramRequest
+	(*HistogramResponse)(nil),     // 16: gastrolog.v1.HistogramResponse
+	(*HistogramBucket)(nil),       // 17: gastrolog.v1.HistogramBucket
+	nil,                           // 18: gastrolog.v1.Record.AttrsEntry
+	(*timestamppb.Timestamp)(nil), // 19: google.protobuf.Timestamp
 }
 var file_gastrolog_v1_query_proto_depIdxs = []int32{
 	6,  // 0: gastrolog.v1.SearchRequest.query:type_name -> gastrolog.v1.Query
@@ -1206,34 +1369,38 @@ var file_gastrolog_v1_query_proto_depIdxs = []int32{
 	8,  // 3: gastrolog.v1.FollowResponse.records:type_name -> gastrolog.v1.Record
 	6,  // 4: gastrolog.v1.ExplainRequest.query:type_name -> gastrolog.v1.Query
 	12, // 5: gastrolog.v1.ExplainResponse.chunks:type_name -> gastrolog.v1.ChunkPlan
-	18, // 6: gastrolog.v1.Query.start:type_name -> google.protobuf.Timestamp
-	18, // 7: gastrolog.v1.Query.end:type_name -> google.protobuf.Timestamp
+	19, // 6: gastrolog.v1.Query.start:type_name -> google.protobuf.Timestamp
+	19, // 7: gastrolog.v1.Query.end:type_name -> google.protobuf.Timestamp
 	7,  // 8: gastrolog.v1.Query.kv_predicates:type_name -> gastrolog.v1.KVPredicate
-	18, // 9: gastrolog.v1.Record.ingest_ts:type_name -> google.protobuf.Timestamp
-	18, // 10: gastrolog.v1.Record.write_ts:type_name -> google.protobuf.Timestamp
-	17, // 11: gastrolog.v1.Record.attrs:type_name -> gastrolog.v1.Record.AttrsEntry
+	19, // 9: gastrolog.v1.Record.ingest_ts:type_name -> google.protobuf.Timestamp
+	19, // 10: gastrolog.v1.Record.write_ts:type_name -> google.protobuf.Timestamp
+	18, // 11: gastrolog.v1.Record.attrs:type_name -> gastrolog.v1.Record.AttrsEntry
 	9,  // 12: gastrolog.v1.Record.ref:type_name -> gastrolog.v1.RecordRef
 	11, // 13: gastrolog.v1.ResumeToken.positions:type_name -> gastrolog.v1.StorePosition
-	13, // 14: gastrolog.v1.ChunkPlan.steps:type_name -> gastrolog.v1.PipelineStep
-	18, // 15: gastrolog.v1.HistogramRequest.start:type_name -> google.protobuf.Timestamp
-	18, // 16: gastrolog.v1.HistogramRequest.end:type_name -> google.protobuf.Timestamp
-	16, // 17: gastrolog.v1.HistogramResponse.buckets:type_name -> gastrolog.v1.HistogramBucket
-	18, // 18: gastrolog.v1.HistogramResponse.start:type_name -> google.protobuf.Timestamp
-	18, // 19: gastrolog.v1.HistogramResponse.end:type_name -> google.protobuf.Timestamp
-	18, // 20: gastrolog.v1.HistogramBucket.ts:type_name -> google.protobuf.Timestamp
-	0,  // 21: gastrolog.v1.QueryService.Search:input_type -> gastrolog.v1.SearchRequest
-	2,  // 22: gastrolog.v1.QueryService.Follow:input_type -> gastrolog.v1.FollowRequest
-	4,  // 23: gastrolog.v1.QueryService.Explain:input_type -> gastrolog.v1.ExplainRequest
-	14, // 24: gastrolog.v1.QueryService.Histogram:input_type -> gastrolog.v1.HistogramRequest
-	1,  // 25: gastrolog.v1.QueryService.Search:output_type -> gastrolog.v1.SearchResponse
-	3,  // 26: gastrolog.v1.QueryService.Follow:output_type -> gastrolog.v1.FollowResponse
-	5,  // 27: gastrolog.v1.QueryService.Explain:output_type -> gastrolog.v1.ExplainResponse
-	15, // 28: gastrolog.v1.QueryService.Histogram:output_type -> gastrolog.v1.HistogramResponse
-	25, // [25:29] is the sub-list for method output_type
-	21, // [21:25] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	14, // 14: gastrolog.v1.ChunkPlan.steps:type_name -> gastrolog.v1.PipelineStep
+	19, // 15: gastrolog.v1.ChunkPlan.start_ts:type_name -> google.protobuf.Timestamp
+	19, // 16: gastrolog.v1.ChunkPlan.end_ts:type_name -> google.protobuf.Timestamp
+	13, // 17: gastrolog.v1.ChunkPlan.branch_plans:type_name -> gastrolog.v1.BranchPlan
+	14, // 18: gastrolog.v1.BranchPlan.steps:type_name -> gastrolog.v1.PipelineStep
+	19, // 19: gastrolog.v1.HistogramRequest.start:type_name -> google.protobuf.Timestamp
+	19, // 20: gastrolog.v1.HistogramRequest.end:type_name -> google.protobuf.Timestamp
+	17, // 21: gastrolog.v1.HistogramResponse.buckets:type_name -> gastrolog.v1.HistogramBucket
+	19, // 22: gastrolog.v1.HistogramResponse.start:type_name -> google.protobuf.Timestamp
+	19, // 23: gastrolog.v1.HistogramResponse.end:type_name -> google.protobuf.Timestamp
+	19, // 24: gastrolog.v1.HistogramBucket.ts:type_name -> google.protobuf.Timestamp
+	0,  // 25: gastrolog.v1.QueryService.Search:input_type -> gastrolog.v1.SearchRequest
+	2,  // 26: gastrolog.v1.QueryService.Follow:input_type -> gastrolog.v1.FollowRequest
+	4,  // 27: gastrolog.v1.QueryService.Explain:input_type -> gastrolog.v1.ExplainRequest
+	15, // 28: gastrolog.v1.QueryService.Histogram:input_type -> gastrolog.v1.HistogramRequest
+	1,  // 29: gastrolog.v1.QueryService.Search:output_type -> gastrolog.v1.SearchResponse
+	3,  // 30: gastrolog.v1.QueryService.Follow:output_type -> gastrolog.v1.FollowResponse
+	5,  // 31: gastrolog.v1.QueryService.Explain:output_type -> gastrolog.v1.ExplainResponse
+	16, // 32: gastrolog.v1.QueryService.Histogram:output_type -> gastrolog.v1.HistogramResponse
+	29, // [29:33] is the sub-list for method output_type
+	25, // [25:29] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_query_proto_init() }
@@ -1247,7 +1414,7 @@ func file_gastrolog_v1_query_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_query_proto_rawDesc), len(file_gastrolog_v1_query_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   18,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

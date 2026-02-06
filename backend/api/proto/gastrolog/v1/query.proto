@@ -57,6 +57,9 @@ message ExplainRequest {
 
 message ExplainResponse {
   repeated ChunkPlan chunks = 1;
+  string direction = 2;    // "forward" or "reverse"
+  int32 total_chunks = 3;  // Total chunks before time-range filtering
+  string expression = 4;   // Parsed boolean expression (from BoolExpr.String())
 }
 
 message Query {
@@ -113,19 +116,32 @@ message ChunkPlan {
   bool sealed = 2;
   int64 record_count = 3;
   repeated PipelineStep steps = 4;
-  string scan_mode = 5; // "sequential" or "index-driven"
+  string scan_mode = 5; // "sequential", "index-driven", or "skipped"
   int64 estimated_records = 6;
   repeated string runtime_filters = 7;
-  string store_id = 8; // Store this chunk belongs to
+  string store_id = 8;
+  google.protobuf.Timestamp start_ts = 9;
+  google.protobuf.Timestamp end_ts = 10;
+  string skip_reason = 11;
+  repeated BranchPlan branch_plans = 12;
+}
+
+message BranchPlan {
+  string expression = 1;          // String representation of the branch
+  repeated PipelineStep steps = 2;
+  bool skipped = 3;
+  string skip_reason = 4;
+  int64 estimated_records = 5;
 }
 
 message PipelineStep {
   string name = 1;
   int64 input_estimate = 2;
   int64 output_estimate = 3;
-  string action = 4; // "seek", "indexed", "filter"
+  string action = 4; // "seek", "indexed", "runtime", "skipped"
   string reason = 5;
   string detail = 6;
+  string predicate = 7; // What we're filtering for, e.g. "token(error, warn)"
 }
 
 message HistogramRequest {
