@@ -503,7 +503,7 @@ func (e *Engine) lookupKVIndex(f KeyValueFilter, chunkID chunk.ChunkID, im index
 			} else {
 				result.available = true
 				reader := index.NewKVIndexReader(chunkID, kvIdx.Entries())
-				if pos, found := reader.Lookup(f.Key, f.Value); found {
+				if pos, found := reader.Lookup(keyLower, valLower); found {
 					result.positions = unionPositions(result.positions, pos)
 					detailParts = append(detailParts, fmt.Sprintf("msg_kv=%d", len(pos)))
 				} else {

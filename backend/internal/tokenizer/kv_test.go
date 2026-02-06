@@ -33,12 +33,12 @@ func TestExtractKeyValues(t *testing.T) {
 		{
 			name:     "mixed case key normalized",
 			msg:      "Status=OK",
-			expected: []KeyValue{{Key: "status", Value: "OK"}},
+			expected: []KeyValue{{Key: "status", Value: "ok"}},
 		},
 		{
-			name:     "value not normalized",
+			name:     "value normalized to lowercase",
 			msg:      "path=/Login",
-			expected: []KeyValue{{Key: "path", Value: "/Login"}},
+			expected: []KeyValue{{Key: "path", Value: "/login"}},
 		},
 		{
 			name:     "complex dotted key",
@@ -48,12 +48,12 @@ func TestExtractKeyValues(t *testing.T) {
 		{
 			name:     "in context",
 			msg:      "ERROR: request failed status=500 method=GET",
-			expected: []KeyValue{{Key: "status", Value: "500"}, {Key: "method", Value: "GET"}},
+			expected: []KeyValue{{Key: "status", Value: "500"}, {Key: "method", Value: "get"}},
 		},
 		{
 			name:     "with comma delimiter",
 			msg:      "status=200,method=POST",
-			expected: []KeyValue{{Key: "status", Value: "200"}, {Key: "method", Value: "POST"}},
+			expected: []KeyValue{{Key: "status", Value: "200"}, {Key: "method", Value: "post"}},
 		},
 		{
 			name:     "value with path",
@@ -157,12 +157,12 @@ func TestExtractKeyValues(t *testing.T) {
 		{
 			name:     "key at start of message",
 			msg:      "level=INFO some message",
-			expected: []KeyValue{{Key: "level", Value: "INFO"}},
+			expected: []KeyValue{{Key: "level", Value: "info"}},
 		},
 		{
 			name:     "value at end of message",
 			msg:      "some message level=INFO",
-			expected: []KeyValue{{Key: "level", Value: "INFO"}},
+			expected: []KeyValue{{Key: "level", Value: "info"}},
 		},
 	}
 

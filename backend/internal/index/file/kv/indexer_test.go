@@ -132,8 +132,8 @@ func TestIndexerBuild(t *testing.T) {
 	if len(kvMap["status:500"]) != 2 {
 		t.Fatalf("status:500: expected 2 positions, got %d", len(kvMap["status:500"]))
 	}
-	if len(kvMap["method:GET"]) != 1 {
-		t.Fatalf("method:GET: expected 1 position, got %d", len(kvMap["method:GET"]))
+	if len(kvMap["method:get"]) != 1 {
+		t.Fatalf("method:get: expected 1 position, got %d", len(kvMap["method:get"]))
 	}
 }
 

@@ -503,6 +503,7 @@ func applyTokenIndex(b *scannerBuilder, indexes index.IndexManager, chunkID chun
 
 	// All tokens must be present in the index (AND semantics).
 	for i, tok := range tokens {
+		tok = strings.ToLower(tok)
 		positions, found := reader.Lookup(tok)
 		if !found {
 			// Token not in index. If the tokenizer would have indexed this
@@ -612,7 +613,7 @@ func applyKeyValueIndex(b *scannerBuilder, indexes index.IndexManager, chunkID c
 			}
 			if kvErr == nil && kvStatus != index.KVCapped {
 				reader := index.NewKVIndexReader(chunkID, kvIdx.Entries())
-				if positions, found := reader.Lookup(f.Key, f.Value); found {
+				if positions, found := reader.Lookup(keyLower, valLower); found {
 					filterPositions = unionPositions(filterPositions, positions)
 				}
 			}

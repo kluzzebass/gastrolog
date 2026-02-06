@@ -1222,19 +1222,25 @@ function PipelineFunnel({
                 </span>
               </span>
 
-              {/* Predicate / reason */}
-              {(step.predicate || step.detail || step.reason) && (
-                <span
-                  className={`ml-auto font-mono text-xs truncate max-w-[50%] ${
-                    step.predicate
-                      ? c("text-text-normal", "text-light-text-normal")
-                      : c("text-text-muted", "text-light-text-muted")
-                  }`}
-                  title={step.predicate || step.detail || step.reason}
-                >
-                  {step.predicate || step.detail || step.reason}
-                </span>
-              )}
+              {/* Predicate + reason */}
+              <span className="ml-auto flex items-center gap-2 min-w-0 max-w-[60%]">
+                {step.predicate && (
+                  <span
+                    className={`font-mono text-xs truncate ${c("text-text-normal", "text-light-text-normal")}`}
+                    title={step.predicate}
+                  >
+                    {step.predicate}
+                  </span>
+                )}
+                {(step.reason || step.detail) && (
+                  <span
+                    className={`font-mono text-xs truncate ${c("text-text-muted", "text-light-text-muted")}`}
+                    title={step.detail || step.reason}
+                  >
+                    {step.detail || step.reason}
+                  </span>
+                )}
+              </span>
             </div>
 
             {/* Narrowing bar */}

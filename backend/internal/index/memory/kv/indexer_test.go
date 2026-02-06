@@ -145,7 +145,7 @@ func TestIndexerBuild(t *testing.T) {
 }
 
 func TestIndexerCaseFolding(t *testing.T) {
-	// kv extraction lowercases keys, but preserves value case.
+	// kv extraction lowercases both keys and values.
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{Attrs: attrs, Raw: []byte("Level=ERROR")},
@@ -175,22 +175,20 @@ func TestIndexerCaseFolding(t *testing.T) {
 		t.Errorf("expected 2 positions, got %d", len(keyEntries[0].Positions))
 	}
 
-	// Value index should have separate entries for "ERROR" and "error" (value case preserved).
+	// Value index should have single "error" entry (both are lowercased).
 	valEntries, _, ok := indexer.GetValue(chunkID)
 	if !ok {
 		t.Fatal("expected value index to exist")
 	}
 
-	valMap := make(map[string]int)
-	for _, e := range valEntries {
-		valMap[e.Value] = len(e.Positions)
+	if len(valEntries) != 1 {
+		t.Fatalf("expected 1 value entry (case folded), got %d", len(valEntries))
 	}
-
-	if _, ok := valMap["ERROR"]; !ok {
-		t.Error("expected 'ERROR' value (uppercase)")
+	if valEntries[0].Value != "error" {
+		t.Errorf("expected value 'error', got %q", valEntries[0].Value)
 	}
-	if _, ok := valMap["error"]; !ok {
-		t.Error("expected 'error' value (lowercase)")
+	if len(valEntries[0].Positions) != 2 {
+		t.Errorf("expected 2 positions, got %d", len(valEntries[0].Positions))
 	}
 }
 
