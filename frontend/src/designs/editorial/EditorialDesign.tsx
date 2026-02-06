@@ -43,12 +43,13 @@ type Theme = "dark" | "light" | "system";
 function extractKVPairs(raw: string): { key: string; value: string }[] {
   const results: { key: string; value: string }[] = [];
   const seen = new Set<string>();
+  // Match key=value, key="quoted value", key='quoted value'
   const keyRe =
-    /(?:^|[\s,;:()\[\]{}])([a-zA-Z_][a-zA-Z0-9_.]*?)=([^\s,;)\]}"'=&{[]+)/g;
+    /(?:^|[\s,;:()\[\]{}])([a-zA-Z_][a-zA-Z0-9_.]*?)=(?:"([^"]*)"|'([^']*)'|([^\s,;)\]}"'=&{[]+))/g;
   let m: RegExpExecArray | null;
   while ((m = keyRe.exec(raw)) !== null) {
     const key = m[1].toLowerCase();
-    const value = m[2].toLowerCase();
+    const value = (m[2] ?? m[3] ?? m[4] ?? "").toLowerCase();
     if (key.length > 64 || value.length > 64 || value.length === 0) continue;
     const dedup = `${key}\0${value}`;
     if (seen.has(dedup)) continue;
@@ -481,7 +482,8 @@ export function EditorialDesign() {
   );
 
   const handleFieldSelect = (key: string, value: string) => {
-    const token = `${key}=${value}`;
+    const needsQuotes = /[^a-zA-Z0-9_\-.]/.test(value);
+    const token = needsQuotes ? `${key}="${value}"` : `${key}=${value}`;
     if (q.includes(token)) {
       const newQuery = q.replace(token, "").replace(/\s+/g, " ").trim();
       setUrlQuery(newQuery);
@@ -1433,7 +1435,11 @@ function FieldExplorer({
             {isExpanded && (
               <div className="ml-4 space-y-px">
                 {values.map(({ value, count: vCount }) => {
-                  const isActive = activeQuery.includes(`${key}=${value}`);
+                  const needsQuotes = /[^a-zA-Z0-9_\-.]/.test(value);
+                  const token = needsQuotes
+                    ? `${key}="${value}"`
+                    : `${key}=${value}`;
+                  const isActive = activeQuery.includes(token);
                   return (
                     <button
                       key={value}

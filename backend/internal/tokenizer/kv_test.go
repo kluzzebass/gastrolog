@@ -113,8 +113,28 @@ func TestExtractKeyValues(t *testing.T) {
 			expected: nil,
 		},
 		{
-			name:     "quoted value rejected",
+			name:     "double quoted value extracted",
 			msg:      `key="value"`,
+			expected: []KeyValue{{Key: "key", Value: "value"}},
+		},
+		{
+			name:     "single quoted value extracted",
+			msg:      `key='value'`,
+			expected: []KeyValue{{Key: "key", Value: "value"}},
+		},
+		{
+			name:     "quoted value with special chars",
+			msg:      `user_agent="python-requests/2.25.1"`,
+			expected: []KeyValue{{Key: "user_agent", Value: "python-requests/2.25.1"}},
+		},
+		{
+			name:     "quoted value with spaces",
+			msg:      `msg="hello world"`,
+			expected: []KeyValue{{Key: "msg", Value: "hello world"}},
+		},
+		{
+			name:     "unterminated quote skipped",
+			msg:      `key="unterminated`,
 			expected: nil,
 		},
 		{

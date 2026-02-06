@@ -65,8 +65,30 @@ func ExtractKeyValues(msg []byte) []KeyValue {
 
 		// Extract and validate value (bytes after '=')
 		valueStart := eqPos + 1
-		valueEnd := findValueEnd(msg, valueStart)
-		valueBytes := msg[valueStart:valueEnd]
+		var valueBytes []byte
+		var valueEnd int
+
+		// Handle quoted values: key="value" or key='value'
+		if valueStart < len(msg) && (msg[valueStart] == '"' || msg[valueStart] == '\'') {
+			quote := msg[valueStart]
+			closePos := -1
+			for j := valueStart + 1; j < len(msg); j++ {
+				if msg[j] == quote {
+					closePos = j
+					break
+				}
+			}
+			if closePos == -1 {
+				// Unterminated quote, skip
+				i = valueStart + 1
+				continue
+			}
+			valueBytes = msg[valueStart+1 : closePos]
+			valueEnd = closePos + 1
+		} else {
+			valueEnd = findValueEnd(msg, valueStart)
+			valueBytes = msg[valueStart:valueEnd]
+		}
 
 		if len(valueBytes) == 0 || len(valueBytes) > MaxValueLength {
 			i = valueEnd
