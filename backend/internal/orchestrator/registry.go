@@ -28,6 +28,15 @@ func (o *Orchestrator) RegisterQueryEngine(key string, qe *query.Engine) {
 	o.queries[key] = qe
 }
 
+// RegisterDigester appends a digester to the processing pipeline.
+// Digesters run in registration order on each message before storage.
+// Must be called before Start().
+func (o *Orchestrator) RegisterDigester(d Digester) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.digesters = append(o.digesters, d)
+}
+
 // RegisterIngester adds a ingester to the registry.
 // Must be called before Start().
 func (o *Orchestrator) RegisterIngester(id string, r Ingester) {

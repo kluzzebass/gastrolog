@@ -135,13 +135,18 @@ func (o *Orchestrator) ingestLoop(ctx context.Context) {
 	}
 }
 
-// processMessage routes incoming messages to chunk managers.
+// processMessage applies digesters then routes to chunk managers.
 func (o *Orchestrator) processMessage(msg IngestMessage) {
+	// Apply digester pipeline (enriches attrs based on message content).
+	for _, d := range o.digesters {
+		d.Digest(&msg)
+	}
+
 	// Construct record.
 	// SourceTS comes from the ingester (parsed from log, zero if unknown).
 	// IngestTS comes from the ingester (when message was received).
 	// WriteTS is set by ChunkManager on append.
-	// Attrs are passed through directly from the ingester.
+	// Attrs may have been enriched by digesters.
 	rec := chunk.Record{
 		SourceTS: msg.SourceTS,
 		IngestTS: msg.IngestTS,

@@ -72,6 +72,9 @@ type Orchestrator struct {
 	ingesters       map[string]Ingester
 	ingesterCancels map[string]context.CancelFunc // per-ingester cancel functions
 
+	// Digesters (message enrichment pipeline).
+	digesters []Digester
+
 	// Routing.
 	router *Router
 

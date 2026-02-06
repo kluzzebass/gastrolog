@@ -25,11 +25,7 @@ function classifySeverity(val: string): string | null {
   return null;
 }
 
-function detectSeverity(
-  attrs: Record<string, string>,
-  raw: string,
-): SeverityInfo | null {
-  // 1. Check attrs: level, severity, severity_name → key=value filter.
+function detectSeverity(attrs: Record<string, string>): SeverityInfo | null {
   for (const key of ["level", "severity", "severity_name"] as const) {
     const val = attrs[key];
     if (val) {
@@ -38,15 +34,6 @@ function detectSeverity(
         const style = BADGE_STYLE[level]!;
         return { level, ...style, filter: `${key}=${val}` };
       }
-    }
-  }
-  // 2. Fall back to level=VALUE or severity=VALUE in message text.
-  const m = /\b(?:level|severity)[=:]\s*"?(\w+)"?/i.exec(raw);
-  if (m) {
-    const level = classifySeverity(m[1]!);
-    if (level) {
-      const style = BADGE_STYLE[level]!;
-      return { level, ...style, filter: `level=${level}` };
     }
   }
   return null;
@@ -69,7 +56,7 @@ export function LogEntry({
 }) {
   const rawText = new TextDecoder().decode(record.raw);
   const parts = composeWithSearch(syntaxHighlight(rawText), tokens);
-  const severity = detectSeverity(record.attrs, rawText);
+  const severity = detectSeverity(record.attrs);
   const ingestTime = record.ingestTs ? record.ingestTs.toDate() : new Date();
 
   const ts = ingestTime.toLocaleTimeString("en-US", {

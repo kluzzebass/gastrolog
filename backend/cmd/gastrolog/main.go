@@ -22,6 +22,7 @@ import (
 	chunkfile "gastrolog/internal/chunk/file"
 	chunkmem "gastrolog/internal/chunk/memory"
 	configfile "gastrolog/internal/config/file"
+	digestlevel "gastrolog/internal/digester/level"
 	"gastrolog/internal/index"
 	indexfile "gastrolog/internal/index/file"
 	indexmem "gastrolog/internal/index/memory"
@@ -92,6 +93,9 @@ func run(ctx context.Context, logger *slog.Logger, configPath, serverAddr string
 	orch := orchestrator.New(orchestrator.Config{
 		Logger: logger,
 	})
+
+	// Register digesters (message enrichment pipeline).
+	orch.RegisterDigester(digestlevel.New())
 
 	// Apply configuration with factories.
 	if err := orch.ApplyConfig(cfg, buildFactories(logger)); err != nil {
