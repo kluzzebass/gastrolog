@@ -129,6 +129,24 @@ func isIndexable(tok []byte) bool {
 	return true
 }
 
+// IsIndexable reports whether a query token would be present in the token index
+// if it appeared in a record. Returns false for tokens the indexer skips:
+// too short, too long, numeric, UUID, non-ASCII, or containing non-token bytes.
+// When this returns true and the token is not found in a sealed chunk's index,
+// the token does not appear in that chunk — zero matches, no runtime scan needed.
+func IsIndexable(token string) bool {
+	if len(token) < minTokenLen || len(token) > DefaultMaxTokenLen {
+		return false
+	}
+	// Check all bytes are valid token bytes (ASCII letters, digits, underscore, hyphen).
+	for i := range len(token) {
+		if !isTokenByte(token[i]) {
+			return false
+		}
+	}
+	return isIndexable([]byte(token))
+}
+
 // isNumeric returns true if tok looks like a number in any common base.
 // This includes pure decimal, hex (0x prefix or all hex digits), octal, binary.
 // Also catches hex-with-hyphens (like UUIDs or partial UUIDs).
