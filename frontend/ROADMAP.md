@@ -11,12 +11,14 @@ React 19 + Vite 7 + TypeScript + Tailwind v4 + Bun. Connect RPC client talks to 
 - **Search**: Token and boolean expression queries, `key=value` filters (including quoted values), time range, reverse order
 - **Follow**: Live tail via `QueryService.Follow` streaming RPC, auto-scroll, follow/stop toggle
 - **Routing**: `/search?q=...` and `/follow?q=...` routes — bookmarkable, shareable, browser back/forward
-- **Results**: Streaming results, token/KV highlighting, virtual scroll, keyboard nav (j/k)
-- **Detail Panel**: Timestamps with relative time, message byte size, extracted KV pairs, attributes, chunk reference, pin to persist across queries
+- **Results**: Streaming results, token/KV highlighting, virtual scroll, Escape to deselect
+- **Detail Panel**: Timestamps with relative time, message byte size, extracted KV pairs, attributes, chunk reference with click-to-filter, pin to persist across queries
 - **Stores**: Live store list with auto-refresh, click to filter by store (toggle on/off), total summary
 - **Fields**: Extracted KV field explorer with click-to-filter (toggle), active filter highlighting, quoted value support
 - **Explain**: Full query plan visualization with index pipeline per chunk
-- **Histogram**: Time distribution of results
+- **Histogram**: Time distribution with severity-stacked bars (error/warn/info/debug/trace), brush selection, pan (arrows + drag), tooltip with per-level breakdown
+- **Time Range**: Preset buttons (5m–30d, All), calendar date picker with time inputs, custom range via brush or manual entry
+- **Query Help**: Popup showing token search, boolean operators, key=value filters, time bounds, and examples
 - **Theme**: Dark/light mode toggle, Observatory design with copper/amber accents, light-mode-safe highlights
 - **ChunkID**: 13-char base32hex timestamp strings (no more UUID byte decoding)
 - **SourceTS**: Displayed in detail panel when available
@@ -58,6 +60,7 @@ React 19 + Vite 7 + TypeScript + Tailwind v4 + Bun. Connect RPC client talks to 
 ## Phase 3: Query UX
 
 ### 3.1 Query Builder
+- [x] Query help popup (syntax reference, operators, examples)
 - [ ] Syntax highlighting in query input
 - [ ] Query history (localStorage)
 - [ ] Saved queries

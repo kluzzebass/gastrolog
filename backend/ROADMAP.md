@@ -12,6 +12,7 @@ Go 1.25+ backend with Connect RPC server, interactive REPL, chunk-based storage,
 - **REPL**: 12 commands, bubbletea pager, live follow mode, vim-style navigation, multi-store support
 - **Ingesters**: Chatterbox (test, 6 formats with SourceTS), HTTP/Loki (Push API), Syslog (RFC 3164/5424, UDP+TCP)
 - **Server**: Connect RPC with 4 services, h2c, graceful shutdown with drain, k8s probes
+- **Histogram**: Time-bucketed record counts via binary search, severity-stacked level breakdown using KV indexes
 - **Config**: File-based with runtime reconfiguration
 - **ChunkID**: 13-char base32hex timestamps (lexicographically time-sorted)
 
