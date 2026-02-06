@@ -331,8 +331,6 @@ export function EditorialDesign() {
   // Fire search or follow depending on the current route.
   useEffect(() => {
     expressionRef.current = q;
-    setSelectedRecord(null);
-    if (!detailPinned) setDetailCollapsed(true);
     if (isFollowMode) {
       // On /follow: stop any in-flight search, start following.
       resetFollow();
@@ -483,6 +481,26 @@ export function EditorialDesign() {
     } else {
       const base = stripChunk(q);
       setUrlQuery(base ? `${token} ${base}` : token);
+    }
+  };
+
+  const stripPos = (q: string): string =>
+    q
+      .replace(/\bpos=\S+/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const handlePosSelect = (chunkId: string, pos: string) => {
+    const posToken = `pos=${pos}`;
+    const chunkToken = `chunk=${chunkId}`;
+    if (q.includes(posToken)) {
+      // Toggle off: remove pos= and chunk=
+      setUrlQuery(stripPos(stripChunk(q)));
+    } else {
+      // Toggle on: ensure chunk= is present, add pos=
+      let base = stripPos(stripChunk(q));
+      const tokens = `${chunkToken} ${posToken}`;
+      setUrlQuery(base ? `${tokens} ${base}` : tokens);
     }
   };
 
@@ -987,10 +1005,10 @@ export function EditorialDesign() {
                       key={i}
                       record={record}
                       tokens={tokens}
-                      isSelected={selectedRecord === record}
+                      isSelected={sameRecord(selectedRecord, record)}
                       onSelect={() =>
                         setSelectedRecord(
-                          selectedRecord === record ? null : record,
+                          sameRecord(selectedRecord, record) ? null : record,
                         )
                       }
                       dark={dark}
@@ -1096,6 +1114,7 @@ export function EditorialDesign() {
               onFieldSelect={handleFieldSelect}
               onChunkSelect={handleChunkSelect}
               onStoreSelect={handleStoreSelect}
+              onPosSelect={handlePosSelect}
             />
           ) : (
             <div className="flex flex-col items-center justify-center h-48 px-4">
@@ -1541,6 +1560,17 @@ function EmptyState({ dark }: { dark: boolean }) {
         press Enter to execute
       </p>
     </div>
+  );
+}
+
+function sameRecord(a: ProtoRecord | null, b: ProtoRecord | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const ar = a.ref,
+    br = b.ref;
+  if (!ar || !br) return false;
+  return (
+    ar.chunkId === br.chunkId && ar.pos === br.pos && ar.storeId === br.storeId
   );
 }
 
@@ -2074,12 +2104,14 @@ function DetailPanelContent({
   onFieldSelect,
   onChunkSelect,
   onStoreSelect,
+  onPosSelect,
 }: {
   record: ProtoRecord;
   dark: boolean;
   onFieldSelect?: (key: string, value: string) => void;
   onChunkSelect?: (chunkId: string) => void;
   onStoreSelect?: (storeId: string) => void;
+  onPosSelect?: (chunkId: string, pos: string) => void;
 }) {
   const c = (d: string, l: string) => (dark ? d : l);
   const rawText = new TextDecoder().decode(record.raw);
@@ -2217,6 +2249,15 @@ function DetailPanelContent({
             label="Position"
             value={record.ref?.pos?.toString() ?? "N/A"}
             dark={dark}
+            onClick={
+              record.ref?.chunkId && record.ref?.pos != null
+                ? () =>
+                    onPosSelect?.(
+                      record.ref!.chunkId,
+                      record.ref!.pos.toString(),
+                    )
+                : undefined
+            }
           />
         </div>
       </DetailSection>

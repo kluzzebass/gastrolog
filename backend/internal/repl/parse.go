@@ -89,6 +89,13 @@ func parseQueryArgs(args []string) (query.Query, string) {
 				}
 				q.Limit = n
 				continue
+			case "pos":
+				var n uint64
+				if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
+					return q, fmt.Sprintf("Invalid pos: %v", err)
+				}
+				q.Pos = &n
+				continue
 			}
 		}
 		// Not a control argument, collect for filter parsing.

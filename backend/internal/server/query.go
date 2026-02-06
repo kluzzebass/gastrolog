@@ -522,6 +522,13 @@ func parseExpression(expr string) (query.Query, error) {
 				}
 				q.Limit = n
 				continue
+			case "pos":
+				var n uint64
+				if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
+					return q, fmt.Errorf("invalid pos: %w", err)
+				}
+				q.Pos = &n
+				continue
 			}
 		}
 		filterParts = append(filterParts, part)

@@ -55,7 +55,7 @@ type REPL struct {
 var commands = []string{"help", "stores", "query", "follow", "next", "reset", "set", "chunks", "chunk", "indexes", "analyze", "explain", "stats", "status", "exit", "quit"}
 
 // queryFilters is the list of query filter keys for tab completion.
-var queryFilters = []string{"start=", "end=", "limit=", "store=", "chunk="}
+var queryFilters = []string{"start=", "end=", "limit=", "store=", "chunk=", "pos="}
 
 // New creates a REPL using the provided client.
 func New(client Client) *REPL {

@@ -59,8 +59,9 @@ type Query struct {
 	RawExpression string
 
 	// Result control
-	IsReverse bool // return results newest-first
-	Limit     int  // max results (0 = unlimited)
+	IsReverse bool    // return results newest-first
+	Limit     int     // max results (0 = unlimited)
+	Pos       *uint64 // exact record position within chunk (nil = no filter)
 
 	// Context windows (for SearchWithContext)
 	ContextBefore int // number of records to include before each match
@@ -431,6 +432,11 @@ func (e *Engine) buildScannerWithManagers(cursor chunk.RecordCursor, q Query, st
 	// Resume position takes precedence over time-based start.
 	if startPos != nil {
 		b.setMinPosition(*startPos)
+	}
+
+	// Exact position filter: seek directly to one record.
+	if q.Pos != nil {
+		b.addPositions([]uint64{*q.Pos})
 	}
 
 	// Convert BoolExpr to DNF and process.
