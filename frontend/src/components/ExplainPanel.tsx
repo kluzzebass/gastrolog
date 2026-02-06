@@ -1,6 +1,94 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { ChunkPlan, BranchPlan, PipelineStep } from "../api/client";
 import { formatChunkId } from "../utils";
+
+// ── Highlight helpers ──
+
+type Range = [number, number]; // [startIdx, endIdx) in expression string
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Find all non-overlapping matches of a regex in the expression, return char ranges. */
+function findRanges(expression: string, re: RegExp): Range[] {
+  const ranges: Range[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(expression)) !== null) {
+    ranges.push([m.index, m.index + m[0].length]);
+  }
+  return ranges;
+}
+
+/** Find a bare word in the expression that isn't part of a key=value token. */
+function findBareWordRanges(expression: string, word: string): Range[] {
+  const re = new RegExp(`(?<!=)\\b${escapeRegex(word)}\\b(?!=)`, "gi");
+  return findRanges(expression, re);
+}
+
+/** Map a pipeline step to character ranges in the expression string. */
+function stepToRanges(step: PipelineStep, expression: string): Range[] {
+  switch (step.name) {
+    case "time":
+      return [
+        ...findRanges(expression, /\bstart=\S+/g),
+        ...findRanges(expression, /\bend=\S+/g),
+      ];
+
+    case "token": {
+      const match = step.predicate.match(/^token\((.+)\)$/);
+      if (!match) return [];
+      const words = match[1].split(/,\s*/);
+      return words.flatMap((w) => findBareWordRanges(expression, w));
+    }
+
+    case "kv": {
+      // Predicate is the literal token, e.g. "level=error"
+      const re = new RegExp(`\\b${escapeRegex(step.predicate)}\\b`, "gi");
+      return findRanges(expression, re);
+    }
+
+    default:
+      return [];
+  }
+}
+
+/** Split expression into segments: [{text, highlighted}] based on ranges. */
+function buildSegments(
+  expression: string,
+  ranges: Range[],
+): { text: string; highlighted: boolean }[] {
+  if (ranges.length === 0) return [{ text: expression, highlighted: false }];
+
+  // Sort and merge overlapping ranges.
+  const sorted = [...ranges].sort((a, b) => a[0] - b[0]);
+  const merged: Range[] = [sorted[0]];
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = merged[merged.length - 1];
+    if (sorted[i][0] <= prev[1]) {
+      prev[1] = Math.max(prev[1], sorted[i][1]);
+    } else {
+      merged.push(sorted[i]);
+    }
+  }
+
+  const segments: { text: string; highlighted: boolean }[] = [];
+  let cursor = 0;
+  for (const [start, end] of merged) {
+    if (cursor < start) {
+      segments.push({
+        text: expression.slice(cursor, start),
+        highlighted: false,
+      });
+    }
+    segments.push({ text: expression.slice(start, end), highlighted: true });
+    cursor = end;
+  }
+  if (cursor < expression.length) {
+    segments.push({ text: expression.slice(cursor), highlighted: false });
+  }
+  return segments;
+}
 
 export function ExplainPanel({
   chunks,
@@ -16,6 +104,19 @@ export function ExplainPanel({
   dark: boolean;
 }) {
   const c = (d: string, l: string) => (dark ? d : l);
+  const [highlightRanges, setHighlightRanges] = useState<Range[]>([]);
+
+  const handleStepHover = useCallback(
+    (step: PipelineStep) => {
+      setHighlightRanges(stepToRanges(step, expression));
+    },
+    [expression],
+  );
+
+  const handleStepLeave = useCallback(() => {
+    setHighlightRanges([]);
+  }, []);
+
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>(() => {
     // Auto-collapse if more than 3 chunks
     if (chunks.length <= 3) return {};
@@ -52,7 +153,13 @@ export function ExplainPanel({
             {chunks.length} of {totalChunks} chunks
           </span>
         </div>
-        {expression && <ExpressionBox expression={expression} dark={dark} />}
+        {expression && (
+          <ExpressionBox
+            expression={expression}
+            dark={dark}
+            highlightRanges={highlightRanges}
+          />
+        )}
       </div>
 
       {/* Scrollable chunk list */}
@@ -65,6 +172,8 @@ export function ExplainPanel({
               dark={dark}
               collapsed={!!collapsed[i]}
               onToggle={() => toggle(i)}
+              onStepHover={handleStepHover}
+              onStepLeave={handleStepLeave}
             />
           ))}
         </div>
@@ -76,20 +185,32 @@ export function ExplainPanel({
 function ExpressionBox({
   expression,
   dark,
+  highlightRanges,
 }: {
   expression: string;
   dark: boolean;
+  highlightRanges: Range[];
 }) {
   const c = (d: string, l: string) => (dark ? d : l);
+  const segments = buildSegments(expression, highlightRanges);
 
   return (
-    <textarea
-      readOnly
-      value={expression}
-      rows={1}
-      style={{ fieldSizing: "content" } as React.CSSProperties}
-      className={`w-full font-mono text-[0.8em] px-3 py-1.5 rounded mb-3 resize-none overflow-hidden border-none outline-none ${c("bg-ink-surface text-text-normal", "bg-light-surface text-light-text-normal")}`}
-    />
+    <div
+      className={`w-full font-mono text-[0.8em] px-3 py-1.5 rounded mb-3 whitespace-pre-wrap break-all ${c("bg-ink-surface text-text-normal", "bg-light-surface text-light-text-normal")}`}
+    >
+      {segments.map((seg, i) =>
+        seg.highlighted ? (
+          <mark
+            key={i}
+            className={`rounded-sm transition-colors duration-150 ${c("bg-copper/25 text-copper", "bg-copper/20 text-copper")}`}
+          >
+            {seg.text}
+          </mark>
+        ) : (
+          <span key={i}>{seg.text}</span>
+        ),
+      )}
+    </div>
   );
 }
 
@@ -98,11 +219,15 @@ function ExplainChunk({
   dark,
   collapsed,
   onToggle,
+  onStepHover,
+  onStepLeave,
 }: {
   plan: ChunkPlan;
   dark: boolean;
   collapsed: boolean;
   onToggle: () => void;
+  onStepHover: (step: PipelineStep) => void;
+  onStepLeave: () => void;
 }) {
   const c = (d: string, l: string) => (dark ? d : l);
   const isSkipped = plan.scanMode === "skipped";
@@ -235,6 +360,8 @@ function ExplainChunk({
                   index={j}
                   totalRecords={totalRecords}
                   dark={dark}
+                  onStepHover={onStepHover}
+                  onStepLeave={onStepLeave}
                 />
               ))}
             </div>
@@ -243,6 +370,8 @@ function ExplainChunk({
               steps={plan.steps}
               totalRecords={totalRecords}
               dark={dark}
+              onStepHover={onStepHover}
+              onStepLeave={onStepLeave}
             />
           ) : null}
 
@@ -288,11 +417,15 @@ function ExplainBranch({
   index,
   totalRecords,
   dark,
+  onStepHover,
+  onStepLeave,
 }: {
   branch: BranchPlan;
   index: number;
   totalRecords: number;
   dark: boolean;
+  onStepHover: (step: PipelineStep) => void;
+  onStepLeave: () => void;
 }) {
   const c = (d: string, l: string) => (dark ? d : l);
 
@@ -350,6 +483,8 @@ function ExplainBranch({
           steps={branch.steps}
           totalRecords={totalRecords}
           dark={dark}
+          onStepHover={onStepHover}
+          onStepLeave={onStepLeave}
         />
       )}
     </div>
@@ -360,10 +495,14 @@ function PipelineFunnel({
   steps,
   totalRecords,
   dark,
+  onStepHover,
+  onStepLeave,
 }: {
   steps: PipelineStep[];
   totalRecords: number;
   dark: boolean;
+  onStepHover?: (step: PipelineStep) => void;
+  onStepLeave?: () => void;
 }) {
   const c = (d: string, l: string) => (dark ? d : l);
   const maxVal = Math.max(
@@ -394,7 +533,12 @@ function PipelineFunnel({
         const reduced = inVal > 0 && outVal < inVal;
 
         return (
-          <div key={i} className="relative pb-3 min-w-0">
+          <div
+            key={i}
+            className="relative pb-3 min-w-0"
+            onMouseEnter={() => onStepHover?.(step)}
+            onMouseLeave={() => onStepLeave?.()}
+          >
             {/* Top row: step info */}
             <div className="flex items-center gap-3 min-w-0">
               {/* Step number */}
@@ -443,7 +587,6 @@ function PipelineFunnel({
                 {step.predicate && (
                   <span
                     className={`font-mono text-xs truncate ${c("text-text-normal", "text-light-text-normal")}`}
-                    title={step.predicate}
                   >
                     {step.predicate}
                   </span>
@@ -451,7 +594,6 @@ function PipelineFunnel({
                 {(step.reason || step.detail) && (
                   <span
                     className={`font-mono text-xs truncate ${c("text-text-muted", "text-light-text-muted")}`}
-                    title={step.detail || step.reason}
                   >
                     {step.detail || step.reason}
                   </span>
