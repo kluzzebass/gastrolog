@@ -6,9 +6,11 @@ package query
 import (
 	"context"
 	"errors"
+	"fmt"
 	"iter"
 	"log/slog"
 	"slices"
+	"strings"
 	"time"
 
 	"gastrolog/internal/chunk"
@@ -66,6 +68,27 @@ type Query struct {
 	// Context windows (for SearchWithContext)
 	ContextBefore int // number of records to include before each match
 	ContextAfter  int // number of records to include after each match
+}
+
+// String returns a human-readable representation of the query including all parameters.
+func (q Query) String() string {
+	var parts []string
+	if q.BoolExpr != nil {
+		parts = append(parts, q.BoolExpr.String())
+	}
+	if !q.Start.IsZero() {
+		parts = append(parts, "start="+q.Start.Format(time.RFC3339))
+	}
+	if !q.End.IsZero() {
+		parts = append(parts, "end="+q.End.Format(time.RFC3339))
+	}
+	if q.IsReverse {
+		parts = append(parts, "reverse=true")
+	}
+	if q.Limit > 0 {
+		parts = append(parts, fmt.Sprintf("limit=%d", q.Limit))
+	}
+	return strings.Join(parts, " ")
 }
 
 // Reverse returns true if this query should return results in reverse (newest-first) order.

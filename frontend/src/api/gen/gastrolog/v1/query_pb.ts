@@ -243,6 +243,20 @@ export class ExplainResponse extends Message<ExplainResponse> {
    */
   expression = "";
 
+  /**
+   * Resolved query start time
+   *
+   * @generated from field: google.protobuf.Timestamp query_start = 5;
+   */
+  queryStart?: Timestamp;
+
+  /**
+   * Resolved query end time
+   *
+   * @generated from field: google.protobuf.Timestamp query_end = 6;
+   */
+  queryEnd?: Timestamp;
+
   constructor(data?: PartialMessage<ExplainResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -255,6 +269,8 @@ export class ExplainResponse extends Message<ExplainResponse> {
     { no: 2, name: "direction", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "total_chunks", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
     { no: 4, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "query_start", kind: "message", T: Timestamp },
+    { no: 6, name: "query_end", kind: "message", T: Timestamp },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ExplainResponse {

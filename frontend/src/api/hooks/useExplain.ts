@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { queryClient, Query, ChunkPlan } from "../client";
 
 export interface ExplainState {
@@ -6,6 +7,8 @@ export interface ExplainState {
   direction: string;
   totalChunks: number;
   expression: string;
+  queryStart?: Timestamp;
+  queryEnd?: Timestamp;
   isLoading: boolean;
   error: Error | null;
 }
@@ -16,6 +19,8 @@ export function useExplain() {
     direction: "",
     totalChunks: 0,
     expression: "",
+    queryStart: undefined,
+    queryEnd: undefined,
     isLoading: false,
     error: null,
   });
@@ -38,6 +43,8 @@ export function useExplain() {
         direction: response.direction,
         totalChunks: response.totalChunks,
         expression: response.expression,
+        queryStart: response.queryStart,
+        queryEnd: response.queryEnd,
         isLoading: false,
         error: null,
       });
@@ -47,6 +54,8 @@ export function useExplain() {
         direction: "",
         totalChunks: 0,
         expression: "",
+        queryStart: undefined,
+        queryEnd: undefined,
         isLoading: false,
         error: err instanceof Error ? err : new Error(String(err)),
       });
@@ -59,6 +68,8 @@ export function useExplain() {
       direction: "",
       totalChunks: 0,
       expression: "",
+      queryStart: undefined,
+      queryEnd: undefined,
       isLoading: false,
       error: null,
     });

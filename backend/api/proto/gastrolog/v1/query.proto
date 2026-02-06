@@ -60,6 +60,8 @@ message ExplainResponse {
   string direction = 2;    // "forward" or "reverse"
   int32 total_chunks = 3;  // Total chunks before time-range filtering
   string expression = 4;   // Parsed boolean expression (from BoolExpr.String())
+  google.protobuf.Timestamp query_start = 5; // Resolved query start time
+  google.protobuf.Timestamp query_end = 6;   // Resolved query end time
 }
 
 message Query {

@@ -160,8 +160,12 @@ func (s *QueryServer) Explain(
 		Direction:   plan.Direction,
 		TotalChunks: int32(plan.TotalChunks),
 	}
-	if plan.Query.BoolExpr != nil {
-		resp.Expression = plan.Query.BoolExpr.String()
+	resp.Expression = plan.Query.String()
+	if !plan.Query.Start.IsZero() {
+		resp.QueryStart = timestamppb.New(plan.Query.Start)
+	}
+	if !plan.Query.End.IsZero() {
+		resp.QueryEnd = timestamppb.New(plan.Query.End)
 	}
 
 	for _, cp := range plan.ChunkPlans {
