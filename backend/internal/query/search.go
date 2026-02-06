@@ -34,6 +34,9 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 	allStores := e.listStores()
 	selectedStores, remainingExpr := ExtractStoreFilter(q.BoolExpr, allStores)
 
+	// Extract chunk predicates.
+	chunkIDs, remainingExpr := ExtractChunkFilter(remainingExpr)
+
 	// Normalize resume token to new format.
 	// For single-store mode, use the first selected store as default.
 	defaultStoreID := "default"
@@ -47,7 +50,7 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 		selectedStores = allStores // no store filter means all stores
 	}
 
-	// Update query to use remaining expression (without store predicates).
+	// Update query to use remaining expression (without store/chunk predicates).
 	q.BoolExpr = remainingExpr
 
 	// Track state for resume token generation.
@@ -79,7 +82,7 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 				return
 			}
 
-			candidates := e.selectChunks(metas, q)
+			candidates := e.selectChunks(metas, q, chunkIDs)
 			for _, meta := range candidates {
 				allChunks = append(allChunks, storeChunk{storeID: storeID, meta: meta})
 			}
@@ -359,7 +362,10 @@ func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeTo
 		selectedStores = allStores
 	}
 
-	// Update query to use remaining expression (without store predicates).
+	// Extract chunk predicates.
+	chunkIDs, remainingExpr := ExtractChunkFilter(remainingExpr)
+
+	// Update query to use remaining expression (without store/chunk predicates).
 	q.BoolExpr = remainingExpr
 
 	var lastRefs []MultiStorePosition
@@ -390,7 +396,7 @@ func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeTo
 				return
 			}
 
-			candidates := e.selectChunks(metas, q)
+			candidates := e.selectChunks(metas, q, chunkIDs)
 			for _, meta := range candidates {
 				allChunks = append(allChunks, storeChunk{storeID: storeID, meta: meta})
 			}
@@ -867,6 +873,10 @@ func (e *Engine) SearchWithContext(ctx context.Context, q Query) (iter.Seq2[chun
 	// Normalize query to ensure BoolExpr is set (converts legacy Tokens/KV if needed).
 	q = q.Normalize()
 
+	// Extract chunk predicates.
+	chunkIDs, remainingExpr := ExtractChunkFilter(q.BoolExpr)
+	q.BoolExpr = remainingExpr
+
 	var nextRef *chunk.RecordRef
 	completed := false
 
@@ -883,7 +893,7 @@ func (e *Engine) SearchWithContext(ctx context.Context, q Query) (iter.Seq2[chun
 		}
 
 		// Sort all chunks by StartTS for consistent ordering.
-		allChunks := e.selectChunks(metas, q)
+		allChunks := e.selectChunks(metas, q, chunkIDs)
 
 		// Also need all chunks sorted ascending for context gathering.
 		allChunksAsc := make([]chunk.ChunkMeta, len(metas))

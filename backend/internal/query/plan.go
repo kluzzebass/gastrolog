@@ -70,7 +70,10 @@ func (e *Engine) Explain(ctx context.Context, q Query) (*QueryPlan, error) {
 		selectedStores = allStores
 	}
 
-	// Update query to use remaining expression (without store predicates).
+	// Extract chunk predicates.
+	chunkIDs, remainingExpr := ExtractChunkFilter(remainingExpr)
+
+	// Update query to use remaining expression (without store/chunk predicates).
 	queryForPlan := q
 	queryForPlan.BoolExpr = remainingExpr
 
@@ -97,7 +100,7 @@ func (e *Engine) Explain(ctx context.Context, q Query) (*QueryPlan, error) {
 		plan.TotalChunks += len(metas)
 
 		// Select chunks that overlap the query time range.
-		candidates := e.selectChunks(metas, queryForPlan)
+		candidates := e.selectChunks(metas, queryForPlan, chunkIDs)
 
 		for _, meta := range candidates {
 			cp := e.buildChunkPlan(ctx, queryForPlan, meta, storeID, cm, im)

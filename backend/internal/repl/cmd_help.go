@@ -34,6 +34,7 @@ Query filters:
   key=*                    Filter by key existence (any value)
   *=value                  Filter by value existence (any key)
   store=NAME               Filter by store (by default, searches all stores)
+  chunk=ID                 Filter by chunk ID
 
 Settings:
   pager=N                  Records per page (0 = no paging, show all)

@@ -297,11 +297,27 @@ func (e *Engine) listStores() []string {
 // selectChunks filters to chunks that overlap the query time range,
 // sorted by StartTS (ascending for forward, descending for reverse).
 // Unsealed chunks are always included (their EndTS is not final).
-func (e *Engine) selectChunks(metas []chunk.ChunkMeta, q Query) []chunk.ChunkMeta {
+// If chunkIDs is non-nil, only chunks with matching IDs are included.
+func (e *Engine) selectChunks(metas []chunk.ChunkMeta, q Query, chunkIDs []chunk.ChunkID) []chunk.ChunkMeta {
 	lower, upper := q.TimeBounds()
+
+	// Build lookup set for chunk ID filtering.
+	var chunkSet map[chunk.ChunkID]struct{}
+	if chunkIDs != nil {
+		chunkSet = make(map[chunk.ChunkID]struct{}, len(chunkIDs))
+		for _, id := range chunkIDs {
+			chunkSet[id] = struct{}{}
+		}
+	}
 
 	var out []chunk.ChunkMeta
 	for _, m := range metas {
+		// Chunk ID filter (if specified).
+		if chunkSet != nil {
+			if _, ok := chunkSet[m.ID]; !ok {
+				continue
+			}
+		}
 		if m.Sealed {
 			// Chunk must overlap [lower, upper)
 			if !lower.IsZero() && m.EndTS.Before(lower) {

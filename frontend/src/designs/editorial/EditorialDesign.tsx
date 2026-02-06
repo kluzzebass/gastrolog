@@ -305,6 +305,12 @@ export function EditorialDesign() {
     return base ? `${token} ${base}` : token;
   };
 
+  const stripChunk = (q: string): string =>
+    q
+      .replace(/\bchunk=\S+/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
   // Navigate to a new query — pushes browser history, preserving current route.
   const setUrlQuery = useCallback(
     (newQ: string) => {
@@ -468,6 +474,16 @@ export function EditorialDesign() {
     setSelectedStore(next);
     const newQuery = injectStore(q, next);
     setUrlQuery(newQuery);
+  };
+
+  const handleChunkSelect = (chunkId: string) => {
+    const token = `chunk=${chunkId}`;
+    if (q.includes(token)) {
+      setUrlQuery(stripChunk(q));
+    } else {
+      const base = stripChunk(q);
+      setUrlQuery(base ? `${token} ${base}` : token);
+    }
   };
 
   const tokens = extractTokens(q);
@@ -1078,6 +1094,7 @@ export function EditorialDesign() {
               record={selectedRecord}
               dark={dark}
               onFieldSelect={handleFieldSelect}
+              onChunkSelect={handleChunkSelect}
             />
           ) : (
             <div className="flex flex-col items-center justify-center h-48 px-4">
@@ -2054,10 +2071,12 @@ function DetailPanelContent({
   record,
   dark,
   onFieldSelect,
+  onChunkSelect,
 }: {
   record: ProtoRecord;
   dark: boolean;
   onFieldSelect?: (key: string, value: string) => void;
+  onChunkSelect?: (chunkId: string) => void;
 }) {
   const c = (d: string, l: string) => (dark ? d : l);
   const rawText = new TextDecoder().decode(record.raw);
@@ -2180,6 +2199,11 @@ function DetailPanelContent({
               record.ref?.chunkId ? formatChunkId(record.ref.chunkId) : "N/A"
             }
             dark={dark}
+            onClick={
+              record.ref?.chunkId
+                ? () => onChunkSelect?.(record.ref!.chunkId)
+                : undefined
+            }
           />
           <DetailRow
             label="Position"
