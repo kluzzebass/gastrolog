@@ -14,7 +14,7 @@ import {
 } from "../../api/client";
 import type { HistogramData } from "../../api/hooks/useHistogram";
 
-type Theme = "dark" | "light";
+type Theme = "dark" | "light" | "system";
 
 /* ── Client-side extraction utilities ── */
 
@@ -117,7 +117,17 @@ export function EditorialDesign() {
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(
     null,
   );
-  const [theme, setTheme] = useState<Theme>("dark");
+  const [theme, setTheme] = useState<Theme>("system");
+  const [systemDark, setSystemDark] = useState(
+    () => window.matchMedia("(prefers-color-scheme: dark)").matches,
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = (e: MediaQueryListEvent) => setSystemDark(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
   const [detailWidth, setDetailWidth] = useState(320);
   const queryInputRef = useRef<HTMLTextAreaElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -166,7 +176,7 @@ export function EditorialDesign() {
   const { data: stores, isLoading: storesLoading } = useStores();
   const { data: stats, isLoading: statsLoading } = useStats();
 
-  const dark = theme === "dark";
+  const dark = theme === "dark" || (theme === "system" && systemDark);
 
   // Build the full expression sent to the server.
   // Strip start=/end=/reverse tokens from the query string.
@@ -174,7 +184,7 @@ export function EditorialDesign() {
     q
       .replace(/\bstart=\S+/g, "")
       .replace(/\bend=\S+/g, "")
-      .replace(/\breverse\b/g, "")
+      .replace(/\breverse=\S+/g, "")
       .replace(/\s+/g, " ")
       .trim();
 
@@ -187,11 +197,11 @@ export function EditorialDesign() {
 
   // Build time range tokens for the given range key.
   const buildTimeTokens = (range: string): string => {
-    if (range === "All") return "reverse";
+    if (range === "All") return "reverse=true";
     const ms = timeRangeMs[range];
-    if (!ms) return "reverse";
+    if (!ms) return "reverse=true";
     const now = Date.now();
-    return `start=${new Date(now - ms).toISOString()} end=${new Date(now).toISOString()} reverse`;
+    return `start=${new Date(now - ms).toISOString()} end=${new Date(now).toISOString()} reverse=true`;
   };
 
   // Inject time range + reverse into query, replacing any existing time tokens.
@@ -332,17 +342,13 @@ export function EditorialDesign() {
       <header
         className={`flex items-center justify-between px-7 py-3.5 border-b ${c("border-ink-border-subtle bg-ink", "border-light-border-subtle bg-light-raised")}`}
       >
-        <div className="flex items-baseline gap-3">
+        <div className="flex items-center gap-3">
+          <img src="/favicon.svg" alt="" className="w-6 h-6" />
           <h1
             className={`font-display text-[1.6em] font-semibold tracking-tight leading-none ${c("text-text-bright", "text-light-text-bright")}`}
           >
             GastroLog
           </h1>
-          <span
-            className={`text-[0.7em] font-body font-medium uppercase tracking-[0.2em] ${c("text-copper-dim", "text-copper")}`}
-          >
-            Observatory
-          </span>
         </div>
 
         <div className="flex items-center gap-6">
@@ -389,15 +395,32 @@ export function EditorialDesign() {
             />
           </div>
 
-          <button
-            onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
-            className={`px-2.5 py-1 text-[0.85em] font-mono border rounded transition-all duration-200 ${c(
-              "border-ink-border text-text-muted hover:border-copper hover:text-copper",
-              "border-light-border text-light-text-muted hover:border-copper hover:text-copper",
-            )}`}
-          >
-            {dark ? "light" : "dark"}
-          </button>
+          <div className="flex items-center gap-1">
+            {[
+              { mode: "light" as Theme, icon: "\u2600", title: "Light" },
+              { mode: "dark" as Theme, icon: "\u263E", title: "Dark" },
+              { mode: "system" as Theme, icon: "\u25D1", title: "System" },
+            ].map(({ mode, icon, title }) => (
+              <button
+                key={mode}
+                onClick={() => setTheme(mode)}
+                title={title}
+                className={`w-7 h-7 flex items-center justify-center text-sm rounded transition-all duration-200 ${
+                  theme === mode
+                    ? c(
+                        "bg-ink-hover text-copper",
+                        "bg-light-hover text-copper",
+                      )
+                    : c(
+                        "text-text-ghost hover:text-text-muted",
+                        "text-light-text-ghost hover:text-light-text-muted",
+                      )
+                }`}
+              >
+                {icon}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
@@ -571,7 +594,7 @@ export function EditorialDesign() {
                 disabled={isSearching}
                 className="px-5 py-2 text-[0.9em] font-medium rounded bg-copper text-white hover:bg-copper-glow transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
               >
-                {isSearching ? "Searching..." : "Search"}
+                Search
               </button>
               <button
                 onClick={handleShowPlan}

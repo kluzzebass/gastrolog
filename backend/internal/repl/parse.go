@@ -34,15 +34,12 @@ func parseQueryArgs(args []string) (query.Query, string) {
 	var filterArgs []string
 
 	for _, arg := range args {
-		// Handle bare keyword flags (no "=").
-		if arg == "reverse" {
-			q.IsReverse = true
-			continue
-		}
-
 		k, v, ok := strings.Cut(arg, "=")
 		if ok {
 			switch k {
+			case "reverse":
+				q.IsReverse = v == "true"
+				continue
 			case "start":
 				t, err := parseTime(v)
 				if err != nil {

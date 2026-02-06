@@ -32,7 +32,7 @@ export function extractTokens(queryStr: string): string[] {
     // Skip query directives (not searchable content)
     const lower = part.toLowerCase();
     if (
-      lower === "reverse" ||
+      lower.startsWith("reverse=") ||
       lower.startsWith("start=") ||
       lower.startsWith("end=") ||
       lower.startsWith("store=") ||

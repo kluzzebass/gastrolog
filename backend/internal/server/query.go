@@ -467,15 +467,12 @@ func parseExpression(expr string) (query.Query, error) {
 	var filterParts []string
 
 	for _, part := range parts {
-		// Handle bare keyword flags (no "=").
-		if part == "reverse" {
-			q.IsReverse = true
-			continue
-		}
-
 		k, v, ok := strings.Cut(part, "=")
 		if ok {
 			switch k {
+			case "reverse":
+				q.IsReverse = v == "true"
+				continue
 			case "start":
 				t, err := parseTime(v)
 				if err != nil {
