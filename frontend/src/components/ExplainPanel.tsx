@@ -28,48 +28,52 @@ export function ExplainPanel({
     setCollapsed((prev) => ({ ...prev, [i]: !prev[i] }));
 
   return (
-    <div>
-      {/* Query summary */}
-      <div className="flex items-center gap-3 mb-3">
-        <h3
-          className={`font-display text-[1.15em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
-        >
-          Execution Plan
-        </h3>
-        <span
-          className={`text-[0.65em] px-1.5 py-0.5 rounded uppercase tracking-wider font-semibold ${
-            direction === "reverse"
-              ? "bg-copper/15 text-copper border border-copper/25"
-              : "bg-severity-info/15 text-severity-info border border-severity-info/25"
-          }`}
-        >
-          {direction || "forward"}
-        </span>
-        <span
-          className={`font-mono text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}
-        >
-          {chunks.length} of {totalChunks} chunks
-        </span>
-      </div>
-      {expression && (
-        <div
-          className={`font-mono text-[0.8em] px-3 py-1.5 rounded mb-3 ${c("bg-ink-surface text-text-normal", "bg-light-surface text-light-text-normal")}`}
-        >
-          {expression}
+    <div className="flex flex-col min-h-0 h-full">
+      {/* Fixed header */}
+      <div className="shrink-0">
+        <div className="flex items-center gap-3 mb-3">
+          <h3
+            className={`font-display text-[1.15em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
+          >
+            Execution Plan
+          </h3>
+          <span
+            className={`text-[0.65em] px-1.5 py-0.5 rounded uppercase tracking-wider font-semibold ${
+              direction === "reverse"
+                ? "bg-copper/15 text-copper border border-copper/25"
+                : "bg-severity-info/15 text-severity-info border border-severity-info/25"
+            }`}
+          >
+            {direction || "forward"}
+          </span>
+          <span
+            className={`font-mono text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}
+          >
+            {chunks.length} of {totalChunks} chunks
+          </span>
         </div>
-      )}
+        {expression && (
+          <div
+            className={`font-mono text-[0.8em] px-3 py-1.5 rounded mb-3 ${c("bg-ink-surface text-text-normal", "bg-light-surface text-light-text-normal")}`}
+          >
+            {expression}
+          </div>
+        )}
+      </div>
 
-      {/* Chunk plans */}
-      <div className="flex flex-col gap-2 stagger-children">
-        {chunks.map((plan, i) => (
-          <ExplainChunk
-            key={i}
-            plan={plan}
-            dark={dark}
-            collapsed={!!collapsed[i]}
-            onToggle={() => toggle(i)}
-          />
-        ))}
+      {/* Scrollable chunk list */}
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden app-scroll">
+        <div className="flex flex-col gap-2 stagger-children">
+          {chunks.map((plan, i) => (
+            <ExplainChunk
+              key={i}
+              plan={plan}
+              dark={dark}
+              collapsed={!!collapsed[i]}
+              onToggle={() => toggle(i)}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );

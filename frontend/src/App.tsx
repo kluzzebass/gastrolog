@@ -801,32 +801,45 @@ export function App() {
             )}
           </div>
 
-          {/* Execution Plan */}
+          {/* Execution Plan Dialog */}
           {showPlan && (
             <div
-              className={`px-5 py-4 border-b animate-fade-up max-h-[50vh] overflow-y-auto overflow-x-hidden app-scroll ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
+              className="fixed inset-0 z-50 flex items-center justify-center"
+              onClick={() => setShowPlan(false)}
             >
-              {isExplaining ? (
-                <div
-                  className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+              <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+              <div
+                className={`relative w-[90vw] max-w-4xl h-[80vh] flex flex-col rounded-lg shadow-2xl p-6 ${c("bg-ink-bg border border-ink-border-subtle", "bg-light-bg border border-light-border-subtle")}`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button
+                  onClick={() => setShowPlan(false)}
+                  className={`absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded text-lg leading-none transition-colors ${c("text-text-muted hover:text-text-bright", "text-light-text-muted hover:text-light-text-bright")}`}
                 >
-                  Analyzing query plan...
-                </div>
-              ) : explainChunks.length === 0 ? (
-                <div
-                  className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-                >
-                  Run a query to see the execution plan.
-                </div>
-              ) : (
-                <ExplainPanel
-                  chunks={explainChunks}
-                  direction={explainDirection}
-                  totalChunks={explainTotalChunks}
-                  expression={explainExpression}
-                  dark={dark}
-                />
-              )}
+                  &times;
+                </button>
+                {isExplaining ? (
+                  <div
+                    className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+                  >
+                    Analyzing query plan...
+                  </div>
+                ) : explainChunks.length === 0 ? (
+                  <div
+                    className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+                  >
+                    Run a query to see the execution plan.
+                  </div>
+                ) : (
+                  <ExplainPanel
+                    chunks={explainChunks}
+                    direction={explainDirection}
+                    totalChunks={explainTotalChunks}
+                    expression={explainExpression}
+                    dark={dark}
+                  />
+                )}
+              </div>
             </div>
           )}
 
