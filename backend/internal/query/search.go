@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/querylang"
 )
 
 // positionExhausted is a sentinel value indicating a chunk has been fully consumed.
@@ -133,7 +134,7 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 
 				lastRefs = []MultiStorePosition{{StoreID: rr.StoreID, ChunkID: rr.Ref.ChunkID, Position: rr.Ref.Pos}}
 
-				if !yield(rr.Record, nil) {
+				if !yield(rr.record(), nil) {
 					return
 				}
 
@@ -286,6 +287,8 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 			// Update position for this chunk.
 			chunkPositions[key] = entry.ref.Pos
 
+			entry.rec.Ref = entry.ref
+			entry.rec.StoreID = entry.storeID
 			if !yield(entry.rec, nil) {
 				buildLastRefs()
 				return
@@ -608,6 +611,8 @@ func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeTo
 			key := chunkKey{storeID: entry.storeID, chunkID: entry.chunkID}
 			chunkPositions[key] = entry.ref.Pos
 
+			entry.rec.Ref = entry.ref
+			entry.rec.StoreID = entry.storeID
 			if !yield(entry.rec, nil) {
 				buildLastRefs()
 				return
@@ -816,6 +821,8 @@ func (e *Engine) Follow(ctx context.Context, q Query) iter.Seq2[chunk.Record, er
 
 			// Yield sorted records.
 			for _, p := range pending {
+				p.rec.Ref = p.ref
+				p.rec.StoreID = p.storeID
 				if !yield(p.rec, nil) {
 					return
 				}
@@ -836,10 +843,8 @@ func (e *Engine) matchesFilter(rec chunk.Record, q Query) bool {
 	if q.BoolExpr == nil {
 		return true
 	}
-	// Use the scanner's filter logic - simplified version here.
-	// For now, just return true and let the caller handle filtering.
-	// TODO: implement proper filter matching.
-	return true
+	dnf := querylang.ToDNF(q.BoolExpr)
+	return dnfFilter(&dnf)(rec)
 }
 
 // SearchWithContext finds records matching the query and includes surrounding
@@ -932,7 +937,7 @@ func (e *Engine) SearchWithContext(ctx context.Context, q Query) (iter.Seq2[chun
 
 				// Yield the match.
 				nextRef = &rr.Ref
-				if !yield(rr.Record, nil) {
+				if !yield(rr.record(), nil) {
 					return
 				}
 				count++

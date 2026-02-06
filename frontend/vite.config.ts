@@ -10,6 +10,7 @@ export default defineConfig({
     http2Proxy({
       "^/gastrolog\\.v1\\.": {
         target: "http://localhost:8080",
+        timeout: 0,
       },
     }),
   ],

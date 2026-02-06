@@ -8,6 +8,7 @@ export function useStores() {
       const response = await storeClient.listStores({});
       return response.stores;
     },
+    refetchInterval: 10_000,
   });
 }
 

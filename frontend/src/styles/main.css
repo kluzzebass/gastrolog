@@ -29,10 +29,15 @@
   --color-severity-debug: #5b8ab5;
   --color-severity-trace: #6a6080;
 
-  /* Highlight */
+  /* Highlight (dark) */
   --color-highlight-bg: #c8875c30;
   --color-highlight-border: #c8875c60;
   --color-highlight-text: #e8d0b8;
+
+  /* Highlight (light) */
+  --color-light-highlight-bg: #c8875c25;
+  --color-light-highlight-border: #c8875c50;
+  --color-light-highlight-text: #7a4a28;
 
   /* Light mode */
   --color-light-bg: #f4f0ea;

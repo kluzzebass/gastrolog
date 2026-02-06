@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   useSearch as useRouterSearch,
   useNavigate,
+  useLocation,
 } from "@tanstack/react-router";
 import {
   startOfMonth,
@@ -20,6 +21,7 @@ import {
 } from "date-fns";
 import {
   useSearch,
+  useFollow,
   useExplain,
   useHistogram,
   extractTokens,
@@ -135,8 +137,10 @@ const timeRangeMs: Record<string, number> = {
 };
 
 export function EditorialDesign() {
-  const { q } = useRouterSearch({ from: "/" });
+  const { q } = useRouterSearch({ strict: false }) as { q: string };
   const navigate = useNavigate();
+  const location = useLocation();
+  const isFollowMode = location.pathname === "/follow";
   const [draft, setDraft] = useState(q);
   const [selectedStore, setSelectedStore] = useState("all");
   const [timeRange, setTimeRange] = useState("1h");
@@ -161,6 +165,7 @@ export function EditorialDesign() {
   const [sidebarWidth, setSidebarWidth] = useState(224);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [detailCollapsed, setDetailCollapsed] = useState(false);
+  const [detailPinned, setDetailPinned] = useState(false);
 
   // Auto-expand detail panel when a record is selected.
   useEffect(() => {
@@ -172,14 +177,14 @@ export function EditorialDesign() {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setSelectedRecord(null);
-        setDetailCollapsed(true);
+        if (!detailPinned) setDetailCollapsed(true);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [detailPinned]);
 
-  const queryInputRef = useRef<HTMLTextAreaElement>(null);
+  const queryInputRef = useRef<HTMLInputElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const expressionRef = useRef("");
 
@@ -227,6 +232,14 @@ export function EditorialDesign() {
     search,
     loadMore,
   } = useSearch();
+  const {
+    records: followRecords,
+    isFollowing,
+    error: followError,
+    follow,
+    stop: stopFollow,
+    reset: resetFollow,
+  } = useFollow();
   const {
     chunks: explainChunks,
     direction: explainDirection,
@@ -286,12 +299,16 @@ export function EditorialDesign() {
     return base ? `${token} ${base}` : token;
   };
 
-  // Navigate to a new query — pushes browser history.
+  // Navigate to a new query — pushes browser history, preserving current route.
   const setUrlQuery = useCallback(
     (newQ: string) => {
-      navigate({ search: { q: newQ }, replace: false });
+      navigate({
+        to: isFollowMode ? "/follow" : "/search",
+        search: { q: newQ },
+        replace: false,
+      });
     },
-    [navigate],
+    [navigate, isFollowMode],
   );
 
   // Sync draft when URL changes (browser back/forward).
@@ -299,13 +316,26 @@ export function EditorialDesign() {
     setDraft(q);
   }, [q]);
 
-  // Fire search whenever the URL query changes.
+  // Fire search or follow depending on the current route.
   useEffect(() => {
     expressionRef.current = q;
-    search(q);
-    fetchHistogram(q);
-    if (showPlan) explain(q);
-  }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
+    setSelectedRecord(null);
+    if (!detailPinned) setDetailCollapsed(true);
+    if (isFollowMode) {
+      // On /follow: stop any in-flight search, start following.
+      resetFollow();
+      follow(q);
+    } else {
+      // On /search: stop any active follow, start searching.
+      if (isFollowing) {
+        stopFollow();
+        resetFollow();
+      }
+      search(q);
+      fetchHistogram(q);
+      if (showPlan) explain(q);
+    }
+  }, [q, isFollowMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // On mount: focus input, seed default time range if no URL query.
   useEffect(() => {
@@ -340,7 +370,25 @@ export function EditorialDesign() {
   }, [hasMore, isSearching, loadMore]);
 
   const executeQuery = () => {
-    setUrlQuery(draft);
+    // Always search from the search route.
+    navigate({ to: "/search", search: { q: draft }, replace: false });
+  };
+
+  const startFollow = () => {
+    // Strip time bounds but keep reverse=.
+    const stripped = draft
+      .replace(/\bstart=\S+/g, "")
+      .replace(/\bend=\S+/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    navigate({ to: "/follow", search: { q: stripped }, replace: false });
+  };
+
+  const stopFollowMode = () => {
+    // Restore time range when switching back to search.
+    const base = stripTimeRange(draft);
+    const restored = injectTimeRange(base, timeRange);
+    navigate({ to: "/search", search: { q: restored }, replace: false });
   };
 
   const handleShowPlan = () => {
@@ -410,21 +458,29 @@ export function EditorialDesign() {
   };
 
   const handleStoreSelect = (storeId: string) => {
-    setSelectedStore(storeId);
-    const newQuery = injectStore(q, storeId);
+    const next = selectedStore === storeId ? "all" : storeId;
+    setSelectedStore(next);
+    const newQuery = injectStore(q, next);
     setUrlQuery(newQuery);
   };
 
   const tokens = extractTokens(q);
+  const displayRecords = isFollowMode ? followRecords : records;
   const attrFields = useMemo(
-    () => aggregateFields(records, "attrs"),
-    [records],
+    () => aggregateFields(displayRecords, "attrs"),
+    [displayRecords],
   );
-  const kvFields = useMemo(() => aggregateFields(records, "kv"), [records]);
+  const kvFields = useMemo(
+    () => aggregateFields(displayRecords, "kv"),
+    [displayRecords],
+  );
 
   const handleFieldSelect = (key: string, value: string) => {
     const token = `${key}=${value}`;
-    if (!q.includes(token)) {
+    if (q.includes(token)) {
+      const newQuery = q.replace(token, "").replace(/\s+/g, " ").trim();
+      setUrlQuery(newQuery);
+    } else {
       const newQuery = q.trim() ? `${q.trim()} ${token}` : token;
       setUrlQuery(newQuery);
     }
@@ -566,13 +622,6 @@ export function EditorialDesign() {
           {/* Stores */}
           <SidebarSection title="Stores" dark={dark}>
             <div className="flex flex-col gap-px">
-              <StoreButton
-                label="All Stores"
-                count={statsLoading ? "..." : totalRecords.toLocaleString()}
-                active={selectedStore === "all"}
-                onClick={() => handleStoreSelect("all")}
-                dark={dark}
-              />
               {storesLoading ? (
                 <div
                   className={`px-2.5 py-1.5 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
@@ -591,6 +640,14 @@ export function EditorialDesign() {
                   />
                 ))
               )}
+            </div>
+            <div
+              className={`flex justify-between items-center px-2.5 pt-2 mt-1 border-t text-[0.8em] ${c("border-ink-border-subtle text-text-ghost", "border-light-border-subtle text-light-text-ghost")}`}
+            >
+              <span>Total</span>
+              <span className="font-mono">
+                {statsLoading ? "..." : totalRecords.toLocaleString()}
+              </span>
             </div>
           </SidebarSection>
 
@@ -660,6 +717,7 @@ export function EditorialDesign() {
               fields={attrFields}
               dark={dark}
               onSelect={handleFieldSelect}
+              activeQuery={q}
             />
           </SidebarSection>
 
@@ -668,6 +726,7 @@ export function EditorialDesign() {
               fields={kvFields}
               dark={dark}
               onSelect={handleFieldSelect}
+              activeQuery={q}
             />
           </SidebarSection>
         </aside>
@@ -700,21 +759,21 @@ export function EditorialDesign() {
           <div
             className={`px-5 py-4 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
           >
-            <div className="flex gap-3 items-start">
+            <div className="flex gap-3 items-center">
               <div className="flex-1 relative">
-                <textarea
+                <input
                   ref={queryInputRef}
+                  type="text"
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
+                    if (e.key === "Enter") {
                       e.preventDefault();
                       executeQuery();
                     }
                   }}
                   placeholder="Search logs... tokens for full-text, key=value for attributes"
-                  rows={1}
-                  className={`query-input w-full px-3 py-2 text-[1em] font-mono border rounded resize-none transition-all duration-200 focus:outline-none ${c(
+                  className={`query-input w-full px-3 h-[38px] text-[1em] font-mono border rounded transition-all duration-200 focus:outline-none ${c(
                     "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost",
                     "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost",
                   )}`}
@@ -723,13 +782,26 @@ export function EditorialDesign() {
               <button
                 onClick={executeQuery}
                 disabled={isSearching}
-                className="px-5 py-2 text-[0.9em] font-medium rounded bg-copper text-white hover:bg-copper-glow transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                className="px-5 h-[38px] text-[0.9em] font-medium rounded bg-copper text-white hover:bg-copper-glow transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
               >
                 Search
               </button>
               <button
+                onClick={isFollowMode ? stopFollowMode : startFollow}
+                className={`px-4 h-[38px] text-[0.9em] font-medium rounded border transition-all duration-200 whitespace-nowrap ${
+                  isFollowMode
+                    ? "bg-severity-error/15 border-severity-error text-severity-error hover:bg-severity-error/25"
+                    : c(
+                        "border-ink-border text-text-muted hover:border-copper-dim hover:text-copper-dim",
+                        "border-light-border text-light-text-muted hover:border-copper hover:text-copper",
+                      )
+                }`}
+              >
+                {isFollowMode ? "Stop" : "Follow"}
+              </button>
+              <button
                 onClick={handleShowPlan}
-                className={`px-3 py-2 text-[0.85em] font-mono border rounded transition-all duration-200 whitespace-nowrap ${
+                className={`px-3 h-[38px] text-[0.9em] font-medium border rounded transition-all duration-200 whitespace-nowrap ${
                   showPlan
                     ? c(
                         "border-copper text-copper",
@@ -745,9 +817,9 @@ export function EditorialDesign() {
               </button>
             </div>
 
-            {searchError && (
+            {(searchError || followError) && (
               <div className="mt-2.5 px-3 py-2 text-[0.9em] bg-severity-error/10 border border-severity-error/25 rounded text-severity-error">
-                {searchError.message}
+                {(searchError || followError)!.message}
               </div>
             )}
 
@@ -808,35 +880,37 @@ export function EditorialDesign() {
             </div>
           )}
 
-          {/* Histogram */}
-          {histogramData && histogramData.buckets.length > 0 && (
-            <div
-              className={`px-5 py-3 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
-            >
-              <HistogramChart
-                data={histogramData}
-                dark={dark}
-                onBrushSelect={(start, end) => {
-                  setRangeStart(start);
-                  setRangeEnd(end);
-                  setTimeRange("custom");
-                  const tokens = `start=${start.toISOString()} end=${end.toISOString()} reverse=true`;
-                  const base = stripTimeRange(q);
-                  const newQuery = base ? `${tokens} ${base}` : tokens;
-                  setUrlQuery(newQuery);
-                }}
-                onPan={(start, end) => {
-                  setRangeStart(start);
-                  setRangeEnd(end);
-                  setTimeRange("custom");
-                  const tokens = `start=${start.toISOString()} end=${end.toISOString()} reverse=true`;
-                  const base = stripTimeRange(q);
-                  const newQuery = base ? `${tokens} ${base}` : tokens;
-                  setUrlQuery(newQuery);
-                }}
-              />
-            </div>
-          )}
+          {/* Histogram (hidden during follow) */}
+          {!isFollowMode &&
+            histogramData &&
+            histogramData.buckets.length > 0 && (
+              <div
+                className={`px-5 py-3 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
+              >
+                <HistogramChart
+                  data={histogramData}
+                  dark={dark}
+                  onBrushSelect={(start, end) => {
+                    setRangeStart(start);
+                    setRangeEnd(end);
+                    setTimeRange("custom");
+                    const tokens = `start=${start.toISOString()} end=${end.toISOString()} reverse=true`;
+                    const base = stripTimeRange(q);
+                    const newQuery = base ? `${tokens} ${base}` : tokens;
+                    setUrlQuery(newQuery);
+                  }}
+                  onPan={(start, end) => {
+                    setRangeStart(start);
+                    setRangeEnd(end);
+                    setTimeRange("custom");
+                    const tokens = `start=${start.toISOString()} end=${end.toISOString()} reverse=true`;
+                    const base = stripTimeRange(q);
+                    const newQuery = base ? `${tokens} ${base}` : tokens;
+                    setUrlQuery(newQuery);
+                  }}
+                />
+              </div>
+            )}
 
           {/* Results */}
           <div className="flex-1 flex flex-col overflow-hidden">
@@ -847,16 +921,22 @@ export function EditorialDesign() {
                 <h3
                   className={`font-display text-[1.15em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
                 >
-                  Results
+                  {isFollowMode ? "Following" : "Results"}
                 </h3>
+                {isFollowMode && (
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-severity-error opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-severity-error" />
+                  </span>
+                )}
                 <span
                   className={`font-mono text-[0.8em] px-2 py-0.5 rounded ${c("bg-ink-surface text-text-muted", "bg-light-hover text-light-text-muted")}`}
                 >
-                  {records.length}
-                  {hasMore ? "+" : ""}
+                  {isFollowMode ? followRecords.length : records.length}
+                  {!isFollowMode && hasMore ? "+" : ""}
                 </span>
               </div>
-              {records.length > 0 && (
+              {(isFollowMode ? followRecords : records).length > 0 && (
                 <span
                   className={`font-mono text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
                 >
@@ -866,11 +946,20 @@ export function EditorialDesign() {
             </div>
 
             <div className="flex-1 overflow-y-auto editorial-scroll">
-              {records.length === 0 && !isSearching ? (
+              {(isFollowMode ? followRecords : records).length === 0 &&
+              !isSearching &&
+              !isFollowMode ? (
                 <EmptyState dark={dark} />
+              ) : (isFollowMode ? followRecords : records).length === 0 &&
+                isFollowMode ? (
+                <div
+                  className={`py-8 text-center text-[0.85em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+                >
+                  Waiting for new records...
+                </div>
               ) : (
                 <div>
-                  {records.map((record, i) => (
+                  {(isFollowMode ? followRecords : records).map((record, i) => (
                     <LogEntry
                       key={i}
                       record={record}
@@ -884,8 +973,8 @@ export function EditorialDesign() {
                       dark={dark}
                     />
                   ))}
-                  {/* Infinite scroll sentinel */}
-                  <div ref={sentinelRef} className="h-1" />
+                  {/* Infinite scroll sentinel (search only) */}
+                  {!isFollowMode && <div ref={sentinelRef} className="h-1" />}
                   {isSearching && records.length > 0 && (
                     <div
                       className={`py-3 text-center text-[0.85em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
@@ -940,13 +1029,41 @@ export function EditorialDesign() {
           }`}
         >
           <div
-            className={`flex items-center px-4 py-3 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
+            className={`flex items-center justify-between px-4 py-3 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
           >
             <h3
               className={`font-display text-[1.15em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
             >
-              Detail
+              Details
             </h3>
+            <button
+              onClick={() => setDetailPinned((p) => !p)}
+              title={detailPinned ? "Unpin detail panel" : "Pin detail panel"}
+              className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${
+                detailPinned
+                  ? c("text-copper", "text-copper")
+                  : c(
+                      "text-text-ghost hover:text-text-muted",
+                      "text-light-text-ghost hover:text-light-text-muted",
+                    )
+              }`}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="w-4 h-4"
+                style={
+                  detailPinned ? undefined : { transform: "rotate(45deg)" }
+                }
+              >
+                <line x1="12" y1="17" x2="12" y2="22" />
+                <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
+              </svg>
+            </button>
           </div>
 
           {selectedRecord ? (
@@ -1258,10 +1375,12 @@ function FieldExplorer({
   fields,
   dark,
   onSelect,
+  activeQuery,
 }: {
   fields: FieldSummary[];
   dark: boolean;
   onSelect: (key: string, value: string) => void;
+  activeQuery: string;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
@@ -1308,16 +1427,27 @@ function FieldExplorer({
             </button>
             {isExpanded && (
               <div className="ml-4 space-y-px">
-                {values.map(({ value, count: vCount }) => (
-                  <button
-                    key={value}
-                    onClick={() => onSelect(key, value)}
-                    className={`w-full flex items-center gap-1.5 px-1.5 py-0.5 text-left text-[0.75em] rounded transition-colors ${dark ? "hover:bg-ink-hover text-text-ghost hover:text-copper-glow" : "hover:bg-light-hover text-light-text-ghost hover:text-copper"}`}
-                  >
-                    <span className="flex-1 font-mono truncate">{value}</span>
-                    <span className="tabular-nums">{vCount}</span>
-                  </button>
-                ))}
+                {values.map(({ value, count: vCount }) => {
+                  const isActive = activeQuery.includes(`${key}=${value}`);
+                  return (
+                    <button
+                      key={value}
+                      onClick={() => onSelect(key, value)}
+                      className={`w-full flex items-center gap-1.5 px-1.5 py-0.5 text-left text-[0.75em] rounded transition-colors ${
+                        isActive
+                          ? dark
+                            ? "bg-copper/15 text-copper"
+                            : "bg-copper/10 text-copper"
+                          : dark
+                            ? "hover:bg-ink-hover text-text-ghost hover:text-copper-glow"
+                            : "hover:bg-light-hover text-light-text-ghost hover:text-copper"
+                      }`}
+                    >
+                      <span className="flex-1 font-mono truncate">{value}</span>
+                      <span className="tabular-nums">{vCount}</span>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1436,7 +1566,9 @@ function LogEntry({
             key={i}
             className={
               part.highlighted
-                ? "bg-highlight-bg border border-highlight-border text-highlight-text px-0.5 rounded-sm"
+                ? dark
+                  ? "bg-highlight-bg border border-highlight-border text-highlight-text px-0.5 rounded-sm"
+                  : "bg-light-highlight-bg border border-light-highlight-border text-light-highlight-text px-0.5 rounded-sm"
                 : ""
             }
           >

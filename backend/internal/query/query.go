@@ -219,6 +219,13 @@ type recordWithRef struct {
 	Ref     chunk.RecordRef
 }
 
+// record returns the Record with Ref and StoreID populated.
+func (rr recordWithRef) record() chunk.Record {
+	rr.Record.Ref = rr.Ref
+	rr.Record.StoreID = rr.StoreID
+	return rr.Record
+}
+
 // Engine executes queries against chunk and index managers.
 //
 // The engine can operate in two modes:
