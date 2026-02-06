@@ -1,9 +1,6 @@
 import type { ProtoRecord } from "../utils";
 import { syntaxHighlight, composeWithSearch } from "../syntax";
 
-const RE_SEVERITY =
-  /\b(ERROR|ERR|FATAL|CRITICAL|WARN(?:ING)?|INFO|NOTICE|DEBUG|TRACE)\b/i;
-
 interface SeverityInfo {
   level: string;
   label: string;
@@ -43,14 +40,8 @@ function detectSeverity(
       }
     }
   }
-  // 2. Fall back to keyword in raw text → level=<normalized> filter.
-  const m = RE_SEVERITY.exec(raw);
-  if (!m) return null;
-  const word = m[1]!;
-  const level = classifySeverity(word);
-  if (!level) return null;
-  const style = BADGE_STYLE[level]!;
-  return { level, ...style, filter: `level=${level}` };
+  // No structured severity attr found — don't guess from message text.
+  return null;
 }
 
 export function LogEntry({
