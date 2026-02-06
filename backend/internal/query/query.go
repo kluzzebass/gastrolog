@@ -374,6 +374,8 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, storeID string
 				yield(rr, err)
 				return
 			}
+			rr.Record.Ref = rr.Ref
+			rr.Record.StoreID = rr.StoreID
 			if !yield(rr, nil) {
 				return
 			}

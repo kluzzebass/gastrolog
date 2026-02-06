@@ -16,6 +16,49 @@ import type { HistogramData } from "../../api/hooks/useHistogram";
 
 type Theme = "dark" | "light";
 
+/* ── Client-side extraction utilities ── */
+
+/** Extract key=value pairs from raw log text (simplified port of Go tokenizer.ExtractKeyValues). */
+function extractKVPairs(raw: string): { key: string; value: string }[] {
+  const results: { key: string; value: string }[] = [];
+  const seen = new Set<string>();
+  const keyRe =
+    /(?:^|[\s,;:()\[\]{}])([a-zA-Z_][a-zA-Z0-9_.]*?)=([^\s,;)\]}"'=&{[]+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = keyRe.exec(raw)) !== null) {
+    const key = m[1].toLowerCase();
+    const value = m[2].toLowerCase();
+    if (key.length > 64 || value.length > 64 || value.length === 0) continue;
+    const dedup = `${key}\0${value}`;
+    if (seen.has(dedup)) continue;
+    seen.add(dedup);
+    results.push({ key, value });
+  }
+  return results;
+}
+
+/** Format a relative time string (e.g., "3s ago", "2m ago"). */
+function relativeTime(date: Date): string {
+  const now = Date.now();
+  const diffMs = now - date.getTime();
+  if (diffMs < 0) return "in the future";
+  const sec = Math.floor(diffMs / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const days = Math.floor(hr / 24);
+  return `${days}d ago`;
+}
+
+/** Format byte size to human-readable string. */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 const timeRangeMs: Record<string, number> = {
   "15m": 15 * 60 * 1000,
   "1h": 60 * 60 * 1000,
@@ -192,7 +235,7 @@ export function EditorialDesign() {
 
   return (
     <div
-      className={`grain h-screen overflow-hidden flex flex-col font-body text-[15px] ${c("bg-ink text-text-normal", "light-theme bg-light-bg text-light-text-normal")}`}
+      className={`grain h-screen overflow-hidden flex flex-col font-body text-[16px] ${c("bg-ink text-text-normal", "light-theme bg-light-bg text-light-text-normal")}`}
     >
       {/* ── Header ── */}
       <header
@@ -564,68 +607,7 @@ export function EditorialDesign() {
               </button>
             </div>
 
-            <div className="p-4 space-y-4">
-              <DetailSection label="Timestamps" dark={dark}>
-                <div className="space-y-1.5">
-                  {selectedRecord.ingestTs && (
-                    <DetailRow
-                      label="Ingest"
-                      value={selectedRecord.ingestTs.toDate().toISOString()}
-                      dark={dark}
-                    />
-                  )}
-                  {selectedRecord.writeTs && (
-                    <DetailRow
-                      label="Write"
-                      value={selectedRecord.writeTs.toDate().toISOString()}
-                      dark={dark}
-                    />
-                  )}
-                </div>
-              </DetailSection>
-
-              <DetailSection label="Message" dark={dark}>
-                <pre
-                  className={`text-[0.85em] font-mono p-3 rounded whitespace-pre-wrap break-words leading-relaxed ${c("bg-ink text-text-normal", "bg-light-bg text-light-text-normal")}`}
-                >
-                  {new TextDecoder().decode(selectedRecord.raw)}
-                </pre>
-              </DetailSection>
-
-              {Object.keys(selectedRecord.attrs).length > 0 && (
-                <DetailSection label="Attributes" dark={dark}>
-                  <div className="space-y-0">
-                    {Object.entries(selectedRecord.attrs).map(([k, v]) => (
-                      <DetailRow key={k} label={k} value={v} dark={dark} />
-                    ))}
-                  </div>
-                </DetailSection>
-              )}
-
-              <DetailSection label="Reference" dark={dark}>
-                <div className="space-y-0">
-                  <DetailRow
-                    label="Store"
-                    value={selectedRecord.ref?.storeId ?? "N/A"}
-                    dark={dark}
-                  />
-                  <DetailRow
-                    label="Chunk"
-                    value={
-                      selectedRecord.ref?.chunkId
-                        ? formatChunkId(selectedRecord.ref.chunkId)
-                        : "N/A"
-                    }
-                    dark={dark}
-                  />
-                  <DetailRow
-                    label="Position"
-                    value={selectedRecord.ref?.pos?.toString() ?? "N/A"}
-                    dark={dark}
-                  />
-                </div>
-              </DetailSection>
-            </div>
+            <DetailPanelContent record={selectedRecord} dark={dark} />
           </aside>
         )}
       </div>
@@ -1261,6 +1243,120 @@ function PipelineFunnel({
   );
 }
 
+function DetailPanelContent({
+  record,
+  dark,
+}: {
+  record: ProtoRecord;
+  dark: boolean;
+}) {
+  const c = (d: string, l: string) => (dark ? d : l);
+  const rawText = new TextDecoder().decode(record.raw);
+  const rawBytes = record.raw.length;
+  const kvPairs = extractKVPairs(rawText);
+
+  const tsRows: { label: string; date: Date }[] = [];
+  if (record.sourceTs)
+    tsRows.push({ label: "Source", date: record.sourceTs.toDate() });
+  if (record.ingestTs)
+    tsRows.push({ label: "Ingest", date: record.ingestTs.toDate() });
+  if (record.writeTs)
+    tsRows.push({ label: "Write", date: record.writeTs.toDate() });
+
+  return (
+    <div className="p-4 space-y-4">
+      {/* Timestamps */}
+      <DetailSection label="Timestamps" dark={dark}>
+        <div className="space-y-1.5">
+          {tsRows.map(({ label, date }) => (
+            <div
+              key={label}
+              className={`flex py-1 border-b last:border-b-0 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
+            >
+              <dt
+                className={`w-16 shrink-0 text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+              >
+                {label}
+              </dt>
+              <dd className="flex-1 min-w-0">
+                <div
+                  className={`text-[0.85em] font-mono break-all ${c("text-text-normal", "text-light-text-normal")}`}
+                >
+                  {date.toISOString()}
+                </div>
+                <div
+                  className={`text-[0.75em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+                >
+                  {relativeTime(date)}
+                </div>
+              </dd>
+            </div>
+          ))}
+        </div>
+      </DetailSection>
+
+      {/* Message */}
+      <DetailSection label={`Message (${formatBytes(rawBytes)})`} dark={dark}>
+        <pre
+          className={`text-[0.85em] font-mono p-3 rounded whitespace-pre-wrap break-words leading-relaxed ${c("bg-ink text-text-normal", "bg-light-bg text-light-text-normal")}`}
+        >
+          {rawText}
+        </pre>
+      </DetailSection>
+
+      {/* Extracted Fields */}
+      {kvPairs.length > 0 && (
+        <DetailSection label="Extracted Fields" dark={dark}>
+          <div className="space-y-0">
+            {kvPairs.map(({ key, value }, i) => (
+              <DetailRow
+                key={`${key}-${i}`}
+                label={key}
+                value={value}
+                dark={dark}
+              />
+            ))}
+          </div>
+        </DetailSection>
+      )}
+
+      {/* Attributes */}
+      {Object.keys(record.attrs).length > 0 && (
+        <DetailSection label="Attributes" dark={dark}>
+          <div className="space-y-0">
+            {Object.entries(record.attrs).map(([k, v]) => (
+              <DetailRow key={k} label={k} value={v} dark={dark} />
+            ))}
+          </div>
+        </DetailSection>
+      )}
+
+      {/* Reference */}
+      <DetailSection label="Reference" dark={dark}>
+        <div className="space-y-0">
+          <DetailRow
+            label="Store"
+            value={record.ref?.storeId ?? "N/A"}
+            dark={dark}
+          />
+          <DetailRow
+            label="Chunk"
+            value={
+              record.ref?.chunkId ? formatChunkId(record.ref.chunkId) : "N/A"
+            }
+            dark={dark}
+          />
+          <DetailRow
+            label="Position"
+            value={record.ref?.pos?.toString() ?? "N/A"}
+            dark={dark}
+          />
+        </div>
+      </DetailSection>
+    </div>
+  );
+}
+
 function DetailSection({
   label,
   dark,
@@ -1415,12 +1511,8 @@ function HistogramChart({
 
 /* ── Utilities ── */
 
-function formatChunkId(chunkId: Uint8Array): string {
-  if (chunkId.length !== 16) return "invalid";
-  const hex = Array.from(chunkId, (b) => b.toString(16).padStart(2, "0")).join(
-    "",
-  );
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}...${hex.slice(28)}`;
+function formatChunkId(chunkId: string): string {
+  return chunkId || "N/A";
 }
 
 function highlightMatches(
