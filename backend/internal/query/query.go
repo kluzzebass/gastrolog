@@ -32,9 +32,9 @@ type KeyValueFilter struct {
 
 // Query describes what records to search for.
 type Query struct {
-	// Time bounds on WriteTS (if End < Start, results are returned in reverse/newest-first order)
-	Start time.Time // inclusive bound (lower for forward, upper for reverse)
-	End   time.Time // exclusive bound (upper for forward, lower for reverse)
+	// Time bounds on WriteTS.
+	Start time.Time // inclusive lower bound
+	End   time.Time // exclusive upper bound
 
 	// Time bounds on SourceTS (optional runtime filters)
 	SourceStart time.Time // inclusive lower bound on SourceTS
@@ -53,8 +53,14 @@ type Query struct {
 	// This enables complex queries like "(error OR warn) AND NOT debug".
 	BoolExpr querylang.Expr
 
+	// RawExpression is the original query string before parsing.
+	// Used for serialization over gRPC (the server re-parses it).
+	// Set by callers that parse from a string (e.g., REPL).
+	RawExpression string
+
 	// Result control
-	Limit int // max results (0 = unlimited)
+	IsReverse bool // return results newest-first
+	Limit     int  // max results (0 = unlimited)
 
 	// Context windows (for SearchWithContext)
 	ContextBefore int // number of records to include before each match
@@ -63,6 +69,10 @@ type Query struct {
 
 // Reverse returns true if this query should return results in reverse (newest-first) order.
 func (q Query) Reverse() bool {
+	if q.IsReverse {
+		return true
+	}
+	// Legacy convention: End < Start means reverse.
 	return !q.Start.IsZero() && !q.End.IsZero() && q.End.Before(q.Start)
 }
 
@@ -118,9 +128,13 @@ func (q Query) Normalize() Query {
 }
 
 // TimeBounds returns the effective lower and upper time bounds, accounting for reverse order.
-// For forward: lower=Start, upper=End
-// For reverse: lower=End, upper=Start
+// Always returns lower <= upper regardless of query direction.
 func (q Query) TimeBounds() (lower, upper time.Time) {
+	if q.IsReverse {
+		// New-style: Start/End are always lower/upper.
+		return q.Start, q.End
+	}
+	// Legacy convention: End < Start means reverse, swap them.
 	if q.Reverse() {
 		return q.End, q.Start
 	}

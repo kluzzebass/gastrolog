@@ -3,6 +3,9 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
@@ -13,6 +16,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
+	"gastrolog/internal/querylang"
 )
 
 // QueryServer implements the QueryService.
@@ -36,7 +40,10 @@ func (s *QueryServer) Search(
 ) error {
 	eng := s.orch.MultiStoreQueryEngine()
 
-	q := protoToQuery(req.Msg.Query)
+	q, err := protoToQuery(req.Msg.Query)
+	if err != nil {
+		return connect.NewError(connect.CodeInvalidArgument, err)
+	}
 
 	// Parse resume token from request
 	var resume *query.ResumeToken
@@ -81,11 +88,12 @@ func (s *QueryServer) Search(
 		tokenBytes = resumeTokenToProto(token)
 	}
 
-	// Send remaining records with HasMore=false
+	// Send remaining records. HasMore=true when a resume token exists
+	// (limit was reached and more records are available).
 	if err := stream.Send(&apiv1.SearchResponse{
 		Records:     batch,
 		ResumeToken: tokenBytes,
-		HasMore:     false,
+		HasMore:     len(tokenBytes) > 0,
 	}); err != nil {
 		return err
 	}
@@ -102,7 +110,10 @@ func (s *QueryServer) Follow(
 ) error {
 	eng := s.orch.MultiStoreQueryEngine()
 
-	q := protoToQuery(req.Msg.Query)
+	q, err := protoToQuery(req.Msg.Query)
+	if err != nil {
+		return connect.NewError(connect.CodeInvalidArgument, err)
+	}
 
 	// Use Follow which continuously polls for new records.
 	iter := eng.Follow(ctx, q)
@@ -132,7 +143,10 @@ func (s *QueryServer) Explain(
 ) (*connect.Response[apiv1.ExplainResponse], error) {
 	eng := s.orch.MultiStoreQueryEngine()
 
-	q := protoToQuery(req.Msg.Query)
+	q, err := protoToQuery(req.Msg.Query)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
 
 	plan, err := eng.Explain(ctx, q)
 	if err != nil {
@@ -172,12 +186,239 @@ func (s *QueryServer) Explain(
 	return connect.NewResponse(resp), nil
 }
 
-// protoToQuery converts a proto Query to the internal query.Query type.
-func protoToQuery(pq *apiv1.Query) query.Query {
-	if pq == nil {
-		return query.Query{}
+// Histogram returns record counts bucketed by time.
+//
+// Two modes:
+//   - Unfiltered (no tokens, kv, severity): uses FindStartPosition binary search
+//     on idx.log for O(buckets * log(n)) per chunk. Very fast.
+//   - Filtered: runs the full query engine search (unlimited) and buckets each
+//     matching record. Capped at 1M records to prevent runaway scans.
+func (s *QueryServer) Histogram(
+	ctx context.Context,
+	req *connect.Request[apiv1.HistogramRequest],
+) (*connect.Response[apiv1.HistogramResponse], error) {
+	numBuckets := int(req.Msg.Buckets)
+	if numBuckets <= 0 {
+		numBuckets = 50
+	}
+	if numBuckets > 500 {
+		numBuckets = 500
 	}
 
+	// Parse expression to extract time bounds, store filter, and query filters.
+	var q query.Query
+	if req.Msg.Expression != "" {
+		var err error
+		q, err = parseExpression(req.Msg.Expression)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+	}
+
+	if req.Msg.Start != nil {
+		q.Start = req.Msg.Start.AsTime()
+	}
+	if req.Msg.End != nil {
+		q.End = req.Msg.End.AsTime()
+	}
+
+	// Determine which stores to query.
+	allStores := s.orch.ListStores()
+	selectedStores := allStores
+	if q.BoolExpr != nil {
+		stores, _ := query.ExtractStoreFilter(q.BoolExpr, allStores)
+		if stores != nil {
+			selectedStores = stores
+		}
+	}
+
+	// If no time range, derive from chunk metadata.
+	if q.Start.IsZero() || q.End.IsZero() {
+		for _, storeID := range selectedStores {
+			cm := s.orch.ChunkManager(storeID)
+			if cm == nil {
+				continue
+			}
+			metas, err := cm.List()
+			if err != nil {
+				continue
+			}
+			for _, meta := range metas {
+				if meta.RecordCount == 0 {
+					continue
+				}
+				if q.Start.IsZero() || meta.StartTS.Before(q.Start) {
+					q.Start = meta.StartTS
+				}
+				if q.End.IsZero() || meta.EndTS.After(q.End) {
+					q.End = meta.EndTS
+				}
+			}
+		}
+	}
+
+	// Normalize: histogram always needs lower < upper regardless of query direction.
+	start, end := q.Start, q.End
+	if !start.IsZero() && !end.IsZero() && end.Before(start) {
+		start, end = end, start
+	}
+	if start.IsZero() || end.IsZero() || !start.Before(end) {
+		return connect.NewResponse(&apiv1.HistogramResponse{}), nil
+	}
+
+	bucketWidth := end.Sub(start) / time.Duration(numBuckets)
+	if bucketWidth <= 0 {
+		bucketWidth = time.Second
+	}
+
+	counts := make([]int64, numBuckets)
+	hasFilter := q.BoolExpr != nil
+
+	if hasFilter {
+		// Filtered path: scan matching records and bucket them.
+		q.Limit = 0
+		eng := s.orch.MultiStoreQueryEngine()
+		iter, _ := eng.Search(ctx, q, nil)
+		const maxScan = 1_000_000
+		scanned := 0
+		for rec, err := range iter {
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					break
+				}
+				return nil, connect.NewError(connect.CodeInternal, err)
+			}
+			ts := rec.WriteTS
+			if ts.Before(start) || !ts.Before(end) {
+				continue
+			}
+			idx := int(ts.Sub(start) / bucketWidth)
+			if idx >= numBuckets {
+				idx = numBuckets - 1
+			}
+			counts[idx]++
+			scanned++
+			if scanned >= maxScan {
+				break
+			}
+		}
+	} else {
+		// Unfiltered path: use FindStartPosition for O(buckets * log(n)).
+		for _, storeID := range selectedStores {
+			cm := s.orch.ChunkManager(storeID)
+			if cm == nil {
+				continue
+			}
+			metas, err := cm.List()
+			if err != nil {
+				continue
+			}
+			for _, meta := range metas {
+				if meta.RecordCount == 0 {
+					continue
+				}
+				if meta.EndTS.Before(start) || !meta.StartTS.Before(end) {
+					continue
+				}
+				s.histogramChunkFast(cm, meta, start, bucketWidth, numBuckets, counts)
+			}
+		}
+	}
+
+	resp := &apiv1.HistogramResponse{
+		Start:   timestamppb.New(start),
+		End:     timestamppb.New(end),
+		Buckets: make([]*apiv1.HistogramBucket, numBuckets),
+	}
+	for i := 0; i < numBuckets; i++ {
+		resp.Buckets[i] = &apiv1.HistogramBucket{
+			Ts:    timestamppb.New(start.Add(bucketWidth * time.Duration(i))),
+			Count: counts[i],
+		}
+	}
+
+	return connect.NewResponse(resp), nil
+}
+
+// histogramChunkFast counts records per bucket using binary search on idx.log.
+// O(buckets * log(n)) per chunk, no record scanning.
+func (s *QueryServer) histogramChunkFast(
+	cm chunk.ChunkManager,
+	meta chunk.ChunkMeta,
+	start time.Time,
+	bucketWidth time.Duration,
+	numBuckets int,
+	counts []int64,
+) {
+	end := start.Add(bucketWidth * time.Duration(numBuckets))
+
+	firstBucket := 0
+	if meta.StartTS.After(start) {
+		firstBucket = int(meta.StartTS.Sub(start) / bucketWidth)
+		if firstBucket >= numBuckets {
+			return
+		}
+	}
+	lastBucket := numBuckets - 1
+	if meta.EndTS.Before(end) {
+		lastBucket = int(meta.EndTS.Sub(start) / bucketWidth)
+		if lastBucket >= numBuckets {
+			lastBucket = numBuckets - 1
+		}
+	}
+
+	for b := firstBucket; b <= lastBucket; b++ {
+		bStart := start.Add(bucketWidth * time.Duration(b))
+		bEnd := start.Add(bucketWidth * time.Duration(b+1))
+
+		var startPos uint64
+		if pos, found, err := cm.FindStartPosition(meta.ID, bStart); err == nil && found {
+			startPos = pos
+		}
+
+		var endPos uint64
+		if !bEnd.Before(meta.EndTS) {
+			endPos = uint64(meta.RecordCount)
+		} else if pos, found, err := cm.FindStartPosition(meta.ID, bEnd); err == nil && found {
+			endPos = pos + 1
+		}
+
+		if endPos > startPos {
+			counts[b] += int64(endPos - startPos)
+		}
+	}
+}
+
+// protoToQuery converts a proto Query to the internal query.Query type.
+// If the Expression field is set, it is parsed server-side and takes
+// precedence over the legacy Tokens/KvPredicates fields.
+func protoToQuery(pq *apiv1.Query) (query.Query, error) {
+	if pq == nil {
+		return query.Query{}, nil
+	}
+
+	// If Expression is set, parse it server-side (same logic as repl/parse.go).
+	// Proto-level fields (Limit, Start, End) override expression-level values
+	// when set, so the frontend can control page size without injecting limit=
+	// into the expression string.
+	if pq.Expression != "" {
+		q, err := parseExpression(pq.Expression)
+		if err != nil {
+			return q, err
+		}
+		if pq.Limit > 0 && q.Limit == 0 {
+			q.Limit = int(pq.Limit)
+		}
+		if pq.Start != nil && q.Start.IsZero() {
+			q.Start = pq.Start.AsTime()
+		}
+		if pq.End != nil && q.End.IsZero() {
+			q.End = pq.End.AsTime()
+		}
+		return q, nil
+	}
+
+	// Legacy path: use structured Tokens/KvPredicates fields.
 	q := query.Query{
 		Tokens:        pq.Tokens,
 		Limit:         int(pq.Limit),
@@ -192,9 +433,116 @@ func protoToQuery(pq *apiv1.Query) query.Query {
 		q.End = pq.End.AsTime()
 	}
 
-	// TODO: handle KV predicates
+	if len(pq.KvPredicates) > 0 {
+		q.KV = make([]query.KeyValueFilter, len(pq.KvPredicates))
+		for i, kv := range pq.KvPredicates {
+			q.KV[i] = query.KeyValueFilter{Key: kv.Key, Value: kv.Value}
+		}
+	}
 
-	return q
+	return q, nil
+}
+
+// parseExpression parses a raw query expression string into a Query.
+// Control arguments (start=, end=, limit=) are extracted; the remainder
+// is parsed through the querylang parser into BoolExpr.
+func parseExpression(expr string) (query.Query, error) {
+	parts := strings.Fields(expr)
+	if len(parts) == 0 {
+		return query.Query{}, nil
+	}
+
+	var q query.Query
+	var filterParts []string
+
+	for _, part := range parts {
+		// Handle bare keyword flags (no "=").
+		if part == "reverse" {
+			q.IsReverse = true
+			continue
+		}
+
+		k, v, ok := strings.Cut(part, "=")
+		if ok {
+			switch k {
+			case "start":
+				t, err := parseTime(v)
+				if err != nil {
+					return q, fmt.Errorf("invalid start time: %w", err)
+				}
+				q.Start = t
+				continue
+			case "end":
+				t, err := parseTime(v)
+				if err != nil {
+					return q, fmt.Errorf("invalid end time: %w", err)
+				}
+				q.End = t
+				continue
+			case "source_start":
+				t, err := parseTime(v)
+				if err != nil {
+					return q, fmt.Errorf("invalid source_start time: %w", err)
+				}
+				q.SourceStart = t
+				continue
+			case "source_end":
+				t, err := parseTime(v)
+				if err != nil {
+					return q, fmt.Errorf("invalid source_end time: %w", err)
+				}
+				q.SourceEnd = t
+				continue
+			case "ingest_start":
+				t, err := parseTime(v)
+				if err != nil {
+					return q, fmt.Errorf("invalid ingest_start time: %w", err)
+				}
+				q.IngestStart = t
+				continue
+			case "ingest_end":
+				t, err := parseTime(v)
+				if err != nil {
+					return q, fmt.Errorf("invalid ingest_end time: %w", err)
+				}
+				q.IngestEnd = t
+				continue
+			case "limit":
+				var n int
+				if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
+					return q, fmt.Errorf("invalid limit: %w", err)
+				}
+				q.Limit = n
+				continue
+			}
+		}
+		filterParts = append(filterParts, part)
+	}
+
+	if len(filterParts) > 0 {
+		parsed, err := querylang.Parse(strings.Join(filterParts, " "))
+		if err != nil {
+			return q, fmt.Errorf("parse error: %w", err)
+		}
+		q.BoolExpr = parsed
+	}
+
+	return q, nil
+}
+
+// parseTime parses a time string in RFC3339 format or as a Unix timestamp.
+func parseTime(s string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, nil
+	}
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t, nil
+	}
+	var unix int64
+	if n, err := fmt.Sscanf(s, "%d", &unix); err == nil && n == 1 && fmt.Sprintf("%d", unix) == s {
+		return time.Unix(unix, 0), nil
+	}
+	return time.Time{}, fmt.Errorf("invalid time format: %s (use RFC3339 or Unix timestamp)", s)
 }
 
 // recordToProto converts an internal Record to the proto type.

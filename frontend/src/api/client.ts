@@ -5,11 +5,10 @@ import { StoreService } from "./gen/gastrolog/v1/store_connect";
 import { LifecycleService } from "./gen/gastrolog/v1/lifecycle_connect";
 import { ConfigService } from "./gen/gastrolog/v1/config_connect";
 
-// API base URL: In dev mode, Vite proxy forwards /gastrolog.v1.* to the backend.
-// In production, assume the backend serves the frontend (same origin).
+// Same origin in both dev and prod. In dev, vite-plugin-http2-proxy
+// forwards RPC calls to the backend over HTTP/2 (required for streaming).
 const API_BASE_URL = window.location.origin;
 
-// Create transport using Connect protocol (works over HTTP/1.1 and HTTP/2)
 const transport = createConnectTransport({
   baseUrl: API_BASE_URL,
 });

@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef } from "react";
-import { queryClient, Query, Record, KVPredicate } from "../client";
-import { Timestamp } from "@bufbuild/protobuf";
+import { queryClient, Query, Record } from "../client";
 
 export interface SearchState {
   records: Record[];
@@ -10,79 +9,31 @@ export interface SearchState {
   resumeToken: Uint8Array | null;
 }
 
-export interface ParsedQuery {
-  tokens: string[];
-  kvPredicates: { key: string; value: string }[];
-  start?: Date;
-  end?: Date;
-  limit?: number;
-}
-
 /**
- * Parse a query string into structured query parts.
- * Syntax:
- *   - Bare words are tokens: "error timeout"
- *   - key=value are KV predicates: "level=ERROR service=payment"
- *   - start=ISO8601 sets start time
- *   - end=ISO8601 sets end time
- *   - limit=N sets max results
+ * Extract bare-word tokens from a query string for UI highlighting.
+ * This is a lightweight client-side extraction only — the server owns
+ * all real query parsing via the `expression` field.
  */
-export function parseQuery(queryStr: string): ParsedQuery {
+export function extractTokens(queryStr: string): string[] {
   const parts = queryStr.trim().split(/\s+/).filter(Boolean);
   const tokens: string[] = [];
-  const kvPredicates: { key: string; value: string }[] = [];
-  let start: Date | undefined;
-  let end: Date | undefined;
-  let limit: number | undefined;
 
   for (const part of parts) {
-    if (part.includes("=")) {
-      const eqIdx = part.indexOf("=");
-      const key = part.slice(0, eqIdx).toLowerCase();
-      const value = part.slice(eqIdx + 1);
-
-      if (key === "start") {
-        const ts = Date.parse(value);
-        if (!isNaN(ts)) start = new Date(ts);
-      } else if (key === "end") {
-        const ts = Date.parse(value);
-        if (!isNaN(ts)) end = new Date(ts);
-      } else if (key === "limit") {
-        const n = parseInt(value, 10);
-        if (!isNaN(n) && n > 0) limit = n;
-      } else {
-        kvPredicates.push({ key, value });
-      }
-    } else {
-      tokens.push(part.toLowerCase());
+    // Skip key=value pairs, operators, and parens
+    if (
+      part.includes("=") ||
+      part === "AND" ||
+      part === "OR" ||
+      part === "NOT" ||
+      part.startsWith("(") ||
+      part.endsWith(")")
+    ) {
+      continue;
     }
+    tokens.push(part.toLowerCase());
   }
 
-  return { tokens, kvPredicates, start, end, limit };
-}
-
-/**
- * Build a Query protobuf message from parsed query parts.
- */
-export function buildQuery(parsed: ParsedQuery): Query {
-  const query = new Query();
-  query.tokens = parsed.tokens;
-  query.kvPredicates = parsed.kvPredicates.map((kv) => {
-    const pred = new KVPredicate();
-    pred.key = kv.key;
-    pred.value = kv.value;
-    return pred;
-  });
-  if (parsed.start) {
-    query.start = Timestamp.fromDate(parsed.start);
-  }
-  if (parsed.end) {
-    query.end = Timestamp.fromDate(parsed.end);
-  }
-  if (parsed.limit) {
-    query.limit = BigInt(parsed.limit);
-  }
-  return query;
+  return tokens;
 }
 
 export function useSearch() {
@@ -98,14 +49,24 @@ export function useSearch() {
 
   const search = useCallback(
     async (queryStr: string, append = false) => {
-      // Cancel any in-flight request
+      // Cancel any in-flight request on new searches (not appends).
       if (abortRef.current) {
-        abortRef.current.abort();
+        if (!append) {
+          abortRef.current.abort();
+        } else {
+          // Don't start an append while a request is still in flight.
+          return;
+        }
       }
       abortRef.current = new AbortController();
 
-      const parsed = parseQuery(queryStr);
-      const query = buildQuery(parsed);
+      // Send the raw query string — the server parses it.
+      // limit is set on the proto field (not in expression) to control
+      // streaming page size. The server returns a resume token after
+      // this many records, enabling infinite scroll.
+      const query = new Query();
+      query.expression = queryStr;
+      query.limit = BigInt(100);
 
       setState((prev) => ({
         ...prev,
@@ -144,6 +105,7 @@ export function useSearch() {
           }));
         }
 
+        abortRef.current = null;
         setState((prev) => ({
           ...prev,
           isSearching: false,
@@ -151,10 +113,14 @@ export function useSearch() {
           resumeToken: lastResumeToken,
         }));
       } catch (err) {
-        if (err instanceof Error && err.name === "AbortError") {
+        if (
+          (err instanceof Error && err.name === "AbortError") ||
+          (err instanceof Error && err.message.includes("aborted"))
+        ) {
           // Search was cancelled, ignore
           return;
         }
+        abortRef.current = null;
         setState((prev) => ({
           ...prev,
           isSearching: false,

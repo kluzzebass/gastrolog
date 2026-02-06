@@ -289,6 +289,18 @@ export class Query extends Message<Query> {
    */
   contextAfter = 0;
 
+  /**
+   * Raw query expression string, parsed server-side via querylang.
+   * When set, tokens and kv_predicates are ignored.
+   * Supports the full query language: bare words (tokens), key=value,
+   * AND/OR/NOT, parentheses, start=/end=/limit= control args.
+   * Examples: "error timeout", "(error OR warn) AND NOT debug",
+   *           "start=2024-01-01T00:00:00Z level=error store=prod"
+   *
+   * @generated from field: string expression = 8;
+   */
+  expression = "";
+
   constructor(data?: PartialMessage<Query>) {
     super();
     proto3.util.initPartial(data, this);
@@ -304,6 +316,7 @@ export class Query extends Message<Query> {
     { no: 5, name: "limit", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 6, name: "context_before", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
     { no: 7, name: "context_after", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 8, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): Query {
@@ -726,6 +739,165 @@ export class PipelineStep extends Message<PipelineStep> {
 
   static equals(a: PipelineStep | PlainMessage<PipelineStep> | undefined, b: PipelineStep | PlainMessage<PipelineStep> | undefined): boolean {
     return proto3.util.equals(PipelineStep, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.HistogramRequest
+ */
+export class HistogramRequest extends Message<HistogramRequest> {
+  /**
+   * @generated from field: google.protobuf.Timestamp start = 1;
+   */
+  start?: Timestamp;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp end = 2;
+   */
+  end?: Timestamp;
+
+  /**
+   * Number of time buckets (default 50 if 0)
+   *
+   * @generated from field: int32 buckets = 3;
+   */
+  buckets = 0;
+
+  /**
+   * Optional: only used to extract store= filter
+   *
+   * @generated from field: string expression = 4;
+   */
+  expression = "";
+
+  constructor(data?: PartialMessage<HistogramRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.HistogramRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "start", kind: "message", T: Timestamp },
+    { no: 2, name: "end", kind: "message", T: Timestamp },
+    { no: 3, name: "buckets", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 4, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): HistogramRequest {
+    return new HistogramRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): HistogramRequest {
+    return new HistogramRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): HistogramRequest {
+    return new HistogramRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: HistogramRequest | PlainMessage<HistogramRequest> | undefined, b: HistogramRequest | PlainMessage<HistogramRequest> | undefined): boolean {
+    return proto3.util.equals(HistogramRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.HistogramResponse
+ */
+export class HistogramResponse extends Message<HistogramResponse> {
+  /**
+   * @generated from field: repeated gastrolog.v1.HistogramBucket buckets = 1;
+   */
+  buckets: HistogramBucket[] = [];
+
+  /**
+   * Actual start of histogram range
+   *
+   * @generated from field: google.protobuf.Timestamp start = 2;
+   */
+  start?: Timestamp;
+
+  /**
+   * Actual end of histogram range
+   *
+   * @generated from field: google.protobuf.Timestamp end = 3;
+   */
+  end?: Timestamp;
+
+  constructor(data?: PartialMessage<HistogramResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.HistogramResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "buckets", kind: "message", T: HistogramBucket, repeated: true },
+    { no: 2, name: "start", kind: "message", T: Timestamp },
+    { no: 3, name: "end", kind: "message", T: Timestamp },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): HistogramResponse {
+    return new HistogramResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): HistogramResponse {
+    return new HistogramResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): HistogramResponse {
+    return new HistogramResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: HistogramResponse | PlainMessage<HistogramResponse> | undefined, b: HistogramResponse | PlainMessage<HistogramResponse> | undefined): boolean {
+    return proto3.util.equals(HistogramResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.HistogramBucket
+ */
+export class HistogramBucket extends Message<HistogramBucket> {
+  /**
+   * Bucket start time
+   *
+   * @generated from field: google.protobuf.Timestamp ts = 1;
+   */
+  ts?: Timestamp;
+
+  /**
+   * Record count in this bucket
+   *
+   * @generated from field: int64 count = 2;
+   */
+  count = protoInt64.zero;
+
+  constructor(data?: PartialMessage<HistogramBucket>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.HistogramBucket";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "ts", kind: "message", T: Timestamp },
+    { no: 2, name: "count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): HistogramBucket {
+    return new HistogramBucket().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): HistogramBucket {
+    return new HistogramBucket().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): HistogramBucket {
+    return new HistogramBucket().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: HistogramBucket | PlainMessage<HistogramBucket> | undefined, b: HistogramBucket | PlainMessage<HistogramBucket> | undefined): boolean {
+    return proto3.util.equals(HistogramBucket, a, b);
   }
 }
 

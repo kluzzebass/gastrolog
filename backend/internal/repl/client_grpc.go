@@ -310,6 +310,13 @@ func (a *grpcAnalyzer) AnalyzeAll() (*analyzer.AggregateAnalysis, error) {
 // Conversion helpers: internal -> proto
 
 func queryToProto(q query.Query) *apiv1.Query {
+	// Prefer sending the raw expression string (parsed server-side).
+	// This preserves full boolean query semantics across the gRPC boundary.
+	if q.RawExpression != "" {
+		return &apiv1.Query{Expression: q.RawExpression}
+	}
+
+	// Legacy path: send structured fields.
 	pq := &apiv1.Query{
 		Tokens:        q.Tokens,
 		Limit:         int64(q.Limit),

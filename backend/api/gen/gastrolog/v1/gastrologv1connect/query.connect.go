@@ -39,6 +39,8 @@ const (
 	QueryServiceFollowProcedure = "/gastrolog.v1.QueryService/Follow"
 	// QueryServiceExplainProcedure is the fully-qualified name of the QueryService's Explain RPC.
 	QueryServiceExplainProcedure = "/gastrolog.v1.QueryService/Explain"
+	// QueryServiceHistogramProcedure is the fully-qualified name of the QueryService's Histogram RPC.
+	QueryServiceHistogramProcedure = "/gastrolog.v1.QueryService/Histogram"
 )
 
 // QueryServiceClient is a client for the gastrolog.v1.QueryService service.
@@ -50,6 +52,9 @@ type QueryServiceClient interface {
 	Follow(context.Context, *connect.Request[v1.FollowRequest]) (*connect.ServerStreamForClient[v1.FollowResponse], error)
 	// Explain returns the query execution plan without executing.
 	Explain(context.Context, *connect.Request[v1.ExplainRequest]) (*connect.Response[v1.ExplainResponse], error)
+	// Histogram returns record counts bucketed by time for the given query.
+	// Uses binary search on chunk indexes for O(buckets * log(n)) performance.
+	Histogram(context.Context, *connect.Request[v1.HistogramRequest]) (*connect.Response[v1.HistogramResponse], error)
 }
 
 // NewQueryServiceClient constructs a client for the gastrolog.v1.QueryService service. By default,
@@ -81,14 +86,21 @@ func NewQueryServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(queryServiceMethods.ByName("Explain")),
 			connect.WithClientOptions(opts...),
 		),
+		histogram: connect.NewClient[v1.HistogramRequest, v1.HistogramResponse](
+			httpClient,
+			baseURL+QueryServiceHistogramProcedure,
+			connect.WithSchema(queryServiceMethods.ByName("Histogram")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // queryServiceClient implements QueryServiceClient.
 type queryServiceClient struct {
-	search  *connect.Client[v1.SearchRequest, v1.SearchResponse]
-	follow  *connect.Client[v1.FollowRequest, v1.FollowResponse]
-	explain *connect.Client[v1.ExplainRequest, v1.ExplainResponse]
+	search    *connect.Client[v1.SearchRequest, v1.SearchResponse]
+	follow    *connect.Client[v1.FollowRequest, v1.FollowResponse]
+	explain   *connect.Client[v1.ExplainRequest, v1.ExplainResponse]
+	histogram *connect.Client[v1.HistogramRequest, v1.HistogramResponse]
 }
 
 // Search calls gastrolog.v1.QueryService.Search.
@@ -106,6 +118,11 @@ func (c *queryServiceClient) Explain(ctx context.Context, req *connect.Request[v
 	return c.explain.CallUnary(ctx, req)
 }
 
+// Histogram calls gastrolog.v1.QueryService.Histogram.
+func (c *queryServiceClient) Histogram(ctx context.Context, req *connect.Request[v1.HistogramRequest]) (*connect.Response[v1.HistogramResponse], error) {
+	return c.histogram.CallUnary(ctx, req)
+}
+
 // QueryServiceHandler is an implementation of the gastrolog.v1.QueryService service.
 type QueryServiceHandler interface {
 	// Search executes a query and streams matching records.
@@ -115,6 +132,9 @@ type QueryServiceHandler interface {
 	Follow(context.Context, *connect.Request[v1.FollowRequest], *connect.ServerStream[v1.FollowResponse]) error
 	// Explain returns the query execution plan without executing.
 	Explain(context.Context, *connect.Request[v1.ExplainRequest]) (*connect.Response[v1.ExplainResponse], error)
+	// Histogram returns record counts bucketed by time for the given query.
+	// Uses binary search on chunk indexes for O(buckets * log(n)) performance.
+	Histogram(context.Context, *connect.Request[v1.HistogramRequest]) (*connect.Response[v1.HistogramResponse], error)
 }
 
 // NewQueryServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -142,6 +162,12 @@ func NewQueryServiceHandler(svc QueryServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(queryServiceMethods.ByName("Explain")),
 		connect.WithHandlerOptions(opts...),
 	)
+	queryServiceHistogramHandler := connect.NewUnaryHandler(
+		QueryServiceHistogramProcedure,
+		svc.Histogram,
+		connect.WithSchema(queryServiceMethods.ByName("Histogram")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.QueryService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case QueryServiceSearchProcedure:
@@ -150,6 +176,8 @@ func NewQueryServiceHandler(svc QueryServiceHandler, opts ...connect.HandlerOpti
 			queryServiceFollowHandler.ServeHTTP(w, r)
 		case QueryServiceExplainProcedure:
 			queryServiceExplainHandler.ServeHTTP(w, r)
+		case QueryServiceHistogramProcedure:
+			queryServiceHistogramHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -169,4 +197,8 @@ func (UnimplementedQueryServiceHandler) Follow(context.Context, *connect.Request
 
 func (UnimplementedQueryServiceHandler) Explain(context.Context, *connect.Request[v1.ExplainRequest]) (*connect.Response[v1.ExplainResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.QueryService.Explain is not implemented"))
+}
+
+func (UnimplementedQueryServiceHandler) Histogram(context.Context, *connect.Request[v1.HistogramRequest]) (*connect.Response[v1.HistogramResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.QueryService.Histogram is not implemented"))
 }

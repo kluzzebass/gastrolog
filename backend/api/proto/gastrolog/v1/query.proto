@@ -17,6 +17,10 @@ service QueryService {
 
   // Explain returns the query execution plan without executing.
   rpc Explain(ExplainRequest) returns (ExplainResponse);
+
+  // Histogram returns record counts bucketed by time for the given query.
+  // Uses binary search on chunk indexes for O(buckets * log(n)) performance.
+  rpc Histogram(HistogramRequest) returns (HistogramResponse);
 }
 
 message SearchRequest {
@@ -63,6 +67,14 @@ message Query {
   int64 limit = 5;
   int32 context_before = 6;
   int32 context_after = 7;
+
+  // Raw query expression string, parsed server-side via querylang.
+  // When set, tokens and kv_predicates are ignored.
+  // Supports the full query language: bare words (tokens), key=value,
+  // AND/OR/NOT, parentheses, start=/end=/limit= control args.
+  // Examples: "error timeout", "(error OR warn) AND NOT debug",
+  //           "start=2024-01-01T00:00:00Z level=error store=prod"
+  string expression = 8;
 }
 
 message KVPredicate {
@@ -114,4 +126,22 @@ message PipelineStep {
   string action = 4; // "seek", "indexed", "filter"
   string reason = 5;
   string detail = 6;
+}
+
+message HistogramRequest {
+  google.protobuf.Timestamp start = 1;
+  google.protobuf.Timestamp end = 2;
+  int32 buckets = 3; // Number of time buckets (default 50 if 0)
+  string expression = 4; // Optional: only used to extract store= filter
+}
+
+message HistogramResponse {
+  repeated HistogramBucket buckets = 1;
+  google.protobuf.Timestamp start = 2; // Actual start of histogram range
+  google.protobuf.Timestamp end = 3;   // Actual end of histogram range
+}
+
+message HistogramBucket {
+  google.protobuf.Timestamp ts = 1; // Bucket start time
+  int64 count = 2;                  // Record count in this bucket
 }

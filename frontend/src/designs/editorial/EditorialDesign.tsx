@@ -1,9 +1,23 @@
-import { useState, useRef, useEffect } from "react";
-import { useSearch, useExplain, parseQuery } from "../../api/hooks";
+import { useState, useRef, useEffect, useCallback } from "react";
+import {
+  useSearch,
+  useExplain,
+  useHistogram,
+  extractTokens,
+} from "../../api/hooks";
 import { useStores, useStats } from "../../api/hooks";
 import { Record as ProtoRecord, ChunkPlan } from "../../api/client";
+import type { HistogramData } from "../../api/hooks/useHistogram";
 
 type Theme = "dark" | "light";
+
+const timeRangeMs: Record<string, number> = {
+  "15m": 15 * 60 * 1000,
+  "1h": 60 * 60 * 1000,
+  "6h": 6 * 60 * 60 * 1000,
+  "24h": 24 * 60 * 60 * 1000,
+  "7d": 7 * 24 * 60 * 60 * 1000,
+};
 
 export function EditorialDesign() {
   const [query, setQuery] = useState("");
@@ -15,6 +29,8 @@ export function EditorialDesign() {
   );
   const [theme, setTheme] = useState<Theme>("dark");
   const queryInputRef = useRef<HTMLTextAreaElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const expressionRef = useRef("");
 
   const {
     records,
@@ -29,54 +45,135 @@ export function EditorialDesign() {
     isLoading: isExplaining,
     explain,
   } = useExplain();
+  const {
+    data: histogramData,
+    isLoading: isHistogramLoading,
+    fetchHistogram,
+  } = useHistogram();
   const { data: stores, isLoading: storesLoading } = useStores();
   const { data: stats, isLoading: statsLoading } = useStats();
 
   const dark = theme === "dark";
 
-  // Focus query input on mount
+  // Build the full expression sent to the server.
+  // The query text box only contains user filters (tokens, kv, severity).
+  // Time range and store are sidebar state, injected here at call time.
+  const buildExpression = (
+    q: string,
+    range?: string,
+    store?: string,
+  ): string => {
+    const r = range ?? timeRange;
+    const s = store ?? selectedStore;
+    const parts: string[] = [];
+
+    if (r !== "All") {
+      const ms = timeRangeMs[r];
+      if (ms) {
+        const now = Date.now();
+        parts.push(`start=${new Date(now - ms).toISOString()}`);
+        parts.push(`end=${new Date(now).toISOString()}`);
+        parts.push("reverse");
+      }
+    } else {
+      parts.push("reverse");
+    }
+    if (s !== "all") {
+      parts.push(`store=${s}`);
+    }
+    if (q.trim()) {
+      parts.push(q.trim());
+    }
+    return parts.join(" ");
+  };
+
+  // Fire search + histogram + explain. Tracks expression for infinite scroll.
+  const fireSearch = (q?: string, range?: string, store?: string) => {
+    const expr = buildExpression(q ?? query, range, store);
+    expressionRef.current = expr;
+    search(expr);
+    fetchHistogram(expr);
+    if (showPlan) explain(expr);
+  };
+
+  // On mount: focus input and load initial results for the default time range.
   useEffect(() => {
     queryInputRef.current?.focus();
-  }, []);
+    fireSearch();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Infinite scroll: observe a sentinel div at the bottom of the results.
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !isSearching) {
+          loadMore(expressionRef.current);
+        }
+      },
+      { threshold: 0 },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, isSearching, loadMore]);
 
   const executeQuery = () => {
-    let fullQuery = query;
-    if (!query.includes("start=") && timeRange !== "Custom") {
-      const now = new Date();
-      const ranges: Record<string, number> = {
-        "15m": 15 * 60 * 1000,
-        "1h": 60 * 60 * 1000,
-        "6h": 6 * 60 * 60 * 1000,
-        "24h": 24 * 60 * 60 * 1000,
-        "7d": 7 * 24 * 60 * 60 * 1000,
-      };
-      const start = new Date(
-        now.getTime() - (ranges[timeRange] ?? ranges["1h"]!),
-      );
-      fullQuery = `start=${start.toISOString()} ${query}`.trim();
-    }
-    if (selectedStore !== "all" && !query.includes("store=")) {
-      fullQuery = `store=${selectedStore} ${fullQuery}`.trim();
-    }
-    search(fullQuery);
-    if (showPlan) explain(fullQuery);
+    fireSearch();
   };
 
   const handleShowPlan = () => {
     const next = !showPlan;
     setShowPlan(next);
-    if (next && query) explain(query);
+    if (next) explain(buildExpression(query));
   };
 
-  const toggleFilter = (filter: string) => {
-    setQuery((q) =>
-      q.includes(filter)
-        ? q.replace(filter, "").trim()
-        : `${q} ${filter}`.trim(),
-    );
+  const allSeverities = ["error", "warn", "info", "debug"];
+
+  // Parse which severities are active from the query string.
+  const activeSeverities = allSeverities.filter((s) =>
+    query.includes(`level=${s}`),
+  );
+
+  // Build the severity portion of the query: single predicate or OR group.
+  const buildSeverityExpr = (severities: string[]): string => {
+    if (severities.length === 0) return "";
+    if (severities.length === 1) return `level=${severities[0]}`;
+    return `(${severities.map((s) => `level=${s}`).join(" OR ")})`;
   };
 
-  const tokens = parseQuery(query).tokens;
+  // Remove any existing severity expression from the query string.
+  const stripSeverity = (q: string): string =>
+    q
+      .replace(/\((?:level=\w+\s+OR\s+)*level=\w+\)/g, "")
+      .replace(/\blevel=(?:error|warn|info|debug)\b/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const toggleSeverity = (level: string) => {
+    const current = allSeverities.filter((s) => query.includes(`level=${s}`));
+    const next = current.includes(level)
+      ? current.filter((s) => s !== level)
+      : [...current, level];
+    const base = stripSeverity(query);
+    const sevExpr = buildSeverityExpr(next);
+    const newQuery = sevExpr ? `${base} ${sevExpr}`.trim() : base;
+    setQuery(newQuery);
+    fireSearch(newQuery);
+  };
+
+  const handleTimeRange = (range: string) => {
+    setTimeRange(range);
+    fireSearch(undefined, range);
+  };
+
+  const handleStoreSelect = (storeId: string) => {
+    setSelectedStore(storeId);
+    fireSearch(undefined, undefined, storeId);
+  };
+
+  const tokens = extractTokens(query);
   const totalRecords = stats?.totalRecords ?? BigInt(0);
   const totalStores = stats?.totalStores ?? BigInt(0);
   const sealedChunks = stats?.sealedChunks ?? BigInt(0);
@@ -87,7 +184,7 @@ export function EditorialDesign() {
 
   return (
     <div
-      className={`grain min-h-screen font-body text-[13px] ${c("bg-ink text-text-normal", "light-theme bg-light-bg text-light-text-normal")}`}
+      className={`grain h-screen overflow-hidden flex flex-col font-body text-[15px] ${c("bg-ink text-text-normal", "light-theme bg-light-bg text-light-text-normal")}`}
     >
       {/* ── Header ── */}
       <header
@@ -95,12 +192,12 @@ export function EditorialDesign() {
       >
         <div className="flex items-baseline gap-3">
           <h1
-            className={`font-display text-[22px] font-semibold tracking-tight leading-none ${c("text-text-bright", "text-light-text-bright")}`}
+            className={`font-display text-[1.6em] font-semibold tracking-tight leading-none ${c("text-text-bright", "text-light-text-bright")}`}
           >
             GastroLog
           </h1>
           <span
-            className={`text-[9px] font-body font-medium uppercase tracking-[0.2em] ${c("text-copper-dim", "text-copper")}`}
+            className={`text-[0.7em] font-body font-medium uppercase tracking-[0.2em] ${c("text-copper-dim", "text-copper")}`}
           >
             Observatory
           </span>
@@ -152,7 +249,7 @@ export function EditorialDesign() {
 
           <button
             onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
-            className={`px-2.5 py-1 text-[11px] font-mono border rounded transition-all duration-200 ${c(
+            className={`px-2.5 py-1 text-[0.85em] font-mono border rounded transition-all duration-200 ${c(
               "border-ink-border text-text-muted hover:border-copper hover:text-copper",
               "border-light-border text-light-text-muted hover:border-copper hover:text-copper",
             )}`}
@@ -163,7 +260,7 @@ export function EditorialDesign() {
       </header>
 
       {/* ── Main Layout ── */}
-      <div className="flex min-h-[calc(100vh-52px)]">
+      <div className="flex flex-1 overflow-hidden">
         {/* ── Sidebar ── */}
         <aside
           className={`w-56 shrink-0 p-4 border-r editorial-scroll overflow-y-auto ${c("border-ink-border-subtle bg-ink", "border-light-border-subtle bg-light-raised")}`}
@@ -171,11 +268,11 @@ export function EditorialDesign() {
           {/* Time Range */}
           <SidebarSection title="Time Range" dark={dark}>
             <div className="flex flex-wrap gap-1">
-              {["15m", "1h", "6h", "24h", "7d", "Custom"].map((range) => (
+              {["15m", "1h", "6h", "24h", "7d", "All"].map((range) => (
                 <button
                   key={range}
-                  onClick={() => setTimeRange(range)}
-                  className={`px-2 py-1 text-[11px] font-mono rounded transition-all duration-150 ${
+                  onClick={() => handleTimeRange(range)}
+                  className={`px-2 py-1 text-[0.85em] font-mono rounded transition-all duration-150 ${
                     timeRange === range
                       ? c("bg-copper text-ink", "bg-copper text-white")
                       : c(
@@ -197,12 +294,12 @@ export function EditorialDesign() {
                 label="All Stores"
                 count={statsLoading ? "..." : totalRecords.toLocaleString()}
                 active={selectedStore === "all"}
-                onClick={() => setSelectedStore("all")}
+                onClick={() => handleStoreSelect("all")}
                 dark={dark}
               />
               {storesLoading ? (
                 <div
-                  className={`px-2.5 py-1.5 text-[11px] ${c("text-text-ghost", "text-light-text-ghost")}`}
+                  className={`px-2.5 py-1.5 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
                 >
                   Loading...
                 </div>
@@ -213,7 +310,7 @@ export function EditorialDesign() {
                     label={store.id}
                     count={store.recordCount.toLocaleString()}
                     active={selectedStore === store.id}
-                    onClick={() => setSelectedStore(store.id)}
+                    onClick={() => handleStoreSelect(store.id)}
                     dark={dark}
                   />
                 ))
@@ -225,25 +322,17 @@ export function EditorialDesign() {
           <SidebarSection title="Severity" dark={dark}>
             <div className="flex flex-wrap gap-1.5">
               {[
-                {
-                  label: "Error",
-                  filter: "level=error",
-                  color: "severity-error",
-                },
-                { label: "Warn", filter: "level=warn", color: "severity-warn" },
-                { label: "Info", filter: "level=info", color: "severity-info" },
-                {
-                  label: "Debug",
-                  filter: "level=debug",
-                  color: "severity-debug",
-                },
-              ].map(({ label, filter, color }) => {
-                const active = query.includes(filter);
+                { label: "Error", level: "error", color: "severity-error" },
+                { label: "Warn", level: "warn", color: "severity-warn" },
+                { label: "Info", level: "info", color: "severity-info" },
+                { label: "Debug", level: "debug", color: "severity-debug" },
+              ].map(({ label, level, color }) => {
+                const active = activeSeverities.includes(level);
                 return (
                   <button
-                    key={filter}
-                    onClick={() => toggleFilter(filter)}
-                    className={`px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider rounded-sm border transition-all duration-150 ${
+                    key={level}
+                    onClick={() => toggleSeverity(level)}
+                    className={`px-2 py-0.5 text-[0.8em] font-medium uppercase tracking-wider rounded-sm border transition-all duration-150 ${
                       active
                         ? `bg-${color} border-${color} text-white`
                         : `border-${color}/40 text-${color} hover:border-${color} hover:bg-${color}/10`
@@ -279,7 +368,7 @@ export function EditorialDesign() {
                   }}
                   placeholder="Search logs... tokens for full-text, key=value for attributes"
                   rows={1}
-                  className={`query-input w-full px-3 py-2 text-[13px] font-mono border rounded resize-none transition-all duration-200 focus:outline-none ${c(
+                  className={`query-input w-full px-3 py-2 text-[1em] font-mono border rounded resize-none transition-all duration-200 focus:outline-none ${c(
                     "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost",
                     "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost",
                   )}`}
@@ -288,13 +377,13 @@ export function EditorialDesign() {
               <button
                 onClick={executeQuery}
                 disabled={isSearching}
-                className="px-5 py-2 text-[12px] font-medium rounded bg-copper text-white hover:bg-copper-glow transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                className="px-5 py-2 text-[0.9em] font-medium rounded bg-copper text-white hover:bg-copper-glow transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
               >
                 {isSearching ? "Searching..." : "Search"}
               </button>
               <button
                 onClick={handleShowPlan}
-                className={`px-3 py-2 text-[11px] font-mono border rounded transition-all duration-200 whitespace-nowrap ${
+                className={`px-3 py-2 text-[0.85em] font-mono border rounded transition-all duration-200 whitespace-nowrap ${
                   showPlan
                     ? c(
                         "border-copper text-copper",
@@ -311,13 +400,13 @@ export function EditorialDesign() {
             </div>
 
             {searchError && (
-              <div className="mt-2.5 px-3 py-2 text-[12px] bg-severity-error/10 border border-severity-error/25 rounded text-severity-error">
+              <div className="mt-2.5 px-3 py-2 text-[0.9em] bg-severity-error/10 border border-severity-error/25 rounded text-severity-error">
                 {searchError.message}
               </div>
             )}
 
             <div
-              className={`flex items-center gap-2 mt-2.5 text-[10px] ${c("text-text-ghost", "text-light-text-ghost")}`}
+              className={`flex items-center gap-2 mt-2.5 text-[0.75em] ${c("text-text-ghost", "text-light-text-ghost")}`}
             >
               <span className="uppercase tracking-wider font-medium">
                 Syntax
@@ -350,19 +439,19 @@ export function EditorialDesign() {
               className={`px-5 py-4 border-b animate-fade-up ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
             >
               <h3
-                className={`font-display text-base font-semibold mb-3 ${c("text-text-bright", "text-light-text-bright")}`}
+                className={`font-display text-[1.15em] font-semibold mb-3 ${c("text-text-bright", "text-light-text-bright")}`}
               >
                 Execution Plan
               </h3>
               {isExplaining ? (
                 <div
-                  className={`text-[12px] ${c("text-text-ghost", "text-light-text-ghost")}`}
+                  className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}
                 >
                   Analyzing query plan...
                 </div>
               ) : explainChunks.length === 0 ? (
                 <div
-                  className={`text-[12px] ${c("text-text-ghost", "text-light-text-ghost")}`}
+                  className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}
                 >
                   Run a query to see the execution plan.
                 </div>
@@ -376,6 +465,15 @@ export function EditorialDesign() {
             </div>
           )}
 
+          {/* Histogram */}
+          {histogramData && histogramData.buckets.length > 0 && (
+            <div
+              className={`px-5 py-3 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
+            >
+              <HistogramChart data={histogramData} dark={dark} />
+            </div>
+          )}
+
           {/* Results */}
           <div className="flex-1 flex flex-col overflow-hidden">
             <div
@@ -383,12 +481,12 @@ export function EditorialDesign() {
             >
               <div className="flex items-center gap-3">
                 <h3
-                  className={`font-display text-[15px] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
+                  className={`font-display text-[1.15em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
                 >
                   Results
                 </h3>
                 <span
-                  className={`font-mono text-[10px] px-2 py-0.5 rounded ${c("bg-ink-surface text-text-muted", "bg-light-hover text-light-text-muted")}`}
+                  className={`font-mono text-[0.8em] px-2 py-0.5 rounded ${c("bg-ink-surface text-text-muted", "bg-light-hover text-light-text-muted")}`}
                 >
                   {records.length}
                   {hasMore ? "+" : ""}
@@ -396,7 +494,7 @@ export function EditorialDesign() {
               </div>
               {records.length > 0 && (
                 <span
-                  className={`font-mono text-[10px] ${c("text-text-ghost", "text-light-text-ghost")}`}
+                  className={`font-mono text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
                 >
                   {new Date().toLocaleTimeString("en-US", { hour12: false })}
                 </span>
@@ -422,17 +520,14 @@ export function EditorialDesign() {
                       dark={dark}
                     />
                   ))}
-                  {hasMore && (
-                    <button
-                      onClick={() => loadMore(query)}
-                      disabled={isSearching}
-                      className={`w-full py-3 text-[11px] font-mono transition-colors ${c(
-                        "text-text-muted hover:text-copper hover:bg-ink-hover",
-                        "text-light-text-muted hover:text-copper hover:bg-light-hover",
-                      )}`}
+                  {/* Infinite scroll sentinel */}
+                  <div ref={sentinelRef} className="h-1" />
+                  {isSearching && records.length > 0 && (
+                    <div
+                      className={`py-3 text-center text-[0.85em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
                     >
-                      {isSearching ? "loading..." : "load more"}
-                    </button>
+                      Loading more...
+                    </div>
                   )}
                 </div>
               )}
@@ -449,7 +544,7 @@ export function EditorialDesign() {
               className={`flex justify-between items-center px-4 py-3 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
             >
               <h3
-                className={`font-display text-[15px] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
+                className={`font-display text-[1.15em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
               >
                 Detail
               </h3>
@@ -486,7 +581,7 @@ export function EditorialDesign() {
 
               <DetailSection label="Message" dark={dark}>
                 <pre
-                  className={`text-[11px] font-mono p-3 rounded whitespace-pre-wrap break-words leading-relaxed ${c("bg-ink text-text-normal", "bg-light-bg text-light-text-normal")}`}
+                  className={`text-[0.85em] font-mono p-3 rounded whitespace-pre-wrap break-words leading-relaxed ${c("bg-ink text-text-normal", "bg-light-bg text-light-text-normal")}`}
                 >
                   {new TextDecoder().decode(selectedRecord.raw)}
                 </pre>
@@ -547,12 +642,12 @@ function StatPill({
   return (
     <div className="flex items-baseline gap-1.5">
       <span
-        className={`font-mono text-[12px] font-medium ${dark ? "text-text-bright" : "text-light-text-bright"}`}
+        className={`font-mono text-[0.9em] font-medium ${dark ? "text-text-bright" : "text-light-text-bright"}`}
       >
         {value}
       </span>
       <span
-        className={`text-[9px] uppercase tracking-wider ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
+        className={`text-[0.7em] uppercase tracking-wider ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
       >
         {label}
       </span>
@@ -572,7 +667,7 @@ function SidebarSection({
   return (
     <section className="mb-5">
       <h3
-        className={`text-[9px] font-medium uppercase tracking-[0.15em] mb-2 ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
+        className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
       >
         {title}
       </h3>
@@ -597,7 +692,7 @@ function StoreButton({
   return (
     <button
       onClick={onClick}
-      className={`flex justify-between items-center px-2.5 py-1.5 text-[12px] rounded text-left transition-all duration-150 ${
+      className={`flex justify-between items-center px-2.5 py-1.5 text-[0.9em] rounded text-left transition-all duration-150 ${
         active
           ? dark
             ? "bg-copper/15 text-copper border border-copper/25"
@@ -609,7 +704,7 @@ function StoreButton({
     >
       <span className="font-medium">{label}</span>
       <span
-        className={`font-mono text-[10px] ${active ? "text-copper-dim" : dark ? "text-text-ghost" : "text-light-text-ghost"}`}
+        className={`font-mono text-[0.8em] ${active ? "text-copper-dim" : dark ? "text-text-ghost" : "text-light-text-ghost"}`}
       >
         {count}
       </span>
@@ -621,17 +716,17 @@ function EmptyState({ dark }: { dark: boolean }) {
   return (
     <div className="flex flex-col items-center justify-center h-full py-20 animate-fade-up">
       <div
-        className={`font-display text-[42px] font-light leading-none mb-3 ${dark ? "text-ink-border" : "text-light-border"}`}
+        className={`font-display text-[3em] font-light leading-none mb-3 ${dark ? "text-ink-border" : "text-light-border"}`}
       >
         &empty;
       </div>
       <p
-        className={`text-[12px] ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
+        className={`text-[0.9em] ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
       >
         Enter a query to search your logs
       </p>
       <p
-        className={`text-[10px] mt-1 font-mono ${dark ? "text-text-ghost/60" : "text-light-text-ghost/60"}`}
+        className={`text-[0.8em] mt-1 font-mono ${dark ? "text-text-ghost/60" : "text-light-text-ghost/60"}`}
       >
         press Enter to execute
       </p>
@@ -652,18 +747,9 @@ function LogEntry({
   onSelect: () => void;
   dark: boolean;
 }) {
-  const level = (record.attrs["level"] ?? "info").toUpperCase();
   const rawText = new TextDecoder().decode(record.raw);
   const parts = highlightMatches(rawText, tokens);
   const ingestTime = record.ingestTs ? record.ingestTs.toDate() : new Date();
-
-  const severityColors: Record<string, { border: string; text: string }> = {
-    ERROR: { border: "border-l-severity-error", text: "text-severity-error" },
-    WARN: { border: "border-l-severity-warn", text: "text-severity-warn" },
-    INFO: { border: "border-l-severity-info", text: "text-severity-info" },
-    DEBUG: { border: "border-l-severity-debug", text: "text-severity-debug" },
-  };
-  const sev = severityColors[level] ?? severityColors["INFO"]!;
 
   const ts = ingestTime.toLocaleTimeString("en-US", {
     hour: "2-digit",
@@ -676,7 +762,7 @@ function LogEntry({
   return (
     <article
       onClick={onSelect}
-      className={`grid grid-cols-[72px_42px_1fr] gap-2.5 px-5 py-[5px] border-b border-l-2 cursor-pointer transition-colors duration-100 ${sev.border} ${
+      className={`grid grid-cols-[13ch_1fr] gap-2.5 px-5 py-[5px] border-b cursor-pointer transition-colors duration-100 ${
         isSelected
           ? dark
             ? "bg-ink-hover"
@@ -687,17 +773,12 @@ function LogEntry({
       }`}
     >
       <span
-        className={`font-mono text-[10px] tabular-nums self-center ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
+        className={`font-mono text-[0.8em] tabular-nums self-center ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
       >
         {ts}
       </span>
-      <span
-        className={`font-mono text-[9px] font-medium uppercase self-center ${sev.text}`}
-      >
-        {level.slice(0, 4)}
-      </span>
       <div
-        className={`font-mono text-[11px] leading-relaxed truncate self-center ${dark ? "text-text-normal" : "text-light-text-normal"}`}
+        className={`font-mono text-[0.85em] leading-relaxed truncate self-center ${dark ? "text-text-normal" : "text-light-text-normal"}`}
       >
         {parts.map((part, i) => (
           <span
@@ -723,12 +804,12 @@ function PlanChunk({ plan, dark }: { plan: ChunkPlan; dark: boolean }) {
     >
       <div className="flex items-center gap-2 mb-2.5">
         <span
-          className={`font-mono text-[11px] font-medium ${dark ? "text-text-bright" : "text-light-text-bright"}`}
+          className={`font-mono text-[0.85em] font-medium ${dark ? "text-text-bright" : "text-light-text-bright"}`}
         >
           {formatChunkId(plan.chunkId)}
         </span>
         <span
-          className={`text-[8px] px-1.5 py-0.5 rounded uppercase tracking-wider font-semibold ${
+          className={`text-[0.65em] px-1.5 py-0.5 rounded uppercase tracking-wider font-semibold ${
             plan.sealed
               ? "bg-severity-info/15 text-severity-info border border-severity-info/25"
               : "bg-copper/15 text-copper border border-copper/25"
@@ -737,13 +818,13 @@ function PlanChunk({ plan, dark }: { plan: ChunkPlan; dark: boolean }) {
           {plan.sealed ? "Sealed" : "Active"}
         </span>
         <span
-          className={`font-mono text-[10px] ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
+          className={`font-mono text-[0.8em] ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
         >
           {plan.recordCount.toLocaleString()} records
         </span>
         {plan.storeId && (
           <span
-            className={`font-mono text-[10px] ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
+            className={`font-mono text-[0.8em] ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
           >
             [{plan.storeId}]
           </span>
@@ -758,12 +839,12 @@ function PlanChunk({ plan, dark }: { plan: ChunkPlan; dark: boolean }) {
           >
             <div className="flex justify-between items-center mb-1">
               <span
-                className={`text-[10px] font-semibold capitalize ${dark ? "text-text-bright" : "text-light-text-bright"}`}
+                className={`text-[0.8em] font-semibold capitalize ${dark ? "text-text-bright" : "text-light-text-bright"}`}
               >
                 {step.name}
               </span>
               <span
-                className={`text-[8px] px-1 py-px rounded uppercase tracking-wide font-medium ${
+                className={`text-[0.65em] px-1 py-px rounded uppercase tracking-wide font-medium ${
                   step.action === "seek"
                     ? "bg-severity-info/15 text-severity-info"
                     : step.action === "indexed"
@@ -775,13 +856,13 @@ function PlanChunk({ plan, dark }: { plan: ChunkPlan; dark: boolean }) {
               </span>
             </div>
             <div
-              className={`font-mono text-[10px] ${dark ? "text-text-muted" : "text-light-text-muted"}`}
+              className={`font-mono text-[0.8em] ${dark ? "text-text-muted" : "text-light-text-muted"}`}
             >
               {step.inputEstimate.toLocaleString()} &rarr;{" "}
               {step.outputEstimate.toLocaleString()}
             </div>
             <div
-              className={`text-[9px] mt-0.5 ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
+              className={`text-[0.7em] mt-0.5 ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
             >
               {step.reason}
             </div>
@@ -790,7 +871,7 @@ function PlanChunk({ plan, dark }: { plan: ChunkPlan; dark: boolean }) {
       </div>
 
       <div
-        className={`flex gap-4 text-[10px] font-mono pt-2 border-t ${dark ? "border-ink-border-subtle text-text-muted" : "border-light-border-subtle text-light-text-muted"}`}
+        className={`flex gap-4 text-[0.8em] font-mono pt-2 border-t ${dark ? "border-ink-border-subtle text-text-muted" : "border-light-border-subtle text-light-text-muted"}`}
       >
         <span>
           scan:{" "}
@@ -825,7 +906,7 @@ function DetailSection({
   return (
     <div>
       <h4
-        className={`text-[9px] font-medium uppercase tracking-[0.15em] mb-1.5 ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
+        className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1.5 ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
       >
         {label}
       </h4>
@@ -848,15 +929,119 @@ function DetailRow({
       className={`flex py-1 border-b last:border-b-0 ${dark ? "border-ink-border-subtle" : "border-light-border-subtle"}`}
     >
       <dt
-        className={`w-16 shrink-0 text-[10px] ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
+        className={`w-16 shrink-0 text-[0.8em] ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
       >
         {label}
       </dt>
       <dd
-        className={`flex-1 text-[11px] font-mono break-all ${dark ? "text-text-normal" : "text-light-text-normal"}`}
+        className={`flex-1 text-[0.85em] font-mono break-all ${dark ? "text-text-normal" : "text-light-text-normal"}`}
       >
         {value}
       </dd>
+    </div>
+  );
+}
+
+function HistogramChart({
+  data,
+  dark,
+}: {
+  data: HistogramData;
+  dark: boolean;
+}) {
+  const { buckets } = data;
+  if (buckets.length === 0) return null;
+
+  const maxCount = Math.max(...buckets.map((b) => b.count), 1);
+  const totalCount = buckets.reduce((sum, b) => sum + b.count, 0);
+  const barHeight = 48;
+  const c = (d: string, l: string) => (dark ? d : l);
+
+  // Format time label based on range span.
+  const rangeMs =
+    buckets.length > 1
+      ? buckets[buckets.length - 1].ts.getTime() - buckets[0].ts.getTime()
+      : 0;
+
+  const formatTime = (d: Date) => {
+    if (rangeMs > 24 * 60 * 60 * 1000) {
+      return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    }
+    return d.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+  };
+
+  // Show ~5 evenly spaced time labels.
+  const labelCount = Math.min(5, buckets.length);
+  const labelStep = Math.max(1, Math.floor(buckets.length / labelCount));
+
+  return (
+    <div>
+      <div className="flex items-baseline justify-between mb-1.5">
+        <span
+          className={`text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+        >
+          Volume
+        </span>
+        <span
+          className={`font-mono text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}
+        >
+          {totalCount.toLocaleString()} records
+        </span>
+      </div>
+      <div className="relative" style={{ height: barHeight }}>
+        <div className="flex items-end h-full gap-px">
+          {buckets.map((bucket, i) => {
+            const pct = maxCount > 0 ? bucket.count / maxCount : 0;
+            return (
+              <div
+                key={i}
+                className="flex-1 min-w-0 group relative"
+                style={{ height: "100%" }}
+              >
+                <div
+                  className={`absolute bottom-0 inset-x-0 rounded-t-sm transition-colors ${
+                    bucket.count > 0
+                      ? c(
+                          "bg-copper/60 group-hover:bg-copper",
+                          "bg-copper/50 group-hover:bg-copper/80",
+                        )
+                      : c("bg-ink-border-subtle/30", "bg-light-border/30")
+                  }`}
+                  style={{
+                    height:
+                      bucket.count > 0 ? `${Math.max(pct * 100, 4)}%` : "2px",
+                  }}
+                />
+                {/* Tooltip */}
+                <div
+                  className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 text-[0.7em] font-mono rounded whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-10 ${c("bg-ink-surface text-text-bright border border-ink-border-subtle", "bg-light-surface text-light-text-bright border border-light-border-subtle")}`}
+                >
+                  {bucket.count.toLocaleString()} &middot;{" "}
+                  {formatTime(bucket.ts)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      {/* Time axis labels */}
+      <div className="flex justify-between mt-1">
+        {Array.from({ length: labelCount }, (_, i) => {
+          const idx = Math.min(i * labelStep, buckets.length - 1);
+          return (
+            <span
+              key={i}
+              className={`text-[0.65em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+            >
+              {formatTime(buckets[idx].ts)}
+            </span>
+          );
+        })}
+      </div>
     </div>
   );
 }

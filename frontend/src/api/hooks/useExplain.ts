@@ -1,6 +1,5 @@
 import { useState, useCallback } from "react";
-import { queryClient, ChunkPlan } from "../client";
-import { parseQuery, buildQuery } from "./useSearch";
+import { queryClient, Query, ChunkPlan } from "../client";
 
 export interface ExplainState {
   chunks: ChunkPlan[];
@@ -16,8 +15,9 @@ export function useExplain() {
   });
 
   const explain = useCallback(async (queryStr: string) => {
-    const parsed = parseQuery(queryStr);
-    const query = buildQuery(parsed);
+    // Send the raw query string — the server parses it.
+    const query = new Query();
+    query.expression = queryStr;
 
     setState({
       chunks: [],

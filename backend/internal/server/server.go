@@ -63,6 +63,30 @@ func (s *Server) registerProbes(mux *http.ServeMux) {
 	})
 }
 
+// corsMiddleware adds CORS headers for browser clients.
+func (s *Server) corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Allow requests from any origin in development
+		// In production, this should be restricted to specific origins
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Connect-Protocol-Version, Connect-Timeout-Ms, Grpc-Timeout, X-Grpc-Web, X-User-Agent")
+			w.Header().Set("Access-Control-Expose-Headers", "Grpc-Status, Grpc-Message, Grpc-Status-Details-Bin")
+			w.Header().Set("Access-Control-Max-Age", "86400")
+		}
+
+		// Handle preflight requests
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 // trackingMiddleware wraps an http.Handler to track in-flight requests.
 func (s *Server) trackingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -100,11 +124,18 @@ func (s *Server) Serve(listener net.Listener) error {
 	// Kubernetes probe endpoints
 	s.registerProbes(mux)
 
-	// Use h2c for HTTP/2 without TLS (for Unix sockets and local connections)
-	handler := h2c.NewHandler(mux, &http2.Server{})
+	// Add CORS support for browser clients
+	corsHandler := s.corsMiddleware(mux)
 
 	// Wrap with tracking middleware for graceful drain
-	s.server = &http.Server{Handler: s.trackingMiddleware(handler)}
+	trackedHandler := s.trackingMiddleware(corsHandler)
+
+	// Use h2c for HTTP/2 without TLS (for Unix sockets and local connections)
+	// h2c.NewHandler supports both HTTP/1.1 and HTTP/2 prior knowledge
+	h2s := &http2.Server{}
+	s.server = &http.Server{
+		Handler: h2c.NewHandler(trackedHandler, h2s),
+	}
 
 	s.logger.Info("server starting", "addr", listener.Addr().String())
 
