@@ -1,5 +1,11 @@
 import type { ProtoRecord } from "../utils";
-import { extractKVPairs, relativeTime, formatBytes, formatChunkId } from "../utils";
+import {
+  extractKVPairs,
+  relativeTime,
+  formatBytes,
+  formatChunkId,
+} from "../utils";
+import { syntaxHighlight } from "../syntax";
 
 export function DetailPanelContent({
   record,
@@ -19,6 +25,16 @@ export function DetailPanelContent({
   const c = (d: string, l: string) => (dark ? d : l);
   const rawText = new TextDecoder().decode(record.raw);
   const rawBytes = record.raw.length;
+
+  // Pretty-print JSON for the detail view.
+  let displayText = rawText;
+  if (rawText.trimStart().startsWith("{")) {
+    try {
+      displayText = JSON.stringify(JSON.parse(rawText), null, 2);
+    } catch {
+      // Not valid JSON — use raw text as-is.
+    }
+  }
   const kvPairs = extractKVPairs(rawText);
 
   const tsRows: { label: string; date: Date | null }[] = [
@@ -81,9 +97,27 @@ export function DetailPanelContent({
       {/* Message */}
       <DetailSection label={`Message (${formatBytes(rawBytes)})`} dark={dark}>
         <pre
-          className={`text-[0.85em] font-mono p-3 rounded whitespace-pre-wrap break-words leading-relaxed ${c("bg-ink text-text-normal", "bg-light-bg text-light-text-normal")}`}
+          className={`text-[0.85em] font-mono p-3 rounded whitespace-pre-wrap wrap-break-word leading-relaxed ${c("bg-ink text-text-normal", "bg-light-bg text-light-text-normal")}`}
         >
-          {rawText}
+          {syntaxHighlight(displayText).map((span, i) => {
+            const style = span.color ? { color: span.color } : undefined;
+            return span.url ? (
+              <a
+                key={i}
+                href={span.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={style}
+                className="underline decoration-current/30 hover:decoration-current/60"
+              >
+                {span.text}
+              </a>
+            ) : (
+              <span key={i} style={style}>
+                {span.text}
+              </span>
+            );
+          })}
         </pre>
       </DetailSection>
 

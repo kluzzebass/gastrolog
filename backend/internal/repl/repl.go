@@ -346,28 +346,26 @@ func (r *REPL) fetchBatch(out *strings.Builder) bool {
 			return true // more may be available
 		}
 
-		select {
-		case result, ok := <-ch:
-			if !ok {
-				if printed == 0 {
-					out.WriteString("No more results.\n")
-				}
+		result, ok := <-ch
+		if !ok {
+			if printed == 0 {
+				out.WriteString("No more results.\n")
+			}
+			r.setResultChan(nil)
+			return false
+		}
+		if result.err != nil {
+			if errors.Is(result.err, query.ErrInvalidResumeToken) {
+				out.WriteString("Resume token invalid (chunk deleted).\n")
 				r.setResultChan(nil)
 				return false
 			}
-			if result.err != nil {
-				if errors.Is(result.err, query.ErrInvalidResumeToken) {
-					out.WriteString("Resume token invalid (chunk deleted).\n")
-					r.setResultChan(nil)
-					return false
-				}
-				fmt.Fprintf(out, "Error: %v\n", result.err)
-				return false
-			}
-
-			r.printRecord(out, result.rec)
-			printed++
+			fmt.Fprintf(out, "Error: %v\n", result.err)
+			return false
 		}
+
+		r.printRecord(out, result.rec)
+		printed++
 	}
 }
 

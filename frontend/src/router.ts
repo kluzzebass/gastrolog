@@ -7,7 +7,7 @@ const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   beforeLoad: () => {
-    throw redirect({ to: "/search" });
+    throw redirect({ to: "/search", search: { q: "" } });
   },
 });
 

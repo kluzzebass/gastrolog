@@ -1,6 +1,16 @@
 import { useState, useRef } from "react";
 import type { HistogramData } from "../api/hooks/useHistogram";
 
+const SEVERITY_COLORS = [
+  ["error", "var(--color-severity-error)"],
+  ["warn", "var(--color-severity-warn)"],
+  ["info", "var(--color-severity-info)"],
+  ["debug", "var(--color-severity-debug)"],
+  ["trace", "var(--color-severity-trace)"],
+] as const;
+
+const SEVERITY_LEVELS = ["error", "warn", "info", "debug", "trace"] as const;
+
 export function HistogramChart({
   data,
   dark,
@@ -20,6 +30,8 @@ export function HistogramChart({
 
   if (buckets.length === 0) return null;
 
+  const firstBucket = buckets[0]!;
+  const lastBucket = buckets[buckets.length - 1]!;
   const maxCount = Math.max(...buckets.map((b) => b.count), 1);
   const totalCount = buckets.reduce((sum, b) => sum + b.count, 0);
   const barHeight = 48;
@@ -53,7 +65,7 @@ export function HistogramChart({
       const lo = Math.min(idx, endIdx);
       const hi = Math.max(idx, endIdx);
       if (lo !== hi) {
-        onBrushSelect(buckets[lo].ts, buckets[hi].ts);
+        onBrushSelect(buckets[lo]!.ts, buckets[hi]!.ts);
       }
       setBrushStart(null);
       setBrushEnd(null);
@@ -82,11 +94,10 @@ export function HistogramChart({
 
   const handlePanStep = (direction: -1 | 1) => {
     if (!onPan || buckets.length < 2) return;
-    const windowMs =
-      buckets[buckets.length - 1].ts.getTime() - buckets[0].ts.getTime();
+    const windowMs = lastBucket.ts.getTime() - firstBucket.ts.getTime();
     const stepMs = windowMs / 2;
-    const first = buckets[0].ts.getTime();
-    const last = buckets[buckets.length - 1].ts.getTime();
+    const first = firstBucket.ts.getTime();
+    const last = lastBucket.ts.getTime();
     onPan(
       new Date(first + direction * stepMs),
       new Date(last + direction * stepMs),
@@ -118,11 +129,10 @@ export function HistogramChart({
       const deltaX = panStartX.current - e.clientX; // drag left = positive = go back
       const axisWidth = el.getBoundingClientRect().width;
       if (Math.abs(deltaX) < 3) return; // ignore tiny movements
-      const windowMs =
-        buckets[buckets.length - 1].ts.getTime() - buckets[0].ts.getTime();
+      const windowMs = lastBucket.ts.getTime() - firstBucket.ts.getTime();
       const deltaMs = (deltaX / axisWidth) * windowMs;
-      const first = buckets[0].ts.getTime();
-      const last = buckets[buckets.length - 1].ts.getTime();
+      const first = firstBucket.ts.getTime();
+      const last = lastBucket.ts.getTime();
       onPan(new Date(first + deltaMs), new Date(last + deltaMs));
     };
     window.addEventListener("mousemove", onMouseMove);
@@ -131,9 +141,7 @@ export function HistogramChart({
 
   // Format time label based on range span.
   const rangeMs =
-    buckets.length > 1
-      ? buckets[buckets.length - 1].ts.getTime() - buckets[0].ts.getTime()
-      : 0;
+    buckets.length > 1 ? lastBucket.ts.getTime() - firstBucket.ts.getTime() : 0;
 
   const formatTime = (d: Date) => {
     if (rangeMs > 24 * 60 * 60 * 1000) {
@@ -160,9 +168,7 @@ export function HistogramChart({
 
   // Compute human-readable pan delta during drag.
   const windowMs =
-    buckets.length > 1
-      ? buckets[buckets.length - 1].ts.getTime() - buckets[0].ts.getTime()
-      : 0;
+    buckets.length > 1 ? lastBucket.ts.getTime() - firstBucket.ts.getTime() : 0;
   const panDeltaMs =
     panOffset !== 0 ? -((panOffset / panAxisWidth.current) * windowMs) : 0;
 
@@ -239,14 +245,9 @@ export function HistogramChart({
             const segments: { key: string; count: number; color: string }[] =
               [];
             if (hasLevels) {
-              for (const [key, color] of [
-                ["error", "var(--color-severity-error)"],
-                ["warn", "var(--color-severity-warn)"],
-                ["info", "var(--color-severity-info)"],
-                ["debug", "var(--color-severity-debug)"],
-                ["trace", "var(--color-severity-trace)"],
-              ] as const) {
-                if (lc[key] > 0) segments.push({ key, count: lc[key], color });
+              for (const [key, color] of SEVERITY_COLORS) {
+                if (lc[key]! > 0)
+                  segments.push({ key, count: lc[key]!, color });
               }
               if (other > 0)
                 segments.push({
@@ -304,11 +305,9 @@ export function HistogramChart({
                   </div>
                   {hasLevels && (
                     <div className="mt-0.5 space-y-px">
-                      {(
-                        ["error", "warn", "info", "debug", "trace"] as const
-                      ).map(
+                      {SEVERITY_LEVELS.map(
                         (level) =>
-                          lc[level] > 0 && (
+                          lc[level]! > 0 && (
                             <div
                               key={level}
                               className="flex items-center gap-1.5"
@@ -320,7 +319,7 @@ export function HistogramChart({
                                 }}
                               />
                               <span className="opacity-70">{level}</span>
-                              <span>{lc[level].toLocaleString()}</span>
+                              <span>{lc[level]!.toLocaleString()}</span>
                             </div>
                           ),
                       )}
@@ -368,7 +367,7 @@ export function HistogramChart({
                 key={i}
                 className={`text-[0.65em] font-mono select-none ${c("text-text-ghost", "text-light-text-ghost")}`}
               >
-                {formatTime(buckets[idx].ts)}
+                {formatTime(buckets[idx]!.ts)}
               </span>
             );
           })}

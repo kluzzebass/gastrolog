@@ -69,8 +69,8 @@ export function TimeRangePicker({
 
   const handleApply = () => {
     if (!pendingStart || !pendingEnd) return;
-    const [sh, sm] = startTime.split(":").map(Number);
-    const [eh, em] = endTime.split(":").map(Number);
+    const [sh = 0, sm = 0] = startTime.split(":").map(Number);
+    const [eh = 0, em = 0] = endTime.split(":").map(Number);
     const start = new Date(pendingStart);
     start.setHours(sh, sm, 0, 0);
     const end = new Date(pendingEnd);

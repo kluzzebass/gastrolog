@@ -32,7 +32,7 @@ import {
 
 export function App() {
   const { q } = useRouterSearch({ strict: false }) as { q: string };
-  const navigate = useNavigate();
+  const navigate = useNavigate({ from: "/search" });
   const location = useLocation();
   const isFollowMode = location.pathname === "/follow";
   const [draft, setDraft] = useState(q);
@@ -263,7 +263,7 @@ export function App() {
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !isSearching) {
+        if (entries[0]?.isIntersecting && hasMore && !isSearching) {
           loadMore(expressionRef.current);
         }
       },
@@ -630,7 +630,7 @@ export function App() {
                       "border-severity-trace/40 text-severity-trace hover:border-severity-trace hover:bg-severity-trace/10",
                   },
                 };
-                const s = styles[color];
+                const s = styles[color]!;
                 return (
                   <button
                     key={level}
@@ -708,7 +708,7 @@ export function App() {
                     }
                   }}
                   placeholder="Search logs... tokens for full-text, key=value for attributes"
-                  className={`query-input w-full pl-3 pr-8 h-[38px] text-[1em] font-mono border rounded transition-all duration-200 focus:outline-none ${c(
+                  className={`query-input w-full pl-3 pr-8 h-9.5 text-[1em] font-mono border rounded transition-all duration-200 focus:outline-none ${c(
                     "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost",
                     "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost",
                   )}`}
@@ -739,13 +739,13 @@ export function App() {
               <button
                 onClick={executeQuery}
                 disabled={isSearching}
-                className="px-5 h-[38px] text-[0.9em] font-medium rounded bg-copper text-white hover:bg-copper-glow transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                className="px-5 h-9.5 text-[0.9em] font-medium rounded bg-copper text-white hover:bg-copper-glow transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
               >
                 Search
               </button>
               <button
                 onClick={isFollowMode ? stopFollowMode : startFollow}
-                className={`px-4 h-[38px] text-[0.9em] font-medium rounded border transition-all duration-200 whitespace-nowrap ${
+                className={`px-4 h-9.5 text-[0.9em] font-medium rounded border transition-all duration-200 whitespace-nowrap ${
                   isFollowMode
                     ? "bg-severity-error/15 border-severity-error text-severity-error hover:bg-severity-error/25"
                     : c(
@@ -758,7 +758,7 @@ export function App() {
               </button>
               <button
                 onClick={handleShowPlan}
-                className={`px-3 h-[38px] text-[0.9em] font-medium border rounded transition-all duration-200 whitespace-nowrap ${
+                className={`px-3 h-9.5 text-[0.9em] font-medium border rounded transition-all duration-200 whitespace-nowrap ${
                   showPlan
                     ? c(
                         "border-copper text-copper",

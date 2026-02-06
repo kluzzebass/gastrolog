@@ -17,16 +17,17 @@ export const timeRangeMs: Record<string, number> = {
   "30d": 30 * 24 * 60 * 60 * 1000,
 };
 
+const RE_KV_PAIRS =
+  /(?:^|[\s,;:()\[\]{}])([a-zA-Z_][a-zA-Z0-9_.]*?)=(?:"([^"]*)"|'([^']*)'|([^\s,;)\]}"'=&{[]+))/g;
+
 /** Extract key=value pairs from raw log text (simplified port of Go tokenizer.ExtractKeyValues). */
 export function extractKVPairs(raw: string): { key: string; value: string }[] {
   const results: { key: string; value: string }[] = [];
   const seen = new Set<string>();
-  // Match key=value, key="quoted value", key='quoted value'
-  const keyRe =
-    /(?:^|[\s,;:()\[\]{}])([a-zA-Z_][a-zA-Z0-9_.]*?)=(?:"([^"]*)"|'([^']*)'|([^\s,;)\]}"'=&{[]+))/g;
+  RE_KV_PAIRS.lastIndex = 0;
   let m: RegExpExecArray | null;
-  while ((m = keyRe.exec(raw)) !== null) {
-    const key = m[1].toLowerCase();
+  while ((m = RE_KV_PAIRS.exec(raw)) !== null) {
+    const key = m[1]!.toLowerCase();
     const value = (m[2] ?? m[3] ?? m[4] ?? "").toLowerCase();
     if (key.length > 64 || value.length > 64 || value.length === 0) continue;
     const dedup = `${key}\0${value}`;
@@ -103,38 +104,6 @@ export function aggregateFields(
 
 export function formatChunkId(chunkId: string): string {
   return chunkId || "N/A";
-}
-
-export function highlightMatches(
-  text: string,
-  tokens: string[],
-): { text: string; highlighted: boolean }[] {
-  if (tokens.length === 0) return [{ text, highlighted: false }];
-
-  const pattern = new RegExp(
-    `(${tokens.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`,
-    "gi",
-  );
-  const parts: { text: string; highlighted: boolean }[] = [];
-  let lastIndex = 0;
-  let match;
-
-  while ((match = pattern.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push({
-        text: text.slice(lastIndex, match.index),
-        highlighted: false,
-      });
-    }
-    parts.push({ text: match[0], highlighted: true });
-    lastIndex = pattern.lastIndex;
-  }
-
-  if (lastIndex < text.length) {
-    parts.push({ text: text.slice(lastIndex), highlighted: false });
-  }
-
-  return parts.length > 0 ? parts : [{ text, highlighted: false }];
 }
 
 export function sameRecord(
