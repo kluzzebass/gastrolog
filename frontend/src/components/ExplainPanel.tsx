@@ -57,7 +57,7 @@ export function ExplainPanel({
 
       {/* Scrollable chunk list */}
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden app-scroll">
-        <div className="flex flex-col gap-2 stagger-children">
+        <div className="flex flex-col gap-2">
           {chunks.map((plan, i) => (
             <ExplainChunk
               key={i}
