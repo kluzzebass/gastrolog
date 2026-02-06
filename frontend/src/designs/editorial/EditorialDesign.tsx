@@ -1095,6 +1095,7 @@ export function EditorialDesign() {
               dark={dark}
               onFieldSelect={handleFieldSelect}
               onChunkSelect={handleChunkSelect}
+              onStoreSelect={handleStoreSelect}
             />
           ) : (
             <div className="flex flex-col items-center justify-center h-48 px-4">
@@ -2072,11 +2073,13 @@ function DetailPanelContent({
   dark,
   onFieldSelect,
   onChunkSelect,
+  onStoreSelect,
 }: {
   record: ProtoRecord;
   dark: boolean;
   onFieldSelect?: (key: string, value: string) => void;
   onChunkSelect?: (chunkId: string) => void;
+  onStoreSelect?: (storeId: string) => void;
 }) {
   const c = (d: string, l: string) => (dark ? d : l);
   const rawText = new TextDecoder().decode(record.raw);
@@ -2192,6 +2195,11 @@ function DetailPanelContent({
             label="Store"
             value={record.ref?.storeId ?? "N/A"}
             dark={dark}
+            onClick={
+              record.ref?.storeId
+                ? () => onStoreSelect?.(record.ref!.storeId)
+                : undefined
+            }
           />
           <DetailRow
             label="Chunk"
