@@ -80,7 +80,7 @@ export function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [detailPinned]);
 
-  const queryInputRef = useRef<HTMLInputElement>(null);
+  const queryInputRef = useRef<HTMLTextAreaElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const expressionRef = useRef("");
 
@@ -704,28 +704,29 @@ export function App() {
           <div
             className={`px-5 py-4 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
           >
-            <div className="flex gap-3 items-center">
+            <div className="flex gap-3 items-start">
               <div className="flex-1 relative">
-                <input
+                <textarea
                   ref={queryInputRef}
-                  type="text"
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") {
+                    if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
                       executeQuery();
                     }
                   }}
+                  rows={1}
                   placeholder="Search logs... tokens for full-text, key=value for attributes"
-                  className={`query-input w-full pl-3 pr-8 h-9.5 text-[1em] font-mono border rounded transition-all duration-200 focus:outline-none ${c(
+                  style={{ fieldSizing: "content" } as React.CSSProperties}
+                  className={`query-input w-full pl-3 pr-8 py-2 text-[0.9em] leading-normal font-mono border rounded resize-none overflow-hidden focus:outline-none ${c(
                     "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost",
                     "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost",
                   )}`}
                 />
                 <button
                   onClick={() => setShowHelp(true)}
-                  className={`absolute right-2 top-1/2 -translate-y-1/2 transition-colors ${c(
+                  className={`absolute right-2 top-2.5 transition-colors ${c(
                     "text-text-ghost hover:text-copper",
                     "text-light-text-ghost hover:text-copper",
                   )}`}
@@ -749,13 +750,13 @@ export function App() {
               <button
                 onClick={executeQuery}
                 disabled={isSearching}
-                className="px-5 h-9.5 text-[0.9em] font-medium rounded bg-copper text-white hover:bg-copper-glow transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                className="px-5 py-2 text-[0.9em] leading-normal font-medium rounded border border-transparent bg-copper text-white hover:bg-copper-glow transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
               >
                 Search
               </button>
               <button
                 onClick={isFollowMode ? stopFollowMode : startFollow}
-                className={`px-4 h-9.5 text-[0.9em] font-medium rounded border transition-all duration-200 whitespace-nowrap ${
+                className={`px-4 py-2 text-[0.9em] leading-normal font-medium rounded border transition-all duration-200 whitespace-nowrap ${
                   isFollowMode
                     ? "bg-severity-error/15 border-severity-error text-severity-error hover:bg-severity-error/25"
                     : c(
@@ -768,7 +769,7 @@ export function App() {
               </button>
               <button
                 onClick={handleShowPlan}
-                className={`px-3 h-9.5 text-[0.9em] font-medium border rounded transition-all duration-200 whitespace-nowrap ${
+                className={`px-3 py-2 text-[0.9em] leading-normal font-medium border rounded transition-all duration-200 whitespace-nowrap ${
                   showPlan
                     ? c(
                         "border-copper text-copper",

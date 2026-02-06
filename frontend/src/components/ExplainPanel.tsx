@@ -52,13 +52,7 @@ export function ExplainPanel({
             {chunks.length} of {totalChunks} chunks
           </span>
         </div>
-        {expression && (
-          <div
-            className={`font-mono text-[0.8em] px-3 py-1.5 rounded mb-3 ${c("bg-ink-surface text-text-normal", "bg-light-surface text-light-text-normal")}`}
-          >
-            {expression}
-          </div>
-        )}
+        {expression && <ExpressionBox expression={expression} dark={dark} />}
       </div>
 
       {/* Scrollable chunk list */}
@@ -76,6 +70,26 @@ export function ExplainPanel({
         </div>
       </div>
     </div>
+  );
+}
+
+function ExpressionBox({
+  expression,
+  dark,
+}: {
+  expression: string;
+  dark: boolean;
+}) {
+  const c = (d: string, l: string) => (dark ? d : l);
+
+  return (
+    <textarea
+      readOnly
+      value={expression}
+      rows={1}
+      style={{ fieldSizing: "content" } as React.CSSProperties}
+      className={`w-full font-mono text-[0.8em] px-3 py-1.5 rounded mb-3 resize-none overflow-hidden border-none outline-none ${c("bg-ink-surface text-text-normal", "bg-light-surface text-light-text-normal")}`}
+    />
   );
 }
 
