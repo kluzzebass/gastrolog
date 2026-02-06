@@ -1173,8 +1173,9 @@ func (x *HistogramResponse) GetEnd() *timestamppb.Timestamp {
 
 type HistogramBucket struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Ts            *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=ts,proto3" json:"ts,omitempty"`        // Bucket start time
-	Count         int64                  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"` // Record count in this bucket
+	Ts            *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=ts,proto3" json:"ts,omitempty"`                                                                                                                 // Bucket start time
+	Count         int64                  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`                                                                                                          // Record count in this bucket
+	LevelCounts   map[string]int64       `protobuf:"bytes,3,rep,name=level_counts,json=levelCounts,proto3" json:"level_counts,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"` // Per-severity counts, e.g. {"error": 12, "warn": 45}
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1221,6 +1222,13 @@ func (x *HistogramBucket) GetCount() int64 {
 		return x.Count
 	}
 	return 0
+}
+
+func (x *HistogramBucket) GetLevelCounts() map[string]int64 {
+	if x != nil {
+		return x.LevelCounts
+	}
+	return nil
 }
 
 var File_gastrolog_v1_query_proto protoreflect.FileDescriptor
@@ -1326,10 +1334,14 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\x11HistogramResponse\x127\n" +
 	"\abuckets\x18\x01 \x03(\v2\x1d.gastrolog.v1.HistogramBucketR\abuckets\x120\n" +
 	"\x05start\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x05start\x12,\n" +
-	"\x03end\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x03end\"S\n" +
+	"\x03end\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x03end\"\xe6\x01\n" +
 	"\x0fHistogramBucket\x12*\n" +
 	"\x02ts\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\x12\x14\n" +
-	"\x05count\x18\x02 \x01(\x03R\x05count2\xb2\x02\n" +
+	"\x05count\x18\x02 \x01(\x03R\x05count\x12Q\n" +
+	"\flevel_counts\x18\x03 \x03(\v2..gastrolog.v1.HistogramBucket.LevelCountsEntryR\vlevelCounts\x1a>\n" +
+	"\x10LevelCountsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x012\xb2\x02\n" +
 	"\fQueryService\x12E\n" +
 	"\x06Search\x12\x1b.gastrolog.v1.SearchRequest\x1a\x1c.gastrolog.v1.SearchResponse0\x01\x12E\n" +
 	"\x06Follow\x12\x1b.gastrolog.v1.FollowRequest\x1a\x1c.gastrolog.v1.FollowResponse0\x01\x12F\n" +
@@ -1348,7 +1360,7 @@ func file_gastrolog_v1_query_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_query_proto_rawDescData
 }
 
-var file_gastrolog_v1_query_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_gastrolog_v1_query_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_gastrolog_v1_query_proto_goTypes = []any{
 	(*SearchRequest)(nil),         // 0: gastrolog.v1.SearchRequest
 	(*SearchResponse)(nil),        // 1: gastrolog.v1.SearchResponse
@@ -1369,7 +1381,8 @@ var file_gastrolog_v1_query_proto_goTypes = []any{
 	(*HistogramResponse)(nil),     // 16: gastrolog.v1.HistogramResponse
 	(*HistogramBucket)(nil),       // 17: gastrolog.v1.HistogramBucket
 	nil,                           // 18: gastrolog.v1.Record.AttrsEntry
-	(*timestamppb.Timestamp)(nil), // 19: google.protobuf.Timestamp
+	nil,                           // 19: gastrolog.v1.HistogramBucket.LevelCountsEntry
+	(*timestamppb.Timestamp)(nil), // 20: google.protobuf.Timestamp
 }
 var file_gastrolog_v1_query_proto_depIdxs = []int32{
 	6,  // 0: gastrolog.v1.SearchRequest.query:type_name -> gastrolog.v1.Query
@@ -1378,39 +1391,40 @@ var file_gastrolog_v1_query_proto_depIdxs = []int32{
 	8,  // 3: gastrolog.v1.FollowResponse.records:type_name -> gastrolog.v1.Record
 	6,  // 4: gastrolog.v1.ExplainRequest.query:type_name -> gastrolog.v1.Query
 	12, // 5: gastrolog.v1.ExplainResponse.chunks:type_name -> gastrolog.v1.ChunkPlan
-	19, // 6: gastrolog.v1.Query.start:type_name -> google.protobuf.Timestamp
-	19, // 7: gastrolog.v1.Query.end:type_name -> google.protobuf.Timestamp
+	20, // 6: gastrolog.v1.Query.start:type_name -> google.protobuf.Timestamp
+	20, // 7: gastrolog.v1.Query.end:type_name -> google.protobuf.Timestamp
 	7,  // 8: gastrolog.v1.Query.kv_predicates:type_name -> gastrolog.v1.KVPredicate
-	19, // 9: gastrolog.v1.Record.ingest_ts:type_name -> google.protobuf.Timestamp
-	19, // 10: gastrolog.v1.Record.write_ts:type_name -> google.protobuf.Timestamp
+	20, // 9: gastrolog.v1.Record.ingest_ts:type_name -> google.protobuf.Timestamp
+	20, // 10: gastrolog.v1.Record.write_ts:type_name -> google.protobuf.Timestamp
 	18, // 11: gastrolog.v1.Record.attrs:type_name -> gastrolog.v1.Record.AttrsEntry
 	9,  // 12: gastrolog.v1.Record.ref:type_name -> gastrolog.v1.RecordRef
-	19, // 13: gastrolog.v1.Record.source_ts:type_name -> google.protobuf.Timestamp
+	20, // 13: gastrolog.v1.Record.source_ts:type_name -> google.protobuf.Timestamp
 	11, // 14: gastrolog.v1.ResumeToken.positions:type_name -> gastrolog.v1.StorePosition
 	14, // 15: gastrolog.v1.ChunkPlan.steps:type_name -> gastrolog.v1.PipelineStep
-	19, // 16: gastrolog.v1.ChunkPlan.start_ts:type_name -> google.protobuf.Timestamp
-	19, // 17: gastrolog.v1.ChunkPlan.end_ts:type_name -> google.protobuf.Timestamp
+	20, // 16: gastrolog.v1.ChunkPlan.start_ts:type_name -> google.protobuf.Timestamp
+	20, // 17: gastrolog.v1.ChunkPlan.end_ts:type_name -> google.protobuf.Timestamp
 	13, // 18: gastrolog.v1.ChunkPlan.branch_plans:type_name -> gastrolog.v1.BranchPlan
 	14, // 19: gastrolog.v1.BranchPlan.steps:type_name -> gastrolog.v1.PipelineStep
-	19, // 20: gastrolog.v1.HistogramRequest.start:type_name -> google.protobuf.Timestamp
-	19, // 21: gastrolog.v1.HistogramRequest.end:type_name -> google.protobuf.Timestamp
+	20, // 20: gastrolog.v1.HistogramRequest.start:type_name -> google.protobuf.Timestamp
+	20, // 21: gastrolog.v1.HistogramRequest.end:type_name -> google.protobuf.Timestamp
 	17, // 22: gastrolog.v1.HistogramResponse.buckets:type_name -> gastrolog.v1.HistogramBucket
-	19, // 23: gastrolog.v1.HistogramResponse.start:type_name -> google.protobuf.Timestamp
-	19, // 24: gastrolog.v1.HistogramResponse.end:type_name -> google.protobuf.Timestamp
-	19, // 25: gastrolog.v1.HistogramBucket.ts:type_name -> google.protobuf.Timestamp
-	0,  // 26: gastrolog.v1.QueryService.Search:input_type -> gastrolog.v1.SearchRequest
-	2,  // 27: gastrolog.v1.QueryService.Follow:input_type -> gastrolog.v1.FollowRequest
-	4,  // 28: gastrolog.v1.QueryService.Explain:input_type -> gastrolog.v1.ExplainRequest
-	15, // 29: gastrolog.v1.QueryService.Histogram:input_type -> gastrolog.v1.HistogramRequest
-	1,  // 30: gastrolog.v1.QueryService.Search:output_type -> gastrolog.v1.SearchResponse
-	3,  // 31: gastrolog.v1.QueryService.Follow:output_type -> gastrolog.v1.FollowResponse
-	5,  // 32: gastrolog.v1.QueryService.Explain:output_type -> gastrolog.v1.ExplainResponse
-	16, // 33: gastrolog.v1.QueryService.Histogram:output_type -> gastrolog.v1.HistogramResponse
-	30, // [30:34] is the sub-list for method output_type
-	26, // [26:30] is the sub-list for method input_type
-	26, // [26:26] is the sub-list for extension type_name
-	26, // [26:26] is the sub-list for extension extendee
-	0,  // [0:26] is the sub-list for field type_name
+	20, // 23: gastrolog.v1.HistogramResponse.start:type_name -> google.protobuf.Timestamp
+	20, // 24: gastrolog.v1.HistogramResponse.end:type_name -> google.protobuf.Timestamp
+	20, // 25: gastrolog.v1.HistogramBucket.ts:type_name -> google.protobuf.Timestamp
+	19, // 26: gastrolog.v1.HistogramBucket.level_counts:type_name -> gastrolog.v1.HistogramBucket.LevelCountsEntry
+	0,  // 27: gastrolog.v1.QueryService.Search:input_type -> gastrolog.v1.SearchRequest
+	2,  // 28: gastrolog.v1.QueryService.Follow:input_type -> gastrolog.v1.FollowRequest
+	4,  // 29: gastrolog.v1.QueryService.Explain:input_type -> gastrolog.v1.ExplainRequest
+	15, // 30: gastrolog.v1.QueryService.Histogram:input_type -> gastrolog.v1.HistogramRequest
+	1,  // 31: gastrolog.v1.QueryService.Search:output_type -> gastrolog.v1.SearchResponse
+	3,  // 32: gastrolog.v1.QueryService.Follow:output_type -> gastrolog.v1.FollowResponse
+	5,  // 33: gastrolog.v1.QueryService.Explain:output_type -> gastrolog.v1.ExplainResponse
+	16, // 34: gastrolog.v1.QueryService.Histogram:output_type -> gastrolog.v1.HistogramResponse
+	31, // [31:35] is the sub-list for method output_type
+	27, // [27:31] is the sub-list for method input_type
+	27, // [27:27] is the sub-list for extension type_name
+	27, // [27:27] is the sub-list for extension extendee
+	0,  // [0:27] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_query_proto_init() }
@@ -1424,7 +1438,7 @@ func file_gastrolog_v1_query_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_query_proto_rawDesc), len(file_gastrolog_v1_query_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

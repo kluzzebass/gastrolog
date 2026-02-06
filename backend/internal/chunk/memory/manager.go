@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -262,6 +263,30 @@ func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, boo
 	}
 
 	return uint64(lo - 1), true, nil
+}
+
+// ReadWriteTimestamps reads the WriteTS for each given record position in a chunk.
+func (m *Manager) ReadWriteTimestamps(id chunk.ChunkID, positions []uint64) ([]time.Time, error) {
+	if len(positions) == 0 {
+		return nil, nil
+	}
+
+	m.mu.Lock()
+	state := m.findChunkLocked(id)
+	m.mu.Unlock()
+	if state == nil {
+		return nil, chunk.ErrChunkNotFound
+	}
+
+	results := make([]time.Time, len(positions))
+	for i, pos := range positions {
+		if pos >= uint64(len(state.records)) {
+			return nil, fmt.Errorf("position %d out of range (chunk has %d records)", pos, len(state.records))
+		}
+		results[i] = state.records[pos].WriteTS
+	}
+
+	return results, nil
 }
 
 // SetRotationPolicy updates the rotation policy for future appends.

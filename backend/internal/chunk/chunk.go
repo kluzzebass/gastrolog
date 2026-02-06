@@ -37,6 +37,10 @@ type ChunkManager interface {
 	// This enables time-based seeking without requiring the time index to be built.
 	FindStartPosition(id ChunkID, ts time.Time) (uint64, bool, error)
 
+	// ReadWriteTimestamps reads the WriteTS for each given record position in a chunk.
+	// Positions must be valid indices. Returns timestamps in the same order as positions.
+	ReadWriteTimestamps(id ChunkID, positions []uint64) ([]time.Time, error)
+
 	// SetRotationPolicy updates the rotation policy for future appends.
 	// This takes effect immediately; the next append will use the new policy.
 	SetRotationPolicy(policy RotationPolicy)

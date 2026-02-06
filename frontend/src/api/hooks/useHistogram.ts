@@ -2,7 +2,11 @@ import { useState, useCallback, useRef } from "react";
 import { queryClient, HistogramBucket } from "../client";
 
 export interface HistogramData {
-  buckets: { ts: Date; count: number }[];
+  buckets: {
+    ts: Date;
+    count: number;
+    levelCounts: Record<string, number>;
+  }[];
   start: Date | null;
   end: Date | null;
 }
@@ -40,6 +44,9 @@ export function useHistogram() {
         const buckets = response.buckets.map((b: HistogramBucket) => ({
           ts: b.ts ? b.ts.toDate() : new Date(),
           count: Number(b.count),
+          levelCounts: Object.fromEntries(
+            Object.entries(b.levelCounts).map(([k, v]) => [k, Number(v)]),
+          ),
         }));
 
         setState({

@@ -161,4 +161,5 @@ message HistogramResponse {
 message HistogramBucket {
   google.protobuf.Timestamp ts = 1; // Bucket start time
   int64 count = 2;                  // Record count in this bucket
+  map<string, int64> level_counts = 3; // Per-severity counts, e.g. {"error": 12, "warn": 45}
 }

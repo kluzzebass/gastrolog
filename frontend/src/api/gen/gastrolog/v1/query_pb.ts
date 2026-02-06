@@ -991,6 +991,13 @@ export class HistogramBucket extends Message<HistogramBucket> {
    */
   count = protoInt64.zero;
 
+  /**
+   * Per-severity counts, e.g. {"error": 12, "warn": 45}
+   *
+   * @generated from field: map<string, int64> level_counts = 3;
+   */
+  levelCounts: { [key: string]: bigint } = {};
+
   constructor(data?: PartialMessage<HistogramBucket>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1001,6 +1008,7 @@ export class HistogramBucket extends Message<HistogramBucket> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "ts", kind: "message", T: Timestamp },
     { no: 2, name: "count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "level_counts", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 3 /* ScalarType.INT64 */} },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): HistogramBucket {

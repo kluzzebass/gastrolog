@@ -914,6 +914,42 @@ func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, boo
 	return lo - 1, true, nil
 }
 
+// ReadWriteTimestamps reads the WriteTS for each given record position in a chunk.
+// Opens idx.log once and reads only the 8-byte WriteTS field for each position.
+func (m *Manager) ReadWriteTimestamps(id chunk.ChunkID, positions []uint64) ([]time.Time, error) {
+	if len(positions) == 0 {
+		return nil, nil
+	}
+
+	m.mu.Lock()
+	_, ok := m.metas[id]
+	m.mu.Unlock()
+	if !ok {
+		return nil, chunk.ErrChunkNotFound
+	}
+
+	idxPath := m.idxLogPath(id)
+	idxFile, err := os.Open(idxPath)
+	if err != nil {
+		return nil, err
+	}
+	defer idxFile.Close()
+
+	results := make([]time.Time, len(positions))
+	var buf [8]byte
+
+	for i, pos := range positions {
+		offset := int64(IdxHeaderSize) + int64(pos)*int64(IdxEntrySize) + int64(idxWriteTSOffset)
+		if _, err := idxFile.ReadAt(buf[:], offset); err != nil {
+			return nil, fmt.Errorf("read WriteTS at position %d: %w", pos, err)
+		}
+		usec := int64(binary.LittleEndian.Uint64(buf[:]))
+		results[i] = time.UnixMicro(usec)
+	}
+
+	return results, nil
+}
+
 // SetRotationPolicy updates the rotation policy for future appends.
 func (m *Manager) SetRotationPolicy(policy chunk.RotationPolicy) {
 	m.mu.Lock()

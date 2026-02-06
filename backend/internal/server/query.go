@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/index"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
@@ -283,6 +285,10 @@ func (s *QueryServer) Histogram(
 	}
 
 	counts := make([]int64, numBuckets)
+	levelCounts := make([]map[string]int64, numBuckets)
+	for i := range levelCounts {
+		levelCounts[i] = make(map[string]int64)
+	}
 	hasFilter := q.BoolExpr != nil
 
 	if hasFilter {
@@ -320,6 +326,7 @@ func (s *QueryServer) Histogram(
 			if cm == nil {
 				continue
 			}
+			im := s.orch.IndexManager(storeID)
 			metas, err := cm.List()
 			if err != nil {
 				continue
@@ -332,6 +339,9 @@ func (s *QueryServer) Histogram(
 					continue
 				}
 				s.histogramChunkFast(cm, meta, start, bucketWidth, numBuckets, counts)
+				if meta.Sealed {
+					s.histogramChunkSeverity(cm, im, meta, start, bucketWidth, numBuckets, levelCounts)
+				}
 			}
 		}
 	}
@@ -342,10 +352,14 @@ func (s *QueryServer) Histogram(
 		Buckets: make([]*apiv1.HistogramBucket, numBuckets),
 	}
 	for i := 0; i < numBuckets; i++ {
-		resp.Buckets[i] = &apiv1.HistogramBucket{
+		bucket := &apiv1.HistogramBucket{
 			Ts:    timestamppb.New(start.Add(bucketWidth * time.Duration(i))),
 			Count: counts[i],
 		}
+		if len(levelCounts[i]) > 0 {
+			bucket.LevelCounts = levelCounts[i]
+		}
+		resp.Buckets[i] = bucket
 	}
 
 	return connect.NewResponse(resp), nil
@@ -398,6 +412,112 @@ func (s *QueryServer) histogramChunkFast(
 			counts[b] += int64(endPos - startPos)
 		}
 	}
+}
+
+// severityLevels are the canonical severity names we track in histograms.
+var severityLevels = []string{"error", "warn", "info", "debug", "trace"}
+
+// severityKVLookups maps canonical severity names to the key=value pairs to look up
+// in the KV index (extracted from message text, e.g. level=error).
+var severityKVLookups = map[string][][2]string{
+	"error": {{"level", "error"}, {"level", "err"}},
+	"warn":  {{"level", "warn"}, {"level", "warning"}},
+	"info":  {{"level", "info"}},
+	"debug": {{"level", "debug"}},
+	"trace": {{"level", "trace"}},
+}
+
+// severityAttrKVLookups maps canonical severity names to the key=value pairs to look up
+// in the attr KV index (from record attributes, e.g. severity_name=error).
+var severityAttrKVLookups = map[string][][2]string{
+	"error": {{"severity_name", "err"}, {"severity_name", "error"}},
+	"warn":  {{"severity_name", "warning"}, {"severity_name", "warn"}},
+	"info":  {{"severity_name", "info"}},
+	"debug": {{"severity_name", "debug"}},
+	"trace": {{"severity_name", "trace"}},
+}
+
+// histogramChunkSeverity populates per-level counts for a chunk using KV indexes.
+// Only works on sealed, indexed chunks. Returns false if indexes are unavailable.
+func (s *QueryServer) histogramChunkSeverity(
+	cm chunk.ChunkManager,
+	im index.IndexManager,
+	meta chunk.ChunkMeta,
+	start time.Time,
+	bucketWidth time.Duration,
+	numBuckets int,
+	levelCounts []map[string]int64,
+) bool {
+	if im == nil {
+		return false
+	}
+
+	// Open KV index (from message text).
+	kvIdx, _, err := im.OpenKVIndex(meta.ID)
+	if err != nil {
+		return false
+	}
+	kvReader := index.NewKVIndexReader(meta.ID, kvIdx.Entries())
+
+	// Open attr KV index (from record attributes).
+	attrKVIdx, err := im.OpenAttrKVIndex(meta.ID)
+	var attrKVReader *index.KVIndexReader
+	if err == nil {
+		// AttrKVIndex uses AttrKVIndexEntry, but we need KVIndexReader.
+		// Convert entries.
+		attrEntries := attrKVIdx.Entries()
+		kvEntries := make([]index.KVIndexEntry, len(attrEntries))
+		for i, e := range attrEntries {
+			kvEntries[i] = index.KVIndexEntry{Key: e.Key, Value: e.Value, Positions: e.Positions}
+		}
+		attrKVReader = index.NewKVIndexReader(meta.ID, kvEntries)
+	}
+
+	for _, level := range severityLevels {
+		// Collect positions from both KV and attr KV indexes.
+		var allPositions []uint64
+
+		for _, kv := range severityKVLookups[level] {
+			if positions, found := kvReader.Lookup(kv[0], kv[1]); found {
+				allPositions = append(allPositions, positions...)
+			}
+		}
+
+		if attrKVReader != nil {
+			for _, kv := range severityAttrKVLookups[level] {
+				if positions, found := attrKVReader.Lookup(kv[0], kv[1]); found {
+					allPositions = append(allPositions, positions...)
+				}
+			}
+		}
+
+		if len(allPositions) == 0 {
+			continue
+		}
+
+		// Deduplicate positions (a record might match both level=error and severity_name=error).
+		slices.Sort(allPositions)
+		allPositions = slices.Compact(allPositions)
+
+		// Read WriteTS for each position and bucket them.
+		timestamps, err := cm.ReadWriteTimestamps(meta.ID, allPositions)
+		if err != nil {
+			continue
+		}
+
+		for _, ts := range timestamps {
+			if ts.Before(start) || !ts.Before(start.Add(bucketWidth*time.Duration(numBuckets))) {
+				continue
+			}
+			idx := int(ts.Sub(start) / bucketWidth)
+			if idx >= numBuckets {
+				idx = numBuckets - 1
+			}
+			levelCounts[idx][level]++
+		}
+	}
+
+	return true
 }
 
 // protoToQuery converts a proto Query to the internal query.Query type.

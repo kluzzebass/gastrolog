@@ -228,6 +228,34 @@ export function HistogramChart({
           )}
           {buckets.map((bucket, i) => {
             const pct = maxCount > 0 ? bucket.count / maxCount : 0;
+            const lc = bucket.levelCounts;
+            const hasLevels = lc && Object.keys(lc).length > 0;
+            const levelSum = hasLevels
+              ? Object.values(lc).reduce((a, b) => a + b, 0)
+              : 0;
+            const other = bucket.count - levelSum;
+
+            // Stack order bottom-to-top: error, warn, info, debug, trace, other
+            const segments: { key: string; count: number; color: string }[] =
+              [];
+            if (hasLevels) {
+              for (const [key, color] of [
+                ["error", "var(--color-severity-error)"],
+                ["warn", "var(--color-severity-warn)"],
+                ["info", "var(--color-severity-info)"],
+                ["debug", "var(--color-severity-debug)"],
+                ["trace", "var(--color-severity-trace)"],
+              ] as const) {
+                if (lc[key] > 0) segments.push({ key, count: lc[key], color });
+              }
+              if (other > 0)
+                segments.push({
+                  key: "other",
+                  count: other,
+                  color: "var(--color-copper)",
+                });
+            }
+
             return (
               <div
                 key={i}
@@ -236,21 +264,75 @@ export function HistogramChart({
               >
                 {bucket.count > 0 && (
                   <div
-                    className={`absolute bottom-0 inset-x-0 rounded-t-sm transition-colors ${c(
-                      "bg-copper/60 group-hover:bg-copper",
-                      "bg-copper/50 group-hover:bg-copper/80",
-                    )}`}
+                    className="absolute bottom-0 inset-x-0 rounded-t-sm overflow-hidden transition-colors"
                     style={{
                       height: `${Math.max(pct * 100, 4)}%`,
                     }}
-                  />
+                  >
+                    {hasLevels && segments.length > 0 ? (
+                      <div
+                        className={`flex flex-col-reverse w-full h-full transition-opacity ${c("opacity-60 group-hover:opacity-100", "opacity-50 group-hover:opacity-80")}`}
+                      >
+                        {segments.map((seg) => (
+                          <div
+                            key={seg.key}
+                            className="w-full shrink-0"
+                            style={{
+                              height: `${(seg.count / bucket.count) * 100}%`,
+                              backgroundColor: seg.color,
+                            }}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <div
+                        className={`w-full h-full transition-opacity ${c(
+                          "bg-copper opacity-60 group-hover:opacity-100",
+                          "bg-copper opacity-50 group-hover:opacity-80",
+                        )}`}
+                      />
+                    )}
+                  </div>
                 )}
                 {/* Tooltip */}
                 <div
                   className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 text-[0.7em] font-mono rounded whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-10 ${c("bg-ink-surface text-text-bright border border-ink-border-subtle", "bg-light-surface text-light-text-bright border border-light-border-subtle")}`}
                 >
-                  {bucket.count.toLocaleString()} &middot;{" "}
-                  {formatTime(bucket.ts)}
+                  <div>
+                    {bucket.count.toLocaleString()} &middot;{" "}
+                    {formatTime(bucket.ts)}
+                  </div>
+                  {hasLevels && (
+                    <div className="mt-0.5 space-y-px">
+                      {(
+                        ["error", "warn", "info", "debug", "trace"] as const
+                      ).map(
+                        (level) =>
+                          lc[level] > 0 && (
+                            <div
+                              key={level}
+                              className="flex items-center gap-1.5"
+                            >
+                              <span
+                                className="inline-block w-1.5 h-1.5 rounded-full"
+                                style={{
+                                  backgroundColor: `var(--color-severity-${level})`,
+                                }}
+                              />
+                              <span className="opacity-70">{level}</span>
+                              <span>{lc[level].toLocaleString()}</span>
+                            </div>
+                          ),
+                      )}
+                      {other > 0 && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-copper/60" />
+                          <span className="opacity-70">other</span>
+                          <span>{other.toLocaleString()}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             );
