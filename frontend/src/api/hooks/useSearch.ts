@@ -29,6 +29,18 @@ export function extractTokens(queryStr: string): string[] {
       continue;
     }
 
+    // Skip query directives (not searchable content)
+    const lower = part.toLowerCase();
+    if (
+      lower === "reverse" ||
+      lower.startsWith("start=") ||
+      lower.startsWith("end=") ||
+      lower.startsWith("store=") ||
+      lower.startsWith("limit=")
+    ) {
+      continue;
+    }
+
     // Extract values from key=value pairs for highlighting
     if (part.includes("=")) {
       const eqIdx = part.indexOf("=");
@@ -39,7 +51,7 @@ export function extractTokens(queryStr: string): string[] {
       continue;
     }
 
-    tokens.push(part.toLowerCase());
+    tokens.push(lower);
   }
 
   return tokens;
