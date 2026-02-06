@@ -18,15 +18,18 @@ export function extractTokens(queryStr: string): string[] {
   const parts = queryStr.trim().split(/\s+/).filter(Boolean);
   const tokens: string[] = [];
 
-  for (const part of parts) {
-    // Skip key=value pairs, operators, and parens
+  for (let part of parts) {
+    // Strip parentheses
+    part = part.replace(/[()]/g, "");
+    if (!part) continue;
+
+    // Skip key=value pairs and operators
+    const upper = part.toUpperCase();
     if (
       part.includes("=") ||
-      part === "AND" ||
-      part === "OR" ||
-      part === "NOT" ||
-      part.startsWith("(") ||
-      part.endsWith(")")
+      upper === "AND" ||
+      upper === "OR" ||
+      upper === "NOT"
     ) {
       continue;
     }
