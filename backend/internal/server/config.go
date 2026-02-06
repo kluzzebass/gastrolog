@@ -30,7 +30,7 @@ func (s *ConfigServer) GetConfig(
 ) (*connect.Response[apiv1.GetConfigResponse], error) {
 	resp := &apiv1.GetConfigResponse{
 		Stores:    make([]*apiv1.StoreConfig, 0),
-		Receivers: make([]*apiv1.ReceiverConfig, 0),
+		Ingesters: make([]*apiv1.IngesterConfig, 0),
 	}
 
 	// Get store configs
@@ -46,9 +46,9 @@ func (s *ConfigServer) GetConfig(
 		})
 	}
 
-	// Get receiver configs
-	for _, id := range s.orch.ListReceivers() {
-		resp.Receivers = append(resp.Receivers, &apiv1.ReceiverConfig{
+	// Get ingester configs
+	for _, id := range s.orch.ListIngesters() {
+		resp.Ingesters = append(resp.Ingesters, &apiv1.IngesterConfig{
 			Id: id,
 			// Type not tracked after creation
 		})
@@ -76,19 +76,19 @@ func (s *ConfigServer) UpdateStoreRoute(
 	return connect.NewResponse(&apiv1.UpdateStoreRouteResponse{}), nil
 }
 
-// ListReceivers returns all registered receivers.
-func (s *ConfigServer) ListReceivers(
+// ListIngesters returns all registered ingesters.
+func (s *ConfigServer) ListIngesters(
 	ctx context.Context,
-	req *connect.Request[apiv1.ListReceiversRequest],
-) (*connect.Response[apiv1.ListReceiversResponse], error) {
-	ids := s.orch.ListReceivers()
+	req *connect.Request[apiv1.ListIngestersRequest],
+) (*connect.Response[apiv1.ListIngestersResponse], error) {
+	ids := s.orch.ListIngesters()
 
-	resp := &apiv1.ListReceiversResponse{
-		Receivers: make([]*apiv1.ReceiverInfo, 0, len(ids)),
+	resp := &apiv1.ListIngestersResponse{
+		Ingesters: make([]*apiv1.IngesterInfo, 0, len(ids)),
 	}
 
 	for _, id := range ids {
-		resp.Receivers = append(resp.Receivers, &apiv1.ReceiverInfo{
+		resp.Ingesters = append(resp.Ingesters, &apiv1.IngesterInfo{
 			Id:      id,
 			Running: s.orch.IsRunning(),
 		})
@@ -97,29 +97,29 @@ func (s *ConfigServer) ListReceivers(
 	return connect.NewResponse(resp), nil
 }
 
-// GetReceiverStatus returns status for a specific receiver.
-func (s *ConfigServer) GetReceiverStatus(
+// GetIngesterStatus returns status for a specific ingester.
+func (s *ConfigServer) GetIngesterStatus(
 	ctx context.Context,
-	req *connect.Request[apiv1.GetReceiverStatusRequest],
-) (*connect.Response[apiv1.GetReceiverStatusResponse], error) {
+	req *connect.Request[apiv1.GetIngesterStatusRequest],
+) (*connect.Response[apiv1.GetIngesterStatusResponse], error) {
 	if req.Msg.Id == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
 	}
 
-	// Check if receiver exists
+	// Check if ingester exists
 	found := false
-	for _, id := range s.orch.ListReceivers() {
+	for _, id := range s.orch.ListIngesters() {
 		if id == req.Msg.Id {
 			found = true
 			break
 		}
 	}
 	if !found {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("receiver not found"))
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("ingester not found"))
 	}
 
-	// TODO: track per-receiver metrics
-	return connect.NewResponse(&apiv1.GetReceiverStatusResponse{
+	// TODO: track per-ingester metrics
+	return connect.NewResponse(&apiv1.GetIngesterStatusResponse{
 		Id:      req.Msg.Id,
 		Running: s.orch.IsRunning(),
 	}), nil

@@ -12,18 +12,18 @@ service ConfigService {
   // UpdateStoreRoute updates a store's routing expression.
   rpc UpdateStoreRoute(UpdateStoreRouteRequest) returns (UpdateStoreRouteResponse);
 
-  // ListReceivers returns all registered receivers.
-  rpc ListReceivers(ListReceiversRequest) returns (ListReceiversResponse);
+  // ListIngesters returns all registered ingesters.
+  rpc ListIngesters(ListIngestersRequest) returns (ListIngestersResponse);
 
-  // GetReceiverStatus returns status for a specific receiver.
-  rpc GetReceiverStatus(GetReceiverStatusRequest) returns (GetReceiverStatusResponse);
+  // GetIngesterStatus returns status for a specific ingester.
+  rpc GetIngesterStatus(GetIngesterStatusRequest) returns (GetIngesterStatusResponse);
 }
 
 message GetConfigRequest {}
 
 message GetConfigResponse {
   repeated StoreConfig stores = 1;
-  repeated ReceiverConfig receivers = 2;
+  repeated IngesterConfig ingesters = 2;
   map<string, RotationPolicyConfig> rotation_policies = 3;
 }
 
@@ -35,7 +35,7 @@ message StoreConfig {
   map<string, string> params = 5;
 }
 
-message ReceiverConfig {
+message IngesterConfig {
   string id = 1;
   string type = 2;
   map<string, string> params = 3;
@@ -54,26 +54,26 @@ message UpdateStoreRouteRequest {
 
 message UpdateStoreRouteResponse {}
 
-message ListReceiversRequest {}
+message ListIngestersRequest {}
 
-message ListReceiversResponse {
-  repeated ReceiverInfo receivers = 1;
+message ListIngestersResponse {
+  repeated IngesterInfo ingesters = 1;
 }
 
-message ReceiverInfo {
+message IngesterInfo {
   string id = 1;
   string type = 2;
   bool running = 3;
 }
 
-message GetReceiverStatusRequest {
+message GetIngesterStatusRequest {
   string id = 1;
 }
 
-message GetReceiverStatusResponse {
+message GetIngesterStatusResponse {
   string id = 1;
   string type = 2;
   bool running = 3;
-  int64 messages_received = 4;
+  int64 messages_ingested = 4;
   int64 errors = 5;
 }

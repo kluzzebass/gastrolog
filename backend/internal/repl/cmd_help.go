@@ -27,7 +27,7 @@ Query filters:
   end=TIME                 End time bound on WriteTS
   source_start=TIME        Start time bound on SourceTS (when log was generated)
   source_end=TIME          End time bound on SourceTS
-  ingest_start=TIME        Start time bound on IngestTS (when receiver got it)
+  ingest_start=TIME        Start time bound on IngestTS (when ingester got it)
   ingest_end=TIME          End time bound on IngestTS
   limit=N                  Maximum total results
   key=value                Filter by key=value in attrs OR message (can repeat, AND semantics)

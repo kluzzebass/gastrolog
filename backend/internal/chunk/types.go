@@ -213,7 +213,7 @@ type ChunkMeta struct {
 //
 // Timestamps:
 //   - SourceTS: when the log was generated at the source (e.g., parsed from syslog timestamp)
-//   - IngestTS: when our receiver received the message
+//   - IngestTS: when our ingester received the message
 //   - WriteTS:  when the chunk manager wrote the record (monotonic within a chunk)
 //
 // Ref and StoreID are populated by the query engine when returning search

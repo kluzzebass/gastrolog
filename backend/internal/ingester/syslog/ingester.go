@@ -1,4 +1,4 @@
-// Package syslog provides a syslog receiver that accepts messages via UDP and TCP.
+// Package syslog provides a syslog ingester that accepts messages via UDP and TCP.
 package syslog
 
 import (
@@ -16,12 +16,12 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
-// Receiver accepts syslog messages via UDP and/or TCP.
-// It implements orchestrator.Receiver.
+// Ingester accepts syslog messages via UDP and/or TCP.
+// It implements orchestrator.Ingester.
 //
 // Supports both RFC 3164 (BSD) and RFC 5424 (IETF) formats with auto-detection.
 // Messages are parsed and relevant fields extracted into attributes.
-type Receiver struct {
+type Ingester struct {
 	udpAddr string
 	tcpAddr string
 	out     chan<- orchestrator.IngestMessage
@@ -32,7 +32,7 @@ type Receiver struct {
 	tcpListener net.Listener
 }
 
-// Config holds syslog receiver configuration.
+// Config holds syslog ingester configuration.
 type Config struct {
 	// UDPAddr is the UDP address to listen on (e.g., ":514").
 	// Empty string disables UDP.
@@ -46,17 +46,17 @@ type Config struct {
 	Logger *slog.Logger
 }
 
-// New creates a new syslog receiver.
-func New(cfg Config) *Receiver {
-	return &Receiver{
+// New creates a new syslog ingester.
+func New(cfg Config) *Ingester {
+	return &Ingester{
 		udpAddr: cfg.UDPAddr,
 		tcpAddr: cfg.TCPAddr,
-		logger:  logging.Default(cfg.Logger).With("component", "receiver", "type", "syslog"),
+		logger:  logging.Default(cfg.Logger).With("component", "ingester", "type", "syslog"),
 	}
 }
 
 // Run starts the syslog listeners and blocks until ctx is cancelled.
-func (r *Receiver) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (r *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
 	r.out = out
 
 	var wg sync.WaitGroup
@@ -85,18 +85,18 @@ func (r *Receiver) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 	}
 
 	if r.udpAddr == "" && r.tcpAddr == "" {
-		return errors.New("syslog receiver: no UDP or TCP address configured")
+		return errors.New("syslog ingester: no UDP or TCP address configured")
 	}
 
 	// Wait for context cancellation or error.
 	select {
 	case <-ctx.Done():
-		r.logger.Info("syslog receiver stopping")
+		r.logger.Info("syslog ingester stopping")
 		r.shutdown()
 		wg.Wait()
 		return nil
 	case err := <-errCh:
-		r.logger.Info("syslog receiver stopping", "error", err)
+		r.logger.Info("syslog ingester stopping", "error", err)
 		r.shutdown()
 		wg.Wait()
 		return err
@@ -104,7 +104,7 @@ func (r *Receiver) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 }
 
 // shutdown closes all listeners.
-func (r *Receiver) shutdown() {
+func (r *Ingester) shutdown() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -119,7 +119,7 @@ func (r *Receiver) shutdown() {
 }
 
 // runUDP handles UDP syslog messages.
-func (r *Receiver) runUDP(ctx context.Context) error {
+func (r *Ingester) runUDP(ctx context.Context) error {
 	addr, err := net.ResolveUDPAddr("udp", r.udpAddr)
 	if err != nil {
 		return err
@@ -173,7 +173,7 @@ func (r *Receiver) runUDP(ctx context.Context) error {
 }
 
 // runTCP handles TCP syslog connections.
-func (r *Receiver) runTCP(ctx context.Context) error {
+func (r *Ingester) runTCP(ctx context.Context) error {
 	listener, err := net.Listen("tcp", r.tcpAddr)
 	if err != nil {
 		return err
@@ -221,7 +221,7 @@ func (r *Receiver) runTCP(ctx context.Context) error {
 
 // handleTCPConn handles a single TCP connection.
 // TCP syslog uses either newline-delimited or octet-counted framing.
-func (r *Receiver) handleTCPConn(ctx context.Context, conn net.Conn) {
+func (r *Ingester) handleTCPConn(ctx context.Context, conn net.Conn) {
 	remoteIP := ""
 	if tcpAddr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
 		remoteIP = tcpAddr.IP.String()
@@ -286,7 +286,7 @@ func (r *Receiver) handleTCPConn(ctx context.Context, conn net.Conn) {
 
 // readOctetCounted reads an octet-counted syslog message.
 // Format: "123 <message>" where 123 is the length of <message>.
-func (r *Receiver) readOctetCounted(reader *bufio.Reader) ([]byte, error) {
+func (r *Ingester) readOctetCounted(reader *bufio.Reader) ([]byte, error) {
 	// Read the length prefix.
 	var length int
 	for {
@@ -313,7 +313,7 @@ func (r *Receiver) readOctetCounted(reader *bufio.Reader) ([]byte, error) {
 }
 
 // UDPAddr returns the UDP listener address. Only valid after Run() has started.
-func (r *Receiver) UDPAddr() net.Addr {
+func (r *Ingester) UDPAddr() net.Addr {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.udpConn == nil {
@@ -323,7 +323,7 @@ func (r *Receiver) UDPAddr() net.Addr {
 }
 
 // TCPAddr returns the TCP listener address. Only valid after Run() has started.
-func (r *Receiver) TCPAddr() net.Addr {
+func (r *Ingester) TCPAddr() net.Addr {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.tcpListener == nil {
@@ -334,7 +334,7 @@ func (r *Receiver) TCPAddr() net.Addr {
 
 // parseMessage parses a syslog message and extracts attributes.
 // Auto-detects RFC 3164 vs RFC 5424 format.
-func (r *Receiver) parseMessage(data []byte, remoteIP string) orchestrator.IngestMessage {
+func (r *Ingester) parseMessage(data []byte, remoteIP string) orchestrator.IngestMessage {
 	attrs := make(map[string]string, 8)
 	if remoteIP != "" {
 		attrs["remote_ip"] = remoteIP
@@ -401,7 +401,7 @@ func parsePriority(data []byte) (int, []byte, bool) {
 // Format: MMM DD HH:MM:SS HOSTNAME TAG: MESSAGE
 // Returns the parsed timestamp (zero if parsing fails).
 // Note: RFC 3164 timestamps have no year, so we use the current year.
-func (r *Receiver) parseRFC3164(data []byte, attrs map[string]string) time.Time {
+func (r *Ingester) parseRFC3164(data []byte, attrs map[string]string) time.Time {
 	var sourceTS time.Time
 
 	// Try to parse timestamp: "Jan  2 15:04:05" or "Jan 02 15:04:05"
@@ -485,7 +485,7 @@ func (r *Receiver) parseRFC3164(data []byte, attrs map[string]string) time.Time 
 // Format: VERSION TIMESTAMP HOSTNAME APP-NAME PROCID MSGID [SD] MESSAGE
 // Returns the parsed timestamp (zero if parsing fails).
 // RFC 5424 timestamps are ISO 8601 format: 2003-10-11T22:14:15.003Z or 2003-10-11T22:14:15.003-07:00
-func (r *Receiver) parseRFC5424(data []byte, attrs map[string]string) time.Time {
+func (r *Ingester) parseRFC5424(data []byte, attrs map[string]string) time.Time {
 	var sourceTS time.Time
 
 	fields := splitFields(data, 7)

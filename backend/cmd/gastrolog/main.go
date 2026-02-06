@@ -27,9 +27,9 @@ import (
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
-	"gastrolog/internal/receiver/chatterbox"
-	recvhttp "gastrolog/internal/receiver/http"
-	recvsyslog "gastrolog/internal/receiver/syslog"
+	"gastrolog/internal/ingester/chatterbox"
+	ingesthttp "gastrolog/internal/ingester/http"
+	ingestsyslog "gastrolog/internal/ingester/syslog"
 	"gastrolog/internal/repl"
 	"gastrolog/internal/server"
 )
@@ -84,7 +84,7 @@ func run(ctx context.Context, logger *slog.Logger, configPath, serverAddr string
 		logger.Info("no config found, running with empty configuration")
 	} else {
 		logger.Info("loaded config",
-			"receivers", len(cfg.Receivers),
+			"ingesters", len(cfg.Ingesters),
 			"stores", len(cfg.Stores))
 	}
 
@@ -161,10 +161,10 @@ func run(ctx context.Context, logger *slog.Logger, configPath, serverAddr string
 // The logger is passed to component factories for structured logging.
 func buildFactories(logger *slog.Logger) orchestrator.Factories {
 	return orchestrator.Factories{
-		Receivers: map[string]orchestrator.ReceiverFactory{
-			"chatterbox": chatterbox.NewReceiver,
-			"http":       recvhttp.NewFactory(),
-			"syslog":     recvsyslog.NewFactory(),
+		Ingesters: map[string]orchestrator.IngesterFactory{
+			"chatterbox": chatterbox.NewIngester,
+			"http":       ingesthttp.NewFactory(),
+			"syslog":     ingestsyslog.NewFactory(),
 		},
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"file":   chunkfile.NewFactory(),

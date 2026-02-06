@@ -139,7 +139,7 @@ Index file headers include the chunk ID (8 bytes) after the common 4-byte prefix
 - **Attributes** -- `map[string]string` with binary encode/decode methods; embedded directly in records
 - **Record** -- log entry with `SourceTS`, `IngestTS`, `WriteTS` (all `time.Time`), `Attrs` (Attributes), and `Raw` payload
   - `SourceTS` -- when the log was generated at the source (parsed from syslog timestamp, Loki payload, etc.; zero if unknown)
-  - `IngestTS` -- when the receiver received the message
+  - `IngestTS` -- when the ingester received the message
   - `WriteTS` -- when the chunk manager appended the record (monotonic within a chunk)
   - `Attrs` -- key-value metadata stored alongside the record (no central registry)
 - **RecordRef** -- `ChunkID` + record index `Pos` (`uint64`); used for cursor positioning via `Seek`
@@ -151,14 +151,14 @@ Index file headers include the chunk ID (8 bytes) after the common 4-byte prefix
 Coordinates ingestion, indexing, and querying without owning business logic:
 
 - Routes records to chunk managers, triggers index builds on seal, delegates queries
-- **Receiver** interface -- sources of log messages; emit `IngestMessage` to shared channel
-- **IngestMessage** -- `{Attrs, Raw, SourceTS, IngestTS}` where `SourceTS` is parsed from the log source and `IngestTS` is set by receiver at receive time
+- **Ingester** interface -- sources of log messages; emit `IngestMessage` to shared channel
+- **IngestMessage** -- `{Attrs, Raw, SourceTS, IngestTS}` where `SourceTS` is parsed from the log source and `IngestTS` is set by ingester at receive time
 
-**Lifecycle:** `Start(ctx)` launches receiver goroutines + ingest loop. `Stop()` cancels context, waits for receivers, closes channel, waits for ingest loop, waits for index builds. All goroutines tracked with `sync.WaitGroup.Go()`.
+**Lifecycle:** `Start(ctx)` launches ingester goroutines + ingest loop. `Stop()` cancels context, waits for ingesters, closes channel, waits for ingest loop, waits for index builds. All goroutines tracked with `sync.WaitGroup.Go()`.
 
-### Receivers (`internal/receiver/`)
+### Ingesters (`internal/ingester/`)
 
-- **Chatterbox** -- test receiver generating random log messages (six format types with weighted selection)
+- **Chatterbox** -- test ingester generating random log messages (six format types with weighted selection)
 - **HTTP** -- Loki-compatible `POST /loki/api/v1/push` endpoint (port 3100)
 - **Syslog** -- RFC 3164/5424, UDP and TCP (port 514)
 
@@ -206,10 +206,10 @@ internal/
   format/           Shared binary header encoding/decoding
   logging/          slog helpers: Discard(), Default(), ComponentFilterHandler
   orchestrator/     Ingest routing, seal detection, search delegation
-  receiver/
-    chatterbox/     Test receiver (random log messages)
-    http/           Loki-compatible HTTP receiver
-    syslog/         RFC 3164/5424 syslog receiver
+  ingester/
+    chatterbox/     Test ingester (random log messages)
+    http/           Loki-compatible HTTP ingester
+    syslog/         RFC 3164/5424 syslog ingester
   chunk/
     types.go        Record, Attributes, ChunkMeta, ChunkID, RecordRef
     chunk.go        ChunkManager, RecordCursor, MetaStore interfaces

@@ -44,11 +44,11 @@ var (
 //   - A RWMutex protects registry access: Register* takes write lock,
 //     Ingest and Search* take read lock.
 //
-// Receiver lifecycle:
-//   - Receivers are registered before Start() is called.
-//   - Start() launches one goroutine per receiver plus an ingest loop.
-//   - Stop() cancels all receivers and the ingest loop via context.
-//   - Receivers emit IngestMessages; orchestrator resolves identity and routes.
+// Ingester lifecycle:
+//   - Ingesters are registered before Start() is called.
+//   - Start() launches one goroutine per ingester plus an ingest loop.
+//   - Stop() cancels all ingesters and the ingest loop via context.
+//   - Ingesters emit IngestMessages; orchestrator resolves identity and routes.
 //
 // Routing:
 //   - Each store has a route expression that determines which messages it receives.
@@ -68,9 +68,9 @@ type Orchestrator struct {
 	indexes map[string]index.IndexManager
 	queries map[string]*query.Engine
 
-	// Receiver management.
-	receivers       map[string]Receiver
-	receiverCancels map[string]context.CancelFunc // per-receiver cancel functions
+	// Ingester management.
+	ingesters       map[string]Ingester
+	ingesterCancels map[string]context.CancelFunc // per-ingester cancel functions
 
 	// Routing.
 	router *Router
@@ -81,7 +81,7 @@ type Orchestrator struct {
 	cancel       context.CancelFunc
 	done         chan struct{}
 	running      bool
-	receiverWg   sync.WaitGroup // tracks receiver goroutines
+	ingesterWg   sync.WaitGroup // tracks ingester goroutines
 	ingestLoopWg sync.WaitGroup // tracks ingest loop goroutine
 
 	// Index build lifecycle.
@@ -131,8 +131,8 @@ func New(cfg Config) *Orchestrator {
 		chunks:          make(map[string]chunk.ChunkManager),
 		indexes:         make(map[string]index.IndexManager),
 		queries:         make(map[string]*query.Engine),
-		receivers:       make(map[string]Receiver),
-		receiverCancels: make(map[string]context.CancelFunc),
+		ingesters:       make(map[string]Ingester),
+		ingesterCancels: make(map[string]context.CancelFunc),
 		ingestSize:      cfg.IngestChannelSize,
 		now:             cfg.Now,
 		indexCtx:        indexCtx,

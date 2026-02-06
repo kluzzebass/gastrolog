@@ -1,4 +1,4 @@
-// Package http provides an HTTP receiver that accepts log messages via the Loki Push API.
+// Package http provides an HTTP ingester that accepts log messages via the Loki Push API.
 package http
 
 import (
@@ -25,8 +25,8 @@ const (
 	maxAttrValueLen = 256 // maximum length of attribute value
 )
 
-// Receiver accepts log messages via the Loki Push API (POST /loki/api/v1/push).
-// It implements orchestrator.Receiver.
+// Ingester accepts log messages via the Loki Push API (POST /loki/api/v1/push).
+// It implements orchestrator.Ingester.
 //
 // This is compatible with Promtail, Grafana Alloy, Fluent Bit, and other tools
 // that support the Loki push protocol.
@@ -36,7 +36,7 @@ const (
 //   - Acknowledged: Returns 204 after message is persisted (X-Wait-Ack: true header)
 //
 // Note: X-Wait-Ack is a GastroLog extension not part of the Loki API.
-type Receiver struct {
+type Ingester struct {
 	addr     string
 	listener net.Listener
 	server   *http.Server
@@ -44,7 +44,7 @@ type Receiver struct {
 	logger   *slog.Logger
 }
 
-// Config holds HTTP receiver configuration.
+// Config holds HTTP ingester configuration.
 type Config struct {
 	// Addr is the address to listen on (e.g., ":3100", "127.0.0.1:3100").
 	Addr string
@@ -53,16 +53,16 @@ type Config struct {
 	Logger *slog.Logger
 }
 
-// New creates a new HTTP receiver.
-func New(cfg Config) *Receiver {
-	return &Receiver{
+// New creates a new HTTP ingester.
+func New(cfg Config) *Ingester {
+	return &Ingester{
 		addr:   cfg.Addr,
-		logger: logging.Default(cfg.Logger).With("component", "receiver", "type", "http"),
+		logger: logging.Default(cfg.Logger).With("component", "ingester", "type", "http"),
 	}
 }
 
 // Run starts the HTTP server and blocks until ctx is cancelled.
-func (r *Receiver) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (r *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
 	r.out = out
 
 	mux := http.NewServeMux()
@@ -85,7 +85,7 @@ func (r *Receiver) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 		return err
 	}
 
-	r.logger.Info("http receiver starting", "addr", r.listener.Addr().String())
+	r.logger.Info("http ingester starting", "addr", r.listener.Addr().String())
 
 	// Run server in background.
 	errCh := make(chan error, 1)
@@ -99,7 +99,7 @@ func (r *Receiver) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 	// Wait for context cancellation or server error.
 	select {
 	case <-ctx.Done():
-		r.logger.Info("http receiver stopping")
+		r.logger.Info("http ingester stopping")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		r.server.Shutdown(shutdownCtx)
@@ -110,7 +110,7 @@ func (r *Receiver) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 }
 
 // Addr returns the listener address. Only valid after Run() has started.
-func (r *Receiver) Addr() net.Addr {
+func (r *Ingester) Addr() net.Addr {
 	if r.listener == nil {
 		return nil
 	}
@@ -133,7 +133,7 @@ type Stream struct {
 type Value []json.RawMessage
 
 // handlePush handles POST /loki/api/v1/push requests.
-func (r *Receiver) handlePush(w http.ResponseWriter, req *http.Request) {
+func (r *Ingester) handlePush(w http.ResponseWriter, req *http.Request) {
 	waitAck := req.Header.Get("X-Wait-Ack") == "true"
 
 	// Handle gzip compression.
@@ -235,7 +235,7 @@ func (r *Receiver) handlePush(w http.ResponseWriter, req *http.Request) {
 
 // parseValue converts a Loki value to an IngestMessage.
 // Value format: ["timestamp_ns", "line"] or ["timestamp_ns", "line", {metadata}]
-func (r *Receiver) parseValue(val Value, streamLabels map[string]string) (orchestrator.IngestMessage, error) {
+func (r *Ingester) parseValue(val Value, streamLabels map[string]string) (orchestrator.IngestMessage, error) {
 	if len(val) < 2 {
 		return orchestrator.IngestMessage{}, errors.New("value must have at least 2 elements [timestamp, line]")
 	}

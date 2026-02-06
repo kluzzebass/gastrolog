@@ -23,7 +23,7 @@ func TestStoreSaveLoad(t *testing.T) {
 	ctx := context.Background()
 
 	original := &config.Config{
-		Receivers: []config.ReceiverConfig{
+		Ingesters: []config.IngesterConfig{
 			{ID: "syslog1", Type: "syslog-udp", Params: map[string]string{"port": "514"}},
 		},
 		Stores: []config.StoreConfig{
@@ -44,18 +44,18 @@ func TestStoreSaveLoad(t *testing.T) {
 		t.Fatal("expected config, got nil")
 	}
 
-	// Verify receivers.
-	if len(loaded.Receivers) != 1 {
-		t.Fatalf("expected 1 receiver, got %d", len(loaded.Receivers))
+	// Verify ingesters.
+	if len(loaded.Ingesters) != 1 {
+		t.Fatalf("expected 1 ingester, got %d", len(loaded.Ingesters))
 	}
-	if loaded.Receivers[0].ID != "syslog1" {
-		t.Errorf("receiver ID: expected %q, got %q", "syslog1", loaded.Receivers[0].ID)
+	if loaded.Ingesters[0].ID != "syslog1" {
+		t.Errorf("ingester ID: expected %q, got %q", "syslog1", loaded.Ingesters[0].ID)
 	}
-	if loaded.Receivers[0].Type != "syslog-udp" {
-		t.Errorf("receiver Type: expected %q, got %q", "syslog-udp", loaded.Receivers[0].Type)
+	if loaded.Ingesters[0].Type != "syslog-udp" {
+		t.Errorf("ingester Type: expected %q, got %q", "syslog-udp", loaded.Ingesters[0].Type)
 	}
-	if loaded.Receivers[0].Params["port"] != "514" {
-		t.Errorf("receiver Params[port]: expected %q, got %q", "514", loaded.Receivers[0].Params["port"])
+	if loaded.Ingesters[0].Params["port"] != "514" {
+		t.Errorf("ingester Params[port]: expected %q, got %q", "514", loaded.Ingesters[0].Params["port"])
 	}
 
 	// Verify stores.
@@ -75,7 +75,7 @@ func TestStoreIsolation(t *testing.T) {
 	ctx := context.Background()
 
 	original := &config.Config{
-		Receivers: []config.ReceiverConfig{
+		Ingesters: []config.IngesterConfig{
 			{ID: "r1", Type: "test", Params: map[string]string{"key": "value"}},
 		},
 	}
@@ -85,8 +85,8 @@ func TestStoreIsolation(t *testing.T) {
 	}
 
 	// Modify original after save.
-	original.Receivers[0].ID = "modified"
-	original.Receivers[0].Params["key"] = "modified"
+	original.Ingesters[0].ID = "modified"
+	original.Ingesters[0].Params["key"] = "modified"
 
 	// Load should return unmodified copy.
 	loaded, err := s.Load(ctx)
@@ -94,15 +94,15 @@ func TestStoreIsolation(t *testing.T) {
 		t.Fatalf("load: %v", err)
 	}
 
-	if loaded.Receivers[0].ID != "r1" {
-		t.Errorf("expected ID %q, got %q", "r1", loaded.Receivers[0].ID)
+	if loaded.Ingesters[0].ID != "r1" {
+		t.Errorf("expected ID %q, got %q", "r1", loaded.Ingesters[0].ID)
 	}
-	if loaded.Receivers[0].Params["key"] != "value" {
-		t.Errorf("expected Params[key] %q, got %q", "value", loaded.Receivers[0].Params["key"])
+	if loaded.Ingesters[0].Params["key"] != "value" {
+		t.Errorf("expected Params[key] %q, got %q", "value", loaded.Ingesters[0].Params["key"])
 	}
 
 	// Modify loaded config.
-	loaded.Receivers[0].ID = "also-modified"
+	loaded.Ingesters[0].ID = "also-modified"
 
 	// Load again should return fresh copy.
 	loaded2, err := s.Load(ctx)
@@ -110,8 +110,8 @@ func TestStoreIsolation(t *testing.T) {
 		t.Fatalf("load: %v", err)
 	}
 
-	if loaded2.Receivers[0].ID != "r1" {
-		t.Errorf("expected ID %q, got %q", "r1", loaded2.Receivers[0].ID)
+	if loaded2.Ingesters[0].ID != "r1" {
+		t.Errorf("expected ID %q, got %q", "r1", loaded2.Ingesters[0].ID)
 	}
 }
 
@@ -120,13 +120,13 @@ func TestStoreSaveOverwrite(t *testing.T) {
 	ctx := context.Background()
 
 	cfg1 := &config.Config{
-		Receivers: []config.ReceiverConfig{
+		Ingesters: []config.IngesterConfig{
 			{ID: "r1", Type: "t1"},
 		},
 	}
 
 	cfg2 := &config.Config{
-		Receivers: []config.ReceiverConfig{
+		Ingesters: []config.IngesterConfig{
 			{ID: "r2", Type: "t2"},
 			{ID: "r3", Type: "t3"},
 		},
@@ -145,11 +145,11 @@ func TestStoreSaveOverwrite(t *testing.T) {
 		t.Fatalf("load: %v", err)
 	}
 
-	if len(loaded.Receivers) != 2 {
-		t.Fatalf("expected 2 receivers, got %d", len(loaded.Receivers))
+	if len(loaded.Ingesters) != 2 {
+		t.Fatalf("expected 2 ingesters, got %d", len(loaded.Ingesters))
 	}
-	if loaded.Receivers[0].ID != "r2" {
-		t.Errorf("expected receiver ID %q, got %q", "r2", loaded.Receivers[0].ID)
+	if loaded.Ingesters[0].ID != "r2" {
+		t.Errorf("expected ingester ID %q, got %q", "r2", loaded.Ingesters[0].ID)
 	}
 }
 
@@ -171,8 +171,8 @@ func TestStoreEmptyConfig(t *testing.T) {
 	if loaded == nil {
 		t.Fatal("expected empty config, got nil")
 	}
-	if len(loaded.Receivers) != 0 {
-		t.Errorf("expected 0 receivers, got %d", len(loaded.Receivers))
+	if len(loaded.Ingesters) != 0 {
+		t.Errorf("expected 0 ingesters, got %d", len(loaded.Ingesters))
 	}
 	if len(loaded.Stores) != 0 {
 		t.Errorf("expected 0 stores, got %d", len(loaded.Stores))
@@ -184,7 +184,7 @@ func TestStoreNilParams(t *testing.T) {
 	ctx := context.Background()
 
 	cfg := &config.Config{
-		Receivers: []config.ReceiverConfig{
+		Ingesters: []config.IngesterConfig{
 			{ID: "r1", Type: "test", Params: nil},
 		},
 		Stores: []config.StoreConfig{
@@ -201,8 +201,8 @@ func TestStoreNilParams(t *testing.T) {
 		t.Fatalf("load: %v", err)
 	}
 
-	if loaded.Receivers[0].Params != nil {
-		t.Errorf("expected nil Params, got %v", loaded.Receivers[0].Params)
+	if loaded.Ingesters[0].Params != nil {
+		t.Errorf("expected nil Params, got %v", loaded.Ingesters[0].Params)
 	}
 	if loaded.Stores[0].Params != nil {
 		t.Errorf("expected nil Params, got %v", loaded.Stores[0].Params)

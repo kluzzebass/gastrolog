@@ -31,7 +31,7 @@ func TestStoreSaveLoad(t *testing.T) {
 	ctx := context.Background()
 
 	original := &config.Config{
-		Receivers: []config.ReceiverConfig{
+		Ingesters: []config.IngesterConfig{
 			{ID: "syslog1", Type: "syslog-udp", Params: map[string]string{"port": "514"}},
 			{ID: "file1", Type: "file", Params: map[string]string{"path": "/var/log/app.log"}},
 		},
@@ -59,15 +59,15 @@ func TestStoreSaveLoad(t *testing.T) {
 		t.Fatal("expected config, got nil")
 	}
 
-	// Verify receivers.
-	if len(loaded.Receivers) != 2 {
-		t.Fatalf("expected 2 receivers, got %d", len(loaded.Receivers))
+	// Verify ingesters.
+	if len(loaded.Ingesters) != 2 {
+		t.Fatalf("expected 2 ingesters, got %d", len(loaded.Ingesters))
 	}
-	if loaded.Receivers[0].ID != "syslog1" {
-		t.Errorf("receiver[0] ID: expected %q, got %q", "syslog1", loaded.Receivers[0].ID)
+	if loaded.Ingesters[0].ID != "syslog1" {
+		t.Errorf("ingester[0] ID: expected %q, got %q", "syslog1", loaded.Ingesters[0].ID)
 	}
-	if loaded.Receivers[0].Params["port"] != "514" {
-		t.Errorf("receiver[0] Params[port]: expected %q, got %q", "514", loaded.Receivers[0].Params["port"])
+	if loaded.Ingesters[0].Params["port"] != "514" {
+		t.Errorf("ingester[0] Params[port]: expected %q, got %q", "514", loaded.Ingesters[0].Params["port"])
 	}
 
 	// Verify stores.
@@ -87,7 +87,7 @@ func TestStoreReloadFromDisk(t *testing.T) {
 	ctx := context.Background()
 
 	original := &config.Config{
-		Receivers: []config.ReceiverConfig{
+		Ingesters: []config.IngesterConfig{
 			{ID: "r1", Type: "test"},
 		},
 	}
@@ -103,11 +103,11 @@ func TestStoreReloadFromDisk(t *testing.T) {
 		t.Fatalf("load from new store: %v", err)
 	}
 
-	if len(loaded.Receivers) != 1 {
-		t.Fatalf("expected 1 receiver, got %d", len(loaded.Receivers))
+	if len(loaded.Ingesters) != 1 {
+		t.Fatalf("expected 1 ingester, got %d", len(loaded.Ingesters))
 	}
-	if loaded.Receivers[0].ID != "r1" {
-		t.Errorf("expected ID %q, got %q", "r1", loaded.Receivers[0].ID)
+	if loaded.Ingesters[0].ID != "r1" {
+		t.Errorf("expected ID %q, got %q", "r1", loaded.Ingesters[0].ID)
 	}
 }
 
@@ -119,13 +119,13 @@ func TestStoreSaveOverwrite(t *testing.T) {
 	ctx := context.Background()
 
 	cfg1 := &config.Config{
-		Receivers: []config.ReceiverConfig{
+		Ingesters: []config.IngesterConfig{
 			{ID: "r1", Type: "t1"},
 		},
 	}
 
 	cfg2 := &config.Config{
-		Receivers: []config.ReceiverConfig{
+		Ingesters: []config.IngesterConfig{
 			{ID: "r2", Type: "t2"},
 			{ID: "r3", Type: "t3"},
 		},
@@ -144,11 +144,11 @@ func TestStoreSaveOverwrite(t *testing.T) {
 		t.Fatalf("load: %v", err)
 	}
 
-	if len(loaded.Receivers) != 2 {
-		t.Fatalf("expected 2 receivers, got %d", len(loaded.Receivers))
+	if len(loaded.Ingesters) != 2 {
+		t.Fatalf("expected 2 ingesters, got %d", len(loaded.Ingesters))
 	}
-	if loaded.Receivers[0].ID != "r2" {
-		t.Errorf("expected receiver ID %q, got %q", "r2", loaded.Receivers[0].ID)
+	if loaded.Ingesters[0].ID != "r2" {
+		t.Errorf("expected ingester ID %q, got %q", "r2", loaded.Ingesters[0].ID)
 	}
 }
 
@@ -160,7 +160,7 @@ func TestStoreCreatesDirectory(t *testing.T) {
 	ctx := context.Background()
 
 	cfg := &config.Config{
-		Receivers: []config.ReceiverConfig{
+		Ingesters: []config.IngesterConfig{
 			{ID: "r1", Type: "test"},
 		},
 	}
@@ -221,7 +221,7 @@ func TestStoreJSONIsHumanReadable(t *testing.T) {
 	ctx := context.Background()
 
 	cfg := &config.Config{
-		Receivers: []config.ReceiverConfig{
+		Ingesters: []config.IngesterConfig{
 			{ID: "syslog1", Type: "syslog-udp", Params: map[string]string{"port": "514"}},
 		},
 	}

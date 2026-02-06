@@ -51,7 +51,7 @@ type Store interface {
 // It is declarative: it defines what should exist, not how to create it.
 type Config struct {
 	RotationPolicies map[string]RotationPolicyConfig `json:"rotationPolicies,omitempty"`
-	Receivers        []ReceiverConfig                `json:"receivers,omitempty"`
+	Ingesters        []IngesterConfig                `json:"ingesters,omitempty"`
 	Stores           []StoreConfig                   `json:"stores,omitempty"`
 }
 
@@ -70,12 +70,12 @@ type RotationPolicyConfig struct {
 	MaxRecords int64 `json:"maxRecords,omitempty"`
 }
 
-// ReceiverConfig describes a receiver to instantiate.
-type ReceiverConfig struct {
-	// ID is a unique identifier for this receiver.
+// IngesterConfig describes a ingester to instantiate.
+type IngesterConfig struct {
+	// ID is a unique identifier for this ingester.
 	ID string `json:"id"`
 
-	// Type identifies the receiver implementation (e.g., "syslog-udp", "file").
+	// Type identifies the ingester implementation (e.g., "syslog-udp", "file").
 	Type string `json:"type"`
 
 	// Params contains type-specific configuration as opaque string key-value pairs.

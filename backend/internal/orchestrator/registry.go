@@ -28,12 +28,12 @@ func (o *Orchestrator) RegisterQueryEngine(key string, qe *query.Engine) {
 	o.queries[key] = qe
 }
 
-// RegisterReceiver adds a receiver to the registry.
+// RegisterIngester adds a ingester to the registry.
 // Must be called before Start().
-func (o *Orchestrator) RegisterReceiver(id string, r Receiver) {
+func (o *Orchestrator) RegisterIngester(id string, r Ingester) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.receivers[id] = r
+	o.ingesters[id] = r
 }
 
 // SetRouter sets the router for attribute-based message routing.
@@ -45,12 +45,12 @@ func (o *Orchestrator) SetRouter(r *Router) {
 	o.router = r
 }
 
-// UnregisterReceiver removes a receiver from the registry.
+// UnregisterIngester removes a ingester from the registry.
 // Must be called before Start() or after Stop().
-func (o *Orchestrator) UnregisterReceiver(id string) {
+func (o *Orchestrator) UnregisterIngester(id string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	delete(o.receivers, id)
+	delete(o.ingesters, id)
 }
 
 // ChunkManager returns the chunk manager registered under the given key.
@@ -91,12 +91,12 @@ func (o *Orchestrator) IndexManagers() []string {
 	return keys
 }
 
-// Receivers returns all registered receiver IDs.
-func (o *Orchestrator) Receivers() []string {
+// Ingesters returns all registered ingester IDs.
+func (o *Orchestrator) Ingesters() []string {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	keys := make([]string, 0, len(o.receivers))
-	for k := range o.receivers {
+	keys := make([]string, 0, len(o.ingesters))
+	for k := range o.ingesters {
 		keys = append(keys, k)
 	}
 	return keys
@@ -120,10 +120,10 @@ func (o *Orchestrator) ListStores() []string {
 	return o.ChunkManagers()
 }
 
-// ListReceivers returns all registered receiver IDs.
-// This is an alias for Receivers.
-func (o *Orchestrator) ListReceivers() []string {
-	return o.Receivers()
+// ListIngesters returns all registered ingester IDs.
+// This is an alias for Ingesters.
+func (o *Orchestrator) ListIngesters() []string {
+	return o.Ingesters()
 }
 
 // QueryEngine returns the query engine registered under the given key.

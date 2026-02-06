@@ -38,12 +38,12 @@ const (
 	// ConfigServiceUpdateStoreRouteProcedure is the fully-qualified name of the ConfigService's
 	// UpdateStoreRoute RPC.
 	ConfigServiceUpdateStoreRouteProcedure = "/gastrolog.v1.ConfigService/UpdateStoreRoute"
-	// ConfigServiceListReceiversProcedure is the fully-qualified name of the ConfigService's
-	// ListReceivers RPC.
-	ConfigServiceListReceiversProcedure = "/gastrolog.v1.ConfigService/ListReceivers"
-	// ConfigServiceGetReceiverStatusProcedure is the fully-qualified name of the ConfigService's
-	// GetReceiverStatus RPC.
-	ConfigServiceGetReceiverStatusProcedure = "/gastrolog.v1.ConfigService/GetReceiverStatus"
+	// ConfigServiceListIngestersProcedure is the fully-qualified name of the ConfigService's
+	// ListIngesters RPC.
+	ConfigServiceListIngestersProcedure = "/gastrolog.v1.ConfigService/ListIngesters"
+	// ConfigServiceGetIngesterStatusProcedure is the fully-qualified name of the ConfigService's
+	// GetIngesterStatus RPC.
+	ConfigServiceGetIngesterStatusProcedure = "/gastrolog.v1.ConfigService/GetIngesterStatus"
 )
 
 // ConfigServiceClient is a client for the gastrolog.v1.ConfigService service.
@@ -52,10 +52,10 @@ type ConfigServiceClient interface {
 	GetConfig(context.Context, *connect.Request[v1.GetConfigRequest]) (*connect.Response[v1.GetConfigResponse], error)
 	// UpdateStoreRoute updates a store's routing expression.
 	UpdateStoreRoute(context.Context, *connect.Request[v1.UpdateStoreRouteRequest]) (*connect.Response[v1.UpdateStoreRouteResponse], error)
-	// ListReceivers returns all registered receivers.
-	ListReceivers(context.Context, *connect.Request[v1.ListReceiversRequest]) (*connect.Response[v1.ListReceiversResponse], error)
-	// GetReceiverStatus returns status for a specific receiver.
-	GetReceiverStatus(context.Context, *connect.Request[v1.GetReceiverStatusRequest]) (*connect.Response[v1.GetReceiverStatusResponse], error)
+	// ListIngesters returns all registered ingesters.
+	ListIngesters(context.Context, *connect.Request[v1.ListIngestersRequest]) (*connect.Response[v1.ListIngestersResponse], error)
+	// GetIngesterStatus returns status for a specific ingester.
+	GetIngesterStatus(context.Context, *connect.Request[v1.GetIngesterStatusRequest]) (*connect.Response[v1.GetIngesterStatusResponse], error)
 }
 
 // NewConfigServiceClient constructs a client for the gastrolog.v1.ConfigService service. By
@@ -81,16 +81,16 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("UpdateStoreRoute")),
 			connect.WithClientOptions(opts...),
 		),
-		listReceivers: connect.NewClient[v1.ListReceiversRequest, v1.ListReceiversResponse](
+		listIngesters: connect.NewClient[v1.ListIngestersRequest, v1.ListIngestersResponse](
 			httpClient,
-			baseURL+ConfigServiceListReceiversProcedure,
-			connect.WithSchema(configServiceMethods.ByName("ListReceivers")),
+			baseURL+ConfigServiceListIngestersProcedure,
+			connect.WithSchema(configServiceMethods.ByName("ListIngesters")),
 			connect.WithClientOptions(opts...),
 		),
-		getReceiverStatus: connect.NewClient[v1.GetReceiverStatusRequest, v1.GetReceiverStatusResponse](
+		getIngesterStatus: connect.NewClient[v1.GetIngesterStatusRequest, v1.GetIngesterStatusResponse](
 			httpClient,
-			baseURL+ConfigServiceGetReceiverStatusProcedure,
-			connect.WithSchema(configServiceMethods.ByName("GetReceiverStatus")),
+			baseURL+ConfigServiceGetIngesterStatusProcedure,
+			connect.WithSchema(configServiceMethods.ByName("GetIngesterStatus")),
 			connect.WithClientOptions(opts...),
 		),
 	}
@@ -100,8 +100,8 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 type configServiceClient struct {
 	getConfig         *connect.Client[v1.GetConfigRequest, v1.GetConfigResponse]
 	updateStoreRoute  *connect.Client[v1.UpdateStoreRouteRequest, v1.UpdateStoreRouteResponse]
-	listReceivers     *connect.Client[v1.ListReceiversRequest, v1.ListReceiversResponse]
-	getReceiverStatus *connect.Client[v1.GetReceiverStatusRequest, v1.GetReceiverStatusResponse]
+	listIngesters     *connect.Client[v1.ListIngestersRequest, v1.ListIngestersResponse]
+	getIngesterStatus *connect.Client[v1.GetIngesterStatusRequest, v1.GetIngesterStatusResponse]
 }
 
 // GetConfig calls gastrolog.v1.ConfigService.GetConfig.
@@ -114,14 +114,14 @@ func (c *configServiceClient) UpdateStoreRoute(ctx context.Context, req *connect
 	return c.updateStoreRoute.CallUnary(ctx, req)
 }
 
-// ListReceivers calls gastrolog.v1.ConfigService.ListReceivers.
-func (c *configServiceClient) ListReceivers(ctx context.Context, req *connect.Request[v1.ListReceiversRequest]) (*connect.Response[v1.ListReceiversResponse], error) {
-	return c.listReceivers.CallUnary(ctx, req)
+// ListIngesters calls gastrolog.v1.ConfigService.ListIngesters.
+func (c *configServiceClient) ListIngesters(ctx context.Context, req *connect.Request[v1.ListIngestersRequest]) (*connect.Response[v1.ListIngestersResponse], error) {
+	return c.listIngesters.CallUnary(ctx, req)
 }
 
-// GetReceiverStatus calls gastrolog.v1.ConfigService.GetReceiverStatus.
-func (c *configServiceClient) GetReceiverStatus(ctx context.Context, req *connect.Request[v1.GetReceiverStatusRequest]) (*connect.Response[v1.GetReceiverStatusResponse], error) {
-	return c.getReceiverStatus.CallUnary(ctx, req)
+// GetIngesterStatus calls gastrolog.v1.ConfigService.GetIngesterStatus.
+func (c *configServiceClient) GetIngesterStatus(ctx context.Context, req *connect.Request[v1.GetIngesterStatusRequest]) (*connect.Response[v1.GetIngesterStatusResponse], error) {
+	return c.getIngesterStatus.CallUnary(ctx, req)
 }
 
 // ConfigServiceHandler is an implementation of the gastrolog.v1.ConfigService service.
@@ -130,10 +130,10 @@ type ConfigServiceHandler interface {
 	GetConfig(context.Context, *connect.Request[v1.GetConfigRequest]) (*connect.Response[v1.GetConfigResponse], error)
 	// UpdateStoreRoute updates a store's routing expression.
 	UpdateStoreRoute(context.Context, *connect.Request[v1.UpdateStoreRouteRequest]) (*connect.Response[v1.UpdateStoreRouteResponse], error)
-	// ListReceivers returns all registered receivers.
-	ListReceivers(context.Context, *connect.Request[v1.ListReceiversRequest]) (*connect.Response[v1.ListReceiversResponse], error)
-	// GetReceiverStatus returns status for a specific receiver.
-	GetReceiverStatus(context.Context, *connect.Request[v1.GetReceiverStatusRequest]) (*connect.Response[v1.GetReceiverStatusResponse], error)
+	// ListIngesters returns all registered ingesters.
+	ListIngesters(context.Context, *connect.Request[v1.ListIngestersRequest]) (*connect.Response[v1.ListIngestersResponse], error)
+	// GetIngesterStatus returns status for a specific ingester.
+	GetIngesterStatus(context.Context, *connect.Request[v1.GetIngesterStatusRequest]) (*connect.Response[v1.GetIngesterStatusResponse], error)
 }
 
 // NewConfigServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -155,16 +155,16 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("UpdateStoreRoute")),
 		connect.WithHandlerOptions(opts...),
 	)
-	configServiceListReceiversHandler := connect.NewUnaryHandler(
-		ConfigServiceListReceiversProcedure,
-		svc.ListReceivers,
-		connect.WithSchema(configServiceMethods.ByName("ListReceivers")),
+	configServiceListIngestersHandler := connect.NewUnaryHandler(
+		ConfigServiceListIngestersProcedure,
+		svc.ListIngesters,
+		connect.WithSchema(configServiceMethods.ByName("ListIngesters")),
 		connect.WithHandlerOptions(opts...),
 	)
-	configServiceGetReceiverStatusHandler := connect.NewUnaryHandler(
-		ConfigServiceGetReceiverStatusProcedure,
-		svc.GetReceiverStatus,
-		connect.WithSchema(configServiceMethods.ByName("GetReceiverStatus")),
+	configServiceGetIngesterStatusHandler := connect.NewUnaryHandler(
+		ConfigServiceGetIngesterStatusProcedure,
+		svc.GetIngesterStatus,
+		connect.WithSchema(configServiceMethods.ByName("GetIngesterStatus")),
 		connect.WithHandlerOptions(opts...),
 	)
 	return "/gastrolog.v1.ConfigService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -173,10 +173,10 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServiceGetConfigHandler.ServeHTTP(w, r)
 		case ConfigServiceUpdateStoreRouteProcedure:
 			configServiceUpdateStoreRouteHandler.ServeHTTP(w, r)
-		case ConfigServiceListReceiversProcedure:
-			configServiceListReceiversHandler.ServeHTTP(w, r)
-		case ConfigServiceGetReceiverStatusProcedure:
-			configServiceGetReceiverStatusHandler.ServeHTTP(w, r)
+		case ConfigServiceListIngestersProcedure:
+			configServiceListIngestersHandler.ServeHTTP(w, r)
+		case ConfigServiceGetIngesterStatusProcedure:
+			configServiceGetIngesterStatusHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -194,10 +194,10 @@ func (UnimplementedConfigServiceHandler) UpdateStoreRoute(context.Context, *conn
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.UpdateStoreRoute is not implemented"))
 }
 
-func (UnimplementedConfigServiceHandler) ListReceivers(context.Context, *connect.Request[v1.ListReceiversRequest]) (*connect.Response[v1.ListReceiversResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.ListReceivers is not implemented"))
+func (UnimplementedConfigServiceHandler) ListIngesters(context.Context, *connect.Request[v1.ListIngestersRequest]) (*connect.Response[v1.ListIngestersResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.ListIngesters is not implemented"))
 }
 
-func (UnimplementedConfigServiceHandler) GetReceiverStatus(context.Context, *connect.Request[v1.GetReceiverStatusRequest]) (*connect.Response[v1.GetReceiverStatusResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.GetReceiverStatus is not implemented"))
+func (UnimplementedConfigServiceHandler) GetIngesterStatus(context.Context, *connect.Request[v1.GetIngesterStatusRequest]) (*connect.Response[v1.GetIngesterStatusResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.GetIngesterStatus is not implemented"))
 }

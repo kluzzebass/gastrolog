@@ -9,7 +9,7 @@ import (
 // scheduled asynchronously for that chunk.
 //
 // This is the direct ingestion API for pre-constructed records.
-// For receiver-based ingestion, use Start() which runs an ingest loop
+// For ingester-based ingestion, use Start() which runs an ingest loop
 // that receives IngestMessages, resolves identity, and calls this internally.
 //
 // Ingest acquires an exclusive lock to serialize seal detection. This

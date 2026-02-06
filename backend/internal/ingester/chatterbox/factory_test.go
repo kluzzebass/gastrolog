@@ -4,15 +4,15 @@ import (
 	"testing"
 )
 
-func TestNewReceiverDefaults(t *testing.T) {
-	r, err := NewReceiver(nil, nil)
+func TestNewIngesterDefaults(t *testing.T) {
+	r, err := NewIngester(nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	recv, ok := r.(*Receiver)
+	recv, ok := r.(*Ingester)
 	if !ok {
-		t.Fatal("expected *Receiver")
+		t.Fatal("expected *Ingester")
 	}
 
 	if recv.minInterval != defaultMinInterval {
@@ -29,18 +29,18 @@ func TestNewReceiverDefaults(t *testing.T) {
 	}
 }
 
-func TestNewReceiverCustomIntervals(t *testing.T) {
+func TestNewIngesterCustomIntervals(t *testing.T) {
 	params := map[string]string{
 		"minInterval": "50ms",
 		"maxInterval": "500ms",
 	}
 
-	r, err := NewReceiver(params, nil)
+	r, err := NewIngester(params, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	recv := r.(*Receiver)
+	recv := r.(*Ingester)
 	if recv.minInterval.Milliseconds() != 50 {
 		t.Errorf("minInterval = %v, want 50ms", recv.minInterval)
 	}
@@ -49,34 +49,34 @@ func TestNewReceiverCustomIntervals(t *testing.T) {
 	}
 }
 
-func TestNewReceiverInvalidMinInterval(t *testing.T) {
+func TestNewIngesterInvalidMinInterval(t *testing.T) {
 	params := map[string]string{
 		"minInterval": "not-a-duration",
 	}
 
-	_, err := NewReceiver(params, nil)
+	_, err := NewIngester(params, nil)
 	if err == nil {
 		t.Error("expected error for invalid minInterval")
 	}
 }
 
-func TestNewReceiverInvalidMaxInterval(t *testing.T) {
+func TestNewIngesterInvalidMaxInterval(t *testing.T) {
 	params := map[string]string{
 		"maxInterval": "not-a-duration",
 	}
 
-	_, err := NewReceiver(params, nil)
+	_, err := NewIngester(params, nil)
 	if err == nil {
 		t.Error("expected error for invalid maxInterval")
 	}
 }
 
-func TestNewReceiverNegativeInterval(t *testing.T) {
+func TestNewIngesterNegativeInterval(t *testing.T) {
 	params := map[string]string{
 		"minInterval": "-1s",
 	}
 
-	_, err := NewReceiver(params, nil)
+	_, err := NewIngester(params, nil)
 	if err == nil {
 		t.Error("expected error for negative minInterval")
 	}
@@ -85,57 +85,57 @@ func TestNewReceiverNegativeInterval(t *testing.T) {
 		"maxInterval": "-1s",
 	}
 
-	_, err = NewReceiver(params, nil)
+	_, err = NewIngester(params, nil)
 	if err == nil {
 		t.Error("expected error for negative maxInterval")
 	}
 }
 
-func TestNewReceiverMinExceedsMax(t *testing.T) {
+func TestNewIngesterMinExceedsMax(t *testing.T) {
 	params := map[string]string{
 		"minInterval": "2s",
 		"maxInterval": "1s",
 	}
 
-	_, err := NewReceiver(params, nil)
+	_, err := NewIngester(params, nil)
 	if err == nil {
 		t.Error("expected error when minInterval > maxInterval")
 	}
 }
 
-func TestNewReceiverCustomInstance(t *testing.T) {
+func TestNewIngesterCustomInstance(t *testing.T) {
 	params := map[string]string{
 		"instance": "test-instance",
 	}
 
-	r, err := NewReceiver(params, nil)
+	r, err := NewIngester(params, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	recv := r.(*Receiver)
+	recv := r.(*Ingester)
 	if recv.instance != "test-instance" {
 		t.Errorf("instance = %q, want %q", recv.instance, "test-instance")
 	}
 }
 
-func TestNewReceiverCustomHostCount(t *testing.T) {
+func TestNewIngesterCustomHostCount(t *testing.T) {
 	params := map[string]string{
 		"hostCount": "20",
 	}
 
-	_, err := NewReceiver(params, nil)
+	_, err := NewIngester(params, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-func TestNewReceiverInvalidHostCount(t *testing.T) {
+func TestNewIngesterInvalidHostCount(t *testing.T) {
 	params := map[string]string{
 		"hostCount": "not-a-number",
 	}
 
-	_, err := NewReceiver(params, nil)
+	_, err := NewIngester(params, nil)
 	if err == nil {
 		t.Error("expected error for invalid hostCount")
 	}
@@ -144,7 +144,7 @@ func TestNewReceiverInvalidHostCount(t *testing.T) {
 		"hostCount": "0",
 	}
 
-	_, err = NewReceiver(params, nil)
+	_, err = NewIngester(params, nil)
 	if err == nil {
 		t.Error("expected error for zero hostCount")
 	}
@@ -153,29 +153,29 @@ func TestNewReceiverInvalidHostCount(t *testing.T) {
 		"hostCount": "-1",
 	}
 
-	_, err = NewReceiver(params, nil)
+	_, err = NewIngester(params, nil)
 	if err == nil {
 		t.Error("expected error for negative hostCount")
 	}
 }
 
-func TestNewReceiverCustomServiceCount(t *testing.T) {
+func TestNewIngesterCustomServiceCount(t *testing.T) {
 	params := map[string]string{
 		"serviceCount": "15",
 	}
 
-	_, err := NewReceiver(params, nil)
+	_, err := NewIngester(params, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-func TestNewReceiverInvalidServiceCount(t *testing.T) {
+func TestNewIngesterInvalidServiceCount(t *testing.T) {
 	params := map[string]string{
 		"serviceCount": "not-a-number",
 	}
 
-	_, err := NewReceiver(params, nil)
+	_, err := NewIngester(params, nil)
 	if err == nil {
 		t.Error("expected error for invalid serviceCount")
 	}
@@ -184,173 +184,173 @@ func TestNewReceiverInvalidServiceCount(t *testing.T) {
 		"serviceCount": "0",
 	}
 
-	_, err = NewReceiver(params, nil)
+	_, err = NewIngester(params, nil)
 	if err == nil {
 		t.Error("expected error for zero serviceCount")
 	}
 }
 
-func TestNewReceiverCustomFormats(t *testing.T) {
+func TestNewIngesterCustomFormats(t *testing.T) {
 	params := map[string]string{
 		"formats": "plain,json,kv",
 	}
 
-	r, err := NewReceiver(params, nil)
+	r, err := NewIngester(params, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	recv := r.(*Receiver)
+	recv := r.(*Ingester)
 	if len(recv.formats) != 3 {
 		t.Errorf("formats count = %d, want 3", len(recv.formats))
 	}
 }
 
-func TestNewReceiverSingleFormat(t *testing.T) {
+func TestNewIngesterSingleFormat(t *testing.T) {
 	params := map[string]string{
 		"formats": "json",
 	}
 
-	r, err := NewReceiver(params, nil)
+	r, err := NewIngester(params, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	recv := r.(*Receiver)
+	recv := r.(*Ingester)
 	if len(recv.formats) != 1 {
 		t.Errorf("formats count = %d, want 1", len(recv.formats))
 	}
 }
 
-func TestNewReceiverUnknownFormat(t *testing.T) {
+func TestNewIngesterUnknownFormat(t *testing.T) {
 	params := map[string]string{
 		"formats": "plain,unknown,json",
 	}
 
-	_, err := NewReceiver(params, nil)
+	_, err := NewIngester(params, nil)
 	if err == nil {
 		t.Error("expected error for unknown format")
 	}
 }
 
-func TestNewReceiverEmptyFormatsString(t *testing.T) {
+func TestNewIngesterEmptyFormatsString(t *testing.T) {
 	params := map[string]string{
 		"formats": "   ",
 	}
 
-	_, err := NewReceiver(params, nil)
+	_, err := NewIngester(params, nil)
 	if err == nil {
 		t.Error("expected error for empty formats string")
 	}
 }
 
-func TestNewReceiverDuplicateFormats(t *testing.T) {
+func TestNewIngesterDuplicateFormats(t *testing.T) {
 	params := map[string]string{
 		"formats": "plain,json,plain,json",
 	}
 
-	r, err := NewReceiver(params, nil)
+	r, err := NewIngester(params, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	recv := r.(*Receiver)
+	recv := r.(*Ingester)
 	if len(recv.formats) != 2 {
 		t.Errorf("formats count = %d, want 2 (duplicates removed)", len(recv.formats))
 	}
 }
 
-func TestNewReceiverCustomWeights(t *testing.T) {
+func TestNewIngesterCustomWeights(t *testing.T) {
 	params := map[string]string{
 		"formats":       "plain,json,kv",
 		"formatWeights": "plain=30,json=20,kv=50",
 	}
 
-	r, err := NewReceiver(params, nil)
+	r, err := NewIngester(params, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	recv := r.(*Receiver)
+	recv := r.(*Ingester)
 	if recv.totalWeight != 100 {
 		t.Errorf("totalWeight = %d, want 100", recv.totalWeight)
 	}
 }
 
-func TestNewReceiverPartialWeights(t *testing.T) {
+func TestNewIngesterPartialWeights(t *testing.T) {
 	// Only specify weight for some formats; others get default weight of 1.
 	params := map[string]string{
 		"formats":       "plain,json,kv",
 		"formatWeights": "plain=10",
 	}
 
-	r, err := NewReceiver(params, nil)
+	r, err := NewIngester(params, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	recv := r.(*Receiver)
+	recv := r.(*Ingester)
 	// plain=10, json=1, kv=1 => total=12
 	if recv.totalWeight != 12 {
 		t.Errorf("totalWeight = %d, want 12", recv.totalWeight)
 	}
 }
 
-func TestNewReceiverInvalidWeightFormat(t *testing.T) {
+func TestNewIngesterInvalidWeightFormat(t *testing.T) {
 	params := map[string]string{
 		"formats":       "plain,json",
 		"formatWeights": "plain:10", // Wrong separator.
 	}
 
-	_, err := NewReceiver(params, nil)
+	_, err := NewIngester(params, nil)
 	if err == nil {
 		t.Error("expected error for invalid weight format")
 	}
 }
 
-func TestNewReceiverInvalidWeightValue(t *testing.T) {
+func TestNewIngesterInvalidWeightValue(t *testing.T) {
 	params := map[string]string{
 		"formats":       "plain,json",
 		"formatWeights": "plain=abc",
 	}
 
-	_, err := NewReceiver(params, nil)
+	_, err := NewIngester(params, nil)
 	if err == nil {
 		t.Error("expected error for non-numeric weight")
 	}
 }
 
-func TestNewReceiverZeroWeight(t *testing.T) {
+func TestNewIngesterZeroWeight(t *testing.T) {
 	params := map[string]string{
 		"formats":       "plain,json",
 		"formatWeights": "plain=0",
 	}
 
-	_, err := NewReceiver(params, nil)
+	_, err := NewIngester(params, nil)
 	if err == nil {
 		t.Error("expected error for zero weight")
 	}
 }
 
-func TestNewReceiverNegativeWeight(t *testing.T) {
+func TestNewIngesterNegativeWeight(t *testing.T) {
 	params := map[string]string{
 		"formats":       "plain,json",
 		"formatWeights": "plain=-5",
 	}
 
-	_, err := NewReceiver(params, nil)
+	_, err := NewIngester(params, nil)
 	if err == nil {
 		t.Error("expected error for negative weight")
 	}
 }
 
-func TestNewReceiverUnknownFormatInWeights(t *testing.T) {
+func TestNewIngesterUnknownFormatInWeights(t *testing.T) {
 	params := map[string]string{
 		"formats":       "plain,json",
 		"formatWeights": "unknown=10",
 	}
 
-	_, err := NewReceiver(params, nil)
+	_, err := NewIngester(params, nil)
 	if err == nil {
 		t.Error("expected error for unknown format in weights")
 	}

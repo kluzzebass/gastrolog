@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { GetConfigRequest, GetConfigResponse, GetReceiverStatusRequest, GetReceiverStatusResponse, ListReceiversRequest, ListReceiversResponse, UpdateStoreRouteRequest, UpdateStoreRouteResponse } from "./config_pb.js";
+import { GetConfigRequest, GetConfigResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, ListIngestersRequest, ListIngestersResponse, UpdateStoreRouteRequest, UpdateStoreRouteResponse } from "./config_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -37,25 +37,25 @@ export const ConfigService = {
       kind: MethodKind.Unary,
     },
     /**
-     * ListReceivers returns all registered receivers.
+     * ListIngesters returns all registered ingesters.
      *
-     * @generated from rpc gastrolog.v1.ConfigService.ListReceivers
+     * @generated from rpc gastrolog.v1.ConfigService.ListIngesters
      */
-    listReceivers: {
-      name: "ListReceivers",
-      I: ListReceiversRequest,
-      O: ListReceiversResponse,
+    listIngesters: {
+      name: "ListIngesters",
+      I: ListIngestersRequest,
+      O: ListIngestersResponse,
       kind: MethodKind.Unary,
     },
     /**
-     * GetReceiverStatus returns status for a specific receiver.
+     * GetIngesterStatus returns status for a specific ingester.
      *
-     * @generated from rpc gastrolog.v1.ConfigService.GetReceiverStatus
+     * @generated from rpc gastrolog.v1.ConfigService.GetIngesterStatus
      */
-    getReceiverStatus: {
-      name: "GetReceiverStatus",
-      I: GetReceiverStatusRequest,
-      O: GetReceiverStatusResponse,
+    getIngesterStatus: {
+      name: "GetIngesterStatus",
+      I: GetIngesterStatusRequest,
+      O: GetIngesterStatusResponse,
       kind: MethodKind.Unary,
     },
   }
