@@ -44,7 +44,6 @@ Go 1.25+ backend with Connect RPC server, interactive REPL, chunk-based storage,
 ### 3.1 Format-Specific Indexes
 - [ ] JSON index (top-level fields, nested paths, arrays)
 - [ ] Apache/Nginx index (method, path, status, bytes, user_agent)
-- [ ] Syslog index (facility, severity, hostname, app, pid)
 - [ ] Logfmt index (structured key=value, more precise than heuristic KV)
 
 ## Phase 4: Query
