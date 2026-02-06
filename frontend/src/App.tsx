@@ -421,6 +421,16 @@ export function App() {
     }
   };
 
+  const handleTokenToggle = (token: string) => {
+    if (q.includes(token)) {
+      const newQuery = q.replace(token, "").replace(/\s+/g, " ").trim();
+      setUrlQuery(newQuery);
+    } else {
+      const newQuery = q.trim() ? `${q.trim()} ${token}` : token;
+      setUrlQuery(newQuery);
+    }
+  };
+
   const totalRecords = stats?.totalRecords ?? BigInt(0);
   const totalStores = stats?.totalStores ?? BigInt(0);
   const sealedChunks = stats?.sealedChunks ?? BigInt(0);
@@ -910,7 +920,7 @@ export function App() {
                           sameRecord(selectedRecord, record) ? null : record,
                         )
                       }
-                      onFieldSelect={handleFieldSelect}
+                      onFilterToggle={handleTokenToggle}
                       dark={dark}
                     />
                   ))}

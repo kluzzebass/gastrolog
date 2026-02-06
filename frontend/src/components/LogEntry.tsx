@@ -8,8 +8,7 @@ interface SeverityInfo {
   level: string;
   label: string;
   cls: string;
-  filterKey: string;
-  filterValue: string;
+  filter: string;
 }
 
 const BADGE_STYLE: Record<string, { label: string; cls: string }> = {
@@ -33,25 +32,25 @@ function detectSeverity(
   attrs: Record<string, string>,
   raw: string,
 ): SeverityInfo | null {
-  // 1. Check attrs: level, severity, severity_name.
+  // 1. Check attrs: level, severity, severity_name → key=value filter.
   for (const key of ["level", "severity", "severity_name"] as const) {
     const val = attrs[key];
     if (val) {
       const level = classifySeverity(val);
       if (level) {
         const style = BADGE_STYLE[level]!;
-        return { level, ...style, filterKey: key, filterValue: val };
+        return { level, ...style, filter: `${key}=${val}` };
       }
     }
   }
-  // 2. Fall back to keyword in raw text.
+  // 2. Fall back to keyword in raw text → bare token filter.
   const m = RE_SEVERITY.exec(raw);
   if (!m) return null;
   const word = m[1]!;
   const level = classifySeverity(word);
   if (!level) return null;
   const style = BADGE_STYLE[level]!;
-  return { level, ...style, filterKey: "level", filterValue: word };
+  return { level, ...style, filter: word.toLowerCase() };
 }
 
 export function LogEntry({
@@ -59,14 +58,14 @@ export function LogEntry({
   tokens,
   isSelected,
   onSelect,
-  onFieldSelect,
+  onFilterToggle,
   dark,
 }: {
   record: ProtoRecord;
   tokens: string[];
   isSelected: boolean;
   onSelect: () => void;
-  onFieldSelect?: (key: string, value: string) => void;
+  onFilterToggle?: (token: string) => void;
   dark: boolean;
 }) {
   const rawText = new TextDecoder().decode(record.raw);
@@ -106,7 +105,7 @@ export function LogEntry({
             className={`text-[0.6em] font-semibold leading-none border rounded-sm px-0.5 py-px cursor-pointer hover:brightness-125 transition-[filter] ${severity.cls}`}
             onClick={(e) => {
               e.stopPropagation();
-              onFieldSelect?.(severity.filterKey, severity.filterValue);
+              onFilterToggle?.(severity.filter);
             }}
           >
             {severity.label}
