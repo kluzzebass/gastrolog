@@ -23,16 +23,22 @@ export function extractTokens(queryStr: string): string[] {
     part = part.replace(/[()]/g, "");
     if (!part) continue;
 
-    // Skip key=value pairs and operators
+    // Skip operators
     const upper = part.toUpperCase();
-    if (
-      part.includes("=") ||
-      upper === "AND" ||
-      upper === "OR" ||
-      upper === "NOT"
-    ) {
+    if (upper === "AND" || upper === "OR" || upper === "NOT") {
       continue;
     }
+
+    // Extract values from key=value pairs for highlighting
+    if (part.includes("=")) {
+      const eqIdx = part.indexOf("=");
+      const value = part.slice(eqIdx + 1);
+      if (value && value !== "*") {
+        tokens.push(value.toLowerCase());
+      }
+      continue;
+    }
+
     tokens.push(part.toLowerCase());
   }
 
