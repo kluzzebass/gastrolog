@@ -158,6 +158,27 @@ export function EditorialDesign() {
     return () => mq.removeEventListener("change", handler);
   }, []);
   const [detailWidth, setDetailWidth] = useState(320);
+  const [sidebarWidth, setSidebarWidth] = useState(224);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [detailCollapsed, setDetailCollapsed] = useState(false);
+
+  // Auto-expand detail panel when a record is selected.
+  useEffect(() => {
+    if (selectedRecord && detailCollapsed) setDetailCollapsed(false);
+  }, [selectedRecord]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Escape key: deselect record and collapse detail panel.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSelectedRecord(null);
+        setDetailCollapsed(true);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
   const queryInputRef = useRef<HTMLTextAreaElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const expressionRef = useRef("");
@@ -170,6 +191,23 @@ export function EditorialDesign() {
       setDetailWidth(
         Math.max(240, Math.min(600, window.innerWidth - e.clientX)),
       );
+    };
+    const onMouseUp = () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  }, []);
+
+  const handleSidebarResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    const onMouseMove = (e: MouseEvent) => {
+      setSidebarWidth(Math.max(160, Math.min(400, e.clientX)));
     };
     const onMouseUp = () => {
       document.body.style.cursor = "";
@@ -493,8 +531,25 @@ export function EditorialDesign() {
       {/* ── Main Layout ── */}
       <div className="flex flex-1 overflow-hidden">
         {/* ── Sidebar ── */}
+        {sidebarCollapsed && (
+          <button
+            onClick={() => setSidebarCollapsed(false)}
+            className={`shrink-0 px-1 flex items-center border-r transition-colors ${c(
+              "border-ink-border-subtle bg-ink text-text-ghost hover:text-text-muted hover:bg-ink-hover",
+              "border-light-border-subtle bg-light-raised text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
+            )}`}
+            title="Expand sidebar"
+          >
+            {"\u25B8"}
+          </button>
+        )}
         <aside
-          className={`w-56 shrink-0 p-4 border-r editorial-scroll overflow-y-auto ${c("border-ink-border-subtle bg-ink", "border-light-border-subtle bg-light-raised")}`}
+          style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}
+          className={`shrink-0 overflow-hidden transition-[width] duration-200 ${
+            sidebarCollapsed
+              ? ""
+              : `p-4 border-r editorial-scroll overflow-y-auto ${c("border-ink-border-subtle bg-ink", "border-light-border-subtle bg-light-raised")}`
+          }`}
         >
           {/* Time Range */}
           <SidebarSection title="Time Range" dark={dark}>
@@ -616,6 +671,26 @@ export function EditorialDesign() {
             />
           </SidebarSection>
         </aside>
+
+        {/* Sidebar resize handle + collapse toggle */}
+        {!sidebarCollapsed && (
+          <div className="relative shrink-0 flex">
+            <div
+              onMouseDown={handleSidebarResize}
+              className={`w-1 cursor-col-resize transition-colors ${c("hover:bg-copper-muted/30", "hover:bg-copper-muted/20")}`}
+            />
+            <button
+              onClick={() => setSidebarCollapsed(true)}
+              className={`absolute top-2 -right-3 w-4 h-6 flex items-center justify-center text-[0.6em] rounded-r z-10 transition-colors ${c(
+                "bg-ink-surface border border-l-0 border-ink-border-subtle text-text-ghost hover:text-text-muted",
+                "bg-light-surface border border-l-0 border-light-border-subtle text-light-text-ghost hover:text-light-text-muted",
+              )}`}
+              title="Collapse sidebar"
+            >
+              {"\u25C2"}
+            </button>
+          </div>
+        )}
 
         {/* ── Main Content ── */}
         <main
@@ -825,39 +900,71 @@ export function EditorialDesign() {
         </main>
 
         {/* ── Detail Panel ── */}
-        {selectedRecord && (
-          <>
+        {/* Detail resize handle + collapse toggle */}
+        {!detailCollapsed && (
+          <div className="relative shrink-0 flex">
+            <button
+              onClick={() => setDetailCollapsed(true)}
+              className={`absolute top-2 -left-3 w-4 h-6 flex items-center justify-center text-[0.6em] rounded-l z-10 transition-colors ${c(
+                "bg-ink-surface border border-r-0 border-ink-border-subtle text-text-ghost hover:text-text-muted",
+                "bg-light-surface border border-r-0 border-light-border-subtle text-light-text-ghost hover:text-light-text-muted",
+              )}`}
+              title="Collapse detail panel"
+            >
+              {"\u25B8"}
+            </button>
             <div
               onMouseDown={handleDetailResize}
-              className={`w-1 shrink-0 cursor-col-resize transition-colors ${c("hover:bg-copper-muted/30", "hover:bg-copper-muted/20")}`}
+              className={`w-1 cursor-col-resize transition-colors ${c("hover:bg-copper-muted/30", "hover:bg-copper-muted/20")}`}
             />
-            <aside
-              style={{ width: detailWidth }}
-              className={`shrink-0 border-l overflow-y-auto editorial-scroll animate-fade-in ${c("border-ink-border-subtle bg-ink-surface", "border-light-border-subtle bg-light-surface")}`}
-            >
-              <div
-                className={`flex justify-between items-center px-4 py-3 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
-              >
-                <h3
-                  className={`font-display text-[1.15em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
-                >
-                  Detail
-                </h3>
-                <button
-                  onClick={() => setSelectedRecord(null)}
-                  className={`text-sm leading-none w-6 h-6 flex items-center justify-center rounded transition-colors ${c(
-                    "text-text-ghost hover:text-text-bright hover:bg-ink-hover",
-                    "text-light-text-ghost hover:text-light-text-bright hover:bg-light-hover",
-                  )}`}
-                >
-                  &times;
-                </button>
-              </div>
-
-              <DetailPanelContent record={selectedRecord} dark={dark} />
-            </aside>
-          </>
+          </div>
         )}
+        {detailCollapsed && (
+          <button
+            onClick={() => setDetailCollapsed(false)}
+            className={`shrink-0 px-1 flex items-center border-l transition-colors ${c(
+              "border-ink-border-subtle bg-ink-surface text-text-ghost hover:text-text-muted hover:bg-ink-hover",
+              "border-light-border-subtle bg-light-surface text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
+            )}`}
+            title="Expand detail panel"
+          >
+            {"\u25C2"}
+          </button>
+        )}
+        <aside
+          style={{ width: detailCollapsed ? 0 : detailWidth }}
+          className={`shrink-0 overflow-hidden transition-[width] duration-200 ${
+            detailCollapsed
+              ? ""
+              : `border-l overflow-y-auto editorial-scroll ${c("border-ink-border-subtle bg-ink-surface", "border-light-border-subtle bg-light-surface")}`
+          }`}
+        >
+          <div
+            className={`flex items-center px-4 py-3 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
+          >
+            <h3
+              className={`font-display text-[1.15em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
+            >
+              Detail
+            </h3>
+          </div>
+
+          {selectedRecord ? (
+            <DetailPanelContent
+              record={selectedRecord}
+              dark={dark}
+              onFieldSelect={handleFieldSelect}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center h-48 px-4">
+              <p
+                className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+              >
+                Select a record to view details
+              </p>
+            </div>
+          )}
+        </aside>
       </div>
     </div>
   );
@@ -1803,22 +1910,28 @@ function PipelineFunnel({
 function DetailPanelContent({
   record,
   dark,
+  onFieldSelect,
 }: {
   record: ProtoRecord;
   dark: boolean;
+  onFieldSelect?: (key: string, value: string) => void;
 }) {
   const c = (d: string, l: string) => (dark ? d : l);
   const rawText = new TextDecoder().decode(record.raw);
   const rawBytes = record.raw.length;
   const kvPairs = extractKVPairs(rawText);
 
-  const tsRows: { label: string; date: Date }[] = [];
-  if (record.sourceTs)
-    tsRows.push({ label: "Source", date: record.sourceTs.toDate() });
-  if (record.ingestTs)
-    tsRows.push({ label: "Ingest", date: record.ingestTs.toDate() });
-  if (record.writeTs)
-    tsRows.push({ label: "Write", date: record.writeTs.toDate() });
+  const tsRows: { label: string; date: Date | null }[] = [
+    { label: "Write", date: record.writeTs ? record.writeTs.toDate() : null },
+    {
+      label: "Ingest",
+      date: record.ingestTs ? record.ingestTs.toDate() : null,
+    },
+    {
+      label: "Source",
+      date: record.sourceTs ? record.sourceTs.toDate() : null,
+    },
+  ];
 
   return (
     <div className="p-4 space-y-4">
@@ -1836,16 +1949,29 @@ function DetailPanelContent({
                 {label}
               </dt>
               <dd className="flex-1 min-w-0">
-                <div
-                  className={`text-[0.85em] font-mono break-all ${c("text-text-normal", "text-light-text-normal")}`}
-                >
-                  {date.toISOString()}
-                </div>
-                <div
-                  className={`text-[0.75em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
-                >
-                  {relativeTime(date)}
-                </div>
+                {date ? (
+                  <>
+                    <div
+                      className={`text-[0.85em] font-mono break-all ${c("text-text-normal", "text-light-text-normal")}`}
+                    >
+                      {date.toISOString()}
+                    </div>
+                    <div
+                      className={`text-[0.75em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+                    >
+                      {relativeTime(date)}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div
+                      className={`text-[0.85em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+                    >
+                      {"\u2014"}
+                    </div>
+                    <div className="text-[0.75em] font-mono">&nbsp;</div>
+                  </>
+                )}
               </dd>
             </div>
           ))}
@@ -1861,6 +1987,23 @@ function DetailPanelContent({
         </pre>
       </DetailSection>
 
+      {/* Attributes */}
+      {Object.keys(record.attrs).length > 0 && (
+        <DetailSection label="Attributes" dark={dark}>
+          <div className="space-y-0">
+            {Object.entries(record.attrs).map(([k, v]) => (
+              <DetailRow
+                key={k}
+                label={k}
+                value={v}
+                dark={dark}
+                onClick={onFieldSelect ? () => onFieldSelect(k, v) : undefined}
+              />
+            ))}
+          </div>
+        </DetailSection>
+      )}
+
       {/* Extracted Fields */}
       {kvPairs.length > 0 && (
         <DetailSection label="Extracted Fields" dark={dark}>
@@ -1871,18 +2014,10 @@ function DetailPanelContent({
                 label={key}
                 value={value}
                 dark={dark}
+                onClick={
+                  onFieldSelect ? () => onFieldSelect(key, value) : undefined
+                }
               />
-            ))}
-          </div>
-        </DetailSection>
-      )}
-
-      {/* Attributes */}
-      {Object.keys(record.attrs).length > 0 && (
-        <DetailSection label="Attributes" dark={dark}>
-          <div className="space-y-0">
-            {Object.entries(record.attrs).map(([k, v]) => (
-              <DetailRow key={k} label={k} value={v} dark={dark} />
             ))}
           </div>
         </DetailSection>
@@ -1939,10 +2074,12 @@ function DetailRow({
   label,
   value,
   dark,
+  onClick,
 }: {
   label: string;
   value: string;
   dark: boolean;
+  onClick?: () => void;
 }) {
   return (
     <div
@@ -1954,7 +2091,14 @@ function DetailRow({
         {label}
       </dt>
       <dd
-        className={`flex-1 text-[0.85em] font-mono break-all ${dark ? "text-text-normal" : "text-light-text-normal"}`}
+        className={`flex-1 text-[0.85em] font-mono break-all ${
+          onClick
+            ? `cursor-pointer transition-colors ${dark ? "text-text-muted hover:text-copper" : "text-light-text-muted hover:text-copper"}`
+            : dark
+              ? "text-text-normal"
+              : "text-light-text-normal"
+        }`}
+        onClick={onClick}
       >
         {value}
       </dd>
