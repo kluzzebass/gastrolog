@@ -1,4 +1,4 @@
-// Package chatterbox provides a receiver that emits random log messages
+// Package chatterbox provides a ingester that emits random log messages
 // at random intervals. It is used to exercise the full ingest pipeline.
 package chatterbox
 
@@ -11,15 +11,15 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
-// Receiver emits random log-like messages at random intervals.
-// It implements orchestrator.Receiver.
+// Ingester emits random log-like messages at random intervals.
+// It implements orchestrator.Ingester.
 //
 // Logging:
 //   - Logger is dependency-injected via the factory
-//   - Receiver owns its scoped logger (component="receiver", type="chatterbox")
+//   - Ingester owns its scoped logger (component="ingester", type="chatterbox")
 //   - Logging is intentionally sparse; only lifecycle events are logged
 //   - No logging in the message generation loop
-type Receiver struct {
+type Ingester struct {
 	minInterval time.Duration
 	maxInterval time.Duration
 	instance    string
@@ -33,14 +33,14 @@ type Receiver struct {
 	// totalWeight is the sum of all format weights.
 	totalWeight int
 
-	// Logger for this receiver instance.
-	// Scoped with component="receiver", type="chatterbox" at construction time.
+	// Logger for this ingester instance.
+	// Scoped with component="ingester", type="chatterbox" at construction time.
 	logger *slog.Logger
 }
 
-// Run starts the receiver and emits messages to the output channel.
+// Run starts the ingester and emits messages to the output channel.
 // Run blocks until ctx is cancelled. Returns nil on normal cancellation.
-func (r *Receiver) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (r *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
 	timer := time.NewTimer(r.randomInterval())
 	defer timer.Stop()
 
@@ -63,7 +63,7 @@ func (r *Receiver) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 }
 
 // randomInterval returns a random duration between minInterval and maxInterval.
-func (r *Receiver) randomInterval() time.Duration {
+func (r *Ingester) randomInterval() time.Duration {
 	if r.minInterval >= r.maxInterval {
 		return r.minInterval
 	}
@@ -72,7 +72,7 @@ func (r *Receiver) randomInterval() time.Duration {
 }
 
 // generateMessage creates a random log-like message.
-func (r *Receiver) generateMessage() orchestrator.IngestMessage {
+func (r *Ingester) generateMessage() orchestrator.IngestMessage {
 	// Select a format using weighted random selection.
 	format := r.selectFormat()
 
@@ -80,12 +80,12 @@ func (r *Receiver) generateMessage() orchestrator.IngestMessage {
 	raw, formatAttrs, sourceTS := format.Generate(r.rng)
 
 	// Merge base attrs with format attrs.
-	// Base attrs take precedence (receiver, instance are always set).
+	// Base attrs take precedence (ingester_type, instance are always set).
 	attrs := make(map[string]string, len(formatAttrs)+2)
 	for k, v := range formatAttrs {
 		attrs[k] = v
 	}
-	attrs["receiver"] = "chatterbox"
+	attrs["ingester_type"] = "chatterbox"
 	attrs["instance"] = r.instance
 
 	return orchestrator.IngestMessage{
@@ -97,7 +97,7 @@ func (r *Receiver) generateMessage() orchestrator.IngestMessage {
 }
 
 // selectFormat returns a randomly selected format based on weights.
-func (r *Receiver) selectFormat() LogFormat {
+func (r *Ingester) selectFormat() LogFormat {
 	if len(r.formats) == 1 {
 		return r.formats[0]
 	}

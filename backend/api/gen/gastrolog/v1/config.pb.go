@@ -60,7 +60,7 @@ func (*GetConfigRequest) Descriptor() ([]byte, []int) {
 type GetConfigResponse struct {
 	state            protoimpl.MessageState           `protogen:"open.v1"`
 	Stores           []*StoreConfig                   `protobuf:"bytes,1,rep,name=stores,proto3" json:"stores,omitempty"`
-	Receivers        []*ReceiverConfig                `protobuf:"bytes,2,rep,name=receivers,proto3" json:"receivers,omitempty"`
+	Ingesters        []*IngesterConfig                `protobuf:"bytes,2,rep,name=ingesters,proto3" json:"ingesters,omitempty"`
 	RotationPolicies map[string]*RotationPolicyConfig `protobuf:"bytes,3,rep,name=rotation_policies,json=rotationPolicies,proto3" json:"rotation_policies,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
@@ -103,9 +103,9 @@ func (x *GetConfigResponse) GetStores() []*StoreConfig {
 	return nil
 }
 
-func (x *GetConfigResponse) GetReceivers() []*ReceiverConfig {
+func (x *GetConfigResponse) GetIngesters() []*IngesterConfig {
 	if x != nil {
-		return x.Receivers
+		return x.Ingesters
 	}
 	return nil
 }
@@ -193,7 +193,7 @@ func (x *StoreConfig) GetParams() map[string]string {
 	return nil
 }
 
-type ReceiverConfig struct {
+type IngesterConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
@@ -202,20 +202,20 @@ type ReceiverConfig struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ReceiverConfig) Reset() {
-	*x = ReceiverConfig{}
+func (x *IngesterConfig) Reset() {
+	*x = IngesterConfig{}
 	mi := &file_gastrolog_v1_config_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ReceiverConfig) String() string {
+func (x *IngesterConfig) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ReceiverConfig) ProtoMessage() {}
+func (*IngesterConfig) ProtoMessage() {}
 
-func (x *ReceiverConfig) ProtoReflect() protoreflect.Message {
+func (x *IngesterConfig) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_config_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -227,26 +227,26 @@ func (x *ReceiverConfig) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ReceiverConfig.ProtoReflect.Descriptor instead.
-func (*ReceiverConfig) Descriptor() ([]byte, []int) {
+// Deprecated: Use IngesterConfig.ProtoReflect.Descriptor instead.
+func (*IngesterConfig) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *ReceiverConfig) GetId() string {
+func (x *IngesterConfig) GetId() string {
 	if x != nil {
 		return x.Id
 	}
 	return ""
 }
 
-func (x *ReceiverConfig) GetType() string {
+func (x *IngesterConfig) GetType() string {
 	if x != nil {
 		return x.Type
 	}
 	return ""
 }
 
-func (x *ReceiverConfig) GetParams() map[string]string {
+func (x *IngesterConfig) GetParams() map[string]string {
 	if x != nil {
 		return x.Params
 	}
@@ -401,26 +401,26 @@ func (*UpdateStoreRouteResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{6}
 }
 
-type ListReceiversRequest struct {
+type ListIngestersRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ListReceiversRequest) Reset() {
-	*x = ListReceiversRequest{}
+func (x *ListIngestersRequest) Reset() {
+	*x = ListIngestersRequest{}
 	mi := &file_gastrolog_v1_config_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ListReceiversRequest) String() string {
+func (x *ListIngestersRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ListReceiversRequest) ProtoMessage() {}
+func (*ListIngestersRequest) ProtoMessage() {}
 
-func (x *ListReceiversRequest) ProtoReflect() protoreflect.Message {
+func (x *ListIngestersRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_config_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -432,32 +432,32 @@ func (x *ListReceiversRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ListReceiversRequest.ProtoReflect.Descriptor instead.
-func (*ListReceiversRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use ListIngestersRequest.ProtoReflect.Descriptor instead.
+func (*ListIngestersRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{7}
 }
 
-type ListReceiversResponse struct {
+type ListIngestersResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Receivers     []*ReceiverInfo        `protobuf:"bytes,1,rep,name=receivers,proto3" json:"receivers,omitempty"`
+	Ingesters     []*IngesterInfo        `protobuf:"bytes,1,rep,name=ingesters,proto3" json:"ingesters,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ListReceiversResponse) Reset() {
-	*x = ListReceiversResponse{}
+func (x *ListIngestersResponse) Reset() {
+	*x = ListIngestersResponse{}
 	mi := &file_gastrolog_v1_config_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ListReceiversResponse) String() string {
+func (x *ListIngestersResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ListReceiversResponse) ProtoMessage() {}
+func (*ListIngestersResponse) ProtoMessage() {}
 
-func (x *ListReceiversResponse) ProtoReflect() protoreflect.Message {
+func (x *ListIngestersResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_config_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -469,19 +469,19 @@ func (x *ListReceiversResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ListReceiversResponse.ProtoReflect.Descriptor instead.
-func (*ListReceiversResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use ListIngestersResponse.ProtoReflect.Descriptor instead.
+func (*ListIngestersResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *ListReceiversResponse) GetReceivers() []*ReceiverInfo {
+func (x *ListIngestersResponse) GetIngesters() []*IngesterInfo {
 	if x != nil {
-		return x.Receivers
+		return x.Ingesters
 	}
 	return nil
 }
 
-type ReceiverInfo struct {
+type IngesterInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
@@ -490,20 +490,20 @@ type ReceiverInfo struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ReceiverInfo) Reset() {
-	*x = ReceiverInfo{}
+func (x *IngesterInfo) Reset() {
+	*x = IngesterInfo{}
 	mi := &file_gastrolog_v1_config_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ReceiverInfo) String() string {
+func (x *IngesterInfo) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ReceiverInfo) ProtoMessage() {}
+func (*IngesterInfo) ProtoMessage() {}
 
-func (x *ReceiverInfo) ProtoReflect() protoreflect.Message {
+func (x *IngesterInfo) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_config_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -515,53 +515,53 @@ func (x *ReceiverInfo) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ReceiverInfo.ProtoReflect.Descriptor instead.
-func (*ReceiverInfo) Descriptor() ([]byte, []int) {
+// Deprecated: Use IngesterInfo.ProtoReflect.Descriptor instead.
+func (*IngesterInfo) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{9}
 }
 
-func (x *ReceiverInfo) GetId() string {
+func (x *IngesterInfo) GetId() string {
 	if x != nil {
 		return x.Id
 	}
 	return ""
 }
 
-func (x *ReceiverInfo) GetType() string {
+func (x *IngesterInfo) GetType() string {
 	if x != nil {
 		return x.Type
 	}
 	return ""
 }
 
-func (x *ReceiverInfo) GetRunning() bool {
+func (x *IngesterInfo) GetRunning() bool {
 	if x != nil {
 		return x.Running
 	}
 	return false
 }
 
-type GetReceiverStatusRequest struct {
+type GetIngesterStatusRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *GetReceiverStatusRequest) Reset() {
-	*x = GetReceiverStatusRequest{}
+func (x *GetIngesterStatusRequest) Reset() {
+	*x = GetIngesterStatusRequest{}
 	mi := &file_gastrolog_v1_config_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *GetReceiverStatusRequest) String() string {
+func (x *GetIngesterStatusRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*GetReceiverStatusRequest) ProtoMessage() {}
+func (*GetIngesterStatusRequest) ProtoMessage() {}
 
-func (x *GetReceiverStatusRequest) ProtoReflect() protoreflect.Message {
+func (x *GetIngesterStatusRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_config_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -573,43 +573,43 @@ func (x *GetReceiverStatusRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GetReceiverStatusRequest.ProtoReflect.Descriptor instead.
-func (*GetReceiverStatusRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use GetIngesterStatusRequest.ProtoReflect.Descriptor instead.
+func (*GetIngesterStatusRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{10}
 }
 
-func (x *GetReceiverStatusRequest) GetId() string {
+func (x *GetIngesterStatusRequest) GetId() string {
 	if x != nil {
 		return x.Id
 	}
 	return ""
 }
 
-type GetReceiverStatusResponse struct {
+type GetIngesterStatusResponse struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	Id               string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Type             string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
 	Running          bool                   `protobuf:"varint,3,opt,name=running,proto3" json:"running,omitempty"`
-	MessagesReceived int64                  `protobuf:"varint,4,opt,name=messages_received,json=messagesReceived,proto3" json:"messages_received,omitempty"`
+	MessagesIngested int64                  `protobuf:"varint,4,opt,name=messages_ingested,json=messagesIngested,proto3" json:"messages_ingested,omitempty"`
 	Errors           int64                  `protobuf:"varint,5,opt,name=errors,proto3" json:"errors,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
 
-func (x *GetReceiverStatusResponse) Reset() {
-	*x = GetReceiverStatusResponse{}
+func (x *GetIngesterStatusResponse) Reset() {
+	*x = GetIngesterStatusResponse{}
 	mi := &file_gastrolog_v1_config_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *GetReceiverStatusResponse) String() string {
+func (x *GetIngesterStatusResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*GetReceiverStatusResponse) ProtoMessage() {}
+func (*GetIngesterStatusResponse) ProtoMessage() {}
 
-func (x *GetReceiverStatusResponse) ProtoReflect() protoreflect.Message {
+func (x *GetIngesterStatusResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_config_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -621,40 +621,40 @@ func (x *GetReceiverStatusResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GetReceiverStatusResponse.ProtoReflect.Descriptor instead.
-func (*GetReceiverStatusResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use GetIngesterStatusResponse.ProtoReflect.Descriptor instead.
+func (*GetIngesterStatusResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{11}
 }
 
-func (x *GetReceiverStatusResponse) GetId() string {
+func (x *GetIngesterStatusResponse) GetId() string {
 	if x != nil {
 		return x.Id
 	}
 	return ""
 }
 
-func (x *GetReceiverStatusResponse) GetType() string {
+func (x *GetIngesterStatusResponse) GetType() string {
 	if x != nil {
 		return x.Type
 	}
 	return ""
 }
 
-func (x *GetReceiverStatusResponse) GetRunning() bool {
+func (x *GetIngesterStatusResponse) GetRunning() bool {
 	if x != nil {
 		return x.Running
 	}
 	return false
 }
 
-func (x *GetReceiverStatusResponse) GetMessagesReceived() int64 {
+func (x *GetIngesterStatusResponse) GetMessagesIngested() int64 {
 	if x != nil {
-		return x.MessagesReceived
+		return x.MessagesIngested
 	}
 	return 0
 }
 
-func (x *GetReceiverStatusResponse) GetErrors() int64 {
+func (x *GetIngesterStatusResponse) GetErrors() int64 {
 	if x != nil {
 		return x.Errors
 	}
@@ -669,7 +669,7 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x10GetConfigRequest\"\xcf\x02\n" +
 	"\x11GetConfigResponse\x121\n" +
 	"\x06stores\x18\x01 \x03(\v2\x19.gastrolog.v1.StoreConfigR\x06stores\x12:\n" +
-	"\treceivers\x18\x02 \x03(\v2\x1c.gastrolog.v1.ReceiverConfigR\treceivers\x12b\n" +
+	"\tingesters\x18\x02 \x03(\v2\x1c.gastrolog.v1.IngesterConfigR\tingesters\x12b\n" +
 	"\x11rotation_policies\x18\x03 \x03(\v25.gastrolog.v1.GetConfigResponse.RotationPoliciesEntryR\x10rotationPolicies\x1ag\n" +
 	"\x15RotationPoliciesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x128\n" +
@@ -683,10 +683,10 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb1\x01\n" +
-	"\x0eReceiverConfig\x12\x0e\n" +
+	"\x0eIngesterConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12@\n" +
-	"\x06params\x18\x03 \x03(\v2(.gastrolog.v1.ReceiverConfig.ParamsEntryR\x06params\x1a9\n" +
+	"\x06params\x18\x03 \x03(\v2(.gastrolog.v1.IngesterConfig.ParamsEntryR\x06params\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"|\n" +
@@ -699,26 +699,26 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\bstore_id\x18\x01 \x01(\tR\astoreId\x12\x14\n" +
 	"\x05route\x18\x02 \x01(\tR\x05route\"\x1a\n" +
 	"\x18UpdateStoreRouteResponse\"\x16\n" +
-	"\x14ListReceiversRequest\"Q\n" +
-	"\x15ListReceiversResponse\x128\n" +
-	"\treceivers\x18\x01 \x03(\v2\x1a.gastrolog.v1.ReceiverInfoR\treceivers\"L\n" +
-	"\fReceiverInfo\x12\x0e\n" +
+	"\x14ListIngestersRequest\"Q\n" +
+	"\x15ListIngestersResponse\x128\n" +
+	"\tingesters\x18\x01 \x03(\v2\x1a.gastrolog.v1.IngesterInfoR\tingesters\"L\n" +
+	"\fIngesterInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x18\n" +
 	"\arunning\x18\x03 \x01(\bR\arunning\"*\n" +
-	"\x18GetReceiverStatusRequest\x12\x0e\n" +
+	"\x18GetIngesterStatusRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x9e\x01\n" +
-	"\x19GetReceiverStatusResponse\x12\x0e\n" +
+	"\x19GetIngesterStatusResponse\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x18\n" +
 	"\arunning\x18\x03 \x01(\bR\arunning\x12+\n" +
-	"\x11messages_received\x18\x04 \x01(\x03R\x10messagesReceived\x12\x16\n" +
+	"\x11messages_ingested\x18\x04 \x01(\x03R\x10messagesIngested\x12\x16\n" +
 	"\x06errors\x18\x05 \x01(\x03R\x06errors2\x80\x03\n" +
 	"\rConfigService\x12L\n" +
 	"\tGetConfig\x12\x1e.gastrolog.v1.GetConfigRequest\x1a\x1f.gastrolog.v1.GetConfigResponse\x12a\n" +
 	"\x10UpdateStoreRoute\x12%.gastrolog.v1.UpdateStoreRouteRequest\x1a&.gastrolog.v1.UpdateStoreRouteResponse\x12X\n" +
-	"\rListReceivers\x12\".gastrolog.v1.ListReceiversRequest\x1a#.gastrolog.v1.ListReceiversResponse\x12d\n" +
-	"\x11GetReceiverStatus\x12&.gastrolog.v1.GetReceiverStatusRequest\x1a'.gastrolog.v1.GetReceiverStatusResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"\rListIngesters\x12\".gastrolog.v1.ListIngestersRequest\x1a#.gastrolog.v1.ListIngestersResponse\x12d\n" +
+	"\x11GetIngesterStatus\x12&.gastrolog.v1.GetIngesterStatusRequest\x1a'.gastrolog.v1.GetIngesterStatusResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_config_proto_rawDescOnce sync.Once
@@ -737,35 +737,35 @@ var file_gastrolog_v1_config_proto_goTypes = []any{
 	(*GetConfigRequest)(nil),          // 0: gastrolog.v1.GetConfigRequest
 	(*GetConfigResponse)(nil),         // 1: gastrolog.v1.GetConfigResponse
 	(*StoreConfig)(nil),               // 2: gastrolog.v1.StoreConfig
-	(*ReceiverConfig)(nil),            // 3: gastrolog.v1.ReceiverConfig
+	(*IngesterConfig)(nil),            // 3: gastrolog.v1.IngesterConfig
 	(*RotationPolicyConfig)(nil),      // 4: gastrolog.v1.RotationPolicyConfig
 	(*UpdateStoreRouteRequest)(nil),   // 5: gastrolog.v1.UpdateStoreRouteRequest
 	(*UpdateStoreRouteResponse)(nil),  // 6: gastrolog.v1.UpdateStoreRouteResponse
-	(*ListReceiversRequest)(nil),      // 7: gastrolog.v1.ListReceiversRequest
-	(*ListReceiversResponse)(nil),     // 8: gastrolog.v1.ListReceiversResponse
-	(*ReceiverInfo)(nil),              // 9: gastrolog.v1.ReceiverInfo
-	(*GetReceiverStatusRequest)(nil),  // 10: gastrolog.v1.GetReceiverStatusRequest
-	(*GetReceiverStatusResponse)(nil), // 11: gastrolog.v1.GetReceiverStatusResponse
+	(*ListIngestersRequest)(nil),      // 7: gastrolog.v1.ListIngestersRequest
+	(*ListIngestersResponse)(nil),     // 8: gastrolog.v1.ListIngestersResponse
+	(*IngesterInfo)(nil),              // 9: gastrolog.v1.IngesterInfo
+	(*GetIngesterStatusRequest)(nil),  // 10: gastrolog.v1.GetIngesterStatusRequest
+	(*GetIngesterStatusResponse)(nil), // 11: gastrolog.v1.GetIngesterStatusResponse
 	nil,                               // 12: gastrolog.v1.GetConfigResponse.RotationPoliciesEntry
 	nil,                               // 13: gastrolog.v1.StoreConfig.ParamsEntry
-	nil,                               // 14: gastrolog.v1.ReceiverConfig.ParamsEntry
+	nil,                               // 14: gastrolog.v1.IngesterConfig.ParamsEntry
 }
 var file_gastrolog_v1_config_proto_depIdxs = []int32{
 	2,  // 0: gastrolog.v1.GetConfigResponse.stores:type_name -> gastrolog.v1.StoreConfig
-	3,  // 1: gastrolog.v1.GetConfigResponse.receivers:type_name -> gastrolog.v1.ReceiverConfig
+	3,  // 1: gastrolog.v1.GetConfigResponse.ingesters:type_name -> gastrolog.v1.IngesterConfig
 	12, // 2: gastrolog.v1.GetConfigResponse.rotation_policies:type_name -> gastrolog.v1.GetConfigResponse.RotationPoliciesEntry
 	13, // 3: gastrolog.v1.StoreConfig.params:type_name -> gastrolog.v1.StoreConfig.ParamsEntry
-	14, // 4: gastrolog.v1.ReceiverConfig.params:type_name -> gastrolog.v1.ReceiverConfig.ParamsEntry
-	9,  // 5: gastrolog.v1.ListReceiversResponse.receivers:type_name -> gastrolog.v1.ReceiverInfo
+	14, // 4: gastrolog.v1.IngesterConfig.params:type_name -> gastrolog.v1.IngesterConfig.ParamsEntry
+	9,  // 5: gastrolog.v1.ListIngestersResponse.ingesters:type_name -> gastrolog.v1.IngesterInfo
 	4,  // 6: gastrolog.v1.GetConfigResponse.RotationPoliciesEntry.value:type_name -> gastrolog.v1.RotationPolicyConfig
 	0,  // 7: gastrolog.v1.ConfigService.GetConfig:input_type -> gastrolog.v1.GetConfigRequest
 	5,  // 8: gastrolog.v1.ConfigService.UpdateStoreRoute:input_type -> gastrolog.v1.UpdateStoreRouteRequest
-	7,  // 9: gastrolog.v1.ConfigService.ListReceivers:input_type -> gastrolog.v1.ListReceiversRequest
-	10, // 10: gastrolog.v1.ConfigService.GetReceiverStatus:input_type -> gastrolog.v1.GetReceiverStatusRequest
+	7,  // 9: gastrolog.v1.ConfigService.ListIngesters:input_type -> gastrolog.v1.ListIngestersRequest
+	10, // 10: gastrolog.v1.ConfigService.GetIngesterStatus:input_type -> gastrolog.v1.GetIngesterStatusRequest
 	1,  // 11: gastrolog.v1.ConfigService.GetConfig:output_type -> gastrolog.v1.GetConfigResponse
 	6,  // 12: gastrolog.v1.ConfigService.UpdateStoreRoute:output_type -> gastrolog.v1.UpdateStoreRouteResponse
-	8,  // 13: gastrolog.v1.ConfigService.ListReceivers:output_type -> gastrolog.v1.ListReceiversResponse
-	11, // 14: gastrolog.v1.ConfigService.GetReceiverStatus:output_type -> gastrolog.v1.GetReceiverStatusResponse
+	8,  // 13: gastrolog.v1.ConfigService.ListIngesters:output_type -> gastrolog.v1.ListIngestersResponse
+	11, // 14: gastrolog.v1.ConfigService.GetIngesterStatus:output_type -> gastrolog.v1.GetIngesterStatusResponse
 	11, // [11:15] is the sub-list for method output_type
 	7,  // [7:11] is the sub-list for method input_type
 	7,  // [7:7] is the sub-list for extension type_name

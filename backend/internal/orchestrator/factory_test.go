@@ -61,10 +61,10 @@ func (f *fakeIndexManager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) 
 	return true, nil
 }
 
-// fakeReceiver implements Receiver for testing.
-type fakeReceiver struct{}
+// fakeIngester implements Ingester for testing.
+type fakeIngester struct{}
 
-func (f *fakeReceiver) Run(ctx context.Context, out chan<- IngestMessage) error {
+func (f *fakeIngester) Run(ctx context.Context, out chan<- IngestMessage) error {
 	<-ctx.Done()
 	return nil
 }
@@ -117,19 +117,19 @@ func TestApplyConfigStores(t *testing.T) {
 	}
 }
 
-func TestApplyConfigReceivers(t *testing.T) {
+func TestApplyConfigIngesters(t *testing.T) {
 	orch := New(Config{})
 
 	factories := Factories{
-		Receivers: map[string]ReceiverFactory{
-			"test": func(params map[string]string, logger *slog.Logger) (Receiver, error) {
-				return &fakeReceiver{}, nil
+		Ingesters: map[string]IngesterFactory{
+			"test": func(params map[string]string, logger *slog.Logger) (Ingester, error) {
+				return &fakeIngester{}, nil
 			},
 		},
 	}
 
 	cfg := &config.Config{
-		Receivers: []config.ReceiverConfig{
+		Ingesters: []config.IngesterConfig{
 			{ID: "recv1", Type: "test", Params: map[string]string{}},
 			{ID: "recv2", Type: "test", Params: map[string]string{}},
 		},
@@ -140,8 +140,8 @@ func TestApplyConfigReceivers(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(orch.receivers) != 2 {
-		t.Errorf("expected 2 receivers, got %d", len(orch.receivers))
+	if len(orch.ingesters) != 2 {
+		t.Errorf("expected 2 ingesters, got %d", len(orch.ingesters))
 	}
 }
 
@@ -187,20 +187,20 @@ func TestApplyConfigUnknownIndexManagerType(t *testing.T) {
 	}
 }
 
-func TestApplyConfigUnknownReceiverType(t *testing.T) {
+func TestApplyConfigUnknownIngesterType(t *testing.T) {
 	orch := New(Config{})
 
 	cfg := &config.Config{
-		Receivers: []config.ReceiverConfig{
+		Ingesters: []config.IngesterConfig{
 			{ID: "recv1", Type: "unknown", Params: map[string]string{}},
 		},
 	}
 
 	err := orch.ApplyConfig(cfg, Factories{
-		Receivers: map[string]ReceiverFactory{},
+		Ingesters: map[string]IngesterFactory{},
 	})
 	if err == nil {
-		t.Error("expected error for unknown receiver type")
+		t.Error("expected error for unknown ingester type")
 	}
 }
 
@@ -233,19 +233,19 @@ func TestApplyConfigDuplicateStoreID(t *testing.T) {
 	}
 }
 
-func TestApplyConfigDuplicateReceiverID(t *testing.T) {
+func TestApplyConfigDuplicateIngesterID(t *testing.T) {
 	orch := New(Config{})
 
 	factories := Factories{
-		Receivers: map[string]ReceiverFactory{
-			"test": func(params map[string]string, logger *slog.Logger) (Receiver, error) {
-				return &fakeReceiver{}, nil
+		Ingesters: map[string]IngesterFactory{
+			"test": func(params map[string]string, logger *slog.Logger) (Ingester, error) {
+				return &fakeIngester{}, nil
 			},
 		},
 	}
 
 	cfg := &config.Config{
-		Receivers: []config.ReceiverConfig{
+		Ingesters: []config.IngesterConfig{
 			{ID: "recv1", Type: "test", Params: map[string]string{}},
 			{ID: "recv1", Type: "test", Params: map[string]string{}}, // duplicate
 		},
@@ -253,7 +253,7 @@ func TestApplyConfigDuplicateReceiverID(t *testing.T) {
 
 	err := orch.ApplyConfig(cfg, factories)
 	if err == nil {
-		t.Error("expected error for duplicate receiver ID")
+		t.Error("expected error for duplicate ingester ID")
 	}
 }
 
@@ -313,44 +313,44 @@ func TestApplyConfigIndexManagerFactoryError(t *testing.T) {
 	}
 }
 
-func TestApplyConfigReceiverFactoryError(t *testing.T) {
+func TestApplyConfigIngesterFactoryError(t *testing.T) {
 	orch := New(Config{})
 
 	factories := Factories{
-		Receivers: map[string]ReceiverFactory{
-			"test": func(params map[string]string, logger *slog.Logger) (Receiver, error) {
+		Ingesters: map[string]IngesterFactory{
+			"test": func(params map[string]string, logger *slog.Logger) (Ingester, error) {
 				return nil, errors.New("factory error")
 			},
 		},
 	}
 
 	cfg := &config.Config{
-		Receivers: []config.ReceiverConfig{
+		Ingesters: []config.IngesterConfig{
 			{ID: "recv1", Type: "test", Params: map[string]string{}},
 		},
 	}
 
 	err := orch.ApplyConfig(cfg, factories)
 	if err == nil {
-		t.Error("expected error from receiver factory")
+		t.Error("expected error from ingester factory")
 	}
 }
 
-func TestApplyConfigParamsPassedToReceiverFactory(t *testing.T) {
+func TestApplyConfigParamsPassedToIngesterFactory(t *testing.T) {
 	orch := New(Config{})
 
 	var receivedParams map[string]string
 	factories := Factories{
-		Receivers: map[string]ReceiverFactory{
-			"test": func(params map[string]string, logger *slog.Logger) (Receiver, error) {
+		Ingesters: map[string]IngesterFactory{
+			"test": func(params map[string]string, logger *slog.Logger) (Ingester, error) {
 				receivedParams = params
-				return &fakeReceiver{}, nil
+				return &fakeIngester{}, nil
 			},
 		},
 	}
 
 	cfg := &config.Config{
-		Receivers: []config.ReceiverConfig{
+		Ingesters: []config.IngesterConfig{
 			{ID: "recv1", Type: "test", Params: map[string]string{
 				"host": "localhost",
 				"port": "514",

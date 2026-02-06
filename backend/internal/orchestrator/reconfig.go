@@ -14,8 +14,8 @@ var (
 	ErrStoreNotEmpty = errors.New("store is not empty")
 	// ErrStoreNotFound is returned when attempting to operate on a non-existent store.
 	ErrStoreNotFound = errors.New("store not found")
-	// ErrReceiverNotFound is returned when attempting to operate on a non-existent receiver.
-	ErrReceiverNotFound = errors.New("receiver not found")
+	// ErrIngesterNotFound is returned when attempting to operate on a non-existent ingester.
+	ErrIngesterNotFound = errors.New("ingester not found")
 	// ErrDuplicateID is returned when attempting to add a component with an existing ID.
 	ErrDuplicateID = errors.New("duplicate ID")
 )
@@ -61,60 +61,60 @@ func (o *Orchestrator) UpdateRoutes(cfg *config.Config) error {
 	return nil
 }
 
-// AddReceiver adds and optionally starts a new receiver.
-// If the orchestrator is running, the receiver is started immediately.
-// Returns ErrDuplicateID if a receiver with this ID already exists.
-func (o *Orchestrator) AddReceiver(id string, r Receiver) error {
+// AddIngester adds and optionally starts a new ingester.
+// If the orchestrator is running, the ingester is started immediately.
+// Returns ErrDuplicateID if a ingester with this ID already exists.
+func (o *Orchestrator) AddIngester(id string, r Ingester) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
-	if _, exists := o.receivers[id]; exists {
+	if _, exists := o.ingesters[id]; exists {
 		return fmt.Errorf("%w: %s", ErrDuplicateID, id)
 	}
 
-	o.receivers[id] = r
+	o.ingesters[id] = r
 
-	// If running, start the receiver immediately.
+	// If running, start the ingester immediately.
 	if o.running && o.ingestCh != nil {
 		ctx, cancel := context.WithCancel(context.Background())
-		o.receiverCancels[id] = cancel
+		o.ingesterCancels[id] = cancel
 
-		o.receiverWg.Go(func() {
+		o.ingesterWg.Go(func() {
 			r.Run(ctx, o.ingestCh)
 		})
-		o.logger.Info("receiver started", "id", id)
+		o.logger.Info("ingester started", "id", id)
 	}
 
 	return nil
 }
 
-// RemoveReceiver stops and removes a receiver.
-// If the orchestrator is running, the receiver is stopped gracefully before removal.
-// The method waits for the receiver to finish processing before returning.
-func (o *Orchestrator) RemoveReceiver(id string) error {
+// RemoveIngester stops and removes a ingester.
+// If the orchestrator is running, the ingester is stopped gracefully before removal.
+// The method waits for the ingester to finish processing before returning.
+func (o *Orchestrator) RemoveIngester(id string) error {
 	o.mu.Lock()
 
-	if _, exists := o.receivers[id]; !exists {
+	if _, exists := o.ingesters[id]; !exists {
 		o.mu.Unlock()
-		return fmt.Errorf("%w: %s", ErrReceiverNotFound, id)
+		return fmt.Errorf("%w: %s", ErrIngesterNotFound, id)
 	}
 
-	// If running, cancel the receiver's context.
-	cancel, hasCancel := o.receiverCancels[id]
+	// If running, cancel the ingester's context.
+	cancel, hasCancel := o.ingesterCancels[id]
 	if o.running && hasCancel {
 		cancel()
-		delete(o.receiverCancels, id)
+		delete(o.ingesterCancels, id)
 	}
 
-	delete(o.receivers, id)
+	delete(o.ingesters, id)
 	o.mu.Unlock()
 
-	// Note: We don't wait for the specific receiver to finish here because
-	// receiverWg tracks all receivers collectively. The receiver will exit
+	// Note: We don't wait for the specific ingester to finish here because
+	// ingesterWg tracks all ingesters collectively. The ingester will exit
 	// when its context is cancelled, and the WaitGroup will decrement.
-	// This is a best-effort removal - the receiver may still be draining.
+	// This is a best-effort removal - the ingester may still be draining.
 
-	o.logger.Info("receiver removed", "id", id)
+	o.logger.Info("ingester removed", "id", id)
 	return nil
 }
 

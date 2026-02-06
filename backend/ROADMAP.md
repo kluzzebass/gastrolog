@@ -10,7 +10,7 @@ Go 1.25+ backend with Connect RPC server, interactive REPL, chunk-based storage,
 - **Indexing**: Token, attribute, and KV indexes with budget control and callgroup deduplication
 - **Query**: Boolean expressions, time bounds, pagination, context windows, explain plans, multi-store search
 - **REPL**: 12 commands, bubbletea pager, live follow mode, vim-style navigation, multi-store support
-- **Receivers**: Chatterbox (test, 6 formats with SourceTS), HTTP/Loki (Push API), Syslog (RFC 3164/5424, UDP+TCP)
+- **Ingesters**: Chatterbox (test, 6 formats with SourceTS), HTTP/Loki (Push API), Syslog (RFC 3164/5424, UDP+TCP)
 - **Server**: Connect RPC with 4 services, h2c, graceful shutdown with drain, k8s probes
 - **Config**: File-based with runtime reconfiguration
 - **ChunkID**: 13-char base32hex timestamps (lexicographically time-sorted)
@@ -27,16 +27,16 @@ Go 1.25+ backend with Connect RPC server, interactive REPL, chunk-based storage,
 - [ ] Optional compression for sealed chunks (zstd or lz4)
 - [ ] Transparent decompression on read
 
-## Phase 2: Receivers
+## Phase 2: Ingesters
 
-### 2.1 New Receivers
+### 2.1 New Ingesters
 - [ ] OTLP (OpenTelemetry logs, gRPC and HTTP)
 - [ ] Fluent Forward (Fluent Bit/Fluentd forward protocol)
 - [ ] Kafka consumer for log pipelines
 
-### 2.2 Receiver Features
+### 2.2 Ingester Features
 - [ ] Backpressure signaling
-- [ ] Per-receiver metrics
+- [ ] Per-ingester metrics
 
 ## Phase 3: Indexing
 
@@ -69,7 +69,7 @@ Go 1.25+ backend with Connect RPC server, interactive REPL, chunk-based storage,
 ### 5.1 Metrics
 - [ ] Prometheus endpoint
 - [ ] Ingestion rate, query latency, index build time
-- [ ] Per-store and per-receiver metrics
+- [ ] Per-store and per-ingester metrics
 
 ### 5.2 Deployment
 - [ ] Dockerfile
@@ -93,7 +93,7 @@ Go 1.25+ backend with Connect RPC server, interactive REPL, chunk-based storage,
 ## Priority Order
 
 1. **Phase 1** - Retention & Storage (required before any real usage)
-2. **Phase 2** - Receivers (broaden ingestion sources)
+2. **Phase 2** - Ingesters (broaden ingestion sources)
 3. **Phase 3** - Indexing (query performance for structured logs)
 4. **Phase 4** - Query (power user features)
 5. **Phase 5** - Observability & Operations (production readiness)

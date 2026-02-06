@@ -24,7 +24,7 @@ import (
 //   - Factories create child loggers scoped to their component
 //   - If Logger is nil, components use discard loggers
 type Factories struct {
-	Receivers     map[string]ReceiverFactory
+	Ingesters     map[string]IngesterFactory
 	ChunkManagers map[string]chunk.ManagerFactory
 	IndexManagers map[string]index.ManagerFactory
 
@@ -47,9 +47,9 @@ type Factories struct {
 //   - Creates a QueryEngine wiring the ChunkManager and IndexManager
 //   - Registers all three under the store's ID
 //
-// For each receiver in the config:
-//   - Creates a Receiver using the matching factory
-//   - Registers it under the receiver's ID
+// For each ingester in the config:
+//   - Creates a Ingester using the matching factory
+//   - Registers it under the ingester's ID
 //
 // Returns an error if:
 //   - A required factory is not found for a given type
@@ -67,7 +67,7 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 
 	// Track IDs to detect duplicates.
 	storeIDs := make(map[string]bool)
-	receiverIDs := make(map[string]bool)
+	ingesterIDs := make(map[string]bool)
 
 	// Compile routes and create stores (chunk manager + index manager + query engine).
 	var compiledRoutes []*CompiledRoute
@@ -146,30 +146,30 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 		o.SetRouter(NewRouter(compiledRoutes))
 	}
 
-	// Create receivers.
-	for _, recvCfg := range cfg.Receivers {
-		if receiverIDs[recvCfg.ID] {
-			return fmt.Errorf("duplicate receiver ID: %s", recvCfg.ID)
+	// Create ingesters.
+	for _, recvCfg := range cfg.Ingesters {
+		if ingesterIDs[recvCfg.ID] {
+			return fmt.Errorf("duplicate ingester ID: %s", recvCfg.ID)
 		}
-		receiverIDs[recvCfg.ID] = true
+		ingesterIDs[recvCfg.ID] = true
 
-		// Look up receiver factory.
-		recvFactory, ok := factories.Receivers[recvCfg.Type]
+		// Look up ingester factory.
+		recvFactory, ok := factories.Ingesters[recvCfg.Type]
 		if !ok {
-			return fmt.Errorf("unknown receiver type: %s", recvCfg.Type)
+			return fmt.Errorf("unknown ingester type: %s", recvCfg.Type)
 		}
 
-		// Create receiver with scoped logger.
+		// Create ingester with scoped logger.
 		var recvLogger *slog.Logger
 		if factories.Logger != nil {
-			recvLogger = factories.Logger.With("receiver_id", recvCfg.ID)
+			recvLogger = factories.Logger.With("ingester_id", recvCfg.ID)
 		}
 		recv, err := recvFactory(recvCfg.Params, recvLogger)
 		if err != nil {
-			return fmt.Errorf("create receiver %s: %w", recvCfg.ID, err)
+			return fmt.Errorf("create ingester %s: %w", recvCfg.ID, err)
 		}
 
-		o.RegisterReceiver(recvCfg.ID, recv)
+		o.RegisterIngester(recvCfg.ID, recv)
 	}
 
 	return nil

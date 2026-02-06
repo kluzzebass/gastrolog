@@ -26,7 +26,8 @@
   --color-severity-error: #c45040;
   --color-severity-warn: #c89848;
   --color-severity-info: #5a9a6a;
-  --color-severity-debug: #5a6878;
+  --color-severity-debug: #5b8ab5;
+  --color-severity-trace: #6a6080;
 
   /* Highlight */
   --color-highlight-bg: #c8875c30;

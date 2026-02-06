@@ -260,7 +260,7 @@ func TestRemoveStoreNotFound(t *testing.T) {
 	}
 }
 
-func TestAddReceiverWhileRunning(t *testing.T) {
+func TestAddIngesterWhileRunning(t *testing.T) {
 	cm, _ := chunkmem.NewManager(chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(10000),
 	})
@@ -294,13 +294,13 @@ func TestAddReceiverWhileRunning(t *testing.T) {
 	}
 	defer orch.Stop()
 
-	// Add receiver while running.
-	recv := newMockReceiver([]orchestrator.IngestMessage{
+	// Add ingester while running.
+	recv := newMockIngester([]orchestrator.IngestMessage{
 		{Attrs: map[string]string{"source": "dynamic"}, Raw: []byte("dynamic message")},
 	})
 
-	if err := orch.AddReceiver("dynamic", recv); err != nil {
-		t.Fatalf("AddReceiver: %v", err)
+	if err := orch.AddIngester("dynamic", recv); err != nil {
+		t.Fatalf("AddIngester: %v", err)
 	}
 
 	// Wait for message to be processed.
@@ -321,45 +321,45 @@ func TestAddReceiverWhileRunning(t *testing.T) {
 	}
 }
 
-func TestAddReceiverDuplicate(t *testing.T) {
+func TestAddIngesterDuplicate(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
-	recv1 := newBlockingReceiver()
-	recv2 := newBlockingReceiver()
+	recv1 := newBlockingIngester()
+	recv2 := newBlockingIngester()
 
-	if err := orch.AddReceiver("recv", recv1); err != nil {
-		t.Fatalf("AddReceiver: %v", err)
+	if err := orch.AddIngester("recv", recv1); err != nil {
+		t.Fatalf("AddIngester: %v", err)
 	}
 
-	err := orch.AddReceiver("recv", recv2)
+	err := orch.AddIngester("recv", recv2)
 	if err == nil {
-		t.Fatal("expected error for duplicate receiver")
+		t.Fatal("expected error for duplicate ingester")
 	}
 }
 
-func TestRemoveReceiverNotRunning(t *testing.T) {
+func TestRemoveIngesterNotRunning(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
-	recv := newBlockingReceiver()
-	if err := orch.AddReceiver("recv", recv); err != nil {
-		t.Fatalf("AddReceiver: %v", err)
+	recv := newBlockingIngester()
+	if err := orch.AddIngester("recv", recv); err != nil {
+		t.Fatalf("AddIngester: %v", err)
 	}
 
 	// Remove while not running should succeed.
-	if err := orch.RemoveReceiver("recv"); err != nil {
-		t.Fatalf("RemoveReceiver: %v", err)
+	if err := orch.RemoveIngester("recv"); err != nil {
+		t.Fatalf("RemoveIngester: %v", err)
 	}
 
 	// Verify removed.
-	receivers := orch.Receivers()
-	for _, id := range receivers {
+	ingesters := orch.Ingesters()
+	for _, id := range ingesters {
 		if id == "recv" {
-			t.Error("receiver should have been removed")
+			t.Error("ingester should have been removed")
 		}
 	}
 }
 
-func TestRemoveReceiverWhileRunning(t *testing.T) {
+func TestRemoveIngesterWhileRunning(t *testing.T) {
 	cm, _ := chunkmem.NewManager(chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(10000),
 	})
@@ -367,9 +367,9 @@ func TestRemoveReceiverWhileRunning(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 	orch.RegisterChunkManager("default", cm)
 
-	recv := newBlockingReceiver()
-	if err := orch.AddReceiver("recv", recv); err != nil {
-		t.Fatalf("AddReceiver: %v", err)
+	recv := newBlockingIngester()
+	if err := orch.AddIngester("recv", recv); err != nil {
+		t.Fatalf("AddIngester: %v", err)
 	}
 
 	if err := orch.Start(context.Background()); err != nil {
@@ -377,37 +377,37 @@ func TestRemoveReceiverWhileRunning(t *testing.T) {
 	}
 	defer orch.Stop()
 
-	// Wait for receiver to start.
+	// Wait for ingester to start.
 	<-recv.started
 
-	// Remove while running should succeed and stop the receiver.
-	if err := orch.RemoveReceiver("recv"); err != nil {
-		t.Fatalf("RemoveReceiver: %v", err)
+	// Remove while running should succeed and stop the ingester.
+	if err := orch.RemoveIngester("recv"); err != nil {
+		t.Fatalf("RemoveIngester: %v", err)
 	}
 
-	// Verify receiver was stopped.
+	// Verify ingester was stopped.
 	select {
 	case <-recv.stopped:
-		// Good - receiver stopped.
+		// Good - ingester stopped.
 	case <-time.After(time.Second):
-		t.Fatal("receiver did not stop after RemoveReceiver")
+		t.Fatal("ingester did not stop after RemoveIngester")
 	}
 
 	// Verify removed from list.
-	receivers := orch.Receivers()
-	for _, id := range receivers {
+	ingesters := orch.Ingesters()
+	for _, id := range ingesters {
 		if id == "recv" {
-			t.Error("receiver should have been removed from list")
+			t.Error("ingester should have been removed from list")
 		}
 	}
 }
 
-func TestRemoveReceiverNotFound(t *testing.T) {
+func TestRemoveIngesterNotFound(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
-	err := orch.RemoveReceiver("nonexistent")
+	err := orch.RemoveIngester("nonexistent")
 	if err == nil {
-		t.Fatal("expected error for nonexistent receiver")
+		t.Fatal("expected error for nonexistent ingester")
 	}
 }
 

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   useSearch,
   useExplain,
@@ -59,6 +59,48 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+type FieldSummary = {
+  key: string;
+  count: number;
+  values: { value: string; count: number }[];
+};
+
+function aggregateFields(
+  records: ProtoRecord[],
+  source: "attrs" | "kv",
+): FieldSummary[] {
+  const keyMap = new Map<string, Map<string, number>>();
+  const decoder = new TextDecoder();
+  for (const record of records) {
+    const pairs: [string, string][] =
+      source === "attrs"
+        ? Object.entries(record.attrs)
+        : extractKVPairs(decoder.decode(record.raw)).map((p) => [
+            p.key,
+            p.value,
+          ]);
+    for (const [key, value] of pairs) {
+      if (source === "kv" && key === "level") continue;
+      let valMap = keyMap.get(key);
+      if (!valMap) {
+        valMap = new Map();
+        keyMap.set(key, valMap);
+      }
+      valMap.set(value, (valMap.get(value) ?? 0) + 1);
+    }
+  }
+  return Array.from(keyMap.entries())
+    .map(([key, valMap]) => ({
+      key,
+      count: Array.from(valMap.values()).reduce((a, b) => a + b, 0),
+      values: Array.from(valMap.entries())
+        .map(([value, count]) => ({ value, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10),
+    }))
+    .sort((a, b) => b.count - a.count);
+}
+
 const timeRangeMs: Record<string, number> = {
   "15m": 15 * 60 * 1000,
   "1h": 60 * 60 * 1000,
@@ -76,9 +118,29 @@ export function EditorialDesign() {
     null,
   );
   const [theme, setTheme] = useState<Theme>("dark");
+  const [detailWidth, setDetailWidth] = useState(320);
   const queryInputRef = useRef<HTMLTextAreaElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const expressionRef = useRef("");
+
+  const handleDetailResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    const onMouseMove = (e: MouseEvent) => {
+      setDetailWidth(
+        Math.max(240, Math.min(600, window.innerWidth - e.clientX)),
+      );
+    };
+    const onMouseUp = () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  }, []);
 
   const {
     records,
@@ -107,50 +169,60 @@ export function EditorialDesign() {
   const dark = theme === "dark";
 
   // Build the full expression sent to the server.
-  // The query text box only contains user filters (tokens, kv, severity).
-  // Time range and store are sidebar state, injected here at call time.
-  const buildExpression = (
-    q: string,
-    range?: string,
-    store?: string,
-  ): string => {
-    const r = range ?? timeRange;
-    const s = store ?? selectedStore;
-    const parts: string[] = [];
+  // Strip start=/end=/reverse tokens from the query string.
+  const stripTimeRange = (q: string): string =>
+    q
+      .replace(/\bstart=\S+/g, "")
+      .replace(/\bend=\S+/g, "")
+      .replace(/\breverse\b/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
 
-    if (r !== "All") {
-      const ms = timeRangeMs[r];
-      if (ms) {
-        const now = Date.now();
-        parts.push(`start=${new Date(now - ms).toISOString()}`);
-        parts.push(`end=${new Date(now).toISOString()}`);
-        parts.push("reverse");
-      }
-    } else {
-      parts.push("reverse");
-    }
-    if (s !== "all") {
-      parts.push(`store=${s}`);
-    }
-    if (q.trim()) {
-      parts.push(q.trim());
-    }
-    return parts.join(" ");
+  // Strip store= token from the query string.
+  const stripStore = (q: string): string =>
+    q
+      .replace(/\bstore=\S+/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  // Build time range tokens for the given range key.
+  const buildTimeTokens = (range: string): string => {
+    if (range === "All") return "reverse";
+    const ms = timeRangeMs[range];
+    if (!ms) return "reverse";
+    const now = Date.now();
+    return `start=${new Date(now - ms).toISOString()} end=${new Date(now).toISOString()} reverse`;
   };
 
-  // Fire search + histogram + explain. Tracks expression for infinite scroll.
-  const fireSearch = (q?: string, range?: string, store?: string) => {
-    const expr = buildExpression(q ?? query, range, store);
-    expressionRef.current = expr;
-    search(expr);
-    fetchHistogram(expr);
-    if (showPlan) explain(expr);
+  // Inject time range + reverse into query, replacing any existing time tokens.
+  const injectTimeRange = (q: string, range: string): string => {
+    const base = stripTimeRange(q);
+    const timeTokens = buildTimeTokens(range);
+    return base ? `${timeTokens} ${base}` : timeTokens;
   };
 
-  // On mount: focus input and load initial results for the default time range.
+  // Inject store= into query, replacing any existing store token.
+  const injectStore = (q: string, storeId: string): string => {
+    const base = stripStore(q);
+    if (storeId === "all") return base;
+    const token = `store=${storeId}`;
+    return base ? `${token} ${base}` : token;
+  };
+
+  // Fire search + histogram + explain from query string (single source of truth).
+  const fireSearch = (q: string) => {
+    expressionRef.current = q;
+    search(q);
+    fetchHistogram(q);
+    if (showPlan) explain(q);
+  };
+
+  // On mount: focus input and seed query with default time range.
   useEffect(() => {
     queryInputRef.current?.focus();
-    fireSearch();
+    const initial = injectTimeRange("", timeRange);
+    setQuery(initial);
+    fireSearch(initial);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Infinite scroll: observe a sentinel div at the bottom of the results.
@@ -171,16 +243,16 @@ export function EditorialDesign() {
   }, [hasMore, isSearching, loadMore]);
 
   const executeQuery = () => {
-    fireSearch();
+    fireSearch(query);
   };
 
   const handleShowPlan = () => {
     const next = !showPlan;
     setShowPlan(next);
-    if (next) explain(buildExpression(query));
+    if (next) explain(query);
   };
 
-  const allSeverities = ["error", "warn", "info", "debug"];
+  const allSeverities = ["error", "warn", "info", "debug", "trace"];
 
   // Parse which severities are active from the query string.
   const activeSeverities = allSeverities.filter((s) =>
@@ -198,7 +270,7 @@ export function EditorialDesign() {
   const stripSeverity = (q: string): string =>
     q
       .replace(/\((?:level=\w+\s+OR\s+)*level=\w+\)/g, "")
-      .replace(/\blevel=(?:error|warn|info|debug)\b/g, "")
+      .replace(/\blevel=(?:error|warn|info|debug|trace)\b/g, "")
       .replace(/\s+/g, " ")
       .trim();
 
@@ -216,15 +288,34 @@ export function EditorialDesign() {
 
   const handleTimeRange = (range: string) => {
     setTimeRange(range);
-    fireSearch(undefined, range);
+    const newQuery = injectTimeRange(query, range);
+    setQuery(newQuery);
+    fireSearch(newQuery);
   };
 
   const handleStoreSelect = (storeId: string) => {
     setSelectedStore(storeId);
-    fireSearch(undefined, undefined, storeId);
+    const newQuery = injectStore(query, storeId);
+    setQuery(newQuery);
+    fireSearch(newQuery);
   };
 
   const tokens = extractTokens(query);
+  const attrFields = useMemo(
+    () => aggregateFields(records, "attrs"),
+    [records],
+  );
+  const kvFields = useMemo(() => aggregateFields(records, "kv"), [records]);
+
+  const handleFieldSelect = (key: string, value: string) => {
+    const token = `${key}=${value}`;
+    if (!query.includes(token)) {
+      const newQuery = query.trim() ? `${query.trim()} ${token}` : token;
+      setQuery(newQuery);
+      fireSearch(newQuery);
+    }
+  };
+
   const totalRecords = stats?.totalRecords ?? BigInt(0);
   const totalStores = stats?.totalStores ?? BigInt(0);
   const sealedChunks = stats?.sealedChunks ?? BigInt(0);
@@ -377,16 +468,49 @@ export function EditorialDesign() {
                 { label: "Warn", level: "warn", color: "severity-warn" },
                 { label: "Info", level: "info", color: "severity-info" },
                 { label: "Debug", level: "debug", color: "severity-debug" },
+                { label: "Trace", level: "trace", color: "severity-trace" },
               ].map(({ label, level, color }) => {
                 const active = activeSeverities.includes(level);
+                const styles: Record<
+                  string,
+                  { active: string; inactive: string }
+                > = {
+                  "severity-error": {
+                    active:
+                      "bg-severity-error border-severity-error text-white",
+                    inactive:
+                      "border-severity-error/40 text-severity-error hover:border-severity-error hover:bg-severity-error/10",
+                  },
+                  "severity-warn": {
+                    active: "bg-severity-warn border-severity-warn text-white",
+                    inactive:
+                      "border-severity-warn/40 text-severity-warn hover:border-severity-warn hover:bg-severity-warn/10",
+                  },
+                  "severity-info": {
+                    active: "bg-severity-info border-severity-info text-white",
+                    inactive:
+                      "border-severity-info/40 text-severity-info hover:border-severity-info hover:bg-severity-info/10",
+                  },
+                  "severity-debug": {
+                    active:
+                      "bg-severity-debug border-severity-debug text-white",
+                    inactive:
+                      "border-severity-debug/40 text-severity-debug hover:border-severity-debug hover:bg-severity-debug/10",
+                  },
+                  "severity-trace": {
+                    active:
+                      "bg-severity-trace border-severity-trace text-white",
+                    inactive:
+                      "border-severity-trace/40 text-severity-trace hover:border-severity-trace hover:bg-severity-trace/10",
+                  },
+                };
+                const s = styles[color];
                 return (
                   <button
                     key={level}
                     onClick={() => toggleSeverity(level)}
                     className={`px-2 py-0.5 text-[0.8em] font-medium uppercase tracking-wider rounded-sm border transition-all duration-150 ${
-                      active
-                        ? `bg-${color} border-${color} text-white`
-                        : `border-${color}/40 text-${color} hover:border-${color} hover:bg-${color}/10`
+                      active ? s.active : s.inactive
                     }`}
                   >
                     {label}
@@ -394,6 +518,23 @@ export function EditorialDesign() {
                 );
               })}
             </div>
+          </SidebarSection>
+
+          {/* Field Explorers */}
+          <SidebarSection title="Attributes" dark={dark}>
+            <FieldExplorer
+              fields={attrFields}
+              dark={dark}
+              onSelect={handleFieldSelect}
+            />
+          </SidebarSection>
+
+          <SidebarSection title="Extracted Fields" dark={dark}>
+            <FieldExplorer
+              fields={kvFields}
+              dark={dark}
+              onSelect={handleFieldSelect}
+            />
           </SidebarSection>
         </aside>
 
@@ -585,30 +726,37 @@ export function EditorialDesign() {
 
         {/* ── Detail Panel ── */}
         {selectedRecord && (
-          <aside
-            className={`w-80 shrink-0 border-l overflow-y-auto editorial-scroll animate-fade-in ${c("border-ink-border-subtle bg-ink-surface", "border-light-border-subtle bg-light-surface")}`}
-          >
+          <>
             <div
-              className={`flex justify-between items-center px-4 py-3 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
+              onMouseDown={handleDetailResize}
+              className={`w-1 shrink-0 cursor-col-resize transition-colors ${c("hover:bg-copper-muted/30", "hover:bg-copper-muted/20")}`}
+            />
+            <aside
+              style={{ width: detailWidth }}
+              className={`shrink-0 border-l overflow-y-auto editorial-scroll animate-fade-in ${c("border-ink-border-subtle bg-ink-surface", "border-light-border-subtle bg-light-surface")}`}
             >
-              <h3
-                className={`font-display text-[1.15em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
+              <div
+                className={`flex justify-between items-center px-4 py-3 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
               >
-                Detail
-              </h3>
-              <button
-                onClick={() => setSelectedRecord(null)}
-                className={`text-sm leading-none w-6 h-6 flex items-center justify-center rounded transition-colors ${c(
-                  "text-text-ghost hover:text-text-bright hover:bg-ink-hover",
-                  "text-light-text-ghost hover:text-light-text-bright hover:bg-light-hover",
-                )}`}
-              >
-                &times;
-              </button>
-            </div>
+                <h3
+                  className={`font-display text-[1.15em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
+                >
+                  Detail
+                </h3>
+                <button
+                  onClick={() => setSelectedRecord(null)}
+                  className={`text-sm leading-none w-6 h-6 flex items-center justify-center rounded transition-colors ${c(
+                    "text-text-ghost hover:text-text-bright hover:bg-ink-hover",
+                    "text-light-text-ghost hover:text-light-text-bright hover:bg-light-hover",
+                  )}`}
+                >
+                  &times;
+                </button>
+              </div>
 
-            <DetailPanelContent record={selectedRecord} dark={dark} />
-          </aside>
+              <DetailPanelContent record={selectedRecord} dark={dark} />
+            </aside>
+          </>
         )}
       </div>
     </div>
@@ -660,6 +808,79 @@ function SidebarSection({
       </h3>
       {children}
     </section>
+  );
+}
+
+function FieldExplorer({
+  fields,
+  dark,
+  onSelect,
+}: {
+  fields: FieldSummary[];
+  dark: boolean;
+  onSelect: (key: string, value: string) => void;
+}) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  if (fields.length === 0) {
+    return (
+      <div
+        className={`text-[0.8em] italic ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
+      >
+        No fields
+      </div>
+    );
+  }
+
+  const toggleKey = (key: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  return (
+    <div className="space-y-px">
+      {fields.map(({ key, count, values }) => {
+        const isExpanded = expanded.has(key);
+        return (
+          <div key={key}>
+            <button
+              onClick={() => toggleKey(key)}
+              className={`w-full flex items-center gap-1.5 px-1.5 py-1 text-left text-[0.8em] rounded transition-colors ${dark ? "hover:bg-ink-hover text-text-muted hover:text-text-normal" : "hover:bg-light-hover text-light-text-muted hover:text-light-text-normal"}`}
+            >
+              <span
+                className={`text-[0.7em] ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
+              >
+                {isExpanded ? "\u25be" : "\u25b8"}
+              </span>
+              <span className="flex-1 font-mono truncate">{key}</span>
+              <span
+                className={`text-[0.85em] tabular-nums ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
+              >
+                {count}
+              </span>
+            </button>
+            {isExpanded && (
+              <div className="ml-4 space-y-px">
+                {values.map(({ value, count: vCount }) => (
+                  <button
+                    key={value}
+                    onClick={() => onSelect(key, value)}
+                    className={`w-full flex items-center gap-1.5 px-1.5 py-0.5 text-left text-[0.75em] rounded transition-colors ${dark ? "hover:bg-ink-hover text-text-ghost hover:text-copper-glow" : "hover:bg-light-hover text-light-text-ghost hover:text-copper"}`}
+                  >
+                    <span className="flex-1 font-mono truncate">{value}</span>
+                    <span className="tabular-nums">{vCount}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1392,7 +1613,7 @@ function DetailRow({
       className={`flex py-1 border-b last:border-b-0 ${dark ? "border-ink-border-subtle" : "border-light-border-subtle"}`}
     >
       <dt
-        className={`w-16 shrink-0 text-[0.8em] ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
+        className={`w-24 shrink-0 text-[0.8em] ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
       >
         {label}
       </dt>

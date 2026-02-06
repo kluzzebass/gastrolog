@@ -47,9 +47,9 @@ export class GetConfigResponse extends Message<GetConfigResponse> {
   stores: StoreConfig[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.ReceiverConfig receivers = 2;
+   * @generated from field: repeated gastrolog.v1.IngesterConfig ingesters = 2;
    */
-  receivers: ReceiverConfig[] = [];
+  ingesters: IngesterConfig[] = [];
 
   /**
    * @generated from field: map<string, gastrolog.v1.RotationPolicyConfig> rotation_policies = 3;
@@ -65,7 +65,7 @@ export class GetConfigResponse extends Message<GetConfigResponse> {
   static readonly typeName = "gastrolog.v1.GetConfigResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "stores", kind: "message", T: StoreConfig, repeated: true },
-    { no: 2, name: "receivers", kind: "message", T: ReceiverConfig, repeated: true },
+    { no: 2, name: "ingesters", kind: "message", T: IngesterConfig, repeated: true },
     { no: 3, name: "rotation_policies", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "message", T: RotationPolicyConfig} },
   ]);
 
@@ -148,9 +148,9 @@ export class StoreConfig extends Message<StoreConfig> {
 }
 
 /**
- * @generated from message gastrolog.v1.ReceiverConfig
+ * @generated from message gastrolog.v1.IngesterConfig
  */
-export class ReceiverConfig extends Message<ReceiverConfig> {
+export class IngesterConfig extends Message<IngesterConfig> {
   /**
    * @generated from field: string id = 1;
    */
@@ -166,33 +166,33 @@ export class ReceiverConfig extends Message<ReceiverConfig> {
    */
   params: { [key: string]: string } = {};
 
-  constructor(data?: PartialMessage<ReceiverConfig>) {
+  constructor(data?: PartialMessage<IngesterConfig>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ReceiverConfig";
+  static readonly typeName = "gastrolog.v1.IngesterConfig";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ReceiverConfig {
-    return new ReceiverConfig().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): IngesterConfig {
+    return new IngesterConfig().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ReceiverConfig {
-    return new ReceiverConfig().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): IngesterConfig {
+    return new IngesterConfig().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ReceiverConfig {
-    return new ReceiverConfig().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): IngesterConfig {
+    return new IngesterConfig().fromJsonString(jsonString, options);
   }
 
-  static equals(a: ReceiverConfig | PlainMessage<ReceiverConfig> | undefined, b: ReceiverConfig | PlainMessage<ReceiverConfig> | undefined): boolean {
-    return proto3.util.equals(ReceiverConfig, a, b);
+  static equals(a: IngesterConfig | PlainMessage<IngesterConfig> | undefined, b: IngesterConfig | PlainMessage<IngesterConfig> | undefined): boolean {
+    return proto3.util.equals(IngesterConfig, a, b);
   }
 }
 
@@ -320,77 +320,77 @@ export class UpdateStoreRouteResponse extends Message<UpdateStoreRouteResponse> 
 }
 
 /**
- * @generated from message gastrolog.v1.ListReceiversRequest
+ * @generated from message gastrolog.v1.ListIngestersRequest
  */
-export class ListReceiversRequest extends Message<ListReceiversRequest> {
-  constructor(data?: PartialMessage<ListReceiversRequest>) {
+export class ListIngestersRequest extends Message<ListIngestersRequest> {
+  constructor(data?: PartialMessage<ListIngestersRequest>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ListReceiversRequest";
+  static readonly typeName = "gastrolog.v1.ListIngestersRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListReceiversRequest {
-    return new ListReceiversRequest().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListIngestersRequest {
+    return new ListIngestersRequest().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListReceiversRequest {
-    return new ListReceiversRequest().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListIngestersRequest {
+    return new ListIngestersRequest().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListReceiversRequest {
-    return new ListReceiversRequest().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListIngestersRequest {
+    return new ListIngestersRequest().fromJsonString(jsonString, options);
   }
 
-  static equals(a: ListReceiversRequest | PlainMessage<ListReceiversRequest> | undefined, b: ListReceiversRequest | PlainMessage<ListReceiversRequest> | undefined): boolean {
-    return proto3.util.equals(ListReceiversRequest, a, b);
+  static equals(a: ListIngestersRequest | PlainMessage<ListIngestersRequest> | undefined, b: ListIngestersRequest | PlainMessage<ListIngestersRequest> | undefined): boolean {
+    return proto3.util.equals(ListIngestersRequest, a, b);
   }
 }
 
 /**
- * @generated from message gastrolog.v1.ListReceiversResponse
+ * @generated from message gastrolog.v1.ListIngestersResponse
  */
-export class ListReceiversResponse extends Message<ListReceiversResponse> {
+export class ListIngestersResponse extends Message<ListIngestersResponse> {
   /**
-   * @generated from field: repeated gastrolog.v1.ReceiverInfo receivers = 1;
+   * @generated from field: repeated gastrolog.v1.IngesterInfo ingesters = 1;
    */
-  receivers: ReceiverInfo[] = [];
+  ingesters: IngesterInfo[] = [];
 
-  constructor(data?: PartialMessage<ListReceiversResponse>) {
+  constructor(data?: PartialMessage<ListIngestersResponse>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ListReceiversResponse";
+  static readonly typeName = "gastrolog.v1.ListIngestersResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "receivers", kind: "message", T: ReceiverInfo, repeated: true },
+    { no: 1, name: "ingesters", kind: "message", T: IngesterInfo, repeated: true },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListReceiversResponse {
-    return new ListReceiversResponse().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListIngestersResponse {
+    return new ListIngestersResponse().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListReceiversResponse {
-    return new ListReceiversResponse().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListIngestersResponse {
+    return new ListIngestersResponse().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListReceiversResponse {
-    return new ListReceiversResponse().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListIngestersResponse {
+    return new ListIngestersResponse().fromJsonString(jsonString, options);
   }
 
-  static equals(a: ListReceiversResponse | PlainMessage<ListReceiversResponse> | undefined, b: ListReceiversResponse | PlainMessage<ListReceiversResponse> | undefined): boolean {
-    return proto3.util.equals(ListReceiversResponse, a, b);
+  static equals(a: ListIngestersResponse | PlainMessage<ListIngestersResponse> | undefined, b: ListIngestersResponse | PlainMessage<ListIngestersResponse> | undefined): boolean {
+    return proto3.util.equals(ListIngestersResponse, a, b);
   }
 }
 
 /**
- * @generated from message gastrolog.v1.ReceiverInfo
+ * @generated from message gastrolog.v1.IngesterInfo
  */
-export class ReceiverInfo extends Message<ReceiverInfo> {
+export class IngesterInfo extends Message<IngesterInfo> {
   /**
    * @generated from field: string id = 1;
    */
@@ -406,77 +406,77 @@ export class ReceiverInfo extends Message<ReceiverInfo> {
    */
   running = false;
 
-  constructor(data?: PartialMessage<ReceiverInfo>) {
+  constructor(data?: PartialMessage<IngesterInfo>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ReceiverInfo";
+  static readonly typeName = "gastrolog.v1.IngesterInfo";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "running", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ReceiverInfo {
-    return new ReceiverInfo().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): IngesterInfo {
+    return new IngesterInfo().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ReceiverInfo {
-    return new ReceiverInfo().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): IngesterInfo {
+    return new IngesterInfo().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ReceiverInfo {
-    return new ReceiverInfo().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): IngesterInfo {
+    return new IngesterInfo().fromJsonString(jsonString, options);
   }
 
-  static equals(a: ReceiverInfo | PlainMessage<ReceiverInfo> | undefined, b: ReceiverInfo | PlainMessage<ReceiverInfo> | undefined): boolean {
-    return proto3.util.equals(ReceiverInfo, a, b);
+  static equals(a: IngesterInfo | PlainMessage<IngesterInfo> | undefined, b: IngesterInfo | PlainMessage<IngesterInfo> | undefined): boolean {
+    return proto3.util.equals(IngesterInfo, a, b);
   }
 }
 
 /**
- * @generated from message gastrolog.v1.GetReceiverStatusRequest
+ * @generated from message gastrolog.v1.GetIngesterStatusRequest
  */
-export class GetReceiverStatusRequest extends Message<GetReceiverStatusRequest> {
+export class GetIngesterStatusRequest extends Message<GetIngesterStatusRequest> {
   /**
    * @generated from field: string id = 1;
    */
   id = "";
 
-  constructor(data?: PartialMessage<GetReceiverStatusRequest>) {
+  constructor(data?: PartialMessage<GetIngesterStatusRequest>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.GetReceiverStatusRequest";
+  static readonly typeName = "gastrolog.v1.GetIngesterStatusRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetReceiverStatusRequest {
-    return new GetReceiverStatusRequest().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetIngesterStatusRequest {
+    return new GetIngesterStatusRequest().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetReceiverStatusRequest {
-    return new GetReceiverStatusRequest().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetIngesterStatusRequest {
+    return new GetIngesterStatusRequest().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetReceiverStatusRequest {
-    return new GetReceiverStatusRequest().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetIngesterStatusRequest {
+    return new GetIngesterStatusRequest().fromJsonString(jsonString, options);
   }
 
-  static equals(a: GetReceiverStatusRequest | PlainMessage<GetReceiverStatusRequest> | undefined, b: GetReceiverStatusRequest | PlainMessage<GetReceiverStatusRequest> | undefined): boolean {
-    return proto3.util.equals(GetReceiverStatusRequest, a, b);
+  static equals(a: GetIngesterStatusRequest | PlainMessage<GetIngesterStatusRequest> | undefined, b: GetIngesterStatusRequest | PlainMessage<GetIngesterStatusRequest> | undefined): boolean {
+    return proto3.util.equals(GetIngesterStatusRequest, a, b);
   }
 }
 
 /**
- * @generated from message gastrolog.v1.GetReceiverStatusResponse
+ * @generated from message gastrolog.v1.GetIngesterStatusResponse
  */
-export class GetReceiverStatusResponse extends Message<GetReceiverStatusResponse> {
+export class GetIngesterStatusResponse extends Message<GetIngesterStatusResponse> {
   /**
    * @generated from field: string id = 1;
    */
@@ -493,44 +493,44 @@ export class GetReceiverStatusResponse extends Message<GetReceiverStatusResponse
   running = false;
 
   /**
-   * @generated from field: int64 messages_received = 4;
+   * @generated from field: int64 messages_ingested = 4;
    */
-  messagesReceived = protoInt64.zero;
+  messagesIngested = protoInt64.zero;
 
   /**
    * @generated from field: int64 errors = 5;
    */
   errors = protoInt64.zero;
 
-  constructor(data?: PartialMessage<GetReceiverStatusResponse>) {
+  constructor(data?: PartialMessage<GetIngesterStatusResponse>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.GetReceiverStatusResponse";
+  static readonly typeName = "gastrolog.v1.GetIngesterStatusResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "running", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 4, name: "messages_received", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 4, name: "messages_ingested", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 5, name: "errors", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetReceiverStatusResponse {
-    return new GetReceiverStatusResponse().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetIngesterStatusResponse {
+    return new GetIngesterStatusResponse().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetReceiverStatusResponse {
-    return new GetReceiverStatusResponse().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetIngesterStatusResponse {
+    return new GetIngesterStatusResponse().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetReceiverStatusResponse {
-    return new GetReceiverStatusResponse().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetIngesterStatusResponse {
+    return new GetIngesterStatusResponse().fromJsonString(jsonString, options);
   }
 
-  static equals(a: GetReceiverStatusResponse | PlainMessage<GetReceiverStatusResponse> | undefined, b: GetReceiverStatusResponse | PlainMessage<GetReceiverStatusResponse> | undefined): boolean {
-    return proto3.util.equals(GetReceiverStatusResponse, a, b);
+  static equals(a: GetIngesterStatusResponse | PlainMessage<GetIngesterStatusResponse> | undefined, b: GetIngesterStatusResponse | PlainMessage<GetIngesterStatusResponse> | undefined): boolean {
+    return proto3.util.equals(GetIngesterStatusResponse, a, b);
   }
 }
 

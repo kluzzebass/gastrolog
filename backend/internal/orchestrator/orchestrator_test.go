@@ -394,27 +394,27 @@ func TestSearchWithContextViaOrchestrator(t *testing.T) {
 	}
 }
 
-// mockReceiver is a test receiver that emits fixed messages.
-type mockReceiver struct {
+// mockIngester is a test ingester that emits fixed messages.
+type mockIngester struct {
 	messages []orchestrator.IngestMessage
 	started  chan struct{}
 	stopped  chan struct{}
 }
 
-func newMockReceiver(messages []orchestrator.IngestMessage) *mockReceiver {
-	return &mockReceiver{
+func newMockIngester(messages []orchestrator.IngestMessage) *mockIngester {
+	return &mockIngester{
 		messages: messages,
 		started:  make(chan struct{}),
 		stopped:  make(chan struct{}),
 	}
 }
 
-func (r *mockReceiver) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (r *mockIngester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
 	close(r.started)
 	defer close(r.stopped)
 
 	for _, msg := range r.messages {
-		// Set IngestTS to now, simulating when the receiver received the message.
+		// Set IngestTS to now, simulating when the ingester received the message.
 		msg.IngestTS = time.Now()
 		select {
 		case <-ctx.Done():
@@ -428,27 +428,27 @@ func (r *mockReceiver) Run(ctx context.Context, out chan<- orchestrator.IngestMe
 	return ctx.Err()
 }
 
-// blockingReceiver blocks until context is cancelled.
-type blockingReceiver struct {
+// blockingIngester blocks until context is cancelled.
+type blockingIngester struct {
 	started chan struct{}
 	stopped chan struct{}
 }
 
-func newBlockingReceiver() *blockingReceiver {
-	return &blockingReceiver{
+func newBlockingIngester() *blockingIngester {
+	return &blockingIngester{
 		started: make(chan struct{}),
 		stopped: make(chan struct{}),
 	}
 }
 
-func (r *blockingReceiver) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (r *blockingIngester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
 	close(r.started)
 	defer close(r.stopped)
 	<-ctx.Done()
 	return ctx.Err()
 }
 
-func newReceiverTestSetup() (*orchestrator.Orchestrator, chunk.ChunkManager) {
+func newIngesterTestSetup() (*orchestrator.Orchestrator, chunk.ChunkManager) {
 	cm, _ := chunkmem.NewManager(chunkmem.Config{
 		RotationPolicy: recordCountPolicy(10000),
 	})
@@ -475,19 +475,19 @@ func newReceiverTestSetup() (*orchestrator.Orchestrator, chunk.ChunkManager) {
 	return orch, cm
 }
 
-func TestReceiverMessageReachesChunkManager(t *testing.T) {
-	orch, cm := newReceiverTestSetup()
+func TestIngesterMessageReachesChunkManager(t *testing.T) {
+	orch, cm := newIngesterTestSetup()
 
-	recv := newMockReceiver([]orchestrator.IngestMessage{
+	recv := newMockIngester([]orchestrator.IngestMessage{
 		{Attrs: map[string]string{"host": "server1"}, Raw: []byte("test message")},
 	})
-	orch.RegisterReceiver("test", recv)
+	orch.RegisterIngester("test", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
 
-	// Wait for receiver to start and message to be processed.
+	// Wait for ingester to start and message to be processed.
 	<-recv.started
 	time.Sleep(50 * time.Millisecond)
 
@@ -513,45 +513,45 @@ func TestReceiverMessageReachesChunkManager(t *testing.T) {
 	}
 }
 
-func TestReceiverContextCancellation(t *testing.T) {
-	orch, _ := newReceiverTestSetup()
+func TestIngesterContextCancellation(t *testing.T) {
+	orch, _ := newIngesterTestSetup()
 
-	recv := newBlockingReceiver()
-	orch.RegisterReceiver("test", recv)
+	recv := newBlockingIngester()
+	orch.RegisterIngester("test", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
 
-	// Wait for receiver to start.
+	// Wait for ingester to start.
 	<-recv.started
 
-	// Stop should cancel context and receiver should exit.
+	// Stop should cancel context and ingester should exit.
 	if err := orch.Stop(); err != nil {
 		t.Fatalf("Stop failed: %v", err)
 	}
 
-	// Verify receiver stopped.
+	// Verify ingester stopped.
 	select {
 	case <-recv.stopped:
 		// Good.
 	case <-time.After(time.Second):
-		t.Error("receiver did not stop after Stop()")
+		t.Error("ingester did not stop after Stop()")
 	}
 }
 
-func TestMultipleReceivers(t *testing.T) {
-	orch, cm := newReceiverTestSetup()
+func TestMultipleIngesters(t *testing.T) {
+	orch, cm := newIngesterTestSetup()
 
-	recv1 := newMockReceiver([]orchestrator.IngestMessage{
+	recv1 := newMockIngester([]orchestrator.IngestMessage{
 		{Attrs: map[string]string{"source": "recv1"}, Raw: []byte("from recv1")},
 	})
-	recv2 := newMockReceiver([]orchestrator.IngestMessage{
+	recv2 := newMockIngester([]orchestrator.IngestMessage{
 		{Attrs: map[string]string{"source": "recv2"}, Raw: []byte("from recv2")},
 	})
 
-	orch.RegisterReceiver("recv1", recv1)
-	orch.RegisterReceiver("recv2", recv2)
+	orch.RegisterIngester("recv1", recv1)
+	orch.RegisterIngester("recv2", recv2)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -587,7 +587,7 @@ func TestMultipleReceivers(t *testing.T) {
 }
 
 func TestStartAlreadyRunning(t *testing.T) {
-	orch, _ := newReceiverTestSetup()
+	orch, _ := newIngesterTestSetup()
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -601,7 +601,7 @@ func TestStartAlreadyRunning(t *testing.T) {
 }
 
 func TestStopNotRunning(t *testing.T) {
-	orch, _ := newReceiverTestSetup()
+	orch, _ := newIngesterTestSetup()
 
 	err := orch.Stop()
 	if err != orchestrator.ErrNotRunning {
@@ -609,7 +609,7 @@ func TestStopNotRunning(t *testing.T) {
 	}
 }
 
-func TestReceiverIndexBuildOnSeal(t *testing.T) {
+func TestIngesterIndexBuildOnSeal(t *testing.T) {
 	// Set up with small chunk size to trigger seal.
 	cm, _ := chunkmem.NewManager(chunkmem.Config{
 		RotationPolicy: recordCountPolicy(2), // 2 records per chunk
@@ -635,13 +635,13 @@ func TestReceiverIndexBuildOnSeal(t *testing.T) {
 	orch.RegisterIndexManager("default", tracker)
 	orch.RegisterQueryEngine("default", qe)
 
-	// Create receiver with 3 messages to trigger seal.
-	recv := newMockReceiver([]orchestrator.IngestMessage{
+	// Create ingester with 3 messages to trigger seal.
+	recv := newMockIngester([]orchestrator.IngestMessage{
 		{Attrs: map[string]string{"host": "s1"}, Raw: []byte("one")},
 		{Attrs: map[string]string{"host": "s1"}, Raw: []byte("two")},
 		{Attrs: map[string]string{"host": "s1"}, Raw: []byte("three")},
 	})
-	orch.RegisterReceiver("test", recv)
+	orch.RegisterIngester("test", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -661,18 +661,18 @@ func TestReceiverIndexBuildOnSeal(t *testing.T) {
 	}
 }
 
-func TestUnregisterReceiver(t *testing.T) {
-	orch, _ := newReceiverTestSetup()
+func TestUnregisterIngester(t *testing.T) {
+	orch, _ := newIngesterTestSetup()
 
-	recv := newBlockingReceiver()
-	orch.RegisterReceiver("test", recv)
-	orch.UnregisterReceiver("test")
+	recv := newBlockingIngester()
+	orch.RegisterIngester("test", recv)
+	orch.UnregisterIngester("test")
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
 
-	// No receivers, so nothing should be started.
+	// No ingesters, so nothing should be started.
 	// Give a moment then stop.
 	time.Sleep(10 * time.Millisecond)
 
@@ -680,29 +680,29 @@ func TestUnregisterReceiver(t *testing.T) {
 		t.Fatalf("Stop failed: %v", err)
 	}
 
-	// Receiver should not have been started.
+	// Ingester should not have been started.
 	select {
 	case <-recv.started:
-		t.Error("receiver should not have been started after unregister")
+		t.Error("ingester should not have been started after unregister")
 	default:
 		// Good.
 	}
 }
 
-// countingReceiver counts how many messages it sends.
-type countingReceiver struct {
+// countingIngester counts how many messages it sends.
+type countingIngester struct {
 	count   int
 	started chan struct{}
 }
 
-func newCountingReceiver(count int) *countingReceiver {
-	return &countingReceiver{
+func newCountingIngester(count int) *countingIngester {
+	return &countingIngester{
 		count:   count,
 		started: make(chan struct{}),
 	}
 }
 
-func (r *countingReceiver) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (r *countingIngester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
 	close(r.started)
 
 	for i := 0; i < r.count; i++ {
@@ -722,10 +722,10 @@ func (r *countingReceiver) Run(ctx context.Context, out chan<- orchestrator.Inge
 }
 
 func TestHighVolumeIngestion(t *testing.T) {
-	orch, cm := newReceiverTestSetup()
+	orch, cm := newIngesterTestSetup()
 
-	recv := newCountingReceiver(100)
-	orch.RegisterReceiver("test", recv)
+	recv := newCountingIngester(100)
+	orch.RegisterIngester("test", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -829,15 +829,15 @@ func TestIndexManagersAccessor(t *testing.T) {
 	}
 }
 
-func TestReceiversAccessor(t *testing.T) {
-	orch, _ := newReceiverTestSetup()
+func TestIngestersAccessor(t *testing.T) {
+	orch, _ := newIngesterTestSetup()
 
-	recv1 := newBlockingReceiver()
-	recv2 := newBlockingReceiver()
-	orch.RegisterReceiver("recv1", recv1)
-	orch.RegisterReceiver("recv2", recv2)
+	recv1 := newBlockingIngester()
+	recv2 := newBlockingIngester()
+	orch.RegisterIngester("recv1", recv1)
+	orch.RegisterIngester("recv2", recv2)
 
-	keys := orch.Receivers()
+	keys := orch.Ingesters()
 	if len(keys) != 2 {
 		t.Fatalf("expected 2 keys, got %d", len(keys))
 	}
@@ -853,7 +853,7 @@ func TestReceiversAccessor(t *testing.T) {
 }
 
 func TestRunningAccessor(t *testing.T) {
-	orch, _ := newReceiverTestSetup()
+	orch, _ := newIngesterTestSetup()
 
 	if orch.Running() {
 		t.Error("expected Running() = false before Start()")
@@ -1157,7 +1157,7 @@ func TestRoutingIntegration(t *testing.T) {
 	}
 }
 
-func TestRoutingWithReceivers(t *testing.T) {
+func TestRoutingWithIngesters(t *testing.T) {
 	orch, stores := newRoutedTestSetup(t)
 
 	// Set up routing: prod gets env=prod, archive is catch-all.
@@ -1167,13 +1167,13 @@ func TestRoutingWithReceivers(t *testing.T) {
 	router := orchestrator.NewRouter([]*orchestrator.CompiledRoute{prodRoute, archiveRoute})
 	orch.SetRouter(router)
 
-	// Create a receiver that emits messages with different attrs.
-	recv := newMockReceiver([]orchestrator.IngestMessage{
+	// Create a ingester that emits messages with different attrs.
+	recv := newMockIngester([]orchestrator.IngestMessage{
 		{Attrs: map[string]string{"env": "prod"}, Raw: []byte("prod msg 1")},
 		{Attrs: map[string]string{"env": "prod"}, Raw: []byte("prod msg 2")},
 		{Attrs: map[string]string{"env": "staging"}, Raw: []byte("staging msg")},
 	})
-	orch.RegisterReceiver("test", recv)
+	orch.RegisterIngester("test", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -1309,7 +1309,7 @@ func TestRoutingComplexExpression(t *testing.T) {
 }
 
 func TestIngestAckSuccess(t *testing.T) {
-	orch, _ := newReceiverTestSetup()
+	orch, _ := newIngesterTestSetup()
 
 	// Create ack channel and message with ack.
 	ackCh := make(chan error, 1)
@@ -1320,19 +1320,19 @@ func TestIngestAckSuccess(t *testing.T) {
 		Ack:      ackCh,
 	}
 
-	// Register receiver before starting.
-	recv := &ackTestReceiver{
+	// Register ingester before starting.
+	recv := &ackTestIngester{
 		msg:     msg,
 		started: make(chan struct{}),
 	}
-	orch.RegisterReceiver("ack-test", recv)
+	orch.RegisterIngester("ack-test", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
 	defer orch.Stop()
 
-	// Wait for receiver to start and send message.
+	// Wait for ingester to start and send message.
 	<-recv.started
 	time.Sleep(50 * time.Millisecond)
 
@@ -1348,13 +1348,13 @@ func TestIngestAckSuccess(t *testing.T) {
 }
 
 func TestIngestAckNotSentWhenNil(t *testing.T) {
-	orch, _ := newReceiverTestSetup()
+	orch, _ := newIngesterTestSetup()
 
 	// Message without ack channel (fire-and-forget).
-	recv := newMockReceiver([]orchestrator.IngestMessage{
+	recv := newMockIngester([]orchestrator.IngestMessage{
 		{Attrs: map[string]string{"host": "server1"}, Raw: []byte("no ack message")},
 	})
-	orch.RegisterReceiver("no-ack-test", recv)
+	orch.RegisterIngester("no-ack-test", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -1367,13 +1367,13 @@ func TestIngestAckNotSentWhenNil(t *testing.T) {
 	// If we got here without panic/deadlock, the nil ack channel was handled correctly.
 }
 
-// ackTestReceiver sends a single message with an ack channel.
-type ackTestReceiver struct {
+// ackTestIngester sends a single message with an ack channel.
+type ackTestIngester struct {
 	msg     orchestrator.IngestMessage
 	started chan struct{}
 }
 
-func (r *ackTestReceiver) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+func (r *ackTestIngester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
 	close(r.started)
 
 	select {

@@ -6,8 +6,8 @@ import (
 	"gastrolog/internal/chunk"
 )
 
-// Start launches all receivers and the ingest loop.
-// Each receiver runs in its own goroutine, emitting messages to a shared channel.
+// Start launches all ingesters and the ingest loop.
+// Each ingester runs in its own goroutine, emitting messages to a shared channel.
 // The ingest loop receives messages, resolves identity, and routes to chunk managers.
 // Start returns immediately; use Stop() to shut down.
 func (o *Orchestrator) Start(ctx context.Context) error {
@@ -18,7 +18,7 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		return ErrAlreadyRunning
 	}
 
-	// Create cancellable context for all receivers and ingest loop.
+	// Create cancellable context for all ingesters and ingest loop.
 	ctx, cancel := context.WithCancel(ctx)
 	o.cancel = cancel
 	o.done = make(chan struct{})
@@ -33,19 +33,19 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	// Log startup info.
 	o.logger.Info("starting orchestrator",
 		"stores", len(o.chunks),
-		"receivers", len(o.receivers))
+		"ingesters", len(o.ingesters))
 
 	if o.router == nil && len(o.chunks) > 1 {
 		o.logger.Warn("no router configured, messages will fan out to all stores")
 	}
 
-	// Launch receiver goroutines with per-receiver contexts.
-	for id, r := range o.receivers {
+	// Launch ingester goroutines with per-ingester contexts.
+	for id, r := range o.ingesters {
 		id, r := id, r // capture for closure
 		recvCtx, recvCancel := context.WithCancel(ctx)
-		o.receiverCancels[id] = recvCancel
-		o.logger.Info("starting receiver", "id", id)
-		o.receiverWg.Go(func() { r.Run(recvCtx, o.ingestCh) })
+		o.ingesterCancels[id] = recvCancel
+		o.logger.Info("starting ingester", "id", id)
+		o.ingesterWg.Go(func() { r.Run(recvCtx, o.ingestCh) })
 	}
 
 	// Launch ingest loop.
@@ -54,7 +54,7 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop cancels all receivers, the ingest loop, and in-flight index builds,
+// Stop cancels all ingesters, the ingest loop, and in-flight index builds,
 // then waits for everything to finish.
 func (o *Orchestrator) Stop() error {
 	o.mu.Lock()
@@ -67,9 +67,9 @@ func (o *Orchestrator) Stop() error {
 	ingestCh := o.ingestCh
 	o.mu.Unlock()
 
-	// Cancel all receiver contexts (both initial and dynamically added).
+	// Cancel all ingester contexts (both initial and dynamically added).
 	o.mu.Lock()
-	for _, recvCancel := range o.receiverCancels {
+	for _, recvCancel := range o.ingesterCancels {
 		recvCancel()
 	}
 	o.mu.Unlock()
@@ -80,8 +80,8 @@ func (o *Orchestrator) Stop() error {
 	// Cancel in-flight index builds.
 	indexCancel()
 
-	// Wait for receivers to exit, then close the ingest channel.
-	o.receiverWg.Wait()
+	// Wait for ingesters to exit, then close the ingest channel.
+	o.ingesterWg.Wait()
 	close(ingestCh)
 
 	// Wait for ingest loop to finish.
@@ -97,8 +97,8 @@ func (o *Orchestrator) Stop() error {
 	o.ingestCh = nil
 	o.indexCtx = nil
 	o.indexCancel = nil
-	// Clear per-receiver cancel functions.
-	o.receiverCancels = make(map[string]context.CancelFunc)
+	// Clear per-ingester cancel functions.
+	o.ingesterCancels = make(map[string]context.CancelFunc)
 	o.mu.Unlock()
 
 	return nil
@@ -121,7 +121,7 @@ func (o *Orchestrator) ingestLoop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			// Context cancelled, but drain remaining messages from channel.
-			// Channel will be closed after receivers exit.
+			// Channel will be closed after ingesters exit.
 			for msg := range o.ingestCh {
 				o.processMessage(msg)
 			}
@@ -138,10 +138,10 @@ func (o *Orchestrator) ingestLoop(ctx context.Context) {
 // processMessage routes incoming messages to chunk managers.
 func (o *Orchestrator) processMessage(msg IngestMessage) {
 	// Construct record.
-	// SourceTS comes from the receiver (parsed from log, zero if unknown).
-	// IngestTS comes from the receiver (when message was received).
+	// SourceTS comes from the ingester (parsed from log, zero if unknown).
+	// IngestTS comes from the ingester (when message was received).
 	// WriteTS is set by ChunkManager on append.
-	// Attrs are passed through directly from the receiver.
+	// Attrs are passed through directly from the ingester.
 	rec := chunk.Record{
 		SourceTS: msg.SourceTS,
 		IngestTS: msg.IngestTS,

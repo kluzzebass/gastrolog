@@ -33,7 +33,7 @@ const (
 // allFormats lists all supported format names in default order.
 var allFormats = []string{FormatPlain, FormatKV, FormatJSON, FormatAccess, FormatSyslog, FormatWeird}
 
-// NewReceiver creates a new chatterbox receiver from configuration parameters.
+// NewIngester creates a new chatterbox ingester from configuration parameters.
 //
 // Supported parameters:
 //   - "minInterval": minimum delay between messages (default: "100ms")
@@ -52,7 +52,7 @@ var allFormats = []string{FormatPlain, FormatKV, FormatJSON, FormatAccess, Forma
 //
 // Returns an error if parameters are invalid (e.g., unparseable duration,
 // min > max, negative values, unknown format names).
-func NewReceiver(params map[string]string, logger *slog.Logger) (orchestrator.Receiver, error) {
+func NewIngester(params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
 	minInterval := defaultMinInterval
 	maxInterval := defaultMaxInterval
 	instance := defaultInstance
@@ -130,12 +130,12 @@ func NewReceiver(params map[string]string, logger *slog.Logger) (orchestrator.Re
 
 	// Scope logger with component identity.
 	scopedLogger := logging.Default(logger).With(
-		"component", "receiver",
+		"component", "ingester",
 		"type", "chatterbox",
 		"instance", instance,
 	)
 
-	return &Receiver{
+	return &Ingester{
 		minInterval: minInterval,
 		maxInterval: maxInterval,
 		instance:    instance,

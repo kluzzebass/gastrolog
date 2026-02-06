@@ -41,7 +41,7 @@
       }
     }
   ],
-  "receivers": [
+  "ingesters": [
     {
       "id": "chatterbox",
       "type": "chatterbox",
