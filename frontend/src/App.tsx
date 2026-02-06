@@ -10,9 +10,9 @@ import {
   useExplain,
   useHistogram,
   extractTokens,
-} from "../../api/hooks";
-import { useStores, useStats } from "../../api/hooks";
-import { Record as ProtoRecord } from "../../api/client";
+} from "./api/hooks";
+import { useStores, useStats } from "./api/hooks";
+import { Record as ProtoRecord } from "./api/client";
 
 import { timeRangeMs, aggregateFields, sameRecord } from "./utils";
 import type { Theme } from "./utils";
@@ -30,7 +30,7 @@ import {
   StoreButton,
 } from "./components/Sidebar";
 
-export function EditorialDesign() {
+export function App() {
   const { q } = useRouterSearch({ strict: false }) as { q: string };
   const navigate = useNavigate();
   const location = useLocation();
@@ -539,7 +539,7 @@ export function EditorialDesign() {
           className={`shrink-0 overflow-hidden ${resizing ? "" : "transition-[width] duration-200"} ${
             sidebarCollapsed
               ? ""
-              : `p-4 border-r editorial-scroll overflow-y-auto ${c("border-ink-border-subtle bg-ink", "border-light-border-subtle bg-light-raised")}`
+              : `p-4 border-r app-scroll overflow-y-auto ${c("border-ink-border-subtle bg-ink", "border-light-border-subtle bg-light-raised")}`
           }`}
         >
           {/* Time Range */}
@@ -794,7 +794,7 @@ export function EditorialDesign() {
           {/* Execution Plan */}
           {showPlan && (
             <div
-              className={`px-5 py-4 border-b animate-fade-up max-h-[50vh] overflow-y-auto overflow-x-hidden editorial-scroll ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
+              className={`px-5 py-4 border-b animate-fade-up max-h-[50vh] overflow-y-auto overflow-x-hidden app-scroll ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
             >
               {isExplaining ? (
                 <div
@@ -885,7 +885,7 @@ export function EditorialDesign() {
               )}
             </div>
 
-            <div className="flex-1 overflow-y-auto editorial-scroll">
+            <div className="flex-1 overflow-y-auto app-scroll">
               {(isFollowMode ? followRecords : records).length === 0 &&
               !isSearching &&
               !isFollowMode ? (
@@ -965,7 +965,7 @@ export function EditorialDesign() {
           className={`shrink-0 overflow-hidden ${resizing ? "" : "transition-[width] duration-200"} ${
             detailCollapsed
               ? ""
-              : `border-l overflow-y-auto editorial-scroll ${c("border-ink-border-subtle bg-ink-surface", "border-light-border-subtle bg-light-surface")}`
+              : `border-l overflow-y-auto app-scroll ${c("border-ink-border-subtle bg-ink-surface", "border-light-border-subtle bg-light-surface")}`
           }`}
         >
           <div
@@ -1030,4 +1030,4 @@ export function EditorialDesign() {
   );
 }
 
-export default EditorialDesign;
+export default App;

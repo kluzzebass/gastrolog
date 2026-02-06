@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import type { HistogramData } from "../../../api/hooks/useHistogram";
+import type { HistogramData } from "../api/hooks/useHistogram";
 
 export function HistogramChart({
   data,

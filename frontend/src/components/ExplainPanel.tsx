@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChunkPlan, BranchPlan, PipelineStep } from "../../../api/client";
+import { ChunkPlan, BranchPlan, PipelineStep } from "../api/client";
 import { formatChunkId } from "../utils";
 
 export function ExplainPanel({

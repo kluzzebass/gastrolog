@@ -1,4 +1,4 @@
-import { Record as ProtoRecord } from "../../api/client";
+import { Record as ProtoRecord } from "./api/client";
 
 export type { ProtoRecord };
 export type Theme = "dark" | "light" | "system";

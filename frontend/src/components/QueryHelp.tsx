@@ -70,7 +70,7 @@ export function QueryHelp({
     >
       <div className={`absolute inset-0 ${c("bg-black/60", "bg-black/40")}`} />
       <div
-        className={`relative max-w-[640px] w-full mx-4 max-h-[80vh] overflow-y-auto editorial-scroll rounded-lg border p-6 ${c(
+        className={`relative max-w-[640px] w-full mx-4 max-h-[80vh] overflow-y-auto app-scroll rounded-lg border p-6 ${c(
           "bg-ink-surface border-ink-border-subtle",
           "bg-light-surface border-light-border-subtle",
         )}`}

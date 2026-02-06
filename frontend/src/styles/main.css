@@ -83,20 +83,20 @@ body {
 }
 
 /* Scrollbar styling */
-.editorial-scroll::-webkit-scrollbar {
+.app-scroll::-webkit-scrollbar {
   width: 6px;
 }
 
-.editorial-scroll::-webkit-scrollbar-track {
+.app-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.editorial-scroll::-webkit-scrollbar-thumb {
+.app-scroll::-webkit-scrollbar-thumb {
   background: var(--color-ink-border);
   border-radius: 3px;
 }
 
-.editorial-scroll::-webkit-scrollbar-thumb:hover {
+.app-scroll::-webkit-scrollbar-thumb:hover {
   background: var(--color-copper-dim);
 }
 
@@ -160,9 +160,9 @@ body {
 }
 
 /* Light theme overrides for scrollbar */
-.light-theme .editorial-scroll::-webkit-scrollbar-thumb {
+.light-theme .app-scroll::-webkit-scrollbar-thumb {
   background: var(--color-light-border);
 }
-.light-theme .editorial-scroll::-webkit-scrollbar-thumb:hover {
+.light-theme .app-scroll::-webkit-scrollbar-thumb:hover {
   background: var(--color-copper);
 }

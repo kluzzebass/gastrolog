@@ -1,6 +1,6 @@
 import { createRoute } from "@tanstack/react-router";
 import { rootRoute } from "./__root";
-import { EditorialDesign } from "../designs/editorial/EditorialDesign";
+import { App } from "../App";
 
 export const followRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -8,5 +8,5 @@ export const followRoute = createRoute({
   validateSearch: (search: Record<string, unknown>) => ({
     q: (search.q as string) || "",
   }),
-  component: EditorialDesign,
+  component: App,
 });
