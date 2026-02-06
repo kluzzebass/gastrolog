@@ -391,7 +391,7 @@ func (s *QueryServer) histogramChunkFast(
 		if !bEnd.Before(meta.EndTS) {
 			endPos = uint64(meta.RecordCount)
 		} else if pos, found, err := cm.FindStartPosition(meta.ID, bEnd); err == nil && found {
-			endPos = pos + 1
+			endPos = pos
 		}
 
 		if endPos > startPos {

@@ -40,5 +40,6 @@ export function useStats(storeId?: string) {
       const response = await storeClient.getStats({ store: storeId ?? "" });
       return response;
     },
+    refetchInterval: 10_000,
   });
 }

@@ -1,5 +1,24 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
+  useSearch as useRouterSearch,
+  useNavigate,
+} from "@tanstack/react-router";
+import {
+  startOfMonth,
+  endOfMonth,
+  startOfWeek,
+  endOfWeek,
+  eachDayOfInterval,
+  format,
+  isSameDay,
+  isSameMonth,
+  isWithinInterval,
+  addMonths,
+  subMonths,
+  isAfter,
+  isBefore,
+} from "date-fns";
+import {
   useSearch,
   useExplain,
   useHistogram,
@@ -102,17 +121,27 @@ function aggregateFields(
 }
 
 const timeRangeMs: Record<string, number> = {
+  "5m": 5 * 60 * 1000,
   "15m": 15 * 60 * 1000,
+  "30m": 30 * 60 * 1000,
   "1h": 60 * 60 * 1000,
+  "3h": 3 * 60 * 60 * 1000,
   "6h": 6 * 60 * 60 * 1000,
+  "12h": 12 * 60 * 60 * 1000,
   "24h": 24 * 60 * 60 * 1000,
+  "3d": 3 * 24 * 60 * 60 * 1000,
   "7d": 7 * 24 * 60 * 60 * 1000,
+  "30d": 30 * 24 * 60 * 60 * 1000,
 };
 
 export function EditorialDesign() {
-  const [query, setQuery] = useState("");
+  const { q } = useRouterSearch({ from: "/" });
+  const navigate = useNavigate();
+  const [draft, setDraft] = useState(q);
   const [selectedStore, setSelectedStore] = useState("all");
   const [timeRange, setTimeRange] = useState("1h");
+  const [rangeStart, setRangeStart] = useState<Date | null>(null);
+  const [rangeEnd, setRangeEnd] = useState<Date | null>(null);
   const [showPlan, setShowPlan] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(
     null,
@@ -219,20 +248,40 @@ export function EditorialDesign() {
     return base ? `${token} ${base}` : token;
   };
 
-  // Fire search + histogram + explain from query string (single source of truth).
-  const fireSearch = (q: string) => {
+  // Navigate to a new query — pushes browser history.
+  const setUrlQuery = useCallback(
+    (newQ: string) => {
+      navigate({ search: { q: newQ }, replace: false });
+    },
+    [navigate],
+  );
+
+  // Sync draft when URL changes (browser back/forward).
+  useEffect(() => {
+    setDraft(q);
+  }, [q]);
+
+  // Fire search whenever the URL query changes.
+  useEffect(() => {
     expressionRef.current = q;
     search(q);
     fetchHistogram(q);
     if (showPlan) explain(q);
-  };
+  }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // On mount: focus input and seed query with default time range.
+  // On mount: focus input, seed default time range if no URL query.
   useEffect(() => {
     queryInputRef.current?.focus();
-    const initial = injectTimeRange("", timeRange);
-    setQuery(initial);
-    fireSearch(initial);
+    if (!q) {
+      const ms = timeRangeMs[timeRange];
+      if (ms) {
+        const now = new Date();
+        setRangeStart(new Date(now.getTime() - ms));
+        setRangeEnd(now);
+      }
+      const initial = injectTimeRange("", timeRange);
+      navigate({ search: { q: initial }, replace: true });
+    }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Infinite scroll: observe a sentinel div at the bottom of the results.
@@ -253,20 +302,20 @@ export function EditorialDesign() {
   }, [hasMore, isSearching, loadMore]);
 
   const executeQuery = () => {
-    fireSearch(query);
+    setUrlQuery(draft);
   };
 
   const handleShowPlan = () => {
     const next = !showPlan;
     setShowPlan(next);
-    if (next) explain(query);
+    if (next) explain(q);
   };
 
   const allSeverities = ["error", "warn", "info", "debug", "trace"];
 
   // Parse which severities are active from the query string.
   const activeSeverities = allSeverities.filter((s) =>
-    query.includes(`level=${s}`),
+    q.includes(`level=${s}`),
   );
 
   // Build the severity portion of the query: single predicate or OR group.
@@ -277,40 +326,58 @@ export function EditorialDesign() {
   };
 
   // Remove any existing severity expression from the query string.
-  const stripSeverity = (q: string): string =>
-    q
+  const stripSeverity = (qs: string): string =>
+    qs
       .replace(/\((?:level=\w+\s+OR\s+)*level=\w+\)/g, "")
       .replace(/\blevel=(?:error|warn|info|debug|trace)\b/g, "")
       .replace(/\s+/g, " ")
       .trim();
 
   const toggleSeverity = (level: string) => {
-    const current = allSeverities.filter((s) => query.includes(`level=${s}`));
+    const current = allSeverities.filter((s) => q.includes(`level=${s}`));
     const next = current.includes(level)
       ? current.filter((s) => s !== level)
       : [...current, level];
-    const base = stripSeverity(query);
+    const base = stripSeverity(q);
     const sevExpr = buildSeverityExpr(next);
     const newQuery = sevExpr ? `${base} ${sevExpr}`.trim() : base;
-    setQuery(newQuery);
-    fireSearch(newQuery);
+    setUrlQuery(newQuery);
   };
 
   const handleTimeRange = (range: string) => {
     setTimeRange(range);
-    const newQuery = injectTimeRange(query, range);
-    setQuery(newQuery);
-    fireSearch(newQuery);
+    if (range === "All") {
+      setRangeStart(null);
+      setRangeEnd(null);
+    } else {
+      const ms = timeRangeMs[range];
+      if (ms) {
+        const now = new Date();
+        setRangeStart(new Date(now.getTime() - ms));
+        setRangeEnd(now);
+      }
+    }
+    const newQuery = injectTimeRange(q, range);
+    setUrlQuery(newQuery);
+  };
+
+  const handleCustomRange = (start: Date, end: Date) => {
+    setTimeRange("custom");
+    setRangeStart(start);
+    setRangeEnd(end);
+    const tokens = `start=${start.toISOString()} end=${end.toISOString()} reverse=true`;
+    const base = stripTimeRange(q);
+    const newQuery = base ? `${tokens} ${base}` : tokens;
+    setUrlQuery(newQuery);
   };
 
   const handleStoreSelect = (storeId: string) => {
     setSelectedStore(storeId);
-    const newQuery = injectStore(query, storeId);
-    setQuery(newQuery);
-    fireSearch(newQuery);
+    const newQuery = injectStore(q, storeId);
+    setUrlQuery(newQuery);
   };
 
-  const tokens = extractTokens(query);
+  const tokens = extractTokens(q);
   const attrFields = useMemo(
     () => aggregateFields(records, "attrs"),
     [records],
@@ -319,10 +386,9 @@ export function EditorialDesign() {
 
   const handleFieldSelect = (key: string, value: string) => {
     const token = `${key}=${value}`;
-    if (!query.includes(token)) {
-      const newQuery = query.trim() ? `${query.trim()} ${token}` : token;
-      setQuery(newQuery);
-      fireSearch(newQuery);
+    if (!q.includes(token)) {
+      const newQuery = q.trim() ? `${q.trim()} ${token}` : token;
+      setUrlQuery(newQuery);
     }
   };
 
@@ -432,24 +498,14 @@ export function EditorialDesign() {
         >
           {/* Time Range */}
           <SidebarSection title="Time Range" dark={dark}>
-            <div className="flex flex-wrap gap-1">
-              {["15m", "1h", "6h", "24h", "7d", "All"].map((range) => (
-                <button
-                  key={range}
-                  onClick={() => handleTimeRange(range)}
-                  className={`px-2 py-1 text-[0.85em] font-mono rounded transition-all duration-150 ${
-                    timeRange === range
-                      ? c("bg-copper text-ink", "bg-copper text-white")
-                      : c(
-                          "text-text-muted hover:text-text-normal hover:bg-ink-hover",
-                          "text-light-text-muted hover:text-light-text-normal hover:bg-light-hover",
-                        )
-                  }`}
-                >
-                  {range}
-                </button>
-              ))}
-            </div>
+            <TimeRangePicker
+              dark={dark}
+              rangeStart={rangeStart}
+              rangeEnd={rangeEnd}
+              activePreset={timeRange}
+              onPresetClick={handleTimeRange}
+              onApply={handleCustomRange}
+            />
           </SidebarSection>
 
           {/* Stores */}
@@ -573,8 +629,8 @@ export function EditorialDesign() {
               <div className="flex-1 relative">
                 <textarea
                   ref={queryInputRef}
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
@@ -636,7 +692,7 @@ export function EditorialDesign() {
               ].map((ex) => (
                 <button
                   key={ex}
-                  onClick={() => setQuery(ex)}
+                  onClick={() => setDraft(ex)}
                   className={`font-mono px-1.5 py-0.5 rounded transition-colors ${c(
                     "text-text-muted hover:text-copper hover:bg-ink-hover",
                     "text-light-text-muted hover:text-copper hover:bg-light-hover",
@@ -682,7 +738,19 @@ export function EditorialDesign() {
             <div
               className={`px-5 py-3 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
             >
-              <HistogramChart data={histogramData} dark={dark} />
+              <HistogramChart
+                data={histogramData}
+                dark={dark}
+                onBrushSelect={(start, end) => {
+                  setRangeStart(start);
+                  setRangeEnd(end);
+                  setTimeRange("custom");
+                  const tokens = `start=${start.toISOString()} end=${end.toISOString()} reverse=true`;
+                  const base = stripTimeRange(q);
+                  const newQuery = base ? `${tokens} ${base}` : tokens;
+                  setUrlQuery(newQuery);
+                }}
+              />
             </div>
           )}
 
@@ -809,6 +877,242 @@ function StatPill({
       >
         {label}
       </span>
+    </div>
+  );
+}
+
+function TimeRangePicker({
+  dark,
+  rangeStart,
+  rangeEnd,
+  activePreset,
+  onPresetClick,
+  onApply,
+}: {
+  dark: boolean;
+  rangeStart: Date | null;
+  rangeEnd: Date | null;
+  activePreset: string;
+  onPresetClick: (preset: string) => void;
+  onApply: (start: Date, end: Date) => void;
+}) {
+  const c = (d: string, l: string) => (dark ? d : l);
+  const [viewMonth, setViewMonth] = useState(() => rangeEnd ?? new Date());
+  const [pendingStart, setPendingStart] = useState<Date | null>(rangeStart);
+  const [pendingEnd, setPendingEnd] = useState<Date | null>(rangeEnd);
+  const [startTime, setStartTime] = useState(() =>
+    rangeStart ? format(rangeStart, "HH:mm") : "00:00",
+  );
+  const [endTime, setEndTime] = useState(() =>
+    rangeEnd ? format(rangeEnd, "HH:mm") : "23:59",
+  );
+  const [picking, setPicking] = useState<"start" | "end">("start");
+
+  // Sync from parent when presets or histogram brush update the range.
+  useEffect(() => {
+    setPendingStart(rangeStart);
+    setPendingEnd(rangeEnd);
+    if (rangeStart) setStartTime(format(rangeStart, "HH:mm"));
+    if (rangeEnd) setEndTime(format(rangeEnd, "HH:mm"));
+    if (rangeEnd) setViewMonth(rangeEnd);
+    setPicking("start");
+  }, [rangeStart, rangeEnd]);
+
+  const handleDayClick = (day: Date) => {
+    if (picking === "start") {
+      setPendingStart(day);
+      setPendingEnd(null);
+      setPicking("end");
+    } else {
+      let s = pendingStart!;
+      let e = day;
+      if (isBefore(e, s)) [s, e] = [e, s];
+      setPendingStart(s);
+      setPendingEnd(e);
+      setPicking("start");
+    }
+  };
+
+  const handleApply = () => {
+    if (!pendingStart || !pendingEnd) return;
+    const [sh, sm] = startTime.split(":").map(Number);
+    const [eh, em] = endTime.split(":").map(Number);
+    const start = new Date(pendingStart);
+    start.setHours(sh, sm, 0, 0);
+    const end = new Date(pendingEnd);
+    end.setHours(eh, em, 59, 999);
+    onApply(start, end);
+  };
+
+  // Calendar grid
+  const monthStart = startOfMonth(viewMonth);
+  const monthEnd = endOfMonth(viewMonth);
+  const calStart = startOfWeek(monthStart, { weekStartsOn: 1 });
+  const calEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
+  const days = eachDayOfInterval({ start: calStart, end: calEnd });
+  const today = new Date();
+
+  const presets = Object.keys(timeRangeMs);
+
+  return (
+    <div className="space-y-2.5">
+      {/* Preset buttons */}
+      <div className="flex flex-wrap gap-1">
+        {[...presets, "All"].map((range) => (
+          <button
+            key={range}
+            onClick={() => onPresetClick(range)}
+            className={`px-2 py-0.5 text-[0.75em] font-mono rounded transition-all duration-150 ${
+              activePreset === range
+                ? c("bg-copper text-ink", "bg-copper text-white")
+                : c(
+                    "text-text-muted hover:text-text-normal hover:bg-ink-hover",
+                    "text-light-text-muted hover:text-light-text-normal hover:bg-light-hover",
+                  )
+            }`}
+          >
+            {range}
+          </button>
+        ))}
+      </div>
+
+      {/* From / To display */}
+      <div className="space-y-1">
+        <div className="flex items-center gap-1.5">
+          <span
+            className={`text-[0.7em] w-8 ${c("text-text-ghost", "text-light-text-ghost")}`}
+          >
+            From
+          </span>
+          <span
+            className={`flex-1 text-[0.75em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}
+          >
+            {pendingStart ? format(pendingStart, "yyyy-MM-dd") : "\u2014"}
+          </span>
+          <input
+            type="text"
+            value={startTime}
+            onChange={(e) => {
+              const v = e.target.value.replace(/[^0-9:]/g, "");
+              if (v.length <= 5) setStartTime(v);
+            }}
+            placeholder="HH:mm"
+            className={`text-[0.75em] font-mono w-14 px-1 py-0.5 rounded border text-center ${c(
+              "bg-ink-surface border-ink-border text-text-normal",
+              "bg-light-surface border-light-border text-light-text-normal",
+            )}`}
+          />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span
+            className={`text-[0.7em] w-8 ${c("text-text-ghost", "text-light-text-ghost")}`}
+          >
+            To
+          </span>
+          <span
+            className={`flex-1 text-[0.75em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}
+          >
+            {pendingEnd ? format(pendingEnd, "yyyy-MM-dd") : "\u2014"}
+          </span>
+          <input
+            type="text"
+            value={endTime}
+            onChange={(e) => {
+              const v = e.target.value.replace(/[^0-9:]/g, "");
+              if (v.length <= 5) setEndTime(v);
+            }}
+            placeholder="HH:mm"
+            className={`text-[0.75em] font-mono w-14 px-1 py-0.5 rounded border text-center ${c(
+              "bg-ink-surface border-ink-border text-text-normal",
+              "bg-light-surface border-light-border text-light-text-normal",
+            )}`}
+          />
+        </div>
+      </div>
+
+      {/* Month navigation */}
+      <div className="flex items-center justify-between">
+        <button
+          onClick={() => setViewMonth((m) => subMonths(m, 1))}
+          className={`text-[0.8em] px-1 rounded ${c("text-text-ghost hover:text-text-muted", "text-light-text-ghost hover:text-light-text-muted")}`}
+        >
+          {"\u25C2"}
+        </button>
+        <span
+          className={`text-[0.75em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}
+        >
+          {format(viewMonth, "MMMM yyyy")}
+        </span>
+        <button
+          onClick={() => setViewMonth((m) => addMonths(m, 1))}
+          className={`text-[0.8em] px-1 rounded ${c("text-text-ghost hover:text-text-muted", "text-light-text-ghost hover:text-light-text-muted")}`}
+        >
+          {"\u25B8"}
+        </button>
+      </div>
+
+      {/* Calendar grid */}
+      <div>
+        <div className="grid grid-cols-7 gap-px mb-0.5">
+          {["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((d) => (
+            <div
+              key={d}
+              className={`text-center text-[0.65em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+            >
+              {d}
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7 gap-px">
+          {days.map((day) => {
+            const inMonth = isSameMonth(day, viewMonth);
+            const isToday = isSameDay(day, today);
+            const isStart = pendingStart && isSameDay(day, pendingStart);
+            const isEnd = pendingEnd && isSameDay(day, pendingEnd);
+            const inRange =
+              pendingStart &&
+              pendingEnd &&
+              isWithinInterval(day, {
+                start: pendingStart,
+                end: pendingEnd,
+              });
+            const selected = isStart || isEnd;
+
+            return (
+              <button
+                key={day.toISOString()}
+                onClick={() => handleDayClick(day)}
+                className={`text-center text-[0.7em] font-mono py-0.5 rounded transition-colors ${
+                  selected
+                    ? "bg-copper text-white"
+                    : inRange
+                      ? c(
+                          "bg-copper/10 text-text-normal",
+                          "bg-copper/10 text-light-text-normal",
+                        )
+                      : inMonth
+                        ? c(
+                            "text-text-muted hover:bg-ink-hover hover:text-text-normal",
+                            "text-light-text-muted hover:bg-light-hover hover:text-light-text-normal",
+                          )
+                        : c("text-text-ghost/40", "text-light-text-ghost/40")
+                }${isToday && !selected ? ` ${c("underline decoration-copper", "underline decoration-copper")}` : ""}`}
+              >
+                {format(day, "d")}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Apply button */}
+      <button
+        onClick={handleApply}
+        disabled={!pendingStart || !pendingEnd}
+        className="w-full py-1 text-[0.8em] font-medium rounded bg-copper text-white hover:bg-copper-glow transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed"
+      >
+        Apply
+      </button>
     </div>
   );
 }
@@ -1652,17 +1956,72 @@ function DetailRow({
 function HistogramChart({
   data,
   dark,
+  onBrushSelect,
 }: {
   data: HistogramData;
   dark: boolean;
+  onBrushSelect?: (start: Date, end: Date) => void;
 }) {
   const { buckets } = data;
+  const barsRef = useRef<HTMLDivElement>(null);
+  const [brushStart, setBrushStart] = useState<number | null>(null);
+  const [brushEnd, setBrushEnd] = useState<number | null>(null);
+  const brushingRef = useRef(false);
+
   if (buckets.length === 0) return null;
 
   const maxCount = Math.max(...buckets.map((b) => b.count), 1);
   const totalCount = buckets.reduce((sum, b) => sum + b.count, 0);
   const barHeight = 48;
   const c = (d: string, l: string) => (dark ? d : l);
+
+  const getBucketIndex = (clientX: number): number => {
+    const el = barsRef.current;
+    if (!el) return 0;
+    const rect = el.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const idx = Math.floor((x / rect.width) * buckets.length);
+    return Math.max(0, Math.min(buckets.length - 1, idx));
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (!onBrushSelect) return;
+    e.preventDefault();
+    const idx = getBucketIndex(e.clientX);
+    setBrushStart(idx);
+    setBrushEnd(idx);
+    brushingRef.current = true;
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!brushingRef.current) return;
+      setBrushEnd(getBucketIndex(e.clientX));
+    };
+    const onMouseUp = (e: MouseEvent) => {
+      if (!brushingRef.current) return;
+      brushingRef.current = false;
+      const endIdx = getBucketIndex(e.clientX);
+      const lo = Math.min(idx, endIdx);
+      const hi = Math.max(idx, endIdx);
+      if (lo !== hi) {
+        onBrushSelect(buckets[lo].ts, buckets[hi].ts);
+      }
+      setBrushStart(null);
+      setBrushEnd(null);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
+
+  const brushLo =
+    brushStart !== null && brushEnd !== null
+      ? Math.min(brushStart, brushEnd)
+      : null;
+  const brushHi =
+    brushStart !== null && brushEnd !== null
+      ? Math.max(brushStart, brushEnd)
+      : null;
 
   // Format time label based on range span.
   const rangeMs =
@@ -1673,6 +2032,14 @@ function HistogramChart({
   const formatTime = (d: Date) => {
     if (rangeMs > 24 * 60 * 60 * 1000) {
       return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    }
+    if (rangeMs < 60 * 60 * 1000) {
+      return d.toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
     }
     return d.toLocaleTimeString("en-US", {
       hour: "2-digit",
@@ -1700,7 +2067,20 @@ function HistogramChart({
         </span>
       </div>
       <div className="relative" style={{ height: barHeight }}>
-        <div className="flex items-end h-full gap-px">
+        <div
+          ref={barsRef}
+          onMouseDown={handleMouseDown}
+          className={`relative flex items-end h-full gap-px ${onBrushSelect ? "cursor-crosshair" : ""}`}
+        >
+          {brushLo !== null && brushHi !== null && (
+            <div
+              className="absolute inset-y-0 bg-copper/20 pointer-events-none z-10 rounded-sm"
+              style={{
+                left: `${(brushLo / buckets.length) * 100}%`,
+                width: `${((brushHi - brushLo + 1) / buckets.length) * 100}%`,
+              }}
+            />
+          )}
           {buckets.map((bucket, i) => {
             const pct = maxCount > 0 ? bucket.count / maxCount : 0;
             return (
@@ -1709,20 +2089,17 @@ function HistogramChart({
                 className="flex-1 min-w-0 group relative"
                 style={{ height: "100%" }}
               >
-                <div
-                  className={`absolute bottom-0 inset-x-0 rounded-t-sm transition-colors ${
-                    bucket.count > 0
-                      ? c(
-                          "bg-copper/60 group-hover:bg-copper",
-                          "bg-copper/50 group-hover:bg-copper/80",
-                        )
-                      : c("bg-ink-border-subtle/30", "bg-light-border/30")
-                  }`}
-                  style={{
-                    height:
-                      bucket.count > 0 ? `${Math.max(pct * 100, 4)}%` : "2px",
-                  }}
-                />
+                {bucket.count > 0 && (
+                  <div
+                    className={`absolute bottom-0 inset-x-0 rounded-t-sm transition-colors ${c(
+                      "bg-copper/60 group-hover:bg-copper",
+                      "bg-copper/50 group-hover:bg-copper/80",
+                    )}`}
+                    style={{
+                      height: `${Math.max(pct * 100, 4)}%`,
+                    }}
+                  />
+                )}
                 {/* Tooltip */}
                 <div
                   className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 text-[0.7em] font-mono rounded whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-10 ${c("bg-ink-surface text-text-bright border border-ink-border-subtle", "bg-light-surface text-light-text-bright border border-light-border-subtle")}`}
