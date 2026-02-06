@@ -7,36 +7,41 @@ React 19 + Vite 7 + TypeScript + Tailwind v4 + Bun. Connect RPC client talks to 
 ### What's Done
 
 - **API Integration**: buf-generated TypeScript types, Connect RPC client, Vite proxy to backend
-- **Hooks**: `useSearch` (streaming + infinite scroll + resume tokens), `useExplain`, `useStores`, `useHistogram`
-- **Search**: Token and boolean expression queries, `key=value` filters, time range, reverse order
+- **Hooks**: `useSearch` (streaming + infinite scroll + resume tokens), `useFollow` (streaming), `useExplain`, `useStores`, `useHistogram`
+- **Search**: Token and boolean expression queries, `key=value` filters (including quoted values), time range, reverse order
+- **Follow**: Live tail via `QueryService.Follow` streaming RPC, auto-scroll, follow/stop toggle
+- **Routing**: `/search?q=...` and `/follow?q=...` routes — bookmarkable, shareable, browser back/forward
 - **Results**: Streaming results, token/KV highlighting, virtual scroll, keyboard nav (j/k)
-- **Detail Panel**: Timestamps with relative time, message byte size, extracted KV pairs, attributes, chunk reference
+- **Detail Panel**: Timestamps with relative time, message byte size, extracted KV pairs, attributes, chunk reference, pin to persist across queries
+- **Stores**: Live store list with auto-refresh, click to filter by store (toggle on/off), total summary
+- **Fields**: Extracted KV field explorer with click-to-filter (toggle), active filter highlighting, quoted value support
 - **Explain**: Full query plan visualization with index pipeline per chunk
 - **Histogram**: Time distribution of results
-- **Theme**: Dark/light mode toggle, Observatory design with copper/amber accents
+- **Theme**: Dark/light mode toggle, Observatory design with copper/amber accents, light-mode-safe highlights
 - **ChunkID**: 13-char base32hex timestamp strings (no more UUID byte decoding)
 - **SourceTS**: Displayed in detail panel when available
 
 ## Phase 1: Live Tail (Follow)
 
 ### 1.1 Streaming
-- [ ] Wire up `QueryService.Follow` streaming RPC
-- [ ] Auto-scroll when at bottom, pause when scrolled up
+- [x] Wire up `QueryService.Follow` streaming RPC
+- [x] Auto-scroll when at bottom, pause when scrolled up
 - [ ] Show "X new logs" indicator when paused
 - [ ] Rate limiting for high-volume streams
 
 ### 1.2 Follow UI
-- [ ] Follow/Pause toggle button
+- [x] Follow/Stop toggle button
 - [ ] Connection status indicator
 - [ ] Reconnection on disconnect
-- [ ] Filter-while-following
+- [x] Filter-while-following
+- [x] Route-based follow (`/follow?q=...`) — bookmarkable, browser back/forward works
 
 ## Phase 2: Store & Chunk Management
 
 ### 2.1 Store List
-- [ ] Wire up `StoreService.ListStores` RPC (hook exists, needs UI)
-- [ ] Display store metadata (record count, byte size, chunk count)
-- [ ] Store filtering/selection for queries
+- [x] Wire up `StoreService.ListStores` RPC with auto-refresh
+- [x] Display store metadata (record count, byte size, chunk count)
+- [x] Store filtering/selection for queries (click to add `store=` filter, click again to remove)
 - [ ] Store health indicators
 
 ### 2.2 Chunk Browser
@@ -65,7 +70,7 @@ React 19 + Vite 7 + TypeScript + Tailwind v4 + Bun. Connect RPC client talks to 
 
 ### 3.3 Export
 - [ ] Export results as JSON/CSV
-- [ ] Shareable query URLs
+- [x] Shareable query URLs (route-based `/search?q=...` and `/follow?q=...`)
 - [ ] Copy log lines to clipboard
 
 ## Phase 4: Polish
