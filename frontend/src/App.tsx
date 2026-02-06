@@ -72,13 +72,17 @@ export function App() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        if (showPlan) {
+          setShowPlan(false);
+          return;
+        }
         setSelectedRecord(null);
         if (!detailPinned) setDetailCollapsed(true);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [detailPinned]);
+  }, [detailPinned, showPlan]);
 
   const queryInputRef = useRef<HTMLTextAreaElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
