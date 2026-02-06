@@ -750,6 +750,15 @@ export function EditorialDesign() {
                   const newQuery = base ? `${tokens} ${base}` : tokens;
                   setUrlQuery(newQuery);
                 }}
+                onPan={(start, end) => {
+                  setRangeStart(start);
+                  setRangeEnd(end);
+                  setTimeRange("custom");
+                  const tokens = `start=${start.toISOString()} end=${end.toISOString()} reverse=true`;
+                  const base = stripTimeRange(q);
+                  const newQuery = base ? `${tokens} ${base}` : tokens;
+                  setUrlQuery(newQuery);
+                }}
               />
             </div>
           )}
@@ -1957,10 +1966,12 @@ function HistogramChart({
   data,
   dark,
   onBrushSelect,
+  onPan,
 }: {
   data: HistogramData;
   dark: boolean;
   onBrushSelect?: (start: Date, end: Date) => void;
+  onPan?: (start: Date, end: Date) => void;
 }) {
   const { buckets } = data;
   const barsRef = useRef<HTMLDivElement>(null);
@@ -2023,6 +2034,62 @@ function HistogramChart({
       ? Math.max(brushStart, brushEnd)
       : null;
 
+  // Pan handlers.
+  const axisRef = useRef<HTMLDivElement>(null);
+  const panStartX = useRef<number>(0);
+  const panAxisWidth = useRef<number>(1);
+  const panningRef = useRef(false);
+  const [panOffset, setPanOffset] = useState(0);
+
+  const handlePanStep = (direction: -1 | 1) => {
+    if (!onPan || buckets.length < 2) return;
+    const windowMs =
+      buckets[buckets.length - 1].ts.getTime() - buckets[0].ts.getTime();
+    const stepMs = windowMs / 2;
+    const first = buckets[0].ts.getTime();
+    const last = buckets[buckets.length - 1].ts.getTime();
+    onPan(
+      new Date(first + direction * stepMs),
+      new Date(last + direction * stepMs),
+    );
+  };
+
+  const handleAxisMouseDown = (e: React.MouseEvent) => {
+    if (!onPan || buckets.length < 2) return;
+    e.preventDefault();
+    panStartX.current = e.clientX;
+    panAxisWidth.current = axisRef.current?.getBoundingClientRect().width || 1;
+    panningRef.current = true;
+    document.body.style.cursor = "grabbing";
+    document.body.style.userSelect = "none";
+
+    const onMouseMove = (e: MouseEvent) => {
+      setPanOffset(e.clientX - panStartX.current);
+    };
+    const onMouseUp = (e: MouseEvent) => {
+      panningRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      setPanOffset(0);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+
+      const el = axisRef.current;
+      if (!el) return;
+      const deltaX = panStartX.current - e.clientX; // drag left = positive = go back
+      const axisWidth = el.getBoundingClientRect().width;
+      if (Math.abs(deltaX) < 3) return; // ignore tiny movements
+      const windowMs =
+        buckets[buckets.length - 1].ts.getTime() - buckets[0].ts.getTime();
+      const deltaMs = (deltaX / axisWidth) * windowMs;
+      const first = buckets[0].ts.getTime();
+      const last = buckets[buckets.length - 1].ts.getTime();
+      onPan(new Date(first + deltaMs), new Date(last + deltaMs));
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
+
   // Format time label based on range span.
   const rangeMs =
     buckets.length > 1
@@ -2052,8 +2119,36 @@ function HistogramChart({
   const labelCount = Math.min(5, buckets.length);
   const labelStep = Math.max(1, Math.floor(buckets.length / labelCount));
 
+  // Compute human-readable pan delta during drag.
+  const windowMs =
+    buckets.length > 1
+      ? buckets[buckets.length - 1].ts.getTime() - buckets[0].ts.getTime()
+      : 0;
+  const panDeltaMs =
+    panOffset !== 0 ? -((panOffset / panAxisWidth.current) * windowMs) : 0;
+
+  const formatDuration = (ms: number): string => {
+    const abs = Math.abs(ms);
+    const sign = ms < 0 ? "-" : "+";
+    if (abs < 1000) return `${sign}${Math.round(abs)}ms`;
+    if (abs < 60_000) return `${sign}${(abs / 1000).toFixed(1)}s`;
+    if (abs < 3_600_000) {
+      const m = Math.floor(abs / 60_000);
+      const s = Math.round((abs % 60_000) / 1000);
+      return s > 0 ? `${sign}${m}m ${s}s` : `${sign}${m}m`;
+    }
+    if (abs < 86_400_000) {
+      const h = Math.floor(abs / 3_600_000);
+      const m = Math.round((abs % 3_600_000) / 60_000);
+      return m > 0 ? `${sign}${h}h ${m}m` : `${sign}${h}h`;
+    }
+    const d = Math.floor(abs / 86_400_000);
+    const h = Math.round((abs % 86_400_000) / 3_600_000);
+    return h > 0 ? `${sign}${d}d ${h}h` : `${sign}${d}d`;
+  };
+
   return (
-    <div>
+    <div className="relative">
       <div className="flex items-baseline justify-between mb-1.5">
         <span
           className={`text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
@@ -2067,6 +2162,17 @@ function HistogramChart({
         </span>
       </div>
       <div className="relative" style={{ height: barHeight }}>
+        {/* Pan delta indicator — centered over bars */}
+        {panOffset !== 0 && (
+          <div
+            className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-2 py-0.5 text-[0.7em] font-mono rounded whitespace-nowrap pointer-events-none z-20 ${c(
+              "bg-ink-surface text-copper border border-copper/30",
+              "bg-light-surface text-copper border border-copper/30",
+            )}`}
+          >
+            {formatDuration(panDeltaMs)}
+          </div>
+        )}
         <div
           ref={barsRef}
           onMouseDown={handleMouseDown}
@@ -2112,19 +2218,52 @@ function HistogramChart({
           })}
         </div>
       </div>
-      {/* Time axis labels */}
-      <div className="flex justify-between mt-1">
-        {Array.from({ length: labelCount }, (_, i) => {
-          const idx = Math.min(i * labelStep, buckets.length - 1);
-          return (
-            <span
-              key={i}
-              className={`text-[0.65em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
-            >
-              {formatTime(buckets[idx].ts)}
-            </span>
-          );
-        })}
+      {/* Time axis with pan arrows + draggable labels */}
+      <div className="flex items-center mt-1 gap-1">
+        {onPan && (
+          <button
+            onClick={() => handlePanStep(-1)}
+            className={`text-[0.7em] px-1 rounded transition-colors shrink-0 ${c(
+              "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
+              "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
+            )}`}
+            title="Pan backward"
+          >
+            {"\u25C2"}
+          </button>
+        )}
+        <div
+          ref={axisRef}
+          onMouseDown={handleAxisMouseDown}
+          className={`flex-1 flex justify-between overflow-hidden ${onPan ? "cursor-grab active:cursor-grabbing" : ""}`}
+          style={
+            panOffset ? { transform: `translateX(${panOffset}px)` } : undefined
+          }
+        >
+          {Array.from({ length: labelCount }, (_, i) => {
+            const idx = Math.min(i * labelStep, buckets.length - 1);
+            return (
+              <span
+                key={i}
+                className={`text-[0.65em] font-mono select-none ${c("text-text-ghost", "text-light-text-ghost")}`}
+              >
+                {formatTime(buckets[idx].ts)}
+              </span>
+            );
+          })}
+        </div>
+        {onPan && (
+          <button
+            onClick={() => handlePanStep(1)}
+            className={`text-[0.7em] px-1 rounded transition-colors shrink-0 ${c(
+              "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
+              "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
+            )}`}
+            title="Pan forward"
+          >
+            {"\u25B8"}
+          </button>
+        )}
       </div>
     </div>
   );
