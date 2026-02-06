@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This project is NOT in production. When changing file formats, just change them. Do not increment version numbers or write backward-compatibility code. Delete old data and start fresh.
 
+## Data Integrity: Facts Before Speculation
+
+Never present derived, heuristic, or approximate data as if it were authoritative. If information comes directly from the system (stored in a record, returned by an API), show it. If it's reconstructed client-side via heuristics (regex extraction, approximation of server logic), either don't show it or label it clearly as derived. When in doubt, leave it out — showing wrong data is worse than showing less data.
+
 ## Project Overview
 
 GastroLog is a Go-based log management system built around chunk-based storage and indexing. The backend is written in Go 1.25.5. The project is in active development.
