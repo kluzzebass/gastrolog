@@ -166,6 +166,7 @@ export function EditorialDesign() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [detailCollapsed, setDetailCollapsed] = useState(false);
   const [detailPinned, setDetailPinned] = useState(false);
+  const [resizing, setResizing] = useState(false);
 
   // Auto-expand detail panel when a record is selected.
   useEffect(() => {
@@ -190,6 +191,7 @@ export function EditorialDesign() {
 
   const handleDetailResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
+    setResizing(true);
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
     const onMouseMove = (e: MouseEvent) => {
@@ -198,6 +200,7 @@ export function EditorialDesign() {
       );
     };
     const onMouseUp = () => {
+      setResizing(false);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
       window.removeEventListener("mousemove", onMouseMove);
@@ -209,12 +212,14 @@ export function EditorialDesign() {
 
   const handleSidebarResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
+    setResizing(true);
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
     const onMouseMove = (e: MouseEvent) => {
       setSidebarWidth(Math.max(160, Math.min(400, e.clientX)));
     };
     const onMouseUp = () => {
+      setResizing(false);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
       window.removeEventListener("mousemove", onMouseMove);
@@ -601,7 +606,7 @@ export function EditorialDesign() {
         )}
         <aside
           style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}
-          className={`shrink-0 overflow-hidden transition-[width] duration-200 ${
+          className={`shrink-0 overflow-hidden ${resizing ? "" : "transition-[width] duration-200"} ${
             sidebarCollapsed
               ? ""
               : `p-4 border-r editorial-scroll overflow-y-auto ${c("border-ink-border-subtle bg-ink", "border-light-border-subtle bg-light-raised")}`
@@ -1022,7 +1027,7 @@ export function EditorialDesign() {
         )}
         <aside
           style={{ width: detailCollapsed ? 0 : detailWidth }}
-          className={`shrink-0 overflow-hidden transition-[width] duration-200 ${
+          className={`shrink-0 overflow-hidden ${resizing ? "" : "transition-[width] duration-200"} ${
             detailCollapsed
               ? ""
               : `border-l overflow-y-auto editorial-scroll ${c("border-ink-border-subtle bg-ink-surface", "border-light-border-subtle bg-light-surface")}`
