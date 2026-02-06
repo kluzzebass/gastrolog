@@ -40,7 +40,15 @@ function detectSeverity(
       }
     }
   }
-  // No structured severity attr found — don't guess from message text.
+  // 2. Fall back to level=VALUE or severity=VALUE in message text.
+  const m = /\b(?:level|severity)[=:]\s*"?(\w+)"?/i.exec(raw);
+  if (m) {
+    const level = classifySeverity(m[1]!);
+    if (level) {
+      const style = BADGE_STYLE[level]!;
+      return { level, ...style, filter: `level=${level}` };
+    }
+  }
   return null;
 }
 
