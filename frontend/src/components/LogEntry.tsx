@@ -43,14 +43,14 @@ function detectSeverity(
       }
     }
   }
-  // 2. Fall back to keyword in raw text → bare token filter.
+  // 2. Fall back to keyword in raw text → level=<normalized> filter.
   const m = RE_SEVERITY.exec(raw);
   if (!m) return null;
   const word = m[1]!;
   const level = classifySeverity(word);
   if (!level) return null;
   const style = BADGE_STYLE[level]!;
-  return { level, ...style, filter: word.toLowerCase() };
+  return { level, ...style, filter: `level=${level}` };
 }
 
 export function LogEntry({
