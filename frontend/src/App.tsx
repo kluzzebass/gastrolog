@@ -808,7 +808,7 @@ export function App() {
               className="fixed inset-0 z-50 flex items-center justify-center"
               onClick={() => setShowPlan(false)}
             >
-              <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+              <div className="absolute inset-0 bg-black/40" />
               <div
                 className={`relative w-[90vw] max-w-4xl h-[80vh] flex flex-col rounded-lg shadow-2xl p-6 ${c("bg-ink-bg border border-ink-border-subtle", "bg-light-bg border border-light-border-subtle")}`}
                 onClick={(e) => e.stopPropagation()}
