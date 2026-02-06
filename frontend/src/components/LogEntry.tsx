@@ -71,7 +71,7 @@ export function LogEntry({
   return (
     <article
       onClick={onSelect}
-      className={`grid grid-cols-[13ch_3ch_1fr] px-5 py-1.5 border-b cursor-pointer transition-colors duration-100 ${
+      className={`grid grid-cols-[10ch_3.5ch_1fr] px-5 py-1.5 border-b cursor-pointer transition-colors duration-100 ${
         isSelected
           ? dark
             ? "bg-ink-hover"
@@ -96,7 +96,7 @@ export function LogEntry({
         )}
       </span>
       <div
-        className={`font-mono text-[0.85em] leading-relaxed truncate self-center ${dark ? "text-text-normal" : "text-light-text-normal"}`}
+        className={`font-mono text-[0.85em] leading-relaxed truncate self-center pl-1.5 ${dark ? "text-text-normal" : "text-light-text-normal"}`}
       >
         {parts.map((part, i) => {
           const className = part.searchHit
