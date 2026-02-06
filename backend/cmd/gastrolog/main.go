@@ -25,11 +25,11 @@ import (
 	"gastrolog/internal/index"
 	indexfile "gastrolog/internal/index/file"
 	indexmem "gastrolog/internal/index/memory"
-	"gastrolog/internal/logging"
-	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/ingester/chatterbox"
 	ingesthttp "gastrolog/internal/ingester/http"
 	ingestsyslog "gastrolog/internal/ingester/syslog"
+	"gastrolog/internal/logging"
+	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/repl"
 	"gastrolog/internal/server"
 )
@@ -119,7 +119,6 @@ func run(ctx context.Context, logger *slog.Logger, configPath, serverAddr string
 		serverWg.Add(1)
 		go func() {
 			defer serverWg.Done()
-			logger.Info("starting Connect RPC server", "addr", serverAddr)
 			if err := srv.ServeTCP(serverAddr); err != nil {
 				logger.Error("server error", "error", err)
 			}
