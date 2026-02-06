@@ -288,11 +288,9 @@ export class ListChunksResponse extends Message<ListChunksResponse> {
  */
 export class ChunkMeta extends Message<ChunkMeta> {
   /**
-   * 16-byte UUID
-   *
-   * @generated from field: bytes id = 1;
+   * @generated from field: string id = 1;
    */
-  id = new Uint8Array(0);
+  id = "";
 
   /**
    * @generated from field: google.protobuf.Timestamp start_ts = 2;
@@ -322,7 +320,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ChunkMeta";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "start_ts", kind: "message", T: Timestamp },
     { no: 3, name: "end_ts", kind: "message", T: Timestamp },
     { no: 4, name: "sealed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
@@ -356,9 +354,9 @@ export class GetChunkRequest extends Message<GetChunkRequest> {
   store = "";
 
   /**
-   * @generated from field: bytes chunk_id = 2;
+   * @generated from field: string chunk_id = 2;
    */
-  chunkId = new Uint8Array(0);
+  chunkId = "";
 
   constructor(data?: PartialMessage<GetChunkRequest>) {
     super();
@@ -369,7 +367,7 @@ export class GetChunkRequest extends Message<GetChunkRequest> {
   static readonly typeName = "gastrolog.v1.GetChunkRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "store", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetChunkRequest {
@@ -436,9 +434,9 @@ export class GetIndexesRequest extends Message<GetIndexesRequest> {
   store = "";
 
   /**
-   * @generated from field: bytes chunk_id = 2;
+   * @generated from field: string chunk_id = 2;
    */
-  chunkId = new Uint8Array(0);
+  chunkId = "";
 
   constructor(data?: PartialMessage<GetIndexesRequest>) {
     super();
@@ -449,7 +447,7 @@ export class GetIndexesRequest extends Message<GetIndexesRequest> {
   static readonly typeName = "gastrolog.v1.GetIndexesRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "store", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetIndexesRequest {
@@ -579,9 +577,9 @@ export class AnalyzeChunkRequest extends Message<AnalyzeChunkRequest> {
   /**
    * If empty, analyze all chunks
    *
-   * @generated from field: bytes chunk_id = 2;
+   * @generated from field: string chunk_id = 2;
    */
-  chunkId = new Uint8Array(0);
+  chunkId = "";
 
   constructor(data?: PartialMessage<AnalyzeChunkRequest>) {
     super();
@@ -592,7 +590,7 @@ export class AnalyzeChunkRequest extends Message<AnalyzeChunkRequest> {
   static readonly typeName = "gastrolog.v1.AnalyzeChunkRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "store", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): AnalyzeChunkRequest {
@@ -654,9 +652,9 @@ export class AnalyzeChunkResponse extends Message<AnalyzeChunkResponse> {
  */
 export class ChunkAnalysis extends Message<ChunkAnalysis> {
   /**
-   * @generated from field: bytes chunk_id = 1;
+   * @generated from field: string chunk_id = 1;
    */
-  chunkId = new Uint8Array(0);
+  chunkId = "";
 
   /**
    * @generated from field: bool sealed = 2;
@@ -681,7 +679,7 @@ export class ChunkAnalysis extends Message<ChunkAnalysis> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ChunkAnalysis";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 1, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "sealed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 3, name: "record_count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 4, name: "indexes", kind: "message", T: IndexAnalysis, repeated: true },

@@ -165,7 +165,7 @@ func (s *QueryServer) Explain(
 	for _, cp := range plan.ChunkPlans {
 		chunkPlan := &apiv1.ChunkPlan{
 			StoreId:          cp.StoreID,
-			ChunkId:          cp.ChunkID[:],
+			ChunkId:          cp.ChunkID.String(),
 			Sealed:           cp.Sealed,
 			RecordCount:      int64(cp.RecordCount),
 			ScanMode:         cp.ScanMode,
@@ -575,13 +575,21 @@ func pipelineStepsToProto(steps []query.PipelineStep) []*apiv1.PipelineStep {
 
 // recordToProto converts an internal Record to the proto type.
 func recordToProto(rec chunk.Record) *apiv1.Record {
-	return &apiv1.Record{
+	r := &apiv1.Record{
 		IngestTs: timestamppb.New(rec.IngestTS),
 		WriteTs:  timestamppb.New(rec.WriteTS),
 		Attrs:    rec.Attrs,
 		Raw:      rec.Raw,
-		// TODO: add RecordRef
+		Ref: &apiv1.RecordRef{
+			ChunkId: rec.Ref.ChunkID.String(),
+			Pos:     rec.Ref.Pos,
+			StoreId: rec.StoreID,
+		},
 	}
+	if !rec.SourceTS.IsZero() {
+		r.SourceTs = timestamppb.New(rec.SourceTS)
+	}
+	return r
 }
 
 // protoToResumeToken converts a proto resume token to the internal type.
@@ -603,8 +611,10 @@ func protoToResumeToken(data []byte) (*query.ResumeToken, error) {
 	}
 
 	for i, pos := range protoToken.Positions {
-		var chunkID chunk.ChunkID
-		copy(chunkID[:], pos.ChunkId)
+		chunkID, err := chunk.ParseChunkID(pos.ChunkId)
+		if err != nil {
+			return nil, fmt.Errorf("invalid chunk ID in resume token: %w", err)
+		}
 		token.Positions[i] = query.MultiStorePosition{
 			StoreID:  pos.StoreId,
 			ChunkID:  chunkID,
@@ -629,7 +639,7 @@ func resumeTokenToProto(token *query.ResumeToken) []byte {
 	for i, pos := range token.Positions {
 		protoToken.Positions[i] = &apiv1.StorePosition{
 			StoreId:  pos.StoreID,
-			ChunkId:  pos.ChunkID[:],
+			ChunkId:  pos.ChunkID.String(),
 			Position: pos.Position,
 		}
 	}

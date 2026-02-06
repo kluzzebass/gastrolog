@@ -436,6 +436,11 @@ export class Record extends Message<Record> {
    */
   ref?: RecordRef;
 
+  /**
+   * @generated from field: google.protobuf.Timestamp source_ts = 6;
+   */
+  sourceTs?: Timestamp;
+
   constructor(data?: PartialMessage<Record>) {
     super();
     proto3.util.initPartial(data, this);
@@ -449,6 +454,7 @@ export class Record extends Message<Record> {
     { no: 3, name: "attrs", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
     { no: 4, name: "raw", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 5, name: "ref", kind: "message", T: RecordRef },
+    { no: 6, name: "source_ts", kind: "message", T: Timestamp },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): Record {
@@ -473,11 +479,9 @@ export class Record extends Message<Record> {
  */
 export class RecordRef extends Message<RecordRef> {
   /**
-   * 16-byte UUID
-   *
-   * @generated from field: bytes chunk_id = 1;
+   * @generated from field: string chunk_id = 1;
    */
-  chunkId = new Uint8Array(0);
+  chunkId = "";
 
   /**
    * @generated from field: uint64 pos = 2;
@@ -499,7 +503,7 @@ export class RecordRef extends Message<RecordRef> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.RecordRef";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 1, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "pos", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 3, name: "store_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
@@ -571,11 +575,9 @@ export class StorePosition extends Message<StorePosition> {
   storeId = "";
 
   /**
-   * 16-byte UUID
-   *
-   * @generated from field: bytes chunk_id = 2;
+   * @generated from field: string chunk_id = 2;
    */
-  chunkId = new Uint8Array(0);
+  chunkId = "";
 
   /**
    * MaxUint64 indicates chunk is exhausted
@@ -593,7 +595,7 @@ export class StorePosition extends Message<StorePosition> {
   static readonly typeName = "gastrolog.v1.StorePosition";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "store_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "position", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
@@ -619,9 +621,9 @@ export class StorePosition extends Message<StorePosition> {
  */
 export class ChunkPlan extends Message<ChunkPlan> {
   /**
-   * @generated from field: bytes chunk_id = 1;
+   * @generated from field: string chunk_id = 1;
    */
-  chunkId = new Uint8Array(0);
+  chunkId = "";
 
   /**
    * @generated from field: bool sealed = 2;
@@ -688,7 +690,7 @@ export class ChunkPlan extends Message<ChunkPlan> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ChunkPlan";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 1, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "sealed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 3, name: "record_count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 4, name: "steps", kind: "message", T: PipelineStep, repeated: true },

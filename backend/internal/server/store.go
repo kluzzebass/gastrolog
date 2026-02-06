@@ -107,14 +107,9 @@ func (s *StoreServer) GetChunk(
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
 	}
 
-	chunkID, err := chunk.ParseChunkID(string(req.Msg.ChunkId))
+	chunkID, err := chunk.ParseChunkID(req.Msg.ChunkId)
 	if err != nil {
-		// Try as raw bytes
-		if len(req.Msg.ChunkId) == 16 {
-			copy(chunkID[:], req.Msg.ChunkId)
-		} else {
-			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid chunk ID"))
-		}
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
 	meta, err := cm.Meta(chunkID)
@@ -143,7 +138,7 @@ func (s *StoreServer) GetIndexes(
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
 	}
 
-	chunkID, err := parseChunkID(req.Msg.ChunkId)
+	chunkID, err := chunk.ParseChunkID(req.Msg.ChunkId)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
@@ -197,8 +192,8 @@ func (s *StoreServer) AnalyzeChunk(
 
 	var analyses []analyzer.ChunkAnalysis
 
-	if len(req.Msg.ChunkId) > 0 {
-		chunkID, parseErr := parseChunkID(req.Msg.ChunkId)
+	if req.Msg.ChunkId != "" {
+		chunkID, parseErr := chunk.ParseChunkID(req.Msg.ChunkId)
 		if parseErr != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, parseErr)
 		}
@@ -221,7 +216,7 @@ func (s *StoreServer) AnalyzeChunk(
 
 	for _, ca := range analyses {
 		protoAnalysis := &apiv1.ChunkAnalysis{
-			ChunkId:     ca.ChunkID[:],
+			ChunkId:     ca.ChunkID.String(),
 			Sealed:      ca.Sealed,
 			RecordCount: ca.ChunkRecords,
 			Indexes:     make([]*apiv1.IndexAnalysis, 0),
@@ -348,21 +343,12 @@ func (s *StoreServer) getStoreInfo(id string) (*apiv1.StoreInfo, error) {
 
 func chunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
 	return &apiv1.ChunkMeta{
-		Id:          meta.ID[:],
+		Id:          meta.ID.String(),
 		StartTs:     timestamppb.New(meta.StartTS),
 		EndTs:       timestamppb.New(meta.EndTS),
 		Sealed:      meta.Sealed,
 		RecordCount: meta.RecordCount,
 	}
-}
-
-func parseChunkID(data []byte) (chunk.ChunkID, error) {
-	var id chunk.ChunkID
-	if len(data) == 16 {
-		copy(id[:], data)
-		return id, nil
-	}
-	return chunk.ParseChunkID(string(data))
 }
 
 func tokenStatusString(stats *analyzer.TokenIndexStats) string {

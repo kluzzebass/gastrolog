@@ -500,6 +500,7 @@ type Record struct {
 	Attrs         map[string]string      `protobuf:"bytes,3,rep,name=attrs,proto3" json:"attrs,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	Raw           []byte                 `protobuf:"bytes,4,opt,name=raw,proto3" json:"raw,omitempty"`
 	Ref           *RecordRef             `protobuf:"bytes,5,opt,name=ref,proto3" json:"ref,omitempty"`
+	SourceTs      *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=source_ts,json=sourceTs,proto3" json:"source_ts,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -569,9 +570,16 @@ func (x *Record) GetRef() *RecordRef {
 	return nil
 }
 
+func (x *Record) GetSourceTs() *timestamppb.Timestamp {
+	if x != nil {
+		return x.SourceTs
+	}
+	return nil
+}
+
 type RecordRef struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ChunkId       []byte                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"` // 16-byte UUID
+	ChunkId       string                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
 	Pos           uint64                 `protobuf:"varint,2,opt,name=pos,proto3" json:"pos,omitempty"`
 	StoreId       string                 `protobuf:"bytes,3,opt,name=store_id,json=storeId,proto3" json:"store_id,omitempty"` // Store this record belongs to
 	unknownFields protoimpl.UnknownFields
@@ -608,11 +616,11 @@ func (*RecordRef) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{9}
 }
 
-func (x *RecordRef) GetChunkId() []byte {
+func (x *RecordRef) GetChunkId() string {
 	if x != nil {
 		return x.ChunkId
 	}
-	return nil
+	return ""
 }
 
 func (x *RecordRef) GetPos() uint64 {
@@ -678,8 +686,8 @@ func (x *ResumeToken) GetPositions() []*StorePosition {
 type StorePosition struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	StoreId       string                 `protobuf:"bytes,1,opt,name=store_id,json=storeId,proto3" json:"store_id,omitempty"`
-	ChunkId       []byte                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"` // 16-byte UUID
-	Position      uint64                 `protobuf:"varint,3,opt,name=position,proto3" json:"position,omitempty"`             // MaxUint64 indicates chunk is exhausted
+	ChunkId       string                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
+	Position      uint64                 `protobuf:"varint,3,opt,name=position,proto3" json:"position,omitempty"` // MaxUint64 indicates chunk is exhausted
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -721,11 +729,11 @@ func (x *StorePosition) GetStoreId() string {
 	return ""
 }
 
-func (x *StorePosition) GetChunkId() []byte {
+func (x *StorePosition) GetChunkId() string {
 	if x != nil {
 		return x.ChunkId
 	}
-	return nil
+	return ""
 }
 
 func (x *StorePosition) GetPosition() uint64 {
@@ -737,7 +745,7 @@ func (x *StorePosition) GetPosition() uint64 {
 
 type ChunkPlan struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
-	ChunkId          []byte                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
+	ChunkId          string                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
 	Sealed           bool                   `protobuf:"varint,2,opt,name=sealed,proto3" json:"sealed,omitempty"`
 	RecordCount      int64                  `protobuf:"varint,3,opt,name=record_count,json=recordCount,proto3" json:"record_count,omitempty"`
 	Steps            []*PipelineStep        `protobuf:"bytes,4,rep,name=steps,proto3" json:"steps,omitempty"`
@@ -783,11 +791,11 @@ func (*ChunkPlan) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{12}
 }
 
-func (x *ChunkPlan) GetChunkId() []byte {
+func (x *ChunkPlan) GetChunkId() string {
 	if x != nil {
 		return x.ChunkId
 	}
-	return nil
+	return ""
 }
 
 func (x *ChunkPlan) GetSealed() bool {
@@ -1253,29 +1261,30 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"expression\"5\n" +
 	"\vKVPredicate\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value\"\xa6\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value\"\xdf\x02\n" +
 	"\x06Record\x127\n" +
 	"\tingest_ts\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\bingestTs\x125\n" +
 	"\bwrite_ts\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\awriteTs\x125\n" +
 	"\x05attrs\x18\x03 \x03(\v2\x1f.gastrolog.v1.Record.AttrsEntryR\x05attrs\x12\x10\n" +
 	"\x03raw\x18\x04 \x01(\fR\x03raw\x12)\n" +
-	"\x03ref\x18\x05 \x01(\v2\x17.gastrolog.v1.RecordRefR\x03ref\x1a8\n" +
+	"\x03ref\x18\x05 \x01(\v2\x17.gastrolog.v1.RecordRefR\x03ref\x127\n" +
+	"\tsource_ts\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\bsourceTs\x1a8\n" +
 	"\n" +
 	"AttrsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"S\n" +
 	"\tRecordRef\x12\x19\n" +
-	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x12\x10\n" +
+	"\bchunk_id\x18\x01 \x01(\tR\achunkId\x12\x10\n" +
 	"\x03pos\x18\x02 \x01(\x04R\x03pos\x12\x19\n" +
 	"\bstore_id\x18\x03 \x01(\tR\astoreId\"H\n" +
 	"\vResumeToken\x129\n" +
 	"\tpositions\x18\x01 \x03(\v2\x1b.gastrolog.v1.StorePositionR\tpositions\"a\n" +
 	"\rStorePosition\x12\x19\n" +
 	"\bstore_id\x18\x01 \x01(\tR\astoreId\x12\x19\n" +
-	"\bchunk_id\x18\x02 \x01(\fR\achunkId\x12\x1a\n" +
+	"\bchunk_id\x18\x02 \x01(\tR\achunkId\x12\x1a\n" +
 	"\bposition\x18\x03 \x01(\x04R\bposition\"\xe9\x03\n" +
 	"\tChunkPlan\x12\x19\n" +
-	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x12\x16\n" +
+	"\bchunk_id\x18\x01 \x01(\tR\achunkId\x12\x16\n" +
 	"\x06sealed\x18\x02 \x01(\bR\x06sealed\x12!\n" +
 	"\frecord_count\x18\x03 \x01(\x03R\vrecordCount\x120\n" +
 	"\x05steps\x18\x04 \x03(\v2\x1a.gastrolog.v1.PipelineStepR\x05steps\x12\x1b\n" +
@@ -1376,31 +1385,32 @@ var file_gastrolog_v1_query_proto_depIdxs = []int32{
 	19, // 10: gastrolog.v1.Record.write_ts:type_name -> google.protobuf.Timestamp
 	18, // 11: gastrolog.v1.Record.attrs:type_name -> gastrolog.v1.Record.AttrsEntry
 	9,  // 12: gastrolog.v1.Record.ref:type_name -> gastrolog.v1.RecordRef
-	11, // 13: gastrolog.v1.ResumeToken.positions:type_name -> gastrolog.v1.StorePosition
-	14, // 14: gastrolog.v1.ChunkPlan.steps:type_name -> gastrolog.v1.PipelineStep
-	19, // 15: gastrolog.v1.ChunkPlan.start_ts:type_name -> google.protobuf.Timestamp
-	19, // 16: gastrolog.v1.ChunkPlan.end_ts:type_name -> google.protobuf.Timestamp
-	13, // 17: gastrolog.v1.ChunkPlan.branch_plans:type_name -> gastrolog.v1.BranchPlan
-	14, // 18: gastrolog.v1.BranchPlan.steps:type_name -> gastrolog.v1.PipelineStep
-	19, // 19: gastrolog.v1.HistogramRequest.start:type_name -> google.protobuf.Timestamp
-	19, // 20: gastrolog.v1.HistogramRequest.end:type_name -> google.protobuf.Timestamp
-	17, // 21: gastrolog.v1.HistogramResponse.buckets:type_name -> gastrolog.v1.HistogramBucket
-	19, // 22: gastrolog.v1.HistogramResponse.start:type_name -> google.protobuf.Timestamp
-	19, // 23: gastrolog.v1.HistogramResponse.end:type_name -> google.protobuf.Timestamp
-	19, // 24: gastrolog.v1.HistogramBucket.ts:type_name -> google.protobuf.Timestamp
-	0,  // 25: gastrolog.v1.QueryService.Search:input_type -> gastrolog.v1.SearchRequest
-	2,  // 26: gastrolog.v1.QueryService.Follow:input_type -> gastrolog.v1.FollowRequest
-	4,  // 27: gastrolog.v1.QueryService.Explain:input_type -> gastrolog.v1.ExplainRequest
-	15, // 28: gastrolog.v1.QueryService.Histogram:input_type -> gastrolog.v1.HistogramRequest
-	1,  // 29: gastrolog.v1.QueryService.Search:output_type -> gastrolog.v1.SearchResponse
-	3,  // 30: gastrolog.v1.QueryService.Follow:output_type -> gastrolog.v1.FollowResponse
-	5,  // 31: gastrolog.v1.QueryService.Explain:output_type -> gastrolog.v1.ExplainResponse
-	16, // 32: gastrolog.v1.QueryService.Histogram:output_type -> gastrolog.v1.HistogramResponse
-	29, // [29:33] is the sub-list for method output_type
-	25, // [25:29] is the sub-list for method input_type
-	25, // [25:25] is the sub-list for extension type_name
-	25, // [25:25] is the sub-list for extension extendee
-	0,  // [0:25] is the sub-list for field type_name
+	19, // 13: gastrolog.v1.Record.source_ts:type_name -> google.protobuf.Timestamp
+	11, // 14: gastrolog.v1.ResumeToken.positions:type_name -> gastrolog.v1.StorePosition
+	14, // 15: gastrolog.v1.ChunkPlan.steps:type_name -> gastrolog.v1.PipelineStep
+	19, // 16: gastrolog.v1.ChunkPlan.start_ts:type_name -> google.protobuf.Timestamp
+	19, // 17: gastrolog.v1.ChunkPlan.end_ts:type_name -> google.protobuf.Timestamp
+	13, // 18: gastrolog.v1.ChunkPlan.branch_plans:type_name -> gastrolog.v1.BranchPlan
+	14, // 19: gastrolog.v1.BranchPlan.steps:type_name -> gastrolog.v1.PipelineStep
+	19, // 20: gastrolog.v1.HistogramRequest.start:type_name -> google.protobuf.Timestamp
+	19, // 21: gastrolog.v1.HistogramRequest.end:type_name -> google.protobuf.Timestamp
+	17, // 22: gastrolog.v1.HistogramResponse.buckets:type_name -> gastrolog.v1.HistogramBucket
+	19, // 23: gastrolog.v1.HistogramResponse.start:type_name -> google.protobuf.Timestamp
+	19, // 24: gastrolog.v1.HistogramResponse.end:type_name -> google.protobuf.Timestamp
+	19, // 25: gastrolog.v1.HistogramBucket.ts:type_name -> google.protobuf.Timestamp
+	0,  // 26: gastrolog.v1.QueryService.Search:input_type -> gastrolog.v1.SearchRequest
+	2,  // 27: gastrolog.v1.QueryService.Follow:input_type -> gastrolog.v1.FollowRequest
+	4,  // 28: gastrolog.v1.QueryService.Explain:input_type -> gastrolog.v1.ExplainRequest
+	15, // 29: gastrolog.v1.QueryService.Histogram:input_type -> gastrolog.v1.HistogramRequest
+	1,  // 30: gastrolog.v1.QueryService.Search:output_type -> gastrolog.v1.SearchResponse
+	3,  // 31: gastrolog.v1.QueryService.Follow:output_type -> gastrolog.v1.FollowResponse
+	5,  // 32: gastrolog.v1.QueryService.Explain:output_type -> gastrolog.v1.ExplainResponse
+	16, // 33: gastrolog.v1.QueryService.Histogram:output_type -> gastrolog.v1.HistogramResponse
+	30, // [30:34] is the sub-list for method output_type
+	26, // [26:30] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_query_proto_init() }

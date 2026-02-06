@@ -91,10 +91,11 @@ message Record {
   map<string, string> attrs = 3;
   bytes raw = 4;
   RecordRef ref = 5;
+  google.protobuf.Timestamp source_ts = 6;
 }
 
 message RecordRef {
-  bytes chunk_id = 1; // 16-byte UUID
+  string chunk_id = 1;
   uint64 pos = 2;
   string store_id = 3; // Store this record belongs to
 }
@@ -107,12 +108,12 @@ message ResumeToken {
 
 message StorePosition {
   string store_id = 1;
-  bytes chunk_id = 2; // 16-byte UUID
+  string chunk_id = 2;
   uint64 position = 3; // MaxUint64 indicates chunk is exhausted
 }
 
 message ChunkPlan {
-  bytes chunk_id = 1;
+  string chunk_id = 1;
   bool sealed = 2;
   int64 record_count = 3;
   repeated PipelineStep steps = 4;

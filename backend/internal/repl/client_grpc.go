@@ -2,6 +2,7 @@ package repl
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"io"
 	"iter"
@@ -222,7 +223,7 @@ func (r *grpcChunkReader) List() ([]chunk.ChunkMeta, error) {
 func (r *grpcChunkReader) Meta(id chunk.ChunkID) (chunk.ChunkMeta, error) {
 	resp, err := r.client.store.GetChunk(context.Background(), connect.NewRequest(&apiv1.GetChunkRequest{
 		Store:   r.store,
-		ChunkId: id[:],
+		ChunkId: id.String(),
 	}))
 	if err != nil {
 		return chunk.ChunkMeta{}, err
@@ -258,7 +259,7 @@ type grpcIndexReader struct {
 func (r *grpcIndexReader) IndexesComplete(id chunk.ChunkID) (bool, error) {
 	resp, err := r.client.store.GetIndexes(context.Background(), connect.NewRequest(&apiv1.GetIndexesRequest{
 		Store:   r.store,
-		ChunkId: id[:],
+		ChunkId: id.String(),
 	}))
 	if err != nil {
 		return false, err
@@ -286,7 +287,7 @@ type grpcAnalyzer struct {
 func (a *grpcAnalyzer) AnalyzeChunk(id chunk.ChunkID) (*analyzer.ChunkAnalysis, error) {
 	resp, err := a.client.store.AnalyzeChunk(context.Background(), connect.NewRequest(&apiv1.AnalyzeChunkRequest{
 		Store:   a.store,
-		ChunkId: id[:],
+		ChunkId: id.String(),
 	}))
 	if err != nil {
 		return nil, err
@@ -299,8 +300,7 @@ func (a *grpcAnalyzer) AnalyzeChunk(id chunk.ChunkID) (*analyzer.ChunkAnalysis, 
 
 func (a *grpcAnalyzer) AnalyzeAll() (*analyzer.AggregateAnalysis, error) {
 	resp, err := a.client.store.AnalyzeChunk(context.Background(), connect.NewRequest(&apiv1.AnalyzeChunkRequest{
-		Store:   a.store,
-		ChunkId: nil, // Empty = analyze all
+		Store: a.store, // Empty ChunkId = analyze all
 	}))
 	if err != nil {
 		return nil, err
@@ -349,28 +349,20 @@ func resumeTokenToBytes(token *query.ResumeToken) []byte {
 	if token == nil {
 		return nil
 	}
-	// Simple encoding: chunkID (16 bytes) + recordPos (8 bytes)
-	buf := make([]byte, 24)
-	copy(buf[:16], token.Next.ChunkID[:])
-	buf[16] = byte(token.Next.Pos >> 56)
-	buf[17] = byte(token.Next.Pos >> 48)
-	buf[18] = byte(token.Next.Pos >> 40)
-	buf[19] = byte(token.Next.Pos >> 32)
-	buf[20] = byte(token.Next.Pos >> 24)
-	buf[21] = byte(token.Next.Pos >> 16)
-	buf[22] = byte(token.Next.Pos >> 8)
-	buf[23] = byte(token.Next.Pos)
+	// Simple encoding: chunkID (8 bytes) + recordPos (8 bytes)
+	buf := make([]byte, 16)
+	copy(buf[:8], token.Next.ChunkID[:])
+	binary.BigEndian.PutUint64(buf[8:], token.Next.Pos)
 	return buf
 }
 
 func bytesToResumeToken(data []byte) *query.ResumeToken {
-	if len(data) < 24 {
+	if len(data) < 16 {
 		return nil
 	}
 	var id chunk.ChunkID
-	copy(id[:], data[:16])
-	pos := uint64(data[16])<<56 | uint64(data[17])<<48 | uint64(data[18])<<40 | uint64(data[19])<<32 |
-		uint64(data[20])<<24 | uint64(data[21])<<16 | uint64(data[22])<<8 | uint64(data[23])
+	copy(id[:], data[:8])
+	pos := binary.BigEndian.Uint64(data[8:])
 	return &query.ResumeToken{
 		Next: chunk.RecordRef{
 			ChunkID: id,
@@ -402,8 +394,7 @@ func protoToChunkMeta(meta *apiv1.ChunkMeta) chunk.ChunkMeta {
 	if meta == nil {
 		return chunk.ChunkMeta{}
 	}
-	var id chunk.ChunkID
-	copy(id[:], meta.Id)
+	id, _ := chunk.ParseChunkID(meta.Id)
 	m := chunk.ChunkMeta{
 		ID:          id,
 		Sealed:      meta.Sealed,
@@ -441,8 +432,7 @@ func protoToQueryPlan(resp *apiv1.ExplainResponse) *query.QueryPlan {
 
 	chunks := make([]query.ChunkPlan, len(resp.Chunks))
 	for i, cp := range resp.Chunks {
-		var chunkID chunk.ChunkID
-		copy(chunkID[:], cp.ChunkId)
+		chunkID, _ := chunk.ParseChunkID(cp.ChunkId)
 
 		runtimeFilter := ""
 		if len(cp.RuntimeFilters) > 0 {
@@ -496,8 +486,7 @@ func protoToChunkAnalysis(ca *apiv1.ChunkAnalysis) *analyzer.ChunkAnalysis {
 		return nil
 	}
 
-	var chunkID chunk.ChunkID
-	copy(chunkID[:], ca.ChunkId)
+	chunkID, _ := chunk.ParseChunkID(ca.ChunkId)
 
 	summaries := make([]analyzer.IndexSummary, len(ca.Indexes))
 	for i, idx := range ca.Indexes {

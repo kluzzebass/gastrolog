@@ -4,6 +4,7 @@ import (
 	"gastrolog/internal/chunk"
 	"slices"
 	"testing"
+	"time"
 )
 
 func TestPrunePositions(t *testing.T) {
@@ -243,7 +244,7 @@ func TestUnionPositions(t *testing.T) {
 
 func TestScannerBuilderBasic(t *testing.T) {
 	// Test that scannerBuilder correctly tracks state.
-	chunkID := [16]byte{1, 2, 3}
+	chunkID := chunk.ChunkIDFromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 
 	b := newScannerBuilder(chunkID)
 
@@ -270,7 +271,7 @@ func TestScannerBuilderBasic(t *testing.T) {
 }
 
 func TestScannerBuilderEmptyIntersection(t *testing.T) {
-	chunkID := [16]byte{1, 2, 3}
+	chunkID := chunk.ChunkIDFromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	b := newScannerBuilder(chunkID)
 
 	b.addPositions([]uint64{10, 20, 30})
@@ -284,7 +285,7 @@ func TestScannerBuilderEmptyIntersection(t *testing.T) {
 }
 
 func TestScannerBuilderMinPosition(t *testing.T) {
-	chunkID := [16]byte{1, 2, 3}
+	chunkID := chunk.ChunkIDFromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	b := newScannerBuilder(chunkID)
 
 	b.setMinPosition(25)
@@ -297,7 +298,7 @@ func TestScannerBuilderMinPosition(t *testing.T) {
 }
 
 func TestScannerBuilderFilters(t *testing.T) {
-	chunkID := [16]byte{1, 2, 3}
+	chunkID := chunk.ChunkIDFromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	b := newScannerBuilder(chunkID)
 
 	filter1 := func(r chunk.Record) bool { return true }

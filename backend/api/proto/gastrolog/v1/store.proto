@@ -61,7 +61,7 @@ message ListChunksResponse {
 }
 
 message ChunkMeta {
-  bytes id = 1; // 16-byte UUID
+  string id = 1;
   google.protobuf.Timestamp start_ts = 2;
   google.protobuf.Timestamp end_ts = 3;
   bool sealed = 4;
@@ -70,7 +70,7 @@ message ChunkMeta {
 
 message GetChunkRequest {
   string store = 1;
-  bytes chunk_id = 2;
+  string chunk_id = 2;
 }
 
 message GetChunkResponse {
@@ -79,7 +79,7 @@ message GetChunkResponse {
 
 message GetIndexesRequest {
   string store = 1;
-  bytes chunk_id = 2;
+  string chunk_id = 2;
 }
 
 message GetIndexesResponse {
@@ -96,7 +96,7 @@ message IndexInfo {
 
 message AnalyzeChunkRequest {
   string store = 1;
-  bytes chunk_id = 2; // If empty, analyze all chunks
+  string chunk_id = 2; // If empty, analyze all chunks
 }
 
 message AnalyzeChunkResponse {
@@ -104,7 +104,7 @@ message AnalyzeChunkResponse {
 }
 
 message ChunkAnalysis {
-  bytes chunk_id = 1;
+  string chunk_id = 1;
   bool sealed = 2;
   int64 record_count = 3;
   repeated IndexAnalysis indexes = 4;

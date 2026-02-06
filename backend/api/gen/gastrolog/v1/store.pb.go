@@ -356,7 +356,7 @@ func (x *ListChunksResponse) GetChunks() []*ChunkMeta {
 
 type ChunkMeta struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"` // 16-byte UUID
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	StartTs       *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=start_ts,json=startTs,proto3" json:"start_ts,omitempty"`
 	EndTs         *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=end_ts,json=endTs,proto3" json:"end_ts,omitempty"`
 	Sealed        bool                   `protobuf:"varint,4,opt,name=sealed,proto3" json:"sealed,omitempty"`
@@ -395,11 +395,11 @@ func (*ChunkMeta) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *ChunkMeta) GetId() []byte {
+func (x *ChunkMeta) GetId() string {
 	if x != nil {
 		return x.Id
 	}
-	return nil
+	return ""
 }
 
 func (x *ChunkMeta) GetStartTs() *timestamppb.Timestamp {
@@ -433,7 +433,7 @@ func (x *ChunkMeta) GetRecordCount() int64 {
 type GetChunkRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Store         string                 `protobuf:"bytes,1,opt,name=store,proto3" json:"store,omitempty"`
-	ChunkId       []byte                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
+	ChunkId       string                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -475,11 +475,11 @@ func (x *GetChunkRequest) GetStore() string {
 	return ""
 }
 
-func (x *GetChunkRequest) GetChunkId() []byte {
+func (x *GetChunkRequest) GetChunkId() string {
 	if x != nil {
 		return x.ChunkId
 	}
-	return nil
+	return ""
 }
 
 type GetChunkResponse struct {
@@ -529,7 +529,7 @@ func (x *GetChunkResponse) GetChunk() *ChunkMeta {
 type GetIndexesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Store         string                 `protobuf:"bytes,1,opt,name=store,proto3" json:"store,omitempty"`
-	ChunkId       []byte                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
+	ChunkId       string                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -571,11 +571,11 @@ func (x *GetIndexesRequest) GetStore() string {
 	return ""
 }
 
-func (x *GetIndexesRequest) GetChunkId() []byte {
+func (x *GetIndexesRequest) GetChunkId() string {
 	if x != nil {
 		return x.ChunkId
 	}
-	return nil
+	return ""
 }
 
 type GetIndexesResponse struct {
@@ -701,7 +701,7 @@ func (x *IndexInfo) GetSizeBytes() int64 {
 type AnalyzeChunkRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Store         string                 `protobuf:"bytes,1,opt,name=store,proto3" json:"store,omitempty"`
-	ChunkId       []byte                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"` // If empty, analyze all chunks
+	ChunkId       string                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"` // If empty, analyze all chunks
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -743,11 +743,11 @@ func (x *AnalyzeChunkRequest) GetStore() string {
 	return ""
 }
 
-func (x *AnalyzeChunkRequest) GetChunkId() []byte {
+func (x *AnalyzeChunkRequest) GetChunkId() string {
 	if x != nil {
 		return x.ChunkId
 	}
-	return nil
+	return ""
 }
 
 type AnalyzeChunkResponse struct {
@@ -796,7 +796,7 @@ func (x *AnalyzeChunkResponse) GetAnalyses() []*ChunkAnalysis {
 
 type ChunkAnalysis struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ChunkId       []byte                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
+	ChunkId       string                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
 	Sealed        bool                   `protobuf:"varint,2,opt,name=sealed,proto3" json:"sealed,omitempty"`
 	RecordCount   int64                  `protobuf:"varint,3,opt,name=record_count,json=recordCount,proto3" json:"record_count,omitempty"`
 	Indexes       []*IndexAnalysis       `protobuf:"bytes,4,rep,name=indexes,proto3" json:"indexes,omitempty"`
@@ -834,11 +834,11 @@ func (*ChunkAnalysis) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{15}
 }
 
-func (x *ChunkAnalysis) GetChunkId() []byte {
+func (x *ChunkAnalysis) GetChunkId() string {
 	if x != nil {
 		return x.ChunkId
 	}
-	return nil
+	return ""
 }
 
 func (x *ChunkAnalysis) GetSealed() bool {
@@ -1106,19 +1106,19 @@ const file_gastrolog_v1_store_proto_rawDesc = "" +
 	"\x12ListChunksResponse\x12/\n" +
 	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\xc0\x01\n" +
 	"\tChunkMeta\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\fR\x02id\x125\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x125\n" +
 	"\bstart_ts\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\astartTs\x121\n" +
 	"\x06end_ts\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x05endTs\x12\x16\n" +
 	"\x06sealed\x18\x04 \x01(\bR\x06sealed\x12!\n" +
 	"\frecord_count\x18\x05 \x01(\x03R\vrecordCount\"B\n" +
 	"\x0fGetChunkRequest\x12\x14\n" +
 	"\x05store\x18\x01 \x01(\tR\x05store\x12\x19\n" +
-	"\bchunk_id\x18\x02 \x01(\fR\achunkId\"A\n" +
+	"\bchunk_id\x18\x02 \x01(\tR\achunkId\"A\n" +
 	"\x10GetChunkResponse\x12-\n" +
 	"\x05chunk\x18\x01 \x01(\v2\x17.gastrolog.v1.ChunkMetaR\x05chunk\"D\n" +
 	"\x11GetIndexesRequest\x12\x14\n" +
 	"\x05store\x18\x01 \x01(\tR\x05store\x12\x19\n" +
-	"\bchunk_id\x18\x02 \x01(\fR\achunkId\"_\n" +
+	"\bchunk_id\x18\x02 \x01(\tR\achunkId\"_\n" +
 	"\x12GetIndexesResponse\x12\x16\n" +
 	"\x06sealed\x18\x01 \x01(\bR\x06sealed\x121\n" +
 	"\aindexes\x18\x02 \x03(\v2\x17.gastrolog.v1.IndexInfoR\aindexes\"w\n" +
@@ -1131,11 +1131,11 @@ const file_gastrolog_v1_store_proto_rawDesc = "" +
 	"size_bytes\x18\x04 \x01(\x03R\tsizeBytes\"F\n" +
 	"\x13AnalyzeChunkRequest\x12\x14\n" +
 	"\x05store\x18\x01 \x01(\tR\x05store\x12\x19\n" +
-	"\bchunk_id\x18\x02 \x01(\fR\achunkId\"O\n" +
+	"\bchunk_id\x18\x02 \x01(\tR\achunkId\"O\n" +
 	"\x14AnalyzeChunkResponse\x127\n" +
 	"\banalyses\x18\x01 \x03(\v2\x1b.gastrolog.v1.ChunkAnalysisR\banalyses\"\x9c\x01\n" +
 	"\rChunkAnalysis\x12\x19\n" +
-	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x12\x16\n" +
+	"\bchunk_id\x18\x01 \x01(\tR\achunkId\x12\x16\n" +
 	"\x06sealed\x18\x02 \x01(\bR\x06sealed\x12!\n" +
 	"\frecord_count\x18\x03 \x01(\x03R\vrecordCount\x125\n" +
 	"\aindexes\x18\x04 \x03(\v2\x1b.gastrolog.v1.IndexAnalysisR\aindexes\"\x94\x02\n" +
