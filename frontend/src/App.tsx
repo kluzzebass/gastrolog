@@ -910,6 +910,7 @@ export function App() {
                           sameRecord(selectedRecord, record) ? null : record,
                         )
                       }
+                      onFieldSelect={handleFieldSelect}
                       dark={dark}
                     />
                   ))}

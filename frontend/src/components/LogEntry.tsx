@@ -4,9 +4,15 @@ import { syntaxHighlight, composeWithSearch } from "../syntax";
 const RE_SEVERITY =
   /\b(ERROR|ERR|FATAL|CRITICAL|WARN(?:ING)?|INFO|NOTICE|DEBUG|TRACE)\b/i;
 
-type Severity = "error" | "warn" | "info" | "debug" | "trace" | null;
+interface SeverityInfo {
+  level: string;
+  label: string;
+  cls: string;
+  filterKey: string;
+  filterValue: string;
+}
 
-const SEVERITY_BADGE: Record<string, { label: string; cls: string }> = {
+const BADGE_STYLE: Record<string, { label: string; cls: string }> = {
   error: { label: "ERR", cls: "border-severity-error/50 text-severity-error" },
   warn: { label: "WRN", cls: "border-severity-warn/50 text-severity-warn" },
   info: { label: "INF", cls: "border-severity-info/50 text-severity-info" },
@@ -14,32 +20,38 @@ const SEVERITY_BADGE: Record<string, { label: string; cls: string }> = {
   trace: { label: "TRC", cls: "border-severity-trace/50 text-severity-trace" },
 };
 
-function detectSeverity(attrs: Record<string, string>, raw: string): Severity {
+function classifySeverity(val: string): string | null {
+  if (/^(error|err|fatal|critical|emerg|alert)$/i.test(val)) return "error";
+  if (/^(warn|warning)$/i.test(val)) return "warn";
+  if (/^(info|notice|informational)$/i.test(val)) return "info";
+  if (/^debug$/i.test(val)) return "debug";
+  if (/^trace$/i.test(val)) return "trace";
+  return null;
+}
+
+function detectSeverity(
+  attrs: Record<string, string>,
+  raw: string,
+): SeverityInfo | null {
   // 1. Check attrs: level, severity, severity_name.
-  const attrVal = (
-    attrs.level ??
-    attrs.severity ??
-    attrs.severity_name ??
-    ""
-  ).toLowerCase();
-  if (attrVal) {
-    if (/^(error|err|fatal|critical|emerg|alert)$/.test(attrVal))
-      return "error";
-    if (/^(warn|warning)$/.test(attrVal)) return "warn";
-    if (/^(info|notice|informational)$/.test(attrVal)) return "info";
-    if (/^debug$/.test(attrVal)) return "debug";
-    if (/^trace$/.test(attrVal)) return "trace";
+  for (const key of ["level", "severity", "severity_name"] as const) {
+    const val = attrs[key];
+    if (val) {
+      const level = classifySeverity(val);
+      if (level) {
+        const style = BADGE_STYLE[level]!;
+        return { level, ...style, filterKey: key, filterValue: val };
+      }
+    }
   }
   // 2. Fall back to keyword in raw text.
   const m = RE_SEVERITY.exec(raw);
   if (!m) return null;
-  const w = m[1]!.toUpperCase();
-  if (w === "ERROR" || w === "ERR" || w === "FATAL" || w === "CRITICAL")
-    return "error";
-  if (w === "WARN" || w === "WARNING") return "warn";
-  if (w === "INFO" || w === "NOTICE") return "info";
-  if (w === "DEBUG") return "debug";
-  return "trace";
+  const word = m[1]!;
+  const level = classifySeverity(word);
+  if (!level) return null;
+  const style = BADGE_STYLE[level]!;
+  return { level, ...style, filterKey: "level", filterValue: word };
 }
 
 export function LogEntry({
@@ -47,12 +59,14 @@ export function LogEntry({
   tokens,
   isSelected,
   onSelect,
+  onFieldSelect,
   dark,
 }: {
   record: ProtoRecord;
   tokens: string[];
   isSelected: boolean;
   onSelect: () => void;
+  onFieldSelect?: (key: string, value: string) => void;
   dark: boolean;
 }) {
   const rawText = new TextDecoder().decode(record.raw);
@@ -89,9 +103,13 @@ export function LogEntry({
       <span className="self-center flex justify-center">
         {severity && (
           <span
-            className={`text-[0.6em] font-semibold leading-none border rounded-sm px-0.5 py-px ${SEVERITY_BADGE[severity]!.cls}`}
+            className={`text-[0.6em] font-semibold leading-none border rounded-sm px-0.5 py-px cursor-pointer hover:brightness-125 transition-[filter] ${severity.cls}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onFieldSelect?.(severity.filterKey, severity.filterValue);
+            }}
           >
-            {SEVERITY_BADGE[severity]!.label}
+            {severity.label}
           </span>
         )}
       </span>
