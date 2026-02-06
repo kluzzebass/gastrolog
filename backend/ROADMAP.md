@@ -1,189 +1,100 @@
-# GastroLog Roadmap
+# GastroLog Backend Roadmap
 
-This document outlines planned features and improvements. Items are roughly grouped by theme, not priority.
+## Current State
 
-## Architecture
+Go 1.25+ backend with Connect RPC server, interactive REPL, chunk-based storage, and multi-index query engine. Single binary with server, REPL, and embedded modes.
 
-### Single Binary, Two Modes
-- `gastrolog serve` - run as server
-- `gastrolog repl [address]` - connect to server via socket
-- `gastrolog repl --embedded` - embedded mode for quick local debugging (no server needed)
+### What's Done
 
-### Connect RPC API ✓
-- ✓ gRPC over Unix socket for local REPL and CLI tools
-- ✓ Connect protocol for browser compatibility (future web UI)
-- ✓ Service definitions: QueryService, StoreService, ConfigService, LifecycleService
-- ✓ REPL client abstraction (GRPCClient, EmbeddedClient)
-- ✓ Embedded mode with in-memory HTTP transport
+- **Core**: Chunk-based storage (file + memory), orchestrator with ingest routing and seal detection
+- **Indexing**: Token, attribute, and KV indexes with budget control and callgroup deduplication
+- **Query**: Boolean expressions, time bounds, pagination, context windows, explain plans, multi-store search
+- **REPL**: 12 commands, bubbletea pager, live follow mode, vim-style navigation, multi-store support
+- **Receivers**: Chatterbox (test, 6 formats with SourceTS), HTTP/Loki (Push API), Syslog (RFC 3164/5424, UDP+TCP)
+- **Server**: Connect RPC with 4 services, h2c, graceful shutdown with drain, k8s probes
+- **Config**: File-based with runtime reconfiguration
+- **ChunkID**: 13-char base32hex timestamps (lexicographically time-sorted)
 
-### Config Store
-- Replace file-based config with SQLite
-- Runtime config changes persisted automatically
-- Config versioning and rollback
-- Watch for external config changes
+## Phase 1: Retention & Storage
 
-## Receivers
+### 1.1 Retention
+- [ ] TTL-based chunk deletion
+- [ ] Size-based retention (keep last N bytes)
+- [ ] Policy per store
+- [ ] Background cleanup goroutine
 
-### Production Receivers
+### 1.2 Compression
+- [ ] Optional compression for sealed chunks (zstd or lz4)
+- [ ] Transparent decompression on read
 
-**Standards & Protocols:**
-- ✓ **Syslog** - UDP and TCP (RFC 3164, RFC 5424) with auto-detection
-- **OTLP** - OpenTelemetry logs (gRPC and HTTP)
-- **Fluent Forward** - Fluent Bit/Fluentd forward protocol
+## Phase 2: Receivers
 
-**Generic:**
-- ✓ **HTTP/Loki** - Loki Push API (`/loki/api/v1/push`) for Promtail, Alloy, Fluent Bit compatibility
-- **Kafka** - Consumer for log pipelines
+### 2.1 New Receivers
+- [ ] OTLP (OpenTelemetry logs, gRPC and HTTP)
+- [ ] Fluent Forward (Fluent Bit/Fluentd forward protocol)
+- [ ] Kafka consumer for log pipelines
 
-### Receiver Features
-- ✓ Optional write acknowledgement (Ack channel in IngestMessage)
-- Backpressure signaling
-- Per-receiver metrics
+### 2.2 Receiver Features
+- [ ] Backpressure signaling
+- [ ] Per-receiver metrics
 
-## Storage
+## Phase 3: Indexing
 
-### Retention & Cleanup
-- TTL-based chunk deletion
-- Size-based retention (keep last N bytes)
-- Policy per store
-- Background cleanup goroutine
+### 3.1 Format-Specific Indexes
+- [ ] JSON index (top-level fields, nested paths, arrays)
+- [ ] Apache/Nginx index (method, path, status, bytes, user_agent)
+- [ ] Syslog index (facility, severity, hostname, app, pid)
+- [ ] Logfmt index (structured key=value, more precise than heuristic KV)
 
-### Compression
-- Optional compression for sealed chunks
-- Configurable algorithm (zstd, lz4)
-- Transparent decompression on read
+## Phase 4: Query
 
-### Cloud Storage (Future)
-- S3-compatible backend
-- Tiered storage (hot local, cold S3)
+### 4.1 Aggregations
+- [ ] `count()`, `count_distinct()`
+- [ ] `min()`, `max()` on timestamps
+- [ ] Group by time buckets
+- [ ] Group by attribute values
 
-## Indexing
+### 4.2 Pattern Matching
+- [ ] Regex support in token search
+- [ ] Prefix/suffix matching
+- [ ] Glob patterns
 
-### Format-Specific Indexes
+### 4.3 Query Performance
+- [ ] Query cost estimation in explain
+- [ ] Query timeout enforcement
+- [ ] Result size limits
 
-Specialized indexers that parse and extract fields from known log formats. Each indexer tries to parse records and skips those that don't match. A single chunk can have entries in multiple format indexes if it contains mixed log types.
+## Phase 5: Observability & Operations
 
-- **JSON Index** - extracts fields from JSON logs
-  - Top-level fields: `level=error`, `msg=failed`
-  - Nested paths: `user.id=123`, `request.headers.content-type=application/json`
-  - Arrays: `tags[]=production`
+### 5.1 Metrics
+- [ ] Prometheus endpoint
+- [ ] Ingestion rate, query latency, index build time
+- [ ] Per-store and per-receiver metrics
 
-- **Apache/Nginx Index** - parses access log formats
-  - Common Log Format and Combined Log Format
-  - Fields: `method`, `path`, `status`, `bytes`, `referer`, `user_agent`, `remote_addr`
+### 5.2 Deployment
+- [ ] Dockerfile
+- [ ] Helm chart
+- [ ] systemd service file
 
-- **Syslog Index** - parses RFC 3164/5424 structure
-  - Fields: `facility`, `severity`, `hostname`, `app`, `pid`, `msgid`
+### 5.3 Config
+- [ ] Replace file-based config with SQLite
+- [ ] Config versioning and rollback
 
-- **Logfmt Index** - parses key=value logfmt style
-  - More structured than the heuristic KV indexer
+## Phase 6: Security
 
-Query examples:
-```
-query status=500 method=POST    # uses apache index
-query level=error user.id=123   # uses json index
-```
+### 6.1 Authentication
+- [ ] mTLS for gastrolog-to-gastrolog communication
+- [ ] API tokens for REPL/CLI access
 
-## Query
+### 6.2 Authorization
+- [ ] Store-level read/write permissions
+- [ ] Query restrictions per user/token
 
-### Aggregations
-- `count()`, `count_distinct()`
-- `min()`, `max()` on timestamps
-- Group by time buckets
-- Group by attribute values
+## Priority Order
 
-### Pattern Matching
-- Regex support in token search
-- Prefix/suffix matching
-- Glob patterns
-
-### Query Performance
-- Query cost estimation in explain
-- Query timeout enforcement
-- Result size limits
-
-## Observability
-
-### Metrics
-- Prometheus endpoint
-- Ingestion rate, query latency, index build time
-- Per-store and per-receiver metrics
-- Routing distribution (messages per store)
-
-### Telemetry
-- Message drop tracking (TODO in route.go)
-- Index build failures
-- Query errors
-
-## Security
-
-### Authentication
-- mTLS for gastrolog-to-gastrolog communication
-- API tokens for REPL/CLI access
-- Optional authentication for local Unix socket
-
-### Authorization
-- Store-level read/write permissions
-- Query restrictions per user/token
-
-## Operations
-
-### Health & Lifecycle ✓
-- ✓ Health check endpoint
-- ✓ Graceful shutdown with drain (waits for in-flight requests, rejects new ones)
-- ✓ Ready/live probes for k8s (`/healthz`, `/readyz`)
-
-### Deployment
-- Dockerfile
-- Helm chart
-- systemd service file
-
-## REPL Enhancements
-
-### Built-in Pager ✓
-- ✓ Full-screen pager using bubbletea for query results
-- ✓ Live pager for `follow` command with auto-scroll when at bottom
-- ✓ Keyboard navigation (vim-style j/k, arrows, page up/down, home/end)
-- ✓ Horizontal scrolling for wide log lines
-- ✓ Mouse wheel support for vertical scrolling
-- ✓ Fetch-more support (press 'n' to load next page)
-- ✓ Output sanitization to prevent terminal corruption from control characters
-- ✓ Proper terminal state save/restore for readline compatibility
-
-### Multi-store Support ✓
-- ✓ `explain` command shows store ID for each chunk
-- ✓ `follow` command works across multiple stores with merge-sort
-- ✓ `search` works across all stores with heap-based merging
-
-### Client-Server REPL
-- Reconnection on server restart
-- Session persistence
-- Multiple concurrent sessions
-
-### New Commands
-- `config` - view/edit configuration
-- `retention` - manage retention policies
-- `receivers` - list/manage receivers
-
-## Documentation
-
-- Architecture overview
-- Deployment guide
-- Query language reference
-- Receiver configuration guide
-- API reference (once Connect RPC exists)
-
----
-
-## Current State (What Exists)
-
-For reference, here's what's already implemented:
-
-- **Core**: Chunk-based storage (file + memory), orchestrator, routing
-- **Indexing**: Token, attribute, and KV indexes with budget control
-- **Query**: Boolean expressions, time bounds, pagination, context windows, explain, multi-store search
-- **REPL**: 12 commands with built-in bubbletea pager, live follow mode, multi-store support
-- **Receivers**: Chatterbox (test), HTTP/Loki (Loki Push API), Syslog (RFC 3164/5424, UDP+TCP)
-- **Config**: File-based with runtime reconfiguration support
-- **Connect RPC**: Server layer with 4 services, REPL client abstraction, embedded mode
-- **Lifecycle**: Health endpoint, graceful shutdown with drain, k8s probes (`/healthz`, `/readyz`)
+1. **Phase 1** - Retention & Storage (required before any real usage)
+2. **Phase 2** - Receivers (broaden ingestion sources)
+3. **Phase 3** - Indexing (query performance for structured logs)
+4. **Phase 4** - Query (power user features)
+5. **Phase 5** - Observability & Operations (production readiness)
+6. **Phase 6** - Security (multi-user scenarios)
