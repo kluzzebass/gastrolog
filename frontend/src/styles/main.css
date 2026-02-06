@@ -19,8 +19,8 @@
   /* Text hierarchy */
   --color-text-bright: #e8e4df;
   --color-text-normal: #b8b2aa;
-  --color-text-muted: #706a62;
-  --color-text-ghost: #4a453e;
+  --color-text-muted: #8a8480;
+  --color-text-ghost: #656058;
 
   /* Semantic - muted, refined */
   --color-severity-error: #c45040;
@@ -42,8 +42,8 @@
   --color-light-border-subtle: #e4ddd4;
   --color-light-text-bright: #1a1610;
   --color-light-text-normal: #3a3630;
-  --color-light-text-muted: #8a8478;
-  --color-light-text-ghost: #b8b2a8;
+  --color-light-text-muted: #706860;
+  --color-light-text-ghost: #958e84;
 
   /* Fonts */
   --font-display: "Cormorant Garamond", serif;
