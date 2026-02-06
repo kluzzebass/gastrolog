@@ -253,6 +253,11 @@ const RE_QUOTED = /"[^"]*"|'[^']*'/g;
 const RE_ACCESS_LOG =
   /^(\S+) \S+ \S+ (\[[^\]]+\]) "(GET|POST|PUT|DELETE|HEAD|OPTIONS|PATCH|TRACE|CONNECT) ([^"]*?) (HTTP\/[\d.]+)" (\d{3}) (\d+|-)/;
 
+// Syslog: RFC 3164 format.
+// <priority>timestamp hostname program[pid]: message
+const RE_SYSLOG =
+  /^(<\d{1,3}>)([A-Z][a-z]{2} [ \d]\d \d{2}:\d{2}:\d{2}) (\S+) (\S+?)(?:\[(\d+)\])?: /;
+
 /** Reset lastIndex on a global regex so it scans from the start. */
 function reset(re: RegExp): RegExp {
   re.lastIndex = 0;
@@ -341,6 +346,58 @@ function highlightKVPlain(text: string): SyntaxSpan[] {
     intervals.push({ start: openQuote, end: openQuote + 1, color: C_DIM });
     const closeQuote = protoStart + alm[5]!.length;
     intervals.push({ start: closeQuote, end: closeQuote + 1, color: C_DIM });
+  }
+
+  // 0b. Syslog (RFC 3164) — <priority>timestamp hostname program[pid]: message
+  const slm = RE_SYSLOG.exec(text);
+  if (slm) {
+    // Priority <NNN> → dim
+    intervals.push({ start: 0, end: slm[1]!.length, color: C_DIM });
+
+    // Timestamp → dim
+    const tsOff = slm[1]!.length;
+    intervals.push({
+      start: tsOff,
+      end: tsOff + slm[2]!.length,
+      color: C_DIM,
+    });
+
+    // Hostname → number color (same as IPs/hostnames)
+    const hostOff = tsOff + slm[2]!.length + 1; // +1 for space
+    intervals.push({
+      start: hostOff,
+      end: hostOff + slm[3]!.length,
+      color: C_NUMBER,
+    });
+
+    // Program name → key color (copper)
+    const progOff = hostOff + slm[3]!.length + 1; // +1 for space
+    intervals.push({
+      start: progOff,
+      end: progOff + slm[4]!.length,
+      color: C_KEY,
+    });
+
+    // PID if present → number color
+    if (slm[5]) {
+      const pidOff = progOff + slm[4]!.length + 1; // +1 for [
+      intervals.push({
+        start: pidOff,
+        end: pidOff + slm[5].length,
+        color: C_NUMBER,
+      });
+      // Dim the brackets
+      intervals.push({
+        start: pidOff - 1,
+        end: pidOff,
+        color: C_DIM,
+      });
+      intervals.push({
+        start: pidOff + slm[5].length,
+        end: pidOff + slm[5].length + 1,
+        color: C_DIM,
+      });
+    }
   }
 
   // 1. Severity keywords.
