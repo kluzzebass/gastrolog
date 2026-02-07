@@ -52,6 +52,12 @@ const (
 	// ConfigServiceDeleteRotationPolicyProcedure is the fully-qualified name of the ConfigService's
 	// DeleteRotationPolicy RPC.
 	ConfigServiceDeleteRotationPolicyProcedure = "/gastrolog.v1.ConfigService/DeleteRotationPolicy"
+	// ConfigServicePutRetentionPolicyProcedure is the fully-qualified name of the ConfigService's
+	// PutRetentionPolicy RPC.
+	ConfigServicePutRetentionPolicyProcedure = "/gastrolog.v1.ConfigService/PutRetentionPolicy"
+	// ConfigServiceDeleteRetentionPolicyProcedure is the fully-qualified name of the ConfigService's
+	// DeleteRetentionPolicy RPC.
+	ConfigServiceDeleteRetentionPolicyProcedure = "/gastrolog.v1.ConfigService/DeleteRetentionPolicy"
 	// ConfigServicePutStoreProcedure is the fully-qualified name of the ConfigService's PutStore RPC.
 	ConfigServicePutStoreProcedure = "/gastrolog.v1.ConfigService/PutStore"
 	// ConfigServiceDeleteStoreProcedure is the fully-qualified name of the ConfigService's DeleteStore
@@ -81,6 +87,10 @@ type ConfigServiceClient interface {
 	PutRotationPolicy(context.Context, *connect.Request[v1.PutRotationPolicyRequest]) (*connect.Response[v1.PutRotationPolicyResponse], error)
 	// DeleteRotationPolicy removes a rotation policy.
 	DeleteRotationPolicy(context.Context, *connect.Request[v1.DeleteRotationPolicyRequest]) (*connect.Response[v1.DeleteRotationPolicyResponse], error)
+	// PutRetentionPolicy creates or updates a retention policy.
+	PutRetentionPolicy(context.Context, *connect.Request[v1.PutRetentionPolicyRequest]) (*connect.Response[v1.PutRetentionPolicyResponse], error)
+	// DeleteRetentionPolicy removes a retention policy.
+	DeleteRetentionPolicy(context.Context, *connect.Request[v1.DeleteRetentionPolicyRequest]) (*connect.Response[v1.DeleteRetentionPolicyResponse], error)
 	// PutStore creates or updates a store.
 	PutStore(context.Context, *connect.Request[v1.PutStoreRequest]) (*connect.Response[v1.PutStoreResponse], error)
 	// DeleteStore removes a store (must be empty).
@@ -144,6 +154,18 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("DeleteRotationPolicy")),
 			connect.WithClientOptions(opts...),
 		),
+		putRetentionPolicy: connect.NewClient[v1.PutRetentionPolicyRequest, v1.PutRetentionPolicyResponse](
+			httpClient,
+			baseURL+ConfigServicePutRetentionPolicyProcedure,
+			connect.WithSchema(configServiceMethods.ByName("PutRetentionPolicy")),
+			connect.WithClientOptions(opts...),
+		),
+		deleteRetentionPolicy: connect.NewClient[v1.DeleteRetentionPolicyRequest, v1.DeleteRetentionPolicyResponse](
+			httpClient,
+			baseURL+ConfigServiceDeleteRetentionPolicyProcedure,
+			connect.WithSchema(configServiceMethods.ByName("DeleteRetentionPolicy")),
+			connect.WithClientOptions(opts...),
+		),
 		putStore: connect.NewClient[v1.PutStoreRequest, v1.PutStoreResponse](
 			httpClient,
 			baseURL+ConfigServicePutStoreProcedure,
@@ -173,17 +195,19 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 
 // configServiceClient implements ConfigServiceClient.
 type configServiceClient struct {
-	getConfig            *connect.Client[v1.GetConfigRequest, v1.GetConfigResponse]
-	listIngesters        *connect.Client[v1.ListIngestersRequest, v1.ListIngestersResponse]
-	getIngesterStatus    *connect.Client[v1.GetIngesterStatusRequest, v1.GetIngesterStatusResponse]
-	putFilter            *connect.Client[v1.PutFilterRequest, v1.PutFilterResponse]
-	deleteFilter         *connect.Client[v1.DeleteFilterRequest, v1.DeleteFilterResponse]
-	putRotationPolicy    *connect.Client[v1.PutRotationPolicyRequest, v1.PutRotationPolicyResponse]
-	deleteRotationPolicy *connect.Client[v1.DeleteRotationPolicyRequest, v1.DeleteRotationPolicyResponse]
-	putStore             *connect.Client[v1.PutStoreRequest, v1.PutStoreResponse]
-	deleteStore          *connect.Client[v1.DeleteStoreRequest, v1.DeleteStoreResponse]
-	putIngester          *connect.Client[v1.PutIngesterRequest, v1.PutIngesterResponse]
-	deleteIngester       *connect.Client[v1.DeleteIngesterRequest, v1.DeleteIngesterResponse]
+	getConfig             *connect.Client[v1.GetConfigRequest, v1.GetConfigResponse]
+	listIngesters         *connect.Client[v1.ListIngestersRequest, v1.ListIngestersResponse]
+	getIngesterStatus     *connect.Client[v1.GetIngesterStatusRequest, v1.GetIngesterStatusResponse]
+	putFilter             *connect.Client[v1.PutFilterRequest, v1.PutFilterResponse]
+	deleteFilter          *connect.Client[v1.DeleteFilterRequest, v1.DeleteFilterResponse]
+	putRotationPolicy     *connect.Client[v1.PutRotationPolicyRequest, v1.PutRotationPolicyResponse]
+	deleteRotationPolicy  *connect.Client[v1.DeleteRotationPolicyRequest, v1.DeleteRotationPolicyResponse]
+	putRetentionPolicy    *connect.Client[v1.PutRetentionPolicyRequest, v1.PutRetentionPolicyResponse]
+	deleteRetentionPolicy *connect.Client[v1.DeleteRetentionPolicyRequest, v1.DeleteRetentionPolicyResponse]
+	putStore              *connect.Client[v1.PutStoreRequest, v1.PutStoreResponse]
+	deleteStore           *connect.Client[v1.DeleteStoreRequest, v1.DeleteStoreResponse]
+	putIngester           *connect.Client[v1.PutIngesterRequest, v1.PutIngesterResponse]
+	deleteIngester        *connect.Client[v1.DeleteIngesterRequest, v1.DeleteIngesterResponse]
 }
 
 // GetConfig calls gastrolog.v1.ConfigService.GetConfig.
@@ -219,6 +243,16 @@ func (c *configServiceClient) PutRotationPolicy(ctx context.Context, req *connec
 // DeleteRotationPolicy calls gastrolog.v1.ConfigService.DeleteRotationPolicy.
 func (c *configServiceClient) DeleteRotationPolicy(ctx context.Context, req *connect.Request[v1.DeleteRotationPolicyRequest]) (*connect.Response[v1.DeleteRotationPolicyResponse], error) {
 	return c.deleteRotationPolicy.CallUnary(ctx, req)
+}
+
+// PutRetentionPolicy calls gastrolog.v1.ConfigService.PutRetentionPolicy.
+func (c *configServiceClient) PutRetentionPolicy(ctx context.Context, req *connect.Request[v1.PutRetentionPolicyRequest]) (*connect.Response[v1.PutRetentionPolicyResponse], error) {
+	return c.putRetentionPolicy.CallUnary(ctx, req)
+}
+
+// DeleteRetentionPolicy calls gastrolog.v1.ConfigService.DeleteRetentionPolicy.
+func (c *configServiceClient) DeleteRetentionPolicy(ctx context.Context, req *connect.Request[v1.DeleteRetentionPolicyRequest]) (*connect.Response[v1.DeleteRetentionPolicyResponse], error) {
+	return c.deleteRetentionPolicy.CallUnary(ctx, req)
 }
 
 // PutStore calls gastrolog.v1.ConfigService.PutStore.
@@ -257,6 +291,10 @@ type ConfigServiceHandler interface {
 	PutRotationPolicy(context.Context, *connect.Request[v1.PutRotationPolicyRequest]) (*connect.Response[v1.PutRotationPolicyResponse], error)
 	// DeleteRotationPolicy removes a rotation policy.
 	DeleteRotationPolicy(context.Context, *connect.Request[v1.DeleteRotationPolicyRequest]) (*connect.Response[v1.DeleteRotationPolicyResponse], error)
+	// PutRetentionPolicy creates or updates a retention policy.
+	PutRetentionPolicy(context.Context, *connect.Request[v1.PutRetentionPolicyRequest]) (*connect.Response[v1.PutRetentionPolicyResponse], error)
+	// DeleteRetentionPolicy removes a retention policy.
+	DeleteRetentionPolicy(context.Context, *connect.Request[v1.DeleteRetentionPolicyRequest]) (*connect.Response[v1.DeleteRetentionPolicyResponse], error)
 	// PutStore creates or updates a store.
 	PutStore(context.Context, *connect.Request[v1.PutStoreRequest]) (*connect.Response[v1.PutStoreResponse], error)
 	// DeleteStore removes a store (must be empty).
@@ -316,6 +354,18 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("DeleteRotationPolicy")),
 		connect.WithHandlerOptions(opts...),
 	)
+	configServicePutRetentionPolicyHandler := connect.NewUnaryHandler(
+		ConfigServicePutRetentionPolicyProcedure,
+		svc.PutRetentionPolicy,
+		connect.WithSchema(configServiceMethods.ByName("PutRetentionPolicy")),
+		connect.WithHandlerOptions(opts...),
+	)
+	configServiceDeleteRetentionPolicyHandler := connect.NewUnaryHandler(
+		ConfigServiceDeleteRetentionPolicyProcedure,
+		svc.DeleteRetentionPolicy,
+		connect.WithSchema(configServiceMethods.ByName("DeleteRetentionPolicy")),
+		connect.WithHandlerOptions(opts...),
+	)
 	configServicePutStoreHandler := connect.NewUnaryHandler(
 		ConfigServicePutStoreProcedure,
 		svc.PutStore,
@@ -356,6 +406,10 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServicePutRotationPolicyHandler.ServeHTTP(w, r)
 		case ConfigServiceDeleteRotationPolicyProcedure:
 			configServiceDeleteRotationPolicyHandler.ServeHTTP(w, r)
+		case ConfigServicePutRetentionPolicyProcedure:
+			configServicePutRetentionPolicyHandler.ServeHTTP(w, r)
+		case ConfigServiceDeleteRetentionPolicyProcedure:
+			configServiceDeleteRetentionPolicyHandler.ServeHTTP(w, r)
 		case ConfigServicePutStoreProcedure:
 			configServicePutStoreHandler.ServeHTTP(w, r)
 		case ConfigServiceDeleteStoreProcedure:
@@ -399,6 +453,14 @@ func (UnimplementedConfigServiceHandler) PutRotationPolicy(context.Context, *con
 
 func (UnimplementedConfigServiceHandler) DeleteRotationPolicy(context.Context, *connect.Request[v1.DeleteRotationPolicyRequest]) (*connect.Response[v1.DeleteRotationPolicyResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.DeleteRotationPolicy is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) PutRetentionPolicy(context.Context, *connect.Request[v1.PutRetentionPolicyRequest]) (*connect.Response[v1.PutRetentionPolicyResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.PutRetentionPolicy is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) DeleteRetentionPolicy(context.Context, *connect.Request[v1.DeleteRetentionPolicyRequest]) (*connect.Response[v1.DeleteRetentionPolicyResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.DeleteRetentionPolicy is not implemented"))
 }
 
 func (UnimplementedConfigServiceHandler) PutStore(context.Context, *connect.Request[v1.PutStoreRequest]) (*connect.Response[v1.PutStoreResponse], error) {

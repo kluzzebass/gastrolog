@@ -15,11 +15,6 @@ type Config struct {
 	// If nil, defaults to a record count policy of 10000 records.
 	RotationPolicy chunk.RotationPolicy
 
-	// MaxChunks limits the number of chunks kept in memory.
-	// When exceeded, the oldest sealed chunks are evicted.
-	// 0 means unlimited.
-	MaxChunks int
-
 	Now       func() time.Time
 	MetaStore chunk.MetaStore
 
@@ -111,6 +106,7 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 	offset := uint64(len(m.active.records))
 	m.active.records = append(m.active.records, record)
 	m.active.size = int64(len(m.active.records))
+	m.active.meta.Bytes = m.active.size
 	m.updateMetaLocked(record.WriteTS, m.active.size)
 
 	if err := m.cfg.MetaStore.Save(m.active.meta); err != nil {
@@ -201,13 +197,6 @@ func (m *Manager) openLocked() error {
 		createdAt: m.cfg.Now(),
 	}
 	m.chunks = append(m.chunks, m.active)
-
-	// Evict oldest chunks if limit exceeded.
-	if m.cfg.MaxChunks > 0 && len(m.chunks) > m.cfg.MaxChunks {
-		evict := len(m.chunks) - m.cfg.MaxChunks
-		m.logger.Info("evicting chunks", "count", evict, "maxChunks", m.cfg.MaxChunks)
-		m.chunks = m.chunks[evict:]
-	}
 
 	return nil
 }
@@ -300,6 +289,27 @@ func (m *Manager) ReadWriteTimestamps(id chunk.ChunkID, positions []uint64) ([]t
 	}
 
 	return results, nil
+}
+
+// Delete removes a sealed chunk from memory.
+// Returns ErrActiveChunk if the chunk is the current active chunk.
+// Returns ErrChunkNotFound if the chunk does not exist.
+func (m *Manager) Delete(id chunk.ChunkID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.active != nil && m.active.meta.ID == id {
+		return chunk.ErrActiveChunk
+	}
+
+	for i, state := range m.chunks {
+		if state.meta.ID == id {
+			m.chunks = append(m.chunks[:i], m.chunks[i+1:]...)
+			return nil
+		}
+	}
+
+	return chunk.ErrChunkNotFound
 }
 
 // SetRotationPolicy updates the rotation policy for future appends.

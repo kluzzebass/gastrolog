@@ -60,6 +60,9 @@ func (s *ConfigServer) GetConfig(
 				if storeCfg.Policy != nil {
 					sc.Policy = *storeCfg.Policy
 				}
+				if storeCfg.Retention != nil {
+					sc.Retention = *storeCfg.Retention
+				}
 				resp.Stores = append(resp.Stores, sc)
 			}
 		}
@@ -89,6 +92,15 @@ func (s *ConfigServer) GetConfig(
 		if err == nil {
 			for id, pol := range policies {
 				resp.RotationPolicies[id] = rotationPolicyToProto(pol)
+			}
+		}
+
+		// Get retention policies from config store.
+		retPolicies, err := s.cfgStore.ListRetentionPolicies(ctx)
+		if err == nil {
+			resp.RetentionPolicies = make(map[string]*apiv1.RetentionPolicyConfig)
+			for id, pol := range retPolicies {
+				resp.RetentionPolicies[id] = retentionPolicyToProto(pol)
 			}
 		}
 	}
@@ -270,6 +282,71 @@ func (s *ConfigServer) DeleteRotationPolicy(
 	return connect.NewResponse(&apiv1.DeleteRotationPolicyResponse{}), nil
 }
 
+// PutRetentionPolicy creates or updates a retention policy.
+func (s *ConfigServer) PutRetentionPolicy(
+	ctx context.Context,
+	req *connect.Request[apiv1.PutRetentionPolicyRequest],
+) (*connect.Response[apiv1.PutRetentionPolicyResponse], error) {
+	if req.Msg.Id == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
+	}
+	if req.Msg.Config == nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("config required"))
+	}
+
+	cfg := protoToRetentionPolicy(req.Msg.Config)
+
+	// Validate by trying to convert.
+	if _, err := cfg.ToRetentionPolicy(); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid retention policy: %w", err))
+	}
+
+	if err := s.cfgStore.PutRetentionPolicy(ctx, req.Msg.Id, cfg); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	// Hot-reload retention policies for running stores.
+	fullCfg, err := s.cfgStore.Load(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload config: %w", err))
+	}
+	if err := s.orch.UpdateRetentionPolicies(fullCfg); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update retention policies: %w", err))
+	}
+
+	return connect.NewResponse(&apiv1.PutRetentionPolicyResponse{}), nil
+}
+
+// DeleteRetentionPolicy removes a retention policy.
+func (s *ConfigServer) DeleteRetentionPolicy(
+	ctx context.Context,
+	req *connect.Request[apiv1.DeleteRetentionPolicyRequest],
+) (*connect.Response[apiv1.DeleteRetentionPolicyResponse], error) {
+	if req.Msg.Id == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
+	}
+
+	// Clear retention reference on any stores that use it.
+	stores, err := s.cfgStore.ListStores(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	for _, st := range stores {
+		if st.Retention != nil && *st.Retention == req.Msg.Id {
+			st.Retention = nil
+			if err := s.cfgStore.PutStore(ctx, st); err != nil {
+				return nil, connect.NewError(connect.CodeInternal, err)
+			}
+		}
+	}
+
+	if err := s.cfgStore.DeleteRetentionPolicy(ctx, req.Msg.Id); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	return connect.NewResponse(&apiv1.DeleteRetentionPolicyResponse{}), nil
+}
+
 // PutStore creates or updates a store.
 func (s *ConfigServer) PutStore(
 	ctx context.Context,
@@ -308,12 +385,15 @@ func (s *ConfigServer) PutStore(
 	}
 
 	if existing {
-		// Reload filters and rotation policies (references may have changed).
+		// Reload filters, rotation policies, and retention policies (references may have changed).
 		if err := s.orch.UpdateFilters(fullCfg); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update filters: %w", err))
 		}
 		if err := s.orch.UpdateRotationPolicies(fullCfg); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update rotation policies: %w", err))
+		}
+		if err := s.orch.UpdateRetentionPolicies(fullCfg); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update retention policies: %w", err))
 		}
 	} else {
 		// Add new store to orchestrator.
@@ -480,6 +560,46 @@ func rotationPolicyToProto(cfg config.RotationPolicyConfig) *apiv1.RotationPolic
 	return p
 }
 
+// protoToRetentionPolicy converts a proto RetentionPolicyConfig to a config.RetentionPolicyConfig.
+func protoToRetentionPolicy(p *apiv1.RetentionPolicyConfig) config.RetentionPolicyConfig {
+	var cfg config.RetentionPolicyConfig
+
+	if p.MaxAgeSeconds > 0 {
+		s := (time.Duration(p.MaxAgeSeconds) * time.Second).String()
+		cfg.MaxAge = &s
+	}
+	if p.MaxBytes > 0 {
+		s := formatBytes(uint64(p.MaxBytes))
+		cfg.MaxBytes = &s
+	}
+	if p.MaxChunks > 0 {
+		cfg.MaxChunks = config.Int64Ptr(p.MaxChunks)
+	}
+
+	return cfg
+}
+
+// retentionPolicyToProto converts a config.RetentionPolicyConfig to a proto RetentionPolicyConfig.
+func retentionPolicyToProto(cfg config.RetentionPolicyConfig) *apiv1.RetentionPolicyConfig {
+	p := &apiv1.RetentionPolicyConfig{}
+
+	if cfg.MaxAge != nil {
+		if d, err := time.ParseDuration(*cfg.MaxAge); err == nil {
+			p.MaxAgeSeconds = int64(d.Seconds())
+		}
+	}
+	if cfg.MaxBytes != nil {
+		if bytes, err := config.ParseBytes(*cfg.MaxBytes); err == nil {
+			p.MaxBytes = int64(bytes)
+		}
+	}
+	if cfg.MaxChunks != nil {
+		p.MaxChunks = *cfg.MaxChunks
+	}
+
+	return p
+}
+
 // protoToStoreConfig converts a proto StoreConfig to a config.StoreConfig.
 func protoToStoreConfig(p *apiv1.StoreConfig) config.StoreConfig {
 	cfg := config.StoreConfig{
@@ -492,6 +612,9 @@ func protoToStoreConfig(p *apiv1.StoreConfig) config.StoreConfig {
 	}
 	if p.Policy != "" {
 		cfg.Policy = config.StringPtr(p.Policy)
+	}
+	if p.Retention != "" {
+		cfg.Retention = config.StringPtr(p.Retention)
 	}
 	return cfg
 }

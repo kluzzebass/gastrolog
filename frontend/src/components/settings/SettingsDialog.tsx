@@ -3,13 +3,15 @@ import { StoresSettings } from "./StoresSettings";
 import { IngestersSettings } from "./IngestersSettings";
 import { FiltersSettings } from "./FiltersSettings";
 import { PoliciesSettings } from "./PoliciesSettings";
+import { RetentionPoliciesSettings } from "./RetentionPoliciesSettings";
 
 export type SettingsTab =
   | "service"
   | "stores"
   | "ingesters"
   | "filters"
-  | "policies";
+  | "policies"
+  | "retention";
 
 interface SettingsDialogProps {
   dark: boolean;
@@ -27,6 +29,7 @@ const tabs: {
   { id: "ingesters", label: "Ingesters", icon: IngesterIcon },
   { id: "filters", label: "Filters", icon: FilterIcon },
   { id: "policies", label: "Rotation Policies", icon: PolicyIcon },
+  { id: "retention", label: "Retention Policies", icon: RetentionIcon },
   { id: "stores", label: "Stores", icon: StorageIcon },
 ];
 
@@ -106,6 +109,7 @@ export function SettingsDialog({
           {tab === "ingesters" && <IngestersSettings dark={dark} />}
           {tab === "filters" && <FiltersSettings dark={dark} />}
           {tab === "policies" && <PoliciesSettings dark={dark} />}
+          {tab === "retention" && <RetentionPoliciesSettings dark={dark} />}
           {tab === "stores" && <StoresSettings dark={dark} />}
         </div>
       </div>
@@ -199,6 +203,25 @@ function IngesterIcon({ className }: { className?: string }) {
       <path d="M8 11l4 4 4-4" />
       <path d="M3 17h18" />
       <path d="M3 21h18" />
+    </svg>
+  );
+}
+
+function RetentionIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 6v6l4 2" />
+      <path d="M4 20l2-2" />
+      <path d="M20 20l-2-2" />
     </svg>
   );
 }

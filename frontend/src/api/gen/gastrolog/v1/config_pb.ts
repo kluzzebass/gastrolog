@@ -61,6 +61,11 @@ export class GetConfigResponse extends Message<GetConfigResponse> {
    */
   filters: { [key: string]: FilterConfig } = {};
 
+  /**
+   * @generated from field: map<string, gastrolog.v1.RetentionPolicyConfig> retention_policies = 5;
+   */
+  retentionPolicies: { [key: string]: RetentionPolicyConfig } = {};
+
   constructor(data?: PartialMessage<GetConfigResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -73,6 +78,7 @@ export class GetConfigResponse extends Message<GetConfigResponse> {
     { no: 2, name: "ingesters", kind: "message", T: IngesterConfig, repeated: true },
     { no: 3, name: "rotation_policies", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "message", T: RotationPolicyConfig} },
     { no: 4, name: "filters", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "message", T: FilterConfig} },
+    { no: 5, name: "retention_policies", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "message", T: RetentionPolicyConfig} },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetConfigResponse {
@@ -121,6 +127,11 @@ export class StoreConfig extends Message<StoreConfig> {
    */
   params: { [key: string]: string } = {};
 
+  /**
+   * @generated from field: string retention = 6;
+   */
+  retention = "";
+
   constructor(data?: PartialMessage<StoreConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -134,6 +145,7 @@ export class StoreConfig extends Message<StoreConfig> {
     { no: 3, name: "filter", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "policy", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 5, name: "params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
+    { no: 6, name: "retention", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): StoreConfig {
@@ -285,6 +297,55 @@ export class RotationPolicyConfig extends Message<RotationPolicyConfig> {
 
   static equals(a: RotationPolicyConfig | PlainMessage<RotationPolicyConfig> | undefined, b: RotationPolicyConfig | PlainMessage<RotationPolicyConfig> | undefined): boolean {
     return proto3.util.equals(RotationPolicyConfig, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.RetentionPolicyConfig
+ */
+export class RetentionPolicyConfig extends Message<RetentionPolicyConfig> {
+  /**
+   * @generated from field: int64 max_age_seconds = 1;
+   */
+  maxAgeSeconds = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 max_bytes = 2;
+   */
+  maxBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 max_chunks = 3;
+   */
+  maxChunks = protoInt64.zero;
+
+  constructor(data?: PartialMessage<RetentionPolicyConfig>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RetentionPolicyConfig";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "max_age_seconds", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 2, name: "max_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "max_chunks", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RetentionPolicyConfig {
+    return new RetentionPolicyConfig().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RetentionPolicyConfig {
+    return new RetentionPolicyConfig().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RetentionPolicyConfig {
+    return new RetentionPolicyConfig().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RetentionPolicyConfig | PlainMessage<RetentionPolicyConfig> | undefined, b: RetentionPolicyConfig | PlainMessage<RetentionPolicyConfig> | undefined): boolean {
+    return proto3.util.equals(RetentionPolicyConfig, a, b);
   }
 }
 
@@ -784,6 +845,148 @@ export class DeleteRotationPolicyResponse extends Message<DeleteRotationPolicyRe
 
   static equals(a: DeleteRotationPolicyResponse | PlainMessage<DeleteRotationPolicyResponse> | undefined, b: DeleteRotationPolicyResponse | PlainMessage<DeleteRotationPolicyResponse> | undefined): boolean {
     return proto3.util.equals(DeleteRotationPolicyResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutRetentionPolicyRequest
+ */
+export class PutRetentionPolicyRequest extends Message<PutRetentionPolicyRequest> {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id = "";
+
+  /**
+   * @generated from field: gastrolog.v1.RetentionPolicyConfig config = 2;
+   */
+  config?: RetentionPolicyConfig;
+
+  constructor(data?: PartialMessage<PutRetentionPolicyRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutRetentionPolicyRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "config", kind: "message", T: RetentionPolicyConfig },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutRetentionPolicyRequest {
+    return new PutRetentionPolicyRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutRetentionPolicyRequest {
+    return new PutRetentionPolicyRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutRetentionPolicyRequest {
+    return new PutRetentionPolicyRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutRetentionPolicyRequest | PlainMessage<PutRetentionPolicyRequest> | undefined, b: PutRetentionPolicyRequest | PlainMessage<PutRetentionPolicyRequest> | undefined): boolean {
+    return proto3.util.equals(PutRetentionPolicyRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutRetentionPolicyResponse
+ */
+export class PutRetentionPolicyResponse extends Message<PutRetentionPolicyResponse> {
+  constructor(data?: PartialMessage<PutRetentionPolicyResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutRetentionPolicyResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutRetentionPolicyResponse {
+    return new PutRetentionPolicyResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutRetentionPolicyResponse {
+    return new PutRetentionPolicyResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutRetentionPolicyResponse {
+    return new PutRetentionPolicyResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutRetentionPolicyResponse | PlainMessage<PutRetentionPolicyResponse> | undefined, b: PutRetentionPolicyResponse | PlainMessage<PutRetentionPolicyResponse> | undefined): boolean {
+    return proto3.util.equals(PutRetentionPolicyResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.DeleteRetentionPolicyRequest
+ */
+export class DeleteRetentionPolicyRequest extends Message<DeleteRetentionPolicyRequest> {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id = "";
+
+  constructor(data?: PartialMessage<DeleteRetentionPolicyRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.DeleteRetentionPolicyRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteRetentionPolicyRequest {
+    return new DeleteRetentionPolicyRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteRetentionPolicyRequest {
+    return new DeleteRetentionPolicyRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteRetentionPolicyRequest {
+    return new DeleteRetentionPolicyRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DeleteRetentionPolicyRequest | PlainMessage<DeleteRetentionPolicyRequest> | undefined, b: DeleteRetentionPolicyRequest | PlainMessage<DeleteRetentionPolicyRequest> | undefined): boolean {
+    return proto3.util.equals(DeleteRetentionPolicyRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.DeleteRetentionPolicyResponse
+ */
+export class DeleteRetentionPolicyResponse extends Message<DeleteRetentionPolicyResponse> {
+  constructor(data?: PartialMessage<DeleteRetentionPolicyResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.DeleteRetentionPolicyResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteRetentionPolicyResponse {
+    return new DeleteRetentionPolicyResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteRetentionPolicyResponse {
+    return new DeleteRetentionPolicyResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteRetentionPolicyResponse {
+    return new DeleteRetentionPolicyResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DeleteRetentionPolicyResponse | PlainMessage<DeleteRetentionPolicyResponse> | undefined, b: DeleteRetentionPolicyResponse | PlainMessage<DeleteRetentionPolicyResponse> | undefined): boolean {
+    return proto3.util.equals(DeleteRetentionPolicyResponse, a, b);
   }
 }
 

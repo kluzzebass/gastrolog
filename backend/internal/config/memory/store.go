@@ -11,11 +11,12 @@ import (
 
 // Store is an in-memory ConfigStore implementation.
 type Store struct {
-	mu               sync.RWMutex
-	filters          map[string]config.FilterConfig
-	rotationPolicies map[string]config.RotationPolicyConfig
-	stores           map[string]config.StoreConfig
-	ingesters        map[string]config.IngesterConfig
+	mu                sync.RWMutex
+	filters           map[string]config.FilterConfig
+	rotationPolicies  map[string]config.RotationPolicyConfig
+	retentionPolicies map[string]config.RetentionPolicyConfig
+	stores            map[string]config.StoreConfig
+	ingesters         map[string]config.IngesterConfig
 }
 
 var _ config.Store = (*Store)(nil)
@@ -23,10 +24,11 @@ var _ config.Store = (*Store)(nil)
 // NewStore creates a new in-memory ConfigStore.
 func NewStore() *Store {
 	return &Store{
-		filters:          make(map[string]config.FilterConfig),
-		rotationPolicies: make(map[string]config.RotationPolicyConfig),
-		stores:           make(map[string]config.StoreConfig),
-		ingesters:        make(map[string]config.IngesterConfig),
+		filters:           make(map[string]config.FilterConfig),
+		rotationPolicies:  make(map[string]config.RotationPolicyConfig),
+		retentionPolicies: make(map[string]config.RetentionPolicyConfig),
+		stores:            make(map[string]config.StoreConfig),
+		ingesters:         make(map[string]config.IngesterConfig),
 	}
 }
 
@@ -36,7 +38,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	if len(s.filters) == 0 && len(s.rotationPolicies) == 0 && len(s.stores) == 0 && len(s.ingesters) == 0 {
+	if len(s.filters) == 0 && len(s.rotationPolicies) == 0 && len(s.retentionPolicies) == 0 && len(s.stores) == 0 && len(s.ingesters) == 0 {
 		return nil, nil
 	}
 
@@ -53,6 +55,13 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 		cfg.RotationPolicies = make(map[string]config.RotationPolicyConfig, len(s.rotationPolicies))
 		for id, rp := range s.rotationPolicies {
 			cfg.RotationPolicies[id] = copyRotationPolicy(rp)
+		}
+	}
+
+	if len(s.retentionPolicies) > 0 {
+		cfg.RetentionPolicies = make(map[string]config.RetentionPolicyConfig, len(s.retentionPolicies))
+		for id, rp := range s.retentionPolicies {
+			cfg.RetentionPolicies[id] = copyRetentionPolicy(rp)
 		}
 	}
 
@@ -152,6 +161,47 @@ func (s *Store) DeleteRotationPolicy(ctx context.Context, id string) error {
 	defer s.mu.Unlock()
 
 	delete(s.rotationPolicies, id)
+	return nil
+}
+
+// Retention policies
+
+func (s *Store) GetRetentionPolicy(ctx context.Context, id string) (*config.RetentionPolicyConfig, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rp, ok := s.retentionPolicies[id]
+	if !ok {
+		return nil, nil
+	}
+	c := copyRetentionPolicy(rp)
+	return &c, nil
+}
+
+func (s *Store) ListRetentionPolicies(ctx context.Context) (map[string]config.RetentionPolicyConfig, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make(map[string]config.RetentionPolicyConfig, len(s.retentionPolicies))
+	for id, rp := range s.retentionPolicies {
+		result[id] = copyRetentionPolicy(rp)
+	}
+	return result, nil
+}
+
+func (s *Store) PutRetentionPolicy(ctx context.Context, id string, cfg config.RetentionPolicyConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.retentionPolicies[id] = copyRetentionPolicy(cfg)
+	return nil
+}
+
+func (s *Store) DeleteRetentionPolicy(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.retentionPolicies, id)
 	return nil
 }
 
@@ -257,6 +307,20 @@ func copyRotationPolicy(rp config.RotationPolicyConfig) config.RotationPolicyCon
 	return c
 }
 
+func copyRetentionPolicy(rp config.RetentionPolicyConfig) config.RetentionPolicyConfig {
+	c := config.RetentionPolicyConfig{}
+	if rp.MaxAge != nil {
+		c.MaxAge = config.StringPtr(*rp.MaxAge)
+	}
+	if rp.MaxBytes != nil {
+		c.MaxBytes = config.StringPtr(*rp.MaxBytes)
+	}
+	if rp.MaxChunks != nil {
+		c.MaxChunks = config.Int64Ptr(*rp.MaxChunks)
+	}
+	return c
+}
+
 func copyStoreConfig(st config.StoreConfig) config.StoreConfig {
 	c := config.StoreConfig{
 		ID:     st.ID,
@@ -268,6 +332,9 @@ func copyStoreConfig(st config.StoreConfig) config.StoreConfig {
 	}
 	if st.Policy != nil {
 		c.Policy = config.StringPtr(*st.Policy)
+	}
+	if st.Retention != nil {
+		c.Retention = config.StringPtr(*st.Retention)
 	}
 	return c
 }

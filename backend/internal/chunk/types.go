@@ -206,6 +206,7 @@ type ChunkMeta struct {
 	StartTS     time.Time
 	EndTS       time.Time
 	RecordCount int64
+	Bytes       int64 // Total on-disk bytes (raw + attr + idx)
 	Sealed      bool
 }
 

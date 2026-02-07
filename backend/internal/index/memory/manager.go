@@ -11,6 +11,7 @@ import (
 
 type IndexStore[T any] interface {
 	Get(chunkID chunk.ChunkID) ([]T, bool)
+	Delete(chunkID chunk.ChunkID)
 }
 
 // AttrIndexStore provides access to all three attribute index types.
@@ -18,6 +19,7 @@ type AttrIndexStore interface {
 	GetKey(chunkID chunk.ChunkID) ([]index.AttrKeyIndexEntry, bool)
 	GetValue(chunkID chunk.ChunkID) ([]index.AttrValueIndexEntry, bool)
 	GetKV(chunkID chunk.ChunkID) ([]index.AttrKVIndexEntry, bool)
+	Delete(chunkID chunk.ChunkID)
 }
 
 // KVIndexStore provides access to all three kv index types.
@@ -25,6 +27,7 @@ type KVIndexStore interface {
 	GetKey(chunkID chunk.ChunkID) ([]index.KVKeyIndexEntry, index.KVIndexStatus, bool)
 	GetValue(chunkID chunk.ChunkID) ([]index.KVValueIndexEntry, index.KVIndexStatus, bool)
 	GetKV(chunkID chunk.ChunkID) ([]index.KVIndexEntry, index.KVIndexStatus, bool)
+	Delete(chunkID chunk.ChunkID)
 }
 
 // Manager manages in-memory index storage.
@@ -67,6 +70,20 @@ func NewManager(
 
 func (m *Manager) BuildIndexes(ctx context.Context, chunkID chunk.ChunkID) error {
 	return m.builder.Build(ctx, chunkID, m.indexers)
+}
+
+// DeleteIndexes removes all index data for the given chunk from memory stores.
+func (m *Manager) DeleteIndexes(chunkID chunk.ChunkID) error {
+	if m.tokenStore != nil {
+		m.tokenStore.Delete(chunkID)
+	}
+	if m.attrStore != nil {
+		m.attrStore.Delete(chunkID)
+	}
+	if m.kvStore != nil {
+		m.kvStore.Delete(chunkID)
+	}
+	return nil
 }
 
 func (m *Manager) OpenTokenIndex(chunkID chunk.ChunkID) (*index.Index[index.TokenIndexEntry], error) {

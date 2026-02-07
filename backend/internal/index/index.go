@@ -142,6 +142,7 @@ func SplitKV(kv string) (key, value string) {
 
 type IndexManager interface {
 	BuildIndexes(ctx context.Context, chunkID chunk.ChunkID) error
+	DeleteIndexes(chunkID chunk.ChunkID) error
 	OpenTokenIndex(chunkID chunk.ChunkID) (*Index[TokenIndexEntry], error)
 	OpenAttrKeyIndex(chunkID chunk.ChunkID) (*Index[AttrKeyIndexEntry], error)
 	OpenAttrValueIndex(chunkID chunk.ChunkID) (*Index[AttrValueIndexEntry], error)

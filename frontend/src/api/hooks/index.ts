@@ -10,6 +10,8 @@ export {
   useDeleteFilter,
   usePutRotationPolicy,
   useDeleteRotationPolicy,
+  usePutRetentionPolicy,
+  useDeleteRetentionPolicy,
   usePutStore,
   useDeleteStore,
   usePutIngester,

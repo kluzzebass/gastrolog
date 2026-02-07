@@ -97,3 +97,9 @@ func (t *Indexer) Get(chunkID chunk.ChunkID) ([]index.TokenIndexEntry, bool) {
 	entries, ok := t.indices[chunkID]
 	return entries, ok
 }
+
+func (t *Indexer) Delete(chunkID chunk.ChunkID) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.indices, chunkID)
+}

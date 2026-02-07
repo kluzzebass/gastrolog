@@ -151,6 +151,45 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 		o.SetFilterSet(NewFilterSet(compiledFilters))
 	}
 
+	// Set up retention runners for stores with retention policies.
+	for _, storeCfg := range cfg.Stores {
+		cm, ok := o.chunks[storeCfg.ID]
+		if !ok {
+			continue
+		}
+		im, ok := o.indexes[storeCfg.ID]
+		if !ok {
+			continue
+		}
+
+		var policy chunk.RetentionPolicy
+
+		if storeCfg.Retention != nil {
+			retCfg, ok := cfg.RetentionPolicies[*storeCfg.Retention]
+			if !ok {
+				return fmt.Errorf("store %s references unknown retention policy: %s", storeCfg.ID, *storeCfg.Retention)
+			}
+			p, err := retCfg.ToRetentionPolicy()
+			if err != nil {
+				return fmt.Errorf("invalid retention policy %s for store %s: %w", *storeCfg.Retention, storeCfg.ID, err)
+			}
+			policy = p
+		}
+
+		if policy != nil {
+			runner := &retentionRunner{
+				storeID:  storeCfg.ID,
+				cm:       cm,
+				im:       im,
+				policy:   policy,
+				interval: defaultRetentionInterval,
+				now:      o.now,
+				logger:   o.logger,
+			}
+			o.retention[storeCfg.ID] = runner
+		}
+	}
+
 	// Create ingesters.
 	for _, recvCfg := range cfg.Ingesters {
 		if ingesterIDs[recvCfg.ID] {

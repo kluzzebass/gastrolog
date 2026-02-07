@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
 	"gastrolog/internal/query"
 )
@@ -197,6 +198,39 @@ func (o *Orchestrator) AddStore(storeCfg config.StoreConfig, cfg *config.Config,
 		return err
 	}
 
+	// Set up retention runner if applicable.
+	var retPolicy chunk.RetentionPolicy
+	if storeCfg.Retention != nil && cfg != nil {
+		retCfg, ok := cfg.RetentionPolicies[*storeCfg.Retention]
+		if ok {
+			p, err := retCfg.ToRetentionPolicy()
+			if err != nil {
+				o.logger.Warn("invalid retention policy for new store", "store", storeCfg.ID, "error", err)
+			} else {
+				retPolicy = p
+			}
+		}
+	}
+	if retPolicy != nil {
+		runner := &retentionRunner{
+			storeID:  storeCfg.ID,
+			cm:       cm,
+			im:       im,
+			policy:   retPolicy,
+			interval: defaultRetentionInterval,
+			now:      o.now,
+			logger:   o.logger,
+		}
+		o.retention[storeCfg.ID] = runner
+
+		// If running, start the runner immediately.
+		if o.running {
+			retCtx, retCancel := context.WithCancel(context.Background())
+			o.retentionCancels[storeCfg.ID] = retCancel
+			o.retentionWg.Go(func() { runner.run(retCtx) })
+		}
+	}
+
 	o.logger.Info("store added", "id", storeCfg.ID, "type", storeCfg.Type, "filter", filterExpr)
 	return nil
 }
@@ -226,6 +260,13 @@ func (o *Orchestrator) RemoveStore(id string) error {
 	if active := cm.Active(); active != nil {
 		return fmt.Errorf("%w: store %s has active chunk", ErrStoreNotEmpty, id)
 	}
+
+	// Stop retention runner if present.
+	if cancel, ok := o.retentionCancels[id]; ok {
+		cancel()
+		delete(o.retentionCancels, id)
+	}
+	delete(o.retention, id)
 
 	// Remove from registries.
 	delete(o.chunks, id)
@@ -356,6 +397,48 @@ func (o *Orchestrator) UpdateRotationPolicies(cfg *config.Config) error {
 		if policy != nil {
 			cm.SetRotationPolicy(policy)
 			o.logger.Info("store rotation policy updated", "store", storeCfg.ID, "policy", *storeCfg.Policy)
+		}
+	}
+
+	return nil
+}
+
+// UpdateRetentionPolicies resolves retention policy references for all registered stores
+// and hot-swaps their retention policies. This is called when a retention policy is
+// created, updated, or deleted to immediately apply changes to running stores.
+//
+// Stores that don't reference any policy keep their current policy.
+// Memory stores without an explicit policy keep their default count(10) policy.
+func (o *Orchestrator) UpdateRetentionPolicies(cfg *config.Config) error {
+	if cfg == nil {
+		return nil
+	}
+
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+
+	for _, storeCfg := range cfg.Stores {
+		runner, ok := o.retention[storeCfg.ID]
+		if !ok {
+			continue // No retention runner for this store.
+		}
+		if storeCfg.Retention == nil {
+			continue // Store doesn't reference a named policy; keep current.
+		}
+
+		policyCfg, ok := cfg.RetentionPolicies[*storeCfg.Retention]
+		if !ok {
+			o.logger.Warn("store references unknown retention policy", "store", storeCfg.ID, "policy", *storeCfg.Retention)
+			continue
+		}
+
+		policy, err := policyCfg.ToRetentionPolicy()
+		if err != nil {
+			return fmt.Errorf("invalid retention policy %s for store %s: %w", *storeCfg.Retention, storeCfg.ID, err)
+		}
+		if policy != nil {
+			runner.setPolicy(policy)
+			o.logger.Info("store retention policy updated", "store", storeCfg.ID, "policy", *storeCfg.Retention)
 		}
 	}
 

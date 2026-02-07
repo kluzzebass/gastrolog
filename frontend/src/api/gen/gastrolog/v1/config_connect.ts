@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteStoreRequest, DeleteStoreResponse, GetConfigRequest, GetConfigResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, ListIngestersRequest, ListIngestersResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutStoreRequest, PutStoreResponse } from "./config_pb.js";
+import { DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteStoreRequest, DeleteStoreResponse, GetConfigRequest, GetConfigResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, ListIngestersRequest, ListIngestersResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutStoreRequest, PutStoreResponse } from "./config_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -89,6 +89,28 @@ export const ConfigService = {
       name: "DeleteRotationPolicy",
       I: DeleteRotationPolicyRequest,
       O: DeleteRotationPolicyResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * PutRetentionPolicy creates or updates a retention policy.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.PutRetentionPolicy
+     */
+    putRetentionPolicy: {
+      name: "PutRetentionPolicy",
+      I: PutRetentionPolicyRequest,
+      O: PutRetentionPolicyResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * DeleteRetentionPolicy removes a retention policy.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.DeleteRetentionPolicy
+     */
+    deleteRetentionPolicy: {
+      name: "DeleteRetentionPolicy",
+      I: DeleteRetentionPolicyRequest,
+      O: DeleteRetentionPolicyResponse,
       kind: MethodKind.Unary,
     },
     /**

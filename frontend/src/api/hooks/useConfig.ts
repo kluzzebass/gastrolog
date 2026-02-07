@@ -67,6 +67,38 @@ export function useDeleteRotationPolicy() {
   });
 }
 
+export function usePutRetentionPolicy() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      id: string;
+      maxAgeSeconds: bigint;
+      maxBytes: bigint;
+      maxChunks: bigint;
+    }) => {
+      await configClient.putRetentionPolicy({
+        id: args.id,
+        config: {
+          maxAgeSeconds: args.maxAgeSeconds,
+          maxBytes: args.maxBytes,
+          maxChunks: args.maxChunks,
+        },
+      });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["config"] }),
+  });
+}
+
+export function useDeleteRetentionPolicy() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await configClient.deleteRetentionPolicy({ id });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["config"] }),
+  });
+}
+
 export function usePutStore() {
   const qc = useQueryClient();
   return useMutation({
@@ -75,6 +107,7 @@ export function usePutStore() {
       type: string;
       filter: string;
       policy: string;
+      retention: string;
       params: Record<string, string>;
     }) => {
       await configClient.putStore({
@@ -83,6 +116,7 @@ export function usePutStore() {
           type: args.type,
           filter: args.filter,
           policy: args.policy,
+          retention: args.retention,
           params: args.params,
         },
       });

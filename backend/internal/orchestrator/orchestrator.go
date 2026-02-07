@@ -92,6 +92,11 @@ type Orchestrator struct {
 	indexCancel context.CancelFunc
 	indexWg     sync.WaitGroup
 
+	// Retention lifecycle.
+	retention        map[string]*retentionRunner   // per-store retention runners
+	retentionCancels map[string]context.CancelFunc // per-runner cancel functions
+	retentionWg      sync.WaitGroup                // tracks retention goroutines
+
 	// Clock for testing.
 	now func() time.Time
 
@@ -131,16 +136,18 @@ func New(cfg Config) *Orchestrator {
 	logger := logging.Default(cfg.Logger).With("component", "orchestrator")
 
 	return &Orchestrator{
-		chunks:          make(map[string]chunk.ChunkManager),
-		indexes:         make(map[string]index.IndexManager),
-		queries:         make(map[string]*query.Engine),
-		ingesters:       make(map[string]Ingester),
-		ingesterCancels: make(map[string]context.CancelFunc),
-		ingestSize:      cfg.IngestChannelSize,
-		now:             cfg.Now,
-		indexCtx:        indexCtx,
-		indexCancel:     indexCancel,
-		logger:          logger,
+		chunks:           make(map[string]chunk.ChunkManager),
+		indexes:          make(map[string]index.IndexManager),
+		queries:          make(map[string]*query.Engine),
+		ingesters:        make(map[string]Ingester),
+		ingesterCancels:  make(map[string]context.CancelFunc),
+		retention:        make(map[string]*retentionRunner),
+		retentionCancels: make(map[string]context.CancelFunc),
+		ingestSize:       cfg.IngestChannelSize,
+		now:              cfg.Now,
+		indexCtx:         indexCtx,
+		indexCancel:      indexCancel,
+		logger:           logger,
 	}
 }
 

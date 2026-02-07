@@ -164,3 +164,11 @@ func (idx *Indexer) GetKV(chunkID chunk.ChunkID) ([]index.AttrKVIndexEntry, bool
 	entries, ok := idx.kvIndex[chunkID]
 	return entries, ok
 }
+
+func (idx *Indexer) Delete(chunkID chunk.ChunkID) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+	delete(idx.keyIndex, chunkID)
+	delete(idx.valIndex, chunkID)
+	delete(idx.kvIndex, chunkID)
+}

@@ -32,6 +32,7 @@ func (f *fakeChunkManager) ReadWriteTimestamps(id chunk.ChunkID, positions []uin
 	return nil, nil
 }
 func (f *fakeChunkManager) SetRotationPolicy(policy chunk.RotationPolicy) {}
+func (f *fakeChunkManager) Delete(id chunk.ChunkID) error                 { return nil }
 
 // fakeIndexManager implements index.IndexManager for testing.
 type fakeIndexManager struct{}
@@ -63,6 +64,7 @@ func (f *fakeIndexManager) OpenKVIndex(chunkID chunk.ChunkID) (*index.Index[inde
 func (f *fakeIndexManager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
 	return true, nil
 }
+func (f *fakeIndexManager) DeleteIndexes(chunkID chunk.ChunkID) error { return nil }
 
 // fakeIngester implements Ingester for testing.
 type fakeIngester struct{}

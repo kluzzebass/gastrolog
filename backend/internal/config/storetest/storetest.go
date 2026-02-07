@@ -170,6 +170,169 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 	})
 
+	// Retention policies
+	t.Run("PutGetRetentionPolicy", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		rp := config.RetentionPolicyConfig{
+			MaxAge:    config.StringPtr("720h"),
+			MaxBytes:  config.StringPtr("10GB"),
+			MaxChunks: config.Int64Ptr(100),
+		}
+
+		if err := s.PutRetentionPolicy(ctx, "default", rp); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+
+		got, err := s.GetRetentionPolicy(ctx, "default")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got == nil {
+			t.Fatal("expected retention policy, got nil")
+		}
+		assertStringPtr(t, "MaxAge", got.MaxAge, "720h")
+		assertStringPtr(t, "MaxBytes", got.MaxBytes, "10GB")
+		assertInt64Ptr(t, "MaxChunks", got.MaxChunks, 100)
+	})
+
+	t.Run("PutRetentionPolicyUpsert", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		rp1 := config.RetentionPolicyConfig{MaxAge: config.StringPtr("24h")}
+		if err := s.PutRetentionPolicy(ctx, "p1", rp1); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+
+		rp2 := config.RetentionPolicyConfig{MaxAge: config.StringPtr("48h")}
+		if err := s.PutRetentionPolicy(ctx, "p1", rp2); err != nil {
+			t.Fatalf("Put upsert: %v", err)
+		}
+
+		got, err := s.GetRetentionPolicy(ctx, "p1")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		assertStringPtr(t, "MaxAge", got.MaxAge, "48h")
+
+		all, err := s.ListRetentionPolicies(ctx)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(all) != 1 {
+			t.Fatalf("expected 1 policy after upsert, got %d", len(all))
+		}
+	})
+
+	t.Run("ListRetentionPolicies", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		all, err := s.ListRetentionPolicies(ctx)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(all) != 0 {
+			t.Fatalf("expected 0, got %d", len(all))
+		}
+
+		if err := s.PutRetentionPolicy(ctx, "a", config.RetentionPolicyConfig{MaxAge: config.StringPtr("1h")}); err != nil {
+			t.Fatalf("Put a: %v", err)
+		}
+		if err := s.PutRetentionPolicy(ctx, "b", config.RetentionPolicyConfig{MaxChunks: config.Int64Ptr(5)}); err != nil {
+			t.Fatalf("Put b: %v", err)
+		}
+
+		all, err = s.ListRetentionPolicies(ctx)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(all) != 2 {
+			t.Fatalf("expected 2, got %d", len(all))
+		}
+		if _, ok := all["a"]; !ok {
+			t.Error("missing policy 'a'")
+		}
+		if _, ok := all["b"]; !ok {
+			t.Error("missing policy 'b'")
+		}
+	})
+
+	t.Run("DeleteRetentionPolicy", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		if err := s.PutRetentionPolicy(ctx, "del", config.RetentionPolicyConfig{MaxAge: config.StringPtr("5m")}); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+
+		if err := s.DeleteRetentionPolicy(ctx, "del"); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+
+		got, err := s.GetRetentionPolicy(ctx, "del")
+		if err != nil {
+			t.Fatalf("Get after delete: %v", err)
+		}
+		if got != nil {
+			t.Fatalf("expected nil after delete, got %+v", got)
+		}
+
+		if err := s.DeleteRetentionPolicy(ctx, "nonexistent"); err != nil {
+			t.Fatalf("Delete non-existent: %v", err)
+		}
+	})
+
+	t.Run("NilRetentionOptionalFields", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		rp := config.RetentionPolicyConfig{}
+		if err := s.PutRetentionPolicy(ctx, "empty", rp); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+
+		got, err := s.GetRetentionPolicy(ctx, "empty")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got == nil {
+			t.Fatal("expected retention policy, got nil")
+		}
+		if got.MaxAge != nil {
+			t.Errorf("expected nil MaxAge, got %v", *got.MaxAge)
+		}
+		if got.MaxBytes != nil {
+			t.Errorf("expected nil MaxBytes, got %v", *got.MaxBytes)
+		}
+		if got.MaxChunks != nil {
+			t.Errorf("expected nil MaxChunks, got %v", *got.MaxChunks)
+		}
+	})
+
+	// Store retention reference
+	t.Run("StoreRetentionField", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		st := config.StoreConfig{
+			ID:        "main",
+			Type:      "file",
+			Retention: config.StringPtr("default-ret"),
+		}
+		if err := s.PutStore(ctx, st); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+
+		got, err := s.GetStore(ctx, "main")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		assertStringPtr(t, "Retention", got.Retention, "default-ret")
+	})
+
 	// Stores
 	t.Run("PutGetStore", func(t *testing.T) {
 		s := newStore(t)

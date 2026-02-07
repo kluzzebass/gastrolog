@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## CRITICAL: DO NOT BUMP FILE VERSIONS OR CREATE MIGRATION CODE!
 
-This project is NOT in production. When changing file formats, just change them. Do not increment version numbers or write backward-compatibility code. Delete old data and start fresh.
+This project is NOT in production. When changing file formats, just change them. Do not increment version numbers or write backward-compatibility code. Delete old data and start fresh. This does NOT apply to migration files.
 
 ## Data Integrity: Facts Before Speculation
 
@@ -43,3 +43,54 @@ See the CLAUDE.md in each directory for stack-specific guidance.
 ## Third-Party Assets
 
 - **Stomach icon** (`frontend/public/favicon.svg`): By [Delapouite](https://delapouite.com/), from [Game-icons.net](https://game-icons.net/1x1/delapouite/stomach.html), licensed under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).
+
+
+## Issue tracking
+
+This project uses **dcat** for issue tracking and **git** for version control. You MUST run `dcat prime` for instructions.
+Then run `dcat list --agent-only` to see the list of issues. Generally we work on bugs first, and always on high priority issues first.
+
+ALWAYS run `dcat update --status in_progress $issueId` when you start working on an issue.
+
+When picking up a child issue, consider whether it can truly be started before the parent is done. Parent-child is organizational, not blocking. If the child genuinely needs the parent to complete first, add an explicit dependency with `dcat dep <child_id> add --depends-on <parent_id>`.
+
+It is okay to work on multiple issues at the same time - just mark all of them as in_progress, and ask the user which one to prioritize if there is a conflict.
+
+If the user brings up a new bug, feature or anything else that warrants changes to the code, first ask if we should create an issue for it before you start working on the code.
+
+When creating a **question** issue (type: question), always draft the title and description first and confirm them with the user before running `dcat create`. Questions capture decisions and context, so the wording matters.
+
+### Issue Status Workflow
+
+Status progression: `open` → `in_progress` → `in_review` → `closed`
+
+When starting work:
+
+```bash
+dcat show $issueId                         # Read full issue details first
+dcat update --status in_progress $issueId  # Then mark as in progress
+```
+
+Always create issue branches, and include the issue ID in the branch name.
+
+When work is complete and ready for user review:
+
+```bash
+dcat update --status in_review $issueId
+```
+
+If changes are needed after review, set back to in_progress:
+
+```bash
+dcat update --status in_progress $issueId
+```
+
+### Closing Issues - IMPORTANT
+
+NEVER close issues without explicit user approval. When work is complete:
+
+1. Set status to `in_review`: `dcat update --status in_review $issueId`
+2. Ask the user to test
+3. Ask if we can close it: "Can I close issue [id] '[title]'?"
+4. Only run `dcat close` after user confirms.
+5. Upon closing, commit and merge the changes.

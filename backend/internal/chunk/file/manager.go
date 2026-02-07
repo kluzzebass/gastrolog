@@ -81,6 +81,7 @@ type chunkMeta struct {
 	startTS     time.Time // WriteTS of first record
 	endTS       time.Time // WriteTS of last record
 	recordCount int64     // Number of records in chunk
+	bytes       int64     // Total on-disk bytes (raw + attr + idx)
 	sealed      bool
 }
 
@@ -90,6 +91,7 @@ func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
 		StartTS:     m.startTS,
 		EndTS:       m.endTS,
 		RecordCount: m.recordCount,
+		Bytes:       m.bytes,
 		Sealed:      m.sealed,
 	}
 }
@@ -243,6 +245,7 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 	m.active.attrOffset += attrLen
 	m.active.recordCount++
 	m.active.meta.recordCount = int64(m.active.recordCount)
+	m.active.meta.bytes = int64(m.active.rawOffset + m.active.attrOffset + m.active.recordCount*IdxEntrySize)
 
 	// Update time bounds.
 	if m.active.meta.startTS.IsZero() {
@@ -547,6 +550,8 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 	rawOffset := uint64(expectedRawSize) - uint64(format.HeaderSize)
 	attrOffset := uint64(expectedAttrSize) - uint64(format.HeaderSize)
 
+	meta.bytes = int64(rawOffset + attrOffset + recordCount*IdxEntrySize)
+
 	m.active = &chunkState{
 		meta:        meta,
 		rawFile:     rawFile,
@@ -606,7 +611,7 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 	firstEntry := DecodeIdxEntry(entryBuf[:])
 	meta.startTS = firstEntry.WriteTS
 
-	// Read last entry for endTS.
+	// Read last entry for endTS and byte totals.
 	lastOffset := IdxFileOffset(recordCount - 1)
 	if _, err := idxFile.Seek(lastOffset, io.SeekStart); err != nil {
 		return nil, err
@@ -616,6 +621,11 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 	}
 	lastEntry := DecodeIdxEntry(entryBuf[:])
 	meta.endTS = lastEntry.WriteTS
+
+	// Derive total bytes: end of raw data + end of attr data + idx entries.
+	rawEnd := int64(lastEntry.RawOffset) + int64(lastEntry.RawSize)
+	attrEnd := int64(lastEntry.AttrOffset) + int64(lastEntry.AttrSize)
+	meta.bytes = rawEnd + attrEnd + int64(recordCount)*int64(IdxEntrySize)
 
 	return meta, nil
 }
@@ -948,6 +958,33 @@ func (m *Manager) ReadWriteTimestamps(id chunk.ChunkID, positions []uint64) ([]t
 	}
 
 	return results, nil
+}
+
+// Delete removes a sealed chunk and its data from disk.
+// Returns ErrActiveChunk if the chunk is the current active chunk.
+// Returns ErrChunkNotFound if the chunk does not exist.
+func (m *Manager) Delete(id chunk.ChunkID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.closed {
+		return ErrManagerClosed
+	}
+
+	if m.active != nil && m.active.meta.id == id {
+		return chunk.ErrActiveChunk
+	}
+
+	if _, ok := m.metas[id]; !ok {
+		return chunk.ErrChunkNotFound
+	}
+
+	if err := os.RemoveAll(m.chunkDir(id)); err != nil {
+		return err
+	}
+
+	delete(m.metas, id)
+	return nil
 }
 
 // SetRotationPolicy updates the rotation policy for future appends.

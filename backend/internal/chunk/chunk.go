@@ -13,6 +13,7 @@ var (
 	ErrNoMoreRecords  = errors.New("no more records")
 	ErrChunkNotSealed = errors.New("chunk is not sealed")
 	ErrChunkNotFound  = errors.New("chunk not found")
+	ErrActiveChunk    = errors.New("cannot delete active chunk")
 )
 
 // ManagerFactory creates a ChunkManager from configuration parameters.
@@ -30,6 +31,7 @@ type ChunkManager interface {
 	Active() *ChunkMeta
 	Meta(id ChunkID) (ChunkMeta, error)
 	List() ([]ChunkMeta, error)
+	Delete(id ChunkID) error
 	OpenCursor(id ChunkID) (RecordCursor, error)
 
 	// FindStartPosition binary searches for the record index at or before the given timestamp.

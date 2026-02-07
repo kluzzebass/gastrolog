@@ -60,6 +60,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 	err := s.db.QueryRowContext(ctx, `
 		SELECT (SELECT count(*) FROM filters)
 		     + (SELECT count(*) FROM rotation_policies)
+		     + (SELECT count(*) FROM retention_policies)
 		     + (SELECT count(*) FROM stores)
 		     + (SELECT count(*) FROM ingesters)
 	`).Scan(&count)
@@ -74,7 +75,11 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	policies, err := s.ListRotationPolicies(ctx)
+	rotationPolicies, err := s.ListRotationPolicies(ctx)
+	if err != nil {
+		return nil, err
+	}
+	retentionPolicies, err := s.ListRetentionPolicies(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -88,10 +93,11 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 	}
 
 	return &config.Config{
-		Filters:          filters,
-		RotationPolicies: policies,
-		Stores:           stores,
-		Ingesters:        ingesters,
+		Filters:           filters,
+		RotationPolicies:  rotationPolicies,
+		RetentionPolicies: retentionPolicies,
+		Stores:            stores,
+		Ingesters:         ingesters,
 	}, nil
 }
 
@@ -215,15 +221,76 @@ func (s *Store) DeleteRotationPolicy(ctx context.Context, id string) error {
 	return nil
 }
 
+// Retention policies
+
+func (s *Store) GetRetentionPolicy(ctx context.Context, id string) (*config.RetentionPolicyConfig, error) {
+	row := s.db.QueryRowContext(ctx,
+		"SELECT max_age, max_bytes, max_chunks FROM retention_policies WHERE retention_policy_id = ?", id)
+
+	var rp config.RetentionPolicyConfig
+	err := row.Scan(&rp.MaxAge, &rp.MaxBytes, &rp.MaxChunks)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get retention policy %q: %w", id, err)
+	}
+	return &rp, nil
+}
+
+func (s *Store) ListRetentionPolicies(ctx context.Context) (map[string]config.RetentionPolicyConfig, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT retention_policy_id, max_age, max_bytes, max_chunks FROM retention_policies")
+	if err != nil {
+		return nil, fmt.Errorf("list retention policies: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]config.RetentionPolicyConfig)
+	for rows.Next() {
+		var id string
+		var rp config.RetentionPolicyConfig
+		if err := rows.Scan(&id, &rp.MaxAge, &rp.MaxBytes, &rp.MaxChunks); err != nil {
+			return nil, fmt.Errorf("scan retention policy: %w", err)
+		}
+		result[id] = rp
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) PutRetentionPolicy(ctx context.Context, id string, rp config.RetentionPolicyConfig) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO retention_policies (retention_policy_id, max_age, max_bytes, max_chunks)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(retention_policy_id) DO UPDATE SET
+			max_age = excluded.max_age,
+			max_bytes = excluded.max_bytes,
+			max_chunks = excluded.max_chunks
+	`, id, rp.MaxAge, rp.MaxBytes, rp.MaxChunks)
+	if err != nil {
+		return fmt.Errorf("put retention policy %q: %w", id, err)
+	}
+	return nil
+}
+
+func (s *Store) DeleteRetentionPolicy(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx,
+		"DELETE FROM retention_policies WHERE retention_policy_id = ?", id)
+	if err != nil {
+		return fmt.Errorf("delete retention policy %q: %w", id, err)
+	}
+	return nil
+}
+
 // Stores
 
 func (s *Store) GetStore(ctx context.Context, id string) (*config.StoreConfig, error) {
 	row := s.db.QueryRowContext(ctx,
-		"SELECT store_id, type, filter, policy, params FROM stores WHERE store_id = ?", id)
+		"SELECT store_id, type, filter, policy, retention, params FROM stores WHERE store_id = ?", id)
 
 	var st config.StoreConfig
 	var paramsJSON *string
-	err := row.Scan(&st.ID, &st.Type, &st.Filter, &st.Policy, &paramsJSON)
+	err := row.Scan(&st.ID, &st.Type, &st.Filter, &st.Policy, &st.Retention, &paramsJSON)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -240,7 +307,7 @@ func (s *Store) GetStore(ctx context.Context, id string) (*config.StoreConfig, e
 
 func (s *Store) ListStores(ctx context.Context) ([]config.StoreConfig, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT store_id, type, filter, policy, params FROM stores")
+		"SELECT store_id, type, filter, policy, retention, params FROM stores")
 	if err != nil {
 		return nil, fmt.Errorf("list stores: %w", err)
 	}
@@ -250,7 +317,7 @@ func (s *Store) ListStores(ctx context.Context) ([]config.StoreConfig, error) {
 	for rows.Next() {
 		var st config.StoreConfig
 		var paramsJSON *string
-		if err := rows.Scan(&st.ID, &st.Type, &st.Filter, &st.Policy, &paramsJSON); err != nil {
+		if err := rows.Scan(&st.ID, &st.Type, &st.Filter, &st.Policy, &st.Retention, &paramsJSON); err != nil {
 			return nil, fmt.Errorf("scan store: %w", err)
 		}
 		if paramsJSON != nil {
@@ -275,14 +342,15 @@ func (s *Store) PutStore(ctx context.Context, st config.StoreConfig) error {
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO stores (store_id, type, filter, policy, params)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO stores (store_id, type, filter, policy, retention, params)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(store_id) DO UPDATE SET
 			type = excluded.type,
 			filter = excluded.filter,
 			policy = excluded.policy,
+			retention = excluded.retention,
 			params = excluded.params
-	`, st.ID, st.Type, st.Filter, st.Policy, paramsJSON)
+	`, st.ID, st.Type, st.Filter, st.Policy, st.Retention, paramsJSON)
 	if err != nil {
 		return fmt.Errorf("put store %q: %w", st.ID, err)
 	}

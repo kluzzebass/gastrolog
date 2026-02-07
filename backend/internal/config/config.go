@@ -50,6 +50,12 @@ type Store interface {
 	PutRotationPolicy(ctx context.Context, id string, cfg RotationPolicyConfig) error
 	DeleteRotationPolicy(ctx context.Context, id string) error
 
+	// Retention policies
+	GetRetentionPolicy(ctx context.Context, id string) (*RetentionPolicyConfig, error)
+	ListRetentionPolicies(ctx context.Context) (map[string]RetentionPolicyConfig, error)
+	PutRetentionPolicy(ctx context.Context, id string, cfg RetentionPolicyConfig) error
+	DeleteRetentionPolicy(ctx context.Context, id string) error
+
 	// Stores
 	GetStore(ctx context.Context, id string) (*StoreConfig, error)
 	ListStores(ctx context.Context) ([]StoreConfig, error)
@@ -66,10 +72,11 @@ type Store interface {
 // Config describes the desired system shape.
 // It is declarative: it defines what should exist, not how to create it.
 type Config struct {
-	Filters          map[string]FilterConfig         `json:"filters,omitempty"`
-	RotationPolicies map[string]RotationPolicyConfig `json:"rotationPolicies,omitempty"`
-	Ingesters        []IngesterConfig                `json:"ingesters,omitempty"`
-	Stores           []StoreConfig                   `json:"stores,omitempty"`
+	Filters           map[string]FilterConfig          `json:"filters,omitempty"`
+	RotationPolicies  map[string]RotationPolicyConfig  `json:"rotationPolicies,omitempty"`
+	RetentionPolicies map[string]RetentionPolicyConfig `json:"retentionPolicies,omitempty"`
+	Ingesters         []IngesterConfig                 `json:"ingesters,omitempty"`
+	Stores            []StoreConfig                    `json:"stores,omitempty"`
 }
 
 // FilterConfig defines a named filter expression.
@@ -106,6 +113,64 @@ func StringPtr(s string) *string { return &s }
 
 // Int64Ptr returns a pointer to n.
 func Int64Ptr(n int64) *int64 { return &n }
+
+// RetentionPolicyConfig defines when sealed chunks should be deleted.
+// Multiple conditions can be specified; a chunk is deleted if ANY condition is met.
+// All fields are optional (nil = not set).
+type RetentionPolicyConfig struct {
+	// MaxAge deletes sealed chunks older than this duration.
+	// Uses Go duration format (e.g., "720h", "24h").
+	MaxAge *string `json:"maxAge,omitempty"`
+
+	// MaxBytes deletes oldest sealed chunks when total store size exceeds this value.
+	// Supports suffixes: B, KB, MB, GB (e.g., "10GB", "500MB").
+	MaxBytes *string `json:"maxBytes,omitempty"`
+
+	// MaxChunks keeps at most this many sealed chunks, deleting the oldest.
+	MaxChunks *int64 `json:"maxChunks,omitempty"`
+}
+
+// ToRetentionPolicy converts a RetentionPolicyConfig to a chunk.RetentionPolicy.
+// Returns nil if no conditions are specified.
+func (c RetentionPolicyConfig) ToRetentionPolicy() (chunk.RetentionPolicy, error) {
+	var policies []chunk.RetentionPolicy
+
+	if c.MaxAge != nil {
+		d, err := time.ParseDuration(*c.MaxAge)
+		if err != nil {
+			return nil, fmt.Errorf("invalid maxAge: %w", err)
+		}
+		if d <= 0 {
+			return nil, fmt.Errorf("invalid maxAge: must be positive")
+		}
+		policies = append(policies, chunk.NewTTLRetentionPolicy(d))
+	}
+
+	if c.MaxBytes != nil {
+		bytes, err := ParseBytes(*c.MaxBytes)
+		if err != nil {
+			return nil, fmt.Errorf("invalid maxBytes: %w", err)
+		}
+		policies = append(policies, chunk.NewSizeRetentionPolicy(int64(bytes)))
+	}
+
+	if c.MaxChunks != nil {
+		if *c.MaxChunks <= 0 {
+			return nil, fmt.Errorf("invalid maxChunks: must be positive")
+		}
+		policies = append(policies, chunk.NewCountRetentionPolicy(int(*c.MaxChunks)))
+	}
+
+	if len(policies) == 0 {
+		return nil, nil
+	}
+
+	if len(policies) == 1 {
+		return policies[0], nil
+	}
+
+	return chunk.NewCompositeRetentionPolicy(policies...), nil
+}
 
 // IngesterConfig describes a ingester to instantiate.
 type IngesterConfig struct {
@@ -212,6 +277,10 @@ type StoreConfig struct {
 	// Policy references a named rotation policy from Config.RotationPolicies.
 	// Nil means no policy (type-specific default).
 	Policy *string `json:"policy,omitempty"`
+
+	// Retention references a named retention policy from Config.RetentionPolicies.
+	// Nil means no retention policy (chunks are kept indefinitely, or type-specific default).
+	Retention *string `json:"retention,omitempty"`
 
 	// Params contains type-specific configuration as opaque string key-value pairs.
 	// Parsing and validation are the responsibility of the factory that consumes

@@ -39,6 +39,15 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		o.logger.Warn("no filters configured, messages will fan out to all stores")
 	}
 
+	// Launch retention runners.
+	for id, runner := range o.retention {
+		id, runner := id, runner
+		retCtx, retCancel := context.WithCancel(ctx)
+		o.retentionCancels[id] = retCancel
+		o.logger.Info("starting retention runner", "store", id)
+		o.retentionWg.Go(func() { runner.run(retCtx) })
+	}
+
 	// Launch ingester goroutines with per-ingester contexts.
 	for id, r := range o.ingesters {
 		id, r := id, r // capture for closure
@@ -72,6 +81,10 @@ func (o *Orchestrator) Stop() error {
 	for _, recvCancel := range o.ingesterCancels {
 		recvCancel()
 	}
+	// Cancel all retention runners.
+	for _, retCancel := range o.retentionCancels {
+		retCancel()
+	}
 	o.mu.Unlock()
 
 	// Cancel main context (for ingest loop).
@@ -90,6 +103,9 @@ func (o *Orchestrator) Stop() error {
 	// Wait for index builds to exit.
 	o.indexWg.Wait()
 
+	// Wait for retention runners to exit.
+	o.retentionWg.Wait()
+
 	o.mu.Lock()
 	o.running = false
 	o.cancel = nil
@@ -99,6 +115,8 @@ func (o *Orchestrator) Stop() error {
 	o.indexCancel = nil
 	// Clear per-ingester cancel functions.
 	o.ingesterCancels = make(map[string]context.CancelFunc)
+	// Clear per-retention cancel functions.
+	o.retentionCancels = make(map[string]context.CancelFunc)
 	o.mu.Unlock()
 
 	return nil

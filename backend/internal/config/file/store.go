@@ -147,6 +147,9 @@ func (s *Store) loadOrEmpty() (*config.Config, error) {
 	if cfg.RotationPolicies == nil {
 		cfg.RotationPolicies = make(map[string]config.RotationPolicyConfig)
 	}
+	if cfg.RetentionPolicies == nil {
+		cfg.RetentionPolicies = make(map[string]config.RetentionPolicyConfig)
+	}
 	return cfg, nil
 }
 
@@ -245,6 +248,55 @@ func (s *Store) DeleteRotationPolicy(ctx context.Context, id string) error {
 		return err
 	}
 	delete(cfg.RotationPolicies, id)
+	return s.flush(cfg)
+}
+
+// Retention policies
+
+func (s *Store) GetRetentionPolicy(ctx context.Context, id string) (*config.RetentionPolicyConfig, error) {
+	cfg, err := s.load()
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil {
+		return nil, nil
+	}
+	rp, ok := cfg.RetentionPolicies[id]
+	if !ok {
+		return nil, nil
+	}
+	return &rp, nil
+}
+
+func (s *Store) ListRetentionPolicies(ctx context.Context) (map[string]config.RetentionPolicyConfig, error) {
+	cfg, err := s.load()
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil {
+		return make(map[string]config.RetentionPolicyConfig), nil
+	}
+	if cfg.RetentionPolicies == nil {
+		return make(map[string]config.RetentionPolicyConfig), nil
+	}
+	return cfg.RetentionPolicies, nil
+}
+
+func (s *Store) PutRetentionPolicy(ctx context.Context, id string, rp config.RetentionPolicyConfig) error {
+	cfg, err := s.loadOrEmpty()
+	if err != nil {
+		return err
+	}
+	cfg.RetentionPolicies[id] = rp
+	return s.flush(cfg)
+}
+
+func (s *Store) DeleteRetentionPolicy(ctx context.Context, id string) error {
+	cfg, err := s.loadOrEmpty()
+	if err != nil {
+		return err
+	}
+	delete(cfg.RetentionPolicies, id)
 	return s.flush(cfg)
 }
 

@@ -13,12 +13,16 @@ func DefaultConfig() *Config {
 		RotationPolicies: map[string]RotationPolicyConfig{
 			"default": {MaxAge: StringPtr("5m")},
 		},
+		RetentionPolicies: map[string]RetentionPolicyConfig{
+			"default": {MaxChunks: Int64Ptr(10)},
+		},
 		Stores: []StoreConfig{
 			{
-				ID:     "default",
-				Type:   "memory",
-				Filter: StringPtr("catch-all"),
-				Policy: StringPtr("default"),
+				ID:        "default",
+				Type:      "memory",
+				Filter:    StringPtr("catch-all"),
+				Policy:    StringPtr("default"),
+				Retention: StringPtr("default"),
 			},
 		},
 		Ingesters: []IngesterConfig{
@@ -48,6 +52,11 @@ func Bootstrap(ctx context.Context, store Store) error {
 	}
 	for id, rp := range cfg.RotationPolicies {
 		if err := store.PutRotationPolicy(ctx, id, rp); err != nil {
+			return err
+		}
+	}
+	for id, rp := range cfg.RetentionPolicies {
+		if err := store.PutRetentionPolicy(ctx, id, rp); err != nil {
 			return err
 		}
 	}

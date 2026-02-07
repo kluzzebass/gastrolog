@@ -19,7 +19,12 @@ export function StoresSettings({ dark }: { dark: boolean }) {
   const [edits, setEdits] = useState<
     Record<
       string,
-      { filter: string; policy: string; params: Record<string, string> }
+      {
+        filter: string;
+        policy: string;
+        retention: string;
+        params: Record<string, string>;
+      }
     >
   >({});
 
@@ -28,10 +33,12 @@ export function StoresSettings({ dark }: { dark: boolean }) {
   const [newType, setNewType] = useState("memory");
   const [newFilter, setNewFilter] = useState("");
   const [newPolicy, setNewPolicy] = useState("");
+  const [newRetention, setNewRetention] = useState("");
   const [newParams, setNewParams] = useState<Record<string, string>>({});
 
   const stores = config?.stores ?? [];
   const policies = config?.rotationPolicies ?? {};
+  const retentionPolicies = config?.retentionPolicies ?? {};
   const filters = config?.filters ?? {};
 
   const filterOptions = [
@@ -44,10 +51,16 @@ export function StoresSettings({ dark }: { dark: boolean }) {
     ...Object.keys(policies).map((id) => ({ value: id, label: id })),
   ];
 
+  const retentionOptions = [
+    { value: "", label: "(none)" },
+    ...Object.keys(retentionPolicies).map((id) => ({ value: id, label: id })),
+  ];
+
   const getEdit = (store: {
     id: string;
     filter: string;
     policy: string;
+    retention: string;
     params: Record<string, string>;
   }) => {
     const existing = edits[store.id];
@@ -55,6 +68,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
     return {
       filter: store.filter,
       policy: store.policy,
+      retention: store.retention,
       params: { ...store.params },
     };
   };
@@ -64,6 +78,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
     patch: Partial<{
       filter: string;
       policy: string;
+      retention: string;
       params: Record<string, string>;
     }>,
   ) => {
@@ -84,6 +99,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
         type,
         filter: edit.filter,
         policy: edit.policy,
+        retention: edit.retention,
         params: edit.params,
       });
       setEdits((prev) => {
@@ -117,6 +133,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
         type: newType,
         filter: newFilter,
         policy: newPolicy,
+        retention: newRetention,
         params: newParams,
       });
       addToast(`Store "${newId.trim()}" created`, "info");
@@ -125,6 +142,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
       setNewType("memory");
       setNewFilter("");
       setNewPolicy("");
+      setNewRetention("");
       setNewParams({});
     } catch (err: any) {
       addToast(err.message ?? "Failed to create store", "error");
@@ -186,7 +204,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                   />
                 </FormField>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <FormField label="Filter" dark={dark}>
                   <SelectInput
                     value={newFilter}
@@ -200,6 +218,14 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                     value={newPolicy}
                     onChange={setNewPolicy}
                     options={policyOptions}
+                    dark={dark}
+                  />
+                </FormField>
+                <FormField label="Retention Policy" dark={dark}>
+                  <SelectInput
+                    value={newRetention}
+                    onChange={setNewRetention}
+                    options={retentionOptions}
                     dark={dark}
                   />
                 </FormField>
@@ -237,8 +263,11 @@ export function StoresSettings({ dark }: { dark: boolean }) {
           const edit = getEdit(store);
           const hasPolicy = store.policy && store.policy in policies;
           const hasFilter = store.filter && store.filter in filters;
+          const hasRetention =
+            store.retention && store.retention in retentionPolicies;
           const warnings = [
             ...(!hasPolicy ? ["no rotation policy"] : []),
+            ...(!hasRetention ? ["no retention policy"] : []),
             ...(!hasFilter ? ["no filter"] : []),
           ];
           return (
@@ -262,7 +291,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
               }
             >
               <div className="flex flex-col gap-3">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-3 gap-3">
                   <FormField label="Filter" dark={dark}>
                     <SelectInput
                       value={edit.filter}
@@ -276,6 +305,14 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                       value={edit.policy}
                       onChange={(v) => setEdit(store.id, { policy: v })}
                       options={policyOptions}
+                      dark={dark}
+                    />
+                  </FormField>
+                  <FormField label="Retention Policy" dark={dark}>
+                    <SelectInput
+                      value={edit.retention}
+                      onChange={(v) => setEdit(store.id, { retention: v })}
+                      options={retentionOptions}
                       dark={dark}
                     />
                   </FormField>

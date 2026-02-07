@@ -47,6 +47,51 @@ func (m *Manager) BuildIndexes(ctx context.Context, chunkID chunk.ChunkID) error
 	return m.builder.Build(ctx, chunkID, m.indexers)
 }
 
+// DeleteIndexes removes all index files and temp files for the given chunk.
+func (m *Manager) DeleteIndexes(chunkID chunk.ChunkID) error {
+	// Remove final index files.
+	paths := []string{
+		filetoken.IndexPath(m.dir, chunkID),
+		fileattr.KeyIndexPath(m.dir, chunkID),
+		fileattr.ValueIndexPath(m.dir, chunkID),
+		fileattr.KVIndexPath(m.dir, chunkID),
+		filekv.KeyIndexPath(m.dir, chunkID),
+		filekv.ValueIndexPath(m.dir, chunkID),
+		filekv.KVIndexPath(m.dir, chunkID),
+	}
+
+	for _, path := range paths {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+
+	// Also remove any orphaned temp files.
+	patterns := []string{
+		filetoken.TempFilePattern(m.dir, chunkID),
+		fileattr.KeyTempFilePattern(m.dir, chunkID),
+		fileattr.ValueTempFilePattern(m.dir, chunkID),
+		fileattr.KVTempFilePattern(m.dir, chunkID),
+		filekv.KeyTempFilePattern(m.dir, chunkID),
+		filekv.ValueTempFilePattern(m.dir, chunkID),
+		filekv.KVTempFilePattern(m.dir, chunkID),
+	}
+
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			return err
+		}
+		for _, match := range matches {
+			if err := os.Remove(match); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
 func (m *Manager) OpenTokenIndex(chunkID chunk.ChunkID) (*index.Index[index.TokenIndexEntry], error) {
 	entries, err := filetoken.LoadIndex(m.dir, chunkID)
 	if err != nil {
