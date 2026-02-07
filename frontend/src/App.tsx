@@ -32,6 +32,9 @@ import {
 } from "./components/Sidebar";
 import { ToastProvider, useToast } from "./components/Toast";
 import { SettingsDialog } from "./components/settings/SettingsDialog";
+import { QueryHistory } from "./components/QueryHistory";
+import { useQueryHistory } from "./hooks/useQueryHistory";
+import { ExportButton } from "./components/ExportButton";
 
 export function App() {
   return (
@@ -99,6 +102,9 @@ function AppContent() {
     return () => window.removeEventListener("keydown", handler);
   }, [detailPinned, showPlan]);
 
+  const [showHistory, setShowHistory] = useState(false);
+  const queryHistory = useQueryHistory();
+
   const queryInputRef = useRef<HTMLTextAreaElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const expressionRef = useRef("");
@@ -157,6 +163,8 @@ function AppContent() {
   const {
     records: followRecords,
     isFollowing,
+    reconnecting,
+    reconnectAttempt,
     error: followError,
     follow,
     stop: stopFollow,
@@ -264,6 +272,7 @@ function AppContent() {
   // Fire search or follow depending on the current route.
   useEffect(() => {
     expressionRef.current = q;
+    queryHistory.add(q);
     if (isFollowMode) {
       // On /follow: stop any in-flight search, start following.
       resetSearch();
@@ -321,10 +330,12 @@ function AppContent() {
 
   const executeQuery = () => {
     // Always search from the search route.
+    setShowHistory(false);
     navigate({ to: "/search", search: { q: draft }, replace: false });
   };
 
   const startFollow = () => {
+    setShowHistory(false);
     // Strip time bounds but keep reverse=.
     const stripped = draft
       .replace(/\bstart=\S+/g, "")
@@ -801,33 +812,74 @@ function AppContent() {
                   rows={1}
                   placeholder="Search logs... tokens for full-text, key=value for attributes"
                   style={{ fieldSizing: "content" } as React.CSSProperties}
-                  className={`query-input w-full pl-3 pr-8 py-2 text-[0.9em] leading-normal font-mono border rounded resize-none overflow-hidden focus:outline-none ${c(
+                  className={`query-input w-full pl-3 pr-14 py-2 text-[0.9em] leading-normal font-mono border rounded resize-none overflow-hidden focus:outline-none ${c(
                     "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost",
                     "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost",
                   )}`}
                 />
-                <button
-                  onClick={() => setShowHelp(true)}
-                  className={`absolute right-2 top-2.5 transition-colors ${c(
-                    "text-text-ghost hover:text-copper",
-                    "text-light-text-ghost hover:text-copper",
-                  )}`}
-                  title="Query language help"
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="w-4 h-4"
+                <div className="absolute right-2 top-2.5 flex items-center gap-1">
+                  <button
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      setShowHistory((h) => !h);
+                    }}
+                    className={`transition-colors ${c(
+                      "text-text-ghost hover:text-copper",
+                      "text-light-text-ghost hover:text-copper",
+                    )}`}
+                    title="Query history"
                   >
-                    <circle cx="12" cy="12" r="10" />
-                    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-                    <line x1="12" y1="17" x2="12.01" y2="17" />
-                  </svg>
-                </button>
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="w-4 h-4"
+                    >
+                      <circle cx="12" cy="12" r="10" />
+                      <polyline points="12 6 12 12 16 14" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => setShowHelp(true)}
+                    className={`transition-colors ${c(
+                      "text-text-ghost hover:text-copper",
+                      "text-light-text-ghost hover:text-copper",
+                    )}`}
+                    title="Query language help"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="w-4 h-4"
+                    >
+                      <circle cx="12" cy="12" r="10" />
+                      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                      <line x1="12" y1="17" x2="12.01" y2="17" />
+                    </svg>
+                  </button>
+                </div>
+                {showHistory && (
+                  <QueryHistory
+                    entries={queryHistory.entries}
+                    dark={dark}
+                    onSelect={(query) => {
+                      setDraft(query);
+                      setShowHistory(false);
+                      queryInputRef.current?.focus();
+                    }}
+                    onRemove={queryHistory.remove}
+                    onClear={queryHistory.clear}
+                    onClose={() => setShowHistory(false)}
+                  />
+                )}
               </div>
               <button
                 onClick={executeQuery}
@@ -1111,12 +1163,21 @@ function AppContent() {
                 >
                   {isFollowMode ? "Following" : "Results"}
                 </h3>
-                {isFollowMode && (
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-severity-error opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-severity-error" />
-                  </span>
-                )}
+                {isFollowMode &&
+                  (reconnecting ? (
+                    <span
+                      className="relative flex h-2 w-2"
+                      title={`Reconnecting (attempt ${reconnectAttempt})...`}
+                    >
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-severity-warn opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-severity-warn" />
+                    </span>
+                  ) : (
+                    <span className="relative flex h-2 w-2" title="Connected">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-severity-info opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-severity-info" />
+                    </span>
+                  ))}
                 <span
                   className={`font-mono text-[0.8em] px-2 py-0.5 rounded ${c("bg-ink-surface text-text-muted", "bg-light-hover text-light-text-muted")}`}
                 >
@@ -1124,13 +1185,16 @@ function AppContent() {
                   {!isFollowMode && hasMore ? "+" : ""}
                 </span>
               </div>
-              {(isFollowMode ? followRecords : records).length > 0 && (
-                <span
-                  className={`font-mono text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-                >
-                  {new Date().toLocaleTimeString("en-US", { hour12: false })}
-                </span>
-              )}
+              <div className="flex items-center gap-3">
+                <ExportButton records={displayRecords} dark={dark} />
+                {(isFollowMode ? followRecords : records).length > 0 && (
+                  <span
+                    className={`font-mono text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+                  >
+                    {new Date().toLocaleTimeString("en-US", { hour12: false })}
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto app-scroll">
