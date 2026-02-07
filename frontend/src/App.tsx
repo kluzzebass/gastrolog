@@ -9,6 +9,7 @@ import {
   useFollow,
   useExplain,
   useHistogram,
+  useLiveHistogram,
   extractTokens,
 } from "./api/hooks";
 import { useStores, useStats } from "./api/hooks";
@@ -29,8 +30,17 @@ import {
   FieldExplorer,
   StoreButton,
 } from "./components/Sidebar";
+import { ToastProvider, useToast } from "./components/Toast";
 
 export function App() {
+  return (
+    <ToastProvider>
+      <AppContent />
+    </ToastProvider>
+  );
+}
+
+function AppContent() {
   const { q } = useRouterSearch({ strict: false }) as { q: string };
   const navigate = useNavigate({ from: "/search" });
   const location = useLocation();
@@ -87,6 +97,7 @@ export function App() {
   const queryInputRef = useRef<HTMLTextAreaElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const expressionRef = useRef("");
+  const skipNextSearchRef = useRef(false);
 
   const handleDetailResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -135,6 +146,8 @@ export function App() {
     hasMore,
     search,
     loadMore,
+    setRecords,
+    reset: resetSearch,
   } = useSearch();
   const {
     records: followRecords,
@@ -161,8 +174,20 @@ export function App() {
   const { data: stats, isLoading: statsLoading } = useStats();
 
   const dark = theme === "dark" || (theme === "system" && systemDark);
+  const { addToast } = useToast();
+
+  // Push errors from hooks to the toast system.
+  useEffect(() => {
+    if (searchError) addToast(searchError.message, "error");
+  }, [searchError]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (followError) addToast(followError.message, "error");
+  }, [followError]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Build the full expression sent to the server.
+  // Whether results are in reverse (newest-first) order.
+  const isReversed = !q.includes("reverse=false");
+
   // Strip start=/end=/reverse tokens from the query string.
   const stripTimeRange = (q: string): string =>
     q
@@ -179,19 +204,24 @@ export function App() {
       .replace(/\s+/g, " ")
       .trim();
 
-  // Build time range tokens for the given range key.
-  const buildTimeTokens = (range: string): string => {
-    if (range === "All") return "reverse=true";
+  // Build time range tokens for the given range key, preserving current reverse state.
+  const buildTimeTokens = (range: string, reverse = isReversed): string => {
+    const rev = `reverse=${reverse}`;
+    if (range === "All") return rev;
     const ms = timeRangeMs[range];
-    if (!ms) return "reverse=true";
+    if (!ms) return rev;
     const now = Date.now();
-    return `start=${new Date(now - ms).toISOString()} end=${new Date(now).toISOString()} reverse=true`;
+    return `start=${new Date(now - ms).toISOString()} end=${new Date(now).toISOString()} ${rev}`;
   };
 
   // Inject time range + reverse into query, replacing any existing time tokens.
-  const injectTimeRange = (q: string, range: string): string => {
+  const injectTimeRange = (
+    q: string,
+    range: string,
+    reverse = isReversed,
+  ): string => {
     const base = stripTimeRange(q);
-    const timeTokens = buildTimeTokens(range);
+    const timeTokens = buildTimeTokens(range, reverse);
     return base ? `${timeTokens} ${base}` : timeTokens;
   };
 
@@ -231,13 +261,20 @@ export function App() {
     expressionRef.current = q;
     if (isFollowMode) {
       // On /follow: stop any in-flight search, start following.
+      resetSearch();
       resetFollow();
       follow(q);
     } else {
       // On /search: stop any active follow, start searching.
       if (isFollowing) {
         stopFollow();
-        resetFollow();
+      }
+      resetFollow();
+      // When transitioning from follow → search via the stop button,
+      // skip the auto-search so the accumulated follow records stay visible.
+      if (skipNextSearchRef.current) {
+        skipNextSearchRef.current = false;
+        return;
       }
       search(q);
       fetchHistogram(q);
@@ -293,6 +330,12 @@ export function App() {
   };
 
   const stopFollowMode = () => {
+    // Stop the stream and adopt follow records into search results
+    // so they stay visible after the route change.
+    stopFollow();
+    setRecords([...followRecords]);
+    skipNextSearchRef.current = true;
+
     // Restore time range when switching back to search.
     const base = stripTimeRange(draft);
     const restored = injectTimeRange(base, timeRange);
@@ -359,9 +402,14 @@ export function App() {
     setTimeRange("custom");
     setRangeStart(start);
     setRangeEnd(end);
-    const tokens = `start=${start.toISOString()} end=${end.toISOString()} reverse=true`;
+    const tokens = `start=${start.toISOString()} end=${end.toISOString()} reverse=${isReversed}`;
     const base = stripTimeRange(q);
     const newQuery = base ? `${tokens} ${base}` : tokens;
+    setUrlQuery(newQuery);
+  };
+
+  const toggleReverse = () => {
+    const newQuery = injectTimeRange(q, timeRange, !isReversed);
     setUrlQuery(newQuery);
   };
 
@@ -402,6 +450,7 @@ export function App() {
     }
   };
 
+  const liveHistogramData = useLiveHistogram(followRecords);
   const tokens = extractTokens(q);
   const displayRecords = isFollowMode ? followRecords : records;
   const attrFields = useMemo(
@@ -835,11 +884,6 @@ export function App() {
               </button>
             </div>
 
-            {(searchError || followError) && (
-              <div className="mt-2.5 px-3 py-2 text-[0.9em] bg-severity-error/10 border border-severity-error/25 rounded text-severity-error">
-                {(searchError || followError)!.message}
-              </div>
-            )}
             {showHelp && (
               <QueryHelp
                 dark={dark}
@@ -894,7 +938,7 @@ export function App() {
             </div>
           )}
 
-          {/* Histogram (hidden during follow) */}
+          {/* Histogram — server-side for search, client-side for follow */}
           {!isFollowMode &&
             histogramData &&
             histogramData.buckets.length > 0 && (
@@ -908,7 +952,7 @@ export function App() {
                     setRangeStart(start);
                     setRangeEnd(end);
                     setTimeRange("custom");
-                    const tokens = `start=${start.toISOString()} end=${end.toISOString()} reverse=true`;
+                    const tokens = `start=${start.toISOString()} end=${end.toISOString()} reverse=${isReversed}`;
                     const base = stripTimeRange(q);
                     const newQuery = base ? `${tokens} ${base}` : tokens;
                     setUrlQuery(newQuery);
@@ -917,7 +961,7 @@ export function App() {
                     setRangeStart(start);
                     setRangeEnd(end);
                     setTimeRange("custom");
-                    const tokens = `start=${start.toISOString()} end=${end.toISOString()} reverse=true`;
+                    const tokens = `start=${start.toISOString()} end=${end.toISOString()} reverse=${isReversed}`;
                     const base = stripTimeRange(q);
                     const newQuery = base ? `${tokens} ${base}` : tokens;
                     setUrlQuery(newQuery);
@@ -925,6 +969,45 @@ export function App() {
                 />
               </div>
             )}
+          {isFollowMode && (
+            <div
+              className={`px-5 py-3 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
+            >
+              {liveHistogramData && liveHistogramData.buckets.length > 0 ? (
+                <HistogramChart data={liveHistogramData} dark={dark} />
+              ) : (
+                <div className="relative">
+                  <div className="flex items-baseline justify-between mb-1.5">
+                    <span
+                      className={`text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+                    >
+                      Volume
+                    </span>
+                    <span
+                      className={`font-mono text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}
+                    >
+                      0 records
+                    </span>
+                  </div>
+                  <div
+                    className={`rounded h-12 ${c("bg-ink-surface/30", "bg-light-hover/30")}`}
+                  />
+                  <div className="flex justify-between mt-1 min-h-5">
+                    <span
+                      className={`text-[0.65em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+                    >
+                      &mdash;
+                    </span>
+                    <span
+                      className={`text-[0.65em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+                    >
+                      &mdash;
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Results */}
           <div className="flex-1 flex flex-col overflow-hidden">
@@ -932,6 +1015,42 @@ export function App() {
               className={`flex justify-between items-center px-5 py-2.5 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
             >
               <div className="flex items-center gap-3">
+                {!isFollowMode && (
+                  <button
+                    onClick={toggleReverse}
+                    title={
+                      isReversed
+                        ? "Newest first (click for oldest first)"
+                        : "Oldest first (click for newest first)"
+                    }
+                    className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${c(
+                      "text-text-muted hover:text-copper hover:bg-ink-hover",
+                      "text-light-text-muted hover:text-copper hover:bg-light-hover",
+                    )}`}
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="w-4 h-4"
+                    >
+                      {isReversed ? (
+                        <>
+                          <path d="M12 5v14" />
+                          <path d="M6 13l6 6 6-6" />
+                        </>
+                      ) : (
+                        <>
+                          <path d="M12 5v14" />
+                          <path d="M6 11l6-6 6 6" />
+                        </>
+                      )}
+                    </svg>
+                  </button>
+                )}
                 <h3
                   className={`font-display text-[1.15em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
                 >

@@ -23,8 +23,8 @@ func TestUpdateRoutes(t *testing.T) {
 	// Initially set routes: prod gets env=prod, archive is catch-all.
 	cfg := &config.Config{
 		Stores: []config.StoreConfig{
-			{ID: "prod", Route: "env=prod"},
-			{ID: "archive", Route: "*"},
+			{ID: "prod", Route: config.StringPtr("env=prod")},
+			{ID: "archive", Route: config.StringPtr("*")},
 		},
 	}
 	if err := orch.UpdateRoutes(cfg); err != nil {
@@ -51,8 +51,8 @@ func TestUpdateRoutes(t *testing.T) {
 	// Now update routes: prod gets env=staging instead.
 	cfg2 := &config.Config{
 		Stores: []config.StoreConfig{
-			{ID: "prod", Route: "env=staging"},
-			{ID: "archive", Route: "*"},
+			{ID: "prod", Route: config.StringPtr("env=staging")},
+			{ID: "archive", Route: config.StringPtr("*")},
 		},
 	}
 	if err := orch.UpdateRoutes(cfg2); err != nil {
@@ -83,7 +83,7 @@ func TestUpdateRoutesInvalidExpression(t *testing.T) {
 
 	cfg := &config.Config{
 		Stores: []config.StoreConfig{
-			{ID: "prod", Route: "(unclosed"},
+			{ID: "prod", Route: config.StringPtr("(unclosed")},
 		},
 	}
 	err := orch.UpdateRoutes(cfg)
@@ -98,8 +98,8 @@ func TestUpdateRoutesIgnoresUnknownStores(t *testing.T) {
 	// Include a store that doesn't exist - should be ignored.
 	cfg := &config.Config{
 		Stores: []config.StoreConfig{
-			{ID: "prod", Route: "env=prod"},
-			{ID: "nonexistent", Route: "*"},
+			{ID: "prod", Route: config.StringPtr("env=prod")},
+			{ID: "nonexistent", Route: config.StringPtr("*")},
 		},
 	}
 	if err := orch.UpdateRoutes(cfg); err != nil {
@@ -122,7 +122,7 @@ func TestAddStore(t *testing.T) {
 	storeCfg := config.StoreConfig{
 		ID:    "new-store",
 		Type:  "memory",
-		Route: "env=test",
+		Route: config.StringPtr("env=test"),
 	}
 
 	if err := orch.AddStore(storeCfg, factories); err != nil {
@@ -165,7 +165,7 @@ func TestAddStoreDuplicate(t *testing.T) {
 	storeCfg := config.StoreConfig{
 		ID:    "store1",
 		Type:  "memory",
-		Route: "*",
+		Route: config.StringPtr("*"),
 	}
 
 	if err := orch.AddStore(storeCfg, factories); err != nil {
@@ -194,7 +194,7 @@ func TestRemoveStoreEmpty(t *testing.T) {
 	storeCfg := config.StoreConfig{
 		ID:    "temp-store",
 		Type:  "memory",
-		Route: "*",
+		Route: config.StringPtr("*"),
 	}
 
 	if err := orch.AddStore(storeCfg, factories); err != nil {
@@ -227,7 +227,7 @@ func TestRemoveStoreNotEmpty(t *testing.T) {
 	storeCfg := config.StoreConfig{
 		ID:    "store-with-data",
 		Type:  "memory",
-		Route: "*",
+		Route: config.StringPtr("*"),
 	}
 
 	if err := orch.AddStore(storeCfg, factories); err != nil {
@@ -426,7 +426,7 @@ func TestStoreConfig(t *testing.T) {
 	storeCfg := config.StoreConfig{
 		ID:    "test-store",
 		Type:  "memory",
-		Route: "env=prod AND level=error",
+		Route: config.StringPtr("env=prod AND level=error"),
 	}
 
 	if err := orch.AddStore(storeCfg, factories); err != nil {
@@ -442,8 +442,8 @@ func TestStoreConfig(t *testing.T) {
 	if gotCfg.ID != "test-store" {
 		t.Errorf("ID: expected %q, got %q", "test-store", gotCfg.ID)
 	}
-	if gotCfg.Route != "env=prod AND level=error" {
-		t.Errorf("Route: expected %q, got %q", "env=prod AND level=error", gotCfg.Route)
+	if gotCfg.Route == nil || *gotCfg.Route != "env=prod AND level=error" {
+		t.Errorf("Route: expected %q, got %v", "env=prod AND level=error", gotCfg.Route)
 	}
 }
 
@@ -521,7 +521,7 @@ func TestSetRotationPolicyDirectly(t *testing.T) {
 	storeCfg := config.StoreConfig{
 		ID:    "test-store",
 		Type:  "memory",
-		Route: "*",
+		Route: config.StringPtr("*"),
 	}
 
 	if err := orch.AddStore(storeCfg, factories); err != nil {
@@ -578,7 +578,7 @@ func TestUpdateStoreRouteInvalid(t *testing.T) {
 	storeCfg := config.StoreConfig{
 		ID:    "test-store",
 		Type:  "memory",
-		Route: "*",
+		Route: config.StringPtr("*"),
 	}
 
 	if err := orch.AddStore(storeCfg, factories); err != nil {

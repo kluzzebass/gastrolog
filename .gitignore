@@ -30,7 +30,9 @@ go.work
 # Service artifacts
 config.json
 sources.json
-sources.db
+*.db
+*.db-shm
+*.db-wal
 data
 *.log
 *.log.*

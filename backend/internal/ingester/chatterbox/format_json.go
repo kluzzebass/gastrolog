@@ -54,7 +54,9 @@ func (f *JSONFormat) Generate(rng *rand.Rand) ([]byte, map[string]string, time.T
 		obj["bytes_in"] = rng.IntN(10000)
 		obj["bytes_out"] = rng.IntN(100000)
 	case 1:
-		// Error details
+		// Error details — level must reflect the error scenario.
+		level = pick(rng, []string{"error", "error", "error", "warn"})
+		obj["level"] = level
 		obj["error"] = pick(rng, []string{"connection refused", "timeout", "invalid input", "not found", "permission denied"})
 		obj["stack"] = pick(rng, []string{"main.go:42", "handler.go:156", "service.go:89"})
 		obj["retry_count"] = rng.IntN(5)

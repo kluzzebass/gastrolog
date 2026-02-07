@@ -22,11 +22,10 @@ import (
 	"time"
 )
 
-// Store persists and loads system configuration.
+// Store persists and loads system configuration with granular CRUD operations.
 //
 // Config describes the desired system shape. Orchestrator loads config at
-// startup and instantiates components. Config changes are not hot-reloaded
-// in v1.
+// startup and instantiates components.
 //
 // Store is not accessed on the ingest or query hot path. Persistence must
 // not block ingestion or queries.
@@ -35,16 +34,27 @@ import (
 // the data can be serialized/deserialized. Semantic validation (duplicate
 // IDs, unknown types, dangling route references) is the responsibility of
 // the component that consumes the config (e.g., Orchestrator at startup).
-//
-// Note on duplicate JSON keys: Go's encoding/json silently accepts duplicate
-// keys and uses the last value. Detecting this would require a custom parser.
-// This is a known limitation of the JSON format/decoder.
 type Store interface {
-	// Load reads the configuration. Returns nil config if none exists.
+	// Load reads the full configuration. Returns nil if nothing exists (bootstrap signal).
 	Load(ctx context.Context) (*Config, error)
 
-	// Save persists the configuration.
-	Save(ctx context.Context, cfg *Config) error
+	// Rotation policies
+	GetRotationPolicy(ctx context.Context, id string) (*RotationPolicyConfig, error)
+	ListRotationPolicies(ctx context.Context) (map[string]RotationPolicyConfig, error)
+	PutRotationPolicy(ctx context.Context, id string, cfg RotationPolicyConfig) error
+	DeleteRotationPolicy(ctx context.Context, id string) error
+
+	// Stores
+	GetStore(ctx context.Context, id string) (*StoreConfig, error)
+	ListStores(ctx context.Context) ([]StoreConfig, error)
+	PutStore(ctx context.Context, cfg StoreConfig) error
+	DeleteStore(ctx context.Context, id string) error
+
+	// Ingesters
+	GetIngester(ctx context.Context, id string) (*IngesterConfig, error)
+	ListIngesters(ctx context.Context) ([]IngesterConfig, error)
+	PutIngester(ctx context.Context, cfg IngesterConfig) error
+	DeleteIngester(ctx context.Context, id string) error
 }
 
 // Config describes the desired system shape.
@@ -57,18 +67,25 @@ type Config struct {
 
 // RotationPolicyConfig defines when chunks should be rotated.
 // Multiple conditions can be specified; rotation occurs when ANY condition is met.
+// All fields are optional (nil = not set).
 type RotationPolicyConfig struct {
 	// MaxBytes rotates when chunk size exceeds this value.
 	// Supports suffixes: B, KB, MB, GB (e.g., "64MB", "1GB").
-	MaxBytes string `json:"maxBytes,omitempty"`
+	MaxBytes *string `json:"maxBytes,omitempty"`
 
 	// MaxAge rotates when chunk age exceeds this duration.
 	// Uses Go duration format (e.g., "1h", "30m", "24h").
-	MaxAge string `json:"maxAge,omitempty"`
+	MaxAge *string `json:"maxAge,omitempty"`
 
 	// MaxRecords rotates when record count exceeds this value.
-	MaxRecords int64 `json:"maxRecords,omitempty"`
+	MaxRecords *int64 `json:"maxRecords,omitempty"`
 }
+
+// StringPtr returns a pointer to s.
+func StringPtr(s string) *string { return &s }
+
+// Int64Ptr returns a pointer to n.
+func Int64Ptr(n int64) *int64 { return &n }
 
 // IngesterConfig describes a ingester to instantiate.
 type IngesterConfig struct {
@@ -89,16 +106,16 @@ type IngesterConfig struct {
 func (c RotationPolicyConfig) ToRotationPolicy() (chunk.RotationPolicy, error) {
 	var policies []chunk.RotationPolicy
 
-	if c.MaxBytes != "" {
-		bytes, err := parseBytes(c.MaxBytes)
+	if c.MaxBytes != nil {
+		bytes, err := parseBytes(*c.MaxBytes)
 		if err != nil {
 			return nil, fmt.Errorf("invalid maxBytes: %w", err)
 		}
 		policies = append(policies, chunk.NewSizePolicy(bytes))
 	}
 
-	if c.MaxAge != "" {
-		d, err := time.ParseDuration(c.MaxAge)
+	if c.MaxAge != nil {
+		d, err := time.ParseDuration(*c.MaxAge)
 		if err != nil {
 			return nil, fmt.Errorf("invalid maxAge: %w", err)
 		}
@@ -108,8 +125,8 @@ func (c RotationPolicyConfig) ToRotationPolicy() (chunk.RotationPolicy, error) {
 		policies = append(policies, chunk.NewAgePolicy(d, nil))
 	}
 
-	if c.MaxRecords > 0 {
-		policies = append(policies, chunk.NewRecordCountPolicy(uint64(c.MaxRecords)))
+	if c.MaxRecords != nil {
+		policies = append(policies, chunk.NewRecordCountPolicy(uint64(*c.MaxRecords)))
 	}
 
 	if len(policies) == 0 {
@@ -170,17 +187,17 @@ type StoreConfig struct {
 
 	// Route defines which messages this store receives based on attributes.
 	// Special values:
-	//   - "" (empty): receives nothing (safe default for unconfigured stores)
+	//   - nil: receives nothing (safe default for unconfigured stores)
 	//   - "*": catch-all, receives all messages
 	//   - "+": catch-the-rest, receives messages that matched no other route
 	//   - any other value: querylang expression matched against message attrs
 	//     (e.g., "env=prod AND level=error")
 	// Token predicates are not allowed in routes (only attr-based filtering).
-	Route string `json:"route,omitempty"`
+	Route *string `json:"route,omitempty"`
 
 	// Policy references a named rotation policy from Config.RotationPolicies.
-	// If empty, the store uses a default policy (type-specific).
-	Policy string `json:"policy,omitempty"`
+	// Nil means no policy (type-specific default).
+	Policy *string `json:"policy,omitempty"`
 
 	// Params contains type-specific configuration as opaque string key-value pairs.
 	// Parsing and validation are the responsibility of the factory that consumes

@@ -79,7 +79,11 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 		storeIDs[storeCfg.ID] = true
 
 		// Compile route expression.
-		route, err := CompileRoute(storeCfg.ID, storeCfg.Route)
+		var routeExpr string
+		if storeCfg.Route != nil {
+			routeExpr = *storeCfg.Route
+		}
+		route, err := CompileRoute(storeCfg.ID, routeExpr)
 		if err != nil {
 			return fmt.Errorf("invalid route for store %s: %w", storeCfg.ID, err)
 		}
@@ -98,14 +102,14 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 		}
 
 		// Apply rotation policy if specified.
-		if storeCfg.Policy != "" {
-			policyCfg, ok := cfg.RotationPolicies[storeCfg.Policy]
+		if storeCfg.Policy != nil {
+			policyCfg, ok := cfg.RotationPolicies[*storeCfg.Policy]
 			if !ok {
-				return fmt.Errorf("store %s references unknown policy: %s", storeCfg.ID, storeCfg.Policy)
+				return fmt.Errorf("store %s references unknown policy: %s", storeCfg.ID, *storeCfg.Policy)
 			}
 			policy, err := policyCfg.ToRotationPolicy()
 			if err != nil {
-				return fmt.Errorf("invalid policy %s for store %s: %w", storeCfg.Policy, storeCfg.ID, err)
+				return fmt.Errorf("invalid policy %s for store %s: %w", *storeCfg.Policy, storeCfg.ID, err)
 			}
 			if policy != nil {
 				cm.SetRotationPolicy(policy)

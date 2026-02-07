@@ -92,6 +92,7 @@ export function useFollow() {
     setState((prev) => ({
       ...prev,
       isFollowing: false,
+      error: null,
     }));
   }, []);
 

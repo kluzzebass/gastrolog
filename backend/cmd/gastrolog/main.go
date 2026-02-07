@@ -11,17 +11,23 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
 	chunkmem "gastrolog/internal/chunk/memory"
+	"gastrolog/internal/config"
 	configfile "gastrolog/internal/config/file"
+	configmem "gastrolog/internal/config/memory"
+	configsqlite "gastrolog/internal/config/sqlite"
 	digestlevel "gastrolog/internal/digester/level"
 	"gastrolog/internal/index"
 	indexfile "gastrolog/internal/index/file"
@@ -36,7 +42,7 @@ import (
 )
 
 func main() {
-	configPath := flag.String("config", "config.json", "path to configuration file")
+	configFlag := flag.String("config", "", "config store (memory, json:path, or sqlite:path)")
 	pprofAddr := flag.String("pprof", "", "pprof HTTP server address (e.g. localhost:6060)")
 	serverAddr := flag.String("server", ":8080", "Connect RPC server address (empty to disable)")
 	replMode := flag.Bool("repl", false, "start interactive REPL after system is running")
@@ -67,27 +73,43 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	if err := run(ctx, logger, *configPath, *serverAddr, *replMode); err != nil {
+	if err := run(ctx, logger, *configFlag, *serverAddr, *replMode); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, logger *slog.Logger, configPath, serverAddr string, replMode bool) error {
+func run(ctx context.Context, logger *slog.Logger, configFlagValue, serverAddr string, replMode bool) error {
+	// Open config store.
+	cfgStore, err := openConfigStore(configFlagValue)
+	if err != nil {
+		return fmt.Errorf("open config store: %w", err)
+	}
+	if c, ok := cfgStore.(io.Closer); ok {
+		defer c.Close()
+	}
+
 	// Load configuration.
-	logger.Info("loading config", "path", configPath)
-	cfgStore := configfile.NewStore(configPath)
+	logger.Info("loading config", "store", configFlagValue)
 	cfg, err := cfgStore.Load(ctx)
 	if err != nil {
 		return err
 	}
+
 	if cfg == nil {
-		logger.Info("no config found, running with empty configuration")
-	} else {
-		logger.Info("loaded config",
-			"ingesters", len(cfg.Ingesters),
-			"stores", len(cfg.Stores))
+		logger.Info("no config found, bootstrapping default configuration")
+		if err := config.Bootstrap(ctx, cfgStore); err != nil {
+			return fmt.Errorf("bootstrap config: %w", err)
+		}
+		cfg, err = cfgStore.Load(ctx)
+		if err != nil {
+			return fmt.Errorf("load bootstrapped config: %w", err)
+		}
 	}
+
+	logger.Info("loaded config",
+		"ingesters", len(cfg.Ingesters),
+		"stores", len(cfg.Stores))
 
 	// Create orchestrator.
 	orch := orchestrator.New(orchestrator.Config{
@@ -178,5 +200,40 @@ func buildFactories(logger *slog.Logger) orchestrator.Factories {
 			"memory": indexmem.NewFactory(),
 		},
 		Logger: logger,
+	}
+}
+
+// parseConfigFlag parses a config flag value into store type and path.
+// Formats: "json:path", "sqlite:path", or bare path (inferred by extension).
+func parseConfigFlag(value string) (storeType, path string, err error) {
+	if i := strings.IndexByte(value, ':'); i > 0 {
+		return value[:i], value[i+1:], nil
+	}
+	// Bare path: infer by extension.
+	switch filepath.Ext(value) {
+	case ".db", ".sqlite", ".sqlite3":
+		return "sqlite", value, nil
+	default:
+		return "json", value, nil
+	}
+}
+
+// openConfigStore creates a config.Store from a flag value.
+// Empty string returns an in-memory store (no persistence).
+func openConfigStore(flagValue string) (config.Store, error) {
+	if flagValue == "" || flagValue == "memory" {
+		return configmem.NewStore(), nil
+	}
+	storeType, path, err := parseConfigFlag(flagValue)
+	if err != nil {
+		return nil, err
+	}
+	switch storeType {
+	case "json":
+		return configfile.NewStore(path), nil
+	case "sqlite":
+		return configsqlite.NewStore(path)
+	default:
+		return nil, fmt.Errorf("unknown config store type: %q", storeType)
 	}
 }

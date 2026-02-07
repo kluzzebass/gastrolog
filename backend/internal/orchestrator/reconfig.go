@@ -42,7 +42,11 @@ func (o *Orchestrator) UpdateRoutes(cfg *config.Config) error {
 			continue
 		}
 
-		route, err := CompileRoute(storeCfg.ID, storeCfg.Route)
+		var routeExpr string
+		if storeCfg.Route != nil {
+			routeExpr = *storeCfg.Route
+		}
+		route, err := CompileRoute(storeCfg.ID, routeExpr)
 		if err != nil {
 			return fmt.Errorf("invalid route for store %s: %w", storeCfg.ID, err)
 		}
@@ -165,7 +169,11 @@ func (o *Orchestrator) AddStore(storeCfg config.StoreConfig, factories Factories
 	o.queries[storeCfg.ID] = qe
 
 	// Update router to include the new store's route.
-	if err := o.updateRouterLocked(storeCfg.ID, storeCfg.Route); err != nil {
+	var routeExpr string
+	if storeCfg.Route != nil {
+		routeExpr = *storeCfg.Route
+	}
+	if err := o.updateRouterLocked(storeCfg.ID, routeExpr); err != nil {
 		// Rollback registration on route error.
 		delete(o.chunks, storeCfg.ID)
 		delete(o.indexes, storeCfg.ID)
@@ -173,7 +181,7 @@ func (o *Orchestrator) AddStore(storeCfg config.StoreConfig, factories Factories
 		return err
 	}
 
-	o.logger.Info("store added", "id", storeCfg.ID, "type", storeCfg.Type, "route", storeCfg.Route)
+	o.logger.Info("store added", "id", storeCfg.ID, "type", storeCfg.Type, "route", routeExpr)
 	return nil
 }
 
@@ -283,7 +291,8 @@ func (o *Orchestrator) StoreConfig(id string) (config.StoreConfig, error) {
 	if o.router != nil {
 		for _, r := range o.router.routes {
 			if r.StoreID == id {
-				cfg.Route = routeExpr(r)
+				expr := routeExpr(r)
+				cfg.Route = &expr
 				break
 			}
 		}

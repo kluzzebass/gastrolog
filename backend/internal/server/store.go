@@ -333,12 +333,15 @@ func (s *StoreServer) getStoreInfo(id string) (*apiv1.StoreInfo, error) {
 	// Get route expression
 	cfg, _ := s.orch.StoreConfig(id)
 
-	return &apiv1.StoreInfo{
+	info := &apiv1.StoreInfo{
 		Id:          id,
-		Route:       cfg.Route,
 		ChunkCount:  int64(len(metas)),
 		RecordCount: recordCount,
-	}, nil
+	}
+	if cfg.Route != nil {
+		info.Route = *cfg.Route
+	}
+	return info, nil
 }
 
 func chunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {

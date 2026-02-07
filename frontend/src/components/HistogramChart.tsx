@@ -339,7 +339,7 @@ export function HistogramChart({
         </div>
       </div>
       {/* Time axis with pan arrows + draggable labels */}
-      <div className="flex items-center mt-1 gap-1">
+      <div className="flex items-center mt-1 gap-1 min-h-5">
         {onPan && (
           <button
             onClick={() => handlePanStep(-1)}

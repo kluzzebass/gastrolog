@@ -39,11 +39,14 @@ func (s *ConfigServer) GetConfig(
 		if err != nil {
 			continue
 		}
-		resp.Stores = append(resp.Stores, &apiv1.StoreConfig{
-			Id:    cfg.ID,
-			Type:  cfg.Type,
-			Route: cfg.Route,
-		})
+		sc := &apiv1.StoreConfig{
+			Id:   cfg.ID,
+			Type: cfg.Type,
+		}
+		if cfg.Route != nil {
+			sc.Route = *cfg.Route
+		}
+		resp.Stores = append(resp.Stores, sc)
 	}
 
 	// Get ingester configs

@@ -174,10 +174,27 @@ export function useSearch() {
     });
   }, []);
 
+  // Adopt externally-provided records (e.g. from follow mode).
+  // Sets records without executing a search.
+  const setRecords = useCallback((records: Record[]) => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+    setState({
+      records,
+      isSearching: false,
+      error: null,
+      hasMore: false,
+      resumeToken: null,
+    });
+  }, []);
+
   return {
     ...state,
     search,
     loadMore,
     reset,
+    setRecords,
   };
 }
