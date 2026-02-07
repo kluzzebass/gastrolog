@@ -63,13 +63,13 @@ function buildSegments(
 
   // Sort and merge overlapping ranges.
   const sorted = [...ranges].sort((a, b) => a[0] - b[0]);
-  const merged: Range[] = [sorted[0]];
+  const merged: Range[] = [sorted[0]!];
   for (let i = 1; i < sorted.length; i++) {
-    const prev = merged[merged.length - 1];
-    if (sorted[i][0] <= prev[1]) {
-      prev[1] = Math.max(prev[1], sorted[i][1]);
+    const prev = merged[merged.length - 1]!;
+    if (sorted[i]![0] <= prev[1]) {
+      prev[1] = Math.max(prev[1], sorted[i]![1]);
     } else {
-      merged.push(sorted[i]);
+      merged.push(sorted[i]!);
     }
   }
 
