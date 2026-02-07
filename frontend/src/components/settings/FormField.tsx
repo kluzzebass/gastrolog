@@ -178,7 +178,7 @@ export function ParamsEditor({ params, onChange, dark }: ParamsEditorProps) {
       {entries.map(([key, val]) => (
         <div key={key} className="flex gap-1.5 items-center">
           <span
-            className={`text-[0.8em] font-mono min-w-[80px] shrink-0 ${c("text-text-muted", "text-light-text-muted")}`}
+            className={`text-[0.8em] font-mono min-w-20 shrink-0 ${c("text-text-muted", "text-light-text-muted")}`}
           >
             {key}
           </span>
@@ -208,7 +208,7 @@ export function ParamsEditor({ params, onChange, dark }: ParamsEditorProps) {
           value={newKey}
           onChange={(e) => setNewKey(e.target.value)}
           placeholder="key"
-          className={`min-w-[80px] w-[80px] shrink-0 px-2 py-1 text-[0.8em] font-mono border rounded focus:outline-none ${c(
+          className={`min-w-20 w-20 shrink-0 px-2 py-1 text-[0.8em] font-mono border rounded focus:outline-none ${c(
             "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
             "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
           )}`}
