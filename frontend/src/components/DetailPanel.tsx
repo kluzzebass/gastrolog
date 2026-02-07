@@ -6,6 +6,7 @@ import {
   formatChunkId,
 } from "../utils";
 import { syntaxHighlight } from "../syntax";
+import { CopyButton } from "./CopyButton";
 
 export function DetailPanelContent({
   record,
@@ -95,7 +96,11 @@ export function DetailPanelContent({
       </DetailSection>
 
       {/* Message */}
-      <DetailSection label={`Message (${formatBytes(rawBytes)})`} dark={dark}>
+      <DetailSection
+        label={`Message (${formatBytes(rawBytes)})`}
+        dark={dark}
+        action={<CopyButton text={rawText} dark={dark} />}
+      >
         <pre
           className={`text-[0.85em] font-mono p-3 rounded whitespace-pre-wrap wrap-break-word leading-relaxed ${c("bg-ink text-text-normal", "bg-light-bg text-light-text-normal")}`}
         >
@@ -206,18 +211,23 @@ export function DetailSection({
   label,
   dark,
   children,
+  action,
 }: {
   label: string;
   dark: boolean;
   children: React.ReactNode;
+  action?: React.ReactNode;
 }) {
   return (
     <div>
-      <h4
-        className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1.5 ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
-      >
-        {label}
-      </h4>
+      <div className="flex items-center gap-2 mb-1.5">
+        <h4
+          className={`text-[0.7em] font-medium uppercase tracking-[0.15em] ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
+        >
+          {label}
+        </h4>
+        {action}
+      </div>
       {children}
     </div>
   );

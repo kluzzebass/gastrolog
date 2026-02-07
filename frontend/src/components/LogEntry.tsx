@@ -1,5 +1,6 @@
 import type { ProtoRecord } from "../utils";
 import { syntaxHighlight, composeWithSearch } from "../syntax";
+import { CopyButton } from "./CopyButton";
 
 interface SeverityInfo {
   level: string;
@@ -70,7 +71,7 @@ export function LogEntry({
   return (
     <article
       onClick={onSelect}
-      className={`grid grid-cols-[10ch_3.5ch_1fr] px-5 py-1.5 border-b cursor-pointer transition-colors duration-100 ${
+      className={`group grid grid-cols-[10ch_3.5ch_1fr_auto] px-5 py-1.5 border-b cursor-pointer transition-colors duration-100 ${
         isSelected
           ? dark
             ? "bg-ink-hover"
@@ -127,6 +128,9 @@ export function LogEntry({
           );
         })}
       </div>
+      <span className="self-center pl-2 opacity-0 group-hover:opacity-100 transition-opacity">
+        <CopyButton text={rawText} dark={dark} />
+      </span>
     </article>
   );
 }
