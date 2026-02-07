@@ -35,15 +35,17 @@ const (
 const (
 	// ConfigServiceGetConfigProcedure is the fully-qualified name of the ConfigService's GetConfig RPC.
 	ConfigServiceGetConfigProcedure = "/gastrolog.v1.ConfigService/GetConfig"
-	// ConfigServiceUpdateStoreFilterProcedure is the fully-qualified name of the ConfigService's
-	// UpdateStoreFilter RPC.
-	ConfigServiceUpdateStoreFilterProcedure = "/gastrolog.v1.ConfigService/UpdateStoreFilter"
 	// ConfigServiceListIngestersProcedure is the fully-qualified name of the ConfigService's
 	// ListIngesters RPC.
 	ConfigServiceListIngestersProcedure = "/gastrolog.v1.ConfigService/ListIngesters"
 	// ConfigServiceGetIngesterStatusProcedure is the fully-qualified name of the ConfigService's
 	// GetIngesterStatus RPC.
 	ConfigServiceGetIngesterStatusProcedure = "/gastrolog.v1.ConfigService/GetIngesterStatus"
+	// ConfigServicePutFilterProcedure is the fully-qualified name of the ConfigService's PutFilter RPC.
+	ConfigServicePutFilterProcedure = "/gastrolog.v1.ConfigService/PutFilter"
+	// ConfigServiceDeleteFilterProcedure is the fully-qualified name of the ConfigService's
+	// DeleteFilter RPC.
+	ConfigServiceDeleteFilterProcedure = "/gastrolog.v1.ConfigService/DeleteFilter"
 	// ConfigServicePutRotationPolicyProcedure is the fully-qualified name of the ConfigService's
 	// PutRotationPolicy RPC.
 	ConfigServicePutRotationPolicyProcedure = "/gastrolog.v1.ConfigService/PutRotationPolicy"
@@ -67,12 +69,14 @@ const (
 type ConfigServiceClient interface {
 	// GetConfig returns the current configuration.
 	GetConfig(context.Context, *connect.Request[v1.GetConfigRequest]) (*connect.Response[v1.GetConfigResponse], error)
-	// UpdateStoreFilter updates a store's filter expression.
-	UpdateStoreFilter(context.Context, *connect.Request[v1.UpdateStoreFilterRequest]) (*connect.Response[v1.UpdateStoreFilterResponse], error)
 	// ListIngesters returns all registered ingesters.
 	ListIngesters(context.Context, *connect.Request[v1.ListIngestersRequest]) (*connect.Response[v1.ListIngestersResponse], error)
 	// GetIngesterStatus returns status for a specific ingester.
 	GetIngesterStatus(context.Context, *connect.Request[v1.GetIngesterStatusRequest]) (*connect.Response[v1.GetIngesterStatusResponse], error)
+	// PutFilter creates or updates a filter.
+	PutFilter(context.Context, *connect.Request[v1.PutFilterRequest]) (*connect.Response[v1.PutFilterResponse], error)
+	// DeleteFilter removes a filter.
+	DeleteFilter(context.Context, *connect.Request[v1.DeleteFilterRequest]) (*connect.Response[v1.DeleteFilterResponse], error)
 	// PutRotationPolicy creates or updates a rotation policy.
 	PutRotationPolicy(context.Context, *connect.Request[v1.PutRotationPolicyRequest]) (*connect.Response[v1.PutRotationPolicyResponse], error)
 	// DeleteRotationPolicy removes a rotation policy.
@@ -104,12 +108,6 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("GetConfig")),
 			connect.WithClientOptions(opts...),
 		),
-		updateStoreFilter: connect.NewClient[v1.UpdateStoreFilterRequest, v1.UpdateStoreFilterResponse](
-			httpClient,
-			baseURL+ConfigServiceUpdateStoreFilterProcedure,
-			connect.WithSchema(configServiceMethods.ByName("UpdateStoreFilter")),
-			connect.WithClientOptions(opts...),
-		),
 		listIngesters: connect.NewClient[v1.ListIngestersRequest, v1.ListIngestersResponse](
 			httpClient,
 			baseURL+ConfigServiceListIngestersProcedure,
@@ -120,6 +118,18 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			httpClient,
 			baseURL+ConfigServiceGetIngesterStatusProcedure,
 			connect.WithSchema(configServiceMethods.ByName("GetIngesterStatus")),
+			connect.WithClientOptions(opts...),
+		),
+		putFilter: connect.NewClient[v1.PutFilterRequest, v1.PutFilterResponse](
+			httpClient,
+			baseURL+ConfigServicePutFilterProcedure,
+			connect.WithSchema(configServiceMethods.ByName("PutFilter")),
+			connect.WithClientOptions(opts...),
+		),
+		deleteFilter: connect.NewClient[v1.DeleteFilterRequest, v1.DeleteFilterResponse](
+			httpClient,
+			baseURL+ConfigServiceDeleteFilterProcedure,
+			connect.WithSchema(configServiceMethods.ByName("DeleteFilter")),
 			connect.WithClientOptions(opts...),
 		),
 		putRotationPolicy: connect.NewClient[v1.PutRotationPolicyRequest, v1.PutRotationPolicyResponse](
@@ -164,9 +174,10 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 // configServiceClient implements ConfigServiceClient.
 type configServiceClient struct {
 	getConfig            *connect.Client[v1.GetConfigRequest, v1.GetConfigResponse]
-	updateStoreFilter    *connect.Client[v1.UpdateStoreFilterRequest, v1.UpdateStoreFilterResponse]
 	listIngesters        *connect.Client[v1.ListIngestersRequest, v1.ListIngestersResponse]
 	getIngesterStatus    *connect.Client[v1.GetIngesterStatusRequest, v1.GetIngesterStatusResponse]
+	putFilter            *connect.Client[v1.PutFilterRequest, v1.PutFilterResponse]
+	deleteFilter         *connect.Client[v1.DeleteFilterRequest, v1.DeleteFilterResponse]
 	putRotationPolicy    *connect.Client[v1.PutRotationPolicyRequest, v1.PutRotationPolicyResponse]
 	deleteRotationPolicy *connect.Client[v1.DeleteRotationPolicyRequest, v1.DeleteRotationPolicyResponse]
 	putStore             *connect.Client[v1.PutStoreRequest, v1.PutStoreResponse]
@@ -180,11 +191,6 @@ func (c *configServiceClient) GetConfig(ctx context.Context, req *connect.Reques
 	return c.getConfig.CallUnary(ctx, req)
 }
 
-// UpdateStoreFilter calls gastrolog.v1.ConfigService.UpdateStoreFilter.
-func (c *configServiceClient) UpdateStoreFilter(ctx context.Context, req *connect.Request[v1.UpdateStoreFilterRequest]) (*connect.Response[v1.UpdateStoreFilterResponse], error) {
-	return c.updateStoreFilter.CallUnary(ctx, req)
-}
-
 // ListIngesters calls gastrolog.v1.ConfigService.ListIngesters.
 func (c *configServiceClient) ListIngesters(ctx context.Context, req *connect.Request[v1.ListIngestersRequest]) (*connect.Response[v1.ListIngestersResponse], error) {
 	return c.listIngesters.CallUnary(ctx, req)
@@ -193,6 +199,16 @@ func (c *configServiceClient) ListIngesters(ctx context.Context, req *connect.Re
 // GetIngesterStatus calls gastrolog.v1.ConfigService.GetIngesterStatus.
 func (c *configServiceClient) GetIngesterStatus(ctx context.Context, req *connect.Request[v1.GetIngesterStatusRequest]) (*connect.Response[v1.GetIngesterStatusResponse], error) {
 	return c.getIngesterStatus.CallUnary(ctx, req)
+}
+
+// PutFilter calls gastrolog.v1.ConfigService.PutFilter.
+func (c *configServiceClient) PutFilter(ctx context.Context, req *connect.Request[v1.PutFilterRequest]) (*connect.Response[v1.PutFilterResponse], error) {
+	return c.putFilter.CallUnary(ctx, req)
+}
+
+// DeleteFilter calls gastrolog.v1.ConfigService.DeleteFilter.
+func (c *configServiceClient) DeleteFilter(ctx context.Context, req *connect.Request[v1.DeleteFilterRequest]) (*connect.Response[v1.DeleteFilterResponse], error) {
+	return c.deleteFilter.CallUnary(ctx, req)
 }
 
 // PutRotationPolicy calls gastrolog.v1.ConfigService.PutRotationPolicy.
@@ -229,12 +245,14 @@ func (c *configServiceClient) DeleteIngester(ctx context.Context, req *connect.R
 type ConfigServiceHandler interface {
 	// GetConfig returns the current configuration.
 	GetConfig(context.Context, *connect.Request[v1.GetConfigRequest]) (*connect.Response[v1.GetConfigResponse], error)
-	// UpdateStoreFilter updates a store's filter expression.
-	UpdateStoreFilter(context.Context, *connect.Request[v1.UpdateStoreFilterRequest]) (*connect.Response[v1.UpdateStoreFilterResponse], error)
 	// ListIngesters returns all registered ingesters.
 	ListIngesters(context.Context, *connect.Request[v1.ListIngestersRequest]) (*connect.Response[v1.ListIngestersResponse], error)
 	// GetIngesterStatus returns status for a specific ingester.
 	GetIngesterStatus(context.Context, *connect.Request[v1.GetIngesterStatusRequest]) (*connect.Response[v1.GetIngesterStatusResponse], error)
+	// PutFilter creates or updates a filter.
+	PutFilter(context.Context, *connect.Request[v1.PutFilterRequest]) (*connect.Response[v1.PutFilterResponse], error)
+	// DeleteFilter removes a filter.
+	DeleteFilter(context.Context, *connect.Request[v1.DeleteFilterRequest]) (*connect.Response[v1.DeleteFilterResponse], error)
 	// PutRotationPolicy creates or updates a rotation policy.
 	PutRotationPolicy(context.Context, *connect.Request[v1.PutRotationPolicyRequest]) (*connect.Response[v1.PutRotationPolicyResponse], error)
 	// DeleteRotationPolicy removes a rotation policy.
@@ -262,12 +280,6 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("GetConfig")),
 		connect.WithHandlerOptions(opts...),
 	)
-	configServiceUpdateStoreFilterHandler := connect.NewUnaryHandler(
-		ConfigServiceUpdateStoreFilterProcedure,
-		svc.UpdateStoreFilter,
-		connect.WithSchema(configServiceMethods.ByName("UpdateStoreFilter")),
-		connect.WithHandlerOptions(opts...),
-	)
 	configServiceListIngestersHandler := connect.NewUnaryHandler(
 		ConfigServiceListIngestersProcedure,
 		svc.ListIngesters,
@@ -278,6 +290,18 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		ConfigServiceGetIngesterStatusProcedure,
 		svc.GetIngesterStatus,
 		connect.WithSchema(configServiceMethods.ByName("GetIngesterStatus")),
+		connect.WithHandlerOptions(opts...),
+	)
+	configServicePutFilterHandler := connect.NewUnaryHandler(
+		ConfigServicePutFilterProcedure,
+		svc.PutFilter,
+		connect.WithSchema(configServiceMethods.ByName("PutFilter")),
+		connect.WithHandlerOptions(opts...),
+	)
+	configServiceDeleteFilterHandler := connect.NewUnaryHandler(
+		ConfigServiceDeleteFilterProcedure,
+		svc.DeleteFilter,
+		connect.WithSchema(configServiceMethods.ByName("DeleteFilter")),
 		connect.WithHandlerOptions(opts...),
 	)
 	configServicePutRotationPolicyHandler := connect.NewUnaryHandler(
@@ -320,12 +344,14 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		switch r.URL.Path {
 		case ConfigServiceGetConfigProcedure:
 			configServiceGetConfigHandler.ServeHTTP(w, r)
-		case ConfigServiceUpdateStoreFilterProcedure:
-			configServiceUpdateStoreFilterHandler.ServeHTTP(w, r)
 		case ConfigServiceListIngestersProcedure:
 			configServiceListIngestersHandler.ServeHTTP(w, r)
 		case ConfigServiceGetIngesterStatusProcedure:
 			configServiceGetIngesterStatusHandler.ServeHTTP(w, r)
+		case ConfigServicePutFilterProcedure:
+			configServicePutFilterHandler.ServeHTTP(w, r)
+		case ConfigServiceDeleteFilterProcedure:
+			configServiceDeleteFilterHandler.ServeHTTP(w, r)
 		case ConfigServicePutRotationPolicyProcedure:
 			configServicePutRotationPolicyHandler.ServeHTTP(w, r)
 		case ConfigServiceDeleteRotationPolicyProcedure:
@@ -351,16 +377,20 @@ func (UnimplementedConfigServiceHandler) GetConfig(context.Context, *connect.Req
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.GetConfig is not implemented"))
 }
 
-func (UnimplementedConfigServiceHandler) UpdateStoreFilter(context.Context, *connect.Request[v1.UpdateStoreFilterRequest]) (*connect.Response[v1.UpdateStoreFilterResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.UpdateStoreFilter is not implemented"))
-}
-
 func (UnimplementedConfigServiceHandler) ListIngesters(context.Context, *connect.Request[v1.ListIngestersRequest]) (*connect.Response[v1.ListIngestersResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.ListIngesters is not implemented"))
 }
 
 func (UnimplementedConfigServiceHandler) GetIngesterStatus(context.Context, *connect.Request[v1.GetIngesterStatusRequest]) (*connect.Response[v1.GetIngesterStatusResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.GetIngesterStatus is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) PutFilter(context.Context, *connect.Request[v1.PutFilterRequest]) (*connect.Response[v1.PutFilterResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.PutFilter is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) DeleteFilter(context.Context, *connect.Request[v1.DeleteFilterRequest]) (*connect.Response[v1.DeleteFilterResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.DeleteFilter is not implemented"))
 }
 
 func (UnimplementedConfigServiceHandler) PutRotationPolicy(context.Context, *connect.Request[v1.PutRotationPolicyRequest]) (*connect.Response[v1.PutRotationPolicyResponse], error) {

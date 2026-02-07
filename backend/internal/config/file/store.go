@@ -141,10 +141,62 @@ func (s *Store) loadOrEmpty() (*config.Config, error) {
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
+	if cfg.Filters == nil {
+		cfg.Filters = make(map[string]config.FilterConfig)
+	}
 	if cfg.RotationPolicies == nil {
 		cfg.RotationPolicies = make(map[string]config.RotationPolicyConfig)
 	}
 	return cfg, nil
+}
+
+// Filters
+
+func (s *Store) GetFilter(ctx context.Context, id string) (*config.FilterConfig, error) {
+	cfg, err := s.load()
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil {
+		return nil, nil
+	}
+	fc, ok := cfg.Filters[id]
+	if !ok {
+		return nil, nil
+	}
+	return &fc, nil
+}
+
+func (s *Store) ListFilters(ctx context.Context) (map[string]config.FilterConfig, error) {
+	cfg, err := s.load()
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil {
+		return make(map[string]config.FilterConfig), nil
+	}
+	if cfg.Filters == nil {
+		return make(map[string]config.FilterConfig), nil
+	}
+	return cfg.Filters, nil
+}
+
+func (s *Store) PutFilter(ctx context.Context, id string, fc config.FilterConfig) error {
+	cfg, err := s.loadOrEmpty()
+	if err != nil {
+		return err
+	}
+	cfg.Filters[id] = fc
+	return s.flush(cfg)
+}
+
+func (s *Store) DeleteFilter(ctx context.Context, id string) error {
+	cfg, err := s.loadOrEmpty()
+	if err != nil {
+		return err
+	}
+	delete(cfg.Filters, id)
+	return s.flush(cfg)
 }
 
 // Rotation policies

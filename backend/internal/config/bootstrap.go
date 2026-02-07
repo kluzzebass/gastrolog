@@ -7,6 +7,9 @@ import "context"
 // with a 5-minute rotation policy.
 func DefaultConfig() *Config {
 	return &Config{
+		Filters: map[string]FilterConfig{
+			"catch-all": {Expression: "*"},
+		},
 		RotationPolicies: map[string]RotationPolicyConfig{
 			"default": {MaxAge: StringPtr("5m")},
 		},
@@ -14,7 +17,7 @@ func DefaultConfig() *Config {
 			{
 				ID:     "default",
 				Type:   "memory",
-				Filter: StringPtr("*"),
+				Filter: StringPtr("catch-all"),
 				Policy: StringPtr("default"),
 			},
 		},
@@ -38,6 +41,11 @@ func DefaultConfig() *Config {
 func Bootstrap(ctx context.Context, store Store) error {
 	cfg := DefaultConfig()
 
+	for id, fc := range cfg.Filters {
+		if err := store.PutFilter(ctx, id, fc); err != nil {
+			return err
+		}
+	}
 	for id, rp := range cfg.RotationPolicies {
 		if err := store.PutRotationPolicy(ctx, id, rp); err != nil {
 			return err

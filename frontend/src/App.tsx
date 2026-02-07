@@ -55,7 +55,7 @@ function AppContent() {
   const [showHelp, setShowHelp] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<
-    "service" | "stores" | "ingesters" | "policies"
+    "service" | "stores" | "ingesters" | "filters" | "policies"
   >("service");
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(
     null,

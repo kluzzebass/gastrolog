@@ -32,11 +32,17 @@ import (
 //
 // Validation: Store does not validate config semantics. It only ensures
 // the data can be serialized/deserialized. Semantic validation (duplicate
-// IDs, unknown types, dangling route references) is the responsibility of
+// IDs, unknown types, dangling filter references) is the responsibility of
 // the component that consumes the config (e.g., Orchestrator at startup).
 type Store interface {
 	// Load reads the full configuration. Returns nil if nothing exists (bootstrap signal).
 	Load(ctx context.Context) (*Config, error)
+
+	// Filters
+	GetFilter(ctx context.Context, id string) (*FilterConfig, error)
+	ListFilters(ctx context.Context) (map[string]FilterConfig, error)
+	PutFilter(ctx context.Context, id string, cfg FilterConfig) error
+	DeleteFilter(ctx context.Context, id string) error
 
 	// Rotation policies
 	GetRotationPolicy(ctx context.Context, id string) (*RotationPolicyConfig, error)
@@ -60,9 +66,23 @@ type Store interface {
 // Config describes the desired system shape.
 // It is declarative: it defines what should exist, not how to create it.
 type Config struct {
+	Filters          map[string]FilterConfig         `json:"filters,omitempty"`
 	RotationPolicies map[string]RotationPolicyConfig `json:"rotationPolicies,omitempty"`
 	Ingesters        []IngesterConfig                `json:"ingesters,omitempty"`
 	Stores           []StoreConfig                   `json:"stores,omitempty"`
+}
+
+// FilterConfig defines a named filter expression.
+// Stores reference filters by ID to determine which messages they receive.
+type FilterConfig struct {
+	// Expression is the filter expression string.
+	// Special values:
+	//   - "*": catch-all, receives all messages
+	//   - "+": catch-the-rest, receives messages that matched no other filter
+	//   - any other value: querylang expression matched against message attrs
+	//     (e.g., "env=prod AND level=error")
+	// Empty expression means the store receives nothing.
+	Expression string `json:"expression"`
 }
 
 // RotationPolicyConfig defines when chunks should be rotated.
@@ -185,14 +205,8 @@ type StoreConfig struct {
 	// Type identifies the store implementation (e.g., "file", "memory").
 	Type string `json:"type"`
 
-	// Filter defines which messages this store receives based on attributes.
-	// Special values:
-	//   - nil: receives nothing (safe default for unconfigured stores)
-	//   - "*": catch-all, receives all messages
-	//   - "+": catch-the-rest, receives messages that matched no other filter
-	//   - any other value: querylang expression matched against message attrs
-	//     (e.g., "env=prod AND level=error")
-	// Token predicates are not allowed in filters (only attr-based filtering).
+	// Filter references a named filter from Config.Filters by ID.
+	// Nil means no filter (store receives nothing).
 	Filter *string `json:"filter,omitempty"`
 
 	// Policy references a named rotation policy from Config.RotationPolicies.

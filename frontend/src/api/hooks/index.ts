@@ -6,6 +6,8 @@ export { useHistogram } from "./useHistogram";
 export { useLiveHistogram } from "./useLiveHistogram";
 export {
   useConfig,
+  usePutFilter,
+  useDeleteFilter,
   usePutRotationPolicy,
   useDeleteRotationPolicy,
   usePutStore,

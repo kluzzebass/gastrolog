@@ -41,11 +41,11 @@ func (s *ConfigServer) GetConfig(
 		Stores:           make([]*apiv1.StoreConfig, 0),
 		Ingesters:        make([]*apiv1.IngesterConfig, 0),
 		RotationPolicies: make(map[string]*apiv1.RotationPolicyConfig),
+		Filters:          make(map[string]*apiv1.FilterConfig),
 	}
 
 	if s.cfgStore != nil {
-		// Get store configs from config store (has full type/params),
-		// then merge live filter from orchestrator.
+		// Get store configs from config store.
 		cfgStores, err := s.cfgStore.ListStores(ctx)
 		if err == nil {
 			for _, storeCfg := range cfgStores {
@@ -60,15 +60,11 @@ func (s *ConfigServer) GetConfig(
 				if storeCfg.Policy != nil {
 					sc.Policy = *storeCfg.Policy
 				}
-				// Override filter with live value from orchestrator if available.
-				if liveCfg, err := s.orch.StoreConfig(storeCfg.ID); err == nil && liveCfg.Filter != nil {
-					sc.Filter = *liveCfg.Filter
-				}
 				resp.Stores = append(resp.Stores, sc)
 			}
 		}
 
-		// Get ingester configs from config store for full type/params info.
+		// Get ingester configs from config store.
 		ingesters, err := s.cfgStore.ListIngesters(ctx)
 		if err == nil {
 			for _, ing := range ingesters {
@@ -77,6 +73,14 @@ func (s *ConfigServer) GetConfig(
 					Type:   ing.Type,
 					Params: ing.Params,
 				})
+			}
+		}
+
+		// Get filters from config store.
+		filters, err := s.cfgStore.ListFilters(ctx)
+		if err == nil {
+			for id, fc := range filters {
+				resp.Filters[id] = &apiv1.FilterConfig{Expression: fc.Expression}
 			}
 		}
 
@@ -92,23 +96,66 @@ func (s *ConfigServer) GetConfig(
 	return connect.NewResponse(resp), nil
 }
 
-// UpdateStoreFilter updates a store's filter expression.
-func (s *ConfigServer) UpdateStoreFilter(
+// PutFilter creates or updates a filter.
+func (s *ConfigServer) PutFilter(
 	ctx context.Context,
-	req *connect.Request[apiv1.UpdateStoreFilterRequest],
-) (*connect.Response[apiv1.UpdateStoreFilterResponse], error) {
-	if req.Msg.StoreId == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store_id required"))
+	req *connect.Request[apiv1.PutFilterRequest],
+) (*connect.Response[apiv1.PutFilterResponse], error) {
+	if req.Msg.Id == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
+	}
+	if req.Msg.Config == nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("config required"))
 	}
 
-	if err := s.orch.UpdateStoreFilter(req.Msg.StoreId, req.Msg.Filter); err != nil {
-		if errors.Is(err, orchestrator.ErrStoreNotFound) {
-			return nil, connect.NewError(connect.CodeNotFound, err)
+	// Validate expression by trying to compile it.
+	if _, err := orchestrator.CompileFilter("_validate", req.Msg.Config.Expression); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid filter expression: %w", err))
+	}
+
+	cfg := config.FilterConfig{Expression: req.Msg.Config.Expression}
+	if err := s.cfgStore.PutFilter(ctx, req.Msg.Id, cfg); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	// Reload filters in orchestrator.
+	fullCfg, err := s.cfgStore.Load(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload config: %w", err))
+	}
+	if err := s.orch.UpdateFilters(fullCfg); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update filters: %w", err))
+	}
+
+	return connect.NewResponse(&apiv1.PutFilterResponse{}), nil
+}
+
+// DeleteFilter removes a filter.
+func (s *ConfigServer) DeleteFilter(
+	ctx context.Context,
+	req *connect.Request[apiv1.DeleteFilterRequest],
+) (*connect.Response[apiv1.DeleteFilterResponse], error) {
+	if req.Msg.Id == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
+	}
+
+	// Check referential integrity: reject if any store references this filter.
+	stores, err := s.cfgStore.ListStores(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	for _, st := range stores {
+		if st.Filter != nil && *st.Filter == req.Msg.Id {
+			return nil, connect.NewError(connect.CodeFailedPrecondition,
+				fmt.Errorf("filter %q is referenced by store %q", req.Msg.Id, st.ID))
 		}
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	return connect.NewResponse(&apiv1.UpdateStoreFilterResponse{}), nil
+	if err := s.cfgStore.DeleteFilter(ctx, req.Msg.Id); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	return connect.NewResponse(&apiv1.DeleteFilterResponse{}), nil
 }
 
 // ListIngesters returns all registered ingesters.
@@ -222,6 +269,12 @@ func (s *ConfigServer) PutStore(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
+	// Reload full config for filter resolution.
+	fullCfg, err := s.cfgStore.Load(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload config: %w", err))
+	}
+
 	// Apply to runtime: check if store already exists.
 	existing := false
 	for _, id := range s.orch.ListStores() {
@@ -232,17 +285,13 @@ func (s *ConfigServer) PutStore(
 	}
 
 	if existing {
-		// Update filter on existing store.
-		filter := ""
-		if storeCfg.Filter != nil {
-			filter = *storeCfg.Filter
-		}
-		if err := s.orch.UpdateStoreFilter(storeCfg.ID, filter); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update store filter: %w", err))
+		// Reload filters for this store (filter ID may have changed).
+		if err := s.orch.UpdateFilters(fullCfg); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update filters: %w", err))
 		}
 	} else {
 		// Add new store to orchestrator.
-		if err := s.orch.AddStore(storeCfg, s.factories); err != nil {
+		if err := s.orch.AddStore(storeCfg, fullCfg, s.factories); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("add store: %w", err))
 		}
 	}

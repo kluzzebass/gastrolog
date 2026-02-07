@@ -78,11 +78,12 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 		}
 		storeIDs[storeCfg.ID] = true
 
-		// Compile filter expression.
-		var filterExpr string
+		// Resolve filter ID to expression and compile.
+		var filterID string
 		if storeCfg.Filter != nil {
-			filterExpr = *storeCfg.Filter
+			filterID = *storeCfg.Filter
 		}
+		filterExpr := resolveFilterExpr(cfg, filterID)
 		f, err := CompileFilter(storeCfg.ID, filterExpr)
 		if err != nil {
 			return fmt.Errorf("invalid filter for store %s: %w", storeCfg.ID, err)

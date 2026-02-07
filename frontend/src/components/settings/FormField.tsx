@@ -2,7 +2,7 @@ import { useState } from "react";
 
 interface FormFieldProps {
   label: string;
-  description?: string;
+  description?: React.ReactNode;
   dark: boolean;
   children: React.ReactNode;
 }
@@ -23,11 +23,11 @@ export function FormField({
       </label>
       {children}
       {description && (
-        <p
-          className={`text-[0.7em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+        <div
+          className={`text-[0.85em] leading-relaxed ${c("text-text-muted", "text-light-text-muted")}`}
         >
           {description}
-        </p>
+        </div>
       )}
     </div>
   );

@@ -1,9 +1,15 @@
 import { useEffect } from "react";
 import { StoresSettings } from "./StoresSettings";
 import { IngestersSettings } from "./IngestersSettings";
+import { FiltersSettings } from "./FiltersSettings";
 import { PoliciesSettings } from "./PoliciesSettings";
 
-export type SettingsTab = "service" | "stores" | "ingesters" | "policies";
+export type SettingsTab =
+  | "service"
+  | "stores"
+  | "ingesters"
+  | "filters"
+  | "policies";
 
 interface SettingsDialogProps {
   dark: boolean;
@@ -19,6 +25,7 @@ const tabs: {
 }[] = [
   { id: "service", label: "Service", icon: ServiceIcon },
   { id: "ingesters", label: "Ingesters", icon: IngesterIcon },
+  { id: "filters", label: "Filters", icon: FilterIcon },
   { id: "policies", label: "Rotation Policies", icon: PolicyIcon },
   { id: "stores", label: "Stores", icon: StorageIcon },
 ];
@@ -97,6 +104,7 @@ export function SettingsDialog({
         <div className="flex-1 overflow-y-auto p-5">
           {tab === "service" && <ServiceSettings dark={dark} />}
           {tab === "ingesters" && <IngestersSettings dark={dark} />}
+          {tab === "filters" && <FiltersSettings dark={dark} />}
           {tab === "policies" && <PoliciesSettings dark={dark} />}
           {tab === "stores" && <StoresSettings dark={dark} />}
         </div>
@@ -138,6 +146,22 @@ function ServiceIcon({ className }: { className?: string }) {
     >
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
+function FilterIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
     </svg>
   );
 }

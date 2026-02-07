@@ -9,14 +9,17 @@ service ConfigService {
   // GetConfig returns the current configuration.
   rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
 
-  // UpdateStoreFilter updates a store's filter expression.
-  rpc UpdateStoreFilter(UpdateStoreFilterRequest) returns (UpdateStoreFilterResponse);
-
   // ListIngesters returns all registered ingesters.
   rpc ListIngesters(ListIngestersRequest) returns (ListIngestersResponse);
 
   // GetIngesterStatus returns status for a specific ingester.
   rpc GetIngesterStatus(GetIngesterStatusRequest) returns (GetIngesterStatusResponse);
+
+  // PutFilter creates or updates a filter.
+  rpc PutFilter(PutFilterRequest) returns (PutFilterResponse);
+
+  // DeleteFilter removes a filter.
+  rpc DeleteFilter(DeleteFilterRequest) returns (DeleteFilterResponse);
 
   // PutRotationPolicy creates or updates a rotation policy.
   rpc PutRotationPolicy(PutRotationPolicyRequest) returns (PutRotationPolicyResponse);
@@ -43,6 +46,7 @@ message GetConfigResponse {
   repeated StoreConfig stores = 1;
   repeated IngesterConfig ingesters = 2;
   map<string, RotationPolicyConfig> rotation_policies = 3;
+  map<string, FilterConfig> filters = 4;
 }
 
 message StoreConfig {
@@ -59,18 +63,15 @@ message IngesterConfig {
   map<string, string> params = 3;
 }
 
+message FilterConfig {
+  string expression = 1;
+}
+
 message RotationPolicyConfig {
   int64 max_bytes = 1;
   int64 max_records = 2;
   int64 max_age_seconds = 3;
 }
-
-message UpdateStoreFilterRequest {
-  string store_id = 1;
-  string filter = 2;
-}
-
-message UpdateStoreFilterResponse {}
 
 message ListIngestersRequest {}
 
@@ -95,6 +96,19 @@ message GetIngesterStatusResponse {
   int64 messages_ingested = 4;
   int64 errors = 5;
 }
+
+message PutFilterRequest {
+  string id = 1;
+  FilterConfig config = 2;
+}
+
+message PutFilterResponse {}
+
+message DeleteFilterRequest {
+  string id = 1;
+}
+
+message DeleteFilterResponse {}
 
 message PutRotationPolicyRequest {
   string id = 1;

@@ -20,10 +20,23 @@ var (
 	ErrDuplicateID = errors.New("duplicate ID")
 )
 
+// resolveFilterExpr looks up a filter ID in the config and returns its expression.
+// Returns empty string if the filter ID is empty or not found (store receives nothing).
+func resolveFilterExpr(cfg *config.Config, filterID string) string {
+	if filterID == "" || cfg == nil || cfg.Filters == nil {
+		return ""
+	}
+	fc, ok := cfg.Filters[filterID]
+	if !ok {
+		return ""
+	}
+	return fc.Expression
+}
+
 // UpdateFilters recompiles filter expressions from store configs and hot-swaps the filter set.
 // This can be called while the system is running without disrupting ingestion.
 //
-// The filters are compiled from the Filter field of each store in the config.
+// Store filter fields are resolved as filter IDs via cfg.Filters.
 // Only stores that are currently registered in the orchestrator are included.
 // Stores in the config that don't exist in the orchestrator are ignored.
 func (o *Orchestrator) UpdateFilters(cfg *config.Config) error {
@@ -42,10 +55,11 @@ func (o *Orchestrator) UpdateFilters(cfg *config.Config) error {
 			continue
 		}
 
-		var filterExpr string
+		var filterID string
 		if storeCfg.Filter != nil {
-			filterExpr = *storeCfg.Filter
+			filterID = *storeCfg.Filter
 		}
+		filterExpr := resolveFilterExpr(cfg, filterID)
 		f, err := CompileFilter(storeCfg.ID, filterExpr)
 		if err != nil {
 			return fmt.Errorf("invalid filter for store %s: %w", storeCfg.ID, err)
@@ -122,9 +136,10 @@ func (o *Orchestrator) RemoveIngester(id string) error {
 	return nil
 }
 
-// AddStore adds a new store (chunk manager, index manager, query engine) and updates the router.
+// AddStore adds a new store (chunk manager, index manager, query engine) and updates the filter set.
+// The cfg parameter is needed to resolve the store's filter ID to a filter expression.
 // Returns ErrDuplicateID if a store with this ID already exists.
-func (o *Orchestrator) AddStore(storeCfg config.StoreConfig, factories Factories) error {
+func (o *Orchestrator) AddStore(storeCfg config.StoreConfig, cfg *config.Config, factories Factories) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -169,10 +184,11 @@ func (o *Orchestrator) AddStore(storeCfg config.StoreConfig, factories Factories
 	o.queries[storeCfg.ID] = qe
 
 	// Update filter set to include the new store's filter.
-	var filterExpr string
+	var filterID string
 	if storeCfg.Filter != nil {
-		filterExpr = *storeCfg.Filter
+		filterID = *storeCfg.Filter
 	}
+	filterExpr := resolveFilterExpr(cfg, filterID)
 	if err := o.updateFilterLocked(storeCfg.ID, filterExpr); err != nil {
 		// Rollback registration on filter error.
 		delete(o.chunks, storeCfg.ID)

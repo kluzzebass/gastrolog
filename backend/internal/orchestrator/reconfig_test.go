@@ -22,9 +22,13 @@ func TestUpdateFilters(t *testing.T) {
 
 	// Initially set filters: prod gets env=prod, archive is catch-all.
 	cfg := &config.Config{
+		Filters: map[string]config.FilterConfig{
+			"prod-filter": {Expression: "env=prod"},
+			"catch-all":   {Expression: "*"},
+		},
 		Stores: []config.StoreConfig{
-			{ID: "prod", Filter: config.StringPtr("env=prod")},
-			{ID: "archive", Filter: config.StringPtr("*")},
+			{ID: "prod", Filter: config.StringPtr("prod-filter")},
+			{ID: "archive", Filter: config.StringPtr("catch-all")},
 		},
 	}
 	if err := orch.UpdateFilters(cfg); err != nil {
@@ -50,9 +54,13 @@ func TestUpdateFilters(t *testing.T) {
 
 	// Now update filters: prod gets env=staging instead.
 	cfg2 := &config.Config{
+		Filters: map[string]config.FilterConfig{
+			"prod-filter": {Expression: "env=staging"},
+			"catch-all":   {Expression: "*"},
+		},
 		Stores: []config.StoreConfig{
-			{ID: "prod", Filter: config.StringPtr("env=staging")},
-			{ID: "archive", Filter: config.StringPtr("*")},
+			{ID: "prod", Filter: config.StringPtr("prod-filter")},
+			{ID: "archive", Filter: config.StringPtr("catch-all")},
 		},
 	}
 	if err := orch.UpdateFilters(cfg2); err != nil {
@@ -82,8 +90,11 @@ func TestUpdateFiltersInvalidExpression(t *testing.T) {
 	orch, _ := newFilteredTestSetup(t)
 
 	cfg := &config.Config{
+		Filters: map[string]config.FilterConfig{
+			"invalid": {Expression: "(unclosed"},
+		},
 		Stores: []config.StoreConfig{
-			{ID: "prod", Filter: config.StringPtr("(unclosed")},
+			{ID: "prod", Filter: config.StringPtr("invalid")},
 		},
 	}
 	err := orch.UpdateFilters(cfg)
@@ -97,9 +108,13 @@ func TestUpdateFiltersIgnoresUnknownStores(t *testing.T) {
 
 	// Include a store that doesn't exist - should be ignored.
 	cfg := &config.Config{
+		Filters: map[string]config.FilterConfig{
+			"prod-filter": {Expression: "env=prod"},
+			"catch-all":   {Expression: "*"},
+		},
 		Stores: []config.StoreConfig{
-			{ID: "prod", Filter: config.StringPtr("env=prod")},
-			{ID: "nonexistent", Filter: config.StringPtr("*")},
+			{ID: "prod", Filter: config.StringPtr("prod-filter")},
+			{ID: "nonexistent", Filter: config.StringPtr("catch-all")},
 		},
 	}
 	if err := orch.UpdateFilters(cfg); err != nil {
@@ -119,13 +134,19 @@ func TestAddStore(t *testing.T) {
 		},
 	}
 
+	cfg := &config.Config{
+		Filters: map[string]config.FilterConfig{
+			"test-filter": {Expression: "env=test"},
+		},
+	}
+
 	storeCfg := config.StoreConfig{
 		ID:     "new-store",
 		Type:   "memory",
-		Filter: config.StringPtr("env=test"),
+		Filter: config.StringPtr("test-filter"),
 	}
 
-	if err := orch.AddStore(storeCfg, factories); err != nil {
+	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
 		t.Fatalf("AddStore: %v", err)
 	}
 
@@ -162,18 +183,24 @@ func TestAddStoreDuplicate(t *testing.T) {
 		},
 	}
 
+	cfg := &config.Config{
+		Filters: map[string]config.FilterConfig{
+			"catch-all": {Expression: "*"},
+		},
+	}
+
 	storeCfg := config.StoreConfig{
 		ID:     "store1",
 		Type:   "memory",
-		Filter: config.StringPtr("*"),
+		Filter: config.StringPtr("catch-all"),
 	}
 
-	if err := orch.AddStore(storeCfg, factories); err != nil {
+	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
 		t.Fatalf("AddStore: %v", err)
 	}
 
 	// Adding again should fail.
-	err := orch.AddStore(storeCfg, factories)
+	err := orch.AddStore(storeCfg, cfg, factories)
 	if err == nil {
 		t.Fatal("expected error for duplicate store")
 	}
@@ -191,13 +218,19 @@ func TestRemoveStoreEmpty(t *testing.T) {
 		},
 	}
 
+	cfg := &config.Config{
+		Filters: map[string]config.FilterConfig{
+			"catch-all": {Expression: "*"},
+		},
+	}
+
 	storeCfg := config.StoreConfig{
 		ID:     "temp-store",
 		Type:   "memory",
-		Filter: config.StringPtr("*"),
+		Filter: config.StringPtr("catch-all"),
 	}
 
-	if err := orch.AddStore(storeCfg, factories); err != nil {
+	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
 		t.Fatalf("AddStore: %v", err)
 	}
 
@@ -224,13 +257,19 @@ func TestRemoveStoreNotEmpty(t *testing.T) {
 		},
 	}
 
+	cfg := &config.Config{
+		Filters: map[string]config.FilterConfig{
+			"catch-all": {Expression: "*"},
+		},
+	}
+
 	storeCfg := config.StoreConfig{
 		ID:     "store-with-data",
 		Type:   "memory",
-		Filter: config.StringPtr("*"),
+		Filter: config.StringPtr("catch-all"),
 	}
 
-	if err := orch.AddStore(storeCfg, factories); err != nil {
+	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
 		t.Fatalf("AddStore: %v", err)
 	}
 
@@ -423,13 +462,19 @@ func TestStoreConfig(t *testing.T) {
 		},
 	}
 
+	cfg := &config.Config{
+		Filters: map[string]config.FilterConfig{
+			"prod-errors": {Expression: "env=prod AND level=error"},
+		},
+	}
+
 	storeCfg := config.StoreConfig{
 		ID:     "test-store",
 		Type:   "memory",
-		Filter: config.StringPtr("env=prod AND level=error"),
+		Filter: config.StringPtr("prod-errors"),
 	}
 
-	if err := orch.AddStore(storeCfg, factories); err != nil {
+	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
 		t.Fatalf("AddStore: %v", err)
 	}
 
@@ -442,6 +487,7 @@ func TestStoreConfig(t *testing.T) {
 	if gotCfg.ID != "test-store" {
 		t.Errorf("ID: expected %q, got %q", "test-store", gotCfg.ID)
 	}
+	// StoreConfig returns the filter expression (not the filter ID).
 	if gotCfg.Filter == nil || *gotCfg.Filter != "env=prod AND level=error" {
 		t.Errorf("Filter: expected %q, got %v", "env=prod AND level=error", gotCfg.Filter)
 	}
@@ -518,13 +564,19 @@ func TestSetRotationPolicyDirectly(t *testing.T) {
 		},
 	}
 
+	cfg := &config.Config{
+		Filters: map[string]config.FilterConfig{
+			"catch-all": {Expression: "*"},
+		},
+	}
+
 	storeCfg := config.StoreConfig{
 		ID:     "test-store",
 		Type:   "memory",
-		Filter: config.StringPtr("*"),
+		Filter: config.StringPtr("catch-all"),
 	}
 
-	if err := orch.AddStore(storeCfg, factories); err != nil {
+	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
 		t.Fatalf("AddStore: %v", err)
 	}
 
@@ -575,13 +627,19 @@ func TestUpdateStoreFilterInvalid(t *testing.T) {
 		},
 	}
 
+	cfg := &config.Config{
+		Filters: map[string]config.FilterConfig{
+			"catch-all": {Expression: "*"},
+		},
+	}
+
 	storeCfg := config.StoreConfig{
 		ID:     "test-store",
 		Type:   "memory",
-		Filter: config.StringPtr("*"),
+		Filter: config.StringPtr("catch-all"),
 	}
 
-	if err := orch.AddStore(storeCfg, factories); err != nil {
+	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
 		t.Fatalf("AddStore: %v", err)
 	}
 

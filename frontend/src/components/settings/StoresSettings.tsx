@@ -26,12 +26,18 @@ export function StoresSettings({ dark }: { dark: boolean }) {
   // New store form state.
   const [newId, setNewId] = useState("");
   const [newType, setNewType] = useState("memory");
-  const [newFilter, setNewFilter] = useState("*");
+  const [newFilter, setNewFilter] = useState("");
   const [newPolicy, setNewPolicy] = useState("");
   const [newParams, setNewParams] = useState<Record<string, string>>({});
 
   const stores = config?.stores ?? [];
   const policies = config?.rotationPolicies ?? {};
+  const filters = config?.filters ?? {};
+
+  const filterOptions = [
+    { value: "", label: "(none)" },
+    ...Object.keys(filters).map((id) => ({ value: id, label: id })),
+  ];
 
   const policyOptions = [
     { value: "", label: "(none)" },
@@ -117,7 +123,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
       setAdding(false);
       setNewId("");
       setNewType("memory");
-      setNewFilter("*");
+      setNewFilter("");
       setNewPolicy("");
       setNewParams({});
     } catch (err: any) {
@@ -181,17 +187,12 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                 </FormField>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <FormField
-                  label="Filter"
-                  description="Use * for catch-all, + for catch-the-rest"
-                  dark={dark}
-                >
-                  <TextInput
+                <FormField label="Filter" dark={dark}>
+                  <SelectInput
                     value={newFilter}
                     onChange={setNewFilter}
-                    placeholder="*"
+                    options={filterOptions}
                     dark={dark}
-                    mono
                   />
                 </FormField>
                 <FormField label="Rotation Policy" dark={dark}>
@@ -249,16 +250,12 @@ export function StoresSettings({ dark }: { dark: boolean }) {
             >
               <div className="flex flex-col gap-3">
                 <div className="grid grid-cols-2 gap-3">
-                  <FormField
-                    label="Filter"
-                    description="Use * for catch-all, + for catch-the-rest"
-                    dark={dark}
-                  >
-                    <TextInput
+                  <FormField label="Filter" dark={dark}>
+                    <SelectInput
                       value={edit.filter}
                       onChange={(v) => setEdit(store.id, { filter: v })}
+                      options={filterOptions}
                       dark={dark}
-                      mono
                     />
                   </FormField>
                   <FormField label="Rotation Policy" dark={dark}>

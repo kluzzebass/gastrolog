@@ -12,6 +12,29 @@ export function useConfig() {
   });
 }
 
+export function usePutFilter() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { id: string; expression: string }) => {
+      await configClient.putFilter({
+        id: args.id,
+        config: { expression: args.expression },
+      });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["config"] }),
+  });
+}
+
+export function useDeleteFilter() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await configClient.deleteFilter({ id });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["config"] }),
+  });
+}
+
 export function usePutRotationPolicy() {
   const qc = useQueryClient();
   return useMutation({

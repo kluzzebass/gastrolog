@@ -58,7 +58,8 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 	// Check if anything exists.
 	var count int
 	err := s.db.QueryRowContext(ctx, `
-		SELECT (SELECT count(*) FROM rotation_policies)
+		SELECT (SELECT count(*) FROM filters)
+		     + (SELECT count(*) FROM rotation_policies)
 		     + (SELECT count(*) FROM stores)
 		     + (SELECT count(*) FROM ingesters)
 	`).Scan(&count)
@@ -69,6 +70,10 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 		return nil, nil
 	}
 
+	filters, err := s.ListFilters(ctx)
+	if err != nil {
+		return nil, err
+	}
 	policies, err := s.ListRotationPolicies(ctx)
 	if err != nil {
 		return nil, err
@@ -83,10 +88,70 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 	}
 
 	return &config.Config{
+		Filters:          filters,
 		RotationPolicies: policies,
 		Stores:           stores,
 		Ingesters:        ingesters,
 	}, nil
+}
+
+// Filters
+
+func (s *Store) GetFilter(ctx context.Context, id string) (*config.FilterConfig, error) {
+	row := s.db.QueryRowContext(ctx,
+		"SELECT expression FROM filters WHERE filter_id = ?", id)
+
+	var fc config.FilterConfig
+	err := row.Scan(&fc.Expression)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get filter %q: %w", id, err)
+	}
+	return &fc, nil
+}
+
+func (s *Store) ListFilters(ctx context.Context) (map[string]config.FilterConfig, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT filter_id, expression FROM filters")
+	if err != nil {
+		return nil, fmt.Errorf("list filters: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]config.FilterConfig)
+	for rows.Next() {
+		var id string
+		var fc config.FilterConfig
+		if err := rows.Scan(&id, &fc.Expression); err != nil {
+			return nil, fmt.Errorf("scan filter: %w", err)
+		}
+		result[id] = fc
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) PutFilter(ctx context.Context, id string, fc config.FilterConfig) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO filters (filter_id, expression)
+		VALUES (?, ?)
+		ON CONFLICT(filter_id) DO UPDATE SET
+			expression = excluded.expression
+	`, id, fc.Expression)
+	if err != nil {
+		return fmt.Errorf("put filter %q: %w", id, err)
+	}
+	return nil
+}
+
+func (s *Store) DeleteFilter(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx,
+		"DELETE FROM filters WHERE filter_id = ?", id)
+	if err != nil {
+		return fmt.Errorf("delete filter %q: %w", id, err)
+	}
+	return nil
 }
 
 // Rotation policies

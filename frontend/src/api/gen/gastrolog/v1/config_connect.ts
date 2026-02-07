@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { DeleteIngesterRequest, DeleteIngesterResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteStoreRequest, DeleteStoreResponse, GetConfigRequest, GetConfigResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, ListIngestersRequest, ListIngestersResponse, PutIngesterRequest, PutIngesterResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutStoreRequest, PutStoreResponse, UpdateStoreFilterRequest, UpdateStoreFilterResponse } from "./config_pb.js";
+import { DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteStoreRequest, DeleteStoreResponse, GetConfigRequest, GetConfigResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, ListIngestersRequest, ListIngestersResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutStoreRequest, PutStoreResponse } from "./config_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -26,17 +26,6 @@ export const ConfigService = {
       kind: MethodKind.Unary,
     },
     /**
-     * UpdateStoreFilter updates a store's filter expression.
-     *
-     * @generated from rpc gastrolog.v1.ConfigService.UpdateStoreFilter
-     */
-    updateStoreFilter: {
-      name: "UpdateStoreFilter",
-      I: UpdateStoreFilterRequest,
-      O: UpdateStoreFilterResponse,
-      kind: MethodKind.Unary,
-    },
-    /**
      * ListIngesters returns all registered ingesters.
      *
      * @generated from rpc gastrolog.v1.ConfigService.ListIngesters
@@ -56,6 +45,28 @@ export const ConfigService = {
       name: "GetIngesterStatus",
       I: GetIngesterStatusRequest,
       O: GetIngesterStatusResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * PutFilter creates or updates a filter.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.PutFilter
+     */
+    putFilter: {
+      name: "PutFilter",
+      I: PutFilterRequest,
+      O: PutFilterResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * DeleteFilter removes a filter.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.DeleteFilter
+     */
+    deleteFilter: {
+      name: "DeleteFilter",
+      I: DeleteFilterRequest,
+      O: DeleteFilterResponse,
       kind: MethodKind.Unary,
     },
     /**

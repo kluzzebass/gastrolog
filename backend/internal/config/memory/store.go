@@ -12,6 +12,7 @@ import (
 // Store is an in-memory ConfigStore implementation.
 type Store struct {
 	mu               sync.RWMutex
+	filters          map[string]config.FilterConfig
 	rotationPolicies map[string]config.RotationPolicyConfig
 	stores           map[string]config.StoreConfig
 	ingesters        map[string]config.IngesterConfig
@@ -22,6 +23,7 @@ var _ config.Store = (*Store)(nil)
 // NewStore creates a new in-memory ConfigStore.
 func NewStore() *Store {
 	return &Store{
+		filters:          make(map[string]config.FilterConfig),
 		rotationPolicies: make(map[string]config.RotationPolicyConfig),
 		stores:           make(map[string]config.StoreConfig),
 		ingesters:        make(map[string]config.IngesterConfig),
@@ -34,11 +36,18 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	if len(s.rotationPolicies) == 0 && len(s.stores) == 0 && len(s.ingesters) == 0 {
+	if len(s.filters) == 0 && len(s.rotationPolicies) == 0 && len(s.stores) == 0 && len(s.ingesters) == 0 {
 		return nil, nil
 	}
 
 	cfg := &config.Config{}
+
+	if len(s.filters) > 0 {
+		cfg.Filters = make(map[string]config.FilterConfig, len(s.filters))
+		for id, fc := range s.filters {
+			cfg.Filters[id] = copyFilterConfig(fc)
+		}
+	}
 
 	if len(s.rotationPolicies) > 0 {
 		cfg.RotationPolicies = make(map[string]config.RotationPolicyConfig, len(s.rotationPolicies))
@@ -62,6 +71,47 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// Filters
+
+func (s *Store) GetFilter(ctx context.Context, id string) (*config.FilterConfig, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	fc, ok := s.filters[id]
+	if !ok {
+		return nil, nil
+	}
+	c := copyFilterConfig(fc)
+	return &c, nil
+}
+
+func (s *Store) ListFilters(ctx context.Context) (map[string]config.FilterConfig, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make(map[string]config.FilterConfig, len(s.filters))
+	for id, fc := range s.filters {
+		result[id] = copyFilterConfig(fc)
+	}
+	return result, nil
+}
+
+func (s *Store) PutFilter(ctx context.Context, id string, cfg config.FilterConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.filters[id] = copyFilterConfig(cfg)
+	return nil
+}
+
+func (s *Store) DeleteFilter(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.filters, id)
+	return nil
 }
 
 // Rotation policies
@@ -188,6 +238,10 @@ func (s *Store) DeleteIngester(ctx context.Context, id string) error {
 }
 
 // Deep copy helpers
+
+func copyFilterConfig(fc config.FilterConfig) config.FilterConfig {
+	return config.FilterConfig{Expression: fc.Expression}
+}
 
 func copyRotationPolicy(rp config.RotationPolicyConfig) config.RotationPolicyConfig {
 	c := config.RotationPolicyConfig{}
