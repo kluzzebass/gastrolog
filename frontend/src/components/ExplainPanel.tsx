@@ -36,10 +36,11 @@ function stepToRanges(step: PipelineStep, expression: string): Range[] {
       ];
 
     case "token": {
-      const match = step.predicate.match(/^token\((.+)\)$/);
-      if (!match) return [];
-      const words = match[1].split(/,\s*/);
-      return words.flatMap((w) => findBareWordRanges(expression, w));
+      const inner = step.predicate.match(/^token\((.+)\)$/)?.[1];
+      if (!inner) return [];
+      return inner
+        .split(/,\s*/)
+        .flatMap((w) => findBareWordRanges(expression, w));
     }
 
     case "kv": {
