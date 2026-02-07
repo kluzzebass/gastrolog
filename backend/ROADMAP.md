@@ -6,14 +6,15 @@ Go 1.25+ backend with Connect RPC server, interactive REPL, chunk-based storage,
 
 ### What's Done
 
-- **Core**: Chunk-based storage (file + memory), orchestrator with ingest routing and seal detection
+- **Core**: Chunk-based storage (file + memory), orchestrator with store filters and seal detection
 - **Indexing**: Token, attribute, and KV indexes with budget control and callgroup deduplication
 - **Query**: Boolean expressions, time bounds, pagination, context windows, explain plans, multi-store search
 - **REPL**: 12 commands, bubbletea pager, live follow mode, vim-style navigation, multi-store support
 - **Ingesters**: Chatterbox (test, 6 formats with SourceTS), HTTP/Loki (Push API), Syslog (RFC 3164/5424, UDP+TCP)
+- **Ingester identity**: Each ingester stamps `ingester_type` and `ingester_id` on every message via factory-provided ID
 - **Server**: Connect RPC with 4 services, h2c, graceful shutdown with drain, k8s probes
 - **Histogram**: Time-bucketed record counts via binary search, severity-stacked level breakdown using KV indexes
-- **Config**: File-based with runtime reconfiguration
+- **Config**: SQLite-backed with runtime CRUD (stores, ingesters, rotation policies)
 - **ChunkID**: 13-char base32hex timestamps (lexicographically time-sorted)
 
 ## Phase 1: Retention & Storage
@@ -21,7 +22,7 @@ Go 1.25+ backend with Connect RPC server, interactive REPL, chunk-based storage,
 ### 1.1 Retention
 - [ ] TTL-based chunk deletion
 - [ ] Size-based retention (keep last N bytes)
-- [ ] Policy per store
+- [x] Policy per store (rotation policies with max bytes/records/age, assignable to stores)
 - [ ] Background cleanup goroutine
 
 ### 1.2 Compression
@@ -77,7 +78,7 @@ Go 1.25+ backend with Connect RPC server, interactive REPL, chunk-based storage,
 - [ ] systemd service file
 
 ### 5.3 Config
-- [ ] Replace file-based config with SQLite
+- [x] Replace file-based config with SQLite (runtime CRUD for stores, ingesters, rotation policies)
 - [ ] Config versioning and rollback
 
 ## Phase 6: Security

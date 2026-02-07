@@ -22,6 +22,9 @@ React 19 + Vite 7 + TypeScript + Tailwind v4 + Bun. Connect RPC client talks to 
 - **Theme**: Dark/light mode toggle, Observatory design with copper/amber accents, light-mode-safe highlights
 - **ChunkID**: 13-char base32hex timestamp strings (no more UUID byte decoding)
 - **SourceTS**: Displayed in detail panel when available
+- **Settings Dialog**: Modal dialog for configuring stores, ingesters, and rotation policies (CRUD)
+- **Type-specific forms**: Chatterbox format checkboxes with weighted probability, syslog UDP/TCP addrs, HTTP listen addr, file store directory
+- **Follow→Search**: Time range selection and histogram brush in follow mode switch to search mode
 
 ## Phase 1: Live Tail (Follow)
 
@@ -44,6 +47,7 @@ React 19 + Vite 7 + TypeScript + Tailwind v4 + Bun. Connect RPC client talks to 
 - [x] Wire up `StoreService.ListStores` RPC with auto-refresh
 - [x] Display store metadata (record count, byte size, chunk count)
 - [x] Store filtering/selection for queries (click to add `store=` filter, click again to remove)
+- [x] Store CRUD via settings dialog (create, edit filter/policy, delete)
 - [ ] Store health indicators
 
 ### 2.2 Chunk Browser
@@ -53,9 +57,9 @@ React 19 + Vite 7 + TypeScript + Tailwind v4 + Bun. Connect RPC client talks to 
 - [ ] Chunk detail view with index status
 
 ### 2.3 Statistics
-- [ ] Wire up `StoreService.GetStats` RPC
+- [x] Wire up `StoreService.GetStats` RPC (header stat pills: records, stores, sealed, storage)
 - [ ] Dashboard widgets for key metrics
-- [ ] Auto-refresh
+- [x] Auto-refresh
 
 ## Phase 3: Query UX
 
