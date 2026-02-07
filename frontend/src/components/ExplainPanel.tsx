@@ -163,6 +163,9 @@ export function ExplainPanel({
         )}
       </div>
 
+      {/* Cost summary */}
+      {chunks.length > 0 && <CostSummary chunks={chunks} dark={dark} />}
+
       {/* Scrollable chunk list */}
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden app-scroll">
         <div className="flex flex-col gap-2">
@@ -210,6 +213,90 @@ function ExpressionBox({
         ) : (
           <span key={i}>{seg.text}</span>
         ),
+      )}
+    </div>
+  );
+}
+
+function CostSummary({ chunks, dark }: { chunks: ChunkPlan[]; dark: boolean }) {
+  const c = (d: string, l: string) => (dark ? d : l);
+
+  const totalRecords = chunks.reduce(
+    (sum, ch) => sum + Number(ch.recordCount),
+    0,
+  );
+  const skipped = chunks.filter((ch) => ch.scanMode === "skipped");
+  const scanned = chunks.filter((ch) => ch.scanMode !== "skipped");
+  const totalScan = scanned.reduce(
+    (sum, ch) => sum + Number(ch.estimatedRecords),
+    0,
+  );
+  const indexDriven = scanned.filter(
+    (ch) => ch.scanMode === "index-driven",
+  ).length;
+  const sequential = scanned.filter(
+    (ch) => ch.scanMode === "sequential",
+  ).length;
+  const reduction = totalRecords > 0 ? (1 - totalScan / totalRecords) * 100 : 0;
+
+  return (
+    <div
+      className={`shrink-0 rounded border px-3.5 py-2.5 mb-3 ${c("bg-ink-surface border-ink-border-subtle", "bg-light-surface border-light-border-subtle")}`}
+    >
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[0.8em] font-mono">
+        <span className={c("text-text-muted", "text-light-text-muted")}>
+          scan{" "}
+          <strong className={c("text-text-bright", "text-light-text-bright")}>
+            ~{totalScan.toLocaleString()}
+          </strong>
+          <span className={c("text-text-ghost", "text-light-text-ghost")}>
+            {" "}
+            / {totalRecords.toLocaleString()} records
+          </span>
+        </span>
+        <span className={c("text-text-muted", "text-light-text-muted")}>
+          chunks{" "}
+          <strong className={c("text-text-bright", "text-light-text-bright")}>
+            {scanned.length}
+          </strong>
+          {skipped.length > 0 && (
+            <span className={c("text-text-ghost", "text-light-text-ghost")}>
+              {" "}
+              ({skipped.length} skipped)
+            </span>
+          )}
+        </span>
+        {scanned.length > 0 && (
+          <span className={c("text-text-muted", "text-light-text-muted")}>
+            {indexDriven > 0 && (
+              <span className="text-severity-info">{indexDriven} indexed</span>
+            )}
+            {indexDriven > 0 && sequential > 0 && ", "}
+            {sequential > 0 && (
+              <span className="text-severity-warn">
+                {sequential} sequential
+              </span>
+            )}
+          </span>
+        )}
+        {reduction > 0 && (
+          <span className="text-copper font-semibold">
+            {reduction.toFixed(0)}% reduced
+          </span>
+        )}
+      </div>
+      {/* Reduction bar */}
+      {totalRecords > 0 && (
+        <div
+          className={`mt-2 h-1.5 rounded-full overflow-hidden ${c("bg-ink-border-subtle/60", "bg-light-border/50")}`}
+        >
+          <div
+            className="h-full bg-copper/80 rounded-full"
+            style={{
+              width: `${Math.min(Math.max((totalScan / totalRecords) * 100, 0.5), 100)}%`,
+            }}
+          />
+        </div>
       )}
     </div>
   );
