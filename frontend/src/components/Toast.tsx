@@ -142,7 +142,7 @@ function ToastItem({
         visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
       }`}
     >
-      <span className="flex-1 break-words">{toast.message}</span>
+      <span className="flex-1 wrap-break-word">{toast.message}</span>
       <button
         onClick={() => onDismiss(toast.id)}
         className="shrink-0 w-5 h-5 flex items-center justify-center rounded opacity-60 hover:opacity-100 transition-opacity"
