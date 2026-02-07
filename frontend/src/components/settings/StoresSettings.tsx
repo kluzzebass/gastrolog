@@ -235,6 +235,12 @@ export function StoresSettings({ dark }: { dark: boolean }) {
         {/* Existing stores */}
         {stores.map((store) => {
           const edit = getEdit(store);
+          const hasPolicy = store.policy && store.policy in policies;
+          const hasFilter = store.filter && store.filter in filters;
+          const warnings = [
+            ...(!hasPolicy ? ["no rotation policy"] : []),
+            ...(!hasFilter ? ["no filter"] : []),
+          ];
           return (
             <SettingsCard
               key={store.id}
@@ -247,6 +253,13 @@ export function StoresSettings({ dark }: { dark: boolean }) {
               }
               onDelete={() => handleDelete(store.id)}
               deleteLabel="Delete"
+              status={
+                warnings.length > 0 ? (
+                  <span className="text-[0.85em] text-severity-warn">
+                    {warnings.join(", ")}
+                  </span>
+                ) : undefined
+              }
             >
               <div className="flex flex-col gap-3">
                 <div className="grid grid-cols-2 gap-3">

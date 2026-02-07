@@ -139,17 +139,19 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
   };
 
   const handleDelete = async (id: string) => {
-    const referencedBy = stores.filter((s) => s.policy === id).map((s) => s.id);
-    if (referencedBy.length > 0) {
-      addToast(
-        `Policy "${id}" is referenced by store(s): ${referencedBy.join(", ")}`,
-        "warn",
-      );
-      return;
-    }
     try {
       await deletePolicy.mutateAsync(id);
-      addToast(`Policy "${id}" deleted`, "info");
+      const referencedBy = stores
+        .filter((s) => s.policy === id)
+        .map((s) => s.id);
+      if (referencedBy.length > 0) {
+        addToast(
+          `Policy "${id}" deleted (was used by: ${referencedBy.join(", ")})`,
+          "warn",
+        );
+      } else {
+        addToast(`Policy "${id}" deleted`, "info");
+      }
     } catch (err: any) {
       addToast(err.message ?? "Failed to delete policy", "error");
     }
@@ -295,7 +297,7 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
               status={
                 refs.length > 0 ? (
                   <span
-                    className={`text-[0.7em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+                    className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
                   >
                     used by: {refs.join(", ")}
                   </span>

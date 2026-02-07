@@ -228,6 +228,15 @@ func (s *ConfigServer) PutRotationPolicy(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
+	// Hot-reload rotation policies for running stores.
+	fullCfg, err := s.cfgStore.Load(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload config: %w", err))
+	}
+	if err := s.orch.UpdateRotationPolicies(fullCfg); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update rotation policies: %w", err))
+	}
+
 	return connect.NewResponse(&apiv1.PutRotationPolicyResponse{}), nil
 }
 
@@ -238,6 +247,20 @@ func (s *ConfigServer) DeleteRotationPolicy(
 ) (*connect.Response[apiv1.DeleteRotationPolicyResponse], error) {
 	if req.Msg.Id == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
+	}
+
+	// Clear policy reference on any stores that use it.
+	stores, err := s.cfgStore.ListStores(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	for _, st := range stores {
+		if st.Policy != nil && *st.Policy == req.Msg.Id {
+			st.Policy = nil
+			if err := s.cfgStore.PutStore(ctx, st); err != nil {
+				return nil, connect.NewError(connect.CodeInternal, err)
+			}
+		}
 	}
 
 	if err := s.cfgStore.DeleteRotationPolicy(ctx, req.Msg.Id); err != nil {
@@ -285,9 +308,12 @@ func (s *ConfigServer) PutStore(
 	}
 
 	if existing {
-		// Reload filters for this store (filter ID may have changed).
+		// Reload filters and rotation policies (references may have changed).
 		if err := s.orch.UpdateFilters(fullCfg); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update filters: %w", err))
+		}
+		if err := s.orch.UpdateRotationPolicies(fullCfg); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update rotation policies: %w", err))
 		}
 	} else {
 		// Add new store to orchestrator.

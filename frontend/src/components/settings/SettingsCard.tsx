@@ -42,15 +42,19 @@ export function SettingsCard({
         onClick={onToggle}
       >
         <div className="flex items-center gap-2.5">
-          <span className={`text-[0.7em] transition-transform ${expanded ? "rotate-90" : ""}`}>
+          <span
+            className={`text-[0.7em] transition-transform ${expanded ? "rotate-90" : ""}`}
+          >
             {"\u25B6"}
           </span>
-          <span className={`font-mono text-[0.9em] font-medium ${c("text-text-bright", "text-light-text-bright")}`}>
+          <span
+            className={`font-mono text-[0.9em] font-medium ${c("text-text-bright", "text-light-text-bright")}`}
+          >
             {id}
           </span>
           {typeBadge && (
             <span
-              className={`px-1.5 py-0.5 text-[0.7em] font-mono rounded ${c(
+              className={`px-1.5 py-0.5 text-[0.8em] font-mono rounded ${c(
                 "bg-ink-hover text-text-muted",
                 "bg-light-hover text-light-text-muted",
               )}`}
@@ -76,12 +80,20 @@ export function SettingsCard({
             </button>
           )}
           {onDelete && confirmDelete && (
-            <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-              <span className={`text-[0.75em] ${c("text-severity-error", "text-severity-error")}`}>
+            <div
+              className="flex items-center gap-1.5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span
+                className={`text-[0.75em] ${c("text-severity-error", "text-severity-error")}`}
+              >
                 Confirm?
               </span>
               <button
-                onClick={() => { onDelete(); setConfirmDelete(false); }}
+                onClick={() => {
+                  onDelete();
+                  setConfirmDelete(false);
+                }}
                 className="px-2 py-1 text-[0.75em] rounded bg-severity-error/15 text-severity-error hover:bg-severity-error/25 transition-colors"
               >
                 Yes
@@ -102,7 +114,9 @@ export function SettingsCard({
 
       {/* Body */}
       {expanded && (
-        <div className={`px-4 pb-4 pt-1 border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}`}>
+        <div
+          className={`px-4 pb-4 pt-1 border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
+        >
           {children}
         </div>
       )}

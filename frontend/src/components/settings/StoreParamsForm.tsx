@@ -1,4 +1,4 @@
-import { FormField, TextInput } from "./FormField";
+import { FormField, TextInput, NumberInput } from "./FormField";
 
 interface StoreParamsFormProps {
   storeType: string;
@@ -35,7 +35,23 @@ export function StoreParamsForm({
     );
   }
 
-  // Memory stores have no required params — rotation is handled by the assigned policy.
+  if (storeType === "memory") {
+    return (
+      <FormField
+        label="Max Chunks"
+        description="Maximum number of chunks kept in memory. Oldest are evicted when exceeded. Default 10."
+        dark={dark}
+      >
+        <NumberInput
+          value={get("maxChunks")}
+          onChange={(v) => set("maxChunks", v)}
+          placeholder="10"
+          dark={dark}
+          min={1}
+        />
+      </FormField>
+    );
+  }
 
   return null;
 }

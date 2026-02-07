@@ -317,6 +317,51 @@ func (o *Orchestrator) StoreConfig(id string) (config.StoreConfig, error) {
 	return cfg, nil
 }
 
+// UpdateRotationPolicies resolves rotation policy references for all registered stores
+// and hot-swaps their rotation policies. This is called when a rotation policy is
+// created, updated, or deleted to immediately apply changes to running stores.
+//
+// Stores that don't reference any policy are left unchanged.
+// Stores referencing a policy that no longer exists get a nil policy (type default).
+func (o *Orchestrator) UpdateRotationPolicies(cfg *config.Config) error {
+	if cfg == nil {
+		return nil
+	}
+
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+
+	for _, storeCfg := range cfg.Stores {
+		cm, ok := o.chunks[storeCfg.ID]
+		if !ok {
+			continue // Store not registered in orchestrator.
+		}
+		if storeCfg.Policy == nil {
+			continue // Store doesn't reference a policy.
+		}
+
+		policyCfg, ok := cfg.RotationPolicies[*storeCfg.Policy]
+		if !ok {
+			// Policy was deleted — nothing to do; store keeps its current policy.
+			// We can't revert to "type default" from here, and the dangling
+			// reference will be caught on next restart or store edit.
+			o.logger.Warn("store references unknown policy", "store", storeCfg.ID, "policy", *storeCfg.Policy)
+			continue
+		}
+
+		policy, err := policyCfg.ToRotationPolicy()
+		if err != nil {
+			return fmt.Errorf("invalid policy %s for store %s: %w", *storeCfg.Policy, storeCfg.ID, err)
+		}
+		if policy != nil {
+			cm.SetRotationPolicy(policy)
+			o.logger.Info("store rotation policy updated", "store", storeCfg.ID, "policy", *storeCfg.Policy)
+		}
+	}
+
+	return nil
+}
+
 // UpdateStoreFilter updates a store's filter expression.
 // Returns ErrStoreNotFound if the store doesn't exist.
 //

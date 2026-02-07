@@ -1,9 +1,5 @@
 import { useState } from "react";
-import {
-  useConfig,
-  usePutFilter,
-  useDeleteFilter,
-} from "../../api/hooks";
+import { useConfig, usePutFilter, useDeleteFilter } from "../../api/hooks";
 import { useToast } from "../Toast";
 import { SettingsCard } from "./SettingsCard";
 import { FormField, TextInput } from "./FormField";
@@ -14,8 +10,8 @@ function FilterDescription({ dark }: { dark: boolean }) {
   return (
     <div className="flex flex-col gap-1.5">
       <p>
-        Determines which ingested messages are stored. Each message's
-        attributes are tested against this expression.
+        Determines which ingested messages are stored. Each message's attributes
+        are tested against this expression.
       </p>
       <div className="flex flex-col gap-1">
         <p>
@@ -52,7 +48,9 @@ export function FiltersSettings({ dark }: { dark: boolean }) {
 
   const [expanded, setExpanded] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  const [edits, setEdits] = useState<Record<string, { expression: string }>>({});
+  const [edits, setEdits] = useState<Record<string, { expression: string }>>(
+    {},
+  );
 
   const [newId, setNewId] = useState("");
   const [newExpression, setNewExpression] = useState("");
@@ -218,7 +216,7 @@ export function FiltersSettings({ dark }: { dark: boolean }) {
               status={
                 refs.length > 0 ? (
                   <span
-                    className={`text-[0.7em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+                    className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
                   >
                     used by: {refs.join(", ")}
                   </span>
