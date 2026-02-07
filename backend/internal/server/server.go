@@ -14,6 +14,7 @@ import (
 	"golang.org/x/net/http2/h2c"
 
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
+	"gastrolog/internal/config"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 )
@@ -26,8 +27,10 @@ type Config struct {
 
 // Server is the Connect RPC server for GastroLog.
 type Server struct {
-	orch   *orchestrator.Orchestrator
-	logger *slog.Logger
+	orch      *orchestrator.Orchestrator
+	cfgStore  config.Store
+	factories orchestrator.Factories
+	logger    *slog.Logger
 
 	mu       sync.Mutex
 	listener net.Listener
@@ -38,11 +41,13 @@ type Server struct {
 }
 
 // New creates a new Server.
-func New(orch *orchestrator.Orchestrator, cfg Config) *Server {
+func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, cfg Config) *Server {
 	return &Server{
-		orch:     orch,
-		logger:   logging.Default(cfg.Logger).With("component", "server"),
-		shutdown: make(chan struct{}),
+		orch:      orch,
+		cfgStore:  cfgStore,
+		factories: factories,
+		logger:    logging.Default(cfg.Logger).With("component", "server"),
+		shutdown:  make(chan struct{}),
 	}
 }
 
@@ -112,7 +117,7 @@ func (s *Server) Serve(listener net.Listener) error {
 	// Create service handlers
 	queryServer := NewQueryServer(s.orch)
 	storeServer := NewStoreServer(s.orch)
-	configServer := NewConfigServer(s.orch)
+	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories)
 	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown)
 
 	// Register handlers
@@ -223,7 +228,7 @@ func (s *Server) Handler() http.Handler {
 
 	queryServer := NewQueryServer(s.orch)
 	storeServer := NewStoreServer(s.orch)
-	configServer := NewConfigServer(s.orch)
+	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories)
 	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown)
 
 	mux.Handle(gastrologv1connect.NewQueryServiceHandler(queryServer))

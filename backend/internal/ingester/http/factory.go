@@ -9,7 +9,7 @@ import (
 
 // NewFactory returns a IngesterFactory for HTTP ingesters.
 func NewFactory() orchestrator.IngesterFactory {
-	return func(params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+	return func(id string, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
 		addr := params["addr"]
 		if addr == "" {
 			addr = ":3100" // Loki's default port
@@ -31,6 +31,7 @@ func NewFactory() orchestrator.IngesterFactory {
 		}
 
 		return New(Config{
+			ID:     id,
 			Addr:   addr,
 			Logger: logger,
 		}), nil

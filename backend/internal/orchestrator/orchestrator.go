@@ -75,8 +75,8 @@ type Orchestrator struct {
 	// Digesters (message enrichment pipeline).
 	digesters []Digester
 
-	// Routing.
-	router *Router
+	// Store filters.
+	filterSet *FilterSet
 
 	// Ingest channel and lifecycle.
 	ingestCh     chan IngestMessage

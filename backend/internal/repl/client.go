@@ -59,7 +59,7 @@ type TokenIndexEntry struct {
 // StoreInfo holds information about a store.
 type StoreInfo struct {
 	ID          string
-	Route       string
+	Filter      string
 	ChunkCount  int
 	RecordCount int64
 }

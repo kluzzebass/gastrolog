@@ -25,12 +25,12 @@ func TestParseBytesValid(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.input, func(t *testing.T) {
-			got, err := parseBytes(tc.input)
+			got, err := ParseBytes(tc.input)
 			if err != nil {
-				t.Fatalf("parseBytes(%q) error: %v", tc.input, err)
+				t.Fatalf("ParseBytes(%q) error: %v", tc.input, err)
 			}
 			if got != tc.expected {
-				t.Errorf("parseBytes(%q) = %d, want %d", tc.input, got, tc.expected)
+				t.Errorf("ParseBytes(%q) = %d, want %d", tc.input, got, tc.expected)
 			}
 		})
 	}
@@ -46,9 +46,9 @@ func TestParseBytesInvalid(t *testing.T) {
 
 	for _, input := range tests {
 		t.Run(input, func(t *testing.T) {
-			_, err := parseBytes(input)
+			_, err := ParseBytes(input)
 			if err == nil {
-				t.Errorf("parseBytes(%q) expected error, got nil", input)
+				t.Errorf("ParseBytes(%q) expected error, got nil", input)
 			}
 		})
 	}

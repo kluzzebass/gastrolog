@@ -13,7 +13,7 @@ import (
 // This provides the same gRPC interface as a remote connection but without
 // any network overhead - ideal for embedded/standalone mode.
 func NewEmbeddedClient(orch *orchestrator.Orchestrator) *GRPCClient {
-	srv := server.New(orch, server.Config{})
+	srv := server.New(orch, nil, orchestrator.Factories{}, server.Config{})
 	handler := srv.Handler()
 
 	// Create a custom HTTP client that routes requests directly to the handler

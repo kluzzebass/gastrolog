@@ -330,7 +330,7 @@ func (s *StoreServer) getStoreInfo(id string) (*apiv1.StoreInfo, error) {
 		recordCount += meta.RecordCount
 	}
 
-	// Get route expression
+	// Get filter expression
 	cfg, _ := s.orch.StoreConfig(id)
 
 	info := &apiv1.StoreInfo{
@@ -338,8 +338,8 @@ func (s *StoreServer) getStoreInfo(id string) (*apiv1.StoreInfo, error) {
 		ChunkCount:  int64(len(metas)),
 		RecordCount: recordCount,
 	}
-	if cfg.Route != nil {
-		info.Route = *cfg.Route
+	if cfg.Filter != nil {
+		info.Filter = *cfg.Filter
 	}
 	return info, nil
 }

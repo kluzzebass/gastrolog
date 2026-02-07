@@ -178,7 +178,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		st := config.StoreConfig{
 			ID:     "main",
 			Type:   "file",
-			Route:  config.StringPtr("*"),
+			Filter: config.StringPtr("*"),
 			Policy: config.StringPtr("default"),
 			Params: map[string]string{"dir": "/var/log"},
 		}
@@ -200,7 +200,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if got.Type != "file" {
 			t.Errorf("Type: expected %q, got %q", "file", got.Type)
 		}
-		assertStringPtr(t, "Route", got.Route, "*")
+		assertStringPtr(t, "Filter", got.Filter, "*")
 		assertStringPtr(t, "Policy", got.Policy, "default")
 		if got.Params["dir"] != "/var/log" {
 			t.Errorf("Params[dir]: expected %q, got %q", "/var/log", got.Params["dir"])
@@ -211,12 +211,12 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		st1 := config.StoreConfig{ID: "s1", Type: "file", Route: config.StringPtr("*")}
+		st1 := config.StoreConfig{ID: "s1", Type: "file", Filter: config.StringPtr("*")}
 		if err := s.PutStore(ctx, st1); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		st2 := config.StoreConfig{ID: "s1", Type: "memory", Route: config.StringPtr("env=prod")}
+		st2 := config.StoreConfig{ID: "s1", Type: "memory", Filter: config.StringPtr("env=prod")}
 		if err := s.PutStore(ctx, st2); err != nil {
 			t.Fatalf("Put upsert: %v", err)
 		}
@@ -474,7 +474,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if err := s.PutRotationPolicy(ctx, "slow", config.RotationPolicyConfig{MaxAge: config.StringPtr("1h")}); err != nil {
 			t.Fatalf("PutRotationPolicy: %v", err)
 		}
-		if err := s.PutStore(ctx, config.StoreConfig{ID: "main", Type: "file", Route: config.StringPtr("*"), Policy: config.StringPtr("fast")}); err != nil {
+		if err := s.PutStore(ctx, config.StoreConfig{ID: "main", Type: "file", Filter: config.StringPtr("*"), Policy: config.StringPtr("fast")}); err != nil {
 			t.Fatalf("PutStore: %v", err)
 		}
 		if err := s.PutIngester(ctx, config.IngesterConfig{ID: "sys1", Type: "syslog-udp", Params: map[string]string{"port": "514"}}); err != nil {

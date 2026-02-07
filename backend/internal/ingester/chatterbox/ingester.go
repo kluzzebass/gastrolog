@@ -20,9 +20,9 @@ import (
 //   - Logging is intentionally sparse; only lifecycle events are logged
 //   - No logging in the message generation loop
 type Ingester struct {
+	id          string
 	minInterval time.Duration
 	maxInterval time.Duration
-	instance    string
 	rng         *rand.Rand
 
 	// formats holds the available log format generators.
@@ -80,13 +80,12 @@ func (r *Ingester) generateMessage() orchestrator.IngestMessage {
 	raw, formatAttrs, sourceTS := format.Generate(r.rng)
 
 	// Merge base attrs with format attrs.
-	// Base attrs take precedence (ingester_type, instance are always set).
 	attrs := make(map[string]string, len(formatAttrs)+2)
 	for k, v := range formatAttrs {
 		attrs[k] = v
 	}
 	attrs["ingester_type"] = "chatterbox"
-	attrs["instance"] = r.instance
+	attrs["ingester_id"] = r.id
 
 	return orchestrator.IngestMessage{
 		Attrs:    attrs,

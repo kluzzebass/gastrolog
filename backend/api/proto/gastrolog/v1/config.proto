@@ -9,14 +9,32 @@ service ConfigService {
   // GetConfig returns the current configuration.
   rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
 
-  // UpdateStoreRoute updates a store's routing expression.
-  rpc UpdateStoreRoute(UpdateStoreRouteRequest) returns (UpdateStoreRouteResponse);
+  // UpdateStoreFilter updates a store's filter expression.
+  rpc UpdateStoreFilter(UpdateStoreFilterRequest) returns (UpdateStoreFilterResponse);
 
   // ListIngesters returns all registered ingesters.
   rpc ListIngesters(ListIngestersRequest) returns (ListIngestersResponse);
 
   // GetIngesterStatus returns status for a specific ingester.
   rpc GetIngesterStatus(GetIngesterStatusRequest) returns (GetIngesterStatusResponse);
+
+  // PutRotationPolicy creates or updates a rotation policy.
+  rpc PutRotationPolicy(PutRotationPolicyRequest) returns (PutRotationPolicyResponse);
+
+  // DeleteRotationPolicy removes a rotation policy.
+  rpc DeleteRotationPolicy(DeleteRotationPolicyRequest) returns (DeleteRotationPolicyResponse);
+
+  // PutStore creates or updates a store.
+  rpc PutStore(PutStoreRequest) returns (PutStoreResponse);
+
+  // DeleteStore removes a store (must be empty).
+  rpc DeleteStore(DeleteStoreRequest) returns (DeleteStoreResponse);
+
+  // PutIngester creates or updates an ingester.
+  rpc PutIngester(PutIngesterRequest) returns (PutIngesterResponse);
+
+  // DeleteIngester removes an ingester.
+  rpc DeleteIngester(DeleteIngesterRequest) returns (DeleteIngesterResponse);
 }
 
 message GetConfigRequest {}
@@ -30,7 +48,7 @@ message GetConfigResponse {
 message StoreConfig {
   string id = 1;
   string type = 2;
-  string route = 3;
+  string filter = 3;
   string policy = 4;
   map<string, string> params = 5;
 }
@@ -47,12 +65,12 @@ message RotationPolicyConfig {
   int64 max_age_seconds = 3;
 }
 
-message UpdateStoreRouteRequest {
+message UpdateStoreFilterRequest {
   string store_id = 1;
-  string route = 2;
+  string filter = 2;
 }
 
-message UpdateStoreRouteResponse {}
+message UpdateStoreFilterResponse {}
 
 message ListIngestersRequest {}
 
@@ -77,3 +95,40 @@ message GetIngesterStatusResponse {
   int64 messages_ingested = 4;
   int64 errors = 5;
 }
+
+message PutRotationPolicyRequest {
+  string id = 1;
+  RotationPolicyConfig config = 2;
+}
+
+message PutRotationPolicyResponse {}
+
+message DeleteRotationPolicyRequest {
+  string id = 1;
+}
+
+message DeleteRotationPolicyResponse {}
+
+message PutStoreRequest {
+  StoreConfig config = 1;
+}
+
+message PutStoreResponse {}
+
+message DeleteStoreRequest {
+  string id = 1;
+}
+
+message DeleteStoreResponse {}
+
+message PutIngesterRequest {
+  IngesterConfig config = 1;
+}
+
+message PutIngesterResponse {}
+
+message DeleteIngesterRequest {
+  string id = 1;
+}
+
+message DeleteIngesterResponse {}

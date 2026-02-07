@@ -11,7 +11,7 @@ import (
 )
 
 func TestNewIngester_Defaults(t *testing.T) {
-	r, err := NewIngester(nil, nil)
+	r, err := NewIngester("test", nil, nil)
 	if err != nil {
 		t.Fatalf("NewIngester(nil) failed: %v", err)
 	}
@@ -22,18 +22,14 @@ func TestNewIngester_Defaults(t *testing.T) {
 	if recv.maxInterval != 1*time.Second {
 		t.Errorf("maxInterval = %v, want 1s", recv.maxInterval)
 	}
-	if recv.instance != "default" {
-		t.Errorf("instance = %q, want %q", recv.instance, "default")
-	}
 }
 
 func TestNewIngester_CustomParams(t *testing.T) {
 	params := map[string]string{
 		"minInterval": "50ms",
 		"maxInterval": "200ms",
-		"instance":    "test-instance",
 	}
-	r, err := NewIngester(params, nil)
+	r, err := NewIngester("test", params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester(params) failed: %v", err)
 	}
@@ -44,9 +40,6 @@ func TestNewIngester_CustomParams(t *testing.T) {
 	if recv.maxInterval != 200*time.Millisecond {
 		t.Errorf("maxInterval = %v, want 200ms", recv.maxInterval)
 	}
-	if recv.instance != "test-instance" {
-		t.Errorf("instance = %q, want %q", recv.instance, "test-instance")
-	}
 }
 
 func TestNewIngester_SubMillisecond(t *testing.T) {
@@ -54,7 +47,7 @@ func TestNewIngester_SubMillisecond(t *testing.T) {
 		"minInterval": "100us",
 		"maxInterval": "500us",
 	}
-	r, err := NewIngester(params, nil)
+	r, err := NewIngester("test", params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester(params) failed: %v", err)
 	}
@@ -72,7 +65,7 @@ func TestNewIngester_MixedUnits(t *testing.T) {
 		"minInterval": "1.5ms",
 		"maxInterval": "2s",
 	}
-	r, err := NewIngester(params, nil)
+	r, err := NewIngester("test", params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester(params) failed: %v", err)
 	}
@@ -87,7 +80,7 @@ func TestNewIngester_MixedUnits(t *testing.T) {
 
 func TestNewIngester_InvalidMinInterval(t *testing.T) {
 	params := map[string]string{"minInterval": "not-a-duration"}
-	_, err := NewIngester(params, nil)
+	_, err := NewIngester("test", params, nil)
 	if err == nil {
 		t.Error("expected error for invalid min_interval")
 	}
@@ -95,7 +88,7 @@ func TestNewIngester_InvalidMinInterval(t *testing.T) {
 
 func TestNewIngester_InvalidMaxInterval(t *testing.T) {
 	params := map[string]string{"maxInterval": "not-a-duration"}
-	_, err := NewIngester(params, nil)
+	_, err := NewIngester("test", params, nil)
 	if err == nil {
 		t.Error("expected error for invalid max_interval")
 	}
@@ -103,7 +96,7 @@ func TestNewIngester_InvalidMaxInterval(t *testing.T) {
 
 func TestNewIngester_NegativeMinInterval(t *testing.T) {
 	params := map[string]string{"minInterval": "-10ms"}
-	_, err := NewIngester(params, nil)
+	_, err := NewIngester("test", params, nil)
 	if err == nil {
 		t.Error("expected error for negative min_interval")
 	}
@@ -111,7 +104,7 @@ func TestNewIngester_NegativeMinInterval(t *testing.T) {
 
 func TestNewIngester_NegativeMaxInterval(t *testing.T) {
 	params := map[string]string{"maxInterval": "-10ms"}
-	_, err := NewIngester(params, nil)
+	_, err := NewIngester("test", params, nil)
 	if err == nil {
 		t.Error("expected error for negative max_interval")
 	}
@@ -122,7 +115,7 @@ func TestNewIngester_MinExceedsMax(t *testing.T) {
 		"minInterval": "500ms",
 		"maxInterval": "100ms",
 	}
-	_, err := NewIngester(params, nil)
+	_, err := NewIngester("test", params, nil)
 	if err == nil {
 		t.Error("expected error when min > max")
 	}
@@ -133,7 +126,7 @@ func TestNewIngester_EqualMinMax(t *testing.T) {
 		"minInterval": "100ms",
 		"maxInterval": "100ms",
 	}
-	r, err := NewIngester(params, nil)
+	r, err := NewIngester("test", params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester with min=max should succeed: %v", err)
 	}
@@ -147,9 +140,8 @@ func TestRun_EmitsMessages(t *testing.T) {
 	params := map[string]string{
 		"minInterval": "1ms",
 		"maxInterval": "5ms",
-		"instance":    "emit-test",
 	}
-	r, err := NewIngester(params, nil)
+	r, err := NewIngester("test", params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -186,9 +178,6 @@ func TestRun_EmitsMessages(t *testing.T) {
 		if msg.Attrs["ingester_type"] != "chatterbox" {
 			t.Errorf("message %d: ingester attr = %q, want %q", i, msg.Attrs["ingester_type"], "chatterbox")
 		}
-		if msg.Attrs["instance"] != "emit-test" {
-			t.Errorf("message %d: instance attr = %q, want %q", i, msg.Attrs["instance"], "emit-test")
-		}
 		if len(msg.Raw) == 0 {
 			t.Errorf("message %d: Raw is empty", i)
 		}
@@ -203,7 +192,7 @@ func TestRun_StopsOnContextCancel(t *testing.T) {
 		"minInterval": "1s",
 		"maxInterval": "2s",
 	}
-	r, err := NewIngester(params, nil)
+	r, err := NewIngester("test", params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -228,25 +217,19 @@ func TestRun_StopsOnContextCancel(t *testing.T) {
 	}
 }
 
-func TestRun_MultipleInstances(t *testing.T) {
-	params1 := map[string]string{
+func TestRun_ConcurrentIngesters(t *testing.T) {
+	params := map[string]string{
 		"minInterval": "1ms",
 		"maxInterval": "5ms",
-		"instance":    "instance-1",
-	}
-	params2 := map[string]string{
-		"minInterval": "1ms",
-		"maxInterval": "5ms",
-		"instance":    "instance-2",
 	}
 
-	r1, err := NewIngester(params1, nil)
+	r1, err := NewIngester("test", params, nil)
 	if err != nil {
-		t.Fatalf("NewIngester(params1) failed: %v", err)
+		t.Fatalf("NewIngester(r1) failed: %v", err)
 	}
-	r2, err := NewIngester(params2, nil)
+	r2, err := NewIngester("test", params, nil)
 	if err != nil {
-		t.Fatalf("NewIngester(params2) failed: %v", err)
+		t.Fatalf("NewIngester(r2) failed: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -260,29 +243,18 @@ func TestRun_MultipleInstances(t *testing.T) {
 	wg.Wait()
 	close(out)
 
-	instance1Count := 0
-	instance2Count := 0
-	for msg := range out {
-		switch msg.Attrs["instance"] {
-		case "instance-1":
-			instance1Count++
-		case "instance-2":
-			instance2Count++
-		default:
-			t.Errorf("unexpected instance: %q", msg.Attrs["instance"])
-		}
+	count := 0
+	for range out {
+		count++
 	}
 
-	if instance1Count == 0 {
-		t.Error("instance-1 emitted no messages")
-	}
-	if instance2Count == 0 {
-		t.Error("instance-2 emitted no messages")
+	if count < 2 {
+		t.Errorf("expected at least 2 messages from concurrent ingesters, got %d", count)
 	}
 }
 
 func TestRun_ReturnsNilOnCancel(t *testing.T) {
-	r, err := NewIngester(nil, nil)
+	r, err := NewIngester("test", nil, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -306,7 +278,7 @@ func TestRun_ReturnsNilOnCancel(t *testing.T) {
 }
 
 func TestGenerateMessage_Format(t *testing.T) {
-	r, err := NewIngester(map[string]string{"instance": "format-test"}, nil)
+	r, err := NewIngester("test", nil, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -314,28 +286,21 @@ func TestGenerateMessage_Format(t *testing.T) {
 
 	msg := recv.generateMessage()
 
-	// Check attributes.
 	if msg.Attrs["ingester_type"] != "chatterbox" {
 		t.Errorf("ingester attr = %q, want %q", msg.Attrs["ingester_type"], "chatterbox")
 	}
-	if msg.Attrs["instance"] != "format-test" {
-		t.Errorf("instance attr = %q, want %q", msg.Attrs["instance"], "format-test")
-	}
 
-	// Check raw contains expected fields.
-	raw := string(msg.Raw)
-	if len(raw) == 0 {
+	if len(msg.Raw) == 0 {
 		t.Error("Raw is empty")
 	}
 
-	// Check IngestTS is recent.
 	if time.Since(msg.IngestTS) > time.Second {
 		t.Errorf("IngestTS too old: %v", msg.IngestTS)
 	}
 }
 
 func TestRandomInterval_Bounds(t *testing.T) {
-	r, err := NewIngester(map[string]string{
+	r, err := NewIngester("test", map[string]string{
 		"minInterval": "10ms",
 		"maxInterval": "20ms",
 	}, nil)
@@ -353,7 +318,7 @@ func TestRandomInterval_Bounds(t *testing.T) {
 }
 
 func TestRandomInterval_EqualBounds(t *testing.T) {
-	r, err := NewIngester(map[string]string{
+	r, err := NewIngester("test", map[string]string{
 		"minInterval": "50ms",
 		"maxInterval": "50ms",
 	}, nil)
@@ -374,7 +339,7 @@ func TestNewIngester_Formats(t *testing.T) {
 	params := map[string]string{
 		"formats": "json,kv",
 	}
-	r, err := NewIngester(params, nil)
+	r, err := NewIngester("test", params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -385,7 +350,7 @@ func TestNewIngester_Formats(t *testing.T) {
 }
 
 func TestNewIngester_AllFormats(t *testing.T) {
-	r, err := NewIngester(nil, nil)
+	r, err := NewIngester("test", nil, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -399,7 +364,7 @@ func TestNewIngester_UnknownFormat(t *testing.T) {
 	params := map[string]string{
 		"formats": "json,invalid",
 	}
-	_, err := NewIngester(params, nil)
+	_, err := NewIngester("test", params, nil)
 	if err == nil {
 		t.Error("expected error for unknown format")
 	}
@@ -410,7 +375,7 @@ func TestNewIngester_FormatWeights(t *testing.T) {
 		"formats":       "json,kv",
 		"formatWeights": "json=10,kv=5",
 	}
-	r, err := NewIngester(params, nil)
+	r, err := NewIngester("test", params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -429,7 +394,7 @@ func TestNewIngester_InvalidWeight(t *testing.T) {
 		"formats":       "json",
 		"formatWeights": "json=notanumber",
 	}
-	_, err := NewIngester(params, nil)
+	_, err := NewIngester("test", params, nil)
 	if err == nil {
 		t.Error("expected error for invalid weight")
 	}
@@ -440,7 +405,7 @@ func TestNewIngester_ZeroWeight(t *testing.T) {
 		"formats":       "json",
 		"formatWeights": "json=0",
 	}
-	_, err := NewIngester(params, nil)
+	_, err := NewIngester("test", params, nil)
 	if err == nil {
 		t.Error("expected error for zero weight")
 	}
@@ -451,7 +416,7 @@ func TestNewIngester_NegativeWeight(t *testing.T) {
 		"formats":       "json",
 		"formatWeights": "json=-5",
 	}
-	_, err := NewIngester(params, nil)
+	_, err := NewIngester("test", params, nil)
 	if err == nil {
 		t.Error("expected error for negative weight")
 	}
@@ -461,7 +426,7 @@ func TestNewIngester_HostCount(t *testing.T) {
 	params := map[string]string{
 		"hostCount": "20",
 	}
-	r, err := NewIngester(params, nil)
+	r, err := NewIngester("test", params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -486,7 +451,7 @@ func TestNewIngester_InvalidHostCount(t *testing.T) {
 	params := map[string]string{
 		"hostCount": "invalid",
 	}
-	_, err := NewIngester(params, nil)
+	_, err := NewIngester("test", params, nil)
 	if err == nil {
 		t.Error("expected error for invalid host_count")
 	}
@@ -496,7 +461,7 @@ func TestNewIngester_ZeroHostCount(t *testing.T) {
 	params := map[string]string{
 		"hostCount": "0",
 	}
-	_, err := NewIngester(params, nil)
+	_, err := NewIngester("test", params, nil)
 	if err == nil {
 		t.Error("expected error for zero host_count")
 	}
@@ -507,7 +472,7 @@ func TestNewIngester_ServiceCount(t *testing.T) {
 		"serviceCount": "3",
 		"formats":      "plain", // plain format uses service attr
 	}
-	r, err := NewIngester(params, nil)
+	r, err := NewIngester("test", params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -532,7 +497,7 @@ func TestNewIngester_InvalidServiceCount(t *testing.T) {
 	params := map[string]string{
 		"serviceCount": "invalid",
 	}
-	_, err := NewIngester(params, nil)
+	_, err := NewIngester("test", params, nil)
 	if err == nil {
 		t.Error("expected error for invalid service_count")
 	}
@@ -542,7 +507,7 @@ func TestNewIngester_ZeroServiceCount(t *testing.T) {
 	params := map[string]string{
 		"serviceCount": "0",
 	}
-	_, err := NewIngester(params, nil)
+	_, err := NewIngester("test", params, nil)
 	if err == nil {
 		t.Error("expected error for zero service_count")
 	}
@@ -554,7 +519,7 @@ func TestGenerateMessage_MultipleFormats(t *testing.T) {
 		"maxInterval": "5ms",
 		"formats":     "plain,json,kv,access,syslog",
 	}
-	r, err := NewIngester(params, nil)
+	r, err := NewIngester("test", params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -597,7 +562,7 @@ func TestGenerateMessage_WeightedSelection(t *testing.T) {
 		"formats":       "json,plain",
 		"formatWeights": "json=90,plain=10",
 	}
-	r, err := NewIngester(params, nil)
+	r, err := NewIngester("test", params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -619,12 +584,11 @@ func TestGenerateMessage_WeightedSelection(t *testing.T) {
 	}
 }
 
-func TestGenerateMessage_AttrsIncludeIngesterAndInstance(t *testing.T) {
+func TestGenerateMessage_AttrsIncludeIngesterType(t *testing.T) {
 	params := map[string]string{
-		"instance": "test-instance",
-		"formats":  "json",
+		"formats": "json",
 	}
-	r, err := NewIngester(params, nil)
+	r, err := NewIngester("test", params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -632,12 +596,8 @@ func TestGenerateMessage_AttrsIncludeIngesterAndInstance(t *testing.T) {
 
 	msg := recv.generateMessage()
 
-	// Base attrs should always be present
 	if msg.Attrs["ingester_type"] != "chatterbox" {
 		t.Errorf("ingester = %q, want %q", msg.Attrs["ingester_type"], "chatterbox")
-	}
-	if msg.Attrs["instance"] != "test-instance" {
-		t.Errorf("instance = %q, want %q", msg.Attrs["instance"], "test-instance")
 	}
 
 	// Format-specific attrs should also be present (JSON format adds these)

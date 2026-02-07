@@ -8,8 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"connectrpc.com/connect"
-	"gastrolog/api/gen/gastrolog/v1"
+	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
@@ -21,6 +20,8 @@ import (
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 	"gastrolog/internal/server"
+
+	"connectrpc.com/connect"
 )
 
 func TestQueryServerSearch(t *testing.T) {
@@ -49,7 +50,7 @@ func TestQueryServerSearch(t *testing.T) {
 	orch.RegisterQueryEngine("default", query.New(cm, im, nil))
 
 	// Create server
-	srv := server.New(orch, server.Config{})
+	srv := server.New(orch, nil, orchestrator.Factories{}, server.Config{})
 	handler := srv.Handler()
 
 	// Create test server

@@ -47,8 +47,8 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 
 	// Determine which stores should receive this message.
 	var targetStores []string
-	if o.router != nil {
-		targetStores = o.router.Route(rec.Attrs)
+	if o.filterSet != nil {
+		targetStores = o.filterSet.Match(rec.Attrs)
 	} else {
 		// Legacy behavior: fan-out to all stores.
 		targetStores = make([]string, 0, len(o.chunks))
@@ -57,7 +57,7 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 		}
 	}
 
-	// Route to target stores only.
+	// Dispatch to target stores only.
 	for _, key := range targetStores {
 		cm, ok := o.chunks[key]
 		if !ok {

@@ -20,13 +20,13 @@ var (
 	ErrDuplicateID = errors.New("duplicate ID")
 )
 
-// UpdateRoutes recompiles route expressions from store configs and hot-swaps the router.
+// UpdateFilters recompiles filter expressions from store configs and hot-swaps the filter set.
 // This can be called while the system is running without disrupting ingestion.
 //
-// The routes are compiled from the Route field of each store in the config.
+// The filters are compiled from the Filter field of each store in the config.
 // Only stores that are currently registered in the orchestrator are included.
 // Stores in the config that don't exist in the orchestrator are ignored.
-func (o *Orchestrator) UpdateRoutes(cfg *config.Config) error {
+func (o *Orchestrator) UpdateFilters(cfg *config.Config) error {
 	if cfg == nil {
 		return nil
 	}
@@ -34,7 +34,7 @@ func (o *Orchestrator) UpdateRoutes(cfg *config.Config) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
-	var compiledRoutes []*CompiledRoute
+	var compiled []*CompiledFilter
 
 	for _, storeCfg := range cfg.Stores {
 		// Only include stores that are registered.
@@ -42,24 +42,24 @@ func (o *Orchestrator) UpdateRoutes(cfg *config.Config) error {
 			continue
 		}
 
-		var routeExpr string
-		if storeCfg.Route != nil {
-			routeExpr = *storeCfg.Route
+		var filterExpr string
+		if storeCfg.Filter != nil {
+			filterExpr = *storeCfg.Filter
 		}
-		route, err := CompileRoute(storeCfg.ID, routeExpr)
+		f, err := CompileFilter(storeCfg.ID, filterExpr)
 		if err != nil {
-			return fmt.Errorf("invalid route for store %s: %w", storeCfg.ID, err)
+			return fmt.Errorf("invalid filter for store %s: %w", storeCfg.ID, err)
 		}
-		compiledRoutes = append(compiledRoutes, route)
+		compiled = append(compiled, f)
 	}
 
-	// Swap router atomically (we're under the lock).
-	if len(compiledRoutes) > 0 {
-		o.router = NewRouter(compiledRoutes)
-		o.logger.Info("routes updated", "count", len(compiledRoutes))
+	// Swap filter set atomically (we're under the lock).
+	if len(compiled) > 0 {
+		o.filterSet = NewFilterSet(compiled)
+		o.logger.Info("filters updated", "count", len(compiled))
 	} else {
-		o.router = nil
-		o.logger.Warn("routes cleared, messages will fan out to all stores")
+		o.filterSet = nil
+		o.logger.Warn("filters cleared, messages will fan out to all stores")
 	}
 
 	return nil
@@ -168,20 +168,20 @@ func (o *Orchestrator) AddStore(storeCfg config.StoreConfig, factories Factories
 	o.indexes[storeCfg.ID] = im
 	o.queries[storeCfg.ID] = qe
 
-	// Update router to include the new store's route.
-	var routeExpr string
-	if storeCfg.Route != nil {
-		routeExpr = *storeCfg.Route
+	// Update filter set to include the new store's filter.
+	var filterExpr string
+	if storeCfg.Filter != nil {
+		filterExpr = *storeCfg.Filter
 	}
-	if err := o.updateRouterLocked(storeCfg.ID, routeExpr); err != nil {
-		// Rollback registration on route error.
+	if err := o.updateFilterLocked(storeCfg.ID, filterExpr); err != nil {
+		// Rollback registration on filter error.
 		delete(o.chunks, storeCfg.ID)
 		delete(o.indexes, storeCfg.ID)
 		delete(o.queries, storeCfg.ID)
 		return err
 	}
 
-	o.logger.Info("store added", "id", storeCfg.ID, "type", storeCfg.Type, "route", routeExpr)
+	o.logger.Info("store added", "id", storeCfg.ID, "type", storeCfg.Type, "filter", filterExpr)
 	return nil
 }
 
@@ -216,59 +216,59 @@ func (o *Orchestrator) RemoveStore(id string) error {
 	delete(o.indexes, id)
 	delete(o.queries, id)
 
-	// Rebuild router without this store.
-	o.rebuildRouterLocked()
+	// Rebuild filter set without this store.
+	o.rebuildFilterSetLocked()
 
 	o.logger.Info("store removed", "id", id)
 	return nil
 }
 
-// updateRouterLocked adds or updates a single store's route in the router.
+// updateFilterLocked adds or updates a single store's filter in the filter set.
 // Must be called with o.mu held.
-func (o *Orchestrator) updateRouterLocked(storeID, routeExpr string) error {
-	route, err := CompileRoute(storeID, routeExpr)
+func (o *Orchestrator) updateFilterLocked(storeID, filterExpr string) error {
+	f, err := CompileFilter(storeID, filterExpr)
 	if err != nil {
-		return fmt.Errorf("invalid route for store %s: %w", storeID, err)
+		return fmt.Errorf("invalid filter for store %s: %w", storeID, err)
 	}
 
-	// Rebuild routes including the new one.
-	var routes []*CompiledRoute
+	// Rebuild filters including the new one.
+	var filters []*CompiledFilter
 
-	// Keep existing routes for other stores.
-	if o.router != nil {
-		for _, r := range o.router.routes {
-			if r.StoreID != storeID {
-				routes = append(routes, r)
+	// Keep existing filters for other stores.
+	if o.filterSet != nil {
+		for _, existing := range o.filterSet.filters {
+			if existing.StoreID != storeID {
+				filters = append(filters, existing)
 			}
 		}
 	}
 
-	// Add the new/updated route.
-	routes = append(routes, route)
+	// Add the new/updated filter.
+	filters = append(filters, f)
 
-	o.router = NewRouter(routes)
+	o.filterSet = NewFilterSet(filters)
 	return nil
 }
 
-// rebuildRouterLocked rebuilds the router from currently registered stores.
+// rebuildFilterSetLocked rebuilds the filter set from currently registered stores.
 // Must be called with o.mu held.
-// This is used after removing a store to exclude its route.
-func (o *Orchestrator) rebuildRouterLocked() {
-	if o.router == nil {
+// This is used after removing a store to exclude its filter.
+func (o *Orchestrator) rebuildFilterSetLocked() {
+	if o.filterSet == nil {
 		return
 	}
 
-	var routes []*CompiledRoute
-	for _, r := range o.router.routes {
-		if _, exists := o.chunks[r.StoreID]; exists {
-			routes = append(routes, r)
+	var filters []*CompiledFilter
+	for _, f := range o.filterSet.filters {
+		if _, exists := o.chunks[f.StoreID]; exists {
+			filters = append(filters, f)
 		}
 	}
 
-	if len(routes) > 0 {
-		o.router = NewRouter(routes)
+	if len(filters) > 0 {
+		o.filterSet = NewFilterSet(filters)
 	} else {
-		o.router = nil
+		o.filterSet = nil
 	}
 }
 
@@ -285,14 +285,14 @@ func (o *Orchestrator) StoreConfig(id string) (config.StoreConfig, error) {
 	cfg := config.StoreConfig{
 		ID: id,
 		// Type and Params are not tracked after creation.
-		// Route can be extracted from router.
+		// Filter can be extracted from filter set.
 	}
 
-	if o.router != nil {
-		for _, r := range o.router.routes {
-			if r.StoreID == id {
-				expr := routeExpr(r)
-				cfg.Route = &expr
+	if o.filterSet != nil {
+		for _, f := range o.filterSet.filters {
+			if f.StoreID == id {
+				expr := f.Expr
+				cfg.Filter = &expr
 				break
 			}
 		}
@@ -301,17 +301,12 @@ func (o *Orchestrator) StoreConfig(id string) (config.StoreConfig, error) {
 	return cfg, nil
 }
 
-// routeExpr returns the original route expression from a compiled route.
-func routeExpr(r *CompiledRoute) string {
-	return r.Expr
-}
-
-// UpdateStoreRoute updates a store's routing expression.
+// UpdateStoreFilter updates a store's filter expression.
 // Returns ErrStoreNotFound if the store doesn't exist.
 //
 // For rotation policy changes, use ChunkManager(id).SetRotationPolicy(policy)
 // directly with a composed policy object.
-func (o *Orchestrator) UpdateStoreRoute(id string, route string) error {
+func (o *Orchestrator) UpdateStoreFilter(id string, filter string) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -319,10 +314,10 @@ func (o *Orchestrator) UpdateStoreRoute(id string, route string) error {
 		return fmt.Errorf("%w: %s", ErrStoreNotFound, id)
 	}
 
-	if err := o.updateRouterLocked(id, route); err != nil {
+	if err := o.updateFilterLocked(id, filter); err != nil {
 		return err
 	}
 
-	o.logger.Info("store route updated", "id", id, "route", route)
+	o.logger.Info("store filter updated", "id", id, "filter", filter)
 	return nil
 }

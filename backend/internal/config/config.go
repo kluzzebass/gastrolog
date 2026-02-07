@@ -107,7 +107,7 @@ func (c RotationPolicyConfig) ToRotationPolicy() (chunk.RotationPolicy, error) {
 	var policies []chunk.RotationPolicy
 
 	if c.MaxBytes != nil {
-		bytes, err := parseBytes(*c.MaxBytes)
+		bytes, err := ParseBytes(*c.MaxBytes)
 		if err != nil {
 			return nil, fmt.Errorf("invalid maxBytes: %w", err)
 		}
@@ -140,8 +140,8 @@ func (c RotationPolicyConfig) ToRotationPolicy() (chunk.RotationPolicy, error) {
 	return chunk.NewCompositePolicy(policies...), nil
 }
 
-// parseBytes parses a byte size string with optional suffix (B, KB, MB, GB).
-func parseBytes(s string) (uint64, error) {
+// ParseBytes parses a byte size string with optional suffix (B, KB, MB, GB).
+func ParseBytes(s string) (uint64, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return 0, fmt.Errorf("empty value")
@@ -185,15 +185,15 @@ type StoreConfig struct {
 	// Type identifies the store implementation (e.g., "file", "memory").
 	Type string `json:"type"`
 
-	// Route defines which messages this store receives based on attributes.
+	// Filter defines which messages this store receives based on attributes.
 	// Special values:
 	//   - nil: receives nothing (safe default for unconfigured stores)
 	//   - "*": catch-all, receives all messages
-	//   - "+": catch-the-rest, receives messages that matched no other route
+	//   - "+": catch-the-rest, receives messages that matched no other filter
 	//   - any other value: querylang expression matched against message attrs
 	//     (e.g., "env=prod AND level=error")
-	// Token predicates are not allowed in routes (only attr-based filtering).
-	Route *string `json:"route,omitempty"`
+	// Token predicates are not allowed in filters (only attr-based filtering).
+	Filter *string `json:"filter,omitempty"`
 
 	// Policy references a named rotation policy from Config.RotationPolicies.
 	// Nil means no policy (type-specific default).

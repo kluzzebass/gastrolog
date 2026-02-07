@@ -15,7 +15,6 @@ import (
 const (
 	defaultMinInterval  = 100 * time.Millisecond
 	defaultMaxInterval  = 1 * time.Second
-	defaultInstance     = "default"
 	defaultHostCount    = 10
 	defaultServiceCount = 5
 )
@@ -38,7 +37,6 @@ var allFormats = []string{FormatPlain, FormatKV, FormatJSON, FormatAccess, Forma
 // Supported parameters:
 //   - "minInterval": minimum delay between messages (default: "100ms")
 //   - "maxInterval": maximum delay between messages (default: "1s")
-//   - "instance": instance identifier for source attribution (default: "default")
 //   - "formats": comma-separated list of enabled formats (default: all)
 //     Valid formats: plain, kv, json, access, syslog, weird
 //   - "formatWeights": comma-separated format=weight pairs (default: equal weights)
@@ -52,10 +50,9 @@ var allFormats = []string{FormatPlain, FormatKV, FormatJSON, FormatAccess, Forma
 //
 // Returns an error if parameters are invalid (e.g., unparseable duration,
 // min > max, negative values, unknown format names).
-func NewIngester(params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+func NewIngester(id string, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
 	minInterval := defaultMinInterval
 	maxInterval := defaultMaxInterval
-	instance := defaultInstance
 	hostCount := defaultHostCount
 	serviceCount := defaultServiceCount
 
@@ -83,10 +80,6 @@ func NewIngester(params map[string]string, logger *slog.Logger) (orchestrator.In
 
 	if minInterval > maxInterval {
 		return nil, fmt.Errorf("minInterval (%v) must not exceed maxInterval (%v)", minInterval, maxInterval)
-	}
-
-	if v, ok := params["instance"]; ok && v != "" {
-		instance = v
 	}
 
 	if v, ok := params["hostCount"]; ok {
@@ -132,13 +125,12 @@ func NewIngester(params map[string]string, logger *slog.Logger) (orchestrator.In
 	scopedLogger := logging.Default(logger).With(
 		"component", "ingester",
 		"type", "chatterbox",
-		"instance", instance,
 	)
 
 	return &Ingester{
+		id:          id,
 		minInterval: minInterval,
 		maxInterval: maxInterval,
-		instance:    instance,
 		rng:         rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64())),
 		formats:     formats,
 		weights:     cumulativeWeights,

@@ -50,7 +50,7 @@ func TestDrainWaitsForInFlightRequests(t *testing.T) {
 	orch.RegisterQueryEngine("default", query.New(cm, im, nil))
 
 	// Create server
-	srv := server.New(orch, server.Config{})
+	srv := server.New(orch, nil, orchestrator.Factories{}, server.Config{})
 	handler := srv.Handler()
 
 	// Create client with embedded transport
@@ -147,7 +147,7 @@ func TestDrainRejectsNewRequests(t *testing.T) {
 	orch.RegisterQueryEngine("default", query.New(cm, im, nil))
 
 	// Create server
-	srv := server.New(orch, server.Config{})
+	srv := server.New(orch, nil, orchestrator.Factories{}, server.Config{})
 	handler := srv.Handler()
 
 	// Create client with embedded transport
@@ -225,7 +225,7 @@ func TestShutdownWithoutDrain(t *testing.T) {
 	orch.RegisterQueryEngine("default", query.New(cm, im, nil))
 
 	// Create server
-	srv := server.New(orch, server.Config{})
+	srv := server.New(orch, nil, orchestrator.Factories{}, server.Config{})
 	handler := srv.Handler()
 
 	// Create client with embedded transport
@@ -252,7 +252,7 @@ func TestShutdownWithoutDrain(t *testing.T) {
 
 func TestHealth(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
-	srv := server.New(orch, server.Config{})
+	srv := server.New(orch, nil, orchestrator.Factories{}, server.Config{})
 	handler := srv.Handler()
 
 	httpClient := &http.Client{
@@ -275,7 +275,7 @@ func TestHealth(t *testing.T) {
 
 func TestProbeEndpoints(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
-	srv := server.New(orch, server.Config{})
+	srv := server.New(orch, nil, orchestrator.Factories{}, server.Config{})
 	handler := srv.Handler()
 
 	httpClient := &http.Client{

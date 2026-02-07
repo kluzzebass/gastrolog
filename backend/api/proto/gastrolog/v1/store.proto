@@ -39,7 +39,7 @@ message ListStoresResponse {
 message StoreInfo {
   string id = 1;
   string type = 2;
-  string route = 3;
+  string filter = 3;
   int64 chunk_count = 4;
   int64 record_count = 5;
 }

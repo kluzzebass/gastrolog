@@ -45,13 +45,13 @@ func (o *Orchestrator) RegisterIngester(id string, r Ingester) {
 	o.ingesters[id] = r
 }
 
-// SetRouter sets the router for attribute-based message routing.
+// SetFilterSet sets the filter set for attribute-based message filtering.
 // Must be called before Start() or Ingest().
-// If not set, messages are routed to all stores (legacy fan-out behavior).
-func (o *Orchestrator) SetRouter(r *Router) {
+// If not set, messages are sent to all stores (legacy fan-out behavior).
+func (o *Orchestrator) SetFilterSet(fs *FilterSet) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.router = r
+	o.filterSet = fs
 }
 
 // UnregisterIngester removes a ingester from the registry.

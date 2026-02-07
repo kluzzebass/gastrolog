@@ -125,7 +125,7 @@ func TestApplyConfigIngesters(t *testing.T) {
 
 	factories := Factories{
 		Ingesters: map[string]IngesterFactory{
-			"test": func(params map[string]string, logger *slog.Logger) (Ingester, error) {
+			"test": func(id string, params map[string]string, logger *slog.Logger) (Ingester, error) {
 				return &fakeIngester{}, nil
 			},
 		},
@@ -241,7 +241,7 @@ func TestApplyConfigDuplicateIngesterID(t *testing.T) {
 
 	factories := Factories{
 		Ingesters: map[string]IngesterFactory{
-			"test": func(params map[string]string, logger *slog.Logger) (Ingester, error) {
+			"test": func(id string, params map[string]string, logger *slog.Logger) (Ingester, error) {
 				return &fakeIngester{}, nil
 			},
 		},
@@ -321,7 +321,7 @@ func TestApplyConfigIngesterFactoryError(t *testing.T) {
 
 	factories := Factories{
 		Ingesters: map[string]IngesterFactory{
-			"test": func(params map[string]string, logger *slog.Logger) (Ingester, error) {
+			"test": func(id string, params map[string]string, logger *slog.Logger) (Ingester, error) {
 				return nil, errors.New("factory error")
 			},
 		},
@@ -345,7 +345,7 @@ func TestApplyConfigParamsPassedToIngesterFactory(t *testing.T) {
 	var receivedParams map[string]string
 	factories := Factories{
 		Ingesters: map[string]IngesterFactory{
-			"test": func(params map[string]string, logger *slog.Logger) (Ingester, error) {
+			"test": func(id string, params map[string]string, logger *slog.Logger) (Ingester, error) {
 				receivedParams = params
 				return &fakeIngester{}, nil
 			},

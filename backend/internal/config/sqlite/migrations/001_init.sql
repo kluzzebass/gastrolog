@@ -8,7 +8,7 @@ CREATE TABLE rotation_policies (
 CREATE TABLE stores (
     store_id TEXT PRIMARY KEY,
     type     TEXT NOT NULL,
-    route    TEXT,
+    filter   TEXT,
     policy   TEXT,
     params   TEXT
 ) STRICT;

@@ -39,4 +39,4 @@ type Ingester interface {
 // defined here. Concrete factory implementations live in their respective
 // ingester packages (e.g., syslog.NewFactory()). The orchestrator never
 // contains ingester construction logic - it only calls factories.
-type IngesterFactory func(params map[string]string, logger *slog.Logger) (Ingester, error)
+type IngesterFactory func(id string, params map[string]string, logger *slog.Logger) (Ingester, error)

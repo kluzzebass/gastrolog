@@ -37,6 +37,7 @@ const (
 //
 // Note: X-Wait-Ack is a GastroLog extension not part of the Loki API.
 type Ingester struct {
+	id       string
 	addr     string
 	listener net.Listener
 	server   *http.Server
@@ -46,6 +47,9 @@ type Ingester struct {
 
 // Config holds HTTP ingester configuration.
 type Config struct {
+	// ID is the ingester's config identifier.
+	ID string
+
 	// Addr is the address to listen on (e.g., ":3100", "127.0.0.1:3100").
 	Addr string
 
@@ -56,6 +60,7 @@ type Config struct {
 // New creates a new HTTP ingester.
 func New(cfg Config) *Ingester {
 	return &Ingester{
+		id:     cfg.ID,
 		addr:   cfg.Addr,
 		logger: logging.Default(cfg.Logger).With("component", "ingester", "type", "http"),
 	}
@@ -279,6 +284,9 @@ func (r *Ingester) parseValue(val Value, streamLabels map[string]string) (orches
 			}
 		}
 	}
+
+	attrs["ingester_type"] = "http"
+	attrs["ingester_id"] = r.id
 
 	return orchestrator.IngestMessage{
 		Attrs:    attrs,

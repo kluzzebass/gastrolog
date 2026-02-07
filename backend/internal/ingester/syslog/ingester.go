@@ -22,6 +22,7 @@ import (
 // Supports both RFC 3164 (BSD) and RFC 5424 (IETF) formats with auto-detection.
 // Messages are parsed and relevant fields extracted into attributes.
 type Ingester struct {
+	id      string
 	udpAddr string
 	tcpAddr string
 	out     chan<- orchestrator.IngestMessage
@@ -34,6 +35,9 @@ type Ingester struct {
 
 // Config holds syslog ingester configuration.
 type Config struct {
+	// ID is the ingester's config identifier.
+	ID string
+
 	// UDPAddr is the UDP address to listen on (e.g., ":514").
 	// Empty string disables UDP.
 	UDPAddr string
@@ -49,6 +53,7 @@ type Config struct {
 // New creates a new syslog ingester.
 func New(cfg Config) *Ingester {
 	return &Ingester{
+		id:      cfg.ID,
 		udpAddr: cfg.UDPAddr,
 		tcpAddr: cfg.TCPAddr,
 		logger:  logging.Default(cfg.Logger).With("component", "ingester", "type", "syslog"),
@@ -365,6 +370,9 @@ func (r *Ingester) parseMessage(data []byte, remoteIP string) orchestrator.Inges
 		// RFC 3164 (BSD) format.
 		sourceTS = r.parseRFC3164(data, attrs)
 	}
+
+	attrs["ingester_type"] = "syslog"
+	attrs["ingester_id"] = r.id
 
 	return orchestrator.IngestMessage{
 		Attrs:    attrs,

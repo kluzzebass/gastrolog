@@ -90,7 +90,11 @@ func run(ctx context.Context, logger *slog.Logger, configFlagValue, serverAddr s
 	}
 
 	// Load configuration.
-	logger.Info("loading config", "store", configFlagValue)
+	configStoreLabel := configFlagValue
+	if configStoreLabel == "" {
+		configStoreLabel = "memory"
+	}
+	logger.Info("loading config", "store", configStoreLabel)
 	cfg, err := cfgStore.Load(ctx)
 	if err != nil {
 		return err
@@ -120,7 +124,8 @@ func run(ctx context.Context, logger *slog.Logger, configFlagValue, serverAddr s
 	orch.RegisterDigester(digestlevel.New())
 
 	// Apply configuration with factories.
-	if err := orch.ApplyConfig(cfg, buildFactories(logger)); err != nil {
+	factories := buildFactories(logger)
+	if err := orch.ApplyConfig(cfg, factories); err != nil {
 		return err
 	}
 
@@ -141,7 +146,7 @@ func run(ctx context.Context, logger *slog.Logger, configFlagValue, serverAddr s
 	var srv *server.Server
 	var serverWg sync.WaitGroup
 	if serverAddr != "" {
-		srv = server.New(orch, server.Config{Logger: logger})
+		srv = server.New(orch, cfgStore, factories, server.Config{Logger: logger})
 		serverWg.Add(1)
 		go func() {
 			defer serverWg.Done()

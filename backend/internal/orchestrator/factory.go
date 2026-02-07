@@ -69,8 +69,8 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 	storeIDs := make(map[string]bool)
 	ingesterIDs := make(map[string]bool)
 
-	// Compile routes and create stores (chunk manager + index manager + query engine).
-	var compiledRoutes []*CompiledRoute
+	// Compile filters and create stores (chunk manager + index manager + query engine).
+	var compiledFilters []*CompiledFilter
 
 	for _, storeCfg := range cfg.Stores {
 		if storeIDs[storeCfg.ID] {
@@ -78,16 +78,16 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 		}
 		storeIDs[storeCfg.ID] = true
 
-		// Compile route expression.
-		var routeExpr string
-		if storeCfg.Route != nil {
-			routeExpr = *storeCfg.Route
+		// Compile filter expression.
+		var filterExpr string
+		if storeCfg.Filter != nil {
+			filterExpr = *storeCfg.Filter
 		}
-		route, err := CompileRoute(storeCfg.ID, routeExpr)
+		f, err := CompileFilter(storeCfg.ID, filterExpr)
 		if err != nil {
-			return fmt.Errorf("invalid route for store %s: %w", storeCfg.ID, err)
+			return fmt.Errorf("invalid filter for store %s: %w", storeCfg.ID, err)
 		}
-		compiledRoutes = append(compiledRoutes, route)
+		compiledFilters = append(compiledFilters, f)
 
 		// Look up chunk manager factory.
 		cmFactory, ok := factories.ChunkManagers[storeCfg.Type]
@@ -145,9 +145,9 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 		o.RegisterQueryEngine(storeCfg.ID, qe)
 	}
 
-	// Set router if any routes were compiled.
-	if len(compiledRoutes) > 0 {
-		o.SetRouter(NewRouter(compiledRoutes))
+	// Set filter set if any filters were compiled.
+	if len(compiledFilters) > 0 {
+		o.SetFilterSet(NewFilterSet(compiledFilters))
 	}
 
 	// Create ingesters.
@@ -168,7 +168,7 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 		if factories.Logger != nil {
 			recvLogger = factories.Logger.With("ingester_id", recvCfg.ID)
 		}
-		recv, err := recvFactory(recvCfg.Params, recvLogger)
+		recv, err := recvFactory(recvCfg.ID, recvCfg.Params, recvLogger)
 		if err != nil {
 			return fmt.Errorf("create ingester %s: %w", recvCfg.ID, err)
 		}

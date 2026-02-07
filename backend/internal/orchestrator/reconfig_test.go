@@ -17,18 +17,18 @@ import (
 	"gastrolog/internal/query"
 )
 
-func TestUpdateRoutes(t *testing.T) {
-	orch, stores := newRoutedTestSetup(t)
+func TestUpdateFilters(t *testing.T) {
+	orch, stores := newFilteredTestSetup(t)
 
-	// Initially set routes: prod gets env=prod, archive is catch-all.
+	// Initially set filters: prod gets env=prod, archive is catch-all.
 	cfg := &config.Config{
 		Stores: []config.StoreConfig{
-			{ID: "prod", Route: config.StringPtr("env=prod")},
-			{ID: "archive", Route: config.StringPtr("*")},
+			{ID: "prod", Filter: config.StringPtr("env=prod")},
+			{ID: "archive", Filter: config.StringPtr("*")},
 		},
 	}
-	if err := orch.UpdateRoutes(cfg); err != nil {
-		t.Fatalf("UpdateRoutes: %v", err)
+	if err := orch.UpdateFilters(cfg); err != nil {
+		t.Fatalf("UpdateFilters: %v", err)
 	}
 
 	// Ingest a prod message - should go to prod and archive.
@@ -48,15 +48,15 @@ func TestUpdateRoutes(t *testing.T) {
 		t.Errorf("archive: expected 1 record, got %d", count)
 	}
 
-	// Now update routes: prod gets env=staging instead.
+	// Now update filters: prod gets env=staging instead.
 	cfg2 := &config.Config{
 		Stores: []config.StoreConfig{
-			{ID: "prod", Route: config.StringPtr("env=staging")},
-			{ID: "archive", Route: config.StringPtr("*")},
+			{ID: "prod", Filter: config.StringPtr("env=staging")},
+			{ID: "archive", Filter: config.StringPtr("*")},
 		},
 	}
-	if err := orch.UpdateRoutes(cfg2); err != nil {
-		t.Fatalf("UpdateRoutes (2nd): %v", err)
+	if err := orch.UpdateFilters(cfg2); err != nil {
+		t.Fatalf("UpdateFilters (2nd): %v", err)
 	}
 
 	// Ingest another prod message - should only go to archive now.
@@ -71,39 +71,39 @@ func TestUpdateRoutes(t *testing.T) {
 
 	// prod should still have 1 (old message), archive should have 2.
 	if count := countRecords(t, stores["prod"]); count != 1 {
-		t.Errorf("prod after route change: expected 1 record, got %d", count)
+		t.Errorf("prod after filter change: expected 1 record, got %d", count)
 	}
 	if count := countRecords(t, stores["archive"]); count != 2 {
-		t.Errorf("archive after route change: expected 2 records, got %d", count)
+		t.Errorf("archive after filter change: expected 2 records, got %d", count)
 	}
 }
 
-func TestUpdateRoutesInvalidExpression(t *testing.T) {
-	orch, _ := newRoutedTestSetup(t)
+func TestUpdateFiltersInvalidExpression(t *testing.T) {
+	orch, _ := newFilteredTestSetup(t)
 
 	cfg := &config.Config{
 		Stores: []config.StoreConfig{
-			{ID: "prod", Route: config.StringPtr("(unclosed")},
+			{ID: "prod", Filter: config.StringPtr("(unclosed")},
 		},
 	}
-	err := orch.UpdateRoutes(cfg)
+	err := orch.UpdateFilters(cfg)
 	if err == nil {
-		t.Fatal("expected error for invalid route expression")
+		t.Fatal("expected error for invalid filter expression")
 	}
 }
 
-func TestUpdateRoutesIgnoresUnknownStores(t *testing.T) {
-	orch, _ := newRoutedTestSetup(t)
+func TestUpdateFiltersIgnoresUnknownStores(t *testing.T) {
+	orch, _ := newFilteredTestSetup(t)
 
 	// Include a store that doesn't exist - should be ignored.
 	cfg := &config.Config{
 		Stores: []config.StoreConfig{
-			{ID: "prod", Route: config.StringPtr("env=prod")},
-			{ID: "nonexistent", Route: config.StringPtr("*")},
+			{ID: "prod", Filter: config.StringPtr("env=prod")},
+			{ID: "nonexistent", Filter: config.StringPtr("*")},
 		},
 	}
-	if err := orch.UpdateRoutes(cfg); err != nil {
-		t.Fatalf("UpdateRoutes: %v", err)
+	if err := orch.UpdateFilters(cfg); err != nil {
+		t.Fatalf("UpdateFilters: %v", err)
 	}
 }
 
@@ -120,9 +120,9 @@ func TestAddStore(t *testing.T) {
 	}
 
 	storeCfg := config.StoreConfig{
-		ID:    "new-store",
-		Type:  "memory",
-		Route: config.StringPtr("env=test"),
+		ID:     "new-store",
+		Type:   "memory",
+		Filter: config.StringPtr("env=test"),
 	}
 
 	if err := orch.AddStore(storeCfg, factories); err != nil {
@@ -135,7 +135,7 @@ func TestAddStore(t *testing.T) {
 		t.Fatal("ChunkManager not found after AddStore")
 	}
 
-	// Verify routing works.
+	// Verify filtering works.
 	rec := chunk.Record{
 		IngestTS: time.Now(),
 		Attrs:    chunk.Attributes{"env": "test"},
@@ -163,9 +163,9 @@ func TestAddStoreDuplicate(t *testing.T) {
 	}
 
 	storeCfg := config.StoreConfig{
-		ID:    "store1",
-		Type:  "memory",
-		Route: config.StringPtr("*"),
+		ID:     "store1",
+		Type:   "memory",
+		Filter: config.StringPtr("*"),
 	}
 
 	if err := orch.AddStore(storeCfg, factories); err != nil {
@@ -192,9 +192,9 @@ func TestRemoveStoreEmpty(t *testing.T) {
 	}
 
 	storeCfg := config.StoreConfig{
-		ID:    "temp-store",
-		Type:  "memory",
-		Route: config.StringPtr("*"),
+		ID:     "temp-store",
+		Type:   "memory",
+		Filter: config.StringPtr("*"),
 	}
 
 	if err := orch.AddStore(storeCfg, factories); err != nil {
@@ -225,9 +225,9 @@ func TestRemoveStoreNotEmpty(t *testing.T) {
 	}
 
 	storeCfg := config.StoreConfig{
-		ID:    "store-with-data",
-		Type:  "memory",
-		Route: config.StringPtr("*"),
+		ID:     "store-with-data",
+		Type:   "memory",
+		Filter: config.StringPtr("*"),
 	}
 
 	if err := orch.AddStore(storeCfg, factories); err != nil {
@@ -284,9 +284,9 @@ func TestAddIngesterWhileRunning(t *testing.T) {
 	orch.RegisterIndexManager("default", im)
 	orch.RegisterQueryEngine("default", qe)
 
-	// Set catch-all route.
-	route, _ := orchestrator.CompileRoute("default", "*")
-	orch.SetRouter(orchestrator.NewRouter([]*orchestrator.CompiledRoute{route}))
+	// Set catch-all filter.
+	filter, _ := orchestrator.CompileFilter("default", "*")
+	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{filter}))
 
 	// Start orchestrator.
 	if err := orch.Start(context.Background()); err != nil {
@@ -424,9 +424,9 @@ func TestStoreConfig(t *testing.T) {
 	}
 
 	storeCfg := config.StoreConfig{
-		ID:    "test-store",
-		Type:  "memory",
-		Route: config.StringPtr("env=prod AND level=error"),
+		ID:     "test-store",
+		Type:   "memory",
+		Filter: config.StringPtr("env=prod AND level=error"),
 	}
 
 	if err := orch.AddStore(storeCfg, factories); err != nil {
@@ -442,8 +442,8 @@ func TestStoreConfig(t *testing.T) {
 	if gotCfg.ID != "test-store" {
 		t.Errorf("ID: expected %q, got %q", "test-store", gotCfg.ID)
 	}
-	if gotCfg.Route == nil || *gotCfg.Route != "env=prod AND level=error" {
-		t.Errorf("Route: expected %q, got %v", "env=prod AND level=error", gotCfg.Route)
+	if gotCfg.Filter == nil || *gotCfg.Filter != "env=prod AND level=error" {
+		t.Errorf("Filter: expected %q, got %v", "env=prod AND level=error", gotCfg.Filter)
 	}
 }
 
@@ -456,13 +456,13 @@ func TestStoreConfigNotFound(t *testing.T) {
 	}
 }
 
-func TestUpdateStoreRoute(t *testing.T) {
-	orch, stores := newRoutedTestSetup(t)
+func TestUpdateStoreFilter(t *testing.T) {
+	orch, stores := newFilteredTestSetup(t)
 
-	// Set initial route: prod gets env=prod.
-	prodRoute, _ := orchestrator.CompileRoute("prod", "env=prod")
-	archiveRoute, _ := orchestrator.CompileRoute("archive", "*")
-	orch.SetRouter(orchestrator.NewRouter([]*orchestrator.CompiledRoute{prodRoute, archiveRoute}))
+	// Set initial filter: prod gets env=prod.
+	prodFilter, _ := orchestrator.CompileFilter("prod", "env=prod")
+	archiveFilter, _ := orchestrator.CompileFilter("archive", "*")
+	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{prodFilter, archiveFilter}))
 
 	// Ingest a prod message.
 	rec := chunk.Record{
@@ -479,9 +479,9 @@ func TestUpdateStoreRoute(t *testing.T) {
 		t.Errorf("prod: expected 1 record, got %d", count)
 	}
 
-	// Update prod's route to env=staging.
-	if err := orch.UpdateStoreRoute("prod", "env=staging"); err != nil {
-		t.Fatalf("UpdateStoreRoute: %v", err)
+	// Update prod's filter to env=staging.
+	if err := orch.UpdateStoreFilter("prod", "env=staging"); err != nil {
+		t.Fatalf("UpdateStoreFilter: %v", err)
 	}
 
 	// Ingest another prod message - should NOT go to prod anymore.
@@ -494,9 +494,9 @@ func TestUpdateStoreRoute(t *testing.T) {
 		t.Fatalf("Ingest: %v", err)
 	}
 
-	// prod should still have 1 message (route changed).
+	// prod should still have 1 message (filter changed).
 	if count := countRecords(t, stores["prod"]); count != 1 {
-		t.Errorf("prod after route change: expected 1 record, got %d", count)
+		t.Errorf("prod after filter change: expected 1 record, got %d", count)
 	}
 
 	// archive should have 2 (catch-all).
@@ -519,9 +519,9 @@ func TestSetRotationPolicyDirectly(t *testing.T) {
 	}
 
 	storeCfg := config.StoreConfig{
-		ID:    "test-store",
-		Type:  "memory",
-		Route: config.StringPtr("*"),
+		ID:     "test-store",
+		Type:   "memory",
+		Filter: config.StringPtr("*"),
 	}
 
 	if err := orch.AddStore(storeCfg, factories); err != nil {
@@ -554,16 +554,16 @@ func TestSetRotationPolicyDirectly(t *testing.T) {
 	}
 }
 
-func TestUpdateStoreRouteNotFound(t *testing.T) {
+func TestUpdateStoreFilterNotFound(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
-	err := orch.UpdateStoreRoute("nonexistent", "*")
+	err := orch.UpdateStoreFilter("nonexistent", "*")
 	if err == nil {
 		t.Fatal("expected error for nonexistent store")
 	}
 }
 
-func TestUpdateStoreRouteInvalid(t *testing.T) {
+func TestUpdateStoreFilterInvalid(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
 	factories := orchestrator.Factories{
@@ -576,18 +576,18 @@ func TestUpdateStoreRouteInvalid(t *testing.T) {
 	}
 
 	storeCfg := config.StoreConfig{
-		ID:    "test-store",
-		Type:  "memory",
-		Route: config.StringPtr("*"),
+		ID:     "test-store",
+		Type:   "memory",
+		Filter: config.StringPtr("*"),
 	}
 
 	if err := orch.AddStore(storeCfg, factories); err != nil {
 		t.Fatalf("AddStore: %v", err)
 	}
 
-	// Invalid route expression.
-	err := orch.UpdateStoreRoute("test-store", "(unclosed")
+	// Invalid filter expression.
+	err := orch.UpdateStoreFilter("test-store", "(unclosed")
 	if err == nil {
-		t.Error("expected error for invalid route expression")
+		t.Error("expected error for invalid filter expression")
 	}
 }

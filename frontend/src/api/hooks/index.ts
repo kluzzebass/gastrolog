@@ -4,3 +4,12 @@ export { useFollow } from "./useFollow";
 export { useExplain } from "./useExplain";
 export { useHistogram } from "./useHistogram";
 export { useLiveHistogram } from "./useLiveHistogram";
+export {
+  useConfig,
+  usePutRotationPolicy,
+  useDeleteRotationPolicy,
+  usePutStore,
+  useDeleteStore,
+  usePutIngester,
+  useDeleteIngester,
+} from "./useConfig";

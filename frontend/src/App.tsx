@@ -31,6 +31,7 @@ import {
   StoreButton,
 } from "./components/Sidebar";
 import { ToastProvider, useToast } from "./components/Toast";
+import { SettingsDialog } from "./components/settings/SettingsDialog";
 
 export function App() {
   return (
@@ -52,6 +53,10 @@ function AppContent() {
   const [rangeEnd, setRangeEnd] = useState<Date | null>(null);
   const [showPlan, setShowPlan] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<
+    "service" | "stores" | "ingesters" | "policies"
+  >("service");
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(
     null,
   );
@@ -395,7 +400,8 @@ function AppContent() {
       }
     }
     const newQuery = injectTimeRange(q, range);
-    setUrlQuery(newQuery);
+    // Time ranges imply search mode — switch away from follow if active.
+    navigate({ to: "/search", search: { q: newQuery }, replace: false });
   };
 
   const handleCustomRange = (start: Date, end: Date) => {
@@ -405,7 +411,8 @@ function AppContent() {
     const tokens = `start=${start.toISOString()} end=${end.toISOString()} reverse=${isReversed}`;
     const base = stripTimeRange(q);
     const newQuery = base ? `${tokens} ${base}` : tokens;
-    setUrlQuery(newQuery);
+    // Time ranges imply search mode — switch away from follow if active.
+    navigate({ to: "/search", search: { q: newQuery }, replace: false });
   };
 
   const toggleReverse = () => {
@@ -579,6 +586,28 @@ function AppContent() {
               </button>
             ))}
           </div>
+
+          <button
+            onClick={() => setShowSettings(true)}
+            title="Settings"
+            className={`w-7 h-7 flex items-center justify-center rounded transition-all duration-200 ${c(
+              "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
+              "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
+            )}`}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="w-4 h-4"
+            >
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
         </div>
       </header>
 
@@ -938,6 +967,16 @@ function AppContent() {
             </div>
           )}
 
+          {/* Settings Dialog */}
+          {showSettings && (
+            <SettingsDialog
+              dark={dark}
+              tab={settingsTab}
+              onTabChange={setSettingsTab}
+              onClose={() => setShowSettings(false)}
+            />
+          )}
+
           {/* Histogram — server-side for search, client-side for follow */}
           {!isFollowMode &&
             histogramData &&
@@ -974,7 +1013,23 @@ function AppContent() {
               className={`px-5 py-3 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
             >
               {liveHistogramData && liveHistogramData.buckets.length > 0 ? (
-                <HistogramChart data={liveHistogramData} dark={dark} />
+                <HistogramChart
+                  data={liveHistogramData}
+                  dark={dark}
+                  onBrushSelect={(start, end) => {
+                    setRangeStart(start);
+                    setRangeEnd(end);
+                    setTimeRange("custom");
+                    const tokens = `start=${start.toISOString()} end=${end.toISOString()} reverse=true`;
+                    const base = stripTimeRange(q);
+                    const newQuery = base ? `${tokens} ${base}` : tokens;
+                    navigate({
+                      to: "/search",
+                      search: { q: newQuery },
+                      replace: false,
+                    });
+                  }}
+                />
               ) : (
                 <div className="relative">
                   <div className="flex items-baseline justify-between mb-1.5">

@@ -943,8 +943,8 @@ func TestSearchWithContextUnknownRegistry(t *testing.T) {
 	}
 }
 
-// newRoutedTestSetup creates an orchestrator with multiple stores and a router.
-func newRoutedTestSetup(t *testing.T) (*orchestrator.Orchestrator, map[string]chunk.ChunkManager) {
+// newFilteredTestSetup creates an orchestrator with multiple stores and a filter set.
+func newFilteredTestSetup(t *testing.T) (*orchestrator.Orchestrator, map[string]chunk.ChunkManager) {
 	t.Helper()
 
 	stores := make(map[string]chunk.ChunkManager)
@@ -1038,37 +1038,37 @@ func getRecordMessages(t *testing.T, cm chunk.ChunkManager) []string {
 }
 
 func TestRoutingIntegration(t *testing.T) {
-	orch, stores := newRoutedTestSetup(t)
+	orch, stores := newFilteredTestSetup(t)
 
-	// Compile routes:
+	// Compile filters:
 	// - prod: receives env=prod messages
 	// - staging: receives env=staging messages
 	// - archive: catch-all (*)
 	// - unrouted: catch-the-rest (+)
-	prodRoute, err := orchestrator.CompileRoute("prod", "env=prod")
+	prodFilter, err := orchestrator.CompileFilter("prod", "env=prod")
 	if err != nil {
-		t.Fatalf("CompileRoute prod failed: %v", err)
+		t.Fatalf("CompileFilter prod failed: %v", err)
 	}
-	stagingRoute, err := orchestrator.CompileRoute("staging", "env=staging")
+	stagingFilter, err := orchestrator.CompileFilter("staging", "env=staging")
 	if err != nil {
-		t.Fatalf("CompileRoute staging failed: %v", err)
+		t.Fatalf("CompileFilter staging failed: %v", err)
 	}
-	archiveRoute, err := orchestrator.CompileRoute("archive", "*")
+	archiveFilter, err := orchestrator.CompileFilter("archive", "*")
 	if err != nil {
-		t.Fatalf("CompileRoute archive failed: %v", err)
+		t.Fatalf("CompileFilter archive failed: %v", err)
 	}
-	unroutedRoute, err := orchestrator.CompileRoute("unrouted", "+")
+	unfilteredFilter, err := orchestrator.CompileFilter("unrouted", "+")
 	if err != nil {
-		t.Fatalf("CompileRoute unrouted failed: %v", err)
+		t.Fatalf("CompileFilter unrouted failed: %v", err)
 	}
 
-	router := orchestrator.NewRouter([]*orchestrator.CompiledRoute{
-		prodRoute,
-		stagingRoute,
-		archiveRoute,
-		unroutedRoute,
+	fs := orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
+		prodFilter,
+		stagingFilter,
+		archiveFilter,
+		unfilteredFilter,
 	})
-	orch.SetRouter(router)
+	orch.SetFilterSet(fs)
 
 	// Test cases: message attrs -> expected stores
 	testCases := []struct {
@@ -1158,14 +1158,14 @@ func TestRoutingIntegration(t *testing.T) {
 }
 
 func TestRoutingWithIngesters(t *testing.T) {
-	orch, stores := newRoutedTestSetup(t)
+	orch, stores := newFilteredTestSetup(t)
 
-	// Set up routing: prod gets env=prod, archive is catch-all.
-	prodRoute, _ := orchestrator.CompileRoute("prod", "env=prod")
-	archiveRoute, _ := orchestrator.CompileRoute("archive", "*")
+	// Set up filtering: prod gets env=prod, archive is catch-all.
+	prodFilter, _ := orchestrator.CompileFilter("prod", "env=prod")
+	archiveFilter, _ := orchestrator.CompileFilter("archive", "*")
 
-	router := orchestrator.NewRouter([]*orchestrator.CompiledRoute{prodRoute, archiveRoute})
-	orch.SetRouter(router)
+	fs := orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{prodFilter, archiveFilter})
+	orch.SetFilterSet(fs)
 
 	// Create a ingester that emits messages with different attrs.
 	recv := newMockIngester([]orchestrator.IngestMessage{
@@ -1202,10 +1202,10 @@ func TestRoutingWithIngesters(t *testing.T) {
 	}
 }
 
-func TestRoutingNoRouterFallback(t *testing.T) {
-	orch, stores := newRoutedTestSetup(t)
+func TestRoutingNoFilterSetFallback(t *testing.T) {
+	orch, stores := newFilteredTestSetup(t)
 
-	// No router set - should fan out to all stores (legacy behavior).
+	// No filter set - should fan out to all stores (legacy behavior).
 	rec := chunk.Record{
 		IngestTS: time.Now(),
 		Attrs:    chunk.Attributes{"env": "test"},
@@ -1224,15 +1224,15 @@ func TestRoutingNoRouterFallback(t *testing.T) {
 	}
 }
 
-func TestRoutingEmptyRouteReceivesNothing(t *testing.T) {
-	orch, stores := newRoutedTestSetup(t)
+func TestRoutingEmptyFilterReceivesNothing(t *testing.T) {
+	orch, stores := newFilteredTestSetup(t)
 
-	// prod has empty route (receives nothing), archive is catch-all.
-	prodRoute, _ := orchestrator.CompileRoute("prod", "")
-	archiveRoute, _ := orchestrator.CompileRoute("archive", "*")
+	// prod has empty filter (receives nothing), archive is catch-all.
+	prodFilter, _ := orchestrator.CompileFilter("prod", "")
+	archiveFilter, _ := orchestrator.CompileFilter("archive", "*")
 
-	router := orchestrator.NewRouter([]*orchestrator.CompiledRoute{prodRoute, archiveRoute})
-	orch.SetRouter(router)
+	fs := orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{prodFilter, archiveFilter})
+	orch.SetFilterSet(fs)
 
 	rec := chunk.Record{
 		IngestTS: time.Now(),
@@ -1245,7 +1245,7 @@ func TestRoutingEmptyRouteReceivesNothing(t *testing.T) {
 
 	// prod should have 0, archive should have 1.
 	if count := countRecords(t, stores["prod"]); count != 0 {
-		t.Errorf("prod store: expected 0 records (empty route), got %d", count)
+		t.Errorf("prod store: expected 0 records (empty filter), got %d", count)
 	}
 	if count := countRecords(t, stores["archive"]); count != 1 {
 		t.Errorf("archive store: expected 1 record, got %d", count)
@@ -1253,17 +1253,17 @@ func TestRoutingEmptyRouteReceivesNothing(t *testing.T) {
 }
 
 func TestRoutingComplexExpression(t *testing.T) {
-	orch, stores := newRoutedTestSetup(t)
+	orch, stores := newFilteredTestSetup(t)
 
 	// prod receives: (env=prod AND level=error) OR (env=prod AND level=critical)
-	prodRoute, err := orchestrator.CompileRoute("prod", "(env=prod AND level=error) OR (env=prod AND level=critical)")
+	prodFilter, err := orchestrator.CompileFilter("prod", "(env=prod AND level=error) OR (env=prod AND level=critical)")
 	if err != nil {
-		t.Fatalf("CompileRoute failed: %v", err)
+		t.Fatalf("CompileFilter failed: %v", err)
 	}
-	archiveRoute, _ := orchestrator.CompileRoute("archive", "*")
+	archiveFilter, _ := orchestrator.CompileFilter("archive", "*")
 
-	router := orchestrator.NewRouter([]*orchestrator.CompiledRoute{prodRoute, archiveRoute})
-	orch.SetRouter(router)
+	fs := orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{prodFilter, archiveFilter})
+	orch.SetFilterSet(fs)
 
 	testCases := []struct {
 		attrs        chunk.Attributes

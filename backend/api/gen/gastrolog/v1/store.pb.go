@@ -106,7 +106,7 @@ type StoreInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
-	Route         string                 `protobuf:"bytes,3,opt,name=route,proto3" json:"route,omitempty"`
+	Filter        string                 `protobuf:"bytes,3,opt,name=filter,proto3" json:"filter,omitempty"`
 	ChunkCount    int64                  `protobuf:"varint,4,opt,name=chunk_count,json=chunkCount,proto3" json:"chunk_count,omitempty"`
 	RecordCount   int64                  `protobuf:"varint,5,opt,name=record_count,json=recordCount,proto3" json:"record_count,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -157,9 +157,9 @@ func (x *StoreInfo) GetType() string {
 	return ""
 }
 
-func (x *StoreInfo) GetRoute() string {
+func (x *StoreInfo) GetFilter() string {
 	if x != nil {
-		return x.Route
+		return x.Filter
 	}
 	return ""
 }
@@ -1089,11 +1089,11 @@ const file_gastrolog_v1_store_proto_rawDesc = "" +
 	"\x18gastrolog/v1/store.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x13\n" +
 	"\x11ListStoresRequest\"E\n" +
 	"\x12ListStoresResponse\x12/\n" +
-	"\x06stores\x18\x01 \x03(\v2\x17.gastrolog.v1.StoreInfoR\x06stores\"\x89\x01\n" +
+	"\x06stores\x18\x01 \x03(\v2\x17.gastrolog.v1.StoreInfoR\x06stores\"\x8b\x01\n" +
 	"\tStoreInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04type\x18\x02 \x01(\tR\x04type\x12\x14\n" +
-	"\x05route\x18\x03 \x01(\tR\x05route\x12\x1f\n" +
+	"\x04type\x18\x02 \x01(\tR\x04type\x12\x16\n" +
+	"\x06filter\x18\x03 \x01(\tR\x06filter\x12\x1f\n" +
 	"\vchunk_count\x18\x04 \x01(\x03R\n" +
 	"chunkCount\x12!\n" +
 	"\frecord_count\x18\x05 \x01(\x03R\vrecordCount\"!\n" +

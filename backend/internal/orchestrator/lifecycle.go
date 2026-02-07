@@ -35,8 +35,8 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		"stores", len(o.chunks),
 		"ingesters", len(o.ingesters))
 
-	if o.router == nil && len(o.chunks) > 1 {
-		o.logger.Warn("no router configured, messages will fan out to all stores")
+	if o.filterSet == nil && len(o.chunks) > 1 {
+		o.logger.Warn("no filters configured, messages will fan out to all stores")
 	}
 
 	// Launch ingester goroutines with per-ingester contexts.

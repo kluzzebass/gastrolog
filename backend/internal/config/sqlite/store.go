@@ -154,11 +154,11 @@ func (s *Store) DeleteRotationPolicy(ctx context.Context, id string) error {
 
 func (s *Store) GetStore(ctx context.Context, id string) (*config.StoreConfig, error) {
 	row := s.db.QueryRowContext(ctx,
-		"SELECT store_id, type, route, policy, params FROM stores WHERE store_id = ?", id)
+		"SELECT store_id, type, filter, policy, params FROM stores WHERE store_id = ?", id)
 
 	var st config.StoreConfig
 	var paramsJSON *string
-	err := row.Scan(&st.ID, &st.Type, &st.Route, &st.Policy, &paramsJSON)
+	err := row.Scan(&st.ID, &st.Type, &st.Filter, &st.Policy, &paramsJSON)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -175,7 +175,7 @@ func (s *Store) GetStore(ctx context.Context, id string) (*config.StoreConfig, e
 
 func (s *Store) ListStores(ctx context.Context) ([]config.StoreConfig, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT store_id, type, route, policy, params FROM stores")
+		"SELECT store_id, type, filter, policy, params FROM stores")
 	if err != nil {
 		return nil, fmt.Errorf("list stores: %w", err)
 	}
@@ -185,7 +185,7 @@ func (s *Store) ListStores(ctx context.Context) ([]config.StoreConfig, error) {
 	for rows.Next() {
 		var st config.StoreConfig
 		var paramsJSON *string
-		if err := rows.Scan(&st.ID, &st.Type, &st.Route, &st.Policy, &paramsJSON); err != nil {
+		if err := rows.Scan(&st.ID, &st.Type, &st.Filter, &st.Policy, &paramsJSON); err != nil {
 			return nil, fmt.Errorf("scan store: %w", err)
 		}
 		if paramsJSON != nil {
@@ -210,14 +210,14 @@ func (s *Store) PutStore(ctx context.Context, st config.StoreConfig) error {
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO stores (store_id, type, route, policy, params)
+		INSERT INTO stores (store_id, type, filter, policy, params)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(store_id) DO UPDATE SET
 			type = excluded.type,
-			route = excluded.route,
+			filter = excluded.filter,
 			policy = excluded.policy,
 			params = excluded.params
-	`, st.ID, st.Type, st.Route, st.Policy, paramsJSON)
+	`, st.ID, st.Type, st.Filter, st.Policy, paramsJSON)
 	if err != nil {
 		return fmt.Errorf("put store %q: %w", st.ID, err)
 	}

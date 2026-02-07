@@ -209,8 +209,8 @@ func copyStoreConfig(st config.StoreConfig) config.StoreConfig {
 		Type:   st.Type,
 		Params: copyParams(st.Params),
 	}
-	if st.Route != nil {
-		c.Route = config.StringPtr(*st.Route)
+	if st.Filter != nil {
+		c.Filter = config.StringPtr(*st.Filter)
 	}
 	if st.Policy != nil {
 		c.Policy = config.StringPtr(*st.Policy)

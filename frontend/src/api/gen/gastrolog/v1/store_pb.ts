@@ -89,9 +89,9 @@ export class StoreInfo extends Message<StoreInfo> {
   type = "";
 
   /**
-   * @generated from field: string route = 3;
+   * @generated from field: string filter = 3;
    */
-  route = "";
+  filter = "";
 
   /**
    * @generated from field: int64 chunk_count = 4;
@@ -113,7 +113,7 @@ export class StoreInfo extends Message<StoreInfo> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "route", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "filter", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "chunk_count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 5, name: "record_count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);

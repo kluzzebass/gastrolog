@@ -14,7 +14,7 @@ func DefaultConfig() *Config {
 			{
 				ID:     "default",
 				Type:   "memory",
-				Route:  StringPtr("*"),
+				Filter: StringPtr("*"),
 				Policy: StringPtr("default"),
 			},
 		},

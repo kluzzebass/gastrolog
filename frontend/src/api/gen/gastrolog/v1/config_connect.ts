@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { GetConfigRequest, GetConfigResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, ListIngestersRequest, ListIngestersResponse, UpdateStoreRouteRequest, UpdateStoreRouteResponse } from "./config_pb.js";
+import { DeleteIngesterRequest, DeleteIngesterResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteStoreRequest, DeleteStoreResponse, GetConfigRequest, GetConfigResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, ListIngestersRequest, ListIngestersResponse, PutIngesterRequest, PutIngesterResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutStoreRequest, PutStoreResponse, UpdateStoreFilterRequest, UpdateStoreFilterResponse } from "./config_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -26,14 +26,14 @@ export const ConfigService = {
       kind: MethodKind.Unary,
     },
     /**
-     * UpdateStoreRoute updates a store's routing expression.
+     * UpdateStoreFilter updates a store's filter expression.
      *
-     * @generated from rpc gastrolog.v1.ConfigService.UpdateStoreRoute
+     * @generated from rpc gastrolog.v1.ConfigService.UpdateStoreFilter
      */
-    updateStoreRoute: {
-      name: "UpdateStoreRoute",
-      I: UpdateStoreRouteRequest,
-      O: UpdateStoreRouteResponse,
+    updateStoreFilter: {
+      name: "UpdateStoreFilter",
+      I: UpdateStoreFilterRequest,
+      O: UpdateStoreFilterResponse,
       kind: MethodKind.Unary,
     },
     /**
@@ -56,6 +56,72 @@ export const ConfigService = {
       name: "GetIngesterStatus",
       I: GetIngesterStatusRequest,
       O: GetIngesterStatusResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * PutRotationPolicy creates or updates a rotation policy.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.PutRotationPolicy
+     */
+    putRotationPolicy: {
+      name: "PutRotationPolicy",
+      I: PutRotationPolicyRequest,
+      O: PutRotationPolicyResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * DeleteRotationPolicy removes a rotation policy.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.DeleteRotationPolicy
+     */
+    deleteRotationPolicy: {
+      name: "DeleteRotationPolicy",
+      I: DeleteRotationPolicyRequest,
+      O: DeleteRotationPolicyResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * PutStore creates or updates a store.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.PutStore
+     */
+    putStore: {
+      name: "PutStore",
+      I: PutStoreRequest,
+      O: PutStoreResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * DeleteStore removes a store (must be empty).
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.DeleteStore
+     */
+    deleteStore: {
+      name: "DeleteStore",
+      I: DeleteStoreRequest,
+      O: DeleteStoreResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * PutIngester creates or updates an ingester.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.PutIngester
+     */
+    putIngester: {
+      name: "PutIngester",
+      I: PutIngesterRequest,
+      O: PutIngesterResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * DeleteIngester removes an ingester.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.DeleteIngester
+     */
+    deleteIngester: {
+      name: "DeleteIngester",
+      I: DeleteIngesterRequest,
+      O: DeleteIngesterResponse,
       kind: MethodKind.Unary,
     },
   }
