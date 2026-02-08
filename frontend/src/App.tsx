@@ -13,7 +13,7 @@ import {
   useRecordContext,
   extractTokens,
 } from "./api/hooks";
-import { useStores, useStats, useLogout } from "./api/hooks";
+import { useStores, useStats, useLogout, useCurrentUser } from "./api/hooks";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { Record as ProtoRecord, setToken } from "./api/client";
 
@@ -39,6 +39,8 @@ import { useQueryHistory } from "./hooks/useQueryHistory";
 import { ExportButton } from "./components/ExportButton";
 import { QueryInput } from "./components/QueryInput";
 import { QueryAutocomplete } from "./components/QueryAutocomplete";
+import { UserMenu } from "./components/UserMenu";
+import { ChangePasswordDialog } from "./components/ChangePasswordDialog";
 import { tokenize } from "./queryTokenizer";
 import { useAutocomplete } from "./hooks/useAutocomplete";
 
@@ -213,6 +215,8 @@ function AppContent() {
   const dark = theme === "dark" || (theme === "system" && systemDark);
   const { addToast } = useToast();
   const logout = useLogout();
+  const currentUser = useCurrentUser();
+  const [showChangePassword, setShowChangePassword] = useState(false);
 
   // Push errors from hooks to the toast system.
   // If the error is Unauthenticated, clear token and redirect to login.
@@ -752,28 +756,15 @@ function AppContent() {
             </svg>
           </button>
 
-          <button
-            onClick={logout}
-            title="Sign out"
-            className={`w-7 h-7 flex items-center justify-center rounded transition-all duration-200 ${c(
-              "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
-              "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
-            )}`}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="w-4 h-4"
-            >
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
-            </svg>
-          </button>
+          {currentUser && (
+            <UserMenu
+              username={currentUser.username}
+              role={currentUser.role}
+              dark={dark}
+              onChangePassword={() => setShowChangePassword(true)}
+              onLogout={logout}
+            />
+          )}
         </div>
       </header>
 
@@ -1242,6 +1233,18 @@ function AppContent() {
           )}
 
           {/* Settings Dialog */}
+          {showChangePassword && currentUser && (
+            <ChangePasswordDialog
+              username={currentUser.username}
+              dark={dark}
+              onClose={() => setShowChangePassword(false)}
+              onSuccess={() => {
+                setShowChangePassword(false);
+                addToast("Password changed successfully", "info");
+              }}
+            />
+          )}
+
           {showSettings && (
             <SettingsDialog
               dark={dark}

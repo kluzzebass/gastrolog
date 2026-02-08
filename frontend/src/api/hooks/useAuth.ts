@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useCallback } from "react";
-import { authClient, setToken } from "../client";
+import { useCallback, useMemo } from "react";
+import { authClient, getToken, setToken } from "../client";
 
 export function useAuthStatus() {
   return useQuery({
@@ -41,6 +41,40 @@ export function useRegister() {
         setToken(data.token.token);
       }
       qc.invalidateQueries({ queryKey: ["authStatus"] });
+    },
+  });
+}
+
+/** Decode the JWT payload to extract username and role. */
+function parseTokenPayload(
+  token: string,
+): { username: string; role: string } | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const payload = JSON.parse(
+      atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")),
+    );
+    return { username: payload.sub ?? "", role: payload.role ?? "" };
+  } catch {
+    return null;
+  }
+}
+
+/** Returns the current user's username and role from the stored JWT. */
+export function useCurrentUser(): { username: string; role: string } | null {
+  const token = getToken();
+  return useMemo(() => (token ? parseTokenPayload(token) : null), [token]);
+}
+
+export function useChangePassword() {
+  return useMutation({
+    mutationFn: async (args: {
+      username: string;
+      oldPassword: string;
+      newPassword: string;
+    }) => {
+      return authClient.changePassword(args);
     },
   });
 }
