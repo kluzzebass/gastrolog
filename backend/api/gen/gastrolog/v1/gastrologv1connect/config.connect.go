@@ -81,6 +81,15 @@ const (
 	// ConfigServicePutPreferencesProcedure is the fully-qualified name of the ConfigService's
 	// PutPreferences RPC.
 	ConfigServicePutPreferencesProcedure = "/gastrolog.v1.ConfigService/PutPreferences"
+	// ConfigServiceGetSavedQueriesProcedure is the fully-qualified name of the ConfigService's
+	// GetSavedQueries RPC.
+	ConfigServiceGetSavedQueriesProcedure = "/gastrolog.v1.ConfigService/GetSavedQueries"
+	// ConfigServicePutSavedQueryProcedure is the fully-qualified name of the ConfigService's
+	// PutSavedQuery RPC.
+	ConfigServicePutSavedQueryProcedure = "/gastrolog.v1.ConfigService/PutSavedQuery"
+	// ConfigServiceDeleteSavedQueryProcedure is the fully-qualified name of the ConfigService's
+	// DeleteSavedQuery RPC.
+	ConfigServiceDeleteSavedQueryProcedure = "/gastrolog.v1.ConfigService/DeleteSavedQuery"
 )
 
 // ConfigServiceClient is a client for the gastrolog.v1.ConfigService service.
@@ -119,6 +128,12 @@ type ConfigServiceClient interface {
 	GetPreferences(context.Context, *connect.Request[v1.GetPreferencesRequest]) (*connect.Response[v1.GetPreferencesResponse], error)
 	// PutPreferences updates the current user's preferences.
 	PutPreferences(context.Context, *connect.Request[v1.PutPreferencesRequest]) (*connect.Response[v1.PutPreferencesResponse], error)
+	// GetSavedQueries returns the current user's saved queries.
+	GetSavedQueries(context.Context, *connect.Request[v1.GetSavedQueriesRequest]) (*connect.Response[v1.GetSavedQueriesResponse], error)
+	// PutSavedQuery creates or updates a saved query by name.
+	PutSavedQuery(context.Context, *connect.Request[v1.PutSavedQueryRequest]) (*connect.Response[v1.PutSavedQueryResponse], error)
+	// DeleteSavedQuery removes a saved query by name.
+	DeleteSavedQuery(context.Context, *connect.Request[v1.DeleteSavedQueryRequest]) (*connect.Response[v1.DeleteSavedQueryResponse], error)
 }
 
 // NewConfigServiceClient constructs a client for the gastrolog.v1.ConfigService service. By
@@ -234,6 +249,24 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("PutPreferences")),
 			connect.WithClientOptions(opts...),
 		),
+		getSavedQueries: connect.NewClient[v1.GetSavedQueriesRequest, v1.GetSavedQueriesResponse](
+			httpClient,
+			baseURL+ConfigServiceGetSavedQueriesProcedure,
+			connect.WithSchema(configServiceMethods.ByName("GetSavedQueries")),
+			connect.WithClientOptions(opts...),
+		),
+		putSavedQuery: connect.NewClient[v1.PutSavedQueryRequest, v1.PutSavedQueryResponse](
+			httpClient,
+			baseURL+ConfigServicePutSavedQueryProcedure,
+			connect.WithSchema(configServiceMethods.ByName("PutSavedQuery")),
+			connect.WithClientOptions(opts...),
+		),
+		deleteSavedQuery: connect.NewClient[v1.DeleteSavedQueryRequest, v1.DeleteSavedQueryResponse](
+			httpClient,
+			baseURL+ConfigServiceDeleteSavedQueryProcedure,
+			connect.WithSchema(configServiceMethods.ByName("DeleteSavedQuery")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -256,6 +289,9 @@ type configServiceClient struct {
 	putServerConfig       *connect.Client[v1.PutServerConfigRequest, v1.PutServerConfigResponse]
 	getPreferences        *connect.Client[v1.GetPreferencesRequest, v1.GetPreferencesResponse]
 	putPreferences        *connect.Client[v1.PutPreferencesRequest, v1.PutPreferencesResponse]
+	getSavedQueries       *connect.Client[v1.GetSavedQueriesRequest, v1.GetSavedQueriesResponse]
+	putSavedQuery         *connect.Client[v1.PutSavedQueryRequest, v1.PutSavedQueryResponse]
+	deleteSavedQuery      *connect.Client[v1.DeleteSavedQueryRequest, v1.DeleteSavedQueryResponse]
 }
 
 // GetConfig calls gastrolog.v1.ConfigService.GetConfig.
@@ -343,6 +379,21 @@ func (c *configServiceClient) PutPreferences(ctx context.Context, req *connect.R
 	return c.putPreferences.CallUnary(ctx, req)
 }
 
+// GetSavedQueries calls gastrolog.v1.ConfigService.GetSavedQueries.
+func (c *configServiceClient) GetSavedQueries(ctx context.Context, req *connect.Request[v1.GetSavedQueriesRequest]) (*connect.Response[v1.GetSavedQueriesResponse], error) {
+	return c.getSavedQueries.CallUnary(ctx, req)
+}
+
+// PutSavedQuery calls gastrolog.v1.ConfigService.PutSavedQuery.
+func (c *configServiceClient) PutSavedQuery(ctx context.Context, req *connect.Request[v1.PutSavedQueryRequest]) (*connect.Response[v1.PutSavedQueryResponse], error) {
+	return c.putSavedQuery.CallUnary(ctx, req)
+}
+
+// DeleteSavedQuery calls gastrolog.v1.ConfigService.DeleteSavedQuery.
+func (c *configServiceClient) DeleteSavedQuery(ctx context.Context, req *connect.Request[v1.DeleteSavedQueryRequest]) (*connect.Response[v1.DeleteSavedQueryResponse], error) {
+	return c.deleteSavedQuery.CallUnary(ctx, req)
+}
+
 // ConfigServiceHandler is an implementation of the gastrolog.v1.ConfigService service.
 type ConfigServiceHandler interface {
 	// GetConfig returns the current configuration.
@@ -379,6 +430,12 @@ type ConfigServiceHandler interface {
 	GetPreferences(context.Context, *connect.Request[v1.GetPreferencesRequest]) (*connect.Response[v1.GetPreferencesResponse], error)
 	// PutPreferences updates the current user's preferences.
 	PutPreferences(context.Context, *connect.Request[v1.PutPreferencesRequest]) (*connect.Response[v1.PutPreferencesResponse], error)
+	// GetSavedQueries returns the current user's saved queries.
+	GetSavedQueries(context.Context, *connect.Request[v1.GetSavedQueriesRequest]) (*connect.Response[v1.GetSavedQueriesResponse], error)
+	// PutSavedQuery creates or updates a saved query by name.
+	PutSavedQuery(context.Context, *connect.Request[v1.PutSavedQueryRequest]) (*connect.Response[v1.PutSavedQueryResponse], error)
+	// DeleteSavedQuery removes a saved query by name.
+	DeleteSavedQuery(context.Context, *connect.Request[v1.DeleteSavedQueryRequest]) (*connect.Response[v1.DeleteSavedQueryResponse], error)
 }
 
 // NewConfigServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -490,6 +547,24 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("PutPreferences")),
 		connect.WithHandlerOptions(opts...),
 	)
+	configServiceGetSavedQueriesHandler := connect.NewUnaryHandler(
+		ConfigServiceGetSavedQueriesProcedure,
+		svc.GetSavedQueries,
+		connect.WithSchema(configServiceMethods.ByName("GetSavedQueries")),
+		connect.WithHandlerOptions(opts...),
+	)
+	configServicePutSavedQueryHandler := connect.NewUnaryHandler(
+		ConfigServicePutSavedQueryProcedure,
+		svc.PutSavedQuery,
+		connect.WithSchema(configServiceMethods.ByName("PutSavedQuery")),
+		connect.WithHandlerOptions(opts...),
+	)
+	configServiceDeleteSavedQueryHandler := connect.NewUnaryHandler(
+		ConfigServiceDeleteSavedQueryProcedure,
+		svc.DeleteSavedQuery,
+		connect.WithSchema(configServiceMethods.ByName("DeleteSavedQuery")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.ConfigService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ConfigServiceGetConfigProcedure:
@@ -526,6 +601,12 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServiceGetPreferencesHandler.ServeHTTP(w, r)
 		case ConfigServicePutPreferencesProcedure:
 			configServicePutPreferencesHandler.ServeHTTP(w, r)
+		case ConfigServiceGetSavedQueriesProcedure:
+			configServiceGetSavedQueriesHandler.ServeHTTP(w, r)
+		case ConfigServicePutSavedQueryProcedure:
+			configServicePutSavedQueryHandler.ServeHTTP(w, r)
+		case ConfigServiceDeleteSavedQueryProcedure:
+			configServiceDeleteSavedQueryHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -601,4 +682,16 @@ func (UnimplementedConfigServiceHandler) GetPreferences(context.Context, *connec
 
 func (UnimplementedConfigServiceHandler) PutPreferences(context.Context, *connect.Request[v1.PutPreferencesRequest]) (*connect.Response[v1.PutPreferencesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.PutPreferences is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) GetSavedQueries(context.Context, *connect.Request[v1.GetSavedQueriesRequest]) (*connect.Response[v1.GetSavedQueriesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.GetSavedQueries is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) PutSavedQuery(context.Context, *connect.Request[v1.PutSavedQueryRequest]) (*connect.Response[v1.PutSavedQueryResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.PutSavedQuery is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) DeleteSavedQuery(context.Context, *connect.Request[v1.DeleteSavedQueryRequest]) (*connect.Response[v1.DeleteSavedQueryResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.DeleteSavedQuery is not implemented"))
 }

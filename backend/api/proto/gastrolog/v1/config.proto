@@ -56,6 +56,15 @@ service ConfigService {
 
   // PutPreferences updates the current user's preferences.
   rpc PutPreferences(PutPreferencesRequest) returns (PutPreferencesResponse);
+
+  // GetSavedQueries returns the current user's saved queries.
+  rpc GetSavedQueries(GetSavedQueriesRequest) returns (GetSavedQueriesResponse);
+
+  // PutSavedQuery creates or updates a saved query by name.
+  rpc PutSavedQuery(PutSavedQueryRequest) returns (PutSavedQueryResponse);
+
+  // DeleteSavedQuery removes a saved query by name.
+  rpc DeleteSavedQuery(DeleteSavedQueryRequest) returns (DeleteSavedQueryResponse);
 }
 
 message GetConfigRequest {}
@@ -214,3 +223,26 @@ message PutPreferencesRequest {
 }
 
 message PutPreferencesResponse {}
+
+message SavedQuery {
+  string name = 1;
+  string query = 2;
+}
+
+message GetSavedQueriesRequest {}
+
+message GetSavedQueriesResponse {
+  repeated SavedQuery queries = 1;
+}
+
+message PutSavedQueryRequest {
+  SavedQuery query = 1;
+}
+
+message PutSavedQueryResponse {}
+
+message DeleteSavedQueryRequest {
+  string name = 1;
+}
+
+message DeleteSavedQueryResponse {}

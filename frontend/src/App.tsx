@@ -39,7 +39,13 @@ import {
   type SettingsTab,
 } from "./components/settings/SettingsDialog";
 import { QueryHistory } from "./components/QueryHistory";
+import { SavedQueries } from "./components/SavedQueries";
 import { useQueryHistory } from "./hooks/useQueryHistory";
+import {
+  useSavedQueries,
+  usePutSavedQuery,
+  useDeleteSavedQuery,
+} from "./api/hooks/useSavedQueries";
 import { ExportButton } from "./components/ExportButton";
 import { QueryInput } from "./components/QueryInput";
 import { QueryAutocomplete } from "./components/QueryAutocomplete";
@@ -148,7 +154,11 @@ function AppContent() {
   }, [detailPinned, showPlan]);
 
   const [showHistory, setShowHistory] = useState(false);
+  const [showSavedQueries, setShowSavedQueries] = useState(false);
   const queryHistory = useQueryHistory();
+  const savedQueries = useSavedQueries();
+  const putSavedQuery = usePutSavedQuery();
+  const deleteSavedQuery = useDeleteSavedQuery();
 
   const queryInputRef = useRef<HTMLTextAreaElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -476,6 +486,7 @@ function AppContent() {
   const executeQuery = () => {
     // Always search from the search route.
     setShowHistory(false);
+    setShowSavedQueries(false);
     if (draft === q && !isFollowMode) {
       // Query unchanged — re-run the search directly since the URL
       // won't change and the effect won't fire.
@@ -489,6 +500,7 @@ function AppContent() {
 
   const startFollow = () => {
     setShowHistory(false);
+    setShowSavedQueries(false);
     // Strip time bounds but keep reverse=.
     const stripped = draft
       .replace(/\blast=\S+/g, "")
@@ -1042,6 +1054,7 @@ function AppContent() {
                       e.stopPropagation();
                       e.preventDefault();
                       setShowHistory((h) => !h);
+                      setShowSavedQueries(false);
                     }}
                     className={`transition-colors ${c(
                       "text-text-ghost hover:text-copper",
@@ -1060,6 +1073,31 @@ function AppContent() {
                     >
                       <circle cx="12" cy="12" r="10" />
                       <polyline points="12 6 12 12 16 14" />
+                    </svg>
+                  </button>
+                  <button
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      setShowSavedQueries((s) => !s);
+                      setShowHistory(false);
+                    }}
+                    className={`transition-colors ${c(
+                      "text-text-ghost hover:text-copper",
+                      "text-light-text-ghost hover:text-copper",
+                    )}`}
+                    title="Saved queries"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="w-4 h-4"
+                    >
+                      <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
                     </svg>
                   </button>
                   <button
@@ -1099,7 +1137,26 @@ function AppContent() {
                     onClose={() => setShowHistory(false)}
                   />
                 )}
-                {autocomplete.isOpen && !showHistory && (
+                {showSavedQueries && (
+                  <SavedQueries
+                    queries={savedQueries.data ?? []}
+                    dark={dark}
+                    currentQuery={draft}
+                    onSelect={(query) => {
+                      setDraft(query);
+                      setShowSavedQueries(false);
+                      queryInputRef.current?.focus();
+                    }}
+                    onSave={(name, query) => {
+                      putSavedQuery.mutate({ name, query });
+                    }}
+                    onDelete={(name) => {
+                      deleteSavedQuery.mutate(name);
+                    }}
+                    onClose={() => setShowSavedQueries(false)}
+                  />
+                )}
+                {autocomplete.isOpen && !showHistory && !showSavedQueries && (
                   <QueryAutocomplete
                     suggestions={autocomplete.suggestions}
                     selectedIndex={autocomplete.selectedIndex}

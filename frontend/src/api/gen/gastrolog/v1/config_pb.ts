@@ -1564,3 +1564,250 @@ export class PutPreferencesResponse extends Message<PutPreferencesResponse> {
   }
 }
 
+/**
+ * @generated from message gastrolog.v1.SavedQuery
+ */
+export class SavedQuery extends Message<SavedQuery> {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name = "";
+
+  /**
+   * @generated from field: string query = 2;
+   */
+  query = "";
+
+  constructor(data?: PartialMessage<SavedQuery>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SavedQuery";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SavedQuery {
+    return new SavedQuery().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SavedQuery {
+    return new SavedQuery().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SavedQuery {
+    return new SavedQuery().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SavedQuery | PlainMessage<SavedQuery> | undefined, b: SavedQuery | PlainMessage<SavedQuery> | undefined): boolean {
+    return proto3.util.equals(SavedQuery, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.GetSavedQueriesRequest
+ */
+export class GetSavedQueriesRequest extends Message<GetSavedQueriesRequest> {
+  constructor(data?: PartialMessage<GetSavedQueriesRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetSavedQueriesRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetSavedQueriesRequest {
+    return new GetSavedQueriesRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetSavedQueriesRequest {
+    return new GetSavedQueriesRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetSavedQueriesRequest {
+    return new GetSavedQueriesRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetSavedQueriesRequest | PlainMessage<GetSavedQueriesRequest> | undefined, b: GetSavedQueriesRequest | PlainMessage<GetSavedQueriesRequest> | undefined): boolean {
+    return proto3.util.equals(GetSavedQueriesRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.GetSavedQueriesResponse
+ */
+export class GetSavedQueriesResponse extends Message<GetSavedQueriesResponse> {
+  /**
+   * @generated from field: repeated gastrolog.v1.SavedQuery queries = 1;
+   */
+  queries: SavedQuery[] = [];
+
+  constructor(data?: PartialMessage<GetSavedQueriesResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetSavedQueriesResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "queries", kind: "message", T: SavedQuery, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetSavedQueriesResponse {
+    return new GetSavedQueriesResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetSavedQueriesResponse {
+    return new GetSavedQueriesResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetSavedQueriesResponse {
+    return new GetSavedQueriesResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetSavedQueriesResponse | PlainMessage<GetSavedQueriesResponse> | undefined, b: GetSavedQueriesResponse | PlainMessage<GetSavedQueriesResponse> | undefined): boolean {
+    return proto3.util.equals(GetSavedQueriesResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutSavedQueryRequest
+ */
+export class PutSavedQueryRequest extends Message<PutSavedQueryRequest> {
+  /**
+   * @generated from field: gastrolog.v1.SavedQuery query = 1;
+   */
+  query?: SavedQuery;
+
+  constructor(data?: PartialMessage<PutSavedQueryRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutSavedQueryRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "query", kind: "message", T: SavedQuery },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutSavedQueryRequest {
+    return new PutSavedQueryRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutSavedQueryRequest {
+    return new PutSavedQueryRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutSavedQueryRequest {
+    return new PutSavedQueryRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutSavedQueryRequest | PlainMessage<PutSavedQueryRequest> | undefined, b: PutSavedQueryRequest | PlainMessage<PutSavedQueryRequest> | undefined): boolean {
+    return proto3.util.equals(PutSavedQueryRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutSavedQueryResponse
+ */
+export class PutSavedQueryResponse extends Message<PutSavedQueryResponse> {
+  constructor(data?: PartialMessage<PutSavedQueryResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutSavedQueryResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutSavedQueryResponse {
+    return new PutSavedQueryResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutSavedQueryResponse {
+    return new PutSavedQueryResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutSavedQueryResponse {
+    return new PutSavedQueryResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutSavedQueryResponse | PlainMessage<PutSavedQueryResponse> | undefined, b: PutSavedQueryResponse | PlainMessage<PutSavedQueryResponse> | undefined): boolean {
+    return proto3.util.equals(PutSavedQueryResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.DeleteSavedQueryRequest
+ */
+export class DeleteSavedQueryRequest extends Message<DeleteSavedQueryRequest> {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name = "";
+
+  constructor(data?: PartialMessage<DeleteSavedQueryRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.DeleteSavedQueryRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteSavedQueryRequest {
+    return new DeleteSavedQueryRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteSavedQueryRequest {
+    return new DeleteSavedQueryRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteSavedQueryRequest {
+    return new DeleteSavedQueryRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DeleteSavedQueryRequest | PlainMessage<DeleteSavedQueryRequest> | undefined, b: DeleteSavedQueryRequest | PlainMessage<DeleteSavedQueryRequest> | undefined): boolean {
+    return proto3.util.equals(DeleteSavedQueryRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.DeleteSavedQueryResponse
+ */
+export class DeleteSavedQueryResponse extends Message<DeleteSavedQueryResponse> {
+  constructor(data?: PartialMessage<DeleteSavedQueryResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.DeleteSavedQueryResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteSavedQueryResponse {
+    return new DeleteSavedQueryResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteSavedQueryResponse {
+    return new DeleteSavedQueryResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteSavedQueryResponse {
+    return new DeleteSavedQueryResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DeleteSavedQueryResponse | PlainMessage<DeleteSavedQueryResponse> | undefined, b: DeleteSavedQueryResponse | PlainMessage<DeleteSavedQueryResponse> | undefined): boolean {
+    return proto3.util.equals(DeleteSavedQueryResponse, a, b);
+  }
+}
+

@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteStoreRequest, DeleteStoreResponse, GetConfigRequest, GetConfigResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetServerConfigRequest, GetServerConfigResponse, ListIngestersRequest, ListIngestersResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutServerConfigRequest, PutServerConfigResponse, PutStoreRequest, PutStoreResponse } from "./config_pb.js";
+import { DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteStoreRequest, DeleteStoreResponse, GetConfigRequest, GetConfigResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetServerConfigRequest, GetServerConfigResponse, ListIngestersRequest, ListIngestersResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutServerConfigRequest, PutServerConfigResponse, PutStoreRequest, PutStoreResponse } from "./config_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -199,6 +199,39 @@ export const ConfigService = {
       name: "PutPreferences",
       I: PutPreferencesRequest,
       O: PutPreferencesResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * GetSavedQueries returns the current user's saved queries.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.GetSavedQueries
+     */
+    getSavedQueries: {
+      name: "GetSavedQueries",
+      I: GetSavedQueriesRequest,
+      O: GetSavedQueriesResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * PutSavedQuery creates or updates a saved query by name.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.PutSavedQuery
+     */
+    putSavedQuery: {
+      name: "PutSavedQuery",
+      I: PutSavedQueryRequest,
+      O: PutSavedQueryResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * DeleteSavedQuery removes a saved query by name.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.DeleteSavedQuery
+     */
+    deleteSavedQuery: {
+      name: "DeleteSavedQuery",
+      I: DeleteSavedQueryRequest,
+      O: DeleteSavedQueryResponse,
       kind: MethodKind.Unary,
     },
   }
