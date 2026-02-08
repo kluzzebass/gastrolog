@@ -114,6 +114,7 @@ function AppContent() {
   const queryInputRef = useRef<HTMLTextAreaElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const logScrollRef = useRef<HTMLDivElement>(null);
+  const selectedRowRef = useRef<HTMLElement>(null);
   const expressionRef = useRef("");
   const skipNextSearchRef = useRef(false);
   const [isScrolledDown, setIsScrolledDown] = useState(false);
@@ -360,6 +361,39 @@ function AppContent() {
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
   }, [isFollowMode, resetFollowNewCount]);
+
+  // After search completes (e.g. zoom-out), scroll the selected row into view.
+  // If the selected record isn't in the loaded page yet, keep loading more
+  // until it appears or there are no more pages.
+  const prevSearchingRef = useRef(false);
+  const scrollToSelectedRef = useRef(false);
+  useEffect(() => {
+    if (prevSearchingRef.current && !isSearching) {
+      if (selectedRowRef.current) {
+        selectedRowRef.current.scrollIntoView({ block: "center" });
+        scrollToSelectedRef.current = false;
+      } else if (selectedRecord && hasMore) {
+        // Selected record not in loaded results yet — auto-paginate.
+        scrollToSelectedRef.current = true;
+        loadMore(expressionRef.current);
+      }
+    }
+    prevSearchingRef.current = isSearching;
+  }, [isSearching]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // When new records arrive during auto-pagination, check if selected row appeared.
+  useEffect(() => {
+    if (!scrollToSelectedRef.current || isSearching) return;
+    if (selectedRowRef.current) {
+      selectedRowRef.current.scrollIntoView({ block: "center" });
+      scrollToSelectedRef.current = false;
+    } else if (hasMore) {
+      loadMore(expressionRef.current);
+    } else {
+      // No more pages — give up.
+      scrollToSelectedRef.current = false;
+    }
+  }, [records.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const executeQuery = () => {
     // Always search from the search route.
@@ -1321,23 +1355,23 @@ function AppContent() {
                 ) : (
                   <div>
                     {(isFollowMode ? followRecords : records).map(
-                      (record, i) => (
-                        <LogEntry
-                          key={i}
-                          record={record}
-                          tokens={tokens}
-                          isSelected={sameRecord(selectedRecord, record)}
-                          onSelect={() =>
-                            setSelectedRecord(
-                              sameRecord(selectedRecord, record)
-                                ? null
-                                : record,
-                            )
-                          }
-                          onFilterToggle={handleTokenToggle}
-                          dark={dark}
-                        />
-                      ),
+                      (record, i) => {
+                        const selected = sameRecord(selectedRecord, record);
+                        return (
+                          <LogEntry
+                            key={i}
+                            ref={selected ? selectedRowRef : undefined}
+                            record={record}
+                            tokens={tokens}
+                            isSelected={selected}
+                            onSelect={() =>
+                              setSelectedRecord(selected ? null : record)
+                            }
+                            onFilterToggle={handleTokenToggle}
+                            dark={dark}
+                          />
+                        );
+                      },
                     )}
                     {/* Infinite scroll sentinel (search only) */}
                     {!isFollowMode && <div ref={sentinelRef} className="h-1" />}

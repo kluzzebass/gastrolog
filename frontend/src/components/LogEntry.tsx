@@ -1,3 +1,4 @@
+import { forwardRef } from "react";
 import type { ProtoRecord } from "../utils";
 import { syntaxHighlight, composeWithSearch } from "../syntax";
 import { CopyButton } from "./CopyButton";
@@ -42,21 +43,20 @@ export function detectSeverity(
   return null;
 }
 
-export function LogEntry({
-  record,
-  tokens,
-  isSelected,
-  onSelect,
-  onFilterToggle,
-  dark,
-}: {
-  record: ProtoRecord;
-  tokens: string[];
-  isSelected: boolean;
-  onSelect: () => void;
-  onFilterToggle?: (token: string) => void;
-  dark: boolean;
-}) {
+export const LogEntry = forwardRef<
+  HTMLElement,
+  {
+    record: ProtoRecord;
+    tokens: string[];
+    isSelected: boolean;
+    onSelect: () => void;
+    onFilterToggle?: (token: string) => void;
+    dark: boolean;
+  }
+>(function LogEntry(
+  { record, tokens, isSelected, onSelect, onFilterToggle, dark },
+  ref,
+) {
   const rawText = new TextDecoder().decode(record.raw);
   const parts = composeWithSearch(syntaxHighlight(rawText), tokens);
   const severity = detectSeverity(record.attrs);
@@ -72,6 +72,7 @@ export function LogEntry({
 
   return (
     <article
+      ref={ref}
       onClick={onSelect}
       className={`group grid grid-cols-[10ch_3.5ch_1fr_auto] px-5 py-1.5 border-b cursor-pointer transition-colors duration-100 ${
         isSelected
@@ -135,4 +136,4 @@ export function LogEntry({
       </span>
     </article>
   );
-}
+});
