@@ -5,79 +5,48 @@ import (
 	"log/slog"
 
 	"gastrolog/internal/chunk"
-
-	"github.com/go-co-op/gocron/v2"
 )
 
-// cronRotationManager manages background cron-based chunk rotation jobs.
-// It maintains a single gocron.Scheduler with one job per store that has
-// a cron rotation schedule configured.
+// cronJobName returns the scheduler job name for a store's cron rotation.
+func cronJobName(storeID string) string {
+	return fmt.Sprintf("cron-rotate:%s", storeID)
+}
+
+// cronRotationManager manages cron-based chunk rotation jobs on the shared scheduler.
+// It doesn't own a scheduler — it registers/removes named jobs on the orchestrator's
+// shared Scheduler so all scheduled tasks are centrally visible.
 type cronRotationManager struct {
-	scheduler gocron.Scheduler
-	jobs      map[string]gocron.Job // storeID → job
+	scheduler *Scheduler
 	logger    *slog.Logger
 }
 
-func newCronRotationManager(logger *slog.Logger) (*cronRotationManager, error) {
-	s, err := gocron.NewScheduler()
-	if err != nil {
-		return nil, fmt.Errorf("create cron scheduler: %w", err)
-	}
+func newCronRotationManager(scheduler *Scheduler, logger *slog.Logger) *cronRotationManager {
 	return &cronRotationManager{
-		scheduler: s,
-		jobs:      make(map[string]gocron.Job),
+		scheduler: scheduler,
 		logger:    logger,
-	}, nil
+	}
 }
 
 // addJob registers a cron rotation job for a store.
 func (m *cronRotationManager) addJob(storeID, cronExpr string, cm chunk.ChunkManager) error {
-	if _, exists := m.jobs[storeID]; exists {
-		return fmt.Errorf("cron rotation job already exists for store %s", storeID)
-	}
-
-	j, err := m.scheduler.NewJob(
-		gocron.CronJob(cronExpr, false),
-		gocron.NewTask(m.rotateStore, storeID, cm),
-		gocron.WithName(fmt.Sprintf("cron-rotate-%s", storeID)),
-	)
-	if err != nil {
-		return fmt.Errorf("create cron rotation job for store %s: %w", storeID, err)
-	}
-
-	m.jobs[storeID] = j
-	m.logger.Info("cron rotation job added", "store", storeID, "cron", cronExpr)
-	return nil
+	name := cronJobName(storeID)
+	return m.scheduler.AddJob(name, cronExpr, m.rotateStore, storeID, cm)
 }
 
 // removeJob stops and removes the cron rotation job for a store.
 func (m *cronRotationManager) removeJob(storeID string) {
-	j, ok := m.jobs[storeID]
-	if !ok {
-		return
-	}
-	if err := m.scheduler.RemoveJob(j.ID()); err != nil {
-		m.logger.Warn("failed to remove cron rotation job", "store", storeID, "error", err)
-	}
-	delete(m.jobs, storeID)
-	m.logger.Info("cron rotation job removed", "store", storeID)
+	m.scheduler.RemoveJob(cronJobName(storeID))
 }
 
 // updateJob replaces the cron rotation job for a store with a new schedule.
 func (m *cronRotationManager) updateJob(storeID, cronExpr string, cm chunk.ChunkManager) error {
-	m.removeJob(storeID)
-	return m.addJob(storeID, cronExpr, cm)
+	name := cronJobName(storeID)
+	return m.scheduler.UpdateJob(name, cronExpr, m.rotateStore, storeID, cm)
 }
 
-// start begins executing all registered cron jobs.
-func (m *cronRotationManager) start() {
-	m.scheduler.Start()
-	m.logger.Info("cron rotation scheduler started", "jobs", len(m.jobs))
-}
-
-// stop shuts down the scheduler and waits for running jobs to finish.
-func (m *cronRotationManager) stop() error {
-	return m.scheduler.Shutdown()
+// hasJob returns true if a cron rotation job exists for a store.
+func (m *cronRotationManager) hasJob(storeID string) bool {
+	return m.scheduler.HasJob(cronJobName(storeID))
 }
 
 // rotateStore seals the active chunk for a store if it has records.

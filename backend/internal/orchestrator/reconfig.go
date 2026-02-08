@@ -414,7 +414,7 @@ func (o *Orchestrator) UpdateRotationPolicies(cfg *config.Config) error {
 		}
 
 		// Update cron rotation job.
-		_, hasCronJob := o.cronRotation.jobs[storeCfg.ID]
+		hasCronJob := o.cronRotation.hasJob(storeCfg.ID)
 		hasCronConfig := policyCfg.Cron != nil && *policyCfg.Cron != ""
 
 		if hasCronConfig && hasCronJob {

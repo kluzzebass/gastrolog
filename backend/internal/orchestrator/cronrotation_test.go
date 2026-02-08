@@ -40,6 +40,17 @@ func (f *cronFakeChunkManager) ReadWriteTimestamps(id chunk.ChunkID, positions [
 }
 func (f *cronFakeChunkManager) SetRotationPolicy(policy chunk.RotationPolicy) {}
 
+// ---------- helpers ----------
+
+func newTestCronManager(t *testing.T) *cronRotationManager {
+	t.Helper()
+	sched, err := newScheduler(slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return newCronRotationManager(sched, slog.Default())
+}
+
 // ---------- tests ----------
 
 func TestRotateStoreSealsNonEmptyChunk(t *testing.T) {
@@ -51,11 +62,7 @@ func TestRotateStoreSealsNonEmptyChunk(t *testing.T) {
 		},
 	}
 
-	m, err := newCronRotationManager(slog.Default())
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	m := newTestCronManager(t)
 	m.rotateStore("test-store", cm)
 
 	if !cm.sealed {
@@ -71,11 +78,7 @@ func TestRotateStoreSkipsEmptyChunk(t *testing.T) {
 		},
 	}
 
-	m, err := newCronRotationManager(slog.Default())
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	m := newTestCronManager(t)
 	m.rotateStore("test-store", cm)
 
 	if cm.sealed {
@@ -88,11 +91,7 @@ func TestRotateStoreSkipsNilActive(t *testing.T) {
 		active: nil,
 	}
 
-	m, err := newCronRotationManager(slog.Default())
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	m := newTestCronManager(t)
 	m.rotateStore("test-store", cm)
 
 	if cm.sealed {
@@ -102,17 +101,13 @@ func TestRotateStoreSkipsNilActive(t *testing.T) {
 
 func TestAddAndRemoveJob(t *testing.T) {
 	cm := &cronFakeChunkManager{}
-
-	m, err := newCronRotationManager(slog.Default())
-	if err != nil {
-		t.Fatal(err)
-	}
+	m := newTestCronManager(t)
 
 	if err := m.addJob("store-a", "* * * * *", cm); err != nil {
 		t.Fatalf("addJob failed: %v", err)
 	}
 
-	if _, ok := m.jobs["store-a"]; !ok {
+	if !m.hasJob("store-a") {
 		t.Error("expected job to be registered")
 	}
 
@@ -123,7 +118,7 @@ func TestAddAndRemoveJob(t *testing.T) {
 
 	m.removeJob("store-a")
 
-	if _, ok := m.jobs["store-a"]; ok {
+	if m.hasJob("store-a") {
 		t.Error("expected job to be removed")
 	}
 
@@ -133,41 +128,62 @@ func TestAddAndRemoveJob(t *testing.T) {
 
 func TestUpdateJob(t *testing.T) {
 	cm := &cronFakeChunkManager{}
-
-	m, err := newCronRotationManager(slog.Default())
-	if err != nil {
-		t.Fatal(err)
-	}
+	m := newTestCronManager(t)
 
 	if err := m.addJob("store-a", "* * * * *", cm); err != nil {
 		t.Fatalf("addJob failed: %v", err)
 	}
 
-	oldJobID := m.jobs["store-a"].ID()
-
 	if err := m.updateJob("store-a", "0 * * * *", cm); err != nil {
 		t.Fatalf("updateJob failed: %v", err)
 	}
 
-	newJobID := m.jobs["store-a"].ID()
-	if oldJobID == newJobID {
-		t.Error("expected job ID to change after update")
+	if !m.hasJob("store-a") {
+		t.Error("expected job to still exist after update")
 	}
 }
 
 func TestAddJobRejectsInvalidCron(t *testing.T) {
 	cm := &cronFakeChunkManager{}
-
-	m, err := newCronRotationManager(slog.Default())
-	if err != nil {
-		t.Fatal(err)
-	}
+	m := newTestCronManager(t)
 
 	if err := m.addJob("store-a", "not a cron", cm); err == nil {
 		t.Error("expected error for invalid cron expression")
 	}
 
-	if _, ok := m.jobs["store-a"]; ok {
+	if m.hasJob("store-a") {
 		t.Error("expected no job to be registered for invalid cron")
+	}
+}
+
+func TestSchedulerListJobs(t *testing.T) {
+	cm := &cronFakeChunkManager{}
+	m := newTestCronManager(t)
+
+	if err := m.addJob("store-a", "* * * * *", cm); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.addJob("store-b", "0 * * * *", cm); err != nil {
+		t.Fatal(err)
+	}
+
+	jobs := m.scheduler.ListJobs()
+	if len(jobs) != 2 {
+		t.Fatalf("expected 2 jobs, got %d", len(jobs))
+	}
+
+	names := map[string]bool{}
+	for _, j := range jobs {
+		names[j.Name] = true
+		if j.Schedule == "" {
+			t.Errorf("expected non-empty schedule for job %s", j.Name)
+		}
+	}
+
+	if !names[cronJobName("store-a")] {
+		t.Error("expected job for store-a")
+	}
+	if !names[cronJobName("store-b")] {
+		t.Error("expected job for store-b")
 	}
 }

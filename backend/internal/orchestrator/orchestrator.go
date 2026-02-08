@@ -98,6 +98,9 @@ type Orchestrator struct {
 	retentionCancels map[string]context.CancelFunc // per-runner cancel functions
 	retentionWg      sync.WaitGroup                // tracks retention goroutines
 
+	// Shared scheduler for all cron-based tasks.
+	scheduler *Scheduler
+
 	// Cron rotation lifecycle.
 	cronRotation *cronRotationManager
 
@@ -139,10 +142,10 @@ func New(cfg Config) *Orchestrator {
 	// Scope logger with component identity.
 	logger := logging.Default(cfg.Logger).With("component", "orchestrator")
 
-	cronMgr, err := newCronRotationManager(logger)
+	sched, err := newScheduler(logger)
 	if err != nil {
 		// This should never fail in practice (just creates a scheduler).
-		panic(fmt.Sprintf("create cron rotation manager: %v", err))
+		panic(fmt.Sprintf("create scheduler: %v", err))
 	}
 
 	return &Orchestrator{
@@ -153,7 +156,8 @@ func New(cfg Config) *Orchestrator {
 		ingesterCancels:  make(map[string]context.CancelFunc),
 		retention:        make(map[string]*retentionRunner),
 		retentionCancels: make(map[string]context.CancelFunc),
-		cronRotation:     cronMgr,
+		scheduler:        sched,
+		cronRotation:     newCronRotationManager(sched, logger),
 		ingestSize:       cfg.IngestChannelSize,
 		now:              cfg.Now,
 		indexCtx:         indexCtx,
@@ -166,4 +170,9 @@ func New(cfg Config) *Orchestrator {
 // Use this when passing loggers to components created by the orchestrator.
 func (o *Orchestrator) Logger() *slog.Logger {
 	return o.logger
+}
+
+// ScheduledJobs returns info about all registered scheduled jobs.
+func (o *Orchestrator) ScheduledJobs() []JobInfo {
+	return o.scheduler.ListJobs()
 }
