@@ -150,6 +150,9 @@ func (s *Store) loadOrEmpty() (*config.Config, error) {
 	if cfg.RetentionPolicies == nil {
 		cfg.RetentionPolicies = make(map[string]config.RetentionPolicyConfig)
 	}
+	if cfg.Settings == nil {
+		cfg.Settings = make(map[string]string)
+	}
 	return cfg, nil
 }
 
@@ -413,5 +416,40 @@ func (s *Store) DeleteIngester(ctx context.Context, id string) error {
 			break
 		}
 	}
+	return s.flush(cfg)
+}
+
+// Settings
+
+func (s *Store) GetSetting(ctx context.Context, key string) (*string, error) {
+	cfg, err := s.load()
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil {
+		return nil, nil
+	}
+	v, ok := cfg.Settings[key]
+	if !ok {
+		return nil, nil
+	}
+	return &v, nil
+}
+
+func (s *Store) PutSetting(ctx context.Context, key string, value string) error {
+	cfg, err := s.loadOrEmpty()
+	if err != nil {
+		return err
+	}
+	cfg.Settings[key] = value
+	return s.flush(cfg)
+}
+
+func (s *Store) DeleteSetting(ctx context.Context, key string) error {
+	cfg, err := s.loadOrEmpty()
+	if err != nil {
+		return err
+	}
+	delete(cfg.Settings, key)
 	return s.flush(cfg)
 }

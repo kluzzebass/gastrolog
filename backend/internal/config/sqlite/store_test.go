@@ -64,7 +64,7 @@ func TestSchema(t *testing.T) {
 		tables[name] = true
 	}
 
-	for _, want := range []string{"rotation_policies", "stores", "ingesters", "filters", "retention_policies", "schema_migrations"} {
+	for _, want := range []string{"rotation_policies", "stores", "ingesters", "filters", "retention_policies", "settings", "schema_migrations"} {
 		if !tables[want] {
 			t.Errorf("expected table %q, got tables: %v", want, tables)
 		}
@@ -92,8 +92,8 @@ func TestMigrationsIdempotent(t *testing.T) {
 	if err := s2.db.QueryRow("SELECT count(*) FROM schema_migrations").Scan(&count); err != nil {
 		t.Fatalf("count: %v", err)
 	}
-	if count != 4 {
-		t.Errorf("expected 4 migration versions, got %d", count)
+	if count != 5 {
+		t.Errorf("expected 5 migration versions, got %d", count)
 	}
 }
 

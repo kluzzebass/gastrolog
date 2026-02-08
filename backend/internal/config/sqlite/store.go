@@ -63,6 +63,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 		     + (SELECT count(*) FROM retention_policies)
 		     + (SELECT count(*) FROM stores)
 		     + (SELECT count(*) FROM ingesters)
+		     + (SELECT count(*) FROM settings)
 	`).Scan(&count)
 	if err != nil {
 		return nil, fmt.Errorf("count entities: %w", err)
@@ -92,12 +93,18 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 		return nil, err
 	}
 
+	settings, err := s.listSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	return &config.Config{
 		Filters:           filters,
 		RotationPolicies:  rotationPolicies,
 		RetentionPolicies: retentionPolicies,
 		Stores:            stores,
 		Ingesters:         ingesters,
+		Settings:          settings,
 	}, nil
 }
 
@@ -444,6 +451,64 @@ func (s *Store) DeleteIngester(ctx context.Context, id string) error {
 		"DELETE FROM ingesters WHERE ingester_id = ?", id)
 	if err != nil {
 		return fmt.Errorf("delete ingester %q: %w", id, err)
+	}
+	return nil
+}
+
+// Settings
+
+func (s *Store) listSettings(ctx context.Context) (map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT key, value FROM settings")
+	if err != nil {
+		return nil, fmt.Errorf("list settings: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]string)
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return nil, fmt.Errorf("scan setting: %w", err)
+		}
+		result[key] = value
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) GetSetting(ctx context.Context, key string) (*string, error) {
+	row := s.db.QueryRowContext(ctx,
+		"SELECT value FROM settings WHERE key = ?", key)
+
+	var value string
+	err := row.Scan(&value)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get setting %q: %w", key, err)
+	}
+	return &value, nil
+}
+
+func (s *Store) PutSetting(ctx context.Context, key string, value string) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO settings (key, value)
+		VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET
+			value = excluded.value
+	`, key, value)
+	if err != nil {
+		return fmt.Errorf("put setting %q: %w", key, err)
+	}
+	return nil
+}
+
+func (s *Store) DeleteSetting(ctx context.Context, key string) error {
+	_, err := s.db.ExecContext(ctx,
+		"DELETE FROM settings WHERE key = ?", key)
+	if err != nil {
+		return fmt.Errorf("delete setting %q: %w", key, err)
 	}
 	return nil
 }

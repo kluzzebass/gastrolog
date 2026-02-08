@@ -17,6 +17,7 @@ type Store struct {
 	retentionPolicies map[string]config.RetentionPolicyConfig
 	stores            map[string]config.StoreConfig
 	ingesters         map[string]config.IngesterConfig
+	settings          map[string]string
 }
 
 var _ config.Store = (*Store)(nil)
@@ -29,6 +30,7 @@ func NewStore() *Store {
 		retentionPolicies: make(map[string]config.RetentionPolicyConfig),
 		stores:            make(map[string]config.StoreConfig),
 		ingesters:         make(map[string]config.IngesterConfig),
+		settings:          make(map[string]string),
 	}
 }
 
@@ -38,7 +40,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	if len(s.filters) == 0 && len(s.rotationPolicies) == 0 && len(s.retentionPolicies) == 0 && len(s.stores) == 0 && len(s.ingesters) == 0 {
+	if len(s.filters) == 0 && len(s.rotationPolicies) == 0 && len(s.retentionPolicies) == 0 && len(s.stores) == 0 && len(s.ingesters) == 0 && len(s.settings) == 0 {
 		return nil, nil
 	}
 
@@ -76,6 +78,13 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 		cfg.Ingesters = make([]config.IngesterConfig, 0, len(s.ingesters))
 		for _, ing := range s.ingesters {
 			cfg.Ingesters = append(cfg.Ingesters, copyIngesterConfig(ing))
+		}
+	}
+
+	if len(s.settings) > 0 {
+		cfg.Settings = make(map[string]string, len(s.settings))
+		for k, v := range s.settings {
+			cfg.Settings[k] = v
 		}
 	}
 
@@ -284,6 +293,35 @@ func (s *Store) DeleteIngester(ctx context.Context, id string) error {
 	defer s.mu.Unlock()
 
 	delete(s.ingesters, id)
+	return nil
+}
+
+// Settings
+
+func (s *Store) GetSetting(ctx context.Context, key string) (*string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	v, ok := s.settings[key]
+	if !ok {
+		return nil, nil
+	}
+	return &v, nil
+}
+
+func (s *Store) PutSetting(ctx context.Context, key string, value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.settings[key] = value
+	return nil
+}
+
+func (s *Store) DeleteSetting(ctx context.Context, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.settings, key)
 	return nil
 }
 

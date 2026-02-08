@@ -653,6 +653,10 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Fatalf("PutIngester: %v", err)
 		}
 
+		if err := s.PutSetting(ctx, "server", `{"auth":{"jwt_secret":"s3cret"}}`); err != nil {
+			t.Fatalf("PutSetting: %v", err)
+		}
+
 		// Load should return the full Config.
 		cfg, err := s.Load(ctx)
 		if err != nil {
@@ -670,6 +674,14 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 		if len(cfg.Ingesters) != 2 {
 			t.Errorf("expected 2 ingesters, got %d", len(cfg.Ingesters))
+		}
+		if len(cfg.Settings) != 1 {
+			t.Errorf("expected 1 setting, got %d", len(cfg.Settings))
+		}
+		if v, ok := cfg.Settings["server"]; !ok {
+			t.Error("missing setting 'server'")
+		} else if v != `{"auth":{"jwt_secret":"s3cret"}}` {
+			t.Errorf("setting 'server': expected JSON blob, got %q", v)
 		}
 	})
 
@@ -699,6 +711,87 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 		if ing != nil {
 			t.Errorf("expected nil, got %+v", ing)
+		}
+
+		setting, err := s.GetSetting(ctx, "nope")
+		if err != nil {
+			t.Fatalf("GetSetting: %v", err)
+		}
+		if setting != nil {
+			t.Errorf("expected nil, got %+v", *setting)
+		}
+	})
+
+	// Settings
+	t.Run("PutGetSetting", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		value := `{"auth":{"jwt_secret":"test-secret"}}`
+		if err := s.PutSetting(ctx, "server", value); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+
+		got, err := s.GetSetting(ctx, "server")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got == nil {
+			t.Fatal("expected setting, got nil")
+		}
+		if *got != value {
+			t.Errorf("expected %q, got %q", value, *got)
+		}
+	})
+
+	t.Run("PutSettingUpsert", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		if err := s.PutSetting(ctx, "server", `{"auth":{}}`); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+
+		updated := `{"auth":{"jwt_secret":"new-secret"}}`
+		if err := s.PutSetting(ctx, "server", updated); err != nil {
+			t.Fatalf("Put upsert: %v", err)
+		}
+
+		got, err := s.GetSetting(ctx, "server")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got == nil {
+			t.Fatal("expected setting, got nil")
+		}
+		if *got != updated {
+			t.Errorf("expected %q, got %q", updated, *got)
+		}
+	})
+
+	t.Run("DeleteSetting", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		if err := s.PutSetting(ctx, "server", `{}`); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+
+		if err := s.DeleteSetting(ctx, "server"); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+
+		got, err := s.GetSetting(ctx, "server")
+		if err != nil {
+			t.Fatalf("Get after delete: %v", err)
+		}
+		if got != nil {
+			t.Fatalf("expected nil after delete, got %q", *got)
+		}
+
+		// Delete non-existent is a no-op.
+		if err := s.DeleteSetting(ctx, "nonexistent"); err != nil {
+			t.Fatalf("Delete non-existent: %v", err)
 		}
 	})
 }

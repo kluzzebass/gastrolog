@@ -69,6 +69,12 @@ type Store interface {
 	ListIngesters(ctx context.Context) ([]IngesterConfig, error)
 	PutIngester(ctx context.Context, cfg IngesterConfig) error
 	DeleteIngester(ctx context.Context, id string) error
+
+	// Settings (server-level key-value configuration)
+	// Values are opaque JSON text; the Store does not interpret them.
+	GetSetting(ctx context.Context, key string) (*string, error)
+	PutSetting(ctx context.Context, key string, value string) error
+	DeleteSetting(ctx context.Context, key string) error
 }
 
 // Config describes the desired system shape.
@@ -79,6 +85,20 @@ type Config struct {
 	RetentionPolicies map[string]RetentionPolicyConfig `json:"retentionPolicies,omitempty"`
 	Ingesters         []IngesterConfig                 `json:"ingesters,omitempty"`
 	Stores            []StoreConfig                    `json:"stores,omitempty"`
+	Settings          map[string]string                `json:"settings,omitempty"`
+}
+
+// ServerConfig holds server-level configuration, organized by concern.
+// It is serialized as JSON and stored under the "server" settings key.
+type ServerConfig struct {
+	Auth AuthConfig `json:"auth,omitempty"`
+}
+
+// AuthConfig holds configuration for user authentication.
+type AuthConfig struct {
+	JWTSecret       string `json:"jwt_secret,omitempty"`
+	TokenDuration   string `json:"token_duration,omitempty"`   // Go duration, e.g. "15m"
+	RefreshDuration string `json:"refresh_duration,omitempty"` // Go duration, e.g. "168h"
 }
 
 // FilterConfig defines a named filter expression.
