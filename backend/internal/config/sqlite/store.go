@@ -164,10 +164,10 @@ func (s *Store) DeleteFilter(ctx context.Context, id string) error {
 
 func (s *Store) GetRotationPolicy(ctx context.Context, id string) (*config.RotationPolicyConfig, error) {
 	row := s.db.QueryRowContext(ctx,
-		"SELECT max_bytes, max_age, max_records FROM rotation_policies WHERE rotation_policy_id = ?", id)
+		"SELECT max_bytes, max_age, max_records, cron FROM rotation_policies WHERE rotation_policy_id = ?", id)
 
 	var rp config.RotationPolicyConfig
-	err := row.Scan(&rp.MaxBytes, &rp.MaxAge, &rp.MaxRecords)
+	err := row.Scan(&rp.MaxBytes, &rp.MaxAge, &rp.MaxRecords, &rp.Cron)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -179,7 +179,7 @@ func (s *Store) GetRotationPolicy(ctx context.Context, id string) (*config.Rotat
 
 func (s *Store) ListRotationPolicies(ctx context.Context) (map[string]config.RotationPolicyConfig, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT rotation_policy_id, max_bytes, max_age, max_records FROM rotation_policies")
+		"SELECT rotation_policy_id, max_bytes, max_age, max_records, cron FROM rotation_policies")
 	if err != nil {
 		return nil, fmt.Errorf("list rotation policies: %w", err)
 	}
@@ -189,7 +189,7 @@ func (s *Store) ListRotationPolicies(ctx context.Context) (map[string]config.Rot
 	for rows.Next() {
 		var id string
 		var rp config.RotationPolicyConfig
-		if err := rows.Scan(&id, &rp.MaxBytes, &rp.MaxAge, &rp.MaxRecords); err != nil {
+		if err := rows.Scan(&id, &rp.MaxBytes, &rp.MaxAge, &rp.MaxRecords, &rp.Cron); err != nil {
 			return nil, fmt.Errorf("scan rotation policy: %w", err)
 		}
 		result[id] = rp
@@ -199,13 +199,14 @@ func (s *Store) ListRotationPolicies(ctx context.Context) (map[string]config.Rot
 
 func (s *Store) PutRotationPolicy(ctx context.Context, id string, rp config.RotationPolicyConfig) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO rotation_policies (rotation_policy_id, max_bytes, max_age, max_records)
-		VALUES (?, ?, ?, ?)
+		INSERT INTO rotation_policies (rotation_policy_id, max_bytes, max_age, max_records, cron)
+		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(rotation_policy_id) DO UPDATE SET
 			max_bytes = excluded.max_bytes,
 			max_age = excluded.max_age,
-			max_records = excluded.max_records
-	`, id, rp.MaxBytes, rp.MaxAge, rp.MaxRecords)
+			max_records = excluded.max_records,
+			cron = excluded.cron
+	`, id, rp.MaxBytes, rp.MaxAge, rp.MaxRecords, rp.Cron)
 	if err != nil {
 		return fmt.Errorf("put rotation policy %q: %w", id, err)
 	}

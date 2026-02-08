@@ -304,6 +304,9 @@ func copyRotationPolicy(rp config.RotationPolicyConfig) config.RotationPolicyCon
 	if rp.MaxRecords != nil {
 		c.MaxRecords = config.Int64Ptr(*rp.MaxRecords)
 	}
+	if rp.Cron != nil {
+		c.Cron = config.StringPtr(*rp.Cron)
+	}
 	return c
 }
 
