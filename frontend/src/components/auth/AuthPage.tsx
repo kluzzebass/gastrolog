@@ -210,11 +210,11 @@ export function AuthPage({ mode }: AuthPageProps) {
                   "bg-light-bg text-light-text-bright placeholder:text-light-text-ghost",
                 )} ${isPending ? "opacity-50 cursor-not-allowed" : ""}`}
               />
-              {mismatch && (
-                <span className="text-[0.78em] text-severity-error">
-                  Passwords do not match
-                </span>
-              )}
+              <span
+                className={`text-[0.78em] ${mismatch ? "text-severity-error" : "invisible"}`}
+              >
+                Passwords do not match
+              </span>
             </div>
           )}
 
