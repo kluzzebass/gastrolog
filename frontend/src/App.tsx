@@ -10,6 +10,7 @@ import {
   useExplain,
   useHistogram,
   useLiveHistogram,
+  useRecordContext,
   extractTokens,
 } from "./api/hooks";
 import { useStores, useStats } from "./api/hooks";
@@ -81,9 +82,14 @@ function AppContent() {
   const [detailPinned, setDetailPinned] = useState(false);
   const [resizing, setResizing] = useState(false);
 
-  // Auto-expand detail panel when a record is selected.
+  // Auto-expand detail panel and fetch context when a record is selected.
   useEffect(() => {
     if (selectedRecord && detailCollapsed) setDetailCollapsed(false);
+    if (selectedRecord?.ref) {
+      fetchContext(selectedRecord.ref);
+    } else {
+      resetContext();
+    }
   }, [selectedRecord]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Escape key: deselect record and collapse detail panel.
@@ -187,6 +193,13 @@ function AppContent() {
     isLoading: isHistogramLoading,
     fetchHistogram,
   } = useHistogram();
+  const {
+    before: contextBefore,
+    after: contextAfter,
+    isLoading: contextLoading,
+    fetchContext,
+    reset: resetContext,
+  } = useRecordContext();
   const { data: stores, isLoading: storesLoading } = useStores();
   const { data: stats, isLoading: statsLoading } = useStats();
 
@@ -1374,6 +1387,10 @@ function AppContent() {
               onChunkSelect={handleChunkSelect}
               onStoreSelect={handleStoreSelect}
               onPosSelect={handlePosSelect}
+              contextBefore={contextBefore}
+              contextAfter={contextAfter}
+              contextLoading={contextLoading}
+              onContextRecordSelect={setSelectedRecord}
             />
           ) : (
             <div className="flex flex-col items-center justify-center h-48 px-4">

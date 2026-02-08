@@ -524,6 +524,139 @@ func (s *QueryServer) histogramChunkSeverity(
 	return true
 }
 
+// GetContext returns records surrounding a specific record, across all stores.
+// It reads the anchor record directly, then uses time-windowed multi-store
+// searches to find nearby records.
+func (s *QueryServer) GetContext(
+	ctx context.Context,
+	req *connect.Request[apiv1.GetContextRequest],
+) (*connect.Response[apiv1.GetContextResponse], error) {
+	ref := req.Msg.Ref
+	if ref == nil || ref.StoreId == "" || ref.ChunkId == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("ref must include store_id, chunk_id, and pos"))
+	}
+
+	chunkID, err := chunk.ParseChunkID(ref.ChunkId)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid chunk_id: %w", err))
+	}
+
+	// Read the anchor record.
+	cm := s.orch.ChunkManager(ref.StoreId)
+	if cm == nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("store %q not found", ref.StoreId))
+	}
+
+	cursor, err := cm.OpenCursor(chunkID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("chunk %s not found: %w", ref.ChunkId, err))
+	}
+
+	anchorRef := chunk.RecordRef{ChunkID: chunkID, Pos: ref.Pos}
+	if err := cursor.Seek(anchorRef); err != nil {
+		cursor.Close()
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("failed to seek to position %d: %w", ref.Pos, err))
+	}
+	anchorRec, _, err := cursor.Next()
+	if err != nil {
+		cursor.Close()
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("failed to read anchor record: %w", err))
+	}
+	cursor.Close()
+	anchorRec.StoreID = ref.StoreId
+	anchorRec.Ref = anchorRef
+
+	// Defaults and caps.
+	before := int(req.Msg.Before)
+	after := int(req.Msg.After)
+	if before == 0 {
+		before = 5
+	}
+	if after == 0 {
+		after = 5
+	}
+	if before > 50 {
+		before = 50
+	}
+	if after > 50 {
+		after = 50
+	}
+
+	anchorTS := anchorRec.WriteTS
+	eng := s.orch.MultiStoreQueryEngine()
+
+	isAnchor := func(rec chunk.Record) bool {
+		return rec.StoreID == ref.StoreId &&
+			rec.Ref.ChunkID == chunkID &&
+			rec.Ref.Pos == ref.Pos
+	}
+
+	// Fetch records before: search backward from anchor timestamp.
+	// Request extra to account for deduplication of the anchor itself.
+	beforeQuery := query.Query{
+		End:       anchorTS,
+		Limit:     before + 1,
+		IsReverse: true,
+	}
+	beforeIter, _ := eng.Search(ctx, beforeQuery, nil)
+	var beforeRecs []chunk.Record
+	for rec, err := range beforeIter {
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil, connect.NewError(connect.CodeCanceled, err)
+			}
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
+		if isAnchor(rec) {
+			continue
+		}
+		beforeRecs = append(beforeRecs, rec)
+		if len(beforeRecs) >= before {
+			break
+		}
+	}
+	// beforeRecs is newest-first (reverse search), flip to oldest-first.
+	slices.Reverse(beforeRecs)
+
+	// Fetch records after: search forward from anchor timestamp.
+	afterQuery := query.Query{
+		Start: anchorTS,
+		Limit: after + 1,
+	}
+	afterIter, _ := eng.Search(ctx, afterQuery, nil)
+	var afterRecs []chunk.Record
+	for rec, err := range afterIter {
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil, connect.NewError(connect.CodeCanceled, err)
+			}
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
+		if isAnchor(rec) {
+			continue
+		}
+		afterRecs = append(afterRecs, rec)
+		if len(afterRecs) >= after {
+			break
+		}
+	}
+
+	// Build response.
+	resp := &apiv1.GetContextResponse{
+		Anchor: recordToProto(anchorRec),
+		Before: make([]*apiv1.Record, 0, len(beforeRecs)),
+		After:  make([]*apiv1.Record, 0, len(afterRecs)),
+	}
+	for _, rec := range beforeRecs {
+		resp.Before = append(resp.Before, recordToProto(rec))
+	}
+	for _, rec := range afterRecs {
+		resp.After = append(resp.After, recordToProto(rec))
+	}
+
+	return connect.NewResponse(resp), nil
+}
+
 // protoToQuery converts a proto Query to the internal query.Query type.
 // If the Expression field is set, it is parsed server-side and takes
 // precedence over the legacy Tokens/KvPredicates fields.

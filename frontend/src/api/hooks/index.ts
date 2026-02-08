@@ -4,6 +4,7 @@ export { useFollow } from "./useFollow";
 export { useExplain } from "./useExplain";
 export { useHistogram } from "./useHistogram";
 export { useLiveHistogram } from "./useLiveHistogram";
+export { useRecordContext } from "./useContext";
 export {
   useConfig,
   usePutFilter,

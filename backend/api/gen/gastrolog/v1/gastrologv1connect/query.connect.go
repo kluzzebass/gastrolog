@@ -41,6 +41,8 @@ const (
 	QueryServiceExplainProcedure = "/gastrolog.v1.QueryService/Explain"
 	// QueryServiceHistogramProcedure is the fully-qualified name of the QueryService's Histogram RPC.
 	QueryServiceHistogramProcedure = "/gastrolog.v1.QueryService/Histogram"
+	// QueryServiceGetContextProcedure is the fully-qualified name of the QueryService's GetContext RPC.
+	QueryServiceGetContextProcedure = "/gastrolog.v1.QueryService/GetContext"
 )
 
 // QueryServiceClient is a client for the gastrolog.v1.QueryService service.
@@ -55,6 +57,9 @@ type QueryServiceClient interface {
 	// Histogram returns record counts bucketed by time for the given query.
 	// Uses binary search on chunk indexes for O(buckets * log(n)) performance.
 	Histogram(context.Context, *connect.Request[v1.HistogramRequest]) (*connect.Response[v1.HistogramResponse], error)
+	// GetContext returns records surrounding a specific record, across all stores.
+	// Uses the anchor record's write timestamp to find nearby records.
+	GetContext(context.Context, *connect.Request[v1.GetContextRequest]) (*connect.Response[v1.GetContextResponse], error)
 }
 
 // NewQueryServiceClient constructs a client for the gastrolog.v1.QueryService service. By default,
@@ -92,15 +97,22 @@ func NewQueryServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(queryServiceMethods.ByName("Histogram")),
 			connect.WithClientOptions(opts...),
 		),
+		getContext: connect.NewClient[v1.GetContextRequest, v1.GetContextResponse](
+			httpClient,
+			baseURL+QueryServiceGetContextProcedure,
+			connect.WithSchema(queryServiceMethods.ByName("GetContext")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // queryServiceClient implements QueryServiceClient.
 type queryServiceClient struct {
-	search    *connect.Client[v1.SearchRequest, v1.SearchResponse]
-	follow    *connect.Client[v1.FollowRequest, v1.FollowResponse]
-	explain   *connect.Client[v1.ExplainRequest, v1.ExplainResponse]
-	histogram *connect.Client[v1.HistogramRequest, v1.HistogramResponse]
+	search     *connect.Client[v1.SearchRequest, v1.SearchResponse]
+	follow     *connect.Client[v1.FollowRequest, v1.FollowResponse]
+	explain    *connect.Client[v1.ExplainRequest, v1.ExplainResponse]
+	histogram  *connect.Client[v1.HistogramRequest, v1.HistogramResponse]
+	getContext *connect.Client[v1.GetContextRequest, v1.GetContextResponse]
 }
 
 // Search calls gastrolog.v1.QueryService.Search.
@@ -123,6 +135,11 @@ func (c *queryServiceClient) Histogram(ctx context.Context, req *connect.Request
 	return c.histogram.CallUnary(ctx, req)
 }
 
+// GetContext calls gastrolog.v1.QueryService.GetContext.
+func (c *queryServiceClient) GetContext(ctx context.Context, req *connect.Request[v1.GetContextRequest]) (*connect.Response[v1.GetContextResponse], error) {
+	return c.getContext.CallUnary(ctx, req)
+}
+
 // QueryServiceHandler is an implementation of the gastrolog.v1.QueryService service.
 type QueryServiceHandler interface {
 	// Search executes a query and streams matching records.
@@ -135,6 +152,9 @@ type QueryServiceHandler interface {
 	// Histogram returns record counts bucketed by time for the given query.
 	// Uses binary search on chunk indexes for O(buckets * log(n)) performance.
 	Histogram(context.Context, *connect.Request[v1.HistogramRequest]) (*connect.Response[v1.HistogramResponse], error)
+	// GetContext returns records surrounding a specific record, across all stores.
+	// Uses the anchor record's write timestamp to find nearby records.
+	GetContext(context.Context, *connect.Request[v1.GetContextRequest]) (*connect.Response[v1.GetContextResponse], error)
 }
 
 // NewQueryServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -168,6 +188,12 @@ func NewQueryServiceHandler(svc QueryServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(queryServiceMethods.ByName("Histogram")),
 		connect.WithHandlerOptions(opts...),
 	)
+	queryServiceGetContextHandler := connect.NewUnaryHandler(
+		QueryServiceGetContextProcedure,
+		svc.GetContext,
+		connect.WithSchema(queryServiceMethods.ByName("GetContext")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.QueryService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case QueryServiceSearchProcedure:
@@ -178,6 +204,8 @@ func NewQueryServiceHandler(svc QueryServiceHandler, opts ...connect.HandlerOpti
 			queryServiceExplainHandler.ServeHTTP(w, r)
 		case QueryServiceHistogramProcedure:
 			queryServiceHistogramHandler.ServeHTTP(w, r)
+		case QueryServiceGetContextProcedure:
+			queryServiceGetContextHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -201,4 +229,8 @@ func (UnimplementedQueryServiceHandler) Explain(context.Context, *connect.Reques
 
 func (UnimplementedQueryServiceHandler) Histogram(context.Context, *connect.Request[v1.HistogramRequest]) (*connect.Response[v1.HistogramResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.QueryService.Histogram is not implemented"))
+}
+
+func (UnimplementedQueryServiceHandler) GetContext(context.Context, *connect.Request[v1.GetContextRequest]) (*connect.Response[v1.GetContextResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.QueryService.GetContext is not implemented"))
 }

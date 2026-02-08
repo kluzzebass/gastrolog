@@ -1044,3 +1044,113 @@ export class HistogramBucket extends Message<HistogramBucket> {
   }
 }
 
+/**
+ * @generated from message gastrolog.v1.GetContextRequest
+ */
+export class GetContextRequest extends Message<GetContextRequest> {
+  /**
+   * The anchor record
+   *
+   * @generated from field: gastrolog.v1.RecordRef ref = 1;
+   */
+  ref?: RecordRef;
+
+  /**
+   * Number of records before anchor (default 5, max 50)
+   *
+   * @generated from field: int32 before = 2;
+   */
+  before = 0;
+
+  /**
+   * Number of records after anchor (default 5, max 50)
+   *
+   * @generated from field: int32 after = 3;
+   */
+  after = 0;
+
+  constructor(data?: PartialMessage<GetContextRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetContextRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "ref", kind: "message", T: RecordRef },
+    { no: 2, name: "before", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 3, name: "after", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetContextRequest {
+    return new GetContextRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetContextRequest {
+    return new GetContextRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetContextRequest {
+    return new GetContextRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetContextRequest | PlainMessage<GetContextRequest> | undefined, b: GetContextRequest | PlainMessage<GetContextRequest> | undefined): boolean {
+    return proto3.util.equals(GetContextRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.GetContextResponse
+ */
+export class GetContextResponse extends Message<GetContextResponse> {
+  /**
+   * Records before anchor, oldest first, all stores
+   *
+   * @generated from field: repeated gastrolog.v1.Record before = 1;
+   */
+  before: Record[] = [];
+
+  /**
+   * The anchor record itself
+   *
+   * @generated from field: gastrolog.v1.Record anchor = 2;
+   */
+  anchor?: Record;
+
+  /**
+   * Records after anchor, oldest first, all stores
+   *
+   * @generated from field: repeated gastrolog.v1.Record after = 3;
+   */
+  after: Record[] = [];
+
+  constructor(data?: PartialMessage<GetContextResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetContextResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "before", kind: "message", T: Record, repeated: true },
+    { no: 2, name: "anchor", kind: "message", T: Record },
+    { no: 3, name: "after", kind: "message", T: Record, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetContextResponse {
+    return new GetContextResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetContextResponse {
+    return new GetContextResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetContextResponse {
+    return new GetContextResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetContextResponse | PlainMessage<GetContextResponse> | undefined, b: GetContextResponse | PlainMessage<GetContextResponse> | undefined): boolean {
+    return proto3.util.equals(GetContextResponse, a, b);
+  }
+}
+

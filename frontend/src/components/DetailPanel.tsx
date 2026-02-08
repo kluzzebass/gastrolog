@@ -7,6 +7,7 @@ import {
 } from "../utils";
 import { syntaxHighlight } from "../syntax";
 import { CopyButton } from "./CopyButton";
+import { ContextRecord } from "./ContextRecord";
 
 export function DetailPanelContent({
   record,
@@ -15,6 +16,10 @@ export function DetailPanelContent({
   onChunkSelect,
   onStoreSelect,
   onPosSelect,
+  contextBefore,
+  contextAfter,
+  contextLoading,
+  onContextRecordSelect,
 }: {
   record: ProtoRecord;
   dark: boolean;
@@ -22,6 +27,10 @@ export function DetailPanelContent({
   onChunkSelect?: (chunkId: string) => void;
   onStoreSelect?: (storeId: string) => void;
   onPosSelect?: (chunkId: string, pos: string) => void;
+  contextBefore?: ProtoRecord[];
+  contextAfter?: ProtoRecord[];
+  contextLoading?: boolean;
+  onContextRecordSelect?: (record: ProtoRecord) => void;
 }) {
   const c = (d: string, l: string) => (dark ? d : l);
   const rawText = new TextDecoder().decode(record.raw);
@@ -202,6 +211,56 @@ export function DetailPanelContent({
             }
           />
         </div>
+      </DetailSection>
+
+      {/* Context */}
+      <DetailSection label="Context" dark={dark}>
+        {contextLoading ? (
+          <div
+            className={`text-[0.8em] font-mono py-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
+          >
+            Loading context...
+          </div>
+        ) : (contextBefore?.length ?? 0) > 0 ||
+          (contextAfter?.length ?? 0) > 0 ? (
+          <div
+            className={`rounded overflow-hidden border ${c("border-ink-border-subtle bg-ink", "border-light-border-subtle bg-light-bg")}`}
+          >
+            {contextBefore?.map((rec, i) => (
+              <ContextRecord
+                key={`before-${i}`}
+                record={rec}
+                isAnchor={false}
+                dark={dark}
+                onSelect={
+                  onContextRecordSelect
+                    ? () => onContextRecordSelect(rec)
+                    : undefined
+                }
+              />
+            ))}
+            <ContextRecord record={record} isAnchor={true} dark={dark} />
+            {contextAfter?.map((rec, i) => (
+              <ContextRecord
+                key={`after-${i}`}
+                record={rec}
+                isAnchor={false}
+                dark={dark}
+                onSelect={
+                  onContextRecordSelect
+                    ? () => onContextRecordSelect(rec)
+                    : undefined
+                }
+              />
+            ))}
+          </div>
+        ) : (
+          <div
+            className={`text-[0.8em] font-mono py-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
+          >
+            No surrounding records
+          </div>
+        )}
       </DetailSection>
     </div>
   );

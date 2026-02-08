@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { ExplainRequest, ExplainResponse, FollowRequest, FollowResponse, HistogramRequest, HistogramResponse, SearchRequest, SearchResponse } from "./query_pb.js";
+import { ExplainRequest, ExplainResponse, FollowRequest, FollowResponse, GetContextRequest, GetContextResponse, HistogramRequest, HistogramResponse, SearchRequest, SearchResponse } from "./query_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -58,6 +58,18 @@ export const QueryService = {
       name: "Histogram",
       I: HistogramRequest,
       O: HistogramResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * GetContext returns records surrounding a specific record, across all stores.
+     * Uses the anchor record's write timestamp to find nearby records.
+     *
+     * @generated from rpc gastrolog.v1.QueryService.GetContext
+     */
+    getContext: {
+      name: "GetContext",
+      I: GetContextRequest,
+      O: GetContextResponse,
       kind: MethodKind.Unary,
     },
   }
