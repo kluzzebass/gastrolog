@@ -147,7 +147,12 @@ func (s *AuthServer) ChangePassword(
 	ctx context.Context,
 	req *connect.Request[apiv1.ChangePasswordRequest],
 ) (*connect.Response[apiv1.ChangePasswordResponse], error) {
+	// Prefer username from JWT claims (set by auth interceptor).
+	// Fall back to request field for first-boot or unauthenticated contexts.
 	username := req.Msg.Username
+	if claims := auth.ClaimsFromContext(ctx); claims != nil {
+		username = claims.Username()
+	}
 	oldPassword := req.Msg.OldPassword
 	newPassword := req.Msg.NewPassword
 

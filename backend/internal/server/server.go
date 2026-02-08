@@ -80,7 +80,7 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 		if origin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Connect-Protocol-Version, Connect-Timeout-Ms, Grpc-Timeout, X-Grpc-Web, X-User-Agent")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Connect-Protocol-Version, Connect-Timeout-Ms, Grpc-Timeout, X-Grpc-Web, X-User-Agent")
 			w.Header().Set("Access-Control-Expose-Headers", "Grpc-Status, Grpc-Message, Grpc-Status-Details-Bin")
 			w.Header().Set("Access-Control-Max-Age", "86400")
 		}
@@ -117,6 +117,13 @@ func (s *Server) Serve(listener net.Listener) error {
 
 	mux := http.NewServeMux()
 
+	// Build handler options (auth interceptor when tokens are available).
+	var handlerOpts []connect.HandlerOption
+	if s.tokens != nil {
+		authInterceptor := auth.NewAuthInterceptor(s.tokens, s.cfgStore)
+		handlerOpts = append(handlerOpts, connect.WithInterceptors(authInterceptor))
+	}
+
 	// Create service handlers
 	queryServer := NewQueryServer(s.orch)
 	storeServer := NewStoreServer(s.orch)
@@ -125,11 +132,11 @@ func (s *Server) Serve(listener net.Listener) error {
 	authServer := NewAuthServer(s.cfgStore, s.tokens)
 
 	// Register handlers
-	mux.Handle(gastrologv1connect.NewQueryServiceHandler(queryServer))
-	mux.Handle(gastrologv1connect.NewStoreServiceHandler(storeServer))
-	mux.Handle(gastrologv1connect.NewConfigServiceHandler(configServer))
-	mux.Handle(gastrologv1connect.NewLifecycleServiceHandler(lifecycleServer))
-	mux.Handle(gastrologv1connect.NewAuthServiceHandler(authServer))
+	mux.Handle(gastrologv1connect.NewQueryServiceHandler(queryServer, handlerOpts...))
+	mux.Handle(gastrologv1connect.NewStoreServiceHandler(storeServer, handlerOpts...))
+	mux.Handle(gastrologv1connect.NewConfigServiceHandler(configServer, handlerOpts...))
+	mux.Handle(gastrologv1connect.NewLifecycleServiceHandler(lifecycleServer, handlerOpts...))
+	mux.Handle(gastrologv1connect.NewAuthServiceHandler(authServer, handlerOpts...))
 
 	// Kubernetes probe endpoints
 	s.registerProbes(mux)
@@ -231,17 +238,23 @@ func (s *Server) ShutdownChan() <-chan struct{} {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
+	var handlerOpts []connect.HandlerOption
+	if s.tokens != nil {
+		authInterceptor := auth.NewAuthInterceptor(s.tokens, s.cfgStore)
+		handlerOpts = append(handlerOpts, connect.WithInterceptors(authInterceptor))
+	}
+
 	queryServer := NewQueryServer(s.orch)
 	storeServer := NewStoreServer(s.orch)
 	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories)
 	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown)
 	authServer := NewAuthServer(s.cfgStore, s.tokens)
 
-	mux.Handle(gastrologv1connect.NewQueryServiceHandler(queryServer))
-	mux.Handle(gastrologv1connect.NewStoreServiceHandler(storeServer))
-	mux.Handle(gastrologv1connect.NewConfigServiceHandler(configServer))
-	mux.Handle(gastrologv1connect.NewLifecycleServiceHandler(lifecycleServer))
-	mux.Handle(gastrologv1connect.NewAuthServiceHandler(authServer))
+	mux.Handle(gastrologv1connect.NewQueryServiceHandler(queryServer, handlerOpts...))
+	mux.Handle(gastrologv1connect.NewStoreServiceHandler(storeServer, handlerOpts...))
+	mux.Handle(gastrologv1connect.NewConfigServiceHandler(configServer, handlerOpts...))
+	mux.Handle(gastrologv1connect.NewLifecycleServiceHandler(lifecycleServer, handlerOpts...))
+	mux.Handle(gastrologv1connect.NewAuthServiceHandler(authServer, handlerOpts...))
 
 	s.registerProbes(mux)
 
