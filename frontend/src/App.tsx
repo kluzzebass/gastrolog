@@ -36,6 +36,8 @@ import { SettingsDialog } from "./components/settings/SettingsDialog";
 import { QueryHistory } from "./components/QueryHistory";
 import { useQueryHistory } from "./hooks/useQueryHistory";
 import { ExportButton } from "./components/ExportButton";
+import { QueryInput } from "./components/QueryInput";
+import { tokenize } from "./queryTokenizer";
 
 export function App() {
   return (
@@ -561,6 +563,7 @@ function AppContent() {
 
   const liveHistogramData = useLiveHistogram(followRecords);
   const tokens = extractTokens(q);
+  const draftHasErrors = useMemo(() => tokenize(draft).hasErrors, [draft]);
   const displayRecords = isFollowMode ? followRecords : records;
   const attrFields = useMemo(
     () => aggregateFields(displayRecords, "attrs"),
@@ -890,25 +893,19 @@ function AppContent() {
           >
             <div className="flex gap-3 items-start">
               <div className="flex-1 relative">
-                <textarea
+                <QueryInput
                   ref={queryInputRef}
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
-                      executeQuery();
+                      if (!draftHasErrors) executeQuery();
                     }
                   }}
-                  rows={1}
                   placeholder="Search logs... tokens for full-text, key=value for attributes"
-                  style={{ fieldSizing: "content" } as React.CSSProperties}
-                  className={`query-input w-full pl-3 pr-14 py-2 text-[0.9em] leading-normal font-mono border rounded resize-none overflow-hidden focus:outline-none ${c(
-                    "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost",
-                    "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost",
-                  )}`}
-                />
-                <div className="absolute right-2 top-2.5 flex items-center gap-1">
+                  dark={dark}
+                >
                   <button
                     onMouseDown={(e) => {
                       e.stopPropagation();
@@ -956,7 +953,7 @@ function AppContent() {
                       <line x1="12" y1="17" x2="12.01" y2="17" />
                     </svg>
                   </button>
-                </div>
+                </QueryInput>
                 {showHistory && (
                   <QueryHistory
                     entries={queryHistory.entries}
@@ -974,7 +971,7 @@ function AppContent() {
               </div>
               <button
                 onClick={executeQuery}
-                disabled={isSearching}
+                disabled={isSearching || draftHasErrors}
                 title="Search"
                 className="px-2 py-2.5 rounded border border-transparent bg-copper text-white hover:bg-copper-glow transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
               >
@@ -993,8 +990,9 @@ function AppContent() {
               </button>
               <button
                 onClick={isFollowMode ? stopFollowMode : startFollow}
+                disabled={!isFollowMode && draftHasErrors}
                 title={isFollowMode ? "Stop following" : "Follow"}
-                className={`px-2 py-2.5 rounded border transition-all duration-200 ${
+                className={`px-2 py-2.5 rounded border transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${
                   isFollowMode
                     ? "bg-severity-error/15 border-severity-error text-severity-error hover:bg-severity-error/25"
                     : c(
@@ -1025,8 +1023,9 @@ function AppContent() {
               </button>
               <button
                 onClick={handleShowPlan}
+                disabled={!showPlan && draftHasErrors}
                 title="Explain query plan"
-                className={`px-2 py-2.5 border rounded transition-all duration-200 ${
+                className={`px-2 py-2.5 border rounded transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${
                   showPlan
                     ? c(
                         "border-copper text-copper",

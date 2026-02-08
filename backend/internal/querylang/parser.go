@@ -1,6 +1,9 @@
 package querylang
 
 // Parser parses a query string into an AST.
+// This is the source of truth for query syntax. The frontend has a mirrored
+// parser in frontend/src/queryTokenizer.ts (validate function) for syntax
+// highlighting and error detection. Changes here must be reflected there.
 //
 // Grammar (EBNF):
 //
