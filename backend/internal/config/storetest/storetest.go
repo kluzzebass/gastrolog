@@ -33,6 +33,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			MaxBytes:   config.StringPtr("64MB"),
 			MaxAge:     config.StringPtr("1h"),
 			MaxRecords: config.Int64Ptr(1000),
+			Cron:       config.StringPtr("0 * * * *"),
 		}
 
 		if err := s.PutRotationPolicy(ctx, "default", rp); err != nil {
@@ -49,17 +50,19 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		assertStringPtr(t, "MaxBytes", got.MaxBytes, "64MB")
 		assertStringPtr(t, "MaxAge", got.MaxAge, "1h")
 		assertInt64Ptr(t, "MaxRecords", got.MaxRecords, 1000)
+		assertStringPtr(t, "Cron", got.Cron, "0 * * * *")
 	})
 
 	t.Run("PutRotationPolicyUpsert", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		rp1 := config.RotationPolicyConfig{MaxAge: config.StringPtr("1h")}
+		rp1 := config.RotationPolicyConfig{MaxAge: config.StringPtr("1h"), Cron: config.StringPtr("0 * * * *")}
 		if err := s.PutRotationPolicy(ctx, "p1", rp1); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
+		// Upsert: change MaxAge, remove Cron.
 		rp2 := config.RotationPolicyConfig{MaxAge: config.StringPtr("2h")}
 		if err := s.PutRotationPolicy(ctx, "p1", rp2); err != nil {
 			t.Fatalf("Put upsert: %v", err)
@@ -70,6 +73,9 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Fatalf("Get: %v", err)
 		}
 		assertStringPtr(t, "MaxAge", got.MaxAge, "2h")
+		if got.Cron != nil {
+			t.Errorf("expected Cron to be nil after upsert without cron, got %q", *got.Cron)
+		}
 
 		// Should still be only one policy.
 		all, err := s.ListRotationPolicies(ctx)
