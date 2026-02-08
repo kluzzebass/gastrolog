@@ -1163,6 +1163,52 @@ function AppContent() {
               className={`flex justify-between items-center px-5 py-2.5 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
             >
               <div className="flex items-center gap-3">
+                {!isFollowMode && selectedRecord && (
+                  <button
+                    onClick={() => {
+                      const anchor = selectedRecord.writeTs?.toDate();
+                      if (!anchor) return;
+                      // Double the current time span, centered on the selected record.
+                      const curStart =
+                        rangeStart?.getTime() ?? anchor.getTime() - 30_000;
+                      const curEnd =
+                        rangeEnd?.getTime() ?? anchor.getTime() + 30_000;
+                      const span = curEnd - curStart;
+                      const mid = anchor.getTime();
+                      const newStart = new Date(mid - span);
+                      const newEnd = new Date(mid + span);
+                      setTimeRange("custom");
+                      setRangeStart(newStart);
+                      setRangeEnd(newEnd);
+                      const newQuery = `start=${newStart.toISOString()} end=${newEnd.toISOString()} reverse=${isReversed}`;
+                      setSelectedRecord(selectedRecord);
+                      navigate({
+                        to: "/search",
+                        search: { q: newQuery },
+                        replace: false,
+                      });
+                    }}
+                    title="Zoom out — double time span around selected record"
+                    className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${c(
+                      "text-text-muted hover:text-copper hover:bg-ink-hover",
+                      "text-light-text-muted hover:text-copper hover:bg-light-hover",
+                    )}`}
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="w-4 h-4"
+                    >
+                      <circle cx="11" cy="11" r="8" />
+                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                      <line x1="8" y1="11" x2="14" y2="11" />
+                    </svg>
+                  </button>
+                )}
                 {!isFollowMode && (
                   <button
                     onClick={toggleReverse}
