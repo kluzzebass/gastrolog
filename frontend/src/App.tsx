@@ -107,8 +107,10 @@ function AppContent() {
 
   const queryInputRef = useRef<HTMLTextAreaElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const logScrollRef = useRef<HTMLDivElement>(null);
   const expressionRef = useRef("");
   const skipNextSearchRef = useRef(false);
+  const [isScrolledDown, setIsScrolledDown] = useState(false);
 
   const handleDetailResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -166,9 +168,11 @@ function AppContent() {
     reconnecting,
     reconnectAttempt,
     error: followError,
+    newCount: followNewCount,
     follow,
     stop: stopFollow,
     reset: resetFollow,
+    resetNewCount: resetFollowNewCount,
   } = useFollow();
   const {
     chunks: explainChunks,
@@ -327,6 +331,22 @@ function AppContent() {
     observer.observe(sentinel);
     return () => observer.disconnect();
   }, [hasMore, isSearching, loadMore]);
+
+  // Follow mode: track scroll position and auto-reset new-record counter.
+  useEffect(() => {
+    const el = logScrollRef.current;
+    if (!el || !isFollowMode) {
+      setIsScrolledDown(false);
+      return;
+    }
+    const onScroll = () => {
+      const scrolled = el.scrollTop > 50;
+      setIsScrolledDown(scrolled);
+      if (!scrolled) resetFollowNewCount();
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [isFollowMode, resetFollowNewCount]);
 
   const executeQuery = () => {
     // Always search from the search route.
@@ -1197,46 +1217,73 @@ function AppContent() {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto app-scroll">
-              {(isFollowMode ? followRecords : records).length === 0 &&
-              !isSearching &&
-              !isFollowMode ? (
-                <EmptyState dark={dark} />
-              ) : (isFollowMode ? followRecords : records).length === 0 &&
-                isFollowMode ? (
-                <div
-                  className={`py-8 text-center text-[0.85em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+            <div className="relative flex-1 overflow-hidden">
+              {/* "N new logs" floating badge */}
+              {isFollowMode && isScrolledDown && followNewCount > 0 && (
+                <button
+                  onClick={() => {
+                    logScrollRef.current?.scrollTo({
+                      top: 0,
+                      behavior: "smooth",
+                    });
+                    resetFollowNewCount();
+                  }}
+                  className={`absolute top-3 left-1/2 -translate-x-1/2 z-10 px-3 py-1.5 rounded-full font-mono text-[0.8em] shadow-lg backdrop-blur cursor-pointer transition-all hover:brightness-110 animate-[fadeSlideDown_200ms_ease-out] ${c(
+                    "bg-copper/90 text-ink",
+                    "bg-copper/90 text-white",
+                  )}`}
                 >
-                  Waiting for new records...
-                </div>
-              ) : (
-                <div>
-                  {(isFollowMode ? followRecords : records).map((record, i) => (
-                    <LogEntry
-                      key={i}
-                      record={record}
-                      tokens={tokens}
-                      isSelected={sameRecord(selectedRecord, record)}
-                      onSelect={() =>
-                        setSelectedRecord(
-                          sameRecord(selectedRecord, record) ? null : record,
-                        )
-                      }
-                      onFilterToggle={handleTokenToggle}
-                      dark={dark}
-                    />
-                  ))}
-                  {/* Infinite scroll sentinel (search only) */}
-                  {!isFollowMode && <div ref={sentinelRef} className="h-1" />}
-                  {isSearching && records.length > 0 && (
-                    <div
-                      className={`py-3 text-center text-[0.85em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
-                    >
-                      Loading more...
-                    </div>
-                  )}
-                </div>
+                  {followNewCount} new log{followNewCount !== 1 ? "s" : ""}
+                </button>
               )}
+              <div
+                ref={logScrollRef}
+                className="h-full overflow-y-auto app-scroll"
+              >
+                {(isFollowMode ? followRecords : records).length === 0 &&
+                !isSearching &&
+                !isFollowMode ? (
+                  <EmptyState dark={dark} />
+                ) : (isFollowMode ? followRecords : records).length === 0 &&
+                  isFollowMode ? (
+                  <div
+                    className={`py-8 text-center text-[0.85em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+                  >
+                    Waiting for new records...
+                  </div>
+                ) : (
+                  <div>
+                    {(isFollowMode ? followRecords : records).map(
+                      (record, i) => (
+                        <LogEntry
+                          key={i}
+                          record={record}
+                          tokens={tokens}
+                          isSelected={sameRecord(selectedRecord, record)}
+                          onSelect={() =>
+                            setSelectedRecord(
+                              sameRecord(selectedRecord, record)
+                                ? null
+                                : record,
+                            )
+                          }
+                          onFilterToggle={handleTokenToggle}
+                          dark={dark}
+                        />
+                      ),
+                    )}
+                    {/* Infinite scroll sentinel (search only) */}
+                    {!isFollowMode && <div ref={sentinelRef} className="h-1" />}
+                    {isSearching && records.length > 0 && (
+                      <div
+                        className={`py-3 text-center text-[0.85em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+                      >
+                        Loading more...
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </main>

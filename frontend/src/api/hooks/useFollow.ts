@@ -11,6 +11,7 @@ export interface FollowState {
   reconnecting: boolean;
   reconnectAttempt: number;
   error: Error | null;
+  newCount: number;
 }
 
 function isAbortError(err: unknown): boolean {
@@ -27,7 +28,9 @@ export function useFollow() {
     reconnecting: false,
     reconnectAttempt: 0,
     error: null,
+    newCount: 0,
   });
+  const newCountRef = useRef(0);
 
   const abortRef = useRef<AbortController | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -83,9 +86,11 @@ export function useFollow() {
             buffer.length = MAX_RECORDS;
           }
 
+          newCountRef.current += response.records.length;
           setState((prev) => ({
             ...prev,
             records: [...buffer],
+            newCount: newCountRef.current,
           }));
         }
 
@@ -129,6 +134,7 @@ export function useFollow() {
       cancelReconnect();
       queryRef.current = queryStr;
       bufferRef.current = [];
+      newCountRef.current = 0;
 
       setState({
         records: [],
@@ -136,6 +142,7 @@ export function useFollow() {
         reconnecting: false,
         reconnectAttempt: 0,
         error: null,
+        newCount: 0,
       });
 
       connectStream(queryStr, 0);
@@ -165,19 +172,27 @@ export function useFollow() {
       abortRef.current = null;
     }
     bufferRef.current = [];
+    newCountRef.current = 0;
     setState({
       records: [],
       isFollowing: false,
       reconnecting: false,
       reconnectAttempt: 0,
       error: null,
+      newCount: 0,
     });
   }, [cancelReconnect]);
+
+  const resetNewCount = useCallback(() => {
+    newCountRef.current = 0;
+    setState((prev) => ({ ...prev, newCount: 0 }));
+  }, []);
 
   return {
     ...state,
     follow,
     stop,
     reset,
+    resetNewCount,
   };
 }
