@@ -93,12 +93,10 @@ type Orchestrator struct {
 	indexCancel context.CancelFunc
 	indexWg     sync.WaitGroup
 
-	// Retention lifecycle.
-	retention        map[string]*retentionRunner   // per-store retention runners
-	retentionCancels map[string]context.CancelFunc // per-runner cancel functions
-	retentionWg      sync.WaitGroup                // tracks retention goroutines
+	// Retention runners (keyed by store ID, invoked by the shared scheduler).
+	retention map[string]*retentionRunner
 
-	// Shared scheduler for all cron-based tasks.
+	// Shared scheduler for all periodic tasks (cron rotation, retention, etc.).
 	scheduler *Scheduler
 
 	// Cron rotation lifecycle.
@@ -149,20 +147,19 @@ func New(cfg Config) *Orchestrator {
 	}
 
 	return &Orchestrator{
-		chunks:           make(map[string]chunk.ChunkManager),
-		indexes:          make(map[string]index.IndexManager),
-		queries:          make(map[string]*query.Engine),
-		ingesters:        make(map[string]Ingester),
-		ingesterCancels:  make(map[string]context.CancelFunc),
-		retention:        make(map[string]*retentionRunner),
-		retentionCancels: make(map[string]context.CancelFunc),
-		scheduler:        sched,
-		cronRotation:     newCronRotationManager(sched, logger),
-		ingestSize:       cfg.IngestChannelSize,
-		now:              cfg.Now,
-		indexCtx:         indexCtx,
-		indexCancel:      indexCancel,
-		logger:           logger,
+		chunks:          make(map[string]chunk.ChunkManager),
+		indexes:         make(map[string]index.IndexManager),
+		queries:         make(map[string]*query.Engine),
+		ingesters:       make(map[string]Ingester),
+		ingesterCancels: make(map[string]context.CancelFunc),
+		retention:       make(map[string]*retentionRunner),
+		scheduler:       sched,
+		cronRotation:    newCronRotationManager(sched, logger),
+		ingestSize:      cfg.IngestChannelSize,
+		now:             cfg.Now,
+		indexCtx:        indexCtx,
+		indexCancel:     indexCancel,
+		logger:          logger,
 	}
 }
 

@@ -1,7 +1,7 @@
 package orchestrator
 
 import (
-	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -10,18 +10,23 @@ import (
 	"gastrolog/internal/index"
 )
 
-const defaultRetentionInterval = 1 * time.Minute
+const defaultRetentionSchedule = "* * * * *" // every minute
 
-// retentionRunner manages the background retention sweep for a single store.
+// retentionJobName returns the scheduler job name for a store's retention sweep.
+func retentionJobName(storeID string) string {
+	return fmt.Sprintf("retention:%s", storeID)
+}
+
+// retentionRunner manages the retention sweep for a single store.
+// It is invoked by the shared scheduler on a cron schedule.
 type retentionRunner struct {
-	mu       sync.Mutex
-	storeID  string
-	cm       chunk.ChunkManager
-	im       index.IndexManager
-	policy   chunk.RetentionPolicy
-	interval time.Duration
-	now      func() time.Time
-	logger   *slog.Logger
+	mu      sync.Mutex
+	storeID string
+	cm      chunk.ChunkManager
+	im      index.IndexManager
+	policy  chunk.RetentionPolicy
+	now     func() time.Time
+	logger  *slog.Logger
 }
 
 // setPolicy hot-swaps the retention policy.
@@ -29,24 +34,6 @@ func (r *retentionRunner) setPolicy(policy chunk.RetentionPolicy) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.policy = policy
-}
-
-// run executes the periodic retention sweep until ctx is cancelled.
-func (r *retentionRunner) run(ctx context.Context) {
-	ticker := time.NewTicker(r.interval)
-	defer ticker.Stop()
-
-	// Run an initial sweep immediately.
-	r.sweep()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			r.sweep()
-		}
-	}
 }
 
 // sweep evaluates the retention policy and deletes expired chunks.

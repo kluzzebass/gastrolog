@@ -202,7 +202,7 @@ func (o *Orchestrator) AddStore(storeCfg config.StoreConfig, cfg *config.Config,
 		return err
 	}
 
-	// Set up retention runner if applicable.
+	// Set up retention job if applicable.
 	var retPolicy chunk.RetentionPolicy
 	if storeCfg.Retention != nil && cfg != nil {
 		retCfg, ok := cfg.RetentionPolicies[*storeCfg.Retention]
@@ -217,21 +217,16 @@ func (o *Orchestrator) AddStore(storeCfg config.StoreConfig, cfg *config.Config,
 	}
 	if retPolicy != nil {
 		runner := &retentionRunner{
-			storeID:  storeCfg.ID,
-			cm:       cm,
-			im:       im,
-			policy:   retPolicy,
-			interval: defaultRetentionInterval,
-			now:      o.now,
-			logger:   o.logger,
+			storeID: storeCfg.ID,
+			cm:      cm,
+			im:      im,
+			policy:  retPolicy,
+			now:     o.now,
+			logger:  o.logger,
 		}
 		o.retention[storeCfg.ID] = runner
-
-		// If running, start the runner immediately.
-		if o.running {
-			retCtx, retCancel := context.WithCancel(context.Background())
-			o.retentionCancels[storeCfg.ID] = retCancel
-			o.retentionWg.Go(func() { runner.run(retCtx) })
+		if err := o.scheduler.AddJob(retentionJobName(storeCfg.ID), defaultRetentionSchedule, runner.sweep); err != nil {
+			o.logger.Warn("failed to add retention job for new store", "store", storeCfg.ID, "error", err)
 		}
 	}
 
@@ -276,11 +271,8 @@ func (o *Orchestrator) RemoveStore(id string) error {
 		return fmt.Errorf("%w: store %s has active chunk", ErrStoreNotEmpty, id)
 	}
 
-	// Stop retention runner if present.
-	if cancel, ok := o.retentionCancels[id]; ok {
-		cancel()
-		delete(o.retentionCancels, id)
-	}
+	// Remove retention job if present.
+	o.scheduler.RemoveJob(retentionJobName(id))
 	delete(o.retention, id)
 
 	// Remove cron rotation job if present.

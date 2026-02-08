@@ -89,13 +89,12 @@ func chunkIDAt(t time.Time) chunk.ChunkID {
 
 func newRetentionRunner(cm chunk.ChunkManager, im index.IndexManager, policy chunk.RetentionPolicy) *retentionRunner {
 	return &retentionRunner{
-		storeID:  "test-store",
-		cm:       cm,
-		im:       im,
-		policy:   policy,
-		interval: time.Minute,
-		now:      time.Now,
-		logger:   slog.Default(),
+		storeID: "test-store",
+		cm:      cm,
+		im:      im,
+		policy:  policy,
+		now:     time.Now,
+		logger:  slog.Default(),
 	}
 }
 

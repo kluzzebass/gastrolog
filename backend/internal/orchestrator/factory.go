@@ -162,7 +162,7 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 		o.SetFilterSet(NewFilterSet(compiledFilters))
 	}
 
-	// Set up retention runners for stores with retention policies.
+	// Set up retention jobs for stores with retention policies.
 	for _, storeCfg := range cfg.Stores {
 		cm, ok := o.chunks[storeCfg.ID]
 		if !ok {
@@ -189,15 +189,17 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 
 		if policy != nil {
 			runner := &retentionRunner{
-				storeID:  storeCfg.ID,
-				cm:       cm,
-				im:       im,
-				policy:   policy,
-				interval: defaultRetentionInterval,
-				now:      o.now,
-				logger:   o.logger,
+				storeID: storeCfg.ID,
+				cm:      cm,
+				im:      im,
+				policy:  policy,
+				now:     o.now,
+				logger:  o.logger,
 			}
 			o.retention[storeCfg.ID] = runner
+			if err := o.scheduler.AddJob(retentionJobName(storeCfg.ID), defaultRetentionSchedule, runner.sweep); err != nil {
+				return fmt.Errorf("retention job for store %s: %w", storeCfg.ID, err)
+			}
 		}
 	}
 
