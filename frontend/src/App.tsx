@@ -364,7 +364,15 @@ function AppContent() {
   const executeQuery = () => {
     // Always search from the search route.
     setShowHistory(false);
-    navigate({ to: "/search", search: { q: draft }, replace: false });
+    if (draft === q && !isFollowMode) {
+      // Query unchanged — re-run the search directly since the URL
+      // won't change and the effect won't fire.
+      search(q);
+      fetchHistogram(q);
+      if (showPlan) explain(q);
+    } else {
+      navigate({ to: "/search", search: { q: draft }, replace: false });
+    }
   };
 
   const startFollow = () => {
