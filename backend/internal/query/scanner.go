@@ -13,6 +13,10 @@ import (
 	"gastrolog/internal/tokenizer"
 )
 
+// kvExtractors is the default set of KV extractors used by runtime filters.
+// Must match the extractors registered in the KV indexer factories.
+var kvExtractors = tokenizer.DefaultExtractors()
+
 // prunePositions returns positions >= minPos from a sorted slice.
 func prunePositions(positions []uint64, minPos uint64) []uint64 {
 	idx := sort.Search(len(positions), func(i int) bool {
@@ -390,7 +394,7 @@ func matchesKeyValue(recAttrs chunk.Attributes, raw []byte, queryFilters []KeyVa
 	var msgValues map[string]struct{} // all values (for *=value pattern)
 	getMsgPairs := func() map[string]map[string]struct{} {
 		if msgPairs == nil {
-			pairs := tokenizer.ExtractKeyValues(raw)
+			pairs := tokenizer.CombinedExtract(raw, kvExtractors)
 			msgPairs = make(map[string]map[string]struct{})
 			msgValues = make(map[string]struct{})
 			for _, kv := range pairs {
@@ -752,7 +756,7 @@ func matchesSingleKV(attrs chunk.Attributes, raw []byte, key, value string) bool
 	}
 
 	// Check message body.
-	pairs := tokenizer.ExtractKeyValues(raw)
+	pairs := tokenizer.CombinedExtract(raw, kvExtractors)
 	for _, kv := range pairs {
 		if kv.Key == keyLower && strings.ToLower(kv.Value) == valueLower {
 			return true
@@ -774,7 +778,7 @@ func matchesKeyExists(attrs chunk.Attributes, raw []byte, key string) bool {
 	}
 
 	// Check message body.
-	pairs := tokenizer.ExtractKeyValues(raw)
+	pairs := tokenizer.CombinedExtract(raw, kvExtractors)
 	for _, kv := range pairs {
 		if kv.Key == keyLower {
 			return true
@@ -796,7 +800,7 @@ func matchesValueExists(attrs chunk.Attributes, raw []byte, value string) bool {
 	}
 
 	// Check message body.
-	pairs := tokenizer.ExtractKeyValues(raw)
+	pairs := tokenizer.CombinedExtract(raw, kvExtractors)
 	for _, kv := range pairs {
 		if strings.ToLower(kv.Value) == valueLower {
 			return true

@@ -35,6 +35,10 @@ type Config struct {
 	// Key and Value indexes are built from the same candidates but stored separately.
 	// Set to 0 to use DefaultKVBudget.
 	KVBudget int64
+
+	// Extractors is the list of KV extractors to run on each record.
+	// If empty, defaults to [ExtractKeyValues] for backward compatibility.
+	Extractors []tokenizer.KVExtractor
 }
 
 // Indexer builds kv indexes for sealed chunks.
@@ -56,10 +60,11 @@ type Config struct {
 // Key-only indexing remains enabled even when value indexing is budget-exhausted.
 // Defensive hard caps are retained as a safety net.
 type Indexer struct {
-	dir      string
-	manager  chunk.ChunkManager
-	logger   *slog.Logger
-	kvBudget int64
+	dir        string
+	manager    chunk.ChunkManager
+	logger     *slog.Logger
+	kvBudget   int64
+	extractors []tokenizer.KVExtractor
 }
 
 func NewIndexer(dir string, manager chunk.ChunkManager, logger *slog.Logger) *Indexer {
@@ -71,11 +76,16 @@ func NewIndexerWithConfig(dir string, manager chunk.ChunkManager, logger *slog.L
 	if budget <= 0 {
 		budget = DefaultKVBudget
 	}
+	extractors := cfg.Extractors
+	if len(extractors) == 0 {
+		extractors = []tokenizer.KVExtractor{tokenizer.ExtractKeyValues}
+	}
 	return &Indexer{
-		dir:      dir,
-		manager:  manager,
-		logger:   logging.Default(logger).With("component", "indexer", "type", "kv"),
-		kvBudget: budget,
+		dir:        dir,
+		manager:    manager,
+		logger:     logging.Default(logger).With("component", "indexer", "type", "kv"),
+		kvBudget:   budget,
+		extractors: extractors,
 	}
 }
 
@@ -157,8 +167,8 @@ func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 			continue // Still count records but don't collect more candidates
 		}
 
-		// Extract key=value pairs from message
-		pairs := tokenizer.ExtractKeyValues(rec.Raw)
+		// Extract key=value pairs from message using all registered extractors.
+		pairs := tokenizer.CombinedExtract(rec.Raw, idx.extractors)
 
 		// Dedupe within record
 		seenKeys := make(map[string]struct{})

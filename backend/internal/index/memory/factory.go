@@ -10,6 +10,7 @@ import (
 	memattr "gastrolog/internal/index/memory/attr"
 	"gastrolog/internal/index/memory/kv"
 	memtoken "gastrolog/internal/index/memory/token"
+	"gastrolog/internal/tokenizer"
 )
 
 // Factory parameter keys.
@@ -34,7 +35,10 @@ func NewFactory() index.ManagerFactory {
 
 		tokIdx := memtoken.NewIndexer(chunkManager)
 		attrIdx := memattr.NewIndexer(chunkManager)
-		kvIdx := kv.NewIndexerWithConfig(chunkManager, kv.Config{KVBudget: kvBudget})
+		kvIdx := kv.NewIndexerWithConfig(chunkManager, kv.Config{
+			KVBudget:   kvBudget,
+			Extractors: tokenizer.DefaultExtractors(),
+		})
 
 		indexers := []index.Indexer{tokIdx, attrIdx, kvIdx}
 
