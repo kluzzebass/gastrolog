@@ -227,24 +227,6 @@ export function AuthPage({ mode }: AuthPageProps) {
             {isRegister ? "Create Account" : "Sign In"}
           </button>
         </form>
-
-        {/* Mode toggle — only show when both modes are valid */}
-        {authStatus.data && !authStatus.data.needsSetup && (
-          <p
-            className={`text-center text-[0.82em] mt-5 ${c("text-text-ghost", "text-light-text-ghost")}`}
-          >
-            {isRegister ? "Already have an account?" : "Don't have an account?"}{" "}
-            <button
-              type="button"
-              onClick={() =>
-                navigate({ to: isRegister ? "/login" : "/register" })
-              }
-              className="text-copper hover:text-copper-glow transition-colors"
-            >
-              {isRegister ? "Sign in" : "Register"}
-            </button>
-          </p>
-        )}
       </div>
     </div>
   );

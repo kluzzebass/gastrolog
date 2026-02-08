@@ -35,10 +35,11 @@ func NewAuthInterceptor(tokens *TokenService, counter UserCounter) *AuthIntercep
 		public: map[string]bool{
 			gastrologv1connect.LifecycleServiceHealthProcedure:   true,
 			gastrologv1connect.AuthServiceGetAuthStatusProcedure: true,
-			gastrologv1connect.AuthServiceRegisterProcedure:      true,
 			gastrologv1connect.AuthServiceLoginProcedure:         true,
 		},
 		admin: map[string]bool{
+			// Auth (admin-only after first user)
+			gastrologv1connect.AuthServiceRegisterProcedure: true,
 			// Lifecycle
 			gastrologv1connect.LifecycleServiceShutdownProcedure: true,
 			// StoreService
@@ -102,13 +103,16 @@ func (i *AuthInterceptor) authenticate(ctx context.Context, procedure string, he
 		return ctx, nil
 	}
 
-	// If no users exist, only public endpoints are accessible.
-	// This forces the frontend to show the registration screen.
+	// First-boot: if no users exist, allow Register (so the first admin
+	// can be created) but block everything else.
 	count, err := i.counter.CountUsers(ctx)
 	if err != nil {
 		return ctx, connect.NewError(connect.CodeInternal, fmt.Errorf("check user count: %w", err))
 	}
 	if count == 0 {
+		if procedure == gastrologv1connect.AuthServiceRegisterProcedure {
+			return ctx, nil
+		}
 		return ctx, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("no users registered; call Register to create the first user"))
 	}
 

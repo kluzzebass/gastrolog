@@ -39,6 +39,14 @@ func (s *stubAuthService) GetAuthStatus(
 	return connect.NewResponse(&apiv1.GetAuthStatusResponse{NeedsSetup: false}), nil
 }
 
+func (s *stubAuthService) Register(
+	ctx context.Context,
+	req *connect.Request[apiv1.RegisterRequest],
+) (*connect.Response[apiv1.RegisterResponse], error) {
+	s.called = true
+	return connect.NewResponse(&apiv1.RegisterResponse{}), nil
+}
+
 func (s *stubAuthService) Login(
 	ctx context.Context,
 	req *connect.Request[apiv1.LoginRequest],
@@ -254,5 +262,47 @@ func TestCountUsersError_FailsClosed(t *testing.T) {
 	}
 	if connect.CodeOf(err) != connect.CodeInternal {
 		t.Errorf("expected Internal, got %v", connect.CodeOf(err))
+	}
+}
+
+func TestRegister_FirstBoot_Allowed(t *testing.T) {
+	s := newTestSetup(t, &mockCounter{count: 0})
+
+	_, err := s.authClient.Register(context.Background(), connect.NewRequest(&apiv1.RegisterRequest{}))
+	if err != nil {
+		t.Fatalf("Register should be allowed during first-boot: %v", err)
+	}
+}
+
+func TestRegister_AfterSetup_RequiresAdmin(t *testing.T) {
+	tokens := auth.NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
+
+	// No token → Unauthenticated.
+	s := newTestSetup(t, &mockCounter{count: 1})
+	_, err := s.authClient.Register(context.Background(), connect.NewRequest(&apiv1.RegisterRequest{}))
+	if err == nil {
+		t.Fatal("Register without token should fail after setup")
+	}
+	if connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Errorf("expected Unauthenticated, got %v", connect.CodeOf(err))
+	}
+
+	// Non-admin token → PermissionDenied.
+	userToken, _, _ := tokens.Issue("alice", "user")
+	userClient := gastrologv1connect.NewAuthServiceClient(http.DefaultClient, s.server.URL, withBearer(userToken))
+	_, err = userClient.Register(context.Background(), connect.NewRequest(&apiv1.RegisterRequest{}))
+	if err == nil {
+		t.Fatal("Register with non-admin token should fail")
+	}
+	if connect.CodeOf(err) != connect.CodePermissionDenied {
+		t.Errorf("expected PermissionDenied, got %v", connect.CodeOf(err))
+	}
+
+	// Admin token → allowed.
+	adminToken, _, _ := tokens.Issue("admin", "admin")
+	adminClient := gastrologv1connect.NewAuthServiceClient(http.DefaultClient, s.server.URL, withBearer(adminToken))
+	_, err = adminClient.Register(context.Background(), connect.NewRequest(&apiv1.RegisterRequest{}))
+	if err != nil {
+		t.Fatalf("Register with admin token should succeed: %v", err)
 	}
 }
