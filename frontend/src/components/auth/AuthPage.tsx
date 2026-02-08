@@ -48,6 +48,8 @@ export function AuthPage({ mode }: AuthPageProps) {
   const c = (d: string, l: string) => (dark ? d : l);
   const isRegister = mode === "register";
   const isPending = login.isPending || register.isPending;
+  const mismatch =
+    isRegister && confirmPassword.length > 0 && password !== confirmPassword;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -164,9 +166,16 @@ export function AuthPage({ mode }: AuthPageProps) {
               onChange={(e) => setPassword(e.target.value)}
               autoComplete={isRegister ? "new-password" : "current-password"}
               disabled={isPending}
-              className={`px-3 py-2 text-[0.9em] border rounded focus:outline-none transition-colors ${c(
-                "bg-ink border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-                "bg-light-bg border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
+              className={`px-3 py-2 text-[0.9em] border rounded focus:outline-none transition-colors ${
+                mismatch
+                  ? "border-severity-error"
+                  : c(
+                      "border-ink-border focus:border-copper-dim",
+                      "border-light-border focus:border-copper",
+                    )
+              } ${c(
+                "bg-ink text-text-bright placeholder:text-text-ghost",
+                "bg-light-bg text-light-text-bright placeholder:text-light-text-ghost",
               )} ${isPending ? "opacity-50 cursor-not-allowed" : ""}`}
             />
           </div>
@@ -175,7 +184,11 @@ export function AuthPage({ mode }: AuthPageProps) {
           {isRegister && (
             <div className="flex flex-col gap-1.5">
               <label
-                className={`text-[0.78em] font-medium tracking-wide uppercase ${c("text-text-muted", "text-light-text-muted")}`}
+                className={`text-[0.78em] font-medium tracking-wide uppercase ${
+                  mismatch
+                    ? "text-severity-error"
+                    : c("text-text-muted", "text-light-text-muted")
+                }`}
               >
                 Confirm Password
               </label>
@@ -185,11 +198,23 @@ export function AuthPage({ mode }: AuthPageProps) {
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 autoComplete="new-password"
                 disabled={isPending}
-                className={`px-3 py-2 text-[0.9em] border rounded focus:outline-none transition-colors ${c(
-                  "bg-ink border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-                  "bg-light-bg border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
+                className={`px-3 py-2 text-[0.9em] border rounded focus:outline-none transition-colors ${
+                  mismatch
+                    ? "border-severity-error"
+                    : c(
+                        "border-ink-border focus:border-copper-dim",
+                        "border-light-border focus:border-copper",
+                      )
+                } ${c(
+                  "bg-ink text-text-bright placeholder:text-text-ghost",
+                  "bg-light-bg text-light-text-bright placeholder:text-light-text-ghost",
                 )} ${isPending ? "opacity-50 cursor-not-allowed" : ""}`}
               />
+              {mismatch && (
+                <span className="text-[0.78em] text-severity-error">
+                  Passwords do not match
+                </span>
+              )}
             </div>
           )}
 
