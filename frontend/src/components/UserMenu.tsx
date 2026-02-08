@@ -66,7 +66,7 @@ export function UserMenu({
 
       {open && (
         <div
-          className={`absolute right-0 top-full mt-1.5 z-50 min-w-[12rem] rounded border shadow-lg ${c(
+          className={`absolute right-0 top-full mt-1.5 z-50 min-w-48 rounded border shadow-lg ${c(
             "bg-ink-surface border-ink-border",
             "bg-light-surface border-light-border",
           )}`}
@@ -81,7 +81,7 @@ export function UserMenu({
               {username}
             </div>
             <div
-              className={`text-[0.7em] uppercase tracking-[0.1em] mt-0.5 ${c("text-text-ghost", "text-light-text-ghost")}`}
+              className={`text-[0.7em] uppercase tracking-widest mt-0.5 ${c("text-text-ghost", "text-light-text-ghost")}`}
             >
               {role}
             </div>

@@ -671,7 +671,7 @@ function AppContent() {
 
   return (
     <div
-      className={`grain h-screen overflow-hidden flex flex-col font-body text-[16px] ${c("bg-ink text-text-normal", "light-theme bg-light-bg text-light-text-normal")}`}
+      className={`grain h-screen overflow-hidden flex flex-col font-body text-base ${c("bg-ink text-text-normal", "light-theme bg-light-bg text-light-text-normal")}`}
     >
       {/* ── Header ── */}
       <header
