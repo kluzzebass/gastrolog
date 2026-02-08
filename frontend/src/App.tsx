@@ -222,6 +222,7 @@ function AppContent() {
   // Strip start=/end=/reverse tokens from the query string.
   const stripTimeRange = (q: string): string =>
     q
+      .replace(/\blast=\S+/g, "")
       .replace(/\bstart=\S+/g, "")
       .replace(/\bend=\S+/g, "")
       .replace(/\breverse=\S+/g, "")
@@ -239,10 +240,8 @@ function AppContent() {
   const buildTimeTokens = (range: string, reverse = isReversed): string => {
     const rev = `reverse=${reverse}`;
     if (range === "All") return rev;
-    const ms = timeRangeMs[range];
-    if (!ms) return rev;
-    const now = Date.now();
-    return `start=${new Date(now - ms).toISOString()} end=${new Date(now).toISOString()} ${rev}`;
+    if (range in timeRangeMs) return `last=${range} ${rev}`;
+    return rev;
   };
 
   // Inject time range + reverse into query, replacing any existing time tokens.
@@ -291,6 +290,22 @@ function AppContent() {
   useEffect(() => {
     expressionRef.current = q;
     queryHistory.add(q);
+
+    // Sync sidebar preset and range display from last= in the URL.
+    const lastMatch = q.match(/\blast=(\S+)/);
+    if (lastMatch) {
+      const key = lastMatch[1];
+      const ms = timeRangeMs[key];
+      if (ms) {
+        setTimeRange(key);
+        const now = new Date();
+        setRangeStart(new Date(now.getTime() - ms));
+        setRangeEnd(now);
+      }
+    } else if (q.includes("start=")) {
+      setTimeRange("custom");
+    }
+
     if (isFollowMode) {
       // On /follow: stop any in-flight search, start following.
       resetSearch();
@@ -413,6 +428,7 @@ function AppContent() {
     setShowHistory(false);
     // Strip time bounds but keep reverse=.
     const stripped = draft
+      .replace(/\blast=\S+/g, "")
       .replace(/\bstart=\S+/g, "")
       .replace(/\bend=\S+/g, "")
       .replace(/\s+/g, " ")

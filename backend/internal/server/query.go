@@ -744,6 +744,15 @@ func parseExpression(expr string) (query.Query, error) {
 				}
 				q.End = t
 				continue
+			case "last":
+				d, err := parseDuration(v)
+				if err != nil {
+					return q, fmt.Errorf("invalid last duration: %w", err)
+				}
+				now := time.Now()
+				q.Start = now.Add(-d)
+				q.End = now
+				continue
 			case "source_start":
 				t, err := parseTime(v)
 				if err != nil {
@@ -800,6 +809,18 @@ func parseExpression(expr string) (query.Query, error) {
 	}
 
 	return q, nil
+}
+
+// parseDuration parses a duration string like "5m", "1h", or "3d".
+// Extends time.ParseDuration with support for day suffixes.
+func parseDuration(s string) (time.Duration, error) {
+	if strings.HasSuffix(s, "d") {
+		var days int
+		if _, err := fmt.Sscanf(s, "%dd", &days); err == nil && days > 0 {
+			return time.Duration(days) * 24 * time.Hour, nil
+		}
+	}
+	return time.ParseDuration(s)
 }
 
 // parseTime parses a time string in RFC3339 format or as a Unix timestamp.
