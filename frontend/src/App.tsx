@@ -37,7 +37,9 @@ import { QueryHistory } from "./components/QueryHistory";
 import { useQueryHistory } from "./hooks/useQueryHistory";
 import { ExportButton } from "./components/ExportButton";
 import { QueryInput } from "./components/QueryInput";
+import { QueryAutocomplete } from "./components/QueryAutocomplete";
 import { tokenize } from "./queryTokenizer";
+import { useAutocomplete } from "./hooks/useAutocomplete";
 
 export function App() {
   return (
@@ -53,6 +55,7 @@ function AppContent() {
   const location = useLocation();
   const isFollowMode = location.pathname === "/follow";
   const [draft, setDraft] = useState(q);
+  const [cursorPos, setCursorPos] = useState(0);
   const [selectedStore, setSelectedStore] = useState("all");
   const [timeRange, setTimeRange] = useState("1h");
   const [rangeStart, setRangeStart] = useState<Date | null>(null);
@@ -573,6 +576,18 @@ function AppContent() {
     () => aggregateFields(displayRecords, "kv"),
     [displayRecords],
   );
+  const allFields = useMemo(() => {
+    const seen = new Set<string>();
+    const merged = [];
+    for (const f of [...attrFields, ...kvFields]) {
+      if (!seen.has(f.key)) {
+        seen.add(f.key);
+        merged.push(f);
+      }
+    }
+    return merged;
+  }, [attrFields, kvFields]);
+  const autocomplete = useAutocomplete(draft, cursorPos, allFields);
 
   const handleFieldSelect = (key: string, value: string) => {
     const needsQuotes = /[^a-zA-Z0-9_\-.]/.test(value);
@@ -896,12 +911,60 @@ function AppContent() {
                 <QueryInput
                   ref={queryInputRef}
                   value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
+                  onChange={(e) => {
+                    setDraft(e.target.value);
+                    setCursorPos(e.target.selectionStart ?? 0);
+                  }}
                   onKeyDown={(e) => {
+                    if (autocomplete.isOpen) {
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        autocomplete.selectNext();
+                        return;
+                      }
+                      if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        autocomplete.selectPrev();
+                        return;
+                      }
+                      if (
+                        e.key === "Tab" ||
+                        (e.key === "Enter" && !e.shiftKey)
+                      ) {
+                        e.preventDefault();
+                        const result = autocomplete.accept();
+                        if (result) {
+                          setDraft(result.newDraft);
+                          setCursorPos(result.newCursor);
+                          // Set cursor position after React re-renders.
+                          requestAnimationFrame(() => {
+                            const ta = queryInputRef.current;
+                            if (ta) {
+                              ta.selectionStart = result.newCursor;
+                              ta.selectionEnd = result.newCursor;
+                            }
+                          });
+                        }
+                        return;
+                      }
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        autocomplete.dismiss();
+                        return;
+                      }
+                    }
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
                       if (!draftHasErrors) executeQuery();
                     }
+                  }}
+                  onKeyUp={(e) => {
+                    const ta = e.target as HTMLTextAreaElement;
+                    setCursorPos(ta.selectionStart ?? 0);
+                  }}
+                  onClick={(e) => {
+                    const ta = e.target as HTMLTextAreaElement;
+                    setCursorPos(ta.selectionStart ?? 0);
                   }}
                   placeholder="Search logs... tokens for full-text, key=value for attributes"
                   dark={dark}
@@ -966,6 +1029,29 @@ function AppContent() {
                     onRemove={queryHistory.remove}
                     onClear={queryHistory.clear}
                     onClose={() => setShowHistory(false)}
+                  />
+                )}
+                {autocomplete.isOpen && !showHistory && (
+                  <QueryAutocomplete
+                    suggestions={autocomplete.suggestions}
+                    selectedIndex={autocomplete.selectedIndex}
+                    dark={dark}
+                    onSelect={(i) => {
+                      const result = autocomplete.accept(i);
+                      if (result) {
+                        setDraft(result.newDraft);
+                        setCursorPos(result.newCursor);
+                        requestAnimationFrame(() => {
+                          const ta = queryInputRef.current;
+                          if (ta) {
+                            ta.selectionStart = result.newCursor;
+                            ta.selectionEnd = result.newCursor;
+                            ta.focus();
+                          }
+                        });
+                      }
+                    }}
+                    onClose={autocomplete.dismiss}
                   />
                 )}
               </div>

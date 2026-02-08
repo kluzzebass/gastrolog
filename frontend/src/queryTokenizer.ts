@@ -39,7 +39,7 @@ export interface HighlightSpan {
   role: HighlightRole;
 }
 
-const DIRECTIVES = new Set([
+export const DIRECTIVES = new Set([
   "reverse",
   "start",
   "end",

@@ -5,6 +5,8 @@ interface QueryInputProps {
   value: string;
   onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  onKeyUp?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  onClick?: (e: React.MouseEvent<HTMLTextAreaElement>) => void;
   placeholder?: string;
   dark: boolean;
   children?: ReactNode;
@@ -46,7 +48,19 @@ function roleStyle(role: HighlightRole, dark: boolean): React.CSSProperties {
 }
 
 export const QueryInput = forwardRef<HTMLTextAreaElement, QueryInputProps>(
-  ({ value, onChange, onKeyDown, placeholder, dark, children }, ref) => {
+  (
+    {
+      value,
+      onChange,
+      onKeyDown,
+      onKeyUp,
+      onClick,
+      placeholder,
+      dark,
+      children,
+    },
+    ref,
+  ) => {
     const { spans, errorMessage } = useMemo(() => tokenize(value), [value]);
 
     const c = (darkCls: string, lightCls: string) =>
@@ -60,6 +74,8 @@ export const QueryInput = forwardRef<HTMLTextAreaElement, QueryInputProps>(
           value={value}
           onChange={onChange}
           onKeyDown={onKeyDown}
+          onKeyUp={onKeyUp}
+          onClick={onClick}
           rows={1}
           placeholder={placeholder}
           title={errorMessage ?? undefined}
