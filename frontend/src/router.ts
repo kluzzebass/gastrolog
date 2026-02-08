@@ -2,6 +2,8 @@ import { createRouter, createRoute, redirect } from "@tanstack/react-router";
 import { rootRoute } from "./routes/__root";
 import { searchRoute } from "./routes/search";
 import { followRoute } from "./routes/follow";
+import { loginRoute } from "./routes/login";
+import { registerRoute } from "./routes/register";
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -11,7 +13,13 @@ const indexRoute = createRoute({
   },
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, searchRoute, followRoute]);
+const routeTree = rootRoute.addChildren([
+  indexRoute,
+  searchRoute,
+  followRoute,
+  loginRoute,
+  registerRoute,
+]);
 
 export const router = createRouter({ routeTree });
 

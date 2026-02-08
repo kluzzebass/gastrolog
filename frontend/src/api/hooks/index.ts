@@ -18,3 +18,4 @@ export {
   usePutIngester,
   useDeleteIngester,
 } from "./useConfig";
+export { useAuthStatus, useLogin, useRegister, useLogout } from "./useAuth";

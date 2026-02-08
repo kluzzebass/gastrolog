@@ -13,8 +13,9 @@ import {
   useRecordContext,
   extractTokens,
 } from "./api/hooks";
-import { useStores, useStats } from "./api/hooks";
-import { Record as ProtoRecord } from "./api/client";
+import { useStores, useStats, useLogout } from "./api/hooks";
+import { ConnectError, Code } from "@connectrpc/connect";
+import { Record as ProtoRecord, setToken } from "./api/client";
 
 import { timeRangeMs, aggregateFields, sameRecord } from "./utils";
 import type { Theme } from "./utils";
@@ -211,13 +212,35 @@ function AppContent() {
 
   const dark = theme === "dark" || (theme === "system" && systemDark);
   const { addToast } = useToast();
+  const logout = useLogout();
 
   // Push errors from hooks to the toast system.
+  // If the error is Unauthenticated, clear token and redirect to login.
   useEffect(() => {
-    if (searchError) addToast(searchError.message, "error");
+    if (searchError) {
+      if (
+        searchError instanceof ConnectError &&
+        searchError.code === Code.Unauthenticated
+      ) {
+        setToken(null);
+        navigate({ to: "/login" });
+        return;
+      }
+      addToast(searchError.message, "error");
+    }
   }, [searchError]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (followError) addToast(followError.message, "error");
+    if (followError) {
+      if (
+        followError instanceof ConnectError &&
+        followError.code === Code.Unauthenticated
+      ) {
+        setToken(null);
+        navigate({ to: "/login" });
+        return;
+      }
+      addToast(followError.message, "error");
+    }
   }, [followError]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Build the full expression sent to the server.
@@ -726,6 +749,29 @@ function AppContent() {
             >
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
+
+          <button
+            onClick={logout}
+            title="Sign out"
+            className={`w-7 h-7 flex items-center justify-center rounded transition-all duration-200 ${c(
+              "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
+              "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
+            )}`}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="w-4 h-4"
+            >
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
             </svg>
           </button>
         </div>
