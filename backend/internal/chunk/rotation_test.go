@@ -84,10 +84,21 @@ func TestSizePolicyBasic(t *testing.T) {
 			record := Record{Raw: make([]byte, tc.rawLen)}
 
 			got := policy.ShouldRotate(state, record)
-			if got != tc.wantRotate {
-				t.Fatalf("ShouldRotate() = %v, want %v", got, tc.wantRotate)
+			if (got != nil) != tc.wantRotate {
+				t.Fatalf("ShouldRotate() = %v, wantRotate %v", got, tc.wantRotate)
 			}
 		})
+	}
+}
+
+func TestSizePolicyTriggerName(t *testing.T) {
+	policy := NewSizePolicy(100)
+	state := ActiveChunkState{Bytes: 200}
+	record := Record{Raw: []byte("x")}
+
+	got := policy.ShouldRotate(state, record)
+	if got == nil || *got != "size" {
+		t.Fatalf("expected trigger 'size', got %v", got)
 	}
 }
 
@@ -97,7 +108,7 @@ func TestSizePolicyZeroMaxBytes(t *testing.T) {
 	state := ActiveChunkState{Bytes: 1000000000} // 1GB already written
 	record := Record{Raw: make([]byte, 1000000)} // 1MB record
 
-	if policy.ShouldRotate(state, record) {
+	if policy.ShouldRotate(state, record) != nil {
 		t.Fatal("zero maxBytes should never trigger rotation")
 	}
 }
@@ -114,7 +125,7 @@ func TestSizePolicyIncludesOverhead(t *testing.T) {
 	}
 
 	// Total: 50 (existing) + 20 (raw) + ~14 (attrs) + 30 (idx) = ~114 > 100
-	if !policy.ShouldRotate(state, record) {
+	if policy.ShouldRotate(state, record) == nil {
 		t.Fatal("policy should account for overhead (attrs + idx entry)")
 	}
 }
@@ -144,10 +155,21 @@ func TestRecordCountPolicyBasic(t *testing.T) {
 			record := Record{Raw: []byte("test")}
 
 			got := policy.ShouldRotate(state, record)
-			if got != tc.wantRotate {
-				t.Fatalf("ShouldRotate() = %v, want %v", got, tc.wantRotate)
+			if (got != nil) != tc.wantRotate {
+				t.Fatalf("ShouldRotate() = %v, wantRotate %v", got, tc.wantRotate)
 			}
 		})
+	}
+}
+
+func TestRecordCountPolicyTriggerName(t *testing.T) {
+	policy := NewRecordCountPolicy(10)
+	state := ActiveChunkState{Records: 100}
+	record := Record{Raw: []byte("x")}
+
+	got := policy.ShouldRotate(state, record)
+	if got == nil || *got != "records" {
+		t.Fatalf("expected trigger 'records', got %v", got)
 	}
 }
 
@@ -157,7 +179,7 @@ func TestRecordCountPolicyZeroMax(t *testing.T) {
 	state := ActiveChunkState{Records: 1000000}
 	record := Record{Raw: []byte("test")}
 
-	if policy.ShouldRotate(state, record) {
+	if policy.ShouldRotate(state, record) != nil {
 		t.Fatal("zero maxRecords should never trigger rotation")
 	}
 }
@@ -215,10 +237,22 @@ func TestAgePolicyBasic(t *testing.T) {
 			record := Record{Raw: []byte("test")}
 
 			got := policy.ShouldRotate(state, record)
-			if got != tc.wantRotate {
-				t.Fatalf("ShouldRotate() = %v, want %v", got, tc.wantRotate)
+			if (got != nil) != tc.wantRotate {
+				t.Fatalf("ShouldRotate() = %v, wantRotate %v", got, tc.wantRotate)
 			}
 		})
+	}
+}
+
+func TestAgePolicyTriggerName(t *testing.T) {
+	now := time.Now()
+	policy := NewAgePolicy(time.Hour, func() time.Time { return now })
+	state := ActiveChunkState{CreatedAt: now.Add(-2 * time.Hour)}
+	record := Record{Raw: []byte("x")}
+
+	got := policy.ShouldRotate(state, record)
+	if got == nil || *got != "age" {
+		t.Fatalf("expected trigger 'age', got %v", got)
 	}
 }
 
@@ -231,7 +265,7 @@ func TestAgePolicyZeroMaxAge(t *testing.T) {
 	}
 	record := Record{Raw: []byte("test")}
 
-	if policy.ShouldRotate(state, record) {
+	if policy.ShouldRotate(state, record) != nil {
 		t.Fatal("zero maxAge should never trigger rotation")
 	}
 }
@@ -243,7 +277,7 @@ func TestAgePolicyZeroCreatedAt(t *testing.T) {
 	state := ActiveChunkState{} // CreatedAt is zero
 	record := Record{Raw: []byte("test")}
 
-	if policy.ShouldRotate(state, record) {
+	if policy.ShouldRotate(state, record) != nil {
 		t.Fatal("zero CreatedAt should not trigger rotation")
 	}
 }
@@ -257,7 +291,7 @@ func TestAgePolicyNilNowFunc(t *testing.T) {
 	}
 	record := Record{Raw: []byte("test")}
 
-	if !policy.ShouldRotate(state, record) {
+	if policy.ShouldRotate(state, record) == nil {
 		t.Fatal("policy with nil now func should use time.Now")
 	}
 }
@@ -288,10 +322,21 @@ func TestHardLimitPolicyBasic(t *testing.T) {
 			record := Record{Raw: make([]byte, tc.rawLen)}
 
 			got := policy.ShouldRotate(state, record)
-			if got != tc.wantRotate {
-				t.Fatalf("ShouldRotate() = %v, want %v", got, tc.wantRotate)
+			if (got != nil) != tc.wantRotate {
+				t.Fatalf("ShouldRotate() = %v, wantRotate %v", got, tc.wantRotate)
 			}
 		})
+	}
+}
+
+func TestHardLimitPolicyTriggerName(t *testing.T) {
+	policy := NewHardLimitPolicy(100, 100)
+	state := ActiveChunkState{Bytes: 200}
+	record := Record{Raw: []byte("x")}
+
+	got := policy.ShouldRotate(state, record)
+	if got == nil || *got != "hard-limit" {
+		t.Fatalf("expected trigger 'hard-limit', got %v", got)
 	}
 }
 
@@ -326,10 +371,26 @@ func TestCompositePolicyORSemantics(t *testing.T) {
 			record := Record{Raw: []byte("test")}
 
 			got := composite.ShouldRotate(state, record)
-			if got != tc.wantRotate {
-				t.Fatalf("ShouldRotate() = %v, want %v", got, tc.wantRotate)
+			if (got != nil) != tc.wantRotate {
+				t.Fatalf("ShouldRotate() = %v, wantRotate %v", got, tc.wantRotate)
 			}
 		})
+	}
+}
+
+func TestCompositePolicyFirstTriggerWins(t *testing.T) {
+	// Both would fire, but size is checked first
+	composite := NewCompositePolicy(
+		NewSizePolicy(100),
+		NewRecordCountPolicy(5),
+	)
+
+	state := ActiveChunkState{Bytes: 200, Records: 10}
+	record := Record{Raw: []byte("x")}
+
+	got := composite.ShouldRotate(state, record)
+	if got == nil || *got != "size" {
+		t.Fatalf("expected first trigger 'size', got %v", got)
 	}
 }
 
@@ -339,23 +400,22 @@ func TestCompositePolicyEmpty(t *testing.T) {
 	state := ActiveChunkState{Bytes: 1000000, Records: 1000000}
 	record := Record{Raw: make([]byte, 1000000)}
 
-	if composite.ShouldRotate(state, record) {
+	if composite.ShouldRotate(state, record) != nil {
 		t.Fatal("empty composite should never trigger rotation")
 	}
 }
 
 func TestCompositePolicyShortCircuits(t *testing.T) {
-	// First policy returns true, second should not be called
 	callCount := 0
 
-	policy1 := RotationPolicyFunc(func(state ActiveChunkState, next Record) bool {
+	policy1 := RotationPolicyFunc(func(state ActiveChunkState, next Record) *string {
 		callCount++
-		return true
+		return trigger("test")
 	})
 
-	policy2 := RotationPolicyFunc(func(state ActiveChunkState, next Record) bool {
+	policy2 := RotationPolicyFunc(func(state ActiveChunkState, next Record) *string {
 		callCount++
-		return false
+		return nil
 	})
 
 	composite := NewCompositePolicy(policy1, policy2)
@@ -365,12 +425,8 @@ func TestCompositePolicyShortCircuits(t *testing.T) {
 
 	composite.ShouldRotate(state, record)
 
-	// Note: Our implementation doesn't short-circuit, it checks all policies.
-	// This test documents current behavior. If short-circuiting is desired,
-	// the implementation should be updated.
-	if callCount != 2 {
-		// Current implementation checks all policies
-		// If we want short-circuiting, update the test expectation
+	if callCount != 1 {
+		t.Fatalf("expected short-circuit after first trigger, got %d calls", callCount)
 	}
 }
 
@@ -400,8 +456,8 @@ func TestNeverRotatePolicy(t *testing.T) {
 			}
 			record := Record{Raw: make([]byte, 1000000)}
 
-			if policy.ShouldRotate(state, record) {
-				t.Fatal("NeverRotatePolicy should never return true")
+			if policy.ShouldRotate(state, record) != nil {
+				t.Fatal("NeverRotatePolicy should never return a trigger")
 			}
 		})
 	}
@@ -433,8 +489,12 @@ func TestAlwaysRotatePolicy(t *testing.T) {
 			}
 			record := Record{}
 
-			if !policy.ShouldRotate(state, record) {
-				t.Fatal("AlwaysRotatePolicy should always return true")
+			got := policy.ShouldRotate(state, record)
+			if got == nil {
+				t.Fatal("AlwaysRotatePolicy should always return a trigger")
+			}
+			if *got != "always" {
+				t.Fatalf("expected trigger 'always', got %q", *got)
 			}
 		})
 	}
@@ -450,11 +510,14 @@ func TestRotationPolicyFunc(t *testing.T) {
 	var capturedState ActiveChunkState
 	var capturedRecord Record
 
-	fn := RotationPolicyFunc(func(state ActiveChunkState, next Record) bool {
+	fn := RotationPolicyFunc(func(state ActiveChunkState, next Record) *string {
 		called = true
 		capturedState = state
 		capturedRecord = next
-		return state.Bytes > 1000
+		if state.Bytes > 1000 {
+			return trigger("custom")
+		}
+		return nil
 	})
 
 	state := ActiveChunkState{Bytes: 500}
@@ -471,14 +534,15 @@ func TestRotationPolicyFunc(t *testing.T) {
 	if string(capturedRecord.Raw) != "test" {
 		t.Fatal("record not captured correctly")
 	}
-	if result {
-		t.Fatal("expected false for bytes=500")
+	if result != nil {
+		t.Fatal("expected nil for bytes=500")
 	}
 
-	// Test returning true
+	// Test returning a trigger
 	state.Bytes = 1500
-	if !fn.ShouldRotate(state, record) {
-		t.Fatal("expected true for bytes=1500")
+	result = fn.ShouldRotate(state, record)
+	if result == nil || *result != "custom" {
+		t.Fatalf("expected trigger 'custom' for bytes=1500, got %v", result)
 	}
 }
 
@@ -612,13 +676,13 @@ func TestTypicalProductionPolicy(t *testing.T) {
 	}
 	record := Record{Raw: make([]byte, 1000)}
 
-	if policy.ShouldRotate(state, record) {
+	if policy.ShouldRotate(state, record) != nil {
 		t.Fatal("fresh chunk with small record should not rotate")
 	}
 
 	// Chunk near size limit - should rotate
 	state.Bytes = 1<<30 - 100
-	if !policy.ShouldRotate(state, record) {
+	if policy.ShouldRotate(state, record) == nil {
 		t.Fatal("chunk near size limit should rotate")
 	}
 }
@@ -633,7 +697,7 @@ func TestHardLimitAlwaysWins(t *testing.T) {
 	state := ActiveChunkState{Bytes: 900}
 	record := Record{Raw: make([]byte, 200)} // Would push over 1000
 
-	if !composite.ShouldRotate(state, record) {
+	if composite.ShouldRotate(state, record) == nil {
 		t.Fatal("hard limit should override never-rotate policy")
 	}
 }

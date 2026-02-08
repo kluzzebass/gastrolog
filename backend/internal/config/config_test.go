@@ -79,12 +79,12 @@ func TestRotationPolicyConfigToPolicy(t *testing.T) {
 		// Test that it triggers rotation at the right size
 		state := chunk.ActiveChunkState{Bytes: 64 * 1024 * 1024}
 		rec := chunk.Record{Raw: []byte("test")}
-		if !policy.ShouldRotate(state, rec) {
+		if policy.ShouldRotate(state, rec) == nil {
 			t.Error("expected rotation when at max bytes")
 		}
 
 		state.Bytes = 1024
-		if policy.ShouldRotate(state, rec) {
+		if policy.ShouldRotate(state, rec) != nil {
 			t.Error("unexpected rotation when under max bytes")
 		}
 	})
@@ -101,12 +101,12 @@ func TestRotationPolicyConfigToPolicy(t *testing.T) {
 
 		state := chunk.ActiveChunkState{Records: 1000}
 		rec := chunk.Record{}
-		if !policy.ShouldRotate(state, rec) {
+		if policy.ShouldRotate(state, rec) == nil {
 			t.Error("expected rotation when at max records")
 		}
 
 		state.Records = 100
-		if policy.ShouldRotate(state, rec) {
+		if policy.ShouldRotate(state, rec) != nil {
 			t.Error("unexpected rotation when under max records")
 		}
 	})
@@ -128,19 +128,19 @@ func TestRotationPolicyConfigToPolicy(t *testing.T) {
 
 		// Trigger by bytes
 		state := chunk.ActiveChunkState{Bytes: 2 * 1024 * 1024, Records: 10}
-		if !policy.ShouldRotate(state, rec) {
+		if policy.ShouldRotate(state, rec) == nil {
 			t.Error("expected rotation when over max bytes")
 		}
 
 		// Trigger by records
 		state = chunk.ActiveChunkState{Bytes: 1024, Records: 100}
-		if !policy.ShouldRotate(state, rec) {
+		if policy.ShouldRotate(state, rec) == nil {
 			t.Error("expected rotation when at max records")
 		}
 
 		// No trigger
 		state = chunk.ActiveChunkState{Bytes: 1024, Records: 10}
-		if policy.ShouldRotate(state, rec) {
+		if policy.ShouldRotate(state, rec) != nil {
 			t.Error("unexpected rotation when under both limits")
 		}
 	})

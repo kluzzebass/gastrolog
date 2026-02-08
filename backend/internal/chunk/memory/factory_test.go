@@ -28,13 +28,13 @@ func TestFactoryDefaultValues(t *testing.T) {
 	state := chunk.ActiveChunkState{Records: DefaultMaxRecords}
 	next := chunk.Record{Raw: []byte("x")}
 
-	if !mgr.cfg.RotationPolicy.ShouldRotate(state, next) {
+	if mgr.cfg.RotationPolicy.ShouldRotate(state, next) == nil {
 		t.Error("expected rotation policy to trigger at default max records")
 	}
 
 	// Under limit should not rotate
 	state.Records = DefaultMaxRecords - 1
-	if mgr.cfg.RotationPolicy.ShouldRotate(state, next) {
+	if mgr.cfg.RotationPolicy.ShouldRotate(state, next) != nil {
 		t.Error("should not rotate when under limit")
 	}
 }
@@ -58,12 +58,12 @@ func TestFactoryCustomValues(t *testing.T) {
 	state := chunk.ActiveChunkState{Records: 2047}
 	next := chunk.Record{Raw: []byte("x")}
 
-	if mgr.cfg.RotationPolicy.ShouldRotate(state, next) {
+	if mgr.cfg.RotationPolicy.ShouldRotate(state, next) != nil {
 		t.Error("should not rotate when under limit")
 	}
 
 	state.Records = 2048
-	if !mgr.cfg.RotationPolicy.ShouldRotate(state, next) {
+	if mgr.cfg.RotationPolicy.ShouldRotate(state, next) == nil {
 		t.Error("should rotate when at limit")
 	}
 }

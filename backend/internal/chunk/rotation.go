@@ -34,43 +34,47 @@ type ActiveChunkState struct {
 // Policies are pure functions: no IO, no locks, no mutation, no global state.
 //
 // The ShouldRotate method is called before each append with the current chunk
-// state and the record about to be written. If it returns true, the current
-// chunk is sealed and a new chunk is opened before the record is appended.
+// state and the record about to be written. It returns nil if no rotation is
+// needed, or a pointer to a string identifying the trigger (e.g. "size",
+// "age", "records", "hard-limit").
 type RotationPolicy interface {
-	// ShouldRotate returns true if the chunk should be rotated before appending
-	// the given record. The state represents the current chunk state, and next
-	// is the record about to be written.
+	// ShouldRotate returns nil if no rotation is needed, or a trigger name
+	// identifying why the chunk should be rotated before appending the record.
 	//
 	// Policies must be pure functions that make decisions based solely on the
 	// provided state and record. They must not perform IO or access global state.
-	ShouldRotate(state ActiveChunkState, next Record) bool
+	ShouldRotate(state ActiveChunkState, next Record) *string
 }
 
-// RotationPolicyFunc is an adapter to allow ordinary functions to be used as RotationPolicy.
-type RotationPolicyFunc func(state ActiveChunkState, next Record) bool
+// trigger returns a *string for a rotation trigger name.
+func trigger(name string) *string { return &name }
 
-func (f RotationPolicyFunc) ShouldRotate(state ActiveChunkState, next Record) bool {
+// RotationPolicyFunc is an adapter to allow ordinary functions to be used as RotationPolicy.
+type RotationPolicyFunc func(state ActiveChunkState, next Record) *string
+
+func (f RotationPolicyFunc) ShouldRotate(state ActiveChunkState, next Record) *string {
 	return f(state, next)
 }
 
 // CompositePolicy combines multiple policies with OR semantics.
-// The chunk is rotated if any policy returns true.
+// The chunk is rotated if any policy returns a non-nil trigger.
+// The first matching trigger wins.
 type CompositePolicy struct {
 	policies []RotationPolicy
 }
 
-// NewCompositePolicy creates a policy that triggers rotation if any sub-policy returns true.
+// NewCompositePolicy creates a policy that triggers rotation if any sub-policy fires.
 func NewCompositePolicy(policies ...RotationPolicy) *CompositePolicy {
 	return &CompositePolicy{policies: policies}
 }
 
-func (c *CompositePolicy) ShouldRotate(state ActiveChunkState, next Record) bool {
+func (c *CompositePolicy) ShouldRotate(state ActiveChunkState, next Record) *string {
 	for _, p := range c.policies {
-		if p.ShouldRotate(state, next) {
-			return true
+		if t := p.ShouldRotate(state, next); t != nil {
+			return t
 		}
 	}
-	return false
+	return nil
 }
 
 // SizePolicy triggers rotation when total bytes would exceed maxBytes.
@@ -85,13 +89,15 @@ func NewSizePolicy(maxBytes uint64) *SizePolicy {
 	return &SizePolicy{maxBytes: maxBytes}
 }
 
-func (p *SizePolicy) ShouldRotate(state ActiveChunkState, next Record) bool {
+func (p *SizePolicy) ShouldRotate(state ActiveChunkState, next Record) *string {
 	if p.maxBytes == 0 {
-		return false
+		return nil
 	}
-	// Calculate projected size after this record
 	projectedBytes := state.Bytes + recordOnDiskSize(next)
-	return projectedBytes > p.maxBytes
+	if projectedBytes > p.maxBytes {
+		return trigger("size")
+	}
+	return nil
 }
 
 // RecordCountPolicy triggers rotation when record count would exceed maxRecords.
@@ -104,12 +110,14 @@ func NewRecordCountPolicy(maxRecords uint64) *RecordCountPolicy {
 	return &RecordCountPolicy{maxRecords: maxRecords}
 }
 
-func (p *RecordCountPolicy) ShouldRotate(state ActiveChunkState, next Record) bool {
+func (p *RecordCountPolicy) ShouldRotate(state ActiveChunkState, next Record) *string {
 	if p.maxRecords == 0 {
-		return false
+		return nil
 	}
-	// Including this record would exceed the limit
-	return state.Records+1 > p.maxRecords
+	if state.Records+1 > p.maxRecords {
+		return trigger("records")
+	}
+	return nil
 }
 
 // AgePolicy triggers rotation when chunk age exceeds maxAge.
@@ -128,14 +136,17 @@ func NewAgePolicy(maxAge time.Duration, now func() time.Time) *AgePolicy {
 	return &AgePolicy{maxAge: maxAge, now: now}
 }
 
-func (p *AgePolicy) ShouldRotate(state ActiveChunkState, next Record) bool {
+func (p *AgePolicy) ShouldRotate(state ActiveChunkState, next Record) *string {
 	if p.maxAge == 0 {
-		return false
+		return nil
 	}
 	if state.CreatedAt.IsZero() {
-		return false
+		return nil
 	}
-	return p.now().Sub(state.CreatedAt) > p.maxAge
+	if p.now().Sub(state.CreatedAt) > p.maxAge {
+		return trigger("age")
+	}
+	return nil
 }
 
 // HardLimitPolicy enforces absolute file size limits that cannot be exceeded.
@@ -159,41 +170,36 @@ func NewHardLimitPolicy(rawMaxBytes, attrMaxBytes uint64) *HardLimitPolicy {
 	}
 }
 
-func (p *HardLimitPolicy) ShouldRotate(state ActiveChunkState, next Record) bool {
-	// Calculate sizes after this record
+func (p *HardLimitPolicy) ShouldRotate(state ActiveChunkState, next Record) *string {
 	rawSize := state.Bytes + uint64(len(next.Raw))
 
 	attrBytes, _ := next.Attrs.Encode()
 	// Note: we need to track raw and attr separately for hard limits
 	// For now, we use a conservative estimate based on total bytes
 	// The actual implementation in the manager tracks these separately
-
-	// This is a simplified check - the actual manager implementation
-	// tracks raw and attr offsets separately
 	_ = attrBytes
 
-	// Conservative: if raw payload alone would exceed raw limit, rotate
 	if rawSize > p.rawMaxBytes {
-		return true
+		return trigger("hard-limit")
 	}
 
-	return false
+	return nil
 }
 
 // NeverRotatePolicy is a policy that never triggers rotation.
 // Useful for testing or when rotation is managed externally.
 type NeverRotatePolicy struct{}
 
-func (NeverRotatePolicy) ShouldRotate(state ActiveChunkState, next Record) bool {
-	return false
+func (NeverRotatePolicy) ShouldRotate(state ActiveChunkState, next Record) *string {
+	return nil
 }
 
 // AlwaysRotatePolicy is a policy that always triggers rotation.
 // Useful for testing.
 type AlwaysRotatePolicy struct{}
 
-func (AlwaysRotatePolicy) ShouldRotate(state ActiveChunkState, next Record) bool {
-	return true
+func (AlwaysRotatePolicy) ShouldRotate(state ActiveChunkState, next Record) *string {
+	return trigger("always")
 }
 
 // recordOnDiskSize calculates the total on-disk bytes for a single record.

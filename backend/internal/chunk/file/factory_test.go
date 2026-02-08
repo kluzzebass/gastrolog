@@ -55,7 +55,7 @@ func TestFactoryDefaultValues(t *testing.T) {
 	next := chunk.Record{Raw: []byte("x")}
 
 	// Should rotate because we're at the limit and adding more
-	if !mgr.cfg.RotationPolicy.ShouldRotate(state, next) {
+	if mgr.cfg.RotationPolicy.ShouldRotate(state, next) == nil {
 		t.Error("expected rotation policy to trigger at default max chunk bytes")
 	}
 }
@@ -82,13 +82,13 @@ func TestFactoryCustomMaxChunkBytes(t *testing.T) {
 	state := chunk.ActiveChunkState{Bytes: 500}
 	next := chunk.Record{Raw: []byte("x")}
 
-	if mgr.cfg.RotationPolicy.ShouldRotate(state, next) {
+	if mgr.cfg.RotationPolicy.ShouldRotate(state, next) != nil {
 		t.Error("should not rotate when under limit")
 	}
 
 	// State at limit
 	state.Bytes = 1024
-	if !mgr.cfg.RotationPolicy.ShouldRotate(state, next) {
+	if mgr.cfg.RotationPolicy.ShouldRotate(state, next) == nil {
 		t.Error("should rotate when at/over limit")
 	}
 }
@@ -140,13 +140,13 @@ func TestFactoryCustomMaxChunkAge(t *testing.T) {
 	state := chunk.ActiveChunkState{
 		CreatedAt: now.Add(-30 * time.Minute),
 	}
-	if mgr.cfg.RotationPolicy.ShouldRotate(state, next) {
+	if mgr.cfg.RotationPolicy.ShouldRotate(state, next) != nil {
 		t.Error("should not rotate when chunk is younger than max age")
 	}
 
 	// State created over 1 hour ago - should rotate
 	state.CreatedAt = now.Add(-2 * time.Hour)
-	if !mgr.cfg.RotationPolicy.ShouldRotate(state, next) {
+	if mgr.cfg.RotationPolicy.ShouldRotate(state, next) == nil {
 		t.Error("should rotate when chunk is older than max age")
 	}
 }
@@ -262,7 +262,7 @@ func TestFactoryHardLimitAlwaysIncluded(t *testing.T) {
 	// A record that would push us over the hard limit
 	next := chunk.Record{Raw: make([]byte, 200)}
 
-	if !mgr.cfg.RotationPolicy.ShouldRotate(state, next) {
+	if mgr.cfg.RotationPolicy.ShouldRotate(state, next) == nil {
 		t.Error("hard limit should always trigger rotation")
 	}
 }
