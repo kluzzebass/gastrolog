@@ -348,7 +348,7 @@ function AppContent() {
 
     // Sync sidebar preset and range display from last= in the URL.
     const lastMatch = q.match(/\blast=(\S+)/);
-    if (lastMatch) {
+    if (lastMatch?.[1]) {
       const key = lastMatch[1];
       const ms = timeRangeMs[key];
       if (ms) {
