@@ -82,11 +82,14 @@ function AppContent() {
   const [detailPinned, setDetailPinned] = useState(false);
   const [resizing, setResizing] = useState(false);
 
+  const contextSizeRef = useRef(5);
+
   // Auto-expand detail panel and fetch context when a record is selected.
   useEffect(() => {
     if (selectedRecord && detailCollapsed) setDetailCollapsed(false);
     if (selectedRecord?.ref) {
-      fetchContext(selectedRecord.ref);
+      contextSizeRef.current = 5;
+      fetchContext(selectedRecord.ref, 5, 5);
     } else {
       resetContext();
     }
@@ -1399,6 +1402,19 @@ function AppContent() {
               contextAfter={contextAfter}
               contextLoading={contextLoading}
               contextReversed={isReversed}
+              onContextZoomOut={() => {
+                if (selectedRecord?.ref) {
+                  contextSizeRef.current = Math.min(
+                    contextSizeRef.current * 2,
+                    50,
+                  );
+                  fetchContext(
+                    selectedRecord.ref,
+                    contextSizeRef.current,
+                    contextSizeRef.current,
+                  );
+                }
+              }}
               onContextRecordSelect={(rec) => {
                 const ts = rec.writeTs?.toDate();
                 if (ts) {
