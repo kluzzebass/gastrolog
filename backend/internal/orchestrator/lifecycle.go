@@ -39,6 +39,9 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		o.logger.Warn("no filters configured, messages will fan out to all stores")
 	}
 
+	// Start cron rotation scheduler.
+	o.cronRotation.start()
+
 	// Launch retention runners.
 	for id, runner := range o.retention {
 		id, runner := id, runner
@@ -105,6 +108,9 @@ func (o *Orchestrator) Stop() error {
 
 	// Wait for retention runners to exit.
 	o.retentionWg.Wait()
+
+	// Stop cron rotation scheduler.
+	o.cronRotation.stop()
 
 	o.mu.Lock()
 	o.running = false

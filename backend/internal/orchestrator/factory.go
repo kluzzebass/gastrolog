@@ -115,6 +115,13 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 			if policy != nil {
 				cm.SetRotationPolicy(policy)
 			}
+
+			// Set up cron rotation if configured.
+			if policyCfg.Cron != nil && *policyCfg.Cron != "" {
+				if err := o.cronRotation.addJob(storeCfg.ID, *policyCfg.Cron, cm); err != nil {
+					return fmt.Errorf("cron rotation for store %s: %w", storeCfg.ID, err)
+				}
+			}
 		}
 
 		// Look up index manager factory.

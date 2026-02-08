@@ -6,6 +6,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -97,6 +98,9 @@ type Orchestrator struct {
 	retentionCancels map[string]context.CancelFunc // per-runner cancel functions
 	retentionWg      sync.WaitGroup                // tracks retention goroutines
 
+	// Cron rotation lifecycle.
+	cronRotation *cronRotationManager
+
 	// Clock for testing.
 	now func() time.Time
 
@@ -135,6 +139,12 @@ func New(cfg Config) *Orchestrator {
 	// Scope logger with component identity.
 	logger := logging.Default(cfg.Logger).With("component", "orchestrator")
 
+	cronMgr, err := newCronRotationManager(logger)
+	if err != nil {
+		// This should never fail in practice (just creates a scheduler).
+		panic(fmt.Sprintf("create cron rotation manager: %v", err))
+	}
+
 	return &Orchestrator{
 		chunks:           make(map[string]chunk.ChunkManager),
 		indexes:          make(map[string]index.IndexManager),
@@ -143,6 +153,7 @@ func New(cfg Config) *Orchestrator {
 		ingesterCancels:  make(map[string]context.CancelFunc),
 		retention:        make(map[string]*retentionRunner),
 		retentionCancels: make(map[string]context.CancelFunc),
+		cronRotation:     cronMgr,
 		ingestSize:       cfg.IngestChannelSize,
 		now:              cfg.Now,
 		indexCtx:         indexCtx,

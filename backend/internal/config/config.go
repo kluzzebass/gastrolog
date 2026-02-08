@@ -20,6 +20,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/go-co-op/gocron/v2"
 )
 
 // Store persists and loads system configuration with granular CRUD operations.
@@ -106,6 +108,24 @@ type RotationPolicyConfig struct {
 
 	// MaxRecords rotates when record count exceeds this value.
 	MaxRecords *int64 `json:"maxRecords,omitempty"`
+
+	// Cron rotates on a fixed schedule using standard 5-field cron syntax.
+	// Example: "0 * * * *" (every hour at minute 0).
+	// This runs as a background job, independent of the per-append threshold checks.
+	Cron *string `json:"cron,omitempty"`
+}
+
+// ValidateCron checks whether the Cron field contains a valid 5-field cron expression.
+// Returns nil if Cron is nil or valid, an error otherwise.
+func (c RotationPolicyConfig) ValidateCron() error {
+	if c.Cron == nil || *c.Cron == "" {
+		return nil
+	}
+	cr := gocron.NewDefaultCron(false)
+	if err := cr.IsValid(*c.Cron, time.UTC, time.Now()); err != nil {
+		return fmt.Errorf("invalid cron expression: %w", err)
+	}
+	return nil
 }
 
 // StringPtr returns a pointer to s.

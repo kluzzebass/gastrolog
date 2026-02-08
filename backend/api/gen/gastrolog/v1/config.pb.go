@@ -326,6 +326,7 @@ type RotationPolicyConfig struct {
 	MaxBytes      int64                  `protobuf:"varint,1,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
 	MaxRecords    int64                  `protobuf:"varint,2,opt,name=max_records,json=maxRecords,proto3" json:"max_records,omitempty"`
 	MaxAgeSeconds int64                  `protobuf:"varint,3,opt,name=max_age_seconds,json=maxAgeSeconds,proto3" json:"max_age_seconds,omitempty"`
+	Cron          string                 `protobuf:"bytes,4,opt,name=cron,proto3" json:"cron,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -379,6 +380,13 @@ func (x *RotationPolicyConfig) GetMaxAgeSeconds() int64 {
 		return x.MaxAgeSeconds
 	}
 	return 0
+}
+
+func (x *RotationPolicyConfig) GetCron() string {
+	if x != nil {
+		return x.Cron
+	}
+	return ""
 }
 
 type RetentionPolicyConfig struct {
@@ -1566,12 +1574,13 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\fFilterConfig\x12\x1e\n" +
 	"\n" +
 	"expression\x18\x01 \x01(\tR\n" +
-	"expression\"|\n" +
+	"expression\"\x90\x01\n" +
 	"\x14RotationPolicyConfig\x12\x1b\n" +
 	"\tmax_bytes\x18\x01 \x01(\x03R\bmaxBytes\x12\x1f\n" +
 	"\vmax_records\x18\x02 \x01(\x03R\n" +
 	"maxRecords\x12&\n" +
-	"\x0fmax_age_seconds\x18\x03 \x01(\x03R\rmaxAgeSeconds\"{\n" +
+	"\x0fmax_age_seconds\x18\x03 \x01(\x03R\rmaxAgeSeconds\x12\x12\n" +
+	"\x04cron\x18\x04 \x01(\tR\x04cron\"{\n" +
 	"\x15RetentionPolicyConfig\x12&\n" +
 	"\x0fmax_age_seconds\x18\x01 \x01(\x03R\rmaxAgeSeconds\x12\x1b\n" +
 	"\tmax_bytes\x18\x02 \x01(\x03R\bmaxBytes\x12\x1d\n" +

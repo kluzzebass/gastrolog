@@ -270,6 +270,11 @@ export class RotationPolicyConfig extends Message<RotationPolicyConfig> {
    */
   maxAgeSeconds = protoInt64.zero;
 
+  /**
+   * @generated from field: string cron = 4;
+   */
+  cron = "";
+
   constructor(data?: PartialMessage<RotationPolicyConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -281,6 +286,7 @@ export class RotationPolicyConfig extends Message<RotationPolicyConfig> {
     { no: 1, name: "max_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 2, name: "max_records", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 3, name: "max_age_seconds", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 4, name: "cron", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RotationPolicyConfig {

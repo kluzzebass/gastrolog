@@ -43,6 +43,7 @@ export function usePutRotationPolicy() {
       maxBytes: bigint;
       maxRecords: bigint;
       maxAgeSeconds: bigint;
+      cron: string;
     }) => {
       await configClient.putRotationPolicy({
         id: args.id,
@@ -50,6 +51,7 @@ export function usePutRotationPolicy() {
           maxBytes: args.maxBytes,
           maxRecords: args.maxRecords,
           maxAgeSeconds: args.maxAgeSeconds,
+          cron: args.cron,
         },
       });
     },

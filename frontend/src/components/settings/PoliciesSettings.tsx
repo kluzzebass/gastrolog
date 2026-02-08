@@ -7,6 +7,7 @@ import {
 import { useToast } from "../Toast";
 import { SettingsCard } from "./SettingsCard";
 import { FormField, TextInput, NumberInput } from "./FormField";
+import { validateCron, describeCron } from "../../utils/cron";
 
 // Format bytes for display.
 function formatBytes(b: bigint): string {
@@ -79,6 +80,51 @@ interface PolicyEdit {
   maxBytes: string;
   maxRecords: string;
   maxAge: string;
+  cron: string;
+}
+
+function CronField({
+  value,
+  onChange,
+  dark,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  dark: boolean;
+}) {
+  const c = (d: string, l: string) => (dark ? d : l);
+  const trimmed = value.trim();
+  const validation = trimmed ? validateCron(trimmed) : null;
+  const description = validation?.valid ? describeCron(trimmed) : null;
+
+  return (
+    <FormField
+      label="Cron Schedule"
+      description="5-field cron: min hour dom mon dow"
+      dark={dark}
+    >
+      <TextInput
+        value={value}
+        onChange={onChange}
+        placeholder="0 * * * *"
+        dark={dark}
+        mono
+      />
+      {trimmed && validation && (
+        <div className="mt-1 text-[0.75em]">
+          {validation.valid ? (
+            <span className={c("text-green-400", "text-green-600")}>
+              {description}
+            </span>
+          ) : (
+            <span className={c("text-red-400", "text-red-600")}>
+              {validation.error}
+            </span>
+          )}
+        </div>
+      )}
+    </FormField>
+  );
 }
 
 export function PoliciesSettings({ dark }: { dark: boolean }) {
@@ -96,6 +142,7 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
   const [newMaxBytes, setNewMaxBytes] = useState("");
   const [newMaxRecords, setNewMaxRecords] = useState("");
   const [newMaxAge, setNewMaxAge] = useState("5m");
+  const [newCron, setNewCron] = useState("");
 
   const policies = config?.rotationPolicies ?? {};
   const stores = config?.stores ?? [];
@@ -103,11 +150,12 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
   const getEdit = (id: string): PolicyEdit => {
     if (edits[id]) return edits[id];
     const pol = policies[id];
-    if (!pol) return { maxBytes: "", maxRecords: "", maxAge: "" };
+    if (!pol) return { maxBytes: "", maxRecords: "", maxAge: "", cron: "" };
     return {
       maxBytes: formatBytes(pol.maxBytes),
       maxRecords: pol.maxRecords > 0n ? pol.maxRecords.toString() : "",
       maxAge: formatDuration(pol.maxAgeSeconds),
+      cron: pol.cron,
     };
   };
 
@@ -120,12 +168,20 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
 
   const handleSave = async (id: string) => {
     const edit = getEdit(id);
+    if (edit.cron) {
+      const result = validateCron(edit.cron);
+      if (!result.valid) {
+        addToast(`Invalid cron: ${result.error}`, "error");
+        return;
+      }
+    }
     try {
       await putPolicy.mutateAsync({
         id,
         maxBytes: parseBytes(edit.maxBytes),
         maxRecords: edit.maxRecords ? BigInt(edit.maxRecords) : 0n,
         maxAgeSeconds: parseDuration(edit.maxAge),
+        cron: edit.cron,
       });
       setEdits((prev) => {
         const next = { ...prev };
@@ -162,12 +218,20 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
       addToast("Policy ID is required", "warn");
       return;
     }
+    if (newCron) {
+      const result = validateCron(newCron);
+      if (!result.valid) {
+        addToast(`Invalid cron: ${result.error}`, "error");
+        return;
+      }
+    }
     try {
       await putPolicy.mutateAsync({
         id: newId.trim(),
         maxBytes: parseBytes(newMaxBytes),
         maxRecords: newMaxRecords ? BigInt(newMaxRecords) : 0n,
         maxAgeSeconds: parseDuration(newMaxAge),
+        cron: newCron,
       });
       addToast(`Policy "${newId.trim()}" created`, "info");
       setAdding(false);
@@ -175,6 +239,7 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
       setNewMaxBytes("");
       setNewMaxRecords("");
       setNewMaxAge("5m");
+      setNewCron("");
     } catch (err: any) {
       addToast(err.message ?? "Failed to create policy", "error");
     }
@@ -261,6 +326,7 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
                   />
                 </FormField>
               </div>
+              <CronField value={newCron} onChange={setNewCron} dark={dark} />
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   onClick={() => setAdding(false)}
@@ -341,6 +407,11 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
                     />
                   </FormField>
                 </div>
+                <CronField
+                  value={edit.cron}
+                  onChange={(v) => setEdit(id, { cron: v })}
+                  dark={dark}
+                />
                 <div className="flex justify-end pt-2">
                   <button
                     onClick={() => handleSave(id)}

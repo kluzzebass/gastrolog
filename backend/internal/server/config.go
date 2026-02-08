@@ -235,6 +235,9 @@ func (s *ConfigServer) PutRotationPolicy(
 	if _, err := cfg.ToRotationPolicy(); err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid rotation policy: %w", err))
 	}
+	if err := cfg.ValidateCron(); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
 
 	if err := s.cfgStore.PutRotationPolicy(ctx, req.Msg.Id, cfg); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -534,6 +537,9 @@ func protoToRotationPolicy(p *apiv1.RotationPolicyConfig) config.RotationPolicyC
 	if p.MaxRecords > 0 {
 		cfg.MaxRecords = config.Int64Ptr(p.MaxRecords)
 	}
+	if p.Cron != "" {
+		cfg.Cron = config.StringPtr(p.Cron)
+	}
 
 	return cfg
 }
@@ -555,6 +561,9 @@ func rotationPolicyToProto(cfg config.RotationPolicyConfig) *apiv1.RotationPolic
 	}
 	if cfg.MaxRecords != nil {
 		p.MaxRecords = *cfg.MaxRecords
+	}
+	if cfg.Cron != nil {
+		p.Cron = *cfg.Cron
 	}
 
 	return p
