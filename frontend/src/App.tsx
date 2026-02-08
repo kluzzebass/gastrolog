@@ -74,20 +74,26 @@ function AppContent() {
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(
     null,
   );
-  const [theme, setThemeLocal] = useState<Theme>("system");
+  const [theme, setThemeLocal] = useState<Theme>(() => {
+    const cached = localStorage.getItem("gastrolog:theme");
+    if (cached === "light" || cached === "dark" || cached === "system")
+      return cached;
+    return "system";
+  });
   const [systemDark, setSystemDark] = useState(
     () => window.matchMedia("(prefers-color-scheme: dark)").matches,
   );
   const preferences = usePreferences();
   const putPreferences = usePutPreferences();
 
-  // Initialize theme from server preferences once loaded.
+  // Sync theme from server preferences (in case it changed on another device).
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   useEffect(() => {
     if (preferences.data && !prefsLoaded) {
       const t = preferences.data.theme;
       if (t === "light" || t === "dark" || t === "system") {
         setThemeLocal(t);
+        localStorage.setItem("gastrolog:theme", t);
       }
       setPrefsLoaded(true);
     }
@@ -96,6 +102,7 @@ function AppContent() {
   const setTheme = useCallback(
     (t: Theme) => {
       setThemeLocal(t);
+      localStorage.setItem("gastrolog:theme", t);
       putPreferences.mutate({ theme: t });
     },
     [putPreferences],
