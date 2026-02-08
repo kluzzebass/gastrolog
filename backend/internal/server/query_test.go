@@ -50,7 +50,7 @@ func TestQueryServerSearch(t *testing.T) {
 	orch.RegisterQueryEngine("default", query.New(cm, im, nil))
 
 	// Create server
-	srv := server.New(orch, nil, orchestrator.Factories{}, server.Config{})
+	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
 	handler := srv.Handler()
 
 	// Create test server

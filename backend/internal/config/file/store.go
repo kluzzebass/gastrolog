@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"gastrolog/internal/config"
 )
@@ -452,4 +453,99 @@ func (s *Store) DeleteSetting(ctx context.Context, key string) error {
 	}
 	delete(cfg.Settings, key)
 	return s.flush(cfg)
+}
+
+// Users
+//
+// Users are operational data (not part of the Config struct), so they are
+// stored in a separate JSON file alongside the main config file.
+
+func (s *Store) usersPath() string {
+	return s.path + ".users.json"
+}
+
+func (s *Store) loadUsers() (map[string]config.User, error) {
+	data, err := os.ReadFile(s.usersPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return make(map[string]config.User), nil
+		}
+		return nil, fmt.Errorf("read users file: %w", err)
+	}
+	var users map[string]config.User
+	if err := json.Unmarshal(data, &users); err != nil {
+		return nil, fmt.Errorf("parse users file: %w", err)
+	}
+	if users == nil {
+		users = make(map[string]config.User)
+	}
+	return users, nil
+}
+
+func (s *Store) flushUsers(users map[string]config.User) error {
+	dir := filepath.Dir(s.usersPath())
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("create users directory: %w", err)
+	}
+	data, err := json.MarshalIndent(users, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal users: %w", err)
+	}
+	tmpPath := s.usersPath() + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("write temp users file: %w", err)
+	}
+	if err := os.Rename(tmpPath, s.usersPath()); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("rename users file: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) CreateUser(ctx context.Context, user config.User) error {
+	users, err := s.loadUsers()
+	if err != nil {
+		return err
+	}
+	if _, ok := users[user.Username]; ok {
+		return fmt.Errorf("user %q already exists", user.Username)
+	}
+	users[user.Username] = user
+	return s.flushUsers(users)
+}
+
+func (s *Store) GetUser(ctx context.Context, username string) (*config.User, error) {
+	users, err := s.loadUsers()
+	if err != nil {
+		return nil, err
+	}
+	u, ok := users[username]
+	if !ok {
+		return nil, nil
+	}
+	return &u, nil
+}
+
+func (s *Store) UpdatePassword(ctx context.Context, username string, passwordHash string) error {
+	users, err := s.loadUsers()
+	if err != nil {
+		return err
+	}
+	u, ok := users[username]
+	if !ok {
+		return fmt.Errorf("user %q not found", username)
+	}
+	u.PasswordHash = passwordHash
+	u.UpdatedAt = time.Now().UTC()
+	users[username] = u
+	return s.flushUsers(users)
+}
+
+func (s *Store) CountUsers(ctx context.Context) (int, error) {
+	users, err := s.loadUsers()
+	if err != nil {
+		return 0, err
+	}
+	return len(users), nil
 }

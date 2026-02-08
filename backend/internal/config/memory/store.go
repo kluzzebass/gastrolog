@@ -4,7 +4,9 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"sync"
+	"time"
 
 	"gastrolog/internal/config"
 )
@@ -18,6 +20,7 @@ type Store struct {
 	stores            map[string]config.StoreConfig
 	ingesters         map[string]config.IngesterConfig
 	settings          map[string]string
+	users             map[string]config.User
 }
 
 var _ config.Store = (*Store)(nil)
@@ -31,6 +34,7 @@ func NewStore() *Store {
 		stores:            make(map[string]config.StoreConfig),
 		ingesters:         make(map[string]config.IngesterConfig),
 		settings:          make(map[string]string),
+		users:             make(map[string]config.User),
 	}
 }
 
@@ -323,6 +327,51 @@ func (s *Store) DeleteSetting(ctx context.Context, key string) error {
 
 	delete(s.settings, key)
 	return nil
+}
+
+// Users
+
+func (s *Store) CreateUser(ctx context.Context, user config.User) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.users[user.Username]; ok {
+		return fmt.Errorf("user %q already exists", user.Username)
+	}
+	s.users[user.Username] = user
+	return nil
+}
+
+func (s *Store) GetUser(ctx context.Context, username string) (*config.User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	u, ok := s.users[username]
+	if !ok {
+		return nil, nil
+	}
+	return &u, nil
+}
+
+func (s *Store) UpdatePassword(ctx context.Context, username string, passwordHash string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	u, ok := s.users[username]
+	if !ok {
+		return fmt.Errorf("user %q not found", username)
+	}
+	u.PasswordHash = passwordHash
+	u.UpdatedAt = time.Now().UTC()
+	s.users[username] = u
+	return nil
+}
+
+func (s *Store) CountUsers(ctx context.Context) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return len(s.users), nil
 }
 
 // Deep copy helpers

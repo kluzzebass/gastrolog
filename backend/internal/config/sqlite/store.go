@@ -6,11 +6,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	_ "modernc.org/sqlite"
 
 	"gastrolog/internal/config"
 )
+
+const timeFormat = time.RFC3339
 
 // Store is a SQLite-based ConfigStore implementation.
 type Store struct {
@@ -511,4 +514,62 @@ func (s *Store) DeleteSetting(ctx context.Context, key string) error {
 		return fmt.Errorf("delete setting %q: %w", key, err)
 	}
 	return nil
+}
+
+// Users
+
+func (s *Store) CreateUser(ctx context.Context, user config.User) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO users (username, password_hash, role, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`, user.Username, user.PasswordHash, user.Role,
+		user.CreatedAt.Format(timeFormat), user.UpdatedAt.Format(timeFormat))
+	if err != nil {
+		return fmt.Errorf("create user %q: %w", user.Username, err)
+	}
+	return nil
+}
+
+func (s *Store) GetUser(ctx context.Context, username string) (*config.User, error) {
+	row := s.db.QueryRowContext(ctx,
+		"SELECT username, password_hash, role, created_at, updated_at FROM users WHERE username = ?", username)
+
+	var u config.User
+	var createdAt, updatedAt string
+	err := row.Scan(&u.Username, &u.PasswordHash, &u.Role, &createdAt, &updatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get user %q: %w", username, err)
+	}
+	u.CreatedAt, _ = time.Parse(timeFormat, createdAt)
+	u.UpdatedAt, _ = time.Parse(timeFormat, updatedAt)
+	return &u, nil
+}
+
+func (s *Store) UpdatePassword(ctx context.Context, username string, passwordHash string) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE users SET password_hash = ?, updated_at = ? WHERE username = ?
+	`, passwordHash, time.Now().UTC().Format(timeFormat), username)
+	if err != nil {
+		return fmt.Errorf("update password for %q: %w", username, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update password for %q: %w", username, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("user %q not found", username)
+	}
+	return nil
+}
+
+func (s *Store) CountUsers(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM users").Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count users: %w", err)
+	}
+	return count, nil
 }

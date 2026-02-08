@@ -14,6 +14,7 @@ import (
 	"golang.org/x/net/http2/h2c"
 
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
+	"gastrolog/internal/auth"
 	"gastrolog/internal/config"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
@@ -30,6 +31,7 @@ type Server struct {
 	orch      *orchestrator.Orchestrator
 	cfgStore  config.Store
 	factories orchestrator.Factories
+	tokens    *auth.TokenService
 	logger    *slog.Logger
 
 	mu       sync.Mutex
@@ -41,11 +43,12 @@ type Server struct {
 }
 
 // New creates a new Server.
-func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, cfg Config) *Server {
+func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, tokens *auth.TokenService, cfg Config) *Server {
 	return &Server{
 		orch:      orch,
 		cfgStore:  cfgStore,
 		factories: factories,
+		tokens:    tokens,
 		logger:    logging.Default(cfg.Logger).With("component", "server"),
 		shutdown:  make(chan struct{}),
 	}
@@ -119,12 +122,14 @@ func (s *Server) Serve(listener net.Listener) error {
 	storeServer := NewStoreServer(s.orch)
 	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories)
 	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown)
+	authServer := NewAuthServer(s.cfgStore, s.tokens)
 
 	// Register handlers
 	mux.Handle(gastrologv1connect.NewQueryServiceHandler(queryServer))
 	mux.Handle(gastrologv1connect.NewStoreServiceHandler(storeServer))
 	mux.Handle(gastrologv1connect.NewConfigServiceHandler(configServer))
 	mux.Handle(gastrologv1connect.NewLifecycleServiceHandler(lifecycleServer))
+	mux.Handle(gastrologv1connect.NewAuthServiceHandler(authServer))
 
 	// Kubernetes probe endpoints
 	s.registerProbes(mux)
@@ -230,11 +235,13 @@ func (s *Server) Handler() http.Handler {
 	storeServer := NewStoreServer(s.orch)
 	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories)
 	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown)
+	authServer := NewAuthServer(s.cfgStore, s.tokens)
 
 	mux.Handle(gastrologv1connect.NewQueryServiceHandler(queryServer))
 	mux.Handle(gastrologv1connect.NewStoreServiceHandler(storeServer))
 	mux.Handle(gastrologv1connect.NewConfigServiceHandler(configServer))
 	mux.Handle(gastrologv1connect.NewLifecycleServiceHandler(lifecycleServer))
+	mux.Handle(gastrologv1connect.NewAuthServiceHandler(authServer))
 
 	s.registerProbes(mux)
 
@@ -248,6 +255,7 @@ type Client struct {
 	Store     gastrologv1connect.StoreServiceClient
 	Config    gastrologv1connect.ConfigServiceClient
 	Lifecycle gastrologv1connect.LifecycleServiceClient
+	Auth      gastrologv1connect.AuthServiceClient
 }
 
 // NewClient creates Connect clients for the given base URL.
@@ -257,6 +265,7 @@ func NewClient(baseURL string, opts ...connect.ClientOption) *Client {
 		Store:     gastrologv1connect.NewStoreServiceClient(http.DefaultClient, baseURL, opts...),
 		Config:    gastrologv1connect.NewConfigServiceClient(http.DefaultClient, baseURL, opts...),
 		Lifecycle: gastrologv1connect.NewLifecycleServiceClient(http.DefaultClient, baseURL, opts...),
+		Auth:      gastrologv1connect.NewAuthServiceClient(http.DefaultClient, baseURL, opts...),
 	}
 }
 
@@ -267,5 +276,6 @@ func NewClientWithHTTP(httpClient connect.HTTPClient, baseURL string, opts ...co
 		Store:     gastrologv1connect.NewStoreServiceClient(httpClient, baseURL, opts...),
 		Config:    gastrologv1connect.NewConfigServiceClient(httpClient, baseURL, opts...),
 		Lifecycle: gastrologv1connect.NewLifecycleServiceClient(httpClient, baseURL, opts...),
+		Auth:      gastrologv1connect.NewAuthServiceClient(httpClient, baseURL, opts...),
 	}
 }

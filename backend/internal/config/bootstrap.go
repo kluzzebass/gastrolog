@@ -1,6 +1,12 @@
 package config
 
-import "context"
+import (
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+)
 
 // DefaultConfig returns the bootstrap configuration for first-run.
 // This sets up a chatterbox ingester routing to an in-memory store
@@ -70,5 +76,25 @@ func Bootstrap(ctx context.Context, store Store) error {
 			return err
 		}
 	}
+
+	// Generate a random JWT secret and store it as server config.
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return fmt.Errorf("generate JWT secret: %w", err)
+	}
+	serverCfg := ServerConfig{
+		Auth: AuthConfig{
+			JWTSecret:     base64.StdEncoding.EncodeToString(secret),
+			TokenDuration: "168h", // 7 days
+		},
+	}
+	serverJSON, err := json.Marshal(serverCfg)
+	if err != nil {
+		return fmt.Errorf("marshal server config: %w", err)
+	}
+	if err := store.PutSetting(ctx, "server", string(serverJSON)); err != nil {
+		return err
+	}
+
 	return nil
 }

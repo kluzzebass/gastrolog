@@ -9,6 +9,8 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -20,7 +22,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
+	"gastrolog/internal/auth"
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
 	chunkmem "gastrolog/internal/chunk/memory"
@@ -142,11 +146,17 @@ func run(ctx context.Context, logger *slog.Logger, configFlagValue, serverAddr s
 	}
 	logger.Info("orchestrator started")
 
+	// Create TokenService from server config for auth RPCs.
+	tokens, err := buildTokenService(ctx, cfgStore)
+	if err != nil {
+		return fmt.Errorf("build token service: %w", err)
+	}
+
 	// Start Connect RPC server if address is provided.
 	var srv *server.Server
 	var serverWg sync.WaitGroup
 	if serverAddr != "" {
-		srv = server.New(orch, cfgStore, factories, server.Config{Logger: logger})
+		srv = server.New(orch, cfgStore, factories, tokens, server.Config{Logger: logger})
 		serverWg.Add(1)
 		go func() {
 			defer serverWg.Done()
@@ -221,6 +231,37 @@ func parseConfigFlag(value string) (storeType, path string, err error) {
 	default:
 		return "json", value, nil
 	}
+}
+
+// buildTokenService reads the server config from the store and creates a TokenService.
+func buildTokenService(ctx context.Context, cfgStore config.Store) (*auth.TokenService, error) {
+	val, err := cfgStore.GetSetting(ctx, "server")
+	if err != nil {
+		return nil, fmt.Errorf("get server setting: %w", err)
+	}
+	if val == nil {
+		return nil, fmt.Errorf("server config not found (bootstrap may have failed)")
+	}
+
+	var serverCfg config.ServerConfig
+	if err := json.Unmarshal([]byte(*val), &serverCfg); err != nil {
+		return nil, fmt.Errorf("parse server config: %w", err)
+	}
+
+	secret, err := base64.StdEncoding.DecodeString(serverCfg.Auth.JWTSecret)
+	if err != nil {
+		return nil, fmt.Errorf("decode JWT secret: %w", err)
+	}
+
+	duration := 168 * time.Hour // default 7 days
+	if serverCfg.Auth.TokenDuration != "" {
+		duration, err = time.ParseDuration(serverCfg.Auth.TokenDuration)
+		if err != nil {
+			return nil, fmt.Errorf("parse token duration: %w", err)
+		}
+	}
+
+	return auth.NewTokenService(secret, duration), nil
 }
 
 // openConfigStore creates a config.Store from a flag value.

@@ -75,6 +75,12 @@ type Store interface {
 	GetSetting(ctx context.Context, key string) (*string, error)
 	PutSetting(ctx context.Context, key string, value string) error
 	DeleteSetting(ctx context.Context, key string) error
+
+	// Users
+	CreateUser(ctx context.Context, user User) error
+	GetUser(ctx context.Context, username string) (*User, error)
+	UpdatePassword(ctx context.Context, username string, passwordHash string) error
+	CountUsers(ctx context.Context) (int, error)
 }
 
 // Config describes the desired system shape.
@@ -96,9 +102,17 @@ type ServerConfig struct {
 
 // AuthConfig holds configuration for user authentication.
 type AuthConfig struct {
-	JWTSecret       string `json:"jwt_secret,omitempty"`
-	TokenDuration   string `json:"token_duration,omitempty"`   // Go duration, e.g. "15m"
-	RefreshDuration string `json:"refresh_duration,omitempty"` // Go duration, e.g. "168h"
+	JWTSecret     string `json:"jwt_secret,omitempty"`
+	TokenDuration string `json:"token_duration,omitempty"` // Go duration, e.g. "168h"
+}
+
+// User represents a user account.
+type User struct {
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"password_hash"`
+	Role         string    `json:"role"` // "admin" or "user"
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // FilterConfig defines a named filter expression.

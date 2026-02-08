@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package gastrolog.v1;
+
+option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
+
+// AuthService provides user registration, login, and password management.
+service AuthService {
+  // Register creates a new user account and returns a token.
+  // The first registered user is automatically assigned the "admin" role.
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+
+  // Login authenticates a user and returns a token.
+  rpc Login(LoginRequest) returns (LoginResponse);
+
+  // ChangePassword updates the authenticated user's password.
+  rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
+
+  // GetAuthStatus returns whether the system needs initial setup.
+  rpc GetAuthStatus(GetAuthStatusRequest) returns (GetAuthStatusResponse);
+}
+
+message Token {
+  string token = 1;
+  int64 expires_at = 2; // unix timestamp
+}
+
+message RegisterRequest {
+  string username = 1;
+  string password = 2;
+}
+
+message RegisterResponse {
+  Token token = 1;
+}
+
+message LoginRequest {
+  string username = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  Token token = 1;
+}
+
+message ChangePasswordRequest {
+  string username = 1;
+  string old_password = 2;
+  string new_password = 3;
+}
+
+message ChangePasswordResponse {}
+
+message GetAuthStatusRequest {}
+
+message GetAuthStatusResponse {
+  bool needs_setup = 1;
+}
