@@ -441,6 +441,523 @@ func (x *GetAuthStatusResponse) GetNeedsSetup() bool {
 	return false
 }
 
+// UserInfo represents a user account without sensitive fields.
+type UserInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
+	Role          string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
+	CreatedAt     int64                  `protobuf:"varint,3,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"` // unix timestamp
+	UpdatedAt     int64                  `protobuf:"varint,4,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"` // unix timestamp
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UserInfo) Reset() {
+	*x = UserInfo{}
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UserInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UserInfo) ProtoMessage() {}
+
+func (x *UserInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UserInfo.ProtoReflect.Descriptor instead.
+func (*UserInfo) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *UserInfo) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *UserInfo) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *UserInfo) GetCreatedAt() int64 {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return 0
+}
+
+func (x *UserInfo) GetUpdatedAt() int64 {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return 0
+}
+
+type CreateUserRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
+	Password      string                 `protobuf:"bytes,2,opt,name=password,proto3" json:"password,omitempty"`
+	Role          string                 `protobuf:"bytes,3,opt,name=role,proto3" json:"role,omitempty"` // "admin" or "user"
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateUserRequest) Reset() {
+	*x = CreateUserRequest{}
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateUserRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateUserRequest) ProtoMessage() {}
+
+func (x *CreateUserRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateUserRequest.ProtoReflect.Descriptor instead.
+func (*CreateUserRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *CreateUserRequest) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *CreateUserRequest) GetPassword() string {
+	if x != nil {
+		return x.Password
+	}
+	return ""
+}
+
+func (x *CreateUserRequest) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+type CreateUserResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	User          *UserInfo              `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateUserResponse) Reset() {
+	*x = CreateUserResponse{}
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateUserResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateUserResponse) ProtoMessage() {}
+
+func (x *CreateUserResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateUserResponse.ProtoReflect.Descriptor instead.
+func (*CreateUserResponse) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *CreateUserResponse) GetUser() *UserInfo {
+	if x != nil {
+		return x.User
+	}
+	return nil
+}
+
+type ListUsersRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListUsersRequest) Reset() {
+	*x = ListUsersRequest{}
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListUsersRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListUsersRequest) ProtoMessage() {}
+
+func (x *ListUsersRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListUsersRequest.ProtoReflect.Descriptor instead.
+func (*ListUsersRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{12}
+}
+
+type ListUsersResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Users         []*UserInfo            `protobuf:"bytes,1,rep,name=users,proto3" json:"users,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListUsersResponse) Reset() {
+	*x = ListUsersResponse{}
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListUsersResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListUsersResponse) ProtoMessage() {}
+
+func (x *ListUsersResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListUsersResponse.ProtoReflect.Descriptor instead.
+func (*ListUsersResponse) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ListUsersResponse) GetUsers() []*UserInfo {
+	if x != nil {
+		return x.Users
+	}
+	return nil
+}
+
+type UpdateUserRoleRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
+	Role          string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"` // "admin" or "user"
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateUserRoleRequest) Reset() {
+	*x = UpdateUserRoleRequest{}
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateUserRoleRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateUserRoleRequest) ProtoMessage() {}
+
+func (x *UpdateUserRoleRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateUserRoleRequest.ProtoReflect.Descriptor instead.
+func (*UpdateUserRoleRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *UpdateUserRoleRequest) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *UpdateUserRoleRequest) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+type UpdateUserRoleResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	User          *UserInfo              `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateUserRoleResponse) Reset() {
+	*x = UpdateUserRoleResponse{}
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateUserRoleResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateUserRoleResponse) ProtoMessage() {}
+
+func (x *UpdateUserRoleResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateUserRoleResponse.ProtoReflect.Descriptor instead.
+func (*UpdateUserRoleResponse) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *UpdateUserRoleResponse) GetUser() *UserInfo {
+	if x != nil {
+		return x.User
+	}
+	return nil
+}
+
+type ResetPasswordRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
+	NewPassword   string                 `protobuf:"bytes,2,opt,name=new_password,json=newPassword,proto3" json:"new_password,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResetPasswordRequest) Reset() {
+	*x = ResetPasswordRequest{}
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResetPasswordRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResetPasswordRequest) ProtoMessage() {}
+
+func (x *ResetPasswordRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResetPasswordRequest.ProtoReflect.Descriptor instead.
+func (*ResetPasswordRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *ResetPasswordRequest) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *ResetPasswordRequest) GetNewPassword() string {
+	if x != nil {
+		return x.NewPassword
+	}
+	return ""
+}
+
+type ResetPasswordResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResetPasswordResponse) Reset() {
+	*x = ResetPasswordResponse{}
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResetPasswordResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResetPasswordResponse) ProtoMessage() {}
+
+func (x *ResetPasswordResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResetPasswordResponse.ProtoReflect.Descriptor instead.
+func (*ResetPasswordResponse) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{17}
+}
+
+type DeleteUserRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteUserRequest) Reset() {
+	*x = DeleteUserRequest{}
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteUserRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteUserRequest) ProtoMessage() {}
+
+func (x *DeleteUserRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteUserRequest.ProtoReflect.Descriptor instead.
+func (*DeleteUserRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *DeleteUserRequest) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+type DeleteUserResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteUserResponse) Reset() {
+	*x = DeleteUserResponse{}
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteUserResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteUserResponse) ProtoMessage() {}
+
+func (x *DeleteUserResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteUserResponse.ProtoReflect.Descriptor instead.
+func (*DeleteUserResponse) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{19}
+}
+
 var File_gastrolog_v1_auth_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_auth_proto_rawDesc = "" +
@@ -468,12 +985,47 @@ const file_gastrolog_v1_auth_proto_rawDesc = "" +
 	"\x14GetAuthStatusRequest\"8\n" +
 	"\x15GetAuthStatusResponse\x12\x1f\n" +
 	"\vneeds_setup\x18\x01 \x01(\bR\n" +
-	"needsSetup2\xd1\x02\n" +
+	"needsSetup\"x\n" +
+	"\bUserInfo\x12\x1a\n" +
+	"\busername\x18\x01 \x01(\tR\busername\x12\x12\n" +
+	"\x04role\x18\x02 \x01(\tR\x04role\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\x03 \x01(\x03R\tcreatedAt\x12\x1d\n" +
+	"\n" +
+	"updated_at\x18\x04 \x01(\x03R\tupdatedAt\"_\n" +
+	"\x11CreateUserRequest\x12\x1a\n" +
+	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
+	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x12\n" +
+	"\x04role\x18\x03 \x01(\tR\x04role\"@\n" +
+	"\x12CreateUserResponse\x12*\n" +
+	"\x04user\x18\x01 \x01(\v2\x16.gastrolog.v1.UserInfoR\x04user\"\x12\n" +
+	"\x10ListUsersRequest\"A\n" +
+	"\x11ListUsersResponse\x12,\n" +
+	"\x05users\x18\x01 \x03(\v2\x16.gastrolog.v1.UserInfoR\x05users\"G\n" +
+	"\x15UpdateUserRoleRequest\x12\x1a\n" +
+	"\busername\x18\x01 \x01(\tR\busername\x12\x12\n" +
+	"\x04role\x18\x02 \x01(\tR\x04role\"D\n" +
+	"\x16UpdateUserRoleResponse\x12*\n" +
+	"\x04user\x18\x01 \x01(\v2\x16.gastrolog.v1.UserInfoR\x04user\"U\n" +
+	"\x14ResetPasswordRequest\x12\x1a\n" +
+	"\busername\x18\x01 \x01(\tR\busername\x12!\n" +
+	"\fnew_password\x18\x02 \x01(\tR\vnewPassword\"\x17\n" +
+	"\x15ResetPasswordResponse\"/\n" +
+	"\x11DeleteUserRequest\x12\x1a\n" +
+	"\busername\x18\x01 \x01(\tR\busername\"\x14\n" +
+	"\x12DeleteUserResponse2\xf8\x05\n" +
 	"\vAuthService\x12I\n" +
 	"\bRegister\x12\x1d.gastrolog.v1.RegisterRequest\x1a\x1e.gastrolog.v1.RegisterResponse\x12@\n" +
 	"\x05Login\x12\x1a.gastrolog.v1.LoginRequest\x1a\x1b.gastrolog.v1.LoginResponse\x12[\n" +
 	"\x0eChangePassword\x12#.gastrolog.v1.ChangePasswordRequest\x1a$.gastrolog.v1.ChangePasswordResponse\x12X\n" +
-	"\rGetAuthStatus\x12\".gastrolog.v1.GetAuthStatusRequest\x1a#.gastrolog.v1.GetAuthStatusResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"\rGetAuthStatus\x12\".gastrolog.v1.GetAuthStatusRequest\x1a#.gastrolog.v1.GetAuthStatusResponse\x12O\n" +
+	"\n" +
+	"CreateUser\x12\x1f.gastrolog.v1.CreateUserRequest\x1a .gastrolog.v1.CreateUserResponse\x12L\n" +
+	"\tListUsers\x12\x1e.gastrolog.v1.ListUsersRequest\x1a\x1f.gastrolog.v1.ListUsersResponse\x12[\n" +
+	"\x0eUpdateUserRole\x12#.gastrolog.v1.UpdateUserRoleRequest\x1a$.gastrolog.v1.UpdateUserRoleResponse\x12X\n" +
+	"\rResetPassword\x12\".gastrolog.v1.ResetPasswordRequest\x1a#.gastrolog.v1.ResetPasswordResponse\x12O\n" +
+	"\n" +
+	"DeleteUser\x12\x1f.gastrolog.v1.DeleteUserRequest\x1a .gastrolog.v1.DeleteUserResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_auth_proto_rawDescOnce sync.Once
@@ -487,7 +1039,7 @@ func file_gastrolog_v1_auth_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_auth_proto_rawDescData
 }
 
-var file_gastrolog_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_gastrolog_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_gastrolog_v1_auth_proto_goTypes = []any{
 	(*Token)(nil),                  // 0: gastrolog.v1.Token
 	(*RegisterRequest)(nil),        // 1: gastrolog.v1.RegisterRequest
@@ -498,23 +1050,47 @@ var file_gastrolog_v1_auth_proto_goTypes = []any{
 	(*ChangePasswordResponse)(nil), // 6: gastrolog.v1.ChangePasswordResponse
 	(*GetAuthStatusRequest)(nil),   // 7: gastrolog.v1.GetAuthStatusRequest
 	(*GetAuthStatusResponse)(nil),  // 8: gastrolog.v1.GetAuthStatusResponse
+	(*UserInfo)(nil),               // 9: gastrolog.v1.UserInfo
+	(*CreateUserRequest)(nil),      // 10: gastrolog.v1.CreateUserRequest
+	(*CreateUserResponse)(nil),     // 11: gastrolog.v1.CreateUserResponse
+	(*ListUsersRequest)(nil),       // 12: gastrolog.v1.ListUsersRequest
+	(*ListUsersResponse)(nil),      // 13: gastrolog.v1.ListUsersResponse
+	(*UpdateUserRoleRequest)(nil),  // 14: gastrolog.v1.UpdateUserRoleRequest
+	(*UpdateUserRoleResponse)(nil), // 15: gastrolog.v1.UpdateUserRoleResponse
+	(*ResetPasswordRequest)(nil),   // 16: gastrolog.v1.ResetPasswordRequest
+	(*ResetPasswordResponse)(nil),  // 17: gastrolog.v1.ResetPasswordResponse
+	(*DeleteUserRequest)(nil),      // 18: gastrolog.v1.DeleteUserRequest
+	(*DeleteUserResponse)(nil),     // 19: gastrolog.v1.DeleteUserResponse
 }
 var file_gastrolog_v1_auth_proto_depIdxs = []int32{
-	0, // 0: gastrolog.v1.RegisterResponse.token:type_name -> gastrolog.v1.Token
-	0, // 1: gastrolog.v1.LoginResponse.token:type_name -> gastrolog.v1.Token
-	1, // 2: gastrolog.v1.AuthService.Register:input_type -> gastrolog.v1.RegisterRequest
-	3, // 3: gastrolog.v1.AuthService.Login:input_type -> gastrolog.v1.LoginRequest
-	5, // 4: gastrolog.v1.AuthService.ChangePassword:input_type -> gastrolog.v1.ChangePasswordRequest
-	7, // 5: gastrolog.v1.AuthService.GetAuthStatus:input_type -> gastrolog.v1.GetAuthStatusRequest
-	2, // 6: gastrolog.v1.AuthService.Register:output_type -> gastrolog.v1.RegisterResponse
-	4, // 7: gastrolog.v1.AuthService.Login:output_type -> gastrolog.v1.LoginResponse
-	6, // 8: gastrolog.v1.AuthService.ChangePassword:output_type -> gastrolog.v1.ChangePasswordResponse
-	8, // 9: gastrolog.v1.AuthService.GetAuthStatus:output_type -> gastrolog.v1.GetAuthStatusResponse
-	6, // [6:10] is the sub-list for method output_type
-	2, // [2:6] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	0,  // 0: gastrolog.v1.RegisterResponse.token:type_name -> gastrolog.v1.Token
+	0,  // 1: gastrolog.v1.LoginResponse.token:type_name -> gastrolog.v1.Token
+	9,  // 2: gastrolog.v1.CreateUserResponse.user:type_name -> gastrolog.v1.UserInfo
+	9,  // 3: gastrolog.v1.ListUsersResponse.users:type_name -> gastrolog.v1.UserInfo
+	9,  // 4: gastrolog.v1.UpdateUserRoleResponse.user:type_name -> gastrolog.v1.UserInfo
+	1,  // 5: gastrolog.v1.AuthService.Register:input_type -> gastrolog.v1.RegisterRequest
+	3,  // 6: gastrolog.v1.AuthService.Login:input_type -> gastrolog.v1.LoginRequest
+	5,  // 7: gastrolog.v1.AuthService.ChangePassword:input_type -> gastrolog.v1.ChangePasswordRequest
+	7,  // 8: gastrolog.v1.AuthService.GetAuthStatus:input_type -> gastrolog.v1.GetAuthStatusRequest
+	10, // 9: gastrolog.v1.AuthService.CreateUser:input_type -> gastrolog.v1.CreateUserRequest
+	12, // 10: gastrolog.v1.AuthService.ListUsers:input_type -> gastrolog.v1.ListUsersRequest
+	14, // 11: gastrolog.v1.AuthService.UpdateUserRole:input_type -> gastrolog.v1.UpdateUserRoleRequest
+	16, // 12: gastrolog.v1.AuthService.ResetPassword:input_type -> gastrolog.v1.ResetPasswordRequest
+	18, // 13: gastrolog.v1.AuthService.DeleteUser:input_type -> gastrolog.v1.DeleteUserRequest
+	2,  // 14: gastrolog.v1.AuthService.Register:output_type -> gastrolog.v1.RegisterResponse
+	4,  // 15: gastrolog.v1.AuthService.Login:output_type -> gastrolog.v1.LoginResponse
+	6,  // 16: gastrolog.v1.AuthService.ChangePassword:output_type -> gastrolog.v1.ChangePasswordResponse
+	8,  // 17: gastrolog.v1.AuthService.GetAuthStatus:output_type -> gastrolog.v1.GetAuthStatusResponse
+	11, // 18: gastrolog.v1.AuthService.CreateUser:output_type -> gastrolog.v1.CreateUserResponse
+	13, // 19: gastrolog.v1.AuthService.ListUsers:output_type -> gastrolog.v1.ListUsersResponse
+	15, // 20: gastrolog.v1.AuthService.UpdateUserRole:output_type -> gastrolog.v1.UpdateUserRoleResponse
+	17, // 21: gastrolog.v1.AuthService.ResetPassword:output_type -> gastrolog.v1.ResetPasswordResponse
+	19, // 22: gastrolog.v1.AuthService.DeleteUser:output_type -> gastrolog.v1.DeleteUserResponse
+	14, // [14:23] is the sub-list for method output_type
+	5,  // [5:14] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_auth_proto_init() }
@@ -528,7 +1104,7 @@ func file_gastrolog_v1_auth_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_auth_proto_rawDesc), len(file_gastrolog_v1_auth_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

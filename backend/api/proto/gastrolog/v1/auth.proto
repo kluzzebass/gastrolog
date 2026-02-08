@@ -6,8 +6,8 @@ option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
 
 // AuthService provides user registration, login, and password management.
 service AuthService {
-  // Register creates a new user account and returns a token.
-  // The first registered user is automatically assigned the "admin" role.
+  // Register creates the first user account during initial setup.
+  // Returns FailedPrecondition if any users already exist.
   rpc Register(RegisterRequest) returns (RegisterResponse);
 
   // Login authenticates a user and returns a token.
@@ -18,6 +18,21 @@ service AuthService {
 
   // GetAuthStatus returns whether the system needs initial setup.
   rpc GetAuthStatus(GetAuthStatusRequest) returns (GetAuthStatusResponse);
+
+  // CreateUser creates a new user account. Admin only.
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+
+  // ListUsers returns all user accounts. Admin only.
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+
+  // UpdateUserRole changes a user's role. Admin only.
+  rpc UpdateUserRole(UpdateUserRoleRequest) returns (UpdateUserRoleResponse);
+
+  // ResetPassword sets a new password for a user. Admin only.
+  rpc ResetPassword(ResetPasswordRequest) returns (ResetPasswordResponse);
+
+  // DeleteUser removes a user account. Admin only.
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
 }
 
 message Token {
@@ -56,3 +71,49 @@ message GetAuthStatusRequest {}
 message GetAuthStatusResponse {
   bool needs_setup = 1;
 }
+
+// UserInfo represents a user account without sensitive fields.
+message UserInfo {
+  string username = 1;
+  string role = 2;
+  int64 created_at = 3; // unix timestamp
+  int64 updated_at = 4; // unix timestamp
+}
+
+message CreateUserRequest {
+  string username = 1;
+  string password = 2;
+  string role = 3; // "admin" or "user"
+}
+
+message CreateUserResponse {
+  UserInfo user = 1;
+}
+
+message ListUsersRequest {}
+
+message ListUsersResponse {
+  repeated UserInfo users = 1;
+}
+
+message UpdateUserRoleRequest {
+  string username = 1;
+  string role = 2; // "admin" or "user"
+}
+
+message UpdateUserRoleResponse {
+  UserInfo user = 1;
+}
+
+message ResetPasswordRequest {
+  string username = 1;
+  string new_password = 2;
+}
+
+message ResetPasswordResponse {}
+
+message DeleteUserRequest {
+  string username = 1;
+}
+
+message DeleteUserResponse {}

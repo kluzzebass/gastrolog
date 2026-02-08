@@ -79,7 +79,10 @@ type Store interface {
 	// Users
 	CreateUser(ctx context.Context, user User) error
 	GetUser(ctx context.Context, username string) (*User, error)
+	ListUsers(ctx context.Context) ([]User, error)
 	UpdatePassword(ctx context.Context, username string, passwordHash string) error
+	UpdateUserRole(ctx context.Context, username string, role string) error
+	DeleteUser(ctx context.Context, username string) error
 	CountUsers(ctx context.Context) (int, error)
 }
 

@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { ChangePasswordRequest, ChangePasswordResponse, GetAuthStatusRequest, GetAuthStatusResponse, LoginRequest, LoginResponse, RegisterRequest, RegisterResponse } from "./auth_pb.js";
+import { ChangePasswordRequest, ChangePasswordResponse, CreateUserRequest, CreateUserResponse, DeleteUserRequest, DeleteUserResponse, GetAuthStatusRequest, GetAuthStatusResponse, ListUsersRequest, ListUsersResponse, LoginRequest, LoginResponse, RegisterRequest, RegisterResponse, ResetPasswordRequest, ResetPasswordResponse, UpdateUserRoleRequest, UpdateUserRoleResponse } from "./auth_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -15,8 +15,8 @@ export const AuthService = {
   typeName: "gastrolog.v1.AuthService",
   methods: {
     /**
-     * Register creates a new user account and returns a token.
-     * The first registered user is automatically assigned the "admin" role.
+     * Register creates the first user account during initial setup.
+     * Returns FailedPrecondition if any users already exist.
      *
      * @generated from rpc gastrolog.v1.AuthService.Register
      */
@@ -57,6 +57,61 @@ export const AuthService = {
       name: "GetAuthStatus",
       I: GetAuthStatusRequest,
       O: GetAuthStatusResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * CreateUser creates a new user account. Admin only.
+     *
+     * @generated from rpc gastrolog.v1.AuthService.CreateUser
+     */
+    createUser: {
+      name: "CreateUser",
+      I: CreateUserRequest,
+      O: CreateUserResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * ListUsers returns all user accounts. Admin only.
+     *
+     * @generated from rpc gastrolog.v1.AuthService.ListUsers
+     */
+    listUsers: {
+      name: "ListUsers",
+      I: ListUsersRequest,
+      O: ListUsersResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * UpdateUserRole changes a user's role. Admin only.
+     *
+     * @generated from rpc gastrolog.v1.AuthService.UpdateUserRole
+     */
+    updateUserRole: {
+      name: "UpdateUserRole",
+      I: UpdateUserRoleRequest,
+      O: UpdateUserRoleResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * ResetPassword sets a new password for a user. Admin only.
+     *
+     * @generated from rpc gastrolog.v1.AuthService.ResetPassword
+     */
+    resetPassword: {
+      name: "ResetPassword",
+      I: ResetPasswordRequest,
+      O: ResetPasswordResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * DeleteUser removes a user account. Admin only.
+     *
+     * @generated from rpc gastrolog.v1.AuthService.DeleteUser
+     */
+    deleteUser: {
+      name: "DeleteUser",
+      I: DeleteUserRequest,
+      O: DeleteUserResponse,
       kind: MethodKind.Unary,
     },
   }

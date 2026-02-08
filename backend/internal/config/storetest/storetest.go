@@ -964,6 +964,120 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 	})
 
+	t.Run("ListUsers", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		// Empty store returns empty list.
+		users, err := s.ListUsers(ctx)
+		if err != nil {
+			t.Fatalf("ListUsers: %v", err)
+		}
+		if len(users) != 0 {
+			t.Fatalf("expected 0 users, got %d", len(users))
+		}
+
+		now := time.Now().UTC()
+		if err := s.CreateUser(ctx, config.User{
+			Username: "alice", PasswordHash: "h1", Role: "admin",
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("CreateUser alice: %v", err)
+		}
+		if err := s.CreateUser(ctx, config.User{
+			Username: "bob", PasswordHash: "h2", Role: "user",
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("CreateUser bob: %v", err)
+		}
+
+		users, err = s.ListUsers(ctx)
+		if err != nil {
+			t.Fatalf("ListUsers: %v", err)
+		}
+		if len(users) != 2 {
+			t.Fatalf("expected 2 users, got %d", len(users))
+		}
+	})
+
+	t.Run("UpdateUserRole", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		now := time.Now().UTC()
+		if err := s.CreateUser(ctx, config.User{
+			Username: "alice", PasswordHash: "h1", Role: "user",
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("CreateUser: %v", err)
+		}
+
+		if err := s.UpdateUserRole(ctx, "alice", "admin"); err != nil {
+			t.Fatalf("UpdateUserRole: %v", err)
+		}
+
+		got, err := s.GetUser(ctx, "alice")
+		if err != nil {
+			t.Fatalf("GetUser: %v", err)
+		}
+		if got.Role != "admin" {
+			t.Errorf("Role: expected %q, got %q", "admin", got.Role)
+		}
+	})
+
+	t.Run("UpdateUserRoleNonExistent", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		err := s.UpdateUserRole(ctx, "ghost", "admin")
+		if err == nil {
+			t.Fatal("expected error updating non-existent user, got nil")
+		}
+	})
+
+	t.Run("DeleteUser", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		now := time.Now().UTC()
+		if err := s.CreateUser(ctx, config.User{
+			Username: "alice", PasswordHash: "h1", Role: "admin",
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("CreateUser: %v", err)
+		}
+
+		if err := s.DeleteUser(ctx, "alice"); err != nil {
+			t.Fatalf("DeleteUser: %v", err)
+		}
+
+		got, err := s.GetUser(ctx, "alice")
+		if err != nil {
+			t.Fatalf("GetUser: %v", err)
+		}
+		if got != nil {
+			t.Fatalf("expected nil after delete, got %+v", got)
+		}
+
+		count, err := s.CountUsers(ctx)
+		if err != nil {
+			t.Fatalf("CountUsers: %v", err)
+		}
+		if count != 0 {
+			t.Fatalf("expected 0 users after delete, got %d", count)
+		}
+	})
+
+	t.Run("DeleteUserNonExistent", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		err := s.DeleteUser(ctx, "ghost")
+		if err == nil {
+			t.Fatal("expected error deleting non-existent user, got nil")
+		}
+	})
+
 	t.Run("UsersNotInLoad", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()

@@ -548,6 +548,28 @@ func (s *Store) GetUser(ctx context.Context, username string) (*config.User, err
 	return &u, nil
 }
 
+func (s *Store) ListUsers(ctx context.Context) ([]config.User, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT username, password_hash, role, created_at, updated_at FROM users ORDER BY created_at")
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []config.User
+	for rows.Next() {
+		var u config.User
+		var createdAt, updatedAt string
+		if err := rows.Scan(&u.Username, &u.PasswordHash, &u.Role, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("scan user: %w", err)
+		}
+		u.CreatedAt, _ = time.Parse(timeFormat, createdAt)
+		u.UpdatedAt, _ = time.Parse(timeFormat, updatedAt)
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
 func (s *Store) UpdatePassword(ctx context.Context, username string, passwordHash string) error {
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE users SET password_hash = ?, updated_at = ? WHERE username = ?
@@ -558,6 +580,39 @@ func (s *Store) UpdatePassword(ctx context.Context, username string, passwordHas
 	n, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("update password for %q: %w", username, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("user %q not found", username)
+	}
+	return nil
+}
+
+func (s *Store) UpdateUserRole(ctx context.Context, username string, role string) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE users SET role = ?, updated_at = ? WHERE username = ?
+	`, role, time.Now().UTC().Format(timeFormat), username)
+	if err != nil {
+		return fmt.Errorf("update role for %q: %w", username, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update role for %q: %w", username, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("user %q not found", username)
+	}
+	return nil
+}
+
+func (s *Store) DeleteUser(ctx context.Context, username string) error {
+	res, err := s.db.ExecContext(ctx,
+		"DELETE FROM users WHERE username = ?", username)
+	if err != nil {
+		return fmt.Errorf("delete user %q: %w", username, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete user %q: %w", username, err)
 	}
 	if n == 0 {
 		return fmt.Errorf("user %q not found", username)

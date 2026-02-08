@@ -527,6 +527,18 @@ func (s *Store) GetUser(ctx context.Context, username string) (*config.User, err
 	return &u, nil
 }
 
+func (s *Store) ListUsers(ctx context.Context) ([]config.User, error) {
+	users, err := s.loadUsers()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]config.User, 0, len(users))
+	for _, u := range users {
+		result = append(result, u)
+	}
+	return result, nil
+}
+
 func (s *Store) UpdatePassword(ctx context.Context, username string, passwordHash string) error {
 	users, err := s.loadUsers()
 	if err != nil {
@@ -539,6 +551,33 @@ func (s *Store) UpdatePassword(ctx context.Context, username string, passwordHas
 	u.PasswordHash = passwordHash
 	u.UpdatedAt = time.Now().UTC()
 	users[username] = u
+	return s.flushUsers(users)
+}
+
+func (s *Store) UpdateUserRole(ctx context.Context, username string, role string) error {
+	users, err := s.loadUsers()
+	if err != nil {
+		return err
+	}
+	u, ok := users[username]
+	if !ok {
+		return fmt.Errorf("user %q not found", username)
+	}
+	u.Role = role
+	u.UpdatedAt = time.Now().UTC()
+	users[username] = u
+	return s.flushUsers(users)
+}
+
+func (s *Store) DeleteUser(ctx context.Context, username string) error {
+	users, err := s.loadUsers()
+	if err != nil {
+		return err
+	}
+	if _, ok := users[username]; !ok {
+		return fmt.Errorf("user %q not found", username)
+	}
+	delete(users, username)
 	return s.flushUsers(users)
 }
 

@@ -359,3 +359,444 @@ export class GetAuthStatusResponse extends Message<GetAuthStatusResponse> {
   }
 }
 
+/**
+ * UserInfo represents a user account without sensitive fields.
+ *
+ * @generated from message gastrolog.v1.UserInfo
+ */
+export class UserInfo extends Message<UserInfo> {
+  /**
+   * @generated from field: string username = 1;
+   */
+  username = "";
+
+  /**
+   * @generated from field: string role = 2;
+   */
+  role = "";
+
+  /**
+   * unix timestamp
+   *
+   * @generated from field: int64 created_at = 3;
+   */
+  createdAt = protoInt64.zero;
+
+  /**
+   * unix timestamp
+   *
+   * @generated from field: int64 updated_at = 4;
+   */
+  updatedAt = protoInt64.zero;
+
+  constructor(data?: PartialMessage<UserInfo>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.UserInfo";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "username", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "role", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "created_at", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 4, name: "updated_at", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): UserInfo {
+    return new UserInfo().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): UserInfo {
+    return new UserInfo().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): UserInfo {
+    return new UserInfo().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: UserInfo | PlainMessage<UserInfo> | undefined, b: UserInfo | PlainMessage<UserInfo> | undefined): boolean {
+    return proto3.util.equals(UserInfo, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.CreateUserRequest
+ */
+export class CreateUserRequest extends Message<CreateUserRequest> {
+  /**
+   * @generated from field: string username = 1;
+   */
+  username = "";
+
+  /**
+   * @generated from field: string password = 2;
+   */
+  password = "";
+
+  /**
+   * "admin" or "user"
+   *
+   * @generated from field: string role = 3;
+   */
+  role = "";
+
+  constructor(data?: PartialMessage<CreateUserRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.CreateUserRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "username", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "password", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "role", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CreateUserRequest {
+    return new CreateUserRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): CreateUserRequest {
+    return new CreateUserRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): CreateUserRequest {
+    return new CreateUserRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: CreateUserRequest | PlainMessage<CreateUserRequest> | undefined, b: CreateUserRequest | PlainMessage<CreateUserRequest> | undefined): boolean {
+    return proto3.util.equals(CreateUserRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.CreateUserResponse
+ */
+export class CreateUserResponse extends Message<CreateUserResponse> {
+  /**
+   * @generated from field: gastrolog.v1.UserInfo user = 1;
+   */
+  user?: UserInfo;
+
+  constructor(data?: PartialMessage<CreateUserResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.CreateUserResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "user", kind: "message", T: UserInfo },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CreateUserResponse {
+    return new CreateUserResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): CreateUserResponse {
+    return new CreateUserResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): CreateUserResponse {
+    return new CreateUserResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: CreateUserResponse | PlainMessage<CreateUserResponse> | undefined, b: CreateUserResponse | PlainMessage<CreateUserResponse> | undefined): boolean {
+    return proto3.util.equals(CreateUserResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ListUsersRequest
+ */
+export class ListUsersRequest extends Message<ListUsersRequest> {
+  constructor(data?: PartialMessage<ListUsersRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ListUsersRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListUsersRequest {
+    return new ListUsersRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListUsersRequest {
+    return new ListUsersRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListUsersRequest {
+    return new ListUsersRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ListUsersRequest | PlainMessage<ListUsersRequest> | undefined, b: ListUsersRequest | PlainMessage<ListUsersRequest> | undefined): boolean {
+    return proto3.util.equals(ListUsersRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ListUsersResponse
+ */
+export class ListUsersResponse extends Message<ListUsersResponse> {
+  /**
+   * @generated from field: repeated gastrolog.v1.UserInfo users = 1;
+   */
+  users: UserInfo[] = [];
+
+  constructor(data?: PartialMessage<ListUsersResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ListUsersResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "users", kind: "message", T: UserInfo, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListUsersResponse {
+    return new ListUsersResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListUsersResponse {
+    return new ListUsersResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListUsersResponse {
+    return new ListUsersResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ListUsersResponse | PlainMessage<ListUsersResponse> | undefined, b: ListUsersResponse | PlainMessage<ListUsersResponse> | undefined): boolean {
+    return proto3.util.equals(ListUsersResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.UpdateUserRoleRequest
+ */
+export class UpdateUserRoleRequest extends Message<UpdateUserRoleRequest> {
+  /**
+   * @generated from field: string username = 1;
+   */
+  username = "";
+
+  /**
+   * "admin" or "user"
+   *
+   * @generated from field: string role = 2;
+   */
+  role = "";
+
+  constructor(data?: PartialMessage<UpdateUserRoleRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.UpdateUserRoleRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "username", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "role", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): UpdateUserRoleRequest {
+    return new UpdateUserRoleRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): UpdateUserRoleRequest {
+    return new UpdateUserRoleRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): UpdateUserRoleRequest {
+    return new UpdateUserRoleRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: UpdateUserRoleRequest | PlainMessage<UpdateUserRoleRequest> | undefined, b: UpdateUserRoleRequest | PlainMessage<UpdateUserRoleRequest> | undefined): boolean {
+    return proto3.util.equals(UpdateUserRoleRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.UpdateUserRoleResponse
+ */
+export class UpdateUserRoleResponse extends Message<UpdateUserRoleResponse> {
+  /**
+   * @generated from field: gastrolog.v1.UserInfo user = 1;
+   */
+  user?: UserInfo;
+
+  constructor(data?: PartialMessage<UpdateUserRoleResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.UpdateUserRoleResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "user", kind: "message", T: UserInfo },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): UpdateUserRoleResponse {
+    return new UpdateUserRoleResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): UpdateUserRoleResponse {
+    return new UpdateUserRoleResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): UpdateUserRoleResponse {
+    return new UpdateUserRoleResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: UpdateUserRoleResponse | PlainMessage<UpdateUserRoleResponse> | undefined, b: UpdateUserRoleResponse | PlainMessage<UpdateUserRoleResponse> | undefined): boolean {
+    return proto3.util.equals(UpdateUserRoleResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ResetPasswordRequest
+ */
+export class ResetPasswordRequest extends Message<ResetPasswordRequest> {
+  /**
+   * @generated from field: string username = 1;
+   */
+  username = "";
+
+  /**
+   * @generated from field: string new_password = 2;
+   */
+  newPassword = "";
+
+  constructor(data?: PartialMessage<ResetPasswordRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ResetPasswordRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "username", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "new_password", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ResetPasswordRequest {
+    return new ResetPasswordRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ResetPasswordRequest {
+    return new ResetPasswordRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ResetPasswordRequest {
+    return new ResetPasswordRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ResetPasswordRequest | PlainMessage<ResetPasswordRequest> | undefined, b: ResetPasswordRequest | PlainMessage<ResetPasswordRequest> | undefined): boolean {
+    return proto3.util.equals(ResetPasswordRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ResetPasswordResponse
+ */
+export class ResetPasswordResponse extends Message<ResetPasswordResponse> {
+  constructor(data?: PartialMessage<ResetPasswordResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ResetPasswordResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ResetPasswordResponse {
+    return new ResetPasswordResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ResetPasswordResponse {
+    return new ResetPasswordResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ResetPasswordResponse {
+    return new ResetPasswordResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ResetPasswordResponse | PlainMessage<ResetPasswordResponse> | undefined, b: ResetPasswordResponse | PlainMessage<ResetPasswordResponse> | undefined): boolean {
+    return proto3.util.equals(ResetPasswordResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.DeleteUserRequest
+ */
+export class DeleteUserRequest extends Message<DeleteUserRequest> {
+  /**
+   * @generated from field: string username = 1;
+   */
+  username = "";
+
+  constructor(data?: PartialMessage<DeleteUserRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.DeleteUserRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "username", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteUserRequest {
+    return new DeleteUserRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteUserRequest {
+    return new DeleteUserRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteUserRequest {
+    return new DeleteUserRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DeleteUserRequest | PlainMessage<DeleteUserRequest> | undefined, b: DeleteUserRequest | PlainMessage<DeleteUserRequest> | undefined): boolean {
+    return proto3.util.equals(DeleteUserRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.DeleteUserResponse
+ */
+export class DeleteUserResponse extends Message<DeleteUserResponse> {
+  constructor(data?: PartialMessage<DeleteUserResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.DeleteUserResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteUserResponse {
+    return new DeleteUserResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteUserResponse {
+    return new DeleteUserResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteUserResponse {
+    return new DeleteUserResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DeleteUserResponse | PlainMessage<DeleteUserResponse> | undefined, b: DeleteUserResponse | PlainMessage<DeleteUserResponse> | undefined): boolean {
+    return proto3.util.equals(DeleteUserResponse, a, b);
+  }
+}
+

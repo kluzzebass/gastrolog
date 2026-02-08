@@ -33,11 +33,22 @@ func NewAuthServer(cfgStore config.Store, tokens *auth.TokenService) *AuthServer
 	}
 }
 
-// Register creates a new user account and returns a token.
+// Register creates the first user account during initial setup.
+// Returns FailedPrecondition if any users already exist.
 func (s *AuthServer) Register(
 	ctx context.Context,
 	req *connect.Request[apiv1.RegisterRequest],
 ) (*connect.Response[apiv1.RegisterResponse], error) {
+	// Register is first-user-only. After bootstrap, use CreateUser.
+	count, err := s.cfgStore.CountUsers(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("count users: %w", err))
+	}
+	if count > 0 {
+		return nil, connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Errorf("registration is disabled; use the admin API to create users"))
+	}
+
 	username := req.Msg.Username
 	password := req.Msg.Password
 
@@ -53,37 +64,18 @@ func (s *AuthServer) Register(
 			fmt.Errorf("password must be at least 8 characters"))
 	}
 
-	// Check if username is taken.
-	existing, err := s.cfgStore.GetUser(ctx, username)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("check user: %w", err))
-	}
-	if existing != nil {
-		return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("username %q is already taken", username))
-	}
-
-	// Determine role: first user is admin.
-	count, err := s.cfgStore.CountUsers(ctx)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("count users: %w", err))
-	}
-	role := "user"
-	if count == 0 {
-		role = "admin"
-	}
-
 	// Hash password.
 	hash, err := auth.HashPassword(password)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("hash password: %w", err))
 	}
 
-	// Create user.
+	// Create first user as admin.
 	now := time.Now().UTC()
 	user := config.User{
 		Username:     username,
 		PasswordHash: hash,
-		Role:         role,
+		Role:         "admin",
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
@@ -92,7 +84,7 @@ func (s *AuthServer) Register(
 	}
 
 	// Issue token.
-	token, expiresAt, err := s.tokens.Issue(username, role)
+	token, expiresAt, err := s.tokens.Issue(username, "admin")
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("issue token: %w", err))
 	}
@@ -205,4 +197,169 @@ func (s *AuthServer) GetAuthStatus(
 	return connect.NewResponse(&apiv1.GetAuthStatusResponse{
 		NeedsSetup: count == 0,
 	}), nil
+}
+
+// CreateUser creates a new user account. Admin only.
+func (s *AuthServer) CreateUser(
+	ctx context.Context,
+	req *connect.Request[apiv1.CreateUserRequest],
+) (*connect.Response[apiv1.CreateUserResponse], error) {
+	username := req.Msg.Username
+	password := req.Msg.Password
+	role := req.Msg.Role
+
+	if !usernameRe.MatchString(username) {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("username must be 3-64 characters, alphanumeric, underscores, or hyphens"))
+	}
+
+	if utf8.RuneCountInString(password) < 8 {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("password must be at least 8 characters"))
+	}
+
+	if role != "admin" && role != "user" {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("role must be \"admin\" or \"user\""))
+	}
+
+	existing, err := s.cfgStore.GetUser(ctx, username)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("check user: %w", err))
+	}
+	if existing != nil {
+		return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("username %q is already taken", username))
+	}
+
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("hash password: %w", err))
+	}
+
+	now := time.Now().UTC()
+	user := config.User{
+		Username:     username,
+		PasswordHash: hash,
+		Role:         role,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if err := s.cfgStore.CreateUser(ctx, user); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("create user: %w", err))
+	}
+
+	return connect.NewResponse(&apiv1.CreateUserResponse{
+		User: userToProto(user),
+	}), nil
+}
+
+// ListUsers returns all user accounts. Admin only.
+func (s *AuthServer) ListUsers(
+	ctx context.Context,
+	req *connect.Request[apiv1.ListUsersRequest],
+) (*connect.Response[apiv1.ListUsersResponse], error) {
+	users, err := s.cfgStore.ListUsers(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list users: %w", err))
+	}
+
+	infos := make([]*apiv1.UserInfo, len(users))
+	for i, u := range users {
+		infos[i] = userToProto(u)
+	}
+
+	return connect.NewResponse(&apiv1.ListUsersResponse{
+		Users: infos,
+	}), nil
+}
+
+// UpdateUserRole changes a user's role. Admin only.
+func (s *AuthServer) UpdateUserRole(
+	ctx context.Context,
+	req *connect.Request[apiv1.UpdateUserRoleRequest],
+) (*connect.Response[apiv1.UpdateUserRoleResponse], error) {
+	username := req.Msg.Username
+	role := req.Msg.Role
+
+	if role != "admin" && role != "user" {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("role must be \"admin\" or \"user\""))
+	}
+
+	if err := s.cfgStore.UpdateUserRole(ctx, username, role); err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("update role: %w", err))
+	}
+
+	user, err := s.cfgStore.GetUser(ctx, username)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get user: %w", err))
+	}
+
+	return connect.NewResponse(&apiv1.UpdateUserRoleResponse{
+		User: userToProto(*user),
+	}), nil
+}
+
+// ResetPassword sets a new password for a user. Admin only.
+func (s *AuthServer) ResetPassword(
+	ctx context.Context,
+	req *connect.Request[apiv1.ResetPasswordRequest],
+) (*connect.Response[apiv1.ResetPasswordResponse], error) {
+	username := req.Msg.Username
+	newPassword := req.Msg.NewPassword
+
+	if utf8.RuneCountInString(newPassword) < 8 {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("password must be at least 8 characters"))
+	}
+
+	user, err := s.cfgStore.GetUser(ctx, username)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get user: %w", err))
+	}
+	if user == nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user %q not found", username))
+	}
+
+	hash, err := auth.HashPassword(newPassword)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("hash password: %w", err))
+	}
+
+	if err := s.cfgStore.UpdatePassword(ctx, username, hash); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update password: %w", err))
+	}
+
+	return connect.NewResponse(&apiv1.ResetPasswordResponse{}), nil
+}
+
+// DeleteUser removes a user account. Admin only.
+// An admin cannot delete their own account.
+func (s *AuthServer) DeleteUser(
+	ctx context.Context,
+	req *connect.Request[apiv1.DeleteUserRequest],
+) (*connect.Response[apiv1.DeleteUserResponse], error) {
+	username := req.Msg.Username
+
+	// Prevent self-deletion.
+	if claims := auth.ClaimsFromContext(ctx); claims != nil && claims.Username() == username {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("cannot delete your own account"))
+	}
+
+	if err := s.cfgStore.DeleteUser(ctx, username); err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("delete user: %w", err))
+	}
+
+	return connect.NewResponse(&apiv1.DeleteUserResponse{}), nil
+}
+
+// userToProto converts a config.User to a proto UserInfo, stripping the password hash.
+func userToProto(u config.User) *apiv1.UserInfo {
+	return &apiv1.UserInfo{
+		Username:  u.Username,
+		Role:      u.Role,
+		CreatedAt: u.CreatedAt.Unix(),
+		UpdatedAt: u.UpdatedAt.Unix(),
+	}
 }

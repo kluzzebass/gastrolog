@@ -75,7 +75,7 @@ func TestRegister_FirstUserIsAdmin(t *testing.T) {
 	}
 }
 
-func TestRegister_DuplicateUsername(t *testing.T) {
+func TestRegister_AfterFirstUser(t *testing.T) {
 	client, _ := newAuthTestClient(t)
 	ctx := context.Background()
 
@@ -84,18 +84,19 @@ func TestRegister_DuplicateUsername(t *testing.T) {
 		Password: "password123",
 	}))
 	if err != nil {
-		t.Fatalf("Register: %v", err)
+		t.Fatalf("Register first user: %v", err)
 	}
 
+	// Second Register should fail with FailedPrecondition.
 	_, err = client.Register(ctx, connect.NewRequest(&apiv1.RegisterRequest{
-		Username: "alice",
-		Password: "differentpassword",
+		Username: "bob",
+		Password: "password456",
 	}))
 	if err == nil {
-		t.Fatal("expected error for duplicate username")
+		t.Fatal("expected error for register after first user")
 	}
-	if connect.CodeOf(err) != connect.CodeAlreadyExists {
-		t.Errorf("expected AlreadyExists, got %v", connect.CodeOf(err))
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("expected FailedPrecondition, got %v", connect.CodeOf(err))
 	}
 }
 

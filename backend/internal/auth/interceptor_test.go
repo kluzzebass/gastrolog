@@ -47,6 +47,17 @@ func (s *stubAuthService) Register(
 	return connect.NewResponse(&apiv1.RegisterResponse{}), nil
 }
 
+func (s *stubAuthService) CreateUser(
+	ctx context.Context,
+	req *connect.Request[apiv1.CreateUserRequest],
+) (*connect.Response[apiv1.CreateUserResponse], error) {
+	s.called = true
+	if req.Msg.Username == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("username required"))
+	}
+	return connect.NewResponse(&apiv1.CreateUserResponse{}), nil
+}
+
 func (s *stubAuthService) Login(
 	ctx context.Context,
 	req *connect.Request[apiv1.LoginRequest],
@@ -274,14 +285,26 @@ func TestRegister_FirstBoot_Allowed(t *testing.T) {
 	}
 }
 
-func TestRegister_AfterSetup_RequiresAdmin(t *testing.T) {
+func TestRegister_AfterSetup_PublicButSelfGuards(t *testing.T) {
+	// Register is public at the interceptor level — the handler itself
+	// rejects calls after the first user (tested in server tests).
+	// Here we verify the interceptor doesn't block it.
+	s := newTestSetup(t, &mockCounter{count: 1})
+	_, err := s.authClient.Register(context.Background(), connect.NewRequest(&apiv1.RegisterRequest{}))
+	// The stub handler succeeds — interceptor didn't block it.
+	if err != nil {
+		t.Fatalf("Register should pass through interceptor (handler guards): %v", err)
+	}
+}
+
+func TestCreateUser_RequiresAdmin(t *testing.T) {
 	tokens := auth.NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
 
 	// No token → Unauthenticated.
 	s := newTestSetup(t, &mockCounter{count: 1})
-	_, err := s.authClient.Register(context.Background(), connect.NewRequest(&apiv1.RegisterRequest{}))
+	_, err := s.authClient.CreateUser(context.Background(), connect.NewRequest(&apiv1.CreateUserRequest{}))
 	if err == nil {
-		t.Fatal("Register without token should fail after setup")
+		t.Fatal("CreateUser without token should fail")
 	}
 	if connect.CodeOf(err) != connect.CodeUnauthenticated {
 		t.Errorf("expected Unauthenticated, got %v", connect.CodeOf(err))
@@ -290,19 +313,23 @@ func TestRegister_AfterSetup_RequiresAdmin(t *testing.T) {
 	// Non-admin token → PermissionDenied.
 	userToken, _, _ := tokens.Issue("alice", "user")
 	userClient := gastrologv1connect.NewAuthServiceClient(http.DefaultClient, s.server.URL, withBearer(userToken))
-	_, err = userClient.Register(context.Background(), connect.NewRequest(&apiv1.RegisterRequest{}))
+	_, err = userClient.CreateUser(context.Background(), connect.NewRequest(&apiv1.CreateUserRequest{}))
 	if err == nil {
-		t.Fatal("Register with non-admin token should fail")
+		t.Fatal("CreateUser with non-admin token should fail")
 	}
 	if connect.CodeOf(err) != connect.CodePermissionDenied {
 		t.Errorf("expected PermissionDenied, got %v", connect.CodeOf(err))
 	}
 
-	// Admin token → allowed.
+	// Admin token → allowed (will fail on validation, not auth).
 	adminToken, _, _ := tokens.Issue("admin", "admin")
 	adminClient := gastrologv1connect.NewAuthServiceClient(http.DefaultClient, s.server.URL, withBearer(adminToken))
-	_, err = adminClient.Register(context.Background(), connect.NewRequest(&apiv1.RegisterRequest{}))
-	if err != nil {
-		t.Fatalf("Register with admin token should succeed: %v", err)
+	_, err = adminClient.CreateUser(context.Background(), connect.NewRequest(&apiv1.CreateUserRequest{}))
+	if err == nil {
+		t.Fatal("CreateUser with empty request should fail on validation")
+	}
+	// Should get past auth and hit validation (InvalidArgument), not auth errors.
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("expected InvalidArgument, got %v", connect.CodeOf(err))
 	}
 }

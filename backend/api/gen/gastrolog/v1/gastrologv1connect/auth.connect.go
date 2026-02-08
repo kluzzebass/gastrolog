@@ -43,12 +43,24 @@ const (
 	// AuthServiceGetAuthStatusProcedure is the fully-qualified name of the AuthService's GetAuthStatus
 	// RPC.
 	AuthServiceGetAuthStatusProcedure = "/gastrolog.v1.AuthService/GetAuthStatus"
+	// AuthServiceCreateUserProcedure is the fully-qualified name of the AuthService's CreateUser RPC.
+	AuthServiceCreateUserProcedure = "/gastrolog.v1.AuthService/CreateUser"
+	// AuthServiceListUsersProcedure is the fully-qualified name of the AuthService's ListUsers RPC.
+	AuthServiceListUsersProcedure = "/gastrolog.v1.AuthService/ListUsers"
+	// AuthServiceUpdateUserRoleProcedure is the fully-qualified name of the AuthService's
+	// UpdateUserRole RPC.
+	AuthServiceUpdateUserRoleProcedure = "/gastrolog.v1.AuthService/UpdateUserRole"
+	// AuthServiceResetPasswordProcedure is the fully-qualified name of the AuthService's ResetPassword
+	// RPC.
+	AuthServiceResetPasswordProcedure = "/gastrolog.v1.AuthService/ResetPassword"
+	// AuthServiceDeleteUserProcedure is the fully-qualified name of the AuthService's DeleteUser RPC.
+	AuthServiceDeleteUserProcedure = "/gastrolog.v1.AuthService/DeleteUser"
 )
 
 // AuthServiceClient is a client for the gastrolog.v1.AuthService service.
 type AuthServiceClient interface {
-	// Register creates a new user account and returns a token.
-	// The first registered user is automatically assigned the "admin" role.
+	// Register creates the first user account during initial setup.
+	// Returns FailedPrecondition if any users already exist.
 	Register(context.Context, *connect.Request[v1.RegisterRequest]) (*connect.Response[v1.RegisterResponse], error)
 	// Login authenticates a user and returns a token.
 	Login(context.Context, *connect.Request[v1.LoginRequest]) (*connect.Response[v1.LoginResponse], error)
@@ -56,6 +68,16 @@ type AuthServiceClient interface {
 	ChangePassword(context.Context, *connect.Request[v1.ChangePasswordRequest]) (*connect.Response[v1.ChangePasswordResponse], error)
 	// GetAuthStatus returns whether the system needs initial setup.
 	GetAuthStatus(context.Context, *connect.Request[v1.GetAuthStatusRequest]) (*connect.Response[v1.GetAuthStatusResponse], error)
+	// CreateUser creates a new user account. Admin only.
+	CreateUser(context.Context, *connect.Request[v1.CreateUserRequest]) (*connect.Response[v1.CreateUserResponse], error)
+	// ListUsers returns all user accounts. Admin only.
+	ListUsers(context.Context, *connect.Request[v1.ListUsersRequest]) (*connect.Response[v1.ListUsersResponse], error)
+	// UpdateUserRole changes a user's role. Admin only.
+	UpdateUserRole(context.Context, *connect.Request[v1.UpdateUserRoleRequest]) (*connect.Response[v1.UpdateUserRoleResponse], error)
+	// ResetPassword sets a new password for a user. Admin only.
+	ResetPassword(context.Context, *connect.Request[v1.ResetPasswordRequest]) (*connect.Response[v1.ResetPasswordResponse], error)
+	// DeleteUser removes a user account. Admin only.
+	DeleteUser(context.Context, *connect.Request[v1.DeleteUserRequest]) (*connect.Response[v1.DeleteUserResponse], error)
 }
 
 // NewAuthServiceClient constructs a client for the gastrolog.v1.AuthService service. By default, it
@@ -93,6 +115,36 @@ func NewAuthServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(authServiceMethods.ByName("GetAuthStatus")),
 			connect.WithClientOptions(opts...),
 		),
+		createUser: connect.NewClient[v1.CreateUserRequest, v1.CreateUserResponse](
+			httpClient,
+			baseURL+AuthServiceCreateUserProcedure,
+			connect.WithSchema(authServiceMethods.ByName("CreateUser")),
+			connect.WithClientOptions(opts...),
+		),
+		listUsers: connect.NewClient[v1.ListUsersRequest, v1.ListUsersResponse](
+			httpClient,
+			baseURL+AuthServiceListUsersProcedure,
+			connect.WithSchema(authServiceMethods.ByName("ListUsers")),
+			connect.WithClientOptions(opts...),
+		),
+		updateUserRole: connect.NewClient[v1.UpdateUserRoleRequest, v1.UpdateUserRoleResponse](
+			httpClient,
+			baseURL+AuthServiceUpdateUserRoleProcedure,
+			connect.WithSchema(authServiceMethods.ByName("UpdateUserRole")),
+			connect.WithClientOptions(opts...),
+		),
+		resetPassword: connect.NewClient[v1.ResetPasswordRequest, v1.ResetPasswordResponse](
+			httpClient,
+			baseURL+AuthServiceResetPasswordProcedure,
+			connect.WithSchema(authServiceMethods.ByName("ResetPassword")),
+			connect.WithClientOptions(opts...),
+		),
+		deleteUser: connect.NewClient[v1.DeleteUserRequest, v1.DeleteUserResponse](
+			httpClient,
+			baseURL+AuthServiceDeleteUserProcedure,
+			connect.WithSchema(authServiceMethods.ByName("DeleteUser")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -102,6 +154,11 @@ type authServiceClient struct {
 	login          *connect.Client[v1.LoginRequest, v1.LoginResponse]
 	changePassword *connect.Client[v1.ChangePasswordRequest, v1.ChangePasswordResponse]
 	getAuthStatus  *connect.Client[v1.GetAuthStatusRequest, v1.GetAuthStatusResponse]
+	createUser     *connect.Client[v1.CreateUserRequest, v1.CreateUserResponse]
+	listUsers      *connect.Client[v1.ListUsersRequest, v1.ListUsersResponse]
+	updateUserRole *connect.Client[v1.UpdateUserRoleRequest, v1.UpdateUserRoleResponse]
+	resetPassword  *connect.Client[v1.ResetPasswordRequest, v1.ResetPasswordResponse]
+	deleteUser     *connect.Client[v1.DeleteUserRequest, v1.DeleteUserResponse]
 }
 
 // Register calls gastrolog.v1.AuthService.Register.
@@ -124,10 +181,35 @@ func (c *authServiceClient) GetAuthStatus(ctx context.Context, req *connect.Requ
 	return c.getAuthStatus.CallUnary(ctx, req)
 }
 
+// CreateUser calls gastrolog.v1.AuthService.CreateUser.
+func (c *authServiceClient) CreateUser(ctx context.Context, req *connect.Request[v1.CreateUserRequest]) (*connect.Response[v1.CreateUserResponse], error) {
+	return c.createUser.CallUnary(ctx, req)
+}
+
+// ListUsers calls gastrolog.v1.AuthService.ListUsers.
+func (c *authServiceClient) ListUsers(ctx context.Context, req *connect.Request[v1.ListUsersRequest]) (*connect.Response[v1.ListUsersResponse], error) {
+	return c.listUsers.CallUnary(ctx, req)
+}
+
+// UpdateUserRole calls gastrolog.v1.AuthService.UpdateUserRole.
+func (c *authServiceClient) UpdateUserRole(ctx context.Context, req *connect.Request[v1.UpdateUserRoleRequest]) (*connect.Response[v1.UpdateUserRoleResponse], error) {
+	return c.updateUserRole.CallUnary(ctx, req)
+}
+
+// ResetPassword calls gastrolog.v1.AuthService.ResetPassword.
+func (c *authServiceClient) ResetPassword(ctx context.Context, req *connect.Request[v1.ResetPasswordRequest]) (*connect.Response[v1.ResetPasswordResponse], error) {
+	return c.resetPassword.CallUnary(ctx, req)
+}
+
+// DeleteUser calls gastrolog.v1.AuthService.DeleteUser.
+func (c *authServiceClient) DeleteUser(ctx context.Context, req *connect.Request[v1.DeleteUserRequest]) (*connect.Response[v1.DeleteUserResponse], error) {
+	return c.deleteUser.CallUnary(ctx, req)
+}
+
 // AuthServiceHandler is an implementation of the gastrolog.v1.AuthService service.
 type AuthServiceHandler interface {
-	// Register creates a new user account and returns a token.
-	// The first registered user is automatically assigned the "admin" role.
+	// Register creates the first user account during initial setup.
+	// Returns FailedPrecondition if any users already exist.
 	Register(context.Context, *connect.Request[v1.RegisterRequest]) (*connect.Response[v1.RegisterResponse], error)
 	// Login authenticates a user and returns a token.
 	Login(context.Context, *connect.Request[v1.LoginRequest]) (*connect.Response[v1.LoginResponse], error)
@@ -135,6 +217,16 @@ type AuthServiceHandler interface {
 	ChangePassword(context.Context, *connect.Request[v1.ChangePasswordRequest]) (*connect.Response[v1.ChangePasswordResponse], error)
 	// GetAuthStatus returns whether the system needs initial setup.
 	GetAuthStatus(context.Context, *connect.Request[v1.GetAuthStatusRequest]) (*connect.Response[v1.GetAuthStatusResponse], error)
+	// CreateUser creates a new user account. Admin only.
+	CreateUser(context.Context, *connect.Request[v1.CreateUserRequest]) (*connect.Response[v1.CreateUserResponse], error)
+	// ListUsers returns all user accounts. Admin only.
+	ListUsers(context.Context, *connect.Request[v1.ListUsersRequest]) (*connect.Response[v1.ListUsersResponse], error)
+	// UpdateUserRole changes a user's role. Admin only.
+	UpdateUserRole(context.Context, *connect.Request[v1.UpdateUserRoleRequest]) (*connect.Response[v1.UpdateUserRoleResponse], error)
+	// ResetPassword sets a new password for a user. Admin only.
+	ResetPassword(context.Context, *connect.Request[v1.ResetPasswordRequest]) (*connect.Response[v1.ResetPasswordResponse], error)
+	// DeleteUser removes a user account. Admin only.
+	DeleteUser(context.Context, *connect.Request[v1.DeleteUserRequest]) (*connect.Response[v1.DeleteUserResponse], error)
 }
 
 // NewAuthServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -168,6 +260,36 @@ func NewAuthServiceHandler(svc AuthServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(authServiceMethods.ByName("GetAuthStatus")),
 		connect.WithHandlerOptions(opts...),
 	)
+	authServiceCreateUserHandler := connect.NewUnaryHandler(
+		AuthServiceCreateUserProcedure,
+		svc.CreateUser,
+		connect.WithSchema(authServiceMethods.ByName("CreateUser")),
+		connect.WithHandlerOptions(opts...),
+	)
+	authServiceListUsersHandler := connect.NewUnaryHandler(
+		AuthServiceListUsersProcedure,
+		svc.ListUsers,
+		connect.WithSchema(authServiceMethods.ByName("ListUsers")),
+		connect.WithHandlerOptions(opts...),
+	)
+	authServiceUpdateUserRoleHandler := connect.NewUnaryHandler(
+		AuthServiceUpdateUserRoleProcedure,
+		svc.UpdateUserRole,
+		connect.WithSchema(authServiceMethods.ByName("UpdateUserRole")),
+		connect.WithHandlerOptions(opts...),
+	)
+	authServiceResetPasswordHandler := connect.NewUnaryHandler(
+		AuthServiceResetPasswordProcedure,
+		svc.ResetPassword,
+		connect.WithSchema(authServiceMethods.ByName("ResetPassword")),
+		connect.WithHandlerOptions(opts...),
+	)
+	authServiceDeleteUserHandler := connect.NewUnaryHandler(
+		AuthServiceDeleteUserProcedure,
+		svc.DeleteUser,
+		connect.WithSchema(authServiceMethods.ByName("DeleteUser")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.AuthService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AuthServiceRegisterProcedure:
@@ -178,6 +300,16 @@ func NewAuthServiceHandler(svc AuthServiceHandler, opts ...connect.HandlerOption
 			authServiceChangePasswordHandler.ServeHTTP(w, r)
 		case AuthServiceGetAuthStatusProcedure:
 			authServiceGetAuthStatusHandler.ServeHTTP(w, r)
+		case AuthServiceCreateUserProcedure:
+			authServiceCreateUserHandler.ServeHTTP(w, r)
+		case AuthServiceListUsersProcedure:
+			authServiceListUsersHandler.ServeHTTP(w, r)
+		case AuthServiceUpdateUserRoleProcedure:
+			authServiceUpdateUserRoleHandler.ServeHTTP(w, r)
+		case AuthServiceResetPasswordProcedure:
+			authServiceResetPasswordHandler.ServeHTTP(w, r)
+		case AuthServiceDeleteUserProcedure:
+			authServiceDeleteUserHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -201,4 +333,24 @@ func (UnimplementedAuthServiceHandler) ChangePassword(context.Context, *connect.
 
 func (UnimplementedAuthServiceHandler) GetAuthStatus(context.Context, *connect.Request[v1.GetAuthStatusRequest]) (*connect.Response[v1.GetAuthStatusResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.AuthService.GetAuthStatus is not implemented"))
+}
+
+func (UnimplementedAuthServiceHandler) CreateUser(context.Context, *connect.Request[v1.CreateUserRequest]) (*connect.Response[v1.CreateUserResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.AuthService.CreateUser is not implemented"))
+}
+
+func (UnimplementedAuthServiceHandler) ListUsers(context.Context, *connect.Request[v1.ListUsersRequest]) (*connect.Response[v1.ListUsersResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.AuthService.ListUsers is not implemented"))
+}
+
+func (UnimplementedAuthServiceHandler) UpdateUserRole(context.Context, *connect.Request[v1.UpdateUserRoleRequest]) (*connect.Response[v1.UpdateUserRoleResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.AuthService.UpdateUserRole is not implemented"))
+}
+
+func (UnimplementedAuthServiceHandler) ResetPassword(context.Context, *connect.Request[v1.ResetPasswordRequest]) (*connect.Response[v1.ResetPasswordResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.AuthService.ResetPassword is not implemented"))
+}
+
+func (UnimplementedAuthServiceHandler) DeleteUser(context.Context, *connect.Request[v1.DeleteUserRequest]) (*connect.Response[v1.DeleteUserResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.AuthService.DeleteUser is not implemented"))
 }

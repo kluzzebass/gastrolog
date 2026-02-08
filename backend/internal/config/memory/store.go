@@ -353,6 +353,17 @@ func (s *Store) GetUser(ctx context.Context, username string) (*config.User, err
 	return &u, nil
 }
 
+func (s *Store) ListUsers(ctx context.Context) ([]config.User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	users := make([]config.User, 0, len(s.users))
+	for _, u := range s.users {
+		users = append(users, u)
+	}
+	return users, nil
+}
+
 func (s *Store) UpdatePassword(ctx context.Context, username string, passwordHash string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -364,6 +375,31 @@ func (s *Store) UpdatePassword(ctx context.Context, username string, passwordHas
 	u.PasswordHash = passwordHash
 	u.UpdatedAt = time.Now().UTC()
 	s.users[username] = u
+	return nil
+}
+
+func (s *Store) UpdateUserRole(ctx context.Context, username string, role string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	u, ok := s.users[username]
+	if !ok {
+		return fmt.Errorf("user %q not found", username)
+	}
+	u.Role = role
+	u.UpdatedAt = time.Now().UTC()
+	s.users[username] = u
+	return nil
+}
+
+func (s *Store) DeleteUser(ctx context.Context, username string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.users[username]; !ok {
+		return fmt.Errorf("user %q not found", username)
+	}
+	delete(s.users, username)
 	return nil
 }
 

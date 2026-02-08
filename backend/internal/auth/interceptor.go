@@ -36,10 +36,15 @@ func NewAuthInterceptor(tokens *TokenService, counter UserCounter) *AuthIntercep
 			gastrologv1connect.LifecycleServiceHealthProcedure:   true,
 			gastrologv1connect.AuthServiceGetAuthStatusProcedure: true,
 			gastrologv1connect.AuthServiceLoginProcedure:         true,
+			gastrologv1connect.AuthServiceRegisterProcedure:      true, // self-guards after first user
 		},
 		admin: map[string]bool{
-			// Auth (admin-only after first user)
-			gastrologv1connect.AuthServiceRegisterProcedure: true,
+			// User management (admin-only)
+			gastrologv1connect.AuthServiceCreateUserProcedure:     true,
+			gastrologv1connect.AuthServiceListUsersProcedure:      true,
+			gastrologv1connect.AuthServiceUpdateUserRoleProcedure: true,
+			gastrologv1connect.AuthServiceResetPasswordProcedure:  true,
+			gastrologv1connect.AuthServiceDeleteUserProcedure:     true,
 			// Lifecycle
 			gastrologv1connect.LifecycleServiceShutdownProcedure: true,
 			// StoreService
