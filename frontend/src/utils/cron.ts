@@ -1,5 +1,6 @@
 // Standard 5-field cron: minute hour day-of-month month day-of-week
-// Ranges: 0-59, 0-23, 1-31, 1-12, 0-7 (0 and 7 = Sunday)
+// Ranges: 0-59, 0-23, 1-31, 1-12, 0-6 (0 = Sunday)
+// Note: gocron uses 0-6 for day-of-week (not 0-7).
 
 const FIELD_NAMES = ["minute", "hour", "day-of-month", "month", "day-of-week"];
 const FIELD_RANGES: [number, number][] = [
@@ -7,16 +8,32 @@ const FIELD_RANGES: [number, number][] = [
   [0, 23],
   [1, 31],
   [1, 12],
-  [0, 7],
+  [0, 6],
 ];
 
 const MONTH_NAMES: Record<string, number> = {
-  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
-  jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+  jan: 1,
+  feb: 2,
+  mar: 3,
+  apr: 4,
+  may: 5,
+  jun: 6,
+  jul: 7,
+  aug: 8,
+  sep: 9,
+  oct: 10,
+  nov: 11,
+  dec: 12,
 };
 
 const DOW_NAMES: Record<string, number> = {
-  sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6,
+  sun: 0,
+  mon: 1,
+  tue: 2,
+  wed: 3,
+  thu: 4,
+  fri: 5,
+  sat: 6,
 };
 
 function validateField(
@@ -50,7 +67,8 @@ function validateField(
     if (rangeMatch) {
       const lo = parseFieldValue(rangeMatch[1]!, min, max, names);
       const hi = parseFieldValue(rangeMatch[2]!, min, max, names);
-      if (lo === null) return `invalid range start in ${name}: ${rangeMatch[1]}`;
+      if (lo === null)
+        return `invalid range start in ${name}: ${rangeMatch[1]}`;
       if (hi === null) return `invalid range end in ${name}: ${rangeMatch[2]}`;
       if (lo > hi) return `invalid range in ${name}: start > end`;
       continue;
@@ -106,34 +124,70 @@ export function describeCron(expr: string): string {
   if (fields.length !== 5) return "";
 
   const [minute, hour, dom, month, dow] = fields as [
-    string, string, string, string, string,
+    string,
+    string,
+    string,
+    string,
+    string,
   ];
   const allStar = (f: string) => f === "*";
 
   // Every minute.
-  if (allStar(minute) && allStar(hour) && allStar(dom) && allStar(month) && allStar(dow)) {
+  if (
+    allStar(minute) &&
+    allStar(hour) &&
+    allStar(dom) &&
+    allStar(month) &&
+    allStar(dow)
+  ) {
     return "Every minute";
   }
 
   // Every N minutes.
-  if (minute.startsWith("*/") && allStar(hour) && allStar(dom) && allStar(month) && allStar(dow)) {
+  if (
+    minute.startsWith("*/") &&
+    allStar(hour) &&
+    allStar(dom) &&
+    allStar(month) &&
+    allStar(dow)
+  ) {
     const n = minute.slice(2);
     return `Every ${n} minute${n === "1" ? "" : "s"}`;
   }
 
   // Every hour at minute N.
-  if (/^\d+$/.test(minute) && allStar(hour) && allStar(dom) && allStar(month) && allStar(dow)) {
-    return minute === "0" ? "Every hour, on the hour" : `Every hour at minute ${minute}`;
+  if (
+    /^\d+$/.test(minute) &&
+    allStar(hour) &&
+    allStar(dom) &&
+    allStar(month) &&
+    allStar(dow)
+  ) {
+    return minute === "0"
+      ? "Every hour, on the hour"
+      : `Every hour at minute ${minute}`;
   }
 
   // Every N hours.
-  if (minute === "0" && hour.startsWith("*/") && allStar(dom) && allStar(month) && allStar(dow)) {
+  if (
+    minute === "0" &&
+    hour.startsWith("*/") &&
+    allStar(dom) &&
+    allStar(month) &&
+    allStar(dow)
+  ) {
     const n = hour.slice(2);
     return `Every ${n} hour${n === "1" ? "" : "s"}`;
   }
 
   // Daily at specific time.
-  if (/^\d+$/.test(minute) && /^\d+$/.test(hour) && allStar(dom) && allStar(month) && allStar(dow)) {
+  if (
+    /^\d+$/.test(minute) &&
+    /^\d+$/.test(hour) &&
+    allStar(dom) &&
+    allStar(month) &&
+    allStar(dow)
+  ) {
     const h = parseInt(hour, 10);
     const m = parseInt(minute, 10);
     if (h === 0 && m === 0) return "Daily at midnight";
@@ -143,10 +197,24 @@ export function describeCron(expr: string): string {
   }
 
   // Weekly.
-  if (/^\d+$/.test(minute) && /^\d+$/.test(hour) && allStar(dom) && allStar(month) && /^\d+$/.test(dow)) {
-    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  if (
+    /^\d+$/.test(minute) &&
+    /^\d+$/.test(hour) &&
+    allStar(dom) &&
+    allStar(month) &&
+    /^\d+$/.test(dow)
+  ) {
+    const days = [
+      "Sunday",
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday",
+    ];
     const d = parseInt(dow, 10);
-    const dayName = days[d === 7 ? 0 : d] ?? `day ${d}`;
+    const dayName = days[d] ?? `day ${d}`;
     const h = parseInt(hour, 10);
     const m = parseInt(minute, 10);
     const time = `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
@@ -154,7 +222,13 @@ export function describeCron(expr: string): string {
   }
 
   // Monthly.
-  if (/^\d+$/.test(minute) && /^\d+$/.test(hour) && /^\d+$/.test(dom) && allStar(month) && allStar(dow)) {
+  if (
+    /^\d+$/.test(minute) &&
+    /^\d+$/.test(hour) &&
+    /^\d+$/.test(dom) &&
+    allStar(month) &&
+    allStar(dow)
+  ) {
     const h = parseInt(hour, 10);
     const m = parseInt(minute, 10);
     const time = `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
