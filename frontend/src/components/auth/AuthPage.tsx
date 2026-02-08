@@ -72,7 +72,7 @@ export function AuthPage({ mode }: AuthPageProps) {
       navigate({ to: "/search", search: { q: "" } });
     } catch (err) {
       if (err instanceof ConnectError) {
-        setError(err.message);
+        setError(err.rawMessage);
       } else {
         setError("An unexpected error occurred.");
       }
@@ -81,11 +81,7 @@ export function AuthPage({ mode }: AuthPageProps) {
 
   // While loading auth status, show nothing (avoids flicker).
   if (authStatus.isLoading) {
-    return (
-      <div
-        className={`h-full ${c("bg-ink", "bg-light-bg")}`}
-      />
-    );
+    return <div className={`h-full ${c("bg-ink", "bg-light-bg")}`} />;
   }
 
   return (
@@ -205,10 +201,7 @@ export function AuthPage({ mode }: AuthPageProps) {
               isPending
                 ? "opacity-60 cursor-not-allowed"
                 : "hover:brightness-110 active:scale-[0.98]"
-            } ${c(
-              "bg-copper text-ink",
-              "bg-copper text-white",
-            )}`}
+            } ${c("bg-copper text-ink", "bg-copper text-white")}`}
           >
             {isPending && (
               <svg
