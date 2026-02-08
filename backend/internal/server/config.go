@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -626,6 +627,52 @@ func protoToStoreConfig(p *apiv1.StoreConfig) config.StoreConfig {
 		cfg.Retention = config.StringPtr(p.Retention)
 	}
 	return cfg
+}
+
+// GetServerConfig returns the server-level configuration.
+func (s *ConfigServer) GetServerConfig(
+	ctx context.Context,
+	req *connect.Request[apiv1.GetServerConfigRequest],
+) (*connect.Response[apiv1.GetServerConfigResponse], error) {
+	resp := &apiv1.GetServerConfigResponse{}
+
+	raw, err := s.cfgStore.GetSetting(ctx, "server")
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if raw != nil {
+		var sc config.ServerConfig
+		if err := json.Unmarshal([]byte(*raw), &sc); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("parse server config: %w", err))
+		}
+		resp.TokenDuration = sc.Auth.TokenDuration
+		resp.JwtSecret = sc.Auth.JWTSecret
+	}
+
+	return connect.NewResponse(resp), nil
+}
+
+// PutServerConfig updates the server-level configuration.
+func (s *ConfigServer) PutServerConfig(
+	ctx context.Context,
+	req *connect.Request[apiv1.PutServerConfigRequest],
+) (*connect.Response[apiv1.PutServerConfigResponse], error) {
+	sc := config.ServerConfig{
+		Auth: config.AuthConfig{
+			JWTSecret:     req.Msg.JwtSecret,
+			TokenDuration: req.Msg.TokenDuration,
+		},
+	}
+
+	data, err := json.Marshal(sc)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if err := s.cfgStore.PutSetting(ctx, "server", string(data)); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	return connect.NewResponse(&apiv1.PutServerConfigResponse{}), nil
 }
 
 // formatBytes formats a byte count as a human-readable string.

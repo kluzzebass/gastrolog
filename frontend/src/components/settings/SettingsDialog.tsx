@@ -1,9 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { StoresSettings } from "./StoresSettings";
 import { IngestersSettings } from "./IngestersSettings";
 import { FiltersSettings } from "./FiltersSettings";
 import { PoliciesSettings } from "./PoliciesSettings";
 import { RetentionPoliciesSettings } from "./RetentionPoliciesSettings";
+import { useServerConfig, usePutServerConfig } from "../../api/hooks/useConfig";
+import { useToast } from "../Toast";
+import { FormField, TextInput } from "./FormField";
 
 export type SettingsTab =
   | "service"
@@ -119,6 +122,43 @@ export function SettingsDialog({
 
 function ServiceSettings({ dark }: { dark: boolean }) {
   const c = (d: string, l: string) => (dark ? d : l);
+  const { data, isLoading } = useServerConfig();
+  const putConfig = usePutServerConfig();
+  const { addToast } = useToast();
+
+  const [tokenDuration, setTokenDuration] = useState("");
+  const [jwtSecret, setJwtSecret] = useState("");
+  const [initialized, setInitialized] = useState(false);
+
+  useEffect(() => {
+    if (data && !initialized) {
+      setTokenDuration(data.tokenDuration);
+      setJwtSecret(data.jwtSecret);
+      setInitialized(true);
+    }
+  }, [data, initialized]);
+
+  const dirty =
+    initialized &&
+    data &&
+    (tokenDuration !== data.tokenDuration || jwtSecret !== data.jwtSecret);
+
+  const handleSave = async () => {
+    try {
+      await putConfig.mutateAsync({ tokenDuration, jwtSecret });
+      addToast("Server configuration updated", "info");
+    } catch (err: any) {
+      addToast(err.message ?? "Failed to update server configuration", "error");
+    }
+  };
+
+  const handleReset = () => {
+    if (data) {
+      setTokenDuration(data.tokenDuration);
+      setJwtSecret(data.jwtSecret);
+    }
+  };
+
   return (
     <div>
       <div className="flex items-center justify-between mb-5">
@@ -128,11 +168,65 @@ function ServiceSettings({ dark }: { dark: boolean }) {
           Service
         </h2>
       </div>
-      <div
-        className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-      >
-        No service-level configuration available yet.
-      </div>
+
+      {isLoading ? (
+        <div
+          className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+        >
+          Loading...
+        </div>
+      ) : (
+        <div className="flex flex-col gap-5 max-w-lg">
+          <FormField
+            label="Token Duration"
+            description="How long authentication tokens remain valid. Use Go duration syntax, e.g. 168h, 720h, 24h."
+            dark={dark}
+          >
+            <TextInput
+              value={tokenDuration}
+              onChange={setTokenDuration}
+              placeholder="168h"
+              dark={dark}
+              mono
+            />
+          </FormField>
+
+          <FormField
+            label="JWT Secret"
+            description="The signing key used for authentication tokens. Changing this will invalidate all existing sessions."
+            dark={dark}
+          >
+            <TextInput
+              value={jwtSecret}
+              onChange={setJwtSecret}
+              placeholder=""
+              dark={dark}
+              mono
+            />
+          </FormField>
+
+          <div className="flex gap-2 mt-1">
+            <button
+              onClick={handleSave}
+              disabled={!dirty || putConfig.isPending}
+              className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
+            >
+              {putConfig.isPending ? "Saving..." : "Save"}
+            </button>
+            {dirty && (
+              <button
+                onClick={handleReset}
+                className={`px-3 py-1.5 text-[0.8em] rounded transition-colors ${c(
+                  "text-text-muted hover:text-text-bright hover:bg-ink-hover",
+                  "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
+                )}`}
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

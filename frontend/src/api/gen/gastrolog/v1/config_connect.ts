@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteStoreRequest, DeleteStoreResponse, GetConfigRequest, GetConfigResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, ListIngestersRequest, ListIngestersResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutStoreRequest, PutStoreResponse } from "./config_pb.js";
+import { DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteStoreRequest, DeleteStoreResponse, GetConfigRequest, GetConfigResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetServerConfigRequest, GetServerConfigResponse, ListIngestersRequest, ListIngestersResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutServerConfigRequest, PutServerConfigResponse, PutStoreRequest, PutStoreResponse } from "./config_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -155,6 +155,28 @@ export const ConfigService = {
       name: "DeleteIngester",
       I: DeleteIngesterRequest,
       O: DeleteIngesterResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * GetServerConfig returns the server-level configuration.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.GetServerConfig
+     */
+    getServerConfig: {
+      name: "GetServerConfig",
+      I: GetServerConfigRequest,
+      O: GetServerConfigResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * PutServerConfig updates the server-level configuration.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.PutServerConfig
+     */
+    putServerConfig: {
+      name: "PutServerConfig",
+      I: PutServerConfigRequest,
+      O: PutServerConfigResponse,
       kind: MethodKind.Unary,
     },
   }

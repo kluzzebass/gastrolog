@@ -69,6 +69,8 @@ func NewAuthInterceptor(tokens *TokenService, counter UserCounter) *AuthIntercep
 			gastrologv1connect.ConfigServiceDeleteStoreProcedure:           true,
 			gastrologv1connect.ConfigServicePutIngesterProcedure:           true,
 			gastrologv1connect.ConfigServiceDeleteIngesterProcedure:        true,
+			gastrologv1connect.ConfigServiceGetServerConfigProcedure:       true,
+			gastrologv1connect.ConfigServicePutServerConfigProcedure:       true,
 		},
 	}
 }

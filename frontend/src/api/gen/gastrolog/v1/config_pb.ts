@@ -1268,3 +1268,151 @@ export class DeleteIngesterResponse extends Message<DeleteIngesterResponse> {
   }
 }
 
+/**
+ * @generated from message gastrolog.v1.GetServerConfigRequest
+ */
+export class GetServerConfigRequest extends Message<GetServerConfigRequest> {
+  constructor(data?: PartialMessage<GetServerConfigRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetServerConfigRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetServerConfigRequest {
+    return new GetServerConfigRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetServerConfigRequest {
+    return new GetServerConfigRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetServerConfigRequest {
+    return new GetServerConfigRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetServerConfigRequest | PlainMessage<GetServerConfigRequest> | undefined, b: GetServerConfigRequest | PlainMessage<GetServerConfigRequest> | undefined): boolean {
+    return proto3.util.equals(GetServerConfigRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.GetServerConfigResponse
+ */
+export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
+  /**
+   * @generated from field: string token_duration = 1;
+   */
+  tokenDuration = "";
+
+  /**
+   * @generated from field: string jwt_secret = 2;
+   */
+  jwtSecret = "";
+
+  constructor(data?: PartialMessage<GetServerConfigResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetServerConfigResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "jwt_secret", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetServerConfigResponse {
+    return new GetServerConfigResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetServerConfigResponse {
+    return new GetServerConfigResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetServerConfigResponse {
+    return new GetServerConfigResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetServerConfigResponse | PlainMessage<GetServerConfigResponse> | undefined, b: GetServerConfigResponse | PlainMessage<GetServerConfigResponse> | undefined): boolean {
+    return proto3.util.equals(GetServerConfigResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutServerConfigRequest
+ */
+export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
+  /**
+   * @generated from field: string token_duration = 1;
+   */
+  tokenDuration = "";
+
+  /**
+   * @generated from field: string jwt_secret = 2;
+   */
+  jwtSecret = "";
+
+  constructor(data?: PartialMessage<PutServerConfigRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutServerConfigRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "jwt_secret", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutServerConfigRequest {
+    return new PutServerConfigRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutServerConfigRequest {
+    return new PutServerConfigRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutServerConfigRequest {
+    return new PutServerConfigRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutServerConfigRequest | PlainMessage<PutServerConfigRequest> | undefined, b: PutServerConfigRequest | PlainMessage<PutServerConfigRequest> | undefined): boolean {
+    return proto3.util.equals(PutServerConfigRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutServerConfigResponse
+ */
+export class PutServerConfigResponse extends Message<PutServerConfigResponse> {
+  constructor(data?: PartialMessage<PutServerConfigResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutServerConfigResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutServerConfigResponse {
+    return new PutServerConfigResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutServerConfigResponse {
+    return new PutServerConfigResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutServerConfigResponse {
+    return new PutServerConfigResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutServerConfigResponse | PlainMessage<PutServerConfigResponse> | undefined, b: PutServerConfigResponse | PlainMessage<PutServerConfigResponse> | undefined): boolean {
+    return proto3.util.equals(PutServerConfigResponse, a, b);
+  }
+}
+

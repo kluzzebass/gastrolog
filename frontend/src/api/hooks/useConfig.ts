@@ -174,3 +174,26 @@ export function useDeleteIngester() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["config"] }),
   });
 }
+
+export function useServerConfig() {
+  return useQuery({
+    queryKey: ["serverConfig"],
+    queryFn: async () => {
+      const response = await configClient.getServerConfig({});
+      return response;
+    },
+  });
+}
+
+export function usePutServerConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { tokenDuration: string; jwtSecret: string }) => {
+      await configClient.putServerConfig({
+        tokenDuration: args.tokenDuration,
+        jwtSecret: args.jwtSecret,
+      });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["serverConfig"] }),
+  });
+}

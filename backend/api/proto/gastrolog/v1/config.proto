@@ -44,6 +44,12 @@ service ConfigService {
 
   // DeleteIngester removes an ingester.
   rpc DeleteIngester(DeleteIngesterRequest) returns (DeleteIngesterResponse);
+
+  // GetServerConfig returns the server-level configuration.
+  rpc GetServerConfig(GetServerConfigRequest) returns (GetServerConfigResponse);
+
+  // PutServerConfig updates the server-level configuration.
+  rpc PutServerConfig(PutServerConfigRequest) returns (PutServerConfigResponse);
 }
 
 message GetConfigRequest {}
@@ -174,3 +180,17 @@ message DeleteIngesterRequest {
 }
 
 message DeleteIngesterResponse {}
+
+message GetServerConfigRequest {}
+
+message GetServerConfigResponse {
+  string token_duration = 1;
+  string jwt_secret = 2;
+}
+
+message PutServerConfigRequest {
+  string token_duration = 1;
+  string jwt_secret = 2;
+}
+
+message PutServerConfigResponse {}
