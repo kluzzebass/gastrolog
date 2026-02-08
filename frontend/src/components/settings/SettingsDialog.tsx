@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { StoresSettings } from "./StoresSettings";
 import { IngestersSettings } from "./IngestersSettings";
 import { FiltersSettings } from "./FiltersSettings";
 import { PoliciesSettings } from "./PoliciesSettings";
 import { RetentionPoliciesSettings } from "./RetentionPoliciesSettings";
+import { UsersSettings } from "./UsersSettings";
 import { useServerConfig, usePutServerConfig } from "../../api/hooks/useConfig";
 import { useToast } from "../Toast";
 import { FormField, TextInput } from "./FormField";
@@ -14,21 +15,27 @@ export type SettingsTab =
   | "ingesters"
   | "filters"
   | "policies"
-  | "retention";
+  | "retention"
+  | "users";
 
 interface SettingsDialogProps {
   dark: boolean;
   tab: SettingsTab;
   onTabChange: (tab: SettingsTab) => void;
   onClose: () => void;
+  isAdmin?: boolean;
 }
 
-const tabs: {
+type TabDef = {
   id: SettingsTab;
   label: string;
   icon: (p: { className?: string }) => React.ReactNode;
-}[] = [
+  adminOnly?: boolean;
+};
+
+const allTabs: TabDef[] = [
   { id: "service", label: "Service", icon: ServiceIcon },
+  { id: "users", label: "Users", icon: UsersIcon, adminOnly: true },
   { id: "ingesters", label: "Ingesters", icon: IngesterIcon },
   { id: "filters", label: "Filters", icon: FilterIcon },
   { id: "policies", label: "Rotation Policies", icon: PolicyIcon },
@@ -41,8 +48,13 @@ export function SettingsDialog({
   tab,
   onTabChange,
   onClose,
+  isAdmin,
 }: SettingsDialogProps) {
   const c = (d: string, l: string) => (dark ? d : l);
+  const tabs = useMemo(
+    () => allTabs.filter((t) => !t.adminOnly || isAdmin),
+    [isAdmin],
+  );
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -109,6 +121,7 @@ export function SettingsDialog({
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-5">
           {tab === "service" && <ServiceSettings dark={dark} />}
+          {tab === "users" && <UsersSettings dark={dark} />}
           {tab === "ingesters" && <IngestersSettings dark={dark} />}
           {tab === "filters" && <FiltersSettings dark={dark} />}
           {tab === "policies" && <PoliciesSettings dark={dark} />}
@@ -353,6 +366,25 @@ function PolicyIcon({ className }: { className?: string }) {
       <path d="M21 12a9 9 0 1 1-9-9" />
       <path d="M21 3v6h-6" />
       <path d="M21 3l-9 9" />
+    </svg>
+  );
+}
+
+function UsersIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
     </svg>
   );
 }

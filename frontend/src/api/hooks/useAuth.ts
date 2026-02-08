@@ -88,3 +88,55 @@ export function useLogout() {
     navigate({ to: "/login" });
   }, [qc, navigate]);
 }
+
+export function useListUsers() {
+  return useQuery({
+    queryKey: ["users"],
+    queryFn: async () => {
+      const res = await authClient.listUsers({});
+      return res.users;
+    },
+  });
+}
+
+export function useCreateUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      username: string;
+      password: string;
+      role: string;
+    }) => {
+      return authClient.createUser(args);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
+  });
+}
+
+export function useResetPassword() {
+  return useMutation({
+    mutationFn: async (args: { username: string; newPassword: string }) => {
+      return authClient.resetPassword(args);
+    },
+  });
+}
+
+export function useUpdateUserRole() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { username: string; role: string }) => {
+      return authClient.updateUserRole(args);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
+  });
+}
+
+export function useDeleteUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (username: string) => {
+      return authClient.deleteUser({ username });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
+  });
+}

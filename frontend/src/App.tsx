@@ -1282,6 +1282,7 @@ function AppContent() {
               tab={settingsTab}
               onTabChange={setSettingsTab}
               onClose={() => setShowSettings(false)}
+              isAdmin={currentUser?.role === "admin"}
             />
           )}
 
