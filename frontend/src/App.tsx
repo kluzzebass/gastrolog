@@ -1398,6 +1398,7 @@ function AppContent() {
               contextBefore={contextBefore}
               contextAfter={contextAfter}
               contextLoading={contextLoading}
+              contextReversed={isReversed}
               onContextRecordSelect={(rec) => {
                 const ts = rec.writeTs?.toDate();
                 if (ts) {

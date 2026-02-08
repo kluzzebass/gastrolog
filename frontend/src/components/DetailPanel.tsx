@@ -19,6 +19,7 @@ export function DetailPanelContent({
   contextBefore,
   contextAfter,
   contextLoading,
+  contextReversed,
   onContextRecordSelect,
 }: {
   record: ProtoRecord;
@@ -30,6 +31,7 @@ export function DetailPanelContent({
   contextBefore?: ProtoRecord[];
   contextAfter?: ProtoRecord[];
   contextLoading?: boolean;
+  contextReversed?: boolean;
   onContextRecordSelect?: (record: ProtoRecord) => void;
 }) {
   const c = (d: string, l: string) => (dark ? d : l);
@@ -226,42 +228,56 @@ export function DetailPanelContent({
           <div
             className={`rounded overflow-hidden border ${c("border-ink-border-subtle bg-ink", "border-light-border-subtle bg-light-bg")}`}
           >
-            {contextBefore?.map((rec, i) => (
-              <ContextRecord
-                key={`before-${i}`}
-                record={rec}
-                isAnchor={false}
-                dark={dark}
-                onSelect={
-                  onContextRecordSelect
-                    ? () => onContextRecordSelect(rec)
-                    : undefined
-                }
-              />
-            ))}
-            <ContextRecord
-              record={record}
-              isAnchor={true}
-              dark={dark}
-              onSelect={
-                onContextRecordSelect
-                  ? () => onContextRecordSelect(record)
-                  : undefined
+            {(() => {
+              const makeList = (
+                recs: ProtoRecord[] | undefined,
+                prefix: string,
+              ) =>
+                recs?.map((rec, i) => (
+                  <ContextRecord
+                    key={`${prefix}-${i}`}
+                    record={rec}
+                    isAnchor={false}
+                    dark={dark}
+                    onSelect={
+                      onContextRecordSelect
+                        ? () => onContextRecordSelect(rec)
+                        : undefined
+                    }
+                  />
+                ));
+              const anchor = (
+                <ContextRecord
+                  key="anchor"
+                  record={record}
+                  isAnchor={true}
+                  dark={dark}
+                  onSelect={
+                    onContextRecordSelect
+                      ? () => onContextRecordSelect(record)
+                      : undefined
+                  }
+                />
+              );
+              // Reversed (newest first): after (reversed), anchor, before (reversed)
+              // Forward (oldest first): before, anchor, after
+              if (contextReversed) {
+                return (
+                  <>
+                    {makeList(contextAfter?.slice().reverse(), "after")}
+                    {anchor}
+                    {makeList(contextBefore?.slice().reverse(), "before")}
+                  </>
+                );
               }
-            />
-            {contextAfter?.map((rec, i) => (
-              <ContextRecord
-                key={`after-${i}`}
-                record={rec}
-                isAnchor={false}
-                dark={dark}
-                onSelect={
-                  onContextRecordSelect
-                    ? () => onContextRecordSelect(rec)
-                    : undefined
-                }
-              />
-            ))}
+              return (
+                <>
+                  {makeList(contextBefore, "before")}
+                  {anchor}
+                  {makeList(contextAfter, "after")}
+                </>
+              );
+            })()}
           </div>
         ) : (
           <div
