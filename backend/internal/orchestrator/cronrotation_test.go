@@ -44,7 +44,7 @@ func (f *cronFakeChunkManager) SetRotationPolicy(policy chunk.RotationPolicy) {}
 
 func newTestCronManager(t *testing.T) *cronRotationManager {
 	t.Helper()
-	sched, err := newScheduler(slog.Default())
+	sched, err := newScheduler(slog.Default(), 4)
 	if err != nil {
 		t.Fatal(err)
 	}

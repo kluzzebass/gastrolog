@@ -1,6 +1,8 @@
 package orchestrator
 
 import (
+	"context"
+	"fmt"
 	"gastrolog/internal/chunk"
 )
 
@@ -80,21 +82,18 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 	return nil
 }
 
-// scheduleIndexBuild triggers an asynchronous index build for the given chunk.
-// The IndexManager handles deduplication of concurrent builds.
-//
-// Goroutine lifecycle:
-//   - Tracked via indexWg for graceful shutdown
-//   - Uses indexCtx which is initialized in New() and lives for orchestrator lifetime
-//   - Builds are bounded (one per sealed chunk)
-//   - IndexManager deduplicates concurrent builds for the same chunk
+// scheduleIndexBuild triggers an asynchronous index build for the given chunk
+// via the shared scheduler. The build is visible in ScheduledJobs() while running
+// and subject to the scheduler's concurrency limit.
+// The IndexManager handles deduplication of concurrent builds for the same chunk.
 func (o *Orchestrator) scheduleIndexBuild(registryKey string, chunkID chunk.ChunkID) {
 	im, ok := o.indexes[registryKey]
 	if !ok {
 		return
 	}
 
-	o.indexWg.Go(func() {
-		_ = im.BuildIndexes(o.indexCtx, chunkID)
-	})
+	name := fmt.Sprintf("index-build:%s:%s", registryKey, chunkID)
+	if err := o.scheduler.RunOnce(name, im.BuildIndexes, context.Background(), chunkID); err != nil {
+		o.logger.Warn("failed to schedule index build", "name", name, "error", err)
+	}
 }

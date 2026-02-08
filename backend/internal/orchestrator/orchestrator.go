@@ -88,11 +88,6 @@ type Orchestrator struct {
 	ingesterWg   sync.WaitGroup // tracks ingester goroutines
 	ingestLoopWg sync.WaitGroup // tracks ingest loop goroutine
 
-	// Index build lifecycle.
-	indexCtx    context.Context
-	indexCancel context.CancelFunc
-	indexWg     sync.WaitGroup
-
 	// Retention runners (keyed by store ID, invoked by the shared scheduler).
 	retention map[string]*retentionRunner
 
@@ -116,6 +111,10 @@ type Config struct {
 	// Defaults to 1000 if not set.
 	IngestChannelSize int
 
+	// MaxConcurrentJobs limits how many scheduler jobs (index builds,
+	// cron rotation, retention) can run in parallel. Defaults to 4.
+	MaxConcurrentJobs int
+
 	// Now returns the current time. Defaults to time.Now.
 	Now func() time.Time
 
@@ -133,14 +132,10 @@ func New(cfg Config) *Orchestrator {
 		cfg.Now = time.Now
 	}
 
-	// Initialize index build context for standalone Ingest() calls.
-	// This is replaced with a fresh context if Start() is called.
-	indexCtx, indexCancel := context.WithCancel(context.Background())
-
 	// Scope logger with component identity.
 	logger := logging.Default(cfg.Logger).With("component", "orchestrator")
 
-	sched, err := newScheduler(logger)
+	sched, err := newScheduler(logger, cfg.MaxConcurrentJobs)
 	if err != nil {
 		// This should never fail in practice (just creates a scheduler).
 		panic(fmt.Sprintf("create scheduler: %v", err))
@@ -157,8 +152,6 @@ func New(cfg Config) *Orchestrator {
 		cronRotation:    newCronRotationManager(sched, logger),
 		ingestSize:      cfg.IngestChannelSize,
 		now:             cfg.Now,
-		indexCtx:        indexCtx,
-		indexCancel:     indexCancel,
 		logger:          logger,
 	}
 }

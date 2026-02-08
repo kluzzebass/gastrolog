@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-co-op/gocron/v2"
+	"github.com/google/uuid"
 )
 
 // JobInfo describes a registered scheduled job for external inspection.
@@ -29,17 +30,26 @@ type Scheduler struct {
 	logger    *slog.Logger
 }
 
-func newScheduler(logger *slog.Logger) (*Scheduler, error) {
-	s, err := gocron.NewScheduler()
+func newScheduler(logger *slog.Logger, maxConcurrent int) (*Scheduler, error) {
+	if maxConcurrent <= 0 {
+		maxConcurrent = 4
+	}
+	s, err := gocron.NewScheduler(
+		gocron.WithLimitConcurrentJobs(uint(maxConcurrent), gocron.LimitModeWait),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("create cron scheduler: %w", err)
 	}
-	return &Scheduler{
+	sched := &Scheduler{
 		scheduler: s,
 		jobs:      make(map[string]gocron.Job),
 		schedules: make(map[string]string),
 		logger:    logger,
-	}, nil
+	}
+	// Start immediately so RunOnce jobs execute even without explicit Start().
+	// Cron jobs added later will begin executing as soon as they're registered.
+	s.Start()
+	return sched, nil
 }
 
 // AddJob registers a named cron job. The name must be unique across all subsystems.
@@ -122,10 +132,46 @@ func (s *Scheduler) ListJobs() []JobInfo {
 	return infos
 }
 
-// Start begins executing all registered jobs.
-func (s *Scheduler) Start() {
-	s.scheduler.Start()
-	s.logger.Info("scheduler started", "jobs", len(s.jobs))
+// Start is a no-op — the scheduler starts eagerly at creation time so that
+// RunOnce jobs can execute without requiring an explicit Start() call.
+// Retained for API compatibility with the orchestrator lifecycle.
+func (s *Scheduler) Start() {}
+
+// RunOnce schedules a one-time job that runs immediately. The job is
+// automatically removed from the tracking maps after completion.
+func (s *Scheduler) RunOnce(name string, taskFn any, args ...any) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	j, err := s.scheduler.NewJob(
+		gocron.OneTimeJob(gocron.OneTimeJobStartImmediately()),
+		gocron.NewTask(taskFn, args...),
+		gocron.WithName(name),
+		gocron.WithEventListeners(
+			gocron.AfterJobRuns(func(_ uuid.UUID, jobName string) {
+				s.removeCompleted(jobName)
+			}),
+			gocron.AfterJobRunsWithError(func(_ uuid.UUID, jobName string, _ error) {
+				s.removeCompleted(jobName)
+			}),
+		),
+	)
+	if err != nil {
+		return fmt.Errorf("create one-time job %s: %w", name, err)
+	}
+
+	s.jobs[name] = j
+	s.schedules[name] = "once"
+	s.logger.Info("one-time job scheduled", "name", name)
+	return nil
+}
+
+// removeCompleted removes a finished one-time job from the tracking maps.
+func (s *Scheduler) removeCompleted(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.jobs, name)
+	delete(s.schedules, name)
 }
 
 // Stop shuts down the scheduler and waits for running jobs to finish.

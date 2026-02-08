@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 
 	"gastrolog/internal/chunk"
 )
@@ -23,9 +24,6 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	o.cancel = cancel
 	o.done = make(chan struct{})
 	o.running = true
-
-	// Create fresh index context for this run cycle.
-	o.indexCtx, o.indexCancel = context.WithCancel(context.Background())
 
 	// Create ingest channel.
 	o.ingestCh = make(chan IngestMessage, o.ingestSize)
@@ -66,7 +64,6 @@ func (o *Orchestrator) Stop() error {
 		return ErrNotRunning
 	}
 	cancel := o.cancel
-	indexCancel := o.indexCancel
 	ingestCh := o.ingestCh
 	o.mu.Unlock()
 
@@ -80,9 +77,6 @@ func (o *Orchestrator) Stop() error {
 	// Cancel main context (for ingest loop).
 	cancel()
 
-	// Cancel in-flight index builds.
-	indexCancel()
-
 	// Wait for ingesters to exit, then close the ingest channel.
 	o.ingesterWg.Wait()
 	close(ingestCh)
@@ -90,10 +84,8 @@ func (o *Orchestrator) Stop() error {
 	// Wait for ingest loop to finish.
 	o.ingestLoopWg.Wait()
 
-	// Wait for index builds to exit.
-	o.indexWg.Wait()
-
-	// Stop shared scheduler (stops retention sweeps, cron rotation, etc.).
+	// Stop shared scheduler — waits for running jobs (index builds,
+	// cron rotation, retention) to finish.
 	o.scheduler.Stop()
 
 	o.mu.Lock()
@@ -101,8 +93,6 @@ func (o *Orchestrator) Stop() error {
 	o.cancel = nil
 	o.done = nil
 	o.ingestCh = nil
-	o.indexCtx = nil
-	o.indexCancel = nil
 	// Clear per-ingester cancel functions.
 	o.ingesterCancels = make(map[string]context.CancelFunc)
 	o.mu.Unlock()
@@ -206,16 +196,10 @@ func (o *Orchestrator) RebuildMissingIndexes(ctx context.Context) error {
 					"store", storeID,
 					"chunk", meta.ID.String())
 
-				// Use the same indexWg as seal-triggered builds.
-				storeID, chunkID, im := storeID, meta.ID, im
-				o.indexWg.Go(func() {
-					if err := im.BuildIndexes(ctx, chunkID); err != nil {
-						o.logger.Error("failed to rebuild indexes",
-							"store", storeID,
-							"chunk", chunkID.String(),
-							"error", err)
-					}
-				})
+				name := fmt.Sprintf("index-rebuild:%s:%s", storeID, meta.ID)
+				if err := o.scheduler.RunOnce(name, im.BuildIndexes, context.Background(), meta.ID); err != nil {
+					o.logger.Warn("failed to schedule index rebuild", "name", name, "error", err)
+				}
 			}
 		}
 	}
