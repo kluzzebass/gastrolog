@@ -1,5 +1,6 @@
 import type { ProtoRecord } from "../utils";
 import { syntaxHighlight } from "../syntax";
+import { detectSeverity } from "./LogEntry";
 
 export function ContextRecord({
   record,
@@ -14,6 +15,7 @@ export function ContextRecord({
 }) {
   const rawText = new TextDecoder().decode(record.raw);
   const parts = syntaxHighlight(rawText);
+  const severity = detectSeverity(record.attrs);
   const writeTime = record.writeTs ? record.writeTs.toDate() : new Date();
 
   const ts = writeTime.toLocaleTimeString("en-US", {
@@ -24,12 +26,10 @@ export function ContextRecord({
     hour12: false,
   });
 
-  const storeId = record.ref?.storeId ?? "";
-
   return (
     <div
       onClick={onSelect}
-      className={`grid grid-cols-[10ch_1fr] gap-x-1.5 px-2 py-0.5 text-[0.8em] leading-snug border-l-2 ${
+      className={`grid grid-cols-[10ch_3.5ch_1fr] px-2 py-0.5 text-[0.8em] leading-snug border-l-2 ${
         isAnchor
           ? dark
             ? "border-l-copper bg-copper/10 text-text-normal"
@@ -41,15 +41,17 @@ export function ContextRecord({
     >
       <span className="font-mono text-[0.9em] tabular-nums self-center shrink-0">
         {ts}
-        {storeId && (
+      </span>
+      <span className="self-center flex justify-center">
+        {severity && (
           <span
-            className={`ml-1 ${dark ? "text-text-ghost/60" : "text-light-text-ghost/60"}`}
+            className={`text-[0.6em] font-semibold leading-none border rounded-sm px-0.5 py-px ${severity.cls}`}
           >
-            {storeId}
+            {severity.label}
           </span>
         )}
       </span>
-      <span className="font-mono text-[0.9em] truncate self-center">
+      <span className="font-mono text-[0.9em] truncate self-center pl-1.5">
         {parts.map((part, i) => {
           const style = part.color ? { color: part.color } : undefined;
           return (

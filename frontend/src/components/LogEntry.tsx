@@ -9,7 +9,7 @@ interface SeverityInfo {
   filter: string;
 }
 
-const BADGE_STYLE: Record<string, { label: string; cls: string }> = {
+export const BADGE_STYLE: Record<string, { label: string; cls: string }> = {
   error: { label: "ERR", cls: "border-severity-error/50 text-severity-error" },
   warn: { label: "WRN", cls: "border-severity-warn/50 text-severity-warn" },
   info: { label: "INF", cls: "border-severity-info/50 text-severity-info" },
@@ -26,7 +26,9 @@ function classifySeverity(val: string): string | null {
   return null;
 }
 
-function detectSeverity(attrs: Record<string, string>): SeverityInfo | null {
+export function detectSeverity(
+  attrs: Record<string, string>,
+): SeverityInfo | null {
   for (const key of ["level", "severity", "severity_name"] as const) {
     const val = attrs[key];
     if (val) {

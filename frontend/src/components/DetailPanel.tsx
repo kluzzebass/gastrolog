@@ -239,7 +239,16 @@ export function DetailPanelContent({
                 }
               />
             ))}
-            <ContextRecord record={record} isAnchor={true} dark={dark} />
+            <ContextRecord
+              record={record}
+              isAnchor={true}
+              dark={dark}
+              onSelect={
+                onContextRecordSelect
+                  ? () => onContextRecordSelect(record)
+                  : undefined
+              }
+            />
             {contextAfter?.map((rec, i) => (
               <ContextRecord
                 key={`after-${i}`}
