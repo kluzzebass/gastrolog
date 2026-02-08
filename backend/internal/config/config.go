@@ -105,8 +105,9 @@ type ServerConfig struct {
 
 // AuthConfig holds configuration for user authentication.
 type AuthConfig struct {
-	JWTSecret     string `json:"jwt_secret,omitempty"`
-	TokenDuration string `json:"token_duration,omitempty"` // Go duration, e.g. "168h"
+	JWTSecret         string `json:"jwt_secret,omitempty"`
+	TokenDuration     string `json:"token_duration,omitempty"`      // Go duration, e.g. "168h"
+	MinPasswordLength int    `json:"min_password_length,omitempty"` // default 8
 }
 
 // User represents a user account.

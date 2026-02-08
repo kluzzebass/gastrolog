@@ -192,11 +192,13 @@ message GetServerConfigRequest {}
 message GetServerConfigResponse {
   string token_duration = 1;
   string jwt_secret = 2;
+  int32 min_password_length = 3;
 }
 
 message PutServerConfigRequest {
   string token_duration = 1;
   string jwt_secret = 2;
+  int32 min_password_length = 3;
 }
 
 message PutServerConfigResponse {}

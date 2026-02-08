@@ -1313,6 +1313,11 @@ export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
    */
   jwtSecret = "";
 
+  /**
+   * @generated from field: int32 min_password_length = 3;
+   */
+  minPasswordLength = 0;
+
   constructor(data?: PartialMessage<GetServerConfigResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1323,6 +1328,7 @@ export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "jwt_secret", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "min_password_length", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetServerConfigResponse {
@@ -1356,6 +1362,11 @@ export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
    */
   jwtSecret = "";
 
+  /**
+   * @generated from field: int32 min_password_length = 3;
+   */
+  minPasswordLength = 0;
+
   constructor(data?: PartialMessage<PutServerConfigRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1366,6 +1377,7 @@ export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "jwt_secret", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "min_password_length", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutServerConfigRequest {

@@ -1570,11 +1570,12 @@ func (*GetServerConfigRequest) Descriptor() ([]byte, []int) {
 }
 
 type GetServerConfigResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TokenDuration string                 `protobuf:"bytes,1,opt,name=token_duration,json=tokenDuration,proto3" json:"token_duration,omitempty"`
-	JwtSecret     string                 `protobuf:"bytes,2,opt,name=jwt_secret,json=jwtSecret,proto3" json:"jwt_secret,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	TokenDuration     string                 `protobuf:"bytes,1,opt,name=token_duration,json=tokenDuration,proto3" json:"token_duration,omitempty"`
+	JwtSecret         string                 `protobuf:"bytes,2,opt,name=jwt_secret,json=jwtSecret,proto3" json:"jwt_secret,omitempty"`
+	MinPasswordLength int32                  `protobuf:"varint,3,opt,name=min_password_length,json=minPasswordLength,proto3" json:"min_password_length,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *GetServerConfigResponse) Reset() {
@@ -1621,12 +1622,20 @@ func (x *GetServerConfigResponse) GetJwtSecret() string {
 	return ""
 }
 
+func (x *GetServerConfigResponse) GetMinPasswordLength() int32 {
+	if x != nil {
+		return x.MinPasswordLength
+	}
+	return 0
+}
+
 type PutServerConfigRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TokenDuration string                 `protobuf:"bytes,1,opt,name=token_duration,json=tokenDuration,proto3" json:"token_duration,omitempty"`
-	JwtSecret     string                 `protobuf:"bytes,2,opt,name=jwt_secret,json=jwtSecret,proto3" json:"jwt_secret,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	TokenDuration     string                 `protobuf:"bytes,1,opt,name=token_duration,json=tokenDuration,proto3" json:"token_duration,omitempty"`
+	JwtSecret         string                 `protobuf:"bytes,2,opt,name=jwt_secret,json=jwtSecret,proto3" json:"jwt_secret,omitempty"`
+	MinPasswordLength int32                  `protobuf:"varint,3,opt,name=min_password_length,json=minPasswordLength,proto3" json:"min_password_length,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *PutServerConfigRequest) Reset() {
@@ -1671,6 +1680,13 @@ func (x *PutServerConfigRequest) GetJwtSecret() string {
 		return x.JwtSecret
 	}
 	return ""
+}
+
+func (x *PutServerConfigRequest) GetMinPasswordLength() int32 {
+	if x != nil {
+		return x.MinPasswordLength
+	}
+	return 0
 }
 
 type PutServerConfigResponse struct {
@@ -1970,15 +1986,17 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x15DeleteIngesterRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x18\n" +
 	"\x16DeleteIngesterResponse\"\x18\n" +
-	"\x16GetServerConfigRequest\"_\n" +
+	"\x16GetServerConfigRequest\"\x8f\x01\n" +
 	"\x17GetServerConfigResponse\x12%\n" +
 	"\x0etoken_duration\x18\x01 \x01(\tR\rtokenDuration\x12\x1d\n" +
 	"\n" +
-	"jwt_secret\x18\x02 \x01(\tR\tjwtSecret\"^\n" +
+	"jwt_secret\x18\x02 \x01(\tR\tjwtSecret\x12.\n" +
+	"\x13min_password_length\x18\x03 \x01(\x05R\x11minPasswordLength\"\x8e\x01\n" +
 	"\x16PutServerConfigRequest\x12%\n" +
 	"\x0etoken_duration\x18\x01 \x01(\tR\rtokenDuration\x12\x1d\n" +
 	"\n" +
-	"jwt_secret\x18\x02 \x01(\tR\tjwtSecret\"\x19\n" +
+	"jwt_secret\x18\x02 \x01(\tR\tjwtSecret\x12.\n" +
+	"\x13min_password_length\x18\x03 \x01(\x05R\x11minPasswordLength\"\x19\n" +
 	"\x17PutServerConfigResponse\"\x17\n" +
 	"\x15GetPreferencesRequest\".\n" +
 	"\x16GetPreferencesResponse\x12\x14\n" +

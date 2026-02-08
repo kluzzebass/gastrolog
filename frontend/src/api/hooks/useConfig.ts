@@ -188,10 +188,15 @@ export function useServerConfig() {
 export function usePutServerConfig() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (args: { tokenDuration: string; jwtSecret: string }) => {
+    mutationFn: async (args: {
+      tokenDuration: string;
+      jwtSecret: string;
+      minPasswordLength: number;
+    }) => {
       await configClient.putServerConfig({
         tokenDuration: args.tokenDuration,
         jwtSecret: args.jwtSecret,
+        minPasswordLength: args.minPasswordLength,
       });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["serverConfig"] }),

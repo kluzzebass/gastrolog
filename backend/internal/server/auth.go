@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"time"
@@ -33,6 +34,23 @@ func NewAuthServer(cfgStore config.Store, tokens *auth.TokenService) *AuthServer
 	}
 }
 
+// minPasswordLength reads the configured minimum password length from the
+// server config, defaulting to 8.
+func (s *AuthServer) minPasswordLength(ctx context.Context) int {
+	raw, err := s.cfgStore.GetSetting(ctx, "server")
+	if err != nil || raw == nil {
+		return 8
+	}
+	var sc config.ServerConfig
+	if err := json.Unmarshal([]byte(*raw), &sc); err != nil {
+		return 8
+	}
+	if sc.Auth.MinPasswordLength > 0 {
+		return sc.Auth.MinPasswordLength
+	}
+	return 8
+}
+
 // Register creates the first user account during initial setup.
 // Returns FailedPrecondition if any users already exist.
 func (s *AuthServer) Register(
@@ -59,9 +77,9 @@ func (s *AuthServer) Register(
 	}
 
 	// Validate password.
-	if utf8.RuneCountInString(password) < 8 {
+	if minLen := s.minPasswordLength(ctx); utf8.RuneCountInString(password) < minLen {
 		return nil, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("password must be at least 8 characters"))
+			fmt.Errorf("password must be at least %d characters", minLen))
 	}
 
 	// Hash password.
@@ -149,9 +167,9 @@ func (s *AuthServer) ChangePassword(
 	newPassword := req.Msg.NewPassword
 
 	// Validate new password.
-	if utf8.RuneCountInString(newPassword) < 8 {
+	if minLen := s.minPasswordLength(ctx); utf8.RuneCountInString(newPassword) < minLen {
 		return nil, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("new password must be at least 8 characters"))
+			fmt.Errorf("new password must be at least %d characters", minLen))
 	}
 
 	// Verify old password.
@@ -213,9 +231,9 @@ func (s *AuthServer) CreateUser(
 			fmt.Errorf("username must be 3-64 characters, alphanumeric, underscores, or hyphens"))
 	}
 
-	if utf8.RuneCountInString(password) < 8 {
+	if minLen := s.minPasswordLength(ctx); utf8.RuneCountInString(password) < minLen {
 		return nil, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("password must be at least 8 characters"))
+			fmt.Errorf("password must be at least %d characters", minLen))
 	}
 
 	if role != "admin" && role != "user" {
@@ -308,9 +326,9 @@ func (s *AuthServer) ResetPassword(
 	username := req.Msg.Username
 	newPassword := req.Msg.NewPassword
 
-	if utf8.RuneCountInString(newPassword) < 8 {
+	if minLen := s.minPasswordLength(ctx); utf8.RuneCountInString(newPassword) < minLen {
 		return nil, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("password must be at least 8 characters"))
+			fmt.Errorf("password must be at least %d characters", minLen))
 	}
 
 	user, err := s.cfgStore.GetUser(ctx, username)

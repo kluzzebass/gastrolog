@@ -648,6 +648,7 @@ func (s *ConfigServer) GetServerConfig(
 		}
 		resp.TokenDuration = sc.Auth.TokenDuration
 		resp.JwtSecret = sc.Auth.JWTSecret
+		resp.MinPasswordLength = int32(sc.Auth.MinPasswordLength)
 	}
 
 	return connect.NewResponse(resp), nil
@@ -660,8 +661,9 @@ func (s *ConfigServer) PutServerConfig(
 ) (*connect.Response[apiv1.PutServerConfigResponse], error) {
 	sc := config.ServerConfig{
 		Auth: config.AuthConfig{
-			JWTSecret:     req.Msg.JwtSecret,
-			TokenDuration: req.Msg.TokenDuration,
+			JWTSecret:         req.Msg.JwtSecret,
+			TokenDuration:     req.Msg.TokenDuration,
+			MinPasswordLength: int(req.Msg.MinPasswordLength),
 		},
 	}
 

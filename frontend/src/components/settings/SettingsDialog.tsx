@@ -7,7 +7,7 @@ import { RetentionPoliciesSettings } from "./RetentionPoliciesSettings";
 import { UsersSettings } from "./UsersSettings";
 import { useServerConfig, usePutServerConfig } from "../../api/hooks/useConfig";
 import { useToast } from "../Toast";
-import { FormField, TextInput } from "./FormField";
+import { FormField, TextInput, NumberInput } from "./FormField";
 
 export type SettingsTab =
   | "service"
@@ -141,6 +141,7 @@ function ServiceSettings({ dark }: { dark: boolean }) {
 
   const [tokenDuration, setTokenDuration] = useState("");
   const [jwtSecret, setJwtSecret] = useState("");
+  const [minPwLen, setMinPwLen] = useState("");
   const [initialized, setInitialized] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
 
@@ -148,6 +149,9 @@ function ServiceSettings({ dark }: { dark: boolean }) {
     if (data && !initialized) {
       setTokenDuration(data.tokenDuration);
       setJwtSecret(data.jwtSecret);
+      setMinPwLen(
+        data.minPasswordLength ? String(data.minPasswordLength) : "8",
+      );
       setInitialized(true);
     }
   }, [data, initialized]);
@@ -155,11 +159,17 @@ function ServiceSettings({ dark }: { dark: boolean }) {
   const dirty =
     initialized &&
     data &&
-    (tokenDuration !== data.tokenDuration || jwtSecret !== data.jwtSecret);
+    (tokenDuration !== data.tokenDuration ||
+      jwtSecret !== data.jwtSecret ||
+      minPwLen !== String(data.minPasswordLength || 8));
 
   const handleSave = async () => {
     try {
-      await putConfig.mutateAsync({ tokenDuration, jwtSecret });
+      await putConfig.mutateAsync({
+        tokenDuration,
+        jwtSecret,
+        minPasswordLength: parseInt(minPwLen, 10) || 8,
+      });
       addToast("Server configuration updated", "info");
     } catch (err: any) {
       addToast(err.message ?? "Failed to update server configuration", "error");
@@ -170,6 +180,9 @@ function ServiceSettings({ dark }: { dark: boolean }) {
     if (data) {
       setTokenDuration(data.tokenDuration);
       setJwtSecret(data.jwtSecret);
+      setMinPwLen(
+        data.minPasswordLength ? String(data.minPasswordLength) : "8",
+      );
     }
   };
 
@@ -235,6 +248,20 @@ function ServiceSettings({ dark }: { dark: boolean }) {
                 )}
               </button>
             </div>
+          </FormField>
+
+          <FormField
+            label="Minimum Password Length"
+            description="The minimum number of characters required for user passwords."
+            dark={dark}
+          >
+            <NumberInput
+              value={minPwLen}
+              onChange={setMinPwLen}
+              placeholder="8"
+              dark={dark}
+              min={1}
+            />
           </FormField>
 
           <div className="flex gap-2 mt-1">
