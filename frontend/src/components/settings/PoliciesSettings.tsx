@@ -100,7 +100,7 @@ function CronField({
   return (
     <FormField
       label="Cron Schedule"
-      description="5-field cron: min hour dom mon dow"
+      description="cron: [sec] min hour dom mon dow"
       dark={dark}
     >
       <TextInput

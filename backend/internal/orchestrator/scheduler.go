@@ -53,7 +53,7 @@ func (s *Scheduler) AddJob(name, cronExpr string, taskFn any, args ...any) error
 	}
 
 	j, err := s.scheduler.NewJob(
-		gocron.CronJob(cronExpr, false),
+		gocron.CronJob(cronExpr, true),
 		gocron.NewTask(taskFn, args...),
 		gocron.WithName(name),
 	)
