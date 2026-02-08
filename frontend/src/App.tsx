@@ -34,7 +34,10 @@ import {
   StoreButton,
 } from "./components/Sidebar";
 import { ToastProvider, useToast } from "./components/Toast";
-import { SettingsDialog } from "./components/settings/SettingsDialog";
+import {
+  SettingsDialog,
+  type SettingsTab,
+} from "./components/settings/SettingsDialog";
 import { QueryHistory } from "./components/QueryHistory";
 import { useQueryHistory } from "./hooks/useQueryHistory";
 import { ExportButton } from "./components/ExportButton";
@@ -67,9 +70,7 @@ function AppContent() {
   const [showPlan, setShowPlan] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<
-    "service" | "stores" | "ingesters" | "filters" | "policies"
-  >("service");
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("service");
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(
     null,
   );
