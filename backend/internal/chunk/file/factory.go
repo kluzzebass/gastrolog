@@ -3,6 +3,7 @@ package file
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"time"
@@ -30,7 +31,7 @@ var (
 
 // NewFactory returns a factory function that creates file-based ChunkManagers.
 func NewFactory() chunk.ManagerFactory {
-	return func(params map[string]string) (chunk.ChunkManager, error) {
+	return func(params map[string]string, logger *slog.Logger) (chunk.ChunkManager, error) {
 		dir, ok := params[ParamDir]
 		if !ok || dir == "" {
 			return nil, ErrMissingDirParam
@@ -39,6 +40,7 @@ func NewFactory() chunk.ManagerFactory {
 		cfg := Config{
 			Dir:      dir,
 			FileMode: DefaultFileMode,
+			Logger:   logger,
 		}
 
 		// Build rotation policy from params

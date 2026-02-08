@@ -87,7 +87,7 @@ func TestApplyConfigStores(t *testing.T) {
 
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": func(params map[string]string) (chunk.ChunkManager, error) {
+			"memory": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
 				return &fakeChunkManager{}, nil
 			},
 		},
@@ -173,7 +173,7 @@ func TestApplyConfigUnknownIndexManagerType(t *testing.T) {
 
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": func(params map[string]string) (chunk.ChunkManager, error) {
+			"memory": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
 				return &fakeChunkManager{}, nil
 			},
 		},
@@ -214,7 +214,7 @@ func TestApplyConfigDuplicateStoreID(t *testing.T) {
 
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": func(params map[string]string) (chunk.ChunkManager, error) {
+			"memory": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
 				return &fakeChunkManager{}, nil
 			},
 		},
@@ -267,7 +267,7 @@ func TestApplyConfigChunkManagerFactoryError(t *testing.T) {
 
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": func(params map[string]string) (chunk.ChunkManager, error) {
+			"memory": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
 				return nil, errors.New("factory error")
 			},
 		},
@@ -295,7 +295,7 @@ func TestApplyConfigIndexManagerFactoryError(t *testing.T) {
 
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"memory": func(params map[string]string) (chunk.ChunkManager, error) {
+			"memory": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
 				return &fakeChunkManager{}, nil
 			},
 		},
@@ -384,7 +384,7 @@ func TestApplyConfigParamsPassedToStoreFactories(t *testing.T) {
 
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"test": func(params map[string]string) (chunk.ChunkManager, error) {
+			"test": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
 				cmReceivedParams = params
 				return &fakeChunkManager{}, nil
 			},
@@ -436,7 +436,7 @@ func TestApplyConfigIndexManagerReceivesChunkManager(t *testing.T) {
 
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"test": func(params map[string]string) (chunk.ChunkManager, error) {
+			"test": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
 				return expectedCM, nil
 			},
 		},

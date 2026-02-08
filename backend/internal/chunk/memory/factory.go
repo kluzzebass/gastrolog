@@ -2,6 +2,7 @@ package memory
 
 import (
 	"fmt"
+	"log/slog"
 	"strconv"
 
 	"gastrolog/internal/chunk"
@@ -19,8 +20,10 @@ const (
 
 // NewFactory returns a factory function that creates in-memory ChunkManagers.
 func NewFactory() chunk.ManagerFactory {
-	return func(params map[string]string) (chunk.ChunkManager, error) {
-		cfg := Config{}
+	return func(params map[string]string, logger *slog.Logger) (chunk.ChunkManager, error) {
+		cfg := Config{
+			Logger: logger,
+		}
 
 		maxRecords := int64(DefaultMaxRecords)
 		if v, ok := params[ParamMaxRecords]; ok {

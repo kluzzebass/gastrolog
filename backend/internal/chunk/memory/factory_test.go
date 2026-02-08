@@ -9,7 +9,7 @@ import (
 func TestFactoryDefaultValues(t *testing.T) {
 	factory := NewFactory()
 
-	cm, err := factory(map[string]string{})
+	cm, err := factory(map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestFactoryCustomValues(t *testing.T) {
 
 	cm, err := factory(map[string]string{
 		ParamMaxRecords: "2048",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -73,21 +73,21 @@ func TestFactoryInvalidMaxRecords(t *testing.T) {
 
 	_, err := factory(map[string]string{
 		ParamMaxRecords: "not-a-number",
-	})
+	}, nil)
 	if err == nil {
 		t.Error("expected error for invalid max_records")
 	}
 
 	_, err = factory(map[string]string{
 		ParamMaxRecords: "0",
-	})
+	}, nil)
 	if err == nil {
 		t.Error("expected error for zero max_records")
 	}
 
 	_, err = factory(map[string]string{
 		ParamMaxRecords: "-1",
-	})
+	}, nil)
 	if err == nil {
 		t.Error("expected error for negative max_records")
 	}

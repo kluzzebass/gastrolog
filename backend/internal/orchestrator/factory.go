@@ -96,8 +96,12 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 			return fmt.Errorf("unknown chunk manager type: %s", storeCfg.Type)
 		}
 
-		// Create chunk manager.
-		cm, err := cmFactory(storeCfg.Params)
+		// Create chunk manager with store-scoped logger.
+		var cmLogger *slog.Logger
+		if factories.Logger != nil {
+			cmLogger = factories.Logger.With("store", storeCfg.ID)
+		}
+		cm, err := cmFactory(storeCfg.Params, cmLogger)
 		if err != nil {
 			return fmt.Errorf("create chunk manager %s: %w", storeCfg.ID, err)
 		}

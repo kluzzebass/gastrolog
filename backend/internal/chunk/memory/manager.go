@@ -85,6 +85,7 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 	state := m.activeChunkState()
 	if m.cfg.RotationPolicy.ShouldRotate(state, record) {
 		m.logger.Info("rotating chunk",
+			"trigger", "threshold",
 			"chunk", state.ChunkID.String(),
 			"bytes", state.Bytes,
 			"records", state.Records,

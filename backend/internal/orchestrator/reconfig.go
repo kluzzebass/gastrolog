@@ -153,7 +153,11 @@ func (o *Orchestrator) AddStore(storeCfg config.StoreConfig, cfg *config.Config,
 	if !ok {
 		return fmt.Errorf("unknown chunk manager type: %s", storeCfg.Type)
 	}
-	cm, err := cmFactory(storeCfg.Params)
+	var cmLogger = factories.Logger
+	if cmLogger != nil {
+		cmLogger = cmLogger.With("store", storeCfg.ID)
+	}
+	cm, err := cmFactory(storeCfg.Params, cmLogger)
 	if err != nil {
 		return fmt.Errorf("create chunk manager %s: %w", storeCfg.ID, err)
 	}

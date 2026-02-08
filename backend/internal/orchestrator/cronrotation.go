@@ -53,7 +53,8 @@ func (m *cronRotationManager) hasJob(storeID string) bool {
 func (m *cronRotationManager) rotateStore(storeID string, cm chunk.ChunkManager) {
 	active := cm.Active()
 	if active == nil || active.RecordCount == 0 {
-		m.logger.Debug("cron rotation: skipping empty chunk", "store", storeID)
+		m.logger.Debug("cron rotation: skipping empty chunk",
+			"store", storeID)
 		return
 	}
 
@@ -63,7 +64,11 @@ func (m *cronRotationManager) rotateStore(storeID string, cm chunk.ChunkManager)
 		return
 	}
 
-	m.logger.Info("cron rotation: sealed chunk",
-		"store", storeID, "chunk", active.ID.String(),
-		"records", active.RecordCount, "bytes", active.Bytes)
+	m.logger.Info("rotating chunk",
+		"trigger", "cron",
+		"store", storeID,
+		"chunk", active.ID.String(),
+		"bytes", active.Bytes,
+		"records", active.RecordCount,
+	)
 }

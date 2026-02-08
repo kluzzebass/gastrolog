@@ -12,12 +12,12 @@ import (
 func TestFactoryMissingDir(t *testing.T) {
 	factory := NewFactory()
 
-	_, err := factory(map[string]string{})
+	_, err := factory(map[string]string{}, nil)
 	if err != ErrMissingDirParam {
 		t.Errorf("expected ErrMissingDirParam, got %v", err)
 	}
 
-	_, err = factory(map[string]string{ParamDir: ""})
+	_, err = factory(map[string]string{ParamDir: ""}, nil)
 	if err != ErrMissingDirParam {
 		t.Errorf("expected ErrMissingDirParam for empty dir, got %v", err)
 	}
@@ -27,7 +27,7 @@ func TestFactoryDefaultValues(t *testing.T) {
 	factory := NewFactory()
 	dir := t.TempDir()
 
-	cm, err := factory(map[string]string{ParamDir: dir})
+	cm, err := factory(map[string]string{ParamDir: dir}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestFactoryCustomMaxChunkBytes(t *testing.T) {
 	cm, err := factory(map[string]string{
 		ParamDir:           dir,
 		ParamMaxChunkBytes: "1024",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestFactoryCustomFileMode(t *testing.T) {
 	cm, err := factory(map[string]string{
 		ParamDir:      dir,
 		ParamFileMode: "0600",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestFactoryCustomMaxChunkAge(t *testing.T) {
 	cm, err := factory(map[string]string{
 		ParamDir:         dir,
 		ParamMaxChunkAge: "1h",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestFactoryInvalidMaxChunkBytes(t *testing.T) {
 	_, err := factory(map[string]string{
 		ParamDir:           dir,
 		ParamMaxChunkBytes: "not-a-number",
-	})
+	}, nil)
 	if err == nil {
 		t.Error("expected error for invalid max_chunk_bytes")
 	}
@@ -166,7 +166,7 @@ func TestFactoryInvalidMaxChunkBytes(t *testing.T) {
 	_, err = factory(map[string]string{
 		ParamDir:           dir,
 		ParamMaxChunkBytes: "0",
-	})
+	}, nil)
 	if err == nil {
 		t.Error("expected error for zero max_chunk_bytes")
 	}
@@ -174,7 +174,7 @@ func TestFactoryInvalidMaxChunkBytes(t *testing.T) {
 	_, err = factory(map[string]string{
 		ParamDir:           dir,
 		ParamMaxChunkBytes: "-1",
-	})
+	}, nil)
 	if err == nil {
 		t.Error("expected error for negative max_chunk_bytes")
 	}
@@ -187,7 +187,7 @@ func TestFactoryInvalidMaxChunkAge(t *testing.T) {
 	_, err := factory(map[string]string{
 		ParamDir:         dir,
 		ParamMaxChunkAge: "not-a-duration",
-	})
+	}, nil)
 	if err == nil {
 		t.Error("expected error for invalid max_chunk_age")
 	}
@@ -195,7 +195,7 @@ func TestFactoryInvalidMaxChunkAge(t *testing.T) {
 	_, err = factory(map[string]string{
 		ParamDir:         dir,
 		ParamMaxChunkAge: "0s",
-	})
+	}, nil)
 	if err == nil {
 		t.Error("expected error for zero max_chunk_age")
 	}
@@ -203,7 +203,7 @@ func TestFactoryInvalidMaxChunkAge(t *testing.T) {
 	_, err = factory(map[string]string{
 		ParamDir:         dir,
 		ParamMaxChunkAge: "-1h",
-	})
+	}, nil)
 	if err == nil {
 		t.Error("expected error for negative max_chunk_age")
 	}
@@ -216,7 +216,7 @@ func TestFactoryInvalidFileMode(t *testing.T) {
 	_, err := factory(map[string]string{
 		ParamDir:      dir,
 		ParamFileMode: "not-octal",
-	})
+	}, nil)
 	if err == nil {
 		t.Error("expected error for invalid file_mode")
 	}
@@ -226,7 +226,7 @@ func TestFactoryCreatesDirectory(t *testing.T) {
 	factory := NewFactory()
 	dir := filepath.Join(t.TempDir(), "subdir", "chunks")
 
-	_, err := factory(map[string]string{ParamDir: dir})
+	_, err := factory(map[string]string{ParamDir: dir}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestFactoryHardLimitAlwaysIncluded(t *testing.T) {
 	factory := NewFactory()
 	dir := t.TempDir()
 
-	cm, err := factory(map[string]string{ParamDir: dir})
+	cm, err := factory(map[string]string{ParamDir: dir}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

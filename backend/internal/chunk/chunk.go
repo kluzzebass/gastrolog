@@ -6,6 +6,7 @@ package chunk
 
 import (
 	"errors"
+	"log/slog"
 	"time"
 )
 
@@ -20,7 +21,8 @@ var (
 // Factories validate required params, apply defaults, and return a fully
 // constructed manager or a descriptive error.
 // Factories must not start goroutines or perform I/O beyond validation.
-type ManagerFactory func(params map[string]string) (ChunkManager, error)
+// The logger parameter provides a store-scoped logger; may be nil.
+type ManagerFactory func(params map[string]string, logger *slog.Logger) (ChunkManager, error)
 
 // ChunkManager manages the lifecycle of chunks.
 // It handles appending records, sealing chunks, and providing access
