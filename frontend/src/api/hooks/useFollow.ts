@@ -38,6 +38,9 @@ export function useFollow() {
   const queryRef = useRef<string>("");
   // Ref to the record buffer so reconnects preserve existing records.
   const bufferRef = useRef<Record[]>([]);
+  // Throttle: coalesce rapid stream messages into a single render per frame.
+  const flushRef = useRef<number | null>(null);
+  const dirtyRef = useRef(false);
 
   const cancelReconnect = useCallback(() => {
     if (reconnectTimer.current !== null) {
@@ -87,11 +90,20 @@ export function useFollow() {
           }
 
           newCountRef.current += response.records.length;
-          setState((prev) => ({
-            ...prev,
-            records: [...buffer],
-            newCount: newCountRef.current,
-          }));
+          dirtyRef.current = true;
+          if (flushRef.current === null) {
+            flushRef.current = requestAnimationFrame(() => {
+              flushRef.current = null;
+              if (dirtyRef.current) {
+                dirtyRef.current = false;
+                setState((prev) => ({
+                  ...prev,
+                  records: [...buffer],
+                  newCount: newCountRef.current,
+                }));
+              }
+            });
+          }
         }
 
         // Stream ended unexpectedly — schedule reconnect.
@@ -150,8 +162,17 @@ export function useFollow() {
     [connectStream, cancelReconnect],
   );
 
+  const cancelFlush = useCallback(() => {
+    if (flushRef.current !== null) {
+      cancelAnimationFrame(flushRef.current);
+      flushRef.current = null;
+    }
+    dirtyRef.current = false;
+  }, []);
+
   const stop = useCallback(() => {
     cancelReconnect();
+    cancelFlush();
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
@@ -163,10 +184,11 @@ export function useFollow() {
       reconnectAttempt: 0,
       error: null,
     }));
-  }, [cancelReconnect]);
+  }, [cancelReconnect, cancelFlush]);
 
   const reset = useCallback(() => {
     cancelReconnect();
+    cancelFlush();
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
