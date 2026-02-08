@@ -1,8 +1,16 @@
 import { useState, useMemo, useCallback } from "react";
 import type { FieldSummary } from "../utils";
+import { timeRangeMs } from "../utils";
 import { DIRECTIVES } from "../queryTokenizer";
 
 const OPERATORS = ["AND", "OR", "NOT"];
+
+// Known values for directives that have a fixed set of options.
+// last= derives from the same timeRangeMs map used by TimeRangePicker.
+const DIRECTIVE_VALUES: Record<string, string[]> = {
+  last: Object.keys(timeRangeMs),
+  reverse: ["true", "false"],
+};
 
 // Characters that break a word in the query language.
 function isWordBreak(ch: string): boolean {
@@ -81,6 +89,15 @@ export function useAutocomplete(
     if (!ctx && cursorPos > 0 && draft[cursorPos - 1] === "=") {
       const valueKey = getValueContext(draft, cursorPos);
       if (valueKey) {
+        // Check directive values first, then field values.
+        const dirVals = DIRECTIVE_VALUES[valueKey.toLowerCase()];
+        if (dirVals) {
+          return {
+            suggestions: dirVals,
+            replaceRange: { start: cursorPos, end: cursorPos },
+            suffix: " ",
+          };
+        }
         const field = fields.find(
           (f) => f.key.toLowerCase() === valueKey.toLowerCase(),
         );
@@ -102,12 +119,19 @@ export function useAutocomplete(
 
     if (valueKey) {
       // Value position: suggest known values for this key.
-      const field = fields.find(
-        (f) => f.key.toLowerCase() === valueKey.toLowerCase(),
-      );
-      if (!field) return empty;
-      const matches = field.values
-        .map((v) => v.value)
+      // Check directive values first, then field values.
+      const dirVals = DIRECTIVE_VALUES[valueKey.toLowerCase()];
+      let candidates: string[];
+      if (dirVals) {
+        candidates = dirVals;
+      } else {
+        const field = fields.find(
+          (f) => f.key.toLowerCase() === valueKey.toLowerCase(),
+        );
+        if (!field) return empty;
+        candidates = field.values.map((v) => v.value);
+      }
+      const matches = candidates
         .filter(
           (v) =>
             v.toLowerCase().startsWith(prefix) && v.toLowerCase() !== prefix,
