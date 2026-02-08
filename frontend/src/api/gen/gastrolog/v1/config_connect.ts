@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteStoreRequest, DeleteStoreResponse, GetConfigRequest, GetConfigResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetServerConfigRequest, GetServerConfigResponse, ListIngestersRequest, ListIngestersResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutServerConfigRequest, PutServerConfigResponse, PutStoreRequest, PutStoreResponse } from "./config_pb.js";
+import { DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteStoreRequest, DeleteStoreResponse, GetConfigRequest, GetConfigResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetServerConfigRequest, GetServerConfigResponse, ListIngestersRequest, ListIngestersResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutServerConfigRequest, PutServerConfigResponse, PutStoreRequest, PutStoreResponse } from "./config_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -177,6 +177,28 @@ export const ConfigService = {
       name: "PutServerConfig",
       I: PutServerConfigRequest,
       O: PutServerConfigResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * GetPreferences returns the current user's preferences.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.GetPreferences
+     */
+    getPreferences: {
+      name: "GetPreferences",
+      I: GetPreferencesRequest,
+      O: GetPreferencesResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * PutPreferences updates the current user's preferences.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.PutPreferences
+     */
+    putPreferences: {
+      name: "PutPreferences",
+      I: PutPreferencesRequest,
+      O: PutPreferencesResponse,
       kind: MethodKind.Unary,
     },
   }

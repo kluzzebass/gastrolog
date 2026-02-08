@@ -75,6 +75,12 @@ const (
 	// ConfigServicePutServerConfigProcedure is the fully-qualified name of the ConfigService's
 	// PutServerConfig RPC.
 	ConfigServicePutServerConfigProcedure = "/gastrolog.v1.ConfigService/PutServerConfig"
+	// ConfigServiceGetPreferencesProcedure is the fully-qualified name of the ConfigService's
+	// GetPreferences RPC.
+	ConfigServiceGetPreferencesProcedure = "/gastrolog.v1.ConfigService/GetPreferences"
+	// ConfigServicePutPreferencesProcedure is the fully-qualified name of the ConfigService's
+	// PutPreferences RPC.
+	ConfigServicePutPreferencesProcedure = "/gastrolog.v1.ConfigService/PutPreferences"
 )
 
 // ConfigServiceClient is a client for the gastrolog.v1.ConfigService service.
@@ -109,6 +115,10 @@ type ConfigServiceClient interface {
 	GetServerConfig(context.Context, *connect.Request[v1.GetServerConfigRequest]) (*connect.Response[v1.GetServerConfigResponse], error)
 	// PutServerConfig updates the server-level configuration.
 	PutServerConfig(context.Context, *connect.Request[v1.PutServerConfigRequest]) (*connect.Response[v1.PutServerConfigResponse], error)
+	// GetPreferences returns the current user's preferences.
+	GetPreferences(context.Context, *connect.Request[v1.GetPreferencesRequest]) (*connect.Response[v1.GetPreferencesResponse], error)
+	// PutPreferences updates the current user's preferences.
+	PutPreferences(context.Context, *connect.Request[v1.PutPreferencesRequest]) (*connect.Response[v1.PutPreferencesResponse], error)
 }
 
 // NewConfigServiceClient constructs a client for the gastrolog.v1.ConfigService service. By
@@ -212,6 +222,18 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("PutServerConfig")),
 			connect.WithClientOptions(opts...),
 		),
+		getPreferences: connect.NewClient[v1.GetPreferencesRequest, v1.GetPreferencesResponse](
+			httpClient,
+			baseURL+ConfigServiceGetPreferencesProcedure,
+			connect.WithSchema(configServiceMethods.ByName("GetPreferences")),
+			connect.WithClientOptions(opts...),
+		),
+		putPreferences: connect.NewClient[v1.PutPreferencesRequest, v1.PutPreferencesResponse](
+			httpClient,
+			baseURL+ConfigServicePutPreferencesProcedure,
+			connect.WithSchema(configServiceMethods.ByName("PutPreferences")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -232,6 +254,8 @@ type configServiceClient struct {
 	deleteIngester        *connect.Client[v1.DeleteIngesterRequest, v1.DeleteIngesterResponse]
 	getServerConfig       *connect.Client[v1.GetServerConfigRequest, v1.GetServerConfigResponse]
 	putServerConfig       *connect.Client[v1.PutServerConfigRequest, v1.PutServerConfigResponse]
+	getPreferences        *connect.Client[v1.GetPreferencesRequest, v1.GetPreferencesResponse]
+	putPreferences        *connect.Client[v1.PutPreferencesRequest, v1.PutPreferencesResponse]
 }
 
 // GetConfig calls gastrolog.v1.ConfigService.GetConfig.
@@ -309,6 +333,16 @@ func (c *configServiceClient) PutServerConfig(ctx context.Context, req *connect.
 	return c.putServerConfig.CallUnary(ctx, req)
 }
 
+// GetPreferences calls gastrolog.v1.ConfigService.GetPreferences.
+func (c *configServiceClient) GetPreferences(ctx context.Context, req *connect.Request[v1.GetPreferencesRequest]) (*connect.Response[v1.GetPreferencesResponse], error) {
+	return c.getPreferences.CallUnary(ctx, req)
+}
+
+// PutPreferences calls gastrolog.v1.ConfigService.PutPreferences.
+func (c *configServiceClient) PutPreferences(ctx context.Context, req *connect.Request[v1.PutPreferencesRequest]) (*connect.Response[v1.PutPreferencesResponse], error) {
+	return c.putPreferences.CallUnary(ctx, req)
+}
+
 // ConfigServiceHandler is an implementation of the gastrolog.v1.ConfigService service.
 type ConfigServiceHandler interface {
 	// GetConfig returns the current configuration.
@@ -341,6 +375,10 @@ type ConfigServiceHandler interface {
 	GetServerConfig(context.Context, *connect.Request[v1.GetServerConfigRequest]) (*connect.Response[v1.GetServerConfigResponse], error)
 	// PutServerConfig updates the server-level configuration.
 	PutServerConfig(context.Context, *connect.Request[v1.PutServerConfigRequest]) (*connect.Response[v1.PutServerConfigResponse], error)
+	// GetPreferences returns the current user's preferences.
+	GetPreferences(context.Context, *connect.Request[v1.GetPreferencesRequest]) (*connect.Response[v1.GetPreferencesResponse], error)
+	// PutPreferences updates the current user's preferences.
+	PutPreferences(context.Context, *connect.Request[v1.PutPreferencesRequest]) (*connect.Response[v1.PutPreferencesResponse], error)
 }
 
 // NewConfigServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -440,6 +478,18 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("PutServerConfig")),
 		connect.WithHandlerOptions(opts...),
 	)
+	configServiceGetPreferencesHandler := connect.NewUnaryHandler(
+		ConfigServiceGetPreferencesProcedure,
+		svc.GetPreferences,
+		connect.WithSchema(configServiceMethods.ByName("GetPreferences")),
+		connect.WithHandlerOptions(opts...),
+	)
+	configServicePutPreferencesHandler := connect.NewUnaryHandler(
+		ConfigServicePutPreferencesProcedure,
+		svc.PutPreferences,
+		connect.WithSchema(configServiceMethods.ByName("PutPreferences")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.ConfigService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ConfigServiceGetConfigProcedure:
@@ -472,6 +522,10 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServiceGetServerConfigHandler.ServeHTTP(w, r)
 		case ConfigServicePutServerConfigProcedure:
 			configServicePutServerConfigHandler.ServeHTTP(w, r)
+		case ConfigServiceGetPreferencesProcedure:
+			configServiceGetPreferencesHandler.ServeHTTP(w, r)
+		case ConfigServicePutPreferencesProcedure:
+			configServicePutPreferencesHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -539,4 +593,12 @@ func (UnimplementedConfigServiceHandler) GetServerConfig(context.Context, *conne
 
 func (UnimplementedConfigServiceHandler) PutServerConfig(context.Context, *connect.Request[v1.PutServerConfigRequest]) (*connect.Response[v1.PutServerConfigResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.PutServerConfig is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) GetPreferences(context.Context, *connect.Request[v1.GetPreferencesRequest]) (*connect.Response[v1.GetPreferencesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.GetPreferences is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) PutPreferences(context.Context, *connect.Request[v1.PutPreferencesRequest]) (*connect.Response[v1.PutPreferencesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.PutPreferences is not implemented"))
 }

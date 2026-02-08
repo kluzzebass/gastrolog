@@ -1416,3 +1416,139 @@ export class PutServerConfigResponse extends Message<PutServerConfigResponse> {
   }
 }
 
+/**
+ * @generated from message gastrolog.v1.GetPreferencesRequest
+ */
+export class GetPreferencesRequest extends Message<GetPreferencesRequest> {
+  constructor(data?: PartialMessage<GetPreferencesRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetPreferencesRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetPreferencesRequest {
+    return new GetPreferencesRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetPreferencesRequest {
+    return new GetPreferencesRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetPreferencesRequest {
+    return new GetPreferencesRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetPreferencesRequest | PlainMessage<GetPreferencesRequest> | undefined, b: GetPreferencesRequest | PlainMessage<GetPreferencesRequest> | undefined): boolean {
+    return proto3.util.equals(GetPreferencesRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.GetPreferencesResponse
+ */
+export class GetPreferencesResponse extends Message<GetPreferencesResponse> {
+  /**
+   * @generated from field: string theme = 1;
+   */
+  theme = "";
+
+  constructor(data?: PartialMessage<GetPreferencesResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetPreferencesResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "theme", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetPreferencesResponse {
+    return new GetPreferencesResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetPreferencesResponse {
+    return new GetPreferencesResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetPreferencesResponse {
+    return new GetPreferencesResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetPreferencesResponse | PlainMessage<GetPreferencesResponse> | undefined, b: GetPreferencesResponse | PlainMessage<GetPreferencesResponse> | undefined): boolean {
+    return proto3.util.equals(GetPreferencesResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutPreferencesRequest
+ */
+export class PutPreferencesRequest extends Message<PutPreferencesRequest> {
+  /**
+   * @generated from field: string theme = 1;
+   */
+  theme = "";
+
+  constructor(data?: PartialMessage<PutPreferencesRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutPreferencesRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "theme", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutPreferencesRequest {
+    return new PutPreferencesRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutPreferencesRequest {
+    return new PutPreferencesRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutPreferencesRequest {
+    return new PutPreferencesRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutPreferencesRequest | PlainMessage<PutPreferencesRequest> | undefined, b: PutPreferencesRequest | PlainMessage<PutPreferencesRequest> | undefined): boolean {
+    return proto3.util.equals(PutPreferencesRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutPreferencesResponse
+ */
+export class PutPreferencesResponse extends Message<PutPreferencesResponse> {
+  constructor(data?: PartialMessage<PutPreferencesResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutPreferencesResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutPreferencesResponse {
+    return new PutPreferencesResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutPreferencesResponse {
+    return new PutPreferencesResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutPreferencesResponse {
+    return new PutPreferencesResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutPreferencesResponse | PlainMessage<PutPreferencesResponse> | undefined, b: PutPreferencesResponse | PlainMessage<PutPreferencesResponse> | undefined): boolean {
+    return proto3.util.equals(PutPreferencesResponse, a, b);
+  }
+}
+

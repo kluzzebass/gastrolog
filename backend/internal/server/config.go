@@ -11,6 +11,7 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
+	"gastrolog/internal/auth"
 	"gastrolog/internal/config"
 	"gastrolog/internal/orchestrator"
 )
@@ -673,6 +674,65 @@ func (s *ConfigServer) PutServerConfig(
 	}
 
 	return connect.NewResponse(&apiv1.PutServerConfigResponse{}), nil
+}
+
+// userPreferences is the JSON structure stored per user.
+type userPreferences struct {
+	Theme string `json:"theme,omitempty"`
+}
+
+// GetPreferences returns the current user's preferences.
+func (s *ConfigServer) GetPreferences(
+	ctx context.Context,
+	req *connect.Request[apiv1.GetPreferencesRequest],
+) (*connect.Response[apiv1.GetPreferencesResponse], error) {
+	claims := auth.ClaimsFromContext(ctx)
+	if claims == nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("not authenticated"))
+	}
+
+	key := "user:" + claims.Username() + ":prefs"
+	raw, err := s.cfgStore.GetSetting(ctx, key)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	resp := &apiv1.GetPreferencesResponse{}
+	if raw != nil {
+		var prefs userPreferences
+		if err := json.Unmarshal([]byte(*raw), &prefs); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("parse preferences: %w", err))
+		}
+		resp.Theme = prefs.Theme
+	}
+
+	return connect.NewResponse(resp), nil
+}
+
+// PutPreferences updates the current user's preferences.
+func (s *ConfigServer) PutPreferences(
+	ctx context.Context,
+	req *connect.Request[apiv1.PutPreferencesRequest],
+) (*connect.Response[apiv1.PutPreferencesResponse], error) {
+	claims := auth.ClaimsFromContext(ctx)
+	if claims == nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("not authenticated"))
+	}
+
+	prefs := userPreferences{
+		Theme: req.Msg.Theme,
+	}
+	data, err := json.Marshal(prefs)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	key := "user:" + claims.Username() + ":prefs"
+	if err := s.cfgStore.PutSetting(ctx, key, string(data)); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	return connect.NewResponse(&apiv1.PutPreferencesResponse{}), nil
 }
 
 // formatBytes formats a byte count as a human-readable string.

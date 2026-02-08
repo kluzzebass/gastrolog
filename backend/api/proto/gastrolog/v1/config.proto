@@ -50,6 +50,12 @@ service ConfigService {
 
   // PutServerConfig updates the server-level configuration.
   rpc PutServerConfig(PutServerConfigRequest) returns (PutServerConfigResponse);
+
+  // GetPreferences returns the current user's preferences.
+  rpc GetPreferences(GetPreferencesRequest) returns (GetPreferencesResponse);
+
+  // PutPreferences updates the current user's preferences.
+  rpc PutPreferences(PutPreferencesRequest) returns (PutPreferencesResponse);
 }
 
 message GetConfigRequest {}
@@ -194,3 +200,15 @@ message PutServerConfigRequest {
 }
 
 message PutServerConfigResponse {}
+
+message GetPreferencesRequest {}
+
+message GetPreferencesResponse {
+  string theme = 1;
+}
+
+message PutPreferencesRequest {
+  string theme = 1;
+}
+
+message PutPreferencesResponse {}

@@ -14,6 +14,7 @@ import {
   extractTokens,
 } from "./api/hooks";
 import { useStores, useStats, useLogout, useCurrentUser } from "./api/hooks";
+import { usePreferences, usePutPreferences } from "./api/hooks/usePreferences";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { Record as ProtoRecord, setToken } from "./api/client";
 
@@ -72,9 +73,31 @@ function AppContent() {
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(
     null,
   );
-  const [theme, setTheme] = useState<Theme>("system");
+  const [theme, setThemeLocal] = useState<Theme>("system");
   const [systemDark, setSystemDark] = useState(
     () => window.matchMedia("(prefers-color-scheme: dark)").matches,
+  );
+  const preferences = usePreferences();
+  const putPreferences = usePutPreferences();
+
+  // Initialize theme from server preferences once loaded.
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
+  useEffect(() => {
+    if (preferences.data && !prefsLoaded) {
+      const t = preferences.data.theme;
+      if (t === "light" || t === "dark" || t === "system") {
+        setThemeLocal(t);
+      }
+      setPrefsLoaded(true);
+    }
+  }, [preferences.data, prefsLoaded]);
+
+  const setTheme = useCallback(
+    (t: Theme) => {
+      setThemeLocal(t);
+      putPreferences.mutate({ theme: t });
+    },
+    [putPreferences],
   );
 
   useEffect(() => {
