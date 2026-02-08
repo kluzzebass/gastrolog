@@ -1398,7 +1398,27 @@ function AppContent() {
               contextBefore={contextBefore}
               contextAfter={contextAfter}
               contextLoading={contextLoading}
-              onContextRecordSelect={setSelectedRecord}
+              onContextRecordSelect={(rec) => {
+                const ts = rec.writeTs?.toDate();
+                if (ts) {
+                  // Build a 1-minute window centered on the record.
+                  const start = new Date(ts.getTime() - 30_000);
+                  const end = new Date(ts.getTime() + 30_000);
+                  // Show all records in the window — no filters.
+                  const newQuery = `start=${start.toISOString()} end=${end.toISOString()} reverse=true`;
+                  setTimeRange("custom");
+                  setRangeStart(start);
+                  setRangeEnd(end);
+                  setSelectedRecord(rec);
+                  navigate({
+                    to: "/search",
+                    search: { q: newQuery },
+                    replace: false,
+                  });
+                } else {
+                  setSelectedRecord(rec);
+                }
+              }}
             />
           ) : (
             <div className="flex flex-col items-center justify-center h-48 px-4">
