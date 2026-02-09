@@ -780,32 +780,24 @@ function AppContent() {
             />
           </div>
 
-          <div className="flex items-center gap-1">
-            {[
-              { mode: "light" as Theme, icon: "\u2600", title: "Light" },
-              { mode: "dark" as Theme, icon: "\u263E", title: "Dark" },
-              { mode: "system" as Theme, icon: "\u25D1", title: "System" },
-            ].map(({ mode, icon, title }) => (
-              <button
-                key={mode}
-                onClick={() => setTheme(mode)}
-                title={title}
-                className={`w-7 h-7 flex items-center justify-center text-sm rounded transition-all duration-200 ${
-                  theme === mode
-                    ? c(
-                        "bg-ink-hover text-copper",
-                        "bg-light-hover text-copper",
-                      )
-                    : c(
-                        "text-text-ghost hover:text-text-muted",
-                        "text-light-text-ghost hover:text-light-text-muted",
-                      )
-                }`}
-              >
-                {icon}
-              </button>
-            ))}
-          </div>
+          <button
+            onClick={() => {
+              const cycle: Theme[] = ["dark", "light", "system"];
+              const next = cycle[(cycle.indexOf(theme) + 1) % cycle.length]!;
+              setTheme(next);
+            }}
+            title={`Theme: ${theme}`}
+            className={`w-7 h-7 flex items-center justify-center text-sm rounded transition-all duration-200 ${c(
+              "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
+              "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
+            )}`}
+          >
+            {theme === "dark"
+              ? "\u263E"
+              : theme === "light"
+                ? "\u2600"
+                : "\u25D1"}
+          </button>
 
           <button
             onClick={() => setShowInspector(true)}
