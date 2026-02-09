@@ -566,6 +566,7 @@ function AppContent() {
     qs
       .replace(/\((?:level=\w+\s+OR\s+)*level=\w+\)/g, "")
       .replace(/\blevel=(?:error|warn|info|debug|trace)\b/g, "")
+      .replace(/\bnot\s+level=\*\b/gi, "")
       .replace(/\s+/g, " ")
       .trim();
 
@@ -578,6 +579,18 @@ function AppContent() {
     const sevExpr = buildSeverityExpr(next);
     const newQuery = sevExpr ? `${base} ${sevExpr}`.trim() : base;
     setUrlQuery(newQuery);
+  };
+
+  const handleSegmentClick = (level: string) => {
+    if (level === "other") {
+      // Toggle "not level=*" (records with no level attribute).
+      const hasNoLevel = /\bnot\s+level=\*\b/i.test(q);
+      const base = stripSeverity(q);
+      const newQuery = hasNoLevel ? base : `${base} not level=*`.trim();
+      setUrlQuery(newQuery);
+    } else {
+      toggleSeverity(level);
+    }
   };
 
   const handleTimeRange = (range: string) => {
@@ -1418,6 +1431,7 @@ function AppContent() {
                     const newQuery = base ? `${tokens} ${base}` : tokens;
                     setUrlQuery(newQuery);
                   }}
+                  onSegmentClick={handleSegmentClick}
                 />
               </div>
             )}
@@ -1442,6 +1456,7 @@ function AppContent() {
                       replace: false,
                     });
                   }}
+                  onSegmentClick={handleSegmentClick}
                 />
               ) : (
                 <div className="relative">

@@ -16,11 +16,13 @@ export function HistogramChart({
   dark,
   onBrushSelect,
   onPan,
+  onSegmentClick,
 }: {
   data: HistogramData;
   dark: boolean;
   onBrushSelect?: (start: Date, end: Date) => void;
   onPan?: (start: Date, end: Date) => void;
+  onSegmentClick?: (level: string) => void;
 }) {
   const { buckets } = data;
   const barsRef = useRef<HTMLDivElement>(null);
@@ -272,25 +274,55 @@ export function HistogramChart({
                   >
                     {hasLevels && segments.length > 0 ? (
                       <div
-                        className={`flex flex-col-reverse w-full h-full transition-opacity ${c("opacity-60 group-hover:opacity-100", "opacity-50 group-hover:opacity-80")}`}
+                        className={`flex flex-col-reverse w-full h-full ${onSegmentClick ? "" : `transition-opacity ${c("opacity-60 group-hover:opacity-100", "opacity-50 group-hover:opacity-80")}`}`}
                       >
                         {segments.map((seg) => (
                           <div
                             key={seg.key}
-                            className="w-full shrink-0"
+                            className={`w-full shrink-0 ${onSegmentClick ? `cursor-pointer transition-opacity ${c("opacity-60 hover:opacity-100", "opacity-50 hover:opacity-90")}` : ""}`}
                             style={{
                               height: `${(seg.count / bucket.count) * 100}%`,
                               backgroundColor: seg.color,
                             }}
+                            onMouseDown={
+                              onSegmentClick
+                                ? (e) => e.stopPropagation()
+                                : undefined
+                            }
+                            onClick={
+                              onSegmentClick
+                                ? (e) => {
+                                    e.stopPropagation();
+                                    onSegmentClick(seg.key);
+                                  }
+                                : undefined
+                            }
                           />
                         ))}
                       </div>
                     ) : (
                       <div
-                        className={`w-full h-full transition-opacity ${c(
-                          "bg-copper opacity-60 group-hover:opacity-100",
-                          "bg-copper opacity-50 group-hover:opacity-80",
-                        )}`}
+                        className={`w-full h-full transition-opacity bg-copper ${
+                          onSegmentClick
+                            ? `cursor-pointer ${c("opacity-60 hover:opacity-100", "opacity-50 hover:opacity-90")}`
+                            : c(
+                                "opacity-60 group-hover:opacity-100",
+                                "opacity-50 group-hover:opacity-80",
+                              )
+                        }`}
+                        onMouseDown={
+                          onSegmentClick
+                            ? (e) => e.stopPropagation()
+                            : undefined
+                        }
+                        onClick={
+                          onSegmentClick
+                            ? (e) => {
+                                e.stopPropagation();
+                                onSegmentClick("other");
+                              }
+                            : undefined
+                        }
                       />
                     )}
                   </div>
