@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import { StoresPanel } from "./StoresPanel";
 
-export type InspectorTab = "chunks" | "stores" | "ingesters" | "metrics";
+export type InspectorTab = "stores" | "ingesters" | "metrics";
 
 interface InspectorDialogProps {
   dark: boolean;
@@ -16,7 +17,6 @@ type TabDef = {
 };
 
 const allTabs: TabDef[] = [
-  { id: "chunks", label: "Chunks", icon: ChunksIcon },
   { id: "stores", label: "Stores", icon: StoresIcon },
   { id: "ingesters", label: "Ingesters", icon: IngestersIcon },
   { id: "metrics", label: "Metrics", icon: MetricsIcon },
@@ -94,7 +94,8 @@ export function InspectorDialog({
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-5">
-          <Placeholder tab={tab} dark={dark} />
+          {tab === "stores" && <StoresPanel dark={dark} />}
+          {tab !== "stores" && <Placeholder tab={tab} dark={dark} />}
         </div>
       </div>
     </div>
@@ -104,7 +105,6 @@ export function InspectorDialog({
 function Placeholder({ tab, dark }: { tab: InspectorTab; dark: boolean }) {
   const c = (d: string, l: string) => (dark ? d : l);
   const labels: Record<InspectorTab, string> = {
-    chunks: "Chunk browser will appear here.",
     stores: "Store health indicators will appear here.",
     ingesters: "Ingester metrics will appear here.",
     metrics: "Dashboard metrics will appear here.",
@@ -120,24 +120,6 @@ function Placeholder({ tab, dark }: { tab: InspectorTab; dark: boolean }) {
 }
 
 // --- Tab Icons ---
-
-function ChunksIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <rect x="2" y="2" width="20" height="6" rx="1" />
-      <rect x="2" y="10" width="20" height="6" rx="1" />
-      <rect x="2" y="18" width="12" height="4" rx="1" />
-    </svg>
-  );
-}
 
 function StoresIcon({ className }: { className?: string }) {
   return (

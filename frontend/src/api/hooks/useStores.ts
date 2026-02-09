@@ -31,6 +31,7 @@ export function useChunks(storeId: string) {
       return response.chunks;
     },
     enabled: !!storeId,
+    refetchInterval: 10_000,
   });
 }
 

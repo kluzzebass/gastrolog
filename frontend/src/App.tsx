@@ -82,7 +82,7 @@ function AppContent() {
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("service");
   const [showInspector, setShowInspector] = useState(false);
-  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("chunks");
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("stores");
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(
     null,
   );
