@@ -1,4 +1,4 @@
-import { useRef, useState, useMemo } from "react";
+import { useState, useMemo } from "react";
 import type { ChunkMeta } from "../../api/gen/gastrolog/v1/store_pb";
 
 interface ChunkTimelineProps {
@@ -15,14 +15,11 @@ export function ChunkTimeline({
   onChunkClick,
 }: ChunkTimelineProps) {
   const c = (d: string, l: string) => (dark ? d : l);
-  const containerRef = useRef<HTMLDivElement>(null);
   const [hoveredChunk, setHoveredChunk] = useState<string | null>(null);
 
-  const { bars, ticks, minTime, timeSpan } = useMemo(() => {
-    if (chunks.length === 0)
-      return { bars: [], ticks: [], minTime: 0, timeSpan: 0 };
+  const { bars, ticks } = useMemo(() => {
+    if (chunks.length === 0) return { bars: [], ticks: [] };
 
-    // Compute global time range across all chunks.
     let globalMin = Infinity;
     let globalMax = -Infinity;
 
@@ -49,46 +46,41 @@ export function ChunkTimeline({
       bytes: bigint;
     }[];
 
-    if (parsed.length === 0)
-      return { bars: [], ticks: [], minTime: 0, timeSpan: 0 };
+    if (parsed.length === 0) return { bars: [], ticks: [] };
 
     for (const p of parsed) {
       if (p.start < globalMin) globalMin = p.start;
       if (p.end > globalMax) globalMax = p.end;
     }
 
-    // Add 2% padding on each side.
-    const rawSpan = globalMax - globalMin || 60_000; // at least 1 minute
+    const rawSpan = globalMax - globalMin || 60_000;
     const padding = rawSpan * 0.02;
     const min = globalMin - padding;
     const span = rawSpan + padding * 2;
 
-    // Sort oldest first (bottom to top visually, but we render top to bottom).
+    // Sort by start time.
     parsed.sort((a, b) => a.start - b.start);
 
     const bars = parsed.map((p) => ({
       ...p,
       x: (p.start - min) / span,
-      w: Math.max((p.end - p.start) / span, 0.003), // min 0.3% width so tiny chunks are visible
+      w: Math.max((p.end - p.start) / span, 0.005), // min 0.5% so tiny chunks stay visible
     }));
 
-    // Generate time axis ticks.
     const ticks = generateTicks(min, min + span, 6);
 
-    return { bars, ticks, minTime: min, timeSpan: span };
+    return { bars, ticks };
   }, [chunks]);
 
   if (bars.length === 0) return null;
 
-  const barHeight = 20;
-  const barGap = 3;
-  const axisHeight = 22;
-  const topPad = 4;
-  const chartHeight =
-    topPad + bars.length * (barHeight + barGap) - barGap + axisHeight;
+  const barHeight = 24;
+  const axisHeight = 20;
+  const topPad = 2;
+  const chartHeight = topPad + barHeight + axisHeight;
 
   return (
-    <div ref={containerRef} className="w-full px-4 pt-3 pb-1">
+    <div className="w-full px-4 pt-3 pb-1">
       <div
         className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
       >
@@ -101,25 +93,25 @@ export function ChunkTimeline({
         preserveAspectRatio="none"
         className="block"
       >
-        {/* Grid lines at tick positions */}
+        {/* Grid lines */}
         {ticks.map((tick, i) => (
           <line
             key={i}
             x1={tick.x * 1000}
             y1={topPad}
             x2={tick.x * 1000}
-            y2={chartHeight - axisHeight}
+            y2={topPad + barHeight}
             stroke={dark ? "#222838" : "#e4ddd4"}
             strokeWidth="1"
             vectorEffect="non-scaling-stroke"
           />
         ))}
 
-        {/* Chunk bars */}
-        {bars.map((bar, i) => {
-          const y = topPad + i * (barHeight + barGap);
+        {/* Single row of chunk bars */}
+        {bars.map((bar) => {
           const isHovered = hoveredChunk === bar.id;
           const isSelected = selectedChunkId === bar.id;
+          const highlighted = isHovered || isSelected;
 
           return (
             <g
@@ -129,38 +121,37 @@ export function ChunkTimeline({
               onMouseLeave={() => setHoveredChunk(null)}
               onClick={() => onChunkClick?.(bar.id)}
             >
-              {/* Bar */}
               <rect
                 x={bar.x * 1000}
-                y={y}
+                y={topPad}
                 width={bar.w * 1000}
                 height={barHeight}
-                rx="3"
-                ry="3"
+                rx="2"
+                ry="2"
                 fill={
                   bar.sealed
-                    ? isHovered || isSelected
+                    ? highlighted
                       ? dark
                         ? "#d4a070"
                         : "#c8875c"
                       : dark
                         ? "#c8875c"
                         : "#a06b44"
-                    : isHovered || isSelected
+                    : highlighted
                       ? "#6aaa7a"
                       : "#5a9a6a"
                 }
-                opacity={isHovered || isSelected ? 1 : 0.8}
+                opacity={highlighted ? 1 : 0.75}
                 vectorEffect="non-scaling-stroke"
                 stroke={isSelected ? (dark ? "#f0d0a0" : "#7a4a28") : "none"}
                 strokeWidth={isSelected ? "2" : "0"}
               />
 
-              {/* Active chunk pulse indicator */}
+              {/* Active chunk pulse */}
               {!bar.sealed && (
                 <circle
-                  cx={bar.x * 1000 + bar.w * 1000 - 2}
-                  cy={y + barHeight / 2}
+                  cx={bar.x * 1000 + bar.w * 1000 - 4}
+                  cy={topPad + barHeight / 2}
                   r="3"
                   fill="#5a9a6a"
                   vectorEffect="non-scaling-stroke"
@@ -174,16 +165,16 @@ export function ChunkTimeline({
                 </circle>
               )}
 
-              {/* Chunk ID label (only if bar is wide enough) */}
-              {bar.w * 1000 > 60 && (
+              {/* Label if wide enough */}
+              {bar.w * 1000 > 55 && (
                 <text
-                  x={bar.x * 1000 + 6}
-                  y={y + barHeight / 2}
+                  x={bar.x * 1000 + 5}
+                  y={topPad + barHeight / 2}
                   dominantBaseline="central"
-                  fontSize="10"
+                  fontSize="9"
                   fontFamily="var(--font-mono, monospace)"
                   fill={dark ? "#0d0f12" : "#faf8f4"}
-                  opacity={0.9}
+                  opacity={0.85}
                   style={{ pointerEvents: "none" }}
                 >
                   {bar.id.slice(0, 8)}
@@ -196,9 +187,9 @@ export function ChunkTimeline({
         {/* Time axis */}
         <line
           x1="0"
-          y1={chartHeight - axisHeight}
+          y1={topPad + barHeight}
           x2="1000"
-          y2={chartHeight - axisHeight}
+          y2={topPad + barHeight}
           stroke={dark ? "#2a3040" : "#d8d0c4"}
           strokeWidth="1"
           vectorEffect="non-scaling-stroke"
@@ -207,16 +198,16 @@ export function ChunkTimeline({
           <g key={i}>
             <line
               x1={tick.x * 1000}
-              y1={chartHeight - axisHeight}
+              y1={topPad + barHeight}
               x2={tick.x * 1000}
-              y2={chartHeight - axisHeight + 4}
+              y2={topPad + barHeight + 4}
               stroke={dark ? "#2a3040" : "#d8d0c4"}
               strokeWidth="1"
               vectorEffect="non-scaling-stroke"
             />
             <text
               x={tick.x * 1000}
-              y={chartHeight - 4}
+              y={chartHeight - 2}
               textAnchor="middle"
               fontSize="9"
               fontFamily="var(--font-mono, monospace)"
@@ -231,7 +222,7 @@ export function ChunkTimeline({
 
       {/* Tooltip — always reserve space to prevent layout shift */}
       <div
-        className={hoveredChunk ? "opacity-100" : "opacity-0"}
+        className={`transition-opacity duration-100 ${hoveredChunk ? "opacity-100" : "opacity-0"}`}
         aria-hidden={!hoveredChunk}
       >
         <ChunkTooltip
@@ -315,7 +306,6 @@ function generateTicks(
   const span = maxMs - minMs;
   if (span <= 0) return [];
 
-  // Pick a nice tick interval.
   const rawInterval = span / targetCount;
   const niceIntervals = [
     1_000,
@@ -323,24 +313,24 @@ function generateTicks(
     5_000,
     10_000,
     15_000,
-    30_000, // seconds
+    30_000,
     60_000,
     2 * 60_000,
     5 * 60_000,
     10 * 60_000,
     15 * 60_000,
-    30 * 60_000, // minutes
+    30 * 60_000,
     3600_000,
     2 * 3600_000,
     4 * 3600_000,
     6 * 3600_000,
-    12 * 3600_000, // hours
+    12 * 3600_000,
     86400_000,
     2 * 86400_000,
-    7 * 86400_000, // days
+    7 * 86400_000,
     30 * 86400_000,
     90 * 86400_000,
-    365 * 86400_000, // months/years
+    365 * 86400_000,
   ];
 
   let interval = niceIntervals[0];
