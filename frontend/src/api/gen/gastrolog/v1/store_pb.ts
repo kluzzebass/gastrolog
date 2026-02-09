@@ -312,6 +312,11 @@ export class ChunkMeta extends Message<ChunkMeta> {
    */
   recordCount = protoInt64.zero;
 
+  /**
+   * @generated from field: int64 bytes = 6;
+   */
+  bytes = protoInt64.zero;
+
   constructor(data?: PartialMessage<ChunkMeta>) {
     super();
     proto3.util.initPartial(data, this);
@@ -325,6 +330,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
     { no: 3, name: "end_ts", kind: "message", T: Timestamp },
     { no: 4, name: "sealed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 5, name: "record_count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 6, name: "bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkMeta {

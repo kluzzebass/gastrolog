@@ -66,6 +66,7 @@ message ChunkMeta {
   google.protobuf.Timestamp end_ts = 3;
   bool sealed = 4;
   int64 record_count = 5;
+  int64 bytes = 6;
 }
 
 message GetChunkRequest {

@@ -35,6 +35,20 @@ export function useChunks(storeId: string) {
   });
 }
 
+export function useIndexes(storeId: string, chunkId: string) {
+  return useQuery({
+    queryKey: ["indexes", storeId, chunkId],
+    queryFn: async () => {
+      const response = await storeClient.getIndexes({
+        store: storeId,
+        chunkId,
+      });
+      return response;
+    },
+    enabled: !!storeId && !!chunkId,
+  });
+}
+
 export function useStats(storeId?: string) {
   return useQuery({
     queryKey: ["stats", storeId ?? "all"],

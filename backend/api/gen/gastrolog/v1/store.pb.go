@@ -361,6 +361,7 @@ type ChunkMeta struct {
 	EndTs         *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=end_ts,json=endTs,proto3" json:"end_ts,omitempty"`
 	Sealed        bool                   `protobuf:"varint,4,opt,name=sealed,proto3" json:"sealed,omitempty"`
 	RecordCount   int64                  `protobuf:"varint,5,opt,name=record_count,json=recordCount,proto3" json:"record_count,omitempty"`
+	Bytes         int64                  `protobuf:"varint,6,opt,name=bytes,proto3" json:"bytes,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -426,6 +427,13 @@ func (x *ChunkMeta) GetSealed() bool {
 func (x *ChunkMeta) GetRecordCount() int64 {
 	if x != nil {
 		return x.RecordCount
+	}
+	return 0
+}
+
+func (x *ChunkMeta) GetBytes() int64 {
+	if x != nil {
+		return x.Bytes
 	}
 	return 0
 }
@@ -1104,13 +1112,14 @@ const file_gastrolog_v1_store_proto_rawDesc = "" +
 	"\x11ListChunksRequest\x12\x14\n" +
 	"\x05store\x18\x01 \x01(\tR\x05store\"E\n" +
 	"\x12ListChunksResponse\x12/\n" +
-	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\xc0\x01\n" +
+	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\xd6\x01\n" +
 	"\tChunkMeta\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x125\n" +
 	"\bstart_ts\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\astartTs\x121\n" +
 	"\x06end_ts\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x05endTs\x12\x16\n" +
 	"\x06sealed\x18\x04 \x01(\bR\x06sealed\x12!\n" +
-	"\frecord_count\x18\x05 \x01(\x03R\vrecordCount\"B\n" +
+	"\frecord_count\x18\x05 \x01(\x03R\vrecordCount\x12\x14\n" +
+	"\x05bytes\x18\x06 \x01(\x03R\x05bytes\"B\n" +
 	"\x0fGetChunkRequest\x12\x14\n" +
 	"\x05store\x18\x01 \x01(\tR\x05store\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\tR\achunkId\"A\n" +

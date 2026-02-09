@@ -351,6 +351,7 @@ func chunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
 		EndTs:       timestamppb.New(meta.EndTS),
 		Sealed:      meta.Sealed,
 		RecordCount: meta.RecordCount,
+		Bytes:       meta.Bytes,
 	}
 }
 

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useStores, useChunks } from "../../api/hooks";
+import { useStores, useChunks, useIndexes } from "../../api/hooks";
 
 export function StoresPanel({ dark }: { dark: boolean }) {
   const c = (d: string, l: string) => (dark ? d : l);
@@ -33,11 +33,10 @@ export function StoresPanel({ dark }: { dark: boolean }) {
           key={store.id}
           storeId={store.id}
           recordCount={store.recordCount}
+          chunkCount={store.chunkCount}
           dark={dark}
           expanded={expanded === store.id}
-          onToggle={() =>
-            setExpanded(expanded === store.id ? null : store.id)
-          }
+          onToggle={() => setExpanded(expanded === store.id ? null : store.id)}
         />
       ))}
     </div>
@@ -47,12 +46,14 @@ export function StoresPanel({ dark }: { dark: boolean }) {
 function StoreCard({
   storeId,
   recordCount,
+  chunkCount,
   dark,
   expanded,
   onToggle,
 }: {
   storeId: string;
   recordCount: bigint;
+  chunkCount: bigint;
   dark: boolean;
   expanded: boolean;
   onToggle: () => void;
@@ -88,6 +89,8 @@ function StoreCard({
           <span
             className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
           >
+            {Number(chunkCount).toLocaleString()} chunks
+            {" \u00B7 "}
             {recordCount.toLocaleString()} records
           </span>
         </div>
@@ -108,6 +111,7 @@ function StoreCard({
 function ChunkList({ storeId, dark }: { storeId: string; dark: boolean }) {
   const c = (d: string, l: string) => (dark ? d : l);
   const { data: chunks, isLoading } = useChunks(storeId);
+  const [expandedChunk, setExpandedChunk] = useState<string | null>(null);
 
   if (isLoading) {
     return (
@@ -140,7 +144,7 @@ function ChunkList({ storeId, dark }: { storeId: string; dark: boolean }) {
     <div>
       {/* Column headers */}
       <div
-        className={`grid grid-cols-[1fr_2fr_auto_auto] gap-3 px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c(
+        className={`grid grid-cols-[1fr_2fr_auto_auto_auto] gap-3 px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c(
           "text-text-ghost border-ink-border-subtle",
           "text-light-text-ghost border-light-border-subtle",
         )}`}
@@ -149,57 +153,147 @@ function ChunkList({ storeId, dark }: { storeId: string; dark: boolean }) {
         <span>Time Range</span>
         <span>Status</span>
         <span className="text-right">Records</span>
+        <span className="text-right">Size</span>
       </div>
 
       {/* Rows */}
       {sorted.map((chunk) => {
         const start = chunk.startTs?.toDate();
         const end = chunk.endTs?.toDate();
+        const isExpanded = expandedChunk === chunk.id;
 
         return (
           <div
             key={chunk.id}
-            className={`grid grid-cols-[1fr_2fr_auto_auto] gap-3 px-4 py-2 text-[0.85em] border-b last:border-b-0 transition-colors ${c(
-              "border-ink-border-subtle hover:bg-ink-hover",
-              "border-light-border-subtle hover:bg-light-hover",
-            )}`}
+            className={`border-b last:border-b-0 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
           >
-            <span
-              className={`font-mono truncate ${c("text-text-muted", "text-light-text-muted")}`}
-              title={chunk.id}
+            <div
+              className={`grid grid-cols-[1fr_2fr_auto_auto_auto] gap-3 px-4 py-2 text-[0.85em] cursor-pointer transition-colors ${c(
+                "hover:bg-ink-hover",
+                "hover:bg-light-hover",
+              )} ${isExpanded ? c("bg-ink-hover", "bg-light-hover") : ""}`}
+              onClick={() => setExpandedChunk(isExpanded ? null : chunk.id)}
             >
-              {chunk.id}
-            </span>
-            <span
-              className={`text-[0.95em] ${c("text-text-muted", "text-light-text-muted")}`}
-            >
-              {start ? formatTime(start) : "—"}
               <span
-                className={`mx-1.5 ${c("text-text-ghost", "text-light-text-ghost")}`}
+                className={`font-mono truncate ${c("text-text-muted", "text-light-text-muted")}`}
+                title={chunk.id}
               >
-                →
+                {chunk.id}
               </span>
-              {end ? formatTime(end) : "—"}
-            </span>
-            <span>
-              {chunk.sealed ? (
-                <span className="px-1.5 py-0.5 text-[0.8em] rounded bg-copper/15 text-copper">
-                  sealed
+              <span
+                className={`text-[0.95em] ${c("text-text-muted", "text-light-text-muted")}`}
+              >
+                {start ? formatTime(start) : "\u2014"}
+                <span
+                  className={`mx-1.5 ${c("text-text-ghost", "text-light-text-ghost")}`}
+                >
+                  {"\u2192"}
                 </span>
-              ) : (
-                <span className="px-1.5 py-0.5 text-[0.8em] rounded bg-severity-info/15 text-severity-info">
-                  active
-                </span>
-              )}
-            </span>
-            <span
-              className={`text-right font-mono ${c("text-text-muted", "text-light-text-muted")}`}
-            >
-              {Number(chunk.recordCount).toLocaleString()}
-            </span>
+                {end ? formatTime(end) : "\u2014"}
+              </span>
+              <span>
+                {chunk.sealed ? (
+                  <span className="px-1.5 py-0.5 text-[0.8em] rounded bg-copper/15 text-copper">
+                    sealed
+                  </span>
+                ) : (
+                  <span className="px-1.5 py-0.5 text-[0.8em] rounded bg-severity-info/15 text-severity-info">
+                    active
+                  </span>
+                )}
+              </span>
+              <span
+                className={`text-right font-mono ${c("text-text-muted", "text-light-text-muted")}`}
+              >
+                {Number(chunk.recordCount).toLocaleString()}
+              </span>
+              <span
+                className={`text-right font-mono ${c("text-text-muted", "text-light-text-muted")}`}
+              >
+                {formatBytes(Number(chunk.bytes))}
+              </span>
+            </div>
+
+            {/* Expanded: index info */}
+            {isExpanded && (
+              <ChunkDetail storeId={storeId} chunkId={chunk.id} dark={dark} />
+            )}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function ChunkDetail({
+  storeId,
+  chunkId,
+  dark,
+}: {
+  storeId: string;
+  chunkId: string;
+  dark: boolean;
+}) {
+  const c = (d: string, l: string) => (dark ? d : l);
+  const { data, isLoading } = useIndexes(storeId, chunkId);
+
+  return (
+    <div className={`px-4 py-3 ${c("bg-ink-raised", "bg-light-bg")}`}>
+      <div
+        className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
+      >
+        Indexes
+      </div>
+
+      {isLoading ? (
+        <div
+          className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+        >
+          Loading indexes...
+        </div>
+      ) : !data?.indexes || data.indexes.length === 0 ? (
+        <div
+          className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+        >
+          No indexes.
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {data.indexes.map((idx) => (
+            <div
+              key={idx.name}
+              className={`flex items-center gap-3 text-[0.85em]`}
+            >
+              <span
+                className={`font-mono w-16 ${c("text-text-bright", "text-light-text-bright")}`}
+              >
+                {idx.name}
+              </span>
+              {idx.exists ? (
+                <>
+                  <span className="px-1.5 py-0.5 text-[0.8em] rounded bg-severity-info/15 text-severity-info">
+                    ok
+                  </span>
+                  <span
+                    className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}
+                  >
+                    {Number(idx.entryCount).toLocaleString()} entries
+                  </span>
+                  <span
+                    className={`font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+                  >
+                    {formatBytes(Number(idx.sizeBytes))}
+                  </span>
+                </>
+              ) : (
+                <span className="px-1.5 py-0.5 text-[0.8em] rounded bg-severity-warn/15 text-severity-warn">
+                  missing
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -212,4 +306,13 @@ function formatTime(date: Date): string {
     minute: "2-digit",
     second: "2-digit",
   });
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024)
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
