@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { useThemeClass } from "../hooks/useThemeClass";
 import type { HistogramData } from "../api/hooks/useHistogram";
 
 const SEVERITY_COLORS = [
@@ -37,7 +38,7 @@ export function HistogramChart({
   const maxCount = Math.max(...buckets.map((b) => b.count), 1);
   const totalCount = buckets.reduce((sum, b) => sum + b.count, 0);
   const barHeight = 48;
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
 
   const getBucketIndex = (clientX: number): number => {
     const el = barsRef.current;

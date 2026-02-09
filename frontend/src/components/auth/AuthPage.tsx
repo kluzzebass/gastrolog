@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { useThemeClass } from "../../hooks/useThemeClass";
+import { SpinnerIcon } from "../icons";
 import { ConnectError } from "@connectrpc/connect";
 import { useAuthStatus, useLogin, useRegister } from "../../api/hooks";
 
@@ -50,7 +52,7 @@ export function AuthPage({ mode }: AuthPageProps) {
     usernameRef.current?.focus();
   }, [mode]);
 
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const isRegister = mode === "register";
   const isPending = login.isPending || register.isPending;
   const mismatch =
@@ -233,27 +235,7 @@ export function AuthPage({ mode }: AuthPageProps) {
                 : "hover:brightness-110 active:scale-[0.98]"
             } ${c("bg-copper text-ink", "bg-copper text-white")}`}
           >
-            {isPending && (
-              <svg
-                className="animate-spin h-4 w-4"
-                viewBox="0 0 24 24"
-                fill="none"
-              >
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="3"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                />
-              </svg>
-            )}
+            {isPending && <SpinnerIcon className="animate-spin h-4 w-4" />}
             {isRegister ? "Create Account" : "Sign In"}
           </button>
         </form>

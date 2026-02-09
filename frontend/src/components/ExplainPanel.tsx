@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { useThemeClass } from "../hooks/useThemeClass";
 import { ChunkPlan, BranchPlan, PipelineStep } from "../api/client";
 import { formatChunkId } from "../utils";
 
@@ -104,7 +105,7 @@ export function ExplainPanel({
   expression: string;
   dark: boolean;
 }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const [highlightRanges, setHighlightRanges] = useState<Range[]>([]);
 
   const handleStepHover = useCallback(
@@ -195,7 +196,7 @@ function ExpressionBox({
   dark: boolean;
   highlightRanges: Range[];
 }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const segments = buildSegments(expression, highlightRanges);
 
   return (
@@ -219,7 +220,7 @@ function ExpressionBox({
 }
 
 function CostSummary({ chunks, dark }: { chunks: ChunkPlan[]; dark: boolean }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
 
   const totalRecords = chunks.reduce(
     (sum, ch) => sum + Number(ch.recordCount),
@@ -317,7 +318,7 @@ function ExplainChunk({
   onStepHover: (step: PipelineStep) => void;
   onStepLeave: () => void;
 }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const isSkipped = plan.scanMode === "skipped";
   const hasBranches = plan.branchPlans.length > 0;
   const totalRecords = Number(plan.recordCount);
@@ -515,7 +516,7 @@ function ExplainBranch({
   onStepHover: (step: PipelineStep) => void;
   onStepLeave: () => void;
 }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
 
   return (
     <div
@@ -592,7 +593,7 @@ function PipelineFunnel({
   onStepHover?: (step: PipelineStep) => void;
   onStepLeave?: () => void;
 }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const maxVal = Math.max(
     totalRecords,
     ...steps.map((s) => Number(s.inputEstimate)),

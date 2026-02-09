@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { useClickOutside } from "../hooks/useClickOutside";
+import { useThemeClass } from "../hooks/useThemeClass";
 import type { SavedQuery } from "../api/gen/gastrolog/v1/config_pb";
 
 export function SavedQueries({
@@ -21,33 +23,14 @@ export function SavedQueries({
   const ref = useRef<HTMLDivElement>(null);
   const [saveName, setSaveName] = useState("");
   const nameInputRef = useRef<HTMLInputElement>(null);
-
-  // Close on click outside.
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        onClose();
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [onClose]);
-
-  // Close on Escape.
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
+  useClickOutside(ref, onClose);
 
   // Auto-focus the name input.
   useEffect(() => {
     nameInputRef.current?.focus();
   }, []);
 
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
 
   const handleSave = () => {
     const name = saveName.trim();

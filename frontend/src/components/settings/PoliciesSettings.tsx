@@ -4,6 +4,7 @@ import {
   usePutRotationPolicy,
   useDeleteRotationPolicy,
 } from "../../api/hooks";
+import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
 import { SettingsCard } from "./SettingsCard";
 import { FormField, TextInput, NumberInput } from "./FormField";
@@ -92,7 +93,7 @@ function CronField({
   onChange: (v: string) => void;
   dark: boolean;
 }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const trimmed = value.trim();
   const validation = trimmed ? validateCron(trimmed) : null;
   const description = validation?.valid ? describeCron(trimmed) : null;
@@ -128,7 +129,7 @@ function CronField({
 }
 
 export function PoliciesSettings({ dark }: { dark: boolean }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putPolicy = usePutRotationPolicy();
   const deletePolicy = useDeleteRotationPolicy();

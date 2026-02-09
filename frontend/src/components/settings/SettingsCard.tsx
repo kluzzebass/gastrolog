@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useThemeClass } from "../../hooks/useThemeClass";
 
 interface SettingsCardProps {
   id: string;
@@ -23,7 +24,7 @@ export function SettingsCard({
   children,
   status,
 }: SettingsCardProps) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   return (

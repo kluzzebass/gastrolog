@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useThemeClass } from "../../hooks/useThemeClass";
 import {
   useConfig,
   usePutRetentionPolicy,
@@ -86,7 +87,7 @@ interface PolicyEdit {
 }
 
 export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putPolicy = usePutRetentionPolicy();
   const deletePolicy = useDeleteRetentionPolicy();

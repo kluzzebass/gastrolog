@@ -7,6 +7,7 @@ import {
   useDeleteUser,
   useCurrentUser,
 } from "../../api/hooks/useAuth";
+import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
 import { SettingsCard } from "./SettingsCard";
 import { FormField, TextInput, SelectInput } from "./FormField";
@@ -17,7 +18,7 @@ const roleOptions = [
 ];
 
 export function UsersSettings({ dark }: { dark: boolean }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const { data: users, isLoading } = useListUsers();
   const createUser = useCreateUser();
   const resetPassword = useResetPassword();
@@ -324,7 +325,7 @@ function PasswordInput({
   placeholder?: string;
   dark: boolean;
 }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   return (
     <div className="relative">
       <input

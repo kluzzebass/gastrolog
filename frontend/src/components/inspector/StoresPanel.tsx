@@ -1,9 +1,10 @@
 import { useState } from "react";
+import { useThemeClass } from "../../hooks/useThemeClass";
 import { useStores, useChunks, useIndexes } from "../../api/hooks";
 import { ChunkTimeline } from "./ChunkTimeline";
 
 export function StoresPanel({ dark }: { dark: boolean }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const { data: stores, isLoading } = useStores();
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -62,7 +63,7 @@ function StoreCard({
   expanded: boolean;
   onToggle: () => void;
 }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
 
   return (
     <div
@@ -118,7 +119,7 @@ function StoreCard({
 }
 
 function ChunkList({ storeId, dark }: { storeId: string; dark: boolean }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const { data: chunks, isLoading } = useChunks(storeId);
   const [expandedChunk, setExpandedChunk] = useState<string | null>(null);
 
@@ -255,7 +256,7 @@ function ChunkDetail({
   chunkId: string;
   dark: boolean;
 }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const { data, isLoading } = useIndexes(storeId, chunkId);
 
   return (

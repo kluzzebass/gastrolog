@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useConfig, usePutIngester, useDeleteIngester } from "../../api/hooks";
+import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
 import { SettingsCard } from "./SettingsCard";
 import { FormField, TextInput, SelectInput } from "./FormField";
@@ -12,7 +13,7 @@ const ingesterTypes = [
 ];
 
 export function IngestersSettings({ dark }: { dark: boolean }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putIngester = usePutIngester();
   const deleteIngester = useDeleteIngester();

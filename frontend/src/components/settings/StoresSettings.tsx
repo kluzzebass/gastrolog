@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useThemeClass } from "../../hooks/useThemeClass";
 import { useConfig, usePutStore, useDeleteStore } from "../../api/hooks";
 import { useToast } from "../Toast";
 import { SettingsCard } from "./SettingsCard";
@@ -6,7 +7,7 @@ import { FormField, TextInput, SelectInput } from "./FormField";
 import { StoreParamsForm } from "./StoreParamsForm";
 
 export function StoresSettings({ dark }: { dark: boolean }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putStore = usePutStore();
   const deleteStore = useDeleteStore();

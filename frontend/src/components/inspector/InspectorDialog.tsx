@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useThemeClass } from "../../hooks/useThemeClass";
 import { StoresPanel } from "./StoresPanel";
 import { IngestersPanel } from "./IngestersPanel";
 
@@ -29,7 +30,7 @@ export function InspectorDialog({
   onTabChange,
   onClose,
 }: InspectorDialogProps) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -107,7 +108,7 @@ export function InspectorDialog({
 }
 
 function Placeholder({ tab, dark }: { tab: InspectorTab; dark: boolean }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const labels: Record<InspectorTab, string> = {
     stores: "Store health indicators will appear here.",
     ingesters: "Ingester metrics will appear here.",

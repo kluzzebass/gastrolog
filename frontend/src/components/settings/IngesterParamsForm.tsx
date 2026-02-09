@@ -1,4 +1,5 @@
 import { FormField, TextInput, NumberInput } from "./FormField";
+import { useThemeClass } from "../../hooks/useThemeClass";
 
 interface IngesterParamsFormProps {
   ingesterType: string;
@@ -73,7 +74,7 @@ function ChatterboxForm({
   onChange: (params: Record<string, string>) => void;
   dark: boolean;
 }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const set = (key: string, value: string) =>
     onChange({ ...params, [key]: value });
   const get = (key: string) => params[key] ?? "";

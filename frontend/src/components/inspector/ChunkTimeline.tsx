@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useThemeClass } from "../../hooks/useThemeClass";
 import type { ChunkMeta } from "../../api/gen/gastrolog/v1/store_pb";
 
 interface ChunkTimelineProps {
@@ -14,7 +15,7 @@ export function ChunkTimeline({
   selectedChunkId,
   onChunkClick,
 }: ChunkTimelineProps) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const [hoveredChunk, setHoveredChunk] = useState<string | null>(null);
 
   const { bars, ticks } = useMemo(() => {
@@ -264,7 +265,7 @@ function ChunkTooltip({
   };
   dark: boolean;
 }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const start = new Date(chunk.start);
   const end = new Date(chunk.end);
   const duration = chunk.end - chunk.start;

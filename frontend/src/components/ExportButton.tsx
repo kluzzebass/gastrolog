@@ -1,4 +1,7 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef } from "react";
+import { useClickOutside } from "../hooks/useClickOutside";
+import { useThemeClass } from "../hooks/useThemeClass";
+import { DownloadIcon } from "./icons";
 import type { ProtoRecord } from "../utils";
 
 type Format = "json" | "csv";
@@ -59,6 +62,10 @@ export function ExportButton({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  useClickOutside(
+    ref,
+    useCallback(() => setOpen(false), []),
+  );
 
   const handleExport = useCallback(
     (format: Format) => {
@@ -73,19 +80,7 @@ export function ExportButton({
     [records],
   );
 
-  // Close on click outside.
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
-
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
 
   return (
     <div className="relative" ref={ref}>
@@ -98,19 +93,7 @@ export function ExportButton({
           "text-light-text-muted hover:text-copper hover:bg-light-hover",
         )}`}
       >
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="w-4 h-4"
-        >
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-          <polyline points="7 10 12 15 17 10" />
-          <line x1="12" y1="15" x2="12" y2="3" />
-        </svg>
+        <DownloadIcon className="w-4 h-4" />
       </button>
       {open && (
         <div

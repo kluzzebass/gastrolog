@@ -1,4 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
+import { useClickOutside } from "../hooks/useClickOutside";
+import { useThemeClass } from "../hooks/useThemeClass";
 import type { HistoryEntry } from "../hooks/useQueryHistory";
 
 export function QueryHistory({
@@ -17,28 +19,9 @@ export function QueryHistory({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  useClickOutside(ref, onClose);
 
-  // Close on click outside.
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        onClose();
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [onClose]);
-
-  // Close on Escape.
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
-
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
 
   if (entries.length === 0) return null;
 

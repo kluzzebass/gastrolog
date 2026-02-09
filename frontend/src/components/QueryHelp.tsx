@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useThemeClass } from "../hooks/useThemeClass";
 
 export function QueryHelp({
   dark,
@@ -9,7 +10,7 @@ export function QueryHelp({
   onClose: () => void;
   onExample: (ex: string) => void;
 }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

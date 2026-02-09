@@ -1,11 +1,12 @@
 import { useState } from "react";
+import { useThemeClass } from "../../hooks/useThemeClass";
 import { useConfig, usePutFilter, useDeleteFilter } from "../../api/hooks";
 import { useToast } from "../Toast";
 import { SettingsCard } from "./SettingsCard";
 import { FormField, TextInput } from "./FormField";
 
 function FilterDescription({ dark }: { dark: boolean }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const code = `font-mono text-[0.95em] px-1 py-px rounded ${c("bg-ink-well text-copper-dim", "bg-light-well text-copper")}`;
   return (
     <div className="flex flex-col gap-1.5">
@@ -40,7 +41,7 @@ function FilterDescription({ dark }: { dark: boolean }) {
 }
 
 export function FiltersSettings({ dark }: { dark: boolean }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putFilter = usePutFilter();
   const deleteFilter = useDeleteFilter();

@@ -1,4 +1,6 @@
 import { useEffect, useRef } from "react";
+import { useClickOutside } from "../hooks/useClickOutside";
+import { useThemeClass } from "../hooks/useThemeClass";
 
 export function QueryAutocomplete({
   suggestions,
@@ -15,24 +17,14 @@ export function QueryAutocomplete({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLDivElement>(null);
-
-  // Close on click outside.
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        onClose();
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [onClose]);
+  useClickOutside(ref, onClose);
 
   // Scroll selected item into view.
   useEffect(() => {
     selectedRef.current?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex]);
 
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
 
   if (suggestions.length === 0) return null;
 
@@ -47,8 +39,14 @@ export function QueryAutocomplete({
           ref={i === selectedIndex ? selectedRef : undefined}
           className={`px-3 py-1.5 font-mono text-[0.8em] cursor-pointer transition-colors ${
             i === selectedIndex
-              ? c("bg-ink-hover text-text-bright", "bg-light-hover text-light-text-bright")
-              : c("text-text-muted hover:bg-ink-hover", "text-light-text-muted hover:bg-light-hover")
+              ? c(
+                  "bg-ink-hover text-text-bright",
+                  "bg-light-hover text-light-text-bright",
+                )
+              : c(
+                  "text-text-muted hover:bg-ink-hover",
+                  "text-light-text-muted hover:bg-light-hover",
+                )
           }`}
           onMouseDown={(e) => {
             e.preventDefault(); // prevent textarea blur

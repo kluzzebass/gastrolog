@@ -1,4 +1,5 @@
 import type { ProtoRecord } from "../utils";
+import { useThemeClass } from "../hooks/useThemeClass";
 import {
   extractKVPairs,
   relativeTime,
@@ -34,7 +35,7 @@ export function DetailPanelContent({
   contextReversed?: boolean;
   onContextRecordSelect?: (record: ProtoRecord) => void;
 }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const rawText = new TextDecoder().decode(record.raw);
   const rawBytes = record.raw.length;
 

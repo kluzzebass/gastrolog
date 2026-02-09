@@ -1,8 +1,9 @@
 import { useState } from "react";
+import { useThemeClass } from "../../hooks/useThemeClass";
 import { useIngesters, useIngesterStatus } from "../../api/hooks";
 
 export function IngestersPanel({ dark }: { dark: boolean }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const { data: ingesters, isLoading } = useIngesters();
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -58,7 +59,7 @@ function IngesterCard({
   expanded: boolean;
   onToggle: () => void;
 }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
 
   return (
     <div
@@ -120,7 +121,7 @@ function IngesterCard({
 }
 
 function IngesterDetail({ id, dark }: { id: string; dark: boolean }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const { data, isLoading } = useIngesterStatus(id);
 
   if (isLoading) {
@@ -144,9 +145,16 @@ function IngesterDetail({ id, dark }: { id: string; dark: boolean }) {
   }
 
   const stats = [
-    { label: "Messages ingested", value: Number(data.messagesIngested).toLocaleString() },
+    {
+      label: "Messages ingested",
+      value: Number(data.messagesIngested).toLocaleString(),
+    },
     { label: "Bytes ingested", value: formatBytes(Number(data.bytesIngested)) },
-    { label: "Errors", value: Number(data.errors).toLocaleString(), isError: Number(data.errors) > 0 },
+    {
+      label: "Errors",
+      value: Number(data.errors).toLocaleString(),
+      isError: Number(data.errors) > 0,
+    },
   ];
 
   return (
@@ -158,7 +166,10 @@ function IngesterDetail({ id, dark }: { id: string; dark: boolean }) {
       </div>
       <div className="flex flex-col gap-1.5">
         {stats.map((stat) => (
-          <div key={stat.label} className="flex items-center gap-3 text-[0.85em]">
+          <div
+            key={stat.label}
+            className="flex items-center gap-3 text-[0.85em]"
+          >
             <span
               className={`w-36 ${c("text-text-muted", "text-light-text-muted")}`}
             >

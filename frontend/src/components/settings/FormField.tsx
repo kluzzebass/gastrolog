@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useThemeClass } from "../../hooks/useThemeClass";
 
 interface FormFieldProps {
   label: string;
@@ -13,7 +14,7 @@ export function FormField({
   dark,
   children,
 }: FormFieldProps) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   return (
     <div className="flex flex-col gap-1">
       <label
@@ -50,7 +51,7 @@ export function TextInput({
   disabled,
   mono,
 }: TextInputProps) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   return (
     <input
       type="text"
@@ -83,7 +84,7 @@ export function SelectInput({
   dark,
   disabled,
 }: SelectInputProps) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   return (
     <select
       value={value}
@@ -120,7 +121,7 @@ export function NumberInput({
   disabled,
   min,
 }: NumberInputProps) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   return (
     <input
       type="text"
@@ -150,7 +151,7 @@ interface ParamsEditorProps {
 }
 
 export function ParamsEditor({ params, onChange, dark }: ParamsEditorProps) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
 

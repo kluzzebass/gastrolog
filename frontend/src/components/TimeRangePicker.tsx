@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useThemeClass } from "../hooks/useThemeClass";
 import {
   startOfMonth,
   endOfMonth,
@@ -30,7 +31,7 @@ export function TimeRangePicker({
   onPresetClick: (preset: string) => void;
   onApply: (start: Date, end: Date) => void;
 }) {
-  const c = (d: string, l: string) => (dark ? d : l);
+  const c = useThemeClass(dark);
   const [viewMonth, setViewMonth] = useState(() => rangeEnd ?? new Date());
   const [pendingStart, setPendingStart] = useState<Date | null>(rangeStart);
   const [pendingEnd, setPendingEnd] = useState<Date | null>(rangeEnd);
