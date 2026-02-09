@@ -518,11 +518,13 @@ function AppContent() {
   const startFollow = () => {
     setShowHistory(false);
     setShowSavedQueries(false);
-    // Strip time bounds but keep reverse=.
+    setFollowReversed(isReversed);
+    // Strip time bounds and reverse= (follow mode uses local state for sort).
     const stripped = draft
       .replace(/\blast=\S+/g, "")
       .replace(/\bstart=\S+/g, "")
       .replace(/\bend=\S+/g, "")
+      .replace(/\breverse=\S+/g, "")
       .replace(/\s+/g, " ")
       .trim();
     navigate({ to: "/follow", search: { q: stripped }, replace: false });
@@ -535,9 +537,10 @@ function AppContent() {
     setRecords([...followRecords]);
     skipNextSearchRef.current = true;
 
-    // Restore time range when switching back to search.
+    // Restore time range when switching back to search,
+    // preserving the sort direction from follow mode.
     const base = stripTimeRange(draft);
-    const restored = injectTimeRange(base, timeRange);
+    const restored = injectTimeRange(base, timeRange, followReversed);
     navigate({ to: "/search", search: { q: restored }, replace: false });
   };
 
@@ -622,9 +625,16 @@ function AppContent() {
     navigate({ to: "/search", search: { q: newQuery }, replace: false });
   };
 
+  // In follow mode, sort direction is purely a display concern (local state).
+  const [followReversed, setFollowReversed] = useState(true);
+
   const toggleReverse = () => {
-    const newQuery = injectTimeRange(q, timeRange, !isReversed);
-    setUrlQuery(newQuery);
+    if (isFollowMode) {
+      setFollowReversed((prev) => !prev);
+    } else {
+      const newQuery = injectTimeRange(q, timeRange, !isReversed);
+      setUrlQuery(newQuery);
+    }
   };
 
   const handleStoreSelect = (storeId: string) => {
@@ -1536,42 +1546,40 @@ function AppContent() {
                     </svg>
                   </button>
                 )}
-                {!isFollowMode && (
-                  <button
-                    onClick={toggleReverse}
-                    title={
-                      isReversed
-                        ? "Newest first (click for oldest first)"
-                        : "Oldest first (click for newest first)"
-                    }
-                    className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${c(
-                      "text-text-muted hover:text-copper hover:bg-ink-hover",
-                      "text-light-text-muted hover:text-copper hover:bg-light-hover",
-                    )}`}
+                <button
+                  onClick={toggleReverse}
+                  title={
+                    (isFollowMode ? followReversed : isReversed)
+                      ? "Newest first (click for oldest first)"
+                      : "Oldest first (click for newest first)"
+                  }
+                  className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${c(
+                    "text-text-muted hover:text-copper hover:bg-ink-hover",
+                    "text-light-text-muted hover:text-copper hover:bg-light-hover",
+                  )}`}
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="w-4 h-4"
                   >
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className="w-4 h-4"
-                    >
-                      {isReversed ? (
-                        <>
-                          <path d="M12 5v14" />
-                          <path d="M6 13l6 6 6-6" />
-                        </>
-                      ) : (
-                        <>
-                          <path d="M12 5v14" />
-                          <path d="M6 11l6-6 6 6" />
-                        </>
-                      )}
-                    </svg>
-                  </button>
-                )}
+                    {(isFollowMode ? followReversed : isReversed) ? (
+                      <>
+                        <path d="M12 5v14" />
+                        <path d="M6 13l6 6 6-6" />
+                      </>
+                    ) : (
+                      <>
+                        <path d="M12 5v14" />
+                        <path d="M6 11l6-6 6 6" />
+                      </>
+                    )}
+                  </svg>
+                </button>
                 <h3
                   className={`font-display text-[1.15em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
                 >
@@ -1647,25 +1655,28 @@ function AppContent() {
                   </div>
                 ) : (
                   <div>
-                    {(isFollowMode ? followRecords : records).map(
-                      (record, i) => {
-                        const selected = sameRecord(selectedRecord, record);
-                        return (
-                          <LogEntry
-                            key={i}
-                            ref={selected ? selectedRowRef : undefined}
-                            record={record}
-                            tokens={tokens}
-                            isSelected={selected}
-                            onSelect={() =>
-                              setSelectedRecord(selected ? null : record)
-                            }
-                            onFilterToggle={handleTokenToggle}
-                            dark={dark}
-                          />
-                        );
-                      },
-                    )}
+                    {(isFollowMode
+                      ? followReversed
+                        ? followRecords
+                        : [...followRecords].reverse()
+                      : records
+                    ).map((record, i) => {
+                      const selected = sameRecord(selectedRecord, record);
+                      return (
+                        <LogEntry
+                          key={i}
+                          ref={selected ? selectedRowRef : undefined}
+                          record={record}
+                          tokens={tokens}
+                          isSelected={selected}
+                          onSelect={() =>
+                            setSelectedRecord(selected ? null : record)
+                          }
+                          onFilterToggle={handleTokenToggle}
+                          dark={dark}
+                        />
+                      );
+                    })}
                     {/* Infinite scroll sentinel (search only) */}
                     {!isFollowMode && <div ref={sentinelRef} className="h-1" />}
                     {isSearching && records.length > 0 && (
