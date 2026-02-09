@@ -163,6 +163,11 @@ func (m *Manager) OpenKVIndex(chunkID chunk.ChunkID) (*index.Index[index.KVIndex
 	return index.NewIndex(entries), status, nil
 }
 
+// IndexFileSizes returns an empty map for in-memory indexes (no disk files).
+func (m *Manager) IndexFileSizes(chunkID chunk.ChunkID) map[string]int64 {
+	return map[string]int64{}
+}
+
 // IndexesComplete reports whether all indexes exist for the given chunk.
 // For in-memory indexes, this checks if all stores have entries for the chunk.
 func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {

@@ -148,26 +148,97 @@ func (s *StoreServer) GetIndexes(
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
 
-	// Check which indexes exist
+	// Get file sizes for all indexes (cheap stat calls).
+	sizes := im.IndexFileSizes(chunkID)
+
 	resp := &apiv1.GetIndexesResponse{
 		Sealed:  meta.Sealed,
-		Indexes: make([]*apiv1.IndexInfo, 0),
+		Indexes: make([]*apiv1.IndexInfo, 0, 7),
 	}
 
 	// Token index
-	if _, err := im.OpenTokenIndex(chunkID); err == nil {
+	if idx, err := im.OpenTokenIndex(chunkID); err == nil {
 		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{
-			Name:   "token",
-			Exists: true,
+			Name:       "token",
+			Exists:     true,
+			EntryCount: int64(len(idx.Entries())),
+			SizeBytes:  sizes["token"],
 		})
 	} else {
-		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{
-			Name:   "token",
-			Exists: false,
-		})
+		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{Name: "token"})
 	}
 
-	// TODO: check attr and kv indexes
+	// Attr key index
+	if idx, err := im.OpenAttrKeyIndex(chunkID); err == nil {
+		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{
+			Name:       "attr_key",
+			Exists:     true,
+			EntryCount: int64(len(idx.Entries())),
+			SizeBytes:  sizes["attr_key"],
+		})
+	} else {
+		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{Name: "attr_key"})
+	}
+
+	// Attr value index
+	if idx, err := im.OpenAttrValueIndex(chunkID); err == nil {
+		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{
+			Name:       "attr_val",
+			Exists:     true,
+			EntryCount: int64(len(idx.Entries())),
+			SizeBytes:  sizes["attr_val"],
+		})
+	} else {
+		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{Name: "attr_val"})
+	}
+
+	// Attr kv index
+	if idx, err := im.OpenAttrKVIndex(chunkID); err == nil {
+		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{
+			Name:       "attr_kv",
+			Exists:     true,
+			EntryCount: int64(len(idx.Entries())),
+			SizeBytes:  sizes["attr_kv"],
+		})
+	} else {
+		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{Name: "attr_kv"})
+	}
+
+	// KV key index
+	if idx, _, err := im.OpenKVKeyIndex(chunkID); err == nil {
+		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{
+			Name:       "kv_key",
+			Exists:     true,
+			EntryCount: int64(len(idx.Entries())),
+			SizeBytes:  sizes["kv_key"],
+		})
+	} else {
+		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{Name: "kv_key"})
+	}
+
+	// KV value index
+	if idx, _, err := im.OpenKVValueIndex(chunkID); err == nil {
+		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{
+			Name:       "kv_val",
+			Exists:     true,
+			EntryCount: int64(len(idx.Entries())),
+			SizeBytes:  sizes["kv_val"],
+		})
+	} else {
+		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{Name: "kv_val"})
+	}
+
+	// KV combined index
+	if idx, _, err := im.OpenKVIndex(chunkID); err == nil {
+		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{
+			Name:       "kv_kv",
+			Exists:     true,
+			EntryCount: int64(len(idx.Entries())),
+			SizeBytes:  sizes["kv_kv"],
+		})
+	} else {
+		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{Name: "kv_kv"})
+	}
 
 	return connect.NewResponse(resp), nil
 }

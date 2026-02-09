@@ -265,7 +265,7 @@ function ChunkDetail({
               className={`flex items-center gap-3 text-[0.85em]`}
             >
               <span
-                className={`font-mono w-16 ${c("text-text-bright", "text-light-text-bright")}`}
+                className={`font-mono w-20 ${c("text-text-bright", "text-light-text-bright")}`}
               >
                 {idx.name}
               </span>
