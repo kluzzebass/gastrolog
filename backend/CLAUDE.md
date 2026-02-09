@@ -24,7 +24,7 @@ just repl                   # Server + interactive REPL
 just pprof                  # Server + pprof on :6060
 ```
 
-The server listens on `:8080` by default (Connect RPC / gRPC-Web).
+The server listens on `:4564` by default (Connect RPC / gRPC-Web).
 
 CLI flags: `-server`, `-repl`, `-config <path>`, `-pprof <addr>`.
 

@@ -9,7 +9,7 @@ export default defineConfig({
     tailwindcss(),
     http2Proxy({
       "^/gastrolog\\.v1\\.": {
-        target: "http://localhost:8080",
+        target: "http://localhost:4564",
         timeout: 0,
       },
     }),

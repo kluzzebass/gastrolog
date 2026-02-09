@@ -48,7 +48,7 @@ import (
 func main() {
 	configFlag := flag.String("config", "", "config store (memory, json:path, or sqlite:path)")
 	pprofAddr := flag.String("pprof", "", "pprof HTTP server address (e.g. localhost:6060)")
-	serverAddr := flag.String("server", ":8080", "Connect RPC server address (empty to disable)")
+	serverAddr := flag.String("server", ":4564", "Connect RPC server address (empty to disable)")
 	replMode := flag.Bool("repl", false, "start interactive REPL after system is running")
 	flag.Parse()
 
