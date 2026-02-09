@@ -144,7 +144,7 @@ function ChunkList({ storeId, dark }: { storeId: string; dark: boolean }) {
     <div>
       {/* Column headers */}
       <div
-        className={`grid grid-cols-[1fr_2fr_auto_auto_auto] gap-3 px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c(
+        className={`grid grid-cols-[1fr_2fr_4rem_5rem_5rem] gap-3 px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c(
           "text-text-ghost border-ink-border-subtle",
           "text-light-text-ghost border-light-border-subtle",
         )}`}
@@ -168,7 +168,7 @@ function ChunkList({ storeId, dark }: { storeId: string; dark: boolean }) {
             className={`border-b last:border-b-0 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
           >
             <div
-              className={`grid grid-cols-[1fr_2fr_auto_auto_auto] gap-3 px-4 py-2 text-[0.85em] cursor-pointer transition-colors ${c(
+              className={`grid grid-cols-[1fr_2fr_4rem_5rem_5rem] gap-3 px-4 py-2 text-[0.85em] cursor-pointer transition-colors ${c(
                 "hover:bg-ink-hover",
                 "hover:bg-light-hover",
               )} ${isExpanded ? c("bg-ink-hover", "bg-light-hover") : ""}`}
