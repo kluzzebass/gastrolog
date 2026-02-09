@@ -106,9 +106,15 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 
 	offset := uint64(len(m.active.records))
 	m.active.records = append(m.active.records, record)
-	m.active.size = int64(len(m.active.records))
+
+	// Approximate payload size: raw log line + attribute content.
+	recBytes := int64(len(record.Raw))
+	for k, v := range record.Attrs {
+		recBytes += int64(len(k) + len(v))
+	}
+	m.active.size += recBytes
 	m.active.meta.Bytes = m.active.size
-	m.updateMetaLocked(record.WriteTS, m.active.size)
+	m.updateMetaLocked(record.WriteTS, int64(len(m.active.records)))
 
 	if err := m.cfg.MetaStore.Save(m.active.meta); err != nil {
 		return chunk.ChunkID{}, 0, err
@@ -129,8 +135,8 @@ func (m *Manager) activeChunkState() chunk.ActiveChunkState {
 		StartTS:     m.active.meta.StartTS,
 		LastWriteTS: m.active.meta.EndTS,
 		CreatedAt:   m.active.createdAt,
-		Bytes:       uint64(m.active.size), // Record count used as proxy for bytes in memory
-		Records:     uint64(m.active.size),
+		Bytes:       uint64(m.active.size),
+		Records:     uint64(len(m.active.records)),
 	}
 }
 

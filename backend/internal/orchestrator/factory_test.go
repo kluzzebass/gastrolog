@@ -65,6 +65,9 @@ func (f *fakeIndexManager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) 
 	return true, nil
 }
 func (f *fakeIndexManager) DeleteIndexes(chunkID chunk.ChunkID) error { return nil }
+func (f *fakeIndexManager) IndexFileSizes(chunkID chunk.ChunkID) map[string]int64 {
+	return map[string]int64{}
+}
 
 // fakeIngester implements Ingester for testing.
 type fakeIngester struct{}
