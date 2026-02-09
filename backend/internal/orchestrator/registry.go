@@ -43,6 +43,9 @@ func (o *Orchestrator) RegisterIngester(id string, r Ingester) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.ingesters[id] = r
+	if o.ingesterStats[id] == nil {
+		o.ingesterStats[id] = &IngesterStats{}
+	}
 }
 
 // SetFilterSet sets the filter set for attribute-based message filtering.

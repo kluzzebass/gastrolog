@@ -640,6 +640,7 @@ type GetIngesterStatusResponse struct {
 	Running          bool                   `protobuf:"varint,3,opt,name=running,proto3" json:"running,omitempty"`
 	MessagesIngested int64                  `protobuf:"varint,4,opt,name=messages_ingested,json=messagesIngested,proto3" json:"messages_ingested,omitempty"`
 	Errors           int64                  `protobuf:"varint,5,opt,name=errors,proto3" json:"errors,omitempty"`
+	BytesIngested    int64                  `protobuf:"varint,6,opt,name=bytes_ingested,json=bytesIngested,proto3" json:"bytes_ingested,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -705,6 +706,13 @@ func (x *GetIngesterStatusResponse) GetMessagesIngested() int64 {
 func (x *GetIngesterStatusResponse) GetErrors() int64 {
 	if x != nil {
 		return x.Errors
+	}
+	return 0
+}
+
+func (x *GetIngesterStatusResponse) GetBytesIngested() int64 {
+	if x != nil {
+		return x.BytesIngested
 	}
 	return 0
 }
@@ -2238,13 +2246,14 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x18\n" +
 	"\arunning\x18\x03 \x01(\bR\arunning\"*\n" +
 	"\x18GetIngesterStatusRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\x9e\x01\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\xc5\x01\n" +
 	"\x19GetIngesterStatusResponse\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x18\n" +
 	"\arunning\x18\x03 \x01(\bR\arunning\x12+\n" +
 	"\x11messages_ingested\x18\x04 \x01(\x03R\x10messagesIngested\x12\x16\n" +
-	"\x06errors\x18\x05 \x01(\x03R\x06errors\"V\n" +
+	"\x06errors\x18\x05 \x01(\x03R\x06errors\x12%\n" +
+	"\x0ebytes_ingested\x18\x06 \x01(\x03R\rbytesIngested\"V\n" +
 	"\x10PutFilterRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x122\n" +
 	"\x06config\x18\x02 \x01(\v2\x1a.gastrolog.v1.FilterConfigR\x06config\"\x13\n" +

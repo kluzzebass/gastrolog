@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gastrolog/internal/chunk"
@@ -16,6 +17,14 @@ import (
 	"gastrolog/internal/logging"
 	"gastrolog/internal/query"
 )
+
+// IngesterStats tracks per-ingester metrics using atomic counters.
+// Safe for concurrent reads (from API handlers) and writes (from ingest loop).
+type IngesterStats struct {
+	MessagesIngested atomic.Int64
+	BytesIngested    atomic.Int64
+	Errors           atomic.Int64
+}
 
 var (
 	// ErrNoChunkManagers is returned when no chunk managers are registered.
@@ -72,6 +81,7 @@ type Orchestrator struct {
 	// Ingester management.
 	ingesters       map[string]Ingester
 	ingesterCancels map[string]context.CancelFunc // per-ingester cancel functions
+	ingesterStats   map[string]*IngesterStats     // per-ingester metrics
 
 	// Digesters (message enrichment pipeline).
 	digesters []Digester
@@ -147,6 +157,7 @@ func New(cfg Config) *Orchestrator {
 		queries:         make(map[string]*query.Engine),
 		ingesters:       make(map[string]Ingester),
 		ingesterCancels: make(map[string]context.CancelFunc),
+		ingesterStats:   make(map[string]*IngesterStats),
 		retention:       make(map[string]*retentionRunner),
 		scheduler:       sched,
 		cronRotation:    newCronRotationManager(sched, logger),
@@ -165,4 +176,12 @@ func (o *Orchestrator) Logger() *slog.Logger {
 // ScheduledJobs returns info about all registered scheduled jobs.
 func (o *Orchestrator) ScheduledJobs() []JobInfo {
 	return o.scheduler.ListJobs()
+}
+
+// GetIngesterStats returns the stats for a specific ingester.
+// Returns nil if the ingester is not found.
+func (o *Orchestrator) GetIngesterStats(id string) *IngesterStats {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.ingesterStats[id]
 }

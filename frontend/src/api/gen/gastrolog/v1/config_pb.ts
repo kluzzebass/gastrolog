@@ -538,6 +538,11 @@ export class GetIngesterStatusResponse extends Message<GetIngesterStatusResponse
    */
   errors = protoInt64.zero;
 
+  /**
+   * @generated from field: int64 bytes_ingested = 6;
+   */
+  bytesIngested = protoInt64.zero;
+
   constructor(data?: PartialMessage<GetIngesterStatusResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -551,6 +556,7 @@ export class GetIngesterStatusResponse extends Message<GetIngesterStatusResponse
     { no: 3, name: "running", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 4, name: "messages_ingested", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 5, name: "errors", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 6, name: "bytes_ingested", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetIngesterStatusResponse {

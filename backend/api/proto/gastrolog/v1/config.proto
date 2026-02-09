@@ -131,6 +131,7 @@ message GetIngesterStatusResponse {
   bool running = 3;
   int64 messages_ingested = 4;
   int64 errors = 5;
+  int64 bytes_ingested = 6;
 }
 
 message PutFilterRequest {

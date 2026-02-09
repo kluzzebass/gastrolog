@@ -179,6 +179,17 @@ func (s *ConfigServer) ListIngesters(
 ) (*connect.Response[apiv1.ListIngestersResponse], error) {
 	ids := s.orch.ListIngesters()
 
+	// Build type lookup from config.
+	typeMap := make(map[string]string)
+	if s.cfgStore != nil {
+		ingesters, err := s.cfgStore.ListIngesters(ctx)
+		if err == nil {
+			for _, ing := range ingesters {
+				typeMap[ing.ID] = ing.Type
+			}
+		}
+	}
+
 	resp := &apiv1.ListIngestersResponse{
 		Ingesters: make([]*apiv1.IngesterInfo, 0, len(ids)),
 	}
@@ -186,6 +197,7 @@ func (s *ConfigServer) ListIngesters(
 	for _, id := range ids {
 		resp.Ingesters = append(resp.Ingesters, &apiv1.IngesterInfo{
 			Id:      id,
+			Type:    typeMap[id],
 			Running: s.orch.IsRunning(),
 		})
 	}
@@ -213,10 +225,32 @@ func (s *ConfigServer) GetIngesterStatus(
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("ingester not found"))
 	}
 
-	return connect.NewResponse(&apiv1.GetIngesterStatusResponse{
+	resp := &apiv1.GetIngesterStatusResponse{
 		Id:      req.Msg.Id,
 		Running: s.orch.IsRunning(),
-	}), nil
+	}
+
+	// Look up ingester type from config.
+	if s.cfgStore != nil {
+		ingesters, err := s.cfgStore.ListIngesters(ctx)
+		if err == nil {
+			for _, ing := range ingesters {
+				if ing.ID == req.Msg.Id {
+					resp.Type = ing.Type
+					break
+				}
+			}
+		}
+	}
+
+	// Populate stats from orchestrator.
+	if stats := s.orch.GetIngesterStats(req.Msg.Id); stats != nil {
+		resp.MessagesIngested = stats.MessagesIngested.Load()
+		resp.Errors = stats.Errors.Load()
+		resp.BytesIngested = stats.BytesIngested.Load()
+	}
+
+	return connect.NewResponse(resp), nil
 }
 
 // PutRotationPolicy creates or updates a rotation policy.

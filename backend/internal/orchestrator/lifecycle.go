@@ -153,6 +153,17 @@ func (o *Orchestrator) processMessage(msg IngestMessage) {
 	// Route to chunk managers (reuses existing Ingest logic).
 	err := o.ingest(rec)
 
+	// Track per-ingester stats.
+	if id := msg.Attrs["ingester_id"]; id != "" {
+		if stats := o.ingesterStats[id]; stats != nil {
+			stats.MessagesIngested.Add(1)
+			stats.BytesIngested.Add(int64(len(msg.Raw)))
+			if err != nil {
+				stats.Errors.Add(1)
+			}
+		}
+	}
+
 	// Send ack if requested.
 	if msg.Ack != nil {
 		msg.Ack <- err

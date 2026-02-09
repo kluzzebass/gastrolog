@@ -92,6 +92,9 @@ func (o *Orchestrator) AddIngester(id string, r Ingester) error {
 	}
 
 	o.ingesters[id] = r
+	if o.ingesterStats[id] == nil {
+		o.ingesterStats[id] = &IngesterStats{}
+	}
 
 	// If running, start the ingester immediately.
 	if o.running && o.ingestCh != nil {

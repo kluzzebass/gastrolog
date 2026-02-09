@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { StoresPanel } from "./StoresPanel";
+import { IngestersPanel } from "./IngestersPanel";
 
 export type InspectorTab = "stores" | "ingesters" | "metrics";
 
@@ -95,7 +96,10 @@ export function InspectorDialog({
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-5">
           {tab === "stores" && <StoresPanel dark={dark} />}
-          {tab !== "stores" && <Placeholder tab={tab} dark={dark} />}
+          {tab === "ingesters" && <IngestersPanel dark={dark} />}
+          {tab !== "stores" && tab !== "ingesters" && (
+            <Placeholder tab={tab} dark={dark} />
+          )}
         </div>
       </div>
     </div>

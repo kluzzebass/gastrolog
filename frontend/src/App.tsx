@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useIsFetching } from "@tanstack/react-query";
 import {
   useSearch as useRouterSearch,
   useNavigate,
@@ -83,6 +84,16 @@ function AppContent() {
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("service");
   const [showInspector, setShowInspector] = useState(false);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("stores");
+  const fetchCount = useIsFetching();
+  const [inspectorGlow, setInspectorGlow] = useState(false);
+  const glowTimer = useRef<ReturnType<typeof setTimeout>>(null);
+  useEffect(() => {
+    if (fetchCount > 0) {
+      setInspectorGlow(true);
+      if (glowTimer.current) clearTimeout(glowTimer.current);
+      glowTimer.current = setTimeout(() => setInspectorGlow(false), 800);
+    }
+  }, [fetchCount]);
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(
     null,
   );
@@ -786,10 +797,10 @@ function AppContent() {
           <button
             onClick={() => setShowInspector(true)}
             title="Inspector"
-            className={`w-7 h-7 flex items-center justify-center rounded transition-all duration-200 ${c(
+            className={`w-7 h-7 flex items-center justify-center rounded transition-all duration-500 ${c(
               "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
               "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
-            )}`}
+            )} ${inspectorGlow ? "text-copper drop-shadow-[0_0_4px_var(--color-copper)]" : ""}`}
           >
             <svg
               viewBox="0 0 24 24"
