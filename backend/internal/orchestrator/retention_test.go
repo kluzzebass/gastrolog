@@ -80,6 +80,9 @@ func (f *retentionFakeIndexManager) OpenKVIndex(chunkID chunk.ChunkID) (*index.I
 func (f *retentionFakeIndexManager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
 	return true, nil
 }
+func (f *retentionFakeIndexManager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
+	return map[string]int64{}
+}
 
 // ---------- helpers ----------
 

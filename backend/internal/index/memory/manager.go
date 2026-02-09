@@ -163,6 +163,69 @@ func (m *Manager) OpenKVIndex(chunkID chunk.ChunkID) (*index.Index[index.KVIndex
 	return index.NewIndex(entries), status, nil
 }
 
+// IndexSizes estimates the in-memory data footprint for each index.
+func (m *Manager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
+	sizes := make(map[string]int64)
+
+	if m.tokenStore != nil {
+		if entries, ok := m.tokenStore.Get(chunkID); ok {
+			var s int64
+			for _, e := range entries {
+				s += int64(len(e.Token)) + int64(len(e.Positions))*8
+			}
+			sizes["token"] = s
+		}
+	}
+	if m.attrStore != nil {
+		if entries, ok := m.attrStore.GetKey(chunkID); ok {
+			var s int64
+			for _, e := range entries {
+				s += int64(len(e.Key)) + int64(len(e.Positions))*8
+			}
+			sizes["attr_key"] = s
+		}
+		if entries, ok := m.attrStore.GetValue(chunkID); ok {
+			var s int64
+			for _, e := range entries {
+				s += int64(len(e.Value)) + int64(len(e.Positions))*8
+			}
+			sizes["attr_val"] = s
+		}
+		if entries, ok := m.attrStore.GetKV(chunkID); ok {
+			var s int64
+			for _, e := range entries {
+				s += int64(len(e.Key)) + int64(len(e.Value)) + int64(len(e.Positions))*8
+			}
+			sizes["attr_kv"] = s
+		}
+	}
+	if m.kvStore != nil {
+		if entries, _, ok := m.kvStore.GetKey(chunkID); ok {
+			var s int64
+			for _, e := range entries {
+				s += int64(len(e.Key)) + int64(len(e.Positions))*8
+			}
+			sizes["kv_key"] = s
+		}
+		if entries, _, ok := m.kvStore.GetValue(chunkID); ok {
+			var s int64
+			for _, e := range entries {
+				s += int64(len(e.Value)) + int64(len(e.Positions))*8
+			}
+			sizes["kv_val"] = s
+		}
+		if entries, _, ok := m.kvStore.GetKV(chunkID); ok {
+			var s int64
+			for _, e := range entries {
+				s += int64(len(e.Key)) + int64(len(e.Value)) + int64(len(e.Positions))*8
+			}
+			sizes["kv_kv"] = s
+		}
+	}
+
+	return sizes
+}
+
 // IndexesComplete reports whether all indexes exist for the given chunk.
 // For in-memory indexes, this checks if all stores have entries for the chunk.
 func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {

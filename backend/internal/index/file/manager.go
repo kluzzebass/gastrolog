@@ -148,6 +148,26 @@ func (m *Manager) OpenKVIndex(chunkID chunk.ChunkID) (*index.Index[index.KVIndex
 	return index.NewIndex(entries), status, nil
 }
 
+// IndexSizes returns the on-disk file size for each index.
+func (m *Manager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
+	sizes := make(map[string]int64)
+	paths := map[string]string{
+		"token":    filetoken.IndexPath(m.dir, chunkID),
+		"attr_key": fileattr.KeyIndexPath(m.dir, chunkID),
+		"attr_val": fileattr.ValueIndexPath(m.dir, chunkID),
+		"attr_kv":  fileattr.KVIndexPath(m.dir, chunkID),
+		"kv_key":   filekv.KeyIndexPath(m.dir, chunkID),
+		"kv_val":   filekv.ValueIndexPath(m.dir, chunkID),
+		"kv_kv":    filekv.KVIndexPath(m.dir, chunkID),
+	}
+	for name, path := range paths {
+		if info, err := os.Stat(path); err == nil {
+			sizes[name] = info.Size()
+		}
+	}
+	return sizes
+}
+
 // IndexesComplete reports whether all indexes exist for the given chunk.
 // Also cleans up any orphaned temporary files from interrupted builds.
 func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
