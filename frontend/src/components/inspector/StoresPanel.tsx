@@ -32,6 +32,7 @@ export function StoresPanel({ dark }: { dark: boolean }) {
         <StoreCard
           key={store.id}
           storeId={store.id}
+          storeType={store.type}
           recordCount={store.recordCount}
           chunkCount={store.chunkCount}
           dark={dark}
@@ -45,6 +46,7 @@ export function StoresPanel({ dark }: { dark: boolean }) {
 
 function StoreCard({
   storeId,
+  storeType,
   recordCount,
   chunkCount,
   dark,
@@ -52,6 +54,7 @@ function StoreCard({
   onToggle,
 }: {
   storeId: string;
+  storeType: string;
   recordCount: bigint;
   chunkCount: bigint;
   dark: boolean;
@@ -86,6 +89,11 @@ function StoreCard({
           >
             {storeId}
           </span>
+          {storeType && (
+            <span className="px-1.5 py-0.5 text-[0.75em] rounded bg-copper/15 text-copper">
+              {storeType}
+            </span>
+          )}
           <span
             className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
           >

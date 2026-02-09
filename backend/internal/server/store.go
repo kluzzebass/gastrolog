@@ -406,6 +406,7 @@ func (s *StoreServer) getStoreInfo(id string) (*apiv1.StoreInfo, error) {
 
 	info := &apiv1.StoreInfo{
 		Id:          id,
+		Type:        cfg.Type,
 		ChunkCount:  int64(len(metas)),
 		RecordCount: recordCount,
 	}
