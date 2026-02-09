@@ -113,7 +113,7 @@ export function DetailPanelContent({
         action={<CopyButton text={rawText} dark={dark} />}
       >
         <pre
-          className={`text-[0.85em] font-mono p-3 rounded whitespace-pre-wrap wrap-break-word leading-relaxed ${c("bg-ink text-text-normal", "bg-light-bg text-light-text-normal")}`}
+          className={`text-[0.85em] font-mono p-3 rounded border whitespace-pre-wrap wrap-break-word leading-relaxed ${c("border-ink-border-subtle bg-ink text-text-normal", "border-light-border-subtle bg-light-bg text-light-text-normal")}`}
         >
           {syntaxHighlight(displayText).map((span, i) => {
             const style = span.color ? { color: span.color } : undefined;
