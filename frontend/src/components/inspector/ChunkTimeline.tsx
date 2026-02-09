@@ -19,7 +19,8 @@ export function ChunkTimeline({
   const [hoveredChunk, setHoveredChunk] = useState<string | null>(null);
 
   const { bars, ticks, minTime, timeSpan } = useMemo(() => {
-    if (chunks.length === 0) return { bars: [], ticks: [], minTime: 0, timeSpan: 0 };
+    if (chunks.length === 0)
+      return { bars: [], ticks: [], minTime: 0, timeSpan: 0 };
 
     // Compute global time range across all chunks.
     let globalMin = Infinity;
@@ -30,18 +31,26 @@ export function ChunkTimeline({
         const start = chunk.startTs?.toDate().getTime() ?? 0;
         const end = chunk.endTs?.toDate().getTime() ?? start;
         if (start === 0 && end === 0) return null;
-        return { id: chunk.id, start, end, sealed: chunk.sealed, recordCount: chunk.recordCount, bytes: chunk.bytes };
+        return {
+          id: chunk.id,
+          start,
+          end,
+          sealed: chunk.sealed,
+          recordCount: chunk.recordCount,
+          bytes: chunk.bytes,
+        };
       })
       .filter(Boolean) as {
-        id: string;
-        start: number;
-        end: number;
-        sealed: boolean;
-        recordCount: bigint;
-        bytes: bigint;
-      }[];
+      id: string;
+      start: number;
+      end: number;
+      sealed: boolean;
+      recordCount: bigint;
+      bytes: bigint;
+    }[];
 
-    if (parsed.length === 0) return { bars: [], ticks: [], minTime: 0, timeSpan: 0 };
+    if (parsed.length === 0)
+      return { bars: [], ticks: [], minTime: 0, timeSpan: 0 };
 
     for (const p of parsed) {
       if (p.start < globalMin) globalMin = p.start;
@@ -75,7 +84,8 @@ export function ChunkTimeline({
   const barGap = 3;
   const axisHeight = 22;
   const topPad = 4;
-  const chartHeight = topPad + bars.length * (barHeight + barGap) - barGap + axisHeight;
+  const chartHeight =
+    topPad + bars.length * (barHeight + barGap) - barGap + axisHeight;
 
   return (
     <div ref={containerRef} className="w-full px-4 pt-3 pb-1">
@@ -130,8 +140,12 @@ export function ChunkTimeline({
                 fill={
                   bar.sealed
                     ? isHovered || isSelected
-                      ? dark ? "#d4a070" : "#c8875c"
-                      : dark ? "#c8875c" : "#a06b44"
+                      ? dark
+                        ? "#d4a070"
+                        : "#c8875c"
+                      : dark
+                        ? "#c8875c"
+                        : "#a06b44"
                     : isHovered || isSelected
                       ? "#6aaa7a"
                       : "#5a9a6a"
@@ -215,13 +229,20 @@ export function ChunkTimeline({
         ))}
       </svg>
 
-      {/* Tooltip */}
-      {hoveredChunk && (
+      {/* Tooltip — always reserve space to prevent layout shift */}
+      <div
+        className={hoveredChunk ? "opacity-100" : "opacity-0"}
+        aria-hidden={!hoveredChunk}
+      >
         <ChunkTooltip
-          chunk={bars.find((b) => b.id === hoveredChunk)!}
+          chunk={
+            hoveredChunk
+              ? (bars.find((b) => b.id === hoveredChunk) ?? bars[0])
+              : bars[0]
+          }
           dark={dark}
         />
-      )}
+      </div>
     </div>
   );
 }
@@ -271,9 +292,13 @@ function ChunkTooltip({
       <div
         className={`flex gap-4 ${c("text-text-muted", "text-light-text-muted")}`}
       >
-        <span>{formatTimeShort(start)} &rarr; {formatTimeShort(end)}</span>
+        <span>
+          {formatTimeShort(start)} &rarr; {formatTimeShort(end)}
+        </span>
         <span>{formatDuration(duration)}</span>
-        <span className="font-mono">{Number(chunk.recordCount).toLocaleString()} records</span>
+        <span className="font-mono">
+          {Number(chunk.recordCount).toLocaleString()} records
+        </span>
         <span className="font-mono">{formatBytes(Number(chunk.bytes))}</span>
       </div>
     </div>
@@ -293,11 +318,29 @@ function generateTicks(
   // Pick a nice tick interval.
   const rawInterval = span / targetCount;
   const niceIntervals = [
-    1_000, 2_000, 5_000, 10_000, 15_000, 30_000, // seconds
-    60_000, 2 * 60_000, 5 * 60_000, 10 * 60_000, 15 * 60_000, 30 * 60_000, // minutes
-    3600_000, 2 * 3600_000, 4 * 3600_000, 6 * 3600_000, 12 * 3600_000, // hours
-    86400_000, 2 * 86400_000, 7 * 86400_000, // days
-    30 * 86400_000, 90 * 86400_000, 365 * 86400_000, // months/years
+    1_000,
+    2_000,
+    5_000,
+    10_000,
+    15_000,
+    30_000, // seconds
+    60_000,
+    2 * 60_000,
+    5 * 60_000,
+    10 * 60_000,
+    15 * 60_000,
+    30 * 60_000, // minutes
+    3600_000,
+    2 * 3600_000,
+    4 * 3600_000,
+    6 * 3600_000,
+    12 * 3600_000, // hours
+    86400_000,
+    2 * 86400_000,
+    7 * 86400_000, // days
+    30 * 86400_000,
+    90 * 86400_000,
+    365 * 86400_000, // months/years
   ];
 
   let interval = niceIntervals[0];
@@ -328,7 +371,10 @@ function formatTickLabel(ms: number, interval: number): string {
     return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
   }
   if (interval >= 3600_000) {
-    return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   }
   return d.toLocaleTimeString(undefined, {
     hour: "2-digit",
