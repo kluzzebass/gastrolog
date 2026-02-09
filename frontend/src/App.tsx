@@ -17,7 +17,7 @@ import {
 import { useStores, useStats, useLogout, useCurrentUser } from "./api/hooks";
 import { usePreferences, usePutPreferences } from "./api/hooks/usePreferences";
 import { ConnectError, Code } from "@connectrpc/connect";
-import { Record as ProtoRecord, setToken } from "./api/client";
+import { Record as ProtoRecord, RecordRef, queryClient, setToken } from "./api/client";
 
 import { timeRangeMs, aggregateFields, sameRecord } from "./utils";
 import type { Theme } from "./utils";
@@ -28,6 +28,7 @@ import { LogEntry } from "./components/LogEntry";
 import { HistogramChart } from "./components/HistogramChart";
 import { TimeRangePicker } from "./components/TimeRangePicker";
 import { DetailPanelContent } from "./components/DetailPanel";
+import { CopyLinkButton } from "./components/CopyButton";
 import { ExplainPanel } from "./components/ExplainPanel";
 import {
   SidebarSection,
@@ -140,7 +141,7 @@ function AppContent() {
   const [detailWidth, setDetailWidth] = useState(320);
   const [sidebarWidth, setSidebarWidth] = useState(224);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [detailCollapsed, setDetailCollapsed] = useState(false);
+  const [detailCollapsed, setDetailCollapsed] = useState(true);
   const [detailPinned, setDetailPinned] = useState(false);
   const [resizing, setResizing] = useState(false);
 
@@ -267,6 +268,34 @@ function AppContent() {
     fetchContext,
     reset: resetContext,
   } = useRecordContext();
+
+  // Handle permalink: if store/chunk/pos are in the URL, fetch and select that record.
+  // Read directly from window.location to avoid TanStack Router stripping unknown params.
+  const permalinkHandled = useRef(false);
+  useEffect(() => {
+    if (permalinkHandled.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const store = params.get("store");
+    const chunk = params.get("chunk");
+    const pos = params.get("pos");
+    if (!store || !chunk || pos == null) return;
+    permalinkHandled.current = true;
+
+    const ref = new RecordRef({ storeId: store, chunkId: chunk, pos: BigInt(pos) });
+    (async () => {
+      try {
+        const resp = await queryClient.getContext({ ref, before: 0, after: 0 });
+        if (resp.anchor) {
+          setSelectedRecord(resp.anchor);
+        }
+      } catch {
+        // Record not found or fetch failed — silently ignore.
+      }
+      // Strip permalink params from the URL so they don't persist on navigation.
+      navigate({ search: { q }, replace: true });
+    })();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const { data: stores, isLoading: storesLoading } = useStores();
   const { data: stats, isLoading: statsLoading } = useStats();
 
@@ -1741,34 +1770,43 @@ function AppContent() {
             >
               Details
             </h3>
-            <button
-              onClick={() => setDetailPinned((p) => !p)}
-              title={detailPinned ? "Unpin detail panel" : "Pin detail panel"}
-              className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${
-                detailPinned
-                  ? c("text-copper", "text-copper")
-                  : c(
-                      "text-text-ghost hover:text-text-muted",
-                      "text-light-text-ghost hover:text-light-text-muted",
-                    )
-              }`}
-            >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="w-4 h-4"
-                style={
-                  detailPinned ? undefined : { transform: "rotate(45deg)" }
-                }
+            <div className="flex items-center gap-1">
+              {selectedRecord?.ref && (
+                <CopyLinkButton
+                  url={`${window.location.origin}/search?store=${encodeURIComponent(selectedRecord.ref.storeId)}&chunk=${encodeURIComponent(selectedRecord.ref.chunkId)}&pos=${selectedRecord.ref.pos}`}
+                  dark={dark}
+                  className="w-6 h-6"
+                />
+              )}
+              <button
+                onClick={() => setDetailPinned((p) => !p)}
+                title={detailPinned ? "Unpin detail panel" : "Pin detail panel"}
+                className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${
+                  detailPinned
+                    ? c("text-copper", "text-copper")
+                    : c(
+                        "text-text-ghost hover:text-text-muted",
+                        "text-light-text-ghost hover:text-light-text-muted",
+                      )
+                }`}
               >
-                <line x1="12" y1="17" x2="12" y2="22" />
-                <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
-              </svg>
-            </button>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="w-4 h-4"
+                  style={
+                    detailPinned ? undefined : { transform: "rotate(45deg)" }
+                  }
+                >
+                  <line x1="12" y1="17" x2="12" y2="22" />
+                  <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
+                </svg>
+              </button>
+            </div>
           </div>
 
           {selectedRecord ? (
