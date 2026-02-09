@@ -61,11 +61,23 @@ export function ChunkTimeline({
     // Sort by start time.
     parsed.sort((a, b) => a.start - b.start);
 
-    const bars = parsed.map((p) => ({
-      ...p,
-      x: (p.start - min) / span,
-      w: Math.max((p.end - p.start) / span, 0.005), // min 0.5% so tiny chunks stay visible
-    }));
+    const minGap = 0.003; // minimum gap between bars so rounded corners don't overlap
+
+    const bars = parsed.map((p, i) => {
+      const x = (p.start - min) / span;
+      let w = Math.max((p.end - p.start) / span, 0.005); // min 0.5% so tiny chunks stay visible
+
+      // Ensure at least minGap before the next bar.
+      if (i < parsed.length - 1) {
+        const nextX = (parsed[i + 1].start - min) / span;
+        const gap = nextX - (x + w);
+        if (gap >= 0 && gap < minGap) {
+          w = Math.max(nextX - minGap - x, 0.003);
+        }
+      }
+
+      return { ...p, x, w };
+    });
 
     const ticks = generateTicks(min, min + span, 6);
 
