@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useStores, useChunks, useIndexes } from "../../api/hooks";
+import { ChunkTimeline } from "./ChunkTimeline";
 
 export function StoresPanel({ dark }: { dark: boolean }) {
   const c = (d: string, l: string) => (dark ? d : l);
@@ -150,6 +151,18 @@ function ChunkList({ storeId, dark }: { storeId: string; dark: boolean }) {
 
   return (
     <div>
+      {/* Timeline visualization */}
+      {chunks.length > 0 && (
+        <ChunkTimeline
+          chunks={chunks}
+          dark={dark}
+          selectedChunkId={expandedChunk}
+          onChunkClick={(id) =>
+            setExpandedChunk(expandedChunk === id ? null : id)
+          }
+        />
+      )}
+
       {/* Column headers */}
       <div
         className={`grid grid-cols-[1fr_2fr_4rem_5rem_5rem] gap-3 px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c(
