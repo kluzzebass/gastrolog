@@ -683,6 +683,12 @@ func (s *ConfigServer) GetServerConfig(
 		resp.TokenDuration = sc.Auth.TokenDuration
 		resp.JwtSecret = sc.Auth.JWTSecret
 		resp.MinPasswordLength = int32(sc.Auth.MinPasswordLength)
+		resp.MaxConcurrentJobs = int32(sc.Scheduler.MaxConcurrentJobs)
+	}
+
+	// If no persisted value, report the live default from the orchestrator.
+	if resp.MaxConcurrentJobs == 0 {
+		resp.MaxConcurrentJobs = int32(s.orch.MaxConcurrentJobs())
 	}
 
 	return connect.NewResponse(resp), nil
@@ -699,6 +705,9 @@ func (s *ConfigServer) PutServerConfig(
 			TokenDuration:     req.Msg.TokenDuration,
 			MinPasswordLength: int(req.Msg.MinPasswordLength),
 		},
+		Scheduler: config.SchedulerConfig{
+			MaxConcurrentJobs: int(req.Msg.MaxConcurrentJobs),
+		},
 	}
 
 	data, err := json.Marshal(sc)
@@ -707,6 +716,13 @@ func (s *ConfigServer) PutServerConfig(
 	}
 	if err := s.cfgStore.PutSetting(ctx, "server", string(data)); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	// Hot-reload the scheduler concurrency limit.
+	if sc.Scheduler.MaxConcurrentJobs > 0 {
+		if err := s.orch.UpdateMaxConcurrentJobs(sc.Scheduler.MaxConcurrentJobs); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update scheduler: %w", err))
+		}
 	}
 
 	return connect.NewResponse(&apiv1.PutServerConfigResponse{}), nil

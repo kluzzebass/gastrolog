@@ -1324,6 +1324,11 @@ export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
    */
   minPasswordLength = 0;
 
+  /**
+   * @generated from field: int32 max_concurrent_jobs = 4;
+   */
+  maxConcurrentJobs = 0;
+
   constructor(data?: PartialMessage<GetServerConfigResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1335,6 +1340,7 @@ export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
     { no: 1, name: "token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "jwt_secret", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "min_password_length", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 4, name: "max_concurrent_jobs", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetServerConfigResponse {
@@ -1373,6 +1379,11 @@ export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
    */
   minPasswordLength = 0;
 
+  /**
+   * @generated from field: int32 max_concurrent_jobs = 4;
+   */
+  maxConcurrentJobs = 0;
+
   constructor(data?: PartialMessage<PutServerConfigRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1384,6 +1395,7 @@ export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
     { no: 1, name: "token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "jwt_secret", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "min_password_length", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 4, name: "max_concurrent_jobs", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutServerConfigRequest {

@@ -1582,6 +1582,7 @@ type GetServerConfigResponse struct {
 	TokenDuration     string                 `protobuf:"bytes,1,opt,name=token_duration,json=tokenDuration,proto3" json:"token_duration,omitempty"`
 	JwtSecret         string                 `protobuf:"bytes,2,opt,name=jwt_secret,json=jwtSecret,proto3" json:"jwt_secret,omitempty"`
 	MinPasswordLength int32                  `protobuf:"varint,3,opt,name=min_password_length,json=minPasswordLength,proto3" json:"min_password_length,omitempty"`
+	MaxConcurrentJobs int32                  `protobuf:"varint,4,opt,name=max_concurrent_jobs,json=maxConcurrentJobs,proto3" json:"max_concurrent_jobs,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -1637,11 +1638,19 @@ func (x *GetServerConfigResponse) GetMinPasswordLength() int32 {
 	return 0
 }
 
+func (x *GetServerConfigResponse) GetMaxConcurrentJobs() int32 {
+	if x != nil {
+		return x.MaxConcurrentJobs
+	}
+	return 0
+}
+
 type PutServerConfigRequest struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	TokenDuration     string                 `protobuf:"bytes,1,opt,name=token_duration,json=tokenDuration,proto3" json:"token_duration,omitempty"`
 	JwtSecret         string                 `protobuf:"bytes,2,opt,name=jwt_secret,json=jwtSecret,proto3" json:"jwt_secret,omitempty"`
 	MinPasswordLength int32                  `protobuf:"varint,3,opt,name=min_password_length,json=minPasswordLength,proto3" json:"min_password_length,omitempty"`
+	MaxConcurrentJobs int32                  `protobuf:"varint,4,opt,name=max_concurrent_jobs,json=maxConcurrentJobs,proto3" json:"max_concurrent_jobs,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -1693,6 +1702,13 @@ func (x *PutServerConfigRequest) GetJwtSecret() string {
 func (x *PutServerConfigRequest) GetMinPasswordLength() int32 {
 	if x != nil {
 		return x.MinPasswordLength
+	}
+	return 0
+}
+
+func (x *PutServerConfigRequest) GetMaxConcurrentJobs() int32 {
+	if x != nil {
+		return x.MaxConcurrentJobs
 	}
 	return 0
 }
@@ -2287,17 +2303,19 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x15DeleteIngesterRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x18\n" +
 	"\x16DeleteIngesterResponse\"\x18\n" +
-	"\x16GetServerConfigRequest\"\x8f\x01\n" +
+	"\x16GetServerConfigRequest\"\xbf\x01\n" +
 	"\x17GetServerConfigResponse\x12%\n" +
 	"\x0etoken_duration\x18\x01 \x01(\tR\rtokenDuration\x12\x1d\n" +
 	"\n" +
 	"jwt_secret\x18\x02 \x01(\tR\tjwtSecret\x12.\n" +
-	"\x13min_password_length\x18\x03 \x01(\x05R\x11minPasswordLength\"\x8e\x01\n" +
+	"\x13min_password_length\x18\x03 \x01(\x05R\x11minPasswordLength\x12.\n" +
+	"\x13max_concurrent_jobs\x18\x04 \x01(\x05R\x11maxConcurrentJobs\"\xbe\x01\n" +
 	"\x16PutServerConfigRequest\x12%\n" +
 	"\x0etoken_duration\x18\x01 \x01(\tR\rtokenDuration\x12\x1d\n" +
 	"\n" +
 	"jwt_secret\x18\x02 \x01(\tR\tjwtSecret\x12.\n" +
-	"\x13min_password_length\x18\x03 \x01(\x05R\x11minPasswordLength\"\x19\n" +
+	"\x13min_password_length\x18\x03 \x01(\x05R\x11minPasswordLength\x12.\n" +
+	"\x13max_concurrent_jobs\x18\x04 \x01(\x05R\x11maxConcurrentJobs\"\x19\n" +
 	"\x17PutServerConfigResponse\"\x17\n" +
 	"\x15GetPreferencesRequest\".\n" +
 	"\x16GetPreferencesResponse\x12\x14\n" +

@@ -192,11 +192,13 @@ export function usePutServerConfig() {
       tokenDuration: string;
       jwtSecret: string;
       minPasswordLength: number;
+      maxConcurrentJobs: number;
     }) => {
       await configClient.putServerConfig({
         tokenDuration: args.tokenDuration,
         jwtSecret: args.jwtSecret,
         minPasswordLength: args.minPasswordLength,
+        maxConcurrentJobs: args.maxConcurrentJobs,
       });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["serverConfig"] }),

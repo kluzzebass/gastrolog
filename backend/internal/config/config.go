@@ -100,7 +100,13 @@ type Config struct {
 // ServerConfig holds server-level configuration, organized by concern.
 // It is serialized as JSON and stored under the "server" settings key.
 type ServerConfig struct {
-	Auth AuthConfig `json:"auth,omitempty"`
+	Auth      AuthConfig      `json:"auth,omitempty"`
+	Scheduler SchedulerConfig `json:"scheduler,omitempty"`
+}
+
+// SchedulerConfig holds configuration for the job scheduler.
+type SchedulerConfig struct {
+	MaxConcurrentJobs int `json:"max_concurrent_jobs,omitempty"` // default 4
 }
 
 // AuthConfig holds configuration for user authentication.

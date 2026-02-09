@@ -477,6 +477,16 @@ func (o *Orchestrator) UpdateRetentionPolicies(cfg *config.Config) error {
 	return nil
 }
 
+// MaxConcurrentJobs returns the current scheduler concurrency limit.
+func (o *Orchestrator) MaxConcurrentJobs() int {
+	return o.scheduler.MaxConcurrent()
+}
+
+// UpdateMaxConcurrentJobs rebuilds the scheduler with a new concurrency limit.
+func (o *Orchestrator) UpdateMaxConcurrentJobs(n int) error {
+	return o.scheduler.Rebuild(n)
+}
+
 // UpdateStoreFilter updates a store's filter expression.
 // Returns ErrStoreNotFound if the store doesn't exist.
 //

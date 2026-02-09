@@ -142,6 +142,7 @@ function ServiceSettings({ dark }: { dark: boolean }) {
   const [tokenDuration, setTokenDuration] = useState("");
   const [jwtSecret, setJwtSecret] = useState("");
   const [minPwLen, setMinPwLen] = useState("");
+  const [maxJobs, setMaxJobs] = useState("");
   const [initialized, setInitialized] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
 
@@ -152,6 +153,7 @@ function ServiceSettings({ dark }: { dark: boolean }) {
       setMinPwLen(
         data.minPasswordLength ? String(data.minPasswordLength) : "8",
       );
+      setMaxJobs(data.maxConcurrentJobs ? String(data.maxConcurrentJobs) : "4");
       setInitialized(true);
     }
   }, [data, initialized]);
@@ -161,7 +163,8 @@ function ServiceSettings({ dark }: { dark: boolean }) {
     data &&
     (tokenDuration !== data.tokenDuration ||
       jwtSecret !== data.jwtSecret ||
-      minPwLen !== String(data.minPasswordLength || 8));
+      minPwLen !== String(data.minPasswordLength || 8) ||
+      maxJobs !== String(data.maxConcurrentJobs || 4));
 
   const handleSave = async () => {
     try {
@@ -169,6 +172,7 @@ function ServiceSettings({ dark }: { dark: boolean }) {
         tokenDuration,
         jwtSecret,
         minPasswordLength: parseInt(minPwLen, 10) || 8,
+        maxConcurrentJobs: parseInt(maxJobs, 10) || 4,
       });
       addToast("Server configuration updated", "info");
     } catch (err: any) {
@@ -183,6 +187,7 @@ function ServiceSettings({ dark }: { dark: boolean }) {
       setMinPwLen(
         data.minPasswordLength ? String(data.minPasswordLength) : "8",
       );
+      setMaxJobs(data.maxConcurrentJobs ? String(data.maxConcurrentJobs) : "4");
     }
   };
 
@@ -259,6 +264,20 @@ function ServiceSettings({ dark }: { dark: boolean }) {
               value={minPwLen}
               onChange={setMinPwLen}
               placeholder="8"
+              dark={dark}
+              min={1}
+            />
+          </FormField>
+
+          <FormField
+            label="Max Concurrent Jobs"
+            description="Maximum number of scheduler jobs (index builds, rotation, retention) that can run in parallel."
+            dark={dark}
+          >
+            <NumberInput
+              value={maxJobs}
+              onChange={setMaxJobs}
+              placeholder="4"
               dark={dark}
               min={1}
             />

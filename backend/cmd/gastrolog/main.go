@@ -119,9 +119,19 @@ func run(ctx context.Context, logger *slog.Logger, configFlagValue, serverAddr s
 		"ingesters", len(cfg.Ingesters),
 		"stores", len(cfg.Stores))
 
+	// Load persisted server config for scheduler settings.
+	var maxConcurrentJobs int
+	if raw, err := cfgStore.GetSetting(ctx, "server"); err == nil && raw != nil {
+		var sc config.ServerConfig
+		if err := json.Unmarshal([]byte(*raw), &sc); err == nil {
+			maxConcurrentJobs = sc.Scheduler.MaxConcurrentJobs
+		}
+	}
+
 	// Create orchestrator.
 	orch := orchestrator.New(orchestrator.Config{
-		Logger: logger,
+		Logger:            logger,
+		MaxConcurrentJobs: maxConcurrentJobs,
 	})
 
 	// Register digesters (message enrichment pipeline).

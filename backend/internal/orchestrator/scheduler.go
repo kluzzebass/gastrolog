@@ -19,15 +19,26 @@ type JobInfo struct {
 	NextRun  time.Time // zero if not scheduled
 }
 
+// cronEntry remembers a cron job's definition so it can be re-registered
+// when the scheduler is rebuilt (e.g. to change the concurrency limit).
+type cronEntry struct {
+	name   string
+	cron   string
+	taskFn any
+	args   []any
+}
+
 // Scheduler is the shared cron scheduler for the orchestrator.
 // All subsystems (cron rotation, future scheduled tasks) register jobs here
 // rather than maintaining their own schedulers.
 type Scheduler struct {
-	mu        sync.Mutex
-	scheduler gocron.Scheduler
-	jobs      map[string]gocron.Job // name → job
-	schedules map[string]string     // name → cron expression (for ListJobs)
-	logger    *slog.Logger
+	mu            sync.Mutex
+	scheduler     gocron.Scheduler
+	jobs          map[string]gocron.Job // name → job
+	schedules     map[string]string     // name → cron expression (for ListJobs)
+	cronEntries   map[string]cronEntry  // name → definition (for rebuild)
+	maxConcurrent int
+	logger        *slog.Logger
 }
 
 func newScheduler(logger *slog.Logger, maxConcurrent int) (*Scheduler, error) {
@@ -41,15 +52,72 @@ func newScheduler(logger *slog.Logger, maxConcurrent int) (*Scheduler, error) {
 		return nil, fmt.Errorf("create cron scheduler: %w", err)
 	}
 	sched := &Scheduler{
-		scheduler: s,
-		jobs:      make(map[string]gocron.Job),
-		schedules: make(map[string]string),
-		logger:    logger,
+		scheduler:     s,
+		jobs:          make(map[string]gocron.Job),
+		schedules:     make(map[string]string),
+		cronEntries:   make(map[string]cronEntry),
+		maxConcurrent: maxConcurrent,
+		logger:        logger,
 	}
 	// Start immediately so RunOnce jobs execute even without explicit Start().
 	// Cron jobs added later will begin executing as soon as they're registered.
 	s.Start()
 	return sched, nil
+}
+
+// MaxConcurrent returns the current concurrency limit.
+func (s *Scheduler) MaxConcurrent() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.maxConcurrent
+}
+
+// Rebuild recreates the gocron scheduler with a new concurrency limit,
+// re-registering all cron jobs. One-time jobs are ephemeral and not preserved.
+func (s *Scheduler) Rebuild(maxConcurrent int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if maxConcurrent <= 0 {
+		maxConcurrent = 4
+	}
+
+	// Shut down old scheduler.
+	if err := s.scheduler.Shutdown(); err != nil {
+		s.logger.Warn("error shutting down old scheduler during rebuild", "error", err)
+	}
+
+	// Create new scheduler with updated limit.
+	gs, err := gocron.NewScheduler(
+		gocron.WithLimitConcurrentJobs(uint(maxConcurrent), gocron.LimitModeWait),
+	)
+	if err != nil {
+		return fmt.Errorf("rebuild scheduler: %w", err)
+	}
+
+	s.scheduler = gs
+	s.maxConcurrent = maxConcurrent
+	s.jobs = make(map[string]gocron.Job, len(s.cronEntries))
+	s.schedules = make(map[string]string, len(s.cronEntries))
+
+	// Re-register all cron jobs.
+	for _, entry := range s.cronEntries {
+		j, err := gs.NewJob(
+			gocron.CronJob(entry.cron, true),
+			gocron.NewTask(entry.taskFn, entry.args...),
+			gocron.WithName(entry.name),
+		)
+		if err != nil {
+			s.logger.Error("failed to re-register job during rebuild", "name", entry.name, "error", err)
+			continue
+		}
+		s.jobs[entry.name] = j
+		s.schedules[entry.name] = entry.cron
+	}
+
+	gs.Start()
+	s.logger.Info("scheduler rebuilt", "maxConcurrent", maxConcurrent, "jobs", len(s.jobs))
+	return nil
 }
 
 // AddJob registers a named cron job. The name must be unique across all subsystems.
@@ -73,6 +141,7 @@ func (s *Scheduler) AddJob(name, cronExpr string, taskFn any, args ...any) error
 
 	s.jobs[name] = j
 	s.schedules[name] = cronExpr
+	s.cronEntries[name] = cronEntry{name: name, cron: cronExpr, taskFn: taskFn, args: args}
 	s.logger.Info("scheduled job added", "name", name, "cron", cronExpr)
 	return nil
 }
@@ -91,6 +160,7 @@ func (s *Scheduler) RemoveJob(name string) {
 	}
 	delete(s.jobs, name)
 	delete(s.schedules, name)
+	delete(s.cronEntries, name)
 	s.logger.Info("scheduled job removed", "name", name)
 }
 

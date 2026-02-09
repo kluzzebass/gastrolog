@@ -203,12 +203,14 @@ message GetServerConfigResponse {
   string token_duration = 1;
   string jwt_secret = 2;
   int32 min_password_length = 3;
+  int32 max_concurrent_jobs = 4;
 }
 
 message PutServerConfigRequest {
   string token_duration = 1;
   string jwt_secret = 2;
   int32 min_password_length = 3;
+  int32 max_concurrent_jobs = 4;
 }
 
 message PutServerConfigResponse {}
