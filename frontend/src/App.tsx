@@ -38,6 +38,10 @@ import {
   SettingsDialog,
   type SettingsTab,
 } from "./components/settings/SettingsDialog";
+import {
+  InspectorDialog,
+  type InspectorTab,
+} from "./components/inspector/InspectorDialog";
 import { QueryHistory } from "./components/QueryHistory";
 import { SavedQueries } from "./components/SavedQueries";
 import { useQueryHistory } from "./hooks/useQueryHistory";
@@ -77,6 +81,8 @@ function AppContent() {
   const [showHelp, setShowHelp] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("service");
+  const [showInspector, setShowInspector] = useState(false);
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("chunks");
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(
     null,
   );
@@ -778,6 +784,27 @@ function AppContent() {
           </div>
 
           <button
+            onClick={() => setShowInspector(true)}
+            title="Inspector"
+            className={`w-7 h-7 flex items-center justify-center rounded transition-all duration-200 ${c(
+              "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
+              "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
+            )}`}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="w-4 h-4"
+            >
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
+          </button>
+
+          <button
             onClick={() => setShowSettings(true)}
             title="Settings"
             className={`w-7 h-7 flex items-center justify-center rounded transition-all duration-200 ${c(
@@ -1340,6 +1367,15 @@ function AppContent() {
               onTabChange={setSettingsTab}
               onClose={() => setShowSettings(false)}
               isAdmin={currentUser?.role === "admin"}
+            />
+          )}
+
+          {showInspector && (
+            <InspectorDialog
+              dark={dark}
+              tab={inspectorTab}
+              onTabChange={setInspectorTab}
+              onClose={() => setShowInspector(false)}
             />
           )}
 
