@@ -733,12 +733,14 @@ function AppContent() {
     <div
       className={`grain h-screen overflow-hidden flex flex-col font-body text-base ${c("bg-ink text-text-normal", "light-theme bg-light-bg text-light-text-normal")}`}
     >
+      <a href="#main-content" className="skip-link">Skip to main content</a>
+
       {/* ── Header ── */}
       <header
         className={`flex items-center justify-between px-7 py-3.5 border-b ${c("border-ink-border-subtle bg-ink", "border-light-border-subtle bg-light-raised")}`}
       >
         <div className="flex items-center gap-3">
-          <img src="/favicon.svg" alt="" className="w-6 h-6" />
+          <img src="/favicon.svg" alt="GastroLog" className="w-6 h-6" />
           <h1
             className={`font-display text-[1.6em] font-semibold tracking-tight leading-none ${c("text-text-bright", "text-light-text-bright")}`}
           >
@@ -796,6 +798,7 @@ function AppContent() {
               const next = cycle[(cycle.indexOf(theme) + 1) % cycle.length]!;
               setTheme(next);
             }}
+            aria-label={`Theme: ${theme}`}
             title={`Theme: ${theme}`}
             className={`w-7 h-7 flex items-center justify-center text-sm rounded transition-all duration-200 ${c(
               "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
@@ -811,6 +814,7 @@ function AppContent() {
 
           <button
             onClick={() => setShowInspector(true)}
+            aria-label="Inspector"
             title="Inspector"
             className={`w-7 h-7 flex items-center justify-center rounded transition-all duration-500 ${c(
               "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
@@ -832,6 +836,7 @@ function AppContent() {
 
           <button
             onClick={() => setShowSettings(true)}
+            aria-label="Settings"
             title="Settings"
             className={`w-7 h-7 flex items-center justify-center rounded transition-all duration-200 ${c(
               "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
@@ -874,12 +879,14 @@ function AppContent() {
               "border-ink-border-subtle bg-ink text-text-ghost hover:text-text-muted hover:bg-ink-hover",
               "border-light-border-subtle bg-light-raised text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
             )}`}
+            aria-label="Expand sidebar"
             title="Expand sidebar"
           >
             {"\u25B8"}
           </button>
         )}
         <aside
+          aria-label="Sidebar"
           style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}
           className={`shrink-0 overflow-hidden ${resizing ? "" : "transition-[width] duration-200"} ${
             sidebarCollapsed
@@ -1024,6 +1031,7 @@ function AppContent() {
                 "bg-ink-surface border border-l-0 border-ink-border-subtle text-text-ghost hover:text-text-muted",
                 "bg-light-surface border border-l-0 border-light-border-subtle text-light-text-ghost hover:text-light-text-muted",
               )}`}
+              aria-label="Collapse sidebar"
               title="Collapse sidebar"
             >
               {"\u25C2"}
@@ -1033,6 +1041,7 @@ function AppContent() {
 
         {/* ── Main Content ── */}
         <main
+          id="main-content"
           className={`flex-1 flex flex-col overflow-hidden ${c("bg-ink-raised", "bg-light-bg")}`}
         >
           {/* Query Bar */}
@@ -1113,6 +1122,7 @@ function AppContent() {
                       "text-text-ghost hover:text-copper",
                       "text-light-text-ghost hover:text-copper",
                     )}`}
+                    aria-label="Query history"
                     title="Query history"
                   >
                     <svg
@@ -1139,6 +1149,7 @@ function AppContent() {
                       "text-text-ghost hover:text-copper",
                       "text-light-text-ghost hover:text-copper",
                     )}`}
+                    aria-label="Saved queries"
                     title="Saved queries"
                   >
                     <svg
@@ -1159,6 +1170,7 @@ function AppContent() {
                       "text-text-ghost hover:text-copper",
                       "text-light-text-ghost hover:text-copper",
                     )}`}
+                    aria-label="Query language help"
                     title="Query language help"
                   >
                     <svg
@@ -1236,6 +1248,7 @@ function AppContent() {
               <button
                 onClick={executeQuery}
                 disabled={isSearching || draftHasErrors}
+                aria-label="Search"
                 title="Search"
                 className="px-2 py-2.5 rounded border border-transparent bg-copper text-white hover:bg-copper-glow transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
               >
@@ -1255,6 +1268,7 @@ function AppContent() {
               <button
                 onClick={isFollowMode ? stopFollowMode : startFollow}
                 disabled={!isFollowMode && draftHasErrors}
+                aria-label={isFollowMode ? "Stop following" : "Follow"}
                 title={isFollowMode ? "Stop following" : "Follow"}
                 className={`px-2 py-2.5 rounded border transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${
                   isFollowMode
@@ -1288,6 +1302,7 @@ function AppContent() {
               <button
                 onClick={handleShowPlan}
                 disabled={!showPlan && draftHasErrors}
+                aria-label="Explain query plan"
                 title="Explain query plan"
                 className={`px-2 py-2.5 border rounded transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${
                   showPlan
@@ -1339,11 +1354,15 @@ function AppContent() {
             >
               <div className="absolute inset-0 bg-black/40" />
               <div
+                role="dialog"
+                aria-modal="true"
+                aria-label="Query Execution Plan"
                 className={`relative w-[90vw] max-w-4xl h-[80vh] flex flex-col rounded-lg shadow-2xl p-6 ${c("bg-ink-raised border border-ink-border-subtle", "bg-light-raised border border-light-border-subtle")}`}
                 onClick={(e) => e.stopPropagation()}
               >
                 <button
                   onClick={() => setShowPlan(false)}
+                  aria-label="Close"
                   className={`absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded text-lg leading-none transition-colors ${c("text-text-muted hover:text-text-bright", "text-light-text-muted hover:text-light-text-bright")}`}
                 >
                   &times;
@@ -1525,6 +1544,7 @@ function AppContent() {
                         replace: false,
                       });
                     }}
+                    aria-label="Zoom out"
                     title="Zoom out — double time span around selected record"
                     className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${c(
                       "text-text-muted hover:text-copper hover:bg-ink-hover",
@@ -1548,6 +1568,11 @@ function AppContent() {
                 )}
                 <button
                   onClick={toggleReverse}
+                  aria-label={
+                    (isFollowMode ? followReversed : isReversed)
+                      ? "Sort oldest first"
+                      : "Sort newest first"
+                  }
                   title={
                     (isFollowMode ? followReversed : isReversed)
                       ? "Newest first (click for oldest first)"
@@ -1601,6 +1626,9 @@ function AppContent() {
                     </span>
                   ))}
                 <span
+                  role="status"
+                  aria-live="polite"
+                  aria-label={`${isFollowMode ? followRecords.length : records.length}${!isFollowMode && hasMore ? "+" : ""} results`}
                   className={`font-mono text-[0.8em] px-2 py-0.5 rounded ${c("bg-ink-surface text-text-muted", "bg-light-hover text-light-text-muted")}`}
                 >
                   {isFollowMode ? followRecords.length : records.length}
@@ -1703,6 +1731,7 @@ function AppContent() {
                 "bg-ink-surface border border-r-0 border-ink-border-subtle text-text-ghost hover:text-text-muted",
                 "bg-light-surface border border-r-0 border-light-border-subtle text-light-text-ghost hover:text-light-text-muted",
               )}`}
+              aria-label="Collapse detail panel"
               title="Collapse detail panel"
             >
               {"\u25B8"}
@@ -1720,12 +1749,14 @@ function AppContent() {
               "border-ink-border-subtle bg-ink-surface text-text-ghost hover:text-text-muted hover:bg-ink-hover",
               "border-light-border-subtle bg-light-surface text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
             )}`}
+            aria-label="Expand detail panel"
             title="Expand detail panel"
           >
             {"\u25C2"}
           </button>
         )}
         <aside
+          aria-label="Record details"
           style={{ width: detailCollapsed ? 0 : detailWidth }}
           className={`shrink-0 overflow-hidden ${resizing ? "" : "transition-[width] duration-200"} ${
             detailCollapsed
@@ -1743,6 +1774,7 @@ function AppContent() {
             </h3>
             <button
               onClick={() => setDetailPinned((p) => !p)}
+              aria-label={detailPinned ? "Unpin detail panel" : "Pin detail panel"}
               title={detailPinned ? "Unpin detail panel" : "Pin detail panel"}
               className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${
                 detailPinned

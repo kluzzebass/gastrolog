@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { clickableProps } from "../../utils";
 import { useStores, useChunks, useIndexes } from "../../api/hooks";
 import { ChunkTimeline } from "./ChunkTimeline";
 
@@ -79,6 +80,8 @@ function StoreCard({
           "hover:bg-light-hover",
         )}`}
         onClick={onToggle}
+        {...clickableProps(onToggle)}
+        aria-expanded={expanded}
       >
         <div className="flex items-center gap-2.5">
           <span
@@ -195,6 +198,8 @@ function ChunkList({ storeId, dark }: { storeId: string; dark: boolean }) {
                 "hover:bg-light-hover",
               )} ${isExpanded ? c("bg-ink-hover", "bg-light-hover") : ""}`}
               onClick={() => setExpandedChunk(isExpanded ? null : chunk.id)}
+              {...clickableProps(() => setExpandedChunk(isExpanded ? null : chunk.id))}
+              aria-expanded={isExpanded}
             >
               <span
                 className={`font-mono truncate ${c("text-text-muted", "text-light-text-muted")}`}

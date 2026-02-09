@@ -91,7 +91,7 @@ function ToastOverlay({
   if (toasts.length === 0) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-100 flex flex-col-reverse gap-2 max-w-sm">
+    <div role="status" aria-live="polite" className="fixed bottom-4 right-4 z-100 flex flex-col-reverse gap-2 max-w-sm">
       {toasts.map((toast) => (
         <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} />
       ))}
@@ -145,6 +145,7 @@ function ToastItem({
       <span className="flex-1 wrap-break-word">{toast.message}</span>
       <button
         onClick={() => onDismiss(toast.id)}
+        aria-label="Dismiss"
         className="shrink-0 w-5 h-5 flex items-center justify-center rounded opacity-60 hover:opacity-100 transition-opacity"
       >
         &times;

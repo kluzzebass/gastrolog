@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { useClickOutside } from "../hooks/useClickOutside";
 import { useThemeClass } from "../hooks/useThemeClass";
+import { clickableProps } from "../utils";
 import type { HistoryEntry } from "../hooks/useQueryHistory";
 
 export function QueryHistory({
@@ -50,6 +51,7 @@ export function QueryHistory({
           key={entry.query}
           className={`group flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors ${c("hover:bg-ink-hover", "hover:bg-light-hover")}`}
           onClick={() => onSelect(entry.query)}
+          {...clickableProps(() => onSelect(entry.query))}
         >
           <span
             className={`flex-1 font-mono text-[0.8em] truncate ${c("text-text-muted", "text-light-text-muted")}`}
@@ -62,6 +64,7 @@ export function QueryHistory({
               onRemove(entry.query);
             }}
             className={`opacity-0 group-hover:opacity-100 text-[0.75em] transition-opacity ${c("text-text-ghost hover:text-severity-error", "text-light-text-ghost hover:text-severity-error")}`}
+            aria-label="Remove from history"
             title="Remove from history"
           >
             &times;

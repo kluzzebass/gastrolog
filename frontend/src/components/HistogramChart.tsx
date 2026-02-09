@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
 import { useThemeClass } from "../hooks/useThemeClass";
+import { clickableProps } from "../utils";
 import type { HistogramData } from "../api/hooks/useHistogram";
 
 const SEVERITY_COLORS = [
@@ -298,6 +299,8 @@ export function HistogramChart({
                                   }
                                 : undefined
                             }
+                            {...clickableProps(onSegmentClick ? () => onSegmentClick(seg.key) : undefined)}
+                            aria-label={onSegmentClick ? `Filter by ${seg.key}` : undefined}
                           />
                         ))}
                       </div>
@@ -380,6 +383,7 @@ export function HistogramChart({
               "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
               "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
             )}`}
+            aria-label="Pan backward"
             title="Pan backward"
           >
             {"\u25C2"}
@@ -412,6 +416,7 @@ export function HistogramChart({
               "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
               "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
             )}`}
+            aria-label="Pan forward"
             title="Pan forward"
           >
             {"\u25B8"}

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useClickOutside } from "../hooks/useClickOutside";
 import { useThemeClass } from "../hooks/useThemeClass";
+import { clickableProps } from "../utils";
 import type { SavedQuery } from "../api/gen/gastrolog/v1/config_pb";
 
 export function SavedQueries({
@@ -104,6 +105,7 @@ export function SavedQueries({
               key={entry.name}
               className={`group flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors ${c("hover:bg-ink-hover", "hover:bg-light-hover")}`}
               onClick={() => onSelect(entry.query)}
+              {...clickableProps(() => onSelect(entry.query))}
             >
               <div className="flex-1 min-w-0">
                 <div
@@ -123,6 +125,7 @@ export function SavedQueries({
                   onDelete(entry.name);
                 }}
                 className={`opacity-0 group-hover:opacity-100 text-[0.75em] transition-opacity ${c("text-text-ghost hover:text-severity-error", "text-light-text-ghost hover:text-severity-error")}`}
+                aria-label="Delete saved query"
                 title="Delete saved query"
               >
                 &times;

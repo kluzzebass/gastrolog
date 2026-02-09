@@ -1,4 +1,5 @@
 import type { ProtoRecord } from "../utils";
+import { clickableProps } from "../utils";
 import { syntaxHighlight } from "../syntax";
 import { detectSeverity } from "./LogEntry";
 
@@ -29,6 +30,7 @@ export function ContextRecord({
   return (
     <div
       onClick={onSelect}
+      {...clickableProps(onSelect)}
       className={`grid grid-cols-[10ch_3.5ch_1fr] px-2 py-0.5 text-[0.8em] leading-snug border-l-2 ${
         isAnchor
           ? dark

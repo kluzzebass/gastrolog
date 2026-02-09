@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { clickableProps } from "../../utils";
 import { useIngesters, useIngesterStatus } from "../../api/hooks";
 
 export function IngestersPanel({ dark }: { dark: boolean }) {
@@ -75,6 +76,8 @@ function IngesterCard({
           "hover:bg-light-hover",
         )}`}
         onClick={onToggle}
+        {...clickableProps(onToggle)}
+        aria-expanded={expanded}
       >
         <div className="flex items-center gap-2.5">
           <span

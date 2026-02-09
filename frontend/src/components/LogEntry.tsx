@@ -1,5 +1,6 @@
 import { forwardRef } from "react";
 import type { ProtoRecord } from "../utils";
+import { clickableProps } from "../utils";
 import { syntaxHighlight, composeWithSearch } from "../syntax";
 import { CopyButton } from "./CopyButton";
 
@@ -97,6 +98,8 @@ export const LogEntry = forwardRef<
               e.stopPropagation();
               onFilterToggle?.(severity.filter);
             }}
+            {...clickableProps(onFilterToggle ? () => onFilterToggle(severity.filter) : undefined)}
+            aria-label={`Filter by ${severity.label}`}
           >
             {severity.label}
           </span>

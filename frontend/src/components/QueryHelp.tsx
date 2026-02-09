@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import FocusTrap from "focus-trap-react";
 import { useThemeClass } from "../hooks/useThemeClass";
 
 export function QueryHelp({
@@ -65,12 +66,16 @@ export function QueryHelp({
   );
 
   return (
+    <FocusTrap focusTrapOptions={{ escapeDeactivates: false, allowOutsideClick: true }}>
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
       onClick={onClose}
     >
       <div className={`absolute inset-0 ${c("bg-black/60", "bg-black/40")}`} />
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Query Language"
         className={`relative max-w-160 w-full mx-4 max-h-[80vh] overflow-y-auto app-scroll rounded-lg border p-6 ${c(
           "bg-ink-surface border-ink-border-subtle",
           "bg-light-surface border-light-border-subtle",
@@ -85,6 +90,7 @@ export function QueryHelp({
           </h2>
           <button
             onClick={onClose}
+            aria-label="Close"
             className={`text-[1.2em] leading-none px-1 transition-colors ${c(
               "text-text-ghost hover:text-text-muted",
               "text-light-text-ghost hover:text-light-text-muted",
@@ -195,5 +201,6 @@ export function QueryHelp({
         )}
       </div>
     </div>
+    </FocusTrap>
   );
 }

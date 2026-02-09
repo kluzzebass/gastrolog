@@ -87,6 +87,7 @@ export function ExportButton({
       <button
         onClick={() => setOpen((o) => !o)}
         disabled={records.length === 0}
+        aria-label="Export results"
         title="Export results"
         className={`w-6 h-6 flex items-center justify-center rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${c(
           "text-text-muted hover:text-copper hover:bg-ink-hover",

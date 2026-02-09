@@ -5,6 +5,7 @@ import {
   relativeTime,
   formatBytes,
   formatChunkId,
+  clickableProps,
 } from "../utils";
 import { syntaxHighlight } from "../syntax";
 import { CopyButton } from "./CopyButton";
@@ -347,6 +348,7 @@ export function DetailRow({
               : "text-light-text-normal"
         }`}
         onClick={onClick}
+        {...clickableProps(onClick)}
       >
         {value}
       </dd>

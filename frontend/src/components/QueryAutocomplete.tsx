@@ -31,12 +31,15 @@ export function QueryAutocomplete({
   return (
     <div
       ref={ref}
+      role="listbox"
       className={`absolute left-0 right-0 top-full mt-1 z-40 rounded border shadow-lg max-h-48 overflow-y-auto app-scroll ${c("bg-ink-surface border-ink-border", "bg-light-surface border-light-border")}`}
     >
       {suggestions.map((suggestion, i) => (
         <div
           key={suggestion}
           ref={i === selectedIndex ? selectedRef : undefined}
+          role="option"
+          aria-selected={i === selectedIndex}
           className={`px-3 py-1.5 font-mono text-[0.8em] cursor-pointer transition-colors ${
             i === selectedIndex
               ? c(

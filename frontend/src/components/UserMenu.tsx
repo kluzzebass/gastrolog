@@ -29,6 +29,7 @@ export function UserMenu({
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
+        aria-label={`User menu: ${username}`}
         title={username}
         className={`w-7 h-7 flex items-center justify-center rounded transition-all duration-200 ${c(
           "text-text-ghost hover:text-text-muted hover:bg-ink-hover",

@@ -35,6 +35,7 @@ export function CopyButton({
       type="button"
       onClick={handleClick}
       className={`inline-flex items-center justify-center transition-colors cursor-pointer ${color} ${className}`}
+      aria-label={copied ? "Copied" : "Copy to clipboard"}
       title={copied ? "Copied!" : "Copy to clipboard"}
     >
       {copied ? (

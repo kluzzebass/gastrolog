@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import FocusTrap from "focus-trap-react";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { SpinnerIcon } from "./icons";
 import { ConnectError } from "@connectrpc/connect";
@@ -70,12 +71,16 @@ export function ChangePasswordDialog({
   };
 
   return (
+    <FocusTrap focusTrapOptions={{ escapeDeactivates: false, allowOutsideClick: true }}>
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
       onClick={onClose}
     >
       <div className="absolute inset-0 bg-black/40" />
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Change Password"
         className={`relative w-full max-w-sm rounded-lg border p-6 shadow-2xl ${c(
           "bg-ink-surface border-ink-border",
           "bg-light-surface border-light-border",
@@ -84,6 +89,7 @@ export function ChangePasswordDialog({
       >
         <button
           onClick={onClose}
+          aria-label="Close"
           className={`absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded text-lg leading-none transition-colors ${c(
             "text-text-muted hover:text-text-bright",
             "text-light-text-muted hover:text-light-text-bright",
@@ -219,5 +225,6 @@ export function ChangePasswordDialog({
         </form>
       </div>
     </div>
+    </FocusTrap>
   );
 }

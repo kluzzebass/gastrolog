@@ -130,9 +130,18 @@ export function ChunkTimeline({
             <g
               key={bar.id}
               className="cursor-pointer"
+              role="button"
+              tabIndex={0}
+              aria-label={`Chunk ${bar.id}`}
               onMouseEnter={() => setHoveredChunk(bar.id)}
               onMouseLeave={() => setHoveredChunk(null)}
               onClick={() => onChunkClick?.(bar.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onChunkClick?.(bar.id);
+                }
+              }}
             >
               <rect
                 x={bar.x * 1000}

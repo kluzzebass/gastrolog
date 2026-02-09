@@ -102,7 +102,7 @@ export function AuthPage({ mode }: AuthPageProps) {
         <div className="flex flex-col items-center gap-3 mb-10">
           <img
             src="/favicon.svg"
-            alt=""
+            alt="GastroLog"
             className={`w-10 h-10 ${c("opacity-70", "opacity-60")}`}
           />
           <h1

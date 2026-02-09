@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { clickableProps } from "../../utils";
 
 interface SettingsCardProps {
   id: string;
@@ -41,6 +42,8 @@ export function SettingsCard({
           "hover:bg-light-hover",
         )}`}
         onClick={onToggle}
+        {...clickableProps(onToggle)}
+        aria-expanded={expanded}
       >
         <div className="flex items-center gap-2.5">
           <span

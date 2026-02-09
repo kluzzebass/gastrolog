@@ -119,3 +119,18 @@ export function sameRecord(
     ar.chunkId === br.chunkId && ar.pos === br.pos && ar.storeId === br.storeId
   );
 }
+
+/** Props to make a non-button element keyboard-activatable (Enter/Space). */
+export function clickableProps(handler: (() => void) | undefined) {
+  if (!handler) return {};
+  return {
+    role: "button" as const,
+    tabIndex: 0,
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        handler();
+      }
+    },
+  };
+}

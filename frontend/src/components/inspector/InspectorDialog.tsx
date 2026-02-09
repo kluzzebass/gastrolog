@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import FocusTrap from "focus-trap-react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { StoresPanel } from "./StoresPanel";
 import { IngestersPanel } from "./IngestersPanel";
@@ -44,12 +45,16 @@ export function InspectorDialog({
   }, [onClose]);
 
   return (
+    <FocusTrap focusTrapOptions={{ escapeDeactivates: false, allowOutsideClick: true }}>
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
       onClick={onClose}
     >
       <div className="absolute inset-0 bg-black/40" />
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Inspector"
         className={`relative w-[90vw] max-w-5xl h-[85vh] flex flex-col rounded-lg shadow-2xl overflow-hidden ${c("bg-ink-raised border border-ink-border-subtle", "bg-light-raised border border-light-border-subtle")}`}
         onClick={(e) => e.stopPropagation()}
       >
@@ -88,6 +93,7 @@ export function InspectorDialog({
 
           <button
             onClick={onClose}
+            aria-label="Close"
             className={`w-7 h-7 flex items-center justify-center rounded text-lg leading-none transition-colors ${c("text-text-muted hover:text-text-bright", "text-light-text-muted hover:text-light-text-bright")}`}
           >
             &times;
@@ -104,6 +110,7 @@ export function InspectorDialog({
         </div>
       </div>
     </div>
+    </FocusTrap>
   );
 }
 
