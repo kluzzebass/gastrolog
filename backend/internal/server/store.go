@@ -148,9 +148,6 @@ func (s *StoreServer) GetIndexes(
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
 
-	// Get file sizes for all indexes (cheap stat calls).
-	sizes := im.IndexFileSizes(chunkID)
-
 	resp := &apiv1.GetIndexesResponse{
 		Sealed:  meta.Sealed,
 		Indexes: make([]*apiv1.IndexInfo, 0, 7),
@@ -158,11 +155,13 @@ func (s *StoreServer) GetIndexes(
 
 	// Token index
 	if idx, err := im.OpenTokenIndex(chunkID); err == nil {
+		entries := idx.Entries()
+		var size int64
+		for _, e := range entries {
+			size += int64(len(e.Token)) + int64(len(e.Positions))*8
+		}
 		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{
-			Name:       "token",
-			Exists:     true,
-			EntryCount: int64(len(idx.Entries())),
-			SizeBytes:  sizes["token"],
+			Name: "token", Exists: true, EntryCount: int64(len(entries)), SizeBytes: size,
 		})
 	} else {
 		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{Name: "token"})
@@ -170,11 +169,13 @@ func (s *StoreServer) GetIndexes(
 
 	// Attr key index
 	if idx, err := im.OpenAttrKeyIndex(chunkID); err == nil {
+		entries := idx.Entries()
+		var size int64
+		for _, e := range entries {
+			size += int64(len(e.Key)) + int64(len(e.Positions))*8
+		}
 		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{
-			Name:       "attr_key",
-			Exists:     true,
-			EntryCount: int64(len(idx.Entries())),
-			SizeBytes:  sizes["attr_key"],
+			Name: "attr_key", Exists: true, EntryCount: int64(len(entries)), SizeBytes: size,
 		})
 	} else {
 		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{Name: "attr_key"})
@@ -182,11 +183,13 @@ func (s *StoreServer) GetIndexes(
 
 	// Attr value index
 	if idx, err := im.OpenAttrValueIndex(chunkID); err == nil {
+		entries := idx.Entries()
+		var size int64
+		for _, e := range entries {
+			size += int64(len(e.Value)) + int64(len(e.Positions))*8
+		}
 		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{
-			Name:       "attr_val",
-			Exists:     true,
-			EntryCount: int64(len(idx.Entries())),
-			SizeBytes:  sizes["attr_val"],
+			Name: "attr_val", Exists: true, EntryCount: int64(len(entries)), SizeBytes: size,
 		})
 	} else {
 		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{Name: "attr_val"})
@@ -194,11 +197,13 @@ func (s *StoreServer) GetIndexes(
 
 	// Attr kv index
 	if idx, err := im.OpenAttrKVIndex(chunkID); err == nil {
+		entries := idx.Entries()
+		var size int64
+		for _, e := range entries {
+			size += int64(len(e.Key)) + int64(len(e.Value)) + int64(len(e.Positions))*8
+		}
 		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{
-			Name:       "attr_kv",
-			Exists:     true,
-			EntryCount: int64(len(idx.Entries())),
-			SizeBytes:  sizes["attr_kv"],
+			Name: "attr_kv", Exists: true, EntryCount: int64(len(entries)), SizeBytes: size,
 		})
 	} else {
 		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{Name: "attr_kv"})
@@ -206,11 +211,13 @@ func (s *StoreServer) GetIndexes(
 
 	// KV key index
 	if idx, _, err := im.OpenKVKeyIndex(chunkID); err == nil {
+		entries := idx.Entries()
+		var size int64
+		for _, e := range entries {
+			size += int64(len(e.Key)) + int64(len(e.Positions))*8
+		}
 		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{
-			Name:       "kv_key",
-			Exists:     true,
-			EntryCount: int64(len(idx.Entries())),
-			SizeBytes:  sizes["kv_key"],
+			Name: "kv_key", Exists: true, EntryCount: int64(len(entries)), SizeBytes: size,
 		})
 	} else {
 		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{Name: "kv_key"})
@@ -218,11 +225,13 @@ func (s *StoreServer) GetIndexes(
 
 	// KV value index
 	if idx, _, err := im.OpenKVValueIndex(chunkID); err == nil {
+		entries := idx.Entries()
+		var size int64
+		for _, e := range entries {
+			size += int64(len(e.Value)) + int64(len(e.Positions))*8
+		}
 		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{
-			Name:       "kv_val",
-			Exists:     true,
-			EntryCount: int64(len(idx.Entries())),
-			SizeBytes:  sizes["kv_val"],
+			Name: "kv_val", Exists: true, EntryCount: int64(len(entries)), SizeBytes: size,
 		})
 	} else {
 		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{Name: "kv_val"})
@@ -230,11 +239,13 @@ func (s *StoreServer) GetIndexes(
 
 	// KV combined index
 	if idx, _, err := im.OpenKVIndex(chunkID); err == nil {
+		entries := idx.Entries()
+		var size int64
+		for _, e := range entries {
+			size += int64(len(e.Key)) + int64(len(e.Value)) + int64(len(e.Positions))*8
+		}
 		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{
-			Name:       "kv_kv",
-			Exists:     true,
-			EntryCount: int64(len(idx.Entries())),
-			SizeBytes:  sizes["kv_kv"],
+			Name: "kv_kv", Exists: true, EntryCount: int64(len(entries)), SizeBytes: size,
 		})
 	} else {
 		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{Name: "kv_kv"})

@@ -300,13 +300,11 @@ function ChunkDetail({
                   >
                     {Number(idx.entryCount).toLocaleString()} entries
                   </span>
-                  {Number(idx.sizeBytes) > 0 && (
-                    <span
-                      className={`font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
-                    >
-                      {formatBytes(Number(idx.sizeBytes))}
-                    </span>
-                  )}
+                  <span
+                    className={`font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+                  >
+                    {formatBytes(Number(idx.sizeBytes))}
+                  </span>
                 </>
               ) : (
                 <span

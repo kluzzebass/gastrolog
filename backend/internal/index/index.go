@@ -170,10 +170,4 @@ type IndexManager interface {
 	// May clean up orphaned temporary files as a side effect.
 	// Note: A capped kv index is still considered "complete" (it exists).
 	IndexesComplete(chunkID chunk.ChunkID) (bool, error)
-
-	// IndexFileSizes returns the on-disk size in bytes for each index file.
-	// Keys are index names (e.g. "token", "attr_key", "kv_kv").
-	// Missing indexes are omitted from the map.
-	// In-memory implementations return an empty map.
-	IndexFileSizes(chunkID chunk.ChunkID) map[string]int64
 }
