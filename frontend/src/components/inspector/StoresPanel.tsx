@@ -307,7 +307,9 @@ function ChunkDetail({
                   </span>
                 </>
               ) : (
-                <span className="px-1.5 py-0.5 text-[0.8em] rounded bg-severity-warn/15 text-severity-warn">
+                <span
+                  className={`px-1.5 py-0.5 text-[0.8em] rounded ${c("bg-ink-hover text-text-ghost", "bg-light-hover text-light-text-ghost")}`}
+                >
                   missing
                 </span>
               )}
