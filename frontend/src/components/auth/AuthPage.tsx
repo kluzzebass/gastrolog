@@ -19,11 +19,16 @@ export function AuthPage({ mode }: AuthPageProps) {
   const [error, setError] = useState("");
   const usernameRef = useRef<HTMLInputElement>(null);
 
-  const [dark, setDark] = useState(
-    () => window.matchMedia("(prefers-color-scheme: dark)").matches,
-  );
+  const [dark, setDark] = useState(() => {
+    const saved = localStorage.getItem("gastrolog:theme");
+    if (saved === "dark") return true;
+    if (saved === "light") return false;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  });
 
   useEffect(() => {
+    const saved = localStorage.getItem("gastrolog:theme");
+    if (saved === "dark" || saved === "light") return; // explicit choice, ignore system
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = (e: MediaQueryListEvent) => setDark(e.matches);
     mq.addEventListener("change", handler);
