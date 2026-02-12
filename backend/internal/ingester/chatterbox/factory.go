@@ -21,16 +21,17 @@ const (
 
 // Format names for configuration.
 const (
-	FormatPlain  = "plain"
-	FormatKV     = "kv"
-	FormatJSON   = "json"
-	FormatAccess = "access"
-	FormatSyslog = "syslog"
-	FormatWeird  = "weird"
+	FormatPlain      = "plain"
+	FormatKV         = "kv"
+	FormatJSON       = "json"
+	FormatAccess     = "access"
+	FormatSyslog     = "syslog"
+	FormatWeird      = "weird"
+	FormatMultirecord = "multirecord"
 )
 
 // allFormats lists all supported format names in default order.
-var allFormats = []string{FormatPlain, FormatKV, FormatJSON, FormatAccess, FormatSyslog, FormatWeird}
+var allFormats = []string{FormatPlain, FormatKV, FormatJSON, FormatAccess, FormatSyslog, FormatWeird, FormatMultirecord}
 
 // NewIngester creates a new chatterbox ingester from configuration parameters.
 //
@@ -38,7 +39,7 @@ var allFormats = []string{FormatPlain, FormatKV, FormatJSON, FormatAccess, Forma
 //   - "minInterval": minimum delay between messages (default: "100ms")
 //   - "maxInterval": maximum delay between messages (default: "1s")
 //   - "formats": comma-separated list of enabled formats (default: all)
-//     Valid formats: plain, kv, json, access, syslog, weird
+//     Valid formats: plain, kv, json, access, syslog, weird, multirecord
 //   - "formatWeights": comma-separated format=weight pairs (default: equal weights)
 //     Example: "plain=30,json=20,kv=25,access=10,syslog=10,weird=5"
 //   - "hostCount": number of distinct hosts to generate (default: 10)
@@ -236,26 +237,28 @@ func parseWeights(weightsParam string, enabledFormats []string) (map[string]int,
 }
 
 // buildFormats creates format instances and builds the cumulative weight table.
-func buildFormats(enabledFormats []string, weights map[string]int, pools *AttributePools) ([]LogFormat, []int, int) {
-	formats := make([]LogFormat, 0, len(enabledFormats))
+func buildFormats(enabledFormats []string, weights map[string]int, pools *AttributePools) ([]MultiRecordFormat, []int, int) {
+	formats := make([]MultiRecordFormat, 0, len(enabledFormats))
 	cumulativeWeights := make([]int, 0, len(enabledFormats))
 	totalWeight := 0
 
 	for _, name := range enabledFormats {
-		var format LogFormat
+		var format MultiRecordFormat
 		switch name {
 		case FormatPlain:
-			format = NewPlainTextFormat(pools)
+			format = &singleFormatAdapter{f: NewPlainTextFormat(pools)}
 		case FormatKV:
-			format = NewKeyValueFormat(pools)
+			format = &singleFormatAdapter{f: NewKeyValueFormat(pools)}
 		case FormatJSON:
-			format = NewJSONFormat(pools)
+			format = &singleFormatAdapter{f: NewJSONFormat(pools)}
 		case FormatAccess:
-			format = NewAccessLogFormat(pools)
+			format = &singleFormatAdapter{f: NewAccessLogFormat(pools)}
 		case FormatSyslog:
-			format = NewSyslogFormat(pools)
+			format = &singleFormatAdapter{f: NewSyslogFormat(pools)}
 		case FormatWeird:
-			format = NewWeirdFormat(pools)
+			format = &singleFormatAdapter{f: NewWeirdFormat(pools)}
+		case FormatMultirecord:
+			format = NewMultirecordFormat(pools)
 		}
 
 		formats = append(formats, format)

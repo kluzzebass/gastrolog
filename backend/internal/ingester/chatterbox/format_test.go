@@ -406,6 +406,41 @@ func TestAccessLogFormat_CombinedFormat(t *testing.T) {
 	}
 }
 
+func TestMultirecordFormat_GenerateMulti(t *testing.T) {
+	pools := newTestPools()
+	format := NewMultirecordFormat(pools)
+	rng := newTestRng()
+
+	seenStack := false
+	seenHelp := false
+	for i := 0; i < 100; i++ {
+		drafts := format.GenerateMulti(rng)
+		if len(drafts) < 2 {
+			t.Errorf("iteration %d: multirecord should produce at least 2 records, got %d", i, len(drafts))
+		}
+		for j, d := range drafts {
+			if d.Attrs == nil {
+				t.Errorf("iteration %d record %d: attrs is nil", i, j)
+			}
+			if d.Attrs["host"] == "" {
+				t.Errorf("iteration %d record %d: missing host attr", i, j)
+			}
+			if d.Attrs["format"] == "stack" {
+				seenStack = true
+			}
+			if d.Attrs["format"] == "help" {
+				seenHelp = true
+			}
+		}
+	}
+	if !seenStack {
+		t.Error("expected to see stack format over 100 iterations")
+	}
+	if !seenHelp {
+		t.Error("expected to see help format over 100 iterations")
+	}
+}
+
 func TestWeirdFormat_Robustness(t *testing.T) {
 	// Weird format should always produce valid attrs and not panic.
 	pools := newTestPools()

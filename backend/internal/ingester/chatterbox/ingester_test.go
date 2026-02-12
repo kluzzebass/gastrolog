@@ -284,7 +284,11 @@ func TestGenerateMessage_Format(t *testing.T) {
 	}
 	recv := r.(*Ingester)
 
-	msg := recv.generateMessage()
+	msgs := recv.generateMessages()
+	if len(msgs) == 0 {
+		t.Fatal("generateMessages returned no messages")
+	}
+	msg := msgs[0]
 
 	if msg.Attrs["ingester_type"] != "chatterbox" {
 		t.Errorf("ingester attr = %q, want %q", msg.Attrs["ingester_type"], "chatterbox")
@@ -355,8 +359,37 @@ func TestNewIngester_AllFormats(t *testing.T) {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
 	recv := r.(*Ingester)
-	if len(recv.formats) != 6 {
-		t.Errorf("expected 6 formats (all), got %d", len(recv.formats))
+	if len(recv.formats) != 7 {
+		t.Errorf("expected 7 formats (all), got %d", len(recv.formats))
+	}
+}
+
+func TestGenerateMessages_MultirecordProducesMultiple(t *testing.T) {
+	params := map[string]string{
+		"formats": "multirecord",
+	}
+	r, err := NewIngester("test", params, nil)
+	if err != nil {
+		t.Fatalf("NewIngester failed: %v", err)
+	}
+	recv := r.(*Ingester)
+
+	multiCount := 0
+	for i := 0; i < 100; i++ {
+		msgs := recv.generateMessages()
+		if len(msgs) > 1 {
+			multiCount++
+			// All messages from one multirecord burst should have same format attr
+			format := msgs[0].Attrs["format"]
+			for _, m := range msgs {
+				if m.Attrs["format"] != format {
+					t.Errorf("burst %d: inconsistent format attr", i)
+				}
+			}
+		}
+	}
+	if multiCount < 50 {
+		t.Errorf("expected multirecord to produce multiple messages most of the time, got %d/100 bursts", multiCount)
 	}
 }
 
@@ -435,9 +468,10 @@ func TestNewIngester_HostCount(t *testing.T) {
 	// Generate messages and collect hosts
 	hosts := make(map[string]bool)
 	for i := 0; i < 1000; i++ {
-		msg := recv.generateMessage()
-		if h := msg.Attrs["host"]; h != "" {
-			hosts[h] = true
+		for _, msg := range recv.generateMessages() {
+			if h := msg.Attrs["host"]; h != "" {
+				hosts[h] = true
+			}
 		}
 	}
 
@@ -481,9 +515,10 @@ func TestNewIngester_ServiceCount(t *testing.T) {
 	// Generate messages and collect services
 	services := make(map[string]bool)
 	for i := 0; i < 500; i++ {
-		msg := recv.generateMessage()
-		if s := msg.Attrs["service"]; s != "" {
-			services[s] = true
+		for _, msg := range recv.generateMessages() {
+			if s := msg.Attrs["service"]; s != "" {
+				services[s] = true
+			}
 		}
 	}
 
@@ -531,16 +566,17 @@ func TestGenerateMessage_MultipleFormats(t *testing.T) {
 	syslogCount := 0
 
 	for i := 0; i < 1000; i++ {
-		msg := recv.generateMessage()
-		raw := string(msg.Raw)
-		if len(raw) > 0 && raw[0] == '{' {
-			jsonCount++
-		}
-		if strings.Contains(raw, "HTTP/") {
-			accessCount++
-		}
-		if len(raw) > 0 && raw[0] == '<' {
-			syslogCount++
+		for _, msg := range recv.generateMessages() {
+			raw := string(msg.Raw)
+			if len(raw) > 0 && raw[0] == '{' {
+				jsonCount++
+			}
+			if strings.Contains(raw, "HTTP/") {
+				accessCount++
+			}
+			if len(raw) > 0 && raw[0] == '<' {
+				syslogCount++
+			}
 		}
 	}
 
@@ -570,10 +606,11 @@ func TestGenerateMessage_WeightedSelection(t *testing.T) {
 
 	jsonCount := 0
 	for i := 0; i < 1000; i++ {
-		msg := recv.generateMessage()
-		raw := string(msg.Raw)
-		if len(raw) > 0 && raw[0] == '{' {
-			jsonCount++
+		for _, msg := range recv.generateMessages() {
+			raw := string(msg.Raw)
+			if len(raw) > 0 && raw[0] == '{' {
+				jsonCount++
+			}
 		}
 	}
 
@@ -594,7 +631,11 @@ func TestGenerateMessage_AttrsIncludeIngesterType(t *testing.T) {
 	}
 	recv := r.(*Ingester)
 
-	msg := recv.generateMessage()
+	msgs := recv.generateMessages()
+	if len(msgs) == 0 {
+		t.Fatal("generateMessages returned no messages")
+	}
+	msg := msgs[0]
 
 	if msg.Attrs["ingester_type"] != "chatterbox" {
 		t.Errorf("ingester = %q, want %q", msg.Attrs["ingester_type"], "chatterbox")

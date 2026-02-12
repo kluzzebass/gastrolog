@@ -25,8 +25,8 @@ type Ingester struct {
 	maxInterval time.Duration
 	rng         *rand.Rand
 
-	// formats holds the available log format generators.
-	formats []LogFormat
+	// formats holds the available format generators (single or multi-record).
+	formats []MultiRecordFormat
 	// weights holds the cumulative weights for format selection.
 	// weights[i] = sum of weights[0..i], used for weighted random selection.
 	weights []int
@@ -51,11 +51,12 @@ func (r *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 		case <-timer.C:
 		}
 
-		msg := r.generateMessage()
-		select {
-		case out <- msg:
-		case <-ctx.Done():
-			return nil
+		for _, msg := range r.generateMessages() {
+			select {
+			case out <- msg:
+			case <-ctx.Done():
+				return nil
+			}
 		}
 
 		timer.Reset(r.randomInterval())
@@ -71,32 +72,36 @@ func (r *Ingester) randomInterval() time.Duration {
 	return r.minInterval + time.Duration(r.rng.Int64N(int64(delta)))
 }
 
-// generateMessage creates a random log-like message.
-func (r *Ingester) generateMessage() orchestrator.IngestMessage {
-	// Select a format using weighted random selection.
+// generateMessages creates one or more log-like messages.
+func (r *Ingester) generateMessages() []orchestrator.IngestMessage {
 	format := r.selectFormat()
+	drafts := format.GenerateMulti(r.rng)
 
-	// Generate raw bytes, format-specific attributes, and source timestamp.
-	raw, formatAttrs, sourceTS := format.Generate(r.rng)
+	base := time.Now()
+	msgs := make([]orchestrator.IngestMessage, 0, len(drafts))
+	for i, d := range drafts {
+		attrs := make(map[string]string, len(d.Attrs)+2)
+		for k, v := range d.Attrs {
+			attrs[k] = v
+		}
+		attrs["ingester_type"] = "chatterbox"
+		attrs["ingester_id"] = r.id
 
-	// Merge base attrs with format attrs.
-	attrs := make(map[string]string, len(formatAttrs)+2)
-	for k, v := range formatAttrs {
-		attrs[k] = v
+		// Offset each record by 1µs so they sort deterministically in order.
+		ingestTS := base.Add(time.Duration(i) * time.Microsecond)
+
+		msgs = append(msgs, orchestrator.IngestMessage{
+			Attrs:    attrs,
+			Raw:      d.Raw,
+			SourceTS: d.SourceTS,
+			IngestTS: ingestTS,
+		})
 	}
-	attrs["ingester_type"] = "chatterbox"
-	attrs["ingester_id"] = r.id
-
-	return orchestrator.IngestMessage{
-		Attrs:    attrs,
-		Raw:      raw,
-		SourceTS: sourceTS,
-		IngestTS: time.Now(),
-	}
+	return msgs
 }
 
 // selectFormat returns a randomly selected format based on weights.
-func (r *Ingester) selectFormat() LogFormat {
+func (r *Ingester) selectFormat() MultiRecordFormat {
 	if len(r.formats) == 1 {
 		return r.formats[0]
 	}
@@ -107,6 +112,5 @@ func (r *Ingester) selectFormat() LogFormat {
 			return r.formats[i]
 		}
 	}
-	// Fallback (shouldn't happen if weights are set up correctly).
 	return r.formats[len(r.formats)-1]
 }

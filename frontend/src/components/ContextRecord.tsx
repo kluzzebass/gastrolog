@@ -53,7 +53,7 @@ export function ContextRecord({
           </span>
         )}
       </span>
-      <span className="font-mono text-[0.9em] truncate self-center pl-1.5">
+      <span className="font-mono text-[0.9em] truncate whitespace-pre self-center pl-1.5">
         {parts.map((part, i) => {
           const style = part.color ? { color: part.color } : undefined;
           return (

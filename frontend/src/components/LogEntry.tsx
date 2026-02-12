@@ -106,7 +106,7 @@ export const LogEntry = forwardRef<
         )}
       </span>
       <div
-        className={`font-mono text-[0.85em] leading-relaxed truncate self-center pl-1.5 ${dark ? "text-text-normal" : "text-light-text-normal"}`}
+        className={`font-mono text-[0.85em] leading-relaxed truncate whitespace-pre self-center pl-1.5 ${dark ? "text-text-normal" : "text-light-text-normal"}`}
       >
         {parts.map((part, i) => {
           const className = part.searchHit

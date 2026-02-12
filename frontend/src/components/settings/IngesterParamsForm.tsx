@@ -15,6 +15,11 @@ const ALL_FORMATS = [
   { id: "access", label: "Access Log", description: "HTTP access log format" },
   { id: "syslog", label: "Syslog", description: "RFC 5424 syslog messages" },
   { id: "weird", label: "Weird", description: "Unusual / malformed entries" },
+  {
+    id: "multirecord",
+    label: "Multi-Record",
+    description: "Stack dumps, help output — each line as separate record",
+  },
 ] as const;
 
 function parseFormats(raw: string): Set<string> {
