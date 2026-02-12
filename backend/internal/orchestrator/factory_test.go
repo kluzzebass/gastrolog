@@ -65,6 +65,12 @@ func (f *fakeIndexManager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) 
 	return true, nil
 }
 func (f *fakeIndexManager) DeleteIndexes(chunkID chunk.ChunkID) error { return nil }
+func (f *fakeIndexManager) FindIngestStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	return 0, false, index.ErrIndexNotFound
+}
+func (f *fakeIndexManager) FindSourceStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	return 0, false, index.ErrIndexNotFound
+}
 func (f *fakeIndexManager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
 	return map[string]int64{}
 }

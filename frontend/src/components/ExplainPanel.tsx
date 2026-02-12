@@ -365,6 +365,14 @@ function ExplainChunk({
           >
             &#x25B6;
           </span>
+          {plan.storeId && (
+            <span
+              className={`text-xs px-1.5 py-0.5 rounded font-medium ${c("bg-ink-border-subtle/40 text-text-normal", "bg-light-border/40 text-light-text-normal")}`}
+              title={`Store: ${plan.storeId}`}
+            >
+              {plan.storeId}
+            </span>
+          )}
           <span
             className={`font-mono text-sm font-medium ${
               isSkipped
@@ -385,13 +393,6 @@ function ExplainChunk({
           >
             {isSkipped ? "Skip" : plan.sealed ? "Sealed" : "Active"}
           </span>
-          {plan.storeId && (
-            <span
-              className={`font-mono text-sm ${c("text-text-muted", "text-light-text-muted")}`}
-            >
-              [{plan.storeId}]
-            </span>
-          )}
           <span
             className={`font-mono text-sm ${c("text-text-normal", "text-light-text-normal")}`}
           >

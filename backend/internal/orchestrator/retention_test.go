@@ -80,6 +80,12 @@ func (f *retentionFakeIndexManager) OpenKVIndex(chunkID chunk.ChunkID) (*index.I
 func (f *retentionFakeIndexManager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
 	return true, nil
 }
+func (f *retentionFakeIndexManager) FindIngestStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	return 0, false, index.ErrIndexNotFound
+}
+func (f *retentionFakeIndexManager) FindSourceStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	return 0, false, index.ErrIndexNotFound
+}
 func (f *retentionFakeIndexManager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
 	return map[string]int64{}
 }

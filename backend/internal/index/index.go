@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
 
 	"gastrolog/internal/chunk"
 )
@@ -170,6 +171,16 @@ type IndexManager interface {
 	// May clean up orphaned temporary files as a side effect.
 	// Note: A capped kv index is still considered "complete" (it exists).
 	IndexesComplete(chunkID chunk.ChunkID) (bool, error)
+
+	// FindIngestStartPosition returns the earliest record position with IngestTS >= ts.
+	// Returns (pos, true, nil) if found, (0, false, nil) if ts is after all records.
+	// Returns ErrIndexNotFound if the ingest index does not exist.
+	FindIngestStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error)
+
+	// FindSourceStartPosition returns the earliest record position with SourceTS >= ts.
+	// Returns (pos, true, nil) if found, (0, false, nil) if ts is after all records.
+	// Returns ErrIndexNotFound if the source index does not exist.
+	FindSourceStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error)
 
 	// IndexSizes returns the size in bytes for each index.
 	// For file-backed indexes this is the on-disk file size.

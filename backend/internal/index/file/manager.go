@@ -6,12 +6,14 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
 	fileattr "gastrolog/internal/index/file/attr"
 	filekv "gastrolog/internal/index/file/kv"
 	filetoken "gastrolog/internal/index/file/token"
+	filetsidx "gastrolog/internal/index/file/tsidx"
 	"gastrolog/internal/logging"
 )
 
@@ -55,6 +57,8 @@ func (m *Manager) DeleteIndexes(chunkID chunk.ChunkID) error {
 		fileattr.KeyIndexPath(m.dir, chunkID),
 		fileattr.ValueIndexPath(m.dir, chunkID),
 		fileattr.KVIndexPath(m.dir, chunkID),
+		filetsidx.IngestIndexPath(m.dir, chunkID),
+		filetsidx.SourceIndexPath(m.dir, chunkID),
 		filekv.KeyIndexPath(m.dir, chunkID),
 		filekv.ValueIndexPath(m.dir, chunkID),
 		filekv.KVIndexPath(m.dir, chunkID),
@@ -72,6 +76,8 @@ func (m *Manager) DeleteIndexes(chunkID chunk.ChunkID) error {
 		fileattr.KeyTempFilePattern(m.dir, chunkID),
 		fileattr.ValueTempFilePattern(m.dir, chunkID),
 		fileattr.KVTempFilePattern(m.dir, chunkID),
+		filetsidx.IngestTempFilePattern(m.dir, chunkID),
+		filetsidx.SourceTempFilePattern(m.dir, chunkID),
 		filekv.KeyTempFilePattern(m.dir, chunkID),
 		filekv.ValueTempFilePattern(m.dir, chunkID),
 		filekv.KVTempFilePattern(m.dir, chunkID),
@@ -148,17 +154,45 @@ func (m *Manager) OpenKVIndex(chunkID chunk.ChunkID) (*index.Index[index.KVIndex
 	return index.NewIndex(entries), status, nil
 }
 
+// FindIngestStartPosition implements index.IndexManager.
+func (m *Manager) FindIngestStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	entries, err := filetsidx.LoadIngestIndex(m.dir, chunkID)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, false, index.ErrIndexNotFound
+		}
+		return 0, false, err
+	}
+	pos, found := filetsidx.FindStartPosition(entries, ts.UnixNano())
+	return pos, found, nil
+}
+
+// FindSourceStartPosition implements index.IndexManager.
+func (m *Manager) FindSourceStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	entries, err := filetsidx.LoadSourceIndex(m.dir, chunkID)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, false, index.ErrIndexNotFound
+		}
+		return 0, false, err
+	}
+	pos, found := filetsidx.FindStartPosition(entries, ts.UnixNano())
+	return pos, found, nil
+}
+
 // IndexSizes returns the on-disk file size for each index.
 func (m *Manager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
 	sizes := make(map[string]int64)
 	paths := map[string]string{
-		"token":    filetoken.IndexPath(m.dir, chunkID),
-		"attr_key": fileattr.KeyIndexPath(m.dir, chunkID),
-		"attr_val": fileattr.ValueIndexPath(m.dir, chunkID),
-		"attr_kv":  fileattr.KVIndexPath(m.dir, chunkID),
-		"kv_key":   filekv.KeyIndexPath(m.dir, chunkID),
-		"kv_val":   filekv.ValueIndexPath(m.dir, chunkID),
-		"kv_kv":    filekv.KVIndexPath(m.dir, chunkID),
+		"token":     filetoken.IndexPath(m.dir, chunkID),
+		"attr_key":  fileattr.KeyIndexPath(m.dir, chunkID),
+		"attr_val":  fileattr.ValueIndexPath(m.dir, chunkID),
+		"attr_kv":   fileattr.KVIndexPath(m.dir, chunkID),
+		"ingest":    filetsidx.IngestIndexPath(m.dir, chunkID),
+		"source":    filetsidx.SourceIndexPath(m.dir, chunkID),
+		"kv_key":    filekv.KeyIndexPath(m.dir, chunkID),
+		"kv_val":    filekv.ValueIndexPath(m.dir, chunkID),
+		"kv_kv":     filekv.KVIndexPath(m.dir, chunkID),
 	}
 	for name, path := range paths {
 		if info, err := os.Stat(path); err == nil {
@@ -177,6 +211,8 @@ func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
 		fileattr.KeyIndexPath(m.dir, chunkID),
 		fileattr.ValueIndexPath(m.dir, chunkID),
 		fileattr.KVIndexPath(m.dir, chunkID),
+		filetsidx.IngestIndexPath(m.dir, chunkID),
+		filetsidx.SourceIndexPath(m.dir, chunkID),
 		filekv.KeyIndexPath(m.dir, chunkID),
 		filekv.ValueIndexPath(m.dir, chunkID),
 		filekv.KVIndexPath(m.dir, chunkID),
@@ -196,6 +232,8 @@ func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
 		fileattr.KeyTempFilePattern(m.dir, chunkID),
 		fileattr.ValueTempFilePattern(m.dir, chunkID),
 		fileattr.KVTempFilePattern(m.dir, chunkID),
+		filetsidx.IngestTempFilePattern(m.dir, chunkID),
+		filetsidx.SourceTempFilePattern(m.dir, chunkID),
 		filekv.KeyTempFilePattern(m.dir, chunkID),
 		filekv.ValueTempFilePattern(m.dir, chunkID),
 		filekv.KVTempFilePattern(m.dir, chunkID),

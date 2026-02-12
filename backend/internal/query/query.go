@@ -462,10 +462,23 @@ func (e *Engine) buildScannerWithManagers(cursor chunk.RecordCursor, q Query, st
 	b := newScannerBuilder(meta.ID)
 	b.storeID = storeID
 
-	// Set minimum position from binary search on idx.log.
+	// Set minimum position from time bounds.
+	// WriteTS: binary search on idx.log.
 	lower, _ := q.TimeBounds()
 	if !lower.IsZero() {
 		if pos, found, err := cm.FindStartPosition(meta.ID, lower); err == nil && found {
+			b.setMinPosition(pos)
+		}
+	}
+	// IngestTS: use ingest index when available.
+	if !q.IngestStart.IsZero() && meta.Sealed {
+		if pos, found, err := im.FindIngestStartPosition(meta.ID, q.IngestStart); err == nil && found {
+			b.setMinPosition(pos)
+		}
+	}
+	// SourceTS: use source index when available.
+	if !q.SourceStart.IsZero() && meta.Sealed {
+		if pos, found, err := im.FindSourceStartPosition(meta.ID, q.SourceStart); err == nil && found {
 			b.setMinPosition(pos)
 		}
 	}

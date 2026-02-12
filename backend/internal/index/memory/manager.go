@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
@@ -161,6 +162,18 @@ func (m *Manager) OpenKVIndex(chunkID chunk.ChunkID) (*index.Index[index.KVIndex
 		return nil, index.KVComplete, index.ErrIndexNotFound
 	}
 	return index.NewIndex(entries), status, nil
+}
+
+// FindIngestStartPosition returns ErrIndexNotFound; memory index manager does not
+// maintain ingest timestamp indexes.
+func (m *Manager) FindIngestStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	return 0, false, index.ErrIndexNotFound
+}
+
+// FindSourceStartPosition returns ErrIndexNotFound; memory index manager does not
+// maintain source timestamp indexes.
+func (m *Manager) FindSourceStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	return 0, false, index.ErrIndexNotFound
 }
 
 // IndexSizes estimates the in-memory data footprint for each index.

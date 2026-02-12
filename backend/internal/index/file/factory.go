@@ -11,6 +11,7 @@ import (
 	fileattr "gastrolog/internal/index/file/attr"
 	filekv "gastrolog/internal/index/file/kv"
 	filetoken "gastrolog/internal/index/file/token"
+	filetsidx "gastrolog/internal/index/file/tsidx"
 	"gastrolog/internal/tokenizer"
 )
 
@@ -47,6 +48,8 @@ func NewFactory() index.ManagerFactory {
 		indexers := []index.Indexer{
 			filetoken.NewIndexer(dir, chunkManager, logger),
 			fileattr.NewIndexer(dir, chunkManager, logger),
+			filetsidx.NewIngestIndexer(dir, chunkManager, logger),
+			filetsidx.NewSourceIndexer(dir, chunkManager, logger),
 			filekv.NewIndexerWithConfig(dir, chunkManager, logger, filekv.Config{
 				KVBudget:   kvBudget,
 				Extractors: tokenizer.DefaultExtractors(),

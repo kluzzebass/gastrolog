@@ -13,7 +13,8 @@ import "errors"
 // Type codes:
 //
 //	't' = time index
-//	's' = source index
+//	's' = source index (SourceTS)
+//	'I' = ingest index (IngestTS)
 //	'k' = token index
 //	'm' = chunk metadata (deprecated)
 //	'z' = source registry
@@ -25,7 +26,8 @@ const (
 	HeaderSize = 4
 
 	TypeTimeIndex      = 't'
-	TypeSourceIndex    = 's' // Deprecated: source index no longer used
+	TypeSourceIndex    = 's' // SourceTS timestamp index
+	TypeIngestIndex    = 'I' // IngestTS timestamp index
 	TypeTokenIndex     = 'k'
 	TypeAttrKeyIndex   = 'K' // Attribute key index
 	TypeAttrValueIndex = 'V' // Attribute value index
