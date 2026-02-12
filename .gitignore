@@ -39,7 +39,5 @@ data
 
 # Lock files
 *.lock
-bun.lock
 package-lock.json
-yarn.lock
 pnpm-lock.yaml
