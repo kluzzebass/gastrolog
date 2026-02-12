@@ -114,7 +114,7 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 	}
 	m.active.size += recBytes
 	m.active.meta.Bytes = m.active.size
-	m.updateMetaLocked(record.WriteTS, int64(len(m.active.records)))
+	m.updateMetaLocked(record, int64(len(m.active.records)))
 
 	if err := m.cfg.MetaStore.Save(m.active.meta); err != nil {
 		return chunk.ChunkID{}, 0, err
@@ -220,12 +220,28 @@ func (m *Manager) sealLocked() error {
 	return nil
 }
 
-func (m *Manager) updateMetaLocked(ts time.Time, recordCount int64) {
+func (m *Manager) updateMetaLocked(record chunk.Record, recordCount int64) {
 	if m.active.meta.StartTS.IsZero() {
-		m.active.meta.StartTS = ts
+		m.active.meta.StartTS = record.WriteTS
 	}
-	m.active.meta.EndTS = ts
+	m.active.meta.EndTS = record.WriteTS
 	m.active.meta.RecordCount = recordCount
+
+	// Update IngestTS and SourceTS bounds.
+	if m.active.meta.IngestStart.IsZero() || record.IngestTS.Before(m.active.meta.IngestStart) {
+		m.active.meta.IngestStart = record.IngestTS
+	}
+	if m.active.meta.IngestEnd.IsZero() || record.IngestTS.After(m.active.meta.IngestEnd) {
+		m.active.meta.IngestEnd = record.IngestTS
+	}
+	if !record.SourceTS.IsZero() {
+		if m.active.meta.SourceStart.IsZero() || record.SourceTS.Before(m.active.meta.SourceStart) {
+			m.active.meta.SourceStart = record.SourceTS
+		}
+		if m.active.meta.SourceEnd.IsZero() || record.SourceTS.After(m.active.meta.SourceEnd) {
+			m.active.meta.SourceEnd = record.SourceTS
+		}
+	}
 }
 
 func (m *Manager) findChunkLocked(id chunk.ChunkID) *chunkState {

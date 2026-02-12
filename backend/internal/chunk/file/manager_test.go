@@ -68,6 +68,65 @@ func TestFileChunkManagerUseSmallTime(t *testing.T) {
 	}
 }
 
+func TestFileChunkManagerIngestSourceTSBounds(t *testing.T) {
+	dir := t.TempDir()
+	manager, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+
+	// Append records with varying IngestTS and SourceTS.
+	ing1 := time.UnixMicro(1000)
+	ing2 := time.UnixMicro(2000)
+	ing3 := time.UnixMicro(1500)
+	src1 := time.UnixMicro(500)
+	src2 := time.UnixMicro(3000)
+	attrs := chunk.Attributes{"src": "test"}
+
+	for _, r := range []chunk.Record{
+		{IngestTS: ing1, SourceTS: src1, Attrs: attrs, Raw: []byte("a")},
+		{IngestTS: ing2, SourceTS: src2, Attrs: attrs, Raw: []byte("b")},
+		{IngestTS: ing3, Attrs: attrs, Raw: []byte("c")}, // no SourceTS
+	} {
+		if _, _, err := manager.Append(r); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+
+	// Unsealed chunks: meta from active. List returns active + sealed.
+	meta, err := manager.Meta(manager.Active().ID)
+	if err != nil {
+		t.Fatalf("meta: %v", err)
+	}
+	if meta.IngestStart != ing1 {
+		t.Errorf("IngestStart: want %v, got %v", ing1, meta.IngestStart)
+	}
+	if meta.IngestEnd != ing2 {
+		t.Errorf("IngestEnd: want %v, got %v", ing2, meta.IngestEnd)
+	}
+	if meta.SourceStart != src1 {
+		t.Errorf("SourceStart: want %v, got %v", src1, meta.SourceStart)
+	}
+	if meta.SourceEnd != src2 {
+		t.Errorf("SourceEnd: want %v, got %v", src2, meta.SourceEnd)
+	}
+
+	// Seal and verify loadChunkMeta also populates bounds.
+	if err := manager.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	meta, err = manager.Meta(meta.ID)
+	if err != nil {
+		t.Fatalf("meta after seal: %v", err)
+	}
+	if meta.IngestStart.IsZero() || meta.IngestEnd.IsZero() {
+		t.Error("sealed chunk should have IngestTS bounds")
+	}
+	if meta.SourceStart != src1 || meta.SourceEnd != src2 {
+		t.Errorf("SourceTS bounds: want %v-%v, got %v-%v", src1, src2, meta.SourceStart, meta.SourceEnd)
+	}
+}
+
 func TestFileChunkManagerDirectoryLayout(t *testing.T) {
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})

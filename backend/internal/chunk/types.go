@@ -208,6 +208,14 @@ type ChunkMeta struct {
 	RecordCount int64
 	Bytes       int64 // Total on-disk bytes (raw + attr + idx)
 	Sealed      bool
+
+	// IngestTS and SourceTS bounds (zero = unknown).
+	// Used to filter chunks by ingest_start/ingest_end and source_start/source_end
+	// without scanning records.
+	IngestStart time.Time // min IngestTS in chunk
+	IngestEnd   time.Time // max IngestTS in chunk
+	SourceStart time.Time // min SourceTS (excluding zero)
+	SourceEnd   time.Time // max SourceTS in chunk
 }
 
 // Record is a single log entry.

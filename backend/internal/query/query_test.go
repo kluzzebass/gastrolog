@@ -554,6 +554,35 @@ func TestSearchStartOnlyFilter(t *testing.T) {
 	}
 }
 
+func TestSearchIngestStartFiltersChunks(t *testing.T) {
+	// Two chunks: chunk1 has IngestTS t0-t1, chunk2 has t2-t4.
+	// ingest_start=t2 should exclude chunk1 (IngestEnd t1 < t2).
+	eng := setup(t,
+		[]chunk.Record{
+			{IngestTS: t0, Attrs: attrsA, Raw: []byte("chunk1-a")},
+			{IngestTS: t1, Attrs: attrsA, Raw: []byte("chunk1-b")},
+		},
+		[]chunk.Record{
+			{IngestTS: t2, Attrs: attrsA, Raw: []byte("chunk2-a")},
+			{IngestTS: t3, Attrs: attrsA, Raw: []byte("chunk2-b")},
+			{IngestTS: t4, Attrs: attrsA, Raw: []byte("chunk2-c")},
+		},
+	)
+
+	results, err := collect(search(eng, context.Background(), query.Query{IngestStart: t2}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results (chunk2 only), got %d", len(results))
+	}
+	for i, want := range []string{"chunk2-a", "chunk2-b", "chunk2-c"} {
+		if string(results[i].Raw) != want {
+			t.Errorf("result[%d]: got %q, want %q", i, results[i].Raw, want)
+		}
+	}
+}
+
 func TestSearchEndOnlyFilter(t *testing.T) {
 	records := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},

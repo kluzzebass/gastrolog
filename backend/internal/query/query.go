@@ -351,6 +351,24 @@ func (e *Engine) selectChunks(metas []chunk.ChunkMeta, q Query, chunkIDs []chunk
 				continue
 			}
 		}
+
+		// Filter by IngestTS bounds if query specifies them.
+		if !q.IngestStart.IsZero() && !m.IngestEnd.IsZero() && m.IngestEnd.Before(q.IngestStart) {
+			continue
+		}
+		if !q.IngestEnd.IsZero() && !m.IngestStart.IsZero() && !m.IngestStart.Before(q.IngestEnd) {
+			continue
+		}
+
+		// Filter by SourceTS bounds if query specifies them.
+		// Chunk with no SourceTS data (both zero) is included.
+		if !q.SourceStart.IsZero() && !m.SourceEnd.IsZero() && m.SourceEnd.Before(q.SourceStart) {
+			continue
+		}
+		if !q.SourceEnd.IsZero() && !m.SourceStart.IsZero() && !m.SourceStart.Before(q.SourceEnd) {
+			continue
+		}
+
 		out = append(out, m)
 	}
 	if q.Reverse() {

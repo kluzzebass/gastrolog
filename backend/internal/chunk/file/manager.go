@@ -87,6 +87,12 @@ type chunkMeta struct {
 	recordCount int64     // Number of records in chunk
 	bytes       int64     // Total on-disk bytes (raw + attr + idx)
 	sealed      bool
+
+	// IngestTS and SourceTS bounds (zero = unknown).
+	ingestStart time.Time
+	ingestEnd   time.Time
+	sourceStart time.Time
+	sourceEnd   time.Time
 }
 
 func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
@@ -97,6 +103,10 @@ func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
 		RecordCount: m.recordCount,
 		Bytes:       m.bytes,
 		Sealed:      m.sealed,
+		IngestStart: m.ingestStart,
+		IngestEnd:   m.ingestEnd,
+		SourceStart: m.sourceStart,
+		SourceEnd:   m.sourceEnd,
 	}
 }
 
@@ -257,6 +267,22 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 		m.active.meta.startTS = record.WriteTS
 	}
 	m.active.meta.endTS = record.WriteTS
+
+	// Update IngestTS and SourceTS bounds.
+	if m.active.meta.ingestStart.IsZero() || record.IngestTS.Before(m.active.meta.ingestStart) {
+		m.active.meta.ingestStart = record.IngestTS
+	}
+	if m.active.meta.ingestEnd.IsZero() || record.IngestTS.After(m.active.meta.ingestEnd) {
+		m.active.meta.ingestEnd = record.IngestTS
+	}
+	if !record.SourceTS.IsZero() {
+		if m.active.meta.sourceStart.IsZero() || record.SourceTS.Before(m.active.meta.sourceStart) {
+			m.active.meta.sourceStart = record.SourceTS
+		}
+		if m.active.meta.sourceEnd.IsZero() || record.SourceTS.After(m.active.meta.sourceEnd) {
+			m.active.meta.sourceEnd = record.SourceTS
+		}
+	}
 
 	return m.active.meta.id, recordIndex, nil
 }
@@ -633,6 +659,37 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 	}
 	lastEntry := DecodeIdxEntry(entryBuf[:], useNano)
 	meta.endTS = lastEntry.WriteTS
+
+	// IngestTS and SourceTS bounds from first and last (approximation for sealed chunks).
+	if firstEntry.IngestTS.Before(lastEntry.IngestTS) {
+		meta.ingestStart = firstEntry.IngestTS
+		meta.ingestEnd = lastEntry.IngestTS
+	} else {
+		meta.ingestStart = lastEntry.IngestTS
+		meta.ingestEnd = firstEntry.IngestTS
+	}
+	if !firstEntry.SourceTS.IsZero() || !lastEntry.SourceTS.IsZero() {
+		var minSrc, maxSrc time.Time
+		if !firstEntry.SourceTS.IsZero() {
+			minSrc = firstEntry.SourceTS
+			maxSrc = firstEntry.SourceTS
+		}
+		if !lastEntry.SourceTS.IsZero() {
+			if minSrc.IsZero() {
+				minSrc = lastEntry.SourceTS
+				maxSrc = lastEntry.SourceTS
+			} else {
+				if lastEntry.SourceTS.Before(minSrc) {
+					minSrc = lastEntry.SourceTS
+				}
+				if lastEntry.SourceTS.After(maxSrc) {
+					maxSrc = lastEntry.SourceTS
+				}
+			}
+		}
+		meta.sourceStart = minSrc
+		meta.sourceEnd = maxSrc
+	}
 
 	// Derive total bytes: end of raw data + end of attr data + idx entries.
 	rawEnd := int64(lastEntry.RawOffset) + int64(lastEntry.RawSize)
