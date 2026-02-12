@@ -13,10 +13,17 @@ import (
 
 // Factory parameter keys.
 const (
-	ParamDir           = "dir"
-	ParamMaxChunkBytes = "maxChunkBytes"
-	ParamMaxChunkAge   = "maxChunkAge"
-	ParamFileMode      = "fileMode"
+	ParamDir                = "dir"
+	ParamMaxChunkBytes      = "maxChunkBytes"
+	ParamMaxChunkAge        = "maxChunkAge"
+	ParamFileMode           = "fileMode"
+	ParamTimestampPrecision = "timestampPrecision"
+)
+
+// Timestamp precision values.
+const (
+	TimestampPrecisionMicro = "micro"
+	TimestampPrecisionNano  = "nano"
 )
 
 // Default values.
@@ -41,6 +48,18 @@ func NewFactory() chunk.ManagerFactory {
 			Dir:      dir,
 			FileMode: DefaultFileMode,
 			Logger:   logger,
+		}
+
+		// Timestamp precision: micro (default) or nano.
+		if v, ok := params[ParamTimestampPrecision]; ok {
+			switch v {
+			case TimestampPrecisionNano:
+				cfg.UseSmallTime = true
+			case TimestampPrecisionMicro, "":
+				cfg.UseSmallTime = false
+			default:
+				return nil, fmt.Errorf("invalid %s: want %q or %q", ParamTimestampPrecision, TimestampPrecisionMicro, TimestampPrecisionNano)
+			}
 		}
 
 		// Build rotation policy from params

@@ -222,6 +222,41 @@ func TestFactoryInvalidFileMode(t *testing.T) {
 	}
 }
 
+func TestFactoryTimestampPrecisionNano(t *testing.T) {
+	factory := NewFactory()
+	dir := t.TempDir()
+
+	cm, err := factory(map[string]string{
+		ParamDir:                dir,
+		ParamTimestampPrecision: TimestampPrecisionNano,
+	}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	mgr, ok := cm.(*Manager)
+	if !ok {
+		t.Fatal("expected *Manager")
+	}
+
+	if !mgr.cfg.UseSmallTime {
+		t.Error("expected UseSmallTime=true for timestampPrecision=nano")
+	}
+}
+
+func TestFactoryInvalidTimestampPrecision(t *testing.T) {
+	factory := NewFactory()
+	dir := t.TempDir()
+
+	_, err := factory(map[string]string{
+		ParamDir:                dir,
+		ParamTimestampPrecision: "invalid",
+	}, nil)
+	if err == nil {
+		t.Error("expected error for invalid timestamp_precision")
+	}
+}
+
 func TestFactoryCreatesDirectory(t *testing.T) {
 	factory := NewFactory()
 	dir := filepath.Join(t.TempDir(), "subdir", "chunks")

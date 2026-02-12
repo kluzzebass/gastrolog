@@ -25,6 +25,7 @@ type mmapCursor struct {
 	attrFile *os.File
 
 	recordCount uint64 // Total records in chunk
+	useNano     bool   // Timestamp precision from idx.log header FlagSmallTime
 	fwdIndex    uint64 // Current forward iteration index
 	revIndex    uint64 // Current reverse iteration index (points to next record to return)
 	fwdDone     bool
@@ -44,6 +45,22 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath string) (*m
 	}
 
 	recordCount := RecordCount(idxInfo.Size())
+
+	// Read header to get timestamp precision (only needed when records exist).
+	useNano := false
+	if recordCount > 0 {
+		headerBuf := make([]byte, format.HeaderSize)
+		if _, err := idxFile.ReadAt(headerBuf, 0); err != nil {
+			idxFile.Close()
+			return nil, err
+		}
+		header, err := format.DecodeAndValidate(headerBuf, format.TypeIdxLog, IdxLogVersion)
+		if err != nil {
+			idxFile.Close()
+			return nil, err
+		}
+		useNano = header.Flags&format.FlagSmallTime != 0
+	}
 
 	// Handle empty chunk case.
 	if recordCount == 0 {
@@ -123,6 +140,7 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath string) (*m
 		idxFile:     idxFile,
 		attrFile:    attrFile,
 		recordCount: recordCount,
+		useNano:     useNano,
 		fwdIndex:    0,
 		revIndex:    recordCount, // Start past end for reverse iteration
 	}, nil
@@ -176,7 +194,7 @@ func (c *mmapCursor) readRecord(index uint64) (chunk.Record, error) {
 	if idxOffset+IdxEntrySize > len(c.idxData) {
 		return chunk.Record{}, ErrInvalidRecordIdx
 	}
-	entry := DecodeIdxEntry(c.idxData[idxOffset : idxOffset+IdxEntrySize])
+	entry := DecodeIdxEntry(c.idxData[idxOffset:idxOffset+IdxEntrySize], c.useNano)
 
 	// Read raw data from mmap'd memory.
 	rawStart := int(format.HeaderSize) + int(entry.RawOffset)
@@ -258,6 +276,7 @@ type stdioCursor struct {
 	idxFile  *os.File
 	attrFile *os.File
 
+	useNano  bool   // Timestamp precision from idx.log header FlagSmallTime
 	fwdIndex uint64 // Current forward iteration index
 	revIndex uint64 // Current reverse iteration index
 	fwdDone  bool
@@ -283,7 +302,7 @@ func newStdioCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath string) (*
 		return nil, err
 	}
 
-	// Get current record count for reverse iteration starting point.
+	// Get current record count and read header for timestamp precision.
 	idxInfo, err := idxFile.Stat()
 	if err != nil {
 		rawFile.Close()
@@ -293,11 +312,31 @@ func newStdioCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath string) (*
 	}
 	recordCount := RecordCount(idxInfo.Size())
 
+	useNano := false
+	if recordCount > 0 {
+		var headerBuf [format.HeaderSize]byte
+		if _, err := idxFile.ReadAt(headerBuf[:], 0); err != nil {
+			rawFile.Close()
+			idxFile.Close()
+			attrFile.Close()
+			return nil, err
+		}
+		header, err := format.DecodeAndValidate(headerBuf[:], format.TypeIdxLog, IdxLogVersion)
+		if err != nil {
+			rawFile.Close()
+			idxFile.Close()
+			attrFile.Close()
+			return nil, err
+		}
+		useNano = header.Flags&format.FlagSmallTime != 0
+	}
+
 	return &stdioCursor{
 		chunkID:  chunkID,
 		rawFile:  rawFile,
 		idxFile:  idxFile,
 		attrFile: attrFile,
+		useNano:  useNano,
 		fwdIndex: 0,
 		revIndex: recordCount,
 	}, nil
@@ -363,7 +402,7 @@ func (c *stdioCursor) readRecord(index uint64) (chunk.Record, error) {
 	if _, err := c.idxFile.ReadAt(entryBuf[:], idxOffset); err != nil {
 		return chunk.Record{}, err
 	}
-	entry := DecodeIdxEntry(entryBuf[:])
+	entry := DecodeIdxEntry(entryBuf[:], c.useNano)
 
 	// Read raw data.
 	rawOffset := int64(format.HeaderSize) + int64(entry.RawOffset)
