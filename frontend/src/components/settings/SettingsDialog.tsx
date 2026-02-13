@@ -135,7 +135,7 @@ export function SettingsDialog({
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-5">
+        <div className="flex-1 overflow-y-auto app-scroll p-5">
           {tab === "service" && <ServiceSettings dark={dark} />}
           {tab === "certificates" && <CertificatesSettings dark={dark} />}
           {tab === "users" && <UsersSettings dark={dark} />}

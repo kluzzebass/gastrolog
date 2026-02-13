@@ -10,6 +10,8 @@ import {
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
 import { SettingsCard } from "./SettingsCard";
+import { SettingsSection } from "./SettingsSection";
+import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, SelectInput } from "./FormField";
 
 const roleOptions = [
@@ -108,205 +110,173 @@ export function UsersSettings({ dark }: { dark: boolean }) {
   };
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-5">
-        <h2
-          className={`font-display text-[1.4em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
+    <SettingsSection
+      title="Users"
+      addLabel="Add User"
+      adding={adding}
+      onToggleAdd={() => setAdding(!adding)}
+      isLoading={false}
+      isEmpty={!isLoading && (users?.length ?? 0) === 0}
+      emptyMessage="No users configured."
+      dark={dark}
+    >
+      {adding && (
+        <AddFormCard
+          dark={dark}
+          onCancel={() => setAdding(false)}
+          onCreate={handleCreate}
+          isPending={createUser.isPending}
         >
-          Users
-        </h2>
-        <button
-          onClick={() => setAdding(!adding)}
-          className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors"
-        >
-          {adding ? "Cancel" : "Add User"}
-        </button>
-      </div>
-
-      <div className="flex flex-col gap-3">
-        {adding && (
-          <div
-            className={`border rounded-lg p-4 ${c("border-copper/40 bg-ink-surface", "border-copper/40 bg-light-surface")}`}
-          >
-            <div className="flex flex-col gap-3">
-              <div className="grid grid-cols-2 gap-3">
-                <FormField label="Username" dark={dark}>
-                  <TextInput
-                    value={newUsername}
-                    onChange={setNewUsername}
-                    placeholder="username"
-                    dark={dark}
-                    mono
-                  />
-                </FormField>
-                <FormField label="Role" dark={dark}>
-                  <SelectInput
-                    value={newRole}
-                    onChange={setNewRole}
-                    options={roleOptions}
-                    dark={dark}
-                  />
-                </FormField>
-              </div>
-              <FormField label="Password" dark={dark}>
-                <PasswordInput
-                  value={newPassword}
-                  onChange={setNewPassword}
-                  show={showNewPw}
-                  onToggle={() => setShowNewPw(!showNewPw)}
-                  placeholder="password"
-                  dark={dark}
-                />
-              </FormField>
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  onClick={() => setAdding(false)}
-                  className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
-                    "border-ink-border text-text-muted hover:bg-ink-hover",
-                    "border-light-border text-light-text-muted hover:bg-light-hover",
-                  )}`}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleCreate}
-                  disabled={createUser.isPending}
-                  className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
-                >
-                  {createUser.isPending ? "Creating..." : "Create"}
-                </button>
-              </div>
-            </div>
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Username" dark={dark}>
+              <TextInput
+                value={newUsername}
+                onChange={setNewUsername}
+                placeholder="username"
+                dark={dark}
+                mono
+              />
+            </FormField>
+            <FormField label="Role" dark={dark}>
+              <SelectInput
+                value={newRole}
+                onChange={setNewRole}
+                options={roleOptions}
+                dark={dark}
+              />
+            </FormField>
           </div>
-        )}
-
-        {isLoading && (
-          <div
-            className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-          >
-            Loading...
-          </div>
-        )}
-
-        {users?.map((user) => {
-          const isSelf = currentUser?.username === user.username;
-          const editedRole = roleEdits[user.username];
-          const roleDirty =
-            editedRole !== undefined && editedRole !== user.role;
-
-          return (
-            <SettingsCard
-              key={user.username}
-              id={user.username}
-              typeBadge={user.role}
+          <FormField label="Password" dark={dark}>
+            <PasswordInput
+              value={newPassword}
+              onChange={setNewPassword}
+              show={showNewPw}
+              onToggle={() => setShowNewPw(!showNewPw)}
+              placeholder="password"
               dark={dark}
-              expanded={expanded === user.username}
-              onToggle={() =>
-                setExpanded(expanded === user.username ? null : user.username)
-              }
-              onDelete={isSelf ? undefined : () => handleDelete(user.username)}
-            >
-              <div className="flex flex-col gap-4">
+            />
+          </FormField>
+        </AddFormCard>
+      )}
+
+      {isLoading && (
+        <div
+          className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+        >
+          Loading...
+        </div>
+      )}
+
+      {users?.map((user) => {
+        const isSelf = currentUser?.username === user.username;
+        const editedRole = roleEdits[user.username];
+        const roleDirty =
+          editedRole !== undefined && editedRole !== user.role;
+
+        return (
+          <SettingsCard
+            key={user.username}
+            id={user.username}
+            typeBadge={user.role}
+            dark={dark}
+            expanded={expanded === user.username}
+            onToggle={() =>
+              setExpanded(expanded === user.username ? null : user.username)
+            }
+            onDelete={isSelf ? undefined : () => handleDelete(user.username)}
+          >
+            <div className="flex flex-col gap-4">
+              <div className="flex items-end gap-3">
+                <div className="flex-1">
+                  <FormField label="Role" dark={dark}>
+                    <SelectInput
+                      value={editedRole ?? user.role}
+                      onChange={(v) =>
+                        setRoleEdits((prev) => ({
+                          ...prev,
+                          [user.username]: v,
+                        }))
+                      }
+                      options={roleOptions}
+                      dark={dark}
+                      disabled={isSelf}
+                    />
+                  </FormField>
+                </div>
+                {roleDirty && (
+                  <button
+                    onClick={() => handleRoleSave(user.username)}
+                    disabled={updateUserRole.isPending}
+                    className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
+                  >
+                    {updateUserRole.isPending ? "Saving..." : "Save"}
+                  </button>
+                )}
+              </div>
+
+              {/* Reset password */}
+              {resetOpen === user.username ? (
                 <div className="flex items-end gap-3">
                   <div className="flex-1">
-                    <FormField label="Role" dark={dark}>
-                      <SelectInput
-                        value={editedRole ?? user.role}
-                        onChange={(v) =>
-                          setRoleEdits((prev) => ({
-                            ...prev,
-                            [user.username]: v,
-                          }))
-                        }
-                        options={roleOptions}
+                    <FormField label="New Password" dark={dark}>
+                      <PasswordInput
+                        value={resetPw}
+                        onChange={setResetPw}
+                        show={showResetPw}
+                        onToggle={() => setShowResetPw(!showResetPw)}
+                        placeholder="new password"
                         dark={dark}
-                        disabled={isSelf}
                       />
                     </FormField>
                   </div>
-                  {roleDirty && (
-                    <button
-                      onClick={() => handleRoleSave(user.username)}
-                      disabled={updateUserRole.isPending}
-                      className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
-                    >
-                      {updateUserRole.isPending ? "Saving..." : "Save"}
-                    </button>
-                  )}
-                </div>
-
-                {/* Reset password */}
-                {resetOpen === user.username ? (
-                  <div className="flex items-end gap-3">
-                    <div className="flex-1">
-                      <FormField label="New Password" dark={dark}>
-                        <PasswordInput
-                          value={resetPw}
-                          onChange={setResetPw}
-                          show={showResetPw}
-                          onToggle={() => setShowResetPw(!showResetPw)}
-                          placeholder="new password"
-                          dark={dark}
-                        />
-                      </FormField>
-                    </div>
-                    <button
-                      onClick={() => handleResetPassword(user.username)}
-                      disabled={resetPassword.isPending}
-                      className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
-                    >
-                      {resetPassword.isPending ? "Resetting..." : "Reset"}
-                    </button>
-                    <button
-                      onClick={() => {
-                        setResetOpen(null);
-                        setResetPw("");
-                        setShowResetPw(false);
-                      }}
-                      className={`px-3 py-1.5 text-[0.8em] rounded transition-colors ${c(
-                        "text-text-muted hover:text-text-bright hover:bg-ink-hover",
-                        "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
-                      )}`}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
+                  <button
+                    onClick={() => handleResetPassword(user.username)}
+                    disabled={resetPassword.isPending}
+                    className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
+                  >
+                    {resetPassword.isPending ? "Resetting..." : "Reset"}
+                  </button>
                   <button
                     onClick={() => {
-                      setResetOpen(user.username);
+                      setResetOpen(null);
                       setResetPw("");
+                      setShowResetPw(false);
                     }}
-                    className={`self-start px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
-                      "border-ink-border text-text-muted hover:text-text-bright hover:bg-ink-hover",
-                      "border-light-border text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
+                    className={`px-3 py-1.5 text-[0.8em] rounded transition-colors ${c(
+                      "text-text-muted hover:text-text-bright hover:bg-ink-hover",
+                      "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
                     )}`}
                   >
-                    Reset Password
+                    Cancel
                   </button>
-                )}
-
-                <div
-                  className={`text-[0.75em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-                >
-                  Created{" "}
-                  {new Date(Number(user.createdAt) * 1000).toLocaleDateString()}
-                  {isSelf && " (you)"}
                 </div>
-              </div>
-            </SettingsCard>
-          );
-        })}
+              ) : (
+                <button
+                  onClick={() => {
+                    setResetOpen(user.username);
+                    setResetPw("");
+                  }}
+                  className={`self-start px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
+                    "border-ink-border text-text-muted hover:text-text-bright hover:bg-ink-hover",
+                    "border-light-border text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
+                  )}`}
+                >
+                  Reset Password
+                </button>
+              )}
 
-        {!isLoading && users?.length === 0 && !adding && (
-          <div
-            className={`text-center py-8 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-          >
-            No users configured.
-          </div>
-        )}
-      </div>
-    </div>
+              <div
+                className={`text-[0.75em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+              >
+                Created{" "}
+                {new Date(Number(user.createdAt) * 1000).toLocaleDateString()}
+                {isSelf && " (you)"}
+              </div>
+            </div>
+          </SettingsCard>
+        );
+      })}
+    </SettingsSection>
   );
 }
 

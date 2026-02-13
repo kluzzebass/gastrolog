@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import {
   useConfig,
@@ -6,7 +6,10 @@ import {
   useDeleteRetentionPolicy,
 } from "../../api/hooks";
 import { useToast } from "../Toast";
+import { useEditState } from "../../hooks/useEditState";
 import { SettingsCard } from "./SettingsCard";
+import { SettingsSection } from "./SettingsSection";
+import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, NumberInput } from "./FormField";
 
 // Format bytes for display.
@@ -95,7 +98,6 @@ export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
 
   const [expanded, setExpanded] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  const [edits, setEdits] = useState<Record<string, PolicyEdit>>({});
 
   const [newId, setNewId] = useState("");
   const [newMaxAge, setNewMaxAge] = useState("720h");
@@ -105,23 +107,20 @@ export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
   const policies = config?.retentionPolicies ?? {};
   const stores = config?.stores ?? [];
 
-  const getEdit = (id: string): PolicyEdit => {
-    if (edits[id]) return edits[id];
-    const pol = policies[id];
-    if (!pol) return { maxAge: "", maxBytes: "", maxChunks: "" };
-    return {
-      maxAge: formatDuration(pol.maxAgeSeconds),
-      maxBytes: formatBytes(pol.maxBytes),
-      maxChunks: pol.maxChunks > 0n ? pol.maxChunks.toString() : "",
-    };
-  };
+  const defaults = useCallback(
+    (id: string): PolicyEdit => {
+      const pol = policies[id];
+      if (!pol) return { maxAge: "", maxBytes: "", maxChunks: "" };
+      return {
+        maxAge: formatDuration(pol.maxAgeSeconds),
+        maxBytes: formatBytes(pol.maxBytes),
+        maxChunks: pol.maxChunks > 0n ? pol.maxChunks.toString() : "",
+      };
+    },
+    [policies],
+  );
 
-  const setEdit = (id: string, patch: Partial<PolicyEdit>) => {
-    setEdits((prev) => ({
-      ...prev,
-      [id]: { ...getEdit(id), ...prev[id], ...patch },
-    }));
-  };
+  const { getEdit, setEdit, clearEdit } = useEditState(defaults);
 
   const handleSave = async (id: string) => {
     const edit = getEdit(id);
@@ -132,11 +131,7 @@ export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
         maxBytes: parseBytes(edit.maxBytes),
         maxChunks: edit.maxChunks ? BigInt(edit.maxChunks) : 0n,
       });
-      setEdits((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
+      clearEdit(id);
       addToast(`Retention policy "${id}" updated`, "info");
     } catch (err: any) {
       addToast(err.message ?? "Failed to update retention policy", "error");
@@ -188,47 +183,103 @@ export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
   const refsFor = (policyId: string) =>
     stores.filter((s) => s.retention === policyId).map((s) => s.id);
 
-  if (isLoading) {
-    return (
-      <div
-        className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-      >
-        Loading...
-      </div>
-    );
-  }
-
   return (
-    <div>
-      <div className="flex items-center justify-between mb-5">
-        <h2
-          className={`font-display text-[1.4em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
+    <SettingsSection
+      title="Retention Policies"
+      addLabel="Add Policy"
+      adding={adding}
+      onToggleAdd={() => setAdding(!adding)}
+      isLoading={isLoading}
+      isEmpty={Object.keys(policies).length === 0}
+      emptyMessage='No retention policies configured. Click "Add Policy" to create one.'
+      dark={dark}
+    >
+      {adding && (
+        <AddFormCard
+          dark={dark}
+          onCancel={() => setAdding(false)}
+          onCreate={handleCreate}
+          isPending={putPolicy.isPending}
         >
-          Retention Policies
-        </h2>
-        <button
-          onClick={() => setAdding(!adding)}
-          className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors"
-        >
-          {adding ? "Cancel" : "Add Policy"}
-        </button>
-      </div>
+          <FormField label="ID" dark={dark}>
+            <TextInput
+              value={newId}
+              onChange={setNewId}
+              placeholder="default"
+              dark={dark}
+              mono
+            />
+          </FormField>
+          <div className="grid grid-cols-3 gap-3">
+            <FormField
+              label="Max Age"
+              description="e.g. 720h, 30d"
+              dark={dark}
+            >
+              <TextInput
+                value={newMaxAge}
+                onChange={setNewMaxAge}
+                placeholder="720h"
+                dark={dark}
+                mono
+              />
+            </FormField>
+            <FormField
+              label="Max Bytes"
+              description="e.g. 10GB, 500MB"
+              dark={dark}
+            >
+              <TextInput
+                value={newMaxBytes}
+                onChange={setNewMaxBytes}
+                placeholder="10GB"
+                dark={dark}
+                mono
+              />
+            </FormField>
+            <FormField label="Max Chunks" dark={dark}>
+              <NumberInput
+                value={newMaxChunks}
+                onChange={setNewMaxChunks}
+                placeholder="100"
+                dark={dark}
+              />
+            </FormField>
+          </div>
+        </AddFormCard>
+      )}
 
-      <div className="flex flex-col gap-3">
-        {adding && (
-          <div
-            className={`border rounded-lg p-4 ${c("border-copper/40 bg-ink-surface", "border-copper/40 bg-light-surface")}`}
+      {Object.entries(policies).map(([id, pol]) => {
+        const edit = getEdit(id);
+        const refs = refsFor(id);
+        return (
+          <SettingsCard
+            key={id}
+            id={id}
+            dark={dark}
+            expanded={expanded === id}
+            onToggle={() => setExpanded(expanded === id ? null : id)}
+            onDelete={() => handleDelete(id)}
+            footer={
+              <button
+                onClick={() => handleSave(id)}
+                disabled={putPolicy.isPending}
+                className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
+              >
+                {putPolicy.isPending ? "Saving..." : "Save"}
+              </button>
+            }
+            status={
+              refs.length > 0 ? (
+                <span
+                  className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+                >
+                  used by: {refs.join(", ")}
+                </span>
+              ) : undefined
+            }
           >
             <div className="flex flex-col gap-3">
-              <FormField label="ID" dark={dark}>
-                <TextInput
-                  value={newId}
-                  onChange={setNewId}
-                  placeholder="default"
-                  dark={dark}
-                  mono
-                />
-              </FormField>
               <div className="grid grid-cols-3 gap-3">
                 <FormField
                   label="Max Age"
@@ -236,8 +287,8 @@ export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
                   dark={dark}
                 >
                   <TextInput
-                    value={newMaxAge}
-                    onChange={setNewMaxAge}
+                    value={edit.maxAge}
+                    onChange={(v) => setEdit(id, { maxAge: v })}
                     placeholder="720h"
                     dark={dark}
                     mono
@@ -249,8 +300,8 @@ export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
                   dark={dark}
                 >
                   <TextInput
-                    value={newMaxBytes}
-                    onChange={setNewMaxBytes}
+                    value={edit.maxBytes}
+                    onChange={(v) => setEdit(id, { maxBytes: v })}
                     placeholder="10GB"
                     dark={dark}
                     mono
@@ -258,115 +309,17 @@ export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
                 </FormField>
                 <FormField label="Max Chunks" dark={dark}>
                   <NumberInput
-                    value={newMaxChunks}
-                    onChange={setNewMaxChunks}
+                    value={edit.maxChunks}
+                    onChange={(v) => setEdit(id, { maxChunks: v })}
                     placeholder="100"
                     dark={dark}
                   />
                 </FormField>
               </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  onClick={() => setAdding(false)}
-                  className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
-                    "border-ink-border text-text-muted hover:bg-ink-hover",
-                    "border-light-border text-light-text-muted hover:bg-light-hover",
-                  )}`}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleCreate}
-                  disabled={putPolicy.isPending}
-                  className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
-                >
-                  {putPolicy.isPending ? "Creating..." : "Create"}
-                </button>
-              </div>
             </div>
-          </div>
-        )}
-
-        {Object.entries(policies).map(([id, pol]) => {
-          const edit = getEdit(id);
-          const refs = refsFor(id);
-          return (
-            <SettingsCard
-              key={id}
-              id={id}
-              dark={dark}
-              expanded={expanded === id}
-              onToggle={() => setExpanded(expanded === id ? null : id)}
-              onDelete={() => handleDelete(id)}
-              footer={
-                <button
-                  onClick={() => handleSave(id)}
-                  disabled={putPolicy.isPending}
-                  className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
-                >
-                  {putPolicy.isPending ? "Saving..." : "Save"}
-                </button>
-              }
-              status={
-                refs.length > 0 ? (
-                  <span
-                    className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-                  >
-                    used by: {refs.join(", ")}
-                  </span>
-                ) : undefined
-              }
-            >
-              <div className="flex flex-col gap-3">
-                <div className="grid grid-cols-3 gap-3">
-                  <FormField
-                    label="Max Age"
-                    description="e.g. 720h, 30d"
-                    dark={dark}
-                  >
-                    <TextInput
-                      value={edit.maxAge}
-                      onChange={(v) => setEdit(id, { maxAge: v })}
-                      placeholder="720h"
-                      dark={dark}
-                      mono
-                    />
-                  </FormField>
-                  <FormField
-                    label="Max Bytes"
-                    description="e.g. 10GB, 500MB"
-                    dark={dark}
-                  >
-                    <TextInput
-                      value={edit.maxBytes}
-                      onChange={(v) => setEdit(id, { maxBytes: v })}
-                      placeholder="10GB"
-                      dark={dark}
-                      mono
-                    />
-                  </FormField>
-                  <FormField label="Max Chunks" dark={dark}>
-                    <NumberInput
-                      value={edit.maxChunks}
-                      onChange={(v) => setEdit(id, { maxChunks: v })}
-                      placeholder="100"
-                      dark={dark}
-                    />
-                  </FormField>
-                </div>
-              </div>
-            </SettingsCard>
-          );
-        })}
-
-        {Object.keys(policies).length === 0 && !adding && (
-          <div
-            className={`text-center py-8 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-          >
-            No retention policies configured. Click "Add Policy" to create one.
-          </div>
-        )}
-      </div>
-    </div>
+          </SettingsCard>
+        );
+      })}
+    </SettingsSection>
   );
 }

@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useConfig, usePutIngester, useDeleteIngester } from "../../api/hooks";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
+import { useEditState } from "../../hooks/useEditState";
 import { SettingsCard } from "./SettingsCard";
+import { SettingsSection } from "./SettingsSection";
+import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, SelectInput } from "./FormField";
 import { IngesterParamsForm } from "./IngesterParamsForm";
 
@@ -24,39 +27,25 @@ export function IngestersSettings({ dark }: { dark: boolean }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
-  const [edits, setEdits] = useState<
-    Record<string, { enabled: boolean; params: Record<string, string> }>
-  >({});
-
   const [newId, setNewId] = useState("");
   const [newType, setNewType] = useState("chatterbox");
   const [newParams, setNewParams] = useState<Record<string, string>>({});
 
   const ingesters = config?.ingesters ?? [];
 
-  const getEdit = (ing: {
-    id: string;
-    enabled: boolean;
-    params: Record<string, string>;
-  }) => {
-    const existing = edits[ing.id];
-    if (existing) return existing;
-    return { enabled: ing.enabled, params: { ...ing.params } };
-  };
+  const defaults = useCallback(
+    (id: string) => {
+      const ing = ingesters.find((i) => i.id === id);
+      if (!ing) return { enabled: true, params: {} as Record<string, string> };
+      return { enabled: ing.enabled, params: { ...ing.params } };
+    },
+    [ingesters],
+  );
 
-  const setEdit = (
-    id: string,
-    update: Partial<{ enabled: boolean; params: Record<string, string> }>,
-  ) => {
-    setEdits((prev) => {
-      const current = prev[id] ?? getEdit(ingesters.find((i) => i.id === id)!);
-      return { ...prev, [id]: { ...current, ...update } };
-    });
-  };
+  const { getEdit, setEdit, clearEdit } = useEditState(defaults);
 
   const handleSave = async (id: string, type: string) => {
-    const ing = ingesters.find((i) => i.id === id)!;
-    const edit = getEdit(ing);
+    const edit = getEdit(id);
     try {
       await putIngester.mutateAsync({
         id,
@@ -64,11 +53,7 @@ export function IngestersSettings({ dark }: { dark: boolean }) {
         enabled: edit.enabled,
         params: edit.params,
       });
-      setEdits((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
+      clearEdit(id);
       addToast(`Ingester "${id}" updated`, "info");
     } catch (err: any) {
       addToast(err.message ?? "Failed to update ingester", "error");
@@ -111,176 +96,134 @@ export function IngestersSettings({ dark }: { dark: boolean }) {
     }
   };
 
-  if (isLoading) {
-    return (
-      <div
-        className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-      >
-        Loading...
-      </div>
-    );
-  }
-
   return (
-    <div>
-      <div className="flex items-center justify-between mb-5">
-        <h2
-          className={`font-display text-[1.4em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
+    <SettingsSection
+      title="Ingesters"
+      addLabel="Add Ingester"
+      adding={adding}
+      onToggleAdd={() => setAdding(!adding)}
+      isLoading={isLoading}
+      isEmpty={ingesters.length === 0}
+      emptyMessage='No ingesters configured. Click "Add Ingester" to create one.'
+      dark={dark}
+    >
+      {adding && (
+        <AddFormCard
+          dark={dark}
+          onCancel={() => setAdding(false)}
+          onCreate={handleCreate}
+          isPending={putIngester.isPending}
         >
-          Ingesters
-        </h2>
-        <button
-          onClick={() => setAdding(!adding)}
-          className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors"
-        >
-          {adding ? "Cancel" : "Add Ingester"}
-        </button>
-      </div>
-
-      <div className="flex flex-col gap-3">
-        {adding && (
-          <div
-            className={`border rounded-lg p-4 ${c("border-copper/40 bg-ink-surface", "border-copper/40 bg-light-surface")}`}
-          >
-            <div className="flex flex-col gap-3">
-              <div className="grid grid-cols-2 gap-3">
-                <FormField label="ID" dark={dark}>
-                  <TextInput
-                    value={newId}
-                    onChange={setNewId}
-                    placeholder="my-ingester"
-                    dark={dark}
-                    mono
-                  />
-                </FormField>
-                <FormField label="Type" dark={dark}>
-                  <SelectInput
-                    value={newType}
-                    onChange={handleNewTypeChange}
-                    options={ingesterTypes}
-                    dark={dark}
-                  />
-                </FormField>
-              </div>
-              <IngesterParamsForm
-                ingesterType={newType}
-                params={newParams}
-                onChange={setNewParams}
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="ID" dark={dark}>
+              <TextInput
+                value={newId}
+                onChange={setNewId}
+                placeholder="my-ingester"
+                dark={dark}
+                mono
+              />
+            </FormField>
+            <FormField label="Type" dark={dark}>
+              <SelectInput
+                value={newType}
+                onChange={handleNewTypeChange}
+                options={ingesterTypes}
                 dark={dark}
               />
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  onClick={() => setAdding(false)}
-                  className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
-                    "border-ink-border text-text-muted hover:bg-ink-hover",
-                    "border-light-border text-light-text-muted hover:bg-light-hover",
+            </FormField>
+          </div>
+          <IngesterParamsForm
+            ingesterType={newType}
+            params={newParams}
+            onChange={setNewParams}
+            dark={dark}
+          />
+        </AddFormCard>
+      )}
+
+      {ingesters.map((ing) => {
+        const edit = getEdit(ing.id);
+        return (
+          <SettingsCard
+            key={ing.id}
+            id={ing.id}
+            typeBadge={ing.type}
+            dark={dark}
+            expanded={expanded === ing.id}
+            onToggle={() => setExpanded(expanded === ing.id ? null : ing.id)}
+            onDelete={() => handleDelete(ing.id)}
+            headerRight={
+              !ing.enabled ? (
+                <span
+                  className={`px-1.5 py-0.5 text-[0.8em] font-mono rounded ${c(
+                    "bg-ink-hover text-text-ghost",
+                    "bg-light-hover text-light-text-ghost",
                   )}`}
                 >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleCreate}
-                  disabled={putIngester.isPending}
-                  className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
-                >
-                  {putIngester.isPending ? "Creating..." : "Create"}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {ingesters.map((ing) => {
-          const edit = getEdit(ing);
-          return (
-            <SettingsCard
-              key={ing.id}
-              id={ing.id}
-              typeBadge={ing.type}
-              dark={dark}
-              expanded={expanded === ing.id}
-              onToggle={() => setExpanded(expanded === ing.id ? null : ing.id)}
-              onDelete={() => handleDelete(ing.id)}
-              headerRight={
-                !ing.enabled ? (
-                  <span
-                    className={`px-1.5 py-0.5 text-[0.8em] font-mono rounded ${c(
-                      "bg-ink-hover text-text-ghost",
-                      "bg-light-hover text-light-text-ghost",
-                    )}`}
-                  >
-                    disabled
-                  </span>
-                ) : undefined
-              }
-              footer={
-                <button
-                  onClick={() => handleSave(ing.id, ing.type)}
-                  disabled={putIngester.isPending}
-                  className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
-                >
-                  {putIngester.isPending ? "Saving..." : "Save"}
-                </button>
-              }
-            >
-              <div className="flex flex-col gap-3">
-                <div
-                  className="flex items-center gap-2 cursor-pointer select-none"
-                  onClick={() => setEdit(ing.id, { enabled: !edit.enabled })}
-                >
-                  <button
-                    type="button"
-                    className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
-                      edit.enabled
-                        ? "bg-copper border-copper text-white"
-                        : c(
-                            "border-ink-border bg-ink-well",
-                            "border-light-border bg-light-well",
-                          )
-                    }`}
-                  >
-                    {edit.enabled && (
-                      <svg
-                        width="10"
-                        height="10"
-                        viewBox="0 0 10 10"
-                        fill="none"
-                      >
-                        <path
-                          d="M2 5L4 7L8 3"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    )}
-                  </button>
-                  <span
-                    className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
-                  >
-                    Enabled
-                  </span>
-                </div>
-                <IngesterParamsForm
-                  ingesterType={ing.type}
-                  params={edit.params}
-                  onChange={(p) => setEdit(ing.id, { params: p })}
-                  dark={dark}
-                />
-              </div>
-            </SettingsCard>
-          );
-        })}
-
-        {ingesters.length === 0 && !adding && (
-          <div
-            className={`text-center py-8 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+                  disabled
+                </span>
+              ) : undefined
+            }
+            footer={
+              <button
+                onClick={() => handleSave(ing.id, ing.type)}
+                disabled={putIngester.isPending}
+                className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
+              >
+                {putIngester.isPending ? "Saving..." : "Save"}
+              </button>
+            }
           >
-            No ingesters configured. Click "Add Ingester" to create one.
-          </div>
-        )}
-      </div>
-    </div>
+            <div className="flex flex-col gap-3">
+              <div
+                className="flex items-center gap-2 cursor-pointer select-none"
+                onClick={() => setEdit(ing.id, { enabled: !edit.enabled })}
+              >
+                <button
+                  type="button"
+                  className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                    edit.enabled
+                      ? "bg-copper border-copper text-white"
+                      : c(
+                          "border-ink-border bg-ink-well",
+                          "border-light-border bg-light-well",
+                        )
+                  }`}
+                >
+                  {edit.enabled && (
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 10 10"
+                      fill="none"
+                    >
+                      <path
+                        d="M2 5L4 7L8 3"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  )}
+                </button>
+                <span
+                  className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
+                >
+                  Enabled
+                </span>
+              </div>
+              <IngesterParamsForm
+                ingesterType={ing.type}
+                params={edit.params}
+                onChange={(p) => setEdit(ing.id, { params: p })}
+                dark={dark}
+              />
+            </div>
+          </SettingsCard>
+        );
+      })}
+    </SettingsSection>
   );
 }

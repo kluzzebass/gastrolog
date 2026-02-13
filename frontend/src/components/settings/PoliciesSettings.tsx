@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import {
   useConfig,
   usePutRotationPolicy,
@@ -6,7 +6,10 @@ import {
 } from "../../api/hooks";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
+import { useEditState } from "../../hooks/useEditState";
 import { SettingsCard } from "./SettingsCard";
+import { SettingsSection } from "./SettingsSection";
+import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, NumberInput } from "./FormField";
 import { validateCron, describeCron } from "../../utils/cron";
 
@@ -137,7 +140,6 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
 
   const [expanded, setExpanded] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  const [edits, setEdits] = useState<Record<string, PolicyEdit>>({});
 
   const [newId, setNewId] = useState("");
   const [newMaxBytes, setNewMaxBytes] = useState("");
@@ -148,24 +150,21 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
   const policies = config?.rotationPolicies ?? {};
   const stores = config?.stores ?? [];
 
-  const getEdit = (id: string): PolicyEdit => {
-    if (edits[id]) return edits[id];
-    const pol = policies[id];
-    if (!pol) return { maxBytes: "", maxRecords: "", maxAge: "", cron: "" };
-    return {
-      maxBytes: formatBytes(pol.maxBytes),
-      maxRecords: pol.maxRecords > 0n ? pol.maxRecords.toString() : "",
-      maxAge: formatDuration(pol.maxAgeSeconds),
-      cron: pol.cron,
-    };
-  };
+  const defaults = useCallback(
+    (id: string): PolicyEdit => {
+      const pol = policies[id];
+      if (!pol) return { maxBytes: "", maxRecords: "", maxAge: "", cron: "" };
+      return {
+        maxBytes: formatBytes(pol.maxBytes),
+        maxRecords: pol.maxRecords > 0n ? pol.maxRecords.toString() : "",
+        maxAge: formatDuration(pol.maxAgeSeconds),
+        cron: pol.cron,
+      };
+    },
+    [policies],
+  );
 
-  const setEdit = (id: string, patch: Partial<PolicyEdit>) => {
-    setEdits((prev) => ({
-      ...prev,
-      [id]: { ...getEdit(id), ...prev[id], ...patch },
-    }));
-  };
+  const { getEdit, setEdit, clearEdit } = useEditState(defaults);
 
   const handleSave = async (id: string) => {
     const edit = getEdit(id);
@@ -184,11 +183,7 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
         maxAgeSeconds: parseDuration(edit.maxAge),
         cron: edit.cron,
       });
-      setEdits((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
+      clearEdit(id);
       addToast(`Policy "${id}" updated`, "info");
     } catch (err: any) {
       addToast(err.message ?? "Failed to update policy", "error");
@@ -250,47 +245,104 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
   const refsFor = (policyId: string) =>
     stores.filter((s) => s.policy === policyId).map((s) => s.id);
 
-  if (isLoading) {
-    return (
-      <div
-        className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-      >
-        Loading...
-      </div>
-    );
-  }
-
   return (
-    <div>
-      <div className="flex items-center justify-between mb-5">
-        <h2
-          className={`font-display text-[1.4em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
+    <SettingsSection
+      title="Rotation Policies"
+      addLabel="Add Policy"
+      adding={adding}
+      onToggleAdd={() => setAdding(!adding)}
+      isLoading={isLoading}
+      isEmpty={Object.keys(policies).length === 0}
+      emptyMessage='No rotation policies configured. Click "Add Policy" to create one.'
+      dark={dark}
+    >
+      {adding && (
+        <AddFormCard
+          dark={dark}
+          onCancel={() => setAdding(false)}
+          onCreate={handleCreate}
+          isPending={putPolicy.isPending}
         >
-          Rotation Policies
-        </h2>
-        <button
-          onClick={() => setAdding(!adding)}
-          className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors"
-        >
-          {adding ? "Cancel" : "Add Policy"}
-        </button>
-      </div>
+          <FormField label="ID" dark={dark}>
+            <TextInput
+              value={newId}
+              onChange={setNewId}
+              placeholder="default"
+              dark={dark}
+              mono
+            />
+          </FormField>
+          <div className="grid grid-cols-3 gap-3">
+            <FormField
+              label="Max Bytes"
+              description="e.g. 64MB, 1GB"
+              dark={dark}
+            >
+              <TextInput
+                value={newMaxBytes}
+                onChange={setNewMaxBytes}
+                placeholder="64MB"
+                dark={dark}
+                mono
+              />
+            </FormField>
+            <FormField label="Max Records" dark={dark}>
+              <NumberInput
+                value={newMaxRecords}
+                onChange={setNewMaxRecords}
+                placeholder="100000"
+                dark={dark}
+              />
+            </FormField>
+            <FormField
+              label="Max Age"
+              description="e.g. 5m, 1h"
+              dark={dark}
+            >
+              <TextInput
+                value={newMaxAge}
+                onChange={setNewMaxAge}
+                placeholder="5m"
+                dark={dark}
+                mono
+              />
+            </FormField>
+          </div>
+          <CronField value={newCron} onChange={setNewCron} dark={dark} />
+        </AddFormCard>
+      )}
 
-      <div className="flex flex-col gap-3">
-        {adding && (
-          <div
-            className={`border rounded-lg p-4 ${c("border-copper/40 bg-ink-surface", "border-copper/40 bg-light-surface")}`}
+      {Object.entries(policies).map(([id, pol]) => {
+        const edit = getEdit(id);
+        const refs = refsFor(id);
+        return (
+          <SettingsCard
+            key={id}
+            id={id}
+            dark={dark}
+            expanded={expanded === id}
+            onToggle={() => setExpanded(expanded === id ? null : id)}
+            onDelete={() => handleDelete(id)}
+            footer={
+              <button
+                onClick={() => handleSave(id)}
+                disabled={putPolicy.isPending}
+                className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
+              >
+                {putPolicy.isPending ? "Saving..." : "Save"}
+              </button>
+            }
+            status={
+              refs.length > 0 ? (
+                <span
+                  className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+                >
+                  used by: {refs.join(", ")}
+                </span>
+              ) : undefined
+            }
           >
             <div className="flex flex-col gap-3">
-              <FormField label="ID" dark={dark}>
-                <TextInput
-                  value={newId}
-                  onChange={setNewId}
-                  placeholder="default"
-                  dark={dark}
-                  mono
-                />
-              </FormField>
               <div className="grid grid-cols-3 gap-3">
                 <FormField
                   label="Max Bytes"
@@ -298,8 +350,8 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
                   dark={dark}
                 >
                   <TextInput
-                    value={newMaxBytes}
-                    onChange={setNewMaxBytes}
+                    value={edit.maxBytes}
+                    onChange={(v) => setEdit(id, { maxBytes: v })}
                     placeholder="64MB"
                     dark={dark}
                     mono
@@ -307,8 +359,8 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
                 </FormField>
                 <FormField label="Max Records" dark={dark}>
                   <NumberInput
-                    value={newMaxRecords}
-                    onChange={setNewMaxRecords}
+                    value={edit.maxRecords}
+                    onChange={(v) => setEdit(id, { maxRecords: v })}
                     placeholder="100000"
                     dark={dark}
                   />
@@ -319,122 +371,23 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
                   dark={dark}
                 >
                   <TextInput
-                    value={newMaxAge}
-                    onChange={setNewMaxAge}
+                    value={edit.maxAge}
+                    onChange={(v) => setEdit(id, { maxAge: v })}
                     placeholder="5m"
                     dark={dark}
                     mono
                   />
                 </FormField>
               </div>
-              <CronField value={newCron} onChange={setNewCron} dark={dark} />
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  onClick={() => setAdding(false)}
-                  className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
-                    "border-ink-border text-text-muted hover:bg-ink-hover",
-                    "border-light-border text-light-text-muted hover:bg-light-hover",
-                  )}`}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleCreate}
-                  disabled={putPolicy.isPending}
-                  className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
-                >
-                  {putPolicy.isPending ? "Creating..." : "Create"}
-                </button>
-              </div>
+              <CronField
+                value={edit.cron}
+                onChange={(v) => setEdit(id, { cron: v })}
+                dark={dark}
+              />
             </div>
-          </div>
-        )}
-
-        {Object.entries(policies).map(([id, pol]) => {
-          const edit = getEdit(id);
-          const refs = refsFor(id);
-          return (
-            <SettingsCard
-              key={id}
-              id={id}
-              dark={dark}
-              expanded={expanded === id}
-              onToggle={() => setExpanded(expanded === id ? null : id)}
-              onDelete={() => handleDelete(id)}
-              footer={
-                <button
-                  onClick={() => handleSave(id)}
-                  disabled={putPolicy.isPending}
-                  className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
-                >
-                  {putPolicy.isPending ? "Saving..." : "Save"}
-                </button>
-              }
-              status={
-                refs.length > 0 ? (
-                  <span
-                    className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-                  >
-                    used by: {refs.join(", ")}
-                  </span>
-                ) : undefined
-              }
-            >
-              <div className="flex flex-col gap-3">
-                <div className="grid grid-cols-3 gap-3">
-                  <FormField
-                    label="Max Bytes"
-                    description="e.g. 64MB, 1GB"
-                    dark={dark}
-                  >
-                    <TextInput
-                      value={edit.maxBytes}
-                      onChange={(v) => setEdit(id, { maxBytes: v })}
-                      placeholder="64MB"
-                      dark={dark}
-                      mono
-                    />
-                  </FormField>
-                  <FormField label="Max Records" dark={dark}>
-                    <NumberInput
-                      value={edit.maxRecords}
-                      onChange={(v) => setEdit(id, { maxRecords: v })}
-                      placeholder="100000"
-                      dark={dark}
-                    />
-                  </FormField>
-                  <FormField
-                    label="Max Age"
-                    description="e.g. 5m, 1h"
-                    dark={dark}
-                  >
-                    <TextInput
-                      value={edit.maxAge}
-                      onChange={(v) => setEdit(id, { maxAge: v })}
-                      placeholder="5m"
-                      dark={dark}
-                      mono
-                    />
-                  </FormField>
-                </div>
-                <CronField
-                  value={edit.cron}
-                  onChange={(v) => setEdit(id, { cron: v })}
-                  dark={dark}
-                />
-              </div>
-            </SettingsCard>
-          );
-        })}
-
-        {Object.keys(policies).length === 0 && !adding && (
-          <div
-            className={`text-center py-8 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-          >
-            No rotation policies configured. Click "Add Policy" to create one.
-          </div>
-        )}
-      </div>
-    </div>
+          </SettingsCard>
+        );
+      })}
+    </SettingsSection>
   );
 }

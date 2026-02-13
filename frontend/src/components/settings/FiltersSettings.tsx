@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useConfig, usePutFilter, useDeleteFilter } from "../../api/hooks";
 import { useToast } from "../Toast";
+import { useEditState } from "../../hooks/useEditState";
 import { SettingsCard } from "./SettingsCard";
+import { SettingsSection } from "./SettingsSection";
+import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput } from "./FormField";
 
 function FilterDescription({ dark }: { dark: boolean }) {
@@ -49,9 +52,6 @@ export function FiltersSettings({ dark }: { dark: boolean }) {
 
   const [expanded, setExpanded] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  const [edits, setEdits] = useState<Record<string, { expression: string }>>(
-    {},
-  );
 
   const [newId, setNewId] = useState("");
   const [newExpression, setNewExpression] = useState("");
@@ -59,29 +59,22 @@ export function FiltersSettings({ dark }: { dark: boolean }) {
   const filters = config?.filters ?? {};
   const stores = config?.stores ?? [];
 
-  const getEdit = (id: string): { expression: string } => {
-    if (edits[id]) return edits[id];
-    const fc = filters[id];
-    if (!fc) return { expression: "" };
-    return { expression: fc.expression };
-  };
+  const defaults = useCallback(
+    (id: string) => {
+      const fc = filters[id];
+      if (!fc) return { expression: "" };
+      return { expression: fc.expression };
+    },
+    [filters],
+  );
 
-  const setEdit = (id: string, patch: Partial<{ expression: string }>) => {
-    setEdits((prev) => ({
-      ...prev,
-      [id]: { ...getEdit(id), ...prev[id], ...patch },
-    }));
-  };
+  const { getEdit, setEdit, clearEdit } = useEditState(defaults);
 
   const handleSave = async (id: string) => {
     const edit = getEdit(id);
     try {
       await putFilter.mutateAsync({ id, expression: edit.expression });
-      setEdits((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
+      clearEdit(id);
       addToast(`Filter "${id}" updated`, "info");
     } catch (err: any) {
       addToast(err.message ?? "Failed to update filter", "error");
@@ -127,138 +120,96 @@ export function FiltersSettings({ dark }: { dark: boolean }) {
   const refsFor = (filterId: string) =>
     stores.filter((s) => s.filter === filterId).map((s) => s.id);
 
-  if (isLoading) {
-    return (
-      <div
-        className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-      >
-        Loading...
-      </div>
-    );
-  }
-
   return (
-    <div>
-      <div className="flex items-center justify-between mb-5">
-        <h2
-          className={`font-display text-[1.4em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
+    <SettingsSection
+      title="Filters"
+      addLabel="Add Filter"
+      adding={adding}
+      onToggleAdd={() => setAdding(!adding)}
+      isLoading={isLoading}
+      isEmpty={Object.keys(filters).length === 0}
+      emptyMessage='No filters configured. Click "Add Filter" to create one.'
+      dark={dark}
+    >
+      {adding && (
+        <AddFormCard
+          dark={dark}
+          onCancel={() => setAdding(false)}
+          onCreate={handleCreate}
+          isPending={putFilter.isPending}
         >
-          Filters
-        </h2>
-        <button
-          onClick={() => setAdding(!adding)}
-          className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors"
-        >
-          {adding ? "Cancel" : "Add Filter"}
-        </button>
-      </div>
+          <FormField label="ID" dark={dark}>
+            <TextInput
+              value={newId}
+              onChange={setNewId}
+              placeholder="catch-all"
+              dark={dark}
+              mono
+            />
+          </FormField>
+          <FormField
+            label="Expression"
+            description={<FilterDescription dark={dark} />}
+            dark={dark}
+          >
+            <TextInput
+              value={newExpression}
+              onChange={setNewExpression}
+              placeholder="*"
+              dark={dark}
+              mono
+            />
+          </FormField>
+        </AddFormCard>
+      )}
 
-      <div className="flex flex-col gap-3">
-        {adding && (
-          <div
-            className={`border rounded-lg p-4 ${c("border-copper/40 bg-ink-surface", "border-copper/40 bg-light-surface")}`}
+      {Object.entries(filters).map(([id]) => {
+        const edit = getEdit(id);
+        const refs = refsFor(id);
+        return (
+          <SettingsCard
+            key={id}
+            id={id}
+            dark={dark}
+            expanded={expanded === id}
+            onToggle={() => setExpanded(expanded === id ? null : id)}
+            onDelete={() => handleDelete(id)}
+            footer={
+              <button
+                onClick={() => handleSave(id)}
+                disabled={putFilter.isPending}
+                className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
+              >
+                {putFilter.isPending ? "Saving..." : "Save"}
+              </button>
+            }
+            status={
+              refs.length > 0 ? (
+                <span
+                  className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+                >
+                  used by: {refs.join(", ")}
+                </span>
+              ) : undefined
+            }
           >
             <div className="flex flex-col gap-3">
-              <FormField label="ID" dark={dark}>
-                <TextInput
-                  value={newId}
-                  onChange={setNewId}
-                  placeholder="catch-all"
-                  dark={dark}
-                  mono
-                />
-              </FormField>
               <FormField
                 label="Expression"
                 description={<FilterDescription dark={dark} />}
                 dark={dark}
               >
                 <TextInput
-                  value={newExpression}
-                  onChange={setNewExpression}
-                  placeholder="*"
+                  value={edit.expression}
+                  onChange={(v) => setEdit(id, { expression: v })}
                   dark={dark}
                   mono
                 />
               </FormField>
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  onClick={() => setAdding(false)}
-                  className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
-                    "border-ink-border text-text-muted hover:bg-ink-hover",
-                    "border-light-border text-light-text-muted hover:bg-light-hover",
-                  )}`}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleCreate}
-                  disabled={putFilter.isPending}
-                  className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
-                >
-                  {putFilter.isPending ? "Creating..." : "Create"}
-                </button>
-              </div>
             </div>
-          </div>
-        )}
-
-        {Object.entries(filters).map(([id]) => {
-          const edit = getEdit(id);
-          const refs = refsFor(id);
-          return (
-            <SettingsCard
-              key={id}
-              id={id}
-              dark={dark}
-              expanded={expanded === id}
-              onToggle={() => setExpanded(expanded === id ? null : id)}
-              onDelete={() => handleDelete(id)}
-              footer={
-                <button
-                  onClick={() => handleSave(id)}
-                  disabled={putFilter.isPending}
-                  className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
-                >
-                  {putFilter.isPending ? "Saving..." : "Save"}
-                </button>
-              }
-              status={
-                refs.length > 0 ? (
-                  <span
-                    className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-                  >
-                    used by: {refs.join(", ")}
-                  </span>
-                ) : undefined
-              }
-            >
-              <div className="flex flex-col gap-3">
-                <FormField
-                  label="Expression"
-                  description={<FilterDescription dark={dark} />}
-                  dark={dark}
-                >
-                  <TextInput
-                    value={edit.expression}
-                    onChange={(v) => setEdit(id, { expression: v })}
-                    dark={dark}
-                    mono
-                  />
-                </FormField>
-              </div>
-            </SettingsCard>
-          );
-        })}
-
-        {Object.keys(filters).length === 0 && !adding && (
-          <div
-            className={`text-center py-8 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-          >
-            No filters configured. Click "Add Filter" to create one.
-          </div>
-        )}
-      </div>
-    </div>
+          </SettingsCard>
+        );
+      })}
+    </SettingsSection>
   );
 }
