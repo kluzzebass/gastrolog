@@ -76,6 +76,7 @@ export const QueryInput = forwardRef<HTMLTextAreaElement, QueryInputProps>(
           onKeyDown={onKeyDown}
           onKeyUp={onKeyUp}
           onClick={onClick}
+          spellCheck={false}
           rows={1}
           placeholder={placeholder}
           title={errorMessage ?? undefined}
