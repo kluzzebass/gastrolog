@@ -390,6 +390,24 @@ export function IngesterParamsForm({
     );
   }
 
+  if (ingesterType === "relp") {
+    return (
+      <FormField
+        label="Listen Address"
+        description="TCP address for RELP (default: :2514)"
+        dark={dark}
+      >
+        <TextInput
+          value={params["addr"] ?? ""}
+          onChange={(v) => onChange({ ...params, addr: v })}
+          placeholder=":2514"
+          dark={dark}
+          mono
+        />
+      </FormField>
+    );
+  }
+
   if (ingesterType === "syslog") {
     return (
       <div className="grid grid-cols-2 gap-3">

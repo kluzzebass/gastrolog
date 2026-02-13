@@ -38,6 +38,7 @@ import (
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/ingester/chatterbox"
 	ingesthttp "gastrolog/internal/ingester/http"
+	ingestrelp "gastrolog/internal/ingester/relp"
 	ingestsyslog "gastrolog/internal/ingester/syslog"
 	ingesttail "gastrolog/internal/ingester/tail"
 	"gastrolog/internal/logging"
@@ -247,6 +248,7 @@ func buildFactories(logger *slog.Logger, dataDir string) orchestrator.Factories 
 		Ingesters: map[string]orchestrator.IngesterFactory{
 			"chatterbox": chatterbox.NewIngester,
 			"http":       ingesthttp.NewFactory(),
+			"relp":       ingestrelp.NewFactory(),
 			"syslog":     ingestsyslog.NewFactory(),
 			"tail":       ingesttail.NewFactory(),
 		},

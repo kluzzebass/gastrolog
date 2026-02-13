@@ -9,6 +9,7 @@ import { IngesterParamsForm } from "./IngesterParamsForm";
 const ingesterTypes = [
   { value: "chatterbox", label: "chatterbox" },
   { value: "http", label: "http" },
+  { value: "relp", label: "relp" },
   { value: "syslog", label: "syslog" },
   { value: "tail", label: "tail" },
 ];
