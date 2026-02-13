@@ -134,15 +134,13 @@ func (m *Manager) LoadFromConfig(defaultCert string, certs map[string]CertSource
 }
 
 // stopWatcher stops the file watcher. Caller must hold m.mu.
+// The goroutine owns watcher.Close() via defer; we only signal it to stop.
 func (m *Manager) stopWatcher() {
 	if m.watcherStop != nil {
 		close(m.watcherStop)
 		m.watcherStop = nil
 	}
-	if m.watcher != nil {
-		m.watcher.Close()
-		m.watcher = nil
-	}
+	m.watcher = nil
 }
 
 // startWatcher starts watching file-based certs. Caller must hold m.mu.

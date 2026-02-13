@@ -96,10 +96,15 @@ func (s *Server) registerProbes(mux *http.ServeMux) {
 	})
 }
 
+// isLoopback returns true if host is a loopback address (localhost, 127.0.0.1, ::1).
+func isLoopback(host string) bool {
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
 // corsMiddleware adds CORS headers for browser clients.
 // Only allows same-origin requests; never reflects arbitrary Origin to avoid
 // cross-origin theft of sensitive data (private keys, JWT secret).
-// For localhost (dev with proxy), allows Origin from same hostname on any port.
+// For loopback (dev with proxy), allows Origin from same hostname on any port.
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
@@ -112,29 +117,28 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 			allowed := origin == sameOrigin
 			if !allowed {
 				// Dev with proxy: frontend (e.g. localhost:3000) proxies to backend (localhost:4564).
-				// Allow any localhost/127.0.0.1 origin when request is to localhost/127.0.0.1.
+				// Allow any loopback origin when request is to loopback.
 				reqHost, _, _ := net.SplitHostPort(r.Host)
 				if reqHost == "" {
 					reqHost = r.Host
 				}
-				isLocal := reqHost == "localhost" || reqHost == "127.0.0.1"
-				if isLocal {
+				if isLoopback(reqHost) {
 					if u, err := url.Parse(origin); err == nil {
 						oHost, _, _ := net.SplitHostPort(u.Host)
 						if oHost == "" {
 							oHost = u.Host
 						}
-						allowed = (oHost == "localhost" || oHost == "127.0.0.1")
+						allowed = isLoopback(oHost)
 					}
 				}
 			}
 			if allowed {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Connect-Protocol-Version, Connect-Timeout-Ms, Grpc-Timeout, X-Grpc-Web, X-User-Agent")
+				w.Header().Set("Access-Control-Expose-Headers", "Grpc-Status, Grpc-Message, Grpc-Status-Details-Bin")
+				w.Header().Set("Access-Control-Max-Age", "86400")
 			}
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Connect-Protocol-Version, Connect-Timeout-Ms, Grpc-Timeout, X-Grpc-Web, X-User-Agent")
-			w.Header().Set("Access-Control-Expose-Headers", "Grpc-Status, Grpc-Message, Grpc-Status-Details-Bin")
-			w.Header().Set("Access-Control-Max-Age", "86400")
 		}
 
 		// Handle preflight requests
@@ -240,7 +244,7 @@ func (s *Server) redirectMiddleware(next http.Handler) http.Handler {
 		if host == "" {
 			host = r.Host
 		}
-		if host == "localhost" || host == "127.0.0.1" {
+		if isLoopback(host) {
 			next.ServeHTTP(w, r)
 			return
 		}
