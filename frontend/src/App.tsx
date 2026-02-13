@@ -21,9 +21,18 @@ import { Record as ProtoRecord, setToken } from "./api/client";
 
 import { timeRangeMs, aggregateFields, sameRecord } from "./utils";
 import type { Theme } from "./utils";
-import { StatPill } from "./components/StatPill";
+import {
+  stripTimeRange,
+  stripStore,
+  stripChunk,
+  stripPos,
+  stripSeverity,
+  injectTimeRange,
+  injectStore,
+  buildSeverityExpr,
+} from "./utils/queryHelpers";
+import { usePanelResize } from "./hooks/usePanelResize";
 import { EmptyState } from "./components/EmptyState";
-import { QueryHelp } from "./components/QueryHelp";
 import { LogEntry } from "./components/LogEntry";
 import { HistogramChart } from "./components/HistogramChart";
 import { TimeRangePicker } from "./components/TimeRangePicker";
@@ -43,21 +52,19 @@ import {
   InspectorDialog,
   type InspectorTab,
 } from "./components/inspector/InspectorDialog";
-import { QueryHistory } from "./components/QueryHistory";
-import { SavedQueries } from "./components/SavedQueries";
 import { useQueryHistory } from "./hooks/useQueryHistory";
 import {
   useSavedQueries,
   usePutSavedQuery,
   useDeleteSavedQuery,
 } from "./api/hooks/useSavedQueries";
-import { ExportButton } from "./components/ExportButton";
-import { QueryInput } from "./components/QueryInput";
-import { QueryAutocomplete } from "./components/QueryAutocomplete";
-import { UserMenu } from "./components/UserMenu";
 import { ChangePasswordDialog } from "./components/ChangePasswordDialog";
+import { Dialog, CloseButton } from "./components/Dialog";
 import { tokenize } from "./queryTokenizer";
 import { useAutocomplete } from "./hooks/useAutocomplete";
+import { HeaderBar } from "./components/HeaderBar";
+import { ResultsToolbar } from "./components/ResultsToolbar";
+import { QueryBar } from "./components/QueryBar";
 
 export function App() {
   return (
@@ -142,7 +149,11 @@ function AppContent() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [detailCollapsed, setDetailCollapsed] = useState(true);
   const [detailPinned, setDetailPinned] = useState(false);
-  const [resizing, setResizing] = useState(false);
+  const { handleResize: handleDetailResize, resizing: detailResizing } =
+    usePanelResize(setDetailWidth, 240, 600, "right");
+  const { handleResize: handleSidebarResize, resizing: sidebarResizing } =
+    usePanelResize(setSidebarWidth, 160, 400, "left");
+  const resizing = detailResizing || sidebarResizing;
 
   // Auto-expand detail panel and fetch context when a record is selected.
   useEffect(() => {
@@ -185,45 +196,6 @@ function AppContent() {
   const skipNextSearchRef = useRef(false);
   const [isScrolledDown, setIsScrolledDown] = useState(false);
 
-  const handleDetailResize = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setResizing(true);
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    const onMouseMove = (e: MouseEvent) => {
-      setDetailWidth(
-        Math.max(240, Math.min(600, window.innerWidth - e.clientX)),
-      );
-    };
-    const onMouseUp = () => {
-      setResizing(false);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-    };
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-  }, []);
-
-  const handleSidebarResize = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setResizing(true);
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    const onMouseMove = (e: MouseEvent) => {
-      setSidebarWidth(Math.max(160, Math.min(400, e.clientX)));
-    };
-    const onMouseUp = () => {
-      setResizing(false);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-    };
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-  }, []);
 
   const {
     records,
@@ -305,59 +277,8 @@ function AppContent() {
     }
   }, [followError]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Build the full expression sent to the server.
   // Whether results are in reverse (newest-first) order.
   const isReversed = !q.includes("reverse=false");
-
-  // Strip start=/end=/reverse tokens from the query string.
-  const stripTimeRange = (q: string): string =>
-    q
-      .replace(/\blast=\S+/g, "")
-      .replace(/\bstart=\S+/g, "")
-      .replace(/\bend=\S+/g, "")
-      .replace(/\breverse=\S+/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
-
-  // Strip store= token from the query string.
-  const stripStore = (q: string): string =>
-    q
-      .replace(/\bstore=\S+/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
-
-  // Build time range tokens for the given range key, preserving current reverse state.
-  const buildTimeTokens = (range: string, reverse = isReversed): string => {
-    const rev = `reverse=${reverse}`;
-    if (range === "All") return rev;
-    if (range in timeRangeMs) return `last=${range} ${rev}`;
-    return rev;
-  };
-
-  // Inject time range + reverse into query, replacing any existing time tokens.
-  const injectTimeRange = (
-    q: string,
-    range: string,
-    reverse = isReversed,
-  ): string => {
-    const base = stripTimeRange(q);
-    const timeTokens = buildTimeTokens(range, reverse);
-    return base ? `${timeTokens} ${base}` : timeTokens;
-  };
-
-  // Inject store= into query, replacing any existing store token.
-  const injectStore = (q: string, storeId: string): string => {
-    const base = stripStore(q);
-    if (storeId === "all") return base;
-    const token = `store=${storeId}`;
-    return base ? `${token} ${base}` : token;
-  };
-
-  const stripChunk = (q: string): string =>
-    q
-      .replace(/\bchunk=\S+/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
 
   // Navigate to a new query — pushes browser history, preserving current route.
   const setUrlQuery = useCallback(
@@ -429,7 +350,7 @@ function AppContent() {
         setRangeStart(new Date(now.getTime() - ms));
         setRangeEnd(now);
       }
-      const initial = injectTimeRange("", timeRange);
+      const initial = injectTimeRange("", timeRange, isReversed);
       navigate({ search: { q: initial }, replace: true });
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -557,22 +478,6 @@ function AppContent() {
     q.includes(`level=${s}`),
   );
 
-  // Build the severity portion of the query: single predicate or OR group.
-  const buildSeverityExpr = (severities: string[]): string => {
-    if (severities.length === 0) return "";
-    if (severities.length === 1) return `level=${severities[0]}`;
-    return `(${severities.map((s) => `level=${s}`).join(" OR ")})`;
-  };
-
-  // Remove any existing severity expression from the query string.
-  const stripSeverity = (qs: string): string =>
-    qs
-      .replace(/\((?:level=\w+\s+OR\s+)*level=\w+\)/g, "")
-      .replace(/\blevel=(?:error|warn|info|debug|trace)\b/g, "")
-      .replace(/\bnot\s+level=\*\b/gi, "")
-      .replace(/\s+/g, " ")
-      .trim();
-
   const toggleSeverity = (level: string) => {
     const current = allSeverities.filter((s) => q.includes(`level=${s}`));
     const next = current.includes(level)
@@ -609,7 +514,7 @@ function AppContent() {
         setRangeEnd(now);
       }
     }
-    const newQuery = injectTimeRange(q, range);
+    const newQuery = injectTimeRange(q, range, isReversed);
     // Time ranges imply search mode — switch away from follow if active.
     navigate({ to: "/search", search: { q: newQuery }, replace: false });
   };
@@ -653,12 +558,6 @@ function AppContent() {
       setUrlQuery(base ? `${token} ${base}` : token);
     }
   };
-
-  const stripPos = (q: string): string =>
-    q
-      .replace(/\bpos=\S+/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
 
   const handlePosSelect = (chunkId: string, pos: string) => {
     const posToken = `pos=${pos}`;
@@ -735,139 +634,22 @@ function AppContent() {
     >
       <a href="#main-content" className="skip-link">Skip to main content</a>
 
-      {/* ── Header ── */}
-      <header
-        className={`flex items-center justify-between px-7 py-3.5 border-b ${c("border-ink-border-subtle bg-ink", "border-light-border-subtle bg-light-raised")}`}
-      >
-        <div className="flex items-center gap-3">
-          <img src="/favicon.svg" alt="GastroLog" className="w-6 h-6" />
-          <h1
-            className={`font-display text-[1.6em] font-semibold tracking-tight leading-none ${c("text-text-bright", "text-light-text-bright")}`}
-          >
-            GastroLog
-          </h1>
-        </div>
-
-        <div className="flex items-center gap-6">
-          {/* Stats ribbon */}
-          <div className="flex items-center gap-5">
-            <StatPill
-              label="Records"
-              value={statsLoading ? "..." : totalRecords.toLocaleString()}
-              dark={dark}
-            />
-            <span
-              className={`text-xs ${c("text-ink-border", "text-light-border")}`}
-            >
-              |
-            </span>
-            <StatPill
-              label="Stores"
-              value={statsLoading ? "..." : totalStores.toString()}
-              dark={dark}
-            />
-            <span
-              className={`text-xs ${c("text-ink-border", "text-light-border")}`}
-            >
-              |
-            </span>
-            <StatPill
-              label="Sealed"
-              value={statsLoading ? "..." : sealedChunks.toString()}
-              dark={dark}
-            />
-            <span
-              className={`text-xs ${c("text-ink-border", "text-light-border")}`}
-            >
-              |
-            </span>
-            <StatPill
-              label="Storage"
-              value={
-                statsLoading
-                  ? "..."
-                  : `${(Number(totalBytes) / 1024 / 1024).toFixed(1)} MB`
-              }
-              dark={dark}
-            />
-          </div>
-
-          <button
-            onClick={() => {
-              const cycle: Theme[] = ["dark", "light", "system"];
-              const next = cycle[(cycle.indexOf(theme) + 1) % cycle.length]!;
-              setTheme(next);
-            }}
-            aria-label={`Theme: ${theme}`}
-            title={`Theme: ${theme}`}
-            className={`w-7 h-7 flex items-center justify-center text-sm rounded transition-all duration-200 ${c(
-              "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
-              "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
-            )}`}
-          >
-            {theme === "dark"
-              ? "\u263E"
-              : theme === "light"
-                ? "\u2600"
-                : "\u25D1"}
-          </button>
-
-          <button
-            onClick={() => setShowInspector(true)}
-            aria-label="Inspector"
-            title="Inspector"
-            className={`w-7 h-7 flex items-center justify-center rounded transition-all duration-500 ${c(
-              "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
-              "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
-            )} ${inspectorGlow ? "text-copper drop-shadow-[0_0_4px_var(--color-copper)]" : ""}`}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="w-4 h-4"
-            >
-              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-            </svg>
-          </button>
-
-          <button
-            onClick={() => setShowSettings(true)}
-            aria-label="Settings"
-            title="Settings"
-            className={`w-7 h-7 flex items-center justify-center rounded transition-all duration-200 ${c(
-              "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
-              "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
-            )}`}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="w-4 h-4"
-            >
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-          </button>
-
-          {currentUser && (
-            <UserMenu
-              username={currentUser.username}
-              role={currentUser.role}
-              dark={dark}
-              onChangePassword={() => setShowChangePassword(true)}
-              onLogout={logout}
-            />
-          )}
-        </div>
-      </header>
+      <HeaderBar
+        dark={dark}
+        theme={theme}
+        setTheme={setTheme}
+        statsLoading={statsLoading}
+        totalRecords={totalRecords}
+        totalStores={totalStores}
+        sealedChunks={sealedChunks}
+        totalBytes={totalBytes}
+        inspectorGlow={inspectorGlow}
+        onShowInspector={() => setShowInspector(true)}
+        onShowSettings={() => setShowSettings(true)}
+        currentUser={currentUser ? { username: currentUser.username, role: currentUser.role } : null}
+        onChangePassword={() => setShowChangePassword(true)}
+        onLogout={logout}
+      />
 
       {/* ── Main Layout ── */}
       <div className="flex flex-1 overflow-hidden">
@@ -1044,352 +826,66 @@ function AppContent() {
           id="main-content"
           className={`flex-1 flex flex-col overflow-hidden ${c("bg-ink-raised", "bg-light-bg")}`}
         >
-          {/* Query Bar */}
-          <div
-            className={`px-5 py-4 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
-          >
-            <div className="flex gap-3 items-start">
-              <div className="flex-1 relative">
-                <QueryInput
-                  ref={queryInputRef}
-                  value={draft}
-                  onChange={(e) => {
-                    setDraft(e.target.value);
-                    setCursorPos(e.target.selectionStart ?? 0);
-                  }}
-                  onKeyDown={(e) => {
-                    if (autocomplete.isOpen) {
-                      if (e.key === "ArrowDown") {
-                        e.preventDefault();
-                        autocomplete.selectNext();
-                        return;
-                      }
-                      if (e.key === "ArrowUp") {
-                        e.preventDefault();
-                        autocomplete.selectPrev();
-                        return;
-                      }
-                      if (
-                        e.key === "Tab" ||
-                        (e.key === "Enter" && !e.shiftKey)
-                      ) {
-                        e.preventDefault();
-                        const result = autocomplete.accept();
-                        if (result) {
-                          setDraft(result.newDraft);
-                          setCursorPos(result.newCursor);
-                          // Set cursor position after React re-renders.
-                          requestAnimationFrame(() => {
-                            const ta = queryInputRef.current;
-                            if (ta) {
-                              ta.selectionStart = result.newCursor;
-                              ta.selectionEnd = result.newCursor;
-                            }
-                          });
-                        }
-                        return;
-                      }
-                      if (e.key === "Escape") {
-                        e.preventDefault();
-                        autocomplete.dismiss();
-                        return;
-                      }
-                    }
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      if (!draftHasErrors) executeQuery();
-                    }
-                  }}
-                  onKeyUp={(e) => {
-                    const ta = e.target as HTMLTextAreaElement;
-                    setCursorPos(ta.selectionStart ?? 0);
-                  }}
-                  onClick={(e) => {
-                    const ta = e.target as HTMLTextAreaElement;
-                    setCursorPos(ta.selectionStart ?? 0);
-                  }}
-                  placeholder="Search logs... tokens for full-text, key=value for attributes"
-                  dark={dark}
-                >
-                  <button
-                    onMouseDown={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      setShowHistory((h) => !h);
-                      setShowSavedQueries(false);
-                    }}
-                    className={`transition-colors ${c(
-                      "text-text-ghost hover:text-copper",
-                      "text-light-text-ghost hover:text-copper",
-                    )}`}
-                    aria-label="Query history"
-                    title="Query history"
-                  >
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className="w-4 h-4"
-                    >
-                      <circle cx="12" cy="12" r="10" />
-                      <polyline points="12 6 12 12 16 14" />
-                    </svg>
-                  </button>
-                  <button
-                    onMouseDown={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      setShowSavedQueries((s) => !s);
-                      setShowHistory(false);
-                    }}
-                    className={`transition-colors ${c(
-                      "text-text-ghost hover:text-copper",
-                      "text-light-text-ghost hover:text-copper",
-                    )}`}
-                    aria-label="Saved queries"
-                    title="Saved queries"
-                  >
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className="w-4 h-4"
-                    >
-                      <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
-                    </svg>
-                  </button>
-                  <button
-                    onClick={() => setShowHelp(true)}
-                    className={`transition-colors ${c(
-                      "text-text-ghost hover:text-copper",
-                      "text-light-text-ghost hover:text-copper",
-                    )}`}
-                    aria-label="Query language help"
-                    title="Query language help"
-                  >
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className="w-4 h-4"
-                    >
-                      <circle cx="12" cy="12" r="10" />
-                      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-                      <line x1="12" y1="17" x2="12.01" y2="17" />
-                    </svg>
-                  </button>
-                </QueryInput>
-                {showHistory && (
-                  <QueryHistory
-                    entries={queryHistory.entries}
-                    dark={dark}
-                    onSelect={(query) => {
-                      setDraft(query);
-                      setShowHistory(false);
-                      queryInputRef.current?.focus();
-                    }}
-                    onRemove={queryHistory.remove}
-                    onClear={queryHistory.clear}
-                    onClose={() => setShowHistory(false)}
-                  />
-                )}
-                {showSavedQueries && (
-                  <SavedQueries
-                    queries={savedQueries.data ?? []}
-                    dark={dark}
-                    currentQuery={draft}
-                    onSelect={(query) => {
-                      setDraft(query);
-                      setShowSavedQueries(false);
-                      queryInputRef.current?.focus();
-                    }}
-                    onSave={(name, query) => {
-                      putSavedQuery.mutate({ name, query });
-                    }}
-                    onDelete={(name) => {
-                      deleteSavedQuery.mutate(name);
-                    }}
-                    onClose={() => setShowSavedQueries(false)}
-                  />
-                )}
-                {autocomplete.isOpen && !showHistory && !showSavedQueries && (
-                  <QueryAutocomplete
-                    suggestions={autocomplete.suggestions}
-                    selectedIndex={autocomplete.selectedIndex}
-                    dark={dark}
-                    onSelect={(i) => {
-                      const result = autocomplete.accept(i);
-                      if (result) {
-                        setDraft(result.newDraft);
-                        setCursorPos(result.newCursor);
-                        requestAnimationFrame(() => {
-                          const ta = queryInputRef.current;
-                          if (ta) {
-                            ta.selectionStart = result.newCursor;
-                            ta.selectionEnd = result.newCursor;
-                            ta.focus();
-                          }
-                        });
-                      }
-                    }}
-                    onClose={autocomplete.dismiss}
-                  />
-                )}
-              </div>
-              <button
-                onClick={executeQuery}
-                disabled={isSearching || draftHasErrors}
-                aria-label="Search"
-                title="Search"
-                className="px-2 py-2.5 rounded border border-transparent bg-copper text-white hover:bg-copper-glow transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="w-4.5 h-4.5"
-                >
-                  <circle cx="11" cy="11" r="8" />
-                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                </svg>
-              </button>
-              <button
-                onClick={isFollowMode ? stopFollowMode : startFollow}
-                disabled={!isFollowMode && draftHasErrors}
-                aria-label={isFollowMode ? "Stop following" : "Follow"}
-                title={isFollowMode ? "Stop following" : "Follow"}
-                className={`px-2 py-2.5 rounded border transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${
-                  isFollowMode
-                    ? "bg-severity-error/15 border-severity-error text-severity-error hover:bg-severity-error/25"
-                    : c(
-                        "border-ink-border text-text-muted hover:border-copper-dim hover:text-copper-dim",
-                        "border-light-border text-light-text-muted hover:border-copper hover:text-copper",
-                      )
-                }`}
-              >
-                {isFollowMode ? (
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="currentColor"
-                    stroke="none"
-                    className="w-4.5 h-4.5"
-                  >
-                    <rect x="6" y="6" width="12" height="12" rx="1" />
-                  </svg>
-                ) : (
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="currentColor"
-                    stroke="none"
-                    className="w-4.5 h-4.5"
-                  >
-                    <polygon points="6,4 20,12 6,20" />
-                  </svg>
-                )}
-              </button>
-              <button
-                onClick={handleShowPlan}
-                disabled={!showPlan && draftHasErrors}
-                aria-label="Explain query plan"
-                title="Explain query plan"
-                className={`px-2 py-2.5 border rounded transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${
-                  showPlan
-                    ? c(
-                        "border-copper text-copper",
-                        "border-copper text-copper",
-                      )
-                    : c(
-                        "border-ink-border text-text-muted hover:border-copper-dim hover:text-copper-dim",
-                        "border-light-border text-light-text-muted hover:border-copper hover:text-copper",
-                      )
-                }`}
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="w-4.5 h-4.5"
-                >
-                  <rect x="3" y="3" width="7" height="5" rx="1" />
-                  <rect x="14" y="8" width="7" height="5" rx="1" />
-                  <rect x="3" y="16" width="7" height="5" rx="1" />
-                  <path d="M10 5.5h2.5a1 1 0 0 1 1 1v4" />
-                  <path d="M14 11.5h-2.5a1 1 0 0 0-1 1v4" />
-                </svg>
-              </button>
-            </div>
-
-            {showHelp && (
-              <QueryHelp
-                dark={dark}
-                onClose={() => setShowHelp(false)}
-                onExample={(ex) => {
-                  setDraft(ex);
-                  setShowHelp(false);
-                }}
-              />
-            )}
-          </div>
+          <QueryBar
+            dark={dark}
+            draft={draft}
+            setDraft={setDraft}
+            setCursorPos={setCursorPos}
+            queryInputRef={queryInputRef}
+            autocomplete={autocomplete}
+            showHistory={showHistory}
+            setShowHistory={setShowHistory}
+            showSavedQueries={showSavedQueries}
+            setShowSavedQueries={setShowSavedQueries}
+            historyEntries={queryHistory.entries}
+            onHistoryRemove={queryHistory.remove}
+            onHistoryClear={queryHistory.clear}
+            savedQueries={savedQueries.data ?? []}
+            onSaveQuery={(name, query) => putSavedQuery.mutate({ name, query })}
+            onDeleteSavedQuery={(name) => deleteSavedQuery.mutate(name)}
+            showHelp={showHelp}
+            setShowHelp={setShowHelp}
+            executeQuery={executeQuery}
+            isSearching={isSearching}
+            isFollowMode={isFollowMode}
+            startFollow={startFollow}
+            stopFollowMode={stopFollowMode}
+            draftHasErrors={draftHasErrors}
+            showPlan={showPlan}
+            handleShowPlan={handleShowPlan}
+          />
 
           {/* Execution Plan Dialog */}
           {showPlan && (
-            <div
-              className="fixed inset-0 z-50 flex items-center justify-center"
-              onClick={() => setShowPlan(false)}
+            <Dialog
+              onClose={() => setShowPlan(false)}
+              ariaLabel="Query Execution Plan"
+              dark={dark}
+              size="lg"
             >
-              <div className="absolute inset-0 bg-black/40" />
-              <div
-                role="dialog"
-                aria-modal="true"
-                aria-label="Query Execution Plan"
-                className={`relative w-[90vw] max-w-4xl h-[80vh] flex flex-col rounded-lg shadow-2xl p-6 ${c("bg-ink-raised border border-ink-border-subtle", "bg-light-raised border border-light-border-subtle")}`}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <button
-                  onClick={() => setShowPlan(false)}
-                  aria-label="Close"
-                  className={`absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded text-lg leading-none transition-colors ${c("text-text-muted hover:text-text-bright", "text-light-text-muted hover:text-light-text-bright")}`}
+              <CloseButton onClick={() => setShowPlan(false)} dark={dark} />
+              {isExplaining ? (
+                <div
+                  className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}
                 >
-                  &times;
-                </button>
-                {isExplaining ? (
-                  <div
-                    className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-                  >
-                    Analyzing query plan...
-                  </div>
-                ) : explainChunks.length === 0 ? (
-                  <div
-                    className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-                  >
-                    Run a query to see the execution plan.
-                  </div>
-                ) : (
-                  <ExplainPanel
-                    chunks={explainChunks}
-                    direction={explainDirection}
-                    totalChunks={explainTotalChunks}
-                    expression={explainExpression}
-                    dark={dark}
-                  />
-                )}
-              </div>
-            </div>
+                  Analyzing query plan...
+                </div>
+              ) : explainChunks.length === 0 ? (
+                <div
+                  className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+                >
+                  Run a query to see the execution plan.
+                </div>
+              ) : (
+                <ExplainPanel
+                  chunks={explainChunks}
+                  direction={explainDirection}
+                  totalChunks={explainTotalChunks}
+                  expression={explainExpression}
+                  dark={dark}
+                />
+              )}
+            </Dialog>
           )}
 
           {/* Settings Dialog */}
@@ -1515,137 +1011,44 @@ function AppContent() {
 
           {/* Results */}
           <div className="flex-1 flex flex-col overflow-hidden">
-            <div
-              className={`flex justify-between items-center px-5 py-2.5 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
-            >
-              <div className="flex items-center gap-3">
-                {!isFollowMode && selectedRecord && (
-                  <button
-                    onClick={() => {
-                      const anchor = selectedRecord.writeTs?.toDate();
-                      if (!anchor) return;
-                      // Double the current time span, centered on the selected record.
-                      const curStart =
-                        rangeStart?.getTime() ?? anchor.getTime() - 30_000;
-                      const curEnd =
-                        rangeEnd?.getTime() ?? anchor.getTime() + 30_000;
-                      const span = curEnd - curStart;
-                      const mid = anchor.getTime();
-                      const newStart = new Date(mid - span);
-                      const newEnd = new Date(mid + span);
-                      setTimeRange("custom");
-                      setRangeStart(newStart);
-                      setRangeEnd(newEnd);
-                      const newQuery = `start=${newStart.toISOString()} end=${newEnd.toISOString()} reverse=${isReversed}`;
-                      setSelectedRecord(selectedRecord);
-                      navigate({
-                        to: "/search",
-                        search: { q: newQuery },
-                        replace: false,
-                      });
-                    }}
-                    aria-label="Zoom out"
-                    title="Zoom out — double time span around selected record"
-                    className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${c(
-                      "text-text-muted hover:text-copper hover:bg-ink-hover",
-                      "text-light-text-muted hover:text-copper hover:bg-light-hover",
-                    )}`}
-                  >
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className="w-4 h-4"
-                    >
-                      <circle cx="11" cy="11" r="8" />
-                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                      <line x1="8" y1="11" x2="14" y2="11" />
-                    </svg>
-                  </button>
-                )}
-                <button
-                  onClick={toggleReverse}
-                  aria-label={
-                    (isFollowMode ? followReversed : isReversed)
-                      ? "Sort oldest first"
-                      : "Sort newest first"
-                  }
-                  title={
-                    (isFollowMode ? followReversed : isReversed)
-                      ? "Newest first (click for oldest first)"
-                      : "Oldest first (click for newest first)"
-                  }
-                  className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${c(
-                    "text-text-muted hover:text-copper hover:bg-ink-hover",
-                    "text-light-text-muted hover:text-copper hover:bg-light-hover",
-                  )}`}
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="w-4 h-4"
-                  >
-                    {(isFollowMode ? followReversed : isReversed) ? (
-                      <>
-                        <path d="M12 5v14" />
-                        <path d="M6 13l6 6 6-6" />
-                      </>
-                    ) : (
-                      <>
-                        <path d="M12 5v14" />
-                        <path d="M6 11l6-6 6 6" />
-                      </>
-                    )}
-                  </svg>
-                </button>
-                <h3
-                  className={`font-display text-[1.15em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
-                >
-                  {isFollowMode ? "Following" : "Results"}
-                </h3>
-                {isFollowMode &&
-                  (reconnecting ? (
-                    <span
-                      className="relative flex h-2 w-2"
-                      title={`Reconnecting (attempt ${reconnectAttempt})...`}
-                    >
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-severity-warn opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-severity-warn" />
-                    </span>
-                  ) : (
-                    <span className="relative flex h-2 w-2" title="Connected">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-severity-info opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-severity-info" />
-                    </span>
-                  ))}
-                <span
-                  role="status"
-                  aria-live="polite"
-                  aria-label={`${isFollowMode ? followRecords.length : records.length}${!isFollowMode && hasMore ? "+" : ""} results`}
-                  className={`font-mono text-[0.8em] px-2 py-0.5 rounded ${c("bg-ink-surface text-text-muted", "bg-light-hover text-light-text-muted")}`}
-                >
-                  {isFollowMode ? followRecords.length : records.length}
-                  {!isFollowMode && hasMore ? "+" : ""}
-                </span>
-              </div>
-              <div className="flex items-center gap-3">
-                <ExportButton records={displayRecords} dark={dark} />
-                {(isFollowMode ? followRecords : records).length > 0 && (
-                  <span
-                    className={`font-mono text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-                  >
-                    {new Date().toLocaleTimeString("en-US", { hour12: false })}
-                  </span>
-                )}
-              </div>
-            </div>
+            <ResultsToolbar
+              dark={dark}
+              isFollowMode={isFollowMode}
+              isReversed={isReversed}
+              followReversed={followReversed}
+              toggleReverse={toggleReverse}
+              selectedRecord={selectedRecord}
+              rangeStart={rangeStart}
+              rangeEnd={rangeEnd}
+              records={records}
+              followRecords={followRecords}
+              hasMore={hasMore}
+              reconnecting={reconnecting}
+              reconnectAttempt={reconnectAttempt}
+              displayRecords={displayRecords}
+              onZoomOut={() => {
+                const anchor = selectedRecord?.writeTs?.toDate();
+                if (!anchor) return;
+                const curStart =
+                  rangeStart?.getTime() ?? anchor.getTime() - 30_000;
+                const curEnd =
+                  rangeEnd?.getTime() ?? anchor.getTime() + 30_000;
+                const span = curEnd - curStart;
+                const mid = anchor.getTime();
+                const newStart = new Date(mid - span);
+                const newEnd = new Date(mid + span);
+                setTimeRange("custom");
+                setRangeStart(newStart);
+                setRangeEnd(newEnd);
+                const newQuery = `start=${newStart.toISOString()} end=${newEnd.toISOString()} reverse=${isReversed}`;
+                setSelectedRecord(selectedRecord);
+                navigate({
+                  to: "/search",
+                  search: { q: newQuery },
+                  replace: false,
+                });
+              }}
+            />
 
             <div className="relative flex-1 overflow-hidden">
               {/* "N new logs" floating badge */}

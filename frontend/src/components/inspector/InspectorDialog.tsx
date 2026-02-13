@@ -1,6 +1,5 @@
-import { useEffect } from "react";
-import FocusTrap from "focus-trap-react";
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { Dialog, DialogTabHeader } from "../Dialog";
 import { StoresIcon, IngestersIcon, MetricsIcon } from "../icons";
 import { StoresPanel } from "./StoresPanel";
 import { IngestersPanel } from "./IngestersPanel";
@@ -32,86 +31,25 @@ export function InspectorDialog({
   onTabChange,
   onClose,
 }: InspectorDialogProps) {
-  const c = useThemeClass(dark);
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
-  }, [onClose]);
-
   return (
-    <FocusTrap focusTrapOptions={{ escapeDeactivates: false, allowOutsideClick: true }}>
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      onClick={onClose}
-    >
-      <div className="absolute inset-0 bg-black/40" />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Inspector"
-        className={`relative w-[90vw] max-w-5xl h-[85vh] flex flex-col rounded-lg shadow-2xl overflow-hidden ${c("bg-ink-raised border border-ink-border-subtle", "bg-light-raised border border-light-border-subtle")}`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div
-          className={`flex items-center gap-4 px-5 py-3 border-b shrink-0 ${c("border-ink-border", "border-light-border")}`}
-        >
-          <h2
-            className={`font-display text-[1.2em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
-          >
-            Inspector
-          </h2>
+    <Dialog onClose={onClose} ariaLabel="Inspector" dark={dark}>
+      <DialogTabHeader
+        title="Inspector"
+        tabs={allTabs}
+        activeTab={tab}
+        onTabChange={(t) => onTabChange(t as InspectorTab)}
+        onClose={onClose}
+        dark={dark}
+      />
 
-          {/* Tabs */}
-          <div className="flex gap-1 ml-4">
-            {allTabs.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                onClick={() => onTabChange(id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-[0.8em] transition-colors ${
-                  tab === id
-                    ? "bg-copper/15 text-copper font-medium"
-                    : c(
-                        "text-text-muted hover:text-text-bright hover:bg-ink-hover",
-                        "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
-                      )
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                {label}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex-1" />
-
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className={`w-7 h-7 flex items-center justify-center rounded text-lg leading-none transition-colors ${c("text-text-muted hover:text-text-bright", "text-light-text-muted hover:text-light-text-bright")}`}
-          >
-            &times;
-          </button>
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-5">
-          {tab === "stores" && <StoresPanel dark={dark} />}
-          {tab === "ingesters" && <IngestersPanel dark={dark} />}
-          {tab !== "stores" && tab !== "ingesters" && (
-            <Placeholder tab={tab} dark={dark} />
-          )}
-        </div>
+      <div className="flex-1 overflow-y-auto p-5">
+        {tab === "stores" && <StoresPanel dark={dark} />}
+        {tab === "ingesters" && <IngestersPanel dark={dark} />}
+        {tab !== "stores" && tab !== "ingesters" && (
+          <Placeholder tab={tab} dark={dark} />
+        )}
       </div>
-    </div>
-    </FocusTrap>
+    </Dialog>
   );
 }
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import FocusTrap from "focus-trap-react";
 import { useThemeClass } from "../hooks/useThemeClass";
+import { Dialog, CloseButton } from "./Dialog";
 import { SpinnerIcon } from "./icons";
 import { ConnectError } from "@connectrpc/connect";
 import { useChangePassword } from "../api/hooks";
@@ -27,15 +27,6 @@ export function ChangePasswordDialog({
   useEffect(() => {
     oldRef.current?.focus();
   }, []);
-
-  // Close on Escape.
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
 
   const c = useThemeClass(dark);
   const isPending = changePassword.isPending;
@@ -72,117 +63,91 @@ export function ChangePasswordDialog({
   };
 
   return (
-    <FocusTrap focusTrapOptions={{ escapeDeactivates: false, allowOutsideClick: true }}>
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      onClick={onClose}
-    >
-      <div className="absolute inset-0 bg-black/40" />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Change Password"
-        className={`relative w-full max-w-sm rounded-lg border p-6 shadow-2xl ${c(
-          "bg-ink-surface border-ink-border",
-          "bg-light-surface border-light-border",
-        )}`}
-        onClick={(e) => e.stopPropagation()}
+    <Dialog onClose={onClose} ariaLabel="Change Password" dark={dark} size="sm">
+      <CloseButton onClick={onClose} dark={dark} />
+
+      <h2
+        className={`font-display text-[1.3em] font-semibold tracking-tight mb-4 ${c("text-text-bright", "text-light-text-bright")}`}
       >
-        <button
-          onClick={onClose}
-          aria-label="Close"
-          className={`absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded text-lg leading-none transition-colors ${c(
-            "text-text-muted hover:text-text-bright",
-            "text-light-text-muted hover:text-light-text-bright",
-          )}`}
-        >
-          &times;
-        </button>
+        Change Password
+      </h2>
 
-        <h2
-          className={`font-display text-[1.3em] font-semibold tracking-tight mb-4 ${c("text-text-bright", "text-light-text-bright")}`}
-        >
-          Change Password
-        </h2>
-
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          {error && (
-            <div
-              className={`text-[0.82em] leading-relaxed px-3 py-2 rounded border ${c(
-                "bg-severity-error/10 border-severity-error/30 text-severity-error",
-                "bg-severity-error/8 border-severity-error/20 text-severity-error",
-              )}`}
-            >
-              {error}
-            </div>
-          )}
-
-          <AuthFormField
-            ref={oldRef}
-            label="Current Password"
-            type="password"
-            value={oldPassword}
-            onChange={setOldPassword}
-            autoComplete="current-password"
-            disabled={isPending}
-            dark={dark}
-          />
-
-          <AuthFormField
-            label="New Password"
-            type="password"
-            value={newPassword}
-            onChange={setNewPassword}
-            autoComplete="new-password"
-            error={mismatch}
-            disabled={isPending}
-            dark={dark}
-          />
-
-          <AuthFormField
-            label="Confirm New Password"
-            type="password"
-            value={confirmPassword}
-            onChange={setConfirmPassword}
-            autoComplete="new-password"
-            error={mismatch}
-            disabled={isPending}
-            dark={dark}
-          />
-          <span
-            className={`text-[0.78em] -mt-3 ${mismatch ? "text-severity-error" : "invisible"}`}
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        {error && (
+          <div
+            className={`text-[0.82em] leading-relaxed px-3 py-2 rounded border ${c(
+              "bg-severity-error/10 border-severity-error/30 text-severity-error",
+              "bg-severity-error/8 border-severity-error/20 text-severity-error",
+            )}`}
           >
-            Passwords do not match
-          </span>
-
-          <div className="flex gap-3 mt-1">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={isPending}
-              className={`flex-1 px-4 py-2.5 text-[0.85em] font-medium rounded border transition-all duration-200 ${c(
-                "border-ink-border text-text-muted hover:text-text-bright hover:border-ink-border-subtle",
-                "border-light-border text-light-text-muted hover:text-light-text-bright hover:border-light-border-subtle",
-              )} ${isPending ? "opacity-50 cursor-not-allowed" : ""}`}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isPending}
-              className={`flex-1 px-4 py-2.5 text-[0.85em] font-medium rounded transition-all duration-200 flex items-center justify-center gap-2 ${
-                isPending
-                  ? "opacity-60 cursor-not-allowed"
-                  : "hover:brightness-110 active:scale-[0.98]"
-              } ${c("bg-copper text-ink", "bg-copper text-white")}`}
-            >
-              {isPending && <SpinnerIcon className="animate-spin h-4 w-4" />}
-              Change Password
-            </button>
+            {error}
           </div>
-        </form>
-      </div>
-    </div>
-    </FocusTrap>
+        )}
+
+        <AuthFormField
+          ref={oldRef}
+          label="Current Password"
+          type="password"
+          value={oldPassword}
+          onChange={setOldPassword}
+          autoComplete="current-password"
+          disabled={isPending}
+          dark={dark}
+        />
+
+        <AuthFormField
+          label="New Password"
+          type="password"
+          value={newPassword}
+          onChange={setNewPassword}
+          autoComplete="new-password"
+          error={mismatch}
+          disabled={isPending}
+          dark={dark}
+        />
+
+        <AuthFormField
+          label="Confirm New Password"
+          type="password"
+          value={confirmPassword}
+          onChange={setConfirmPassword}
+          autoComplete="new-password"
+          error={mismatch}
+          disabled={isPending}
+          dark={dark}
+        />
+        <span
+          className={`text-[0.78em] -mt-3 ${mismatch ? "text-severity-error" : "invisible"}`}
+        >
+          Passwords do not match
+        </span>
+
+        <div className="flex gap-3 mt-1">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isPending}
+            className={`flex-1 px-4 py-2.5 text-[0.85em] font-medium rounded border transition-all duration-200 ${c(
+              "border-ink-border text-text-muted hover:text-text-bright hover:border-ink-border-subtle",
+              "border-light-border text-light-text-muted hover:text-light-text-bright hover:border-light-border-subtle",
+            )} ${isPending ? "opacity-50 cursor-not-allowed" : ""}`}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={isPending}
+            className={`flex-1 px-4 py-2.5 text-[0.85em] font-medium rounded transition-all duration-200 flex items-center justify-center gap-2 ${
+              isPending
+                ? "opacity-60 cursor-not-allowed"
+                : "hover:brightness-110 active:scale-[0.98]"
+            } ${c("bg-copper text-ink", "bg-copper text-white")}`}
+          >
+            {isPending && <SpinnerIcon className="animate-spin h-4 w-4" />}
+            Change Password
+          </button>
+        </div>
+      </form>
+    </Dialog>
   );
 }
