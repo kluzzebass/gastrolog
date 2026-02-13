@@ -39,6 +39,7 @@ import (
 	"gastrolog/internal/ingester/chatterbox"
 	ingesthttp "gastrolog/internal/ingester/http"
 	ingestsyslog "gastrolog/internal/ingester/syslog"
+	ingesttail "gastrolog/internal/ingester/tail"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/repl"
@@ -156,7 +157,7 @@ func run(ctx context.Context, logger *slog.Logger, datadirFlag, configType, serv
 	orch.RegisterDigester(digestlevel.New())
 
 	// Apply configuration with factories.
-	factories := buildFactories(logger)
+	factories := buildFactories(logger, bootstrapDataDir)
 	if err := orch.ApplyConfig(cfg, factories); err != nil {
 		return err
 	}
@@ -241,12 +242,13 @@ func run(ctx context.Context, logger *slog.Logger, datadirFlag, configType, serv
 
 // buildFactories creates the factory maps for all supported component types.
 // The logger is passed to component factories for structured logging.
-func buildFactories(logger *slog.Logger) orchestrator.Factories {
+func buildFactories(logger *slog.Logger, dataDir string) orchestrator.Factories {
 	return orchestrator.Factories{
 		Ingesters: map[string]orchestrator.IngesterFactory{
 			"chatterbox": chatterbox.NewIngester,
 			"http":       ingesthttp.NewFactory(),
 			"syslog":     ingestsyslog.NewFactory(),
+			"tail":       ingesttail.NewFactory(),
 		},
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"file":   chunkfile.NewFactory(),
@@ -256,7 +258,8 @@ func buildFactories(logger *slog.Logger) orchestrator.Factories {
 			"file":   indexfile.NewFactory(),
 			"memory": indexmem.NewFactory(),
 		},
-		Logger: logger,
+		Logger:  logger,
+		DataDir: dataDir,
 	}
 }
 

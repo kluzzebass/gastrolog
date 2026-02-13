@@ -286,6 +286,78 @@ function ChatterboxForm({
   );
 }
 
+function TailForm({
+  params,
+  onChange,
+  dark,
+}: {
+  params: Record<string, string>;
+  onChange: (params: Record<string, string>) => void;
+  dark: boolean;
+}) {
+  const c = useThemeClass(dark);
+
+  // Convert between JSON array and newline-separated text.
+  let text = "";
+  try {
+    const raw = params["paths"];
+    if (raw) text = (JSON.parse(raw) as string[]).join("\n");
+  } catch {
+    // invalid JSON — show raw value so user can fix it
+    text = params["paths"] ?? "";
+  }
+
+  const handleTextChange = (value: string) => {
+    const lines = value
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
+    onChange({ ...params, paths: lines.length > 0 ? JSON.stringify(lines) : "" });
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <label
+          className={`text-[0.8em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}
+        >
+          File Patterns
+        </label>
+        <p
+          className={`text-[0.7em] mb-1.5 ${c("text-text-ghost", "text-light-text-ghost")}`}
+        >
+          Glob patterns for files to tail, one per line. Supports ** for
+          recursive matching.
+        </p>
+        <textarea
+          value={text}
+          onChange={(e) => handleTextChange(e.target.value)}
+          placeholder={"/var/log/app.log\n/var/log/**/*.log"}
+          rows={3}
+          className={`px-2.5 py-1.5 text-[0.85em] font-mono border rounded focus:outline-none transition-colors resize-y ${c(
+            "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
+            "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
+          )}`}
+        />
+      </div>
+
+      <FormField
+        label="Poll Interval"
+        description="How often to re-scan for new files and save bookmarks (default: 30s, 0s to disable)"
+        dark={dark}
+      >
+        <TextInput
+          value={params["poll_interval"] ?? ""}
+          onChange={(v) => onChange({ ...params, poll_interval: v })}
+          placeholder="30s"
+          dark={dark}
+          mono
+        />
+      </FormField>
+    </div>
+  );
+}
+
 export function IngesterParamsForm({
   ingesterType,
   params,
@@ -294,6 +366,10 @@ export function IngesterParamsForm({
 }: IngesterParamsFormProps) {
   if (ingesterType === "chatterbox") {
     return <ChatterboxForm params={params} onChange={onChange} dark={dark} />;
+  }
+
+  if (ingesterType === "tail") {
+    return <TailForm params={params} onChange={onChange} dark={dark} />;
   }
 
   if (ingesterType === "http") {

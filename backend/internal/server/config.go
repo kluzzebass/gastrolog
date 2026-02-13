@@ -524,7 +524,17 @@ func (s *ConfigServer) PutIngester(
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("unknown ingester type: %s", ingCfg.Type))
 	}
 
-	ingester, err := factory(ingCfg.ID, ingCfg.Params, s.factories.Logger)
+	// Inject _state_dir so ingesters can persist state.
+	params := ingCfg.Params
+	if s.factories.DataDir != "" {
+		params = make(map[string]string, len(ingCfg.Params)+1)
+		for k, v := range ingCfg.Params {
+			params[k] = v
+		}
+		params["_state_dir"] = s.factories.DataDir
+	}
+
+	ingester, err := factory(ingCfg.ID, params, s.factories.Logger)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("create ingester: %w", err))
 	}

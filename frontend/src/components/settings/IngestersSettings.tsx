@@ -10,6 +10,7 @@ const ingesterTypes = [
   { value: "chatterbox", label: "chatterbox" },
   { value: "http", label: "http" },
   { value: "syslog", label: "syslog" },
+  { value: "tail", label: "tail" },
 ];
 
 export function IngestersSettings({ dark }: { dark: boolean }) {

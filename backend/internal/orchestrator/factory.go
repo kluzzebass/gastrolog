@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"fmt"
 	"log/slog"
+	"maps"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
@@ -32,6 +33,10 @@ type Factories struct {
 	// Components derive child loggers with their own scope.
 	// If nil, components use discard loggers.
 	Logger *slog.Logger
+
+	// DataDir is the root data directory. When non-empty, it is injected as
+	// the "_state_dir" param so that ingesters can persist state (e.g. bookmarks).
+	DataDir string
 
 	// Note: No QueryEngineFactory is needed because QueryEngine construction
 	// is trivial and uniform (query.New(cm, im, logger)). If QueryEngine ever
@@ -216,12 +221,21 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 			return fmt.Errorf("unknown ingester type: %s", recvCfg.Type)
 		}
 
+		// Inject _state_dir so ingesters can persist state.
+		params := maps.Clone(recvCfg.Params)
+		if params == nil {
+			params = make(map[string]string)
+		}
+		if factories.DataDir != "" {
+			params["_state_dir"] = factories.DataDir
+		}
+
 		// Create ingester with scoped logger.
 		var recvLogger *slog.Logger
 		if factories.Logger != nil {
 			recvLogger = factories.Logger.With("ingester_id", recvCfg.ID)
 		}
-		recv, err := recvFactory(recvCfg.ID, recvCfg.Params, recvLogger)
+		recv, err := recvFactory(recvCfg.ID, params, recvLogger)
 		if err != nil {
 			return fmt.Errorf("create ingester %s: %w", recvCfg.ID, err)
 		}
