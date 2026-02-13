@@ -140,7 +140,7 @@ function AppContent() {
   const [detailWidth, setDetailWidth] = useState(320);
   const [sidebarWidth, setSidebarWidth] = useState(224);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [detailCollapsed, setDetailCollapsed] = useState(false);
+  const [detailCollapsed, setDetailCollapsed] = useState(true);
   const [detailPinned, setDetailPinned] = useState(false);
   const [resizing, setResizing] = useState(false);
 
