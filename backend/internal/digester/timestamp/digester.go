@@ -18,6 +18,9 @@ import (
 //
 // If SourceTS is already set (non-zero), the message is left unchanged.
 // Parsing is best-effort: if nothing matches, the message passes through.
+//
+// Additionally recognized (added for common log frameworks):
+//   - Ctime / BSD:            Fri Feb 13 17:49:50.028 2026
 type Digester struct{}
 
 // New creates a timestamp digester.
@@ -78,6 +81,11 @@ func extractTimestamp(raw []byte) time.Time {
 	// 4. Go/Ruby: YYYY/MM/DD
 	if pos := findYearSlashPrefix(raw); pos >= 0 && pos < bestPos {
 		candidates = append(candidates, candidate{pos, tryGoRuby})
+	}
+
+	// 5. Ctime / BSD: "Fri Feb 13 17:49:50" (weekday + month)
+	if pos := findWeekdayMonthPrefix(raw); pos >= 0 && pos < bestPos {
+		candidates = append(candidates, candidate{pos, tryCtime})
 	}
 
 	for _, c := range candidates {
@@ -364,6 +372,109 @@ func tryGoRuby(raw []byte, pos int) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return ts, true
+}
+
+// weekdayPrefixes maps 3-letter weekday abbreviations for validation.
+var weekdayPrefixes = map[string]bool{
+	"Mon": true, "Tue": true, "Wed": true, "Thu": true,
+	"Fri": true, "Sat": true, "Sun": true,
+}
+
+// findWeekdayMonthPrefix finds the first position matching "Dow Mon " (e.g. "Fri Feb ").
+func findWeekdayMonthPrefix(raw []byte) int {
+	// Need at least "Fri Feb 13 17:49:50" = 19+ bytes from the weekday start.
+	for i := 0; i+19 <= len(raw); i++ {
+		if raw[i+3] == ' ' && isUpperAlpha(raw[i]) && isLowerAlpha(raw[i+1]) && isLowerAlpha(raw[i+2]) {
+			wd := string(raw[i : i+3])
+			if !weekdayPrefixes[wd] {
+				continue
+			}
+			// Check for month at position i+4.
+			if i+7 < len(raw) && isUpperAlpha(raw[i+4]) && isLowerAlpha(raw[i+5]) && isLowerAlpha(raw[i+6]) && raw[i+7] == ' ' {
+				mo := string(raw[i+4 : i+7])
+				if _, ok := monthPrefixes[mo]; ok {
+					return i
+				}
+			}
+		}
+	}
+	return -1
+}
+
+// tryCtime parses ctime / BSD-style timestamps.
+// Formats:
+//   - "Fri Feb 13 17:49:50 2026"       (with year)
+//   - "Fri Feb 13 17:49:50.028 2026"   (with fractional seconds and year)
+//   - "Fri Feb 13 17:49:50"            (no year — infer current)
+//   - "Fri Feb 13 17:49:50.028"        (fractional seconds, no year)
+//   - "Fri Feb  3 17:49:50"            (single-digit day with leading space)
+func tryCtime(raw []byte, pos int) (time.Time, bool) {
+	r := raw[pos:]
+	// Skip weekday + space: "Fri " = 4 bytes.
+	// Remaining is "Feb 13 17:49:50..." which is the syslog BSD format.
+	if len(r) < 20 { // "Fri " + "Feb 13 17:49:50" = 4+15 = 19 min
+		return time.Time{}, false
+	}
+
+	after := r[4:] // skip "Fri "
+	if len(after) < 15 {
+		return time.Time{}, false
+	}
+
+	// Validate syslog-style structure: Mon DD HH:MM:SS
+	if after[3] != ' ' || after[6] != ' ' || after[9] != ':' || after[12] != ':' {
+		return time.Time{}, false
+	}
+
+	// Find end of base timestamp (15 bytes) then check for fractional seconds and year.
+	end := 15
+	hasFrac := false
+	if end < len(after) && after[end] == '.' {
+		hasFrac = true
+		end++
+		for end < len(after) && isDigit(after[end]) {
+			end++
+		}
+	}
+
+	// Check for trailing year: " 2026"
+	hasYear := false
+	if end+5 <= len(after) && after[end] == ' ' &&
+		isDigit(after[end+1]) && isDigit(after[end+2]) && isDigit(after[end+3]) && isDigit(after[end+4]) {
+		hasYear = true
+		end += 5
+	}
+
+	tsStr := string(after[:end])
+
+	// Build format string.
+	layouts := []string{}
+	if hasYear && hasFrac {
+		layouts = append(layouts, "Jan  2 15:04:05.000000000 2006", "Jan 02 15:04:05.000000000 2006")
+	} else if hasYear {
+		layouts = append(layouts, "Jan  2 15:04:05 2006", "Jan 02 15:04:05 2006")
+	} else if hasFrac {
+		layouts = append(layouts, "Jan  2 15:04:05.000000000", "Jan 02 15:04:05.000000000")
+	} else {
+		layouts = append(layouts, "Jan  2 15:04:05", "Jan 02 15:04:05")
+	}
+
+	now := time.Now()
+	for _, layout := range layouts {
+		ts, err := time.Parse(layout, tsStr)
+		if err != nil {
+			continue
+		}
+		if !hasYear {
+			ts = ts.AddDate(now.Year(), 0, 0)
+			if ts.After(now.Add(24 * time.Hour)) {
+				ts = ts.AddDate(-1, 0, 0)
+			}
+		}
+		return ts, true
+	}
+
+	return time.Time{}, false
 }
 
 func isDigit(b byte) bool      { return b >= '0' && b <= '9' }

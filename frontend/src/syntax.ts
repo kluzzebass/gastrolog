@@ -233,7 +233,7 @@ const RE_SEV =
 const RE_KV =
   /(?:^|[\s,;:()\[\]{}])([a-zA-Z_][a-zA-Z0-9_.]*?)=(?:"[^"]*"|'[^']*'|[^\s,;)\]}"'=&{[]+)/g;
 const RE_TS =
-  /\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?|\[\d{2}\/[A-Z][a-z]{2}\/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{4}\]/g;
+  /\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?|\[\d{2}\/[A-Z][a-z]{2}\/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{4}\]|\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}|(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) [A-Z][a-z]{2} [ \d]\d \d{2}:\d{2}:\d{2}(?:\.\d+)?(?:\s\d{4})?|[A-Z][a-z]{2} [ \d]\d \d{2}:\d{2}:\d{2}/g;
 const RE_URL = /\bhttps?:\/\/[^\s"'<>]+/g;
 const RE_PATH = /(?:\/[\w.@-]+){2,}(?:\/[\w.@-]*)?|\b[a-zA-Z]:\\[\w.\\-]+/g;
 const RE_UUID =
@@ -433,7 +433,7 @@ function highlightKVPlain(text: string): SyntaxSpan[] {
     intervals.push({ start: keyStart, end: keyEnd, color: C_DIM });
   }
 
-  // 3. Timestamps: ISO and CLF.
+  // 3. Timestamps: ISO, CLF, Go/Ruby, ctime, syslog BSD.
   reset(RE_TS);
   while ((m = RE_TS.exec(text)) !== null) {
     intervals.push({

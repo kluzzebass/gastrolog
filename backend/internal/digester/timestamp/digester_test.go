@@ -213,6 +213,52 @@ func TestDigest_GoRuby(t *testing.T) {
 	}
 }
 
+func TestDigest_Ctime(t *testing.T) {
+	tests := []struct {
+		name      string
+		raw       string
+		wantMonth time.Month
+		wantDay   int
+		wantYear  int // 0 means check current year
+	}{
+		{"with year", "Fri Feb 13 17:49:50 2026 msg", time.February, 13, 2026},
+		{"frac with year", "Fri Feb 13 17:49:50.028 2026 msg", time.February, 13, 2026},
+		{"single-digit day", "Thu Jan  2 15:04:05 2026 msg", time.January, 2, 2026},
+		{"no year", "Sat Dec 25 12:00:00 merry christmas", time.December, 25, 0},
+		{"mid-line", "myapp: Fri Feb 13 17:49:50 2026 something", time.February, 13, 2026},
+	}
+
+	now := time.Now()
+	d := New()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := &orchestrator.IngestMessage{
+				Raw: []byte(tt.raw),
+			}
+			d.Digest(msg)
+			if msg.SourceTS.IsZero() {
+				t.Fatal("expected SourceTS to be set")
+			}
+			if msg.SourceTS.Month() != tt.wantMonth {
+				t.Errorf("month: got %v, want %v", msg.SourceTS.Month(), tt.wantMonth)
+			}
+			if msg.SourceTS.Day() != tt.wantDay {
+				t.Errorf("day: got %d, want %d", msg.SourceTS.Day(), tt.wantDay)
+			}
+			if tt.wantYear != 0 {
+				if msg.SourceTS.Year() != tt.wantYear {
+					t.Errorf("year: got %d, want %d", msg.SourceTS.Year(), tt.wantYear)
+				}
+			} else {
+				y := msg.SourceTS.Year()
+				if y != now.Year() && y != now.Year()-1 {
+					t.Errorf("unexpected year %d", y)
+				}
+			}
+		})
+	}
+}
+
 func TestDigest_SkipsNonZeroSourceTS(t *testing.T) {
 	d := New()
 	existing := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
