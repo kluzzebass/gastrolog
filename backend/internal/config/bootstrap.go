@@ -40,8 +40,9 @@ func DefaultConfig(dataDir string) *Config {
 		Stores:    []StoreConfig{defaultStore},
 		Ingesters: []IngesterConfig{
 			{
-				ID:   "chatterbox",
-				Type: "chatterbox",
+				ID:      "chatterbox",
+				Type:    "chatterbox",
+				Enabled: true,
 				Params: map[string]string{
 					"minInterval": "1s",
 					"maxInterval": "5s",

@@ -151,12 +151,14 @@ export function usePutIngester() {
     mutationFn: async (args: {
       id: string;
       type: string;
+      enabled: boolean;
       params: Record<string, string>;
     }) => {
       await configClient.putIngester({
         config: {
           id: args.id,
           type: args.type,
+          enabled: args.enabled,
           params: args.params,
         },
       });

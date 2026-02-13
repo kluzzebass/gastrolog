@@ -524,9 +524,10 @@ func copyStoreConfig(st config.StoreConfig) config.StoreConfig {
 
 func copyIngesterConfig(ing config.IngesterConfig) config.IngesterConfig {
 	return config.IngesterConfig{
-		ID:     ing.ID,
-		Type:   ing.Type,
-		Params: copyParams(ing.Params),
+		ID:      ing.ID,
+		Type:    ing.Type,
+		Enabled: ing.Enabled,
+		Params:  copyParams(ing.Params),
 	}
 }
 

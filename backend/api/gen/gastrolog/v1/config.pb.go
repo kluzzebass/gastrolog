@@ -222,6 +222,7 @@ type IngesterConfig struct {
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
 	Params        map[string]string      `protobuf:"bytes,3,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Enabled       bool                   `protobuf:"varint,4,opt,name=enabled,proto3" json:"enabled,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -275,6 +276,13 @@ func (x *IngesterConfig) GetParams() map[string]string {
 		return x.Params
 	}
 	return nil
+}
+
+func (x *IngesterConfig) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
 }
 
 type FilterConfig struct {
@@ -2680,11 +2688,12 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\tretention\x18\x06 \x01(\tR\tretention\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb1\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xcb\x01\n" +
 	"\x0eIngesterConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12@\n" +
-	"\x06params\x18\x03 \x03(\v2(.gastrolog.v1.IngesterConfig.ParamsEntryR\x06params\x1a9\n" +
+	"\x06params\x18\x03 \x03(\v2(.gastrolog.v1.IngesterConfig.ParamsEntryR\x06params\x12\x18\n" +
+	"\aenabled\x18\x04 \x01(\bR\aenabled\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\".\n" +

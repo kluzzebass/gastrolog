@@ -184,6 +184,11 @@ export class IngesterConfig extends Message<IngesterConfig> {
    */
   params: { [key: string]: string } = {};
 
+  /**
+   * @generated from field: bool enabled = 4;
+   */
+  enabled = false;
+
   constructor(data?: PartialMessage<IngesterConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -195,6 +200,7 @@ export class IngesterConfig extends Message<IngesterConfig> {
     { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
+    { no: 4, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): IngesterConfig {

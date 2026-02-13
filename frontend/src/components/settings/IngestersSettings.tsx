@@ -25,7 +25,7 @@ export function IngestersSettings({ dark }: { dark: boolean }) {
   const [adding, setAdding] = useState(false);
 
   const [edits, setEdits] = useState<
-    Record<string, { params: Record<string, string> }>
+    Record<string, { enabled: boolean; params: Record<string, string> }>
   >({});
 
   const [newId, setNewId] = useState("");
@@ -34,20 +34,36 @@ export function IngestersSettings({ dark }: { dark: boolean }) {
 
   const ingesters = config?.ingesters ?? [];
 
-  const getEdit = (ing: { id: string; params: Record<string, string> }) => {
+  const getEdit = (ing: {
+    id: string;
+    enabled: boolean;
+    params: Record<string, string>;
+  }) => {
     const existing = edits[ing.id];
     if (existing) return existing;
-    return { params: { ...ing.params } };
+    return { enabled: ing.enabled, params: { ...ing.params } };
   };
 
-  const setEdit = (id: string, params: Record<string, string>) => {
-    setEdits((prev) => ({ ...prev, [id]: { params } }));
+  const setEdit = (
+    id: string,
+    update: Partial<{ enabled: boolean; params: Record<string, string> }>,
+  ) => {
+    setEdits((prev) => {
+      const current = prev[id] ?? getEdit(ingesters.find((i) => i.id === id)!);
+      return { ...prev, [id]: { ...current, ...update } };
+    });
   };
 
   const handleSave = async (id: string, type: string) => {
-    const edit = getEdit(ingesters.find((i) => i.id === id)!);
+    const ing = ingesters.find((i) => i.id === id)!;
+    const edit = getEdit(ing);
     try {
-      await putIngester.mutateAsync({ id, type, params: edit.params });
+      await putIngester.mutateAsync({
+        id,
+        type,
+        enabled: edit.enabled,
+        params: edit.params,
+      });
       setEdits((prev) => {
         const next = { ...prev };
         delete next[id];
@@ -82,6 +98,7 @@ export function IngestersSettings({ dark }: { dark: boolean }) {
       await putIngester.mutateAsync({
         id: newId.trim(),
         type: newType,
+        enabled: true,
         params: newParams,
       });
       addToast(`Ingester "${newId.trim()}" created`, "info");
@@ -184,23 +201,73 @@ export function IngestersSettings({ dark }: { dark: boolean }) {
               expanded={expanded === ing.id}
               onToggle={() => setExpanded(expanded === ing.id ? null : ing.id)}
               onDelete={() => handleDelete(ing.id)}
+              headerRight={
+                !ing.enabled ? (
+                  <span
+                    className={`px-1.5 py-0.5 text-[0.8em] font-mono rounded ${c(
+                      "bg-ink-hover text-text-ghost",
+                      "bg-light-hover text-light-text-ghost",
+                    )}`}
+                  >
+                    disabled
+                  </span>
+                ) : undefined
+              }
+              footer={
+                <button
+                  onClick={() => handleSave(ing.id, ing.type)}
+                  disabled={putIngester.isPending}
+                  className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
+                >
+                  {putIngester.isPending ? "Saving..." : "Save"}
+                </button>
+              }
             >
               <div className="flex flex-col gap-3">
+                <div
+                  className="flex items-center gap-2 cursor-pointer select-none"
+                  onClick={() => setEdit(ing.id, { enabled: !edit.enabled })}
+                >
+                  <button
+                    type="button"
+                    className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                      edit.enabled
+                        ? "bg-copper border-copper text-white"
+                        : c(
+                            "border-ink-border bg-ink-well",
+                            "border-light-border bg-light-well",
+                          )
+                    }`}
+                  >
+                    {edit.enabled && (
+                      <svg
+                        width="10"
+                        height="10"
+                        viewBox="0 0 10 10"
+                        fill="none"
+                      >
+                        <path
+                          d="M2 5L4 7L8 3"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    )}
+                  </button>
+                  <span
+                    className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
+                  >
+                    Enabled
+                  </span>
+                </div>
                 <IngesterParamsForm
                   ingesterType={ing.type}
                   params={edit.params}
-                  onChange={(p) => setEdit(ing.id, p)}
+                  onChange={(p) => setEdit(ing.id, { params: p })}
                   dark={dark}
                 />
-                <div className="flex justify-end pt-2">
-                  <button
-                    onClick={() => handleSave(ing.id, ing.type)}
-                    disabled={putIngester.isPending}
-                    className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
-                  >
-                    {putIngester.isPending ? "Saving..." : "Save"}
-                  </button>
-                </div>
               </div>
             </SettingsCard>
           );

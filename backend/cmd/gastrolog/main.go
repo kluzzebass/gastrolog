@@ -33,6 +33,7 @@ import (
 	configsqlite "gastrolog/internal/config/sqlite"
 	"gastrolog/internal/datadir"
 	digestlevel "gastrolog/internal/digester/level"
+	digesttimestamp "gastrolog/internal/digester/timestamp"
 	"gastrolog/internal/index"
 	indexfile "gastrolog/internal/index/file"
 	indexmem "gastrolog/internal/index/memory"
@@ -156,6 +157,7 @@ func run(ctx context.Context, logger *slog.Logger, datadirFlag, configType, serv
 
 	// Register digesters (message enrichment pipeline).
 	orch.RegisterDigester(digestlevel.New())
+	orch.RegisterDigester(digesttimestamp.New())
 
 	// Apply configuration with factories.
 	factories := buildFactories(logger, bootstrapDataDir)

@@ -102,6 +102,7 @@ message IngesterConfig {
   string id = 1;
   string type = 2;
   map<string, string> params = 3;
+  bool enabled = 4;
 }
 
 message FilterConfig {

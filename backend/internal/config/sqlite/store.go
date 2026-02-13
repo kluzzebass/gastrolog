@@ -388,11 +388,11 @@ func (s *Store) DeleteStore(ctx context.Context, id string) error {
 
 func (s *Store) GetIngester(ctx context.Context, id string) (*config.IngesterConfig, error) {
 	row := s.db.QueryRowContext(ctx,
-		"SELECT ingester_id, type, params FROM ingesters WHERE ingester_id = ?", id)
+		"SELECT ingester_id, type, params, enabled FROM ingesters WHERE ingester_id = ?", id)
 
 	var ing config.IngesterConfig
 	var paramsJSON *string
-	err := row.Scan(&ing.ID, &ing.Type, &paramsJSON)
+	err := row.Scan(&ing.ID, &ing.Type, &paramsJSON, &ing.Enabled)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -409,7 +409,7 @@ func (s *Store) GetIngester(ctx context.Context, id string) (*config.IngesterCon
 
 func (s *Store) ListIngesters(ctx context.Context) ([]config.IngesterConfig, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT ingester_id, type, params FROM ingesters")
+		"SELECT ingester_id, type, params, enabled FROM ingesters")
 	if err != nil {
 		return nil, fmt.Errorf("list ingesters: %w", err)
 	}
@@ -419,7 +419,7 @@ func (s *Store) ListIngesters(ctx context.Context) ([]config.IngesterConfig, err
 	for rows.Next() {
 		var ing config.IngesterConfig
 		var paramsJSON *string
-		if err := rows.Scan(&ing.ID, &ing.Type, &paramsJSON); err != nil {
+		if err := rows.Scan(&ing.ID, &ing.Type, &paramsJSON, &ing.Enabled); err != nil {
 			return nil, fmt.Errorf("scan ingester: %w", err)
 		}
 		if paramsJSON != nil {
@@ -444,12 +444,13 @@ func (s *Store) PutIngester(ctx context.Context, ing config.IngesterConfig) erro
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO ingesters (ingester_id, type, params)
-		VALUES (?, ?, ?)
+		INSERT INTO ingesters (ingester_id, type, params, enabled)
+		VALUES (?, ?, ?, ?)
 		ON CONFLICT(ingester_id) DO UPDATE SET
 			type = excluded.type,
-			params = excluded.params
-	`, ing.ID, ing.Type, paramsJSON)
+			params = excluded.params,
+			enabled = excluded.enabled
+	`, ing.ID, ing.Type, paramsJSON, ing.Enabled)
 	if err != nil {
 		return fmt.Errorf("put ingester %q: %w", ing.ID, err)
 	}

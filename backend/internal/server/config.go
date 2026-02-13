@@ -84,9 +84,10 @@ func (s *ConfigServer) GetConfig(
 		if err == nil {
 			for _, ing := range ingesters {
 				resp.Ingesters = append(resp.Ingesters, &apiv1.IngesterConfig{
-					Id:     ing.ID,
-					Type:   ing.Type,
-					Params: ing.Params,
+					Id:      ing.ID,
+					Type:    ing.Type,
+					Params:  ing.Params,
+					Enabled: ing.Enabled,
 				})
 			}
 		}
@@ -498,12 +499,13 @@ func (s *ConfigServer) PutIngester(
 	}
 
 	ingCfg := config.IngesterConfig{
-		ID:     req.Msg.Config.Id,
-		Type:   req.Msg.Config.Type,
-		Params: req.Msg.Config.Params,
+		ID:      req.Msg.Config.Id,
+		Type:    req.Msg.Config.Type,
+		Enabled: req.Msg.Config.Enabled,
+		Params:  req.Msg.Config.Params,
 	}
 
-	// Check if ingester already exists — if so, remove it first so we can re-create.
+	// Check if ingester already exists in runtime — if so, remove it first.
 	existing := false
 	for _, id := range s.orch.ListIngesters() {
 		if id == ingCfg.ID {
@@ -518,32 +520,35 @@ func (s *ConfigServer) PutIngester(
 		}
 	}
 
-	// Look up factory and create the ingester.
-	factory, ok := s.factories.Ingesters[ingCfg.Type]
-	if !ok {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("unknown ingester type: %s", ingCfg.Type))
-	}
-
-	// Inject _state_dir so ingesters can persist state.
-	params := ingCfg.Params
-	if s.factories.DataDir != "" {
-		params = make(map[string]string, len(ingCfg.Params)+1)
-		for k, v := range ingCfg.Params {
-			params[k] = v
+	// Only create and register the ingester if enabled.
+	if ingCfg.Enabled {
+		// Look up factory and create the ingester.
+		factory, ok := s.factories.Ingesters[ingCfg.Type]
+		if !ok {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("unknown ingester type: %s", ingCfg.Type))
 		}
-		params["_state_dir"] = s.factories.DataDir
+
+		// Inject _state_dir so ingesters can persist state.
+		params := ingCfg.Params
+		if s.factories.DataDir != "" {
+			params = make(map[string]string, len(ingCfg.Params)+1)
+			for k, v := range ingCfg.Params {
+				params[k] = v
+			}
+			params["_state_dir"] = s.factories.DataDir
+		}
+
+		ingester, err := factory(ingCfg.ID, params, s.factories.Logger)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("create ingester: %w", err))
+		}
+
+		if err := s.orch.AddIngester(ingCfg.ID, ingester); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("add ingester: %w", err))
+		}
 	}
 
-	ingester, err := factory(ingCfg.ID, params, s.factories.Logger)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("create ingester: %w", err))
-	}
-
-	if err := s.orch.AddIngester(ingCfg.ID, ingester); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("add ingester: %w", err))
-	}
-
-	// Persist to config store.
+	// Persist to config store (always, even when disabled).
 	if err := s.cfgStore.PutIngester(ctx, ingCfg); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}

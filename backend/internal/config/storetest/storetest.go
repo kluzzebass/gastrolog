@@ -494,9 +494,10 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		ctx := context.Background()
 
 		ing := config.IngesterConfig{
-			ID:     "syslog1",
-			Type:   "syslog-udp",
-			Params: map[string]string{"port": "514"},
+			ID:      "syslog1",
+			Type:    "syslog-udp",
+			Enabled: true,
+			Params:  map[string]string{"port": "514"},
 		}
 
 		if err := s.PutIngester(ctx, ing); err != nil {
@@ -515,6 +516,9 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 		if got.Type != "syslog-udp" {
 			t.Errorf("Type: expected %q, got %q", "syslog-udp", got.Type)
+		}
+		if !got.Enabled {
+			t.Error("Enabled: expected true, got false")
 		}
 		if got.Params["port"] != "514" {
 			t.Errorf("Params[port]: expected %q, got %q", "514", got.Params["port"])
@@ -647,10 +651,10 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if err := s.PutStore(ctx, config.StoreConfig{ID: "main", Type: "file", Filter: config.StringPtr("*"), Policy: config.StringPtr("fast")}); err != nil {
 			t.Fatalf("PutStore: %v", err)
 		}
-		if err := s.PutIngester(ctx, config.IngesterConfig{ID: "sys1", Type: "syslog-udp", Params: map[string]string{"port": "514"}}); err != nil {
+		if err := s.PutIngester(ctx, config.IngesterConfig{ID: "sys1", Type: "syslog-udp", Enabled: true, Params: map[string]string{"port": "514"}}); err != nil {
 			t.Fatalf("PutIngester: %v", err)
 		}
-		if err := s.PutIngester(ctx, config.IngesterConfig{ID: "file1", Type: "file", Params: map[string]string{"path": "/var/log/app.log"}}); err != nil {
+		if err := s.PutIngester(ctx, config.IngesterConfig{ID: "file1", Type: "file", Enabled: true, Params: map[string]string{"path": "/var/log/app.log"}}); err != nil {
 			t.Fatalf("PutIngester: %v", err)
 		}
 

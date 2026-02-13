@@ -276,6 +276,10 @@ type IngesterConfig struct {
 	// Type identifies the ingester implementation (e.g., "syslog-udp", "file").
 	Type string `json:"type"`
 
+	// Enabled controls whether the ingester is started. When false, the
+	// configuration is preserved but the ingester does not run.
+	Enabled bool `json:"enabled"`
+
 	// Params contains type-specific configuration as opaque string key-value pairs.
 	// Parsing and validation are the responsibility of the factory that consumes
 	// the params. There is no schema enforcement at the ConfigStore level.
