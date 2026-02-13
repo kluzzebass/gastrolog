@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import type { ChunkMeta } from "../../api/gen/gastrolog/v1/store_pb";
+import { formatBytes, formatDurationMs } from "../../utils/units";
 
 interface ChunkTimelineProps {
   chunks: ChunkMeta[];
@@ -308,7 +309,7 @@ function ChunkTooltip({
         <span>
           {formatTimeShort(start)} &rarr; {formatTimeShort(end)}
         </span>
-        <span>{formatDuration(duration)}</span>
+        <span>{formatDurationMs(duration)}</span>
         <span className="font-mono">
           {Number(chunk.recordCount).toLocaleString()} records
         </span>
@@ -405,25 +406,3 @@ function formatTimeShort(d: Date): string {
   });
 }
 
-function formatDuration(ms: number): string {
-  if (ms < 1_000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1_000).toFixed(0)}s`;
-  if (ms < 3600_000) return `${(ms / 60_000).toFixed(0)}m`;
-  if (ms < 86400_000) {
-    const h = Math.floor(ms / 3600_000);
-    const m = Math.floor((ms % 3600_000) / 60_000);
-    return m > 0 ? `${h}h ${m}m` : `${h}h`;
-  }
-  const d = Math.floor(ms / 86400_000);
-  const h = Math.floor((ms % 86400_000) / 3600_000);
-  return h > 0 ? `${d}d ${h}h` : `${d}d`;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024)
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}

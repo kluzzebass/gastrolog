@@ -8,6 +8,7 @@ import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, SelectInput } from "./FormField";
 import { StoreParamsForm } from "./StoreParamsForm";
+import { PrimaryButton } from "./Buttons";
 
 export function StoresSettings({ dark }: { dark: boolean }) {
   const c = useThemeClass(dark);
@@ -222,13 +223,12 @@ export function StoresSettings({ dark }: { dark: boolean }) {
             onDelete={() => handleDelete(store.id)}
             deleteLabel="Delete"
             footer={
-              <button
+              <PrimaryButton
                 onClick={() => handleSave(store.id, store.type)}
                 disabled={putStore.isPending}
-                className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
               >
                 {putStore.isPending ? "Saving..." : "Save"}
-              </button>
+              </PrimaryButton>
             }
             status={
               warnings.length > 0 ? (

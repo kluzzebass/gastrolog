@@ -1,5 +1,6 @@
 import { FormField, TextInput, NumberInput } from "./FormField";
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { Checkbox } from "./Checkbox";
 
 interface IngesterParamsFormProps {
   ingesterType: string;
@@ -150,31 +151,11 @@ function ChatterboxForm({
                   isOn ? "bg-light-surface" : "bg-light-well/50",
                 )}`}
               >
-                {/* Checkbox */}
-                <button
-                  type="button"
-                  onClick={() => toggleFormat(f.id)}
-                  className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
-                    isOn
-                      ? "bg-copper border-copper text-white"
-                      : c(
-                          "border-ink-border bg-ink-well",
-                          "border-light-border bg-light-well",
-                        )
-                  }`}
-                >
-                  {isOn && (
-                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                      <path
-                        d="M2 5L4 7L8 3"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  )}
-                </button>
+                <Checkbox
+                  checked={isOn}
+                  onChange={() => toggleFormat(f.id)}
+                  dark={dark}
+                />
 
                 {/* Label + description */}
                 <div className="flex-1 min-w-0">

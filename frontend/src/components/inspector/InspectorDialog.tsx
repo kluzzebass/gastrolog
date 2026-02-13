@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import FocusTrap from "focus-trap-react";
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { StoresIcon, IngestersIcon, MetricsIcon } from "../icons";
 import { StoresPanel } from "./StoresPanel";
 import { IngestersPanel } from "./IngestersPanel";
 
@@ -131,58 +132,3 @@ function Placeholder({ tab, dark }: { tab: InspectorTab; dark: boolean }) {
   );
 }
 
-// --- Tab Icons ---
-
-function StoresIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <ellipse cx="12" cy="5" rx="9" ry="3" />
-      <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
-      <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
-    </svg>
-  );
-}
-
-function IngestersIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M12 3v12" />
-      <path d="M8 11l4 4 4-4" />
-      <path d="M3 17h18" />
-      <path d="M3 21h18" />
-    </svg>
-  );
-}
-
-function MetricsIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M3 3v18h18" />
-      <path d="M7 17l4-8 4 4 5-9" />
-    </svg>
-  );
-}

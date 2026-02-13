@@ -7,6 +7,8 @@ import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput } from "./FormField";
+import { PrimaryButton } from "./Buttons";
+import { UsedByStatus, refsFor } from "./UsedByStatus";
 
 function FilterDescription({ dark }: { dark: boolean }) {
   const c = useThemeClass(dark);
@@ -82,7 +84,7 @@ export function FiltersSettings({ dark }: { dark: boolean }) {
   };
 
   const handleDelete = async (id: string) => {
-    const referencedBy = stores.filter((s) => s.filter === id).map((s) => s.id);
+    const referencedBy = refsFor(stores, "filter", id);
     if (referencedBy.length > 0) {
       addToast(
         `Filter "${id}" is referenced by store(s): ${referencedBy.join(", ")}`,
@@ -117,8 +119,6 @@ export function FiltersSettings({ dark }: { dark: boolean }) {
     }
   };
 
-  const refsFor = (filterId: string) =>
-    stores.filter((s) => s.filter === filterId).map((s) => s.id);
 
   return (
     <SettingsSection
@@ -165,7 +165,7 @@ export function FiltersSettings({ dark }: { dark: boolean }) {
 
       {Object.entries(filters).map(([id]) => {
         const edit = getEdit(id);
-        const refs = refsFor(id);
+        const refs = refsFor(stores, "filter", id);
         return (
           <SettingsCard
             key={id}
@@ -175,23 +175,14 @@ export function FiltersSettings({ dark }: { dark: boolean }) {
             onToggle={() => setExpanded(expanded === id ? null : id)}
             onDelete={() => handleDelete(id)}
             footer={
-              <button
+              <PrimaryButton
                 onClick={() => handleSave(id)}
                 disabled={putFilter.isPending}
-                className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
               >
                 {putFilter.isPending ? "Saving..." : "Save"}
-              </button>
+              </PrimaryButton>
             }
-            status={
-              refs.length > 0 ? (
-                <span
-                  className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-                >
-                  used by: {refs.join(", ")}
-                </span>
-              ) : undefined
-            }
+            status={<UsedByStatus dark={dark} refs={refs} />}
           >
             <div className="flex flex-col gap-3">
               <FormField

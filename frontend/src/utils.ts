@@ -53,12 +53,7 @@ export function relativeTime(date: Date): string {
   return `${days}d ago`;
 }
 
-/** Format byte size to human-readable string. */
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
+export { formatBytes } from "./utils/units";
 
 export type FieldSummary = {
   key: string;

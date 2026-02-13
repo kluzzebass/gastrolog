@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { clickableProps } from "../../utils";
 import { useIngesters, useIngesterStatus } from "../../api/hooks";
+import { formatBytes } from "../../utils/units";
 
 export function IngestersPanel({ dark }: { dark: boolean }) {
   const c = useThemeClass(dark);
@@ -194,11 +195,3 @@ function IngesterDetail({ id, dark }: { id: string; dark: boolean }) {
   );
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024)
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}

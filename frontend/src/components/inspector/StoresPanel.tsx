@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { clickableProps } from "../../utils";
 import { useStores, useChunks, useIndexes } from "../../api/hooks";
+import { formatBytes } from "../../utils/units";
 import { ChunkTimeline } from "./ChunkTimeline";
 
 export function StoresPanel({ dark }: { dark: boolean }) {
@@ -337,11 +338,3 @@ function formatTime(date: Date): string {
   });
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024)
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}

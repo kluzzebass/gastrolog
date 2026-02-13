@@ -1,4 +1,5 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { PrimaryButton, GhostButton } from "./Buttons";
 
 interface AddFormCardProps {
   dark: boolean;
@@ -23,22 +24,12 @@ export function AddFormCard({
       <div className="flex flex-col gap-3">
         {children}
         <div className="flex justify-end gap-2 pt-2">
-          <button
-            onClick={onCancel}
-            className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
-              "border-ink-border text-text-muted hover:bg-ink-hover",
-              "border-light-border text-light-text-muted hover:bg-light-hover",
-            )}`}
-          >
+          <GhostButton onClick={onCancel} dark={dark} bordered>
             Cancel
-          </button>
-          <button
-            onClick={onCreate}
-            disabled={isPending}
-            className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
-          >
+          </GhostButton>
+          <PrimaryButton onClick={onCreate} disabled={isPending}>
             {isPending ? "Creating..." : "Create"}
-          </button>
+          </PrimaryButton>
         </div>
       </div>
     </div>

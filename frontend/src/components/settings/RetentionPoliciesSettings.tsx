@@ -11,77 +11,14 @@ import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, NumberInput } from "./FormField";
-
-// Format bytes for display.
-function formatBytes(b: bigint): string {
-  if (b === 0n) return "";
-  if (b >= 1073741824n && b % 1073741824n === 0n) return `${b / 1073741824n}GB`;
-  if (b >= 1048576n && b % 1048576n === 0n) return `${b / 1048576n}MB`;
-  if (b >= 1024n && b % 1024n === 0n) return `${b / 1024n}KB`;
-  return `${b}B`;
-}
-
-// Format seconds as human-readable duration.
-function formatDuration(s: bigint): string {
-  if (s === 0n) return "";
-  const days = s / 86400n;
-  const hours = (s % 86400n) / 3600n;
-  const mins = (s % 3600n) / 60n;
-  if (days > 0n && hours === 0n && mins === 0n) return `${days * 24n}h`;
-  if (days > 0n && mins === 0n) return `${days * 24n + hours}h`;
-  const totalHours = days * 24n + hours;
-  if (totalHours > 0n && mins === 0n) return `${totalHours}h`;
-  if (totalHours > 0n) return `${totalHours}h${mins}m`;
-  if (mins > 0n) return `${mins}m`;
-  return `${s}s`;
-}
-
-// Parse a byte string like "10GB" to bigint.
-function parseBytes(s: string): bigint {
-  s = s.trim().toUpperCase();
-  if (!s) return 0n;
-  const match = s.match(/^(\d+)\s*(GB|MB|KB|B)?$/);
-  if (!match) return 0n;
-  const n = BigInt(match[1]!);
-  switch (match[2]) {
-    case "GB":
-      return n * 1073741824n;
-    case "MB":
-      return n * 1048576n;
-    case "KB":
-      return n * 1024n;
-    default:
-      return n;
-  }
-}
-
-// Parse a duration string like "720h" or "30d" to seconds as bigint.
-function parseDuration(s: string): bigint {
-  s = s.trim().toLowerCase();
-  if (!s) return 0n;
-  let total = 0n;
-  const re = /(\d+)\s*(d|h|m|s)/g;
-  let match;
-  while ((match = re.exec(s)) !== null) {
-    const n = BigInt(match[1]!);
-    switch (match[2]) {
-      case "d":
-        total += n * 86400n;
-        break;
-      case "h":
-        total += n * 3600n;
-        break;
-      case "m":
-        total += n * 60n;
-        break;
-      case "s":
-        total += n;
-        break;
-    }
-  }
-  if (total === 0n && /^\d+$/.test(s)) total = BigInt(s);
-  return total;
-}
+import { PrimaryButton } from "./Buttons";
+import { UsedByStatus, refsFor } from "./UsedByStatus";
+import {
+  formatBytesBigint as formatBytes,
+  formatDuration,
+  parseBytes,
+  parseDuration,
+} from "../../utils/units";
 
 interface PolicyEdit {
   maxAge: string;
@@ -180,8 +117,6 @@ export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
     }
   };
 
-  const refsFor = (policyId: string) =>
-    stores.filter((s) => s.retention === policyId).map((s) => s.id);
 
   return (
     <SettingsSection
@@ -251,7 +186,7 @@ export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
 
       {Object.entries(policies).map(([id, pol]) => {
         const edit = getEdit(id);
-        const refs = refsFor(id);
+        const refs = refsFor(stores, "retention", id);
         return (
           <SettingsCard
             key={id}
@@ -261,23 +196,14 @@ export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
             onToggle={() => setExpanded(expanded === id ? null : id)}
             onDelete={() => handleDelete(id)}
             footer={
-              <button
+              <PrimaryButton
                 onClick={() => handleSave(id)}
                 disabled={putPolicy.isPending}
-                className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
               >
                 {putPolicy.isPending ? "Saving..." : "Save"}
-              </button>
+              </PrimaryButton>
             }
-            status={
-              refs.length > 0 ? (
-                <span
-                  className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-                >
-                  used by: {refs.join(", ")}
-                </span>
-              ) : undefined
-            }
+            status={<UsedByStatus dark={dark} refs={refs} />}
           >
             <div className="flex flex-col gap-3">
               <div className="grid grid-cols-3 gap-3">

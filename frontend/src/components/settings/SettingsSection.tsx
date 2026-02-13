@@ -1,4 +1,5 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { PrimaryButton } from "./Buttons";
 
 interface SettingsSectionProps {
   title: string;
@@ -43,12 +44,9 @@ export function SettingsSection({
         >
           {title}
         </h2>
-        <button
-          onClick={onToggleAdd}
-          className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors"
-        >
+        <PrimaryButton onClick={onToggleAdd}>
           {adding ? "Cancel" : addLabel}
-        </button>
+        </PrimaryButton>
       </div>
 
       <div className="flex flex-col gap-3">

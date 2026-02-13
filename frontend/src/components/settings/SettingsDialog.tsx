@@ -1,7 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import FocusTrap from "focus-trap-react";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { EyeIcon, EyeOffIcon } from "../icons";
+import {
+  EyeIcon,
+  EyeOffIcon,
+  CertIcon,
+  ServiceIcon,
+  FilterIcon,
+  StoresIcon,
+  IngestersIcon,
+  RetentionIcon,
+  PolicyIcon,
+  UsersIcon,
+} from "../icons";
 import { StoresSettings } from "./StoresSettings";
 import { IngestersSettings } from "./IngestersSettings";
 import { CertificatesSettings } from "./CertificatesSettings";
@@ -17,6 +28,8 @@ import {
 } from "../../api/hooks/useConfig";
 import { useToast } from "../Toast";
 import { FormField, TextInput, NumberInput } from "./FormField";
+import { PrimaryButton, GhostButton } from "./Buttons";
+import { Checkbox } from "./Checkbox";
 
 export type SettingsTab =
   | "service"
@@ -47,11 +60,11 @@ const allTabs: TabDef[] = [
   { id: "service", label: "Service", icon: ServiceIcon },
   { id: "certificates", label: "Certificates", icon: CertIcon },
   { id: "users", label: "Users", icon: UsersIcon, adminOnly: true },
-  { id: "ingesters", label: "Ingesters", icon: IngesterIcon },
+  { id: "ingesters", label: "Ingesters", icon: IngestersIcon },
   { id: "filters", label: "Filters", icon: FilterIcon },
   { id: "policies", label: "Rotation Policies", icon: PolicyIcon },
   { id: "retention", label: "Retention Policies", icon: RetentionIcon },
-  { id: "stores", label: "Stores", icon: StorageIcon },
+  { id: "stores", label: "Stores", icon: StoresIcon },
 ];
 
 export function SettingsDialog({
@@ -350,11 +363,10 @@ function ServiceSettings({ dark }: { dark: boolean }) {
                 description="Serve HTTPS when a default certificate is set"
                 dark={dark}
               >
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={tlsEnabled}
-                  onChange={(e) => setTlsEnabled(e.target.checked)}
-                  className="w-4 h-4"
+                  onChange={setTlsEnabled}
+                  dark={dark}
                 />
               </FormField>
               {tlsEnabled && (
@@ -363,11 +375,10 @@ function ServiceSettings({ dark }: { dark: boolean }) {
                   description="Redirect plain HTTP requests to HTTPS"
                   dark={dark}
                 >
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={httpToHttpsRedirect}
-                    onChange={(e) => setHttpToHttpsRedirect(e.target.checked)}
-                    className="w-4 h-4"
+                    onChange={setHttpToHttpsRedirect}
+                    dark={dark}
                   />
                 </FormField>
               )}
@@ -375,23 +386,16 @@ function ServiceSettings({ dark }: { dark: boolean }) {
           )}
 
           <div className="flex gap-2 mt-1">
-            <button
+            <PrimaryButton
               onClick={handleSave}
               disabled={!dirty || putConfig.isPending}
-              className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
             >
               {putConfig.isPending ? "Saving..." : "Save"}
-            </button>
+            </PrimaryButton>
             {dirty && (
-              <button
-                onClick={handleReset}
-                className={`px-3 py-1.5 text-[0.8em] rounded transition-colors ${c(
-                  "text-text-muted hover:text-text-bright hover:bg-ink-hover",
-                  "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
-                )}`}
-              >
+              <GhostButton onClick={handleReset} dark={dark}>
                 Reset
-              </button>
+              </GhostButton>
             )}
           </div>
         </div>
@@ -400,145 +404,3 @@ function ServiceSettings({ dark }: { dark: boolean }) {
   );
 }
 
-function CertIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-    </svg>
-  );
-}
-
-function ServiceIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-    </svg>
-  );
-}
-
-function FilterIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-    </svg>
-  );
-}
-
-function StorageIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <ellipse cx="12" cy="5" rx="9" ry="3" />
-      <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
-      <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
-    </svg>
-  );
-}
-
-function IngesterIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M12 3v12" />
-      <path d="M8 11l4 4 4-4" />
-      <path d="M3 17h18" />
-      <path d="M3 21h18" />
-    </svg>
-  );
-}
-
-function RetentionIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 6v6l4 2" />
-      <path d="M4 20l2-2" />
-      <path d="M20 20l-2-2" />
-    </svg>
-  );
-}
-
-function PolicyIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M21 12a9 9 0 1 1-9-9" />
-      <path d="M21 3v6h-6" />
-      <path d="M21 3l-9 9" />
-    </svg>
-  );
-}
-
-function UsersIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  );
-}

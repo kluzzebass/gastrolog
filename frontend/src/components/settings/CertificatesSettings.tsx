@@ -20,6 +20,8 @@ function parseTar(data: Uint8Array): [string, Uint8Array][] {
 }
 
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { PrimaryButton, GhostButton } from "./Buttons";
+import { Checkbox } from "./Checkbox";
 import {
   useCertificates,
   useCertificate,
@@ -122,32 +124,21 @@ function PemCertForm({
           description="Use this certificate for TLS-wrapping the main server (when HTTPS is enabled)"
           dark={dark}
         >
-          <input
-            type="checkbox"
+          <Checkbox
             checked={setAsDefault}
-            onChange={(e) => setSetAsDefault(e.target.checked)}
-            className="w-4 h-4"
+            onChange={setSetAsDefault}
+            dark={dark}
           />
         </FormField>
         <div className="flex justify-end gap-2 pt-2">
           {onCancel && (
-            <button
-              onClick={onCancel}
-              className={`px-3 py-1.5 text-[0.8em] rounded transition-colors ${c(
-                "text-text-muted hover:text-text-bright hover:bg-ink-hover",
-                "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
-              )}`}
-            >
+            <GhostButton onClick={onCancel} dark={dark}>
               Cancel
-            </button>
+            </GhostButton>
           )}
-          <button
-            onClick={onSave}
-            disabled={saving}
-            className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
-          >
+          <PrimaryButton onClick={onSave} disabled={saving}>
             {saving ? "Saving..." : "Save"}
-          </button>
+          </PrimaryButton>
         </div>
       </div>
     </div>
@@ -222,32 +213,21 @@ function FilesCertForm({
           description="Use this certificate for TLS-wrapping the main server (when HTTPS is enabled)"
           dark={dark}
         >
-          <input
-            type="checkbox"
+          <Checkbox
             checked={setAsDefault}
-            onChange={(e) => setSetAsDefault(e.target.checked)}
-            className="w-4 h-4"
+            onChange={setSetAsDefault}
+            dark={dark}
           />
         </FormField>
         <div className="flex justify-end gap-2 pt-2">
           {onCancel && (
-            <button
-              onClick={onCancel}
-              className={`px-3 py-1.5 text-[0.8em] rounded transition-colors ${c(
-                "text-text-muted hover:text-text-bright hover:bg-ink-hover",
-                "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
-              )}`}
-            >
+            <GhostButton onClick={onCancel} dark={dark}>
               Cancel
-            </button>
+            </GhostButton>
           )}
-          <button
-            onClick={onSave}
-            disabled={saving}
-            className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
-          >
+          <PrimaryButton onClick={onSave} disabled={saving}>
             {saving ? "Saving..." : "Save"}
-          </button>
+          </PrimaryButton>
         </div>
       </div>
     </div>
@@ -501,24 +481,12 @@ export function CertificatesSettings({ dark }: { dark: boolean }) {
         </h2>
         {!adding && !expanded && (
           <div className="flex gap-2">
-            <button
-              onClick={startAddPem}
-              className={`px-3 py-1.5 text-[0.8em] rounded transition-colors ${c(
-                "bg-copper text-white hover:bg-copper-glow",
-                "bg-copper text-white hover:bg-copper-glow",
-              )}`}
-            >
+            <PrimaryButton onClick={startAddPem}>
               Add pasted certificate
-            </button>
-            <button
-              onClick={startAddFiles}
-              className={`px-3 py-1.5 text-[0.8em] rounded transition-colors ${c(
-                "bg-copper/80 text-white hover:bg-copper-glow",
-                "bg-copper/80 text-white hover:bg-copper-glow",
-              )}`}
-            >
+            </PrimaryButton>
+            <PrimaryButton onClick={startAddFiles}>
               Add monitored files
-            </button>
+            </PrimaryButton>
           </div>
         )}
       </div>
