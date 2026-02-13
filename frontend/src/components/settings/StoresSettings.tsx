@@ -3,6 +3,7 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { useConfig, usePutStore, useDeleteStore } from "../../api/hooks";
 import { useToast } from "../Toast";
 import { useEditState } from "../../hooks/useEditState";
+import { useCrudHandlers } from "../../hooks/useCrudHandlers";
 import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
@@ -70,32 +71,29 @@ export function StoresSettings({ dark }: { dark: boolean }) {
 
   const { getEdit, setEdit, clearEdit } = useEditState(defaults);
 
-  const handleSave = async (id: string, type: string) => {
-    const edit = getEdit(id);
-    try {
-      await putStore.mutateAsync({
-        id,
-        type,
-        filter: edit.filter,
-        policy: edit.policy,
-        retention: edit.retention,
-        params: edit.params,
-      });
-      clearEdit(id);
-      addToast(`Store "${id}" updated`, "info");
-    } catch (err: any) {
-      addToast(err.message ?? "Failed to update store", "error");
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    try {
-      await deleteStore.mutateAsync(id);
-      addToast(`Store "${id}" deleted`, "info");
-    } catch (err: any) {
-      addToast(err.message ?? "Failed to delete store", "error");
-    }
-  };
+  const { handleSave: saveStore, handleDelete } = useCrudHandlers({
+    mutation: putStore,
+    deleteMutation: deleteStore,
+    label: "Store",
+    onSaveTransform: (
+      id,
+      edit: {
+        filter: string;
+        policy: string;
+        retention: string;
+        params: Record<string, string>;
+        type: string;
+      },
+    ) => ({
+      id,
+      type: edit.type,
+      filter: edit.filter,
+      policy: edit.policy,
+      retention: edit.retention,
+      params: edit.params,
+    }),
+    clearEdit,
+  });
 
   const handleCreate = async () => {
     if (!newId.trim()) {
@@ -224,7 +222,12 @@ export function StoresSettings({ dark }: { dark: boolean }) {
             deleteLabel="Delete"
             footer={
               <PrimaryButton
-                onClick={() => handleSave(store.id, store.type)}
+                onClick={() =>
+                  saveStore(store.id, {
+                    ...getEdit(store.id),
+                    type: store.type,
+                  })
+                }
                 disabled={putStore.isPending}
               >
                 {putStore.isPending ? "Saving..." : "Save"}

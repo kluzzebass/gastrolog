@@ -7,6 +7,7 @@ import {
 } from "../../api/hooks";
 import { useToast } from "../Toast";
 import { useEditState } from "../../hooks/useEditState";
+import { useCrudHandlers } from "../../hooks/useCrudHandlers";
 import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
@@ -59,25 +60,17 @@ export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
 
   const { getEdit, setEdit, clearEdit } = useEditState(defaults);
 
-  const handleSave = async (id: string) => {
-    const edit = getEdit(id);
-    try {
-      await putPolicy.mutateAsync({
-        id,
-        maxAgeSeconds: parseDuration(edit.maxAge),
-        maxBytes: parseBytes(edit.maxBytes),
-        maxChunks: edit.maxChunks ? BigInt(edit.maxChunks) : 0n,
-      });
-      clearEdit(id);
-      addToast(`Retention policy "${id}" updated`, "info");
-    } catch (err: any) {
-      addToast(err.message ?? "Failed to update retention policy", "error");
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    try {
-      await deletePolicy.mutateAsync(id);
+  const { handleSave: savePolicy, handleDelete } = useCrudHandlers({
+    mutation: putPolicy,
+    deleteMutation: deletePolicy,
+    label: "Retention policy",
+    onSaveTransform: (id, edit: PolicyEdit) => ({
+      id,
+      maxAgeSeconds: parseDuration(edit.maxAge),
+      maxBytes: parseBytes(edit.maxBytes),
+      maxChunks: edit.maxChunks ? BigInt(edit.maxChunks) : 0n,
+    }),
+    onDeleteSuccess: (id) => {
       const referencedBy = stores
         .filter((s) => s.retention === id)
         .map((s) => s.id);
@@ -89,10 +82,11 @@ export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
       } else {
         addToast(`Retention policy "${id}" deleted`, "info");
       }
-    } catch (err: any) {
-      addToast(err.message ?? "Failed to delete retention policy", "error");
-    }
-  };
+    },
+    clearEdit,
+  });
+
+  const handleSave = (id: string) => savePolicy(id, getEdit(id));
 
   const handleCreate = async () => {
     if (!newId.trim()) {

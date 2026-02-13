@@ -3,6 +3,7 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { clickableProps } from "../../utils";
 import { useStores, useChunks, useIndexes } from "../../api/hooks";
 import { formatBytes } from "../../utils/units";
+import { ExpandableCard } from "../settings/ExpandableCard";
 import { ChunkTimeline } from "./ChunkTimeline";
 
 export function StoresPanel({ dark }: { dark: boolean }) {
@@ -33,91 +34,27 @@ export function StoresPanel({ dark }: { dark: boolean }) {
   return (
     <div className="flex flex-col gap-3">
       {stores.map((store) => (
-        <StoreCard
+        <ExpandableCard
           key={store.id}
-          storeId={store.id}
-          storeType={store.type}
-          recordCount={store.recordCount}
-          chunkCount={store.chunkCount}
+          id={store.id}
+          typeBadge={store.type}
+          typeBadgeAccent
           dark={dark}
           expanded={expanded === store.id}
           onToggle={() => setExpanded(expanded === store.id ? null : store.id)}
-        />
-      ))}
-    </div>
-  );
-}
-
-function StoreCard({
-  storeId,
-  storeType,
-  recordCount,
-  chunkCount,
-  dark,
-  expanded,
-  onToggle,
-}: {
-  storeId: string;
-  storeType: string;
-  recordCount: bigint;
-  chunkCount: bigint;
-  dark: boolean;
-  expanded: boolean;
-  onToggle: () => void;
-}) {
-  const c = useThemeClass(dark);
-
-  return (
-    <div
-      className={`border rounded-lg overflow-hidden transition-colors ${c(
-        "border-ink-border-subtle bg-ink-surface",
-        "border-light-border-subtle bg-light-surface",
-      )}`}
-    >
-      {/* Header */}
-      <div
-        className={`flex items-center justify-between px-4 py-3 cursor-pointer select-none transition-colors ${c(
-          "hover:bg-ink-hover",
-          "hover:bg-light-hover",
-        )}`}
-        onClick={onToggle}
-        {...clickableProps(onToggle)}
-        aria-expanded={expanded}
-      >
-        <div className="flex items-center gap-2.5">
-          <span
-            className={`text-[0.7em] transition-transform ${expanded ? "rotate-90" : ""}`}
-          >
-            {"\u25B6"}
-          </span>
-          <span
-            className={`font-mono text-[0.9em] font-medium ${c("text-text-bright", "text-light-text-bright")}`}
-          >
-            {storeId}
-          </span>
-          {storeType && (
-            <span className="px-1.5 py-0.5 text-[0.75em] rounded bg-copper/15 text-copper">
-              {storeType}
+          status={
+            <span
+              className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+            >
+              {Number(store.chunkCount).toLocaleString()} chunks
+              {" \u00B7 "}
+              {store.recordCount.toLocaleString()} records
             </span>
-          )}
-          <span
-            className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-          >
-            {Number(chunkCount).toLocaleString()} chunks
-            {" \u00B7 "}
-            {recordCount.toLocaleString()} records
-          </span>
-        </div>
-      </div>
-
-      {/* Chunk list */}
-      {expanded && (
-        <div
-          className={`border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
+          }
         >
-          <ChunkList storeId={storeId} dark={dark} />
-        </div>
-      )}
+          <ChunkList storeId={store.id} dark={dark} />
+        </ExpandableCard>
+      ))}
     </div>
   );
 }

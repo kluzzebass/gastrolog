@@ -4,6 +4,7 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { SpinnerIcon } from "../icons";
 import { ConnectError } from "@connectrpc/connect";
 import { useAuthStatus, useLogin, useRegister } from "../../api/hooks";
+import { AuthFormField } from "./AuthFormField";
 
 interface AuthPageProps {
   mode: "login" | "register";
@@ -139,90 +140,46 @@ export function AuthPage({ mode }: AuthPageProps) {
             </div>
           )}
 
-          {/* Username */}
-          <div className="flex flex-col gap-1.5">
-            <label
-              className={`text-[0.78em] font-medium tracking-wide uppercase ${c("text-text-muted", "text-light-text-muted")}`}
-            >
-              Username
-            </label>
-            <input
-              ref={usernameRef}
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoComplete="username"
-              disabled={isPending}
-              className={`px-3 py-2 text-[0.9em] border rounded focus:outline-none transition-colors ${c(
-                "bg-ink border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-                "bg-light-bg border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
-              )} ${isPending ? "opacity-50 cursor-not-allowed" : ""}`}
-            />
-          </div>
+          <AuthFormField
+            ref={usernameRef}
+            label="Username"
+            type="text"
+            value={username}
+            onChange={setUsername}
+            autoComplete="username"
+            disabled={isPending}
+            dark={dark}
+          />
 
-          {/* Password */}
-          <div className="flex flex-col gap-1.5">
-            <label
-              className={`text-[0.78em] font-medium tracking-wide uppercase ${c("text-text-muted", "text-light-text-muted")}`}
-            >
-              Password
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete={isRegister ? "new-password" : "current-password"}
-              disabled={isPending}
-              className={`px-3 py-2 text-[0.9em] border rounded focus:outline-none transition-colors ${
-                mismatch
-                  ? "border-severity-error"
-                  : c(
-                      "border-ink-border focus:border-copper-dim",
-                      "border-light-border focus:border-copper",
-                    )
-              } ${c(
-                "bg-ink text-text-bright placeholder:text-text-ghost",
-                "bg-light-bg text-light-text-bright placeholder:text-light-text-ghost",
-              )} ${isPending ? "opacity-50 cursor-not-allowed" : ""}`}
-            />
-          </div>
+          <AuthFormField
+            label="Password"
+            type="password"
+            value={password}
+            onChange={setPassword}
+            autoComplete={isRegister ? "new-password" : "current-password"}
+            error={mismatch}
+            disabled={isPending}
+            dark={dark}
+          />
 
-          {/* Confirm Password (register only) */}
           {isRegister && (
-            <div className="flex flex-col gap-1.5">
-              <label
-                className={`text-[0.78em] font-medium tracking-wide uppercase ${
-                  mismatch
-                    ? "text-severity-error"
-                    : c("text-text-muted", "text-light-text-muted")
-                }`}
-              >
-                Confirm Password
-              </label>
-              <input
+            <>
+              <AuthFormField
+                label="Confirm Password"
                 type="password"
                 value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
+                onChange={setConfirmPassword}
                 autoComplete="new-password"
+                error={mismatch}
                 disabled={isPending}
-                className={`px-3 py-2 text-[0.9em] border rounded focus:outline-none transition-colors ${
-                  mismatch
-                    ? "border-severity-error"
-                    : c(
-                        "border-ink-border focus:border-copper-dim",
-                        "border-light-border focus:border-copper",
-                      )
-                } ${c(
-                  "bg-ink text-text-bright placeholder:text-text-ghost",
-                  "bg-light-bg text-light-text-bright placeholder:text-light-text-ghost",
-                )} ${isPending ? "opacity-50 cursor-not-allowed" : ""}`}
+                dark={dark}
               />
               <span
-                className={`text-[0.78em] ${mismatch ? "text-severity-error" : "invisible"}`}
+                className={`text-[0.78em] -mt-3 ${mismatch ? "text-severity-error" : "invisible"}`}
               >
                 Passwords do not match
               </span>
-            </div>
+            </>
           )}
 
           {/* Submit */}

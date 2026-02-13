@@ -7,6 +7,7 @@ import {
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
 import { useEditState } from "../../hooks/useEditState";
+import { useCrudHandlers } from "../../hooks/useCrudHandlers";
 import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
@@ -107,33 +108,24 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
 
   const { getEdit, setEdit, clearEdit } = useEditState(defaults);
 
-  const handleSave = async (id: string) => {
-    const edit = getEdit(id);
-    if (edit.cron) {
-      const result = validateCron(edit.cron);
-      if (!result.valid) {
-        addToast(`Invalid cron: ${result.error}`, "error");
-        return;
+  const { handleSave: savePolicy, handleDelete } = useCrudHandlers({
+    mutation: putPolicy,
+    deleteMutation: deletePolicy,
+    label: "Policy",
+    onSaveTransform: (id, edit: PolicyEdit) => {
+      if (edit.cron) {
+        const result = validateCron(edit.cron);
+        if (!result.valid) throw new Error(`Invalid cron: ${result.error}`);
       }
-    }
-    try {
-      await putPolicy.mutateAsync({
+      return {
         id,
         maxBytes: parseBytes(edit.maxBytes),
         maxRecords: edit.maxRecords ? BigInt(edit.maxRecords) : 0n,
         maxAgeSeconds: parseDuration(edit.maxAge),
         cron: edit.cron,
-      });
-      clearEdit(id);
-      addToast(`Policy "${id}" updated`, "info");
-    } catch (err: any) {
-      addToast(err.message ?? "Failed to update policy", "error");
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    try {
-      await deletePolicy.mutateAsync(id);
+      };
+    },
+    onDeleteSuccess: (id) => {
       const referencedBy = stores
         .filter((s) => s.policy === id)
         .map((s) => s.id);
@@ -145,10 +137,11 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
       } else {
         addToast(`Policy "${id}" deleted`, "info");
       }
-    } catch (err: any) {
-      addToast(err.message ?? "Failed to delete policy", "error");
-    }
-  };
+    },
+    clearEdit,
+  });
+
+  const handleSave = (id: string) => savePolicy(id, getEdit(id));
 
   const handleCreate = async () => {
     if (!newId.trim()) {

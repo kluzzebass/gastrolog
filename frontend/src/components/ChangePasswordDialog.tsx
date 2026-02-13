@@ -4,6 +4,7 @@ import { useThemeClass } from "../hooks/useThemeClass";
 import { SpinnerIcon } from "./icons";
 import { ConnectError } from "@connectrpc/connect";
 import { useChangePassword } from "../api/hooks";
+import { AuthFormField } from "./auth/AuthFormField";
 
 export function ChangePasswordDialog({
   username,
@@ -116,86 +117,43 @@ export function ChangePasswordDialog({
             </div>
           )}
 
-          <div className="flex flex-col gap-1.5">
-            <label
-              className={`text-[0.78em] font-medium tracking-wide uppercase ${c("text-text-muted", "text-light-text-muted")}`}
-            >
-              Current Password
-            </label>
-            <input
-              ref={oldRef}
-              type="password"
-              value={oldPassword}
-              onChange={(e) => setOldPassword(e.target.value)}
-              autoComplete="current-password"
-              disabled={isPending}
-              className={`px-3 py-2 text-[0.9em] border rounded focus:outline-none transition-colors ${c(
-                "bg-ink border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-                "bg-light-bg border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
-              )} ${isPending ? "opacity-50 cursor-not-allowed" : ""}`}
-            />
-          </div>
+          <AuthFormField
+            ref={oldRef}
+            label="Current Password"
+            type="password"
+            value={oldPassword}
+            onChange={setOldPassword}
+            autoComplete="current-password"
+            disabled={isPending}
+            dark={dark}
+          />
 
-          <div className="flex flex-col gap-1.5">
-            <label
-              className={`text-[0.78em] font-medium tracking-wide uppercase ${c("text-text-muted", "text-light-text-muted")}`}
-            >
-              New Password
-            </label>
-            <input
-              type="password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              autoComplete="new-password"
-              disabled={isPending}
-              className={`px-3 py-2 text-[0.9em] border rounded focus:outline-none transition-colors ${
-                mismatch
-                  ? "border-severity-error"
-                  : c(
-                      "border-ink-border focus:border-copper-dim",
-                      "border-light-border focus:border-copper",
-                    )
-              } ${c(
-                "bg-ink text-text-bright placeholder:text-text-ghost",
-                "bg-light-bg text-light-text-bright placeholder:text-light-text-ghost",
-              )} ${isPending ? "opacity-50 cursor-not-allowed" : ""}`}
-            />
-          </div>
+          <AuthFormField
+            label="New Password"
+            type="password"
+            value={newPassword}
+            onChange={setNewPassword}
+            autoComplete="new-password"
+            error={mismatch}
+            disabled={isPending}
+            dark={dark}
+          />
 
-          <div className="flex flex-col gap-1.5">
-            <label
-              className={`text-[0.78em] font-medium tracking-wide uppercase ${
-                mismatch
-                  ? "text-severity-error"
-                  : c("text-text-muted", "text-light-text-muted")
-              }`}
-            >
-              Confirm New Password
-            </label>
-            <input
-              type="password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              autoComplete="new-password"
-              disabled={isPending}
-              className={`px-3 py-2 text-[0.9em] border rounded focus:outline-none transition-colors ${
-                mismatch
-                  ? "border-severity-error"
-                  : c(
-                      "border-ink-border focus:border-copper-dim",
-                      "border-light-border focus:border-copper",
-                    )
-              } ${c(
-                "bg-ink text-text-bright placeholder:text-text-ghost",
-                "bg-light-bg text-light-text-bright placeholder:text-light-text-ghost",
-              )} ${isPending ? "opacity-50 cursor-not-allowed" : ""}`}
-            />
-            <span
-              className={`text-[0.78em] ${mismatch ? "text-severity-error" : "invisible"}`}
-            >
-              Passwords do not match
-            </span>
-          </div>
+          <AuthFormField
+            label="Confirm New Password"
+            type="password"
+            value={confirmPassword}
+            onChange={setConfirmPassword}
+            autoComplete="new-password"
+            error={mismatch}
+            disabled={isPending}
+            dark={dark}
+          />
+          <span
+            className={`text-[0.78em] -mt-3 ${mismatch ? "text-severity-error" : "invisible"}`}
+          >
+            Passwords do not match
+          </span>
 
           <div className="flex gap-3 mt-1">
             <button

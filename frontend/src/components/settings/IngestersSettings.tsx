@@ -3,6 +3,7 @@ import { useConfig, usePutIngester, useDeleteIngester } from "../../api/hooks";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
 import { useEditState } from "../../hooks/useEditState";
+import { useCrudHandlers } from "../../hooks/useCrudHandlers";
 import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
@@ -46,30 +47,21 @@ export function IngestersSettings({ dark }: { dark: boolean }) {
 
   const { getEdit, setEdit, clearEdit } = useEditState(defaults);
 
-  const handleSave = async (id: string, type: string) => {
-    const edit = getEdit(id);
-    try {
-      await putIngester.mutateAsync({
-        id,
-        type,
-        enabled: edit.enabled,
-        params: edit.params,
-      });
-      clearEdit(id);
-      addToast(`Ingester "${id}" updated`, "info");
-    } catch (err: any) {
-      addToast(err.message ?? "Failed to update ingester", "error");
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    try {
-      await deleteIngester.mutateAsync(id);
-      addToast(`Ingester "${id}" deleted`, "info");
-    } catch (err: any) {
-      addToast(err.message ?? "Failed to delete ingester", "error");
-    }
-  };
+  const { handleSave: saveIngester, handleDelete } = useCrudHandlers({
+    mutation: putIngester,
+    deleteMutation: deleteIngester,
+    label: "Ingester",
+    onSaveTransform: (
+      id,
+      edit: { enabled: boolean; params: Record<string, string>; type: string },
+    ) => ({
+      id,
+      type: edit.type,
+      enabled: edit.enabled,
+      params: edit.params,
+    }),
+    clearEdit,
+  });
 
   const handleNewTypeChange = (type: string) => {
     setNewType(type);
@@ -169,7 +161,12 @@ export function IngestersSettings({ dark }: { dark: boolean }) {
             }
             footer={
               <PrimaryButton
-                onClick={() => handleSave(ing.id, ing.type)}
+                onClick={() =>
+                  saveIngester(ing.id, {
+                    ...getEdit(ing.id),
+                    type: ing.type,
+                  })
+                }
                 disabled={putIngester.isPending}
               >
                 {putIngester.isPending ? "Saving..." : "Save"}

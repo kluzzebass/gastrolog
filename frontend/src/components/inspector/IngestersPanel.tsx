@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { clickableProps } from "../../utils";
 import { useIngesters, useIngesterStatus } from "../../api/hooks";
 import { formatBytes } from "../../utils/units";
+import { ExpandableCard } from "../settings/ExpandableCard";
 
 export function IngestersPanel({ dark }: { dark: boolean }) {
   const c = useThemeClass(dark);
@@ -32,72 +32,16 @@ export function IngestersPanel({ dark }: { dark: boolean }) {
   return (
     <div className="flex flex-col gap-3">
       {ingesters.map((ing) => (
-        <IngesterCard
+        <ExpandableCard
           key={ing.id}
           id={ing.id}
-          type={ing.type}
-          running={ing.running}
+          typeBadge={ing.type}
+          typeBadgeAccent
           dark={dark}
           expanded={expanded === ing.id}
           onToggle={() => setExpanded(expanded === ing.id ? null : ing.id)}
-        />
-      ))}
-    </div>
-  );
-}
-
-function IngesterCard({
-  id,
-  type,
-  running,
-  dark,
-  expanded,
-  onToggle,
-}: {
-  id: string;
-  type: string;
-  running: boolean;
-  dark: boolean;
-  expanded: boolean;
-  onToggle: () => void;
-}) {
-  const c = useThemeClass(dark);
-
-  return (
-    <div
-      className={`border rounded-lg overflow-hidden transition-colors ${c(
-        "border-ink-border-subtle bg-ink-surface",
-        "border-light-border-subtle bg-light-surface",
-      )}`}
-    >
-      {/* Header */}
-      <div
-        className={`flex items-center justify-between px-4 py-3 cursor-pointer select-none transition-colors ${c(
-          "hover:bg-ink-hover",
-          "hover:bg-light-hover",
-        )}`}
-        onClick={onToggle}
-        {...clickableProps(onToggle)}
-        aria-expanded={expanded}
-      >
-        <div className="flex items-center gap-2.5">
-          <span
-            className={`text-[0.7em] transition-transform ${expanded ? "rotate-90" : ""}`}
-          >
-            {"\u25B6"}
-          </span>
-          <span
-            className={`font-mono text-[0.9em] font-medium ${c("text-text-bright", "text-light-text-bright")}`}
-          >
-            {id}
-          </span>
-          {type && (
-            <span className="px-1.5 py-0.5 text-[0.75em] rounded bg-copper/15 text-copper">
-              {type}
-            </span>
-          )}
-          <span>
-            {running ? (
+          status={
+            ing.running ? (
               <span className="px-1.5 py-0.5 text-[0.75em] rounded bg-severity-info/15 text-severity-info">
                 running
               </span>
@@ -107,19 +51,12 @@ function IngesterCard({
               >
                 stopped
               </span>
-            )}
-          </span>
-        </div>
-      </div>
-
-      {/* Detail */}
-      {expanded && (
-        <div
-          className={`border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
+            )
+          }
         >
-          <IngesterDetail id={id} dark={dark} />
-        </div>
-      )}
+          <IngesterDetail id={ing.id} dark={dark} />
+        </ExpandableCard>
+      ))}
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { useConfig, usePutFilter, useDeleteFilter } from "../../api/hooks";
 import { useToast } from "../Toast";
 import { useEditState } from "../../hooks/useEditState";
+import { useCrudHandlers } from "../../hooks/useCrudHandlers";
 import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
@@ -72,33 +73,24 @@ export function FiltersSettings({ dark }: { dark: boolean }) {
 
   const { getEdit, setEdit, clearEdit } = useEditState(defaults);
 
-  const handleSave = async (id: string) => {
-    const edit = getEdit(id);
-    try {
-      await putFilter.mutateAsync({ id, expression: edit.expression });
-      clearEdit(id);
-      addToast(`Filter "${id}" updated`, "info");
-    } catch (err: any) {
-      addToast(err.message ?? "Failed to update filter", "error");
-    }
-  };
+  const { handleSave: saveFilter, handleDelete } = useCrudHandlers({
+    mutation: putFilter,
+    deleteMutation: deleteFilter,
+    label: "Filter",
+    onSaveTransform: (id, edit: { expression: string }) => ({
+      id,
+      expression: edit.expression,
+    }),
+    onDeleteCheck: (id) => {
+      const refs = refsFor(stores, "filter", id);
+      return refs.length > 0
+        ? `Filter "${id}" is referenced by store(s): ${refs.join(", ")}`
+        : null;
+    },
+    clearEdit,
+  });
 
-  const handleDelete = async (id: string) => {
-    const referencedBy = refsFor(stores, "filter", id);
-    if (referencedBy.length > 0) {
-      addToast(
-        `Filter "${id}" is referenced by store(s): ${referencedBy.join(", ")}`,
-        "warn",
-      );
-      return;
-    }
-    try {
-      await deleteFilter.mutateAsync(id);
-      addToast(`Filter "${id}" deleted`, "info");
-    } catch (err: any) {
-      addToast(err.message ?? "Failed to delete filter", "error");
-    }
-  };
+  const handleSave = (id: string) => saveFilter(id, getEdit(id));
 
   const handleCreate = async () => {
     if (!newId.trim()) {
