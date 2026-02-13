@@ -458,57 +458,56 @@ func (s *Store) DeleteSetting(ctx context.Context, key string) error {
 	return s.flush(cfg)
 }
 
-// TLS config
-//
-// TLS settings (default_cert, tls_enabled, http_to_https_redirect) live in
-// server config (Settings["server"]). Certificates live in Config.TLS.Certs.
+// Certificates
 
-func (s *Store) GetTLSConfig(ctx context.Context) (*config.TLSConfig, error) {
+func (s *Store) ListCertificates(ctx context.Context) ([]string, error) {
 	cfg, err := s.load()
 	if err != nil {
 		return nil, err
 	}
-	out := &config.TLSConfig{Certs: make(map[string]config.CertPEM)}
-	if cfg != nil {
-		if serverJSON, ok := cfg.Settings["server"]; ok && serverJSON != "" {
-			var serverCfg config.ServerConfig
-			if err := json.Unmarshal([]byte(serverJSON), &serverCfg); err == nil {
-				out.DefaultCert = serverCfg.TLS.DefaultCert
-				out.TLSEnabled = serverCfg.TLS.TLSEnabled
-				out.HTTPToHTTPSRedirect = serverCfg.TLS.HTTPToHTTPSRedirect
-			}
-		}
-		if cfg.TLS != nil && cfg.TLS.Certs != nil {
-			out.Certs = cfg.TLS.Certs
-		}
+	if cfg == nil || cfg.Certs == nil {
+		return nil, nil
 	}
-	return out, nil
+	names := make([]string, 0, len(cfg.Certs))
+	for name := range cfg.Certs {
+		names = append(names, name)
+	}
+	return names, nil
 }
 
-func (s *Store) PutTLSConfig(ctx context.Context, tlsCfg *config.TLSConfig) error {
+func (s *Store) GetCertificate(ctx context.Context, name string) (*config.CertPEM, error) {
+	cfg, err := s.load()
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil || cfg.Certs == nil {
+		return nil, nil
+	}
+	pem, ok := cfg.Certs[name]
+	if !ok {
+		return nil, nil
+	}
+	return &pem, nil
+}
+
+func (s *Store) PutCertificate(ctx context.Context, name string, cert config.CertPEM) error {
 	cfg, err := s.loadOrEmpty()
 	if err != nil {
 		return err
 	}
-	// Update TLS settings in server config
-	var serverCfg config.ServerConfig
-	if serverJSON, ok := cfg.Settings["server"]; ok && serverJSON != "" {
-		_ = json.Unmarshal([]byte(serverJSON), &serverCfg)
+	if cfg.Certs == nil {
+		cfg.Certs = make(map[string]config.CertPEM)
 	}
-	serverCfg.TLS.DefaultCert = tlsCfg.DefaultCert
-	serverCfg.TLS.TLSEnabled = tlsCfg.TLSEnabled
-	serverCfg.TLS.HTTPToHTTPSRedirect = tlsCfg.HTTPToHTTPSRedirect
-	serverCfg.TLS.Certs = nil
-	data, err := json.Marshal(serverCfg)
+	cfg.Certs[name] = cert
+	return s.flush(cfg)
+}
+
+func (s *Store) DeleteCertificate(ctx context.Context, name string) error {
+	cfg, err := s.loadOrEmpty()
 	if err != nil {
 		return err
 	}
-	cfg.Settings["server"] = string(data)
-	// Certs in Config.TLS
-	if cfg.TLS == nil {
-		cfg.TLS = &config.TLSConfig{}
-	}
-	cfg.TLS.Certs = tlsCfg.Certs
+	delete(cfg.Certs, name)
 	return s.flush(cfg)
 }
 

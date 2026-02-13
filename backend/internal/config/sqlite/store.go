@@ -524,99 +524,64 @@ func (s *Store) DeleteSetting(ctx context.Context, key string) error {
 	return nil
 }
 
-// TLS config
-//
-// TLS settings (default_cert, tls_enabled, http_to_https_redirect) live in
-// server config (settings key "server"). Certificates live in tls_certificates.
+// Certificates
 
-func (s *Store) GetTLSConfig(ctx context.Context) (*config.TLSConfig, error) {
-	// TLS settings from server config
-	raw, err := s.GetSetting(ctx, "server")
+func (s *Store) ListCertificates(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT cert_id FROM tls_certificates")
 	if err != nil {
-		return nil, fmt.Errorf("get server config: %w", err)
-	}
-	cfg := &config.TLSConfig{Certs: make(map[string]config.CertPEM)}
-	if raw != nil && *raw != "" {
-		var serverCfg config.ServerConfig
-		if err := json.Unmarshal([]byte(*raw), &serverCfg); err == nil {
-			cfg.DefaultCert = serverCfg.TLS.DefaultCert
-			cfg.TLSEnabled = serverCfg.TLS.TLSEnabled
-			cfg.HTTPToHTTPSRedirect = serverCfg.TLS.HTTPToHTTPSRedirect
-		}
-	}
-
-	// Certs from tls_certificates
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT cert_id, cert_pem, key_pem, cert_file, key_file FROM tls_certificates")
-	if err != nil {
-		return nil, fmt.Errorf("list tls certificates: %w", err)
+		return nil, fmt.Errorf("list certificates: %w", err)
 	}
 	defer rows.Close()
 
+	var names []string
 	for rows.Next() {
-		var id string
-		var pem config.CertPEM
-		if err := rows.Scan(&id, &pem.CertPEM, &pem.KeyPEM, &pem.CertFile, &pem.KeyFile); err != nil {
-			return nil, fmt.Errorf("scan tls certificate: %w", err)
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("scan certificate name: %w", err)
 		}
-		cfg.Certs[id] = pem
+		names = append(names, name)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate tls certificates: %w", err)
-	}
-
-	return cfg, nil
+	return names, rows.Err()
 }
 
-func (s *Store) PutTLSConfig(ctx context.Context, cfg *config.TLSConfig) error {
-	// Update TLS settings in server config
-	raw, err := s.GetSetting(ctx, "server")
+func (s *Store) GetCertificate(ctx context.Context, name string) (*config.CertPEM, error) {
+	row := s.db.QueryRowContext(ctx,
+		"SELECT cert_pem, key_pem, cert_file, key_file FROM tls_certificates WHERE cert_id = ?", name)
+
+	var pem config.CertPEM
+	err := row.Scan(&pem.CertPEM, &pem.KeyPEM, &pem.CertFile, &pem.KeyFile)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
 	if err != nil {
-		return fmt.Errorf("get server config: %w", err)
+		return nil, fmt.Errorf("get certificate %q: %w", name, err)
 	}
-	var serverCfg config.ServerConfig
-	if raw != nil && *raw != "" {
-		_ = json.Unmarshal([]byte(*raw), &serverCfg)
-	}
-	serverCfg.TLS.DefaultCert = cfg.DefaultCert
-	serverCfg.TLS.TLSEnabled = cfg.TLSEnabled
-	serverCfg.TLS.HTTPToHTTPSRedirect = cfg.HTTPToHTTPSRedirect
-	serverCfg.TLS.Certs = nil // certs live in tls_certificates
-	data, err := json.Marshal(serverCfg)
+	return &pem, nil
+}
+
+func (s *Store) PutCertificate(ctx context.Context, name string, cert config.CertPEM) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO tls_certificates (cert_id, cert_pem, key_pem, cert_file, key_file)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(cert_id) DO UPDATE SET
+			cert_pem = excluded.cert_pem,
+			key_pem = excluded.key_pem,
+			cert_file = excluded.cert_file,
+			key_file = excluded.key_file
+	`, name, cert.CertPEM, cert.KeyPEM, cert.CertFile, cert.KeyFile)
 	if err != nil {
-		return fmt.Errorf("marshal server config: %w", err)
+		return fmt.Errorf("put certificate %q: %w", name, err)
 	}
-	if err := s.PutSetting(ctx, "server", string(data)); err != nil {
-		return fmt.Errorf("put server config: %w", err)
-	}
+	return nil
+}
 
-	// Update certificates
-	tx, err := s.db.BeginTx(ctx, nil)
+func (s *Store) DeleteCertificate(ctx context.Context, name string) error {
+	_, err := s.db.ExecContext(ctx,
+		"DELETE FROM tls_certificates WHERE cert_id = ?", name)
 	if err != nil {
-		return fmt.Errorf("begin tls certs tx: %w", err)
+		return fmt.Errorf("delete certificate %q: %w", name, err)
 	}
-	defer tx.Rollback()
-
-	if _, err := tx.ExecContext(ctx, "DELETE FROM tls_certificates"); err != nil {
-		return fmt.Errorf("clear tls certificates: %w", err)
-	}
-
-	if len(cfg.Certs) > 0 {
-		stmt, err := tx.PrepareContext(ctx,
-			"INSERT INTO tls_certificates (cert_id, cert_pem, key_pem, cert_file, key_file) VALUES (?, ?, ?, ?, ?)")
-		if err != nil {
-			return fmt.Errorf("prepare tls cert insert: %w", err)
-		}
-		defer stmt.Close()
-
-		for id, pem := range cfg.Certs {
-			if _, err := stmt.ExecContext(ctx, id, pem.CertPEM, pem.KeyPEM, pem.CertFile, pem.KeyFile); err != nil {
-				return fmt.Errorf("insert tls cert %q: %w", id, err)
-			}
-		}
-	}
-
-	return tx.Commit()
+	return nil
 }
 
 // Users

@@ -95,7 +95,7 @@ function PemCertForm({
             onChange={(e) => setCertPem(e.target.value)}
             placeholder="-----BEGIN CERTIFICATE-----\n..."
             rows={6}
-            className={`w-full px-2.5 py-1.5 text-[0.85em] font-mono border rounded focus:outline-none transition-colors ${c(
+            className={`w-full px-2.5 py-1.5 text-[0.85em] font-mono border rounded focus:outline-none transition-colors resize-y app-scroll app-resize ${c(
               "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
               "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
             )}`}
@@ -111,7 +111,7 @@ function PemCertForm({
             onChange={(e) => setKeyPem(e.target.value)}
             placeholder={isEditing ? "•••••••• (paste to replace)" : "-----BEGIN PRIVATE KEY-----\n..."}
             rows={6}
-            className={`w-full px-2.5 py-1.5 text-[0.85em] font-mono border rounded focus:outline-none transition-colors ${c(
+            className={`w-full px-2.5 py-1.5 text-[0.85em] font-mono border rounded focus:outline-none transition-colors resize-y app-scroll app-resize ${c(
               "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
               "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
             )}`}

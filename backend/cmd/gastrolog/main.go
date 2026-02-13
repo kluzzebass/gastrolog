@@ -186,15 +186,25 @@ func run(ctx context.Context, logger *slog.Logger, datadirFlag, configType, serv
 
 	// Certificate manager: load certs from config store.
 	certMgr := cert.New(cert.Config{Logger: logger})
-	tlsCfg, err := config.LoadTLSConfig(ctx, cfgStore)
+	certNames, err := cfgStore.ListCertificates(ctx)
 	if err != nil {
-		return fmt.Errorf("load TLS config: %w", err)
+		return fmt.Errorf("list certificates: %w", err)
 	}
-	certs := make(map[string]cert.CertSource)
-	for k, v := range tlsCfg.Certs {
-		certs[k] = cert.CertSource{CertPEM: v.CertPEM, KeyPEM: v.KeyPEM, CertFile: v.CertFile, KeyFile: v.KeyFile}
+	certs := make(map[string]cert.CertSource, len(certNames))
+	for _, name := range certNames {
+		pem, err := cfgStore.GetCertificate(ctx, name)
+		if err != nil {
+			return fmt.Errorf("get certificate %q: %w", name, err)
+		}
+		if pem != nil {
+			certs[name] = cert.CertSource{CertPEM: pem.CertPEM, KeyPEM: pem.KeyPEM, CertFile: pem.CertFile, KeyFile: pem.KeyFile}
+		}
 	}
-	if err := certMgr.LoadFromConfig(tlsCfg.DefaultCert, certs); err != nil {
+	sc, err := config.LoadServerConfig(ctx, cfgStore)
+	if err != nil {
+		return fmt.Errorf("load server config for TLS: %w", err)
+	}
+	if err := certMgr.LoadFromConfig(sc.TLS.DefaultCert, certs); err != nil {
 		return fmt.Errorf("load certs: %w", err)
 	}
 

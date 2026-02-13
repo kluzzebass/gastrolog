@@ -993,18 +993,40 @@ func (s *ConfigServer) DeleteSavedQuery(
 	return connect.NewResponse(&apiv1.DeleteSavedQueryResponse{}), nil
 }
 
+// reloadCertManager lists all certs from the store and loads them into the cert manager.
+func (s *ConfigServer) reloadCertManager(ctx context.Context) error {
+	if s.certManager == nil {
+		return nil
+	}
+	sc, err := config.LoadServerConfig(ctx, s.cfgStore)
+	if err != nil {
+		return fmt.Errorf("load server config: %w", err)
+	}
+	names, err := s.cfgStore.ListCertificates(ctx)
+	if err != nil {
+		return fmt.Errorf("list certificates: %w", err)
+	}
+	certs := make(map[string]cert.CertSource, len(names))
+	for _, name := range names {
+		pem, err := s.cfgStore.GetCertificate(ctx, name)
+		if err != nil {
+			return fmt.Errorf("get certificate %q: %w", name, err)
+		}
+		if pem != nil {
+			certs[name] = cert.CertSource{CertPEM: pem.CertPEM, KeyPEM: pem.KeyPEM, CertFile: pem.CertFile, KeyFile: pem.KeyFile}
+		}
+	}
+	return s.certManager.LoadFromConfig(sc.TLS.DefaultCert, certs)
+}
+
 // ListCertificates returns all certificate names.
 func (s *ConfigServer) ListCertificates(
 	ctx context.Context,
 	req *connect.Request[apiv1.ListCertificatesRequest],
 ) (*connect.Response[apiv1.ListCertificatesResponse], error) {
-	tlsCfg, err := config.LoadTLSConfig(ctx, s.cfgStore)
+	names, err := s.cfgStore.ListCertificates(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-	names := make([]string, 0, len(tlsCfg.Certs))
-	for name := range tlsCfg.Certs {
-		names = append(names, name)
 	}
 	return connect.NewResponse(&apiv1.ListCertificatesResponse{Names: names}), nil
 }
@@ -1017,12 +1039,11 @@ func (s *ConfigServer) GetCertificate(
 	if req.Msg.Name == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name required"))
 	}
-	tlsCfg, err := config.LoadTLSConfig(ctx, s.cfgStore)
+	pem, err := s.cfgStore.GetCertificate(ctx, req.Msg.Name)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	pem, ok := tlsCfg.Certs[req.Msg.Name]
-	if !ok {
+	if pem == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("certificate not found"))
 	}
 	return connect.NewResponse(&apiv1.GetCertificateResponse{
@@ -1042,18 +1063,19 @@ func (s *ConfigServer) PutCertificate(
 	if req.Msg.Name == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name required"))
 	}
-	tlsCfg, err := config.LoadTLSConfig(ctx, s.cfgStore)
+
+	// Load existing cert for key-reuse logic.
+	existing, err := s.cfgStore.GetCertificate(ctx, req.Msg.Name)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	if tlsCfg.Certs == nil {
-		tlsCfg.Certs = make(map[string]config.CertPEM)
+	if existing == nil {
+		existing = &config.CertPEM{}
 	}
 
 	hasPEM := req.Msg.CertPem != "" && req.Msg.KeyPem != ""
 	hasFiles := req.Msg.CertFile != "" && req.Msg.KeyFile != ""
 	// Update PEM cert: certPem + empty keyPem means keep existing key
-	existing := tlsCfg.Certs[req.Msg.Name]
 	hasPEMUpdate := req.Msg.CertPem != "" && (req.Msg.KeyPem != "" || (existing.KeyPEM != "" && existing.CertFile == ""))
 	if !hasPEM && !hasFiles && !hasPEMUpdate {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("provide either cert_pem+key_pem or cert_file+key_file"))
@@ -1073,9 +1095,7 @@ func (s *ConfigServer) PutCertificate(
 	if hasFiles {
 		keyPath := req.Msg.KeyFile
 		if keyPath == "" {
-			if existing, ok := tlsCfg.Certs[req.Msg.Name]; ok {
-				keyPath = existing.KeyFile
-			}
+			keyPath = existing.KeyFile
 		}
 		if keyPath != "" {
 			if _, err := tls.LoadX509KeyPair(req.Msg.CertFile, keyPath); err != nil {
@@ -1084,26 +1104,30 @@ func (s *ConfigServer) PutCertificate(
 		}
 	}
 
-	tlsCfg.Certs[req.Msg.Name] = config.CertPEM{
+	newCert := config.CertPEM{
 		CertPEM:  req.Msg.CertPem,
 		KeyPEM:   keyPEM,
 		CertFile: req.Msg.CertFile,
 		KeyFile:  req.Msg.KeyFile,
 	}
-	if req.Msg.SetAsDefault {
-		tlsCfg.DefaultCert = req.Msg.Name
-	}
-	if err := config.SaveTLSConfig(ctx, s.cfgStore, tlsCfg); err != nil {
+	if err := s.cfgStore.PutCertificate(ctx, req.Msg.Name, newCert); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	if s.certManager != nil {
-		certs := make(map[string]cert.CertSource)
-		for k, v := range tlsCfg.Certs {
-			certs[k] = cert.CertSource{CertPEM: v.CertPEM, KeyPEM: v.KeyPEM, CertFile: v.CertFile, KeyFile: v.KeyFile}
+
+	// Update default cert in server config if requested.
+	if req.Msg.SetAsDefault {
+		sc, err := config.LoadServerConfig(ctx, s.cfgStore)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err)
 		}
-		if err := s.certManager.LoadFromConfig(tlsCfg.DefaultCert, certs); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload certs: %w", err))
+		sc.TLS.DefaultCert = req.Msg.Name
+		if err := config.SaveServerConfig(ctx, s.cfgStore, sc); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err)
 		}
+	}
+
+	if err := s.reloadCertManager(ctx); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload certs: %w", err))
 	}
 	if s.onTLSConfigChange != nil {
 		s.onTLSConfigChange()
@@ -1119,30 +1143,33 @@ func (s *ConfigServer) DeleteCertificate(
 	if req.Msg.Name == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name required"))
 	}
-	tlsCfg, err := config.LoadTLSConfig(ctx, s.cfgStore)
+	pem, err := s.cfgStore.GetCertificate(ctx, req.Msg.Name)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	if _, ok := tlsCfg.Certs[req.Msg.Name]; !ok {
+	if pem == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("certificate not found"))
 	}
-	delete(tlsCfg.Certs, req.Msg.Name)
-	if tlsCfg.DefaultCert == req.Msg.Name {
-		tlsCfg.DefaultCert = ""
-		tlsCfg.TLSEnabled = false
-		tlsCfg.HTTPToHTTPSRedirect = false
-	}
-	if err := config.SaveTLSConfig(ctx, s.cfgStore, tlsCfg); err != nil {
+	if err := s.cfgStore.DeleteCertificate(ctx, req.Msg.Name); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	if s.certManager != nil {
-		certs := make(map[string]cert.CertSource)
-		for k, v := range tlsCfg.Certs {
-			certs[k] = cert.CertSource{CertPEM: v.CertPEM, KeyPEM: v.KeyPEM, CertFile: v.CertFile, KeyFile: v.KeyFile}
+
+	// Clear default and disable TLS if the deleted cert was the default.
+	sc, err := config.LoadServerConfig(ctx, s.cfgStore)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if sc.TLS.DefaultCert == req.Msg.Name {
+		sc.TLS.DefaultCert = ""
+		sc.TLS.TLSEnabled = false
+		sc.TLS.HTTPToHTTPSRedirect = false
+		if err := config.SaveServerConfig(ctx, s.cfgStore, sc); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err)
 		}
-		if err := s.certManager.LoadFromConfig(tlsCfg.DefaultCert, certs); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload certs: %w", err))
-		}
+	}
+
+	if err := s.reloadCertManager(ctx); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload certs: %w", err))
 	}
 	if s.onTLSConfigChange != nil {
 		s.onTLSConfigChange()

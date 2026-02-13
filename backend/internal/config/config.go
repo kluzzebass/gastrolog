@@ -15,6 +15,7 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"gastrolog/internal/chunk"
 	"strconv"
@@ -76,9 +77,11 @@ type Store interface {
 	PutSetting(ctx context.Context, key string, value string) error
 	DeleteSetting(ctx context.Context, key string) error
 
-	// TLS config (dedicated storage, not in Settings KV)
-	GetTLSConfig(ctx context.Context) (*TLSConfig, error)
-	PutTLSConfig(ctx context.Context, cfg *TLSConfig) error
+	// Certificates (dedicated storage, not in Settings KV)
+	ListCertificates(ctx context.Context) ([]string, error)
+	GetCertificate(ctx context.Context, name string) (*CertPEM, error)
+	PutCertificate(ctx context.Context, name string, cert CertPEM) error
+	DeleteCertificate(ctx context.Context, name string) error
 
 	// Users
 	CreateUser(ctx context.Context, user User) error
@@ -99,7 +102,7 @@ type Config struct {
 	Ingesters         []IngesterConfig                 `json:"ingesters,omitempty"`
 	Stores            []StoreConfig                    `json:"stores,omitempty"`
 	Settings          map[string]string                `json:"settings,omitempty"`
-	TLS               *TLSConfig                       `json:"tls,omitempty"`
+	Certs             map[string]CertPEM               `json:"certs,omitempty"`
 }
 
 // ServerConfig holds server-level configuration, organized by concern.
@@ -110,9 +113,8 @@ type ServerConfig struct {
 	TLS      TLSConfig       `json:"tls,omitempty"`
 }
 
-// TLSConfig holds TLS certificate configuration.
-// Supports multiple named certs for server, ingesters, and storage engines.
-// PEM content is stored in config, or loaded from files (directory monitoring).
+// TLSConfig holds TLS server settings.
+// Certificate data is stored separately via the Store certificate CRUD methods.
 type TLSConfig struct {
 	// DefaultCert is the cert name used for TLS-wrapping the Connect RPC / web endpoint.
 	DefaultCert string `json:"default_cert,omitempty"`
@@ -120,8 +122,6 @@ type TLSConfig struct {
 	TLSEnabled bool `json:"tls_enabled,omitempty"`
 	// HTTPToHTTPSRedirect redirects HTTP requests to HTTPS when both listeners are active.
 	HTTPToHTTPSRedirect bool `json:"http_to_https_redirect,omitempty"`
-	// Certs holds named certs; keys are names (e.g. "server", "ingester.http").
-	Certs map[string]CertPEM `json:"certs,omitempty"`
 }
 
 // CertPEM holds certificate content. Either stored PEM or file paths (directory monitoring).
@@ -386,4 +386,29 @@ type StoreConfig struct {
 	// Parsing and validation are the responsibility of the factory that consumes
 	// the params. There is no schema enforcement at the ConfigStore level.
 	Params map[string]string `json:"params,omitempty"`
+}
+
+// LoadServerConfig reads and parses the ServerConfig from the "server" settings key.
+// Returns a zero-value ServerConfig if no setting exists.
+func LoadServerConfig(ctx context.Context, store Store) (ServerConfig, error) {
+	raw, err := store.GetSetting(ctx, "server")
+	if err != nil {
+		return ServerConfig{}, fmt.Errorf("get server setting: %w", err)
+	}
+	var sc ServerConfig
+	if raw != nil {
+		if err := json.Unmarshal([]byte(*raw), &sc); err != nil {
+			return ServerConfig{}, fmt.Errorf("parse server config: %w", err)
+		}
+	}
+	return sc, nil
+}
+
+// SaveServerConfig marshals and writes the ServerConfig to the "server" settings key.
+func SaveServerConfig(ctx context.Context, store Store, sc ServerConfig) error {
+	data, err := json.Marshal(sc)
+	if err != nil {
+		return fmt.Errorf("marshal server config: %w", err)
+	}
+	return store.PutSetting(ctx, "server", string(data))
 }

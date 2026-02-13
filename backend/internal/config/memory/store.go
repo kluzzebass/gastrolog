@@ -4,7 +4,6 @@ package memory
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -21,7 +20,7 @@ type Store struct {
 	stores            map[string]config.StoreConfig
 	ingesters         map[string]config.IngesterConfig
 	settings          map[string]string
-	tlsConfig         *config.TLSConfig
+	certs             map[string]config.CertPEM
 	users             map[string]config.User
 }
 
@@ -36,6 +35,7 @@ func NewStore() *Store {
 		stores:            make(map[string]config.StoreConfig),
 		ingesters:         make(map[string]config.IngesterConfig),
 		settings:          make(map[string]string),
+		certs:             make(map[string]config.CertPEM),
 		users:             make(map[string]config.User),
 	}
 }
@@ -331,58 +331,43 @@ func (s *Store) DeleteSetting(ctx context.Context, key string) error {
 	return nil
 }
 
-// TLS config
-//
-// TLS settings (default_cert, tls_enabled, http_to_https_redirect) live in
-// server config (settings["server"]). Certificates live in tlsConfig.Certs.
+// Certificates
 
-func (s *Store) GetTLSConfig(ctx context.Context) (*config.TLSConfig, error) {
+func (s *Store) ListCertificates(ctx context.Context) ([]string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	out := &config.TLSConfig{Certs: make(map[string]config.CertPEM)}
-	if serverJSON, ok := s.settings["server"]; ok && serverJSON != "" {
-		var serverCfg config.ServerConfig
-		if err := json.Unmarshal([]byte(serverJSON), &serverCfg); err == nil {
-			out.DefaultCert = serverCfg.TLS.DefaultCert
-			out.TLSEnabled = serverCfg.TLS.TLSEnabled
-			out.HTTPToHTTPSRedirect = serverCfg.TLS.HTTPToHTTPSRedirect
-		}
+	names := make([]string, 0, len(s.certs))
+	for name := range s.certs {
+		names = append(names, name)
 	}
-	if s.tlsConfig != nil && s.tlsConfig.Certs != nil {
-		for k, v := range s.tlsConfig.Certs {
-			out.Certs[k] = v
-		}
-	}
-	return out, nil
+	return names, nil
 }
 
-func (s *Store) PutTLSConfig(ctx context.Context, cfg *config.TLSConfig) error {
+func (s *Store) GetCertificate(ctx context.Context, name string) (*config.CertPEM, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	pem, ok := s.certs[name]
+	if !ok {
+		return nil, nil
+	}
+	return &pem, nil
+}
+
+func (s *Store) PutCertificate(ctx context.Context, name string, cert config.CertPEM) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Update TLS settings in server config
-	var serverCfg config.ServerConfig
-	if serverJSON, ok := s.settings["server"]; ok && serverJSON != "" {
-		_ = json.Unmarshal([]byte(serverJSON), &serverCfg)
-	}
-	serverCfg.TLS.DefaultCert = cfg.DefaultCert
-	serverCfg.TLS.TLSEnabled = cfg.TLSEnabled
-	serverCfg.TLS.HTTPToHTTPSRedirect = cfg.HTTPToHTTPSRedirect
-	serverCfg.TLS.Certs = nil
-	data, err := json.Marshal(serverCfg)
-	if err != nil {
-		return err
-	}
-	s.settings["server"] = string(data)
-	// Certs in tlsConfig
-	if s.tlsConfig == nil {
-		s.tlsConfig = &config.TLSConfig{}
-	}
-	s.tlsConfig.Certs = make(map[string]config.CertPEM, len(cfg.Certs))
-	for k, v := range cfg.Certs {
-		s.tlsConfig.Certs[k] = v
-	}
+	s.certs[name] = cert
+	return nil
+}
+
+func (s *Store) DeleteCertificate(ctx context.Context, name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.certs, name)
 	return nil
 }
 

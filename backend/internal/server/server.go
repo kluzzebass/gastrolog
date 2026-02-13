@@ -256,14 +256,14 @@ func (s *Server) redirectMiddleware(next http.Handler) http.Handler {
 // reconfigureTLS starts/stops HTTPS listener based on config. Safe to call from any goroutine.
 func (s *Server) reconfigureTLS() {
 	ctx := context.Background()
-	tlsCfg, err := config.LoadTLSConfig(ctx, s.cfgStore)
+	sc, err := config.LoadServerConfig(ctx, s.cfgStore)
 	if err != nil {
 		s.logger.Warn("reconfigure TLS: load config failed", "error", err)
 		return
 	}
 	// Fall back to HTTP if no default cert or TLS disabled
-	tlsEnabled := tlsCfg.TLSEnabled && tlsCfg.DefaultCert != ""
-	redirectEnabled := tlsCfg.HTTPToHTTPSRedirect && tlsEnabled
+	tlsEnabled := sc.TLS.TLSEnabled && sc.TLS.DefaultCert != ""
+	redirectEnabled := sc.TLS.HTTPToHTTPSRedirect && tlsEnabled
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
