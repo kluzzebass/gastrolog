@@ -144,8 +144,8 @@ func TestApplyConfigIngesters(t *testing.T) {
 
 	cfg := &config.Config{
 		Ingesters: []config.IngesterConfig{
-			{ID: "recv1", Type: "test", Params: map[string]string{}},
-			{ID: "recv2", Type: "test", Params: map[string]string{}},
+			{ID: "recv1", Type: "test", Enabled: true, Params: map[string]string{}},
+			{ID: "recv2", Type: "test", Enabled: true, Params: map[string]string{}},
 		},
 	}
 
@@ -206,7 +206,7 @@ func TestApplyConfigUnknownIngesterType(t *testing.T) {
 
 	cfg := &config.Config{
 		Ingesters: []config.IngesterConfig{
-			{ID: "recv1", Type: "unknown", Params: map[string]string{}},
+			{ID: "recv1", Type: "unknown", Enabled: true, Params: map[string]string{}},
 		},
 	}
 
@@ -260,8 +260,8 @@ func TestApplyConfigDuplicateIngesterID(t *testing.T) {
 
 	cfg := &config.Config{
 		Ingesters: []config.IngesterConfig{
-			{ID: "recv1", Type: "test", Params: map[string]string{}},
-			{ID: "recv1", Type: "test", Params: map[string]string{}}, // duplicate
+			{ID: "recv1", Type: "test", Enabled: true, Params: map[string]string{}},
+			{ID: "recv1", Type: "test", Enabled: true, Params: map[string]string{}}, // duplicate
 		},
 	}
 
@@ -340,7 +340,7 @@ func TestApplyConfigIngesterFactoryError(t *testing.T) {
 
 	cfg := &config.Config{
 		Ingesters: []config.IngesterConfig{
-			{ID: "recv1", Type: "test", Params: map[string]string{}},
+			{ID: "recv1", Type: "test", Enabled: true, Params: map[string]string{}},
 		},
 	}
 
@@ -365,7 +365,7 @@ func TestApplyConfigParamsPassedToIngesterFactory(t *testing.T) {
 
 	cfg := &config.Config{
 		Ingesters: []config.IngesterConfig{
-			{ID: "recv1", Type: "test", Params: map[string]string{
+			{ID: "recv1", Type: "test", Enabled: true, Params: map[string]string{
 				"host": "localhost",
 				"port": "514",
 			}},

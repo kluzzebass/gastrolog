@@ -215,6 +215,10 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 		}
 		ingesterIDs[recvCfg.ID] = true
 
+		if !recvCfg.Enabled {
+			continue
+		}
+
 		// Look up ingester factory.
 		recvFactory, ok := factories.Ingesters[recvCfg.Type]
 		if !ok {
