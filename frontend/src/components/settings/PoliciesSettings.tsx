@@ -361,6 +361,15 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
               expanded={expanded === id}
               onToggle={() => setExpanded(expanded === id ? null : id)}
               onDelete={() => handleDelete(id)}
+              footer={
+                <button
+                  onClick={() => handleSave(id)}
+                  disabled={putPolicy.isPending}
+                  className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
+                >
+                  {putPolicy.isPending ? "Saving..." : "Save"}
+                </button>
+              }
               status={
                 refs.length > 0 ? (
                   <span
@@ -413,15 +422,6 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
                   onChange={(v) => setEdit(id, { cron: v })}
                   dark={dark}
                 />
-                <div className="flex justify-end pt-2">
-                  <button
-                    onClick={() => handleSave(id)}
-                    disabled={putPolicy.isPending}
-                    className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
-                  >
-                    {putPolicy.isPending ? "Saving..." : "Save"}
-                  </button>
-                </div>
               </div>
             </SettingsCard>
           );

@@ -12,6 +12,8 @@ interface SettingsCardProps {
   deleteLabel?: string;
   children: React.ReactNode;
   status?: React.ReactNode;
+  headerRight?: React.ReactNode;
+  footer?: React.ReactNode;
 }
 
 export function SettingsCard({
@@ -24,6 +26,8 @@ export function SettingsCard({
   deleteLabel,
   children,
   status,
+  headerRight,
+  footer,
 }: SettingsCardProps) {
   const c = useThemeClass(dark);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -68,52 +72,7 @@ export function SettingsCard({
           )}
           {status}
         </div>
-        <div className="flex items-center gap-2">
-          {onDelete && !confirmDelete && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setConfirmDelete(true);
-              }}
-              className={`px-2 py-1 text-[0.75em] rounded transition-colors ${c(
-                "text-text-ghost hover:text-severity-error hover:bg-ink-hover",
-                "text-light-text-ghost hover:text-severity-error hover:bg-light-hover",
-              )}`}
-            >
-              {deleteLabel || "Delete"}
-            </button>
-          )}
-          {onDelete && confirmDelete && (
-            <div
-              className="flex items-center gap-1.5"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <span
-                className={`text-[0.75em] ${c("text-severity-error", "text-severity-error")}`}
-              >
-                Confirm?
-              </span>
-              <button
-                onClick={() => {
-                  onDelete();
-                  setConfirmDelete(false);
-                }}
-                className="px-2 py-1 text-[0.75em] rounded bg-severity-error/15 text-severity-error hover:bg-severity-error/25 transition-colors"
-              >
-                Yes
-              </button>
-              <button
-                onClick={() => setConfirmDelete(false)}
-                className={`px-2 py-1 text-[0.75em] rounded transition-colors ${c(
-                  "text-text-muted hover:bg-ink-hover",
-                  "text-light-text-muted hover:bg-light-hover",
-                )}`}
-              >
-                No
-              </button>
-            </div>
-          )}
-        </div>
+        {headerRight}
       </div>
 
       {/* Body */}
@@ -122,6 +81,49 @@ export function SettingsCard({
           className={`px-4 pb-4 pt-1 border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
         >
           {children}
+          {(onDelete || footer) && (
+            <div className="flex items-center justify-between pt-3 mt-3">
+              <div>
+                {onDelete && !confirmDelete && (
+                  <button
+                    onClick={() => setConfirmDelete(true)}
+                    className={`px-2 py-1 text-[0.75em] rounded transition-colors ${c(
+                      "text-text-ghost hover:text-severity-error hover:bg-ink-hover",
+                      "text-light-text-ghost hover:text-severity-error hover:bg-light-hover",
+                    )}`}
+                  >
+                    {deleteLabel || "Delete"}
+                  </button>
+                )}
+                {onDelete && confirmDelete && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[0.75em] text-severity-error">
+                      Confirm?
+                    </span>
+                    <button
+                      onClick={() => {
+                        onDelete();
+                        setConfirmDelete(false);
+                      }}
+                      className="px-2 py-1 text-[0.75em] rounded bg-severity-error/15 text-severity-error hover:bg-severity-error/25 transition-colors"
+                    >
+                      Yes
+                    </button>
+                    <button
+                      onClick={() => setConfirmDelete(false)}
+                      className={`px-2 py-1 text-[0.75em] rounded transition-colors ${c(
+                        "text-text-muted hover:bg-ink-hover",
+                        "text-light-text-muted hover:bg-light-hover",
+                      )}`}
+                    >
+                      No
+                    </button>
+                  </div>
+                )}
+              </div>
+              {footer && <div className="flex items-center gap-2">{footer}</div>}
+            </div>
+          )}
         </div>
       )}
     </div>

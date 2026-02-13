@@ -283,6 +283,15 @@ export function StoresSettings({ dark }: { dark: boolean }) {
               }
               onDelete={() => handleDelete(store.id)}
               deleteLabel="Delete"
+              footer={
+                <button
+                  onClick={() => handleSave(store.id, store.type)}
+                  disabled={putStore.isPending}
+                  className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
+                >
+                  {putStore.isPending ? "Saving..." : "Save"}
+                </button>
+              }
               status={
                 warnings.length > 0 ? (
                   <span className="text-[0.85em] text-severity-warn">
@@ -324,15 +333,6 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                   onChange={(p) => setEdit(store.id, { params: p })}
                   dark={dark}
                 />
-                <div className="flex justify-end pt-2">
-                  <button
-                    onClick={() => handleSave(store.id, store.type)}
-                    disabled={putStore.isPending}
-                    className="px-3 py-1.5 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-50"
-                  >
-                    {putStore.isPending ? "Saving..." : "Save"}
-                  </button>
-                </div>
               </div>
             </SettingsCard>
           );
