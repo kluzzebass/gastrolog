@@ -19,12 +19,11 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
 	"gastrolog/internal/auth"
+	"gastrolog/internal/cert"
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
 	chunkmem "gastrolog/internal/chunk/memory"
@@ -32,6 +31,7 @@ import (
 	configfile "gastrolog/internal/config/file"
 	configmem "gastrolog/internal/config/memory"
 	configsqlite "gastrolog/internal/config/sqlite"
+	"gastrolog/internal/datadir"
 	digestlevel "gastrolog/internal/digester/level"
 	"gastrolog/internal/index"
 	indexfile "gastrolog/internal/index/file"
@@ -39,7 +39,6 @@ import (
 	"gastrolog/internal/ingester/chatterbox"
 	ingesthttp "gastrolog/internal/ingester/http"
 	ingestsyslog "gastrolog/internal/ingester/syslog"
-	"gastrolog/internal/cert"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/repl"
@@ -47,7 +46,8 @@ import (
 )
 
 func main() {
-	configFlag := flag.String("config", "", "config store (memory, json:path, or sqlite:path)")
+	datadirFlag := flag.String("datadir", "", "data directory (default: platform config dir)")
+	configType := flag.String("config-type", "sqlite", "config store type: sqlite, json, or memory")
 	pprofAddr := flag.String("pprof", "", "pprof HTTP server address (e.g. localhost:6060)")
 	serverAddr := flag.String("server", ":4564", "Connect RPC server address (empty to disable)")
 	replMode := flag.Bool("repl", false, "start interactive REPL after system is running")
@@ -78,15 +78,29 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	if err := run(ctx, logger, *configFlag, *serverAddr, *replMode); err != nil {
+	if err := run(ctx, logger, *datadirFlag, *configType, *serverAddr, *replMode); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, logger *slog.Logger, configFlagValue, serverAddr string, replMode bool) error {
+func run(ctx context.Context, logger *slog.Logger, datadirFlag, configType, serverAddr string, replMode bool) error {
+	// Resolve data directory.
+	dd, err := resolveDataDir(datadirFlag)
+	if err != nil {
+		return fmt.Errorf("resolve data directory: %w", err)
+	}
+
+	// For non-memory config types, ensure the data directory exists.
+	if configType != "memory" {
+		if err := dd.EnsureExists(); err != nil {
+			return err
+		}
+		logger.Info("data directory", "path", dd.Root())
+	}
+
 	// Open config store.
-	cfgStore, err := openConfigStore(configFlagValue)
+	cfgStore, err := openConfigStore(dd, configType)
 	if err != nil {
 		return fmt.Errorf("open config store: %w", err)
 	}
@@ -95,19 +109,22 @@ func run(ctx context.Context, logger *slog.Logger, configFlagValue, serverAddr s
 	}
 
 	// Load configuration.
-	configStoreLabel := configFlagValue
-	if configStoreLabel == "" {
-		configStoreLabel = "memory"
-	}
-	logger.Info("loading config", "store", configStoreLabel)
+	logger.Info("loading config", "type", configType)
 	cfg, err := cfgStore.Load(ctx)
 	if err != nil {
 		return err
 	}
 
+	// Determine dataDir for bootstrap: persistent stores get the real dir,
+	// memory gets empty string (in-memory default store).
+	bootstrapDataDir := ""
+	if configType != "memory" {
+		bootstrapDataDir = dd.Root()
+	}
+
 	if cfg == nil {
 		logger.Info("no config found, bootstrapping default configuration")
-		if err := config.Bootstrap(ctx, cfgStore); err != nil {
+		if err := config.Bootstrap(ctx, cfgStore, bootstrapDataDir); err != nil {
 			return fmt.Errorf("bootstrap config: %w", err)
 		}
 		cfg, err = cfgStore.Load(ctx)
@@ -243,19 +260,12 @@ func buildFactories(logger *slog.Logger) orchestrator.Factories {
 	}
 }
 
-// parseConfigFlag parses a config flag value into store type and path.
-// Formats: "json:path", "sqlite:path", or bare path (inferred by extension).
-func parseConfigFlag(value string) (storeType, path string, err error) {
-	if i := strings.IndexByte(value, ':'); i > 0 {
-		return value[:i], value[i+1:], nil
+// resolveDataDir returns a Dir from the flag value, or the platform default.
+func resolveDataDir(flagValue string) (datadir.Dir, error) {
+	if flagValue != "" {
+		return datadir.New(flagValue), nil
 	}
-	// Bare path: infer by extension.
-	switch filepath.Ext(value) {
-	case ".db", ".sqlite", ".sqlite3":
-		return "sqlite", value, nil
-	default:
-		return "json", value, nil
-	}
+	return datadir.Default()
 }
 
 // buildTokenService reads the server config from the store and creates a TokenService.
@@ -289,22 +299,16 @@ func buildTokenService(ctx context.Context, cfgStore config.Store) (*auth.TokenS
 	return auth.NewTokenService(secret, duration), nil
 }
 
-// openConfigStore creates a config.Store from a flag value.
-// Empty string returns an in-memory store (no persistence).
-func openConfigStore(flagValue string) (config.Store, error) {
-	if flagValue == "" || flagValue == "memory" {
+// openConfigStore creates a config.Store based on config type and data directory.
+func openConfigStore(dd datadir.Dir, configType string) (config.Store, error) {
+	switch configType {
+	case "memory":
 		return configmem.NewStore(), nil
-	}
-	storeType, path, err := parseConfigFlag(flagValue)
-	if err != nil {
-		return nil, err
-	}
-	switch storeType {
 	case "json":
-		return configfile.NewStore(path), nil
+		return configfile.NewStore(dd.ConfigPath("json"), dd.UsersPath()), nil
 	case "sqlite":
-		return configsqlite.NewStore(path)
+		return configsqlite.NewStore(dd.ConfigPath("sqlite"))
 	default:
-		return nil, fmt.Errorf("unknown config store type: %q", storeType)
+		return nil, fmt.Errorf("unknown config store type: %q", configType)
 	}
 }

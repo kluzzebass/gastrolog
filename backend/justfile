@@ -8,24 +8,24 @@ _default:
 build:
   go build -o gastrolog ./cmd/gastrolog
 
-# Runs the gastrolog backend with a json configuration.
-run-json:
-  go run ./cmd/gastrolog -config json:config.json
-
-# Runs the gastrolog backend with an sqlite configuration.
+# Runs the gastrolog backend with sqlite config (default).
 run-sqlite:
-  go run ./cmd/gastrolog -config sqlite:config.db
-
-# Runs the gastrolog backend with an in-memory configuration.
-run-memory:
   go run ./cmd/gastrolog
+
+# Runs the gastrolog backend with json config.
+run-json:
+  go run ./cmd/gastrolog -config-type json
+
+# Runs the gastrolog backend with in-memory config (no persistence).
+run-memory:
+  go run ./cmd/gastrolog -config-type memory
 
 alias run := run-sqlite
 
-# Runs the gastrolog backend with the specified configuration, and pprof server.
+# Runs the gastrolog backend with pprof server.
 pprof:
-  go run ./cmd/gastrolog -config sqlite:config.db -pprof localhost:6060
+  go run ./cmd/gastrolog -pprof localhost:6060
 
-# Runs the gastrolog backend with the specified configuration, and REPL.
+# Runs the gastrolog backend with REPL.
 repl:
-  go run ./cmd/gastrolog -config sqlite:config.db -repl
+  go run ./cmd/gastrolog -repl

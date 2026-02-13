@@ -32,14 +32,17 @@ type envelope struct {
 // Configuration is persisted as JSON for human readability.
 // Writes are atomic via temp file + rename with round-trip validation.
 type Store struct {
-	path string
+	path      string
+	usersPath string
 }
 
 var _ config.Store = (*Store)(nil)
 
 // NewStore creates a new file-based ConfigStore.
-func NewStore(path string) *Store {
-	return &Store{path: path}
+// configPath is the path to the config JSON file.
+// usersPath is the path to the users JSON file.
+func NewStore(configPath, usersPath string) *Store {
+	return &Store{path: configPath, usersPath: usersPath}
 }
 
 // Load reads the full configuration from disk.
@@ -514,12 +517,8 @@ func (s *Store) PutTLSConfig(ctx context.Context, tlsCfg *config.TLSConfig) erro
 // Users are operational data (not part of the Config struct), so they are
 // stored in a separate JSON file alongside the main config file.
 
-func (s *Store) usersPath() string {
-	return s.path + ".users.json"
-}
-
 func (s *Store) loadUsers() (map[string]config.User, error) {
-	data, err := os.ReadFile(s.usersPath())
+	data, err := os.ReadFile(s.usersPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return make(map[string]config.User), nil
@@ -537,7 +536,7 @@ func (s *Store) loadUsers() (map[string]config.User, error) {
 }
 
 func (s *Store) flushUsers(users map[string]config.User) error {
-	dir := filepath.Dir(s.usersPath())
+	dir := filepath.Dir(s.usersPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("create users directory: %w", err)
 	}
@@ -545,12 +544,12 @@ func (s *Store) flushUsers(users map[string]config.User) error {
 	if err != nil {
 		return fmt.Errorf("marshal users: %w", err)
 	}
-	tmpPath := s.usersPath() + ".tmp"
+	tmpPath := s.usersPath + ".tmp"
 	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
 		os.Remove(tmpPath)
 		return fmt.Errorf("write temp users file: %w", err)
 	}
-	if err := os.Rename(tmpPath, s.usersPath()); err != nil {
+	if err := os.Rename(tmpPath, s.usersPath); err != nil {
 		os.Remove(tmpPath)
 		return fmt.Errorf("rename users file: %w", err)
 	}

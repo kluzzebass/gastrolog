@@ -11,37 +11,45 @@ import (
 	"gastrolog/internal/config/storetest"
 )
 
+// newTestStore creates a Store with config and users paths in the given directory.
+func newTestStore(dir string) *Store {
+	return NewStore(
+		filepath.Join(dir, "config.json"),
+		filepath.Join(dir, "users.json"),
+	)
+}
+
 func TestConformance(t *testing.T) {
 	storetest.TestStore(t, func(t *testing.T) config.Store {
-		return NewStore(filepath.Join(t.TempDir(), "config.json"))
+		return newTestStore(t.TempDir())
 	})
 }
 
 func TestStoreCreatesDirectory(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "subdir", "nested", "config.json")
+	dir := filepath.Join(t.TempDir(), "subdir", "nested")
+	configPath := filepath.Join(dir, "config.json")
 
-	s := NewStore(path)
+	s := NewStore(configPath, filepath.Join(dir, "users.json"))
 	ctx := context.Background()
 
 	if err := s.PutIngester(ctx, config.IngesterConfig{ID: "r1", Type: "test"}); err != nil {
 		t.Fatalf("PutIngester: %v", err)
 	}
 
-	if _, err := os.Stat(path); err != nil {
+	if _, err := os.Stat(configPath); err != nil {
 		t.Fatalf("config file should exist: %v", err)
 	}
 }
 
 func TestStoreInvalidJSON(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "config.json")
+	configPath := filepath.Join(dir, "config.json")
 
-	if err := os.WriteFile(path, []byte("{invalid}"), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte("{invalid}"), 0644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
-	s := NewStore(path)
+	s := newTestStore(dir)
 	_, err := s.Load(context.Background())
 	if err == nil {
 		t.Fatal("expected error loading invalid JSON, got nil")
@@ -50,15 +58,15 @@ func TestStoreInvalidJSON(t *testing.T) {
 
 func TestStoreUnversionedFile(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "config.json")
+	configPath := filepath.Join(dir, "config.json")
 
 	// Write a legacy unversioned config (no "version" field).
 	data := `{"ingesters": [{"id": "r1", "type": "test"}]}`
-	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(data), 0644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
-	s := NewStore(path)
+	s := newTestStore(dir)
 	_, err := s.Load(context.Background())
 	if err == nil {
 		t.Fatal("expected error for unversioned config, got nil")
@@ -70,9 +78,9 @@ func TestStoreUnversionedFile(t *testing.T) {
 
 func TestStoreJSONIsHumanReadable(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "config.json")
+	configPath := filepath.Join(dir, "config.json")
 
-	s := NewStore(path)
+	s := newTestStore(dir)
 	ctx := context.Background()
 
 	if err := s.PutIngester(ctx, config.IngesterConfig{
@@ -81,7 +89,7 @@ func TestStoreJSONIsHumanReadable(t *testing.T) {
 		t.Fatalf("PutIngester: %v", err)
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
@@ -97,17 +105,16 @@ func TestStoreJSONIsHumanReadable(t *testing.T) {
 
 func TestStoreReloadFromDisk(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "config.json")
 
-	s1 := NewStore(path)
+	s1 := newTestStore(dir)
 	ctx := context.Background()
 
 	if err := s1.PutIngester(ctx, config.IngesterConfig{ID: "r1", Type: "test"}); err != nil {
 		t.Fatalf("PutIngester: %v", err)
 	}
 
-	// Create new store pointing at same file.
-	s2 := NewStore(path)
+	// Create new store pointing at same files.
+	s2 := newTestStore(dir)
 	got, err := s2.GetIngester(ctx, "r1")
 	if err != nil {
 		t.Fatalf("GetIngester from new store: %v", err)

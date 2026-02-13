@@ -9,9 +9,24 @@ import (
 )
 
 // DefaultConfig returns the bootstrap configuration for first-run.
-// This sets up a chatterbox ingester routing to an in-memory store
-// with a 5-minute rotation policy.
-func DefaultConfig() *Config {
+// If dataDir is non-empty, the default store uses file-backed storage under
+// <dataDir>/stores/default/. Otherwise it uses an in-memory store.
+func DefaultConfig(dataDir string) *Config {
+	defaultStore := StoreConfig{
+		ID:        "default",
+		Filter:    StringPtr("catch-all"),
+		Policy:    StringPtr("default"),
+		Retention: StringPtr("default"),
+	}
+	if dataDir != "" {
+		defaultStore.Type = "file"
+		defaultStore.Params = map[string]string{
+			"dir": dataDir + "/stores/default",
+		}
+	} else {
+		defaultStore.Type = "memory"
+	}
+
 	return &Config{
 		Filters: map[string]FilterConfig{
 			"catch-all": {Expression: "*"},
@@ -22,15 +37,7 @@ func DefaultConfig() *Config {
 		RetentionPolicies: map[string]RetentionPolicyConfig{
 			"default": {MaxChunks: Int64Ptr(10)},
 		},
-		Stores: []StoreConfig{
-			{
-				ID:        "default",
-				Type:      "memory",
-				Filter:    StringPtr("catch-all"),
-				Policy:    StringPtr("default"),
-				Retention: StringPtr("default"),
-			},
-		},
+		Stores:    []StoreConfig{defaultStore},
 		Ingesters: []IngesterConfig{
 			{
 				ID:   "chatterbox",
@@ -48,8 +55,9 @@ func DefaultConfig() *Config {
 
 // Bootstrap writes the default configuration to a store using individual
 // CRUD operations. Call this when Load returns nil (no config exists).
-func Bootstrap(ctx context.Context, store Store) error {
-	cfg := DefaultConfig()
+// dataDir is passed through to DefaultConfig to determine store backing.
+func Bootstrap(ctx context.Context, store Store, dataDir string) error {
+	cfg := DefaultConfig(dataDir)
 
 	for id, fc := range cfg.Filters {
 		if err := store.PutFilter(ctx, id, fc); err != nil {

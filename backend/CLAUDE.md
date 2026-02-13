@@ -19,14 +19,16 @@ go mod tidy                                       # Clean dependencies
 ## Running
 
 ```bash
-just run                    # Server with config.json
+just run                    # Server with SQLite config (default)
+just run-json               # Server with JSON config
+just run-memory             # Server with in-memory config (no persistence)
 just repl                   # Server + interactive REPL
 just pprof                  # Server + pprof on :6060
 ```
 
 The server listens on `:4564` by default (Connect RPC / gRPC-Web).
 
-CLI flags: `-server`, `-repl`, `-config <path>`, `-pprof <addr>`.
+CLI flags: `-datadir <path>`, `-config-type <sqlite|json|memory>`, `-server`, `-repl`, `-pprof <addr>`.
 
 ## Proto Generation
 
@@ -41,7 +43,20 @@ Always regenerate both backend and frontend after proto changes.
 
 ## Data Directory
 
-File-based stores write to `data/` by default (configured in `config.json`). Chunk directories are named by their 13-char base32hex ChunkID. Delete `data/` to start fresh after format changes.
+gastrolog uses a platform-appropriate data directory for all persistent state:
+- **Linux:** `~/.config/gastrolog`
+- **macOS:** `~/Library/Application Support/gastrolog`
+- **Windows:** `%APPDATA%/gastrolog`
+
+Override with `-datadir <path>`. Layout:
+```
+<datadir>/
+  config.db or config.json    (config store)
+  users.json                   (user credentials, JSON store only)
+  stores/<id>/                 (per-store chunk + index data)
+```
+
+Chunk directories within each store are named by their 13-char base32hex ChunkID. Delete the data directory to start fresh after format changes.
 
 ## Go Style Rules
 

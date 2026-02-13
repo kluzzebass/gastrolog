@@ -1,3 +1,6 @@
 config.json
+config.db
+users.json
+stores/
 data/
 /gastrolog

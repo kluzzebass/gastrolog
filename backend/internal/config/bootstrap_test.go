@@ -8,8 +8,8 @@ import (
 	"gastrolog/internal/config/memory"
 )
 
-func TestDefaultConfig(t *testing.T) {
-	cfg := config.DefaultConfig()
+func TestDefaultConfigMemory(t *testing.T) {
+	cfg := config.DefaultConfig("")
 	if cfg == nil {
 		t.Fatal("expected non-nil config")
 	}
@@ -26,11 +26,31 @@ func TestDefaultConfig(t *testing.T) {
 	if len(cfg.Stores) != 1 {
 		t.Errorf("expected 1 store, got %d", len(cfg.Stores))
 	}
+	if cfg.Stores[0].Type != "memory" {
+		t.Errorf("expected store type 'memory', got %q", cfg.Stores[0].Type)
+	}
 	if len(cfg.Ingesters) != 1 {
 		t.Errorf("expected 1 ingester, got %d", len(cfg.Ingesters))
 	}
 	if cfg.Ingesters[0].ID != "chatterbox" {
 		t.Errorf("expected ingester ID 'chatterbox', got %q", cfg.Ingesters[0].ID)
+	}
+}
+
+func TestDefaultConfigWithDataDir(t *testing.T) {
+	cfg := config.DefaultConfig("/tmp/gastrolog")
+	if cfg == nil {
+		t.Fatal("expected non-nil config")
+	}
+	if len(cfg.Stores) != 1 {
+		t.Fatalf("expected 1 store, got %d", len(cfg.Stores))
+	}
+	st := cfg.Stores[0]
+	if st.Type != "file" {
+		t.Errorf("expected store type 'file', got %q", st.Type)
+	}
+	if st.Params["dir"] != "/tmp/gastrolog/stores/default" {
+		t.Errorf("expected dir '/tmp/gastrolog/stores/default', got %q", st.Params["dir"])
 	}
 }
 
@@ -48,7 +68,7 @@ func TestBootstrap(t *testing.T) {
 	}
 
 	// Bootstrap.
-	if err := config.Bootstrap(ctx, s); err != nil {
+	if err := config.Bootstrap(ctx, s, ""); err != nil {
 		t.Fatalf("Bootstrap: %v", err)
 	}
 
