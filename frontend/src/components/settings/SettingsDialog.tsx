@@ -4,16 +4,23 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { EyeIcon, EyeOffIcon } from "../icons";
 import { StoresSettings } from "./StoresSettings";
 import { IngestersSettings } from "./IngestersSettings";
+import { CertificatesSettings } from "./CertificatesSettings";
 import { FiltersSettings } from "./FiltersSettings";
 import { PoliciesSettings } from "./PoliciesSettings";
 import { RetentionPoliciesSettings } from "./RetentionPoliciesSettings";
 import { UsersSettings } from "./UsersSettings";
-import { useServerConfig, usePutServerConfig } from "../../api/hooks/useConfig";
+import {
+  useServerConfig,
+  usePutServerConfig,
+  useCertificates,
+  JWT_KEEP,
+} from "../../api/hooks/useConfig";
 import { useToast } from "../Toast";
 import { FormField, TextInput, NumberInput } from "./FormField";
 
 export type SettingsTab =
   | "service"
+  | "certificates"
   | "stores"
   | "ingesters"
   | "filters"
@@ -38,6 +45,7 @@ type TabDef = {
 
 const allTabs: TabDef[] = [
   { id: "service", label: "Service", icon: ServiceIcon },
+  { id: "certificates", label: "Certificates", icon: CertIcon },
   { id: "users", label: "Users", icon: UsersIcon, adminOnly: true },
   { id: "ingesters", label: "Ingesters", icon: IngesterIcon },
   { id: "filters", label: "Filters", icon: FilterIcon },
@@ -129,6 +137,7 @@ export function SettingsDialog({
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-5">
           {tab === "service" && <ServiceSettings dark={dark} />}
+          {tab === "certificates" && <CertificatesSettings dark={dark} />}
           {tab === "users" && <UsersSettings dark={dark} />}
           {tab === "ingesters" && <IngestersSettings dark={dark} />}
           {tab === "filters" && <FiltersSettings dark={dark} />}
@@ -145,6 +154,7 @@ export function SettingsDialog({
 function ServiceSettings({ dark }: { dark: boolean }) {
   const c = useThemeClass(dark);
   const { data, isLoading } = useServerConfig();
+  const { data: certData } = useCertificates();
   const putConfig = usePutServerConfig();
   const { addToast } = useToast();
 
@@ -152,17 +162,25 @@ function ServiceSettings({ dark }: { dark: boolean }) {
   const [jwtSecret, setJwtSecret] = useState("");
   const [minPwLen, setMinPwLen] = useState("");
   const [maxJobs, setMaxJobs] = useState("");
+  const [tlsDefaultCert, setTlsDefaultCert] = useState("");
+  const [tlsEnabled, setTlsEnabled] = useState(false);
+  const [httpToHttpsRedirect, setHttpToHttpsRedirect] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
+
+  const certNames = certData?.names ?? [];
 
   useEffect(() => {
     if (data && !initialized) {
       setTokenDuration(data.tokenDuration);
-      setJwtSecret(data.jwtSecret);
+      setJwtSecret(data.jwtSecretConfigured ? JWT_KEEP : "");
       setMinPwLen(
         data.minPasswordLength ? String(data.minPasswordLength) : "8",
       );
       setMaxJobs(data.maxConcurrentJobs ? String(data.maxConcurrentJobs) : "4");
+      setTlsDefaultCert(data.tlsDefaultCert ?? "");
+      setTlsEnabled(data.tlsEnabled ?? false);
+      setHttpToHttpsRedirect(data.httpToHttpsRedirect ?? false);
       setInitialized(true);
     }
   }, [data, initialized]);
@@ -171,17 +189,24 @@ function ServiceSettings({ dark }: { dark: boolean }) {
     initialized &&
     data &&
     (tokenDuration !== data.tokenDuration ||
-      jwtSecret !== data.jwtSecret ||
+      (jwtSecret !== JWT_KEEP && jwtSecret !== "") ||
       minPwLen !== String(data.minPasswordLength || 8) ||
-      maxJobs !== String(data.maxConcurrentJobs || 4));
+      maxJobs !== String(data.maxConcurrentJobs || 4) ||
+      tlsDefaultCert !== (data.tlsDefaultCert ?? "") ||
+      tlsEnabled !== (data.tlsEnabled ?? false) ||
+      httpToHttpsRedirect !== (data.httpToHttpsRedirect ?? false));
 
   const handleSave = async () => {
     try {
       await putConfig.mutateAsync({
         tokenDuration,
-        jwtSecret,
+        jwtSecret: jwtSecret === JWT_KEEP ? JWT_KEEP : jwtSecret,
         minPasswordLength: parseInt(minPwLen, 10) || 8,
         maxConcurrentJobs: parseInt(maxJobs, 10) || 4,
+        tlsDefaultCert,
+        tlsEnabled: certNames.includes(tlsDefaultCert) ? tlsEnabled : false,
+        httpToHttpsRedirect:
+          certNames.includes(tlsDefaultCert) ? httpToHttpsRedirect : false,
       });
       addToast("Server configuration updated", "info");
     } catch (err: any) {
@@ -192,11 +217,14 @@ function ServiceSettings({ dark }: { dark: boolean }) {
   const handleReset = () => {
     if (data) {
       setTokenDuration(data.tokenDuration);
-      setJwtSecret(data.jwtSecret);
+      setJwtSecret(data.jwtSecretConfigured ? JWT_KEEP : "");
       setMinPwLen(
         data.minPasswordLength ? String(data.minPasswordLength) : "8",
       );
       setMaxJobs(data.maxConcurrentJobs ? String(data.maxConcurrentJobs) : "4");
+      setTlsDefaultCert(data.tlsDefaultCert ?? "");
+      setTlsEnabled(data.tlsEnabled ?? false);
+      setHttpToHttpsRedirect(data.httpToHttpsRedirect ?? false);
     }
   };
 
@@ -234,14 +262,15 @@ function ServiceSettings({ dark }: { dark: boolean }) {
 
           <FormField
             label="JWT Secret"
-            description="The signing key used for authentication tokens. Changing this will invalidate all existing sessions."
+            description="The signing key used for authentication tokens. Never shown; paste a new value to change. Changing this will invalidate all existing sessions."
             dark={dark}
           >
             <div className="relative">
               <input
                 type={showSecret ? "text" : "password"}
-                value={jwtSecret}
+                value={jwtSecret === JWT_KEEP ? "" : jwtSecret}
                 onChange={(e) => setJwtSecret(e.target.value)}
+                placeholder={data?.jwtSecretConfigured ? "•••••••• (paste to replace)" : "Set JWT secret"}
                 className={`w-full px-2.5 py-1.5 pr-9 text-[0.85em] font-mono border rounded focus:outline-none transition-colors ${c(
                   "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
                   "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
@@ -292,6 +321,59 @@ function ServiceSettings({ dark }: { dark: boolean }) {
             />
           </FormField>
 
+          <FormField
+            label="TLS default certificate"
+            description="Certificate used for HTTPS. Set in Certificates tab."
+            dark={dark}
+          >
+            <select
+              value={tlsDefaultCert}
+              onChange={(e) => setTlsDefaultCert(e.target.value)}
+              className={`w-full px-2.5 py-1.5 text-[0.85em] border rounded focus:outline-none transition-colors ${c(
+                "bg-ink-surface border-ink-border text-text-bright focus:border-copper-dim",
+                "bg-light-surface border-light-border text-light-text-bright focus:border-copper",
+              )}`}
+            >
+              <option value="">— none —</option>
+              {certNames.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </FormField>
+
+          {tlsDefaultCert && (
+            <>
+              <FormField
+                label="Enable TLS (HTTPS)"
+                description="Serve HTTPS when a default certificate is set"
+                dark={dark}
+              >
+                <input
+                  type="checkbox"
+                  checked={tlsEnabled}
+                  onChange={(e) => setTlsEnabled(e.target.checked)}
+                  className="w-4 h-4"
+                />
+              </FormField>
+              {tlsEnabled && (
+                <FormField
+                  label="Redirect HTTP to HTTPS"
+                  description="Redirect plain HTTP requests to HTTPS"
+                  dark={dark}
+                >
+                  <input
+                    type="checkbox"
+                    checked={httpToHttpsRedirect}
+                    onChange={(e) => setHttpToHttpsRedirect(e.target.checked)}
+                    className="w-4 h-4"
+                  />
+                </FormField>
+              )}
+            </>
+          )}
+
           <div className="flex gap-2 mt-1">
             <button
               onClick={handleSave}
@@ -315,6 +397,23 @@ function ServiceSettings({ dark }: { dark: boolean }) {
         </div>
       )}
     </div>
+  );
+}
+
+function CertIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </svg>
   );
 }
 

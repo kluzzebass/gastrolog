@@ -39,6 +39,7 @@ import (
 	"gastrolog/internal/ingester/chatterbox"
 	ingesthttp "gastrolog/internal/ingester/http"
 	ingestsyslog "gastrolog/internal/ingester/syslog"
+	"gastrolog/internal/cert"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/repl"
@@ -162,11 +163,25 @@ func run(ctx context.Context, logger *slog.Logger, configFlagValue, serverAddr s
 		return fmt.Errorf("build token service: %w", err)
 	}
 
+	// Certificate manager: load certs from config store.
+	certMgr := cert.New(cert.Config{Logger: logger})
+	tlsCfg, err := config.LoadTLSConfig(ctx, cfgStore)
+	if err != nil {
+		return fmt.Errorf("load TLS config: %w", err)
+	}
+	certs := make(map[string]cert.CertSource)
+	for k, v := range tlsCfg.Certs {
+		certs[k] = cert.CertSource{CertPEM: v.CertPEM, KeyPEM: v.KeyPEM, CertFile: v.CertFile, KeyFile: v.KeyFile}
+	}
+	if err := certMgr.LoadFromConfig(tlsCfg.DefaultCert, certs); err != nil {
+		return fmt.Errorf("load certs: %w", err)
+	}
+
 	// Start Connect RPC server if address is provided.
 	var srv *server.Server
 	var serverWg sync.WaitGroup
 	if serverAddr != "" {
-		srv = server.New(orch, cfgStore, factories, tokens, server.Config{Logger: logger})
+		srv = server.New(orch, cfgStore, factories, tokens, server.Config{Logger: logger, CertManager: certMgr})
 		serverWg.Add(1)
 		go func() {
 			defer serverWg.Done()

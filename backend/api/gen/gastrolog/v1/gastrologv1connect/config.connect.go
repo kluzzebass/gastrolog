@@ -90,6 +90,18 @@ const (
 	// ConfigServiceDeleteSavedQueryProcedure is the fully-qualified name of the ConfigService's
 	// DeleteSavedQuery RPC.
 	ConfigServiceDeleteSavedQueryProcedure = "/gastrolog.v1.ConfigService/DeleteSavedQuery"
+	// ConfigServiceListCertificatesProcedure is the fully-qualified name of the ConfigService's
+	// ListCertificates RPC.
+	ConfigServiceListCertificatesProcedure = "/gastrolog.v1.ConfigService/ListCertificates"
+	// ConfigServiceGetCertificateProcedure is the fully-qualified name of the ConfigService's
+	// GetCertificate RPC.
+	ConfigServiceGetCertificateProcedure = "/gastrolog.v1.ConfigService/GetCertificate"
+	// ConfigServicePutCertificateProcedure is the fully-qualified name of the ConfigService's
+	// PutCertificate RPC.
+	ConfigServicePutCertificateProcedure = "/gastrolog.v1.ConfigService/PutCertificate"
+	// ConfigServiceDeleteCertificateProcedure is the fully-qualified name of the ConfigService's
+	// DeleteCertificate RPC.
+	ConfigServiceDeleteCertificateProcedure = "/gastrolog.v1.ConfigService/DeleteCertificate"
 )
 
 // ConfigServiceClient is a client for the gastrolog.v1.ConfigService service.
@@ -134,6 +146,14 @@ type ConfigServiceClient interface {
 	PutSavedQuery(context.Context, *connect.Request[v1.PutSavedQueryRequest]) (*connect.Response[v1.PutSavedQueryResponse], error)
 	// DeleteSavedQuery removes a saved query by name.
 	DeleteSavedQuery(context.Context, *connect.Request[v1.DeleteSavedQueryRequest]) (*connect.Response[v1.DeleteSavedQueryResponse], error)
+	// ListCertificates returns all certificate names.
+	ListCertificates(context.Context, *connect.Request[v1.ListCertificatesRequest]) (*connect.Response[v1.ListCertificatesResponse], error)
+	// GetCertificate returns a certificate by name (includes PEM content).
+	GetCertificate(context.Context, *connect.Request[v1.GetCertificateRequest]) (*connect.Response[v1.GetCertificateResponse], error)
+	// PutCertificate creates or updates a certificate.
+	PutCertificate(context.Context, *connect.Request[v1.PutCertificateRequest]) (*connect.Response[v1.PutCertificateResponse], error)
+	// DeleteCertificate removes a certificate.
+	DeleteCertificate(context.Context, *connect.Request[v1.DeleteCertificateRequest]) (*connect.Response[v1.DeleteCertificateResponse], error)
 }
 
 // NewConfigServiceClient constructs a client for the gastrolog.v1.ConfigService service. By
@@ -267,6 +287,30 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("DeleteSavedQuery")),
 			connect.WithClientOptions(opts...),
 		),
+		listCertificates: connect.NewClient[v1.ListCertificatesRequest, v1.ListCertificatesResponse](
+			httpClient,
+			baseURL+ConfigServiceListCertificatesProcedure,
+			connect.WithSchema(configServiceMethods.ByName("ListCertificates")),
+			connect.WithClientOptions(opts...),
+		),
+		getCertificate: connect.NewClient[v1.GetCertificateRequest, v1.GetCertificateResponse](
+			httpClient,
+			baseURL+ConfigServiceGetCertificateProcedure,
+			connect.WithSchema(configServiceMethods.ByName("GetCertificate")),
+			connect.WithClientOptions(opts...),
+		),
+		putCertificate: connect.NewClient[v1.PutCertificateRequest, v1.PutCertificateResponse](
+			httpClient,
+			baseURL+ConfigServicePutCertificateProcedure,
+			connect.WithSchema(configServiceMethods.ByName("PutCertificate")),
+			connect.WithClientOptions(opts...),
+		),
+		deleteCertificate: connect.NewClient[v1.DeleteCertificateRequest, v1.DeleteCertificateResponse](
+			httpClient,
+			baseURL+ConfigServiceDeleteCertificateProcedure,
+			connect.WithSchema(configServiceMethods.ByName("DeleteCertificate")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -292,6 +336,10 @@ type configServiceClient struct {
 	getSavedQueries       *connect.Client[v1.GetSavedQueriesRequest, v1.GetSavedQueriesResponse]
 	putSavedQuery         *connect.Client[v1.PutSavedQueryRequest, v1.PutSavedQueryResponse]
 	deleteSavedQuery      *connect.Client[v1.DeleteSavedQueryRequest, v1.DeleteSavedQueryResponse]
+	listCertificates      *connect.Client[v1.ListCertificatesRequest, v1.ListCertificatesResponse]
+	getCertificate        *connect.Client[v1.GetCertificateRequest, v1.GetCertificateResponse]
+	putCertificate        *connect.Client[v1.PutCertificateRequest, v1.PutCertificateResponse]
+	deleteCertificate     *connect.Client[v1.DeleteCertificateRequest, v1.DeleteCertificateResponse]
 }
 
 // GetConfig calls gastrolog.v1.ConfigService.GetConfig.
@@ -394,6 +442,26 @@ func (c *configServiceClient) DeleteSavedQuery(ctx context.Context, req *connect
 	return c.deleteSavedQuery.CallUnary(ctx, req)
 }
 
+// ListCertificates calls gastrolog.v1.ConfigService.ListCertificates.
+func (c *configServiceClient) ListCertificates(ctx context.Context, req *connect.Request[v1.ListCertificatesRequest]) (*connect.Response[v1.ListCertificatesResponse], error) {
+	return c.listCertificates.CallUnary(ctx, req)
+}
+
+// GetCertificate calls gastrolog.v1.ConfigService.GetCertificate.
+func (c *configServiceClient) GetCertificate(ctx context.Context, req *connect.Request[v1.GetCertificateRequest]) (*connect.Response[v1.GetCertificateResponse], error) {
+	return c.getCertificate.CallUnary(ctx, req)
+}
+
+// PutCertificate calls gastrolog.v1.ConfigService.PutCertificate.
+func (c *configServiceClient) PutCertificate(ctx context.Context, req *connect.Request[v1.PutCertificateRequest]) (*connect.Response[v1.PutCertificateResponse], error) {
+	return c.putCertificate.CallUnary(ctx, req)
+}
+
+// DeleteCertificate calls gastrolog.v1.ConfigService.DeleteCertificate.
+func (c *configServiceClient) DeleteCertificate(ctx context.Context, req *connect.Request[v1.DeleteCertificateRequest]) (*connect.Response[v1.DeleteCertificateResponse], error) {
+	return c.deleteCertificate.CallUnary(ctx, req)
+}
+
 // ConfigServiceHandler is an implementation of the gastrolog.v1.ConfigService service.
 type ConfigServiceHandler interface {
 	// GetConfig returns the current configuration.
@@ -436,6 +504,14 @@ type ConfigServiceHandler interface {
 	PutSavedQuery(context.Context, *connect.Request[v1.PutSavedQueryRequest]) (*connect.Response[v1.PutSavedQueryResponse], error)
 	// DeleteSavedQuery removes a saved query by name.
 	DeleteSavedQuery(context.Context, *connect.Request[v1.DeleteSavedQueryRequest]) (*connect.Response[v1.DeleteSavedQueryResponse], error)
+	// ListCertificates returns all certificate names.
+	ListCertificates(context.Context, *connect.Request[v1.ListCertificatesRequest]) (*connect.Response[v1.ListCertificatesResponse], error)
+	// GetCertificate returns a certificate by name (includes PEM content).
+	GetCertificate(context.Context, *connect.Request[v1.GetCertificateRequest]) (*connect.Response[v1.GetCertificateResponse], error)
+	// PutCertificate creates or updates a certificate.
+	PutCertificate(context.Context, *connect.Request[v1.PutCertificateRequest]) (*connect.Response[v1.PutCertificateResponse], error)
+	// DeleteCertificate removes a certificate.
+	DeleteCertificate(context.Context, *connect.Request[v1.DeleteCertificateRequest]) (*connect.Response[v1.DeleteCertificateResponse], error)
 }
 
 // NewConfigServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -565,6 +641,30 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("DeleteSavedQuery")),
 		connect.WithHandlerOptions(opts...),
 	)
+	configServiceListCertificatesHandler := connect.NewUnaryHandler(
+		ConfigServiceListCertificatesProcedure,
+		svc.ListCertificates,
+		connect.WithSchema(configServiceMethods.ByName("ListCertificates")),
+		connect.WithHandlerOptions(opts...),
+	)
+	configServiceGetCertificateHandler := connect.NewUnaryHandler(
+		ConfigServiceGetCertificateProcedure,
+		svc.GetCertificate,
+		connect.WithSchema(configServiceMethods.ByName("GetCertificate")),
+		connect.WithHandlerOptions(opts...),
+	)
+	configServicePutCertificateHandler := connect.NewUnaryHandler(
+		ConfigServicePutCertificateProcedure,
+		svc.PutCertificate,
+		connect.WithSchema(configServiceMethods.ByName("PutCertificate")),
+		connect.WithHandlerOptions(opts...),
+	)
+	configServiceDeleteCertificateHandler := connect.NewUnaryHandler(
+		ConfigServiceDeleteCertificateProcedure,
+		svc.DeleteCertificate,
+		connect.WithSchema(configServiceMethods.ByName("DeleteCertificate")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.ConfigService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ConfigServiceGetConfigProcedure:
@@ -607,6 +707,14 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServicePutSavedQueryHandler.ServeHTTP(w, r)
 		case ConfigServiceDeleteSavedQueryProcedure:
 			configServiceDeleteSavedQueryHandler.ServeHTTP(w, r)
+		case ConfigServiceListCertificatesProcedure:
+			configServiceListCertificatesHandler.ServeHTTP(w, r)
+		case ConfigServiceGetCertificateProcedure:
+			configServiceGetCertificateHandler.ServeHTTP(w, r)
+		case ConfigServicePutCertificateProcedure:
+			configServicePutCertificateHandler.ServeHTTP(w, r)
+		case ConfigServiceDeleteCertificateProcedure:
+			configServiceDeleteCertificateHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -694,4 +802,20 @@ func (UnimplementedConfigServiceHandler) PutSavedQuery(context.Context, *connect
 
 func (UnimplementedConfigServiceHandler) DeleteSavedQuery(context.Context, *connect.Request[v1.DeleteSavedQueryRequest]) (*connect.Response[v1.DeleteSavedQueryResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.DeleteSavedQuery is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) ListCertificates(context.Context, *connect.Request[v1.ListCertificatesRequest]) (*connect.Response[v1.ListCertificatesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.ListCertificates is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) GetCertificate(context.Context, *connect.Request[v1.GetCertificateRequest]) (*connect.Response[v1.GetCertificateResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.GetCertificate is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) PutCertificate(context.Context, *connect.Request[v1.PutCertificateRequest]) (*connect.Response[v1.PutCertificateResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.PutCertificate is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) DeleteCertificate(context.Context, *connect.Request[v1.DeleteCertificateRequest]) (*connect.Response[v1.DeleteCertificateResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.DeleteCertificate is not implemented"))
 }

@@ -455,6 +455,60 @@ func (s *Store) DeleteSetting(ctx context.Context, key string) error {
 	return s.flush(cfg)
 }
 
+// TLS config
+//
+// TLS settings (default_cert, tls_enabled, http_to_https_redirect) live in
+// server config (Settings["server"]). Certificates live in Config.TLS.Certs.
+
+func (s *Store) GetTLSConfig(ctx context.Context) (*config.TLSConfig, error) {
+	cfg, err := s.load()
+	if err != nil {
+		return nil, err
+	}
+	out := &config.TLSConfig{Certs: make(map[string]config.CertPEM)}
+	if cfg != nil {
+		if serverJSON, ok := cfg.Settings["server"]; ok && serverJSON != "" {
+			var serverCfg config.ServerConfig
+			if err := json.Unmarshal([]byte(serverJSON), &serverCfg); err == nil {
+				out.DefaultCert = serverCfg.TLS.DefaultCert
+				out.TLSEnabled = serverCfg.TLS.TLSEnabled
+				out.HTTPToHTTPSRedirect = serverCfg.TLS.HTTPToHTTPSRedirect
+			}
+		}
+		if cfg.TLS != nil && cfg.TLS.Certs != nil {
+			out.Certs = cfg.TLS.Certs
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) PutTLSConfig(ctx context.Context, tlsCfg *config.TLSConfig) error {
+	cfg, err := s.loadOrEmpty()
+	if err != nil {
+		return err
+	}
+	// Update TLS settings in server config
+	var serverCfg config.ServerConfig
+	if serverJSON, ok := cfg.Settings["server"]; ok && serverJSON != "" {
+		_ = json.Unmarshal([]byte(serverJSON), &serverCfg)
+	}
+	serverCfg.TLS.DefaultCert = tlsCfg.DefaultCert
+	serverCfg.TLS.TLSEnabled = tlsCfg.TLSEnabled
+	serverCfg.TLS.HTTPToHTTPSRedirect = tlsCfg.HTTPToHTTPSRedirect
+	serverCfg.TLS.Certs = nil
+	data, err := json.Marshal(serverCfg)
+	if err != nil {
+		return err
+	}
+	cfg.Settings["server"] = string(data)
+	// Certs in Config.TLS
+	if cfg.TLS == nil {
+		cfg.TLS = &config.TLSConfig{}
+	}
+	cfg.TLS.Certs = tlsCfg.Certs
+	return s.flush(cfg)
+}
+
 // Users
 //
 // Users are operational data (not part of the Config struct), so they are

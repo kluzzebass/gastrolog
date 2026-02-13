@@ -4,6 +4,7 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -20,6 +21,7 @@ type Store struct {
 	stores            map[string]config.StoreConfig
 	ingesters         map[string]config.IngesterConfig
 	settings          map[string]string
+	tlsConfig         *config.TLSConfig
 	users             map[string]config.User
 }
 
@@ -326,6 +328,61 @@ func (s *Store) DeleteSetting(ctx context.Context, key string) error {
 	defer s.mu.Unlock()
 
 	delete(s.settings, key)
+	return nil
+}
+
+// TLS config
+//
+// TLS settings (default_cert, tls_enabled, http_to_https_redirect) live in
+// server config (settings["server"]). Certificates live in tlsConfig.Certs.
+
+func (s *Store) GetTLSConfig(ctx context.Context) (*config.TLSConfig, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := &config.TLSConfig{Certs: make(map[string]config.CertPEM)}
+	if serverJSON, ok := s.settings["server"]; ok && serverJSON != "" {
+		var serverCfg config.ServerConfig
+		if err := json.Unmarshal([]byte(serverJSON), &serverCfg); err == nil {
+			out.DefaultCert = serverCfg.TLS.DefaultCert
+			out.TLSEnabled = serverCfg.TLS.TLSEnabled
+			out.HTTPToHTTPSRedirect = serverCfg.TLS.HTTPToHTTPSRedirect
+		}
+	}
+	if s.tlsConfig != nil && s.tlsConfig.Certs != nil {
+		for k, v := range s.tlsConfig.Certs {
+			out.Certs[k] = v
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) PutTLSConfig(ctx context.Context, cfg *config.TLSConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Update TLS settings in server config
+	var serverCfg config.ServerConfig
+	if serverJSON, ok := s.settings["server"]; ok && serverJSON != "" {
+		_ = json.Unmarshal([]byte(serverJSON), &serverCfg)
+	}
+	serverCfg.TLS.DefaultCert = cfg.DefaultCert
+	serverCfg.TLS.TLSEnabled = cfg.TLSEnabled
+	serverCfg.TLS.HTTPToHTTPSRedirect = cfg.HTTPToHTTPSRedirect
+	serverCfg.TLS.Certs = nil
+	data, err := json.Marshal(serverCfg)
+	if err != nil {
+		return err
+	}
+	s.settings["server"] = string(data)
+	// Certs in tlsConfig
+	if s.tlsConfig == nil {
+		s.tlsConfig = &config.TLSConfig{}
+	}
+	s.tlsConfig.Certs = make(map[string]config.CertPEM, len(cfg.Certs))
+	for k, v := range cfg.Certs {
+		s.tlsConfig.Certs[k] = v
+	}
 	return nil
 }
 

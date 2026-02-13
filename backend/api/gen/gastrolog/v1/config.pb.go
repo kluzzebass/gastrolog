@@ -1578,13 +1578,16 @@ func (*GetServerConfigRequest) Descriptor() ([]byte, []int) {
 }
 
 type GetServerConfigResponse struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	TokenDuration     string                 `protobuf:"bytes,1,opt,name=token_duration,json=tokenDuration,proto3" json:"token_duration,omitempty"`
-	JwtSecret         string                 `protobuf:"bytes,2,opt,name=jwt_secret,json=jwtSecret,proto3" json:"jwt_secret,omitempty"`
-	MinPasswordLength int32                  `protobuf:"varint,3,opt,name=min_password_length,json=minPasswordLength,proto3" json:"min_password_length,omitempty"`
-	MaxConcurrentJobs int32                  `protobuf:"varint,4,opt,name=max_concurrent_jobs,json=maxConcurrentJobs,proto3" json:"max_concurrent_jobs,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	TokenDuration       string                 `protobuf:"bytes,1,opt,name=token_duration,json=tokenDuration,proto3" json:"token_duration,omitempty"`
+	JwtSecretConfigured bool                   `protobuf:"varint,2,opt,name=jwt_secret_configured,json=jwtSecretConfigured,proto3" json:"jwt_secret_configured,omitempty"` // True when a JWT secret exists; the secret itself is never returned.
+	MinPasswordLength   int32                  `protobuf:"varint,3,opt,name=min_password_length,json=minPasswordLength,proto3" json:"min_password_length,omitempty"`
+	MaxConcurrentJobs   int32                  `protobuf:"varint,4,opt,name=max_concurrent_jobs,json=maxConcurrentJobs,proto3" json:"max_concurrent_jobs,omitempty"`
+	TlsDefaultCert      string                 `protobuf:"bytes,5,opt,name=tls_default_cert,json=tlsDefaultCert,proto3" json:"tls_default_cert,omitempty"`
+	TlsEnabled          bool                   `protobuf:"varint,6,opt,name=tls_enabled,json=tlsEnabled,proto3" json:"tls_enabled,omitempty"`
+	HttpToHttpsRedirect bool                   `protobuf:"varint,7,opt,name=http_to_https_redirect,json=httpToHttpsRedirect,proto3" json:"http_to_https_redirect,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *GetServerConfigResponse) Reset() {
@@ -1624,11 +1627,11 @@ func (x *GetServerConfigResponse) GetTokenDuration() string {
 	return ""
 }
 
-func (x *GetServerConfigResponse) GetJwtSecret() string {
+func (x *GetServerConfigResponse) GetJwtSecretConfigured() bool {
 	if x != nil {
-		return x.JwtSecret
+		return x.JwtSecretConfigured
 	}
-	return ""
+	return false
 }
 
 func (x *GetServerConfigResponse) GetMinPasswordLength() int32 {
@@ -1645,14 +1648,38 @@ func (x *GetServerConfigResponse) GetMaxConcurrentJobs() int32 {
 	return 0
 }
 
+func (x *GetServerConfigResponse) GetTlsDefaultCert() string {
+	if x != nil {
+		return x.TlsDefaultCert
+	}
+	return ""
+}
+
+func (x *GetServerConfigResponse) GetTlsEnabled() bool {
+	if x != nil {
+		return x.TlsEnabled
+	}
+	return false
+}
+
+func (x *GetServerConfigResponse) GetHttpToHttpsRedirect() bool {
+	if x != nil {
+		return x.HttpToHttpsRedirect
+	}
+	return false
+}
+
 type PutServerConfigRequest struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	TokenDuration     string                 `protobuf:"bytes,1,opt,name=token_duration,json=tokenDuration,proto3" json:"token_duration,omitempty"`
-	JwtSecret         string                 `protobuf:"bytes,2,opt,name=jwt_secret,json=jwtSecret,proto3" json:"jwt_secret,omitempty"`
-	MinPasswordLength int32                  `protobuf:"varint,3,opt,name=min_password_length,json=minPasswordLength,proto3" json:"min_password_length,omitempty"`
-	MaxConcurrentJobs int32                  `protobuf:"varint,4,opt,name=max_concurrent_jobs,json=maxConcurrentJobs,proto3" json:"max_concurrent_jobs,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	TokenDuration       *string                `protobuf:"bytes,1,opt,name=token_duration,json=tokenDuration,proto3,oneof" json:"token_duration,omitempty"`
+	JwtSecret           *string                `protobuf:"bytes,2,opt,name=jwt_secret,json=jwtSecret,proto3,oneof" json:"jwt_secret,omitempty"`
+	MinPasswordLength   *int32                 `protobuf:"varint,3,opt,name=min_password_length,json=minPasswordLength,proto3,oneof" json:"min_password_length,omitempty"`
+	MaxConcurrentJobs   *int32                 `protobuf:"varint,4,opt,name=max_concurrent_jobs,json=maxConcurrentJobs,proto3,oneof" json:"max_concurrent_jobs,omitempty"`
+	TlsDefaultCert      *string                `protobuf:"bytes,5,opt,name=tls_default_cert,json=tlsDefaultCert,proto3,oneof" json:"tls_default_cert,omitempty"`
+	TlsEnabled          *bool                  `protobuf:"varint,6,opt,name=tls_enabled,json=tlsEnabled,proto3,oneof" json:"tls_enabled,omitempty"`
+	HttpToHttpsRedirect *bool                  `protobuf:"varint,7,opt,name=http_to_https_redirect,json=httpToHttpsRedirect,proto3,oneof" json:"http_to_https_redirect,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *PutServerConfigRequest) Reset() {
@@ -1686,31 +1713,52 @@ func (*PutServerConfigRequest) Descriptor() ([]byte, []int) {
 }
 
 func (x *PutServerConfigRequest) GetTokenDuration() string {
-	if x != nil {
-		return x.TokenDuration
+	if x != nil && x.TokenDuration != nil {
+		return *x.TokenDuration
 	}
 	return ""
 }
 
 func (x *PutServerConfigRequest) GetJwtSecret() string {
-	if x != nil {
-		return x.JwtSecret
+	if x != nil && x.JwtSecret != nil {
+		return *x.JwtSecret
 	}
 	return ""
 }
 
 func (x *PutServerConfigRequest) GetMinPasswordLength() int32 {
-	if x != nil {
-		return x.MinPasswordLength
+	if x != nil && x.MinPasswordLength != nil {
+		return *x.MinPasswordLength
 	}
 	return 0
 }
 
 func (x *PutServerConfigRequest) GetMaxConcurrentJobs() int32 {
-	if x != nil {
-		return x.MaxConcurrentJobs
+	if x != nil && x.MaxConcurrentJobs != nil {
+		return *x.MaxConcurrentJobs
 	}
 	return 0
+}
+
+func (x *PutServerConfigRequest) GetTlsDefaultCert() string {
+	if x != nil && x.TlsDefaultCert != nil {
+		return *x.TlsDefaultCert
+	}
+	return ""
+}
+
+func (x *PutServerConfigRequest) GetTlsEnabled() bool {
+	if x != nil && x.TlsEnabled != nil {
+		return *x.TlsEnabled
+	}
+	return false
+}
+
+func (x *PutServerConfigRequest) GetHttpToHttpsRedirect() bool {
+	if x != nil && x.HttpToHttpsRedirect != nil {
+		return *x.HttpToHttpsRedirect
+	}
+	return false
 }
 
 type PutServerConfigResponse struct {
@@ -2201,6 +2249,407 @@ func (*DeleteSavedQueryResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{46}
 }
 
+type ListCertificatesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListCertificatesRequest) Reset() {
+	*x = ListCertificatesRequest{}
+	mi := &file_gastrolog_v1_config_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListCertificatesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListCertificatesRequest) ProtoMessage() {}
+
+func (x *ListCertificatesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_config_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListCertificatesRequest.ProtoReflect.Descriptor instead.
+func (*ListCertificatesRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{47}
+}
+
+type ListCertificatesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Names         []string               `protobuf:"bytes,1,rep,name=names,proto3" json:"names,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListCertificatesResponse) Reset() {
+	*x = ListCertificatesResponse{}
+	mi := &file_gastrolog_v1_config_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListCertificatesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListCertificatesResponse) ProtoMessage() {}
+
+func (x *ListCertificatesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_config_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListCertificatesResponse.ProtoReflect.Descriptor instead.
+func (*ListCertificatesResponse) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *ListCertificatesResponse) GetNames() []string {
+	if x != nil {
+		return x.Names
+	}
+	return nil
+}
+
+type GetCertificateRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetCertificateRequest) Reset() {
+	*x = GetCertificateRequest{}
+	mi := &file_gastrolog_v1_config_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetCertificateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetCertificateRequest) ProtoMessage() {}
+
+func (x *GetCertificateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_config_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetCertificateRequest.ProtoReflect.Descriptor instead.
+func (*GetCertificateRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *GetCertificateRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type GetCertificateResponse struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Name    string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	CertPem string                 `protobuf:"bytes,2,opt,name=cert_pem,json=certPem,proto3" json:"cert_pem,omitempty"`
+	// key_pem is never populated in responses; private keys must not be exposed via API.
+	KeyPem        string `protobuf:"bytes,3,opt,name=key_pem,json=keyPem,proto3" json:"key_pem,omitempty"`
+	CertFile      string `protobuf:"bytes,4,opt,name=cert_file,json=certFile,proto3" json:"cert_file,omitempty"`
+	KeyFile       string `protobuf:"bytes,5,opt,name=key_file,json=keyFile,proto3" json:"key_file,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetCertificateResponse) Reset() {
+	*x = GetCertificateResponse{}
+	mi := &file_gastrolog_v1_config_proto_msgTypes[50]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetCertificateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetCertificateResponse) ProtoMessage() {}
+
+func (x *GetCertificateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_config_proto_msgTypes[50]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetCertificateResponse.ProtoReflect.Descriptor instead.
+func (*GetCertificateResponse) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{50}
+}
+
+func (x *GetCertificateResponse) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *GetCertificateResponse) GetCertPem() string {
+	if x != nil {
+		return x.CertPem
+	}
+	return ""
+}
+
+func (x *GetCertificateResponse) GetKeyPem() string {
+	if x != nil {
+		return x.KeyPem
+	}
+	return ""
+}
+
+func (x *GetCertificateResponse) GetCertFile() string {
+	if x != nil {
+		return x.CertFile
+	}
+	return ""
+}
+
+func (x *GetCertificateResponse) GetKeyFile() string {
+	if x != nil {
+		return x.KeyFile
+	}
+	return ""
+}
+
+type PutCertificateRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	CertPem       string                 `protobuf:"bytes,2,opt,name=cert_pem,json=certPem,proto3" json:"cert_pem,omitempty"`
+	KeyPem        string                 `protobuf:"bytes,3,opt,name=key_pem,json=keyPem,proto3" json:"key_pem,omitempty"` // When updating, empty means keep existing key.
+	CertFile      string                 `protobuf:"bytes,4,opt,name=cert_file,json=certFile,proto3" json:"cert_file,omitempty"`
+	KeyFile       string                 `protobuf:"bytes,5,opt,name=key_file,json=keyFile,proto3" json:"key_file,omitempty"`
+	SetAsDefault  bool                   `protobuf:"varint,6,opt,name=set_as_default,json=setAsDefault,proto3" json:"set_as_default,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PutCertificateRequest) Reset() {
+	*x = PutCertificateRequest{}
+	mi := &file_gastrolog_v1_config_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PutCertificateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PutCertificateRequest) ProtoMessage() {}
+
+func (x *PutCertificateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_config_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PutCertificateRequest.ProtoReflect.Descriptor instead.
+func (*PutCertificateRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *PutCertificateRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *PutCertificateRequest) GetCertPem() string {
+	if x != nil {
+		return x.CertPem
+	}
+	return ""
+}
+
+func (x *PutCertificateRequest) GetKeyPem() string {
+	if x != nil {
+		return x.KeyPem
+	}
+	return ""
+}
+
+func (x *PutCertificateRequest) GetCertFile() string {
+	if x != nil {
+		return x.CertFile
+	}
+	return ""
+}
+
+func (x *PutCertificateRequest) GetKeyFile() string {
+	if x != nil {
+		return x.KeyFile
+	}
+	return ""
+}
+
+func (x *PutCertificateRequest) GetSetAsDefault() bool {
+	if x != nil {
+		return x.SetAsDefault
+	}
+	return false
+}
+
+type PutCertificateResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PutCertificateResponse) Reset() {
+	*x = PutCertificateResponse{}
+	mi := &file_gastrolog_v1_config_proto_msgTypes[52]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PutCertificateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PutCertificateResponse) ProtoMessage() {}
+
+func (x *PutCertificateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_config_proto_msgTypes[52]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PutCertificateResponse.ProtoReflect.Descriptor instead.
+func (*PutCertificateResponse) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{52}
+}
+
+type DeleteCertificateRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteCertificateRequest) Reset() {
+	*x = DeleteCertificateRequest{}
+	mi := &file_gastrolog_v1_config_proto_msgTypes[53]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteCertificateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteCertificateRequest) ProtoMessage() {}
+
+func (x *DeleteCertificateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_config_proto_msgTypes[53]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteCertificateRequest.ProtoReflect.Descriptor instead.
+func (*DeleteCertificateRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *DeleteCertificateRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type DeleteCertificateResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteCertificateResponse) Reset() {
+	*x = DeleteCertificateResponse{}
+	mi := &file_gastrolog_v1_config_proto_msgTypes[54]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteCertificateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteCertificateResponse) ProtoMessage() {}
+
+func (x *DeleteCertificateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_config_proto_msgTypes[54]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteCertificateResponse.ProtoReflect.Descriptor instead.
+func (*DeleteCertificateResponse) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{54}
+}
+
 var File_gastrolog_v1_config_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_config_proto_rawDesc = "" +
@@ -2303,19 +2752,33 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x15DeleteIngesterRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x18\n" +
 	"\x16DeleteIngesterResponse\"\x18\n" +
-	"\x16GetServerConfigRequest\"\xbf\x01\n" +
+	"\x16GetServerConfigRequest\"\xd4\x02\n" +
 	"\x17GetServerConfigResponse\x12%\n" +
-	"\x0etoken_duration\x18\x01 \x01(\tR\rtokenDuration\x12\x1d\n" +
-	"\n" +
-	"jwt_secret\x18\x02 \x01(\tR\tjwtSecret\x12.\n" +
+	"\x0etoken_duration\x18\x01 \x01(\tR\rtokenDuration\x122\n" +
+	"\x15jwt_secret_configured\x18\x02 \x01(\bR\x13jwtSecretConfigured\x12.\n" +
 	"\x13min_password_length\x18\x03 \x01(\x05R\x11minPasswordLength\x12.\n" +
-	"\x13max_concurrent_jobs\x18\x04 \x01(\x05R\x11maxConcurrentJobs\"\xbe\x01\n" +
-	"\x16PutServerConfigRequest\x12%\n" +
-	"\x0etoken_duration\x18\x01 \x01(\tR\rtokenDuration\x12\x1d\n" +
+	"\x13max_concurrent_jobs\x18\x04 \x01(\x05R\x11maxConcurrentJobs\x12(\n" +
+	"\x10tls_default_cert\x18\x05 \x01(\tR\x0etlsDefaultCert\x12\x1f\n" +
+	"\vtls_enabled\x18\x06 \x01(\bR\n" +
+	"tlsEnabled\x123\n" +
+	"\x16http_to_https_redirect\x18\a \x01(\bR\x13httpToHttpsRedirect\"\xf3\x03\n" +
+	"\x16PutServerConfigRequest\x12*\n" +
+	"\x0etoken_duration\x18\x01 \x01(\tH\x00R\rtokenDuration\x88\x01\x01\x12\"\n" +
 	"\n" +
-	"jwt_secret\x18\x02 \x01(\tR\tjwtSecret\x12.\n" +
-	"\x13min_password_length\x18\x03 \x01(\x05R\x11minPasswordLength\x12.\n" +
-	"\x13max_concurrent_jobs\x18\x04 \x01(\x05R\x11maxConcurrentJobs\"\x19\n" +
+	"jwt_secret\x18\x02 \x01(\tH\x01R\tjwtSecret\x88\x01\x01\x123\n" +
+	"\x13min_password_length\x18\x03 \x01(\x05H\x02R\x11minPasswordLength\x88\x01\x01\x123\n" +
+	"\x13max_concurrent_jobs\x18\x04 \x01(\x05H\x03R\x11maxConcurrentJobs\x88\x01\x01\x12-\n" +
+	"\x10tls_default_cert\x18\x05 \x01(\tH\x04R\x0etlsDefaultCert\x88\x01\x01\x12$\n" +
+	"\vtls_enabled\x18\x06 \x01(\bH\x05R\n" +
+	"tlsEnabled\x88\x01\x01\x128\n" +
+	"\x16http_to_https_redirect\x18\a \x01(\bH\x06R\x13httpToHttpsRedirect\x88\x01\x01B\x11\n" +
+	"\x0f_token_durationB\r\n" +
+	"\v_jwt_secretB\x16\n" +
+	"\x14_min_password_lengthB\x16\n" +
+	"\x14_max_concurrent_jobsB\x13\n" +
+	"\x11_tls_default_certB\x0e\n" +
+	"\f_tls_enabledB\x19\n" +
+	"\x17_http_to_https_redirect\"\x19\n" +
 	"\x17PutServerConfigResponse\"\x17\n" +
 	"\x15GetPreferencesRequest\".\n" +
 	"\x16GetPreferencesResponse\x12\x14\n" +
@@ -2335,7 +2798,29 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x15PutSavedQueryResponse\"-\n" +
 	"\x17DeleteSavedQueryRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\"\x1a\n" +
-	"\x18DeleteSavedQueryResponse2\xd9\x0e\n" +
+	"\x18DeleteSavedQueryResponse\"\x19\n" +
+	"\x17ListCertificatesRequest\"0\n" +
+	"\x18ListCertificatesResponse\x12\x14\n" +
+	"\x05names\x18\x01 \x03(\tR\x05names\"+\n" +
+	"\x15GetCertificateRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"\x98\x01\n" +
+	"\x16GetCertificateResponse\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x19\n" +
+	"\bcert_pem\x18\x02 \x01(\tR\acertPem\x12\x17\n" +
+	"\akey_pem\x18\x03 \x01(\tR\x06keyPem\x12\x1b\n" +
+	"\tcert_file\x18\x04 \x01(\tR\bcertFile\x12\x19\n" +
+	"\bkey_file\x18\x05 \x01(\tR\akeyFile\"\xbd\x01\n" +
+	"\x15PutCertificateRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x19\n" +
+	"\bcert_pem\x18\x02 \x01(\tR\acertPem\x12\x17\n" +
+	"\akey_pem\x18\x03 \x01(\tR\x06keyPem\x12\x1b\n" +
+	"\tcert_file\x18\x04 \x01(\tR\bcertFile\x12\x19\n" +
+	"\bkey_file\x18\x05 \x01(\tR\akeyFile\x12$\n" +
+	"\x0eset_as_default\x18\x06 \x01(\bR\fsetAsDefault\"\x18\n" +
+	"\x16PutCertificateResponse\".\n" +
+	"\x18DeleteCertificateRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"\x1b\n" +
+	"\x19DeleteCertificateResponse2\xdc\x11\n" +
 	"\rConfigService\x12L\n" +
 	"\tGetConfig\x12\x1e.gastrolog.v1.GetConfigRequest\x1a\x1f.gastrolog.v1.GetConfigResponse\x12X\n" +
 	"\rListIngesters\x12\".gastrolog.v1.ListIngestersRequest\x1a#.gastrolog.v1.ListIngestersResponse\x12d\n" +
@@ -2356,7 +2841,11 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x0ePutPreferences\x12#.gastrolog.v1.PutPreferencesRequest\x1a$.gastrolog.v1.PutPreferencesResponse\x12^\n" +
 	"\x0fGetSavedQueries\x12$.gastrolog.v1.GetSavedQueriesRequest\x1a%.gastrolog.v1.GetSavedQueriesResponse\x12X\n" +
 	"\rPutSavedQuery\x12\".gastrolog.v1.PutSavedQueryRequest\x1a#.gastrolog.v1.PutSavedQueryResponse\x12a\n" +
-	"\x10DeleteSavedQuery\x12%.gastrolog.v1.DeleteSavedQueryRequest\x1a&.gastrolog.v1.DeleteSavedQueryResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"\x10DeleteSavedQuery\x12%.gastrolog.v1.DeleteSavedQueryRequest\x1a&.gastrolog.v1.DeleteSavedQueryResponse\x12a\n" +
+	"\x10ListCertificates\x12%.gastrolog.v1.ListCertificatesRequest\x1a&.gastrolog.v1.ListCertificatesResponse\x12[\n" +
+	"\x0eGetCertificate\x12#.gastrolog.v1.GetCertificateRequest\x1a$.gastrolog.v1.GetCertificateResponse\x12[\n" +
+	"\x0ePutCertificate\x12#.gastrolog.v1.PutCertificateRequest\x1a$.gastrolog.v1.PutCertificateResponse\x12d\n" +
+	"\x11DeleteCertificate\x12&.gastrolog.v1.DeleteCertificateRequest\x1a'.gastrolog.v1.DeleteCertificateResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_config_proto_rawDescOnce sync.Once
@@ -2370,7 +2859,7 @@ func file_gastrolog_v1_config_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_config_proto_rawDescData
 }
 
-var file_gastrolog_v1_config_proto_msgTypes = make([]protoimpl.MessageInfo, 52)
+var file_gastrolog_v1_config_proto_msgTypes = make([]protoimpl.MessageInfo, 60)
 var file_gastrolog_v1_config_proto_goTypes = []any{
 	(*GetConfigRequest)(nil),              // 0: gastrolog.v1.GetConfigRequest
 	(*GetConfigResponse)(nil),             // 1: gastrolog.v1.GetConfigResponse
@@ -2419,20 +2908,28 @@ var file_gastrolog_v1_config_proto_goTypes = []any{
 	(*PutSavedQueryResponse)(nil),         // 44: gastrolog.v1.PutSavedQueryResponse
 	(*DeleteSavedQueryRequest)(nil),       // 45: gastrolog.v1.DeleteSavedQueryRequest
 	(*DeleteSavedQueryResponse)(nil),      // 46: gastrolog.v1.DeleteSavedQueryResponse
-	nil,                                   // 47: gastrolog.v1.GetConfigResponse.RotationPoliciesEntry
-	nil,                                   // 48: gastrolog.v1.GetConfigResponse.FiltersEntry
-	nil,                                   // 49: gastrolog.v1.GetConfigResponse.RetentionPoliciesEntry
-	nil,                                   // 50: gastrolog.v1.StoreConfig.ParamsEntry
-	nil,                                   // 51: gastrolog.v1.IngesterConfig.ParamsEntry
+	(*ListCertificatesRequest)(nil),       // 47: gastrolog.v1.ListCertificatesRequest
+	(*ListCertificatesResponse)(nil),      // 48: gastrolog.v1.ListCertificatesResponse
+	(*GetCertificateRequest)(nil),         // 49: gastrolog.v1.GetCertificateRequest
+	(*GetCertificateResponse)(nil),        // 50: gastrolog.v1.GetCertificateResponse
+	(*PutCertificateRequest)(nil),         // 51: gastrolog.v1.PutCertificateRequest
+	(*PutCertificateResponse)(nil),        // 52: gastrolog.v1.PutCertificateResponse
+	(*DeleteCertificateRequest)(nil),      // 53: gastrolog.v1.DeleteCertificateRequest
+	(*DeleteCertificateResponse)(nil),     // 54: gastrolog.v1.DeleteCertificateResponse
+	nil,                                   // 55: gastrolog.v1.GetConfigResponse.RotationPoliciesEntry
+	nil,                                   // 56: gastrolog.v1.GetConfigResponse.FiltersEntry
+	nil,                                   // 57: gastrolog.v1.GetConfigResponse.RetentionPoliciesEntry
+	nil,                                   // 58: gastrolog.v1.StoreConfig.ParamsEntry
+	nil,                                   // 59: gastrolog.v1.IngesterConfig.ParamsEntry
 }
 var file_gastrolog_v1_config_proto_depIdxs = []int32{
 	2,  // 0: gastrolog.v1.GetConfigResponse.stores:type_name -> gastrolog.v1.StoreConfig
 	3,  // 1: gastrolog.v1.GetConfigResponse.ingesters:type_name -> gastrolog.v1.IngesterConfig
-	47, // 2: gastrolog.v1.GetConfigResponse.rotation_policies:type_name -> gastrolog.v1.GetConfigResponse.RotationPoliciesEntry
-	48, // 3: gastrolog.v1.GetConfigResponse.filters:type_name -> gastrolog.v1.GetConfigResponse.FiltersEntry
-	49, // 4: gastrolog.v1.GetConfigResponse.retention_policies:type_name -> gastrolog.v1.GetConfigResponse.RetentionPoliciesEntry
-	50, // 5: gastrolog.v1.StoreConfig.params:type_name -> gastrolog.v1.StoreConfig.ParamsEntry
-	51, // 6: gastrolog.v1.IngesterConfig.params:type_name -> gastrolog.v1.IngesterConfig.ParamsEntry
+	55, // 2: gastrolog.v1.GetConfigResponse.rotation_policies:type_name -> gastrolog.v1.GetConfigResponse.RotationPoliciesEntry
+	56, // 3: gastrolog.v1.GetConfigResponse.filters:type_name -> gastrolog.v1.GetConfigResponse.FiltersEntry
+	57, // 4: gastrolog.v1.GetConfigResponse.retention_policies:type_name -> gastrolog.v1.GetConfigResponse.RetentionPoliciesEntry
+	58, // 5: gastrolog.v1.StoreConfig.params:type_name -> gastrolog.v1.StoreConfig.ParamsEntry
+	59, // 6: gastrolog.v1.IngesterConfig.params:type_name -> gastrolog.v1.IngesterConfig.ParamsEntry
 	9,  // 7: gastrolog.v1.ListIngestersResponse.ingesters:type_name -> gastrolog.v1.IngesterInfo
 	4,  // 8: gastrolog.v1.PutFilterRequest.config:type_name -> gastrolog.v1.FilterConfig
 	5,  // 9: gastrolog.v1.PutRotationPolicyRequest.config:type_name -> gastrolog.v1.RotationPolicyConfig
@@ -2464,28 +2961,36 @@ var file_gastrolog_v1_config_proto_depIdxs = []int32{
 	41, // 35: gastrolog.v1.ConfigService.GetSavedQueries:input_type -> gastrolog.v1.GetSavedQueriesRequest
 	43, // 36: gastrolog.v1.ConfigService.PutSavedQuery:input_type -> gastrolog.v1.PutSavedQueryRequest
 	45, // 37: gastrolog.v1.ConfigService.DeleteSavedQuery:input_type -> gastrolog.v1.DeleteSavedQueryRequest
-	1,  // 38: gastrolog.v1.ConfigService.GetConfig:output_type -> gastrolog.v1.GetConfigResponse
-	8,  // 39: gastrolog.v1.ConfigService.ListIngesters:output_type -> gastrolog.v1.ListIngestersResponse
-	11, // 40: gastrolog.v1.ConfigService.GetIngesterStatus:output_type -> gastrolog.v1.GetIngesterStatusResponse
-	13, // 41: gastrolog.v1.ConfigService.PutFilter:output_type -> gastrolog.v1.PutFilterResponse
-	15, // 42: gastrolog.v1.ConfigService.DeleteFilter:output_type -> gastrolog.v1.DeleteFilterResponse
-	17, // 43: gastrolog.v1.ConfigService.PutRotationPolicy:output_type -> gastrolog.v1.PutRotationPolicyResponse
-	19, // 44: gastrolog.v1.ConfigService.DeleteRotationPolicy:output_type -> gastrolog.v1.DeleteRotationPolicyResponse
-	21, // 45: gastrolog.v1.ConfigService.PutRetentionPolicy:output_type -> gastrolog.v1.PutRetentionPolicyResponse
-	23, // 46: gastrolog.v1.ConfigService.DeleteRetentionPolicy:output_type -> gastrolog.v1.DeleteRetentionPolicyResponse
-	25, // 47: gastrolog.v1.ConfigService.PutStore:output_type -> gastrolog.v1.PutStoreResponse
-	27, // 48: gastrolog.v1.ConfigService.DeleteStore:output_type -> gastrolog.v1.DeleteStoreResponse
-	29, // 49: gastrolog.v1.ConfigService.PutIngester:output_type -> gastrolog.v1.PutIngesterResponse
-	31, // 50: gastrolog.v1.ConfigService.DeleteIngester:output_type -> gastrolog.v1.DeleteIngesterResponse
-	33, // 51: gastrolog.v1.ConfigService.GetServerConfig:output_type -> gastrolog.v1.GetServerConfigResponse
-	35, // 52: gastrolog.v1.ConfigService.PutServerConfig:output_type -> gastrolog.v1.PutServerConfigResponse
-	37, // 53: gastrolog.v1.ConfigService.GetPreferences:output_type -> gastrolog.v1.GetPreferencesResponse
-	39, // 54: gastrolog.v1.ConfigService.PutPreferences:output_type -> gastrolog.v1.PutPreferencesResponse
-	42, // 55: gastrolog.v1.ConfigService.GetSavedQueries:output_type -> gastrolog.v1.GetSavedQueriesResponse
-	44, // 56: gastrolog.v1.ConfigService.PutSavedQuery:output_type -> gastrolog.v1.PutSavedQueryResponse
-	46, // 57: gastrolog.v1.ConfigService.DeleteSavedQuery:output_type -> gastrolog.v1.DeleteSavedQueryResponse
-	38, // [38:58] is the sub-list for method output_type
-	18, // [18:38] is the sub-list for method input_type
+	47, // 38: gastrolog.v1.ConfigService.ListCertificates:input_type -> gastrolog.v1.ListCertificatesRequest
+	49, // 39: gastrolog.v1.ConfigService.GetCertificate:input_type -> gastrolog.v1.GetCertificateRequest
+	51, // 40: gastrolog.v1.ConfigService.PutCertificate:input_type -> gastrolog.v1.PutCertificateRequest
+	53, // 41: gastrolog.v1.ConfigService.DeleteCertificate:input_type -> gastrolog.v1.DeleteCertificateRequest
+	1,  // 42: gastrolog.v1.ConfigService.GetConfig:output_type -> gastrolog.v1.GetConfigResponse
+	8,  // 43: gastrolog.v1.ConfigService.ListIngesters:output_type -> gastrolog.v1.ListIngestersResponse
+	11, // 44: gastrolog.v1.ConfigService.GetIngesterStatus:output_type -> gastrolog.v1.GetIngesterStatusResponse
+	13, // 45: gastrolog.v1.ConfigService.PutFilter:output_type -> gastrolog.v1.PutFilterResponse
+	15, // 46: gastrolog.v1.ConfigService.DeleteFilter:output_type -> gastrolog.v1.DeleteFilterResponse
+	17, // 47: gastrolog.v1.ConfigService.PutRotationPolicy:output_type -> gastrolog.v1.PutRotationPolicyResponse
+	19, // 48: gastrolog.v1.ConfigService.DeleteRotationPolicy:output_type -> gastrolog.v1.DeleteRotationPolicyResponse
+	21, // 49: gastrolog.v1.ConfigService.PutRetentionPolicy:output_type -> gastrolog.v1.PutRetentionPolicyResponse
+	23, // 50: gastrolog.v1.ConfigService.DeleteRetentionPolicy:output_type -> gastrolog.v1.DeleteRetentionPolicyResponse
+	25, // 51: gastrolog.v1.ConfigService.PutStore:output_type -> gastrolog.v1.PutStoreResponse
+	27, // 52: gastrolog.v1.ConfigService.DeleteStore:output_type -> gastrolog.v1.DeleteStoreResponse
+	29, // 53: gastrolog.v1.ConfigService.PutIngester:output_type -> gastrolog.v1.PutIngesterResponse
+	31, // 54: gastrolog.v1.ConfigService.DeleteIngester:output_type -> gastrolog.v1.DeleteIngesterResponse
+	33, // 55: gastrolog.v1.ConfigService.GetServerConfig:output_type -> gastrolog.v1.GetServerConfigResponse
+	35, // 56: gastrolog.v1.ConfigService.PutServerConfig:output_type -> gastrolog.v1.PutServerConfigResponse
+	37, // 57: gastrolog.v1.ConfigService.GetPreferences:output_type -> gastrolog.v1.GetPreferencesResponse
+	39, // 58: gastrolog.v1.ConfigService.PutPreferences:output_type -> gastrolog.v1.PutPreferencesResponse
+	42, // 59: gastrolog.v1.ConfigService.GetSavedQueries:output_type -> gastrolog.v1.GetSavedQueriesResponse
+	44, // 60: gastrolog.v1.ConfigService.PutSavedQuery:output_type -> gastrolog.v1.PutSavedQueryResponse
+	46, // 61: gastrolog.v1.ConfigService.DeleteSavedQuery:output_type -> gastrolog.v1.DeleteSavedQueryResponse
+	48, // 62: gastrolog.v1.ConfigService.ListCertificates:output_type -> gastrolog.v1.ListCertificatesResponse
+	50, // 63: gastrolog.v1.ConfigService.GetCertificate:output_type -> gastrolog.v1.GetCertificateResponse
+	52, // 64: gastrolog.v1.ConfigService.PutCertificate:output_type -> gastrolog.v1.PutCertificateResponse
+	54, // 65: gastrolog.v1.ConfigService.DeleteCertificate:output_type -> gastrolog.v1.DeleteCertificateResponse
+	42, // [42:66] is the sub-list for method output_type
+	18, // [18:42] is the sub-list for method input_type
 	18, // [18:18] is the sub-list for extension type_name
 	18, // [18:18] is the sub-list for extension extendee
 	0,  // [0:18] is the sub-list for field type_name
@@ -2496,13 +3001,14 @@ func file_gastrolog_v1_config_proto_init() {
 	if File_gastrolog_v1_config_proto != nil {
 		return
 	}
+	file_gastrolog_v1_config_proto_msgTypes[34].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_config_proto_rawDesc), len(file_gastrolog_v1_config_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   52,
+			NumMessages:   60,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -65,6 +65,18 @@ service ConfigService {
 
   // DeleteSavedQuery removes a saved query by name.
   rpc DeleteSavedQuery(DeleteSavedQueryRequest) returns (DeleteSavedQueryResponse);
+
+  // ListCertificates returns all certificate names.
+  rpc ListCertificates(ListCertificatesRequest) returns (ListCertificatesResponse);
+
+  // GetCertificate returns a certificate by name (includes PEM content).
+  rpc GetCertificate(GetCertificateRequest) returns (GetCertificateResponse);
+
+  // PutCertificate creates or updates a certificate.
+  rpc PutCertificate(PutCertificateRequest) returns (PutCertificateResponse);
+
+  // DeleteCertificate removes a certificate.
+  rpc DeleteCertificate(DeleteCertificateRequest) returns (DeleteCertificateResponse);
 }
 
 message GetConfigRequest {}
@@ -201,16 +213,22 @@ message GetServerConfigRequest {}
 
 message GetServerConfigResponse {
   string token_duration = 1;
-  string jwt_secret = 2;
+  bool jwt_secret_configured = 2;  // True when a JWT secret exists; the secret itself is never returned.
   int32 min_password_length = 3;
   int32 max_concurrent_jobs = 4;
+  string tls_default_cert = 5;
+  bool tls_enabled = 6;
+  bool http_to_https_redirect = 7;
 }
 
 message PutServerConfigRequest {
-  string token_duration = 1;
-  string jwt_secret = 2;
-  int32 min_password_length = 3;
-  int32 max_concurrent_jobs = 4;
+  optional string token_duration = 1;
+  optional string jwt_secret = 2;
+  optional int32 min_password_length = 3;
+  optional int32 max_concurrent_jobs = 4;
+  optional string tls_default_cert = 5;
+  optional bool tls_enabled = 6;
+  optional bool http_to_https_redirect = 7;
 }
 
 message PutServerConfigResponse {}
@@ -249,3 +267,39 @@ message DeleteSavedQueryRequest {
 }
 
 message DeleteSavedQueryResponse {}
+
+message ListCertificatesRequest {}
+
+message ListCertificatesResponse {
+  repeated string names = 1;
+}
+
+message GetCertificateRequest {
+  string name = 1;
+}
+
+message GetCertificateResponse {
+  string name = 1;
+  string cert_pem = 2;
+  // key_pem is never populated in responses; private keys must not be exposed via API.
+  string key_pem = 3;
+  string cert_file = 4;
+  string key_file = 5;
+}
+
+message PutCertificateRequest {
+  string name = 1;
+  string cert_pem = 2;
+  string key_pem = 3;  // When updating, empty means keep existing key.
+  string cert_file = 4;
+  string key_file = 5;
+  bool set_as_default = 6;
+}
+
+message PutCertificateResponse {}
+
+message DeleteCertificateRequest {
+  string name = 1;
+}
+
+message DeleteCertificateResponse {}

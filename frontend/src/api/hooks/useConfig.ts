@@ -185,22 +185,100 @@ export function useServerConfig() {
   });
 }
 
+export const JWT_KEEP = "__KEEP_EXISTING__";
+
 export function usePutServerConfig() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: {
-      tokenDuration: string;
-      jwtSecret: string;
-      minPasswordLength: number;
-      maxConcurrentJobs: number;
+      tokenDuration?: string;
+      jwtSecret?: string;
+      minPasswordLength?: number;
+      maxConcurrentJobs?: number;
+      tlsDefaultCert?: string;
+      tlsEnabled?: boolean;
+      httpToHttpsRedirect?: boolean;
     }) => {
-      await configClient.putServerConfig({
-        tokenDuration: args.tokenDuration,
-        jwtSecret: args.jwtSecret,
-        minPasswordLength: args.minPasswordLength,
-        maxConcurrentJobs: args.maxConcurrentJobs,
+      const req: Record<string, unknown> = {};
+      if (args.tokenDuration !== undefined) req.tokenDuration = args.tokenDuration;
+      if (args.jwtSecret !== undefined && args.jwtSecret !== JWT_KEEP)
+        req.jwtSecret = args.jwtSecret;
+      if (args.minPasswordLength !== undefined)
+        req.minPasswordLength = args.minPasswordLength;
+      if (args.maxConcurrentJobs !== undefined)
+        req.maxConcurrentJobs = args.maxConcurrentJobs;
+      if (args.tlsDefaultCert !== undefined)
+        req.tlsDefaultCert = args.tlsDefaultCert;
+      if (args.tlsEnabled !== undefined) req.tlsEnabled = args.tlsEnabled;
+      if (args.httpToHttpsRedirect !== undefined)
+        req.httpToHttpsRedirect = args.httpToHttpsRedirect;
+      await configClient.putServerConfig(req as Parameters<typeof configClient.putServerConfig>[0]);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["serverConfig"] });
+      qc.invalidateQueries({ queryKey: ["certificates"] });
+    },
+  });
+}
+
+export function useCertificates() {
+  return useQuery({
+    queryKey: ["certificates"],
+    queryFn: async () => {
+      const response = await configClient.listCertificates({});
+      return response;
+    },
+  });
+}
+
+export function useCertificate(name: string | null) {
+  return useQuery({
+    queryKey: ["certificate", name],
+    queryFn: async () => {
+      if (!name) return null;
+      const response = await configClient.getCertificate({ name });
+      return response;
+    },
+    enabled: !!name,
+  });
+}
+
+export function usePutCertificate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      name: string;
+      certPem?: string;
+      keyPem?: string;
+      certFile?: string;
+      keyFile?: string;
+      setAsDefault?: boolean;
+    }) => {
+      await configClient.putCertificate({
+        name: args.name,
+        certPem: args.certPem ?? "",
+        keyPem: args.keyPem ?? "",
+        certFile: args.certFile ?? "",
+        keyFile: args.keyFile ?? "",
+        setAsDefault: args.setAsDefault ?? false,
       });
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["serverConfig"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["certificates"] });
+      qc.invalidateQueries({ queryKey: ["serverConfig"] });
+    },
+  });
+}
+
+export function useDeleteCertificate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (name: string) => {
+      await configClient.deleteCertificate({ name });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["certificates"] });
+      qc.invalidateQueries({ queryKey: ["serverConfig"] });
+    },
   });
 }

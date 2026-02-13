@@ -1315,9 +1315,11 @@ export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
   tokenDuration = "";
 
   /**
-   * @generated from field: string jwt_secret = 2;
+   * True when a JWT secret exists; the secret itself is never returned.
+   *
+   * @generated from field: bool jwt_secret_configured = 2;
    */
-  jwtSecret = "";
+  jwtSecretConfigured = false;
 
   /**
    * @generated from field: int32 min_password_length = 3;
@@ -1329,6 +1331,21 @@ export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
    */
   maxConcurrentJobs = 0;
 
+  /**
+   * @generated from field: string tls_default_cert = 5;
+   */
+  tlsDefaultCert = "";
+
+  /**
+   * @generated from field: bool tls_enabled = 6;
+   */
+  tlsEnabled = false;
+
+  /**
+   * @generated from field: bool http_to_https_redirect = 7;
+   */
+  httpToHttpsRedirect = false;
+
   constructor(data?: PartialMessage<GetServerConfigResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1338,9 +1355,12 @@ export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
   static readonly typeName = "gastrolog.v1.GetServerConfigResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "jwt_secret", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "jwt_secret_configured", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 3, name: "min_password_length", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
     { no: 4, name: "max_concurrent_jobs", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 5, name: "tls_default_cert", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "tls_enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 7, name: "http_to_https_redirect", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetServerConfigResponse {
@@ -1365,24 +1385,39 @@ export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
  */
 export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
   /**
-   * @generated from field: string token_duration = 1;
+   * @generated from field: optional string token_duration = 1;
    */
-  tokenDuration = "";
+  tokenDuration?: string;
 
   /**
-   * @generated from field: string jwt_secret = 2;
+   * @generated from field: optional string jwt_secret = 2;
    */
-  jwtSecret = "";
+  jwtSecret?: string;
 
   /**
-   * @generated from field: int32 min_password_length = 3;
+   * @generated from field: optional int32 min_password_length = 3;
    */
-  minPasswordLength = 0;
+  minPasswordLength?: number;
 
   /**
-   * @generated from field: int32 max_concurrent_jobs = 4;
+   * @generated from field: optional int32 max_concurrent_jobs = 4;
    */
-  maxConcurrentJobs = 0;
+  maxConcurrentJobs?: number;
+
+  /**
+   * @generated from field: optional string tls_default_cert = 5;
+   */
+  tlsDefaultCert?: string;
+
+  /**
+   * @generated from field: optional bool tls_enabled = 6;
+   */
+  tlsEnabled?: boolean;
+
+  /**
+   * @generated from field: optional bool http_to_https_redirect = 7;
+   */
+  httpToHttpsRedirect?: boolean;
 
   constructor(data?: PartialMessage<PutServerConfigRequest>) {
     super();
@@ -1392,10 +1427,13 @@ export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutServerConfigRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "jwt_secret", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "min_password_length", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
-    { no: 4, name: "max_concurrent_jobs", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 1, name: "token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 2, name: "jwt_secret", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 3, name: "min_password_length", kind: "scalar", T: 5 /* ScalarType.INT32 */, opt: true },
+    { no: 4, name: "max_concurrent_jobs", kind: "scalar", T: 5 /* ScalarType.INT32 */, opt: true },
+    { no: 5, name: "tls_default_cert", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 6, name: "tls_enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
+    { no: 7, name: "http_to_https_redirect", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutServerConfigRequest {
@@ -1826,6 +1864,342 @@ export class DeleteSavedQueryResponse extends Message<DeleteSavedQueryResponse> 
 
   static equals(a: DeleteSavedQueryResponse | PlainMessage<DeleteSavedQueryResponse> | undefined, b: DeleteSavedQueryResponse | PlainMessage<DeleteSavedQueryResponse> | undefined): boolean {
     return proto3.util.equals(DeleteSavedQueryResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ListCertificatesRequest
+ */
+export class ListCertificatesRequest extends Message<ListCertificatesRequest> {
+  constructor(data?: PartialMessage<ListCertificatesRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ListCertificatesRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListCertificatesRequest {
+    return new ListCertificatesRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListCertificatesRequest {
+    return new ListCertificatesRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListCertificatesRequest {
+    return new ListCertificatesRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ListCertificatesRequest | PlainMessage<ListCertificatesRequest> | undefined, b: ListCertificatesRequest | PlainMessage<ListCertificatesRequest> | undefined): boolean {
+    return proto3.util.equals(ListCertificatesRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ListCertificatesResponse
+ */
+export class ListCertificatesResponse extends Message<ListCertificatesResponse> {
+  /**
+   * @generated from field: repeated string names = 1;
+   */
+  names: string[] = [];
+
+  constructor(data?: PartialMessage<ListCertificatesResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ListCertificatesResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "names", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListCertificatesResponse {
+    return new ListCertificatesResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListCertificatesResponse {
+    return new ListCertificatesResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListCertificatesResponse {
+    return new ListCertificatesResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ListCertificatesResponse | PlainMessage<ListCertificatesResponse> | undefined, b: ListCertificatesResponse | PlainMessage<ListCertificatesResponse> | undefined): boolean {
+    return proto3.util.equals(ListCertificatesResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.GetCertificateRequest
+ */
+export class GetCertificateRequest extends Message<GetCertificateRequest> {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name = "";
+
+  constructor(data?: PartialMessage<GetCertificateRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetCertificateRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetCertificateRequest {
+    return new GetCertificateRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetCertificateRequest {
+    return new GetCertificateRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetCertificateRequest {
+    return new GetCertificateRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetCertificateRequest | PlainMessage<GetCertificateRequest> | undefined, b: GetCertificateRequest | PlainMessage<GetCertificateRequest> | undefined): boolean {
+    return proto3.util.equals(GetCertificateRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.GetCertificateResponse
+ */
+export class GetCertificateResponse extends Message<GetCertificateResponse> {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name = "";
+
+  /**
+   * @generated from field: string cert_pem = 2;
+   */
+  certPem = "";
+
+  /**
+   * key_pem is never populated in responses; private keys must not be exposed via API.
+   *
+   * @generated from field: string key_pem = 3;
+   */
+  keyPem = "";
+
+  /**
+   * @generated from field: string cert_file = 4;
+   */
+  certFile = "";
+
+  /**
+   * @generated from field: string key_file = 5;
+   */
+  keyFile = "";
+
+  constructor(data?: PartialMessage<GetCertificateResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetCertificateResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "cert_pem", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "key_pem", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "cert_file", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "key_file", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetCertificateResponse {
+    return new GetCertificateResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetCertificateResponse {
+    return new GetCertificateResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetCertificateResponse {
+    return new GetCertificateResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetCertificateResponse | PlainMessage<GetCertificateResponse> | undefined, b: GetCertificateResponse | PlainMessage<GetCertificateResponse> | undefined): boolean {
+    return proto3.util.equals(GetCertificateResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutCertificateRequest
+ */
+export class PutCertificateRequest extends Message<PutCertificateRequest> {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name = "";
+
+  /**
+   * @generated from field: string cert_pem = 2;
+   */
+  certPem = "";
+
+  /**
+   * When updating, empty means keep existing key.
+   *
+   * @generated from field: string key_pem = 3;
+   */
+  keyPem = "";
+
+  /**
+   * @generated from field: string cert_file = 4;
+   */
+  certFile = "";
+
+  /**
+   * @generated from field: string key_file = 5;
+   */
+  keyFile = "";
+
+  /**
+   * @generated from field: bool set_as_default = 6;
+   */
+  setAsDefault = false;
+
+  constructor(data?: PartialMessage<PutCertificateRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutCertificateRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "cert_pem", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "key_pem", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "cert_file", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "key_file", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "set_as_default", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutCertificateRequest {
+    return new PutCertificateRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutCertificateRequest {
+    return new PutCertificateRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutCertificateRequest {
+    return new PutCertificateRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutCertificateRequest | PlainMessage<PutCertificateRequest> | undefined, b: PutCertificateRequest | PlainMessage<PutCertificateRequest> | undefined): boolean {
+    return proto3.util.equals(PutCertificateRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutCertificateResponse
+ */
+export class PutCertificateResponse extends Message<PutCertificateResponse> {
+  constructor(data?: PartialMessage<PutCertificateResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutCertificateResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutCertificateResponse {
+    return new PutCertificateResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutCertificateResponse {
+    return new PutCertificateResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutCertificateResponse {
+    return new PutCertificateResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutCertificateResponse | PlainMessage<PutCertificateResponse> | undefined, b: PutCertificateResponse | PlainMessage<PutCertificateResponse> | undefined): boolean {
+    return proto3.util.equals(PutCertificateResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.DeleteCertificateRequest
+ */
+export class DeleteCertificateRequest extends Message<DeleteCertificateRequest> {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name = "";
+
+  constructor(data?: PartialMessage<DeleteCertificateRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.DeleteCertificateRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteCertificateRequest {
+    return new DeleteCertificateRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteCertificateRequest {
+    return new DeleteCertificateRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteCertificateRequest {
+    return new DeleteCertificateRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DeleteCertificateRequest | PlainMessage<DeleteCertificateRequest> | undefined, b: DeleteCertificateRequest | PlainMessage<DeleteCertificateRequest> | undefined): boolean {
+    return proto3.util.equals(DeleteCertificateRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.DeleteCertificateResponse
+ */
+export class DeleteCertificateResponse extends Message<DeleteCertificateResponse> {
+  constructor(data?: PartialMessage<DeleteCertificateResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.DeleteCertificateResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteCertificateResponse {
+    return new DeleteCertificateResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteCertificateResponse {
+    return new DeleteCertificateResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteCertificateResponse {
+    return new DeleteCertificateResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DeleteCertificateResponse | PlainMessage<DeleteCertificateResponse> | undefined, b: DeleteCertificateResponse | PlainMessage<DeleteCertificateResponse> | undefined): boolean {
+    return proto3.util.equals(DeleteCertificateResponse, a, b);
   }
 }
 

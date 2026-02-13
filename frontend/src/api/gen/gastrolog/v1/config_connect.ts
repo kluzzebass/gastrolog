@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteStoreRequest, DeleteStoreResponse, GetConfigRequest, GetConfigResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetServerConfigRequest, GetServerConfigResponse, ListIngestersRequest, ListIngestersResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutServerConfigRequest, PutServerConfigResponse, PutStoreRequest, PutStoreResponse } from "./config_pb.js";
+import { DeleteCertificateRequest, DeleteCertificateResponse, DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteStoreRequest, DeleteStoreResponse, GetCertificateRequest, GetCertificateResponse, GetConfigRequest, GetConfigResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetServerConfigRequest, GetServerConfigResponse, ListCertificatesRequest, ListCertificatesResponse, ListIngestersRequest, ListIngestersResponse, PutCertificateRequest, PutCertificateResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutServerConfigRequest, PutServerConfigResponse, PutStoreRequest, PutStoreResponse } from "./config_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -232,6 +232,50 @@ export const ConfigService = {
       name: "DeleteSavedQuery",
       I: DeleteSavedQueryRequest,
       O: DeleteSavedQueryResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * ListCertificates returns all certificate names.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.ListCertificates
+     */
+    listCertificates: {
+      name: "ListCertificates",
+      I: ListCertificatesRequest,
+      O: ListCertificatesResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * GetCertificate returns a certificate by name (includes PEM content).
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.GetCertificate
+     */
+    getCertificate: {
+      name: "GetCertificate",
+      I: GetCertificateRequest,
+      O: GetCertificateResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * PutCertificate creates or updates a certificate.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.PutCertificate
+     */
+    putCertificate: {
+      name: "PutCertificate",
+      I: PutCertificateRequest,
+      O: PutCertificateResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * DeleteCertificate removes a certificate.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.DeleteCertificate
+     */
+    deleteCertificate: {
+      name: "DeleteCertificate",
+      I: DeleteCertificateRequest,
+      O: DeleteCertificateResponse,
       kind: MethodKind.Unary,
     },
   }

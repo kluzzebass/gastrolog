@@ -76,6 +76,10 @@ type Store interface {
 	PutSetting(ctx context.Context, key string, value string) error
 	DeleteSetting(ctx context.Context, key string) error
 
+	// TLS config (dedicated storage, not in Settings KV)
+	GetTLSConfig(ctx context.Context) (*TLSConfig, error)
+	PutTLSConfig(ctx context.Context, cfg *TLSConfig) error
+
 	// Users
 	CreateUser(ctx context.Context, user User) error
 	GetUser(ctx context.Context, username string) (*User, error)
@@ -95,6 +99,7 @@ type Config struct {
 	Ingesters         []IngesterConfig                 `json:"ingesters,omitempty"`
 	Stores            []StoreConfig                    `json:"stores,omitempty"`
 	Settings          map[string]string                `json:"settings,omitempty"`
+	TLS               *TLSConfig                       `json:"tls,omitempty"`
 }
 
 // ServerConfig holds server-level configuration, organized by concern.
@@ -102,6 +107,30 @@ type Config struct {
 type ServerConfig struct {
 	Auth      AuthConfig      `json:"auth,omitempty"`
 	Scheduler SchedulerConfig `json:"scheduler,omitempty"`
+	TLS      TLSConfig       `json:"tls,omitempty"`
+}
+
+// TLSConfig holds TLS certificate configuration.
+// Supports multiple named certs for server, ingesters, and storage engines.
+// PEM content is stored in config, or loaded from files (directory monitoring).
+type TLSConfig struct {
+	// DefaultCert is the cert name used for TLS-wrapping the Connect RPC / web endpoint.
+	DefaultCert string `json:"default_cert,omitempty"`
+	// TLSEnabled turns on HTTPS when a default cert exists. Falls back to HTTP if no cert.
+	TLSEnabled bool `json:"tls_enabled,omitempty"`
+	// HTTPToHTTPSRedirect redirects HTTP requests to HTTPS when both listeners are active.
+	HTTPToHTTPSRedirect bool `json:"http_to_https_redirect,omitempty"`
+	// Certs holds named certs; keys are names (e.g. "server", "ingester.http").
+	Certs map[string]CertPEM `json:"certs,omitempty"`
+}
+
+// CertPEM holds certificate content. Either stored PEM or file paths (directory monitoring).
+// When both are set, file paths take precedence and are watched for changes.
+type CertPEM struct {
+	CertPEM  string `json:"cert_pem,omitempty"`
+	KeyPEM   string `json:"key_pem,omitempty"`
+	CertFile string `json:"cert_file,omitempty"`
+	KeyFile  string `json:"key_file,omitempty"`
 }
 
 // SchedulerConfig holds configuration for the job scheduler.
