@@ -8,6 +8,7 @@ interface CrudOptions<TEdit> {
   };
   label: string;
   onSaveTransform: (id: string, edit: TEdit) => any;
+  onDeleteTransform?: (id: string) => any;
   onDeleteCheck?: (id: string) => string | null;
   onDeleteSuccess?: (id: string) => void;
   clearEdit?: (id: string) => void;
@@ -18,6 +19,7 @@ export function useCrudHandlers<TEdit>({
   deleteMutation,
   label,
   onSaveTransform,
+  onDeleteTransform,
   onDeleteCheck,
   onDeleteSuccess,
   clearEdit,
@@ -44,7 +46,8 @@ export function useCrudHandlers<TEdit>({
       }
     }
     try {
-      await deleteMutation.mutateAsync(id);
+      const deleteArgs = onDeleteTransform ? onDeleteTransform(id) : id;
+      await deleteMutation.mutateAsync(deleteArgs);
       if (onDeleteSuccess) {
         onDeleteSuccess(id);
       } else {

@@ -4,6 +4,13 @@ export {
   useChunks,
   useIndexes,
   useStats,
+  useReindexStore,
+  useValidateStore,
+  useCloneStore,
+  useMigrateStore,
+  useCompactStore,
+  useMergeStores,
+  useImportRecords,
 } from "./useStores";
 export { useSearch, extractTokens } from "./useSearch";
 export { useFollow } from "./useFollow";
@@ -21,6 +28,10 @@ export {
   useDeleteRetentionPolicy,
   usePutStore,
   useDeleteStore,
+  usePauseStore,
+  useResumeStore,
+  useRenameStore,
+  useDecommissionStore,
   usePutIngester,
   useDeleteIngester,
 } from "./useConfig";

@@ -48,6 +48,29 @@ const (
 	StoreServiceAnalyzeChunkProcedure = "/gastrolog.v1.StoreService/AnalyzeChunk"
 	// StoreServiceGetStatsProcedure is the fully-qualified name of the StoreService's GetStats RPC.
 	StoreServiceGetStatsProcedure = "/gastrolog.v1.StoreService/GetStats"
+	// StoreServiceReindexStoreProcedure is the fully-qualified name of the StoreService's ReindexStore
+	// RPC.
+	StoreServiceReindexStoreProcedure = "/gastrolog.v1.StoreService/ReindexStore"
+	// StoreServiceValidateStoreProcedure is the fully-qualified name of the StoreService's
+	// ValidateStore RPC.
+	StoreServiceValidateStoreProcedure = "/gastrolog.v1.StoreService/ValidateStore"
+	// StoreServiceCloneStoreProcedure is the fully-qualified name of the StoreService's CloneStore RPC.
+	StoreServiceCloneStoreProcedure = "/gastrolog.v1.StoreService/CloneStore"
+	// StoreServiceMigrateStoreProcedure is the fully-qualified name of the StoreService's MigrateStore
+	// RPC.
+	StoreServiceMigrateStoreProcedure = "/gastrolog.v1.StoreService/MigrateStore"
+	// StoreServiceExportStoreProcedure is the fully-qualified name of the StoreService's ExportStore
+	// RPC.
+	StoreServiceExportStoreProcedure = "/gastrolog.v1.StoreService/ExportStore"
+	// StoreServiceImportRecordsProcedure is the fully-qualified name of the StoreService's
+	// ImportRecords RPC.
+	StoreServiceImportRecordsProcedure = "/gastrolog.v1.StoreService/ImportRecords"
+	// StoreServiceCompactStoreProcedure is the fully-qualified name of the StoreService's CompactStore
+	// RPC.
+	StoreServiceCompactStoreProcedure = "/gastrolog.v1.StoreService/CompactStore"
+	// StoreServiceMergeStoresProcedure is the fully-qualified name of the StoreService's MergeStores
+	// RPC.
+	StoreServiceMergeStoresProcedure = "/gastrolog.v1.StoreService/MergeStores"
 )
 
 // StoreServiceClient is a client for the gastrolog.v1.StoreService service.
@@ -66,6 +89,23 @@ type StoreServiceClient interface {
 	AnalyzeChunk(context.Context, *connect.Request[v1.AnalyzeChunkRequest]) (*connect.Response[v1.AnalyzeChunkResponse], error)
 	// GetStats returns overall statistics for a store.
 	GetStats(context.Context, *connect.Request[v1.GetStatsRequest]) (*connect.Response[v1.GetStatsResponse], error)
+	// ReindexStore rebuilds all indexes for sealed chunks in a store.
+	ReindexStore(context.Context, *connect.Request[v1.ReindexStoreRequest]) (*connect.Response[v1.ReindexStoreResponse], error)
+	// ValidateStore checks chunk and index integrity for a store.
+	ValidateStore(context.Context, *connect.Request[v1.ValidateStoreRequest]) (*connect.Response[v1.ValidateStoreResponse], error)
+	// CloneStore copies all records from a source store to a new store.
+	CloneStore(context.Context, *connect.Request[v1.CloneStoreRequest]) (*connect.Response[v1.CloneStoreResponse], error)
+	// MigrateStore copies records to a new store of a different type, then deletes the source.
+	MigrateStore(context.Context, *connect.Request[v1.MigrateStoreRequest]) (*connect.Response[v1.MigrateStoreResponse], error)
+	// ExportStore streams all records from a store for backup.
+	ExportStore(context.Context, *connect.Request[v1.ExportStoreRequest]) (*connect.ServerStreamForClient[v1.ExportStoreResponse], error)
+	// ImportRecords appends a batch of records to a store.
+	ImportRecords(context.Context, *connect.Request[v1.ImportRecordsRequest]) (*connect.Response[v1.ImportRecordsResponse], error)
+	// CompactStore removes orphaned chunk directories and reclaims space.
+	CompactStore(context.Context, *connect.Request[v1.CompactStoreRequest]) (*connect.Response[v1.CompactStoreResponse], error)
+	// MergeStores copies all records from a source store into a destination store,
+	// then deletes the source.
+	MergeStores(context.Context, *connect.Request[v1.MergeStoresRequest]) (*connect.Response[v1.MergeStoresResponse], error)
 }
 
 // NewStoreServiceClient constructs a client for the gastrolog.v1.StoreService service. By default,
@@ -121,18 +161,74 @@ func NewStoreServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(storeServiceMethods.ByName("GetStats")),
 			connect.WithClientOptions(opts...),
 		),
+		reindexStore: connect.NewClient[v1.ReindexStoreRequest, v1.ReindexStoreResponse](
+			httpClient,
+			baseURL+StoreServiceReindexStoreProcedure,
+			connect.WithSchema(storeServiceMethods.ByName("ReindexStore")),
+			connect.WithClientOptions(opts...),
+		),
+		validateStore: connect.NewClient[v1.ValidateStoreRequest, v1.ValidateStoreResponse](
+			httpClient,
+			baseURL+StoreServiceValidateStoreProcedure,
+			connect.WithSchema(storeServiceMethods.ByName("ValidateStore")),
+			connect.WithClientOptions(opts...),
+		),
+		cloneStore: connect.NewClient[v1.CloneStoreRequest, v1.CloneStoreResponse](
+			httpClient,
+			baseURL+StoreServiceCloneStoreProcedure,
+			connect.WithSchema(storeServiceMethods.ByName("CloneStore")),
+			connect.WithClientOptions(opts...),
+		),
+		migrateStore: connect.NewClient[v1.MigrateStoreRequest, v1.MigrateStoreResponse](
+			httpClient,
+			baseURL+StoreServiceMigrateStoreProcedure,
+			connect.WithSchema(storeServiceMethods.ByName("MigrateStore")),
+			connect.WithClientOptions(opts...),
+		),
+		exportStore: connect.NewClient[v1.ExportStoreRequest, v1.ExportStoreResponse](
+			httpClient,
+			baseURL+StoreServiceExportStoreProcedure,
+			connect.WithSchema(storeServiceMethods.ByName("ExportStore")),
+			connect.WithClientOptions(opts...),
+		),
+		importRecords: connect.NewClient[v1.ImportRecordsRequest, v1.ImportRecordsResponse](
+			httpClient,
+			baseURL+StoreServiceImportRecordsProcedure,
+			connect.WithSchema(storeServiceMethods.ByName("ImportRecords")),
+			connect.WithClientOptions(opts...),
+		),
+		compactStore: connect.NewClient[v1.CompactStoreRequest, v1.CompactStoreResponse](
+			httpClient,
+			baseURL+StoreServiceCompactStoreProcedure,
+			connect.WithSchema(storeServiceMethods.ByName("CompactStore")),
+			connect.WithClientOptions(opts...),
+		),
+		mergeStores: connect.NewClient[v1.MergeStoresRequest, v1.MergeStoresResponse](
+			httpClient,
+			baseURL+StoreServiceMergeStoresProcedure,
+			connect.WithSchema(storeServiceMethods.ByName("MergeStores")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // storeServiceClient implements StoreServiceClient.
 type storeServiceClient struct {
-	listStores   *connect.Client[v1.ListStoresRequest, v1.ListStoresResponse]
-	getStore     *connect.Client[v1.GetStoreRequest, v1.GetStoreResponse]
-	listChunks   *connect.Client[v1.ListChunksRequest, v1.ListChunksResponse]
-	getChunk     *connect.Client[v1.GetChunkRequest, v1.GetChunkResponse]
-	getIndexes   *connect.Client[v1.GetIndexesRequest, v1.GetIndexesResponse]
-	analyzeChunk *connect.Client[v1.AnalyzeChunkRequest, v1.AnalyzeChunkResponse]
-	getStats     *connect.Client[v1.GetStatsRequest, v1.GetStatsResponse]
+	listStores    *connect.Client[v1.ListStoresRequest, v1.ListStoresResponse]
+	getStore      *connect.Client[v1.GetStoreRequest, v1.GetStoreResponse]
+	listChunks    *connect.Client[v1.ListChunksRequest, v1.ListChunksResponse]
+	getChunk      *connect.Client[v1.GetChunkRequest, v1.GetChunkResponse]
+	getIndexes    *connect.Client[v1.GetIndexesRequest, v1.GetIndexesResponse]
+	analyzeChunk  *connect.Client[v1.AnalyzeChunkRequest, v1.AnalyzeChunkResponse]
+	getStats      *connect.Client[v1.GetStatsRequest, v1.GetStatsResponse]
+	reindexStore  *connect.Client[v1.ReindexStoreRequest, v1.ReindexStoreResponse]
+	validateStore *connect.Client[v1.ValidateStoreRequest, v1.ValidateStoreResponse]
+	cloneStore    *connect.Client[v1.CloneStoreRequest, v1.CloneStoreResponse]
+	migrateStore  *connect.Client[v1.MigrateStoreRequest, v1.MigrateStoreResponse]
+	exportStore   *connect.Client[v1.ExportStoreRequest, v1.ExportStoreResponse]
+	importRecords *connect.Client[v1.ImportRecordsRequest, v1.ImportRecordsResponse]
+	compactStore  *connect.Client[v1.CompactStoreRequest, v1.CompactStoreResponse]
+	mergeStores   *connect.Client[v1.MergeStoresRequest, v1.MergeStoresResponse]
 }
 
 // ListStores calls gastrolog.v1.StoreService.ListStores.
@@ -170,6 +266,46 @@ func (c *storeServiceClient) GetStats(ctx context.Context, req *connect.Request[
 	return c.getStats.CallUnary(ctx, req)
 }
 
+// ReindexStore calls gastrolog.v1.StoreService.ReindexStore.
+func (c *storeServiceClient) ReindexStore(ctx context.Context, req *connect.Request[v1.ReindexStoreRequest]) (*connect.Response[v1.ReindexStoreResponse], error) {
+	return c.reindexStore.CallUnary(ctx, req)
+}
+
+// ValidateStore calls gastrolog.v1.StoreService.ValidateStore.
+func (c *storeServiceClient) ValidateStore(ctx context.Context, req *connect.Request[v1.ValidateStoreRequest]) (*connect.Response[v1.ValidateStoreResponse], error) {
+	return c.validateStore.CallUnary(ctx, req)
+}
+
+// CloneStore calls gastrolog.v1.StoreService.CloneStore.
+func (c *storeServiceClient) CloneStore(ctx context.Context, req *connect.Request[v1.CloneStoreRequest]) (*connect.Response[v1.CloneStoreResponse], error) {
+	return c.cloneStore.CallUnary(ctx, req)
+}
+
+// MigrateStore calls gastrolog.v1.StoreService.MigrateStore.
+func (c *storeServiceClient) MigrateStore(ctx context.Context, req *connect.Request[v1.MigrateStoreRequest]) (*connect.Response[v1.MigrateStoreResponse], error) {
+	return c.migrateStore.CallUnary(ctx, req)
+}
+
+// ExportStore calls gastrolog.v1.StoreService.ExportStore.
+func (c *storeServiceClient) ExportStore(ctx context.Context, req *connect.Request[v1.ExportStoreRequest]) (*connect.ServerStreamForClient[v1.ExportStoreResponse], error) {
+	return c.exportStore.CallServerStream(ctx, req)
+}
+
+// ImportRecords calls gastrolog.v1.StoreService.ImportRecords.
+func (c *storeServiceClient) ImportRecords(ctx context.Context, req *connect.Request[v1.ImportRecordsRequest]) (*connect.Response[v1.ImportRecordsResponse], error) {
+	return c.importRecords.CallUnary(ctx, req)
+}
+
+// CompactStore calls gastrolog.v1.StoreService.CompactStore.
+func (c *storeServiceClient) CompactStore(ctx context.Context, req *connect.Request[v1.CompactStoreRequest]) (*connect.Response[v1.CompactStoreResponse], error) {
+	return c.compactStore.CallUnary(ctx, req)
+}
+
+// MergeStores calls gastrolog.v1.StoreService.MergeStores.
+func (c *storeServiceClient) MergeStores(ctx context.Context, req *connect.Request[v1.MergeStoresRequest]) (*connect.Response[v1.MergeStoresResponse], error) {
+	return c.mergeStores.CallUnary(ctx, req)
+}
+
 // StoreServiceHandler is an implementation of the gastrolog.v1.StoreService service.
 type StoreServiceHandler interface {
 	// ListStores returns all registered stores.
@@ -186,6 +322,23 @@ type StoreServiceHandler interface {
 	AnalyzeChunk(context.Context, *connect.Request[v1.AnalyzeChunkRequest]) (*connect.Response[v1.AnalyzeChunkResponse], error)
 	// GetStats returns overall statistics for a store.
 	GetStats(context.Context, *connect.Request[v1.GetStatsRequest]) (*connect.Response[v1.GetStatsResponse], error)
+	// ReindexStore rebuilds all indexes for sealed chunks in a store.
+	ReindexStore(context.Context, *connect.Request[v1.ReindexStoreRequest]) (*connect.Response[v1.ReindexStoreResponse], error)
+	// ValidateStore checks chunk and index integrity for a store.
+	ValidateStore(context.Context, *connect.Request[v1.ValidateStoreRequest]) (*connect.Response[v1.ValidateStoreResponse], error)
+	// CloneStore copies all records from a source store to a new store.
+	CloneStore(context.Context, *connect.Request[v1.CloneStoreRequest]) (*connect.Response[v1.CloneStoreResponse], error)
+	// MigrateStore copies records to a new store of a different type, then deletes the source.
+	MigrateStore(context.Context, *connect.Request[v1.MigrateStoreRequest]) (*connect.Response[v1.MigrateStoreResponse], error)
+	// ExportStore streams all records from a store for backup.
+	ExportStore(context.Context, *connect.Request[v1.ExportStoreRequest], *connect.ServerStream[v1.ExportStoreResponse]) error
+	// ImportRecords appends a batch of records to a store.
+	ImportRecords(context.Context, *connect.Request[v1.ImportRecordsRequest]) (*connect.Response[v1.ImportRecordsResponse], error)
+	// CompactStore removes orphaned chunk directories and reclaims space.
+	CompactStore(context.Context, *connect.Request[v1.CompactStoreRequest]) (*connect.Response[v1.CompactStoreResponse], error)
+	// MergeStores copies all records from a source store into a destination store,
+	// then deletes the source.
+	MergeStores(context.Context, *connect.Request[v1.MergeStoresRequest]) (*connect.Response[v1.MergeStoresResponse], error)
 }
 
 // NewStoreServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -237,6 +390,54 @@ func NewStoreServiceHandler(svc StoreServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(storeServiceMethods.ByName("GetStats")),
 		connect.WithHandlerOptions(opts...),
 	)
+	storeServiceReindexStoreHandler := connect.NewUnaryHandler(
+		StoreServiceReindexStoreProcedure,
+		svc.ReindexStore,
+		connect.WithSchema(storeServiceMethods.ByName("ReindexStore")),
+		connect.WithHandlerOptions(opts...),
+	)
+	storeServiceValidateStoreHandler := connect.NewUnaryHandler(
+		StoreServiceValidateStoreProcedure,
+		svc.ValidateStore,
+		connect.WithSchema(storeServiceMethods.ByName("ValidateStore")),
+		connect.WithHandlerOptions(opts...),
+	)
+	storeServiceCloneStoreHandler := connect.NewUnaryHandler(
+		StoreServiceCloneStoreProcedure,
+		svc.CloneStore,
+		connect.WithSchema(storeServiceMethods.ByName("CloneStore")),
+		connect.WithHandlerOptions(opts...),
+	)
+	storeServiceMigrateStoreHandler := connect.NewUnaryHandler(
+		StoreServiceMigrateStoreProcedure,
+		svc.MigrateStore,
+		connect.WithSchema(storeServiceMethods.ByName("MigrateStore")),
+		connect.WithHandlerOptions(opts...),
+	)
+	storeServiceExportStoreHandler := connect.NewServerStreamHandler(
+		StoreServiceExportStoreProcedure,
+		svc.ExportStore,
+		connect.WithSchema(storeServiceMethods.ByName("ExportStore")),
+		connect.WithHandlerOptions(opts...),
+	)
+	storeServiceImportRecordsHandler := connect.NewUnaryHandler(
+		StoreServiceImportRecordsProcedure,
+		svc.ImportRecords,
+		connect.WithSchema(storeServiceMethods.ByName("ImportRecords")),
+		connect.WithHandlerOptions(opts...),
+	)
+	storeServiceCompactStoreHandler := connect.NewUnaryHandler(
+		StoreServiceCompactStoreProcedure,
+		svc.CompactStore,
+		connect.WithSchema(storeServiceMethods.ByName("CompactStore")),
+		connect.WithHandlerOptions(opts...),
+	)
+	storeServiceMergeStoresHandler := connect.NewUnaryHandler(
+		StoreServiceMergeStoresProcedure,
+		svc.MergeStores,
+		connect.WithSchema(storeServiceMethods.ByName("MergeStores")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.StoreService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case StoreServiceListStoresProcedure:
@@ -253,6 +454,22 @@ func NewStoreServiceHandler(svc StoreServiceHandler, opts ...connect.HandlerOpti
 			storeServiceAnalyzeChunkHandler.ServeHTTP(w, r)
 		case StoreServiceGetStatsProcedure:
 			storeServiceGetStatsHandler.ServeHTTP(w, r)
+		case StoreServiceReindexStoreProcedure:
+			storeServiceReindexStoreHandler.ServeHTTP(w, r)
+		case StoreServiceValidateStoreProcedure:
+			storeServiceValidateStoreHandler.ServeHTTP(w, r)
+		case StoreServiceCloneStoreProcedure:
+			storeServiceCloneStoreHandler.ServeHTTP(w, r)
+		case StoreServiceMigrateStoreProcedure:
+			storeServiceMigrateStoreHandler.ServeHTTP(w, r)
+		case StoreServiceExportStoreProcedure:
+			storeServiceExportStoreHandler.ServeHTTP(w, r)
+		case StoreServiceImportRecordsProcedure:
+			storeServiceImportRecordsHandler.ServeHTTP(w, r)
+		case StoreServiceCompactStoreProcedure:
+			storeServiceCompactStoreHandler.ServeHTTP(w, r)
+		case StoreServiceMergeStoresProcedure:
+			storeServiceMergeStoresHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -288,4 +505,36 @@ func (UnimplementedStoreServiceHandler) AnalyzeChunk(context.Context, *connect.R
 
 func (UnimplementedStoreServiceHandler) GetStats(context.Context, *connect.Request[v1.GetStatsRequest]) (*connect.Response[v1.GetStatsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.StoreService.GetStats is not implemented"))
+}
+
+func (UnimplementedStoreServiceHandler) ReindexStore(context.Context, *connect.Request[v1.ReindexStoreRequest]) (*connect.Response[v1.ReindexStoreResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.StoreService.ReindexStore is not implemented"))
+}
+
+func (UnimplementedStoreServiceHandler) ValidateStore(context.Context, *connect.Request[v1.ValidateStoreRequest]) (*connect.Response[v1.ValidateStoreResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.StoreService.ValidateStore is not implemented"))
+}
+
+func (UnimplementedStoreServiceHandler) CloneStore(context.Context, *connect.Request[v1.CloneStoreRequest]) (*connect.Response[v1.CloneStoreResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.StoreService.CloneStore is not implemented"))
+}
+
+func (UnimplementedStoreServiceHandler) MigrateStore(context.Context, *connect.Request[v1.MigrateStoreRequest]) (*connect.Response[v1.MigrateStoreResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.StoreService.MigrateStore is not implemented"))
+}
+
+func (UnimplementedStoreServiceHandler) ExportStore(context.Context, *connect.Request[v1.ExportStoreRequest], *connect.ServerStream[v1.ExportStoreResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.StoreService.ExportStore is not implemented"))
+}
+
+func (UnimplementedStoreServiceHandler) ImportRecords(context.Context, *connect.Request[v1.ImportRecordsRequest]) (*connect.Response[v1.ImportRecordsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.StoreService.ImportRecords is not implemented"))
+}
+
+func (UnimplementedStoreServiceHandler) CompactStore(context.Context, *connect.Request[v1.CompactStoreRequest]) (*connect.Response[v1.CompactStoreResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.StoreService.CompactStore is not implemented"))
+}
+
+func (UnimplementedStoreServiceHandler) MergeStores(context.Context, *connect.Request[v1.MergeStoresRequest]) (*connect.Response[v1.MergeStoresResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.StoreService.MergeStores is not implemented"))
 }

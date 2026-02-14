@@ -132,6 +132,11 @@ export class StoreConfig extends Message<StoreConfig> {
    */
   retention = "";
 
+  /**
+   * @generated from field: bool enabled = 7;
+   */
+  enabled = false;
+
   constructor(data?: PartialMessage<StoreConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -146,6 +151,7 @@ export class StoreConfig extends Message<StoreConfig> {
     { no: 4, name: "policy", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 5, name: "params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
     { no: 6, name: "retention", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 7, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): StoreConfig {
@@ -1085,6 +1091,11 @@ export class DeleteStoreRequest extends Message<DeleteStoreRequest> {
    */
   id = "";
 
+  /**
+   * @generated from field: bool force = 2;
+   */
+  force = false;
+
   constructor(data?: PartialMessage<DeleteStoreRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1094,6 +1105,7 @@ export class DeleteStoreRequest extends Message<DeleteStoreRequest> {
   static readonly typeName = "gastrolog.v1.DeleteStoreRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "force", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteStoreRequest {
@@ -2206,6 +2218,290 @@ export class DeleteCertificateResponse extends Message<DeleteCertificateResponse
 
   static equals(a: DeleteCertificateResponse | PlainMessage<DeleteCertificateResponse> | undefined, b: DeleteCertificateResponse | PlainMessage<DeleteCertificateResponse> | undefined): boolean {
     return proto3.util.equals(DeleteCertificateResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PauseStoreRequest
+ */
+export class PauseStoreRequest extends Message<PauseStoreRequest> {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id = "";
+
+  constructor(data?: PartialMessage<PauseStoreRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PauseStoreRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PauseStoreRequest {
+    return new PauseStoreRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PauseStoreRequest {
+    return new PauseStoreRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PauseStoreRequest {
+    return new PauseStoreRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PauseStoreRequest | PlainMessage<PauseStoreRequest> | undefined, b: PauseStoreRequest | PlainMessage<PauseStoreRequest> | undefined): boolean {
+    return proto3.util.equals(PauseStoreRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PauseStoreResponse
+ */
+export class PauseStoreResponse extends Message<PauseStoreResponse> {
+  constructor(data?: PartialMessage<PauseStoreResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PauseStoreResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PauseStoreResponse {
+    return new PauseStoreResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PauseStoreResponse {
+    return new PauseStoreResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PauseStoreResponse {
+    return new PauseStoreResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PauseStoreResponse | PlainMessage<PauseStoreResponse> | undefined, b: PauseStoreResponse | PlainMessage<PauseStoreResponse> | undefined): boolean {
+    return proto3.util.equals(PauseStoreResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ResumeStoreRequest
+ */
+export class ResumeStoreRequest extends Message<ResumeStoreRequest> {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id = "";
+
+  constructor(data?: PartialMessage<ResumeStoreRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ResumeStoreRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ResumeStoreRequest {
+    return new ResumeStoreRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ResumeStoreRequest {
+    return new ResumeStoreRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ResumeStoreRequest {
+    return new ResumeStoreRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ResumeStoreRequest | PlainMessage<ResumeStoreRequest> | undefined, b: ResumeStoreRequest | PlainMessage<ResumeStoreRequest> | undefined): boolean {
+    return proto3.util.equals(ResumeStoreRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ResumeStoreResponse
+ */
+export class ResumeStoreResponse extends Message<ResumeStoreResponse> {
+  constructor(data?: PartialMessage<ResumeStoreResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ResumeStoreResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ResumeStoreResponse {
+    return new ResumeStoreResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ResumeStoreResponse {
+    return new ResumeStoreResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ResumeStoreResponse {
+    return new ResumeStoreResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ResumeStoreResponse | PlainMessage<ResumeStoreResponse> | undefined, b: ResumeStoreResponse | PlainMessage<ResumeStoreResponse> | undefined): boolean {
+    return proto3.util.equals(ResumeStoreResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.RenameStoreRequest
+ */
+export class RenameStoreRequest extends Message<RenameStoreRequest> {
+  /**
+   * @generated from field: string old_id = 1;
+   */
+  oldId = "";
+
+  /**
+   * @generated from field: string new_id = 2;
+   */
+  newId = "";
+
+  constructor(data?: PartialMessage<RenameStoreRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RenameStoreRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "old_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "new_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RenameStoreRequest {
+    return new RenameStoreRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RenameStoreRequest {
+    return new RenameStoreRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RenameStoreRequest {
+    return new RenameStoreRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RenameStoreRequest | PlainMessage<RenameStoreRequest> | undefined, b: RenameStoreRequest | PlainMessage<RenameStoreRequest> | undefined): boolean {
+    return proto3.util.equals(RenameStoreRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.RenameStoreResponse
+ */
+export class RenameStoreResponse extends Message<RenameStoreResponse> {
+  constructor(data?: PartialMessage<RenameStoreResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RenameStoreResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RenameStoreResponse {
+    return new RenameStoreResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RenameStoreResponse {
+    return new RenameStoreResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RenameStoreResponse {
+    return new RenameStoreResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RenameStoreResponse | PlainMessage<RenameStoreResponse> | undefined, b: RenameStoreResponse | PlainMessage<RenameStoreResponse> | undefined): boolean {
+    return proto3.util.equals(RenameStoreResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.DecommissionStoreRequest
+ */
+export class DecommissionStoreRequest extends Message<DecommissionStoreRequest> {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id = "";
+
+  constructor(data?: PartialMessage<DecommissionStoreRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.DecommissionStoreRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DecommissionStoreRequest {
+    return new DecommissionStoreRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DecommissionStoreRequest {
+    return new DecommissionStoreRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DecommissionStoreRequest {
+    return new DecommissionStoreRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DecommissionStoreRequest | PlainMessage<DecommissionStoreRequest> | undefined, b: DecommissionStoreRequest | PlainMessage<DecommissionStoreRequest> | undefined): boolean {
+    return proto3.util.equals(DecommissionStoreRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.DecommissionStoreResponse
+ */
+export class DecommissionStoreResponse extends Message<DecommissionStoreResponse> {
+  /**
+   * @generated from field: int64 chunks_removed = 1;
+   */
+  chunksRemoved = protoInt64.zero;
+
+  constructor(data?: PartialMessage<DecommissionStoreResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.DecommissionStoreResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "chunks_removed", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DecommissionStoreResponse {
+    return new DecommissionStoreResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DecommissionStoreResponse {
+    return new DecommissionStoreResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DecommissionStoreResponse {
+    return new DecommissionStoreResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DecommissionStoreResponse | PlainMessage<DecommissionStoreResponse> | undefined, b: DecommissionStoreResponse | PlainMessage<DecommissionStoreResponse> | undefined): boolean {
+    return proto3.util.equals(DecommissionStoreResponse, a, b);
   }
 }
 

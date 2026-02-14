@@ -1,8 +1,11 @@
 package file
 
 import (
+	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -574,6 +577,123 @@ func TestFileChunkManagerEmptyChunk(t *testing.T) {
 	if _, _, err := cursor.Prev(); err != chunk.ErrNoMoreRecords {
 		t.Fatalf("expected ErrNoMoreRecords from Prev, got %v", err)
 	}
+}
+
+// TestMissingDirectoryWarning verifies that a warning is logged when a previously
+// existing store's data directory is missing and gets recreated empty.
+func TestMissingDirectoryWarning(t *testing.T) {
+	root := t.TempDir()
+	storeDir := filepath.Join(root, "mystore")
+
+	// Create a manager, write data, seal, close — establishes the directory.
+	m1, err := NewManager(Config{Dir: storeDir})
+	if err != nil {
+		t.Fatalf("create initial manager: %v", err)
+	}
+	rec := chunk.Record{
+		IngestTS: time.UnixMicro(1000),
+		Attrs:    chunk.Attributes{"src": "test"},
+		Raw:      []byte("important data"),
+	}
+	if _, _, err := m1.Append(rec); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := m1.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	if err := m1.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// Nuke the directory (simulates accidental deletion / /tmp cleanup).
+	if err := os.RemoveAll(storeDir); err != nil {
+		t.Fatalf("remove store dir: %v", err)
+	}
+
+	// Re-open with a capturing logger, expecting existing data.
+	h := &capturingHandler{}
+	logger := slog.New(h)
+
+	m2, err := NewManager(Config{Dir: storeDir, Logger: logger, ExpectExisting: true})
+	if err != nil {
+		t.Fatalf("reopen manager: %v", err)
+	}
+	defer m2.Close()
+
+	// Should have zero chunks.
+	metas, err := m2.List()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(metas) != 0 {
+		t.Fatalf("expected 0 chunks after dir loss, got %d", len(metas))
+	}
+
+	// Should have logged a warning about the missing directory.
+	if !h.hasWarn("missing") {
+		t.Error("expected a WARN log about missing directory, got none")
+	}
+}
+
+// TestNewDirectoryNoWarning verifies that creating a brand-new store (directory
+// never existed) does NOT emit a spurious warning.
+func TestNewDirectoryNoWarning(t *testing.T) {
+	root := t.TempDir()
+	storeDir := filepath.Join(root, "brand-new-store")
+
+	h := &capturingHandler{}
+	logger := slog.New(h)
+
+	m, err := NewManager(Config{Dir: storeDir, Logger: logger})
+	if err != nil {
+		t.Fatalf("create manager: %v", err)
+	}
+	defer m.Close()
+
+	// A new empty store should NOT warn — there's nothing to have lost.
+	if h.hasWarn("missing") {
+		t.Error("unexpected warning for brand-new store directory")
+	}
+}
+
+// capturingHandler is a minimal slog.Handler that records log records for assertions.
+type capturingHandler struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *capturingHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
+func (h *capturingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r)
+	return nil
+}
+func (h *capturingHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
+func (h *capturingHandler) WithGroup(_ string) slog.Handler      { return h }
+
+func (h *capturingHandler) hasWarn(substr string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, r := range h.records {
+		if r.Level == slog.LevelWarn && contains(r.Message, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && searchString(s, substr)
+}
+
+func searchString(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
 
 // TestListReturnsSortedChunks verifies that List() returns chunks sorted by StartTS.

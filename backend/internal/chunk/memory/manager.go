@@ -342,4 +342,13 @@ func (m *Manager) SetRotationPolicy(policy chunk.RotationPolicy) {
 	m.cfg.RotationPolicy = policy
 }
 
+// Close releases resources. For memory manager, this clears internal state.
+func (m *Manager) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.active = nil
+	m.chunks = nil
+	return nil
+}
+
 var _ chunk.ChunkManager = (*Manager)(nil)

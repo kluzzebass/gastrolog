@@ -261,6 +261,20 @@ func (s *Store) DeleteStore(ctx context.Context, id string) error {
 	return nil
 }
 
+func (s *Store) RenameStore(ctx context.Context, oldID, newID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cfg, ok := s.stores[oldID]
+	if !ok {
+		return fmt.Errorf("store %q not found", oldID)
+	}
+	cfg.ID = newID
+	s.stores[newID] = cfg
+	delete(s.stores, oldID)
+	return nil
+}
+
 // Ingesters
 
 func (s *Store) GetIngester(ctx context.Context, id string) (*config.IngesterConfig, error) {
@@ -494,6 +508,7 @@ func copyStoreConfig(st config.StoreConfig) config.StoreConfig {
 		ID:     st.ID,
 		Type:   st.Type,
 		Params: copyParams(st.Params),
+		Enabled: st.Enabled,
 	}
 	if st.Filter != nil {
 		c.Filter = config.StringPtr(*st.Filter)

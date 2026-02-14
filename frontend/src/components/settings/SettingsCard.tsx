@@ -49,7 +49,7 @@ export function SettingsCard({
             {onDelete && !confirmDelete && (
               <button
                 onClick={() => setConfirmDelete(true)}
-                className={`px-2 py-1 text-[0.75em] rounded transition-colors ${c(
+                className={`px-3 py-1.5 text-[0.8em] rounded transition-colors ${c(
                   "text-text-ghost hover:text-severity-error hover:bg-ink-hover",
                   "text-light-text-ghost hover:text-severity-error hover:bg-light-hover",
                 )}`}
@@ -59,7 +59,7 @@ export function SettingsCard({
             )}
             {onDelete && confirmDelete && (
               <div className="flex items-center gap-1.5">
-                <span className="text-[0.75em] text-severity-error">
+                <span className="text-[0.8em] text-severity-error">
                   Confirm?
                 </span>
                 <button
@@ -67,13 +67,13 @@ export function SettingsCard({
                     onDelete();
                     setConfirmDelete(false);
                   }}
-                  className="px-2 py-1 text-[0.75em] rounded bg-severity-error/15 text-severity-error hover:bg-severity-error/25 transition-colors"
+                  className="px-3 py-1.5 text-[0.8em] rounded bg-severity-error/15 text-severity-error hover:bg-severity-error/25 transition-colors"
                 >
                   Yes
                 </button>
                 <button
                   onClick={() => setConfirmDelete(false)}
-                  className={`px-2 py-1 text-[0.75em] rounded transition-colors ${c(
+                  className={`px-3 py-1.5 text-[0.8em] rounded transition-colors ${c(
                     "text-text-muted hover:bg-ink-hover",
                     "text-light-text-muted hover:bg-light-hover",
                   )}`}

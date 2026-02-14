@@ -103,6 +103,11 @@ export class StoreInfo extends Message<StoreInfo> {
    */
   recordCount = protoInt64.zero;
 
+  /**
+   * @generated from field: bool enabled = 6;
+   */
+  enabled = false;
+
   constructor(data?: PartialMessage<StoreInfo>) {
     super();
     proto3.util.initPartial(data, this);
@@ -116,6 +121,7 @@ export class StoreInfo extends Message<StoreInfo> {
     { no: 3, name: "filter", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "chunk_count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 5, name: "record_count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 6, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): StoreInfo {
@@ -857,6 +863,11 @@ export class GetStatsResponse extends Message<GetStatsResponse> {
    */
   newestRecord?: Timestamp;
 
+  /**
+   * @generated from field: repeated gastrolog.v1.StoreStats store_stats = 8;
+   */
+  storeStats: StoreStats[] = [];
+
   constructor(data?: PartialMessage<GetStatsResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -872,6 +883,7 @@ export class GetStatsResponse extends Message<GetStatsResponse> {
     { no: 5, name: "total_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 6, name: "oldest_record", kind: "message", T: Timestamp },
     { no: 7, name: "newest_record", kind: "message", T: Timestamp },
+    { no: 8, name: "store_stats", kind: "message", T: StoreStats, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetStatsResponse {
@@ -888,6 +900,904 @@ export class GetStatsResponse extends Message<GetStatsResponse> {
 
   static equals(a: GetStatsResponse | PlainMessage<GetStatsResponse> | undefined, b: GetStatsResponse | PlainMessage<GetStatsResponse> | undefined): boolean {
     return proto3.util.equals(GetStatsResponse, a, b);
+  }
+}
+
+/**
+ * StoreStats provides per-store statistics.
+ *
+ * @generated from message gastrolog.v1.StoreStats
+ */
+export class StoreStats extends Message<StoreStats> {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id = "";
+
+  /**
+   * @generated from field: string type = 2;
+   */
+  type = "";
+
+  /**
+   * @generated from field: int64 chunk_count = 3;
+   */
+  chunkCount = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 sealed_chunks = 4;
+   */
+  sealedChunks = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 active_chunks = 5;
+   */
+  activeChunks = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 record_count = 6;
+   */
+  recordCount = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 data_bytes = 7;
+   */
+  dataBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 index_bytes = 8;
+   */
+  indexBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp oldest_record = 9;
+   */
+  oldestRecord?: Timestamp;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp newest_record = 10;
+   */
+  newestRecord?: Timestamp;
+
+  /**
+   * @generated from field: bool enabled = 11;
+   */
+  enabled = false;
+
+  constructor(data?: PartialMessage<StoreStats>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.StoreStats";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "chunk_count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 4, name: "sealed_chunks", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 5, name: "active_chunks", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 6, name: "record_count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 7, name: "data_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 8, name: "index_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 9, name: "oldest_record", kind: "message", T: Timestamp },
+    { no: 10, name: "newest_record", kind: "message", T: Timestamp },
+    { no: 11, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): StoreStats {
+    return new StoreStats().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): StoreStats {
+    return new StoreStats().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): StoreStats {
+    return new StoreStats().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: StoreStats | PlainMessage<StoreStats> | undefined, b: StoreStats | PlainMessage<StoreStats> | undefined): boolean {
+    return proto3.util.equals(StoreStats, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ReindexStoreRequest
+ */
+export class ReindexStoreRequest extends Message<ReindexStoreRequest> {
+  /**
+   * @generated from field: string store = 1;
+   */
+  store = "";
+
+  constructor(data?: PartialMessage<ReindexStoreRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ReindexStoreRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "store", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ReindexStoreRequest {
+    return new ReindexStoreRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ReindexStoreRequest {
+    return new ReindexStoreRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ReindexStoreRequest {
+    return new ReindexStoreRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ReindexStoreRequest | PlainMessage<ReindexStoreRequest> | undefined, b: ReindexStoreRequest | PlainMessage<ReindexStoreRequest> | undefined): boolean {
+    return proto3.util.equals(ReindexStoreRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ReindexStoreResponse
+ */
+export class ReindexStoreResponse extends Message<ReindexStoreResponse> {
+  /**
+   * @generated from field: int64 chunks_reindexed = 1;
+   */
+  chunksReindexed = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 errors = 2;
+   */
+  errors = protoInt64.zero;
+
+  /**
+   * @generated from field: repeated string error_details = 3;
+   */
+  errorDetails: string[] = [];
+
+  constructor(data?: PartialMessage<ReindexStoreResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ReindexStoreResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "chunks_reindexed", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 2, name: "errors", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "error_details", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ReindexStoreResponse {
+    return new ReindexStoreResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ReindexStoreResponse {
+    return new ReindexStoreResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ReindexStoreResponse {
+    return new ReindexStoreResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ReindexStoreResponse | PlainMessage<ReindexStoreResponse> | undefined, b: ReindexStoreResponse | PlainMessage<ReindexStoreResponse> | undefined): boolean {
+    return proto3.util.equals(ReindexStoreResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ValidateStoreRequest
+ */
+export class ValidateStoreRequest extends Message<ValidateStoreRequest> {
+  /**
+   * @generated from field: string store = 1;
+   */
+  store = "";
+
+  constructor(data?: PartialMessage<ValidateStoreRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ValidateStoreRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "store", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ValidateStoreRequest {
+    return new ValidateStoreRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ValidateStoreRequest {
+    return new ValidateStoreRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ValidateStoreRequest {
+    return new ValidateStoreRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ValidateStoreRequest | PlainMessage<ValidateStoreRequest> | undefined, b: ValidateStoreRequest | PlainMessage<ValidateStoreRequest> | undefined): boolean {
+    return proto3.util.equals(ValidateStoreRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ValidateStoreResponse
+ */
+export class ValidateStoreResponse extends Message<ValidateStoreResponse> {
+  /**
+   * @generated from field: bool valid = 1;
+   */
+  valid = false;
+
+  /**
+   * @generated from field: repeated gastrolog.v1.ChunkValidation chunks = 2;
+   */
+  chunks: ChunkValidation[] = [];
+
+  constructor(data?: PartialMessage<ValidateStoreResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ValidateStoreResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "valid", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 2, name: "chunks", kind: "message", T: ChunkValidation, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ValidateStoreResponse {
+    return new ValidateStoreResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ValidateStoreResponse {
+    return new ValidateStoreResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ValidateStoreResponse {
+    return new ValidateStoreResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ValidateStoreResponse | PlainMessage<ValidateStoreResponse> | undefined, b: ValidateStoreResponse | PlainMessage<ValidateStoreResponse> | undefined): boolean {
+    return proto3.util.equals(ValidateStoreResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ChunkValidation
+ */
+export class ChunkValidation extends Message<ChunkValidation> {
+  /**
+   * @generated from field: string chunk_id = 1;
+   */
+  chunkId = "";
+
+  /**
+   * @generated from field: bool valid = 2;
+   */
+  valid = false;
+
+  /**
+   * @generated from field: repeated string issues = 3;
+   */
+  issues: string[] = [];
+
+  constructor(data?: PartialMessage<ChunkValidation>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ChunkValidation";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "valid", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 3, name: "issues", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkValidation {
+    return new ChunkValidation().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ChunkValidation {
+    return new ChunkValidation().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ChunkValidation {
+    return new ChunkValidation().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ChunkValidation | PlainMessage<ChunkValidation> | undefined, b: ChunkValidation | PlainMessage<ChunkValidation> | undefined): boolean {
+    return proto3.util.equals(ChunkValidation, a, b);
+  }
+}
+
+/**
+ * CloneStore copies all records from source to a new store with the same config.
+ *
+ * @generated from message gastrolog.v1.CloneStoreRequest
+ */
+export class CloneStoreRequest extends Message<CloneStoreRequest> {
+  /**
+   * @generated from field: string source = 1;
+   */
+  source = "";
+
+  /**
+   * @generated from field: string destination = 2;
+   */
+  destination = "";
+
+  /**
+   * Optional overrides for destination store params (e.g. dir for file stores).
+   * Merged on top of source params.
+   *
+   * @generated from field: map<string, string> destination_params = 3;
+   */
+  destinationParams: { [key: string]: string } = {};
+
+  constructor(data?: PartialMessage<CloneStoreRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.CloneStoreRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "source", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "destination", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "destination_params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CloneStoreRequest {
+    return new CloneStoreRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): CloneStoreRequest {
+    return new CloneStoreRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): CloneStoreRequest {
+    return new CloneStoreRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: CloneStoreRequest | PlainMessage<CloneStoreRequest> | undefined, b: CloneStoreRequest | PlainMessage<CloneStoreRequest> | undefined): boolean {
+    return proto3.util.equals(CloneStoreRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.CloneStoreResponse
+ */
+export class CloneStoreResponse extends Message<CloneStoreResponse> {
+  /**
+   * @generated from field: int64 records_copied = 1;
+   */
+  recordsCopied = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 chunks_created = 2;
+   */
+  chunksCreated = protoInt64.zero;
+
+  constructor(data?: PartialMessage<CloneStoreResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.CloneStoreResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "records_copied", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 2, name: "chunks_created", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CloneStoreResponse {
+    return new CloneStoreResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): CloneStoreResponse {
+    return new CloneStoreResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): CloneStoreResponse {
+    return new CloneStoreResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: CloneStoreResponse | PlainMessage<CloneStoreResponse> | undefined, b: CloneStoreResponse | PlainMessage<CloneStoreResponse> | undefined): boolean {
+    return proto3.util.equals(CloneStoreResponse, a, b);
+  }
+}
+
+/**
+ * MigrateStore copies records to a new store of a different type, then deletes the source.
+ *
+ * @generated from message gastrolog.v1.MigrateStoreRequest
+ */
+export class MigrateStoreRequest extends Message<MigrateStoreRequest> {
+  /**
+   * @generated from field: string source = 1;
+   */
+  source = "";
+
+  /**
+   * @generated from field: string destination = 2;
+   */
+  destination = "";
+
+  /**
+   * @generated from field: string destination_type = 3;
+   */
+  destinationType = "";
+
+  /**
+   * @generated from field: map<string, string> destination_params = 4;
+   */
+  destinationParams: { [key: string]: string } = {};
+
+  constructor(data?: PartialMessage<MigrateStoreRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.MigrateStoreRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "source", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "destination", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "destination_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "destination_params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): MigrateStoreRequest {
+    return new MigrateStoreRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): MigrateStoreRequest {
+    return new MigrateStoreRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): MigrateStoreRequest {
+    return new MigrateStoreRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: MigrateStoreRequest | PlainMessage<MigrateStoreRequest> | undefined, b: MigrateStoreRequest | PlainMessage<MigrateStoreRequest> | undefined): boolean {
+    return proto3.util.equals(MigrateStoreRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.MigrateStoreResponse
+ */
+export class MigrateStoreResponse extends Message<MigrateStoreResponse> {
+  /**
+   * @generated from field: int64 records_migrated = 1;
+   */
+  recordsMigrated = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 chunks_created = 2;
+   */
+  chunksCreated = protoInt64.zero;
+
+  constructor(data?: PartialMessage<MigrateStoreResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.MigrateStoreResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "records_migrated", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 2, name: "chunks_created", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): MigrateStoreResponse {
+    return new MigrateStoreResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): MigrateStoreResponse {
+    return new MigrateStoreResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): MigrateStoreResponse {
+    return new MigrateStoreResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: MigrateStoreResponse | PlainMessage<MigrateStoreResponse> | undefined, b: MigrateStoreResponse | PlainMessage<MigrateStoreResponse> | undefined): boolean {
+    return proto3.util.equals(MigrateStoreResponse, a, b);
+  }
+}
+
+/**
+ * ExportStore streams all records from a store.
+ *
+ * @generated from message gastrolog.v1.ExportStoreRequest
+ */
+export class ExportStoreRequest extends Message<ExportStoreRequest> {
+  /**
+   * @generated from field: string store = 1;
+   */
+  store = "";
+
+  constructor(data?: PartialMessage<ExportStoreRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ExportStoreRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "store", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ExportStoreRequest {
+    return new ExportStoreRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ExportStoreRequest {
+    return new ExportStoreRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ExportStoreRequest {
+    return new ExportStoreRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ExportStoreRequest | PlainMessage<ExportStoreRequest> | undefined, b: ExportStoreRequest | PlainMessage<ExportStoreRequest> | undefined): boolean {
+    return proto3.util.equals(ExportStoreRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ExportStoreResponse
+ */
+export class ExportStoreResponse extends Message<ExportStoreResponse> {
+  /**
+   * @generated from field: repeated gastrolog.v1.ExportRecord records = 1;
+   */
+  records: ExportRecord[] = [];
+
+  /**
+   * @generated from field: bool has_more = 2;
+   */
+  hasMore = false;
+
+  constructor(data?: PartialMessage<ExportStoreResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ExportStoreResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "records", kind: "message", T: ExportRecord, repeated: true },
+    { no: 2, name: "has_more", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ExportStoreResponse {
+    return new ExportStoreResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ExportStoreResponse {
+    return new ExportStoreResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ExportStoreResponse {
+    return new ExportStoreResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ExportStoreResponse | PlainMessage<ExportStoreResponse> | undefined, b: ExportStoreResponse | PlainMessage<ExportStoreResponse> | undefined): boolean {
+    return proto3.util.equals(ExportStoreResponse, a, b);
+  }
+}
+
+/**
+ * ExportRecord is a portable record representation for export/import.
+ *
+ * @generated from message gastrolog.v1.ExportRecord
+ */
+export class ExportRecord extends Message<ExportRecord> {
+  /**
+   * @generated from field: google.protobuf.Timestamp source_ts = 1;
+   */
+  sourceTs?: Timestamp;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp ingest_ts = 2;
+   */
+  ingestTs?: Timestamp;
+
+  /**
+   * @generated from field: map<string, string> attrs = 3;
+   */
+  attrs: { [key: string]: string } = {};
+
+  /**
+   * @generated from field: bytes raw = 4;
+   */
+  raw = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<ExportRecord>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ExportRecord";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "source_ts", kind: "message", T: Timestamp },
+    { no: 2, name: "ingest_ts", kind: "message", T: Timestamp },
+    { no: 3, name: "attrs", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
+    { no: 4, name: "raw", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ExportRecord {
+    return new ExportRecord().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ExportRecord {
+    return new ExportRecord().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ExportRecord {
+    return new ExportRecord().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ExportRecord | PlainMessage<ExportRecord> | undefined, b: ExportRecord | PlainMessage<ExportRecord> | undefined): boolean {
+    return proto3.util.equals(ExportRecord, a, b);
+  }
+}
+
+/**
+ * ImportRecords appends a batch of records to a store.
+ *
+ * @generated from message gastrolog.v1.ImportRecordsRequest
+ */
+export class ImportRecordsRequest extends Message<ImportRecordsRequest> {
+  /**
+   * @generated from field: string store = 1;
+   */
+  store = "";
+
+  /**
+   * @generated from field: repeated gastrolog.v1.ExportRecord records = 2;
+   */
+  records: ExportRecord[] = [];
+
+  constructor(data?: PartialMessage<ImportRecordsRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ImportRecordsRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "store", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "records", kind: "message", T: ExportRecord, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ImportRecordsRequest {
+    return new ImportRecordsRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ImportRecordsRequest {
+    return new ImportRecordsRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ImportRecordsRequest {
+    return new ImportRecordsRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ImportRecordsRequest | PlainMessage<ImportRecordsRequest> | undefined, b: ImportRecordsRequest | PlainMessage<ImportRecordsRequest> | undefined): boolean {
+    return proto3.util.equals(ImportRecordsRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ImportRecordsResponse
+ */
+export class ImportRecordsResponse extends Message<ImportRecordsResponse> {
+  /**
+   * @generated from field: int64 records_imported = 1;
+   */
+  recordsImported = protoInt64.zero;
+
+  constructor(data?: PartialMessage<ImportRecordsResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ImportRecordsResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "records_imported", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ImportRecordsResponse {
+    return new ImportRecordsResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ImportRecordsResponse {
+    return new ImportRecordsResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ImportRecordsResponse {
+    return new ImportRecordsResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ImportRecordsResponse | PlainMessage<ImportRecordsResponse> | undefined, b: ImportRecordsResponse | PlainMessage<ImportRecordsResponse> | undefined): boolean {
+    return proto3.util.equals(ImportRecordsResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.CompactStoreRequest
+ */
+export class CompactStoreRequest extends Message<CompactStoreRequest> {
+  /**
+   * @generated from field: string store = 1;
+   */
+  store = "";
+
+  constructor(data?: PartialMessage<CompactStoreRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.CompactStoreRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "store", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CompactStoreRequest {
+    return new CompactStoreRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): CompactStoreRequest {
+    return new CompactStoreRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): CompactStoreRequest {
+    return new CompactStoreRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: CompactStoreRequest | PlainMessage<CompactStoreRequest> | undefined, b: CompactStoreRequest | PlainMessage<CompactStoreRequest> | undefined): boolean {
+    return proto3.util.equals(CompactStoreRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.CompactStoreResponse
+ */
+export class CompactStoreResponse extends Message<CompactStoreResponse> {
+  /**
+   * @generated from field: int64 chunks_removed = 1;
+   */
+  chunksRemoved = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 bytes_reclaimed = 2;
+   */
+  bytesReclaimed = protoInt64.zero;
+
+  constructor(data?: PartialMessage<CompactStoreResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.CompactStoreResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "chunks_removed", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 2, name: "bytes_reclaimed", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CompactStoreResponse {
+    return new CompactStoreResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): CompactStoreResponse {
+    return new CompactStoreResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): CompactStoreResponse {
+    return new CompactStoreResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: CompactStoreResponse | PlainMessage<CompactStoreResponse> | undefined, b: CompactStoreResponse | PlainMessage<CompactStoreResponse> | undefined): boolean {
+    return proto3.util.equals(CompactStoreResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.MergeStoresRequest
+ */
+export class MergeStoresRequest extends Message<MergeStoresRequest> {
+  /**
+   * @generated from field: string source = 1;
+   */
+  source = "";
+
+  /**
+   * @generated from field: string destination = 2;
+   */
+  destination = "";
+
+  constructor(data?: PartialMessage<MergeStoresRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.MergeStoresRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "source", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "destination", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): MergeStoresRequest {
+    return new MergeStoresRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): MergeStoresRequest {
+    return new MergeStoresRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): MergeStoresRequest {
+    return new MergeStoresRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: MergeStoresRequest | PlainMessage<MergeStoresRequest> | undefined, b: MergeStoresRequest | PlainMessage<MergeStoresRequest> | undefined): boolean {
+    return proto3.util.equals(MergeStoresRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.MergeStoresResponse
+ */
+export class MergeStoresResponse extends Message<MergeStoresResponse> {
+  /**
+   * @generated from field: int64 records_merged = 1;
+   */
+  recordsMerged = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 chunks_created = 2;
+   */
+  chunksCreated = protoInt64.zero;
+
+  constructor(data?: PartialMessage<MergeStoresResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.MergeStoresResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "records_merged", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 2, name: "chunks_created", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): MergeStoresResponse {
+    return new MergeStoresResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): MergeStoresResponse {
+    return new MergeStoresResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): MergeStoresResponse {
+    return new MergeStoresResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: MergeStoresResponse | PlainMessage<MergeStoresResponse> | undefined, b: MergeStoresResponse | PlainMessage<MergeStoresResponse> | undefined): boolean {
+    return proto3.util.equals(MergeStoresResponse, a, b);
   }
 }
 

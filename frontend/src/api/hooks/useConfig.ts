@@ -111,6 +111,7 @@ export function usePutStore() {
       policy: string;
       retention: string;
       params: Record<string, string>;
+      enabled?: boolean;
     }) => {
       await configClient.putStore({
         config: {
@@ -120,6 +121,7 @@ export function usePutStore() {
           policy: args.policy,
           retention: args.retention,
           params: args.params,
+          enabled: args.enabled ?? true,
         },
       });
     },
@@ -134,8 +136,8 @@ export function usePutStore() {
 export function useDeleteStore() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => {
-      await configClient.deleteStore({ id });
+    mutationFn: async (args: { id: string; force?: boolean }) => {
+      await configClient.deleteStore({ id: args.id, force: args.force ?? false });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["config"] });
@@ -268,6 +270,61 @@ export function usePutCertificate() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["certificates"] });
       qc.invalidateQueries({ queryKey: ["serverConfig"] });
+    },
+  });
+}
+
+export function usePauseStore() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await configClient.pauseStore({ id });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["config"] });
+      qc.invalidateQueries({ queryKey: ["stores"] });
+    },
+  });
+}
+
+export function useResumeStore() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await configClient.resumeStore({ id });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["config"] });
+      qc.invalidateQueries({ queryKey: ["stores"] });
+    },
+  });
+}
+
+export function useRenameStore() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { oldId: string; newId: string }) => {
+      await configClient.renameStore({ oldId: args.oldId, newId: args.newId });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["config"] });
+      qc.invalidateQueries({ queryKey: ["stores"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
+    },
+  });
+}
+
+export function useDecommissionStore() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const response = await configClient.decommissionStore({ id });
+      return response;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["config"] });
+      qc.invalidateQueries({ queryKey: ["stores"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
     },
   });
 }

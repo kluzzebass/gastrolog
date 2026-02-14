@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { DeleteCertificateRequest, DeleteCertificateResponse, DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteStoreRequest, DeleteStoreResponse, GetCertificateRequest, GetCertificateResponse, GetConfigRequest, GetConfigResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetServerConfigRequest, GetServerConfigResponse, ListCertificatesRequest, ListCertificatesResponse, ListIngestersRequest, ListIngestersResponse, PutCertificateRequest, PutCertificateResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutServerConfigRequest, PutServerConfigResponse, PutStoreRequest, PutStoreResponse } from "./config_pb.js";
+import { DecommissionStoreRequest, DecommissionStoreResponse, DeleteCertificateRequest, DeleteCertificateResponse, DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteStoreRequest, DeleteStoreResponse, GetCertificateRequest, GetCertificateResponse, GetConfigRequest, GetConfigResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetServerConfigRequest, GetServerConfigResponse, ListCertificatesRequest, ListCertificatesResponse, ListIngestersRequest, ListIngestersResponse, PauseStoreRequest, PauseStoreResponse, PutCertificateRequest, PutCertificateResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutServerConfigRequest, PutServerConfigResponse, PutStoreRequest, PutStoreResponse, RenameStoreRequest, RenameStoreResponse, ResumeStoreRequest, ResumeStoreResponse } from "./config_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -276,6 +276,50 @@ export const ConfigService = {
       name: "DeleteCertificate",
       I: DeleteCertificateRequest,
       O: DeleteCertificateResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * PauseStore pauses ingestion for a store.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.PauseStore
+     */
+    pauseStore: {
+      name: "PauseStore",
+      I: PauseStoreRequest,
+      O: PauseStoreResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * ResumeStore resumes ingestion for a store.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.ResumeStore
+     */
+    resumeStore: {
+      name: "ResumeStore",
+      I: ResumeStoreRequest,
+      O: ResumeStoreResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * RenameStore changes a store's ID.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.RenameStore
+     */
+    renameStore: {
+      name: "RenameStore",
+      I: RenameStoreRequest,
+      O: RenameStoreResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * DecommissionStore disables ingestion and force-deletes a store.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.DecommissionStore
+     */
+    decommissionStore: {
+      name: "DecommissionStore",
+      I: DecommissionStoreRequest,
+      O: DecommissionStoreResponse,
       kind: MethodKind.Unary,
     },
   }

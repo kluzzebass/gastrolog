@@ -49,6 +49,11 @@ type Config struct {
 	// Logger for structured logging. If nil, logging is disabled.
 	// The manager scopes this logger with component="chunk-manager".
 	Logger *slog.Logger
+
+	// ExpectExisting indicates that this store is being loaded from config
+	// (not freshly created). If the data directory is missing, a warning
+	// is logged about potential data loss.
+	ExpectExisting bool
 }
 
 // Manager manages file-based chunk storage with split raw.log and idx.log files.
@@ -136,6 +141,14 @@ func NewManager(cfg Config) (*Manager, error) {
 		cfg.RotationPolicy = chunk.NewHardLimitPolicy(MaxRawLogSize, MaxAttrLogSize)
 	}
 
+	// Check if the directory already exists before creating it.
+	// If we have to create it, we track that so we can warn about
+	// potential data loss (existing store with missing directory).
+	dirExisted := true
+	if _, statErr := os.Stat(cfg.Dir); os.IsNotExist(statErr) {
+		dirExisted = false
+	}
+
 	if err := os.MkdirAll(cfg.Dir, 0o755); err != nil {
 		return nil, err
 	}
@@ -163,6 +176,11 @@ func NewManager(cfg Config) (*Manager, error) {
 	if err := manager.loadExisting(); err != nil {
 		lockFile.Close()
 		return nil, err
+	}
+
+	if cfg.ExpectExisting && !dirExisted {
+		logger.Warn("store data directory was missing and has been recreated empty — if this store previously held data, it may have been lost",
+			"dir", cfg.Dir)
 	}
 
 	return manager, nil

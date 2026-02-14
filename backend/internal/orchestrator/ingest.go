@@ -61,6 +61,9 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 
 	// Dispatch to target stores only.
 	for _, key := range targetStores {
+		if o.disabled[key] {
+			continue // store is disabled, skip ingestion
+		}
 		cm, ok := o.chunks[key]
 		if !ok {
 			continue // store not registered (shouldn't happen)

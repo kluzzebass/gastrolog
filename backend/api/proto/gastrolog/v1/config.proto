@@ -77,6 +77,18 @@ service ConfigService {
 
   // DeleteCertificate removes a certificate.
   rpc DeleteCertificate(DeleteCertificateRequest) returns (DeleteCertificateResponse);
+
+  // PauseStore pauses ingestion for a store.
+  rpc PauseStore(PauseStoreRequest) returns (PauseStoreResponse);
+
+  // ResumeStore resumes ingestion for a store.
+  rpc ResumeStore(ResumeStoreRequest) returns (ResumeStoreResponse);
+
+  // RenameStore changes a store's ID.
+  rpc RenameStore(RenameStoreRequest) returns (RenameStoreResponse);
+
+  // DecommissionStore disables ingestion and force-deletes a store.
+  rpc DecommissionStore(DecommissionStoreRequest) returns (DecommissionStoreResponse);
 }
 
 message GetConfigRequest {}
@@ -96,6 +108,7 @@ message StoreConfig {
   string policy = 4;
   map<string, string> params = 5;
   string retention = 6;
+  bool enabled = 7;
 }
 
 message IngesterConfig {
@@ -194,6 +207,7 @@ message PutStoreResponse {}
 
 message DeleteStoreRequest {
   string id = 1;
+  bool force = 2;
 }
 
 message DeleteStoreResponse {}
@@ -304,3 +318,30 @@ message DeleteCertificateRequest {
 }
 
 message DeleteCertificateResponse {}
+
+message PauseStoreRequest {
+  string id = 1;
+}
+
+message PauseStoreResponse {}
+
+message ResumeStoreRequest {
+  string id = 1;
+}
+
+message ResumeStoreResponse {}
+
+message RenameStoreRequest {
+  string old_id = 1;
+  string new_id = 2;
+}
+
+message RenameStoreResponse {}
+
+message DecommissionStoreRequest {
+  string id = 1;
+}
+
+message DecommissionStoreResponse {
+  int64 chunks_removed = 1;
+}

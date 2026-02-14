@@ -281,6 +281,9 @@ func (o *Orchestrator) RemoveStore(id string) error {
 	// Remove cron rotation job if present.
 	o.cronRotation.removeJob(id)
 
+	// Remove disabled state.
+	delete(o.disabled, id)
+
 	// Remove from registries.
 	delete(o.chunks, id)
 	delete(o.indexes, id)
@@ -290,6 +293,111 @@ func (o *Orchestrator) RemoveStore(id string) error {
 	o.rebuildFilterSetLocked()
 
 	o.logger.Info("store removed", "id", id)
+	return nil
+}
+
+// DisableStore disables ingestion for a store.
+// Disabled stores will not receive new records from the ingest pipeline.
+// Returns ErrStoreNotFound if the store doesn't exist.
+func (o *Orchestrator) DisableStore(id string) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	if _, exists := o.chunks[id]; !exists {
+		return fmt.Errorf("%w: %s", ErrStoreNotFound, id)
+	}
+
+	o.disabled[id] = true
+	o.logger.Info("store disabled", "id", id)
+	return nil
+}
+
+// EnableStore enables ingestion for a store.
+// Returns ErrStoreNotFound if the store doesn't exist.
+func (o *Orchestrator) EnableStore(id string) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	if _, exists := o.chunks[id]; !exists {
+		return fmt.Errorf("%w: %s", ErrStoreNotFound, id)
+	}
+
+	delete(o.disabled, id)
+	o.logger.Info("store enabled", "id", id)
+	return nil
+}
+
+// IsStoreEnabled returns whether ingestion is enabled for the given store.
+func (o *Orchestrator) IsStoreEnabled(id string) bool {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return !o.disabled[id]
+}
+
+// ForceRemoveStore removes a store regardless of whether it contains data.
+// It seals the active chunk if present, deletes all indexes and chunks,
+// closes the chunk manager, and cleans up all associated resources.
+// Returns ErrStoreNotFound if the store doesn't exist.
+func (o *Orchestrator) ForceRemoveStore(id string) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	cm, exists := o.chunks[id]
+	if !exists {
+		return fmt.Errorf("%w: %s", ErrStoreNotFound, id)
+	}
+	im := o.indexes[id]
+
+	// Seal active chunk if present.
+	if active := cm.Active(); active != nil {
+		if err := cm.Seal(); err != nil {
+			return fmt.Errorf("seal active chunk for store %s: %w", id, err)
+		}
+	}
+
+	// Delete all indexes and chunks.
+	metas, err := cm.List()
+	if err != nil {
+		return fmt.Errorf("list chunks for store %s: %w", id, err)
+	}
+	for _, meta := range metas {
+		if im != nil {
+			// Best-effort index deletion; log and continue on error.
+			if err := im.DeleteIndexes(meta.ID); err != nil {
+				o.logger.Warn("failed to delete indexes during force remove",
+					"store", id, "chunk", meta.ID.String(), "error", err)
+			}
+		}
+		if err := cm.Delete(meta.ID); err != nil {
+			return fmt.Errorf("delete chunk %s in store %s: %w", meta.ID.String(), id, err)
+		}
+	}
+
+	// Close the chunk manager to release file locks.
+	if err := cm.Close(); err != nil {
+		o.logger.Warn("failed to close chunk manager during force remove",
+			"store", id, "error", err)
+	}
+
+	// Remove retention job if present.
+	o.scheduler.RemoveJob(retentionJobName(id))
+	delete(o.retention, id)
+
+	// Remove cron rotation job if present.
+	o.cronRotation.removeJob(id)
+
+	// Remove disabled state.
+	delete(o.disabled, id)
+
+	// Remove from registries.
+	delete(o.chunks, id)
+	delete(o.indexes, id)
+	delete(o.queries, id)
+
+	// Rebuild filter set without this store.
+	o.rebuildFilterSetLocked()
+
+	o.logger.Info("store force-removed", "id", id)
 	return nil
 }
 
@@ -340,6 +448,66 @@ func (o *Orchestrator) rebuildFilterSetLocked() {
 	} else {
 		o.filterSet = nil
 	}
+}
+
+// RenameStore atomically renames a store's ID across all internal registries.
+// Returns ErrStoreNotFound if the old ID doesn't exist.
+// Returns ErrDuplicateID if the new ID is already taken.
+func (o *Orchestrator) RenameStore(oldID, newID string) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	if _, exists := o.chunks[oldID]; !exists {
+		return fmt.Errorf("%w: %s", ErrStoreNotFound, oldID)
+	}
+	if _, exists := o.chunks[newID]; exists {
+		return fmt.Errorf("%w: %s", ErrDuplicateID, newID)
+	}
+
+	// Move all registry entries from old to new.
+	o.chunks[newID] = o.chunks[oldID]
+	delete(o.chunks, oldID)
+
+	o.indexes[newID] = o.indexes[oldID]
+	delete(o.indexes, oldID)
+
+	o.queries[newID] = o.queries[oldID]
+	delete(o.queries, oldID)
+
+	if o.disabled[oldID] {
+		o.disabled[newID] = true
+		delete(o.disabled, oldID)
+	}
+
+	// Rename retention runner.
+	if runner, ok := o.retention[oldID]; ok {
+		runner.storeID = newID
+		o.retention[newID] = runner
+		delete(o.retention, oldID)
+		o.scheduler.RemoveJob(retentionJobName(oldID))
+		if err := o.scheduler.AddJob(retentionJobName(newID), defaultRetentionSchedule, runner.sweep); err != nil {
+			o.logger.Warn("failed to re-add retention job after rename", "store", newID, "error", err)
+		}
+	}
+
+	// Rename cron rotation job.
+	if o.cronRotation.hasJob(oldID) {
+		o.cronRotation.renameJob(oldID, newID, o.chunks[newID])
+	}
+
+	// Rebuild filter set with the new store ID.
+	if o.filterSet != nil {
+		for _, f := range o.filterSet.filters {
+			if f.StoreID == oldID {
+				f.StoreID = newID
+				break
+			}
+		}
+		o.filterSet = NewFilterSet(o.filterSet.filters)
+	}
+
+	o.logger.Info("store renamed", "old", oldID, "new", newID)
+	return nil
 }
 
 // StoreConfig returns the effective configuration for a store.

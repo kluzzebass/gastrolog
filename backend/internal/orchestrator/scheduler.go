@@ -202,6 +202,13 @@ func (s *Scheduler) ListJobs() []JobInfo {
 	return infos
 }
 
+// JobSchedule returns the cron expression for a named job, or "" if not found.
+func (s *Scheduler) JobSchedule(name string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.schedules[name]
+}
+
 // Start is a no-op — the scheduler starts eagerly at creation time so that
 // RunOnce jobs can execute without requiring an explicit Start() call.
 // Retained for API compatibility with the orchestrator lifecycle.

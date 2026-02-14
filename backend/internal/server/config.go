@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -65,6 +68,7 @@ func (s *ConfigServer) GetConfig(
 					Id:     storeCfg.ID,
 					Type:   storeCfg.Type,
 					Params: storeCfg.Params,
+					Enabled: storeCfg.Enabled,
 				}
 				if storeCfg.Filter != nil {
 					sc.Filter = *storeCfg.Filter
@@ -397,6 +401,54 @@ func (s *ConfigServer) DeleteRetentionPolicy(
 	return connect.NewResponse(&apiv1.DeleteRetentionPolicyResponse{}), nil
 }
 
+// validateStoreDir checks that a file store's directory does not overlap (nest
+// inside or contain) any other file store's directory. Returns an error
+// describing the conflict, or nil if the directory is safe.
+func (s *ConfigServer) validateStoreDir(ctx context.Context, storeID string, dir string) error {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return fmt.Errorf("resolve path: %w", err)
+	}
+	// Normalize: ensure trailing separator for prefix comparison.
+	normDir := filepath.Clean(absDir) + string(filepath.Separator)
+
+	existing, err := s.cfgStore.ListStores(ctx)
+	if err != nil {
+		return fmt.Errorf("list stores: %w", err)
+	}
+
+	for _, st := range existing {
+		if st.ID == storeID {
+			continue // Updating self is OK.
+		}
+		if st.Type != "file" {
+			continue // Only check file stores.
+		}
+		otherDir := st.Params["dir"]
+		if otherDir == "" {
+			continue
+		}
+		absOther, err := filepath.Abs(otherDir)
+		if err != nil {
+			continue // Can't resolve — skip.
+		}
+		normOther := filepath.Clean(absOther) + string(filepath.Separator)
+
+		// Check for exact match or nesting in either direction.
+		if normDir == normOther {
+			return fmt.Errorf("directory %q is already used by store %q", dir, st.ID)
+		}
+		if strings.HasPrefix(normDir, normOther) {
+			return fmt.Errorf("directory %q is nested inside store %q directory %q", dir, st.ID, otherDir)
+		}
+		if strings.HasPrefix(normOther, normDir) {
+			return fmt.Errorf("directory %q contains store %q directory %q", dir, st.ID, otherDir)
+		}
+	}
+
+	return nil
+}
+
 // PutStore creates or updates a store.
 func (s *ConfigServer) PutStore(
 	ctx context.Context,
@@ -413,6 +465,15 @@ func (s *ConfigServer) PutStore(
 	}
 
 	storeCfg := protoToStoreConfig(req.Msg.Config)
+
+	// Validate file store directory against nesting.
+	if storeCfg.Type == "file" {
+		if dir := storeCfg.Params["dir"]; dir != "" {
+			if err := s.validateStoreDir(ctx, storeCfg.ID, dir); err != nil {
+				return nil, connect.NewError(connect.CodeInvalidArgument, err)
+			}
+		}
+	}
 
 	// Persist to config store.
 	if err := s.cfgStore.PutStore(ctx, storeCfg); err != nil {
@@ -445,6 +506,12 @@ func (s *ConfigServer) PutStore(
 		if err := s.orch.UpdateRetentionPolicies(fullCfg); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update retention policies: %w", err))
 		}
+		// Apply enabled state.
+		if !storeCfg.Enabled {
+			_ = s.orch.DisableStore(storeCfg.ID)
+		} else {
+			_ = s.orch.EnableStore(storeCfg.ID)
+		}
 	} else {
 		// Add new store to orchestrator.
 		if err := s.orch.AddStore(storeCfg, fullCfg, s.factories); err != nil {
@@ -455,7 +522,9 @@ func (s *ConfigServer) PutStore(
 	return connect.NewResponse(&apiv1.PutStoreResponse{}), nil
 }
 
-// DeleteStore removes a store (must be empty).
+// DeleteStore removes a store. If force is false, the store must be empty.
+// If force is true, the store is removed regardless of content: active chunks are sealed,
+// all indexes and chunks are deleted, and for file stores the data directory is removed.
 func (s *ConfigServer) DeleteStore(
 	ctx context.Context,
 	req *connect.Request[apiv1.DeleteStoreRequest],
@@ -464,15 +533,44 @@ func (s *ConfigServer) DeleteStore(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
 	}
 
-	// Remove from runtime first (validates emptiness).
-	if err := s.orch.RemoveStore(req.Msg.Id); err != nil {
-		if errors.Is(err, orchestrator.ErrStoreNotFound) {
-			return nil, connect.NewError(connect.CodeNotFound, err)
+	// Read store config before removing from runtime (we need it for directory cleanup).
+	var storeCfg *config.StoreConfig
+	if req.Msg.Force {
+		cfg, err := s.cfgStore.GetStore(ctx, req.Msg.Id)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("read store config: %w", err))
 		}
-		if errors.Is(err, orchestrator.ErrStoreNotEmpty) {
-			return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+		storeCfg = cfg
+	}
+
+	// Remove from runtime.
+	if req.Msg.Force {
+		if err := s.orch.ForceRemoveStore(req.Msg.Id); err != nil {
+			// If the store doesn't exist in the orchestrator, that's fine for force-delete —
+			// we still clean up config and disk.
+			if !errors.Is(err, orchestrator.ErrStoreNotFound) {
+				return nil, connect.NewError(connect.CodeInternal, err)
+			}
 		}
-		return nil, connect.NewError(connect.CodeInternal, err)
+
+		// For file stores, remove the data directory.
+		if storeCfg != nil && storeCfg.Type == "file" {
+			if dir := storeCfg.Params["dir"]; dir != "" {
+				if err := os.RemoveAll(dir); err != nil {
+					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("remove store directory: %w", err))
+				}
+			}
+		}
+	} else {
+		if err := s.orch.RemoveStore(req.Msg.Id); err != nil {
+			if errors.Is(err, orchestrator.ErrStoreNotFound) {
+				return nil, connect.NewError(connect.CodeNotFound, err)
+			}
+			if errors.Is(err, orchestrator.ErrStoreNotEmpty) {
+				return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+			}
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
 	}
 
 	// Remove from config store.
@@ -581,6 +679,156 @@ func (s *ConfigServer) DeleteIngester(
 	return connect.NewResponse(&apiv1.DeleteIngesterResponse{}), nil
 }
 
+// PauseStore disables ingestion for a store.
+func (s *ConfigServer) PauseStore(
+	ctx context.Context,
+	req *connect.Request[apiv1.PauseStoreRequest],
+) (*connect.Response[apiv1.PauseStoreResponse], error) {
+	if req.Msg.Id == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
+	}
+
+	// Update runtime state.
+	if err := s.orch.DisableStore(req.Msg.Id); err != nil {
+		if errors.Is(err, orchestrator.ErrStoreNotFound) {
+			return nil, connect.NewError(connect.CodeNotFound, err)
+		}
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	// Persist to config.
+	storeCfg, err := s.cfgStore.GetStore(ctx, req.Msg.Id)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if storeCfg != nil {
+		storeCfg.Enabled = false
+		if err := s.cfgStore.PutStore(ctx, *storeCfg); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
+	}
+
+	return connect.NewResponse(&apiv1.PauseStoreResponse{}), nil
+}
+
+// ResumeStore enables ingestion for a store.
+func (s *ConfigServer) ResumeStore(
+	ctx context.Context,
+	req *connect.Request[apiv1.ResumeStoreRequest],
+) (*connect.Response[apiv1.ResumeStoreResponse], error) {
+	if req.Msg.Id == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
+	}
+
+	// Update runtime state.
+	if err := s.orch.EnableStore(req.Msg.Id); err != nil {
+		if errors.Is(err, orchestrator.ErrStoreNotFound) {
+			return nil, connect.NewError(connect.CodeNotFound, err)
+		}
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	// Persist to config.
+	storeCfg, err := s.cfgStore.GetStore(ctx, req.Msg.Id)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if storeCfg != nil {
+		storeCfg.Enabled = true
+		if err := s.cfgStore.PutStore(ctx, *storeCfg); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
+	}
+
+	return connect.NewResponse(&apiv1.ResumeStoreResponse{}), nil
+}
+
+// RenameStore changes a store's ID.
+func (s *ConfigServer) RenameStore(
+	ctx context.Context,
+	req *connect.Request[apiv1.RenameStoreRequest],
+) (*connect.Response[apiv1.RenameStoreResponse], error) {
+	if req.Msg.OldId == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("old_id required"))
+	}
+	if req.Msg.NewId == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("new_id required"))
+	}
+	if req.Msg.OldId == req.Msg.NewId {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("old_id and new_id must differ"))
+	}
+
+	// Rename in orchestrator (validates existence and uniqueness).
+	if err := s.orch.RenameStore(req.Msg.OldId, req.Msg.NewId); err != nil {
+		if errors.Is(err, orchestrator.ErrStoreNotFound) {
+			return nil, connect.NewError(connect.CodeNotFound, err)
+		}
+		if errors.Is(err, orchestrator.ErrDuplicateID) {
+			return nil, connect.NewError(connect.CodeAlreadyExists, err)
+		}
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	// Rename in config store.
+	if err := s.cfgStore.RenameStore(ctx, req.Msg.OldId, req.Msg.NewId); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	return connect.NewResponse(&apiv1.RenameStoreResponse{}), nil
+}
+
+// DecommissionStore disables a store and force-deletes it.
+func (s *ConfigServer) DecommissionStore(
+	ctx context.Context,
+	req *connect.Request[apiv1.DecommissionStoreRequest],
+) (*connect.Response[apiv1.DecommissionStoreResponse], error) {
+	if req.Msg.Id == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
+	}
+
+	// Count chunks before removal for the response.
+	var chunksRemoved int64
+	if cm := s.orch.ChunkManager(req.Msg.Id); cm != nil {
+		if metas, err := cm.List(); err == nil {
+			chunksRemoved = int64(len(metas))
+		}
+	}
+
+	// Disable ingestion first.
+	_ = s.orch.DisableStore(req.Msg.Id)
+
+	// Read store config for directory cleanup.
+	var storeCfg *config.StoreConfig
+	if cfg, err := s.cfgStore.GetStore(ctx, req.Msg.Id); err == nil {
+		storeCfg = cfg
+	}
+
+	// Force-remove from orchestrator.
+	if err := s.orch.ForceRemoveStore(req.Msg.Id); err != nil {
+		if !errors.Is(err, orchestrator.ErrStoreNotFound) {
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
+	}
+
+	// Clean up data directory for file stores.
+	if storeCfg != nil && storeCfg.Type == "file" {
+		if dir := storeCfg.Params["dir"]; dir != "" {
+			if err := os.RemoveAll(dir); err != nil {
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("remove store directory: %w", err))
+			}
+		}
+	}
+
+	// Remove from config store.
+	if err := s.cfgStore.DeleteStore(ctx, req.Msg.Id); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	return connect.NewResponse(&apiv1.DecommissionStoreResponse{
+		ChunksRemoved: chunksRemoved,
+	}), nil
+}
+
 // --- Proto <-> Config conversion helpers ---
 
 // protoToRotationPolicy converts a proto RotationPolicyConfig to a config.RotationPolicyConfig.
@@ -676,6 +924,7 @@ func protoToStoreConfig(p *apiv1.StoreConfig) config.StoreConfig {
 		ID:     p.Id,
 		Type:   p.Type,
 		Params: p.Params,
+		Enabled: p.Enabled,
 	}
 	if p.Filter != "" {
 		cfg.Filter = config.StringPtr(p.Filter)

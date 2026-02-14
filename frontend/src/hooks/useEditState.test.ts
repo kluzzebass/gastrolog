@@ -57,7 +57,7 @@ describe("useEditState", () => {
     expect(result.current.getEdit("b").count).toBe(2);
   });
 
-  test("clearEdit resets to defaults", () => {
+  test("clearEdit resets to defaults", async () => {
     const { result } = renderHook(() => useEditState(defaults));
 
     act(() => {
@@ -67,6 +67,11 @@ describe("useEditState", () => {
 
     act(() => {
       result.current.clearEdit("foo");
+    });
+    // Immediately after clear, stashed values prevent flash.
+    // After the next frame, defaults take over.
+    await act(async () => {
+      await new Promise((r) => requestAnimationFrame(r));
     });
     expect(result.current.getEdit("foo")).toEqual({
       name: "default-foo",

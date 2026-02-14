@@ -48,6 +48,10 @@ type ChunkManager interface {
 	// SetRotationPolicy updates the rotation policy for future appends.
 	// This takes effect immediately; the next append will use the new policy.
 	SetRotationPolicy(policy RotationPolicy)
+
+	// Close releases resources held by the manager (file locks, mmap regions, etc).
+	// After Close, the manager must not be used.
+	Close() error
 }
 
 // RecordCursor provides bidirectional iteration over records in a chunk.

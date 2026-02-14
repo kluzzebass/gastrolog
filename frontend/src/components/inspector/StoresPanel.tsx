@@ -1,7 +1,13 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { clickableProps } from "../../utils";
-import { useStores, useChunks, useIndexes } from "../../api/hooks";
+import {
+  useStores,
+  useChunks,
+  useIndexes,
+  useValidateStore,
+} from "../../api/hooks";
+import { useToast } from "../Toast";
 import { formatBytes } from "../../utils/units";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { ChunkTimeline } from "./ChunkTimeline";
@@ -42,19 +48,76 @@ export function StoresPanel({ dark }: { dark: boolean }) {
           dark={dark}
           expanded={expanded === store.id}
           onToggle={() => setExpanded(expanded === store.id ? null : store.id)}
-          status={
+          headerRight={
             <span
-              className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+              className={`text-[0.8em] flex items-center gap-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
             >
+              {!store.enabled && (
+                <span className="px-1.5 py-0.5 text-[0.75em] font-medium uppercase tracking-wider rounded bg-severity-warn/15 text-severity-warn">
+                  Disabled
+                </span>
+              )}
               {Number(store.chunkCount).toLocaleString()} chunks
               {" \u00B7 "}
               {store.recordCount.toLocaleString()} records
             </span>
           }
         >
+          <StoreActions storeId={store.id} dark={dark} />
           <ChunkList storeId={store.id} dark={dark} />
         </ExpandableCard>
       ))}
+    </div>
+  );
+}
+
+function StoreActions({
+  storeId,
+  dark,
+}: {
+  storeId: string;
+  dark: boolean;
+}) {
+  const c = useThemeClass(dark);
+  const validate = useValidateStore();
+  const { addToast } = useToast();
+
+  return (
+    <div
+      className={`flex items-center gap-2 px-4 py-2 border-b ${c(
+        "border-ink-border-subtle",
+        "border-light-border-subtle",
+      )}`}
+    >
+      <button
+        type="button"
+        className={`px-2.5 py-1 text-[0.8em] rounded border transition-colors ${c(
+          "border-ink-border-subtle text-text-muted hover:bg-ink-hover",
+          "border-light-border-subtle text-light-text-muted hover:bg-light-hover",
+        )}`}
+        disabled={validate.isPending}
+        onClick={async () => {
+          try {
+            const result = await validate.mutateAsync(storeId);
+            if (result.valid) {
+              addToast(
+                `Store valid (${result.chunks.length} chunk(s) checked)`,
+                "info",
+              );
+            } else {
+              const issues = result.chunks
+                .filter((ch) => !ch.valid)
+                .map((ch) => `${ch.chunkId}: ${ch.issues.join(", ")}`)
+                .join("; ");
+              addToast(`Validation failed: ${issues}`, "error");
+            }
+          } catch (err: any) {
+            addToast(err.message ?? "Validation failed", "error");
+          }
+        }}
+      >
+        {validate.isPending ? "Validating..." : "Validate"}
+      </button>
     </div>
   );
 }

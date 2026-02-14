@@ -304,11 +304,11 @@ func (s *Store) DeleteRetentionPolicy(ctx context.Context, id string) error {
 
 func (s *Store) GetStore(ctx context.Context, id string) (*config.StoreConfig, error) {
 	row := s.db.QueryRowContext(ctx,
-		"SELECT store_id, type, filter, policy, retention, params FROM stores WHERE store_id = ?", id)
+		"SELECT store_id, type, filter, policy, retention, params, enabled FROM stores WHERE store_id = ?", id)
 
 	var st config.StoreConfig
 	var paramsJSON *string
-	err := row.Scan(&st.ID, &st.Type, &st.Filter, &st.Policy, &st.Retention, &paramsJSON)
+	err := row.Scan(&st.ID, &st.Type, &st.Filter, &st.Policy, &st.Retention, &paramsJSON, &st.Enabled)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -325,7 +325,7 @@ func (s *Store) GetStore(ctx context.Context, id string) (*config.StoreConfig, e
 
 func (s *Store) ListStores(ctx context.Context) ([]config.StoreConfig, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT store_id, type, filter, policy, retention, params FROM stores")
+		"SELECT store_id, type, filter, policy, retention, params, enabled FROM stores")
 	if err != nil {
 		return nil, fmt.Errorf("list stores: %w", err)
 	}
@@ -335,7 +335,7 @@ func (s *Store) ListStores(ctx context.Context) ([]config.StoreConfig, error) {
 	for rows.Next() {
 		var st config.StoreConfig
 		var paramsJSON *string
-		if err := rows.Scan(&st.ID, &st.Type, &st.Filter, &st.Policy, &st.Retention, &paramsJSON); err != nil {
+		if err := rows.Scan(&st.ID, &st.Type, &st.Filter, &st.Policy, &st.Retention, &paramsJSON, &st.Enabled); err != nil {
 			return nil, fmt.Errorf("scan store: %w", err)
 		}
 		if paramsJSON != nil {
@@ -360,15 +360,16 @@ func (s *Store) PutStore(ctx context.Context, st config.StoreConfig) error {
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO stores (store_id, type, filter, policy, retention, params)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO stores (store_id, type, filter, policy, retention, params, enabled)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(store_id) DO UPDATE SET
 			type = excluded.type,
 			filter = excluded.filter,
 			policy = excluded.policy,
 			retention = excluded.retention,
-			params = excluded.params
-	`, st.ID, st.Type, st.Filter, st.Policy, st.Retention, paramsJSON)
+			params = excluded.params,
+			enabled = excluded.enabled
+	`, st.ID, st.Type, st.Filter, st.Policy, st.Retention, paramsJSON, st.Enabled)
 	if err != nil {
 		return fmt.Errorf("put store %q: %w", st.ID, err)
 	}
@@ -380,6 +381,15 @@ func (s *Store) DeleteStore(ctx context.Context, id string) error {
 		"DELETE FROM stores WHERE store_id = ?", id)
 	if err != nil {
 		return fmt.Errorf("delete store %q: %w", id, err)
+	}
+	return nil
+}
+
+func (s *Store) RenameStore(ctx context.Context, oldID, newID string) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE stores SET store_id = ? WHERE store_id = ?", newID, oldID)
+	if err != nil {
+		return fmt.Errorf("rename store %q to %q: %w", oldID, newID, err)
 	}
 	return nil
 }

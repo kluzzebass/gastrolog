@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { storeClient } from "../client";
 
 export function useStores() {
@@ -57,5 +57,131 @@ export function useStats(storeId?: string) {
       return response;
     },
     refetchInterval: 10_000,
+  });
+}
+
+export function useReindexStore() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (store: string) => {
+      const response = await storeClient.reindexStore({ store });
+      return response;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["stores"] });
+      qc.invalidateQueries({ queryKey: ["indexes"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
+    },
+  });
+}
+
+export function useValidateStore() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (store: string) => {
+      const response = await storeClient.validateStore({ store });
+      return response;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["stores"] });
+    },
+  });
+}
+
+export function useCloneStore() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      source: string;
+      destination: string;
+      destinationParams?: Record<string, string>;
+    }) => {
+      const response = await storeClient.cloneStore({
+        source: args.source,
+        destination: args.destination,
+        destinationParams: args.destinationParams ?? {},
+      });
+      return response;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["stores"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
+      qc.invalidateQueries({ queryKey: ["config"] });
+    },
+  });
+}
+
+export function useMigrateStore() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      source: string;
+      destination: string;
+      destinationType: string;
+      destinationParams?: Record<string, string>;
+    }) => {
+      const response = await storeClient.migrateStore(args);
+      return response;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["stores"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
+      qc.invalidateQueries({ queryKey: ["config"] });
+    },
+  });
+}
+
+export function useCompactStore() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (store: string) => {
+      const response = await storeClient.compactStore({ store });
+      return response;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["stores"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
+    },
+  });
+}
+
+export function useMergeStores() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { source: string; destination: string }) => {
+      const response = await storeClient.mergeStores({
+        source: args.source,
+        destination: args.destination,
+      });
+      return response;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["stores"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
+      qc.invalidateQueries({ queryKey: ["config"] });
+    },
+  });
+}
+
+export function useImportRecords() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      store: string;
+      records: Array<{
+        sourceTs?: Date;
+        ingestTs?: Date;
+        attrs?: Record<string, string>;
+        raw: Uint8Array;
+      }>;
+    }) => {
+      const response = await storeClient.importRecords(args);
+      return response;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["stores"] });
+      qc.invalidateQueries({ queryKey: ["chunks"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
+    },
   });
 }

@@ -3,6 +3,9 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -10,20 +13,24 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/chunk"
+	chunkfile "gastrolog/internal/chunk/file"
+	"gastrolog/internal/config"
 	"gastrolog/internal/index/analyzer"
 	"gastrolog/internal/orchestrator"
 )
 
 // StoreServer implements the StoreService.
 type StoreServer struct {
-	orch *orchestrator.Orchestrator
+	orch      *orchestrator.Orchestrator
+	cfgStore  config.Store
+	factories orchestrator.Factories
 }
 
 var _ gastrologv1connect.StoreServiceHandler = (*StoreServer)(nil)
 
 // NewStoreServer creates a new StoreServer.
-func NewStoreServer(orch *orchestrator.Orchestrator) *StoreServer {
-	return &StoreServer{orch: orch}
+func NewStoreServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories) *StoreServer {
+	return &StoreServer{orch: orch, cfgStore: cfgStore, factories: factories}
 }
 
 // ListStores returns all registered stores.
@@ -343,24 +350,563 @@ func (s *StoreServer) GetStats(
 			continue
 		}
 
+		storeStat := &apiv1.StoreStats{
+			Id:         storeID,
+			ChunkCount: int64(len(metas)),
+			Enabled:    s.orch.IsStoreEnabled(storeID),
+		}
+
+		// Get store type from config if available.
+		if cfg, err := s.orch.StoreConfig(storeID); err == nil {
+			storeStat.Type = cfg.Type
+		}
+
+		im := s.orch.IndexManager(storeID)
+
 		resp.TotalChunks += int64(len(metas))
 
 		for _, meta := range metas {
 			if meta.Sealed {
 				resp.SealedChunks++
+				storeStat.SealedChunks++
+			} else {
+				storeStat.ActiveChunks++
 			}
 			resp.TotalRecords += meta.RecordCount
+			storeStat.RecordCount += meta.RecordCount
+			storeStat.DataBytes += meta.Bytes
 
-			if resp.OldestRecord == nil || (!meta.StartTS.IsZero() && meta.StartTS.Before(resp.OldestRecord.AsTime())) {
-				resp.OldestRecord = timestamppb.New(meta.StartTS)
+			// Sum index sizes for this chunk.
+			if im != nil {
+				for _, size := range im.IndexSizes(meta.ID) {
+					storeStat.IndexBytes += size
+				}
 			}
-			if resp.NewestRecord == nil || meta.EndTS.After(resp.NewestRecord.AsTime()) {
-				resp.NewestRecord = timestamppb.New(meta.EndTS)
+
+			if !meta.StartTS.IsZero() {
+				if resp.OldestRecord == nil || meta.StartTS.Before(resp.OldestRecord.AsTime()) {
+					resp.OldestRecord = timestamppb.New(meta.StartTS)
+				}
+				if storeStat.OldestRecord == nil || meta.StartTS.Before(storeStat.OldestRecord.AsTime()) {
+					storeStat.OldestRecord = timestamppb.New(meta.StartTS)
+				}
+			}
+			if !meta.EndTS.IsZero() {
+				if resp.NewestRecord == nil || meta.EndTS.After(resp.NewestRecord.AsTime()) {
+					resp.NewestRecord = timestamppb.New(meta.EndTS)
+				}
+				if storeStat.NewestRecord == nil || meta.EndTS.After(storeStat.NewestRecord.AsTime()) {
+					storeStat.NewestRecord = timestamppb.New(meta.EndTS)
+				}
+			}
+		}
+
+		resp.TotalBytes += storeStat.DataBytes + storeStat.IndexBytes
+		resp.StoreStats = append(resp.StoreStats, storeStat)
+	}
+
+	return connect.NewResponse(resp), nil
+}
+
+// ReindexStore rebuilds all indexes for sealed chunks in a store.
+func (s *StoreServer) ReindexStore(
+	ctx context.Context,
+	req *connect.Request[apiv1.ReindexStoreRequest],
+) (*connect.Response[apiv1.ReindexStoreResponse], error) {
+	store := req.Msg.Store
+	if store == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store required"))
+	}
+
+	cm := s.orch.ChunkManager(store)
+	im := s.orch.IndexManager(store)
+	if cm == nil || im == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
+	}
+
+	metas, err := cm.List()
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	resp := &apiv1.ReindexStoreResponse{}
+
+	for _, meta := range metas {
+		if !meta.Sealed {
+			continue // Only reindex sealed chunks.
+		}
+
+		// Delete existing indexes first.
+		if err := im.DeleteIndexes(meta.ID); err != nil {
+			resp.Errors++
+			resp.ErrorDetails = append(resp.ErrorDetails,
+				fmt.Sprintf("delete indexes for chunk %s: %v", meta.ID, err))
+			continue
+		}
+
+		// Rebuild indexes.
+		if err := im.BuildIndexes(ctx, meta.ID); err != nil {
+			resp.Errors++
+			resp.ErrorDetails = append(resp.ErrorDetails,
+				fmt.Sprintf("build indexes for chunk %s: %v", meta.ID, err))
+			continue
+		}
+
+		resp.ChunksReindexed++
+	}
+
+	return connect.NewResponse(resp), nil
+}
+
+// ValidateStore checks chunk and index integrity for a store.
+func (s *StoreServer) ValidateStore(
+	ctx context.Context,
+	req *connect.Request[apiv1.ValidateStoreRequest],
+) (*connect.Response[apiv1.ValidateStoreResponse], error) {
+	store := req.Msg.Store
+	if store == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store required"))
+	}
+
+	cm := s.orch.ChunkManager(store)
+	im := s.orch.IndexManager(store)
+	if cm == nil || im == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
+	}
+
+	metas, err := cm.List()
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	resp := &apiv1.ValidateStoreResponse{Valid: true}
+
+	for _, meta := range metas {
+		cv := &apiv1.ChunkValidation{
+			ChunkId: meta.ID.String(),
+			Valid:   true,
+		}
+
+		// Check that we can read the chunk via cursor.
+		cursor, err := cm.OpenCursor(meta.ID)
+		if err != nil {
+			cv.Valid = false
+			cv.Issues = append(cv.Issues, fmt.Sprintf("cannot open cursor: %v", err))
+		} else {
+			// Count records to verify consistency with metadata.
+			var recordCount int64
+			for {
+				_, _, err := cursor.Next()
+				if errors.Is(err, chunk.ErrNoMoreRecords) {
+					break
+				}
+				if err != nil {
+					cv.Valid = false
+					cv.Issues = append(cv.Issues, fmt.Sprintf("read error at record %d: %v", recordCount, err))
+					break
+				}
+				recordCount++
+			}
+			cursor.Close()
+
+			if meta.RecordCount > 0 && recordCount != meta.RecordCount {
+				cv.Valid = false
+				cv.Issues = append(cv.Issues,
+					fmt.Sprintf("record count mismatch: metadata says %d, cursor read %d", meta.RecordCount, recordCount))
+			}
+		}
+
+		// For sealed chunks, check index completeness.
+		if meta.Sealed {
+			complete, err := im.IndexesComplete(meta.ID)
+			if err != nil {
+				cv.Valid = false
+				cv.Issues = append(cv.Issues, fmt.Sprintf("index check error: %v", err))
+			} else if !complete {
+				cv.Valid = false
+				cv.Issues = append(cv.Issues, "indexes incomplete for sealed chunk")
+			}
+		}
+
+		if !cv.Valid {
+			resp.Valid = false
+		}
+		resp.Chunks = append(resp.Chunks, cv)
+	}
+
+	return connect.NewResponse(resp), nil
+}
+
+// CloneStore copies all records from a source store to a new store.
+func (s *StoreServer) CloneStore(
+	ctx context.Context,
+	req *connect.Request[apiv1.CloneStoreRequest],
+) (*connect.Response[apiv1.CloneStoreResponse], error) {
+	if req.Msg.Source == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("source required"))
+	}
+	if req.Msg.Destination == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("destination required"))
+	}
+	if req.Msg.Source == req.Msg.Destination {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("source and destination must differ"))
+	}
+
+	// Source must exist.
+	srcCM := s.orch.ChunkManager(req.Msg.Source)
+	if srcCM == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("source store not found"))
+	}
+
+	// Get source config from config store (has type and params).
+	srcCfg, err := s.getFullStoreConfig(ctx, req.Msg.Source)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("read source config: %w", err))
+	}
+
+	dstCfg := config.StoreConfig{
+		ID:      req.Msg.Destination,
+		Type:    srcCfg.Type,
+		Filter:  srcCfg.Filter,
+		Policy:  srcCfg.Policy,
+		Enabled: true,
+		Params:  make(map[string]string, len(srcCfg.Params)),
+	}
+	for k, v := range srcCfg.Params {
+		dstCfg.Params[k] = v
+	}
+	// For file stores, derive a new directory for the destination.
+	if srcCfg.Type == "file" && s.factories.DataDir != "" {
+		dstCfg.Params[chunkfile.ParamDir] = filepath.Join(s.factories.DataDir, "stores", req.Msg.Destination)
+	}
+	// Merge user-provided destination params on top (can override derived dir).
+	for k, v := range req.Msg.DestinationParams {
+		dstCfg.Params[k] = v
+	}
+
+	if err := s.createStore(ctx, dstCfg); err != nil {
+		return nil, err
+	}
+
+	recordsCopied, chunksCreated, err := s.copyRecords(ctx, req.Msg.Source, req.Msg.Destination)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("copy records: %w", err))
+	}
+
+	return connect.NewResponse(&apiv1.CloneStoreResponse{
+		RecordsCopied: recordsCopied,
+		ChunksCreated: chunksCreated,
+	}), nil
+}
+
+// MigrateStore copies records to a new store of a different type, then deletes the source.
+func (s *StoreServer) MigrateStore(
+	ctx context.Context,
+	req *connect.Request[apiv1.MigrateStoreRequest],
+) (*connect.Response[apiv1.MigrateStoreResponse], error) {
+	if req.Msg.Source == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("source required"))
+	}
+	if req.Msg.Destination == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("destination required"))
+	}
+	if req.Msg.DestinationType == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("destination_type required"))
+	}
+	if req.Msg.Source == req.Msg.Destination {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("source and destination must differ"))
+	}
+
+	// Source must exist.
+	srcCM := s.orch.ChunkManager(req.Msg.Source)
+	if srcCM == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("source store not found"))
+	}
+
+	// Get source config for filter/policy, but use destination type and params.
+	srcCfg, err := s.getFullStoreConfig(ctx, req.Msg.Source)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("read source config: %w", err))
+	}
+
+	dstParams := req.Msg.DestinationParams
+	if dstParams == nil {
+		dstParams = make(map[string]string)
+	}
+	// For file stores without an explicit dir, derive one from the data directory.
+	if req.Msg.DestinationType == "file" && dstParams[chunkfile.ParamDir] == "" && s.factories.DataDir != "" {
+		dstParams[chunkfile.ParamDir] = filepath.Join(s.factories.DataDir, "stores", req.Msg.Destination)
+	}
+
+	dstCfg := config.StoreConfig{
+		ID:      req.Msg.Destination,
+		Type:    req.Msg.DestinationType,
+		Filter:  srcCfg.Filter,
+		Policy:  srcCfg.Policy,
+		Enabled: true,
+		Params:  dstParams,
+	}
+
+	if err := s.createStore(ctx, dstCfg); err != nil {
+		return nil, err
+	}
+
+	recordsMigrated, chunksCreated, err := s.copyRecords(ctx, req.Msg.Source, req.Msg.Destination)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("copy records: %w", err))
+	}
+
+	// Delete the source store.
+	if err := s.orch.ForceRemoveStore(req.Msg.Source); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("delete source: %w", err))
+	}
+
+	// Remove source from config store.
+	if s.cfgStore != nil {
+		if err := s.cfgStore.DeleteStore(ctx, req.Msg.Source); err != nil {
+			// Non-fatal: runtime is already cleaned up.
+			_ = err
+		}
+	}
+
+	return connect.NewResponse(&apiv1.MigrateStoreResponse{
+		RecordsMigrated: recordsMigrated,
+		ChunksCreated:   chunksCreated,
+	}), nil
+}
+
+// ExportStore streams all records from a store.
+func (s *StoreServer) ExportStore(
+	ctx context.Context,
+	req *connect.Request[apiv1.ExportStoreRequest],
+	stream *connect.ServerStream[apiv1.ExportStoreResponse],
+) error {
+	store := req.Msg.Store
+	if store == "" {
+		return connect.NewError(connect.CodeInvalidArgument, errors.New("store required"))
+	}
+
+	cm := s.orch.ChunkManager(store)
+	if cm == nil {
+		return connect.NewError(connect.CodeNotFound, errors.New("store not found"))
+	}
+
+	metas, err := cm.List()
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, err)
+	}
+
+	const batchSize = 100
+
+	for _, meta := range metas {
+		cursor, err := cm.OpenCursor(meta.ID)
+		if err != nil {
+			return connect.NewError(connect.CodeInternal, fmt.Errorf("open chunk %s: %w", meta.ID, err))
+		}
+
+		batch := make([]*apiv1.ExportRecord, 0, batchSize)
+		for {
+			rec, _, err := cursor.Next()
+			if errors.Is(err, chunk.ErrNoMoreRecords) {
+				break
+			}
+			if err != nil {
+				cursor.Close()
+				return connect.NewError(connect.CodeInternal, fmt.Errorf("read chunk %s: %w", meta.ID, err))
+			}
+
+			exportRec := &apiv1.ExportRecord{
+				Raw: rec.Raw,
+			}
+			if !rec.SourceTS.IsZero() {
+				exportRec.SourceTs = timestamppb.New(rec.SourceTS)
+			}
+			if !rec.IngestTS.IsZero() {
+				exportRec.IngestTs = timestamppb.New(rec.IngestTS)
+			}
+			if len(rec.Attrs) > 0 {
+				exportRec.Attrs = make(map[string]string, len(rec.Attrs))
+				for k, v := range rec.Attrs {
+					exportRec.Attrs[k] = v
+				}
+			}
+			batch = append(batch, exportRec)
+
+			if len(batch) >= batchSize {
+				if err := stream.Send(&apiv1.ExportStoreResponse{Records: batch, HasMore: true}); err != nil {
+					cursor.Close()
+					return err
+				}
+				batch = make([]*apiv1.ExportRecord, 0, batchSize)
+			}
+		}
+		cursor.Close()
+
+		// Flush remaining records for this chunk.
+		if len(batch) > 0 {
+			if err := stream.Send(&apiv1.ExportStoreResponse{Records: batch, HasMore: true}); err != nil {
+				return err
 			}
 		}
 	}
 
-	return connect.NewResponse(resp), nil
+	// Final empty message to signal end.
+	if err := stream.Send(&apiv1.ExportStoreResponse{HasMore: false}); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// ImportRecords appends a batch of records to a store.
+func (s *StoreServer) ImportRecords(
+	ctx context.Context,
+	req *connect.Request[apiv1.ImportRecordsRequest],
+) (*connect.Response[apiv1.ImportRecordsResponse], error) {
+	store := req.Msg.Store
+	if store == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store required"))
+	}
+
+	cm := s.orch.ChunkManager(store)
+	if cm == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
+	}
+
+	var imported int64
+	for _, exportRec := range req.Msg.Records {
+		rec := chunk.Record{
+			Raw: exportRec.Raw,
+		}
+		if exportRec.SourceTs != nil {
+			rec.SourceTS = exportRec.SourceTs.AsTime()
+		}
+		if exportRec.IngestTs != nil {
+			rec.IngestTS = exportRec.IngestTs.AsTime()
+		}
+		if len(exportRec.Attrs) > 0 {
+			rec.Attrs = make(chunk.Attributes, len(exportRec.Attrs))
+			for k, v := range exportRec.Attrs {
+				rec.Attrs[k] = v
+			}
+		}
+
+		if _, _, err := cm.Append(rec); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("append record %d: %w", imported, err))
+		}
+		imported++
+	}
+
+	return connect.NewResponse(&apiv1.ImportRecordsResponse{
+		RecordsImported: imported,
+	}), nil
+}
+
+// getFullStoreConfig retrieves store config from the config store (with type/params),
+// falling back to the orchestrator's limited config.
+func (s *StoreServer) getFullStoreConfig(ctx context.Context, id string) (config.StoreConfig, error) {
+	if s.cfgStore != nil {
+		cfg, err := s.cfgStore.GetStore(ctx, id)
+		if err == nil && cfg != nil {
+			return *cfg, nil
+		}
+	}
+	return s.orch.StoreConfig(id)
+}
+
+// createStore persists a store config and adds it to the orchestrator.
+func (s *StoreServer) createStore(ctx context.Context, cfg config.StoreConfig) *connect.Error {
+	// Persist to config store.
+	if s.cfgStore != nil {
+		if err := s.cfgStore.PutStore(ctx, cfg); err != nil {
+			return connect.NewError(connect.CodeInternal, fmt.Errorf("persist config: %w", err))
+		}
+	}
+
+	// Load full config for filter resolution.
+	var fullCfg *config.Config
+	if s.cfgStore != nil {
+		var err error
+		fullCfg, err = s.cfgStore.Load(ctx)
+		if err != nil {
+			return connect.NewError(connect.CodeInternal, fmt.Errorf("reload config: %w", err))
+		}
+	}
+
+	// Add to orchestrator.
+	if err := s.orch.AddStore(cfg, fullCfg, s.factories); err != nil {
+		// Rollback config entry on orchestrator failure.
+		if s.cfgStore != nil {
+			_ = s.cfgStore.DeleteStore(ctx, cfg.ID)
+		}
+		return connect.NewError(connect.CodeInternal, fmt.Errorf("add store: %w", err))
+	}
+
+	return nil
+}
+
+// copyRecords copies all records from source to destination store, returning counts.
+func (s *StoreServer) copyRecords(ctx context.Context, srcID, dstID string) (recordsCopied, chunksCreated int64, err error) {
+	srcCM := s.orch.ChunkManager(srcID)
+	dstCM := s.orch.ChunkManager(dstID)
+	dstIM := s.orch.IndexManager(dstID)
+
+	metas, err := srcCM.List()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	for _, meta := range metas {
+		cursor, err := srcCM.OpenCursor(meta.ID)
+		if err != nil {
+			return recordsCopied, chunksCreated, fmt.Errorf("open chunk %s: %w", meta.ID, err)
+		}
+
+		for {
+			rec, _, readErr := cursor.Next()
+			if errors.Is(readErr, chunk.ErrNoMoreRecords) {
+				break
+			}
+			if readErr != nil {
+				cursor.Close()
+				return recordsCopied, chunksCreated, fmt.Errorf("read chunk %s: %w", meta.ID, readErr)
+			}
+
+			// Copy record to outlive cursor.
+			rec = rec.Copy()
+			if _, _, appendErr := dstCM.Append(rec); appendErr != nil {
+				cursor.Close()
+				return recordsCopied, chunksCreated, fmt.Errorf("append record: %w", appendErr)
+			}
+			recordsCopied++
+		}
+		cursor.Close()
+	}
+
+	// Seal the active chunk if it has data, so we can build indexes.
+	if active := dstCM.Active(); active != nil && active.RecordCount > 0 {
+		if err := dstCM.Seal(); err != nil {
+			return recordsCopied, chunksCreated, fmt.Errorf("seal final chunk: %w", err)
+		}
+	}
+
+	// Build indexes for all sealed chunks.
+	dstMetas, err := dstCM.List()
+	if err != nil {
+		return recordsCopied, chunksCreated, err
+	}
+	for _, meta := range dstMetas {
+		if meta.Sealed {
+			chunksCreated++
+			if dstIM != nil {
+				if err := dstIM.BuildIndexes(ctx, meta.ID); err != nil {
+					return recordsCopied, chunksCreated, fmt.Errorf("build indexes for chunk %s: %w", meta.ID, err)
+				}
+			}
+		}
+	}
+
+	return recordsCopied, chunksCreated, nil
 }
 
 func (s *StoreServer) getStoreInfo(id string) (*apiv1.StoreInfo, error) {
@@ -387,11 +933,145 @@ func (s *StoreServer) getStoreInfo(id string) (*apiv1.StoreInfo, error) {
 		Type:        cfg.Type,
 		ChunkCount:  int64(len(metas)),
 		RecordCount: recordCount,
+		Enabled:     s.orch.IsStoreEnabled(id),
 	}
 	if cfg.Filter != nil {
 		info.Filter = *cfg.Filter
 	}
 	return info, nil
+}
+
+// CompactStore removes orphaned chunk directories and reclaims space for file stores.
+func (s *StoreServer) CompactStore(
+	ctx context.Context,
+	req *connect.Request[apiv1.CompactStoreRequest],
+) (*connect.Response[apiv1.CompactStoreResponse], error) {
+	store := req.Msg.Store
+	if store == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store required"))
+	}
+
+	cm := s.orch.ChunkManager(store)
+	im := s.orch.IndexManager(store)
+	if cm == nil || im == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
+	}
+
+	// Get the store config to find the directory.
+	storeCfg, err := s.getFullStoreConfig(ctx, store)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("read store config: %w", err))
+	}
+
+	resp := &apiv1.CompactStoreResponse{}
+
+	// For file stores, scan the directory for orphaned chunk subdirectories.
+	if storeCfg.Type == "file" {
+		dir := storeCfg.Params[chunkfile.ParamDir]
+		if dir == "" {
+			return connect.NewResponse(resp), nil
+		}
+
+		// Get known chunk IDs.
+		metas, err := cm.List()
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
+		known := make(map[string]bool, len(metas))
+		for _, m := range metas {
+			known[m.ID.String()] = true
+		}
+		// Also include the active chunk.
+		if active := cm.Active(); active != nil {
+			known[active.ID.String()] = true
+		}
+
+		// Scan directory for subdirectories not in the known set.
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("read store dir: %w", err))
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue // Skip files (.lock, etc.)
+			}
+			if known[entry.Name()] {
+				continue // Known chunk, keep it.
+			}
+			orphanPath := filepath.Join(dir, entry.Name())
+			// Walk orphan directory to sum file sizes before removal.
+			_ = filepath.WalkDir(orphanPath, func(_ string, d os.DirEntry, err error) error {
+				if err != nil || d.IsDir() {
+					return nil
+				}
+				if info, err := d.Info(); err == nil {
+					resp.BytesReclaimed += info.Size()
+				}
+				return nil
+			})
+			if err := os.RemoveAll(orphanPath); err != nil {
+				return nil, connect.NewError(connect.CodeInternal,
+					fmt.Errorf("remove orphan %s: %w", entry.Name(), err))
+			}
+			resp.ChunksRemoved++
+		}
+	}
+
+	return connect.NewResponse(resp), nil
+}
+
+// MergeStores copies all records from a source store into a destination store,
+// then deletes the source.
+func (s *StoreServer) MergeStores(
+	ctx context.Context,
+	req *connect.Request[apiv1.MergeStoresRequest],
+) (*connect.Response[apiv1.MergeStoresResponse], error) {
+	if req.Msg.Source == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("source required"))
+	}
+	if req.Msg.Destination == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("destination required"))
+	}
+	if req.Msg.Source == req.Msg.Destination {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("source and destination must differ"))
+	}
+
+	// Both stores must exist.
+	srcCM := s.orch.ChunkManager(req.Msg.Source)
+	dstCM := s.orch.ChunkManager(req.Msg.Destination)
+	if srcCM == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("source store not found"))
+	}
+	if dstCM == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("destination store not found"))
+	}
+
+	// Copy records from source to destination.
+	recordsMerged, chunksCreated, err := s.copyRecords(ctx, req.Msg.Source, req.Msg.Destination)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("merge records: %w", err))
+	}
+
+	// Force-delete the source store.
+	if err := s.orch.ForceRemoveStore(req.Msg.Source); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("delete source: %w", err))
+	}
+
+	// Remove source from config store and clean up data directory.
+	if s.cfgStore != nil {
+		srcCfg, cfgErr := s.getFullStoreConfig(ctx, req.Msg.Source)
+		_ = s.cfgStore.DeleteStore(ctx, req.Msg.Source) // Non-fatal: runtime already cleaned up.
+		if cfgErr == nil && srcCfg.Type == "file" {
+			if dir := srcCfg.Params[chunkfile.ParamDir]; dir != "" {
+				_ = os.RemoveAll(dir)
+			}
+		}
+	}
+
+	return connect.NewResponse(&apiv1.MergeStoresResponse{
+		RecordsMerged: recordsMerged,
+		ChunksCreated: chunksCreated,
+	}), nil
 }
 
 func chunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {

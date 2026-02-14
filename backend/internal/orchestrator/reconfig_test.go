@@ -299,6 +299,121 @@ func TestRemoveStoreNotFound(t *testing.T) {
 	}
 }
 
+func TestForceRemoveStore(t *testing.T) {
+	orch := orchestrator.New(orchestrator.Config{})
+
+	factories := orchestrator.Factories{
+		ChunkManagers: map[string]chunk.ManagerFactory{
+			"memory": chunkmem.NewFactory(),
+		},
+		IndexManagers: map[string]index.ManagerFactory{
+			"memory": indexmem.NewFactory(),
+		},
+	}
+
+	cfg := &config.Config{
+		Filters: map[string]config.FilterConfig{
+			"catch-all": {Expression: "*"},
+		},
+	}
+
+	storeCfg := config.StoreConfig{
+		ID:     "store-with-data",
+		Type:   "memory",
+		Filter: config.StringPtr("catch-all"),
+	}
+
+	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
+		t.Fatalf("AddStore: %v", err)
+	}
+
+	// Ingest data and cause a seal to create sealed chunks.
+	cm := orch.ChunkManager("store-with-data")
+	cm.SetRotationPolicy(chunk.NewRecordCountPolicy(3))
+
+	for i := 0; i < 10; i++ {
+		rec := chunk.Record{
+			IngestTS: time.Now(),
+			Attrs:    chunk.Attributes{},
+			Raw:      []byte("test message"),
+		}
+		if err := orch.Ingest(rec); err != nil {
+			t.Fatalf("Ingest: %v", err)
+		}
+	}
+
+	// Verify store has data.
+	metas, _ := cm.List()
+	if len(metas) == 0 {
+		t.Fatal("expected chunks in store")
+	}
+
+	// Normal remove should fail.
+	if err := orch.RemoveStore("store-with-data"); err == nil {
+		t.Fatal("expected error for non-empty store")
+	}
+
+	// Force remove should succeed.
+	if err := orch.ForceRemoveStore("store-with-data"); err != nil {
+		t.Fatalf("ForceRemoveStore: %v", err)
+	}
+
+	// Verify store was completely removed.
+	if cm := orch.ChunkManager("store-with-data"); cm != nil {
+		t.Error("ChunkManager should be nil after ForceRemoveStore")
+	}
+	if im := orch.IndexManager("store-with-data"); im != nil {
+		t.Error("IndexManager should be nil after ForceRemoveStore")
+	}
+}
+
+func TestForceRemoveStoreNotFound(t *testing.T) {
+	orch := orchestrator.New(orchestrator.Config{})
+
+	err := orch.ForceRemoveStore("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent store")
+	}
+}
+
+func TestForceRemoveEmptyStore(t *testing.T) {
+	orch := orchestrator.New(orchestrator.Config{})
+
+	factories := orchestrator.Factories{
+		ChunkManagers: map[string]chunk.ManagerFactory{
+			"memory": chunkmem.NewFactory(),
+		},
+		IndexManagers: map[string]index.ManagerFactory{
+			"memory": indexmem.NewFactory(),
+		},
+	}
+
+	cfg := &config.Config{
+		Filters: map[string]config.FilterConfig{
+			"catch-all": {Expression: "*"},
+		},
+	}
+
+	storeCfg := config.StoreConfig{
+		ID:     "empty-store",
+		Type:   "memory",
+		Filter: config.StringPtr("catch-all"),
+	}
+
+	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
+		t.Fatalf("AddStore: %v", err)
+	}
+
+	// Force remove empty store should succeed.
+	if err := orch.ForceRemoveStore("empty-store"); err != nil {
+		t.Fatalf("ForceRemoveStore: %v", err)
+	}
+
+	if cm := orch.ChunkManager("empty-store"); cm != nil {
+		t.Error("ChunkManager should be nil after ForceRemoveStore")
+	}
+}
+
 func TestAddIngesterWhileRunning(t *testing.T) {
 	cm, _ := chunkmem.NewManager(chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(10000),
@@ -603,6 +718,198 @@ func TestSetRotationPolicyDirectly(t *testing.T) {
 	}
 	if len(metas) < 3 {
 		t.Errorf("expected at least 3 chunks due to rotation policy, got %d", len(metas))
+	}
+}
+
+func TestPauseStore(t *testing.T) {
+	orch := orchestrator.New(orchestrator.Config{})
+
+	factories := orchestrator.Factories{
+		ChunkManagers: map[string]chunk.ManagerFactory{
+			"memory": chunkmem.NewFactory(),
+		},
+		IndexManagers: map[string]index.ManagerFactory{
+			"memory": indexmem.NewFactory(),
+		},
+	}
+
+	cfg := &config.Config{
+		Filters: map[string]config.FilterConfig{
+			"catch-all": {Expression: "*"},
+		},
+	}
+
+	storeCfg := config.StoreConfig{
+		ID:     "pausable",
+		Type:   "memory",
+		Filter: config.StringPtr("catch-all"),
+	}
+
+	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
+		t.Fatalf("AddStore: %v", err)
+	}
+
+	// Ingest a record before pausing.
+	rec := chunk.Record{
+		IngestTS: time.Now(),
+		Attrs:    chunk.Attributes{},
+		Raw:      []byte("before pause"),
+	}
+	if err := orch.Ingest(rec); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+
+	cm := orch.ChunkManager("pausable")
+	if count := countRecords(t, cm); count != 1 {
+		t.Fatalf("expected 1 record before pause, got %d", count)
+	}
+
+	// Disable the store.
+	if err := orch.DisableStore("pausable"); err != nil {
+		t.Fatalf("DisableStore: %v", err)
+	}
+	if orch.IsStoreEnabled("pausable") {
+		t.Fatal("store should be disabled")
+	}
+
+	// Ingest another record — should be silently dropped for this store.
+	rec2 := chunk.Record{
+		IngestTS: time.Now(),
+		Attrs:    chunk.Attributes{},
+		Raw:      []byte("while disabled"),
+	}
+	if err := orch.Ingest(rec2); err != nil {
+		t.Fatalf("Ingest while disabled: %v", err)
+	}
+
+	if count := countRecords(t, cm); count != 1 {
+		t.Errorf("expected 1 record while disabled, got %d", count)
+	}
+}
+
+func TestResumeStore(t *testing.T) {
+	orch := orchestrator.New(orchestrator.Config{})
+
+	factories := orchestrator.Factories{
+		ChunkManagers: map[string]chunk.ManagerFactory{
+			"memory": chunkmem.NewFactory(),
+		},
+		IndexManagers: map[string]index.ManagerFactory{
+			"memory": indexmem.NewFactory(),
+		},
+	}
+
+	cfg := &config.Config{
+		Filters: map[string]config.FilterConfig{
+			"catch-all": {Expression: "*"},
+		},
+	}
+
+	storeCfg := config.StoreConfig{
+		ID:     "pausable",
+		Type:   "memory",
+		Filter: config.StringPtr("catch-all"),
+	}
+
+	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
+		t.Fatalf("AddStore: %v", err)
+	}
+
+	// Disable then re-enable.
+	if err := orch.DisableStore("pausable"); err != nil {
+		t.Fatalf("DisableStore: %v", err)
+	}
+	if err := orch.EnableStore("pausable"); err != nil {
+		t.Fatalf("EnableStore: %v", err)
+	}
+	if !orch.IsStoreEnabled("pausable") {
+		t.Fatal("store should be enabled after re-enable")
+	}
+
+	// Ingest should work after re-enable.
+	rec := chunk.Record{
+		IngestTS: time.Now(),
+		Attrs:    chunk.Attributes{},
+		Raw:      []byte("after resume"),
+	}
+	if err := orch.Ingest(rec); err != nil {
+		t.Fatalf("Ingest after resume: %v", err)
+	}
+
+	cm := orch.ChunkManager("pausable")
+	if count := countRecords(t, cm); count != 1 {
+		t.Errorf("expected 1 record after resume, got %d", count)
+	}
+}
+
+func TestDisableStoreNotFound(t *testing.T) {
+	orch := orchestrator.New(orchestrator.Config{})
+
+	if err := orch.DisableStore("nonexistent"); err == nil {
+		t.Fatal("expected error for nonexistent store")
+	}
+	if err := orch.EnableStore("nonexistent"); err == nil {
+		t.Fatal("expected error for nonexistent store")
+	}
+}
+
+func TestDisableDoesNotAffectQuery(t *testing.T) {
+	orch := orchestrator.New(orchestrator.Config{})
+
+	factories := orchestrator.Factories{
+		ChunkManagers: map[string]chunk.ManagerFactory{
+			"memory": chunkmem.NewFactory(),
+		},
+		IndexManagers: map[string]index.ManagerFactory{
+			"memory": indexmem.NewFactory(),
+		},
+	}
+
+	cfg := &config.Config{
+		Filters: map[string]config.FilterConfig{
+			"catch-all": {Expression: "*"},
+		},
+	}
+
+	storeCfg := config.StoreConfig{
+		ID:     "queryable",
+		Type:   "memory",
+		Filter: config.StringPtr("catch-all"),
+	}
+
+	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
+		t.Fatalf("AddStore: %v", err)
+	}
+
+	// Ingest data, then pause.
+	for i := 0; i < 5; i++ {
+		if err := orch.Ingest(chunk.Record{
+			IngestTS: time.Now(),
+			Raw:      []byte("test message"),
+		}); err != nil {
+			t.Fatalf("Ingest: %v", err)
+		}
+	}
+
+	if err := orch.DisableStore("queryable"); err != nil {
+		t.Fatalf("DisableStore: %v", err)
+	}
+
+	// Query should still work while disabled.
+	results, _, err := orch.Search(context.Background(), "queryable", query.Query{}, nil)
+	if err != nil {
+		t.Fatalf("Search while disabled: %v", err)
+	}
+
+	count := 0
+	for _, err := range results {
+		if err != nil {
+			t.Fatalf("Search result error: %v", err)
+		}
+		count++
+	}
+	if count != 5 {
+		t.Errorf("expected 5 results while disabled, got %d", count)
 	}
 }
 

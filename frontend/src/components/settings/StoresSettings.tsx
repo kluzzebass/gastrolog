@@ -1,6 +1,16 @@
 import { useState, useCallback } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { useConfig, usePutStore, useDeleteStore } from "../../api/hooks";
+import {
+  useConfig,
+  usePutStore,
+  useDeleteStore,
+  useReindexStore,
+  useCloneStore,
+  useRenameStore,
+  useDecommissionStore,
+  useCompactStore,
+  useMergeStores,
+} from "../../api/hooks";
 import { useToast } from "../Toast";
 import { useEditState } from "../../hooks/useEditState";
 import { useCrudHandlers } from "../../hooks/useCrudHandlers";
@@ -10,16 +20,28 @@ import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, SelectInput } from "./FormField";
 import { StoreParamsForm } from "./StoreParamsForm";
 import { PrimaryButton } from "./Buttons";
+import { Checkbox } from "./Checkbox";
 
 export function StoresSettings({ dark }: { dark: boolean }) {
   const c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putStore = usePutStore();
   const deleteStore = useDeleteStore();
+  const reindex = useReindexStore();
+  const clone = useCloneStore();
+  const rename = useRenameStore();
+  const decommission = useDecommissionStore();
+  const compact = useCompactStore();
+  const merge = useMergeStores();
   const { addToast } = useToast();
 
   const [expanded, setExpanded] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [cloneTarget, setCloneTarget] = useState<
+    Record<string, { name: string; dir: string }>
+  >({});
+  const [renameTarget, setRenameTarget] = useState<Record<string, string>>({});
+  const [mergeTarget, setMergeTarget] = useState<Record<string, string>>({});
 
   // New store form state.
   const [newId, setNewId] = useState("");
@@ -57,12 +79,14 @@ export function StoresSettings({ dark }: { dark: boolean }) {
           filter: "",
           policy: "",
           retention: "",
+          enabled: true,
           params: {} as Record<string, string>,
         };
       return {
         filter: store.filter,
         policy: store.policy,
         retention: store.retention,
+        enabled: store.enabled,
         params: { ...store.params },
       };
     },
@@ -81,6 +105,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
         filter: string;
         policy: string;
         retention: string;
+        enabled: boolean;
         params: Record<string, string>;
         type: string;
       },
@@ -91,7 +116,9 @@ export function StoresSettings({ dark }: { dark: boolean }) {
       policy: edit.policy,
       retention: edit.retention,
       params: edit.params,
+      enabled: edit.enabled,
     }),
+    onDeleteTransform: (id) => ({ id, force: true }),
     clearEdit,
   });
 
@@ -221,27 +248,164 @@ export function StoresSettings({ dark }: { dark: boolean }) {
             onDelete={() => handleDelete(store.id)}
             deleteLabel="Delete"
             footer={
-              <PrimaryButton
-                onClick={() =>
-                  saveStore(store.id, {
-                    ...getEdit(store.id),
-                    type: store.type,
-                  })
-                }
-                disabled={putStore.isPending}
-              >
-                {putStore.isPending ? "Saving..." : "Save"}
-              </PrimaryButton>
+              <>
+                <button
+                  type="button"
+                  className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
+                    "border-ink-border-subtle text-text-muted hover:bg-ink-hover",
+                    "border-light-border-subtle text-light-text-muted hover:bg-light-hover",
+                  )}`}
+                  disabled={reindex.isPending}
+                  onClick={async () => {
+                    try {
+                      const result = await reindex.mutateAsync(store.id);
+                      addToast(
+                        `Reindexed ${result.chunksReindexed} chunk(s)${result.errors > 0 ? `, ${result.errors} error(s)` : ""}`,
+                        result.errors > 0 ? "warn" : "info",
+                      );
+                    } catch (err: any) {
+                      addToast(err.message ?? "Reindex failed", "error");
+                    }
+                  }}
+                >
+                  {reindex.isPending ? "Reindexing..." : "Reindex"}
+                </button>
+                <button
+                  type="button"
+                  className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
+                    "border-ink-border-subtle text-text-muted hover:bg-ink-hover",
+                    "border-light-border-subtle text-light-text-muted hover:bg-light-hover",
+                  )}`}
+                  disabled={compact.isPending}
+                  onClick={async () => {
+                    try {
+                      const result = await compact.mutateAsync(store.id);
+                      addToast(
+                        result.chunksRemoved > 0
+                          ? `Compacted: removed ${result.chunksRemoved} orphan(s), reclaimed ${result.bytesReclaimed} bytes`
+                          : "No orphaned data found",
+                        "info",
+                      );
+                    } catch (err: any) {
+                      addToast(err.message ?? "Compact failed", "error");
+                    }
+                  }}
+                >
+                  {compact.isPending ? "Compacting..." : "Compact"}
+                </button>
+                <button
+                  type="button"
+                  className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
+                    "border-ink-border-subtle text-text-muted hover:bg-ink-hover",
+                    "border-light-border-subtle text-light-text-muted hover:bg-light-hover",
+                  )}`}
+                  onClick={() => {
+                    setCloneTarget((prev) => {
+                      if (prev[store.id]) {
+                        const next = { ...prev };
+                        delete next[store.id];
+                        return next;
+                      }
+                      return { ...prev, [store.id]: { name: "", dir: "" } };
+                    });
+                  }}
+                >
+                  {cloneTarget[store.id] ? "Cancel Clone" : "Clone"}
+                </button>
+                <button
+                  type="button"
+                  className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
+                    "border-ink-border-subtle text-text-muted hover:bg-ink-hover",
+                    "border-light-border-subtle text-light-text-muted hover:bg-light-hover",
+                  )}`}
+                  onClick={() => {
+                    setRenameTarget((prev) =>
+                      prev[store.id] !== undefined
+                        ? Object.fromEntries(Object.entries(prev).filter(([k]) => k !== store.id))
+                        : { ...prev, [store.id]: "" },
+                    );
+                  }}
+                >
+                  {renameTarget[store.id] !== undefined ? "Cancel Rename" : "Rename"}
+                </button>
+                <button
+                  type="button"
+                  className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
+                    "border-ink-border-subtle text-text-muted hover:bg-ink-hover",
+                    "border-light-border-subtle text-light-text-muted hover:bg-light-hover",
+                  )}`}
+                  onClick={() => {
+                    setMergeTarget((prev) =>
+                      prev[store.id] !== undefined
+                        ? Object.fromEntries(Object.entries(prev).filter(([k]) => k !== store.id))
+                        : { ...prev, [store.id]: "" },
+                    );
+                  }}
+                >
+                  {mergeTarget[store.id] !== undefined ? "Cancel Merge" : "Merge Into..."}
+                </button>
+                <button
+                  type="button"
+                  className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
+                    "border-severity-error/30 text-severity-error hover:bg-severity-error/10",
+                    "border-severity-error/30 text-severity-error hover:bg-severity-error/10",
+                  )}`}
+                  disabled={decommission.isPending}
+                  onClick={async () => {
+                    if (!confirm(`Decommission store "${store.id}"? This will permanently delete all data.`)) return;
+                    try {
+                      const result = await decommission.mutateAsync(store.id);
+                      addToast(
+                        `Decommissioned "${store.id}" (${result.chunksRemoved} chunk(s) removed)`,
+                        "info",
+                      );
+                    } catch (err: any) {
+                      addToast(err.message ?? "Decommission failed", "error");
+                    }
+                  }}
+                >
+                  {decommission.isPending ? "Decommissioning..." : "Decommission"}
+                </button>
+                <PrimaryButton
+                  onClick={() =>
+                    saveStore(store.id, {
+                      ...getEdit(store.id),
+                      type: store.type,
+                    })
+                  }
+                  disabled={putStore.isPending}
+                >
+                  {putStore.isPending ? "Saving..." : "Save"}
+                </PrimaryButton>
+              </>
             }
-            status={
-              warnings.length > 0 ? (
-                <span className="text-[0.85em] text-severity-warn">
-                  {warnings.join(", ")}
-                </span>
-              ) : undefined
+            headerRight={
+              <span className="flex items-center gap-2">
+                {!store.enabled && (
+                  <span
+                    className={`px-1.5 py-0.5 text-[0.8em] font-mono rounded ${c(
+                      "bg-ink-hover text-text-ghost",
+                      "bg-light-hover text-light-text-ghost",
+                    )}`}
+                  >
+                    disabled
+                  </span>
+                )}
+                {warnings.length > 0 && (
+                  <span className="text-[0.85em] text-severity-warn">
+                    {warnings.join(", ")}
+                  </span>
+                )}
+              </span>
             }
           >
             <div className="flex flex-col gap-3">
+              <Checkbox
+                checked={edit.enabled}
+                onChange={(v) => setEdit(store.id, { enabled: v })}
+                label="Enabled"
+                dark={dark}
+              />
               <div className="grid grid-cols-3 gap-3">
                 <FormField label="Filter" dark={dark}>
                   <SelectInput
@@ -274,6 +438,200 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                 onChange={(p) => setEdit(store.id, { params: p })}
                 dark={dark}
               />
+              {cloneTarget[store.id] && (
+                <div
+                  className={`flex flex-col gap-3 p-3 rounded border ${c(
+                    "border-ink-border-subtle bg-ink-raised",
+                    "border-light-border-subtle bg-light-bg",
+                  )}`}
+                >
+                  <div
+                    className={`text-[0.75em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+                  >
+                    Clone Store
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <FormField label="Name" dark={dark}>
+                      <TextInput
+                        value={cloneTarget[store.id].name}
+                        onChange={(v) =>
+                          setCloneTarget((prev) => ({
+                            ...prev,
+                            [store.id]: { ...prev[store.id], name: v },
+                          }))
+                        }
+                        placeholder="cloned-store"
+                        dark={dark}
+                        mono
+                      />
+                    </FormField>
+                    {store.type === "file" && (
+                      <FormField label="Directory (optional)" dark={dark}>
+                        <TextInput
+                          value={cloneTarget[store.id].dir}
+                          onChange={(v) =>
+                            setCloneTarget((prev) => ({
+                              ...prev,
+                              [store.id]: { ...prev[store.id], dir: v },
+                            }))
+                          }
+                          placeholder="auto-derived from name"
+                          dark={dark}
+                          mono
+                        />
+                      </FormField>
+                    )}
+                  </div>
+                  <div className="flex justify-end">
+                    <PrimaryButton
+                      disabled={
+                        clone.isPending ||
+                        !cloneTarget[store.id].name.trim()
+                      }
+                      onClick={async () => {
+                        const { name, dir } = cloneTarget[store.id];
+                        const trimmedName = name.trim();
+                        if (!trimmedName) return;
+                        try {
+                          const params: Record<string, string> = {};
+                          if (dir.trim()) {
+                            params["dir"] = dir.trim();
+                          }
+                          const result = await clone.mutateAsync({
+                            source: store.id,
+                            destination: trimmedName,
+                            destinationParams:
+                              Object.keys(params).length > 0
+                                ? params
+                                : undefined,
+                          });
+                          addToast(
+                            `Cloned ${result.recordsCopied} record(s) to "${trimmedName}"`,
+                            "info",
+                          );
+                          setCloneTarget((prev) => {
+                            const next = { ...prev };
+                            delete next[store.id];
+                            return next;
+                          });
+                        } catch (err: any) {
+                          addToast(
+                            err.message ?? "Clone failed",
+                            "error",
+                          );
+                        }
+                      }}
+                    >
+                      {clone.isPending ? "Cloning..." : "Clone"}
+                    </PrimaryButton>
+                  </div>
+                </div>
+              )}
+              {renameTarget[store.id] !== undefined && (
+                <div
+                  className={`flex flex-col gap-3 p-3 rounded border ${c(
+                    "border-ink-border-subtle bg-ink-raised",
+                    "border-light-border-subtle bg-light-bg",
+                  )}`}
+                >
+                  <div
+                    className={`text-[0.75em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+                  >
+                    Rename Store
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <FormField label="New ID" dark={dark}>
+                      <TextInput
+                        value={renameTarget[store.id]}
+                        onChange={(v) =>
+                          setRenameTarget((prev) => ({ ...prev, [store.id]: v }))
+                        }
+                        placeholder="new-store-id"
+                        dark={dark}
+                        mono
+                      />
+                    </FormField>
+                  </div>
+                  <div className="flex justify-end">
+                    <PrimaryButton
+                      disabled={rename.isPending || !renameTarget[store.id].trim()}
+                      onClick={async () => {
+                        const newId = renameTarget[store.id].trim();
+                        if (!newId) return;
+                        try {
+                          await rename.mutateAsync({ oldId: store.id, newId });
+                          addToast(`Renamed "${store.id}" to "${newId}"`, "info");
+                          setRenameTarget((prev) =>
+                            Object.fromEntries(Object.entries(prev).filter(([k]) => k !== store.id)),
+                          );
+                        } catch (err: any) {
+                          addToast(err.message ?? "Rename failed", "error");
+                        }
+                      }}
+                    >
+                      {rename.isPending ? "Renaming..." : "Rename"}
+                    </PrimaryButton>
+                  </div>
+                </div>
+              )}
+              {mergeTarget[store.id] !== undefined && (
+                <div
+                  className={`flex flex-col gap-3 p-3 rounded border ${c(
+                    "border-ink-border-subtle bg-ink-raised",
+                    "border-light-border-subtle bg-light-bg",
+                  )}`}
+                >
+                  <div
+                    className={`text-[0.75em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+                  >
+                    Merge Into Another Store
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <FormField label="Destination" dark={dark}>
+                      <SelectInput
+                        value={mergeTarget[store.id]}
+                        onChange={(v) =>
+                          setMergeTarget((prev) => ({ ...prev, [store.id]: v }))
+                        }
+                        options={[
+                          { value: "", label: "(select)" },
+                          ...stores
+                            .filter((s) => s.id !== store.id)
+                            .map((s) => ({ value: s.id, label: s.id })),
+                        ]}
+                        dark={dark}
+                      />
+                    </FormField>
+                  </div>
+                  <div className="flex justify-end">
+                    <PrimaryButton
+                      disabled={merge.isPending || !mergeTarget[store.id]}
+                      onClick={async () => {
+                        const dest = mergeTarget[store.id];
+                        if (!dest) return;
+                        if (!confirm(`Merge all records from "${store.id}" into "${dest}"? This will delete "${store.id}" afterward.`)) return;
+                        try {
+                          const result = await merge.mutateAsync({
+                            source: store.id,
+                            destination: dest,
+                          });
+                          addToast(
+                            `Merged ${result.recordsMerged} record(s) into "${dest}"`,
+                            "info",
+                          );
+                          setMergeTarget((prev) =>
+                            Object.fromEntries(Object.entries(prev).filter(([k]) => k !== store.id)),
+                          );
+                        } catch (err: any) {
+                          addToast(err.message ?? "Merge failed", "error");
+                        }
+                      }}
+                    >
+                      {merge.isPending ? "Merging..." : "Merge"}
+                    </PrimaryButton>
+                  </div>
+                </div>
+              )}
             </div>
           </SettingsCard>
         );

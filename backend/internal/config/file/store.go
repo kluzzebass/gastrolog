@@ -365,6 +365,20 @@ func (s *Store) DeleteStore(ctx context.Context, id string) error {
 	return s.flush(cfg)
 }
 
+func (s *Store) RenameStore(ctx context.Context, oldID, newID string) error {
+	cfg, err := s.loadOrEmpty()
+	if err != nil {
+		return err
+	}
+	for i, st := range cfg.Stores {
+		if st.ID == oldID {
+			cfg.Stores[i].ID = newID
+			return s.flush(cfg)
+		}
+	}
+	return fmt.Errorf("store %q not found", oldID)
+}
+
 // Ingesters
 
 func (s *Store) GetIngester(ctx context.Context, id string) (*config.IngesterConfig, error) {

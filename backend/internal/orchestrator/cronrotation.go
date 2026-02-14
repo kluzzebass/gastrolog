@@ -44,6 +44,19 @@ func (m *cronRotationManager) updateJob(storeID, cronExpr string, cm chunk.Chunk
 	return m.scheduler.UpdateJob(name, cronExpr, m.rotateStore, storeID, cm)
 }
 
+// renameJob renames a cron rotation job from oldID to newID, preserving the schedule.
+func (m *cronRotationManager) renameJob(oldID, newID string, cm chunk.ChunkManager) {
+	oldName := cronJobName(oldID)
+	schedule := m.scheduler.JobSchedule(oldName)
+	if schedule == "" {
+		return // No such job.
+	}
+	m.scheduler.RemoveJob(oldName)
+	if err := m.addJob(newID, schedule, cm); err != nil {
+		m.logger.Warn("failed to re-add cron rotation after rename", "store", newID, "error", err)
+	}
+}
+
 // hasJob returns true if a cron rotation job exists for a store.
 func (m *cronRotationManager) hasJob(storeID string) bool {
 	return m.scheduler.HasJob(cronJobName(storeID))

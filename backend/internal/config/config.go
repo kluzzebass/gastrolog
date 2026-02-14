@@ -64,6 +64,7 @@ type Store interface {
 	ListStores(ctx context.Context) ([]StoreConfig, error)
 	PutStore(ctx context.Context, cfg StoreConfig) error
 	DeleteStore(ctx context.Context, id string) error
+	RenameStore(ctx context.Context, oldID, newID string) error
 
 	// Ingesters
 	GetIngester(ctx context.Context, id string) (*IngesterConfig, error)
@@ -381,6 +382,10 @@ type StoreConfig struct {
 	// Retention references a named retention policy from Config.RetentionPolicies.
 	// Nil means no retention policy (chunks are kept indefinitely, or type-specific default).
 	Retention *string `json:"retention,omitempty"`
+
+	// Enabled indicates whether ingestion is enabled for this store.
+	// When false, the store will not receive new records from the ingest pipeline.
+	Enabled bool `json:"enabled,omitempty"`
 
 	// Params contains type-specific configuration as opaque string key-value pairs.
 	// Parsing and validation are the responsibility of the factory that consumes

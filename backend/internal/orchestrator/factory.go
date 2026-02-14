@@ -106,7 +106,13 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 		if factories.Logger != nil {
 			cmLogger = factories.Logger.With("store", storeCfg.ID)
 		}
-		cm, err := cmFactory(storeCfg.Params, cmLogger)
+		// Inject _expect_existing so file stores can warn about missing directories.
+		cmParams := maps.Clone(storeCfg.Params)
+		if cmParams == nil {
+			cmParams = make(map[string]string)
+		}
+		cmParams["_expect_existing"] = "true"
+		cm, err := cmFactory(cmParams, cmLogger)
 		if err != nil {
 			return fmt.Errorf("create chunk manager %s: %w", storeCfg.ID, err)
 		}
@@ -160,6 +166,11 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 		o.RegisterChunkManager(storeCfg.ID, cm)
 		o.RegisterIndexManager(storeCfg.ID, im)
 		o.RegisterQueryEngine(storeCfg.ID, qe)
+
+		// Apply disabled state.
+		if !storeCfg.Enabled {
+			o.disabled[storeCfg.ID] = true
+		}
 	}
 
 	// Set filter set if any filters were compiled.

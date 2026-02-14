@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { AnalyzeChunkRequest, AnalyzeChunkResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetStatsRequest, GetStatsResponse, GetStoreRequest, GetStoreResponse, ListChunksRequest, ListChunksResponse, ListStoresRequest, ListStoresResponse } from "./store_pb.js";
+import { AnalyzeChunkRequest, AnalyzeChunkResponse, CloneStoreRequest, CloneStoreResponse, CompactStoreRequest, CompactStoreResponse, ExportStoreRequest, ExportStoreResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetStatsRequest, GetStatsResponse, GetStoreRequest, GetStoreResponse, ImportRecordsRequest, ImportRecordsResponse, ListChunksRequest, ListChunksResponse, ListStoresRequest, ListStoresResponse, MergeStoresRequest, MergeStoresResponse, MigrateStoreRequest, MigrateStoreResponse, ReindexStoreRequest, ReindexStoreResponse, ValidateStoreRequest, ValidateStoreResponse } from "./store_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -89,6 +89,95 @@ export const StoreService = {
       name: "GetStats",
       I: GetStatsRequest,
       O: GetStatsResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * ReindexStore rebuilds all indexes for sealed chunks in a store.
+     *
+     * @generated from rpc gastrolog.v1.StoreService.ReindexStore
+     */
+    reindexStore: {
+      name: "ReindexStore",
+      I: ReindexStoreRequest,
+      O: ReindexStoreResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * ValidateStore checks chunk and index integrity for a store.
+     *
+     * @generated from rpc gastrolog.v1.StoreService.ValidateStore
+     */
+    validateStore: {
+      name: "ValidateStore",
+      I: ValidateStoreRequest,
+      O: ValidateStoreResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * CloneStore copies all records from a source store to a new store.
+     *
+     * @generated from rpc gastrolog.v1.StoreService.CloneStore
+     */
+    cloneStore: {
+      name: "CloneStore",
+      I: CloneStoreRequest,
+      O: CloneStoreResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * MigrateStore copies records to a new store of a different type, then deletes the source.
+     *
+     * @generated from rpc gastrolog.v1.StoreService.MigrateStore
+     */
+    migrateStore: {
+      name: "MigrateStore",
+      I: MigrateStoreRequest,
+      O: MigrateStoreResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * ExportStore streams all records from a store for backup.
+     *
+     * @generated from rpc gastrolog.v1.StoreService.ExportStore
+     */
+    exportStore: {
+      name: "ExportStore",
+      I: ExportStoreRequest,
+      O: ExportStoreResponse,
+      kind: MethodKind.ServerStreaming,
+    },
+    /**
+     * ImportRecords appends a batch of records to a store.
+     *
+     * @generated from rpc gastrolog.v1.StoreService.ImportRecords
+     */
+    importRecords: {
+      name: "ImportRecords",
+      I: ImportRecordsRequest,
+      O: ImportRecordsResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * CompactStore removes orphaned chunk directories and reclaims space.
+     *
+     * @generated from rpc gastrolog.v1.StoreService.CompactStore
+     */
+    compactStore: {
+      name: "CompactStore",
+      I: CompactStoreRequest,
+      O: CompactStoreResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * MergeStores copies all records from a source store into a destination store,
+     * then deletes the source.
+     *
+     * @generated from rpc gastrolog.v1.StoreService.MergeStores
+     */
+    mergeStores: {
+      name: "MergeStores",
+      I: MergeStoresRequest,
+      O: MergeStoresResponse,
       kind: MethodKind.Unary,
     },
   }

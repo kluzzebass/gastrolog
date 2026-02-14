@@ -102,6 +102,18 @@ const (
 	// ConfigServiceDeleteCertificateProcedure is the fully-qualified name of the ConfigService's
 	// DeleteCertificate RPC.
 	ConfigServiceDeleteCertificateProcedure = "/gastrolog.v1.ConfigService/DeleteCertificate"
+	// ConfigServicePauseStoreProcedure is the fully-qualified name of the ConfigService's PauseStore
+	// RPC.
+	ConfigServicePauseStoreProcedure = "/gastrolog.v1.ConfigService/PauseStore"
+	// ConfigServiceResumeStoreProcedure is the fully-qualified name of the ConfigService's ResumeStore
+	// RPC.
+	ConfigServiceResumeStoreProcedure = "/gastrolog.v1.ConfigService/ResumeStore"
+	// ConfigServiceRenameStoreProcedure is the fully-qualified name of the ConfigService's RenameStore
+	// RPC.
+	ConfigServiceRenameStoreProcedure = "/gastrolog.v1.ConfigService/RenameStore"
+	// ConfigServiceDecommissionStoreProcedure is the fully-qualified name of the ConfigService's
+	// DecommissionStore RPC.
+	ConfigServiceDecommissionStoreProcedure = "/gastrolog.v1.ConfigService/DecommissionStore"
 )
 
 // ConfigServiceClient is a client for the gastrolog.v1.ConfigService service.
@@ -154,6 +166,14 @@ type ConfigServiceClient interface {
 	PutCertificate(context.Context, *connect.Request[v1.PutCertificateRequest]) (*connect.Response[v1.PutCertificateResponse], error)
 	// DeleteCertificate removes a certificate.
 	DeleteCertificate(context.Context, *connect.Request[v1.DeleteCertificateRequest]) (*connect.Response[v1.DeleteCertificateResponse], error)
+	// PauseStore pauses ingestion for a store.
+	PauseStore(context.Context, *connect.Request[v1.PauseStoreRequest]) (*connect.Response[v1.PauseStoreResponse], error)
+	// ResumeStore resumes ingestion for a store.
+	ResumeStore(context.Context, *connect.Request[v1.ResumeStoreRequest]) (*connect.Response[v1.ResumeStoreResponse], error)
+	// RenameStore changes a store's ID.
+	RenameStore(context.Context, *connect.Request[v1.RenameStoreRequest]) (*connect.Response[v1.RenameStoreResponse], error)
+	// DecommissionStore disables ingestion and force-deletes a store.
+	DecommissionStore(context.Context, *connect.Request[v1.DecommissionStoreRequest]) (*connect.Response[v1.DecommissionStoreResponse], error)
 }
 
 // NewConfigServiceClient constructs a client for the gastrolog.v1.ConfigService service. By
@@ -311,6 +331,30 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("DeleteCertificate")),
 			connect.WithClientOptions(opts...),
 		),
+		pauseStore: connect.NewClient[v1.PauseStoreRequest, v1.PauseStoreResponse](
+			httpClient,
+			baseURL+ConfigServicePauseStoreProcedure,
+			connect.WithSchema(configServiceMethods.ByName("PauseStore")),
+			connect.WithClientOptions(opts...),
+		),
+		resumeStore: connect.NewClient[v1.ResumeStoreRequest, v1.ResumeStoreResponse](
+			httpClient,
+			baseURL+ConfigServiceResumeStoreProcedure,
+			connect.WithSchema(configServiceMethods.ByName("ResumeStore")),
+			connect.WithClientOptions(opts...),
+		),
+		renameStore: connect.NewClient[v1.RenameStoreRequest, v1.RenameStoreResponse](
+			httpClient,
+			baseURL+ConfigServiceRenameStoreProcedure,
+			connect.WithSchema(configServiceMethods.ByName("RenameStore")),
+			connect.WithClientOptions(opts...),
+		),
+		decommissionStore: connect.NewClient[v1.DecommissionStoreRequest, v1.DecommissionStoreResponse](
+			httpClient,
+			baseURL+ConfigServiceDecommissionStoreProcedure,
+			connect.WithSchema(configServiceMethods.ByName("DecommissionStore")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -340,6 +384,10 @@ type configServiceClient struct {
 	getCertificate        *connect.Client[v1.GetCertificateRequest, v1.GetCertificateResponse]
 	putCertificate        *connect.Client[v1.PutCertificateRequest, v1.PutCertificateResponse]
 	deleteCertificate     *connect.Client[v1.DeleteCertificateRequest, v1.DeleteCertificateResponse]
+	pauseStore            *connect.Client[v1.PauseStoreRequest, v1.PauseStoreResponse]
+	resumeStore           *connect.Client[v1.ResumeStoreRequest, v1.ResumeStoreResponse]
+	renameStore           *connect.Client[v1.RenameStoreRequest, v1.RenameStoreResponse]
+	decommissionStore     *connect.Client[v1.DecommissionStoreRequest, v1.DecommissionStoreResponse]
 }
 
 // GetConfig calls gastrolog.v1.ConfigService.GetConfig.
@@ -462,6 +510,26 @@ func (c *configServiceClient) DeleteCertificate(ctx context.Context, req *connec
 	return c.deleteCertificate.CallUnary(ctx, req)
 }
 
+// PauseStore calls gastrolog.v1.ConfigService.PauseStore.
+func (c *configServiceClient) PauseStore(ctx context.Context, req *connect.Request[v1.PauseStoreRequest]) (*connect.Response[v1.PauseStoreResponse], error) {
+	return c.pauseStore.CallUnary(ctx, req)
+}
+
+// ResumeStore calls gastrolog.v1.ConfigService.ResumeStore.
+func (c *configServiceClient) ResumeStore(ctx context.Context, req *connect.Request[v1.ResumeStoreRequest]) (*connect.Response[v1.ResumeStoreResponse], error) {
+	return c.resumeStore.CallUnary(ctx, req)
+}
+
+// RenameStore calls gastrolog.v1.ConfigService.RenameStore.
+func (c *configServiceClient) RenameStore(ctx context.Context, req *connect.Request[v1.RenameStoreRequest]) (*connect.Response[v1.RenameStoreResponse], error) {
+	return c.renameStore.CallUnary(ctx, req)
+}
+
+// DecommissionStore calls gastrolog.v1.ConfigService.DecommissionStore.
+func (c *configServiceClient) DecommissionStore(ctx context.Context, req *connect.Request[v1.DecommissionStoreRequest]) (*connect.Response[v1.DecommissionStoreResponse], error) {
+	return c.decommissionStore.CallUnary(ctx, req)
+}
+
 // ConfigServiceHandler is an implementation of the gastrolog.v1.ConfigService service.
 type ConfigServiceHandler interface {
 	// GetConfig returns the current configuration.
@@ -512,6 +580,14 @@ type ConfigServiceHandler interface {
 	PutCertificate(context.Context, *connect.Request[v1.PutCertificateRequest]) (*connect.Response[v1.PutCertificateResponse], error)
 	// DeleteCertificate removes a certificate.
 	DeleteCertificate(context.Context, *connect.Request[v1.DeleteCertificateRequest]) (*connect.Response[v1.DeleteCertificateResponse], error)
+	// PauseStore pauses ingestion for a store.
+	PauseStore(context.Context, *connect.Request[v1.PauseStoreRequest]) (*connect.Response[v1.PauseStoreResponse], error)
+	// ResumeStore resumes ingestion for a store.
+	ResumeStore(context.Context, *connect.Request[v1.ResumeStoreRequest]) (*connect.Response[v1.ResumeStoreResponse], error)
+	// RenameStore changes a store's ID.
+	RenameStore(context.Context, *connect.Request[v1.RenameStoreRequest]) (*connect.Response[v1.RenameStoreResponse], error)
+	// DecommissionStore disables ingestion and force-deletes a store.
+	DecommissionStore(context.Context, *connect.Request[v1.DecommissionStoreRequest]) (*connect.Response[v1.DecommissionStoreResponse], error)
 }
 
 // NewConfigServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -665,6 +741,30 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("DeleteCertificate")),
 		connect.WithHandlerOptions(opts...),
 	)
+	configServicePauseStoreHandler := connect.NewUnaryHandler(
+		ConfigServicePauseStoreProcedure,
+		svc.PauseStore,
+		connect.WithSchema(configServiceMethods.ByName("PauseStore")),
+		connect.WithHandlerOptions(opts...),
+	)
+	configServiceResumeStoreHandler := connect.NewUnaryHandler(
+		ConfigServiceResumeStoreProcedure,
+		svc.ResumeStore,
+		connect.WithSchema(configServiceMethods.ByName("ResumeStore")),
+		connect.WithHandlerOptions(opts...),
+	)
+	configServiceRenameStoreHandler := connect.NewUnaryHandler(
+		ConfigServiceRenameStoreProcedure,
+		svc.RenameStore,
+		connect.WithSchema(configServiceMethods.ByName("RenameStore")),
+		connect.WithHandlerOptions(opts...),
+	)
+	configServiceDecommissionStoreHandler := connect.NewUnaryHandler(
+		ConfigServiceDecommissionStoreProcedure,
+		svc.DecommissionStore,
+		connect.WithSchema(configServiceMethods.ByName("DecommissionStore")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.ConfigService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ConfigServiceGetConfigProcedure:
@@ -715,6 +815,14 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServicePutCertificateHandler.ServeHTTP(w, r)
 		case ConfigServiceDeleteCertificateProcedure:
 			configServiceDeleteCertificateHandler.ServeHTTP(w, r)
+		case ConfigServicePauseStoreProcedure:
+			configServicePauseStoreHandler.ServeHTTP(w, r)
+		case ConfigServiceResumeStoreProcedure:
+			configServiceResumeStoreHandler.ServeHTTP(w, r)
+		case ConfigServiceRenameStoreProcedure:
+			configServiceRenameStoreHandler.ServeHTTP(w, r)
+		case ConfigServiceDecommissionStoreProcedure:
+			configServiceDecommissionStoreHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -818,4 +926,20 @@ func (UnimplementedConfigServiceHandler) PutCertificate(context.Context, *connec
 
 func (UnimplementedConfigServiceHandler) DeleteCertificate(context.Context, *connect.Request[v1.DeleteCertificateRequest]) (*connect.Response[v1.DeleteCertificateResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.DeleteCertificate is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) PauseStore(context.Context, *connect.Request[v1.PauseStoreRequest]) (*connect.Response[v1.PauseStoreResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.PauseStore is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) ResumeStore(context.Context, *connect.Request[v1.ResumeStoreRequest]) (*connect.Response[v1.ResumeStoreResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.ResumeStore is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) RenameStore(context.Context, *connect.Request[v1.RenameStoreRequest]) (*connect.Response[v1.RenameStoreResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.RenameStore is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) DecommissionStore(context.Context, *connect.Request[v1.DecommissionStoreRequest]) (*connect.Response[v1.DecommissionStoreResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.DecommissionStore is not implemented"))
 }

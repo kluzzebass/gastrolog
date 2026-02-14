@@ -18,6 +18,11 @@ const (
 	ParamMaxChunkAge        = "maxChunkAge"
 	ParamFileMode           = "fileMode"
 	ParamTimestampPrecision = "timestampPrecision"
+
+	// ParamExpectExisting is injected by the orchestrator when loading stores
+	// from config. It tells the chunk manager to warn if the data directory
+	// is missing (potential data loss). Not persisted in config.
+	ParamExpectExisting = "_expect_existing"
 )
 
 // Timestamp precision values.
@@ -45,9 +50,10 @@ func NewFactory() chunk.ManagerFactory {
 		}
 
 		cfg := Config{
-			Dir:      dir,
-			FileMode: DefaultFileMode,
-			Logger:   logger,
+			Dir:            dir,
+			FileMode:       DefaultFileMode,
+			Logger:         logger,
+			ExpectExisting: params[ParamExpectExisting] == "true",
 		}
 
 		// Timestamp precision: micro (default) or nano.

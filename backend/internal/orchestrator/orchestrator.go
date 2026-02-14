@@ -89,6 +89,9 @@ type Orchestrator struct {
 	// Store filters.
 	filterSet *FilterSet
 
+	// Disabled stores (keyed by store ID). Present = disabled.
+	disabled map[string]bool
+
 	// Ingest channel and lifecycle.
 	ingestCh     chan IngestMessage
 	ingestSize   int
@@ -158,6 +161,7 @@ func New(cfg Config) *Orchestrator {
 		ingesters:       make(map[string]Ingester),
 		ingesterCancels: make(map[string]context.CancelFunc),
 		ingesterStats:   make(map[string]*IngesterStats),
+		disabled:        make(map[string]bool),
 		retention:       make(map[string]*retentionRunner),
 		scheduler:       sched,
 		cronRotation:    newCronRotationManager(sched, logger),

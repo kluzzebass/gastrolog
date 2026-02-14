@@ -183,7 +183,7 @@ func (s *Server) Serve(listener net.Listener) error {
 
 	// Create service handlers
 	queryServer := NewQueryServer(s.orch)
-	storeServer := NewStoreServer(s.orch)
+	storeServer := NewStoreServer(s.orch, s.cfgStore, s.factories)
 	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager)
 	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
 	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown)
@@ -311,7 +311,7 @@ func (s *Server) reconfigureTLS() {
 		handlerOpts = append(handlerOpts, connect.WithInterceptors(authInterceptor))
 	}
 	queryServer := NewQueryServer(s.orch)
-	storeServer := NewStoreServer(s.orch)
+	storeServer := NewStoreServer(s.orch, s.cfgStore, s.factories)
 	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager)
 	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
 	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown)
@@ -455,7 +455,7 @@ func (s *Server) Handler() http.Handler {
 	}
 
 	queryServer := NewQueryServer(s.orch)
-	storeServer := NewStoreServer(s.orch)
+	storeServer := NewStoreServer(s.orch, s.cfgStore, s.factories)
 	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager)
 	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown)
 	authServer := NewAuthServer(s.cfgStore, s.tokens)

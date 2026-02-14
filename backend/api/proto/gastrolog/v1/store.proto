@@ -28,6 +28,31 @@ service StoreService {
 
   // GetStats returns overall statistics for a store.
   rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
+
+  // ReindexStore rebuilds all indexes for sealed chunks in a store.
+  rpc ReindexStore(ReindexStoreRequest) returns (ReindexStoreResponse);
+
+  // ValidateStore checks chunk and index integrity for a store.
+  rpc ValidateStore(ValidateStoreRequest) returns (ValidateStoreResponse);
+
+  // CloneStore copies all records from a source store to a new store.
+  rpc CloneStore(CloneStoreRequest) returns (CloneStoreResponse);
+
+  // MigrateStore copies records to a new store of a different type, then deletes the source.
+  rpc MigrateStore(MigrateStoreRequest) returns (MigrateStoreResponse);
+
+  // ExportStore streams all records from a store for backup.
+  rpc ExportStore(ExportStoreRequest) returns (stream ExportStoreResponse);
+
+  // ImportRecords appends a batch of records to a store.
+  rpc ImportRecords(ImportRecordsRequest) returns (ImportRecordsResponse);
+
+  // CompactStore removes orphaned chunk directories and reclaims space.
+  rpc CompactStore(CompactStoreRequest) returns (CompactStoreResponse);
+
+  // MergeStores copies all records from a source store into a destination store,
+  // then deletes the source.
+  rpc MergeStores(MergeStoresRequest) returns (MergeStoresResponse);
 }
 
 message ListStoresRequest {}
@@ -42,6 +67,7 @@ message StoreInfo {
   string filter = 3;
   int64 chunk_count = 4;
   int64 record_count = 5;
+  bool enabled = 6;
 }
 
 message GetStoreRequest {
@@ -132,4 +158,119 @@ message GetStatsResponse {
   int64 total_bytes = 5;
   google.protobuf.Timestamp oldest_record = 6;
   google.protobuf.Timestamp newest_record = 7;
+  repeated StoreStats store_stats = 8;
+}
+
+// StoreStats provides per-store statistics.
+message StoreStats {
+  string id = 1;
+  string type = 2;
+  int64 chunk_count = 3;
+  int64 sealed_chunks = 4;
+  int64 active_chunks = 5;
+  int64 record_count = 6;
+  int64 data_bytes = 7;
+  int64 index_bytes = 8;
+  google.protobuf.Timestamp oldest_record = 9;
+  google.protobuf.Timestamp newest_record = 10;
+  bool enabled = 11;
+}
+
+message ReindexStoreRequest {
+  string store = 1;
+}
+
+message ReindexStoreResponse {
+  int64 chunks_reindexed = 1;
+  int64 errors = 2;
+  repeated string error_details = 3;
+}
+
+message ValidateStoreRequest {
+  string store = 1;
+}
+
+message ValidateStoreResponse {
+  bool valid = 1;
+  repeated ChunkValidation chunks = 2;
+}
+
+message ChunkValidation {
+  string chunk_id = 1;
+  bool valid = 2;
+  repeated string issues = 3;
+}
+
+// CloneStore copies all records from source to a new store with the same config.
+message CloneStoreRequest {
+  string source = 1;
+  string destination = 2;
+  // Optional overrides for destination store params (e.g. dir for file stores).
+  // Merged on top of source params.
+  map<string, string> destination_params = 3;
+}
+
+message CloneStoreResponse {
+  int64 records_copied = 1;
+  int64 chunks_created = 2;
+}
+
+// MigrateStore copies records to a new store of a different type, then deletes the source.
+message MigrateStoreRequest {
+  string source = 1;
+  string destination = 2;
+  string destination_type = 3;
+  map<string, string> destination_params = 4;
+}
+
+message MigrateStoreResponse {
+  int64 records_migrated = 1;
+  int64 chunks_created = 2;
+}
+
+// ExportStore streams all records from a store.
+message ExportStoreRequest {
+  string store = 1;
+}
+
+message ExportStoreResponse {
+  repeated ExportRecord records = 1;
+  bool has_more = 2;
+}
+
+// ExportRecord is a portable record representation for export/import.
+message ExportRecord {
+  google.protobuf.Timestamp source_ts = 1;
+  google.protobuf.Timestamp ingest_ts = 2;
+  map<string, string> attrs = 3;
+  bytes raw = 4;
+}
+
+// ImportRecords appends a batch of records to a store.
+message ImportRecordsRequest {
+  string store = 1;
+  repeated ExportRecord records = 2;
+}
+
+message ImportRecordsResponse {
+  int64 records_imported = 1;
+}
+
+message CompactStoreRequest {
+  string store = 1;
+}
+
+message CompactStoreResponse {
+  int64 chunks_removed = 1;
+  int64 bytes_reclaimed = 2;
+}
+
+message MergeStoresRequest {
+  string source = 1;
+  string destination = 2;
+}
+
+message MergeStoresResponse {
+  int64 records_merged = 1;
+  int64 chunks_created = 2;
 }
