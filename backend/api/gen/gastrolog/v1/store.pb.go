@@ -1292,12 +1292,10 @@ func (x *ReindexStoreRequest) GetStore() string {
 }
 
 type ReindexStoreResponse struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	ChunksReindexed int64                  `protobuf:"varint,1,opt,name=chunks_reindexed,json=chunksReindexed,proto3" json:"chunks_reindexed,omitempty"`
-	Errors          int64                  `protobuf:"varint,2,opt,name=errors,proto3" json:"errors,omitempty"`
-	ErrorDetails    []string               `protobuf:"bytes,3,rep,name=error_details,json=errorDetails,proto3" json:"error_details,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	JobId         string                 `protobuf:"bytes,4,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ReindexStoreResponse) Reset() {
@@ -1330,25 +1328,11 @@ func (*ReindexStoreResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{21}
 }
 
-func (x *ReindexStoreResponse) GetChunksReindexed() int64 {
+func (x *ReindexStoreResponse) GetJobId() string {
 	if x != nil {
-		return x.ChunksReindexed
+		return x.JobId
 	}
-	return 0
-}
-
-func (x *ReindexStoreResponse) GetErrors() int64 {
-	if x != nil {
-		return x.Errors
-	}
-	return 0
-}
-
-func (x *ReindexStoreResponse) GetErrorDetails() []string {
-	if x != nil {
-		return x.ErrorDetails
-	}
-	return nil
+	return ""
 }
 
 type ValidateStoreRequest struct {
@@ -1572,8 +1556,7 @@ func (x *CloneStoreRequest) GetDestinationParams() map[string]string {
 
 type CloneStoreResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	RecordsCopied int64                  `protobuf:"varint,1,opt,name=records_copied,json=recordsCopied,proto3" json:"records_copied,omitempty"`
-	ChunksCreated int64                  `protobuf:"varint,2,opt,name=chunks_created,json=chunksCreated,proto3" json:"chunks_created,omitempty"`
+	JobId         string                 `protobuf:"bytes,3,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1608,18 +1591,11 @@ func (*CloneStoreResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{26}
 }
 
-func (x *CloneStoreResponse) GetRecordsCopied() int64 {
+func (x *CloneStoreResponse) GetJobId() string {
 	if x != nil {
-		return x.RecordsCopied
+		return x.JobId
 	}
-	return 0
-}
-
-func (x *CloneStoreResponse) GetChunksCreated() int64 {
-	if x != nil {
-		return x.ChunksCreated
-	}
-	return 0
+	return ""
 }
 
 // MigrateStore copies records to a new store of a different type, then deletes the source.
@@ -1692,11 +1668,10 @@ func (x *MigrateStoreRequest) GetDestinationParams() map[string]string {
 }
 
 type MigrateStoreResponse struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	RecordsMigrated int64                  `protobuf:"varint,1,opt,name=records_migrated,json=recordsMigrated,proto3" json:"records_migrated,omitempty"`
-	ChunksCreated   int64                  `protobuf:"varint,2,opt,name=chunks_created,json=chunksCreated,proto3" json:"chunks_created,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	JobId         string                 `protobuf:"bytes,3,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *MigrateStoreResponse) Reset() {
@@ -1729,18 +1704,11 @@ func (*MigrateStoreResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{28}
 }
 
-func (x *MigrateStoreResponse) GetRecordsMigrated() int64 {
+func (x *MigrateStoreResponse) GetJobId() string {
 	if x != nil {
-		return x.RecordsMigrated
+		return x.JobId
 	}
-	return 0
-}
-
-func (x *MigrateStoreResponse) GetChunksCreated() int64 {
-	if x != nil {
-		return x.ChunksCreated
-	}
-	return 0
+	return ""
 }
 
 // ExportStore streams all records from a store.
@@ -2060,8 +2028,7 @@ func (x *MergeStoresRequest) GetDestination() string {
 
 type MergeStoresResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	RecordsMerged int64                  `protobuf:"varint,1,opt,name=records_merged,json=recordsMerged,proto3" json:"records_merged,omitempty"`
-	ChunksCreated int64                  `protobuf:"varint,2,opt,name=chunks_created,json=chunksCreated,proto3" json:"chunks_created,omitempty"`
+	JobId         string                 `protobuf:"bytes,3,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2096,18 +2063,11 @@ func (*MergeStoresResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{35}
 }
 
-func (x *MergeStoresResponse) GetRecordsMerged() int64 {
+func (x *MergeStoresResponse) GetJobId() string {
 	if x != nil {
-		return x.RecordsMerged
+		return x.JobId
 	}
-	return 0
-}
-
-func (x *MergeStoresResponse) GetChunksCreated() int64 {
-	if x != nil {
-		return x.ChunksCreated
-	}
-	return 0
+	return ""
 }
 
 var File_gastrolog_v1_store_proto protoreflect.FileDescriptor
@@ -2213,11 +2173,9 @@ const file_gastrolog_v1_store_proto_rawDesc = "" +
 	"\aenabled\x18\v \x01(\bR\aenabled\x12\x12\n" +
 	"\x04name\x18\f \x01(\tR\x04name\"+\n" +
 	"\x13ReindexStoreRequest\x12\x14\n" +
-	"\x05store\x18\x01 \x01(\tR\x05store\"~\n" +
-	"\x14ReindexStoreResponse\x12)\n" +
-	"\x10chunks_reindexed\x18\x01 \x01(\x03R\x0fchunksReindexed\x12\x16\n" +
-	"\x06errors\x18\x02 \x01(\x03R\x06errors\x12#\n" +
-	"\rerror_details\x18\x03 \x03(\tR\ferrorDetails\",\n" +
+	"\x05store\x18\x01 \x01(\tR\x05store\"-\n" +
+	"\x14ReindexStoreResponse\x12\x15\n" +
+	"\x06job_id\x18\x04 \x01(\tR\x05jobId\",\n" +
 	"\x14ValidateStoreRequest\x12\x14\n" +
 	"\x05store\x18\x01 \x01(\tR\x05store\"d\n" +
 	"\x15ValidateStoreResponse\x12\x14\n" +
@@ -2233,10 +2191,9 @@ const file_gastrolog_v1_store_proto_rawDesc = "" +
 	"\x12destination_params\x18\x03 \x03(\v26.gastrolog.v1.CloneStoreRequest.DestinationParamsEntryR\x11destinationParams\x1aD\n" +
 	"\x16DestinationParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"b\n" +
-	"\x12CloneStoreResponse\x12%\n" +
-	"\x0erecords_copied\x18\x01 \x01(\x03R\rrecordsCopied\x12%\n" +
-	"\x0echunks_created\x18\x02 \x01(\x03R\rchunksCreated\"\xa9\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"+\n" +
+	"\x12CloneStoreResponse\x12\x15\n" +
+	"\x06job_id\x18\x03 \x01(\tR\x05jobId\"\xa9\x02\n" +
 	"\x13MigrateStoreRequest\x12\x16\n" +
 	"\x06source\x18\x01 \x01(\tR\x06source\x12 \n" +
 	"\vdestination\x18\x02 \x01(\tR\vdestination\x12)\n" +
@@ -2244,10 +2201,9 @@ const file_gastrolog_v1_store_proto_rawDesc = "" +
 	"\x12destination_params\x18\x04 \x03(\v28.gastrolog.v1.MigrateStoreRequest.DestinationParamsEntryR\x11destinationParams\x1aD\n" +
 	"\x16DestinationParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"h\n" +
-	"\x14MigrateStoreResponse\x12)\n" +
-	"\x10records_migrated\x18\x01 \x01(\x03R\x0frecordsMigrated\x12%\n" +
-	"\x0echunks_created\x18\x02 \x01(\x03R\rchunksCreated\"*\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"-\n" +
+	"\x14MigrateStoreResponse\x12\x15\n" +
+	"\x06job_id\x18\x03 \x01(\tR\x05jobId\"*\n" +
 	"\x12ExportStoreRequest\x12\x14\n" +
 	"\x05store\x18\x01 \x01(\tR\x05store\"f\n" +
 	"\x13ExportStoreResponse\x124\n" +
@@ -2269,10 +2225,9 @@ const file_gastrolog_v1_store_proto_rawDesc = "" +
 	"\x10records_imported\x18\x01 \x01(\x03R\x0frecordsImported\"N\n" +
 	"\x12MergeStoresRequest\x12\x16\n" +
 	"\x06source\x18\x01 \x01(\tR\x06source\x12 \n" +
-	"\vdestination\x18\x02 \x01(\tR\vdestination\"c\n" +
-	"\x13MergeStoresResponse\x12%\n" +
-	"\x0erecords_merged\x18\x01 \x01(\x03R\rrecordsMerged\x12%\n" +
-	"\x0echunks_created\x18\x02 \x01(\x03R\rchunksCreated2\x96\t\n" +
+	"\vdestination\x18\x02 \x01(\tR\vdestination\",\n" +
+	"\x13MergeStoresResponse\x12\x15\n" +
+	"\x06job_id\x18\x03 \x01(\tR\x05jobId2\x96\t\n" +
 	"\fStoreService\x12O\n" +
 	"\n" +
 	"ListStores\x12\x1f.gastrolog.v1.ListStoresRequest\x1a .gastrolog.v1.ListStoresResponse\x12I\n" +

@@ -10,6 +10,7 @@ import { StoreService } from "./gen/gastrolog/v1/store_connect";
 import { LifecycleService } from "./gen/gastrolog/v1/lifecycle_connect";
 import { ConfigService } from "./gen/gastrolog/v1/config_connect";
 import { AuthService } from "./gen/gastrolog/v1/auth_connect";
+import { JobService } from "./gen/gastrolog/v1/job_connect";
 
 // Token management — stored in localStorage, read by the auth interceptor.
 const TOKEN_KEY = "gastrolog_token";
@@ -69,6 +70,7 @@ export const storeClient = createPromiseClient(StoreService, transport);
 export const lifecycleClient = createPromiseClient(LifecycleService, transport);
 export const configClient = createPromiseClient(ConfigService, transport);
 export const authClient = createPromiseClient(AuthService, transport);
+export const jobClient = createPromiseClient(JobService, transport);
 
 // Re-export types for convenience
 export * from "./gen/gastrolog/v1/query_pb";
@@ -76,3 +78,4 @@ export * from "./gen/gastrolog/v1/store_pb";
 export * from "./gen/gastrolog/v1/lifecycle_pb";
 export * from "./gen/gastrolog/v1/config_pb";
 export * from "./gen/gastrolog/v1/auth_pb";
+export * from "./gen/gastrolog/v1/job_pb";

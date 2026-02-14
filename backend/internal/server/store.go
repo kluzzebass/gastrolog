@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -32,6 +33,8 @@ var _ gastrologv1connect.StoreServiceHandler = (*StoreServer)(nil)
 func NewStoreServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories) *StoreServer {
 	return &StoreServer{orch: orch, cfgStore: cfgStore, factories: factories}
 }
+
+func (s *StoreServer) now() time.Time { return time.Now() }
 
 // ListStores returns all registered stores.
 func (s *StoreServer) ListStores(
@@ -410,6 +413,7 @@ func (s *StoreServer) GetStats(
 }
 
 // ReindexStore rebuilds all indexes for sealed chunks in a store.
+// The work is submitted as an async job; the response contains the job ID.
 func (s *StoreServer) ReindexStore(
 	ctx context.Context,
 	req *connect.Request[apiv1.ReindexStoreRequest],
@@ -425,38 +429,38 @@ func (s *StoreServer) ReindexStore(
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
 	}
 
-	metas, err := cm.List()
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-
-	resp := &apiv1.ReindexStoreResponse{}
-
-	for _, meta := range metas {
-		if !meta.Sealed {
-			continue // Only reindex sealed chunks.
+	jobID := s.orch.Scheduler().Submit("reindex:"+store, func(ctx context.Context, job *orchestrator.JobProgress) {
+		metas, err := cm.List()
+		if err != nil {
+			job.Fail(s.now(), err.Error())
+			return
 		}
 
-		// Delete existing indexes first.
-		if err := im.DeleteIndexes(meta.ID); err != nil {
-			resp.Errors++
-			resp.ErrorDetails = append(resp.ErrorDetails,
-				fmt.Sprintf("delete indexes for chunk %s: %v", meta.ID, err))
-			continue
+		var sealedCount int64
+		for _, m := range metas {
+			if m.Sealed {
+				sealedCount++
+			}
 		}
+		job.SetRunning(sealedCount)
 
-		// Rebuild indexes.
-		if err := im.BuildIndexes(ctx, meta.ID); err != nil {
-			resp.Errors++
-			resp.ErrorDetails = append(resp.ErrorDetails,
-				fmt.Sprintf("build indexes for chunk %s: %v", meta.ID, err))
-			continue
+		for _, meta := range metas {
+			if !meta.Sealed {
+				continue
+			}
+			if err := im.DeleteIndexes(meta.ID); err != nil {
+				job.AddErrorDetail(fmt.Sprintf("delete indexes for chunk %s: %v", meta.ID, err))
+				continue
+			}
+			if err := im.BuildIndexes(ctx, meta.ID); err != nil {
+				job.AddErrorDetail(fmt.Sprintf("build indexes for chunk %s: %v", meta.ID, err))
+				continue
+			}
+			job.IncrChunks()
 		}
+	})
 
-		resp.ChunksReindexed++
-	}
-
-	return connect.NewResponse(resp), nil
+	return connect.NewResponse(&apiv1.ReindexStoreResponse{JobId: jobID}), nil
 }
 
 // ValidateStore checks chunk and index integrity for a store.
@@ -589,15 +593,15 @@ func (s *StoreServer) CloneStore(
 		return nil, err
 	}
 
-	recordsCopied, chunksCreated, err := s.copyRecords(ctx, req.Msg.Source, req.Msg.Destination)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("copy records: %w", err))
-	}
+	srcID := req.Msg.Source
+	dstID := req.Msg.Destination
+	jobID := s.orch.Scheduler().Submit("clone:"+srcID+"->"+dstID, func(ctx context.Context, job *orchestrator.JobProgress) {
+		if err := s.copyRecordsTracked(ctx, srcID, dstID, job); err != nil {
+			job.Fail(s.now(), fmt.Sprintf("copy records: %v", err))
+		}
+	})
 
-	return connect.NewResponse(&apiv1.CloneStoreResponse{
-		RecordsCopied: recordsCopied,
-		ChunksCreated: chunksCreated,
-	}), nil
+	return connect.NewResponse(&apiv1.CloneStoreResponse{JobId: jobID}), nil
 }
 
 // MigrateStore copies records to a new store of a different type, then deletes the source.
@@ -652,28 +656,27 @@ func (s *StoreServer) MigrateStore(
 		return nil, err
 	}
 
-	recordsMigrated, chunksCreated, err := s.copyRecords(ctx, req.Msg.Source, req.Msg.Destination)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("copy records: %w", err))
-	}
-
-	// Delete the source store.
-	if err := s.orch.ForceRemoveStore(req.Msg.Source); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("delete source: %w", err))
-	}
-
-	// Remove source from config store.
-	if s.cfgStore != nil {
-		if err := s.cfgStore.DeleteStore(ctx, req.Msg.Source); err != nil {
-			// Non-fatal: runtime is already cleaned up.
-			_ = err
+	srcID := req.Msg.Source
+	dstID := req.Msg.Destination
+	jobID := s.orch.Scheduler().Submit("migrate:"+srcID+"->"+dstID, func(ctx context.Context, job *orchestrator.JobProgress) {
+		if err := s.copyRecordsTracked(ctx, srcID, dstID, job); err != nil {
+			job.Fail(s.now(), fmt.Sprintf("copy records: %v", err))
+			return
 		}
-	}
 
-	return connect.NewResponse(&apiv1.MigrateStoreResponse{
-		RecordsMigrated: recordsMigrated,
-		ChunksCreated:   chunksCreated,
-	}), nil
+		// Delete the source store after successful copy.
+		if err := s.orch.ForceRemoveStore(srcID); err != nil {
+			job.Fail(s.now(), fmt.Sprintf("delete source: %v", err))
+			return
+		}
+
+		// Remove source from config store.
+		if s.cfgStore != nil {
+			_ = s.cfgStore.DeleteStore(ctx, srcID)
+		}
+	})
+
+	return connect.NewResponse(&apiv1.MigrateStoreResponse{JobId: jobID}), nil
 }
 
 // ExportStore streams all records from a store.
@@ -910,6 +913,70 @@ func (s *StoreServer) copyRecords(ctx context.Context, srcID, dstID string) (rec
 	return recordsCopied, chunksCreated, nil
 }
 
+// copyRecordsTracked copies all records from source to destination, reporting
+// progress via the tracked job.
+func (s *StoreServer) copyRecordsTracked(ctx context.Context, srcID, dstID string, job *orchestrator.JobProgress) error {
+	srcCM := s.orch.ChunkManager(srcID)
+	dstCM := s.orch.ChunkManager(dstID)
+	dstIM := s.orch.IndexManager(dstID)
+
+	metas, err := srcCM.List()
+	if err != nil {
+		return err
+	}
+
+	job.SetRunning(int64(len(metas)))
+
+	for _, meta := range metas {
+		cursor, err := srcCM.OpenCursor(meta.ID)
+		if err != nil {
+			return fmt.Errorf("open chunk %s: %w", meta.ID, err)
+		}
+
+		for {
+			rec, _, readErr := cursor.Next()
+			if errors.Is(readErr, chunk.ErrNoMoreRecords) {
+				break
+			}
+			if readErr != nil {
+				cursor.Close()
+				return fmt.Errorf("read chunk %s: %w", meta.ID, readErr)
+			}
+
+			rec = rec.Copy()
+			if _, _, appendErr := dstCM.Append(rec); appendErr != nil {
+				cursor.Close()
+				return fmt.Errorf("append record: %w", appendErr)
+			}
+			job.AddRecords(1)
+		}
+		cursor.Close()
+		job.IncrChunks()
+	}
+
+	// Seal the active chunk if it has data, so we can build indexes.
+	if active := dstCM.Active(); active != nil && active.RecordCount > 0 {
+		if err := dstCM.Seal(); err != nil {
+			return fmt.Errorf("seal final chunk: %w", err)
+		}
+	}
+
+	// Build indexes for all sealed chunks.
+	dstMetas, err := dstCM.List()
+	if err != nil {
+		return err
+	}
+	for _, meta := range dstMetas {
+		if meta.Sealed && dstIM != nil {
+			if err := dstIM.BuildIndexes(ctx, meta.ID); err != nil {
+				return fmt.Errorf("build indexes for chunk %s: %w", meta.ID, err)
+			}
+		}
+	}
+
+	return nil
+}
+
 func (s *StoreServer) getStoreInfo(ctx context.Context, id string) (*apiv1.StoreInfo, error) {
 	cm := s.orch.ChunkManager(id)
 	if cm == nil {
@@ -968,33 +1035,35 @@ func (s *StoreServer) MergeStores(
 	if dstCM == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("destination store not found"))
 	}
+	_ = dstCM // validated above
 
-	// Copy records from source to destination.
-	recordsMerged, chunksCreated, err := s.copyRecords(ctx, req.Msg.Source, req.Msg.Destination)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("merge records: %w", err))
-	}
+	srcID := req.Msg.Source
+	dstID := req.Msg.Destination
+	jobID := s.orch.Scheduler().Submit("merge:"+srcID+"->"+dstID, func(ctx context.Context, job *orchestrator.JobProgress) {
+		if err := s.copyRecordsTracked(ctx, srcID, dstID, job); err != nil {
+			job.Fail(s.now(), fmt.Sprintf("merge records: %v", err))
+			return
+		}
 
-	// Force-delete the source store.
-	if err := s.orch.ForceRemoveStore(req.Msg.Source); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("delete source: %w", err))
-	}
+		// Force-delete the source store.
+		if err := s.orch.ForceRemoveStore(srcID); err != nil {
+			job.Fail(s.now(), fmt.Sprintf("delete source: %v", err))
+			return
+		}
 
-	// Remove source from config store and clean up data directory.
-	if s.cfgStore != nil {
-		srcCfg, cfgErr := s.getFullStoreConfig(ctx, req.Msg.Source)
-		_ = s.cfgStore.DeleteStore(ctx, req.Msg.Source) // Non-fatal: runtime already cleaned up.
-		if cfgErr == nil && srcCfg.Type == "file" {
-			if dir := srcCfg.Params[chunkfile.ParamDir]; dir != "" {
-				_ = os.RemoveAll(dir)
+		// Remove source from config store and clean up data directory.
+		if s.cfgStore != nil {
+			srcCfg, cfgErr := s.getFullStoreConfig(ctx, srcID)
+			_ = s.cfgStore.DeleteStore(ctx, srcID)
+			if cfgErr == nil && srcCfg.Type == "file" {
+				if dir := srcCfg.Params[chunkfile.ParamDir]; dir != "" {
+					_ = os.RemoveAll(dir)
+				}
 			}
 		}
-	}
+	})
 
-	return connect.NewResponse(&apiv1.MergeStoresResponse{
-		RecordsMerged: recordsMerged,
-		ChunksCreated: chunksCreated,
-	}), nil
+	return connect.NewResponse(&apiv1.MergeStoresResponse{JobId: jobID}), nil
 }
 
 func chunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {

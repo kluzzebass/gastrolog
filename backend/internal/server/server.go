@@ -55,6 +55,7 @@ type Server struct {
 	mu       sync.Mutex
 	listener net.Listener
 	server   *http.Server
+	handler  http.Handler // core handler (mux + CORS + tracking), shared by HTTP and HTTPS
 	shutdown chan struct{}
 	inFlight sync.WaitGroup // tracks in-flight requests for graceful drain
 	draining atomic.Bool    // true when server is draining (rejecting new requests)
@@ -164,6 +165,35 @@ func (s *Server) trackingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// buildMux creates a new ServeMux with all RPC service handlers and probe endpoints registered.
+func (s *Server) buildMux() *http.ServeMux {
+	mux := http.NewServeMux()
+
+	var handlerOpts []connect.HandlerOption
+	if s.tokens != nil {
+		authInterceptor := auth.NewAuthInterceptor(s.tokens, s.cfgStore)
+		handlerOpts = append(handlerOpts, connect.WithInterceptors(authInterceptor))
+	}
+
+	queryServer := NewQueryServer(s.orch)
+	storeServer := NewStoreServer(s.orch, s.cfgStore, s.factories)
+	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager)
+	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
+	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown)
+	authServer := NewAuthServer(s.cfgStore, s.tokens)
+	jobServer := NewJobServer(s.orch.Scheduler())
+
+	mux.Handle(gastrologv1connect.NewQueryServiceHandler(queryServer, handlerOpts...))
+	mux.Handle(gastrologv1connect.NewStoreServiceHandler(storeServer, handlerOpts...))
+	mux.Handle(gastrologv1connect.NewConfigServiceHandler(configServer, handlerOpts...))
+	mux.Handle(gastrologv1connect.NewLifecycleServiceHandler(lifecycleServer, handlerOpts...))
+	mux.Handle(gastrologv1connect.NewAuthServiceHandler(authServer, handlerOpts...))
+	mux.Handle(gastrologv1connect.NewJobServiceHandler(jobServer, handlerOpts...))
+
+	s.registerProbes(mux)
+	return mux
+}
+
 // Serve starts the server on the given listener.
 // HTTP is always on; HTTPS is started when TLS enabled and default cert exists.
 // It blocks until the server is stopped or an error occurs.
@@ -172,47 +202,14 @@ func (s *Server) Serve(listener net.Listener) error {
 	s.listener = listener
 	s.mu.Unlock()
 
-	mux := http.NewServeMux()
+	// Build the core handler once — reused by both HTTP and HTTPS.
+	mux := s.buildMux()
+	s.handler = s.trackingMiddleware(s.corsMiddleware(mux))
 
-	// Build handler options (auth interceptor when tokens are available).
-	var handlerOpts []connect.HandlerOption
-	if s.tokens != nil {
-		authInterceptor := auth.NewAuthInterceptor(s.tokens, s.cfgStore)
-		handlerOpts = append(handlerOpts, connect.WithInterceptors(authInterceptor))
-	}
-
-	// Create service handlers
-	queryServer := NewQueryServer(s.orch)
-	storeServer := NewStoreServer(s.orch, s.cfgStore, s.factories)
-	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager)
-	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
-	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown)
-	authServer := NewAuthServer(s.cfgStore, s.tokens)
-
-	// Register handlers
-	mux.Handle(gastrologv1connect.NewQueryServiceHandler(queryServer, handlerOpts...))
-	mux.Handle(gastrologv1connect.NewStoreServiceHandler(storeServer, handlerOpts...))
-	mux.Handle(gastrologv1connect.NewConfigServiceHandler(configServer, handlerOpts...))
-	mux.Handle(gastrologv1connect.NewLifecycleServiceHandler(lifecycleServer, handlerOpts...))
-	mux.Handle(gastrologv1connect.NewAuthServiceHandler(authServer, handlerOpts...))
-
-	// Kubernetes probe endpoints
-	s.registerProbes(mux)
-
-	// Add CORS support for browser clients
-	corsHandler := s.corsMiddleware(mux)
-
-	// Wrap with tracking middleware for graceful drain
-	trackedHandler := s.trackingMiddleware(corsHandler)
-
-	// Redirect middleware: when HTTP and redirect enabled, redirect to HTTPS
-	redirectHandler := s.redirectMiddleware(trackedHandler)
-
-	// Use h2c for HTTP/2 without TLS (for Unix sockets and local connections)
-	// h2c.NewHandler supports both HTTP/1.1 and HTTP/2 prior knowledge
-	h2s := &http2.Server{}
+	// HTTP adds redirect-to-HTTPS + h2c (HTTP/2 without TLS).
+	redirectHandler := s.redirectMiddleware(s.handler)
 	s.server = &http.Server{
-		Handler: h2c.NewHandler(redirectHandler, h2s),
+		Handler: h2c.NewHandler(redirectHandler, &http2.Server{}),
 	}
 
 	// Initial TLS config: start HTTPS if enabled
@@ -304,30 +301,9 @@ func (s *Server) reconfigureTLS() {
 	tlsConfig := s.certManager.TLSConfig()
 	tlsLn := tls.NewListener(ln, tlsConfig)
 
-	mux := http.NewServeMux()
-	var handlerOpts []connect.HandlerOption
-	if s.tokens != nil {
-		authInterceptor := auth.NewAuthInterceptor(s.tokens, s.cfgStore)
-		handlerOpts = append(handlerOpts, connect.WithInterceptors(authInterceptor))
-	}
-	queryServer := NewQueryServer(s.orch)
-	storeServer := NewStoreServer(s.orch, s.cfgStore, s.factories)
-	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager)
-	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
-	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown)
-	authServer := NewAuthServer(s.cfgStore, s.tokens)
-	mux.Handle(gastrologv1connect.NewQueryServiceHandler(queryServer, handlerOpts...))
-	mux.Handle(gastrologv1connect.NewStoreServiceHandler(storeServer, handlerOpts...))
-	mux.Handle(gastrologv1connect.NewConfigServiceHandler(configServer, handlerOpts...))
-	mux.Handle(gastrologv1connect.NewLifecycleServiceHandler(lifecycleServer, handlerOpts...))
-	mux.Handle(gastrologv1connect.NewAuthServiceHandler(authServer, handlerOpts...))
-	s.registerProbes(mux)
-	corsHandler := s.corsMiddleware(mux)
-	trackedHandler := s.trackingMiddleware(corsHandler)
-
 	s.httpsListener = tlsLn
 	s.httpsServer = &http.Server{
-		Handler: trackedHandler,
+		Handler: s.handler,
 	}
 	s.logger.Info("HTTPS listener started", "addr", httpsAddr)
 
@@ -446,28 +422,7 @@ func (s *Server) ShutdownChan() <-chan struct{} {
 // Handler returns an http.Handler for the server.
 // This is useful for testing or embedding in another server.
 func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
-
-	var handlerOpts []connect.HandlerOption
-	if s.tokens != nil {
-		authInterceptor := auth.NewAuthInterceptor(s.tokens, s.cfgStore)
-		handlerOpts = append(handlerOpts, connect.WithInterceptors(authInterceptor))
-	}
-
-	queryServer := NewQueryServer(s.orch)
-	storeServer := NewStoreServer(s.orch, s.cfgStore, s.factories)
-	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager)
-	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown)
-	authServer := NewAuthServer(s.cfgStore, s.tokens)
-
-	mux.Handle(gastrologv1connect.NewQueryServiceHandler(queryServer, handlerOpts...))
-	mux.Handle(gastrologv1connect.NewStoreServiceHandler(storeServer, handlerOpts...))
-	mux.Handle(gastrologv1connect.NewConfigServiceHandler(configServer, handlerOpts...))
-	mux.Handle(gastrologv1connect.NewLifecycleServiceHandler(lifecycleServer, handlerOpts...))
-	mux.Handle(gastrologv1connect.NewAuthServiceHandler(authServer, handlerOpts...))
-
-	s.registerProbes(mux)
-
+	mux := s.buildMux()
 	handler := h2c.NewHandler(mux, &http2.Server{})
 	return s.trackingMiddleware(handler)
 }
@@ -479,6 +434,7 @@ type Client struct {
 	Config    gastrologv1connect.ConfigServiceClient
 	Lifecycle gastrologv1connect.LifecycleServiceClient
 	Auth      gastrologv1connect.AuthServiceClient
+	Job       gastrologv1connect.JobServiceClient
 }
 
 // NewClient creates Connect clients for the given base URL.
@@ -489,6 +445,7 @@ func NewClient(baseURL string, opts ...connect.ClientOption) *Client {
 		Config:    gastrologv1connect.NewConfigServiceClient(http.DefaultClient, baseURL, opts...),
 		Lifecycle: gastrologv1connect.NewLifecycleServiceClient(http.DefaultClient, baseURL, opts...),
 		Auth:      gastrologv1connect.NewAuthServiceClient(http.DefaultClient, baseURL, opts...),
+		Job:       gastrologv1connect.NewJobServiceClient(http.DefaultClient, baseURL, opts...),
 	}
 }
 
@@ -500,5 +457,6 @@ func NewClientWithHTTP(httpClient connect.HTTPClient, baseURL string, opts ...co
 		Config:    gastrologv1connect.NewConfigServiceClient(httpClient, baseURL, opts...),
 		Lifecycle: gastrologv1connect.NewLifecycleServiceClient(httpClient, baseURL, opts...),
 		Auth:      gastrologv1connect.NewAuthServiceClient(httpClient, baseURL, opts...),
+		Job:       gastrologv1connect.NewJobServiceClient(httpClient, baseURL, opts...),
 	}
 }

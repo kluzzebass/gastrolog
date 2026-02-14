@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -10,13 +11,105 @@ import (
 	"github.com/google/uuid"
 )
 
-// JobInfo describes a registered scheduled job for external inspection.
+// JobStatus represents the lifecycle state of a job.
+type JobStatus int
+
+const (
+	JobStatusPending   JobStatus = 1
+	JobStatusRunning   JobStatus = 2
+	JobStatusCompleted JobStatus = 3
+	JobStatusFailed    JobStatus = 4
+)
+
+// JobProgress tracks progress counters and errors for a running or completed job.
+// Methods are safe for concurrent use.
+type JobProgress struct {
+	mu           sync.RWMutex
+	Status       JobStatus
+	ChunksTotal  int64
+	ChunksDone   int64
+	RecordsDone  int64
+	Error        string
+	ErrorDetails []string
+	StartedAt    time.Time
+	CompletedAt  time.Time
+}
+
+// SetRunning transitions the job to Running and sets the total chunk count.
+func (p *JobProgress) SetRunning(chunksTotal int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.Status = JobStatusRunning
+	p.ChunksTotal = chunksTotal
+}
+
+// IncrChunks increments the chunks-done counter.
+func (p *JobProgress) IncrChunks() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.ChunksDone++
+}
+
+// AddRecords adds n to the records-done counter.
+func (p *JobProgress) AddRecords(n int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.RecordsDone += n
+}
+
+// Complete transitions the job to Completed.
+func (p *JobProgress) Complete(now time.Time) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.Status = JobStatusCompleted
+	p.CompletedAt = now
+}
+
+// Fail transitions the job to Failed with an error message.
+func (p *JobProgress) Fail(now time.Time, err string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.Status = JobStatusFailed
+	p.Error = err
+	p.CompletedAt = now
+}
+
+// AddErrorDetail appends a per-chunk error detail.
+func (p *JobProgress) AddErrorDetail(msg string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.ErrorDetails = append(p.ErrorDetails, msg)
+}
+
+// JobInfo describes a registered job for external inspection.
 type JobInfo struct {
-	ID       string    // unique job ID (gocron UUID)
-	Name     string    // human-readable name (e.g. "cron-rotate:my-store")
-	Schedule string    // cron expression
+	ID       string
+	Name     string
+	Schedule string    // cron expression, or "once" for one-time jobs
 	LastRun  time.Time // zero if never run
 	NextRun  time.Time // zero if not scheduled
+	Progress *JobProgress
+}
+
+// Snapshot returns a read-consistent copy of the JobInfo's progress fields.
+func (info JobInfo) Snapshot() JobInfo {
+	if info.Progress == nil {
+		return info
+	}
+	p := info.Progress
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	info.Progress = &JobProgress{
+		Status:       p.Status,
+		ChunksTotal:  p.ChunksTotal,
+		ChunksDone:   p.ChunksDone,
+		RecordsDone:  p.RecordsDone,
+		Error:        p.Error,
+		ErrorDetails: append([]string(nil), p.ErrorDetails...),
+		StartedAt:    p.StartedAt,
+		CompletedAt:  p.CompletedAt,
+	}
+	return info
 }
 
 // cronEntry remembers a cron job's definition so it can be re-registered
@@ -34,14 +127,17 @@ type cronEntry struct {
 type Scheduler struct {
 	mu            sync.Mutex
 	scheduler     gocron.Scheduler
-	jobs          map[string]gocron.Job // name → job
-	schedules     map[string]string     // name → cron expression (for ListJobs)
-	cronEntries   map[string]cronEntry  // name → definition (for rebuild)
+	jobs          map[string]gocron.Job    // name → job
+	schedules     map[string]string        // name → cron expression (for ListJobs)
+	cronEntries   map[string]cronEntry     // name → definition (for rebuild)
+	progress      map[string]*JobProgress  // gocron job ID → progress (one-time jobs)
+	completed     map[string]JobInfo       // gocron job ID → info (retained after gocron removes one-time jobs)
 	maxConcurrent int
+	now           func() time.Time
 	logger        *slog.Logger
 }
 
-func newScheduler(logger *slog.Logger, maxConcurrent int) (*Scheduler, error) {
+func newScheduler(logger *slog.Logger, maxConcurrent int, now func() time.Time) (*Scheduler, error) {
 	if maxConcurrent <= 0 {
 		maxConcurrent = 4
 	}
@@ -56,7 +152,10 @@ func newScheduler(logger *slog.Logger, maxConcurrent int) (*Scheduler, error) {
 		jobs:          make(map[string]gocron.Job),
 		schedules:     make(map[string]string),
 		cronEntries:   make(map[string]cronEntry),
+		progress:      make(map[string]*JobProgress),
+		completed:     make(map[string]JobInfo),
 		maxConcurrent: maxConcurrent,
+		now:           now,
 		logger:        logger,
 	}
 	// Start immediately so RunOnce jobs execute even without explicit Start().
@@ -179,17 +278,24 @@ func (s *Scheduler) HasJob(name string) bool {
 	return ok
 }
 
-// ListJobs returns info about all registered jobs.
+// ListJobs returns info about all registered cron and one-time jobs,
+// plus recently completed one-time jobs retained for status polling.
 func (s *Scheduler) ListJobs() []JobInfo {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	infos := make([]JobInfo, 0, len(s.jobs))
+	s.cleanupCompletedLocked()
+
+	infos := make([]JobInfo, 0, len(s.jobs)+len(s.completed))
+
+	// Active jobs (cron + in-progress one-time).
 	for name, j := range s.jobs {
+		id := j.ID().String()
 		info := JobInfo{
-			ID:       j.ID().String(),
+			ID:       id,
 			Name:     name,
 			Schedule: s.schedules[name],
+			Progress: s.progress[id],
 		}
 		if lr, err := j.LastRun(); err == nil {
 			info.LastRun = lr
@@ -199,7 +305,46 @@ func (s *Scheduler) ListJobs() []JobInfo {
 		}
 		infos = append(infos, info)
 	}
+
+	// Completed one-time jobs (retained for polling).
+	for _, info := range s.completed {
+		infos = append(infos, info)
+	}
+
 	return infos
+}
+
+// GetJob returns info about a single job by gocron ID.
+func (s *Scheduler) GetJob(id string) (JobInfo, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Check completed first (one-time jobs removed from gocron).
+	if info, ok := s.completed[id]; ok {
+		return info, true
+	}
+
+	// Check active jobs.
+	for name, j := range s.jobs {
+		jID := j.ID().String()
+		if jID == id {
+			info := JobInfo{
+				ID:       jID,
+				Name:     name,
+				Schedule: s.schedules[name],
+				Progress: s.progress[jID],
+			}
+			if lr, err := j.LastRun(); err == nil {
+				info.LastRun = lr
+			}
+			if nr, err := j.NextRun(); err == nil {
+				info.NextRun = nr
+			}
+			return info, true
+		}
+	}
+
+	return JobInfo{}, false
 }
 
 // JobSchedule returns the cron expression for a named job, or "" if not found.
@@ -215,7 +360,8 @@ func (s *Scheduler) JobSchedule(name string) string {
 func (s *Scheduler) Start() {}
 
 // RunOnce schedules a one-time job that runs immediately. The job is
-// automatically removed from the tracking maps after completion.
+// automatically removed from the active maps after completion, but its
+// progress info is retained for status polling.
 func (s *Scheduler) RunOnce(name string, taskFn any, args ...any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -226,10 +372,10 @@ func (s *Scheduler) RunOnce(name string, taskFn any, args ...any) error {
 		gocron.WithName(name),
 		gocron.WithEventListeners(
 			gocron.AfterJobRuns(func(_ uuid.UUID, jobName string) {
-				s.removeCompleted(jobName)
+				s.completeOneTimeJob(jobName)
 			}),
 			gocron.AfterJobRunsWithError(func(_ uuid.UUID, jobName string, _ error) {
-				s.removeCompleted(jobName)
+				s.completeOneTimeJob(jobName)
 			}),
 		),
 	)
@@ -243,12 +389,111 @@ func (s *Scheduler) RunOnce(name string, taskFn any, args ...any) error {
 	return nil
 }
 
-// removeCompleted removes a finished one-time job from the tracking maps.
-func (s *Scheduler) removeCompleted(name string) {
+// Submit schedules a one-time job with progress tracking. Returns the gocron
+// job ID. The fn receives a context (detached from the caller) and a
+// JobProgress for reporting progress.
+func (s *Scheduler) Submit(name string, fn func(context.Context, *JobProgress)) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	prog := &JobProgress{
+		Status:    JobStatusPending,
+		StartedAt: s.now(),
+	}
+
+	wrapper := func() {
+		prog.SetRunning(0)
+		ctx := context.WithoutCancel(context.Background())
+		fn(ctx, prog)
+		// If fn didn't explicitly complete/fail, mark completed.
+		prog.mu.RLock()
+		status := prog.Status
+		prog.mu.RUnlock()
+		if status == JobStatusRunning {
+			prog.Complete(s.now())
+		}
+		s.logger.Info("job finished", "name", name)
+	}
+
+	j, err := s.scheduler.NewJob(
+		gocron.OneTimeJob(gocron.OneTimeJobStartImmediately()),
+		gocron.NewTask(wrapper),
+		gocron.WithName(name),
+		gocron.WithEventListeners(
+			gocron.AfterJobRuns(func(_ uuid.UUID, jobName string) {
+				s.completeOneTimeJob(jobName)
+			}),
+			gocron.AfterJobRunsWithError(func(_ uuid.UUID, jobName string, _ error) {
+				s.completeOneTimeJob(jobName)
+			}),
+		),
+	)
+	if err != nil {
+		s.logger.Error("failed to schedule job", "name", name, "error", err)
+		prog.Fail(s.now(), "failed to schedule: "+err.Error())
+		// Generate an ID for the failed job so the caller can still look it up.
+		failedID := uuid.Must(uuid.NewV7()).String()
+		s.completed[failedID] = JobInfo{
+			ID:       failedID,
+			Name:     name,
+			Schedule: "once",
+			Progress: prog,
+		}
+		return failedID
+	}
+
+	id := j.ID().String()
+	s.jobs[name] = j
+	s.schedules[name] = "once"
+	s.progress[id] = prog
+	s.logger.Info("job submitted", "name", name, "id", id)
+	return id
+}
+
+// completeOneTimeJob moves a finished one-time job from the active maps
+// to the completed map so its progress remains available for polling.
+func (s *Scheduler) completeOneTimeJob(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	j, ok := s.jobs[name]
+	if !ok {
+		return
+	}
+
+	id := j.ID().String()
+	info := JobInfo{
+		ID:       id,
+		Name:     name,
+		Schedule: "once",
+		Progress: s.progress[id],
+	}
+	if lr, err := j.LastRun(); err == nil {
+		info.LastRun = lr
+	}
+
+	s.completed[id] = info
 	delete(s.jobs, name)
 	delete(s.schedules, name)
+	delete(s.progress, id)
+}
+
+// cleanupCompletedLocked removes completed jobs older than 1 hour.
+// Must be called with s.mu held.
+func (s *Scheduler) cleanupCompletedLocked() {
+	cutoff := s.now().Add(-1 * time.Hour)
+	for id, info := range s.completed {
+		if info.Progress == nil {
+			delete(s.completed, id)
+			continue
+		}
+		info.Progress.mu.RLock()
+		completedAt := info.Progress.CompletedAt
+		info.Progress.mu.RUnlock()
+		if !completedAt.IsZero() && completedAt.Before(cutoff) {
+			delete(s.completed, id)
+		}
+	}
 }
 
 // Stop shuts down the scheduler and waits for running jobs to finish.

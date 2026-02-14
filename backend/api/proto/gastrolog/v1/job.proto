@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package gastrolog.v1;
+
+option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
+
+import "google/protobuf/timestamp.proto";
+
+service JobService {
+  rpc GetJob(GetJobRequest) returns (GetJobResponse);
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+}
+
+enum JobStatus {
+  JOB_STATUS_UNSPECIFIED = 0;
+  JOB_STATUS_PENDING = 1;
+  JOB_STATUS_RUNNING = 2;
+  JOB_STATUS_COMPLETED = 3;
+  JOB_STATUS_FAILED = 4;
+}
+
+enum JobKind {
+  JOB_KIND_UNSPECIFIED = 0;
+  JOB_KIND_TASK = 1;       // one-off async task (reindex, clone, migrate, merge)
+  JOB_KIND_SCHEDULED = 2;  // recurring cron job (rotation, retention, index build)
+}
+
+message Job {
+  string id = 1;
+  string name = 2;
+  JobStatus status = 3;
+  JobKind kind = 11;
+  int64 chunks_total = 4;
+  int64 chunks_done = 5;
+  int64 records_done = 6;
+  string error = 7;
+  repeated string error_details = 8;
+  google.protobuf.Timestamp started_at = 9;
+  google.protobuf.Timestamp completed_at = 10;
+  // Scheduled job fields.
+  string schedule = 12;                           // cron expression (scheduled jobs only)
+  google.protobuf.Timestamp last_run = 13;        // last execution time
+  google.protobuf.Timestamp next_run = 14;        // next scheduled execution time
+}
+
+message GetJobRequest { string id = 1; }
+message GetJobResponse { Job job = 1; }
+message ListJobsRequest {}
+message ListJobsResponse { repeated Job jobs = 1; }

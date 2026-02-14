@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import {
   useConfig,
@@ -7,7 +7,9 @@ import {
   useReindexStore,
   useCloneStore,
   useMergeStores,
+  useJob,
 } from "../../api/hooks";
+import { JobStatus } from "../../api/client";
 import { useToast } from "../Toast";
 import { useEditState } from "../../hooks/useEditState";
 import { useCrudHandlers } from "../../hooks/useCrudHandlers";
@@ -18,6 +20,68 @@ import { FormField, TextInput, SelectInput } from "./FormField";
 import { StoreParamsForm } from "./StoreParamsForm";
 import { PrimaryButton } from "./Buttons";
 import { Checkbox } from "./Checkbox";
+import { useQueryClient } from "@tanstack/react-query";
+import type { Job } from "../../api/gen/gastrolog/v1/job_pb";
+
+function JobProgress({
+  jobId,
+  label,
+  dark,
+  onComplete,
+  onFailed,
+}: {
+  jobId: string;
+  label: string;
+  dark: boolean;
+  onComplete: (job: Job) => void;
+  onFailed: (job: Job) => void;
+}) {
+  const c = useThemeClass(dark);
+  const { data: job } = useJob(jobId);
+  const qc = useQueryClient();
+  const [handled, setHandled] = useState(false);
+
+  useEffect(() => {
+    if (!job || handled) return;
+    if (job.status === JobStatus.COMPLETED) {
+      setHandled(true);
+      qc.invalidateQueries({ queryKey: ["stores"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
+      qc.invalidateQueries({ queryKey: ["indexes"] });
+      qc.invalidateQueries({ queryKey: ["config"] });
+      onComplete(job);
+    } else if (job.status === JobStatus.FAILED) {
+      setHandled(true);
+      onFailed(job);
+    }
+  }, [job, handled, onComplete, onFailed, qc]);
+
+  if (!job) return null;
+
+  const isRunning =
+    job.status === JobStatus.RUNNING || job.status === JobStatus.PENDING;
+  if (!isRunning) return null;
+
+  const progress =
+    job.chunksTotal > 0
+      ? `${job.chunksDone}/${job.chunksTotal} chunks`
+      : "starting...";
+
+  return (
+    <div
+      className={`flex items-center gap-2 px-3 py-1.5 text-[0.8em] rounded ${c(
+        "bg-ink-hover text-text-muted",
+        "bg-light-hover text-light-text-muted",
+      )}`}
+    >
+      <span className="animate-spin inline-block w-3 h-3 border border-current border-t-transparent rounded-full" />
+      <span>
+        {label} {progress}
+        {job.recordsDone > 0 && ` (${job.recordsDone} records)`}
+      </span>
+    </div>
+  );
+}
 
 export function StoresSettings({ dark }: { dark: boolean }) {
   const c = useThemeClass(dark);
@@ -35,6 +99,10 @@ export function StoresSettings({ dark }: { dark: boolean }) {
     Record<string, { name: string; dir: string }>
   >({});
   const [mergeTarget, setMergeTarget] = useState<Record<string, string>>({});
+  // Track active jobs per store: { storeId: { jobId, label } }
+  const [activeJobs, setActiveJobs] = useState<
+    Record<string, { jobId: string; label: string }>
+  >({});
 
   // New store form state.
   const [newName, setNewName] = useState("");
@@ -115,6 +183,14 @@ export function StoresSettings({ dark }: { dark: boolean }) {
     onDeleteTransform: (id) => ({ id, force: true }),
     clearEdit,
   });
+
+  const clearJob = useCallback((storeId: string) => {
+    setActiveJobs((prev) => {
+      const next = { ...prev };
+      delete next[storeId];
+      return next;
+    });
+  }, []);
 
   const handleCreate = async () => {
     if (!newName.trim()) {
@@ -229,6 +305,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
           ...(!hasRetention ? ["no retention policy"] : []),
           ...(!hasFilter ? ["no filter"] : []),
         ];
+        const activeJob = activeJobs[store.id];
         return (
           <SettingsCard
             key={store.id}
@@ -243,26 +320,54 @@ export function StoresSettings({ dark }: { dark: boolean }) {
             deleteLabel="Delete"
             footer={
               <>
+                {activeJob && (
+                  <JobProgress
+                    jobId={activeJob.jobId}
+                    label={activeJob.label}
+                    dark={dark}
+                    onComplete={(job) => {
+                      const chunks = Number(job.chunksDone);
+                      const errors = job.errorDetails.length;
+                      addToast(
+                        `${activeJob.label} done: ${chunks} chunk(s)${errors > 0 ? `, ${errors} error(s)` : ""}`,
+                        errors > 0 ? "warn" : "info",
+                      );
+                      clearJob(store.id);
+                    }}
+                    onFailed={(job) => {
+                      addToast(
+                        `${activeJob.label} failed: ${job.error}`,
+                        "error",
+                      );
+                      clearJob(store.id);
+                    }}
+                  />
+                )}
                 <button
                   type="button"
                   className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
                     "border-ink-border-subtle text-text-muted hover:bg-ink-hover",
                     "border-light-border-subtle text-light-text-muted hover:bg-light-hover",
                   )}`}
-                  disabled={reindex.isPending}
+                  disabled={reindex.isPending || !!activeJob}
                   onClick={async () => {
                     try {
                       const result = await reindex.mutateAsync(store.id);
-                      addToast(
-                        `Reindexed ${result.chunksReindexed} chunk(s)${result.errors > 0 ? `, ${result.errors} error(s)` : ""}`,
-                        result.errors > 0 ? "warn" : "info",
-                      );
+                      setActiveJobs((prev) => ({
+                        ...prev,
+                        [store.id]: {
+                          jobId: result.jobId,
+                          label: "Reindexing",
+                        },
+                      }));
                     } catch (err: any) {
                       addToast(err.message ?? "Reindex failed", "error");
                     }
                   }}
                 >
-                  {reindex.isPending ? "Reindexing..." : "Reindex"}
+                  {activeJob?.label === "Reindexing"
+                    ? "Reindexing..."
+                    : "Reindex"}
                 </button>
                 <button
                   type="button"
@@ -270,6 +375,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                     "border-ink-border-subtle text-text-muted hover:bg-ink-hover",
                     "border-light-border-subtle text-light-text-muted hover:bg-light-hover",
                   )}`}
+                  disabled={!!activeJob}
                   onClick={() => {
                     setCloneTarget((prev) => {
                       if (prev[store.id]) {
@@ -285,10 +391,10 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                 </button>
                 <button
                   type="button"
-                  disabled
-                  className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors opacity-50 cursor-not-allowed ${c(
-                    "border-ink-border-subtle text-text-muted",
-                    "border-light-border-subtle text-light-text-muted",
+                  disabled={!!activeJob}
+                  className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
+                    "border-ink-border-subtle text-text-muted hover:bg-ink-hover",
+                    "border-light-border-subtle text-light-text-muted hover:bg-light-hover",
                   )}`}
                   onClick={() => {
                     setMergeTarget((prev) =>
@@ -420,7 +526,8 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                     <PrimaryButton
                       disabled={
                         clone.isPending ||
-                        !cloneTarget[store.id].name.trim()
+                        !cloneTarget[store.id].name.trim() ||
+                        !!activeJob
                       }
                       onClick={async () => {
                         const { name, dir } = cloneTarget[store.id];
@@ -439,10 +546,13 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                                 ? params
                                 : undefined,
                           });
-                          addToast(
-                            `Cloned ${result.recordsCopied} record(s) to "${trimmedName}"`,
-                            "info",
-                          );
+                          setActiveJobs((prev) => ({
+                            ...prev,
+                            [store.id]: {
+                              jobId: result.jobId,
+                              label: "Cloning",
+                            },
+                          }));
                           setCloneTarget((prev) => {
                             const next = { ...prev };
                             delete next[store.id];
@@ -492,7 +602,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                   </div>
                   <div className="flex justify-end">
                     <PrimaryButton
-                      disabled={merge.isPending || !mergeTarget[store.id]}
+                      disabled={merge.isPending || !mergeTarget[store.id] || !!activeJob}
                       onClick={async () => {
                         const dest = mergeTarget[store.id];
                         if (!dest) return;
@@ -503,10 +613,13 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                             source: store.id,
                             destination: dest,
                           });
-                          addToast(
-                            `Merged ${result.recordsMerged} record(s) into "${destName}"`,
-                            "info",
-                          );
+                          setActiveJobs((prev) => ({
+                            ...prev,
+                            [store.id]: {
+                              jobId: result.jobId,
+                              label: "Merging",
+                            },
+                          }));
                           setMergeTarget((prev) =>
                             Object.fromEntries(Object.entries(prev).filter(([k]) => k !== store.id)),
                           );

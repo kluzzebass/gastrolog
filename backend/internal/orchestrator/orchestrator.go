@@ -141,7 +141,7 @@ func New(cfg Config) *Orchestrator {
 	// Scope logger with component identity.
 	logger := logging.Default(cfg.Logger).With("component", "orchestrator")
 
-	sched, err := newScheduler(logger, cfg.MaxConcurrentJobs)
+	sched, err := newScheduler(logger, cfg.MaxConcurrentJobs, cfg.Now)
 	if err != nil {
 		// This should never fail in practice (just creates a scheduler).
 		panic(fmt.Sprintf("create scheduler: %v", err))
@@ -167,9 +167,9 @@ func (o *Orchestrator) Logger() *slog.Logger {
 	return o.logger
 }
 
-// ScheduledJobs returns info about all registered scheduled jobs.
-func (o *Orchestrator) ScheduledJobs() []JobInfo {
-	return o.scheduler.ListJobs()
+// Scheduler returns the shared scheduler for job submission and listing.
+func (o *Orchestrator) Scheduler() *Scheduler {
+	return o.scheduler
 }
 
 // GetIngesterStats returns the stats for a specific ingester.

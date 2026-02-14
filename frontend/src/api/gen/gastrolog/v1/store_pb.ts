@@ -1056,19 +1056,9 @@ export class ReindexStoreRequest extends Message<ReindexStoreRequest> {
  */
 export class ReindexStoreResponse extends Message<ReindexStoreResponse> {
   /**
-   * @generated from field: int64 chunks_reindexed = 1;
+   * @generated from field: string job_id = 4;
    */
-  chunksReindexed = protoInt64.zero;
-
-  /**
-   * @generated from field: int64 errors = 2;
-   */
-  errors = protoInt64.zero;
-
-  /**
-   * @generated from field: repeated string error_details = 3;
-   */
-  errorDetails: string[] = [];
+  jobId = "";
 
   constructor(data?: PartialMessage<ReindexStoreResponse>) {
     super();
@@ -1078,9 +1068,7 @@ export class ReindexStoreResponse extends Message<ReindexStoreResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ReindexStoreResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "chunks_reindexed", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 2, name: "errors", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 3, name: "error_details", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 4, name: "job_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ReindexStoreResponse {
@@ -1288,14 +1276,9 @@ export class CloneStoreRequest extends Message<CloneStoreRequest> {
  */
 export class CloneStoreResponse extends Message<CloneStoreResponse> {
   /**
-   * @generated from field: int64 records_copied = 1;
+   * @generated from field: string job_id = 3;
    */
-  recordsCopied = protoInt64.zero;
-
-  /**
-   * @generated from field: int64 chunks_created = 2;
-   */
-  chunksCreated = protoInt64.zero;
+  jobId = "";
 
   constructor(data?: PartialMessage<CloneStoreResponse>) {
     super();
@@ -1305,8 +1288,7 @@ export class CloneStoreResponse extends Message<CloneStoreResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.CloneStoreResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "records_copied", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 2, name: "chunks_created", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "job_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CloneStoreResponse {
@@ -1388,14 +1370,9 @@ export class MigrateStoreRequest extends Message<MigrateStoreRequest> {
  */
 export class MigrateStoreResponse extends Message<MigrateStoreResponse> {
   /**
-   * @generated from field: int64 records_migrated = 1;
+   * @generated from field: string job_id = 3;
    */
-  recordsMigrated = protoInt64.zero;
-
-  /**
-   * @generated from field: int64 chunks_created = 2;
-   */
-  chunksCreated = protoInt64.zero;
+  jobId = "";
 
   constructor(data?: PartialMessage<MigrateStoreResponse>) {
     super();
@@ -1405,8 +1382,7 @@ export class MigrateStoreResponse extends Message<MigrateStoreResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.MigrateStoreResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "records_migrated", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 2, name: "chunks_created", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "job_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): MigrateStoreResponse {
@@ -1695,14 +1671,9 @@ export class MergeStoresRequest extends Message<MergeStoresRequest> {
  */
 export class MergeStoresResponse extends Message<MergeStoresResponse> {
   /**
-   * @generated from field: int64 records_merged = 1;
+   * @generated from field: string job_id = 3;
    */
-  recordsMerged = protoInt64.zero;
-
-  /**
-   * @generated from field: int64 chunks_created = 2;
-   */
-  chunksCreated = protoInt64.zero;
+  jobId = "";
 
   constructor(data?: PartialMessage<MergeStoresResponse>) {
     super();
@@ -1712,8 +1683,7 @@ export class MergeStoresResponse extends Message<MergeStoresResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.MergeStoresResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "records_merged", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 2, name: "chunks_created", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "job_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): MergeStoresResponse {

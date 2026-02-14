@@ -180,9 +180,7 @@ message ReindexStoreRequest {
 }
 
 message ReindexStoreResponse {
-  int64 chunks_reindexed = 1;
-  int64 errors = 2;
-  repeated string error_details = 3;
+  string job_id = 4;
 }
 
 message ValidateStoreRequest {
@@ -210,8 +208,7 @@ message CloneStoreRequest {
 }
 
 message CloneStoreResponse {
-  int64 records_copied = 1;
-  int64 chunks_created = 2;
+  string job_id = 3;
 }
 
 // MigrateStore copies records to a new store of a different type, then deletes the source.
@@ -223,8 +220,7 @@ message MigrateStoreRequest {
 }
 
 message MigrateStoreResponse {
-  int64 records_migrated = 1;
-  int64 chunks_created = 2;
+  string job_id = 3;
 }
 
 // ExportStore streams all records from a store.
@@ -261,6 +257,5 @@ message MergeStoresRequest {
 }
 
 message MergeStoresResponse {
-  int64 records_merged = 1;
-  int64 chunks_created = 2;
+  string job_id = 3;
 }

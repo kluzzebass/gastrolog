@@ -25,9 +25,34 @@ import (
 	"connectrpc.com/connect"
 )
 
+// waitForJob polls the JobService until the job completes or fails, returning the final job state.
+func waitForJob(t *testing.T, jobClient gastrologv1connect.JobServiceClient, jobID string) *gastrologv1.Job {
+	t.Helper()
+	ctx := context.Background()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := jobClient.GetJob(ctx, connect.NewRequest(&gastrologv1.GetJobRequest{Id: jobID}))
+		if err != nil {
+			t.Fatalf("GetJob(%s): %v", jobID, err)
+		}
+		switch resp.Msg.Job.Status {
+		case gastrologv1.JobStatus_JOB_STATUS_COMPLETED, gastrologv1.JobStatus_JOB_STATUS_FAILED:
+			return resp.Msg.Job
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("job %s did not complete within deadline", jobID)
+	return nil
+}
+
 // newStoreTestSetup creates an orchestrator with a memory store containing test data,
 // and returns a StoreService client.
-func newStoreTestSetup(t *testing.T, recordCount int) gastrologv1connect.StoreServiceClient {
+type storeTestClients struct {
+	store gastrologv1connect.StoreServiceClient
+	job   gastrologv1connect.JobServiceClient
+}
+
+func newStoreTestSetup(t *testing.T, recordCount int) storeTestClients {
 	t.Helper()
 
 	orch := orchestrator.New(orchestrator.Config{})
@@ -71,33 +96,44 @@ func newStoreTestSetup(t *testing.T, recordCount int) gastrologv1connect.StoreSe
 	httpClient := &http.Client{
 		Transport: &embeddedTransport{handler: handler},
 	}
-	return gastrologv1connect.NewStoreServiceClient(httpClient, "http://embedded")
+	return storeTestClients{
+		store: gastrologv1connect.NewStoreServiceClient(httpClient, "http://embedded"),
+		job:   gastrologv1connect.NewJobServiceClient(httpClient, "http://embedded"),
+	}
 }
 
 func TestReindexStore(t *testing.T) {
-	client := newStoreTestSetup(t, 12) // 12 records = 2 sealed (5 each) + 1 active (2)
+	clients := newStoreTestSetup(t, 12) // 12 records = 2 sealed (5 each) + 1 active (2)
 	ctx := context.Background()
 
-	resp, err := client.ReindexStore(ctx, connect.NewRequest(&gastrologv1.ReindexStoreRequest{
+	resp, err := clients.store.ReindexStore(ctx, connect.NewRequest(&gastrologv1.ReindexStoreRequest{
 		Store: "default",
 	}))
 	if err != nil {
 		t.Fatalf("ReindexStore: %v", err)
 	}
 
-	if resp.Msg.ChunksReindexed != 2 {
-		t.Errorf("expected 2 chunks reindexed, got %d", resp.Msg.ChunksReindexed)
+	if resp.Msg.JobId == "" {
+		t.Fatal("expected non-empty job_id")
 	}
-	if resp.Msg.Errors != 0 {
-		t.Errorf("expected 0 errors, got %d: %v", resp.Msg.Errors, resp.Msg.ErrorDetails)
+
+	job := waitForJob(t, clients.job, resp.Msg.JobId)
+	if job.Status != gastrologv1.JobStatus_JOB_STATUS_COMPLETED {
+		t.Errorf("expected completed, got %v (error: %s)", job.Status, job.Error)
+	}
+	if job.ChunksDone != 2 {
+		t.Errorf("expected 2 chunks done, got %d", job.ChunksDone)
+	}
+	if len(job.ErrorDetails) != 0 {
+		t.Errorf("expected 0 error details, got %v", job.ErrorDetails)
 	}
 }
 
 func TestReindexStoreNotFound(t *testing.T) {
-	client := newStoreTestSetup(t, 0)
+	clients := newStoreTestSetup(t, 0)
 	ctx := context.Background()
 
-	_, err := client.ReindexStore(ctx, connect.NewRequest(&gastrologv1.ReindexStoreRequest{
+	_, err := clients.store.ReindexStore(ctx, connect.NewRequest(&gastrologv1.ReindexStoreRequest{
 		Store: "nonexistent",
 	}))
 	if err == nil {
@@ -109,26 +145,27 @@ func TestReindexStoreNotFound(t *testing.T) {
 }
 
 func TestReindexStoreEmpty(t *testing.T) {
-	client := newStoreTestSetup(t, 0)
+	clients := newStoreTestSetup(t, 0)
 	ctx := context.Background()
 
-	resp, err := client.ReindexStore(ctx, connect.NewRequest(&gastrologv1.ReindexStoreRequest{
+	resp, err := clients.store.ReindexStore(ctx, connect.NewRequest(&gastrologv1.ReindexStoreRequest{
 		Store: "default",
 	}))
 	if err != nil {
 		t.Fatalf("ReindexStore: %v", err)
 	}
 
-	if resp.Msg.ChunksReindexed != 0 {
-		t.Errorf("expected 0 chunks reindexed for empty store, got %d", resp.Msg.ChunksReindexed)
+	job := waitForJob(t, clients.job, resp.Msg.JobId)
+	if job.ChunksDone != 0 {
+		t.Errorf("expected 0 chunks done for empty store, got %d", job.ChunksDone)
 	}
 }
 
 func TestValidateStore(t *testing.T) {
-	client := newStoreTestSetup(t, 12)
+	clients := newStoreTestSetup(t, 12)
 	ctx := context.Background()
 
-	resp, err := client.ValidateStore(ctx, connect.NewRequest(&gastrologv1.ValidateStoreRequest{
+	resp, err := clients.store.ValidateStore(ctx, connect.NewRequest(&gastrologv1.ValidateStoreRequest{
 		Store: "default",
 	}))
 	if err != nil {
@@ -150,10 +187,10 @@ func TestValidateStore(t *testing.T) {
 }
 
 func TestValidateStoreNotFound(t *testing.T) {
-	client := newStoreTestSetup(t, 0)
+	clients := newStoreTestSetup(t, 0)
 	ctx := context.Background()
 
-	_, err := client.ValidateStore(ctx, connect.NewRequest(&gastrologv1.ValidateStoreRequest{
+	_, err := clients.store.ValidateStore(ctx, connect.NewRequest(&gastrologv1.ValidateStoreRequest{
 		Store: "nonexistent",
 	}))
 	if err == nil {
@@ -165,10 +202,10 @@ func TestValidateStoreNotFound(t *testing.T) {
 }
 
 func TestGetStatsDetailed(t *testing.T) {
-	client := newStoreTestSetup(t, 12)
+	clients := newStoreTestSetup(t, 12)
 	ctx := context.Background()
 
-	resp, err := client.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{}))
+	resp, err := clients.store.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{}))
 	if err != nil {
 		t.Fatalf("GetStats: %v", err)
 	}
@@ -219,11 +256,11 @@ func TestGetStatsDetailed(t *testing.T) {
 }
 
 func TestGetStatsFilterByStore(t *testing.T) {
-	client := newStoreTestSetup(t, 5)
+	clients := newStoreTestSetup(t, 5)
 	ctx := context.Background()
 
 	// Filter to a specific store.
-	resp, err := client.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
+	resp, err := clients.store.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
 		Store: "default",
 	}))
 	if err != nil {
@@ -240,7 +277,13 @@ func TestGetStatsFilterByStore(t *testing.T) {
 
 // newFullStoreTestSetup creates a store test setup with cfgStore and factories,
 // needed for clone/migrate/export/import tests.
-func newFullStoreTestSetup(t *testing.T, recordCount int) (gastrologv1connect.StoreServiceClient, config.Store) {
+type fullStoreTestClients struct {
+	store    gastrologv1connect.StoreServiceClient
+	job      gastrologv1connect.JobServiceClient
+	cfgStore config.Store
+}
+
+func newFullStoreTestSetup(t *testing.T, recordCount int) fullStoreTestClients {
 	t.Helper()
 
 	orch := orchestrator.New(orchestrator.Config{})
@@ -293,14 +336,18 @@ func newFullStoreTestSetup(t *testing.T, recordCount int) (gastrologv1connect.St
 	httpClient := &http.Client{
 		Transport: &embeddedTransport{handler: handler},
 	}
-	return gastrologv1connect.NewStoreServiceClient(httpClient, "http://embedded"), cfgStore
+	return fullStoreTestClients{
+		store:    gastrologv1connect.NewStoreServiceClient(httpClient, "http://embedded"),
+		job:      gastrologv1connect.NewJobServiceClient(httpClient, "http://embedded"),
+		cfgStore: cfgStore,
+	}
 }
 
 func TestCloneStore(t *testing.T) {
-	client, _ := newFullStoreTestSetup(t, 12)
+	tc := newFullStoreTestSetup(t, 12)
 	ctx := context.Background()
 
-	resp, err := client.CloneStore(ctx, connect.NewRequest(&gastrologv1.CloneStoreRequest{
+	resp, err := tc.store.CloneStore(ctx, connect.NewRequest(&gastrologv1.CloneStoreRequest{
 		Source:      "default",
 		Destination: "clone1",
 	}))
@@ -308,15 +355,17 @@ func TestCloneStore(t *testing.T) {
 		t.Fatalf("CloneStore: %v", err)
 	}
 
-	if resp.Msg.RecordsCopied != 12 {
-		t.Errorf("expected 12 records copied, got %d", resp.Msg.RecordsCopied)
+	if resp.Msg.JobId == "" {
+		t.Fatal("expected non-empty job_id")
 	}
-	if resp.Msg.ChunksCreated < 1 {
-		t.Errorf("expected at least 1 chunk created, got %d", resp.Msg.ChunksCreated)
+
+	job := waitForJob(t, tc.job, resp.Msg.JobId)
+	if job.Status != gastrologv1.JobStatus_JOB_STATUS_COMPLETED {
+		t.Errorf("expected completed, got %v (error: %s)", job.Status, job.Error)
 	}
 
 	// Verify the cloned store has the same records.
-	stats, err := client.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
+	stats, err := tc.store.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
 		Store: "clone1",
 	}))
 	if err != nil {
@@ -328,10 +377,10 @@ func TestCloneStore(t *testing.T) {
 }
 
 func TestCloneStoreNotFound(t *testing.T) {
-	client, _ := newFullStoreTestSetup(t, 0)
+	tc := newFullStoreTestSetup(t, 0)
 	ctx := context.Background()
 
-	_, err := client.CloneStore(ctx, connect.NewRequest(&gastrologv1.CloneStoreRequest{
+	_, err := tc.store.CloneStore(ctx, connect.NewRequest(&gastrologv1.CloneStoreRequest{
 		Source:      "nonexistent",
 		Destination: "clone1",
 	}))
@@ -344,10 +393,10 @@ func TestCloneStoreNotFound(t *testing.T) {
 }
 
 func TestCloneStoreSameName(t *testing.T) {
-	client, _ := newFullStoreTestSetup(t, 0)
+	tc := newFullStoreTestSetup(t, 0)
 	ctx := context.Background()
 
-	_, err := client.CloneStore(ctx, connect.NewRequest(&gastrologv1.CloneStoreRequest{
+	_, err := tc.store.CloneStore(ctx, connect.NewRequest(&gastrologv1.CloneStoreRequest{
 		Source:      "default",
 		Destination: "default",
 	}))
@@ -360,10 +409,10 @@ func TestCloneStoreSameName(t *testing.T) {
 }
 
 func TestMigrateStore(t *testing.T) {
-	client, _ := newFullStoreTestSetup(t, 12)
+	tc := newFullStoreTestSetup(t, 12)
 	ctx := context.Background()
 
-	resp, err := client.MigrateStore(ctx, connect.NewRequest(&gastrologv1.MigrateStoreRequest{
+	resp, err := tc.store.MigrateStore(ctx, connect.NewRequest(&gastrologv1.MigrateStoreRequest{
 		Source:          "default",
 		Destination:     "migrated",
 		DestinationType: "memory",
@@ -372,12 +421,17 @@ func TestMigrateStore(t *testing.T) {
 		t.Fatalf("MigrateStore: %v", err)
 	}
 
-	if resp.Msg.RecordsMigrated != 12 {
-		t.Errorf("expected 12 records migrated, got %d", resp.Msg.RecordsMigrated)
+	if resp.Msg.JobId == "" {
+		t.Fatal("expected non-empty job_id")
+	}
+
+	job := waitForJob(t, tc.job, resp.Msg.JobId)
+	if job.Status != gastrologv1.JobStatus_JOB_STATUS_COMPLETED {
+		t.Errorf("expected completed, got %v (error: %s)", job.Status, job.Error)
 	}
 
 	// Source should be gone.
-	_, err = client.GetStore(ctx, connect.NewRequest(&gastrologv1.GetStoreRequest{
+	_, err = tc.store.GetStore(ctx, connect.NewRequest(&gastrologv1.GetStoreRequest{
 		Id: "default",
 	}))
 	if err == nil {
@@ -385,7 +439,7 @@ func TestMigrateStore(t *testing.T) {
 	}
 
 	// Destination should have the records.
-	stats, err := client.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
+	stats, err := tc.store.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
 		Store: "migrated",
 	}))
 	if err != nil {
@@ -397,10 +451,10 @@ func TestMigrateStore(t *testing.T) {
 }
 
 func TestMigrateStoreNotFound(t *testing.T) {
-	client, _ := newFullStoreTestSetup(t, 0)
+	tc := newFullStoreTestSetup(t, 0)
 	ctx := context.Background()
 
-	_, err := client.MigrateStore(ctx, connect.NewRequest(&gastrologv1.MigrateStoreRequest{
+	_, err := tc.store.MigrateStore(ctx, connect.NewRequest(&gastrologv1.MigrateStoreRequest{
 		Source:          "nonexistent",
 		Destination:     "dest",
 		DestinationType: "memory",
@@ -414,10 +468,10 @@ func TestMigrateStoreNotFound(t *testing.T) {
 }
 
 func TestExportStore(t *testing.T) {
-	client, _ := newFullStoreTestSetup(t, 12)
+	tc := newFullStoreTestSetup(t, 12)
 	ctx := context.Background()
 
-	stream, err := client.ExportStore(ctx, connect.NewRequest(&gastrologv1.ExportStoreRequest{
+	stream, err := tc.store.ExportStore(ctx, connect.NewRequest(&gastrologv1.ExportStoreRequest{
 		Store: "default",
 	}))
 	if err != nil {
@@ -454,10 +508,10 @@ func TestExportStore(t *testing.T) {
 }
 
 func TestExportStoreNotFound(t *testing.T) {
-	client, _ := newFullStoreTestSetup(t, 0)
+	tc := newFullStoreTestSetup(t, 0)
 	ctx := context.Background()
 
-	stream, err := client.ExportStore(ctx, connect.NewRequest(&gastrologv1.ExportStoreRequest{
+	stream, err := tc.store.ExportStore(ctx, connect.NewRequest(&gastrologv1.ExportStoreRequest{
 		Store: "nonexistent",
 	}))
 	if err != nil {
@@ -476,7 +530,7 @@ func TestExportStoreNotFound(t *testing.T) {
 }
 
 func TestImportRecords(t *testing.T) {
-	client, _ := newFullStoreTestSetup(t, 0) // Empty store.
+	tc := newFullStoreTestSetup(t, 0) // Empty store.
 	ctx := context.Background()
 
 	now := time.Now()
@@ -489,7 +543,7 @@ func TestImportRecords(t *testing.T) {
 		_ = now // timestamps optional
 	}
 
-	resp, err := client.ImportRecords(ctx, connect.NewRequest(&gastrologv1.ImportRecordsRequest{
+	resp, err := tc.store.ImportRecords(ctx, connect.NewRequest(&gastrologv1.ImportRecordsRequest{
 		Store:   "default",
 		Records: records,
 	}))
@@ -502,7 +556,7 @@ func TestImportRecords(t *testing.T) {
 	}
 
 	// Verify records exist in the store.
-	stats, err := client.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
+	stats, err := tc.store.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
 		Store: "default",
 	}))
 	if err != nil {
@@ -514,10 +568,10 @@ func TestImportRecords(t *testing.T) {
 }
 
 func TestImportRecordsStoreNotFound(t *testing.T) {
-	client, _ := newFullStoreTestSetup(t, 0)
+	tc := newFullStoreTestSetup(t, 0)
 	ctx := context.Background()
 
-	_, err := client.ImportRecords(ctx, connect.NewRequest(&gastrologv1.ImportRecordsRequest{
+	_, err := tc.store.ImportRecords(ctx, connect.NewRequest(&gastrologv1.ImportRecordsRequest{
 		Store:   "nonexistent",
 		Records: []*gastrologv1.ExportRecord{{Raw: []byte("test")}},
 	}))
@@ -530,11 +584,11 @@ func TestImportRecordsStoreNotFound(t *testing.T) {
 }
 
 func TestExportImportRoundTrip(t *testing.T) {
-	client, _ := newFullStoreTestSetup(t, 12)
+	tc := newFullStoreTestSetup(t, 12)
 	ctx := context.Background()
 
 	// Export from default store.
-	stream, err := client.ExportStore(ctx, connect.NewRequest(&gastrologv1.ExportStoreRequest{
+	stream, err := tc.store.ExportStore(ctx, connect.NewRequest(&gastrologv1.ExportStoreRequest{
 		Store: "default",
 	}))
 	if err != nil {
@@ -558,14 +612,14 @@ func TestExportImportRoundTrip(t *testing.T) {
 	}
 
 	// Clone a new empty store to import into.
-	_, err = client.CloneStore(ctx, connect.NewRequest(&gastrologv1.CloneStoreRequest{
+	_, err = tc.store.CloneStore(ctx, connect.NewRequest(&gastrologv1.CloneStoreRequest{
 		Source:      "default",
 		Destination: "import-target",
 	}))
 	// Clone will copy records, but we want to test import specifically.
 	// Create a fresh empty store instead using import to nonexistent-like scenario.
 	// Actually, let's just import into the existing default store as additional records.
-	resp, err := client.ImportRecords(ctx, connect.NewRequest(&gastrologv1.ImportRecordsRequest{
+	resp, err := tc.store.ImportRecords(ctx, connect.NewRequest(&gastrologv1.ImportRecordsRequest{
 		Store:   "default",
 		Records: allRecords,
 	}))
@@ -578,7 +632,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 	}
 
 	// Default store should now have 24 records (12 original + 12 imported).
-	stats, err := client.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
+	stats, err := tc.store.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
 		Store: "default",
 	}))
 	if err != nil {
@@ -589,8 +643,15 @@ func TestExportImportRoundTrip(t *testing.T) {
 	}
 }
 
+// twoStoreTestClients holds clients and orchestrator for two-store merge tests.
+type twoStoreTestClients struct {
+	store gastrologv1connect.StoreServiceClient
+	job   gastrologv1connect.JobServiceClient
+	orch  *orchestrator.Orchestrator
+}
+
 // newTwoStoreTestSetup creates an orchestrator with two memory stores for merge testing.
-func newTwoStoreTestSetup(t *testing.T) (gastrologv1connect.StoreServiceClient, *orchestrator.Orchestrator) {
+func newTwoStoreTestSetup(t *testing.T) twoStoreTestClients {
 	t.Helper()
 
 	orch := orchestrator.New(orchestrator.Config{})
@@ -648,21 +709,24 @@ func newTwoStoreTestSetup(t *testing.T) (gastrologv1connect.StoreServiceClient, 
 		}
 	}
 
-	storeClient := gastrologv1connect.NewStoreServiceClient(httpClient, "http://embedded")
-	return storeClient, orch
+	return twoStoreTestClients{
+		store: gastrologv1connect.NewStoreServiceClient(httpClient, "http://embedded"),
+		job:   gastrologv1connect.NewJobServiceClient(httpClient, "http://embedded"),
+		orch:  orch,
+	}
 }
 
 func TestMergeStores(t *testing.T) {
-	client, orch := newTwoStoreTestSetup(t)
+	tc := newTwoStoreTestSetup(t)
 	ctx := context.Background()
 
 	// Both stores should exist.
-	srcCM := orch.ChunkManager("src")
+	srcCM := tc.orch.ChunkManager("src")
 	if srcCM == nil {
 		t.Fatal("src chunk manager should exist")
 	}
 
-	resp, err := client.MergeStores(ctx, connect.NewRequest(&gastrologv1.MergeStoresRequest{
+	resp, err := tc.store.MergeStores(ctx, connect.NewRequest(&gastrologv1.MergeStoresRequest{
 		Source:      "src",
 		Destination: "dst",
 	}))
@@ -670,27 +734,32 @@ func TestMergeStores(t *testing.T) {
 		t.Fatalf("MergeStores: %v", err)
 	}
 
-	if resp.Msg.RecordsMerged <= 0 {
-		t.Errorf("expected records merged > 0, got %d", resp.Msg.RecordsMerged)
+	if resp.Msg.JobId == "" {
+		t.Fatal("expected non-empty job_id")
+	}
+
+	job := waitForJob(t, tc.job, resp.Msg.JobId)
+	if job.Status != gastrologv1.JobStatus_JOB_STATUS_COMPLETED {
+		t.Errorf("expected completed, got %v (error: %s)", job.Status, job.Error)
 	}
 
 	// Source should be gone.
-	if cm := orch.ChunkManager("src"); cm != nil {
+	if cm := tc.orch.ChunkManager("src"); cm != nil {
 		t.Error("source chunk manager should be nil after merge")
 	}
 
 	// Destination should have the merged records.
-	dstCM := orch.ChunkManager("dst")
+	dstCM := tc.orch.ChunkManager("dst")
 	if dstCM == nil {
 		t.Fatal("dst chunk manager should still exist")
 	}
 }
 
 func TestMergeStoresNotFound(t *testing.T) {
-	client := newStoreTestSetup(t, 5)
+	clients := newStoreTestSetup(t, 5)
 	ctx := context.Background()
 
-	_, err := client.MergeStores(ctx, connect.NewRequest(&gastrologv1.MergeStoresRequest{
+	_, err := clients.store.MergeStores(ctx, connect.NewRequest(&gastrologv1.MergeStoresRequest{
 		Source:      "nonexistent",
 		Destination: "default",
 	}))
@@ -703,10 +772,10 @@ func TestMergeStoresNotFound(t *testing.T) {
 }
 
 func TestMergeStoresSameStore(t *testing.T) {
-	client := newStoreTestSetup(t, 5)
+	clients := newStoreTestSetup(t, 5)
 	ctx := context.Background()
 
-	_, err := client.MergeStores(ctx, connect.NewRequest(&gastrologv1.MergeStoresRequest{
+	_, err := clients.store.MergeStores(ctx, connect.NewRequest(&gastrologv1.MergeStoresRequest{
 		Source:      "default",
 		Destination: "default",
 	}))

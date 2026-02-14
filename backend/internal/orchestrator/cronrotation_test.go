@@ -45,7 +45,7 @@ func (f *cronFakeChunkManager) Close() error                                   {
 
 func newTestCronManager(t *testing.T) *cronRotationManager {
 	t.Helper()
-	sched, err := newScheduler(slog.Default(), 4)
+	sched, err := newScheduler(slog.Default(), 4, time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
