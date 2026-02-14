@@ -6,8 +6,6 @@ import {
   useDeleteStore,
   useReindexStore,
   useCloneStore,
-  useDecommissionStore,
-  useCompactStore,
   useMergeStores,
 } from "../../api/hooks";
 import { useToast } from "../Toast";
@@ -28,8 +26,6 @@ export function StoresSettings({ dark }: { dark: boolean }) {
   const deleteStore = useDeleteStore();
   const reindex = useReindexStore();
   const clone = useCloneStore();
-  const decommission = useDecommissionStore();
-  const compact = useCompactStore();
   const merge = useMergeStores();
   const { addToast } = useToast();
 
@@ -274,29 +270,6 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                     "border-ink-border-subtle text-text-muted hover:bg-ink-hover",
                     "border-light-border-subtle text-light-text-muted hover:bg-light-hover",
                   )}`}
-                  disabled={compact.isPending}
-                  onClick={async () => {
-                    try {
-                      const result = await compact.mutateAsync(store.id);
-                      addToast(
-                        result.chunksRemoved > 0
-                          ? `Compacted: removed ${result.chunksRemoved} orphan(s), reclaimed ${result.bytesReclaimed} bytes`
-                          : "No orphaned data found",
-                        "info",
-                      );
-                    } catch (err: any) {
-                      addToast(err.message ?? "Compact failed", "error");
-                    }
-                  }}
-                >
-                  {compact.isPending ? "Compacting..." : "Compact"}
-                </button>
-                <button
-                  type="button"
-                  className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
-                    "border-ink-border-subtle text-text-muted hover:bg-ink-hover",
-                    "border-light-border-subtle text-light-text-muted hover:bg-light-hover",
-                  )}`}
                   onClick={() => {
                     setCloneTarget((prev) => {
                       if (prev[store.id]) {
@@ -312,9 +285,10 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                 </button>
                 <button
                   type="button"
-                  className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
-                    "border-ink-border-subtle text-text-muted hover:bg-ink-hover",
-                    "border-light-border-subtle text-light-text-muted hover:bg-light-hover",
+                  disabled
+                  className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors opacity-50 cursor-not-allowed ${c(
+                    "border-ink-border-subtle text-text-muted",
+                    "border-light-border-subtle text-light-text-muted",
                   )}`}
                   onClick={() => {
                     setMergeTarget((prev) =>
@@ -325,28 +299,6 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                   }}
                 >
                   {mergeTarget[store.id] !== undefined ? "Cancel Merge" : "Merge Into..."}
-                </button>
-                <button
-                  type="button"
-                  className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
-                    "border-severity-error/30 text-severity-error hover:bg-severity-error/10",
-                    "border-severity-error/30 text-severity-error hover:bg-severity-error/10",
-                  )}`}
-                  disabled={decommission.isPending}
-                  onClick={async () => {
-                    if (!confirm(`Decommission store "${store.name || store.id}"? This will permanently delete all data.`)) return;
-                    try {
-                      const result = await decommission.mutateAsync(store.id);
-                      addToast(
-                        `Decommissioned "${store.name || store.id}" (${result.chunksRemoved} chunk(s) removed)`,
-                        "info",
-                      );
-                    } catch (err: any) {
-                      addToast(err.message ?? "Decommission failed", "error");
-                    }
-                  }}
-                >
-                  {decommission.isPending ? "Decommissioning..." : "Decommission"}
                 </button>
                 <PrimaryButton
                   onClick={() =>

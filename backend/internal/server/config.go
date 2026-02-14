@@ -758,58 +758,6 @@ func (s *ConfigServer) ResumeStore(
 	return connect.NewResponse(&apiv1.ResumeStoreResponse{}), nil
 }
 
-// DecommissionStore disables a store and force-deletes it.
-func (s *ConfigServer) DecommissionStore(
-	ctx context.Context,
-	req *connect.Request[apiv1.DecommissionStoreRequest],
-) (*connect.Response[apiv1.DecommissionStoreResponse], error) {
-	if req.Msg.Id == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
-	}
-
-	// Count chunks before removal for the response.
-	var chunksRemoved int64
-	if cm := s.orch.ChunkManager(req.Msg.Id); cm != nil {
-		if metas, err := cm.List(); err == nil {
-			chunksRemoved = int64(len(metas))
-		}
-	}
-
-	// Disable ingestion first.
-	_ = s.orch.DisableStore(req.Msg.Id)
-
-	// Read store config for directory cleanup.
-	var storeCfg *config.StoreConfig
-	if cfg, err := s.cfgStore.GetStore(ctx, req.Msg.Id); err == nil {
-		storeCfg = cfg
-	}
-
-	// Force-remove from orchestrator.
-	if err := s.orch.ForceRemoveStore(req.Msg.Id); err != nil {
-		if !errors.Is(err, orchestrator.ErrStoreNotFound) {
-			return nil, connect.NewError(connect.CodeInternal, err)
-		}
-	}
-
-	// Clean up data directory for file stores.
-	if storeCfg != nil && storeCfg.Type == "file" {
-		if dir := storeCfg.Params["dir"]; dir != "" {
-			if err := os.RemoveAll(dir); err != nil {
-				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("remove store directory: %w", err))
-			}
-		}
-	}
-
-	// Remove from config store.
-	if err := s.cfgStore.DeleteStore(ctx, req.Msg.Id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-
-	return connect.NewResponse(&apiv1.DecommissionStoreResponse{
-		ChunksRemoved: chunksRemoved,
-	}), nil
-}
-
 // TestIngester tests connectivity for an ingester configuration without saving it.
 func (s *ConfigServer) TestIngester(
 	ctx context.Context,

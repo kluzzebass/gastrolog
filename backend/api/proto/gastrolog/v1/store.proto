@@ -47,9 +47,6 @@ service StoreService {
   // ImportRecords appends a batch of records to a store.
   rpc ImportRecords(ImportRecordsRequest) returns (ImportRecordsResponse);
 
-  // CompactStore removes orphaned chunk directories and reclaims space.
-  rpc CompactStore(CompactStoreRequest) returns (CompactStoreResponse);
-
   // MergeStores copies all records from a source store into a destination store,
   // then deletes the source.
   rpc MergeStores(MergeStoresRequest) returns (MergeStoresResponse);
@@ -256,15 +253,6 @@ message ImportRecordsRequest {
 
 message ImportRecordsResponse {
   int64 records_imported = 1;
-}
-
-message CompactStoreRequest {
-  string store = 1;
-}
-
-message CompactStoreResponse {
-  int64 chunks_removed = 1;
-  int64 bytes_reclaimed = 2;
 }
 
 message MergeStoresRequest {

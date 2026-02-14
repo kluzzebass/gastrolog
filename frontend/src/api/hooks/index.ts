@@ -8,7 +8,6 @@ export {
   useValidateStore,
   useCloneStore,
   useMigrateStore,
-  useCompactStore,
   useMergeStores,
   useImportRecords,
 } from "./useStores";
@@ -30,7 +29,6 @@ export {
   useDeleteStore,
   usePauseStore,
   useResumeStore,
-  useDecommissionStore,
   usePutIngester,
   useDeleteIngester,
   useTestIngester,

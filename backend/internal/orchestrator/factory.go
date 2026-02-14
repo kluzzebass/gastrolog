@@ -162,15 +162,10 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 		}
 		qe := query.New(cm, im, qeLogger)
 
-		// Register all components.
-		o.RegisterChunkManager(storeCfg.ID, cm)
-		o.RegisterIndexManager(storeCfg.ID, im)
-		o.RegisterQueryEngine(storeCfg.ID, qe)
-
-		// Apply disabled state.
-		if !storeCfg.Enabled {
-			o.disabled[storeCfg.ID] = true
-		}
+		// Register store.
+		store := NewStore(storeCfg.ID, cm, im, qe)
+		store.Enabled = storeCfg.Enabled
+		o.RegisterStore(store)
 	}
 
 	// Set filter set if any filters were compiled.
@@ -180,14 +175,12 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 
 	// Set up retention jobs for stores with retention policies.
 	for _, storeCfg := range cfg.Stores {
-		cm, ok := o.chunks[storeCfg.ID]
-		if !ok {
+		store := o.stores[storeCfg.ID]
+		if store == nil {
 			continue
 		}
-		im, ok := o.indexes[storeCfg.ID]
-		if !ok {
-			continue
-		}
+		cm := store.Chunks
+		im := store.Indexes
 
 		var policy chunk.RetentionPolicy
 

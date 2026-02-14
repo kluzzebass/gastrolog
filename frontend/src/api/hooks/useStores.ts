@@ -131,20 +131,6 @@ export function useMigrateStore() {
   });
 }
 
-export function useCompactStore() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (store: string) => {
-      const response = await storeClient.compactStore({ store });
-      return response;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["stores"] });
-      qc.invalidateQueries({ queryKey: ["stats"] });
-    },
-  });
-}
-
 export function useMergeStores() {
   const qc = useQueryClient();
   return useMutation({

@@ -82,7 +82,7 @@ func (o *Orchestrator) UpdateFilters(cfg *config.Config) error {
 
 	for _, storeCfg := range cfg.Stores {
 		// Only include stores that are registered.
-		if _, ok := o.chunks[storeCfg.ID]; !ok {
+		if _, ok := o.stores[storeCfg.ID]; !ok {
 			continue
 		}
 
@@ -177,7 +177,7 @@ func (o *Orchestrator) AddStore(storeCfg config.StoreConfig, cfg *config.Config,
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
-	if _, exists := o.chunks[storeCfg.ID]; exists {
+	if _, exists := o.stores[storeCfg.ID]; exists {
 		return fmt.Errorf("%w: %s", ErrDuplicateID, storeCfg.ID)
 	}
 
@@ -216,10 +216,9 @@ func (o *Orchestrator) AddStore(storeCfg config.StoreConfig, cfg *config.Config,
 	}
 	qe := query.New(cm, im, qeLogger)
 
-	// Register components.
-	o.chunks[storeCfg.ID] = cm
-	o.indexes[storeCfg.ID] = im
-	o.queries[storeCfg.ID] = qe
+	// Register store. AddStore does not apply disabled state (unlike ApplyConfig).
+	store := NewStore(storeCfg.ID, cm, im, qe)
+	o.stores[storeCfg.ID] = store
 
 	// Update filter set to include the new store's filter.
 	var filterID string
@@ -229,9 +228,7 @@ func (o *Orchestrator) AddStore(storeCfg config.StoreConfig, cfg *config.Config,
 	filterExpr := resolveFilterExpr(cfg, filterID)
 	if err := o.updateFilterLocked(storeCfg.ID, filterExpr); err != nil {
 		// Rollback registration on filter error.
-		delete(o.chunks, storeCfg.ID)
-		delete(o.indexes, storeCfg.ID)
-		delete(o.queries, storeCfg.ID)
+		delete(o.stores, storeCfg.ID)
 		return err
 	}
 
@@ -286,10 +283,11 @@ func (o *Orchestrator) RemoveStore(id string) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
-	cm, exists := o.chunks[id]
+	store, exists := o.stores[id]
 	if !exists {
 		return fmt.Errorf("%w: %s", ErrStoreNotFound, id)
 	}
+	cm := store.Chunks
 
 	// Check if store has any data.
 	metas, err := cm.List()
@@ -312,13 +310,8 @@ func (o *Orchestrator) RemoveStore(id string) error {
 	// Remove cron rotation job if present.
 	o.cronRotation.removeJob(id)
 
-	// Remove disabled state.
-	delete(o.disabled, id)
-
-	// Remove from registries.
-	delete(o.chunks, id)
-	delete(o.indexes, id)
-	delete(o.queries, id)
+	// Remove from registry.
+	delete(o.stores, id)
 
 	// Rebuild filter set without this store.
 	o.rebuildFilterSetLocked()
@@ -334,11 +327,12 @@ func (o *Orchestrator) DisableStore(id string) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
-	if _, exists := o.chunks[id]; !exists {
+	store, exists := o.stores[id]
+	if !exists {
 		return fmt.Errorf("%w: %s", ErrStoreNotFound, id)
 	}
 
-	o.disabled[id] = true
+	store.Enabled = false
 	o.logger.Info("store disabled", "id", id)
 	return nil
 }
@@ -349,11 +343,12 @@ func (o *Orchestrator) EnableStore(id string) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
-	if _, exists := o.chunks[id]; !exists {
+	store, exists := o.stores[id]
+	if !exists {
 		return fmt.Errorf("%w: %s", ErrStoreNotFound, id)
 	}
 
-	delete(o.disabled, id)
+	store.Enabled = true
 	o.logger.Info("store enabled", "id", id)
 	return nil
 }
@@ -362,7 +357,10 @@ func (o *Orchestrator) EnableStore(id string) error {
 func (o *Orchestrator) IsStoreEnabled(id string) bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	return !o.disabled[id]
+	if store := o.stores[id]; store != nil {
+		return store.Enabled
+	}
+	return false
 }
 
 // ForceRemoveStore removes a store regardless of whether it contains data.
@@ -373,11 +371,12 @@ func (o *Orchestrator) ForceRemoveStore(id string) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
-	cm, exists := o.chunks[id]
+	store, exists := o.stores[id]
 	if !exists {
 		return fmt.Errorf("%w: %s", ErrStoreNotFound, id)
 	}
-	im := o.indexes[id]
+	cm := store.Chunks
+	im := store.Indexes
 
 	// Seal active chunk if present.
 	if active := cm.Active(); active != nil {
@@ -417,13 +416,8 @@ func (o *Orchestrator) ForceRemoveStore(id string) error {
 	// Remove cron rotation job if present.
 	o.cronRotation.removeJob(id)
 
-	// Remove disabled state.
-	delete(o.disabled, id)
-
-	// Remove from registries.
-	delete(o.chunks, id)
-	delete(o.indexes, id)
-	delete(o.queries, id)
+	// Remove from registry.
+	delete(o.stores, id)
 
 	// Rebuild filter set without this store.
 	o.rebuildFilterSetLocked()
@@ -469,7 +463,7 @@ func (o *Orchestrator) rebuildFilterSetLocked() {
 
 	var filters []*CompiledFilter
 	for _, f := range o.filterSet.filters {
-		if _, exists := o.chunks[f.StoreID]; exists {
+		if _, exists := o.stores[f.StoreID]; exists {
 			filters = append(filters, f)
 		}
 	}
@@ -487,7 +481,7 @@ func (o *Orchestrator) StoreConfig(id string) (config.StoreConfig, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
-	if _, exists := o.chunks[id]; !exists {
+	if _, exists := o.stores[id]; !exists {
 		return config.StoreConfig{}, fmt.Errorf("%w: %s", ErrStoreNotFound, id)
 	}
 
@@ -525,10 +519,11 @@ func (o *Orchestrator) UpdateRotationPolicies(cfg *config.Config) error {
 	defer o.mu.RUnlock()
 
 	for _, storeCfg := range cfg.Stores {
-		cm, ok := o.chunks[storeCfg.ID]
+		store, ok := o.stores[storeCfg.ID]
 		if !ok {
 			continue // Store not registered in orchestrator.
 		}
+		cm := store.Chunks
 		if storeCfg.Policy == nil {
 			continue // Store doesn't reference a policy.
 		}
@@ -547,7 +542,7 @@ func (o *Orchestrator) UpdateRotationPolicies(cfg *config.Config) error {
 			return fmt.Errorf("invalid policy %s for store %s: %w", *storeCfg.Policy, storeCfg.ID, err)
 		}
 		if policy != nil {
-			cm.SetRotationPolicy(policy)
+			store.Chunks.SetRotationPolicy(policy)
 			o.logger.Info("store rotation policy updated", "store", storeCfg.ID, "policy", *storeCfg.Policy)
 		}
 
@@ -635,7 +630,7 @@ func (o *Orchestrator) UpdateStoreFilter(id string, filter string) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
-	if _, exists := o.chunks[id]; !exists {
+	if _, exists := o.stores[id]; !exists {
 		return fmt.Errorf("%w: %s", ErrStoreNotFound, id)
 	}
 

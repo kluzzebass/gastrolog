@@ -30,10 +30,10 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 
 	// Log startup info.
 	o.logger.Info("starting orchestrator",
-		"stores", len(o.chunks),
+		"stores", len(o.stores),
 		"ingesters", len(o.ingesters))
 
-	if o.filterSet == nil && len(o.chunks) > 1 {
+	if o.filterSet == nil && len(o.stores) > 1 {
 		o.logger.Warn("no filters configured, messages will fan out to all stores")
 	}
 
@@ -181,11 +181,12 @@ func (o *Orchestrator) RebuildMissingIndexes(ctx context.Context) error {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
-	for storeID, cm := range o.chunks {
-		im, ok := o.indexes[storeID]
-		if !ok {
+	for storeID, store := range o.stores {
+		if store == nil {
 			continue
 		}
+		cm := store.Chunks
+		im := store.Indexes
 
 		metas, err := cm.List()
 		if err != nil {
@@ -208,7 +209,7 @@ func (o *Orchestrator) RebuildMissingIndexes(ctx context.Context) error {
 					"chunk", meta.ID.String())
 
 				name := fmt.Sprintf("index-rebuild:%s:%s", storeID, meta.ID)
-				if err := o.scheduler.RunOnce(name, im.BuildIndexes, context.Background(), meta.ID); err != nil {
+				if err := o.scheduler.RunOnce(name, store.Indexes.BuildIndexes, context.Background(), meta.ID); err != nil {
 					o.logger.Warn("failed to schedule index rebuild", "name", name, "error", err)
 				}
 			}

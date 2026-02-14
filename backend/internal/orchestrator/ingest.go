@@ -43,7 +43,7 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
-	if len(o.chunks) == 0 {
+	if len(o.stores) == 0 {
 		return ErrNoChunkManagers
 	}
 
@@ -53,32 +53,21 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 		targetStores = o.filterSet.Match(rec.Attrs)
 	} else {
 		// Legacy behavior: fan-out to all stores.
-		targetStores = make([]string, 0, len(o.chunks))
-		for key := range o.chunks {
+		targetStores = make([]string, 0, len(o.stores))
+		for key := range o.stores {
 			targetStores = append(targetStores, key)
 		}
 	}
 
 	// Dispatch to target stores only.
 	for _, key := range targetStores {
-		if o.disabled[key] {
-			continue // store is disabled, skip ingestion
+		store := o.stores[key]
+		if store == nil || !store.Enabled {
+			continue
 		}
-		cm, ok := o.chunks[key]
-		if !ok {
-			continue // store not registered (shouldn't happen)
-		}
-
-		activeBefore := cm.Active()
-
-		_, _, err := cm.Append(rec)
-		if err != nil {
+		onSeal := func(cid chunk.ChunkID) { o.scheduleIndexBuild(key, cid) }
+		if err := store.Append(rec, onSeal); err != nil {
 			return err
-		}
-
-		activeAfter := cm.Active()
-		if activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID) {
-			o.scheduleIndexBuild(key, activeBefore.ID)
 		}
 	}
 
@@ -90,13 +79,13 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 // and subject to the scheduler's concurrency limit.
 // The IndexManager handles deduplication of concurrent builds for the same chunk.
 func (o *Orchestrator) scheduleIndexBuild(registryKey string, chunkID chunk.ChunkID) {
-	im, ok := o.indexes[registryKey]
-	if !ok {
+	store := o.stores[registryKey]
+	if store == nil {
 		return
 	}
 
 	name := fmt.Sprintf("index-build:%s:%s", registryKey, chunkID)
-	if err := o.scheduler.RunOnce(name, im.BuildIndexes, context.Background(), chunkID); err != nil {
+	if err := o.scheduler.RunOnce(name, store.Indexes.BuildIndexes, context.Background(), chunkID); err != nil {
 		o.logger.Warn("failed to schedule index build", "name", name, "error", err)
 	}
 }

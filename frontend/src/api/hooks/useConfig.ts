@@ -309,21 +309,6 @@ export function useResumeStore() {
   });
 }
 
-export function useDecommissionStore() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      const response = await configClient.decommissionStore({ id });
-      return response;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["config"] });
-      qc.invalidateQueries({ queryKey: ["stores"] });
-      qc.invalidateQueries({ queryKey: ["stats"] });
-    },
-  });
-}
-
 export function useTestIngester() {
   return useMutation({
     mutationFn: async (args: { type: string; params: Record<string, string> }) => {

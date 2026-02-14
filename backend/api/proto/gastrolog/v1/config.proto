@@ -84,9 +84,6 @@ service ConfigService {
   // ResumeStore resumes ingestion for a store.
   rpc ResumeStore(ResumeStoreRequest) returns (ResumeStoreResponse);
 
-  // DecommissionStore disables ingestion and force-deletes a store.
-  rpc DecommissionStore(DecommissionStoreRequest) returns (DecommissionStoreResponse);
-
   // TestIngester tests connectivity for an ingester configuration without saving it.
   rpc TestIngester(TestIngesterRequest) returns (TestIngesterResponse);
 }
@@ -343,14 +340,6 @@ message ResumeStoreRequest {
 }
 
 message ResumeStoreResponse {}
-
-message DecommissionStoreRequest {
-  string id = 1;
-}
-
-message DecommissionStoreResponse {
-  int64 chunks_removed = 1;
-}
 
 message TestIngesterRequest {
   string type = 1;

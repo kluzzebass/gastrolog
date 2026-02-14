@@ -12,10 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gastrolog/internal/chunk"
-	"gastrolog/internal/index"
 	"gastrolog/internal/logging"
-	"gastrolog/internal/query"
 )
 
 // IngesterStats tracks per-ingester metrics using atomic counters.
@@ -73,10 +70,8 @@ var (
 type Orchestrator struct {
 	mu sync.RWMutex
 
-	// Component registries.
-	chunks  map[string]chunk.ChunkManager
-	indexes map[string]index.IndexManager
-	queries map[string]*query.Engine
+	// Store registry. Each store bundles Chunks, Indexes, and Query.
+	stores map[string]*Store
 
 	// Ingester management.
 	ingesters       map[string]Ingester
@@ -89,8 +84,6 @@ type Orchestrator struct {
 	// Store filters.
 	filterSet *FilterSet
 
-	// Disabled stores (keyed by store ID). Present = disabled.
-	disabled map[string]bool
 
 	// Ingest channel and lifecycle.
 	ingestCh     chan IngestMessage
@@ -155,13 +148,10 @@ func New(cfg Config) *Orchestrator {
 	}
 
 	return &Orchestrator{
-		chunks:          make(map[string]chunk.ChunkManager),
-		indexes:         make(map[string]index.IndexManager),
-		queries:         make(map[string]*query.Engine),
+		stores:          make(map[string]*Store),
 		ingesters:       make(map[string]Ingester),
 		ingesterCancels: make(map[string]context.CancelFunc),
 		ingesterStats:   make(map[string]*IngesterStats),
-		disabled:        make(map[string]bool),
 		retention:       make(map[string]*retentionRunner),
 		scheduler:       sched,
 		cronRotation:    newCronRotationManager(sched, logger),

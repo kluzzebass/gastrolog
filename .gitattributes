@@ -1,0 +1,2 @@
+# Dogcat JSONL merge driver
+.dogcats/*.jsonl merge=dcat-jsonl

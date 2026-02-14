@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { AnalyzeChunkRequest, AnalyzeChunkResponse, CloneStoreRequest, CloneStoreResponse, CompactStoreRequest, CompactStoreResponse, ExportStoreRequest, ExportStoreResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetStatsRequest, GetStatsResponse, GetStoreRequest, GetStoreResponse, ImportRecordsRequest, ImportRecordsResponse, ListChunksRequest, ListChunksResponse, ListStoresRequest, ListStoresResponse, MergeStoresRequest, MergeStoresResponse, MigrateStoreRequest, MigrateStoreResponse, ReindexStoreRequest, ReindexStoreResponse, ValidateStoreRequest, ValidateStoreResponse } from "./store_pb.js";
+import { AnalyzeChunkRequest, AnalyzeChunkResponse, CloneStoreRequest, CloneStoreResponse, ExportStoreRequest, ExportStoreResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetStatsRequest, GetStatsResponse, GetStoreRequest, GetStoreResponse, ImportRecordsRequest, ImportRecordsResponse, ListChunksRequest, ListChunksResponse, ListStoresRequest, ListStoresResponse, MergeStoresRequest, MergeStoresResponse, MigrateStoreRequest, MigrateStoreResponse, ReindexStoreRequest, ReindexStoreResponse, ValidateStoreRequest, ValidateStoreResponse } from "./store_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -155,17 +155,6 @@ export const StoreService = {
       name: "ImportRecords",
       I: ImportRecordsRequest,
       O: ImportRecordsResponse,
-      kind: MethodKind.Unary,
-    },
-    /**
-     * CompactStore removes orphaned chunk directories and reclaims space.
-     *
-     * @generated from rpc gastrolog.v1.StoreService.CompactStore
-     */
-    compactStore: {
-      name: "CompactStore",
-      I: CompactStoreRequest,
-      O: CompactStoreResponse,
       kind: MethodKind.Unary,
     },
     /**

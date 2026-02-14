@@ -589,37 +589,6 @@ func TestExportImportRoundTrip(t *testing.T) {
 	}
 }
 
-func TestCompactStoreMemory(t *testing.T) {
-	client := newStoreTestSetup(t, 12)
-	ctx := context.Background()
-
-	// Compact on a memory store should succeed but remove nothing.
-	resp, err := client.CompactStore(ctx, connect.NewRequest(&gastrologv1.CompactStoreRequest{
-		Store: "default",
-	}))
-	if err != nil {
-		t.Fatalf("CompactStore: %v", err)
-	}
-	if resp.Msg.ChunksRemoved != 0 {
-		t.Errorf("expected 0 chunks removed for memory store, got %d", resp.Msg.ChunksRemoved)
-	}
-}
-
-func TestCompactStoreNotFound(t *testing.T) {
-	client := newStoreTestSetup(t, 0)
-	ctx := context.Background()
-
-	_, err := client.CompactStore(ctx, connect.NewRequest(&gastrologv1.CompactStoreRequest{
-		Store: "nonexistent",
-	}))
-	if err == nil {
-		t.Fatal("expected error for nonexistent store")
-	}
-	if connect.CodeOf(err) != connect.CodeNotFound {
-		t.Fatalf("expected NotFound, got %v", connect.CodeOf(err))
-	}
-}
-
 // newTwoStoreTestSetup creates an orchestrator with two memory stores for merge testing.
 func newTwoStoreTestSetup(t *testing.T) (gastrologv1connect.StoreServiceClient, *orchestrator.Orchestrator) {
 	t.Helper()

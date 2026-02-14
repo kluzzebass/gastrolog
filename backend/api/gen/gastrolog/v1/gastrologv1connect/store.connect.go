@@ -65,9 +65,6 @@ const (
 	// StoreServiceImportRecordsProcedure is the fully-qualified name of the StoreService's
 	// ImportRecords RPC.
 	StoreServiceImportRecordsProcedure = "/gastrolog.v1.StoreService/ImportRecords"
-	// StoreServiceCompactStoreProcedure is the fully-qualified name of the StoreService's CompactStore
-	// RPC.
-	StoreServiceCompactStoreProcedure = "/gastrolog.v1.StoreService/CompactStore"
 	// StoreServiceMergeStoresProcedure is the fully-qualified name of the StoreService's MergeStores
 	// RPC.
 	StoreServiceMergeStoresProcedure = "/gastrolog.v1.StoreService/MergeStores"
@@ -101,8 +98,6 @@ type StoreServiceClient interface {
 	ExportStore(context.Context, *connect.Request[v1.ExportStoreRequest]) (*connect.ServerStreamForClient[v1.ExportStoreResponse], error)
 	// ImportRecords appends a batch of records to a store.
 	ImportRecords(context.Context, *connect.Request[v1.ImportRecordsRequest]) (*connect.Response[v1.ImportRecordsResponse], error)
-	// CompactStore removes orphaned chunk directories and reclaims space.
-	CompactStore(context.Context, *connect.Request[v1.CompactStoreRequest]) (*connect.Response[v1.CompactStoreResponse], error)
 	// MergeStores copies all records from a source store into a destination store,
 	// then deletes the source.
 	MergeStores(context.Context, *connect.Request[v1.MergeStoresRequest]) (*connect.Response[v1.MergeStoresResponse], error)
@@ -197,12 +192,6 @@ func NewStoreServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(storeServiceMethods.ByName("ImportRecords")),
 			connect.WithClientOptions(opts...),
 		),
-		compactStore: connect.NewClient[v1.CompactStoreRequest, v1.CompactStoreResponse](
-			httpClient,
-			baseURL+StoreServiceCompactStoreProcedure,
-			connect.WithSchema(storeServiceMethods.ByName("CompactStore")),
-			connect.WithClientOptions(opts...),
-		),
 		mergeStores: connect.NewClient[v1.MergeStoresRequest, v1.MergeStoresResponse](
 			httpClient,
 			baseURL+StoreServiceMergeStoresProcedure,
@@ -227,7 +216,6 @@ type storeServiceClient struct {
 	migrateStore  *connect.Client[v1.MigrateStoreRequest, v1.MigrateStoreResponse]
 	exportStore   *connect.Client[v1.ExportStoreRequest, v1.ExportStoreResponse]
 	importRecords *connect.Client[v1.ImportRecordsRequest, v1.ImportRecordsResponse]
-	compactStore  *connect.Client[v1.CompactStoreRequest, v1.CompactStoreResponse]
 	mergeStores   *connect.Client[v1.MergeStoresRequest, v1.MergeStoresResponse]
 }
 
@@ -296,11 +284,6 @@ func (c *storeServiceClient) ImportRecords(ctx context.Context, req *connect.Req
 	return c.importRecords.CallUnary(ctx, req)
 }
 
-// CompactStore calls gastrolog.v1.StoreService.CompactStore.
-func (c *storeServiceClient) CompactStore(ctx context.Context, req *connect.Request[v1.CompactStoreRequest]) (*connect.Response[v1.CompactStoreResponse], error) {
-	return c.compactStore.CallUnary(ctx, req)
-}
-
 // MergeStores calls gastrolog.v1.StoreService.MergeStores.
 func (c *storeServiceClient) MergeStores(ctx context.Context, req *connect.Request[v1.MergeStoresRequest]) (*connect.Response[v1.MergeStoresResponse], error) {
 	return c.mergeStores.CallUnary(ctx, req)
@@ -334,8 +317,6 @@ type StoreServiceHandler interface {
 	ExportStore(context.Context, *connect.Request[v1.ExportStoreRequest], *connect.ServerStream[v1.ExportStoreResponse]) error
 	// ImportRecords appends a batch of records to a store.
 	ImportRecords(context.Context, *connect.Request[v1.ImportRecordsRequest]) (*connect.Response[v1.ImportRecordsResponse], error)
-	// CompactStore removes orphaned chunk directories and reclaims space.
-	CompactStore(context.Context, *connect.Request[v1.CompactStoreRequest]) (*connect.Response[v1.CompactStoreResponse], error)
 	// MergeStores copies all records from a source store into a destination store,
 	// then deletes the source.
 	MergeStores(context.Context, *connect.Request[v1.MergeStoresRequest]) (*connect.Response[v1.MergeStoresResponse], error)
@@ -426,12 +407,6 @@ func NewStoreServiceHandler(svc StoreServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(storeServiceMethods.ByName("ImportRecords")),
 		connect.WithHandlerOptions(opts...),
 	)
-	storeServiceCompactStoreHandler := connect.NewUnaryHandler(
-		StoreServiceCompactStoreProcedure,
-		svc.CompactStore,
-		connect.WithSchema(storeServiceMethods.ByName("CompactStore")),
-		connect.WithHandlerOptions(opts...),
-	)
 	storeServiceMergeStoresHandler := connect.NewUnaryHandler(
 		StoreServiceMergeStoresProcedure,
 		svc.MergeStores,
@@ -466,8 +441,6 @@ func NewStoreServiceHandler(svc StoreServiceHandler, opts ...connect.HandlerOpti
 			storeServiceExportStoreHandler.ServeHTTP(w, r)
 		case StoreServiceImportRecordsProcedure:
 			storeServiceImportRecordsHandler.ServeHTTP(w, r)
-		case StoreServiceCompactStoreProcedure:
-			storeServiceCompactStoreHandler.ServeHTTP(w, r)
 		case StoreServiceMergeStoresProcedure:
 			storeServiceMergeStoresHandler.ServeHTTP(w, r)
 		default:
@@ -529,10 +502,6 @@ func (UnimplementedStoreServiceHandler) ExportStore(context.Context, *connect.Re
 
 func (UnimplementedStoreServiceHandler) ImportRecords(context.Context, *connect.Request[v1.ImportRecordsRequest]) (*connect.Response[v1.ImportRecordsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.StoreService.ImportRecords is not implemented"))
-}
-
-func (UnimplementedStoreServiceHandler) CompactStore(context.Context, *connect.Request[v1.CompactStoreRequest]) (*connect.Response[v1.CompactStoreResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.StoreService.CompactStore is not implemented"))
 }
 
 func (UnimplementedStoreServiceHandler) MergeStores(context.Context, *connect.Request[v1.MergeStoresRequest]) (*connect.Response[v1.MergeStoresResponse], error) {

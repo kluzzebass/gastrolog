@@ -108,9 +108,6 @@ const (
 	// ConfigServiceResumeStoreProcedure is the fully-qualified name of the ConfigService's ResumeStore
 	// RPC.
 	ConfigServiceResumeStoreProcedure = "/gastrolog.v1.ConfigService/ResumeStore"
-	// ConfigServiceDecommissionStoreProcedure is the fully-qualified name of the ConfigService's
-	// DecommissionStore RPC.
-	ConfigServiceDecommissionStoreProcedure = "/gastrolog.v1.ConfigService/DecommissionStore"
 	// ConfigServiceTestIngesterProcedure is the fully-qualified name of the ConfigService's
 	// TestIngester RPC.
 	ConfigServiceTestIngesterProcedure = "/gastrolog.v1.ConfigService/TestIngester"
@@ -170,8 +167,6 @@ type ConfigServiceClient interface {
 	PauseStore(context.Context, *connect.Request[v1.PauseStoreRequest]) (*connect.Response[v1.PauseStoreResponse], error)
 	// ResumeStore resumes ingestion for a store.
 	ResumeStore(context.Context, *connect.Request[v1.ResumeStoreRequest]) (*connect.Response[v1.ResumeStoreResponse], error)
-	// DecommissionStore disables ingestion and force-deletes a store.
-	DecommissionStore(context.Context, *connect.Request[v1.DecommissionStoreRequest]) (*connect.Response[v1.DecommissionStoreResponse], error)
 	// TestIngester tests connectivity for an ingester configuration without saving it.
 	TestIngester(context.Context, *connect.Request[v1.TestIngesterRequest]) (*connect.Response[v1.TestIngesterResponse], error)
 }
@@ -343,12 +338,6 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("ResumeStore")),
 			connect.WithClientOptions(opts...),
 		),
-		decommissionStore: connect.NewClient[v1.DecommissionStoreRequest, v1.DecommissionStoreResponse](
-			httpClient,
-			baseURL+ConfigServiceDecommissionStoreProcedure,
-			connect.WithSchema(configServiceMethods.ByName("DecommissionStore")),
-			connect.WithClientOptions(opts...),
-		),
 		testIngester: connect.NewClient[v1.TestIngesterRequest, v1.TestIngesterResponse](
 			httpClient,
 			baseURL+ConfigServiceTestIngesterProcedure,
@@ -386,7 +375,6 @@ type configServiceClient struct {
 	deleteCertificate     *connect.Client[v1.DeleteCertificateRequest, v1.DeleteCertificateResponse]
 	pauseStore            *connect.Client[v1.PauseStoreRequest, v1.PauseStoreResponse]
 	resumeStore           *connect.Client[v1.ResumeStoreRequest, v1.ResumeStoreResponse]
-	decommissionStore     *connect.Client[v1.DecommissionStoreRequest, v1.DecommissionStoreResponse]
 	testIngester          *connect.Client[v1.TestIngesterRequest, v1.TestIngesterResponse]
 }
 
@@ -520,11 +508,6 @@ func (c *configServiceClient) ResumeStore(ctx context.Context, req *connect.Requ
 	return c.resumeStore.CallUnary(ctx, req)
 }
 
-// DecommissionStore calls gastrolog.v1.ConfigService.DecommissionStore.
-func (c *configServiceClient) DecommissionStore(ctx context.Context, req *connect.Request[v1.DecommissionStoreRequest]) (*connect.Response[v1.DecommissionStoreResponse], error) {
-	return c.decommissionStore.CallUnary(ctx, req)
-}
-
 // TestIngester calls gastrolog.v1.ConfigService.TestIngester.
 func (c *configServiceClient) TestIngester(ctx context.Context, req *connect.Request[v1.TestIngesterRequest]) (*connect.Response[v1.TestIngesterResponse], error) {
 	return c.testIngester.CallUnary(ctx, req)
@@ -584,8 +567,6 @@ type ConfigServiceHandler interface {
 	PauseStore(context.Context, *connect.Request[v1.PauseStoreRequest]) (*connect.Response[v1.PauseStoreResponse], error)
 	// ResumeStore resumes ingestion for a store.
 	ResumeStore(context.Context, *connect.Request[v1.ResumeStoreRequest]) (*connect.Response[v1.ResumeStoreResponse], error)
-	// DecommissionStore disables ingestion and force-deletes a store.
-	DecommissionStore(context.Context, *connect.Request[v1.DecommissionStoreRequest]) (*connect.Response[v1.DecommissionStoreResponse], error)
 	// TestIngester tests connectivity for an ingester configuration without saving it.
 	TestIngester(context.Context, *connect.Request[v1.TestIngesterRequest]) (*connect.Response[v1.TestIngesterResponse], error)
 }
@@ -753,12 +734,6 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("ResumeStore")),
 		connect.WithHandlerOptions(opts...),
 	)
-	configServiceDecommissionStoreHandler := connect.NewUnaryHandler(
-		ConfigServiceDecommissionStoreProcedure,
-		svc.DecommissionStore,
-		connect.WithSchema(configServiceMethods.ByName("DecommissionStore")),
-		connect.WithHandlerOptions(opts...),
-	)
 	configServiceTestIngesterHandler := connect.NewUnaryHandler(
 		ConfigServiceTestIngesterProcedure,
 		svc.TestIngester,
@@ -819,8 +794,6 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServicePauseStoreHandler.ServeHTTP(w, r)
 		case ConfigServiceResumeStoreProcedure:
 			configServiceResumeStoreHandler.ServeHTTP(w, r)
-		case ConfigServiceDecommissionStoreProcedure:
-			configServiceDecommissionStoreHandler.ServeHTTP(w, r)
 		case ConfigServiceTestIngesterProcedure:
 			configServiceTestIngesterHandler.ServeHTTP(w, r)
 		default:
@@ -934,10 +907,6 @@ func (UnimplementedConfigServiceHandler) PauseStore(context.Context, *connect.Re
 
 func (UnimplementedConfigServiceHandler) ResumeStore(context.Context, *connect.Request[v1.ResumeStoreRequest]) (*connect.Response[v1.ResumeStoreResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.ResumeStore is not implemented"))
-}
-
-func (UnimplementedConfigServiceHandler) DecommissionStore(context.Context, *connect.Request[v1.DecommissionStoreRequest]) (*connect.Response[v1.DecommissionStoreResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.DecommissionStore is not implemented"))
 }
 
 func (UnimplementedConfigServiceHandler) TestIngester(context.Context, *connect.Request[v1.TestIngesterRequest]) (*connect.Response[v1.TestIngesterResponse], error) {

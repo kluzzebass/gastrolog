@@ -121,14 +121,18 @@ func TestApplyConfigStores(t *testing.T) {
 	}
 
 	// Verify stores were registered.
-	if len(orch.chunks) != 2 {
-		t.Errorf("expected 2 chunk managers, got %d", len(orch.chunks))
+	keys := orch.ChunkManagers()
+	if len(keys) != 2 {
+		t.Errorf("expected 2 stores, got %d", len(keys))
 	}
-	if len(orch.indexes) != 2 {
-		t.Errorf("expected 2 index managers, got %d", len(orch.indexes))
+	if orch.ChunkManager("store1") == nil || orch.ChunkManager("store2") == nil {
+		t.Error("expected both stores to have chunk managers")
 	}
-	if len(orch.queries) != 2 {
-		t.Errorf("expected 2 query engines, got %d", len(orch.queries))
+	if orch.IndexManager("store1") == nil || orch.IndexManager("store2") == nil {
+		t.Error("expected both stores to have index managers")
+	}
+	if orch.QueryEngine("store1") == nil || orch.QueryEngine("store2") == nil {
+		t.Error("expected both stores to have query engines")
 	}
 }
 

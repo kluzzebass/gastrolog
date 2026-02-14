@@ -7,25 +7,47 @@ import (
 	"gastrolog/internal/query"
 )
 
+// RegisterStore adds a store to the registry.
+func (o *Orchestrator) RegisterStore(store *Store) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.stores[store.ID] = store
+}
+
 // RegisterChunkManager adds a chunk manager to the registry.
+// Deprecated: use RegisterStore(NewStore(...)) instead.
 func (o *Orchestrator) RegisterChunkManager(key string, cm chunk.ChunkManager) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.chunks[key] = cm
+	if s := o.stores[key]; s != nil {
+		s.Chunks = cm
+		return
+	}
+	o.stores[key] = NewStore(key, cm, nil, nil)
 }
 
 // RegisterIndexManager adds an index manager to the registry.
+// Deprecated: use RegisterStore(NewStore(...)) instead.
 func (o *Orchestrator) RegisterIndexManager(key string, im index.IndexManager) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.indexes[key] = im
+	if s := o.stores[key]; s != nil {
+		s.Indexes = im
+		return
+	}
+	o.stores[key] = NewStore(key, nil, im, nil)
 }
 
 // RegisterQueryEngine adds a query engine to the registry.
+// Deprecated: use RegisterStore(NewStore(...)) instead.
 func (o *Orchestrator) RegisterQueryEngine(key string, qe *query.Engine) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.queries[key] = qe
+	if s := o.stores[key]; s != nil {
+		s.Query = qe
+		return
+	}
+	o.stores[key] = NewStore(key, nil, nil, qe)
 }
 
 // RegisterDigester appends a digester to the processing pipeline.
@@ -70,15 +92,18 @@ func (o *Orchestrator) UnregisterIngester(id string) {
 func (o *Orchestrator) ChunkManager(key string) chunk.ChunkManager {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	return o.chunks[cmp.Or(key, "default")]
+	if s := o.stores[cmp.Or(key, "default")]; s != nil {
+		return s.Chunks
+	}
+	return nil
 }
 
 // ChunkManagers returns all registered chunk manager keys.
 func (o *Orchestrator) ChunkManagers() []string {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	keys := make([]string, 0, len(o.chunks))
-	for k := range o.chunks {
+	keys := make([]string, 0, len(o.stores))
+	for k := range o.stores {
 		keys = append(keys, k)
 	}
 	return keys
@@ -89,15 +114,18 @@ func (o *Orchestrator) ChunkManagers() []string {
 func (o *Orchestrator) IndexManager(key string) index.IndexManager {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	return o.indexes[cmp.Or(key, "default")]
+	if s := o.stores[cmp.Or(key, "default")]; s != nil {
+		return s.Indexes
+	}
+	return nil
 }
 
 // IndexManagers returns all registered index manager keys.
 func (o *Orchestrator) IndexManagers() []string {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	keys := make([]string, 0, len(o.indexes))
-	for k := range o.indexes {
+	keys := make([]string, 0, len(o.stores))
+	for k := range o.stores {
 		keys = append(keys, k)
 	}
 	return keys
@@ -143,7 +171,10 @@ func (o *Orchestrator) ListIngesters() []string {
 func (o *Orchestrator) QueryEngine(key string) *query.Engine {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	return o.queries[cmp.Or(key, "default")]
+	if s := o.stores[cmp.Or(key, "default")]; s != nil {
+		return s.Query
+	}
+	return nil
 }
 
 // MultiStoreQueryEngine returns a query engine that searches across all stores.

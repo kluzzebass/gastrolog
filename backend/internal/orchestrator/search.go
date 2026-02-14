@@ -17,15 +17,15 @@ func (o *Orchestrator) Search(ctx context.Context, key string, q query.Query, re
 
 	key = cmp.Or(key, "default")
 
-	qe, ok := o.queries[key]
-	if !ok {
-		if len(o.queries) == 0 {
+	store := o.stores[key]
+	if store == nil {
+		if len(o.stores) == 0 {
 			return nil, nil, ErrNoQueryEngines
 		}
 		return nil, nil, ErrUnknownRegistry
 	}
 
-	seq, nextToken := qe.Search(ctx, q, resume)
+	seq, nextToken := store.Query.Search(ctx, q, resume)
 	return seq, nextToken, nil
 }
 
@@ -36,15 +36,15 @@ func (o *Orchestrator) SearchThenFollow(ctx context.Context, key string, q query
 
 	key = cmp.Or(key, "default")
 
-	qe, ok := o.queries[key]
-	if !ok {
-		if len(o.queries) == 0 {
+	store := o.stores[key]
+	if store == nil {
+		if len(o.stores) == 0 {
 			return nil, nil, ErrNoQueryEngines
 		}
 		return nil, nil, ErrUnknownRegistry
 	}
 
-	seq, nextToken := qe.SearchThenFollow(ctx, q, resume)
+	seq, nextToken := store.Query.SearchThenFollow(ctx, q, resume)
 	return seq, nextToken, nil
 }
 
@@ -55,15 +55,15 @@ func (o *Orchestrator) SearchWithContext(ctx context.Context, key string, q quer
 
 	key = cmp.Or(key, "default")
 
-	qe, ok := o.queries[key]
-	if !ok {
-		if len(o.queries) == 0 {
+	store := o.stores[key]
+	if store == nil {
+		if len(o.stores) == 0 {
 			return nil, nil, ErrNoQueryEngines
 		}
 		return nil, nil, ErrUnknownRegistry
 	}
 
-	seq, nextToken := qe.SearchWithContext(ctx, q)
+	seq, nextToken := store.Query.SearchWithContext(ctx, q)
 	return seq, nextToken, nil
 }
 
@@ -74,13 +74,13 @@ func (o *Orchestrator) Explain(ctx context.Context, key string, q query.Query) (
 
 	key = cmp.Or(key, "default")
 
-	qe, ok := o.queries[key]
-	if !ok {
-		if len(o.queries) == 0 {
+	store := o.stores[key]
+	if store == nil {
+		if len(o.stores) == 0 {
 			return nil, ErrNoQueryEngines
 		}
 		return nil, ErrUnknownRegistry
 	}
 
-	return qe.Explain(ctx, q)
+	return store.Query.Explain(ctx, q)
 }
