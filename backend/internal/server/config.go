@@ -18,6 +18,7 @@ import (
 	"gastrolog/internal/auth"
 	"gastrolog/internal/cert"
 	"gastrolog/internal/config"
+	"gastrolog/internal/ingester/docker"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -827,6 +828,32 @@ func (s *ConfigServer) DecommissionStore(
 	return connect.NewResponse(&apiv1.DecommissionStoreResponse{
 		ChunksRemoved: chunksRemoved,
 	}), nil
+}
+
+// TestIngester tests connectivity for an ingester configuration without saving it.
+func (s *ConfigServer) TestIngester(
+	ctx context.Context,
+	req *connect.Request[apiv1.TestIngesterRequest],
+) (*connect.Response[apiv1.TestIngesterResponse], error) {
+	switch req.Msg.Type {
+	case "docker":
+		msg, err := docker.TestConnection(ctx, req.Msg.Params, s.cfgStore)
+		if err != nil {
+			return connect.NewResponse(&apiv1.TestIngesterResponse{
+				Success: false,
+				Message: err.Error(),
+			}), nil
+		}
+		return connect.NewResponse(&apiv1.TestIngesterResponse{
+			Success: true,
+			Message: msg,
+		}), nil
+	default:
+		return connect.NewResponse(&apiv1.TestIngesterResponse{
+			Success: false,
+			Message: fmt.Sprintf("connection test not supported for ingester type %q", req.Msg.Type),
+		}), nil
+	}
 }
 
 // --- Proto <-> Config conversion helpers ---

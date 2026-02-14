@@ -1,5 +1,7 @@
-import { FormField, TextInput, NumberInput } from "./FormField";
+import { useState } from "react";
+import { FormField, TextInput, NumberInput, SelectInput } from "./FormField";
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { useCertificates, useTestIngester } from "../../api/hooks/useConfig";
 import { Checkbox } from "./Checkbox";
 
 interface IngesterParamsFormProps {
@@ -339,6 +341,221 @@ function TailForm({
   );
 }
 
+function DockerForm({
+  params,
+  onChange,
+  dark,
+}: {
+  params: Record<string, string>;
+  onChange: (params: Record<string, string>) => void;
+  dark: boolean;
+}) {
+  const c = useThemeClass(dark);
+  const { data: certData } = useCertificates();
+  const testIngester = useTestIngester();
+  const [testResult, setTestResult] = useState<{
+    success: boolean;
+    message: string;
+  } | null>(null);
+  const certNames = certData?.names ?? [];
+  const certOptions = [
+    { value: "", label: "(none)" },
+    ...certNames.map((n: string) => ({ value: n, label: n })),
+  ];
+  const set = (key: string, value: string) =>
+    onChange({ ...params, [key]: value });
+
+  return (
+    <div className="flex flex-col gap-4">
+      <FormField
+        label="Docker Host"
+        description="Docker daemon address, e.g. unix:///var/run/docker.sock or tcp://docker-host:2376"
+        dark={dark}
+      >
+        <TextInput
+          value={params["host"] ?? ""}
+          onChange={(v) => set("host", v)}
+          placeholder="unix:///var/run/docker.sock"
+          dark={dark}
+          mono
+        />
+      </FormField>
+
+      {/* Filters */}
+      <div className="flex flex-col gap-1">
+        <label
+          className={`text-[0.8em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}
+        >
+          Container Filters
+        </label>
+        <p
+          className={`text-[0.7em] mb-1.5 ${c("text-text-ghost", "text-light-text-ghost")}`}
+        >
+          Only containers matching all specified filters will be tailed. Leave
+          empty to tail all containers.
+        </p>
+        <div className="grid grid-cols-3 gap-3">
+          <FormField label="Label Filter" dark={dark}>
+            <TextInput
+              value={params["label_filter"] ?? ""}
+              onChange={(v) => set("label_filter", v)}
+              placeholder="gastrolog.collect=true"
+              dark={dark}
+              mono
+            />
+          </FormField>
+          <FormField label="Name Filter" dark={dark}>
+            <TextInput
+              value={params["name_filter"] ?? ""}
+              onChange={(v) => set("name_filter", v)}
+              placeholder="^web-.*"
+              dark={dark}
+              mono
+            />
+          </FormField>
+          <FormField label="Image Filter" dark={dark}>
+            <TextInput
+              value={params["image_filter"] ?? ""}
+              onChange={(v) => set("image_filter", v)}
+              placeholder="nginx"
+              dark={dark}
+              mono
+            />
+          </FormField>
+        </div>
+      </div>
+
+      {/* Streams & Polling */}
+      <div className="grid grid-cols-2 gap-3">
+        <FormField
+          label="Poll Interval"
+          description="Backup container discovery interval (default: 30s)"
+          dark={dark}
+        >
+          <TextInput
+            value={params["poll_interval"] ?? ""}
+            onChange={(v) => set("poll_interval", v)}
+            placeholder="30s"
+            dark={dark}
+            mono
+          />
+        </FormField>
+        <div className="flex items-end gap-4 pb-1">
+          <Checkbox
+            checked={params["stdout"] !== "false"}
+            onChange={(v) => set("stdout", v ? "true" : "false")}
+            label="Stdout"
+            dark={dark}
+          />
+          <Checkbox
+            checked={params["stderr"] !== "false"}
+            onChange={(v) => set("stderr", v ? "true" : "false")}
+            label="Stderr"
+            dark={dark}
+          />
+        </div>
+      </div>
+
+      {/* TLS */}
+      <div className="flex flex-col gap-1">
+        <Checkbox
+          checked={params["tls"] !== "false"}
+          onChange={(v) => set("tls", v ? "true" : "false")}
+          label="Enable TLS"
+          dark={dark}
+        />
+        {params["tls"] !== "false" && (
+          <div className="flex flex-col gap-2 mt-1">
+            <p
+              className={`text-[0.7em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+            >
+              Select certificates from the Certificates tab. Leave empty to use
+              system CAs without client authentication.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <FormField
+                label="CA Certificate"
+                description="Verify the Docker daemon's server certificate"
+                dark={dark}
+              >
+                <SelectInput
+                  value={params["tls_ca"] ?? ""}
+                  onChange={(v) => set("tls_ca", v)}
+                  options={certOptions}
+                  dark={dark}
+                />
+              </FormField>
+              <FormField
+                label="Client Certificate"
+                description="Authenticate to the Docker daemon"
+                dark={dark}
+              >
+                <SelectInput
+                  value={params["tls_cert"] ?? ""}
+                  onChange={(v) => set("tls_cert", v)}
+                  options={certOptions}
+                  dark={dark}
+                />
+              </FormField>
+            </div>
+            <Checkbox
+              checked={params["tls_verify"] !== "false"}
+              onChange={(v) => set("tls_verify", v ? "true" : "false")}
+              label="Verify server certificate"
+              dark={dark}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Test Connection */}
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          disabled={testIngester.isPending}
+          onClick={() => {
+            setTestResult(null);
+            testIngester.mutate(
+              { type: "docker", params },
+              {
+                onSuccess: (resp) => {
+                  setTestResult({
+                    success: resp.success,
+                    message: resp.message,
+                  });
+                },
+                onError: (err) => {
+                  setTestResult({
+                    success: false,
+                    message: err instanceof Error ? err.message : String(err),
+                  });
+                },
+              },
+            );
+          }}
+          className={`px-3 py-1.5 text-[0.8em] font-medium rounded border transition-colors ${c(
+            "bg-ink-surface border-ink-border text-text-bright hover:border-copper-dim disabled:opacity-50",
+            "bg-light-surface border-light-border text-light-text-bright hover:border-copper disabled:opacity-50",
+          )}`}
+        >
+          {testIngester.isPending ? "Testing..." : "Test Connection"}
+        </button>
+        {testResult && (
+          <span
+            className={`text-[0.8em] ${
+              testResult.success
+                ? c("text-green-400", "text-green-600")
+                : c("text-red-400", "text-red-600")
+            }`}
+          >
+            {testResult.message}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function IngesterParamsForm({
   ingesterType,
   params,
@@ -351,6 +568,10 @@ export function IngesterParamsForm({
 
   if (ingesterType === "tail") {
     return <TailForm params={params} onChange={onChange} dark={dark} />;
+  }
+
+  if (ingesterType === "docker") {
+    return <DockerForm params={params} onChange={onChange} dark={dark} />;
   }
 
   if (ingesterType === "http") {

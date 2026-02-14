@@ -14,6 +14,7 @@ import { Checkbox } from "./Checkbox";
 
 const ingesterTypes = [
   { value: "chatterbox", label: "chatterbox" },
+  { value: "docker", label: "docker" },
   { value: "http", label: "http" },
   { value: "relp", label: "relp" },
   { value: "syslog", label: "syslog" },

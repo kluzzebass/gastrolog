@@ -34,6 +34,7 @@ export {
   useDecommissionStore,
   usePutIngester,
   useDeleteIngester,
+  useTestIngester,
 } from "./useConfig";
 export {
   useAuthStatus,

@@ -2505,3 +2505,89 @@ export class DecommissionStoreResponse extends Message<DecommissionStoreResponse
   }
 }
 
+/**
+ * @generated from message gastrolog.v1.TestIngesterRequest
+ */
+export class TestIngesterRequest extends Message<TestIngesterRequest> {
+  /**
+   * @generated from field: string type = 1;
+   */
+  type = "";
+
+  /**
+   * @generated from field: map<string, string> params = 2;
+   */
+  params: { [key: string]: string } = {};
+
+  constructor(data?: PartialMessage<TestIngesterRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.TestIngesterRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TestIngesterRequest {
+    return new TestIngesterRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TestIngesterRequest {
+    return new TestIngesterRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TestIngesterRequest {
+    return new TestIngesterRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: TestIngesterRequest | PlainMessage<TestIngesterRequest> | undefined, b: TestIngesterRequest | PlainMessage<TestIngesterRequest> | undefined): boolean {
+    return proto3.util.equals(TestIngesterRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.TestIngesterResponse
+ */
+export class TestIngesterResponse extends Message<TestIngesterResponse> {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success = false;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message = "";
+
+  constructor(data?: PartialMessage<TestIngesterResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.TestIngesterResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "success", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 2, name: "message", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TestIngesterResponse {
+    return new TestIngesterResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TestIngesterResponse {
+    return new TestIngesterResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TestIngesterResponse {
+    return new TestIngesterResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: TestIngesterResponse | PlainMessage<TestIngesterResponse> | undefined, b: TestIngesterResponse | PlainMessage<TestIngesterResponse> | undefined): boolean {
+    return proto3.util.equals(TestIngesterResponse, a, b);
+  }
+}
+

@@ -114,6 +114,9 @@ const (
 	// ConfigServiceDecommissionStoreProcedure is the fully-qualified name of the ConfigService's
 	// DecommissionStore RPC.
 	ConfigServiceDecommissionStoreProcedure = "/gastrolog.v1.ConfigService/DecommissionStore"
+	// ConfigServiceTestIngesterProcedure is the fully-qualified name of the ConfigService's
+	// TestIngester RPC.
+	ConfigServiceTestIngesterProcedure = "/gastrolog.v1.ConfigService/TestIngester"
 )
 
 // ConfigServiceClient is a client for the gastrolog.v1.ConfigService service.
@@ -174,6 +177,8 @@ type ConfigServiceClient interface {
 	RenameStore(context.Context, *connect.Request[v1.RenameStoreRequest]) (*connect.Response[v1.RenameStoreResponse], error)
 	// DecommissionStore disables ingestion and force-deletes a store.
 	DecommissionStore(context.Context, *connect.Request[v1.DecommissionStoreRequest]) (*connect.Response[v1.DecommissionStoreResponse], error)
+	// TestIngester tests connectivity for an ingester configuration without saving it.
+	TestIngester(context.Context, *connect.Request[v1.TestIngesterRequest]) (*connect.Response[v1.TestIngesterResponse], error)
 }
 
 // NewConfigServiceClient constructs a client for the gastrolog.v1.ConfigService service. By
@@ -355,6 +360,12 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("DecommissionStore")),
 			connect.WithClientOptions(opts...),
 		),
+		testIngester: connect.NewClient[v1.TestIngesterRequest, v1.TestIngesterResponse](
+			httpClient,
+			baseURL+ConfigServiceTestIngesterProcedure,
+			connect.WithSchema(configServiceMethods.ByName("TestIngester")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -388,6 +399,7 @@ type configServiceClient struct {
 	resumeStore           *connect.Client[v1.ResumeStoreRequest, v1.ResumeStoreResponse]
 	renameStore           *connect.Client[v1.RenameStoreRequest, v1.RenameStoreResponse]
 	decommissionStore     *connect.Client[v1.DecommissionStoreRequest, v1.DecommissionStoreResponse]
+	testIngester          *connect.Client[v1.TestIngesterRequest, v1.TestIngesterResponse]
 }
 
 // GetConfig calls gastrolog.v1.ConfigService.GetConfig.
@@ -530,6 +542,11 @@ func (c *configServiceClient) DecommissionStore(ctx context.Context, req *connec
 	return c.decommissionStore.CallUnary(ctx, req)
 }
 
+// TestIngester calls gastrolog.v1.ConfigService.TestIngester.
+func (c *configServiceClient) TestIngester(ctx context.Context, req *connect.Request[v1.TestIngesterRequest]) (*connect.Response[v1.TestIngesterResponse], error) {
+	return c.testIngester.CallUnary(ctx, req)
+}
+
 // ConfigServiceHandler is an implementation of the gastrolog.v1.ConfigService service.
 type ConfigServiceHandler interface {
 	// GetConfig returns the current configuration.
@@ -588,6 +605,8 @@ type ConfigServiceHandler interface {
 	RenameStore(context.Context, *connect.Request[v1.RenameStoreRequest]) (*connect.Response[v1.RenameStoreResponse], error)
 	// DecommissionStore disables ingestion and force-deletes a store.
 	DecommissionStore(context.Context, *connect.Request[v1.DecommissionStoreRequest]) (*connect.Response[v1.DecommissionStoreResponse], error)
+	// TestIngester tests connectivity for an ingester configuration without saving it.
+	TestIngester(context.Context, *connect.Request[v1.TestIngesterRequest]) (*connect.Response[v1.TestIngesterResponse], error)
 }
 
 // NewConfigServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -765,6 +784,12 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("DecommissionStore")),
 		connect.WithHandlerOptions(opts...),
 	)
+	configServiceTestIngesterHandler := connect.NewUnaryHandler(
+		ConfigServiceTestIngesterProcedure,
+		svc.TestIngester,
+		connect.WithSchema(configServiceMethods.ByName("TestIngester")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.ConfigService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ConfigServiceGetConfigProcedure:
@@ -823,6 +848,8 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServiceRenameStoreHandler.ServeHTTP(w, r)
 		case ConfigServiceDecommissionStoreProcedure:
 			configServiceDecommissionStoreHandler.ServeHTTP(w, r)
+		case ConfigServiceTestIngesterProcedure:
+			configServiceTestIngesterHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -942,4 +969,8 @@ func (UnimplementedConfigServiceHandler) RenameStore(context.Context, *connect.R
 
 func (UnimplementedConfigServiceHandler) DecommissionStore(context.Context, *connect.Request[v1.DecommissionStoreRequest]) (*connect.Response[v1.DecommissionStoreResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.DecommissionStore is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) TestIngester(context.Context, *connect.Request[v1.TestIngesterRequest]) (*connect.Response[v1.TestIngesterResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.TestIngester is not implemented"))
 }

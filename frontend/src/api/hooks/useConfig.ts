@@ -329,6 +329,18 @@ export function useDecommissionStore() {
   });
 }
 
+export function useTestIngester() {
+  return useMutation({
+    mutationFn: async (args: { type: string; params: Record<string, string> }) => {
+      const response = await configClient.testIngester({
+        type: args.type,
+        params: args.params,
+      });
+      return response;
+    },
+  });
+}
+
 export function useDeleteCertificate() {
   const qc = useQueryClient();
   return useMutation({

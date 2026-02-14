@@ -89,6 +89,9 @@ service ConfigService {
 
   // DecommissionStore disables ingestion and force-deletes a store.
   rpc DecommissionStore(DecommissionStoreRequest) returns (DecommissionStoreResponse);
+
+  // TestIngester tests connectivity for an ingester configuration without saving it.
+  rpc TestIngester(TestIngesterRequest) returns (TestIngesterResponse);
 }
 
 message GetConfigRequest {}
@@ -344,4 +347,14 @@ message DecommissionStoreRequest {
 
 message DecommissionStoreResponse {
   int64 chunks_removed = 1;
+}
+
+message TestIngesterRequest {
+  string type = 1;
+  map<string, string> params = 2;
+}
+
+message TestIngesterResponse {
+  bool success = 1;
+  string message = 2;
 }
