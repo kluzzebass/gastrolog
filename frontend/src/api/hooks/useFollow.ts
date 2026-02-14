@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from "react";
+import { ConnectError, Code } from "@connectrpc/connect";
 import { queryClient, Query, Record } from "../client";
 
 const MAX_RECORDS = 5000;
@@ -110,6 +111,19 @@ export function useFollow() {
         scheduleReconnect(queryStr, 0);
       } catch (err) {
         if (isAbortError(err)) {
+          return;
+        }
+        // Don't reconnect on auth errors — the global interceptor will
+        // redirect to login; we just need to stop the reconnect loop.
+        if (
+          err instanceof ConnectError &&
+          err.code === Code.Unauthenticated
+        ) {
+          setState((prev) => ({
+            ...prev,
+            error: err as ConnectError,
+            reconnecting: false,
+          }));
           return;
         }
         // Schedule reconnect with backoff.

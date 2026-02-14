@@ -16,8 +16,7 @@ import {
 } from "./api/hooks";
 import { useStores, useStats, useLogout, useCurrentUser } from "./api/hooks";
 import { usePreferences, usePutPreferences } from "./api/hooks/usePreferences";
-import { ConnectError, Code } from "@connectrpc/connect";
-import { Record as ProtoRecord, setToken } from "./api/client";
+import { Record as ProtoRecord } from "./api/client";
 
 import { timeRangeMs, aggregateFields, sameRecord } from "./utils";
 import type { Theme } from "./utils";
@@ -249,30 +248,13 @@ function AppContent() {
   const [showChangePassword, setShowChangePassword] = useState(false);
 
   // Push errors from hooks to the toast system.
-  // If the error is Unauthenticated, clear token and redirect to login.
   useEffect(() => {
     if (searchError) {
-      if (
-        searchError instanceof ConnectError &&
-        searchError.code === Code.Unauthenticated
-      ) {
-        setToken(null);
-        navigate({ to: "/login" });
-        return;
-      }
       addToast(searchError.message, "error");
     }
   }, [searchError]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (followError) {
-      if (
-        followError instanceof ConnectError &&
-        followError.code === Code.Unauthenticated
-      ) {
-        setToken(null);
-        navigate({ to: "/login" });
-        return;
-      }
       addToast(followError.message, "error");
     }
   }, [followError]); // eslint-disable-line react-hooks/exhaustive-deps
