@@ -41,6 +41,7 @@ import (
 	ingesthttp "gastrolog/internal/ingester/http"
 	ingestrelp "gastrolog/internal/ingester/relp"
 	ingestsyslog "gastrolog/internal/ingester/syslog"
+	ingestdocker "gastrolog/internal/ingester/docker"
 	ingesttail "gastrolog/internal/ingester/tail"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
@@ -118,16 +119,14 @@ func run(ctx context.Context, logger *slog.Logger, datadirFlag, configType, serv
 		return err
 	}
 
-	// Determine dataDir for bootstrap: persistent stores get the real dir,
-	// memory gets empty string (in-memory default store).
-	bootstrapDataDir := ""
+	dataDir := ""
 	if configType != "memory" {
-		bootstrapDataDir = dd.Root()
+		dataDir = dd.Root()
 	}
 
 	if cfg == nil {
 		logger.Info("no config found, bootstrapping default configuration")
-		if err := config.Bootstrap(ctx, cfgStore, bootstrapDataDir); err != nil {
+		if err := config.Bootstrap(ctx, cfgStore); err != nil {
 			return fmt.Errorf("bootstrap config: %w", err)
 		}
 		cfg, err = cfgStore.Load(ctx)
@@ -160,7 +159,7 @@ func run(ctx context.Context, logger *slog.Logger, datadirFlag, configType, serv
 	orch.RegisterDigester(digesttimestamp.New())
 
 	// Apply configuration with factories.
-	factories := buildFactories(logger, bootstrapDataDir)
+	factories := buildFactories(logger, dataDir, cfgStore)
 	if err := orch.ApplyConfig(cfg, factories); err != nil {
 		return err
 	}
@@ -255,10 +254,11 @@ func run(ctx context.Context, logger *slog.Logger, datadirFlag, configType, serv
 
 // buildFactories creates the factory maps for all supported component types.
 // The logger is passed to component factories for structured logging.
-func buildFactories(logger *slog.Logger, dataDir string) orchestrator.Factories {
+func buildFactories(logger *slog.Logger, dataDir string, cfgStore config.Store) orchestrator.Factories {
 	return orchestrator.Factories{
 		Ingesters: map[string]orchestrator.IngesterFactory{
 			"chatterbox": chatterbox.NewIngester,
+			"docker":     ingestdocker.NewFactory(cfgStore),
 			"http":       ingesthttp.NewFactory(),
 			"relp":       ingestrelp.NewFactory(),
 			"syslog":     ingestsyslog.NewFactory(),
