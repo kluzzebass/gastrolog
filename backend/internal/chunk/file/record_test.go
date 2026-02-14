@@ -16,9 +16,9 @@ import (
 
 func TestIdxEntryEncodeDecode(t *testing.T) {
 	entry := IdxEntry{
-		SourceTS:   time.UnixMicro(1234567890123455),
-		IngestTS:   time.UnixMicro(1234567890123456),
-		WriteTS:    time.UnixMicro(1234567890123457),
+		SourceTS:   time.Unix(0, 1234567890123455000),
+		IngestTS:   time.Unix(0, 1234567890123456000),
+		WriteTS:    time.Unix(0, 1234567890123457000),
 		RawOffset:  12345,
 		RawSize:    67890,
 		AttrOffset: 11111,
@@ -26,18 +26,18 @@ func TestIdxEntryEncodeDecode(t *testing.T) {
 	}
 
 	buf := make([]byte, IdxEntrySize)
-	EncodeIdxEntry(entry, buf, false)
+	EncodeIdxEntry(entry, buf)
 
-	decoded := DecodeIdxEntry(buf, false)
+	decoded := DecodeIdxEntry(buf)
 
-	if decoded.SourceTS.UnixMicro() != entry.SourceTS.UnixMicro() {
-		t.Fatalf("SourceTS: want %d, got %d", entry.SourceTS.UnixMicro(), decoded.SourceTS.UnixMicro())
+	if decoded.SourceTS.UnixNano() != entry.SourceTS.UnixNano() {
+		t.Fatalf("SourceTS: want %d, got %d", entry.SourceTS.UnixNano(), decoded.SourceTS.UnixNano())
 	}
-	if decoded.IngestTS.UnixMicro() != entry.IngestTS.UnixMicro() {
-		t.Fatalf("IngestTS: want %d, got %d", entry.IngestTS.UnixMicro(), decoded.IngestTS.UnixMicro())
+	if decoded.IngestTS.UnixNano() != entry.IngestTS.UnixNano() {
+		t.Fatalf("IngestTS: want %d, got %d", entry.IngestTS.UnixNano(), decoded.IngestTS.UnixNano())
 	}
-	if decoded.WriteTS.UnixMicro() != entry.WriteTS.UnixMicro() {
-		t.Fatalf("WriteTS: want %d, got %d", entry.WriteTS.UnixMicro(), decoded.WriteTS.UnixMicro())
+	if decoded.WriteTS.UnixNano() != entry.WriteTS.UnixNano() {
+		t.Fatalf("WriteTS: want %d, got %d", entry.WriteTS.UnixNano(), decoded.WriteTS.UnixNano())
 	}
 	if decoded.RawOffset != entry.RawOffset {
 		t.Fatalf("RawOffset: want %d, got %d", entry.RawOffset, decoded.RawOffset)
@@ -54,11 +54,12 @@ func TestIdxEntryEncodeDecode(t *testing.T) {
 }
 
 func TestIdxEntryBinaryFormat(t *testing.T) {
-	// Test exact binary layout for a known entry
+	// Test exact binary layout for a known entry.
+	// Values are Unix nanoseconds, so we use time.Unix(0, v).
 	entry := IdxEntry{
-		SourceTS:   time.UnixMicro(0x00d00d00d00d00d0),
-		IngestTS:   time.UnixMicro(0x0102030405060708),
-		WriteTS:    time.UnixMicro(0x1112131415161718),
+		SourceTS:   time.Unix(0, 0x00d00d00d00d00d0),
+		IngestTS:   time.Unix(0, 0x0102030405060708),
+		WriteTS:    time.Unix(0, 0x1112131415161718),
 		RawOffset:  0x21222324,
 		RawSize:    0x31323334,
 		AttrOffset: 0x41424344,
@@ -66,7 +67,7 @@ func TestIdxEntryBinaryFormat(t *testing.T) {
 	}
 
 	buf := make([]byte, IdxEntrySize)
-	EncodeIdxEntry(entry, buf, false)
+	EncodeIdxEntry(entry, buf)
 
 	// Verify each field at its expected offset
 	// SourceTS at offset 0, 8 bytes
@@ -133,9 +134,9 @@ func TestIdxEntryEncodeDecodeNano(t *testing.T) {
 	}
 
 	buf := make([]byte, IdxEntrySize)
-	EncodeIdxEntry(entry, buf, true)
+	EncodeIdxEntry(entry, buf)
 
-	decoded := DecodeIdxEntry(buf, true)
+	decoded := DecodeIdxEntry(buf)
 
 	if decoded.SourceTS.UnixNano() != entry.SourceTS.UnixNano() {
 		t.Fatalf("SourceTS: want %d, got %d", entry.SourceTS.UnixNano(), decoded.SourceTS.UnixNano())
@@ -152,19 +153,19 @@ func TestIdxEntryZeroValues(t *testing.T) {
 	entry := IdxEntry{}
 
 	buf := make([]byte, IdxEntrySize)
-	EncodeIdxEntry(entry, buf, false)
+	EncodeIdxEntry(entry, buf)
 
-	decoded := DecodeIdxEntry(buf, false)
+	decoded := DecodeIdxEntry(buf)
 
 	// Zero time.Time in Go is year 1, not Unix epoch.
-	// The encoding stores UnixMicro(), so we verify round-trip correctness.
-	if !decoded.SourceTS.Equal(entry.SourceTS) {
+	// The encoding stores UnixNano(), so we verify round-trip correctness.
+	if decoded.SourceTS.UnixNano() != entry.SourceTS.UnixNano() {
 		t.Fatalf("Zero SourceTS round-trip failed: want %v, got %v", entry.SourceTS, decoded.SourceTS)
 	}
-	if !decoded.IngestTS.Equal(entry.IngestTS) {
+	if decoded.IngestTS.UnixNano() != entry.IngestTS.UnixNano() {
 		t.Fatalf("Zero IngestTS round-trip failed: want %v, got %v", entry.IngestTS, decoded.IngestTS)
 	}
-	if !decoded.WriteTS.Equal(entry.WriteTS) {
+	if decoded.WriteTS.UnixNano() != entry.WriteTS.UnixNano() {
 		t.Fatalf("Zero WriteTS round-trip failed: want %v, got %v", entry.WriteTS, decoded.WriteTS)
 	}
 	if decoded.RawOffset != 0 {
@@ -183,9 +184,9 @@ func TestIdxEntryZeroValues(t *testing.T) {
 
 func TestIdxEntryMaxValues(t *testing.T) {
 	entry := IdxEntry{
-		SourceTS:   time.UnixMicro(1<<63 - 1), // max positive int64
-		IngestTS:   time.UnixMicro(1<<63 - 1),
-		WriteTS:    time.UnixMicro(1<<63 - 1),
+		SourceTS:   time.Unix(0, 1<<63-1), // max positive int64
+		IngestTS:   time.Unix(0, 1<<63-1),
+		WriteTS:    time.Unix(0, 1<<63-1),
 		RawOffset:  0xFFFFFFFF, // max uint32
 		RawSize:    0xFFFFFFFF,
 		AttrOffset: 0xFFFFFFFF,
@@ -193,9 +194,9 @@ func TestIdxEntryMaxValues(t *testing.T) {
 	}
 
 	buf := make([]byte, IdxEntrySize)
-	EncodeIdxEntry(entry, buf, false)
+	EncodeIdxEntry(entry, buf)
 
-	decoded := DecodeIdxEntry(buf, false)
+	decoded := DecodeIdxEntry(buf)
 
 	if decoded.RawOffset != 0xFFFFFFFF {
 		t.Fatalf("Max RawOffset: want %d, got %d", uint32(0xFFFFFFFF), decoded.RawOffset)
@@ -368,24 +369,24 @@ func TestMaxSizeConstants(t *testing.T) {
 func TestMultipleEntriesRoundTrip(t *testing.T) {
 	entries := []IdxEntry{
 		{
-			IngestTS:   time.UnixMicro(1000),
-			WriteTS:    time.UnixMicro(1001),
+			IngestTS:   time.Unix(0, 1000),
+			WriteTS:    time.Unix(0, 1001),
 			RawOffset:  0,
 			RawSize:    100,
 			AttrOffset: 0,
 			AttrSize:   10,
 		},
 		{
-			IngestTS:   time.UnixMicro(2000),
-			WriteTS:    time.UnixMicro(2001),
+			IngestTS:   time.Unix(0, 2000),
+			WriteTS:    time.Unix(0, 2001),
 			RawOffset:  100,
 			RawSize:    200,
 			AttrOffset: 10,
 			AttrSize:   20,
 		},
 		{
-			IngestTS:   time.UnixMicro(3000),
-			WriteTS:    time.UnixMicro(3001),
+			IngestTS:   time.Unix(0, 3000),
+			WriteTS:    time.Unix(0, 3001),
 			RawOffset:  300,
 			RawSize:    300,
 			AttrOffset: 30,
@@ -396,17 +397,17 @@ func TestMultipleEntriesRoundTrip(t *testing.T) {
 	// Encode all entries into a buffer
 	buf := make([]byte, len(entries)*IdxEntrySize)
 	for i, entry := range entries {
-		EncodeIdxEntry(entry, buf[i*IdxEntrySize:], false)
+		EncodeIdxEntry(entry, buf[i*IdxEntrySize:])
 	}
 
 	// Decode and verify
 	for i, expected := range entries {
-		decoded := DecodeIdxEntry(buf[i*IdxEntrySize:], false)
+		decoded := DecodeIdxEntry(buf[i*IdxEntrySize:])
 
-		if decoded.IngestTS.UnixMicro() != expected.IngestTS.UnixMicro() {
+		if decoded.IngestTS.UnixNano() != expected.IngestTS.UnixNano() {
 			t.Fatalf("Entry %d IngestTS mismatch", i)
 		}
-		if decoded.WriteTS.UnixMicro() != expected.WriteTS.UnixMicro() {
+		if decoded.WriteTS.UnixNano() != expected.WriteTS.UnixNano() {
 			t.Fatalf("Entry %d WriteTS mismatch", i)
 		}
 		if decoded.RawOffset != expected.RawOffset {
@@ -428,13 +429,13 @@ func TestMultipleEntriesRoundTrip(t *testing.T) {
 // Timestamp Precision Tests
 // =============================================================================
 
-func TestTimestampMicrosecondPrecision(t *testing.T) {
-	// Test that microsecond precision is preserved
+func TestTimestampNanosecondPrecision(t *testing.T) {
+	// Test that nanosecond precision is preserved
 	testTimes := []time.Time{
-		time.Date(2025, 1, 15, 10, 30, 45, 123456000, time.UTC), // 123456 microseconds
-		time.Date(2025, 1, 15, 10, 30, 45, 999999000, time.UTC), // 999999 microseconds
-		time.Date(2025, 1, 15, 10, 30, 45, 1000, time.UTC),      // 1 microsecond
-		time.Date(2025, 1, 15, 10, 30, 45, 0, time.UTC),         // 0 microseconds
+		time.Date(2025, 1, 15, 10, 30, 45, 123456789, time.UTC),
+		time.Date(2025, 1, 15, 10, 30, 45, 999999999, time.UTC),
+		time.Date(2025, 1, 15, 10, 30, 45, 1, time.UTC),
+		time.Date(2025, 1, 15, 10, 30, 45, 0, time.UTC),
 	}
 
 	for _, ts := range testTimes {
@@ -444,20 +445,17 @@ func TestTimestampMicrosecondPrecision(t *testing.T) {
 		}
 
 		buf := make([]byte, IdxEntrySize)
-		EncodeIdxEntry(entry, buf, false)
-		decoded := DecodeIdxEntry(buf, false)
+		EncodeIdxEntry(entry, buf)
+		decoded := DecodeIdxEntry(buf)
 
-		// UnixMicro truncates nanoseconds to microseconds
-		expectedMicro := ts.UnixMicro()
-
-		if decoded.IngestTS.UnixMicro() != expectedMicro {
-			t.Fatalf("Timestamp %v: want %d micros, got %d", ts, expectedMicro, decoded.IngestTS.UnixMicro())
+		if decoded.IngestTS.UnixNano() != ts.UnixNano() {
+			t.Fatalf("Timestamp %v: want %d nanos, got %d", ts, ts.UnixNano(), decoded.IngestTS.UnixNano())
 		}
 	}
 }
 
 func TestNegativeTimestamp(t *testing.T) {
-	// Test timestamps before Unix epoch (negative microseconds)
+	// Test timestamps before Unix epoch (negative nanoseconds)
 	ts := time.Date(1960, 1, 1, 0, 0, 0, 0, time.UTC)
 	entry := IdxEntry{
 		IngestTS: ts,
@@ -465,11 +463,11 @@ func TestNegativeTimestamp(t *testing.T) {
 	}
 
 	buf := make([]byte, IdxEntrySize)
-	EncodeIdxEntry(entry, buf, false)
-	decoded := DecodeIdxEntry(buf, false)
+	EncodeIdxEntry(entry, buf)
+	decoded := DecodeIdxEntry(buf)
 
-	if decoded.IngestTS.UnixMicro() != ts.UnixMicro() {
-		t.Fatalf("Negative timestamp: want %d, got %d", ts.UnixMicro(), decoded.IngestTS.UnixMicro())
+	if decoded.IngestTS.UnixNano() != ts.UnixNano() {
+		t.Fatalf("Negative timestamp: want %d, got %d", ts.UnixNano(), decoded.IngestTS.UnixNano())
 	}
 }
 
@@ -479,8 +477,8 @@ func TestNegativeTimestamp(t *testing.T) {
 
 func BenchmarkEncodeIdxEntry(b *testing.B) {
 	entry := IdxEntry{
-		IngestTS:   time.UnixMicro(1234567890123456),
-		WriteTS:    time.UnixMicro(1234567890123457),
+		IngestTS:   time.Unix(0, 1234567890123456000),
+		WriteTS:    time.Unix(0, 1234567890123457000),
 		RawOffset:  12345,
 		RawSize:    67890,
 		AttrOffset: 11111,
@@ -490,25 +488,25 @@ func BenchmarkEncodeIdxEntry(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		EncodeIdxEntry(entry, buf, false)
+		EncodeIdxEntry(entry, buf)
 	}
 }
 
 func BenchmarkDecodeIdxEntry(b *testing.B) {
 	entry := IdxEntry{
-		IngestTS:   time.UnixMicro(1234567890123456),
-		WriteTS:    time.UnixMicro(1234567890123457),
+		IngestTS:   time.Unix(0, 1234567890123456000),
+		WriteTS:    time.Unix(0, 1234567890123457000),
 		RawOffset:  12345,
 		RawSize:    67890,
 		AttrOffset: 11111,
 		AttrSize:   222,
 	}
 	buf := make([]byte, IdxEntrySize)
-	EncodeIdxEntry(entry, buf, false)
+	EncodeIdxEntry(entry, buf)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = DecodeIdxEntry(buf, false)
+		_ = DecodeIdxEntry(buf)
 	}
 }
 
@@ -522,10 +520,10 @@ func FuzzIdxEntryRoundTrip(f *testing.F) {
 	f.Add(int64(1234567890), int64(1234567891), uint32(1000), uint32(500), uint32(100), uint16(50))
 	f.Add(int64(-1000000), int64(-999999), uint32(0xFFFFFFFF), uint32(0xFFFFFFFF), uint32(0xFFFFFFFF), uint16(0xFFFF))
 
-	f.Fuzz(func(t *testing.T, ingestMicro, writeMicro int64, rawOff, rawSize, attrOff uint32, attrSize uint16) {
+	f.Fuzz(func(t *testing.T, ingestNano, writeNano int64, rawOff, rawSize, attrOff uint32, attrSize uint16) {
 		entry := IdxEntry{
-			IngestTS:   time.UnixMicro(ingestMicro),
-			WriteTS:    time.UnixMicro(writeMicro),
+			IngestTS:   time.Unix(0, ingestNano),
+			WriteTS:    time.Unix(0, writeNano),
 			RawOffset:  rawOff,
 			RawSize:    rawSize,
 			AttrOffset: attrOff,
@@ -533,13 +531,13 @@ func FuzzIdxEntryRoundTrip(f *testing.F) {
 		}
 
 		buf := make([]byte, IdxEntrySize)
-		EncodeIdxEntry(entry, buf, false)
-		decoded := DecodeIdxEntry(buf, false)
+		EncodeIdxEntry(entry, buf)
+		decoded := DecodeIdxEntry(buf)
 
-		if decoded.IngestTS.UnixMicro() != ingestMicro {
+		if decoded.IngestTS.UnixNano() != ingestNano {
 			t.Fatalf("IngestTS mismatch")
 		}
-		if decoded.WriteTS.UnixMicro() != writeMicro {
+		if decoded.WriteTS.UnixNano() != writeNano {
 			t.Fatalf("WriteTS mismatch")
 		}
 		if decoded.RawOffset != rawOff {
@@ -658,34 +656,34 @@ func TestEncodeIdxEntryBufferReuse(t *testing.T) {
 	buf := make([]byte, IdxEntrySize)
 
 	entry1 := IdxEntry{
-		IngestTS:   time.UnixMicro(1000),
+		IngestTS:   time.Unix(0, 1000),
 		RawOffset:  100,
 		AttrOffset: 10,
 		AttrSize:   5,
 	}
-	EncodeIdxEntry(entry1, buf, false)
-	decoded1 := DecodeIdxEntry(buf, false)
+	EncodeIdxEntry(entry1, buf)
+	decoded1 := DecodeIdxEntry(buf)
 
 	entry2 := IdxEntry{
-		IngestTS:   time.UnixMicro(2000),
+		IngestTS:   time.Unix(0, 2000),
 		RawOffset:  200,
 		AttrOffset: 20,
 		AttrSize:   10,
 	}
-	EncodeIdxEntry(entry2, buf, false)
-	decoded2 := DecodeIdxEntry(buf, false)
+	EncodeIdxEntry(entry2, buf)
+	decoded2 := DecodeIdxEntry(buf)
 
 	// First entry should have been overwritten
-	if decoded2.IngestTS.UnixMicro() != 2000 {
-		t.Fatalf("Buffer reuse: IngestTS should be 2000, got %d", decoded2.IngestTS.UnixMicro())
+	if decoded2.IngestTS.UnixNano() != 2000 {
+		t.Fatalf("Buffer reuse: IngestTS should be 2000, got %d", decoded2.IngestTS.UnixNano())
 	}
 	if decoded2.AttrOffset != 20 {
 		t.Fatalf("Buffer reuse: AttrOffset should be 20, got %d", decoded2.AttrOffset)
 	}
 
 	// decoded1 should still have old values (it's a copy of the values)
-	if decoded1.IngestTS.UnixMicro() != 1000 {
-		t.Fatalf("decoded1 IngestTS should still be 1000, got %d", decoded1.IngestTS.UnixMicro())
+	if decoded1.IngestTS.UnixNano() != 1000 {
+		t.Fatalf("decoded1 IngestTS should still be 1000, got %d", decoded1.IngestTS.UnixNano())
 	}
 }
 
@@ -697,22 +695,22 @@ func TestDecodeIdxEntryFromSlice(t *testing.T) {
 
 	for i := 0; i < numEntries; i++ {
 		entry := IdxEntry{
-			IngestTS:   time.UnixMicro(int64(i * 1000)),
-			WriteTS:    time.UnixMicro(int64(i*1000 + 1)),
+			IngestTS:   time.Unix(0, int64(i*1000)),
+			WriteTS:    time.Unix(0, int64(i*1000+1)),
 			RawOffset:  uint32(i * 100),
 			RawSize:    uint32(i * 10),
 			AttrOffset: uint32(i * 50),
 			AttrSize:   uint16(i * 5),
 		}
-		EncodeIdxEntry(entry, buf[i*IdxEntrySize:], false)
+		EncodeIdxEntry(entry, buf[i*IdxEntrySize:])
 	}
 
 	// Decode each entry from its slice
 	for i := 0; i < numEntries; i++ {
-		decoded := DecodeIdxEntry(buf[i*IdxEntrySize:], false)
+		decoded := DecodeIdxEntry(buf[i*IdxEntrySize:])
 
-		if decoded.IngestTS.UnixMicro() != int64(i*1000) {
-			t.Fatalf("Entry %d: IngestTS want %d, got %d", i, i*1000, decoded.IngestTS.UnixMicro())
+		if decoded.IngestTS.UnixNano() != int64(i*1000) {
+			t.Fatalf("Entry %d: IngestTS want %d, got %d", i, i*1000, decoded.IngestTS.UnixNano())
 		}
 		if decoded.RawOffset != uint32(i*100) {
 			t.Fatalf("Entry %d: RawOffset want %d, got %d", i, i*100, decoded.RawOffset)
@@ -729,8 +727,8 @@ func TestDecodeIdxEntryFromSlice(t *testing.T) {
 
 func TestDecodeIdxEntryNoBufferReference(t *testing.T) {
 	entry := IdxEntry{
-		IngestTS:   time.UnixMicro(12345),
-		WriteTS:    time.UnixMicro(12346),
+		IngestTS:   time.Unix(0, 12345),
+		WriteTS:    time.Unix(0, 12346),
 		RawOffset:  1000,
 		RawSize:    500,
 		AttrOffset: 100,
@@ -738,9 +736,9 @@ func TestDecodeIdxEntryNoBufferReference(t *testing.T) {
 	}
 
 	buf := make([]byte, IdxEntrySize)
-	EncodeIdxEntry(entry, buf, false)
+	EncodeIdxEntry(entry, buf)
 
-	decoded := DecodeIdxEntry(buf, false)
+	decoded := DecodeIdxEntry(buf)
 
 	// Zero out the buffer
 	for i := range buf {
@@ -748,7 +746,7 @@ func TestDecodeIdxEntryNoBufferReference(t *testing.T) {
 	}
 
 	// Decoded entry should still have correct values (no reference to buf)
-	if decoded.IngestTS.UnixMicro() != 12345 {
+	if decoded.IngestTS.UnixNano() != 12345 {
 		t.Fatal("Decoded entry references buffer for IngestTS")
 	}
 	if decoded.RawOffset != 1000 {

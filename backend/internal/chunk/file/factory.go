@@ -13,22 +13,15 @@ import (
 
 // Factory parameter keys.
 const (
-	ParamDir                = "dir"
-	ParamMaxChunkBytes      = "maxChunkBytes"
-	ParamMaxChunkAge        = "maxChunkAge"
-	ParamFileMode           = "fileMode"
-	ParamTimestampPrecision = "timestampPrecision"
+	ParamDir           = "dir"
+	ParamMaxChunkBytes = "maxChunkBytes"
+	ParamMaxChunkAge   = "maxChunkAge"
+	ParamFileMode      = "fileMode"
 
 	// ParamExpectExisting is injected by the orchestrator when loading stores
 	// from config. It tells the chunk manager to warn if the data directory
 	// is missing (potential data loss). Not persisted in config.
 	ParamExpectExisting = "_expect_existing"
-)
-
-// Timestamp precision values.
-const (
-	TimestampPrecisionMicro = "micro"
-	TimestampPrecisionNano  = "nano"
 )
 
 // Default values.
@@ -54,18 +47,6 @@ func NewFactory() chunk.ManagerFactory {
 			FileMode:       DefaultFileMode,
 			Logger:         logger,
 			ExpectExisting: params[ParamExpectExisting] == "true",
-		}
-
-		// Timestamp precision: micro (default) or nano.
-		if v, ok := params[ParamTimestampPrecision]; ok {
-			switch v {
-			case TimestampPrecisionNano:
-				cfg.UseSmallTime = true
-			case TimestampPrecisionMicro, "":
-				cfg.UseSmallTime = false
-			default:
-				return nil, fmt.Errorf("invalid %s: want %q or %q", ParamTimestampPrecision, TimestampPrecisionMicro, TimestampPrecisionNano)
-			}
 		}
 
 		// Build rotation policy from params

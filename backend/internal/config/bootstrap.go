@@ -15,6 +15,7 @@ func DefaultConfig() *Config {
 	defaultStore := StoreConfig{
 		ID:        "default",
 		Type:      "memory",
+		Enabled:   true,
 		Filter:    StringPtr("catch-all"),
 		Policy:    StringPtr("default"),
 		Retention: StringPtr("default"),

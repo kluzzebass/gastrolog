@@ -37,10 +37,6 @@ type Config struct {
 	FileMode os.FileMode
 	Now      func() time.Time
 
-	// UseSmallTime causes idx.log entries to use Unix nanoseconds instead of microseconds.
-	// Chunks created with this config set FlagSmallTime in the idx.log header.
-	UseSmallTime bool
-
 	// RotationPolicy determines when to rotate chunks.
 	// If nil, a default policy with 4GB hard limits is used.
 	// Use chunk.NewCompositePolicy to combine multiple policies.
@@ -263,7 +259,7 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 		AttrSize:   uint16(attrLen),
 	}
 	var entryBuf [IdxEntrySize]byte
-	EncodeIdxEntry(entry, entryBuf[:], m.cfg.UseSmallTime)
+	EncodeIdxEntry(entry, entryBuf[:])
 	n, err = m.active.idxFile.Write(entryBuf[:])
 	if err != nil {
 		return chunk.ChunkID{}, 0, err
@@ -532,14 +528,12 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 		closeAll()
 		return err
 	}
-	idxHeader, err := format.DecodeAndValidate(headerBuf[:format.HeaderSize], format.TypeIdxLog, IdxLogVersion)
-	if err != nil {
+	if _, err := format.DecodeAndValidate(headerBuf[:format.HeaderSize], format.TypeIdxLog, IdxLogVersion); err != nil {
 		closeAll()
 		return err
 	}
-	useNano := idxHeader.Flags&format.FlagSmallTime != 0
-	createdAtMicros := binary.LittleEndian.Uint64(headerBuf[format.HeaderSize:])
-	createdAt := time.UnixMicro(int64(createdAtMicros))
+	createdAtNanos := binary.LittleEndian.Uint64(headerBuf[format.HeaderSize:])
+	createdAt := time.Unix(0, int64(createdAtNanos))
 
 	// Compute record count from idx.log file size.
 	idxInfo, err := idxFile.Stat()
@@ -560,7 +554,7 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 			closeAll()
 			return err
 		}
-		lastEntry := DecodeIdxEntry(entryBuf[:], useNano)
+		lastEntry := DecodeIdxEntry(entryBuf[:])
 		expectedRawSize = int64(format.HeaderSize) + int64(lastEntry.RawOffset) + int64(lastEntry.RawSize)
 		expectedAttrSize = int64(format.HeaderSize) + int64(lastEntry.AttrOffset) + int64(lastEntry.AttrSize)
 	} else {
@@ -663,8 +657,7 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 	if _, err := io.ReadFull(idxFile, entryBuf[:]); err != nil {
 		return nil, err
 	}
-	useNano := header.Flags&format.FlagSmallTime != 0
-	firstEntry := DecodeIdxEntry(entryBuf[:], useNano)
+	firstEntry := DecodeIdxEntry(entryBuf[:])
 	meta.startTS = firstEntry.WriteTS
 
 	// Read last entry for endTS and byte totals.
@@ -675,7 +668,7 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 	if _, err := io.ReadFull(idxFile, entryBuf[:]); err != nil {
 		return nil, err
 	}
-	lastEntry := DecodeIdxEntry(entryBuf[:], useNano)
+	lastEntry := DecodeIdxEntry(entryBuf[:])
 	meta.endTS = lastEntry.WriteTS
 
 	// IngestTS and SourceTS bounds from first and last (approximation for sealed chunks).
@@ -797,17 +790,13 @@ func (m *Manager) createIdxFile(id chunk.ChunkID, createdAt time.Time) (*os.File
 
 	// Write header (4 bytes) + createdAt timestamp (8 bytes).
 	var buf [IdxHeaderSize]byte
-	flags := byte(0)
-	if m.cfg.UseSmallTime {
-		flags |= format.FlagSmallTime
-	}
 	header := format.Header{
 		Type:    format.TypeIdxLog,
 		Version: IdxLogVersion,
-		Flags:   flags,
+		Flags:   0,
 	}
 	header.EncodeInto(buf[:])
-	binary.LittleEndian.PutUint64(buf[format.HeaderSize:], uint64(createdAt.UnixMicro()))
+	binary.LittleEndian.PutUint64(buf[format.HeaderSize:], uint64(createdAt.UnixNano()))
 
 	if _, err := file.Write(buf[:]); err != nil {
 		file.Close()
@@ -986,17 +975,14 @@ func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, boo
 	}
 	defer idxFile.Close()
 
-	// Read header to get timestamp precision.
+	// Validate header.
 	var headerBuf [format.HeaderSize]byte
 	if _, err := idxFile.ReadAt(headerBuf[:], 0); err != nil {
 		return 0, false, err
 	}
-	idxHeader, err := format.DecodeAndValidate(headerBuf[:], format.TypeIdxLog, IdxLogVersion)
-	if err != nil {
+	if _, err := format.DecodeAndValidate(headerBuf[:], format.TypeIdxLog, IdxLogVersion); err != nil {
 		return 0, false, err
 	}
-	useNano := idxHeader.Flags&format.FlagSmallTime != 0
-
 	info, err := idxFile.Stat()
 	if err != nil {
 		return 0, false, err
@@ -1018,7 +1004,7 @@ func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, boo
 		if _, err := idxFile.ReadAt(entryBuf[:], offset); err != nil {
 			return 0, false, err
 		}
-		entry := DecodeIdxEntry(entryBuf[:], useNano)
+		entry := DecodeIdxEntry(entryBuf[:])
 
 		if entry.WriteTS.After(ts) {
 			hi = mid
@@ -1064,8 +1050,8 @@ func (m *Manager) ReadWriteTimestamps(id chunk.ChunkID, positions []uint64) ([]t
 		if _, err := idxFile.ReadAt(buf[:], offset); err != nil {
 			return nil, fmt.Errorf("read WriteTS at position %d: %w", pos, err)
 		}
-		usec := int64(binary.LittleEndian.Uint64(buf[:]))
-		results[i] = time.UnixMicro(usec)
+		nsec := int64(binary.LittleEndian.Uint64(buf[:]))
+		results[i] = time.Unix(0, nsec)
 	}
 
 	return results, nil

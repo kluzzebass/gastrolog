@@ -1,4 +1,4 @@
-import { FormField, TextInput, SelectInput } from "./FormField";
+import { FormField, TextInput } from "./FormField";
 
 interface StoreParamsFormProps {
   storeType: string;
@@ -31,21 +31,6 @@ export function StoreParamsForm({
             placeholder="/var/lib/gastrolog/data"
             dark={dark}
             mono
-          />
-        </FormField>
-        <FormField
-          label="Timestamp precision"
-          description="micro = 1µs resolution (default; fine for most logs). nano = 1ns resolution for high-resolution timing or ordering events within the same millisecond. Both use 8 bytes; nano has a smaller representable range (~±292 years from 1970) than micro (~±292k years)."
-          dark={dark}
-        >
-          <SelectInput
-            value={get("timestampPrecision") || "micro"}
-            onChange={(v) => set("timestampPrecision", v)}
-            options={[
-              { value: "micro", label: "micro" },
-              { value: "nano", label: "nano" },
-            ]}
-            dark={dark}
           />
         </FormField>
       </div>

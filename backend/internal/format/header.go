@@ -43,8 +43,7 @@ const (
 	TypeAttrLog        = 'a'
 
 	// Flag bits for raw.log, idx.log, and attr.log headers.
-	FlagSealed    = 0x01
-	FlagSmallTime = 0x02 // Timestamps in idx.log entries use Unix nanoseconds; unset = Unix microseconds
+	FlagSealed = 0x01
 
 	// Flag bits for index file headers.
 	// FlagComplete indicates the index was fully written (not a partial/crashed write).

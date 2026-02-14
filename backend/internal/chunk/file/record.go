@@ -11,9 +11,9 @@ import (
 
 // idx.log entry layout (38 bytes):
 //
-//	sourceTS   (8 bytes, int64, Unix micro/nano per header FlagSmallTime, 0 if not available)
-//	ingestTS   (8 bytes, int64, Unix micro/nano per header FlagSmallTime)
-//	writeTS    (8 bytes, int64, Unix micro/nano per header FlagSmallTime)
+//	sourceTS   (8 bytes, int64, Unix nanoseconds, 0 if not available)
+//	ingestTS   (8 bytes, int64, Unix nanoseconds)
+//	writeTS    (8 bytes, int64, Unix nanoseconds)
 //	rawOffset  (4 bytes, uint32, byte offset into raw.log data section)
 //	rawSize    (4 bytes, uint32, length of raw data)
 //	attrOffset (4 bytes, uint32, byte offset into attr.log data section)
@@ -35,7 +35,7 @@ const (
 	AttrLogVersion = 0x01
 
 	// IdxHeaderSize is the total header size for idx.log.
-	// 4 bytes common header + 8 bytes createdAt (Unix microseconds).
+	// 4 bytes common header + 8 bytes createdAt (Unix nanoseconds).
 	IdxHeaderSize = 12
 
 	// MaxRawLogSize is the hard limit for raw.log (4GB - 1).
@@ -66,21 +66,11 @@ type IdxEntry struct {
 }
 
 // EncodeIdxEntry encodes an idx.log entry into a 38-byte buffer.
-// useNano: if true, store Unix nanoseconds; if false, store Unix microseconds.
-func EncodeIdxEntry(e IdxEntry, buf []byte, useNano bool) {
-	var src, ing, wri int64
-	if useNano {
-		src = e.SourceTS.UnixNano()
-		ing = e.IngestTS.UnixNano()
-		wri = e.WriteTS.UnixNano()
-	} else {
-		src = e.SourceTS.UnixMicro()
-		ing = e.IngestTS.UnixMicro()
-		wri = e.WriteTS.UnixMicro()
-	}
-	binary.LittleEndian.PutUint64(buf[idxSourceTSOffset:], uint64(src))
-	binary.LittleEndian.PutUint64(buf[idxIngestTSOffset:], uint64(ing))
-	binary.LittleEndian.PutUint64(buf[idxWriteTSOffset:], uint64(wri))
+// Timestamps are stored as Unix nanoseconds.
+func EncodeIdxEntry(e IdxEntry, buf []byte) {
+	binary.LittleEndian.PutUint64(buf[idxSourceTSOffset:], uint64(e.SourceTS.UnixNano()))
+	binary.LittleEndian.PutUint64(buf[idxIngestTSOffset:], uint64(e.IngestTS.UnixNano()))
+	binary.LittleEndian.PutUint64(buf[idxWriteTSOffset:], uint64(e.WriteTS.UnixNano()))
 	binary.LittleEndian.PutUint32(buf[idxRawOffsetOffset:], e.RawOffset)
 	binary.LittleEndian.PutUint32(buf[idxRawSizeOffset:], e.RawSize)
 	binary.LittleEndian.PutUint32(buf[idxAttrOffsetOffset:], e.AttrOffset)
@@ -88,25 +78,12 @@ func EncodeIdxEntry(e IdxEntry, buf []byte, useNano bool) {
 }
 
 // DecodeIdxEntry decodes an idx.log entry from a 38-byte buffer.
-// useNano: if true, values are Unix nanoseconds; if false, Unix microseconds.
-func DecodeIdxEntry(buf []byte, useNano bool) IdxEntry {
-	var srcTS, ingTS, wriTS time.Time
-	src := int64(binary.LittleEndian.Uint64(buf[idxSourceTSOffset:]))
-	ing := int64(binary.LittleEndian.Uint64(buf[idxIngestTSOffset:]))
-	wri := int64(binary.LittleEndian.Uint64(buf[idxWriteTSOffset:]))
-	if useNano {
-		srcTS = time.Unix(0, src)
-		ingTS = time.Unix(0, ing)
-		wriTS = time.Unix(0, wri)
-	} else {
-		srcTS = time.UnixMicro(src)
-		ingTS = time.UnixMicro(ing)
-		wriTS = time.UnixMicro(wri)
-	}
+// Timestamps are stored as Unix nanoseconds.
+func DecodeIdxEntry(buf []byte) IdxEntry {
 	return IdxEntry{
-		SourceTS:   srcTS,
-		IngestTS:   ingTS,
-		WriteTS:    wriTS,
+		SourceTS:   time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxSourceTSOffset:]))),
+		IngestTS:   time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxIngestTSOffset:]))),
+		WriteTS:    time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxWriteTSOffset:]))),
 		RawOffset:  binary.LittleEndian.Uint32(buf[idxRawOffsetOffset:]),
 		RawSize:    binary.LittleEndian.Uint32(buf[idxRawSizeOffset:]),
 		AttrOffset: binary.LittleEndian.Uint32(buf[idxAttrOffsetOffset:]),

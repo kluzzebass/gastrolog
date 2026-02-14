@@ -120,7 +120,7 @@ Append records, seal chunks, then pass `cm` and `im` to the code under test. See
 - `BuildHelper` provides callgroup deduplication + errgroup parallelism for concurrent index builds
 - All managers are mutex-protected for concurrent access
 - Atomic file operations for metadata and indexes (temp file then rename)
-- `time.Time` used throughout the domain; int64 microseconds only at file encode/decode boundaries
+- `time.Time` used throughout the domain; int64 nanoseconds only at file encode/decode boundaries
 - Cursors work on both sealed and unsealed chunks; indexers explicitly reject unsealed chunks
 - Named constants for all binary format sizes (no magic numbers in encode/decode)
 - Sentinel errors for all validation failures (`ErrSignatureMismatch`, `ErrVersionMismatch`, etc.)
@@ -129,7 +129,7 @@ Append records, seal chunks, then pass `cm` and `im` to the code under test. See
 
 ## Binary Format Conventions
 
-All binary files use **little-endian** byte order. Timestamps stored on disk are **int64 Unix microseconds** (converted to/from `time.Time` at the encode/decode boundary).
+All binary files use **little-endian** byte order. Timestamps stored on disk are **int64 Unix nanoseconds** (converted to/from `time.Time` at the encode/decode boundary). ChunkIDs remain microsecond-based (identity mechanism, not data precision).
 
 Common 4-byte header prefix for all binary files:
 ```

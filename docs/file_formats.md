@@ -1,6 +1,6 @@
 # GastroLog File Formats
 
-All multi-byte integers are **little-endian**. UUIDs are stored as raw 16-byte values. Timestamps are stored as **int64 Unix microseconds**.
+All multi-byte integers are **little-endian**. UUIDs are stored as raw 16-byte values. Timestamps are stored as **int64 Unix nanoseconds**.
 
 ## Directory Layout
 
@@ -155,9 +155,9 @@ Append-only file containing fixed-size metadata entries for each record. The chu
 
 | Offset | Size | Field         | Description                                   |
 |--------|------|---------------|-----------------------------------------------|
-| 0      | 8    | sourceTS      | Source timestamp (int64 Unix micros, 0 if unknown) |
-| 8      | 8    | ingestTS      | Ingest timestamp (int64 Unix micros)          |
-| 16     | 8    | writeTS       | Write timestamp (int64 Unix micros)           |
+| 0      | 8    | sourceTS      | Source timestamp (int64 Unix nanos, 0 if unknown) |
+| 8      | 8    | ingestTS      | Ingest timestamp (int64 Unix nanos)           |
+| 16     | 8    | writeTS       | Write timestamp (int64 Unix nanos)            |
 | 24     | 4    | rawOffset     | Byte offset into raw.log data section (uint32)|
 | 28     | 4    | rawSize       | Length of raw data in bytes (uint32)          |
 | 32     | 4    | attrOffset    | Byte offset into attr.log data section (uint32)|
@@ -221,7 +221,7 @@ Sparse time index mapping sampled timestamps to record indices within a chunk. O
 
 | Offset | Size | Field     | Description                          |
 |--------|------|-----------|--------------------------------------|
-| 0      | 8    | timestamp | Record timestamp (int64 Unix micros) |
+| 0      | 8    | timestamp | Record timestamp (int64 Unix nanos) |
 | 8      | 4    | recordPos | Record index (uint32)                |
 
 **Total file size: 24 + (entryCount x 12) bytes**

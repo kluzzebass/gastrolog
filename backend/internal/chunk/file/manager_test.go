@@ -10,12 +10,11 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/format"
 )
 
-func TestFileChunkManagerUseSmallTime(t *testing.T) {
+func TestFileChunkManagerNanosecondPrecision(t *testing.T) {
 	dir := t.TempDir()
-	manager, err := NewManager(Config{Dir: dir, UseSmallTime: true})
+	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
 	}
@@ -34,23 +33,6 @@ func TestFileChunkManagerUseSmallTime(t *testing.T) {
 	}
 	if err := manager.Seal(); err != nil {
 		t.Fatalf("seal: %v", err)
-	}
-
-	// Verify idx.log header has FlagSmallTime.
-	idxPath := filepath.Join(dir, chunkID.String(), idxLogFileName)
-	data, err := os.ReadFile(idxPath)
-	if err != nil {
-		t.Fatalf("read idx.log: %v", err)
-	}
-	if len(data) < format.HeaderSize {
-		t.Fatalf("idx.log too small")
-	}
-	header, err := format.DecodeAndValidate(data[:format.HeaderSize], format.TypeIdxLog, IdxLogVersion)
-	if err != nil {
-		t.Fatalf("decode header: %v", err)
-	}
-	if header.Flags&format.FlagSmallTime == 0 {
-		t.Error("expected FlagSmallTime in idx header")
 	}
 
 	// Read back via cursor and verify nanosecond precision preserved.

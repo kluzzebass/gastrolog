@@ -21,9 +21,9 @@ func TestIdxEntryRoundTrip(t *testing.T) {
 	}
 
 	var buf [IdxEntrySize]byte
-	EncodeIdxEntry(entry, buf[:], false)
+	EncodeIdxEntry(entry, buf[:])
 
-	decoded := DecodeIdxEntry(buf[:], false)
+	decoded := DecodeIdxEntry(buf[:])
 
 	if !decoded.IngestTS.Equal(entry.IngestTS) {
 		t.Errorf("IngestTS: want %v, got %v", entry.IngestTS, decoded.IngestTS)
