@@ -29,21 +29,23 @@ func (r *REPL) cmdAnalyze(out *strings.Builder, args []string) {
 		return
 	}
 
-	slices.Sort(stores)
+	slices.SortFunc(stores, func(a, b StoreInfo) int {
+		return strings.Compare(a.DisplayName(), b.DisplayName())
+	})
 
 	for _, store := range stores {
-		a := r.client.Analyzer(store)
+		a := r.client.Analyzer(store.ID)
 		if a == nil {
 			continue
 		}
 
 		agg, err := a.AnalyzeAll()
 		if err != nil {
-			fmt.Fprintf(out, "[%s] Error: %v\n", store, err)
+			fmt.Fprintf(out, "[%s] Error: %v\n", store.DisplayName(), err)
 			continue
 		}
 
-		fmt.Fprintf(out, "[%s] Index Analysis (%d chunks):\n", store, agg.ChunksAnalyzed)
+		fmt.Fprintf(out, "[%s] Index Analysis (%d chunks):\n", store.DisplayName(), agg.ChunksAnalyzed)
 
 		// Summary by index type
 		out.WriteString("\n  Bytes by Index Type:\n")
@@ -112,27 +114,27 @@ func (r *REPL) analyzeChunk(out *strings.Builder, chunkID chunk.ChunkID) {
 	// Find the chunk and its analyzer
 	stores := r.client.ListStores()
 	var a AnalyzerClient
-	var foundStore string
+	var foundStore StoreInfo
 
 	for _, store := range stores {
-		cm := r.client.ChunkManager(store)
+		cm := r.client.ChunkManager(store.ID)
 		if cm == nil {
 			continue
 		}
 		if _, err := cm.Meta(chunkID); err == nil {
 			foundStore = store
-			a = r.client.Analyzer(store)
+			a = r.client.Analyzer(store.ID)
 			break
 		}
 	}
 
-	if foundStore == "" {
+	if foundStore.ID == "" {
 		fmt.Fprintf(out, "Chunk not found: %s\n", chunkID.String())
 		return
 	}
 
 	if a == nil {
-		fmt.Fprintf(out, "No analyzer for store: %s\n", foundStore)
+		fmt.Fprintf(out, "No analyzer for store: %s\n", foundStore.DisplayName())
 		return
 	}
 
@@ -143,7 +145,7 @@ func (r *REPL) analyzeChunk(out *strings.Builder, chunkID chunk.ChunkID) {
 	}
 
 	fmt.Fprintf(out, "Index Analysis for %s:\n", chunkID.String())
-	fmt.Fprintf(out, "  Store:    %s\n", foundStore)
+	fmt.Fprintf(out, "  Store:    %s\n", foundStore.DisplayName())
 	fmt.Fprintf(out, "  Records:  %d\n", ca.ChunkRecords)
 	fmt.Fprintf(out, "  Raw Size: %s\n", formatBytes(ca.ChunkBytes))
 	fmt.Fprintf(out, "  Sealed:   %v\n", ca.Sealed)

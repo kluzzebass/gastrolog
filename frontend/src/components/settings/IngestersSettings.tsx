@@ -31,7 +31,7 @@ export function IngestersSettings({ dark }: { dark: boolean }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
-  const [newId, setNewId] = useState("");
+  const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState("chatterbox");
   const [newParams, setNewParams] = useState<Record<string, string>>({});
 
@@ -57,6 +57,7 @@ export function IngestersSettings({ dark }: { dark: boolean }) {
       edit: { enabled: boolean; params: Record<string, string>; type: string },
     ) => ({
       id,
+      name: ingesters.find((i) => i.id === id)?.name ?? "",
       type: edit.type,
       enabled: edit.enabled,
       params: edit.params,
@@ -70,20 +71,21 @@ export function IngestersSettings({ dark }: { dark: boolean }) {
   };
 
   const handleCreate = async () => {
-    if (!newId.trim()) {
-      addToast("Ingester ID is required", "warn");
+    if (!newName.trim()) {
+      addToast("Ingester name is required", "warn");
       return;
     }
     try {
       await putIngester.mutateAsync({
-        id: newId.trim(),
+        id: "",
+        name: newName.trim(),
         type: newType,
         enabled: true,
         params: newParams,
       });
-      addToast(`Ingester "${newId.trim()}" created`, "info");
+      addToast(`Ingester "${newName.trim()}" created`, "info");
       setAdding(false);
-      setNewId("");
+      setNewName("");
       setNewType("chatterbox");
       setNewParams({});
     } catch (err: any) {
@@ -110,13 +112,12 @@ export function IngestersSettings({ dark }: { dark: boolean }) {
           isPending={putIngester.isPending}
         >
           <div className="grid grid-cols-2 gap-3">
-            <FormField label="ID" dark={dark}>
+            <FormField label="Name" dark={dark}>
               <TextInput
-                value={newId}
-                onChange={setNewId}
+                value={newName}
+                onChange={setNewName}
                 placeholder="my-ingester"
                 dark={dark}
-                mono
               />
             </FormField>
             <FormField label="Type" dark={dark}>
@@ -142,7 +143,7 @@ export function IngestersSettings({ dark }: { dark: boolean }) {
         return (
           <SettingsCard
             key={ing.id}
-            id={ing.id}
+            id={ing.name || ing.id}
             typeBadge={ing.type}
             dark={dark}
             expanded={expanded === ing.id}

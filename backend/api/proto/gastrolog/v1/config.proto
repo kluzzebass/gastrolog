@@ -66,10 +66,10 @@ service ConfigService {
   // DeleteSavedQuery removes a saved query by name.
   rpc DeleteSavedQuery(DeleteSavedQueryRequest) returns (DeleteSavedQueryResponse);
 
-  // ListCertificates returns all certificate names.
+  // ListCertificates returns all certificates.
   rpc ListCertificates(ListCertificatesRequest) returns (ListCertificatesResponse);
 
-  // GetCertificate returns a certificate by name (includes PEM content).
+  // GetCertificate returns a certificate by ID (includes PEM content).
   rpc GetCertificate(GetCertificateRequest) returns (GetCertificateResponse);
 
   // PutCertificate creates or updates a certificate.
@@ -84,9 +84,6 @@ service ConfigService {
   // ResumeStore resumes ingestion for a store.
   rpc ResumeStore(ResumeStoreRequest) returns (ResumeStoreResponse);
 
-  // RenameStore changes a store's ID.
-  rpc RenameStore(RenameStoreRequest) returns (RenameStoreResponse);
-
   // DecommissionStore disables ingestion and force-deletes a store.
   rpc DecommissionStore(DecommissionStoreRequest) returns (DecommissionStoreResponse);
 
@@ -99,9 +96,9 @@ message GetConfigRequest {}
 message GetConfigResponse {
   repeated StoreConfig stores = 1;
   repeated IngesterConfig ingesters = 2;
-  map<string, RotationPolicyConfig> rotation_policies = 3;
-  map<string, FilterConfig> filters = 4;
-  map<string, RetentionPolicyConfig> retention_policies = 5;
+  repeated RotationPolicyConfig rotation_policies = 3;
+  repeated FilterConfig filters = 4;
+  repeated RetentionPolicyConfig retention_policies = 5;
 }
 
 message StoreConfig {
@@ -112,6 +109,7 @@ message StoreConfig {
   map<string, string> params = 5;
   string retention = 6;
   bool enabled = 7;
+  string name = 8;
 }
 
 message IngesterConfig {
@@ -119,10 +117,13 @@ message IngesterConfig {
   string type = 2;
   map<string, string> params = 3;
   bool enabled = 4;
+  string name = 5;
 }
 
 message FilterConfig {
   string expression = 1;
+  string id = 2;
+  string name = 3;
 }
 
 message RotationPolicyConfig {
@@ -130,12 +131,16 @@ message RotationPolicyConfig {
   int64 max_records = 2;
   int64 max_age_seconds = 3;
   string cron = 4;
+  string id = 5;
+  string name = 6;
 }
 
 message RetentionPolicyConfig {
   int64 max_age_seconds = 1;
   int64 max_bytes = 2;
   int64 max_chunks = 3;
+  string id = 4;
+  string name = 5;
 }
 
 message ListIngestersRequest {}
@@ -148,6 +153,7 @@ message IngesterInfo {
   string id = 1;
   string type = 2;
   bool running = 3;
+  string name = 4;
 }
 
 message GetIngesterStatusRequest {
@@ -164,7 +170,6 @@ message GetIngesterStatusResponse {
 }
 
 message PutFilterRequest {
-  string id = 1;
   FilterConfig config = 2;
 }
 
@@ -177,7 +182,6 @@ message DeleteFilterRequest {
 message DeleteFilterResponse {}
 
 message PutRotationPolicyRequest {
-  string id = 1;
   RotationPolicyConfig config = 2;
 }
 
@@ -190,7 +194,6 @@ message DeleteRotationPolicyRequest {
 message DeleteRotationPolicyResponse {}
 
 message PutRetentionPolicyRequest {
-  string id = 1;
   RetentionPolicyConfig config = 2;
 }
 
@@ -289,15 +292,21 @@ message DeleteSavedQueryResponse {}
 message ListCertificatesRequest {}
 
 message ListCertificatesResponse {
-  repeated string names = 1;
+  repeated CertificateInfo certificates = 1;
+}
+
+message CertificateInfo {
+  string id = 1;
+  string name = 2;
 }
 
 message GetCertificateRequest {
-  string name = 1;
+  string id = 1;
 }
 
 message GetCertificateResponse {
-  string name = 1;
+  string id = 1;
+  string name = 7;
   string cert_pem = 2;
   // key_pem is never populated in responses; private keys must not be exposed via API.
   string key_pem = 3;
@@ -306,7 +315,8 @@ message GetCertificateResponse {
 }
 
 message PutCertificateRequest {
-  string name = 1;
+  string id = 1;
+  string name = 7;
   string cert_pem = 2;
   string key_pem = 3;  // When updating, empty means keep existing key.
   string cert_file = 4;
@@ -317,7 +327,7 @@ message PutCertificateRequest {
 message PutCertificateResponse {}
 
 message DeleteCertificateRequest {
-  string name = 1;
+  string id = 1;
 }
 
 message DeleteCertificateResponse {}
@@ -333,13 +343,6 @@ message ResumeStoreRequest {
 }
 
 message ResumeStoreResponse {}
-
-message RenameStoreRequest {
-  string old_id = 1;
-  string new_id = 2;
-}
-
-message RenameStoreResponse {}
 
 message DecommissionStoreRequest {
   string id = 1;

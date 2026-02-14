@@ -119,8 +119,8 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 
 		// Apply rotation policy if specified.
 		if storeCfg.Policy != nil {
-			policyCfg, ok := cfg.RotationPolicies[*storeCfg.Policy]
-			if !ok {
+			policyCfg := findRotationPolicy(cfg.RotationPolicies, *storeCfg.Policy)
+			if policyCfg == nil {
 				return fmt.Errorf("store %s references unknown policy: %s", storeCfg.ID, *storeCfg.Policy)
 			}
 			policy, err := policyCfg.ToRotationPolicy()
@@ -192,8 +192,8 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 		var policy chunk.RetentionPolicy
 
 		if storeCfg.Retention != nil {
-			retCfg, ok := cfg.RetentionPolicies[*storeCfg.Retention]
-			if !ok {
+			retCfg := findRetentionPolicy(cfg.RetentionPolicies, *storeCfg.Retention)
+			if retCfg == nil {
 				return fmt.Errorf("store %s references unknown retention policy: %s", storeCfg.ID, *storeCfg.Retention)
 			}
 			p, err := retCfg.ToRetentionPolicy()

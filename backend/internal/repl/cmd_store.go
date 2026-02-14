@@ -13,6 +13,6 @@ func (r *REPL) cmdStores(out *strings.Builder) {
 	}
 	out.WriteString("Available stores:\n")
 	for _, s := range stores {
-		fmt.Fprintf(out, "  %s\n", s)
+		fmt.Fprintf(out, "  %s\n", s.DisplayName())
 	}
 }

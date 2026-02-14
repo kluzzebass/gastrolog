@@ -192,7 +192,7 @@ func TestAuthenticatedEndpoint_InvalidToken(t *testing.T) {
 
 func TestAuthenticatedEndpoint_ValidToken(t *testing.T) {
 	tokens := auth.NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
-	token, _, err := tokens.Issue("alice", "user")
+	token, _, err := tokens.Issue("uid-alice", "alice", "user")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestAuthenticatedEndpoint_ValidToken(t *testing.T) {
 
 func TestAdminEndpoint_NonAdminToken(t *testing.T) {
 	tokens := auth.NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
-	token, _, err := tokens.Issue("alice", "user")
+	token, _, err := tokens.Issue("uid-alice", "alice", "user")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestAdminEndpoint_NonAdminToken(t *testing.T) {
 
 func TestAdminEndpoint_AdminToken(t *testing.T) {
 	tokens := auth.NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
-	token, _, err := tokens.Issue("admin", "admin")
+	token, _, err := tokens.Issue("uid-admin", "admin", "admin")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -311,7 +311,7 @@ func TestCreateUser_RequiresAdmin(t *testing.T) {
 	}
 
 	// Non-admin token → PermissionDenied.
-	userToken, _, _ := tokens.Issue("alice", "user")
+	userToken, _, _ := tokens.Issue("uid-alice", "alice", "user")
 	userClient := gastrologv1connect.NewAuthServiceClient(http.DefaultClient, s.server.URL, withBearer(userToken))
 	_, err = userClient.CreateUser(context.Background(), connect.NewRequest(&apiv1.CreateUserRequest{}))
 	if err == nil {
@@ -322,7 +322,7 @@ func TestCreateUser_RequiresAdmin(t *testing.T) {
 	}
 
 	// Admin token → allowed (will fail on validation, not auth).
-	adminToken, _, _ := tokens.Issue("admin", "admin")
+	adminToken, _, _ := tokens.Issue("uid-admin", "admin", "admin")
 	adminClient := gastrologv1connect.NewAuthServiceClient(http.DefaultClient, s.server.URL, withBearer(adminToken))
 	_, err = adminClient.CreateUser(context.Background(), connect.NewRequest(&apiv1.CreateUserRequest{}))
 	if err == nil {

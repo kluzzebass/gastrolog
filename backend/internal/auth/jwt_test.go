@@ -8,7 +8,7 @@ import (
 func TestIssueAndVerify(t *testing.T) {
 	ts := NewTokenService([]byte("test-secret-key-for-testing-only"), 7*24*time.Hour)
 
-	token, expiresAt, err := ts.Issue("alice", "admin")
+	token, expiresAt, err := ts.Issue("user-001", "alice", "admin")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -22,6 +22,9 @@ func TestIssueAndVerify(t *testing.T) {
 	claims, err := ts.Verify(token)
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
+	}
+	if claims.UserID != "user-001" {
+		t.Errorf("UserID: expected %q, got %q", "user-001", claims.UserID)
 	}
 	if claims.Username() != "alice" {
 		t.Errorf("Username: expected %q, got %q", "alice", claims.Username())
@@ -38,7 +41,7 @@ func TestVerifyExpiredToken(t *testing.T) {
 	// Token that expired 1 hour ago.
 	ts := NewTokenService([]byte("test-secret"), -1*time.Hour)
 
-	token, _, err := ts.Issue("bob", "user")
+	token, _, err := ts.Issue("user-002", "bob", "user")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -53,7 +56,7 @@ func TestVerifyWrongSecret(t *testing.T) {
 	ts1 := NewTokenService([]byte("secret-one"), 7*24*time.Hour)
 	ts2 := NewTokenService([]byte("secret-two"), 7*24*time.Hour)
 
-	token, _, err := ts1.Issue("carol", "user")
+	token, _, err := ts1.Issue("user-003", "carol", "user")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}

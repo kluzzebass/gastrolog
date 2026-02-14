@@ -22,9 +22,9 @@ func TestUpdateFilters(t *testing.T) {
 
 	// Initially set filters: prod gets env=prod, archive is catch-all.
 	cfg := &config.Config{
-		Filters: map[string]config.FilterConfig{
-			"prod-filter": {Expression: "env=prod"},
-			"catch-all":   {Expression: "*"},
+		Filters: []config.FilterConfig{
+			{ID: "prod-filter", Expression: "env=prod"},
+			{ID: "catch-all", Expression: "*"},
 		},
 		Stores: []config.StoreConfig{
 			{ID: "prod", Filter: config.StringPtr("prod-filter")},
@@ -54,9 +54,9 @@ func TestUpdateFilters(t *testing.T) {
 
 	// Now update filters: prod gets env=staging instead.
 	cfg2 := &config.Config{
-		Filters: map[string]config.FilterConfig{
-			"prod-filter": {Expression: "env=staging"},
-			"catch-all":   {Expression: "*"},
+		Filters: []config.FilterConfig{
+			{ID: "prod-filter", Expression: "env=staging"},
+			{ID: "catch-all", Expression: "*"},
 		},
 		Stores: []config.StoreConfig{
 			{ID: "prod", Filter: config.StringPtr("prod-filter")},
@@ -90,8 +90,8 @@ func TestUpdateFiltersInvalidExpression(t *testing.T) {
 	orch, _ := newFilteredTestSetup(t)
 
 	cfg := &config.Config{
-		Filters: map[string]config.FilterConfig{
-			"invalid": {Expression: "(unclosed"},
+		Filters: []config.FilterConfig{
+			{ID: "invalid", Expression: "(unclosed"},
 		},
 		Stores: []config.StoreConfig{
 			{ID: "prod", Filter: config.StringPtr("invalid")},
@@ -108,9 +108,9 @@ func TestUpdateFiltersIgnoresUnknownStores(t *testing.T) {
 
 	// Include a store that doesn't exist - should be ignored.
 	cfg := &config.Config{
-		Filters: map[string]config.FilterConfig{
-			"prod-filter": {Expression: "env=prod"},
-			"catch-all":   {Expression: "*"},
+		Filters: []config.FilterConfig{
+			{ID: "prod-filter", Expression: "env=prod"},
+			{ID: "catch-all", Expression: "*"},
 		},
 		Stores: []config.StoreConfig{
 			{ID: "prod", Filter: config.StringPtr("prod-filter")},
@@ -135,8 +135,8 @@ func TestAddStore(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Filters: map[string]config.FilterConfig{
-			"test-filter": {Expression: "env=test"},
+		Filters: []config.FilterConfig{
+			{ID: "test-filter", Expression: "env=test"},
 		},
 	}
 
@@ -184,8 +184,8 @@ func TestAddStoreDuplicate(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Filters: map[string]config.FilterConfig{
-			"catch-all": {Expression: "*"},
+		Filters: []config.FilterConfig{
+			{ID: "catch-all", Expression: "*"},
 		},
 	}
 
@@ -219,8 +219,8 @@ func TestRemoveStoreEmpty(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Filters: map[string]config.FilterConfig{
-			"catch-all": {Expression: "*"},
+		Filters: []config.FilterConfig{
+			{ID: "catch-all", Expression: "*"},
 		},
 	}
 
@@ -258,8 +258,8 @@ func TestRemoveStoreNotEmpty(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Filters: map[string]config.FilterConfig{
-			"catch-all": {Expression: "*"},
+		Filters: []config.FilterConfig{
+			{ID: "catch-all", Expression: "*"},
 		},
 	}
 
@@ -312,8 +312,8 @@ func TestForceRemoveStore(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Filters: map[string]config.FilterConfig{
-			"catch-all": {Expression: "*"},
+		Filters: []config.FilterConfig{
+			{ID: "catch-all", Expression: "*"},
 		},
 	}
 
@@ -389,8 +389,8 @@ func TestForceRemoveEmptyStore(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Filters: map[string]config.FilterConfig{
-			"catch-all": {Expression: "*"},
+		Filters: []config.FilterConfig{
+			{ID: "catch-all", Expression: "*"},
 		},
 	}
 
@@ -578,8 +578,8 @@ func TestStoreConfig(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Filters: map[string]config.FilterConfig{
-			"prod-errors": {Expression: "env=prod AND level=error"},
+		Filters: []config.FilterConfig{
+			{ID: "prod-errors", Expression: "env=prod AND level=error"},
 		},
 	}
 
@@ -680,8 +680,8 @@ func TestSetRotationPolicyDirectly(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Filters: map[string]config.FilterConfig{
-			"catch-all": {Expression: "*"},
+		Filters: []config.FilterConfig{
+			{ID: "catch-all", Expression: "*"},
 		},
 	}
 
@@ -734,8 +734,8 @@ func TestPauseStore(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Filters: map[string]config.FilterConfig{
-			"catch-all": {Expression: "*"},
+		Filters: []config.FilterConfig{
+			{ID: "catch-all", Expression: "*"},
 		},
 	}
 
@@ -800,8 +800,8 @@ func TestResumeStore(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Filters: map[string]config.FilterConfig{
-			"catch-all": {Expression: "*"},
+		Filters: []config.FilterConfig{
+			{ID: "catch-all", Expression: "*"},
 		},
 	}
 
@@ -866,8 +866,8 @@ func TestDisableDoesNotAffectQuery(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Filters: map[string]config.FilterConfig{
-			"catch-all": {Expression: "*"},
+		Filters: []config.FilterConfig{
+			{ID: "catch-all", Expression: "*"},
 		},
 	}
 
@@ -935,8 +935,8 @@ func TestUpdateStoreFilterInvalid(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Filters: map[string]config.FilterConfig{
-			"catch-all": {Expression: "*"},
+		Filters: []config.FilterConfig{
+			{ID: "catch-all", Expression: "*"},
 		},
 	}
 

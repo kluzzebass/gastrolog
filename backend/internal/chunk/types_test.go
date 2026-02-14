@@ -7,7 +7,6 @@ import (
 
 func TestNewChunkIDUnique(t *testing.T) {
 	a := NewChunkID()
-	time.Sleep(time.Microsecond)
 	b := NewChunkID()
 	if a == b {
 		t.Fatal("expected distinct IDs")
@@ -29,38 +28,37 @@ func TestChunkIDStringRoundTrip(t *testing.T) {
 func TestChunkIDStringLength(t *testing.T) {
 	id := NewChunkID()
 	s := id.String()
-	if len(s) != 13 {
-		t.Fatalf("expected 13-char string, got %d: %q", len(s), s)
+	if len(s) != 26 {
+		t.Fatalf("expected 26-char string, got %d: %q", len(s), s)
 	}
 }
 
-func TestChunkIDSortOrder(t *testing.T) {
-	t1 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
-	t2 := time.Date(2026, 6, 15, 12, 30, 0, 0, time.UTC)
-
-	id1 := ChunkIDFromTime(t1)
-	id2 := ChunkIDFromTime(t2)
-
-	if id1.String() >= id2.String() {
-		t.Fatalf("expected %s < %s", id1, id2)
+func TestChunkIDMonotonicity(t *testing.T) {
+	// UUIDv7 IDs should be monotonically increasing.
+	ids := make([]ChunkID, 100)
+	for i := range ids {
+		ids[i] = NewChunkID()
+	}
+	for i := 1; i < len(ids); i++ {
+		if ids[i].String() <= ids[i-1].String() {
+			t.Fatalf("ID %d (%s) <= ID %d (%s)", i, ids[i], i-1, ids[i-1])
+		}
 	}
 }
 
-func TestChunkIDTimeRoundTrip(t *testing.T) {
-	orig := time.Date(2026, 2, 6, 14, 23, 45, 123456000, time.UTC)
-	id := ChunkIDFromTime(orig)
+func TestChunkIDTimeExtraction(t *testing.T) {
+	before := time.Now().Truncate(time.Millisecond)
+	id := NewChunkID()
+	after := time.Now().Truncate(time.Millisecond).Add(time.Millisecond)
+
 	got := id.Time()
-
-	// Truncate to microseconds for comparison.
-	want := orig.Truncate(time.Microsecond)
-	if !got.Equal(want) {
-		t.Fatalf("expected %v, got %v", want, got)
+	if got.Before(before) || got.After(after) {
+		t.Fatalf("time %v outside expected range [%v, %v]", got, before, after)
 	}
 }
 
 func TestParseChunkIDValid(t *testing.T) {
-	// Create a known ID and verify round-trip.
-	known := ChunkIDFromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	known := NewChunkID()
 	s := known.String()
 	parsed, err := ParseChunkID(s)
 	if err != nil {
@@ -75,9 +73,8 @@ func TestParseChunkIDInvalid(t *testing.T) {
 	cases := []string{
 		"",
 		"short",
-		"toolongstring!!",  // 15 chars
-		"0000000000000000", // 16 chars
-		"!!!!!!!!!!!!!",    // 13 chars but invalid base32hex
+		"toolongstringfortesting!!!!!", // too long
+		"!!!!!!!!!!!!!!!!!!!!!!!!!!", // 26 chars but invalid base32hex
 	}
 	for _, input := range cases {
 		_, err := ParseChunkID(input)
@@ -90,8 +87,8 @@ func TestParseChunkIDInvalid(t *testing.T) {
 func TestChunkIDZero(t *testing.T) {
 	zero := ChunkID{}
 	s := zero.String()
-	if len(s) != 13 {
-		t.Fatalf("expected 13 chars, got %d: %q", len(s), s)
+	if len(s) != 26 {
+		t.Fatalf("expected 26 chars, got %d: %q", len(s), s)
 	}
 	parsed, err := ParseChunkID(s)
 	if err != nil {

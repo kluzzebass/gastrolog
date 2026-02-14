@@ -14,7 +14,7 @@ func (r *REPL) cmdStats(out *strings.Builder) {
 	var totalRecords int64
 
 	for _, store := range stores {
-		cm := r.client.ChunkManager(store)
+		cm := r.client.ChunkManager(store.ID)
 		if cm == nil {
 			continue
 		}
@@ -58,11 +58,13 @@ func (r *REPL) cmdStatus(out *strings.Builder) {
 
 	// Stores and their active chunks
 	stores := r.client.ListStores()
-	slices.Sort(stores)
+	slices.SortFunc(stores, func(a, b StoreInfo) int {
+		return strings.Compare(a.DisplayName(), b.DisplayName())
+	})
 
 	fmt.Fprintf(out, "  Stores:\n")
 	for _, store := range stores {
-		cm := r.client.ChunkManager(store)
+		cm := r.client.ChunkManager(store.ID)
 		if cm == nil {
 			continue
 		}
@@ -70,13 +72,13 @@ func (r *REPL) cmdStatus(out *strings.Builder) {
 		active := cm.Active()
 		if active != nil {
 			fmt.Fprintf(out, "    [%s] active chunk: %s\n",
-				store, active.ID.String())
+				store.DisplayName(), active.ID.String())
 		} else {
-			fmt.Fprintf(out, "    [%s] no active chunk\n", store)
+			fmt.Fprintf(out, "    [%s] no active chunk\n", store.DisplayName())
 		}
 
 		// Check for pending indexes on sealed chunks
-		im := r.client.IndexManager(store)
+		im := r.client.IndexManager(store.ID)
 		if im != nil {
 			chunks, err := cm.List()
 			if err == nil {
@@ -89,7 +91,7 @@ func (r *REPL) cmdStatus(out *strings.Builder) {
 					}
 				}
 				if pendingIndexes > 0 {
-					fmt.Fprintf(out, "    [%s] pending indexes: %d chunks\n", store, pendingIndexes)
+					fmt.Fprintf(out, "    [%s] pending indexes: %d chunks\n", store.DisplayName(), pendingIndexes)
 				}
 			}
 		}

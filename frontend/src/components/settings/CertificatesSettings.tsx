@@ -252,7 +252,7 @@ export function CertificatesSettings({ dark }: { dark: boolean }) {
   const deleteCert = useDeleteCertificate();
   const { addToast } = useToast();
 
-  const names = data?.names ?? [];
+  const certs = data?.certificates ?? [];
   const defaultCert = serverConfig?.tlsDefaultCert ?? "";
 
   const resetForm = () => {
@@ -278,6 +278,7 @@ export function CertificatesSettings({ dark }: { dark: boolean }) {
     }
     try {
       await putCert.mutateAsync({
+        id: "",
         name: n,
         certPem: certPem.trim(),
         keyPem: keyPem.trim(),
@@ -304,6 +305,7 @@ export function CertificatesSettings({ dark }: { dark: boolean }) {
     }
     try {
       await putCert.mutateAsync({
+        id: "",
         name: n,
         certPem: "",
         keyPem: "",
@@ -318,53 +320,58 @@ export function CertificatesSettings({ dark }: { dark: boolean }) {
     }
   };
 
-  const handleSaveEditPem = async (n: string) => {
+  const handleSaveEditPem = async (id: string) => {
     if (!certPem.trim()) {
       addToast("Certificate PEM is required", "error");
       return;
     }
+    const certName = certs.find((c) => c.id === id)?.name ?? "";
     // keyPem empty when editing means keep existing key
     try {
       await putCert.mutateAsync({
-        name: n,
+        id,
+        name: certName,
         certPem: certPem.trim(),
         keyPem: keyPem.trim(),
         certFile: "",
         keyFile: "",
         setAsDefault,
       });
-      addToast(`Certificate "${n}" saved`, "info");
+      addToast(`Certificate "${certName || id}" saved`, "info");
       setExpanded(null);
     } catch (err: unknown) {
       addToast((err as Error)?.message ?? "Failed to save certificate", "error");
     }
   };
 
-  const handleSaveEditFiles = async (n: string) => {
+  const handleSaveEditFiles = async (id: string) => {
     if (!certFile.trim() || !keyFile.trim()) {
       addToast("Certificate and key file paths are required", "error");
       return;
     }
+    const certName = certs.find((c) => c.id === id)?.name ?? "";
     try {
       await putCert.mutateAsync({
-        name: n,
+        id,
+        name: certName,
         certPem: "",
         keyPem: "",
         certFile: certFile.trim(),
         keyFile: keyFile.trim(),
         setAsDefault,
       });
-      addToast(`Certificate "${n}" saved`, "info");
+      addToast(`Certificate "${certName || id}" saved`, "info");
       setExpanded(null);
     } catch (err: unknown) {
       addToast((err as Error)?.message ?? "Failed to save certificate", "error");
     }
   };
 
-  const handleDelete = async (n: string) => {
+  const handleDelete = async (id: string) => {
+    const certName = certs.find((c) => c.id === id)?.name ?? id;
     try {
-      await deleteCert.mutateAsync(n);
-      addToast(`Certificate "${n}" deleted`, "info");
+      await deleteCert.mutateAsync(id);
+      addToast(`Certificate "${certName}" deleted`, "info");
     } catch (err: unknown) {
       addToast((err as Error)?.message ?? "Failed to delete certificate", "error");
     }
@@ -381,7 +388,7 @@ export function CertificatesSettings({ dark }: { dark: boolean }) {
   };
 
   useEffect(() => {
-    if (expanded && certData && certData.name === expanded) {
+    if (expanded && certData && certData.id === expanded) {
       const isFileBased = !!(certData.certFile && certData.keyFile);
       setCertPem(certData.certPem ?? "");
       setKeyPem("");
@@ -459,7 +466,7 @@ export function CertificatesSettings({ dark }: { dark: boolean }) {
     }
   }, []);
 
-  const isExpandedFileBased = expanded && certData && certData.name === expanded && !!(certData.certFile && certData.keyFile);
+  const isExpandedFileBased = expanded && certData && certData.id === expanded && !!(certData.certFile && certData.keyFile);
 
   if (isLoading) {
     return (
@@ -588,54 +595,54 @@ export function CertificatesSettings({ dark }: { dark: boolean }) {
         </div>
       )}
 
-      {names.length > 0 && (
+      {certs.length > 0 && (
         <div className="flex flex-col gap-3">
-          {names.map((n) => (
+          {certs.map((cert) => (
             <SettingsCard
-              key={n}
-              id={n}
-              typeBadge={defaultCert === n ? "default" : undefined}
+              key={cert.id}
+              id={cert.name || cert.id}
+              typeBadge={defaultCert === cert.id ? "default" : undefined}
               dark={dark}
-              expanded={expanded === n}
+              expanded={expanded === cert.id}
               onToggle={() => {
-                if (expanded === n) {
+                if (expanded === cert.id) {
                   setExpanded(null);
                 } else {
                   setCertPem("");
                   setKeyPem("");
                   setCertFile("");
                   setKeyFile("");
-                  setExpanded(n);
+                  setExpanded(cert.id);
                 }
               }}
-              onDelete={() => handleDelete(n)}
+              onDelete={() => handleDelete(cert.id)}
               deleteLabel="Delete"
             >
-              {expanded === n && (
+              {expanded === cert.id && (
                 isExpandedFileBased ? (
                   <FilesCertForm
                     dark={dark}
-                    name={n}
+                    name={cert.name || cert.id}
                     certFile={certFile}
                     keyFile={keyFile}
                     setAsDefault={setAsDefault}
                     setCertFile={setCertFile}
                     setKeyFile={setKeyFile}
                     setSetAsDefault={setSetAsDefault}
-                    onSave={() => handleSaveEditFiles(n)}
+                    onSave={() => handleSaveEditFiles(cert.id)}
                     saving={putCert.isPending}
                   />
                 ) : (
                   <PemCertForm
                     dark={dark}
-                    name={n}
+                    name={cert.name || cert.id}
                     certPem={certPem}
                     keyPem={keyPem}
                     setAsDefault={setAsDefault}
                     setCertPem={setCertPem}
                     setKeyPem={setKeyPem}
                     setSetAsDefault={setSetAsDefault}
-                    onSave={() => handleSaveEditPem(n)}
+                    onSave={() => handleSaveEditPem(cert.id)}
                     saving={putCert.isPending}
                     onDrop={handleDrop}
                     onDragOver={handleDragOver}
@@ -650,7 +657,7 @@ export function CertificatesSettings({ dark }: { dark: boolean }) {
         </div>
       )}
 
-      {names.length === 0 && !adding && (
+      {certs.length === 0 && !adding && (
         <div
           className={`text-[0.85em] py-8 text-center ${c("text-text-muted", "text-light-text-muted")}`}
         >

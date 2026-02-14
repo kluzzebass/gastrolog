@@ -68,6 +68,7 @@ message StoreInfo {
   int64 chunk_count = 4;
   int64 record_count = 5;
   bool enabled = 6;
+  string name = 7;
 }
 
 message GetStoreRequest {
@@ -174,6 +175,7 @@ message StoreStats {
   google.protobuf.Timestamp oldest_record = 9;
   google.protobuf.Timestamp newest_record = 10;
   bool enabled = 11;
+  string name = 12;
 }
 
 message ReindexStoreRequest {

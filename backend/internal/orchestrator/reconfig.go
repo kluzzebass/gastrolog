@@ -24,14 +24,44 @@ var (
 // resolveFilterExpr looks up a filter ID in the config and returns its expression.
 // Returns empty string if the filter ID is empty or not found (store receives nothing).
 func resolveFilterExpr(cfg *config.Config, filterID string) string {
-	if filterID == "" || cfg == nil || cfg.Filters == nil {
+	if filterID == "" || cfg == nil {
 		return ""
 	}
-	fc, ok := cfg.Filters[filterID]
-	if !ok {
+	fc := findFilter(cfg.Filters, filterID)
+	if fc == nil {
 		return ""
 	}
 	return fc.Expression
+}
+
+// findFilter finds a FilterConfig by ID in a slice.
+func findFilter(filters []config.FilterConfig, id string) *config.FilterConfig {
+	for i := range filters {
+		if filters[i].ID == id {
+			return &filters[i]
+		}
+	}
+	return nil
+}
+
+// findRotationPolicy finds a RotationPolicyConfig by ID in a slice.
+func findRotationPolicy(policies []config.RotationPolicyConfig, id string) *config.RotationPolicyConfig {
+	for i := range policies {
+		if policies[i].ID == id {
+			return &policies[i]
+		}
+	}
+	return nil
+}
+
+// findRetentionPolicy finds a RetentionPolicyConfig by ID in a slice.
+func findRetentionPolicy(policies []config.RetentionPolicyConfig, id string) *config.RetentionPolicyConfig {
+	for i := range policies {
+		if policies[i].ID == id {
+			return &policies[i]
+		}
+	}
+	return nil
 }
 
 // UpdateFilters recompiles filter expressions from store configs and hot-swaps the filter set.
@@ -208,8 +238,8 @@ func (o *Orchestrator) AddStore(storeCfg config.StoreConfig, cfg *config.Config,
 	// Set up retention job if applicable.
 	var retPolicy chunk.RetentionPolicy
 	if storeCfg.Retention != nil && cfg != nil {
-		retCfg, ok := cfg.RetentionPolicies[*storeCfg.Retention]
-		if ok {
+		retCfg := findRetentionPolicy(cfg.RetentionPolicies, *storeCfg.Retention)
+		if retCfg != nil {
 			p, err := retCfg.ToRetentionPolicy()
 			if err != nil {
 				o.logger.Warn("invalid retention policy for new store", "store", storeCfg.ID, "error", err)
@@ -235,7 +265,8 @@ func (o *Orchestrator) AddStore(storeCfg config.StoreConfig, cfg *config.Config,
 
 	// Set up cron rotation if the rotation policy has a cron schedule.
 	if storeCfg.Policy != nil && cfg != nil {
-		if policyCfg, ok := cfg.RotationPolicies[*storeCfg.Policy]; ok {
+		policyCfg := findRotationPolicy(cfg.RotationPolicies, *storeCfg.Policy)
+		if policyCfg != nil {
 			if policyCfg.Cron != nil && *policyCfg.Cron != "" {
 				if err := o.cronRotation.addJob(storeCfg.ID, *policyCfg.Cron, cm); err != nil {
 					o.logger.Warn("failed to add cron rotation for new store", "store", storeCfg.ID, "error", err)
@@ -450,66 +481,6 @@ func (o *Orchestrator) rebuildFilterSetLocked() {
 	}
 }
 
-// RenameStore atomically renames a store's ID across all internal registries.
-// Returns ErrStoreNotFound if the old ID doesn't exist.
-// Returns ErrDuplicateID if the new ID is already taken.
-func (o *Orchestrator) RenameStore(oldID, newID string) error {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-
-	if _, exists := o.chunks[oldID]; !exists {
-		return fmt.Errorf("%w: %s", ErrStoreNotFound, oldID)
-	}
-	if _, exists := o.chunks[newID]; exists {
-		return fmt.Errorf("%w: %s", ErrDuplicateID, newID)
-	}
-
-	// Move all registry entries from old to new.
-	o.chunks[newID] = o.chunks[oldID]
-	delete(o.chunks, oldID)
-
-	o.indexes[newID] = o.indexes[oldID]
-	delete(o.indexes, oldID)
-
-	o.queries[newID] = o.queries[oldID]
-	delete(o.queries, oldID)
-
-	if o.disabled[oldID] {
-		o.disabled[newID] = true
-		delete(o.disabled, oldID)
-	}
-
-	// Rename retention runner.
-	if runner, ok := o.retention[oldID]; ok {
-		runner.storeID = newID
-		o.retention[newID] = runner
-		delete(o.retention, oldID)
-		o.scheduler.RemoveJob(retentionJobName(oldID))
-		if err := o.scheduler.AddJob(retentionJobName(newID), defaultRetentionSchedule, runner.sweep); err != nil {
-			o.logger.Warn("failed to re-add retention job after rename", "store", newID, "error", err)
-		}
-	}
-
-	// Rename cron rotation job.
-	if o.cronRotation.hasJob(oldID) {
-		o.cronRotation.renameJob(oldID, newID, o.chunks[newID])
-	}
-
-	// Rebuild filter set with the new store ID.
-	if o.filterSet != nil {
-		for _, f := range o.filterSet.filters {
-			if f.StoreID == oldID {
-				f.StoreID = newID
-				break
-			}
-		}
-		o.filterSet = NewFilterSet(o.filterSet.filters)
-	}
-
-	o.logger.Info("store renamed", "old", oldID, "new", newID)
-	return nil
-}
-
 // StoreConfig returns the effective configuration for a store.
 // This is useful for API responses and debugging.
 func (o *Orchestrator) StoreConfig(id string) (config.StoreConfig, error) {
@@ -562,8 +533,8 @@ func (o *Orchestrator) UpdateRotationPolicies(cfg *config.Config) error {
 			continue // Store doesn't reference a policy.
 		}
 
-		policyCfg, ok := cfg.RotationPolicies[*storeCfg.Policy]
-		if !ok {
+		policyCfg := findRotationPolicy(cfg.RotationPolicies, *storeCfg.Policy)
+		if policyCfg == nil {
 			// Policy was deleted — nothing to do; store keeps its current policy.
 			// We can't revert to "type default" from here, and the dangling
 			// reference will be caught on next restart or store edit.
@@ -626,8 +597,8 @@ func (o *Orchestrator) UpdateRetentionPolicies(cfg *config.Config) error {
 			continue // Store doesn't reference a named policy; keep current.
 		}
 
-		policyCfg, ok := cfg.RetentionPolicies[*storeCfg.Retention]
-		if !ok {
+		policyCfg := findRetentionPolicy(cfg.RetentionPolicies, *storeCfg.Retention)
+		if policyCfg == nil {
 			o.logger.Warn("store references unknown retention policy", "store", storeCfg.ID, "policy", *storeCfg.Retention)
 			continue
 		}

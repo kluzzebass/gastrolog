@@ -121,7 +121,9 @@ function ServiceSettings({ dark }: { dark: boolean }) {
   const [initialized, setInitialized] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
 
-  const certNames = certData?.names ?? [];
+  const certs = certData?.certificates ?? [];
+  const certIds = certs.map((c) => c.id);
+  const certDisplayName = (id: string) => certs.find((c) => c.id === id)?.name || id;
 
   useEffect(() => {
     if (data && !initialized) {
@@ -157,9 +159,9 @@ function ServiceSettings({ dark }: { dark: boolean }) {
         minPasswordLength: parseInt(minPwLen, 10) || 8,
         maxConcurrentJobs: parseInt(maxJobs, 10) || 4,
         tlsDefaultCert,
-        tlsEnabled: certNames.includes(tlsDefaultCert) ? tlsEnabled : false,
+        tlsEnabled: certIds.includes(tlsDefaultCert) ? tlsEnabled : false,
         httpToHttpsRedirect:
-          certNames.includes(tlsDefaultCert) ? httpToHttpsRedirect : false,
+          certIds.includes(tlsDefaultCert) ? httpToHttpsRedirect : false,
       });
       addToast("Server configuration updated", "info");
     } catch (err: any) {
@@ -288,9 +290,9 @@ function ServiceSettings({ dark }: { dark: boolean }) {
               )}`}
             >
               <option value="">— none —</option>
-              {certNames.map((n) => (
-                <option key={n} value={n}>
-                  {n}
+              {certs.map((cert) => (
+                <option key={cert.id} value={cert.id}>
+                  {cert.name || cert.id}
                 </option>
               ))}
             </select>

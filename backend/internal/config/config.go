@@ -43,20 +43,20 @@ type Store interface {
 
 	// Filters
 	GetFilter(ctx context.Context, id string) (*FilterConfig, error)
-	ListFilters(ctx context.Context) (map[string]FilterConfig, error)
-	PutFilter(ctx context.Context, id string, cfg FilterConfig) error
+	ListFilters(ctx context.Context) ([]FilterConfig, error)
+	PutFilter(ctx context.Context, cfg FilterConfig) error
 	DeleteFilter(ctx context.Context, id string) error
 
 	// Rotation policies
 	GetRotationPolicy(ctx context.Context, id string) (*RotationPolicyConfig, error)
-	ListRotationPolicies(ctx context.Context) (map[string]RotationPolicyConfig, error)
-	PutRotationPolicy(ctx context.Context, id string, cfg RotationPolicyConfig) error
+	ListRotationPolicies(ctx context.Context) ([]RotationPolicyConfig, error)
+	PutRotationPolicy(ctx context.Context, cfg RotationPolicyConfig) error
 	DeleteRotationPolicy(ctx context.Context, id string) error
 
 	// Retention policies
 	GetRetentionPolicy(ctx context.Context, id string) (*RetentionPolicyConfig, error)
-	ListRetentionPolicies(ctx context.Context) (map[string]RetentionPolicyConfig, error)
-	PutRetentionPolicy(ctx context.Context, id string, cfg RetentionPolicyConfig) error
+	ListRetentionPolicies(ctx context.Context) ([]RetentionPolicyConfig, error)
+	PutRetentionPolicy(ctx context.Context, cfg RetentionPolicyConfig) error
 	DeleteRetentionPolicy(ctx context.Context, id string) error
 
 	// Stores
@@ -64,7 +64,6 @@ type Store interface {
 	ListStores(ctx context.Context) ([]StoreConfig, error)
 	PutStore(ctx context.Context, cfg StoreConfig) error
 	DeleteStore(ctx context.Context, id string) error
-	RenameStore(ctx context.Context, oldID, newID string) error
 
 	// Ingesters
 	GetIngester(ctx context.Context, id string) (*IngesterConfig, error)
@@ -79,31 +78,32 @@ type Store interface {
 	DeleteSetting(ctx context.Context, key string) error
 
 	// Certificates (dedicated storage, not in Settings KV)
-	ListCertificates(ctx context.Context) ([]string, error)
-	GetCertificate(ctx context.Context, name string) (*CertPEM, error)
-	PutCertificate(ctx context.Context, name string, cert CertPEM) error
-	DeleteCertificate(ctx context.Context, name string) error
+	ListCertificates(ctx context.Context) ([]CertPEM, error)
+	GetCertificate(ctx context.Context, id string) (*CertPEM, error)
+	PutCertificate(ctx context.Context, cert CertPEM) error
+	DeleteCertificate(ctx context.Context, id string) error
 
 	// Users
 	CreateUser(ctx context.Context, user User) error
-	GetUser(ctx context.Context, username string) (*User, error)
+	GetUser(ctx context.Context, id string) (*User, error)
+	GetUserByUsername(ctx context.Context, username string) (*User, error)
 	ListUsers(ctx context.Context) ([]User, error)
-	UpdatePassword(ctx context.Context, username string, passwordHash string) error
-	UpdateUserRole(ctx context.Context, username string, role string) error
-	DeleteUser(ctx context.Context, username string) error
+	UpdatePassword(ctx context.Context, id string, passwordHash string) error
+	UpdateUserRole(ctx context.Context, id string, role string) error
+	DeleteUser(ctx context.Context, id string) error
 	CountUsers(ctx context.Context) (int, error)
 }
 
 // Config describes the desired system shape.
 // It is declarative: it defines what should exist, not how to create it.
 type Config struct {
-	Filters           map[string]FilterConfig          `json:"filters,omitempty"`
-	RotationPolicies  map[string]RotationPolicyConfig  `json:"rotationPolicies,omitempty"`
-	RetentionPolicies map[string]RetentionPolicyConfig `json:"retentionPolicies,omitempty"`
-	Ingesters         []IngesterConfig                 `json:"ingesters,omitempty"`
-	Stores            []StoreConfig                    `json:"stores,omitempty"`
-	Settings          map[string]string                `json:"settings,omitempty"`
-	Certs             map[string]CertPEM               `json:"certs,omitempty"`
+	Filters           []FilterConfig          `json:"filters,omitempty"`
+	RotationPolicies  []RotationPolicyConfig  `json:"rotationPolicies,omitempty"`
+	RetentionPolicies []RetentionPolicyConfig `json:"retentionPolicies,omitempty"`
+	Ingesters         []IngesterConfig        `json:"ingesters,omitempty"`
+	Stores            []StoreConfig           `json:"stores,omitempty"`
+	Settings          map[string]string       `json:"settings,omitempty"`
+	Certs             []CertPEM               `json:"certs,omitempty"`
 }
 
 // ServerConfig holds server-level configuration, organized by concern.
@@ -117,7 +117,7 @@ type ServerConfig struct {
 // TLSConfig holds TLS server settings.
 // Certificate data is stored separately via the Store certificate CRUD methods.
 type TLSConfig struct {
-	// DefaultCert is the cert name used for TLS-wrapping the Connect RPC / web endpoint.
+	// DefaultCert is the cert ID used for TLS-wrapping the Connect RPC / web endpoint.
 	DefaultCert string `json:"default_cert,omitempty"`
 	// TLSEnabled turns on HTTPS when a default cert exists. Falls back to HTTP if no cert.
 	TLSEnabled bool `json:"tls_enabled,omitempty"`
@@ -128,6 +128,8 @@ type TLSConfig struct {
 // CertPEM holds certificate content. Either stored PEM or file paths (directory monitoring).
 // When both are set, file paths take precedence and are watched for changes.
 type CertPEM struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
 	CertPEM  string `json:"cert_pem,omitempty"`
 	KeyPEM   string `json:"key_pem,omitempty"`
 	CertFile string `json:"cert_file,omitempty"`
@@ -148,6 +150,7 @@ type AuthConfig struct {
 
 // User represents a user account.
 type User struct {
+	ID           string    `json:"id"`
 	Username     string    `json:"username"`
 	PasswordHash string    `json:"password_hash"`
 	Role         string    `json:"role"` // "admin" or "user"
@@ -156,8 +159,14 @@ type User struct {
 }
 
 // FilterConfig defines a named filter expression.
-// Stores reference filters by ID to determine which messages they receive.
+// Stores reference filters by UUID to determine which messages they receive.
 type FilterConfig struct {
+	// ID is the unique identifier (UUIDv7).
+	ID string `json:"id"`
+
+	// Name is the human-readable display name (unique).
+	Name string `json:"name"`
+
 	// Expression is the filter expression string.
 	// Special values:
 	//   - "*": catch-all, receives all messages
@@ -172,6 +181,12 @@ type FilterConfig struct {
 // Multiple conditions can be specified; rotation occurs when ANY condition is met.
 // All fields are optional (nil = not set).
 type RotationPolicyConfig struct {
+	// ID is the unique identifier (UUIDv7).
+	ID string `json:"id"`
+
+	// Name is the human-readable display name (unique).
+	Name string `json:"name"`
+
 	// MaxBytes rotates when chunk size exceeds this value.
 	// Supports suffixes: B, KB, MB, GB (e.g., "64MB", "1GB").
 	MaxBytes *string `json:"maxBytes,omitempty"`
@@ -215,6 +230,12 @@ func Int64Ptr(n int64) *int64 { return &n }
 // Multiple conditions can be specified; a chunk is deleted if ANY condition is met.
 // All fields are optional (nil = not set).
 type RetentionPolicyConfig struct {
+	// ID is the unique identifier (UUIDv7).
+	ID string `json:"id"`
+
+	// Name is the human-readable display name (unique).
+	Name string `json:"name"`
+
 	// MaxAge deletes sealed chunks older than this duration.
 	// Uses Go duration format (e.g., "720h", "24h").
 	MaxAge *string `json:"maxAge,omitempty"`
@@ -271,8 +292,11 @@ func (c RetentionPolicyConfig) ToRetentionPolicy() (chunk.RetentionPolicy, error
 
 // IngesterConfig describes a ingester to instantiate.
 type IngesterConfig struct {
-	// ID is a unique identifier for this ingester.
+	// ID is the unique identifier (UUIDv7).
 	ID string `json:"id"`
+
+	// Name is the human-readable display name (unique).
+	Name string `json:"name"`
 
 	// Type identifies the ingester implementation (e.g., "syslog-udp", "file").
 	Type string `json:"type"`
@@ -365,21 +389,24 @@ func ParseBytes(s string) (uint64, error) {
 
 // StoreConfig describes a storage backend to instantiate.
 type StoreConfig struct {
-	// ID is a unique identifier for this store.
+	// ID is the unique identifier (UUIDv7).
 	ID string `json:"id"`
+
+	// Name is the human-readable display name (unique).
+	Name string `json:"name"`
 
 	// Type identifies the store implementation (e.g., "file", "memory").
 	Type string `json:"type"`
 
-	// Filter references a named filter from Config.Filters by ID.
+	// Filter references a filter by UUID.
 	// Nil means no filter (store receives nothing).
 	Filter *string `json:"filter,omitempty"`
 
-	// Policy references a named rotation policy from Config.RotationPolicies.
+	// Policy references a rotation policy by UUID.
 	// Nil means no policy (type-specific default).
 	Policy *string `json:"policy,omitempty"`
 
-	// Retention references a named retention policy from Config.RetentionPolicies.
+	// Retention references a retention policy by UUID.
 	// Nil means no retention policy (chunks are kept indefinitely, or type-specific default).
 	Retention *string `json:"retention,omitempty"`
 

@@ -146,16 +146,19 @@ func (s *Store) loadOrEmpty() (*config.Config, error) {
 		cfg = &config.Config{}
 	}
 	if cfg.Filters == nil {
-		cfg.Filters = make(map[string]config.FilterConfig)
+		cfg.Filters = []config.FilterConfig{}
 	}
 	if cfg.RotationPolicies == nil {
-		cfg.RotationPolicies = make(map[string]config.RotationPolicyConfig)
+		cfg.RotationPolicies = []config.RotationPolicyConfig{}
 	}
 	if cfg.RetentionPolicies == nil {
-		cfg.RetentionPolicies = make(map[string]config.RetentionPolicyConfig)
+		cfg.RetentionPolicies = []config.RetentionPolicyConfig{}
 	}
 	if cfg.Settings == nil {
 		cfg.Settings = make(map[string]string)
+	}
+	if cfg.Certs == nil {
+		cfg.Certs = []config.CertPEM{}
 	}
 	return cfg, nil
 }
@@ -170,33 +173,37 @@ func (s *Store) GetFilter(ctx context.Context, id string) (*config.FilterConfig,
 	if cfg == nil {
 		return nil, nil
 	}
-	fc, ok := cfg.Filters[id]
-	if !ok {
-		return nil, nil
+	for _, fc := range cfg.Filters {
+		if fc.ID == id {
+			return &fc, nil
+		}
 	}
-	return &fc, nil
+	return nil, nil
 }
 
-func (s *Store) ListFilters(ctx context.Context) (map[string]config.FilterConfig, error) {
+func (s *Store) ListFilters(ctx context.Context) ([]config.FilterConfig, error) {
 	cfg, err := s.load()
 	if err != nil {
 		return nil, err
 	}
 	if cfg == nil {
-		return make(map[string]config.FilterConfig), nil
-	}
-	if cfg.Filters == nil {
-		return make(map[string]config.FilterConfig), nil
+		return nil, nil
 	}
 	return cfg.Filters, nil
 }
 
-func (s *Store) PutFilter(ctx context.Context, id string, fc config.FilterConfig) error {
+func (s *Store) PutFilter(ctx context.Context, fc config.FilterConfig) error {
 	cfg, err := s.loadOrEmpty()
 	if err != nil {
 		return err
 	}
-	cfg.Filters[id] = fc
+	for i, existing := range cfg.Filters {
+		if existing.ID == fc.ID {
+			cfg.Filters[i] = fc
+			return s.flush(cfg)
+		}
+	}
+	cfg.Filters = append(cfg.Filters, fc)
 	return s.flush(cfg)
 }
 
@@ -205,7 +212,12 @@ func (s *Store) DeleteFilter(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	delete(cfg.Filters, id)
+	for i, fc := range cfg.Filters {
+		if fc.ID == id {
+			cfg.Filters = append(cfg.Filters[:i], cfg.Filters[i+1:]...)
+			break
+		}
+	}
 	return s.flush(cfg)
 }
 
@@ -219,33 +231,37 @@ func (s *Store) GetRotationPolicy(ctx context.Context, id string) (*config.Rotat
 	if cfg == nil {
 		return nil, nil
 	}
-	rp, ok := cfg.RotationPolicies[id]
-	if !ok {
-		return nil, nil
+	for _, rp := range cfg.RotationPolicies {
+		if rp.ID == id {
+			return &rp, nil
+		}
 	}
-	return &rp, nil
+	return nil, nil
 }
 
-func (s *Store) ListRotationPolicies(ctx context.Context) (map[string]config.RotationPolicyConfig, error) {
+func (s *Store) ListRotationPolicies(ctx context.Context) ([]config.RotationPolicyConfig, error) {
 	cfg, err := s.load()
 	if err != nil {
 		return nil, err
 	}
 	if cfg == nil {
-		return make(map[string]config.RotationPolicyConfig), nil
-	}
-	if cfg.RotationPolicies == nil {
-		return make(map[string]config.RotationPolicyConfig), nil
+		return nil, nil
 	}
 	return cfg.RotationPolicies, nil
 }
 
-func (s *Store) PutRotationPolicy(ctx context.Context, id string, rp config.RotationPolicyConfig) error {
+func (s *Store) PutRotationPolicy(ctx context.Context, rp config.RotationPolicyConfig) error {
 	cfg, err := s.loadOrEmpty()
 	if err != nil {
 		return err
 	}
-	cfg.RotationPolicies[id] = rp
+	for i, existing := range cfg.RotationPolicies {
+		if existing.ID == rp.ID {
+			cfg.RotationPolicies[i] = rp
+			return s.flush(cfg)
+		}
+	}
+	cfg.RotationPolicies = append(cfg.RotationPolicies, rp)
 	return s.flush(cfg)
 }
 
@@ -254,7 +270,12 @@ func (s *Store) DeleteRotationPolicy(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	delete(cfg.RotationPolicies, id)
+	for i, rp := range cfg.RotationPolicies {
+		if rp.ID == id {
+			cfg.RotationPolicies = append(cfg.RotationPolicies[:i], cfg.RotationPolicies[i+1:]...)
+			break
+		}
+	}
 	return s.flush(cfg)
 }
 
@@ -268,33 +289,37 @@ func (s *Store) GetRetentionPolicy(ctx context.Context, id string) (*config.Rete
 	if cfg == nil {
 		return nil, nil
 	}
-	rp, ok := cfg.RetentionPolicies[id]
-	if !ok {
-		return nil, nil
+	for _, rp := range cfg.RetentionPolicies {
+		if rp.ID == id {
+			return &rp, nil
+		}
 	}
-	return &rp, nil
+	return nil, nil
 }
 
-func (s *Store) ListRetentionPolicies(ctx context.Context) (map[string]config.RetentionPolicyConfig, error) {
+func (s *Store) ListRetentionPolicies(ctx context.Context) ([]config.RetentionPolicyConfig, error) {
 	cfg, err := s.load()
 	if err != nil {
 		return nil, err
 	}
 	if cfg == nil {
-		return make(map[string]config.RetentionPolicyConfig), nil
-	}
-	if cfg.RetentionPolicies == nil {
-		return make(map[string]config.RetentionPolicyConfig), nil
+		return nil, nil
 	}
 	return cfg.RetentionPolicies, nil
 }
 
-func (s *Store) PutRetentionPolicy(ctx context.Context, id string, rp config.RetentionPolicyConfig) error {
+func (s *Store) PutRetentionPolicy(ctx context.Context, rp config.RetentionPolicyConfig) error {
 	cfg, err := s.loadOrEmpty()
 	if err != nil {
 		return err
 	}
-	cfg.RetentionPolicies[id] = rp
+	for i, existing := range cfg.RetentionPolicies {
+		if existing.ID == rp.ID {
+			cfg.RetentionPolicies[i] = rp
+			return s.flush(cfg)
+		}
+	}
+	cfg.RetentionPolicies = append(cfg.RetentionPolicies, rp)
 	return s.flush(cfg)
 }
 
@@ -303,7 +328,12 @@ func (s *Store) DeleteRetentionPolicy(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	delete(cfg.RetentionPolicies, id)
+	for i, rp := range cfg.RetentionPolicies {
+		if rp.ID == id {
+			cfg.RetentionPolicies = append(cfg.RetentionPolicies[:i], cfg.RetentionPolicies[i+1:]...)
+			break
+		}
+	}
 	return s.flush(cfg)
 }
 
@@ -363,20 +393,6 @@ func (s *Store) DeleteStore(ctx context.Context, id string) error {
 		}
 	}
 	return s.flush(cfg)
-}
-
-func (s *Store) RenameStore(ctx context.Context, oldID, newID string) error {
-	cfg, err := s.loadOrEmpty()
-	if err != nil {
-		return err
-	}
-	for i, st := range cfg.Stores {
-		if st.ID == oldID {
-			cfg.Stores[i].ID = newID
-			return s.flush(cfg)
-		}
-	}
-	return fmt.Errorf("store %q not found", oldID)
 }
 
 // Ingesters
@@ -474,7 +490,7 @@ func (s *Store) DeleteSetting(ctx context.Context, key string) error {
 
 // Certificates
 
-func (s *Store) ListCertificates(ctx context.Context) ([]string, error) {
+func (s *Store) ListCertificates(ctx context.Context) ([]config.CertPEM, error) {
 	cfg, err := s.load()
 	if err != nil {
 		return nil, err
@@ -482,14 +498,10 @@ func (s *Store) ListCertificates(ctx context.Context) ([]string, error) {
 	if cfg == nil || cfg.Certs == nil {
 		return nil, nil
 	}
-	names := make([]string, 0, len(cfg.Certs))
-	for name := range cfg.Certs {
-		names = append(names, name)
-	}
-	return names, nil
+	return cfg.Certs, nil
 }
 
-func (s *Store) GetCertificate(ctx context.Context, name string) (*config.CertPEM, error) {
+func (s *Store) GetCertificate(ctx context.Context, id string) (*config.CertPEM, error) {
 	cfg, err := s.load()
 	if err != nil {
 		return nil, err
@@ -497,31 +509,40 @@ func (s *Store) GetCertificate(ctx context.Context, name string) (*config.CertPE
 	if cfg == nil || cfg.Certs == nil {
 		return nil, nil
 	}
-	pem, ok := cfg.Certs[name]
-	if !ok {
-		return nil, nil
+	for _, cert := range cfg.Certs {
+		if cert.ID == id {
+			return &cert, nil
+		}
 	}
-	return &pem, nil
+	return nil, nil
 }
 
-func (s *Store) PutCertificate(ctx context.Context, name string, cert config.CertPEM) error {
+func (s *Store) PutCertificate(ctx context.Context, cert config.CertPEM) error {
 	cfg, err := s.loadOrEmpty()
 	if err != nil {
 		return err
 	}
-	if cfg.Certs == nil {
-		cfg.Certs = make(map[string]config.CertPEM)
+	for i, existing := range cfg.Certs {
+		if existing.ID == cert.ID {
+			cfg.Certs[i] = cert
+			return s.flush(cfg)
+		}
 	}
-	cfg.Certs[name] = cert
+	cfg.Certs = append(cfg.Certs, cert)
 	return s.flush(cfg)
 }
 
-func (s *Store) DeleteCertificate(ctx context.Context, name string) error {
+func (s *Store) DeleteCertificate(ctx context.Context, id string) error {
 	cfg, err := s.loadOrEmpty()
 	if err != nil {
 		return err
 	}
-	delete(cfg.Certs, name)
+	for i, cert := range cfg.Certs {
+		if cert.ID == id {
+			cfg.Certs = append(cfg.Certs[:i], cfg.Certs[i+1:]...)
+			break
+		}
+	}
 	return s.flush(cfg)
 }
 
@@ -529,6 +550,7 @@ func (s *Store) DeleteCertificate(ctx context.Context, name string) error {
 //
 // Users are operational data (not part of the Config struct), so they are
 // stored in a separate JSON file alongside the main config file.
+// The map key is the user ID (UUID), not the username.
 
 func (s *Store) loadUsers() (map[string]config.User, error) {
 	data, err := os.ReadFile(s.usersPath)
@@ -574,23 +596,43 @@ func (s *Store) CreateUser(ctx context.Context, user config.User) error {
 	if err != nil {
 		return err
 	}
-	if _, ok := users[user.Username]; ok {
-		return fmt.Errorf("user %q already exists", user.Username)
+	// Check for duplicate ID.
+	if _, ok := users[user.ID]; ok {
+		return fmt.Errorf("user with ID %q already exists", user.ID)
 	}
-	users[user.Username] = user
+	// Check for duplicate username.
+	for _, u := range users {
+		if u.Username == user.Username {
+			return fmt.Errorf("user %q already exists", user.Username)
+		}
+	}
+	users[user.ID] = user
 	return s.flushUsers(users)
 }
 
-func (s *Store) GetUser(ctx context.Context, username string) (*config.User, error) {
+func (s *Store) GetUser(ctx context.Context, id string) (*config.User, error) {
 	users, err := s.loadUsers()
 	if err != nil {
 		return nil, err
 	}
-	u, ok := users[username]
+	u, ok := users[id]
 	if !ok {
 		return nil, nil
 	}
 	return &u, nil
+}
+
+func (s *Store) GetUserByUsername(ctx context.Context, username string) (*config.User, error) {
+	users, err := s.loadUsers()
+	if err != nil {
+		return nil, err
+	}
+	for _, u := range users {
+		if u.Username == username {
+			return &u, nil
+		}
+	}
+	return nil, nil
 }
 
 func (s *Store) ListUsers(ctx context.Context) ([]config.User, error) {
@@ -605,45 +647,45 @@ func (s *Store) ListUsers(ctx context.Context) ([]config.User, error) {
 	return result, nil
 }
 
-func (s *Store) UpdatePassword(ctx context.Context, username string, passwordHash string) error {
+func (s *Store) UpdatePassword(ctx context.Context, id string, passwordHash string) error {
 	users, err := s.loadUsers()
 	if err != nil {
 		return err
 	}
-	u, ok := users[username]
+	u, ok := users[id]
 	if !ok {
-		return fmt.Errorf("user %q not found", username)
+		return fmt.Errorf("user %q not found", id)
 	}
 	u.PasswordHash = passwordHash
 	u.UpdatedAt = time.Now().UTC()
-	users[username] = u
+	users[id] = u
 	return s.flushUsers(users)
 }
 
-func (s *Store) UpdateUserRole(ctx context.Context, username string, role string) error {
+func (s *Store) UpdateUserRole(ctx context.Context, id string, role string) error {
 	users, err := s.loadUsers()
 	if err != nil {
 		return err
 	}
-	u, ok := users[username]
+	u, ok := users[id]
 	if !ok {
-		return fmt.Errorf("user %q not found", username)
+		return fmt.Errorf("user %q not found", id)
 	}
 	u.Role = role
 	u.UpdatedAt = time.Now().UTC()
-	users[username] = u
+	users[id] = u
 	return s.flushUsers(users)
 }
 
-func (s *Store) DeleteUser(ctx context.Context, username string) error {
+func (s *Store) DeleteUser(ctx context.Context, id string) error {
 	users, err := s.loadUsers()
 	if err != nil {
 		return err
 	}
-	if _, ok := users[username]; !ok {
-		return fmt.Errorf("user %q not found", username)
+	if _, ok := users[id]; !ok {
+		return fmt.Errorf("user %q not found", id)
 	}
-	delete(users, username)
+	delete(users, id)
 	return s.flushUsers(users)
 }
 

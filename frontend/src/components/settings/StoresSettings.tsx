@@ -6,7 +6,6 @@ import {
   useDeleteStore,
   useReindexStore,
   useCloneStore,
-  useRenameStore,
   useDecommissionStore,
   useCompactStore,
   useMergeStores,
@@ -29,7 +28,6 @@ export function StoresSettings({ dark }: { dark: boolean }) {
   const deleteStore = useDeleteStore();
   const reindex = useReindexStore();
   const clone = useCloneStore();
-  const rename = useRenameStore();
   const decommission = useDecommissionStore();
   const compact = useCompactStore();
   const merge = useMergeStores();
@@ -40,11 +38,10 @@ export function StoresSettings({ dark }: { dark: boolean }) {
   const [cloneTarget, setCloneTarget] = useState<
     Record<string, { name: string; dir: string }>
   >({});
-  const [renameTarget, setRenameTarget] = useState<Record<string, string>>({});
   const [mergeTarget, setMergeTarget] = useState<Record<string, string>>({});
 
   // New store form state.
-  const [newId, setNewId] = useState("");
+  const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState("memory");
   const [newFilter, setNewFilter] = useState("");
   const [newPolicy, setNewPolicy] = useState("");
@@ -52,23 +49,23 @@ export function StoresSettings({ dark }: { dark: boolean }) {
   const [newParams, setNewParams] = useState<Record<string, string>>({});
 
   const stores = config?.stores ?? [];
-  const policies = config?.rotationPolicies ?? {};
-  const retentionPolicies = config?.retentionPolicies ?? {};
-  const filters = config?.filters ?? {};
+  const policies = config?.rotationPolicies ?? [];
+  const retentionPolicies = config?.retentionPolicies ?? [];
+  const filters = config?.filters ?? [];
 
   const filterOptions = [
     { value: "", label: "(none)" },
-    ...Object.keys(filters).map((id) => ({ value: id, label: id })),
+    ...filters.map((f) => ({ value: f.id, label: f.name || f.id })),
   ];
 
   const policyOptions = [
     { value: "", label: "(none)" },
-    ...Object.keys(policies).map((id) => ({ value: id, label: id })),
+    ...policies.map((p) => ({ value: p.id, label: p.name || p.id })),
   ];
 
   const retentionOptions = [
     { value: "", label: "(none)" },
-    ...Object.keys(retentionPolicies).map((id) => ({ value: id, label: id })),
+    ...retentionPolicies.map((r) => ({ value: r.id, label: r.name || r.id })),
   ];
 
   const defaults = useCallback(
@@ -111,6 +108,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
       },
     ) => ({
       id,
+      name: stores.find((s) => s.id === id)?.name ?? "",
       type: edit.type,
       filter: edit.filter,
       policy: edit.policy,
@@ -123,22 +121,23 @@ export function StoresSettings({ dark }: { dark: boolean }) {
   });
 
   const handleCreate = async () => {
-    if (!newId.trim()) {
-      addToast("Store ID is required", "warn");
+    if (!newName.trim()) {
+      addToast("Store name is required", "warn");
       return;
     }
     try {
       await putStore.mutateAsync({
-        id: newId.trim(),
+        id: "",
+        name: newName.trim(),
         type: newType,
         filter: newFilter,
         policy: newPolicy,
         retention: newRetention,
         params: newParams,
       });
-      addToast(`Store "${newId.trim()}" created`, "info");
+      addToast(`Store "${newName.trim()}" created`, "info");
       setAdding(false);
-      setNewId("");
+      setNewName("");
       setNewType("memory");
       setNewFilter("");
       setNewPolicy("");
@@ -168,13 +167,12 @@ export function StoresSettings({ dark }: { dark: boolean }) {
           isPending={putStore.isPending}
         >
           <div className="grid grid-cols-2 gap-3">
-            <FormField label="ID" dark={dark}>
+            <FormField label="Name" dark={dark}>
               <TextInput
-                value={newId}
-                onChange={setNewId}
+                value={newName}
+                onChange={setNewName}
                 placeholder="my-store"
                 dark={dark}
-                mono
               />
             </FormField>
             <FormField label="Type" dark={dark}>
@@ -226,10 +224,10 @@ export function StoresSettings({ dark }: { dark: boolean }) {
 
       {stores.map((store) => {
         const edit = getEdit(store.id);
-        const hasPolicy = store.policy && store.policy in policies;
-        const hasFilter = store.filter && store.filter in filters;
+        const hasPolicy = store.policy && policies.some((p) => p.id === store.policy);
+        const hasFilter = store.filter && filters.some((f) => f.id === store.filter);
         const hasRetention =
-          store.retention && store.retention in retentionPolicies;
+          store.retention && retentionPolicies.some((r) => r.id === store.retention);
         const warnings = [
           ...(!hasPolicy ? ["no rotation policy"] : []),
           ...(!hasRetention ? ["no retention policy"] : []),
@@ -238,7 +236,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
         return (
           <SettingsCard
             key={store.id}
-            id={store.id}
+            id={store.name || store.id}
             typeBadge={store.type}
             dark={dark}
             expanded={expanded === store.id}
@@ -319,22 +317,6 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                     "border-light-border-subtle text-light-text-muted hover:bg-light-hover",
                   )}`}
                   onClick={() => {
-                    setRenameTarget((prev) =>
-                      prev[store.id] !== undefined
-                        ? Object.fromEntries(Object.entries(prev).filter(([k]) => k !== store.id))
-                        : { ...prev, [store.id]: "" },
-                    );
-                  }}
-                >
-                  {renameTarget[store.id] !== undefined ? "Cancel Rename" : "Rename"}
-                </button>
-                <button
-                  type="button"
-                  className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
-                    "border-ink-border-subtle text-text-muted hover:bg-ink-hover",
-                    "border-light-border-subtle text-light-text-muted hover:bg-light-hover",
-                  )}`}
-                  onClick={() => {
                     setMergeTarget((prev) =>
                       prev[store.id] !== undefined
                         ? Object.fromEntries(Object.entries(prev).filter(([k]) => k !== store.id))
@@ -352,11 +334,11 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                   )}`}
                   disabled={decommission.isPending}
                   onClick={async () => {
-                    if (!confirm(`Decommission store "${store.id}"? This will permanently delete all data.`)) return;
+                    if (!confirm(`Decommission store "${store.name || store.id}"? This will permanently delete all data.`)) return;
                     try {
                       const result = await decommission.mutateAsync(store.id);
                       addToast(
-                        `Decommissioned "${store.id}" (${result.chunksRemoved} chunk(s) removed)`,
+                        `Decommissioned "${store.name || store.id}" (${result.chunksRemoved} chunk(s) removed)`,
                         "info",
                       );
                     } catch (err: any) {
@@ -527,53 +509,6 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                   </div>
                 </div>
               )}
-              {renameTarget[store.id] !== undefined && (
-                <div
-                  className={`flex flex-col gap-3 p-3 rounded border ${c(
-                    "border-ink-border-subtle bg-ink-raised",
-                    "border-light-border-subtle bg-light-bg",
-                  )}`}
-                >
-                  <div
-                    className={`text-[0.75em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-                  >
-                    Rename Store
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <FormField label="New ID" dark={dark}>
-                      <TextInput
-                        value={renameTarget[store.id]}
-                        onChange={(v) =>
-                          setRenameTarget((prev) => ({ ...prev, [store.id]: v }))
-                        }
-                        placeholder="new-store-id"
-                        dark={dark}
-                        mono
-                      />
-                    </FormField>
-                  </div>
-                  <div className="flex justify-end">
-                    <PrimaryButton
-                      disabled={rename.isPending || !renameTarget[store.id].trim()}
-                      onClick={async () => {
-                        const newId = renameTarget[store.id].trim();
-                        if (!newId) return;
-                        try {
-                          await rename.mutateAsync({ oldId: store.id, newId });
-                          addToast(`Renamed "${store.id}" to "${newId}"`, "info");
-                          setRenameTarget((prev) =>
-                            Object.fromEntries(Object.entries(prev).filter(([k]) => k !== store.id)),
-                          );
-                        } catch (err: any) {
-                          addToast(err.message ?? "Rename failed", "error");
-                        }
-                      }}
-                    >
-                      {rename.isPending ? "Renaming..." : "Rename"}
-                    </PrimaryButton>
-                  </div>
-                </div>
-              )}
               {mergeTarget[store.id] !== undefined && (
                 <div
                   className={`flex flex-col gap-3 p-3 rounded border ${c(
@@ -597,7 +532,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                           { value: "", label: "(select)" },
                           ...stores
                             .filter((s) => s.id !== store.id)
-                            .map((s) => ({ value: s.id, label: s.id })),
+                            .map((s) => ({ value: s.id, label: s.name || s.id })),
                         ]}
                         dark={dark}
                       />
@@ -609,14 +544,15 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                       onClick={async () => {
                         const dest = mergeTarget[store.id];
                         if (!dest) return;
-                        if (!confirm(`Merge all records from "${store.id}" into "${dest}"? This will delete "${store.id}" afterward.`)) return;
+                        const destName = stores.find((s) => s.id === dest)?.name || dest;
+                        if (!confirm(`Merge all records from "${store.name || store.id}" into "${destName}"? This will delete "${store.name || store.id}" afterward.`)) return;
                         try {
                           const result = await merge.mutateAsync({
                             source: store.id,
                             destination: dest,
                           });
                           addToast(
-                            `Merged ${result.recordsMerged} record(s) into "${dest}"`,
+                            `Merged ${result.recordsMerged} record(s) into "${destName}"`,
                             "info",
                           );
                           setMergeTarget((prev) =>

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
@@ -53,12 +54,7 @@ func (s *ConfigServer) GetConfig(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetConfigRequest],
 ) (*connect.Response[apiv1.GetConfigResponse], error) {
-	resp := &apiv1.GetConfigResponse{
-		Stores:           make([]*apiv1.StoreConfig, 0),
-		Ingesters:        make([]*apiv1.IngesterConfig, 0),
-		RotationPolicies: make(map[string]*apiv1.RotationPolicyConfig),
-		Filters:          make(map[string]*apiv1.FilterConfig),
-	}
+	resp := &apiv1.GetConfigResponse{}
 
 	if s.cfgStore != nil {
 		// Get store configs from config store.
@@ -66,9 +62,10 @@ func (s *ConfigServer) GetConfig(
 		if err == nil {
 			for _, storeCfg := range cfgStores {
 				sc := &apiv1.StoreConfig{
-					Id:     storeCfg.ID,
-					Type:   storeCfg.Type,
-					Params: storeCfg.Params,
+					Id:      storeCfg.ID,
+					Name:    storeCfg.Name,
+					Type:    storeCfg.Type,
+					Params:  storeCfg.Params,
 					Enabled: storeCfg.Enabled,
 				}
 				if storeCfg.Filter != nil {
@@ -90,6 +87,7 @@ func (s *ConfigServer) GetConfig(
 			for _, ing := range ingesters {
 				resp.Ingesters = append(resp.Ingesters, &apiv1.IngesterConfig{
 					Id:      ing.ID,
+					Name:    ing.Name,
 					Type:    ing.Type,
 					Params:  ing.Params,
 					Enabled: ing.Enabled,
@@ -100,25 +98,34 @@ func (s *ConfigServer) GetConfig(
 		// Get filters from config store.
 		filters, err := s.cfgStore.ListFilters(ctx)
 		if err == nil {
-			for id, fc := range filters {
-				resp.Filters[id] = &apiv1.FilterConfig{Expression: fc.Expression}
+			for _, fc := range filters {
+				resp.Filters = append(resp.Filters, &apiv1.FilterConfig{
+					Id:         fc.ID,
+					Name:       fc.Name,
+					Expression: fc.Expression,
+				})
 			}
 		}
 
 		// Get rotation policies from config store.
 		policies, err := s.cfgStore.ListRotationPolicies(ctx)
 		if err == nil {
-			for id, pol := range policies {
-				resp.RotationPolicies[id] = rotationPolicyToProto(pol)
+			for _, pol := range policies {
+				p := rotationPolicyToProto(pol)
+				p.Id = pol.ID
+				p.Name = pol.Name
+				resp.RotationPolicies = append(resp.RotationPolicies, p)
 			}
 		}
 
 		// Get retention policies from config store.
 		retPolicies, err := s.cfgStore.ListRetentionPolicies(ctx)
 		if err == nil {
-			resp.RetentionPolicies = make(map[string]*apiv1.RetentionPolicyConfig)
-			for id, pol := range retPolicies {
-				resp.RetentionPolicies[id] = retentionPolicyToProto(pol)
+			for _, pol := range retPolicies {
+				p := retentionPolicyToProto(pol)
+				p.Id = pol.ID
+				p.Name = pol.Name
+				resp.RetentionPolicies = append(resp.RetentionPolicies, p)
 			}
 		}
 	}
@@ -131,11 +138,11 @@ func (s *ConfigServer) PutFilter(
 	ctx context.Context,
 	req *connect.Request[apiv1.PutFilterRequest],
 ) (*connect.Response[apiv1.PutFilterResponse], error) {
-	if req.Msg.Id == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
-	}
 	if req.Msg.Config == nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("config required"))
+	}
+	if req.Msg.Config.Id == "" {
+		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
 	}
 
 	// Validate expression by trying to compile it.
@@ -143,8 +150,8 @@ func (s *ConfigServer) PutFilter(
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid filter expression: %w", err))
 	}
 
-	cfg := config.FilterConfig{Expression: req.Msg.Config.Expression}
-	if err := s.cfgStore.PutFilter(ctx, req.Msg.Id, cfg); err != nil {
+	cfg := config.FilterConfig{ID: req.Msg.Config.Id, Name: req.Msg.Config.Name, Expression: req.Msg.Config.Expression}
+	if err := s.cfgStore.PutFilter(ctx, cfg); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
@@ -195,13 +202,17 @@ func (s *ConfigServer) ListIngesters(
 ) (*connect.Response[apiv1.ListIngestersResponse], error) {
 	ids := s.orch.ListIngesters()
 
-	// Build type lookup from config.
-	typeMap := make(map[string]string)
+	// Build type and name lookup from config.
+	type ingMeta struct {
+		typ  string
+		name string
+	}
+	metaMap := make(map[string]ingMeta)
 	if s.cfgStore != nil {
 		ingesters, err := s.cfgStore.ListIngesters(ctx)
 		if err == nil {
 			for _, ing := range ingesters {
-				typeMap[ing.ID] = ing.Type
+				metaMap[ing.ID] = ingMeta{typ: ing.Type, name: ing.Name}
 			}
 		}
 	}
@@ -211,9 +222,11 @@ func (s *ConfigServer) ListIngesters(
 	}
 
 	for _, id := range ids {
+		m := metaMap[id]
 		resp.Ingesters = append(resp.Ingesters, &apiv1.IngesterInfo{
 			Id:      id,
-			Type:    typeMap[id],
+			Name:    m.name,
+			Type:    m.typ,
 			Running: s.orch.IsRunning(),
 		})
 	}
@@ -274,11 +287,11 @@ func (s *ConfigServer) PutRotationPolicy(
 	ctx context.Context,
 	req *connect.Request[apiv1.PutRotationPolicyRequest],
 ) (*connect.Response[apiv1.PutRotationPolicyResponse], error) {
-	if req.Msg.Id == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
-	}
 	if req.Msg.Config == nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("config required"))
+	}
+	if req.Msg.Config.Id == "" {
+		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
 	}
 
 	cfg := protoToRotationPolicy(req.Msg.Config)
@@ -291,7 +304,7 @@ func (s *ConfigServer) PutRotationPolicy(
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	if err := s.cfgStore.PutRotationPolicy(ctx, req.Msg.Id, cfg); err != nil {
+	if err := s.cfgStore.PutRotationPolicy(ctx, cfg); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
@@ -342,11 +355,11 @@ func (s *ConfigServer) PutRetentionPolicy(
 	ctx context.Context,
 	req *connect.Request[apiv1.PutRetentionPolicyRequest],
 ) (*connect.Response[apiv1.PutRetentionPolicyResponse], error) {
-	if req.Msg.Id == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
-	}
 	if req.Msg.Config == nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("config required"))
+	}
+	if req.Msg.Config.Id == "" {
+		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
 	}
 
 	cfg := protoToRetentionPolicy(req.Msg.Config)
@@ -356,7 +369,7 @@ func (s *ConfigServer) PutRetentionPolicy(
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid retention policy: %w", err))
 	}
 
-	if err := s.cfgStore.PutRetentionPolicy(ctx, req.Msg.Id, cfg); err != nil {
+	if err := s.cfgStore.PutRetentionPolicy(ctx, cfg); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
@@ -459,7 +472,7 @@ func (s *ConfigServer) PutStore(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("config required"))
 	}
 	if req.Msg.Config.Id == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store id required"))
+		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
 	}
 	if req.Msg.Config.Type == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store type required"))
@@ -591,7 +604,7 @@ func (s *ConfigServer) PutIngester(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("config required"))
 	}
 	if req.Msg.Config.Id == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("ingester id required"))
+		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
 	}
 	if req.Msg.Config.Type == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("ingester type required"))
@@ -599,6 +612,7 @@ func (s *ConfigServer) PutIngester(
 
 	ingCfg := config.IngesterConfig{
 		ID:      req.Msg.Config.Id,
+		Name:    req.Msg.Config.Name,
 		Type:    req.Msg.Config.Type,
 		Enabled: req.Msg.Config.Enabled,
 		Params:  req.Msg.Config.Params,
@@ -742,40 +756,6 @@ func (s *ConfigServer) ResumeStore(
 	}
 
 	return connect.NewResponse(&apiv1.ResumeStoreResponse{}), nil
-}
-
-// RenameStore changes a store's ID.
-func (s *ConfigServer) RenameStore(
-	ctx context.Context,
-	req *connect.Request[apiv1.RenameStoreRequest],
-) (*connect.Response[apiv1.RenameStoreResponse], error) {
-	if req.Msg.OldId == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("old_id required"))
-	}
-	if req.Msg.NewId == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("new_id required"))
-	}
-	if req.Msg.OldId == req.Msg.NewId {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("old_id and new_id must differ"))
-	}
-
-	// Rename in orchestrator (validates existence and uniqueness).
-	if err := s.orch.RenameStore(req.Msg.OldId, req.Msg.NewId); err != nil {
-		if errors.Is(err, orchestrator.ErrStoreNotFound) {
-			return nil, connect.NewError(connect.CodeNotFound, err)
-		}
-		if errors.Is(err, orchestrator.ErrDuplicateID) {
-			return nil, connect.NewError(connect.CodeAlreadyExists, err)
-		}
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-
-	// Rename in config store.
-	if err := s.cfgStore.RenameStore(ctx, req.Msg.OldId, req.Msg.NewId); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-
-	return connect.NewResponse(&apiv1.RenameStoreResponse{}), nil
 }
 
 // DecommissionStore disables a store and force-deletes it.
@@ -948,9 +928,10 @@ func retentionPolicyToProto(cfg config.RetentionPolicyConfig) *apiv1.RetentionPo
 // protoToStoreConfig converts a proto StoreConfig to a config.StoreConfig.
 func protoToStoreConfig(p *apiv1.StoreConfig) config.StoreConfig {
 	cfg := config.StoreConfig{
-		ID:     p.Id,
-		Type:   p.Type,
-		Params: p.Params,
+		ID:      p.Id,
+		Name:    p.Name,
+		Type:    p.Type,
+		Params:  p.Params,
 		Enabled: p.Enabled,
 	}
 	if p.Filter != "" {
@@ -1083,7 +1064,7 @@ func (s *ConfigServer) GetPreferences(
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("not authenticated"))
 	}
 
-	key := "user:" + claims.Username() + ":prefs"
+	key := "user:" + claims.UserID + ":prefs"
 	raw, err := s.cfgStore.GetSetting(ctx, key)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -1119,7 +1100,7 @@ func (s *ConfigServer) PutPreferences(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	key := "user:" + claims.Username() + ":prefs"
+	key := "user:" + claims.UserID + ":prefs"
 	if err := s.cfgStore.PutSetting(ctx, key, string(data)); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -1143,7 +1124,7 @@ func (s *ConfigServer) GetSavedQueries(
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("not authenticated"))
 	}
 
-	key := "user:" + claims.Username() + ":saved_queries"
+	key := "user:" + claims.UserID + ":saved_queries"
 	raw, err := s.cfgStore.GetSetting(ctx, key)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -1179,7 +1160,7 @@ func (s *ConfigServer) PutSavedQuery(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("query name required"))
 	}
 
-	key := "user:" + claims.Username() + ":saved_queries"
+	key := "user:" + claims.UserID + ":saved_queries"
 	raw, err := s.cfgStore.GetSetting(ctx, key)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -1232,7 +1213,7 @@ func (s *ConfigServer) DeleteSavedQuery(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("query name required"))
 	}
 
-	key := "user:" + claims.Username() + ":saved_queries"
+	key := "user:" + claims.UserID + ":saved_queries"
 	raw, err := s.cfgStore.GetSetting(ctx, key)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -1278,19 +1259,13 @@ func (s *ConfigServer) reloadCertManager(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("load server config: %w", err)
 	}
-	names, err := s.cfgStore.ListCertificates(ctx)
+	certList, err := s.cfgStore.ListCertificates(ctx)
 	if err != nil {
 		return fmt.Errorf("list certificates: %w", err)
 	}
-	certs := make(map[string]cert.CertSource, len(names))
-	for _, name := range names {
-		pem, err := s.cfgStore.GetCertificate(ctx, name)
-		if err != nil {
-			return fmt.Errorf("get certificate %q: %w", name, err)
-		}
-		if pem != nil {
-			certs[name] = cert.CertSource{CertPEM: pem.CertPEM, KeyPEM: pem.KeyPEM, CertFile: pem.CertFile, KeyFile: pem.KeyFile}
-		}
+	certs := make(map[string]cert.CertSource, len(certList))
+	for _, c := range certList {
+		certs[c.Name] = cert.CertSource{CertPEM: c.CertPEM, KeyPEM: c.KeyPEM, CertFile: c.CertFile, KeyFile: c.KeyFile}
 	}
 	return s.certManager.LoadFromConfig(sc.TLS.DefaultCert, certs)
 }
@@ -1300,22 +1275,40 @@ func (s *ConfigServer) ListCertificates(
 	ctx context.Context,
 	req *connect.Request[apiv1.ListCertificatesRequest],
 ) (*connect.Response[apiv1.ListCertificatesResponse], error) {
-	names, err := s.cfgStore.ListCertificates(ctx)
+	certs, err := s.cfgStore.ListCertificates(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	return connect.NewResponse(&apiv1.ListCertificatesResponse{Names: names}), nil
+	infos := make([]*apiv1.CertificateInfo, len(certs))
+	for i, c := range certs {
+		infos[i] = &apiv1.CertificateInfo{Id: c.ID, Name: c.Name}
+	}
+	return connect.NewResponse(&apiv1.ListCertificatesResponse{Certificates: infos}), nil
 }
 
-// GetCertificate returns a certificate by name.
+// findCertByName returns the certificate with the given name, or nil if not found.
+func (s *ConfigServer) findCertByName(ctx context.Context, name string) (*config.CertPEM, error) {
+	certs, err := s.cfgStore.ListCertificates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range certs {
+		if c.Name == name {
+			return &c, nil
+		}
+	}
+	return nil, nil
+}
+
+// GetCertificate returns a certificate by ID.
 func (s *ConfigServer) GetCertificate(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetCertificateRequest],
 ) (*connect.Response[apiv1.GetCertificateResponse], error) {
-	if req.Msg.Name == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name required"))
+	if req.Msg.Id == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
 	}
-	pem, err := s.cfgStore.GetCertificate(ctx, req.Msg.Name)
+	pem, err := s.cfgStore.GetCertificate(ctx, req.Msg.Id)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -1323,7 +1316,8 @@ func (s *ConfigServer) GetCertificate(
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("certificate not found"))
 	}
 	return connect.NewResponse(&apiv1.GetCertificateResponse{
-		Name:     req.Msg.Name,
+		Id:       pem.ID,
+		Name:     pem.Name,
 		CertPem:  pem.CertPEM,
 		KeyPem:   "", // Never expose private keys via API
 		CertFile: pem.CertFile,
@@ -1340,8 +1334,14 @@ func (s *ConfigServer) PutCertificate(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name required"))
 	}
 
-	// Load existing cert for key-reuse logic.
-	existing, err := s.cfgStore.GetCertificate(ctx, req.Msg.Name)
+	// Load existing cert by ID (if given) or by name for key-reuse logic.
+	var existing *config.CertPEM
+	var err error
+	if req.Msg.Id != "" {
+		existing, err = s.cfgStore.GetCertificate(ctx, req.Msg.Id)
+	} else {
+		existing, err = s.findCertByName(ctx, req.Msg.Name)
+	}
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -1380,13 +1380,24 @@ func (s *ConfigServer) PutCertificate(
 		}
 	}
 
+	// Reuse request ID, fall back to existing ID, then generate new UUID.
+	certID := req.Msg.Id
+	if certID == "" {
+		certID = existing.ID
+	}
+	if certID == "" {
+		certID = uuid.Must(uuid.NewV7()).String()
+	}
+
 	newCert := config.CertPEM{
+		ID:       certID,
+		Name:     req.Msg.Name,
 		CertPEM:  req.Msg.CertPem,
 		KeyPEM:   keyPEM,
 		CertFile: req.Msg.CertFile,
 		KeyFile:  req.Msg.KeyFile,
 	}
-	if err := s.cfgStore.PutCertificate(ctx, req.Msg.Name, newCert); err != nil {
+	if err := s.cfgStore.PutCertificate(ctx, newCert); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
@@ -1416,17 +1427,17 @@ func (s *ConfigServer) DeleteCertificate(
 	ctx context.Context,
 	req *connect.Request[apiv1.DeleteCertificateRequest],
 ) (*connect.Response[apiv1.DeleteCertificateResponse], error) {
-	if req.Msg.Name == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name required"))
+	if req.Msg.Id == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
 	}
-	pem, err := s.cfgStore.GetCertificate(ctx, req.Msg.Name)
+	pem, err := s.cfgStore.GetCertificate(ctx, req.Msg.Id)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	if pem == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("certificate not found"))
 	}
-	if err := s.cfgStore.DeleteCertificate(ctx, req.Msg.Name); err != nil {
+	if err := s.cfgStore.DeleteCertificate(ctx, req.Msg.Id); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
@@ -1435,7 +1446,7 @@ func (s *ConfigServer) DeleteCertificate(
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	if sc.TLS.DefaultCert == req.Msg.Name {
+	if sc.TLS.DefaultCert == pem.Name {
 		sc.TLS.DefaultCert = ""
 		sc.TLS.TLSEnabled = false
 		sc.TLS.HTTPToHTTPSRedirect = false

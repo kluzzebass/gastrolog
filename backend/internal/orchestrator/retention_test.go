@@ -93,8 +93,8 @@ func (f *retentionFakeIndexManager) IndexSizes(chunkID chunk.ChunkID) map[string
 
 // ---------- helpers ----------
 
-func chunkIDAt(t time.Time) chunk.ChunkID {
-	return chunk.ChunkIDFromTime(t)
+func chunkIDAt(_ time.Time) chunk.ChunkID {
+	return chunk.NewChunkID()
 }
 
 func newRetentionRunner(cm chunk.ChunkManager, im index.IndexManager, policy chunk.RetentionPolicy) *retentionRunner {

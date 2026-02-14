@@ -68,7 +68,7 @@ func TestIntegration_RegisterThenDeny(t *testing.T) {
 	}
 
 	// With a valid token, it should pass.
-	token, _, err := tokens.Issue("admin", "admin")
+	token, _, err := tokens.Issue("uid-admin", "admin", "admin")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}

@@ -42,7 +42,7 @@ export function StoresPanel({ dark }: { dark: boolean }) {
       {stores.map((store) => (
         <ExpandableCard
           key={store.id}
-          id={store.id}
+          id={store.name || store.id}
           typeBadge={store.type}
           typeBadgeAccent
           dark={dark}

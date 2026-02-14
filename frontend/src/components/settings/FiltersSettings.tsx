@@ -56,15 +56,15 @@ export function FiltersSettings({ dark }: { dark: boolean }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
-  const [newId, setNewId] = useState("");
+  const [newName, setNewName] = useState("");
   const [newExpression, setNewExpression] = useState("");
 
-  const filters = config?.filters ?? {};
+  const filters = config?.filters ?? [];
   const stores = config?.stores ?? [];
 
   const defaults = useCallback(
     (id: string) => {
-      const fc = filters[id];
+      const fc = filters.find((f) => f.id === id);
       if (!fc) return { expression: "" };
       return { expression: fc.expression };
     },
@@ -79,6 +79,7 @@ export function FiltersSettings({ dark }: { dark: boolean }) {
     label: "Filter",
     onSaveTransform: (id, edit: { expression: string }) => ({
       id,
+      name: filters.find((f) => f.id === id)?.name ?? "",
       expression: edit.expression,
     }),
     onDeleteCheck: (id) => {
@@ -93,18 +94,19 @@ export function FiltersSettings({ dark }: { dark: boolean }) {
   const handleSave = (id: string) => saveFilter(id, getEdit(id));
 
   const handleCreate = async () => {
-    if (!newId.trim()) {
-      addToast("Filter ID is required", "warn");
+    if (!newName.trim()) {
+      addToast("Filter name is required", "warn");
       return;
     }
     try {
       await putFilter.mutateAsync({
-        id: newId.trim(),
+        id: "",
+        name: newName.trim(),
         expression: newExpression,
       });
-      addToast(`Filter "${newId.trim()}" created`, "info");
+      addToast(`Filter "${newName.trim()}" created`, "info");
       setAdding(false);
-      setNewId("");
+      setNewName("");
       setNewExpression("");
     } catch (err: any) {
       addToast(err.message ?? "Failed to create filter", "error");
@@ -119,7 +121,7 @@ export function FiltersSettings({ dark }: { dark: boolean }) {
       adding={adding}
       onToggleAdd={() => setAdding(!adding)}
       isLoading={isLoading}
-      isEmpty={Object.keys(filters).length === 0}
+      isEmpty={filters.length === 0}
       emptyMessage='No filters configured. Click "Add Filter" to create one.'
       dark={dark}
     >
@@ -130,13 +132,12 @@ export function FiltersSettings({ dark }: { dark: boolean }) {
           onCreate={handleCreate}
           isPending={putFilter.isPending}
         >
-          <FormField label="ID" dark={dark}>
+          <FormField label="Name" dark={dark}>
             <TextInput
-              value={newId}
-              onChange={setNewId}
+              value={newName}
+              onChange={setNewName}
               placeholder="catch-all"
               dark={dark}
-              mono
             />
           </FormField>
           <FormField
@@ -155,13 +156,14 @@ export function FiltersSettings({ dark }: { dark: boolean }) {
         </AddFormCard>
       )}
 
-      {Object.entries(filters).map(([id]) => {
+      {filters.map((fc) => {
+        const id = fc.id;
         const edit = getEdit(id);
         const refs = refsFor(stores, "filter", id);
         return (
           <SettingsCard
             key={id}
-            id={id}
+            id={fc.name || id}
             dark={dark}
             expanded={expanded === id}
             onToggle={() => setExpanded(expanded === id ? null : id)}

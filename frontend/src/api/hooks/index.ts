@@ -30,7 +30,6 @@ export {
   useDeleteStore,
   usePauseStore,
   useResumeStore,
-  useRenameStore,
   useDecommissionStore,
   usePutIngester,
   useDeleteIngester,

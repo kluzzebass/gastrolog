@@ -16,9 +16,10 @@ func metaAt(id ChunkID, start, end time.Time, bytes int64) ChunkMeta {
 	}
 }
 
-// Helper to create deterministic ChunkIDs from a time.
-func idAt(t time.Time) ChunkID {
-	return ChunkIDFromTime(t)
+// idAt creates a unique ChunkID. The time parameter is unused but kept
+// for test readability — UUIDv7 IDs are monotonic by creation order.
+func idAt(_ time.Time) ChunkID {
+	return NewChunkID()
 }
 
 // collectIDs extracts just the ChunkIDs from a slice for comparison.

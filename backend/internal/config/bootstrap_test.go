@@ -16,9 +16,9 @@ func TestDefaultConfig(t *testing.T) {
 	if len(cfg.RotationPolicies) != 1 {
 		t.Errorf("expected 1 rotation policy, got %d", len(cfg.RotationPolicies))
 	}
-	rp, ok := cfg.RotationPolicies["default"]
-	if !ok {
-		t.Fatal("expected 'default' rotation policy")
+	rp := cfg.RotationPolicies[0]
+	if rp.Name != "default" {
+		t.Fatalf("expected rotation policy name 'default', got %q", rp.Name)
 	}
 	if rp.MaxAge == nil || *rp.MaxAge != "5m" {
 		t.Errorf("expected MaxAge '5m', got %v", rp.MaxAge)
@@ -32,8 +32,8 @@ func TestDefaultConfig(t *testing.T) {
 	if len(cfg.Ingesters) != 1 {
 		t.Errorf("expected 1 ingester, got %d", len(cfg.Ingesters))
 	}
-	if cfg.Ingesters[0].ID != "chatterbox" {
-		t.Errorf("expected ingester ID 'chatterbox', got %q", cfg.Ingesters[0].ID)
+	if cfg.Ingesters[0].Name != "chatterbox" {
+		t.Errorf("expected ingester name 'chatterbox', got %q", cfg.Ingesters[0].Name)
 	}
 }
 

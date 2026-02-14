@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
@@ -89,8 +90,10 @@ func (s *AuthServer) Register(
 	}
 
 	// Create first user as admin.
+	userID := uuid.Must(uuid.NewV7()).String()
 	now := time.Now().UTC()
 	user := config.User{
+		ID:           userID,
 		Username:     username,
 		PasswordHash: hash,
 		Role:         "admin",
@@ -102,7 +105,7 @@ func (s *AuthServer) Register(
 	}
 
 	// Issue token.
-	token, expiresAt, err := s.tokens.Issue(username, "admin")
+	token, expiresAt, err := s.tokens.Issue(userID, username, "admin")
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("issue token: %w", err))
 	}
@@ -123,7 +126,7 @@ func (s *AuthServer) Login(
 	username := req.Msg.Username
 	password := req.Msg.Password
 
-	user, err := s.cfgStore.GetUser(ctx, username)
+	user, err := s.cfgStore.GetUserByUsername(ctx, username)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get user: %w", err))
 	}
@@ -139,7 +142,7 @@ func (s *AuthServer) Login(
 		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("invalid credentials"))
 	}
 
-	token, expiresAt, err := s.tokens.Issue(username, user.Role)
+	token, expiresAt, err := s.tokens.Issue(user.ID, username, user.Role)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("issue token: %w", err))
 	}
@@ -173,7 +176,7 @@ func (s *AuthServer) ChangePassword(
 	}
 
 	// Verify old password.
-	user, err := s.cfgStore.GetUser(ctx, username)
+	user, err := s.cfgStore.GetUserByUsername(ctx, username)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get user: %w", err))
 	}
@@ -195,7 +198,7 @@ func (s *AuthServer) ChangePassword(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("hash password: %w", err))
 	}
 
-	if err := s.cfgStore.UpdatePassword(ctx, username, hash); err != nil {
+	if err := s.cfgStore.UpdatePassword(ctx, user.ID, hash); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update password: %w", err))
 	}
 
@@ -241,7 +244,7 @@ func (s *AuthServer) CreateUser(
 			fmt.Errorf("role must be \"admin\" or \"user\""))
 	}
 
-	existing, err := s.cfgStore.GetUser(ctx, username)
+	existing, err := s.cfgStore.GetUserByUsername(ctx, username)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("check user: %w", err))
 	}
@@ -256,6 +259,7 @@ func (s *AuthServer) CreateUser(
 
 	now := time.Now().UTC()
 	user := config.User{
+		ID:           uuid.Must(uuid.NewV7()).String(),
 		Username:     username,
 		PasswordHash: hash,
 		Role:         role,
@@ -296,19 +300,31 @@ func (s *AuthServer) UpdateUserRole(
 	ctx context.Context,
 	req *connect.Request[apiv1.UpdateUserRoleRequest],
 ) (*connect.Response[apiv1.UpdateUserRoleResponse], error) {
-	username := req.Msg.Username
+	userID := req.Msg.Id
 	role := req.Msg.Role
 
+	if userID == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("id required"))
+	}
 	if role != "admin" && role != "user" {
 		return nil, connect.NewError(connect.CodeInvalidArgument,
 			fmt.Errorf("role must be \"admin\" or \"user\""))
 	}
 
-	if err := s.cfgStore.UpdateUserRole(ctx, username, role); err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("update role: %w", err))
+	user, err := s.cfgStore.GetUser(ctx, userID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get user: %w", err))
+	}
+	if user == nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user %q not found", userID))
 	}
 
-	user, err := s.cfgStore.GetUser(ctx, username)
+	if err := s.cfgStore.UpdateUserRole(ctx, userID, role); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update role: %w", err))
+	}
+
+	// Re-fetch to get the updated user.
+	user, err = s.cfgStore.GetUser(ctx, userID)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get user: %w", err))
 	}
@@ -323,20 +339,23 @@ func (s *AuthServer) ResetPassword(
 	ctx context.Context,
 	req *connect.Request[apiv1.ResetPasswordRequest],
 ) (*connect.Response[apiv1.ResetPasswordResponse], error) {
-	username := req.Msg.Username
+	userID := req.Msg.Id
 	newPassword := req.Msg.NewPassword
 
+	if userID == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("id required"))
+	}
 	if minLen := s.minPasswordLength(ctx); utf8.RuneCountInString(newPassword) < minLen {
 		return nil, connect.NewError(connect.CodeInvalidArgument,
 			fmt.Errorf("password must be at least %d characters", minLen))
 	}
 
-	user, err := s.cfgStore.GetUser(ctx, username)
+	user, err := s.cfgStore.GetUser(ctx, userID)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get user: %w", err))
 	}
 	if user == nil {
-		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user %q not found", username))
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user %q not found", userID))
 	}
 
 	hash, err := auth.HashPassword(newPassword)
@@ -344,7 +363,7 @@ func (s *AuthServer) ResetPassword(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("hash password: %w", err))
 	}
 
-	if err := s.cfgStore.UpdatePassword(ctx, username, hash); err != nil {
+	if err := s.cfgStore.UpdatePassword(ctx, userID, hash); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update password: %w", err))
 	}
 
@@ -357,15 +376,19 @@ func (s *AuthServer) DeleteUser(
 	ctx context.Context,
 	req *connect.Request[apiv1.DeleteUserRequest],
 ) (*connect.Response[apiv1.DeleteUserResponse], error) {
-	username := req.Msg.Username
+	userID := req.Msg.Id
+
+	if userID == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("id required"))
+	}
 
 	// Prevent self-deletion.
-	if claims := auth.ClaimsFromContext(ctx); claims != nil && claims.Username() == username {
+	if claims := auth.ClaimsFromContext(ctx); claims != nil && claims.UserID == userID {
 		return nil, connect.NewError(connect.CodeInvalidArgument,
 			fmt.Errorf("cannot delete your own account"))
 	}
 
-	if err := s.cfgStore.DeleteUser(ctx, username); err != nil {
+	if err := s.cfgStore.DeleteUser(ctx, userID); err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("delete user: %w", err))
 	}
 
@@ -375,6 +398,7 @@ func (s *AuthServer) DeleteUser(
 // userToProto converts a config.User to a proto UserInfo, stripping the password hash.
 func userToProto(u config.User) *apiv1.UserInfo {
 	return &apiv1.UserInfo{
+		Id:        u.ID,
 		Username:  u.Username,
 		Role:      u.Role,
 		CreatedAt: u.CreatedAt.Unix(),

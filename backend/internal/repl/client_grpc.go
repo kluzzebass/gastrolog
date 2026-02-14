@@ -167,14 +167,14 @@ func (c *GRPCClient) Follow(ctx context.Context, store string, q query.Query) (i
 	return seq, nil
 }
 
-func (c *GRPCClient) ListStores() []string {
+func (c *GRPCClient) ListStores() []StoreInfo {
 	resp, err := c.store.ListStores(context.Background(), connect.NewRequest(&apiv1.ListStoresRequest{}))
 	if err != nil {
 		return nil
 	}
-	stores := make([]string, len(resp.Msg.Stores))
+	stores := make([]StoreInfo, len(resp.Msg.Stores))
 	for i, s := range resp.Msg.Stores {
-		stores[i] = s.Id
+		stores[i] = StoreInfo{ID: s.Id, Name: s.Name}
 	}
 	return stores
 }
@@ -349,20 +349,20 @@ func resumeTokenToBytes(token *query.ResumeToken) []byte {
 	if token == nil {
 		return nil
 	}
-	// Simple encoding: chunkID (8 bytes) + recordPos (8 bytes)
-	buf := make([]byte, 16)
-	copy(buf[:8], token.Next.ChunkID[:])
-	binary.BigEndian.PutUint64(buf[8:], token.Next.Pos)
+	// Simple encoding: chunkID (16 bytes) + recordPos (8 bytes)
+	buf := make([]byte, 24)
+	copy(buf[:16], token.Next.ChunkID[:])
+	binary.BigEndian.PutUint64(buf[16:], token.Next.Pos)
 	return buf
 }
 
 func bytesToResumeToken(data []byte) *query.ResumeToken {
-	if len(data) < 16 {
+	if len(data) < 24 {
 		return nil
 	}
 	var id chunk.ChunkID
-	copy(id[:], data[:8])
-	pos := binary.BigEndian.Uint64(data[8:])
+	copy(id[:], data[:16])
+	pos := binary.BigEndian.Uint64(data[16:])
 	return &query.ResumeToken{
 		Next: chunk.RecordRef{
 			ChunkID: id,

@@ -57,8 +57,7 @@ func TestDeleteStoreForce(t *testing.T) {
 
 	// Create a filter first, then a store that uses it.
 	_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-		Id:     "catch-all",
-		Config: &gastrologv1.FilterConfig{Expression: "*"},
+		Config: &gastrologv1.FilterConfig{Id: "catch-all", Expression: "*"},
 	}))
 	if err != nil {
 		t.Fatalf("PutFilter: %v", err)
@@ -231,8 +230,7 @@ func TestPauseResumeStoreRPC(t *testing.T) {
 
 	// Create a filter and a store.
 	_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-		Id:     "catch-all",
-		Config: &gastrologv1.FilterConfig{Expression: "*"},
+		Config: &gastrologv1.FilterConfig{Id: "catch-all", Expression: "*"},
 	}))
 	if err != nil {
 		t.Fatalf("PutFilter: %v", err)
@@ -330,8 +328,7 @@ func TestPauseStorePersistsToConfig(t *testing.T) {
 
 	// Create a filter and store.
 	_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-		Id:     "catch-all",
-		Config: &gastrologv1.FilterConfig{Expression: "*"},
+		Config: &gastrologv1.FilterConfig{Id: "catch-all", Expression: "*"},
 	}))
 	if err != nil {
 		t.Fatalf("PutFilter: %v", err)
@@ -381,127 +378,12 @@ func TestPauseStorePersistsToConfig(t *testing.T) {
 	}
 }
 
-func TestRenameStore(t *testing.T) {
-	client, cfgStore, orch := newConfigTestSetup(t)
-	ctx := context.Background()
-
-	// Create a filter and store.
-	_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-		Id:     "catch-all",
-		Config: &gastrologv1.FilterConfig{Expression: "*"},
-	}))
-	if err != nil {
-		t.Fatalf("PutFilter: %v", err)
-	}
-	_, err = client.PutStore(ctx, connect.NewRequest(&gastrologv1.PutStoreRequest{
-		Config: &gastrologv1.StoreConfig{
-			Id:     "old-name",
-			Type:   "memory",
-			Filter: "catch-all",
-		},
-	}))
-	if err != nil {
-		t.Fatalf("PutStore: %v", err)
-	}
-
-	// Ingest data.
-	if err := orch.Ingest(chunk.Record{Raw: []byte("test")}); err != nil {
-		t.Fatalf("Ingest: %v", err)
-	}
-
-	// Rename.
-	_, err = client.RenameStore(ctx, connect.NewRequest(&gastrologv1.RenameStoreRequest{
-		OldId: "old-name",
-		NewId: "new-name",
-	}))
-	if err != nil {
-		t.Fatalf("RenameStore: %v", err)
-	}
-
-	// Old name should be gone.
-	if cm := orch.ChunkManager("old-name"); cm != nil {
-		t.Error("old store name should not have a chunk manager")
-	}
-
-	// New name should have data.
-	cm := orch.ChunkManager("new-name")
-	if cm == nil {
-		t.Fatal("new store name should have a chunk manager")
-	}
-	if active := cm.Active(); active == nil {
-		t.Error("new store should have an active chunk with data")
-	}
-
-	// Config store should reflect rename.
-	old, _ := cfgStore.GetStore(ctx, "old-name")
-	if old != nil {
-		t.Error("old name should not exist in config store")
-	}
-	newCfg, _ := cfgStore.GetStore(ctx, "new-name")
-	if newCfg == nil {
-		t.Fatal("new name should exist in config store")
-	}
-	if newCfg.ID != "new-name" {
-		t.Errorf("expected config ID new-name, got %s", newCfg.ID)
-	}
-}
-
-func TestRenameStoreNotFound(t *testing.T) {
-	client, _, _ := newConfigTestSetup(t)
-	ctx := context.Background()
-
-	_, err := client.RenameStore(ctx, connect.NewRequest(&gastrologv1.RenameStoreRequest{
-		OldId: "nonexistent",
-		NewId: "anything",
-	}))
-	if err == nil {
-		t.Fatal("expected error for nonexistent store")
-	}
-	if connect.CodeOf(err) != connect.CodeNotFound {
-		t.Fatalf("expected NotFound, got %v", connect.CodeOf(err))
-	}
-}
-
-func TestRenameStoreDuplicate(t *testing.T) {
-	client, _, _ := newConfigTestSetup(t)
-	ctx := context.Background()
-
-	// Create two stores.
-	_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-		Id:     "catch-all",
-		Config: &gastrologv1.FilterConfig{Expression: "*"},
-	}))
-	if err != nil {
-		t.Fatalf("PutFilter: %v", err)
-	}
-	for _, id := range []string{"store-a", "store-b"} {
-		_, err = client.PutStore(ctx, connect.NewRequest(&gastrologv1.PutStoreRequest{
-			Config: &gastrologv1.StoreConfig{Id: id, Type: "memory", Filter: "catch-all"},
-		}))
-		if err != nil {
-			t.Fatalf("PutStore(%s): %v", id, err)
-		}
-	}
-
-	_, err = client.RenameStore(ctx, connect.NewRequest(&gastrologv1.RenameStoreRequest{
-		OldId: "store-a",
-		NewId: "store-b",
-	}))
-	if err == nil {
-		t.Fatal("expected error for duplicate target name")
-	}
-	if connect.CodeOf(err) != connect.CodeAlreadyExists {
-		t.Fatalf("expected AlreadyExists, got %v", connect.CodeOf(err))
-	}
-}
-
 func TestDecommissionStore(t *testing.T) {
 	client, cfgStore, orch := newConfigTestSetup(t)
 	ctx := context.Background()
 
 	_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-		Id:     "catch-all",
-		Config: &gastrologv1.FilterConfig{Expression: "*"},
+		Config: &gastrologv1.FilterConfig{Id: "catch-all", Expression: "*"},
 	}))
 	if err != nil {
 		t.Fatalf("PutFilter: %v", err)

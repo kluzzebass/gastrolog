@@ -16,8 +16,8 @@ func TestEmbeddedClient_ListStores(t *testing.T) {
 	if len(stores) != 1 {
 		t.Fatalf("expected 1 store, got %d", len(stores))
 	}
-	if stores[0] != "default" {
-		t.Errorf("expected store 'default', got %q", stores[0])
+	if stores[0].ID != "default" {
+		t.Errorf("expected store ID 'default', got %q", stores[0].ID)
 	}
 }
 

@@ -108,6 +108,11 @@ export class StoreInfo extends Message<StoreInfo> {
    */
   enabled = false;
 
+  /**
+   * @generated from field: string name = 7;
+   */
+  name = "";
+
   constructor(data?: PartialMessage<StoreInfo>) {
     super();
     proto3.util.initPartial(data, this);
@@ -122,6 +127,7 @@ export class StoreInfo extends Message<StoreInfo> {
     { no: 4, name: "chunk_count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 5, name: "record_count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 6, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 7, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): StoreInfo {
@@ -964,6 +970,11 @@ export class StoreStats extends Message<StoreStats> {
    */
   enabled = false;
 
+  /**
+   * @generated from field: string name = 12;
+   */
+  name = "";
+
   constructor(data?: PartialMessage<StoreStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -983,6 +994,7 @@ export class StoreStats extends Message<StoreStats> {
     { no: 9, name: "oldest_record", kind: "message", T: Timestamp },
     { no: 10, name: "newest_record", kind: "message", T: Timestamp },
     { no: 11, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 12, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): StoreStats {

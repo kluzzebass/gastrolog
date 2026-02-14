@@ -195,8 +195,8 @@ func TestBuildHelperIndependentChunkIDs(t *testing.T) {
 	}
 
 	helper := index.NewBuildHelper()
-	id1 := chunk.ChunkIDFromTime(time.Now())
-	id2 := chunk.ChunkIDFromTime(time.Now().Add(time.Second))
+	id1 := chunk.NewChunkID()
+	id2 := chunk.NewChunkID()
 
 	var wg sync.WaitGroup
 	for _, id := range []chunk.ChunkID{id1, id2} {

@@ -37,17 +37,17 @@ export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
-  const [newId, setNewId] = useState("");
+  const [newName, setNewName] = useState("");
   const [newMaxAge, setNewMaxAge] = useState("720h");
   const [newMaxBytes, setNewMaxBytes] = useState("");
   const [newMaxChunks, setNewMaxChunks] = useState("");
 
-  const policies = config?.retentionPolicies ?? {};
+  const policies = config?.retentionPolicies ?? [];
   const stores = config?.stores ?? [];
 
   const defaults = useCallback(
     (id: string): PolicyEdit => {
-      const pol = policies[id];
+      const pol = policies.find((p) => p.id === id);
       if (!pol) return { maxAge: "", maxBytes: "", maxChunks: "" };
       return {
         maxAge: formatDuration(pol.maxAgeSeconds),
@@ -66,6 +66,7 @@ export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
     label: "Retention policy",
     onSaveTransform: (id, edit: PolicyEdit) => ({
       id,
+      name: policies.find((p) => p.id === id)?.name ?? "",
       maxAgeSeconds: parseDuration(edit.maxAge),
       maxBytes: parseBytes(edit.maxBytes),
       maxChunks: edit.maxChunks ? BigInt(edit.maxChunks) : 0n,
@@ -89,20 +90,21 @@ export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
   const handleSave = (id: string) => savePolicy(id, getEdit(id));
 
   const handleCreate = async () => {
-    if (!newId.trim()) {
-      addToast("Policy ID is required", "warn");
+    if (!newName.trim()) {
+      addToast("Policy name is required", "warn");
       return;
     }
     try {
       await putPolicy.mutateAsync({
-        id: newId.trim(),
+        id: "",
+        name: newName.trim(),
         maxAgeSeconds: parseDuration(newMaxAge),
         maxBytes: parseBytes(newMaxBytes),
         maxChunks: newMaxChunks ? BigInt(newMaxChunks) : 0n,
       });
-      addToast(`Retention policy "${newId.trim()}" created`, "info");
+      addToast(`Retention policy "${newName.trim()}" created`, "info");
       setAdding(false);
-      setNewId("");
+      setNewName("");
       setNewMaxAge("720h");
       setNewMaxBytes("");
       setNewMaxChunks("");
@@ -119,7 +121,7 @@ export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
       adding={adding}
       onToggleAdd={() => setAdding(!adding)}
       isLoading={isLoading}
-      isEmpty={Object.keys(policies).length === 0}
+      isEmpty={policies.length === 0}
       emptyMessage='No retention policies configured. Click "Add Policy" to create one.'
       dark={dark}
     >
@@ -130,13 +132,12 @@ export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
           onCreate={handleCreate}
           isPending={putPolicy.isPending}
         >
-          <FormField label="ID" dark={dark}>
+          <FormField label="Name" dark={dark}>
             <TextInput
-              value={newId}
-              onChange={setNewId}
+              value={newName}
+              onChange={setNewName}
               placeholder="default"
               dark={dark}
-              mono
             />
           </FormField>
           <div className="grid grid-cols-3 gap-3">
@@ -178,13 +179,14 @@ export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
         </AddFormCard>
       )}
 
-      {Object.entries(policies).map(([id, pol]) => {
+      {policies.map((pol) => {
+        const id = pol.id;
         const edit = getEdit(id);
         const refs = refsFor(stores, "retention", id);
         return (
           <SettingsCard
             key={id}
-            id={id}
+            id={pol.name || id}
             dark={dark}
             expanded={expanded === id}
             onToggle={() => setExpanded(expanded === id ? null : id)}

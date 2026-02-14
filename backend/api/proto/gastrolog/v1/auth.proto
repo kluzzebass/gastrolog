@@ -78,6 +78,7 @@ message UserInfo {
   string role = 2;
   int64 created_at = 3; // unix timestamp
   int64 updated_at = 4; // unix timestamp
+  string id = 5;
 }
 
 message CreateUserRequest {
@@ -97,7 +98,7 @@ message ListUsersResponse {
 }
 
 message UpdateUserRoleRequest {
-  string username = 1;
+  string id = 1;
   string role = 2; // "admin" or "user"
 }
 
@@ -106,14 +107,14 @@ message UpdateUserRoleResponse {
 }
 
 message ResetPasswordRequest {
-  string username = 1;
+  string id = 1;
   string new_password = 2;
 }
 
 message ResetPasswordResponse {}
 
 message DeleteUserRequest {
-  string username = 1;
+  string id = 1;
 }
 
 message DeleteUserResponse {}

@@ -21,7 +21,7 @@ type Store struct {
 	ingesters         map[string]config.IngesterConfig
 	settings          map[string]string
 	certs             map[string]config.CertPEM
-	users             map[string]config.User
+	users             map[string]config.User // keyed by ID (UUID)
 }
 
 var _ config.Store = (*Store)(nil)
@@ -53,23 +53,23 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 	cfg := &config.Config{}
 
 	if len(s.filters) > 0 {
-		cfg.Filters = make(map[string]config.FilterConfig, len(s.filters))
-		for id, fc := range s.filters {
-			cfg.Filters[id] = copyFilterConfig(fc)
+		cfg.Filters = make([]config.FilterConfig, 0, len(s.filters))
+		for _, fc := range s.filters {
+			cfg.Filters = append(cfg.Filters, copyFilterConfig(fc))
 		}
 	}
 
 	if len(s.rotationPolicies) > 0 {
-		cfg.RotationPolicies = make(map[string]config.RotationPolicyConfig, len(s.rotationPolicies))
-		for id, rp := range s.rotationPolicies {
-			cfg.RotationPolicies[id] = copyRotationPolicy(rp)
+		cfg.RotationPolicies = make([]config.RotationPolicyConfig, 0, len(s.rotationPolicies))
+		for _, rp := range s.rotationPolicies {
+			cfg.RotationPolicies = append(cfg.RotationPolicies, copyRotationPolicy(rp))
 		}
 	}
 
 	if len(s.retentionPolicies) > 0 {
-		cfg.RetentionPolicies = make(map[string]config.RetentionPolicyConfig, len(s.retentionPolicies))
-		for id, rp := range s.retentionPolicies {
-			cfg.RetentionPolicies[id] = copyRetentionPolicy(rp)
+		cfg.RetentionPolicies = make([]config.RetentionPolicyConfig, 0, len(s.retentionPolicies))
+		for _, rp := range s.retentionPolicies {
+			cfg.RetentionPolicies = append(cfg.RetentionPolicies, copyRetentionPolicy(rp))
 		}
 	}
 
@@ -94,6 +94,13 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 		}
 	}
 
+	if len(s.certs) > 0 {
+		cfg.Certs = make([]config.CertPEM, 0, len(s.certs))
+		for _, cert := range s.certs {
+			cfg.Certs = append(cfg.Certs, copyCertPEM(cert))
+		}
+	}
+
 	return cfg, nil
 }
 
@@ -111,22 +118,22 @@ func (s *Store) GetFilter(ctx context.Context, id string) (*config.FilterConfig,
 	return &c, nil
 }
 
-func (s *Store) ListFilters(ctx context.Context) (map[string]config.FilterConfig, error) {
+func (s *Store) ListFilters(ctx context.Context) ([]config.FilterConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	result := make(map[string]config.FilterConfig, len(s.filters))
-	for id, fc := range s.filters {
-		result[id] = copyFilterConfig(fc)
+	result := make([]config.FilterConfig, 0, len(s.filters))
+	for _, fc := range s.filters {
+		result = append(result, copyFilterConfig(fc))
 	}
 	return result, nil
 }
 
-func (s *Store) PutFilter(ctx context.Context, id string, cfg config.FilterConfig) error {
+func (s *Store) PutFilter(ctx context.Context, cfg config.FilterConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.filters[id] = copyFilterConfig(cfg)
+	s.filters[cfg.ID] = copyFilterConfig(cfg)
 	return nil
 }
 
@@ -152,22 +159,22 @@ func (s *Store) GetRotationPolicy(ctx context.Context, id string) (*config.Rotat
 	return &c, nil
 }
 
-func (s *Store) ListRotationPolicies(ctx context.Context) (map[string]config.RotationPolicyConfig, error) {
+func (s *Store) ListRotationPolicies(ctx context.Context) ([]config.RotationPolicyConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	result := make(map[string]config.RotationPolicyConfig, len(s.rotationPolicies))
-	for id, rp := range s.rotationPolicies {
-		result[id] = copyRotationPolicy(rp)
+	result := make([]config.RotationPolicyConfig, 0, len(s.rotationPolicies))
+	for _, rp := range s.rotationPolicies {
+		result = append(result, copyRotationPolicy(rp))
 	}
 	return result, nil
 }
 
-func (s *Store) PutRotationPolicy(ctx context.Context, id string, cfg config.RotationPolicyConfig) error {
+func (s *Store) PutRotationPolicy(ctx context.Context, cfg config.RotationPolicyConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.rotationPolicies[id] = copyRotationPolicy(cfg)
+	s.rotationPolicies[cfg.ID] = copyRotationPolicy(cfg)
 	return nil
 }
 
@@ -193,22 +200,22 @@ func (s *Store) GetRetentionPolicy(ctx context.Context, id string) (*config.Rete
 	return &c, nil
 }
 
-func (s *Store) ListRetentionPolicies(ctx context.Context) (map[string]config.RetentionPolicyConfig, error) {
+func (s *Store) ListRetentionPolicies(ctx context.Context) ([]config.RetentionPolicyConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	result := make(map[string]config.RetentionPolicyConfig, len(s.retentionPolicies))
-	for id, rp := range s.retentionPolicies {
-		result[id] = copyRetentionPolicy(rp)
+	result := make([]config.RetentionPolicyConfig, 0, len(s.retentionPolicies))
+	for _, rp := range s.retentionPolicies {
+		result = append(result, copyRetentionPolicy(rp))
 	}
 	return result, nil
 }
 
-func (s *Store) PutRetentionPolicy(ctx context.Context, id string, cfg config.RetentionPolicyConfig) error {
+func (s *Store) PutRetentionPolicy(ctx context.Context, cfg config.RetentionPolicyConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.retentionPolicies[id] = copyRetentionPolicy(cfg)
+	s.retentionPolicies[cfg.ID] = copyRetentionPolicy(cfg)
 	return nil
 }
 
@@ -258,20 +265,6 @@ func (s *Store) DeleteStore(ctx context.Context, id string) error {
 	defer s.mu.Unlock()
 
 	delete(s.stores, id)
-	return nil
-}
-
-func (s *Store) RenameStore(ctx context.Context, oldID, newID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	cfg, ok := s.stores[oldID]
-	if !ok {
-		return fmt.Errorf("store %q not found", oldID)
-	}
-	cfg.ID = newID
-	s.stores[newID] = cfg
-	delete(s.stores, oldID)
 	return nil
 }
 
@@ -347,41 +340,42 @@ func (s *Store) DeleteSetting(ctx context.Context, key string) error {
 
 // Certificates
 
-func (s *Store) ListCertificates(ctx context.Context) ([]string, error) {
+func (s *Store) ListCertificates(ctx context.Context) ([]config.CertPEM, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	names := make([]string, 0, len(s.certs))
-	for name := range s.certs {
-		names = append(names, name)
+	result := make([]config.CertPEM, 0, len(s.certs))
+	for _, cert := range s.certs {
+		result = append(result, copyCertPEM(cert))
 	}
-	return names, nil
+	return result, nil
 }
 
-func (s *Store) GetCertificate(ctx context.Context, name string) (*config.CertPEM, error) {
+func (s *Store) GetCertificate(ctx context.Context, id string) (*config.CertPEM, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	pem, ok := s.certs[name]
+	pem, ok := s.certs[id]
 	if !ok {
 		return nil, nil
 	}
-	return &pem, nil
+	c := copyCertPEM(pem)
+	return &c, nil
 }
 
-func (s *Store) PutCertificate(ctx context.Context, name string, cert config.CertPEM) error {
+func (s *Store) PutCertificate(ctx context.Context, cert config.CertPEM) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.certs[name] = cert
+	s.certs[cert.ID] = copyCertPEM(cert)
 	return nil
 }
 
-func (s *Store) DeleteCertificate(ctx context.Context, name string) error {
+func (s *Store) DeleteCertificate(ctx context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	delete(s.certs, name)
+	delete(s.certs, id)
 	return nil
 }
 
@@ -391,22 +385,40 @@ func (s *Store) CreateUser(ctx context.Context, user config.User) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, ok := s.users[user.Username]; ok {
-		return fmt.Errorf("user %q already exists", user.Username)
+	if _, ok := s.users[user.ID]; ok {
+		return fmt.Errorf("user %q already exists", user.ID)
 	}
-	s.users[user.Username] = user
+	// Also check for duplicate username.
+	for _, u := range s.users {
+		if u.Username == user.Username {
+			return fmt.Errorf("username %q already exists", user.Username)
+		}
+	}
+	s.users[user.ID] = user
 	return nil
 }
 
-func (s *Store) GetUser(ctx context.Context, username string) (*config.User, error) {
+func (s *Store) GetUser(ctx context.Context, id string) (*config.User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	u, ok := s.users[username]
+	u, ok := s.users[id]
 	if !ok {
 		return nil, nil
 	}
 	return &u, nil
+}
+
+func (s *Store) GetUserByUsername(ctx context.Context, username string) (*config.User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, u := range s.users {
+		if u.Username == username {
+			return &u, nil
+		}
+	}
+	return nil, nil
 }
 
 func (s *Store) ListUsers(ctx context.Context) ([]config.User, error) {
@@ -420,42 +432,42 @@ func (s *Store) ListUsers(ctx context.Context) ([]config.User, error) {
 	return users, nil
 }
 
-func (s *Store) UpdatePassword(ctx context.Context, username string, passwordHash string) error {
+func (s *Store) UpdatePassword(ctx context.Context, id string, passwordHash string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	u, ok := s.users[username]
+	u, ok := s.users[id]
 	if !ok {
-		return fmt.Errorf("user %q not found", username)
+		return fmt.Errorf("user %q not found", id)
 	}
 	u.PasswordHash = passwordHash
 	u.UpdatedAt = time.Now().UTC()
-	s.users[username] = u
+	s.users[id] = u
 	return nil
 }
 
-func (s *Store) UpdateUserRole(ctx context.Context, username string, role string) error {
+func (s *Store) UpdateUserRole(ctx context.Context, id string, role string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	u, ok := s.users[username]
+	u, ok := s.users[id]
 	if !ok {
-		return fmt.Errorf("user %q not found", username)
+		return fmt.Errorf("user %q not found", id)
 	}
 	u.Role = role
 	u.UpdatedAt = time.Now().UTC()
-	s.users[username] = u
+	s.users[id] = u
 	return nil
 }
 
-func (s *Store) DeleteUser(ctx context.Context, username string) error {
+func (s *Store) DeleteUser(ctx context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, ok := s.users[username]; !ok {
-		return fmt.Errorf("user %q not found", username)
+	if _, ok := s.users[id]; !ok {
+		return fmt.Errorf("user %q not found", id)
 	}
-	delete(s.users, username)
+	delete(s.users, id)
 	return nil
 }
 
@@ -469,11 +481,18 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 // Deep copy helpers
 
 func copyFilterConfig(fc config.FilterConfig) config.FilterConfig {
-	return config.FilterConfig{Expression: fc.Expression}
+	return config.FilterConfig{
+		ID:         fc.ID,
+		Name:       fc.Name,
+		Expression: fc.Expression,
+	}
 }
 
 func copyRotationPolicy(rp config.RotationPolicyConfig) config.RotationPolicyConfig {
-	c := config.RotationPolicyConfig{}
+	c := config.RotationPolicyConfig{
+		ID:   rp.ID,
+		Name: rp.Name,
+	}
 	if rp.MaxBytes != nil {
 		c.MaxBytes = config.StringPtr(*rp.MaxBytes)
 	}
@@ -490,7 +509,10 @@ func copyRotationPolicy(rp config.RotationPolicyConfig) config.RotationPolicyCon
 }
 
 func copyRetentionPolicy(rp config.RetentionPolicyConfig) config.RetentionPolicyConfig {
-	c := config.RetentionPolicyConfig{}
+	c := config.RetentionPolicyConfig{
+		ID:   rp.ID,
+		Name: rp.Name,
+	}
 	if rp.MaxAge != nil {
 		c.MaxAge = config.StringPtr(*rp.MaxAge)
 	}
@@ -505,9 +527,10 @@ func copyRetentionPolicy(rp config.RetentionPolicyConfig) config.RetentionPolicy
 
 func copyStoreConfig(st config.StoreConfig) config.StoreConfig {
 	c := config.StoreConfig{
-		ID:     st.ID,
-		Type:   st.Type,
-		Params: copyParams(st.Params),
+		ID:      st.ID,
+		Name:    st.Name,
+		Type:    st.Type,
+		Params:  copyParams(st.Params),
 		Enabled: st.Enabled,
 	}
 	if st.Filter != nil {
@@ -525,9 +548,21 @@ func copyStoreConfig(st config.StoreConfig) config.StoreConfig {
 func copyIngesterConfig(ing config.IngesterConfig) config.IngesterConfig {
 	return config.IngesterConfig{
 		ID:      ing.ID,
+		Name:    ing.Name,
 		Type:    ing.Type,
 		Enabled: ing.Enabled,
 		Params:  copyParams(ing.Params),
+	}
+}
+
+func copyCertPEM(cert config.CertPEM) config.CertPEM {
+	return config.CertPEM{
+		ID:       cert.ID,
+		Name:     cert.Name,
+		CertPEM:  cert.CertPEM,
+		KeyPEM:   cert.KeyPEM,
+		CertFile: cert.CertFile,
+		KeyFile:  cert.KeyFile,
 	}
 }
 

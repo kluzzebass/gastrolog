@@ -83,18 +83,18 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
-  const [newId, setNewId] = useState("");
+  const [newName, setNewName] = useState("");
   const [newMaxBytes, setNewMaxBytes] = useState("");
   const [newMaxRecords, setNewMaxRecords] = useState("");
   const [newMaxAge, setNewMaxAge] = useState("5m");
   const [newCron, setNewCron] = useState("");
 
-  const policies = config?.rotationPolicies ?? {};
+  const policies = config?.rotationPolicies ?? [];
   const stores = config?.stores ?? [];
 
   const defaults = useCallback(
     (id: string): PolicyEdit => {
-      const pol = policies[id];
+      const pol = policies.find((p) => p.id === id);
       if (!pol) return { maxBytes: "", maxRecords: "", maxAge: "", cron: "" };
       return {
         maxBytes: formatBytes(pol.maxBytes),
@@ -119,6 +119,7 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
       }
       return {
         id,
+        name: policies.find((p) => p.id === id)?.name ?? "",
         maxBytes: parseBytes(edit.maxBytes),
         maxRecords: edit.maxRecords ? BigInt(edit.maxRecords) : 0n,
         maxAgeSeconds: parseDuration(edit.maxAge),
@@ -144,8 +145,8 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
   const handleSave = (id: string) => savePolicy(id, getEdit(id));
 
   const handleCreate = async () => {
-    if (!newId.trim()) {
-      addToast("Policy ID is required", "warn");
+    if (!newName.trim()) {
+      addToast("Policy name is required", "warn");
       return;
     }
     if (newCron) {
@@ -157,15 +158,16 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
     }
     try {
       await putPolicy.mutateAsync({
-        id: newId.trim(),
+        id: "",
+        name: newName.trim(),
         maxBytes: parseBytes(newMaxBytes),
         maxRecords: newMaxRecords ? BigInt(newMaxRecords) : 0n,
         maxAgeSeconds: parseDuration(newMaxAge),
         cron: newCron,
       });
-      addToast(`Policy "${newId.trim()}" created`, "info");
+      addToast(`Policy "${newName.trim()}" created`, "info");
       setAdding(false);
-      setNewId("");
+      setNewName("");
       setNewMaxBytes("");
       setNewMaxRecords("");
       setNewMaxAge("5m");
@@ -183,7 +185,7 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
       adding={adding}
       onToggleAdd={() => setAdding(!adding)}
       isLoading={isLoading}
-      isEmpty={Object.keys(policies).length === 0}
+      isEmpty={policies.length === 0}
       emptyMessage='No rotation policies configured. Click "Add Policy" to create one.'
       dark={dark}
     >
@@ -194,13 +196,12 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
           onCreate={handleCreate}
           isPending={putPolicy.isPending}
         >
-          <FormField label="ID" dark={dark}>
+          <FormField label="Name" dark={dark}>
             <TextInput
-              value={newId}
-              onChange={setNewId}
+              value={newName}
+              onChange={setNewName}
               placeholder="default"
               dark={dark}
-              mono
             />
           </FormField>
           <div className="grid grid-cols-3 gap-3">
@@ -243,13 +244,14 @@ export function PoliciesSettings({ dark }: { dark: boolean }) {
         </AddFormCard>
       )}
 
-      {Object.entries(policies).map(([id, pol]) => {
+      {policies.map((pol) => {
+        const id = pol.id;
         const edit = getEdit(id);
         const refs = refsFor(stores, "policy", id);
         return (
           <SettingsCard
             key={id}
-            id={id}
+            id={pol.name || id}
             dark={dark}
             expanded={expanded === id}
             onToggle={() => setExpanded(expanded === id ? null : id)}

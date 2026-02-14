@@ -6,35 +6,45 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+
+	"github.com/google/uuid"
 )
 
 // DefaultConfig returns the bootstrap configuration for first-run.
 // The default store is always in-memory; file-backed stores are only created
 // when the user explicitly configures one.
 func DefaultConfig() *Config {
-	defaultStore := StoreConfig{
-		ID:        "default",
-		Type:      "memory",
-		Enabled:   true,
-		Filter:    StringPtr("catch-all"),
-		Policy:    StringPtr("default"),
-		Retention: StringPtr("default"),
-	}
+	filterID := uuid.Must(uuid.NewV7()).String()
+	rotationID := uuid.Must(uuid.NewV7()).String()
+	retentionID := uuid.Must(uuid.NewV7()).String()
+	storeID := uuid.Must(uuid.NewV7()).String()
+	ingesterID := uuid.Must(uuid.NewV7()).String()
 
 	return &Config{
-		Filters: map[string]FilterConfig{
-			"catch-all": {Expression: "*"},
+		Filters: []FilterConfig{
+			{ID: filterID, Name: "catch-all", Expression: "*"},
 		},
-		RotationPolicies: map[string]RotationPolicyConfig{
-			"default": {MaxAge: StringPtr("5m")},
+		RotationPolicies: []RotationPolicyConfig{
+			{ID: rotationID, Name: "default", MaxAge: StringPtr("5m")},
 		},
-		RetentionPolicies: map[string]RetentionPolicyConfig{
-			"default": {MaxChunks: Int64Ptr(10)},
+		RetentionPolicies: []RetentionPolicyConfig{
+			{ID: retentionID, Name: "default", MaxChunks: Int64Ptr(10)},
 		},
-		Stores:    []StoreConfig{defaultStore},
+		Stores: []StoreConfig{
+			{
+				ID:        storeID,
+				Name:      "default",
+				Type:      "memory",
+				Enabled:   true,
+				Filter:    &filterID,
+				Policy:    &rotationID,
+				Retention: &retentionID,
+			},
+		},
 		Ingesters: []IngesterConfig{
 			{
-				ID:      "chatterbox",
+				ID:      ingesterID,
+				Name:    "chatterbox",
 				Type:    "chatterbox",
 				Enabled: true,
 				Params: map[string]string{
@@ -53,18 +63,18 @@ func DefaultConfig() *Config {
 func Bootstrap(ctx context.Context, store Store) error {
 	cfg := DefaultConfig()
 
-	for id, fc := range cfg.Filters {
-		if err := store.PutFilter(ctx, id, fc); err != nil {
+	for _, fc := range cfg.Filters {
+		if err := store.PutFilter(ctx, fc); err != nil {
 			return err
 		}
 	}
-	for id, rp := range cfg.RotationPolicies {
-		if err := store.PutRotationPolicy(ctx, id, rp); err != nil {
+	for _, rp := range cfg.RotationPolicies {
+		if err := store.PutRotationPolicy(ctx, rp); err != nil {
 			return err
 		}
 	}
-	for id, rp := range cfg.RetentionPolicies {
-		if err := store.PutRetentionPolicy(ctx, id, rp); err != nil {
+	for _, rp := range cfg.RetentionPolicies {
+		if err := store.PutRetentionPolicy(ctx, rp); err != nil {
 			return err
 		}
 	}

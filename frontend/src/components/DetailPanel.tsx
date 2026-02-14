@@ -10,6 +10,7 @@ import {
 import { syntaxHighlight } from "../syntax";
 import { CopyButton } from "./CopyButton";
 import { ContextRecord } from "./ContextRecord";
+import { useStores } from "../api/hooks";
 
 export function DetailPanelContent({
   record,

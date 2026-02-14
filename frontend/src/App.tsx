@@ -683,7 +683,7 @@ function AppContent() {
                 stores?.map((store) => (
                   <StoreButton
                     key={store.id}
-                    label={store.id}
+                    label={store.name || store.id}
                     count={store.recordCount.toLocaleString()}
                     active={selectedStore === store.id}
                     onClick={() => handleStoreSelect(store.id)}

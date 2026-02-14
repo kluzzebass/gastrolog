@@ -20,7 +20,7 @@ type Client interface {
 	Explain(ctx context.Context, store string, q query.Query) (*query.QueryPlan, error)
 
 	// Store operations
-	ListStores() []string
+	ListStores() []StoreInfo
 	ChunkManager(store string) ChunkReader
 	IndexManager(store string) IndexReader
 
@@ -59,9 +59,18 @@ type TokenIndexEntry struct {
 // StoreInfo holds information about a store.
 type StoreInfo struct {
 	ID          string
+	Name        string
 	Filter      string
 	ChunkCount  int
 	RecordCount int64
+}
+
+// DisplayName returns the Name if set, otherwise the ID.
+func (s StoreInfo) DisplayName() string {
+	if s.Name != "" {
+		return s.Name
+	}
+	return s.ID
 }
 
 // Stats holds aggregate statistics.

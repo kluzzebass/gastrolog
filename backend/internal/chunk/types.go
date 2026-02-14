@@ -7,8 +7,9 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"sync/atomic"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 var (
@@ -137,41 +138,20 @@ func (a Attributes) Copy() Attributes {
 var chunkIDEncoding = base32.HexEncoding.WithPadding(base32.NoPadding)
 
 // ChunkID uniquely identifies a chunk.
-// It encodes a creation timestamp as big-endian uint64 unix microseconds.
-// The string representation is 13-char lowercase base32hex, lexicographically
-// sortable by creation time.
-type ChunkID [8]byte
+// It is a UUIDv7 (16 bytes) whose string representation is 26-char lowercase
+// base32hex, lexicographically sortable by creation time.
+type ChunkID [16]byte
 
-// lastChunkMicro ensures NewChunkID returns monotonically increasing IDs
-// even when called multiple times within the same microsecond.
-var lastChunkMicro atomic.Int64
-
-// NewChunkID creates a ChunkID from the current time.
-// It guarantees monotonically increasing IDs even under rapid creation.
+// NewChunkID creates a ChunkID from a new UUIDv7.
+// UUIDv7 embeds a millisecond timestamp and guarantees monotonically increasing IDs.
 func NewChunkID() ChunkID {
-	now := time.Now().UnixMicro()
-	for {
-		old := lastChunkMicro.Load()
-		next := max(now, old+1)
-		if lastChunkMicro.CompareAndSwap(old, next) {
-			var id ChunkID
-			binary.BigEndian.PutUint64(id[:], uint64(next))
-			return id
-		}
-	}
+	return ChunkID(uuid.Must(uuid.NewV7()))
 }
 
-// ChunkIDFromTime creates a ChunkID from the given time.
-func ChunkIDFromTime(t time.Time) ChunkID {
-	var id ChunkID
-	binary.BigEndian.PutUint64(id[:], uint64(t.UnixMicro()))
-	return id
-}
-
-// ParseChunkID parses a 13-character base32hex string into a ChunkID.
+// ParseChunkID parses a 26-character base32hex string into a ChunkID.
 func ParseChunkID(value string) (ChunkID, error) {
-	if len(value) != 13 {
-		return ChunkID{}, fmt.Errorf("invalid chunk ID length: %d (want 13)", len(value))
+	if len(value) != 26 {
+		return ChunkID{}, fmt.Errorf("invalid chunk ID length: %d (want 26)", len(value))
 	}
 	// base32hex decode expects uppercase
 	decoded, err := chunkIDEncoding.DecodeString(strings.ToUpper(value))
@@ -183,15 +163,17 @@ func ParseChunkID(value string) (ChunkID, error) {
 	return id, nil
 }
 
-// String returns the 13-character lowercase base32hex representation.
+// String returns the 26-character lowercase base32hex representation.
 func (id ChunkID) String() string {
 	return strings.ToLower(chunkIDEncoding.EncodeToString(id[:]))
 }
 
-// Time returns the creation time encoded in the ChunkID.
+// Time returns the creation time encoded in the UUIDv7 ChunkID.
+// UUIDv7 stores millisecond Unix timestamp in bytes 0-5 (48 bits, big-endian).
 func (id ChunkID) Time() time.Time {
-	us := int64(binary.BigEndian.Uint64(id[:]))
-	return time.UnixMicro(us)
+	ms := int64(id[0])<<40 | int64(id[1])<<32 | int64(id[2])<<24 |
+		int64(id[3])<<16 | int64(id[4])<<8 | int64(id[5])
+	return time.UnixMilli(ms)
 }
 
 // RecordRef is a reference to a record within a chunk.

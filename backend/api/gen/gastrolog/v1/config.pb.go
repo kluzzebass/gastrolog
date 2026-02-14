@@ -58,12 +58,12 @@ func (*GetConfigRequest) Descriptor() ([]byte, []int) {
 }
 
 type GetConfigResponse struct {
-	state             protoimpl.MessageState            `protogen:"open.v1"`
-	Stores            []*StoreConfig                    `protobuf:"bytes,1,rep,name=stores,proto3" json:"stores,omitempty"`
-	Ingesters         []*IngesterConfig                 `protobuf:"bytes,2,rep,name=ingesters,proto3" json:"ingesters,omitempty"`
-	RotationPolicies  map[string]*RotationPolicyConfig  `protobuf:"bytes,3,rep,name=rotation_policies,json=rotationPolicies,proto3" json:"rotation_policies,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	Filters           map[string]*FilterConfig          `protobuf:"bytes,4,rep,name=filters,proto3" json:"filters,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	RetentionPolicies map[string]*RetentionPolicyConfig `protobuf:"bytes,5,rep,name=retention_policies,json=retentionPolicies,proto3" json:"retention_policies,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	state             protoimpl.MessageState   `protogen:"open.v1"`
+	Stores            []*StoreConfig           `protobuf:"bytes,1,rep,name=stores,proto3" json:"stores,omitempty"`
+	Ingesters         []*IngesterConfig        `protobuf:"bytes,2,rep,name=ingesters,proto3" json:"ingesters,omitempty"`
+	RotationPolicies  []*RotationPolicyConfig  `protobuf:"bytes,3,rep,name=rotation_policies,json=rotationPolicies,proto3" json:"rotation_policies,omitempty"`
+	Filters           []*FilterConfig          `protobuf:"bytes,4,rep,name=filters,proto3" json:"filters,omitempty"`
+	RetentionPolicies []*RetentionPolicyConfig `protobuf:"bytes,5,rep,name=retention_policies,json=retentionPolicies,proto3" json:"retention_policies,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -112,21 +112,21 @@ func (x *GetConfigResponse) GetIngesters() []*IngesterConfig {
 	return nil
 }
 
-func (x *GetConfigResponse) GetRotationPolicies() map[string]*RotationPolicyConfig {
+func (x *GetConfigResponse) GetRotationPolicies() []*RotationPolicyConfig {
 	if x != nil {
 		return x.RotationPolicies
 	}
 	return nil
 }
 
-func (x *GetConfigResponse) GetFilters() map[string]*FilterConfig {
+func (x *GetConfigResponse) GetFilters() []*FilterConfig {
 	if x != nil {
 		return x.Filters
 	}
 	return nil
 }
 
-func (x *GetConfigResponse) GetRetentionPolicies() map[string]*RetentionPolicyConfig {
+func (x *GetConfigResponse) GetRetentionPolicies() []*RetentionPolicyConfig {
 	if x != nil {
 		return x.RetentionPolicies
 	}
@@ -142,6 +142,7 @@ type StoreConfig struct {
 	Params        map[string]string      `protobuf:"bytes,5,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	Retention     string                 `protobuf:"bytes,6,opt,name=retention,proto3" json:"retention,omitempty"`
 	Enabled       bool                   `protobuf:"varint,7,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Name          string                 `protobuf:"bytes,8,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -225,12 +226,20 @@ func (x *StoreConfig) GetEnabled() bool {
 	return false
 }
 
+func (x *StoreConfig) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
 type IngesterConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
 	Params        map[string]string      `protobuf:"bytes,3,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	Enabled       bool                   `protobuf:"varint,4,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Name          string                 `protobuf:"bytes,5,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -293,9 +302,18 @@ func (x *IngesterConfig) GetEnabled() bool {
 	return false
 }
 
+func (x *IngesterConfig) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
 type FilterConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Expression    string                 `protobuf:"bytes,1,opt,name=expression,proto3" json:"expression,omitempty"`
+	Id            string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -337,12 +355,28 @@ func (x *FilterConfig) GetExpression() string {
 	return ""
 }
 
+func (x *FilterConfig) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *FilterConfig) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
 type RotationPolicyConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	MaxBytes      int64                  `protobuf:"varint,1,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
 	MaxRecords    int64                  `protobuf:"varint,2,opt,name=max_records,json=maxRecords,proto3" json:"max_records,omitempty"`
 	MaxAgeSeconds int64                  `protobuf:"varint,3,opt,name=max_age_seconds,json=maxAgeSeconds,proto3" json:"max_age_seconds,omitempty"`
 	Cron          string                 `protobuf:"bytes,4,opt,name=cron,proto3" json:"cron,omitempty"`
+	Id            string                 `protobuf:"bytes,5,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,6,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -405,11 +439,27 @@ func (x *RotationPolicyConfig) GetCron() string {
 	return ""
 }
 
+func (x *RotationPolicyConfig) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *RotationPolicyConfig) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
 type RetentionPolicyConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	MaxAgeSeconds int64                  `protobuf:"varint,1,opt,name=max_age_seconds,json=maxAgeSeconds,proto3" json:"max_age_seconds,omitempty"`
 	MaxBytes      int64                  `protobuf:"varint,2,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
 	MaxChunks     int64                  `protobuf:"varint,3,opt,name=max_chunks,json=maxChunks,proto3" json:"max_chunks,omitempty"`
+	Id            string                 `protobuf:"bytes,4,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,5,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -463,6 +513,20 @@ func (x *RetentionPolicyConfig) GetMaxChunks() int64 {
 		return x.MaxChunks
 	}
 	return 0
+}
+
+func (x *RetentionPolicyConfig) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *RetentionPolicyConfig) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
 }
 
 type ListIngestersRequest struct {
@@ -550,6 +614,7 @@ type IngesterInfo struct {
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
 	Running       bool                   `protobuf:"varint,3,opt,name=running,proto3" json:"running,omitempty"`
+	Name          string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -603,6 +668,13 @@ func (x *IngesterInfo) GetRunning() bool {
 		return x.Running
 	}
 	return false
+}
+
+func (x *IngesterInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
 }
 
 type GetIngesterStatusRequest struct {
@@ -735,7 +807,6 @@ func (x *GetIngesterStatusResponse) GetBytesIngested() int64 {
 
 type PutFilterRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Config        *FilterConfig          `protobuf:"bytes,2,opt,name=config,proto3" json:"config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -769,13 +840,6 @@ func (x *PutFilterRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use PutFilterRequest.ProtoReflect.Descriptor instead.
 func (*PutFilterRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{12}
-}
-
-func (x *PutFilterRequest) GetId() string {
-	if x != nil {
-		return x.Id
-	}
-	return ""
 }
 
 func (x *PutFilterRequest) GetConfig() *FilterConfig {
@@ -903,7 +967,6 @@ func (*DeleteFilterResponse) Descriptor() ([]byte, []int) {
 
 type PutRotationPolicyRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Config        *RotationPolicyConfig  `protobuf:"bytes,2,opt,name=config,proto3" json:"config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -937,13 +1000,6 @@ func (x *PutRotationPolicyRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use PutRotationPolicyRequest.ProtoReflect.Descriptor instead.
 func (*PutRotationPolicyRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{16}
-}
-
-func (x *PutRotationPolicyRequest) GetId() string {
-	if x != nil {
-		return x.Id
-	}
-	return ""
 }
 
 func (x *PutRotationPolicyRequest) GetConfig() *RotationPolicyConfig {
@@ -1071,7 +1127,6 @@ func (*DeleteRotationPolicyResponse) Descriptor() ([]byte, []int) {
 
 type PutRetentionPolicyRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Config        *RetentionPolicyConfig `protobuf:"bytes,2,opt,name=config,proto3" json:"config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1105,13 +1160,6 @@ func (x *PutRetentionPolicyRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use PutRetentionPolicyRequest.ProtoReflect.Descriptor instead.
 func (*PutRetentionPolicyRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{20}
-}
-
-func (x *PutRetentionPolicyRequest) GetId() string {
-	if x != nil {
-		return x.Id
-	}
-	return ""
 }
 
 func (x *PutRetentionPolicyRequest) GetConfig() *RetentionPolicyConfig {
@@ -2311,7 +2359,7 @@ func (*ListCertificatesRequest) Descriptor() ([]byte, []int) {
 
 type ListCertificatesResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Names         []string               `protobuf:"bytes,1,rep,name=names,proto3" json:"names,omitempty"`
+	Certificates  []*CertificateInfo     `protobuf:"bytes,1,rep,name=certificates,proto3" json:"certificates,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2346,23 +2394,75 @@ func (*ListCertificatesResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{48}
 }
 
-func (x *ListCertificatesResponse) GetNames() []string {
+func (x *ListCertificatesResponse) GetCertificates() []*CertificateInfo {
 	if x != nil {
-		return x.Names
+		return x.Certificates
 	}
 	return nil
 }
 
+type CertificateInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CertificateInfo) Reset() {
+	*x = CertificateInfo{}
+	mi := &file_gastrolog_v1_config_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CertificateInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CertificateInfo) ProtoMessage() {}
+
+func (x *CertificateInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_config_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CertificateInfo.ProtoReflect.Descriptor instead.
+func (*CertificateInfo) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *CertificateInfo) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *CertificateInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
 type GetCertificateRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetCertificateRequest) Reset() {
 	*x = GetCertificateRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[49]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2374,7 +2474,7 @@ func (x *GetCertificateRequest) String() string {
 func (*GetCertificateRequest) ProtoMessage() {}
 
 func (x *GetCertificateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[49]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2387,19 +2487,20 @@ func (x *GetCertificateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCertificateRequest.ProtoReflect.Descriptor instead.
 func (*GetCertificateRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{49}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{50}
 }
 
-func (x *GetCertificateRequest) GetName() string {
+func (x *GetCertificateRequest) GetId() string {
 	if x != nil {
-		return x.Name
+		return x.Id
 	}
 	return ""
 }
 
 type GetCertificateResponse struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
-	Name    string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Id      string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name    string                 `protobuf:"bytes,7,opt,name=name,proto3" json:"name,omitempty"`
 	CertPem string                 `protobuf:"bytes,2,opt,name=cert_pem,json=certPem,proto3" json:"cert_pem,omitempty"`
 	// key_pem is never populated in responses; private keys must not be exposed via API.
 	KeyPem        string `protobuf:"bytes,3,opt,name=key_pem,json=keyPem,proto3" json:"key_pem,omitempty"`
@@ -2411,7 +2512,7 @@ type GetCertificateResponse struct {
 
 func (x *GetCertificateResponse) Reset() {
 	*x = GetCertificateResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[50]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2423,7 +2524,7 @@ func (x *GetCertificateResponse) String() string {
 func (*GetCertificateResponse) ProtoMessage() {}
 
 func (x *GetCertificateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[50]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2436,7 +2537,14 @@ func (x *GetCertificateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCertificateResponse.ProtoReflect.Descriptor instead.
 func (*GetCertificateResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{50}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *GetCertificateResponse) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
 }
 
 func (x *GetCertificateResponse) GetName() string {
@@ -2476,7 +2584,8 @@ func (x *GetCertificateResponse) GetKeyFile() string {
 
 type PutCertificateRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,7,opt,name=name,proto3" json:"name,omitempty"`
 	CertPem       string                 `protobuf:"bytes,2,opt,name=cert_pem,json=certPem,proto3" json:"cert_pem,omitempty"`
 	KeyPem        string                 `protobuf:"bytes,3,opt,name=key_pem,json=keyPem,proto3" json:"key_pem,omitempty"` // When updating, empty means keep existing key.
 	CertFile      string                 `protobuf:"bytes,4,opt,name=cert_file,json=certFile,proto3" json:"cert_file,omitempty"`
@@ -2488,7 +2597,7 @@ type PutCertificateRequest struct {
 
 func (x *PutCertificateRequest) Reset() {
 	*x = PutCertificateRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[51]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2500,7 +2609,7 @@ func (x *PutCertificateRequest) String() string {
 func (*PutCertificateRequest) ProtoMessage() {}
 
 func (x *PutCertificateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[51]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2513,7 +2622,14 @@ func (x *PutCertificateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutCertificateRequest.ProtoReflect.Descriptor instead.
 func (*PutCertificateRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{51}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{52}
+}
+
+func (x *PutCertificateRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
 }
 
 func (x *PutCertificateRequest) GetName() string {
@@ -2566,7 +2682,7 @@ type PutCertificateResponse struct {
 
 func (x *PutCertificateResponse) Reset() {
 	*x = PutCertificateResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[52]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2578,7 +2694,7 @@ func (x *PutCertificateResponse) String() string {
 func (*PutCertificateResponse) ProtoMessage() {}
 
 func (x *PutCertificateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[52]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2591,19 +2707,19 @@ func (x *PutCertificateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutCertificateResponse.ProtoReflect.Descriptor instead.
 func (*PutCertificateResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{52}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{53}
 }
 
 type DeleteCertificateRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DeleteCertificateRequest) Reset() {
 	*x = DeleteCertificateRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[53]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2615,7 +2731,7 @@ func (x *DeleteCertificateRequest) String() string {
 func (*DeleteCertificateRequest) ProtoMessage() {}
 
 func (x *DeleteCertificateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[53]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2628,12 +2744,12 @@ func (x *DeleteCertificateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteCertificateRequest.ProtoReflect.Descriptor instead.
 func (*DeleteCertificateRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{53}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{54}
 }
 
-func (x *DeleteCertificateRequest) GetName() string {
+func (x *DeleteCertificateRequest) GetId() string {
 	if x != nil {
-		return x.Name
+		return x.Id
 	}
 	return ""
 }
@@ -2646,7 +2762,7 @@ type DeleteCertificateResponse struct {
 
 func (x *DeleteCertificateResponse) Reset() {
 	*x = DeleteCertificateResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[54]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2658,7 +2774,7 @@ func (x *DeleteCertificateResponse) String() string {
 func (*DeleteCertificateResponse) ProtoMessage() {}
 
 func (x *DeleteCertificateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[54]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2671,7 +2787,7 @@ func (x *DeleteCertificateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteCertificateResponse.ProtoReflect.Descriptor instead.
 func (*DeleteCertificateResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{54}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{55}
 }
 
 type PauseStoreRequest struct {
@@ -2683,7 +2799,7 @@ type PauseStoreRequest struct {
 
 func (x *PauseStoreRequest) Reset() {
 	*x = PauseStoreRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[55]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2695,7 +2811,7 @@ func (x *PauseStoreRequest) String() string {
 func (*PauseStoreRequest) ProtoMessage() {}
 
 func (x *PauseStoreRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[55]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2708,7 +2824,7 @@ func (x *PauseStoreRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PauseStoreRequest.ProtoReflect.Descriptor instead.
 func (*PauseStoreRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{55}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *PauseStoreRequest) GetId() string {
@@ -2726,7 +2842,7 @@ type PauseStoreResponse struct {
 
 func (x *PauseStoreResponse) Reset() {
 	*x = PauseStoreResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[56]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2738,7 +2854,7 @@ func (x *PauseStoreResponse) String() string {
 func (*PauseStoreResponse) ProtoMessage() {}
 
 func (x *PauseStoreResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[56]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2751,7 +2867,7 @@ func (x *PauseStoreResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PauseStoreResponse.ProtoReflect.Descriptor instead.
 func (*PauseStoreResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{56}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{57}
 }
 
 type ResumeStoreRequest struct {
@@ -2763,7 +2879,7 @@ type ResumeStoreRequest struct {
 
 func (x *ResumeStoreRequest) Reset() {
 	*x = ResumeStoreRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[57]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2775,7 +2891,7 @@ func (x *ResumeStoreRequest) String() string {
 func (*ResumeStoreRequest) ProtoMessage() {}
 
 func (x *ResumeStoreRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[57]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2788,7 +2904,7 @@ func (x *ResumeStoreRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResumeStoreRequest.ProtoReflect.Descriptor instead.
 func (*ResumeStoreRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{57}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *ResumeStoreRequest) GetId() string {
@@ -2806,7 +2922,7 @@ type ResumeStoreResponse struct {
 
 func (x *ResumeStoreResponse) Reset() {
 	*x = ResumeStoreResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[58]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2818,7 +2934,7 @@ func (x *ResumeStoreResponse) String() string {
 func (*ResumeStoreResponse) ProtoMessage() {}
 
 func (x *ResumeStoreResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[58]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2831,95 +2947,7 @@ func (x *ResumeStoreResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResumeStoreResponse.ProtoReflect.Descriptor instead.
 func (*ResumeStoreResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{58}
-}
-
-type RenameStoreRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	OldId         string                 `protobuf:"bytes,1,opt,name=old_id,json=oldId,proto3" json:"old_id,omitempty"`
-	NewId         string                 `protobuf:"bytes,2,opt,name=new_id,json=newId,proto3" json:"new_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *RenameStoreRequest) Reset() {
-	*x = RenameStoreRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[59]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RenameStoreRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RenameStoreRequest) ProtoMessage() {}
-
-func (x *RenameStoreRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[59]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RenameStoreRequest.ProtoReflect.Descriptor instead.
-func (*RenameStoreRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{59}
-}
-
-func (x *RenameStoreRequest) GetOldId() string {
-	if x != nil {
-		return x.OldId
-	}
-	return ""
-}
-
-func (x *RenameStoreRequest) GetNewId() string {
-	if x != nil {
-		return x.NewId
-	}
-	return ""
-}
-
-type RenameStoreResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *RenameStoreResponse) Reset() {
-	*x = RenameStoreResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[60]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RenameStoreResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RenameStoreResponse) ProtoMessage() {}
-
-func (x *RenameStoreResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[60]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RenameStoreResponse.ProtoReflect.Descriptor instead.
-func (*RenameStoreResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{60}
 }
 
 type DecommissionStoreRequest struct {
@@ -2931,7 +2959,7 @@ type DecommissionStoreRequest struct {
 
 func (x *DecommissionStoreRequest) Reset() {
 	*x = DecommissionStoreRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[61]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2943,7 +2971,7 @@ func (x *DecommissionStoreRequest) String() string {
 func (*DecommissionStoreRequest) ProtoMessage() {}
 
 func (x *DecommissionStoreRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[61]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2956,7 +2984,7 @@ func (x *DecommissionStoreRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DecommissionStoreRequest.ProtoReflect.Descriptor instead.
 func (*DecommissionStoreRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{61}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *DecommissionStoreRequest) GetId() string {
@@ -2975,7 +3003,7 @@ type DecommissionStoreResponse struct {
 
 func (x *DecommissionStoreResponse) Reset() {
 	*x = DecommissionStoreResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[62]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2987,7 +3015,7 @@ func (x *DecommissionStoreResponse) String() string {
 func (*DecommissionStoreResponse) ProtoMessage() {}
 
 func (x *DecommissionStoreResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[62]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3000,7 +3028,7 @@ func (x *DecommissionStoreResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DecommissionStoreResponse.ProtoReflect.Descriptor instead.
 func (*DecommissionStoreResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{62}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *DecommissionStoreResponse) GetChunksRemoved() int64 {
@@ -3020,7 +3048,7 @@ type TestIngesterRequest struct {
 
 func (x *TestIngesterRequest) Reset() {
 	*x = TestIngesterRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[63]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3032,7 +3060,7 @@ func (x *TestIngesterRequest) String() string {
 func (*TestIngesterRequest) ProtoMessage() {}
 
 func (x *TestIngesterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[63]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3045,7 +3073,7 @@ func (x *TestIngesterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestIngesterRequest.ProtoReflect.Descriptor instead.
 func (*TestIngesterRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{63}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *TestIngesterRequest) GetType() string {
@@ -3072,7 +3100,7 @@ type TestIngesterResponse struct {
 
 func (x *TestIngesterResponse) Reset() {
 	*x = TestIngesterResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[64]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3084,7 +3112,7 @@ func (x *TestIngesterResponse) String() string {
 func (*TestIngesterResponse) ProtoMessage() {}
 
 func (x *TestIngesterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[64]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3097,7 +3125,7 @@ func (x *TestIngesterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestIngesterResponse.ProtoReflect.Descriptor instead.
 func (*TestIngesterResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{64}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *TestIngesterResponse) GetSuccess() bool {
@@ -3119,22 +3147,13 @@ var File_gastrolog_v1_config_proto protoreflect.FileDescriptor
 const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\n" +
 	"\x19gastrolog/v1/config.proto\x12\fgastrolog.v1\"\x12\n" +
-	"\x10GetConfigRequest\"\xc1\x05\n" +
+	"\x10GetConfigRequest\"\xdd\x02\n" +
 	"\x11GetConfigResponse\x121\n" +
 	"\x06stores\x18\x01 \x03(\v2\x19.gastrolog.v1.StoreConfigR\x06stores\x12:\n" +
-	"\tingesters\x18\x02 \x03(\v2\x1c.gastrolog.v1.IngesterConfigR\tingesters\x12b\n" +
-	"\x11rotation_policies\x18\x03 \x03(\v25.gastrolog.v1.GetConfigResponse.RotationPoliciesEntryR\x10rotationPolicies\x12F\n" +
-	"\afilters\x18\x04 \x03(\v2,.gastrolog.v1.GetConfigResponse.FiltersEntryR\afilters\x12e\n" +
-	"\x12retention_policies\x18\x05 \x03(\v26.gastrolog.v1.GetConfigResponse.RetentionPoliciesEntryR\x11retentionPolicies\x1ag\n" +
-	"\x15RotationPoliciesEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x128\n" +
-	"\x05value\x18\x02 \x01(\v2\".gastrolog.v1.RotationPolicyConfigR\x05value:\x028\x01\x1aV\n" +
-	"\fFiltersEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x120\n" +
-	"\x05value\x18\x02 \x01(\v2\x1a.gastrolog.v1.FilterConfigR\x05value:\x028\x01\x1ai\n" +
-	"\x16RetentionPoliciesEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x129\n" +
-	"\x05value\x18\x02 \x01(\v2#.gastrolog.v1.RetentionPolicyConfigR\x05value:\x028\x01\"\x93\x02\n" +
+	"\tingesters\x18\x02 \x03(\v2\x1c.gastrolog.v1.IngesterConfigR\tingesters\x12O\n" +
+	"\x11rotation_policies\x18\x03 \x03(\v2\".gastrolog.v1.RotationPolicyConfigR\x10rotationPolicies\x124\n" +
+	"\afilters\x18\x04 \x03(\v2\x1a.gastrolog.v1.FilterConfigR\afilters\x12R\n" +
+	"\x12retention_policies\x18\x05 \x03(\v2#.gastrolog.v1.RetentionPolicyConfigR\x11retentionPolicies\"\xa7\x02\n" +
 	"\vStoreConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x16\n" +
@@ -3142,40 +3161,49 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x06policy\x18\x04 \x01(\tR\x06policy\x12=\n" +
 	"\x06params\x18\x05 \x03(\v2%.gastrolog.v1.StoreConfig.ParamsEntryR\x06params\x12\x1c\n" +
 	"\tretention\x18\x06 \x01(\tR\tretention\x12\x18\n" +
-	"\aenabled\x18\a \x01(\bR\aenabled\x1a9\n" +
+	"\aenabled\x18\a \x01(\bR\aenabled\x12\x12\n" +
+	"\x04name\x18\b \x01(\tR\x04name\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xcb\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xdf\x01\n" +
 	"\x0eIngesterConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12@\n" +
 	"\x06params\x18\x03 \x03(\v2(.gastrolog.v1.IngesterConfig.ParamsEntryR\x06params\x12\x18\n" +
-	"\aenabled\x18\x04 \x01(\bR\aenabled\x1a9\n" +
+	"\aenabled\x18\x04 \x01(\bR\aenabled\x12\x12\n" +
+	"\x04name\x18\x05 \x01(\tR\x04name\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\".\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"R\n" +
 	"\fFilterConfig\x12\x1e\n" +
 	"\n" +
 	"expression\x18\x01 \x01(\tR\n" +
-	"expression\"\x90\x01\n" +
+	"expression\x12\x0e\n" +
+	"\x02id\x18\x02 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\"\xb4\x01\n" +
 	"\x14RotationPolicyConfig\x12\x1b\n" +
 	"\tmax_bytes\x18\x01 \x01(\x03R\bmaxBytes\x12\x1f\n" +
 	"\vmax_records\x18\x02 \x01(\x03R\n" +
 	"maxRecords\x12&\n" +
 	"\x0fmax_age_seconds\x18\x03 \x01(\x03R\rmaxAgeSeconds\x12\x12\n" +
-	"\x04cron\x18\x04 \x01(\tR\x04cron\"{\n" +
+	"\x04cron\x18\x04 \x01(\tR\x04cron\x12\x0e\n" +
+	"\x02id\x18\x05 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x06 \x01(\tR\x04name\"\x9f\x01\n" +
 	"\x15RetentionPolicyConfig\x12&\n" +
 	"\x0fmax_age_seconds\x18\x01 \x01(\x03R\rmaxAgeSeconds\x12\x1b\n" +
 	"\tmax_bytes\x18\x02 \x01(\x03R\bmaxBytes\x12\x1d\n" +
 	"\n" +
-	"max_chunks\x18\x03 \x01(\x03R\tmaxChunks\"\x16\n" +
+	"max_chunks\x18\x03 \x01(\x03R\tmaxChunks\x12\x0e\n" +
+	"\x02id\x18\x04 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x05 \x01(\tR\x04name\"\x16\n" +
 	"\x14ListIngestersRequest\"Q\n" +
 	"\x15ListIngestersResponse\x128\n" +
-	"\tingesters\x18\x01 \x03(\v2\x1a.gastrolog.v1.IngesterInfoR\tingesters\"L\n" +
+	"\tingesters\x18\x01 \x03(\v2\x1a.gastrolog.v1.IngesterInfoR\tingesters\"`\n" +
 	"\fIngesterInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x18\n" +
-	"\arunning\x18\x03 \x01(\bR\arunning\"*\n" +
+	"\arunning\x18\x03 \x01(\bR\arunning\x12\x12\n" +
+	"\x04name\x18\x04 \x01(\tR\x04name\"*\n" +
 	"\x18GetIngesterStatusRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\xc5\x01\n" +
 	"\x19GetIngesterStatusResponse\x12\x0e\n" +
@@ -3184,23 +3212,20 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\arunning\x18\x03 \x01(\bR\arunning\x12+\n" +
 	"\x11messages_ingested\x18\x04 \x01(\x03R\x10messagesIngested\x12\x16\n" +
 	"\x06errors\x18\x05 \x01(\x03R\x06errors\x12%\n" +
-	"\x0ebytes_ingested\x18\x06 \x01(\x03R\rbytesIngested\"V\n" +
-	"\x10PutFilterRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x122\n" +
+	"\x0ebytes_ingested\x18\x06 \x01(\x03R\rbytesIngested\"F\n" +
+	"\x10PutFilterRequest\x122\n" +
 	"\x06config\x18\x02 \x01(\v2\x1a.gastrolog.v1.FilterConfigR\x06config\"\x13\n" +
 	"\x11PutFilterResponse\"%\n" +
 	"\x13DeleteFilterRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x16\n" +
-	"\x14DeleteFilterResponse\"f\n" +
-	"\x18PutRotationPolicyRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12:\n" +
+	"\x14DeleteFilterResponse\"V\n" +
+	"\x18PutRotationPolicyRequest\x12:\n" +
 	"\x06config\x18\x02 \x01(\v2\".gastrolog.v1.RotationPolicyConfigR\x06config\"\x1b\n" +
 	"\x19PutRotationPolicyResponse\"-\n" +
 	"\x1bDeleteRotationPolicyRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x1e\n" +
-	"\x1cDeleteRotationPolicyResponse\"h\n" +
-	"\x19PutRetentionPolicyRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12;\n" +
+	"\x1cDeleteRotationPolicyResponse\"X\n" +
+	"\x19PutRetentionPolicyRequest\x12;\n" +
 	"\x06config\x18\x02 \x01(\v2#.gastrolog.v1.RetentionPolicyConfigR\x06config\"\x1c\n" +
 	"\x1aPutRetentionPolicyResponse\".\n" +
 	"\x1cDeleteRetentionPolicyRequest\x12\x0e\n" +
@@ -3266,38 +3291,39 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x17DeleteSavedQueryRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\"\x1a\n" +
 	"\x18DeleteSavedQueryResponse\"\x19\n" +
-	"\x17ListCertificatesRequest\"0\n" +
-	"\x18ListCertificatesResponse\x12\x14\n" +
-	"\x05names\x18\x01 \x03(\tR\x05names\"+\n" +
-	"\x15GetCertificateRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"\x98\x01\n" +
-	"\x16GetCertificateResponse\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x19\n" +
+	"\x17ListCertificatesRequest\"]\n" +
+	"\x18ListCertificatesResponse\x12A\n" +
+	"\fcertificates\x18\x01 \x03(\v2\x1d.gastrolog.v1.CertificateInfoR\fcertificates\"5\n" +
+	"\x0fCertificateInfo\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"'\n" +
+	"\x15GetCertificateRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\xa8\x01\n" +
+	"\x16GetCertificateResponse\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\a \x01(\tR\x04name\x12\x19\n" +
 	"\bcert_pem\x18\x02 \x01(\tR\acertPem\x12\x17\n" +
 	"\akey_pem\x18\x03 \x01(\tR\x06keyPem\x12\x1b\n" +
 	"\tcert_file\x18\x04 \x01(\tR\bcertFile\x12\x19\n" +
-	"\bkey_file\x18\x05 \x01(\tR\akeyFile\"\xbd\x01\n" +
-	"\x15PutCertificateRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x19\n" +
+	"\bkey_file\x18\x05 \x01(\tR\akeyFile\"\xcd\x01\n" +
+	"\x15PutCertificateRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\a \x01(\tR\x04name\x12\x19\n" +
 	"\bcert_pem\x18\x02 \x01(\tR\acertPem\x12\x17\n" +
 	"\akey_pem\x18\x03 \x01(\tR\x06keyPem\x12\x1b\n" +
 	"\tcert_file\x18\x04 \x01(\tR\bcertFile\x12\x19\n" +
 	"\bkey_file\x18\x05 \x01(\tR\akeyFile\x12$\n" +
 	"\x0eset_as_default\x18\x06 \x01(\bR\fsetAsDefault\"\x18\n" +
-	"\x16PutCertificateResponse\".\n" +
-	"\x18DeleteCertificateRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"\x1b\n" +
+	"\x16PutCertificateResponse\"*\n" +
+	"\x18DeleteCertificateRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\x1b\n" +
 	"\x19DeleteCertificateResponse\"#\n" +
 	"\x11PauseStoreRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x14\n" +
 	"\x12PauseStoreResponse\"$\n" +
 	"\x12ResumeStoreRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x15\n" +
-	"\x13ResumeStoreResponse\"B\n" +
-	"\x12RenameStoreRequest\x12\x15\n" +
-	"\x06old_id\x18\x01 \x01(\tR\x05oldId\x12\x15\n" +
-	"\x06new_id\x18\x02 \x01(\tR\x05newId\"\x15\n" +
-	"\x13RenameStoreResponse\"*\n" +
+	"\x13ResumeStoreResponse\"*\n" +
 	"\x18DecommissionStoreRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"B\n" +
 	"\x19DecommissionStoreResponse\x12%\n" +
@@ -3310,7 +3336,7 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"J\n" +
 	"\x14TestIngesterResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage2\x92\x15\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage2\xbe\x14\n" +
 	"\rConfigService\x12L\n" +
 	"\tGetConfig\x12\x1e.gastrolog.v1.GetConfigRequest\x1a\x1f.gastrolog.v1.GetConfigResponse\x12X\n" +
 	"\rListIngesters\x12\".gastrolog.v1.ListIngestersRequest\x1a#.gastrolog.v1.ListIngestersResponse\x12d\n" +
@@ -3338,8 +3364,7 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x11DeleteCertificate\x12&.gastrolog.v1.DeleteCertificateRequest\x1a'.gastrolog.v1.DeleteCertificateResponse\x12O\n" +
 	"\n" +
 	"PauseStore\x12\x1f.gastrolog.v1.PauseStoreRequest\x1a .gastrolog.v1.PauseStoreResponse\x12R\n" +
-	"\vResumeStore\x12 .gastrolog.v1.ResumeStoreRequest\x1a!.gastrolog.v1.ResumeStoreResponse\x12R\n" +
-	"\vRenameStore\x12 .gastrolog.v1.RenameStoreRequest\x1a!.gastrolog.v1.RenameStoreResponse\x12d\n" +
+	"\vResumeStore\x12 .gastrolog.v1.ResumeStoreRequest\x1a!.gastrolog.v1.ResumeStoreResponse\x12d\n" +
 	"\x11DecommissionStore\x12&.gastrolog.v1.DecommissionStoreRequest\x1a'.gastrolog.v1.DecommissionStoreResponse\x12U\n" +
 	"\fTestIngester\x12!.gastrolog.v1.TestIngesterRequest\x1a\".gastrolog.v1.TestIngesterResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
@@ -3355,7 +3380,7 @@ func file_gastrolog_v1_config_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_config_proto_rawDescData
 }
 
-var file_gastrolog_v1_config_proto_msgTypes = make([]protoimpl.MessageInfo, 71)
+var file_gastrolog_v1_config_proto_msgTypes = make([]protoimpl.MessageInfo, 67)
 var file_gastrolog_v1_config_proto_goTypes = []any{
 	(*GetConfigRequest)(nil),              // 0: gastrolog.v1.GetConfigRequest
 	(*GetConfigResponse)(nil),             // 1: gastrolog.v1.GetConfigResponse
@@ -3406,37 +3431,33 @@ var file_gastrolog_v1_config_proto_goTypes = []any{
 	(*DeleteSavedQueryResponse)(nil),      // 46: gastrolog.v1.DeleteSavedQueryResponse
 	(*ListCertificatesRequest)(nil),       // 47: gastrolog.v1.ListCertificatesRequest
 	(*ListCertificatesResponse)(nil),      // 48: gastrolog.v1.ListCertificatesResponse
-	(*GetCertificateRequest)(nil),         // 49: gastrolog.v1.GetCertificateRequest
-	(*GetCertificateResponse)(nil),        // 50: gastrolog.v1.GetCertificateResponse
-	(*PutCertificateRequest)(nil),         // 51: gastrolog.v1.PutCertificateRequest
-	(*PutCertificateResponse)(nil),        // 52: gastrolog.v1.PutCertificateResponse
-	(*DeleteCertificateRequest)(nil),      // 53: gastrolog.v1.DeleteCertificateRequest
-	(*DeleteCertificateResponse)(nil),     // 54: gastrolog.v1.DeleteCertificateResponse
-	(*PauseStoreRequest)(nil),             // 55: gastrolog.v1.PauseStoreRequest
-	(*PauseStoreResponse)(nil),            // 56: gastrolog.v1.PauseStoreResponse
-	(*ResumeStoreRequest)(nil),            // 57: gastrolog.v1.ResumeStoreRequest
-	(*ResumeStoreResponse)(nil),           // 58: gastrolog.v1.ResumeStoreResponse
-	(*RenameStoreRequest)(nil),            // 59: gastrolog.v1.RenameStoreRequest
-	(*RenameStoreResponse)(nil),           // 60: gastrolog.v1.RenameStoreResponse
-	(*DecommissionStoreRequest)(nil),      // 61: gastrolog.v1.DecommissionStoreRequest
-	(*DecommissionStoreResponse)(nil),     // 62: gastrolog.v1.DecommissionStoreResponse
-	(*TestIngesterRequest)(nil),           // 63: gastrolog.v1.TestIngesterRequest
-	(*TestIngesterResponse)(nil),          // 64: gastrolog.v1.TestIngesterResponse
-	nil,                                   // 65: gastrolog.v1.GetConfigResponse.RotationPoliciesEntry
-	nil,                                   // 66: gastrolog.v1.GetConfigResponse.FiltersEntry
-	nil,                                   // 67: gastrolog.v1.GetConfigResponse.RetentionPoliciesEntry
-	nil,                                   // 68: gastrolog.v1.StoreConfig.ParamsEntry
-	nil,                                   // 69: gastrolog.v1.IngesterConfig.ParamsEntry
-	nil,                                   // 70: gastrolog.v1.TestIngesterRequest.ParamsEntry
+	(*CertificateInfo)(nil),               // 49: gastrolog.v1.CertificateInfo
+	(*GetCertificateRequest)(nil),         // 50: gastrolog.v1.GetCertificateRequest
+	(*GetCertificateResponse)(nil),        // 51: gastrolog.v1.GetCertificateResponse
+	(*PutCertificateRequest)(nil),         // 52: gastrolog.v1.PutCertificateRequest
+	(*PutCertificateResponse)(nil),        // 53: gastrolog.v1.PutCertificateResponse
+	(*DeleteCertificateRequest)(nil),      // 54: gastrolog.v1.DeleteCertificateRequest
+	(*DeleteCertificateResponse)(nil),     // 55: gastrolog.v1.DeleteCertificateResponse
+	(*PauseStoreRequest)(nil),             // 56: gastrolog.v1.PauseStoreRequest
+	(*PauseStoreResponse)(nil),            // 57: gastrolog.v1.PauseStoreResponse
+	(*ResumeStoreRequest)(nil),            // 58: gastrolog.v1.ResumeStoreRequest
+	(*ResumeStoreResponse)(nil),           // 59: gastrolog.v1.ResumeStoreResponse
+	(*DecommissionStoreRequest)(nil),      // 60: gastrolog.v1.DecommissionStoreRequest
+	(*DecommissionStoreResponse)(nil),     // 61: gastrolog.v1.DecommissionStoreResponse
+	(*TestIngesterRequest)(nil),           // 62: gastrolog.v1.TestIngesterRequest
+	(*TestIngesterResponse)(nil),          // 63: gastrolog.v1.TestIngesterResponse
+	nil,                                   // 64: gastrolog.v1.StoreConfig.ParamsEntry
+	nil,                                   // 65: gastrolog.v1.IngesterConfig.ParamsEntry
+	nil,                                   // 66: gastrolog.v1.TestIngesterRequest.ParamsEntry
 }
 var file_gastrolog_v1_config_proto_depIdxs = []int32{
 	2,  // 0: gastrolog.v1.GetConfigResponse.stores:type_name -> gastrolog.v1.StoreConfig
 	3,  // 1: gastrolog.v1.GetConfigResponse.ingesters:type_name -> gastrolog.v1.IngesterConfig
-	65, // 2: gastrolog.v1.GetConfigResponse.rotation_policies:type_name -> gastrolog.v1.GetConfigResponse.RotationPoliciesEntry
-	66, // 3: gastrolog.v1.GetConfigResponse.filters:type_name -> gastrolog.v1.GetConfigResponse.FiltersEntry
-	67, // 4: gastrolog.v1.GetConfigResponse.retention_policies:type_name -> gastrolog.v1.GetConfigResponse.RetentionPoliciesEntry
-	68, // 5: gastrolog.v1.StoreConfig.params:type_name -> gastrolog.v1.StoreConfig.ParamsEntry
-	69, // 6: gastrolog.v1.IngesterConfig.params:type_name -> gastrolog.v1.IngesterConfig.ParamsEntry
+	5,  // 2: gastrolog.v1.GetConfigResponse.rotation_policies:type_name -> gastrolog.v1.RotationPolicyConfig
+	4,  // 3: gastrolog.v1.GetConfigResponse.filters:type_name -> gastrolog.v1.FilterConfig
+	6,  // 4: gastrolog.v1.GetConfigResponse.retention_policies:type_name -> gastrolog.v1.RetentionPolicyConfig
+	64, // 5: gastrolog.v1.StoreConfig.params:type_name -> gastrolog.v1.StoreConfig.ParamsEntry
+	65, // 6: gastrolog.v1.IngesterConfig.params:type_name -> gastrolog.v1.IngesterConfig.ParamsEntry
 	9,  // 7: gastrolog.v1.ListIngestersResponse.ingesters:type_name -> gastrolog.v1.IngesterInfo
 	4,  // 8: gastrolog.v1.PutFilterRequest.config:type_name -> gastrolog.v1.FilterConfig
 	5,  // 9: gastrolog.v1.PutRotationPolicyRequest.config:type_name -> gastrolog.v1.RotationPolicyConfig
@@ -3445,73 +3466,69 @@ var file_gastrolog_v1_config_proto_depIdxs = []int32{
 	3,  // 12: gastrolog.v1.PutIngesterRequest.config:type_name -> gastrolog.v1.IngesterConfig
 	40, // 13: gastrolog.v1.GetSavedQueriesResponse.queries:type_name -> gastrolog.v1.SavedQuery
 	40, // 14: gastrolog.v1.PutSavedQueryRequest.query:type_name -> gastrolog.v1.SavedQuery
-	70, // 15: gastrolog.v1.TestIngesterRequest.params:type_name -> gastrolog.v1.TestIngesterRequest.ParamsEntry
-	5,  // 16: gastrolog.v1.GetConfigResponse.RotationPoliciesEntry.value:type_name -> gastrolog.v1.RotationPolicyConfig
-	4,  // 17: gastrolog.v1.GetConfigResponse.FiltersEntry.value:type_name -> gastrolog.v1.FilterConfig
-	6,  // 18: gastrolog.v1.GetConfigResponse.RetentionPoliciesEntry.value:type_name -> gastrolog.v1.RetentionPolicyConfig
-	0,  // 19: gastrolog.v1.ConfigService.GetConfig:input_type -> gastrolog.v1.GetConfigRequest
-	7,  // 20: gastrolog.v1.ConfigService.ListIngesters:input_type -> gastrolog.v1.ListIngestersRequest
-	10, // 21: gastrolog.v1.ConfigService.GetIngesterStatus:input_type -> gastrolog.v1.GetIngesterStatusRequest
-	12, // 22: gastrolog.v1.ConfigService.PutFilter:input_type -> gastrolog.v1.PutFilterRequest
-	14, // 23: gastrolog.v1.ConfigService.DeleteFilter:input_type -> gastrolog.v1.DeleteFilterRequest
-	16, // 24: gastrolog.v1.ConfigService.PutRotationPolicy:input_type -> gastrolog.v1.PutRotationPolicyRequest
-	18, // 25: gastrolog.v1.ConfigService.DeleteRotationPolicy:input_type -> gastrolog.v1.DeleteRotationPolicyRequest
-	20, // 26: gastrolog.v1.ConfigService.PutRetentionPolicy:input_type -> gastrolog.v1.PutRetentionPolicyRequest
-	22, // 27: gastrolog.v1.ConfigService.DeleteRetentionPolicy:input_type -> gastrolog.v1.DeleteRetentionPolicyRequest
-	24, // 28: gastrolog.v1.ConfigService.PutStore:input_type -> gastrolog.v1.PutStoreRequest
-	26, // 29: gastrolog.v1.ConfigService.DeleteStore:input_type -> gastrolog.v1.DeleteStoreRequest
-	28, // 30: gastrolog.v1.ConfigService.PutIngester:input_type -> gastrolog.v1.PutIngesterRequest
-	30, // 31: gastrolog.v1.ConfigService.DeleteIngester:input_type -> gastrolog.v1.DeleteIngesterRequest
-	32, // 32: gastrolog.v1.ConfigService.GetServerConfig:input_type -> gastrolog.v1.GetServerConfigRequest
-	34, // 33: gastrolog.v1.ConfigService.PutServerConfig:input_type -> gastrolog.v1.PutServerConfigRequest
-	36, // 34: gastrolog.v1.ConfigService.GetPreferences:input_type -> gastrolog.v1.GetPreferencesRequest
-	38, // 35: gastrolog.v1.ConfigService.PutPreferences:input_type -> gastrolog.v1.PutPreferencesRequest
-	41, // 36: gastrolog.v1.ConfigService.GetSavedQueries:input_type -> gastrolog.v1.GetSavedQueriesRequest
-	43, // 37: gastrolog.v1.ConfigService.PutSavedQuery:input_type -> gastrolog.v1.PutSavedQueryRequest
-	45, // 38: gastrolog.v1.ConfigService.DeleteSavedQuery:input_type -> gastrolog.v1.DeleteSavedQueryRequest
-	47, // 39: gastrolog.v1.ConfigService.ListCertificates:input_type -> gastrolog.v1.ListCertificatesRequest
-	49, // 40: gastrolog.v1.ConfigService.GetCertificate:input_type -> gastrolog.v1.GetCertificateRequest
-	51, // 41: gastrolog.v1.ConfigService.PutCertificate:input_type -> gastrolog.v1.PutCertificateRequest
-	53, // 42: gastrolog.v1.ConfigService.DeleteCertificate:input_type -> gastrolog.v1.DeleteCertificateRequest
-	55, // 43: gastrolog.v1.ConfigService.PauseStore:input_type -> gastrolog.v1.PauseStoreRequest
-	57, // 44: gastrolog.v1.ConfigService.ResumeStore:input_type -> gastrolog.v1.ResumeStoreRequest
-	59, // 45: gastrolog.v1.ConfigService.RenameStore:input_type -> gastrolog.v1.RenameStoreRequest
-	61, // 46: gastrolog.v1.ConfigService.DecommissionStore:input_type -> gastrolog.v1.DecommissionStoreRequest
-	63, // 47: gastrolog.v1.ConfigService.TestIngester:input_type -> gastrolog.v1.TestIngesterRequest
-	1,  // 48: gastrolog.v1.ConfigService.GetConfig:output_type -> gastrolog.v1.GetConfigResponse
-	8,  // 49: gastrolog.v1.ConfigService.ListIngesters:output_type -> gastrolog.v1.ListIngestersResponse
-	11, // 50: gastrolog.v1.ConfigService.GetIngesterStatus:output_type -> gastrolog.v1.GetIngesterStatusResponse
-	13, // 51: gastrolog.v1.ConfigService.PutFilter:output_type -> gastrolog.v1.PutFilterResponse
-	15, // 52: gastrolog.v1.ConfigService.DeleteFilter:output_type -> gastrolog.v1.DeleteFilterResponse
-	17, // 53: gastrolog.v1.ConfigService.PutRotationPolicy:output_type -> gastrolog.v1.PutRotationPolicyResponse
-	19, // 54: gastrolog.v1.ConfigService.DeleteRotationPolicy:output_type -> gastrolog.v1.DeleteRotationPolicyResponse
-	21, // 55: gastrolog.v1.ConfigService.PutRetentionPolicy:output_type -> gastrolog.v1.PutRetentionPolicyResponse
-	23, // 56: gastrolog.v1.ConfigService.DeleteRetentionPolicy:output_type -> gastrolog.v1.DeleteRetentionPolicyResponse
-	25, // 57: gastrolog.v1.ConfigService.PutStore:output_type -> gastrolog.v1.PutStoreResponse
-	27, // 58: gastrolog.v1.ConfigService.DeleteStore:output_type -> gastrolog.v1.DeleteStoreResponse
-	29, // 59: gastrolog.v1.ConfigService.PutIngester:output_type -> gastrolog.v1.PutIngesterResponse
-	31, // 60: gastrolog.v1.ConfigService.DeleteIngester:output_type -> gastrolog.v1.DeleteIngesterResponse
-	33, // 61: gastrolog.v1.ConfigService.GetServerConfig:output_type -> gastrolog.v1.GetServerConfigResponse
-	35, // 62: gastrolog.v1.ConfigService.PutServerConfig:output_type -> gastrolog.v1.PutServerConfigResponse
-	37, // 63: gastrolog.v1.ConfigService.GetPreferences:output_type -> gastrolog.v1.GetPreferencesResponse
-	39, // 64: gastrolog.v1.ConfigService.PutPreferences:output_type -> gastrolog.v1.PutPreferencesResponse
-	42, // 65: gastrolog.v1.ConfigService.GetSavedQueries:output_type -> gastrolog.v1.GetSavedQueriesResponse
-	44, // 66: gastrolog.v1.ConfigService.PutSavedQuery:output_type -> gastrolog.v1.PutSavedQueryResponse
-	46, // 67: gastrolog.v1.ConfigService.DeleteSavedQuery:output_type -> gastrolog.v1.DeleteSavedQueryResponse
-	48, // 68: gastrolog.v1.ConfigService.ListCertificates:output_type -> gastrolog.v1.ListCertificatesResponse
-	50, // 69: gastrolog.v1.ConfigService.GetCertificate:output_type -> gastrolog.v1.GetCertificateResponse
-	52, // 70: gastrolog.v1.ConfigService.PutCertificate:output_type -> gastrolog.v1.PutCertificateResponse
-	54, // 71: gastrolog.v1.ConfigService.DeleteCertificate:output_type -> gastrolog.v1.DeleteCertificateResponse
-	56, // 72: gastrolog.v1.ConfigService.PauseStore:output_type -> gastrolog.v1.PauseStoreResponse
-	58, // 73: gastrolog.v1.ConfigService.ResumeStore:output_type -> gastrolog.v1.ResumeStoreResponse
-	60, // 74: gastrolog.v1.ConfigService.RenameStore:output_type -> gastrolog.v1.RenameStoreResponse
-	62, // 75: gastrolog.v1.ConfigService.DecommissionStore:output_type -> gastrolog.v1.DecommissionStoreResponse
-	64, // 76: gastrolog.v1.ConfigService.TestIngester:output_type -> gastrolog.v1.TestIngesterResponse
-	48, // [48:77] is the sub-list for method output_type
-	19, // [19:48] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	49, // 15: gastrolog.v1.ListCertificatesResponse.certificates:type_name -> gastrolog.v1.CertificateInfo
+	66, // 16: gastrolog.v1.TestIngesterRequest.params:type_name -> gastrolog.v1.TestIngesterRequest.ParamsEntry
+	0,  // 17: gastrolog.v1.ConfigService.GetConfig:input_type -> gastrolog.v1.GetConfigRequest
+	7,  // 18: gastrolog.v1.ConfigService.ListIngesters:input_type -> gastrolog.v1.ListIngestersRequest
+	10, // 19: gastrolog.v1.ConfigService.GetIngesterStatus:input_type -> gastrolog.v1.GetIngesterStatusRequest
+	12, // 20: gastrolog.v1.ConfigService.PutFilter:input_type -> gastrolog.v1.PutFilterRequest
+	14, // 21: gastrolog.v1.ConfigService.DeleteFilter:input_type -> gastrolog.v1.DeleteFilterRequest
+	16, // 22: gastrolog.v1.ConfigService.PutRotationPolicy:input_type -> gastrolog.v1.PutRotationPolicyRequest
+	18, // 23: gastrolog.v1.ConfigService.DeleteRotationPolicy:input_type -> gastrolog.v1.DeleteRotationPolicyRequest
+	20, // 24: gastrolog.v1.ConfigService.PutRetentionPolicy:input_type -> gastrolog.v1.PutRetentionPolicyRequest
+	22, // 25: gastrolog.v1.ConfigService.DeleteRetentionPolicy:input_type -> gastrolog.v1.DeleteRetentionPolicyRequest
+	24, // 26: gastrolog.v1.ConfigService.PutStore:input_type -> gastrolog.v1.PutStoreRequest
+	26, // 27: gastrolog.v1.ConfigService.DeleteStore:input_type -> gastrolog.v1.DeleteStoreRequest
+	28, // 28: gastrolog.v1.ConfigService.PutIngester:input_type -> gastrolog.v1.PutIngesterRequest
+	30, // 29: gastrolog.v1.ConfigService.DeleteIngester:input_type -> gastrolog.v1.DeleteIngesterRequest
+	32, // 30: gastrolog.v1.ConfigService.GetServerConfig:input_type -> gastrolog.v1.GetServerConfigRequest
+	34, // 31: gastrolog.v1.ConfigService.PutServerConfig:input_type -> gastrolog.v1.PutServerConfigRequest
+	36, // 32: gastrolog.v1.ConfigService.GetPreferences:input_type -> gastrolog.v1.GetPreferencesRequest
+	38, // 33: gastrolog.v1.ConfigService.PutPreferences:input_type -> gastrolog.v1.PutPreferencesRequest
+	41, // 34: gastrolog.v1.ConfigService.GetSavedQueries:input_type -> gastrolog.v1.GetSavedQueriesRequest
+	43, // 35: gastrolog.v1.ConfigService.PutSavedQuery:input_type -> gastrolog.v1.PutSavedQueryRequest
+	45, // 36: gastrolog.v1.ConfigService.DeleteSavedQuery:input_type -> gastrolog.v1.DeleteSavedQueryRequest
+	47, // 37: gastrolog.v1.ConfigService.ListCertificates:input_type -> gastrolog.v1.ListCertificatesRequest
+	50, // 38: gastrolog.v1.ConfigService.GetCertificate:input_type -> gastrolog.v1.GetCertificateRequest
+	52, // 39: gastrolog.v1.ConfigService.PutCertificate:input_type -> gastrolog.v1.PutCertificateRequest
+	54, // 40: gastrolog.v1.ConfigService.DeleteCertificate:input_type -> gastrolog.v1.DeleteCertificateRequest
+	56, // 41: gastrolog.v1.ConfigService.PauseStore:input_type -> gastrolog.v1.PauseStoreRequest
+	58, // 42: gastrolog.v1.ConfigService.ResumeStore:input_type -> gastrolog.v1.ResumeStoreRequest
+	60, // 43: gastrolog.v1.ConfigService.DecommissionStore:input_type -> gastrolog.v1.DecommissionStoreRequest
+	62, // 44: gastrolog.v1.ConfigService.TestIngester:input_type -> gastrolog.v1.TestIngesterRequest
+	1,  // 45: gastrolog.v1.ConfigService.GetConfig:output_type -> gastrolog.v1.GetConfigResponse
+	8,  // 46: gastrolog.v1.ConfigService.ListIngesters:output_type -> gastrolog.v1.ListIngestersResponse
+	11, // 47: gastrolog.v1.ConfigService.GetIngesterStatus:output_type -> gastrolog.v1.GetIngesterStatusResponse
+	13, // 48: gastrolog.v1.ConfigService.PutFilter:output_type -> gastrolog.v1.PutFilterResponse
+	15, // 49: gastrolog.v1.ConfigService.DeleteFilter:output_type -> gastrolog.v1.DeleteFilterResponse
+	17, // 50: gastrolog.v1.ConfigService.PutRotationPolicy:output_type -> gastrolog.v1.PutRotationPolicyResponse
+	19, // 51: gastrolog.v1.ConfigService.DeleteRotationPolicy:output_type -> gastrolog.v1.DeleteRotationPolicyResponse
+	21, // 52: gastrolog.v1.ConfigService.PutRetentionPolicy:output_type -> gastrolog.v1.PutRetentionPolicyResponse
+	23, // 53: gastrolog.v1.ConfigService.DeleteRetentionPolicy:output_type -> gastrolog.v1.DeleteRetentionPolicyResponse
+	25, // 54: gastrolog.v1.ConfigService.PutStore:output_type -> gastrolog.v1.PutStoreResponse
+	27, // 55: gastrolog.v1.ConfigService.DeleteStore:output_type -> gastrolog.v1.DeleteStoreResponse
+	29, // 56: gastrolog.v1.ConfigService.PutIngester:output_type -> gastrolog.v1.PutIngesterResponse
+	31, // 57: gastrolog.v1.ConfigService.DeleteIngester:output_type -> gastrolog.v1.DeleteIngesterResponse
+	33, // 58: gastrolog.v1.ConfigService.GetServerConfig:output_type -> gastrolog.v1.GetServerConfigResponse
+	35, // 59: gastrolog.v1.ConfigService.PutServerConfig:output_type -> gastrolog.v1.PutServerConfigResponse
+	37, // 60: gastrolog.v1.ConfigService.GetPreferences:output_type -> gastrolog.v1.GetPreferencesResponse
+	39, // 61: gastrolog.v1.ConfigService.PutPreferences:output_type -> gastrolog.v1.PutPreferencesResponse
+	42, // 62: gastrolog.v1.ConfigService.GetSavedQueries:output_type -> gastrolog.v1.GetSavedQueriesResponse
+	44, // 63: gastrolog.v1.ConfigService.PutSavedQuery:output_type -> gastrolog.v1.PutSavedQueryResponse
+	46, // 64: gastrolog.v1.ConfigService.DeleteSavedQuery:output_type -> gastrolog.v1.DeleteSavedQueryResponse
+	48, // 65: gastrolog.v1.ConfigService.ListCertificates:output_type -> gastrolog.v1.ListCertificatesResponse
+	51, // 66: gastrolog.v1.ConfigService.GetCertificate:output_type -> gastrolog.v1.GetCertificateResponse
+	53, // 67: gastrolog.v1.ConfigService.PutCertificate:output_type -> gastrolog.v1.PutCertificateResponse
+	55, // 68: gastrolog.v1.ConfigService.DeleteCertificate:output_type -> gastrolog.v1.DeleteCertificateResponse
+	57, // 69: gastrolog.v1.ConfigService.PauseStore:output_type -> gastrolog.v1.PauseStoreResponse
+	59, // 70: gastrolog.v1.ConfigService.ResumeStore:output_type -> gastrolog.v1.ResumeStoreResponse
+	61, // 71: gastrolog.v1.ConfigService.DecommissionStore:output_type -> gastrolog.v1.DecommissionStoreResponse
+	63, // 72: gastrolog.v1.ConfigService.TestIngester:output_type -> gastrolog.v1.TestIngesterResponse
+	45, // [45:73] is the sub-list for method output_type
+	17, // [17:45] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_config_proto_init() }
@@ -3526,7 +3543,7 @@ func file_gastrolog_v1_config_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_config_proto_rawDesc), len(file_gastrolog_v1_config_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   71,
+			NumMessages:   67,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

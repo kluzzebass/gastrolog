@@ -115,7 +115,7 @@ export function useCreateUser() {
 
 export function useResetPassword() {
   return useMutation({
-    mutationFn: async (args: { username: string; newPassword: string }) => {
+    mutationFn: async (args: { id: string; newPassword: string }) => {
       return authClient.resetPassword(args);
     },
   });
@@ -124,7 +124,7 @@ export function useResetPassword() {
 export function useUpdateUserRole() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (args: { username: string; role: string }) => {
+    mutationFn: async (args: { id: string; role: string }) => {
       return authClient.updateUserRole(args);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
@@ -134,8 +134,8 @@ export function useUpdateUserRole() {
 export function useDeleteUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (username: string) => {
-      return authClient.deleteUser({ username });
+    mutationFn: async (id: string) => {
+      return authClient.deleteUser({ id });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
   });

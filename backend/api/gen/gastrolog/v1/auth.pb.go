@@ -448,6 +448,7 @@ type UserInfo struct {
 	Role          string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
 	CreatedAt     int64                  `protobuf:"varint,3,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"` // unix timestamp
 	UpdatedAt     int64                  `protobuf:"varint,4,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"` // unix timestamp
+	Id            string                 `protobuf:"bytes,5,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -508,6 +509,13 @@ func (x *UserInfo) GetUpdatedAt() int64 {
 		return x.UpdatedAt
 	}
 	return 0
+}
+
+func (x *UserInfo) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
 }
 
 type CreateUserRequest struct {
@@ -696,7 +704,7 @@ func (x *ListUsersResponse) GetUsers() []*UserInfo {
 
 type UpdateUserRoleRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Role          string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"` // "admin" or "user"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -732,9 +740,9 @@ func (*UpdateUserRoleRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{14}
 }
 
-func (x *UpdateUserRoleRequest) GetUsername() string {
+func (x *UpdateUserRoleRequest) GetId() string {
 	if x != nil {
-		return x.Username
+		return x.Id
 	}
 	return ""
 }
@@ -792,7 +800,7 @@ func (x *UpdateUserRoleResponse) GetUser() *UserInfo {
 
 type ResetPasswordRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	NewPassword   string                 `protobuf:"bytes,2,opt,name=new_password,json=newPassword,proto3" json:"new_password,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -828,9 +836,9 @@ func (*ResetPasswordRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{16}
 }
 
-func (x *ResetPasswordRequest) GetUsername() string {
+func (x *ResetPasswordRequest) GetId() string {
 	if x != nil {
-		return x.Username
+		return x.Id
 	}
 	return ""
 }
@@ -880,7 +888,7 @@ func (*ResetPasswordResponse) Descriptor() ([]byte, []int) {
 
 type DeleteUserRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -915,9 +923,9 @@ func (*DeleteUserRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{18}
 }
 
-func (x *DeleteUserRequest) GetUsername() string {
+func (x *DeleteUserRequest) GetId() string {
 	if x != nil {
-		return x.Username
+		return x.Id
 	}
 	return ""
 }
@@ -985,14 +993,15 @@ const file_gastrolog_v1_auth_proto_rawDesc = "" +
 	"\x14GetAuthStatusRequest\"8\n" +
 	"\x15GetAuthStatusResponse\x12\x1f\n" +
 	"\vneeds_setup\x18\x01 \x01(\bR\n" +
-	"needsSetup\"x\n" +
+	"needsSetup\"\x88\x01\n" +
 	"\bUserInfo\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x12\n" +
 	"\x04role\x18\x02 \x01(\tR\x04role\x12\x1d\n" +
 	"\n" +
 	"created_at\x18\x03 \x01(\x03R\tcreatedAt\x12\x1d\n" +
 	"\n" +
-	"updated_at\x18\x04 \x01(\x03R\tupdatedAt\"_\n" +
+	"updated_at\x18\x04 \x01(\x03R\tupdatedAt\x12\x0e\n" +
+	"\x02id\x18\x05 \x01(\tR\x02id\"_\n" +
 	"\x11CreateUserRequest\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x12\n" +
@@ -1001,18 +1010,18 @@ const file_gastrolog_v1_auth_proto_rawDesc = "" +
 	"\x04user\x18\x01 \x01(\v2\x16.gastrolog.v1.UserInfoR\x04user\"\x12\n" +
 	"\x10ListUsersRequest\"A\n" +
 	"\x11ListUsersResponse\x12,\n" +
-	"\x05users\x18\x01 \x03(\v2\x16.gastrolog.v1.UserInfoR\x05users\"G\n" +
-	"\x15UpdateUserRoleRequest\x12\x1a\n" +
-	"\busername\x18\x01 \x01(\tR\busername\x12\x12\n" +
+	"\x05users\x18\x01 \x03(\v2\x16.gastrolog.v1.UserInfoR\x05users\";\n" +
+	"\x15UpdateUserRoleRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04role\x18\x02 \x01(\tR\x04role\"D\n" +
 	"\x16UpdateUserRoleResponse\x12*\n" +
-	"\x04user\x18\x01 \x01(\v2\x16.gastrolog.v1.UserInfoR\x04user\"U\n" +
-	"\x14ResetPasswordRequest\x12\x1a\n" +
-	"\busername\x18\x01 \x01(\tR\busername\x12!\n" +
+	"\x04user\x18\x01 \x01(\v2\x16.gastrolog.v1.UserInfoR\x04user\"I\n" +
+	"\x14ResetPasswordRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fnew_password\x18\x02 \x01(\tR\vnewPassword\"\x17\n" +
-	"\x15ResetPasswordResponse\"/\n" +
-	"\x11DeleteUserRequest\x12\x1a\n" +
-	"\busername\x18\x01 \x01(\tR\busername\"\x14\n" +
+	"\x15ResetPasswordResponse\"#\n" +
+	"\x11DeleteUserRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\x14\n" +
 	"\x12DeleteUserResponse2\xf8\x05\n" +
 	"\vAuthService\x12I\n" +
 	"\bRegister\x12\x1d.gastrolog.v1.RegisterRequest\x1a\x1e.gastrolog.v1.RegisterResponse\x12@\n" +

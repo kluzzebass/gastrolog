@@ -22,29 +22,29 @@ func (r *REPL) cmdIndexes(out *strings.Builder, args []string) {
 
 	// Find the chunk and its index manager
 	stores := r.client.ListStores()
-	var foundStore string
+	var foundStore StoreInfo
 	var cm ChunkReader
 	var im IndexReader
 
 	for _, store := range stores {
-		cm = r.client.ChunkManager(store)
+		cm = r.client.ChunkManager(store.ID)
 		if cm == nil {
 			continue
 		}
 		if _, err := cm.Meta(chunkID); err == nil {
 			foundStore = store
-			im = r.client.IndexManager(store)
+			im = r.client.IndexManager(store.ID)
 			break
 		}
 	}
 
-	if foundStore == "" {
+	if foundStore.ID == "" {
 		fmt.Fprintf(out, "Chunk not found: %s\n", args[0])
 		return
 	}
 
 	if im == nil {
-		fmt.Fprintf(out, "No index manager for store: %s\n", foundStore)
+		fmt.Fprintf(out, "No index manager for store: %s\n", foundStore.DisplayName())
 		return
 	}
 

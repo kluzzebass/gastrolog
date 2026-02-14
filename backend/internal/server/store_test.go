@@ -649,8 +649,7 @@ func newTwoStoreTestSetup(t *testing.T) (gastrologv1connect.StoreServiceClient, 
 	ctx := context.Background()
 
 	_, err := cfgClient.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-		Id:     "catch-all",
-		Config: &gastrologv1.FilterConfig{Expression: "*"},
+		Config: &gastrologv1.FilterConfig{Id: "catch-all", Expression: "*"},
 	}))
 	if err != nil {
 		t.Fatalf("PutFilter: %v", err)

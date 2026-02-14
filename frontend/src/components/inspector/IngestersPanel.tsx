@@ -34,7 +34,7 @@ export function IngestersPanel({ dark }: { dark: boolean }) {
       {ingesters.map((ing) => (
         <ExpandableCard
           key={ing.id}
-          id={ing.id}
+          id={ing.name || ing.id}
           typeBadge={ing.type}
           typeBadgeAccent
           dark={dark}

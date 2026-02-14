@@ -17,22 +17,24 @@ func (r *REPL) cmdChunks(out *strings.Builder) {
 		return
 	}
 
-	slices.Sort(stores)
+	slices.SortFunc(stores, func(a, b StoreInfo) int {
+		return strings.Compare(a.DisplayName(), b.DisplayName())
+	})
 
 	for _, store := range stores {
-		cm := r.client.ChunkManager(store)
+		cm := r.client.ChunkManager(store.ID)
 		if cm == nil {
 			continue
 		}
 
 		chunks, err := cm.List()
 		if err != nil {
-			fmt.Fprintf(out, "[%s] Error listing chunks: %v\n", store, err)
+			fmt.Fprintf(out, "[%s] Error listing chunks: %v\n", store.DisplayName(), err)
 			continue
 		}
 
 		if len(chunks) == 0 {
-			fmt.Fprintf(out, "[%s] No chunks\n", store)
+			fmt.Fprintf(out, "[%s] No chunks\n", store.DisplayName())
 			continue
 		}
 
@@ -41,7 +43,7 @@ func (r *REPL) cmdChunks(out *strings.Builder) {
 			return a.StartTS.Compare(b.StartTS)
 		})
 
-		fmt.Fprintf(out, "[%s] %d chunks:\n", store, len(chunks))
+		fmt.Fprintf(out, "[%s] %d chunks:\n", store.DisplayName(), len(chunks))
 
 		// Check which is the active chunk
 		active := cm.Active()
@@ -84,12 +86,12 @@ func (r *REPL) cmdChunk(out *strings.Builder, args []string) {
 
 	// Find the chunk across all stores
 	stores := r.client.ListStores()
-	var foundStore string
+	var foundStore StoreInfo
 	var meta chunk.ChunkMeta
 	var cm ChunkReader
 
 	for _, store := range stores {
-		cm = r.client.ChunkManager(store)
+		cm = r.client.ChunkManager(store.ID)
 		if cm == nil {
 			continue
 		}
@@ -101,7 +103,7 @@ func (r *REPL) cmdChunk(out *strings.Builder, args []string) {
 		}
 	}
 
-	if foundStore == "" {
+	if foundStore.ID == "" {
 		fmt.Fprintf(out, "Chunk not found: %s\n", args[0])
 		return
 	}
@@ -115,7 +117,7 @@ func (r *REPL) cmdChunk(out *strings.Builder, args []string) {
 	}
 
 	fmt.Fprintf(out, "Chunk: %s\n", meta.ID.String())
-	fmt.Fprintf(out, "  Store:    %s\n", foundStore)
+	fmt.Fprintf(out, "  Store:    %s\n", foundStore.DisplayName())
 	fmt.Fprintf(out, "  Status:   %s\n", status)
 	fmt.Fprintf(out, "  StartTS:  %s\n", meta.StartTS.Format(time.RFC3339Nano))
 	fmt.Fprintf(out, "  EndTS:    %s\n", meta.EndTS.Format(time.RFC3339Nano))
@@ -123,7 +125,7 @@ func (r *REPL) cmdChunk(out *strings.Builder, args []string) {
 
 	// Show index status if sealed
 	if meta.Sealed {
-		im := r.client.IndexManager(foundStore)
+		im := r.client.IndexManager(foundStore.ID)
 		if im != nil {
 			complete, err := im.IndexesComplete(chunkID)
 			if err != nil {

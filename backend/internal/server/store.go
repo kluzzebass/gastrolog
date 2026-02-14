@@ -45,7 +45,7 @@ func (s *StoreServer) ListStores(
 	}
 
 	for _, id := range stores {
-		info, err := s.getStoreInfo(id)
+		info, err := s.getStoreInfo(ctx, id)
 		if err != nil {
 			continue // Skip stores with errors
 		}
@@ -60,7 +60,7 @@ func (s *StoreServer) GetStore(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetStoreRequest],
 ) (*connect.Response[apiv1.GetStoreResponse], error) {
-	info, err := s.getStoreInfo(req.Msg.Id)
+	info, err := s.getStoreInfo(ctx, req.Msg.Id)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
@@ -356,9 +356,10 @@ func (s *StoreServer) GetStats(
 			Enabled:    s.orch.IsStoreEnabled(storeID),
 		}
 
-		// Get store type from config if available.
-		if cfg, err := s.orch.StoreConfig(storeID); err == nil {
+		// Get store type and name from config store (orchestrator doesn't track these).
+		if cfg, err := s.getFullStoreConfig(ctx, storeID); err == nil {
 			storeStat.Type = cfg.Type
+			storeStat.Name = cfg.Name
 		}
 
 		im := s.orch.IndexManager(storeID)
@@ -909,7 +910,7 @@ func (s *StoreServer) copyRecords(ctx context.Context, srcID, dstID string) (rec
 	return recordsCopied, chunksCreated, nil
 }
 
-func (s *StoreServer) getStoreInfo(id string) (*apiv1.StoreInfo, error) {
+func (s *StoreServer) getStoreInfo(ctx context.Context, id string) (*apiv1.StoreInfo, error) {
 	cm := s.orch.ChunkManager(id)
 	if cm == nil {
 		return nil, errors.New("store not found")
@@ -925,11 +926,12 @@ func (s *StoreServer) getStoreInfo(id string) (*apiv1.StoreInfo, error) {
 		recordCount += meta.RecordCount
 	}
 
-	// Get filter expression
-	cfg, _ := s.orch.StoreConfig(id)
+	// Get store config from config store (has name, type, params).
+	cfg, _ := s.getFullStoreConfig(ctx, id)
 
 	info := &apiv1.StoreInfo{
 		Id:          id,
+		Name:        cfg.Name,
 		Type:        cfg.Type,
 		ChunkCount:  int64(len(metas)),
 		RecordCount: recordCount,

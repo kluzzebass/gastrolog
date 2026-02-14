@@ -15,10 +15,9 @@ export function useConfig() {
 export function usePutFilter() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (args: { id: string; expression: string }) => {
+    mutationFn: async (args: { id: string; name: string; expression: string }) => {
       await configClient.putFilter({
-        id: args.id,
-        config: { expression: args.expression },
+        config: { id: args.id, name: args.name, expression: args.expression },
       });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["config"] }),
@@ -40,14 +39,16 @@ export function usePutRotationPolicy() {
   return useMutation({
     mutationFn: async (args: {
       id: string;
+      name: string;
       maxBytes: bigint;
       maxRecords: bigint;
       maxAgeSeconds: bigint;
       cron: string;
     }) => {
       await configClient.putRotationPolicy({
-        id: args.id,
         config: {
+          id: args.id,
+          name: args.name,
           maxBytes: args.maxBytes,
           maxRecords: args.maxRecords,
           maxAgeSeconds: args.maxAgeSeconds,
@@ -74,13 +75,15 @@ export function usePutRetentionPolicy() {
   return useMutation({
     mutationFn: async (args: {
       id: string;
+      name: string;
       maxAgeSeconds: bigint;
       maxBytes: bigint;
       maxChunks: bigint;
     }) => {
       await configClient.putRetentionPolicy({
-        id: args.id,
         config: {
+          id: args.id,
+          name: args.name,
           maxAgeSeconds: args.maxAgeSeconds,
           maxBytes: args.maxBytes,
           maxChunks: args.maxChunks,
@@ -106,6 +109,7 @@ export function usePutStore() {
   return useMutation({
     mutationFn: async (args: {
       id: string;
+      name: string;
       type: string;
       filter: string;
       policy: string;
@@ -116,6 +120,7 @@ export function usePutStore() {
       await configClient.putStore({
         config: {
           id: args.id,
+          name: args.name,
           type: args.type,
           filter: args.filter,
           policy: args.policy,
@@ -152,6 +157,7 @@ export function usePutIngester() {
   return useMutation({
     mutationFn: async (args: {
       id: string;
+      name: string;
       type: string;
       enabled: boolean;
       params: Record<string, string>;
@@ -159,6 +165,7 @@ export function usePutIngester() {
       await configClient.putIngester({
         config: {
           id: args.id,
+          name: args.name,
           type: args.type,
           enabled: args.enabled,
           params: args.params,
@@ -235,15 +242,15 @@ export function useCertificates() {
   });
 }
 
-export function useCertificate(name: string | null) {
+export function useCertificate(id: string | null) {
   return useQuery({
-    queryKey: ["certificate", name],
+    queryKey: ["certificate", id],
     queryFn: async () => {
-      if (!name) return null;
-      const response = await configClient.getCertificate({ name });
+      if (!id) return null;
+      const response = await configClient.getCertificate({ id });
       return response;
     },
-    enabled: !!name,
+    enabled: !!id,
   });
 }
 
@@ -251,6 +258,7 @@ export function usePutCertificate() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: {
+      id: string;
       name: string;
       certPem?: string;
       keyPem?: string;
@@ -259,6 +267,7 @@ export function usePutCertificate() {
       setAsDefault?: boolean;
     }) => {
       await configClient.putCertificate({
+        id: args.id,
         name: args.name,
         certPem: args.certPem ?? "",
         keyPem: args.keyPem ?? "",
@@ -300,20 +309,6 @@ export function useResumeStore() {
   });
 }
 
-export function useRenameStore() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (args: { oldId: string; newId: string }) => {
-      await configClient.renameStore({ oldId: args.oldId, newId: args.newId });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["config"] });
-      qc.invalidateQueries({ queryKey: ["stores"] });
-      qc.invalidateQueries({ queryKey: ["stats"] });
-    },
-  });
-}
-
 export function useDecommissionStore() {
   const qc = useQueryClient();
   return useMutation({
@@ -344,8 +339,8 @@ export function useTestIngester() {
 export function useDeleteCertificate() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (name: string) => {
-      await configClient.deleteCertificate({ name });
+    mutationFn: async (id: string) => {
+      await configClient.deleteCertificate({ id });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["certificates"] });

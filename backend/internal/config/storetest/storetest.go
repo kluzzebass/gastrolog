@@ -9,7 +9,11 @@ import (
 	"time"
 
 	"gastrolog/internal/config"
+
+	"github.com/google/uuid"
 )
+
+func newID() string { return uuid.Must(uuid.NewV7()).String() }
 
 // TestStore runs the full conformance suite against a Store implementation.
 // newStore must return a fresh, empty store for each sub-test.
@@ -25,23 +29,52 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 	})
 
+	// Filters
+	t.Run("PutGetFilter", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		id := newID()
+		fc := config.FilterConfig{ID: id, Name: "catch-all", Expression: "*"}
+		if err := s.PutFilter(ctx, fc); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+
+		got, err := s.GetFilter(ctx, id)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got == nil {
+			t.Fatal("expected filter, got nil")
+		}
+		if got.Name != "catch-all" {
+			t.Errorf("Name: expected %q, got %q", "catch-all", got.Name)
+		}
+		if got.Expression != "*" {
+			t.Errorf("Expression: expected %q, got %q", "*", got.Expression)
+		}
+	})
+
 	// Rotation policies
 	t.Run("PutGetRotationPolicy", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
 
+		id := newID()
 		rp := config.RotationPolicyConfig{
+			ID:         id,
+			Name:       "default",
 			MaxBytes:   config.StringPtr("64MB"),
 			MaxAge:     config.StringPtr("1h"),
 			MaxRecords: config.Int64Ptr(1000),
 			Cron:       config.StringPtr("0 * * * *"),
 		}
 
-		if err := s.PutRotationPolicy(ctx, "default", rp); err != nil {
+		if err := s.PutRotationPolicy(ctx, rp); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		got, err := s.GetRotationPolicy(ctx, "default")
+		got, err := s.GetRotationPolicy(ctx, id)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -58,18 +91,19 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		rp1 := config.RotationPolicyConfig{MaxAge: config.StringPtr("1h"), Cron: config.StringPtr("0 * * * *")}
-		if err := s.PutRotationPolicy(ctx, "p1", rp1); err != nil {
+		id := newID()
+		rp1 := config.RotationPolicyConfig{ID: id, Name: "p1", MaxAge: config.StringPtr("1h"), Cron: config.StringPtr("0 * * * *")}
+		if err := s.PutRotationPolicy(ctx, rp1); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
 		// Upsert: change MaxAge, remove Cron.
-		rp2 := config.RotationPolicyConfig{MaxAge: config.StringPtr("2h")}
-		if err := s.PutRotationPolicy(ctx, "p1", rp2); err != nil {
+		rp2 := config.RotationPolicyConfig{ID: id, Name: "p1", MaxAge: config.StringPtr("2h")}
+		if err := s.PutRotationPolicy(ctx, rp2); err != nil {
 			t.Fatalf("Put upsert: %v", err)
 		}
 
-		got, err := s.GetRotationPolicy(ctx, "p1")
+		got, err := s.GetRotationPolicy(ctx, id)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -101,10 +135,12 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Fatalf("expected 0, got %d", len(all))
 		}
 
-		if err := s.PutRotationPolicy(ctx, "a", config.RotationPolicyConfig{MaxAge: config.StringPtr("1h")}); err != nil {
+		idA := newID()
+		idB := newID()
+		if err := s.PutRotationPolicy(ctx, config.RotationPolicyConfig{ID: idA, Name: "a", MaxAge: config.StringPtr("1h")}); err != nil {
 			t.Fatalf("Put a: %v", err)
 		}
-		if err := s.PutRotationPolicy(ctx, "b", config.RotationPolicyConfig{MaxBytes: config.StringPtr("10MB")}); err != nil {
+		if err := s.PutRotationPolicy(ctx, config.RotationPolicyConfig{ID: idB, Name: "b", MaxBytes: config.StringPtr("10MB")}); err != nil {
 			t.Fatalf("Put b: %v", err)
 		}
 
@@ -115,11 +151,12 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if len(all) != 2 {
 			t.Fatalf("expected 2, got %d", len(all))
 		}
-		if _, ok := all["a"]; !ok {
-			t.Error("missing policy 'a'")
+		ids := map[string]bool{}
+		for _, rp := range all {
+			ids[rp.ID] = true
 		}
-		if _, ok := all["b"]; !ok {
-			t.Error("missing policy 'b'")
+		if !ids[idA] || !ids[idB] {
+			t.Errorf("expected policies %s and %s, got %v", idA, idB, ids)
 		}
 	})
 
@@ -127,15 +164,16 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		if err := s.PutRotationPolicy(ctx, "del", config.RotationPolicyConfig{MaxAge: config.StringPtr("5m")}); err != nil {
+		id := newID()
+		if err := s.PutRotationPolicy(ctx, config.RotationPolicyConfig{ID: id, Name: "del", MaxAge: config.StringPtr("5m")}); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		if err := s.DeleteRotationPolicy(ctx, "del"); err != nil {
+		if err := s.DeleteRotationPolicy(ctx, id); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
 
-		got, err := s.GetRotationPolicy(ctx, "del")
+		got, err := s.GetRotationPolicy(ctx, id)
 		if err != nil {
 			t.Fatalf("Get after delete: %v", err)
 		}
@@ -154,12 +192,13 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		ctx := context.Background()
 
 		// All nil pointer fields.
-		rp := config.RotationPolicyConfig{}
-		if err := s.PutRotationPolicy(ctx, "empty", rp); err != nil {
+		id := newID()
+		rp := config.RotationPolicyConfig{ID: id, Name: "empty"}
+		if err := s.PutRotationPolicy(ctx, rp); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		got, err := s.GetRotationPolicy(ctx, "empty")
+		got, err := s.GetRotationPolicy(ctx, id)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -182,17 +221,20 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
+		id := newID()
 		rp := config.RetentionPolicyConfig{
+			ID:        id,
+			Name:      "default",
 			MaxAge:    config.StringPtr("720h"),
 			MaxBytes:  config.StringPtr("10GB"),
 			MaxChunks: config.Int64Ptr(100),
 		}
 
-		if err := s.PutRetentionPolicy(ctx, "default", rp); err != nil {
+		if err := s.PutRetentionPolicy(ctx, rp); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		got, err := s.GetRetentionPolicy(ctx, "default")
+		got, err := s.GetRetentionPolicy(ctx, id)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -208,17 +250,18 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		rp1 := config.RetentionPolicyConfig{MaxAge: config.StringPtr("24h")}
-		if err := s.PutRetentionPolicy(ctx, "p1", rp1); err != nil {
+		id := newID()
+		rp1 := config.RetentionPolicyConfig{ID: id, Name: "p1", MaxAge: config.StringPtr("24h")}
+		if err := s.PutRetentionPolicy(ctx, rp1); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		rp2 := config.RetentionPolicyConfig{MaxAge: config.StringPtr("48h")}
-		if err := s.PutRetentionPolicy(ctx, "p1", rp2); err != nil {
+		rp2 := config.RetentionPolicyConfig{ID: id, Name: "p1", MaxAge: config.StringPtr("48h")}
+		if err := s.PutRetentionPolicy(ctx, rp2); err != nil {
 			t.Fatalf("Put upsert: %v", err)
 		}
 
-		got, err := s.GetRetentionPolicy(ctx, "p1")
+		got, err := s.GetRetentionPolicy(ctx, id)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -245,10 +288,12 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Fatalf("expected 0, got %d", len(all))
 		}
 
-		if err := s.PutRetentionPolicy(ctx, "a", config.RetentionPolicyConfig{MaxAge: config.StringPtr("1h")}); err != nil {
+		idA := newID()
+		idB := newID()
+		if err := s.PutRetentionPolicy(ctx, config.RetentionPolicyConfig{ID: idA, Name: "a", MaxAge: config.StringPtr("1h")}); err != nil {
 			t.Fatalf("Put a: %v", err)
 		}
-		if err := s.PutRetentionPolicy(ctx, "b", config.RetentionPolicyConfig{MaxChunks: config.Int64Ptr(5)}); err != nil {
+		if err := s.PutRetentionPolicy(ctx, config.RetentionPolicyConfig{ID: idB, Name: "b", MaxChunks: config.Int64Ptr(5)}); err != nil {
 			t.Fatalf("Put b: %v", err)
 		}
 
@@ -259,11 +304,12 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if len(all) != 2 {
 			t.Fatalf("expected 2, got %d", len(all))
 		}
-		if _, ok := all["a"]; !ok {
-			t.Error("missing policy 'a'")
+		ids := map[string]bool{}
+		for _, rp := range all {
+			ids[rp.ID] = true
 		}
-		if _, ok := all["b"]; !ok {
-			t.Error("missing policy 'b'")
+		if !ids[idA] || !ids[idB] {
+			t.Errorf("expected policies %s and %s, got %v", idA, idB, ids)
 		}
 	})
 
@@ -271,15 +317,16 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		if err := s.PutRetentionPolicy(ctx, "del", config.RetentionPolicyConfig{MaxAge: config.StringPtr("5m")}); err != nil {
+		id := newID()
+		if err := s.PutRetentionPolicy(ctx, config.RetentionPolicyConfig{ID: id, Name: "del", MaxAge: config.StringPtr("5m")}); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		if err := s.DeleteRetentionPolicy(ctx, "del"); err != nil {
+		if err := s.DeleteRetentionPolicy(ctx, id); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
 
-		got, err := s.GetRetentionPolicy(ctx, "del")
+		got, err := s.GetRetentionPolicy(ctx, id)
 		if err != nil {
 			t.Fatalf("Get after delete: %v", err)
 		}
@@ -296,12 +343,13 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		rp := config.RetentionPolicyConfig{}
-		if err := s.PutRetentionPolicy(ctx, "empty", rp); err != nil {
+		id := newID()
+		rp := config.RetentionPolicyConfig{ID: id, Name: "empty"}
+		if err := s.PutRetentionPolicy(ctx, rp); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		got, err := s.GetRetentionPolicy(ctx, "empty")
+		got, err := s.GetRetentionPolicy(ctx, id)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -324,20 +372,23 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
+		id := newID()
+		retID := newID()
 		st := config.StoreConfig{
-			ID:        "main",
+			ID:        id,
+			Name:      "main",
 			Type:      "file",
-			Retention: config.StringPtr("default-ret"),
+			Retention: &retID,
 		}
 		if err := s.PutStore(ctx, st); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		got, err := s.GetStore(ctx, "main")
+		got, err := s.GetStore(ctx, id)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		assertStringPtr(t, "Retention", got.Retention, "default-ret")
+		assertStringPtr(t, "Retention", got.Retention, retID)
 	})
 
 	// Stores
@@ -345,11 +396,15 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
+		id := newID()
+		filterID := newID()
+		policyID := newID()
 		st := config.StoreConfig{
-			ID:     "main",
+			ID:     id,
+			Name:   "main",
 			Type:   "file",
-			Filter: config.StringPtr("*"),
-			Policy: config.StringPtr("default"),
+			Filter: &filterID,
+			Policy: &policyID,
 			Params: map[string]string{"dir": "/var/log"},
 		}
 
@@ -357,21 +412,24 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Fatalf("Put: %v", err)
 		}
 
-		got, err := s.GetStore(ctx, "main")
+		got, err := s.GetStore(ctx, id)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
 		if got == nil {
 			t.Fatal("expected store, got nil")
 		}
-		if got.ID != "main" {
-			t.Errorf("ID: expected %q, got %q", "main", got.ID)
+		if got.ID != id {
+			t.Errorf("ID: expected %q, got %q", id, got.ID)
+		}
+		if got.Name != "main" {
+			t.Errorf("Name: expected %q, got %q", "main", got.Name)
 		}
 		if got.Type != "file" {
 			t.Errorf("Type: expected %q, got %q", "file", got.Type)
 		}
-		assertStringPtr(t, "Filter", got.Filter, "*")
-		assertStringPtr(t, "Policy", got.Policy, "default")
+		assertStringPtr(t, "Filter", got.Filter, filterID)
+		assertStringPtr(t, "Policy", got.Policy, policyID)
 		if got.Params["dir"] != "/var/log" {
 			t.Errorf("Params[dir]: expected %q, got %q", "/var/log", got.Params["dir"])
 		}
@@ -381,17 +439,20 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		st1 := config.StoreConfig{ID: "s1", Type: "file", Filter: config.StringPtr("*")}
+		id := newID()
+		filterID1 := newID()
+		st1 := config.StoreConfig{ID: id, Name: "s1", Type: "file", Filter: &filterID1}
 		if err := s.PutStore(ctx, st1); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		st2 := config.StoreConfig{ID: "s1", Type: "memory", Filter: config.StringPtr("env=prod")}
+		filterID2 := newID()
+		st2 := config.StoreConfig{ID: id, Name: "s1", Type: "memory", Filter: &filterID2}
 		if err := s.PutStore(ctx, st2); err != nil {
 			t.Fatalf("Put upsert: %v", err)
 		}
 
-		got, err := s.GetStore(ctx, "s1")
+		got, err := s.GetStore(ctx, id)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -420,10 +481,12 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Fatalf("expected 0, got %d", len(all))
 		}
 
-		if err := s.PutStore(ctx, config.StoreConfig{ID: "a", Type: "file"}); err != nil {
+		idA := newID()
+		idB := newID()
+		if err := s.PutStore(ctx, config.StoreConfig{ID: idA, Name: "a", Type: "file"}); err != nil {
 			t.Fatalf("Put a: %v", err)
 		}
-		if err := s.PutStore(ctx, config.StoreConfig{ID: "b", Type: "memory"}); err != nil {
+		if err := s.PutStore(ctx, config.StoreConfig{ID: idB, Name: "b", Type: "memory"}); err != nil {
 			t.Fatalf("Put b: %v", err)
 		}
 
@@ -439,8 +502,8 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		for _, st := range all {
 			ids[st.ID] = true
 		}
-		if !ids["a"] || !ids["b"] {
-			t.Errorf("expected stores a and b, got %v", ids)
+		if !ids[idA] || !ids[idB] {
+			t.Errorf("expected stores %s and %s, got %v", idA, idB, ids)
 		}
 	})
 
@@ -448,15 +511,16 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		if err := s.PutStore(ctx, config.StoreConfig{ID: "del", Type: "file"}); err != nil {
+		id := newID()
+		if err := s.PutStore(ctx, config.StoreConfig{ID: id, Name: "del", Type: "file"}); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		if err := s.DeleteStore(ctx, "del"); err != nil {
+		if err := s.DeleteStore(ctx, id); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
 
-		got, err := s.GetStore(ctx, "del")
+		got, err := s.GetStore(ctx, id)
 		if err != nil {
 			t.Fatalf("Get after delete: %v", err)
 		}
@@ -474,12 +538,13 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		st := config.StoreConfig{ID: "s1", Type: "memory", Params: nil}
+		id := newID()
+		st := config.StoreConfig{ID: id, Name: "s1", Type: "memory", Params: nil}
 		if err := s.PutStore(ctx, st); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		got, err := s.GetStore(ctx, "s1")
+		got, err := s.GetStore(ctx, id)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -493,8 +558,10 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
+		id := newID()
 		ing := config.IngesterConfig{
-			ID:      "syslog1",
+			ID:      id,
+			Name:    "syslog1",
 			Type:    "syslog-udp",
 			Enabled: true,
 			Params:  map[string]string{"port": "514"},
@@ -504,15 +571,18 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Fatalf("Put: %v", err)
 		}
 
-		got, err := s.GetIngester(ctx, "syslog1")
+		got, err := s.GetIngester(ctx, id)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
 		if got == nil {
 			t.Fatal("expected ingester, got nil")
 		}
-		if got.ID != "syslog1" {
-			t.Errorf("ID: expected %q, got %q", "syslog1", got.ID)
+		if got.ID != id {
+			t.Errorf("ID: expected %q, got %q", id, got.ID)
+		}
+		if got.Name != "syslog1" {
+			t.Errorf("Name: expected %q, got %q", "syslog1", got.Name)
 		}
 		if got.Type != "syslog-udp" {
 			t.Errorf("Type: expected %q, got %q", "syslog-udp", got.Type)
@@ -529,17 +599,18 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		ing1 := config.IngesterConfig{ID: "i1", Type: "syslog-udp"}
+		id := newID()
+		ing1 := config.IngesterConfig{ID: id, Name: "i1", Type: "syslog-udp"}
 		if err := s.PutIngester(ctx, ing1); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		ing2 := config.IngesterConfig{ID: "i1", Type: "file"}
+		ing2 := config.IngesterConfig{ID: id, Name: "i1", Type: "file"}
 		if err := s.PutIngester(ctx, ing2); err != nil {
 			t.Fatalf("Put upsert: %v", err)
 		}
 
-		got, err := s.GetIngester(ctx, "i1")
+		got, err := s.GetIngester(ctx, id)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -568,10 +639,12 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Fatalf("expected 0, got %d", len(all))
 		}
 
-		if err := s.PutIngester(ctx, config.IngesterConfig{ID: "a", Type: "syslog-udp"}); err != nil {
+		idA := newID()
+		idB := newID()
+		if err := s.PutIngester(ctx, config.IngesterConfig{ID: idA, Name: "a", Type: "syslog-udp"}); err != nil {
 			t.Fatalf("Put a: %v", err)
 		}
-		if err := s.PutIngester(ctx, config.IngesterConfig{ID: "b", Type: "file"}); err != nil {
+		if err := s.PutIngester(ctx, config.IngesterConfig{ID: idB, Name: "b", Type: "file"}); err != nil {
 			t.Fatalf("Put b: %v", err)
 		}
 
@@ -587,8 +660,8 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		for _, ing := range all {
 			ids[ing.ID] = true
 		}
-		if !ids["a"] || !ids["b"] {
-			t.Errorf("expected ingesters a and b, got %v", ids)
+		if !ids[idA] || !ids[idB] {
+			t.Errorf("expected ingesters %s and %s, got %v", idA, idB, ids)
 		}
 	})
 
@@ -596,15 +669,16 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		if err := s.PutIngester(ctx, config.IngesterConfig{ID: "del", Type: "test"}); err != nil {
+		id := newID()
+		if err := s.PutIngester(ctx, config.IngesterConfig{ID: id, Name: "del", Type: "test"}); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		if err := s.DeleteIngester(ctx, "del"); err != nil {
+		if err := s.DeleteIngester(ctx, id); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
 
-		got, err := s.GetIngester(ctx, "del")
+		got, err := s.GetIngester(ctx, id)
 		if err != nil {
 			t.Fatalf("Get after delete: %v", err)
 		}
@@ -622,12 +696,13 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		ing := config.IngesterConfig{ID: "i1", Type: "test", Params: nil}
+		id := newID()
+		ing := config.IngesterConfig{ID: id, Name: "i1", Type: "test", Params: nil}
 		if err := s.PutIngester(ctx, ing); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		got, err := s.GetIngester(ctx, "i1")
+		got, err := s.GetIngester(ctx, id)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -641,20 +716,27 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
+		rpFastID := newID()
+		rpSlowID := newID()
+		storeID := newID()
+		ing1ID := newID()
+		ing2ID := newID()
+
 		// Put several entities via CRUD.
-		if err := s.PutRotationPolicy(ctx, "fast", config.RotationPolicyConfig{MaxAge: config.StringPtr("5m")}); err != nil {
+		if err := s.PutRotationPolicy(ctx, config.RotationPolicyConfig{ID: rpFastID, Name: "fast", MaxAge: config.StringPtr("5m")}); err != nil {
 			t.Fatalf("PutRotationPolicy: %v", err)
 		}
-		if err := s.PutRotationPolicy(ctx, "slow", config.RotationPolicyConfig{MaxAge: config.StringPtr("1h")}); err != nil {
+		if err := s.PutRotationPolicy(ctx, config.RotationPolicyConfig{ID: rpSlowID, Name: "slow", MaxAge: config.StringPtr("1h")}); err != nil {
 			t.Fatalf("PutRotationPolicy: %v", err)
 		}
-		if err := s.PutStore(ctx, config.StoreConfig{ID: "main", Type: "file", Filter: config.StringPtr("*"), Policy: config.StringPtr("fast")}); err != nil {
+		filterID := newID()
+		if err := s.PutStore(ctx, config.StoreConfig{ID: storeID, Name: "main", Type: "file", Filter: &filterID, Policy: &rpFastID}); err != nil {
 			t.Fatalf("PutStore: %v", err)
 		}
-		if err := s.PutIngester(ctx, config.IngesterConfig{ID: "sys1", Type: "syslog-udp", Enabled: true, Params: map[string]string{"port": "514"}}); err != nil {
+		if err := s.PutIngester(ctx, config.IngesterConfig{ID: ing1ID, Name: "sys1", Type: "syslog-udp", Enabled: true, Params: map[string]string{"port": "514"}}); err != nil {
 			t.Fatalf("PutIngester: %v", err)
 		}
-		if err := s.PutIngester(ctx, config.IngesterConfig{ID: "file1", Type: "file", Enabled: true, Params: map[string]string{"path": "/var/log/app.log"}}); err != nil {
+		if err := s.PutIngester(ctx, config.IngesterConfig{ID: ing2ID, Name: "file1", Type: "file", Enabled: true, Params: map[string]string{"path": "/var/log/app.log"}}); err != nil {
 			t.Fatalf("PutIngester: %v", err)
 		}
 
@@ -806,8 +888,10 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
+		id := newID()
 		now := time.Now().UTC().Truncate(time.Second)
 		user := config.User{
+			ID:           id,
 			Username:     "alice",
 			PasswordHash: "$argon2id$v=19$m=65536,t=3,p=4$fakesalt$fakehash",
 			Role:         "admin",
@@ -819,7 +903,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Fatalf("CreateUser: %v", err)
 		}
 
-		got, err := s.GetUser(ctx, "alice")
+		got, err := s.GetUser(ctx, id)
 		if err != nil {
 			t.Fatalf("GetUser: %v", err)
 		}
@@ -841,6 +925,18 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if got.UpdatedAt.Truncate(time.Second) != now {
 			t.Errorf("UpdatedAt: expected %v, got %v", now, got.UpdatedAt)
 		}
+
+		// GetUserByUsername should also find the user.
+		byName, err := s.GetUserByUsername(ctx, "alice")
+		if err != nil {
+			t.Fatalf("GetUserByUsername: %v", err)
+		}
+		if byName == nil {
+			t.Fatal("expected user by username, got nil")
+		}
+		if byName.ID != id {
+			t.Errorf("GetUserByUsername ID: expected %q, got %q", id, byName.ID)
+		}
 	})
 
 	t.Run("CreateUserDuplicate", func(t *testing.T) {
@@ -849,6 +945,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 
 		now := time.Now().UTC()
 		user := config.User{
+			ID:           newID(),
 			Username:     "bob",
 			PasswordHash: "hash1",
 			Role:         "user",
@@ -861,7 +958,9 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 
 		// Second create with same username should fail.
-		err := s.CreateUser(ctx, user)
+		user2 := user
+		user2.ID = newID() // different ID, same username
+		err := s.CreateUser(ctx, user2)
 		if err == nil {
 			t.Fatal("expected error creating duplicate user, got nil")
 		}
@@ -880,12 +979,27 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 	})
 
+	t.Run("GetUserByUsernameNonExistent", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		got, err := s.GetUserByUsername(ctx, "nobody")
+		if err != nil {
+			t.Fatalf("GetUserByUsername: %v", err)
+		}
+		if got != nil {
+			t.Fatalf("expected nil for non-existent user, got %+v", got)
+		}
+	})
+
 	t.Run("UpdatePassword", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
 
+		id := newID()
 		now := time.Now().UTC()
 		user := config.User{
+			ID:           id,
 			Username:     "carol",
 			PasswordHash: "old-hash",
 			Role:         "user",
@@ -897,11 +1011,11 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Fatalf("CreateUser: %v", err)
 		}
 
-		if err := s.UpdatePassword(ctx, "carol", "new-hash"); err != nil {
+		if err := s.UpdatePassword(ctx, id, "new-hash"); err != nil {
 			t.Fatalf("UpdatePassword: %v", err)
 		}
 
-		got, err := s.GetUser(ctx, "carol")
+		got, err := s.GetUser(ctx, id)
 		if err != nil {
 			t.Fatalf("GetUser: %v", err)
 		}
@@ -938,7 +1052,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 
 		now := time.Now().UTC()
 		if err := s.CreateUser(ctx, config.User{
-			Username: "u1", PasswordHash: "h1", Role: "admin",
+			ID: newID(), Username: "u1", PasswordHash: "h1", Role: "admin",
 			CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatalf("CreateUser u1: %v", err)
@@ -953,7 +1067,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 
 		if err := s.CreateUser(ctx, config.User{
-			Username: "u2", PasswordHash: "h2", Role: "user",
+			ID: newID(), Username: "u2", PasswordHash: "h2", Role: "user",
 			CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatalf("CreateUser u2: %v", err)
@@ -983,13 +1097,13 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 
 		now := time.Now().UTC()
 		if err := s.CreateUser(ctx, config.User{
-			Username: "alice", PasswordHash: "h1", Role: "admin",
+			ID: newID(), Username: "alice", PasswordHash: "h1", Role: "admin",
 			CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatalf("CreateUser alice: %v", err)
 		}
 		if err := s.CreateUser(ctx, config.User{
-			Username: "bob", PasswordHash: "h2", Role: "user",
+			ID: newID(), Username: "bob", PasswordHash: "h2", Role: "user",
 			CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatalf("CreateUser bob: %v", err)
@@ -1008,19 +1122,20 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
+		id := newID()
 		now := time.Now().UTC()
 		if err := s.CreateUser(ctx, config.User{
-			Username: "alice", PasswordHash: "h1", Role: "user",
+			ID: id, Username: "alice", PasswordHash: "h1", Role: "user",
 			CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatalf("CreateUser: %v", err)
 		}
 
-		if err := s.UpdateUserRole(ctx, "alice", "admin"); err != nil {
+		if err := s.UpdateUserRole(ctx, id, "admin"); err != nil {
 			t.Fatalf("UpdateUserRole: %v", err)
 		}
 
-		got, err := s.GetUser(ctx, "alice")
+		got, err := s.GetUser(ctx, id)
 		if err != nil {
 			t.Fatalf("GetUser: %v", err)
 		}
@@ -1043,19 +1158,20 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
+		id := newID()
 		now := time.Now().UTC()
 		if err := s.CreateUser(ctx, config.User{
-			Username: "alice", PasswordHash: "h1", Role: "admin",
+			ID: id, Username: "alice", PasswordHash: "h1", Role: "admin",
 			CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatalf("CreateUser: %v", err)
 		}
 
-		if err := s.DeleteUser(ctx, "alice"); err != nil {
+		if err := s.DeleteUser(ctx, id); err != nil {
 			t.Fatalf("DeleteUser: %v", err)
 		}
 
-		got, err := s.GetUser(ctx, "alice")
+		got, err := s.GetUser(ctx, id)
 		if err != nil {
 			t.Fatalf("GetUser: %v", err)
 		}
@@ -1088,7 +1204,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 
 		now := time.Now().UTC()
 		if err := s.CreateUser(ctx, config.User{
-			Username: "admin", PasswordHash: "hash", Role: "admin",
+			ID: newID(), Username: "admin", PasswordHash: "hash", Role: "admin",
 			CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatalf("CreateUser: %v", err)

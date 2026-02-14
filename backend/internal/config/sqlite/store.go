@@ -102,6 +102,10 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	certs, err := s.ListCertificates(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	settings, err := s.listSettings(ctx)
 	if err != nil {
@@ -115,6 +119,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 		Stores:            stores,
 		Ingesters:         ingesters,
 		Settings:          settings,
+		Certs:             certs,
 	}, nil
 }
 
@@ -122,10 +127,10 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 
 func (s *Store) GetFilter(ctx context.Context, id string) (*config.FilterConfig, error) {
 	row := s.db.QueryRowContext(ctx,
-		"SELECT expression FROM filters WHERE filter_id = ?", id)
+		"SELECT id, name, expression FROM filters WHERE id = ?", id)
 
 	var fc config.FilterConfig
-	err := row.Scan(&fc.Expression)
+	err := row.Scan(&fc.ID, &fc.Name, &fc.Expression)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -135,42 +140,42 @@ func (s *Store) GetFilter(ctx context.Context, id string) (*config.FilterConfig,
 	return &fc, nil
 }
 
-func (s *Store) ListFilters(ctx context.Context) (map[string]config.FilterConfig, error) {
+func (s *Store) ListFilters(ctx context.Context) ([]config.FilterConfig, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT filter_id, expression FROM filters")
+		"SELECT id, name, expression FROM filters")
 	if err != nil {
 		return nil, fmt.Errorf("list filters: %w", err)
 	}
 	defer rows.Close()
 
-	result := make(map[string]config.FilterConfig)
+	var result []config.FilterConfig
 	for rows.Next() {
-		var id string
 		var fc config.FilterConfig
-		if err := rows.Scan(&id, &fc.Expression); err != nil {
+		if err := rows.Scan(&fc.ID, &fc.Name, &fc.Expression); err != nil {
 			return nil, fmt.Errorf("scan filter: %w", err)
 		}
-		result[id] = fc
+		result = append(result, fc)
 	}
 	return result, rows.Err()
 }
 
-func (s *Store) PutFilter(ctx context.Context, id string, fc config.FilterConfig) error {
+func (s *Store) PutFilter(ctx context.Context, fc config.FilterConfig) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO filters (filter_id, expression)
-		VALUES (?, ?)
-		ON CONFLICT(filter_id) DO UPDATE SET
+		INSERT INTO filters (id, name, expression)
+		VALUES (?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			name = excluded.name,
 			expression = excluded.expression
-	`, id, fc.Expression)
+	`, fc.ID, fc.Name, fc.Expression)
 	if err != nil {
-		return fmt.Errorf("put filter %q: %w", id, err)
+		return fmt.Errorf("put filter %q: %w", fc.ID, err)
 	}
 	return nil
 }
 
 func (s *Store) DeleteFilter(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx,
-		"DELETE FROM filters WHERE filter_id = ?", id)
+		"DELETE FROM filters WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("delete filter %q: %w", id, err)
 	}
@@ -181,10 +186,10 @@ func (s *Store) DeleteFilter(ctx context.Context, id string) error {
 
 func (s *Store) GetRotationPolicy(ctx context.Context, id string) (*config.RotationPolicyConfig, error) {
 	row := s.db.QueryRowContext(ctx,
-		"SELECT max_bytes, max_age, max_records, cron FROM rotation_policies WHERE rotation_policy_id = ?", id)
+		"SELECT id, name, max_bytes, max_age, max_records, cron FROM rotation_policies WHERE id = ?", id)
 
 	var rp config.RotationPolicyConfig
-	err := row.Scan(&rp.MaxBytes, &rp.MaxAge, &rp.MaxRecords, &rp.Cron)
+	err := row.Scan(&rp.ID, &rp.Name, &rp.MaxBytes, &rp.MaxAge, &rp.MaxRecords, &rp.Cron)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -194,45 +199,45 @@ func (s *Store) GetRotationPolicy(ctx context.Context, id string) (*config.Rotat
 	return &rp, nil
 }
 
-func (s *Store) ListRotationPolicies(ctx context.Context) (map[string]config.RotationPolicyConfig, error) {
+func (s *Store) ListRotationPolicies(ctx context.Context) ([]config.RotationPolicyConfig, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT rotation_policy_id, max_bytes, max_age, max_records, cron FROM rotation_policies")
+		"SELECT id, name, max_bytes, max_age, max_records, cron FROM rotation_policies")
 	if err != nil {
 		return nil, fmt.Errorf("list rotation policies: %w", err)
 	}
 	defer rows.Close()
 
-	result := make(map[string]config.RotationPolicyConfig)
+	var result []config.RotationPolicyConfig
 	for rows.Next() {
-		var id string
 		var rp config.RotationPolicyConfig
-		if err := rows.Scan(&id, &rp.MaxBytes, &rp.MaxAge, &rp.MaxRecords, &rp.Cron); err != nil {
+		if err := rows.Scan(&rp.ID, &rp.Name, &rp.MaxBytes, &rp.MaxAge, &rp.MaxRecords, &rp.Cron); err != nil {
 			return nil, fmt.Errorf("scan rotation policy: %w", err)
 		}
-		result[id] = rp
+		result = append(result, rp)
 	}
 	return result, rows.Err()
 }
 
-func (s *Store) PutRotationPolicy(ctx context.Context, id string, rp config.RotationPolicyConfig) error {
+func (s *Store) PutRotationPolicy(ctx context.Context, rp config.RotationPolicyConfig) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO rotation_policies (rotation_policy_id, max_bytes, max_age, max_records, cron)
-		VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(rotation_policy_id) DO UPDATE SET
+		INSERT INTO rotation_policies (id, name, max_bytes, max_age, max_records, cron)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			name = excluded.name,
 			max_bytes = excluded.max_bytes,
 			max_age = excluded.max_age,
 			max_records = excluded.max_records,
 			cron = excluded.cron
-	`, id, rp.MaxBytes, rp.MaxAge, rp.MaxRecords, rp.Cron)
+	`, rp.ID, rp.Name, rp.MaxBytes, rp.MaxAge, rp.MaxRecords, rp.Cron)
 	if err != nil {
-		return fmt.Errorf("put rotation policy %q: %w", id, err)
+		return fmt.Errorf("put rotation policy %q: %w", rp.ID, err)
 	}
 	return nil
 }
 
 func (s *Store) DeleteRotationPolicy(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx,
-		"DELETE FROM rotation_policies WHERE rotation_policy_id = ?", id)
+		"DELETE FROM rotation_policies WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("delete rotation policy %q: %w", id, err)
 	}
@@ -243,10 +248,10 @@ func (s *Store) DeleteRotationPolicy(ctx context.Context, id string) error {
 
 func (s *Store) GetRetentionPolicy(ctx context.Context, id string) (*config.RetentionPolicyConfig, error) {
 	row := s.db.QueryRowContext(ctx,
-		"SELECT max_age, max_bytes, max_chunks FROM retention_policies WHERE retention_policy_id = ?", id)
+		"SELECT id, name, max_age, max_bytes, max_chunks FROM retention_policies WHERE id = ?", id)
 
 	var rp config.RetentionPolicyConfig
-	err := row.Scan(&rp.MaxAge, &rp.MaxBytes, &rp.MaxChunks)
+	err := row.Scan(&rp.ID, &rp.Name, &rp.MaxAge, &rp.MaxBytes, &rp.MaxChunks)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -256,44 +261,44 @@ func (s *Store) GetRetentionPolicy(ctx context.Context, id string) (*config.Rete
 	return &rp, nil
 }
 
-func (s *Store) ListRetentionPolicies(ctx context.Context) (map[string]config.RetentionPolicyConfig, error) {
+func (s *Store) ListRetentionPolicies(ctx context.Context) ([]config.RetentionPolicyConfig, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT retention_policy_id, max_age, max_bytes, max_chunks FROM retention_policies")
+		"SELECT id, name, max_age, max_bytes, max_chunks FROM retention_policies")
 	if err != nil {
 		return nil, fmt.Errorf("list retention policies: %w", err)
 	}
 	defer rows.Close()
 
-	result := make(map[string]config.RetentionPolicyConfig)
+	var result []config.RetentionPolicyConfig
 	for rows.Next() {
-		var id string
 		var rp config.RetentionPolicyConfig
-		if err := rows.Scan(&id, &rp.MaxAge, &rp.MaxBytes, &rp.MaxChunks); err != nil {
+		if err := rows.Scan(&rp.ID, &rp.Name, &rp.MaxAge, &rp.MaxBytes, &rp.MaxChunks); err != nil {
 			return nil, fmt.Errorf("scan retention policy: %w", err)
 		}
-		result[id] = rp
+		result = append(result, rp)
 	}
 	return result, rows.Err()
 }
 
-func (s *Store) PutRetentionPolicy(ctx context.Context, id string, rp config.RetentionPolicyConfig) error {
+func (s *Store) PutRetentionPolicy(ctx context.Context, rp config.RetentionPolicyConfig) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO retention_policies (retention_policy_id, max_age, max_bytes, max_chunks)
-		VALUES (?, ?, ?, ?)
-		ON CONFLICT(retention_policy_id) DO UPDATE SET
+		INSERT INTO retention_policies (id, name, max_age, max_bytes, max_chunks)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			name = excluded.name,
 			max_age = excluded.max_age,
 			max_bytes = excluded.max_bytes,
 			max_chunks = excluded.max_chunks
-	`, id, rp.MaxAge, rp.MaxBytes, rp.MaxChunks)
+	`, rp.ID, rp.Name, rp.MaxAge, rp.MaxBytes, rp.MaxChunks)
 	if err != nil {
-		return fmt.Errorf("put retention policy %q: %w", id, err)
+		return fmt.Errorf("put retention policy %q: %w", rp.ID, err)
 	}
 	return nil
 }
 
 func (s *Store) DeleteRetentionPolicy(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx,
-		"DELETE FROM retention_policies WHERE retention_policy_id = ?", id)
+		"DELETE FROM retention_policies WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("delete retention policy %q: %w", id, err)
 	}
@@ -304,11 +309,11 @@ func (s *Store) DeleteRetentionPolicy(ctx context.Context, id string) error {
 
 func (s *Store) GetStore(ctx context.Context, id string) (*config.StoreConfig, error) {
 	row := s.db.QueryRowContext(ctx,
-		"SELECT store_id, type, filter, policy, retention, params, enabled FROM stores WHERE store_id = ?", id)
+		"SELECT id, name, type, filter, policy, retention, params, enabled FROM stores WHERE id = ?", id)
 
 	var st config.StoreConfig
 	var paramsJSON *string
-	err := row.Scan(&st.ID, &st.Type, &st.Filter, &st.Policy, &st.Retention, &paramsJSON, &st.Enabled)
+	err := row.Scan(&st.ID, &st.Name, &st.Type, &st.Filter, &st.Policy, &st.Retention, &paramsJSON, &st.Enabled)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -325,7 +330,7 @@ func (s *Store) GetStore(ctx context.Context, id string) (*config.StoreConfig, e
 
 func (s *Store) ListStores(ctx context.Context) ([]config.StoreConfig, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT store_id, type, filter, policy, retention, params, enabled FROM stores")
+		"SELECT id, name, type, filter, policy, retention, params, enabled FROM stores")
 	if err != nil {
 		return nil, fmt.Errorf("list stores: %w", err)
 	}
@@ -335,7 +340,7 @@ func (s *Store) ListStores(ctx context.Context) ([]config.StoreConfig, error) {
 	for rows.Next() {
 		var st config.StoreConfig
 		var paramsJSON *string
-		if err := rows.Scan(&st.ID, &st.Type, &st.Filter, &st.Policy, &st.Retention, &paramsJSON, &st.Enabled); err != nil {
+		if err := rows.Scan(&st.ID, &st.Name, &st.Type, &st.Filter, &st.Policy, &st.Retention, &paramsJSON, &st.Enabled); err != nil {
 			return nil, fmt.Errorf("scan store: %w", err)
 		}
 		if paramsJSON != nil {
@@ -355,21 +360,22 @@ func (s *Store) PutStore(ctx context.Context, st config.StoreConfig) error {
 		if err != nil {
 			return fmt.Errorf("marshal store %q params: %w", st.ID, err)
 		}
-		s := string(data)
-		paramsJSON = &s
+		v := string(data)
+		paramsJSON = &v
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO stores (store_id, type, filter, policy, retention, params, enabled)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(store_id) DO UPDATE SET
+		INSERT INTO stores (id, name, type, filter, policy, retention, params, enabled)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			name = excluded.name,
 			type = excluded.type,
 			filter = excluded.filter,
 			policy = excluded.policy,
 			retention = excluded.retention,
 			params = excluded.params,
 			enabled = excluded.enabled
-	`, st.ID, st.Type, st.Filter, st.Policy, st.Retention, paramsJSON, st.Enabled)
+	`, st.ID, st.Name, st.Type, st.Filter, st.Policy, st.Retention, paramsJSON, st.Enabled)
 	if err != nil {
 		return fmt.Errorf("put store %q: %w", st.ID, err)
 	}
@@ -378,18 +384,9 @@ func (s *Store) PutStore(ctx context.Context, st config.StoreConfig) error {
 
 func (s *Store) DeleteStore(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx,
-		"DELETE FROM stores WHERE store_id = ?", id)
+		"DELETE FROM stores WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("delete store %q: %w", id, err)
-	}
-	return nil
-}
-
-func (s *Store) RenameStore(ctx context.Context, oldID, newID string) error {
-	_, err := s.db.ExecContext(ctx,
-		"UPDATE stores SET store_id = ? WHERE store_id = ?", newID, oldID)
-	if err != nil {
-		return fmt.Errorf("rename store %q to %q: %w", oldID, newID, err)
 	}
 	return nil
 }
@@ -398,11 +395,11 @@ func (s *Store) RenameStore(ctx context.Context, oldID, newID string) error {
 
 func (s *Store) GetIngester(ctx context.Context, id string) (*config.IngesterConfig, error) {
 	row := s.db.QueryRowContext(ctx,
-		"SELECT ingester_id, type, params, enabled FROM ingesters WHERE ingester_id = ?", id)
+		"SELECT id, name, type, params, enabled FROM ingesters WHERE id = ?", id)
 
 	var ing config.IngesterConfig
 	var paramsJSON *string
-	err := row.Scan(&ing.ID, &ing.Type, &paramsJSON, &ing.Enabled)
+	err := row.Scan(&ing.ID, &ing.Name, &ing.Type, &paramsJSON, &ing.Enabled)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -419,7 +416,7 @@ func (s *Store) GetIngester(ctx context.Context, id string) (*config.IngesterCon
 
 func (s *Store) ListIngesters(ctx context.Context) ([]config.IngesterConfig, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT ingester_id, type, params, enabled FROM ingesters")
+		"SELECT id, name, type, params, enabled FROM ingesters")
 	if err != nil {
 		return nil, fmt.Errorf("list ingesters: %w", err)
 	}
@@ -429,7 +426,7 @@ func (s *Store) ListIngesters(ctx context.Context) ([]config.IngesterConfig, err
 	for rows.Next() {
 		var ing config.IngesterConfig
 		var paramsJSON *string
-		if err := rows.Scan(&ing.ID, &ing.Type, &paramsJSON, &ing.Enabled); err != nil {
+		if err := rows.Scan(&ing.ID, &ing.Name, &ing.Type, &paramsJSON, &ing.Enabled); err != nil {
 			return nil, fmt.Errorf("scan ingester: %w", err)
 		}
 		if paramsJSON != nil {
@@ -449,18 +446,19 @@ func (s *Store) PutIngester(ctx context.Context, ing config.IngesterConfig) erro
 		if err != nil {
 			return fmt.Errorf("marshal ingester %q params: %w", ing.ID, err)
 		}
-		s := string(data)
-		paramsJSON = &s
+		v := string(data)
+		paramsJSON = &v
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO ingesters (ingester_id, type, params, enabled)
-		VALUES (?, ?, ?, ?)
-		ON CONFLICT(ingester_id) DO UPDATE SET
+		INSERT INTO ingesters (id, name, type, params, enabled)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			name = excluded.name,
 			type = excluded.type,
 			params = excluded.params,
 			enabled = excluded.enabled
-	`, ing.ID, ing.Type, paramsJSON, ing.Enabled)
+	`, ing.ID, ing.Name, ing.Type, paramsJSON, ing.Enabled)
 	if err != nil {
 		return fmt.Errorf("put ingester %q: %w", ing.ID, err)
 	}
@@ -469,7 +467,7 @@ func (s *Store) PutIngester(ctx context.Context, ing config.IngesterConfig) erro
 
 func (s *Store) DeleteIngester(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx,
-		"DELETE FROM ingesters WHERE ingester_id = ?", id)
+		"DELETE FROM ingesters WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("delete ingester %q: %w", id, err)
 	}
@@ -536,60 +534,62 @@ func (s *Store) DeleteSetting(ctx context.Context, key string) error {
 
 // Certificates
 
-func (s *Store) ListCertificates(ctx context.Context) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT cert_id FROM tls_certificates")
+func (s *Store) ListCertificates(ctx context.Context) ([]config.CertPEM, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT id, name, cert_pem, key_pem, cert_file, key_file FROM tls_certificates")
 	if err != nil {
 		return nil, fmt.Errorf("list certificates: %w", err)
 	}
 	defer rows.Close()
 
-	var names []string
+	var result []config.CertPEM
 	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, fmt.Errorf("scan certificate name: %w", err)
+		var cert config.CertPEM
+		if err := rows.Scan(&cert.ID, &cert.Name, &cert.CertPEM, &cert.KeyPEM, &cert.CertFile, &cert.KeyFile); err != nil {
+			return nil, fmt.Errorf("scan certificate: %w", err)
 		}
-		names = append(names, name)
+		result = append(result, cert)
 	}
-	return names, rows.Err()
+	return result, rows.Err()
 }
 
-func (s *Store) GetCertificate(ctx context.Context, name string) (*config.CertPEM, error) {
+func (s *Store) GetCertificate(ctx context.Context, id string) (*config.CertPEM, error) {
 	row := s.db.QueryRowContext(ctx,
-		"SELECT cert_pem, key_pem, cert_file, key_file FROM tls_certificates WHERE cert_id = ?", name)
+		"SELECT id, name, cert_pem, key_pem, cert_file, key_file FROM tls_certificates WHERE id = ?", id)
 
-	var pem config.CertPEM
-	err := row.Scan(&pem.CertPEM, &pem.KeyPEM, &pem.CertFile, &pem.KeyFile)
+	var cert config.CertPEM
+	err := row.Scan(&cert.ID, &cert.Name, &cert.CertPEM, &cert.KeyPEM, &cert.CertFile, &cert.KeyFile)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get certificate %q: %w", name, err)
+		return nil, fmt.Errorf("get certificate %q: %w", id, err)
 	}
-	return &pem, nil
+	return &cert, nil
 }
 
-func (s *Store) PutCertificate(ctx context.Context, name string, cert config.CertPEM) error {
+func (s *Store) PutCertificate(ctx context.Context, cert config.CertPEM) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO tls_certificates (cert_id, cert_pem, key_pem, cert_file, key_file)
-		VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(cert_id) DO UPDATE SET
+		INSERT INTO tls_certificates (id, name, cert_pem, key_pem, cert_file, key_file)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			name = excluded.name,
 			cert_pem = excluded.cert_pem,
 			key_pem = excluded.key_pem,
 			cert_file = excluded.cert_file,
 			key_file = excluded.key_file
-	`, name, cert.CertPEM, cert.KeyPEM, cert.CertFile, cert.KeyFile)
+	`, cert.ID, cert.Name, cert.CertPEM, cert.KeyPEM, cert.CertFile, cert.KeyFile)
 	if err != nil {
-		return fmt.Errorf("put certificate %q: %w", name, err)
+		return fmt.Errorf("put certificate %q: %w", cert.ID, err)
 	}
 	return nil
 }
 
-func (s *Store) DeleteCertificate(ctx context.Context, name string) error {
+func (s *Store) DeleteCertificate(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx,
-		"DELETE FROM tls_certificates WHERE cert_id = ?", name)
+		"DELETE FROM tls_certificates WHERE id = ?", id)
 	if err != nil {
-		return fmt.Errorf("delete certificate %q: %w", name, err)
+		return fmt.Errorf("delete certificate %q: %w", id, err)
 	}
 	return nil
 }
@@ -598,9 +598,9 @@ func (s *Store) DeleteCertificate(ctx context.Context, name string) error {
 
 func (s *Store) CreateUser(ctx context.Context, user config.User) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO users (username, password_hash, role, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?)
-	`, user.Username, user.PasswordHash, user.Role,
+		INSERT INTO users (id, username, password_hash, role, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, user.ID, user.Username, user.PasswordHash, user.Role,
 		user.CreatedAt.Format(timeFormat), user.UpdatedAt.Format(timeFormat))
 	if err != nil {
 		return fmt.Errorf("create user %q: %w", user.Username, err)
@@ -608,18 +608,36 @@ func (s *Store) CreateUser(ctx context.Context, user config.User) error {
 	return nil
 }
 
-func (s *Store) GetUser(ctx context.Context, username string) (*config.User, error) {
+func (s *Store) GetUser(ctx context.Context, id string) (*config.User, error) {
 	row := s.db.QueryRowContext(ctx,
-		"SELECT username, password_hash, role, created_at, updated_at FROM users WHERE username = ?", username)
+		"SELECT id, username, password_hash, role, created_at, updated_at FROM users WHERE id = ?", id)
 
 	var u config.User
 	var createdAt, updatedAt string
-	err := row.Scan(&u.Username, &u.PasswordHash, &u.Role, &createdAt, &updatedAt)
+	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &createdAt, &updatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get user %q: %w", username, err)
+		return nil, fmt.Errorf("get user %q: %w", id, err)
+	}
+	u.CreatedAt, _ = time.Parse(timeFormat, createdAt)
+	u.UpdatedAt, _ = time.Parse(timeFormat, updatedAt)
+	return &u, nil
+}
+
+func (s *Store) GetUserByUsername(ctx context.Context, username string) (*config.User, error) {
+	row := s.db.QueryRowContext(ctx,
+		"SELECT id, username, password_hash, role, created_at, updated_at FROM users WHERE username = ?", username)
+
+	var u config.User
+	var createdAt, updatedAt string
+	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &createdAt, &updatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get user by username %q: %w", username, err)
 	}
 	u.CreatedAt, _ = time.Parse(timeFormat, createdAt)
 	u.UpdatedAt, _ = time.Parse(timeFormat, updatedAt)
@@ -628,7 +646,7 @@ func (s *Store) GetUser(ctx context.Context, username string) (*config.User, err
 
 func (s *Store) ListUsers(ctx context.Context) ([]config.User, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT username, password_hash, role, created_at, updated_at FROM users ORDER BY created_at")
+		"SELECT id, username, password_hash, role, created_at, updated_at FROM users ORDER BY created_at")
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
@@ -638,7 +656,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]config.User, error) {
 	for rows.Next() {
 		var u config.User
 		var createdAt, updatedAt string
-		if err := rows.Scan(&u.Username, &u.PasswordHash, &u.Role, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan user: %w", err)
 		}
 		u.CreatedAt, _ = time.Parse(timeFormat, createdAt)
@@ -648,52 +666,52 @@ func (s *Store) ListUsers(ctx context.Context) ([]config.User, error) {
 	return users, rows.Err()
 }
 
-func (s *Store) UpdatePassword(ctx context.Context, username string, passwordHash string) error {
+func (s *Store) UpdatePassword(ctx context.Context, id string, passwordHash string) error {
 	res, err := s.db.ExecContext(ctx, `
-		UPDATE users SET password_hash = ?, updated_at = ? WHERE username = ?
-	`, passwordHash, time.Now().UTC().Format(timeFormat), username)
+		UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?
+	`, passwordHash, time.Now().UTC().Format(timeFormat), id)
 	if err != nil {
-		return fmt.Errorf("update password for %q: %w", username, err)
+		return fmt.Errorf("update password for %q: %w", id, err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("update password for %q: %w", username, err)
+		return fmt.Errorf("update password for %q: %w", id, err)
 	}
 	if n == 0 {
-		return fmt.Errorf("user %q not found", username)
+		return fmt.Errorf("user %q not found", id)
 	}
 	return nil
 }
 
-func (s *Store) UpdateUserRole(ctx context.Context, username string, role string) error {
+func (s *Store) UpdateUserRole(ctx context.Context, id string, role string) error {
 	res, err := s.db.ExecContext(ctx, `
-		UPDATE users SET role = ?, updated_at = ? WHERE username = ?
-	`, role, time.Now().UTC().Format(timeFormat), username)
+		UPDATE users SET role = ?, updated_at = ? WHERE id = ?
+	`, role, time.Now().UTC().Format(timeFormat), id)
 	if err != nil {
-		return fmt.Errorf("update role for %q: %w", username, err)
+		return fmt.Errorf("update role for %q: %w", id, err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("update role for %q: %w", username, err)
+		return fmt.Errorf("update role for %q: %w", id, err)
 	}
 	if n == 0 {
-		return fmt.Errorf("user %q not found", username)
+		return fmt.Errorf("user %q not found", id)
 	}
 	return nil
 }
 
-func (s *Store) DeleteUser(ctx context.Context, username string) error {
+func (s *Store) DeleteUser(ctx context.Context, id string) error {
 	res, err := s.db.ExecContext(ctx,
-		"DELETE FROM users WHERE username = ?", username)
+		"DELETE FROM users WHERE id = ?", id)
 	if err != nil {
-		return fmt.Errorf("delete user %q: %w", username, err)
+		return fmt.Errorf("delete user %q: %w", id, err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("delete user %q: %w", username, err)
+		return fmt.Errorf("delete user %q: %w", id, err)
 	}
 	if n == 0 {
-		return fmt.Errorf("user %q not found", username)
+		return fmt.Errorf("user %q not found", id)
 	}
 	return nil
 }

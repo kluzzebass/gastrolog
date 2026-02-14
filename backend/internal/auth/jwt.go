@@ -9,8 +9,10 @@ import (
 
 // Claims holds the JWT claims for a GastroLog token.
 // Username is stored in the standard "sub" (Subject) claim.
+// UserID stores the user's UUID for ID-based lookups.
 type Claims struct {
-	Role string `json:"role"`
+	Role   string `json:"role"`
+	UserID string `json:"uid,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -35,12 +37,13 @@ func NewTokenService(secret []byte, duration time.Duration) *TokenService {
 }
 
 // Issue creates a signed JWT for the given user.
-func (ts *TokenService) Issue(username, role string) (string, time.Time, error) {
+func (ts *TokenService) Issue(userID, username, role string) (string, time.Time, error) {
 	now := time.Now().UTC()
 	expiresAt := now.Add(ts.duration)
 
 	claims := Claims{
-		Role: role,
+		Role:   role,
+		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   username,
 			IssuedAt:  jwt.NewNumericDate(now),

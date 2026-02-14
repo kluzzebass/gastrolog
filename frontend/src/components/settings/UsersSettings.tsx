@@ -70,30 +70,30 @@ export function UsersSettings({ dark }: { dark: boolean }) {
     }
   };
 
-  const handleRoleSave = async (username: string) => {
-    const role = roleEdits[username];
+  const handleRoleSave = async (user: { id: string; username: string }) => {
+    const role = roleEdits[user.id];
     if (!role) return;
     try {
-      await updateUserRole.mutateAsync({ username, role });
+      await updateUserRole.mutateAsync({ id: user.id, role });
       setRoleEdits((prev) => {
         const next = { ...prev };
-        delete next[username];
+        delete next[user.id];
         return next;
       });
-      addToast(`Role updated for "${username}"`, "info");
+      addToast(`Role updated for "${user.username}"`, "info");
     } catch (err: any) {
       addToast(err.message ?? "Failed to update role", "error");
     }
   };
 
-  const handleResetPassword = async (username: string) => {
+  const handleResetPassword = async (user: { id: string; username: string }) => {
     if (!resetPw) {
       addToast("New password is required", "warn");
       return;
     }
     try {
-      await resetPassword.mutateAsync({ username, newPassword: resetPw });
-      addToast(`Password reset for "${username}"`, "info");
+      await resetPassword.mutateAsync({ id: user.id, newPassword: resetPw });
+      addToast(`Password reset for "${user.username}"`, "info");
       setResetOpen(null);
       setResetPw("");
       setShowResetPw(false);
@@ -102,10 +102,10 @@ export function UsersSettings({ dark }: { dark: boolean }) {
     }
   };
 
-  const handleDelete = async (username: string) => {
+  const handleDeleteUser = async (user: { id: string; username: string }) => {
     try {
-      await deleteUser.mutateAsync(username);
-      addToast(`User "${username}" deleted`, "info");
+      await deleteUser.mutateAsync(user.id);
+      addToast(`User "${user.username}" deleted`, "info");
     } catch (err: any) {
       addToast(err.message ?? "Failed to delete user", "error");
     }
@@ -171,21 +171,21 @@ export function UsersSettings({ dark }: { dark: boolean }) {
 
       {users?.map((user) => {
         const isSelf = currentUser?.username === user.username;
-        const editedRole = roleEdits[user.username];
+        const editedRole = roleEdits[user.id];
         const roleDirty =
           editedRole !== undefined && editedRole !== user.role;
 
         return (
           <SettingsCard
-            key={user.username}
+            key={user.id}
             id={user.username}
             typeBadge={user.role}
             dark={dark}
-            expanded={expanded === user.username}
+            expanded={expanded === user.id}
             onToggle={() =>
-              setExpanded(expanded === user.username ? null : user.username)
+              setExpanded(expanded === user.id ? null : user.id)
             }
-            onDelete={isSelf ? undefined : () => handleDelete(user.username)}
+            onDelete={isSelf ? undefined : () => handleDeleteUser(user)}
           >
             <div className="flex flex-col gap-4">
               <div className="flex items-end gap-3">
@@ -196,7 +196,7 @@ export function UsersSettings({ dark }: { dark: boolean }) {
                       onChange={(v) =>
                         setRoleEdits((prev) => ({
                           ...prev,
-                          [user.username]: v,
+                          [user.id]: v,
                         }))
                       }
                       options={roleOptions}
@@ -207,7 +207,7 @@ export function UsersSettings({ dark }: { dark: boolean }) {
                 </div>
                 {roleDirty && (
                   <PrimaryButton
-                    onClick={() => handleRoleSave(user.username)}
+                    onClick={() => handleRoleSave(user)}
                     disabled={updateUserRole.isPending}
                   >
                     {updateUserRole.isPending ? "Saving..." : "Save"}
@@ -216,7 +216,7 @@ export function UsersSettings({ dark }: { dark: boolean }) {
               </div>
 
               {/* Reset password */}
-              {resetOpen === user.username ? (
+              {resetOpen === user.id ? (
                 <div className="flex items-end gap-3">
                   <div className="flex-1">
                     <FormField label="New Password" dark={dark}>
@@ -231,7 +231,7 @@ export function UsersSettings({ dark }: { dark: boolean }) {
                     </FormField>
                   </div>
                   <PrimaryButton
-                    onClick={() => handleResetPassword(user.username)}
+                    onClick={() => handleResetPassword(user)}
                     disabled={resetPassword.isPending}
                   >
                     {resetPassword.isPending ? "Resetting..." : "Reset"}
@@ -250,7 +250,7 @@ export function UsersSettings({ dark }: { dark: boolean }) {
               ) : (
                 <GhostButton
                   onClick={() => {
-                    setResetOpen(user.username);
+                    setResetOpen(user.id);
                     setResetPw("");
                   }}
                   dark={dark}

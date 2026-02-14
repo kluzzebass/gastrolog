@@ -8,6 +8,8 @@ import (
 
 	"gastrolog/internal/config"
 	"gastrolog/internal/config/storetest"
+
+	"github.com/google/uuid"
 )
 
 func newTestStore(t *testing.T) *Store {
@@ -92,8 +94,8 @@ func TestMigrationsIdempotent(t *testing.T) {
 	if err := s2.db.QueryRow("SELECT count(*) FROM schema_migrations").Scan(&count); err != nil {
 		t.Fatalf("count: %v", err)
 	}
-	if count != 11 {
-		t.Errorf("expected 11 migration versions, got %d", count)
+	if count != 12 {
+		t.Errorf("expected 12 migration versions, got %d", count)
 	}
 }
 
@@ -116,8 +118,8 @@ func TestStrictTables(t *testing.T) {
 	// STRICT tables reject type mismatches. rotation_policies.max_records
 	// is INTEGER — inserting a non-numeric text should fail.
 	_, err := s.db.Exec(
-		"INSERT INTO rotation_policies (rotation_policy_id, max_records) VALUES (?, ?)",
-		"test", "not-a-number")
+		"INSERT INTO rotation_policies (id, name, max_records) VALUES (?, ?, ?)",
+		"test", "test", "not-a-number")
 	if err == nil {
 		t.Fatal("expected error inserting text into STRICT INTEGER column")
 	}
@@ -127,14 +129,15 @@ func TestNullRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 
 	// Insert a rotation policy with all NULL optional fields directly via SQL.
+	id := uuid.Must(uuid.NewV7()).String()
 	_, err := s.db.Exec(
-		"INSERT INTO rotation_policies (rotation_policy_id) VALUES (?)", "nulltest")
+		"INSERT INTO rotation_policies (id, name) VALUES (?, ?)", id, "nulltest")
 	if err != nil {
 		t.Fatalf("insert: %v", err)
 	}
 
 	// Read back via the Store interface.
-	rp, err := s.GetRotationPolicy(context.Background(), "nulltest")
+	rp, err := s.GetRotationPolicy(context.Background(), id)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}

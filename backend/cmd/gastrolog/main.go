@@ -185,19 +185,13 @@ func run(ctx context.Context, logger *slog.Logger, datadirFlag, configType, serv
 
 	// Certificate manager: load certs from config store.
 	certMgr := cert.New(cert.Config{Logger: logger})
-	certNames, err := cfgStore.ListCertificates(ctx)
+	certList, err := cfgStore.ListCertificates(ctx)
 	if err != nil {
 		return fmt.Errorf("list certificates: %w", err)
 	}
-	certs := make(map[string]cert.CertSource, len(certNames))
-	for _, name := range certNames {
-		pem, err := cfgStore.GetCertificate(ctx, name)
-		if err != nil {
-			return fmt.Errorf("get certificate %q: %w", name, err)
-		}
-		if pem != nil {
-			certs[name] = cert.CertSource{CertPEM: pem.CertPEM, KeyPEM: pem.KeyPEM, CertFile: pem.CertFile, KeyFile: pem.KeyFile}
-		}
+	certs := make(map[string]cert.CertSource, len(certList))
+	for _, c := range certList {
+		certs[c.ID] = cert.CertSource{CertPEM: c.CertPEM, KeyPEM: c.KeyPEM, CertFile: c.CertFile, KeyFile: c.KeyFile}
 	}
 	sc, err := config.LoadServerConfig(ctx, cfgStore)
 	if err != nil {

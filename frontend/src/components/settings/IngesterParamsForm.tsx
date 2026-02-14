@@ -357,10 +357,10 @@ function DockerForm({
     success: boolean;
     message: string;
   } | null>(null);
-  const certNames = certData?.names ?? [];
+  const certs = certData?.certificates ?? [];
   const certOptions = [
     { value: "", label: "(none)" },
-    ...certNames.map((n: string) => ({ value: n, label: n })),
+    ...certs.map((c) => ({ value: c.id, label: c.name || c.id })),
   ];
   const set = (key: string, value: string) =>
     onChange({ ...params, [key]: value });

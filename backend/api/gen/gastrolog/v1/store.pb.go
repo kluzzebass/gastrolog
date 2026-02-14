@@ -110,6 +110,7 @@ type StoreInfo struct {
 	ChunkCount    int64                  `protobuf:"varint,4,opt,name=chunk_count,json=chunkCount,proto3" json:"chunk_count,omitempty"`
 	RecordCount   int64                  `protobuf:"varint,5,opt,name=record_count,json=recordCount,proto3" json:"record_count,omitempty"`
 	Enabled       bool                   `protobuf:"varint,6,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Name          string                 `protobuf:"bytes,7,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -184,6 +185,13 @@ func (x *StoreInfo) GetEnabled() bool {
 		return x.Enabled
 	}
 	return false
+}
+
+func (x *StoreInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
 }
 
 type GetStoreRequest struct {
@@ -1120,6 +1128,7 @@ type StoreStats struct {
 	OldestRecord  *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=oldest_record,json=oldestRecord,proto3" json:"oldest_record,omitempty"`
 	NewestRecord  *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=newest_record,json=newestRecord,proto3" json:"newest_record,omitempty"`
 	Enabled       bool                   `protobuf:"varint,11,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Name          string                 `protobuf:"bytes,12,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1229,6 +1238,13 @@ func (x *StoreStats) GetEnabled() bool {
 		return x.Enabled
 	}
 	return false
+}
+
+func (x *StoreStats) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
 }
 
 type ReindexStoreRequest struct {
@@ -2197,7 +2213,7 @@ const file_gastrolog_v1_store_proto_rawDesc = "" +
 	"\x18gastrolog/v1/store.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x13\n" +
 	"\x11ListStoresRequest\"E\n" +
 	"\x12ListStoresResponse\x12/\n" +
-	"\x06stores\x18\x01 \x03(\v2\x17.gastrolog.v1.StoreInfoR\x06stores\"\xa5\x01\n" +
+	"\x06stores\x18\x01 \x03(\v2\x17.gastrolog.v1.StoreInfoR\x06stores\"\xb9\x01\n" +
 	"\tStoreInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x16\n" +
@@ -2205,7 +2221,8 @@ const file_gastrolog_v1_store_proto_rawDesc = "" +
 	"\vchunk_count\x18\x04 \x01(\x03R\n" +
 	"chunkCount\x12!\n" +
 	"\frecord_count\x18\x05 \x01(\x03R\vrecordCount\x12\x18\n" +
-	"\aenabled\x18\x06 \x01(\bR\aenabled\"!\n" +
+	"\aenabled\x18\x06 \x01(\bR\aenabled\x12\x12\n" +
+	"\x04name\x18\a \x01(\tR\x04name\"!\n" +
 	"\x0fGetStoreRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"A\n" +
 	"\x10GetStoreResponse\x12-\n" +
@@ -2272,7 +2289,7 @@ const file_gastrolog_v1_store_proto_rawDesc = "" +
 	"\roldest_record\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\foldestRecord\x12?\n" +
 	"\rnewest_record\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\fnewestRecord\x129\n" +
 	"\vstore_stats\x18\b \x03(\v2\x18.gastrolog.v1.StoreStatsR\n" +
-	"storeStats\"\x9a\x03\n" +
+	"storeStats\"\xae\x03\n" +
 	"\n" +
 	"StoreStats\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -2289,7 +2306,8 @@ const file_gastrolog_v1_store_proto_rawDesc = "" +
 	"\roldest_record\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\foldestRecord\x12?\n" +
 	"\rnewest_record\x18\n" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\fnewestRecord\x12\x18\n" +
-	"\aenabled\x18\v \x01(\bR\aenabled\"+\n" +
+	"\aenabled\x18\v \x01(\bR\aenabled\x12\x12\n" +
+	"\x04name\x18\f \x01(\tR\x04name\"+\n" +
 	"\x13ReindexStoreRequest\x12\x14\n" +
 	"\x05store\x18\x01 \x01(\tR\x05store\"~\n" +
 	"\x14ReindexStoreResponse\x12)\n" +
