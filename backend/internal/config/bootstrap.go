@@ -9,22 +9,15 @@ import (
 )
 
 // DefaultConfig returns the bootstrap configuration for first-run.
-// If dataDir is non-empty, the default store uses file-backed storage under
-// <dataDir>/stores/default/. Otherwise it uses an in-memory store.
-func DefaultConfig(dataDir string) *Config {
+// The default store is always in-memory; file-backed stores are only created
+// when the user explicitly configures one.
+func DefaultConfig() *Config {
 	defaultStore := StoreConfig{
 		ID:        "default",
+		Type:      "memory",
 		Filter:    StringPtr("catch-all"),
 		Policy:    StringPtr("default"),
 		Retention: StringPtr("default"),
-	}
-	if dataDir != "" {
-		defaultStore.Type = "file"
-		defaultStore.Params = map[string]string{
-			"dir": dataDir + "/stores/default",
-		}
-	} else {
-		defaultStore.Type = "memory"
 	}
 
 	return &Config{
@@ -56,9 +49,8 @@ func DefaultConfig(dataDir string) *Config {
 
 // Bootstrap writes the default configuration to a store using individual
 // CRUD operations. Call this when Load returns nil (no config exists).
-// dataDir is passed through to DefaultConfig to determine store backing.
-func Bootstrap(ctx context.Context, store Store, dataDir string) error {
-	cfg := DefaultConfig(dataDir)
+func Bootstrap(ctx context.Context, store Store) error {
+	cfg := DefaultConfig()
 
 	for id, fc := range cfg.Filters {
 		if err := store.PutFilter(ctx, id, fc); err != nil {
