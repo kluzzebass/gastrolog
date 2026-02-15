@@ -1,4 +1,4 @@
-import { isValidElement, useMemo, useState } from "react";
+import { isValidElement, useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Dialog } from "./Dialog";
@@ -20,6 +20,12 @@ export function HelpDialog({ dark, topicId, onClose }: HelpDialogProps) {
   );
 
   const topic: HelpTopic | undefined = findTopic(activeId);
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  // Reset scroll position when switching topics
+  useEffect(() => {
+    contentRef.current?.scrollTo(0, 0);
+  }, [activeId]);
 
   // Memoize so react-markdown doesn't unmount/remount custom components
   // (e.g. MermaidDiagram) on every parent re-render.
@@ -56,7 +62,7 @@ export function HelpDialog({ dark, topicId, onClose }: HelpDialogProps) {
         </nav>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto app-scroll p-6 pt-10">
+        <div ref={contentRef} className="flex-1 overflow-y-auto app-scroll p-6 pt-10">
           <h2
             className={`font-display text-[1.4em] font-semibold mb-4 ${c("text-text-bright", "text-light-text-bright")}`}
           >

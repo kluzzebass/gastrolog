@@ -4,54 +4,21 @@ The query engine evaluates search expressions against stored records, using inde
 
 ## Expression Syntax
 
-Queries are composed of **predicates** combined with boolean logic. Multiple bare predicates are implicitly joined with AND.
+Queries are composed of **predicates** combined with boolean logic. Multiple bare predicates are implicitly joined with AND. See the Query Language topic for the full syntax reference.
 
-### Token Search
+### Quick Reference
 
-Bare words search record payloads by token.
-
-- `error` — records containing the token "error"
-- `error timeout` — records containing both (implicit AND)
-
-### Key-Value Filters
-
-- `level=error` — exact key=value match (in attributes or message text)
-- `key="value with spaces"` — quoted values for special characters
-- `level=*` — key exists with any value
-- `*=error` — value exists under any key
-
-### Boolean Operators
-
-- `AND` — both sides must match (binds tighter than OR)
-- `OR` — either side matches
-- `NOT` — negation
-- `(...)` — parentheses for grouping
-
-Example: `(error OR warn) AND NOT debug`
-
-### Time Bounds
-
-| Filter | Bounds on | Description |
-|--------|-----------|-------------|
-| `start=TIME` | WriteTS | Inclusive lower bound |
-| `end=TIME` | WriteTS | Exclusive upper bound |
-| `source_start=TIME` | SourceTS | Lower bound on log origin time |
-| `source_end=TIME` | SourceTS | Upper bound on log origin time |
-| `ingest_start=TIME` | IngestTS | Lower bound on ingester receive time |
-| `ingest_end=TIME` | IngestTS | Upper bound on ingester receive time |
-
-TIME accepts RFC 3339 format (e.g., `2024-01-15T08:00:00Z`) or Unix timestamps.
-
-### Scoping
-
-- `store=NAME` — restrict search to a specific store
-- `chunk=ID` — restrict search to a specific chunk
-- `pos=N` — exact record position within a chunk
-
-### Result Control
-
-- `limit=N` — maximum number of results
-- `reverse=true|false` — newest-first or oldest-first
+| Syntax | Meaning |
+|--------|---------|
+| `error` | Token search |
+| `error timeout` | Implicit AND |
+| `error OR warn` | Either matches |
+| `NOT debug` | Negation |
+| `level=error` | Key=value (attributes + message text) |
+| `host=*` | Key exists |
+| `start=TIME end=TIME` | WriteTS time range |
+| `store=NAME` | Scope to store |
+| `limit=N reverse=true` | Result control |
 
 ## Query Evaluation
 
@@ -71,22 +38,54 @@ flowchart TD
 When a search is executed:
 
 1. **Parse**: The query string is parsed into an AST of predicates and boolean operators
-2. **Normalize**: Legacy token/KV lists are converted to a unified boolean expression
-3. **Time bounds**: `start=` / `end=` determine which chunks overlap the query range
-4. **Chunk selection**: Chunks outside the time range are skipped. Unsealed chunks are always included.
-5. **DNF compilation**: The boolean expression is converted to Disjunctive Normal Form (OR of ANDs) for efficient evaluation
-6. **Per-chunk scanning**: Each selected chunk is scanned using the best available strategy:
-   - **Index-driven**: If all predicates in a DNF branch have index coverage, intersect position lists
+2. **Time bounds**: `start=` / `end=` determine which chunks overlap the query range
+3. **Chunk selection**: Chunks outside the time range are skipped entirely. The active (unsealed) chunk is always included.
+4. **DNF compilation**: The boolean expression is converted to Disjunctive Normal Form (OR of ANDs) for efficient evaluation
+5. **Per-chunk scanning**: Each selected chunk is scanned using the best available strategy:
+   - **Index-driven**: If all predicates in a DNF branch have index coverage, intersect position lists and read only matching records
    - **Sequential with runtime filter**: Scan records and evaluate predicates at read time
-   - **Seek-based start**: Binary search on timestamps to skip to the relevant range
+   - **Seek-based start**: Binary search on timestamps to skip to the relevant range within a chunk
 
 ## Multi-Store Search
 
-When no `store=` filter is specified, the engine queries all stores in parallel via the store registry. Results are merged by timestamp. Resume tokens track positions across multiple stores for pagination.
+When no `store=` filter is specified, the engine queries all stores in parallel. Results are merged by timestamp using a heap-based merge sort. Each store is searched independently and results are interleaved in time order.
 
 ## Resume Tokens and Pagination
 
-Search results are returned as an iterator with a **resume token**. The token encodes the last-read position in each store/chunk, allowing the next page to continue exactly where the previous one left off. Tokens remain valid as long as the referenced chunks exist.
+Search results are returned as an iterator with a **resume token**. The token encodes the last-read position in each store and chunk, allowing the next page to continue exactly where the previous one left off.
+
+Resume tokens track positions across multiple stores. Each position records a store ID, chunk ID, and the last-returned record index. Exhausted chunks (fully read) are marked so they don't need to be re-scanned.
+
+Tokens remain valid as long as the referenced chunks exist. If a chunk is deleted by a retention policy between pages, the token becomes invalid and the search must restart.
+
+## Follow (Live Tail)
+
+The Follow feature streams new records as they arrive, similar to `tail -f`. It works by polling all selected stores for new records that appeared since the last check.
+
+Follow only emits **new** records — it marks all existing chunks as "seen" on initialization and only yields records appended after that point. Records from multiple stores are merged by IngestTS.
+
+Follow runs until cancelled. When combined with a query filter, only matching new records are emitted.
+
+## Histogram
+
+The Histogram feature returns record counts bucketed by time, used for the timeline visualization. It divides a time range into evenly-spaced buckets and counts how many records fall into each.
+
+Two execution paths:
+
+- **Unfiltered**: Uses binary search on idx.log entries to count records per bucket without reading any record data. This is very fast even on large chunks.
+- **Filtered** (with a query expression): Runs a full search and buckets each matching record. Capped at 1 million scanned records to prevent runaway queries.
+
+Each bucket includes per-severity level counts (error, warn, info, debug, trace) extracted from KV indexes and record attributes.
+
+## Context View
+
+The GetContext feature retrieves records surrounding a specific anchor record. Given a record reference, it returns:
+
+- The **anchor** record itself
+- A configurable number of records **before** the anchor (up to 50)
+- A configurable number of records **after** the anchor (up to 50)
+
+Context records are fetched across all stores by timestamp, so you see what was happening system-wide around the time of the anchor record.
 
 ## Execution Plan
 
@@ -100,3 +99,7 @@ The **Explain** view shows how the engine will process a query:
   - **Runtime filters**: Predicates evaluated at scan time (not index-accelerated)
   - **Skip reason**: Why a chunk was excluded (e.g., outside time range)
   - **Branch plans**: For multi-branch DNF queries, each branch's index strategy
+
+## Query Timeout
+
+An optional query timeout can be configured in Service settings. When set, individual search, follow, histogram, and context requests are cancelled if they exceed the configured duration. The timeout uses Go duration syntax (e.g., `30s`, `1m`). Setting it to empty or `0s` disables the timeout.

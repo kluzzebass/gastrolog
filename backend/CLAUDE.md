@@ -158,7 +158,7 @@ Index file headers include the chunk ID (8 bytes) after the common 4-byte prefix
   - `Attrs` -- key-value metadata stored alongside the record (no central registry)
 - **RecordRef** -- `ChunkID` + record index `Pos` (`uint64`); used for cursor positioning via `Seek`
 - **ChunkMeta** -- `ID`, `StartTS`, `EndTS` (`time.Time`), `Sealed`
-- **ChunkID** -- 8-byte big-endian uint64 unix microseconds, encoded as 13-char base32hex string (time-ordered, sortable)
+- **ChunkID** -- 16-byte UUIDv7 (millisecond Unix timestamp in high bits), encoded as 26-char lowercase base32hex string (time-ordered, sortable)
 
 ### Orchestrator (`internal/orchestrator/`)
 

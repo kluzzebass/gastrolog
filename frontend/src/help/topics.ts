@@ -22,7 +22,7 @@ export const helpTopics: HelpTopic[] = [
   { id: 'ingesters', title: 'Ingesters', content: ingesters },
   { id: 'indexers', title: 'Indexers', content: indexers },
   { id: 'policies', title: 'Policies', content: policies },
-  { id: 'user-management', title: 'User Management', content: userManagement },
+  { id: 'user-management', title: 'Users & Security', content: userManagement },
   { id: 'architecture', title: 'Architecture', content: architecture },
 ];
 

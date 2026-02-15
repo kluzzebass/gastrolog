@@ -6,8 +6,9 @@ This page explains the design rationale behind GastroLog's core architecture.
 graph TD
     subgraph Ingestion
         I[Ingesters]
+        D[Digesters]
         O[Orchestrator]
-        I --> O
+        I --> D --> O
     end
 
     subgraph Storage
@@ -83,6 +84,24 @@ Every record carries SourceTS, IngestTS, and WriteTS. Most log systems track onl
 - **WriteTS**: When the record was committed to storage. Monotonic within a chunk, used as the primary ordering key. Reliable for pagination and consistent iteration.
 
 Having all three lets you answer different questions: "when did this happen?" (SourceTS), "when did we learn about it?" (IngestTS), "when was it stored?" (WriteTS).
+
+## Digester Pipeline
+
+Between ingestion and storage, messages pass through **digesters** — enrichment stages that extract structured information from raw log content. Digesters are best-effort: parse failures are silently ignored, and the message passes through unchanged.
+
+**Why digesters?** Log sources vary widely in format. Rather than requiring each ingester to understand every log format, digesters provide a uniform enrichment layer. A syslog message and a JSON-structured HTTP push both get normalized severity levels and extracted timestamps, regardless of their source.
+
+Digesters run in-place on the message before filter evaluation, so their extracted attributes (like `level`) can be used in store filter expressions.
+
+## Configuration System
+
+GastroLog stores its configuration (stores, ingesters, filters, policies, users, certificates) in a pluggable config store. Three backends are available:
+
+- **SQLite** (default): Persistent relational storage with ACID transactions
+- **JSON**: File-based persistence with atomic writes (temp file + rename)
+- **Memory**: In-process only, useful for testing and ephemeral instances
+
+All configuration is managed through the Settings dialog or the API. Stores, ingesters, filters, and policies reference each other by UUID — a store points to its rotation policy, retention policy, and filter by ID.
 
 ## DNF Query Compilation
 

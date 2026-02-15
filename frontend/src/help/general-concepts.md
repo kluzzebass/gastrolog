@@ -83,7 +83,17 @@ Extracts severity from the message body and sets a normalized `level` attribute.
 - **JSON format**: `"level":"error"`, `"severity":"warn"`
 - **Syslog priority**: `<NNN>` where severity = priority % 8
 
-Values are normalized to: `error`, `warn`, `info`, `debug`, `trace`.
+**Normalization mappings:**
+
+| Normalized | Also matches |
+|------------|-------------|
+| `error` | err, fatal, critical, emerg, emergency, alert, crit |
+| `warn` | warning |
+| `info` | notice, informational |
+| `debug` | |
+| `trace` | |
+
+Syslog priorities map numeric severity to these levels: 0-3 (emerg through err) become `error`, 4 (warning) becomes `warn`, 5-6 (notice, info) become `info`, 7 (debug) becomes `debug`.
 
 ### Timestamp Digester
 
@@ -95,6 +105,10 @@ Extracts SourceTS from the raw log content when the ingester didn't set one. Ski
 - **Common Log Format**: `[02/Jan/2006:15:04:05 -0700]`
 - **Go/Ruby datestamp**: `2024/01/15 10:30:45`
 - **Ctime / BSD**: `Fri Feb 13 17:49:50 2026`
+
+All formats support fractional seconds up to nanosecond precision and timezone offsets. When a format lacks a year (e.g., RFC 3164), the current year is inferred with rollover detection — if the parsed time would be more than 24 hours in the future, the previous year is used instead.
+
+When multiple timestamp patterns appear in a single message, the one at the earliest byte position wins.
 
 ## Multi-Store Routing
 
