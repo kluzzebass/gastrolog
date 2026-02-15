@@ -13,6 +13,8 @@ export function useDialogState() {
   const [showHistory, setShowHistory] = useState(false);
   const [showSavedQueries, setShowSavedQueries] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
+  const [showHelpDialog, setShowHelpDialog] = useState(false);
+  const [helpTopic, setHelpTopic] = useState<string | undefined>(undefined);
 
   // Inspector glow effect: briefly flash when any fetch is active.
   const fetchCount = useIsFetching();
@@ -45,6 +47,10 @@ export function useDialogState() {
     setShowSavedQueries,
     showChangePassword,
     setShowChangePassword,
+    showHelpDialog,
+    setShowHelpDialog,
+    helpTopic,
+    setHelpTopic,
     inspectorGlow,
   };
 }
