@@ -111,8 +111,16 @@ type Config struct {
 // It is serialized as JSON and stored under the "server" settings key.
 type ServerConfig struct {
 	Auth      AuthConfig      `json:"auth"`
+	Query     QueryConfig     `json:"query"`
 	Scheduler SchedulerConfig `json:"scheduler"`
 	TLS       TLSConfig       `json:"tls"`
+}
+
+// QueryConfig holds configuration for the query engine.
+type QueryConfig struct {
+	// Timeout is the maximum duration for a single query (Search, Histogram, GetContext).
+	// Uses Go duration format (e.g., "30s", "1m"). Empty or "0s" disables the timeout.
+	Timeout string `json:"timeout,omitempty"`
 }
 
 // TLSConfig holds TLS server settings.

@@ -430,7 +430,7 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, storeID uuid.U
 
 		// Try to use indexes for sealed chunks, fall back to sequential scan
 		// if indexes aren't available yet (chunk sealed but not yet indexed).
-		scanner, err := e.buildScannerWithManagers(cursor, q, storeID, meta, startPos, cm, im)
+		scanner, err := e.buildScannerWithManagers(ctx, cursor, q, storeID, meta, startPos, cm, im)
 		if err != nil {
 			yield(recordWithRef{}, err)
 			return
@@ -453,7 +453,7 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, storeID uuid.U
 // buildScannerWithManagers creates a scanner for a chunk using the composable filter pipeline.
 // It tries to use indexes when available, falling back to runtime filters when not.
 // storeID is included in the returned recordWithRef for multi-store queries.
-func (e *Engine) buildScannerWithManagers(cursor chunk.RecordCursor, q Query, storeID uuid.UUID, meta chunk.ChunkMeta, startPos *uint64, cm chunk.ChunkManager, im index.IndexManager) (iter.Seq2[recordWithRef, error], error) {
+func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.RecordCursor, q Query, storeID uuid.UUID, meta chunk.ChunkMeta, startPos *uint64, cm chunk.ChunkManager, im index.IndexManager) (iter.Seq2[recordWithRef, error], error) {
 	b := newScannerBuilder(meta.ID)
 	b.storeID = storeID
 
@@ -623,7 +623,7 @@ func (e *Engine) buildScannerWithManagers(cursor chunk.RecordCursor, q Query, st
 		}
 	}
 
-	return b.build(cursor, q), nil
+	return b.build(ctx, cursor, q), nil
 }
 
 // emptyScanner returns a scanner that yields no records.
