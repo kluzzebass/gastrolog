@@ -81,10 +81,8 @@ When the query engine processes a sealed chunk:
 ```mermaid
 flowchart TD
     A[Boolean Expression] --> B[DNF Compilation]
-    B --> C[Branch 1: error AND level=error]
-    B --> D[Branch 2: warn AND host=*]
-    C --> E{Indexes<br/>Available?}
-    D --> E
+    B -->|error AND level=error| E{Indexes<br/>Available?}
+    B -->|warn AND host=*| E
     E -->|Yes| F[Intersect Position Lists]
     E -->|No| G[Runtime Filter]
     F --> H[Union Results]
