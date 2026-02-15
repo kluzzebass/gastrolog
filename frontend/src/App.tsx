@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { useIsFetching } from "@tanstack/react-query";
 import {
   useSearch as useRouterSearch,
   useNavigate,
@@ -27,9 +26,11 @@ import {
   injectStore,
   buildSeverityExpr,
 } from "./utils/queryHelpers";
-import { usePanelResize } from "./hooks/usePanelResize";
 import { useThemeSync } from "./hooks/useThemeSync";
 import { useThemeClass } from "./hooks/useThemeClass";
+import { useDialogState } from "./hooks/useDialogState";
+import { usePanelLayout } from "./hooks/usePanelLayout";
+import { useTimeRange } from "./hooks/useTimeRange";
 import { EmptyState } from "./components/EmptyState";
 import { LogEntry } from "./components/LogEntry";
 import { HistogramChart } from "./components/HistogramChart";
@@ -37,14 +38,8 @@ import { ExplainPanel } from "./components/ExplainPanel";
 import { SearchSidebar } from "./components/SearchSidebar";
 import { DetailSidebar } from "./components/DetailSidebar";
 import { ToastProvider, useToast } from "./components/Toast";
-import {
-  SettingsDialog,
-  type SettingsTab,
-} from "./components/settings/SettingsDialog";
-import {
-  InspectorDialog,
-  type InspectorTab,
-} from "./components/inspector/InspectorDialog";
+import { SettingsDialog } from "./components/settings/SettingsDialog";
+import { InspectorDialog } from "./components/inspector/InspectorDialog";
 import { useQueryHistory } from "./hooks/useQueryHistory";
 import {
   useSavedQueries,
@@ -75,39 +70,40 @@ function AppContent() {
   const [draft, setDraft] = useState(q);
   const [cursorPos, setCursorPos] = useState(0);
   const [selectedStore, setSelectedStore] = useState("all");
-  const [timeRange, setTimeRange] = useState("1h");
-  const [rangeStart, setRangeStart] = useState<Date | null>(null);
-  const [rangeEnd, setRangeEnd] = useState<Date | null>(null);
-  const [showPlan, setShowPlan] = useState(false);
-  const [showHelp, setShowHelp] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>("service");
-  const [showInspector, setShowInspector] = useState(false);
-  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("stores");
-  const fetchCount = useIsFetching();
-  const [inspectorGlow, setInspectorGlow] = useState(false);
-  const glowTimer = useRef<ReturnType<typeof setTimeout>>(null);
-  useEffect(() => {
-    if (fetchCount > 0) {
-      setInspectorGlow(true);
-      if (glowTimer.current) clearTimeout(glowTimer.current);
-      glowTimer.current = setTimeout(() => setInspectorGlow(false), 800);
-    }
-  }, [fetchCount]);
+
+  // Whether results are in reverse (newest-first) order.
+  const isReversed = !q.includes("reverse=false");
+
+  const {
+    timeRange, setTimeRange,
+    rangeStart, setRangeStart,
+    rangeEnd, setRangeEnd,
+    handleTimeRange, handleCustomRange,
+  } = useTimeRange(q, isReversed);
+
+  const {
+    showPlan, setShowPlan,
+    showHelp, setShowHelp,
+    showSettings, setShowSettings,
+    settingsTab, setSettingsTab,
+    showInspector, setShowInspector,
+    inspectorTab, setInspectorTab,
+    showHistory, setShowHistory,
+    showSavedQueries, setShowSavedQueries,
+    showChangePassword, setShowChangePassword,
+    inspectorGlow,
+  } = useDialogState();
+
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(
     null,
   );
   const { theme, setTheme, dark } = useThemeSync();
-  const [detailWidth, setDetailWidth] = useState(320);
-  const [sidebarWidth, setSidebarWidth] = useState(224);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [detailCollapsed, setDetailCollapsed] = useState(true);
-  const [detailPinned, setDetailPinned] = useState(false);
-  const { handleResize: handleDetailResize, resizing: detailResizing } =
-    usePanelResize(setDetailWidth, 240, 600, "right");
-  const { handleResize: handleSidebarResize, resizing: sidebarResizing } =
-    usePanelResize(setSidebarWidth, 160, 400, "left");
-  const resizing = detailResizing || sidebarResizing;
+
+  const {
+    sidebarWidth, sidebarCollapsed, setSidebarCollapsed, handleSidebarResize,
+    detailWidth, detailCollapsed, setDetailCollapsed, detailPinned, setDetailPinned,
+    handleDetailResize, resizing,
+  } = usePanelLayout();
 
   // Auto-expand detail panel and fetch context when a record is selected.
   useEffect(() => {
@@ -135,8 +131,6 @@ function AppContent() {
     return () => window.removeEventListener("keydown", handler);
   }, [detailPinned, showPlan]);
 
-  const [showHistory, setShowHistory] = useState(false);
-  const [showSavedQueries, setShowSavedQueries] = useState(false);
   const queryHistory = useQueryHistory();
   const savedQueries = useSavedQueries();
   const putSavedQuery = usePutSavedQuery();
@@ -199,7 +193,6 @@ function AppContent() {
   const { addToast } = useToast();
   const logout = useLogout();
   const currentUser = useCurrentUser();
-  const [showChangePassword, setShowChangePassword] = useState(false);
 
   // Push errors from hooks to the toast system.
   useEffect(() => {
@@ -212,9 +205,6 @@ function AppContent() {
       addToast(followError.message, "error");
     }
   }, [followError]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Whether results are in reverse (newest-first) order.
-  const isReversed = !q.includes("reverse=false");
 
   // Navigate to a new query — pushes browser history, preserving current route.
   const setUrlQuery = useCallback(
@@ -435,35 +425,6 @@ function AppContent() {
     } else {
       toggleSeverity(level);
     }
-  };
-
-  const handleTimeRange = (range: string) => {
-    setTimeRange(range);
-    if (range === "All") {
-      setRangeStart(null);
-      setRangeEnd(null);
-    } else {
-      const ms = timeRangeMs[range];
-      if (ms) {
-        const now = new Date();
-        setRangeStart(new Date(now.getTime() - ms));
-        setRangeEnd(now);
-      }
-    }
-    const newQuery = injectTimeRange(q, range, isReversed);
-    // Time ranges imply search mode — switch away from follow if active.
-    navigate({ to: "/search", search: { q: newQuery }, replace: false });
-  };
-
-  const handleCustomRange = (start: Date, end: Date) => {
-    setTimeRange("custom");
-    setRangeStart(start);
-    setRangeEnd(end);
-    const tokens = `start=${start.toISOString()} end=${end.toISOString()} reverse=${isReversed}`;
-    const base = stripTimeRange(q);
-    const newQuery = base ? `${tokens} ${base}` : tokens;
-    // Time ranges imply search mode — switch away from follow if active.
-    navigate({ to: "/search", search: { q: newQuery }, replace: false });
   };
 
   // In follow mode, sort direction is purely a display concern (local state).
