@@ -99,25 +99,19 @@ func (s *ConfigServer) PutStore(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	// Reload full config for filter resolution.
-	fullCfg, err := s.cfgStore.Load(ctx)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload config: %w", err))
-	}
-
 	// Apply to runtime: check if store already exists.
 	existing := slices.Contains(s.orch.ListStores(), storeCfg.ID)
 
 	if existing {
 		// Reload filters, rotation policies, and retention policies (references may have changed).
-		if err := s.orch.UpdateFilters(fullCfg); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update filters: %w", err))
+		if err := s.orch.ReloadFilters(ctx); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload filters: %w", err))
 		}
-		if err := s.orch.UpdateRotationPolicies(fullCfg); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update rotation policies: %w", err))
+		if err := s.orch.ReloadRotationPolicies(ctx); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload rotation policies: %w", err))
 		}
-		if err := s.orch.UpdateRetentionPolicies(fullCfg); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update retention policies: %w", err))
+		if err := s.orch.ReloadRetentionPolicies(ctx); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload retention policies: %w", err))
 		}
 		// Apply enabled state.
 		if !storeCfg.Enabled {
@@ -127,7 +121,7 @@ func (s *ConfigServer) PutStore(
 		}
 	} else {
 		// Add new store to orchestrator.
-		if err := s.orch.AddStore(storeCfg, fullCfg, s.factories); err != nil {
+		if err := s.orch.AddStore(ctx, storeCfg, s.factories); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("add store: %w", err))
 		}
 	}

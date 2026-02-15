@@ -144,6 +144,7 @@ func run(ctx context.Context, logger *slog.Logger, datadirFlag, configType, serv
 	orch := orchestrator.New(orchestrator.Config{
 		Logger:            logger,
 		MaxConcurrentJobs: maxConcurrentJobs,
+		ConfigLoader:      cfgStore,
 	})
 
 	// Register digesters (message enrichment pipeline).

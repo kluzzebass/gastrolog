@@ -929,6 +929,35 @@ func newFilteredTestSetup(t *testing.T) (*orchestrator.Orchestrator, filteredTes
 	return orch, stores
 }
 
+// newFilteredTestSetupWithLoader is like newFilteredTestSetup but accepts a
+// *fakeConfigLoader and passes it as the ConfigLoader in orchestrator.Config.
+func newFilteredTestSetupWithLoader(t *testing.T, loader *fakeConfigLoader) (*orchestrator.Orchestrator, filteredTestStores) {
+	t.Helper()
+
+	stores := filteredTestStores{
+		prod:     uuid.Must(uuid.NewV7()),
+		staging:  uuid.Must(uuid.NewV7()),
+		archive:  uuid.Must(uuid.NewV7()),
+		unrouted: uuid.Must(uuid.NewV7()),
+		cms:      make(map[uuid.UUID]chunk.ChunkManager),
+	}
+
+	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+
+	for _, id := range []uuid.UUID{stores.prod, stores.staging, stores.archive, stores.unrouted} {
+		s := memtest.MustNewStore(t, chunkmem.Config{
+			RotationPolicy: recordCountPolicy(10000),
+		})
+		stores.cms[id] = s.CM
+
+		orch.RegisterChunkManager(id, s.CM)
+		orch.RegisterIndexManager(id, s.IM)
+		orch.RegisterQueryEngine(id, s.QE)
+	}
+
+	return orch, stores
+}
+
 // countRecords counts records in a chunk manager's active chunk.
 func countRecords(t *testing.T, cm chunk.ChunkManager) int {
 	t.Helper()

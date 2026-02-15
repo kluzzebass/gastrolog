@@ -40,12 +40,8 @@ func (s *ConfigServer) PutFilter(
 	}
 
 	// Reload filters in orchestrator.
-	fullCfg, err := s.cfgStore.Load(ctx)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload config: %w", err))
-	}
-	if err := s.orch.UpdateFilters(fullCfg); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update filters: %w", err))
+	if err := s.orch.ReloadFilters(ctx); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload filters: %w", err))
 	}
 
 	return connect.NewResponse(&apiv1.PutFilterResponse{}), nil

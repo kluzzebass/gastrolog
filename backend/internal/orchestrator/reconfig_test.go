@@ -18,14 +18,24 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestUpdateFilters(t *testing.T) {
-	orch, stores := newFilteredTestSetup(t)
+// fakeConfigLoader implements orchestrator.ConfigLoader for tests.
+type fakeConfigLoader struct {
+	cfg *config.Config
+}
+
+func (f *fakeConfigLoader) Load(_ context.Context) (*config.Config, error) {
+	return f.cfg, nil
+}
+
+func TestReloadFilters(t *testing.T) {
+	loader := &fakeConfigLoader{}
+	orch, stores := newFilteredTestSetupWithLoader(t, loader)
 
 	prodFilterID := uuid.Must(uuid.NewV7())
 	catchAllFilterID := uuid.Must(uuid.NewV7())
 
 	// Initially set filters: prod gets env=prod, archive is catch-all.
-	cfg := &config.Config{
+	loader.cfg = &config.Config{
 		Filters: []config.FilterConfig{
 			{ID: prodFilterID, Expression: "env=prod"},
 			{ID: catchAllFilterID, Expression: "*"},
@@ -35,8 +45,8 @@ func TestUpdateFilters(t *testing.T) {
 			{ID: stores.archive, Filter: new(catchAllFilterID)},
 		},
 	}
-	if err := orch.UpdateFilters(cfg); err != nil {
-		t.Fatalf("UpdateFilters: %v", err)
+	if err := orch.ReloadFilters(context.Background()); err != nil {
+		t.Fatalf("ReloadFilters: %v", err)
 	}
 
 	// Ingest a prod message - should go to prod and archive.
@@ -57,7 +67,7 @@ func TestUpdateFilters(t *testing.T) {
 	}
 
 	// Now update filters: prod gets env=staging instead.
-	cfg2 := &config.Config{
+	loader.cfg = &config.Config{
 		Filters: []config.FilterConfig{
 			{ID: prodFilterID, Expression: "env=staging"},
 			{ID: catchAllFilterID, Expression: "*"},
@@ -67,8 +77,8 @@ func TestUpdateFilters(t *testing.T) {
 			{ID: stores.archive, Filter: new(catchAllFilterID)},
 		},
 	}
-	if err := orch.UpdateFilters(cfg2); err != nil {
-		t.Fatalf("UpdateFilters (2nd): %v", err)
+	if err := orch.ReloadFilters(context.Background()); err != nil {
+		t.Fatalf("ReloadFilters (2nd): %v", err)
 	}
 
 	// Ingest another prod message - should only go to archive now.
@@ -90,12 +100,13 @@ func TestUpdateFilters(t *testing.T) {
 	}
 }
 
-func TestUpdateFiltersInvalidExpression(t *testing.T) {
-	orch, stores := newFilteredTestSetup(t)
+func TestReloadFiltersInvalidExpression(t *testing.T) {
+	loader := &fakeConfigLoader{}
+	orch, stores := newFilteredTestSetupWithLoader(t, loader)
 
 	invalidFilterID := uuid.Must(uuid.NewV7())
 
-	cfg := &config.Config{
+	loader.cfg = &config.Config{
 		Filters: []config.FilterConfig{
 			{ID: invalidFilterID, Expression: "(unclosed"},
 		},
@@ -103,21 +114,22 @@ func TestUpdateFiltersInvalidExpression(t *testing.T) {
 			{ID: stores.prod, Filter: new(invalidFilterID)},
 		},
 	}
-	err := orch.UpdateFilters(cfg)
+	err := orch.ReloadFilters(context.Background())
 	if err == nil {
 		t.Fatal("expected error for invalid filter expression")
 	}
 }
 
-func TestUpdateFiltersIgnoresUnknownStores(t *testing.T) {
-	orch, stores := newFilteredTestSetup(t)
+func TestReloadFiltersIgnoresUnknownStores(t *testing.T) {
+	loader := &fakeConfigLoader{}
+	orch, stores := newFilteredTestSetupWithLoader(t, loader)
 
 	prodFilterID := uuid.Must(uuid.NewV7())
 	catchAllFilterID := uuid.Must(uuid.NewV7())
 	nonexistentStoreID := uuid.Must(uuid.NewV7())
 
 	// Include a store that doesn't exist - should be ignored.
-	cfg := &config.Config{
+	loader.cfg = &config.Config{
 		Filters: []config.FilterConfig{
 			{ID: prodFilterID, Expression: "env=prod"},
 			{ID: catchAllFilterID, Expression: "*"},
@@ -127,13 +139,21 @@ func TestUpdateFiltersIgnoresUnknownStores(t *testing.T) {
 			{ID: nonexistentStoreID, Filter: new(catchAllFilterID)},
 		},
 	}
-	if err := orch.UpdateFilters(cfg); err != nil {
-		t.Fatalf("UpdateFilters: %v", err)
+	if err := orch.ReloadFilters(context.Background()); err != nil {
+		t.Fatalf("ReloadFilters: %v", err)
 	}
 }
 
 func TestAddStore(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
+	loader := &fakeConfigLoader{cfg: &config.Config{
+		Filters: []config.FilterConfig{
+			{ID: filterID, Expression: "env=test"},
+		},
+	}}
+	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -144,22 +164,13 @@ func TestAddStore(t *testing.T) {
 		},
 	}
 
-	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
-
-	cfg := &config.Config{
-		Filters: []config.FilterConfig{
-			{ID: filterID, Expression: "env=test"},
-		},
-	}
-
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
+	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
 		t.Fatalf("AddStore: %v", err)
 	}
 
@@ -185,7 +196,15 @@ func TestAddStore(t *testing.T) {
 }
 
 func TestAddStoreDuplicate(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
+	loader := &fakeConfigLoader{cfg: &config.Config{
+		Filters: []config.FilterConfig{
+			{ID: filterID, Expression: "*"},
+		},
+	}}
+	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -196,34 +215,33 @@ func TestAddStoreDuplicate(t *testing.T) {
 		},
 	}
 
-	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
-
-	cfg := &config.Config{
-		Filters: []config.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
-	}
-
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
+	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
 		t.Fatalf("AddStore: %v", err)
 	}
 
 	// Adding again should fail.
-	err := orch.AddStore(storeCfg, cfg, factories)
+	err := orch.AddStore(context.Background(), storeCfg, factories)
 	if err == nil {
 		t.Fatal("expected error for duplicate store")
 	}
 }
 
 func TestRemoveStoreEmpty(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
+	loader := &fakeConfigLoader{cfg: &config.Config{
+		Filters: []config.FilterConfig{
+			{ID: filterID, Expression: "*"},
+		},
+	}}
+	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -234,22 +252,13 @@ func TestRemoveStoreEmpty(t *testing.T) {
 		},
 	}
 
-	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
-
-	cfg := &config.Config{
-		Filters: []config.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
-	}
-
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
+	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
 		t.Fatalf("AddStore: %v", err)
 	}
 
@@ -265,7 +274,15 @@ func TestRemoveStoreEmpty(t *testing.T) {
 }
 
 func TestRemoveStoreNotEmpty(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
+	loader := &fakeConfigLoader{cfg: &config.Config{
+		Filters: []config.FilterConfig{
+			{ID: filterID, Expression: "*"},
+		},
+	}}
+	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -276,22 +293,13 @@ func TestRemoveStoreNotEmpty(t *testing.T) {
 		},
 	}
 
-	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
-
-	cfg := &config.Config{
-		Filters: []config.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
-	}
-
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
+	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
 		t.Fatalf("AddStore: %v", err)
 	}
 
@@ -313,7 +321,8 @@ func TestRemoveStoreNotEmpty(t *testing.T) {
 }
 
 func TestRemoveStoreNotFound(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	loader := &fakeConfigLoader{cfg: &config.Config{}}
+	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
 	err := orch.RemoveStore(uuid.Must(uuid.NewV7()))
 	if err == nil {
@@ -322,7 +331,15 @@ func TestRemoveStoreNotFound(t *testing.T) {
 }
 
 func TestForceRemoveStore(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
+	loader := &fakeConfigLoader{cfg: &config.Config{
+		Filters: []config.FilterConfig{
+			{ID: filterID, Expression: "*"},
+		},
+	}}
+	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -333,22 +350,13 @@ func TestForceRemoveStore(t *testing.T) {
 		},
 	}
 
-	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
-
-	cfg := &config.Config{
-		Filters: []config.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
-	}
-
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
+	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
 		t.Fatalf("AddStore: %v", err)
 	}
 
@@ -393,7 +401,8 @@ func TestForceRemoveStore(t *testing.T) {
 }
 
 func TestForceRemoveStoreNotFound(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	loader := &fakeConfigLoader{cfg: &config.Config{}}
+	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
 	err := orch.ForceRemoveStore(uuid.Must(uuid.NewV7()))
 	if err == nil {
@@ -402,7 +411,15 @@ func TestForceRemoveStoreNotFound(t *testing.T) {
 }
 
 func TestForceRemoveEmptyStore(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
+	loader := &fakeConfigLoader{cfg: &config.Config{
+		Filters: []config.FilterConfig{
+			{ID: filterID, Expression: "*"},
+		},
+	}}
+	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -413,22 +430,13 @@ func TestForceRemoveEmptyStore(t *testing.T) {
 		},
 	}
 
-	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
-
-	cfg := &config.Config{
-		Filters: []config.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
-	}
-
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
+	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
 		t.Fatalf("AddStore: %v", err)
 	}
 
@@ -580,7 +588,15 @@ func TestRemoveIngesterNotFound(t *testing.T) {
 }
 
 func TestStoreConfig(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
+	loader := &fakeConfigLoader{cfg: &config.Config{
+		Filters: []config.FilterConfig{
+			{ID: filterID, Expression: "env=prod AND level=error"},
+		},
+	}}
+	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -591,22 +607,13 @@ func TestStoreConfig(t *testing.T) {
 		},
 	}
 
-	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
-
-	cfg := &config.Config{
-		Filters: []config.FilterConfig{
-			{ID: filterID, Expression: "env=prod AND level=error"},
-		},
-	}
-
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
+	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
 		t.Fatalf("AddStore: %v", err)
 	}
 
@@ -685,7 +692,15 @@ func TestUpdateStoreFilter(t *testing.T) {
 }
 
 func TestSetRotationPolicyDirectly(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
+	loader := &fakeConfigLoader{cfg: &config.Config{
+		Filters: []config.FilterConfig{
+			{ID: filterID, Expression: "*"},
+		},
+	}}
+	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
 	// Create a store with default rotation policy (10000 records).
 	factories := orchestrator.Factories{
@@ -697,22 +712,13 @@ func TestSetRotationPolicyDirectly(t *testing.T) {
 		},
 	}
 
-	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
-
-	cfg := &config.Config{
-		Filters: []config.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
-	}
-
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
+	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
 		t.Fatalf("AddStore: %v", err)
 	}
 
@@ -743,7 +749,15 @@ func TestSetRotationPolicyDirectly(t *testing.T) {
 }
 
 func TestPauseStore(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
+	loader := &fakeConfigLoader{cfg: &config.Config{
+		Filters: []config.FilterConfig{
+			{ID: filterID, Expression: "*"},
+		},
+	}}
+	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -754,22 +768,13 @@ func TestPauseStore(t *testing.T) {
 		},
 	}
 
-	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
-
-	cfg := &config.Config{
-		Filters: []config.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
-	}
-
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
+	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
 		t.Fatalf("AddStore: %v", err)
 	}
 
@@ -812,7 +817,15 @@ func TestPauseStore(t *testing.T) {
 }
 
 func TestResumeStore(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
+	loader := &fakeConfigLoader{cfg: &config.Config{
+		Filters: []config.FilterConfig{
+			{ID: filterID, Expression: "*"},
+		},
+	}}
+	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -823,22 +836,13 @@ func TestResumeStore(t *testing.T) {
 		},
 	}
 
-	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
-
-	cfg := &config.Config{
-		Filters: []config.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
-	}
-
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
+	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
 		t.Fatalf("AddStore: %v", err)
 	}
 
@@ -881,7 +885,15 @@ func TestDisableStoreNotFound(t *testing.T) {
 }
 
 func TestDisableDoesNotAffectQuery(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
+	loader := &fakeConfigLoader{cfg: &config.Config{
+		Filters: []config.FilterConfig{
+			{ID: filterID, Expression: "*"},
+		},
+	}}
+	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -892,22 +904,13 @@ func TestDisableDoesNotAffectQuery(t *testing.T) {
 		},
 	}
 
-	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
-
-	cfg := &config.Config{
-		Filters: []config.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
-	}
-
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
+	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
 		t.Fatalf("AddStore: %v", err)
 	}
 
@@ -953,7 +956,15 @@ func TestUpdateStoreFilterNotFound(t *testing.T) {
 }
 
 func TestUpdateStoreFilterInvalid(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
+	loader := &fakeConfigLoader{cfg: &config.Config{
+		Filters: []config.FilterConfig{
+			{ID: filterID, Expression: "*"},
+		},
+	}}
+	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -964,22 +975,13 @@ func TestUpdateStoreFilterInvalid(t *testing.T) {
 		},
 	}
 
-	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
-
-	cfg := &config.Config{
-		Filters: []config.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
-	}
-
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
+	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
 		t.Fatalf("AddStore: %v", err)
 	}
 

@@ -21,7 +21,18 @@ var (
 	ErrIngesterNotFound = errors.New("ingester not found")
 	// ErrDuplicateID is returned when attempting to add a component with an existing ID.
 	ErrDuplicateID = errors.New("duplicate ID")
+	// ErrNoConfigLoader is returned when a hot-update method is called without a ConfigLoader.
+	ErrNoConfigLoader = errors.New("no config loader configured")
 )
+
+// loadConfig loads the full configuration via the ConfigLoader.
+// Returns ErrNoConfigLoader if no ConfigLoader is set.
+func (o *Orchestrator) loadConfig(ctx context.Context) (*config.Config, error) {
+	if o.cfgLoader == nil {
+		return nil, ErrNoConfigLoader
+	}
+	return o.cfgLoader.Load(ctx)
+}
 
 // resolveFilterExpr looks up a filter ID in the config and returns its expression.
 // Returns empty string if the filter ID is nil or not found (store receives nothing).
@@ -66,13 +77,18 @@ func findRetentionPolicy(policies []config.RetentionPolicyConfig, id uuid.UUID) 
 	return nil
 }
 
-// UpdateFilters recompiles filter expressions from store configs and hot-swaps the filter set.
-// This can be called while the system is running without disrupting ingestion.
+// ReloadFilters loads the full config and recompiles filter expressions for all
+// registered stores. This can be called while the system is running without
+// disrupting ingestion.
 //
 // Store filter fields are resolved as filter IDs via cfg.Filters.
 // Only stores that are currently registered in the orchestrator are included.
 // Stores in the config that don't exist in the orchestrator are ignored.
-func (o *Orchestrator) UpdateFilters(cfg *config.Config) error {
+func (o *Orchestrator) ReloadFilters(ctx context.Context) error {
+	cfg, err := o.loadConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("load config for filter reload: %w", err)
+	}
 	if cfg == nil {
 		return nil
 	}
@@ -173,9 +189,13 @@ func (o *Orchestrator) RemoveIngester(id uuid.UUID) error {
 }
 
 // AddStore adds a new store (chunk manager, index manager, query engine) and updates the filter set.
-// The cfg parameter is needed to resolve the store's filter ID to a filter expression.
+// Loads the full config internally to resolve the store's filter ID to a filter expression.
 // Returns ErrDuplicateID if a store with this ID already exists.
-func (o *Orchestrator) AddStore(storeCfg config.StoreConfig, cfg *config.Config, factories Factories) error {
+func (o *Orchestrator) AddStore(ctx context.Context, storeCfg config.StoreConfig, factories Factories) error {
+	cfg, err := o.loadConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("load config for AddStore: %w", err)
+	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -498,13 +518,17 @@ func (o *Orchestrator) StoreConfig(id uuid.UUID) (config.StoreConfig, error) {
 	return cfg, nil
 }
 
-// UpdateRotationPolicies resolves rotation policy references for all registered stores
-// and hot-swaps their rotation policies. This is called when a rotation policy is
-// created, updated, or deleted to immediately apply changes to running stores.
+// ReloadRotationPolicies loads the full config and resolves rotation policy references
+// for all registered stores, hot-swapping their policies. This is called when a
+// rotation policy is created, updated, or deleted.
 //
 // Stores that don't reference any policy are left unchanged.
 // Stores referencing a policy that no longer exists get a nil policy (type default).
-func (o *Orchestrator) UpdateRotationPolicies(cfg *config.Config) error {
+func (o *Orchestrator) ReloadRotationPolicies(ctx context.Context) error {
+	cfg, err := o.loadConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("load config for rotation policy reload: %w", err)
+	}
 	if cfg == nil {
 		return nil
 	}
@@ -563,13 +587,17 @@ func (o *Orchestrator) UpdateRotationPolicies(cfg *config.Config) error {
 	return nil
 }
 
-// UpdateRetentionPolicies resolves retention policy references for all registered stores
-// and hot-swaps their retention policies. This is called when a retention policy is
-// created, updated, or deleted to immediately apply changes to running stores.
+// ReloadRetentionPolicies loads the full config and resolves retention policy references
+// for all registered stores, hot-swapping their policies. This is called when a
+// retention policy is created, updated, or deleted.
 //
 // Stores that don't reference any policy keep their current policy.
 // Memory stores without an explicit policy keep their default count(10) policy.
-func (o *Orchestrator) UpdateRetentionPolicies(cfg *config.Config) error {
+func (o *Orchestrator) ReloadRetentionPolicies(ctx context.Context) error {
+	cfg, err := o.loadConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("load config for retention policy reload: %w", err)
+	}
 	if cfg == nil {
 		return nil
 	}

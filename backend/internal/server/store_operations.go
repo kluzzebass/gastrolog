@@ -391,18 +391,8 @@ func (s *StoreServer) createStore(ctx context.Context, cfg config.StoreConfig) *
 		}
 	}
 
-	// Load full config for filter resolution.
-	var fullCfg *config.Config
-	if s.cfgStore != nil {
-		var err error
-		fullCfg, err = s.cfgStore.Load(ctx)
-		if err != nil {
-			return connect.NewError(connect.CodeInternal, fmt.Errorf("reload config: %w", err))
-		}
-	}
-
 	// Add to orchestrator.
-	if err := s.orch.AddStore(cfg, fullCfg, s.factories); err != nil {
+	if err := s.orch.AddStore(ctx, cfg, s.factories); err != nil {
 		// Rollback config entry on orchestrator failure.
 		if s.cfgStore != nil {
 			if delErr := s.cfgStore.DeleteStore(ctx, cfg.ID); delErr != nil {
