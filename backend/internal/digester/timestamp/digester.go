@@ -259,8 +259,7 @@ var monthPrefixes = map[string]time.Month{
 func findMonthPrefix(raw []byte) int {
 	for i := 0; i+3 < len(raw); i++ {
 		if raw[i+3] == ' ' && isUpperAlpha(raw[i]) && isLowerAlpha(raw[i+1]) && isLowerAlpha(raw[i+2]) {
-			key := string(raw[i : i+3])
-			if _, ok := monthPrefixes[key]; ok {
+			if _, ok := monthPrefixes[string(raw[i:i+3])]; ok {
 				return i
 			}
 		}
@@ -385,14 +384,12 @@ func findWeekdayMonthPrefix(raw []byte) int {
 	// Need at least "Fri Feb 13 17:49:50" = 19+ bytes from the weekday start.
 	for i := 0; i+19 <= len(raw); i++ {
 		if raw[i+3] == ' ' && isUpperAlpha(raw[i]) && isLowerAlpha(raw[i+1]) && isLowerAlpha(raw[i+2]) {
-			wd := string(raw[i : i+3])
-			if !weekdayPrefixes[wd] {
+			if !weekdayPrefixes[string(raw[i:i+3])] {
 				continue
 			}
 			// Check for month at position i+4.
 			if i+7 < len(raw) && isUpperAlpha(raw[i+4]) && isLowerAlpha(raw[i+5]) && isLowerAlpha(raw[i+6]) && raw[i+7] == ' ' {
-				mo := string(raw[i+4 : i+7])
-				if _, ok := monthPrefixes[mo]; ok {
+				if _, ok := monthPrefixes[string(raw[i+4:i+7])]; ok {
 					return i
 				}
 			}

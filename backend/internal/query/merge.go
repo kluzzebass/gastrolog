@@ -1,9 +1,6 @@
 package query
 
 import (
-	"container/heap"
-	"errors"
-
 	"gastrolog/internal/chunk"
 
 	"github.com/google/uuid"
@@ -13,7 +10,6 @@ import (
 type cursorEntry struct {
 	storeID uuid.UUID
 	chunkID chunk.ChunkID
-	cursor  chunk.RecordCursor
 	rec     chunk.Record
 	ref     chunk.RecordRef
 }
@@ -71,76 +67,3 @@ func (h *mergeHeapReverse) Pop() any {
 	return x
 }
 
-// mergeCursors creates a merged iterator over multiple cursors, ordered by IngestTS.
-// Each cursor should already be positioned at its starting point.
-// The advance function is called to get the next record from a cursor (Next or Prev).
-// Cursors are closed when exhausted or when iteration stops.
-func mergeCursors(entries []*cursorEntry, reverse bool, advance func(*cursorEntry) (chunk.Record, chunk.RecordRef, error)) func(yield func(*cursorEntry, error) bool) {
-	return func(yield func(*cursorEntry, error) bool) {
-		if len(entries) == 0 {
-			return
-		}
-
-		// Initialize heap with first record from each cursor
-		var h heap.Interface
-		if reverse {
-			rh := make(mergeHeapReverse, 0, len(entries))
-			h = &rh
-		} else {
-			fh := make(mergeHeap, 0, len(entries))
-			h = &fh
-		}
-
-		// Track cursors to close on exit
-		activeCursors := make([]*cursorEntry, 0, len(entries))
-		defer func() {
-			for _, e := range activeCursors {
-				if e.cursor != nil {
-					e.cursor.Close()
-				}
-			}
-		}()
-
-		// Prime the heap with first record from each cursor
-		for _, e := range entries {
-			rec, ref, err := advance(e)
-			if err != nil {
-				if errors.Is(err, chunk.ErrNoMoreRecords) {
-					e.cursor.Close()
-					continue
-				}
-				yield(nil, err)
-				return
-			}
-			e.rec = rec
-			e.ref = ref
-			heap.Push(h, e)
-			activeCursors = append(activeCursors, e)
-		}
-
-		// Merge
-		for h.Len() > 0 {
-			e := heap.Pop(h).(*cursorEntry)
-
-			if !yield(e, nil) {
-				return
-			}
-
-			// Advance this cursor
-			rec, ref, err := advance(e)
-			if err != nil {
-				if errors.Is(err, chunk.ErrNoMoreRecords) {
-					// Remove from active cursors
-					e.cursor.Close()
-					e.cursor = nil
-					continue
-				}
-				yield(nil, err)
-				return
-			}
-			e.rec = rec
-			e.ref = ref
-			heap.Push(h, e)
-		}
-	}
-}

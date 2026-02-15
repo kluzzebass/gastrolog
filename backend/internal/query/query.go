@@ -450,13 +450,6 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, storeID uuid.U
 	}
 }
 
-// buildScanner creates a scanner for a chunk using the composable filter pipeline.
-// It tries to use indexes when available, falling back to runtime filters when not.
-// This is a convenience wrapper for single-store mode.
-func (e *Engine) buildScanner(cursor chunk.RecordCursor, q Query, meta chunk.ChunkMeta, startPos *uint64) (iter.Seq2[recordWithRef, error], error) {
-	return e.buildScannerWithManagers(cursor, q, uuid.UUID{}, meta, startPos, e.chunks, e.indexes)
-}
-
 // buildScannerWithManagers creates a scanner for a chunk using the composable filter pipeline.
 // It tries to use indexes when available, falling back to runtime filters when not.
 // storeID is included in the returned recordWithRef for multi-store queries.

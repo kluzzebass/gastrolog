@@ -124,10 +124,6 @@ func (f *fakeDockerClient) Ping(ctx context.Context) (string, error) {
 
 // --- Helper functions ---
 
-func testLogger() *logging.ComponentFilterHandler {
-	return nil // Tests use discard logger
-}
-
 func makeMultiplexedFrame(stream streamType, ts time.Time, line string) []byte {
 	payload := ts.Format(time.RFC3339Nano) + " " + line + "\n"
 	header := make([]byte, 8)

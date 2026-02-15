@@ -122,15 +122,6 @@ func (b *scannerBuilder) addPositions(positions []uint64) bool {
 	return len(b.positions) > 0
 }
 
-// unionPositionsInto unions positions into an accumulator, then adds the result.
-// Used for OR semantics (e.g., multiple sources).
-func (b *scannerBuilder) unionPositionsInto(accumulator *[]uint64, positions []uint64) {
-	if b.hasMinPos {
-		positions = prunePositions(positions, b.minPos)
-	}
-	*accumulator = unionPositions(*accumulator, positions)
-}
-
 // addFilter adds a runtime filter that will be applied to each record.
 // Filters are applied in the order they are added, so callers should add
 // cheap filters (e.g., source ID check) before expensive ones (e.g., tokenization).
@@ -810,20 +801,6 @@ func matchesValueExists(attrs chunk.Attributes, raw []byte, value string) bool {
 	}
 
 	return false
-}
-
-// notTokenFilter returns a filter that excludes records containing any of the given tokens.
-func notTokenFilter(tokens []string) recordFilter {
-	return func(rec chunk.Record) bool {
-		return !matchesTokens(rec.Raw, tokens)
-	}
-}
-
-// notKeyValueFilter returns a filter that excludes records matching any of the given key=value pairs.
-func notKeyValueFilter(filters []KeyValueFilter) recordFilter {
-	return func(rec chunk.Record) bool {
-		return !matchesKeyValue(rec.Attrs, rec.Raw, filters)
-	}
 }
 
 // sourceTimeFilter returns a filter that checks SourceTS bounds.

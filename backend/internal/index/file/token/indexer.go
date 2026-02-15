@@ -259,15 +259,6 @@ func (ti *tokenIntern) lookup(b []byte) (string, bool) {
 	return "", false
 }
 
-// tokens returns all interned token strings.
-func (ti *tokenIntern) tokens() []string {
-	var result []string
-	for _, bucket := range ti.buckets {
-		result = append(result, bucket...)
-	}
-	return result
-}
-
 // writeIndexHeader writes the index file header.
 func writeIndexHeader(w *os.File, keyCount uint32) error {
 	buf := make([]byte, headerSize)

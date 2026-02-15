@@ -24,7 +24,6 @@ package querylang
 type parser struct {
 	lex *Lexer
 	cur Token
-	err error // first error encountered
 }
 
 // Parse parses a query string into an AST.

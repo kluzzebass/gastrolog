@@ -21,29 +21,3 @@ type StoreRegistry interface {
 	// Returns nil if the store doesn't exist.
 	IndexManager(storeID uuid.UUID) index.IndexManager
 }
-
-// singleStoreRegistry wraps a single chunk/index manager pair as a StoreRegistry.
-// This allows backward compatibility with code that creates an Engine for one store.
-type singleStoreRegistry struct {
-	storeID uuid.UUID
-	chunks  chunk.ChunkManager
-	indexes index.IndexManager
-}
-
-func (r *singleStoreRegistry) ListStores() []uuid.UUID {
-	return []uuid.UUID{r.storeID}
-}
-
-func (r *singleStoreRegistry) ChunkManager(storeID uuid.UUID) chunk.ChunkManager {
-	if storeID == r.storeID {
-		return r.chunks
-	}
-	return nil
-}
-
-func (r *singleStoreRegistry) IndexManager(storeID uuid.UUID) index.IndexManager {
-	if storeID == r.storeID {
-		return r.indexes
-	}
-	return nil
-}

@@ -65,29 +65,6 @@ var (
 	attrsB = chunk.Attributes{"source": "srcB"}
 )
 
-// allRecords collects all records from batches in order, for building a fake clock.
-func allRecords(batches [][]chunk.Record) []chunk.Record {
-	var all []chunk.Record
-	for _, b := range batches {
-		all = append(all, b...)
-	}
-	return all
-}
-
-// fakeClock returns a Now function that returns IngestTS of each record in order,
-// so that WriteTS == IngestTS in tests.
-func fakeClock(records []chunk.Record) func() time.Time {
-	idx := 0
-	return func() time.Time {
-		if idx < len(records) {
-			ts := records[idx].IngestTS
-			idx++
-			return ts
-		}
-		return time.Now()
-	}
-}
-
 // fakeClockForBatches creates a clock that handles interleaved chunk opens and appends.
 // For each batch, the first Now() call is for createdAt (returns dummy), the rest are for records.
 func fakeClockForBatches(batches [][]chunk.Record) func() time.Time {

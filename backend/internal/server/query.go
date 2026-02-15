@@ -473,7 +473,7 @@ func (s *QueryServer) histogramChunkSeverity(
 		attrEntries := attrKVIdx.Entries()
 		kvEntries := make([]index.KVIndexEntry, len(attrEntries))
 		for i, e := range attrEntries {
-			kvEntries[i] = index.KVIndexEntry{Key: e.Key, Value: e.Value, Positions: e.Positions}
+			kvEntries[i] = index.KVIndexEntry(e)
 		}
 		attrKVReader = index.NewKVIndexReader(meta.ID, kvEntries)
 	}

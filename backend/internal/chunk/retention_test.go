@@ -22,15 +22,6 @@ func idAt(_ time.Time) ChunkID {
 	return NewChunkID()
 }
 
-// collectIDs extracts just the ChunkIDs from a slice for comparison.
-func collectIDs(metas []ChunkMeta) []ChunkID {
-	ids := make([]ChunkID, len(metas))
-	for i, m := range metas {
-		ids[i] = m.ID
-	}
-	return ids
-}
-
 // chunkIDsEqual returns true if two slices contain the same ChunkIDs in the same order.
 func chunkIDsEqual(a, b []ChunkID) bool {
 	if len(a) != len(b) {
