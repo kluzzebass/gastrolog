@@ -27,8 +27,8 @@ import (
 func newConfigTestSetup(t *testing.T) (gastrologv1connect.ConfigServiceClient, config.Store, *orchestrator.Orchestrator) {
 	t.Helper()
 
-	orch := orchestrator.New(orchestrator.Config{})
 	cfgStore := cfgmem.NewStore()
+	orch := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{

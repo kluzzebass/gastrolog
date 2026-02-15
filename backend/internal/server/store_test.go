@@ -281,8 +281,8 @@ type fullStoreTestClients struct {
 func newFullStoreTestSetup(t *testing.T, recordCount int) fullStoreTestClients {
 	t.Helper()
 
-	orch := orchestrator.New(orchestrator.Config{})
 	cfgStore := cfgmem.NewStore()
+	orch := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
 	defaultID := uuid.Must(uuid.NewV7())
 
 	factories := orchestrator.Factories{
@@ -301,8 +301,7 @@ func newFullStoreTestSetup(t *testing.T, recordCount int) fullStoreTestClients {
 	}
 	cfgStore.PutStore(context.Background(), storeCfg)
 
-	fullCfg, _ := cfgStore.Load(context.Background())
-	if err := orch.AddStore(storeCfg, fullCfg, factories); err != nil {
+	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
 		t.Fatalf("AddStore: %v", err)
 	}
 
@@ -606,9 +605,8 @@ type twoStoreTestClients struct {
 func newTwoStoreTestSetup(t *testing.T) twoStoreTestClients {
 	t.Helper()
 
-	orch := orchestrator.New(orchestrator.Config{})
-
 	cfgStore := cfgmem.NewStore()
+	orch := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
 	filterID := uuid.Must(uuid.NewV7())
 	srcID := uuid.Must(uuid.NewV7())
 	dstID := uuid.Must(uuid.NewV7())
@@ -708,8 +706,8 @@ func TestMergeStoresMemory(t *testing.T) {
 }
 
 func TestMergeStoresFileBacked(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
 	cfgStore := cfgmem.NewStore()
+	orch := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
 	dataDir := t.TempDir()
 
 	factories := orchestrator.Factories{

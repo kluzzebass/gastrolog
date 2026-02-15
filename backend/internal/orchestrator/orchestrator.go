@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gastrolog/internal/config"
 	"gastrolog/internal/logging"
 
 	"github.com/google/uuid"
@@ -108,9 +109,22 @@ type Orchestrator struct {
 	// Clock for testing.
 	now func() time.Time
 
+	// Config loader for hot-update operations.
+	cfgLoader ConfigLoader
+
 	// Logger for this orchestrator instance.
 	// Scoped with component="orchestrator" at construction time.
 	logger *slog.Logger
+}
+
+// ConfigLoader provides read access to the full configuration.
+// The orchestrator uses this during hot-update operations (ReloadFilters,
+// ReloadRotationPolicies, etc.) to resolve references like filter IDs
+// and policy IDs without the server having to mediate.
+//
+// config.Store satisfies this interface.
+type ConfigLoader interface {
+	Load(ctx context.Context) (*config.Config, error)
 }
 
 // Config configures an Orchestrator.
@@ -129,6 +143,12 @@ type Config struct {
 	// Logger for structured logging. If nil, logging is disabled.
 	// The orchestrator scopes this logger with component="orchestrator".
 	Logger *slog.Logger
+
+	// ConfigLoader provides read access to the full configuration.
+	// If set, the orchestrator can reload config internally during
+	// hot-update operations (ReloadFilters, AddStore, etc.).
+	// If nil, hot-update methods that require config will return an error.
+	ConfigLoader ConfigLoader
 }
 
 // New creates an Orchestrator with empty registries.
@@ -158,6 +178,7 @@ func New(cfg Config) *Orchestrator {
 		scheduler:       sched,
 		cronRotation:    newCronRotationManager(sched, logger),
 		ingestSize:      cfg.IngestChannelSize,
+		cfgLoader:       cfg.ConfigLoader,
 		now:             cfg.Now,
 		logger:          logger,
 	}
