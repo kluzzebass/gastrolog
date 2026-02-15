@@ -47,7 +47,7 @@ function FilterDescription({ dark }: { dark: boolean }) {
 }
 
 export function FiltersSettings({ dark }: { dark: boolean }) {
-  const c = useThemeClass(dark);
+  const _c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putFilter = usePutFilter();
   const deleteFilter = useDeleteFilter();

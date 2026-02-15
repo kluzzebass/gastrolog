@@ -46,7 +46,7 @@ function getValueContext(text: string, wordStart: number): string | null {
   i--; // skip =
 
   // Find the key before =.
-  let keyEnd = i + 1;
+  const keyEnd = i + 1;
   while (i >= 0 && !isWordBreak(text[i]!)) i--;
   const key = text.slice(i + 1, keyEnd);
   return key.length > 0 ? key : null;
@@ -75,7 +75,7 @@ export function useAutocomplete(
     if (dismissed) setDismissed(false);
   }
 
-  const { suggestions, replaceRange, suffix } = useMemo(() => {
+  const { suggestions, replaceRange, suffix: _suffix } = useMemo(() => {
     const empty = {
       suggestions: [] as string[],
       replaceRange: null,

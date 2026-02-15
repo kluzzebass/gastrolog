@@ -18,7 +18,7 @@ export const timeRangeMs: Record<string, number> = {
 };
 
 const RE_KV_PAIRS =
-  /(?:^|[\s,;:()\[\]{}])([a-zA-Z_][a-zA-Z0-9_.]*?)=(?:"([^"]*)"|'([^']*)'|([^\s,;)\]}"'=&{[]+))/g;
+  /(?:^|[\s,;:()[\]{}])([a-zA-Z_][a-zA-Z0-9_.]*?)=(?:"([^"]*)"|'([^']*)'|([^\s,;)\]}"'=&{[]+))/g;
 
 /** Extract key=value pairs from raw log text (simplified port of Go tokenizer.ExtractKeyValues). */
 export function extractKVPairs(raw: string): { key: string; value: string }[] {

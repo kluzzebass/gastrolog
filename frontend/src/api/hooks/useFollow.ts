@@ -217,7 +217,7 @@ export function useFollow() {
       error: null,
       newCount: 0,
     });
-  }, [cancelReconnect]);
+  }, [cancelReconnect, cancelFlush]);
 
   const resetNewCount = useCallback(() => {
     newCountRef.current = 0;

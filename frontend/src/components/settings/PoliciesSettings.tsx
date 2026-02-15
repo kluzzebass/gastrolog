@@ -74,7 +74,7 @@ function CronField({
 }
 
 export function PoliciesSettings({ dark }: { dark: boolean }) {
-  const c = useThemeClass(dark);
+  const _c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putPolicy = usePutRotationPolicy();
   const deletePolicy = useDeleteRotationPolicy();

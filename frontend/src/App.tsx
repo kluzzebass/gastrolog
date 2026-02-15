@@ -182,7 +182,7 @@ function AppContent() {
   } = useExplain();
   const {
     data: histogramData,
-    isLoading: isHistogramLoading,
+    isLoading: _isHistogramLoading,
     fetchHistogram,
   } = useHistogram();
   const {
@@ -502,7 +502,7 @@ function AppContent() {
       setUrlQuery(stripPos(stripChunk(q)));
     } else {
       // Toggle on: ensure chunk= is present, add pos=
-      let base = stripPos(stripChunk(q));
+      const base = stripPos(stripChunk(q));
       const tokens = `${chunkToken} ${posToken}`;
       setUrlQuery(base ? `${tokens} ${base}` : tokens);
     }

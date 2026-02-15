@@ -295,7 +295,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
   function cur(): HighlightSpan | null {
     return pos < indices.length ? spans[indices[pos]!]! : null;
   }
-  function curIdx(): number {
+  function _curIdx(): number {
     return pos < indices.length ? indices[pos]! : -1;
   }
   function advance() {

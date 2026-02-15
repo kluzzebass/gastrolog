@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { tokenize, DIRECTIVES, type HighlightSpan } from "./queryTokenizer";
+import { tokenize, DIRECTIVES } from "./queryTokenizer";
 
 /** Helper: tokenize and return non-whitespace spans as [text, role] tuples. */
 function spans(input: string): [string, string][] {
@@ -9,7 +9,7 @@ function spans(input: string): [string, string][] {
 }
 
 /** Helper: tokenize and return the error message (or null). */
-function errorMsg(input: string): string | null {
+function _errorMsg(input: string): string | null {
   return tokenize(input).errorMessage;
 }
 

@@ -56,7 +56,7 @@ interface PemCertFormProps {
 
 function PemCertForm({
   dark,
-  name,
+  name: _name,
   certPem,
   keyPem,
   setAsDefault,
@@ -161,7 +161,7 @@ interface FilesCertFormProps {
 
 function FilesCertForm({
   dark,
-  name,
+  name: _name,
   certFile,
   keyFile,
   setAsDefault,
@@ -389,7 +389,7 @@ export function CertificatesSettings({ dark }: { dark: boolean }) {
 
   useEffect(() => {
     if (expanded && certData && certData.id === expanded) {
-      const isFileBased = !!(certData.certFile && certData.keyFile);
+      const _isFileBased = !!(certData.certFile && certData.keyFile);
       setCertPem(certData.certPem ?? "");
       setKeyPem("");
       setCertFile(certData.certFile ?? "");
@@ -425,7 +425,7 @@ export function CertificatesSettings({ dark }: { dark: boolean }) {
         if (name.endsWith(".zip")) {
           const buf = await file.arrayBuffer();
           const unzipped = unzipSync(new Uint8Array(buf));
-          for (const [path, data] of Object.entries(unzipped)) {
+          for (const [_path, data] of Object.entries(unzipped)) {
             const text = new TextDecoder().decode(data);
             assignPem(text);
           }

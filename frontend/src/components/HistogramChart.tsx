@@ -31,6 +31,13 @@ export function HistogramChart({
   const [brushStart, setBrushStart] = useState<number | null>(null);
   const [brushEnd, setBrushEnd] = useState<number | null>(null);
   const brushingRef = useRef(false);
+  const c = useThemeClass(dark);
+  // Pan handlers.
+  const axisRef = useRef<HTMLDivElement>(null);
+  const panStartX = useRef<number>(0);
+  const [panAxisWidth, setPanAxisWidth] = useState(1);
+  const panningRef = useRef(false);
+  const [panOffset, setPanOffset] = useState(0);
 
   if (buckets.length === 0) return null;
 
@@ -39,7 +46,6 @@ export function HistogramChart({
   const maxCount = Math.max(...buckets.map((b) => b.count), 1);
   const totalCount = buckets.reduce((sum, b) => sum + b.count, 0);
   const barHeight = 48;
-  const c = useThemeClass(dark);
 
   const getBucketIndex = (clientX: number): number => {
     const el = barsRef.current;
@@ -89,13 +95,6 @@ export function HistogramChart({
       ? Math.max(brushStart, brushEnd)
       : null;
 
-  // Pan handlers.
-  const axisRef = useRef<HTMLDivElement>(null);
-  const panStartX = useRef<number>(0);
-  const panAxisWidth = useRef<number>(1);
-  const panningRef = useRef(false);
-  const [panOffset, setPanOffset] = useState(0);
-
   const handlePanStep = (direction: -1 | 1) => {
     if (!onPan || buckets.length < 2) return;
     const windowMs = lastBucket.ts.getTime() - firstBucket.ts.getTime();
@@ -112,7 +111,7 @@ export function HistogramChart({
     if (!onPan || buckets.length < 2) return;
     e.preventDefault();
     panStartX.current = e.clientX;
-    panAxisWidth.current = axisRef.current?.getBoundingClientRect().width || 1;
+    setPanAxisWidth(axisRef.current?.getBoundingClientRect().width || 1);
     panningRef.current = true;
     document.body.style.cursor = "grabbing";
     document.body.style.userSelect = "none";
@@ -174,7 +173,7 @@ export function HistogramChart({
   const windowMs =
     buckets.length > 1 ? lastBucket.ts.getTime() - firstBucket.ts.getTime() : 0;
   const panDeltaMs =
-    panOffset !== 0 ? -((panOffset / panAxisWidth.current) * windowMs) : 0;
+    panOffset !== 0 ? -((panOffset / panAxisWidth) * windowMs) : 0;
 
   const formatDuration = (ms: number): string => {
     const abs = Math.abs(ms);

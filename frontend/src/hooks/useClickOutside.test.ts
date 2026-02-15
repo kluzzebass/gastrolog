@@ -1,5 +1,5 @@
 import { describe, expect, test, mock } from "bun:test";
-import React, { useRef } from "react";
+import { useRef } from "react";
 import { renderHook, act } from "@testing-library/react";
 import { useClickOutside } from "./useClickOutside";
 

@@ -123,7 +123,7 @@ function ServiceSettings({ dark }: { dark: boolean }) {
 
   const certs = certData?.certificates ?? [];
   const certIds = certs.map((c) => c.id);
-  const certDisplayName = (id: string) => certs.find((c) => c.id === id)?.name || id;
+  const _certDisplayName = (id: string) => certs.find((c) => c.id === id)?.name || id;
 
   useEffect(() => {
     if (data && !initialized) {

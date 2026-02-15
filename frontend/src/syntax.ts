@@ -231,7 +231,7 @@ interface ColorInterval {
 const RE_SEV =
   /\b(ERROR|ERR|WARN(?:ING)?|INFO|DEBUG|TRACE|FATAL|CRITICAL|NOTICE)\b/gi;
 const RE_KV =
-  /(?:^|[\s,;:()\[\]{}])([a-zA-Z_][a-zA-Z0-9_.]*?)=(?:"[^"]*"|'[^']*'|[^\s,;)\]}"'=&{[]+)/g;
+  /(?:^|[\s,;:()[\]{}])([a-zA-Z_][a-zA-Z0-9_.]*?)=(?:"[^"]*"|'[^']*'|[^\s,;)\]}"'=&{[]+)/g;
 const RE_TS =
   /\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?|\[\d{2}\/[A-Z][a-z]{2}\/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{4}\]|\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}|(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) [A-Z][a-z]{2} [ \d]\d \d{2}:\d{2}:\d{2}(?:\.\d+)?(?:\s\d{4})?|[A-Z][a-z]{2} [ \d]\d \d{2}:\d{2}:\d{2}/g;
 const RE_URL = /\bhttps?:\/\/[^\s"'<>]+/g;
