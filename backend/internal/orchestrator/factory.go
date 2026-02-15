@@ -133,7 +133,7 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 
 			// Set up cron rotation if configured.
 			if policyCfg.Cron != nil && *policyCfg.Cron != "" {
-				if err := o.cronRotation.addJob(storeCfg.ID, *policyCfg.Cron, cm); err != nil {
+				if err := o.cronRotation.addJob(storeCfg.ID, storeCfg.Name, *policyCfg.Cron, cm); err != nil {
 					return fmt.Errorf("cron rotation for store %s: %w", storeCfg.ID, err)
 				}
 			}
@@ -209,6 +209,7 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 			if err := o.scheduler.AddJob(retentionJobName(storeCfg.ID), defaultRetentionSchedule, runner.sweep); err != nil {
 				return fmt.Errorf("retention job for store %s: %w", storeCfg.ID, err)
 			}
+			o.scheduler.Describe(retentionJobName(storeCfg.ID), fmt.Sprintf("Delete expired chunks from '%s'", storeCfg.Name))
 		}
 	}
 

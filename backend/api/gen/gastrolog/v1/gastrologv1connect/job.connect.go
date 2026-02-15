@@ -37,12 +37,15 @@ const (
 	JobServiceGetJobProcedure = "/gastrolog.v1.JobService/GetJob"
 	// JobServiceListJobsProcedure is the fully-qualified name of the JobService's ListJobs RPC.
 	JobServiceListJobsProcedure = "/gastrolog.v1.JobService/ListJobs"
+	// JobServiceWatchJobsProcedure is the fully-qualified name of the JobService's WatchJobs RPC.
+	JobServiceWatchJobsProcedure = "/gastrolog.v1.JobService/WatchJobs"
 )
 
 // JobServiceClient is a client for the gastrolog.v1.JobService service.
 type JobServiceClient interface {
 	GetJob(context.Context, *connect.Request[v1.GetJobRequest]) (*connect.Response[v1.GetJobResponse], error)
 	ListJobs(context.Context, *connect.Request[v1.ListJobsRequest]) (*connect.Response[v1.ListJobsResponse], error)
+	WatchJobs(context.Context, *connect.Request[v1.WatchJobsRequest]) (*connect.ServerStreamForClient[v1.WatchJobsResponse], error)
 }
 
 // NewJobServiceClient constructs a client for the gastrolog.v1.JobService service. By default, it
@@ -68,13 +71,20 @@ func NewJobServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(jobServiceMethods.ByName("ListJobs")),
 			connect.WithClientOptions(opts...),
 		),
+		watchJobs: connect.NewClient[v1.WatchJobsRequest, v1.WatchJobsResponse](
+			httpClient,
+			baseURL+JobServiceWatchJobsProcedure,
+			connect.WithSchema(jobServiceMethods.ByName("WatchJobs")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // jobServiceClient implements JobServiceClient.
 type jobServiceClient struct {
-	getJob   *connect.Client[v1.GetJobRequest, v1.GetJobResponse]
-	listJobs *connect.Client[v1.ListJobsRequest, v1.ListJobsResponse]
+	getJob    *connect.Client[v1.GetJobRequest, v1.GetJobResponse]
+	listJobs  *connect.Client[v1.ListJobsRequest, v1.ListJobsResponse]
+	watchJobs *connect.Client[v1.WatchJobsRequest, v1.WatchJobsResponse]
 }
 
 // GetJob calls gastrolog.v1.JobService.GetJob.
@@ -87,10 +97,16 @@ func (c *jobServiceClient) ListJobs(ctx context.Context, req *connect.Request[v1
 	return c.listJobs.CallUnary(ctx, req)
 }
 
+// WatchJobs calls gastrolog.v1.JobService.WatchJobs.
+func (c *jobServiceClient) WatchJobs(ctx context.Context, req *connect.Request[v1.WatchJobsRequest]) (*connect.ServerStreamForClient[v1.WatchJobsResponse], error) {
+	return c.watchJobs.CallServerStream(ctx, req)
+}
+
 // JobServiceHandler is an implementation of the gastrolog.v1.JobService service.
 type JobServiceHandler interface {
 	GetJob(context.Context, *connect.Request[v1.GetJobRequest]) (*connect.Response[v1.GetJobResponse], error)
 	ListJobs(context.Context, *connect.Request[v1.ListJobsRequest]) (*connect.Response[v1.ListJobsResponse], error)
+	WatchJobs(context.Context, *connect.Request[v1.WatchJobsRequest], *connect.ServerStream[v1.WatchJobsResponse]) error
 }
 
 // NewJobServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -112,12 +128,20 @@ func NewJobServiceHandler(svc JobServiceHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(jobServiceMethods.ByName("ListJobs")),
 		connect.WithHandlerOptions(opts...),
 	)
+	jobServiceWatchJobsHandler := connect.NewServerStreamHandler(
+		JobServiceWatchJobsProcedure,
+		svc.WatchJobs,
+		connect.WithSchema(jobServiceMethods.ByName("WatchJobs")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.JobService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case JobServiceGetJobProcedure:
 			jobServiceGetJobHandler.ServeHTTP(w, r)
 		case JobServiceListJobsProcedure:
 			jobServiceListJobsHandler.ServeHTTP(w, r)
+		case JobServiceWatchJobsProcedure:
+			jobServiceWatchJobsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -133,4 +157,8 @@ func (UnimplementedJobServiceHandler) GetJob(context.Context, *connect.Request[v
 
 func (UnimplementedJobServiceHandler) ListJobs(context.Context, *connect.Request[v1.ListJobsRequest]) (*connect.Response[v1.ListJobsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.JobService.ListJobs is not implemented"))
+}
+
+func (UnimplementedJobServiceHandler) WatchJobs(context.Context, *connect.Request[v1.WatchJobsRequest], *connect.ServerStream[v1.WatchJobsResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.JobService.WatchJobs is not implemented"))
 }

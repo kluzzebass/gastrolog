@@ -8,6 +8,7 @@ export function useConfig() {
       const response = await configClient.getConfig({});
       return response;
     },
+    staleTime: 0,
     refetchInterval: 10_000,
   });
 }

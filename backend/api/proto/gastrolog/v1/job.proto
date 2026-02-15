@@ -9,6 +9,7 @@ import "google/protobuf/timestamp.proto";
 service JobService {
   rpc GetJob(GetJobRequest) returns (GetJobResponse);
   rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+  rpc WatchJobs(WatchJobsRequest) returns (stream WatchJobsResponse);
 }
 
 enum JobStatus {
@@ -30,6 +31,7 @@ message Job {
   string name = 2;
   JobStatus status = 3;
   JobKind kind = 11;
+  string description = 15;  // human-readable description for the UI
   int64 chunks_total = 4;
   int64 chunks_done = 5;
   int64 records_done = 6;
@@ -47,3 +49,5 @@ message GetJobRequest { string id = 1; }
 message GetJobResponse { Job job = 1; }
 message ListJobsRequest {}
 message ListJobsResponse { repeated Job jobs = 1; }
+message WatchJobsRequest {}
+message WatchJobsResponse { repeated Job jobs = 1; }

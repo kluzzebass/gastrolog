@@ -1,10 +1,11 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { Dialog, DialogTabHeader } from "../Dialog";
-import { StoresIcon, IngestersIcon, MetricsIcon } from "../icons";
+import { StoresIcon, IngestersIcon, JobsIcon, MetricsIcon } from "../icons";
 import { StoresPanel } from "./StoresPanel";
 import { IngestersPanel } from "./IngestersPanel";
+import { JobsPanel } from "./JobsPanel";
 
-export type InspectorTab = "stores" | "ingesters" | "metrics";
+export type InspectorTab = "stores" | "ingesters" | "jobs" | "metrics";
 
 interface InspectorDialogProps {
   dark: boolean;
@@ -22,6 +23,7 @@ type TabDef = {
 const allTabs: TabDef[] = [
   { id: "stores", label: "Stores", icon: StoresIcon },
   { id: "ingesters", label: "Ingesters", icon: IngestersIcon },
+  { id: "jobs", label: "Jobs", icon: JobsIcon },
   { id: "metrics", label: "Metrics", icon: MetricsIcon },
 ];
 
@@ -45,7 +47,8 @@ export function InspectorDialog({
       <div className="flex-1 overflow-y-auto p-5">
         {tab === "stores" && <StoresPanel dark={dark} />}
         {tab === "ingesters" && <IngestersPanel dark={dark} />}
-        {tab !== "stores" && tab !== "ingesters" && (
+        {tab === "jobs" && <JobsPanel dark={dark} />}
+        {tab !== "stores" && tab !== "ingesters" && tab !== "jobs" && (
           <Placeholder tab={tab} dark={dark} />
         )}
       </div>
@@ -58,6 +61,7 @@ function Placeholder({ tab, dark }: { tab: InspectorTab; dark: boolean }) {
   const labels: Record<InspectorTab, string> = {
     stores: "Store health indicators will appear here.",
     ingesters: "Ingester metrics will appear here.",
+    jobs: "Job status will appear here.",
     metrics: "Dashboard metrics will appear here.",
   };
 

@@ -28,9 +28,13 @@ func newCronRotationManager(scheduler *Scheduler, logger *slog.Logger) *cronRota
 }
 
 // addJob registers a cron rotation job for a store.
-func (m *cronRotationManager) addJob(storeID, cronExpr string, cm chunk.ChunkManager) error {
+func (m *cronRotationManager) addJob(storeID, storeName, cronExpr string, cm chunk.ChunkManager) error {
 	name := cronJobName(storeID)
-	return m.scheduler.AddJob(name, cronExpr, m.rotateStore, storeID, cm)
+	if err := m.scheduler.AddJob(name, cronExpr, m.rotateStore, storeID, cm); err != nil {
+		return err
+	}
+	m.scheduler.Describe(name, fmt.Sprintf("Rotate active chunk in '%s'", storeName))
+	return nil
 }
 
 // removeJob stops and removes the cron rotation job for a store.
@@ -39,20 +43,24 @@ func (m *cronRotationManager) removeJob(storeID string) {
 }
 
 // updateJob replaces the cron rotation job for a store with a new schedule.
-func (m *cronRotationManager) updateJob(storeID, cronExpr string, cm chunk.ChunkManager) error {
+func (m *cronRotationManager) updateJob(storeID, storeName, cronExpr string, cm chunk.ChunkManager) error {
 	name := cronJobName(storeID)
-	return m.scheduler.UpdateJob(name, cronExpr, m.rotateStore, storeID, cm)
+	if err := m.scheduler.UpdateJob(name, cronExpr, m.rotateStore, storeID, cm); err != nil {
+		return err
+	}
+	m.scheduler.Describe(name, fmt.Sprintf("Rotate active chunk in '%s'", storeName))
+	return nil
 }
 
 // renameJob renames a cron rotation job from oldID to newID, preserving the schedule.
-func (m *cronRotationManager) renameJob(oldID, newID string, cm chunk.ChunkManager) {
+func (m *cronRotationManager) renameJob(oldID, newID, storeName string, cm chunk.ChunkManager) {
 	oldName := cronJobName(oldID)
 	schedule := m.scheduler.JobSchedule(oldName)
 	if schedule == "" {
 		return // No such job.
 	}
 	m.scheduler.RemoveJob(oldName)
-	if err := m.addJob(newID, schedule, cm); err != nil {
+	if err := m.addJob(newID, storeName, schedule, cm); err != nil {
 		m.logger.Warn("failed to re-add cron rotation after rename", "store", newID, "error", err)
 	}
 }

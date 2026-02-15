@@ -3,8 +3,11 @@ package server
 import (
 	"context"
 	"errors"
+	"hash/fnv"
+	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
@@ -56,11 +59,49 @@ func (s *JobServer) ListJobs(
 	return connect.NewResponse(&apiv1.ListJobsResponse{Jobs: protoJobs}), nil
 }
 
+// WatchJobs streams the full job list whenever state changes.
+func (s *JobServer) WatchJobs(
+	ctx context.Context,
+	req *connect.Request[apiv1.WatchJobsRequest],
+	stream *connect.ServerStream[apiv1.WatchJobsResponse],
+) error {
+	var lastHash uint64
+
+	for {
+		jobs := s.scheduler.ListJobs()
+		resp := &apiv1.WatchJobsResponse{
+			Jobs: make([]*apiv1.Job, 0, len(jobs)),
+		}
+		for _, info := range jobs {
+			resp.Jobs = append(resp.Jobs, jobInfoToProto(info.Snapshot()))
+		}
+
+		h := fnv.New64a()
+		data, _ := proto.Marshal(resp)
+		h.Write(data)
+		hash := h.Sum64()
+
+		if hash != lastHash {
+			if err := stream.Send(resp); err != nil {
+				return err
+			}
+			lastHash = hash
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
+
 func jobInfoToProto(info orchestrator.JobInfo) *apiv1.Job {
 	pj := &apiv1.Job{
-		Id:       info.ID,
-		Name:     info.Name,
-		Schedule: info.Schedule,
+		Id:          info.ID,
+		Name:        info.Name,
+		Description: info.Description,
+		Schedule:    info.Schedule,
 	}
 
 	if info.Schedule == "once" {

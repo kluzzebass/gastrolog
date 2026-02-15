@@ -99,6 +99,13 @@ export class Job extends Message<Job> {
   kind = JobKind.UNSPECIFIED;
 
   /**
+   * human-readable description for the UI
+   *
+   * @generated from field: string description = 15;
+   */
+  description = "";
+
+  /**
    * @generated from field: int64 chunks_total = 4;
    */
   chunksTotal = protoInt64.zero;
@@ -168,6 +175,7 @@ export class Job extends Message<Job> {
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "status", kind: "enum", T: proto3.getEnumType(JobStatus) },
     { no: 11, name: "kind", kind: "enum", T: proto3.getEnumType(JobKind) },
+    { no: 15, name: "description", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "chunks_total", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 5, name: "chunks_done", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 6, name: "records_done", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
@@ -336,6 +344,74 @@ export class ListJobsResponse extends Message<ListJobsResponse> {
 
   static equals(a: ListJobsResponse | PlainMessage<ListJobsResponse> | undefined, b: ListJobsResponse | PlainMessage<ListJobsResponse> | undefined): boolean {
     return proto3.util.equals(ListJobsResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.WatchJobsRequest
+ */
+export class WatchJobsRequest extends Message<WatchJobsRequest> {
+  constructor(data?: PartialMessage<WatchJobsRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.WatchJobsRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): WatchJobsRequest {
+    return new WatchJobsRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): WatchJobsRequest {
+    return new WatchJobsRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): WatchJobsRequest {
+    return new WatchJobsRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: WatchJobsRequest | PlainMessage<WatchJobsRequest> | undefined, b: WatchJobsRequest | PlainMessage<WatchJobsRequest> | undefined): boolean {
+    return proto3.util.equals(WatchJobsRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.WatchJobsResponse
+ */
+export class WatchJobsResponse extends Message<WatchJobsResponse> {
+  /**
+   * @generated from field: repeated gastrolog.v1.Job jobs = 1;
+   */
+  jobs: Job[] = [];
+
+  constructor(data?: PartialMessage<WatchJobsResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.WatchJobsResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "jobs", kind: "message", T: Job, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): WatchJobsResponse {
+    return new WatchJobsResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): WatchJobsResponse {
+    return new WatchJobsResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): WatchJobsResponse {
+    return new WatchJobsResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: WatchJobsResponse | PlainMessage<WatchJobsResponse> | undefined, b: WatchJobsResponse | PlainMessage<WatchJobsResponse> | undefined): boolean {
+    return proto3.util.equals(WatchJobsResponse, a, b);
   }
 }
 

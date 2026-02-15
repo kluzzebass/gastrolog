@@ -88,4 +88,5 @@ func (o *Orchestrator) scheduleIndexBuild(registryKey string, chunkID chunk.Chun
 	if err := o.scheduler.RunOnce(name, store.Indexes.BuildIndexes, context.Background(), chunkID); err != nil {
 		o.logger.Warn("failed to schedule index build", "name", name, "error", err)
 	}
+	o.scheduler.Describe(name, fmt.Sprintf("Build indexes for chunk %s", chunkID))
 }

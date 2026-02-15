@@ -8,6 +8,7 @@ export function useStores() {
       const response = await storeClient.listStores({});
       return response.stores;
     },
+    staleTime: 0,
     refetchInterval: 10_000,
   });
 }
@@ -19,6 +20,7 @@ export function useStore(id: string) {
       const response = await storeClient.getStore({ id });
       return response.store;
     },
+    staleTime: 0,
     enabled: !!id,
   });
 }
@@ -30,6 +32,7 @@ export function useChunks(storeId: string) {
       const response = await storeClient.listChunks({ store: storeId });
       return response.chunks;
     },
+    staleTime: 0,
     enabled: !!storeId,
     refetchInterval: 10_000,
   });
@@ -56,6 +59,7 @@ export function useStats(storeId?: string) {
       const response = await storeClient.getStats({ store: storeId ?? "" });
       return response;
     },
+    staleTime: 0,
     refetchInterval: 10_000,
   });
 }

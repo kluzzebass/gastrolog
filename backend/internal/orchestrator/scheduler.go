@@ -1,9 +1,11 @@
 package orchestrator
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -83,12 +85,13 @@ func (p *JobProgress) AddErrorDetail(msg string) {
 
 // JobInfo describes a registered job for external inspection.
 type JobInfo struct {
-	ID       string
-	Name     string
-	Schedule string    // cron expression, or "once" for one-time jobs
-	LastRun  time.Time // zero if never run
-	NextRun  time.Time // zero if not scheduled
-	Progress *JobProgress
+	ID          string
+	Name        string
+	Description string    // human-readable description for the UI
+	Schedule    string    // cron expression, or "once" for one-time jobs
+	LastRun     time.Time // zero if never run
+	NextRun     time.Time // zero if not scheduled
+	Progress    *JobProgress
 }
 
 // Snapshot returns a read-consistent copy of the JobInfo's progress fields.
@@ -129,6 +132,7 @@ type Scheduler struct {
 	scheduler     gocron.Scheduler
 	jobs          map[string]gocron.Job    // name → job
 	schedules     map[string]string        // name → cron expression (for ListJobs)
+	descriptions  map[string]string        // name → human-readable description
 	cronEntries   map[string]cronEntry     // name → definition (for rebuild)
 	progress      map[string]*JobProgress  // gocron job ID → progress (one-time jobs)
 	completed     map[string]JobInfo       // gocron job ID → info (retained after gocron removes one-time jobs)
@@ -151,6 +155,7 @@ func newScheduler(logger *slog.Logger, maxConcurrent int, now func() time.Time) 
 		scheduler:     s,
 		jobs:          make(map[string]gocron.Job),
 		schedules:     make(map[string]string),
+		descriptions:  make(map[string]string),
 		cronEntries:   make(map[string]cronEntry),
 		progress:      make(map[string]*JobProgress),
 		completed:     make(map[string]JobInfo),
@@ -198,6 +203,8 @@ func (s *Scheduler) Rebuild(maxConcurrent int) error {
 	s.maxConcurrent = maxConcurrent
 	s.jobs = make(map[string]gocron.Job, len(s.cronEntries))
 	s.schedules = make(map[string]string, len(s.cronEntries))
+	oldDescs := s.descriptions
+	s.descriptions = make(map[string]string, len(s.cronEntries))
 
 	// Re-register all cron jobs.
 	for _, entry := range s.cronEntries {
@@ -212,6 +219,9 @@ func (s *Scheduler) Rebuild(maxConcurrent int) error {
 		}
 		s.jobs[entry.name] = j
 		s.schedules[entry.name] = entry.cron
+		if desc, ok := oldDescs[entry.name]; ok {
+			s.descriptions[entry.name] = desc
+		}
 	}
 
 	gs.Start()
@@ -259,6 +269,7 @@ func (s *Scheduler) RemoveJob(name string) {
 	}
 	delete(s.jobs, name)
 	delete(s.schedules, name)
+	delete(s.descriptions, name)
 	delete(s.cronEntries, name)
 	s.logger.Info("scheduled job removed", "name", name)
 }
@@ -278,6 +289,13 @@ func (s *Scheduler) HasJob(name string) bool {
 	return ok
 }
 
+// Describe sets a human-readable description for a named job.
+func (s *Scheduler) Describe(name, description string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.descriptions[name] = description
+}
+
 // ListJobs returns info about all registered cron and one-time jobs,
 // plus recently completed one-time jobs retained for status polling.
 func (s *Scheduler) ListJobs() []JobInfo {
@@ -292,10 +310,11 @@ func (s *Scheduler) ListJobs() []JobInfo {
 	for name, j := range s.jobs {
 		id := j.ID().String()
 		info := JobInfo{
-			ID:       id,
-			Name:     name,
-			Schedule: s.schedules[name],
-			Progress: s.progress[id],
+			ID:          id,
+			Name:        name,
+			Description: s.descriptions[name],
+			Schedule:    s.schedules[name],
+			Progress:    s.progress[id],
 		}
 		if lr, err := j.LastRun(); err == nil {
 			info.LastRun = lr
@@ -310,6 +329,20 @@ func (s *Scheduler) ListJobs() []JobInfo {
 	for _, info := range s.completed {
 		infos = append(infos, info)
 	}
+
+	// Stable sort: scheduled jobs first (by name), then tasks (by name).
+	slices.SortFunc(infos, func(a, b JobInfo) int {
+		// Scheduled before one-time tasks.
+		aScheduled := a.Schedule != ""
+		bScheduled := b.Schedule != ""
+		if aScheduled != bScheduled {
+			if aScheduled {
+				return -1
+			}
+			return 1
+		}
+		return cmp.Compare(a.Name, b.Name)
+	})
 
 	return infos
 }
@@ -329,10 +362,11 @@ func (s *Scheduler) GetJob(id string) (JobInfo, bool) {
 		jID := j.ID().String()
 		if jID == id {
 			info := JobInfo{
-				ID:       jID,
-				Name:     name,
-				Schedule: s.schedules[name],
-				Progress: s.progress[jID],
+				ID:          jID,
+				Name:        name,
+				Description: s.descriptions[name],
+				Schedule:    s.schedules[name],
+				Progress:    s.progress[jID],
 			}
 			if lr, err := j.LastRun(); err == nil {
 				info.LastRun = lr
@@ -434,10 +468,11 @@ func (s *Scheduler) Submit(name string, fn func(context.Context, *JobProgress)) 
 		// Generate an ID for the failed job so the caller can still look it up.
 		failedID := uuid.Must(uuid.NewV7()).String()
 		s.completed[failedID] = JobInfo{
-			ID:       failedID,
-			Name:     name,
-			Schedule: "once",
-			Progress: prog,
+			ID:          failedID,
+			Name:        name,
+			Description: s.descriptions[name],
+			Schedule:    "once",
+			Progress:    prog,
 		}
 		return failedID
 	}
@@ -463,10 +498,11 @@ func (s *Scheduler) completeOneTimeJob(name string) {
 
 	id := j.ID().String()
 	info := JobInfo{
-		ID:       id,
-		Name:     name,
-		Schedule: "once",
-		Progress: s.progress[id],
+		ID:          id,
+		Name:        name,
+		Description: s.descriptions[name],
+		Schedule:    "once",
+		Progress:    s.progress[id],
 	}
 	if lr, err := j.LastRun(); err == nil {
 		info.LastRun = lr
@@ -475,6 +511,7 @@ func (s *Scheduler) completeOneTimeJob(name string) {
 	s.completed[id] = info
 	delete(s.jobs, name)
 	delete(s.schedules, name)
+	delete(s.descriptions, name)
 	delete(s.progress, id)
 }
 

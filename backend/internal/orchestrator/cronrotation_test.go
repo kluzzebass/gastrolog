@@ -104,7 +104,7 @@ func TestAddAndRemoveJob(t *testing.T) {
 	cm := &cronFakeChunkManager{}
 	m := newTestCronManager(t)
 
-	if err := m.addJob("store-a", "* * * * *", cm); err != nil {
+	if err := m.addJob("store-a", "store-a", "* * * * *", cm); err != nil {
 		t.Fatalf("addJob failed: %v", err)
 	}
 
@@ -113,7 +113,7 @@ func TestAddAndRemoveJob(t *testing.T) {
 	}
 
 	// Adding the same store again should fail.
-	if err := m.addJob("store-a", "0 * * * *", cm); err == nil {
+	if err := m.addJob("store-a", "store-a", "0 * * * *", cm); err == nil {
 		t.Error("expected error when adding duplicate job")
 	}
 
@@ -131,11 +131,11 @@ func TestUpdateJob(t *testing.T) {
 	cm := &cronFakeChunkManager{}
 	m := newTestCronManager(t)
 
-	if err := m.addJob("store-a", "* * * * *", cm); err != nil {
+	if err := m.addJob("store-a", "store-a", "* * * * *", cm); err != nil {
 		t.Fatalf("addJob failed: %v", err)
 	}
 
-	if err := m.updateJob("store-a", "0 * * * *", cm); err != nil {
+	if err := m.updateJob("store-a", "store-a", "0 * * * *", cm); err != nil {
 		t.Fatalf("updateJob failed: %v", err)
 	}
 
@@ -148,7 +148,7 @@ func TestAddJobRejectsInvalidCron(t *testing.T) {
 	cm := &cronFakeChunkManager{}
 	m := newTestCronManager(t)
 
-	if err := m.addJob("store-a", "not a cron", cm); err == nil {
+	if err := m.addJob("store-a", "store-a", "not a cron", cm); err == nil {
 		t.Error("expected error for invalid cron expression")
 	}
 
@@ -161,10 +161,10 @@ func TestSchedulerListJobs(t *testing.T) {
 	cm := &cronFakeChunkManager{}
 	m := newTestCronManager(t)
 
-	if err := m.addJob("store-a", "* * * * *", cm); err != nil {
+	if err := m.addJob("store-a", "store-a", "* * * * *", cm); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.addJob("store-b", "0 * * * *", cm); err != nil {
+	if err := m.addJob("store-b", "store-b", "0 * * * *", cm); err != nil {
 		t.Fatal(err)
 	}
 

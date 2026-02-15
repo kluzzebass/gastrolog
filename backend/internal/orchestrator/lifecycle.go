@@ -212,6 +212,7 @@ func (o *Orchestrator) RebuildMissingIndexes(ctx context.Context) error {
 				if err := o.scheduler.RunOnce(name, store.Indexes.BuildIndexes, context.Background(), meta.ID); err != nil {
 					o.logger.Warn("failed to schedule index rebuild", "name", name, "error", err)
 				}
+				o.scheduler.Describe(name, fmt.Sprintf("Rebuild missing indexes for chunk %s", meta.ID))
 			}
 		}
 	}

@@ -258,6 +258,7 @@ func (o *Orchestrator) AddStore(storeCfg config.StoreConfig, cfg *config.Config,
 		if err := o.scheduler.AddJob(retentionJobName(storeCfg.ID), defaultRetentionSchedule, runner.sweep); err != nil {
 			o.logger.Warn("failed to add retention job for new store", "store", storeCfg.ID, "error", err)
 		}
+		o.scheduler.Describe(retentionJobName(storeCfg.ID), fmt.Sprintf("Delete expired chunks from '%s'", storeCfg.Name))
 	}
 
 	// Set up cron rotation if the rotation policy has a cron schedule.
@@ -265,7 +266,7 @@ func (o *Orchestrator) AddStore(storeCfg config.StoreConfig, cfg *config.Config,
 		policyCfg := findRotationPolicy(cfg.RotationPolicies, *storeCfg.Policy)
 		if policyCfg != nil {
 			if policyCfg.Cron != nil && *policyCfg.Cron != "" {
-				if err := o.cronRotation.addJob(storeCfg.ID, *policyCfg.Cron, cm); err != nil {
+				if err := o.cronRotation.addJob(storeCfg.ID, storeCfg.Name, *policyCfg.Cron, cm); err != nil {
 					o.logger.Warn("failed to add cron rotation for new store", "store", storeCfg.ID, "error", err)
 				}
 			}
@@ -552,12 +553,12 @@ func (o *Orchestrator) UpdateRotationPolicies(cfg *config.Config) error {
 
 		if hasCronConfig && hasCronJob {
 			// Schedule may have changed — update.
-			if err := o.cronRotation.updateJob(storeCfg.ID, *policyCfg.Cron, cm); err != nil {
+			if err := o.cronRotation.updateJob(storeCfg.ID, storeCfg.Name, *policyCfg.Cron, cm); err != nil {
 				o.logger.Error("failed to update cron rotation", "store", storeCfg.ID, "error", err)
 			}
 		} else if hasCronConfig && !hasCronJob {
 			// New cron schedule — add.
-			if err := o.cronRotation.addJob(storeCfg.ID, *policyCfg.Cron, cm); err != nil {
+			if err := o.cronRotation.addJob(storeCfg.ID, storeCfg.Name, *policyCfg.Cron, cm); err != nil {
 				o.logger.Error("failed to add cron rotation", "store", storeCfg.ID, "error", err)
 			}
 		} else if !hasCronConfig && hasCronJob {

@@ -36,6 +36,15 @@ func NewStoreServer(orch *orchestrator.Orchestrator, cfgStore config.Store, fact
 
 func (s *StoreServer) now() time.Time { return time.Now() }
 
+// storeName returns the human-readable name for a store, falling back to the ID.
+func (s *StoreServer) storeName(ctx context.Context, id string) string {
+	cfg, err := s.getFullStoreConfig(ctx, id)
+	if err == nil && cfg.Name != "" {
+		return cfg.Name
+	}
+	return id
+}
+
 // ListStores returns all registered stores.
 func (s *StoreServer) ListStores(
 	ctx context.Context,
@@ -429,7 +438,8 @@ func (s *StoreServer) ReindexStore(
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
 	}
 
-	jobID := s.orch.Scheduler().Submit("reindex:"+store, func(ctx context.Context, job *orchestrator.JobProgress) {
+	jobName := "reindex:" + store
+	jobID := s.orch.Scheduler().Submit(jobName, func(ctx context.Context, job *orchestrator.JobProgress) {
 		metas, err := cm.List()
 		if err != nil {
 			job.Fail(s.now(), err.Error())
@@ -459,6 +469,7 @@ func (s *StoreServer) ReindexStore(
 			job.IncrChunks()
 		}
 	})
+	s.orch.Scheduler().Describe(jobName, fmt.Sprintf("Rebuild all indexes for '%s'", s.storeName(ctx, store)))
 
 	return connect.NewResponse(&apiv1.ReindexStoreResponse{JobId: jobID}), nil
 }
@@ -595,11 +606,13 @@ func (s *StoreServer) CloneStore(
 
 	srcID := req.Msg.Source
 	dstID := req.Msg.Destination
-	jobID := s.orch.Scheduler().Submit("clone:"+srcID+"->"+dstID, func(ctx context.Context, job *orchestrator.JobProgress) {
+	jobName := "clone:" + srcID + "->" + dstID
+	jobID := s.orch.Scheduler().Submit(jobName, func(ctx context.Context, job *orchestrator.JobProgress) {
 		if err := s.copyRecordsTracked(ctx, srcID, dstID, job); err != nil {
 			job.Fail(s.now(), fmt.Sprintf("copy records: %v", err))
 		}
 	})
+	s.orch.Scheduler().Describe(jobName, fmt.Sprintf("Clone '%s' to '%s'", s.storeName(ctx, srcID), s.storeName(ctx, dstID)))
 
 	return connect.NewResponse(&apiv1.CloneStoreResponse{JobId: jobID}), nil
 }
@@ -658,7 +671,9 @@ func (s *StoreServer) MigrateStore(
 
 	srcID := req.Msg.Source
 	dstID := req.Msg.Destination
-	jobID := s.orch.Scheduler().Submit("migrate:"+srcID+"->"+dstID, func(ctx context.Context, job *orchestrator.JobProgress) {
+	srcName := s.storeName(ctx, srcID)
+	jobName := "migrate:" + srcID + "->" + dstID
+	jobID := s.orch.Scheduler().Submit(jobName, func(ctx context.Context, job *orchestrator.JobProgress) {
 		if err := s.copyRecordsTracked(ctx, srcID, dstID, job); err != nil {
 			job.Fail(s.now(), fmt.Sprintf("copy records: %v", err))
 			return
@@ -675,6 +690,7 @@ func (s *StoreServer) MigrateStore(
 			_ = s.cfgStore.DeleteStore(ctx, srcID)
 		}
 	})
+	s.orch.Scheduler().Describe(jobName, fmt.Sprintf("Migrate '%s' to '%s'", srcName, s.storeName(ctx, dstID)))
 
 	return connect.NewResponse(&apiv1.MigrateStoreResponse{JobId: jobID}), nil
 }
@@ -1039,7 +1055,8 @@ func (s *StoreServer) MergeStores(
 
 	srcID := req.Msg.Source
 	dstID := req.Msg.Destination
-	jobID := s.orch.Scheduler().Submit("merge:"+srcID+"->"+dstID, func(ctx context.Context, job *orchestrator.JobProgress) {
+	jobName := "merge:" + srcID + "->" + dstID
+	jobID := s.orch.Scheduler().Submit(jobName, func(ctx context.Context, job *orchestrator.JobProgress) {
 		if err := s.copyRecordsTracked(ctx, srcID, dstID, job); err != nil {
 			job.Fail(s.now(), fmt.Sprintf("merge records: %v", err))
 			return
@@ -1062,6 +1079,7 @@ func (s *StoreServer) MergeStores(
 			}
 		}
 	})
+	s.orch.Scheduler().Describe(jobName, fmt.Sprintf("Merge '%s' into '%s'", s.storeName(ctx, srcID), s.storeName(ctx, dstID)))
 
 	return connect.NewResponse(&apiv1.MergeStoresResponse{JobId: jobID}), nil
 }

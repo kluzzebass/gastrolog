@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { GetJobRequest, GetJobResponse, ListJobsRequest, ListJobsResponse } from "./job_pb.js";
+import { GetJobRequest, GetJobResponse, ListJobsRequest, ListJobsResponse, WatchJobsRequest, WatchJobsResponse } from "./job_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -29,6 +29,15 @@ export const JobService = {
       I: ListJobsRequest,
       O: ListJobsResponse,
       kind: MethodKind.Unary,
+    },
+    /**
+     * @generated from rpc gastrolog.v1.JobService.WatchJobs
+     */
+    watchJobs: {
+      name: "WatchJobs",
+      I: WatchJobsRequest,
+      O: WatchJobsResponse,
+      kind: MethodKind.ServerStreaming,
     },
   }
 } as const;

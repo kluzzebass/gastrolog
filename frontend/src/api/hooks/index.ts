@@ -42,4 +42,4 @@ export {
   useChangePassword,
 } from "./useAuth";
 export { useIngesters, useIngesterStatus } from "./useIngesters";
-export { useJob, useJobs } from "./useJobs";
+export { useJob, useWatchJobs } from "./useJobs";

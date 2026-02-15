@@ -132,6 +132,7 @@ type Job struct {
 	Name         string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	Status       JobStatus              `protobuf:"varint,3,opt,name=status,proto3,enum=gastrolog.v1.JobStatus" json:"status,omitempty"`
 	Kind         JobKind                `protobuf:"varint,11,opt,name=kind,proto3,enum=gastrolog.v1.JobKind" json:"kind,omitempty"`
+	Description  string                 `protobuf:"bytes,15,opt,name=description,proto3" json:"description,omitempty"` // human-readable description for the UI
 	ChunksTotal  int64                  `protobuf:"varint,4,opt,name=chunks_total,json=chunksTotal,proto3" json:"chunks_total,omitempty"`
 	ChunksDone   int64                  `protobuf:"varint,5,opt,name=chunks_done,json=chunksDone,proto3" json:"chunks_done,omitempty"`
 	RecordsDone  int64                  `protobuf:"varint,6,opt,name=records_done,json=recordsDone,proto3" json:"records_done,omitempty"`
@@ -203,6 +204,13 @@ func (x *Job) GetKind() JobKind {
 		return x.Kind
 	}
 	return JobKind_JOB_KIND_UNSPECIFIED
+}
+
+func (x *Job) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
 }
 
 func (x *Job) GetChunksTotal() int64 {
@@ -443,16 +451,97 @@ func (x *ListJobsResponse) GetJobs() []*Job {
 	return nil
 }
 
+type WatchJobsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WatchJobsRequest) Reset() {
+	*x = WatchJobsRequest{}
+	mi := &file_gastrolog_v1_job_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WatchJobsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WatchJobsRequest) ProtoMessage() {}
+
+func (x *WatchJobsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_job_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WatchJobsRequest.ProtoReflect.Descriptor instead.
+func (*WatchJobsRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_job_proto_rawDescGZIP(), []int{5}
+}
+
+type WatchJobsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Jobs          []*Job                 `protobuf:"bytes,1,rep,name=jobs,proto3" json:"jobs,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WatchJobsResponse) Reset() {
+	*x = WatchJobsResponse{}
+	mi := &file_gastrolog_v1_job_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WatchJobsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WatchJobsResponse) ProtoMessage() {}
+
+func (x *WatchJobsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_job_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WatchJobsResponse.ProtoReflect.Descriptor instead.
+func (*WatchJobsResponse) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_job_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *WatchJobsResponse) GetJobs() []*Job {
+	if x != nil {
+		return x.Jobs
+	}
+	return nil
+}
+
 var File_gastrolog_v1_job_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_job_proto_rawDesc = "" +
 	"\n" +
-	"\x16gastrolog/v1/job.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xab\x04\n" +
+	"\x16gastrolog/v1/job.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xcd\x04\n" +
 	"\x03Job\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12/\n" +
 	"\x06status\x18\x03 \x01(\x0e2\x17.gastrolog.v1.JobStatusR\x06status\x12)\n" +
-	"\x04kind\x18\v \x01(\x0e2\x15.gastrolog.v1.JobKindR\x04kind\x12!\n" +
+	"\x04kind\x18\v \x01(\x0e2\x15.gastrolog.v1.JobKindR\x04kind\x12 \n" +
+	"\vdescription\x18\x0f \x01(\tR\vdescription\x12!\n" +
 	"\fchunks_total\x18\x04 \x01(\x03R\vchunksTotal\x12\x1f\n" +
 	"\vchunks_done\x18\x05 \x01(\x03R\n" +
 	"chunksDone\x12!\n" +
@@ -472,6 +561,9 @@ const file_gastrolog_v1_job_proto_rawDesc = "" +
 	"\x03job\x18\x01 \x01(\v2\x11.gastrolog.v1.JobR\x03job\"\x11\n" +
 	"\x0fListJobsRequest\"9\n" +
 	"\x10ListJobsResponse\x12%\n" +
+	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\x12\n" +
+	"\x10WatchJobsRequest\":\n" +
+	"\x11WatchJobsResponse\x12%\n" +
 	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs*\x88\x01\n" +
 	"\tJobStatus\x12\x1a\n" +
 	"\x16JOB_STATUS_UNSPECIFIED\x10\x00\x12\x16\n" +
@@ -482,11 +574,12 @@ const file_gastrolog_v1_job_proto_rawDesc = "" +
 	"\aJobKind\x12\x18\n" +
 	"\x14JOB_KIND_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rJOB_KIND_TASK\x10\x01\x12\x16\n" +
-	"\x12JOB_KIND_SCHEDULED\x10\x022\x9c\x01\n" +
+	"\x12JOB_KIND_SCHEDULED\x10\x022\xec\x01\n" +
 	"\n" +
 	"JobService\x12C\n" +
 	"\x06GetJob\x12\x1b.gastrolog.v1.GetJobRequest\x1a\x1c.gastrolog.v1.GetJobResponse\x12I\n" +
-	"\bListJobs\x12\x1d.gastrolog.v1.ListJobsRequest\x1a\x1e.gastrolog.v1.ListJobsResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"\bListJobs\x12\x1d.gastrolog.v1.ListJobsRequest\x1a\x1e.gastrolog.v1.ListJobsResponse\x12N\n" +
+	"\tWatchJobs\x12\x1e.gastrolog.v1.WatchJobsRequest\x1a\x1f.gastrolog.v1.WatchJobsResponse0\x01B,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_job_proto_rawDescOnce sync.Once
@@ -501,7 +594,7 @@ func file_gastrolog_v1_job_proto_rawDescGZIP() []byte {
 }
 
 var file_gastrolog_v1_job_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_gastrolog_v1_job_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_gastrolog_v1_job_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_gastrolog_v1_job_proto_goTypes = []any{
 	(JobStatus)(0),                // 0: gastrolog.v1.JobStatus
 	(JobKind)(0),                  // 1: gastrolog.v1.JobKind
@@ -510,26 +603,31 @@ var file_gastrolog_v1_job_proto_goTypes = []any{
 	(*GetJobResponse)(nil),        // 4: gastrolog.v1.GetJobResponse
 	(*ListJobsRequest)(nil),       // 5: gastrolog.v1.ListJobsRequest
 	(*ListJobsResponse)(nil),      // 6: gastrolog.v1.ListJobsResponse
-	(*timestamppb.Timestamp)(nil), // 7: google.protobuf.Timestamp
+	(*WatchJobsRequest)(nil),      // 7: gastrolog.v1.WatchJobsRequest
+	(*WatchJobsResponse)(nil),     // 8: gastrolog.v1.WatchJobsResponse
+	(*timestamppb.Timestamp)(nil), // 9: google.protobuf.Timestamp
 }
 var file_gastrolog_v1_job_proto_depIdxs = []int32{
 	0,  // 0: gastrolog.v1.Job.status:type_name -> gastrolog.v1.JobStatus
 	1,  // 1: gastrolog.v1.Job.kind:type_name -> gastrolog.v1.JobKind
-	7,  // 2: gastrolog.v1.Job.started_at:type_name -> google.protobuf.Timestamp
-	7,  // 3: gastrolog.v1.Job.completed_at:type_name -> google.protobuf.Timestamp
-	7,  // 4: gastrolog.v1.Job.last_run:type_name -> google.protobuf.Timestamp
-	7,  // 5: gastrolog.v1.Job.next_run:type_name -> google.protobuf.Timestamp
+	9,  // 2: gastrolog.v1.Job.started_at:type_name -> google.protobuf.Timestamp
+	9,  // 3: gastrolog.v1.Job.completed_at:type_name -> google.protobuf.Timestamp
+	9,  // 4: gastrolog.v1.Job.last_run:type_name -> google.protobuf.Timestamp
+	9,  // 5: gastrolog.v1.Job.next_run:type_name -> google.protobuf.Timestamp
 	2,  // 6: gastrolog.v1.GetJobResponse.job:type_name -> gastrolog.v1.Job
 	2,  // 7: gastrolog.v1.ListJobsResponse.jobs:type_name -> gastrolog.v1.Job
-	3,  // 8: gastrolog.v1.JobService.GetJob:input_type -> gastrolog.v1.GetJobRequest
-	5,  // 9: gastrolog.v1.JobService.ListJobs:input_type -> gastrolog.v1.ListJobsRequest
-	4,  // 10: gastrolog.v1.JobService.GetJob:output_type -> gastrolog.v1.GetJobResponse
-	6,  // 11: gastrolog.v1.JobService.ListJobs:output_type -> gastrolog.v1.ListJobsResponse
-	10, // [10:12] is the sub-list for method output_type
-	8,  // [8:10] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	2,  // 8: gastrolog.v1.WatchJobsResponse.jobs:type_name -> gastrolog.v1.Job
+	3,  // 9: gastrolog.v1.JobService.GetJob:input_type -> gastrolog.v1.GetJobRequest
+	5,  // 10: gastrolog.v1.JobService.ListJobs:input_type -> gastrolog.v1.ListJobsRequest
+	7,  // 11: gastrolog.v1.JobService.WatchJobs:input_type -> gastrolog.v1.WatchJobsRequest
+	4,  // 12: gastrolog.v1.JobService.GetJob:output_type -> gastrolog.v1.GetJobResponse
+	6,  // 13: gastrolog.v1.JobService.ListJobs:output_type -> gastrolog.v1.ListJobsResponse
+	8,  // 14: gastrolog.v1.JobService.WatchJobs:output_type -> gastrolog.v1.WatchJobsResponse
+	12, // [12:15] is the sub-list for method output_type
+	9,  // [9:12] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_job_proto_init() }
@@ -543,7 +641,7 @@ func file_gastrolog_v1_job_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_job_proto_rawDesc), len(file_gastrolog_v1_job_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   5,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
