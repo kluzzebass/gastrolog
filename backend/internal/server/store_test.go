@@ -75,9 +75,7 @@ func newStoreTestSetup(t *testing.T, recordCount int) storeTestClients {
 
 	memtest.BuildIndexes(t, s.CM, s.IM)
 
-	orch.RegisterChunkManager(defaultID, s.CM)
-	orch.RegisterIndexManager(defaultID, s.IM)
-	orch.RegisterQueryEngine(defaultID, s.QE)
+	orch.RegisterStore(orchestrator.NewStore(defaultID, s.CM, s.IM, s.QE))
 
 	// Set filter so orchestrator knows about the store.
 	filter, _ := orchestrator.CompileFilter(defaultID, "*")

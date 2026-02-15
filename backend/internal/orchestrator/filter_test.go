@@ -327,6 +327,95 @@ func TestFilterSetValueExists(t *testing.T) {
 	}
 }
 
+func TestFilterSetAddOrUpdate(t *testing.T) {
+	storeA := uuid.Must(uuid.NewV7())
+	storeB := uuid.Must(uuid.NewV7())
+
+	// AddOrUpdate on nil receiver creates a fresh set.
+	fs, err := (*FilterSet)(nil).AddOrUpdate(storeA, "env=prod")
+	if err != nil {
+		t.Fatalf("AddOrUpdate on nil: %v", err)
+	}
+	got := fs.Match(chunk.Attributes{"env": "prod"})
+	if !containsUUID(got, storeA) {
+		t.Error("storeA should match after AddOrUpdate")
+	}
+
+	// Add a second store.
+	fs, err = fs.AddOrUpdate(storeB, "*")
+	if err != nil {
+		t.Fatalf("AddOrUpdate storeB: %v", err)
+	}
+	got = fs.Match(chunk.Attributes{"env": "prod"})
+	if !containsUUID(got, storeA) || !containsUUID(got, storeB) {
+		t.Error("both stores should match")
+	}
+
+	// Update storeA's filter.
+	fs, err = fs.AddOrUpdate(storeA, "env=staging")
+	if err != nil {
+		t.Fatalf("AddOrUpdate update storeA: %v", err)
+	}
+	got = fs.Match(chunk.Attributes{"env": "prod"})
+	if containsUUID(got, storeA) {
+		t.Error("storeA should no longer match env=prod after update")
+	}
+	got = fs.Match(chunk.Attributes{"env": "staging"})
+	if !containsUUID(got, storeA) {
+		t.Error("storeA should match env=staging after update")
+	}
+
+	// Invalid expression returns error.
+	_, err = fs.AddOrUpdate(storeA, "(unclosed")
+	if err == nil {
+		t.Error("expected error for invalid expression")
+	}
+}
+
+func TestFilterSetWithout(t *testing.T) {
+	storeA := uuid.Must(uuid.NewV7())
+	storeB := uuid.Must(uuid.NewV7())
+	storeC := uuid.Must(uuid.NewV7())
+
+	filterA, _ := CompileFilter(storeA, "env=prod")
+	filterB, _ := CompileFilter(storeB, "env=staging")
+	filterC, _ := CompileFilter(storeC, "*")
+
+	fs := NewFilterSet([]*CompiledFilter{filterA, filterB, filterC})
+
+	// Without a single store.
+	fs2 := fs.Without(storeA)
+	got := fs2.Match(chunk.Attributes{"env": "prod"})
+	if containsUUID(got, storeA) {
+		t.Error("storeA should be removed")
+	}
+	if !containsUUID(got, storeC) {
+		t.Error("storeC (catch-all) should remain")
+	}
+
+	// Without multiple stores.
+	fs3 := fs.Without(storeA, storeB)
+	got = fs3.Match(chunk.Attributes{"env": "staging"})
+	if containsUUID(got, storeA) || containsUUID(got, storeB) {
+		t.Error("storeA and storeB should be removed")
+	}
+	if !containsUUID(got, storeC) {
+		t.Error("storeC should remain")
+	}
+
+	// Without all stores returns nil.
+	fs4 := fs.Without(storeA, storeB, storeC)
+	if fs4 != nil {
+		t.Error("expected nil when all stores removed")
+	}
+
+	// Without on nil receiver returns nil.
+	fs5 := (*FilterSet)(nil).Without(storeA)
+	if fs5 != nil {
+		t.Error("Without on nil should return nil")
+	}
+}
+
 // Helper functions
 
 func sameElements(a, b []uuid.UUID) bool {

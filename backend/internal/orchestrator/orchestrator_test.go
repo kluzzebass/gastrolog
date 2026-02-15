@@ -54,9 +54,7 @@ func newTestSetup(maxRecords int64) (*orchestrator.Orchestrator, chunk.ChunkMana
 
 	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterChunkManager(defaultID, s.CM)
-	orch.RegisterIndexManager(defaultID, tracker)
-	orch.RegisterQueryEngine(defaultID, s.QE)
+	orch.RegisterStore(orchestrator.NewStore(defaultID, s.CM, tracker, s.QE))
 
 	return orch, s.CM, tracker, defaultID
 }
@@ -450,9 +448,7 @@ func newIngesterTestSetup() (*orchestrator.Orchestrator, chunk.ChunkManager) {
 
 	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterChunkManager(defaultID, s.CM)
-	orch.RegisterIndexManager(defaultID, s.IM)
-	orch.RegisterQueryEngine(defaultID, s.QE)
+	orch.RegisterStore(orchestrator.NewStore(defaultID, s.CM, s.IM, s.QE))
 
 	return orch, s.CM
 }
@@ -601,9 +597,7 @@ func TestIngesterIndexBuildOnSeal(t *testing.T) {
 
 	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterChunkManager(defaultID, s.CM)
-	orch.RegisterIndexManager(defaultID, tracker)
-	orch.RegisterQueryEngine(defaultID, s.QE)
+	orch.RegisterStore(orchestrator.NewStore(defaultID, s.CM, tracker, s.QE))
 
 	// Create ingester with 3 messages to trigger seal.
 	recv := newMockIngester([]orchestrator.IngestMessage{
@@ -748,10 +742,10 @@ func TestChunkManagerAccessor(t *testing.T) {
 	}
 }
 
-func TestChunkManagersAccessor(t *testing.T) {
+func TestListStoresAccessor(t *testing.T) {
 	orch, _, _, defaultID := newTestSetup(1 << 20)
 
-	keys := orch.ChunkManagers()
+	keys := orch.ListStores()
 	if len(keys) != 1 {
 		t.Fatalf("expected 1 key, got %d", len(keys))
 	}
@@ -776,10 +770,10 @@ func TestIndexManagerAccessor(t *testing.T) {
 	}
 }
 
-func TestIndexManagersAccessor(t *testing.T) {
+func TestListStoresReturnsAllKeys(t *testing.T) {
 	orch, _, _, defaultID := newTestSetup(1 << 20)
 
-	keys := orch.IndexManagers()
+	keys := orch.ListStores()
 	if len(keys) != 1 {
 		t.Fatalf("expected 1 key, got %d", len(keys))
 	}
@@ -788,7 +782,7 @@ func TestIndexManagersAccessor(t *testing.T) {
 	}
 }
 
-func TestIngestersAccessor(t *testing.T) {
+func TestListIngestersAccessor(t *testing.T) {
 	orch, _ := newIngesterTestSetup()
 
 	recv1 := newBlockingIngester()
@@ -798,7 +792,7 @@ func TestIngestersAccessor(t *testing.T) {
 	orch.RegisterIngester(id1, recv1)
 	orch.RegisterIngester(id2, recv2)
 
-	keys := orch.Ingesters()
+	keys := orch.ListIngesters()
 	if len(keys) != 2 {
 		t.Fatalf("expected 2 keys, got %d", len(keys))
 	}
@@ -813,27 +807,27 @@ func TestIngestersAccessor(t *testing.T) {
 	}
 }
 
-func TestRunningAccessor(t *testing.T) {
+func TestIsRunningAccessor(t *testing.T) {
 	orch, _ := newIngesterTestSetup()
 
-	if orch.Running() {
-		t.Error("expected Running() = false before Start()")
+	if orch.IsRunning() {
+		t.Error("expected IsRunning() = false before Start()")
 	}
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
 
-	if !orch.Running() {
-		t.Error("expected Running() = true after Start()")
+	if !orch.IsRunning() {
+		t.Error("expected IsRunning() = true after Start()")
 	}
 
 	if err := orch.Stop(); err != nil {
 		t.Fatalf("Stop failed: %v", err)
 	}
 
-	if orch.Running() {
-		t.Error("expected Running() = false after Stop()")
+	if orch.IsRunning() {
+		t.Error("expected IsRunning() = false after Stop()")
 	}
 }
 
@@ -856,8 +850,7 @@ func TestRebuildMissingIndexes(t *testing.T) {
 
 	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterChunkManager(defaultID, s.CM)
-	orch.RegisterIndexManager(defaultID, tracker)
+	orch.RegisterStore(orchestrator.NewStore(defaultID, s.CM, tracker, nil))
 
 	// RebuildMissingIndexes should find the sealed chunk and build indexes.
 	if err := orch.RebuildMissingIndexes(context.Background()); err != nil {
@@ -921,9 +914,7 @@ func newFilteredTestSetup(t *testing.T) (*orchestrator.Orchestrator, filteredTes
 		})
 		stores.cms[id] = s.CM
 
-		orch.RegisterChunkManager(id, s.CM)
-		orch.RegisterIndexManager(id, s.IM)
-		orch.RegisterQueryEngine(id, s.QE)
+		orch.RegisterStore(orchestrator.NewStore(id, s.CM, s.IM, s.QE))
 	}
 
 	return orch, stores
@@ -950,9 +941,7 @@ func newFilteredTestSetupWithLoader(t *testing.T, loader *fakeConfigLoader) (*or
 		})
 		stores.cms[id] = s.CM
 
-		orch.RegisterChunkManager(id, s.CM)
-		orch.RegisterIndexManager(id, s.IM)
-		orch.RegisterQueryEngine(id, s.QE)
+		orch.RegisterStore(orchestrator.NewStore(id, s.CM, s.IM, s.QE))
 	}
 
 	return orch, stores
