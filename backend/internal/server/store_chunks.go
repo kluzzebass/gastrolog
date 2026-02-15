@@ -25,14 +25,9 @@ func (s *StoreServer) ListChunks(
 		return nil, connErr
 	}
 
-	cm := s.orch.ChunkManager(storeID)
-	if cm == nil {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
-	}
-
-	metas, err := cm.List()
+	metas, err := s.orch.ListChunkMetas(storeID)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, mapStoreError(err)
 	}
 
 	resp := &apiv1.ListChunksResponse{
@@ -59,19 +54,14 @@ func (s *StoreServer) GetChunk(
 		return nil, connErr
 	}
 
-	cm := s.orch.ChunkManager(storeID)
-	if cm == nil {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
-	}
-
 	chunkID, err := chunk.ParseChunkID(req.Msg.ChunkId)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	meta, err := cm.Meta(chunkID)
+	meta, err := s.orch.GetChunkMeta(storeID, chunkID)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, err)
+		return nil, mapStoreError(err)
 	}
 
 	return connect.NewResponse(&apiv1.GetChunkResponse{
@@ -92,90 +82,28 @@ func (s *StoreServer) GetIndexes(
 		return nil, connErr
 	}
 
-	cm := s.orch.ChunkManager(storeID)
-	im := s.orch.IndexManager(storeID)
-	if cm == nil || im == nil {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
-	}
-
 	chunkID, err := chunk.ParseChunkID(req.Msg.ChunkId)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	meta, err := cm.Meta(chunkID)
+	report, err := s.orch.ChunkIndexInfos(storeID, chunkID)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, err)
+		return nil, mapStoreError(err)
 	}
-
-	sizes := im.IndexSizes(chunkID)
 
 	resp := &apiv1.GetIndexesResponse{
-		Sealed:  meta.Sealed,
-		Indexes: make([]*apiv1.IndexInfo, 0, 7),
+		Sealed:  report.Sealed,
+		Indexes: make([]*apiv1.IndexInfo, 0, len(report.Indexes)),
 	}
 
-	// Token index
-	if idx, err := im.OpenTokenIndex(chunkID); err == nil {
+	for _, idx := range report.Indexes {
 		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{
-			Name: "token", Exists: true, EntryCount: int64(len(idx.Entries())), SizeBytes: sizes["token"],
+			Name:       idx.Name,
+			Exists:     idx.Exists,
+			EntryCount: idx.EntryCount,
+			SizeBytes:  idx.SizeBytes,
 		})
-	} else {
-		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{Name: "token"})
-	}
-
-	// Attr key index
-	if idx, err := im.OpenAttrKeyIndex(chunkID); err == nil {
-		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{
-			Name: "attr_key", Exists: true, EntryCount: int64(len(idx.Entries())), SizeBytes: sizes["attr_key"],
-		})
-	} else {
-		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{Name: "attr_key"})
-	}
-
-	// Attr value index
-	if idx, err := im.OpenAttrValueIndex(chunkID); err == nil {
-		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{
-			Name: "attr_val", Exists: true, EntryCount: int64(len(idx.Entries())), SizeBytes: sizes["attr_val"],
-		})
-	} else {
-		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{Name: "attr_val"})
-	}
-
-	// Attr kv index
-	if idx, err := im.OpenAttrKVIndex(chunkID); err == nil {
-		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{
-			Name: "attr_kv", Exists: true, EntryCount: int64(len(idx.Entries())), SizeBytes: sizes["attr_kv"],
-		})
-	} else {
-		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{Name: "attr_kv"})
-	}
-
-	// KV key index
-	if idx, _, err := im.OpenKVKeyIndex(chunkID); err == nil {
-		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{
-			Name: "kv_key", Exists: true, EntryCount: int64(len(idx.Entries())), SizeBytes: sizes["kv_key"],
-		})
-	} else {
-		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{Name: "kv_key"})
-	}
-
-	// KV value index
-	if idx, _, err := im.OpenKVValueIndex(chunkID); err == nil {
-		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{
-			Name: "kv_val", Exists: true, EntryCount: int64(len(idx.Entries())), SizeBytes: sizes["kv_val"],
-		})
-	} else {
-		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{Name: "kv_val"})
-	}
-
-	// KV combined index
-	if idx, _, err := im.OpenKVIndex(chunkID); err == nil {
-		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{
-			Name: "kv_kv", Exists: true, EntryCount: int64(len(idx.Entries())), SizeBytes: sizes["kv_kv"],
-		})
-	} else {
-		resp.Indexes = append(resp.Indexes, &apiv1.IndexInfo{Name: "kv_kv"})
 	}
 
 	return connect.NewResponse(resp), nil
@@ -194,13 +122,10 @@ func (s *StoreServer) AnalyzeChunk(
 		return nil, connErr
 	}
 
-	cm := s.orch.ChunkManager(storeID)
-	im := s.orch.IndexManager(storeID)
-	if cm == nil || im == nil {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
+	a, err := s.orch.NewAnalyzer(storeID)
+	if err != nil {
+		return nil, mapStoreError(err)
 	}
-
-	a := analyzer.New(cm, im)
 
 	var analyses []analyzer.ChunkAnalysis
 
@@ -283,15 +208,9 @@ func (s *StoreServer) ValidateStore(
 		return nil, connErr
 	}
 
-	cm := s.orch.ChunkManager(storeID)
-	im := s.orch.IndexManager(storeID)
-	if cm == nil || im == nil {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
-	}
-
-	metas, err := cm.List()
+	metas, err := s.orch.ListChunkMetas(storeID)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, mapStoreError(err)
 	}
 
 	resp := &apiv1.ValidateStoreResponse{Valid: true}
@@ -303,7 +222,7 @@ func (s *StoreServer) ValidateStore(
 		}
 
 		// Check that we can read the chunk via cursor.
-		cursor, err := cm.OpenCursor(meta.ID)
+		cursor, err := s.orch.OpenCursor(storeID, meta.ID)
 		if err != nil {
 			cv.Valid = false
 			cv.Issues = append(cv.Issues, fmt.Sprintf("cannot open cursor: %v", err))
@@ -333,7 +252,7 @@ func (s *StoreServer) ValidateStore(
 
 		// For sealed chunks, check index completeness.
 		if meta.Sealed {
-			complete, err := im.IndexesComplete(meta.ID)
+			complete, err := s.orch.IndexesComplete(storeID, meta.ID)
 			if err != nil {
 				cv.Valid = false
 				cv.Issues = append(cv.Issues, fmt.Sprintf("index check error: %v", err))

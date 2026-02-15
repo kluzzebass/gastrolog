@@ -56,7 +56,7 @@ func (s *StoreServer) GetStore(
 	}
 	info, err := s.getStoreInfo(ctx, id)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, err)
+		return nil, mapStoreError(err)
 	}
 
 	return connect.NewResponse(&apiv1.GetStoreResponse{Store: info}), nil
@@ -89,12 +89,7 @@ func (s *StoreServer) GetStats(
 	resp.TotalStores = int64(len(stores))
 
 	for _, storeID := range stores {
-		cm := s.orch.ChunkManager(storeID)
-		if cm == nil {
-			continue
-		}
-
-		metas, err := cm.List()
+		metas, err := s.orch.ListChunkMetas(storeID)
 		if err != nil {
 			continue
 		}
@@ -111,8 +106,6 @@ func (s *StoreServer) GetStats(
 			storeStat.Name = cfg.Name
 		}
 
-		im := s.orch.IndexManager(storeID)
-
 		resp.TotalChunks += int64(len(metas))
 
 		for _, meta := range metas {
@@ -127,8 +120,8 @@ func (s *StoreServer) GetStats(
 			storeStat.DataBytes += meta.Bytes
 
 			// Sum index sizes for this chunk.
-			if im != nil {
-				for _, size := range im.IndexSizes(meta.ID) {
+			if sizes, err := s.orch.IndexSizes(storeID, meta.ID); err == nil {
+				for _, size := range sizes {
 					storeStat.IndexBytes += size
 				}
 			}
@@ -159,12 +152,7 @@ func (s *StoreServer) GetStats(
 }
 
 func (s *StoreServer) getStoreInfo(ctx context.Context, id uuid.UUID) (*apiv1.StoreInfo, error) {
-	cm := s.orch.ChunkManager(id)
-	if cm == nil {
-		return nil, errors.New("store not found")
-	}
-
-	metas, err := cm.List()
+	metas, err := s.orch.ListChunkMetas(id)
 	if err != nil {
 		return nil, err
 	}

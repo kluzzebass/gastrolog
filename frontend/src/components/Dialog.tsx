@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import type FocusTrap from "focus-trap-react";
+import FocusTrap from "focus-trap-react";
 import { useThemeClass } from "../hooks/useThemeClass";
 
 const sizeClasses = {

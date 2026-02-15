@@ -32,15 +32,13 @@ func (s *StoreServer) ReindexStore(
 		return nil, connErr
 	}
 
-	cm := s.orch.ChunkManager(storeID)
-	im := s.orch.IndexManager(storeID)
-	if cm == nil || im == nil {
+	if !s.orch.StoreExists(storeID) {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
 	}
 
 	jobName := "reindex:" + storeID.String()
 	jobID := s.orch.Scheduler().Submit(jobName, func(ctx context.Context, job *orchestrator.JobProgress) {
-		metas, err := cm.List()
+		metas, err := s.orch.ListChunkMetas(storeID)
 		if err != nil {
 			job.Fail(s.now(), err.Error())
 			return
@@ -58,11 +56,11 @@ func (s *StoreServer) ReindexStore(
 			if !meta.Sealed {
 				continue
 			}
-			if err := im.DeleteIndexes(meta.ID); err != nil {
+			if err := s.orch.DeleteIndexes(storeID, meta.ID); err != nil {
 				job.AddErrorDetail(fmt.Sprintf("delete indexes for chunk %s: %v", meta.ID, err))
 				continue
 			}
-			if err := im.BuildIndexes(ctx, meta.ID); err != nil {
+			if err := s.orch.BuildIndexes(ctx, storeID, meta.ID); err != nil {
 				job.AddErrorDetail(fmt.Sprintf("build indexes for chunk %s: %v", meta.ID, err))
 				continue
 			}
@@ -93,8 +91,7 @@ func (s *StoreServer) MigrateStore(
 	}
 
 	// Source must exist.
-	srcCM := s.orch.ChunkManager(srcID)
-	if srcCM == nil {
+	if !s.orch.StoreExists(srcID) {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("source store not found"))
 	}
 
@@ -147,10 +144,8 @@ func (s *StoreServer) MigrateStore(
 	}
 
 	// Seal source's active chunk so all data is in sealed chunks.
-	if active := srcCM.Active(); active != nil && active.RecordCount > 0 {
-		if err := srcCM.Seal(); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("seal source: %w", err))
-		}
+	if err := s.orch.SealActive(srcID); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("seal source: %w", err))
 	}
 
 	// Phase 3: Async merge + delete.
@@ -164,18 +159,15 @@ func (s *StoreServer) MigrateStore(
 	}
 
 	// Detect chunk mover support.
-	_, srcMovable := srcCM.(chunk.ChunkMover)
-	dstCM := s.orch.ChunkManager(dstID)
-	_, dstMovable := dstCM.(chunk.ChunkMover)
-	canMoveChunks := srcMovable && dstMovable
+	canMoveChunks := s.orch.SupportsChunkMove(srcID, dstID)
 
 	jobName := "migrate:" + srcID.String() + "->" + dstID.String()
 	jobID := s.orch.Scheduler().Submit(jobName, func(ctx context.Context, job *orchestrator.JobProgress) {
 		var mergeErr error
 		if canMoveChunks {
-			mergeErr = s.moveChunksTracked(ctx, srcID, dstID, job)
+			mergeErr = s.orch.MoveChunks(ctx, srcID, dstID, job)
 		} else {
-			mergeErr = s.copyRecordsTracked(ctx, srcID, dstID, job)
+			mergeErr = s.orch.CopyRecords(ctx, srcID, dstID, job)
 		}
 		if mergeErr != nil {
 			job.Fail(s.now(), fmt.Sprintf("merge records: %v", mergeErr))
@@ -231,12 +223,10 @@ func (s *StoreServer) MergeStores(
 	}
 
 	// Both stores must exist.
-	srcCM := s.orch.ChunkManager(srcID)
-	dstCM := s.orch.ChunkManager(dstID)
-	if srcCM == nil {
+	if !s.orch.StoreExists(srcID) {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("source store not found"))
 	}
-	if dstCM == nil {
+	if !s.orch.StoreExists(dstID) {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("destination store not found"))
 	}
 
@@ -258,9 +248,7 @@ func (s *StoreServer) MergeStores(
 
 	// Use chunk-level moves when both sides support it (preserves WriteTS).
 	// Fall back to record-by-record copy otherwise (rewrites WriteTS).
-	_, srcMovable := srcCM.(chunk.ChunkMover)
-	_, dstMovable := dstCM.(chunk.ChunkMover)
-	canMoveChunks := srcMovable && dstMovable
+	canMoveChunks := s.orch.SupportsChunkMove(srcID, dstID)
 
 	// Capture source file dir before job runs (source config will be deleted).
 	var srcFileDir string
@@ -271,21 +259,16 @@ func (s *StoreServer) MergeStores(
 	jobName := "merge:" + srcID.String() + "->" + dstID.String()
 	jobID := s.orch.Scheduler().Submit(jobName, func(ctx context.Context, job *orchestrator.JobProgress) {
 		// Seal source's active chunk before merging.
-		srcCM := s.orch.ChunkManager(srcID)
-		if srcCM != nil {
-			if active := srcCM.Active(); active != nil && active.RecordCount > 0 {
-				if err := srcCM.Seal(); err != nil {
-					job.Fail(s.now(), fmt.Sprintf("seal source: %v", err))
-					return
-				}
-			}
+		if err := s.orch.SealActive(srcID); err != nil {
+			job.Fail(s.now(), fmt.Sprintf("seal source: %v", err))
+			return
 		}
 
 		var err error
 		if canMoveChunks {
-			err = s.moveChunksTracked(ctx, srcID, dstID, job)
+			err = s.orch.MoveChunks(ctx, srcID, dstID, job)
 		} else {
-			err = s.copyRecordsTracked(ctx, srcID, dstID, job)
+			err = s.orch.CopyRecords(ctx, srcID, dstID, job)
 		}
 		if err != nil {
 			job.Fail(s.now(), fmt.Sprintf("merge records: %v", err))
@@ -329,20 +312,15 @@ func (s *StoreServer) ExportStore(
 		return connErr
 	}
 
-	cm := s.orch.ChunkManager(storeID)
-	if cm == nil {
-		return connect.NewError(connect.CodeNotFound, errors.New("store not found"))
-	}
-
-	metas, err := cm.List()
+	metas, err := s.orch.ListChunkMetas(storeID)
 	if err != nil {
-		return connect.NewError(connect.CodeInternal, err)
+		return mapStoreError(err)
 	}
 
 	const batchSize = 100
 
 	for _, meta := range metas {
-		cursor, err := cm.OpenCursor(meta.ID)
+		cursor, err := s.orch.OpenCursor(storeID, meta.ID)
 		if err != nil {
 			return connect.NewError(connect.CodeInternal, fmt.Errorf("open chunk %s: %w", meta.ID, err))
 		}
@@ -412,11 +390,6 @@ func (s *StoreServer) ImportRecords(
 		return nil, connErr
 	}
 
-	cm := s.orch.ChunkManager(storeID)
-	if cm == nil {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
-	}
-
 	var imported int64
 	for _, exportRec := range req.Msg.Records {
 		rec := chunk.Record{
@@ -433,8 +406,8 @@ func (s *StoreServer) ImportRecords(
 			maps.Copy(rec.Attrs, exportRec.Attrs)
 		}
 
-		if _, _, err := cm.Append(rec); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("append record %d: %w", imported, err))
+		if _, _, err := s.orch.Append(storeID, rec); err != nil {
+			return nil, mapStoreError(err)
 		}
 		imported++
 	}
@@ -484,129 +457,6 @@ func (s *StoreServer) createStore(ctx context.Context, cfg config.StoreConfig) *
 			}
 		}
 		return connect.NewError(connect.CodeInternal, fmt.Errorf("add store: %w", err))
-	}
-
-	return nil
-}
-
-// copyRecordsTracked copies all records from source to destination, reporting
-// progress via the tracked job.
-func (s *StoreServer) copyRecordsTracked(ctx context.Context, srcID, dstID uuid.UUID, job *orchestrator.JobProgress) error {
-	srcCM := s.orch.ChunkManager(srcID)
-	dstCM := s.orch.ChunkManager(dstID)
-	dstIM := s.orch.IndexManager(dstID)
-
-	metas, err := srcCM.List()
-	if err != nil {
-		return err
-	}
-
-	job.SetRunning(int64(len(metas)))
-
-	for _, meta := range metas {
-		cursor, err := srcCM.OpenCursor(meta.ID)
-		if err != nil {
-			return fmt.Errorf("open chunk %s: %w", meta.ID, err)
-		}
-
-		for {
-			rec, _, readErr := cursor.Next()
-			if errors.Is(readErr, chunk.ErrNoMoreRecords) {
-				break
-			}
-			if readErr != nil {
-				cursor.Close()
-				return fmt.Errorf("read chunk %s: %w", meta.ID, readErr)
-			}
-
-			rec = rec.Copy()
-			if _, _, appendErr := dstCM.AppendPreserved(rec); appendErr != nil {
-				cursor.Close()
-				return fmt.Errorf("append record: %w", appendErr)
-			}
-			job.AddRecords(1)
-		}
-		cursor.Close()
-		job.IncrChunks()
-	}
-
-	// Seal the active chunk if it has data, so we can build indexes.
-	if active := dstCM.Active(); active != nil && active.RecordCount > 0 {
-		if err := dstCM.Seal(); err != nil {
-			return fmt.Errorf("seal final chunk: %w", err)
-		}
-	}
-
-	// Build indexes for all sealed chunks.
-	dstMetas, err := dstCM.List()
-	if err != nil {
-		return err
-	}
-	for _, meta := range dstMetas {
-		if meta.Sealed && dstIM != nil {
-			if err := dstIM.BuildIndexes(ctx, meta.ID); err != nil {
-				return fmt.Errorf("build indexes for chunk %s: %w", meta.ID, err)
-			}
-		}
-	}
-
-	return nil
-}
-
-// moveChunksTracked moves sealed chunks from source to destination by
-// moving chunk directories on the filesystem. This preserves all record
-// timestamps (including WriteTS) since no records are rewritten.
-func (s *StoreServer) moveChunksTracked(ctx context.Context, srcID, dstID uuid.UUID, job *orchestrator.JobProgress) error {
-	srcCM := s.orch.ChunkManager(srcID)
-	dstCM := s.orch.ChunkManager(dstID)
-	dstIM := s.orch.IndexManager(dstID)
-
-	srcMover := srcCM.(chunk.ChunkMover)
-	dstMover := dstCM.(chunk.ChunkMover)
-
-	metas, err := srcCM.List()
-	if err != nil {
-		return err
-	}
-
-	job.SetRunning(int64(len(metas)))
-
-	for _, meta := range metas {
-		if !meta.Sealed {
-			continue
-		}
-
-		srcDir := srcMover.ChunkDir(meta.ID)
-		dstDir := dstMover.ChunkDir(meta.ID)
-
-		// Untrack from source.
-		if err := srcMover.Disown(meta.ID); err != nil {
-			return fmt.Errorf("disown chunk %s: %w", meta.ID, err)
-		}
-
-		// Move directory.
-		if err := chunkfile.MoveDir(srcDir, dstDir); err != nil {
-			// Attempt to restore source tracking on failure.
-			if _, adoptErr := srcMover.Adopt(meta.ID); adoptErr != nil {
-				job.AddErrorDetail(fmt.Sprintf("failed to restore chunk %s after move error: %v", meta.ID, adoptErr))
-			}
-			return fmt.Errorf("move chunk %s: %w", meta.ID, err)
-		}
-
-		// Register in destination.
-		if _, err := dstMover.Adopt(meta.ID); err != nil {
-			return fmt.Errorf("adopt chunk %s in destination: %w", meta.ID, err)
-		}
-
-		// Build indexes for the moved chunk in the destination.
-		if dstIM != nil {
-			if err := dstIM.BuildIndexes(ctx, meta.ID); err != nil {
-				job.AddErrorDetail(fmt.Sprintf("build indexes for chunk %s: %v", meta.ID, err))
-			}
-		}
-
-		job.AddRecords(meta.RecordCount)
-		job.IncrChunks()
 	}
 
 	return nil
