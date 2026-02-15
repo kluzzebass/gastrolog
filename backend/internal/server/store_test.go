@@ -346,79 +346,15 @@ func newFullStoreTestSetup(t *testing.T, recordCount int) fullStoreTestClients {
 	}
 }
 
-func TestCloneStore(t *testing.T) {
-	tc := newFullStoreTestSetup(t, 12)
-	ctx := context.Background()
-
-	resp, err := tc.store.CloneStore(ctx, connect.NewRequest(&gastrologv1.CloneStoreRequest{
-		Source:      "default",
-		Destination: "clone1",
-	}))
-	if err != nil {
-		t.Fatalf("CloneStore: %v", err)
-	}
-
-	if resp.Msg.JobId == "" {
-		t.Fatal("expected non-empty job_id")
-	}
-
-	job := waitForJob(t, tc.job, resp.Msg.JobId)
-	if job.Status != gastrologv1.JobStatus_JOB_STATUS_COMPLETED {
-		t.Errorf("expected completed, got %v (error: %s)", job.Status, job.Error)
-	}
-
-	// Verify the cloned store has the same records.
-	stats, err := tc.store.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
-		Store: "clone1",
-	}))
-	if err != nil {
-		t.Fatalf("GetStats for clone: %v", err)
-	}
-	if stats.Msg.TotalRecords != 12 {
-		t.Errorf("clone should have 12 records, got %d", stats.Msg.TotalRecords)
-	}
-}
-
-func TestCloneStoreNotFound(t *testing.T) {
-	tc := newFullStoreTestSetup(t, 0)
-	ctx := context.Background()
-
-	_, err := tc.store.CloneStore(ctx, connect.NewRequest(&gastrologv1.CloneStoreRequest{
-		Source:      "nonexistent",
-		Destination: "clone1",
-	}))
-	if err == nil {
-		t.Fatal("expected error for nonexistent source")
-	}
-	if connect.CodeOf(err) != connect.CodeNotFound {
-		t.Fatalf("expected NotFound, got %v", connect.CodeOf(err))
-	}
-}
-
-func TestCloneStoreSameName(t *testing.T) {
-	tc := newFullStoreTestSetup(t, 0)
-	ctx := context.Background()
-
-	_, err := tc.store.CloneStore(ctx, connect.NewRequest(&gastrologv1.CloneStoreRequest{
-		Source:      "default",
-		Destination: "default",
-	}))
-	if err == nil {
-		t.Fatal("expected error for same source and destination")
-	}
-	if connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Fatalf("expected InvalidArgument, got %v", connect.CodeOf(err))
-	}
-}
 
 func TestMigrateStore(t *testing.T) {
 	tc := newFullStoreTestSetup(t, 12)
 	ctx := context.Background()
 
+	// No DestinationType — should default to same as source ("memory").
 	resp, err := tc.store.MigrateStore(ctx, connect.NewRequest(&gastrologv1.MigrateStoreRequest{
-		Source:          "default",
-		Destination:     "migrated",
-		DestinationType: "memory",
+		Source:      "default",
+		Destination: "migrated",
 	}))
 	if err != nil {
 		t.Fatalf("MigrateStore: %v", err)
@@ -428,12 +364,22 @@ func TestMigrateStore(t *testing.T) {
 		t.Fatal("expected non-empty job_id")
 	}
 
+	// Source should be disabled in config (sync phase persists this before returning).
+	// Note: the async job may have already deleted the source, so check config directly.
+	srcCfg, err := tc.cfgStore.GetStore(ctx, "default")
+	if err != nil {
+		t.Fatalf("cfgStore.GetStore(default): %v", err)
+	}
+	if srcCfg != nil && srcCfg.Enabled {
+		t.Error("expected source config to have enabled=false")
+	}
+
 	job := waitForJob(t, tc.job, resp.Msg.JobId)
 	if job.Status != gastrologv1.JobStatus_JOB_STATUS_COMPLETED {
 		t.Errorf("expected completed, got %v (error: %s)", job.Status, job.Error)
 	}
 
-	// Source should be gone.
+	// Source should be gone after job completes.
 	_, err = tc.store.GetStore(ctx, connect.NewRequest(&gastrologv1.GetStoreRequest{
 		Id: "default",
 	}))
@@ -458,9 +404,8 @@ func TestMigrateStoreNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := tc.store.MigrateStore(ctx, connect.NewRequest(&gastrologv1.MigrateStoreRequest{
-		Source:          "nonexistent",
-		Destination:     "dest",
-		DestinationType: "memory",
+		Source:      "nonexistent",
+		Destination: "dest",
 	}))
 	if err == nil {
 		t.Fatal("expected error for nonexistent source")
@@ -614,14 +559,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 		t.Fatalf("expected 12 exported records, got %d", len(allRecords))
 	}
 
-	// Clone a new empty store to import into.
-	_, err = tc.store.CloneStore(ctx, connect.NewRequest(&gastrologv1.CloneStoreRequest{
-		Source:      "default",
-		Destination: "import-target",
-	}))
-	// Clone will copy records, but we want to test import specifically.
-	// Create a fresh empty store instead using import to nonexistent-like scenario.
-	// Actually, let's just import into the existing default store as additional records.
+	// Import the exported records back into the same store as additional records.
 	resp, err := tc.store.ImportRecords(ctx, connect.NewRequest(&gastrologv1.ImportRecordsRequest{
 		Store:   "default",
 		Records: allRecords,
@@ -724,6 +662,7 @@ func TestMergeStoresMemory(t *testing.T) {
 	ctx := context.Background()
 
 	// Memory-backed stores fall back to record-by-record copy.
+	// Source is auto-disabled by MergeStores.
 	resp, err := tc.store.MergeStores(ctx, connect.NewRequest(&gastrologv1.MergeStoresRequest{
 		Source:      "src",
 		Destination: "dst",
@@ -844,6 +783,7 @@ func TestMergeStoresFileBacked(t *testing.T) {
 		t.Fatalf("expected 10 records in src, got %d", len(originalWriteTSs))
 	}
 
+	// Source is auto-disabled by MergeStores.
 	resp, err := storeClient.MergeStores(ctx, connect.NewRequest(&gastrologv1.MergeStoresRequest{
 		Source:      "src",
 		Destination: "dst",
@@ -931,3 +871,45 @@ func TestMergeStoresSameStore(t *testing.T) {
 		t.Fatalf("expected InvalidArgument, got %v", connect.CodeOf(err))
 	}
 }
+
+func TestMigrateStoreFileRequiresDir(t *testing.T) {
+	tc := newFullStoreTestSetup(t, 5)
+	ctx := context.Background()
+
+	// Migrating to "file" type without providing dir should fail.
+	_, err := tc.store.MigrateStore(ctx, connect.NewRequest(&gastrologv1.MigrateStoreRequest{
+		Source:          "default",
+		Destination:     "file-store",
+		DestinationType: "file",
+	}))
+	if err == nil {
+		t.Fatal("expected error for file type without dir")
+	}
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected InvalidArgument, got %v", connect.CodeOf(err))
+	}
+}
+
+func TestMergeStoresAutoDisablesSource(t *testing.T) {
+	tc := newTwoStoreTestSetup(t)
+	ctx := context.Background()
+
+	// Verify source is enabled before merge.
+	if !tc.orch.IsStoreEnabled("src") {
+		t.Fatal("expected source to be enabled before merge")
+	}
+
+	_, err := tc.store.MergeStores(ctx, connect.NewRequest(&gastrologv1.MergeStoresRequest{
+		Source:      "src",
+		Destination: "dst",
+	}))
+	if err != nil {
+		t.Fatalf("MergeStores: %v", err)
+	}
+
+	// Source should be auto-disabled after MergeStores returns.
+	if tc.orch.IsStoreEnabled("src") {
+		t.Error("expected source to be auto-disabled by MergeStores")
+	}
+}
+

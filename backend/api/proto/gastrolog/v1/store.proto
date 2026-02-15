@@ -35,10 +35,8 @@ service StoreService {
   // ValidateStore checks chunk and index integrity for a store.
   rpc ValidateStore(ValidateStoreRequest) returns (ValidateStoreResponse);
 
-  // CloneStore copies all records from a source store to a new store.
-  rpc CloneStore(CloneStoreRequest) returns (CloneStoreResponse);
-
-  // MigrateStore copies records to a new store of a different type, then deletes the source.
+  // MigrateStore moves a store to a new name, type, and/or location.
+  // Three-phase: create destination, freeze source, async merge+delete.
   rpc MigrateStore(MigrateStoreRequest) returns (MigrateStoreResponse);
 
   // ExportStore streams all records from a store for backup.
@@ -198,23 +196,12 @@ message ChunkValidation {
   repeated string issues = 3;
 }
 
-// CloneStore copies all records from source to a new store with the same config.
-message CloneStoreRequest {
-  string source = 1;
-  string destination = 2;
-  // Optional overrides for destination store params (e.g. dir for file stores).
-  // Merged on top of source params.
-  map<string, string> destination_params = 3;
-}
-
-message CloneStoreResponse {
-  string job_id = 3;
-}
-
-// MigrateStore copies records to a new store of a different type, then deletes the source.
+// MigrateStore moves a store to a new name, type, and/or location.
+// Three-phase: create destination, freeze source, async merge+delete.
 message MigrateStoreRequest {
   string source = 1;
   string destination = 2;
+  // Optional: if empty, uses the same type as the source store.
   string destination_type = 3;
   map<string, string> destination_params = 4;
 }

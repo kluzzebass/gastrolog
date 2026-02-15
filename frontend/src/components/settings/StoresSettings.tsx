@@ -5,7 +5,7 @@ import {
   usePutStore,
   useDeleteStore,
   useReindexStore,
-  useCloneStore,
+  useMigrateStore,
   useMergeStores,
   useJob,
 } from "../../api/hooks";
@@ -89,15 +89,15 @@ export function StoresSettings({ dark }: { dark: boolean }) {
   const putStore = usePutStore();
   const deleteStore = useDeleteStore();
   const reindex = useReindexStore();
-  const clone = useCloneStore();
+  const migrate = useMigrateStore();
   const merge = useMergeStores();
   const { addToast } = useToast();
 
   const [expanded, setExpanded] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [typeConfirmed, setTypeConfirmed] = useState(false);
-  const [cloneTarget, setCloneTarget] = useState<
-    Record<string, { name: string; dir: string }>
+  const [migrateTarget, setMigrateTarget] = useState<
+    Record<string, { name: string; type: string; dir: string }>
   >({});
   const [mergeTarget, setMergeTarget] = useState<Record<string, string>>({});
   // Track active jobs per store: { storeId: { jobId, label } }
@@ -402,26 +402,28 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                     ? "Reindexing..."
                     : "Reindex"}
                 </button>
-                <button
-                  type="button"
-                  className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
-                    "border-ink-border-subtle text-text-muted hover:bg-ink-hover",
-                    "border-light-border-subtle text-light-text-muted hover:bg-light-hover",
-                  )}`}
-                  disabled={!!activeJob}
-                  onClick={() => {
-                    setCloneTarget((prev) => {
-                      if (prev[store.id]) {
-                        const next = { ...prev };
-                        delete next[store.id];
-                        return next;
-                      }
-                      return { ...prev, [store.id]: { name: "", dir: "" } };
-                    });
-                  }}
-                >
-                  {cloneTarget[store.id] ? "Cancel Clone" : "Clone"}
-                </button>
+                {store.enabled && (
+                  <button
+                    type="button"
+                    className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
+                      "border-ink-border-subtle text-text-muted hover:bg-ink-hover",
+                      "border-light-border-subtle text-light-text-muted hover:bg-light-hover",
+                    )}`}
+                    disabled={!!activeJob}
+                    onClick={() => {
+                      setMigrateTarget((prev) => {
+                        if (prev[store.id]) {
+                          const next = { ...prev };
+                          delete next[store.id];
+                          return next;
+                        }
+                        return { ...prev, [store.id]: { name: "", type: "", dir: "" } };
+                      });
+                    }}
+                  >
+                    {migrateTarget[store.id] ? "Cancel Migrate" : "Migrate"}
+                  </button>
+                )}
                 <button
                   type="button"
                   disabled={!!activeJob}
@@ -511,99 +513,118 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                 onChange={(p) => setEdit(store.id, { params: p })}
                 dark={dark}
               />
-              {cloneTarget[store.id] && (
-                <div
-                  className={`flex flex-col gap-3 p-3 rounded border ${c(
-                    "border-ink-border-subtle bg-ink-raised",
-                    "border-light-border-subtle bg-light-bg",
-                  )}`}
-                >
+              {migrateTarget[store.id] && (() => {
+                const mt = migrateTarget[store.id];
+                const resolvedType = mt.type || store.type;
+                const dirRequired = resolvedType === "file";
+                const canSubmit = mt.name.trim() && (!dirRequired || mt.dir.trim());
+                return (
                   <div
-                    className={`text-[0.75em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+                    className={`flex flex-col gap-3 p-3 rounded border ${c(
+                      "border-ink-border-subtle bg-ink-raised",
+                      "border-light-border-subtle bg-light-bg",
+                    )}`}
                   >
-                    Clone Store
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <FormField label="Name" dark={dark}>
-                      <TextInput
-                        value={cloneTarget[store.id].name}
-                        onChange={(v) =>
-                          setCloneTarget((prev) => ({
-                            ...prev,
-                            [store.id]: { ...prev[store.id], name: v },
-                          }))
-                        }
-                        placeholder="cloned-store"
-                        dark={dark}
-                        mono
-                      />
-                    </FormField>
-                    {store.type === "file" && (
-                      <FormField label="Directory (optional)" dark={dark}>
+                    <div
+                      className={`text-[0.75em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+                    >
+                      Migrate Store
+                    </div>
+                    <p className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
+                      Creates a new destination store, disables this store so no new data flows in, then moves all records to the destination and deletes this store.
+                    </p>
+                    <div className="grid grid-cols-3 gap-3">
+                      <FormField label="Destination Name" dark={dark}>
                         <TextInput
-                          value={cloneTarget[store.id].dir}
+                          value={mt.name}
                           onChange={(v) =>
-                            setCloneTarget((prev) => ({
+                            setMigrateTarget((prev) => ({
                               ...prev,
-                              [store.id]: { ...prev[store.id], dir: v },
+                              [store.id]: { ...prev[store.id], name: v },
                             }))
                           }
-                          placeholder="auto-derived from name"
+                          placeholder="new-store"
                           dark={dark}
                           mono
                         />
                       </FormField>
-                    )}
-                  </div>
-                  <div className="flex justify-end">
-                    <PrimaryButton
-                      disabled={
-                        clone.isPending ||
-                        !cloneTarget[store.id].name.trim() ||
-                        !!activeJob
-                      }
-                      onClick={async () => {
-                        const { name, dir } = cloneTarget[store.id];
-                        const trimmedName = name.trim();
-                        if (!trimmedName) return;
-                        try {
-                          const params: Record<string, string> = {};
-                          if (dir.trim()) {
-                            params["dir"] = dir.trim();
+                      <FormField label="Type" dark={dark}>
+                        <SelectInput
+                          value={mt.type}
+                          onChange={(v) =>
+                            setMigrateTarget((prev) => ({
+                              ...prev,
+                              [store.id]: { ...prev[store.id], type: v, dir: "" },
+                            }))
                           }
-                          const result = await clone.mutateAsync({
-                            source: store.id,
-                            destination: trimmedName,
-                            destinationParams:
-                              Object.keys(params).length > 0
-                                ? params
-                                : undefined,
-                          });
-                          setActiveJobs((prev) => ({
-                            ...prev,
-                            [store.id]: {
-                              jobId: result.jobId,
-                              label: "Cloning",
-                            },
-                          }));
-                          setCloneTarget((prev) => {
-                            const next = { ...prev };
-                            delete next[store.id];
-                            return next;
-                          });
-                        } catch (err: any) {
-                          addToast(
-                            err.message ?? "Clone failed",
-                            "error",
-                          );
-                        }
-                      }}
-                    >
-                      {clone.isPending ? "Cloning..." : "Clone"}
-                    </PrimaryButton>
+                          options={[
+                            { value: "", label: `same (${store.type})` },
+                            { value: "memory", label: "memory" },
+                            { value: "file", label: "file" },
+                          ]}
+                          dark={dark}
+                        />
+                      </FormField>
+                      {dirRequired && (
+                        <FormField label="Directory" dark={dark}>
+                          <TextInput
+                            value={mt.dir}
+                            onChange={(v) =>
+                              setMigrateTarget((prev) => ({
+                                ...prev,
+                                [store.id]: { ...prev[store.id], dir: v },
+                              }))
+                            }
+                            placeholder="/path/to/store"
+                            dark={dark}
+                            mono
+                          />
+                        </FormField>
+                      )}
+                    </div>
+                    <div className="flex justify-end">
+                      <PrimaryButton
+                        disabled={migrate.isPending || !canSubmit || !!activeJob}
+                        onClick={async () => {
+                          const trimmedName = mt.name.trim();
+                          if (!trimmedName) return;
+                          const srcLabel = store.name || store.id;
+                          if (!confirm(`Migrate "${srcLabel}" to "${trimmedName}"? This will immediately disable "${srcLabel}" and delete it after all records are moved.`)) return;
+                          try {
+                            const params: Record<string, string> = {};
+                            if (mt.dir.trim()) {
+                              params["dir"] = mt.dir.trim();
+                            }
+                            const result = await migrate.mutateAsync({
+                              source: store.id,
+                              destination: trimmedName,
+                              destinationType: mt.type || undefined,
+                              destinationParams:
+                                Object.keys(params).length > 0 ? params : undefined,
+                            });
+                            setActiveJobs((prev) => ({
+                              ...prev,
+                              [store.id]: {
+                                jobId: result.jobId,
+                                label: "Migrating",
+                              },
+                            }));
+                            setMigrateTarget((prev) => {
+                              const next = { ...prev };
+                              delete next[store.id];
+                              return next;
+                            });
+                          } catch (err: any) {
+                            addToast(err.message ?? "Migrate failed", "error");
+                          }
+                        }}
+                      >
+                        {migrate.isPending ? "Migrating..." : "Migrate"}
+                      </PrimaryButton>
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
               {mergeTarget[store.id] !== undefined && (
                 <div
                   className={`flex flex-col gap-3 p-3 rounded border ${c(
@@ -616,6 +637,9 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                   >
                     Merge Into Another Store
                   </div>
+                  <p className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
+                    Disables this store, moves all records into the destination, then deletes this store.
+                  </p>
                   <div className="grid grid-cols-2 gap-3">
                     <FormField label="Destination" dark={dark}>
                       <SelectInput
@@ -640,7 +664,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                         const dest = mergeTarget[store.id];
                         if (!dest) return;
                         const destName = stores.find((s) => s.id === dest)?.name || dest;
-                        if (!confirm(`Merge all records from "${store.name || store.id}" into "${destName}"? This will delete "${store.name || store.id}" afterward.`)) return;
+                        if (!confirm(`Merge "${store.name || store.id}" into "${destName}"? This will immediately disable "${store.name || store.id}" and delete it after all records are moved.`)) return;
                         try {
                           const result = await merge.mutateAsync({
                             source: store.id,

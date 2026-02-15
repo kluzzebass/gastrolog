@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"connectrpc.com/connect"
@@ -553,71 +552,8 @@ func (s *StoreServer) ValidateStore(
 	return connect.NewResponse(resp), nil
 }
 
-// CloneStore copies all records from a source store to a new store.
-func (s *StoreServer) CloneStore(
-	ctx context.Context,
-	req *connect.Request[apiv1.CloneStoreRequest],
-) (*connect.Response[apiv1.CloneStoreResponse], error) {
-	if req.Msg.Source == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("source required"))
-	}
-	if req.Msg.Destination == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("destination required"))
-	}
-	if req.Msg.Source == req.Msg.Destination {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("source and destination must differ"))
-	}
-
-	// Source must exist.
-	srcCM := s.orch.ChunkManager(req.Msg.Source)
-	if srcCM == nil {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("source store not found"))
-	}
-
-	// Get source config from config store (has type and params).
-	srcCfg, err := s.getFullStoreConfig(ctx, req.Msg.Source)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("read source config: %w", err))
-	}
-
-	dstCfg := config.StoreConfig{
-		ID:      req.Msg.Destination,
-		Type:    srcCfg.Type,
-		Filter:  srcCfg.Filter,
-		Policy:  srcCfg.Policy,
-		Enabled: true,
-		Params:  make(map[string]string, len(srcCfg.Params)),
-	}
-	for k, v := range srcCfg.Params {
-		dstCfg.Params[k] = v
-	}
-	// For file stores, derive a new directory for the destination.
-	if srcCfg.Type == "file" && s.factories.DataDir != "" {
-		dstCfg.Params[chunkfile.ParamDir] = filepath.Join(s.factories.DataDir, "stores", req.Msg.Destination)
-	}
-	// Merge user-provided destination params on top (can override derived dir).
-	for k, v := range req.Msg.DestinationParams {
-		dstCfg.Params[k] = v
-	}
-
-	if err := s.createStore(ctx, dstCfg); err != nil {
-		return nil, err
-	}
-
-	srcID := req.Msg.Source
-	dstID := req.Msg.Destination
-	jobName := "clone:" + srcID + "->" + dstID
-	jobID := s.orch.Scheduler().Submit(jobName, func(ctx context.Context, job *orchestrator.JobProgress) {
-		if err := s.copyRecordsTracked(ctx, srcID, dstID, job); err != nil {
-			job.Fail(s.now(), fmt.Sprintf("copy records: %v", err))
-		}
-	})
-	s.orch.Scheduler().Describe(jobName, fmt.Sprintf("Clone '%s' to '%s'", s.storeName(ctx, srcID), s.storeName(ctx, dstID)))
-
-	return connect.NewResponse(&apiv1.CloneStoreResponse{JobId: jobID}), nil
-}
-
-// MigrateStore copies records to a new store of a different type, then deletes the source.
+// MigrateStore moves a store to a new name, type, and/or location.
+// Three-phase: create destination, freeze source, async merge+delete.
 func (s *StoreServer) MigrateStore(
 	ctx context.Context,
 	req *connect.Request[apiv1.MigrateStoreRequest],
@@ -628,9 +564,6 @@ func (s *StoreServer) MigrateStore(
 	if req.Msg.Destination == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("destination required"))
 	}
-	if req.Msg.DestinationType == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("destination_type required"))
-	}
 	if req.Msg.Source == req.Msg.Destination {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("source and destination must differ"))
 	}
@@ -641,53 +574,102 @@ func (s *StoreServer) MigrateStore(
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("source store not found"))
 	}
 
-	// Get source config for filter/policy, but use destination type and params.
+	// Get source config for filter/policy and to resolve destination type.
 	srcCfg, err := s.getFullStoreConfig(ctx, req.Msg.Source)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("read source config: %w", err))
+	}
+
+	// Resolve destination type: explicit or same as source.
+	dstType := req.Msg.DestinationType
+	if dstType == "" {
+		dstType = srcCfg.Type
 	}
 
 	dstParams := req.Msg.DestinationParams
 	if dstParams == nil {
 		dstParams = make(map[string]string)
 	}
-	// For file stores without an explicit dir, derive one from the data directory.
-	if req.Msg.DestinationType == "file" && dstParams[chunkfile.ParamDir] == "" && s.factories.DataDir != "" {
-		dstParams[chunkfile.ParamDir] = filepath.Join(s.factories.DataDir, "stores", req.Msg.Destination)
+	// File stores require an explicit dir — no auto-derive.
+	if dstType == "file" && dstParams[chunkfile.ParamDir] == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("destination_params.dir required for file stores"))
 	}
 
+	// Phase 1: Create destination store with inherited filter/policy.
 	dstCfg := config.StoreConfig{
-		ID:      req.Msg.Destination,
-		Type:    req.Msg.DestinationType,
-		Filter:  srcCfg.Filter,
-		Policy:  srcCfg.Policy,
-		Enabled: true,
-		Params:  dstParams,
+		ID:        req.Msg.Destination,
+		Type:      dstType,
+		Filter:    srcCfg.Filter,
+		Policy:    srcCfg.Policy,
+		Retention: srcCfg.Retention,
+		Enabled:   true,
+		Params:    dstParams,
 	}
 
 	if err := s.createStore(ctx, dstCfg); err != nil {
 		return nil, err
 	}
 
+	// Phase 2: Freeze source — disable ingestion and persist.
+	if err := s.orch.DisableStore(req.Msg.Source); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("disable source: %w", err))
+	}
+	if s.cfgStore != nil {
+		srcCfg.Enabled = false
+		if err := s.cfgStore.PutStore(ctx, srcCfg); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("persist disabled source: %w", err))
+		}
+	}
+
+	// Seal source's active chunk so all data is in sealed chunks.
+	if active := srcCM.Active(); active != nil && active.RecordCount > 0 {
+		if err := srcCM.Seal(); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("seal source: %w", err))
+		}
+	}
+
+	// Phase 3: Async merge + delete.
 	srcID := req.Msg.Source
 	dstID := req.Msg.Destination
 	srcName := s.storeName(ctx, srcID)
+
+	// Capture file dir before the job runs (source config will be deleted).
+	var srcFileDir string
+	if srcCfg.Type == "file" {
+		srcFileDir = srcCfg.Params[chunkfile.ParamDir]
+	}
+
+	// Detect chunk mover support.
+	_, srcMovable := srcCM.(chunk.ChunkMover)
+	dstCM := s.orch.ChunkManager(dstID)
+	_, dstMovable := dstCM.(chunk.ChunkMover)
+	canMoveChunks := srcMovable && dstMovable
+
 	jobName := "migrate:" + srcID + "->" + dstID
 	jobID := s.orch.Scheduler().Submit(jobName, func(ctx context.Context, job *orchestrator.JobProgress) {
-		if err := s.copyRecordsTracked(ctx, srcID, dstID, job); err != nil {
-			job.Fail(s.now(), fmt.Sprintf("copy records: %v", err))
+		var mergeErr error
+		if canMoveChunks {
+			mergeErr = s.moveChunksTracked(ctx, srcID, dstID, job)
+		} else {
+			mergeErr = s.copyRecordsTracked(ctx, srcID, dstID, job)
+		}
+		if mergeErr != nil {
+			job.Fail(s.now(), fmt.Sprintf("merge records: %v", mergeErr))
 			return
 		}
 
-		// Delete the source store after successful copy.
+		// Delete the source store.
 		if err := s.orch.ForceRemoveStore(srcID); err != nil {
 			job.Fail(s.now(), fmt.Sprintf("delete source: %v", err))
 			return
 		}
 
-		// Remove source from config store.
+		// Remove source from config store and clean up file directory.
 		if s.cfgStore != nil {
 			_ = s.cfgStore.DeleteStore(ctx, srcID)
+		}
+		if srcFileDir != "" {
+			_ = os.RemoveAll(srcFileDir)
 		}
 	})
 	s.orch.Scheduler().Describe(jobName, fmt.Sprintf("Migrate '%s' to '%s'", srcName, s.storeName(ctx, dstID)))
@@ -1052,6 +1034,20 @@ func (s *StoreServer) MergeStores(
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("destination store not found"))
 	}
 
+	// Auto-disable source to prevent new data flowing in during merge.
+	if s.orch.IsStoreEnabled(req.Msg.Source) {
+		if err := s.orch.DisableStore(req.Msg.Source); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("disable source: %w", err))
+		}
+		if s.cfgStore != nil {
+			srcCfg, err := s.getFullStoreConfig(ctx, req.Msg.Source)
+			if err == nil {
+				srcCfg.Enabled = false
+				_ = s.cfgStore.PutStore(ctx, srcCfg)
+			}
+		}
+	}
+
 	// Use chunk-level moves when both sides support it (preserves WriteTS).
 	// Fall back to record-by-record copy otherwise (rewrites WriteTS).
 	_, srcMovable := srcCM.(chunk.ChunkMover)
@@ -1060,8 +1056,26 @@ func (s *StoreServer) MergeStores(
 
 	srcID := req.Msg.Source
 	dstID := req.Msg.Destination
+
+	// Capture source file dir before job runs (source config will be deleted).
+	var srcFileDir string
+	if srcCfg, err := s.getFullStoreConfig(ctx, srcID); err == nil && srcCfg.Type == "file" {
+		srcFileDir = srcCfg.Params[chunkfile.ParamDir]
+	}
+
 	jobName := "merge:" + srcID + "->" + dstID
 	jobID := s.orch.Scheduler().Submit(jobName, func(ctx context.Context, job *orchestrator.JobProgress) {
+		// Seal source's active chunk before merging.
+		srcCM := s.orch.ChunkManager(srcID)
+		if srcCM != nil {
+			if active := srcCM.Active(); active != nil && active.RecordCount > 0 {
+				if err := srcCM.Seal(); err != nil {
+					job.Fail(s.now(), fmt.Sprintf("seal source: %v", err))
+					return
+				}
+			}
+		}
+
 		var err error
 		if canMoveChunks {
 			err = s.moveChunksTracked(ctx, srcID, dstID, job)
@@ -1081,13 +1095,10 @@ func (s *StoreServer) MergeStores(
 
 		// Remove source from config store and clean up data directory.
 		if s.cfgStore != nil {
-			srcCfg, cfgErr := s.getFullStoreConfig(ctx, srcID)
 			_ = s.cfgStore.DeleteStore(ctx, srcID)
-			if cfgErr == nil && srcCfg.Type == "file" {
-				if dir := srcCfg.Params[chunkfile.ParamDir]; dir != "" {
-					_ = os.RemoveAll(dir)
-				}
-			}
+		}
+		if srcFileDir != "" {
+			_ = os.RemoveAll(srcFileDir)
 		}
 	})
 	s.orch.Scheduler().Describe(jobName, fmt.Sprintf("Merge '%s' into '%s'", s.storeName(ctx, srcID), s.storeName(ctx, dstID)))
@@ -1105,13 +1116,6 @@ func (s *StoreServer) moveChunksTracked(ctx context.Context, srcID, dstID string
 
 	srcMover := srcCM.(chunk.ChunkMover)
 	dstMover := dstCM.(chunk.ChunkMover)
-
-	// Seal source's active chunk so all data is in sealed chunks.
-	if active := srcCM.Active(); active != nil && active.RecordCount > 0 {
-		if err := srcCM.Seal(); err != nil {
-			return fmt.Errorf("seal source active chunk: %w", err)
-		}
-	}
 
 	metas, err := srcCM.List()
 	if err != nil {

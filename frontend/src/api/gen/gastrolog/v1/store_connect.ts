@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { AnalyzeChunkRequest, AnalyzeChunkResponse, CloneStoreRequest, CloneStoreResponse, ExportStoreRequest, ExportStoreResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetStatsRequest, GetStatsResponse, GetStoreRequest, GetStoreResponse, ImportRecordsRequest, ImportRecordsResponse, ListChunksRequest, ListChunksResponse, ListStoresRequest, ListStoresResponse, MergeStoresRequest, MergeStoresResponse, MigrateStoreRequest, MigrateStoreResponse, ReindexStoreRequest, ReindexStoreResponse, ValidateStoreRequest, ValidateStoreResponse } from "./store_pb.js";
+import { AnalyzeChunkRequest, AnalyzeChunkResponse, ExportStoreRequest, ExportStoreResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetStatsRequest, GetStatsResponse, GetStoreRequest, GetStoreResponse, ImportRecordsRequest, ImportRecordsResponse, ListChunksRequest, ListChunksResponse, ListStoresRequest, ListStoresResponse, MergeStoresRequest, MergeStoresResponse, MigrateStoreRequest, MigrateStoreResponse, ReindexStoreRequest, ReindexStoreResponse, ValidateStoreRequest, ValidateStoreResponse } from "./store_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -114,18 +114,8 @@ export const StoreService = {
       kind: MethodKind.Unary,
     },
     /**
-     * CloneStore copies all records from a source store to a new store.
-     *
-     * @generated from rpc gastrolog.v1.StoreService.CloneStore
-     */
-    cloneStore: {
-      name: "CloneStore",
-      I: CloneStoreRequest,
-      O: CloneStoreResponse,
-      kind: MethodKind.Unary,
-    },
-    /**
-     * MigrateStore copies records to a new store of a different type, then deletes the source.
+     * MigrateStore moves a store to a new name, type, and/or location.
+     * Three-phase: create destination, freeze source, async merge+delete.
      *
      * @generated from rpc gastrolog.v1.StoreService.MigrateStore
      */

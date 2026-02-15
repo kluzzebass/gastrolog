@@ -54,8 +54,6 @@ const (
 	// StoreServiceValidateStoreProcedure is the fully-qualified name of the StoreService's
 	// ValidateStore RPC.
 	StoreServiceValidateStoreProcedure = "/gastrolog.v1.StoreService/ValidateStore"
-	// StoreServiceCloneStoreProcedure is the fully-qualified name of the StoreService's CloneStore RPC.
-	StoreServiceCloneStoreProcedure = "/gastrolog.v1.StoreService/CloneStore"
 	// StoreServiceMigrateStoreProcedure is the fully-qualified name of the StoreService's MigrateStore
 	// RPC.
 	StoreServiceMigrateStoreProcedure = "/gastrolog.v1.StoreService/MigrateStore"
@@ -90,9 +88,8 @@ type StoreServiceClient interface {
 	ReindexStore(context.Context, *connect.Request[v1.ReindexStoreRequest]) (*connect.Response[v1.ReindexStoreResponse], error)
 	// ValidateStore checks chunk and index integrity for a store.
 	ValidateStore(context.Context, *connect.Request[v1.ValidateStoreRequest]) (*connect.Response[v1.ValidateStoreResponse], error)
-	// CloneStore copies all records from a source store to a new store.
-	CloneStore(context.Context, *connect.Request[v1.CloneStoreRequest]) (*connect.Response[v1.CloneStoreResponse], error)
-	// MigrateStore copies records to a new store of a different type, then deletes the source.
+	// MigrateStore moves a store to a new name, type, and/or location.
+	// Three-phase: create destination, freeze source, async merge+delete.
 	MigrateStore(context.Context, *connect.Request[v1.MigrateStoreRequest]) (*connect.Response[v1.MigrateStoreResponse], error)
 	// ExportStore streams all records from a store for backup.
 	ExportStore(context.Context, *connect.Request[v1.ExportStoreRequest]) (*connect.ServerStreamForClient[v1.ExportStoreResponse], error)
@@ -168,12 +165,6 @@ func NewStoreServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(storeServiceMethods.ByName("ValidateStore")),
 			connect.WithClientOptions(opts...),
 		),
-		cloneStore: connect.NewClient[v1.CloneStoreRequest, v1.CloneStoreResponse](
-			httpClient,
-			baseURL+StoreServiceCloneStoreProcedure,
-			connect.WithSchema(storeServiceMethods.ByName("CloneStore")),
-			connect.WithClientOptions(opts...),
-		),
 		migrateStore: connect.NewClient[v1.MigrateStoreRequest, v1.MigrateStoreResponse](
 			httpClient,
 			baseURL+StoreServiceMigrateStoreProcedure,
@@ -212,7 +203,6 @@ type storeServiceClient struct {
 	getStats      *connect.Client[v1.GetStatsRequest, v1.GetStatsResponse]
 	reindexStore  *connect.Client[v1.ReindexStoreRequest, v1.ReindexStoreResponse]
 	validateStore *connect.Client[v1.ValidateStoreRequest, v1.ValidateStoreResponse]
-	cloneStore    *connect.Client[v1.CloneStoreRequest, v1.CloneStoreResponse]
 	migrateStore  *connect.Client[v1.MigrateStoreRequest, v1.MigrateStoreResponse]
 	exportStore   *connect.Client[v1.ExportStoreRequest, v1.ExportStoreResponse]
 	importRecords *connect.Client[v1.ImportRecordsRequest, v1.ImportRecordsResponse]
@@ -264,11 +254,6 @@ func (c *storeServiceClient) ValidateStore(ctx context.Context, req *connect.Req
 	return c.validateStore.CallUnary(ctx, req)
 }
 
-// CloneStore calls gastrolog.v1.StoreService.CloneStore.
-func (c *storeServiceClient) CloneStore(ctx context.Context, req *connect.Request[v1.CloneStoreRequest]) (*connect.Response[v1.CloneStoreResponse], error) {
-	return c.cloneStore.CallUnary(ctx, req)
-}
-
 // MigrateStore calls gastrolog.v1.StoreService.MigrateStore.
 func (c *storeServiceClient) MigrateStore(ctx context.Context, req *connect.Request[v1.MigrateStoreRequest]) (*connect.Response[v1.MigrateStoreResponse], error) {
 	return c.migrateStore.CallUnary(ctx, req)
@@ -309,9 +294,8 @@ type StoreServiceHandler interface {
 	ReindexStore(context.Context, *connect.Request[v1.ReindexStoreRequest]) (*connect.Response[v1.ReindexStoreResponse], error)
 	// ValidateStore checks chunk and index integrity for a store.
 	ValidateStore(context.Context, *connect.Request[v1.ValidateStoreRequest]) (*connect.Response[v1.ValidateStoreResponse], error)
-	// CloneStore copies all records from a source store to a new store.
-	CloneStore(context.Context, *connect.Request[v1.CloneStoreRequest]) (*connect.Response[v1.CloneStoreResponse], error)
-	// MigrateStore copies records to a new store of a different type, then deletes the source.
+	// MigrateStore moves a store to a new name, type, and/or location.
+	// Three-phase: create destination, freeze source, async merge+delete.
 	MigrateStore(context.Context, *connect.Request[v1.MigrateStoreRequest]) (*connect.Response[v1.MigrateStoreResponse], error)
 	// ExportStore streams all records from a store for backup.
 	ExportStore(context.Context, *connect.Request[v1.ExportStoreRequest], *connect.ServerStream[v1.ExportStoreResponse]) error
@@ -383,12 +367,6 @@ func NewStoreServiceHandler(svc StoreServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(storeServiceMethods.ByName("ValidateStore")),
 		connect.WithHandlerOptions(opts...),
 	)
-	storeServiceCloneStoreHandler := connect.NewUnaryHandler(
-		StoreServiceCloneStoreProcedure,
-		svc.CloneStore,
-		connect.WithSchema(storeServiceMethods.ByName("CloneStore")),
-		connect.WithHandlerOptions(opts...),
-	)
 	storeServiceMigrateStoreHandler := connect.NewUnaryHandler(
 		StoreServiceMigrateStoreProcedure,
 		svc.MigrateStore,
@@ -433,8 +411,6 @@ func NewStoreServiceHandler(svc StoreServiceHandler, opts ...connect.HandlerOpti
 			storeServiceReindexStoreHandler.ServeHTTP(w, r)
 		case StoreServiceValidateStoreProcedure:
 			storeServiceValidateStoreHandler.ServeHTTP(w, r)
-		case StoreServiceCloneStoreProcedure:
-			storeServiceCloneStoreHandler.ServeHTTP(w, r)
 		case StoreServiceMigrateStoreProcedure:
 			storeServiceMigrateStoreHandler.ServeHTTP(w, r)
 		case StoreServiceExportStoreProcedure:
@@ -486,10 +462,6 @@ func (UnimplementedStoreServiceHandler) ReindexStore(context.Context, *connect.R
 
 func (UnimplementedStoreServiceHandler) ValidateStore(context.Context, *connect.Request[v1.ValidateStoreRequest]) (*connect.Response[v1.ValidateStoreResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.StoreService.ValidateStore is not implemented"))
-}
-
-func (UnimplementedStoreServiceHandler) CloneStore(context.Context, *connect.Request[v1.CloneStoreRequest]) (*connect.Response[v1.CloneStoreResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.StoreService.CloneStore is not implemented"))
 }
 
 func (UnimplementedStoreServiceHandler) MigrateStore(context.Context, *connect.Request[v1.MigrateStoreRequest]) (*connect.Response[v1.MigrateStoreResponse], error) {

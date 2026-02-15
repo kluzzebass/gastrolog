@@ -92,39 +92,21 @@ export function useValidateStore() {
   });
 }
 
-export function useCloneStore() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (args: {
-      source: string;
-      destination: string;
-      destinationParams?: Record<string, string>;
-    }) => {
-      const response = await storeClient.cloneStore({
-        source: args.source,
-        destination: args.destination,
-        destinationParams: args.destinationParams ?? {},
-      });
-      return response;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["stores"] });
-      qc.invalidateQueries({ queryKey: ["stats"] });
-      qc.invalidateQueries({ queryKey: ["config"] });
-    },
-  });
-}
-
 export function useMigrateStore() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: {
       source: string;
       destination: string;
-      destinationType: string;
+      destinationType?: string;
       destinationParams?: Record<string, string>;
     }) => {
-      const response = await storeClient.migrateStore(args);
+      const response = await storeClient.migrateStore({
+        source: args.source,
+        destination: args.destination,
+        destinationType: args.destinationType ?? "",
+        destinationParams: args.destinationParams ?? {},
+      });
       return response;
     },
     onSuccess: () => {

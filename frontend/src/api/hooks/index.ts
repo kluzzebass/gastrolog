@@ -6,7 +6,6 @@ export {
   useStats,
   useReindexStore,
   useValidateStore,
-  useCloneStore,
   useMigrateStore,
   useMergeStores,
   useImportRecords,

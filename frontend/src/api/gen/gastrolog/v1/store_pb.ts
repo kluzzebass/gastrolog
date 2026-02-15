@@ -1218,98 +1218,8 @@ export class ChunkValidation extends Message<ChunkValidation> {
 }
 
 /**
- * CloneStore copies all records from source to a new store with the same config.
- *
- * @generated from message gastrolog.v1.CloneStoreRequest
- */
-export class CloneStoreRequest extends Message<CloneStoreRequest> {
-  /**
-   * @generated from field: string source = 1;
-   */
-  source = "";
-
-  /**
-   * @generated from field: string destination = 2;
-   */
-  destination = "";
-
-  /**
-   * Optional overrides for destination store params (e.g. dir for file stores).
-   * Merged on top of source params.
-   *
-   * @generated from field: map<string, string> destination_params = 3;
-   */
-  destinationParams: { [key: string]: string } = {};
-
-  constructor(data?: PartialMessage<CloneStoreRequest>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.CloneStoreRequest";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "source", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "destination", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "destination_params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CloneStoreRequest {
-    return new CloneStoreRequest().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): CloneStoreRequest {
-    return new CloneStoreRequest().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): CloneStoreRequest {
-    return new CloneStoreRequest().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: CloneStoreRequest | PlainMessage<CloneStoreRequest> | undefined, b: CloneStoreRequest | PlainMessage<CloneStoreRequest> | undefined): boolean {
-    return proto3.util.equals(CloneStoreRequest, a, b);
-  }
-}
-
-/**
- * @generated from message gastrolog.v1.CloneStoreResponse
- */
-export class CloneStoreResponse extends Message<CloneStoreResponse> {
-  /**
-   * @generated from field: string job_id = 3;
-   */
-  jobId = "";
-
-  constructor(data?: PartialMessage<CloneStoreResponse>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.CloneStoreResponse";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 3, name: "job_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CloneStoreResponse {
-    return new CloneStoreResponse().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): CloneStoreResponse {
-    return new CloneStoreResponse().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): CloneStoreResponse {
-    return new CloneStoreResponse().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: CloneStoreResponse | PlainMessage<CloneStoreResponse> | undefined, b: CloneStoreResponse | PlainMessage<CloneStoreResponse> | undefined): boolean {
-    return proto3.util.equals(CloneStoreResponse, a, b);
-  }
-}
-
-/**
- * MigrateStore copies records to a new store of a different type, then deletes the source.
+ * MigrateStore moves a store to a new name, type, and/or location.
+ * Three-phase: create destination, freeze source, async merge+delete.
  *
  * @generated from message gastrolog.v1.MigrateStoreRequest
  */
@@ -1325,6 +1235,8 @@ export class MigrateStoreRequest extends Message<MigrateStoreRequest> {
   destination = "";
 
   /**
+   * Optional: if empty, uses the same type as the source store.
+   *
    * @generated from field: string destination_type = 3;
    */
   destinationType = "";
