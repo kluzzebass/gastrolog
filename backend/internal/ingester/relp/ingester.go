@@ -96,11 +96,9 @@ func (r *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 			continue
 		}
 
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			r.handleConn(ctx, conn, out)
-		}()
+		})
 	}
 }
 

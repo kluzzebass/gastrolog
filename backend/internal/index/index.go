@@ -133,7 +133,7 @@ func (idx *Index[T]) Entries() []T {
 // SplitKV splits a combined key-value string (separated by null byte) into key and value.
 // Used by attr and kv indexers which store key+"\x00"+value as map keys.
 func SplitKV(kv string) (key, value string) {
-	for i := 0; i < len(kv); i++ {
+	for i := range len(kv) {
 		if kv[i] == 0 {
 			return kv[:i], kv[i+1:]
 		}

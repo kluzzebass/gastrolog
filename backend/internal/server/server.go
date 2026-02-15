@@ -2,6 +2,7 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"crypto/tls"
 	"log/slog"
@@ -120,9 +121,7 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 				// Dev with proxy: frontend (e.g. localhost:3000) proxies to backend (localhost:4564).
 				// Allow any loopback origin when request is to loopback.
 				reqHost, _, _ := net.SplitHostPort(r.Host)
-				if reqHost == "" {
-					reqHost = r.Host
-				}
+				reqHost = cmp.Or(reqHost, r.Host)
 				if isLoopback(reqHost) {
 					if u, err := url.Parse(origin); err == nil {
 						oHost, _, _ := net.SplitHostPort(u.Host)
@@ -176,7 +175,7 @@ func (s *Server) buildMux() *http.ServeMux {
 	}
 
 	queryServer := NewQueryServer(s.orch)
-	storeServer := NewStoreServer(s.orch, s.cfgStore, s.factories)
+	storeServer := NewStoreServer(s.orch, s.cfgStore, s.factories, s.logger)
 	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager)
 	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
 	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown)

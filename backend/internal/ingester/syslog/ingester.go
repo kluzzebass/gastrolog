@@ -69,24 +69,20 @@ func (r *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 
 	// Start UDP listener if configured.
 	if r.udpAddr != "" {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if err := r.runUDP(ctx); err != nil {
 				errCh <- err
 			}
-		}()
+		})
 	}
 
 	// Start TCP listener if configured.
 	if r.tcpAddr != "" {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if err := r.runTCP(ctx); err != nil {
 				errCh <- err
 			}
-		}()
+		})
 	}
 
 	if r.udpAddr == "" && r.tcpAddr == "" {
@@ -215,12 +211,10 @@ func (r *Ingester) runTCP(ctx context.Context) error {
 			continue
 		}
 
-		wg.Add(1)
-		go func(conn net.Conn) {
-			defer wg.Done()
+		wg.Go(func() {
 			defer conn.Close()
 			r.handleTCPConn(ctx, conn)
-		}(conn)
+		})
 	}
 }
 

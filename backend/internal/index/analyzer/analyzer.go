@@ -217,7 +217,7 @@ func (a *Analyzer) analyzeTokenIndex(ca *ChunkAnalysis) {
 		return int(b.freq - a.freq) // Descending
 	})
 	limit := min(10, len(topN))
-	for i := 0; i < limit; i++ {
+	for i := range limit {
 		stats.TopTokensByFrequency = append(stats.TopTokensByFrequency, TokenFrequency{
 			Token:     topN[i].token,
 			Frequency: topN[i].freq,
@@ -275,7 +275,7 @@ func analyzeKeyIndex[T inverted.KeyEntry](entries []T) keyIndexStats {
 		return int(b.freq - a.freq)
 	})
 	limit := min(10, len(topN))
-	for i := 0; i < limit; i++ {
+	for i := range limit {
 		stats.topKeys = append(stats.topKeys, TokenFrequency{
 			Token:     topN[i].key,
 			Frequency: topN[i].freq,

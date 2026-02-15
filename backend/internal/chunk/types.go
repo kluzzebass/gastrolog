@@ -86,7 +86,7 @@ func DecodeAttributes(data []byte) (Attributes, error) {
 	attrs := make(Attributes, count)
 	offset := 2
 
-	for i := 0; i < count; i++ {
+	for range count {
 		// Read key length
 		if offset+2 > len(data) {
 			return nil, ErrInvalidAttrsData

@@ -215,7 +215,7 @@ func (m *pagerModel) View() string {
 	var sb strings.Builder
 	viewHeight := m.height
 
-	for i := 0; i < viewHeight; i++ {
+	for i := range viewHeight {
 		lineIdx := m.topLine + i
 		var line string
 		if lineIdx < len(m.lines) {
@@ -426,7 +426,7 @@ func (m *livePagerModel) View() string {
 	var sb strings.Builder
 	viewHeight := m.height
 
-	for i := 0; i < viewHeight; i++ {
+	for i := range viewHeight {
 		lineIdx := m.topLine + i
 		var line string
 		if lineIdx < len(m.lines) {

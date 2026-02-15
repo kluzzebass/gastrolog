@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -146,7 +147,7 @@ func (s *Store) GetFilter(ctx context.Context, id uuid.UUID) (*config.FilterConf
 
 	var fc config.FilterConfig
 	err := row.Scan(&fc.ID, &fc.Name, &fc.Expression)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -205,7 +206,7 @@ func (s *Store) GetRotationPolicy(ctx context.Context, id uuid.UUID) (*config.Ro
 
 	var rp config.RotationPolicyConfig
 	err := row.Scan(&rp.ID, &rp.Name, &rp.MaxBytes, &rp.MaxAge, &rp.MaxRecords, &rp.Cron)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -267,7 +268,7 @@ func (s *Store) GetRetentionPolicy(ctx context.Context, id uuid.UUID) (*config.R
 
 	var rp config.RetentionPolicyConfig
 	err := row.Scan(&rp.ID, &rp.Name, &rp.MaxAge, &rp.MaxBytes, &rp.MaxChunks)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -330,7 +331,7 @@ func (s *Store) GetStore(ctx context.Context, id uuid.UUID) (*config.StoreConfig
 	var paramsJSON *string
 	var filter, policy, retention sql.NullString
 	err := row.Scan(&st.ID, &st.Name, &st.Type, &filter, &policy, &retention, &paramsJSON, &st.Enabled)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -435,7 +436,7 @@ func (s *Store) GetIngester(ctx context.Context, id uuid.UUID) (*config.Ingester
 	var ing config.IngesterConfig
 	var paramsJSON *string
 	err := row.Scan(&ing.ID, &ing.Name, &ing.Type, &paramsJSON, &ing.Enabled)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -536,7 +537,7 @@ func (s *Store) GetSetting(ctx context.Context, key string) (*string, error) {
 
 	var value string
 	err := row.Scan(&value)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -594,7 +595,7 @@ func (s *Store) GetCertificate(ctx context.Context, id uuid.UUID) (*config.CertP
 
 	var cert config.CertPEM
 	err := row.Scan(&cert.ID, &cert.Name, &cert.CertPEM, &cert.KeyPEM, &cert.CertFile, &cert.KeyFile)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -650,14 +651,20 @@ func (s *Store) GetUser(ctx context.Context, id uuid.UUID) (*config.User, error)
 	var u config.User
 	var createdAt, updatedAt string
 	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &createdAt, &updatedAt)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get user %q: %w", id, err)
 	}
-	u.CreatedAt, _ = time.Parse(timeFormat, createdAt)
-	u.UpdatedAt, _ = time.Parse(timeFormat, updatedAt)
+	u.CreatedAt, err = time.Parse(timeFormat, createdAt)
+	if err != nil {
+		return nil, fmt.Errorf("get user %q: parse created_at %q: %w", id, createdAt, err)
+	}
+	u.UpdatedAt, err = time.Parse(timeFormat, updatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("get user %q: parse updated_at %q: %w", id, updatedAt, err)
+	}
 	return &u, nil
 }
 
@@ -668,14 +675,20 @@ func (s *Store) GetUserByUsername(ctx context.Context, username string) (*config
 	var u config.User
 	var createdAt, updatedAt string
 	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &createdAt, &updatedAt)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get user by username %q: %w", username, err)
 	}
-	u.CreatedAt, _ = time.Parse(timeFormat, createdAt)
-	u.UpdatedAt, _ = time.Parse(timeFormat, updatedAt)
+	u.CreatedAt, err = time.Parse(timeFormat, createdAt)
+	if err != nil {
+		return nil, fmt.Errorf("get user by username %q: parse created_at %q: %w", username, createdAt, err)
+	}
+	u.UpdatedAt, err = time.Parse(timeFormat, updatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("get user by username %q: parse updated_at %q: %w", username, updatedAt, err)
+	}
 	return &u, nil
 }
 
@@ -694,8 +707,14 @@ func (s *Store) ListUsers(ctx context.Context) ([]config.User, error) {
 		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan user: %w", err)
 		}
-		u.CreatedAt, _ = time.Parse(timeFormat, createdAt)
-		u.UpdatedAt, _ = time.Parse(timeFormat, updatedAt)
+		u.CreatedAt, err = time.Parse(timeFormat, createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("scan user %q: parse created_at %q: %w", u.Username, createdAt, err)
+		}
+		u.UpdatedAt, err = time.Parse(timeFormat, updatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("scan user %q: parse updated_at %q: %w", u.Username, updatedAt, err)
+		}
 		users = append(users, u)
 	}
 	return users, rows.Err()

@@ -15,7 +15,7 @@ var (
 	ErrChunkNotSealed = errors.New("chunk is not sealed")
 	ErrChunkNotFound  = errors.New("chunk not found")
 	ErrActiveChunk    = errors.New("cannot delete active chunk")
-	ErrMissingWriteTS = errors.New("AppendPreserved requires non-zero WriteTS")
+	ErrMissingWriteTS = errors.New("append preserved requires non-zero WriteTS")
 )
 
 // ManagerFactory creates a ChunkManager from configuration parameters.

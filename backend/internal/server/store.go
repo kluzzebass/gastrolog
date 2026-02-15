@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	chunkfile "gastrolog/internal/chunk/file"
 	"gastrolog/internal/config"
 	"gastrolog/internal/index/analyzer"
+	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -25,13 +27,19 @@ type StoreServer struct {
 	orch      *orchestrator.Orchestrator
 	cfgStore  config.Store
 	factories orchestrator.Factories
+	logger    *slog.Logger
 }
 
 var _ gastrologv1connect.StoreServiceHandler = (*StoreServer)(nil)
 
 // NewStoreServer creates a new StoreServer.
-func NewStoreServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories) *StoreServer {
-	return &StoreServer{orch: orch, cfgStore: cfgStore, factories: factories}
+func NewStoreServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, logger *slog.Logger) *StoreServer {
+	return &StoreServer{
+		orch:      orch,
+		cfgStore:  cfgStore,
+		factories: factories,
+		logger:    logging.Default(logger).With("component", "store-server"),
+	}
 }
 
 func (s *StoreServer) now() time.Time { return time.Now() }
@@ -705,10 +713,14 @@ func (s *StoreServer) MigrateStore(
 
 		// Remove source from config store and clean up file directory.
 		if s.cfgStore != nil {
-			_ = s.cfgStore.DeleteStore(ctx, srcID)
+			if err := s.cfgStore.DeleteStore(ctx, srcID); err != nil {
+				s.logger.Warn("cleanup: delete store config", "store", srcID, "error", err)
+			}
 		}
 		if srcFileDir != "" {
-			_ = os.RemoveAll(srcFileDir)
+			if err := os.RemoveAll(srcFileDir); err != nil {
+				s.logger.Warn("cleanup: remove source directory", "dir", srcFileDir, "error", err)
+			}
 		}
 	})
 	s.orch.Scheduler().Describe(jobName, fmt.Sprintf("Migrate '%s' to '%s'", srcName, s.storeName(ctx, dstID)))
@@ -884,7 +896,9 @@ func (s *StoreServer) createStore(ctx context.Context, cfg config.StoreConfig) *
 	if err := s.orch.AddStore(cfg, fullCfg, s.factories); err != nil {
 		// Rollback config entry on orchestrator failure.
 		if s.cfgStore != nil {
-			_ = s.cfgStore.DeleteStore(ctx, cfg.ID)
+			if delErr := s.cfgStore.DeleteStore(ctx, cfg.ID); delErr != nil {
+				s.logger.Warn("rollback: delete store config", "store", cfg.ID, "error", delErr)
+			}
 		}
 		return connect.NewError(connect.CodeInternal, fmt.Errorf("add store: %w", err))
 	}
@@ -1033,7 +1047,9 @@ func (s *StoreServer) MergeStores(
 			srcCfg, err := s.getFullStoreConfig(ctx, srcID)
 			if err == nil {
 				srcCfg.Enabled = false
-				_ = s.cfgStore.PutStore(ctx, srcCfg)
+				if err := s.cfgStore.PutStore(ctx, srcCfg); err != nil {
+					s.logger.Warn("persist disabled source config", "store", srcID, "error", err)
+				}
 			}
 		}
 	}
@@ -1082,10 +1098,14 @@ func (s *StoreServer) MergeStores(
 
 		// Remove source from config store and clean up data directory.
 		if s.cfgStore != nil {
-			_ = s.cfgStore.DeleteStore(ctx, srcID)
+			if err := s.cfgStore.DeleteStore(ctx, srcID); err != nil {
+				s.logger.Warn("cleanup: delete store config", "store", srcID, "error", err)
+			}
 		}
 		if srcFileDir != "" {
-			_ = os.RemoveAll(srcFileDir)
+			if err := os.RemoveAll(srcFileDir); err != nil {
+				s.logger.Warn("cleanup: remove source directory", "dir", srcFileDir, "error", err)
+			}
 		}
 	})
 	s.orch.Scheduler().Describe(jobName, fmt.Sprintf("Merge '%s' into '%s'", s.storeName(ctx, srcID), s.storeName(ctx, dstID)))

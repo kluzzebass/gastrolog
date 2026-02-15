@@ -210,7 +210,7 @@ func extractJSONValue(rest []byte) string {
 func normalize(val string) string {
 	// Fast lowercase for short ASCII strings.
 	lower := make([]byte, len(val))
-	for i := 0; i < len(val); i++ {
+	for i := range len(val) {
 		c := val[i]
 		if c >= 'A' && c <= 'Z' {
 			c += 'a' - 'A'

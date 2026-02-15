@@ -356,7 +356,7 @@ func (s *QueryServer) Histogram(
 		End:     timestamppb.New(end),
 		Buckets: make([]*apiv1.HistogramBucket, numBuckets),
 	}
-	for i := 0; i < numBuckets; i++ {
+	for i := range numBuckets {
 		bucket := &apiv1.HistogramBucket{
 			Ts:    timestamppb.New(start.Add(bucketWidth * time.Duration(i))),
 			Count: counts[i],

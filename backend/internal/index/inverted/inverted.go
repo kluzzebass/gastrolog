@@ -256,7 +256,7 @@ func DecodeKeyIndex[T any](data []byte, dataStart int, newEntry func(key string,
 
 		positions := make([]uint64, pCount)
 		pCursor := postingBlobStart + pOffset
-		for j := 0; j < pCount; j++ {
+		for j := range pCount {
 			positions[j] = uint64(binary.LittleEndian.Uint32(data[pCursor : pCursor+PositionSize]))
 			pCursor += PositionSize
 		}
@@ -314,7 +314,7 @@ func DecodeValueIndex[T any](data []byte, dataStart int, newEntry func(value str
 
 		positions := make([]uint64, pCount)
 		pCursor := postingBlobStart + pOffset
-		for j := 0; j < pCount; j++ {
+		for j := range pCount {
 			positions[j] = uint64(binary.LittleEndian.Uint32(data[pCursor : pCursor+PositionSize]))
 			pCursor += PositionSize
 		}
@@ -382,7 +382,7 @@ func DecodeKVIndex[T any](data []byte, dataStart int, newEntry func(key, value s
 
 		positions := make([]uint64, pCount)
 		pCursor := postingBlobStart + pOffset
-		for j := 0; j < pCount; j++ {
+		for j := range pCount {
 			positions[j] = uint64(binary.LittleEndian.Uint32(data[pCursor : pCursor+PositionSize]))
 			pCursor += PositionSize
 		}
