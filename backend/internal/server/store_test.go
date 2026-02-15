@@ -18,11 +18,8 @@ import (
 	"gastrolog/internal/index"
 	indexfile "gastrolog/internal/index/file"
 	indexmem "gastrolog/internal/index/memory"
-	memattr "gastrolog/internal/index/memory/attr"
-	memkv "gastrolog/internal/index/memory/kv"
-	memtoken "gastrolog/internal/index/memory/token"
+	"gastrolog/internal/memtest"
 	"gastrolog/internal/orchestrator"
-	"gastrolog/internal/query"
 	"gastrolog/internal/server"
 
 	"connectrpc.com/connect"
@@ -63,34 +60,24 @@ func newStoreTestSetup(t *testing.T, recordCount int) storeTestClients {
 	orch := orchestrator.New(orchestrator.Config{})
 	defaultID := uuid.Must(uuid.NewV7())
 
-	cm, _ := chunkmem.NewManager(chunkmem.Config{
+	s := memtest.MustNewStore(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(5), // Seal every 5 records.
 	})
-	tokIdx := memtoken.NewIndexer(cm)
-	attrIdx := memattr.NewIndexer(cm)
-	kvIdx := memkv.NewIndexer(cm)
-	im := indexmem.NewManager([]index.Indexer{tokIdx, attrIdx, kvIdx}, tokIdx, attrIdx, kvIdx, nil)
 
 	t0 := time.Now()
 	for i := range recordCount {
-		cm.Append(chunk.Record{
+		s.CM.Append(chunk.Record{
 			IngestTS: t0.Add(time.Duration(i) * time.Second),
 			Attrs:    chunk.Attributes{"env": "test"},
 			Raw:      []byte("test-record"),
 		})
 	}
 
-	// Build indexes for sealed chunks.
-	metas, _ := cm.List()
-	for _, meta := range metas {
-		if meta.Sealed {
-			im.BuildIndexes(context.Background(), meta.ID)
-		}
-	}
+	memtest.BuildIndexes(t, s.CM, s.IM)
 
-	orch.RegisterChunkManager(defaultID, cm)
-	orch.RegisterIndexManager(defaultID, im)
-	orch.RegisterQueryEngine(defaultID, query.New(cm, im, nil))
+	orch.RegisterChunkManager(defaultID, s.CM)
+	orch.RegisterIndexManager(defaultID, s.IM)
+	orch.RegisterQueryEngine(defaultID, s.QE)
 
 	// Set filter so orchestrator knows about the store.
 	filter, _ := orchestrator.CompileFilter(defaultID, "*")

@@ -11,9 +11,7 @@ import (
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/index"
 	indexmem "gastrolog/internal/index/memory"
-	memattr "gastrolog/internal/index/memory/attr"
-	"gastrolog/internal/index/memory/kv"
-	memtoken "gastrolog/internal/index/memory/token"
+	"gastrolog/internal/memtest"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 
@@ -48,32 +46,19 @@ func (t *trackingIndexManager) BuildIndexes(ctx context.Context, chunkID chunk.C
 }
 
 func newTestSetup(maxRecords int64) (*orchestrator.Orchestrator, chunk.ChunkManager, *trackingIndexManager, uuid.UUID) {
-	cm, _ := chunkmem.NewManager(chunkmem.Config{
+	s, _ := memtest.NewStore(chunkmem.Config{
 		RotationPolicy: recordCountPolicy(maxRecords),
 	})
 
-	tokIdx := memtoken.NewIndexer(cm)
-	attrIdx := memattr.NewIndexer(cm)
-	kvIdx := kv.NewIndexer(cm)
-
-	im := indexmem.NewManager(
-		[]index.Indexer{tokIdx, attrIdx, kvIdx},
-		tokIdx,
-		attrIdx,
-		kvIdx,
-		nil,
-	)
-
-	tracker := &trackingIndexManager{IndexManager: im}
-	qe := query.New(cm, im, nil)
+	tracker := &trackingIndexManager{IndexManager: s.IM}
 
 	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterChunkManager(defaultID, cm)
+	orch.RegisterChunkManager(defaultID, s.CM)
 	orch.RegisterIndexManager(defaultID, tracker)
-	orch.RegisterQueryEngine(defaultID, qe)
+	orch.RegisterQueryEngine(defaultID, s.QE)
 
-	return orch, cm, tracker, defaultID
+	return orch, s.CM, tracker, defaultID
 }
 
 func TestIngestReachesChunkManager(t *testing.T) {
@@ -459,31 +444,17 @@ func (r *blockingIngester) Run(ctx context.Context, out chan<- orchestrator.Inge
 }
 
 func newIngesterTestSetup() (*orchestrator.Orchestrator, chunk.ChunkManager) {
-	cm, _ := chunkmem.NewManager(chunkmem.Config{
+	s, _ := memtest.NewStore(chunkmem.Config{
 		RotationPolicy: recordCountPolicy(10000),
 	})
 
-	tokIdx := memtoken.NewIndexer(cm)
-	attrIdx := memattr.NewIndexer(cm)
-	kvIdx := kv.NewIndexer(cm)
-
-	im := indexmem.NewManager(
-		[]index.Indexer{tokIdx, attrIdx, kvIdx},
-		tokIdx,
-		attrIdx,
-		kvIdx,
-		nil,
-	)
-
-	qe := query.New(cm, im, nil)
-
 	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterChunkManager(defaultID, cm)
-	orch.RegisterIndexManager(defaultID, im)
-	orch.RegisterQueryEngine(defaultID, qe)
+	orch.RegisterChunkManager(defaultID, s.CM)
+	orch.RegisterIndexManager(defaultID, s.IM)
+	orch.RegisterQueryEngine(defaultID, s.QE)
 
-	return orch, cm
+	return orch, s.CM
 }
 
 func TestIngesterMessageReachesChunkManager(t *testing.T) {
@@ -622,30 +593,17 @@ func TestStopNotRunning(t *testing.T) {
 
 func TestIngesterIndexBuildOnSeal(t *testing.T) {
 	// Set up with small chunk size to trigger seal.
-	cm, _ := chunkmem.NewManager(chunkmem.Config{
+	s, _ := memtest.NewStore(chunkmem.Config{
 		RotationPolicy: recordCountPolicy(2), // 2 records per chunk
 	})
 
-	tokIdx := memtoken.NewIndexer(cm)
-	attrIdx := memattr.NewIndexer(cm)
-	kvIdx := kv.NewIndexer(cm)
-
-	im := indexmem.NewManager(
-		[]index.Indexer{tokIdx, attrIdx, kvIdx},
-		tokIdx,
-		attrIdx,
-		kvIdx,
-		nil,
-	)
-
-	tracker := &trackingIndexManager{IndexManager: im}
-	qe := query.New(cm, im, nil)
+	tracker := &trackingIndexManager{IndexManager: s.IM}
 
 	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterChunkManager(defaultID, cm)
+	orch.RegisterChunkManager(defaultID, s.CM)
 	orch.RegisterIndexManager(defaultID, tracker)
-	orch.RegisterQueryEngine(defaultID, qe)
+	orch.RegisterQueryEngine(defaultID, s.QE)
 
 	// Create ingester with 3 messages to trigger seal.
 	recv := newMockIngester([]orchestrator.IngestMessage{
@@ -881,37 +839,24 @@ func TestRunningAccessor(t *testing.T) {
 
 func TestRebuildMissingIndexes(t *testing.T) {
 	// Set up with small chunk to seal it.
-	cm, _ := chunkmem.NewManager(chunkmem.Config{
+	s, _ := memtest.NewStore(chunkmem.Config{
 		RotationPolicy: recordCountPolicy(2),
 	})
 
 	// Append 3 records to seal the first chunk.
 	for i := range 3 {
-		cm.Append(chunk.Record{
+		s.CM.Append(chunk.Record{
 			IngestTS: t1.Add(time.Duration(i) * time.Second),
 			Attrs:    attrsA,
 			Raw:      []byte("record"),
 		})
 	}
 
-	// Create fresh indexers that haven't indexed anything.
-	tokIdx := memtoken.NewIndexer(cm)
-	attrIdx := memattr.NewIndexer(cm)
-	kvIdx := kv.NewIndexer(cm)
-
-	im := indexmem.NewManager(
-		[]index.Indexer{tokIdx, attrIdx, kvIdx},
-		tokIdx,
-		attrIdx,
-		kvIdx,
-		nil,
-	)
-
-	tracker := &trackingIndexManager{IndexManager: im}
+	tracker := &trackingIndexManager{IndexManager: s.IM}
 
 	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterChunkManager(defaultID, cm)
+	orch.RegisterChunkManager(defaultID, s.CM)
 	orch.RegisterIndexManager(defaultID, tracker)
 
 	// RebuildMissingIndexes should find the sealed chunk and build indexes.
@@ -971,31 +916,14 @@ func newFilteredTestSetup(t *testing.T) (*orchestrator.Orchestrator, filteredTes
 	orch := orchestrator.New(orchestrator.Config{})
 
 	for _, id := range []uuid.UUID{stores.prod, stores.staging, stores.archive, stores.unrouted} {
-		cm, err := chunkmem.NewManager(chunkmem.Config{
+		s := memtest.MustNewStore(t, chunkmem.Config{
 			RotationPolicy: recordCountPolicy(10000),
 		})
-		if err != nil {
-			t.Fatalf("NewManager failed: %v", err)
-		}
-		stores.cms[id] = cm
+		stores.cms[id] = s.CM
 
-		tokIdx := memtoken.NewIndexer(cm)
-		attrIdx := memattr.NewIndexer(cm)
-		kvIdx := kv.NewIndexer(cm)
-
-		im := indexmem.NewManager(
-			[]index.Indexer{tokIdx, attrIdx, kvIdx},
-			tokIdx,
-			attrIdx,
-			kvIdx,
-			nil,
-		)
-
-		qe := query.New(cm, im, nil)
-
-		orch.RegisterChunkManager(id, cm)
-		orch.RegisterIndexManager(id, im)
-		orch.RegisterQueryEngine(id, qe)
+		orch.RegisterChunkManager(id, s.CM)
+		orch.RegisterIndexManager(id, s.IM)
+		orch.RegisterQueryEngine(id, s.QE)
 	}
 
 	return orch, stores

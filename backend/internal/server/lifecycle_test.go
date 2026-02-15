@@ -12,13 +12,8 @@ import (
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
-	"gastrolog/internal/index"
-	indexmem "gastrolog/internal/index/memory"
-	memattr "gastrolog/internal/index/memory/attr"
-	memkv "gastrolog/internal/index/memory/kv"
-	memtoken "gastrolog/internal/index/memory/token"
+	"gastrolog/internal/memtest"
 	"gastrolog/internal/orchestrator"
-	"gastrolog/internal/query"
 	"gastrolog/internal/server"
 
 	"connectrpc.com/connect"
@@ -29,27 +24,23 @@ func TestDrainWaitsForInFlightRequests(t *testing.T) {
 	// Create orchestrator with a store
 	orch := orchestrator.New(orchestrator.Config{})
 
-	cm, _ := chunkmem.NewManager(chunkmem.Config{
+	s := memtest.MustNewStore(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
 	})
-	tokIdx := memtoken.NewIndexer(cm)
-	attrIdx := memattr.NewIndexer(cm)
-	kvIdx := memkv.NewIndexer(cm)
-	im := indexmem.NewManager([]index.Indexer{tokIdx, attrIdx, kvIdx}, tokIdx, attrIdx, kvIdx, nil)
 
 	// Add some records
 	t0 := time.Now()
 	for i := range 10 {
-		cm.Append(chunk.Record{
+		s.CM.Append(chunk.Record{
 			IngestTS: t0.Add(time.Duration(i) * time.Second),
 			Raw:      []byte("test-record"),
 		})
 	}
 
 	defaultID := uuid.Must(uuid.NewV7())
-	orch.RegisterChunkManager(defaultID, cm)
-	orch.RegisterIndexManager(defaultID, im)
-	orch.RegisterQueryEngine(defaultID, query.New(cm, im, nil))
+	orch.RegisterChunkManager(defaultID, s.CM)
+	orch.RegisterIndexManager(defaultID, s.IM)
+	orch.RegisterQueryEngine(defaultID, s.QE)
 
 	// Create server
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
@@ -125,27 +116,23 @@ func TestDrainRejectsNewRequests(t *testing.T) {
 	// Create orchestrator with a store
 	orch := orchestrator.New(orchestrator.Config{})
 
-	cm, _ := chunkmem.NewManager(chunkmem.Config{
+	s := memtest.MustNewStore(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
 	})
-	tokIdx := memtoken.NewIndexer(cm)
-	attrIdx := memattr.NewIndexer(cm)
-	kvIdx := memkv.NewIndexer(cm)
-	im := indexmem.NewManager([]index.Indexer{tokIdx, attrIdx, kvIdx}, tokIdx, attrIdx, kvIdx, nil)
 
 	// Add some records
 	t0 := time.Now()
 	for i := range 10 {
-		cm.Append(chunk.Record{
+		s.CM.Append(chunk.Record{
 			IngestTS: t0.Add(time.Duration(i) * time.Second),
 			Raw:      []byte("test-record"),
 		})
 	}
 
 	defaultID := uuid.Must(uuid.NewV7())
-	orch.RegisterChunkManager(defaultID, cm)
-	orch.RegisterIndexManager(defaultID, im)
-	orch.RegisterQueryEngine(defaultID, query.New(cm, im, nil))
+	orch.RegisterChunkManager(defaultID, s.CM)
+	orch.RegisterIndexManager(defaultID, s.IM)
+	orch.RegisterQueryEngine(defaultID, s.QE)
 
 	// Create server
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
@@ -213,18 +200,14 @@ func TestShutdownWithoutDrain(t *testing.T) {
 	// Create orchestrator with a store
 	orch := orchestrator.New(orchestrator.Config{})
 
-	cm, _ := chunkmem.NewManager(chunkmem.Config{
+	s := memtest.MustNewStore(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
 	})
-	tokIdx := memtoken.NewIndexer(cm)
-	attrIdx := memattr.NewIndexer(cm)
-	kvIdx := memkv.NewIndexer(cm)
-	im := indexmem.NewManager([]index.Indexer{tokIdx, attrIdx, kvIdx}, tokIdx, attrIdx, kvIdx, nil)
 
 	defaultID := uuid.Must(uuid.NewV7())
-	orch.RegisterChunkManager(defaultID, cm)
-	orch.RegisterIndexManager(defaultID, im)
-	orch.RegisterQueryEngine(defaultID, query.New(cm, im, nil))
+	orch.RegisterChunkManager(defaultID, s.CM)
+	orch.RegisterIndexManager(defaultID, s.IM)
+	orch.RegisterQueryEngine(defaultID, s.QE)
 
 	// Create server
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})

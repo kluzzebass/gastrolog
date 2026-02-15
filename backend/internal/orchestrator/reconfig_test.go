@@ -11,9 +11,7 @@ import (
 	"gastrolog/internal/config"
 	"gastrolog/internal/index"
 	indexmem "gastrolog/internal/index/memory"
-	memattr "gastrolog/internal/index/memory/attr"
-	"gastrolog/internal/index/memory/kv"
-	memtoken "gastrolog/internal/index/memory/token"
+	"gastrolog/internal/memtest"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 
@@ -445,29 +443,15 @@ func TestForceRemoveEmptyStore(t *testing.T) {
 }
 
 func TestAddIngesterWhileRunning(t *testing.T) {
-	cm, _ := chunkmem.NewManager(chunkmem.Config{
+	s := memtest.MustNewStore(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(10000),
 	})
 
-	tokIdx := memtoken.NewIndexer(cm)
-	attrIdx := memattr.NewIndexer(cm)
-	kvIdx := kv.NewIndexer(cm)
-
-	im := indexmem.NewManager(
-		[]index.Indexer{tokIdx, attrIdx, kvIdx},
-		tokIdx,
-		attrIdx,
-		kvIdx,
-		nil,
-	)
-
-	qe := query.New(cm, im, nil)
-
 	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterChunkManager(defaultID, cm)
-	orch.RegisterIndexManager(defaultID, im)
-	orch.RegisterQueryEngine(defaultID, qe)
+	orch.RegisterChunkManager(defaultID, s.CM)
+	orch.RegisterIndexManager(defaultID, s.IM)
+	orch.RegisterQueryEngine(defaultID, s.QE)
 
 	// Set catch-all filter.
 	filter, _ := orchestrator.CompileFilter(defaultID, "*")
@@ -494,7 +478,7 @@ func TestAddIngesterWhileRunning(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Verify message was received.
-	msgs := getRecordMessages(t, cm)
+	msgs := getRecordMessages(t, s.CM)
 	found := slices.Contains(msgs, "dynamic message")
 	if !found {
 		t.Error("dynamic message not found")

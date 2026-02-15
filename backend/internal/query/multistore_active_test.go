@@ -9,10 +9,7 @@ import (
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/index"
-	indexmem "gastrolog/internal/index/memory"
-	memattr "gastrolog/internal/index/memory/attr"
-	memkv "gastrolog/internal/index/memory/kv"
-	memtoken "gastrolog/internal/index/memory/token"
+	"gastrolog/internal/memtest"
 	"gastrolog/internal/query"
 
 	"github.com/google/uuid"
@@ -29,18 +26,14 @@ func TestMultiStoreSearchActiveChunks(t *testing.T) {
 	// Create two stores with ACTIVE (unsealed) chunks
 	for range 2 {
 		storeID := uuid.Must(uuid.NewV7())
-		cm, _ := chunkmem.NewManager(chunkmem.Config{
+		s := memtest.MustNewStore(t, chunkmem.Config{
 			RotationPolicy: chunk.NewRecordCountPolicy(1000),
 		})
-		tokIdx := memtoken.NewIndexer(cm)
-		attrIdx := memattr.NewIndexer(cm)
-		kvIdx := memkv.NewIndexer(cm)
-		im := indexmem.NewManager([]index.Indexer{tokIdx, attrIdx, kvIdx}, tokIdx, attrIdx, kvIdx, nil)
 
 		// Add some records - DO NOT SEAL
 		t0 := time.Now()
 		for i := range 5 {
-			cm.Append(chunk.Record{
+			s.CM.Append(chunk.Record{
 				IngestTS: t0.Add(time.Duration(i) * time.Second),
 				Raw:      fmt.Appendf(nil, "store-%s-record-%d", storeID, i),
 			})
@@ -50,7 +43,7 @@ func TestMultiStoreSearchActiveChunks(t *testing.T) {
 		reg.stores[storeID] = struct {
 			cm chunk.ChunkManager
 			im index.IndexManager
-		}{cm, im}
+		}{s.CM, s.IM}
 	}
 
 	// Create multi-store engine

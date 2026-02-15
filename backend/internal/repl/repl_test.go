@@ -9,13 +9,8 @@ import (
 
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
-	"gastrolog/internal/index"
-	indexmem "gastrolog/internal/index/memory"
-	memattr "gastrolog/internal/index/memory/attr"
-	"gastrolog/internal/index/memory/kv"
-	memtoken "gastrolog/internal/index/memory/token"
+	"gastrolog/internal/memtest"
 	"gastrolog/internal/orchestrator"
-	"gastrolog/internal/query"
 
 	"github.com/google/uuid"
 )
@@ -23,31 +18,18 @@ import (
 func setupTestSystem(t *testing.T) (Client, *orchestrator.Orchestrator, chunk.ChunkManager) {
 	t.Helper()
 
-	// Create memory-based chunk manager.
-	cm, err := chunkmem.NewManager(chunkmem.Config{
+	s := memtest.MustNewStore(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(10000),
 	})
-	if err != nil {
-		t.Fatalf("create chunk manager: %v", err)
-	}
-
-	// Create memory-based index manager.
-	tokIdx := memtoken.NewIndexer(cm)
-	attrIdx := memattr.NewIndexer(cm)
-	kvIdx := kv.NewIndexer(cm)
-	im := indexmem.NewManager([]index.Indexer{tokIdx, attrIdx, kvIdx}, tokIdx, attrIdx, kvIdx, nil)
-
-	// Create query engine.
-	qe := query.New(cm, im, nil)
 
 	// Create orchestrator.
 	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterChunkManager(defaultID, cm)
-	orch.RegisterIndexManager(defaultID, im)
-	orch.RegisterQueryEngine(defaultID, qe)
+	orch.RegisterChunkManager(defaultID, s.CM)
+	orch.RegisterIndexManager(defaultID, s.IM)
+	orch.RegisterQueryEngine(defaultID, s.QE)
 
-	return NewEmbeddedClient(orch), orch, cm
+	return NewEmbeddedClient(orch), orch, s.CM
 }
 
 func TestREPL_Help(t *testing.T) {

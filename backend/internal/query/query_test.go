@@ -8,11 +8,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
-	"gastrolog/internal/index"
-	indexmem "gastrolog/internal/index/memory"
-	memattr "gastrolog/internal/index/memory/attr"
-	"gastrolog/internal/index/memory/kv"
-	memtoken "gastrolog/internal/index/memory/token"
+	"gastrolog/internal/memtest"
 	"gastrolog/internal/query"
 )
 
@@ -36,22 +32,6 @@ func search(eng *query.Engine, ctx context.Context, q query.Query) func(yield fu
 	return seq
 }
 
-// buildIndexes builds indexes for all sealed chunks.
-func buildIndexes(t *testing.T, cm chunk.ChunkManager, im index.IndexManager) {
-	t.Helper()
-	metas, err := cm.List()
-	if err != nil {
-		t.Fatalf("list chunks: %v", err)
-	}
-	for _, m := range metas {
-		if !m.Sealed {
-			continue
-		}
-		if err := im.BuildIndexes(context.Background(), m.ID); err != nil {
-			t.Fatalf("build indexes for %s: %v", m.ID, err)
-		}
-	}
-}
 
 var (
 	t0 = time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -92,40 +72,25 @@ func fakeClockForBatches(batches [][]chunk.Record) func() time.Time {
 func setup(t *testing.T, batches ...[]chunk.Record) *query.Engine {
 	t.Helper()
 
-	cm, err := chunkmem.NewManager(chunkmem.Config{
+	s := memtest.MustNewStore(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(10000), // Large enough to not auto-rotate
 		Now:            fakeClockForBatches(batches),
 	})
-	if err != nil {
-		t.Fatalf("new chunk manager: %v", err)
-	}
 
 	for _, records := range batches {
 		for _, rec := range records {
-			if _, _, err := cm.Append(rec); err != nil {
+			if _, _, err := s.CM.Append(rec); err != nil {
 				t.Fatalf("append: %v", err)
 			}
 		}
-		if err := cm.Seal(); err != nil {
+		if err := s.CM.Seal(); err != nil {
 			t.Fatalf("seal: %v", err)
 		}
 	}
 
-	tokIdx := memtoken.NewIndexer(cm)
-	attrIdx := memattr.NewIndexer(cm)
-	kvIdx := kv.NewIndexer(cm)
+	memtest.BuildIndexes(t, s.CM, s.IM)
 
-	im := indexmem.NewManager(
-		[]index.Indexer{tokIdx, attrIdx, kvIdx},
-		tokIdx,
-		attrIdx,
-		kvIdx,
-		nil,
-	)
-
-	buildIndexes(t, cm, im)
-
-	return query.New(cm, im, nil)
+	return s.QE
 }
 
 // setupWithActive is like setup but leaves the last batch unsealed (active chunk).
@@ -134,47 +99,32 @@ func setupWithActive(t *testing.T, sealed [][]chunk.Record, active []chunk.Recor
 
 	// Combine sealed batches with active batch for clock generation
 	allBatches := append(sealed, active)
-	cm, err := chunkmem.NewManager(chunkmem.Config{
+	s := memtest.MustNewStore(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(10000),
 		Now:            fakeClockForBatches(allBatches),
 	})
-	if err != nil {
-		t.Fatalf("new chunk manager: %v", err)
-	}
 
 	for _, records := range sealed {
 		for _, rec := range records {
-			if _, _, err := cm.Append(rec); err != nil {
+			if _, _, err := s.CM.Append(rec); err != nil {
 				t.Fatalf("append: %v", err)
 			}
 		}
-		if err := cm.Seal(); err != nil {
+		if err := s.CM.Seal(); err != nil {
 			t.Fatalf("seal: %v", err)
 		}
 	}
 
 	// Append active chunk records without sealing.
 	for _, rec := range active {
-		if _, _, err := cm.Append(rec); err != nil {
+		if _, _, err := s.CM.Append(rec); err != nil {
 			t.Fatalf("append: %v", err)
 		}
 	}
 
-	tokIdx := memtoken.NewIndexer(cm)
-	attrIdx := memattr.NewIndexer(cm)
-	kvIdx := kv.NewIndexer(cm)
+	memtest.BuildIndexes(t, s.CM, s.IM)
 
-	im := indexmem.NewManager(
-		[]index.Indexer{tokIdx, attrIdx, kvIdx},
-		tokIdx,
-		attrIdx,
-		kvIdx,
-		nil,
-	)
-
-	buildIndexes(t, cm, im)
-
-	return query.New(cm, im, nil)
+	return s.QE
 }
 
 func TestSearchNoChunks(t *testing.T) {
@@ -1903,39 +1853,24 @@ func TestSearchSealedWithoutIndexes(t *testing.T) {
 	}
 
 	// Create chunk manager and append records.
-	cm, err := chunkmem.NewManager(chunkmem.Config{
+	s := memtest.MustNewStore(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(10000),
 		Now:            fakeClockForBatches([][]chunk.Record{records}),
 	})
-	if err != nil {
-		t.Fatalf("new chunk manager: %v", err)
-	}
 
 	for _, rec := range records {
-		if _, _, err := cm.Append(rec); err != nil {
+		if _, _, err := s.CM.Append(rec); err != nil {
 			t.Fatalf("append: %v", err)
 		}
 	}
 
 	// Seal the chunk but DO NOT build indexes.
-	if err := cm.Seal(); err != nil {
+	if err := s.CM.Seal(); err != nil {
 		t.Fatalf("seal: %v", err)
 	}
+	// Note: NOT calling BuildIndexes - indexes don't exist.
 
-	// Create index manager that will return ErrIndexNotFound.
-	tokIdx := memtoken.NewIndexer(cm)
-	attrIdx := memattr.NewIndexer(cm)
-	kvIdx := kv.NewIndexer(cm)
-	im := indexmem.NewManager(
-		[]index.Indexer{tokIdx, attrIdx, kvIdx},
-		tokIdx,
-		attrIdx,
-		kvIdx,
-		nil,
-	)
-	// Note: NOT calling buildIndexes - indexes don't exist.
-
-	eng := query.New(cm, im, nil)
+	eng := s.QE
 
 	// Query with time filter - should fall back to sequential scan.
 	t.Run("time filter", func(t *testing.T) {
