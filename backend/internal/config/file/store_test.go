@@ -9,6 +9,8 @@ import (
 
 	"gastrolog/internal/config"
 	"gastrolog/internal/config/storetest"
+
+	"github.com/google/uuid"
 )
 
 // newTestStore creates a Store with config and users paths in the given directory.
@@ -32,7 +34,8 @@ func TestStoreCreatesDirectory(t *testing.T) {
 	s := NewStore(configPath, filepath.Join(dir, "users.json"))
 	ctx := context.Background()
 
-	if err := s.PutIngester(ctx, config.IngesterConfig{ID: "r1", Type: "test"}); err != nil {
+	ingesterID := uuid.Must(uuid.NewV7())
+	if err := s.PutIngester(ctx, config.IngesterConfig{ID: ingesterID, Type: "test"}); err != nil {
 		t.Fatalf("PutIngester: %v", err)
 	}
 
@@ -83,8 +86,9 @@ func TestStoreJSONIsHumanReadable(t *testing.T) {
 	s := newTestStore(dir)
 	ctx := context.Background()
 
+	syslogID := uuid.Must(uuid.NewV7())
 	if err := s.PutIngester(ctx, config.IngesterConfig{
-		ID: "syslog1", Type: "syslog-udp", Params: map[string]string{"port": "514"},
+		ID: syslogID, Type: "syslog-udp", Params: map[string]string{"port": "514"},
 	}); err != nil {
 		t.Fatalf("PutIngester: %v", err)
 	}
@@ -109,20 +113,21 @@ func TestStoreReloadFromDisk(t *testing.T) {
 	s1 := newTestStore(dir)
 	ctx := context.Background()
 
-	if err := s1.PutIngester(ctx, config.IngesterConfig{ID: "r1", Type: "test"}); err != nil {
+	ingesterID := uuid.Must(uuid.NewV7())
+	if err := s1.PutIngester(ctx, config.IngesterConfig{ID: ingesterID, Type: "test"}); err != nil {
 		t.Fatalf("PutIngester: %v", err)
 	}
 
 	// Create new store pointing at same files.
 	s2 := newTestStore(dir)
-	got, err := s2.GetIngester(ctx, "r1")
+	got, err := s2.GetIngester(ctx, ingesterID)
 	if err != nil {
 		t.Fatalf("GetIngester from new store: %v", err)
 	}
 	if got == nil {
 		t.Fatal("expected ingester from new store, got nil")
 	}
-	if got.ID != "r1" {
-		t.Errorf("expected ID %q, got %q", "r1", got.ID)
+	if got.ID != ingesterID {
+		t.Errorf("expected ID %v, got %v", ingesterID, got.ID)
 	}
 }

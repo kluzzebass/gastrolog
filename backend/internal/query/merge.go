@@ -5,11 +5,13 @@ import (
 	"errors"
 
 	"gastrolog/internal/chunk"
+
+	"github.com/google/uuid"
 )
 
 // cursorEntry represents a cursor with its current record in the merge heap.
 type cursorEntry struct {
-	storeID string
+	storeID uuid.UUID
 	chunkID chunk.ChunkID
 	cursor  chunk.RecordCursor
 	rec     chunk.Record

@@ -8,6 +8,8 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
+
+	"github.com/google/uuid"
 )
 
 // ---------- fake chunk manager ----------
@@ -102,7 +104,7 @@ func chunkIDAt(_ time.Time) chunk.ChunkID {
 
 func newRetentionRunner(cm chunk.ChunkManager, im index.IndexManager, policy chunk.RetentionPolicy) *retentionRunner {
 	return &retentionRunner{
-		storeID: "test-store",
+		storeID: uuid.Must(uuid.NewV7()),
 		cm:      cm,
 		im:      im,
 		policy:  policy,

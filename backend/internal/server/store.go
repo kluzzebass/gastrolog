@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
@@ -35,13 +36,23 @@ func NewStoreServer(orch *orchestrator.Orchestrator, cfgStore config.Store, fact
 
 func (s *StoreServer) now() time.Time { return time.Now() }
 
+// parseUUID parses a string into a uuid.UUID, returning a connect error on failure.
+func parseUUID(s string) (uuid.UUID, *connect.Error) {
+	id, err := uuid.Parse(s)
+	if err != nil {
+		return uuid.Nil, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("invalid ID %q: %w", s, err))
+	}
+	return id, nil
+}
+
 // storeName returns the human-readable name for a store, falling back to the ID.
-func (s *StoreServer) storeName(ctx context.Context, id string) string {
+func (s *StoreServer) storeName(ctx context.Context, id uuid.UUID) string {
 	cfg, err := s.getFullStoreConfig(ctx, id)
 	if err == nil && cfg.Name != "" {
 		return cfg.Name
 	}
-	return id
+	return id.String()
 }
 
 // ListStores returns all registered stores.
@@ -71,7 +82,11 @@ func (s *StoreServer) GetStore(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetStoreRequest],
 ) (*connect.Response[apiv1.GetStoreResponse], error) {
-	info, err := s.getStoreInfo(ctx, req.Msg.Id)
+	id, connErr := parseUUID(req.Msg.Id)
+	if connErr != nil {
+		return nil, connErr
+	}
+	info, err := s.getStoreInfo(ctx, id)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)
 	}
@@ -84,12 +99,15 @@ func (s *StoreServer) ListChunks(
 	ctx context.Context,
 	req *connect.Request[apiv1.ListChunksRequest],
 ) (*connect.Response[apiv1.ListChunksResponse], error) {
-	store := req.Msg.Store
-	if store == "" {
-		store = "default"
+	if req.Msg.Store == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store required"))
+	}
+	storeID, connErr := parseUUID(req.Msg.Store)
+	if connErr != nil {
+		return nil, connErr
 	}
 
-	cm := s.orch.ChunkManager(store)
+	cm := s.orch.ChunkManager(storeID)
 	if cm == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
 	}
@@ -115,12 +133,15 @@ func (s *StoreServer) GetChunk(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetChunkRequest],
 ) (*connect.Response[apiv1.GetChunkResponse], error) {
-	store := req.Msg.Store
-	if store == "" {
-		store = "default"
+	if req.Msg.Store == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store required"))
+	}
+	storeID, connErr := parseUUID(req.Msg.Store)
+	if connErr != nil {
+		return nil, connErr
 	}
 
-	cm := s.orch.ChunkManager(store)
+	cm := s.orch.ChunkManager(storeID)
 	if cm == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
 	}
@@ -145,13 +166,16 @@ func (s *StoreServer) GetIndexes(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetIndexesRequest],
 ) (*connect.Response[apiv1.GetIndexesResponse], error) {
-	store := req.Msg.Store
-	if store == "" {
-		store = "default"
+	if req.Msg.Store == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store required"))
+	}
+	storeID, connErr := parseUUID(req.Msg.Store)
+	if connErr != nil {
+		return nil, connErr
 	}
 
-	cm := s.orch.ChunkManager(store)
-	im := s.orch.IndexManager(store)
+	cm := s.orch.ChunkManager(storeID)
+	im := s.orch.IndexManager(storeID)
 	if cm == nil || im == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
 	}
@@ -244,13 +268,16 @@ func (s *StoreServer) AnalyzeChunk(
 	ctx context.Context,
 	req *connect.Request[apiv1.AnalyzeChunkRequest],
 ) (*connect.Response[apiv1.AnalyzeChunkResponse], error) {
-	store := req.Msg.Store
-	if store == "" {
-		store = "default"
+	if req.Msg.Store == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store required"))
+	}
+	storeID, connErr := parseUUID(req.Msg.Store)
+	if connErr != nil {
+		return nil, connErr
 	}
 
-	cm := s.orch.ChunkManager(store)
-	im := s.orch.IndexManager(store)
+	cm := s.orch.ChunkManager(storeID)
+	im := s.orch.IndexManager(storeID)
 	if cm == nil || im == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
 	}
@@ -335,10 +362,14 @@ func (s *StoreServer) GetStats(
 	stores := s.orch.ListStores()
 	if req.Msg.Store != "" {
 		// Filter to specific store
+		storeID, connErr := parseUUID(req.Msg.Store)
+		if connErr != nil {
+			return nil, connErr
+		}
 		found := false
 		for _, id := range stores {
-			if id == req.Msg.Store {
-				stores = []string{id}
+			if id == storeID {
+				stores = []uuid.UUID{storeID}
 				found = true
 				break
 			}
@@ -362,7 +393,7 @@ func (s *StoreServer) GetStats(
 		}
 
 		storeStat := &apiv1.StoreStats{
-			Id:         storeID,
+			Id:         storeID.String(),
 			ChunkCount: int64(len(metas)),
 			Enabled:    s.orch.IsStoreEnabled(storeID),
 		}
@@ -426,18 +457,21 @@ func (s *StoreServer) ReindexStore(
 	ctx context.Context,
 	req *connect.Request[apiv1.ReindexStoreRequest],
 ) (*connect.Response[apiv1.ReindexStoreResponse], error) {
-	store := req.Msg.Store
-	if store == "" {
+	if req.Msg.Store == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store required"))
 	}
+	storeID, connErr := parseUUID(req.Msg.Store)
+	if connErr != nil {
+		return nil, connErr
+	}
 
-	cm := s.orch.ChunkManager(store)
-	im := s.orch.IndexManager(store)
+	cm := s.orch.ChunkManager(storeID)
+	im := s.orch.IndexManager(storeID)
 	if cm == nil || im == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
 	}
 
-	jobName := "reindex:" + store
+	jobName := "reindex:" + storeID.String()
 	jobID := s.orch.Scheduler().Submit(jobName, func(ctx context.Context, job *orchestrator.JobProgress) {
 		metas, err := cm.List()
 		if err != nil {
@@ -468,7 +502,7 @@ func (s *StoreServer) ReindexStore(
 			job.IncrChunks()
 		}
 	})
-	s.orch.Scheduler().Describe(jobName, fmt.Sprintf("Rebuild all indexes for '%s'", s.storeName(ctx, store)))
+	s.orch.Scheduler().Describe(jobName, fmt.Sprintf("Rebuild all indexes for '%s'", s.storeName(ctx, storeID)))
 
 	return connect.NewResponse(&apiv1.ReindexStoreResponse{JobId: jobID}), nil
 }
@@ -478,13 +512,16 @@ func (s *StoreServer) ValidateStore(
 	ctx context.Context,
 	req *connect.Request[apiv1.ValidateStoreRequest],
 ) (*connect.Response[apiv1.ValidateStoreResponse], error) {
-	store := req.Msg.Store
-	if store == "" {
+	if req.Msg.Store == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store required"))
 	}
+	storeID, connErr := parseUUID(req.Msg.Store)
+	if connErr != nil {
+		return nil, connErr
+	}
 
-	cm := s.orch.ChunkManager(store)
-	im := s.orch.IndexManager(store)
+	cm := s.orch.ChunkManager(storeID)
+	im := s.orch.IndexManager(storeID)
 	if cm == nil || im == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
 	}
@@ -564,18 +601,20 @@ func (s *StoreServer) MigrateStore(
 	if req.Msg.Destination == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("destination required"))
 	}
-	if req.Msg.Source == req.Msg.Destination {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("source and destination must differ"))
+
+	srcID, connErr := parseUUID(req.Msg.Source)
+	if connErr != nil {
+		return nil, connErr
 	}
 
 	// Source must exist.
-	srcCM := s.orch.ChunkManager(req.Msg.Source)
+	srcCM := s.orch.ChunkManager(srcID)
 	if srcCM == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("source store not found"))
 	}
 
 	// Get source config for filter/policy and to resolve destination type.
-	srcCfg, err := s.getFullStoreConfig(ctx, req.Msg.Source)
+	srcCfg, err := s.getFullStoreConfig(ctx, srcID)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("read source config: %w", err))
 	}
@@ -597,7 +636,8 @@ func (s *StoreServer) MigrateStore(
 
 	// Phase 1: Create destination store with inherited filter/policy.
 	dstCfg := config.StoreConfig{
-		ID:        req.Msg.Destination,
+		ID:        uuid.Must(uuid.NewV7()),
+		Name:      req.Msg.Destination,
 		Type:      dstType,
 		Filter:    srcCfg.Filter,
 		Policy:    srcCfg.Policy,
@@ -611,7 +651,7 @@ func (s *StoreServer) MigrateStore(
 	}
 
 	// Phase 2: Freeze source — disable ingestion and persist.
-	if err := s.orch.DisableStore(req.Msg.Source); err != nil {
+	if err := s.orch.DisableStore(srcID); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("disable source: %w", err))
 	}
 	if s.cfgStore != nil {
@@ -629,8 +669,7 @@ func (s *StoreServer) MigrateStore(
 	}
 
 	// Phase 3: Async merge + delete.
-	srcID := req.Msg.Source
-	dstID := req.Msg.Destination
+	dstID := dstCfg.ID
 	srcName := s.storeName(ctx, srcID)
 
 	// Capture file dir before the job runs (source config will be deleted).
@@ -645,7 +684,7 @@ func (s *StoreServer) MigrateStore(
 	_, dstMovable := dstCM.(chunk.ChunkMover)
 	canMoveChunks := srcMovable && dstMovable
 
-	jobName := "migrate:" + srcID + "->" + dstID
+	jobName := "migrate:" + srcID.String() + "->" + dstID.String()
 	jobID := s.orch.Scheduler().Submit(jobName, func(ctx context.Context, job *orchestrator.JobProgress) {
 		var mergeErr error
 		if canMoveChunks {
@@ -683,12 +722,15 @@ func (s *StoreServer) ExportStore(
 	req *connect.Request[apiv1.ExportStoreRequest],
 	stream *connect.ServerStream[apiv1.ExportStoreResponse],
 ) error {
-	store := req.Msg.Store
-	if store == "" {
+	if req.Msg.Store == "" {
 		return connect.NewError(connect.CodeInvalidArgument, errors.New("store required"))
 	}
+	storeID, connErr := parseUUID(req.Msg.Store)
+	if connErr != nil {
+		return connErr
+	}
 
-	cm := s.orch.ChunkManager(store)
+	cm := s.orch.ChunkManager(storeID)
 	if cm == nil {
 		return connect.NewError(connect.CodeNotFound, errors.New("store not found"))
 	}
@@ -765,12 +807,15 @@ func (s *StoreServer) ImportRecords(
 	ctx context.Context,
 	req *connect.Request[apiv1.ImportRecordsRequest],
 ) (*connect.Response[apiv1.ImportRecordsResponse], error) {
-	store := req.Msg.Store
-	if store == "" {
+	if req.Msg.Store == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store required"))
 	}
+	storeID, connErr := parseUUID(req.Msg.Store)
+	if connErr != nil {
+		return nil, connErr
+	}
 
-	cm := s.orch.ChunkManager(store)
+	cm := s.orch.ChunkManager(storeID)
 	if cm == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
 	}
@@ -806,7 +851,7 @@ func (s *StoreServer) ImportRecords(
 
 // getFullStoreConfig retrieves store config from the config store (with type/params),
 // falling back to the orchestrator's limited config.
-func (s *StoreServer) getFullStoreConfig(ctx context.Context, id string) (config.StoreConfig, error) {
+func (s *StoreServer) getFullStoreConfig(ctx context.Context, id uuid.UUID) (config.StoreConfig, error) {
 	if s.cfgStore != nil {
 		cfg, err := s.cfgStore.GetStore(ctx, id)
 		if err == nil && cfg != nil {
@@ -848,7 +893,7 @@ func (s *StoreServer) createStore(ctx context.Context, cfg config.StoreConfig) *
 }
 
 // copyRecords copies all records from source to destination store, returning counts.
-func (s *StoreServer) copyRecords(ctx context.Context, srcID, dstID string) (recordsCopied, chunksCreated int64, err error) {
+func (s *StoreServer) copyRecords(ctx context.Context, srcID, dstID uuid.UUID) (recordsCopied, chunksCreated int64, err error) {
 	srcCM := s.orch.ChunkManager(srcID)
 	dstCM := s.orch.ChunkManager(dstID)
 	dstIM := s.orch.IndexManager(dstID)
@@ -913,7 +958,7 @@ func (s *StoreServer) copyRecords(ctx context.Context, srcID, dstID string) (rec
 
 // copyRecordsTracked copies all records from source to destination, reporting
 // progress via the tracked job.
-func (s *StoreServer) copyRecordsTracked(ctx context.Context, srcID, dstID string, job *orchestrator.JobProgress) error {
+func (s *StoreServer) copyRecordsTracked(ctx context.Context, srcID, dstID uuid.UUID, job *orchestrator.JobProgress) error {
 	srcCM := s.orch.ChunkManager(srcID)
 	dstCM := s.orch.ChunkManager(dstID)
 	dstIM := s.orch.IndexManager(dstID)
@@ -975,7 +1020,7 @@ func (s *StoreServer) copyRecordsTracked(ctx context.Context, srcID, dstID strin
 	return nil
 }
 
-func (s *StoreServer) getStoreInfo(ctx context.Context, id string) (*apiv1.StoreInfo, error) {
+func (s *StoreServer) getStoreInfo(ctx context.Context, id uuid.UUID) (*apiv1.StoreInfo, error) {
 	cm := s.orch.ChunkManager(id)
 	if cm == nil {
 		return nil, errors.New("store not found")
@@ -995,7 +1040,7 @@ func (s *StoreServer) getStoreInfo(ctx context.Context, id string) (*apiv1.Store
 	cfg, _ := s.getFullStoreConfig(ctx, id)
 
 	info := &apiv1.StoreInfo{
-		Id:          id,
+		Id:          id.String(),
 		Name:        cfg.Name,
 		Type:        cfg.Type,
 		ChunkCount:  int64(len(metas)),
@@ -1003,7 +1048,7 @@ func (s *StoreServer) getStoreInfo(ctx context.Context, id string) (*apiv1.Store
 		Enabled:     s.orch.IsStoreEnabled(id),
 	}
 	if cfg.Filter != nil {
-		info.Filter = *cfg.Filter
+		info.Filter = cfg.Filter.String()
 	}
 	return info, nil
 }
@@ -1024,9 +1069,18 @@ func (s *StoreServer) MergeStores(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("source and destination must differ"))
 	}
 
+	srcID, connErr := parseUUID(req.Msg.Source)
+	if connErr != nil {
+		return nil, connErr
+	}
+	dstID, connErr := parseUUID(req.Msg.Destination)
+	if connErr != nil {
+		return nil, connErr
+	}
+
 	// Both stores must exist.
-	srcCM := s.orch.ChunkManager(req.Msg.Source)
-	dstCM := s.orch.ChunkManager(req.Msg.Destination)
+	srcCM := s.orch.ChunkManager(srcID)
+	dstCM := s.orch.ChunkManager(dstID)
 	if srcCM == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("source store not found"))
 	}
@@ -1035,12 +1089,12 @@ func (s *StoreServer) MergeStores(
 	}
 
 	// Auto-disable source to prevent new data flowing in during merge.
-	if s.orch.IsStoreEnabled(req.Msg.Source) {
-		if err := s.orch.DisableStore(req.Msg.Source); err != nil {
+	if s.orch.IsStoreEnabled(srcID) {
+		if err := s.orch.DisableStore(srcID); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("disable source: %w", err))
 		}
 		if s.cfgStore != nil {
-			srcCfg, err := s.getFullStoreConfig(ctx, req.Msg.Source)
+			srcCfg, err := s.getFullStoreConfig(ctx, srcID)
 			if err == nil {
 				srcCfg.Enabled = false
 				_ = s.cfgStore.PutStore(ctx, srcCfg)
@@ -1054,16 +1108,13 @@ func (s *StoreServer) MergeStores(
 	_, dstMovable := dstCM.(chunk.ChunkMover)
 	canMoveChunks := srcMovable && dstMovable
 
-	srcID := req.Msg.Source
-	dstID := req.Msg.Destination
-
 	// Capture source file dir before job runs (source config will be deleted).
 	var srcFileDir string
 	if srcCfg, err := s.getFullStoreConfig(ctx, srcID); err == nil && srcCfg.Type == "file" {
 		srcFileDir = srcCfg.Params[chunkfile.ParamDir]
 	}
 
-	jobName := "merge:" + srcID + "->" + dstID
+	jobName := "merge:" + srcID.String() + "->" + dstID.String()
 	jobID := s.orch.Scheduler().Submit(jobName, func(ctx context.Context, job *orchestrator.JobProgress) {
 		// Seal source's active chunk before merging.
 		srcCM := s.orch.ChunkManager(srcID)
@@ -1109,7 +1160,7 @@ func (s *StoreServer) MergeStores(
 // moveChunksTracked moves sealed chunks from source to destination by
 // moving chunk directories on the filesystem. This preserves all record
 // timestamps (including WriteTS) since no records are rewritten.
-func (s *StoreServer) moveChunksTracked(ctx context.Context, srcID, dstID string, job *orchestrator.JobProgress) error {
+func (s *StoreServer) moveChunksTracked(ctx context.Context, srcID, dstID uuid.UUID, job *orchestrator.JobProgress) error {
 	srcCM := s.orch.ChunkManager(srcID)
 	dstCM := s.orch.ChunkManager(dstID)
 	dstIM := s.orch.IndexManager(dstID)

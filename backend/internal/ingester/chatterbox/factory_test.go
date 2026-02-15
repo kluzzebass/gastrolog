@@ -2,10 +2,12 @@ package chatterbox
 
 import (
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestNewIngesterDefaults(t *testing.T) {
-	r, err := NewIngester("test", nil, nil)
+	r, err := NewIngester(uuid.New(), nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -32,7 +34,7 @@ func TestNewIngesterCustomIntervals(t *testing.T) {
 		"maxInterval": "500ms",
 	}
 
-	r, err := NewIngester("test", params, nil)
+	r, err := NewIngester(uuid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -51,7 +53,7 @@ func TestNewIngesterInvalidMinInterval(t *testing.T) {
 		"minInterval": "not-a-duration",
 	}
 
-	_, err := NewIngester("test", params, nil)
+	_, err := NewIngester(uuid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for invalid minInterval")
 	}
@@ -62,7 +64,7 @@ func TestNewIngesterInvalidMaxInterval(t *testing.T) {
 		"maxInterval": "not-a-duration",
 	}
 
-	_, err := NewIngester("test", params, nil)
+	_, err := NewIngester(uuid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for invalid maxInterval")
 	}
@@ -73,7 +75,7 @@ func TestNewIngesterNegativeInterval(t *testing.T) {
 		"minInterval": "-1s",
 	}
 
-	_, err := NewIngester("test", params, nil)
+	_, err := NewIngester(uuid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for negative minInterval")
 	}
@@ -82,7 +84,7 @@ func TestNewIngesterNegativeInterval(t *testing.T) {
 		"maxInterval": "-1s",
 	}
 
-	_, err = NewIngester("test", params, nil)
+	_, err = NewIngester(uuid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for negative maxInterval")
 	}
@@ -94,7 +96,7 @@ func TestNewIngesterMinExceedsMax(t *testing.T) {
 		"maxInterval": "1s",
 	}
 
-	_, err := NewIngester("test", params, nil)
+	_, err := NewIngester(uuid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error when minInterval > maxInterval")
 	}
@@ -105,7 +107,7 @@ func TestNewIngesterCustomHostCount(t *testing.T) {
 		"hostCount": "20",
 	}
 
-	_, err := NewIngester("test", params, nil)
+	_, err := NewIngester(uuid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -116,7 +118,7 @@ func TestNewIngesterInvalidHostCount(t *testing.T) {
 		"hostCount": "not-a-number",
 	}
 
-	_, err := NewIngester("test", params, nil)
+	_, err := NewIngester(uuid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for invalid hostCount")
 	}
@@ -125,7 +127,7 @@ func TestNewIngesterInvalidHostCount(t *testing.T) {
 		"hostCount": "0",
 	}
 
-	_, err = NewIngester("test", params, nil)
+	_, err = NewIngester(uuid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for zero hostCount")
 	}
@@ -134,7 +136,7 @@ func TestNewIngesterInvalidHostCount(t *testing.T) {
 		"hostCount": "-1",
 	}
 
-	_, err = NewIngester("test", params, nil)
+	_, err = NewIngester(uuid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for negative hostCount")
 	}
@@ -145,7 +147,7 @@ func TestNewIngesterCustomServiceCount(t *testing.T) {
 		"serviceCount": "15",
 	}
 
-	_, err := NewIngester("test", params, nil)
+	_, err := NewIngester(uuid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -156,7 +158,7 @@ func TestNewIngesterInvalidServiceCount(t *testing.T) {
 		"serviceCount": "not-a-number",
 	}
 
-	_, err := NewIngester("test", params, nil)
+	_, err := NewIngester(uuid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for invalid serviceCount")
 	}
@@ -165,7 +167,7 @@ func TestNewIngesterInvalidServiceCount(t *testing.T) {
 		"serviceCount": "0",
 	}
 
-	_, err = NewIngester("test", params, nil)
+	_, err = NewIngester(uuid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for zero serviceCount")
 	}
@@ -176,7 +178,7 @@ func TestNewIngesterCustomFormats(t *testing.T) {
 		"formats": "plain,json,kv",
 	}
 
-	r, err := NewIngester("test", params, nil)
+	r, err := NewIngester(uuid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -192,7 +194,7 @@ func TestNewIngesterSingleFormat(t *testing.T) {
 		"formats": "json",
 	}
 
-	r, err := NewIngester("test", params, nil)
+	r, err := NewIngester(uuid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -208,7 +210,7 @@ func TestNewIngesterUnknownFormat(t *testing.T) {
 		"formats": "plain,unknown,json",
 	}
 
-	_, err := NewIngester("test", params, nil)
+	_, err := NewIngester(uuid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for unknown format")
 	}
@@ -219,7 +221,7 @@ func TestNewIngesterEmptyFormatsString(t *testing.T) {
 		"formats": "   ",
 	}
 
-	_, err := NewIngester("test", params, nil)
+	_, err := NewIngester(uuid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for empty formats string")
 	}
@@ -230,7 +232,7 @@ func TestNewIngesterDuplicateFormats(t *testing.T) {
 		"formats": "plain,json,plain,json",
 	}
 
-	r, err := NewIngester("test", params, nil)
+	r, err := NewIngester(uuid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -247,7 +249,7 @@ func TestNewIngesterCustomWeights(t *testing.T) {
 		"formatWeights": "plain=30,json=20,kv=50",
 	}
 
-	r, err := NewIngester("test", params, nil)
+	r, err := NewIngester(uuid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -265,7 +267,7 @@ func TestNewIngesterPartialWeights(t *testing.T) {
 		"formatWeights": "plain=10",
 	}
 
-	r, err := NewIngester("test", params, nil)
+	r, err := NewIngester(uuid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -283,7 +285,7 @@ func TestNewIngesterInvalidWeightFormat(t *testing.T) {
 		"formatWeights": "plain:10", // Wrong separator.
 	}
 
-	_, err := NewIngester("test", params, nil)
+	_, err := NewIngester(uuid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for invalid weight format")
 	}
@@ -295,7 +297,7 @@ func TestNewIngesterInvalidWeightValue(t *testing.T) {
 		"formatWeights": "plain=abc",
 	}
 
-	_, err := NewIngester("test", params, nil)
+	_, err := NewIngester(uuid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for non-numeric weight")
 	}
@@ -307,7 +309,7 @@ func TestNewIngesterZeroWeight(t *testing.T) {
 		"formatWeights": "plain=0",
 	}
 
-	_, err := NewIngester("test", params, nil)
+	_, err := NewIngester(uuid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for zero weight")
 	}
@@ -319,7 +321,7 @@ func TestNewIngesterNegativeWeight(t *testing.T) {
 		"formatWeights": "plain=-5",
 	}
 
-	_, err := NewIngester("test", params, nil)
+	_, err := NewIngester(uuid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for negative weight")
 	}
@@ -331,7 +333,7 @@ func TestNewIngesterUnknownFormatInWeights(t *testing.T) {
 		"formatWeights": "unknown=10",
 	}
 
-	_, err := NewIngester("test", params, nil)
+	_, err := NewIngester(uuid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for unknown format in weights")
 	}

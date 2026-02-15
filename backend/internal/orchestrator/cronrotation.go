@@ -5,10 +5,12 @@ import (
 	"log/slog"
 
 	"gastrolog/internal/chunk"
+
+	"github.com/google/uuid"
 )
 
 // cronJobName returns the scheduler job name for a store's cron rotation.
-func cronJobName(storeID string) string {
+func cronJobName(storeID uuid.UUID) string {
 	return fmt.Sprintf("cron-rotate:%s", storeID)
 }
 
@@ -28,7 +30,7 @@ func newCronRotationManager(scheduler *Scheduler, logger *slog.Logger) *cronRota
 }
 
 // addJob registers a cron rotation job for a store.
-func (m *cronRotationManager) addJob(storeID, storeName, cronExpr string, cm chunk.ChunkManager) error {
+func (m *cronRotationManager) addJob(storeID uuid.UUID, storeName, cronExpr string, cm chunk.ChunkManager) error {
 	name := cronJobName(storeID)
 	if err := m.scheduler.AddJob(name, cronExpr, m.rotateStore, storeID, cm); err != nil {
 		return err
@@ -38,12 +40,12 @@ func (m *cronRotationManager) addJob(storeID, storeName, cronExpr string, cm chu
 }
 
 // removeJob stops and removes the cron rotation job for a store.
-func (m *cronRotationManager) removeJob(storeID string) {
+func (m *cronRotationManager) removeJob(storeID uuid.UUID) {
 	m.scheduler.RemoveJob(cronJobName(storeID))
 }
 
 // updateJob replaces the cron rotation job for a store with a new schedule.
-func (m *cronRotationManager) updateJob(storeID, storeName, cronExpr string, cm chunk.ChunkManager) error {
+func (m *cronRotationManager) updateJob(storeID uuid.UUID, storeName, cronExpr string, cm chunk.ChunkManager) error {
 	name := cronJobName(storeID)
 	if err := m.scheduler.UpdateJob(name, cronExpr, m.rotateStore, storeID, cm); err != nil {
 		return err
@@ -53,7 +55,7 @@ func (m *cronRotationManager) updateJob(storeID, storeName, cronExpr string, cm 
 }
 
 // renameJob renames a cron rotation job from oldID to newID, preserving the schedule.
-func (m *cronRotationManager) renameJob(oldID, newID, storeName string, cm chunk.ChunkManager) {
+func (m *cronRotationManager) renameJob(oldID, newID uuid.UUID, storeName string, cm chunk.ChunkManager) {
 	oldName := cronJobName(oldID)
 	schedule := m.scheduler.JobSchedule(oldName)
 	if schedule == "" {
@@ -66,12 +68,12 @@ func (m *cronRotationManager) renameJob(oldID, newID, storeName string, cm chunk
 }
 
 // hasJob returns true if a cron rotation job exists for a store.
-func (m *cronRotationManager) hasJob(storeID string) bool {
+func (m *cronRotationManager) hasJob(storeID uuid.UUID) bool {
 	return m.scheduler.HasJob(cronJobName(storeID))
 }
 
 // rotateStore seals the active chunk for a store if it has records.
-func (m *cronRotationManager) rotateStore(storeID string, cm chunk.ChunkManager) {
+func (m *cronRotationManager) rotateStore(storeID uuid.UUID, cm chunk.ChunkManager) {
 	active := cm.Active()
 	if active == nil || active.RecordCount == 0 {
 		m.logger.Debug("cron rotation: skipping empty chunk",

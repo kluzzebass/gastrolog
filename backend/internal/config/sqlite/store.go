@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 
 	"gastrolog/internal/config"
@@ -61,6 +62,20 @@ func NewStore(path string) (*Store, error) {
 // Close closes the underlying database connection.
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+// scanNullUUID converts a sql.NullString to a *uuid.UUID.
+// If the column is NULL, dst is left as nil. Otherwise the string is parsed as a UUID.
+func scanNullUUID(ns sql.NullString, dst **uuid.UUID) error {
+	if !ns.Valid {
+		return nil
+	}
+	id, err := uuid.Parse(ns.String)
+	if err != nil {
+		return fmt.Errorf("parse uuid %q: %w", ns.String, err)
+	}
+	*dst = &id
+	return nil
 }
 
 // Load reads the full configuration. Returns nil if all tables are empty.
@@ -125,7 +140,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 
 // Filters
 
-func (s *Store) GetFilter(ctx context.Context, id string) (*config.FilterConfig, error) {
+func (s *Store) GetFilter(ctx context.Context, id uuid.UUID) (*config.FilterConfig, error) {
 	row := s.db.QueryRowContext(ctx,
 		"SELECT id, name, expression FROM filters WHERE id = ?", id)
 
@@ -173,7 +188,7 @@ func (s *Store) PutFilter(ctx context.Context, fc config.FilterConfig) error {
 	return nil
 }
 
-func (s *Store) DeleteFilter(ctx context.Context, id string) error {
+func (s *Store) DeleteFilter(ctx context.Context, id uuid.UUID) error {
 	_, err := s.db.ExecContext(ctx,
 		"DELETE FROM filters WHERE id = ?", id)
 	if err != nil {
@@ -184,7 +199,7 @@ func (s *Store) DeleteFilter(ctx context.Context, id string) error {
 
 // Rotation policies
 
-func (s *Store) GetRotationPolicy(ctx context.Context, id string) (*config.RotationPolicyConfig, error) {
+func (s *Store) GetRotationPolicy(ctx context.Context, id uuid.UUID) (*config.RotationPolicyConfig, error) {
 	row := s.db.QueryRowContext(ctx,
 		"SELECT id, name, max_bytes, max_age, max_records, cron FROM rotation_policies WHERE id = ?", id)
 
@@ -235,7 +250,7 @@ func (s *Store) PutRotationPolicy(ctx context.Context, rp config.RotationPolicyC
 	return nil
 }
 
-func (s *Store) DeleteRotationPolicy(ctx context.Context, id string) error {
+func (s *Store) DeleteRotationPolicy(ctx context.Context, id uuid.UUID) error {
 	_, err := s.db.ExecContext(ctx,
 		"DELETE FROM rotation_policies WHERE id = ?", id)
 	if err != nil {
@@ -246,7 +261,7 @@ func (s *Store) DeleteRotationPolicy(ctx context.Context, id string) error {
 
 // Retention policies
 
-func (s *Store) GetRetentionPolicy(ctx context.Context, id string) (*config.RetentionPolicyConfig, error) {
+func (s *Store) GetRetentionPolicy(ctx context.Context, id uuid.UUID) (*config.RetentionPolicyConfig, error) {
 	row := s.db.QueryRowContext(ctx,
 		"SELECT id, name, max_age, max_bytes, max_chunks FROM retention_policies WHERE id = ?", id)
 
@@ -296,7 +311,7 @@ func (s *Store) PutRetentionPolicy(ctx context.Context, rp config.RetentionPolic
 	return nil
 }
 
-func (s *Store) DeleteRetentionPolicy(ctx context.Context, id string) error {
+func (s *Store) DeleteRetentionPolicy(ctx context.Context, id uuid.UUID) error {
 	_, err := s.db.ExecContext(ctx,
 		"DELETE FROM retention_policies WHERE id = ?", id)
 	if err != nil {
@@ -307,18 +322,28 @@ func (s *Store) DeleteRetentionPolicy(ctx context.Context, id string) error {
 
 // Stores
 
-func (s *Store) GetStore(ctx context.Context, id string) (*config.StoreConfig, error) {
+func (s *Store) GetStore(ctx context.Context, id uuid.UUID) (*config.StoreConfig, error) {
 	row := s.db.QueryRowContext(ctx,
 		"SELECT id, name, type, filter, policy, retention, params, enabled FROM stores WHERE id = ?", id)
 
 	var st config.StoreConfig
 	var paramsJSON *string
-	err := row.Scan(&st.ID, &st.Name, &st.Type, &st.Filter, &st.Policy, &st.Retention, &paramsJSON, &st.Enabled)
+	var filter, policy, retention sql.NullString
+	err := row.Scan(&st.ID, &st.Name, &st.Type, &filter, &policy, &retention, &paramsJSON, &st.Enabled)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get store %q: %w", id, err)
+	}
+	if err := scanNullUUID(filter, &st.Filter); err != nil {
+		return nil, fmt.Errorf("get store %q filter: %w", id, err)
+	}
+	if err := scanNullUUID(policy, &st.Policy); err != nil {
+		return nil, fmt.Errorf("get store %q policy: %w", id, err)
+	}
+	if err := scanNullUUID(retention, &st.Retention); err != nil {
+		return nil, fmt.Errorf("get store %q retention: %w", id, err)
 	}
 	if paramsJSON != nil {
 		if err := json.Unmarshal([]byte(*paramsJSON), &st.Params); err != nil {
@@ -340,8 +365,18 @@ func (s *Store) ListStores(ctx context.Context) ([]config.StoreConfig, error) {
 	for rows.Next() {
 		var st config.StoreConfig
 		var paramsJSON *string
-		if err := rows.Scan(&st.ID, &st.Name, &st.Type, &st.Filter, &st.Policy, &st.Retention, &paramsJSON, &st.Enabled); err != nil {
+		var filter, policy, retention sql.NullString
+		if err := rows.Scan(&st.ID, &st.Name, &st.Type, &filter, &policy, &retention, &paramsJSON, &st.Enabled); err != nil {
 			return nil, fmt.Errorf("scan store: %w", err)
+		}
+		if err := scanNullUUID(filter, &st.Filter); err != nil {
+			return nil, fmt.Errorf("scan store filter: %w", err)
+		}
+		if err := scanNullUUID(policy, &st.Policy); err != nil {
+			return nil, fmt.Errorf("scan store policy: %w", err)
+		}
+		if err := scanNullUUID(retention, &st.Retention); err != nil {
+			return nil, fmt.Errorf("scan store retention: %w", err)
 		}
 		if paramsJSON != nil {
 			if err := json.Unmarshal([]byte(*paramsJSON), &st.Params); err != nil {
@@ -382,7 +417,7 @@ func (s *Store) PutStore(ctx context.Context, st config.StoreConfig) error {
 	return nil
 }
 
-func (s *Store) DeleteStore(ctx context.Context, id string) error {
+func (s *Store) DeleteStore(ctx context.Context, id uuid.UUID) error {
 	_, err := s.db.ExecContext(ctx,
 		"DELETE FROM stores WHERE id = ?", id)
 	if err != nil {
@@ -393,7 +428,7 @@ func (s *Store) DeleteStore(ctx context.Context, id string) error {
 
 // Ingesters
 
-func (s *Store) GetIngester(ctx context.Context, id string) (*config.IngesterConfig, error) {
+func (s *Store) GetIngester(ctx context.Context, id uuid.UUID) (*config.IngesterConfig, error) {
 	row := s.db.QueryRowContext(ctx,
 		"SELECT id, name, type, params, enabled FROM ingesters WHERE id = ?", id)
 
@@ -465,7 +500,7 @@ func (s *Store) PutIngester(ctx context.Context, ing config.IngesterConfig) erro
 	return nil
 }
 
-func (s *Store) DeleteIngester(ctx context.Context, id string) error {
+func (s *Store) DeleteIngester(ctx context.Context, id uuid.UUID) error {
 	_, err := s.db.ExecContext(ctx,
 		"DELETE FROM ingesters WHERE id = ?", id)
 	if err != nil {
@@ -553,7 +588,7 @@ func (s *Store) ListCertificates(ctx context.Context) ([]config.CertPEM, error) 
 	return result, rows.Err()
 }
 
-func (s *Store) GetCertificate(ctx context.Context, id string) (*config.CertPEM, error) {
+func (s *Store) GetCertificate(ctx context.Context, id uuid.UUID) (*config.CertPEM, error) {
 	row := s.db.QueryRowContext(ctx,
 		"SELECT id, name, cert_pem, key_pem, cert_file, key_file FROM tls_certificates WHERE id = ?", id)
 
@@ -585,7 +620,7 @@ func (s *Store) PutCertificate(ctx context.Context, cert config.CertPEM) error {
 	return nil
 }
 
-func (s *Store) DeleteCertificate(ctx context.Context, id string) error {
+func (s *Store) DeleteCertificate(ctx context.Context, id uuid.UUID) error {
 	_, err := s.db.ExecContext(ctx,
 		"DELETE FROM tls_certificates WHERE id = ?", id)
 	if err != nil {
@@ -608,7 +643,7 @@ func (s *Store) CreateUser(ctx context.Context, user config.User) error {
 	return nil
 }
 
-func (s *Store) GetUser(ctx context.Context, id string) (*config.User, error) {
+func (s *Store) GetUser(ctx context.Context, id uuid.UUID) (*config.User, error) {
 	row := s.db.QueryRowContext(ctx,
 		"SELECT id, username, password_hash, role, created_at, updated_at FROM users WHERE id = ?", id)
 
@@ -666,7 +701,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]config.User, error) {
 	return users, rows.Err()
 }
 
-func (s *Store) UpdatePassword(ctx context.Context, id string, passwordHash string) error {
+func (s *Store) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?
 	`, passwordHash, time.Now().UTC().Format(timeFormat), id)
@@ -683,7 +718,7 @@ func (s *Store) UpdatePassword(ctx context.Context, id string, passwordHash stri
 	return nil
 }
 
-func (s *Store) UpdateUserRole(ctx context.Context, id string, role string) error {
+func (s *Store) UpdateUserRole(ctx context.Context, id uuid.UUID, role string) error {
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE users SET role = ?, updated_at = ? WHERE id = ?
 	`, role, time.Now().UTC().Format(timeFormat), id)
@@ -700,7 +735,7 @@ func (s *Store) UpdateUserRole(ctx context.Context, id string, role string) erro
 	return nil
 }
 
-func (s *Store) DeleteUser(ctx context.Context, id string) error {
+func (s *Store) DeleteUser(ctx context.Context, id uuid.UUID) error {
 	res, err := s.db.ExecContext(ctx,
 		"DELETE FROM users WHERE id = ?", id)
 	if err != nil {

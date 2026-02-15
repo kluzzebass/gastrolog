@@ -8,12 +8,14 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
+
+	"github.com/google/uuid"
 )
 
 const defaultRetentionSchedule = "* * * * *" // every minute
 
 // retentionJobName returns the scheduler job name for a store's retention sweep.
-func retentionJobName(storeID string) string {
+func retentionJobName(storeID uuid.UUID) string {
 	return fmt.Sprintf("retention:%s", storeID)
 }
 
@@ -21,7 +23,7 @@ func retentionJobName(storeID string) string {
 // It is invoked by the shared scheduler on a cron schedule.
 type retentionRunner struct {
 	mu      sync.Mutex
-	storeID string
+	storeID uuid.UUID
 	cm      chunk.ChunkManager
 	im      index.IndexManager
 	policy  chunk.RetentionPolicy

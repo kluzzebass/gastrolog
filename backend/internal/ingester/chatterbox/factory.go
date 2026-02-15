@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 )
@@ -51,7 +53,7 @@ var allFormats = []string{FormatPlain, FormatKV, FormatJSON, FormatAccess, Forma
 //
 // Returns an error if parameters are invalid (e.g., unparseable duration,
 // min > max, negative values, unknown format names).
-func NewIngester(id string, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+func NewIngester(id uuid.UUID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
 	minInterval := defaultMinInterval
 	maxInterval := defaultMaxInterval
 	hostCount := defaultHostCount
@@ -129,7 +131,7 @@ func NewIngester(id string, params map[string]string, logger *slog.Logger) (orch
 	)
 
 	return &Ingester{
-		id:          id,
+		id:          id.String(),
 		minInterval: minInterval,
 		maxInterval: maxInterval,
 		rng:         rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64())),

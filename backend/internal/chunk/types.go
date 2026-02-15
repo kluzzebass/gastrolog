@@ -220,7 +220,7 @@ type Record struct {
 	Attrs    Attributes
 	Raw      []byte
 	Ref      RecordRef
-	StoreID  string
+	StoreID  uuid.UUID
 }
 
 // Copy returns a deep copy of the record with its own Raw slice and Attrs map.

@@ -17,6 +17,8 @@ import (
 	"gastrolog/internal/index"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/querylang"
+
+	"github.com/google/uuid"
 )
 
 // KeyValueFilter represents a key=value filter that searches both
@@ -185,7 +187,7 @@ func (q Query) WithStorePredicate(storeID string) Query {
 
 // MultiStorePosition represents a position within a specific store's chunk.
 type MultiStorePosition struct {
-	StoreID  string
+	StoreID  uuid.UUID
 	ChunkID  chunk.ChunkID
 	Position uint64
 }
@@ -207,7 +209,7 @@ type ResumeToken struct {
 // Normalize converts a legacy resume token (using Next) to the new format (using Positions).
 // If Positions is already populated, returns the token unchanged.
 // The storeID parameter is used for legacy tokens that don't include store information.
-func (t *ResumeToken) Normalize(defaultStoreID string) *ResumeToken {
+func (t *ResumeToken) Normalize(defaultStoreID uuid.UUID) *ResumeToken {
 	if t == nil {
 		return nil
 	}
@@ -238,7 +240,7 @@ var ErrMultiStoreNotSupported = errors.New("operation not supported in multi-sto
 // recordWithRef combines a record with its reference for internal iteration.
 // StoreID is included for multi-store queries.
 type recordWithRef struct {
-	StoreID string
+	StoreID uuid.UUID
 	Record  chunk.Record
 	Ref     chunk.RecordRef
 }
@@ -303,7 +305,7 @@ func (e *Engine) isMultiStore() bool {
 
 // getStoreManagers returns the chunk and index managers for a store.
 // For single-store mode, storeID is ignored.
-func (e *Engine) getStoreManagers(storeID string) (chunk.ChunkManager, index.IndexManager) {
+func (e *Engine) getStoreManagers(storeID uuid.UUID) (chunk.ChunkManager, index.IndexManager) {
 	if e.registry != nil {
 		return e.registry.ChunkManager(storeID), e.registry.IndexManager(storeID)
 	}
@@ -311,11 +313,11 @@ func (e *Engine) getStoreManagers(storeID string) (chunk.ChunkManager, index.Ind
 }
 
 // listStores returns all store IDs this engine can query.
-func (e *Engine) listStores() []string {
+func (e *Engine) listStores() []uuid.UUID {
 	if e.registry != nil {
 		return e.registry.ListStores()
 	}
-	return []string{"default"}
+	return []uuid.UUID{uuid.Nil}
 }
 
 // selectChunks filters to chunks that overlap the query time range,
@@ -387,11 +389,11 @@ func (e *Engine) selectChunks(metas []chunk.ChunkMeta, q Query, chunkIDs []chunk
 // storeID identifies which store the chunk belongs to (for multi-store queries).
 // startPos allows resuming from a specific position within the chunk.
 // Unsealed chunks are scanned sequentially without indexes.
-func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, storeID string, meta chunk.ChunkMeta, startPos *uint64) iter.Seq2[recordWithRef, error] {
+func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, storeID uuid.UUID, meta chunk.ChunkMeta, startPos *uint64) iter.Seq2[recordWithRef, error] {
 	return func(yield func(recordWithRef, error) bool) {
 		cm, im := e.getStoreManagers(storeID)
 		if cm == nil {
-			yield(recordWithRef{}, errors.New("store not found: "+storeID))
+			yield(recordWithRef{}, errors.New("store not found: "+storeID.String()))
 			return
 		}
 
@@ -452,13 +454,13 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, storeID string
 // It tries to use indexes when available, falling back to runtime filters when not.
 // This is a convenience wrapper for single-store mode.
 func (e *Engine) buildScanner(cursor chunk.RecordCursor, q Query, meta chunk.ChunkMeta, startPos *uint64) (iter.Seq2[recordWithRef, error], error) {
-	return e.buildScannerWithManagers(cursor, q, "default", meta, startPos, e.chunks, e.indexes)
+	return e.buildScannerWithManagers(cursor, q, uuid.UUID{}, meta, startPos, e.chunks, e.indexes)
 }
 
 // buildScannerWithManagers creates a scanner for a chunk using the composable filter pipeline.
 // It tries to use indexes when available, falling back to runtime filters when not.
 // storeID is included in the returned recordWithRef for multi-store queries.
-func (e *Engine) buildScannerWithManagers(cursor chunk.RecordCursor, q Query, storeID string, meta chunk.ChunkMeta, startPos *uint64, cm chunk.ChunkManager, im index.IndexManager) (iter.Seq2[recordWithRef, error], error) {
+func (e *Engine) buildScannerWithManagers(cursor chunk.RecordCursor, q Query, storeID uuid.UUID, meta chunk.ChunkMeta, startPos *uint64, cm chunk.ChunkManager, im index.IndexManager) (iter.Seq2[recordWithRef, error], error) {
 	b := newScannerBuilder(meta.ID)
 	b.storeID = storeID
 

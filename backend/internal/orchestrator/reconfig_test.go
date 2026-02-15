@@ -15,20 +15,25 @@ import (
 	memtoken "gastrolog/internal/index/memory/token"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
+
+	"github.com/google/uuid"
 )
 
 func TestUpdateFilters(t *testing.T) {
 	orch, stores := newFilteredTestSetup(t)
 
+	prodFilterID := uuid.Must(uuid.NewV7())
+	catchAllFilterID := uuid.Must(uuid.NewV7())
+
 	// Initially set filters: prod gets env=prod, archive is catch-all.
 	cfg := &config.Config{
 		Filters: []config.FilterConfig{
-			{ID: "prod-filter", Expression: "env=prod"},
-			{ID: "catch-all", Expression: "*"},
+			{ID: prodFilterID, Expression: "env=prod"},
+			{ID: catchAllFilterID, Expression: "*"},
 		},
 		Stores: []config.StoreConfig{
-			{ID: "prod", Filter: config.StringPtr("prod-filter")},
-			{ID: "archive", Filter: config.StringPtr("catch-all")},
+			{ID: stores.prod, Filter: config.UUIDPtr(prodFilterID)},
+			{ID: stores.archive, Filter: config.UUIDPtr(catchAllFilterID)},
 		},
 	}
 	if err := orch.UpdateFilters(cfg); err != nil {
@@ -45,22 +50,22 @@ func TestUpdateFilters(t *testing.T) {
 		t.Fatalf("Ingest: %v", err)
 	}
 
-	if count := countRecords(t, stores["prod"]); count != 1 {
+	if count := countRecords(t, stores.cms[stores.prod]); count != 1 {
 		t.Errorf("prod: expected 1 record, got %d", count)
 	}
-	if count := countRecords(t, stores["archive"]); count != 1 {
+	if count := countRecords(t, stores.cms[stores.archive]); count != 1 {
 		t.Errorf("archive: expected 1 record, got %d", count)
 	}
 
 	// Now update filters: prod gets env=staging instead.
 	cfg2 := &config.Config{
 		Filters: []config.FilterConfig{
-			{ID: "prod-filter", Expression: "env=staging"},
-			{ID: "catch-all", Expression: "*"},
+			{ID: prodFilterID, Expression: "env=staging"},
+			{ID: catchAllFilterID, Expression: "*"},
 		},
 		Stores: []config.StoreConfig{
-			{ID: "prod", Filter: config.StringPtr("prod-filter")},
-			{ID: "archive", Filter: config.StringPtr("catch-all")},
+			{ID: stores.prod, Filter: config.UUIDPtr(prodFilterID)},
+			{ID: stores.archive, Filter: config.UUIDPtr(catchAllFilterID)},
 		},
 	}
 	if err := orch.UpdateFilters(cfg2); err != nil {
@@ -78,23 +83,25 @@ func TestUpdateFilters(t *testing.T) {
 	}
 
 	// prod should still have 1 (old message), archive should have 2.
-	if count := countRecords(t, stores["prod"]); count != 1 {
+	if count := countRecords(t, stores.cms[stores.prod]); count != 1 {
 		t.Errorf("prod after filter change: expected 1 record, got %d", count)
 	}
-	if count := countRecords(t, stores["archive"]); count != 2 {
+	if count := countRecords(t, stores.cms[stores.archive]); count != 2 {
 		t.Errorf("archive after filter change: expected 2 records, got %d", count)
 	}
 }
 
 func TestUpdateFiltersInvalidExpression(t *testing.T) {
-	orch, _ := newFilteredTestSetup(t)
+	orch, stores := newFilteredTestSetup(t)
+
+	invalidFilterID := uuid.Must(uuid.NewV7())
 
 	cfg := &config.Config{
 		Filters: []config.FilterConfig{
-			{ID: "invalid", Expression: "(unclosed"},
+			{ID: invalidFilterID, Expression: "(unclosed"},
 		},
 		Stores: []config.StoreConfig{
-			{ID: "prod", Filter: config.StringPtr("invalid")},
+			{ID: stores.prod, Filter: config.UUIDPtr(invalidFilterID)},
 		},
 	}
 	err := orch.UpdateFilters(cfg)
@@ -104,17 +111,21 @@ func TestUpdateFiltersInvalidExpression(t *testing.T) {
 }
 
 func TestUpdateFiltersIgnoresUnknownStores(t *testing.T) {
-	orch, _ := newFilteredTestSetup(t)
+	orch, stores := newFilteredTestSetup(t)
+
+	prodFilterID := uuid.Must(uuid.NewV7())
+	catchAllFilterID := uuid.Must(uuid.NewV7())
+	nonexistentStoreID := uuid.Must(uuid.NewV7())
 
 	// Include a store that doesn't exist - should be ignored.
 	cfg := &config.Config{
 		Filters: []config.FilterConfig{
-			{ID: "prod-filter", Expression: "env=prod"},
-			{ID: "catch-all", Expression: "*"},
+			{ID: prodFilterID, Expression: "env=prod"},
+			{ID: catchAllFilterID, Expression: "*"},
 		},
 		Stores: []config.StoreConfig{
-			{ID: "prod", Filter: config.StringPtr("prod-filter")},
-			{ID: "nonexistent", Filter: config.StringPtr("catch-all")},
+			{ID: stores.prod, Filter: config.UUIDPtr(prodFilterID)},
+			{ID: nonexistentStoreID, Filter: config.UUIDPtr(catchAllFilterID)},
 		},
 	}
 	if err := orch.UpdateFilters(cfg); err != nil {
@@ -134,16 +145,19 @@ func TestAddStore(t *testing.T) {
 		},
 	}
 
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
 	cfg := &config.Config{
 		Filters: []config.FilterConfig{
-			{ID: "test-filter", Expression: "env=test"},
+			{ID: filterID, Expression: "env=test"},
 		},
 	}
 
 	storeCfg := config.StoreConfig{
-		ID:     "new-store",
+		ID:     storeID,
 		Type:   "memory",
-		Filter: config.StringPtr("test-filter"),
+		Filter: config.UUIDPtr(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
@@ -151,7 +165,7 @@ func TestAddStore(t *testing.T) {
 	}
 
 	// Verify store was added.
-	cm := orch.ChunkManager("new-store")
+	cm := orch.ChunkManager(storeID)
 	if cm == nil {
 		t.Fatal("ChunkManager not found after AddStore")
 	}
@@ -183,16 +197,19 @@ func TestAddStoreDuplicate(t *testing.T) {
 		},
 	}
 
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
 	cfg := &config.Config{
 		Filters: []config.FilterConfig{
-			{ID: "catch-all", Expression: "*"},
+			{ID: filterID, Expression: "*"},
 		},
 	}
 
 	storeCfg := config.StoreConfig{
-		ID:     "store1",
+		ID:     storeID,
 		Type:   "memory",
-		Filter: config.StringPtr("catch-all"),
+		Filter: config.UUIDPtr(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
@@ -218,16 +235,19 @@ func TestRemoveStoreEmpty(t *testing.T) {
 		},
 	}
 
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
 	cfg := &config.Config{
 		Filters: []config.FilterConfig{
-			{ID: "catch-all", Expression: "*"},
+			{ID: filterID, Expression: "*"},
 		},
 	}
 
 	storeCfg := config.StoreConfig{
-		ID:     "temp-store",
+		ID:     storeID,
 		Type:   "memory",
-		Filter: config.StringPtr("catch-all"),
+		Filter: config.UUIDPtr(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
@@ -235,12 +255,12 @@ func TestRemoveStoreEmpty(t *testing.T) {
 	}
 
 	// Remove should succeed since no data.
-	if err := orch.RemoveStore("temp-store"); err != nil {
+	if err := orch.RemoveStore(storeID); err != nil {
 		t.Fatalf("RemoveStore: %v", err)
 	}
 
 	// Verify store was removed.
-	if cm := orch.ChunkManager("temp-store"); cm != nil {
+	if cm := orch.ChunkManager(storeID); cm != nil {
 		t.Error("ChunkManager should be nil after RemoveStore")
 	}
 }
@@ -257,16 +277,19 @@ func TestRemoveStoreNotEmpty(t *testing.T) {
 		},
 	}
 
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
 	cfg := &config.Config{
 		Filters: []config.FilterConfig{
-			{ID: "catch-all", Expression: "*"},
+			{ID: filterID, Expression: "*"},
 		},
 	}
 
 	storeCfg := config.StoreConfig{
-		ID:     "store-with-data",
+		ID:     storeID,
 		Type:   "memory",
-		Filter: config.StringPtr("catch-all"),
+		Filter: config.UUIDPtr(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
@@ -284,7 +307,7 @@ func TestRemoveStoreNotEmpty(t *testing.T) {
 	}
 
 	// Remove should fail.
-	err := orch.RemoveStore("store-with-data")
+	err := orch.RemoveStore(storeID)
 	if err == nil {
 		t.Fatal("expected error for non-empty store")
 	}
@@ -293,7 +316,7 @@ func TestRemoveStoreNotEmpty(t *testing.T) {
 func TestRemoveStoreNotFound(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
-	err := orch.RemoveStore("nonexistent")
+	err := orch.RemoveStore(uuid.Must(uuid.NewV7()))
 	if err == nil {
 		t.Fatal("expected error for nonexistent store")
 	}
@@ -311,16 +334,19 @@ func TestForceRemoveStore(t *testing.T) {
 		},
 	}
 
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
 	cfg := &config.Config{
 		Filters: []config.FilterConfig{
-			{ID: "catch-all", Expression: "*"},
+			{ID: filterID, Expression: "*"},
 		},
 	}
 
 	storeCfg := config.StoreConfig{
-		ID:     "store-with-data",
+		ID:     storeID,
 		Type:   "memory",
-		Filter: config.StringPtr("catch-all"),
+		Filter: config.UUIDPtr(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
@@ -328,7 +354,7 @@ func TestForceRemoveStore(t *testing.T) {
 	}
 
 	// Ingest data and cause a seal to create sealed chunks.
-	cm := orch.ChunkManager("store-with-data")
+	cm := orch.ChunkManager(storeID)
 	cm.SetRotationPolicy(chunk.NewRecordCountPolicy(3))
 
 	for i := 0; i < 10; i++ {
@@ -349,20 +375,20 @@ func TestForceRemoveStore(t *testing.T) {
 	}
 
 	// Normal remove should fail.
-	if err := orch.RemoveStore("store-with-data"); err == nil {
+	if err := orch.RemoveStore(storeID); err == nil {
 		t.Fatal("expected error for non-empty store")
 	}
 
 	// Force remove should succeed.
-	if err := orch.ForceRemoveStore("store-with-data"); err != nil {
+	if err := orch.ForceRemoveStore(storeID); err != nil {
 		t.Fatalf("ForceRemoveStore: %v", err)
 	}
 
 	// Verify store was completely removed.
-	if cm := orch.ChunkManager("store-with-data"); cm != nil {
+	if cm := orch.ChunkManager(storeID); cm != nil {
 		t.Error("ChunkManager should be nil after ForceRemoveStore")
 	}
-	if im := orch.IndexManager("store-with-data"); im != nil {
+	if im := orch.IndexManager(storeID); im != nil {
 		t.Error("IndexManager should be nil after ForceRemoveStore")
 	}
 }
@@ -370,7 +396,7 @@ func TestForceRemoveStore(t *testing.T) {
 func TestForceRemoveStoreNotFound(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
-	err := orch.ForceRemoveStore("nonexistent")
+	err := orch.ForceRemoveStore(uuid.Must(uuid.NewV7()))
 	if err == nil {
 		t.Fatal("expected error for nonexistent store")
 	}
@@ -388,16 +414,19 @@ func TestForceRemoveEmptyStore(t *testing.T) {
 		},
 	}
 
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
 	cfg := &config.Config{
 		Filters: []config.FilterConfig{
-			{ID: "catch-all", Expression: "*"},
+			{ID: filterID, Expression: "*"},
 		},
 	}
 
 	storeCfg := config.StoreConfig{
-		ID:     "empty-store",
+		ID:     storeID,
 		Type:   "memory",
-		Filter: config.StringPtr("catch-all"),
+		Filter: config.UUIDPtr(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
@@ -405,11 +434,11 @@ func TestForceRemoveEmptyStore(t *testing.T) {
 	}
 
 	// Force remove empty store should succeed.
-	if err := orch.ForceRemoveStore("empty-store"); err != nil {
+	if err := orch.ForceRemoveStore(storeID); err != nil {
 		t.Fatalf("ForceRemoveStore: %v", err)
 	}
 
-	if cm := orch.ChunkManager("empty-store"); cm != nil {
+	if cm := orch.ChunkManager(storeID); cm != nil {
 		t.Error("ChunkManager should be nil after ForceRemoveStore")
 	}
 }
@@ -433,13 +462,14 @@ func TestAddIngesterWhileRunning(t *testing.T) {
 
 	qe := query.New(cm, im, nil)
 
+	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterChunkManager("default", cm)
-	orch.RegisterIndexManager("default", im)
-	orch.RegisterQueryEngine("default", qe)
+	orch.RegisterChunkManager(defaultID, cm)
+	orch.RegisterIndexManager(defaultID, im)
+	orch.RegisterQueryEngine(defaultID, qe)
 
 	// Set catch-all filter.
-	filter, _ := orchestrator.CompileFilter("default", "*")
+	filter, _ := orchestrator.CompileFilter(defaultID, "*")
 	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{filter}))
 
 	// Start orchestrator.
@@ -453,7 +483,8 @@ func TestAddIngesterWhileRunning(t *testing.T) {
 		{Attrs: map[string]string{"source": "dynamic"}, Raw: []byte("dynamic message")},
 	})
 
-	if err := orch.AddIngester("dynamic", recv); err != nil {
+	ingesterID := uuid.Must(uuid.NewV7())
+	if err := orch.AddIngester(ingesterID, recv); err != nil {
 		t.Fatalf("AddIngester: %v", err)
 	}
 
@@ -478,14 +509,15 @@ func TestAddIngesterWhileRunning(t *testing.T) {
 func TestAddIngesterDuplicate(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
+	ingesterID := uuid.Must(uuid.NewV7())
 	recv1 := newBlockingIngester()
 	recv2 := newBlockingIngester()
 
-	if err := orch.AddIngester("recv", recv1); err != nil {
+	if err := orch.AddIngester(ingesterID, recv1); err != nil {
 		t.Fatalf("AddIngester: %v", err)
 	}
 
-	err := orch.AddIngester("recv", recv2)
+	err := orch.AddIngester(ingesterID, recv2)
 	if err == nil {
 		t.Fatal("expected error for duplicate ingester")
 	}
@@ -494,20 +526,21 @@ func TestAddIngesterDuplicate(t *testing.T) {
 func TestRemoveIngesterNotRunning(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
+	ingesterID := uuid.Must(uuid.NewV7())
 	recv := newBlockingIngester()
-	if err := orch.AddIngester("recv", recv); err != nil {
+	if err := orch.AddIngester(ingesterID, recv); err != nil {
 		t.Fatalf("AddIngester: %v", err)
 	}
 
 	// Remove while not running should succeed.
-	if err := orch.RemoveIngester("recv"); err != nil {
+	if err := orch.RemoveIngester(ingesterID); err != nil {
 		t.Fatalf("RemoveIngester: %v", err)
 	}
 
 	// Verify removed.
 	ingesters := orch.Ingesters()
 	for _, id := range ingesters {
-		if id == "recv" {
+		if id == ingesterID {
 			t.Error("ingester should have been removed")
 		}
 	}
@@ -518,11 +551,13 @@ func TestRemoveIngesterWhileRunning(t *testing.T) {
 		RotationPolicy: chunk.NewRecordCountPolicy(10000),
 	})
 
+	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterChunkManager("default", cm)
+	orch.RegisterChunkManager(defaultID, cm)
 
+	ingesterID := uuid.Must(uuid.NewV7())
 	recv := newBlockingIngester()
-	if err := orch.AddIngester("recv", recv); err != nil {
+	if err := orch.AddIngester(ingesterID, recv); err != nil {
 		t.Fatalf("AddIngester: %v", err)
 	}
 
@@ -535,7 +570,7 @@ func TestRemoveIngesterWhileRunning(t *testing.T) {
 	<-recv.started
 
 	// Remove while running should succeed and stop the ingester.
-	if err := orch.RemoveIngester("recv"); err != nil {
+	if err := orch.RemoveIngester(ingesterID); err != nil {
 		t.Fatalf("RemoveIngester: %v", err)
 	}
 
@@ -550,7 +585,7 @@ func TestRemoveIngesterWhileRunning(t *testing.T) {
 	// Verify removed from list.
 	ingesters := orch.Ingesters()
 	for _, id := range ingesters {
-		if id == "recv" {
+		if id == ingesterID {
 			t.Error("ingester should have been removed from list")
 		}
 	}
@@ -559,7 +594,7 @@ func TestRemoveIngesterWhileRunning(t *testing.T) {
 func TestRemoveIngesterNotFound(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
-	err := orch.RemoveIngester("nonexistent")
+	err := orch.RemoveIngester(uuid.Must(uuid.NewV7()))
 	if err == nil {
 		t.Fatal("expected error for nonexistent ingester")
 	}
@@ -577,16 +612,19 @@ func TestStoreConfig(t *testing.T) {
 		},
 	}
 
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
 	cfg := &config.Config{
 		Filters: []config.FilterConfig{
-			{ID: "prod-errors", Expression: "env=prod AND level=error"},
+			{ID: filterID, Expression: "env=prod AND level=error"},
 		},
 	}
 
 	storeCfg := config.StoreConfig{
-		ID:     "test-store",
+		ID:     storeID,
 		Type:   "memory",
-		Filter: config.StringPtr("prod-errors"),
+		Filter: config.UUIDPtr(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
@@ -594,24 +632,25 @@ func TestStoreConfig(t *testing.T) {
 	}
 
 	// Get config back.
-	gotCfg, err := orch.StoreConfig("test-store")
+	gotCfg, err := orch.StoreConfig(storeID)
 	if err != nil {
 		t.Fatalf("StoreConfig: %v", err)
 	}
 
-	if gotCfg.ID != "test-store" {
-		t.Errorf("ID: expected %q, got %q", "test-store", gotCfg.ID)
+	if gotCfg.ID != storeID {
+		t.Errorf("ID: expected %s, got %s", storeID, gotCfg.ID)
 	}
-	// StoreConfig returns the filter expression (not the filter ID).
-	if gotCfg.Filter == nil || *gotCfg.Filter != "env=prod AND level=error" {
-		t.Errorf("Filter: expected %q, got %v", "env=prod AND level=error", gotCfg.Filter)
+	// StoreConfig does not track the original filter UUID reference,
+	// so Filter is nil in the returned config.
+	if gotCfg.Filter != nil {
+		t.Errorf("Filter: expected nil (not tracked by orchestrator), got %v", gotCfg.Filter)
 	}
 }
 
 func TestStoreConfigNotFound(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
-	_, err := orch.StoreConfig("nonexistent")
+	_, err := orch.StoreConfig(uuid.Must(uuid.NewV7()))
 	if err == nil {
 		t.Fatal("expected error for nonexistent store")
 	}
@@ -621,8 +660,8 @@ func TestUpdateStoreFilter(t *testing.T) {
 	orch, stores := newFilteredTestSetup(t)
 
 	// Set initial filter: prod gets env=prod.
-	prodFilter, _ := orchestrator.CompileFilter("prod", "env=prod")
-	archiveFilter, _ := orchestrator.CompileFilter("archive", "*")
+	prodFilter, _ := orchestrator.CompileFilter(stores.prod, "env=prod")
+	archiveFilter, _ := orchestrator.CompileFilter(stores.archive, "*")
 	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{prodFilter, archiveFilter}))
 
 	// Ingest a prod message.
@@ -636,12 +675,12 @@ func TestUpdateStoreFilter(t *testing.T) {
 	}
 
 	// prod should have 1 message.
-	if count := countRecords(t, stores["prod"]); count != 1 {
+	if count := countRecords(t, stores.cms[stores.prod]); count != 1 {
 		t.Errorf("prod: expected 1 record, got %d", count)
 	}
 
 	// Update prod's filter to env=staging.
-	if err := orch.UpdateStoreFilter("prod", "env=staging"); err != nil {
+	if err := orch.UpdateStoreFilter(stores.prod, "env=staging"); err != nil {
 		t.Fatalf("UpdateStoreFilter: %v", err)
 	}
 
@@ -656,12 +695,12 @@ func TestUpdateStoreFilter(t *testing.T) {
 	}
 
 	// prod should still have 1 message (filter changed).
-	if count := countRecords(t, stores["prod"]); count != 1 {
+	if count := countRecords(t, stores.cms[stores.prod]); count != 1 {
 		t.Errorf("prod after filter change: expected 1 record, got %d", count)
 	}
 
 	// archive should have 2 (catch-all).
-	if count := countRecords(t, stores["archive"]); count != 2 {
+	if count := countRecords(t, stores.cms[stores.archive]); count != 2 {
 		t.Errorf("archive: expected 2 records, got %d", count)
 	}
 }
@@ -679,16 +718,19 @@ func TestSetRotationPolicyDirectly(t *testing.T) {
 		},
 	}
 
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
 	cfg := &config.Config{
 		Filters: []config.FilterConfig{
-			{ID: "catch-all", Expression: "*"},
+			{ID: filterID, Expression: "*"},
 		},
 	}
 
 	storeCfg := config.StoreConfig{
-		ID:     "test-store",
+		ID:     storeID,
 		Type:   "memory",
-		Filter: config.StringPtr("catch-all"),
+		Filter: config.UUIDPtr(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
@@ -696,7 +738,7 @@ func TestSetRotationPolicyDirectly(t *testing.T) {
 	}
 
 	// Get chunk manager and set rotation policy directly.
-	cm := orch.ChunkManager("test-store")
+	cm := orch.ChunkManager(storeID)
 	cm.SetRotationPolicy(chunk.NewRecordCountPolicy(3))
 
 	// Ingest 10 records - should trigger multiple rotations with limit of 3.
@@ -733,16 +775,19 @@ func TestPauseStore(t *testing.T) {
 		},
 	}
 
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
 	cfg := &config.Config{
 		Filters: []config.FilterConfig{
-			{ID: "catch-all", Expression: "*"},
+			{ID: filterID, Expression: "*"},
 		},
 	}
 
 	storeCfg := config.StoreConfig{
-		ID:     "pausable",
+		ID:     storeID,
 		Type:   "memory",
-		Filter: config.StringPtr("catch-all"),
+		Filter: config.UUIDPtr(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
@@ -759,20 +804,20 @@ func TestPauseStore(t *testing.T) {
 		t.Fatalf("Ingest: %v", err)
 	}
 
-	cm := orch.ChunkManager("pausable")
+	cm := orch.ChunkManager(storeID)
 	if count := countRecords(t, cm); count != 1 {
 		t.Fatalf("expected 1 record before pause, got %d", count)
 	}
 
 	// Disable the store.
-	if err := orch.DisableStore("pausable"); err != nil {
+	if err := orch.DisableStore(storeID); err != nil {
 		t.Fatalf("DisableStore: %v", err)
 	}
-	if orch.IsStoreEnabled("pausable") {
+	if orch.IsStoreEnabled(storeID) {
 		t.Fatal("store should be disabled")
 	}
 
-	// Ingest another record — should be silently dropped for this store.
+	// Ingest another record - should be silently dropped for this store.
 	rec2 := chunk.Record{
 		IngestTS: time.Now(),
 		Attrs:    chunk.Attributes{},
@@ -799,16 +844,19 @@ func TestResumeStore(t *testing.T) {
 		},
 	}
 
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
 	cfg := &config.Config{
 		Filters: []config.FilterConfig{
-			{ID: "catch-all", Expression: "*"},
+			{ID: filterID, Expression: "*"},
 		},
 	}
 
 	storeCfg := config.StoreConfig{
-		ID:     "pausable",
+		ID:     storeID,
 		Type:   "memory",
-		Filter: config.StringPtr("catch-all"),
+		Filter: config.UUIDPtr(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
@@ -816,13 +864,13 @@ func TestResumeStore(t *testing.T) {
 	}
 
 	// Disable then re-enable.
-	if err := orch.DisableStore("pausable"); err != nil {
+	if err := orch.DisableStore(storeID); err != nil {
 		t.Fatalf("DisableStore: %v", err)
 	}
-	if err := orch.EnableStore("pausable"); err != nil {
+	if err := orch.EnableStore(storeID); err != nil {
 		t.Fatalf("EnableStore: %v", err)
 	}
-	if !orch.IsStoreEnabled("pausable") {
+	if !orch.IsStoreEnabled(storeID) {
 		t.Fatal("store should be enabled after re-enable")
 	}
 
@@ -836,7 +884,7 @@ func TestResumeStore(t *testing.T) {
 		t.Fatalf("Ingest after resume: %v", err)
 	}
 
-	cm := orch.ChunkManager("pausable")
+	cm := orch.ChunkManager(storeID)
 	if count := countRecords(t, cm); count != 1 {
 		t.Errorf("expected 1 record after resume, got %d", count)
 	}
@@ -845,10 +893,10 @@ func TestResumeStore(t *testing.T) {
 func TestDisableStoreNotFound(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
-	if err := orch.DisableStore("nonexistent"); err == nil {
+	if err := orch.DisableStore(uuid.Must(uuid.NewV7())); err == nil {
 		t.Fatal("expected error for nonexistent store")
 	}
-	if err := orch.EnableStore("nonexistent"); err == nil {
+	if err := orch.EnableStore(uuid.Must(uuid.NewV7())); err == nil {
 		t.Fatal("expected error for nonexistent store")
 	}
 }
@@ -865,16 +913,19 @@ func TestDisableDoesNotAffectQuery(t *testing.T) {
 		},
 	}
 
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
 	cfg := &config.Config{
 		Filters: []config.FilterConfig{
-			{ID: "catch-all", Expression: "*"},
+			{ID: filterID, Expression: "*"},
 		},
 	}
 
 	storeCfg := config.StoreConfig{
-		ID:     "queryable",
+		ID:     storeID,
 		Type:   "memory",
-		Filter: config.StringPtr("catch-all"),
+		Filter: config.UUIDPtr(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
@@ -891,12 +942,12 @@ func TestDisableDoesNotAffectQuery(t *testing.T) {
 		}
 	}
 
-	if err := orch.DisableStore("queryable"); err != nil {
+	if err := orch.DisableStore(storeID); err != nil {
 		t.Fatalf("DisableStore: %v", err)
 	}
 
 	// Query should still work while disabled.
-	results, _, err := orch.Search(context.Background(), "queryable", query.Query{}, nil)
+	results, _, err := orch.Search(context.Background(), storeID, query.Query{}, nil)
 	if err != nil {
 		t.Fatalf("Search while disabled: %v", err)
 	}
@@ -916,7 +967,7 @@ func TestDisableDoesNotAffectQuery(t *testing.T) {
 func TestUpdateStoreFilterNotFound(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
-	err := orch.UpdateStoreFilter("nonexistent", "*")
+	err := orch.UpdateStoreFilter(uuid.Must(uuid.NewV7()), "*")
 	if err == nil {
 		t.Fatal("expected error for nonexistent store")
 	}
@@ -934,16 +985,19 @@ func TestUpdateStoreFilterInvalid(t *testing.T) {
 		},
 	}
 
+	filterID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+
 	cfg := &config.Config{
 		Filters: []config.FilterConfig{
-			{ID: "catch-all", Expression: "*"},
+			{ID: filterID, Expression: "*"},
 		},
 	}
 
 	storeCfg := config.StoreConfig{
-		ID:     "test-store",
+		ID:     storeID,
 		Type:   "memory",
-		Filter: config.StringPtr("catch-all"),
+		Filter: config.UUIDPtr(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
@@ -951,7 +1005,7 @@ func TestUpdateStoreFilterInvalid(t *testing.T) {
 	}
 
 	// Invalid filter expression.
-	err := orch.UpdateStoreFilter("test-store", "(unclosed")
+	err := orch.UpdateStoreFilter(storeID, "(unclosed")
 	if err == nil {
 		t.Error("expected error for invalid filter expression")
 	}

@@ -16,8 +16,9 @@ func TestEmbeddedClient_ListStores(t *testing.T) {
 	if len(stores) != 1 {
 		t.Fatalf("expected 1 store, got %d", len(stores))
 	}
-	if stores[0].ID != "default" {
-		t.Errorf("expected store ID 'default', got %q", stores[0].ID)
+	// Store ID is now a UUID string, just verify we got one store.
+	if stores[0].ID == "" {
+		t.Error("expected non-empty store ID")
 	}
 }
 
@@ -43,9 +44,15 @@ func TestEmbeddedClient_Search(t *testing.T) {
 		}
 	}
 
-	// Search via embedded client
+	// Search via embedded client — use the store ID from ListStores.
+	stores := client.ListStores()
+	if len(stores) == 0 {
+		t.Fatal("expected at least one store")
+	}
+	storeID := stores[0].ID
+
 	q := query.Query{Limit: 10}
-	iter, getToken, err := client.Search(context.Background(), "default", q, nil)
+	iter, getToken, err := client.Search(context.Background(), storeID, q, nil)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}

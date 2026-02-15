@@ -9,19 +9,21 @@ import (
 	"time"
 
 	"gastrolog/internal/config"
+
+	"github.com/google/uuid"
 )
 
 // Store is an in-memory ConfigStore implementation.
 type Store struct {
 	mu                sync.RWMutex
-	filters           map[string]config.FilterConfig
-	rotationPolicies  map[string]config.RotationPolicyConfig
-	retentionPolicies map[string]config.RetentionPolicyConfig
-	stores            map[string]config.StoreConfig
-	ingesters         map[string]config.IngesterConfig
+	filters           map[uuid.UUID]config.FilterConfig
+	rotationPolicies  map[uuid.UUID]config.RotationPolicyConfig
+	retentionPolicies map[uuid.UUID]config.RetentionPolicyConfig
+	stores            map[uuid.UUID]config.StoreConfig
+	ingesters         map[uuid.UUID]config.IngesterConfig
 	settings          map[string]string
-	certs             map[string]config.CertPEM
-	users             map[string]config.User // keyed by ID (UUID)
+	certs             map[uuid.UUID]config.CertPEM
+	users             map[uuid.UUID]config.User // keyed by ID (UUID)
 }
 
 var _ config.Store = (*Store)(nil)
@@ -29,14 +31,14 @@ var _ config.Store = (*Store)(nil)
 // NewStore creates a new in-memory ConfigStore.
 func NewStore() *Store {
 	return &Store{
-		filters:           make(map[string]config.FilterConfig),
-		rotationPolicies:  make(map[string]config.RotationPolicyConfig),
-		retentionPolicies: make(map[string]config.RetentionPolicyConfig),
-		stores:            make(map[string]config.StoreConfig),
-		ingesters:         make(map[string]config.IngesterConfig),
+		filters:           make(map[uuid.UUID]config.FilterConfig),
+		rotationPolicies:  make(map[uuid.UUID]config.RotationPolicyConfig),
+		retentionPolicies: make(map[uuid.UUID]config.RetentionPolicyConfig),
+		stores:            make(map[uuid.UUID]config.StoreConfig),
+		ingesters:         make(map[uuid.UUID]config.IngesterConfig),
 		settings:          make(map[string]string),
-		certs:             make(map[string]config.CertPEM),
-		users:             make(map[string]config.User),
+		certs:             make(map[uuid.UUID]config.CertPEM),
+		users:             make(map[uuid.UUID]config.User),
 	}
 }
 
@@ -106,7 +108,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 
 // Filters
 
-func (s *Store) GetFilter(ctx context.Context, id string) (*config.FilterConfig, error) {
+func (s *Store) GetFilter(ctx context.Context, id uuid.UUID) (*config.FilterConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -137,7 +139,7 @@ func (s *Store) PutFilter(ctx context.Context, cfg config.FilterConfig) error {
 	return nil
 }
 
-func (s *Store) DeleteFilter(ctx context.Context, id string) error {
+func (s *Store) DeleteFilter(ctx context.Context, id uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -147,7 +149,7 @@ func (s *Store) DeleteFilter(ctx context.Context, id string) error {
 
 // Rotation policies
 
-func (s *Store) GetRotationPolicy(ctx context.Context, id string) (*config.RotationPolicyConfig, error) {
+func (s *Store) GetRotationPolicy(ctx context.Context, id uuid.UUID) (*config.RotationPolicyConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -178,7 +180,7 @@ func (s *Store) PutRotationPolicy(ctx context.Context, cfg config.RotationPolicy
 	return nil
 }
 
-func (s *Store) DeleteRotationPolicy(ctx context.Context, id string) error {
+func (s *Store) DeleteRotationPolicy(ctx context.Context, id uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -188,7 +190,7 @@ func (s *Store) DeleteRotationPolicy(ctx context.Context, id string) error {
 
 // Retention policies
 
-func (s *Store) GetRetentionPolicy(ctx context.Context, id string) (*config.RetentionPolicyConfig, error) {
+func (s *Store) GetRetentionPolicy(ctx context.Context, id uuid.UUID) (*config.RetentionPolicyConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -219,7 +221,7 @@ func (s *Store) PutRetentionPolicy(ctx context.Context, cfg config.RetentionPoli
 	return nil
 }
 
-func (s *Store) DeleteRetentionPolicy(ctx context.Context, id string) error {
+func (s *Store) DeleteRetentionPolicy(ctx context.Context, id uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -229,7 +231,7 @@ func (s *Store) DeleteRetentionPolicy(ctx context.Context, id string) error {
 
 // Stores
 
-func (s *Store) GetStore(ctx context.Context, id string) (*config.StoreConfig, error) {
+func (s *Store) GetStore(ctx context.Context, id uuid.UUID) (*config.StoreConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -260,7 +262,7 @@ func (s *Store) PutStore(ctx context.Context, cfg config.StoreConfig) error {
 	return nil
 }
 
-func (s *Store) DeleteStore(ctx context.Context, id string) error {
+func (s *Store) DeleteStore(ctx context.Context, id uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -270,7 +272,7 @@ func (s *Store) DeleteStore(ctx context.Context, id string) error {
 
 // Ingesters
 
-func (s *Store) GetIngester(ctx context.Context, id string) (*config.IngesterConfig, error) {
+func (s *Store) GetIngester(ctx context.Context, id uuid.UUID) (*config.IngesterConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -301,7 +303,7 @@ func (s *Store) PutIngester(ctx context.Context, cfg config.IngesterConfig) erro
 	return nil
 }
 
-func (s *Store) DeleteIngester(ctx context.Context, id string) error {
+func (s *Store) DeleteIngester(ctx context.Context, id uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -351,7 +353,7 @@ func (s *Store) ListCertificates(ctx context.Context) ([]config.CertPEM, error) 
 	return result, nil
 }
 
-func (s *Store) GetCertificate(ctx context.Context, id string) (*config.CertPEM, error) {
+func (s *Store) GetCertificate(ctx context.Context, id uuid.UUID) (*config.CertPEM, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -371,7 +373,7 @@ func (s *Store) PutCertificate(ctx context.Context, cert config.CertPEM) error {
 	return nil
 }
 
-func (s *Store) DeleteCertificate(ctx context.Context, id string) error {
+func (s *Store) DeleteCertificate(ctx context.Context, id uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -398,7 +400,7 @@ func (s *Store) CreateUser(ctx context.Context, user config.User) error {
 	return nil
 }
 
-func (s *Store) GetUser(ctx context.Context, id string) (*config.User, error) {
+func (s *Store) GetUser(ctx context.Context, id uuid.UUID) (*config.User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -432,7 +434,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]config.User, error) {
 	return users, nil
 }
 
-func (s *Store) UpdatePassword(ctx context.Context, id string, passwordHash string) error {
+func (s *Store) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -446,7 +448,7 @@ func (s *Store) UpdatePassword(ctx context.Context, id string, passwordHash stri
 	return nil
 }
 
-func (s *Store) UpdateUserRole(ctx context.Context, id string, role string) error {
+func (s *Store) UpdateUserRole(ctx context.Context, id uuid.UUID, role string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -460,7 +462,7 @@ func (s *Store) UpdateUserRole(ctx context.Context, id string, role string) erro
 	return nil
 }
 
-func (s *Store) DeleteUser(ctx context.Context, id string) error {
+func (s *Store) DeleteUser(ctx context.Context, id uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -534,13 +536,13 @@ func copyStoreConfig(st config.StoreConfig) config.StoreConfig {
 		Enabled: st.Enabled,
 	}
 	if st.Filter != nil {
-		c.Filter = config.StringPtr(*st.Filter)
+		c.Filter = config.UUIDPtr(*st.Filter)
 	}
 	if st.Policy != nil {
-		c.Policy = config.StringPtr(*st.Policy)
+		c.Policy = config.UUIDPtr(*st.Policy)
 	}
 	if st.Retention != nil {
-		c.Retention = config.StringPtr(*st.Retention)
+		c.Retention = config.UUIDPtr(*st.Retention)
 	}
 	return c
 }

@@ -90,7 +90,7 @@ func (s *AuthServer) Register(
 	}
 
 	// Create first user as admin.
-	userID := uuid.Must(uuid.NewV7()).String()
+	userID := uuid.Must(uuid.NewV7())
 	now := time.Now().UTC()
 	user := config.User{
 		ID:           userID,
@@ -105,7 +105,7 @@ func (s *AuthServer) Register(
 	}
 
 	// Issue token.
-	token, expiresAt, err := s.tokens.Issue(userID, username, "admin")
+	token, expiresAt, err := s.tokens.Issue(userID.String(), username, "admin")
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("issue token: %w", err))
 	}
@@ -142,7 +142,7 @@ func (s *AuthServer) Login(
 		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("invalid credentials"))
 	}
 
-	token, expiresAt, err := s.tokens.Issue(user.ID, username, user.Role)
+	token, expiresAt, err := s.tokens.Issue(user.ID.String(), username, user.Role)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("issue token: %w", err))
 	}
@@ -259,7 +259,7 @@ func (s *AuthServer) CreateUser(
 
 	now := time.Now().UTC()
 	user := config.User{
-		ID:           uuid.Must(uuid.NewV7()).String(),
+		ID:           uuid.Must(uuid.NewV7()),
 		Username:     username,
 		PasswordHash: hash,
 		Role:         role,
@@ -300,12 +300,12 @@ func (s *AuthServer) UpdateUserRole(
 	ctx context.Context,
 	req *connect.Request[apiv1.UpdateUserRoleRequest],
 ) (*connect.Response[apiv1.UpdateUserRoleResponse], error) {
-	userID := req.Msg.Id
+	userID, connErr := parseUUID(req.Msg.Id)
+	if connErr != nil {
+		return nil, connErr
+	}
 	role := req.Msg.Role
 
-	if userID == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("id required"))
-	}
 	if role != "admin" && role != "user" {
 		return nil, connect.NewError(connect.CodeInvalidArgument,
 			fmt.Errorf("role must be \"admin\" or \"user\""))
@@ -339,12 +339,12 @@ func (s *AuthServer) ResetPassword(
 	ctx context.Context,
 	req *connect.Request[apiv1.ResetPasswordRequest],
 ) (*connect.Response[apiv1.ResetPasswordResponse], error) {
-	userID := req.Msg.Id
+	userID, connErr := parseUUID(req.Msg.Id)
+	if connErr != nil {
+		return nil, connErr
+	}
 	newPassword := req.Msg.NewPassword
 
-	if userID == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("id required"))
-	}
 	if minLen := s.minPasswordLength(ctx); utf8.RuneCountInString(newPassword) < minLen {
 		return nil, connect.NewError(connect.CodeInvalidArgument,
 			fmt.Errorf("password must be at least %d characters", minLen))
@@ -376,14 +376,13 @@ func (s *AuthServer) DeleteUser(
 	ctx context.Context,
 	req *connect.Request[apiv1.DeleteUserRequest],
 ) (*connect.Response[apiv1.DeleteUserResponse], error) {
-	userID := req.Msg.Id
-
-	if userID == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("id required"))
+	userID, connErr := parseUUID(req.Msg.Id)
+	if connErr != nil {
+		return nil, connErr
 	}
 
 	// Prevent self-deletion.
-	if claims := auth.ClaimsFromContext(ctx); claims != nil && claims.UserID == userID {
+	if claims := auth.ClaimsFromContext(ctx); claims != nil && claims.UserID == userID.String() {
 		return nil, connect.NewError(connect.CodeInvalidArgument,
 			fmt.Errorf("cannot delete your own account"))
 	}
@@ -398,7 +397,7 @@ func (s *AuthServer) DeleteUser(
 // userToProto converts a config.User to a proto UserInfo, stripping the password hash.
 func userToProto(u config.User) *apiv1.UserInfo {
 	return &apiv1.UserInfo{
-		Id:        u.ID,
+		Id:        u.ID.String(),
 		Username:  u.Username,
 		Role:      u.Role,
 		CreatedAt: u.CreatedAt.Unix(),

@@ -6,6 +6,8 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/querylang"
+
+	"github.com/google/uuid"
 )
 
 // FilterKind identifies the type of store filter.
@@ -24,7 +26,7 @@ const (
 
 // CompiledFilter is a pre-compiled store filter for fast evaluation.
 type CompiledFilter struct {
-	StoreID string
+	StoreID uuid.UUID
 	Kind    FilterKind
 	Expr    string         // original filter expression (for config reconstruction)
 	DNF     *querylang.DNF // only set for FilterExpr
@@ -32,7 +34,7 @@ type CompiledFilter struct {
 
 // CompileFilter parses a filter string and returns a compiled filter.
 // Returns an error if the filter expression is invalid or uses unsupported predicates.
-func CompileFilter(storeID, filter string) (*CompiledFilter, error) {
+func CompileFilter(storeID uuid.UUID, filter string) (*CompiledFilter, error) {
 	filter = strings.TrimSpace(filter)
 
 	// Empty filter = receives nothing
@@ -124,8 +126,8 @@ func NewFilterSet(filters []*CompiledFilter) *FilterSet {
 //   - messages_ingested_total (total messages received)
 //
 // This enables alerting on drop rate and visibility into filter distribution.
-func (fs *FilterSet) Match(attrs chunk.Attributes) []string {
-	var result []string
+func (fs *FilterSet) Match(attrs chunk.Attributes) []uuid.UUID {
+	var result []uuid.UUID
 	matchedExpr := false
 
 	// First pass: evaluate expression filters and catch-all

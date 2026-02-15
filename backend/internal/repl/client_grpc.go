@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
@@ -458,8 +459,9 @@ func protoToQueryPlan(resp *apiv1.ExplainResponse) *query.QueryPlan {
 			})
 		}
 
+		storeID, _ := uuid.Parse(cp.StoreId)
 		chunks[i] = query.ChunkPlan{
-			StoreID:       cp.StoreId,
+			StoreID:       storeID,
 			ChunkID:       chunkID,
 			Sealed:        cp.Sealed,
 			RecordCount:   int(cp.RecordCount),

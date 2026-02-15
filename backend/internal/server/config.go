@@ -25,8 +25,8 @@ import (
 
 // ConfigServer implements the ConfigService.
 type ConfigServer struct {
-	orch             *orchestrator.Orchestrator
-	cfgStore            config.Store
+	orch              *orchestrator.Orchestrator
+	cfgStore          config.Store
 	factories         orchestrator.Factories
 	certManager       CertManager
 	onTLSConfigChange func()
@@ -62,20 +62,20 @@ func (s *ConfigServer) GetConfig(
 		if err == nil {
 			for _, storeCfg := range cfgStores {
 				sc := &apiv1.StoreConfig{
-					Id:      storeCfg.ID,
+					Id:      storeCfg.ID.String(),
 					Name:    storeCfg.Name,
 					Type:    storeCfg.Type,
 					Params:  storeCfg.Params,
 					Enabled: storeCfg.Enabled,
 				}
 				if storeCfg.Filter != nil {
-					sc.Filter = *storeCfg.Filter
+					sc.Filter = storeCfg.Filter.String()
 				}
 				if storeCfg.Policy != nil {
-					sc.Policy = *storeCfg.Policy
+					sc.Policy = storeCfg.Policy.String()
 				}
 				if storeCfg.Retention != nil {
-					sc.Retention = *storeCfg.Retention
+					sc.Retention = storeCfg.Retention.String()
 				}
 				resp.Stores = append(resp.Stores, sc)
 			}
@@ -86,7 +86,7 @@ func (s *ConfigServer) GetConfig(
 		if err == nil {
 			for _, ing := range ingesters {
 				resp.Ingesters = append(resp.Ingesters, &apiv1.IngesterConfig{
-					Id:      ing.ID,
+					Id:      ing.ID.String(),
 					Name:    ing.Name,
 					Type:    ing.Type,
 					Params:  ing.Params,
@@ -100,7 +100,7 @@ func (s *ConfigServer) GetConfig(
 		if err == nil {
 			for _, fc := range filters {
 				resp.Filters = append(resp.Filters, &apiv1.FilterConfig{
-					Id:         fc.ID,
+					Id:         fc.ID.String(),
 					Name:       fc.Name,
 					Expression: fc.Expression,
 				})
@@ -112,7 +112,7 @@ func (s *ConfigServer) GetConfig(
 		if err == nil {
 			for _, pol := range policies {
 				p := rotationPolicyToProto(pol)
-				p.Id = pol.ID
+				p.Id = pol.ID.String()
 				p.Name = pol.Name
 				resp.RotationPolicies = append(resp.RotationPolicies, p)
 			}
@@ -123,7 +123,7 @@ func (s *ConfigServer) GetConfig(
 		if err == nil {
 			for _, pol := range retPolicies {
 				p := retentionPolicyToProto(pol)
-				p.Id = pol.ID
+				p.Id = pol.ID.String()
 				p.Name = pol.Name
 				resp.RetentionPolicies = append(resp.RetentionPolicies, p)
 			}
@@ -146,11 +146,15 @@ func (s *ConfigServer) PutFilter(
 	}
 
 	// Validate expression by trying to compile it.
-	if _, err := orchestrator.CompileFilter("_validate", req.Msg.Config.Expression); err != nil {
+	if _, err := orchestrator.CompileFilter(uuid.Nil, req.Msg.Config.Expression); err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid filter expression: %w", err))
 	}
 
-	cfg := config.FilterConfig{ID: req.Msg.Config.Id, Name: req.Msg.Config.Name, Expression: req.Msg.Config.Expression}
+	id, connErr := parseUUID(req.Msg.Config.Id)
+	if connErr != nil {
+		return nil, connErr
+	}
+	cfg := config.FilterConfig{ID: id, Name: req.Msg.Config.Name, Expression: req.Msg.Config.Expression}
 	if err := s.cfgStore.PutFilter(ctx, cfg); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -176,19 +180,24 @@ func (s *ConfigServer) DeleteFilter(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
 	}
 
+	id, connErr := parseUUID(req.Msg.Id)
+	if connErr != nil {
+		return nil, connErr
+	}
+
 	// Check referential integrity: reject if any store references this filter.
 	stores, err := s.cfgStore.ListStores(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	for _, st := range stores {
-		if st.Filter != nil && *st.Filter == req.Msg.Id {
+		if st.Filter != nil && *st.Filter == id {
 			return nil, connect.NewError(connect.CodeFailedPrecondition,
 				fmt.Errorf("filter %q is referenced by store %q", req.Msg.Id, st.ID))
 		}
 	}
 
-	if err := s.cfgStore.DeleteFilter(ctx, req.Msg.Id); err != nil {
+	if err := s.cfgStore.DeleteFilter(ctx, id); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
@@ -207,7 +216,7 @@ func (s *ConfigServer) ListIngesters(
 		typ  string
 		name string
 	}
-	metaMap := make(map[string]ingMeta)
+	metaMap := make(map[uuid.UUID]ingMeta)
 	if s.cfgStore != nil {
 		ingesters, err := s.cfgStore.ListIngesters(ctx)
 		if err == nil {
@@ -224,7 +233,7 @@ func (s *ConfigServer) ListIngesters(
 	for _, id := range ids {
 		m := metaMap[id]
 		resp.Ingesters = append(resp.Ingesters, &apiv1.IngesterInfo{
-			Id:      id,
+			Id:      id.String(),
 			Name:    m.name,
 			Type:    m.typ,
 			Running: s.orch.IsRunning(),
@@ -243,9 +252,14 @@ func (s *ConfigServer) GetIngesterStatus(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
 	}
 
+	id, connErr := parseUUID(req.Msg.Id)
+	if connErr != nil {
+		return nil, connErr
+	}
+
 	found := false
-	for _, id := range s.orch.ListIngesters() {
-		if id == req.Msg.Id {
+	for _, orchID := range s.orch.ListIngesters() {
+		if id == orchID {
 			found = true
 			break
 		}
@@ -264,7 +278,7 @@ func (s *ConfigServer) GetIngesterStatus(
 		ingesters, err := s.cfgStore.ListIngesters(ctx)
 		if err == nil {
 			for _, ing := range ingesters {
-				if ing.ID == req.Msg.Id {
+				if ing.ID == id {
 					resp.Type = ing.Type
 					break
 				}
@@ -273,7 +287,7 @@ func (s *ConfigServer) GetIngesterStatus(
 	}
 
 	// Populate stats from orchestrator.
-	if stats := s.orch.GetIngesterStats(req.Msg.Id); stats != nil {
+	if stats := s.orch.GetIngesterStats(id); stats != nil {
 		resp.MessagesIngested = stats.MessagesIngested.Load()
 		resp.Errors = stats.Errors.Load()
 		resp.BytesIngested = stats.BytesIngested.Load()
@@ -294,7 +308,14 @@ func (s *ConfigServer) PutRotationPolicy(
 		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
 	}
 
+	id, connErr := parseUUID(req.Msg.Config.Id)
+	if connErr != nil {
+		return nil, connErr
+	}
+
 	cfg := protoToRotationPolicy(req.Msg.Config)
+	cfg.ID = id
+	cfg.Name = req.Msg.Config.Name
 
 	// Validate by trying to convert.
 	if _, err := cfg.ToRotationPolicy(); err != nil {
@@ -329,13 +350,18 @@ func (s *ConfigServer) DeleteRotationPolicy(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
 	}
 
+	id, connErr := parseUUID(req.Msg.Id)
+	if connErr != nil {
+		return nil, connErr
+	}
+
 	// Clear policy reference on any stores that use it.
 	stores, err := s.cfgStore.ListStores(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	for _, st := range stores {
-		if st.Policy != nil && *st.Policy == req.Msg.Id {
+		if st.Policy != nil && *st.Policy == id {
 			st.Policy = nil
 			if err := s.cfgStore.PutStore(ctx, st); err != nil {
 				return nil, connect.NewError(connect.CodeInternal, err)
@@ -343,7 +369,7 @@ func (s *ConfigServer) DeleteRotationPolicy(
 		}
 	}
 
-	if err := s.cfgStore.DeleteRotationPolicy(ctx, req.Msg.Id); err != nil {
+	if err := s.cfgStore.DeleteRotationPolicy(ctx, id); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
@@ -362,7 +388,14 @@ func (s *ConfigServer) PutRetentionPolicy(
 		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
 	}
 
+	id, connErr := parseUUID(req.Msg.Config.Id)
+	if connErr != nil {
+		return nil, connErr
+	}
+
 	cfg := protoToRetentionPolicy(req.Msg.Config)
+	cfg.ID = id
+	cfg.Name = req.Msg.Config.Name
 
 	// Validate by trying to convert.
 	if _, err := cfg.ToRetentionPolicy(); err != nil {
@@ -394,13 +427,18 @@ func (s *ConfigServer) DeleteRetentionPolicy(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
 	}
 
+	id, connErr := parseUUID(req.Msg.Id)
+	if connErr != nil {
+		return nil, connErr
+	}
+
 	// Clear retention reference on any stores that use it.
 	stores, err := s.cfgStore.ListStores(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	for _, st := range stores {
-		if st.Retention != nil && *st.Retention == req.Msg.Id {
+		if st.Retention != nil && *st.Retention == id {
 			st.Retention = nil
 			if err := s.cfgStore.PutStore(ctx, st); err != nil {
 				return nil, connect.NewError(connect.CodeInternal, err)
@@ -408,7 +446,7 @@ func (s *ConfigServer) DeleteRetentionPolicy(
 		}
 	}
 
-	if err := s.cfgStore.DeleteRetentionPolicy(ctx, req.Msg.Id); err != nil {
+	if err := s.cfgStore.DeleteRetentionPolicy(ctx, id); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
@@ -418,7 +456,7 @@ func (s *ConfigServer) DeleteRetentionPolicy(
 // validateStoreDir checks that a file store's directory does not overlap (nest
 // inside or contain) any other file store's directory. Returns an error
 // describing the conflict, or nil if the directory is safe.
-func (s *ConfigServer) validateStoreDir(ctx context.Context, storeID string, dir string) error {
+func (s *ConfigServer) validateStoreDir(ctx context.Context, storeID uuid.UUID, dir string) error {
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
 		return fmt.Errorf("resolve path: %w", err)
@@ -478,7 +516,10 @@ func (s *ConfigServer) PutStore(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store type required"))
 	}
 
-	storeCfg := protoToStoreConfig(req.Msg.Config)
+	storeCfg, err := protoToStoreConfig(req.Msg.Config)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
 
 	// Validate file store directory against nesting.
 	if storeCfg.Type == "file" {
@@ -547,10 +588,15 @@ func (s *ConfigServer) DeleteStore(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
 	}
 
+	id, connErr := parseUUID(req.Msg.Id)
+	if connErr != nil {
+		return nil, connErr
+	}
+
 	// Read store config before removing from runtime (we need it for directory cleanup).
 	var storeCfg *config.StoreConfig
 	if req.Msg.Force {
-		cfg, err := s.cfgStore.GetStore(ctx, req.Msg.Id)
+		cfg, err := s.cfgStore.GetStore(ctx, id)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("read store config: %w", err))
 		}
@@ -559,7 +605,7 @@ func (s *ConfigServer) DeleteStore(
 
 	// Remove from runtime.
 	if req.Msg.Force {
-		if err := s.orch.ForceRemoveStore(req.Msg.Id); err != nil {
+		if err := s.orch.ForceRemoveStore(id); err != nil {
 			// If the store doesn't exist in the orchestrator, that's fine for force-delete —
 			// we still clean up config and disk.
 			if !errors.Is(err, orchestrator.ErrStoreNotFound) {
@@ -576,7 +622,7 @@ func (s *ConfigServer) DeleteStore(
 			}
 		}
 	} else {
-		if err := s.orch.RemoveStore(req.Msg.Id); err != nil {
+		if err := s.orch.RemoveStore(id); err != nil {
 			if errors.Is(err, orchestrator.ErrStoreNotFound) {
 				return nil, connect.NewError(connect.CodeNotFound, err)
 			}
@@ -588,7 +634,7 @@ func (s *ConfigServer) DeleteStore(
 	}
 
 	// Remove from config store.
-	if err := s.cfgStore.DeleteStore(ctx, req.Msg.Id); err != nil {
+	if err := s.cfgStore.DeleteStore(ctx, id); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
@@ -610,8 +656,13 @@ func (s *ConfigServer) PutIngester(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("ingester type required"))
 	}
 
+	id, connErr := parseUUID(req.Msg.Config.Id)
+	if connErr != nil {
+		return nil, connErr
+	}
+
 	ingCfg := config.IngesterConfig{
-		ID:      req.Msg.Config.Id,
+		ID:      id,
 		Name:    req.Msg.Config.Name,
 		Type:    req.Msg.Config.Type,
 		Enabled: req.Msg.Config.Enabled,
@@ -620,8 +671,8 @@ func (s *ConfigServer) PutIngester(
 
 	// Check if ingester already exists in runtime — if so, remove it first.
 	existing := false
-	for _, id := range s.orch.ListIngesters() {
-		if id == ingCfg.ID {
+	for _, orchID := range s.orch.ListIngesters() {
+		if orchID == ingCfg.ID {
 			existing = true
 			break
 		}
@@ -678,8 +729,13 @@ func (s *ConfigServer) DeleteIngester(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
 	}
 
+	id, connErr := parseUUID(req.Msg.Id)
+	if connErr != nil {
+		return nil, connErr
+	}
+
 	// Remove from runtime.
-	if err := s.orch.RemoveIngester(req.Msg.Id); err != nil {
+	if err := s.orch.RemoveIngester(id); err != nil {
 		if errors.Is(err, orchestrator.ErrIngesterNotFound) {
 			return nil, connect.NewError(connect.CodeNotFound, err)
 		}
@@ -687,7 +743,7 @@ func (s *ConfigServer) DeleteIngester(
 	}
 
 	// Remove from config store.
-	if err := s.cfgStore.DeleteIngester(ctx, req.Msg.Id); err != nil {
+	if err := s.cfgStore.DeleteIngester(ctx, id); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
@@ -703,8 +759,13 @@ func (s *ConfigServer) PauseStore(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
 	}
 
+	id, connErr := parseUUID(req.Msg.Id)
+	if connErr != nil {
+		return nil, connErr
+	}
+
 	// Update runtime state.
-	if err := s.orch.DisableStore(req.Msg.Id); err != nil {
+	if err := s.orch.DisableStore(id); err != nil {
 		if errors.Is(err, orchestrator.ErrStoreNotFound) {
 			return nil, connect.NewError(connect.CodeNotFound, err)
 		}
@@ -712,7 +773,7 @@ func (s *ConfigServer) PauseStore(
 	}
 
 	// Persist to config.
-	storeCfg, err := s.cfgStore.GetStore(ctx, req.Msg.Id)
+	storeCfg, err := s.cfgStore.GetStore(ctx, id)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -735,8 +796,13 @@ func (s *ConfigServer) ResumeStore(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
 	}
 
+	id, connErr := parseUUID(req.Msg.Id)
+	if connErr != nil {
+		return nil, connErr
+	}
+
 	// Update runtime state.
-	if err := s.orch.EnableStore(req.Msg.Id); err != nil {
+	if err := s.orch.EnableStore(id); err != nil {
 		if errors.Is(err, orchestrator.ErrStoreNotFound) {
 			return nil, connect.NewError(connect.CodeNotFound, err)
 		}
@@ -744,7 +810,7 @@ func (s *ConfigServer) ResumeStore(
 	}
 
 	// Persist to config.
-	storeCfg, err := s.cfgStore.GetStore(ctx, req.Msg.Id)
+	storeCfg, err := s.cfgStore.GetStore(ctx, id)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -874,24 +940,40 @@ func retentionPolicyToProto(cfg config.RetentionPolicyConfig) *apiv1.RetentionPo
 }
 
 // protoToStoreConfig converts a proto StoreConfig to a config.StoreConfig.
-func protoToStoreConfig(p *apiv1.StoreConfig) config.StoreConfig {
+func protoToStoreConfig(p *apiv1.StoreConfig) (config.StoreConfig, error) {
+	id, err := uuid.Parse(p.Id)
+	if err != nil {
+		return config.StoreConfig{}, fmt.Errorf("invalid store ID: %w", err)
+	}
 	cfg := config.StoreConfig{
-		ID:      p.Id,
+		ID:      id,
 		Name:    p.Name,
 		Type:    p.Type,
 		Params:  p.Params,
 		Enabled: p.Enabled,
 	}
 	if p.Filter != "" {
-		cfg.Filter = config.StringPtr(p.Filter)
+		fid, err := uuid.Parse(p.Filter)
+		if err != nil {
+			return config.StoreConfig{}, fmt.Errorf("invalid filter ID: %w", err)
+		}
+		cfg.Filter = config.UUIDPtr(fid)
 	}
 	if p.Policy != "" {
-		cfg.Policy = config.StringPtr(p.Policy)
+		pid, err := uuid.Parse(p.Policy)
+		if err != nil {
+			return config.StoreConfig{}, fmt.Errorf("invalid policy ID: %w", err)
+		}
+		cfg.Policy = config.UUIDPtr(pid)
 	}
 	if p.Retention != "" {
-		cfg.Retention = config.StringPtr(p.Retention)
+		rid, err := uuid.Parse(p.Retention)
+		if err != nil {
+			return config.StoreConfig{}, fmt.Errorf("invalid retention ID: %w", err)
+		}
+		cfg.Retention = config.UUIDPtr(rid)
 	}
-	return cfg
+	return cfg, nil
 }
 
 // GetServerConfig returns the server-level configuration.
@@ -1229,7 +1311,7 @@ func (s *ConfigServer) ListCertificates(
 	}
 	infos := make([]*apiv1.CertificateInfo, len(certs))
 	for i, c := range certs {
-		infos[i] = &apiv1.CertificateInfo{Id: c.ID, Name: c.Name}
+		infos[i] = &apiv1.CertificateInfo{Id: c.ID.String(), Name: c.Name}
 	}
 	return connect.NewResponse(&apiv1.ListCertificatesResponse{Certificates: infos}), nil
 }
@@ -1256,7 +1338,13 @@ func (s *ConfigServer) GetCertificate(
 	if req.Msg.Id == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
 	}
-	pem, err := s.cfgStore.GetCertificate(ctx, req.Msg.Id)
+
+	id, connErr := parseUUID(req.Msg.Id)
+	if connErr != nil {
+		return nil, connErr
+	}
+
+	pem, err := s.cfgStore.GetCertificate(ctx, id)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -1264,7 +1352,7 @@ func (s *ConfigServer) GetCertificate(
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("certificate not found"))
 	}
 	return connect.NewResponse(&apiv1.GetCertificateResponse{
-		Id:       pem.ID,
+		Id:       pem.ID.String(),
 		Name:     pem.Name,
 		CertPem:  pem.CertPEM,
 		KeyPem:   "", // Never expose private keys via API
@@ -1286,7 +1374,11 @@ func (s *ConfigServer) PutCertificate(
 	var existing *config.CertPEM
 	var err error
 	if req.Msg.Id != "" {
-		existing, err = s.cfgStore.GetCertificate(ctx, req.Msg.Id)
+		reqID, connErr := parseUUID(req.Msg.Id)
+		if connErr != nil {
+			return nil, connErr
+		}
+		existing, err = s.cfgStore.GetCertificate(ctx, reqID)
 	} else {
 		existing, err = s.findCertByName(ctx, req.Msg.Name)
 	}
@@ -1328,13 +1420,15 @@ func (s *ConfigServer) PutCertificate(
 		}
 	}
 
-	// Reuse request ID, fall back to existing ID, then generate new UUID.
-	certID := req.Msg.Id
-	if certID == "" {
-		certID = existing.ID
-	}
-	if certID == "" {
-		certID = uuid.Must(uuid.NewV7()).String()
+	// Reuse existing ID, or generate new UUID.
+	certID := existing.ID
+	if certID == uuid.Nil {
+		if req.Msg.Id != "" {
+			// Already validated above.
+			certID, _ = uuid.Parse(req.Msg.Id)
+		} else {
+			certID = uuid.Must(uuid.NewV7())
+		}
 	}
 
 	newCert := config.CertPEM{
@@ -1378,14 +1472,20 @@ func (s *ConfigServer) DeleteCertificate(
 	if req.Msg.Id == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
 	}
-	pem, err := s.cfgStore.GetCertificate(ctx, req.Msg.Id)
+
+	id, connErr := parseUUID(req.Msg.Id)
+	if connErr != nil {
+		return nil, connErr
+	}
+
+	pem, err := s.cfgStore.GetCertificate(ctx, id)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	if pem == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("certificate not found"))
 	}
-	if err := s.cfgStore.DeleteCertificate(ctx, req.Msg.Id); err != nil {
+	if err := s.cfgStore.DeleteCertificate(ctx, id); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 

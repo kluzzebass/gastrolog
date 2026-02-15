@@ -4,12 +4,14 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
 	"gastrolog/internal/query"
+
+	"github.com/google/uuid"
 )
 
 // Store bundles the chunk manager, index manager, and query engine for a single store.
 // The invariant that every store ID has all three is now structurally enforced.
 type Store struct {
-	ID      string
+	ID      uuid.UUID
 	Chunks  chunk.ChunkManager
 	Indexes index.IndexManager
 	Query   *query.Engine
@@ -17,7 +19,7 @@ type Store struct {
 }
 
 // NewStore creates a Store from its components.
-func NewStore(id string, cm chunk.ChunkManager, im index.IndexManager, qe *query.Engine) *Store {
+func NewStore(id uuid.UUID, cm chunk.ChunkManager, im index.IndexManager, qe *query.Engine) *Store {
 	return &Store{
 		ID:      id,
 		Chunks:  cm,

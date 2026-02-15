@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // IngestMessage is the data emitted by ingesters for ingestion.
@@ -39,4 +41,4 @@ type Ingester interface {
 // defined here. Concrete factory implementations live in their respective
 // ingester packages (e.g., syslog.NewFactory()). The orchestrator never
 // contains ingester construction logic - it only calls factories.
-type IngesterFactory func(id string, params map[string]string, logger *slog.Logger) (Ingester, error)
+type IngesterFactory func(id uuid.UUID, params map[string]string, logger *slog.Logger) (Ingester, error)

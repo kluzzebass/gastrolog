@@ -10,6 +10,8 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/querylang"
+
+	"github.com/google/uuid"
 )
 
 // positionExhausted is a sentinel value indicating a chunk has been fully consumed.
@@ -39,7 +41,7 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 
 	// Normalize resume token to new format.
 	// For single-store mode, use the first selected store as default.
-	defaultStoreID := "default"
+	var defaultStoreID uuid.UUID
 	if len(selectedStores) > 0 {
 		defaultStoreID = selectedStores[0]
 	} else if len(allStores) > 0 {
@@ -65,7 +67,7 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 
 		// Collect all chunks from selected stores with time overlap.
 		type storeChunk struct {
-			storeID string
+			storeID uuid.UUID
 			meta    chunk.ChunkMeta
 		}
 		var allChunks []storeChunk
@@ -152,7 +154,7 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 
 		// Multiple chunks: use heap-based merge sort.
 		// Build resume position map for quick lookup.
-		resumePositions := make(map[string]map[chunk.ChunkID]uint64)
+		resumePositions := make(map[uuid.UUID]map[chunk.ChunkID]uint64)
 		if resume != nil {
 			for _, pos := range resume.Positions {
 				if resumePositions[pos.StoreID] == nil {
@@ -165,7 +167,7 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 		// Track current position for ALL chunks (for resume token).
 		// Position is updated as records are yielded, or set to positionExhausted when done.
 		type chunkKey struct {
-			storeID string
+			storeID uuid.UUID
 			chunkID chunk.ChunkID
 		}
 		chunkPositions := make(map[chunkKey]uint64)
@@ -182,7 +184,7 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 
 		// Track active cursors for cleanup.
 		type activeScanner struct {
-			storeID string
+			storeID uuid.UUID
 			chunkID chunk.ChunkID
 			iter    func() (recordWithRef, error, bool)
 			stop    func()
@@ -266,7 +268,7 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 		}
 
 		// Find scanner by storeID and chunkID.
-		findScanner := func(storeID string, chunkID chunk.ChunkID) *activeScanner {
+		findScanner := func(storeID uuid.UUID, chunkID chunk.ChunkID) *activeScanner {
 			for i := range activeScanners {
 				if activeScanners[i].storeID == storeID && activeScanners[i].chunkID == chunkID {
 					return &activeScanners[i]
@@ -379,7 +381,7 @@ func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeTo
 
 		// Collect all chunks from selected stores with time overlap.
 		type storeChunk struct {
-			storeID string
+			storeID uuid.UUID
 			meta    chunk.ChunkMeta
 		}
 		var allChunks []storeChunk
@@ -413,7 +415,7 @@ func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeTo
 
 		// Track current position for ALL chunks (for resume token).
 		type chunkKey struct {
-			storeID string
+			storeID uuid.UUID
 			chunkID chunk.ChunkID
 		}
 		chunkPositions := make(map[chunkKey]uint64)
@@ -432,7 +434,7 @@ func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeTo
 
 		// Track active cursors for cleanup.
 		type activeScanner struct {
-			storeID string
+			storeID uuid.UUID
 			chunkID chunk.ChunkID
 			iter    func() (recordWithRef, error, bool)
 			stop    func()
@@ -447,7 +449,7 @@ func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeTo
 		}()
 
 		// Find scanner by storeID and chunkID.
-		findScanner := func(storeID string, chunkID chunk.ChunkID) *activeScanner {
+		findScanner := func(storeID uuid.UUID, chunkID chunk.ChunkID) *activeScanner {
 			for i := range activeScanners {
 				if activeScanners[i].storeID == storeID && activeScanners[i].chunkID == chunkID {
 					return &activeScanners[i]
@@ -691,7 +693,7 @@ func (e *Engine) Follow(ctx context.Context, q Query) iter.Seq2[chunk.Record, er
 	return func(yield func(chunk.Record, error) bool) {
 		// Track last seen position per store+chunk.
 		type chunkKey struct {
-			storeID string
+			storeID uuid.UUID
 			chunkID chunk.ChunkID
 		}
 		lastPositions := make(map[chunkKey]uint64)
@@ -749,7 +751,7 @@ func (e *Engine) Follow(ctx context.Context, q Query) iter.Seq2[chunk.Record, er
 
 			// Collect records from all stores since last positions.
 			type pendingRecord struct {
-				storeID string
+				storeID uuid.UUID
 				rec     chunk.Record
 				ref     chunk.RecordRef
 			}
@@ -909,7 +911,7 @@ func (e *Engine) SearchWithContext(ctx context.Context, q Query) (iter.Seq2[chun
 				return
 			}
 
-			for rr, err := range e.searchChunkWithRef(ctx, q, "", meta, nil) {
+			for rr, err := range e.searchChunkWithRef(ctx, q, uuid.UUID{}, meta, nil) {
 				if err != nil {
 					nextRef = &rr.Ref
 					yield(chunk.Record{}, err)

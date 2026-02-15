@@ -7,14 +7,16 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/google/uuid"
+
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 )
 
 // NewFactory returns an IngesterFactory for file tail ingesters.
 func NewFactory() orchestrator.IngesterFactory {
-	return func(id string, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
-		cfg, err := parseConfig(id, params, logger)
+	return func(id uuid.UUID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+		cfg, err := parseConfig(id.String(), params, logger)
 		if err != nil {
 			return nil, err
 		}

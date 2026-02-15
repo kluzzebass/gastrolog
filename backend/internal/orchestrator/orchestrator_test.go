@@ -15,6 +15,8 @@ import (
 	memtoken "gastrolog/internal/index/memory/token"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
+
+	"github.com/google/uuid"
 )
 
 // recordCountPolicy creates a rotation policy for testing that rotates at maxRecords.
@@ -44,7 +46,7 @@ func (t *trackingIndexManager) BuildIndexes(ctx context.Context, chunkID chunk.C
 	return t.IndexManager.BuildIndexes(ctx, chunkID)
 }
 
-func newTestSetup(maxRecords int64) (*orchestrator.Orchestrator, chunk.ChunkManager, *trackingIndexManager) {
+func newTestSetup(maxRecords int64) (*orchestrator.Orchestrator, chunk.ChunkManager, *trackingIndexManager, uuid.UUID) {
 	cm, _ := chunkmem.NewManager(chunkmem.Config{
 		RotationPolicy: recordCountPolicy(maxRecords),
 	})
@@ -64,16 +66,17 @@ func newTestSetup(maxRecords int64) (*orchestrator.Orchestrator, chunk.ChunkMana
 	tracker := &trackingIndexManager{IndexManager: im}
 	qe := query.New(cm, im, nil)
 
+	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterChunkManager("default", cm)
-	orch.RegisterIndexManager("default", tracker)
-	orch.RegisterQueryEngine("default", qe)
+	orch.RegisterChunkManager(defaultID, cm)
+	orch.RegisterIndexManager(defaultID, tracker)
+	orch.RegisterQueryEngine(defaultID, qe)
 
-	return orch, cm, tracker
+	return orch, cm, tracker, defaultID
 }
 
 func TestIngestReachesChunkManager(t *testing.T) {
-	orch, cm, _ := newTestSetup(1 << 20) // Large chunk, no auto-seal
+	orch, cm, _, _ := newTestSetup(1 << 20) // Large chunk, no auto-seal
 
 	rec := chunk.Record{
 		IngestTS: t1,
@@ -103,7 +106,7 @@ func TestIngestReachesChunkManager(t *testing.T) {
 }
 
 func TestIngestMultipleRecords(t *testing.T) {
-	orch, cm, _ := newTestSetup(1 << 20)
+	orch, cm, _, _ := newTestSetup(1 << 20)
 
 	records := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
@@ -149,7 +152,7 @@ func TestIngestMultipleRecords(t *testing.T) {
 
 func TestSealedChunkTriggersIndexBuild(t *testing.T) {
 	// Set MaxRecords to 2 so third record triggers seal.
-	orch, _, tracker := newTestSetup(2)
+	orch, _, tracker, _ := newTestSetup(2)
 
 	// Ingest 3 records to trigger seal (chunk fills at 2, third causes seal).
 	for i := 0; i < 3; i++ {
@@ -181,7 +184,7 @@ func TestSealedChunkTriggersIndexBuild(t *testing.T) {
 
 func TestIndexBuildTriggeredOncePerSeal(t *testing.T) {
 	// Set chunk size to 2 records.
-	orch, _, tracker := newTestSetup(2)
+	orch, _, tracker, _ := newTestSetup(2)
 
 	// Ingest 3 records to trigger exactly one seal.
 	for i := 0; i < 3; i++ {
@@ -205,7 +208,7 @@ func TestIndexBuildTriggeredOncePerSeal(t *testing.T) {
 }
 
 func TestSearchViaOrchestrator(t *testing.T) {
-	orch, cm, _ := newTestSetup(1 << 20)
+	orch, cm, _, defaultID := newTestSetup(1 << 20)
 
 	records := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
@@ -220,7 +223,7 @@ func TestSearchViaOrchestrator(t *testing.T) {
 	}
 
 	// Search via orchestrator.
-	seq, _, err := orch.Search(context.Background(), "default", query.Query{}, nil)
+	seq, _, err := orch.Search(context.Background(), defaultID, query.Query{}, nil)
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
@@ -256,18 +259,18 @@ func TestSearchViaOrchestrator(t *testing.T) {
 	}
 }
 
-func TestSearchDefaultKey(t *testing.T) {
-	orch, _, _ := newTestSetup(1 << 20)
+func TestSearchByUUID(t *testing.T) {
+	orch, _, _, defaultID := newTestSetup(1 << 20)
 
 	rec := chunk.Record{IngestTS: t1, Attrs: attrsA, Raw: []byte("test")}
 	if err := orch.Ingest(rec); err != nil {
 		t.Fatalf("Ingest failed: %v", err)
 	}
 
-	// Empty key should use "default".
-	seq, _, err := orch.Search(context.Background(), "", query.Query{}, nil)
+	// Search with the store UUID.
+	seq, _, err := orch.Search(context.Background(), defaultID, query.Query{}, nil)
 	if err != nil {
-		t.Fatalf("Search with empty key failed: %v", err)
+		t.Fatalf("Search with store UUID failed: %v", err)
 	}
 
 	count := 0
@@ -281,12 +284,18 @@ func TestSearchDefaultKey(t *testing.T) {
 	if count != 1 {
 		t.Errorf("expected 1 result, got %d", count)
 	}
+
+	// Zero UUID should return ErrUnknownRegistry.
+	_, _, err = orch.Search(context.Background(), uuid.Nil, query.Query{}, nil)
+	if err != orchestrator.ErrUnknownRegistry {
+		t.Errorf("expected ErrUnknownRegistry for zero UUID, got %v", err)
+	}
 }
 
 func TestSearchUnknownRegistry(t *testing.T) {
-	orch, _, _ := newTestSetup(1 << 20)
+	orch, _, _, _ := newTestSetup(1 << 20)
 
-	_, _, err := orch.Search(context.Background(), "nonexistent", query.Query{}, nil)
+	_, _, err := orch.Search(context.Background(), uuid.Must(uuid.NewV7()), query.Query{}, nil)
 	if err != orchestrator.ErrUnknownRegistry {
 		t.Errorf("expected ErrUnknownRegistry, got %v", err)
 	}
@@ -305,14 +314,14 @@ func TestIngestNoChunkManagers(t *testing.T) {
 func TestSearchNoQueryEngines(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
-	_, _, err := orch.Search(context.Background(), "default", query.Query{}, nil)
+	_, _, err := orch.Search(context.Background(), uuid.Must(uuid.NewV7()), query.Query{}, nil)
 	if err != orchestrator.ErrNoQueryEngines {
 		t.Errorf("expected ErrNoQueryEngines, got %v", err)
 	}
 }
 
 func TestSearchThenFollowViaOrchestrator(t *testing.T) {
-	orch, _, _ := newTestSetup(1 << 20)
+	orch, _, _, defaultID := newTestSetup(1 << 20)
 
 	records := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("info")},
@@ -326,7 +335,7 @@ func TestSearchThenFollowViaOrchestrator(t *testing.T) {
 		}
 	}
 
-	seq, _, err := orch.SearchThenFollow(context.Background(), "default", query.Query{
+	seq, _, err := orch.SearchThenFollow(context.Background(), defaultID, query.Query{
 		Tokens: []string{"error"},
 	}, nil)
 	if err != nil {
@@ -351,7 +360,7 @@ func TestSearchThenFollowViaOrchestrator(t *testing.T) {
 }
 
 func TestSearchWithContextViaOrchestrator(t *testing.T) {
-	orch, _, _ := newTestSetup(1 << 20)
+	orch, _, _, defaultID := newTestSetup(1 << 20)
 
 	records := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("before")},
@@ -365,7 +374,7 @@ func TestSearchWithContextViaOrchestrator(t *testing.T) {
 		}
 	}
 
-	seq, _, err := orch.SearchWithContext(context.Background(), "default", query.Query{
+	seq, _, err := orch.SearchWithContext(context.Background(), defaultID, query.Query{
 		Tokens:        []string{"error"},
 		ContextBefore: 1,
 		ContextAfter:  1,
@@ -467,10 +476,11 @@ func newIngesterTestSetup() (*orchestrator.Orchestrator, chunk.ChunkManager) {
 
 	qe := query.New(cm, im, nil)
 
+	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterChunkManager("default", cm)
-	orch.RegisterIndexManager("default", im)
-	orch.RegisterQueryEngine("default", qe)
+	orch.RegisterChunkManager(defaultID, cm)
+	orch.RegisterIndexManager(defaultID, im)
+	orch.RegisterQueryEngine(defaultID, qe)
 
 	return orch, cm
 }
@@ -481,7 +491,7 @@ func TestIngesterMessageReachesChunkManager(t *testing.T) {
 	recv := newMockIngester([]orchestrator.IngestMessage{
 		{Attrs: map[string]string{"host": "server1"}, Raw: []byte("test message")},
 	})
-	orch.RegisterIngester("test", recv)
+	orch.RegisterIngester(uuid.Must(uuid.NewV7()), recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -517,7 +527,7 @@ func TestIngesterContextCancellation(t *testing.T) {
 	orch, _ := newIngesterTestSetup()
 
 	recv := newBlockingIngester()
-	orch.RegisterIngester("test", recv)
+	orch.RegisterIngester(uuid.Must(uuid.NewV7()), recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -550,8 +560,8 @@ func TestMultipleIngesters(t *testing.T) {
 		{Attrs: map[string]string{"source": "recv2"}, Raw: []byte("from recv2")},
 	})
 
-	orch.RegisterIngester("recv1", recv1)
-	orch.RegisterIngester("recv2", recv2)
+	orch.RegisterIngester(uuid.Must(uuid.NewV7()), recv1)
+	orch.RegisterIngester(uuid.Must(uuid.NewV7()), recv2)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -630,10 +640,11 @@ func TestIngesterIndexBuildOnSeal(t *testing.T) {
 	tracker := &trackingIndexManager{IndexManager: im}
 	qe := query.New(cm, im, nil)
 
+	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterChunkManager("default", cm)
-	orch.RegisterIndexManager("default", tracker)
-	orch.RegisterQueryEngine("default", qe)
+	orch.RegisterChunkManager(defaultID, cm)
+	orch.RegisterIndexManager(defaultID, tracker)
+	orch.RegisterQueryEngine(defaultID, qe)
 
 	// Create ingester with 3 messages to trigger seal.
 	recv := newMockIngester([]orchestrator.IngestMessage{
@@ -641,7 +652,7 @@ func TestIngesterIndexBuildOnSeal(t *testing.T) {
 		{Attrs: map[string]string{"host": "s1"}, Raw: []byte("two")},
 		{Attrs: map[string]string{"host": "s1"}, Raw: []byte("three")},
 	})
-	orch.RegisterIngester("test", recv)
+	orch.RegisterIngester(uuid.Must(uuid.NewV7()), recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -665,8 +676,9 @@ func TestUnregisterIngester(t *testing.T) {
 	orch, _ := newIngesterTestSetup()
 
 	recv := newBlockingIngester()
-	orch.RegisterIngester("test", recv)
-	orch.UnregisterIngester("test")
+	ingesterID := uuid.Must(uuid.NewV7())
+	orch.RegisterIngester(ingesterID, recv)
+	orch.UnregisterIngester(ingesterID)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -725,7 +737,7 @@ func TestHighVolumeIngestion(t *testing.T) {
 	orch, cm := newIngesterTestSetup()
 
 	recv := newCountingIngester(100)
-	orch.RegisterIngester("test", recv)
+	orch.RegisterIngester(uuid.Must(uuid.NewV7()), recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -762,70 +774,58 @@ func TestHighVolumeIngestion(t *testing.T) {
 // Registry accessor tests
 
 func TestChunkManagerAccessor(t *testing.T) {
-	orch, cm, _ := newTestSetup(1 << 20)
+	orch, cm, _, defaultID := newTestSetup(1 << 20)
 
 	// Get by key.
-	got := orch.ChunkManager("default")
+	got := orch.ChunkManager(defaultID)
 	if got != cm {
 		t.Error("expected ChunkManager to return registered manager")
 	}
 
-	// Empty key defaults to "default".
-	got = orch.ChunkManager("")
-	if got != cm {
-		t.Error("expected empty key to default to 'default'")
-	}
-
 	// Unknown key returns nil.
-	got = orch.ChunkManager("nonexistent")
+	got = orch.ChunkManager(uuid.Must(uuid.NewV7()))
 	if got != nil {
 		t.Error("expected nil for unknown key")
 	}
 }
 
 func TestChunkManagersAccessor(t *testing.T) {
-	orch, _, _ := newTestSetup(1 << 20)
+	orch, _, _, defaultID := newTestSetup(1 << 20)
 
 	keys := orch.ChunkManagers()
 	if len(keys) != 1 {
 		t.Fatalf("expected 1 key, got %d", len(keys))
 	}
-	if keys[0] != "default" {
-		t.Errorf("expected 'default', got %q", keys[0])
+	if keys[0] != defaultID {
+		t.Errorf("expected %s, got %s", defaultID, keys[0])
 	}
 }
 
 func TestIndexManagerAccessor(t *testing.T) {
-	orch, _, tracker := newTestSetup(1 << 20)
+	orch, _, tracker, defaultID := newTestSetup(1 << 20)
 
 	// Get by key.
-	got := orch.IndexManager("default")
+	got := orch.IndexManager(defaultID)
 	if got != tracker {
 		t.Error("expected IndexManager to return registered manager")
 	}
 
-	// Empty key defaults to "default".
-	got = orch.IndexManager("")
-	if got != tracker {
-		t.Error("expected empty key to default to 'default'")
-	}
-
 	// Unknown key returns nil.
-	got = orch.IndexManager("nonexistent")
+	got = orch.IndexManager(uuid.Must(uuid.NewV7()))
 	if got != nil {
 		t.Error("expected nil for unknown key")
 	}
 }
 
 func TestIndexManagersAccessor(t *testing.T) {
-	orch, _, _ := newTestSetup(1 << 20)
+	orch, _, _, defaultID := newTestSetup(1 << 20)
 
 	keys := orch.IndexManagers()
 	if len(keys) != 1 {
 		t.Fatalf("expected 1 key, got %d", len(keys))
 	}
-	if keys[0] != "default" {
-		t.Errorf("expected 'default', got %q", keys[0])
+	if keys[0] != defaultID {
+		t.Errorf("expected %s, got %s", defaultID, keys[0])
 	}
 }
 
@@ -834,8 +834,10 @@ func TestIngestersAccessor(t *testing.T) {
 
 	recv1 := newBlockingIngester()
 	recv2 := newBlockingIngester()
-	orch.RegisterIngester("recv1", recv1)
-	orch.RegisterIngester("recv2", recv2)
+	id1 := uuid.Must(uuid.NewV7())
+	id2 := uuid.Must(uuid.NewV7())
+	orch.RegisterIngester(id1, recv1)
+	orch.RegisterIngester(id2, recv2)
 
 	keys := orch.Ingesters()
 	if len(keys) != 2 {
@@ -843,12 +845,12 @@ func TestIngestersAccessor(t *testing.T) {
 	}
 
 	// Keys may be in any order.
-	found := make(map[string]bool)
+	found := make(map[uuid.UUID]bool)
 	for _, k := range keys {
 		found[k] = true
 	}
-	if !found["recv1"] || !found["recv2"] {
-		t.Errorf("expected recv1 and recv2, got %v", keys)
+	if !found[id1] || !found[id2] {
+		t.Errorf("expected %s and %s, got %v", id1, id2, keys)
 	}
 }
 
@@ -906,9 +908,10 @@ func TestRebuildMissingIndexes(t *testing.T) {
 
 	tracker := &trackingIndexManager{IndexManager: im}
 
+	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterChunkManager("default", cm)
-	orch.RegisterIndexManager("default", tracker)
+	orch.RegisterChunkManager(defaultID, cm)
+	orch.RegisterIndexManager(defaultID, tracker)
 
 	// RebuildMissingIndexes should find the sealed chunk and build indexes.
 	if err := orch.RebuildMissingIndexes(context.Background()); err != nil {
@@ -926,40 +929,54 @@ func TestRebuildMissingIndexes(t *testing.T) {
 }
 
 func TestSearchThenFollowUnknownRegistry(t *testing.T) {
-	orch, _, _ := newTestSetup(1 << 20)
+	orch, _, _, _ := newTestSetup(1 << 20)
 
-	_, _, err := orch.SearchThenFollow(context.Background(), "nonexistent", query.Query{}, nil)
+	_, _, err := orch.SearchThenFollow(context.Background(), uuid.Must(uuid.NewV7()), query.Query{}, nil)
 	if err != orchestrator.ErrUnknownRegistry {
 		t.Errorf("expected ErrUnknownRegistry, got %v", err)
 	}
 }
 
 func TestSearchWithContextUnknownRegistry(t *testing.T) {
-	orch, _, _ := newTestSetup(1 << 20)
+	orch, _, _, _ := newTestSetup(1 << 20)
 
-	_, _, err := orch.SearchWithContext(context.Background(), "nonexistent", query.Query{})
+	_, _, err := orch.SearchWithContext(context.Background(), uuid.Must(uuid.NewV7()), query.Query{})
 	if err != orchestrator.ErrUnknownRegistry {
 		t.Errorf("expected ErrUnknownRegistry, got %v", err)
 	}
 }
 
+// filteredTestStores holds the store IDs and chunk managers for the filtered test setup.
+type filteredTestStores struct {
+	prod     uuid.UUID
+	staging  uuid.UUID
+	archive  uuid.UUID
+	unrouted uuid.UUID
+	cms      map[uuid.UUID]chunk.ChunkManager
+}
+
 // newFilteredTestSetup creates an orchestrator with multiple stores and a filter set.
-func newFilteredTestSetup(t *testing.T) (*orchestrator.Orchestrator, map[string]chunk.ChunkManager) {
+func newFilteredTestSetup(t *testing.T) (*orchestrator.Orchestrator, filteredTestStores) {
 	t.Helper()
 
-	stores := make(map[string]chunk.ChunkManager)
-	storeNames := []string{"prod", "staging", "archive", "unrouted"}
+	stores := filteredTestStores{
+		prod:     uuid.Must(uuid.NewV7()),
+		staging:  uuid.Must(uuid.NewV7()),
+		archive:  uuid.Must(uuid.NewV7()),
+		unrouted: uuid.Must(uuid.NewV7()),
+		cms:      make(map[uuid.UUID]chunk.ChunkManager),
+	}
 
 	orch := orchestrator.New(orchestrator.Config{})
 
-	for _, name := range storeNames {
+	for _, id := range []uuid.UUID{stores.prod, stores.staging, stores.archive, stores.unrouted} {
 		cm, err := chunkmem.NewManager(chunkmem.Config{
 			RotationPolicy: recordCountPolicy(10000),
 		})
 		if err != nil {
 			t.Fatalf("NewManager failed: %v", err)
 		}
-		stores[name] = cm
+		stores.cms[id] = cm
 
 		tokIdx := memtoken.NewIndexer(cm)
 		attrIdx := memattr.NewIndexer(cm)
@@ -975,9 +992,9 @@ func newFilteredTestSetup(t *testing.T) (*orchestrator.Orchestrator, map[string]
 
 		qe := query.New(cm, im, nil)
 
-		orch.RegisterChunkManager(name, cm)
-		orch.RegisterIndexManager(name, im)
-		orch.RegisterQueryEngine(name, qe)
+		orch.RegisterChunkManager(id, cm)
+		orch.RegisterIndexManager(id, im)
+		orch.RegisterQueryEngine(id, qe)
 	}
 
 	return orch, stores
@@ -1045,19 +1062,19 @@ func TestRoutingIntegration(t *testing.T) {
 	// - staging: receives env=staging messages
 	// - archive: catch-all (*)
 	// - unrouted: catch-the-rest (+)
-	prodFilter, err := orchestrator.CompileFilter("prod", "env=prod")
+	prodFilter, err := orchestrator.CompileFilter(stores.prod, "env=prod")
 	if err != nil {
 		t.Fatalf("CompileFilter prod failed: %v", err)
 	}
-	stagingFilter, err := orchestrator.CompileFilter("staging", "env=staging")
+	stagingFilter, err := orchestrator.CompileFilter(stores.staging, "env=staging")
 	if err != nil {
 		t.Fatalf("CompileFilter staging failed: %v", err)
 	}
-	archiveFilter, err := orchestrator.CompileFilter("archive", "*")
+	archiveFilter, err := orchestrator.CompileFilter(stores.archive, "*")
 	if err != nil {
 		t.Fatalf("CompileFilter archive failed: %v", err)
 	}
-	unfilteredFilter, err := orchestrator.CompileFilter("unrouted", "+")
+	unfilteredFilter, err := orchestrator.CompileFilter(stores.unrouted, "+")
 	if err != nil {
 		t.Fatalf("CompileFilter unrouted failed: %v", err)
 	}
@@ -1075,31 +1092,31 @@ func TestRoutingIntegration(t *testing.T) {
 		name     string
 		attrs    chunk.Attributes
 		raw      string
-		expected []string // stores that should receive the message
+		expected []uuid.UUID // stores that should receive the message
 	}{
 		{
 			name:     "prod message goes to prod and archive",
 			attrs:    chunk.Attributes{"env": "prod", "level": "error"},
 			raw:      "production error",
-			expected: []string{"prod", "archive"},
+			expected: []uuid.UUID{stores.prod, stores.archive},
 		},
 		{
 			name:     "staging message goes to staging and archive",
 			attrs:    chunk.Attributes{"env": "staging", "level": "info"},
 			raw:      "staging info",
-			expected: []string{"staging", "archive"},
+			expected: []uuid.UUID{stores.staging, stores.archive},
 		},
 		{
 			name:     "dev message goes to archive and unrouted",
 			attrs:    chunk.Attributes{"env": "dev", "level": "debug"},
 			raw:      "dev debug",
-			expected: []string{"archive", "unrouted"},
+			expected: []uuid.UUID{stores.archive, stores.unrouted},
 		},
 		{
 			name:     "no env goes to archive and unrouted",
 			attrs:    chunk.Attributes{"level": "warn"},
 			raw:      "no env warn",
-			expected: []string{"archive", "unrouted"},
+			expected: []uuid.UUID{stores.archive, stores.unrouted},
 		},
 	}
 
@@ -1116,9 +1133,9 @@ func TestRoutingIntegration(t *testing.T) {
 	}
 
 	// Verify each store received the expected messages.
-	storeMessages := make(map[string][]string)
-	for name, cm := range stores {
-		storeMessages[name] = getRecordMessages(t, cm)
+	storeMessages := make(map[uuid.UUID][]string)
+	for id, cm := range stores.cms {
+		storeMessages[id] = getRecordMessages(t, cm)
 	}
 
 	for _, tc := range testCases {
@@ -1131,16 +1148,16 @@ func TestRoutingIntegration(t *testing.T) {
 				}
 			}
 			if !found {
-				t.Errorf("%s: expected message %q in store %q, but not found (store has: %v)",
+				t.Errorf("%s: expected message %q in store %s, but not found (store has: %v)",
 					tc.name, tc.raw, expectedStore, storeMessages[expectedStore])
 			}
 		}
 
 		// Also verify message is NOT in stores not in expected list.
-		for storeName, msgs := range storeMessages {
+		for storeID, msgs := range storeMessages {
 			isExpected := false
 			for _, exp := range tc.expected {
-				if exp == storeName {
+				if exp == storeID {
 					isExpected = true
 					break
 				}
@@ -1148,8 +1165,8 @@ func TestRoutingIntegration(t *testing.T) {
 			if !isExpected {
 				for _, msg := range msgs {
 					if msg == tc.raw {
-						t.Errorf("%s: message %q should NOT be in store %q",
-							tc.name, tc.raw, storeName)
+						t.Errorf("%s: message %q should NOT be in store %s",
+							tc.name, tc.raw, storeID)
 					}
 				}
 			}
@@ -1161,8 +1178,8 @@ func TestRoutingWithIngesters(t *testing.T) {
 	orch, stores := newFilteredTestSetup(t)
 
 	// Set up filtering: prod gets env=prod, archive is catch-all.
-	prodFilter, _ := orchestrator.CompileFilter("prod", "env=prod")
-	archiveFilter, _ := orchestrator.CompileFilter("archive", "*")
+	prodFilter, _ := orchestrator.CompileFilter(stores.prod, "env=prod")
+	archiveFilter, _ := orchestrator.CompileFilter(stores.archive, "*")
 
 	fs := orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{prodFilter, archiveFilter})
 	orch.SetFilterSet(fs)
@@ -1173,7 +1190,7 @@ func TestRoutingWithIngesters(t *testing.T) {
 		{Attrs: map[string]string{"env": "prod"}, Raw: []byte("prod msg 2")},
 		{Attrs: map[string]string{"env": "staging"}, Raw: []byte("staging msg")},
 	})
-	orch.RegisterIngester("test", recv)
+	orch.RegisterIngester(uuid.Must(uuid.NewV7()), recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -1187,9 +1204,9 @@ func TestRoutingWithIngesters(t *testing.T) {
 	}
 
 	// Verify routing: prod should have 2 messages, archive should have 3.
-	prodMsgs := getRecordMessages(t, stores["prod"])
-	archiveMsgs := getRecordMessages(t, stores["archive"])
-	stagingMsgs := getRecordMessages(t, stores["staging"])
+	prodMsgs := getRecordMessages(t, stores.cms[stores.prod])
+	archiveMsgs := getRecordMessages(t, stores.cms[stores.archive])
+	stagingMsgs := getRecordMessages(t, stores.cms[stores.staging])
 
 	if len(prodMsgs) != 2 {
 		t.Errorf("prod store: expected 2 messages, got %d: %v", len(prodMsgs), prodMsgs)
@@ -1216,10 +1233,10 @@ func TestRoutingNoFilterSetFallback(t *testing.T) {
 	}
 
 	// All stores should have the message.
-	for name, cm := range stores {
+	for id, cm := range stores.cms {
 		count := countRecords(t, cm)
 		if count != 1 {
-			t.Errorf("store %q: expected 1 record (fanout), got %d", name, count)
+			t.Errorf("store %s: expected 1 record (fanout), got %d", id, count)
 		}
 	}
 }
@@ -1228,8 +1245,8 @@ func TestRoutingEmptyFilterReceivesNothing(t *testing.T) {
 	orch, stores := newFilteredTestSetup(t)
 
 	// prod has empty filter (receives nothing), archive is catch-all.
-	prodFilter, _ := orchestrator.CompileFilter("prod", "")
-	archiveFilter, _ := orchestrator.CompileFilter("archive", "*")
+	prodFilter, _ := orchestrator.CompileFilter(stores.prod, "")
+	archiveFilter, _ := orchestrator.CompileFilter(stores.archive, "*")
 
 	fs := orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{prodFilter, archiveFilter})
 	orch.SetFilterSet(fs)
@@ -1244,10 +1261,10 @@ func TestRoutingEmptyFilterReceivesNothing(t *testing.T) {
 	}
 
 	// prod should have 0, archive should have 1.
-	if count := countRecords(t, stores["prod"]); count != 0 {
+	if count := countRecords(t, stores.cms[stores.prod]); count != 0 {
 		t.Errorf("prod store: expected 0 records (empty filter), got %d", count)
 	}
-	if count := countRecords(t, stores["archive"]); count != 1 {
+	if count := countRecords(t, stores.cms[stores.archive]); count != 1 {
 		t.Errorf("archive store: expected 1 record, got %d", count)
 	}
 }
@@ -1256,11 +1273,11 @@ func TestRoutingComplexExpression(t *testing.T) {
 	orch, stores := newFilteredTestSetup(t)
 
 	// prod receives: (env=prod AND level=error) OR (env=prod AND level=critical)
-	prodFilter, err := orchestrator.CompileFilter("prod", "(env=prod AND level=error) OR (env=prod AND level=critical)")
+	prodFilter, err := orchestrator.CompileFilter(stores.prod, "(env=prod AND level=error) OR (env=prod AND level=critical)")
 	if err != nil {
 		t.Fatalf("CompileFilter failed: %v", err)
 	}
-	archiveFilter, _ := orchestrator.CompileFilter("archive", "*")
+	archiveFilter, _ := orchestrator.CompileFilter(stores.archive, "*")
 
 	fs := orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{prodFilter, archiveFilter})
 	orch.SetFilterSet(fs)
@@ -1287,7 +1304,7 @@ func TestRoutingComplexExpression(t *testing.T) {
 		}
 	}
 
-	prodMsgs := getRecordMessages(t, stores["prod"])
+	prodMsgs := getRecordMessages(t, stores.cms[stores.prod])
 
 	for _, tc := range testCases {
 		found := false
@@ -1303,7 +1320,7 @@ func TestRoutingComplexExpression(t *testing.T) {
 	}
 
 	// Archive should have all 4 messages.
-	if count := countRecords(t, stores["archive"]); count != 4 {
+	if count := countRecords(t, stores.cms[stores.archive]); count != 4 {
 		t.Errorf("archive: expected 4 messages, got %d", count)
 	}
 }
@@ -1325,7 +1342,7 @@ func TestIngestAckSuccess(t *testing.T) {
 		msg:     msg,
 		started: make(chan struct{}),
 	}
-	orch.RegisterIngester("ack-test", recv)
+	orch.RegisterIngester(uuid.Must(uuid.NewV7()), recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -1354,7 +1371,7 @@ func TestIngestAckNotSentWhenNil(t *testing.T) {
 	recv := newMockIngester([]orchestrator.IngestMessage{
 		{Attrs: map[string]string{"host": "server1"}, Raw: []byte("no ack message")},
 	})
-	orch.RegisterIngester("no-ack-test", recv)
+	orch.RegisterIngester(uuid.Must(uuid.NewV7()), recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)

@@ -191,7 +191,7 @@ func run(ctx context.Context, logger *slog.Logger, datadirFlag, configType, serv
 	}
 	certs := make(map[string]cert.CertSource, len(certList))
 	for _, c := range certList {
-		certs[c.ID] = cert.CertSource{CertPEM: c.CertPEM, KeyPEM: c.KeyPEM, CertFile: c.CertFile, KeyFile: c.KeyFile}
+		certs[c.ID.String()] = cert.CertSource{CertPEM: c.CertPEM, KeyPEM: c.KeyPEM, CertFile: c.CertFile, KeyFile: c.KeyFile}
 	}
 	sc, err := config.LoadServerConfig(ctx, cfgStore)
 	if err != nil {

@@ -1,10 +1,11 @@
 package orchestrator
 
 import (
-	"cmp"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
 	"gastrolog/internal/query"
+
+	"github.com/google/uuid"
 )
 
 // RegisterStore adds a store to the registry.
@@ -16,7 +17,7 @@ func (o *Orchestrator) RegisterStore(store *Store) {
 
 // RegisterChunkManager adds a chunk manager to the registry.
 // Deprecated: use RegisterStore(NewStore(...)) instead.
-func (o *Orchestrator) RegisterChunkManager(key string, cm chunk.ChunkManager) {
+func (o *Orchestrator) RegisterChunkManager(key uuid.UUID, cm chunk.ChunkManager) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if s := o.stores[key]; s != nil {
@@ -28,7 +29,7 @@ func (o *Orchestrator) RegisterChunkManager(key string, cm chunk.ChunkManager) {
 
 // RegisterIndexManager adds an index manager to the registry.
 // Deprecated: use RegisterStore(NewStore(...)) instead.
-func (o *Orchestrator) RegisterIndexManager(key string, im index.IndexManager) {
+func (o *Orchestrator) RegisterIndexManager(key uuid.UUID, im index.IndexManager) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if s := o.stores[key]; s != nil {
@@ -40,7 +41,7 @@ func (o *Orchestrator) RegisterIndexManager(key string, im index.IndexManager) {
 
 // RegisterQueryEngine adds a query engine to the registry.
 // Deprecated: use RegisterStore(NewStore(...)) instead.
-func (o *Orchestrator) RegisterQueryEngine(key string, qe *query.Engine) {
+func (o *Orchestrator) RegisterQueryEngine(key uuid.UUID, qe *query.Engine) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if s := o.stores[key]; s != nil {
@@ -61,7 +62,7 @@ func (o *Orchestrator) RegisterDigester(d Digester) {
 
 // RegisterIngester adds a ingester to the registry.
 // Must be called before Start().
-func (o *Orchestrator) RegisterIngester(id string, r Ingester) {
+func (o *Orchestrator) RegisterIngester(id uuid.UUID, r Ingester) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.ingesters[id] = r
@@ -81,7 +82,7 @@ func (o *Orchestrator) SetFilterSet(fs *FilterSet) {
 
 // UnregisterIngester removes a ingester from the registry.
 // Must be called before Start() or after Stop().
-func (o *Orchestrator) UnregisterIngester(id string) {
+func (o *Orchestrator) UnregisterIngester(id uuid.UUID) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	delete(o.ingesters, id)
@@ -89,20 +90,20 @@ func (o *Orchestrator) UnregisterIngester(id string) {
 
 // ChunkManager returns the chunk manager registered under the given key.
 // Returns nil if not found.
-func (o *Orchestrator) ChunkManager(key string) chunk.ChunkManager {
+func (o *Orchestrator) ChunkManager(key uuid.UUID) chunk.ChunkManager {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	if s := o.stores[cmp.Or(key, "default")]; s != nil {
+	if s := o.stores[key]; s != nil {
 		return s.Chunks
 	}
 	return nil
 }
 
 // ChunkManagers returns all registered chunk manager keys.
-func (o *Orchestrator) ChunkManagers() []string {
+func (o *Orchestrator) ChunkManagers() []uuid.UUID {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	keys := make([]string, 0, len(o.stores))
+	keys := make([]uuid.UUID, 0, len(o.stores))
 	for k := range o.stores {
 		keys = append(keys, k)
 	}
@@ -111,20 +112,20 @@ func (o *Orchestrator) ChunkManagers() []string {
 
 // IndexManager returns the index manager registered under the given key.
 // Returns nil if not found.
-func (o *Orchestrator) IndexManager(key string) index.IndexManager {
+func (o *Orchestrator) IndexManager(key uuid.UUID) index.IndexManager {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	if s := o.stores[cmp.Or(key, "default")]; s != nil {
+	if s := o.stores[key]; s != nil {
 		return s.Indexes
 	}
 	return nil
 }
 
 // IndexManagers returns all registered index manager keys.
-func (o *Orchestrator) IndexManagers() []string {
+func (o *Orchestrator) IndexManagers() []uuid.UUID {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	keys := make([]string, 0, len(o.stores))
+	keys := make([]uuid.UUID, 0, len(o.stores))
 	for k := range o.stores {
 		keys = append(keys, k)
 	}
@@ -132,10 +133,10 @@ func (o *Orchestrator) IndexManagers() []string {
 }
 
 // Ingesters returns all registered ingester IDs.
-func (o *Orchestrator) Ingesters() []string {
+func (o *Orchestrator) Ingesters() []uuid.UUID {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	keys := make([]string, 0, len(o.ingesters))
+	keys := make([]uuid.UUID, 0, len(o.ingesters))
 	for k := range o.ingesters {
 		keys = append(keys, k)
 	}
@@ -156,22 +157,22 @@ func (o *Orchestrator) IsRunning() bool {
 
 // ListStores returns all registered store IDs.
 // This is an alias for ChunkManagers.
-func (o *Orchestrator) ListStores() []string {
+func (o *Orchestrator) ListStores() []uuid.UUID {
 	return o.ChunkManagers()
 }
 
 // ListIngesters returns all registered ingester IDs.
 // This is an alias for Ingesters.
-func (o *Orchestrator) ListIngesters() []string {
+func (o *Orchestrator) ListIngesters() []uuid.UUID {
 	return o.Ingesters()
 }
 
 // QueryEngine returns the query engine registered under the given key.
 // Returns nil if not found.
-func (o *Orchestrator) QueryEngine(key string) *query.Engine {
+func (o *Orchestrator) QueryEngine(key uuid.UUID) *query.Engine {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	if s := o.stores[cmp.Or(key, "default")]; s != nil {
+	if s := o.stores[key]; s != nil {
 		return s.Query
 	}
 	return nil

@@ -8,6 +8,8 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
 	"gastrolog/internal/query"
+
+	"github.com/google/uuid"
 )
 
 var (
@@ -22,9 +24,9 @@ var (
 )
 
 // resolveFilterExpr looks up a filter ID in the config and returns its expression.
-// Returns empty string if the filter ID is empty or not found (store receives nothing).
-func resolveFilterExpr(cfg *config.Config, filterID string) string {
-	if filterID == "" || cfg == nil {
+// Returns empty string if the filter ID is nil or not found (store receives nothing).
+func resolveFilterExpr(cfg *config.Config, filterID uuid.UUID) string {
+	if filterID == uuid.Nil || cfg == nil {
 		return ""
 	}
 	fc := findFilter(cfg.Filters, filterID)
@@ -35,7 +37,7 @@ func resolveFilterExpr(cfg *config.Config, filterID string) string {
 }
 
 // findFilter finds a FilterConfig by ID in a slice.
-func findFilter(filters []config.FilterConfig, id string) *config.FilterConfig {
+func findFilter(filters []config.FilterConfig, id uuid.UUID) *config.FilterConfig {
 	for i := range filters {
 		if filters[i].ID == id {
 			return &filters[i]
@@ -45,7 +47,7 @@ func findFilter(filters []config.FilterConfig, id string) *config.FilterConfig {
 }
 
 // findRotationPolicy finds a RotationPolicyConfig by ID in a slice.
-func findRotationPolicy(policies []config.RotationPolicyConfig, id string) *config.RotationPolicyConfig {
+func findRotationPolicy(policies []config.RotationPolicyConfig, id uuid.UUID) *config.RotationPolicyConfig {
 	for i := range policies {
 		if policies[i].ID == id {
 			return &policies[i]
@@ -55,7 +57,7 @@ func findRotationPolicy(policies []config.RotationPolicyConfig, id string) *conf
 }
 
 // findRetentionPolicy finds a RetentionPolicyConfig by ID in a slice.
-func findRetentionPolicy(policies []config.RetentionPolicyConfig, id string) *config.RetentionPolicyConfig {
+func findRetentionPolicy(policies []config.RetentionPolicyConfig, id uuid.UUID) *config.RetentionPolicyConfig {
 	for i := range policies {
 		if policies[i].ID == id {
 			return &policies[i]
@@ -86,7 +88,7 @@ func (o *Orchestrator) UpdateFilters(cfg *config.Config) error {
 			continue
 		}
 
-		var filterID string
+		var filterID uuid.UUID
 		if storeCfg.Filter != nil {
 			filterID = *storeCfg.Filter
 		}
@@ -113,7 +115,7 @@ func (o *Orchestrator) UpdateFilters(cfg *config.Config) error {
 // AddIngester adds and optionally starts a new ingester.
 // If the orchestrator is running, the ingester is started immediately.
 // Returns ErrDuplicateID if a ingester with this ID already exists.
-func (o *Orchestrator) AddIngester(id string, r Ingester) error {
+func (o *Orchestrator) AddIngester(id uuid.UUID, r Ingester) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -143,7 +145,7 @@ func (o *Orchestrator) AddIngester(id string, r Ingester) error {
 // RemoveIngester stops and removes a ingester.
 // If the orchestrator is running, the ingester is stopped gracefully before removal.
 // The method waits for the ingester to finish processing before returning.
-func (o *Orchestrator) RemoveIngester(id string) error {
+func (o *Orchestrator) RemoveIngester(id uuid.UUID) error {
 	o.mu.Lock()
 
 	if _, exists := o.ingesters[id]; !exists {
@@ -221,7 +223,7 @@ func (o *Orchestrator) AddStore(storeCfg config.StoreConfig, cfg *config.Config,
 	o.stores[storeCfg.ID] = store
 
 	// Update filter set to include the new store's filter.
-	var filterID string
+	var filterID uuid.UUID
 	if storeCfg.Filter != nil {
 		filterID = *storeCfg.Filter
 	}
@@ -280,7 +282,7 @@ func (o *Orchestrator) AddStore(storeCfg config.StoreConfig, cfg *config.Config,
 // RemoveStore removes a store if it's empty (no chunks with data).
 // Returns ErrStoreNotFound if the store doesn't exist.
 // Returns ErrStoreNotEmpty if the store has any chunks.
-func (o *Orchestrator) RemoveStore(id string) error {
+func (o *Orchestrator) RemoveStore(id uuid.UUID) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -324,7 +326,7 @@ func (o *Orchestrator) RemoveStore(id string) error {
 // DisableStore disables ingestion for a store.
 // Disabled stores will not receive new records from the ingest pipeline.
 // Returns ErrStoreNotFound if the store doesn't exist.
-func (o *Orchestrator) DisableStore(id string) error {
+func (o *Orchestrator) DisableStore(id uuid.UUID) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -340,7 +342,7 @@ func (o *Orchestrator) DisableStore(id string) error {
 
 // EnableStore enables ingestion for a store.
 // Returns ErrStoreNotFound if the store doesn't exist.
-func (o *Orchestrator) EnableStore(id string) error {
+func (o *Orchestrator) EnableStore(id uuid.UUID) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -355,7 +357,7 @@ func (o *Orchestrator) EnableStore(id string) error {
 }
 
 // IsStoreEnabled returns whether ingestion is enabled for the given store.
-func (o *Orchestrator) IsStoreEnabled(id string) bool {
+func (o *Orchestrator) IsStoreEnabled(id uuid.UUID) bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	if store := o.stores[id]; store != nil {
@@ -368,7 +370,7 @@ func (o *Orchestrator) IsStoreEnabled(id string) bool {
 // It seals the active chunk if present, deletes all indexes and chunks,
 // closes the chunk manager, and cleans up all associated resources.
 // Returns ErrStoreNotFound if the store doesn't exist.
-func (o *Orchestrator) ForceRemoveStore(id string) error {
+func (o *Orchestrator) ForceRemoveStore(id uuid.UUID) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -429,7 +431,7 @@ func (o *Orchestrator) ForceRemoveStore(id string) error {
 
 // updateFilterLocked adds or updates a single store's filter in the filter set.
 // Must be called with o.mu held.
-func (o *Orchestrator) updateFilterLocked(storeID, filterExpr string) error {
+func (o *Orchestrator) updateFilterLocked(storeID uuid.UUID, filterExpr string) error {
 	f, err := CompileFilter(storeID, filterExpr)
 	if err != nil {
 		return fmt.Errorf("invalid filter for store %s: %w", storeID, err)
@@ -478,7 +480,7 @@ func (o *Orchestrator) rebuildFilterSetLocked() {
 
 // StoreConfig returns the effective configuration for a store.
 // This is useful for API responses and debugging.
-func (o *Orchestrator) StoreConfig(id string) (config.StoreConfig, error) {
+func (o *Orchestrator) StoreConfig(id uuid.UUID) (config.StoreConfig, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
@@ -489,17 +491,8 @@ func (o *Orchestrator) StoreConfig(id string) (config.StoreConfig, error) {
 	cfg := config.StoreConfig{
 		ID: id,
 		// Type and Params are not tracked after creation.
-		// Filter can be extracted from filter set.
-	}
-
-	if o.filterSet != nil {
-		for _, f := range o.filterSet.filters {
-			if f.StoreID == id {
-				expr := f.Expr
-				cfg.Filter = &expr
-				break
-			}
-		}
+		// Filter is a UUID reference; the orchestrator doesn't track the original
+		// filter UUID reference, so it's left nil here.
 	}
 
 	return cfg, nil
@@ -627,7 +620,7 @@ func (o *Orchestrator) UpdateMaxConcurrentJobs(n int) error {
 //
 // For rotation policy changes, use ChunkManager(id).SetRotationPolicy(policy)
 // directly with a composed policy object.
-func (o *Orchestrator) UpdateStoreFilter(id string, filter string) error {
+func (o *Orchestrator) UpdateStoreFilter(id uuid.UUID, filter string) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 

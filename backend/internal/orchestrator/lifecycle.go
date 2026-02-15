@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"gastrolog/internal/chunk"
+
+	"github.com/google/uuid"
 )
 
 // Start launches all ingesters and the ingest loop.
@@ -94,7 +96,7 @@ func (o *Orchestrator) Stop() error {
 	o.done = nil
 	o.ingestCh = nil
 	// Clear per-ingester cancel functions.
-	o.ingesterCancels = make(map[string]context.CancelFunc)
+	o.ingesterCancels = make(map[uuid.UUID]context.CancelFunc)
 	o.mu.Unlock()
 
 	return nil
@@ -154,12 +156,14 @@ func (o *Orchestrator) processMessage(msg IngestMessage) {
 	err := o.ingest(rec)
 
 	// Track per-ingester stats.
-	if id := msg.Attrs["ingester_id"]; id != "" {
-		if stats := o.ingesterStats[id]; stats != nil {
-			stats.MessagesIngested.Add(1)
-			stats.BytesIngested.Add(int64(len(msg.Raw)))
-			if err != nil {
-				stats.Errors.Add(1)
+	if idStr := msg.Attrs["ingester_id"]; idStr != "" {
+		if id, parseErr := uuid.Parse(idStr); parseErr == nil {
+			if stats := o.ingesterStats[id]; stats != nil {
+				stats.MessagesIngested.Add(1)
+				stats.BytesIngested.Add(int64(len(msg.Raw)))
+				if err != nil {
+					stats.Errors.Add(1)
+				}
 			}
 		}
 	}

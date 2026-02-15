@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"gastrolog/internal/orchestrator"
 )
 
@@ -27,7 +29,7 @@ func collectMessages(t *testing.T, out chan orchestrator.IngestMessage, timeout 
 
 func TestFactoryMissingPaths(t *testing.T) {
 	factory := NewFactory()
-	_, err := factory("test", map[string]string{}, nil)
+	_, err := factory(uuid.New(), map[string]string{}, nil)
 	if err == nil {
 		t.Fatal("expected error for missing paths")
 	}
@@ -35,7 +37,7 @@ func TestFactoryMissingPaths(t *testing.T) {
 
 func TestFactoryInvalidPathsJSON(t *testing.T) {
 	factory := NewFactory()
-	_, err := factory("test", map[string]string{"paths": "not-json"}, nil)
+	_, err := factory(uuid.New(), map[string]string{"paths": "not-json"}, nil)
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
 	}
@@ -43,7 +45,7 @@ func TestFactoryInvalidPathsJSON(t *testing.T) {
 
 func TestFactoryEmptyPaths(t *testing.T) {
 	factory := NewFactory()
-	_, err := factory("test", map[string]string{"paths": "[]"}, nil)
+	_, err := factory(uuid.New(), map[string]string{"paths": "[]"}, nil)
 	if err == nil {
 		t.Fatal("expected error for empty paths array")
 	}
@@ -51,7 +53,7 @@ func TestFactoryEmptyPaths(t *testing.T) {
 
 func TestFactoryInvalidPollInterval(t *testing.T) {
 	factory := NewFactory()
-	_, err := factory("test", map[string]string{
+	_, err := factory(uuid.New(), map[string]string{
 		"paths":         `["/tmp/*.log"]`,
 		"poll_interval": "not-a-duration",
 	}, nil)
@@ -62,7 +64,7 @@ func TestFactoryInvalidPollInterval(t *testing.T) {
 
 func TestFactoryNegativePollInterval(t *testing.T) {
 	factory := NewFactory()
-	_, err := factory("test", map[string]string{
+	_, err := factory(uuid.New(), map[string]string{
 		"paths":         `["/tmp/*.log"]`,
 		"poll_interval": "-1s",
 	}, nil)
@@ -73,7 +75,8 @@ func TestFactoryNegativePollInterval(t *testing.T) {
 
 func TestFactoryStateDir(t *testing.T) {
 	factory := NewFactory()
-	ing, err := factory("myid", map[string]string{
+	id := uuid.New()
+	ing, err := factory(id, map[string]string{
 		"paths":      `["/tmp/*.log"]`,
 		"_state_dir": "/data",
 	}, nil)
@@ -81,7 +84,7 @@ func TestFactoryStateDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	ti := ing.(*ingester)
-	want := filepath.Join("/data", "state", "tail", "myid.json")
+	want := filepath.Join("/data", "state", "tail", id.String()+".json")
 	if ti.stateFile != want {
 		t.Errorf("stateFile = %q, want %q", ti.stateFile, want)
 	}
@@ -95,7 +98,7 @@ func TestSingleFileTailing(t *testing.T) {
 	}
 
 	factory := NewFactory()
-	ing, err := factory("test", map[string]string{
+	ing, err := factory(uuid.New(), map[string]string{
 		"paths":         `["` + filepath.Join(dir, "*.log") + `"]`,
 		"poll_interval": "0s", // disable polling
 	}, nil)
@@ -161,7 +164,7 @@ func TestCRLFLineEndings(t *testing.T) {
 	logFile := filepath.Join(dir, "app.log")
 
 	factory := NewFactory()
-	ing, err := factory("test", map[string]string{
+	ing, err := factory(uuid.New(), map[string]string{
 		"paths":         `["` + filepath.Join(dir, "*.log") + `"]`,
 		"poll_interval": "0s",
 	}, nil)
@@ -215,7 +218,7 @@ func TestMultipleFiles(t *testing.T) {
 	os.WriteFile(log2, nil, 0o644)
 
 	factory := NewFactory()
-	ing, err := factory("test", map[string]string{
+	ing, err := factory(uuid.New(), map[string]string{
 		"paths":         `["` + filepath.Join(dir, "*.log") + `"]`,
 		"poll_interval": "0s",
 	}, nil)
@@ -265,7 +268,7 @@ func TestTruncationDetection(t *testing.T) {
 	os.WriteFile(logFile, nil, 0o644)
 
 	factory := NewFactory()
-	ing, err := factory("test", map[string]string{
+	ing, err := factory(uuid.New(), map[string]string{
 		"paths":         `["` + filepath.Join(dir, "*.log") + `"]`,
 		"poll_interval": "100ms",
 	}, nil)
@@ -375,7 +378,7 @@ func TestBookmarkResumeFromOffset(t *testing.T) {
 	}
 
 	factory := NewFactory()
-	ing, err := factory("test", map[string]string{
+	ing, err := factory(uuid.New(), map[string]string{
 		"paths":         `["` + filepath.Join(dir, "*.log") + `"]`,
 		"poll_interval": "0s",
 		"_state_dir":    dir,
@@ -474,7 +477,7 @@ func TestPollDetectsNewFile(t *testing.T) {
 	dir := t.TempDir()
 
 	factory := NewFactory()
-	ing, err := factory("test", map[string]string{
+	ing, err := factory(uuid.New(), map[string]string{
 		"paths":         `["` + filepath.Join(dir, "*.log") + `"]`,
 		"poll_interval": "200ms",
 	}, nil)

@@ -22,6 +22,7 @@ import (
 	"gastrolog/internal/server"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 )
 
 func TestDrainWaitsForInFlightRequests(t *testing.T) {
@@ -45,9 +46,10 @@ func TestDrainWaitsForInFlightRequests(t *testing.T) {
 		})
 	}
 
-	orch.RegisterChunkManager("default", cm)
-	orch.RegisterIndexManager("default", im)
-	orch.RegisterQueryEngine("default", query.New(cm, im, nil))
+	defaultID := uuid.Must(uuid.NewV7())
+	orch.RegisterChunkManager(defaultID, cm)
+	orch.RegisterIndexManager(defaultID, im)
+	orch.RegisterQueryEngine(defaultID, query.New(cm, im, nil))
 
 	// Create server
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
@@ -142,9 +144,10 @@ func TestDrainRejectsNewRequests(t *testing.T) {
 		})
 	}
 
-	orch.RegisterChunkManager("default", cm)
-	orch.RegisterIndexManager("default", im)
-	orch.RegisterQueryEngine("default", query.New(cm, im, nil))
+	defaultID := uuid.Must(uuid.NewV7())
+	orch.RegisterChunkManager(defaultID, cm)
+	orch.RegisterIndexManager(defaultID, im)
+	orch.RegisterQueryEngine(defaultID, query.New(cm, im, nil))
 
 	// Create server
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
@@ -220,9 +223,10 @@ func TestShutdownWithoutDrain(t *testing.T) {
 	kvIdx := memkv.NewIndexer(cm)
 	im := indexmem.NewManager([]index.Indexer{tokIdx, attrIdx, kvIdx}, tokIdx, attrIdx, kvIdx, nil)
 
-	orch.RegisterChunkManager("default", cm)
-	orch.RegisterIndexManager("default", im)
-	orch.RegisterQueryEngine("default", query.New(cm, im, nil))
+	defaultID := uuid.Must(uuid.NewV7())
+	orch.RegisterChunkManager(defaultID, cm)
+	orch.RegisterIndexManager(defaultID, im)
+	orch.RegisterQueryEngine(defaultID, query.New(cm, im, nil))
 
 	// Create server
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})

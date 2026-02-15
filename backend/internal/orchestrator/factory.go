@@ -9,6 +9,8 @@ import (
 	"gastrolog/internal/config"
 	"gastrolog/internal/index"
 	"gastrolog/internal/query"
+
+	"github.com/google/uuid"
 )
 
 // Factories holds factory functions for creating components from configuration.
@@ -71,8 +73,8 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 	}
 
 	// Track IDs to detect duplicates.
-	storeIDs := make(map[string]bool)
-	ingesterIDs := make(map[string]bool)
+	storeIDs := make(map[uuid.UUID]bool)
+	ingesterIDs := make(map[uuid.UUID]bool)
 
 	// Compile filters and create stores (chunk manager + index manager + query engine).
 	var compiledFilters []*CompiledFilter
@@ -84,7 +86,7 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 		storeIDs[storeCfg.ID] = true
 
 		// Resolve filter ID to expression and compile.
-		var filterID string
+		var filterID uuid.UUID
 		if storeCfg.Filter != nil {
 			filterID = *storeCfg.Filter
 		}

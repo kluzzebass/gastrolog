@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"gastrolog/internal/logging"
+
+	"github.com/google/uuid"
 )
 
 // IngesterStats tracks per-ingester metrics using atomic counters.
@@ -71,12 +73,12 @@ type Orchestrator struct {
 	mu sync.RWMutex
 
 	// Store registry. Each store bundles Chunks, Indexes, and Query.
-	stores map[string]*Store
+	stores map[uuid.UUID]*Store
 
 	// Ingester management.
-	ingesters       map[string]Ingester
-	ingesterCancels map[string]context.CancelFunc // per-ingester cancel functions
-	ingesterStats   map[string]*IngesterStats     // per-ingester metrics
+	ingesters       map[uuid.UUID]Ingester
+	ingesterCancels map[uuid.UUID]context.CancelFunc // per-ingester cancel functions
+	ingesterStats   map[uuid.UUID]*IngesterStats     // per-ingester metrics
 
 	// Digesters (message enrichment pipeline).
 	digesters []Digester
@@ -95,7 +97,7 @@ type Orchestrator struct {
 	ingestLoopWg sync.WaitGroup // tracks ingest loop goroutine
 
 	// Retention runners (keyed by store ID, invoked by the shared scheduler).
-	retention map[string]*retentionRunner
+	retention map[uuid.UUID]*retentionRunner
 
 	// Shared scheduler for all periodic tasks (cron rotation, retention, etc.).
 	scheduler *Scheduler
@@ -148,11 +150,11 @@ func New(cfg Config) *Orchestrator {
 	}
 
 	return &Orchestrator{
-		stores:          make(map[string]*Store),
-		ingesters:       make(map[string]Ingester),
-		ingesterCancels: make(map[string]context.CancelFunc),
-		ingesterStats:   make(map[string]*IngesterStats),
-		retention:       make(map[string]*retentionRunner),
+		stores:          make(map[uuid.UUID]*Store),
+		ingesters:       make(map[uuid.UUID]Ingester),
+		ingesterCancels: make(map[uuid.UUID]context.CancelFunc),
+		ingesterStats:   make(map[uuid.UUID]*IngesterStats),
+		retention:       make(map[uuid.UUID]*retentionRunner),
 		scheduler:       sched,
 		cronRotation:    newCronRotationManager(sched, logger),
 		ingestSize:      cfg.IngestChannelSize,
@@ -174,7 +176,7 @@ func (o *Orchestrator) Scheduler() *Scheduler {
 
 // GetIngesterStats returns the stats for a specific ingester.
 // Returns nil if the ingester is not found.
-func (o *Orchestrator) GetIngesterStats(id string) *IngesterStats {
+func (o *Orchestrator) GetIngesterStats(id uuid.UUID) *IngesterStats {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	return o.ingesterStats[id]

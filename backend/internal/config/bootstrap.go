@@ -14,11 +14,11 @@ import (
 // The default store is always in-memory; file-backed stores are only created
 // when the user explicitly configures one.
 func DefaultConfig() *Config {
-	filterID := uuid.Must(uuid.NewV7()).String()
-	rotationID := uuid.Must(uuid.NewV7()).String()
-	retentionID := uuid.Must(uuid.NewV7()).String()
-	storeID := uuid.Must(uuid.NewV7()).String()
-	ingesterID := uuid.Must(uuid.NewV7()).String()
+	filterID := uuid.Must(uuid.NewV7())
+	rotationID := uuid.Must(uuid.NewV7())
+	retentionID := uuid.Must(uuid.NewV7())
+	storeID := uuid.Must(uuid.NewV7())
+	ingesterID := uuid.Must(uuid.NewV7())
 
 	return &Config{
 		Filters: []FilterConfig{
@@ -36,9 +36,9 @@ func DefaultConfig() *Config {
 				Name:      "default",
 				Type:      "memory",
 				Enabled:   true,
-				Filter:    &filterID,
-				Policy:    &rotationID,
-				Retention: &retentionID,
+				Filter:    UUIDPtr(filterID),
+				Policy:    UUIDPtr(rotationID),
+				Retention: UUIDPtr(retentionID),
 			},
 		},
 		Ingesters: []IngesterConfig{

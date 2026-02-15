@@ -11,6 +11,8 @@ import (
 	"gastrolog/internal/index"
 	"gastrolog/internal/querylang"
 	"gastrolog/internal/tokenizer"
+
+	"github.com/google/uuid"
 )
 
 // kvExtractors is the default set of KV extractors used by runtime filters.
@@ -77,7 +79,7 @@ type recordFilter func(chunk.Record) bool
 //   - empty (len==0): index says no matches, skip chunk entirely
 //   - non-empty: seek to these positions only
 type scannerBuilder struct {
-	storeID   string // store ID for multi-store queries
+	storeID   uuid.UUID // store ID for multi-store queries
 	chunkID   chunk.ChunkID
 	positions []uint64       // nil = sequential, empty = no matches, non-empty = seek positions
 	filters   []recordFilter // applied in order; cheap filters should be added first

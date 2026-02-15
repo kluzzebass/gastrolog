@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"gastrolog/internal/config"
+
+	"github.com/google/uuid"
 )
 
 const currentVersion = 1
@@ -165,7 +167,7 @@ func (s *Store) loadOrEmpty() (*config.Config, error) {
 
 // Filters
 
-func (s *Store) GetFilter(ctx context.Context, id string) (*config.FilterConfig, error) {
+func (s *Store) GetFilter(ctx context.Context, id uuid.UUID) (*config.FilterConfig, error) {
 	cfg, err := s.load()
 	if err != nil {
 		return nil, err
@@ -207,7 +209,7 @@ func (s *Store) PutFilter(ctx context.Context, fc config.FilterConfig) error {
 	return s.flush(cfg)
 }
 
-func (s *Store) DeleteFilter(ctx context.Context, id string) error {
+func (s *Store) DeleteFilter(ctx context.Context, id uuid.UUID) error {
 	cfg, err := s.loadOrEmpty()
 	if err != nil {
 		return err
@@ -223,7 +225,7 @@ func (s *Store) DeleteFilter(ctx context.Context, id string) error {
 
 // Rotation policies
 
-func (s *Store) GetRotationPolicy(ctx context.Context, id string) (*config.RotationPolicyConfig, error) {
+func (s *Store) GetRotationPolicy(ctx context.Context, id uuid.UUID) (*config.RotationPolicyConfig, error) {
 	cfg, err := s.load()
 	if err != nil {
 		return nil, err
@@ -265,7 +267,7 @@ func (s *Store) PutRotationPolicy(ctx context.Context, rp config.RotationPolicyC
 	return s.flush(cfg)
 }
 
-func (s *Store) DeleteRotationPolicy(ctx context.Context, id string) error {
+func (s *Store) DeleteRotationPolicy(ctx context.Context, id uuid.UUID) error {
 	cfg, err := s.loadOrEmpty()
 	if err != nil {
 		return err
@@ -281,7 +283,7 @@ func (s *Store) DeleteRotationPolicy(ctx context.Context, id string) error {
 
 // Retention policies
 
-func (s *Store) GetRetentionPolicy(ctx context.Context, id string) (*config.RetentionPolicyConfig, error) {
+func (s *Store) GetRetentionPolicy(ctx context.Context, id uuid.UUID) (*config.RetentionPolicyConfig, error) {
 	cfg, err := s.load()
 	if err != nil {
 		return nil, err
@@ -323,7 +325,7 @@ func (s *Store) PutRetentionPolicy(ctx context.Context, rp config.RetentionPolic
 	return s.flush(cfg)
 }
 
-func (s *Store) DeleteRetentionPolicy(ctx context.Context, id string) error {
+func (s *Store) DeleteRetentionPolicy(ctx context.Context, id uuid.UUID) error {
 	cfg, err := s.loadOrEmpty()
 	if err != nil {
 		return err
@@ -339,7 +341,7 @@ func (s *Store) DeleteRetentionPolicy(ctx context.Context, id string) error {
 
 // Stores
 
-func (s *Store) GetStore(ctx context.Context, id string) (*config.StoreConfig, error) {
+func (s *Store) GetStore(ctx context.Context, id uuid.UUID) (*config.StoreConfig, error) {
 	cfg, err := s.load()
 	if err != nil {
 		return nil, err
@@ -381,7 +383,7 @@ func (s *Store) PutStore(ctx context.Context, st config.StoreConfig) error {
 	return s.flush(cfg)
 }
 
-func (s *Store) DeleteStore(ctx context.Context, id string) error {
+func (s *Store) DeleteStore(ctx context.Context, id uuid.UUID) error {
 	cfg, err := s.loadOrEmpty()
 	if err != nil {
 		return err
@@ -397,7 +399,7 @@ func (s *Store) DeleteStore(ctx context.Context, id string) error {
 
 // Ingesters
 
-func (s *Store) GetIngester(ctx context.Context, id string) (*config.IngesterConfig, error) {
+func (s *Store) GetIngester(ctx context.Context, id uuid.UUID) (*config.IngesterConfig, error) {
 	cfg, err := s.load()
 	if err != nil {
 		return nil, err
@@ -439,7 +441,7 @@ func (s *Store) PutIngester(ctx context.Context, ing config.IngesterConfig) erro
 	return s.flush(cfg)
 }
 
-func (s *Store) DeleteIngester(ctx context.Context, id string) error {
+func (s *Store) DeleteIngester(ctx context.Context, id uuid.UUID) error {
 	cfg, err := s.loadOrEmpty()
 	if err != nil {
 		return err
@@ -501,7 +503,7 @@ func (s *Store) ListCertificates(ctx context.Context) ([]config.CertPEM, error) 
 	return cfg.Certs, nil
 }
 
-func (s *Store) GetCertificate(ctx context.Context, id string) (*config.CertPEM, error) {
+func (s *Store) GetCertificate(ctx context.Context, id uuid.UUID) (*config.CertPEM, error) {
 	cfg, err := s.load()
 	if err != nil {
 		return nil, err
@@ -532,7 +534,7 @@ func (s *Store) PutCertificate(ctx context.Context, cert config.CertPEM) error {
 	return s.flush(cfg)
 }
 
-func (s *Store) DeleteCertificate(ctx context.Context, id string) error {
+func (s *Store) DeleteCertificate(ctx context.Context, id uuid.UUID) error {
 	cfg, err := s.loadOrEmpty()
 	if err != nil {
 		return err
@@ -552,25 +554,25 @@ func (s *Store) DeleteCertificate(ctx context.Context, id string) error {
 // stored in a separate JSON file alongside the main config file.
 // The map key is the user ID (UUID), not the username.
 
-func (s *Store) loadUsers() (map[string]config.User, error) {
+func (s *Store) loadUsers() (map[uuid.UUID]config.User, error) {
 	data, err := os.ReadFile(s.usersPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return make(map[string]config.User), nil
+			return make(map[uuid.UUID]config.User), nil
 		}
 		return nil, fmt.Errorf("read users file: %w", err)
 	}
-	var users map[string]config.User
+	var users map[uuid.UUID]config.User
 	if err := json.Unmarshal(data, &users); err != nil {
 		return nil, fmt.Errorf("parse users file: %w", err)
 	}
 	if users == nil {
-		users = make(map[string]config.User)
+		users = make(map[uuid.UUID]config.User)
 	}
 	return users, nil
 }
 
-func (s *Store) flushUsers(users map[string]config.User) error {
+func (s *Store) flushUsers(users map[uuid.UUID]config.User) error {
 	dir := filepath.Dir(s.usersPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("create users directory: %w", err)
@@ -610,7 +612,7 @@ func (s *Store) CreateUser(ctx context.Context, user config.User) error {
 	return s.flushUsers(users)
 }
 
-func (s *Store) GetUser(ctx context.Context, id string) (*config.User, error) {
+func (s *Store) GetUser(ctx context.Context, id uuid.UUID) (*config.User, error) {
 	users, err := s.loadUsers()
 	if err != nil {
 		return nil, err
@@ -647,7 +649,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]config.User, error) {
 	return result, nil
 }
 
-func (s *Store) UpdatePassword(ctx context.Context, id string, passwordHash string) error {
+func (s *Store) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
 	users, err := s.loadUsers()
 	if err != nil {
 		return err
@@ -662,7 +664,7 @@ func (s *Store) UpdatePassword(ctx context.Context, id string, passwordHash stri
 	return s.flushUsers(users)
 }
 
-func (s *Store) UpdateUserRole(ctx context.Context, id string, role string) error {
+func (s *Store) UpdateUserRole(ctx context.Context, id uuid.UUID, role string) error {
 	users, err := s.loadUsers()
 	if err != nil {
 		return err
@@ -677,7 +679,7 @@ func (s *Store) UpdateUserRole(ctx context.Context, id string, role string) erro
 	return s.flushUsers(users)
 }
 
-func (s *Store) DeleteUser(ctx context.Context, id string) error {
+func (s *Store) DeleteUser(ctx context.Context, id uuid.UUID) error {
 	users, err := s.loadUsers()
 	if err != nil {
 		return err

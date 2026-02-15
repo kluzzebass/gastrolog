@@ -26,6 +26,7 @@ import (
 	"gastrolog/internal/server"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 )
 
 // waitForJob polls the JobService until the job completes or fails, returning the final job state.
@@ -51,14 +52,16 @@ func waitForJob(t *testing.T, jobClient gastrologv1connect.JobServiceClient, job
 // newStoreTestSetup creates an orchestrator with a memory store containing test data,
 // and returns a StoreService client.
 type storeTestClients struct {
-	store gastrologv1connect.StoreServiceClient
-	job   gastrologv1connect.JobServiceClient
+	store     gastrologv1connect.StoreServiceClient
+	job       gastrologv1connect.JobServiceClient
+	defaultID uuid.UUID
 }
 
 func newStoreTestSetup(t *testing.T, recordCount int) storeTestClients {
 	t.Helper()
 
 	orch := orchestrator.New(orchestrator.Config{})
+	defaultID := uuid.Must(uuid.NewV7())
 
 	cm, _ := chunkmem.NewManager(chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(5), // Seal every 5 records.
@@ -85,12 +88,12 @@ func newStoreTestSetup(t *testing.T, recordCount int) storeTestClients {
 		}
 	}
 
-	orch.RegisterChunkManager("default", cm)
-	orch.RegisterIndexManager("default", im)
-	orch.RegisterQueryEngine("default", query.New(cm, im, nil))
+	orch.RegisterChunkManager(defaultID, cm)
+	orch.RegisterIndexManager(defaultID, im)
+	orch.RegisterQueryEngine(defaultID, query.New(cm, im, nil))
 
 	// Set filter so orchestrator knows about the store.
-	filter, _ := orchestrator.CompileFilter("default", "*")
+	filter, _ := orchestrator.CompileFilter(defaultID, "*")
 	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{filter}))
 
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
@@ -100,8 +103,9 @@ func newStoreTestSetup(t *testing.T, recordCount int) storeTestClients {
 		Transport: &embeddedTransport{handler: handler},
 	}
 	return storeTestClients{
-		store: gastrologv1connect.NewStoreServiceClient(httpClient, "http://embedded"),
-		job:   gastrologv1connect.NewJobServiceClient(httpClient, "http://embedded"),
+		store:     gastrologv1connect.NewStoreServiceClient(httpClient, "http://embedded"),
+		job:       gastrologv1connect.NewJobServiceClient(httpClient, "http://embedded"),
+		defaultID: defaultID,
 	}
 }
 
@@ -110,7 +114,7 @@ func TestReindexStore(t *testing.T) {
 	ctx := context.Background()
 
 	resp, err := clients.store.ReindexStore(ctx, connect.NewRequest(&gastrologv1.ReindexStoreRequest{
-		Store: "default",
+		Store: clients.defaultID.String(),
 	}))
 	if err != nil {
 		t.Fatalf("ReindexStore: %v", err)
@@ -137,7 +141,7 @@ func TestReindexStoreNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := clients.store.ReindexStore(ctx, connect.NewRequest(&gastrologv1.ReindexStoreRequest{
-		Store: "nonexistent",
+		Store: uuid.Must(uuid.NewV7()).String(),
 	}))
 	if err == nil {
 		t.Fatal("expected error for nonexistent store")
@@ -152,7 +156,7 @@ func TestReindexStoreEmpty(t *testing.T) {
 	ctx := context.Background()
 
 	resp, err := clients.store.ReindexStore(ctx, connect.NewRequest(&gastrologv1.ReindexStoreRequest{
-		Store: "default",
+		Store: clients.defaultID.String(),
 	}))
 	if err != nil {
 		t.Fatalf("ReindexStore: %v", err)
@@ -169,7 +173,7 @@ func TestValidateStore(t *testing.T) {
 	ctx := context.Background()
 
 	resp, err := clients.store.ValidateStore(ctx, connect.NewRequest(&gastrologv1.ValidateStoreRequest{
-		Store: "default",
+		Store: clients.defaultID.String(),
 	}))
 	if err != nil {
 		t.Fatalf("ValidateStore: %v", err)
@@ -194,7 +198,7 @@ func TestValidateStoreNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := clients.store.ValidateStore(ctx, connect.NewRequest(&gastrologv1.ValidateStoreRequest{
-		Store: "nonexistent",
+		Store: uuid.Must(uuid.NewV7()).String(),
 	}))
 	if err == nil {
 		t.Fatal("expected error for nonexistent store")
@@ -232,8 +236,8 @@ func TestGetStatsDetailed(t *testing.T) {
 	}
 
 	ss := resp.Msg.StoreStats[0]
-	if ss.Id != "default" {
-		t.Errorf("expected store ID 'default', got %q", ss.Id)
+	if ss.Id != clients.defaultID.String() {
+		t.Errorf("expected store ID %q, got %q", clients.defaultID.String(), ss.Id)
 	}
 	if ss.ChunkCount != 3 {
 		t.Errorf("store stat: expected 3 chunks, got %d", ss.ChunkCount)
@@ -264,7 +268,7 @@ func TestGetStatsFilterByStore(t *testing.T) {
 
 	// Filter to a specific store.
 	resp, err := clients.store.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
-		Store: "default",
+		Store: clients.defaultID.String(),
 	}))
 	if err != nil {
 		t.Fatalf("GetStats: %v", err)
@@ -281,9 +285,10 @@ func TestGetStatsFilterByStore(t *testing.T) {
 // newFullStoreTestSetup creates a store test setup with cfgStore and factories,
 // needed for clone/migrate/export/import tests.
 type fullStoreTestClients struct {
-	store    gastrologv1connect.StoreServiceClient
-	job      gastrologv1connect.JobServiceClient
-	cfgStore config.Store
+	store     gastrologv1connect.StoreServiceClient
+	job       gastrologv1connect.JobServiceClient
+	cfgStore  config.Store
+	defaultID uuid.UUID
 }
 
 func newFullStoreTestSetup(t *testing.T, recordCount int) fullStoreTestClients {
@@ -291,6 +296,7 @@ func newFullStoreTestSetup(t *testing.T, recordCount int) fullStoreTestClients {
 
 	orch := orchestrator.New(orchestrator.Config{})
 	cfgStore := cfgmem.NewStore()
+	defaultID := uuid.Must(uuid.NewV7())
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -303,7 +309,7 @@ func newFullStoreTestSetup(t *testing.T, recordCount int) fullStoreTestClients {
 
 	// Create default store via config + orchestrator.
 	storeCfg := config.StoreConfig{
-		ID:   "default",
+		ID:   defaultID,
 		Type: "memory",
 	}
 	cfgStore.PutStore(context.Background(), storeCfg)
@@ -314,7 +320,7 @@ func newFullStoreTestSetup(t *testing.T, recordCount int) fullStoreTestClients {
 	}
 
 	// Ingest test data.
-	cm := orch.ChunkManager("default")
+	cm := orch.ChunkManager(defaultID)
 	t0 := time.Now()
 	for i := 0; i < recordCount; i++ {
 		cm.Append(chunk.Record{
@@ -325,7 +331,7 @@ func newFullStoreTestSetup(t *testing.T, recordCount int) fullStoreTestClients {
 	}
 
 	// Build indexes for sealed chunks.
-	im := orch.IndexManager("default")
+	im := orch.IndexManager(defaultID)
 	metas, _ := cm.List()
 	for _, meta := range metas {
 		if meta.Sealed {
@@ -340,9 +346,10 @@ func newFullStoreTestSetup(t *testing.T, recordCount int) fullStoreTestClients {
 		Transport: &embeddedTransport{handler: handler},
 	}
 	return fullStoreTestClients{
-		store:    gastrologv1connect.NewStoreServiceClient(httpClient, "http://embedded"),
-		job:      gastrologv1connect.NewJobServiceClient(httpClient, "http://embedded"),
-		cfgStore: cfgStore,
+		store:     gastrologv1connect.NewStoreServiceClient(httpClient, "http://embedded"),
+		job:       gastrologv1connect.NewJobServiceClient(httpClient, "http://embedded"),
+		cfgStore:  cfgStore,
+		defaultID: defaultID,
 	}
 }
 
@@ -353,7 +360,7 @@ func TestMigrateStore(t *testing.T) {
 
 	// No DestinationType — should default to same as source ("memory").
 	resp, err := tc.store.MigrateStore(ctx, connect.NewRequest(&gastrologv1.MigrateStoreRequest{
-		Source:      "default",
+		Source:      tc.defaultID.String(),
 		Destination: "migrated",
 	}))
 	if err != nil {
@@ -366,9 +373,9 @@ func TestMigrateStore(t *testing.T) {
 
 	// Source should be disabled in config (sync phase persists this before returning).
 	// Note: the async job may have already deleted the source, so check config directly.
-	srcCfg, err := tc.cfgStore.GetStore(ctx, "default")
+	srcCfg, err := tc.cfgStore.GetStore(ctx, tc.defaultID)
 	if err != nil {
-		t.Fatalf("cfgStore.GetStore(default): %v", err)
+		t.Fatalf("cfgStore.GetStore(%s): %v", tc.defaultID, err)
 	}
 	if srcCfg != nil && srcCfg.Enabled {
 		t.Error("expected source config to have enabled=false")
@@ -381,15 +388,31 @@ func TestMigrateStore(t *testing.T) {
 
 	// Source should be gone after job completes.
 	_, err = tc.store.GetStore(ctx, connect.NewRequest(&gastrologv1.GetStoreRequest{
-		Id: "default",
+		Id: tc.defaultID.String(),
 	}))
 	if err == nil {
 		t.Error("expected source store to be deleted after migration")
 	}
 
+	// Find destination store by name (ID is a UUID now).
+	listResp, err := tc.store.ListStores(ctx, connect.NewRequest(&gastrologv1.ListStoresRequest{}))
+	if err != nil {
+		t.Fatalf("ListStores: %v", err)
+	}
+	var dstID string
+	for _, s := range listResp.Msg.Stores {
+		if s.Name == "migrated" {
+			dstID = s.Id
+			break
+		}
+	}
+	if dstID == "" {
+		t.Fatal("destination store 'migrated' not found in ListStores")
+	}
+
 	// Destination should have the records.
 	stats, err := tc.store.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
-		Store: "migrated",
+		Store: dstID,
 	}))
 	if err != nil {
 		t.Fatalf("GetStats for migrated: %v", err)
@@ -404,7 +427,7 @@ func TestMigrateStoreNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := tc.store.MigrateStore(ctx, connect.NewRequest(&gastrologv1.MigrateStoreRequest{
-		Source:      "nonexistent",
+		Source:      uuid.Must(uuid.NewV7()).String(),
 		Destination: "dest",
 	}))
 	if err == nil {
@@ -420,7 +443,7 @@ func TestExportStore(t *testing.T) {
 	ctx := context.Background()
 
 	stream, err := tc.store.ExportStore(ctx, connect.NewRequest(&gastrologv1.ExportStoreRequest{
-		Store: "default",
+		Store: tc.defaultID.String(),
 	}))
 	if err != nil {
 		t.Fatalf("ExportStore: %v", err)
@@ -460,7 +483,7 @@ func TestExportStoreNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	stream, err := tc.store.ExportStore(ctx, connect.NewRequest(&gastrologv1.ExportStoreRequest{
-		Store: "nonexistent",
+		Store: uuid.Must(uuid.NewV7()).String(),
 	}))
 	if err != nil {
 		t.Fatalf("ExportStore call: %v", err)
@@ -492,7 +515,7 @@ func TestImportRecords(t *testing.T) {
 	}
 
 	resp, err := tc.store.ImportRecords(ctx, connect.NewRequest(&gastrologv1.ImportRecordsRequest{
-		Store:   "default",
+		Store:   tc.defaultID.String(),
 		Records: records,
 	}))
 	if err != nil {
@@ -505,7 +528,7 @@ func TestImportRecords(t *testing.T) {
 
 	// Verify records exist in the store.
 	stats, err := tc.store.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
-		Store: "default",
+		Store: tc.defaultID.String(),
 	}))
 	if err != nil {
 		t.Fatalf("GetStats: %v", err)
@@ -520,7 +543,7 @@ func TestImportRecordsStoreNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := tc.store.ImportRecords(ctx, connect.NewRequest(&gastrologv1.ImportRecordsRequest{
-		Store:   "nonexistent",
+		Store:   uuid.Must(uuid.NewV7()).String(),
 		Records: []*gastrologv1.ExportRecord{{Raw: []byte("test")}},
 	}))
 	if err == nil {
@@ -537,7 +560,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 
 	// Export from default store.
 	stream, err := tc.store.ExportStore(ctx, connect.NewRequest(&gastrologv1.ExportStoreRequest{
-		Store: "default",
+		Store: tc.defaultID.String(),
 	}))
 	if err != nil {
 		t.Fatalf("ExportStore: %v", err)
@@ -561,7 +584,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 
 	// Import the exported records back into the same store as additional records.
 	resp, err := tc.store.ImportRecords(ctx, connect.NewRequest(&gastrologv1.ImportRecordsRequest{
-		Store:   "default",
+		Store:   tc.defaultID.String(),
 		Records: allRecords,
 	}))
 	if err != nil {
@@ -574,7 +597,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 
 	// Default store should now have 24 records (12 original + 12 imported).
 	stats, err := tc.store.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
-		Store: "default",
+		Store: tc.defaultID.String(),
 	}))
 	if err != nil {
 		t.Fatalf("GetStats: %v", err)
@@ -589,6 +612,8 @@ type twoStoreTestClients struct {
 	store gastrologv1connect.StoreServiceClient
 	job   gastrologv1connect.JobServiceClient
 	orch  *orchestrator.Orchestrator
+	srcID uuid.UUID
+	dstID uuid.UUID
 }
 
 // newTwoStoreTestSetup creates an orchestrator with two memory stores for merge testing.
@@ -598,6 +623,9 @@ func newTwoStoreTestSetup(t *testing.T) twoStoreTestClients {
 	orch := orchestrator.New(orchestrator.Config{})
 
 	cfgStore := cfgmem.NewStore()
+	filterID := uuid.Must(uuid.NewV7())
+	srcID := uuid.Must(uuid.NewV7())
+	dstID := uuid.Must(uuid.NewV7())
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -620,18 +648,18 @@ func newTwoStoreTestSetup(t *testing.T) twoStoreTestClients {
 	ctx := context.Background()
 
 	_, err := cfgClient.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-		Config: &gastrologv1.FilterConfig{Id: "catch-all", Expression: "*"},
+		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Expression: "*"},
 	}))
 	if err != nil {
 		t.Fatalf("PutFilter: %v", err)
 	}
 
-	for _, id := range []string{"src", "dst"} {
+	for _, id := range []uuid.UUID{srcID, dstID} {
 		_, err := cfgClient.PutStore(ctx, connect.NewRequest(&gastrologv1.PutStoreRequest{
 			Config: &gastrologv1.StoreConfig{
-				Id:     id,
+				Id:     id.String(),
 				Type:   "memory",
-				Filter: "catch-all",
+				Filter: filterID.String(),
 			},
 		}))
 		if err != nil {
@@ -654,6 +682,8 @@ func newTwoStoreTestSetup(t *testing.T) twoStoreTestClients {
 		store: gastrologv1connect.NewStoreServiceClient(httpClient, "http://embedded"),
 		job:   gastrologv1connect.NewJobServiceClient(httpClient, "http://embedded"),
 		orch:  orch,
+		srcID: srcID,
+		dstID: dstID,
 	}
 }
 
@@ -664,8 +694,8 @@ func TestMergeStoresMemory(t *testing.T) {
 	// Memory-backed stores fall back to record-by-record copy.
 	// Source is auto-disabled by MergeStores.
 	resp, err := tc.store.MergeStores(ctx, connect.NewRequest(&gastrologv1.MergeStoresRequest{
-		Source:      "src",
-		Destination: "dst",
+		Source:      tc.srcID.String(),
+		Destination: tc.dstID.String(),
 	}))
 	if err != nil {
 		t.Fatalf("MergeStores: %v", err)
@@ -680,12 +710,12 @@ func TestMergeStoresMemory(t *testing.T) {
 	}
 
 	// Source should be gone.
-	if cm := tc.orch.ChunkManager("src"); cm != nil {
+	if cm := tc.orch.ChunkManager(tc.srcID); cm != nil {
 		t.Error("source chunk manager should be nil after merge")
 	}
 
 	// Destination should have the merged records.
-	dstCM := tc.orch.ChunkManager("dst")
+	dstCM := tc.orch.ChunkManager(tc.dstID)
 	if dstCM == nil {
 		t.Fatal("dst chunk manager should still exist")
 	}
@@ -717,20 +747,24 @@ func TestMergeStoresFileBacked(t *testing.T) {
 	jobClient := gastrologv1connect.NewJobServiceClient(httpClient, "http://embedded")
 	ctx := context.Background()
 
+	filterID := uuid.Must(uuid.NewV7())
+	srcID := uuid.Must(uuid.NewV7())
+	dstID := uuid.Must(uuid.NewV7())
+
 	_, err := cfgClient.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-		Config: &gastrologv1.FilterConfig{Id: "catch-all", Expression: "*"},
+		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Expression: "*"},
 	}))
 	if err != nil {
 		t.Fatalf("PutFilter: %v", err)
 	}
 
-	for _, id := range []string{"src", "dst"} {
-		storeDir := filepath.Join(dataDir, "stores", id)
+	for _, id := range []uuid.UUID{srcID, dstID} {
+		storeDir := filepath.Join(dataDir, "stores", id.String())
 		_, err := cfgClient.PutStore(ctx, connect.NewRequest(&gastrologv1.PutStoreRequest{
 			Config: &gastrologv1.StoreConfig{
-				Id:     id,
+				Id:     id.String(),
 				Type:   "file",
-				Filter: "catch-all",
+				Filter: filterID.String(),
 				Params: map[string]string{"dir": storeDir},
 			},
 		}))
@@ -740,7 +774,7 @@ func TestMergeStoresFileBacked(t *testing.T) {
 	}
 
 	// Ingest records into src.
-	srcCM := orch.ChunkManager("src")
+	srcCM := orch.ChunkManager(srcID)
 	if srcCM == nil {
 		t.Fatal("src chunk manager should exist")
 	}
@@ -785,8 +819,8 @@ func TestMergeStoresFileBacked(t *testing.T) {
 
 	// Source is auto-disabled by MergeStores.
 	resp, err := storeClient.MergeStores(ctx, connect.NewRequest(&gastrologv1.MergeStoresRequest{
-		Source:      "src",
-		Destination: "dst",
+		Source:      srcID.String(),
+		Destination: dstID.String(),
 	}))
 	if err != nil {
 		t.Fatalf("MergeStores: %v", err)
@@ -801,12 +835,12 @@ func TestMergeStoresFileBacked(t *testing.T) {
 	}
 
 	// Source should be gone.
-	if cm := orch.ChunkManager("src"); cm != nil {
+	if cm := orch.ChunkManager(srcID); cm != nil {
 		t.Error("source chunk manager should be nil after merge")
 	}
 
 	// Destination should have all records with preserved WriteTS.
-	dstCM := orch.ChunkManager("dst")
+	dstCM := orch.ChunkManager(dstID)
 	if dstCM == nil {
 		t.Fatal("dst chunk manager should still exist")
 	}
@@ -845,8 +879,8 @@ func TestMergeStoresNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := clients.store.MergeStores(ctx, connect.NewRequest(&gastrologv1.MergeStoresRequest{
-		Source:      "nonexistent",
-		Destination: "default",
+		Source:      uuid.Must(uuid.NewV7()).String(),
+		Destination: clients.defaultID.String(),
 	}))
 	if err == nil {
 		t.Fatal("expected error for nonexistent source")
@@ -861,8 +895,8 @@ func TestMergeStoresSameStore(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := clients.store.MergeStores(ctx, connect.NewRequest(&gastrologv1.MergeStoresRequest{
-		Source:      "default",
-		Destination: "default",
+		Source:      clients.defaultID.String(),
+		Destination: clients.defaultID.String(),
 	}))
 	if err == nil {
 		t.Fatal("expected error when source == destination")
@@ -878,7 +912,7 @@ func TestMigrateStoreFileRequiresDir(t *testing.T) {
 
 	// Migrating to "file" type without providing dir should fail.
 	_, err := tc.store.MigrateStore(ctx, connect.NewRequest(&gastrologv1.MigrateStoreRequest{
-		Source:          "default",
+		Source:          tc.defaultID.String(),
 		Destination:     "file-store",
 		DestinationType: "file",
 	}))
@@ -895,20 +929,20 @@ func TestMergeStoresAutoDisablesSource(t *testing.T) {
 	ctx := context.Background()
 
 	// Verify source is enabled before merge.
-	if !tc.orch.IsStoreEnabled("src") {
+	if !tc.orch.IsStoreEnabled(tc.srcID) {
 		t.Fatal("expected source to be enabled before merge")
 	}
 
 	_, err := tc.store.MergeStores(ctx, connect.NewRequest(&gastrologv1.MergeStoresRequest{
-		Source:      "src",
-		Destination: "dst",
+		Source:      tc.srcID.String(),
+		Destination: tc.dstID.String(),
 	}))
 	if err != nil {
 		t.Fatalf("MergeStores: %v", err)
 	}
 
 	// Source should be auto-disabled after MergeStores returns.
-	if tc.orch.IsStoreEnabled("src") {
+	if tc.orch.IsStoreEnabled(tc.srcID) {
 		t.Error("expected source to be auto-disabled by MergeStores")
 	}
 }

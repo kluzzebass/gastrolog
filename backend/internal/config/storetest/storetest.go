@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func newID() string { return uuid.Must(uuid.NewV7()).String() }
+func newID() uuid.UUID { return uuid.Must(uuid.NewV7()) }
 
 // TestStore runs the full conformance suite against a Store implementation.
 // newStore must return a fresh, empty store for each sub-test.
@@ -151,7 +151,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if len(all) != 2 {
 			t.Fatalf("expected 2, got %d", len(all))
 		}
-		ids := map[string]bool{}
+		ids := map[uuid.UUID]bool{}
 		for _, rp := range all {
 			ids[rp.ID] = true
 		}
@@ -182,7 +182,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 
 		// Delete non-existent is a no-op.
-		if err := s.DeleteRotationPolicy(ctx, "nonexistent"); err != nil {
+		if err := s.DeleteRotationPolicy(ctx, uuid.Must(uuid.NewV7())); err != nil {
 			t.Fatalf("Delete non-existent: %v", err)
 		}
 	})
@@ -304,7 +304,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if len(all) != 2 {
 			t.Fatalf("expected 2, got %d", len(all))
 		}
-		ids := map[string]bool{}
+		ids := map[uuid.UUID]bool{}
 		for _, rp := range all {
 			ids[rp.ID] = true
 		}
@@ -334,7 +334,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Fatalf("expected nil after delete, got %+v", got)
 		}
 
-		if err := s.DeleteRetentionPolicy(ctx, "nonexistent"); err != nil {
+		if err := s.DeleteRetentionPolicy(ctx, uuid.Must(uuid.NewV7())); err != nil {
 			t.Fatalf("Delete non-existent: %v", err)
 		}
 	})
@@ -388,7 +388,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		assertStringPtr(t, "Retention", got.Retention, retID)
+		assertUUIDPtr(t, "Retention", got.Retention, retID)
 	})
 
 	// Stores
@@ -420,7 +420,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Fatal("expected store, got nil")
 		}
 		if got.ID != id {
-			t.Errorf("ID: expected %q, got %q", id, got.ID)
+			t.Errorf("ID: expected %s, got %s", id, got.ID)
 		}
 		if got.Name != "main" {
 			t.Errorf("Name: expected %q, got %q", "main", got.Name)
@@ -428,8 +428,8 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if got.Type != "file" {
 			t.Errorf("Type: expected %q, got %q", "file", got.Type)
 		}
-		assertStringPtr(t, "Filter", got.Filter, filterID)
-		assertStringPtr(t, "Policy", got.Policy, policyID)
+		assertUUIDPtr(t, "Filter", got.Filter, filterID)
+		assertUUIDPtr(t, "Policy", got.Policy, policyID)
 		if got.Params["dir"] != "/var/log" {
 			t.Errorf("Params[dir]: expected %q, got %q", "/var/log", got.Params["dir"])
 		}
@@ -498,7 +498,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Fatalf("expected 2, got %d", len(all))
 		}
 
-		ids := map[string]bool{}
+		ids := map[uuid.UUID]bool{}
 		for _, st := range all {
 			ids[st.ID] = true
 		}
@@ -529,7 +529,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 
 		// Delete non-existent is a no-op.
-		if err := s.DeleteStore(ctx, "nonexistent"); err != nil {
+		if err := s.DeleteStore(ctx, uuid.Must(uuid.NewV7())); err != nil {
 			t.Fatalf("Delete non-existent: %v", err)
 		}
 	})
@@ -579,7 +579,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Fatal("expected ingester, got nil")
 		}
 		if got.ID != id {
-			t.Errorf("ID: expected %q, got %q", id, got.ID)
+			t.Errorf("ID: expected %s, got %s", id, got.ID)
 		}
 		if got.Name != "syslog1" {
 			t.Errorf("Name: expected %q, got %q", "syslog1", got.Name)
@@ -656,7 +656,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Fatalf("expected 2, got %d", len(all))
 		}
 
-		ids := map[string]bool{}
+		ids := map[uuid.UUID]bool{}
 		for _, ing := range all {
 			ids[ing.ID] = true
 		}
@@ -687,7 +687,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 
 		// Delete non-existent is a no-op.
-		if err := s.DeleteIngester(ctx, "nonexistent"); err != nil {
+		if err := s.DeleteIngester(ctx, uuid.Must(uuid.NewV7())); err != nil {
 			t.Fatalf("Delete non-existent: %v", err)
 		}
 	})
@@ -775,8 +775,9 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 	t.Run("GetNonExistent", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
+		nope := uuid.Must(uuid.NewV7())
 
-		rp, err := s.GetRotationPolicy(ctx, "nope")
+		rp, err := s.GetRotationPolicy(ctx, nope)
 		if err != nil {
 			t.Fatalf("GetRotationPolicy: %v", err)
 		}
@@ -784,7 +785,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Errorf("expected nil, got %+v", rp)
 		}
 
-		st, err := s.GetStore(ctx, "nope")
+		st, err := s.GetStore(ctx, nope)
 		if err != nil {
 			t.Fatalf("GetStore: %v", err)
 		}
@@ -792,7 +793,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Errorf("expected nil, got %+v", st)
 		}
 
-		ing, err := s.GetIngester(ctx, "nope")
+		ing, err := s.GetIngester(ctx, nope)
 		if err != nil {
 			t.Fatalf("GetIngester: %v", err)
 		}
@@ -935,7 +936,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Fatal("expected user by username, got nil")
 		}
 		if byName.ID != id {
-			t.Errorf("GetUserByUsername ID: expected %q, got %q", id, byName.ID)
+			t.Errorf("GetUserByUsername ID: expected %s, got %s", id, byName.ID)
 		}
 	})
 
@@ -970,7 +971,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		got, err := s.GetUser(ctx, "nobody")
+		got, err := s.GetUser(ctx, uuid.Must(uuid.NewV7()))
 		if err != nil {
 			t.Fatalf("GetUser: %v", err)
 		}
@@ -1032,7 +1033,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		err := s.UpdatePassword(ctx, "ghost", "hash")
+		err := s.UpdatePassword(ctx, uuid.Must(uuid.NewV7()), "hash")
 		if err == nil {
 			t.Fatal("expected error updating non-existent user, got nil")
 		}
@@ -1148,7 +1149,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		err := s.UpdateUserRole(ctx, "ghost", "admin")
+		err := s.UpdateUserRole(ctx, uuid.Must(uuid.NewV7()), "admin")
 		if err == nil {
 			t.Fatal("expected error updating non-existent user, got nil")
 		}
@@ -1192,7 +1193,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		err := s.DeleteUser(ctx, "ghost")
+		err := s.DeleteUser(ctx, uuid.Must(uuid.NewV7()))
 		if err == nil {
 			t.Fatal("expected error deleting non-existent user, got nil")
 		}
@@ -1230,6 +1231,17 @@ func assertStringPtr(t *testing.T, name string, got *string, want string) {
 	}
 	if *got != want {
 		t.Errorf("%s: expected %q, got %q", name, want, *got)
+	}
+}
+
+func assertUUIDPtr(t *testing.T, name string, got *uuid.UUID, want uuid.UUID) {
+	t.Helper()
+	if got == nil {
+		t.Errorf("%s: expected %s, got nil", name, want)
+		return
+	}
+	if *got != want {
+		t.Errorf("%s: expected %s, got %s", name, want, *got)
 	}
 }
 

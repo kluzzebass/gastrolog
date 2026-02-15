@@ -16,6 +16,8 @@ import (
 	memtoken "gastrolog/internal/index/memory/token"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
+
+	"github.com/google/uuid"
 )
 
 func setupTestSystem(t *testing.T) (Client, *orchestrator.Orchestrator, chunk.ChunkManager) {
@@ -39,10 +41,11 @@ func setupTestSystem(t *testing.T) (Client, *orchestrator.Orchestrator, chunk.Ch
 	qe := query.New(cm, im, nil)
 
 	// Create orchestrator.
+	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterChunkManager("default", cm)
-	orch.RegisterIndexManager("default", im)
-	orch.RegisterQueryEngine("default", qe)
+	orch.RegisterChunkManager(defaultID, cm)
+	orch.RegisterIndexManager(defaultID, im)
+	orch.RegisterQueryEngine(defaultID, qe)
 
 	return NewEmbeddedClient(orch), orch, cm
 }
@@ -258,8 +261,9 @@ func TestREPL_Stores(t *testing.T) {
 	if !strings.Contains(out, "Available stores:") {
 		t.Errorf("expected 'Available stores:': %s", out)
 	}
-	if !strings.Contains(out, "default") {
-		t.Errorf("expected 'default' store: %s", out)
+	// Store ID is now a UUID, just verify at least one store is listed.
+	if strings.Contains(out, "No stores configured") {
+		t.Errorf("expected at least one store listed: %s", out)
 	}
 }
 

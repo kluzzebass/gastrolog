@@ -22,6 +22,7 @@ import (
 	"gastrolog/internal/server"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 )
 
 // embeddedTransport routes requests directly to an http.Handler using pipes
@@ -106,9 +107,10 @@ func TestEmbeddedTransportSearch(t *testing.T) {
 		})
 	}
 
-	orch.RegisterChunkManager("default", cm)
-	orch.RegisterIndexManager("default", im)
-	orch.RegisterQueryEngine("default", query.New(cm, im, nil))
+	defaultID := uuid.Must(uuid.NewV7())
+	orch.RegisterChunkManager(defaultID, cm)
+	orch.RegisterIndexManager(defaultID, im)
+	orch.RegisterQueryEngine(defaultID, query.New(cm, im, nil))
 
 	// Create server
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})

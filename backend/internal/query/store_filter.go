@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	"gastrolog/internal/querylang"
+
+	"github.com/google/uuid"
 )
 
 // storeKey is the reserved key for store filtering.
@@ -21,7 +23,7 @@ const storeKey = "store"
 // Store predicates at the top level (ANDed with other terms) are extracted.
 // Store predicates inside OR branches or negated are left in place and
 // handled at runtime (though this is an unusual use case).
-func ExtractStoreFilter(expr querylang.Expr, allStores []string) (stores []string, remainingExpr querylang.Expr) {
+func ExtractStoreFilter(expr querylang.Expr, allStores []uuid.UUID) (stores []uuid.UUID, remainingExpr querylang.Expr) {
 	if expr == nil {
 		return nil, nil // nil means all stores
 	}
@@ -33,10 +35,18 @@ func ExtractStoreFilter(expr querylang.Expr, allStores []string) (stores []strin
 		return nil, expr // no store filter, return original expression
 	}
 
-	// Convert map to slice
-	stores = make([]string, 0, len(extracted))
+	// Convert extracted string values to UUIDs.
+	stores = make([]uuid.UUID, 0, len(extracted))
 	for s := range extracted {
-		stores = append(stores, s)
+		id, err := uuid.Parse(s)
+		if err != nil {
+			continue // skip unparseable values
+		}
+		stores = append(stores, id)
+	}
+
+	if len(stores) == 0 {
+		return nil, expr // no valid UUIDs found, return original expression
 	}
 
 	return stores, remaining

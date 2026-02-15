@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/go-co-op/gocron/v2"
+	"github.com/google/uuid"
 )
 
 // Store persists and loads system configuration with granular CRUD operations.
@@ -42,34 +43,34 @@ type Store interface {
 	Load(ctx context.Context) (*Config, error)
 
 	// Filters
-	GetFilter(ctx context.Context, id string) (*FilterConfig, error)
+	GetFilter(ctx context.Context, id uuid.UUID) (*FilterConfig, error)
 	ListFilters(ctx context.Context) ([]FilterConfig, error)
 	PutFilter(ctx context.Context, cfg FilterConfig) error
-	DeleteFilter(ctx context.Context, id string) error
+	DeleteFilter(ctx context.Context, id uuid.UUID) error
 
 	// Rotation policies
-	GetRotationPolicy(ctx context.Context, id string) (*RotationPolicyConfig, error)
+	GetRotationPolicy(ctx context.Context, id uuid.UUID) (*RotationPolicyConfig, error)
 	ListRotationPolicies(ctx context.Context) ([]RotationPolicyConfig, error)
 	PutRotationPolicy(ctx context.Context, cfg RotationPolicyConfig) error
-	DeleteRotationPolicy(ctx context.Context, id string) error
+	DeleteRotationPolicy(ctx context.Context, id uuid.UUID) error
 
 	// Retention policies
-	GetRetentionPolicy(ctx context.Context, id string) (*RetentionPolicyConfig, error)
+	GetRetentionPolicy(ctx context.Context, id uuid.UUID) (*RetentionPolicyConfig, error)
 	ListRetentionPolicies(ctx context.Context) ([]RetentionPolicyConfig, error)
 	PutRetentionPolicy(ctx context.Context, cfg RetentionPolicyConfig) error
-	DeleteRetentionPolicy(ctx context.Context, id string) error
+	DeleteRetentionPolicy(ctx context.Context, id uuid.UUID) error
 
 	// Stores
-	GetStore(ctx context.Context, id string) (*StoreConfig, error)
+	GetStore(ctx context.Context, id uuid.UUID) (*StoreConfig, error)
 	ListStores(ctx context.Context) ([]StoreConfig, error)
 	PutStore(ctx context.Context, cfg StoreConfig) error
-	DeleteStore(ctx context.Context, id string) error
+	DeleteStore(ctx context.Context, id uuid.UUID) error
 
 	// Ingesters
-	GetIngester(ctx context.Context, id string) (*IngesterConfig, error)
+	GetIngester(ctx context.Context, id uuid.UUID) (*IngesterConfig, error)
 	ListIngesters(ctx context.Context) ([]IngesterConfig, error)
 	PutIngester(ctx context.Context, cfg IngesterConfig) error
-	DeleteIngester(ctx context.Context, id string) error
+	DeleteIngester(ctx context.Context, id uuid.UUID) error
 
 	// Settings (server-level key-value configuration)
 	// Values are opaque JSON text; the Store does not interpret them.
@@ -79,18 +80,18 @@ type Store interface {
 
 	// Certificates (dedicated storage, not in Settings KV)
 	ListCertificates(ctx context.Context) ([]CertPEM, error)
-	GetCertificate(ctx context.Context, id string) (*CertPEM, error)
+	GetCertificate(ctx context.Context, id uuid.UUID) (*CertPEM, error)
 	PutCertificate(ctx context.Context, cert CertPEM) error
-	DeleteCertificate(ctx context.Context, id string) error
+	DeleteCertificate(ctx context.Context, id uuid.UUID) error
 
 	// Users
 	CreateUser(ctx context.Context, user User) error
-	GetUser(ctx context.Context, id string) (*User, error)
+	GetUser(ctx context.Context, id uuid.UUID) (*User, error)
 	GetUserByUsername(ctx context.Context, username string) (*User, error)
 	ListUsers(ctx context.Context) ([]User, error)
-	UpdatePassword(ctx context.Context, id string, passwordHash string) error
-	UpdateUserRole(ctx context.Context, id string, role string) error
-	DeleteUser(ctx context.Context, id string) error
+	UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error
+	UpdateUserRole(ctx context.Context, id uuid.UUID, role string) error
+	DeleteUser(ctx context.Context, id uuid.UUID) error
 	CountUsers(ctx context.Context) (int, error)
 }
 
@@ -128,8 +129,8 @@ type TLSConfig struct {
 // CertPEM holds certificate content. Either stored PEM or file paths (directory monitoring).
 // When both are set, file paths take precedence and are watched for changes.
 type CertPEM struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
+	ID       uuid.UUID `json:"id"`
+	Name     string    `json:"name"`
 	CertPEM  string `json:"cert_pem,omitempty"`
 	KeyPEM   string `json:"key_pem,omitempty"`
 	CertFile string `json:"cert_file,omitempty"`
@@ -150,7 +151,7 @@ type AuthConfig struct {
 
 // User represents a user account.
 type User struct {
-	ID           string    `json:"id"`
+	ID           uuid.UUID `json:"id"`
 	Username     string    `json:"username"`
 	PasswordHash string    `json:"password_hash"`
 	Role         string    `json:"role"` // "admin" or "user"
@@ -162,7 +163,7 @@ type User struct {
 // Stores reference filters by UUID to determine which messages they receive.
 type FilterConfig struct {
 	// ID is the unique identifier (UUIDv7).
-	ID string `json:"id"`
+	ID uuid.UUID `json:"id"`
 
 	// Name is the human-readable display name (unique).
 	Name string `json:"name"`
@@ -182,7 +183,7 @@ type FilterConfig struct {
 // All fields are optional (nil = not set).
 type RotationPolicyConfig struct {
 	// ID is the unique identifier (UUIDv7).
-	ID string `json:"id"`
+	ID uuid.UUID `json:"id"`
 
 	// Name is the human-readable display name (unique).
 	Name string `json:"name"`
@@ -223,6 +224,9 @@ func (c RotationPolicyConfig) ValidateCron() error {
 // StringPtr returns a pointer to s.
 func StringPtr(s string) *string { return &s }
 
+// UUIDPtr returns a pointer to id.
+func UUIDPtr(id uuid.UUID) *uuid.UUID { return &id }
+
 // Int64Ptr returns a pointer to n.
 func Int64Ptr(n int64) *int64 { return &n }
 
@@ -231,7 +235,7 @@ func Int64Ptr(n int64) *int64 { return &n }
 // All fields are optional (nil = not set).
 type RetentionPolicyConfig struct {
 	// ID is the unique identifier (UUIDv7).
-	ID string `json:"id"`
+	ID uuid.UUID `json:"id"`
 
 	// Name is the human-readable display name (unique).
 	Name string `json:"name"`
@@ -293,7 +297,7 @@ func (c RetentionPolicyConfig) ToRetentionPolicy() (chunk.RetentionPolicy, error
 // IngesterConfig describes a ingester to instantiate.
 type IngesterConfig struct {
 	// ID is the unique identifier (UUIDv7).
-	ID string `json:"id"`
+	ID uuid.UUID `json:"id"`
 
 	// Name is the human-readable display name (unique).
 	Name string `json:"name"`
@@ -390,7 +394,7 @@ func ParseBytes(s string) (uint64, error) {
 // StoreConfig describes a storage backend to instantiate.
 type StoreConfig struct {
 	// ID is the unique identifier (UUIDv7).
-	ID string `json:"id"`
+	ID uuid.UUID `json:"id"`
 
 	// Name is the human-readable display name (unique).
 	Name string `json:"name"`
@@ -400,15 +404,15 @@ type StoreConfig struct {
 
 	// Filter references a filter by UUID.
 	// Nil means no filter (store receives nothing).
-	Filter *string `json:"filter,omitempty"`
+	Filter *uuid.UUID `json:"filter,omitempty"`
 
 	// Policy references a rotation policy by UUID.
 	// Nil means no policy (type-specific default).
-	Policy *string `json:"policy,omitempty"`
+	Policy *uuid.UUID `json:"policy,omitempty"`
 
 	// Retention references a retention policy by UUID.
 	// Nil means no retention policy (chunks are kept indefinitely, or type-specific default).
-	Retention *string `json:"retention,omitempty"`
+	Retention *uuid.UUID `json:"retention,omitempty"`
 
 	// Enabled indicates whether ingestion is enabled for this store.
 	// When false, the store will not receive new records from the ingest pipeline.

@@ -10,6 +10,8 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
 	"gastrolog/internal/index"
+
+	"github.com/google/uuid"
 )
 
 // fakeChunkManager implements chunk.ChunkManager for testing.
@@ -111,10 +113,13 @@ func TestApplyConfigStores(t *testing.T) {
 		},
 	}
 
+	store1ID := uuid.Must(uuid.NewV7())
+	store2ID := uuid.Must(uuid.NewV7())
+
 	cfg := &config.Config{
 		Stores: []config.StoreConfig{
-			{ID: "store1", Type: "memory", Params: map[string]string{}},
-			{ID: "store2", Type: "memory", Params: map[string]string{}},
+			{ID: store1ID, Type: "memory", Params: map[string]string{}},
+			{ID: store2ID, Type: "memory", Params: map[string]string{}},
 		},
 	}
 
@@ -128,13 +133,13 @@ func TestApplyConfigStores(t *testing.T) {
 	if len(keys) != 2 {
 		t.Errorf("expected 2 stores, got %d", len(keys))
 	}
-	if orch.ChunkManager("store1") == nil || orch.ChunkManager("store2") == nil {
+	if orch.ChunkManager(store1ID) == nil || orch.ChunkManager(store2ID) == nil {
 		t.Error("expected both stores to have chunk managers")
 	}
-	if orch.IndexManager("store1") == nil || orch.IndexManager("store2") == nil {
+	if orch.IndexManager(store1ID) == nil || orch.IndexManager(store2ID) == nil {
 		t.Error("expected both stores to have index managers")
 	}
-	if orch.QueryEngine("store1") == nil || orch.QueryEngine("store2") == nil {
+	if orch.QueryEngine(store1ID) == nil || orch.QueryEngine(store2ID) == nil {
 		t.Error("expected both stores to have query engines")
 	}
 }
@@ -144,16 +149,18 @@ func TestApplyConfigIngesters(t *testing.T) {
 
 	factories := Factories{
 		Ingesters: map[string]IngesterFactory{
-			"test": func(id string, params map[string]string, logger *slog.Logger) (Ingester, error) {
+			"test": func(id uuid.UUID, params map[string]string, logger *slog.Logger) (Ingester, error) {
 				return &fakeIngester{}, nil
 			},
 		},
 	}
 
+	recv1ID := uuid.Must(uuid.NewV7())
+	recv2ID := uuid.Must(uuid.NewV7())
 	cfg := &config.Config{
 		Ingesters: []config.IngesterConfig{
-			{ID: "recv1", Type: "test", Enabled: true, Params: map[string]string{}},
-			{ID: "recv2", Type: "test", Enabled: true, Params: map[string]string{}},
+			{ID: recv1ID, Type: "test", Enabled: true, Params: map[string]string{}},
+			{ID: recv2ID, Type: "test", Enabled: true, Params: map[string]string{}},
 		},
 	}
 
@@ -172,7 +179,7 @@ func TestApplyConfigUnknownChunkManagerType(t *testing.T) {
 
 	cfg := &config.Config{
 		Stores: []config.StoreConfig{
-			{ID: "store1", Type: "unknown", Params: map[string]string{}},
+			{ID: uuid.Must(uuid.NewV7()), Type: "unknown", Params: map[string]string{}},
 		},
 	}
 
@@ -199,7 +206,7 @@ func TestApplyConfigUnknownIndexManagerType(t *testing.T) {
 
 	cfg := &config.Config{
 		Stores: []config.StoreConfig{
-			{ID: "store1", Type: "memory", Params: map[string]string{}},
+			{ID: uuid.Must(uuid.NewV7()), Type: "memory", Params: map[string]string{}},
 		},
 	}
 
@@ -214,7 +221,7 @@ func TestApplyConfigUnknownIngesterType(t *testing.T) {
 
 	cfg := &config.Config{
 		Ingesters: []config.IngesterConfig{
-			{ID: "recv1", Type: "unknown", Enabled: true, Params: map[string]string{}},
+			{ID: uuid.Must(uuid.NewV7()), Type: "unknown", Enabled: true, Params: map[string]string{}},
 		},
 	}
 
@@ -242,10 +249,11 @@ func TestApplyConfigDuplicateStoreID(t *testing.T) {
 		},
 	}
 
+	dupID := uuid.Must(uuid.NewV7())
 	cfg := &config.Config{
 		Stores: []config.StoreConfig{
-			{ID: "store1", Type: "memory", Params: map[string]string{}},
-			{ID: "store1", Type: "memory", Params: map[string]string{}}, // duplicate
+			{ID: dupID, Type: "memory", Params: map[string]string{}},
+			{ID: dupID, Type: "memory", Params: map[string]string{}}, // duplicate
 		},
 	}
 
@@ -260,16 +268,17 @@ func TestApplyConfigDuplicateIngesterID(t *testing.T) {
 
 	factories := Factories{
 		Ingesters: map[string]IngesterFactory{
-			"test": func(id string, params map[string]string, logger *slog.Logger) (Ingester, error) {
+			"test": func(id uuid.UUID, params map[string]string, logger *slog.Logger) (Ingester, error) {
 				return &fakeIngester{}, nil
 			},
 		},
 	}
 
+	dupIngID := uuid.Must(uuid.NewV7())
 	cfg := &config.Config{
 		Ingesters: []config.IngesterConfig{
-			{ID: "recv1", Type: "test", Enabled: true, Params: map[string]string{}},
-			{ID: "recv1", Type: "test", Enabled: true, Params: map[string]string{}}, // duplicate
+			{ID: dupIngID, Type: "test", Enabled: true, Params: map[string]string{}},
+			{ID: dupIngID, Type: "test", Enabled: true, Params: map[string]string{}}, // duplicate
 		},
 	}
 
@@ -297,7 +306,7 @@ func TestApplyConfigChunkManagerFactoryError(t *testing.T) {
 
 	cfg := &config.Config{
 		Stores: []config.StoreConfig{
-			{ID: "store1", Type: "memory", Params: map[string]string{}},
+			{ID: uuid.Must(uuid.NewV7()), Type: "memory", Params: map[string]string{}},
 		},
 	}
 
@@ -325,7 +334,7 @@ func TestApplyConfigIndexManagerFactoryError(t *testing.T) {
 
 	cfg := &config.Config{
 		Stores: []config.StoreConfig{
-			{ID: "store1", Type: "memory", Params: map[string]string{}},
+			{ID: uuid.Must(uuid.NewV7()), Type: "memory", Params: map[string]string{}},
 		},
 	}
 
@@ -340,7 +349,7 @@ func TestApplyConfigIngesterFactoryError(t *testing.T) {
 
 	factories := Factories{
 		Ingesters: map[string]IngesterFactory{
-			"test": func(id string, params map[string]string, logger *slog.Logger) (Ingester, error) {
+			"test": func(id uuid.UUID, params map[string]string, logger *slog.Logger) (Ingester, error) {
 				return nil, errors.New("factory error")
 			},
 		},
@@ -348,7 +357,7 @@ func TestApplyConfigIngesterFactoryError(t *testing.T) {
 
 	cfg := &config.Config{
 		Ingesters: []config.IngesterConfig{
-			{ID: "recv1", Type: "test", Enabled: true, Params: map[string]string{}},
+			{ID: uuid.Must(uuid.NewV7()), Type: "test", Enabled: true, Params: map[string]string{}},
 		},
 	}
 
@@ -364,7 +373,7 @@ func TestApplyConfigParamsPassedToIngesterFactory(t *testing.T) {
 	var receivedParams map[string]string
 	factories := Factories{
 		Ingesters: map[string]IngesterFactory{
-			"test": func(id string, params map[string]string, logger *slog.Logger) (Ingester, error) {
+			"test": func(id uuid.UUID, params map[string]string, logger *slog.Logger) (Ingester, error) {
 				receivedParams = params
 				return &fakeIngester{}, nil
 			},
@@ -373,7 +382,7 @@ func TestApplyConfigParamsPassedToIngesterFactory(t *testing.T) {
 
 	cfg := &config.Config{
 		Ingesters: []config.IngesterConfig{
-			{ID: "recv1", Type: "test", Enabled: true, Params: map[string]string{
+			{ID: uuid.Must(uuid.NewV7()), Type: "test", Enabled: true, Params: map[string]string{
 				"host": "localhost",
 				"port": "514",
 			}},
@@ -416,7 +425,7 @@ func TestApplyConfigParamsPassedToStoreFactories(t *testing.T) {
 
 	cfg := &config.Config{
 		Stores: []config.StoreConfig{
-			{ID: "store1", Type: "test", Params: map[string]string{
+			{ID: uuid.Must(uuid.NewV7()), Type: "test", Params: map[string]string{
 				"dir":      "/data/chunks",
 				"kvBudget": "500",
 			}},
@@ -467,7 +476,7 @@ func TestApplyConfigIndexManagerReceivesChunkManager(t *testing.T) {
 
 	cfg := &config.Config{
 		Stores: []config.StoreConfig{
-			{ID: "store1", Type: "test", Params: map[string]string{}},
+			{ID: uuid.Must(uuid.NewV7()), Type: "test", Params: map[string]string{}},
 		},
 	}
 

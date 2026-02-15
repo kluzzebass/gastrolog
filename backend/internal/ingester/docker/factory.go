@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/google/uuid"
+
 	"gastrolog/internal/config"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
@@ -16,8 +18,8 @@ import (
 // NewFactory returns an IngesterFactory for Docker container log ingesters.
 // The config store is used to resolve certificate names for TLS.
 func NewFactory(cfgStore config.Store) orchestrator.IngesterFactory {
-	return func(id string, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
-		cfg, err := parseConfig(id, params, cfgStore, logger)
+	return func(id uuid.UUID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+		cfg, err := parseConfig(id.String(), params, cfgStore, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -145,11 +147,19 @@ func resolveTLS(id string, params map[string]string, cfgStore config.Store) (*cl
 	ctx := context.Background()
 	tlsCfg := &clientTLSConfig{Verify: verify}
 
-	if caName != "" {
-		pem, err := cfgStore.GetCertificate(ctx, caName)
+	// We need to look up certificates by name. ListCertificates returns all
+	// certs, and we find the one matching the requested name.
+	var certs []config.CertPEM
+	if caName != "" || certName != "" {
+		var err error
+		certs, err = cfgStore.ListCertificates(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("docker ingester %q: lookup CA cert %q: %w", id, caName, err)
+			return nil, fmt.Errorf("docker ingester %q: list certificates: %w", id, err)
 		}
+	}
+
+	if caName != "" {
+		pem := findCertByName(certs, caName)
 		if pem == nil {
 			return nil, fmt.Errorf("docker ingester %q: CA certificate %q not found", id, caName)
 		}
@@ -158,10 +168,7 @@ func resolveTLS(id string, params map[string]string, cfgStore config.Store) (*cl
 	}
 
 	if certName != "" {
-		pem, err := cfgStore.GetCertificate(ctx, certName)
-		if err != nil {
-			return nil, fmt.Errorf("docker ingester %q: lookup client cert %q: %w", id, certName, err)
-		}
+		pem := findCertByName(certs, certName)
 		if pem == nil {
 			return nil, fmt.Errorf("docker ingester %q: client certificate %q not found", id, certName)
 		}
@@ -172,6 +179,16 @@ func resolveTLS(id string, params map[string]string, cfgStore config.Store) (*cl
 	}
 
 	return tlsCfg, nil
+}
+
+// findCertByName returns the first certificate with the given name, or nil if not found.
+func findCertByName(certs []config.CertPEM, name string) *config.CertPEM {
+	for i := range certs {
+		if certs[i].Name == name {
+			return &certs[i]
+		}
+	}
+	return nil
 }
 
 // TestConnection creates a temporary Docker client from the given params,

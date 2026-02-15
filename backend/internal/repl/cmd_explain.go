@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
 )
@@ -79,7 +81,7 @@ func printExplainPlan(out *strings.Builder, plan *query.QueryPlan) {
 			sealedStr = "active"
 		}
 		storePrefix := ""
-		if cp.StoreID != "" {
+		if cp.StoreID != (uuid.UUID{}) {
 			storePrefix = fmt.Sprintf("[%s] ", cp.StoreID)
 		}
 		out.WriteString(fmt.Sprintf("Chunk %d: %s%s (%s)\n", i+1, storePrefix, cp.ChunkID.String(), sealedStr))

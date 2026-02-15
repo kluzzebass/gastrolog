@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"gastrolog/internal/chunk"
+
+	"github.com/google/uuid"
 )
 
 // Ingest routes a record to all registered chunk managers.
@@ -48,12 +50,12 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 	}
 
 	// Determine which stores should receive this message.
-	var targetStores []string
+	var targetStores []uuid.UUID
 	if o.filterSet != nil {
 		targetStores = o.filterSet.Match(rec.Attrs)
 	} else {
 		// Legacy behavior: fan-out to all stores.
-		targetStores = make([]string, 0, len(o.stores))
+		targetStores = make([]uuid.UUID, 0, len(o.stores))
 		for key := range o.stores {
 			targetStores = append(targetStores, key)
 		}
@@ -78,7 +80,7 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 // via the shared scheduler. The build is visible in ScheduledJobs() while running
 // and subject to the scheduler's concurrency limit.
 // The IndexManager handles deduplication of concurrent builds for the same chunk.
-func (o *Orchestrator) scheduleIndexBuild(registryKey string, chunkID chunk.ChunkID) {
+func (o *Orchestrator) scheduleIndexBuild(registryKey uuid.UUID, chunkID chunk.ChunkID) {
 	store := o.stores[registryKey]
 	if store == nil {
 		return

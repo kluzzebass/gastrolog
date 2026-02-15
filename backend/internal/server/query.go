@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -170,7 +171,7 @@ func (s *QueryServer) Explain(
 
 	for _, cp := range plan.ChunkPlans {
 		chunkPlan := &apiv1.ChunkPlan{
-			StoreId:          cp.StoreID,
+			StoreId:          cp.StoreID.String(),
 			ChunkId:          cp.ChunkID.String(),
 			Sealed:           cp.Sealed,
 			RecordCount:      int64(cp.RecordCount),
@@ -536,13 +537,18 @@ func (s *QueryServer) GetContext(
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("ref must include store_id, chunk_id, and pos"))
 	}
 
+	storeID, connErr := parseUUID(ref.StoreId)
+	if connErr != nil {
+		return nil, connErr
+	}
+
 	chunkID, err := chunk.ParseChunkID(ref.ChunkId)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid chunk_id: %w", err))
 	}
 
 	// Read the anchor record.
-	cm := s.orch.ChunkManager(ref.StoreId)
+	cm := s.orch.ChunkManager(storeID)
 	if cm == nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("store %q not found", ref.StoreId))
 	}
@@ -563,7 +569,7 @@ func (s *QueryServer) GetContext(
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("failed to read anchor record: %w", err))
 	}
 	cursor.Close()
-	anchorRec.StoreID = ref.StoreId
+	anchorRec.StoreID = storeID
 	anchorRec.Ref = anchorRef
 
 	// Defaults and caps.
@@ -586,7 +592,7 @@ func (s *QueryServer) GetContext(
 	eng := s.orch.MultiStoreQueryEngine()
 
 	isAnchor := func(rec chunk.Record) bool {
-		return rec.StoreID == ref.StoreId &&
+		return rec.StoreID == storeID &&
 			rec.Ref.ChunkID == chunkID &&
 			rec.Ref.Pos == ref.Pos
 	}
@@ -865,7 +871,7 @@ func recordToProto(rec chunk.Record) *apiv1.Record {
 		Ref: &apiv1.RecordRef{
 			ChunkId: rec.Ref.ChunkID.String(),
 			Pos:     rec.Ref.Pos,
-			StoreId: rec.StoreID,
+			StoreId: rec.StoreID.String(),
 		},
 	}
 	if !rec.SourceTS.IsZero() {
@@ -897,8 +903,12 @@ func protoToResumeToken(data []byte) (*query.ResumeToken, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid chunk ID in resume token: %w", err)
 		}
+		storeID, err := uuid.Parse(pos.StoreId)
+		if err != nil {
+			return nil, fmt.Errorf("invalid store ID in resume token: %w", err)
+		}
 		token.Positions[i] = query.MultiStorePosition{
-			StoreID:  pos.StoreId,
+			StoreID:  storeID,
 			ChunkID:  chunkID,
 			Position: pos.Position,
 		}
@@ -920,7 +930,7 @@ func resumeTokenToProto(token *query.ResumeToken) []byte {
 
 	for i, pos := range token.Positions {
 		protoToken.Positions[i] = &apiv1.StorePosition{
-			StoreId:  pos.StoreID,
+			StoreId:  pos.StoreID.String(),
 			ChunkId:  pos.ChunkID.String(),
 			Position: pos.Position,
 		}

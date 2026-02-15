@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+
+	"github.com/google/uuid"
 )
 
 // ---------- fake chunk manager for cron rotation ----------
@@ -66,8 +68,9 @@ func TestRotateStoreSealsNonEmptyChunk(t *testing.T) {
 		},
 	}
 
+	storeID := uuid.Must(uuid.NewV7())
 	m := newTestCronManager(t)
-	m.rotateStore("test-store", cm)
+	m.rotateStore(storeID, cm)
 
 	if !cm.sealed {
 		t.Error("expected chunk to be sealed")
@@ -82,8 +85,9 @@ func TestRotateStoreSkipsEmptyChunk(t *testing.T) {
 		},
 	}
 
+	storeID := uuid.Must(uuid.NewV7())
 	m := newTestCronManager(t)
-	m.rotateStore("test-store", cm)
+	m.rotateStore(storeID, cm)
 
 	if cm.sealed {
 		t.Error("expected empty chunk to NOT be sealed")
@@ -95,8 +99,9 @@ func TestRotateStoreSkipsNilActive(t *testing.T) {
 		active: nil,
 	}
 
+	storeID := uuid.Must(uuid.NewV7())
 	m := newTestCronManager(t)
-	m.rotateStore("test-store", cm)
+	m.rotateStore(storeID, cm)
 
 	if cm.sealed {
 		t.Error("expected nil active to NOT trigger seal")
@@ -107,42 +112,45 @@ func TestAddAndRemoveJob(t *testing.T) {
 	cm := &cronFakeChunkManager{}
 	m := newTestCronManager(t)
 
-	if err := m.addJob("store-a", "store-a", "* * * * *", cm); err != nil {
+	storeA := uuid.Must(uuid.NewV7())
+	if err := m.addJob(storeA, "store-a", "* * * * *", cm); err != nil {
 		t.Fatalf("addJob failed: %v", err)
 	}
 
-	if !m.hasJob("store-a") {
+	if !m.hasJob(storeA) {
 		t.Error("expected job to be registered")
 	}
 
 	// Adding the same store again should fail.
-	if err := m.addJob("store-a", "store-a", "0 * * * *", cm); err == nil {
+	if err := m.addJob(storeA, "store-a", "0 * * * *", cm); err == nil {
 		t.Error("expected error when adding duplicate job")
 	}
 
-	m.removeJob("store-a")
+	m.removeJob(storeA)
 
-	if m.hasJob("store-a") {
+	if m.hasJob(storeA) {
 		t.Error("expected job to be removed")
 	}
 
 	// Removing a non-existent job should be a no-op.
-	m.removeJob("store-nonexistent")
+	nonexistent := uuid.Must(uuid.NewV7())
+	m.removeJob(nonexistent)
 }
 
 func TestUpdateJob(t *testing.T) {
 	cm := &cronFakeChunkManager{}
 	m := newTestCronManager(t)
 
-	if err := m.addJob("store-a", "store-a", "* * * * *", cm); err != nil {
+	storeA := uuid.Must(uuid.NewV7())
+	if err := m.addJob(storeA, "store-a", "* * * * *", cm); err != nil {
 		t.Fatalf("addJob failed: %v", err)
 	}
 
-	if err := m.updateJob("store-a", "store-a", "0 * * * *", cm); err != nil {
+	if err := m.updateJob(storeA, "store-a", "0 * * * *", cm); err != nil {
 		t.Fatalf("updateJob failed: %v", err)
 	}
 
-	if !m.hasJob("store-a") {
+	if !m.hasJob(storeA) {
 		t.Error("expected job to still exist after update")
 	}
 }
@@ -151,11 +159,12 @@ func TestAddJobRejectsInvalidCron(t *testing.T) {
 	cm := &cronFakeChunkManager{}
 	m := newTestCronManager(t)
 
-	if err := m.addJob("store-a", "store-a", "not a cron", cm); err == nil {
+	storeA := uuid.Must(uuid.NewV7())
+	if err := m.addJob(storeA, "store-a", "not a cron", cm); err == nil {
 		t.Error("expected error for invalid cron expression")
 	}
 
-	if m.hasJob("store-a") {
+	if m.hasJob(storeA) {
 		t.Error("expected no job to be registered for invalid cron")
 	}
 }
@@ -164,10 +173,12 @@ func TestSchedulerListJobs(t *testing.T) {
 	cm := &cronFakeChunkManager{}
 	m := newTestCronManager(t)
 
-	if err := m.addJob("store-a", "store-a", "* * * * *", cm); err != nil {
+	storeA := uuid.Must(uuid.NewV7())
+	storeB := uuid.Must(uuid.NewV7())
+	if err := m.addJob(storeA, "store-a", "* * * * *", cm); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.addJob("store-b", "store-b", "0 * * * *", cm); err != nil {
+	if err := m.addJob(storeB, "store-b", "0 * * * *", cm); err != nil {
 		t.Fatal(err)
 	}
 
@@ -184,10 +195,10 @@ func TestSchedulerListJobs(t *testing.T) {
 		}
 	}
 
-	if !names[cronJobName("store-a")] {
+	if !names[cronJobName(storeA)] {
 		t.Error("expected job for store-a")
 	}
-	if !names[cronJobName("store-b")] {
+	if !names[cronJobName(storeB)] {
 		t.Error("expected job for store-b")
 	}
 }

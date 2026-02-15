@@ -129,9 +129,9 @@ func TestNullRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 
 	// Insert a rotation policy with all NULL optional fields directly via SQL.
-	id := uuid.Must(uuid.NewV7()).String()
+	id := uuid.Must(uuid.NewV7())
 	_, err := s.db.Exec(
-		"INSERT INTO rotation_policies (id, name) VALUES (?, ?)", id, "nulltest")
+		"INSERT INTO rotation_policies (id, name) VALUES (?, ?)", id.String(), "nulltest")
 	if err != nil {
 		t.Fatalf("insert: %v", err)
 	}
