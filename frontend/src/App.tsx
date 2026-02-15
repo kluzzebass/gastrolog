@@ -29,6 +29,7 @@ import {
 } from "./utils/queryHelpers";
 import { usePanelResize } from "./hooks/usePanelResize";
 import { useThemeSync } from "./hooks/useThemeSync";
+import { useThemeClass } from "./hooks/useThemeClass";
 import { EmptyState } from "./components/EmptyState";
 import { LogEntry } from "./components/LogEntry";
 import { HistogramChart } from "./components/HistogramChart";
@@ -560,8 +561,7 @@ function AppContent() {
   const sealedChunks = stats?.sealedChunks ?? BigInt(0);
   const totalBytes = stats?.totalBytes ?? BigInt(0);
 
-  // Theme-aware class helper
-  const c = (darkCls: string, lightCls: string) => (dark ? darkCls : lightCls);
+  const c = useThemeClass(dark);
 
   return (
     <div

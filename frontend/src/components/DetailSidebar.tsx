@@ -1,5 +1,6 @@
 import { Record as ProtoRecord } from "../api/client";
 import { DetailPanelContent } from "./DetailPanel";
+import { useThemeClass } from "../hooks/useThemeClass";
 
 interface DetailSidebarProps {
   dark: boolean;
@@ -42,7 +43,7 @@ export function DetailSidebar({
   contextReversed,
   onContextRecordSelect,
 }: DetailSidebarProps) {
-  const c = (darkCls: string, lightCls: string) => (dark ? darkCls : lightCls);
+  const c = useThemeClass(dark);
 
   return (
     <>

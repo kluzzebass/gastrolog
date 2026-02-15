@@ -5,6 +5,7 @@ import { QueryAutocomplete } from "./QueryAutocomplete";
 import { QueryHelp } from "./QueryHelp";
 import type { HistoryEntry } from "../hooks/useQueryHistory";
 import type { SavedQuery } from "../api/gen/gastrolog/v1/config_pb";
+import { useThemeClass } from "../hooks/useThemeClass";
 
 interface QueryBarProps {
   dark: boolean;
@@ -71,7 +72,7 @@ export function QueryBar({
   showPlan,
   handleShowPlan,
 }: QueryBarProps) {
-  const c = (darkCls: string, lightCls: string) => (dark ? darkCls : lightCls);
+  const c = useThemeClass(dark);
 
   return (
     <div

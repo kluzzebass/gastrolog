@@ -1,5 +1,6 @@
 import { forwardRef, useMemo, type ReactNode } from "react";
 import { tokenize, type HighlightRole } from "../queryTokenizer";
+import { useThemeClass } from "../hooks/useThemeClass";
 
 interface QueryInputProps {
   value: string;
@@ -63,8 +64,7 @@ export const QueryInput = forwardRef<HTMLTextAreaElement, QueryInputProps>(
   ) => {
     const { spans, errorMessage } = useMemo(() => tokenize(value), [value]);
 
-    const c = (darkCls: string, lightCls: string) =>
-      dark ? darkCls : lightCls;
+    const c = useThemeClass(dark);
 
     return (
       <>

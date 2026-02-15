@@ -6,6 +6,7 @@ import {
 } from "./Sidebar";
 import type { StoreInfo } from "../api/gen/gastrolog/v1/store_pb";
 import type { FieldSummary } from "../utils";
+import { useThemeClass } from "../hooks/useThemeClass";
 
 interface SearchSidebarProps {
   dark: boolean;
@@ -58,7 +59,7 @@ export function SearchSidebar({
   onFieldSelect,
   activeQuery,
 }: SearchSidebarProps) {
-  const c = (darkCls: string, lightCls: string) => (dark ? darkCls : lightCls);
+  const c = useThemeClass(dark);
 
   const allSeverities = [
     { label: "Error", level: "error", color: "severity-error" },

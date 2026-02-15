@@ -1,6 +1,7 @@
 import { StatPill } from "./StatPill";
 import { UserMenu } from "./UserMenu";
 import type { Theme } from "../utils";
+import { useThemeClass } from "../hooks/useThemeClass";
 
 interface HeaderBarProps {
   dark: boolean;
@@ -35,7 +36,7 @@ export function HeaderBar({
   onChangePassword,
   onLogout,
 }: HeaderBarProps) {
-  const c = (darkCls: string, lightCls: string) => (dark ? darkCls : lightCls);
+  const c = useThemeClass(dark);
 
   return (
     <header

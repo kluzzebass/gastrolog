@@ -1,5 +1,6 @@
 import { Record as ProtoRecord } from "../api/client";
 import { ExportButton } from "./ExportButton";
+import { useThemeClass } from "../hooks/useThemeClass";
 
 interface ResultsToolbarProps {
   dark: boolean;
@@ -34,7 +35,7 @@ export function ResultsToolbar({
   displayRecords,
   onZoomOut,
 }: ResultsToolbarProps) {
-  const c = (darkCls: string, lightCls: string) => (dark ? darkCls : lightCls);
+  const c = useThemeClass(dark);
 
   return (
     <div
