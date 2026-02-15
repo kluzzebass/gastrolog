@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Do not suggest creating PRs.
+
 ## CRITICAL: DO NOT BUMP FILE VERSIONS OR CREATE MIGRATION CODE!
 
 This project is NOT in production. When changing file formats, just change them. Do not increment version numbers or write backward-compatibility code. Delete old data and start fresh. This does NOT apply to migration files.
