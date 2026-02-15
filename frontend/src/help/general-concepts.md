@@ -51,21 +51,50 @@ The path from a log message to a stored, indexed record:
 
 ```mermaid
 flowchart LR
-    A[Ingester] --> B[Orchestrator]
+    A[Ingester] --> B[Digesters]
     B --> C{Filter\nMatch}
     C -->|env=prod| D[Store A]
     C -->|level=debug| E[Store B]
-    D --> F[Active Chunk]
-    F -->|Rotation| G[Sealed Chunk]
-    G -->|Async| H[Index Build]
+    D --> F1[Active Chunk]
+    E --> F2[Active Chunk]
+    F1 -->|Rotation| G1[Sealed Chunk]
+    F2 -->|Rotation| G2[Sealed Chunk]
+    G1 -->|Async| H1[Index Build]
+    G2 -->|Async| H2[Index Build]
 ```
 
 1. An **ingester** (syslog, HTTP, tail, etc.) receives a log message and emits an `IngestMessage` with the raw payload, parsed attributes, SourceTS, and IngestTS
-2. The **orchestrator** evaluates each store's **filter** against the message's attributes to determine which stores should receive it
-3. For each matching store, the record is **appended** to the store's active chunk with a WriteTS
-4. If the append causes the active chunk to exceed its **rotation policy** limits, the chunk is **sealed** and a new active chunk begins
-5. Sealing schedules asynchronous **index builds** (token, attribute, KV) on the sealed chunk
-6. **Retention policies** periodically scan sealed chunks and delete those that have expired
+2. **Digesters** enrich the message in-place — extracting severity levels, parsing timestamps, and adding attributes based on message content (see below)
+3. The **orchestrator** evaluates each store's **filter** against the message's attributes to determine which stores should receive it
+4. For each matching store, the record is **appended** to the store's active chunk with a WriteTS
+5. If the append causes the active chunk to exceed its **rotation policy** limits, the chunk is **sealed** and a new active chunk begins
+6. Sealing schedules asynchronous **index builds** (token, attribute, KV) on the sealed chunk
+7. **Retention policies** periodically scan sealed chunks and delete those that have expired
+
+## Digesters
+
+Digesters are a message enrichment pipeline that runs between ingestion and storage. They process each message in-place, adding or refining attributes based on the raw log content. Digesters are best-effort — a parse failure simply means no enrichment is applied.
+
+### Level Digester
+
+Extracts severity from the message body and sets a normalized `level` attribute. Skipped if a `level`, `severity`, or `severity_name` attribute is already present. Recognizes:
+
+- **KV format**: `level=ERROR`, `severity=warn`
+- **JSON format**: `"level":"error"`, `"severity":"warn"`
+- **Syslog priority**: `<NNN>` where severity = priority % 8
+
+Values are normalized to: `error`, `warn`, `info`, `debug`, `trace`.
+
+### Timestamp Digester
+
+Extracts SourceTS from the raw log content when the ingester didn't set one. Skipped if SourceTS is already non-zero. Recognizes (in order of earliest match position):
+
+- **RFC 3339 / ISO 8601**: `2024-01-15T10:30:45.123Z`
+- **Apple unified log**: `2024-01-15 10:30:45.123456-0800`
+- **Syslog BSD (RFC 3164)**: `Jan  5 15:04:02`
+- **Common Log Format**: `[02/Jan/2006:15:04:05 -0700]`
+- **Go/Ruby datestamp**: `2024/01/15 10:30:45`
+- **Ctime / BSD**: `Fri Feb 13 17:49:50 2026`
 
 ## Multi-Store Routing
 
