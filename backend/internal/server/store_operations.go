@@ -18,6 +18,24 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
+// makeCleanupFunc returns a callback that removes the source store from the
+// config store and cleans up its data directory. Safe to call from async jobs.
+func (s *StoreServer) makeCleanupFunc(srcID uuid.UUID, srcFileDir string) func(ctx context.Context) error {
+	return func(ctx context.Context) error {
+		if s.cfgStore != nil {
+			if err := s.cfgStore.DeleteStore(ctx, srcID); err != nil {
+				s.logger.Warn("cleanup: delete store config", "store", srcID, "error", err)
+			}
+		}
+		if srcFileDir != "" {
+			if err := os.RemoveAll(srcFileDir); err != nil {
+				s.logger.Warn("cleanup: remove source directory", "dir", srcFileDir, "error", err)
+			}
+		}
+		return nil
+	}
+}
+
 // ReindexStore rebuilds all indexes for sealed chunks in a store.
 // The work is submitted as an async job; the response contains the job ID.
 func (s *StoreServer) ReindexStore(
@@ -158,41 +176,12 @@ func (s *StoreServer) MigrateStore(
 		srcFileDir = srcCfg.Params[chunkfile.ParamDir]
 	}
 
-	// Detect chunk mover support.
-	canMoveChunks := s.orch.SupportsChunkMove(srcID, dstID)
-
-	jobName := "migrate:" + srcID.String() + "->" + dstID.String()
-	jobID := s.orch.Scheduler().Submit(jobName, func(ctx context.Context, job *orchestrator.JobProgress) {
-		var mergeErr error
-		if canMoveChunks {
-			mergeErr = s.orch.MoveChunks(ctx, srcID, dstID, job)
-		} else {
-			mergeErr = s.orch.CopyRecords(ctx, srcID, dstID, job)
-		}
-		if mergeErr != nil {
-			job.Fail(s.now(), fmt.Sprintf("merge records: %v", mergeErr))
-			return
-		}
-
-		// Delete the source store.
-		if err := s.orch.ForceRemoveStore(srcID); err != nil {
-			job.Fail(s.now(), fmt.Sprintf("delete source: %v", err))
-			return
-		}
-
-		// Remove source from config store and clean up file directory.
-		if s.cfgStore != nil {
-			if err := s.cfgStore.DeleteStore(ctx, srcID); err != nil {
-				s.logger.Warn("cleanup: delete store config", "store", srcID, "error", err)
-			}
-		}
-		if srcFileDir != "" {
-			if err := os.RemoveAll(srcFileDir); err != nil {
-				s.logger.Warn("cleanup: remove source directory", "dir", srcFileDir, "error", err)
-			}
-		}
+	jobID := s.orch.MigrateStore(ctx, orchestrator.TransferParams{
+		SrcID:       srcID,
+		DstID:       dstID,
+		Description: fmt.Sprintf("Migrate '%s' to '%s'", srcName, s.storeName(ctx, dstID)),
+		CleanupSrc:  s.makeCleanupFunc(srcID, srcFileDir),
 	})
-	s.orch.Scheduler().Describe(jobName, fmt.Sprintf("Migrate '%s' to '%s'", srcName, s.storeName(ctx, dstID)))
 
 	return connect.NewResponse(&apiv1.MigrateStoreResponse{JobId: jobID}), nil
 }
@@ -246,54 +235,18 @@ func (s *StoreServer) MergeStores(
 		}
 	}
 
-	// Use chunk-level moves when both sides support it (preserves WriteTS).
-	// Fall back to record-by-record copy otherwise (rewrites WriteTS).
-	canMoveChunks := s.orch.SupportsChunkMove(srcID, dstID)
-
 	// Capture source file dir before job runs (source config will be deleted).
 	var srcFileDir string
 	if srcCfg, err := s.getFullStoreConfig(ctx, srcID); err == nil && srcCfg.Type == "file" {
 		srcFileDir = srcCfg.Params[chunkfile.ParamDir]
 	}
 
-	jobName := "merge:" + srcID.String() + "->" + dstID.String()
-	jobID := s.orch.Scheduler().Submit(jobName, func(ctx context.Context, job *orchestrator.JobProgress) {
-		// Seal source's active chunk before merging.
-		if err := s.orch.SealActive(srcID); err != nil {
-			job.Fail(s.now(), fmt.Sprintf("seal source: %v", err))
-			return
-		}
-
-		var err error
-		if canMoveChunks {
-			err = s.orch.MoveChunks(ctx, srcID, dstID, job)
-		} else {
-			err = s.orch.CopyRecords(ctx, srcID, dstID, job)
-		}
-		if err != nil {
-			job.Fail(s.now(), fmt.Sprintf("merge records: %v", err))
-			return
-		}
-
-		// Force-delete the source store (now empty).
-		if err := s.orch.ForceRemoveStore(srcID); err != nil {
-			job.Fail(s.now(), fmt.Sprintf("delete source: %v", err))
-			return
-		}
-
-		// Remove source from config store and clean up data directory.
-		if s.cfgStore != nil {
-			if err := s.cfgStore.DeleteStore(ctx, srcID); err != nil {
-				s.logger.Warn("cleanup: delete store config", "store", srcID, "error", err)
-			}
-		}
-		if srcFileDir != "" {
-			if err := os.RemoveAll(srcFileDir); err != nil {
-				s.logger.Warn("cleanup: remove source directory", "dir", srcFileDir, "error", err)
-			}
-		}
+	jobID := s.orch.MergeStores(ctx, orchestrator.TransferParams{
+		SrcID:       srcID,
+		DstID:       dstID,
+		Description: fmt.Sprintf("Merge '%s' into '%s'", s.storeName(ctx, srcID), s.storeName(ctx, dstID)),
+		CleanupSrc:  s.makeCleanupFunc(srcID, srcFileDir),
 	})
-	s.orch.Scheduler().Describe(jobName, fmt.Sprintf("Merge '%s' into '%s'", s.storeName(ctx, srcID), s.storeName(ctx, dstID)))
 
 	return connect.NewResponse(&apiv1.MergeStoresResponse{JobId: jobID}), nil
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -16,7 +15,6 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/index"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
@@ -205,24 +203,10 @@ func (s *QueryServer) Explain(
 }
 
 // Histogram returns record counts bucketed by time.
-//
-// Two modes:
-//   - Unfiltered (no tokens, kv, severity): uses FindStartPosition binary search
-//     on idx.log for O(buckets * log(n)) per chunk. Very fast.
-//   - Filtered: runs the full query engine search (unlimited) and buckets each
-//     matching record. Capped at 1M records to prevent runaway scans.
 func (s *QueryServer) Histogram(
 	ctx context.Context,
 	req *connect.Request[apiv1.HistogramRequest],
 ) (*connect.Response[apiv1.HistogramResponse], error) {
-	numBuckets := int(req.Msg.Buckets)
-	if numBuckets <= 0 {
-		numBuckets = 50
-	}
-	if numBuckets > 500 {
-		numBuckets = 500
-	}
-
 	// Parse expression to extract time bounds, store filter, and query filters.
 	var q query.Query
 	if req.Msg.Expression != "" {
@@ -240,129 +224,34 @@ func (s *QueryServer) Histogram(
 		q.End = req.Msg.End.AsTime()
 	}
 
-	// Determine which stores to query.
-	allStores := s.orch.ListStores()
-	selectedStores := allStores
-	if q.BoolExpr != nil {
-		stores, _ := query.ExtractStoreFilter(q.BoolExpr, allStores)
-		if stores != nil {
-			selectedStores = stores
-		}
+	eng := s.orch.MultiStoreQueryEngine()
+	result, err := eng.Histogram(ctx, query.HistogramQuery{
+		Query:      q,
+		NumBuckets: int(req.Msg.Buckets),
+	})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	// If no time range, derive from chunk metadata.
-	if q.Start.IsZero() || q.End.IsZero() {
-		for _, storeID := range selectedStores {
-			cm := s.orch.ChunkManager(storeID)
-			if cm == nil {
-				continue
-			}
-			metas, err := cm.List()
-			if err != nil {
-				continue
-			}
-			for _, meta := range metas {
-				if meta.RecordCount == 0 {
-					continue
-				}
-				if q.Start.IsZero() || meta.StartTS.Before(q.Start) {
-					q.Start = meta.StartTS
-				}
-				if q.End.IsZero() || meta.EndTS.After(q.End) {
-					q.End = meta.EndTS
-				}
-			}
-		}
-	}
-
-	// Normalize: histogram always needs lower < upper regardless of query direction.
-	start, end := q.Start, q.End
-	if !start.IsZero() && !end.IsZero() && end.Before(start) {
-		start, end = end, start
-	}
-	if start.IsZero() || end.IsZero() || !start.Before(end) {
+	if len(result.Counts) == 0 {
 		return connect.NewResponse(&apiv1.HistogramResponse{}), nil
 	}
 
-	bucketWidth := end.Sub(start) / time.Duration(numBuckets)
-	if bucketWidth <= 0 {
-		bucketWidth = time.Second
-	}
-
-	counts := make([]int64, numBuckets)
-	levelCounts := make([]map[string]int64, numBuckets)
-	for i := range levelCounts {
-		levelCounts[i] = make(map[string]int64)
-	}
-	hasFilter := q.BoolExpr != nil
-
-	if hasFilter {
-		// Filtered path: scan matching records and bucket them.
-		q.Limit = 0
-		eng := s.orch.MultiStoreQueryEngine()
-		iter, _ := eng.Search(ctx, q, nil)
-		const maxScan = 1_000_000
-		scanned := 0
-		for rec, err := range iter {
-			if err != nil {
-				if errors.Is(err, context.Canceled) {
-					break
-				}
-				return nil, connect.NewError(connect.CodeInternal, err)
-			}
-			ts := rec.WriteTS
-			if ts.Before(start) || !ts.Before(end) {
-				continue
-			}
-			idx := int(ts.Sub(start) / bucketWidth)
-			if idx >= numBuckets {
-				idx = numBuckets - 1
-			}
-			counts[idx]++
-			scanned++
-			if scanned >= maxScan {
-				break
-			}
-		}
-	} else {
-		// Unfiltered path: use FindStartPosition for O(buckets * log(n)).
-		for _, storeID := range selectedStores {
-			cm := s.orch.ChunkManager(storeID)
-			if cm == nil {
-				continue
-			}
-			im := s.orch.IndexManager(storeID)
-			metas, err := cm.List()
-			if err != nil {
-				continue
-			}
-			for _, meta := range metas {
-				if meta.RecordCount == 0 {
-					continue
-				}
-				if meta.EndTS.Before(start) || !meta.StartTS.Before(end) {
-					continue
-				}
-				s.histogramChunkFast(cm, meta, start, bucketWidth, numBuckets, counts)
-				if meta.Sealed {
-					s.histogramChunkSeverity(cm, im, meta, start, bucketWidth, numBuckets, levelCounts)
-				}
-			}
-		}
-	}
+	numBuckets := len(result.Counts)
+	bucketWidth := result.End.Sub(result.Start) / time.Duration(numBuckets)
 
 	resp := &apiv1.HistogramResponse{
-		Start:   timestamppb.New(start),
-		End:     timestamppb.New(end),
+		Start:   timestamppb.New(result.Start),
+		End:     timestamppb.New(result.End),
 		Buckets: make([]*apiv1.HistogramBucket, numBuckets),
 	}
 	for i := range numBuckets {
 		bucket := &apiv1.HistogramBucket{
-			Ts:    timestamppb.New(start.Add(bucketWidth * time.Duration(i))),
-			Count: counts[i],
+			Ts:    timestamppb.New(result.Start.Add(bucketWidth * time.Duration(i))),
+			Count: result.Counts[i],
 		}
-		if len(levelCounts[i]) > 0 {
-			bucket.LevelCounts = levelCounts[i]
+		if len(result.LevelCounts[i]) > 0 {
+			bucket.LevelCounts = result.LevelCounts[i]
 		}
 		resp.Buckets[i] = bucket
 	}
@@ -370,164 +259,7 @@ func (s *QueryServer) Histogram(
 	return connect.NewResponse(resp), nil
 }
 
-// histogramChunkFast counts records per bucket using binary search on idx.log.
-// O(buckets * log(n)) per chunk, no record scanning.
-func (s *QueryServer) histogramChunkFast(
-	cm chunk.ChunkManager,
-	meta chunk.ChunkMeta,
-	start time.Time,
-	bucketWidth time.Duration,
-	numBuckets int,
-	counts []int64,
-) {
-	end := start.Add(bucketWidth * time.Duration(numBuckets))
-
-	firstBucket := 0
-	if meta.StartTS.After(start) {
-		firstBucket = int(meta.StartTS.Sub(start) / bucketWidth)
-		if firstBucket >= numBuckets {
-			return
-		}
-	}
-	lastBucket := numBuckets - 1
-	if meta.EndTS.Before(end) {
-		lastBucket = int(meta.EndTS.Sub(start) / bucketWidth)
-		if lastBucket >= numBuckets {
-			lastBucket = numBuckets - 1
-		}
-	}
-
-	for b := firstBucket; b <= lastBucket; b++ {
-		bStart := start.Add(bucketWidth * time.Duration(b))
-		bEnd := start.Add(bucketWidth * time.Duration(b+1))
-
-		var startPos uint64
-		if pos, found, err := cm.FindStartPosition(meta.ID, bStart); err == nil && found {
-			startPos = pos
-		}
-
-		var endPos uint64
-		if !bEnd.Before(meta.EndTS) {
-			endPos = uint64(meta.RecordCount)
-		} else if pos, found, err := cm.FindStartPosition(meta.ID, bEnd); err == nil && found {
-			endPos = pos
-		}
-
-		if endPos > startPos {
-			counts[b] += int64(endPos - startPos)
-		}
-	}
-}
-
-// severityLevels are the canonical severity names we track in histograms.
-var severityLevels = []string{"error", "warn", "info", "debug", "trace"}
-
-// severityKVLookups maps canonical severity names to the key=value pairs to look up
-// in the KV index (extracted from message text, e.g. level=error).
-var severityKVLookups = map[string][][2]string{
-	"error": {{"level", "error"}, {"level", "err"}},
-	"warn":  {{"level", "warn"}, {"level", "warning"}},
-	"info":  {{"level", "info"}},
-	"debug": {{"level", "debug"}},
-	"trace": {{"level", "trace"}},
-}
-
-// severityAttrKVLookups maps canonical severity names to the key=value pairs to look up
-// in the attr KV index (from record attributes, e.g. severity_name=error).
-var severityAttrKVLookups = map[string][][2]string{
-	"error": {{"severity_name", "err"}, {"severity_name", "error"}},
-	"warn":  {{"severity_name", "warning"}, {"severity_name", "warn"}},
-	"info":  {{"severity_name", "info"}},
-	"debug": {{"severity_name", "debug"}},
-	"trace": {{"severity_name", "trace"}},
-}
-
-// histogramChunkSeverity populates per-level counts for a chunk using KV indexes.
-// Only works on sealed, indexed chunks. Returns false if indexes are unavailable.
-func (s *QueryServer) histogramChunkSeverity(
-	cm chunk.ChunkManager,
-	im index.IndexManager,
-	meta chunk.ChunkMeta,
-	start time.Time,
-	bucketWidth time.Duration,
-	numBuckets int,
-	levelCounts []map[string]int64,
-) bool {
-	if im == nil {
-		return false
-	}
-
-	// Open KV index (from message text).
-	kvIdx, _, err := im.OpenKVIndex(meta.ID)
-	if err != nil {
-		return false
-	}
-	kvReader := index.NewKVIndexReader(meta.ID, kvIdx.Entries())
-
-	// Open attr KV index (from record attributes).
-	attrKVIdx, err := im.OpenAttrKVIndex(meta.ID)
-	var attrKVReader *index.KVIndexReader
-	if err == nil {
-		// AttrKVIndex uses AttrKVIndexEntry, but we need KVIndexReader.
-		// Convert entries.
-		attrEntries := attrKVIdx.Entries()
-		kvEntries := make([]index.KVIndexEntry, len(attrEntries))
-		for i, e := range attrEntries {
-			kvEntries[i] = index.KVIndexEntry(e)
-		}
-		attrKVReader = index.NewKVIndexReader(meta.ID, kvEntries)
-	}
-
-	for _, level := range severityLevels {
-		// Collect positions from both KV and attr KV indexes.
-		var allPositions []uint64
-
-		for _, kv := range severityKVLookups[level] {
-			if positions, found := kvReader.Lookup(kv[0], kv[1]); found {
-				allPositions = append(allPositions, positions...)
-			}
-		}
-
-		if attrKVReader != nil {
-			for _, kv := range severityAttrKVLookups[level] {
-				if positions, found := attrKVReader.Lookup(kv[0], kv[1]); found {
-					allPositions = append(allPositions, positions...)
-				}
-			}
-		}
-
-		if len(allPositions) == 0 {
-			continue
-		}
-
-		// Deduplicate positions (a record might match both level=error and severity_name=error).
-		slices.Sort(allPositions)
-		allPositions = slices.Compact(allPositions)
-
-		// Read WriteTS for each position and bucket them.
-		timestamps, err := cm.ReadWriteTimestamps(meta.ID, allPositions)
-		if err != nil {
-			continue
-		}
-
-		for _, ts := range timestamps {
-			if ts.Before(start) || !ts.Before(start.Add(bucketWidth*time.Duration(numBuckets))) {
-				continue
-			}
-			idx := int(ts.Sub(start) / bucketWidth)
-			if idx >= numBuckets {
-				idx = numBuckets - 1
-			}
-			levelCounts[idx][level]++
-		}
-	}
-
-	return true
-}
-
 // GetContext returns records surrounding a specific record, across all stores.
-// It reads the anchor record directly, then uses time-windowed multi-store
-// searches to find nearby records.
 func (s *QueryServer) GetContext(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetContextRequest],
@@ -547,116 +279,26 @@ func (s *QueryServer) GetContext(
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid chunk_id: %w", err))
 	}
 
-	// Read the anchor record.
-	cm := s.orch.ChunkManager(storeID)
-	if cm == nil {
-		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("store %q not found", ref.StoreId))
-	}
-
-	cursor, err := cm.OpenCursor(chunkID)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("chunk %s not found: %w", ref.ChunkId, err))
-	}
-
-	anchorRef := chunk.RecordRef{ChunkID: chunkID, Pos: ref.Pos}
-	if err := cursor.Seek(anchorRef); err != nil {
-		cursor.Close()
-		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("failed to seek to position %d: %w", ref.Pos, err))
-	}
-	anchorRec, _, err := cursor.Next()
-	if err != nil {
-		cursor.Close()
-		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("failed to read anchor record: %w", err))
-	}
-	cursor.Close()
-	anchorRec.StoreID = storeID
-	anchorRec.Ref = anchorRef
-
-	// Defaults and caps.
-	before := int(req.Msg.Before)
-	after := int(req.Msg.After)
-	if before == 0 {
-		before = 5
-	}
-	if after == 0 {
-		after = 5
-	}
-	if before > 50 {
-		before = 50
-	}
-	if after > 50 {
-		after = 50
-	}
-
-	anchorTS := anchorRec.WriteTS
 	eng := s.orch.MultiStoreQueryEngine()
-
-	isAnchor := func(rec chunk.Record) bool {
-		return rec.StoreID == storeID &&
-			rec.Ref.ChunkID == chunkID &&
-			rec.Ref.Pos == ref.Pos
-	}
-
-	// Fetch records before: search backward from anchor timestamp.
-	// Request extra to account for deduplication of the anchor itself.
-	beforeQuery := query.Query{
-		End:       anchorTS,
-		Limit:     before + 1,
-		IsReverse: true,
-	}
-	beforeIter, _ := eng.Search(ctx, beforeQuery, nil)
-	var beforeRecs []chunk.Record
-	for rec, err := range beforeIter {
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil, connect.NewError(connect.CodeCanceled, err)
-			}
-			return nil, connect.NewError(connect.CodeInternal, err)
-		}
-		if isAnchor(rec) {
-			continue
-		}
-		beforeRecs = append(beforeRecs, rec)
-		if len(beforeRecs) >= before {
-			break
-		}
-	}
-	// beforeRecs is newest-first (reverse search), flip to oldest-first.
-	slices.Reverse(beforeRecs)
-
-	// Fetch records after: search forward from anchor timestamp.
-	afterQuery := query.Query{
-		Start: anchorTS,
-		Limit: after + 1,
-	}
-	afterIter, _ := eng.Search(ctx, afterQuery, nil)
-	var afterRecs []chunk.Record
-	for rec, err := range afterIter {
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil, connect.NewError(connect.CodeCanceled, err)
-			}
-			return nil, connect.NewError(connect.CodeInternal, err)
-		}
-		if isAnchor(rec) {
-			continue
-		}
-		afterRecs = append(afterRecs, rec)
-		if len(afterRecs) >= after {
-			break
-		}
+	result, err := eng.GetContext(ctx, query.ContextRef{
+		StoreID: storeID,
+		ChunkID: chunkID,
+		Pos:     ref.Pos,
+	}, int(req.Msg.Before), int(req.Msg.After))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
 	// Build response.
 	resp := &apiv1.GetContextResponse{
-		Anchor: recordToProto(anchorRec),
-		Before: make([]*apiv1.Record, 0, len(beforeRecs)),
-		After:  make([]*apiv1.Record, 0, len(afterRecs)),
+		Anchor: recordToProto(result.Anchor),
+		Before: make([]*apiv1.Record, 0, len(result.Before)),
+		After:  make([]*apiv1.Record, 0, len(result.After)),
 	}
-	for _, rec := range beforeRecs {
+	for _, rec := range result.Before {
 		resp.Before = append(resp.Before, recordToProto(rec))
 	}
-	for _, rec := range afterRecs {
+	for _, rec := range result.After {
 		resp.After = append(resp.After, recordToProto(rec))
 	}
 

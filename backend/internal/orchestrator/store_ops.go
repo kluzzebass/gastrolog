@@ -402,3 +402,96 @@ func (o *Orchestrator) MoveChunks(ctx context.Context, srcID, dstID uuid.UUID, j
 
 	return nil
 }
+
+// TransferParams describes a store-to-store data movement operation.
+type TransferParams struct {
+	SrcID uuid.UUID
+	DstID uuid.UUID
+
+	// Description is a human-readable label for the job (shown in the UI).
+	Description string
+
+	// CleanupSrc is called after the source store is removed from the orchestrator.
+	// It handles config store deletion and filesystem cleanup.
+	// A nil CleanupSrc means no external cleanup is needed.
+	CleanupSrc func(ctx context.Context) error
+}
+
+// MigrateStore freezes the source (disable + seal), moves data to destination,
+// then removes the source. The operation runs as an async job.
+// The source must already be disabled and sealed by the caller.
+func (o *Orchestrator) MigrateStore(ctx context.Context, p TransferParams) string {
+	canMoveChunks := o.SupportsChunkMove(p.SrcID, p.DstID)
+
+	jobName := "migrate:" + p.SrcID.String() + "->" + p.DstID.String()
+	jobID := o.scheduler.Submit(jobName, func(ctx context.Context, job *JobProgress) {
+		var mergeErr error
+		if canMoveChunks {
+			mergeErr = o.MoveChunks(ctx, p.SrcID, p.DstID, job)
+		} else {
+			mergeErr = o.CopyRecords(ctx, p.SrcID, p.DstID, job)
+		}
+		if mergeErr != nil {
+			job.Fail(o.now(), fmt.Sprintf("merge records: %v", mergeErr))
+			return
+		}
+
+		if err := o.ForceRemoveStore(p.SrcID); err != nil {
+			job.Fail(o.now(), fmt.Sprintf("delete source: %v", err))
+			return
+		}
+
+		if p.CleanupSrc != nil {
+			if err := p.CleanupSrc(ctx); err != nil {
+				o.logger.Warn("cleanup: source cleanup failed", "src", p.SrcID, "error", err)
+			}
+		}
+	})
+	if p.Description != "" {
+		o.scheduler.Describe(jobName, p.Description)
+	}
+
+	return jobID
+}
+
+// MergeStores seals the source, moves data to destination, then removes the
+// source. The operation runs as an async job. The source must already be
+// disabled by the caller.
+func (o *Orchestrator) MergeStores(ctx context.Context, p TransferParams) string {
+	canMoveChunks := o.SupportsChunkMove(p.SrcID, p.DstID)
+
+	jobName := "merge:" + p.SrcID.String() + "->" + p.DstID.String()
+	jobID := o.scheduler.Submit(jobName, func(ctx context.Context, job *JobProgress) {
+		if err := o.SealActive(p.SrcID); err != nil {
+			job.Fail(o.now(), fmt.Sprintf("seal source: %v", err))
+			return
+		}
+
+		var err error
+		if canMoveChunks {
+			err = o.MoveChunks(ctx, p.SrcID, p.DstID, job)
+		} else {
+			err = o.CopyRecords(ctx, p.SrcID, p.DstID, job)
+		}
+		if err != nil {
+			job.Fail(o.now(), fmt.Sprintf("merge records: %v", err))
+			return
+		}
+
+		if err := o.ForceRemoveStore(p.SrcID); err != nil {
+			job.Fail(o.now(), fmt.Sprintf("delete source: %v", err))
+			return
+		}
+
+		if p.CleanupSrc != nil {
+			if err := p.CleanupSrc(ctx); err != nil {
+				o.logger.Warn("cleanup: source cleanup failed", "src", p.SrcID, "error", err)
+			}
+		}
+	})
+	if p.Description != "" {
+		o.scheduler.Describe(jobName, p.Description)
+	}
+
+	return jobID
+}

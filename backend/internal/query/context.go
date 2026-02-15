@@ -3,10 +3,135 @@ package query
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
+
+	"github.com/google/uuid"
 
 	"gastrolog/internal/chunk"
 )
+
+// ContextRef identifies the anchor record.
+type ContextRef struct {
+	StoreID uuid.UUID
+	ChunkID chunk.ChunkID
+	Pos     uint64
+}
+
+// ContextResult holds the anchor and surrounding records.
+type ContextResult struct {
+	Anchor chunk.Record
+	Before []chunk.Record
+	After  []chunk.Record
+}
+
+// GetContext returns records surrounding a specific record, across all stores.
+// It reads the anchor record directly, then uses time-windowed multi-store
+// searches to find nearby records.
+func (e *Engine) GetContext(ctx context.Context, ref ContextRef, before, after int) (*ContextResult, error) {
+	// Defaults and caps.
+	if before == 0 {
+		before = 5
+	}
+	if after == 0 {
+		after = 5
+	}
+	if before > 50 {
+		before = 50
+	}
+	if after > 50 {
+		after = 50
+	}
+
+	// Read the anchor record.
+	cm, _ := e.getStoreManagers(ref.StoreID)
+	if cm == nil {
+		return nil, fmt.Errorf("store %q not found", ref.StoreID)
+	}
+
+	cursor, err := cm.OpenCursor(ref.ChunkID)
+	if err != nil {
+		return nil, fmt.Errorf("chunk %s not found: %w", ref.ChunkID, err)
+	}
+
+	anchorRef := chunk.RecordRef{ChunkID: ref.ChunkID, Pos: ref.Pos}
+	if err := cursor.Seek(anchorRef); err != nil {
+		cursor.Close()
+		return nil, fmt.Errorf("failed to seek to position %d: %w", ref.Pos, err)
+	}
+	anchorRec, _, err := cursor.Next()
+	if err != nil {
+		cursor.Close()
+		return nil, fmt.Errorf("failed to read anchor record: %w", err)
+	}
+	cursor.Close()
+	anchorRec.StoreID = ref.StoreID
+	anchorRec.Ref = anchorRef
+
+	anchorTS := anchorRec.WriteTS
+
+	isAnchor := func(rec chunk.Record) bool {
+		return rec.StoreID == ref.StoreID &&
+			rec.Ref.ChunkID == ref.ChunkID &&
+			rec.Ref.Pos == ref.Pos
+	}
+
+	// Fetch records before: search backward from anchor timestamp.
+	// Request extra to account for deduplication of the anchor itself.
+	beforeQuery := Query{
+		End:       anchorTS,
+		Limit:     before + 1,
+		IsReverse: true,
+	}
+	beforeIter, _ := e.Search(ctx, beforeQuery, nil)
+	var beforeRecs []chunk.Record
+	for rec, err := range beforeIter {
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil, err
+			}
+			return nil, err
+		}
+		if isAnchor(rec) {
+			continue
+		}
+		beforeRecs = append(beforeRecs, rec)
+		if len(beforeRecs) >= before {
+			break
+		}
+	}
+	// beforeRecs is newest-first (reverse search), flip to oldest-first.
+	slices.Reverse(beforeRecs)
+
+	// Fetch records after: search forward from anchor timestamp.
+	afterQuery := Query{
+		Start: anchorTS,
+		Limit: after + 1,
+	}
+	afterIter, _ := e.Search(ctx, afterQuery, nil)
+	var afterRecs []chunk.Record
+	for rec, err := range afterIter {
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil, err
+			}
+			return nil, err
+		}
+		if isAnchor(rec) {
+			continue
+		}
+		afterRecs = append(afterRecs, rec)
+		if len(afterRecs) >= after {
+			break
+		}
+	}
+
+	return &ContextResult{
+		Anchor: anchorRec,
+		Before: beforeRecs,
+		After:  afterRecs,
+	}, nil
+}
 
 // gatherContextBefore collects up to n records before the anchor position.
 // Returns records in the order they should be yielded (oldest first for forward,
