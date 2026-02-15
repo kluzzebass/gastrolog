@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { FormField, TextInput, NumberInput, SelectInput } from "./FormField";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { useCertificates, useTestIngester } from "../../api/hooks/useConfig";
+import { useCertificates } from "../../api/hooks/useConfig";
+import { useTestIngester } from "../../api/hooks/useIngesters";
 import { Checkbox } from "./Checkbox";
 
 interface IngesterParamsFormProps {

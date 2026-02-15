@@ -9,6 +9,10 @@ export {
   useMigrateStore,
   useMergeStores,
   useImportRecords,
+  usePutStore,
+  useDeleteStore,
+  usePauseStore,
+  useResumeStore,
 } from "./useStores";
 export { useSearch, extractTokens } from "./useSearch";
 export { useFollow } from "./useFollow";
@@ -24,13 +28,6 @@ export {
   useDeleteRotationPolicy,
   usePutRetentionPolicy,
   useDeleteRetentionPolicy,
-  usePutStore,
-  useDeleteStore,
-  usePauseStore,
-  useResumeStore,
-  usePutIngester,
-  useDeleteIngester,
-  useTestIngester,
 } from "./useConfig";
 export {
   useAuthStatus,
@@ -40,5 +37,11 @@ export {
   useCurrentUser,
   useChangePassword,
 } from "./useAuth";
-export { useIngesters, useIngesterStatus } from "./useIngesters";
+export {
+  useIngesters,
+  useIngesterStatus,
+  usePutIngester,
+  useDeleteIngester,
+  useTestIngester,
+} from "./useIngesters";
 export { useJob, useWatchJobs } from "./useJobs";

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { configClient } from "../client";
 
 export function useIngesters() {
@@ -21,5 +21,51 @@ export function useIngesterStatus(id: string) {
     },
     enabled: !!id,
     refetchInterval: 5_000,
+  });
+}
+
+export function usePutIngester() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      id: string;
+      name: string;
+      type: string;
+      enabled: boolean;
+      params: Record<string, string>;
+    }) => {
+      await configClient.putIngester({
+        config: {
+          id: args.id,
+          name: args.name,
+          type: args.type,
+          enabled: args.enabled,
+          params: args.params,
+        },
+      });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["config"] }),
+  });
+}
+
+export function useDeleteIngester() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await configClient.deleteIngester({ id });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["config"] }),
+  });
+}
+
+export function useTestIngester() {
+  return useMutation({
+    mutationFn: async (args: { type: string; params: Record<string, string> }) => {
+      const response = await configClient.testIngester({
+        type: args.type,
+        params: args.params,
+      });
+      return response;
+    },
   });
 }

@@ -105,88 +105,6 @@ export function useDeleteRetentionPolicy() {
   });
 }
 
-export function usePutStore() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (args: {
-      id: string;
-      name: string;
-      type: string;
-      filter: string;
-      policy: string;
-      retention: string;
-      params: Record<string, string>;
-      enabled?: boolean;
-    }) => {
-      await configClient.putStore({
-        config: {
-          id: args.id,
-          name: args.name,
-          type: args.type,
-          filter: args.filter,
-          policy: args.policy,
-          retention: args.retention,
-          params: args.params,
-          enabled: args.enabled ?? true,
-        },
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["config"] });
-      qc.invalidateQueries({ queryKey: ["stores"] });
-      qc.invalidateQueries({ queryKey: ["stats"] });
-    },
-  });
-}
-
-export function useDeleteStore() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (args: { id: string; force?: boolean }) => {
-      await configClient.deleteStore({ id: args.id, force: args.force ?? false });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["config"] });
-      qc.invalidateQueries({ queryKey: ["stores"] });
-      qc.invalidateQueries({ queryKey: ["stats"] });
-    },
-  });
-}
-
-export function usePutIngester() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (args: {
-      id: string;
-      name: string;
-      type: string;
-      enabled: boolean;
-      params: Record<string, string>;
-    }) => {
-      await configClient.putIngester({
-        config: {
-          id: args.id,
-          name: args.name,
-          type: args.type,
-          enabled: args.enabled,
-          params: args.params,
-        },
-      });
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["config"] }),
-  });
-}
-
-export function useDeleteIngester() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      await configClient.deleteIngester({ id });
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["config"] }),
-  });
-}
-
 export function useServerConfig() {
   return useQuery({
     queryKey: ["serverConfig"],
@@ -280,44 +198,6 @@ export function usePutCertificate() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["certificates"] });
       qc.invalidateQueries({ queryKey: ["serverConfig"] });
-    },
-  });
-}
-
-export function usePauseStore() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      await configClient.pauseStore({ id });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["config"] });
-      qc.invalidateQueries({ queryKey: ["stores"] });
-    },
-  });
-}
-
-export function useResumeStore() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      await configClient.resumeStore({ id });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["config"] });
-      qc.invalidateQueries({ queryKey: ["stores"] });
-    },
-  });
-}
-
-export function useTestIngester() {
-  return useMutation({
-    mutationFn: async (args: { type: string; params: Record<string, string> }) => {
-      const response = await configClient.testIngester({
-        type: args.type,
-        params: args.params,
-      });
-      return response;
     },
   });
 }

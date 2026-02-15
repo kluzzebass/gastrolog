@@ -13,12 +13,12 @@ const DIRECTIVE_VALUES: Record<string, string[]> = {
 };
 
 // Characters that break a word in the query language.
-function isWordBreak(ch: string): boolean {
+export function isWordBreak(ch: string): boolean {
   return " \t\n\r()=*\"'".includes(ch);
 }
 
 // Extract the word at cursor and its replace range.
-function wordAtCursor(
+export function wordAtCursor(
   text: string,
   cursor: number,
 ): { word: string; start: number; end: number } | null {
@@ -39,7 +39,7 @@ function wordAtCursor(
 }
 
 // Determine if the cursor is in a "value" position (after key=).
-function getValueContext(text: string, wordStart: number): string | null {
+export function getValueContext(text: string, wordStart: number): string | null {
   // Look backward from word start for `=` preceded by a key.
   let i = wordStart - 1;
   if (i < 0 || text[i] !== "=") return null;

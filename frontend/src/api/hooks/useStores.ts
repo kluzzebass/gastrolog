@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Timestamp } from "@bufbuild/protobuf";
-import { storeClient } from "../client";
+import { storeClient, configClient } from "../client";
 
 export function useStores() {
   return useQuery({
@@ -163,6 +163,80 @@ export function useImportRecords() {
       qc.invalidateQueries({ queryKey: ["stores"] });
       qc.invalidateQueries({ queryKey: ["chunks"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
+    },
+  });
+}
+
+export function usePutStore() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      id: string;
+      name: string;
+      type: string;
+      filter: string;
+      policy: string;
+      retention: string;
+      params: Record<string, string>;
+      enabled?: boolean;
+    }) => {
+      await configClient.putStore({
+        config: {
+          id: args.id,
+          name: args.name,
+          type: args.type,
+          filter: args.filter,
+          policy: args.policy,
+          retention: args.retention,
+          params: args.params,
+          enabled: args.enabled ?? true,
+        },
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["config"] });
+      qc.invalidateQueries({ queryKey: ["stores"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
+    },
+  });
+}
+
+export function useDeleteStore() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { id: string; force?: boolean }) => {
+      await configClient.deleteStore({ id: args.id, force: args.force ?? false });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["config"] });
+      qc.invalidateQueries({ queryKey: ["stores"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
+    },
+  });
+}
+
+export function usePauseStore() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await configClient.pauseStore({ id });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["config"] });
+      qc.invalidateQueries({ queryKey: ["stores"] });
+    },
+  });
+}
+
+export function useResumeStore() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await configClient.resumeStore({ id });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["config"] });
+      qc.invalidateQueries({ queryKey: ["stores"] });
     },
   });
 }

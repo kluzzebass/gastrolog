@@ -539,7 +539,7 @@ function highlightKVPlain(text: string): SyntaxSpan[] {
 
 /** Convert a set of (possibly overlapping) color intervals to non-overlapping spans.
  *  First interval wins at each character position (priority by insertion order). */
-function intervalsToSpans(
+export function intervalsToSpans(
   text: string,
   intervals: ColorInterval[],
 ): SyntaxSpan[] {
@@ -582,7 +582,7 @@ function intervalsToSpans(
 }
 
 /** Merge adjacent spans with the same color to reduce span count. */
-function mergeAdjacentSpans(spans: SyntaxSpan[]): SyntaxSpan[] {
+export function mergeAdjacentSpans(spans: SyntaxSpan[]): SyntaxSpan[] {
   if (spans.length <= 1) return spans;
   const merged: SyntaxSpan[] = [spans[0]!];
   for (let i = 1; i < spans.length; i++) {
