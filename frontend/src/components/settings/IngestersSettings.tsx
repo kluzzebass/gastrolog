@@ -7,9 +7,9 @@ import { useCrudHandlers } from "../../hooks/useCrudHandlers";
 import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
-import { FormField, TextInput, SelectInput } from "./FormField";
+import { FormField, TextInput } from "./FormField";
 import { IngesterParamsForm } from "./IngesterParamsForm";
-import { PrimaryButton } from "./Buttons";
+import { PrimaryButton, GhostButton } from "./Buttons";
 import { Checkbox } from "./Checkbox";
 
 const ingesterTypes = [
@@ -30,6 +30,7 @@ export function IngestersSettings({ dark }: { dark: boolean }) {
 
   const [expanded, setExpanded] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [typeConfirmed, setTypeConfirmed] = useState(false);
 
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState("chatterbox");
@@ -65,11 +66,6 @@ export function IngestersSettings({ dark }: { dark: boolean }) {
     clearEdit,
   });
 
-  const handleNewTypeChange = (type: string) => {
-    setNewType(type);
-    setNewParams({});
-  };
-
   const handleCreate = async () => {
     if (!newName.trim()) {
       addToast("Ingester name is required", "warn");
@@ -85,6 +81,7 @@ export function IngestersSettings({ dark }: { dark: boolean }) {
       });
       addToast(`Ingester "${newName.trim()}" created`, "info");
       setAdding(false);
+      setTypeConfirmed(false);
       setNewName("");
       setNewType("chatterbox");
       setNewParams({});
@@ -98,37 +95,66 @@ export function IngestersSettings({ dark }: { dark: boolean }) {
       title="Ingesters"
       addLabel="Add Ingester"
       adding={adding}
-      onToggleAdd={() => setAdding(!adding)}
+      onToggleAdd={() => {
+        setAdding(!adding);
+        setTypeConfirmed(false);
+        setNewName("");
+        setNewType("chatterbox");
+        setNewParams({});
+      }}
       isLoading={isLoading}
       isEmpty={ingesters.length === 0}
       emptyMessage='No ingesters configured. Click "Add Ingester" to create one.'
       dark={dark}
+      addSlot={
+        adding && !typeConfirmed ? (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {ingesterTypes.map((t) => (
+              <button
+                key={t.value}
+                type="button"
+                onClick={() => {
+                  setNewType(t.value);
+                  setNewParams({});
+                  setTypeConfirmed(true);
+                }}
+                className={`px-3 py-1.5 text-[0.8em] font-mono rounded border transition-colors ${c(
+                  "border-ink-border-subtle text-text-secondary hover:border-copper hover:text-copper",
+                  "border-light-border-subtle text-light-text-secondary hover:border-copper hover:text-copper",
+                )}`}
+              >
+                {t.label}
+              </button>
+            ))}
+            <GhostButton
+              onClick={() => setAdding(false)}
+              dark={dark}
+            >
+              Cancel
+            </GhostButton>
+          </div>
+        ) : undefined
+      }
     >
-      {adding && (
+      {adding && typeConfirmed && (
         <AddFormCard
           dark={dark}
-          onCancel={() => setAdding(false)}
+          onCancel={() => {
+            setAdding(false);
+            setTypeConfirmed(false);
+          }}
           onCreate={handleCreate}
           isPending={putIngester.isPending}
+          typeBadge={newType}
         >
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="Name" dark={dark}>
-              <TextInput
-                value={newName}
-                onChange={setNewName}
-                placeholder="my-ingester"
-                dark={dark}
-              />
-            </FormField>
-            <FormField label="Type" dark={dark}>
-              <SelectInput
-                value={newType}
-                onChange={handleNewTypeChange}
-                options={ingesterTypes}
-                dark={dark}
-              />
-            </FormField>
-          </div>
+          <FormField label="Name" dark={dark}>
+            <TextInput
+              value={newName}
+              onChange={setNewName}
+              placeholder="my-ingester"
+              dark={dark}
+            />
+          </FormField>
           <IngesterParamsForm
             ingesterType={newType}
             params={newParams}

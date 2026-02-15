@@ -10,6 +10,8 @@ interface SettingsSectionProps {
   isEmpty: boolean;
   emptyMessage: string;
   dark: boolean;
+  /** Replaces the default add/cancel button when provided. */
+  addSlot?: React.ReactNode;
   children: React.ReactNode;
 }
 
@@ -23,6 +25,7 @@ export function SettingsSection({
   emptyMessage,
   dark,
   children,
+  addSlot,
 }: SettingsSectionProps) {
   const c = useThemeClass(dark);
 
@@ -44,9 +47,11 @@ export function SettingsSection({
         >
           {title}
         </h2>
-        <PrimaryButton onClick={onToggleAdd}>
-          {adding ? "Cancel" : addLabel}
-        </PrimaryButton>
+        {addSlot || (
+          <PrimaryButton onClick={onToggleAdd}>
+            {adding ? "Cancel" : addLabel}
+          </PrimaryButton>
+        )}
       </div>
 
       <div className="flex flex-col gap-3">

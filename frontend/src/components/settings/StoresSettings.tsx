@@ -18,7 +18,7 @@ import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, SelectInput } from "./FormField";
 import { StoreParamsForm } from "./StoreParamsForm";
-import { PrimaryButton } from "./Buttons";
+import { PrimaryButton, GhostButton } from "./Buttons";
 import { Checkbox } from "./Checkbox";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Job } from "../../api/gen/gastrolog/v1/job_pb";
@@ -95,6 +95,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
 
   const [expanded, setExpanded] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [typeConfirmed, setTypeConfirmed] = useState(false);
   const [cloneTarget, setCloneTarget] = useState<
     Record<string, { name: string; dir: string }>
   >({});
@@ -209,6 +210,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
       });
       addToast(`Store "${newName.trim()}" created`, "info");
       setAdding(false);
+      setTypeConfirmed(false);
       setNewName("");
       setNewType("memory");
       setNewFilter("");
@@ -225,40 +227,71 @@ export function StoresSettings({ dark }: { dark: boolean }) {
       title="Stores"
       addLabel="Add Store"
       adding={adding}
-      onToggleAdd={() => setAdding(!adding)}
+      onToggleAdd={() => {
+        setAdding(!adding);
+        setTypeConfirmed(false);
+        setNewName("");
+        setNewType("memory");
+        setNewFilter("");
+        setNewPolicy("");
+        setNewRetention("");
+        setNewParams({});
+      }}
       isLoading={isLoading}
       isEmpty={stores.length === 0}
       emptyMessage='No stores configured. Click "Add Store" to create one.'
       dark={dark}
+      addSlot={
+        adding && !typeConfirmed ? (
+          <div className="flex items-center gap-1.5">
+            {[
+              { value: "memory", label: "memory" },
+              { value: "file", label: "file" },
+            ].map((t) => (
+              <button
+                key={t.value}
+                type="button"
+                onClick={() => {
+                  setNewType(t.value);
+                  setTypeConfirmed(true);
+                }}
+                className={`px-3 py-1.5 text-[0.8em] font-mono rounded border transition-colors ${c(
+                  "border-ink-border-subtle text-text-secondary hover:border-copper hover:text-copper",
+                  "border-light-border-subtle text-light-text-secondary hover:border-copper hover:text-copper",
+                )}`}
+              >
+                {t.label}
+              </button>
+            ))}
+            <GhostButton
+              onClick={() => setAdding(false)}
+              dark={dark}
+            >
+              Cancel
+            </GhostButton>
+          </div>
+        ) : undefined
+      }
     >
-      {adding && (
+      {adding && typeConfirmed && (
         <AddFormCard
           dark={dark}
-          onCancel={() => setAdding(false)}
+          onCancel={() => {
+            setAdding(false);
+            setTypeConfirmed(false);
+          }}
           onCreate={handleCreate}
           isPending={putStore.isPending}
+          typeBadge={newType}
         >
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="Name" dark={dark}>
-              <TextInput
-                value={newName}
-                onChange={setNewName}
-                placeholder="my-store"
-                dark={dark}
-              />
-            </FormField>
-            <FormField label="Type" dark={dark}>
-              <SelectInput
-                value={newType}
-                onChange={setNewType}
-                options={[
-                  { value: "memory", label: "memory" },
-                  { value: "file", label: "file" },
-                ]}
-                dark={dark}
-              />
-            </FormField>
-          </div>
+          <FormField label="Name" dark={dark}>
+            <TextInput
+              value={newName}
+              onChange={setNewName}
+              placeholder="my-store"
+              dark={dark}
+            />
+          </FormField>
           <div className="grid grid-cols-3 gap-3">
             <FormField label="Filter" dark={dark}>
               <SelectInput
