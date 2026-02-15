@@ -26,7 +26,4 @@ alias run := run-sqlite
 pprof:
   go run ./cmd/gastrolog -pprof localhost:6060
 
-# Runs the gastrolog backend with REPL.
-repl:
-  go run ./cmd/gastrolog -repl
 

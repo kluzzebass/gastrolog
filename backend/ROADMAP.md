@@ -2,14 +2,13 @@
 
 ## Current State
 
-Go 1.25+ backend with Connect RPC server, interactive REPL, chunk-based storage, and multi-index query engine. Single binary with server, REPL, and embedded modes.
+Go 1.25+ backend with Connect RPC server, chunk-based storage, and multi-index query engine.
 
 ### What's Done
 
 - **Core**: Chunk-based storage (file + memory), orchestrator with store filters and seal detection
 - **Indexing**: Token, attribute, and KV indexes with budget control and callgroup deduplication
 - **Query**: Boolean expressions, time bounds, pagination, context windows, explain plans, multi-store search
-- **REPL**: 12 commands, bubbletea pager, live follow mode, vim-style navigation, multi-store support
 - **Ingesters**: Chatterbox (test, 6 formats with SourceTS), HTTP/Loki (Push API), Syslog (RFC 3164/5424, UDP+TCP)
 - **Ingester identity**: Each ingester stamps `ingester_type` and `ingester_id` on every message via factory-provided ID
 - **Server**: Connect RPC with 4 services, h2c, graceful shutdown with drain, k8s probes
@@ -85,7 +84,7 @@ Go 1.25+ backend with Connect RPC server, interactive REPL, chunk-based storage,
 
 ### 6.1 Authentication
 - [ ] mTLS for gastrolog-to-gastrolog communication
-- [ ] API tokens for REPL/CLI access
+- [ ] API tokens for programmatic access
 
 ### 6.2 Authorization
 - [ ] Store-level read/write permissions

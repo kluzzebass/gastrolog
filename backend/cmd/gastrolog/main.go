@@ -45,7 +45,6 @@ import (
 	ingesttail "gastrolog/internal/ingester/tail"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
-	"gastrolog/internal/repl"
 	"gastrolog/internal/server"
 )
 
@@ -54,21 +53,14 @@ func main() {
 	configType := flag.String("config-type", "sqlite", "config store type: sqlite, json, or memory")
 	pprofAddr := flag.String("pprof", "", "pprof HTTP server address (e.g. localhost:6060)")
 	serverAddr := flag.String("server", ":4564", "Connect RPC server address (empty to disable)")
-	replMode := flag.Bool("repl", false, "start interactive REPL after system is running")
 	flag.Parse()
 
-	// Create base logger. In REPL mode, use discard logger to avoid interfering
-	// with readline. Otherwise use ComponentFilterHandler for dynamic log level control.
-	var logger *slog.Logger
-	if *replMode {
-		logger = logging.Discard()
-	} else {
-		baseHandler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-			Level: slog.LevelDebug, // Allow all levels; filtering done by ComponentFilterHandler
-		})
-		filterHandler := logging.NewComponentFilterHandler(baseHandler, slog.LevelInfo)
-		logger = slog.New(filterHandler)
-	}
+	// Create base logger with ComponentFilterHandler for dynamic log level control.
+	baseHandler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelDebug, // Allow all levels; filtering done by ComponentFilterHandler
+	})
+	filterHandler := logging.NewComponentFilterHandler(baseHandler, slog.LevelInfo)
+	logger := slog.New(filterHandler)
 
 	if *pprofAddr != "" {
 		go func() {
@@ -82,13 +74,13 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	if err := run(ctx, logger, *datadirFlag, *configType, *serverAddr, *replMode); err != nil {
+	if err := run(ctx, logger, *datadirFlag, *configType, *serverAddr); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, logger *slog.Logger, datadirFlag, configType, serverAddr string, replMode bool) error {
+func run(ctx context.Context, logger *slog.Logger, datadirFlag, configType, serverAddr string) error {
 	// Resolve data directory.
 	dd, err := resolveDataDir(datadirFlag)
 	if err != nil {
@@ -213,18 +205,8 @@ func run(ctx context.Context, logger *slog.Logger, datadirFlag, configType, serv
 		})
 	}
 
-	if replMode {
-		// Run REPL in foreground using embedded gRPC client.
-		// This uses an in-memory transport so the REPL talks gRPC
-		// just like a remote client, but without network overhead.
-		r := repl.New(repl.NewEmbeddedClient(orch))
-		if err := r.Run(); err != nil && err != context.Canceled {
-			logger.Error("repl error", "error", err)
-		}
-	} else {
-		// Wait for shutdown signal.
-		<-ctx.Done()
-	}
+	// Wait for shutdown signal.
+	<-ctx.Done()
 
 	// Stop the server first.
 	if srv != nil {
