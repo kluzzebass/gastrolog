@@ -48,21 +48,6 @@ type Factories struct {
 // ApplyConfig creates and registers components based on the provided configuration.
 // It uses the factory maps to look up the appropriate factory for each component type.
 //
-// For each store in the config:
-//   - Creates a ChunkManager using the matching factory
-//   - Creates an IndexManager using the matching factory (same type as ChunkManager)
-//   - Creates a QueryEngine wiring the ChunkManager and IndexManager
-//   - Registers all three under the store's ID
-//
-// For each ingester in the config:
-//   - Creates a Ingester using the matching factory
-//   - Registers it under the ingester's ID
-//
-// Returns an error if:
-//   - A required factory is not found for a given type
-//   - A factory returns an error during construction
-//   - Duplicate IDs are encountered
-//
 // Atomicity: ApplyConfig is NOT atomic. On error, some components may have
 // been constructed and registered while others were not. Callers must discard
 // the orchestrator on error and create a fresh one. Do not attempt to recover
@@ -72,11 +57,23 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 		return nil
 	}
 
-	// Track IDs to detect duplicates.
-	storeIDs := make(map[uuid.UUID]bool)
-	ingesterIDs := make(map[uuid.UUID]bool)
+	if err := o.applyStores(cfg, factories); err != nil {
+		return err
+	}
+	if err := o.applyRetention(cfg); err != nil {
+		return err
+	}
+	if err := o.applyIngesters(cfg, factories); err != nil {
+		return err
+	}
 
-	// Compile filters and create stores (chunk manager + index manager + query engine).
+	return nil
+}
+
+// applyStores creates chunk/index/query managers for each store in the config,
+// compiles filters, applies rotation policies, and registers stores.
+func (o *Orchestrator) applyStores(cfg *config.Config, factories Factories) error {
+	storeIDs := make(map[uuid.UUID]bool)
 	var compiledFilters []*CompiledFilter
 
 	for _, storeCfg := range cfg.Stores {
@@ -121,23 +118,8 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 
 		// Apply rotation policy if specified.
 		if storeCfg.Policy != nil {
-			policyCfg := findRotationPolicy(cfg.RotationPolicies, *storeCfg.Policy)
-			if policyCfg == nil {
-				return fmt.Errorf("store %s references unknown policy: %s", storeCfg.ID, *storeCfg.Policy)
-			}
-			policy, err := policyCfg.ToRotationPolicy()
-			if err != nil {
-				return fmt.Errorf("invalid policy %s for store %s: %w", *storeCfg.Policy, storeCfg.ID, err)
-			}
-			if policy != nil {
-				cm.SetRotationPolicy(policy)
-			}
-
-			// Set up cron rotation if configured.
-			if policyCfg.Cron != nil && *policyCfg.Cron != "" {
-				if err := o.cronRotation.addJob(storeCfg.ID, storeCfg.Name, *policyCfg.Cron, cm); err != nil {
-					return fmt.Errorf("cron rotation for store %s: %w", storeCfg.ID, err)
-				}
+			if err := o.applyRotationPolicy(cfg, storeCfg, cm); err != nil {
+				return err
 			}
 		}
 
@@ -175,47 +157,80 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 		o.SetFilterSet(NewFilterSet(compiledFilters))
 	}
 
-	// Set up retention jobs for stores with retention policies.
+	return nil
+}
+
+// applyRotationPolicy resolves and applies a rotation policy (and optional cron schedule)
+// to a chunk manager.
+func (o *Orchestrator) applyRotationPolicy(cfg *config.Config, storeCfg config.StoreConfig, cm chunk.ChunkManager) error {
+	policyCfg := findRotationPolicy(cfg.RotationPolicies, *storeCfg.Policy)
+	if policyCfg == nil {
+		return fmt.Errorf("store %s references unknown policy: %s", storeCfg.ID, *storeCfg.Policy)
+	}
+	policy, err := policyCfg.ToRotationPolicy()
+	if err != nil {
+		return fmt.Errorf("invalid policy %s for store %s: %w", *storeCfg.Policy, storeCfg.ID, err)
+	}
+	if policy != nil {
+		cm.SetRotationPolicy(policy)
+	}
+
+	// Set up cron rotation if configured.
+	if policyCfg.Cron != nil && *policyCfg.Cron != "" {
+		if err := o.cronRotation.addJob(storeCfg.ID, storeCfg.Name, *policyCfg.Cron, cm); err != nil {
+			return fmt.Errorf("cron rotation for store %s: %w", storeCfg.ID, err)
+		}
+	}
+
+	return nil
+}
+
+// applyRetention sets up retention jobs for stores that reference retention policies.
+func (o *Orchestrator) applyRetention(cfg *config.Config) error {
 	for _, storeCfg := range cfg.Stores {
+		if storeCfg.Retention == nil {
+			continue
+		}
+
 		store := o.stores[storeCfg.ID]
 		if store == nil {
 			continue
 		}
-		cm := store.Chunks
-		im := store.Indexes
 
-		var policy chunk.RetentionPolicy
-
-		if storeCfg.Retention != nil {
-			retCfg := findRetentionPolicy(cfg.RetentionPolicies, *storeCfg.Retention)
-			if retCfg == nil {
-				return fmt.Errorf("store %s references unknown retention policy: %s", storeCfg.ID, *storeCfg.Retention)
-			}
-			p, err := retCfg.ToRetentionPolicy()
-			if err != nil {
-				return fmt.Errorf("invalid retention policy %s for store %s: %w", *storeCfg.Retention, storeCfg.ID, err)
-			}
-			policy = p
+		retCfg := findRetentionPolicy(cfg.RetentionPolicies, *storeCfg.Retention)
+		if retCfg == nil {
+			return fmt.Errorf("store %s references unknown retention policy: %s", storeCfg.ID, *storeCfg.Retention)
+		}
+		policy, err := retCfg.ToRetentionPolicy()
+		if err != nil {
+			return fmt.Errorf("invalid retention policy %s for store %s: %w", *storeCfg.Retention, storeCfg.ID, err)
+		}
+		if policy == nil {
+			continue
 		}
 
-		if policy != nil {
-			runner := &retentionRunner{
-				storeID: storeCfg.ID,
-				cm:      cm,
-				im:      im,
-				policy:  policy,
-				now:     o.now,
-				logger:  o.logger,
-			}
-			o.retention[storeCfg.ID] = runner
-			if err := o.scheduler.AddJob(retentionJobName(storeCfg.ID), defaultRetentionSchedule, runner.sweep); err != nil {
-				return fmt.Errorf("retention job for store %s: %w", storeCfg.ID, err)
-			}
-			o.scheduler.Describe(retentionJobName(storeCfg.ID), fmt.Sprintf("Delete expired chunks from '%s'", storeCfg.Name))
+		runner := &retentionRunner{
+			storeID: storeCfg.ID,
+			cm:      store.Chunks,
+			im:      store.Indexes,
+			policy:  policy,
+			now:     o.now,
+			logger:  o.logger,
 		}
+		o.retention[storeCfg.ID] = runner
+		if err := o.scheduler.AddJob(retentionJobName(storeCfg.ID), defaultRetentionSchedule, runner.sweep); err != nil {
+			return fmt.Errorf("retention job for store %s: %w", storeCfg.ID, err)
+		}
+		o.scheduler.Describe(retentionJobName(storeCfg.ID), fmt.Sprintf("Delete expired chunks from '%s'", storeCfg.Name))
 	}
 
-	// Create ingesters.
+	return nil
+}
+
+// applyIngesters creates and registers ingesters from the config.
+func (o *Orchestrator) applyIngesters(cfg *config.Config, factories Factories) error {
+	ingesterIDs := make(map[uuid.UUID]bool)
+
 	for _, recvCfg := range cfg.Ingesters {
 		if ingesterIDs[recvCfg.ID] {
 			return fmt.Errorf("duplicate ingester ID: %s", recvCfg.ID)
