@@ -50,7 +50,12 @@ export function HelpDialog({ dark, topicId, onClose }: HelpDialogProps) {
         </nav>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto app-scroll p-6">
+        <div className="flex-1 overflow-y-auto app-scroll p-6 pt-10">
+          <h2
+            className={`font-display text-[1.4em] font-semibold mb-4 ${c("text-text-bright", "text-light-text-bright")}`}
+          >
+            Help
+          </h2>
           {topic ? (
             <Markdown components={markdownComponents(c)}>
               {topic.content}

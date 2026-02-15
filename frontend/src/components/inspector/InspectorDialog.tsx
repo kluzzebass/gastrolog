@@ -1,5 +1,5 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { Dialog, DialogTabHeader } from "../Dialog";
+import { Dialog } from "../Dialog";
 import { StoresIcon, IngestersIcon, JobsIcon, MetricsIcon } from "../icons";
 import { StoresPanel } from "./StoresPanel";
 import { IngestersPanel } from "./IngestersPanel";
@@ -33,24 +33,54 @@ export function InspectorDialog({
   onTabChange,
   onClose,
 }: InspectorDialogProps) {
+  const c = useThemeClass(dark);
+
   return (
     <Dialog onClose={onClose} ariaLabel="Inspector" dark={dark}>
-      <DialogTabHeader
-        title="Inspector"
-        tabs={allTabs}
-        activeTab={tab}
-        onTabChange={(t) => onTabChange(t as InspectorTab)}
-        onClose={onClose}
-        dark={dark}
-      />
+      <div className="flex h-full overflow-hidden">
+        <nav
+          className={`w-48 shrink-0 border-r overflow-y-auto app-scroll p-3 ${c("border-ink-border", "border-light-border")}`}
+        >
+          <h2
+            className={`text-[0.75em] uppercase tracking-wider font-medium mb-3 px-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
+          >
+            Inspector
+          </h2>
+          {allTabs.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => onTabChange(id)}
+              className={`flex items-center gap-2 w-full text-left px-2 py-1.5 rounded text-[0.85em] transition-colors mb-0.5 ${
+                tab === id
+                  ? "bg-copper/15 text-copper font-medium"
+                  : c(
+                      "text-text-muted hover:text-text-bright hover:bg-ink-hover",
+                      "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
+                    )
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5 shrink-0" />
+              {label}
+            </button>
+          ))}
+        </nav>
 
-      <div className="flex-1 overflow-y-auto p-5">
-        {tab === "stores" && <StoresPanel dark={dark} />}
-        {tab === "ingesters" && <IngestersPanel dark={dark} />}
-        {tab === "jobs" && <JobsPanel dark={dark} />}
-        {tab !== "stores" && tab !== "ingesters" && tab !== "jobs" && (
-          <Placeholder tab={tab} dark={dark} />
-        )}
+        <div className="flex-1 overflow-y-auto app-scroll p-5 pt-10">
+          {tab === "stores" && <StoresPanel dark={dark} />}
+          {tab === "ingesters" && <IngestersPanel dark={dark} />}
+          {tab === "jobs" && <JobsPanel dark={dark} />}
+          {tab !== "stores" && tab !== "ingesters" && tab !== "jobs" && (
+            <Placeholder tab={tab} dark={dark} />
+          )}
+        </div>
+
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          className={`absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded text-lg leading-none transition-colors ${c("text-text-muted hover:text-text-bright", "text-light-text-muted hover:text-light-text-bright")}`}
+        >
+          &times;
+        </button>
       </div>
     </Dialog>
   );

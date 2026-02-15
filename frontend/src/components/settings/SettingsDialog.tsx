@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { Dialog, DialogTabHeader } from "../Dialog";
+import { Dialog } from "../Dialog";
 import {
   EyeIcon,
   EyeOffIcon,
@@ -74,6 +74,7 @@ export function SettingsDialog({
   onClose,
   isAdmin,
 }: SettingsDialogProps) {
+  const c = useThemeClass(dark);
   const tabs = useMemo(
     () => allTabs.filter((t) => !t.adminOnly || isAdmin),
     [isAdmin],
@@ -81,24 +82,52 @@ export function SettingsDialog({
 
   return (
     <Dialog onClose={onClose} ariaLabel="Settings" dark={dark}>
-      <DialogTabHeader
-        title="Settings"
-        tabs={tabs}
-        activeTab={tab}
-        onTabChange={(t) => onTabChange(t as SettingsTab)}
-        onClose={onClose}
-        dark={dark}
-      />
+      <div className="flex h-full overflow-hidden">
+        <nav
+          className={`w-48 shrink-0 border-r overflow-y-auto app-scroll p-3 ${c("border-ink-border", "border-light-border")}`}
+        >
+          <h2
+            className={`text-[0.75em] uppercase tracking-wider font-medium mb-3 px-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
+          >
+            Settings
+          </h2>
+          {tabs.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => onTabChange(id)}
+              className={`flex items-center gap-2 w-full text-left px-2 py-1.5 rounded text-[0.85em] transition-colors mb-0.5 ${
+                tab === id
+                  ? "bg-copper/15 text-copper font-medium"
+                  : c(
+                      "text-text-muted hover:text-text-bright hover:bg-ink-hover",
+                      "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
+                    )
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5 shrink-0" />
+              {label}
+            </button>
+          ))}
+        </nav>
 
-      <div className="flex-1 overflow-y-auto app-scroll p-5">
-        {tab === "service" && <ServiceSettings dark={dark} />}
-        {tab === "certificates" && <CertificatesSettings dark={dark} />}
-        {tab === "users" && <UsersSettings dark={dark} />}
-        {tab === "ingesters" && <IngestersSettings dark={dark} />}
-        {tab === "filters" && <FiltersSettings dark={dark} />}
-        {tab === "policies" && <PoliciesSettings dark={dark} />}
-        {tab === "retention" && <RetentionPoliciesSettings dark={dark} />}
-        {tab === "stores" && <StoresSettings dark={dark} />}
+        <div className="flex-1 overflow-y-auto app-scroll p-5 pt-10">
+          {tab === "service" && <ServiceSettings dark={dark} />}
+          {tab === "certificates" && <CertificatesSettings dark={dark} />}
+          {tab === "users" && <UsersSettings dark={dark} />}
+          {tab === "ingesters" && <IngestersSettings dark={dark} />}
+          {tab === "filters" && <FiltersSettings dark={dark} />}
+          {tab === "policies" && <PoliciesSettings dark={dark} />}
+          {tab === "retention" && <RetentionPoliciesSettings dark={dark} />}
+          {tab === "stores" && <StoresSettings dark={dark} />}
+        </div>
+
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          className={`absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded text-lg leading-none transition-colors ${c("text-text-muted hover:text-text-bright", "text-light-text-muted hover:text-light-text-bright")}`}
+        >
+          &times;
+        </button>
       </div>
     </Dialog>
   );
