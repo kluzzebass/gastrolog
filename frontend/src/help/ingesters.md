@@ -51,7 +51,16 @@ Accepts log pushes via the Loki HTTP API. Compatible with Promtail, Grafana Agen
 
 **Endpoints**: `POST /loki/api/v1/push` and `POST /api/prom/push` (legacy)
 
-Supports gzip-compressed request bodies. Labels from the Loki push request are converted to record attributes (validated: max 32 attributes, keys up to 64 chars, values up to 256 chars). Structured metadata from the third element of value arrays is also extracted.
+Supports gzip-compressed request bodies.
+
+**Attributes set:**
+
+| Attribute | Source |
+|-----------|--------|
+| *(stream labels)* | All labels from the Loki push request's `stream` field become attributes (e.g., `job`, `env`, `host`) |
+| *(structured metadata)* | Key-value pairs from the third element of value arrays, if present |
+
+Labels are validated: max 32 attributes per message, keys up to 64 characters, values up to 256 characters.
 
 By default, the HTTP ingester returns `204 No Content` immediately (fire-and-forget). Clients can send `X-Wait-Ack: true` to wait for the record to be persisted before receiving the response.
 
@@ -65,7 +74,21 @@ Receives messages via the Reliable Event Logging Protocol. RELP provides transac
 |-------|-------------|---------|
 | `addr` | Listen address | `:2514` |
 
-RELP messages are parsed as syslog, so the same attributes as the Syslog ingester are extracted (facility, severity, hostname, app_name, etc.). Acknowledgement is sent only after the record is written to the chunk store, providing an end-to-end delivery guarantee.
+RELP messages are parsed as syslog. Acknowledgement is sent only after the record is written to the chunk store, providing an end-to-end delivery guarantee.
+
+**Attributes set:**
+
+| Attribute | Source |
+|-----------|--------|
+| `remote_ip` | Sender's IP address |
+| `facility` | Numeric facility code (0-23) from syslog priority |
+| `facility_name` | Human-readable facility name |
+| `severity` | Numeric severity (0-7) from syslog priority |
+| `severity_name` | Human-readable severity name |
+| `hostname` | From syslog header |
+| `app_name` | Application/program name |
+| `proc_id` | Process ID |
+| `msg_id` | Message ID (RFC 5424 only) |
 
 ## Tail
 
@@ -136,7 +159,20 @@ Test ingester that generates random log messages in various formats. Useful for 
 
 **Supported formats**: plain, kv, json, access, syslog, weird, multirecord
 
-Each format generates different attribute patterns. Common attributes include `service`, `host`, and `env`. The syslog and access formats also set SourceTS. The weird format generates intentionally malformed data for stress testing.
+**Attributes set (vary by format):**
+
+| Attribute | Formats | Source |
+|-----------|---------|--------|
+| `service` | All | Randomly selected service name |
+| `host` | All | Randomly selected hostname |
+| `env` | kv, json | Environment: prod, staging, dev, test |
+| `facility` | syslog | Syslog facility name |
+| `vhost` | access | Virtual host for access log entries |
+| `format` | multirecord | Sub-format: stack, help |
+| `language` | multirecord | go, java, python |
+| `command` | multirecord | kubectl, docker, etc. |
+
+The syslog, json, and access formats set SourceTS. The weird format generates intentionally malformed and binary data for stress testing parsers.
 
 ## Routing
 
