@@ -84,7 +84,7 @@ func TestREPL_Query(t *testing.T) {
 	attrsWeb := chunk.Attributes{"service": "web"}
 
 	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		rec := chunk.Record{
 			IngestTS: baseTime.Add(time.Duration(i) * time.Second),
 			Attrs:    attrsApi,
@@ -94,7 +94,7 @@ func TestREPL_Query(t *testing.T) {
 			t.Fatalf("append: %v", err)
 		}
 	}
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		rec := chunk.Record{
 			IngestTS: baseTime.Add(time.Duration(i) * time.Second),
 			Attrs:    attrsWeb,
@@ -173,7 +173,7 @@ func TestREPL_NextAndReset(t *testing.T) {
 	// Ingest 25 records.
 	attrs := chunk.Attributes{"service": "api"}
 	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	for i := 0; i < 25; i++ {
+	for i := range 25 {
 		rec := chunk.Record{
 			IngestTS: baseTime.Add(time.Duration(i) * time.Second),
 			Attrs:    attrs,

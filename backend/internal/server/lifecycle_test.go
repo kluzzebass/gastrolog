@@ -39,7 +39,7 @@ func TestDrainWaitsForInFlightRequests(t *testing.T) {
 
 	// Add some records
 	t0 := time.Now()
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		cm.Append(chunk.Record{
 			IngestTS: t0.Add(time.Duration(i) * time.Second),
 			Raw:      []byte("test-record"),
@@ -66,9 +66,7 @@ func TestDrainWaitsForInFlightRequests(t *testing.T) {
 	var searchStarted atomic.Bool
 	var searchDone atomic.Bool
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		stream, err := queryClient.Search(context.Background(), connect.NewRequest(&gastrologv1.SearchRequest{
 			Query: &gastrologv1.Query{},
 		}))
@@ -82,7 +80,7 @@ func TestDrainWaitsForInFlightRequests(t *testing.T) {
 			time.Sleep(50 * time.Millisecond)
 		}
 		searchDone.Store(true)
-	}()
+	})
 
 	// Wait for search to start
 	for !searchStarted.Load() {
@@ -137,7 +135,7 @@ func TestDrainRejectsNewRequests(t *testing.T) {
 
 	// Add some records
 	t0 := time.Now()
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		cm.Append(chunk.Record{
 			IngestTS: t0.Add(time.Duration(i) * time.Second),
 			Raw:      []byte("test-record"),

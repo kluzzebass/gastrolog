@@ -26,7 +26,7 @@ import (
 type fakeDockerClient struct {
 	mu         sync.Mutex
 	containers []containerInfo
-	logStreams  map[string]*fakeLogStream // container ID -> stream
+	logStreams map[string]*fakeLogStream // container ID -> stream
 	events     chan containerEvent
 	inspectErr error
 	listErr    error
@@ -40,7 +40,7 @@ type fakeLogStream struct {
 func newFakeClient() *fakeDockerClient {
 	return &fakeDockerClient{
 		logStreams: make(map[string]*fakeLogStream),
-		events:    make(chan containerEvent, 10),
+		events:     make(chan containerEvent, 10),
 	}
 }
 
@@ -391,8 +391,7 @@ func TestContainerStopEvent(t *testing.T) {
 	}
 	ing := newIngesterWithClient(cfg, client)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	out := make(chan orchestrator.IngestMessage, 10)
 
 	go func() {

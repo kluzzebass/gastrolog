@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -32,8 +33,8 @@ func TestUpdateFilters(t *testing.T) {
 			{ID: catchAllFilterID, Expression: "*"},
 		},
 		Stores: []config.StoreConfig{
-			{ID: stores.prod, Filter: config.UUIDPtr(prodFilterID)},
-			{ID: stores.archive, Filter: config.UUIDPtr(catchAllFilterID)},
+			{ID: stores.prod, Filter: new(prodFilterID)},
+			{ID: stores.archive, Filter: new(catchAllFilterID)},
 		},
 	}
 	if err := orch.UpdateFilters(cfg); err != nil {
@@ -64,8 +65,8 @@ func TestUpdateFilters(t *testing.T) {
 			{ID: catchAllFilterID, Expression: "*"},
 		},
 		Stores: []config.StoreConfig{
-			{ID: stores.prod, Filter: config.UUIDPtr(prodFilterID)},
-			{ID: stores.archive, Filter: config.UUIDPtr(catchAllFilterID)},
+			{ID: stores.prod, Filter: new(prodFilterID)},
+			{ID: stores.archive, Filter: new(catchAllFilterID)},
 		},
 	}
 	if err := orch.UpdateFilters(cfg2); err != nil {
@@ -101,7 +102,7 @@ func TestUpdateFiltersInvalidExpression(t *testing.T) {
 			{ID: invalidFilterID, Expression: "(unclosed"},
 		},
 		Stores: []config.StoreConfig{
-			{ID: stores.prod, Filter: config.UUIDPtr(invalidFilterID)},
+			{ID: stores.prod, Filter: new(invalidFilterID)},
 		},
 	}
 	err := orch.UpdateFilters(cfg)
@@ -124,8 +125,8 @@ func TestUpdateFiltersIgnoresUnknownStores(t *testing.T) {
 			{ID: catchAllFilterID, Expression: "*"},
 		},
 		Stores: []config.StoreConfig{
-			{ID: stores.prod, Filter: config.UUIDPtr(prodFilterID)},
-			{ID: nonexistentStoreID, Filter: config.UUIDPtr(catchAllFilterID)},
+			{ID: stores.prod, Filter: new(prodFilterID)},
+			{ID: nonexistentStoreID, Filter: new(catchAllFilterID)},
 		},
 	}
 	if err := orch.UpdateFilters(cfg); err != nil {
@@ -157,7 +158,7 @@ func TestAddStore(t *testing.T) {
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
-		Filter: config.UUIDPtr(filterID),
+		Filter: new(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
@@ -209,7 +210,7 @@ func TestAddStoreDuplicate(t *testing.T) {
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
-		Filter: config.UUIDPtr(filterID),
+		Filter: new(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
@@ -247,7 +248,7 @@ func TestRemoveStoreEmpty(t *testing.T) {
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
-		Filter: config.UUIDPtr(filterID),
+		Filter: new(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
@@ -289,7 +290,7 @@ func TestRemoveStoreNotEmpty(t *testing.T) {
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
-		Filter: config.UUIDPtr(filterID),
+		Filter: new(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
@@ -346,7 +347,7 @@ func TestForceRemoveStore(t *testing.T) {
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
-		Filter: config.UUIDPtr(filterID),
+		Filter: new(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
@@ -357,7 +358,7 @@ func TestForceRemoveStore(t *testing.T) {
 	cm := orch.ChunkManager(storeID)
 	cm.SetRotationPolicy(chunk.NewRecordCountPolicy(3))
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		rec := chunk.Record{
 			IngestTS: time.Now(),
 			Attrs:    chunk.Attributes{},
@@ -426,7 +427,7 @@ func TestForceRemoveEmptyStore(t *testing.T) {
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
-		Filter: config.UUIDPtr(filterID),
+		Filter: new(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
@@ -494,13 +495,7 @@ func TestAddIngesterWhileRunning(t *testing.T) {
 
 	// Verify message was received.
 	msgs := getRecordMessages(t, cm)
-	found := false
-	for _, msg := range msgs {
-		if msg == "dynamic message" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(msgs, "dynamic message")
 	if !found {
 		t.Error("dynamic message not found")
 	}
@@ -624,7 +619,7 @@ func TestStoreConfig(t *testing.T) {
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
-		Filter: config.UUIDPtr(filterID),
+		Filter: new(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
@@ -730,7 +725,7 @@ func TestSetRotationPolicyDirectly(t *testing.T) {
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
-		Filter: config.UUIDPtr(filterID),
+		Filter: new(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
@@ -742,7 +737,7 @@ func TestSetRotationPolicyDirectly(t *testing.T) {
 	cm.SetRotationPolicy(chunk.NewRecordCountPolicy(3))
 
 	// Ingest 10 records - should trigger multiple rotations with limit of 3.
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		rec := chunk.Record{
 			IngestTS: time.Now(),
 			Attrs:    chunk.Attributes{},
@@ -787,7 +782,7 @@ func TestPauseStore(t *testing.T) {
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
-		Filter: config.UUIDPtr(filterID),
+		Filter: new(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
@@ -856,7 +851,7 @@ func TestResumeStore(t *testing.T) {
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
-		Filter: config.UUIDPtr(filterID),
+		Filter: new(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
@@ -925,7 +920,7 @@ func TestDisableDoesNotAffectQuery(t *testing.T) {
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
-		Filter: config.UUIDPtr(filterID),
+		Filter: new(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {
@@ -933,7 +928,7 @@ func TestDisableDoesNotAffectQuery(t *testing.T) {
 	}
 
 	// Ingest data, then pause.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		if err := orch.Ingest(chunk.Record{
 			IngestTS: time.Now(),
 			Raw:      []byte("test message"),
@@ -997,7 +992,7 @@ func TestUpdateStoreFilterInvalid(t *testing.T) {
 	storeCfg := config.StoreConfig{
 		ID:     storeID,
 		Type:   "memory",
-		Filter: config.UUIDPtr(filterID),
+		Filter: new(filterID),
 	}
 
 	if err := orch.AddStore(storeCfg, cfg, factories); err != nil {

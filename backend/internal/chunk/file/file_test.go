@@ -379,7 +379,7 @@ func TestManagerReload(t *testing.T) {
 			t.Fatalf("NewManager: %v", err)
 		}
 
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			id, _, err := mgr.Append(chunk.Record{
 				IngestTS: time.UnixMicro(int64(i * 100)),
 				Attrs:    attrs,
@@ -455,7 +455,7 @@ func TestRotationOnMaxChunkBytes(t *testing.T) {
 	attrs := chunk.Attributes{"source": "test"}
 	var chunkIDs []chunk.ChunkID
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		id, _, err := mgr.Append(chunk.Record{
 			IngestTS: time.UnixMicro(int64(i * 100)),
 			Attrs:    attrs,
@@ -503,7 +503,7 @@ func TestCrashRecoveryTruncatesOrphanedRawData(t *testing.T) {
 		}
 
 		attrs := chunk.Attributes{"source": "test"}
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			id, _, err := mgr.Append(chunk.Record{
 				IngestTS: time.UnixMicro(int64(i * 100)),
 				Attrs:    attrs,
@@ -612,7 +612,7 @@ func TestFindStartPosition(t *testing.T) {
 	var chunkID chunk.ChunkID
 
 	// Append 10 records with timestamps 1 second apart
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		id, _, err := mgr.Append(chunk.Record{
 			IngestTS: baseTime.Add(time.Duration(i) * time.Second),
 			Attrs:    attrs,

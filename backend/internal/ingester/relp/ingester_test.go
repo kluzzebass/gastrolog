@@ -128,7 +128,7 @@ func TestRELPSession(t *testing.T) {
 
 	// Wait for listener to start.
 	var addr net.Addr
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		addr = ing.Addr()
 		if addr != nil {
 			break
@@ -223,7 +223,7 @@ func TestRELPMultipleMessages(t *testing.T) {
 
 	// Wait for listener.
 	var addr net.Addr
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		addr = ing.Addr()
 		if addr != nil {
 			break
@@ -287,7 +287,7 @@ func TestRELPConnectionClose(t *testing.T) {
 
 	// Wait for listener.
 	var addr net.Addr
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		addr = ing.Addr()
 		if addr != nil {
 			break

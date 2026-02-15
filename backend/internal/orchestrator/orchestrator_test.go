@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"context"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -155,7 +156,7 @@ func TestSealedChunkTriggersIndexBuild(t *testing.T) {
 	orch, _, tracker, _ := newTestSetup(2)
 
 	// Ingest 3 records to trigger seal (chunk fills at 2, third causes seal).
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		rec := chunk.Record{
 			IngestTS: t1.Add(time.Duration(i) * time.Second),
 			Attrs:    attrsA,
@@ -187,7 +188,7 @@ func TestIndexBuildTriggeredOncePerSeal(t *testing.T) {
 	orch, _, tracker, _ := newTestSetup(2)
 
 	// Ingest 3 records to trigger exactly one seal.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		rec := chunk.Record{
 			IngestTS: t1.Add(time.Duration(i) * time.Second),
 			Attrs:    attrsA,
@@ -885,7 +886,7 @@ func TestRebuildMissingIndexes(t *testing.T) {
 	})
 
 	// Append 3 records to seal the first chunk.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		cm.Append(chunk.Record{
 			IngestTS: t1.Add(time.Duration(i) * time.Second),
 			Attrs:    attrsA,
@@ -1140,13 +1141,7 @@ func TestRoutingIntegration(t *testing.T) {
 
 	for _, tc := range testCases {
 		for _, expectedStore := range tc.expected {
-			found := false
-			for _, msg := range storeMessages[expectedStore] {
-				if msg == tc.raw {
-					found = true
-					break
-				}
-			}
+			found := slices.Contains(storeMessages[expectedStore], tc.raw)
 			if !found {
 				t.Errorf("%s: expected message %q in store %s, but not found (store has: %v)",
 					tc.name, tc.raw, expectedStore, storeMessages[expectedStore])
@@ -1155,13 +1150,7 @@ func TestRoutingIntegration(t *testing.T) {
 
 		// Also verify message is NOT in stores not in expected list.
 		for storeID, msgs := range storeMessages {
-			isExpected := false
-			for _, exp := range tc.expected {
-				if exp == storeID {
-					isExpected = true
-					break
-				}
-			}
+			isExpected := slices.Contains(tc.expected, storeID)
 			if !isExpected {
 				for _, msg := range msgs {
 					if msg == tc.raw {
@@ -1307,13 +1296,7 @@ func TestRoutingComplexExpression(t *testing.T) {
 	prodMsgs := getRecordMessages(t, stores.cms[stores.prod])
 
 	for _, tc := range testCases {
-		found := false
-		for _, msg := range prodMsgs {
-			if msg == tc.raw {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(prodMsgs, tc.raw)
 		if found != tc.expectInProd {
 			t.Errorf("message %q: expectInProd=%v, found=%v", tc.raw, tc.expectInProd, found)
 		}

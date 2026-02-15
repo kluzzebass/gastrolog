@@ -72,7 +72,7 @@ func newStoreTestSetup(t *testing.T, recordCount int) storeTestClients {
 	im := indexmem.NewManager([]index.Indexer{tokIdx, attrIdx, kvIdx}, tokIdx, attrIdx, kvIdx, nil)
 
 	t0 := time.Now()
-	for i := 0; i < recordCount; i++ {
+	for i := range recordCount {
 		cm.Append(chunk.Record{
 			IngestTS: t0.Add(time.Duration(i) * time.Second),
 			Attrs:    chunk.Attributes{"env": "test"},
@@ -322,7 +322,7 @@ func newFullStoreTestSetup(t *testing.T, recordCount int) fullStoreTestClients {
 	// Ingest test data.
 	cm := orch.ChunkManager(defaultID)
 	t0 := time.Now()
-	for i := 0; i < recordCount; i++ {
+	for i := range recordCount {
 		cm.Append(chunk.Record{
 			IngestTS: t0.Add(time.Duration(i) * time.Second),
 			Attrs:    chunk.Attributes{"env": "test", "idx": string(rune('0' + i%10))},
@@ -352,7 +352,6 @@ func newFullStoreTestSetup(t *testing.T, recordCount int) fullStoreTestClients {
 		defaultID: defaultID,
 	}
 }
-
 
 func TestMigrateStore(t *testing.T) {
 	tc := newFullStoreTestSetup(t, 12)
@@ -669,7 +668,7 @@ func newTwoStoreTestSetup(t *testing.T) twoStoreTestClients {
 
 	// Ingest data into src.
 	t0 := time.Now()
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if err := orch.Ingest(chunk.Record{
 			IngestTS: t0.Add(time.Duration(i) * time.Second),
 			Raw:      []byte("merge-record"),
@@ -946,4 +945,3 @@ func TestMergeStoresAutoDisablesSource(t *testing.T) {
 		t.Error("expected source to be auto-disabled by MergeStores")
 	}
 }
-

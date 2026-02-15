@@ -68,10 +68,10 @@ func TestMultiStoreSearch(t *testing.T) {
 
 		// Add some records
 		t0 := time.Now()
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			cm.Append(chunk.Record{
 				IngestTS: t0.Add(time.Duration(i) * time.Second),
-				Raw:      []byte(fmt.Sprintf("store-%s-record-%d", storeID, i)),
+				Raw:      fmt.Appendf(nil, "store-%s-record-%d", storeID, i),
 			})
 		}
 		cm.Seal()
@@ -98,7 +98,7 @@ func TestMultiStoreSearch(t *testing.T) {
 		count++
 	}
 	t.Logf("Total: %d records", count)
-	
+
 	if count != 10 {
 		t.Errorf("expected 10 records, got %d", count)
 	}

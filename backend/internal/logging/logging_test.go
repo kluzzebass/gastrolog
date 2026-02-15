@@ -228,18 +228,18 @@ func TestComponentFilterHandler_Concurrent(t *testing.T) {
 	const iterations = 100
 
 	// Concurrent logging.
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		wg.Go(func() {
-			for j := 0; j < iterations; j++ {
+			for range iterations {
 				logger.Info("message", "component", "test")
 			}
 		})
 	}
 
 	// Concurrent level changes.
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		wg.Go(func() {
-			for j := 0; j < iterations; j++ {
+			for range iterations {
 				filter.SetLevel("test", slog.LevelDebug)
 				filter.ClearLevel("test")
 			}

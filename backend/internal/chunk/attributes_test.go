@@ -267,7 +267,7 @@ func TestAttributesMaxSize(t *testing.T) {
 func TestAttributesManyPairs(t *testing.T) {
 	// Test with many small key-value pairs
 	attrs := make(Attributes)
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		key := strings.Repeat("k", i%10+1)
 		// Use index in key to ensure uniqueness
 		key = key + string(rune('A'+i%26)) + string(rune('0'+i%10))
@@ -501,7 +501,7 @@ func BenchmarkAttributesDecode(b *testing.B) {
 
 func BenchmarkAttributesEncodeLarge(b *testing.B) {
 	attrs := make(Attributes)
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		key := strings.Repeat("key", 5) + string(rune('A'+i%26))
 		attrs[key] = strings.Repeat("value", 20)
 	}
@@ -514,7 +514,7 @@ func BenchmarkAttributesEncodeLarge(b *testing.B) {
 
 func BenchmarkAttributesDecodeLarge(b *testing.B) {
 	attrs := make(Attributes)
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		key := strings.Repeat("key", 5) + string(rune('A'+i%26))
 		attrs[key] = strings.Repeat("value", 20)
 	}

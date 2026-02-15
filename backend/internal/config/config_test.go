@@ -67,7 +67,7 @@ func TestRotationPolicyConfigToPolicy(t *testing.T) {
 	})
 
 	t.Run("maxBytes only", func(t *testing.T) {
-		cfg := RotationPolicyConfig{MaxBytes: StringPtr("64MB")}
+		cfg := RotationPolicyConfig{MaxBytes: new("64MB")}
 		policy, err := cfg.ToRotationPolicy()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -113,7 +113,7 @@ func TestRotationPolicyConfigToPolicy(t *testing.T) {
 
 	t.Run("composite", func(t *testing.T) {
 		cfg := RotationPolicyConfig{
-			MaxBytes:   StringPtr("1MB"),
+			MaxBytes:   new("1MB"),
 			MaxRecords: Int64Ptr(100),
 		}
 		policy, err := cfg.ToRotationPolicy()
@@ -146,7 +146,7 @@ func TestRotationPolicyConfigToPolicy(t *testing.T) {
 	})
 
 	t.Run("invalid maxBytes", func(t *testing.T) {
-		cfg := RotationPolicyConfig{MaxBytes: StringPtr("invalid")}
+		cfg := RotationPolicyConfig{MaxBytes: new("invalid")}
 		_, err := cfg.ToRotationPolicy()
 		if err == nil {
 			t.Error("expected error for invalid maxBytes")
@@ -154,7 +154,7 @@ func TestRotationPolicyConfigToPolicy(t *testing.T) {
 	})
 
 	t.Run("invalid maxAge", func(t *testing.T) {
-		cfg := RotationPolicyConfig{MaxAge: StringPtr("invalid")}
+		cfg := RotationPolicyConfig{MaxAge: new("invalid")}
 		_, err := cfg.ToRotationPolicy()
 		if err == nil {
 			t.Error("expected error for invalid maxAge")
@@ -162,7 +162,7 @@ func TestRotationPolicyConfigToPolicy(t *testing.T) {
 	})
 
 	t.Run("negative maxAge", func(t *testing.T) {
-		cfg := RotationPolicyConfig{MaxAge: StringPtr("-1h")}
+		cfg := RotationPolicyConfig{MaxAge: new("-1h")}
 		_, err := cfg.ToRotationPolicy()
 		if err == nil {
 			t.Error("expected error for negative maxAge")

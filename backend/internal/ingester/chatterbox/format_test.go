@@ -22,7 +22,7 @@ func TestPlainTextFormat_Generate(t *testing.T) {
 	format := NewPlainTextFormat(pools)
 	rng := newTestRng()
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		raw, attrs, sourceTS := format.Generate(rng)
 		if len(raw) == 0 {
 			t.Errorf("iteration %d: raw is empty", i)
@@ -44,7 +44,7 @@ func TestKeyValueFormat_Generate(t *testing.T) {
 	format := NewKeyValueFormat(pools)
 	rng := newTestRng()
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		raw, attrs, sourceTS := format.Generate(rng)
 		if len(raw) == 0 {
 			t.Errorf("iteration %d: raw is empty", i)
@@ -78,7 +78,7 @@ func TestJSONFormat_Generate(t *testing.T) {
 	rng := newTestRng()
 
 	before := time.Now()
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		raw, attrs, sourceTS := format.Generate(rng)
 		if len(raw) == 0 {
 			t.Errorf("iteration %d: raw is empty", i)
@@ -116,7 +116,7 @@ func TestAccessLogFormat_Generate(t *testing.T) {
 	rng := newTestRng()
 
 	before := time.Now()
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		raw, attrs, sourceTS := format.Generate(rng)
 		if len(raw) == 0 {
 			t.Errorf("iteration %d: raw is empty", i)
@@ -150,7 +150,7 @@ func TestSyslogFormat_Generate(t *testing.T) {
 	rng := newTestRng()
 
 	before := time.Now()
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		raw, attrs, sourceTS := format.Generate(rng)
 		if len(raw) == 0 {
 			t.Errorf("iteration %d: raw is empty", i)
@@ -180,7 +180,7 @@ func TestWeirdFormat_Generate(t *testing.T) {
 	format := NewWeirdFormat(pools)
 	rng := newTestRng()
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		raw, attrs, sourceTS := format.Generate(rng)
 		// Weird format may produce empty data in some cases, but attrs should always be set
 		if !sourceTS.IsZero() {
@@ -225,7 +225,7 @@ func TestFormat_AttributeVariation(t *testing.T) {
 	hosts := make(map[string]bool)
 	services := make(map[string]bool)
 
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		_, attrs, _ := format.Generate(rng)
 		hosts[attrs["host"]] = true
 		services[attrs["service"]] = true
@@ -279,7 +279,7 @@ func TestJSONFormat_AllVariants(t *testing.T) {
 		"trace_id":    false, // Distributed tracing
 	}
 
-	for i := 0; i < 500; i++ {
+	for i := range 500 {
 		rng := rand.New(rand.NewPCG(uint64(i), uint64(i+1)))
 		raw, _, _ := format.Generate(rng)
 
@@ -315,7 +315,7 @@ func TestKeyValueFormat_AllVariants(t *testing.T) {
 		"trace_id=": false, // Generic with trace context
 	}
 
-	for i := 0; i < 500; i++ {
+	for i := range 500 {
 		rng := rand.New(rand.NewPCG(uint64(i), uint64(i+1)))
 		raw, _, _ := format.Generate(rng)
 		line := string(raw)
@@ -340,7 +340,7 @@ func TestSyslogFormat_PriorityRange(t *testing.T) {
 	format := NewSyslogFormat(pools)
 	rng := newTestRng()
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		raw, _, _ := format.Generate(rng)
 		line := string(raw)
 
@@ -376,7 +376,7 @@ func TestAccessLogFormat_CombinedFormat(t *testing.T) {
 	format := NewAccessLogFormat(pools)
 	rng := newTestRng()
 
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		raw, _, _ := format.Generate(rng)
 		line := string(raw)
 
@@ -413,7 +413,7 @@ func TestMultirecordFormat_GenerateMulti(t *testing.T) {
 
 	seenStack := false
 	seenHelp := false
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		drafts := format.GenerateMulti(rng)
 		if len(drafts) < 2 {
 			t.Errorf("iteration %d: multirecord should produce at least 2 records, got %d", i, len(drafts))
@@ -446,7 +446,7 @@ func TestWeirdFormat_Robustness(t *testing.T) {
 	pools := newTestPools()
 	format := NewWeirdFormat(pools)
 
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		rng := rand.New(rand.NewPCG(uint64(i), uint64(i+1)))
 
 		// Should not panic.

@@ -64,10 +64,10 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		rp := config.RotationPolicyConfig{
 			ID:         id,
 			Name:       "default",
-			MaxBytes:   config.StringPtr("64MB"),
-			MaxAge:     config.StringPtr("1h"),
+			MaxBytes:   new("64MB"),
+			MaxAge:     new("1h"),
 			MaxRecords: config.Int64Ptr(1000),
-			Cron:       config.StringPtr("0 * * * *"),
+			Cron:       new("0 * * * *"),
 		}
 
 		if err := s.PutRotationPolicy(ctx, rp); err != nil {
@@ -92,13 +92,13 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		ctx := context.Background()
 
 		id := newID()
-		rp1 := config.RotationPolicyConfig{ID: id, Name: "p1", MaxAge: config.StringPtr("1h"), Cron: config.StringPtr("0 * * * *")}
+		rp1 := config.RotationPolicyConfig{ID: id, Name: "p1", MaxAge: new("1h"), Cron: new("0 * * * *")}
 		if err := s.PutRotationPolicy(ctx, rp1); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
 		// Upsert: change MaxAge, remove Cron.
-		rp2 := config.RotationPolicyConfig{ID: id, Name: "p1", MaxAge: config.StringPtr("2h")}
+		rp2 := config.RotationPolicyConfig{ID: id, Name: "p1", MaxAge: new("2h")}
 		if err := s.PutRotationPolicy(ctx, rp2); err != nil {
 			t.Fatalf("Put upsert: %v", err)
 		}
@@ -137,10 +137,10 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 
 		idA := newID()
 		idB := newID()
-		if err := s.PutRotationPolicy(ctx, config.RotationPolicyConfig{ID: idA, Name: "a", MaxAge: config.StringPtr("1h")}); err != nil {
+		if err := s.PutRotationPolicy(ctx, config.RotationPolicyConfig{ID: idA, Name: "a", MaxAge: new("1h")}); err != nil {
 			t.Fatalf("Put a: %v", err)
 		}
-		if err := s.PutRotationPolicy(ctx, config.RotationPolicyConfig{ID: idB, Name: "b", MaxBytes: config.StringPtr("10MB")}); err != nil {
+		if err := s.PutRotationPolicy(ctx, config.RotationPolicyConfig{ID: idB, Name: "b", MaxBytes: new("10MB")}); err != nil {
 			t.Fatalf("Put b: %v", err)
 		}
 
@@ -165,7 +165,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		ctx := context.Background()
 
 		id := newID()
-		if err := s.PutRotationPolicy(ctx, config.RotationPolicyConfig{ID: id, Name: "del", MaxAge: config.StringPtr("5m")}); err != nil {
+		if err := s.PutRotationPolicy(ctx, config.RotationPolicyConfig{ID: id, Name: "del", MaxAge: new("5m")}); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
@@ -225,8 +225,8 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		rp := config.RetentionPolicyConfig{
 			ID:        id,
 			Name:      "default",
-			MaxAge:    config.StringPtr("720h"),
-			MaxBytes:  config.StringPtr("10GB"),
+			MaxAge:    new("720h"),
+			MaxBytes:  new("10GB"),
 			MaxChunks: config.Int64Ptr(100),
 		}
 
@@ -251,12 +251,12 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		ctx := context.Background()
 
 		id := newID()
-		rp1 := config.RetentionPolicyConfig{ID: id, Name: "p1", MaxAge: config.StringPtr("24h")}
+		rp1 := config.RetentionPolicyConfig{ID: id, Name: "p1", MaxAge: new("24h")}
 		if err := s.PutRetentionPolicy(ctx, rp1); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		rp2 := config.RetentionPolicyConfig{ID: id, Name: "p1", MaxAge: config.StringPtr("48h")}
+		rp2 := config.RetentionPolicyConfig{ID: id, Name: "p1", MaxAge: new("48h")}
 		if err := s.PutRetentionPolicy(ctx, rp2); err != nil {
 			t.Fatalf("Put upsert: %v", err)
 		}
@@ -290,7 +290,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 
 		idA := newID()
 		idB := newID()
-		if err := s.PutRetentionPolicy(ctx, config.RetentionPolicyConfig{ID: idA, Name: "a", MaxAge: config.StringPtr("1h")}); err != nil {
+		if err := s.PutRetentionPolicy(ctx, config.RetentionPolicyConfig{ID: idA, Name: "a", MaxAge: new("1h")}); err != nil {
 			t.Fatalf("Put a: %v", err)
 		}
 		if err := s.PutRetentionPolicy(ctx, config.RetentionPolicyConfig{ID: idB, Name: "b", MaxChunks: config.Int64Ptr(5)}); err != nil {
@@ -318,7 +318,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		ctx := context.Background()
 
 		id := newID()
-		if err := s.PutRetentionPolicy(ctx, config.RetentionPolicyConfig{ID: id, Name: "del", MaxAge: config.StringPtr("5m")}); err != nil {
+		if err := s.PutRetentionPolicy(ctx, config.RetentionPolicyConfig{ID: id, Name: "del", MaxAge: new("5m")}); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
@@ -723,10 +723,10 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		ing2ID := newID()
 
 		// Put several entities via CRUD.
-		if err := s.PutRotationPolicy(ctx, config.RotationPolicyConfig{ID: rpFastID, Name: "fast", MaxAge: config.StringPtr("5m")}); err != nil {
+		if err := s.PutRotationPolicy(ctx, config.RotationPolicyConfig{ID: rpFastID, Name: "fast", MaxAge: new("5m")}); err != nil {
 			t.Fatalf("PutRotationPolicy: %v", err)
 		}
-		if err := s.PutRotationPolicy(ctx, config.RotationPolicyConfig{ID: rpSlowID, Name: "slow", MaxAge: config.StringPtr("1h")}); err != nil {
+		if err := s.PutRotationPolicy(ctx, config.RotationPolicyConfig{ID: rpSlowID, Name: "slow", MaxAge: new("1h")}); err != nil {
 			t.Fatalf("PutRotationPolicy: %v", err)
 		}
 		filterID := newID()

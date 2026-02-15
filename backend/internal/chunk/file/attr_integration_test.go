@@ -597,7 +597,7 @@ func TestConcurrentReadWithAttributes(t *testing.T) {
 	// Write some records
 	numRecords := 100
 	var chunkID chunk.ChunkID
-	for i := 0; i < numRecords; i++ {
+	for i := range numRecords {
 		rec := chunk.Record{
 			IngestTS: time.UnixMicro(int64(i * 1000)),
 			Attrs:    chunk.Attributes{"idx": string(rune('0' + i%10))},
@@ -618,7 +618,7 @@ func TestConcurrentReadWithAttributes(t *testing.T) {
 	numReaders := 10
 	errCh := make(chan error, numReaders)
 
-	for r := 0; r < numReaders; r++ {
+	for r := range numReaders {
 		go func(readerID int) {
 			cursor, err := manager.OpenCursor(chunkID)
 			if err != nil {
@@ -656,7 +656,7 @@ func TestConcurrentReadWithAttributes(t *testing.T) {
 		}(r)
 	}
 
-	for i := 0; i < numReaders; i++ {
+	for range numReaders {
 		if err := <-errCh; err != nil {
 			t.Fatalf("reader error: %v", err)
 		}
@@ -922,7 +922,7 @@ func TestManyRecordsWithVariedAttributes(t *testing.T) {
 	numRecords := 10000
 	var chunkID chunk.ChunkID
 
-	for i := 0; i < numRecords; i++ {
+	for i := range numRecords {
 		attrs := chunk.Attributes{
 			"idx":     string(rune('A' + i%26)),
 			"service": []string{"api", "web", "worker", "cron"}[i%4],
@@ -1031,7 +1031,7 @@ func BenchmarkReadWithAttributes(b *testing.B) {
 	raw := bytes.Repeat([]byte("x"), 200)
 
 	var chunkID chunk.ChunkID
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		rec := chunk.Record{
 			IngestTS: time.UnixMicro(int64(i)),
 			Attrs:    attrs,

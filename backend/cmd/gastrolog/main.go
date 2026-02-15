@@ -38,10 +38,10 @@ import (
 	indexfile "gastrolog/internal/index/file"
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/ingester/chatterbox"
+	ingestdocker "gastrolog/internal/ingester/docker"
 	ingesthttp "gastrolog/internal/ingester/http"
 	ingestrelp "gastrolog/internal/ingester/relp"
 	ingestsyslog "gastrolog/internal/ingester/syslog"
-	ingestdocker "gastrolog/internal/ingester/docker"
 	ingesttail "gastrolog/internal/ingester/tail"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
@@ -206,13 +206,11 @@ func run(ctx context.Context, logger *slog.Logger, datadirFlag, configType, serv
 	var serverWg sync.WaitGroup
 	if serverAddr != "" {
 		srv = server.New(orch, cfgStore, factories, tokens, server.Config{Logger: logger, CertManager: certMgr})
-		serverWg.Add(1)
-		go func() {
-			defer serverWg.Done()
+		serverWg.Go(func() {
 			if err := srv.ServeTCP(serverAddr); err != nil {
 				logger.Error("server error", "error", err)
 			}
-		}()
+		})
 	}
 
 	if replMode {

@@ -3,7 +3,6 @@ package http
 import (
 	"bytes"
 	"compress/gzip"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,8 +19,7 @@ func TestLokiPushSingleStream(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
@@ -75,8 +73,7 @@ func TestLokiPushMultipleValues(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
@@ -124,8 +121,7 @@ func TestLokiPushMultipleStreams(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
@@ -156,7 +152,7 @@ func TestLokiPushMultipleStreams(t *testing.T) {
 
 	// Check we got 2 messages with different hosts.
 	hosts := make(map[string]string)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		select {
 		case msg := <-out:
 			hosts[msg.Attrs["host"]] = string(msg.Raw)
@@ -177,8 +173,7 @@ func TestLokiPushStructuredMetadata(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
@@ -229,8 +224,7 @@ func TestLokiPushGzipCompression(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
@@ -272,8 +266,7 @@ func TestLokiPushWaitAck(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
@@ -328,8 +321,7 @@ func TestLokiPushWaitAckError(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
@@ -376,8 +368,7 @@ func TestLokiPushLegacyEndpoint(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
@@ -410,8 +401,7 @@ func TestLokiPushEmptyStreams(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
@@ -432,8 +422,7 @@ func TestLokiPushInvalidJSON(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
@@ -453,8 +442,7 @@ func TestLokiPushInvalidTimestamp(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
@@ -476,8 +464,7 @@ func TestReadyEndpoint(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
@@ -497,15 +484,14 @@ func TestLokiPushTooManyAttrs(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
 
 	// Build stream with too many labels.
 	labels := make(map[string]string)
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		labels[fmt.Sprintf("key%d", i)] = fmt.Sprintf("value%d", i)
 	}
 	labelsJSON, _ := json.Marshal(labels)
@@ -528,8 +514,7 @@ func TestLokiPushAttrKeyTooLong(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
@@ -554,8 +539,7 @@ func TestLokiPushAttrValueTooLong(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)

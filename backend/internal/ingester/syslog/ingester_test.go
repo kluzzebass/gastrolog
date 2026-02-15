@@ -1,7 +1,6 @@
 package syslog
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"testing"
@@ -14,8 +13,7 @@ func TestSyslogUDPRFC3164(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{UDPAddr: "127.0.0.1:0"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
@@ -62,8 +60,7 @@ func TestSyslogUDPRFC5424(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{UDPAddr: "127.0.0.1:0"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
@@ -120,8 +117,7 @@ func TestSyslogTCPNewlineDelimited(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{TCPAddr: "127.0.0.1:0"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
@@ -162,8 +158,7 @@ func TestSyslogTCPOctetCounted(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{TCPAddr: "127.0.0.1:0"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
@@ -193,8 +188,7 @@ func TestSyslogMultipleUDPMessages(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 100)
 	recv := New(Config{UDPAddr: "127.0.0.1:0"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
@@ -206,7 +200,7 @@ func TestSyslogMultipleUDPMessages(t *testing.T) {
 	defer conn.Close()
 
 	// Send 10 messages.
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		msg := fmt.Sprintf("<34>Jan 15 10:22:15 host app: message %d", i)
 		conn.Write([]byte(msg))
 	}
@@ -228,8 +222,7 @@ func TestSyslogRemoteIP(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{UDPAddr: "127.0.0.1:0"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
@@ -256,8 +249,7 @@ func TestSyslogRFC3164WithPID(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{UDPAddr: "127.0.0.1:0"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
@@ -292,8 +284,7 @@ func TestSyslogNoPriority(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{UDPAddr: "127.0.0.1:0"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
@@ -328,8 +319,7 @@ func TestSyslogBothUDPAndTCP(t *testing.T) {
 		TCPAddr: "127.0.0.1:0",
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go recv.Run(ctx, out)
 	time.Sleep(50 * time.Millisecond)
@@ -346,7 +336,7 @@ func TestSyslogBothUDPAndTCP(t *testing.T) {
 
 	// Receive both.
 	received := make(map[string]bool)
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		select {
 		case m := <-out:
 			received[string(m.Raw)] = true

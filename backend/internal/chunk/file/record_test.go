@@ -693,7 +693,7 @@ func TestDecodeIdxEntryFromSlice(t *testing.T) {
 	numEntries := 5
 	buf := make([]byte, numEntries*IdxEntrySize)
 
-	for i := 0; i < numEntries; i++ {
+	for i := range numEntries {
 		entry := IdxEntry{
 			IngestTS:   time.Unix(0, int64(i*1000)),
 			WriteTS:    time.Unix(0, int64(i*1000+1)),
@@ -706,7 +706,7 @@ func TestDecodeIdxEntryFromSlice(t *testing.T) {
 	}
 
 	// Decode each entry from its slice
-	for i := 0; i < numEntries; i++ {
+	for i := range numEntries {
 		decoded := DecodeIdxEntry(buf[i*IdxEntrySize:])
 
 		if decoded.IngestTS.UnixNano() != int64(i*1000) {

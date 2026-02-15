@@ -1,6 +1,7 @@
 package chunk
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -57,15 +58,16 @@ func formatIDs(ids []ChunkID) string {
 	if len(ids) == 0 {
 		return "[]"
 	}
-	s := "["
+	var s strings.Builder
+	s.WriteString("[")
 	for i, id := range ids {
 		if i > 0 {
-			s += ", "
+			s.WriteString(", ")
 		}
-		s += id.String()
+		s.WriteString(id.String())
 	}
-	s += "]"
-	return s
+	s.WriteString("]")
+	return s.String()
 }
 
 // --- TTLRetentionPolicy ---

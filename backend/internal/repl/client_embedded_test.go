@@ -33,7 +33,7 @@ func TestEmbeddedClient_Search(t *testing.T) {
 
 	// Append some records
 	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		rec := chunk.Record{
 			IngestTS: baseTime.Add(time.Duration(i) * time.Second),
 			Attrs:    chunk.Attributes{"service": "api"},

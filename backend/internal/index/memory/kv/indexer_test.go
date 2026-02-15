@@ -493,10 +493,10 @@ func TestIndexerCapped(t *testing.T) {
 
 	// Generate records with many unique keys.
 	// MaxUniqueKeys is 10000, so we need more than that.
-	for i := 0; i < MaxUniqueKeys+100; i++ {
+	for i := range MaxUniqueKeys + 100 {
 		_, _, err := manager.Append(chunk.Record{
 			Attrs: attrs,
-			Raw:   []byte(fmt.Sprintf("key%d=value%d", i, i)),
+			Raw:   fmt.Appendf(nil, "key%d=value%d", i, i),
 		})
 		if err != nil {
 			t.Fatalf("append: %v", err)

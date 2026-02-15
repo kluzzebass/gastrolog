@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
+	"slices"
 	"time"
 
 	"connectrpc.com/connect"
@@ -375,12 +377,9 @@ func (s *StoreServer) GetStats(
 			return nil, connErr
 		}
 		found := false
-		for _, id := range stores {
-			if id == storeID {
-				stores = []uuid.UUID{storeID}
-				found = true
-				break
-			}
+		if slices.Contains(stores, storeID) {
+			stores = []uuid.UUID{storeID}
+			found = true
 		}
 		if !found {
 			return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
@@ -782,9 +781,7 @@ func (s *StoreServer) ExportStore(
 			}
 			if len(rec.Attrs) > 0 {
 				exportRec.Attrs = make(map[string]string, len(rec.Attrs))
-				for k, v := range rec.Attrs {
-					exportRec.Attrs[k] = v
-				}
+				maps.Copy(exportRec.Attrs, rec.Attrs)
 			}
 			batch = append(batch, exportRec)
 
@@ -845,9 +842,7 @@ func (s *StoreServer) ImportRecords(
 		}
 		if len(exportRec.Attrs) > 0 {
 			rec.Attrs = make(chunk.Attributes, len(exportRec.Attrs))
-			for k, v := range exportRec.Attrs {
-				rec.Attrs[k] = v
-			}
+			maps.Copy(rec.Attrs, exportRec.Attrs)
 		}
 
 		if _, _, err := cm.Append(rec); err != nil {

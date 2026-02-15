@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -257,13 +259,7 @@ func (s *ConfigServer) GetIngesterStatus(
 		return nil, connErr
 	}
 
-	found := false
-	for _, orchID := range s.orch.ListIngesters() {
-		if id == orchID {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(s.orch.ListIngesters(), id)
 	if !found {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("ingester not found"))
 	}
@@ -542,13 +538,7 @@ func (s *ConfigServer) PutStore(
 	}
 
 	// Apply to runtime: check if store already exists.
-	existing := false
-	for _, id := range s.orch.ListStores() {
-		if id == storeCfg.ID {
-			existing = true
-			break
-		}
-	}
+	existing := slices.Contains(s.orch.ListStores(), storeCfg.ID)
 
 	if existing {
 		// Reload filters, rotation policies, and retention policies (references may have changed).
@@ -670,13 +660,7 @@ func (s *ConfigServer) PutIngester(
 	}
 
 	// Check if ingester already exists in runtime — if so, remove it first.
-	existing := false
-	for _, orchID := range s.orch.ListIngesters() {
-		if orchID == ingCfg.ID {
-			existing = true
-			break
-		}
-	}
+	existing := slices.Contains(s.orch.ListIngesters(), ingCfg.ID)
 
 	if existing {
 		if err := s.orch.RemoveIngester(ingCfg.ID); err != nil && !errors.Is(err, orchestrator.ErrIngesterNotFound) {
@@ -696,9 +680,7 @@ func (s *ConfigServer) PutIngester(
 		params := ingCfg.Params
 		if s.factories.DataDir != "" {
 			params = make(map[string]string, len(ingCfg.Params)+1)
-			for k, v := range ingCfg.Params {
-				params[k] = v
-			}
+			maps.Copy(params, ingCfg.Params)
 			params["_state_dir"] = s.factories.DataDir
 		}
 
@@ -865,10 +847,10 @@ func protoToRotationPolicy(p *apiv1.RotationPolicyConfig) config.RotationPolicyC
 		cfg.MaxAge = &s
 	}
 	if p.MaxRecords > 0 {
-		cfg.MaxRecords = config.Int64Ptr(p.MaxRecords)
+		cfg.MaxRecords = new(p.MaxRecords)
 	}
 	if p.Cron != "" {
-		cfg.Cron = config.StringPtr(p.Cron)
+		cfg.Cron = new(p.Cron)
 	}
 
 	return cfg
@@ -912,7 +894,7 @@ func protoToRetentionPolicy(p *apiv1.RetentionPolicyConfig) config.RetentionPoli
 		cfg.MaxBytes = &s
 	}
 	if p.MaxChunks > 0 {
-		cfg.MaxChunks = config.Int64Ptr(p.MaxChunks)
+		cfg.MaxChunks = new(p.MaxChunks)
 	}
 
 	return cfg
@@ -957,21 +939,21 @@ func protoToStoreConfig(p *apiv1.StoreConfig) (config.StoreConfig, error) {
 		if err != nil {
 			return config.StoreConfig{}, fmt.Errorf("invalid filter ID: %w", err)
 		}
-		cfg.Filter = config.UUIDPtr(fid)
+		cfg.Filter = new(fid)
 	}
 	if p.Policy != "" {
 		pid, err := uuid.Parse(p.Policy)
 		if err != nil {
 			return config.StoreConfig{}, fmt.Errorf("invalid policy ID: %w", err)
 		}
-		cfg.Policy = config.UUIDPtr(pid)
+		cfg.Policy = new(pid)
 	}
 	if p.Retention != "" {
 		rid, err := uuid.Parse(p.Retention)
 		if err != nil {
 			return config.StoreConfig{}, fmt.Errorf("invalid retention ID: %w", err)
 		}
-		cfg.Retention = config.UUIDPtr(rid)
+		cfg.Retention = new(rid)
 	}
 	return cfg, nil
 }

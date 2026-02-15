@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"regexp"
 	"strings"
 	"time"
@@ -150,9 +151,7 @@ func streamOnce(
 			}
 
 			msgAttrs := make(map[string]string, len(attrs)+1)
-			for k, v := range attrs {
-				msgAttrs[k] = v
-			}
+			maps.Copy(msgAttrs, attrs)
 			msgAttrs["stream"] = entry.Stream
 
 			msg := orchestrator.IngestMessage{

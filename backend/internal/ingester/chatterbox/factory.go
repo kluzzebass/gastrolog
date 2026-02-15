@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -23,12 +24,12 @@ const (
 
 // Format names for configuration.
 const (
-	FormatPlain      = "plain"
-	FormatKV         = "kv"
-	FormatJSON       = "json"
-	FormatAccess     = "access"
-	FormatSyslog     = "syslog"
-	FormatWeird      = "weird"
+	FormatPlain       = "plain"
+	FormatKV          = "kv"
+	FormatJSON        = "json"
+	FormatAccess      = "access"
+	FormatSyslog      = "syslog"
+	FormatWeird       = "weird"
 	FormatMultirecord = "multirecord"
 )
 
@@ -177,12 +178,7 @@ func parseFormats(formatsParam string) ([]string, error) {
 
 // isValidFormat checks if a format name is valid.
 func isValidFormat(name string) bool {
-	for _, f := range allFormats {
-		if f == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(allFormats, name)
 }
 
 // parseWeights parses the formatWeights parameter into a weight map.
@@ -198,8 +194,8 @@ func parseWeights(weightsParam string, enabledFormats []string) (map[string]int,
 		return weights, nil
 	}
 
-	parts := strings.Split(weightsParam, ",")
-	for _, p := range parts {
+	parts := strings.SplitSeq(weightsParam, ",")
+	for p := range parts {
 		p = strings.TrimSpace(p)
 		if p == "" {
 			continue

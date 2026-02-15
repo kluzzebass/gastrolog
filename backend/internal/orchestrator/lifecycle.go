@@ -44,7 +44,6 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 
 	// Launch ingester goroutines with per-ingester contexts.
 	for id, r := range o.ingesters {
-		id, r := id, r // capture for closure
 		recvCtx, recvCancel := context.WithCancel(ctx)
 		o.ingesterCancels[id] = recvCancel
 		o.logger.Info("starting ingester", "id", id)

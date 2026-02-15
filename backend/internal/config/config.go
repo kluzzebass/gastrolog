@@ -110,9 +110,9 @@ type Config struct {
 // ServerConfig holds server-level configuration, organized by concern.
 // It is serialized as JSON and stored under the "server" settings key.
 type ServerConfig struct {
-	Auth      AuthConfig      `json:"auth,omitempty"`
-	Scheduler SchedulerConfig `json:"scheduler,omitempty"`
-	TLS      TLSConfig       `json:"tls,omitempty"`
+	Auth      AuthConfig      `json:"auth"`
+	Scheduler SchedulerConfig `json:"scheduler"`
+	TLS       TLSConfig       `json:"tls"`
 }
 
 // TLSConfig holds TLS server settings.
@@ -131,10 +131,10 @@ type TLSConfig struct {
 type CertPEM struct {
 	ID       uuid.UUID `json:"id"`
 	Name     string    `json:"name"`
-	CertPEM  string `json:"cert_pem,omitempty"`
-	KeyPEM   string `json:"key_pem,omitempty"`
-	CertFile string `json:"cert_file,omitempty"`
-	KeyFile  string `json:"key_file,omitempty"`
+	CertPEM  string    `json:"cert_pem,omitempty"`
+	KeyPEM   string    `json:"key_pem,omitempty"`
+	CertFile string    `json:"cert_file,omitempty"`
+	KeyFile  string    `json:"key_file,omitempty"`
 }
 
 // SchedulerConfig holds configuration for the job scheduler.
@@ -222,13 +222,19 @@ func (c RotationPolicyConfig) ValidateCron() error {
 }
 
 // StringPtr returns a pointer to s.
-func StringPtr(s string) *string { return &s }
+//
+//go:fix inline
+func StringPtr(s string) *string { return new(s) }
 
 // UUIDPtr returns a pointer to id.
-func UUIDPtr(id uuid.UUID) *uuid.UUID { return &id }
+//
+//go:fix inline
+func UUIDPtr(id uuid.UUID) *uuid.UUID { return new(id) }
 
 // Int64Ptr returns a pointer to n.
-func Int64Ptr(n int64) *int64 { return &n }
+//
+//go:fix inline
+func Int64Ptr(n int64) *int64 { return new(n) }
 
 // RetentionPolicyConfig defines when sealed chunks should be deleted.
 // Multiple conditions can be specified; a chunk is deleted if ANY condition is met.

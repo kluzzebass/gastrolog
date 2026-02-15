@@ -35,7 +35,7 @@ func TestRotationOnMaxChunkBytesWithAttributes(t *testing.T) {
 	chunkIDs := make(map[chunk.ChunkID]bool)
 
 	// Append records until we've rotated at least once
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		rec := chunk.Record{
 			IngestTS: time.UnixMicro(int64(i * 1000)),
 			Attrs:    attrs,
@@ -506,7 +506,7 @@ func TestReadWhileWriting(t *testing.T) {
 
 	// Write initial records
 	var chunkID chunk.ChunkID
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		rec := chunk.Record{
 			IngestTS: time.UnixMicro(int64(i * 1000)),
 			Attrs:    chunk.Attributes{"phase": "initial", "idx": string(rune('0' + i))},
@@ -526,7 +526,7 @@ func TestReadWhileWriting(t *testing.T) {
 	}
 
 	// Read some records
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		rec, _, err := cursor.Next()
 		if err != nil {
 			t.Fatalf("next %d: %v", i, err)
@@ -612,7 +612,7 @@ func TestWriteTSIsMonotonic(t *testing.T) {
 	defer cursor.Close()
 
 	var lastWriteTS time.Time
-	for i := 0; i < len(ingestTimes); i++ {
+	for i := range ingestTimes {
 		rec, _, err := cursor.Next()
 		if err != nil {
 			t.Fatalf("next %d: %v", i, err)
@@ -648,7 +648,7 @@ func TestReopenUnsealedChunk(t *testing.T) {
 			t.Fatalf("new manager: %v", err)
 		}
 
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			rec := chunk.Record{
 				IngestTS: time.UnixMicro(int64(i * 1000)),
 				Attrs:    chunk.Attributes{"session": "1", "idx": string(rune('0' + i))},

@@ -149,10 +149,7 @@ func (m *pagerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clamp()
 
 	case tea.KeyMsg:
-		viewHeight := m.height
-		if viewHeight < 1 {
-			viewHeight = 1
-		}
+		viewHeight := max(m.height, 1)
 
 		switch msg.String() {
 		case "q", "Q", "esc":
@@ -240,16 +237,10 @@ func (m *pagerModel) View() string {
 }
 
 func (m *pagerModel) statusBar() string {
-	endLine := m.topLine + m.height
-	if endLine > len(m.lines) {
-		endLine = len(m.lines)
-	}
+	endLine := min(m.topLine+m.height, len(m.lines))
 	percent := 100
 	if len(m.lines) > m.height {
-		percent = (m.topLine + m.height) * 100 / len(m.lines)
-		if percent > 100 {
-			percent = 100
-		}
+		percent = min((m.topLine+m.height)*100/len(m.lines), 100)
 	}
 
 	status := fmt.Sprintf(" lines %d-%d of %d (%d%%)", m.topLine+1, endLine, len(m.lines), percent)
@@ -273,10 +264,7 @@ func (m *pagerModel) statusBar() string {
 }
 
 func (m *pagerModel) clamp() {
-	maxTop := len(m.lines) - m.height
-	if maxTop < 0 {
-		maxTop = 0
-	}
+	maxTop := max(len(m.lines)-m.height, 0)
 	if m.topLine > maxTop {
 		m.topLine = maxTop
 	}
@@ -289,10 +277,7 @@ func (m *pagerModel) clamp() {
 }
 
 func (m *pagerModel) atBottom() bool {
-	maxTop := len(m.lines) - m.height
-	if maxTop < 0 {
-		maxTop = 0
-	}
+	maxTop := max(len(m.lines)-m.height, 0)
 	return m.topLine >= maxTop
 }
 
@@ -377,10 +362,7 @@ func (m *livePagerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		viewHeight := m.height
-		if viewHeight < 1 {
-			viewHeight = 1
-		}
+		viewHeight := max(m.height, 1)
 
 		switch msg.String() {
 		case "q", "Q", "esc":
@@ -452,10 +434,7 @@ func (m *livePagerModel) View() string {
 
 func (m *livePagerModel) statusBar() string {
 	total := len(m.lines)
-	endLine := m.topLine + m.height
-	if endLine > total {
-		endLine = total
-	}
+	endLine := min(m.topLine+m.height, total)
 
 	var status string
 	if total == 0 {
@@ -481,10 +460,7 @@ func (m *livePagerModel) statusBar() string {
 }
 
 func (m *livePagerModel) clamp() {
-	maxTop := len(m.lines) - m.height
-	if maxTop < 0 {
-		maxTop = 0
-	}
+	maxTop := max(len(m.lines)-m.height, 0)
 	if m.topLine > maxTop {
 		m.topLine = maxTop
 	}
@@ -497,18 +473,12 @@ func (m *livePagerModel) clamp() {
 }
 
 func (m *livePagerModel) scrollToBottom() {
-	maxTop := len(m.lines) - m.height
-	if maxTop < 0 {
-		maxTop = 0
-	}
+	maxTop := max(len(m.lines)-m.height, 0)
 	m.topLine = maxTop
 }
 
 func (m *livePagerModel) atBottom() bool {
-	maxTop := len(m.lines) - m.height
-	if maxTop < 0 {
-		maxTop = 0
-	}
+	maxTop := max(len(m.lines)-m.height, 0)
 	return m.topLine >= maxTop
 }
 

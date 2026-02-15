@@ -25,7 +25,7 @@ func DefaultConfig() *Config {
 			{ID: filterID, Name: "catch-all", Expression: "*"},
 		},
 		RotationPolicies: []RotationPolicyConfig{
-			{ID: rotationID, Name: "default", MaxAge: StringPtr("5m")},
+			{ID: rotationID, Name: "default", MaxAge: new("5m")},
 		},
 		RetentionPolicies: []RetentionPolicyConfig{
 			{ID: retentionID, Name: "default", MaxChunks: Int64Ptr(10)},
@@ -36,9 +36,9 @@ func DefaultConfig() *Config {
 				Name:      "default",
 				Type:      "memory",
 				Enabled:   true,
-				Filter:    UUIDPtr(filterID),
-				Policy:    UUIDPtr(rotationID),
-				Retention: UUIDPtr(retentionID),
+				Filter:    new(filterID),
+				Policy:    new(rotationID),
+				Retention: new(retentionID),
 			},
 		},
 		Ingesters: []IngesterConfig{

@@ -141,7 +141,7 @@ func (p *CountRetentionPolicy) Apply(state StoreState) []ChunkID {
 	// Chunks are sorted oldest first; delete the excess from the front.
 	excess := len(state.Chunks) - p.maxChunks
 	result := make([]ChunkID, excess)
-	for i := 0; i < excess; i++ {
+	for i := range excess {
 		result[i] = state.Chunks[i].ID
 	}
 

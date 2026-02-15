@@ -251,7 +251,7 @@ func TestAnalyzeAll(t *testing.T) {
 	}
 
 	// Create multiple chunks by appending more than rotation threshold
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		rec := chunk.Record{
 			IngestTS: now.Add(time.Duration(i) * time.Second),
 			WriteTS:  now.Add(time.Duration(i) * time.Second),

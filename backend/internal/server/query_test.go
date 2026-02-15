@@ -39,7 +39,7 @@ func TestQueryServerSearch(t *testing.T) {
 
 	// Add some records
 	t0 := time.Now()
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		cm.Append(chunk.Record{
 			IngestTS: t0.Add(time.Duration(i) * time.Second),
 			Raw:      []byte("test-record"),

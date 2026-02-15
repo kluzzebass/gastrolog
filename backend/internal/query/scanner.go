@@ -3,6 +3,7 @@ package query
 import (
 	"errors"
 	"iter"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -727,12 +728,7 @@ func matchesSingleToken(raw []byte, token string) bool {
 	// Lowercase the token for case-insensitive matching.
 	tokenLower := strings.ToLower(token)
 	recordTokens := tokenizer.Tokens(raw)
-	for _, t := range recordTokens {
-		if t == tokenLower {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(recordTokens, tokenLower)
 }
 
 // matchesSingleKV checks if a record contains a specific key=value pair

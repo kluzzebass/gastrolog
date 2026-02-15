@@ -49,7 +49,7 @@ func (f *WeirdFormat) Generate(rng *rand.Rand) ([]byte, map[string]string, time.
 		// Repeated patterns
 		pattern := pick(rng, []string{"AAAA", "abab", "123123", "....", "====", "----"})
 		count := 10 + rng.IntN(50)
-		for i := 0; i < count; i++ {
+		for range count {
 			data = append(data, pattern...)
 		}
 	case 5:
@@ -69,7 +69,7 @@ func (f *WeirdFormat) Generate(rng *rand.Rand) ([]byte, map[string]string, time.
 	default:
 		// Mixed binary and text
 		data = []byte("START")
-		for i := 0; i < 20; i++ {
+		for range 20 {
 			if rng.IntN(2) == 0 {
 				data = append(data, byte(rng.IntN(32))) // control char
 			} else {

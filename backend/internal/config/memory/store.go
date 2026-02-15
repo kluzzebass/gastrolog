@@ -5,6 +5,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sync"
 	"time"
 
@@ -91,9 +92,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 
 	if len(s.settings) > 0 {
 		cfg.Settings = make(map[string]string, len(s.settings))
-		for k, v := range s.settings {
-			cfg.Settings[k] = v
-		}
+		maps.Copy(cfg.Settings, s.settings)
 	}
 
 	if len(s.certs) > 0 {
@@ -496,16 +495,16 @@ func copyRotationPolicy(rp config.RotationPolicyConfig) config.RotationPolicyCon
 		Name: rp.Name,
 	}
 	if rp.MaxBytes != nil {
-		c.MaxBytes = config.StringPtr(*rp.MaxBytes)
+		c.MaxBytes = new(*rp.MaxBytes)
 	}
 	if rp.MaxAge != nil {
-		c.MaxAge = config.StringPtr(*rp.MaxAge)
+		c.MaxAge = new(*rp.MaxAge)
 	}
 	if rp.MaxRecords != nil {
-		c.MaxRecords = config.Int64Ptr(*rp.MaxRecords)
+		c.MaxRecords = new(*rp.MaxRecords)
 	}
 	if rp.Cron != nil {
-		c.Cron = config.StringPtr(*rp.Cron)
+		c.Cron = new(*rp.Cron)
 	}
 	return c
 }
@@ -516,13 +515,13 @@ func copyRetentionPolicy(rp config.RetentionPolicyConfig) config.RetentionPolicy
 		Name: rp.Name,
 	}
 	if rp.MaxAge != nil {
-		c.MaxAge = config.StringPtr(*rp.MaxAge)
+		c.MaxAge = new(*rp.MaxAge)
 	}
 	if rp.MaxBytes != nil {
-		c.MaxBytes = config.StringPtr(*rp.MaxBytes)
+		c.MaxBytes = new(*rp.MaxBytes)
 	}
 	if rp.MaxChunks != nil {
-		c.MaxChunks = config.Int64Ptr(*rp.MaxChunks)
+		c.MaxChunks = new(*rp.MaxChunks)
 	}
 	return c
 }
@@ -536,13 +535,13 @@ func copyStoreConfig(st config.StoreConfig) config.StoreConfig {
 		Enabled: st.Enabled,
 	}
 	if st.Filter != nil {
-		c.Filter = config.UUIDPtr(*st.Filter)
+		c.Filter = new(*st.Filter)
 	}
 	if st.Policy != nil {
-		c.Policy = config.UUIDPtr(*st.Policy)
+		c.Policy = new(*st.Policy)
 	}
 	if st.Retention != nil {
-		c.Retention = config.UUIDPtr(*st.Retention)
+		c.Retention = new(*st.Retention)
 	}
 	return c
 }
@@ -573,8 +572,6 @@ func copyParams(params map[string]string) map[string]string {
 		return nil
 	}
 	cp := make(map[string]string, len(params))
-	for k, v := range params {
-		cp[k] = v
-	}
+	maps.Copy(cp, params)
 	return cp
 }

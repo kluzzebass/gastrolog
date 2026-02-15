@@ -18,6 +18,7 @@ package logging
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"sync/atomic"
 )
 
@@ -213,9 +214,7 @@ func (h *ComponentFilterHandler) SetLevel(component string, level slog.Level) {
 	// Copy-on-write: create new map with updated value.
 	oldLevels := *h.levelSnapshot.Load()
 	newLevels := make(map[string]slog.Level, len(oldLevels)+1)
-	for k, v := range oldLevels {
-		newLevels[k] = v
-	}
+	maps.Copy(newLevels, oldLevels)
 	newLevels[component] = level
 	h.levelSnapshot.Store(&newLevels)
 }

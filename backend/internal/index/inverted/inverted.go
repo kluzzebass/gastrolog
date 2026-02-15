@@ -220,7 +220,7 @@ func DecodeKeyIndex[T any](data []byte, dataStart int, newEntry func(key string,
 
 	// Scan to find posting blob start
 	scanCursor := dataStart
-	for i := uint32(0); i < entryCount; i++ {
+	for range entryCount {
 		if scanCursor+StringLenSize > len(data) {
 			return nil, ErrStringSizeMismatch
 		}
@@ -278,7 +278,7 @@ func DecodeValueIndex[T any](data []byte, dataStart int, newEntry func(value str
 	entryCount := binary.LittleEndian.Uint32(data[dataStart-EntryCountSize : dataStart])
 
 	scanCursor := dataStart
-	for i := uint32(0); i < entryCount; i++ {
+	for range entryCount {
 		if scanCursor+StringLenSize > len(data) {
 			return nil, ErrStringSizeMismatch
 		}
@@ -336,7 +336,7 @@ func DecodeKVIndex[T any](data []byte, dataStart int, newEntry func(key, value s
 	entryCount := binary.LittleEndian.Uint32(data[dataStart-EntryCountSize : dataStart])
 
 	scanCursor := dataStart
-	for i := uint32(0); i < entryCount; i++ {
+	for range entryCount {
 		if scanCursor+StringLenSize > len(data) {
 			return nil, ErrStringSizeMismatch
 		}

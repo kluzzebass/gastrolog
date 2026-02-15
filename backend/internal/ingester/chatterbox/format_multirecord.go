@@ -1,6 +1,7 @@
 package chatterbox
 
 import (
+	"maps"
 	"math/rand/v2"
 	"strings"
 	"time"
@@ -173,9 +174,7 @@ func (f *MultirecordFormat) linesToDrafts(rng *rand.Rand, lines []string, extraP
 			continue // Skip blank lines
 		}
 		attrs := make(map[string]string, len(baseAttrs))
-		for k, v := range baseAttrs {
-			attrs[k] = v
-		}
+		maps.Copy(attrs, baseAttrs)
 		drafts = append(drafts, recordDraft{
 			Raw:      []byte(trimmed),
 			Attrs:    attrs,

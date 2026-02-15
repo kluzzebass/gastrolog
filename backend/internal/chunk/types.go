@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -127,9 +128,7 @@ func (a Attributes) Copy() Attributes {
 		return nil
 	}
 	cp := make(Attributes, len(a))
-	for k, v := range a {
-		cp[k] = v
-	}
+	maps.Copy(cp, a)
 	return cp
 }
 

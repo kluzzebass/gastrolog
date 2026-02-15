@@ -410,7 +410,7 @@ func TestCompositePolicyShortCircuits(t *testing.T) {
 
 	policy1 := RotationPolicyFunc(func(state ActiveChunkState, next Record) *string {
 		callCount++
-		return trigger("test")
+		return new("test")
 	})
 
 	policy2 := RotationPolicyFunc(func(state ActiveChunkState, next Record) *string {
@@ -515,7 +515,7 @@ func TestRotationPolicyFunc(t *testing.T) {
 		capturedState = state
 		capturedRecord = next
 		if state.Bytes > 1000 {
-			return trigger("custom")
+			return new("custom")
 		}
 		return nil
 	})

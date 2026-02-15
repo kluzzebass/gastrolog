@@ -119,7 +119,7 @@ func decodeIndex(data []byte) ([]index.TokenIndexEntry, error) {
 	// We need to scan through the key table to find where postings start.
 	// First pass: count total key table size.
 	scanCursor := cursor
-	for i := uint32(0); i < keyCount; i++ {
+	for range keyCount {
 		if scanCursor+tokenLenSize > len(data) {
 			return nil, ErrKeySizeMismatch
 		}
@@ -154,7 +154,7 @@ func decodeIndex(data []byte) ([]index.TokenIndexEntry, error) {
 
 		entries[i].Positions = make([]uint64, pCount)
 		pCursor := postingBlobStart + pOffset
-		for j := 0; j < pCount; j++ {
+		for j := range pCount {
 			entries[i].Positions[j] = uint64(binary.LittleEndian.Uint32(data[pCursor : pCursor+positionSize]))
 			pCursor += positionSize
 		}

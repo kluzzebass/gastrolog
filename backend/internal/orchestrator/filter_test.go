@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"slices"
 	"testing"
 
 	"gastrolog/internal/chunk"
@@ -346,10 +347,5 @@ func sameElements(a, b []uuid.UUID) bool {
 }
 
 func containsUUID(slice []uuid.UUID, id uuid.UUID) bool {
-	for _, v := range slice {
-		if v == id {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, id)
 }

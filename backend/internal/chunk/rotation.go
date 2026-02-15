@@ -46,9 +46,6 @@ type RotationPolicy interface {
 	ShouldRotate(state ActiveChunkState, next Record) *string
 }
 
-// trigger returns a *string for a rotation trigger name.
-func trigger(name string) *string { return &name }
-
 // RotationPolicyFunc is an adapter to allow ordinary functions to be used as RotationPolicy.
 type RotationPolicyFunc func(state ActiveChunkState, next Record) *string
 
@@ -95,7 +92,7 @@ func (p *SizePolicy) ShouldRotate(state ActiveChunkState, next Record) *string {
 	}
 	projectedBytes := state.Bytes + recordOnDiskSize(next)
 	if projectedBytes > p.maxBytes {
-		return trigger("size")
+		return new("size")
 	}
 	return nil
 }
@@ -115,7 +112,7 @@ func (p *RecordCountPolicy) ShouldRotate(state ActiveChunkState, next Record) *s
 		return nil
 	}
 	if state.Records+1 > p.maxRecords {
-		return trigger("records")
+		return new("records")
 	}
 	return nil
 }
@@ -144,7 +141,7 @@ func (p *AgePolicy) ShouldRotate(state ActiveChunkState, next Record) *string {
 		return nil
 	}
 	if p.now().Sub(state.CreatedAt) > p.maxAge {
-		return trigger("age")
+		return new("age")
 	}
 	return nil
 }
@@ -180,7 +177,7 @@ func (p *HardLimitPolicy) ShouldRotate(state ActiveChunkState, next Record) *str
 	_ = attrBytes
 
 	if rawSize > p.rawMaxBytes {
-		return trigger("hard-limit")
+		return new("hard-limit")
 	}
 
 	return nil
@@ -199,7 +196,7 @@ func (NeverRotatePolicy) ShouldRotate(state ActiveChunkState, next Record) *stri
 type AlwaysRotatePolicy struct{}
 
 func (AlwaysRotatePolicy) ShouldRotate(state ActiveChunkState, next Record) *string {
-	return trigger("always")
+	return new("always")
 }
 
 // recordOnDiskSize calculates the total on-disk bytes for a single record.

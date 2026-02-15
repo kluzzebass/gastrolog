@@ -5,6 +5,7 @@ package chatterbox
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"math/rand/v2"
 	"time"
 
@@ -81,9 +82,7 @@ func (r *Ingester) generateMessages() []orchestrator.IngestMessage {
 	msgs := make([]orchestrator.IngestMessage, 0, len(drafts))
 	for i, d := range drafts {
 		attrs := make(map[string]string, len(d.Attrs)+2)
-		for k, v := range d.Attrs {
-			attrs[k] = v
-		}
+		maps.Copy(attrs, d.Attrs)
 		attrs["ingester_type"] = "chatterbox"
 		attrs["ingester_id"] = r.id
 

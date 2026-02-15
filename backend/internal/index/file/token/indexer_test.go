@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	gotime "time"
@@ -827,12 +828,12 @@ func TestIndexerLongTokenTruncated(t *testing.T) {
 	attrs := chunk.Attributes{"source": "test"}
 	// Create a long token (200 chars) using 'z' (not hex)
 	// Max token length is 16, so it should be truncated
-	longInput := ""
-	for i := 0; i < 200; i++ {
-		longInput += "z"
+	var longInput strings.Builder
+	for range 200 {
+		longInput.WriteString("z")
 	}
 	records := []chunk.Record{
-		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte(longInput)},
+		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte(longInput.String())},
 	}
 
 	manager, chunkID := setupChunkManager(t, records)

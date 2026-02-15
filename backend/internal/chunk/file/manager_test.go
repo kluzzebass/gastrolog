@@ -878,7 +878,7 @@ func TestListReturnsSortedChunks(t *testing.T) {
 	}
 
 	// Create 3 chunks with 1 record each
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		rec := chunk.Record{
 			IngestTS: clock(),
 			Attrs:    attrs,

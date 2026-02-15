@@ -315,7 +315,7 @@ func TestRandomInterval_Bounds(t *testing.T) {
 	}
 	recv := r.(*Ingester)
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		interval := recv.randomInterval()
 		if interval < 10*time.Millisecond || interval >= 20*time.Millisecond {
 			t.Errorf("interval %v out of bounds [10ms, 20ms)", interval)
@@ -333,7 +333,7 @@ func TestRandomInterval_EqualBounds(t *testing.T) {
 	}
 	recv := r.(*Ingester)
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		interval := recv.randomInterval()
 		if interval != 50*time.Millisecond {
 			t.Errorf("interval = %v, want 50ms", interval)
@@ -377,7 +377,7 @@ func TestGenerateMessages_MultirecordProducesMultiple(t *testing.T) {
 	recv := r.(*Ingester)
 
 	multiCount := 0
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		msgs := recv.generateMessages()
 		if len(msgs) > 1 {
 			multiCount++
@@ -469,7 +469,7 @@ func TestNewIngester_HostCount(t *testing.T) {
 
 	// Generate messages and collect hosts
 	hosts := make(map[string]bool)
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		for _, msg := range recv.generateMessages() {
 			if h := msg.Attrs["host"]; h != "" {
 				hosts[h] = true
@@ -516,7 +516,7 @@ func TestNewIngester_ServiceCount(t *testing.T) {
 
 	// Generate messages and collect services
 	services := make(map[string]bool)
-	for i := 0; i < 500; i++ {
+	for range 500 {
 		for _, msg := range recv.generateMessages() {
 			if s := msg.Attrs["service"]; s != "" {
 				services[s] = true
@@ -567,7 +567,7 @@ func TestGenerateMessage_MultipleFormats(t *testing.T) {
 	accessCount := 0
 	syslogCount := 0
 
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		for _, msg := range recv.generateMessages() {
 			raw := string(msg.Raw)
 			if len(raw) > 0 && raw[0] == '{' {
@@ -607,7 +607,7 @@ func TestGenerateMessage_WeightedSelection(t *testing.T) {
 	recv := r.(*Ingester)
 
 	jsonCount := 0
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		for _, msg := range recv.generateMessages() {
 			raw := string(msg.Raw)
 			if len(raw) > 0 && raw[0] == '{' {

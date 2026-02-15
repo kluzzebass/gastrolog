@@ -15,11 +15,11 @@ import (
 const (
 	currentVersion = 0x01
 
-	countSize    = 4
-	headerSize   = format.HeaderSize + countSize
-	entrySize    = 12 // ts int64 + pos uint32
-	ingestFile   = "_ingest.idx"
-	sourceFile   = "_source.idx"
+	countSize  = 4
+	headerSize = format.HeaderSize + countSize
+	entrySize  = 12 // ts int64 + pos uint32
+	ingestFile = "_ingest.idx"
+	sourceFile = "_source.idx"
 )
 
 var (
@@ -76,7 +76,7 @@ func decodeIndex(data []byte, expectedType byte) ([]Entry, error) {
 	cursor += countSize
 
 	entries := make([]Entry, n)
-	for i := uint32(0); i < n; i++ {
+	for i := range n {
 		if cursor+entrySize > len(data) {
 			return nil, ErrIndexTooSmall
 		}
