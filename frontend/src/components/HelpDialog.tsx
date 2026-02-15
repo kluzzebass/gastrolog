@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { isValidElement, useMemo, useState } from "react";
 import Markdown from "react-markdown";
 import { Dialog } from "./Dialog";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { helpTopics, findTopic } from "../help/topics";
 import type { HelpTopic } from "../help/topics";
+import { MermaidDiagram } from "./Mermaid";
 
 interface HelpDialogProps {
   dark: boolean;
@@ -18,6 +19,10 @@ export function HelpDialog({ dark, topicId, onClose }: HelpDialogProps) {
   );
 
   const topic: HelpTopic | undefined = findTopic(activeId);
+
+  // Memoize so react-markdown doesn't unmount/remount custom components
+  // (e.g. MermaidDiagram) on every parent re-render.
+  const mdComponents = useMemo(() => markdownComponents(dark), [dark]);
 
   return (
     <Dialog onClose={onClose} ariaLabel="Help" dark={dark} size="xl">
@@ -57,7 +62,7 @@ export function HelpDialog({ dark, topicId, onClose }: HelpDialogProps) {
             Help
           </h2>
           {topic ? (
-            <Markdown components={markdownComponents(c)}>
+            <Markdown components={mdComponents}>
               {topic.content}
             </Markdown>
           ) : (
@@ -82,9 +87,10 @@ export function HelpDialog({ dark, topicId, onClose }: HelpDialogProps) {
   );
 }
 
-type C = ReturnType<typeof useThemeClass>;
-
-function markdownComponents(c: C) {
+function markdownComponents(dark: boolean) {
+  const c: (d: string, l: string) => string = dark
+    ? (d) => d
+    : (_, l) => l;
   return {
     h1: ({ children }: { children?: React.ReactNode }) => (
       <h1
@@ -144,16 +150,26 @@ function markdownComponents(c: C) {
           </code>
         );
       }
+      // Mermaid diagram
+      if (className?.includes("language-mermaid")) {
+        return <MermaidDiagram chart={String(children).trim()} dark={dark} />;
+      }
       // Code block (inside <pre>)
       return <code className={`font-mono text-[0.85em] ${className}`}>{children}</code>;
     },
-    pre: ({ children }: { children?: React.ReactNode }) => (
-      <pre
-        className={`mb-3 p-3 rounded overflow-x-auto app-scroll text-[0.9em] ${c("bg-ink-surface", "bg-light-hover")}`}
-      >
-        {children}
-      </pre>
-    ),
+    pre: ({ children }: { children?: React.ReactNode }) => {
+      // Unwrap <pre> when the child is a custom component (e.g. MermaidDiagram)
+      if (isValidElement(children) && typeof children.type !== "string") {
+        return <>{children}</>;
+      }
+      return (
+        <pre
+          className={`mb-3 p-3 rounded overflow-x-auto app-scroll text-[0.9em] ${c("bg-ink-surface", "bg-light-hover")}`}
+        >
+          {children}
+        </pre>
+      );
+    },
     strong: ({ children }: { children?: React.ReactNode }) => (
       <strong
         className={`font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
