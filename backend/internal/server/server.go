@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
@@ -174,7 +175,15 @@ func (s *Server) buildMux() *http.ServeMux {
 		handlerOpts = append(handlerOpts, connect.WithInterceptors(authInterceptor))
 	}
 
-	queryServer := NewQueryServer(s.orch)
+	queryTimeout := 30 * time.Second // default
+	if s.cfgStore != nil {
+		if sc, err := config.LoadServerConfig(context.Background(), s.cfgStore); err == nil && sc.Query.Timeout != "" {
+			if d, err := time.ParseDuration(sc.Query.Timeout); err == nil {
+				queryTimeout = d
+			}
+		}
+	}
+	queryServer := NewQueryServer(s.orch, queryTimeout)
 	storeServer := NewStoreServer(s.orch, s.cfgStore, s.factories, s.logger)
 	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager)
 	configServer.SetOnTLSConfigChange(s.reconfigureTLS)

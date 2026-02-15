@@ -1,6 +1,7 @@
 package query
 
 import (
+	"context"
 	"errors"
 	"iter"
 	"slices"
@@ -161,27 +162,36 @@ func (b *scannerBuilder) isSequential() bool {
 }
 
 // build creates the final scanner iterator.
-func (b *scannerBuilder) build(cursor chunk.RecordCursor, q Query) iter.Seq2[recordWithRef, error] {
+func (b *scannerBuilder) build(ctx context.Context, cursor chunk.RecordCursor, q Query) iter.Seq2[recordWithRef, error] {
 	if b.hasNoMatches() {
 		return emptyScanner()
 	}
 
 	if b.isSequential() {
-		return b.buildSequentialScanner(cursor, q)
+		return b.buildSequentialScanner(ctx, cursor, q)
 	}
 
-	return b.buildPositionScanner(cursor, q)
+	return b.buildPositionScanner(ctx, cursor, q)
 }
 
 // buildSequentialScanner creates a scanner that reads records sequentially.
-func (b *scannerBuilder) buildSequentialScanner(cursor chunk.RecordCursor, q Query) iter.Seq2[recordWithRef, error] {
+func (b *scannerBuilder) buildSequentialScanner(ctx context.Context, cursor chunk.RecordCursor, q Query) iter.Seq2[recordWithRef, error] {
 	lower, upper := q.TimeBounds()
 	filters := b.filters
 	storeID := b.storeID
 
 	if q.Reverse() {
 		return func(yield func(recordWithRef, error) bool) {
+			n := 0
 			for {
+				if n&1023 == 0 {
+					if err := ctx.Err(); err != nil {
+						yield(recordWithRef{StoreID: storeID}, err)
+						return
+					}
+				}
+				n++
+
 				rec, ref, err := cursor.Prev()
 				if errors.Is(err, chunk.ErrNoMoreRecords) {
 					return
@@ -212,7 +222,16 @@ func (b *scannerBuilder) buildSequentialScanner(cursor chunk.RecordCursor, q Que
 	}
 
 	return func(yield func(recordWithRef, error) bool) {
+		n := 0
 		for {
+			if n&1023 == 0 {
+				if err := ctx.Err(); err != nil {
+					yield(recordWithRef{StoreID: storeID}, err)
+					return
+				}
+			}
+			n++
+
 			rec, ref, err := cursor.Next()
 			if errors.Is(err, chunk.ErrNoMoreRecords) {
 				return
@@ -243,7 +262,7 @@ func (b *scannerBuilder) buildSequentialScanner(cursor chunk.RecordCursor, q Que
 }
 
 // buildPositionScanner creates a scanner that seeks to specific positions.
-func (b *scannerBuilder) buildPositionScanner(cursor chunk.RecordCursor, q Query) iter.Seq2[recordWithRef, error] {
+func (b *scannerBuilder) buildPositionScanner(ctx context.Context, cursor chunk.RecordCursor, q Query) iter.Seq2[recordWithRef, error] {
 	lower, upper := q.TimeBounds()
 	positions := b.positions
 	chunkID := b.chunkID
@@ -253,6 +272,13 @@ func (b *scannerBuilder) buildPositionScanner(cursor chunk.RecordCursor, q Query
 	if q.Reverse() {
 		return func(yield func(recordWithRef, error) bool) {
 			for i := len(positions) - 1; i >= 0; i-- {
+				if i&1023 == 0 {
+					if err := ctx.Err(); err != nil {
+						yield(recordWithRef{StoreID: storeID}, err)
+						return
+					}
+				}
+
 				pos := positions[i]
 				ref := chunk.RecordRef{ChunkID: chunkID, Pos: pos}
 				if err := cursor.Seek(ref); err != nil {
@@ -290,7 +316,14 @@ func (b *scannerBuilder) buildPositionScanner(cursor chunk.RecordCursor, q Query
 	}
 
 	return func(yield func(recordWithRef, error) bool) {
-		for _, pos := range positions {
+		for i, pos := range positions {
+			if i&1023 == 0 {
+				if err := ctx.Err(); err != nil {
+					yield(recordWithRef{StoreID: storeID}, err)
+					return
+				}
+			}
+
 			ref := chunk.RecordRef{ChunkID: chunkID, Pos: pos}
 			if err := cursor.Seek(ref); err != nil {
 				yield(recordWithRef{StoreID: storeID, Ref: ref}, err)

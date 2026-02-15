@@ -22,14 +22,15 @@ import (
 
 // QueryServer implements the QueryService.
 type QueryServer struct {
-	orch *orchestrator.Orchestrator
+	orch         *orchestrator.Orchestrator
+	queryTimeout time.Duration
 }
 
 var _ gastrologv1connect.QueryServiceHandler = (*QueryServer)(nil)
 
 // NewQueryServer creates a new QueryServer.
-func NewQueryServer(orch *orchestrator.Orchestrator) *QueryServer {
-	return &QueryServer{orch: orch}
+func NewQueryServer(orch *orchestrator.Orchestrator, queryTimeout time.Duration) *QueryServer {
+	return &QueryServer{orch: orch, queryTimeout: queryTimeout}
 }
 
 // Search executes a query and streams matching records.
@@ -39,6 +40,12 @@ func (s *QueryServer) Search(
 	req *connect.Request[apiv1.SearchRequest],
 	stream *connect.ServerStream[apiv1.SearchResponse],
 ) error {
+	if s.queryTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.queryTimeout)
+		defer cancel()
+	}
+
 	eng := s.orch.MultiStoreQueryEngine()
 
 	q, err := protoToQuery(req.Msg.Query)
@@ -64,6 +71,9 @@ func (s *QueryServer) Search(
 
 	for rec, err := range iter {
 		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return connect.NewError(connect.CodeDeadlineExceeded, err)
+			}
 			if errors.Is(err, context.Canceled) {
 				return connect.NewError(connect.CodeCanceled, err)
 			}
@@ -207,6 +217,12 @@ func (s *QueryServer) Histogram(
 	ctx context.Context,
 	req *connect.Request[apiv1.HistogramRequest],
 ) (*connect.Response[apiv1.HistogramResponse], error) {
+	if s.queryTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.queryTimeout)
+		defer cancel()
+	}
+
 	// Parse expression to extract time bounds, store filter, and query filters.
 	var q query.Query
 	if req.Msg.Expression != "" {
@@ -264,6 +280,12 @@ func (s *QueryServer) GetContext(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetContextRequest],
 ) (*connect.Response[apiv1.GetContextResponse], error) {
+	if s.queryTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.queryTimeout)
+		defer cancel()
+	}
+
 	ref := req.Msg.Ref
 	if ref == nil || ref.StoreId == "" || ref.ChunkId == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("ref must include store_id, chunk_id, and pos"))

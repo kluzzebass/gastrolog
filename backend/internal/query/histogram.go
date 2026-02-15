@@ -128,7 +128,7 @@ func (e *Engine) Histogram(ctx context.Context, hq HistogramQuery) (*HistogramRe
 		scanned := 0
 		for rec, err := range iter {
 			if err != nil {
-				if errors.Is(err, context.Canceled) {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					break
 				}
 				return nil, err
