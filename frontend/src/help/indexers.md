@@ -83,7 +83,7 @@ flowchart TD
     A[Boolean Expression] --> B[DNF Compilation]
     B --> C[Branch 1: error AND level=error]
     B --> D[Branch 2: warn AND host=*]
-    C --> E{Indexes\nAvailable?}
+    C --> E{Indexes<br/>Available?}
     D --> E
     E -->|Yes| F[Intersect Position Lists]
     E -->|No| G[Runtime Filter]

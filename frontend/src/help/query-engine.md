@@ -28,7 +28,7 @@ flowchart TD
     B --> C[Resolve Time Bounds]
     C --> D[Select Chunks]
     D --> E[Compile to DNF]
-    E --> F{Per-Chunk\nScan}
+    E --> F{Per-Chunk<br/>Scan}
     F --> G[Sealed: Index Lookup]
     F --> H[Unsealed: Full Scan]
     G --> I[Merge & Return]

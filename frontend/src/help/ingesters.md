@@ -4,10 +4,10 @@ Ingesters receive log messages from external sources and feed them into GastroLo
 
 ```mermaid
 flowchart LR
-    A[Syslog\nUDP/TCP] --> O[Orchestrator]
-    B[HTTP\nLoki API] --> O
-    C[Docker\nContainer Logs] --> O
-    D[Tail\nFile Following] --> O
+    A[Syslog<br/>UDP/TCP] --> O[Orchestrator]
+    B[HTTP<br/>Loki API] --> O
+    C[Docker<br/>Container Logs] --> O
+    D[Tail<br/>File Following] --> O
     E[RELP] --> O
     O --> S[Stores]
 ```

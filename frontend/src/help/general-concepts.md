@@ -52,7 +52,7 @@ The path from a log message to a stored, indexed record:
 ```mermaid
 flowchart LR
     A[Ingester] --> B[Digesters]
-    B --> C{Filter\nMatch}
+    B --> C{Filter<br/>Match}
     C -->|env=prod| D[Store A]
     C -->|level=debug| E[Store B]
     D --> F1[Active Chunk]
