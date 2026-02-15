@@ -22,13 +22,12 @@ go mod tidy                                       # Clean dependencies
 just run                    # Server with SQLite config (default)
 just run-json               # Server with JSON config
 just run-memory             # Server with in-memory config (no persistence)
-just repl                   # Server + interactive REPL
 just pprof                  # Server + pprof on :6060
 ```
 
 The server listens on `:4564` by default (Connect RPC / gRPC-Web).
 
-CLI flags: `-datadir <path>`, `-config-type <sqlite|json|memory>`, `-server`, `-repl`, `-pprof <addr>`.
+CLI flags: `-datadir <path>`, `-config-type <sqlite|json|memory>`, `-server`, `-pprof <addr>`.
 
 ## Proto Generation
 
@@ -203,10 +202,6 @@ Coordinates ingestion, indexing, and querying without owning business logic:
 
 Connect RPC server with h2c. QueryServer, StoreServer, ConfigServer, LifecycleServer. Graceful shutdown with request draining. Kubernetes probes at `/healthz` and `/readyz`.
 
-### REPL (`internal/repl/`)
-
-Interactive CLI with readline, bubbletea pager, tab completion. Uses Client interface (GRPCClient for remote, EmbeddedClient for in-process). Commands: `query`, `follow`, `explain`, `chunks`, `stores`, `stats`, etc.
-
 ### Tokenizer (`internal/tokenizer/`)
 
 - Token rules: ASCII alphanumeric + underscore + hyphen, 2-16 chars, lowercased, excludes numeric-only and UUIDs
@@ -243,7 +238,6 @@ internal/
     scanner.go      Composable scanner pipeline
   tokenizer/        Token and KV extraction
   config/           Config types + file/memory stores
-  repl/             Interactive REPL
   server/           Connect RPC server
 api/
   proto/            Proto definitions

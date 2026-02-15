@@ -16,7 +16,7 @@ Never present derived, heuristic, or approximate data as if it were authoritativ
 
 GastroLog is a log management system built around chunk-based storage and indexing.
 
-- **Backend** (`backend/`): Go 1.25+, Connect RPC server, REPL, chunk/index engines
+- **Backend** (`backend/`): Go 1.25+, Connect RPC server, chunk/index engines
 - **Frontend** (`frontend/`): React 19 + Vite 7 + TypeScript + Tailwind v4 + Bun
 - **Proto** (`backend/api/proto/`): Shared protobuf definitions, generated for both Go and TypeScript
 
