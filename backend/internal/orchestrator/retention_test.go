@@ -20,6 +20,9 @@ type retentionFakeChunkManager struct {
 func (f *retentionFakeChunkManager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 	return chunk.ChunkID{}, 0, nil
 }
+func (f *retentionFakeChunkManager) AppendPreserved(record chunk.Record) (chunk.ChunkID, uint64, error) {
+	return chunk.ChunkID{}, 0, nil
+}
 func (f *retentionFakeChunkManager) Seal() error              { return nil }
 func (f *retentionFakeChunkManager) Active() *chunk.ChunkMeta { return nil }
 func (f *retentionFakeChunkManager) Meta(id chunk.ChunkID) (chunk.ChunkMeta, error) {

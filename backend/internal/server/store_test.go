@@ -4,16 +4,19 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"path/filepath"
 	"testing"
 	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/chunk"
+	chunkfile "gastrolog/internal/chunk/file"
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/config"
 	cfgmem "gastrolog/internal/config/memory"
 	"gastrolog/internal/index"
+	indexfile "gastrolog/internal/index/file"
 	indexmem "gastrolog/internal/index/memory"
 	memattr "gastrolog/internal/index/memory/attr"
 	memkv "gastrolog/internal/index/memory/kv"
@@ -716,16 +719,11 @@ func newTwoStoreTestSetup(t *testing.T) twoStoreTestClients {
 	}
 }
 
-func TestMergeStores(t *testing.T) {
+func TestMergeStoresMemory(t *testing.T) {
 	tc := newTwoStoreTestSetup(t)
 	ctx := context.Background()
 
-	// Both stores should exist.
-	srcCM := tc.orch.ChunkManager("src")
-	if srcCM == nil {
-		t.Fatal("src chunk manager should exist")
-	}
-
+	// Memory-backed stores fall back to record-by-record copy.
 	resp, err := tc.store.MergeStores(ctx, connect.NewRequest(&gastrologv1.MergeStoresRequest{
 		Source:      "src",
 		Destination: "dst",
@@ -733,7 +731,6 @@ func TestMergeStores(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MergeStores: %v", err)
 	}
-
 	if resp.Msg.JobId == "" {
 		t.Fatal("expected non-empty job_id")
 	}
@@ -752,6 +749,154 @@ func TestMergeStores(t *testing.T) {
 	dstCM := tc.orch.ChunkManager("dst")
 	if dstCM == nil {
 		t.Fatal("dst chunk manager should still exist")
+	}
+}
+
+func TestMergeStoresFileBacked(t *testing.T) {
+	orch := orchestrator.New(orchestrator.Config{})
+	cfgStore := cfgmem.NewStore()
+	dataDir := t.TempDir()
+
+	factories := orchestrator.Factories{
+		ChunkManagers: map[string]chunk.ManagerFactory{
+			"file": chunkfile.NewFactory(),
+		},
+		IndexManagers: map[string]index.ManagerFactory{
+			"file": indexfile.NewFactory(),
+		},
+		DataDir: dataDir,
+	}
+
+	srv := server.New(orch, cfgStore, factories, nil, server.Config{})
+	handler := srv.Handler()
+	httpClient := &http.Client{
+		Transport: &embeddedTransport{handler: handler},
+	}
+
+	cfgClient := gastrologv1connect.NewConfigServiceClient(httpClient, "http://embedded")
+	storeClient := gastrologv1connect.NewStoreServiceClient(httpClient, "http://embedded")
+	jobClient := gastrologv1connect.NewJobServiceClient(httpClient, "http://embedded")
+	ctx := context.Background()
+
+	_, err := cfgClient.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
+		Config: &gastrologv1.FilterConfig{Id: "catch-all", Expression: "*"},
+	}))
+	if err != nil {
+		t.Fatalf("PutFilter: %v", err)
+	}
+
+	for _, id := range []string{"src", "dst"} {
+		storeDir := filepath.Join(dataDir, "stores", id)
+		_, err := cfgClient.PutStore(ctx, connect.NewRequest(&gastrologv1.PutStoreRequest{
+			Config: &gastrologv1.StoreConfig{
+				Id:     id,
+				Type:   "file",
+				Filter: "catch-all",
+				Params: map[string]string{"dir": storeDir},
+			},
+		}))
+		if err != nil {
+			t.Fatalf("PutStore(%s): %v", id, err)
+		}
+	}
+
+	// Ingest records into src.
+	srcCM := orch.ChunkManager("src")
+	if srcCM == nil {
+		t.Fatal("src chunk manager should exist")
+	}
+
+	t0 := time.Now()
+	for i := range 10 {
+		_, _, err := srcCM.Append(chunk.Record{
+			IngestTS: t0.Add(time.Duration(i) * time.Second),
+			Attrs:    chunk.Attributes{"env": "test"},
+			Raw:      []byte("merge-record"),
+		})
+		if err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+
+	// Seal to ensure we have sealed chunks.
+	if err := srcCM.Seal(); err != nil {
+		t.Fatalf("Seal: %v", err)
+	}
+
+	// Read WriteTS from source records before merge (for verification).
+	srcMetas, _ := srcCM.List()
+	var originalWriteTSs []time.Time
+	for _, meta := range srcMetas {
+		cursor, err := srcCM.OpenCursor(meta.ID)
+		if err != nil {
+			t.Fatalf("open cursor: %v", err)
+		}
+		for {
+			rec, _, err := cursor.Next()
+			if err != nil {
+				break
+			}
+			originalWriteTSs = append(originalWriteTSs, rec.WriteTS)
+		}
+		cursor.Close()
+	}
+	if len(originalWriteTSs) != 10 {
+		t.Fatalf("expected 10 records in src, got %d", len(originalWriteTSs))
+	}
+
+	resp, err := storeClient.MergeStores(ctx, connect.NewRequest(&gastrologv1.MergeStoresRequest{
+		Source:      "src",
+		Destination: "dst",
+	}))
+	if err != nil {
+		t.Fatalf("MergeStores: %v", err)
+	}
+	if resp.Msg.JobId == "" {
+		t.Fatal("expected non-empty job_id")
+	}
+
+	job := waitForJob(t, jobClient, resp.Msg.JobId)
+	if job.Status != gastrologv1.JobStatus_JOB_STATUS_COMPLETED {
+		t.Errorf("expected completed, got %v (error: %s, details: %v)", job.Status, job.Error, job.ErrorDetails)
+	}
+
+	// Source should be gone.
+	if cm := orch.ChunkManager("src"); cm != nil {
+		t.Error("source chunk manager should be nil after merge")
+	}
+
+	// Destination should have all records with preserved WriteTS.
+	dstCM := orch.ChunkManager("dst")
+	if dstCM == nil {
+		t.Fatal("dst chunk manager should still exist")
+	}
+
+	dstMetas, _ := dstCM.List()
+	var mergedWriteTSs []time.Time
+	for _, meta := range dstMetas {
+		cursor, err := dstCM.OpenCursor(meta.ID)
+		if err != nil {
+			t.Fatalf("open dst cursor: %v", err)
+		}
+		for {
+			rec, _, err := cursor.Next()
+			if err != nil {
+				break
+			}
+			mergedWriteTSs = append(mergedWriteTSs, rec.WriteTS)
+		}
+		cursor.Close()
+	}
+
+	if len(mergedWriteTSs) != 10 {
+		t.Fatalf("expected 10 merged records, got %d", len(mergedWriteTSs))
+	}
+
+	// WriteTS should be preserved (not rewritten).
+	for i, orig := range originalWriteTSs {
+		if !orig.Equal(mergedWriteTSs[i]) {
+			t.Errorf("record %d: WriteTS changed from %v to %v", i, orig, mergedWriteTSs[i])
+		}
 	}
 }
 

@@ -71,6 +71,17 @@ func NewManager(cfg Config) (*Manager, error) {
 }
 
 func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
+	return m.doAppend(record, false)
+}
+
+func (m *Manager) AppendPreserved(record chunk.Record) (chunk.ChunkID, uint64, error) {
+	if record.WriteTS.IsZero() {
+		return chunk.ChunkID{}, 0, chunk.ErrMissingWriteTS
+	}
+	return m.doAppend(record, true)
+}
+
+func (m *Manager) doAppend(record chunk.Record, preserveWriteTS bool) (chunk.ChunkID, uint64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -99,10 +110,11 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 		}
 	}
 
-	// WriteTS is assigned by the chunk manager, not the caller.
-	// Monotonic by construction since writes are mutex-serialized.
-	// Uses m.cfg.Now (defaults to time.Now) so tests can inject a fake clock.
-	record.WriteTS = m.cfg.Now()
+	if !preserveWriteTS {
+		// WriteTS is assigned by the chunk manager, not the caller.
+		// Monotonic by construction since writes are mutex-serialized.
+		record.WriteTS = m.cfg.Now()
+	}
 
 	offset := uint64(len(m.active.records))
 	m.active.records = append(m.active.records, record)

@@ -183,6 +183,17 @@ func NewManager(cfg Config) (*Manager, error) {
 }
 
 func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
+	return m.doAppend(record, false)
+}
+
+func (m *Manager) AppendPreserved(record chunk.Record) (chunk.ChunkID, uint64, error) {
+	if record.WriteTS.IsZero() {
+		return chunk.ChunkID{}, 0, chunk.ErrMissingWriteTS
+	}
+	return m.doAppend(record, true)
+}
+
+func (m *Manager) doAppend(record chunk.Record, preserveWriteTS bool) (chunk.ChunkID, uint64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -223,9 +234,11 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 		}
 	}
 
-	// WriteTS is assigned by the chunk manager, not the caller.
-	// Monotonic by construction since writes are mutex-serialized.
-	record.WriteTS = m.cfg.Now()
+	if !preserveWriteTS {
+		// WriteTS is assigned by the chunk manager, not the caller.
+		// Monotonic by construction since writes are mutex-serialized.
+		record.WriteTS = m.cfg.Now()
+	}
 
 	rawLen := uint64(len(record.Raw))
 	attrLen := uint64(len(attrBytes))
@@ -1092,3 +1105,69 @@ func (m *Manager) SetRotationPolicy(policy chunk.RotationPolicy) {
 }
 
 var _ chunk.ChunkManager = (*Manager)(nil)
+var _ chunk.ChunkMover = (*Manager)(nil)
+
+// ChunkDir returns the filesystem path for a chunk's directory.
+func (m *Manager) ChunkDir(id chunk.ChunkID) string {
+	return m.chunkDir(id)
+}
+
+// Disown untracks a sealed chunk without deleting its files.
+// The chunk must exist, be sealed, and not be the active chunk.
+func (m *Manager) Disown(id chunk.ChunkID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.closed {
+		return ErrManagerClosed
+	}
+
+	if m.active != nil && m.active.meta.id == id {
+		return chunk.ErrActiveChunk
+	}
+
+	meta, ok := m.metas[id]
+	if !ok {
+		return chunk.ErrChunkNotFound
+	}
+	if !meta.sealed {
+		return chunk.ErrChunkNotSealed
+	}
+
+	delete(m.metas, id)
+	return nil
+}
+
+// Adopt registers a sealed chunk directory already present in the storage dir.
+// The directory must exist, contain valid idx.log metadata, and the chunk must be sealed.
+func (m *Manager) Adopt(id chunk.ChunkID) (chunk.ChunkMeta, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.closed {
+		return chunk.ChunkMeta{}, ErrManagerClosed
+	}
+
+	// Check if already tracked.
+	if _, ok := m.metas[id]; ok {
+		return chunk.ChunkMeta{}, fmt.Errorf("chunk %s already tracked", id)
+	}
+
+	// Verify directory exists.
+	dir := m.chunkDir(id)
+	if _, err := os.Stat(dir); err != nil {
+		return chunk.ChunkMeta{}, fmt.Errorf("chunk directory missing: %w", err)
+	}
+
+	meta, err := m.loadChunkMeta(id)
+	if err != nil {
+		return chunk.ChunkMeta{}, fmt.Errorf("load chunk meta: %w", err)
+	}
+
+	if !meta.sealed {
+		return chunk.ChunkMeta{}, chunk.ErrChunkNotSealed
+	}
+
+	m.metas[id] = meta
+	return meta.toChunkMeta(), nil
+}

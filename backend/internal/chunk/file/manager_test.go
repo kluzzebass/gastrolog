@@ -678,6 +678,187 @@ func searchString(s, substr string) bool {
 	return false
 }
 
+func TestChunkDir(t *testing.T) {
+	dir := t.TempDir()
+	manager, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer manager.Close()
+
+	rec := chunk.Record{IngestTS: time.UnixMicro(1), Attrs: chunk.Attributes{"src": "test"}, Raw: []byte("a")}
+	chunkID, _, err := manager.Append(rec)
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	got := manager.ChunkDir(chunkID)
+	want := filepath.Join(dir, chunkID.String())
+	if got != want {
+		t.Errorf("ChunkDir: got %q, want %q", got, want)
+	}
+}
+
+func TestDisown(t *testing.T) {
+	dir := t.TempDir()
+	manager, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer manager.Close()
+
+	rec := chunk.Record{IngestTS: time.UnixMicro(1), Attrs: chunk.Attributes{"src": "test"}, Raw: []byte("a")}
+	chunkID, _, err := manager.Append(rec)
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := manager.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	// Disown the sealed chunk.
+	if err := manager.Disown(chunkID); err != nil {
+		t.Fatalf("disown: %v", err)
+	}
+
+	// Chunk should no longer be tracked.
+	if _, err := manager.Meta(chunkID); err != chunk.ErrChunkNotFound {
+		t.Errorf("expected ErrChunkNotFound after disown, got %v", err)
+	}
+
+	// Files should still exist on disk.
+	chunkDir := filepath.Join(dir, chunkID.String())
+	if _, err := os.Stat(chunkDir); os.IsNotExist(err) {
+		t.Error("chunk directory should still exist after disown")
+	}
+}
+
+func TestDisownActiveChunkFails(t *testing.T) {
+	dir := t.TempDir()
+	manager, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer manager.Close()
+
+	rec := chunk.Record{IngestTS: time.UnixMicro(1), Attrs: chunk.Attributes{"src": "test"}, Raw: []byte("a")}
+	chunkID, _, err := manager.Append(rec)
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	// Disown the active chunk should fail.
+	if err := manager.Disown(chunkID); err != chunk.ErrActiveChunk {
+		t.Errorf("expected ErrActiveChunk, got %v", err)
+	}
+}
+
+func TestDisownUnsealedChunkFails(t *testing.T) {
+	dir := t.TempDir()
+	manager, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer manager.Close()
+
+	// Disown nonexistent chunk.
+	fakeID := chunk.NewChunkID()
+	if err := manager.Disown(fakeID); err != chunk.ErrChunkNotFound {
+		t.Errorf("expected ErrChunkNotFound, got %v", err)
+	}
+}
+
+func TestAdopt(t *testing.T) {
+	dir := t.TempDir()
+	manager, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+
+	rec := chunk.Record{IngestTS: time.UnixMicro(1000), Attrs: chunk.Attributes{"src": "test"}, Raw: []byte("adopt-me")}
+	chunkID, _, err := manager.Append(rec)
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := manager.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	// Disown the chunk.
+	if err := manager.Disown(chunkID); err != nil {
+		t.Fatalf("disown: %v", err)
+	}
+
+	// Adopt it back.
+	meta, err := manager.Adopt(chunkID)
+	if err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+	if meta.ID != chunkID {
+		t.Errorf("adopted chunk ID: got %s, want %s", meta.ID, chunkID)
+	}
+	if !meta.Sealed {
+		t.Error("adopted chunk should be sealed")
+	}
+	if meta.RecordCount != 1 {
+		t.Errorf("adopted chunk record count: got %d, want 1", meta.RecordCount)
+	}
+
+	// Should be listed again.
+	metas, err := manager.List()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	found := false
+	for _, m := range metas {
+		if m.ID == chunkID {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("adopted chunk should appear in list")
+	}
+
+	manager.Close()
+}
+
+func TestAdoptMissingDirFails(t *testing.T) {
+	dir := t.TempDir()
+	manager, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer manager.Close()
+
+	fakeID := chunk.NewChunkID()
+	if _, err := manager.Adopt(fakeID); err == nil {
+		t.Fatal("expected error adopting nonexistent chunk")
+	}
+}
+
+func TestAdoptAlreadyTrackedFails(t *testing.T) {
+	dir := t.TempDir()
+	manager, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer manager.Close()
+
+	rec := chunk.Record{IngestTS: time.UnixMicro(1), Attrs: chunk.Attributes{"src": "test"}, Raw: []byte("a")}
+	chunkID, _, err := manager.Append(rec)
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := manager.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	// Adopt a chunk that's already tracked should fail.
+	if _, err := manager.Adopt(chunkID); err == nil {
+		t.Fatal("expected error adopting already-tracked chunk")
+	}
+}
+
 // TestListReturnsSortedChunks verifies that List() returns chunks sorted by StartTS.
 func TestListReturnsSortedChunks(t *testing.T) {
 	dir := t.TempDir()

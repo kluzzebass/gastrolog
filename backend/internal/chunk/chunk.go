@@ -15,6 +15,7 @@ var (
 	ErrChunkNotSealed = errors.New("chunk is not sealed")
 	ErrChunkNotFound  = errors.New("chunk not found")
 	ErrActiveChunk    = errors.New("cannot delete active chunk")
+	ErrMissingWriteTS = errors.New("AppendPreserved requires non-zero WriteTS")
 )
 
 // ManagerFactory creates a ChunkManager from configuration parameters.
@@ -29,6 +30,14 @@ type ManagerFactory func(params map[string]string, logger *slog.Logger) (ChunkMa
 // to chunk metadata and cursors.
 type ChunkManager interface {
 	Append(record Record) (ChunkID, uint64, error)
+
+	// AppendPreserved appends a record using its existing WriteTS instead of
+	// assigning a new one. The record's WriteTS must be non-zero.
+	// Used by merge/clone operations to preserve original timestamps.
+	// The caller is responsible for ensuring WriteTS monotonicity within a chunk
+	// (i.e. each call's WriteTS must be >= the previous call's WriteTS).
+	AppendPreserved(record Record) (ChunkID, uint64, error)
+
 	Seal() error
 	Active() *ChunkMeta
 	Meta(id ChunkID) (ChunkMeta, error)
@@ -52,6 +61,22 @@ type ChunkManager interface {
 	// Close releases resources held by the manager (file locks, mmap regions, etc).
 	// After Close, the manager must not be used.
 	Close() error
+}
+
+// ChunkMover extends ChunkManager with filesystem-level chunk movement.
+// Not all ChunkManager implementations support this (e.g. memory-based ones
+// cannot). Callers should type-assert to check availability.
+type ChunkMover interface {
+	// Adopt registers a sealed chunk directory already present in the storage dir.
+	// The chunk must have valid idx.log metadata and be sealed.
+	Adopt(id ChunkID) (ChunkMeta, error)
+
+	// Disown untracks a sealed chunk without deleting its files.
+	// The chunk must be sealed and not the active chunk.
+	Disown(id ChunkID) error
+
+	// ChunkDir returns the filesystem path for a chunk's directory.
+	ChunkDir(id ChunkID) string
 }
 
 // RecordCursor provides bidirectional iteration over records in a chunk.

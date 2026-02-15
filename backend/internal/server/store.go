@@ -892,9 +892,9 @@ func (s *StoreServer) copyRecords(ctx context.Context, srcID, dstID string) (rec
 				return recordsCopied, chunksCreated, fmt.Errorf("read chunk %s: %w", meta.ID, readErr)
 			}
 
-			// Copy record to outlive cursor.
+			// Copy record to outlive cursor; preserve original WriteTS.
 			rec = rec.Copy()
-			if _, _, appendErr := dstCM.Append(rec); appendErr != nil {
+			if _, _, appendErr := dstCM.AppendPreserved(rec); appendErr != nil {
 				cursor.Close()
 				return recordsCopied, chunksCreated, fmt.Errorf("append record: %w", appendErr)
 			}
@@ -960,7 +960,7 @@ func (s *StoreServer) copyRecordsTracked(ctx context.Context, srcID, dstID strin
 			}
 
 			rec = rec.Copy()
-			if _, _, appendErr := dstCM.Append(rec); appendErr != nil {
+			if _, _, appendErr := dstCM.AppendPreserved(rec); appendErr != nil {
 				cursor.Close()
 				return fmt.Errorf("append record: %w", appendErr)
 			}
@@ -1026,8 +1026,8 @@ func (s *StoreServer) getStoreInfo(ctx context.Context, id string) (*apiv1.Store
 	return info, nil
 }
 
-// MergeStores copies all records from a source store into a destination store,
-// then deletes the source.
+// MergeStores moves all chunks from a source store into a destination store,
+// then deletes the source. Both stores must support chunk-level moves (ChunkMover).
 func (s *StoreServer) MergeStores(
 	ctx context.Context,
 	req *connect.Request[apiv1.MergeStoresRequest],
@@ -1051,18 +1051,29 @@ func (s *StoreServer) MergeStores(
 	if dstCM == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("destination store not found"))
 	}
-	_ = dstCM // validated above
+
+	// Use chunk-level moves when both sides support it (preserves WriteTS).
+	// Fall back to record-by-record copy otherwise (rewrites WriteTS).
+	_, srcMovable := srcCM.(chunk.ChunkMover)
+	_, dstMovable := dstCM.(chunk.ChunkMover)
+	canMoveChunks := srcMovable && dstMovable
 
 	srcID := req.Msg.Source
 	dstID := req.Msg.Destination
 	jobName := "merge:" + srcID + "->" + dstID
 	jobID := s.orch.Scheduler().Submit(jobName, func(ctx context.Context, job *orchestrator.JobProgress) {
-		if err := s.copyRecordsTracked(ctx, srcID, dstID, job); err != nil {
+		var err error
+		if canMoveChunks {
+			err = s.moveChunksTracked(ctx, srcID, dstID, job)
+		} else {
+			err = s.copyRecordsTracked(ctx, srcID, dstID, job)
+		}
+		if err != nil {
 			job.Fail(s.now(), fmt.Sprintf("merge records: %v", err))
 			return
 		}
 
-		// Force-delete the source store.
+		// Force-delete the source store (now empty).
 		if err := s.orch.ForceRemoveStore(srcID); err != nil {
 			job.Fail(s.now(), fmt.Sprintf("delete source: %v", err))
 			return
@@ -1082,6 +1093,72 @@ func (s *StoreServer) MergeStores(
 	s.orch.Scheduler().Describe(jobName, fmt.Sprintf("Merge '%s' into '%s'", s.storeName(ctx, srcID), s.storeName(ctx, dstID)))
 
 	return connect.NewResponse(&apiv1.MergeStoresResponse{JobId: jobID}), nil
+}
+
+// moveChunksTracked moves sealed chunks from source to destination by
+// moving chunk directories on the filesystem. This preserves all record
+// timestamps (including WriteTS) since no records are rewritten.
+func (s *StoreServer) moveChunksTracked(ctx context.Context, srcID, dstID string, job *orchestrator.JobProgress) error {
+	srcCM := s.orch.ChunkManager(srcID)
+	dstCM := s.orch.ChunkManager(dstID)
+	dstIM := s.orch.IndexManager(dstID)
+
+	srcMover := srcCM.(chunk.ChunkMover)
+	dstMover := dstCM.(chunk.ChunkMover)
+
+	// Seal source's active chunk so all data is in sealed chunks.
+	if active := srcCM.Active(); active != nil && active.RecordCount > 0 {
+		if err := srcCM.Seal(); err != nil {
+			return fmt.Errorf("seal source active chunk: %w", err)
+		}
+	}
+
+	metas, err := srcCM.List()
+	if err != nil {
+		return err
+	}
+
+	job.SetRunning(int64(len(metas)))
+
+	for _, meta := range metas {
+		if !meta.Sealed {
+			continue
+		}
+
+		srcDir := srcMover.ChunkDir(meta.ID)
+		dstDir := dstMover.ChunkDir(meta.ID)
+
+		// Untrack from source.
+		if err := srcMover.Disown(meta.ID); err != nil {
+			return fmt.Errorf("disown chunk %s: %w", meta.ID, err)
+		}
+
+		// Move directory.
+		if err := chunkfile.MoveDir(srcDir, dstDir); err != nil {
+			// Attempt to restore source tracking on failure.
+			if _, adoptErr := srcMover.Adopt(meta.ID); adoptErr != nil {
+				job.AddErrorDetail(fmt.Sprintf("failed to restore chunk %s after move error: %v", meta.ID, adoptErr))
+			}
+			return fmt.Errorf("move chunk %s: %w", meta.ID, err)
+		}
+
+		// Register in destination.
+		if _, err := dstMover.Adopt(meta.ID); err != nil {
+			return fmt.Errorf("adopt chunk %s in destination: %w", meta.ID, err)
+		}
+
+		// Build indexes for the moved chunk in the destination.
+		if dstIM != nil {
+			if err := dstIM.BuildIndexes(ctx, meta.ID); err != nil {
+				job.AddErrorDetail(fmt.Sprintf("build indexes for chunk %s: %v", meta.ID, err))
+			}
+		}
+
+		job.AddRecords(meta.RecordCount)
+		job.IncrChunks()
+	}
+
+	return nil
 }
 
 func chunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {

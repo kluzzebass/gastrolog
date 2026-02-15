@@ -19,6 +19,9 @@ type cronFakeChunkManager struct {
 func (f *cronFakeChunkManager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 	return chunk.ChunkID{}, 0, nil
 }
+func (f *cronFakeChunkManager) AppendPreserved(record chunk.Record) (chunk.ChunkID, uint64, error) {
+	return chunk.ChunkID{}, 0, nil
+}
 func (f *cronFakeChunkManager) Seal() error {
 	f.sealed = true
 	return f.sealErr
