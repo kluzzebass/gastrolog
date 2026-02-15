@@ -1,5 +1,6 @@
 import { isValidElement, useMemo, useState } from "react";
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Dialog } from "./Dialog";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { helpTopics, findTopic } from "../help/topics";
@@ -62,7 +63,7 @@ export function HelpDialog({ dark, topicId, onClose }: HelpDialogProps) {
             Help
           </h2>
           {topic ? (
-            <Markdown components={mdComponents}>
+            <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>
               {topic.content}
             </Markdown>
           ) : (

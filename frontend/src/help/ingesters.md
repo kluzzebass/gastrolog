@@ -2,6 +2,16 @@
 
 Ingesters receive log messages from external sources and feed them into GastroLog's ingestion pipeline. Each ingester runs independently and emits records with attributes, timestamps, and the raw payload.
 
+```mermaid
+flowchart LR
+    A[Syslog\nUDP/TCP] --> O[Orchestrator]
+    B[HTTP\nLoki API] --> O
+    C[Docker\nContainer Logs] --> O
+    D[Tail\nFile Following] --> O
+    E[RELP] --> O
+    O --> S[Stores]
+```
+
 ## Syslog
 
 Type: `syslog`

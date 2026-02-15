@@ -2,6 +2,16 @@
 
 Policies control the lifecycle of chunks within a store. **Rotation policies** determine when to seal the active chunk, and **retention policies** determine when to delete old sealed chunks.
 
+```mermaid
+stateDiagram-v2
+    [*] --> Active: Create
+    Active --> Active: Append records
+    Active --> Sealed: Rotation policy
+    Sealed --> Indexed: Index build
+    Indexed --> Deleted: Retention policy
+    Deleted --> [*]
+```
+
 ## Rotation Policies
 
 A rotation policy defines when the active chunk should be sealed and a new one started. Multiple conditions can be combined — the chunk rotates when **any** condition is met.

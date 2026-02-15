@@ -41,6 +41,15 @@ Extraction format: `key=value` or `key="quoted value"` patterns in the log text.
 
 ## How Indexes Are Built
 
+```mermaid
+flowchart LR
+    A[Active Chunk] -->|Seal| B[Sealed Chunk]
+    B --> C[Index Build Job]
+    C --> D[Token Index]
+    C --> E[Attr Indexes]
+    C --> F[KV Indexes]
+```
+
 1. A chunk is **sealed** (rotation policy triggers or manual seal)
 2. The orchestrator schedules an asynchronous **index build job**
 3. Each indexer reads the sealed chunk's records via a cursor and writes its index artifacts
@@ -52,6 +61,19 @@ Indexes are only built for sealed chunks. The active (unsealed) chunk is always 
 ## Query Acceleration
 
 When the query engine processes a sealed chunk:
+
+```mermaid
+flowchart TD
+    A[Boolean Expression] --> B[DNF Compilation]
+    B --> C[Branch 1: error AND level=error]
+    B --> D[Branch 2: warn AND host=*]
+    C --> E{Indexes\nAvailable?}
+    D --> E
+    E -->|Yes| F[Intersect Position Lists]
+    E -->|No| G[Runtime Filter]
+    F --> H[Union Results]
+    G --> H
+```
 
 1. The boolean expression is converted to **Disjunctive Normal Form** (DNF) — a union of conjunctions
 2. For each conjunction branch, the engine checks which predicates have index coverage

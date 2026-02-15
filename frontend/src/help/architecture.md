@@ -2,6 +2,31 @@
 
 This page explains the design rationale behind GastroLog's core architecture.
 
+```mermaid
+graph TD
+    subgraph Ingestion
+        I[Ingesters]
+        O[Orchestrator]
+        I --> O
+    end
+
+    subgraph Storage
+        O -->|Filter| S1[Store A]
+        O -->|Filter| S2[Store B]
+        S1 --> C1[Chunks]
+        S2 --> C2[Chunks]
+        C1 --> X1[Indexes]
+        C2 --> X2[Indexes]
+    end
+
+    subgraph Query
+        Q[Query Engine]
+        X1 --> Q
+        X2 --> Q
+        Q --> R[Results]
+    end
+```
+
 ## Chunk-Based Storage
 
 Rather than writing all logs to a single file or database table, GastroLog splits records into **chunks** — bounded, append-only segments.

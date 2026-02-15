@@ -49,6 +49,17 @@ You can have multiple stores for different purposes — production logs in one, 
 
 The path from a log message to a stored, indexed record:
 
+```mermaid
+flowchart LR
+    A[Ingester] --> B[Orchestrator]
+    B --> C{Filter\nMatch}
+    C -->|env=prod| D[Store A]
+    C -->|level=debug| E[Store B]
+    D --> F[Active Chunk]
+    F -->|Rotation| G[Sealed Chunk]
+    G -->|Async| H[Index Build]
+```
+
 1. An **ingester** (syslog, HTTP, tail, etc.) receives a log message and emits an `IngestMessage` with the raw payload, parsed attributes, SourceTS, and IngestTS
 2. The **orchestrator** evaluates each store's **filter** against the message's attributes to determine which stores should receive it
 3. For each matching store, the record is **appended** to the store's active chunk with a WriteTS

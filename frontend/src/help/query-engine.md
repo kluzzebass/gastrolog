@@ -55,6 +55,19 @@ TIME accepts RFC 3339 format (e.g., `2024-01-15T08:00:00Z`) or Unix timestamps.
 
 ## Query Evaluation
 
+```mermaid
+flowchart TD
+    A[Query String] --> B[Parse to AST]
+    B --> C[Resolve Time Bounds]
+    C --> D[Select Chunks]
+    D --> E[Compile to DNF]
+    E --> F{Per-Chunk\nScan}
+    F --> G[Sealed: Index Lookup]
+    F --> H[Unsealed: Full Scan]
+    G --> I[Merge & Return]
+    H --> I
+```
+
 When a search is executed:
 
 1. **Parse**: The query string is parsed into an AST of predicates and boolean operators
