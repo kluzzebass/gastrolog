@@ -13,6 +13,7 @@ interface HeaderBarProps {
   sealedChunks: bigint;
   totalBytes: bigint;
   inspectorGlow: boolean;
+  onShowHelp: () => void;
   onShowInspector: () => void;
   onShowSettings: () => void;
   currentUser: { username: string; role: string } | null;
@@ -29,6 +30,7 @@ export function HeaderBar({
   totalStores,
   sealedChunks,
   totalBytes,
+  onShowHelp,
   inspectorGlow,
   onShowInspector,
   onShowSettings,
@@ -113,6 +115,30 @@ export function HeaderBar({
             : theme === "light"
               ? "\u2600"
               : "\u25D1"}
+        </button>
+
+        <button
+          onClick={onShowHelp}
+          aria-label="Help"
+          title="Help"
+          className={`w-7 h-7 flex items-center justify-center rounded transition-all duration-200 ${c(
+            "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
+            "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
+          )}`}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="w-4 h-4"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
         </button>
 
         <button

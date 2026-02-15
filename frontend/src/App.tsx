@@ -51,6 +51,8 @@ import { Dialog, CloseButton } from "./components/Dialog";
 import { tokenize } from "./queryTokenizer";
 import { useAutocomplete } from "./hooks/useAutocomplete";
 import { HeaderBar } from "./components/HeaderBar";
+import { HelpDialog } from "./components/HelpDialog";
+import { HelpProvider } from "./hooks/useHelp";
 import { ResultsToolbar } from "./components/ResultsToolbar";
 import { QueryBar } from "./components/QueryBar";
 
@@ -91,8 +93,15 @@ function AppContent() {
     showHistory, setShowHistory,
     showSavedQueries, setShowSavedQueries,
     showChangePassword, setShowChangePassword,
+    showHelpDialog, setShowHelpDialog,
+    helpTopic, setHelpTopic,
     inspectorGlow,
   } = useDialogState();
+
+  const openHelp = useCallback((topicId?: string) => {
+    setHelpTopic(topicId);
+    setShowHelpDialog(true);
+  }, []);
 
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(
     null,
@@ -525,6 +534,7 @@ function AppContent() {
   const c = useThemeClass(dark);
 
   return (
+    <HelpProvider onOpen={openHelp}>
     <div
       className={`grain h-screen overflow-hidden flex flex-col font-body text-base ${c("bg-ink text-text-normal", "light-theme bg-light-bg text-light-text-normal")}`}
     >
@@ -540,6 +550,7 @@ function AppContent() {
         sealedChunks={sealedChunks}
         totalBytes={totalBytes}
         inspectorGlow={inspectorGlow}
+        onShowHelp={() => openHelp()}
         onShowInspector={() => setShowInspector(true)}
         onShowSettings={() => setShowSettings(true)}
         currentUser={currentUser ? { username: currentUser.username, role: currentUser.role } : null}
@@ -671,6 +682,14 @@ function AppContent() {
               tab={inspectorTab}
               onTabChange={setInspectorTab}
               onClose={() => setShowInspector(false)}
+            />
+          )}
+
+          {showHelpDialog && (
+            <HelpDialog
+              dark={dark}
+              topicId={helpTopic}
+              onClose={() => setShowHelpDialog(false)}
             />
           )}
 
@@ -918,6 +937,7 @@ function AppContent() {
         />
       </div>
     </div>
+    </HelpProvider>
   );
 }
 
