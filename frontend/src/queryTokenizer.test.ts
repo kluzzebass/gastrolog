@@ -270,10 +270,10 @@ describe("complex queries", () => {
     expect(r.hasErrors).toBe(false);
     const nonWs = r.spans.filter((s) => s.role !== "whitespace");
     // last=5m: directive-key eq value
-    expect(nonWs[0].role).toBe("directive-key");
+    expect(nonWs[0]!.role).toBe("directive-key");
     // level=error: key eq value
-    expect(nonWs[6].role).toBe("key");
-    expect(nonWs[6].text).toBe("level");
+    expect(nonWs[6]!.role).toBe("key");
+    expect(nonWs[6]!.text).toBe("level");
   });
 
   test("mixed predicates and boolean", () => {

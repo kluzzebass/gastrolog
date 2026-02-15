@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from "react";
 
-export function useEditState<T extends Record<string, unknown>>(
+export function useEditState<T extends Record<string, any>>(
   defaults: (id: string) => T,
 ) {
   const [edits, setEdits] = useState<Record<string, T>>({});

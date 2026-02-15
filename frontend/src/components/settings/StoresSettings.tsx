@@ -514,7 +514,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                 dark={dark}
               />
               {migrateTarget[store.id] && (() => {
-                const mt = migrateTarget[store.id];
+                const mt = migrateTarget[store.id]!;
                 const resolvedType = mt.type || store.type;
                 const dirRequired = resolvedType === "file";
                 const canSubmit = mt.name.trim() && (!dirRequired || mt.dir.trim());
@@ -540,7 +540,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                           onChange={(v) =>
                             setMigrateTarget((prev) => ({
                               ...prev,
-                              [store.id]: { ...prev[store.id], name: v },
+                              [store.id]: { ...prev[store.id]!, name: v },
                             }))
                           }
                           placeholder="new-store"
@@ -554,7 +554,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                           onChange={(v) =>
                             setMigrateTarget((prev) => ({
                               ...prev,
-                              [store.id]: { ...prev[store.id], type: v, dir: "" },
+                              [store.id]: { ...prev[store.id]!, type: v, dir: "" },
                             }))
                           }
                           options={[
@@ -572,7 +572,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                             onChange={(v) =>
                               setMigrateTarget((prev) => ({
                                 ...prev,
-                                [store.id]: { ...prev[store.id], dir: v },
+                                [store.id]: { ...prev[store.id]!, dir: v },
                               }))
                             }
                             placeholder="/path/to/store"
@@ -643,7 +643,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                   <div className="grid grid-cols-2 gap-3">
                     <FormField label="Destination" dark={dark}>
                       <SelectInput
-                        value={mergeTarget[store.id]}
+                        value={mergeTarget[store.id] ?? ""}
                         onChange={(v) =>
                           setMergeTarget((prev) => ({ ...prev, [store.id]: v }))
                         }

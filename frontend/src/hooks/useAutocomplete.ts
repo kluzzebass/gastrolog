@@ -26,11 +26,11 @@ function wordAtCursor(
 
   // Scan backward from cursor to find word start.
   let start = cursor;
-  while (start > 0 && !isWordBreak(text[start - 1])) start--;
+  while (start > 0 && !isWordBreak(text[start - 1]!)) start--;
 
   // Scan forward from cursor to find word end.
   let end = cursor;
-  while (end < text.length && !isWordBreak(text[end])) end++;
+  while (end < text.length && !isWordBreak(text[end]!)) end++;
 
   const word = text.slice(start, cursor); // only the part before cursor
   if (word.length === 0) return null;
@@ -47,7 +47,7 @@ function getValueContext(text: string, wordStart: number): string | null {
 
   // Find the key before =.
   let keyEnd = i + 1;
-  while (i >= 0 && !isWordBreak(text[i])) i--;
+  while (i >= 0 && !isWordBreak(text[i]!)) i--;
   const key = text.slice(i + 1, keyEnd);
   return key.length > 0 ? key : null;
 }
@@ -199,7 +199,7 @@ export function useAutocomplete(
       if (!isOpen || idx < 0 || idx >= suggestions.length || !replaceRange)
         return null;
 
-      const suggestion = suggestions[idx];
+      const suggestion = suggestions[idx]!;
       const valueKey = getValueContext(draft, replaceRange.start);
 
       // Keys get "=" appended, values and operators get " ".

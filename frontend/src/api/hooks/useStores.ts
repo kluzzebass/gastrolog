@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Timestamp } from "@bufbuild/protobuf";
 import { storeClient } from "../client";
 
 export function useStores() {
@@ -147,7 +148,15 @@ export function useImportRecords() {
         raw: Uint8Array;
       }>;
     }) => {
-      const response = await storeClient.importRecords(args);
+      const response = await storeClient.importRecords({
+        store: args.store,
+        records: args.records.map((r) => ({
+          raw: r.raw as Uint8Array<ArrayBuffer>,
+          attrs: r.attrs,
+          sourceTs: r.sourceTs ? Timestamp.fromDate(r.sourceTs) : undefined,
+          ingestTs: r.ingestTs ? Timestamp.fromDate(r.ingestTs) : undefined,
+        })),
+      });
       return response;
     },
     onSuccess: () => {

@@ -20,7 +20,7 @@ describe("useQueryHistory", () => {
     });
 
     expect(result.current.entries).toHaveLength(1);
-    expect(result.current.entries[0].query).toBe("level=error");
+    expect(result.current.entries[0]!.query).toBe("level=error");
   });
 
   test("add trims whitespace", () => {
@@ -30,7 +30,7 @@ describe("useQueryHistory", () => {
       result.current.add("  level=error  ");
     });
 
-    expect(result.current.entries[0].query).toBe("level=error");
+    expect(result.current.entries[0]!.query).toBe("level=error");
   });
 
   test("add ignores empty strings", () => {
@@ -58,8 +58,8 @@ describe("useQueryHistory", () => {
     });
 
     expect(result.current.entries).toHaveLength(2);
-    expect(result.current.entries[0].query).toBe("first");
-    expect(result.current.entries[1].query).toBe("second");
+    expect(result.current.entries[0]!.query).toBe("first");
+    expect(result.current.entries[1]!.query).toBe("second");
   });
 
   test("add caps at 50 entries", () => {
@@ -73,7 +73,7 @@ describe("useQueryHistory", () => {
 
     expect(result.current.entries).toHaveLength(50);
     // Most recent should be first
-    expect(result.current.entries[0].query).toBe("query-59");
+    expect(result.current.entries[0]!.query).toBe("query-59");
   });
 
   test("add persists to localStorage", () => {
@@ -103,7 +103,7 @@ describe("useQueryHistory", () => {
     });
 
     expect(result.current.entries).toHaveLength(1);
-    expect(result.current.entries[0].query).toBe("keep");
+    expect(result.current.entries[0]!.query).toBe("keep");
   });
 
   test("clear removes all entries", () => {
@@ -130,7 +130,7 @@ describe("useQueryHistory", () => {
 
     const { result } = renderHook(() => useQueryHistory());
     expect(result.current.entries).toHaveLength(1);
-    expect(result.current.entries[0].query).toBe("from-storage");
+    expect(result.current.entries[0]!.query).toBe("from-storage");
   });
 
   test("handles corrupt localStorage gracefully", () => {

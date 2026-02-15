@@ -71,7 +71,7 @@ export function ChunkTimeline({
 
       // Ensure at least minGap before the next bar.
       if (i < parsed.length - 1) {
-        const nextX = (parsed[i + 1].start - min) / span;
+        const nextX = (parsed[i + 1]!.start - min) / span;
         const gap = nextX - (x + w);
         if (gap >= 0 && gap < minGap) {
           w = Math.max(nextX - minGap - x, 0.003);
@@ -251,8 +251,8 @@ export function ChunkTimeline({
         <ChunkTooltip
           chunk={
             hoveredChunk
-              ? (bars.find((b) => b.id === hoveredChunk) ?? bars[0])
-              : bars[0]
+              ? (bars.find((b) => b.id === hoveredChunk) ?? bars[0]!)
+              : bars[0]!
           }
           dark={dark}
         />
@@ -356,7 +356,7 @@ function generateTicks(
     365 * 86400_000,
   ];
 
-  let interval = niceIntervals[0];
+  let interval = niceIntervals[0]!;
   for (const ni of niceIntervals) {
     if (ni >= rawInterval) {
       interval = ni;

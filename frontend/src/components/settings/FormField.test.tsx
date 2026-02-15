@@ -143,7 +143,7 @@ describe("NumberInput", () => {
 
   test("mono and disabled props pass through", () => {
     const { container } = render(
-      <NumberInput value="1" onChange={() => {}} dark={true} mono disabled />,
+      <NumberInput value="1" onChange={() => {}} dark={true} disabled />,
     );
     const input = container.querySelector("input") as HTMLInputElement;
     expect(input.disabled).toBe(true);
@@ -165,7 +165,7 @@ describe("ParamsEditor", () => {
     const { getAllByText } = render(
       <ParamsEditor params={{ host: "localhost", port: "8080" }} onChange={onChange} dark={true} />,
     );
-    fireEvent.click(getAllByText("×")[0]);
+    fireEvent.click(getAllByText("×")[0]!);
     expect(onChange).toHaveBeenCalledWith({ port: "8080" });
   });
 

@@ -127,7 +127,7 @@ function lex(input: string): QueryToken[] {
       if (
         pos > input.length ||
         tokens.length === 0 ||
-        tokens[tokens.length - 1].pos !== start
+        tokens[tokens.length - 1]!.pos !== start
       ) {
         tokens.push({
           text: input.slice(start, pos),
@@ -140,7 +140,7 @@ function lex(input: string): QueryToken[] {
 
     // Bareword
     const start = pos;
-    while (pos < input.length && isBarewordChar(input[pos])) {
+    while (pos < input.length && isBarewordChar(input[pos]!)) {
       pos++;
     }
     const lit = input.slice(start, pos);
@@ -176,20 +176,20 @@ function classify(raw: QueryToken[]): HighlightSpan[] {
 
   let i = 0;
   while (i < raw.length) {
-    const tok = raw[i];
+    const tok = raw[i]!;
 
     // Detect word = (word|star|quoted) patterns (with no whitespace around =)
     if (
       (tok.kind === "word" || tok.kind === "star") &&
       i + 2 < raw.length &&
-      raw[i + 1].kind === "eq" &&
-      (raw[i + 2].kind === "word" ||
-        raw[i + 2].kind === "star" ||
-        raw[i + 2].kind === "quoted")
+      raw[i + 1]!.kind === "eq" &&
+      (raw[i + 2]!.kind === "word" ||
+        raw[i + 2]!.kind === "star" ||
+        raw[i + 2]!.kind === "quoted")
     ) {
       const key = tok.text;
-      const eq = raw[i + 1];
-      const val = raw[i + 2];
+      const eq = raw[i + 1]!;
+      const val = raw[i + 2]!;
 
       if (tok.kind === "word" && DIRECTIVES.has(key.toLowerCase())) {
         // Directive: italic key, dim =, normal value
@@ -279,7 +279,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
   // Filter to non-whitespace span indices for parsing.
   const indices: number[] = [];
   for (let i = 0; i < spans.length; i++) {
-    if (spans[i].role !== "whitespace") indices.push(i);
+    if (spans[i]!.role !== "whitespace") indices.push(i);
   }
 
   // Already-errored spans (unterminated quotes) — skip validation if present.
@@ -293,10 +293,10 @@ function validate(spans: HighlightSpan[]): ValidateResult {
   let errorMessage: string | null = null;
 
   function cur(): HighlightSpan | null {
-    return pos < indices.length ? spans[indices[pos]] : null;
+    return pos < indices.length ? spans[indices[pos]!]! : null;
   }
   function curIdx(): number {
-    return pos < indices.length ? indices[pos] : -1;
+    return pos < indices.length ? indices[pos]! : -1;
   }
   function advance() {
     pos++;
@@ -304,7 +304,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
   function fail(msg: string) {
     if (errorAt < 0) {
       errorAt =
-        pos < indices.length ? indices[pos] : indices[indices.length - 1];
+        pos < indices.length ? indices[pos]! : indices[indices.length - 1]!;
       errorMessage = msg;
     }
   }
@@ -459,8 +459,8 @@ function validate(spans: HighlightSpan[]): ValidateResult {
   parseOrExpr();
 
   if (errorAt < 0 && pos < indices.length) {
-    errorAt = indices[pos];
-    errorMessage = `unexpected '${spans[indices[pos]].text}'`;
+    errorAt = indices[pos]!;
+    errorMessage = `unexpected '${spans[indices[pos]!]!.text}'`;
   }
 
   if (errorAt < 0) return { spans, errorMessage: null };

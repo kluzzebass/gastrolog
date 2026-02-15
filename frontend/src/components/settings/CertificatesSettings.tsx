@@ -433,7 +433,7 @@ export function CertificatesSettings({ dark }: { dark: boolean }) {
           const buf = await file.arrayBuffer();
           let data = new Uint8Array(buf);
           if (name.endsWith(".gz") || name.endsWith(".tgz")) {
-            data = decompressSync(data);
+            data = decompressSync(data) as Uint8Array<ArrayBuffer>;
           }
           const entries = parseTar(data);
           for (const [, content] of entries) {
