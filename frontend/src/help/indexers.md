@@ -80,7 +80,7 @@ When the query engine processes a sealed chunk:
 
 ```mermaid
 flowchart TD
-    A[Boolean Expression] --> B[DNF Compilation]
+    Q["(error AND level=error) OR (warn AND host=*)"] --> B[DNF Compilation]
     B -->|error AND level=error| E{Indexes<br/>Available?}
     B -->|warn AND host=*| E
     E -->|Yes| F[Intersect Position Lists]
