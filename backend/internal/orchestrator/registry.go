@@ -15,42 +15,6 @@ func (o *Orchestrator) RegisterStore(store *Store) {
 	o.stores[store.ID] = store
 }
 
-// RegisterChunkManager adds a chunk manager to the registry.
-// Deprecated: use RegisterStore(NewStore(...)) instead.
-func (o *Orchestrator) RegisterChunkManager(key uuid.UUID, cm chunk.ChunkManager) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if s := o.stores[key]; s != nil {
-		s.Chunks = cm
-		return
-	}
-	o.stores[key] = NewStore(key, cm, nil, nil)
-}
-
-// RegisterIndexManager adds an index manager to the registry.
-// Deprecated: use RegisterStore(NewStore(...)) instead.
-func (o *Orchestrator) RegisterIndexManager(key uuid.UUID, im index.IndexManager) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if s := o.stores[key]; s != nil {
-		s.Indexes = im
-		return
-	}
-	o.stores[key] = NewStore(key, nil, im, nil)
-}
-
-// RegisterQueryEngine adds a query engine to the registry.
-// Deprecated: use RegisterStore(NewStore(...)) instead.
-func (o *Orchestrator) RegisterQueryEngine(key uuid.UUID, qe *query.Engine) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if s := o.stores[key]; s != nil {
-		s.Query = qe
-		return
-	}
-	o.stores[key] = NewStore(key, nil, nil, qe)
-}
-
 // RegisterDigester appends a digester to the processing pipeline.
 // Digesters run in registration order on each message before storage.
 // Must be called before Start().
@@ -99,17 +63,6 @@ func (o *Orchestrator) ChunkManager(key uuid.UUID) chunk.ChunkManager {
 	return nil
 }
 
-// ChunkManagers returns all registered chunk manager keys.
-func (o *Orchestrator) ChunkManagers() []uuid.UUID {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	keys := make([]uuid.UUID, 0, len(o.stores))
-	for k := range o.stores {
-		keys = append(keys, k)
-	}
-	return keys
-}
-
 // IndexManager returns the index manager registered under the given key.
 // Returns nil if not found.
 func (o *Orchestrator) IndexManager(key uuid.UUID) index.IndexManager {
@@ -121,8 +74,15 @@ func (o *Orchestrator) IndexManager(key uuid.UUID) index.IndexManager {
 	return nil
 }
 
-// IndexManagers returns all registered index manager keys.
-func (o *Orchestrator) IndexManagers() []uuid.UUID {
+// IsRunning returns true if the orchestrator is running.
+func (o *Orchestrator) IsRunning() bool {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.running
+}
+
+// ListStores returns all registered store IDs.
+func (o *Orchestrator) ListStores() []uuid.UUID {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	keys := make([]uuid.UUID, 0, len(o.stores))
@@ -132,8 +92,8 @@ func (o *Orchestrator) IndexManagers() []uuid.UUID {
 	return keys
 }
 
-// Ingesters returns all registered ingester IDs.
-func (o *Orchestrator) Ingesters() []uuid.UUID {
+// ListIngesters returns all registered ingester IDs.
+func (o *Orchestrator) ListIngesters() []uuid.UUID {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	keys := make([]uuid.UUID, 0, len(o.ingesters))
@@ -141,30 +101,6 @@ func (o *Orchestrator) Ingesters() []uuid.UUID {
 		keys = append(keys, k)
 	}
 	return keys
-}
-
-// Running returns true if the orchestrator is running.
-func (o *Orchestrator) Running() bool {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	return o.running
-}
-
-// IsRunning is an alias for Running.
-func (o *Orchestrator) IsRunning() bool {
-	return o.Running()
-}
-
-// ListStores returns all registered store IDs.
-// This is an alias for ChunkManagers.
-func (o *Orchestrator) ListStores() []uuid.UUID {
-	return o.ChunkManagers()
-}
-
-// ListIngesters returns all registered ingester IDs.
-// This is an alias for Ingesters.
-func (o *Orchestrator) ListIngesters() []uuid.UUID {
-	return o.Ingesters()
 }
 
 // QueryEngine returns the query engine registered under the given key.

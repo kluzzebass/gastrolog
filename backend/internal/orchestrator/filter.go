@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
+
 // FilterKind identifies the type of store filter.
 type FilterKind int
 
@@ -116,6 +117,53 @@ type FilterSet struct {
 // NewFilterSet creates a filter set from compiled filters.
 func NewFilterSet(filters []*CompiledFilter) *FilterSet {
 	return &FilterSet{filters: filters}
+}
+
+// AddOrUpdate returns a new FilterSet with the given store's filter compiled and
+// added or updated. Returns error if the filter expression is invalid.
+// Safe to call on a nil receiver (creates a fresh set).
+func (fs *FilterSet) AddOrUpdate(storeID uuid.UUID, filterExpr string) (*FilterSet, error) {
+	f, err := CompileFilter(storeID, filterExpr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid filter for store %s: %w", storeID, err)
+	}
+
+	var filters []*CompiledFilter
+	if fs != nil {
+		for _, existing := range fs.filters {
+			if existing.StoreID != storeID {
+				filters = append(filters, existing)
+			}
+		}
+	}
+	filters = append(filters, f)
+
+	return NewFilterSet(filters), nil
+}
+
+// Without returns a new FilterSet excluding filters for the given store IDs.
+// Returns nil if the resulting set is empty. Safe to call on a nil receiver.
+func (fs *FilterSet) Without(storeIDs ...uuid.UUID) *FilterSet {
+	if fs == nil {
+		return nil
+	}
+
+	exclude := make(map[uuid.UUID]struct{}, len(storeIDs))
+	for _, id := range storeIDs {
+		exclude[id] = struct{}{}
+	}
+
+	var filters []*CompiledFilter
+	for _, f := range fs.filters {
+		if _, skip := exclude[f.StoreID]; !skip {
+			filters = append(filters, f)
+		}
+	}
+
+	if len(filters) == 0 {
+		return nil
+	}
+	return NewFilterSet(filters)
 }
 
 // Match returns the store IDs that should receive a message with the given attributes.

@@ -457,9 +457,7 @@ func TestAddIngesterWhileRunning(t *testing.T) {
 
 	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterChunkManager(defaultID, s.CM)
-	orch.RegisterIndexManager(defaultID, s.IM)
-	orch.RegisterQueryEngine(defaultID, s.QE)
+	orch.RegisterStore(orchestrator.NewStore(defaultID, s.CM, s.IM, s.QE))
 
 	// Set catch-all filter.
 	filter, _ := orchestrator.CompileFilter(defaultID, "*")
@@ -525,7 +523,7 @@ func TestRemoveIngesterNotRunning(t *testing.T) {
 	}
 
 	// Verify removed.
-	ingesters := orch.Ingesters()
+	ingesters := orch.ListIngesters()
 	for _, id := range ingesters {
 		if id == ingesterID {
 			t.Error("ingester should have been removed")
@@ -540,7 +538,7 @@ func TestRemoveIngesterWhileRunning(t *testing.T) {
 
 	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterChunkManager(defaultID, cm)
+	orch.RegisterStore(orchestrator.NewStore(defaultID, cm, nil, nil))
 
 	ingesterID := uuid.Must(uuid.NewV7())
 	recv := newBlockingIngester()
@@ -570,7 +568,7 @@ func TestRemoveIngesterWhileRunning(t *testing.T) {
 	}
 
 	// Verify removed from list.
-	ingesters := orch.Ingesters()
+	ingesters := orch.ListIngesters()
 	for _, id := range ingesters {
 		if id == ingesterID {
 			t.Error("ingester should have been removed from list")

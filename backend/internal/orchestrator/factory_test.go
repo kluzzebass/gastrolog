@@ -129,7 +129,7 @@ func TestApplyConfigStores(t *testing.T) {
 	}
 
 	// Verify stores were registered.
-	keys := orch.ChunkManagers()
+	keys := orch.ListStores()
 	if len(keys) != 2 {
 		t.Errorf("expected 2 stores, got %d", len(keys))
 	}

@@ -38,9 +38,7 @@ func TestQueryServerSearch(t *testing.T) {
 	}
 
 	defaultID := uuid.Must(uuid.NewV7())
-	orch.RegisterChunkManager(defaultID, s.CM)
-	orch.RegisterIndexManager(defaultID, s.IM)
-	orch.RegisterQueryEngine(defaultID, s.QE)
+	orch.RegisterStore(orchestrator.NewStore(defaultID, s.CM, s.IM, s.QE))
 
 	// Create server
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
