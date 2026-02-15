@@ -10,8 +10,10 @@ Disk-backed storage using a split-file format per chunk. This is the production 
 
 ### Directory Layout
 
+The `dir` parameter points to the store's data directory. Within it:
+
 ```
-<datadir>/stores/<store-id>/
+<dir>/
   .lock                        # Exclusive process lock
   <chunk-id>/                  # 26-char base32hex, time-ordered
     raw.log                    # Record payloads (concatenated)
@@ -55,7 +57,7 @@ Raw.log and attr.log use 32-bit unsigned offsets, giving a hard limit of **4 GB 
 
 | Param | Description | Default |
 |-------|-------------|---------|
-| `dir` | Data directory for this store | Set automatically |
+| `dir` | Data directory for this store (required) | |
 | `maxChunkBytes` | Soft size limit per chunk | `64MB` |
 | `maxChunkAge` | Maximum wall-clock age before rotation | None |
 | `fileMode` | Unix file permissions (octal) | `0644` |
