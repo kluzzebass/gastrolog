@@ -15,14 +15,11 @@ import {
   extractTokens,
 } from "./api/hooks";
 import { useStores, useStats, useLogout, useCurrentUser } from "./api/hooks";
-import { usePreferences, usePutPreferences } from "./api/hooks/usePreferences";
 import { Record as ProtoRecord } from "./api/client";
 
 import { timeRangeMs, aggregateFields, sameRecord } from "./utils";
-import type { Theme } from "./utils";
 import {
   stripTimeRange,
-  stripStore,
   stripChunk,
   stripPos,
   stripSeverity,
@@ -31,17 +28,13 @@ import {
   buildSeverityExpr,
 } from "./utils/queryHelpers";
 import { usePanelResize } from "./hooks/usePanelResize";
+import { useThemeSync } from "./hooks/useThemeSync";
 import { EmptyState } from "./components/EmptyState";
 import { LogEntry } from "./components/LogEntry";
 import { HistogramChart } from "./components/HistogramChart";
-import { TimeRangePicker } from "./components/TimeRangePicker";
-import { DetailPanelContent } from "./components/DetailPanel";
 import { ExplainPanel } from "./components/ExplainPanel";
-import {
-  SidebarSection,
-  FieldExplorer,
-  StoreButton,
-} from "./components/Sidebar";
+import { SearchSidebar } from "./components/SearchSidebar";
+import { DetailSidebar } from "./components/DetailSidebar";
 import { ToastProvider, useToast } from "./components/Toast";
 import {
   SettingsDialog,
@@ -103,46 +96,7 @@ function AppContent() {
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(
     null,
   );
-  const [theme, setThemeLocal] = useState<Theme>(() => {
-    const cached = localStorage.getItem("gastrolog:theme");
-    if (cached === "light" || cached === "dark" || cached === "system")
-      return cached;
-    return "system";
-  });
-  const [systemDark, setSystemDark] = useState(
-    () => window.matchMedia("(prefers-color-scheme: dark)").matches,
-  );
-  const preferences = usePreferences();
-  const putPreferences = usePutPreferences();
-
-  // Sync theme from server preferences (in case it changed on another device).
-  const [prefsLoaded, setPrefsLoaded] = useState(false);
-  useEffect(() => {
-    if (preferences.data && !prefsLoaded) {
-      const t = preferences.data.theme;
-      if (t === "light" || t === "dark" || t === "system") {
-        setThemeLocal(t);
-        localStorage.setItem("gastrolog:theme", t);
-      }
-      setPrefsLoaded(true);
-    }
-  }, [preferences.data, prefsLoaded]);
-
-  const setTheme = useCallback(
-    (t: Theme) => {
-      setThemeLocal(t);
-      localStorage.setItem("gastrolog:theme", t);
-      putPreferences.mutate({ theme: t });
-    },
-    [putPreferences],
-  );
-
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const handler = (e: MediaQueryListEvent) => setSystemDark(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, []);
+  const { theme, setTheme, dark } = useThemeSync();
   const [detailWidth, setDetailWidth] = useState(320);
   const [sidebarWidth, setSidebarWidth] = useState(224);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -241,7 +195,6 @@ function AppContent() {
   const { data: stores, isLoading: storesLoading } = useStores();
   const { data: stats, isLoading: statsLoading } = useStats();
 
-  const dark = theme === "dark" || (theme === "system" && systemDark);
   const { addToast } = useToast();
   const logout = useLogout();
   const currentUser = useCurrentUser();
@@ -635,173 +588,31 @@ function AppContent() {
 
       {/* ── Main Layout ── */}
       <div className="flex flex-1 overflow-hidden">
-        {/* ── Sidebar ── */}
-        {sidebarCollapsed && (
-          <button
-            onClick={() => setSidebarCollapsed(false)}
-            className={`shrink-0 px-1 flex items-center border-r transition-colors ${c(
-              "border-ink-border-subtle bg-ink text-text-ghost hover:text-text-muted hover:bg-ink-hover",
-              "border-light-border-subtle bg-light-raised text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
-            )}`}
-            aria-label="Expand sidebar"
-            title="Expand sidebar"
-          >
-            {"\u25B8"}
-          </button>
-        )}
-        <aside
-          aria-label="Sidebar"
-          style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}
-          className={`shrink-0 overflow-hidden ${resizing ? "" : "transition-[width] duration-200"} ${
-            sidebarCollapsed
-              ? ""
-              : `p-4 border-r app-scroll overflow-y-auto ${c("border-ink-border-subtle bg-ink", "border-light-border-subtle bg-light-raised")}`
-          }`}
-        >
-          {/* Time Range */}
-          <SidebarSection title="Time Range" dark={dark}>
-            <TimeRangePicker
-              dark={dark}
-              rangeStart={rangeStart}
-              rangeEnd={rangeEnd}
-              activePreset={timeRange}
-              onPresetClick={handleTimeRange}
-              onApply={handleCustomRange}
-            />
-          </SidebarSection>
-
-          {/* Stores */}
-          <SidebarSection title="Stores" dark={dark}>
-            <div className="flex flex-col gap-px">
-              {storesLoading ? (
-                <div
-                  className={`px-2.5 py-1.5 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-                >
-                  Loading...
-                </div>
-              ) : (
-                stores?.map((store) => (
-                  <StoreButton
-                    key={store.id}
-                    label={store.name || store.id}
-                    count={store.recordCount.toLocaleString()}
-                    active={selectedStore === store.id}
-                    onClick={() => handleStoreSelect(store.id)}
-                    dark={dark}
-                  />
-                ))
-              )}
-            </div>
-            <div
-              className={`flex justify-between items-center px-2.5 pt-2 mt-1 border-t text-[0.8em] ${c("border-ink-border-subtle text-text-ghost", "border-light-border-subtle text-light-text-ghost")}`}
-            >
-              <span>Total</span>
-              <span className="font-mono">
-                {statsLoading ? "..." : totalRecords.toLocaleString()}
-              </span>
-            </div>
-          </SidebarSection>
-
-          {/* Quick Filters */}
-          <SidebarSection title="Severity" dark={dark}>
-            <div className="flex flex-wrap gap-1.5">
-              {[
-                { label: "Error", level: "error", color: "severity-error" },
-                { label: "Warn", level: "warn", color: "severity-warn" },
-                { label: "Info", level: "info", color: "severity-info" },
-                { label: "Debug", level: "debug", color: "severity-debug" },
-                { label: "Trace", level: "trace", color: "severity-trace" },
-              ].map(({ label, level, color }) => {
-                const active = activeSeverities.includes(level);
-                const styles: Record<
-                  string,
-                  { active: string; inactive: string }
-                > = {
-                  "severity-error": {
-                    active:
-                      "bg-severity-error border-severity-error text-white",
-                    inactive:
-                      "border-severity-error/40 text-severity-error hover:border-severity-error hover:bg-severity-error/10",
-                  },
-                  "severity-warn": {
-                    active: "bg-severity-warn border-severity-warn text-white",
-                    inactive:
-                      "border-severity-warn/40 text-severity-warn hover:border-severity-warn hover:bg-severity-warn/10",
-                  },
-                  "severity-info": {
-                    active: "bg-severity-info border-severity-info text-white",
-                    inactive:
-                      "border-severity-info/40 text-severity-info hover:border-severity-info hover:bg-severity-info/10",
-                  },
-                  "severity-debug": {
-                    active:
-                      "bg-severity-debug border-severity-debug text-white",
-                    inactive:
-                      "border-severity-debug/40 text-severity-debug hover:border-severity-debug hover:bg-severity-debug/10",
-                  },
-                  "severity-trace": {
-                    active:
-                      "bg-severity-trace border-severity-trace text-white",
-                    inactive:
-                      "border-severity-trace/40 text-severity-trace hover:border-severity-trace hover:bg-severity-trace/10",
-                  },
-                };
-                const s = styles[color]!;
-                return (
-                  <button
-                    key={level}
-                    onClick={() => toggleSeverity(level)}
-                    className={`px-2 py-0.5 text-[0.8em] font-medium uppercase tracking-wider rounded-sm border transition-all duration-150 ${
-                      active ? s.active : s.inactive
-                    }`}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-          </SidebarSection>
-
-          {/* Field Explorers */}
-          <SidebarSection title="Attributes" dark={dark}>
-            <FieldExplorer
-              fields={attrFields}
-              dark={dark}
-              onSelect={handleFieldSelect}
-              activeQuery={q}
-            />
-          </SidebarSection>
-
-          <SidebarSection title="Extracted Fields" dark={dark}>
-            <FieldExplorer
-              fields={kvFields}
-              dark={dark}
-              onSelect={handleFieldSelect}
-              activeQuery={q}
-            />
-          </SidebarSection>
-        </aside>
-
-        {/* Sidebar resize handle + collapse toggle */}
-        {!sidebarCollapsed && (
-          <div className="relative shrink-0 flex">
-            <div
-              onMouseDown={handleSidebarResize}
-              className={`w-1 cursor-col-resize transition-colors ${c("hover:bg-copper-muted/30", "hover:bg-copper-muted/20")}`}
-            />
-            <button
-              onClick={() => setSidebarCollapsed(true)}
-              className={`absolute top-2 -right-3 w-4 h-6 flex items-center justify-center text-[0.6em] rounded-r z-10 transition-colors ${c(
-                "bg-ink-surface border border-l-0 border-ink-border-subtle text-text-ghost hover:text-text-muted",
-                "bg-light-surface border border-l-0 border-light-border-subtle text-light-text-ghost hover:text-light-text-muted",
-              )}`}
-              aria-label="Collapse sidebar"
-              title="Collapse sidebar"
-            >
-              {"\u25C2"}
-            </button>
-          </div>
-        )}
+        <SearchSidebar
+          dark={dark}
+          sidebarWidth={sidebarWidth}
+          sidebarCollapsed={sidebarCollapsed}
+          setSidebarCollapsed={setSidebarCollapsed}
+          handleSidebarResize={handleSidebarResize}
+          resizing={resizing}
+          rangeStart={rangeStart}
+          rangeEnd={rangeEnd}
+          timeRange={timeRange}
+          onTimeRangeChange={handleTimeRange}
+          onCustomRange={handleCustomRange}
+          stores={stores}
+          storesLoading={storesLoading}
+          statsLoading={statsLoading}
+          totalRecords={totalRecords}
+          selectedStore={selectedStore}
+          onStoreSelect={handleStoreSelect}
+          activeSeverities={activeSeverities}
+          onToggleSeverity={toggleSeverity}
+          attrFields={attrFields}
+          kvFields={kvFields}
+          onFieldSelect={handleFieldSelect}
+          activeQuery={q}
+        />
 
         {/* ── Main Content ── */}
         <main
@@ -1106,132 +917,44 @@ function AppContent() {
           </div>
         </main>
 
-        {/* ── Detail Panel ── */}
-        {/* Detail resize handle + collapse toggle */}
-        {!detailCollapsed && (
-          <div className="relative shrink-0 flex">
-            <button
-              onClick={() => setDetailCollapsed(true)}
-              className={`absolute top-2 -left-3 w-4 h-6 flex items-center justify-center text-[0.6em] rounded-l z-10 transition-colors ${c(
-                "bg-ink-surface border border-r-0 border-ink-border-subtle text-text-ghost hover:text-text-muted",
-                "bg-light-surface border border-r-0 border-light-border-subtle text-light-text-ghost hover:text-light-text-muted",
-              )}`}
-              aria-label="Collapse detail panel"
-              title="Collapse detail panel"
-            >
-              {"\u25B8"}
-            </button>
-            <div
-              onMouseDown={handleDetailResize}
-              className={`w-1 cursor-col-resize transition-colors ${c("hover:bg-copper-muted/30", "hover:bg-copper-muted/20")}`}
-            />
-          </div>
-        )}
-        {detailCollapsed && (
-          <button
-            onClick={() => setDetailCollapsed(false)}
-            className={`shrink-0 px-1 flex items-center border-l transition-colors ${c(
-              "border-ink-border-subtle bg-ink-surface text-text-ghost hover:text-text-muted hover:bg-ink-hover",
-              "border-light-border-subtle bg-light-surface text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
-            )}`}
-            aria-label="Expand detail panel"
-            title="Expand detail panel"
-          >
-            {"\u25C2"}
-          </button>
-        )}
-        <aside
-          aria-label="Record details"
-          style={{ width: detailCollapsed ? 0 : detailWidth }}
-          className={`shrink-0 overflow-hidden ${resizing ? "" : "transition-[width] duration-200"} ${
-            detailCollapsed
-              ? ""
-              : `border-l overflow-y-auto app-scroll ${c("border-ink-border-subtle bg-ink-surface", "border-light-border-subtle bg-light-surface")}`
-          }`}
-        >
-          <div
-            className={`flex items-center justify-between px-4 py-3 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
-          >
-            <h3
-              className={`font-display text-[1.15em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
-            >
-              Details
-            </h3>
-            <button
-              onClick={() => setDetailPinned((p) => !p)}
-              aria-label={detailPinned ? "Unpin detail panel" : "Pin detail panel"}
-              title={detailPinned ? "Unpin detail panel" : "Pin detail panel"}
-              className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${
-                detailPinned
-                  ? c("text-copper", "text-copper")
-                  : c(
-                      "text-text-ghost hover:text-text-muted",
-                      "text-light-text-ghost hover:text-light-text-muted",
-                    )
-              }`}
-            >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="w-4 h-4"
-                style={
-                  detailPinned ? undefined : { transform: "rotate(45deg)" }
-                }
-              >
-                <line x1="12" y1="17" x2="12" y2="22" />
-                <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
-              </svg>
-            </button>
-          </div>
-
-          {selectedRecord ? (
-            <DetailPanelContent
-              record={selectedRecord}
-              dark={dark}
-              onFieldSelect={handleFieldSelect}
-              onChunkSelect={handleChunkSelect}
-              onStoreSelect={handleStoreSelect}
-              onPosSelect={handlePosSelect}
-              contextBefore={contextBefore}
-              contextAfter={contextAfter}
-              contextLoading={contextLoading}
-              contextReversed={isReversed}
-              onContextRecordSelect={(rec) => {
-                const ts = rec.writeTs?.toDate();
-                if (ts) {
-                  // Build a 1-minute window centered on the record.
-                  const start = new Date(ts.getTime() - 30_000);
-                  const end = new Date(ts.getTime() + 30_000);
-                  // Show all records in the window — no filters.
-                  const newQuery = `start=${start.toISOString()} end=${end.toISOString()} reverse=true`;
-                  setTimeRange("custom");
-                  setRangeStart(start);
-                  setRangeEnd(end);
-                  setSelectedRecord(rec);
-                  navigate({
-                    to: "/search",
-                    search: { q: newQuery },
-                    replace: false,
-                  });
-                } else {
-                  setSelectedRecord(rec);
-                }
-              }}
-            />
-          ) : (
-            <div className="flex flex-col items-center justify-center h-48 px-4">
-              <p
-                className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-              >
-                Select a record to view details
-              </p>
-            </div>
-          )}
-        </aside>
+        <DetailSidebar
+          dark={dark}
+          detailWidth={detailWidth}
+          detailCollapsed={detailCollapsed}
+          setDetailCollapsed={setDetailCollapsed}
+          detailPinned={detailPinned}
+          setDetailPinned={setDetailPinned}
+          handleDetailResize={handleDetailResize}
+          resizing={resizing}
+          selectedRecord={selectedRecord}
+          onFieldSelect={handleFieldSelect}
+          onChunkSelect={handleChunkSelect}
+          onStoreSelect={handleStoreSelect}
+          onPosSelect={handlePosSelect}
+          contextBefore={contextBefore}
+          contextAfter={contextAfter}
+          contextLoading={contextLoading}
+          contextReversed={isReversed}
+          onContextRecordSelect={(rec) => {
+            const ts = rec.writeTs?.toDate();
+            if (ts) {
+              const start = new Date(ts.getTime() - 30_000);
+              const end = new Date(ts.getTime() + 30_000);
+              const newQuery = `start=${start.toISOString()} end=${end.toISOString()} reverse=true`;
+              setTimeRange("custom");
+              setRangeStart(start);
+              setRangeEnd(end);
+              setSelectedRecord(rec);
+              navigate({
+                to: "/search",
+                search: { q: newQuery },
+                replace: false,
+              });
+            } else {
+              setSelectedRecord(rec);
+            }
+          }}
+        />
       </div>
     </div>
   );
