@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -35,6 +36,15 @@ func NewStoreServer(orch *orchestrator.Orchestrator, cfgStore config.Store, fact
 }
 
 func (s *StoreServer) now() time.Time { return time.Now() }
+
+// mapStoreError converts orchestrator errors to connect errors.
+// ErrStoreNotFound maps to CodeNotFound; everything else to CodeInternal.
+func mapStoreError(err error) *connect.Error {
+	if errors.Is(err, orchestrator.ErrStoreNotFound) {
+		return connect.NewError(connect.CodeNotFound, err)
+	}
+	return connect.NewError(connect.CodeInternal, err)
+}
 
 // parseUUID parses a string into a uuid.UUID, returning a connect error on failure.
 func parseUUID(s string) (uuid.UUID, *connect.Error) {

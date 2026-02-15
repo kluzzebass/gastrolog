@@ -682,12 +682,9 @@ func (e *Engine) Follow(ctx context.Context, q Query) iter.Seq2[chunk.Record, er
 	// Normalize query to ensure BoolExpr is set.
 	q = q.Normalize()
 
-	// Extract store predicates.
-	allStores := e.listStores()
-	selectedStores, remainingExpr := ExtractStoreFilter(q.BoolExpr, allStores)
-	if selectedStores == nil {
-		selectedStores = allStores
-	}
+	// Extract store predicates once (the expression doesn't change).
+	// storeFilter is nil when the query has no store= predicate (follow all).
+	storeFilter, remainingExpr := ExtractStoreFilter(q.BoolExpr, nil)
 	q.BoolExpr = remainingExpr
 
 	return func(yield func(chunk.Record, error) bool) {
@@ -697,25 +694,24 @@ func (e *Engine) Follow(ctx context.Context, q Query) iter.Seq2[chunk.Record, er
 			chunkID chunk.ChunkID
 		}
 		lastPositions := make(map[chunkKey]uint64)
+		knownStores := make(map[uuid.UUID]bool)
 
-		// Initialize positions to end of each chunk (only show NEW records).
-		// We use positionExhausted as a marker for "skip this sealed chunk entirely".
-		for _, storeID := range selectedStores {
+		// initStorePositions marks all existing chunks in a store as seen,
+		// so Follow only yields records that arrive after this point.
+		initStorePositions := func(storeID uuid.UUID) {
 			cm, _ := e.getStoreManagers(storeID)
 			if cm == nil {
-				continue
+				return
 			}
 			metas, err := cm.List()
 			if err != nil {
-				continue
+				return
 			}
 			for _, meta := range metas {
 				key := chunkKey{storeID: storeID, chunkID: meta.ID}
 				if meta.Sealed {
-					// Sealed chunks won't get new records - mark as exhausted.
 					lastPositions[key] = positionExhausted
 				} else {
-					// For active chunk, find current end position.
 					cursor, err := cm.OpenCursor(meta.ID)
 					if err != nil {
 						continue
@@ -734,10 +730,36 @@ func (e *Engine) Follow(ctx context.Context, q Query) iter.Seq2[chunk.Record, er
 					if hasRecords {
 						lastPositions[key] = lastPos
 					}
-					// If no records yet, don't add to lastPositions - we'll read from start.
 				}
 			}
+			knownStores[storeID] = true
 		}
+
+		// resolveStores returns the stores to poll this iteration.
+		// When no store= predicate exists, it re-evaluates the live store
+		// list each call, initializing positions for any newly discovered store.
+		resolveStores := func() []uuid.UUID {
+			if storeFilter != nil {
+				// Explicit store= predicate: fixed set, but still init new ones.
+				for _, id := range storeFilter {
+					if !knownStores[id] {
+						initStorePositions(id)
+					}
+				}
+				return storeFilter
+			}
+			// No predicate: follow all current stores.
+			all := e.listStores()
+			for _, id := range all {
+				if !knownStores[id] {
+					initStorePositions(id)
+				}
+			}
+			return all
+		}
+
+		// Initialize positions for stores that exist right now.
+		resolveStores()
 
 		// Poll interval for new records.
 		const pollInterval = 100 * time.Millisecond
@@ -748,6 +770,9 @@ func (e *Engine) Follow(ctx context.Context, q Query) iter.Seq2[chunk.Record, er
 				return
 			default:
 			}
+
+			// Re-resolve stores each iteration to pick up adds/removes.
+			selectedStores := resolveStores()
 
 			// Collect records from all stores since last positions.
 			type pendingRecord struct {
