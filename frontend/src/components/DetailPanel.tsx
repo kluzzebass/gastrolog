@@ -294,7 +294,7 @@ export function DetailPanelContent({
   );
 }
 
-export function DetailSection({
+function DetailSection({
   label,
   dark,
   children,
@@ -320,7 +320,7 @@ export function DetailSection({
   );
 }
 
-export function DetailRow({
+function DetailRow({
   label,
   value,
   dark,

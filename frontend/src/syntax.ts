@@ -1,13 +1,13 @@
 // Syntax highlighting for log messages.
 // Two-stage pipeline: syntaxHighlight (foreground colors) → composeWithSearch (background overlay).
 
-export interface SyntaxSpan {
+interface SyntaxSpan {
   text: string;
   color?: string; // CSS color value, undefined = inherit
   url?: string; // If set, render as a clickable link
 }
 
-export interface HighlightedSpan {
+interface HighlightedSpan {
   text: string;
   color?: string;
   searchHit: boolean;

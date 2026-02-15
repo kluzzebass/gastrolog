@@ -3,7 +3,7 @@
 // Produces position-annotated tokens including whitespace so that
 // concatenating all token texts reproduces the original input exactly.
 
-export type QueryTokenKind =
+type QueryTokenKind =
   | "word"
   | "quoted"
   | "operator" // AND, OR, NOT
@@ -28,7 +28,7 @@ export type HighlightRole =
   | "whitespace"
   | "error";
 
-export interface QueryToken {
+interface QueryToken {
   text: string;
   pos: number;
   kind: QueryTokenKind;
@@ -475,7 +475,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
   };
 }
 
-export interface TokenizeResult {
+interface TokenizeResult {
   spans: HighlightSpan[];
   hasErrors: boolean;
   errorMessage: string | null;
