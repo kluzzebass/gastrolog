@@ -19,7 +19,7 @@ const (
 	ParamFileMode      = "fileMode"
 
 	// ParamExpectExisting is injected by the orchestrator when loading stores
-	// from config. It tells the chunk manager to warn if the data directory
+	// from config. It tells the chunk manager to warn if the store directory
 	// is missing (potential data loss). Not persisted in config.
 	ParamExpectExisting = "_expect_existing"
 )

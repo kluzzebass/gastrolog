@@ -10,11 +10,11 @@ build:
 
 # Runs the gastrolog backend with sqlite config (default).
 run-sqlite:
-  go run ./cmd/gastrolog -datadir data
+  go run ./cmd/gastrolog -home data
 
 # Runs the gastrolog backend with json config.
 run-json:
-  go run ./cmd/gastrolog -config-type json -datadir data
+  go run ./cmd/gastrolog -config-type json -home data
 
 # Runs the gastrolog backend with in-memory config (no persistence).
 run-memory:

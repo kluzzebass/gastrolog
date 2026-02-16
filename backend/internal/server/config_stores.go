@@ -131,7 +131,7 @@ func (s *ConfigServer) PutStore(
 
 // DeleteStore removes a store. If force is false, the store must be empty.
 // If force is true, the store is removed regardless of content: active chunks are sealed,
-// all indexes and chunks are deleted, and for file stores the data directory is removed.
+// all indexes and chunks are deleted, and for file stores the store directory is removed.
 func (s *ConfigServer) DeleteStore(
 	ctx context.Context,
 	req *connect.Request[apiv1.DeleteStoreRequest],
@@ -165,7 +165,7 @@ func (s *ConfigServer) DeleteStore(
 			}
 		}
 
-		// For file stores, remove the data directory.
+		// For file stores, remove the store directory.
 		if storeCfg != nil && storeCfg.Type == "file" {
 			if dir := storeCfg.Params["dir"]; dir != "" {
 				if err := os.RemoveAll(dir); err != nil {

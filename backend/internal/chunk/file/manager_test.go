@@ -562,7 +562,7 @@ func TestFileChunkManagerEmptyChunk(t *testing.T) {
 }
 
 // TestMissingDirectoryWarning verifies that a warning is logged when a previously
-// existing store's data directory is missing and gets recreated empty.
+// existing store's directory is missing and gets recreated empty.
 func TestMissingDirectoryWarning(t *testing.T) {
 	root := t.TempDir()
 	storeDir := filepath.Join(root, "mystore")

@@ -36,9 +36,9 @@ type Factories struct {
 	// If nil, components use discard loggers.
 	Logger *slog.Logger
 
-	// DataDir is the root data directory. When non-empty, it is injected as
+	// HomeDir is the gastrolog home directory. When non-empty, it is injected as
 	// the "_state_dir" param so that ingesters can persist state (e.g. bookmarks).
-	DataDir string
+	HomeDir string
 
 	// Note: No QueryEngineFactory is needed because QueryEngine construction
 	// is trivial and uniform (query.New(cm, im, logger)). If QueryEngine ever
@@ -252,8 +252,8 @@ func (o *Orchestrator) applyIngesters(cfg *config.Config, factories Factories) e
 		if params == nil {
 			params = make(map[string]string)
 		}
-		if factories.DataDir != "" {
-			params["_state_dir"] = factories.DataDir
+		if factories.HomeDir != "" {
+			params["_state_dir"] = factories.HomeDir
 		}
 
 		// Create ingester with scoped logger.

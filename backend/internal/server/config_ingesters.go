@@ -149,10 +149,10 @@ func (s *ConfigServer) PutIngester(
 
 		// Inject _state_dir so ingesters can persist state.
 		params := ingCfg.Params
-		if s.factories.DataDir != "" {
+		if s.factories.HomeDir != "" {
 			params = make(map[string]string, len(ingCfg.Params)+1)
 			maps.Copy(params, ingCfg.Params)
-			params["_state_dir"] = s.factories.DataDir
+			params["_state_dir"] = s.factories.HomeDir
 		}
 
 		ingester, err := factory(ingCfg.ID, params, s.factories.Logger)

@@ -29,7 +29,7 @@ const (
 var (
 	ErrMissingDir      = errors.New("file chunk manager dir is required")
 	ErrManagerClosed   = errors.New("manager is closed")
-	ErrDirectoryLocked = errors.New("data directory is locked by another process")
+	ErrDirectoryLocked = errors.New("store directory is locked by another process")
 )
 
 type Config struct {
@@ -47,7 +47,7 @@ type Config struct {
 	Logger *slog.Logger
 
 	// ExpectExisting indicates that this store is being loaded from config
-	// (not freshly created). If the data directory is missing, a warning
+	// (not freshly created). If the store directory is missing, a warning
 	// is logged about potential data loss.
 	ExpectExisting bool
 }
@@ -69,7 +69,7 @@ type Config struct {
 type Manager struct {
 	mu       sync.Mutex
 	cfg      Config
-	lockFile *os.File // Exclusive lock on data directory
+	lockFile *os.File // Exclusive lock on store directory
 	active   *chunkState
 	metas    map[chunk.ChunkID]*chunkMeta // In-memory chunk metadata
 	closed   bool
@@ -149,7 +149,7 @@ func NewManager(cfg Config) (*Manager, error) {
 		return nil, err
 	}
 
-	// Acquire exclusive lock on data directory.
+	// Acquire exclusive lock on store directory.
 	lockPath := filepath.Join(cfg.Dir, lockFileName)
 	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, cfg.FileMode)
 	if err != nil {
@@ -175,7 +175,7 @@ func NewManager(cfg Config) (*Manager, error) {
 	}
 
 	if cfg.ExpectExisting && !dirExisted {
-		logger.Warn("store data directory was missing and has been recreated empty — if this store previously held data, it may have been lost",
+		logger.Warn("store directory was missing and has been recreated empty — if this store previously held data, it may have been lost",
 			"dir", cfg.Dir)
 	}
 

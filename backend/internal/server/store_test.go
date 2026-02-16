@@ -706,7 +706,7 @@ func TestMergeStoresMemory(t *testing.T) {
 func TestMergeStoresFileBacked(t *testing.T) {
 	cfgStore := cfgmem.NewStore()
 	orch := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
-	dataDir := t.TempDir()
+	homeDir := t.TempDir()
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -715,7 +715,7 @@ func TestMergeStoresFileBacked(t *testing.T) {
 		IndexManagers: map[string]index.ManagerFactory{
 			"file": indexfile.NewFactory(),
 		},
-		DataDir: dataDir,
+		HomeDir: homeDir,
 	}
 
 	srv := server.New(orch, cfgStore, factories, nil, server.Config{})
@@ -741,7 +741,7 @@ func TestMergeStoresFileBacked(t *testing.T) {
 	}
 
 	for _, id := range []uuid.UUID{srcID, dstID} {
-		storeDir := filepath.Join(dataDir, "stores", id.String())
+		storeDir := filepath.Join(homeDir, "stores", id.String())
 		_, err := cfgClient.PutStore(ctx, connect.NewRequest(&gastrologv1.PutStoreRequest{
 			Config: &gastrologv1.StoreConfig{
 				Id:     id.String(),
