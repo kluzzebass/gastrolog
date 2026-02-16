@@ -52,17 +52,17 @@ flowchart TD
     D --> F[Expire]
 ```
 
-**Ingest** — An ingester receives a log message from an external source (syslog, HTTP, Docker, file tail, etc.) and wraps it with metadata: the raw text, protocol-level attributes, and an arrival timestamp.
+[**Ingest**](help:ingestion) — An ingester receives a log message from an external source (syslog, HTTP, Docker, file tail, etc.) and wraps it with metadata: the raw text, protocol-level attributes, and an arrival timestamp.
 
-**Digest** — Digesters scan the message and add attributes the ingester couldn't — a normalized `level` from the log content, and a source timestamp parsed from embedded date patterns. See the **Digestion** topic.
+[**Digest**](help:digesters) — Digesters scan the message and add attributes the ingester couldn't — a normalized `level` from the log content, and a source timestamp parsed from embedded date patterns.
 
-**Route** — Each store has a filter expression evaluated against the message attributes. A message can match multiple stores, or be caught by a catch-rest filter so nothing is silently dropped.
+[**Route**](help:routing) — Each store has a filter expression evaluated against the message attributes. A message can match multiple stores, or be caught by a catch-rest filter so nothing is silently dropped.
 
-**Store** — Matching stores append the record to their active chunk. When a chunk hits its rotation policy limits, it is sealed and a new one begins.
+[**Store**](help:storage) — Matching stores append the record to their active chunk. When a chunk hits its rotation policy limits, it is sealed and a new one begins.
 
-**Index** — Sealed chunks are indexed in the background so the query engine can search without scanning every record.
+[**Index**](help:indexers) — Sealed chunks are indexed in the background so the query engine can search without scanning every record.
 
-**Expire** — Retention policies periodically delete sealed chunks that are too old, too numerous, or pushing the store over its size budget.
+**Expire** — [Retention policies](help:policy-retention) periodically delete sealed chunks that are too old, too numerous, or pushing the store over its size budget.
 
 ## Multi-Store Routing
 

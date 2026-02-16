@@ -24,6 +24,16 @@ export function HelpDialog({ dark, topicId, onClose }: HelpDialogProps) {
   const [activeId, setActiveId] = useState(
     () => topicId ?? helpTopics[0]?.id ?? "",
   );
+  const [expanded, setExpanded] = useState<Set<string>>(() => {
+    // Auto-expand the branch containing the initial topic
+    const initial = new Set<string>();
+    for (const t of helpTopics) {
+      if (t.children && isWithin(t, topicId ?? helpTopics[0]?.id ?? "")) {
+        initial.add(t.id);
+      }
+    }
+    return initial;
+  });
 
   const topic: HelpTopic | undefined = findTopic(activeId);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -33,19 +43,42 @@ export function HelpDialog({ dark, topicId, onClose }: HelpDialogProps) {
     contentRef.current?.scrollTo(0, 0);
   }, [activeId]);
 
+  function navigateToTopic(topicId: string) {
+    const target = findTopic(topicId);
+    if (target) selectTopic(target);
+  }
+
   // Memoize so react-markdown doesn't unmount/remount custom components
   // (e.g. MermaidDiagram) on every parent re-render.
-  const mdComponents = useMemo(() => markdownComponents(dark), [dark]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const mdComponents = useMemo(() => markdownComponents(dark, navigateToTopic), [dark, expanded]);
+
+  function selectTopic(t: HelpTopic) {
+    setActiveId(t.id);
+    // Auto-expand when selecting a parent topic
+    if (t.children && !expanded.has(t.id)) {
+      setExpanded((prev) => new Set(prev).add(t.id));
+    }
+  }
+
+  function toggleExpanded(id: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   function renderTopic(t: HelpTopic, depth: number) {
     const isActive = activeId === t.id;
     const hasChildren = !!t.children;
-    const isExpanded = hasChildren && isWithin(t, activeId);
+    const isExpanded = hasChildren && expanded.has(t.id);
 
     return (
       <div key={t.id}>
         <button
-          onClick={() => setActiveId(t.id)}
+          onClick={() => selectTopic(t)}
           className={`flex items-center w-full text-left rounded text-[0.85em] transition-colors mb-0.5 ${
             isActive
               ? "bg-copper/15 text-copper font-medium"
@@ -58,7 +91,8 @@ export function HelpDialog({ dark, topicId, onClose }: HelpDialogProps) {
         >
           {hasChildren && (
             <svg
-              className={`w-3 h-3 mr-1 shrink-0 transition-transform ${isExpanded ? "rotate-90" : ""}`}
+              onClick={(e) => { e.stopPropagation(); toggleExpanded(t.id); }}
+              className={`w-3 h-3 mr-1 shrink-0 transition-transform cursor-pointer ${isExpanded ? "rotate-90" : ""}`}
               viewBox="0 0 12 12"
               fill="currentColor"
             >
@@ -99,7 +133,7 @@ export function HelpDialog({ dark, topicId, onClose }: HelpDialogProps) {
             Help
           </h2>
           {topic ? (
-            <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+            <Markdown remarkPlugins={[remarkGfm]} components={mdComponents} urlTransform={(url) => url}>
               {topic.content}
             </Markdown>
           ) : (
@@ -124,7 +158,7 @@ export function HelpDialog({ dark, topicId, onClose }: HelpDialogProps) {
   );
 }
 
-function markdownComponents(dark: boolean) {
+function markdownComponents(dark: boolean, onNavigate: (topicId: string) => void) {
   const c: (d: string, l: string) => string = dark
     ? (d) => d
     : (_, l) => l;
@@ -227,16 +261,29 @@ function markdownComponents(dark: boolean) {
     }: {
       href?: string;
       children?: React.ReactNode;
-    }) => (
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-copper hover:underline"
-      >
-        {children}
-      </a>
-    ),
+    }) => {
+      if (href?.startsWith("help:")) {
+        const topicId = href.slice(5);
+        return (
+          <button
+            onClick={() => onNavigate(topicId)}
+            className="text-copper hover:underline cursor-pointer"
+          >
+            {children}
+          </button>
+        );
+      }
+      return (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-copper hover:underline"
+        >
+          {children}
+        </a>
+      );
+    },
     table: ({ children }: { children?: React.ReactNode }) => (
       <table
         className={`mb-3 w-full text-[0.9em] border-collapse ${c("text-text-muted", "text-light-text-muted")}`}

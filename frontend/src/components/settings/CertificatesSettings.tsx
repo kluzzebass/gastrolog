@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { unzipSync, decompressSync } from "fflate";
+import { HelpButton } from "../HelpButton";
 
 function parseTar(data: Uint8Array): [string, Uint8Array][] {
   const entries: [string, Uint8Array][] = [];
@@ -481,11 +482,14 @@ export function CertificatesSettings({ dark }: { dark: boolean }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-5">
-        <h2
-          className={`font-display text-[1.4em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
-        >
-          Certificates
-        </h2>
+        <div className="flex items-center gap-2">
+          <h2
+            className={`font-display text-[1.4em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
+          >
+            Certificates
+          </h2>
+          <HelpButton topicId="certificates" />
+        </div>
         {!adding && !expanded && (
           <div className="flex gap-2">
             <PrimaryButton onClick={startAddPem}>

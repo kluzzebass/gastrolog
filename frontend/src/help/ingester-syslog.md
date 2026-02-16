@@ -2,7 +2,7 @@
 
 Type: `syslog`
 
-Receives syslog messages over UDP and/or TCP. Supports both RFC 3164 (BSD) and RFC 5424 (structured) formats, auto-detected per message. TCP supports both newline-delimited and octet-counted framing.
+Receives syslog messages over UDP and/or TCP. Supports both RFC 3164 (BSD) and RFC 5424 (structured) formats, auto-detected per message. TCP supports both newline-delimited and octet-counted framing. Severity and facility are extracted directly from the protocol, so the [Level digester](help:digester-level) skips these messages.
 
 | Param | Description | Default |
 |-------|-------------|---------|

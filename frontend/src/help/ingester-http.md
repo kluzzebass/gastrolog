@@ -2,7 +2,7 @@
 
 Type: `http`
 
-Accepts log pushes via the Loki HTTP API. Compatible with Promtail, Grafana Agent, and other Loki clients. If you're already shipping logs to Loki, you can point them at GastroLog instead.
+Accepts log pushes via the Loki HTTP API. Compatible with Promtail, Grafana Agent, and other Loki clients. If you're already shipping logs to Loki, you can point them at GastroLog instead. Messages pass through [digestion](help:digesters) for level and timestamp extraction.
 
 | Param | Description | Default |
 |-------|-------------|---------|

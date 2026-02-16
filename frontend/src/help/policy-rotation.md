@@ -11,7 +11,7 @@ A rotation policy defines when the active chunk should be sealed and a new one s
 | **Record count** | `maxRecords` | Seal when the chunk reaches this many records | `100000` |
 | **Cron** | `cron` | Seal on a cron schedule | `0 * * * *` (hourly) |
 
-The size limit is a **soft limit** — it checks the projected size (current size plus the incoming record) before each append. If the projected size would exceed the limit, the chunk is sealed first and the record goes into a new chunk. Note that individual storage engines may impose their own hard size limits — see the storage engine pages for details.
+The size limit is a **soft limit** — it checks the projected size (current size plus the incoming record) before each append. If the projected size would exceed the limit, the chunk is sealed first and the record goes into a new chunk. Note that individual storage engines may impose their own hard size limits — see [File Store](help:storage-file) and [Memory Store](help:storage-memory) for details.
 
 ## Value Formats
 

@@ -2,7 +2,7 @@
 
 Type: `chatterbox`
 
-A test ingester that generates random log messages in various formats. Useful for development and trying things out.
+A test ingester that generates random log messages in various formats. Useful for development and trying things out. Messages pass through [digestion](help:digesters) like any other source.
 
 | Param | Description | Default |
 |-------|-------------|---------|

@@ -12,7 +12,7 @@ A retention policy defines when sealed chunks should be deleted. Multiple condit
 
 ## How Retention Runs
 
-Retention policies are evaluated periodically by a background scheduler. On each run:
+Retention policies are evaluated periodically by a [background scheduler](help:inspector-jobs). On each run:
 
 1. The policy receives a snapshot of all sealed chunks in the store
 2. **TTL**: Deletes any chunk whose **EndTS** (the WriteTS of its last record) is older than the configured duration
@@ -20,7 +20,7 @@ Retention policies are evaluated periodically by a background scheduler. On each
 4. **Chunk count**: Keeps the newest N chunks, deletes the rest
 5. The union of all deletions is applied — if any condition flags a chunk, it is deleted
 
-A store with no retention policy keeps chunks indefinitely.
+A [store](help:storage) with no retention policy keeps chunks indefinitely. See also [Rotation](help:policy-rotation) for when chunks are sealed.
 
 ## Example
 

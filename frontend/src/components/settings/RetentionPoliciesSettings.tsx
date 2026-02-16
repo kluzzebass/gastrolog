@@ -117,6 +117,7 @@ export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
   return (
     <SettingsSection
       title="Retention Policies"
+      helpTopicId="policy-retention"
       addLabel="Add Policy"
       adding={adding}
       onToggleAdd={() => setAdding(!adding)}

@@ -2,7 +2,7 @@
 
 Type: `tail`
 
-Follows local log files, similar to `tail -f`. Tracks file offsets across restarts so no lines are missed or duplicated. Handles file rotation (detects inode changes) and truncation.
+Follows local log files, similar to `tail -f`. Tracks file offsets across restarts so no lines are missed or duplicated. Handles file rotation (detects inode changes) and truncation. Messages pass through [digestion](help:digesters) for level and timestamp extraction.
 
 | Param | Description | Default |
 |-------|-------------|---------|

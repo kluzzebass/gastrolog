@@ -1,5 +1,6 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { PrimaryButton } from "./Buttons";
+import { HelpButton } from "../HelpButton";
 
 interface SettingsSectionProps {
   title: string;
@@ -12,6 +13,7 @@ interface SettingsSectionProps {
   dark: boolean;
   /** Replaces the default add/cancel button when provided. */
   addSlot?: React.ReactNode;
+  helpTopicId?: string;
   children: React.ReactNode;
 }
 
@@ -26,6 +28,7 @@ export function SettingsSection({
   dark,
   children,
   addSlot,
+  helpTopicId,
 }: SettingsSectionProps) {
   const c = useThemeClass(dark);
 
@@ -42,11 +45,14 @@ export function SettingsSection({
   return (
     <div>
       <div className="flex items-center justify-between mb-5">
-        <h2
-          className={`font-display text-[1.4em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
-        >
-          {title}
-        </h2>
+        <div className="flex items-center gap-2">
+          <h2
+            className={`font-display text-[1.4em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
+          >
+            {title}
+          </h2>
+          {helpTopicId && <HelpButton topicId={helpTopicId} />}
+        </div>
         {addSlot || (
           <PrimaryButton onClick={onToggleAdd}>
             {adding ? "Cancel" : addLabel}

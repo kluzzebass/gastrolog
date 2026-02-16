@@ -4,6 +4,7 @@ import { StoresIcon, IngestersIcon, JobsIcon, MetricsIcon } from "../icons";
 import { StoresPanel } from "./StoresPanel";
 import { IngestersPanel } from "./IngestersPanel";
 import { JobsPanel } from "./JobsPanel";
+import { HelpButton } from "../HelpButton";
 
 export type InspectorTab = "stores" | "ingesters" | "jobs" | "metrics";
 
@@ -18,12 +19,13 @@ type TabDef = {
   id: InspectorTab;
   label: string;
   icon: (p: { className?: string }) => React.ReactNode;
+  helpTopicId?: string;
 };
 
 const allTabs: TabDef[] = [
-  { id: "stores", label: "Stores", icon: StoresIcon },
-  { id: "ingesters", label: "Ingesters", icon: IngestersIcon },
-  { id: "jobs", label: "Jobs", icon: JobsIcon },
+  { id: "stores", label: "Stores", icon: StoresIcon, helpTopicId: "inspector-stores" },
+  { id: "ingesters", label: "Ingesters", icon: IngestersIcon, helpTopicId: "inspector-ingesters" },
+  { id: "jobs", label: "Jobs", icon: JobsIcon, helpTopicId: "inspector-jobs" },
   { id: "metrics", label: "Metrics", icon: MetricsIcon },
 ];
 
@@ -46,22 +48,24 @@ export function InspectorDialog({
           >
             Inspector
           </h2>
-          {allTabs.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => onTabChange(id)}
-              className={`flex items-center gap-2 w-full text-left px-2 py-1.5 rounded text-[0.85em] transition-colors mb-0.5 ${
-                tab === id
-                  ? "bg-copper/15 text-copper font-medium"
-                  : c(
-                      "text-text-muted hover:text-text-bright hover:bg-ink-hover",
-                      "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
-                    )
-              }`}
-            >
-              <Icon className="w-3.5 h-3.5 shrink-0" />
-              {label}
-            </button>
+          {allTabs.map(({ id, label, icon: Icon, helpTopicId }) => (
+            <div key={id} className="flex items-center mb-0.5">
+              <button
+                onClick={() => onTabChange(id)}
+                className={`flex items-center gap-2 flex-1 text-left px-2 py-1.5 rounded text-[0.85em] transition-colors ${
+                  tab === id
+                    ? "bg-copper/15 text-copper font-medium"
+                    : c(
+                        "text-text-muted hover:text-text-bright hover:bg-ink-hover",
+                        "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
+                      )
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5 shrink-0" />
+                {label}
+              </button>
+              {tab === id && helpTopicId && <HelpButton topicId={helpTopicId} />}
+            </div>
           ))}
         </nav>
 

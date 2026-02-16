@@ -5,7 +5,6 @@ import type { InspectorTab } from "../components/inspector/InspectorDialog";
 
 export function useDialogState() {
   const [showPlan, setShowPlan] = useState(false);
-  const [showHelp, setShowHelp] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("service");
   const [showInspector, setShowInspector] = useState(false);
@@ -31,8 +30,6 @@ export function useDialogState() {
   return {
     showPlan,
     setShowPlan,
-    showHelp,
-    setShowHelp,
     showSettings,
     setShowSettings,
     settingsTab,

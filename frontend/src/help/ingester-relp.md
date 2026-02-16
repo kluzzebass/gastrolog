@@ -10,4 +10,4 @@ Receives messages via the Reliable Event Logging Protocol. RELP provides transac
 
 RELP messages are parsed as syslog. Acknowledgement is sent only after the record is written to the chunk store, providing an end-to-end delivery guarantee.
 
-**Attributes set:** Same as Syslog (facility, severity, hostname, app_name, etc.) plus `remote_ip`.
+**Attributes set:** Same as [Syslog](help:ingester-syslog) (facility, severity, hostname, app_name, etc.) plus `remote_ip`.

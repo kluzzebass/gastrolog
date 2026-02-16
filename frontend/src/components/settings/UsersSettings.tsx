@@ -114,6 +114,7 @@ export function UsersSettings({ dark }: { dark: boolean }) {
   return (
     <SettingsSection
       title="Users"
+      helpTopicId="user-management"
       addLabel="Add User"
       adding={adding}
       onToggleAdd={() => setAdding(!adding)}

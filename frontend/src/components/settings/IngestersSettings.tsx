@@ -93,6 +93,7 @@ export function IngestersSettings({ dark }: { dark: boolean }) {
   return (
     <SettingsSection
       title="Ingesters"
+      helpTopicId="ingesters"
       addLabel="Add Ingester"
       adding={adding}
       onToggleAdd={() => {

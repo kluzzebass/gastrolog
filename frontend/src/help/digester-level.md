@@ -1,8 +1,8 @@
 # Level Digester
 
-Extracts a severity level from the message and sets a normalized `level` attribute. This is what powers severity filtering (`level=error`) and the per-level histogram counts.
+Extracts a severity level from the message and sets a normalized `level` attribute. This is what powers severity filtering ([`level=error`](help:query-language)) and the per-level histogram counts.
 
-Skipped if the message already has a `level`, `severity`, or `severity_name` attribute (e.g., set by a syslog ingester).
+Skipped if the message already has a `level`, `severity`, or `severity_name` attribute (e.g., set by the [Syslog ingester](help:ingester-syslog)).
 
 ## Where It Looks
 

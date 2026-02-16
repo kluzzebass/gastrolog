@@ -9,9 +9,9 @@ Bare words filter by token. Multiple tokens use AND semantics.
 - `error` — records containing "error"
 - `error timeout` — records containing both "error" and "timeout"
 
-Token matching is case-insensitive and works on whole tokens (word boundaries), not substrings. A search for `err` will not match a record containing only "error" — use `error` instead. Tokens are 2-16 characters; shorter or longer terms won't match via the token index.
+Token matching is case-insensitive and works on whole tokens (word boundaries), not substrings. A search for `err` will not match a record containing only "error" — use `error` instead. Tokens are 2-16 characters; shorter or longer terms won't match via the [token index](help:indexers).
 
-Numeric values (e.g., `404`, `0xff`) and UUIDs are not indexed as tokens. Searching for a number still works via runtime scanning, but won't benefit from index acceleration on sealed chunks.
+Numeric values (e.g., `404`, `0xff`) and UUIDs are not indexed as tokens. Searching for a number still works via runtime scanning, but won't benefit from [index acceleration](help:indexers) on sealed chunks.
 
 ## Boolean Operators
 
@@ -46,7 +46,7 @@ Filter by timestamp. Accepts RFC 3339 format (e.g., `2024-01-15T08:00:00Z`) or U
 | `ingest_start=TIME` | IngestTS | Lower bound on ingester receive time |
 | `ingest_end=TIME` | IngestTS | Upper bound on ingester receive time |
 
-WriteTS bounds (`start`/`end`) are used for chunk selection — chunks outside the time range are skipped entirely. SourceTS and IngestTS bounds are applied as runtime filters on individual records.
+WriteTS bounds (`start`/`end`) are used for [chunk](help:general-concepts) selection — chunks outside the time range are skipped entirely. SourceTS and IngestTS bounds are applied as runtime filters on individual records.
 
 ## Result Control
 

@@ -30,6 +30,7 @@ import { useToast } from "../Toast";
 import { FormField, TextInput, NumberInput } from "./FormField";
 import { PrimaryButton, GhostButton } from "./Buttons";
 import { Checkbox } from "./Checkbox";
+import { HelpButton } from "../HelpButton";
 
 export type SettingsTab =
   | "service"
@@ -54,17 +55,18 @@ type TabDef = {
   label: string;
   icon: (p: { className?: string }) => React.ReactNode;
   adminOnly?: boolean;
+  helpTopicId?: string;
 };
 
 const allTabs: TabDef[] = [
-  { id: "service", label: "Service", icon: ServiceIcon },
-  { id: "certificates", label: "Certificates", icon: CertIcon },
-  { id: "users", label: "Users", icon: UsersIcon, adminOnly: true },
-  { id: "ingesters", label: "Ingesters", icon: IngestersIcon },
-  { id: "filters", label: "Filters", icon: FilterIcon },
-  { id: "policies", label: "Rotation Policies", icon: PolicyIcon },
-  { id: "retention", label: "Retention Policies", icon: RetentionIcon },
-  { id: "stores", label: "Stores", icon: StoresIcon },
+  { id: "service", label: "Service", icon: ServiceIcon, helpTopicId: "service-settings" },
+  { id: "certificates", label: "Certificates", icon: CertIcon, helpTopicId: "certificates" },
+  { id: "users", label: "Users", icon: UsersIcon, adminOnly: true, helpTopicId: "user-management" },
+  { id: "ingesters", label: "Ingesters", icon: IngestersIcon, helpTopicId: "ingesters" },
+  { id: "filters", label: "Filters", icon: FilterIcon, helpTopicId: "routing" },
+  { id: "policies", label: "Rotation Policies", icon: PolicyIcon, helpTopicId: "policy-rotation" },
+  { id: "retention", label: "Retention Policies", icon: RetentionIcon, helpTopicId: "policy-retention" },
+  { id: "stores", label: "Stores", icon: StoresIcon, helpTopicId: "storage-engines" },
 ];
 
 export function SettingsDialog({
@@ -91,22 +93,24 @@ export function SettingsDialog({
           >
             Settings
           </h2>
-          {tabs.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => onTabChange(id)}
-              className={`flex items-center gap-2 w-full text-left px-2 py-1.5 rounded text-[0.85em] transition-colors mb-0.5 ${
-                tab === id
-                  ? "bg-copper/15 text-copper font-medium"
-                  : c(
-                      "text-text-muted hover:text-text-bright hover:bg-ink-hover",
-                      "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
-                    )
-              }`}
-            >
-              <Icon className="w-3.5 h-3.5 shrink-0" />
-              {label}
-            </button>
+          {tabs.map(({ id, label, icon: Icon, helpTopicId }) => (
+            <div key={id} className="flex items-center mb-0.5">
+              <button
+                onClick={() => onTabChange(id)}
+                className={`flex items-center gap-2 flex-1 text-left px-2 py-1.5 rounded text-[0.85em] transition-colors ${
+                  tab === id
+                    ? "bg-copper/15 text-copper font-medium"
+                    : c(
+                        "text-text-muted hover:text-text-bright hover:bg-ink-hover",
+                        "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
+                      )
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5 shrink-0" />
+                {label}
+              </button>
+              {tab === id && helpTopicId && <HelpButton topicId={helpTopicId} />}
+            </div>
           ))}
         </nav>
 
@@ -215,11 +219,14 @@ function ServiceSettings({ dark }: { dark: boolean }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-5">
-        <h2
-          className={`font-display text-[1.4em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
-        >
-          Service
-        </h2>
+        <div className="flex items-center gap-2">
+          <h2
+            className={`font-display text-[1.4em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
+          >
+            Service
+          </h2>
+          <HelpButton topicId="service-settings" />
+        </div>
       </div>
 
       {isLoading ? (

@@ -13,4 +13,4 @@ Digestion is best-effort: if a message doesn't match any recognized pattern, it 
 | **Level** | A normalized severity level (`error`, `warn`, `info`, `debug`, `trace`) from the log content |
 | **Timestamp** | A source timestamp (SourceTS) from embedded date patterns in the message text |
 
-See the sub-pages for details on how each digester works.
+See [Level](help:digester-level) and [Timestamp](help:digester-timestamp) for details on each.

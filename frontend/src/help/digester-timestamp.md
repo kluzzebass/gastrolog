@@ -1,8 +1,8 @@
 # Timestamp Digester
 
-Extracts a source timestamp (SourceTS) from the message text. This tells you when the log event actually happened at the source, as opposed to when GastroLog received it.
+Extracts a source timestamp (SourceTS) from the message text. This tells you when the log event actually happened at the source, as opposed to when GastroLog received it. See [General Concepts](help:general-concepts) for how timestamps are used.
 
-Skipped if the ingester already set SourceTS (e.g., syslog and Docker ingesters parse timestamps from their protocol).
+Skipped if the ingester already set SourceTS (e.g., the [Syslog](help:ingester-syslog) and [Docker](help:ingester-docker) ingesters parse timestamps from their protocol).
 
 ## Recognized Formats
 

@@ -1,6 +1,6 @@
 # Explain
 
-The Explain view shows the query engine's execution plan — how it intends to process your query before running it. Open it with the **Show Plan** button next to the search bar.
+The Explain view shows the [query engine's](help:query-engine) execution plan — how it intends to process your query before running it. Open it with the **Show Plan** button next to the search bar.
 
 ## What It Shows
 
@@ -13,12 +13,12 @@ The Explain view shows the query engine's execution plan — how it intends to p
 
 Expand individual chunks to see the pipeline steps the engine will use:
 
-- Which index lookups it can perform (fast path)
+- Which [index](help:indexers) lookups it can perform (fast path)
 - Which predicates fall back to runtime filtering (slow path — scanning each record)
 - Whether a chunk is skipped entirely (outside the time range)
 
 ## When to Use It
 
 - **Slow queries**: Check if the engine is scanning more chunks than expected, or if key predicates aren't using indexes
-- **Index verification**: Confirm that your search terms are hitting the token or KV index rather than falling back to scanning
+- **Index verification**: Confirm that your search terms are hitting the [token or KV index](help:indexers) rather than falling back to scanning
 - **Understanding capped indexes**: When a KV index has too many distinct keys, it's marked as capped and some predicates fall back to scanning. Explain shows when this happens.

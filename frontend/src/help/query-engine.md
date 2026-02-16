@@ -2,13 +2,13 @@
 
 Searching is how you retrieve records from GastroLog. When you run a search, the query engine figures out the fastest way to find matching records — narrowing down which chunks to look at, using indexes where available, and merging results from multiple stores into a single time-ordered stream.
 
-For the query syntax, see the **Query Language** topic.
+For the query syntax, see [Query Language](help:query-language).
 
 ## How a Search Works
 
 1. Your query is parsed into a normalized form (OR of ANDs) so the engine can plan each branch independently
 2. Time bounds (`start=` / `end=`) are used to skip chunks that fall outside the range
-3. The remaining chunks are scanned — sealed chunks use their indexes to jump to matching records, while the active chunk is scanned directly
+3. The remaining chunks are scanned — sealed chunks use their [indexes](help:indexers) to jump to matching records, while the active chunk is scanned directly
 4. If you're searching across multiple stores, results are merged by timestamp
 
 When no `store=` filter is specified, all stores are searched in parallel.
@@ -33,8 +33,8 @@ Click a record to see what was happening around it. The context view shows a con
 
 ## Explain
 
-The Explain view shows how the engine plans to process your query — which chunks it will scan, whether it can use indexes, and which predicates fall back to runtime filtering. Useful for understanding why a query is slow or for verifying that your indexes are being used.
+The [Explain](help:explain) view shows how the engine plans to process your query — which chunks it will scan, whether it can use indexes, and which predicates fall back to runtime filtering. Useful for understanding why a query is slow or for verifying that your indexes are being used.
 
 ## Timeout
 
-An optional query timeout can be configured in Service settings. When set, queries that run too long are cancelled automatically. Uses Go duration syntax (e.g., `30s`, `1m`). Set to empty or `0s` to disable.
+An optional query timeout can be configured in [Service settings](help:service-settings). When set, queries that run too long are cancelled automatically. Uses Go duration syntax (e.g., `30s`, `1m`). Set to empty or `0s` to disable.

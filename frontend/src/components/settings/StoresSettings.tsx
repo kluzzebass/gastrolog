@@ -225,6 +225,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
   return (
     <SettingsSection
       title="Stores"
+      helpTopicId="storage-engines"
       addLabel="Add Store"
       adding={adding}
       onToggleAdd={() => {

@@ -2,8 +2,8 @@ import { QueryInput } from "./QueryInput";
 import { QueryHistory } from "./QueryHistory";
 import { SavedQueries } from "./SavedQueries";
 import { QueryAutocomplete } from "./QueryAutocomplete";
-import { QueryHelp } from "./QueryHelp";
 import type { HistoryEntry } from "../hooks/useQueryHistory";
+import { useHelp } from "../hooks/useHelp";
 import type { SavedQuery } from "../api/gen/gastrolog/v1/config_pb";
 import { useThemeClass } from "../hooks/useThemeClass";
 
@@ -32,8 +32,6 @@ interface QueryBarProps {
   savedQueries: SavedQuery[];
   onSaveQuery: (name: string, query: string) => void;
   onDeleteSavedQuery: (name: string) => void;
-  showHelp: boolean;
-  setShowHelp: (v: boolean) => void;
   executeQuery: () => void;
   isSearching: boolean;
   isFollowMode: boolean;
@@ -61,8 +59,6 @@ export function QueryBar({
   savedQueries,
   onSaveQuery,
   onDeleteSavedQuery,
-  showHelp,
-  setShowHelp,
   executeQuery,
   isSearching,
   isFollowMode,
@@ -73,6 +69,7 @@ export function QueryBar({
   handleShowPlan,
 }: QueryBarProps) {
   const c = useThemeClass(dark);
+  const { openHelp } = useHelp();
 
   return (
     <div
@@ -194,7 +191,7 @@ export function QueryBar({
               </svg>
             </button>
             <button
-              onClick={() => setShowHelp(true)}
+              onClick={() => openHelp("query-language")}
               className={`transition-colors ${c(
                 "text-text-ghost hover:text-copper",
                 "text-light-text-ghost hover:text-copper",
@@ -359,16 +356,6 @@ export function QueryBar({
         </button>
       </div>
 
-      {showHelp && (
-        <QueryHelp
-          dark={dark}
-          onClose={() => setShowHelp(false)}
-          onExample={(ex) => {
-            setDraft(ex);
-            setShowHelp(false);
-          }}
-        />
-      )}
     </div>
   );
 }

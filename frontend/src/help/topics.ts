@@ -1,14 +1,5 @@
 import generalConcepts from './general-concepts.md?raw';
-import queryLanguage from './query-language.md?raw';
-import queryEngine from './query-engine.md?raw';
-import explain from './explain.md?raw';
-import storageEngines from './storage-engines.md?raw';
-import storageFile from './storage-file.md?raw';
-import storageMemory from './storage-memory.md?raw';
-import routing from './routing.md?raw';
-import policyRotation from './policy-rotation.md?raw';
-import policyRetention from './policy-retention.md?raw';
-import ingesters from './ingesters.md?raw';
+import ingestion from './ingestion.md?raw';
 import ingesterSyslog from './ingester-syslog.md?raw';
 import ingesterHttp from './ingester-http.md?raw';
 import ingesterRelp from './ingester-relp.md?raw';
@@ -18,11 +9,25 @@ import ingesterChatterbox from './ingester-chatterbox.md?raw';
 import digesters from './digesters.md?raw';
 import digesterLevel from './digester-level.md?raw';
 import digesterTimestamp from './digester-timestamp.md?raw';
+import storage from './storage.md?raw';
+import storageFile from './storage-file.md?raw';
+import storageMemory from './storage-memory.md?raw';
 import indexers from './indexers.md?raw';
+import queryEngine from './query-engine.md?raw';
+import queryLanguage from './query-language.md?raw';
+import explain from './explain.md?raw';
 import inspector from './inspector.md?raw';
 import inspectorStores from './inspector-stores.md?raw';
 import inspectorIngesters from './inspector-ingesters.md?raw';
 import inspectorJobs from './inspector-jobs.md?raw';
+import settingsOverview from './settings.md?raw';
+import serviceSettings from './service-settings.md?raw';
+import ingesters from './ingesters.md?raw';
+import routing from './routing.md?raw';
+import policyRotation from './policy-rotation.md?raw';
+import policyRetention from './policy-retention.md?raw';
+import storageEngines from './storage-engines.md?raw';
+import certificates from './certificates.md?raw';
 import userManagement from './user-management.md?raw';
 
 export interface HelpTopic {
@@ -35,7 +40,7 @@ export interface HelpTopic {
 export const helpTopics: HelpTopic[] = [
   { id: 'general-concepts', title: 'General Concepts', content: generalConcepts },
   {
-    id: 'ingesters', title: 'Ingestion', content: ingesters,
+    id: 'ingestion', title: 'Ingestion', content: ingestion,
     children: [
       { id: 'ingester-syslog', title: 'Syslog', content: ingesterSyslog },
       { id: 'ingester-http', title: 'HTTP (Loki)', content: ingesterHttp },
@@ -53,11 +58,8 @@ export const helpTopics: HelpTopic[] = [
     ],
   },
   {
-    id: 'storage-engines', title: 'Storage', content: storageEngines,
+    id: 'storage', title: 'Storage', content: storage,
     children: [
-      { id: 'routing', title: 'Routing', content: routing },
-      { id: 'policy-rotation', title: 'Rotation', content: policyRotation },
-      { id: 'policy-retention', title: 'Retention', content: policyRetention },
       { id: 'storage-file', title: 'File Store', content: storageFile },
       { id: 'storage-memory', title: 'Memory Store', content: storageMemory },
     ],
@@ -78,7 +80,19 @@ export const helpTopics: HelpTopic[] = [
       { id: 'inspector-jobs', title: 'Jobs', content: inspectorJobs },
     ],
   },
-  { id: 'user-management', title: 'Users & Security', content: userManagement },
+  {
+    id: 'settings', title: 'Settings', content: settingsOverview,
+    children: [
+      { id: 'service-settings', title: 'Service', content: serviceSettings },
+      { id: 'ingesters', title: 'Ingesters', content: ingesters },
+      { id: 'routing', title: 'Routing', content: routing },
+      { id: 'policy-rotation', title: 'Rotation', content: policyRotation },
+      { id: 'policy-retention', title: 'Retention', content: policyRetention },
+      { id: 'storage-engines', title: 'Stores', content: storageEngines },
+      { id: 'certificates', title: 'Certificates', content: certificates },
+      { id: 'user-management', title: 'Users & Security', content: userManagement },
+    ],
+  },
 ];
 
 export function findTopic(id: string): HelpTopic | undefined {

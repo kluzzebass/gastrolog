@@ -117,6 +117,7 @@ export function FiltersSettings({ dark }: { dark: boolean }) {
   return (
     <SettingsSection
       title="Filters"
+      helpTopicId="routing"
       addLabel="Add Filter"
       adding={adding}
       onToggleAdd={() => setAdding(!adding)}

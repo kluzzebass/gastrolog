@@ -85,7 +85,6 @@ function AppContent() {
 
   const {
     showPlan, setShowPlan,
-    showHelp, setShowHelp,
     showSettings, setShowSettings,
     settingsTab, setSettingsTab,
     showInspector, setShowInspector,
@@ -608,8 +607,6 @@ function AppContent() {
             savedQueries={savedQueries.data ?? []}
             onSaveQuery={(name, query) => putSavedQuery.mutate({ name, query })}
             onDeleteSavedQuery={(name) => deleteSavedQuery.mutate(name)}
-            showHelp={showHelp}
-            setShowHelp={setShowHelp}
             executeQuery={executeQuery}
             isSearching={isSearching}
             isFollowMode={isFollowMode}

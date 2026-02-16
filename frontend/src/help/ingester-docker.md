@@ -27,4 +27,4 @@ Streams container logs from a Docker daemon. Automatically discovers containers 
 | `image` | Image name/tag |
 | `stream` | Log source: `stdout`, `stderr`, or `tty` |
 
-Handles both TTY and multiplexed log streams. Docker timestamps are extracted automatically.
+Handles both TTY and multiplexed log streams. Docker timestamps are extracted automatically, so the [Timestamp digester](help:digester-timestamp) skips these messages. The [Level digester](help:digester-level) still runs to extract severity from the message content.
