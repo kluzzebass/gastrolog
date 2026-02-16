@@ -67,13 +67,35 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 		if store == nil || !store.Enabled {
 			continue
 		}
-		onSeal := func(cid chunk.ChunkID) { o.scheduleIndexBuild(key, cid) }
+		onSeal := func(cid chunk.ChunkID) {
+			o.scheduleCompression(key, cid)
+			o.scheduleIndexBuild(key, cid)
+		}
 		if err := store.Append(rec, onSeal); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+// scheduleCompression triggers an asynchronous compression job for the given chunk
+// via the shared scheduler. Only dispatched if the ChunkManager implements ChunkCompressor.
+func (o *Orchestrator) scheduleCompression(registryKey uuid.UUID, chunkID chunk.ChunkID) {
+	store := o.stores[registryKey]
+	if store == nil {
+		return
+	}
+
+	compressor, ok := store.Chunks.(chunk.ChunkCompressor)
+	if !ok {
+		return
+	}
+
+	name := fmt.Sprintf("compress:%s:%s", registryKey, chunkID)
+	if err := o.scheduler.RunOnce(name, compressor.CompressChunk, chunkID); err != nil {
+		o.logger.Warn("failed to schedule compression", "name", name, "error", err)
+	}
 }
 
 // scheduleIndexBuild triggers an asynchronous index build for the given chunk

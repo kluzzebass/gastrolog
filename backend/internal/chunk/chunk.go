@@ -79,6 +79,15 @@ type ChunkMover interface {
 	ChunkDir(id ChunkID) string
 }
 
+// ChunkCompressor extends ChunkManager with post-seal compression.
+// Not all ChunkManager implementations support this (e.g. memory-based ones
+// have nothing to compress). Callers should type-assert to check availability.
+type ChunkCompressor interface {
+	// CompressChunk compresses the data files of a sealed chunk.
+	// No-op if compression is not enabled or the chunk is already compressed.
+	CompressChunk(id ChunkID) error
+}
+
 // RecordCursor provides bidirectional iteration over records in a chunk.
 type RecordCursor interface {
 	Next() (Record, RecordRef, error)

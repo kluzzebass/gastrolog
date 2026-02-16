@@ -183,6 +183,9 @@ func TestCompressedChunkRoundTrip(t *testing.T) {
 	if err := manager.Seal(); err != nil {
 		t.Fatalf("seal: %v", err)
 	}
+	if err := manager.CompressChunk(chunkID); err != nil {
+		t.Fatalf("compress: %v", err)
+	}
 
 	// Verify compressed files have FlagCompressed set.
 	chunkDir := filepath.Join(dir, chunkID.String())
@@ -269,6 +272,9 @@ func TestCompressedChunkReverseCursor(t *testing.T) {
 	if err := manager.Seal(); err != nil {
 		t.Fatalf("seal: %v", err)
 	}
+	if err := manager.CompressChunk(chunkID); err != nil {
+		t.Fatalf("compress: %v", err)
+	}
 
 	cursor, err := manager.OpenCursor(chunkID)
 	if err != nil {
@@ -337,6 +343,9 @@ func TestCompressedFilesAreSmaller(t *testing.T) {
 	if err := mZstd.Seal(); err != nil {
 		t.Fatalf("seal: %v", err)
 	}
+	if err := mZstd.CompressChunk(idZstd); err != nil {
+		t.Fatalf("compress: %v", err)
+	}
 	mZstd.Close()
 
 	// Compare raw.log sizes.
@@ -395,8 +404,19 @@ func TestCompressedChunkRotation(t *testing.T) {
 		t.Fatalf("seal: %v", err)
 	}
 
-	// Verify all records across all chunks.
+	// Compress all sealed chunks.
 	metas, err := manager.List()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, meta := range metas {
+		if err := manager.CompressChunk(meta.ID); err != nil {
+			t.Fatalf("compress %s: %v", meta.ID, err)
+		}
+	}
+
+	// Verify all records across all chunks.
+	metas, err = manager.List()
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -452,6 +472,9 @@ func TestCompressedChunkPersistAcrossRestart(t *testing.T) {
 		if err := m.Seal(); err != nil {
 			t.Fatalf("seal: %v", err)
 		}
+		if err := m.CompressChunk(chunkID); err != nil {
+			t.Fatalf("compress: %v", err)
+		}
 		if err := m.Close(); err != nil {
 			t.Fatalf("close: %v", err)
 		}
@@ -502,6 +525,14 @@ func TestCompressedEmptyChunk(t *testing.T) {
 	}
 
 	metas, err := manager.List()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if err := manager.CompressChunk(metas[0].ID); err != nil {
+		t.Fatalf("compress: %v", err)
+	}
+
+	metas, err = manager.List()
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}

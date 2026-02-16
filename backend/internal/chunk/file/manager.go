@@ -566,16 +566,6 @@ func (m *Manager) sealChunkOnDisk(id chunk.ChunkID) error {
 	}
 	dictFile.Close()
 
-	// Compress raw.log and attr.log if compression is enabled.
-	if m.zstdEnc != nil {
-		if err := compressFile(rawPath, m.zstdEnc, m.cfg.FileMode); err != nil {
-			m.logger.Warn("failed to compress raw.log", "chunk", id.String(), "err", err)
-		}
-		if err := compressFile(attrPath, m.zstdEnc, m.cfg.FileMode); err != nil {
-			m.logger.Warn("failed to compress attr.log", "chunk", id.String(), "err", err)
-		}
-	}
-
 	return nil
 }
 
@@ -1001,7 +991,6 @@ func (m *Manager) sealLocked() error {
 		return nil
 	}
 
-	id := m.active.meta.id
 	m.active.meta.sealed = true
 
 	// Update sealed flag in all file headers.
@@ -1033,19 +1022,6 @@ func (m *Manager) sealLocked() error {
 	}
 
 	m.active = nil
-
-	// Compress raw.log and attr.log if compression is enabled.
-	// Done after files are closed. Best-effort: if compression fails
-	// the chunk remains sealed but uncompressed (read path handles both).
-	if m.zstdEnc != nil {
-		if err := compressFile(m.rawLogPath(id), m.zstdEnc, m.cfg.FileMode); err != nil {
-			m.logger.Warn("failed to compress raw.log", "chunk", id.String(), "err", err)
-		}
-		if err := compressFile(m.attrLogPath(id), m.zstdEnc, m.cfg.FileMode); err != nil {
-			m.logger.Warn("failed to compress attr.log", "chunk", id.String(), "err", err)
-		}
-	}
-
 	return nil
 }
 
@@ -1272,6 +1248,39 @@ func (m *Manager) Delete(id chunk.ChunkID) error {
 	return nil
 }
 
+// CompressChunk compresses raw.log and attr.log for a sealed chunk using zstd.
+// Returns nil if compression is not enabled or the chunk is not found/not sealed.
+// Safe to call concurrently with reads (atomic file replacement via rename).
+// Intended to be called by the orchestrator via the scheduler after sealing.
+func (m *Manager) CompressChunk(id chunk.ChunkID) error {
+	if m.zstdEnc == nil {
+		return nil
+	}
+
+	m.mu.Lock()
+	meta, ok := m.metas[id]
+	if !ok {
+		m.mu.Unlock()
+		return chunk.ErrChunkNotFound
+	}
+	if !meta.sealed {
+		m.mu.Unlock()
+		return nil
+	}
+	rawPath := m.rawLogPath(id)
+	attrPath := m.attrLogPath(id)
+	mode := m.cfg.FileMode
+	m.mu.Unlock()
+
+	if err := compressFile(rawPath, m.zstdEnc, mode); err != nil {
+		return fmt.Errorf("compress raw.log: %w", err)
+	}
+	if err := compressFile(attrPath, m.zstdEnc, mode); err != nil {
+		return fmt.Errorf("compress attr.log: %w", err)
+	}
+	return nil
+}
+
 // SetRotationPolicy updates the rotation policy for future appends.
 func (m *Manager) SetRotationPolicy(policy chunk.RotationPolicy) {
 	m.mu.Lock()
@@ -1281,6 +1290,7 @@ func (m *Manager) SetRotationPolicy(policy chunk.RotationPolicy) {
 
 var _ chunk.ChunkManager = (*Manager)(nil)
 var _ chunk.ChunkMover = (*Manager)(nil)
+var _ chunk.ChunkCompressor = (*Manager)(nil)
 
 // ChunkDir returns the filesystem path for a chunk's directory.
 func (m *Manager) ChunkDir(id chunk.ChunkID) string {
