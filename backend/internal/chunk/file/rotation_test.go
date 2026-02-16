@@ -204,11 +204,11 @@ func TestAttributesTooLargeFails(t *testing.T) {
 	}
 	defer manager.Close()
 
-	// Create attributes that exceed 64KB when encoded
-	// Each entry needs: 2 (keyLen) + 2 (valLen) + key + value
-	// With a 32KB key and 32KB value, total > 64KB
+	// Create attributes that exceed 64KB when dict-encoded.
+	// Dict encoding per entry: 2 (keyID) + 2 (valLen) + value.
+	// Total: 2 (count) + 4 + valLen > 65535 → valLen > 65529.
 	largeAttrs := chunk.Attributes{
-		strings.Repeat("k", 32768): strings.Repeat("v", 32768),
+		"k": strings.Repeat("v", 65530),
 	}
 
 	rec := chunk.Record{
@@ -302,10 +302,10 @@ func TestAllThreeFilesCreated(t *testing.T) {
 
 	manager.Close()
 
-	// Check all three files exist
+	// Check all four files exist
 	chunkDir := filepath.Join(dir, chunkID.String())
 
-	files := []string{rawLogFileName, idxLogFileName, attrLogFileName}
+	files := []string{rawLogFileName, idxLogFileName, attrLogFileName, attrDictFileName}
 	for _, f := range files {
 		path := filepath.Join(chunkDir, f)
 		info, err := os.Stat(path)
@@ -380,11 +380,24 @@ func TestFileHeadersAreCorrect(t *testing.T) {
 		t.Fatalf("attr.log type: want 0x61, got 0x%02x", attrData[1])
 	}
 
+	// Verify attr_dict.log header
+	dictData, err := os.ReadFile(filepath.Join(chunkDir, attrDictFileName))
+	if err != nil {
+		t.Fatalf("read attr_dict.log: %v", err)
+	}
+	if dictData[0] != 0x69 {
+		t.Fatalf("attr_dict.log signature: want 0x69, got 0x%02x", dictData[0])
+	}
+	if dictData[1] != 0x64 { // 'd' type
+		t.Fatalf("attr_dict.log type: want 0x64, got 0x%02x", dictData[1])
+	}
+
 	// All files should have sealed flag set
 	for name, data := range map[string][]byte{
-		"raw.log":  rawData,
-		"idx.log":  idxData,
-		"attr.log": attrData,
+		"raw.log":       rawData,
+		"idx.log":       idxData,
+		"attr.log":      attrData,
+		"attr_dict.log": dictData,
 	} {
 		if data[3]&0x01 == 0 {
 			t.Fatalf("%s sealed flag not set", name)
@@ -422,7 +435,7 @@ func TestEmptyChunkHasAllFiles(t *testing.T) {
 	// Verify all files exist even for empty chunk
 	chunkDir := filepath.Join(dir, metas[0].ID.String())
 
-	for _, f := range []string{rawLogFileName, idxLogFileName, attrLogFileName} {
+	for _, f := range []string{rawLogFileName, idxLogFileName, attrLogFileName, attrDictFileName} {
 		path := filepath.Join(chunkDir, f)
 		_, err := os.Stat(path)
 		if err != nil {

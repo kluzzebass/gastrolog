@@ -172,8 +172,8 @@ func TestFileChunkManagerDirectoryLayout(t *testing.T) {
 		t.Fatalf("missing directory for chunk %s", chunkID2.String())
 	}
 
-	// Each chunk directory should contain exactly the three expected files.
-	expectedFiles := []string{rawLogFileName, idxLogFileName, attrLogFileName}
+	// Each chunk directory should contain exactly the four expected files.
+	expectedFiles := []string{rawLogFileName, idxLogFileName, attrLogFileName, attrDictFileName}
 	for _, id := range []chunk.ChunkID{chunkID1, chunkID2} {
 		chunkDir := filepath.Join(dir, id.String())
 		files, err := os.ReadDir(chunkDir)
@@ -265,6 +265,9 @@ func TestFileChunkManagerAppendSealOpenReader(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(chunkDir, attrLogFileName)); err != nil {
 		t.Fatalf("attr.log file missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(chunkDir, attrDictFileName)); err != nil {
+		t.Fatalf("attr_dict.log file missing: %v", err)
 	}
 }
 

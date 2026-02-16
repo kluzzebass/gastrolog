@@ -21,9 +21,10 @@ import (
 
 // File names within a chunk directory.
 const (
-	rawLogFileName  = "raw.log"
-	idxLogFileName  = "idx.log"
-	attrLogFileName = "attr.log"
+	rawLogFileName      = "raw.log"
+	idxLogFileName      = "idx.log"
+	attrLogFileName     = "attr.log"
+	attrDictFileName    = "attr_dict.log"
 )
 
 var (
@@ -116,6 +117,8 @@ type chunkState struct {
 	rawFile     *os.File
 	idxFile     *os.File
 	attrFile    *os.File
+	dictFile    *os.File
+	keyDict     *chunk.KeyDict
 	rawOffset   uint64    // Current write position in raw.log (after header)
 	attrOffset  uint64    // Current write position in attr.log (after header)
 	recordCount uint64    // Number of records written
@@ -201,17 +204,17 @@ func (m *Manager) doAppend(record chunk.Record, preserveWriteTS bool) (chunk.Chu
 		return chunk.ChunkID{}, 0, ErrManagerClosed
 	}
 
-	// Encode attributes upfront to check size limits and for policy decisions.
-	attrBytes, err := record.Attrs.Encode()
-	if err != nil {
-		return chunk.ChunkID{}, 0, err
-	}
-
-	// Ensure we have an active chunk.
+	// Ensure we have an active chunk (needed before dict encoding).
 	if m.active == nil {
 		if err := m.openLocked(); err != nil {
 			return chunk.ChunkID{}, 0, err
 		}
+	}
+
+	// Encode attributes using dictionary.
+	attrBytes, newKeys, err := chunk.EncodeWithDict(record.Attrs, m.active.keyDict)
+	if err != nil {
+		return chunk.ChunkID{}, 0, err
 	}
 
 	// Build state snapshot for rotation decision.
@@ -232,6 +235,11 @@ func (m *Manager) doAppend(record chunk.Record, preserveWriteTS bool) (chunk.Chu
 		if err := m.openLocked(); err != nil {
 			return chunk.ChunkID{}, 0, err
 		}
+		// Re-encode with the new chunk's dictionary.
+		attrBytes, newKeys, err = chunk.EncodeWithDict(record.Attrs, m.active.keyDict)
+		if err != nil {
+			return chunk.ChunkID{}, 0, err
+		}
 	}
 
 	if !preserveWriteTS {
@@ -242,6 +250,18 @@ func (m *Manager) doAppend(record chunk.Record, preserveWriteTS bool) (chunk.Chu
 
 	rawLen := uint64(len(record.Raw))
 	attrLen := uint64(len(attrBytes))
+
+	// Write new dictionary entries before attr data (crash safety).
+	for _, key := range newKeys {
+		entry := chunk.EncodeDictEntry(key)
+		n, err := m.active.dictFile.Write(entry)
+		if err != nil {
+			return chunk.ChunkID{}, 0, err
+		}
+		if n != len(entry) {
+			return chunk.ChunkID{}, 0, io.ErrShortWrite
+		}
+	}
 
 	// Write raw data to raw.log.
 	n, err := m.active.rawFile.Write(record.Raw)
@@ -396,12 +416,13 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	rawPath := m.rawLogPath(id)
 	idxPath := m.idxLogPath(id)
 	attrPath := m.attrLogPath(id)
+	dictPath := m.dictLogPath(id)
 
 	if meta.sealed {
-		return newMmapCursor(id, rawPath, idxPath, attrPath)
+		return newMmapCursor(id, rawPath, idxPath, attrPath, dictPath)
 	}
 
-	return newStdioCursor(id, rawPath, idxPath, attrPath)
+	return newStdioCursor(id, rawPath, idxPath, attrPath, dictPath)
 }
 
 func (m *Manager) loadExisting() error {
@@ -472,6 +493,7 @@ func (m *Manager) sealChunkOnDisk(id chunk.ChunkID) error {
 	rawPath := m.rawLogPath(id)
 	idxPath := m.idxLogPath(id)
 	attrPath := m.attrLogPath(id)
+	dictPath := m.dictLogPath(id)
 
 	// Set sealed flag in raw.log header.
 	rawFile, err := os.OpenFile(rawPath, os.O_RDWR, m.cfg.FileMode)
@@ -506,6 +528,17 @@ func (m *Manager) sealChunkOnDisk(id chunk.ChunkID) error {
 	}
 	attrFile.Close()
 
+	// Set sealed flag in attr_dict.log header.
+	dictFile, err := os.OpenFile(dictPath, os.O_RDWR, m.cfg.FileMode)
+	if err != nil {
+		return err
+	}
+	if err := m.setSealedFlag(dictFile); err != nil {
+		dictFile.Close()
+		return err
+	}
+	dictFile.Close()
+
 	return nil
 }
 
@@ -528,11 +561,19 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 		idxFile.Close()
 		return err
 	}
+	dictFile, err := m.openDictFile(id)
+	if err != nil {
+		rawFile.Close()
+		idxFile.Close()
+		attrFile.Close()
+		return err
+	}
 
 	closeAll := func() {
 		rawFile.Close()
 		idxFile.Close()
 		attrFile.Close()
+		dictFile.Close()
 	}
 
 	// Read idx.log header including createdAt timestamp.
@@ -612,6 +653,28 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 	rawOffset := uint64(expectedRawSize) - uint64(format.HeaderSize)
 	attrOffset := uint64(expectedAttrSize) - uint64(format.HeaderSize)
 
+	// Load key dictionary from attr_dict.log.
+	dictInfo, err := dictFile.Stat()
+	if err != nil {
+		closeAll()
+		return err
+	}
+	var keyDict *chunk.KeyDict
+	if dictInfo.Size() <= int64(format.HeaderSize) {
+		keyDict = chunk.NewKeyDict()
+	} else {
+		dictData := make([]byte, dictInfo.Size()-int64(format.HeaderSize))
+		if _, err := dictFile.ReadAt(dictData, int64(format.HeaderSize)); err != nil {
+			closeAll()
+			return err
+		}
+		keyDict, err = chunk.DecodeDictData(dictData)
+		if err != nil {
+			closeAll()
+			return err
+		}
+	}
+
 	meta.bytes = int64(rawOffset + attrOffset + recordCount*IdxEntrySize)
 
 	m.active = &chunkState{
@@ -619,6 +682,8 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 		rawFile:     rawFile,
 		idxFile:     idxFile,
 		attrFile:    attrFile,
+		dictFile:    dictFile,
+		keyDict:     keyDict,
 		rawOffset:   rawOffset,
 		attrOffset:  attrOffset,
 		recordCount: recordCount,
@@ -753,6 +818,15 @@ func (m *Manager) openLocked() error {
 		return err
 	}
 
+	// Create and initialize attr_dict.log with header.
+	dictFile, err := m.createDictFile(id)
+	if err != nil {
+		rawFile.Close()
+		idxFile.Close()
+		attrFile.Close()
+		return err
+	}
+
 	meta := &chunkMeta{
 		id:     id,
 		sealed: false,
@@ -763,6 +837,8 @@ func (m *Manager) openLocked() error {
 		rawFile:     rawFile,
 		idxFile:     idxFile,
 		attrFile:    attrFile,
+		dictFile:    dictFile,
+		keyDict:     chunk.NewKeyDict(),
 		rawOffset:   0, // Data starts after header
 		attrOffset:  0, // Data starts after header
 		recordCount: 0,
@@ -856,6 +932,33 @@ func (m *Manager) openAttrFile(id chunk.ChunkID) (*os.File, error) {
 	return os.OpenFile(path, os.O_RDWR|os.O_APPEND, m.cfg.FileMode)
 }
 
+func (m *Manager) createDictFile(id chunk.ChunkID) (*os.File, error) {
+	path := m.dictLogPath(id)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, m.cfg.FileMode)
+	if err != nil {
+		return nil, err
+	}
+
+	// Write header.
+	header := format.Header{
+		Type:    format.TypeAttrDict,
+		Version: AttrDictVersion,
+		Flags:   0,
+	}
+	headerBytes := header.Encode()
+	if _, err := file.Write(headerBytes[:]); err != nil {
+		file.Close()
+		return nil, err
+	}
+
+	return file, nil
+}
+
+func (m *Manager) openDictFile(id chunk.ChunkID) (*os.File, error) {
+	path := m.dictLogPath(id)
+	return os.OpenFile(path, os.O_RDWR|os.O_APPEND, m.cfg.FileMode)
+}
+
 func (m *Manager) sealLocked() error {
 	if m.active == nil {
 		return nil
@@ -873,6 +976,9 @@ func (m *Manager) sealLocked() error {
 	if err := m.setSealedFlag(m.active.attrFile); err != nil {
 		return err
 	}
+	if err := m.setSealedFlag(m.active.dictFile); err != nil {
+		return err
+	}
 
 	// Close files.
 	if err := m.active.rawFile.Close(); err != nil {
@@ -882,6 +988,9 @@ func (m *Manager) sealLocked() error {
 		return err
 	}
 	if err := m.active.attrFile.Close(); err != nil {
+		return err
+	}
+	if err := m.active.dictFile.Close(); err != nil {
 		return err
 	}
 
@@ -933,6 +1042,9 @@ func (m *Manager) Close() error {
 		if err := m.active.attrFile.Close(); err != nil {
 			errs = append(errs, err)
 		}
+		if err := m.active.dictFile.Close(); err != nil {
+			errs = append(errs, err)
+		}
 		m.active = nil
 	}
 
@@ -964,6 +1076,10 @@ func (m *Manager) idxLogPath(id chunk.ChunkID) string {
 
 func (m *Manager) attrLogPath(id chunk.ChunkID) string {
 	return filepath.Join(m.chunkDir(id), attrLogFileName)
+}
+
+func (m *Manager) dictLogPath(id chunk.ChunkID) string {
+	return filepath.Join(m.chunkDir(id), attrDictFileName)
 }
 
 // FindStartPosition binary searches idx.log for the record at or before the given timestamp.

@@ -13,6 +13,18 @@ var (
 	ErrMmapEmpty = errors.New("cannot mmap empty file")
 )
 
+// loadKeyDict reads attr_dict.log, validates its header, and returns a KeyDict.
+func loadKeyDict(dictPath string) (*chunk.KeyDict, error) {
+	data, err := os.ReadFile(dictPath)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := format.DecodeAndValidate(data[:format.HeaderSize], format.TypeAttrDict, AttrDictVersion); err != nil {
+		return nil, err
+	}
+	return chunk.DecodeDictData(data[format.HeaderSize:])
+}
+
 // mmapCursor is a RecordCursor backed by mmap'd raw.log, idx.log, and attr.log files.
 // Used for sealed chunks.
 type mmapCursor struct {
@@ -23,6 +35,7 @@ type mmapCursor struct {
 	rawFile  *os.File
 	idxFile  *os.File
 	attrFile *os.File
+	keyDict  *chunk.KeyDict
 
 	recordCount uint64 // Total records in chunk
 	fwdIndex    uint64 // Current forward iteration index
@@ -31,7 +44,13 @@ type mmapCursor struct {
 	revDone     bool
 }
 
-func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath string) (*mmapCursor, error) {
+func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath string) (*mmapCursor, error) {
+	// Load key dictionary from attr_dict.log.
+	keyDict, err := loadKeyDict(dictPath)
+	if err != nil {
+		return nil, err
+	}
+
 	// Open and mmap idx.log.
 	idxFile, err := os.Open(idxPath)
 	if err != nil {
@@ -50,6 +69,7 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath string) (*m
 		idxFile.Close()
 		return &mmapCursor{
 			chunkID:     chunkID,
+			keyDict:     keyDict,
 			recordCount: 0,
 			fwdDone:     true,
 			revDone:     true,
@@ -122,6 +142,7 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath string) (*m
 		rawFile:     rawFile,
 		idxFile:     idxFile,
 		attrFile:    attrFile,
+		keyDict:     keyDict,
 		recordCount: recordCount,
 		fwdIndex:    0,
 		revIndex:    recordCount, // Start past end for reverse iteration
@@ -186,13 +207,13 @@ func (c *mmapCursor) readRecord(index uint64) (chunk.Record, error) {
 	}
 	raw := c.rawData[rawStart:rawEnd]
 
-	// Read and decode attributes.
+	// Read and decode attributes using dictionary.
 	attrStart := int(format.HeaderSize) + int(entry.AttrOffset)
 	attrEnd := attrStart + int(entry.AttrSize)
 	if attrEnd > len(c.attrData) {
 		return chunk.Record{}, ErrInvalidEntry
 	}
-	attrs, err := chunk.DecodeAttributes(c.attrData[attrStart:attrEnd])
+	attrs, err := chunk.DecodeWithDict(c.attrData[attrStart:attrEnd], c.keyDict)
 	if err != nil {
 		return chunk.Record{}, err
 	}
@@ -257,6 +278,7 @@ type stdioCursor struct {
 	rawFile  *os.File
 	idxFile  *os.File
 	attrFile *os.File
+	keyDict  *chunk.KeyDict
 
 	fwdIndex uint64 // Current forward iteration index
 	revIndex uint64 // Current reverse iteration index
@@ -264,7 +286,13 @@ type stdioCursor struct {
 	revDone  bool
 }
 
-func newStdioCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath string) (*stdioCursor, error) {
+func newStdioCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath string) (*stdioCursor, error) {
+	// Load key dictionary from attr_dict.log.
+	keyDict, err := loadKeyDict(dictPath)
+	if err != nil {
+		return nil, err
+	}
+
 	rawFile, err := os.Open(rawPath)
 	if err != nil {
 		return nil, err
@@ -298,6 +326,7 @@ func newStdioCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath string) (*
 		rawFile:  rawFile,
 		idxFile:  idxFile,
 		attrFile: attrFile,
+		keyDict:  keyDict,
 		fwdIndex: 0,
 		revIndex: recordCount,
 	}, nil
@@ -372,13 +401,13 @@ func (c *stdioCursor) readRecord(index uint64) (chunk.Record, error) {
 		return chunk.Record{}, err
 	}
 
-	// Read and decode attributes.
+	// Read and decode attributes using dictionary.
 	attrOffset := int64(format.HeaderSize) + int64(entry.AttrOffset)
 	attrBuf := make([]byte, entry.AttrSize)
 	if _, err := c.attrFile.ReadAt(attrBuf, attrOffset); err != nil {
 		return chunk.Record{}, err
 	}
-	attrs, err := chunk.DecodeAttributes(attrBuf)
+	attrs, err := chunk.DecodeWithDict(attrBuf, c.keyDict)
 	if err != nil {
 		return chunk.Record{}, err
 	}

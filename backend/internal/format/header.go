@@ -41,6 +41,7 @@ const (
 	TypeRawLog         = 'r'
 	TypeIdxLog         = 'i'
 	TypeAttrLog        = 'a'
+	TypeAttrDict       = 'd' // Attribute key dictionary
 
 	// Flag bits for raw.log, idx.log, and attr.log headers.
 	FlagSealed = 0x01

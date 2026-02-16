@@ -268,9 +268,20 @@ func TestAttrLogFileFormat(t *testing.T) {
 		t.Fatal("sealed flag not set in attr.log header")
 	}
 
-	// Verify we can decode the attributes from the data section
+	// Load the key dictionary.
+	dictPath := filepath.Join(dir, chunkID.String(), attrDictFileName)
+	dictData, err := os.ReadFile(dictPath)
+	if err != nil {
+		t.Fatalf("read attr_dict.log: %v", err)
+	}
+	keyDict, err := chunk.DecodeDictData(dictData[format.HeaderSize:])
+	if err != nil {
+		t.Fatalf("decode dict: %v", err)
+	}
+
+	// Verify we can decode the attributes from the data section using the dictionary.
 	attrData := data[format.HeaderSize:]
-	decoded, err := chunk.DecodeAttributes(attrData)
+	decoded, err := chunk.DecodeWithDict(attrData, keyDict)
 	if err != nil {
 		t.Fatalf("decode attrs from file: %v", err)
 	}
@@ -381,8 +392,11 @@ func TestIdxLogEntryContainsAttrOffsets(t *testing.T) {
 		t.Fatalf("entry 0 AttrOffset: want 0, got %d", entry0.AttrOffset)
 	}
 
-	// Entry 0's AttrSize should be the encoded size of {"a": "1"}
-	enc0, _ := records[0].Attrs.Encode()
+	// Entry 0's AttrSize should match dict-encoded size of {"a": "1"}.
+	// With dict encoding: [count:u16][keyID:u16][valLen:u16][val bytes]
+	// = 2 + 2 + 2 + 1 = 7 bytes.
+	dict := chunk.NewKeyDict()
+	enc0, _, _ := chunk.EncodeWithDict(records[0].Attrs, dict)
 	if entry0.AttrSize != uint16(len(enc0)) {
 		t.Fatalf("entry 0 AttrSize: want %d, got %d", len(enc0), entry0.AttrSize)
 	}

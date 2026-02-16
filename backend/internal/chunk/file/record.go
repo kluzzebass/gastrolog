@@ -30,9 +30,10 @@ const (
 	idxAttrSizeOffset   = 36
 
 	// File versions.
-	RawLogVersion  = 0x01
-	IdxLogVersion  = 0x01
-	AttrLogVersion = 0x01
+	RawLogVersion    = 0x01
+	IdxLogVersion    = 0x01
+	AttrLogVersion   = 0x01
+	AttrDictVersion  = 0x01
 
 	// IdxHeaderSize is the total header size for idx.log.
 	// 4 bytes common header + 8 bytes createdAt (Unix nanoseconds).
