@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -472,6 +473,9 @@ func (m *Manager) loadExisting() error {
 			continue
 		}
 
+		// Clean up orphan temp files left by crashed compression or index builds.
+		m.cleanOrphanTempFiles(filepath.Join(m.cfg.Dir, entry.Name()))
+
 		meta, err := m.loadChunkMeta(id)
 		if err != nil {
 			return err
@@ -513,6 +517,30 @@ func (m *Manager) loadExisting() error {
 	}
 
 	return nil
+}
+
+// cleanOrphanTempFiles removes leftover temp files from a chunk directory.
+// These can be left behind by crashed compression jobs (.compress-*) or
+// index builds (*.tmp.*). Best-effort: errors are logged but not returned.
+func (m *Manager) cleanOrphanTempFiles(chunkDir string) {
+	entries, err := os.ReadDir(chunkDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasPrefix(name, ".compress-") || strings.Contains(name, ".tmp.") {
+			path := filepath.Join(chunkDir, name)
+			if err := os.Remove(path); err != nil {
+				m.logger.Warn("failed to remove orphan temp file", "path", path, "error", err)
+			} else {
+				m.logger.Info("removed orphan temp file", "path", path)
+			}
+		}
+	}
 }
 
 // sealChunkOnDisk sets the sealed flag in the chunk's file headers without opening it as active.

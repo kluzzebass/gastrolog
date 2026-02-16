@@ -623,6 +623,72 @@ func TestCompressedEmptyChunk(t *testing.T) {
 	manager.Close()
 }
 
+func TestOrphanTempFileCleanup(t *testing.T) {
+	dir := t.TempDir()
+
+	// First session: write, seal, close. Leave orphan temp files behind.
+	{
+		m, err := NewManager(Config{Dir: dir, Compression: CompressionZstd})
+		if err != nil {
+			t.Fatalf("new manager: %v", err)
+		}
+		id, _, err := m.Append(chunk.Record{
+			IngestTS: time.UnixMicro(1000),
+			Attrs:    chunk.Attributes{"k": "v"},
+			Raw:      []byte("test"),
+		})
+		if err != nil {
+			t.Fatalf("append: %v", err)
+		}
+		if err := m.Seal(); err != nil {
+			t.Fatalf("seal: %v", err)
+		}
+		if err := m.CompressChunk(id); err != nil {
+			t.Fatalf("compress: %v", err)
+		}
+
+		// Simulate crashed compression and index build by leaving orphan temp files.
+		chunkDir := filepath.Join(dir, id.String())
+		os.WriteFile(filepath.Join(chunkDir, ".compress-123456"), []byte("orphan"), 0o644)
+		os.WriteFile(filepath.Join(chunkDir, "token_index.bin.tmp.789"), []byte("orphan"), 0o644)
+
+		if err := m.Close(); err != nil {
+			t.Fatalf("close: %v", err)
+		}
+	}
+
+	// Second session: reopen — orphan files should be cleaned up.
+	{
+		m, err := NewManager(Config{Dir: dir})
+		if err != nil {
+			t.Fatalf("reopen: %v", err)
+		}
+		defer m.Close()
+
+		// Check that orphan files are gone.
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("readdir: %v", err)
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			chunkDir := filepath.Join(dir, entry.Name())
+			files, err := os.ReadDir(chunkDir)
+			if err != nil {
+				t.Fatalf("readdir chunk: %v", err)
+			}
+			for _, f := range files {
+				name := f.Name()
+				if strings.HasPrefix(name, ".compress-") || strings.Contains(name, ".tmp.") {
+					t.Fatalf("orphan temp file not cleaned up: %s", name)
+				}
+			}
+		}
+	}
+}
+
 // =============================================================================
 // Helpers
 // =============================================================================
