@@ -44,7 +44,8 @@ const (
 	TypeAttrDict       = 'd' // Attribute key dictionary
 
 	// Flag bits for raw.log, idx.log, and attr.log headers.
-	FlagSealed = 0x01
+	FlagSealed     = 0x01
+	FlagCompressed = 0x02
 
 	// Flag bits for index file headers.
 	// FlagComplete indicates the index was fully written (not a partial/crashed write).

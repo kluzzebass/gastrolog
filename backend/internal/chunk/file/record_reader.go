@@ -26,7 +26,8 @@ func loadDict(dictPath string) (*chunk.StringDict, error) {
 }
 
 // mmapCursor is a RecordCursor backed by mmap'd raw.log, idx.log, and attr.log files.
-// Used for sealed chunks.
+// Used for sealed chunks. For compressed files, the data is decompressed into a
+// heap-allocated []byte instead of mmap.
 type mmapCursor struct {
 	chunkID  chunk.ChunkID
 	rawData  []byte
@@ -35,7 +36,10 @@ type mmapCursor struct {
 	rawFile  *os.File
 	idxFile  *os.File
 	attrFile *os.File
-	dict *chunk.StringDict
+	dict     *chunk.StringDict
+
+	rawMmapped  bool // true if rawData is mmap'd (needs Munmap)
+	attrMmapped bool // true if attrData is mmap'd (needs Munmap)
 
 	recordCount uint64 // Total records in chunk
 	fwdIndex    uint64 // Current forward iteration index
@@ -82,56 +86,92 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath s
 		return nil, err
 	}
 
-	// Open and mmap raw.log.
-	rawFile, err := os.Open(rawPath)
+	// Open raw.log — decompress if compressed, otherwise mmap.
+	var rawData []byte
+	var rawFile *os.File
+	var rawMmapped bool
+
+	decompRaw, compressed, err := readFileData(rawPath)
 	if err != nil {
 		syscall.Munmap(idxData)
 		idxFile.Close()
 		return nil, err
 	}
-	rawInfo, err := rawFile.Stat()
-	if err != nil {
-		rawFile.Close()
-		syscall.Munmap(idxData)
-		idxFile.Close()
-		return nil, err
+	if compressed {
+		// Compressed: use decompressed heap buffer. Prepend a fake header
+		// so offsets from idx.log (which are relative to after the header) work.
+		rawData = make([]byte, format.HeaderSize+len(decompRaw))
+		copy(rawData[format.HeaderSize:], decompRaw)
+		rawMmapped = false
+	} else {
+		// Not compressed: mmap as usual.
+		rawFile, err = os.Open(rawPath)
+		if err != nil {
+			syscall.Munmap(idxData)
+			idxFile.Close()
+			return nil, err
+		}
+		rawInfo, err := rawFile.Stat()
+		if err != nil {
+			rawFile.Close()
+			syscall.Munmap(idxData)
+			idxFile.Close()
+			return nil, err
+		}
+		rawData, err = syscall.Mmap(int(rawFile.Fd()), 0, int(rawInfo.Size()), syscall.PROT_READ, syscall.MAP_SHARED)
+		if err != nil {
+			rawFile.Close()
+			syscall.Munmap(idxData)
+			idxFile.Close()
+			return nil, err
+		}
+		rawMmapped = true
 	}
 
-	rawData, err := syscall.Mmap(int(rawFile.Fd()), 0, int(rawInfo.Size()), syscall.PROT_READ, syscall.MAP_SHARED)
-	if err != nil {
-		rawFile.Close()
+	cleanupRaw := func() {
+		if rawMmapped {
+			syscall.Munmap(rawData)
+			rawFile.Close()
+		}
 		syscall.Munmap(idxData)
 		idxFile.Close()
-		return nil, err
 	}
 
-	// Open and mmap attr.log.
-	attrFile, err := os.Open(attrPath)
-	if err != nil {
-		syscall.Munmap(rawData)
-		rawFile.Close()
-		syscall.Munmap(idxData)
-		idxFile.Close()
-		return nil, err
-	}
-	attrInfo, err := attrFile.Stat()
-	if err != nil {
-		attrFile.Close()
-		syscall.Munmap(rawData)
-		rawFile.Close()
-		syscall.Munmap(idxData)
-		idxFile.Close()
-		return nil, err
-	}
+	// Open attr.log — decompress if compressed, otherwise mmap.
+	var attrData []byte
+	var attrFile *os.File
+	var attrMmapped bool
 
-	attrData, err := syscall.Mmap(int(attrFile.Fd()), 0, int(attrInfo.Size()), syscall.PROT_READ, syscall.MAP_SHARED)
+	decompAttr, attrCompressed, err := readFileData(attrPath)
 	if err != nil {
-		attrFile.Close()
-		syscall.Munmap(rawData)
-		rawFile.Close()
-		syscall.Munmap(idxData)
-		idxFile.Close()
+		cleanupRaw()
 		return nil, err
+	}
+	if attrCompressed {
+		// Compressed: use decompressed heap buffer with header-sized prefix.
+		attrData = make([]byte, format.HeaderSize+len(decompAttr))
+		copy(attrData[format.HeaderSize:], decompAttr)
+		attrMmapped = false
+	} else {
+		// Not compressed: mmap as usual.
+		attrFile, err = os.Open(attrPath)
+		if err != nil {
+			cleanupRaw()
+			return nil, err
+		}
+		attrInfo, err := attrFile.Stat()
+		if err != nil {
+			attrFile.Close()
+			cleanupRaw()
+			return nil, err
+		}
+		attrData, err = syscall.Mmap(int(attrFile.Fd()), 0, int(attrInfo.Size()), syscall.PROT_READ, syscall.MAP_SHARED)
+		if err != nil {
+			attrFile.Close()
+			cleanupRaw()
+			return nil, err
+		}
+		attrMmapped = true
 	}
 
 	return &mmapCursor{
@@ -143,6 +183,8 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath s
 		idxFile:     idxFile,
 		attrFile:    attrFile,
 		dict:        dict,
+		rawMmapped:  rawMmapped,
+		attrMmapped: attrMmapped,
 		recordCount: recordCount,
 		fwdIndex:    0,
 		revIndex:    recordCount, // Start past end for reverse iteration
@@ -227,8 +269,10 @@ func (c *mmapCursor) Close() error {
 	var errs []error
 
 	if c.rawData != nil {
-		if err := syscall.Munmap(c.rawData); err != nil {
-			errs = append(errs, err)
+		if c.rawMmapped {
+			if err := syscall.Munmap(c.rawData); err != nil {
+				errs = append(errs, err)
+			}
 		}
 		c.rawData = nil
 	}
@@ -239,8 +283,10 @@ func (c *mmapCursor) Close() error {
 		c.idxData = nil
 	}
 	if c.attrData != nil {
-		if err := syscall.Munmap(c.attrData); err != nil {
-			errs = append(errs, err)
+		if c.attrMmapped {
+			if err := syscall.Munmap(c.attrData); err != nil {
+				errs = append(errs, err)
+			}
 		}
 		c.attrData = nil
 	}

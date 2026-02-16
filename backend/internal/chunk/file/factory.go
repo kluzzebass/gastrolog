@@ -17,6 +17,7 @@ const (
 	ParamMaxChunkBytes = "maxChunkBytes"
 	ParamMaxChunkAge   = "maxChunkAge"
 	ParamFileMode      = "fileMode"
+	ParamCompression   = "compression" // "none" or "zstd"
 
 	// ParamExpectExisting is injected by the orchestrator when loading stores
 	// from config. It tells the chunk manager to warn if the store directory
@@ -83,6 +84,17 @@ func NewFactory() chunk.ManagerFactory {
 		}
 
 		cfg.RotationPolicy = chunk.NewCompositePolicy(policies...)
+
+		if v, ok := params[ParamCompression]; ok {
+			switch v {
+			case "zstd":
+				cfg.Compression = CompressionZstd
+			case "none", "":
+				cfg.Compression = CompressionNone
+			default:
+				return nil, fmt.Errorf("invalid %s: %q (must be \"none\" or \"zstd\")", ParamCompression, v)
+			}
+		}
 
 		if v, ok := params[ParamFileMode]; ok {
 			n, err := strconv.ParseUint(v, 8, 32)

@@ -17,6 +17,8 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/format"
 	"gastrolog/internal/logging"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 // File names within a chunk directory.
@@ -25,6 +27,14 @@ const (
 	idxLogFileName      = "idx.log"
 	attrLogFileName     = "attr.log"
 	attrDictFileName    = "attr_dict.log"
+)
+
+// CompressionType selects the compression algorithm for sealed chunks.
+type CompressionType int
+
+const (
+	CompressionNone CompressionType = iota
+	CompressionZstd
 )
 
 var (
@@ -46,6 +56,11 @@ type Config struct {
 	// Logger for structured logging. If nil, logging is disabled.
 	// The manager scopes this logger with component="chunk-manager".
 	Logger *slog.Logger
+
+	// Compression selects the compression algorithm for sealed chunks.
+	// When set, raw.log and attr.log are compressed at seal time.
+	// Defaults to CompressionNone.
+	Compression CompressionType
 
 	// ExpectExisting indicates that this store is being loaded from config
 	// (not freshly created). If the store directory is missing, a warning
@@ -74,6 +89,7 @@ type Manager struct {
 	active   *chunkState
 	metas    map[chunk.ChunkID]*chunkMeta // In-memory chunk metadata
 	closed   bool
+	zstdEnc  *zstd.Encoder // non-nil when compression is enabled
 
 	// Logger for this manager instance.
 	// Scoped with component="chunk-manager", type="file" at construction time.
@@ -166,10 +182,21 @@ func NewManager(cfg Config) (*Manager, error) {
 	// Scope logger with component identity.
 	logger := logging.Default(cfg.Logger).With("component", "chunk-manager", "type", "file")
 
+	var zstdEnc *zstd.Encoder
+	if cfg.Compression == CompressionZstd {
+		var err error
+		zstdEnc, err = zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
+		if err != nil {
+			lockFile.Close()
+			return nil, fmt.Errorf("create zstd encoder: %w", err)
+		}
+	}
+
 	manager := &Manager{
 		cfg:      cfg,
 		lockFile: lockFile,
 		metas:    make(map[chunk.ChunkID]*chunkMeta),
+		zstdEnc:  zstdEnc,
 		logger:   logger,
 	}
 	if err := manager.loadExisting(); err != nil {
@@ -538,6 +565,16 @@ func (m *Manager) sealChunkOnDisk(id chunk.ChunkID) error {
 		return err
 	}
 	dictFile.Close()
+
+	// Compress raw.log and attr.log if compression is enabled.
+	if m.zstdEnc != nil {
+		if err := compressFile(rawPath, m.zstdEnc, m.cfg.FileMode); err != nil {
+			m.logger.Warn("failed to compress raw.log", "chunk", id.String(), "err", err)
+		}
+		if err := compressFile(attrPath, m.zstdEnc, m.cfg.FileMode); err != nil {
+			m.logger.Warn("failed to compress attr.log", "chunk", id.String(), "err", err)
+		}
+	}
 
 	return nil
 }
@@ -964,6 +1001,7 @@ func (m *Manager) sealLocked() error {
 		return nil
 	}
 
+	id := m.active.meta.id
 	m.active.meta.sealed = true
 
 	// Update sealed flag in all file headers.
@@ -995,6 +1033,19 @@ func (m *Manager) sealLocked() error {
 	}
 
 	m.active = nil
+
+	// Compress raw.log and attr.log if compression is enabled.
+	// Done after files are closed. Best-effort: if compression fails
+	// the chunk remains sealed but uncompressed (read path handles both).
+	if m.zstdEnc != nil {
+		if err := compressFile(m.rawLogPath(id), m.zstdEnc, m.cfg.FileMode); err != nil {
+			m.logger.Warn("failed to compress raw.log", "chunk", id.String(), "err", err)
+		}
+		if err := compressFile(m.attrLogPath(id), m.zstdEnc, m.cfg.FileMode); err != nil {
+			m.logger.Warn("failed to compress attr.log", "chunk", id.String(), "err", err)
+		}
+	}
+
 	return nil
 }
 
@@ -1046,6 +1097,14 @@ func (m *Manager) Close() error {
 			errs = append(errs, err)
 		}
 		m.active = nil
+	}
+
+	// Close zstd encoder.
+	if m.zstdEnc != nil {
+		if err := m.zstdEnc.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		m.zstdEnc = nil
 	}
 
 	// Release directory lock.

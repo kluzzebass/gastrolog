@@ -10,6 +10,7 @@ require (
 	github.com/go-co-op/gocron/v2 v2.19.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
+	github.com/klauspost/compress v1.18.4
 	github.com/thierry-f-78/go-relp v1.0.0
 	golang.org/x/crypto v0.47.0
 	golang.org/x/net v0.49.0
