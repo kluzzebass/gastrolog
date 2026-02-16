@@ -13,8 +13,8 @@ var (
 	ErrMmapEmpty = errors.New("cannot mmap empty file")
 )
 
-// loadKeyDict reads attr_dict.log, validates its header, and returns a KeyDict.
-func loadKeyDict(dictPath string) (*chunk.KeyDict, error) {
+// loadDict reads attr_dict.log, validates its header, and returns a StringDict.
+func loadDict(dictPath string) (*chunk.StringDict, error) {
 	data, err := os.ReadFile(dictPath)
 	if err != nil {
 		return nil, err
@@ -35,7 +35,7 @@ type mmapCursor struct {
 	rawFile  *os.File
 	idxFile  *os.File
 	attrFile *os.File
-	keyDict  *chunk.KeyDict
+	dict *chunk.StringDict
 
 	recordCount uint64 // Total records in chunk
 	fwdIndex    uint64 // Current forward iteration index
@@ -45,8 +45,8 @@ type mmapCursor struct {
 }
 
 func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath string) (*mmapCursor, error) {
-	// Load key dictionary from attr_dict.log.
-	keyDict, err := loadKeyDict(dictPath)
+	// Load dictionary from attr_dict.log.
+	dict, err := loadDict(dictPath)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +69,7 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath s
 		idxFile.Close()
 		return &mmapCursor{
 			chunkID:     chunkID,
-			keyDict:     keyDict,
+			dict:        dict,
 			recordCount: 0,
 			fwdDone:     true,
 			revDone:     true,
@@ -142,7 +142,7 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath s
 		rawFile:     rawFile,
 		idxFile:     idxFile,
 		attrFile:    attrFile,
-		keyDict:     keyDict,
+		dict:        dict,
 		recordCount: recordCount,
 		fwdIndex:    0,
 		revIndex:    recordCount, // Start past end for reverse iteration
@@ -213,7 +213,7 @@ func (c *mmapCursor) readRecord(index uint64) (chunk.Record, error) {
 	if attrEnd > len(c.attrData) {
 		return chunk.Record{}, ErrInvalidEntry
 	}
-	attrs, err := chunk.DecodeWithDict(c.attrData[attrStart:attrEnd], c.keyDict)
+	attrs, err := chunk.DecodeWithDict(c.attrData[attrStart:attrEnd], c.dict)
 	if err != nil {
 		return chunk.Record{}, err
 	}
@@ -278,7 +278,8 @@ type stdioCursor struct {
 	rawFile  *os.File
 	idxFile  *os.File
 	attrFile *os.File
-	keyDict  *chunk.KeyDict
+	dict     *chunk.StringDict
+	dictPath string // path to attr_dict.log for reloading
 
 	fwdIndex uint64 // Current forward iteration index
 	revIndex uint64 // Current reverse iteration index
@@ -287,8 +288,8 @@ type stdioCursor struct {
 }
 
 func newStdioCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath string) (*stdioCursor, error) {
-	// Load key dictionary from attr_dict.log.
-	keyDict, err := loadKeyDict(dictPath)
+	// Load dictionary from attr_dict.log.
+	dict, err := loadDict(dictPath)
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +327,8 @@ func newStdioCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath 
 		rawFile:  rawFile,
 		idxFile:  idxFile,
 		attrFile: attrFile,
-		keyDict:  keyDict,
+		dict:     dict,
+		dictPath: dictPath,
 		fwdIndex: 0,
 		revIndex: recordCount,
 	}, nil
@@ -407,7 +409,14 @@ func (c *stdioCursor) readRecord(index uint64) (chunk.Record, error) {
 	if _, err := c.attrFile.ReadAt(attrBuf, attrOffset); err != nil {
 		return chunk.Record{}, err
 	}
-	attrs, err := chunk.DecodeWithDict(attrBuf, c.keyDict)
+	attrs, err := chunk.DecodeWithDict(attrBuf, c.dict)
+	if errors.Is(err, chunk.ErrInvalidAttrsData) {
+		// Dict may be stale — reload from disk and retry once.
+		if reloaded, loadErr := loadDict(c.dictPath); loadErr == nil {
+			c.dict = reloaded
+			attrs, err = chunk.DecodeWithDict(attrBuf, c.dict)
+		}
+	}
 	if err != nil {
 		return chunk.Record{}, err
 	}

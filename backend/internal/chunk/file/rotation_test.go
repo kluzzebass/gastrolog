@@ -2,9 +2,9 @@ package file
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -205,10 +205,11 @@ func TestAttributesTooLargeFails(t *testing.T) {
 	defer manager.Close()
 
 	// Create attributes that exceed 64KB when dict-encoded.
-	// Dict encoding per entry: 2 (keyID) + 2 (valLen) + value.
-	// Total: 2 (count) + 4 + valLen > 65535 → valLen > 65529.
-	largeAttrs := chunk.Attributes{
-		"k": strings.Repeat("v", 65530),
+	// Dict encoding: [count:u16] + count * [keyID:u32 + valID:u32]
+	// = 2 + count * 8 > 65535 → count > 8191.
+	largeAttrs := make(chunk.Attributes, 8192)
+	for i := range 8192 {
+		largeAttrs[fmt.Sprintf("k%d", i)] = fmt.Sprintf("v%d", i)
 	}
 
 	rec := chunk.Record{
@@ -236,10 +237,12 @@ func TestAttributesNearMaxSize(t *testing.T) {
 	}
 	defer manager.Close()
 
-	// Create attributes near but under 64KB limit
-	// 65535 - 2 (count) - 2 (keyLen) - 2 (valLen) - 1 (key) = 65528 max for value
-	nearMaxAttrs := chunk.Attributes{
-		"k": strings.Repeat("v", 65000), // Under limit
+	// Create attributes near but under 64KB limit.
+	// Dict encoding: 2 + count*8 ≤ 65535 → count ≤ 8191.
+	// Use 8000 attrs (under 8191 limit).
+	nearMaxAttrs := make(chunk.Attributes, 8000)
+	for i := range 8000 {
+		nearMaxAttrs[fmt.Sprintf("k%d", i)] = fmt.Sprintf("v%d", i)
 	}
 
 	rec := chunk.Record{

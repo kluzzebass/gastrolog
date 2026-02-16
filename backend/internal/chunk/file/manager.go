@@ -118,7 +118,7 @@ type chunkState struct {
 	idxFile     *os.File
 	attrFile    *os.File
 	dictFile    *os.File
-	keyDict     *chunk.KeyDict
+	dict        *chunk.StringDict
 	rawOffset   uint64    // Current write position in raw.log (after header)
 	attrOffset  uint64    // Current write position in attr.log (after header)
 	recordCount uint64    // Number of records written
@@ -212,7 +212,7 @@ func (m *Manager) doAppend(record chunk.Record, preserveWriteTS bool) (chunk.Chu
 	}
 
 	// Encode attributes using dictionary.
-	attrBytes, newKeys, err := chunk.EncodeWithDict(record.Attrs, m.active.keyDict)
+	attrBytes, newKeys, err := chunk.EncodeWithDict(record.Attrs, m.active.dict)
 	if err != nil {
 		return chunk.ChunkID{}, 0, err
 	}
@@ -236,7 +236,7 @@ func (m *Manager) doAppend(record chunk.Record, preserveWriteTS bool) (chunk.Chu
 			return chunk.ChunkID{}, 0, err
 		}
 		// Re-encode with the new chunk's dictionary.
-		attrBytes, newKeys, err = chunk.EncodeWithDict(record.Attrs, m.active.keyDict)
+		attrBytes, newKeys, err = chunk.EncodeWithDict(record.Attrs, m.active.dict)
 		if err != nil {
 			return chunk.ChunkID{}, 0, err
 		}
@@ -659,16 +659,16 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 		closeAll()
 		return err
 	}
-	var keyDict *chunk.KeyDict
+	var dict *chunk.StringDict
 	if dictInfo.Size() <= int64(format.HeaderSize) {
-		keyDict = chunk.NewKeyDict()
+		dict = chunk.NewStringDict()
 	} else {
 		dictData := make([]byte, dictInfo.Size()-int64(format.HeaderSize))
 		if _, err := dictFile.ReadAt(dictData, int64(format.HeaderSize)); err != nil {
 			closeAll()
 			return err
 		}
-		keyDict, err = chunk.DecodeDictData(dictData)
+		dict, err = chunk.DecodeDictData(dictData)
 		if err != nil {
 			closeAll()
 			return err
@@ -683,7 +683,7 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 		idxFile:     idxFile,
 		attrFile:    attrFile,
 		dictFile:    dictFile,
-		keyDict:     keyDict,
+		dict:        dict,
 		rawOffset:   rawOffset,
 		attrOffset:  attrOffset,
 		recordCount: recordCount,
@@ -838,7 +838,7 @@ func (m *Manager) openLocked() error {
 		idxFile:     idxFile,
 		attrFile:    attrFile,
 		dictFile:    dictFile,
-		keyDict:     chunk.NewKeyDict(),
+		dict:        chunk.NewStringDict(),
 		rawOffset:   0, // Data starts after header
 		attrOffset:  0, // Data starts after header
 		recordCount: 0,

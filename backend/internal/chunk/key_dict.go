@@ -7,73 +7,74 @@ import (
 )
 
 var (
-	ErrKeyDictFull       = errors.New("key dictionary full (65535 keys)")
-	ErrInvalidKeyDictData = errors.New("invalid key dictionary data")
-	ErrKeyNotFound       = errors.New("key not found in dictionary")
+	ErrDictFull         = errors.New("string dictionary full")
+	ErrDictEntryNotFound = errors.New("entry not found in dictionary")
 )
 
-// KeyDict is a per-chunk dictionary mapping attribute key strings to uint16 IDs.
-// IDs are assigned sequentially starting from 0.
-type KeyDict struct {
-	keys   []string
-	lookup map[string]uint16
+// StringDict is a per-chunk dictionary mapping strings to uint32 IDs.
+// Used for both attribute keys and values. IDs are assigned sequentially
+// starting from 0.
+type StringDict struct {
+	strings []string
+	lookup  map[string]uint32
 }
 
-// NewKeyDict creates an empty key dictionary.
-func NewKeyDict() *KeyDict {
-	return &KeyDict{
-		lookup: make(map[string]uint16),
+// NewStringDict creates an empty string dictionary.
+func NewStringDict() *StringDict {
+	return &StringDict{
+		lookup: make(map[string]uint32),
 	}
 }
 
-// Add registers a key and returns its ID. If the key already exists, the
-// existing ID is returned. Returns ErrKeyDictFull if the dictionary has
-// reached its 65535-key capacity.
-func (d *KeyDict) Add(key string) (uint16, error) {
-	if id, ok := d.lookup[key]; ok {
+// Add registers a string and returns its ID. If the string already exists,
+// the existing ID is returned. Returns ErrDictFull if the dictionary has
+// reached its capacity.
+func (d *StringDict) Add(s string) (uint32, error) {
+	if id, ok := d.lookup[s]; ok {
 		return id, nil
 	}
-	if len(d.keys) >= 1<<16-1 {
-		return 0, ErrKeyDictFull
+	if len(d.strings) >= 1<<32-1 {
+		return 0, ErrDictFull
 	}
-	id := uint16(len(d.keys))
-	d.keys = append(d.keys, key)
-	d.lookup[key] = id
+	id := uint32(len(d.strings))
+	d.strings = append(d.strings, s)
+	d.lookup[s] = id
 	return id, nil
 }
 
-// Lookup returns the ID for a key, or false if not present.
-func (d *KeyDict) Lookup(key string) (uint16, bool) {
-	id, ok := d.lookup[key]
+// Lookup returns the ID for a string, or false if not present.
+func (d *StringDict) Lookup(s string) (uint32, bool) {
+	id, ok := d.lookup[s]
 	return id, ok
 }
 
-// Key returns the key string for a given ID.
-func (d *KeyDict) Key(id uint16) (string, error) {
-	if int(id) >= len(d.keys) {
-		return "", ErrKeyNotFound
+// Get returns the string for a given ID.
+func (d *StringDict) Get(id uint32) (string, error) {
+	if int(id) >= len(d.strings) {
+		return "", ErrDictEntryNotFound
 	}
-	return d.keys[id], nil
+	return d.strings[id], nil
 }
 
-// Len returns the number of keys in the dictionary.
-func (d *KeyDict) Len() int {
-	return len(d.keys)
+// Len returns the number of entries in the dictionary.
+func (d *StringDict) Len() int {
+	return len(d.strings)
 }
 
-// EncodeDictEntry serializes one dictionary entry: [keyLen:u16][key bytes].
-func EncodeDictEntry(key string) []byte {
-	buf := make([]byte, 2+len(key))
-	binary.LittleEndian.PutUint16(buf[0:2], uint16(len(key)))
-	copy(buf[2:], key)
+// EncodeDictEntry serializes one dictionary entry: [strLen:u16][string bytes].
+func EncodeDictEntry(s string) []byte {
+	buf := make([]byte, 2+len(s))
+	binary.LittleEndian.PutUint16(buf[0:2], uint16(len(s)))
+	copy(buf[2:], s)
 	return buf
 }
 
-// EncodeWithDict encodes attributes using the key dictionary.
-// Format: [count:u16][keyID:u16][valLen:u16][val bytes]... repeated count times.
+// EncodeWithDict encodes attributes using the string dictionary for both
+// keys and values.
+// Format: [count:u16][keyID:u32][valID:u32]... repeated count times.
 // Keys are sorted lexicographically for deterministic output.
-// Returns the encoded bytes and any newly-added keys (for appending to dict file).
-func EncodeWithDict(attrs Attributes, dict *KeyDict) (encoded []byte, newKeys []string, err error) {
+// Returns the encoded bytes and any newly-added strings (for appending to dict file).
+func EncodeWithDict(attrs Attributes, dict *StringDict) (encoded []byte, newEntries []string, err error) {
 	if len(attrs) == 0 {
 		return []byte{0, 0}, nil, nil
 	}
@@ -85,8 +86,9 @@ func EncodeWithDict(attrs Attributes, dict *KeyDict) (encoded []byte, newKeys []
 	}
 	slices.Sort(keys)
 
-	// Register all keys and collect new ones.
-	keyIDs := make([]uint16, len(keys))
+	// Register all keys and values, collect new entries.
+	keyIDs := make([]uint32, len(keys))
+	valIDs := make([]uint32, len(keys))
 	for i, k := range keys {
 		prevLen := dict.Len()
 		id, err := dict.Add(k)
@@ -95,16 +97,23 @@ func EncodeWithDict(attrs Attributes, dict *KeyDict) (encoded []byte, newKeys []
 		}
 		keyIDs[i] = id
 		if dict.Len() > prevLen {
-			newKeys = append(newKeys, k)
+			newEntries = append(newEntries, k)
+		}
+
+		v := attrs[k]
+		prevLen = dict.Len()
+		id, err = dict.Add(v)
+		if err != nil {
+			return nil, nil, err
+		}
+		valIDs[i] = id
+		if dict.Len() > prevLen {
+			newEntries = append(newEntries, v)
 		}
 	}
 
-	// Calculate total size: 2 (count) + sum of (2 + 2 + valLen).
-	size := 2
-	for _, k := range keys {
-		v := attrs[k]
-		size += 2 + 2 + len(v) // keyID + valLen + val
-	}
+	// Calculate total size: 2 (count) + count * 8 (keyID:u32 + valID:u32).
+	size := 2 + len(attrs)*8
 
 	if size > 65535 {
 		return nil, nil, ErrAttrsTooLarge
@@ -114,24 +123,20 @@ func EncodeWithDict(attrs Attributes, dict *KeyDict) (encoded []byte, newKeys []
 	binary.LittleEndian.PutUint16(buf[0:2], uint16(len(attrs)))
 
 	offset := 2
-	for i, k := range keys {
-		v := attrs[k]
+	for i := range keys {
+		binary.LittleEndian.PutUint32(buf[offset:offset+4], keyIDs[i])
+		offset += 4
 
-		binary.LittleEndian.PutUint16(buf[offset:offset+2], keyIDs[i])
-		offset += 2
-
-		binary.LittleEndian.PutUint16(buf[offset:offset+2], uint16(len(v)))
-		offset += 2
-		copy(buf[offset:], v)
-		offset += len(v)
+		binary.LittleEndian.PutUint32(buf[offset:offset+4], valIDs[i])
+		offset += 4
 	}
 
-	return buf, newKeys, nil
+	return buf, newEntries, nil
 }
 
 // DecodeWithDict decodes attributes that were encoded with EncodeWithDict.
-// Format: [count:u16][keyID:u16][valLen:u16][val bytes]...
-func DecodeWithDict(data []byte, dict *KeyDict) (Attributes, error) {
+// Format: [count:u16][keyID:u32][valID:u32]...
+func DecodeWithDict(data []byte, dict *StringDict) (Attributes, error) {
 	if len(data) < 2 {
 		return nil, ErrInvalidAttrsData
 	}
@@ -146,30 +151,28 @@ func DecodeWithDict(data []byte, dict *KeyDict) (Attributes, error) {
 
 	for range count {
 		// Read key ID.
-		if offset+2 > len(data) {
+		if offset+4 > len(data) {
 			return nil, ErrInvalidAttrsData
 		}
-		keyID := binary.LittleEndian.Uint16(data[offset : offset+2])
-		offset += 2
+		keyID := binary.LittleEndian.Uint32(data[offset : offset+4])
+		offset += 4
 
-		key, err := dict.Key(keyID)
+		key, err := dict.Get(keyID)
 		if err != nil {
 			return nil, ErrInvalidAttrsData
 		}
 
-		// Read value length.
-		if offset+2 > len(data) {
+		// Read value ID.
+		if offset+4 > len(data) {
 			return nil, ErrInvalidAttrsData
 		}
-		valLen := int(binary.LittleEndian.Uint16(data[offset : offset+2]))
-		offset += 2
+		valID := binary.LittleEndian.Uint32(data[offset : offset+4])
+		offset += 4
 
-		// Read value.
-		if offset+valLen > len(data) {
+		val, err := dict.Get(valID)
+		if err != nil {
 			return nil, ErrInvalidAttrsData
 		}
-		val := string(data[offset : offset+valLen])
-		offset += valLen
 
 		attrs[key] = val
 	}
@@ -177,28 +180,28 @@ func DecodeWithDict(data []byte, dict *KeyDict) (Attributes, error) {
 	return attrs, nil
 }
 
-// DecodeDictData rebuilds a KeyDict from the data section of attr_dict.log
+// DecodeDictData rebuilds a StringDict from the data section of attr_dict.log
 // (after the 4-byte header). Tolerates a partial trailing entry for crash recovery.
-func DecodeDictData(data []byte) (*KeyDict, error) {
-	dict := NewKeyDict()
+func DecodeDictData(data []byte) (*StringDict, error) {
+	dict := NewStringDict()
 	offset := 0
 
 	for offset < len(data) {
-		// Need at least 2 bytes for keyLen.
+		// Need at least 2 bytes for strLen.
 		if offset+2 > len(data) {
 			break // Partial trailing entry — tolerate.
 		}
-		keyLen := int(binary.LittleEndian.Uint16(data[offset : offset+2]))
+		strLen := int(binary.LittleEndian.Uint16(data[offset : offset+2]))
 		offset += 2
 
-		// Need keyLen bytes for the key.
-		if offset+keyLen > len(data) {
+		// Need strLen bytes for the string.
+		if offset+strLen > len(data) {
 			break // Partial trailing entry — tolerate.
 		}
-		key := string(data[offset : offset+keyLen])
-		offset += keyLen
+		s := string(data[offset : offset+strLen])
+		offset += strLen
 
-		if _, err := dict.Add(key); err != nil {
+		if _, err := dict.Add(s); err != nil {
 			return nil, err
 		}
 	}

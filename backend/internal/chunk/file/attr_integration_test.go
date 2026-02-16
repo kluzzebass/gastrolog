@@ -393,9 +393,9 @@ func TestIdxLogEntryContainsAttrOffsets(t *testing.T) {
 	}
 
 	// Entry 0's AttrSize should match dict-encoded size of {"a": "1"}.
-	// With dict encoding: [count:u16][keyID:u16][valLen:u16][val bytes]
-	// = 2 + 2 + 2 + 1 = 7 bytes.
-	dict := chunk.NewKeyDict()
+	// With dict encoding: [count:u16][keyID:u32][valID:u32]
+	// = 2 + 4 + 4 = 10 bytes.
+	dict := chunk.NewStringDict()
 	enc0, _, _ := chunk.EncodeWithDict(records[0].Attrs, dict)
 	if entry0.AttrSize != uint16(len(enc0)) {
 		t.Fatalf("entry 0 AttrSize: want %d, got %d", len(enc0), entry0.AttrSize)
@@ -771,10 +771,10 @@ func TestLargeAttributesRoundTrip(t *testing.T) {
 	}
 	defer manager.Close()
 
-	// Create attrs near the 64KB limit
-	// 65535 - 2 (count) - 2 (keyLen) - 2 (valLen) = 65529 max for key+value
+	// Large attribute value — with dict encoding, this encodes to just 10 bytes
+	// in attr.log (the value string lives in the dict file).
 	attrs := chunk.Attributes{
-		"k": strings.Repeat("v", 60000), // Large but under limit
+		"k": strings.Repeat("v", 60000),
 	}
 
 	rec := chunk.Record{
