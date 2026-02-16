@@ -74,7 +74,7 @@ export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
     onDeleteSuccess: (id) => {
       const referencedBy = stores
         .filter((s) => s.retention === id)
-        .map((s) => s.id);
+        .map((s) => s.name || s.id);
       if (referencedBy.length > 0) {
         addToast(
           `Retention policy "${id}" deleted (was used by: ${referencedBy.join(", ")})`,

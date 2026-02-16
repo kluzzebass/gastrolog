@@ -27,5 +27,5 @@ export function refsFor(
   field: string,
   id: string,
 ): string[] {
-  return stores.filter((s) => s[field] === id).map((s) => s.id);
+  return stores.filter((s) => s[field] === id).map((s) => s.name || s.id);
 }
