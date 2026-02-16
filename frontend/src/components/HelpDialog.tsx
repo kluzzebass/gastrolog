@@ -13,6 +13,12 @@ interface HelpDialogProps {
   onClose: () => void;
 }
 
+/** Check if `id` is the topic or any descendant of `topic`. */
+function isWithin(topic: HelpTopic, id: string): boolean {
+  if (topic.id === id) return true;
+  return topic.children?.some((c) => isWithin(c, id)) ?? false;
+}
+
 export function HelpDialog({ dark, topicId, onClose }: HelpDialogProps) {
   const c = useThemeClass(dark);
   const [activeId, setActiveId] = useState(
@@ -31,6 +37,45 @@ export function HelpDialog({ dark, topicId, onClose }: HelpDialogProps) {
   // (e.g. MermaidDiagram) on every parent re-render.
   const mdComponents = useMemo(() => markdownComponents(dark), [dark]);
 
+  function renderTopic(t: HelpTopic, depth: number) {
+    const isActive = activeId === t.id;
+    const hasChildren = !!t.children;
+    const isExpanded = hasChildren && isWithin(t, activeId);
+
+    return (
+      <div key={t.id}>
+        <button
+          onClick={() => setActiveId(t.id)}
+          className={`flex items-center w-full text-left rounded text-[0.85em] transition-colors mb-0.5 ${
+            isActive
+              ? "bg-copper/15 text-copper font-medium"
+              : c(
+                  "text-text-muted hover:text-text-bright hover:bg-ink-hover",
+                  "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
+                )
+          }`}
+          style={{ paddingLeft: `${0.5 + depth * 0.75}rem`, paddingRight: '0.5rem', paddingTop: '0.375rem', paddingBottom: '0.375rem' }}
+        >
+          {hasChildren && (
+            <svg
+              className={`w-3 h-3 mr-1 shrink-0 transition-transform ${isExpanded ? "rotate-90" : ""}`}
+              viewBox="0 0 12 12"
+              fill="currentColor"
+            >
+              <path d="M4.5 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
+          {t.title}
+        </button>
+        {isExpanded && (
+          <div>
+            {t.children!.map((child) => renderTopic(child, depth + 1))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <Dialog onClose={onClose} ariaLabel="Help" dark={dark} size="xl">
       <div className="flex h-full overflow-hidden">
@@ -43,22 +88,7 @@ export function HelpDialog({ dark, topicId, onClose }: HelpDialogProps) {
           >
             Topics
           </h2>
-          {helpTopics.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setActiveId(t.id)}
-              className={`block w-full text-left px-2 py-1.5 rounded text-[0.85em] transition-colors mb-0.5 ${
-                activeId === t.id
-                  ? "bg-copper/15 text-copper font-medium"
-                  : c(
-                      "text-text-muted hover:text-text-bright hover:bg-ink-hover",
-                      "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
-                    )
-              }`}
-            >
-              {t.title}
-            </button>
-          ))}
+          {helpTopics.map((t) => renderTopic(t, 0))}
         </nav>
 
         {/* Content */}
@@ -165,8 +195,12 @@ function markdownComponents(dark: boolean) {
       return <code className={`font-mono text-[0.85em] ${className}`}>{children}</code>;
     },
     pre: ({ children }: { children?: React.ReactNode }) => {
-      // Unwrap <pre> when the child is a custom component (e.g. MermaidDiagram)
-      if (isValidElement(children) && typeof children.type !== "string") {
+      // Unwrap <pre> for mermaid diagrams — the code component renders
+      // them as <MermaidDiagram>, which shouldn't be wrapped in <pre>.
+      if (
+        isValidElement<{ className?: string }>(children) &&
+        children.props.className?.includes("language-mermaid")
+      ) {
         return <>{children}</>;
       }
       return (

@@ -1,4 +1,4 @@
-# User Management & Security
+# Users & Security
 
 GastroLog uses JWT-based authentication with role-based access control, and supports TLS with certificate management.
 

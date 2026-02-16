@@ -1,105 +1,40 @@
-# Query Engine
+# Searching
 
-The query engine evaluates search expressions against stored records, using indexes where available and falling back to runtime filtering otherwise.
+Searching is how you retrieve records from GastroLog. When you run a search, the query engine figures out the fastest way to find matching records — narrowing down which chunks to look at, using indexes where available, and merging results from multiple stores into a single time-ordered stream.
 
-## Expression Syntax
+For the query syntax, see the **Query Language** topic.
 
-Queries are composed of **predicates** combined with boolean logic. Multiple bare predicates are implicitly joined with AND. See the Query Language topic for the full syntax reference.
+## How a Search Works
 
-### Quick Reference
+1. Your query is parsed into a normalized form (OR of ANDs) so the engine can plan each branch independently
+2. Time bounds (`start=` / `end=`) are used to skip chunks that fall outside the range
+3. The remaining chunks are scanned — sealed chunks use their indexes to jump to matching records, while the active chunk is scanned directly
+4. If you're searching across multiple stores, results are merged by timestamp
 
-| Syntax | Meaning |
-|--------|---------|
-| `error` | Token search |
-| `error timeout` | Implicit AND |
-| `error OR warn` | Either matches |
-| `NOT debug` | Negation |
-| `level=error` | Key=value (attributes + message text) |
-| `host=*` | Key exists |
-| `start=TIME end=TIME` | WriteTS time range |
-| `store=NAME` | Scope to store |
-| `limit=N reverse=true` | Result control |
+When no `store=` filter is specified, all stores are searched in parallel.
 
-## Query Evaluation
+## Pagination
 
-```mermaid
-flowchart TD
-    A[Query String] --> B[Parse to AST]
-    B --> C[Resolve Time Bounds]
-    C --> D[Select Chunks]
-    D --> E[Compile to DNF]
-    E --> F{Per-Chunk<br/>Scan}
-    F --> G[Sealed: Index Lookup]
-    F --> H[Unsealed: Full Scan]
-    G --> I[Merge & Return]
-    H --> I
-```
-
-When a search is executed:
-
-1. **Parse**: The query string is parsed into an AST of predicates and boolean operators
-2. **Time bounds**: `start=` / `end=` determine which chunks overlap the query range
-3. **Chunk selection**: Chunks outside the time range are skipped entirely. The active (unsealed) chunk is always included.
-4. **DNF compilation**: The boolean expression is converted to Disjunctive Normal Form (OR of ANDs) for efficient evaluation
-5. **Per-chunk scanning**: Each selected chunk is scanned using the best available strategy:
-   - **Index-driven**: If all predicates in a DNF branch have index coverage, intersect position lists and read only matching records
-   - **Sequential with runtime filter**: Scan records and evaluate predicates at read time
-   - **Seek-based start**: Binary search on timestamps to skip to the relevant range within a chunk
-
-## Multi-Store Search
-
-When no `store=` filter is specified, the engine queries all stores in parallel. Results are merged by timestamp using a heap-based merge sort. Each store is searched independently and results are interleaved in time order.
-
-## Resume Tokens and Pagination
-
-Search results are returned as an iterator with a **resume token**. The token encodes the last-read position in each store and chunk, allowing the next page to continue exactly where the previous one left off.
-
-Resume tokens track positions across multiple stores. Each position records a store ID, chunk ID, and the last-returned record index. Exhausted chunks (fully read) are marked so they don't need to be re-scanned.
-
-Tokens remain valid as long as the referenced chunks exist. If a chunk is deleted by a retention policy between pages, the token becomes invalid and the search must restart.
+Results come back a page at a time. A **resume token** tracks where each store left off, so the next page picks up exactly where the previous one stopped. Tokens stay valid as long as the referenced chunks still exist — if a retention policy deletes a chunk between pages, the search restarts from the beginning.
 
 ## Follow (Live Tail)
 
-The Follow feature streams new records as they arrive, similar to `tail -f`. It works by polling all selected stores for new records that appeared since the last check.
-
-Follow only emits **new** records — it marks all existing chunks as "seen" on initialization and only yields records appended after that point. Records from multiple stores are merged by IngestTS.
-
-Follow runs until cancelled. When combined with a query filter, only matching new records are emitted.
+Follow streams new records as they arrive, similar to `tail -f`. It only shows records that appear after you start following — existing data is skipped. When combined with a query filter, only matching new records are shown.
 
 ## Histogram
 
-The Histogram feature returns record counts bucketed by time, used for the timeline visualization. It divides a time range into evenly-spaced buckets and counts how many records fall into each.
+The timeline visualization uses the histogram to show record counts over time, bucketed into evenly-spaced intervals. Each bucket includes per-severity counts (error, warn, info, debug, trace).
 
-Two execution paths:
-
-- **Unfiltered**: Uses binary search on idx.log entries to count records per bucket without reading any record data. This is very fast even on large chunks.
-- **Filtered** (with a query expression): Runs a full search and buckets each matching record. Capped at 1 million scanned records to prevent runaway queries.
-
-Each bucket includes per-severity level counts (error, warn, info, debug, trace) extracted from KV indexes and record attributes.
+Without a filter, this is very fast — it counts records from the index without reading any record data. With a filter, it runs a full search and buckets the results.
 
 ## Context View
 
-The GetContext feature retrieves records surrounding a specific anchor record. Given a record reference, it returns:
+Click a record to see what was happening around it. The context view shows a configurable number of records before and after the selected one (up to 50 each), pulled from all stores by timestamp.
 
-- The **anchor** record itself
-- A configurable number of records **before** the anchor (up to 50)
-- A configurable number of records **after** the anchor (up to 50)
+## Explain
 
-Context records are fetched across all stores by timestamp, so you see what was happening system-wide around the time of the anchor record.
+The Explain view shows how the engine plans to process your query — which chunks it will scan, whether it can use indexes, and which predicates fall back to runtime filtering. Useful for understanding why a query is slow or for verifying that your indexes are being used.
 
-## Execution Plan
+## Timeout
 
-The **Explain** view shows how the engine will process a query:
-
-- **Direction**: Forward (oldest-first) or reverse (newest-first)
-- **Total chunks**: How many chunks exist vs. how many overlap the time range
-- **Per-chunk plan**:
-  - **Scan mode**: `index-driven`, `sequential`, or `skipped`
-  - **Pipeline steps**: Each filtering stage with input/output estimates
-  - **Runtime filters**: Predicates evaluated at scan time (not index-accelerated)
-  - **Skip reason**: Why a chunk was excluded (e.g., outside time range)
-  - **Branch plans**: For multi-branch DNF queries, each branch's index strategy
-
-## Query Timeout
-
-An optional query timeout can be configured in Service settings. When set, individual search, follow, histogram, and context requests are cancelled if they exceed the configured duration. The timeout uses Go duration syntax (e.g., `30s`, `1m`). Setting it to empty or `0s` disables the timeout.
+An optional query timeout can be configured in Service settings. When set, queries that run too long are cancelled automatically. Uses Go duration syntax (e.g., `30s`, `1m`). Set to empty or `0s` to disable.
