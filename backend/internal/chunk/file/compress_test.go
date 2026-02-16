@@ -2,6 +2,7 @@ package file
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,13 +43,17 @@ func TestCompressDecompressRoundTrip(t *testing.T) {
 		t.Fatalf("compress: %v", err)
 	}
 
-	// Read back via readFileData.
-	got, compressed, err := readFileData(path)
+	// Read back via seekable reader.
+	r, f, err := openSeekableReader(path)
 	if err != nil {
-		t.Fatalf("readFileData: %v", err)
+		t.Fatalf("openSeekableReader: %v", err)
 	}
-	if !compressed {
-		t.Fatal("expected compressed=true")
+	defer f.Close()
+	defer r.Close()
+
+	got, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
 	}
 	if !bytes.Equal(got, data) {
 		t.Fatalf("data mismatch: want %d bytes, got %d bytes", len(data), len(got))
@@ -105,15 +110,12 @@ func TestUncompressedPassthrough(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	got, compressed, err := readFileData(path)
+	compressed, err := isCompressed(path)
 	if err != nil {
-		t.Fatalf("readFileData: %v", err)
+		t.Fatalf("isCompressed: %v", err)
 	}
 	if compressed {
 		t.Fatal("expected compressed=false for uncompressed file")
-	}
-	if got != nil {
-		t.Fatal("expected nil data for uncompressed file (caller should mmap)")
 	}
 }
 
@@ -137,15 +139,83 @@ func TestCompressEmptyDataSection(t *testing.T) {
 		t.Fatalf("compress: %v", err)
 	}
 
-	got, compressed, err := readFileData(path)
+	compressed, err := isCompressed(path)
 	if err != nil {
-		t.Fatalf("readFileData: %v", err)
+		t.Fatalf("isCompressed: %v", err)
 	}
 	if !compressed {
 		t.Fatal("expected compressed=true")
 	}
+
+	r, f, err := openSeekableReader(path)
+	if err != nil {
+		t.Fatalf("openSeekableReader: %v", err)
+	}
+	defer f.Close()
+	defer r.Close()
+
+	got, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
 	if len(got) != 0 {
 		t.Fatalf("expected empty data, got %d bytes", len(got))
+	}
+}
+
+func TestSeekableRandomAccess(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.log")
+
+	header := format.Header{Type: format.TypeRawLog, Version: RawLogVersion, Flags: format.FlagSealed}
+	headerBytes := header.Encode()
+	// Create data larger than one frame to test cross-frame random access.
+	data := make([]byte, seekableFrameSize*3+1000)
+	for i := range data {
+		data[i] = byte(i % 251) // deterministic pattern
+	}
+	if err := os.WriteFile(path, append(headerBytes[:], data...), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	enc, err := newTestEncoder()
+	if err != nil {
+		t.Fatalf("new encoder: %v", err)
+	}
+	defer enc.Close()
+
+	if err := compressFile(path, enc, 0o644); err != nil {
+		t.Fatalf("compress: %v", err)
+	}
+
+	r, f, err := openSeekableReader(path)
+	if err != nil {
+		t.Fatalf("openSeekableReader: %v", err)
+	}
+	defer f.Close()
+	defer r.Close()
+
+	// Test ReadAt at various offsets including cross-frame boundaries.
+	tests := []struct {
+		offset int64
+		size   int
+	}{
+		{0, 100},                                              // start
+		{int64(seekableFrameSize - 50), 100},                  // cross first frame boundary
+		{int64(seekableFrameSize * 2), 100},                   // start of third frame
+		{int64(len(data) - 50), 50},                           // near end
+		{int64(seekableFrameSize*3 + 500), 100},               // in last partial frame
+	}
+	for _, tt := range tests {
+		buf := make([]byte, tt.size)
+		n, err := r.ReadAt(buf, tt.offset)
+		if err != nil && err != io.EOF {
+			t.Fatalf("ReadAt(offset=%d, size=%d): %v", tt.offset, tt.size, err)
+		}
+		expected := data[tt.offset : tt.offset+int64(n)]
+		if !bytes.Equal(buf[:n], expected) {
+			t.Fatalf("ReadAt(offset=%d): data mismatch", tt.offset)
+		}
 	}
 }
 
