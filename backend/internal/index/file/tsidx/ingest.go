@@ -80,6 +80,10 @@ func (i *IngestIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error 
 	tmpName := tmpFile.Name()
 	defer os.Remove(tmpName)
 
+	if err := tmpFile.Chmod(0o644); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("chmod temp: %w", err)
+	}
 	data := encodeIndex(entries, format.TypeIngestIndex)
 	if _, err := tmpFile.Write(data); err != nil {
 		tmpFile.Close()
