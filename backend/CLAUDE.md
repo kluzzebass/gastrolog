@@ -27,7 +27,7 @@ just pprof                  # Server + pprof on :6060
 
 The server listens on `:4564` by default (Connect RPC / gRPC-Web).
 
-CLI flags: `-datadir <path>`, `-config-type <sqlite|json|memory>`, `-server`, `-pprof <addr>`.
+CLI flags: `-home <path>`, `-config-type <sqlite|json|memory>`, `-server`, `-pprof <addr>`.
 
 ## Proto Generation
 
@@ -40,22 +40,21 @@ cd ../../frontend && buf generate # Regenerate TypeScript code (from frontend di
 
 Always regenerate both backend and frontend after proto changes.
 
-## Data Directory
+## Home Directory
 
-gastrolog uses a platform-appropriate data directory for all persistent state:
+gastrolog uses a platform-appropriate home directory for all persistent state:
 - **Linux:** `~/.config/gastrolog`
 - **macOS:** `~/Library/Application Support/gastrolog`
 - **Windows:** `%APPDATA%/gastrolog`
 
-Override with `-datadir <path>`. Layout:
+Override with `-home <path>`. Layout:
 ```
-<datadir>/
+<home>/
   config.db or config.json    (config store)
   users.json                   (user credentials, JSON store only)
-  stores/<id>/                 (per-store chunk + index data)
 ```
 
-Chunk directories within each store are named by their 13-char base32hex ChunkID. Delete the data directory to start fresh after format changes.
+Note: store directories are configured per-store (the `dir` param) and are NOT inside the home directory. Delete the home directory to reset configuration; delete store directories to reset data.
 
 ## Go Style Rules
 

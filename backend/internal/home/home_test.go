@@ -1,4 +1,4 @@
-package datadir
+package home
 
 import (
 	"os"

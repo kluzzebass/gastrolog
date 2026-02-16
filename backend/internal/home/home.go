@@ -1,6 +1,6 @@
-// Package datadir manages the gastrolog data directory layout.
+// Package home manages the gastrolog home directory layout.
 //
-// The data directory owns all persistent state: config files, user databases,
+// The home directory owns all persistent state: config files, user databases,
 // and per-store chunk/index directories.
 //
 // Layout:
@@ -10,7 +10,7 @@
 //	  users.json                       (user credentials, JSON file store only)
 //	  stores/
 //	    <store-id>/                    (per-store chunk + index data)
-package datadir
+package home
 
 import (
 	"fmt"
@@ -18,7 +18,7 @@ import (
 	"path/filepath"
 )
 
-// Dir represents a gastrolog data directory.
+// Dir represents a gastrolog home directory.
 type Dir struct {
 	root string
 }
@@ -40,7 +40,7 @@ func Default() (Dir, error) {
 	return Dir{root: filepath.Join(base, "gastrolog")}, nil
 }
 
-// Root returns the data directory path.
+// Root returns the home directory path.
 func (d Dir) Root() string {
 	return d.root
 }
@@ -66,10 +66,10 @@ func (d Dir) StoreDir(storeID string) string {
 	return filepath.Join(d.root, "stores", storeID)
 }
 
-// EnsureExists creates the data directory (and parents) if it doesn't exist.
+// EnsureExists creates the home directory (and parents) if it doesn't exist.
 func (d Dir) EnsureExists() error {
 	if err := os.MkdirAll(d.root, 0755); err != nil {
-		return fmt.Errorf("create data directory %s: %w", d.root, err)
+		return fmt.Errorf("create home directory %s: %w", d.root, err)
 	}
 	return nil
 }

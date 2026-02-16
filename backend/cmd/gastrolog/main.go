@@ -31,7 +31,7 @@ import (
 	configfile "gastrolog/internal/config/file"
 	configmem "gastrolog/internal/config/memory"
 	configsqlite "gastrolog/internal/config/sqlite"
-	"gastrolog/internal/datadir"
+	"gastrolog/internal/home"
 	digestlevel "gastrolog/internal/digester/level"
 	digesttimestamp "gastrolog/internal/digester/timestamp"
 	"gastrolog/internal/index"
@@ -49,7 +49,7 @@ import (
 )
 
 func main() {
-	datadirFlag := flag.String("datadir", "", "data directory (default: platform config dir)")
+	homeFlag := flag.String("home", "", "home directory (default: platform config dir)")
 	configType := flag.String("config-type", "sqlite", "config store type: sqlite, json, or memory")
 	pprofAddr := flag.String("pprof", "", "pprof HTTP server address (e.g. localhost:6060)")
 	serverAddr := flag.String("server", ":4564", "Connect RPC server address (empty to disable)")
@@ -74,29 +74,29 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	if err := run(ctx, logger, *datadirFlag, *configType, *serverAddr); err != nil {
+	if err := run(ctx, logger, *homeFlag, *configType, *serverAddr); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, logger *slog.Logger, datadirFlag, configType, serverAddr string) error {
-	// Resolve data directory.
-	dd, err := resolveDataDir(datadirFlag)
+func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverAddr string) error {
+	// Resolve home directory.
+	hd, err := resolveHome(homeFlag)
 	if err != nil {
-		return fmt.Errorf("resolve data directory: %w", err)
+		return fmt.Errorf("resolve home directory: %w", err)
 	}
 
-	// For non-memory config types, ensure the data directory exists.
+	// For non-memory config types, ensure the home directory exists.
 	if configType != "memory" {
-		if err := dd.EnsureExists(); err != nil {
+		if err := hd.EnsureExists(); err != nil {
 			return err
 		}
-		logger.Info("data directory", "path", dd.Root())
+		logger.Info("home directory", "path", hd.Root())
 	}
 
 	// Open config store.
-	cfgStore, err := openConfigStore(dd, configType)
+	cfgStore, err := openConfigStore(hd, configType)
 	if err != nil {
 		return fmt.Errorf("open config store: %w", err)
 	}
@@ -111,9 +111,9 @@ func run(ctx context.Context, logger *slog.Logger, datadirFlag, configType, serv
 		return err
 	}
 
-	dataDir := ""
+	homeDir := ""
 	if configType != "memory" {
-		dataDir = dd.Root()
+		homeDir = hd.Root()
 	}
 
 	if cfg == nil {
@@ -152,7 +152,7 @@ func run(ctx context.Context, logger *slog.Logger, datadirFlag, configType, serv
 	orch.RegisterDigester(digesttimestamp.New())
 
 	// Apply configuration with factories.
-	factories := buildFactories(logger, dataDir, cfgStore)
+	factories := buildFactories(logger, homeDir, cfgStore)
 	if err := orch.ApplyConfig(cfg, factories); err != nil {
 		return err
 	}
@@ -229,7 +229,7 @@ func run(ctx context.Context, logger *slog.Logger, datadirFlag, configType, serv
 
 // buildFactories creates the factory maps for all supported component types.
 // The logger is passed to component factories for structured logging.
-func buildFactories(logger *slog.Logger, dataDir string, cfgStore config.Store) orchestrator.Factories {
+func buildFactories(logger *slog.Logger, homeDir string, cfgStore config.Store) orchestrator.Factories {
 	return orchestrator.Factories{
 		Ingesters: map[string]orchestrator.IngesterFactory{
 			"chatterbox": chatterbox.NewIngester,
@@ -248,16 +248,16 @@ func buildFactories(logger *slog.Logger, dataDir string, cfgStore config.Store) 
 			"memory": indexmem.NewFactory(),
 		},
 		Logger:  logger,
-		DataDir: dataDir,
+		HomeDir: homeDir,
 	}
 }
 
-// resolveDataDir returns a Dir from the flag value, or the platform default.
-func resolveDataDir(flagValue string) (datadir.Dir, error) {
+// resolveHome returns a Dir from the flag value, or the platform default.
+func resolveHome(flagValue string) (home.Dir, error) {
 	if flagValue != "" {
-		return datadir.New(flagValue), nil
+		return home.New(flagValue), nil
 	}
-	return datadir.Default()
+	return home.Default()
 }
 
 // buildTokenService reads the server config from the store and creates a TokenService.
@@ -291,15 +291,15 @@ func buildTokenService(ctx context.Context, cfgStore config.Store) (*auth.TokenS
 	return auth.NewTokenService(secret, duration), nil
 }
 
-// openConfigStore creates a config.Store based on config type and data directory.
-func openConfigStore(dd datadir.Dir, configType string) (config.Store, error) {
+// openConfigStore creates a config.Store based on config type and home directory.
+func openConfigStore(hd home.Dir, configType string) (config.Store, error) {
 	switch configType {
 	case "memory":
 		return configmem.NewStore(), nil
 	case "json":
-		return configfile.NewStore(dd.ConfigPath("json"), dd.UsersPath()), nil
+		return configfile.NewStore(hd.ConfigPath("json"), hd.UsersPath()), nil
 	case "sqlite":
-		return configsqlite.NewStore(dd.ConfigPath("sqlite"))
+		return configsqlite.NewStore(hd.ConfigPath("sqlite"))
 	default:
 		return nil, fmt.Errorf("unknown config store type: %q", configType)
 	}

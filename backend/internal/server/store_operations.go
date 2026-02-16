@@ -19,7 +19,7 @@ import (
 )
 
 // makeCleanupFunc returns a callback that removes the source store from the
-// config store and cleans up its data directory. Safe to call from async jobs.
+// config store and cleans up its store directory. Safe to call from async jobs.
 func (s *StoreServer) makeCleanupFunc(srcID uuid.UUID, srcFileDir string) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		if s.cfgStore != nil {
