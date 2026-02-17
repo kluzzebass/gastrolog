@@ -444,8 +444,20 @@ function AppContent() {
     if (isFollowMode) {
       setFollowReversed((prev) => !prev);
     } else {
-      const newQuery = injectTimeRange(q, timeRange, !isReversed);
-      setUrlQuery(newQuery);
+      // Swap reverse= without touching start=/end=/last= tokens.
+      const hasExplicitStartEnd =
+        /\bstart=/.test(q) || /\bend=/.test(q);
+      if (hasExplicitStartEnd) {
+        const stripped = q
+          .replace(/\breverse=\S+/g, "")
+          .replace(/\s+/g, " ")
+          .trim();
+        const rev = `reverse=${!isReversed}`;
+        setUrlQuery(stripped ? `${rev} ${stripped}` : rev);
+      } else {
+        const newQuery = injectTimeRange(q, timeRange, !isReversed);
+        setUrlQuery(newQuery);
+      }
     }
   };
 
