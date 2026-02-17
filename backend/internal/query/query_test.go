@@ -10,6 +10,7 @@ import (
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/query"
+	"gastrolog/internal/querylang"
 )
 
 // collect gathers all records from the iterator, returning the first error encountered.
@@ -2463,5 +2464,82 @@ func TestSearchKeyValueFilterKeyWildcardNoMatch(t *testing.T) {
 	}
 	if len(results) != 0 {
 		t.Fatalf("expected 0 results, got %d", len(results))
+	}
+}
+
+func TestSearchGlobTokenMatch(t *testing.T) {
+	records := []chunk.Record{
+		{Raw: []byte("error: connection refused"), IngestTS: t1, Attrs: attrsA},
+		{Raw: []byte("warning: disk full"), IngestTS: t2, Attrs: attrsA},
+		{Raw: []byte("errors detected in subsystem"), IngestTS: t3, Attrs: attrsA},
+	}
+	eng := setup(t, records)
+
+	// Glob "error*" should match "error" and "errors"
+	expr, _ := querylang.Parse("error*")
+	results, err := collect(search(eng, context.Background(), query.Query{BoolExpr: expr}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+}
+
+func TestSearchGlobCrossTokenRawLine(t *testing.T) {
+	records := []chunk.Record{
+		{Raw: []byte("2025-01-01 com.example.controller started"), IngestTS: t1, Attrs: attrsA},
+		{Raw: []byte("2025-01-01 org.apache.handler started"), IngestTS: t2, Attrs: attrsA},
+		{Raw: []byte("2025-01-01 com.example.service stopped"), IngestTS: t3, Attrs: attrsA},
+	}
+	eng := setup(t, records)
+
+	// Glob "com*controller" should match via raw-line word matching
+	// even though tokenizer splits com.example.controller into separate tokens.
+	expr, _ := querylang.Parse("com*controller")
+	results, err := collect(search(eng, context.Background(), query.Query{BoolExpr: expr}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result (com.example.controller), got %d", len(results))
+	}
+}
+
+func TestSearchGlobSuffix(t *testing.T) {
+	records := []chunk.Record{
+		{Raw: []byte("connection_timeout detected"), IngestTS: t1, Attrs: attrsA},
+		{Raw: []byte("read_timeout on socket"), IngestTS: t2, Attrs: attrsA},
+		{Raw: []byte("success response"), IngestTS: t3, Attrs: attrsA},
+	}
+	eng := setup(t, records)
+
+	// Glob "*timeout" should match tokens ending in timeout
+	expr, _ := querylang.Parse("*timeout")
+	results, err := collect(search(eng, context.Background(), query.Query{BoolExpr: expr}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+}
+
+func TestSearchGlobWithNOT(t *testing.T) {
+	records := []chunk.Record{
+		{Raw: []byte("error: connection refused"), IngestTS: t1, Attrs: attrsA},
+		{Raw: []byte("debug_error: test message"), IngestTS: t2, Attrs: attrsA},
+		{Raw: []byte("warning: timeout"), IngestTS: t3, Attrs: attrsA},
+	}
+	eng := setup(t, records)
+
+	// "error* AND NOT debug*"
+	expr, _ := querylang.Parse("error* AND NOT debug*")
+	results, err := collect(search(eng, context.Background(), query.Query{BoolExpr: expr}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
 	}
 }

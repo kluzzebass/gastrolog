@@ -577,19 +577,15 @@ func matchStringOrPatLower(s, exactLower string, pat *regexp.Regexp) bool {
 }
 
 // globTokenFilter returns a filter that matches records where at least one token
-// matches all the given glob patterns (AND semantics across patterns).
+// or whitespace-delimited word matches all the given glob patterns (AND semantics).
+// Tokens are checked first (cheap, from tokenizer). If no token match, falls back
+// to whitespace-delimited words from the raw line for cross-token matches like
+// com*controller matching com.example.controller.
 func globTokenFilter(globs []GlobFilter) recordFilter {
 	return func(rec chunk.Record) bool {
 		recordTokens := tokenizer.Tokens(rec.Raw)
 		for _, g := range globs {
-			found := false
-			for _, tok := range recordTokens {
-				if g.Pattern.MatchString(tok) {
-					found = true
-					break
-				}
-			}
-			if !found {
+			if !matchGlobTokensOrRaw(recordTokens, rec.Raw, g.Pattern) {
 				return false
 			}
 		}
@@ -597,15 +593,58 @@ func globTokenFilter(globs []GlobFilter) recordFilter {
 	}
 }
 
-// matchesSingleGlob checks if a record contains any token matching the glob pattern.
+// matchesSingleGlob checks if a record matches a glob pattern against
+// tokenized words first, then whitespace-delimited words from the raw line.
 func matchesSingleGlob(raw []byte, pattern *regexp.Regexp) bool {
 	recordTokens := tokenizer.Tokens(raw)
-	for _, tok := range recordTokens {
+	return matchGlobTokensOrRaw(recordTokens, raw, pattern)
+}
+
+// matchGlobTokensOrRaw checks tokens first, then falls back to whitespace-delimited
+// words from the raw line. This allows globs to match across tokenizer boundaries
+// (e.g., com*controller matching com.example.controller).
+func matchGlobTokensOrRaw(tokens []string, raw []byte, pattern *regexp.Regexp) bool {
+	// Fast path: check tokenized words.
+	for _, tok := range tokens {
 		if pattern.MatchString(tok) {
 			return true
 		}
 	}
+
+	// Slow path: check whitespace-delimited words from the raw line.
+	// This catches cross-token patterns like com*controller matching
+	// com.example.controller which the tokenizer splits into [com, example, controller].
+	for word := range rawWords(raw) {
+		if pattern.Match(word) {
+			return true
+		}
+	}
+
 	return false
+}
+
+// rawWords yields whitespace-delimited byte slices from raw.
+func rawWords(raw []byte) iter.Seq[[]byte] {
+	return func(yield func([]byte) bool) {
+		i := 0
+		for i < len(raw) {
+			// Skip whitespace.
+			for i < len(raw) && (raw[i] == ' ' || raw[i] == '\t' || raw[i] == '\n' || raw[i] == '\r') {
+				i++
+			}
+			if i >= len(raw) {
+				return
+			}
+			// Find end of word.
+			start := i
+			for i < len(raw) && raw[i] != ' ' && raw[i] != '\t' && raw[i] != '\n' && raw[i] != '\r' {
+				i++
+			}
+			if !yield(raw[start:i]) {
+				return
+			}
+		}
+	}
 }
 
 // applyGlobIndex tries to use the token index for glob pattern filtering.
