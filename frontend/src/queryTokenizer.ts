@@ -11,6 +11,7 @@ type QueryTokenKind =
   | "rparen"
   | "eq"
   | "star"
+  | "glob" // bareword with glob metacharacters (*, ?, [)
   | "regex" // /pattern/
   | "whitespace"
   | "error"; // unterminated quote or regex
@@ -24,6 +25,7 @@ export type HighlightRole =
   | "value" // value in key=value predicate
   | "token" // bare search term
   | "quoted" // quoted string (standalone or as value)
+  | "glob" // glob pattern (error*, *timeout, etc.)
   | "regex" // /pattern/ regex literal
   | "paren" // ( or )
   | "star" // *
@@ -99,6 +101,22 @@ function lex(input: string): QueryToken[] {
       continue;
     }
     if (ch === "*") {
+      // Peek ahead: if followed by a bareword or glob char, this is a glob (e.g. *error)
+      if (pos + 1 < input.length && isGlobBarewordChar(input[pos + 1]!)) {
+        const start = pos;
+        pos++; // skip leading *
+        while (pos < input.length && (isBarewordChar(input[pos]!) || isGlobMeta(input[pos]!))) {
+          if (input[pos] === "[") {
+            pos++;
+            while (pos < input.length && input[pos] !== "]") pos++;
+            if (pos < input.length) pos++; // skip ]
+          } else {
+            pos++;
+          }
+        }
+        tokens.push({ text: input.slice(start, pos), pos: start, kind: "glob" });
+        continue;
+      }
       tokens.push({ text: "*", pos, kind: "star" });
       pos++;
       continue;
@@ -174,18 +192,35 @@ function lex(input: string): QueryToken[] {
       continue;
     }
 
-    // Bareword
+    // Bareword (may contain glob metacharacters *, ?, [)
     const start = pos;
-    while (pos < input.length && isBarewordChar(input[pos]!)) {
-      pos++;
+    let hasGlobMeta = false;
+    while (pos < input.length && (isBarewordChar(input[pos]!) || isGlobMeta(input[pos]!))) {
+      const c = input[pos]!;
+      if (isGlobMeta(c)) {
+        hasGlobMeta = true;
+        if (c === "[") {
+          pos++;
+          while (pos < input.length && input[pos] !== "]") pos++;
+          if (pos < input.length) pos++; // skip ]
+        } else {
+          pos++;
+        }
+      } else {
+        pos++;
+      }
     }
     const lit = input.slice(start, pos);
-    const upper = lit.toUpperCase();
-    const kind: QueryTokenKind =
-      upper === "AND" || upper === "OR" || upper === "NOT"
-        ? "operator"
-        : "word";
-    tokens.push({ text: lit, pos: start, kind });
+    if (hasGlobMeta) {
+      tokens.push({ text: lit, pos: start, kind: "glob" });
+    } else {
+      const upper = lit.toUpperCase();
+      const kind: QueryTokenKind =
+        upper === "AND" || upper === "OR" || upper === "NOT"
+          ? "operator"
+          : "word";
+      tokens.push({ text: lit, pos: start, kind });
+    }
   }
 
   return tokens;
@@ -201,10 +236,20 @@ function isBarewordChar(ch: string): boolean {
     ch !== ")" &&
     ch !== "=" &&
     ch !== "*" &&
+    ch !== "?" &&
+    ch !== "[" &&
     ch !== '"' &&
     ch !== "'" &&
     ch !== "/"
   );
+}
+
+function isGlobMeta(ch: string): boolean {
+  return ch === "*" || ch === "?" || ch === "[";
+}
+
+function isGlobBarewordChar(ch: string): boolean {
+  return isBarewordChar(ch) || ch === "?" || ch === "[";
 }
 
 // Phase 2: Post-pass — detect key=value sequences and classify roles.
@@ -215,12 +260,13 @@ function classify(raw: QueryToken[]): HighlightSpan[] {
   while (i < raw.length) {
     const tok = raw[i]!;
 
-    // Detect word = (word|star|quoted) patterns (with no whitespace around =)
+    // Detect word/glob = (word|glob|star|quoted) patterns (with no whitespace around =)
     if (
-      (tok.kind === "word" || tok.kind === "star") &&
+      (tok.kind === "word" || tok.kind === "star" || tok.kind === "glob") &&
       i + 2 < raw.length &&
       raw[i + 1]!.kind === "eq" &&
       (raw[i + 2]!.kind === "word" ||
+        raw[i + 2]!.kind === "glob" ||
         raw[i + 2]!.kind === "star" ||
         raw[i + 2]!.kind === "quoted")
     ) {
@@ -239,11 +285,21 @@ function classify(raw: QueryToken[]): HighlightSpan[] {
               ? "quoted"
               : val.kind === "star"
                 ? "star"
-                : "value",
+                : val.kind === "glob"
+                  ? "glob"
+                  : "value",
         });
       } else {
-        // key=value predicate
-        spans.push({ text: key, role: tok.kind === "star" ? "star" : "key" });
+        // key=value predicate (key may be word, glob, or star)
+        spans.push({
+          text: key,
+          role:
+            tok.kind === "star"
+              ? "star"
+              : tok.kind === "glob"
+                ? "glob"
+                : "key",
+        });
         spans.push({ text: eq.text, role: "eq" });
         spans.push({
           text: val.text,
@@ -252,7 +308,9 @@ function classify(raw: QueryToken[]): HighlightSpan[] {
               ? "quoted"
               : val.kind === "star"
                 ? "star"
-                : "value",
+                : val.kind === "glob"
+                  ? "glob"
+                  : "value",
         });
       }
       i += 3;
@@ -276,6 +334,9 @@ function classify(raw: QueryToken[]): HighlightSpan[] {
         break;
       case "star":
         spans.push({ text: tok.text, role: "star" });
+        break;
+      case "glob":
+        spans.push({ text: tok.text, role: "glob" });
         break;
       case "regex":
         spans.push({ text: tok.text, role: "regex" });
@@ -349,7 +410,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
     }
   }
 
-  // Is the current span a predicate start? (token, quoted, key, directive-key, star, or kv triple)
+  // Is the current span a predicate start? (token, quoted, key, directive-key, star, glob, or kv triple)
   function isPredStart(): boolean {
     const s = cur();
     if (!s) return false;
@@ -357,6 +418,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
       s.role === "token" ||
       s.role === "quoted" ||
       s.role === "regex" ||
+      s.role === "glob" ||
       s.role === "key" ||
       s.role === "directive-key" ||
       s.role === "star" ||
@@ -458,7 +520,10 @@ function validate(spans: HighlightSpan[]): ValidateResult {
       const v = cur();
       if (
         !v ||
-        (v.role !== "value" && v.role !== "quoted" && v.role !== "star")
+        (v.role !== "value" &&
+          v.role !== "quoted" &&
+          v.role !== "star" &&
+          v.role !== "glob")
       ) {
         fail("expected value after '='");
         return false;
@@ -475,7 +540,10 @@ function validate(spans: HighlightSpan[]): ValidateResult {
         const v = cur();
         if (
           !v ||
-          (v.role !== "value" && v.role !== "quoted" && v.role !== "star")
+          (v.role !== "value" &&
+            v.role !== "quoted" &&
+            v.role !== "star" &&
+            v.role !== "glob")
         ) {
           fail("expected value after '*='");
           return false;
@@ -488,7 +556,37 @@ function validate(spans: HighlightSpan[]): ValidateResult {
       return false;
     }
 
-    if (s.role === "token" || s.role === "quoted" || s.role === "regex") {
+    // Glob can be standalone (like a token) or as KV key (already classified)
+    if (s.role === "glob") {
+      const saved = pos;
+      advance(); // consume glob
+      // Check if it's a KV: glob=...
+      if (cur()?.role === "eq") {
+        advance(); // consume eq
+        const v = cur();
+        if (
+          !v ||
+          (v.role !== "value" &&
+            v.role !== "quoted" &&
+            v.role !== "star" &&
+            v.role !== "glob")
+        ) {
+          fail("expected value after '='");
+          return false;
+        }
+        advance(); // consume value
+        return true;
+      }
+      // Standalone glob predicate
+      // Restore to just after the glob (advance already consumed it)
+      return true;
+    }
+
+    if (
+      s.role === "token" ||
+      s.role === "quoted" ||
+      s.role === "regex"
+    ) {
       advance();
       return true;
     }

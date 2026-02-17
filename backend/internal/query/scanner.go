@@ -463,7 +463,7 @@ func matchesKeyValue(recAttrs chunk.Attributes, raw []byte, queryFilters []KeyVa
 			// Check attrs
 			found := false
 			for k := range recAttrs {
-				if strings.EqualFold(k, f.Key) {
+				if matchStringOrPat(k, f.Key, f.KeyPat) {
 					found = true
 					break
 				}
@@ -473,7 +473,18 @@ func matchesKeyValue(recAttrs chunk.Attributes, raw []byte, queryFilters []KeyVa
 			}
 			// Check message body
 			pairs := getMsgPairs()
-			if _, ok := pairs[keyLower]; ok {
+			if f.KeyPat != nil {
+				// Glob key: scan all keys
+				for k := range pairs {
+					if f.KeyPat.MatchString(k) {
+						found = true
+						break
+					}
+				}
+			} else if _, ok := pairs[keyLower]; ok {
+				found = true
+			}
+			if found {
 				continue
 			}
 			return false // Key not found in either location
@@ -482,7 +493,7 @@ func matchesKeyValue(recAttrs chunk.Attributes, raw []byte, queryFilters []KeyVa
 			// Check attrs
 			found := false
 			for _, v := range recAttrs {
-				if strings.EqualFold(v, f.Value) {
+				if matchStringOrPat(v, f.Value, f.ValuePat) {
 					found = true
 					break
 				}
@@ -491,30 +502,153 @@ func matchesKeyValue(recAttrs chunk.Attributes, raw []byte, queryFilters []KeyVa
 				continue
 			}
 			// Check message body
-			values := getMsgValues()
-			if _, ok := values[valLower]; ok {
+			if f.ValuePat != nil {
+				values := getMsgValues()
+				for v := range values {
+					if f.ValuePat.MatchString(v) {
+						found = true
+						break
+					}
+				}
+			} else {
+				values := getMsgValues()
+				if _, ok := values[valLower]; ok {
+					found = true
+				}
+			}
+			if found {
 				continue
 			}
 			return false // Value not found in either location
 		} else {
-			// Both key and value: exact key=value match
+			// Both key and value: exact or glob key=value match
 			// Check attributes first (cheaper).
-			if v, ok := recAttrs[f.Key]; ok && strings.EqualFold(v, f.Value) {
-				continue // Found in attrs, this filter passes.
+			found := false
+			for k, v := range recAttrs {
+				if matchStringOrPat(k, f.Key, f.KeyPat) && matchStringOrPat(v, f.Value, f.ValuePat) {
+					found = true
+					break
+				}
+			}
+			if found {
+				continue
 			}
 
 			// Check message body.
 			pairs := getMsgPairs()
-			if values, ok := pairs[keyLower]; ok {
-				if _, found := values[valLower]; found {
-					continue // Found in message, this filter passes.
+			for k, values := range pairs {
+				if !matchStringOrPatLower(k, keyLower, f.KeyPat) {
+					continue
+				}
+				for v := range values {
+					if matchStringOrPatLower(v, valLower, f.ValuePat) {
+						found = true
+						break
+					}
+				}
+				if found {
+					break
 				}
 			}
 
+			if found {
+				continue
+			}
 			return false // Not found in either location.
 		}
 	}
 	return true
+}
+
+// matchStringOrPat matches a string against either an exact value (case-insensitive) or a compiled glob pattern.
+func matchStringOrPat(s, exact string, pat *regexp.Regexp) bool {
+	if pat != nil {
+		return pat.MatchString(s)
+	}
+	return strings.EqualFold(s, exact)
+}
+
+// matchStringOrPatLower matches a lowercased string against either a lowercased exact value or a compiled glob pattern.
+func matchStringOrPatLower(s, exactLower string, pat *regexp.Regexp) bool {
+	if pat != nil {
+		return pat.MatchString(s)
+	}
+	return s == exactLower
+}
+
+// globTokenFilter returns a filter that matches records where at least one token
+// matches all the given glob patterns (AND semantics across patterns).
+func globTokenFilter(globs []GlobFilter) recordFilter {
+	return func(rec chunk.Record) bool {
+		recordTokens := tokenizer.Tokens(rec.Raw)
+		for _, g := range globs {
+			found := false
+			for _, tok := range recordTokens {
+				if g.Pattern.MatchString(tok) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+// matchesSingleGlob checks if a record contains any token matching the glob pattern.
+func matchesSingleGlob(raw []byte, pattern *regexp.Regexp) bool {
+	recordTokens := tokenizer.Tokens(raw)
+	for _, tok := range recordTokens {
+		if pattern.MatchString(tok) {
+			return true
+		}
+	}
+	return false
+}
+
+// applyGlobIndex tries to use the token index for glob pattern filtering.
+// For prefix globs (e.g., "error*"), uses LookupPrefix for index acceleration.
+// Returns (true, false) if index was used and has matches.
+// Returns (true, true) if index was used but no matches exist.
+// Returns (false, false) if index unavailable or glob has no usable prefix.
+func applyGlobIndex(b *scannerBuilder, indexes index.IndexManager, chunkID chunk.ChunkID, globs []GlobFilter) (ok bool, empty bool) {
+	if len(globs) == 0 {
+		return true, false
+	}
+
+	tokIdx, err := indexes.OpenTokenIndex(chunkID)
+	if errors.Is(err, index.ErrIndexNotFound) || err != nil {
+		return false, false
+	}
+
+	reader := index.NewTokenIndexReader(chunkID, tokIdx.Entries())
+	anyUsedIndex := false
+
+	for _, g := range globs {
+		prefix, hasPrefix := querylang.ExtractGlobPrefix(g.RawPattern)
+		if !hasPrefix {
+			continue // no prefix — can't use index for this glob
+		}
+
+		// Use prefix lookup to get candidate positions.
+		positions, found := reader.LookupPrefix(prefix)
+		if !found {
+			// No tokens with this prefix exist in the chunk.
+			return true, true
+		}
+
+		if !b.addPositions(positions) {
+			return true, true
+		}
+		anyUsedIndex = true
+	}
+
+	if !anyUsedIndex {
+		return false, false
+	}
+	return true, false
 }
 
 // Index application functions. Each returns true if it contributed positions,
@@ -674,11 +808,18 @@ func applyKeyValueIndex(b *scannerBuilder, indexes index.IndexManager, chunkID c
 	return true, false
 }
 
-// ConjunctionToFilters converts a DNF conjunction to tokens, KV filters, regex runtime filter, and a negation filter.
-// Positive predicates are returned as tokens/KV for index acceleration.
+// GlobFilter represents a glob pattern filter for index acceleration.
+type GlobFilter struct {
+	Pattern    *regexp.Regexp // compiled glob pattern
+	RawPattern string         // original glob string (for explain plan)
+}
+
+// ConjunctionToFilters converts a DNF conjunction to tokens, KV filters, glob filters,
+// regex runtime filter, and a negation filter.
+// Positive predicates are returned as tokens/KV/globs for index acceleration.
 // Regex predicates are always runtime-only (no index acceleration).
 // Negative predicates are returned as a runtime filter.
-func ConjunctionToFilters(conj *querylang.Conjunction) (tokens []string, kv []KeyValueFilter, negFilter recordFilter) {
+func ConjunctionToFilters(conj *querylang.Conjunction) (tokens []string, kv []KeyValueFilter, globs []GlobFilter, negFilter recordFilter) {
 	var regexFilters []recordFilter
 
 	// Extract positive predicates for index acceleration
@@ -687,13 +828,15 @@ func ConjunctionToFilters(conj *querylang.Conjunction) (tokens []string, kv []Ke
 		case querylang.PredToken:
 			tokens = append(tokens, p.Value)
 		case querylang.PredKV:
-			kv = append(kv, KeyValueFilter{Key: p.Key, Value: p.Value})
+			kv = append(kv, KeyValueFilter{Key: p.Key, Value: p.Value, KeyPat: p.KeyPat, ValuePat: p.ValuePat})
 		case querylang.PredKeyExists:
-			kv = append(kv, KeyValueFilter{Key: p.Key, Value: ""})
+			kv = append(kv, KeyValueFilter{Key: p.Key, Value: "", KeyPat: p.KeyPat})
 		case querylang.PredValueExists:
-			kv = append(kv, KeyValueFilter{Key: "", Value: p.Value})
+			kv = append(kv, KeyValueFilter{Key: "", Value: p.Value, ValuePat: p.ValuePat})
 		case querylang.PredRegex:
 			regexFilters = append(regexFilters, regexFilter(p.Pattern))
+		case querylang.PredGlob:
+			globs = append(globs, GlobFilter{Pattern: p.Pattern, RawPattern: p.Value})
 		}
 	}
 
@@ -717,7 +860,7 @@ func ConjunctionToFilters(conj *querylang.Conjunction) (tokens []string, kv []Ke
 		}
 	}
 
-	return tokens, kv, negFilter
+	return tokens, kv, globs, negFilter
 }
 
 // negativePredicatesFilter returns a filter that rejects records matching ANY of the negative predicates.
@@ -771,16 +914,19 @@ func evalPredicate(pred *querylang.PredicateExpr, rec chunk.Record) bool {
 		return matchesSingleToken(rec.Raw, pred.Value)
 
 	case querylang.PredKV:
-		return matchesSingleKV(rec.Attrs, rec.Raw, pred.Key, pred.Value)
+		return matchesSingleKV(rec.Attrs, rec.Raw, pred)
 
 	case querylang.PredKeyExists:
-		return matchesKeyExists(rec.Attrs, rec.Raw, pred.Key)
+		return matchesKeyExists(rec.Attrs, rec.Raw, pred)
 
 	case querylang.PredValueExists:
-		return matchesValueExists(rec.Attrs, rec.Raw, pred.Value)
+		return matchesValueExists(rec.Attrs, rec.Raw, pred)
 
 	case querylang.PredRegex:
 		return pred.Pattern.Match(rec.Raw)
+
+	case querylang.PredGlob:
+		return matchesSingleGlob(rec.Raw, pred.Pattern)
 
 	default:
 		return false
@@ -797,13 +943,14 @@ func matchesSingleToken(raw []byte, token string) bool {
 
 // matchesSingleKV checks if a record contains a specific key=value pair
 // in either attributes or extracted message body pairs.
-func matchesSingleKV(attrs chunk.Attributes, raw []byte, key, value string) bool {
-	keyLower := strings.ToLower(key)
-	valueLower := strings.ToLower(value)
+// Supports glob patterns via keyPat/valPat (from PredicateExpr.KeyPat/ValuePat).
+func matchesSingleKV(attrs chunk.Attributes, raw []byte, pred *querylang.PredicateExpr) bool {
+	keyLower := strings.ToLower(pred.Key)
+	valueLower := strings.ToLower(pred.Value)
 
 	// Check attributes (case-insensitive).
 	for k, v := range attrs {
-		if strings.EqualFold(k, key) && strings.EqualFold(v, value) {
+		if matchStringOrPat(k, pred.Key, pred.KeyPat) && matchStringOrPat(v, pred.Value, pred.ValuePat) {
 			return true
 		}
 	}
@@ -811,7 +958,7 @@ func matchesSingleKV(attrs chunk.Attributes, raw []byte, key, value string) bool
 	// Check message body.
 	pairs := tokenizer.CombinedExtract(raw, kvExtractors)
 	for _, kv := range pairs {
-		if kv.Key == keyLower && strings.ToLower(kv.Value) == valueLower {
+		if matchStringOrPatLower(kv.Key, keyLower, pred.KeyPat) && matchStringOrPatLower(strings.ToLower(kv.Value), valueLower, pred.ValuePat) {
 			return true
 		}
 	}
@@ -820,12 +967,13 @@ func matchesSingleKV(attrs chunk.Attributes, raw []byte, key, value string) bool
 }
 
 // matchesKeyExists checks if a record has a key (any value) in attrs or message body.
-func matchesKeyExists(attrs chunk.Attributes, raw []byte, key string) bool {
-	keyLower := strings.ToLower(key)
+// Supports glob patterns via keyPat (from PredicateExpr.KeyPat).
+func matchesKeyExists(attrs chunk.Attributes, raw []byte, pred *querylang.PredicateExpr) bool {
+	keyLower := strings.ToLower(pred.Key)
 
 	// Check attributes.
 	for k := range attrs {
-		if strings.EqualFold(k, key) {
+		if matchStringOrPat(k, pred.Key, pred.KeyPat) {
 			return true
 		}
 	}
@@ -833,7 +981,7 @@ func matchesKeyExists(attrs chunk.Attributes, raw []byte, key string) bool {
 	// Check message body.
 	pairs := tokenizer.CombinedExtract(raw, kvExtractors)
 	for _, kv := range pairs {
-		if kv.Key == keyLower {
+		if matchStringOrPatLower(kv.Key, keyLower, pred.KeyPat) {
 			return true
 		}
 	}
@@ -842,12 +990,13 @@ func matchesKeyExists(attrs chunk.Attributes, raw []byte, key string) bool {
 }
 
 // matchesValueExists checks if a record has a value (any key) in attrs or message body.
-func matchesValueExists(attrs chunk.Attributes, raw []byte, value string) bool {
-	valueLower := strings.ToLower(value)
+// Supports glob patterns via valPat (from PredicateExpr.ValuePat).
+func matchesValueExists(attrs chunk.Attributes, raw []byte, pred *querylang.PredicateExpr) bool {
+	valueLower := strings.ToLower(pred.Value)
 
 	// Check attributes.
 	for _, v := range attrs {
-		if strings.EqualFold(v, value) {
+		if matchStringOrPat(v, pred.Value, pred.ValuePat) {
 			return true
 		}
 	}
@@ -855,7 +1004,7 @@ func matchesValueExists(attrs chunk.Attributes, raw []byte, value string) bool {
 	// Check message body.
 	pairs := tokenizer.CombinedExtract(raw, kvExtractors)
 	for _, kv := range pairs {
-		if strings.ToLower(kv.Value) == valueLower {
+		if matchStringOrPatLower(strings.ToLower(kv.Value), valueLower, pred.ValuePat) {
 			return true
 		}
 	}

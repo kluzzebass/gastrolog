@@ -18,6 +18,9 @@ const (
 
 	// PredRegex represents a regex match against the raw log line: /pattern/
 	PredRegex
+
+	// PredGlob represents a glob pattern match against tokenized words: error*
+	PredGlob
 )
 
 func (k PredicateKind) String() string {
@@ -32,6 +35,8 @@ func (k PredicateKind) String() string {
 		return "value_exists"
 	case PredRegex:
 		return "regex"
+	case PredGlob:
+		return "glob"
 	default:
 		return "unknown"
 	}

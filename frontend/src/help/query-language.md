@@ -22,6 +22,29 @@ Combine filters with boolean logic. AND binds tighter than OR.
 - `NOT debug` — exclude records with "debug"
 - `(error OR warn) AND NOT debug` — parentheses for grouping
 
+## Glob Patterns
+
+Match against tokenized words using shell-style glob patterns. Case-insensitive.
+
+- `error*` — tokens starting with "error" (error, errors, error123)
+- `*timeout` — tokens ending with "timeout" (connection_timeout, timeout)
+- `err?r` — single character wildcard (error, errir)
+- `[Ee]rror` — character class (Error, error)
+
+Globs work in key=value positions too:
+
+- `level=err*` — value matches glob pattern
+- `err*=value` — key matches glob pattern
+- `err*=*` — key matching glob exists
+- `*=err*` — any key has a value matching glob
+
+Glob patterns combine with all boolean operators:
+
+- `error* AND NOT debug*` — combine with negation
+- `(err* OR warn*) AND level=error` — combine with grouping
+
+Prefix globs (like `error*`) benefit from [index acceleration](help:indexers) on sealed chunks via prefix lookup on the token index.
+
 ## Regex Search
 
 Match the raw log line against a regular expression with `/pattern/` syntax. Case-insensitive by default.
@@ -117,3 +140,13 @@ Records matching the regex pattern with level "error".
 NOT /debug|trace/
 ```
 Exclude records matching a regex alternation.
+
+```
+error* AND NOT debug*
+```
+Records with tokens starting with "error" but not "debug".
+
+```
+level=err* host=web-*
+```
+Records where level matches "err*" and host matches "web-*".

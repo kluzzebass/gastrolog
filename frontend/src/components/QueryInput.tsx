@@ -32,6 +32,8 @@ function roleStyle(role: HighlightRole, dark: boolean): React.CSSProperties {
       };
     case "quoted":
       return { color: "var(--color-severity-info)" };
+    case "glob":
+      return { color: "var(--color-severity-debug)", fontStyle: "italic" };
     case "regex":
       return { color: "var(--color-severity-debug)", fontStyle: "italic" };
     case "paren":

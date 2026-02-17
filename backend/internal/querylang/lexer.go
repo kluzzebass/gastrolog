@@ -21,6 +21,7 @@ const (
 	TokEq               // =
 	TokStar             // *
 	TokRegex            // /pattern/ (regex literal, slashes stripped)
+	TokGlob             // bareword with glob metacharacters (*, ?, [)
 )
 
 func (k TokenKind) String() string {
@@ -45,6 +46,8 @@ func (k TokenKind) String() string {
 		return "*"
 	case TokRegex:
 		return "REGEX"
+	case TokGlob:
+		return "GLOB"
 	default:
 		return "UNKNOWN"
 	}
@@ -91,6 +94,10 @@ func (l *Lexer) Next() (Token, error) {
 		l.pos++
 		return Token{Kind: TokEq, Lit: "=", Pos: startPos}, nil
 	case '*':
+		// Peek ahead: if followed by a bareword char or glob meta, this is a glob prefix (e.g. *error).
+		if l.pos+1 < len(l.input) && isGlobBarewordChar(l.input[l.pos+1]) {
+			return l.scanGlobBareword()
+		}
 		l.pos++
 		return Token{Kind: TokStar, Lit: "*", Pos: startPos}, nil
 	case '"', '\'':
@@ -163,13 +170,61 @@ func (l *Lexer) scanQuotedString(quote byte) (Token, error) {
 	return Token{}, newParseError(startPos, ErrUnterminatedString, "unterminated string starting at position %d", startPos)
 }
 
-// scanBareword scans a bareword token, which may be a keyword.
+// scanBareword scans a bareword token, which may be a keyword or a glob pattern.
+// If the bareword contains glob metacharacters (*, ?, [), it produces TokGlob.
 func (l *Lexer) scanBareword() (Token, error) {
 	startPos := l.pos
+	hasGlobMeta := false
 
 	for l.pos < len(l.input) {
 		ch := l.input[l.pos]
 		if isBarewordChar(ch) {
+			l.pos++
+		} else if ch == '*' || ch == '?' || ch == '[' {
+			hasGlobMeta = true
+			l.pos++
+			// For '[', scan to closing ']'
+			if ch == '[' {
+				for l.pos < len(l.input) && l.input[l.pos] != ']' {
+					l.pos++
+				}
+				if l.pos < len(l.input) {
+					l.pos++ // skip ']'
+				}
+			}
+		} else {
+			break
+		}
+	}
+
+	lit := l.input[startPos:l.pos]
+
+	if hasGlobMeta {
+		return Token{Kind: TokGlob, Lit: lit, Pos: startPos}, nil
+	}
+
+	kind := classifyWord(lit)
+	return Token{Kind: kind, Lit: lit, Pos: startPos}, nil
+}
+
+// scanGlobBareword scans a glob pattern starting with '*'.
+func (l *Lexer) scanGlobBareword() (Token, error) {
+	startPos := l.pos
+	l.pos++ // skip leading '*'
+
+	for l.pos < len(l.input) {
+		ch := l.input[l.pos]
+		if isBarewordChar(ch) || ch == '*' || ch == '?' || ch == '[' {
+			if ch == '[' {
+				l.pos++
+				for l.pos < len(l.input) && l.input[l.pos] != ']' {
+					l.pos++
+				}
+				if l.pos < len(l.input) {
+					l.pos++ // skip ']'
+				}
+				continue
+			}
 			l.pos++
 		} else {
 			break
@@ -177,9 +232,7 @@ func (l *Lexer) scanBareword() (Token, error) {
 	}
 
 	lit := l.input[startPos:l.pos]
-	kind := classifyWord(lit)
-
-	return Token{Kind: kind, Lit: lit, Pos: startPos}, nil
+	return Token{Kind: TokGlob, Lit: lit, Pos: startPos}, nil
 }
 
 // scanRegex scans a regex literal delimited by forward slashes.
@@ -213,16 +266,22 @@ func (l *Lexer) scanRegex() (Token, error) {
 }
 
 // isBarewordChar returns true if ch can be part of a bareword.
-// Barewords exclude: whitespace, ()=*"'/
+// Barewords exclude: whitespace, ()=*?"'/ and [
 func isBarewordChar(ch byte) bool {
 	switch ch {
 	case ' ', '\t', '\n', '\r':
 		return false
-	case '(', ')', '=', '*', '"', '\'', '/':
+	case '(', ')', '=', '*', '?', '[', '"', '\'', '/':
 		return false
 	default:
 		return true
 	}
+}
+
+// isGlobBarewordChar returns true if ch can start or continue a glob-extended bareword.
+// This includes regular bareword chars plus glob metacharacters ? and [.
+func isGlobBarewordChar(ch byte) bool {
+	return isBarewordChar(ch) || ch == '?' || ch == '['
 }
 
 // classifyWord checks if a word is a keyword (case-insensitive).

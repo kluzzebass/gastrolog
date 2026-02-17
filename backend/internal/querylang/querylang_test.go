@@ -623,6 +623,274 @@ func TestLexerRegex(t *testing.T) {
 	}
 }
 
+// --- Glob pattern tests ---
+
+func TestLexerGlob(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected []struct {
+			kind TokenKind
+			lit  string
+		}
+	}{
+		{
+			"error*",
+			[]struct {
+				kind TokenKind
+				lit  string
+			}{{TokGlob, "error*"}, {TokEOF, ""}},
+		},
+		{
+			"*timeout",
+			[]struct {
+				kind TokenKind
+				lit  string
+			}{{TokGlob, "*timeout"}, {TokEOF, ""}},
+		},
+		{
+			"err?r",
+			[]struct {
+				kind TokenKind
+				lit  string
+			}{{TokGlob, "err?r"}, {TokEOF, ""}},
+		},
+		{
+			"[Ee]rror",
+			[]struct {
+				kind TokenKind
+				lit  string
+			}{{TokGlob, "[Ee]rror"}, {TokEOF, ""}},
+		},
+		{
+			"*=error",
+			[]struct {
+				kind TokenKind
+				lit  string
+			}{{TokStar, "*"}, {TokEq, "="}, {TokWord, "error"}, {TokEOF, ""}},
+		},
+		{
+			"key=err*",
+			[]struct {
+				kind TokenKind
+				lit  string
+			}{{TokWord, "key"}, {TokEq, "="}, {TokGlob, "err*"}, {TokEOF, ""}},
+		},
+		{
+			"err*=value",
+			[]struct {
+				kind TokenKind
+				lit  string
+			}{{TokGlob, "err*"}, {TokEq, "="}, {TokWord, "value"}, {TokEOF, ""}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			lex := NewLexer(tt.input)
+			for i, want := range tt.expected {
+				tok, err := lex.Next()
+				if err != nil {
+					t.Fatalf("token %d: unexpected error: %v", i, err)
+				}
+				if tok.Kind != want.kind {
+					t.Errorf("token %d: Kind = %v, want %v", i, tok.Kind, want.kind)
+				}
+				if tok.Kind != TokEOF && tok.Lit != want.lit {
+					t.Errorf("token %d: Lit = %q, want %q", i, tok.Lit, want.lit)
+				}
+			}
+		})
+	}
+}
+
+func TestParseGlobStandalone(t *testing.T) {
+	tests := []struct {
+		input string
+		value string
+	}{
+		{"error*", "error*"},
+		{"*timeout", "*timeout"},
+		{"err?r", "err?r"},
+		{"[Ee]rror", "[Ee]rror"},
+		{"*err*", "*err*"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			expr, err := Parse(tt.input)
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
+			}
+			pred, ok := expr.(*PredicateExpr)
+			if !ok {
+				t.Fatalf("Parse(%q) = %T, want *PredicateExpr", tt.input, expr)
+			}
+			if pred.Kind != PredGlob {
+				t.Errorf("Parse(%q).Kind = %v, want PredGlob", tt.input, pred.Kind)
+			}
+			if pred.Value != tt.value {
+				t.Errorf("Parse(%q).Value = %q, want %q", tt.input, pred.Value, tt.value)
+			}
+			if pred.Pattern == nil {
+				t.Fatalf("Parse(%q).Pattern is nil", tt.input)
+			}
+		})
+	}
+}
+
+func TestParseGlobKV(t *testing.T) {
+	tests := []struct {
+		input    string
+		kind     PredicateKind
+		key      string
+		value    string
+		hasKeyPat bool
+		hasValPat bool
+	}{
+		{"level=err*", PredKV, "level", "err*", false, true},
+		{"err*=value", PredKV, "err*", "value", true, false},
+		{"err*=warn*", PredKV, "err*", "warn*", true, true},
+		{"err*=*", PredKeyExists, "err*", "", true, false},
+		{"*=err*", PredValueExists, "", "err*", false, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			expr, err := Parse(tt.input)
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
+			}
+			pred, ok := expr.(*PredicateExpr)
+			if !ok {
+				t.Fatalf("Parse(%q) = %T, want *PredicateExpr", tt.input, expr)
+			}
+			if pred.Kind != tt.kind {
+				t.Errorf("Parse(%q).Kind = %v, want %v", tt.input, pred.Kind, tt.kind)
+			}
+			if tt.key != "" && pred.Key != tt.key {
+				t.Errorf("Parse(%q).Key = %q, want %q", tt.input, pred.Key, tt.key)
+			}
+			if tt.value != "" && pred.Value != tt.value {
+				t.Errorf("Parse(%q).Value = %q, want %q", tt.input, pred.Value, tt.value)
+			}
+			if tt.hasKeyPat && pred.KeyPat == nil {
+				t.Errorf("Parse(%q).KeyPat is nil, expected pattern", tt.input)
+			}
+			if tt.hasValPat && pred.ValuePat == nil {
+				t.Errorf("Parse(%q).ValuePat is nil, expected pattern", tt.input)
+			}
+		})
+	}
+}
+
+func TestParseGlobInBooleanExpressions(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"glob AND token", "error* AND level=error"},
+		{"NOT glob", "NOT debug*"},
+		{"glob OR glob", "err* OR warn*"},
+		{"glob in parens", "(err* OR warn*) AND NOT debug"},
+		{"implicit AND with glob", "error* level=error"},
+		{"glob kv AND token", "level=err* AND timeout"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			expr, err := Parse(tt.input)
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
+			}
+			if expr == nil {
+				t.Fatalf("Parse(%q) returned nil", tt.input)
+			}
+			t.Logf("Parse(%q) = %s", tt.input, expr.String())
+		})
+	}
+}
+
+func TestGlobExprString(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"error*", "glob(error*)"},
+		{"*timeout", "glob(*timeout)"},
+		{"err?r", "glob(err?r)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			expr, err := Parse(tt.input)
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
+			}
+			got := expr.String()
+			if got != tt.want {
+				t.Errorf("Parse(%q).String() = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCompileGlob(t *testing.T) {
+	tests := []struct {
+		pattern string
+		match   []string
+		noMatch []string
+	}{
+		{"error*", []string{"error", "errors", "error123"}, []string{"err", "myerror"}},
+		{"*timeout", []string{"timeout", "connection_timeout", "xtimeout"}, []string{"timeoutx"}},
+		{"err?r", []string{"error", "errir"}, []string{"err", "errorr"}},
+		{"[Ee]rror", []string{"Error", "error"}, []string{"rror", "1rror"}},
+		{"*err*", []string{"error", "myerror", "err", "errs"}, []string{"er"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.pattern, func(t *testing.T) {
+			re, err := CompileGlob(tt.pattern)
+			if err != nil {
+				t.Fatalf("CompileGlob(%q) error: %v", tt.pattern, err)
+			}
+			for _, s := range tt.match {
+				if !re.MatchString(s) {
+					t.Errorf("CompileGlob(%q): expected %q to match", tt.pattern, s)
+				}
+			}
+			for _, s := range tt.noMatch {
+				if re.MatchString(s) {
+					t.Errorf("CompileGlob(%q): expected %q to NOT match", tt.pattern, s)
+				}
+			}
+		})
+	}
+}
+
+func TestExtractGlobPrefix(t *testing.T) {
+	tests := []struct {
+		pattern string
+		prefix  string
+		ok      bool
+	}{
+		{"error*", "error", true},
+		{"*timeout", "", false},
+		{"err?r", "err", true},
+		{"hello", "hello", true},
+		{"[Ee]rror", "", false},
+		{"abc*def", "abc", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.pattern, func(t *testing.T) {
+			prefix, ok := ExtractGlobPrefix(tt.pattern)
+			if ok != tt.ok || prefix != tt.prefix {
+				t.Errorf("ExtractGlobPrefix(%q) = (%q, %v), want (%q, %v)", tt.pattern, prefix, ok, tt.prefix, tt.ok)
+			}
+		})
+	}
+}
+
 func TestSlashNoLongerInBareword(t *testing.T) {
 	// Verify that '/' terminates barewords.
 	// "path/to" should NOT parse as a single token.

@@ -15,8 +15,9 @@ import "regexp"
 //	unary_expr = "NOT" unary_expr | primary
 //	primary   = "(" or_expr ")" | predicate
 //	predicate = kv_pred | regex_pred | token_pred
-//	kv_pred   = ( WORD | "*" ) "=" ( WORD | "*" )
+//	kv_pred   = ( WORD | GLOB | "*" ) "=" ( WORD | GLOB | "*" )
 //	regex_pred = REGEX
+//	glob_pred  = GLOB
 //	token_pred = WORD
 //
 // Precedence (highest to lowest):
@@ -123,7 +124,7 @@ func (p *parser) isAndStart() bool {
 	case TokAnd:
 		// Explicit AND
 		return true
-	case TokNot, TokLParen, TokWord, TokStar, TokRegex:
+	case TokNot, TokLParen, TokWord, TokStar, TokRegex, TokGlob:
 		// Could start a unary_expr (implicit AND)
 		return true
 	default:
@@ -219,8 +220,8 @@ func (p *parser) parsePredicate() (Expr, error) {
 		return &PredicateExpr{Kind: PredRegex, Value: pattern, Pattern: re}, nil
 	}
 
-	// First part: WORD or "*"
-	if p.cur.Kind != TokWord && p.cur.Kind != TokStar {
+	// First part: WORD, GLOB, or "*"
+	if p.cur.Kind != TokWord && p.cur.Kind != TokStar && p.cur.Kind != TokGlob {
 		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected word or '*', got %s", p.cur.Kind)
 	}
 
@@ -229,11 +230,14 @@ func (p *parser) parsePredicate() (Expr, error) {
 		return nil, err
 	}
 
-	// Check for "=" to distinguish kv_pred from token_pred.
+	// Check for "=" to distinguish kv_pred from token_pred/glob_pred.
 	if p.cur.Kind != TokEq {
-		// token_pred: just a word (not allowed to be "*" alone)
+		// Standalone token or glob (not allowed to be "*" alone)
 		if first.Kind == TokStar {
 			return nil, newParseError(first.Pos, ErrUnexpectedToken, "'*' must be followed by '='")
+		}
+		if first.Kind == TokGlob {
+			return p.buildGlobPredicate(first)
 		}
 		return &PredicateExpr{Kind: PredToken, Value: first.Lit}, nil
 	}
@@ -243,8 +247,8 @@ func (p *parser) parsePredicate() (Expr, error) {
 		return nil, err
 	}
 
-	// Second part: WORD or "*"
-	if p.cur.Kind != TokWord && p.cur.Kind != TokStar {
+	// Second part: WORD, GLOB, or "*"
+	if p.cur.Kind != TokWord && p.cur.Kind != TokStar && p.cur.Kind != TokGlob {
 		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected word or '*' after '=', got %s", p.cur.Kind)
 	}
 
@@ -253,19 +257,69 @@ func (p *parser) parsePredicate() (Expr, error) {
 		return nil, err
 	}
 
-	// Determine predicate kind based on wildcards.
+	return p.buildKVPredicate(first, second)
+}
+
+// buildGlobPredicate creates a PredGlob from a standalone glob token.
+func (p *parser) buildGlobPredicate(tok Token) (*PredicateExpr, error) {
+	pattern, err := CompileGlob(tok.Lit)
+	if err != nil {
+		return nil, newParseError(tok.Pos, ErrInvalidGlob, "invalid glob pattern %q: %v", tok.Lit, err)
+	}
+	return &PredicateExpr{Kind: PredGlob, Value: tok.Lit, Pattern: pattern}, nil
+}
+
+// buildKVPredicate creates the appropriate KV predicate from key=value tokens,
+// handling glob patterns in either position.
+func (p *parser) buildKVPredicate(first, second Token) (*PredicateExpr, error) {
+	// Determine predicate kind based on wildcards and globs.
 	switch {
 	case first.Kind == TokStar && second.Kind == TokStar:
-		// *=* is nonsensical but could be allowed; for now, treat as error.
 		return nil, newParseError(first.Pos, ErrUnexpectedToken, "'*=*' is not a valid predicate")
+
+	case first.Kind == TokStar && second.Kind == TokGlob:
+		// *=glob pattern: value exists matching glob under any key
+		valPat, err := CompileGlob(second.Lit)
+		if err != nil {
+			return nil, newParseError(second.Pos, ErrInvalidGlob, "invalid glob pattern %q: %v", second.Lit, err)
+		}
+		return &PredicateExpr{Kind: PredValueExists, Value: second.Lit, ValuePat: valPat}, nil
+
+	case first.Kind == TokGlob && second.Kind == TokStar:
+		// glob=*: key exists matching glob
+		keyPat, err := CompileGlob(first.Lit)
+		if err != nil {
+			return nil, newParseError(first.Pos, ErrInvalidGlob, "invalid glob pattern %q: %v", first.Lit, err)
+		}
+		return &PredicateExpr{Kind: PredKeyExists, Key: first.Lit, KeyPat: keyPat}, nil
+
 	case first.Kind == TokStar:
 		// *=value
 		return &PredicateExpr{Kind: PredValueExists, Value: second.Lit}, nil
+
 	case second.Kind == TokStar:
 		// key=*
 		return &PredicateExpr{Kind: PredKeyExists, Key: first.Lit}, nil
+
 	default:
-		// key=value
-		return &PredicateExpr{Kind: PredKV, Key: first.Lit, Value: second.Lit}, nil
+		// key=value, possibly with globs in either or both positions
+		pred := &PredicateExpr{Kind: PredKV, Key: first.Lit, Value: second.Lit}
+
+		if first.Kind == TokGlob {
+			keyPat, err := CompileGlob(first.Lit)
+			if err != nil {
+				return nil, newParseError(first.Pos, ErrInvalidGlob, "invalid glob pattern %q: %v", first.Lit, err)
+			}
+			pred.KeyPat = keyPat
+		}
+		if second.Kind == TokGlob {
+			valPat, err := CompileGlob(second.Lit)
+			if err != nil {
+				return nil, newParseError(second.Pos, ErrInvalidGlob, "invalid glob pattern %q: %v", second.Lit, err)
+			}
+			pred.ValuePat = valPat
+		}
+
+		return pred, nil
 	}
 }

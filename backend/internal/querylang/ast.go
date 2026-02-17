@@ -70,8 +70,14 @@ func (n *NotExpr) String() string {
 type PredicateExpr struct {
 	Kind    PredicateKind
 	Key     string         // empty for Token kind
-	Value   string         // the token or value; for PredRegex, the raw pattern
-	Pattern *regexp.Regexp // compiled regex; set only for PredRegex
+	Value   string         // the token or value; for PredRegex/PredGlob, the raw pattern
+	Pattern *regexp.Regexp // compiled regex; set for PredRegex and PredGlob
+
+	// Glob patterns for KV predicates. When a glob is used in key or value position
+	// of a KV predicate, these hold the compiled patterns. The Kind remains PredKV/
+	// PredKeyExists/PredValueExists, but matching uses regex instead of exact compare.
+	KeyPat   *regexp.Regexp // compiled glob for key position (e.g., err*=value)
+	ValuePat *regexp.Regexp // compiled glob for value position (e.g., key=err*)
 }
 
 func (PredicateExpr) expr() {}
@@ -88,6 +94,8 @@ func (p *PredicateExpr) String() string {
 		return fmt.Sprintf("*=%s", p.Value)
 	case PredRegex:
 		return fmt.Sprintf("regex(/%s/)", p.Value)
+	case PredGlob:
+		return fmt.Sprintf("glob(%s)", p.Value)
 	default:
 		return fmt.Sprintf("unknown(%d)", p.Kind)
 	}

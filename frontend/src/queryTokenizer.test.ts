@@ -321,6 +321,137 @@ describe("regex literals", () => {
   });
 });
 
+describe("glob patterns", () => {
+  test("standalone glob with trailing *", () => {
+    expect(spans("error*")).toEqual([["error*", "glob"]]);
+  });
+
+  test("standalone glob with leading *", () => {
+    expect(spans("*timeout")).toEqual([["*timeout", "glob"]]);
+  });
+
+  test("standalone glob with ?", () => {
+    expect(spans("err?r")).toEqual([["err?r", "glob"]]);
+  });
+
+  test("standalone glob with char class", () => {
+    expect(spans("[Ee]rror")).toEqual([["[Ee]rror", "glob"]]);
+  });
+
+  test("glob roundtrip", () => {
+    roundtrip("error*");
+    roundtrip("*timeout");
+    roundtrip("err?r");
+    roundtrip("[Ee]rror");
+  });
+
+  test("glob in KV value", () => {
+    expect(spans("level=err*")).toEqual([
+      ["level", "key"],
+      ["=", "eq"],
+      ["err*", "glob"],
+    ]);
+  });
+
+  test("glob in KV key", () => {
+    expect(spans("err*=value")).toEqual([
+      ["err*", "glob"],
+      ["=", "eq"],
+      ["value", "value"],
+    ]);
+  });
+
+  test("glob key=*", () => {
+    expect(spans("err*=*")).toEqual([
+      ["err*", "glob"],
+      ["=", "eq"],
+      ["*", "star"],
+    ]);
+  });
+
+  test("*=glob", () => {
+    expect(spans("*=err*")).toEqual([
+      ["*", "star"],
+      ["=", "eq"],
+      ["err*", "glob"],
+    ]);
+  });
+
+  test("glob AND token", () => {
+    expect(spans("error* AND level=error")).toEqual([
+      ["error*", "glob"],
+      ["AND", "operator"],
+      ["level", "key"],
+      ["=", "eq"],
+      ["error", "value"],
+    ]);
+  });
+
+  test("NOT glob", () => {
+    expect(spans("NOT debug*")).toEqual([
+      ["NOT", "operator"],
+      ["debug*", "glob"],
+    ]);
+  });
+
+  test("glob OR glob", () => {
+    expect(spans("err* OR warn*")).toEqual([
+      ["err*", "glob"],
+      ["OR", "operator"],
+      ["warn*", "glob"],
+    ]);
+  });
+
+  test("implicit AND with glob", () => {
+    expect(spans("error* level=error")).toEqual([
+      ["error*", "glob"],
+      ["level", "key"],
+      ["=", "eq"],
+      ["error", "value"],
+    ]);
+  });
+
+  test("* still works as star in *=value", () => {
+    expect(spans("*=value")).toEqual([
+      ["*", "star"],
+      ["=", "eq"],
+      ["value", "value"],
+    ]);
+  });
+
+  test("* still works as star in key=*", () => {
+    expect(spans("key=*")).toEqual([
+      ["key", "key"],
+      ["=", "eq"],
+      ["*", "star"],
+    ]);
+  });
+});
+
+describe("glob validation", () => {
+  const valid = [
+    "error*",
+    "*timeout",
+    "err?r",
+    "[Ee]rror",
+    "error* AND level=error",
+    "NOT debug*",
+    "(err* OR warn*) AND NOT debug",
+    "level=err*",
+    "err*=value",
+    "err*=*",
+    "*=err*",
+  ];
+
+  for (const q of valid) {
+    test(`valid: ${JSON.stringify(q)}`, () => {
+      const result = tokenize(q);
+      expect(result.hasErrors).toBe(false);
+      expect(result.errorMessage).toBeNull();
+    });
+  }
+});
+
 describe("complex queries", () => {
   test("realistic search query", () => {
     const r = tokenize('last=5m reverse=true level=error msg="connection refused"');

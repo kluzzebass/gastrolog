@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -32,6 +33,11 @@ import (
 type KeyValueFilter struct {
 	Key   string // empty string means "any key"
 	Value string // empty string means "any value"
+
+	// Glob patterns for key/value positions. When non-nil, matching uses regex
+	// instead of exact string comparison.
+	KeyPat   *regexp.Regexp // compiled glob for key (e.g., err*=value)
+	ValuePat *regexp.Regexp // compiled glob for value (e.g., key=err*)
 }
 
 // Query describes what records to search for.
@@ -504,7 +510,7 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 
 		if len(dnf.Branches) == 1 {
 			// Single branch: use index acceleration
-			tokens, kv, negFilter := ConjunctionToFilters(&dnf.Branches[0])
+			tokens, kv, globs, negFilter := ConjunctionToFilters(&dnf.Branches[0])
 
 			// Apply token filter for positive predicates
 			if len(tokens) > 0 {
@@ -518,6 +524,25 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 					}
 				} else {
 					b.addFilter(tokenFilter(tokens))
+				}
+			}
+
+			// Apply glob filter for positive predicates
+			if len(globs) > 0 {
+				if meta.Sealed {
+					ok, empty := applyGlobIndex(b, im, meta.ID, globs)
+					if empty {
+						return emptyScanner(), nil
+					}
+					if !ok {
+						b.addFilter(globTokenFilter(globs))
+					} else {
+						// Index gave us prefix-based positions, but we still need a runtime
+						// filter to verify the full glob pattern matches a token.
+						b.addFilter(globTokenFilter(globs))
+					}
+				} else {
+					b.addFilter(globTokenFilter(globs))
 				}
 			}
 
@@ -552,12 +577,21 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 					branchBuilder.setMinPosition(b.minPos)
 				}
 
-				tokens, kv, _ := ConjunctionToFilters(&branch)
+				tokens, kv, globs, _ := ConjunctionToFilters(&branch)
 				branchEmpty := false
 
 				// Try to get positions from token index
 				if len(tokens) > 0 && meta.Sealed {
 					ok, empty := applyTokenIndex(branchBuilder, im, meta.ID, tokens)
+					if empty {
+						branchEmpty = true
+					}
+					_ = ok
+				}
+
+				// Try to get positions from glob index
+				if !branchEmpty && len(globs) > 0 && meta.Sealed {
+					ok, empty := applyGlobIndex(branchBuilder, im, meta.ID, globs)
 					if empty {
 						branchEmpty = true
 					}

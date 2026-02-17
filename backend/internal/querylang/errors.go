@@ -11,6 +11,7 @@ var (
 	ErrUnterminatedRegex  = errors.New("unterminated regex")
 	ErrInvalidEscape      = errors.New("invalid escape sequence")
 	ErrInvalidRegex       = errors.New("invalid regex")
+	ErrInvalidGlob        = errors.New("invalid glob pattern")
 )
 
 // Parser errors.

@@ -257,7 +257,7 @@ func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMe
 func (e *Engine) buildBranchPipeline(pipeline *[]PipelineStep, branch *querylang.Conjunction, meta chunk.ChunkMeta, currentPositions int, im index.IndexManager) (int, bool, string, []string) {
 	var runtimeFilters []string
 
-	tokens, kv, _ := ConjunctionToFilters(branch)
+	tokens, kv, globs, _ := ConjunctionToFilters(branch)
 
 	// Token index.
 	if len(tokens) > 0 {
@@ -329,6 +329,53 @@ func (e *Engine) buildBranchPipeline(pipeline *[]PipelineStep, branch *querylang
 			runtimeFilters = append(runtimeFilters, predicate)
 		}
 		*pipeline = append(*pipeline, step)
+	}
+
+	// Glob patterns (prefix acceleration via token index).
+	if len(globs) > 0 {
+		for _, g := range globs {
+			predicate := fmt.Sprintf("glob(%s)", g.RawPattern)
+			step := PipelineStep{
+				Index:           "token",
+				Predicate:       predicate,
+				PositionsBefore: currentPositions,
+			}
+
+			prefix, hasPrefix := querylang.ExtractGlobPrefix(g.RawPattern)
+			if !hasPrefix {
+				step.PositionsAfter = currentPositions
+				step.Action = "runtime"
+				step.Reason = "no_prefix"
+				step.Details = "glob has no literal prefix for index lookup"
+				runtimeFilters = append(runtimeFilters, predicate)
+			} else {
+				tokIdx, err := im.OpenTokenIndex(meta.ID)
+				if err == nil {
+					reader := index.NewTokenIndexReader(meta.ID, tokIdx.Entries())
+					positions, found := reader.LookupPrefix(prefix)
+					if !found {
+						step.PositionsAfter = 0
+						step.Action = "skipped"
+						step.Reason = "no_match"
+						step.Details = fmt.Sprintf("no tokens with prefix %q", prefix)
+						*pipeline = append(*pipeline, step)
+						return 0, true, fmt.Sprintf("no match (%s)", predicate), nil
+					}
+					step.PositionsAfter = len(positions)
+					step.Action = "indexed"
+					step.Reason = "prefix_lookup"
+					step.Details = fmt.Sprintf("prefix %q matched %d positions", prefix, len(positions))
+					currentPositions = min(currentPositions, len(positions))
+				} else {
+					step.PositionsAfter = currentPositions
+					step.Action = "runtime"
+					step.Reason = "index_missing"
+					step.Details = "no token index"
+					runtimeFilters = append(runtimeFilters, predicate)
+				}
+			}
+			*pipeline = append(*pipeline, step)
+		}
 	}
 
 	// Regex predicates (always runtime, no index acceleration).
