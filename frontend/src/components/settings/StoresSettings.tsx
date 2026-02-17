@@ -389,13 +389,13 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                   onClick={async () => {
                     try {
                       await seal.mutateAsync(store.id);
-                      addToast("Active chunk sealed", "info");
+                      addToast("Active chunk rotated", "info");
                     } catch (err: any) {
-                      addToast(err.message ?? "Seal failed", "error");
+                      addToast(err.message ?? "Rotate failed", "error");
                     }
                   }}
                 >
-                  {seal.isPending ? "Sealing..." : "Seal"}
+                  {seal.isPending ? "Rotating..." : "Rotate"}
                 </button>
                 <button
                   type="button"

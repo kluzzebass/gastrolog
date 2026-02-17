@@ -4,6 +4,7 @@ import { searchRoute } from "./routes/search";
 import { followRoute } from "./routes/follow";
 import { loginRoute } from "./routes/login";
 import { registerRoute } from "./routes/register";
+import { setupRoute } from "./routes/setup";
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -19,6 +20,7 @@ const routeTree = rootRoute.addChildren([
   followRoute,
   loginRoute,
   registerRoute,
+  setupRoute,
 ]);
 
 export const router = createRouter({ routeTree });

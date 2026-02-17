@@ -1,0 +1,285 @@
+import { useState, useCallback } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import { useThemeSync } from "../../hooks/useThemeSync";
+import { useThemeClass } from "../../hooks/useThemeClass";
+import { useToast } from "../Toast";
+import { configClient } from "../../api/client";
+import { useQueryClient } from "@tanstack/react-query";
+import { PrimaryButton, GhostButton } from "../settings/Buttons";
+import { WelcomeStep } from "./WelcomeStep";
+import { StoreStep, type StoreData } from "./StoreStep";
+import {
+  PoliciesStep,
+  parseDurationToSeconds,
+  type RotationData,
+  type RetentionData,
+} from "./PoliciesStep";
+import { IngesterStep, type IngesterData } from "./IngesterStep";
+import { ReviewStep } from "./ReviewStep";
+
+const STEPS = ["Welcome", "Store", "Policies", "Ingester", "Review"] as const;
+
+export function SetupWizard() {
+  const { dark } = useThemeSync();
+  const c = useThemeClass(dark);
+  const navigate = useNavigate();
+  const { addToast } = useToast();
+  const queryClient = useQueryClient();
+
+  const [step, setStep] = useState(0);
+  const [creating, setCreating] = useState(false);
+
+  // Step data
+  const [store, setStore] = useState<StoreData>({
+    name: "default",
+    type: "file",
+    dir: "",
+  });
+  const [rotation, setRotation] = useState<RotationData>({
+    name: "default",
+    maxAge: "",
+    maxBytes: "",
+    maxRecords: "",
+    cron: "",
+  });
+  const [retention, setRetention] = useState<RetentionData>({
+    name: "default",
+    maxChunks: "",
+    maxAge: "",
+    maxBytes: "",
+  });
+  const [ingester, setIngester] = useState<IngesterData>({
+    name: "",
+    type: "",
+    params: {},
+  });
+
+  const canProceed = useCallback(() => {
+    switch (step) {
+      case 0: return true; // Welcome
+      case 1: // Store
+        if (!store.name.trim()) return false;
+        if (store.type === "file" && !store.dir.trim()) return false;
+        return true;
+      case 2: return true; // Policies (defaults are fine)
+      case 3: return !!ingester.type; // Need a type selected
+      case 4: return true; // Review
+      default: return false;
+    }
+  }, [step, store, ingester.type]);
+
+  const handleCreate = async () => {
+    setCreating(true);
+    try {
+      const filterId = crypto.randomUUID();
+      const storeId = crypto.randomUUID();
+      const ingesterId = crypto.randomUUID();
+
+      // 1. Create filter (catch-all)
+      await configClient.putFilter({
+        config: {
+          id: filterId,
+          name: "catch-all",
+          expression: "*",
+        },
+      });
+
+      // 2. Create rotation policy (if any fields are set)
+      const hasRotation = rotation.maxAge || rotation.maxBytes || rotation.maxRecords || rotation.cron;
+      let rotationId = "";
+      if (hasRotation) {
+        rotationId = crypto.randomUUID();
+        await configClient.putRotationPolicy({
+          config: {
+            id: rotationId,
+            name: rotation.name || "default",
+            maxAgeSeconds: parseDurationToSeconds(rotation.maxAge),
+            maxBytes: rotation.maxBytes ? BigInt(rotation.maxBytes) : BigInt(0),
+            maxRecords: rotation.maxRecords
+              ? BigInt(rotation.maxRecords)
+              : BigInt(0),
+            cron: rotation.cron,
+          },
+        });
+      }
+
+      // 3. Create retention policy (if any fields are set)
+      const hasRetention = retention.maxChunks || retention.maxAge || retention.maxBytes;
+      let retentionId = "";
+      if (hasRetention) {
+        retentionId = crypto.randomUUID();
+        await configClient.putRetentionPolicy({
+          config: {
+            id: retentionId,
+            name: retention.name || "default",
+            maxChunks: retention.maxChunks
+              ? BigInt(retention.maxChunks)
+              : BigInt(0),
+            maxAgeSeconds: parseDurationToSeconds(retention.maxAge || ""),
+            maxBytes: retention.maxBytes
+              ? BigInt(retention.maxBytes)
+              : BigInt(0),
+          },
+        });
+      }
+
+      // 4. Create store
+      const storeParams: Record<string, string> = {};
+      if (store.type === "file" && store.dir) {
+        storeParams["dir"] = store.dir;
+      }
+      await configClient.putStore({
+        config: {
+          id: storeId,
+          name: store.name || "default",
+          type: store.type,
+          enabled: true,
+          filter: filterId,
+          policy: rotationId,
+          retention: retentionId,
+          params: storeParams,
+        },
+      });
+
+      // 5. Create ingester
+      await configClient.putIngester({
+        config: {
+          id: ingesterId,
+          name: ingester.name || ingester.type,
+          type: ingester.type,
+          enabled: true,
+          params: ingester.params,
+        },
+      });
+
+      await queryClient.invalidateQueries({ queryKey: ["config"] });
+      addToast("Configuration created successfully!", "info");
+      navigate({ to: "/search", search: { q: "" } });
+    } catch (err) {
+      addToast(
+        err instanceof Error ? err.message : "Failed to create configuration",
+        "error",
+      );
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div className="flex-1 flex items-center justify-center overflow-auto p-4">
+      <div
+        className={`w-full max-w-xl mx-auto rounded-lg border shadow-lg overflow-hidden ${c(
+          "border-ink-border bg-ink-raised",
+          "border-light-border bg-light-surface",
+        )}`}
+      >
+        {/* Step indicator */}
+        <div
+          className={`flex items-center justify-center gap-2 px-6 py-4 border-b ${c(
+            "border-ink-border-subtle",
+            "border-light-border-subtle",
+          )}`}
+        >
+          {STEPS.map((label, i) => (
+            <div key={label} className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => i < step && setStep(i)}
+                disabled={i >= step}
+                className={`w-7 h-7 rounded-full flex items-center justify-center text-[0.75em] font-mono font-medium transition-colors ${
+                  i === step
+                    ? "bg-copper text-white"
+                    : i < step
+                      ? c(
+                          "bg-copper/20 text-copper cursor-pointer hover:bg-copper/30",
+                          "bg-copper/20 text-copper cursor-pointer hover:bg-copper/30",
+                        )
+                      : c(
+                          "bg-ink-surface text-text-ghost",
+                          "bg-light-well text-light-text-ghost",
+                        )
+                }`}
+              >
+                {i + 1}
+              </button>
+              {i < STEPS.length - 1 && (
+                <div
+                  className={`w-6 h-px ${c(
+                    i < step ? "bg-copper/40" : "bg-ink-border-subtle",
+                    i < step ? "bg-copper/40" : "bg-light-border-subtle",
+                  )}`}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Step content */}
+        <div className="px-6 py-5 max-h-[60vh] overflow-y-auto app-scroll">
+          {step === 0 && (
+            <WelcomeStep dark={dark} onNext={() => setStep(1)} />
+          )}
+          {step === 1 && (
+            <StoreStep dark={dark} data={store} onChange={setStore} />
+          )}
+          {step === 2 && (
+            <PoliciesStep
+              dark={dark}
+              rotation={rotation}
+              retention={retention}
+              onRotationChange={setRotation}
+              onRetentionChange={setRetention}
+            />
+          )}
+          {step === 3 && (
+            <IngesterStep dark={dark} data={ingester} onChange={setIngester} />
+          )}
+          {step === 4 && (
+            <ReviewStep
+              dark={dark}
+              store={store}
+              rotation={rotation}
+              retention={retention}
+              ingester={ingester}
+            />
+          )}
+        </div>
+
+        {/* Navigation */}
+        <div
+          className={`flex items-center justify-between px-6 py-4 border-t ${c(
+            "border-ink-border-subtle",
+            "border-light-border-subtle",
+          )}`}
+        >
+          <div>
+            {step > 0 && (
+              <GhostButton
+                onClick={() => setStep(step - 1)}
+                dark={dark}
+                bordered
+              >
+                Back
+              </GhostButton>
+            )}
+          </div>
+          <div>
+            {step > 0 && step < STEPS.length - 1 && (
+              <PrimaryButton
+                onClick={() => setStep(step + 1)}
+                disabled={!canProceed()}
+              >
+                Next
+              </PrimaryButton>
+            )}
+            {step === STEPS.length - 1 && (
+              <PrimaryButton onClick={handleCreate} disabled={creating}>
+                {creating ? "Creating..." : "Create"}
+              </PrimaryButton>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

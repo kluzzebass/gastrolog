@@ -1,5 +1,6 @@
-import { createRootRoute, Outlet, redirect } from "@tanstack/react-router";
+import { createRootRoute, redirect } from "@tanstack/react-router";
 import { getToken } from "../api/client";
+import { App } from "../App";
 
 const AUTH_PATHS = ["/login", "/register"];
 
@@ -10,5 +11,5 @@ export const rootRoute = createRootRoute({
       throw redirect({ to: "/login" });
     }
   },
-  component: () => <Outlet />,
+  component: App,
 });

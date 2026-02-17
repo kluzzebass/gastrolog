@@ -22,6 +22,10 @@ run-memory:
 
 alias run := run-sqlite
 
+# Runs the gastrolog backend with full bootstrap (memory store + chatterbox).
+run-bootstrap:
+  go run ./cmd/gastrolog -bootstrap -home data
+
 # Runs the gastrolog backend with pprof server.
 pprof:
   go run ./cmd/gastrolog -pprof localhost:6060

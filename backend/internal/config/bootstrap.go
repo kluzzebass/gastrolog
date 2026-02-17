@@ -110,3 +110,27 @@ func Bootstrap(ctx context.Context, store Store) error {
 
 	return nil
 }
+
+// BootstrapMinimal writes only the server config (JWT secret + token duration)
+// to the store. This allows auth to work without creating any stores, filters,
+// policies, or ingesters — suitable for first-time setup via the wizard UI.
+func BootstrapMinimal(ctx context.Context, store Store) error {
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return fmt.Errorf("generate JWT secret: %w", err)
+	}
+	serverCfg := ServerConfig{
+		Auth: AuthConfig{
+			JWTSecret:     base64.StdEncoding.EncodeToString(secret),
+			TokenDuration: "168h", // 7 days
+		},
+	}
+	serverJSON, err := json.Marshal(serverCfg)
+	if err != nil {
+		return fmt.Errorf("marshal server config: %w", err)
+	}
+	if err := store.PutSetting(ctx, "server", string(serverJSON)); err != nil {
+		return err
+	}
+	return nil
+}

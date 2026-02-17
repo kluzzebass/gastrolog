@@ -53,6 +53,7 @@ func main() {
 	configType := flag.String("config-type", "sqlite", "config store type: sqlite, json, or memory")
 	pprofAddr := flag.String("pprof", "", "pprof HTTP server address (e.g. localhost:6060)")
 	serverAddr := flag.String("server", ":4564", "Connect RPC server address (empty to disable)")
+	bootstrapFlag := flag.Bool("bootstrap", false, "bootstrap with default config (memory store + chatterbox)")
 	flag.Parse()
 
 	// Create base logger with ComponentFilterHandler for dynamic log level control.
@@ -74,13 +75,13 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	if err := run(ctx, logger, *homeFlag, *configType, *serverAddr); err != nil {
+	if err := run(ctx, logger, *homeFlag, *configType, *serverAddr, *bootstrapFlag); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverAddr string) error {
+func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverAddr string, bootstrap bool) error {
 	// Resolve home directory.
 	hd, err := resolveHome(homeFlag)
 	if err != nil {
@@ -117,9 +118,16 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 	}
 
 	if cfg == nil {
-		logger.Info("no config found, bootstrapping default configuration")
-		if err := config.Bootstrap(ctx, cfgStore); err != nil {
-			return fmt.Errorf("bootstrap config: %w", err)
+		if bootstrap {
+			logger.Info("no config found, bootstrapping default configuration")
+			if err := config.Bootstrap(ctx, cfgStore); err != nil {
+				return fmt.Errorf("bootstrap config: %w", err)
+			}
+		} else {
+			logger.Info("no config found, bootstrapping minimal configuration (auth only)")
+			if err := config.BootstrapMinimal(ctx, cfgStore); err != nil {
+				return fmt.Errorf("bootstrap minimal config: %w", err)
+			}
 		}
 		cfg, err = cfgStore.Load(ctx)
 		if err != nil {
