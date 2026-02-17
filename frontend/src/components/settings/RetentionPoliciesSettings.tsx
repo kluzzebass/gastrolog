@@ -58,7 +58,7 @@ export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
     [policies],
   );
 
-  const { getEdit, setEdit, clearEdit } = useEditState(defaults);
+  const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
 
   const { handleSave: savePolicy, handleDelete } = useCrudHandlers({
     mutation: putPolicy,
@@ -195,7 +195,7 @@ export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
             footer={
               <PrimaryButton
                 onClick={() => handleSave(id)}
-                disabled={putPolicy.isPending}
+                disabled={putPolicy.isPending || !isDirty(id)}
               >
                 {putPolicy.isPending ? "Saving..." : "Save"}
               </PrimaryButton>

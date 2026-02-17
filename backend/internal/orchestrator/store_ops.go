@@ -108,13 +108,46 @@ func (o *Orchestrator) Append(storeID uuid.UUID, rec chunk.Record) (chunk.ChunkI
 }
 
 // SealActive seals the active chunk if it has records. No-op if empty or no active chunk.
+// After sealing, schedules compression and index builds (same as ingest-triggered seal).
 func (o *Orchestrator) SealActive(storeID uuid.UUID) error {
-	cm, err := o.chunkManager(storeID)
-	if err != nil {
+	o.mu.RLock()
+	store := o.stores[storeID]
+	o.mu.RUnlock()
+	if store == nil {
+		return fmt.Errorf("%w: %s", ErrStoreNotFound, storeID)
+	}
+
+	active := store.Chunks.Active()
+	if active == nil || active.RecordCount == 0 {
+		return nil
+	}
+	chunkID := active.ID
+
+	if err := store.Chunks.Seal(); err != nil {
 		return err
 	}
-	if active := cm.Active(); active != nil && active.RecordCount > 0 {
-		return cm.Seal()
+
+	// Schedule post-seal jobs (same as ingest onSeal callback).
+	// Must hold lock since scheduleCompression/scheduleIndexBuild access o.stores.
+	o.mu.Lock()
+	o.scheduleCompression(storeID, chunkID)
+	o.scheduleIndexBuild(storeID, chunkID)
+	o.mu.Unlock()
+
+	return nil
+}
+
+// SetStoreCompression enables or disables compression for a store's chunk manager.
+// No-op if the chunk manager doesn't support compression (e.g. memory stores).
+func (o *Orchestrator) SetStoreCompression(storeID uuid.UUID, enabled bool) error {
+	o.mu.RLock()
+	store := o.stores[storeID]
+	o.mu.RUnlock()
+	if store == nil {
+		return fmt.Errorf("%w: %s", ErrStoreNotFound, storeID)
+	}
+	if compressor, ok := store.Chunks.(chunk.ChunkCompressor); ok {
+		return compressor.SetCompressionEnabled(enabled)
 	}
 	return nil
 }

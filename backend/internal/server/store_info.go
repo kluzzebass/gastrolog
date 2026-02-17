@@ -187,6 +187,8 @@ func chunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
 		Sealed:      meta.Sealed,
 		RecordCount: meta.RecordCount,
 		Bytes:       meta.Bytes,
+		Compressed:  meta.Compressed,
+		DiskBytes:   meta.DiskBytes,
 	}
 }
 

@@ -65,6 +65,20 @@ export function useStats(storeId?: string) {
   });
 }
 
+export function useSealStore() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (store: string) => {
+      await storeClient.sealStore({ store });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["stores"] });
+      qc.invalidateQueries({ queryKey: ["chunks"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
+    },
+  });
+}
+
 export function useReindexStore() {
   const qc = useQueryClient();
   return useMutation({

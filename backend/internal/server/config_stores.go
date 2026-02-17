@@ -119,6 +119,10 @@ func (s *ConfigServer) PutStore(
 		} else {
 			_ = s.orch.EnableStore(storeCfg.ID)
 		}
+		// Apply compression setting (file stores only).
+		if storeCfg.Type == "file" {
+			_ = s.orch.SetStoreCompression(storeCfg.ID, storeCfg.Params["compression"] == "zstd")
+		}
 	} else {
 		// Add new store to orchestrator.
 		if err := s.orch.AddStore(ctx, storeCfg, s.factories); err != nil {

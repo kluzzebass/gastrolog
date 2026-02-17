@@ -1,4 +1,5 @@
 import { FormField, TextInput } from "./FormField";
+import { Checkbox } from "./Checkbox";
 
 interface StoreParamsFormProps {
   storeType: string;
@@ -33,6 +34,12 @@ export function StoreParamsForm({
             mono
           />
         </FormField>
+        <Checkbox
+          checked={get("compression") === "zstd"}
+          onChange={(v) => set("compression", v ? "zstd" : "none")}
+          label="Compress sealed chunks (zstd)"
+          dark={dark}
+        />
       </div>
     );
   }

@@ -66,6 +66,8 @@ const (
 	// StoreServiceMergeStoresProcedure is the fully-qualified name of the StoreService's MergeStores
 	// RPC.
 	StoreServiceMergeStoresProcedure = "/gastrolog.v1.StoreService/MergeStores"
+	// StoreServiceSealStoreProcedure is the fully-qualified name of the StoreService's SealStore RPC.
+	StoreServiceSealStoreProcedure = "/gastrolog.v1.StoreService/SealStore"
 )
 
 // StoreServiceClient is a client for the gastrolog.v1.StoreService service.
@@ -98,6 +100,8 @@ type StoreServiceClient interface {
 	// MergeStores copies all records from a source store into a destination store,
 	// then deletes the source.
 	MergeStores(context.Context, *connect.Request[v1.MergeStoresRequest]) (*connect.Response[v1.MergeStoresResponse], error)
+	// SealStore seals the active chunk of a store.
+	SealStore(context.Context, *connect.Request[v1.SealStoreRequest]) (*connect.Response[v1.SealStoreResponse], error)
 }
 
 // NewStoreServiceClient constructs a client for the gastrolog.v1.StoreService service. By default,
@@ -189,6 +193,12 @@ func NewStoreServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(storeServiceMethods.ByName("MergeStores")),
 			connect.WithClientOptions(opts...),
 		),
+		sealStore: connect.NewClient[v1.SealStoreRequest, v1.SealStoreResponse](
+			httpClient,
+			baseURL+StoreServiceSealStoreProcedure,
+			connect.WithSchema(storeServiceMethods.ByName("SealStore")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -207,6 +217,7 @@ type storeServiceClient struct {
 	exportStore   *connect.Client[v1.ExportStoreRequest, v1.ExportStoreResponse]
 	importRecords *connect.Client[v1.ImportRecordsRequest, v1.ImportRecordsResponse]
 	mergeStores   *connect.Client[v1.MergeStoresRequest, v1.MergeStoresResponse]
+	sealStore     *connect.Client[v1.SealStoreRequest, v1.SealStoreResponse]
 }
 
 // ListStores calls gastrolog.v1.StoreService.ListStores.
@@ -274,6 +285,11 @@ func (c *storeServiceClient) MergeStores(ctx context.Context, req *connect.Reque
 	return c.mergeStores.CallUnary(ctx, req)
 }
 
+// SealStore calls gastrolog.v1.StoreService.SealStore.
+func (c *storeServiceClient) SealStore(ctx context.Context, req *connect.Request[v1.SealStoreRequest]) (*connect.Response[v1.SealStoreResponse], error) {
+	return c.sealStore.CallUnary(ctx, req)
+}
+
 // StoreServiceHandler is an implementation of the gastrolog.v1.StoreService service.
 type StoreServiceHandler interface {
 	// ListStores returns all registered stores.
@@ -304,6 +320,8 @@ type StoreServiceHandler interface {
 	// MergeStores copies all records from a source store into a destination store,
 	// then deletes the source.
 	MergeStores(context.Context, *connect.Request[v1.MergeStoresRequest]) (*connect.Response[v1.MergeStoresResponse], error)
+	// SealStore seals the active chunk of a store.
+	SealStore(context.Context, *connect.Request[v1.SealStoreRequest]) (*connect.Response[v1.SealStoreResponse], error)
 }
 
 // NewStoreServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -391,6 +409,12 @@ func NewStoreServiceHandler(svc StoreServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(storeServiceMethods.ByName("MergeStores")),
 		connect.WithHandlerOptions(opts...),
 	)
+	storeServiceSealStoreHandler := connect.NewUnaryHandler(
+		StoreServiceSealStoreProcedure,
+		svc.SealStore,
+		connect.WithSchema(storeServiceMethods.ByName("SealStore")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.StoreService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case StoreServiceListStoresProcedure:
@@ -419,6 +443,8 @@ func NewStoreServiceHandler(svc StoreServiceHandler, opts ...connect.HandlerOpti
 			storeServiceImportRecordsHandler.ServeHTTP(w, r)
 		case StoreServiceMergeStoresProcedure:
 			storeServiceMergeStoresHandler.ServeHTTP(w, r)
+		case StoreServiceSealStoreProcedure:
+			storeServiceSealStoreHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -478,4 +504,8 @@ func (UnimplementedStoreServiceHandler) ImportRecords(context.Context, *connect.
 
 func (UnimplementedStoreServiceHandler) MergeStores(context.Context, *connect.Request[v1.MergeStoresRequest]) (*connect.Response[v1.MergeStoresResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.StoreService.MergeStores is not implemented"))
+}
+
+func (UnimplementedStoreServiceHandler) SealStore(context.Context, *connect.Request[v1.SealStoreRequest]) (*connect.Response[v1.SealStoreResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.StoreService.SealStore is not implemented"))
 }

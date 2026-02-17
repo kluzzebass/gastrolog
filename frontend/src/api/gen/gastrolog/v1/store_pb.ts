@@ -329,6 +329,20 @@ export class ChunkMeta extends Message<ChunkMeta> {
    */
   bytes = protoInt64.zero;
 
+  /**
+   * true if raw.log/attr.log are compressed
+   *
+   * @generated from field: bool compressed = 7;
+   */
+  compressed = false;
+
+  /**
+   * actual on-disk size (may differ from bytes if compressed)
+   *
+   * @generated from field: int64 disk_bytes = 8;
+   */
+  diskBytes = protoInt64.zero;
+
   constructor(data?: PartialMessage<ChunkMeta>) {
     super();
     proto3.util.initPartial(data, this);
@@ -343,6 +357,8 @@ export class ChunkMeta extends Message<ChunkMeta> {
     { no: 4, name: "sealed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 5, name: "record_count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 6, name: "bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 7, name: "compressed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 8, name: "disk_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkMeta {
@@ -1612,6 +1628,74 @@ export class MergeStoresResponse extends Message<MergeStoresResponse> {
 
   static equals(a: MergeStoresResponse | PlainMessage<MergeStoresResponse> | undefined, b: MergeStoresResponse | PlainMessage<MergeStoresResponse> | undefined): boolean {
     return proto3.util.equals(MergeStoresResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.SealStoreRequest
+ */
+export class SealStoreRequest extends Message<SealStoreRequest> {
+  /**
+   * @generated from field: string store = 1;
+   */
+  store = "";
+
+  constructor(data?: PartialMessage<SealStoreRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SealStoreRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "store", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SealStoreRequest {
+    return new SealStoreRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SealStoreRequest {
+    return new SealStoreRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SealStoreRequest {
+    return new SealStoreRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SealStoreRequest | PlainMessage<SealStoreRequest> | undefined, b: SealStoreRequest | PlainMessage<SealStoreRequest> | undefined): boolean {
+    return proto3.util.equals(SealStoreRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.SealStoreResponse
+ */
+export class SealStoreResponse extends Message<SealStoreResponse> {
+  constructor(data?: PartialMessage<SealStoreResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SealStoreResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SealStoreResponse {
+    return new SealStoreResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SealStoreResponse {
+    return new SealStoreResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SealStoreResponse {
+    return new SealStoreResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SealStoreResponse | PlainMessage<SealStoreResponse> | undefined, b: SealStoreResponse | PlainMessage<SealStoreResponse> | undefined): boolean {
+    return proto3.util.equals(SealStoreResponse, a, b);
   }
 }
 

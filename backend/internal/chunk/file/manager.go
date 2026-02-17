@@ -100,12 +100,15 @@ type Manager struct {
 // chunkMeta holds in-memory metadata derived from idx.log.
 // No longer persisted to meta.bin.
 type chunkMeta struct {
-	id          chunk.ChunkID
-	startTS     time.Time // WriteTS of first record
-	endTS       time.Time // WriteTS of last record
-	recordCount int64     // Number of records in chunk
-	bytes       int64     // Total on-disk bytes (raw + attr + idx)
-	sealed      bool
+	id               chunk.ChunkID
+	startTS          time.Time // WriteTS of first record
+	endTS            time.Time // WriteTS of last record
+	recordCount      int64     // Number of records in chunk
+	bytes            int64     // Total logical bytes (data + non-data files)
+	logicalDataBytes int64     // Logical data bytes only (raw + attr + idx content)
+	sealed           bool
+	compressed       bool  // true if raw.log/attr.log are compressed
+	diskBytes        int64 // actual on-disk size (sum of all files)
 
 	// IngestTS and SourceTS bounds (zero = unknown).
 	ingestStart time.Time
@@ -122,6 +125,8 @@ func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
 		RecordCount: m.recordCount,
 		Bytes:       m.bytes,
 		Sealed:      m.sealed,
+		Compressed:  m.compressed,
+		DiskBytes:   m.diskBytes,
 		IngestStart: m.ingestStart,
 		IngestEnd:   m.ingestEnd,
 		SourceStart: m.sourceStart,
@@ -335,7 +340,9 @@ func (m *Manager) doAppend(record chunk.Record, preserveWriteTS bool) (chunk.Chu
 	m.active.attrOffset += attrLen
 	m.active.recordCount++
 	m.active.meta.recordCount = int64(m.active.recordCount)
-	m.active.meta.bytes = int64(m.active.rawOffset + m.active.attrOffset + m.active.recordCount*IdxEntrySize)
+	dataBytes := int64(m.active.rawOffset + m.active.attrOffset + m.active.recordCount*IdxEntrySize)
+	m.active.meta.logicalDataBytes = dataBytes
+	m.active.meta.bytes = dataBytes
 
 	// Update time bounds.
 	if m.active.meta.startTS.IsZero() {
@@ -730,7 +737,9 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 		}
 	}
 
-	meta.bytes = int64(rawOffset + attrOffset + recordCount*IdxEntrySize)
+	dataBytes := int64(rawOffset + attrOffset + recordCount*IdxEntrySize)
+	meta.logicalDataBytes = dataBytes
+	meta.bytes = dataBytes
 
 	m.active = &chunkState{
 		meta:        meta,
@@ -775,10 +784,26 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 	}
 	recordCount := RecordCount(info.Size())
 
+	// Check raw.log header for compression flag.
+	compressed := false
+	if sealed {
+		rawPath := m.rawLogPath(id)
+		if rawFile, err := os.Open(rawPath); err == nil {
+			var rawHeader [format.HeaderSize]byte
+			if _, err := io.ReadFull(rawFile, rawHeader[:]); err == nil {
+				if h, err := format.Decode(rawHeader[:]); err == nil {
+					compressed = h.Flags&format.FlagCompressed != 0
+				}
+			}
+			rawFile.Close()
+		}
+	}
+
 	meta := &chunkMeta{
 		id:          id,
 		recordCount: int64(recordCount),
 		sealed:      sealed,
+		compressed:  compressed,
 	}
 
 	if recordCount == 0 {
@@ -835,10 +860,19 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 		meta.sourceEnd = maxSrc
 	}
 
-	// Derive total bytes: end of raw data + end of attr data + idx entries.
+	// Derive logical data bytes: end of raw data + end of attr data + idx entries.
 	rawEnd := int64(lastEntry.RawOffset) + int64(lastEntry.RawSize)
 	attrEnd := int64(lastEntry.AttrOffset) + int64(lastEntry.AttrSize)
-	meta.bytes = rawEnd + attrEnd + int64(recordCount)*int64(IdxEntrySize)
+	logicalDataBytes := rawEnd + attrEnd + int64(recordCount)*int64(IdxEntrySize)
+	meta.logicalDataBytes = logicalDataBytes
+	meta.bytes = logicalDataBytes
+
+	// For sealed chunks, include all files in the directory so that bytes and
+	// diskBytes cover the same set of files (indexes cancel out in the ratio).
+	if sealed {
+		meta.bytes = m.computeTotalLogicalBytes(id, logicalDataBytes)
+		meta.diskBytes = m.computeDiskBytes(id)
+	}
 
 	return meta, nil
 }
@@ -1020,6 +1054,7 @@ func (m *Manager) sealLocked() error {
 	}
 
 	m.active.meta.sealed = true
+	id := m.active.meta.id
 
 	// Update sealed flag in all file headers.
 	if err := m.setSealedFlag(m.active.rawFile); err != nil {
@@ -1048,6 +1083,10 @@ func (m *Manager) sealLocked() error {
 	if err := m.active.dictFile.Close(); err != nil {
 		return err
 	}
+
+	// Compute directory-level sizes now that files are closed.
+	m.active.meta.bytes = m.computeTotalLogicalBytes(id, m.active.meta.logicalDataBytes)
+	m.active.meta.diskBytes = m.computeDiskBytes(id)
 
 	m.active = nil
 	return nil
@@ -1123,6 +1162,56 @@ func (m *Manager) Close() error {
 		return errs[0]
 	}
 	return nil
+}
+
+// computeDiskBytes sums the on-disk sizes of all files in the chunk directory.
+// This includes data files (potentially compressed) and index files.
+func (m *Manager) computeDiskBytes(id chunk.ChunkID) int64 {
+	entries, err := os.ReadDir(filepath.Join(m.cfg.Dir, id.String()))
+	if err != nil {
+		return 0
+	}
+	var total int64
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		total += info.Size()
+	}
+	return total
+}
+
+// computeTotalLogicalBytes returns the total logical size of a sealed chunk:
+// the logical data size (uncompressed raw + attr + idx content from offsets)
+// plus on-disk sizes of all other files (attr_dict, indexes) which aren't
+// compressed. This pairs with computeDiskBytes so that uncompressed files
+// appear on both sides of the compression ratio and cancel out.
+func (m *Manager) computeTotalLogicalBytes(id chunk.ChunkID, logicalDataBytes int64) int64 {
+	entries, err := os.ReadDir(filepath.Join(m.cfg.Dir, id.String()))
+	if err != nil {
+		return logicalDataBytes
+	}
+	total := logicalDataBytes
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		// Skip the three data files whose logical size is already in logicalDataBytes.
+		switch entry.Name() {
+		case rawLogFileName, attrLogFileName, idxLogFileName:
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		total += info.Size()
+	}
+	return total
 }
 
 func (m *Manager) chunkDir(id chunk.ChunkID) string {
@@ -1305,6 +1394,48 @@ func (m *Manager) CompressChunk(id chunk.ChunkID) error {
 	}
 	if err := compressFile(attrPath, m.zstdEnc, mode); err != nil {
 		return fmt.Errorf("compress attr.log: %w", err)
+	}
+
+	// Update in-memory meta to reflect compressed state.
+	m.mu.Lock()
+	if meta := m.metas[id]; meta != nil {
+		meta.compressed = true
+		meta.diskBytes = m.computeDiskBytes(id)
+	}
+	m.mu.Unlock()
+
+	return nil
+}
+
+// RefreshDiskSizes recomputes bytes and diskBytes for a sealed chunk from the
+// actual directory contents. Called after index builds add files to the chunk dir.
+func (m *Manager) RefreshDiskSizes(id chunk.ChunkID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	meta, ok := m.metas[id]
+	if !ok || !meta.sealed {
+		return
+	}
+	meta.bytes = m.computeTotalLogicalBytes(id, meta.logicalDataBytes)
+	meta.diskBytes = m.computeDiskBytes(id)
+}
+
+// SetCompressionEnabled enables or disables zstd compression for future seals.
+func (m *Manager) SetCompressionEnabled(enabled bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if enabled && m.zstdEnc == nil {
+		enc, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
+		if err != nil {
+			return fmt.Errorf("create zstd encoder: %w", err)
+		}
+		m.zstdEnc = enc
+		m.cfg.Compression = CompressionZstd
+	} else if !enabled && m.zstdEnc != nil {
+		m.zstdEnc.Close()
+		m.zstdEnc = nil
+		m.cfg.Compression = CompressionNone
 	}
 	return nil
 }

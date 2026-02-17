@@ -378,6 +378,8 @@ type ChunkMeta struct {
 	Sealed        bool                   `protobuf:"varint,4,opt,name=sealed,proto3" json:"sealed,omitempty"`
 	RecordCount   int64                  `protobuf:"varint,5,opt,name=record_count,json=recordCount,proto3" json:"record_count,omitempty"`
 	Bytes         int64                  `protobuf:"varint,6,opt,name=bytes,proto3" json:"bytes,omitempty"`
+	Compressed    bool                   `protobuf:"varint,7,opt,name=compressed,proto3" json:"compressed,omitempty"`                // true if raw.log/attr.log are compressed
+	DiskBytes     int64                  `protobuf:"varint,8,opt,name=disk_bytes,json=diskBytes,proto3" json:"disk_bytes,omitempty"` // actual on-disk size (may differ from bytes if compressed)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -450,6 +452,20 @@ func (x *ChunkMeta) GetRecordCount() int64 {
 func (x *ChunkMeta) GetBytes() int64 {
 	if x != nil {
 		return x.Bytes
+	}
+	return 0
+}
+
+func (x *ChunkMeta) GetCompressed() bool {
+	if x != nil {
+		return x.Compressed
+	}
+	return false
+}
+
+func (x *ChunkMeta) GetDiskBytes() int64 {
+	if x != nil {
+		return x.DiskBytes
 	}
 	return 0
 }
@@ -1965,6 +1981,86 @@ func (x *MergeStoresResponse) GetJobId() string {
 	return ""
 }
 
+type SealStoreRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Store         string                 `protobuf:"bytes,1,opt,name=store,proto3" json:"store,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SealStoreRequest) Reset() {
+	*x = SealStoreRequest{}
+	mi := &file_gastrolog_v1_store_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SealStoreRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SealStoreRequest) ProtoMessage() {}
+
+func (x *SealStoreRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_store_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SealStoreRequest.ProtoReflect.Descriptor instead.
+func (*SealStoreRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *SealStoreRequest) GetStore() string {
+	if x != nil {
+		return x.Store
+	}
+	return ""
+}
+
+type SealStoreResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SealStoreResponse) Reset() {
+	*x = SealStoreResponse{}
+	mi := &file_gastrolog_v1_store_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SealStoreResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SealStoreResponse) ProtoMessage() {}
+
+func (x *SealStoreResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_store_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SealStoreResponse.ProtoReflect.Descriptor instead.
+func (*SealStoreResponse) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{35}
+}
+
 var File_gastrolog_v1_store_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_store_proto_rawDesc = "" +
@@ -1989,14 +2085,19 @@ const file_gastrolog_v1_store_proto_rawDesc = "" +
 	"\x11ListChunksRequest\x12\x14\n" +
 	"\x05store\x18\x01 \x01(\tR\x05store\"E\n" +
 	"\x12ListChunksResponse\x12/\n" +
-	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\xd6\x01\n" +
+	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\x95\x02\n" +
 	"\tChunkMeta\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x125\n" +
 	"\bstart_ts\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\astartTs\x121\n" +
 	"\x06end_ts\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x05endTs\x12\x16\n" +
 	"\x06sealed\x18\x04 \x01(\bR\x06sealed\x12!\n" +
 	"\frecord_count\x18\x05 \x01(\x03R\vrecordCount\x12\x14\n" +
-	"\x05bytes\x18\x06 \x01(\x03R\x05bytes\"B\n" +
+	"\x05bytes\x18\x06 \x01(\x03R\x05bytes\x12\x1e\n" +
+	"\n" +
+	"compressed\x18\a \x01(\bR\n" +
+	"compressed\x12\x1d\n" +
+	"\n" +
+	"disk_bytes\x18\b \x01(\x03R\tdiskBytes\"B\n" +
 	"\x0fGetChunkRequest\x12\x14\n" +
 	"\x05store\x18\x01 \x01(\tR\x05store\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\tR\achunkId\"A\n" +
@@ -2113,7 +2214,10 @@ const file_gastrolog_v1_store_proto_rawDesc = "" +
 	"\x06source\x18\x01 \x01(\tR\x06source\x12 \n" +
 	"\vdestination\x18\x02 \x01(\tR\vdestination\",\n" +
 	"\x13MergeStoresResponse\x12\x15\n" +
-	"\x06job_id\x18\x03 \x01(\tR\x05jobId2\xc5\b\n" +
+	"\x06job_id\x18\x03 \x01(\tR\x05jobId\"(\n" +
+	"\x10SealStoreRequest\x12\x14\n" +
+	"\x05store\x18\x01 \x01(\tR\x05store\"\x13\n" +
+	"\x11SealStoreResponse2\x93\t\n" +
 	"\fStoreService\x12O\n" +
 	"\n" +
 	"ListStores\x12\x1f.gastrolog.v1.ListStoresRequest\x1a .gastrolog.v1.ListStoresResponse\x12I\n" +
@@ -2130,7 +2234,8 @@ const file_gastrolog_v1_store_proto_rawDesc = "" +
 	"\fMigrateStore\x12!.gastrolog.v1.MigrateStoreRequest\x1a\".gastrolog.v1.MigrateStoreResponse\x12T\n" +
 	"\vExportStore\x12 .gastrolog.v1.ExportStoreRequest\x1a!.gastrolog.v1.ExportStoreResponse0\x01\x12X\n" +
 	"\rImportRecords\x12\".gastrolog.v1.ImportRecordsRequest\x1a#.gastrolog.v1.ImportRecordsResponse\x12R\n" +
-	"\vMergeStores\x12 .gastrolog.v1.MergeStoresRequest\x1a!.gastrolog.v1.MergeStoresResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"\vMergeStores\x12 .gastrolog.v1.MergeStoresRequest\x1a!.gastrolog.v1.MergeStoresResponse\x12L\n" +
+	"\tSealStore\x12\x1e.gastrolog.v1.SealStoreRequest\x1a\x1f.gastrolog.v1.SealStoreResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_store_proto_rawDescOnce sync.Once
@@ -2144,7 +2249,7 @@ func file_gastrolog_v1_store_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_store_proto_rawDescData
 }
 
-var file_gastrolog_v1_store_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
+var file_gastrolog_v1_store_proto_msgTypes = make([]protoimpl.MessageInfo, 39)
 var file_gastrolog_v1_store_proto_goTypes = []any{
 	(*ListStoresRequest)(nil),     // 0: gastrolog.v1.ListStoresRequest
 	(*ListStoresResponse)(nil),    // 1: gastrolog.v1.ListStoresResponse
@@ -2180,33 +2285,35 @@ var file_gastrolog_v1_store_proto_goTypes = []any{
 	(*ImportRecordsResponse)(nil), // 31: gastrolog.v1.ImportRecordsResponse
 	(*MergeStoresRequest)(nil),    // 32: gastrolog.v1.MergeStoresRequest
 	(*MergeStoresResponse)(nil),   // 33: gastrolog.v1.MergeStoresResponse
-	nil,                           // 34: gastrolog.v1.IndexAnalysis.DetailsEntry
-	nil,                           // 35: gastrolog.v1.MigrateStoreRequest.DestinationParamsEntry
-	nil,                           // 36: gastrolog.v1.ExportRecord.AttrsEntry
-	(*timestamppb.Timestamp)(nil), // 37: google.protobuf.Timestamp
+	(*SealStoreRequest)(nil),      // 34: gastrolog.v1.SealStoreRequest
+	(*SealStoreResponse)(nil),     // 35: gastrolog.v1.SealStoreResponse
+	nil,                           // 36: gastrolog.v1.IndexAnalysis.DetailsEntry
+	nil,                           // 37: gastrolog.v1.MigrateStoreRequest.DestinationParamsEntry
+	nil,                           // 38: gastrolog.v1.ExportRecord.AttrsEntry
+	(*timestamppb.Timestamp)(nil), // 39: google.protobuf.Timestamp
 }
 var file_gastrolog_v1_store_proto_depIdxs = []int32{
 	2,  // 0: gastrolog.v1.ListStoresResponse.stores:type_name -> gastrolog.v1.StoreInfo
 	2,  // 1: gastrolog.v1.GetStoreResponse.store:type_name -> gastrolog.v1.StoreInfo
 	7,  // 2: gastrolog.v1.ListChunksResponse.chunks:type_name -> gastrolog.v1.ChunkMeta
-	37, // 3: gastrolog.v1.ChunkMeta.start_ts:type_name -> google.protobuf.Timestamp
-	37, // 4: gastrolog.v1.ChunkMeta.end_ts:type_name -> google.protobuf.Timestamp
+	39, // 3: gastrolog.v1.ChunkMeta.start_ts:type_name -> google.protobuf.Timestamp
+	39, // 4: gastrolog.v1.ChunkMeta.end_ts:type_name -> google.protobuf.Timestamp
 	7,  // 5: gastrolog.v1.GetChunkResponse.chunk:type_name -> gastrolog.v1.ChunkMeta
 	12, // 6: gastrolog.v1.GetIndexesResponse.indexes:type_name -> gastrolog.v1.IndexInfo
 	15, // 7: gastrolog.v1.AnalyzeChunkResponse.analyses:type_name -> gastrolog.v1.ChunkAnalysis
 	16, // 8: gastrolog.v1.ChunkAnalysis.indexes:type_name -> gastrolog.v1.IndexAnalysis
-	34, // 9: gastrolog.v1.IndexAnalysis.details:type_name -> gastrolog.v1.IndexAnalysis.DetailsEntry
-	37, // 10: gastrolog.v1.GetStatsResponse.oldest_record:type_name -> google.protobuf.Timestamp
-	37, // 11: gastrolog.v1.GetStatsResponse.newest_record:type_name -> google.protobuf.Timestamp
+	36, // 9: gastrolog.v1.IndexAnalysis.details:type_name -> gastrolog.v1.IndexAnalysis.DetailsEntry
+	39, // 10: gastrolog.v1.GetStatsResponse.oldest_record:type_name -> google.protobuf.Timestamp
+	39, // 11: gastrolog.v1.GetStatsResponse.newest_record:type_name -> google.protobuf.Timestamp
 	19, // 12: gastrolog.v1.GetStatsResponse.store_stats:type_name -> gastrolog.v1.StoreStats
-	37, // 13: gastrolog.v1.StoreStats.oldest_record:type_name -> google.protobuf.Timestamp
-	37, // 14: gastrolog.v1.StoreStats.newest_record:type_name -> google.protobuf.Timestamp
+	39, // 13: gastrolog.v1.StoreStats.oldest_record:type_name -> google.protobuf.Timestamp
+	39, // 14: gastrolog.v1.StoreStats.newest_record:type_name -> google.protobuf.Timestamp
 	24, // 15: gastrolog.v1.ValidateStoreResponse.chunks:type_name -> gastrolog.v1.ChunkValidation
-	35, // 16: gastrolog.v1.MigrateStoreRequest.destination_params:type_name -> gastrolog.v1.MigrateStoreRequest.DestinationParamsEntry
+	37, // 16: gastrolog.v1.MigrateStoreRequest.destination_params:type_name -> gastrolog.v1.MigrateStoreRequest.DestinationParamsEntry
 	29, // 17: gastrolog.v1.ExportStoreResponse.records:type_name -> gastrolog.v1.ExportRecord
-	37, // 18: gastrolog.v1.ExportRecord.source_ts:type_name -> google.protobuf.Timestamp
-	37, // 19: gastrolog.v1.ExportRecord.ingest_ts:type_name -> google.protobuf.Timestamp
-	36, // 20: gastrolog.v1.ExportRecord.attrs:type_name -> gastrolog.v1.ExportRecord.AttrsEntry
+	39, // 18: gastrolog.v1.ExportRecord.source_ts:type_name -> google.protobuf.Timestamp
+	39, // 19: gastrolog.v1.ExportRecord.ingest_ts:type_name -> google.protobuf.Timestamp
+	38, // 20: gastrolog.v1.ExportRecord.attrs:type_name -> gastrolog.v1.ExportRecord.AttrsEntry
 	29, // 21: gastrolog.v1.ImportRecordsRequest.records:type_name -> gastrolog.v1.ExportRecord
 	0,  // 22: gastrolog.v1.StoreService.ListStores:input_type -> gastrolog.v1.ListStoresRequest
 	3,  // 23: gastrolog.v1.StoreService.GetStore:input_type -> gastrolog.v1.GetStoreRequest
@@ -2221,21 +2328,23 @@ var file_gastrolog_v1_store_proto_depIdxs = []int32{
 	27, // 32: gastrolog.v1.StoreService.ExportStore:input_type -> gastrolog.v1.ExportStoreRequest
 	30, // 33: gastrolog.v1.StoreService.ImportRecords:input_type -> gastrolog.v1.ImportRecordsRequest
 	32, // 34: gastrolog.v1.StoreService.MergeStores:input_type -> gastrolog.v1.MergeStoresRequest
-	1,  // 35: gastrolog.v1.StoreService.ListStores:output_type -> gastrolog.v1.ListStoresResponse
-	4,  // 36: gastrolog.v1.StoreService.GetStore:output_type -> gastrolog.v1.GetStoreResponse
-	6,  // 37: gastrolog.v1.StoreService.ListChunks:output_type -> gastrolog.v1.ListChunksResponse
-	9,  // 38: gastrolog.v1.StoreService.GetChunk:output_type -> gastrolog.v1.GetChunkResponse
-	11, // 39: gastrolog.v1.StoreService.GetIndexes:output_type -> gastrolog.v1.GetIndexesResponse
-	14, // 40: gastrolog.v1.StoreService.AnalyzeChunk:output_type -> gastrolog.v1.AnalyzeChunkResponse
-	18, // 41: gastrolog.v1.StoreService.GetStats:output_type -> gastrolog.v1.GetStatsResponse
-	21, // 42: gastrolog.v1.StoreService.ReindexStore:output_type -> gastrolog.v1.ReindexStoreResponse
-	23, // 43: gastrolog.v1.StoreService.ValidateStore:output_type -> gastrolog.v1.ValidateStoreResponse
-	26, // 44: gastrolog.v1.StoreService.MigrateStore:output_type -> gastrolog.v1.MigrateStoreResponse
-	28, // 45: gastrolog.v1.StoreService.ExportStore:output_type -> gastrolog.v1.ExportStoreResponse
-	31, // 46: gastrolog.v1.StoreService.ImportRecords:output_type -> gastrolog.v1.ImportRecordsResponse
-	33, // 47: gastrolog.v1.StoreService.MergeStores:output_type -> gastrolog.v1.MergeStoresResponse
-	35, // [35:48] is the sub-list for method output_type
-	22, // [22:35] is the sub-list for method input_type
+	34, // 35: gastrolog.v1.StoreService.SealStore:input_type -> gastrolog.v1.SealStoreRequest
+	1,  // 36: gastrolog.v1.StoreService.ListStores:output_type -> gastrolog.v1.ListStoresResponse
+	4,  // 37: gastrolog.v1.StoreService.GetStore:output_type -> gastrolog.v1.GetStoreResponse
+	6,  // 38: gastrolog.v1.StoreService.ListChunks:output_type -> gastrolog.v1.ListChunksResponse
+	9,  // 39: gastrolog.v1.StoreService.GetChunk:output_type -> gastrolog.v1.GetChunkResponse
+	11, // 40: gastrolog.v1.StoreService.GetIndexes:output_type -> gastrolog.v1.GetIndexesResponse
+	14, // 41: gastrolog.v1.StoreService.AnalyzeChunk:output_type -> gastrolog.v1.AnalyzeChunkResponse
+	18, // 42: gastrolog.v1.StoreService.GetStats:output_type -> gastrolog.v1.GetStatsResponse
+	21, // 43: gastrolog.v1.StoreService.ReindexStore:output_type -> gastrolog.v1.ReindexStoreResponse
+	23, // 44: gastrolog.v1.StoreService.ValidateStore:output_type -> gastrolog.v1.ValidateStoreResponse
+	26, // 45: gastrolog.v1.StoreService.MigrateStore:output_type -> gastrolog.v1.MigrateStoreResponse
+	28, // 46: gastrolog.v1.StoreService.ExportStore:output_type -> gastrolog.v1.ExportStoreResponse
+	31, // 47: gastrolog.v1.StoreService.ImportRecords:output_type -> gastrolog.v1.ImportRecordsResponse
+	33, // 48: gastrolog.v1.StoreService.MergeStores:output_type -> gastrolog.v1.MergeStoresResponse
+	35, // 49: gastrolog.v1.StoreService.SealStore:output_type -> gastrolog.v1.SealStoreResponse
+	36, // [36:50] is the sub-list for method output_type
+	22, // [22:36] is the sub-list for method input_type
 	22, // [22:22] is the sub-list for extension type_name
 	22, // [22:22] is the sub-list for extension extendee
 	0,  // [0:22] is the sub-list for field type_name
@@ -2252,7 +2361,7 @@ func file_gastrolog_v1_store_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_store_proto_rawDesc), len(file_gastrolog_v1_store_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   37,
+			NumMessages:   39,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

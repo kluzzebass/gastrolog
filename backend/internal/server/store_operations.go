@@ -36,6 +36,30 @@ func (s *StoreServer) makeCleanupFunc(srcID uuid.UUID, srcFileDir string) func(c
 	}
 }
 
+// SealStore seals the active chunk of a store.
+func (s *StoreServer) SealStore(
+	ctx context.Context,
+	req *connect.Request[apiv1.SealStoreRequest],
+) (*connect.Response[apiv1.SealStoreResponse], error) {
+	if req.Msg.Store == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store required"))
+	}
+	storeID, connErr := parseUUID(req.Msg.Store)
+	if connErr != nil {
+		return nil, connErr
+	}
+
+	if !s.orch.StoreExists(storeID) {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
+	}
+
+	if err := s.orch.SealActive(storeID); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("seal active chunk: %w", err))
+	}
+
+	return connect.NewResponse(&apiv1.SealStoreResponse{}), nil
+}
+
 // ReindexStore rebuilds all indexes for sealed chunks in a store.
 // The work is submitted as an async job; the response contains the job ID.
 func (s *StoreServer) ReindexStore(

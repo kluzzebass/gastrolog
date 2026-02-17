@@ -71,7 +71,7 @@ export function FiltersSettings({ dark }: { dark: boolean }) {
     [filters],
   );
 
-  const { getEdit, setEdit, clearEdit } = useEditState(defaults);
+  const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
 
   const { handleSave: saveFilter, handleDelete } = useCrudHandlers({
     mutation: putFilter,
@@ -172,7 +172,7 @@ export function FiltersSettings({ dark }: { dark: boolean }) {
             footer={
               <PrimaryButton
                 onClick={() => handleSave(id)}
-                disabled={putFilter.isPending}
+                disabled={putFilter.isPending || !isDirty(id)}
               >
                 {putFilter.isPending ? "Saving..." : "Save"}
               </PrimaryButton>

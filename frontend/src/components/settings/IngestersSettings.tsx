@@ -47,7 +47,7 @@ export function IngestersSettings({ dark }: { dark: boolean }) {
     [ingesters],
   );
 
-  const { getEdit, setEdit, clearEdit } = useEditState(defaults);
+  const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
 
   const { handleSave: saveIngester, handleDelete } = useCrudHandlers({
     mutation: putIngester,
@@ -196,7 +196,7 @@ export function IngestersSettings({ dark }: { dark: boolean }) {
                     type: ing.type,
                   })
                 }
-                disabled={putIngester.isPending}
+                disabled={putIngester.isPending || !isDirty(ing.id)}
               >
                 {putIngester.isPending ? "Saving..." : "Save"}
               </PrimaryButton>

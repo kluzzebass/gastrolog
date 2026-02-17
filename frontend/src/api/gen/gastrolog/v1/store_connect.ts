@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { AnalyzeChunkRequest, AnalyzeChunkResponse, ExportStoreRequest, ExportStoreResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetStatsRequest, GetStatsResponse, GetStoreRequest, GetStoreResponse, ImportRecordsRequest, ImportRecordsResponse, ListChunksRequest, ListChunksResponse, ListStoresRequest, ListStoresResponse, MergeStoresRequest, MergeStoresResponse, MigrateStoreRequest, MigrateStoreResponse, ReindexStoreRequest, ReindexStoreResponse, ValidateStoreRequest, ValidateStoreResponse } from "./store_pb.js";
+import { AnalyzeChunkRequest, AnalyzeChunkResponse, ExportStoreRequest, ExportStoreResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetStatsRequest, GetStatsResponse, GetStoreRequest, GetStoreResponse, ImportRecordsRequest, ImportRecordsResponse, ListChunksRequest, ListChunksResponse, ListStoresRequest, ListStoresResponse, MergeStoresRequest, MergeStoresResponse, MigrateStoreRequest, MigrateStoreResponse, ReindexStoreRequest, ReindexStoreResponse, SealStoreRequest, SealStoreResponse, ValidateStoreRequest, ValidateStoreResponse } from "./store_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -157,6 +157,17 @@ export const StoreService = {
       name: "MergeStores",
       I: MergeStoresRequest,
       O: MergeStoresResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * SealStore seals the active chunk of a store.
+     *
+     * @generated from rpc gastrolog.v1.StoreService.SealStore
+     */
+    sealStore: {
+      name: "SealStore",
+      I: SealStoreRequest,
+      O: SealStoreResponse,
       kind: MethodKind.Unary,
     },
   }

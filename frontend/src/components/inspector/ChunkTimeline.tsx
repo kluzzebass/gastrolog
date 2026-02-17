@@ -37,6 +37,8 @@ export function ChunkTimeline({
           sealed: chunk.sealed,
           recordCount: chunk.recordCount,
           bytes: chunk.bytes,
+          compressed: chunk.compressed,
+          diskBytes: chunk.diskBytes,
         };
       })
       .filter(Boolean) as {
@@ -46,6 +48,8 @@ export function ChunkTimeline({
       sealed: boolean;
       recordCount: bigint;
       bytes: bigint;
+      compressed: boolean;
+      diskBytes: bigint;
     }[];
 
     if (parsed.length === 0) return { bars: [], ticks: [] };
@@ -272,6 +276,8 @@ function ChunkTooltip({
     sealed: boolean;
     recordCount: bigint;
     bytes: bigint;
+    compressed: boolean;
+    diskBytes: bigint;
   };
   dark: boolean;
 }) {
@@ -279,6 +285,13 @@ function ChunkTooltip({
   const start = new Date(chunk.start);
   const end = new Date(chunk.end);
   const duration = chunk.end - chunk.start;
+
+  const logicalBytes = Number(chunk.bytes);
+  const diskBytes = Number(chunk.diskBytes);
+  const showCompression = chunk.compressed && diskBytes > 0 && logicalBytes > 0;
+  const reductionPct = showCompression
+    ? Math.round((1 - diskBytes / logicalBytes) * 100)
+    : 0;
 
   return (
     <div
@@ -302,9 +315,14 @@ function ChunkTooltip({
             active
           </span>
         )}
+        {chunk.compressed && (
+          <span className="px-1.5 py-0.5 text-[0.85em] rounded bg-severity-info/15 text-severity-info">
+            compressed
+          </span>
+        )}
       </div>
       <div
-        className={`flex gap-4 ${c("text-text-muted", "text-light-text-muted")}`}
+        className={`flex gap-4 flex-wrap ${c("text-text-muted", "text-light-text-muted")}`}
       >
         <span>
           {formatTimeShort(start)} &rarr; {formatTimeShort(end)}
@@ -313,7 +331,12 @@ function ChunkTooltip({
         <span className="font-mono">
           {Number(chunk.recordCount).toLocaleString()} records
         </span>
-        <span className="font-mono">{formatBytes(Number(chunk.bytes))}</span>
+        <span className="font-mono">{formatBytes(logicalBytes)}</span>
+        {showCompression && (
+          <span className="font-mono">
+            {formatBytes(logicalBytes)} &rarr; {formatBytes(diskBytes)} ({reductionPct}% reduction)
+          </span>
+        )}
       </div>
     </div>
   );

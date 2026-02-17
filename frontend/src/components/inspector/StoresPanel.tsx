@@ -8,6 +8,7 @@ import {
   useValidateStore,
 } from "../../api/hooks";
 import { useToast } from "../Toast";
+import type { ChunkMeta } from "../../api/gen/gastrolog/v1/store_pb";
 import { formatBytes } from "../../utils/units";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { ChunkTimeline } from "./ChunkTimeline";
@@ -170,7 +171,7 @@ function ChunkList({ storeId, dark }: { storeId: string; dark: boolean }) {
 
       {/* Column headers */}
       <div
-        className={`grid grid-cols-[1fr_2fr_4rem_5rem_5rem] gap-3 px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c(
+        className={`grid grid-cols-[1fr_2fr_6rem_5rem_5rem] gap-3 px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c(
           "text-text-ghost border-ink-border-subtle",
           "text-light-text-ghost border-light-border-subtle",
         )}`}
@@ -194,7 +195,7 @@ function ChunkList({ storeId, dark }: { storeId: string; dark: boolean }) {
             className={`border-b last:border-b-0 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
           >
             <div
-              className={`grid grid-cols-[1fr_2fr_4rem_5rem_5rem] gap-3 px-4 py-2 text-[0.85em] cursor-pointer transition-colors ${c(
+              className={`grid grid-cols-[1fr_2fr_6rem_5rem_5rem] gap-3 px-4 py-2 text-[0.85em] cursor-pointer transition-colors ${c(
                 "hover:bg-ink-hover",
                 "hover:bg-light-hover",
               )} ${isExpanded ? c("bg-ink-hover", "bg-light-hover") : ""}`}
@@ -219,7 +220,7 @@ function ChunkList({ storeId, dark }: { storeId: string; dark: boolean }) {
                 </span>
                 {end ? formatTime(end) : "\u2014"}
               </span>
-              <span>
+              <span className="flex items-center gap-1 flex-wrap">
                 {chunk.sealed ? (
                   <span className="px-1.5 py-0.5 text-[0.8em] rounded bg-copper/15 text-copper">
                     sealed
@@ -227,6 +228,11 @@ function ChunkList({ storeId, dark }: { storeId: string; dark: boolean }) {
                 ) : (
                   <span className="px-1.5 py-0.5 text-[0.8em] rounded bg-severity-info/15 text-severity-info">
                     active
+                  </span>
+                )}
+                {chunk.compressed && (
+                  <span className="px-1.5 py-0.5 text-[0.8em] rounded bg-severity-info/15 text-severity-info">
+                    zstd
                   </span>
                 )}
               </span>
@@ -237,14 +243,19 @@ function ChunkList({ storeId, dark }: { storeId: string; dark: boolean }) {
               </span>
               <span
                 className={`text-right font-mono ${c("text-text-muted", "text-light-text-muted")}`}
+                title={chunk.compressed && Number(chunk.diskBytes) > 0
+                  ? `${formatBytes(Number(chunk.bytes))} → ${formatBytes(Number(chunk.diskBytes))} on disk`
+                  : undefined}
               >
-                {formatBytes(Number(chunk.bytes))}
+                {chunk.compressed && Number(chunk.diskBytes) > 0
+                  ? formatBytes(Number(chunk.diskBytes))
+                  : formatBytes(Number(chunk.bytes))}
               </span>
             </div>
 
             {/* Expanded: index info */}
             {isExpanded && (
-              <ChunkDetail storeId={storeId} chunkId={chunk.id} dark={dark} />
+              <ChunkDetail storeId={storeId} chunk={chunk} dark={dark} />
             )}
           </div>
         );
@@ -255,18 +266,52 @@ function ChunkList({ storeId, dark }: { storeId: string; dark: boolean }) {
 
 function ChunkDetail({
   storeId,
-  chunkId,
+  chunk,
   dark,
 }: {
   storeId: string;
-  chunkId: string;
+  chunk: ChunkMeta;
   dark: boolean;
 }) {
   const c = useThemeClass(dark);
-  const { data, isLoading } = useIndexes(storeId, chunkId);
+  const { data, isLoading } = useIndexes(storeId, chunk.id);
+
+  const logicalBytes = Number(chunk.bytes);
+  const diskBytes = Number(chunk.diskBytes);
+  const showCompression = chunk.compressed && diskBytes > 0 && logicalBytes > 0;
+  const reductionPct = showCompression
+    ? Math.round((1 - diskBytes / logicalBytes) * 100)
+    : 0;
 
   return (
     <div className={`px-4 py-3 ${c("bg-ink-raised", "bg-light-bg")}`}>
+      {/* Compression info */}
+      {showCompression && (
+        <div className="mb-3">
+          <div
+            className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1.5 ${c("text-text-ghost", "text-light-text-ghost")}`}
+          >
+            Compression
+          </div>
+          <div className={`flex items-center gap-3 text-[0.85em]`}>
+            <span className="px-1.5 py-0.5 text-[0.8em] rounded bg-severity-info/15 text-severity-info">
+              zstd
+            </span>
+            <span
+              className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}
+            >
+              {formatBytes(logicalBytes)} &rarr; {formatBytes(diskBytes)}
+            </span>
+            <span
+              className={`font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+            >
+              {reductionPct}% reduction
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Indexes */}
       <div
         className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
       >

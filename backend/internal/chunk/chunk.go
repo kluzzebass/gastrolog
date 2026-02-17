@@ -86,6 +86,15 @@ type ChunkCompressor interface {
 	// CompressChunk compresses the data files of a sealed chunk.
 	// No-op if compression is not enabled or the chunk is already compressed.
 	CompressChunk(id ChunkID) error
+
+	// SetCompressionEnabled enables or disables compression for future seals.
+	// When enabled, uses zstd compression. Safe to call at any time.
+	SetCompressionEnabled(enabled bool) error
+
+	// RefreshDiskSizes recomputes Bytes and DiskBytes for a sealed chunk
+	// from the actual directory contents. Call after index builds or other
+	// operations that add/remove files in the chunk directory.
+	RefreshDiskSizes(id ChunkID)
 }
 
 // RecordCursor provides bidirectional iteration over records in a chunk.

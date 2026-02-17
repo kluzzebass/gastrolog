@@ -4,6 +4,7 @@ import {
   useConfig,
   usePutStore,
   useDeleteStore,
+  useSealStore,
   useReindexStore,
   useMigrateStore,
   useMergeStores,
@@ -88,6 +89,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
   const { data: config, isLoading } = useConfig();
   const putStore = usePutStore();
   const deleteStore = useDeleteStore();
+  const seal = useSealStore();
   const reindex = useReindexStore();
   const migrate = useMigrateStore();
   const merge = useMergeStores();
@@ -155,7 +157,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
     [stores],
   );
 
-  const { getEdit, setEdit, clearEdit } = useEditState(defaults);
+  const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
 
   const { handleSave: saveStore, handleDelete } = useCrudHandlers({
     mutation: putStore,
@@ -383,6 +385,24 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                     "border-ink-border-subtle text-text-muted hover:bg-ink-hover",
                     "border-light-border-subtle text-light-text-muted hover:bg-light-hover",
                   )}`}
+                  disabled={seal.isPending || !!activeJob}
+                  onClick={async () => {
+                    try {
+                      await seal.mutateAsync(store.id);
+                      addToast("Active chunk sealed", "info");
+                    } catch (err: any) {
+                      addToast(err.message ?? "Seal failed", "error");
+                    }
+                  }}
+                >
+                  {seal.isPending ? "Sealing..." : "Seal"}
+                </button>
+                <button
+                  type="button"
+                  className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
+                    "border-ink-border-subtle text-text-muted hover:bg-ink-hover",
+                    "border-light-border-subtle text-light-text-muted hover:bg-light-hover",
+                  )}`}
                   disabled={reindex.isPending || !!activeJob}
                   onClick={async () => {
                     try {
@@ -449,7 +469,7 @@ export function StoresSettings({ dark }: { dark: boolean }) {
                       type: store.type,
                     })
                   }
-                  disabled={putStore.isPending}
+                  disabled={putStore.isPending || !isDirty(store.id)}
                 >
                   {putStore.isPending ? "Saving..." : "Save"}
                 </PrimaryButton>

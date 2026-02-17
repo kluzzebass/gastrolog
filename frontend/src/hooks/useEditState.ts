@@ -44,5 +44,14 @@ export function useEditState<T extends Record<string, any>>(
     });
   }, []);
 
-  return { getEdit, setEdit, clearEdit };
+  const isDirty = useCallback(
+    (id: string): boolean => {
+      if (!edits[id]) return false;
+      const def = defaults(id);
+      return JSON.stringify(edits[id]) !== JSON.stringify(def);
+    },
+    [edits, defaults],
+  );
+
+  return { getEdit, setEdit, clearEdit, isDirty };
 }

@@ -108,8 +108,20 @@ func (o *Orchestrator) scheduleIndexBuild(registryKey uuid.UUID, chunkID chunk.C
 		return
 	}
 
+	// Wrap the index build to refresh chunk disk sizes afterward,
+	// since index files are written into the chunk directory.
+	buildFn := func(ctx context.Context, id chunk.ChunkID) error {
+		if err := store.Indexes.BuildIndexes(ctx, id); err != nil {
+			return err
+		}
+		if compressor, ok := store.Chunks.(chunk.ChunkCompressor); ok {
+			compressor.RefreshDiskSizes(id)
+		}
+		return nil
+	}
+
 	name := fmt.Sprintf("index-build:%s:%s", registryKey, chunkID)
-	if err := o.scheduler.RunOnce(name, store.Indexes.BuildIndexes, context.Background(), chunkID); err != nil {
+	if err := o.scheduler.RunOnce(name, buildFn, context.Background(), chunkID); err != nil {
 		o.logger.Warn("failed to schedule index build", "name", name, "error", err)
 	}
 	o.scheduler.Describe(name, fmt.Sprintf("Build indexes for chunk %s", chunkID))

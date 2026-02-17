@@ -48,6 +48,9 @@ service StoreService {
   // MergeStores copies all records from a source store into a destination store,
   // then deletes the source.
   rpc MergeStores(MergeStoresRequest) returns (MergeStoresResponse);
+
+  // SealStore seals the active chunk of a store.
+  rpc SealStore(SealStoreRequest) returns (SealStoreResponse);
 }
 
 message ListStoresRequest {}
@@ -89,6 +92,8 @@ message ChunkMeta {
   bool sealed = 4;
   int64 record_count = 5;
   int64 bytes = 6;
+  bool compressed = 7;    // true if raw.log/attr.log are compressed
+  int64 disk_bytes = 8;   // actual on-disk size (may differ from bytes if compressed)
 }
 
 message GetChunkRequest {
@@ -246,3 +251,9 @@ message MergeStoresRequest {
 message MergeStoresResponse {
   string job_id = 3;
 }
+
+message SealStoreRequest {
+  string store = 1;
+}
+
+message SealStoreResponse {}

@@ -4,6 +4,7 @@ export {
   useChunks,
   useIndexes,
   useStats,
+  useSealStore,
   useReindexStore,
   useValidateStore,
   useMigrateStore,

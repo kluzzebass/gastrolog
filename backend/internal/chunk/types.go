@@ -187,8 +187,10 @@ type ChunkMeta struct {
 	StartTS     time.Time
 	EndTS       time.Time
 	RecordCount int64
-	Bytes       int64 // Total on-disk bytes (raw + attr + idx)
+	Bytes       int64 // Total logical bytes (raw + attr + idx)
 	Sealed      bool
+	Compressed  bool  // true if raw.log/attr.log are compressed
+	DiskBytes   int64 // actual on-disk size (may differ from Bytes if compressed)
 
 	// IngestTS and SourceTS bounds (zero = unknown).
 	// Used to filter chunks by ingest_start/ingest_end and source_start/source_end
