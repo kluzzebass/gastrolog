@@ -24,12 +24,16 @@ Combine filters with boolean logic. AND binds tighter than OR.
 
 ## Glob Patterns
 
-Match against tokenized words using shell-style glob patterns. Case-insensitive.
+Match against words using shell-style glob patterns. Case-insensitive. Metacharacters: `*` (any characters), `?` (single character), `[abc]` (character class).
 
-- `error*` — tokens starting with "error" (error, errors, error123)
-- `*timeout` — tokens ending with "timeout" (connection_timeout, timeout)
+- `error*` — words starting with "error" (error, errors, error123)
+- `*timeout` — words ending with "timeout" (connection_timeout, timeout)
 - `err?r` — single character wildcard (error, errir)
 - `[Ee]rror` — character class (Error, error)
+
+The pattern must match the **entire** word, not a substring. `*` matches zero or more characters but does not imply a trailing wildcard. For example, `com*con` matches `com.example.con` but **not** `com.example.controller` — use `com*con*` or `com*controller` for that.
+
+Globs match against individual tokens first, then fall back to whitespace-delimited words in the raw log line. This means dotted identifiers like `com.example.controller` can be matched as a whole — `com*controller` works even though the token index splits it into separate tokens.
 
 Globs work in key=value positions too:
 
