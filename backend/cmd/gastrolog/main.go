@@ -11,7 +11,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"log/slog"
@@ -46,16 +45,13 @@ import (
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/server"
+
+	"github.com/spf13/cobra"
 )
 
-func main() {
-	homeFlag := flag.String("home", "", "home directory (default: platform config dir)")
-	configType := flag.String("config-type", "sqlite", "config store type: sqlite, json, or memory")
-	pprofAddr := flag.String("pprof", "", "pprof HTTP server address (e.g. localhost:6060)")
-	serverAddr := flag.String("server", ":4564", "Connect RPC server address (empty to disable)")
-	bootstrapFlag := flag.Bool("bootstrap", false, "bootstrap with default config (memory store + chatterbox)")
-	flag.Parse()
+var version = "dev"
 
+func main() {
 	// Create base logger with ComponentFilterHandler for dynamic log level control.
 	baseHandler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelDebug, // Allow all levels; filtering done by ComponentFilterHandler
@@ -63,20 +59,57 @@ func main() {
 	filterHandler := logging.NewComponentFilterHandler(baseHandler, slog.LevelInfo)
 	logger := slog.New(filterHandler)
 
-	if *pprofAddr != "" {
-		go func() {
-			logger.Info("pprof server listening", "addr", *pprofAddr)
-			if err := http.ListenAndServe(*pprofAddr, nil); err != nil {
-				logger.Error("pprof server error", "error", err)
+	rootCmd := &cobra.Command{
+		Use:   "gastrolog",
+		Short: "Log aggregation service",
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			pprofAddr, _ := cmd.Flags().GetString("pprof")
+			if pprofAddr != "" {
+				go func() {
+					logger.Info("pprof server listening", "addr", pprofAddr)
+					if err := http.ListenAndServe(pprofAddr, nil); err != nil {
+						logger.Error("pprof server error", "error", err)
+					}
+				}()
 			}
-		}()
+			return nil
+		},
 	}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer cancel()
+	rootCmd.PersistentFlags().String("home", "", "home directory (default: platform config dir)")
+	rootCmd.PersistentFlags().String("config-type", "sqlite", "config store type: sqlite, json, or memory")
+	rootCmd.PersistentFlags().String("pprof", "", "pprof HTTP server address (e.g. localhost:6060)")
 
-	if err := run(ctx, logger, *homeFlag, *configType, *serverAddr, *bootstrapFlag); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+	serverCmd := &cobra.Command{
+		Use:   "server",
+		Short: "Run the Connect RPC server",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			homeFlag, _ := cmd.Flags().GetString("home")
+			configType, _ := cmd.Flags().GetString("config-type")
+			serverAddr, _ := cmd.Flags().GetString("addr")
+			bootstrap, _ := cmd.Flags().GetBool("bootstrap")
+
+			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+			defer cancel()
+
+			return run(ctx, logger, homeFlag, configType, serverAddr, bootstrap)
+		},
+	}
+
+	serverCmd.Flags().String("addr", ":4564", "Connect RPC server address (empty to disable)")
+	serverCmd.Flags().Bool("bootstrap", false, "bootstrap with default config (memory store + chatterbox)")
+
+	versionCmd := &cobra.Command{
+		Use:   "version",
+		Short: "Print version information",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Println(version)
+		},
+	}
+
+	rootCmd.AddCommand(serverCmd, versionCmd)
+
+	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
 }

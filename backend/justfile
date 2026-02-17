@@ -10,24 +10,22 @@ build:
 
 # Runs the gastrolog backend with sqlite config (default).
 run-sqlite:
-  go run ./cmd/gastrolog -home data
+  go run ./cmd/gastrolog server --home data
 
 # Runs the gastrolog backend with json config.
 run-json:
-  go run ./cmd/gastrolog -config-type json -home data
+  go run ./cmd/gastrolog server --config-type json --home data
 
 # Runs the gastrolog backend with in-memory config (no persistence).
 run-memory:
-  go run ./cmd/gastrolog -config-type memory
+  go run ./cmd/gastrolog server --config-type memory
 
 alias run := run-sqlite
 
 # Runs the gastrolog backend with full bootstrap (memory store + chatterbox).
 run-bootstrap:
-  go run ./cmd/gastrolog -bootstrap -home data
+  go run ./cmd/gastrolog server --bootstrap --home data
 
 # Runs the gastrolog backend with pprof server.
 pprof:
-  go run ./cmd/gastrolog -pprof localhost:6060
-
-
+  go run ./cmd/gastrolog server --pprof localhost:6060

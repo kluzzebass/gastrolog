@@ -22,12 +22,13 @@ go mod tidy                                       # Clean dependencies
 just run                    # Server with SQLite config (default)
 just run-json               # Server with JSON config
 just run-memory             # Server with in-memory config (no persistence)
+just run-bootstrap          # Server with full bootstrap (memory + chatterbox)
 just pprof                  # Server + pprof on :6060
 ```
 
 The server listens on `:4564` by default (Connect RPC / gRPC-Web).
 
-CLI flags: `-home <path>`, `-config-type <sqlite|json|memory>`, `-server`, `-pprof <addr>`.
+CLI: `gastrolog server [flags]`. Global flags: `--home`, `--config-type`, `--pprof`. Server flags: `--addr`, `--bootstrap`.
 
 ## Proto Generation
 
