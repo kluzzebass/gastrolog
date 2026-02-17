@@ -146,6 +146,8 @@ export function useSearch() {
         setState((prev) => ({
           ...prev,
           isSearching: false,
+          hasMore: false,
+          resumeToken: null,
           error: err instanceof Error ? err : new Error(String(err)),
         }));
       }

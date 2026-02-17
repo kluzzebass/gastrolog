@@ -36,6 +36,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map(),
   );
+  const toastsRef = useRef(toasts);
+  toastsRef.current = toasts;
 
   const dismissToast = useCallback((id: string) => {
     const timer = timersRef.current.get(id);
@@ -48,6 +50,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
   const addToast = useCallback(
     (message: string, level: ToastLevel = "error") => {
+      // Deduplicate: skip if a toast with the same message and level already exists.
+      if (toastsRef.current.some((t) => t.message === message && t.level === level)) {
+        return;
+      }
+
       const id = `toast-${++nextId}`;
       const toast: Toast = { id, message, level, createdAt: Date.now() };
       setToasts((prev) => [...prev, toast]);
