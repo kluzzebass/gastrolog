@@ -79,7 +79,7 @@ Key-value matching is case-insensitive.
 
 ## Time Bounds
 
-Filter by timestamp. Accepts RFC 3339 format (e.g., `2024-01-15T08:00:00Z`) or Unix timestamps (seconds since epoch).
+Filter by timestamp. Values are resolved in the browser using your local timezone.
 
 | Filter | Bounds on | Description |
 |--------|-----------|-------------|
@@ -91,6 +91,21 @@ Filter by timestamp. Accepts RFC 3339 format (e.g., `2024-01-15T08:00:00Z`) or U
 | `ingest_end=TIME` | IngestTS | Upper bound on ingester receive time |
 
 WriteTS bounds (`start`/`end`) are used for [chunk](help:general-concepts) selection — chunks outside the time range are skipped entirely. SourceTS and IngestTS bounds are applied as runtime filters on individual records.
+
+| Format | Examples | Notes |
+|--------|----------|-------|
+| Keywords | `start=yesterday`, `start=today`, `start=tomorrow`, `start=now` | |
+| Relative | `start="3 hours ago"`, `start="2 days ago"` | Seconds, minutes, hours, days, weeks, months, years |
+| Time only | `start=08:00` | Today at that time |
+| Period keywords | `start="this morning"`, `start="this afternoon"`, `start="this evening"` | 06:00, 12:00, 18:00 |
+| Last day-of-week | `start="last monday"` | Most recent occurrence at 00:00 |
+| Date only | `start=2024-01-15` | Midnight local time |
+| Date + time | `start=2024-01-15T08:00` | No timezone suffix = local time |
+| Locale dates | `start="1/15/2024"` | MDY or DMY based on browser locale |
+| RFC 3339 | `start=2024-01-15T08:00:00Z` | Passed through as-is |
+| Unix timestamp | `start=1705312800` | Seconds since epoch, passed through |
+
+Multi-word values must be quoted: `start="3 hours ago"`. Single-word values like `start=yesterday` or `start=08:00` do not need quotes. Slash dates must also be quoted since `/` is the regex delimiter.
 
 ## Result Control
 

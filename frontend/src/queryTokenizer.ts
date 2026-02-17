@@ -32,7 +32,7 @@ export type HighlightRole =
   | "whitespace"
   | "error";
 
-interface QueryToken {
+export interface QueryToken {
   text: string;
   pos: number;
   kind: QueryTokenKind;
@@ -57,7 +57,7 @@ export const DIRECTIVES = new Set([
 ]);
 
 // Phase 1: Raw lexing — character scan producing tokens with whitespace preserved.
-function lex(input: string): QueryToken[] {
+export function lex(input: string): QueryToken[] {
   const tokens: QueryToken[] = [];
   let pos = 0;
 

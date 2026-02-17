@@ -26,6 +26,7 @@ import {
   injectStore,
   buildSeverityExpr,
 } from "./utils/queryHelpers";
+import { normalizeTimeDirectives } from "./utils/normalizeTimeDirectives";
 import { useThemeSync } from "./hooks/useThemeSync";
 import { useThemeClass } from "./hooks/useThemeClass";
 import { useDialogState } from "./hooks/useDialogState";
@@ -359,14 +360,15 @@ function AppContent() {
     // Always search from the search route.
     setShowHistory(false);
     setShowSavedQueries(false);
-    if (draft === q && !isFollowMode) {
+    const normalized = normalizeTimeDirectives(draft);
+    if (normalized === q && !isFollowMode) {
       // Query unchanged — re-run the search directly since the URL
       // won't change and the effect won't fire.
       search(q);
       fetchHistogram(q);
       if (showPlan) explain(q);
     } else {
-      navigate({ to: "/search", search: { q: draft }, replace: false });
+      navigate({ to: "/search", search: { q: normalized }, replace: false });
     }
   };
 
