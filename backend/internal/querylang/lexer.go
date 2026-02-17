@@ -4,6 +4,9 @@ import (
 	"strings"
 )
 
+// Regex delimiters used by the lexer.
+const regexDelimiter = '/'
+
 // TokenKind identifies the type of lexical token.
 type TokenKind int
 
@@ -17,6 +20,7 @@ const (
 	TokRParen           // )
 	TokEq               // =
 	TokStar             // *
+	TokRegex            // /pattern/ (regex literal, slashes stripped)
 )
 
 func (k TokenKind) String() string {
@@ -39,6 +43,8 @@ func (k TokenKind) String() string {
 		return "="
 	case TokStar:
 		return "*"
+	case TokRegex:
+		return "REGEX"
 	default:
 		return "UNKNOWN"
 	}
@@ -89,6 +95,8 @@ func (l *Lexer) Next() (Token, error) {
 		return Token{Kind: TokStar, Lit: "*", Pos: startPos}, nil
 	case '"', '\'':
 		return l.scanQuotedString(ch)
+	case regexDelimiter:
+		return l.scanRegex()
 	}
 
 	// Bareword (may be keyword)
@@ -174,13 +182,43 @@ func (l *Lexer) scanBareword() (Token, error) {
 	return Token{Kind: kind, Lit: lit, Pos: startPos}, nil
 }
 
+// scanRegex scans a regex literal delimited by forward slashes.
+// The pattern between slashes is returned as the token literal (slashes stripped).
+// Escaped slashes (\/) within the pattern are unescaped.
+func (l *Lexer) scanRegex() (Token, error) {
+	startPos := l.pos
+	l.pos++ // skip opening /
+
+	var sb strings.Builder
+	for l.pos < len(l.input) {
+		ch := l.input[l.pos]
+
+		if ch == regexDelimiter {
+			l.pos++ // skip closing /
+			return Token{Kind: TokRegex, Lit: sb.String(), Pos: startPos}, nil
+		}
+
+		if ch == '\\' && l.pos+1 < len(l.input) && l.input[l.pos+1] == regexDelimiter {
+			// Escaped slash: \/ → /
+			sb.WriteByte('/')
+			l.pos += 2
+			continue
+		}
+
+		sb.WriteByte(ch)
+		l.pos++
+	}
+
+	return Token{}, newParseError(startPos, ErrUnterminatedRegex, "unterminated regex starting at position %d", startPos)
+}
+
 // isBarewordChar returns true if ch can be part of a bareword.
-// Barewords exclude: whitespace, ()=*"'
+// Barewords exclude: whitespace, ()=*"'/
 func isBarewordChar(ch byte) bool {
 	switch ch {
 	case ' ', '\t', '\n', '\r':
 		return false
-	case '(', ')', '=', '*', '"', '\'':
+	case '(', ')', '=', '*', '"', '\'', '/':
 		return false
 	default:
 		return true

@@ -15,6 +15,9 @@ const (
 
 	// PredValueExists represents a value existence check: "*=error"
 	PredValueExists
+
+	// PredRegex represents a regex match against the raw log line: /pattern/
+	PredRegex
 )
 
 func (k PredicateKind) String() string {
@@ -27,6 +30,8 @@ func (k PredicateKind) String() string {
 		return "key_exists"
 	case PredValueExists:
 		return "value_exists"
+	case PredRegex:
+		return "regex"
 	default:
 		return "unknown"
 	}

@@ -8,7 +8,9 @@ import (
 // Lexer errors.
 var (
 	ErrUnterminatedString = errors.New("unterminated string")
+	ErrUnterminatedRegex  = errors.New("unterminated regex")
 	ErrInvalidEscape      = errors.New("invalid escape sequence")
+	ErrInvalidRegex       = errors.New("invalid regex")
 )
 
 // Parser errors.

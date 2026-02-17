@@ -264,6 +264,63 @@ describe("validation: invalid queries", () => {
   });
 });
 
+describe("regex literals", () => {
+  test("basic regex", () => {
+    expect(spans("/error\\d+/")).toEqual([["/error\\d+/", "regex"]]);
+  });
+
+  test("regex roundtrip", () => {
+    roundtrip("/error\\d+/");
+    roundtrip("/pattern/");
+    roundtrip("/path\\/to\\/file/");
+  });
+
+  test("regex with escaped slash", () => {
+    expect(spans("/path\\/to/")).toEqual([["/path\\/to/", "regex"]]);
+  });
+
+  test("regex AND token", () => {
+    expect(spans("/timeout/ AND level=error")).toEqual([
+      ["/timeout/", "regex"],
+      ["AND", "operator"],
+      ["level", "key"],
+      ["=", "eq"],
+      ["error", "value"],
+    ]);
+  });
+
+  test("NOT regex", () => {
+    expect(spans("NOT /debug/")).toEqual([
+      ["NOT", "operator"],
+      ["/debug/", "regex"],
+    ]);
+  });
+
+  test("implicit AND with regex", () => {
+    expect(spans("error /timeout/")).toEqual([
+      ["error", "token"],
+      ["/timeout/", "regex"],
+    ]);
+  });
+
+  test("regex in parens", () => {
+    const r = tokenize("(/error/ OR /warn/)");
+    expect(r.hasErrors).toBe(false);
+  });
+
+  test("unterminated regex", () => {
+    const r = tokenize("/unterminated");
+    expect(r.hasErrors).toBe(true);
+  });
+
+  test("slash no longer in bareword", () => {
+    // "path/to/" becomes: word "path", regex "to", rather than a single bareword
+    const result = spans("path/to/");
+    expect(result[0]).toEqual(["path", "token"]);
+    expect(result[1]).toEqual(["/to/", "regex"]);
+  });
+});
+
 describe("complex queries", () => {
   test("realistic search query", () => {
     const r = tokenize('last=5m reverse=true level=error msg="connection refused"');

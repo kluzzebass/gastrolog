@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"iter"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -404,6 +405,13 @@ func keyValueFilter(filters []KeyValueFilter) recordFilter {
 	}
 }
 
+// regexFilter returns a filter that matches records whose raw line matches the pattern.
+func regexFilter(pattern *regexp.Regexp) recordFilter {
+	return func(rec chunk.Record) bool {
+		return pattern.Match(rec.Raw)
+	}
+}
+
 // matchesKeyValue checks if all query key=value pairs are found in either
 // the record's attributes or the message body (OR semantics per pair, AND across pairs).
 //
@@ -666,10 +674,13 @@ func applyKeyValueIndex(b *scannerBuilder, indexes index.IndexManager, chunkID c
 	return true, false
 }
 
-// ConjunctionToFilters converts a DNF conjunction to tokens, KV filters, and a negation filter.
+// ConjunctionToFilters converts a DNF conjunction to tokens, KV filters, regex runtime filter, and a negation filter.
 // Positive predicates are returned as tokens/KV for index acceleration.
+// Regex predicates are always runtime-only (no index acceleration).
 // Negative predicates are returned as a runtime filter.
 func ConjunctionToFilters(conj *querylang.Conjunction) (tokens []string, kv []KeyValueFilter, negFilter recordFilter) {
+	var regexFilters []recordFilter
+
 	// Extract positive predicates for index acceleration
 	for _, p := range conj.Positive {
 		switch p.Kind {
@@ -681,12 +692,29 @@ func ConjunctionToFilters(conj *querylang.Conjunction) (tokens []string, kv []Ke
 			kv = append(kv, KeyValueFilter{Key: p.Key, Value: ""})
 		case querylang.PredValueExists:
 			kv = append(kv, KeyValueFilter{Key: "", Value: p.Value})
+		case querylang.PredRegex:
+			regexFilters = append(regexFilters, regexFilter(p.Pattern))
 		}
 	}
 
-	// Build negation filter for negative predicates
+	// Build combined filter for negatives + regexes
+	var filters []recordFilter
 	if len(conj.Negative) > 0 {
-		negFilter = negativePredicatesFilter(conj.Negative)
+		filters = append(filters, negativePredicatesFilter(conj.Negative))
+	}
+	filters = append(filters, regexFilters...)
+
+	if len(filters) == 1 {
+		negFilter = filters[0]
+	} else if len(filters) > 1 {
+		negFilter = func(rec chunk.Record) bool {
+			for _, f := range filters {
+				if !f(rec) {
+					return false
+				}
+			}
+			return true
+		}
 	}
 
 	return tokens, kv, negFilter
@@ -750,6 +778,9 @@ func evalPredicate(pred *querylang.PredicateExpr, rec chunk.Record) bool {
 
 	case querylang.PredValueExists:
 		return matchesValueExists(rec.Attrs, rec.Raw, pred.Value)
+
+	case querylang.PredRegex:
+		return pred.Pattern.Match(rec.Raw)
 
 	default:
 		return false

@@ -22,6 +22,23 @@ Combine filters with boolean logic. AND binds tighter than OR.
 - `NOT debug` — exclude records with "debug"
 - `(error OR warn) AND NOT debug` — parentheses for grouping
 
+## Regex Search
+
+Match the raw log line against a regular expression with `/pattern/` syntax. Case-insensitive by default.
+
+- `/error\d+/` — matches "error42", "Error100", etc.
+- `/failed.*connection/` — matches "failed to establish connection"
+- `/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/` — matches IPv4 addresses
+- `/path\/to\/file/` — escaped slashes for literal `/`
+
+Regex predicates combine with all boolean operators:
+
+- `level=error AND /timeout/` — combine with key=value filters
+- `NOT /debug/` — negation
+- `/error/ OR /warn/` — alternation (can also be written as `/error|warn/`)
+
+Regex filters always run at scan time (no index acceleration). Uses [RE2 syntax](https://github.com/google/re2/wiki/Syntax) (no backreferences or lookahead). Override case-sensitivity with inline flags, e.g. `/(?-i)CaseSensitive/`.
+
 ## Key=Value Filters
 
 Filter by key=value in record attributes or message body. Both sources are checked: a query for `level=error` matches records where `level=error` appears in the stored attributes **or** in the raw message text.
@@ -90,3 +107,13 @@ All errors from January 15, 2024.
 host=* NOT service=*
 ```
 Records with a host attribute but no service attribute.
+
+```
+/error\d+/ level=error
+```
+Records matching the regex pattern with level "error".
+
+```
+NOT /debug|trace/
+```
+Exclude records matching a regex alternation.

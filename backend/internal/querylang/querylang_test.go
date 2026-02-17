@@ -2,6 +2,7 @@ package querylang
 
 import (
 	"errors"
+	"regexp"
 	"testing"
 )
 
@@ -483,6 +484,7 @@ func TestExprString(t *testing.T) {
 		{"NOT error", "NOT token(error)"},
 		{"a AND b", "(token(a) AND token(b))"},
 		{"a OR b", "(token(a) OR token(b))"},
+		{`/error\d+/`, `regex(/error\d+/)`},
 	}
 
 	for _, tt := range tests {
@@ -496,5 +498,148 @@ func TestExprString(t *testing.T) {
 				t.Errorf("Parse(%q).String() = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestParseRegex(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		pattern string
+	}{
+		{"basic regex", `/error\d+/`, `error\d+`},
+		{"regex with dot-star", `/failed.*connection/`, `failed.*connection`},
+		{"regex IP pattern", `/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/`, `\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}`},
+		{"regex with escaped slash", `/path\/to\/file/`, `path/to/file`},
+		{"empty regex", `//`, ``},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			expr, err := Parse(tt.input)
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
+			}
+			pred, ok := expr.(*PredicateExpr)
+			if !ok {
+				t.Fatalf("Parse(%q) = %T, want *PredicateExpr", tt.input, expr)
+			}
+			if pred.Kind != PredRegex {
+				t.Errorf("Parse(%q).Kind = %v, want PredRegex", tt.input, pred.Kind)
+			}
+			if pred.Value != tt.pattern {
+				t.Errorf("Parse(%q).Value = %q, want %q", tt.input, pred.Value, tt.pattern)
+			}
+			if pred.Pattern == nil {
+				t.Fatalf("Parse(%q).Pattern is nil", tt.input)
+			}
+			// Verify case-insensitive flag is applied.
+			wantRe := regexp.MustCompile("(?i)" + tt.pattern)
+			if pred.Pattern.String() != wantRe.String() {
+				t.Errorf("Parse(%q).Pattern = %q, want %q", tt.input, pred.Pattern.String(), wantRe.String())
+			}
+		})
+	}
+}
+
+func TestParseRegexInBooleanExpressions(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"regex AND token", `/timeout/ AND level=error`},
+		{"token AND regex", `level=error AND /timeout/`},
+		{"NOT regex", `NOT /debug/`},
+		{"regex OR regex", `/error/ OR /warn/`},
+		{"implicit AND with regex", `error /timeout/`},
+		{"regex in parens", `(/error/ OR /warn/) AND level=error`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			expr, err := Parse(tt.input)
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
+			}
+			if expr == nil {
+				t.Fatalf("Parse(%q) returned nil", tt.input)
+			}
+			t.Logf("Parse(%q) = %s", tt.input, expr.String())
+		})
+	}
+}
+
+func TestParseRegexErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr error
+	}{
+		{"unterminated regex", `/pattern`, ErrUnterminatedRegex},
+		{"invalid regex pattern", `/[invalid/`, ErrInvalidRegex},
+		{"invalid regex unclosed group", `/(unclosed/`, ErrInvalidRegex},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Parse(tt.input)
+			if err == nil {
+				t.Fatalf("Parse(%q) expected error, got nil", tt.input)
+			}
+			if !errors.Is(err, tt.wantErr) {
+				t.Errorf("Parse(%q) error = %v, want %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLexerRegex(t *testing.T) {
+	input := `/error\d+/ AND level=warn`
+	lex := NewLexer(input)
+
+	expected := []struct {
+		kind TokenKind
+		lit  string
+	}{
+		{TokRegex, `error\d+`},
+		{TokAnd, "AND"},
+		{TokWord, "level"},
+		{TokEq, "="},
+		{TokWord, "warn"},
+		{TokEOF, ""},
+	}
+
+	for i, want := range expected {
+		tok, err := lex.Next()
+		if err != nil {
+			t.Fatalf("token %d: unexpected error: %v", i, err)
+		}
+		if tok.Kind != want.kind {
+			t.Errorf("token %d: Kind = %v, want %v", i, tok.Kind, want.kind)
+		}
+		if tok.Kind != TokEOF && tok.Lit != want.lit {
+			t.Errorf("token %d: Lit = %q, want %q", i, tok.Lit, want.lit)
+		}
+	}
+}
+
+func TestSlashNoLongerInBareword(t *testing.T) {
+	// Verify that '/' terminates barewords.
+	// "path/to" should NOT parse as a single token.
+	lex := NewLexer("path/to/file")
+	tok, err := lex.Next()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tok.Kind != TokWord || tok.Lit != "path" {
+		t.Errorf("first token = (%v, %q), want (WORD, \"path\")", tok.Kind, tok.Lit)
+	}
+	// Next should be a regex token /to/
+	tok, err = lex.Next()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tok.Kind != TokRegex || tok.Lit != "to" {
+		t.Errorf("second token = (%v, %q), want (REGEX, \"to\")", tok.Kind, tok.Lit)
 	}
 }

@@ -1,5 +1,7 @@
 package querylang
 
+import "regexp"
+
 // Parser parses a query string into an AST.
 // This is the source of truth for query syntax. The frontend has a mirrored
 // parser in frontend/src/queryTokenizer.ts (validate function) for syntax
@@ -12,8 +14,9 @@ package querylang
 //	and_expr  = unary_expr ( [ "AND" ] unary_expr )*
 //	unary_expr = "NOT" unary_expr | primary
 //	primary   = "(" or_expr ")" | predicate
-//	predicate = kv_pred | token_pred
+//	predicate = kv_pred | regex_pred | token_pred
 //	kv_pred   = ( WORD | "*" ) "=" ( WORD | "*" )
+//	regex_pred = REGEX
 //	token_pred = WORD
 //
 // Precedence (highest to lowest):
@@ -120,7 +123,7 @@ func (p *parser) isAndStart() bool {
 	case TokAnd:
 		// Explicit AND
 		return true
-	case TokNot, TokLParen, TokWord, TokStar:
+	case TokNot, TokLParen, TokWord, TokStar, TokRegex:
 		// Could start a unary_expr (implicit AND)
 		return true
 	default:
@@ -200,6 +203,20 @@ func (p *parser) parsePredicate() (Expr, error) {
 		return nil, newParseError(p.cur.Pos, ErrUnmatchedParen, "unmatched closing parenthesis")
 	case TokEq:
 		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "unexpected '='")
+	}
+
+	// Regex predicate: /pattern/
+	if p.cur.Kind == TokRegex {
+		pattern := p.cur.Lit
+		pos := p.cur.Pos
+		re, err := regexp.Compile("(?i)" + pattern)
+		if err != nil {
+			return nil, newParseError(pos, ErrInvalidRegex, "invalid regex /%s/: %v", pattern, err)
+		}
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
+		return &PredicateExpr{Kind: PredRegex, Value: pattern, Pattern: re}, nil
 	}
 
 	// First part: WORD or "*"

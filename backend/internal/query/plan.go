@@ -331,6 +331,24 @@ func (e *Engine) buildBranchPipeline(pipeline *[]PipelineStep, branch *querylang
 		*pipeline = append(*pipeline, step)
 	}
 
+	// Regex predicates (always runtime, no index acceleration).
+	for _, p := range branch.Positive {
+		if p.Kind == querylang.PredRegex {
+			predicate := fmt.Sprintf("regex(/%s/)", p.Value)
+			step := PipelineStep{
+				Index:           "runtime",
+				Predicate:       predicate,
+				PositionsBefore: currentPositions,
+				PositionsAfter:  currentPositions,
+				Action:          "runtime",
+				Reason:          "no_index",
+				Details:         "regex requires sequential scan",
+			}
+			*pipeline = append(*pipeline, step)
+			runtimeFilters = append(runtimeFilters, predicate)
+		}
+	}
+
 	// KV indexes.
 	if len(kv) > 0 {
 		for _, f := range kv {

@@ -11,6 +11,7 @@ package querylang
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -67,9 +68,10 @@ func (n *NotExpr) String() string {
 
 // PredicateExpr represents a leaf predicate.
 type PredicateExpr struct {
-	Kind  PredicateKind
-	Key   string // empty for Token kind
-	Value string // the token or value
+	Kind    PredicateKind
+	Key     string         // empty for Token kind
+	Value   string         // the token or value; for PredRegex, the raw pattern
+	Pattern *regexp.Regexp // compiled regex; set only for PredRegex
 }
 
 func (PredicateExpr) expr() {}
@@ -84,6 +86,8 @@ func (p *PredicateExpr) String() string {
 		return fmt.Sprintf("%s=*", p.Key)
 	case PredValueExists:
 		return fmt.Sprintf("*=%s", p.Value)
+	case PredRegex:
+		return fmt.Sprintf("regex(/%s/)", p.Value)
 	default:
 		return fmt.Sprintf("unknown(%d)", p.Kind)
 	}

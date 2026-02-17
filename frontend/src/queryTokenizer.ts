@@ -11,8 +11,9 @@ type QueryTokenKind =
   | "rparen"
   | "eq"
   | "star"
+  | "regex" // /pattern/
   | "whitespace"
-  | "error"; // unterminated quote
+  | "error"; // unterminated quote or regex
 
 // After the post-pass, words in key=value positions get reclassified.
 export type HighlightRole =
@@ -23,6 +24,7 @@ export type HighlightRole =
   | "value" // value in key=value predicate
   | "token" // bare search term
   | "quoted" // quoted string (standalone or as value)
+  | "regex" // /pattern/ regex literal
   | "paren" // ( or )
   | "star" // *
   | "whitespace"
@@ -138,6 +140,40 @@ function lex(input: string): QueryToken[] {
       continue;
     }
 
+    // Regex literal: /pattern/
+    if (ch === "/") {
+      const start = pos;
+      pos++; // skip opening /
+      while (pos < input.length) {
+        if (input[pos] === "\\" && pos + 1 < input.length && input[pos + 1] === "/") {
+          pos += 2; // skip escaped slash
+          continue;
+        }
+        if (input[pos] === "/") {
+          pos++; // skip closing /
+          tokens.push({
+            text: input.slice(start, pos),
+            pos: start,
+            kind: "regex",
+          });
+          break;
+        }
+        pos++;
+      }
+      // Unterminated regex
+      if (
+        tokens.length === 0 ||
+        tokens[tokens.length - 1]!.pos !== start
+      ) {
+        tokens.push({
+          text: input.slice(start, pos),
+          pos: start,
+          kind: "error",
+        });
+      }
+      continue;
+    }
+
     // Bareword
     const start = pos;
     while (pos < input.length && isBarewordChar(input[pos]!)) {
@@ -166,7 +202,8 @@ function isBarewordChar(ch: string): boolean {
     ch !== "=" &&
     ch !== "*" &&
     ch !== '"' &&
-    ch !== "'"
+    ch !== "'" &&
+    ch !== "/"
   );
 }
 
@@ -240,6 +277,9 @@ function classify(raw: QueryToken[]): HighlightSpan[] {
       case "star":
         spans.push({ text: tok.text, role: "star" });
         break;
+      case "regex":
+        spans.push({ text: tok.text, role: "regex" });
+        break;
       case "whitespace":
         spans.push({ text: tok.text, role: "whitespace" });
         break;
@@ -268,7 +308,7 @@ function classify(raw: QueryToken[]): HighlightSpan[] {
 //   and_expr   = unary_expr ( [ "AND" ] unary_expr )*
 //   unary_expr = "NOT" unary_expr | primary
 //   primary    = "(" or_expr ")" | predicate
-//   predicate  = kv_triple | token | quoted | star_pred
+//   predicate  = kv_triple | regex | token | quoted | star_pred
 //   kv_triple  = (key|directive-key) eq (value|quoted|star)
 interface ValidateResult {
   spans: HighlightSpan[];
@@ -316,6 +356,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
     return (
       s.role === "token" ||
       s.role === "quoted" ||
+      s.role === "regex" ||
       s.role === "key" ||
       s.role === "directive-key" ||
       s.role === "star" ||
@@ -447,7 +488,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
       return false;
     }
 
-    if (s.role === "token" || s.role === "quoted") {
+    if (s.role === "token" || s.role === "quoted" || s.role === "regex") {
       advance();
       return true;
     }
