@@ -4,9 +4,11 @@ set dotenv-load
 _default:
   @just --list
 
+version := `git describe --tags --always --dirty 2>/dev/null || echo dev`
+
 # Builds the gastrolog binary.
 build:
-  go build -o gastrolog ./cmd/gastrolog
+  go build -ldflags "-X main.version={{version}}" -o gastrolog ./cmd/gastrolog
 
 # Runs the gastrolog backend with sqlite config (default).
 run-sqlite:
