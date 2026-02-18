@@ -15,7 +15,9 @@ COPY backend/ .
 COPY --from=frontend /src/frontend/dist/ internal/frontend/dist/
 RUN go run ./cmd/compress-assets internal/frontend/dist
 ARG VERSION=dev
-RUN CGO_ENABLED=0 go build -ldflags "-X main.version=${VERSION}" -o /gastrolog ./cmd/gastrolog
+ARG TARGETOS
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags "-X main.version=${VERSION}" -o /gastrolog ./cmd/gastrolog
 
 # Stage 3: Runtime
 FROM scratch
