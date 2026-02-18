@@ -151,6 +151,7 @@ function ServiceSettings({ dark }: { dark: boolean }) {
   const [tlsDefaultCert, setTlsDefaultCert] = useState("");
   const [tlsEnabled, setTlsEnabled] = useState(false);
   const [httpToHttpsRedirect, setHttpToHttpsRedirect] = useState(false);
+  const [httpsPort, setHttpsPort] = useState("");
   const [requireMixedCase, setRequireMixedCase] = useState(false);
   const [requireDigit, setRequireDigit] = useState(false);
   const [requireSpecial, setRequireSpecial] = useState(false);
@@ -174,6 +175,7 @@ function ServiceSettings({ dark }: { dark: boolean }) {
       setTlsDefaultCert(data.tlsDefaultCert ?? "");
       setTlsEnabled(data.tlsEnabled ?? false);
       setHttpToHttpsRedirect(data.httpToHttpsRedirect ?? false);
+      setHttpsPort(data.httpsPort ?? "");
       setRequireMixedCase(data.requireMixedCase ?? false);
       setRequireDigit(data.requireDigit ?? false);
       setRequireSpecial(data.requireSpecial ?? false);
@@ -193,6 +195,7 @@ function ServiceSettings({ dark }: { dark: boolean }) {
       tlsDefaultCert !== (data.tlsDefaultCert ?? "") ||
       tlsEnabled !== (data.tlsEnabled ?? false) ||
       httpToHttpsRedirect !== (data.httpToHttpsRedirect ?? false) ||
+      httpsPort !== (data.httpsPort ?? "") ||
       requireMixedCase !== (data.requireMixedCase ?? false) ||
       requireDigit !== (data.requireDigit ?? false) ||
       requireSpecial !== (data.requireSpecial ?? false) ||
@@ -210,6 +213,7 @@ function ServiceSettings({ dark }: { dark: boolean }) {
         tlsEnabled: certIds.includes(tlsDefaultCert) ? tlsEnabled : false,
         httpToHttpsRedirect:
           certIds.includes(tlsDefaultCert) ? httpToHttpsRedirect : false,
+        httpsPort,
         requireMixedCase,
         requireDigit,
         requireSpecial,
@@ -233,6 +237,7 @@ function ServiceSettings({ dark }: { dark: boolean }) {
       setTlsDefaultCert(data.tlsDefaultCert ?? "");
       setTlsEnabled(data.tlsEnabled ?? false);
       setHttpToHttpsRedirect(data.httpToHttpsRedirect ?? false);
+      setHttpsPort(data.httpsPort ?? "");
       setRequireMixedCase(data.requireMixedCase ?? false);
       setRequireDigit(data.requireDigit ?? false);
       setRequireSpecial(data.requireSpecial ?? false);
@@ -421,17 +426,36 @@ function ServiceSettings({ dark }: { dark: boolean }) {
                   />
                 </FormField>
                 {tlsEnabled && (
-                  <FormField
-                    label="Redirect HTTP to HTTPS"
-                    description="Redirect plain HTTP requests to HTTPS"
-                    dark={dark}
-                  >
-                    <Checkbox
-                      checked={httpToHttpsRedirect}
-                      onChange={setHttpToHttpsRedirect}
+                  <>
+                    <FormField
+                      label="HTTPS port"
+                      description="Port for the HTTPS listener. Leave empty for HTTP port + 1."
                       dark={dark}
-                    />
-                  </FormField>
+                    >
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={httpsPort}
+                        onChange={(e) => setHttpsPort(e.target.value)}
+                        placeholder="auto"
+                        className={`w-full px-2.5 py-1.5 text-[0.85em] font-mono border rounded focus:outline-none transition-colors ${c(
+                          "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
+                          "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
+                        )}`}
+                      />
+                    </FormField>
+                    <FormField
+                      label="Redirect HTTP to HTTPS"
+                      description="Redirect plain HTTP requests to HTTPS"
+                      dark={dark}
+                    >
+                      <Checkbox
+                        checked={httpToHttpsRedirect}
+                        onChange={setHttpToHttpsRedirect}
+                        dark={dark}
+                      />
+                    </FormField>
+                  </>
                 )}
               </>
             )}

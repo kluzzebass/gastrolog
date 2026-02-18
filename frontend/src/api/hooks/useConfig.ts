@@ -128,6 +128,7 @@ export function usePutServerConfig() {
       tlsDefaultCert?: string;
       tlsEnabled?: boolean;
       httpToHttpsRedirect?: boolean;
+      httpsPort?: string;
       requireMixedCase?: boolean;
       requireDigit?: boolean;
       requireSpecial?: boolean;
@@ -147,6 +148,8 @@ export function usePutServerConfig() {
       if (args.tlsEnabled !== undefined) req.tlsEnabled = args.tlsEnabled;
       if (args.httpToHttpsRedirect !== undefined)
         req.httpToHttpsRedirect = args.httpToHttpsRedirect;
+      if (args.httpsPort !== undefined)
+        req.httpsPort = args.httpsPort;
       if (args.requireMixedCase !== undefined)
         req.requireMixedCase = args.requireMixedCase;
       if (args.requireDigit !== undefined)

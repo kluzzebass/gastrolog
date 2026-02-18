@@ -146,6 +146,7 @@ func (s *ConfigServer) GetServerConfig(
 		resp.TlsDefaultCert = sc.TLS.DefaultCert
 		resp.TlsEnabled = sc.TLS.TLSEnabled
 		resp.HttpToHttpsRedirect = sc.TLS.HTTPToHTTPSRedirect
+		resp.HttpsPort = sc.TLS.HTTPSPort
 		resp.RequireMixedCase = sc.Auth.RequireMixedCase
 		resp.RequireDigit = sc.Auth.RequireDigit
 		resp.RequireSpecial = sc.Auth.RequireSpecial
@@ -206,6 +207,9 @@ func (s *ConfigServer) PutServerConfig(
 	}
 	if req.Msg.HttpToHttpsRedirect != nil {
 		sc.TLS.HTTPToHTTPSRedirect = *req.Msg.HttpToHttpsRedirect && sc.TLS.DefaultCert != ""
+	}
+	if req.Msg.HttpsPort != nil {
+		sc.TLS.HTTPSPort = *req.Msg.HttpsPort
 	}
 	if req.Msg.RequireMixedCase != nil {
 		sc.Auth.RequireMixedCase = *req.Msg.RequireMixedCase

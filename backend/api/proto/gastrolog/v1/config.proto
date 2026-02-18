@@ -242,6 +242,7 @@ message GetServerConfigResponse {
   bool require_special = 10;
   int32 max_consecutive_repeats = 11;
   bool forbid_animal_noise = 12;
+  string https_port = 13;  // Configured HTTPS port; empty = HTTP port + 1.
 }
 
 message PutServerConfigRequest {
@@ -257,6 +258,7 @@ message PutServerConfigRequest {
   optional bool require_special = 10;
   optional int32 max_consecutive_repeats = 11;
   optional bool forbid_animal_noise = 12;
+  optional string https_port = 13;
 }
 
 message PutServerConfigResponse {}

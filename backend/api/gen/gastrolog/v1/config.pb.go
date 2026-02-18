@@ -1663,6 +1663,7 @@ type GetServerConfigResponse struct {
 	RequireSpecial        bool                   `protobuf:"varint,10,opt,name=require_special,json=requireSpecial,proto3" json:"require_special,omitempty"`
 	MaxConsecutiveRepeats int32                  `protobuf:"varint,11,opt,name=max_consecutive_repeats,json=maxConsecutiveRepeats,proto3" json:"max_consecutive_repeats,omitempty"`
 	ForbidAnimalNoise     bool                   `protobuf:"varint,12,opt,name=forbid_animal_noise,json=forbidAnimalNoise,proto3" json:"forbid_animal_noise,omitempty"`
+	HttpsPort             string                 `protobuf:"bytes,13,opt,name=https_port,json=httpsPort,proto3" json:"https_port,omitempty"` // Configured HTTPS port; empty = HTTP port + 1.
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -1781,6 +1782,13 @@ func (x *GetServerConfigResponse) GetForbidAnimalNoise() bool {
 	return false
 }
 
+func (x *GetServerConfigResponse) GetHttpsPort() string {
+	if x != nil {
+		return x.HttpsPort
+	}
+	return ""
+}
+
 type PutServerConfigRequest struct {
 	state                 protoimpl.MessageState `protogen:"open.v1"`
 	TokenDuration         *string                `protobuf:"bytes,1,opt,name=token_duration,json=tokenDuration,proto3,oneof" json:"token_duration,omitempty"`
@@ -1795,6 +1803,7 @@ type PutServerConfigRequest struct {
 	RequireSpecial        *bool                  `protobuf:"varint,10,opt,name=require_special,json=requireSpecial,proto3,oneof" json:"require_special,omitempty"`
 	MaxConsecutiveRepeats *int32                 `protobuf:"varint,11,opt,name=max_consecutive_repeats,json=maxConsecutiveRepeats,proto3,oneof" json:"max_consecutive_repeats,omitempty"`
 	ForbidAnimalNoise     *bool                  `protobuf:"varint,12,opt,name=forbid_animal_noise,json=forbidAnimalNoise,proto3,oneof" json:"forbid_animal_noise,omitempty"`
+	HttpsPort             *string                `protobuf:"bytes,13,opt,name=https_port,json=httpsPort,proto3,oneof" json:"https_port,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -1911,6 +1920,13 @@ func (x *PutServerConfigRequest) GetForbidAnimalNoise() bool {
 		return *x.ForbidAnimalNoise
 	}
 	return false
+}
+
+func (x *PutServerConfigRequest) GetHttpsPort() string {
+	if x != nil && x.HttpsPort != nil {
+		return *x.HttpsPort
+	}
+	return ""
 }
 
 type PutServerConfigResponse struct {
@@ -3236,7 +3252,7 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x15DeleteIngesterRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x18\n" +
 	"\x16DeleteIngesterResponse\"\x18\n" +
-	"\x16GetServerConfigRequest\"\xb8\x04\n" +
+	"\x16GetServerConfigRequest\"\xd7\x04\n" +
 	"\x17GetServerConfigResponse\x12%\n" +
 	"\x0etoken_duration\x18\x01 \x01(\tR\rtokenDuration\x122\n" +
 	"\x15jwt_secret_configured\x18\x02 \x01(\bR\x13jwtSecretConfigured\x12.\n" +
@@ -3251,7 +3267,9 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x0frequire_special\x18\n" +
 	" \x01(\bR\x0erequireSpecial\x126\n" +
 	"\x17max_consecutive_repeats\x18\v \x01(\x05R\x15maxConsecutiveRepeats\x12.\n" +
-	"\x13forbid_animal_noise\x18\f \x01(\bR\x11forbidAnimalNoise\"\xe1\x06\n" +
+	"\x13forbid_animal_noise\x18\f \x01(\bR\x11forbidAnimalNoise\x12\x1d\n" +
+	"\n" +
+	"https_port\x18\r \x01(\tR\thttpsPort\"\x94\a\n" +
 	"\x16PutServerConfigRequest\x12*\n" +
 	"\x0etoken_duration\x18\x01 \x01(\tH\x00R\rtokenDuration\x88\x01\x01\x12\"\n" +
 	"\n" +
@@ -3268,7 +3286,9 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	" \x01(\bH\tR\x0erequireSpecial\x88\x01\x01\x12;\n" +
 	"\x17max_consecutive_repeats\x18\v \x01(\x05H\n" +
 	"R\x15maxConsecutiveRepeats\x88\x01\x01\x123\n" +
-	"\x13forbid_animal_noise\x18\f \x01(\bH\vR\x11forbidAnimalNoise\x88\x01\x01B\x11\n" +
+	"\x13forbid_animal_noise\x18\f \x01(\bH\vR\x11forbidAnimalNoise\x88\x01\x01\x12\"\n" +
+	"\n" +
+	"https_port\x18\r \x01(\tH\fR\thttpsPort\x88\x01\x01B\x11\n" +
 	"\x0f_token_durationB\r\n" +
 	"\v_jwt_secretB\x16\n" +
 	"\x14_min_password_lengthB\x16\n" +
@@ -3280,7 +3300,8 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x0e_require_digitB\x12\n" +
 	"\x10_require_specialB\x1a\n" +
 	"\x18_max_consecutive_repeatsB\x16\n" +
-	"\x14_forbid_animal_noise\"\x19\n" +
+	"\x14_forbid_animal_noiseB\r\n" +
+	"\v_https_port\"\x19\n" +
 	"\x17PutServerConfigResponse\"\x17\n" +
 	"\x15GetPreferencesRequest\".\n" +
 	"\x16GetPreferencesResponse\x12\x14\n" +

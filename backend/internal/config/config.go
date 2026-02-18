@@ -132,6 +132,8 @@ type TLSConfig struct {
 	TLSEnabled bool `json:"tls_enabled,omitempty"`
 	// HTTPToHTTPSRedirect redirects HTTP requests to HTTPS when both listeners are active.
 	HTTPToHTTPSRedirect bool `json:"http_to_https_redirect,omitempty"`
+	// HTTPSPort is the port for the HTTPS listener. Empty means HTTP port + 1.
+	HTTPSPort string `json:"https_port,omitempty"`
 }
 
 // CertPEM holds certificate content. Either stored PEM or file paths (directory monitoring).

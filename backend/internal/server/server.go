@@ -292,10 +292,13 @@ func (s *Server) reconfigureTLS() {
 		return
 	}
 
-	// HTTPS port: derive from HTTP listener port + 1
-	httpsPort := s.deriveHTTPSPort()
+	// HTTPS port: use configured value, or derive from HTTP listener port + 1
+	httpsPort := sc.TLS.HTTPSPort
 	if httpsPort == "" {
-		s.logger.Warn("reconfigure TLS: cannot derive HTTPS port")
+		httpsPort = s.deriveHTTPSPort()
+	}
+	if httpsPort == "" {
+		s.logger.Warn("reconfigure TLS: cannot determine HTTPS port")
 		return
 	}
 	s.httpsPort = httpsPort
