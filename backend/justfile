@@ -32,6 +32,17 @@ run-bootstrap:
 pprof:
   go run ./cmd/gastrolog server --pprof localhost:6060
 
+# Cross-compiles for a specific OS/arch. Usage: just build-cross linux amd64
+build-cross os arch:
+  CGO_ENABLED=0 GOOS={{os}} GOARCH={{arch}} go build -ldflags "-X main.version={{version}}" -o gastrolog-{{os}}-{{arch}} ./cmd/gastrolog
+
+# Builds release binaries for all supported platforms.
+build-all:
+  just build-cross linux amd64
+  just build-cross linux arm64
+  just build-cross darwin amd64
+  just build-cross darwin arm64
+
 # Embeds built frontend assets into the backend (brotli-compressed).
 embed-frontend:
   rm -rf internal/frontend/dist/*

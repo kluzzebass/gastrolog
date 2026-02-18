@@ -17,3 +17,13 @@ build:
     just frontend build
     just backend embed-frontend
     just backend build
+
+# Build release binaries for all platforms with embedded frontend
+build-all:
+    just frontend build
+    just backend embed-frontend
+    just backend build-all
+
+# Build Docker image
+docker tag="gastrolog:latest":
+    docker build --build-arg VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev) -t {{tag}} .
