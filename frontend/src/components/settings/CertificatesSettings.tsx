@@ -53,6 +53,7 @@ interface PemCertFormProps {
   onDragEnter: (e: React.DragEvent) => void;
   onDragLeave: (e: React.DragEvent) => void;
   isEditing?: boolean;
+  hideActions?: boolean;
 }
 
 function PemCertForm({
@@ -72,6 +73,7 @@ function PemCertForm({
   onDragEnter,
   onDragLeave,
   isEditing,
+  hideActions,
 }: PemCertFormProps) {
   const c = useThemeClass(dark);
   return (
@@ -131,16 +133,18 @@ function PemCertForm({
             dark={dark}
           />
         </FormField>
-        <div className="flex justify-end gap-2 pt-2">
-          {onCancel && (
-            <GhostButton onClick={onCancel} dark={dark}>
-              Cancel
-            </GhostButton>
-          )}
-          <PrimaryButton onClick={onSave} disabled={saving}>
-            {saving ? "Saving..." : "Save"}
-          </PrimaryButton>
-        </div>
+        {!hideActions && (
+          <div className="flex justify-end gap-2 pt-2">
+            {onCancel && (
+              <GhostButton onClick={onCancel} dark={dark}>
+                Cancel
+              </GhostButton>
+            )}
+            <PrimaryButton onClick={onSave} disabled={saving}>
+              {saving ? "Saving..." : "Save"}
+            </PrimaryButton>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -158,6 +162,7 @@ interface FilesCertFormProps {
   onSave: () => void;
   onCancel?: () => void;
   saving?: boolean;
+  hideActions?: boolean;
 }
 
 function FilesCertForm({
@@ -172,6 +177,7 @@ function FilesCertForm({
   onSave,
   onCancel,
   saving,
+  hideActions,
 }: FilesCertFormProps) {
   const c = useThemeClass(dark);
   return (
@@ -220,16 +226,18 @@ function FilesCertForm({
             dark={dark}
           />
         </FormField>
-        <div className="flex justify-end gap-2 pt-2">
-          {onCancel && (
-            <GhostButton onClick={onCancel} dark={dark}>
-              Cancel
-            </GhostButton>
-          )}
-          <PrimaryButton onClick={onSave} disabled={saving}>
-            {saving ? "Saving..." : "Save"}
-          </PrimaryButton>
-        </div>
+        {!hideActions && (
+          <div className="flex justify-end gap-2 pt-2">
+            {onCancel && (
+              <GhostButton onClick={onCancel} dark={dark}>
+                Cancel
+              </GhostButton>
+            )}
+            <PrimaryButton onClick={onSave} disabled={saving}>
+              {saving ? "Saving..." : "Save"}
+            </PrimaryButton>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -621,6 +629,20 @@ export function CertificatesSettings({ dark }: { dark: boolean }) {
               }}
               onDelete={() => handleDelete(cert.id)}
               deleteLabel="Delete"
+              footer={
+                expanded === cert.id ? (
+                  <PrimaryButton
+                    onClick={() =>
+                      isExpandedFileBased
+                        ? handleSaveEditFiles(cert.id)
+                        : handleSaveEditPem(cert.id)
+                    }
+                    disabled={putCert.isPending}
+                  >
+                    {putCert.isPending ? "Saving..." : "Save"}
+                  </PrimaryButton>
+                ) : undefined
+              }
             >
               {expanded === cert.id && (
                 isExpandedFileBased ? (
@@ -635,6 +657,7 @@ export function CertificatesSettings({ dark }: { dark: boolean }) {
                     setSetAsDefault={setSetAsDefault}
                     onSave={() => handleSaveEditFiles(cert.id)}
                     saving={putCert.isPending}
+                    hideActions
                   />
                 ) : (
                   <PemCertForm
@@ -653,6 +676,7 @@ export function CertificatesSettings({ dark }: { dark: boolean }) {
                     onDragEnter={handleDragEnter}
                     onDragLeave={handleDragLeave}
                     isEditing
+                    hideActions
                   />
                 )
               )}

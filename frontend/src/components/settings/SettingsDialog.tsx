@@ -86,7 +86,7 @@ export function SettingsDialog({
     <Dialog onClose={onClose} ariaLabel="Settings" dark={dark}>
       <div className="flex h-full overflow-hidden">
         <nav
-          className={`w-48 shrink-0 border-r overflow-y-auto app-scroll p-3 ${c("border-ink-border", "border-light-border")}`}
+          className={`min-w-fit shrink-0 border-r overflow-y-auto app-scroll p-3 ${c("border-ink-border", "border-light-border")}`}
         >
           <h2
             className={`text-[0.75em] uppercase tracking-wider font-medium mb-3 px-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
@@ -107,7 +107,7 @@ export function SettingsDialog({
                 }`}
               >
                 <Icon className="w-3.5 h-3.5 shrink-0" />
-                {label}
+                <span className="whitespace-nowrap">{label}</span>
               </button>
               {tab === id && helpTopicId && <HelpButton topicId={helpTopicId} />}
             </div>
