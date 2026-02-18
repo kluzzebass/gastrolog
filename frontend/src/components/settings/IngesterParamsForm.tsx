@@ -382,49 +382,20 @@ function DockerForm({
         />
       </FormField>
 
-      {/* Filters */}
-      <div className="flex flex-col gap-1">
-        <label
-          className={`text-[0.8em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}
-        >
-          Container Filters
-        </label>
-        <p
-          className={`text-[0.7em] mb-1.5 ${c("text-text-ghost", "text-light-text-ghost")}`}
-        >
-          Only containers matching all specified filters will be tailed. Leave
-          empty to tail all containers.
-        </p>
-        <div className="grid grid-cols-3 gap-3">
-          <FormField label="Label Filter" dark={dark}>
-            <TextInput
-              value={params["label_filter"] ?? ""}
-              onChange={(v) => set("label_filter", v)}
-              placeholder="gastrolog.collect=true"
-              dark={dark}
-              mono
-            />
-          </FormField>
-          <FormField label="Name Filter" dark={dark}>
-            <TextInput
-              value={params["name_filter"] ?? ""}
-              onChange={(v) => set("name_filter", v)}
-              placeholder="^web-.*"
-              dark={dark}
-              mono
-            />
-          </FormField>
-          <FormField label="Image Filter" dark={dark}>
-            <TextInput
-              value={params["image_filter"] ?? ""}
-              onChange={(v) => set("image_filter", v)}
-              placeholder="nginx"
-              dark={dark}
-              mono
-            />
-          </FormField>
-        </div>
-      </div>
+      {/* Filter */}
+      <FormField
+        label="Container Filter"
+        description="Boolean expression over container metadata. Leave empty to tail all containers."
+        dark={dark}
+      >
+        <TextInput
+          value={params["filter"] ?? ""}
+          onChange={(v) => set("filter", v)}
+          placeholder="image=nginx* AND label.env=prod"
+          dark={dark}
+          mono
+        />
+      </FormField>
 
       {/* Streams & Polling */}
       <div className="grid grid-cols-2 gap-3">
