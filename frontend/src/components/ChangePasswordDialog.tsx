@@ -3,7 +3,7 @@ import { useThemeClass } from "../hooks/useThemeClass";
 import { Dialog, CloseButton } from "./Dialog";
 import { SpinnerIcon } from "./icons";
 import { ConnectError } from "@connectrpc/connect";
-import { useChangePassword } from "../api/hooks";
+import { useChangePassword, useServerConfig } from "../api/hooks";
 import { AuthFormField } from "./auth/AuthFormField";
 
 export function ChangePasswordDialog({
@@ -23,6 +23,8 @@ export function ChangePasswordDialog({
   const [error, setError] = useState("");
   const oldRef = useRef<HTMLInputElement>(null);
   const changePassword = useChangePassword();
+  const { data: serverConfig } = useServerConfig();
+  const minLength = serverConfig?.minPasswordLength || 8;
 
   useEffect(() => {
     oldRef.current?.focus();
@@ -101,10 +103,19 @@ export function ChangePasswordDialog({
           value={newPassword}
           onChange={setNewPassword}
           autoComplete="new-password"
-          error={mismatch}
           disabled={isPending}
           dark={dark}
         />
+
+        {newPassword.length > 0 && (
+          <div className="-mt-2 flex flex-col gap-1">
+            <PasswordRule
+              met={newPassword.length >= minLength}
+              label={`At least ${minLength} characters`}
+              dark={dark}
+            />
+          </div>
+        )}
 
         <AuthFormField
           label="Confirm New Password"
@@ -116,11 +127,12 @@ export function ChangePasswordDialog({
           disabled={isPending}
           dark={dark}
         />
-        <span
-          className={`text-[0.78em] -mt-3 ${mismatch ? "text-severity-error" : "invisible"}`}
-        >
-          Passwords do not match
-        </span>
+
+        {mismatch && (
+          <span className="text-[0.78em] -mt-3 text-severity-error">
+            Passwords do not match
+          </span>
+        )}
 
         <div className="flex gap-3 mt-1">
           <button
@@ -149,5 +161,19 @@ export function ChangePasswordDialog({
         </div>
       </form>
     </Dialog>
+  );
+}
+
+function PasswordRule({ met, label, dark }: { met: boolean; label: string; dark: boolean }) {
+  const c = dark ? (d: string) => d : (_: string, l: string) => l;
+  return (
+    <div className={`flex items-center gap-1.5 text-[0.78em] ${
+      met
+        ? "text-severity-info"
+        : c("text-text-ghost", "text-light-text-ghost")
+    }`}>
+      <span className="text-[0.9em]">{met ? "\u2713" : "\u2022"}</span>
+      {label}
+    </div>
   );
 }

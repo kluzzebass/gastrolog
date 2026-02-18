@@ -3,7 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { SpinnerIcon } from "../icons";
 import { ConnectError } from "@connectrpc/connect";
-import { useAuthStatus, useLogin, useRegister } from "../../api/hooks";
+import { useAuthStatus, useLogin, useRegister, useServerConfig } from "../../api/hooks";
 import { AuthFormField } from "./AuthFormField";
 
 interface AuthPageProps {
@@ -15,6 +15,8 @@ export function AuthPage({ mode }: AuthPageProps) {
   const authStatus = useAuthStatus();
   const login = useLogin();
   const register = useRegister();
+  const { data: serverConfig } = useServerConfig();
+  const minLength = serverConfig?.minPasswordLength || 8;
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -157,10 +159,19 @@ export function AuthPage({ mode }: AuthPageProps) {
             value={password}
             onChange={setPassword}
             autoComplete={isRegister ? "new-password" : "current-password"}
-            error={mismatch}
             disabled={isPending}
             dark={dark}
           />
+
+          {isRegister && password.length > 0 && (
+            <div className="-mt-2 flex flex-col gap-1">
+              <PasswordRule
+                met={password.length >= minLength}
+                label={`At least ${minLength} characters`}
+                dark={dark}
+              />
+            </div>
+          )}
 
           {isRegister && (
             <>
@@ -174,11 +185,11 @@ export function AuthPage({ mode }: AuthPageProps) {
                 disabled={isPending}
                 dark={dark}
               />
-              <span
-                className={`text-[0.78em] -mt-3 ${mismatch ? "text-severity-error" : "invisible"}`}
-              >
-                Passwords do not match
-              </span>
+              {mismatch && (
+                <span className="text-[0.78em] -mt-3 text-severity-error">
+                  Passwords do not match
+                </span>
+              )}
             </>
           )}
 
@@ -197,6 +208,20 @@ export function AuthPage({ mode }: AuthPageProps) {
           </button>
         </form>
       </div>
+    </div>
+  );
+}
+
+function PasswordRule({ met, label, dark }: { met: boolean; label: string; dark: boolean }) {
+  const c = dark ? (d: string) => d : (_: string, l: string) => l;
+  return (
+    <div className={`flex items-center gap-1.5 text-[0.78em] ${
+      met
+        ? "text-severity-info"
+        : c("text-text-ghost", "text-light-text-ghost")
+    }`}>
+      <span className="text-[0.9em]">{met ? "\u2713" : "\u2022"}</span>
+      {label}
     </div>
   );
 }

@@ -23,6 +23,7 @@ export { useLiveHistogram } from "./useLiveHistogram";
 export { useRecordContext } from "./useContext";
 export {
   useConfig,
+  useServerConfig,
   usePutFilter,
   useDeleteFilter,
   usePutRotationPolicy,
