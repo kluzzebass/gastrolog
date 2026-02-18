@@ -3,6 +3,7 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { useIngesters, useIngesterStatus } from "../../api/hooks";
 import { formatBytes } from "../../utils/units";
 import { ExpandableCard } from "../settings/ExpandableCard";
+import { HelpButton } from "../HelpButton";
 
 export function IngestersPanel({ dark }: { dark: boolean }) {
   const c = useThemeClass(dark);
@@ -31,6 +32,14 @@ export function IngestersPanel({ dark }: { dark: boolean }) {
 
   return (
     <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-2 mb-2">
+        <h2
+          className={`font-display text-[1.4em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
+        >
+          Ingesters
+        </h2>
+        <HelpButton topicId="inspector-ingesters" />
+      </div>
       {ingesters.map((ing) => (
         <ExpandableCard
           key={ing.id}

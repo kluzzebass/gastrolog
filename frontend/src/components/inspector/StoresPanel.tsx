@@ -12,6 +12,7 @@ import type { ChunkMeta } from "../../api/gen/gastrolog/v1/store_pb";
 import { formatBytes } from "../../utils/units";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { ChunkTimeline } from "./ChunkTimeline";
+import { HelpButton } from "../HelpButton";
 
 export function StoresPanel({ dark }: { dark: boolean }) {
   const c = useThemeClass(dark);
@@ -40,6 +41,14 @@ export function StoresPanel({ dark }: { dark: boolean }) {
 
   return (
     <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-2 mb-2">
+        <h2
+          className={`font-display text-[1.4em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
+        >
+          Stores
+        </h2>
+        <HelpButton topicId="inspector-stores" />
+      </div>
       {stores.map((store) => (
         <ExpandableCard
           key={store.id}

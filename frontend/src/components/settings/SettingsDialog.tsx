@@ -93,24 +93,22 @@ export function SettingsDialog({
           >
             Settings
           </h2>
-          {tabs.map(({ id, label, icon: Icon, helpTopicId }) => (
-            <div key={id} className="flex items-center mb-0.5">
-              <button
-                onClick={() => onTabChange(id)}
-                className={`flex items-center gap-2 flex-1 text-left px-2 py-1.5 rounded text-[0.85em] transition-colors ${
-                  tab === id
-                    ? "bg-copper/15 text-copper font-medium"
-                    : c(
-                        "text-text-muted hover:text-text-bright hover:bg-ink-hover",
-                        "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
-                      )
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5 shrink-0" />
-                <span className="whitespace-nowrap">{label}</span>
-              </button>
-              {tab === id && helpTopicId && <HelpButton topicId={helpTopicId} />}
-            </div>
+          {tabs.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => onTabChange(id)}
+              className={`flex items-center gap-2 w-full text-left px-2 py-1.5 mb-0.5 rounded text-[0.85em] transition-colors ${
+                tab === id
+                  ? "bg-copper/15 text-copper"
+                  : c(
+                      "text-text-muted hover:text-text-bright hover:bg-ink-hover",
+                      "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
+                    )
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5 shrink-0" />
+              <span className="whitespace-nowrap">{label}</span>
+            </button>
           ))}
         </nav>
 

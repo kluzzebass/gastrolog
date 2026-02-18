@@ -4,6 +4,7 @@ import { useWatchJobs } from "../../api/hooks";
 import { JobStatus, JobKind } from "../../api/gen/gastrolog/v1/job_pb";
 import type { Job } from "../../api/gen/gastrolog/v1/job_pb";
 import { ExpandableCard } from "../settings/ExpandableCard";
+import { HelpButton } from "../HelpButton";
 
 /** Format a Date as `YYYY-MM-DD HH:MM:SS` (24-hour, local time). */
 function formatTimestamp(date: Date): string {
@@ -80,6 +81,14 @@ export function JobsPanel({ dark }: { dark: boolean }) {
 
   return (
     <div className="flex flex-col gap-5">
+      <div className="flex items-center gap-2">
+        <h2
+          className={`font-display text-[1.4em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
+        >
+          Jobs
+        </h2>
+        <HelpButton topicId="inspector-jobs" />
+      </div>
       {reconnecting && (
         <div className="flex items-center gap-2">
           <span className="px-1.5 py-0.5 text-[0.75em] rounded bg-severity-warn/15 text-severity-warn">
