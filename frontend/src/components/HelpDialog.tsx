@@ -11,6 +11,7 @@ interface HelpDialogProps {
   dark: boolean;
   topicId?: string;
   onClose: () => void;
+  onNavigate: (topicId: string) => void;
 }
 
 /** Check if `id` is the topic or any descendant of `topic`. */
@@ -19,21 +20,34 @@ function isWithin(topic: HelpTopic, id: string): boolean {
   return topic.children?.some((c) => isWithin(c, id)) ?? false;
 }
 
-export function HelpDialog({ dark, topicId, onClose }: HelpDialogProps) {
+export function HelpDialog({ dark, topicId, onClose, onNavigate }: HelpDialogProps) {
   const c = useThemeClass(dark);
-  const [activeId, setActiveId] = useState(
-    () => topicId ?? helpTopics[0]?.id ?? "",
-  );
+  const activeId = topicId ?? helpTopics[0]?.id ?? "";
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     // Auto-expand the branch containing the initial topic
     const initial = new Set<string>();
     for (const t of helpTopics) {
-      if (t.children && isWithin(t, topicId ?? helpTopics[0]?.id ?? "")) {
+      if (t.children && isWithin(t, activeId)) {
         initial.add(t.id);
       }
     }
     return initial;
   });
+
+  // Auto-expand when navigating to a topic inside a collapsed parent
+  useEffect(() => {
+    setExpanded((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const t of helpTopics) {
+        if (t.children && !next.has(t.id) && isWithin(t, activeId)) {
+          next.add(t.id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [activeId]);
 
   const topic: HelpTopic | undefined = findTopic(activeId);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -43,8 +57,8 @@ export function HelpDialog({ dark, topicId, onClose }: HelpDialogProps) {
     contentRef.current?.scrollTo(0, 0);
   }, [activeId]);
 
-  function navigateToTopic(topicId: string) {
-    const target = findTopic(topicId);
+  function navigateToTopic(id: string) {
+    const target = findTopic(id);
     if (target) selectTopic(target);
   }
 
@@ -54,7 +68,7 @@ export function HelpDialog({ dark, topicId, onClose }: HelpDialogProps) {
   const mdComponents = useMemo(() => markdownComponents(dark, navigateToTopic), [dark, expanded]);
 
   function selectTopic(t: HelpTopic) {
-    setActiveId(t.id);
+    onNavigate(t.id);
     // Auto-expand when selecting a parent topic
     if (t.children && !expanded.has(t.id)) {
       setExpanded((prev) => new Set(prev).add(t.id));

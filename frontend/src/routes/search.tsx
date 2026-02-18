@@ -7,6 +7,7 @@ export const searchRoute = createRoute({
   path: "/search",
   validateSearch: (search: Record<string, unknown>) => ({
     q: (search.q as string) || "",
+    help: (search.help as string) || undefined,
   }),
   component: SearchView,
 });

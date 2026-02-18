@@ -81,7 +81,7 @@ export function AuthPage({ mode }: AuthPageProps) {
       } else {
         await login.mutateAsync({ username: username.trim(), password });
       }
-      navigate({ to: "/search", search: { q: "" } });
+      navigate({ to: "/search", search: { q: "", help: undefined } });
     } catch (err) {
       if (err instanceof ConnectError) {
         setError(err.rawMessage);

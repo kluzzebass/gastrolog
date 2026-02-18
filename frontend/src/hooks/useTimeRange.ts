@@ -25,7 +25,7 @@ export function useTimeRange(q: string, isReversed: boolean) {
       }
       const newQuery = injectTimeRange(q, range, isReversed);
       // Time ranges imply search mode — switch away from follow if active.
-      navigate({ to: "/search", search: { q: newQuery }, replace: false });
+      navigate({ to: "/search", search: (prev: Record<string, unknown>) => ({ ...prev, q: newQuery }), replace: false } as any);
     },
     [q, isReversed, navigate],
   );
@@ -39,7 +39,7 @@ export function useTimeRange(q: string, isReversed: boolean) {
       const base = stripTimeRange(q);
       const newQuery = base ? `${tokens} ${base}` : tokens;
       // Time ranges imply search mode — switch away from follow if active.
-      navigate({ to: "/search", search: { q: newQuery }, replace: false });
+      navigate({ to: "/search", search: (prev: Record<string, unknown>) => ({ ...prev, q: newQuery }), replace: false } as any);
     },
     [q, isReversed, navigate],
   );

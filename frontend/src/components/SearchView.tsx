@@ -59,7 +59,7 @@ import { QueryBar } from "./QueryBar";
 import { useConfig } from "../api/hooks/useConfig";
 
 export function SearchView() {
-  const { q } = useRouterSearch({ strict: false }) as { q: string };
+  const { q, help: helpParam } = useRouterSearch({ strict: false }) as { q: string; help?: string };
   const navigate = useNavigate({ from: "/search" });
   const location = useLocation();
   const isFollowMode = location.pathname === "/follow";
@@ -94,15 +94,12 @@ export function SearchView() {
     showHistory, setShowHistory,
     showSavedQueries, setShowSavedQueries,
     showChangePassword, setShowChangePassword,
-    showHelpDialog, setShowHelpDialog,
-    helpTopic, setHelpTopic,
     inspectorGlow,
   } = useDialogState();
 
   const openHelp = useCallback((topicId?: string) => {
-    setHelpTopic(topicId);
-    setShowHelpDialog(true);
-  }, []);
+    navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, help: topicId || "general" }) } as any);
+  }, [navigate]);
 
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(
     null,
@@ -221,9 +218,9 @@ export function SearchView() {
     (newQ: string) => {
       navigate({
         to: isFollowMode ? "/follow" : "/search",
-        search: { q: newQ },
+        search: (prev: Record<string, unknown>) => ({ ...prev, q: newQ }),
         replace: false,
-      });
+      } as any);
     },
     [navigate, isFollowMode],
   );
@@ -287,7 +284,7 @@ export function SearchView() {
         setRangeEnd(now);
       }
       const initial = injectTimeRange("", timeRange, isReversed);
-      navigate({ search: { q: initial }, replace: true });
+      navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, q: initial }), replace: true } as any);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -369,7 +366,7 @@ export function SearchView() {
       fetchHistogram(q);
       if (showPlan) explain(q);
     } else {
-      navigate({ to: "/search", search: { q: normalized }, replace: false });
+      navigate({ to: "/search", search: (prev: Record<string, unknown>) => ({ ...prev, q: normalized }), replace: false } as any);
     }
   };
 
@@ -385,7 +382,7 @@ export function SearchView() {
       .replace(/\breverse=\S+/g, "")
       .replace(/\s+/g, " ")
       .trim();
-    navigate({ to: "/follow", search: { q: stripped }, replace: false });
+    navigate({ to: "/follow", search: (prev: Record<string, unknown>) => ({ ...prev, q: stripped }), replace: false } as any);
   };
 
   const stopFollowMode = () => {
@@ -399,7 +396,7 @@ export function SearchView() {
     // preserving the sort direction from follow mode.
     const base = stripTimeRange(draft);
     const restored = injectTimeRange(base, timeRange, followReversed);
-    navigate({ to: "/search", search: { q: restored }, replace: false });
+    navigate({ to: "/search", search: (prev: Record<string, unknown>) => ({ ...prev, q: restored }), replace: false } as any);
   };
 
   const handleShowPlan = () => {
@@ -695,11 +692,12 @@ export function SearchView() {
             />
           )}
 
-          {showHelpDialog && (
+          {helpParam && (
             <HelpDialog
               dark={dark}
-              topicId={helpTopic}
-              onClose={() => setShowHelpDialog(false)}
+              topicId={helpParam}
+              onClose={() => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, help: undefined }) } as any)}
+              onNavigate={(id) => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, help: id }) } as any)}
             />
           )}
 
@@ -752,9 +750,9 @@ export function SearchView() {
                     const newQuery = base ? `${tokens} ${base}` : tokens;
                     navigate({
                       to: "/search",
-                      search: { q: newQuery },
+                      search: (prev: Record<string, unknown>) => ({ ...prev, q: newQuery }),
                       replace: false,
-                    });
+                    } as any);
                   }}
                   onSegmentClick={handleSegmentClick}
                 />
@@ -827,9 +825,9 @@ export function SearchView() {
                 setSelectedRecord(selectedRecord);
                 navigate({
                   to: "/search",
-                  search: { q: newQuery },
+                  search: (prev: Record<string, unknown>) => ({ ...prev, q: newQuery }),
                   replace: false,
-                });
+                } as any);
               }}
             />
 
@@ -937,9 +935,9 @@ export function SearchView() {
               setSelectedRecord(rec);
               navigate({
                 to: "/search",
-                search: { q: newQuery },
+                search: (prev: Record<string, unknown>) => ({ ...prev, q: newQuery }),
                 replace: false,
-              });
+              } as any);
             } else {
               setSelectedRecord(rec);
             }
