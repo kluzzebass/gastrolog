@@ -10,13 +10,11 @@ permissions:
   packages: write
 
 jobs:
-  release:
+  prepare:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -40,9 +38,54 @@ jobs:
           cp -r ../frontend/dist/* internal/frontend/dist/
           go run ./cmd/compress-assets internal/frontend/dist
 
+      - name: Upload embedded assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: backend/internal/frontend/dist/
+          retention-days: 1
+
+  test:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: backend/go.sum
+
+      - name: Download embedded assets
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: backend/internal/frontend/dist/
+
       - name: Run tests
         working-directory: backend
         run: go test -v ./...
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: backend/go.sum
+
+      - name: Download embedded assets
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: backend/internal/frontend/dist/
 
       - name: Build binaries
         working-directory: backend
@@ -61,30 +104,6 @@ jobs:
           CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/gastrolog-darwin-arm64 ./cmd/gastrolog
 
           cd dist && sha256sum * > checksums.txt
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          platforms: linux/amd64,linux/arm64
-          build-args: VERSION=${{ github.ref_name }}
-          tags: |
-            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-            ghcr.io/${{ github.repository }}:latest
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -179,3 +198,34 @@ jobs:
           git add gastrolog.rb
           git commit -m "Update gastrolog to ${{ steps.version.outputs.version }}"
           git push
+
+  docker:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          build-args: VERSION=${{ github.ref_name }}
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            ghcr.io/${{ github.repository }}:latest
