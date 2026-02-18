@@ -146,6 +146,11 @@ func (s *ConfigServer) GetServerConfig(
 		resp.TlsDefaultCert = sc.TLS.DefaultCert
 		resp.TlsEnabled = sc.TLS.TLSEnabled
 		resp.HttpToHttpsRedirect = sc.TLS.HTTPToHTTPSRedirect
+		resp.RequireMixedCase = sc.Auth.RequireMixedCase
+		resp.RequireDigit = sc.Auth.RequireDigit
+		resp.RequireSpecial = sc.Auth.RequireSpecial
+		resp.MaxConsecutiveRepeats = int32(sc.Auth.MaxConsecutiveRepeats)
+		resp.ForbidAnimalNoise = sc.Auth.ForbidAnimalNoise
 	}
 
 	// If no persisted value, report the live default from the orchestrator.
@@ -201,6 +206,21 @@ func (s *ConfigServer) PutServerConfig(
 	}
 	if req.Msg.HttpToHttpsRedirect != nil {
 		sc.TLS.HTTPToHTTPSRedirect = *req.Msg.HttpToHttpsRedirect && sc.TLS.DefaultCert != ""
+	}
+	if req.Msg.RequireMixedCase != nil {
+		sc.Auth.RequireMixedCase = *req.Msg.RequireMixedCase
+	}
+	if req.Msg.RequireDigit != nil {
+		sc.Auth.RequireDigit = *req.Msg.RequireDigit
+	}
+	if req.Msg.RequireSpecial != nil {
+		sc.Auth.RequireSpecial = *req.Msg.RequireSpecial
+	}
+	if req.Msg.MaxConsecutiveRepeats != nil {
+		sc.Auth.MaxConsecutiveRepeats = int(*req.Msg.MaxConsecutiveRepeats)
+	}
+	if req.Msg.ForbidAnimalNoise != nil {
+		sc.Auth.ForbidAnimalNoise = *req.Msg.ForbidAnimalNoise
 	}
 
 	data, err := json.Marshal(sc)

@@ -237,6 +237,11 @@ message GetServerConfigResponse {
   string tls_default_cert = 5;
   bool tls_enabled = 6;
   bool http_to_https_redirect = 7;
+  bool require_mixed_case = 8;
+  bool require_digit = 9;
+  bool require_special = 10;
+  int32 max_consecutive_repeats = 11;
+  bool forbid_animal_noise = 12;
 }
 
 message PutServerConfigRequest {
@@ -247,6 +252,11 @@ message PutServerConfigRequest {
   optional string tls_default_cert = 5;
   optional bool tls_enabled = 6;
   optional bool http_to_https_redirect = 7;
+  optional bool require_mixed_case = 8;
+  optional bool require_digit = 9;
+  optional bool require_special = 10;
+  optional int32 max_consecutive_repeats = 11;
+  optional bool forbid_animal_noise = 12;
 }
 
 message PutServerConfigResponse {}

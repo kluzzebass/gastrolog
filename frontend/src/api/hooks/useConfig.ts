@@ -128,6 +128,11 @@ export function usePutServerConfig() {
       tlsDefaultCert?: string;
       tlsEnabled?: boolean;
       httpToHttpsRedirect?: boolean;
+      requireMixedCase?: boolean;
+      requireDigit?: boolean;
+      requireSpecial?: boolean;
+      maxConsecutiveRepeats?: number;
+      forbidAnimalNoise?: boolean;
     }) => {
       const req: Record<string, unknown> = {};
       if (args.tokenDuration !== undefined) req.tokenDuration = args.tokenDuration;
@@ -142,6 +147,16 @@ export function usePutServerConfig() {
       if (args.tlsEnabled !== undefined) req.tlsEnabled = args.tlsEnabled;
       if (args.httpToHttpsRedirect !== undefined)
         req.httpToHttpsRedirect = args.httpToHttpsRedirect;
+      if (args.requireMixedCase !== undefined)
+        req.requireMixedCase = args.requireMixedCase;
+      if (args.requireDigit !== undefined)
+        req.requireDigit = args.requireDigit;
+      if (args.requireSpecial !== undefined)
+        req.requireSpecial = args.requireSpecial;
+      if (args.maxConsecutiveRepeats !== undefined)
+        req.maxConsecutiveRepeats = args.maxConsecutiveRepeats;
+      if (args.forbidAnimalNoise !== undefined)
+        req.forbidAnimalNoise = args.forbidAnimalNoise;
       await configClient.putServerConfig(req as Parameters<typeof configClient.putServerConfig>[0]);
     },
     onSuccess: () => {

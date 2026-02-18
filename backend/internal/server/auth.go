@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -35,21 +36,91 @@ func NewAuthServer(cfgStore config.Store, tokens *auth.TokenService) *AuthServer
 	}
 }
 
-// minPasswordLength reads the configured minimum password length from the
-// server config, defaulting to 8.
-func (s *AuthServer) minPasswordLength(ctx context.Context) int {
+// animalNoises is the set of recognised animal sounds for password validation.
+var animalNoises = []string{
+	"moo", "woof", "bark", "meow", "oink", "quack", "baa", "neigh",
+	"roar", "hiss", "chirp", "tweet", "cluck", "ribbit", "buzz",
+	"howl", "purr", "squeak", "growl", "caw", "gobble",
+}
+
+// passwordPolicy holds the password complexity rules loaded from server config.
+type passwordPolicy struct {
+	MinLength             int
+	RequireMixedCase      bool
+	RequireDigit          bool
+	RequireSpecial        bool
+	MaxConsecutiveRepeats int
+	ForbidAnimalNoise    bool
+}
+
+// loadPasswordPolicy reads the password policy from server config.
+func (s *AuthServer) loadPasswordPolicy(ctx context.Context) passwordPolicy {
+	p := passwordPolicy{MinLength: 8}
 	raw, err := s.cfgStore.GetSetting(ctx, "server")
 	if err != nil || raw == nil {
-		return 8
+		return p
 	}
 	var sc config.ServerConfig
 	if err := json.Unmarshal([]byte(*raw), &sc); err != nil {
-		return 8
+		return p
 	}
 	if sc.Auth.MinPasswordLength > 0 {
-		return sc.Auth.MinPasswordLength
+		p.MinLength = sc.Auth.MinPasswordLength
 	}
-	return 8
+	p.RequireMixedCase = sc.Auth.RequireMixedCase
+	p.RequireDigit = sc.Auth.RequireDigit
+	p.RequireSpecial = sc.Auth.RequireSpecial
+	p.MaxConsecutiveRepeats = sc.Auth.MaxConsecutiveRepeats
+	p.ForbidAnimalNoise = sc.Auth.ForbidAnimalNoise
+	return p
+}
+
+// validatePassword checks a password against the policy and returns a descriptive error.
+func validatePassword(pw string, p passwordPolicy) error {
+	if utf8.RuneCountInString(pw) < p.MinLength {
+		return fmt.Errorf("password must be at least %d characters", p.MinLength)
+	}
+	if p.RequireMixedCase {
+		hasLower := regexp.MustCompile(`[a-z]`).MatchString(pw)
+		hasUpper := regexp.MustCompile(`[A-Z]`).MatchString(pw)
+		if !hasLower || !hasUpper {
+			return fmt.Errorf("password must contain both uppercase and lowercase letters")
+		}
+	}
+	if p.RequireDigit {
+		if !regexp.MustCompile(`[0-9]`).MatchString(pw) {
+			return fmt.Errorf("password must contain at least one digit")
+		}
+	}
+	if p.RequireSpecial {
+		if !regexp.MustCompile(`[^a-zA-Z0-9]`).MatchString(pw) {
+			return fmt.Errorf("password must contain at least one special character")
+		}
+	}
+	if p.MaxConsecutiveRepeats > 0 {
+		count := 1
+		var prev rune
+		for i, r := range pw {
+			if i > 0 && r == prev {
+				count++
+				if count > p.MaxConsecutiveRepeats {
+					return fmt.Errorf("password must not have more than %d identical characters in a row", p.MaxConsecutiveRepeats)
+				}
+			} else {
+				count = 1
+			}
+			prev = r
+		}
+	}
+	if p.ForbidAnimalNoise {
+		lower := strings.ToLower(pw)
+		for _, noise := range animalNoises {
+			if strings.Contains(lower, noise) {
+				return fmt.Errorf("password must not contain animal noises (e.g. moo, woof, meow)")
+			}
+		}
+	}
+	return nil
 }
 
 // Register creates the first user account during initial setup.
@@ -78,9 +149,8 @@ func (s *AuthServer) Register(
 	}
 
 	// Validate password.
-	if minLen := s.minPasswordLength(ctx); utf8.RuneCountInString(password) < minLen {
-		return nil, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("password must be at least %d characters", minLen))
+	if err := validatePassword(password, s.loadPasswordPolicy(ctx)); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
 	// Hash password.
@@ -170,9 +240,8 @@ func (s *AuthServer) ChangePassword(
 	newPassword := req.Msg.NewPassword
 
 	// Validate new password.
-	if minLen := s.minPasswordLength(ctx); utf8.RuneCountInString(newPassword) < minLen {
-		return nil, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("new password must be at least %d characters", minLen))
+	if err := validatePassword(newPassword, s.loadPasswordPolicy(ctx)); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
 	// Verify old password.
@@ -234,9 +303,8 @@ func (s *AuthServer) CreateUser(
 			fmt.Errorf("username must be 3-64 characters, alphanumeric, underscores, or hyphens"))
 	}
 
-	if minLen := s.minPasswordLength(ctx); utf8.RuneCountInString(password) < minLen {
-		return nil, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("password must be at least %d characters", minLen))
+	if err := validatePassword(password, s.loadPasswordPolicy(ctx)); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
 	if role != "admin" && role != "user" {
@@ -345,9 +413,8 @@ func (s *AuthServer) ResetPassword(
 	}
 	newPassword := req.Msg.NewPassword
 
-	if minLen := s.minPasswordLength(ctx); utf8.RuneCountInString(newPassword) < minLen {
-		return nil, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("password must be at least %d characters", minLen))
+	if err := validatePassword(newPassword, s.loadPasswordPolicy(ctx)); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
 	user, err := s.cfgStore.GetUser(ctx, userID)

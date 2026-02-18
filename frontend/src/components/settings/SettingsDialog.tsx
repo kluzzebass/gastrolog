@@ -151,6 +151,11 @@ function ServiceSettings({ dark }: { dark: boolean }) {
   const [tlsDefaultCert, setTlsDefaultCert] = useState("");
   const [tlsEnabled, setTlsEnabled] = useState(false);
   const [httpToHttpsRedirect, setHttpToHttpsRedirect] = useState(false);
+  const [requireMixedCase, setRequireMixedCase] = useState(false);
+  const [requireDigit, setRequireDigit] = useState(false);
+  const [requireSpecial, setRequireSpecial] = useState(false);
+  const [maxConsecutiveRepeats, setMaxConsecutiveRepeats] = useState("");
+  const [forbidAnimalNoise, setForbidAnimalNoise] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
 
@@ -169,6 +174,11 @@ function ServiceSettings({ dark }: { dark: boolean }) {
       setTlsDefaultCert(data.tlsDefaultCert ?? "");
       setTlsEnabled(data.tlsEnabled ?? false);
       setHttpToHttpsRedirect(data.httpToHttpsRedirect ?? false);
+      setRequireMixedCase(data.requireMixedCase ?? false);
+      setRequireDigit(data.requireDigit ?? false);
+      setRequireSpecial(data.requireSpecial ?? false);
+      setMaxConsecutiveRepeats(data.maxConsecutiveRepeats ? String(data.maxConsecutiveRepeats) : "0");
+      setForbidAnimalNoise(data.forbidAnimalNoise ?? false);
       setInitialized(true);
     }
   }, [data, initialized]);
@@ -182,7 +192,12 @@ function ServiceSettings({ dark }: { dark: boolean }) {
       maxJobs !== String(data.maxConcurrentJobs || 4) ||
       tlsDefaultCert !== (data.tlsDefaultCert ?? "") ||
       tlsEnabled !== (data.tlsEnabled ?? false) ||
-      httpToHttpsRedirect !== (data.httpToHttpsRedirect ?? false));
+      httpToHttpsRedirect !== (data.httpToHttpsRedirect ?? false) ||
+      requireMixedCase !== (data.requireMixedCase ?? false) ||
+      requireDigit !== (data.requireDigit ?? false) ||
+      requireSpecial !== (data.requireSpecial ?? false) ||
+      maxConsecutiveRepeats !== String(data.maxConsecutiveRepeats || 0) ||
+      forbidAnimalNoise !== (data.forbidAnimalNoise ?? false));
 
   const handleSave = async () => {
     try {
@@ -195,6 +210,11 @@ function ServiceSettings({ dark }: { dark: boolean }) {
         tlsEnabled: certIds.includes(tlsDefaultCert) ? tlsEnabled : false,
         httpToHttpsRedirect:
           certIds.includes(tlsDefaultCert) ? httpToHttpsRedirect : false,
+        requireMixedCase,
+        requireDigit,
+        requireSpecial,
+        maxConsecutiveRepeats: parseInt(maxConsecutiveRepeats, 10) || 0,
+        forbidAnimalNoise,
       });
       addToast("Server configuration updated", "info");
     } catch (err: any) {
@@ -213,6 +233,11 @@ function ServiceSettings({ dark }: { dark: boolean }) {
       setTlsDefaultCert(data.tlsDefaultCert ?? "");
       setTlsEnabled(data.tlsEnabled ?? false);
       setHttpToHttpsRedirect(data.httpToHttpsRedirect ?? false);
+      setRequireMixedCase(data.requireMixedCase ?? false);
+      setRequireDigit(data.requireDigit ?? false);
+      setRequireSpecial(data.requireSpecial ?? false);
+      setMaxConsecutiveRepeats(data.maxConsecutiveRepeats ? String(data.maxConsecutiveRepeats) : "0");
+      setForbidAnimalNoise(data.forbidAnimalNoise ?? false);
     }
   };
 
@@ -236,132 +261,181 @@ function ServiceSettings({ dark }: { dark: boolean }) {
           Loading...
         </div>
       ) : (
-        <div className="flex flex-col gap-5 max-w-lg">
-          <FormField
-            label="Token Duration"
-            description="How long authentication tokens remain valid. Use Go duration syntax, e.g. 168h, 720h, 24h."
-            dark={dark}
-          >
-            <TextInput
-              value={tokenDuration}
-              onChange={setTokenDuration}
-              placeholder="168h"
+        <div className="flex flex-col gap-8 max-w-lg">
+          {/* ── Authentication ── */}
+          <section className="flex flex-col gap-5">
+            <h3 className={`text-[0.75em] uppercase tracking-wider font-medium pb-1 border-b ${c("text-text-ghost border-ink-border", "text-light-text-ghost border-light-border")}`}>
+              Authentication
+            </h3>
+
+            <FormField
+              label="Token Duration"
+              description="How long authentication tokens remain valid. Use Go duration syntax, e.g. 168h, 720h, 24h."
               dark={dark}
-              mono
-            />
-          </FormField>
-
-          <FormField
-            label="JWT Secret"
-            description="The signing key used for authentication tokens. Never shown; paste a new value to change. Changing this will invalidate all existing sessions."
-            dark={dark}
-          >
-            <div className="relative">
-              <input
-                type={showSecret ? "text" : "password"}
-                value={jwtSecret === JWT_KEEP ? "" : jwtSecret}
-                onChange={(e) => setJwtSecret(e.target.value)}
-                placeholder={data?.jwtSecretConfigured ? "•••••••• (paste to replace)" : "Set JWT secret"}
-                className={`w-full px-2.5 py-1.5 pr-9 text-[0.85em] font-mono border rounded focus:outline-none transition-colors ${c(
-                  "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-                  "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
-                )}`}
-              />
-              <button
-                type="button"
-                onClick={() => setShowSecret(!showSecret)}
-                className={`absolute right-2 top-1/2 -translate-y-1/2 transition-colors ${c(
-                  "text-text-ghost hover:text-text-muted",
-                  "text-light-text-ghost hover:text-light-text-muted",
-                )}`}
-              >
-                {showSecret ? (
-                  <EyeOffIcon className="w-4 h-4" />
-                ) : (
-                  <EyeIcon className="w-4 h-4" />
-                )}
-              </button>
-            </div>
-          </FormField>
-
-          <FormField
-            label="Minimum Password Length"
-            description="The minimum number of characters required for user passwords."
-            dark={dark}
-          >
-            <NumberInput
-              value={minPwLen}
-              onChange={setMinPwLen}
-              placeholder="8"
-              dark={dark}
-              min={1}
-            />
-          </FormField>
-
-          <FormField
-            label="Max Concurrent Jobs"
-            description="Maximum number of scheduler jobs (index builds, rotation, retention) that can run in parallel."
-            dark={dark}
-          >
-            <NumberInput
-              value={maxJobs}
-              onChange={setMaxJobs}
-              placeholder="4"
-              dark={dark}
-              min={1}
-            />
-          </FormField>
-
-          <FormField
-            label="TLS default certificate"
-            description="Certificate used for HTTPS. Set in Certificates tab."
-            dark={dark}
-          >
-            <select
-              value={tlsDefaultCert}
-              onChange={(e) => setTlsDefaultCert(e.target.value)}
-              className={`w-full px-2.5 py-1.5 text-[0.85em] border rounded focus:outline-none transition-colors ${c(
-                "bg-ink-surface border-ink-border text-text-bright focus:border-copper-dim",
-                "bg-light-surface border-light-border text-light-text-bright focus:border-copper",
-              )}`}
             >
-              <option value="">— none —</option>
-              {certs.map((cert) => (
-                <option key={cert.id} value={cert.id}>
-                  {cert.name || cert.id}
-                </option>
-              ))}
-            </select>
-          </FormField>
+              <TextInput
+                value={tokenDuration}
+                onChange={setTokenDuration}
+                placeholder="168h"
+                dark={dark}
+                mono
+              />
+            </FormField>
 
-          {tlsDefaultCert && (
-            <>
+            <FormField
+              label="JWT Secret"
+              description="The signing key used for authentication tokens. Never shown; paste a new value to change. Changing this will invalidate all existing sessions."
+              dark={dark}
+            >
+              <div className="relative">
+                <input
+                  type={showSecret ? "text" : "password"}
+                  value={jwtSecret === JWT_KEEP ? "" : jwtSecret}
+                  onChange={(e) => setJwtSecret(e.target.value)}
+                  placeholder={data?.jwtSecretConfigured ? "•••••••• (paste to replace)" : "Set JWT secret"}
+                  className={`w-full px-2.5 py-1.5 pr-9 text-[0.85em] font-mono border rounded focus:outline-none transition-colors ${c(
+                    "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
+                    "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
+                  )}`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowSecret(!showSecret)}
+                  className={`absolute right-2 top-1/2 -translate-y-1/2 transition-colors ${c(
+                    "text-text-ghost hover:text-text-muted",
+                    "text-light-text-ghost hover:text-light-text-muted",
+                  )}`}
+                >
+                  {showSecret ? (
+                    <EyeOffIcon className="w-4 h-4" />
+                  ) : (
+                    <EyeIcon className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
+            </FormField>
+          </section>
+
+          {/* ── Password Policy ── */}
+          <section className="flex flex-col gap-5">
+            <h3 className={`text-[0.75em] uppercase tracking-wider font-medium pb-1 border-b ${c("text-text-ghost border-ink-border", "text-light-text-ghost border-light-border")}`}>
+              Password Policy
+            </h3>
+
+            <div className="flex items-baseline gap-4">
               <FormField
-                label="Enable TLS (HTTPS)"
-                description="Serve HTTPS when a default certificate is set"
+                label="Minimum length"
                 dark={dark}
               >
-                <Checkbox
-                  checked={tlsEnabled}
-                  onChange={setTlsEnabled}
+                <NumberInput
+                  value={minPwLen}
+                  onChange={setMinPwLen}
+                  placeholder="8"
                   dark={dark}
+                  min={1}
                 />
               </FormField>
-              {tlsEnabled && (
+
+              <FormField
+                label="Max consecutive repeats"
+                dark={dark}
+              >
+                <NumberInput
+                  value={maxConsecutiveRepeats}
+                  onChange={setMaxConsecutiveRepeats}
+                  placeholder="0 (no limit)"
+                  dark={dark}
+                  min={0}
+                />
+              </FormField>
+            </div>
+
+            <div className="flex flex-col gap-2.5">
+              <Checkbox checked={requireMixedCase} onChange={setRequireMixedCase} label="Require mixed case (upper + lowercase)" dark={dark} />
+              <Checkbox checked={requireDigit} onChange={setRequireDigit} label="Require digit (0-9)" dark={dark} />
+              <Checkbox checked={requireSpecial} onChange={setRequireSpecial} label="Require special character" dark={dark} />
+              <Checkbox checked={forbidAnimalNoise} onChange={setForbidAnimalNoise} label="Forbid animal noises (moo, woof, meow, …)" dark={dark} />
+            </div>
+          </section>
+
+          {/* ── Scheduler ── */}
+          <section className="flex flex-col gap-5">
+            <h3 className={`text-[0.75em] uppercase tracking-wider font-medium pb-1 border-b ${c("text-text-ghost border-ink-border", "text-light-text-ghost border-light-border")}`}>
+              Scheduler
+            </h3>
+
+            <FormField
+              label="Max Concurrent Jobs"
+              description="Maximum number of scheduler jobs (index builds, rotation, retention) that can run in parallel."
+              dark={dark}
+            >
+              <NumberInput
+                value={maxJobs}
+                onChange={setMaxJobs}
+                placeholder="4"
+                dark={dark}
+                min={1}
+              />
+            </FormField>
+          </section>
+
+          {/* ── TLS ── */}
+          <section className="flex flex-col gap-5">
+            <h3 className={`text-[0.75em] uppercase tracking-wider font-medium pb-1 border-b ${c("text-text-ghost border-ink-border", "text-light-text-ghost border-light-border")}`}>
+              TLS
+            </h3>
+
+            <FormField
+              label="Default certificate"
+              description="Certificate used for HTTPS. Set in Certificates tab."
+              dark={dark}
+            >
+              <select
+                value={tlsDefaultCert}
+                onChange={(e) => setTlsDefaultCert(e.target.value)}
+                className={`w-full px-2.5 py-1.5 text-[0.85em] border rounded focus:outline-none transition-colors ${c(
+                  "bg-ink-surface border-ink-border text-text-bright focus:border-copper-dim",
+                  "bg-light-surface border-light-border text-light-text-bright focus:border-copper",
+                )}`}
+              >
+                <option value="">— none —</option>
+                {certs.map((cert) => (
+                  <option key={cert.id} value={cert.id}>
+                    {cert.name || cert.id}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+
+            {tlsDefaultCert && (
+              <>
                 <FormField
-                  label="Redirect HTTP to HTTPS"
-                  description="Redirect plain HTTP requests to HTTPS"
+                  label="Enable TLS (HTTPS)"
+                  description="Serve HTTPS when a default certificate is set"
                   dark={dark}
                 >
                   <Checkbox
-                    checked={httpToHttpsRedirect}
-                    onChange={setHttpToHttpsRedirect}
+                    checked={tlsEnabled}
+                    onChange={setTlsEnabled}
                     dark={dark}
                   />
                 </FormField>
-              )}
-            </>
-          )}
+                {tlsEnabled && (
+                  <FormField
+                    label="Redirect HTTP to HTTPS"
+                    description="Redirect plain HTTP requests to HTTPS"
+                    dark={dark}
+                  >
+                    <Checkbox
+                      checked={httpToHttpsRedirect}
+                      onChange={setHttpToHttpsRedirect}
+                      dark={dark}
+                    />
+                  </FormField>
+                )}
+              </>
+            )}
+          </section>
 
           <div className="flex gap-2 mt-1">
             <PrimaryButton

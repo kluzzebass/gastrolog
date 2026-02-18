@@ -152,9 +152,14 @@ type SchedulerConfig struct {
 
 // AuthConfig holds configuration for user authentication.
 type AuthConfig struct {
-	JWTSecret         string `json:"jwt_secret,omitempty"`
-	TokenDuration     string `json:"token_duration,omitempty"`      // Go duration, e.g. "168h"
-	MinPasswordLength int    `json:"min_password_length,omitempty"` // default 8
+	JWTSecret             string `json:"jwt_secret,omitempty"`
+	TokenDuration         string `json:"token_duration,omitempty"`          // Go duration, e.g. "168h"
+	MinPasswordLength     int    `json:"min_password_length,omitempty"`     // default 8
+	RequireMixedCase      bool   `json:"require_mixed_case,omitempty"`      // require upper and lowercase
+	RequireDigit          bool   `json:"require_digit,omitempty"`           // require at least one digit
+	RequireSpecial        bool   `json:"require_special,omitempty"`         // require at least one special char
+	MaxConsecutiveRepeats int    `json:"max_consecutive_repeats,omitempty"` // 0 = no limit
+	ForbidAnimalNoise    bool   `json:"forbid_animal_noise,omitempty"`    // require an animal noise
 }
 
 // User represents a user account.

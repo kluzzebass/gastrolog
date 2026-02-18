@@ -7,8 +7,10 @@ import {
   useDeleteUser,
   useCurrentUser,
 } from "../../api/hooks/useAuth";
+import { useServerConfig } from "../../api/hooks/useConfig";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
+import { PasswordRules } from "../auth/PasswordRules";
 import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
@@ -29,6 +31,7 @@ export function UsersSettings({ dark }: { dark: boolean }) {
   const updateUserRole = useUpdateUserRole();
   const deleteUser = useDeleteUser();
   const currentUser = useCurrentUser();
+  const { data: serverConfig } = useServerConfig();
   const { addToast } = useToast();
 
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -159,6 +162,9 @@ export function UsersSettings({ dark }: { dark: boolean }) {
               dark={dark}
             />
           </FormField>
+          {serverConfig && (
+            <PasswordRules password={newPassword} config={serverConfig} dark={dark} />
+          )}
         </AddFormCard>
       )}
 
@@ -218,35 +224,40 @@ export function UsersSettings({ dark }: { dark: boolean }) {
 
               {/* Reset password */}
               {resetOpen === user.id ? (
-                <div className="flex items-end gap-3">
-                  <div className="flex-1">
-                    <FormField label="New Password" dark={dark}>
-                      <PasswordInput
-                        value={resetPw}
-                        onChange={setResetPw}
-                        show={showResetPw}
-                        onToggle={() => setShowResetPw(!showResetPw)}
-                        placeholder="new password"
-                        dark={dark}
-                      />
-                    </FormField>
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-end gap-3">
+                    <div className="flex-1">
+                      <FormField label="New Password" dark={dark}>
+                        <PasswordInput
+                          value={resetPw}
+                          onChange={setResetPw}
+                          show={showResetPw}
+                          onToggle={() => setShowResetPw(!showResetPw)}
+                          placeholder="new password"
+                          dark={dark}
+                        />
+                      </FormField>
+                    </div>
+                    <PrimaryButton
+                      onClick={() => handleResetPassword(user)}
+                      disabled={resetPassword.isPending}
+                    >
+                      {resetPassword.isPending ? "Resetting..." : "Reset"}
+                    </PrimaryButton>
+                    <GhostButton
+                      onClick={() => {
+                        setResetOpen(null);
+                        setResetPw("");
+                        setShowResetPw(false);
+                      }}
+                      dark={dark}
+                    >
+                      Cancel
+                    </GhostButton>
                   </div>
-                  <PrimaryButton
-                    onClick={() => handleResetPassword(user)}
-                    disabled={resetPassword.isPending}
-                  >
-                    {resetPassword.isPending ? "Resetting..." : "Reset"}
-                  </PrimaryButton>
-                  <GhostButton
-                    onClick={() => {
-                      setResetOpen(null);
-                      setResetPw("");
-                      setShowResetPw(false);
-                    }}
-                    dark={dark}
-                  >
-                    Cancel
-                  </GhostButton>
+                  {serverConfig && (
+                    <PasswordRules password={resetPw} config={serverConfig} dark={dark} />
+                  )}
                 </div>
               ) : (
                 <GhostButton

@@ -1650,16 +1650,21 @@ func (*GetServerConfigRequest) Descriptor() ([]byte, []int) {
 }
 
 type GetServerConfigResponse struct {
-	state               protoimpl.MessageState `protogen:"open.v1"`
-	TokenDuration       string                 `protobuf:"bytes,1,opt,name=token_duration,json=tokenDuration,proto3" json:"token_duration,omitempty"`
-	JwtSecretConfigured bool                   `protobuf:"varint,2,opt,name=jwt_secret_configured,json=jwtSecretConfigured,proto3" json:"jwt_secret_configured,omitempty"` // True when a JWT secret exists; the secret itself is never returned.
-	MinPasswordLength   int32                  `protobuf:"varint,3,opt,name=min_password_length,json=minPasswordLength,proto3" json:"min_password_length,omitempty"`
-	MaxConcurrentJobs   int32                  `protobuf:"varint,4,opt,name=max_concurrent_jobs,json=maxConcurrentJobs,proto3" json:"max_concurrent_jobs,omitempty"`
-	TlsDefaultCert      string                 `protobuf:"bytes,5,opt,name=tls_default_cert,json=tlsDefaultCert,proto3" json:"tls_default_cert,omitempty"`
-	TlsEnabled          bool                   `protobuf:"varint,6,opt,name=tls_enabled,json=tlsEnabled,proto3" json:"tls_enabled,omitempty"`
-	HttpToHttpsRedirect bool                   `protobuf:"varint,7,opt,name=http_to_https_redirect,json=httpToHttpsRedirect,proto3" json:"http_to_https_redirect,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	TokenDuration         string                 `protobuf:"bytes,1,opt,name=token_duration,json=tokenDuration,proto3" json:"token_duration,omitempty"`
+	JwtSecretConfigured   bool                   `protobuf:"varint,2,opt,name=jwt_secret_configured,json=jwtSecretConfigured,proto3" json:"jwt_secret_configured,omitempty"` // True when a JWT secret exists; the secret itself is never returned.
+	MinPasswordLength     int32                  `protobuf:"varint,3,opt,name=min_password_length,json=minPasswordLength,proto3" json:"min_password_length,omitempty"`
+	MaxConcurrentJobs     int32                  `protobuf:"varint,4,opt,name=max_concurrent_jobs,json=maxConcurrentJobs,proto3" json:"max_concurrent_jobs,omitempty"`
+	TlsDefaultCert        string                 `protobuf:"bytes,5,opt,name=tls_default_cert,json=tlsDefaultCert,proto3" json:"tls_default_cert,omitempty"`
+	TlsEnabled            bool                   `protobuf:"varint,6,opt,name=tls_enabled,json=tlsEnabled,proto3" json:"tls_enabled,omitempty"`
+	HttpToHttpsRedirect   bool                   `protobuf:"varint,7,opt,name=http_to_https_redirect,json=httpToHttpsRedirect,proto3" json:"http_to_https_redirect,omitempty"`
+	RequireMixedCase      bool                   `protobuf:"varint,8,opt,name=require_mixed_case,json=requireMixedCase,proto3" json:"require_mixed_case,omitempty"`
+	RequireDigit          bool                   `protobuf:"varint,9,opt,name=require_digit,json=requireDigit,proto3" json:"require_digit,omitempty"`
+	RequireSpecial        bool                   `protobuf:"varint,10,opt,name=require_special,json=requireSpecial,proto3" json:"require_special,omitempty"`
+	MaxConsecutiveRepeats int32                  `protobuf:"varint,11,opt,name=max_consecutive_repeats,json=maxConsecutiveRepeats,proto3" json:"max_consecutive_repeats,omitempty"`
+	ForbidAnimalNoise     bool                   `protobuf:"varint,12,opt,name=forbid_animal_noise,json=forbidAnimalNoise,proto3" json:"forbid_animal_noise,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *GetServerConfigResponse) Reset() {
@@ -1741,17 +1746,57 @@ func (x *GetServerConfigResponse) GetHttpToHttpsRedirect() bool {
 	return false
 }
 
+func (x *GetServerConfigResponse) GetRequireMixedCase() bool {
+	if x != nil {
+		return x.RequireMixedCase
+	}
+	return false
+}
+
+func (x *GetServerConfigResponse) GetRequireDigit() bool {
+	if x != nil {
+		return x.RequireDigit
+	}
+	return false
+}
+
+func (x *GetServerConfigResponse) GetRequireSpecial() bool {
+	if x != nil {
+		return x.RequireSpecial
+	}
+	return false
+}
+
+func (x *GetServerConfigResponse) GetMaxConsecutiveRepeats() int32 {
+	if x != nil {
+		return x.MaxConsecutiveRepeats
+	}
+	return 0
+}
+
+func (x *GetServerConfigResponse) GetForbidAnimalNoise() bool {
+	if x != nil {
+		return x.ForbidAnimalNoise
+	}
+	return false
+}
+
 type PutServerConfigRequest struct {
-	state               protoimpl.MessageState `protogen:"open.v1"`
-	TokenDuration       *string                `protobuf:"bytes,1,opt,name=token_duration,json=tokenDuration,proto3,oneof" json:"token_duration,omitempty"`
-	JwtSecret           *string                `protobuf:"bytes,2,opt,name=jwt_secret,json=jwtSecret,proto3,oneof" json:"jwt_secret,omitempty"`
-	MinPasswordLength   *int32                 `protobuf:"varint,3,opt,name=min_password_length,json=minPasswordLength,proto3,oneof" json:"min_password_length,omitempty"`
-	MaxConcurrentJobs   *int32                 `protobuf:"varint,4,opt,name=max_concurrent_jobs,json=maxConcurrentJobs,proto3,oneof" json:"max_concurrent_jobs,omitempty"`
-	TlsDefaultCert      *string                `protobuf:"bytes,5,opt,name=tls_default_cert,json=tlsDefaultCert,proto3,oneof" json:"tls_default_cert,omitempty"`
-	TlsEnabled          *bool                  `protobuf:"varint,6,opt,name=tls_enabled,json=tlsEnabled,proto3,oneof" json:"tls_enabled,omitempty"`
-	HttpToHttpsRedirect *bool                  `protobuf:"varint,7,opt,name=http_to_https_redirect,json=httpToHttpsRedirect,proto3,oneof" json:"http_to_https_redirect,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	TokenDuration         *string                `protobuf:"bytes,1,opt,name=token_duration,json=tokenDuration,proto3,oneof" json:"token_duration,omitempty"`
+	JwtSecret             *string                `protobuf:"bytes,2,opt,name=jwt_secret,json=jwtSecret,proto3,oneof" json:"jwt_secret,omitempty"`
+	MinPasswordLength     *int32                 `protobuf:"varint,3,opt,name=min_password_length,json=minPasswordLength,proto3,oneof" json:"min_password_length,omitempty"`
+	MaxConcurrentJobs     *int32                 `protobuf:"varint,4,opt,name=max_concurrent_jobs,json=maxConcurrentJobs,proto3,oneof" json:"max_concurrent_jobs,omitempty"`
+	TlsDefaultCert        *string                `protobuf:"bytes,5,opt,name=tls_default_cert,json=tlsDefaultCert,proto3,oneof" json:"tls_default_cert,omitempty"`
+	TlsEnabled            *bool                  `protobuf:"varint,6,opt,name=tls_enabled,json=tlsEnabled,proto3,oneof" json:"tls_enabled,omitempty"`
+	HttpToHttpsRedirect   *bool                  `protobuf:"varint,7,opt,name=http_to_https_redirect,json=httpToHttpsRedirect,proto3,oneof" json:"http_to_https_redirect,omitempty"`
+	RequireMixedCase      *bool                  `protobuf:"varint,8,opt,name=require_mixed_case,json=requireMixedCase,proto3,oneof" json:"require_mixed_case,omitempty"`
+	RequireDigit          *bool                  `protobuf:"varint,9,opt,name=require_digit,json=requireDigit,proto3,oneof" json:"require_digit,omitempty"`
+	RequireSpecial        *bool                  `protobuf:"varint,10,opt,name=require_special,json=requireSpecial,proto3,oneof" json:"require_special,omitempty"`
+	MaxConsecutiveRepeats *int32                 `protobuf:"varint,11,opt,name=max_consecutive_repeats,json=maxConsecutiveRepeats,proto3,oneof" json:"max_consecutive_repeats,omitempty"`
+	ForbidAnimalNoise     *bool                  `protobuf:"varint,12,opt,name=forbid_animal_noise,json=forbidAnimalNoise,proto3,oneof" json:"forbid_animal_noise,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *PutServerConfigRequest) Reset() {
@@ -1829,6 +1874,41 @@ func (x *PutServerConfigRequest) GetTlsEnabled() bool {
 func (x *PutServerConfigRequest) GetHttpToHttpsRedirect() bool {
 	if x != nil && x.HttpToHttpsRedirect != nil {
 		return *x.HttpToHttpsRedirect
+	}
+	return false
+}
+
+func (x *PutServerConfigRequest) GetRequireMixedCase() bool {
+	if x != nil && x.RequireMixedCase != nil {
+		return *x.RequireMixedCase
+	}
+	return false
+}
+
+func (x *PutServerConfigRequest) GetRequireDigit() bool {
+	if x != nil && x.RequireDigit != nil {
+		return *x.RequireDigit
+	}
+	return false
+}
+
+func (x *PutServerConfigRequest) GetRequireSpecial() bool {
+	if x != nil && x.RequireSpecial != nil {
+		return *x.RequireSpecial
+	}
+	return false
+}
+
+func (x *PutServerConfigRequest) GetMaxConsecutiveRepeats() int32 {
+	if x != nil && x.MaxConsecutiveRepeats != nil {
+		return *x.MaxConsecutiveRepeats
+	}
+	return 0
+}
+
+func (x *PutServerConfigRequest) GetForbidAnimalNoise() bool {
+	if x != nil && x.ForbidAnimalNoise != nil {
+		return *x.ForbidAnimalNoise
 	}
 	return false
 }
@@ -3156,7 +3236,7 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x15DeleteIngesterRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x18\n" +
 	"\x16DeleteIngesterResponse\"\x18\n" +
-	"\x16GetServerConfigRequest\"\xd4\x02\n" +
+	"\x16GetServerConfigRequest\"\xb8\x04\n" +
 	"\x17GetServerConfigResponse\x12%\n" +
 	"\x0etoken_duration\x18\x01 \x01(\tR\rtokenDuration\x122\n" +
 	"\x15jwt_secret_configured\x18\x02 \x01(\bR\x13jwtSecretConfigured\x12.\n" +
@@ -3165,7 +3245,13 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x10tls_default_cert\x18\x05 \x01(\tR\x0etlsDefaultCert\x12\x1f\n" +
 	"\vtls_enabled\x18\x06 \x01(\bR\n" +
 	"tlsEnabled\x123\n" +
-	"\x16http_to_https_redirect\x18\a \x01(\bR\x13httpToHttpsRedirect\"\xf3\x03\n" +
+	"\x16http_to_https_redirect\x18\a \x01(\bR\x13httpToHttpsRedirect\x12,\n" +
+	"\x12require_mixed_case\x18\b \x01(\bR\x10requireMixedCase\x12#\n" +
+	"\rrequire_digit\x18\t \x01(\bR\frequireDigit\x12'\n" +
+	"\x0frequire_special\x18\n" +
+	" \x01(\bR\x0erequireSpecial\x126\n" +
+	"\x17max_consecutive_repeats\x18\v \x01(\x05R\x15maxConsecutiveRepeats\x12.\n" +
+	"\x13forbid_animal_noise\x18\f \x01(\bR\x11forbidAnimalNoise\"\xe1\x06\n" +
 	"\x16PutServerConfigRequest\x12*\n" +
 	"\x0etoken_duration\x18\x01 \x01(\tH\x00R\rtokenDuration\x88\x01\x01\x12\"\n" +
 	"\n" +
@@ -3175,14 +3261,26 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x10tls_default_cert\x18\x05 \x01(\tH\x04R\x0etlsDefaultCert\x88\x01\x01\x12$\n" +
 	"\vtls_enabled\x18\x06 \x01(\bH\x05R\n" +
 	"tlsEnabled\x88\x01\x01\x128\n" +
-	"\x16http_to_https_redirect\x18\a \x01(\bH\x06R\x13httpToHttpsRedirect\x88\x01\x01B\x11\n" +
+	"\x16http_to_https_redirect\x18\a \x01(\bH\x06R\x13httpToHttpsRedirect\x88\x01\x01\x121\n" +
+	"\x12require_mixed_case\x18\b \x01(\bH\aR\x10requireMixedCase\x88\x01\x01\x12(\n" +
+	"\rrequire_digit\x18\t \x01(\bH\bR\frequireDigit\x88\x01\x01\x12,\n" +
+	"\x0frequire_special\x18\n" +
+	" \x01(\bH\tR\x0erequireSpecial\x88\x01\x01\x12;\n" +
+	"\x17max_consecutive_repeats\x18\v \x01(\x05H\n" +
+	"R\x15maxConsecutiveRepeats\x88\x01\x01\x123\n" +
+	"\x13forbid_animal_noise\x18\f \x01(\bH\vR\x11forbidAnimalNoise\x88\x01\x01B\x11\n" +
 	"\x0f_token_durationB\r\n" +
 	"\v_jwt_secretB\x16\n" +
 	"\x14_min_password_lengthB\x16\n" +
 	"\x14_max_concurrent_jobsB\x13\n" +
 	"\x11_tls_default_certB\x0e\n" +
 	"\f_tls_enabledB\x19\n" +
-	"\x17_http_to_https_redirect\"\x19\n" +
+	"\x17_http_to_https_redirectB\x15\n" +
+	"\x13_require_mixed_caseB\x10\n" +
+	"\x0e_require_digitB\x12\n" +
+	"\x10_require_specialB\x1a\n" +
+	"\x18_max_consecutive_repeatsB\x16\n" +
+	"\x14_forbid_animal_noise\"\x19\n" +
 	"\x17PutServerConfigResponse\"\x17\n" +
 	"\x15GetPreferencesRequest\".\n" +
 	"\x16GetPreferencesResponse\x12\x14\n" +

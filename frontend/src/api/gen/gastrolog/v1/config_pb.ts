@@ -1400,6 +1400,31 @@ export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
    */
   httpToHttpsRedirect = false;
 
+  /**
+   * @generated from field: bool require_mixed_case = 8;
+   */
+  requireMixedCase = false;
+
+  /**
+   * @generated from field: bool require_digit = 9;
+   */
+  requireDigit = false;
+
+  /**
+   * @generated from field: bool require_special = 10;
+   */
+  requireSpecial = false;
+
+  /**
+   * @generated from field: int32 max_consecutive_repeats = 11;
+   */
+  maxConsecutiveRepeats = 0;
+
+  /**
+   * @generated from field: bool forbid_animal_noise = 12;
+   */
+  forbidAnimalNoise = false;
+
   constructor(data?: PartialMessage<GetServerConfigResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1415,6 +1440,11 @@ export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
     { no: 5, name: "tls_default_cert", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 6, name: "tls_enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 7, name: "http_to_https_redirect", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 8, name: "require_mixed_case", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 9, name: "require_digit", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 10, name: "require_special", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 11, name: "max_consecutive_repeats", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 12, name: "forbid_animal_noise", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetServerConfigResponse {
@@ -1473,6 +1503,31 @@ export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
    */
   httpToHttpsRedirect?: boolean;
 
+  /**
+   * @generated from field: optional bool require_mixed_case = 8;
+   */
+  requireMixedCase?: boolean;
+
+  /**
+   * @generated from field: optional bool require_digit = 9;
+   */
+  requireDigit?: boolean;
+
+  /**
+   * @generated from field: optional bool require_special = 10;
+   */
+  requireSpecial?: boolean;
+
+  /**
+   * @generated from field: optional int32 max_consecutive_repeats = 11;
+   */
+  maxConsecutiveRepeats?: number;
+
+  /**
+   * @generated from field: optional bool forbid_animal_noise = 12;
+   */
+  forbidAnimalNoise?: boolean;
+
   constructor(data?: PartialMessage<PutServerConfigRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1488,6 +1543,11 @@ export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
     { no: 5, name: "tls_default_cert", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 6, name: "tls_enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
     { no: 7, name: "http_to_https_redirect", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
+    { no: 8, name: "require_mixed_case", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
+    { no: 9, name: "require_digit", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
+    { no: 10, name: "require_special", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
+    { no: 11, name: "max_consecutive_repeats", kind: "scalar", T: 5 /* ScalarType.INT32 */, opt: true },
+    { no: 12, name: "forbid_animal_noise", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutServerConfigRequest {
