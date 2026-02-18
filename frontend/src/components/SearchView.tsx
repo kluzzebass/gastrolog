@@ -64,10 +64,10 @@ export function SearchView() {
   const location = useLocation();
   const isFollowMode = location.pathname === "/follow";
 
-  // Redirect to setup wizard if no stores are configured.
+  // Redirect to setup wizard if no stores are configured and setup hasn't been skipped.
   const config = useConfig();
   useEffect(() => {
-    if (config.data && config.data.stores.length === 0) {
+    if (config.data && config.data.stores.length === 0 && !localStorage.getItem("setup_skipped")) {
       navigate({ to: "/setup" } as any);
     }
   }, [config.data]); // eslint-disable-line react-hooks/exhaustive-deps

@@ -152,6 +152,7 @@ export function SetupWizard() {
         },
       });
 
+      localStorage.removeItem("setup_skipped");
       await queryClient.invalidateQueries({ queryKey: ["config"] });
       addToast("Configuration created successfully!", "info");
       navigate({ to: "/search", search: { q: "" } });
@@ -252,7 +253,7 @@ export function SetupWizard() {
             "border-light-border-subtle",
           )}`}
         >
-          <div>
+          <div className="flex gap-2">
             {step > 0 && (
               <GhostButton
                 onClick={() => setStep(step - 1)}
@@ -262,6 +263,15 @@ export function SetupWizard() {
                 Back
               </GhostButton>
             )}
+            <GhostButton
+              onClick={() => {
+                localStorage.setItem("setup_skipped", "1");
+                navigate({ to: "/search", search: { q: "" } });
+              }}
+              dark={dark}
+            >
+              Skip
+            </GhostButton>
           </div>
           <div>
             {step > 0 && step < STEPS.length - 1 && (
