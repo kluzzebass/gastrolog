@@ -31,10 +31,29 @@ The `--bootstrap` flag starts with a default in-memory store and a chatterbox te
 docker run -p 4564:4564 ghcr.io/kluzzebass/gastrolog:latest server
 ```
 
-Or use the included [compose.yml](compose.yml) which sets up persistent volumes for config and store data:
+Example `compose.yml` with persistent volumes and all service ports:
 
-```sh
-docker compose up
+```yaml
+services:
+  gastrolog:
+    container_name: gastrolog
+    image: ghcr.io/kluzzebass/gastrolog:latest
+    ports:
+      - "4564:4564"   # HTTP  (API + web UI)
+      - "4565:4565"   # HTTPS (when TLS enabled)
+      - "514:514/udp" # Syslog (UDP)
+      - "514:514/tcp" # Syslog (TCP)
+      - "3100:3100"   # HTTP (Loki-compatible)
+      - "2514:2514"   # RELP
+    volumes:
+      - config:/config                              # Configuration database
+      - stores:/stores                              # Log store data
+      - /var/log:/logs:ro                           # Host logs (for tail ingester)
+      - /var/run/docker.sock:/var/run/docker.sock:ro # Docker (for container log ingester)
+
+volumes:
+  config:
+  stores:
 ```
 
 ### With Homebrew
