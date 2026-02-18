@@ -27,3 +27,12 @@ build-all:
 # Build Docker image
 docker tag="gastrolog:latest":
     docker build --build-arg VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev) -t {{tag}} .
+
+# Tag and push a release (triggers GitHub Actions build). Usage: just release patch
+release bump:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    version=$(svu {{bump}})
+    echo "Releasing $version"
+    git tag "$version"
+    git push origin "$version"
