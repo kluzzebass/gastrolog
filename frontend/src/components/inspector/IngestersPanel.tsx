@@ -92,7 +92,8 @@ function IngesterDetail({ id, dark }: { id: string; dark: boolean }) {
     },
     { label: "Bytes ingested", value: formatBytes(Number(data.bytesIngested)) },
     {
-      label: "Errors",
+      label: "Dropped",
+      hint: "No store filter matched, or storage I/O failed",
       value: Number(data.errors).toLocaleString(),
       isError: Number(data.errors) > 0,
     },
@@ -109,13 +110,20 @@ function IngesterDetail({ id, dark }: { id: string; dark: boolean }) {
         {stats.map((stat) => (
           <div
             key={stat.label}
-            className="flex items-center gap-3 text-[0.85em]"
+            className="flex items-start gap-3 text-[0.85em]"
           >
-            <span
-              className={`w-36 ${c("text-text-muted", "text-light-text-muted")}`}
-            >
-              {stat.label}
-            </span>
+            <div className="w-36">
+              <span
+                className={c("text-text-muted", "text-light-text-muted")}
+              >
+                {stat.label}
+              </span>
+              {stat.hint && (
+                <div className={`text-[0.8em] leading-tight mt-0.5 ${c("text-text-ghost", "text-light-text-ghost")}`}>
+                  {stat.hint}
+                </div>
+              )}
+            </div>
             <span
               className={`font-mono ${
                 stat.isError
