@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { configClient } from "../client";
+import { configClient, getToken } from "../client";
 
 export function usePreferences() {
   return useQuery({
@@ -8,6 +8,7 @@ export function usePreferences() {
       const response = await configClient.getPreferences({});
       return response;
     },
+    enabled: !!getToken(),
   });
 }
 

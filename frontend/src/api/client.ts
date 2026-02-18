@@ -46,7 +46,8 @@ const unauthInterceptor: Interceptor = (next) => async (req) => {
     if (
       err instanceof ConnectError &&
       err.code === Code.Unauthenticated &&
-      !req.service.typeName.endsWith(".AuthService")
+      !req.service.typeName.endsWith(".AuthService") &&
+      !["/login", "/register"].includes(window.location.pathname)
     ) {
       setToken(null);
       window.location.href = "/login";
