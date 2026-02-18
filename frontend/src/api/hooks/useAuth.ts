@@ -10,7 +10,6 @@ export function useAuthStatus() {
       const res = await authClient.getAuthStatus({});
       return res;
     },
-    staleTime: 0,
     retry: false,
   });
 }
