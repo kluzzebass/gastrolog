@@ -1,0 +1,174 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Embed frontend assets
+        working-directory: backend
+        run: |
+          rm -rf internal/frontend/dist/*
+          cp -r ../frontend/dist/* internal/frontend/dist/
+          go run ./cmd/compress-assets internal/frontend/dist
+
+      - name: Run tests
+        working-directory: backend
+        run: go test -v ./...
+
+      - name: Build binaries
+        working-directory: backend
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          LDFLAGS="-s -w -X main.version=$VERSION"
+
+          mkdir -p dist
+
+          # Linux
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/gastrolog-linux-amd64
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/gastrolog-linux-arm64
+
+          # macOS
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/gastrolog-darwin-amd64
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/gastrolog-darwin-arm64
+
+          cd dist && sha256sum * > checksums.txt
+
+      - name: Build and push Docker image
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          docker build --build-arg VERSION=$VERSION -t ghcr.io/${{ github.repository }}:$VERSION -t ghcr.io/${{ github.repository }}:latest .
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push Docker image
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          docker push ghcr.io/${{ github.repository }}:$VERSION
+          docker push ghcr.io/${{ github.repository }}:latest
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            backend/dist/gastrolog-linux-amd64
+            backend/dist/gastrolog-linux-arm64
+            backend/dist/gastrolog-darwin-amd64
+            backend/dist/gastrolog-darwin-arm64
+            backend/dist/checksums.txt
+          generate_release_notes: true
+
+      - name: Extract version and checksums
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION_NUM=${VERSION#v}
+          SHA256_DARWIN_X86=$(grep "gastrolog-darwin-amd64" backend/dist/checksums.txt | cut -d' ' -f1)
+          SHA256_DARWIN_ARM=$(grep "gastrolog-darwin-arm64" backend/dist/checksums.txt | cut -d' ' -f1)
+          SHA256_LINUX_X86=$(grep "gastrolog-linux-amd64" backend/dist/checksums.txt | cut -d' ' -f1)
+          SHA256_LINUX_ARM=$(grep "gastrolog-linux-arm64" backend/dist/checksums.txt | cut -d' ' -f1)
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version_number=$VERSION_NUM" >> $GITHUB_OUTPUT
+          echo "sha256_darwin_x86=$SHA256_DARWIN_X86" >> $GITHUB_OUTPUT
+          echo "sha256_darwin_arm=$SHA256_DARWIN_ARM" >> $GITHUB_OUTPUT
+          echo "sha256_linux_x86=$SHA256_LINUX_X86" >> $GITHUB_OUTPUT
+          echo "sha256_linux_arm=$SHA256_LINUX_ARM" >> $GITHUB_OUTPUT
+
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v4
+        with:
+          repository: kluzzebass/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update Homebrew formula
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          VERSION_NUM: ${{ steps.version.outputs.version_number }}
+          SHA256_DARWIN_X86: ${{ steps.version.outputs.sha256_darwin_x86 }}
+          SHA256_DARWIN_ARM: ${{ steps.version.outputs.sha256_darwin_arm }}
+          SHA256_LINUX_X86: ${{ steps.version.outputs.sha256_linux_x86 }}
+          SHA256_LINUX_ARM: ${{ steps.version.outputs.sha256_linux_arm }}
+        run: |
+          cd homebrew-tap
+          cat > gastrolog.rb << EOF
+          class Gastrolog < Formula
+            desc "Log aggregation service"
+            homepage "https://github.com/kluzzebass/gastrolog"
+            version "$VERSION_NUM"
+
+            on_macos do
+              on_intel do
+                url "https://github.com/kluzzebass/gastrolog/releases/download/$VERSION/gastrolog-darwin-amd64"
+                sha256 "$SHA256_DARWIN_X86"
+              end
+
+              on_arm do
+                url "https://github.com/kluzzebass/gastrolog/releases/download/$VERSION/gastrolog-darwin-arm64"
+                sha256 "$SHA256_DARWIN_ARM"
+              end
+            end
+
+            on_linux do
+              on_intel do
+                url "https://github.com/kluzzebass/gastrolog/releases/download/$VERSION/gastrolog-linux-amd64"
+                sha256 "$SHA256_LINUX_X86"
+              end
+
+              on_arm do
+                url "https://github.com/kluzzebass/gastrolog/releases/download/$VERSION/gastrolog-linux-arm64"
+                sha256 "$SHA256_LINUX_ARM"
+              end
+            end
+
+            def install
+              bin.install Dir["gastrolog-*"].first => "gastrolog"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/gastrolog version")
+            end
+          end
+          EOF
+
+      - name: Commit and push Homebrew formula
+        run: |
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add gastrolog.rb
+          git commit -m "Update gastrolog to ${{ steps.version.outputs.version }}"
+          git push
