@@ -1,0 +1,22 @@
+[Unit]
+Description=GastroLog log aggregation service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/gastrolog server --home /var/lib/gastrolog
+Restart=on-failure
+RestartSec=5
+
+# Security hardening
+DynamicUser=yes
+StateDirectory=gastrolog
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+ReadWritePaths=/var/lib/gastrolog
+
+[Install]
+WantedBy=multi-user.target
