@@ -29,6 +29,7 @@ import policyRetention from './policy-retention.md?raw';
 import storageEngines from './storage-engines.md?raw';
 import certificates from './certificates.md?raw';
 import userManagement from './user-management.md?raw';
+import about from './about.md?raw';
 
 export interface HelpTopic {
   id: string;
@@ -93,6 +94,7 @@ export const helpTopics: HelpTopic[] = [
       { id: 'user-management', title: 'Users & Security', content: userManagement },
     ],
   },
+  { id: 'about', title: 'About', content: about },
 ];
 
 export function findTopic(id: string): HelpTopic | undefined {
