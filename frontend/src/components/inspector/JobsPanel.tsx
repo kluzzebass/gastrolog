@@ -184,7 +184,7 @@ export function JobsPanel({ dark }: { dark: boolean }) {
         <div
           className={`flex items-center justify-center h-full text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}
         >
-          No jobs.
+          No jobs. Scheduled jobs appear when stores have rotation or retention policies.
         </div>
       )}
     </div>
