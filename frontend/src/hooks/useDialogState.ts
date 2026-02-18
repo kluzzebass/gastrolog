@@ -1,14 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { useIsFetching } from "@tanstack/react-query";
-import type { SettingsTab } from "../components/settings/SettingsDialog";
-import type { InspectorTab } from "../components/inspector/InspectorDialog";
 
 export function useDialogState() {
   const [showPlan, setShowPlan] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>("service");
-  const [showInspector, setShowInspector] = useState(false);
-  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("stores");
   const [showHistory, setShowHistory] = useState(false);
   const [showSavedQueries, setShowSavedQueries] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -27,14 +21,6 @@ export function useDialogState() {
   return {
     showPlan,
     setShowPlan,
-    showSettings,
-    setShowSettings,
-    settingsTab,
-    setSettingsTab,
-    showInspector,
-    setShowInspector,
-    inspectorTab,
-    setInspectorTab,
     showHistory,
     setShowHistory,
     showSavedQueries,

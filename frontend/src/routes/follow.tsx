@@ -8,6 +8,8 @@ export const followRoute = createRoute({
   validateSearch: (search: Record<string, unknown>) => ({
     q: (search.q as string) || "",
     help: (search.help as string) || undefined,
+    settings: (search.settings as string) || undefined,
+    inspector: (search.inspector as string) || undefined,
   }),
   component: SearchView,
 });

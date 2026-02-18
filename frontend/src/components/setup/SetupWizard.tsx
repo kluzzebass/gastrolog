@@ -155,7 +155,7 @@ export function SetupWizard() {
       localStorage.removeItem("setup_skipped");
       await queryClient.invalidateQueries({ queryKey: ["config"] });
       addToast("Configuration created successfully!", "info");
-      navigate({ to: "/search", search: { q: "", help: undefined } });
+      navigate({ to: "/search", search: { q: "", help: undefined, settings: undefined, inspector: undefined } });
     } catch (err) {
       addToast(
         err instanceof Error ? err.message : "Failed to create configuration",
@@ -266,7 +266,7 @@ export function SetupWizard() {
             <GhostButton
               onClick={() => {
                 localStorage.setItem("setup_skipped", "1");
-                navigate({ to: "/search", search: { q: "", help: undefined } });
+                navigate({ to: "/search", search: { q: "", help: undefined, settings: undefined, inspector: undefined } });
               }}
               dark={dark}
             >

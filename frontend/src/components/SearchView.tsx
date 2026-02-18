@@ -59,7 +59,7 @@ import { QueryBar } from "./QueryBar";
 import { useConfig } from "../api/hooks/useConfig";
 
 export function SearchView() {
-  const { q, help: helpParam } = useRouterSearch({ strict: false }) as { q: string; help?: string };
+  const { q, help: helpParam, settings: settingsParam, inspector: inspectorParam } = useRouterSearch({ strict: false }) as { q: string; help?: string; settings?: string; inspector?: string };
   const navigate = useNavigate({ from: "/search" });
   const location = useLocation();
   const isFollowMode = location.pathname === "/follow";
@@ -87,10 +87,6 @@ export function SearchView() {
 
   const {
     showPlan, setShowPlan,
-    showSettings, setShowSettings,
-    settingsTab, setSettingsTab,
-    showInspector, setShowInspector,
-    inspectorTab, setInspectorTab,
     showHistory, setShowHistory,
     showSavedQueries, setShowSavedQueries,
     showChangePassword, setShowChangePassword,
@@ -99,6 +95,14 @@ export function SearchView() {
 
   const openHelp = useCallback((topicId?: string) => {
     navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, help: topicId || "general" }) } as any);
+  }, [navigate]);
+
+  const openSettings = useCallback((tab?: string) => {
+    navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, settings: tab || "service" }) } as any);
+  }, [navigate]);
+
+  const openInspector = useCallback((tab?: string) => {
+    navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: tab || "stores" }) } as any);
   }, [navigate]);
 
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(
@@ -560,8 +564,8 @@ export function SearchView() {
         totalBytes={totalBytes}
         inspectorGlow={inspectorGlow}
         onShowHelp={() => openHelp()}
-        onShowInspector={() => setShowInspector(true)}
-        onShowSettings={() => setShowSettings(true)}
+        onShowInspector={() => openInspector()}
+        onShowSettings={() => openSettings()}
         currentUser={currentUser ? { username: currentUser.username, role: currentUser.role } : null}
         onChangePassword={() => setShowChangePassword(true)}
         onLogout={logout}
@@ -673,22 +677,22 @@ export function SearchView() {
             />
           )}
 
-          {showSettings && (
+          {settingsParam && (
             <SettingsDialog
               dark={dark}
-              tab={settingsTab}
-              onTabChange={setSettingsTab}
-              onClose={() => setShowSettings(false)}
+              tab={settingsParam as any}
+              onTabChange={(tab) => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, settings: tab }) } as any)}
+              onClose={() => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, settings: undefined }) } as any)}
               isAdmin={currentUser?.role === "admin"}
             />
           )}
 
-          {showInspector && (
+          {inspectorParam && (
             <InspectorDialog
               dark={dark}
-              tab={inspectorTab}
-              onTabChange={setInspectorTab}
-              onClose={() => setShowInspector(false)}
+              tab={inspectorParam as any}
+              onTabChange={(tab) => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: tab }) } as any)}
+              onClose={() => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: undefined }) } as any)}
             />
           )}
 
