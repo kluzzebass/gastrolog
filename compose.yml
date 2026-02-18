@@ -1,0 +1,13 @@
+services:
+  gastrolog:
+    image: ghcr.io/kluzzebass/gastrolog:latest
+    ports:
+      - "4564:4564"
+    volumes:
+      - config:/config
+      - stores:/stores
+    command: ["server", "--home", "/config"]
+
+volumes:
+  config:
+  stores:

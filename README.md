@@ -31,6 +31,12 @@ The `--bootstrap` flag starts with a default in-memory store and a chatterbox te
 docker run -p 4564:4564 ghcr.io/kluzzebass/gastrolog:latest server
 ```
 
+Or use the included [compose.yml](compose.yml) which sets up persistent volumes for config and store data:
+
+```sh
+docker compose up
+```
+
 ### With Homebrew
 
 ```sh
