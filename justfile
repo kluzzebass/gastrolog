@@ -11,3 +11,9 @@ frontend *args:
 # Run backend commands
 backend *args:
     @just --justfile ./backend/justfile {{args}}
+
+# Build binary with embedded frontend
+build:
+    just frontend build
+    just backend embed-frontend
+    just backend build

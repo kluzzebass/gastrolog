@@ -22,6 +22,7 @@ import (
 	"gastrolog/internal/auth"
 	"gastrolog/internal/cert"
 	"gastrolog/internal/config"
+	"gastrolog/internal/frontend"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 )
@@ -199,6 +200,11 @@ func (s *Server) buildMux() *http.ServeMux {
 	mux.Handle(gastrologv1connect.NewJobServiceHandler(jobServer, handlerOpts...))
 
 	s.registerProbes(mux)
+
+	if h := frontend.Handler(); h != nil {
+		mux.Handle("/", h)
+	}
+
 	return mux
 }
 

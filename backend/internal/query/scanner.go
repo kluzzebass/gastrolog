@@ -605,10 +605,8 @@ func matchesSingleGlob(raw []byte, pattern *regexp.Regexp) bool {
 // (e.g., com*controller matching com.example.controller).
 func matchGlobTokensOrRaw(tokens []string, raw []byte, pattern *regexp.Regexp) bool {
 	// Fast path: check tokenized words.
-	for _, tok := range tokens {
-		if pattern.MatchString(tok) {
-			return true
-		}
+	if slices.ContainsFunc(tokens, pattern.MatchString) {
+		return true
 	}
 
 	// Slow path: check whitespace-delimited words from the raw line.

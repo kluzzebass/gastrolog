@@ -15,7 +15,7 @@ export default defineConfig({
     }),
   ],
   build: {
-    chunkSizeWarningLimit: 700,
+    chunkSizeWarningLimit: 1500,
   },
   server: {
     port: 3000,

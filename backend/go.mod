@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	connectrpc.com/connect v1.19.1
 	github.com/SaveTheRbtz/zstd-seekable-format-go/pkg v0.8.0
+	github.com/andybalholm/brotli v1.2.0
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/fsnotify/fsnotify v1.9.0

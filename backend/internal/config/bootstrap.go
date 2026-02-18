@@ -28,7 +28,7 @@ func DefaultConfig() *Config {
 			{ID: rotationID, Name: "default", MaxAge: new("5m")},
 		},
 		RetentionPolicies: []RetentionPolicyConfig{
-			{ID: retentionID, Name: "default", MaxChunks: Int64Ptr(10)},
+			{ID: retentionID, Name: "default", MaxChunks: new(int64(10))},
 		},
 		Stores: []StoreConfig{
 			{

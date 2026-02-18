@@ -92,7 +92,7 @@ func TestRotationPolicyConfigToPolicy(t *testing.T) {
 	})
 
 	t.Run("maxRecords only", func(t *testing.T) {
-		cfg := RotationPolicyConfig{MaxRecords: Int64Ptr(1000)}
+		cfg := RotationPolicyConfig{MaxRecords: new(int64(1000))}
 		policy, err := cfg.ToRotationPolicy()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -116,7 +116,7 @@ func TestRotationPolicyConfigToPolicy(t *testing.T) {
 	t.Run("composite", func(t *testing.T) {
 		cfg := RotationPolicyConfig{
 			MaxBytes:   new("1MB"),
-			MaxRecords: Int64Ptr(100),
+			MaxRecords: new(int64(100)),
 		}
 		policy, err := cfg.ToRotationPolicy()
 		if err != nil {
@@ -277,7 +277,7 @@ func TestToRetentionPolicy(t *testing.T) {
 	})
 
 	t.Run("maxChunks only", func(t *testing.T) {
-		cfg := RetentionPolicyConfig{MaxChunks: Int64Ptr(5)}
+		cfg := RetentionPolicyConfig{MaxChunks: new(int64(5))}
 		policy, err := cfg.ToRetentionPolicy()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -290,7 +290,7 @@ func TestToRetentionPolicy(t *testing.T) {
 	t.Run("composite age and chunks", func(t *testing.T) {
 		cfg := RetentionPolicyConfig{
 			MaxAge:    new("720h"),
-			MaxChunks: Int64Ptr(100),
+			MaxChunks: new(int64(100)),
 		}
 		policy, err := cfg.ToRetentionPolicy()
 		if err != nil {
@@ -305,7 +305,7 @@ func TestToRetentionPolicy(t *testing.T) {
 		cfg := RetentionPolicyConfig{
 			MaxAge:    new("720h"),
 			MaxBytes:  new("10GB"),
-			MaxChunks: Int64Ptr(50),
+			MaxChunks: new(int64(50)),
 		}
 		policy, err := cfg.ToRetentionPolicy()
 		if err != nil {
@@ -349,7 +349,7 @@ func TestToRetentionPolicy(t *testing.T) {
 	})
 
 	t.Run("zero maxChunks", func(t *testing.T) {
-		cfg := RetentionPolicyConfig{MaxChunks: Int64Ptr(0)}
+		cfg := RetentionPolicyConfig{MaxChunks: new(int64(0))}
 		_, err := cfg.ToRetentionPolicy()
 		if err == nil {
 			t.Error("expected error for zero maxChunks")
@@ -357,7 +357,7 @@ func TestToRetentionPolicy(t *testing.T) {
 	})
 
 	t.Run("negative maxChunks", func(t *testing.T) {
-		cfg := RetentionPolicyConfig{MaxChunks: Int64Ptr(-1)}
+		cfg := RetentionPolicyConfig{MaxChunks: new(int64(-1))}
 		_, err := cfg.ToRetentionPolicy()
 		if err == nil {
 			t.Error("expected error for negative maxChunks")

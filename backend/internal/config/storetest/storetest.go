@@ -66,7 +66,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			Name:       "default",
 			MaxBytes:   new("64MB"),
 			MaxAge:     new("1h"),
-			MaxRecords: config.Int64Ptr(1000),
+			MaxRecords: new(int64(1000)),
 			Cron:       new("0 * * * *"),
 		}
 
@@ -227,7 +227,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			Name:      "default",
 			MaxAge:    new("720h"),
 			MaxBytes:  new("10GB"),
-			MaxChunks: config.Int64Ptr(100),
+			MaxChunks: new(int64(100)),
 		}
 
 		if err := s.PutRetentionPolicy(ctx, rp); err != nil {
@@ -293,7 +293,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if err := s.PutRetentionPolicy(ctx, config.RetentionPolicyConfig{ID: idA, Name: "a", MaxAge: new("1h")}); err != nil {
 			t.Fatalf("Put a: %v", err)
 		}
-		if err := s.PutRetentionPolicy(ctx, config.RetentionPolicyConfig{ID: idB, Name: "b", MaxChunks: config.Int64Ptr(5)}); err != nil {
+		if err := s.PutRetentionPolicy(ctx, config.RetentionPolicyConfig{ID: idB, Name: "b", MaxChunks: new(int64(5))}); err != nil {
 			t.Fatalf("Put b: %v", err)
 		}
 

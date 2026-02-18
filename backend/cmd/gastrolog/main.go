@@ -82,7 +82,7 @@ func main() {
 
 	serverCmd := &cobra.Command{
 		Use:   "server",
-		Short: "Run the Connect RPC server",
+		Short: "Start the gastrolog service",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			homeFlag, _ := cmd.Flags().GetString("home")
 			configType, _ := cmd.Flags().GetString("config-type")
@@ -96,7 +96,7 @@ func main() {
 		},
 	}
 
-	serverCmd.Flags().String("addr", ":4564", "Connect RPC server address (empty to disable)")
+	serverCmd.Flags().String("addr", ":4564", "listen address (host:port)")
 	serverCmd.Flags().Bool("bootstrap", false, "bootstrap with default config (memory store + chatterbox)")
 
 	versionCmd := &cobra.Command{
@@ -235,7 +235,7 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 		return fmt.Errorf("load certs: %w", err)
 	}
 
-	// Start Connect RPC server if address is provided.
+	// Start server if address is provided.
 	var srv *server.Server
 	var serverWg sync.WaitGroup
 	if serverAddr != "" {

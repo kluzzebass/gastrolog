@@ -29,3 +29,9 @@ run-bootstrap:
 # Runs the gastrolog backend with pprof server.
 pprof:
   go run ./cmd/gastrolog server --pprof localhost:6060
+
+# Embeds built frontend assets into the backend (brotli-compressed).
+embed-frontend:
+  rm -rf internal/frontend/dist/*
+  cp -r ../frontend/dist/* internal/frontend/dist/
+  go run ./cmd/compress-assets internal/frontend/dist
