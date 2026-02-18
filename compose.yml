@@ -2,7 +2,8 @@ services:
   gastrolog:
     image: ghcr.io/kluzzebass/gastrolog:latest
     ports:
-      - "4564:4564"   # API + web UI
+      - "4564:4564"   # HTTP  (API + web UI)
+      - "4565:4565"   # HTTPS (when TLS enabled)
       - "514:514/udp" # Syslog (UDP)
       - "514:514/tcp" # Syslog (TCP)
       - "3100:3100"   # HTTP (Loki-compatible)
