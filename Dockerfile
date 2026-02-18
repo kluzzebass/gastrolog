@@ -24,4 +24,4 @@ FROM scratch
 COPY --from=backend /gastrolog /gastrolog
 EXPOSE 4564
 ENTRYPOINT ["/gastrolog"]
-CMD ["server"]
+CMD ["server", "--home", "/config"]

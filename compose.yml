@@ -6,7 +6,6 @@ services:
     volumes:
       - config:/config
       - stores:/stores
-    command: ["server", "--home", "/config"]
 
 volumes:
   config:
