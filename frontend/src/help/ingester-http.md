@@ -22,3 +22,7 @@ Supports gzip-compressed request bodies.
 Labels are validated: max 32 attributes per message, keys up to 64 characters, values up to 256 characters.
 
 By default, the HTTP ingester returns `204 No Content` immediately (fire-and-forget). Clients can send `X-Wait-Ack: true` to wait for the record to be persisted before receiving the response.
+
+## Recipe
+
+See [Promtail / Grafana Agent](help:recipe-promtail) for configuration examples.

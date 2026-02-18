@@ -28,3 +28,7 @@ Streams container logs from a Docker daemon. Automatically discovers containers 
 | `stream` | Log source: `stdout`, `stderr`, or `tty` |
 
 Handles both TTY and multiplexed log streams. Docker timestamps are extracted automatically, so the [Timestamp digester](help:digester-timestamp) skips these messages. The [Level digester](help:digester-level) still runs to extract severity from the message content.
+
+## Recipe
+
+See [Docker with mTLS](help:recipe-docker-mtls) for a complete walkthrough of setting up Docker daemon TCP access with client and server certificate authentication.

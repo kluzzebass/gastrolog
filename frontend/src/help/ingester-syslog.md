@@ -22,3 +22,8 @@ Receives syslog messages over UDP and/or TCP. Supports both RFC 3164 (BSD) and R
 | `app_name` | Application/program name |
 | `proc_id` | Process ID (from `[PID]` notation) |
 | `msg_id` | Message ID (RFC 5424 only) |
+
+## Recipes
+
+- [rsyslog](help:recipe-rsyslog) — forward logs from rsyslog over UDP, TCP, or RELP
+- [systemd journal](help:recipe-journald) — ship journal entries via rsyslog

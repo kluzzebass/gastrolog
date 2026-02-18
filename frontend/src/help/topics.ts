@@ -29,6 +29,11 @@ import policyRetention from './policy-retention.md?raw';
 import storageEngines from './storage-engines.md?raw';
 import certificates from './certificates.md?raw';
 import userManagement from './user-management.md?raw';
+import recipes from './recipes.md?raw';
+import recipeDockerMtls from './recipe-docker-mtls.md?raw';
+import recipeRsyslog from './recipe-rsyslog.md?raw';
+import recipePromtail from './recipe-promtail.md?raw';
+import recipeJournald from './recipe-journald.md?raw';
 import about from './about.md?raw';
 
 export interface HelpTopic {
@@ -92,6 +97,15 @@ export const helpTopics: HelpTopic[] = [
       { id: 'storage-engines', title: 'Stores', content: storageEngines },
       { id: 'certificates', title: 'Certificates', content: certificates },
       { id: 'user-management', title: 'Users & Security', content: userManagement },
+    ],
+  },
+  {
+    id: 'recipes', title: 'Recipes', content: recipes,
+    children: [
+      { id: 'recipe-docker-mtls', title: 'Docker with mTLS', content: recipeDockerMtls },
+      { id: 'recipe-rsyslog', title: 'rsyslog', content: recipeRsyslog },
+      { id: 'recipe-promtail', title: 'Promtail / Grafana Agent', content: recipePromtail },
+      { id: 'recipe-journald', title: 'systemd journal', content: recipeJournald },
     ],
   },
   { id: 'about', title: 'About', content: about },
