@@ -18,7 +18,7 @@ ARG VERSION=dev
 RUN CGO_ENABLED=0 go build -ldflags "-X main.version=${VERSION}" -o /gastrolog ./cmd/gastrolog
 
 # Stage 3: Runtime
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM scratch
 COPY --from=backend /gastrolog /gastrolog
 EXPOSE 4564
 ENTRYPOINT ["/gastrolog"]
