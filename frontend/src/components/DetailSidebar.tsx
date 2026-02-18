@@ -98,7 +98,10 @@ export function DetailSidebar({
             Details
           </h3>
           <button
-            onClick={() => setDetailPinned((p: boolean) => !p)}
+            onClick={() => {
+              setDetailPinned((p: boolean) => !p);
+              if (detailPinned && !selectedRecord) setDetailCollapsed(true);
+            }}
             aria-label={detailPinned ? "Unpin detail panel" : "Pin detail panel"}
             title={detailPinned ? "Unpin detail panel" : "Pin detail panel"}
             className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${
