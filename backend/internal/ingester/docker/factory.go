@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
-	"regexp"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +12,7 @@ import (
 	"gastrolog/internal/config"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/querylang"
 )
 
 // NewFactory returns an IngesterFactory for Docker container log ingesters.
@@ -33,7 +33,7 @@ type ingesterConfig struct {
 	Host         string
 	UseTLS       bool
 	TLS          *clientTLSConfig
-	Filter       containerFilter
+	Filter       *querylang.DNF
 	PollInterval time.Duration
 	Stdout       bool
 	Stderr       bool
@@ -63,24 +63,14 @@ func parseConfig(id string, params map[string]string, cfgStore config.Store, log
 		}
 	}
 
-	// Filters.
-	var f containerFilter
-	if labelFilter := params["label_filter"]; labelFilter != "" {
-		f.LabelKey, f.LabelValue = parseLabelFilter(labelFilter)
-	}
-	if nameFilter := params["name_filter"]; nameFilter != "" {
-		re, err := regexp.Compile(nameFilter)
+	// Filter.
+	var filter *querylang.DNF
+	if filterExpr := params["filter"]; filterExpr != "" {
+		var err error
+		filter, err = querylang.CompileAttrFilter(filterExpr)
 		if err != nil {
-			return ingesterConfig{}, fmt.Errorf("docker ingester %q: invalid name_filter regex: %w", id, err)
+			return ingesterConfig{}, fmt.Errorf("docker ingester %q: invalid filter: %w", id, err)
 		}
-		f.NameRegex = re
-	}
-	if imageFilter := params["image_filter"]; imageFilter != "" {
-		re, err := regexp.Compile(imageFilter)
-		if err != nil {
-			return ingesterConfig{}, fmt.Errorf("docker ingester %q: invalid image_filter regex: %w", id, err)
-		}
-		f.ImageRegex = re
 	}
 
 	// Poll interval.
@@ -121,7 +111,7 @@ func parseConfig(id string, params map[string]string, cfgStore config.Store, log
 		Host:         host,
 		UseTLS:       useTLS,
 		TLS:          tlsCfg,
-		Filter:       f,
+		Filter:       filter,
 		PollInterval: pollInterval,
 		Stdout:       stdout,
 		Stderr:       stderr,

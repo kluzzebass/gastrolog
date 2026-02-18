@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/querylang"
 )
 
 // trackedContainer holds per-container state during ingester operation.
@@ -20,7 +21,7 @@ type trackedContainer struct {
 type ingester struct {
 	id           string
 	client       dockerClient
-	filter       containerFilter
+	filter       *querylang.DNF
 	pollInterval time.Duration
 	stdout       bool
 	stderr       bool
@@ -130,7 +131,7 @@ func (ing *ingester) waitForDocker(ctx context.Context) error {
 // startContainer begins streaming logs for a container if it matches filters
 // and isn't already being tracked.
 func (ing *ingester) startContainer(ctx context.Context, info containerInfo, out chan<- orchestrator.IngestMessage, wg *sync.WaitGroup) {
-	if !ing.filter.matches(info) {
+	if !querylang.MatchAttrs(ing.filter, containerAttrs(info)) {
 		return
 	}
 

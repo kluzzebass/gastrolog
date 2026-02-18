@@ -7,9 +7,7 @@ Streams container logs from a Docker daemon. Automatically discovers containers 
 | Param | Description | Default |
 |-------|-------------|---------|
 | `host` | Docker daemon address | `unix:///var/run/docker.sock` |
-| `label_filter` | Docker label filter (`key=value`) | |
-| `name_filter` | Container name regex | |
-| `image_filter` | Image name regex | |
+| `filter` | Container filter expression (see below) | |
 | `poll_interval` | Container discovery interval | `30s` |
 | `stdout` | Capture stdout | `true` |
 | `stderr` | Capture stderr | `true` |
@@ -17,6 +15,28 @@ Streams container logs from a Docker daemon. Automatically discovers containers 
 | `tls_ca` | CA certificate name (from certificate store) | |
 | `tls_cert` | Client certificate name | |
 | `tls_verify` | Verify server TLS certificate | `true` |
+
+## Filter expressions
+
+The `filter` param uses the same expression syntax as store routing filters. Containers are matched against these attributes:
+
+| Attribute | Source |
+|-----------|--------|
+| `name` | Container name |
+| `image` | Image name/tag |
+| `label.<key>` | Docker label (e.g., `label.env`) |
+
+**Examples:**
+
+- `image=nginx*` — containers running nginx
+- `name=web*` — containers whose name starts with "web"
+- `label.env=prod` — containers with Docker label `env=prod`
+- `label.logging=*` — containers that have a `logging` label (any value)
+- `image=nginx* OR image=redis*` — nginx or redis containers
+- `name=web* AND label.env=prod` — web containers in prod
+- `NOT image=postgres*` — everything except postgres
+
+Omit `filter` to collect logs from all containers.
 
 ## Attributes
 

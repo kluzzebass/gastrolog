@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -19,6 +18,7 @@ import (
 	configmem "gastrolog/internal/config/memory"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/querylang"
 )
 
 // --- Fake Docker client ---
@@ -183,18 +183,18 @@ func TestFactoryValidation(t *testing.T) {
 			wantErr: `client certificate "nonexistent-client" not found`,
 		},
 		{
-			name: "invalid name_filter regex",
+			name: "invalid filter expression",
 			params: map[string]string{
-				"name_filter": "[invalid",
+				"filter": "env=prod AND",
 			},
-			wantErr: "invalid name_filter regex",
+			wantErr: "invalid filter",
 		},
 		{
-			name: "invalid image_filter regex",
+			name: "filter rejects bare tokens",
 			params: map[string]string{
-				"image_filter": "[invalid",
+				"filter": "nginx",
 			},
-			wantErr: "invalid image_filter regex",
+			wantErr: "token predicates not allowed",
 		},
 		{
 			name: "invalid poll_interval",
@@ -471,112 +471,140 @@ func TestBookmarkEmptyPath(t *testing.T) {
 	}
 }
 
-func TestLabelFiltering(t *testing.T) {
+func TestFilterMatching(t *testing.T) {
 	tests := []struct {
 		name       string
 		filterExpr string
-		labels     map[string]string
+		info       containerInfo
 		want       bool
 	}{
 		{
-			name:       "key only match",
-			filterExpr: "gastrolog.collect",
-			labels:     map[string]string{"gastrolog.collect": "true"},
+			name:       "label key=value match",
+			filterExpr: "label.gastrolog.collect=true",
+			info:       containerInfo{Labels: map[string]string{"gastrolog.collect": "true"}},
 			want:       true,
 		},
 		{
-			name:       "key only no match",
-			filterExpr: "gastrolog.collect",
-			labels:     map[string]string{"other": "true"},
+			name:       "label key=value no match",
+			filterExpr: "label.gastrolog.collect=true",
+			info:       containerInfo{Labels: map[string]string{"gastrolog.collect": "false"}},
 			want:       false,
 		},
 		{
-			name:       "key=value match",
-			filterExpr: "gastrolog.collect=true",
-			labels:     map[string]string{"gastrolog.collect": "true"},
+			name:       "label key exists",
+			filterExpr: "label.gastrolog.collect=*",
+			info:       containerInfo{Labels: map[string]string{"gastrolog.collect": "true"}},
 			want:       true,
 		},
 		{
-			name:       "key=value wrong value",
-			filterExpr: "gastrolog.collect=true",
-			labels:     map[string]string{"gastrolog.collect": "false"},
+			name:       "label key missing",
+			filterExpr: "label.gastrolog.collect=*",
+			info:       containerInfo{Labels: map[string]string{"other": "true"}},
+			want:       false,
+		},
+		{
+			name:       "name match",
+			filterExpr: "name=my-app*",
+			info:       containerInfo{Name: "my-app-1"},
+			want:       true,
+		},
+		{
+			name:       "name no match",
+			filterExpr: "name=my-app*",
+			info:       containerInfo{Name: "other-app"},
+			want:       false,
+		},
+		{
+			name:       "image match",
+			filterExpr: "image=nginx*",
+			info:       containerInfo{Image: "nginx:latest"},
+			want:       true,
+		},
+		{
+			name:       "image no match",
+			filterExpr: "image=nginx*",
+			info:       containerInfo{Image: "redis:7"},
+			want:       false,
+		},
+		{
+			name:       "combined AND match",
+			filterExpr: "name=web* AND image=nginx*",
+			info:       containerInfo{Name: "web-1", Image: "nginx:latest"},
+			want:       true,
+		},
+		{
+			name:       "combined AND partial mismatch",
+			filterExpr: "name=web* AND image=nginx*",
+			info:       containerInfo{Name: "api-1", Image: "nginx:latest"},
+			want:       false,
+		},
+		{
+			name:       "OR expression",
+			filterExpr: "image=nginx* OR image=redis*",
+			info:       containerInfo{Image: "redis:7"},
+			want:       true,
+		},
+		{
+			name:       "NOT expression",
+			filterExpr: "NOT image=postgres*",
+			info:       containerInfo{Image: "nginx:latest"},
+			want:       true,
+		},
+		{
+			name:       "NOT expression rejected",
+			filterExpr: "NOT image=postgres*",
+			info:       containerInfo{Image: "postgres:15"},
 			want:       false,
 		},
 		{
 			name:       "no filter matches all",
 			filterExpr: "",
-			labels:     map[string]string{"anything": "here"},
+			info:       containerInfo{Name: "anything", Image: "any:image"},
 			want:       true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			key, value := parseLabelFilter(tt.filterExpr)
-			f := containerFilter{LabelKey: key, LabelValue: value}
-			info := containerInfo{Labels: tt.labels}
-			if got := f.matches(info); got != tt.want {
-				t.Errorf("filter.matches() = %v, want %v", got, tt.want)
+			var filter *querylang.DNF
+			if tt.filterExpr != "" {
+				var err error
+				filter, err = querylang.CompileAttrFilter(tt.filterExpr)
+				if err != nil {
+					t.Fatalf("CompileAttrFilter(%q): %v", tt.filterExpr, err)
+				}
+			}
+			got := querylang.MatchAttrs(filter, containerAttrs(tt.info))
+			if got != tt.want {
+				t.Errorf("MatchAttrs() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestNameFiltering(t *testing.T) {
-	f := containerFilter{NameRegex: regexp.MustCompile(`^my-app`)}
-
-	if !f.matches(containerInfo{Name: "my-app-1"}) {
-		t.Error("should match my-app-1")
-	}
-	if f.matches(containerInfo{Name: "other-app"}) {
-		t.Error("should not match other-app")
-	}
-}
-
-func TestImageFiltering(t *testing.T) {
-	f := containerFilter{ImageRegex: regexp.MustCompile(`nginx`)}
-
-	if !f.matches(containerInfo{Image: "nginx:latest"}) {
-		t.Error("should match nginx:latest")
-	}
-	if f.matches(containerInfo{Image: "redis:7"}) {
-		t.Error("should not match redis:7")
-	}
-}
-
-func TestCombinedFilters(t *testing.T) {
-	f := containerFilter{
-		LabelKey:   "env",
-		LabelValue: "prod",
-		NameRegex:  regexp.MustCompile(`^web`),
-		ImageRegex: regexp.MustCompile(`nginx`),
-	}
-
-	// All match.
-	if !f.matches(containerInfo{
+func TestContainerAttrs(t *testing.T) {
+	info := containerInfo{
 		Name:   "web-1",
 		Image:  "nginx:latest",
-		Labels: map[string]string{"env": "prod"},
-	}) {
-		t.Error("should match when all criteria met")
+		Labels: map[string]string{"env": "prod", "tier": "frontend"},
 	}
 
-	// Label mismatch.
-	if f.matches(containerInfo{
-		Name:   "web-1",
-		Image:  "nginx:latest",
-		Labels: map[string]string{"env": "dev"},
-	}) {
-		t.Error("should not match with wrong label value")
-	}
+	attrs := containerAttrs(info)
 
-	// Name mismatch.
-	if f.matches(containerInfo{
-		Name:   "api-1",
-		Image:  "nginx:latest",
-		Labels: map[string]string{"env": "prod"},
-	}) {
-		t.Error("should not match with wrong name")
+	if attrs["name"] != "web-1" {
+		t.Errorf("name = %q, want %q", attrs["name"], "web-1")
+	}
+	if attrs["image"] != "nginx:latest" {
+		t.Errorf("image = %q, want %q", attrs["image"], "nginx:latest")
+	}
+	if attrs["label.env"] != "prod" {
+		t.Errorf("label.env = %q, want %q", attrs["label.env"], "prod")
+	}
+	if attrs["label.tier"] != "frontend" {
+		t.Errorf("label.tier = %q, want %q", attrs["label.tier"], "frontend")
+	}
+	if len(attrs) != 4 {
+		t.Errorf("expected 4 attrs, got %d", len(attrs))
 	}
 }
 
@@ -793,15 +821,18 @@ func TestFilteredContainersNotTailed(t *testing.T) {
 	noMatchBuf.Write(makeMultiplexedFrame(streamStdout, ts, "should not appear"))
 	client.setLogStream(noMatchID, noMatchBuf.Bytes(), false)
 
+	filter, err := querylang.CompileAttrFilter("name=web*")
+	if err != nil {
+		t.Fatalf("CompileAttrFilter: %v", err)
+	}
+
 	cfg := ingesterConfig{
 		ID:           "test-docker",
 		PollInterval: 0,
 		Stdout:       true,
 		Stderr:       true,
-		Filter: containerFilter{
-			NameRegex: regexp.MustCompile(`^web`),
-		},
-		Logger: logging.Discard(),
+		Filter:       filter,
+		Logger:       logging.Discard(),
 	}
 	ing := newIngesterWithClient(cfg, client)
 
@@ -841,27 +872,3 @@ func TestStreamTypeString(t *testing.T) {
 	}
 }
 
-func TestParseLabelFilter(t *testing.T) {
-	tests := []struct {
-		input     string
-		wantKey   string
-		wantValue string
-	}{
-		{"", "", ""},
-		{"key", "key", ""},
-		{"key=value", "key", "value"},
-		{"key=value=extra", "key", "value=extra"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			key, value := parseLabelFilter(tt.input)
-			if key != tt.wantKey {
-				t.Errorf("key = %q, want %q", key, tt.wantKey)
-			}
-			if value != tt.wantValue {
-				t.Errorf("value = %q, want %q", value, tt.wantValue)
-			}
-		})
-	}
-}

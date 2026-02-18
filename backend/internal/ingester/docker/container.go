@@ -2,57 +2,24 @@ package docker
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"maps"
-	"regexp"
-	"strings"
 	"time"
 
 	"gastrolog/internal/orchestrator"
 )
 
-// containerFilter holds compiled filter criteria for container matching.
-type containerFilter struct {
-	LabelKey   string
-	LabelValue string
-	NameRegex  *regexp.Regexp
-	ImageRegex *regexp.Regexp
-}
-
-// matches returns true if the container passes all configured filters.
-func (f *containerFilter) matches(info containerInfo) bool {
-	if f.LabelKey != "" {
-		v, ok := info.Labels[f.LabelKey]
-		if !ok {
-			return false
-		}
-		if f.LabelValue != "" && v != f.LabelValue {
-			return false
-		}
+// containerAttrs flattens container metadata into a map for querylang filter matching.
+// Keys: "name", "image", "label.<key>" for each Docker label.
+func containerAttrs(info containerInfo) map[string]string {
+	attrs := make(map[string]string, 2+len(info.Labels))
+	attrs["name"] = info.Name
+	attrs["image"] = info.Image
+	for k, v := range info.Labels {
+		attrs[fmt.Sprintf("label.%s", k)] = v
 	}
-
-	if f.NameRegex != nil && !f.NameRegex.MatchString(info.Name) {
-		return false
-	}
-
-	if f.ImageRegex != nil && !f.ImageRegex.MatchString(info.Image) {
-		return false
-	}
-
-	return true
-}
-
-// parseLabelFilter parses a Docker label filter like "key=value" or "key".
-func parseLabelFilter(s string) (key, value string) {
-	if s == "" {
-		return "", ""
-	}
-	parts := strings.SplitN(s, "=", 2)
-	key = parts[0]
-	if len(parts) == 2 {
-		value = parts[1]
-	}
-	return key, value
+	return attrs
 }
 
 // streamContainer runs a log stream for a single container, emitting messages

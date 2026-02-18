@@ -129,12 +129,12 @@ Use the **Test Connection** button to verify connectivity before saving.
 
 ## Filtering containers
 
-Use `label_filter`, `name_filter`, or `image_filter` to limit which containers are logged:
+Use the `filter` param to limit which containers are logged. It accepts boolean expressions over container metadata (`name`, `image`, `label.<key>`):
 
-- **`label_filter`** set to `logging=true` — only containers with the Docker label `logging=true`
-- **`name_filter`** set to `^myapp-` — only containers whose name starts with `myapp-`
-- **`image_filter`** set to `nginx` — only containers running an nginx image
+- `filter` set to `label.logging=true` — only containers with the Docker label `logging=true`
+- `filter` set to `name=myapp-*` — only containers whose name starts with `myapp-`
+- `filter` set to `image=nginx*` — only containers running an nginx image
+- `filter` set to `name=web* AND label.env=prod` — web containers in production
+- `filter` set to `label.logging=*` — any container that has a `logging` label regardless of value
 
-The `label_filter` value uses `key=value` syntax (split on the first `=`). Set it to just a key (e.g., `logging`) to match any container that has that label regardless of value.
-
-See [Docker ingester](help:ingester-docker) for the full parameter reference.
+See [Docker ingester](help:ingester-docker) for the full parameter reference and expression syntax.

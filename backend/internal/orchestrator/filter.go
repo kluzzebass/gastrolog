@@ -59,8 +59,8 @@ func CompileFilter(storeID uuid.UUID, filter string) (*CompiledFilter, error) {
 		return nil, fmt.Errorf("invalid filter expression: %w", err)
 	}
 
-	// Validate: reject token predicates (only attr-based filtering allowed)
-	if err := validateFilterExpr(expr); err != nil {
+	// Validate: reject non-attr predicates (tokens, regexes, globs).
+	if err := querylang.ValidateAttrFilter(expr); err != nil {
 		return nil, err
 	}
 
@@ -73,40 +73,6 @@ func CompileFilter(storeID uuid.UUID, filter string) (*CompiledFilter, error) {
 		Expr:    filter,
 		DNF:     &dnf,
 	}, nil
-}
-
-// validateFilterExpr checks that the expression only uses attr-based predicates.
-// Token predicates are not allowed because filters only look at Attrs, not Raw.
-func validateFilterExpr(expr querylang.Expr) error {
-	switch e := expr.(type) {
-	case *querylang.PredicateExpr:
-		if e.Kind == querylang.PredToken {
-			return fmt.Errorf("token predicates not allowed in filters (use key=value): %q", e.Value)
-		}
-		return nil
-
-	case *querylang.AndExpr:
-		for _, term := range e.Terms {
-			if err := validateFilterExpr(term); err != nil {
-				return err
-			}
-		}
-		return nil
-
-	case *querylang.OrExpr:
-		for _, term := range e.Terms {
-			if err := validateFilterExpr(term); err != nil {
-				return err
-			}
-		}
-		return nil
-
-	case *querylang.NotExpr:
-		return validateFilterExpr(e.Term)
-
-	default:
-		return nil
-	}
 }
 
 // FilterSet evaluates store filters to determine which stores receive a message.
@@ -186,7 +152,7 @@ func (fs *FilterSet) Match(attrs chunk.Attributes) []uuid.UUID {
 		case FilterCatchAll:
 			result = append(result, f.StoreID)
 		case FilterExpr:
-			if matchesAttrs(f.DNF, attrs) {
+			if querylang.MatchAttrs(f.DNF, attrs) {
 				result = append(result, f.StoreID)
 				matchedExpr = true
 			}
@@ -207,75 +173,3 @@ func (fs *FilterSet) Match(attrs chunk.Attributes) []uuid.UUID {
 	return result
 }
 
-// matchesAttrs checks if attributes match a DNF expression.
-func matchesAttrs(dnf *querylang.DNF, attrs chunk.Attributes) bool {
-	for _, branch := range dnf.Branches {
-		if matchesBranchAttrs(&branch, attrs) {
-			return true
-		}
-	}
-	return false
-}
-
-// matchesBranchAttrs checks if attributes match a single DNF branch.
-func matchesBranchAttrs(branch *querylang.Conjunction, attrs chunk.Attributes) bool {
-	// Check all positive predicates (AND semantics)
-	for _, p := range branch.Positive {
-		if !evalAttrPredicate(p, attrs) {
-			return false
-		}
-	}
-	// Check all negative predicates (must NOT match any)
-	for _, p := range branch.Negative {
-		if evalAttrPredicate(p, attrs) {
-			return false
-		}
-	}
-	return true
-}
-
-// evalAttrPredicate evaluates a predicate against attributes only.
-func evalAttrPredicate(pred *querylang.PredicateExpr, attrs chunk.Attributes) bool {
-	switch pred.Kind {
-	case querylang.PredKV:
-		// Exact key=value match (case-insensitive)
-		if v, ok := attrs[pred.Key]; ok {
-			return strings.EqualFold(v, pred.Value)
-		}
-		// Also check case-insensitive key lookup
-		for k, v := range attrs {
-			if strings.EqualFold(k, pred.Key) && strings.EqualFold(v, pred.Value) {
-				return true
-			}
-		}
-		return false
-
-	case querylang.PredKeyExists:
-		// Key exists with any value
-		if _, ok := attrs[pred.Key]; ok {
-			return true
-		}
-		for k := range attrs {
-			if strings.EqualFold(k, pred.Key) {
-				return true
-			}
-		}
-		return false
-
-	case querylang.PredValueExists:
-		// Any key has this value
-		for _, v := range attrs {
-			if strings.EqualFold(v, pred.Value) {
-				return true
-			}
-		}
-		return false
-
-	case querylang.PredToken:
-		// Should not happen - validated at compile time
-		return false
-
-	default:
-		return false
-	}
-}
