@@ -28,22 +28,33 @@ type HistogramResult struct {
 // severityLevels are the canonical severity names we track in histograms.
 var severityLevels = []string{"error", "warn", "info", "debug", "trace"}
 
-// severityFromAttrs returns the canonical severity level for a record based on
-// its attributes, or "" if none detected. Checks both "level" and "severity_name".
-func severityFromAttrs(attrs chunk.Attributes) string {
+// classifySeverity maps a raw value to a canonical severity level.
+// Handles values set by the level digester (already normalized) and
+// raw syslog severity_name values that bypass the digester.
+func classifySeverity(v string) string {
+	switch strings.ToLower(v) {
+	case "error", "err", "fatal", "critical", "emerg", "emergency", "alert", "crit":
+		return "error"
+	case "warn", "warning":
+		return "warn"
+	case "info", "notice", "informational":
+		return "info"
+	case "debug":
+		return "debug"
+	case "trace":
+		return "trace"
+	}
+	return ""
+}
+
+// severityFromRecord returns the canonical severity level for a record
+// based on its attributes. The level digester sets a normalized "level"
+// attribute at ingest time; syslog sets "severity_name" directly.
+func severityFromRecord(rec chunk.Record) string {
 	for _, key := range []string{"level", "severity_name"} {
-		if v, ok := attrs[key]; ok {
-			switch strings.ToLower(v) {
-			case "error", "err":
-				return "error"
-			case "warn", "warning":
-				return "warn"
-			case "info":
-				return "info"
-			case "debug":
-				return "debug"
-			case "trace":
-				return "trace"
+		if v, ok := rec.Attrs[key]; ok {
+			if level := classifySeverity(v); level != "" {
+				return level
 			}
 		}
 	}
@@ -165,7 +176,7 @@ func (e *Engine) Histogram(ctx context.Context, hq HistogramQuery) (*HistogramRe
 				idx = numBuckets - 1
 			}
 			counts[idx]++
-			if level := severityFromAttrs(rec.Attrs); level != "" {
+			if level := severityFromRecord(rec); level != "" {
 				levelCounts[idx][level]++
 			}
 			scanned++
@@ -194,6 +205,9 @@ func (e *Engine) Histogram(ctx context.Context, hq HistogramQuery) (*HistogramRe
 				histogramChunkFast(cm, meta, start, bucketWidth, numBuckets, counts)
 				if meta.Sealed {
 					histogramChunkSeverity(cm, im, meta, start, bucketWidth, numBuckets, levelCounts)
+				} else {
+					// Unsealed chunks have no indexes; scan records for severity.
+					histogramChunkSeverityScan(cm, meta, start, bucketWidth, numBuckets, levelCounts)
 				}
 			}
 		}
@@ -334,5 +348,44 @@ func histogramChunkSeverity(
 			}
 			levelCounts[idx][level]++
 		}
+	}
+}
+
+// histogramChunkSeverityScan populates per-level counts for an unsealed chunk
+// by scanning records and checking attrs. The level digester sets a "level"
+// attribute at ingest time, so this is reliable without indexes.
+func histogramChunkSeverityScan(
+	cm chunk.ChunkManager,
+	meta chunk.ChunkMeta,
+	start time.Time,
+	bucketWidth time.Duration,
+	numBuckets int,
+	levelCounts []map[string]int64,
+) {
+	cursor, err := cm.OpenCursor(meta.ID)
+	if err != nil {
+		return
+	}
+	defer cursor.Close()
+
+	end := start.Add(bucketWidth * time.Duration(numBuckets))
+	for {
+		rec, _, err := cursor.Next()
+		if err != nil {
+			break
+		}
+		ts := rec.WriteTS
+		if ts.Before(start) || !ts.Before(end) {
+			continue
+		}
+		level := severityFromRecord(rec)
+		if level == "" {
+			continue
+		}
+		idx := int(ts.Sub(start) / bucketWidth)
+		if idx >= numBuckets {
+			idx = numBuckets - 1
+		}
+		levelCounts[idx][level]++
 	}
 }
