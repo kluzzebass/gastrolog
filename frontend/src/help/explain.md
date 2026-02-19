@@ -1,6 +1,6 @@
 # Explain
 
-The Explain view shows the [query engine's](help:query-engine) execution plan — how it intends to process your query before running it. Open it with the **Show Plan** button next to the search bar.
+The Explain view shows the [query engine's](help:query-engine) execution plan — how it intends to process your query before running it. Open it with the ![icon:explain]() button next to the search bar.
 
 ## What It Shows
 

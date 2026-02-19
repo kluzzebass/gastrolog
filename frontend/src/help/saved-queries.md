@@ -5,7 +5,7 @@ Save frequently used queries so you can recall them with a single click instead 
 ## Saving a Query
 
 1. Type your query in the search bar
-2. Click the **bookmark** icon (right side of the search bar) to open the saved queries panel
+2. Click the ![icon:bookmark]() button (right side of the search bar) to open the saved queries panel
 3. Enter a name for the query and press **Enter** or click **Save**
 
 The current contents of the search bar are saved exactly as written — filters, time bounds, and all.

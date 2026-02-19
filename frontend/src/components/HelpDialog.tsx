@@ -6,6 +6,7 @@ import { useThemeClass } from "../hooks/useThemeClass";
 import { helpTopics, findTopic } from "../help/topics";
 import type { HelpTopic } from "../help/topics";
 import { MermaidDiagram } from "./Mermaid";
+import { getHelpIcon } from "../help/icons";
 
 interface HelpDialogProps {
   dark: boolean;
@@ -324,5 +325,26 @@ function markdownComponents(dark: boolean, onNavigate: (topicId: string) => void
         className={`my-4 border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
       />
     ),
+    img: ({ alt }: { alt?: string }) => {
+      if (alt?.startsWith("icon:")) {
+        const icon = getHelpIcon(alt.slice(5));
+        if (icon) {
+          return (
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className={`inline-block w-4 h-4 align-text-bottom ${c("text-copper", "text-copper")}`}
+            >
+              {icon}
+            </svg>
+          );
+        }
+      }
+      return null;
+    },
   };
 }
