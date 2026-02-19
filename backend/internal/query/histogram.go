@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 
 	"gastrolog/internal/chunk"
@@ -26,6 +27,28 @@ type HistogramResult struct {
 
 // severityLevels are the canonical severity names we track in histograms.
 var severityLevels = []string{"error", "warn", "info", "debug", "trace"}
+
+// severityFromAttrs returns the canonical severity level for a record based on
+// its attributes, or "" if none detected. Checks both "level" and "severity_name".
+func severityFromAttrs(attrs chunk.Attributes) string {
+	for _, key := range []string{"level", "severity_name"} {
+		if v, ok := attrs[key]; ok {
+			switch strings.ToLower(v) {
+			case "error", "err":
+				return "error"
+			case "warn", "warning":
+				return "warn"
+			case "info":
+				return "info"
+			case "debug":
+				return "debug"
+			case "trace":
+				return "trace"
+			}
+		}
+	}
+	return ""
+}
 
 // severityKVLookups maps canonical severity names to the key=value pairs to look up
 // in the KV index (extracted from message text, e.g. level=error).
@@ -142,6 +165,9 @@ func (e *Engine) Histogram(ctx context.Context, hq HistogramQuery) (*HistogramRe
 				idx = numBuckets - 1
 			}
 			counts[idx]++
+			if level := severityFromAttrs(rec.Attrs); level != "" {
+				levelCounts[idx][level]++
+			}
 			scanned++
 			if scanned >= maxScan {
 				break
