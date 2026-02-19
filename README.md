@@ -4,6 +4,8 @@
 
 GastroLog is a log aggregation and search service. It collects logs from various sources, stores them in time-ordered chunks, and builds indexes for fast full-text search.
 
+![GastroLog screenshot](docs/screenshot.png)
+
 ## Features
 
 - **Multiple ingesters** — Syslog (UDP/TCP), HTTP (Loki-compatible), RELP, file tail, Docker container logs
