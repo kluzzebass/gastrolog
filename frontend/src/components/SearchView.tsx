@@ -61,7 +61,7 @@ import { useConfig } from "../api/hooks/useConfig";
 
 export function SearchView() {
   const { q, help: helpParam, settings: settingsParam, inspector: inspectorParam } = useRouterSearch({ strict: false }) as { q: string; help?: string; settings?: string; inspector?: string };
-  const navigate = useNavigate({ from: "/search" });
+  const navigate = useNavigate();
   const location = useLocation();
   const isFollowMode = location.pathname === "/follow";
 
