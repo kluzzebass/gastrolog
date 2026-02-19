@@ -153,6 +153,7 @@ export function SearchView() {
   const selectedRowRef = useRef<HTMLElement>(null);
   const expressionRef = useRef("");
   const skipNextSearchRef = useRef(false);
+  const loadMoreGateRef = useRef(false);
   const [isScrolledDown, setIsScrolledDown] = useState(false);
 
 
@@ -249,6 +250,19 @@ export function SearchView() {
       }
     } else if (q.includes("start=")) {
       setTimeRange("custom");
+    } else {
+      // No time directives — inject default range so the query is bounded.
+      const defaultRange = "5m";
+      setTimeRange(defaultRange);
+      const ms = timeRangeMs[defaultRange];
+      if (ms) {
+        const now = new Date();
+        setRangeStart(new Date(now.getTime() - ms));
+        setRangeEnd(now);
+      }
+      const fixed = injectTimeRange(q, defaultRange, isReversed);
+      navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, q: fixed }), replace: true } as any);
+      return;
     }
 
     if (isFollowMode) {
@@ -268,6 +282,7 @@ export function SearchView() {
         skipNextSearchRef.current = false;
         return;
       }
+      loadMoreGateRef.current = false;
       search(q);
       fetchHistogram(q);
       if (showPlan) explain(q);
@@ -290,20 +305,29 @@ export function SearchView() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Infinite scroll: observe a sentinel div at the bottom of the results.
+  // The gate prevents runaway loading — it opens only when the user scrolls.
   useEffect(() => {
     const sentinel = sentinelRef.current;
+    const scrollEl = logScrollRef.current;
     if (!sentinel) return;
+
+    const openGate = () => { loadMoreGateRef.current = true; };
+    scrollEl?.addEventListener("scroll", openGate, { passive: true, once: true });
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting && hasMore && !isSearching) {
+        if (entries[0]?.isIntersecting && hasMore && !isSearching && loadMoreGateRef.current) {
+          loadMoreGateRef.current = false;
           loadMore(expressionRef.current);
         }
       },
-      { root: logScrollRef.current, rootMargin: "0px 0px 200px 0px" },
+      { root: scrollEl, rootMargin: "0px 0px 200px 0px" },
     );
     observer.observe(sentinel);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      scrollEl?.removeEventListener("scroll", openGate);
+    };
   }, [hasMore, isSearching, loadMore]);
 
   // Follow mode: track scroll position and auto-reset new-record counter.

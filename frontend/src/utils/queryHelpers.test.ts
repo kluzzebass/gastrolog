@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   stripTimeRange,
+  stripAllDirectives,
   stripStore,
   stripChunk,
   stripPos,
@@ -68,6 +69,16 @@ describe("stripSeverity", () => {
       expect(stripSeverity(`level=${level} foo`)).toBe("foo");
     }
   });
+});
+
+describe("stripAllDirectives", () => {
+  test("strips all directive types", () =>
+    expect(stripAllDirectives("last=5m start=x end=y reverse=true store=main limit=100 chunk=abc pos=42 foo")).toBe("foo"));
+  test("only directives returns empty", () =>
+    expect(stripAllDirectives("last=15m reverse=true")).toBe(""));
+  test("preserves search expression", () =>
+    expect(stripAllDirectives("last=5m reverse=true level=error foo")).toBe("level=error foo"));
+  test("empty string", () => expect(stripAllDirectives("")).toBe(""));
 });
 
 describe("buildTimeTokens", () => {

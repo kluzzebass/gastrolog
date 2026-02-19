@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import type { FieldSummary } from "../utils";
 import { timeRangeMs } from "../utils";
 import { DIRECTIVES } from "../queryTokenizer";
@@ -178,7 +178,19 @@ export function useAutocomplete(
     }
   }
 
-  const isOpen = suggestions.length > 0;
+  const hasSuggestions = suggestions.length > 0;
+  const [isOpen, setIsOpen] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => {
+    clearTimeout(debounceRef.current);
+    if (!hasSuggestions || dismissed) {
+      setIsOpen(false);
+    } else {
+      debounceRef.current = setTimeout(() => setIsOpen(true), 150);
+    }
+    return () => clearTimeout(debounceRef.current);
+  }, [hasSuggestions, dismissed, sugKey]);
 
   const selectNext = useCallback(() => {
     setSelectedIndex((i) => (i + 1) % suggestions.length);

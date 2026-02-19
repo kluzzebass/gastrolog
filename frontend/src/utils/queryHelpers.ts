@@ -35,6 +35,20 @@ export const stripSeverity = (qs: string): string =>
     .replace(/\s+/g, " ")
     .trim();
 
+/** Strip all directives, returning only the user's search expression. */
+export const stripAllDirectives = (q: string): string =>
+  q
+    .replace(/\blast=\S+/g, "")
+    .replace(/\bstart=\S+/g, "")
+    .replace(/\bend=\S+/g, "")
+    .replace(/\breverse=\S+/g, "")
+    .replace(/\bstore=\S+/g, "")
+    .replace(/\blimit=\S+/g, "")
+    .replace(/\bchunk=\S+/g, "")
+    .replace(/\bpos=\S+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
 export const buildTimeTokens = (range: string, reverse: boolean): string => {
   const rev = `reverse=${reverse}`;
   if (range === "All") return rev;

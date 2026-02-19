@@ -5,7 +5,7 @@ import { injectTimeRange, stripTimeRange } from "../utils/queryHelpers";
 
 export function useTimeRange(q: string, isReversed: boolean) {
   const navigate = useNavigate({ from: "/search" });
-  const [timeRange, setTimeRange] = useState("1h");
+  const [timeRange, setTimeRange] = useState("5m");
   const [rangeStart, setRangeStart] = useState<Date | null>(null);
   const [rangeEnd, setRangeEnd] = useState<Date | null>(null);
 
