@@ -16,6 +16,7 @@ import indexers from './indexers.md?raw';
 import queryEngine from './query-engine.md?raw';
 import queryLanguage from './query-language.md?raw';
 import explain from './explain.md?raw';
+import savedQueries from './saved-queries.md?raw';
 import inspector from './inspector.md?raw';
 import inspectorStores from './inspector-stores.md?raw';
 import inspectorIngesters from './inspector-ingesters.md?raw';
@@ -75,6 +76,7 @@ export const helpTopics: HelpTopic[] = [
     id: 'query-engine', title: 'Searching', content: queryEngine,
     children: [
       { id: 'query-language', title: 'Query Language', content: queryLanguage },
+      { id: 'saved-queries', title: 'Saved Queries', content: savedQueries },
       { id: 'explain', title: 'Explain', content: explain },
     ],
   },
