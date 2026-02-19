@@ -15,11 +15,11 @@ function Section({
   title,
   dark,
   children,
-}: {
+}: Readonly<{
   title: string;
   dark: boolean;
   children: React.ReactNode;
-}) {
+}>) {
   const c = useThemeClass(dark);
   return (
     <div className="flex flex-col gap-1.5">
@@ -40,7 +40,7 @@ function Section({
   );
 }
 
-function SkippedSection({ title, dark }: { title: string; dark: boolean }) {
+function SkippedSection({ title, dark }: Readonly<{ title: string; dark: boolean }>) {
   const c = useThemeClass(dark);
   return (
     <div className="flex flex-col gap-1.5">
@@ -62,11 +62,11 @@ function Row({
   label,
   value,
   dark,
-}: {
+}: Readonly<{
   label: string;
   value: string;
   dark: boolean;
-}) {
+}>) {
   const c = useThemeClass(dark);
   if (!value) return null;
   return (
@@ -89,7 +89,7 @@ export function ReviewStep({
   rotation,
   retention,
   ingester,
-}: ReviewStepProps) {
+}: Readonly<ReviewStepProps>) {
   const c = useThemeClass(dark);
   return (
     <div className="flex flex-col gap-5">

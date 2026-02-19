@@ -60,7 +60,7 @@ function useTick() {
   }, []);
 }
 
-export function JobsPanel({ dark }: { dark: boolean }) {
+export function JobsPanel({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
   const { jobs, connected, reconnecting } = useWatchJobs();
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -203,10 +203,10 @@ export function JobsPanel({ dark }: { dark: boolean }) {
 function StatusBadge({
   status,
   dark,
-}: {
+}: Readonly<{
   status: JobStatus;
   dark: boolean;
-}) {
+}>) {
   const c = useThemeClass(dark);
 
   switch (status) {
@@ -241,7 +241,7 @@ function StatusBadge({
   }
 }
 
-function TaskProgress({ job, dark }: { job: Job; dark: boolean }) {
+function TaskProgress({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
   const c = useThemeClass(dark);
 
   if (
@@ -277,7 +277,7 @@ function TaskProgress({ job, dark }: { job: Job; dark: boolean }) {
   );
 }
 
-function TaskDetail({ job, dark }: { job: Job; dark: boolean }) {
+function TaskDetail({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
   const c = useThemeClass(dark);
 
   const stats: { label: string; value: string; isError?: boolean }[] = [];

@@ -9,10 +9,10 @@ const HelpContext = createContext<HelpContextValue | null>(null);
 export function HelpProvider({
   children,
   onOpen,
-}: {
+}: Readonly<{
   children: React.ReactNode;
   onOpen: (topicId?: string) => void;
-}) {
+}>) {
   return (
     <HelpContext.Provider value={{ openHelp: onOpen }}>
       {children}

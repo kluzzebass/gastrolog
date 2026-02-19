@@ -33,11 +33,11 @@ function CronField({
   value,
   onChange,
   dark,
-}: {
+}: Readonly<{
   value: string;
   onChange: (v: string) => void;
   dark: boolean;
-}) {
+}>) {
   const c = useThemeClass(dark);
   const trimmed = value.trim();
   const validation = trimmed ? validateCron(trimmed) : null;
@@ -73,7 +73,7 @@ function CronField({
   );
 }
 
-export function PoliciesSettings({ dark }: { dark: boolean }) {
+export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const _c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putPolicy = usePutRotationPolicy();

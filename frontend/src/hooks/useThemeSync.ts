@@ -14,7 +14,7 @@ export function useThemeSync() {
     return "system";
   });
   const [systemDark, setSystemDark] = useState(
-    () => window.matchMedia("(prefers-color-scheme: dark)").matches,
+    () => globalThis.matchMedia("(prefers-color-scheme: dark)").matches,
   );
   const preferences = usePreferences();
   const putPreferences = usePutPreferences();
@@ -42,7 +42,7 @@ export function useThemeSync() {
   );
 
   useEffect(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const mq = globalThis.matchMedia("(prefers-color-scheme: dark)");
     const handler = (e: MediaQueryListEvent) => setSystemDark(e.matches);
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);

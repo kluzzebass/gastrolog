@@ -5,11 +5,11 @@ export function SidebarSection({
   title,
   dark,
   children,
-}: {
+}: Readonly<{
   title: string;
   dark: boolean;
   children: React.ReactNode;
-}) {
+}>) {
   return (
     <section className="mb-5">
       <h3
@@ -27,12 +27,12 @@ export function FieldExplorer({
   dark,
   onSelect,
   activeQuery,
-}: {
+}: Readonly<{
   fields: FieldSummary[];
   dark: boolean;
   onSelect: (key: string, value: string) => void;
   activeQuery: string;
-}) {
+}>) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   if (fields.length === 0) {
@@ -118,13 +118,13 @@ export function StoreButton({
   active,
   onClick,
   dark,
-}: {
+}: Readonly<{
   label: string;
   count: string;
   active: boolean;
   onClick: () => void;
   dark: boolean;
-}) {
+}>) {
   return (
     <button
       onClick={onClick}

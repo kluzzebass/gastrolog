@@ -12,7 +12,7 @@ export function SavedQueries({
   onSave,
   onDelete,
   onClose,
-}: {
+}: Readonly<{
   queries: SavedQuery[];
   dark: boolean;
   currentQuery: string;
@@ -20,7 +20,7 @@ export function SavedQueries({
   onSave: (name: string, query: string) => void;
   onDelete: (name: string) => void;
   onClose: () => void;
-}) {
+}>) {
   const ref = useRef<HTMLDivElement>(null);
   const [saveName, setSaveName] = useState("");
   const nameInputRef = useRef<HTMLInputElement>(null);

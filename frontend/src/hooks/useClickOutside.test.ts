@@ -63,7 +63,7 @@ describe("useClickOutside", () => {
     });
 
     act(() => {
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      globalThis.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     });
 
     expect(onClose).toHaveBeenCalled();
@@ -83,7 +83,7 @@ describe("useClickOutside", () => {
     });
 
     act(() => {
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+      globalThis.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
     });
 
     expect(onClose).not.toHaveBeenCalled();

@@ -29,7 +29,7 @@ export function SettingsSection({
   children,
   addSlot,
   helpTopicId,
-}: SettingsSectionProps) {
+}: Readonly<SettingsSectionProps>) {
   const c = useThemeClass(dark);
 
   if (isLoading) {

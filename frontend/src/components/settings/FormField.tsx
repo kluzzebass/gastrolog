@@ -13,7 +13,7 @@ export function FormField({
   description,
   dark,
   children,
-}: FormFieldProps) {
+}: Readonly<FormFieldProps>) {
   const c = useThemeClass(dark);
   return (
     <div className="flex flex-col gap-1">
@@ -50,7 +50,7 @@ export function TextInput({
   dark,
   disabled,
   mono,
-}: TextInputProps) {
+}: Readonly<TextInputProps>) {
   const c = useThemeClass(dark);
   return (
     <input
@@ -83,7 +83,7 @@ export function SelectInput({
   options,
   dark,
   disabled,
-}: SelectInputProps) {
+}: Readonly<SelectInputProps>) {
   const c = useThemeClass(dark);
   return (
     <select
@@ -120,7 +120,7 @@ export function NumberInput({
   dark,
   disabled,
   min,
-}: NumberInputProps) {
+}: Readonly<NumberInputProps>) {
   const c = useThemeClass(dark);
   return (
     <input
@@ -150,7 +150,7 @@ interface ParamsEditorProps {
   dark: boolean;
 }
 
-export function ParamsEditor({ params, onChange, dark }: ParamsEditorProps) {
+export function ParamsEditor({ params, onChange, dark }: Readonly<ParamsEditorProps>) {
   const c = useThemeClass(dark);
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");

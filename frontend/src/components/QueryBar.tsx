@@ -67,7 +67,7 @@ export function QueryBar({
   draftHasErrors,
   showPlan,
   handleShowPlan,
-}: QueryBarProps) {
+}: Readonly<QueryBarProps>) {
   const c = useThemeClass(dark);
   const { openHelp } = useHelp();
 

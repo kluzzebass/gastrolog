@@ -5,11 +5,11 @@ export function CopyButton({
   text,
   dark,
   className = "",
-}: {
+}: Readonly<{
   text: string;
   dark: boolean;
   className?: string;
-}) {
+}>) {
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 

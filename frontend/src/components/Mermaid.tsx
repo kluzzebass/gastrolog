@@ -60,7 +60,7 @@ interface MermaidDiagramProps {
   dark: boolean;
 }
 
-export function MermaidDiagram({ chart, dark }: MermaidDiagramProps) {
+export function MermaidDiagram({ chart, dark }: Readonly<MermaidDiagramProps>) {
   const c = useThemeClass(dark);
   const ref = useRef<HTMLDivElement>(null);
   const [svg, setSvg] = useState("");

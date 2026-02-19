@@ -75,7 +75,7 @@ export function SettingsDialog({
   onTabChange,
   onClose,
   isAdmin,
-}: SettingsDialogProps) {
+}: Readonly<SettingsDialogProps>) {
   const c = useThemeClass(dark);
   const tabs = useMemo(
     () => allTabs.filter((t) => !t.adminOnly || isAdmin),
@@ -135,7 +135,7 @@ export function SettingsDialog({
   );
 }
 
-function ServiceSettings({ dark }: { dark: boolean }) {
+function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
   const { data, isLoading } = useServerConfig();
   const { data: certData } = useCertificates();

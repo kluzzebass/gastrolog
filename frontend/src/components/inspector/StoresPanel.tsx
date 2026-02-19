@@ -14,7 +14,7 @@ import { ExpandableCard } from "../settings/ExpandableCard";
 import { ChunkTimeline } from "./ChunkTimeline";
 import { HelpButton } from "../HelpButton";
 
-export function StoresPanel({ dark }: { dark: boolean }) {
+export function StoresPanel({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
   const { data: stores, isLoading } = useStores();
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -84,10 +84,10 @@ export function StoresPanel({ dark }: { dark: boolean }) {
 function StoreActions({
   storeId,
   dark,
-}: {
+}: Readonly<{
   storeId: string;
   dark: boolean;
-}) {
+}>) {
   const c = useThemeClass(dark);
   const validate = useValidateStore();
   const { addToast } = useToast();
@@ -132,7 +132,7 @@ function StoreActions({
   );
 }
 
-function ChunkList({ storeId, dark }: { storeId: string; dark: boolean }) {
+function ChunkList({ storeId, dark }: Readonly<{ storeId: string; dark: boolean }>) {
   const c = useThemeClass(dark);
   const { data: chunks, isLoading } = useChunks(storeId);
   const [expandedChunk, setExpandedChunk] = useState<string | null>(null);
@@ -277,11 +277,11 @@ function ChunkDetail({
   storeId,
   chunk,
   dark,
-}: {
+}: Readonly<{
   storeId: string;
   chunk: ChunkMeta;
   dark: boolean;
-}) {
+}>) {
   const c = useThemeClass(dark);
   const { data, isLoading } = useIndexes(storeId, chunk.id);
 

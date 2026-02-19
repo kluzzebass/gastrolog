@@ -31,7 +31,7 @@ export function useToast(): ToastContextValue {
 
 let nextId = 0;
 
-export function ToastProvider({ children }: { children: React.ReactNode }) {
+export function ToastProvider({ children }: Readonly<{ children: React.ReactNode }>) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map(),
@@ -92,10 +92,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 function ToastOverlay({
   toasts,
   onDismiss,
-}: {
+}: Readonly<{
   toasts: Toast[];
   onDismiss: (id: string) => void;
-}) {
+}>) {
   if (toasts.length === 0) return null;
 
   return (
@@ -131,10 +131,10 @@ const LEVEL_STYLES: Record<
 function ToastItem({
   toast,
   onDismiss,
-}: {
+}: Readonly<{
   toast: Toast;
   onDismiss: (id: string) => void;
-}) {
+}>) {
   const [visible, setVisible] = useState(false);
   const s = LEVEL_STYLES[toast.level];
 

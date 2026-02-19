@@ -1,6 +1,6 @@
 import { useHelp } from "../hooks/useHelp";
 
-export function HelpButton({ topicId }: { topicId?: string }) {
+export function HelpButton({ topicId }: Readonly<{ topicId?: string }>) {
   const { openHelp } = useHelp();
 
   return (

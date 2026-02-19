@@ -24,7 +24,7 @@ export function DetailPanelContent({
   contextLoading,
   contextReversed,
   onContextRecordSelect,
-}: {
+}: Readonly<{
   record: ProtoRecord;
   dark: boolean;
   onFieldSelect?: (key: string, value: string) => void;
@@ -36,7 +36,7 @@ export function DetailPanelContent({
   contextLoading?: boolean;
   contextReversed?: boolean;
   onContextRecordSelect?: (record: ProtoRecord) => void;
-}) {
+}>) {
   const c = useThemeClass(dark);
   const rawText = new TextDecoder().decode(record.raw);
   const rawBytes = record.raw.length;
@@ -299,12 +299,12 @@ function DetailSection({
   dark,
   children,
   action,
-}: {
+}: Readonly<{
   label: string;
   dark: boolean;
   children: React.ReactNode;
   action?: React.ReactNode;
-}) {
+}>) {
   return (
     <div>
       <div className="flex items-center gap-2 mb-1.5">
@@ -325,12 +325,12 @@ function DetailRow({
   value,
   dark,
   onClick,
-}: {
+}: Readonly<{
   label: string;
   value: string;
   dark: boolean;
   onClick?: () => void;
-}) {
+}>) {
   return (
     <div
       className={`flex py-1 border-b last:border-b-0 ${dark ? "border-ink-border-subtle" : "border-light-border-subtle"}`}

@@ -4,7 +4,7 @@ interface IconProps {
   className?: string;
 }
 
-export function CopyIcon({ className }: IconProps) {
+export function CopyIcon({ className }: Readonly<IconProps>) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -21,7 +21,7 @@ export function CopyIcon({ className }: IconProps) {
   );
 }
 
-export function CheckIcon({ className }: IconProps) {
+export function CheckIcon({ className }: Readonly<IconProps>) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -37,7 +37,7 @@ export function CheckIcon({ className }: IconProps) {
   );
 }
 
-export function DownloadIcon({ className }: IconProps) {
+export function DownloadIcon({ className }: Readonly<IconProps>) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -55,7 +55,7 @@ export function DownloadIcon({ className }: IconProps) {
   );
 }
 
-export function UserIcon({ className }: IconProps) {
+export function UserIcon({ className }: Readonly<IconProps>) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -72,7 +72,7 @@ export function UserIcon({ className }: IconProps) {
   );
 }
 
-export function LockIcon({ className }: IconProps) {
+export function LockIcon({ className }: Readonly<IconProps>) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -89,7 +89,7 @@ export function LockIcon({ className }: IconProps) {
   );
 }
 
-export function SignOutIcon({ className }: IconProps) {
+export function SignOutIcon({ className }: Readonly<IconProps>) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -107,7 +107,7 @@ export function SignOutIcon({ className }: IconProps) {
   );
 }
 
-export function SpinnerIcon({ className }: IconProps) {
+export function SpinnerIcon({ className }: Readonly<IconProps>) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none">
       <circle
@@ -127,7 +127,7 @@ export function SpinnerIcon({ className }: IconProps) {
   );
 }
 
-export function EyeIcon({ className }: IconProps) {
+export function EyeIcon({ className }: Readonly<IconProps>) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -144,7 +144,7 @@ export function EyeIcon({ className }: IconProps) {
   );
 }
 
-export function EyeOffIcon({ className }: IconProps) {
+export function EyeOffIcon({ className }: Readonly<IconProps>) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -163,7 +163,7 @@ export function EyeOffIcon({ className }: IconProps) {
   );
 }
 
-export function CertIcon({ className }: IconProps) {
+export function CertIcon({ className }: Readonly<IconProps>) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -180,7 +180,7 @@ export function CertIcon({ className }: IconProps) {
   );
 }
 
-export function ServiceIcon({ className }: IconProps) {
+export function ServiceIcon({ className }: Readonly<IconProps>) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -197,7 +197,7 @@ export function ServiceIcon({ className }: IconProps) {
   );
 }
 
-export function FilterIcon({ className }: IconProps) {
+export function FilterIcon({ className }: Readonly<IconProps>) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -213,7 +213,7 @@ export function FilterIcon({ className }: IconProps) {
   );
 }
 
-export function StoresIcon({ className }: IconProps) {
+export function StoresIcon({ className }: Readonly<IconProps>) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -231,7 +231,7 @@ export function StoresIcon({ className }: IconProps) {
   );
 }
 
-export function IngestersIcon({ className }: IconProps) {
+export function IngestersIcon({ className }: Readonly<IconProps>) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -250,7 +250,7 @@ export function IngestersIcon({ className }: IconProps) {
   );
 }
 
-export function RetentionIcon({ className }: IconProps) {
+export function RetentionIcon({ className }: Readonly<IconProps>) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -269,7 +269,7 @@ export function RetentionIcon({ className }: IconProps) {
   );
 }
 
-export function PolicyIcon({ className }: IconProps) {
+export function PolicyIcon({ className }: Readonly<IconProps>) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -287,7 +287,7 @@ export function PolicyIcon({ className }: IconProps) {
   );
 }
 
-export function UsersIcon({ className }: IconProps) {
+export function UsersIcon({ className }: Readonly<IconProps>) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -306,7 +306,7 @@ export function UsersIcon({ className }: IconProps) {
   );
 }
 
-export function JobsIcon({ className }: IconProps) {
+export function JobsIcon({ className }: Readonly<IconProps>) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -325,7 +325,7 @@ export function JobsIcon({ className }: IconProps) {
   );
 }
 
-export function MetricsIcon({ className }: IconProps) {
+export function MetricsIcon({ className }: Readonly<IconProps>) {
   return (
     <svg
       viewBox="0 0 24 24"

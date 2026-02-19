@@ -37,7 +37,7 @@ export function HeaderBar({
   currentUser,
   onChangePassword,
   onLogout,
-}: HeaderBarProps) {
+}: Readonly<HeaderBarProps>) {
   const c = useThemeClass(dark);
 
   return (

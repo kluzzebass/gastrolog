@@ -18,7 +18,7 @@ const STORE_TYPES = [
   { value: "memory", label: "Memory (non-persistent)" },
 ];
 
-export function StoreStep({ dark, data, onChange }: StoreStepProps) {
+export function StoreStep({ dark, data, onChange }: Readonly<StoreStepProps>) {
   const c = useThemeClass(dark);
   return (
     <div className="flex flex-col gap-5">

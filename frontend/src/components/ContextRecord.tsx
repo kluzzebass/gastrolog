@@ -8,12 +8,12 @@ export function ContextRecord({
   isAnchor,
   dark,
   onSelect,
-}: {
+}: Readonly<{
   record: ProtoRecord;
   isAnchor: boolean;
   dark: boolean;
   onSelect?: () => void;
-}) {
+}>) {
   const rawText = new TextDecoder().decode(record.raw);
   const parts = syntaxHighlight(rawText);
   const severity = detectSeverity(record.attrs);

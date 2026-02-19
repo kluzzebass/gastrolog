@@ -15,7 +15,7 @@ export function ChunkTimeline({
   dark,
   selectedChunkId,
   onChunkClick,
-}: ChunkTimelineProps) {
+}: Readonly<ChunkTimelineProps>) {
   const c = useThemeClass(dark);
   const [hoveredChunk, setHoveredChunk] = useState<string | null>(null);
 
@@ -268,7 +268,7 @@ export function ChunkTimeline({
 function ChunkTooltip({
   chunk,
   dark,
-}: {
+}: Readonly<{
   chunk: {
     id: string;
     start: number;
@@ -280,7 +280,7 @@ function ChunkTooltip({
     diskBytes: bigint;
   };
   dark: boolean;
-}) {
+}>) {
   const c = useThemeClass(dark);
   const start = new Date(chunk.start);
   const end = new Date(chunk.end);

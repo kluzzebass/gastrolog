@@ -23,7 +23,7 @@ const roleOptions = [
   { value: "user", label: "User" },
 ];
 
-export function UsersSettings({ dark }: { dark: boolean }) {
+export function UsersSettings({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
   const { data: users, isLoading } = useListUsers();
   const createUser = useCreateUser();
@@ -295,14 +295,14 @@ function PasswordInput({
   onToggle,
   placeholder,
   dark,
-}: {
+}: Readonly<{
   value: string;
   onChange: (v: string) => void;
   show: boolean;
   onToggle: () => void;
   placeholder?: string;
   dark: boolean;
-}) {
+}>) {
   const c = useThemeClass(dark);
   return (
     <div className="relative">

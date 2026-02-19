@@ -22,7 +22,7 @@ function isWithin(topic: HelpTopic, id: string): boolean {
   return topic.children?.some((c) => isWithin(c, id)) ?? false;
 }
 
-export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings }: HelpDialogProps) {
+export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings }: Readonly<HelpDialogProps>) {
   const c = useThemeClass(dark);
   const activeId = topicId ?? helpTopics[0]?.id ?? "";
   const [expanded, setExpanded] = useState<Set<string>>(() => {

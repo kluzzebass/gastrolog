@@ -27,7 +27,7 @@ interface PolicyEdit {
   maxChunks: string;
 }
 
-export function RetentionPoliciesSettings({ dark }: { dark: boolean }) {
+export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const _c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putPolicy = usePutRetentionPolicy();

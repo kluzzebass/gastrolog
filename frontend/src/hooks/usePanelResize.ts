@@ -19,7 +19,7 @@ export function usePanelResize(
       const onMouseMove = (e: MouseEvent) => {
         const value =
           direction === "right"
-            ? window.innerWidth - e.clientX
+            ? globalThis.innerWidth - e.clientX
             : e.clientX;
         setter(Math.max(min, Math.min(max, value)));
       };
@@ -27,11 +27,11 @@ export function usePanelResize(
         setResizing(false);
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
-        window.removeEventListener("mousemove", onMouseMove);
-        window.removeEventListener("mouseup", onMouseUp);
+        globalThis.removeEventListener("mousemove", onMouseMove);
+        globalThis.removeEventListener("mouseup", onMouseUp);
       };
-      window.addEventListener("mousemove", onMouseMove);
-      window.addEventListener("mouseup", onMouseUp);
+      globalThis.addEventListener("mousemove", onMouseMove);
+      globalThis.addEventListener("mouseup", onMouseUp);
     },
     [setter, min, max, direction],
   );

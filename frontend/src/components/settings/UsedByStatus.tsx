@@ -10,7 +10,7 @@ interface UsedByStatusProps {
   refs: string[];
 }
 
-export function UsedByStatus({ dark, refs }: UsedByStatusProps) {
+export function UsedByStatus({ dark, refs }: Readonly<UsedByStatusProps>) {
   const c = useThemeClass(dark);
   if (refs.length === 0) return undefined;
   return (

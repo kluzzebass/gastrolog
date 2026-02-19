@@ -8,13 +8,13 @@ export function QueryAutocomplete({
   dark,
   onSelect,
   onClose,
-}: {
+}: Readonly<{
   suggestions: string[];
   selectedIndex: number;
   dark: boolean;
   onSelect: (index: number) => void;
   onClose: () => void;
-}) {
+}>) {
   const ref = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLDivElement>(null);
   useClickOutside(ref, onClose);

@@ -23,7 +23,7 @@ const INGESTER_TYPES = [
   { id: "chatterbox", label: "Chatterbox", description: "Test data generator" },
 ] as const;
 
-export function IngesterStep({ dark, data, onChange }: IngesterStepProps) {
+export function IngesterStep({ dark, data, onChange }: Readonly<IngesterStepProps>) {
   const c = useThemeClass(dark);
 
   const selectType = (type: string) => {

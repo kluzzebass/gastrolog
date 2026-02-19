@@ -6,7 +6,7 @@ interface PasswordRulesProps {
   dark: boolean;
 }
 
-export function PasswordRules({ password, config, dark }: PasswordRulesProps) {
+export function PasswordRules({ password, config, dark }: Readonly<PasswordRulesProps>) {
   const minLength = config.minPasswordLength || 8;
 
   const rules: { label: string; met: boolean }[] = [

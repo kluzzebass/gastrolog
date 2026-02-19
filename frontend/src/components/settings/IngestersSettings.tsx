@@ -21,7 +21,7 @@ const ingesterTypes = [
   { value: "tail", label: "tail" },
 ];
 
-export function IngestersSettings({ dark }: { dark: boolean }) {
+export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putIngester = usePutIngester();

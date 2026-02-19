@@ -32,7 +32,7 @@ export function InspectorDialog({
   tab,
   onTabChange,
   onClose,
-}: InspectorDialogProps) {
+}: Readonly<InspectorDialogProps>) {
   const c = useThemeClass(dark);
 
   return (
@@ -86,7 +86,7 @@ export function InspectorDialog({
   );
 }
 
-function Placeholder({ tab, dark }: { tab: InspectorTab; dark: boolean }) {
+function Placeholder({ tab, dark }: Readonly<{ tab: InspectorTab; dark: boolean }>) {
   const c = useThemeClass(dark);
   const labels: Record<InspectorTab, string> = {
     stores: "Store health indicators will appear here.",

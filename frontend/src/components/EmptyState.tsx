@@ -1,4 +1,4 @@
-export function EmptyState({ dark }: { dark: boolean }) {
+export function EmptyState({ dark }: Readonly<{ dark: boolean }>) {
   return (
     <div className="flex flex-col items-center justify-center h-full py-20 animate-fade-up">
       <div

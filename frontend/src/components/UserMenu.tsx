@@ -9,13 +9,13 @@ export function UserMenu({
   dark,
   onChangePassword,
   onLogout,
-}: {
+}: Readonly<{
   username: string;
   role: string;
   dark: boolean;
   onChangePassword: () => void;
   onLogout: () => void;
-}) {
+}>) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useClickOutside(
@@ -95,11 +95,11 @@ function MenuItem({
   dark,
   onClick,
   children,
-}: {
+}: Readonly<{
   dark: boolean;
   onClick: () => void;
   children: React.ReactNode;
-}) {
+}>) {
   const c = useThemeClass(dark);
   return (
     <button

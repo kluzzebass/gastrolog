@@ -6,7 +6,7 @@ interface WelcomeStepProps {
   onNext: () => void;
 }
 
-export function WelcomeStep({ dark, onNext }: WelcomeStepProps) {
+export function WelcomeStep({ dark, onNext }: Readonly<WelcomeStepProps>) {
   const c = useThemeClass(dark);
   return (
     <div className="flex flex-col items-center text-center gap-6 py-4">

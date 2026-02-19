@@ -11,14 +11,14 @@ export function QueryHistory({
   onRemove,
   onClear,
   onClose,
-}: {
+}: Readonly<{
   entries: HistoryEntry[];
   dark: boolean;
   onSelect: (query: string) => void;
   onRemove: (query: string) => void;
   onClear: () => void;
   onClose: () => void;
-}) {
+}>) {
   const ref = useRef<HTMLDivElement>(null);
   useClickOutside(ref, onClose);
 

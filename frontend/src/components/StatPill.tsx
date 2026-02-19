@@ -2,11 +2,11 @@ export function StatPill({
   label,
   value,
   dark,
-}: {
+}: Readonly<{
   label: string;
   value: string;
   dark: boolean;
-}) {
+}>) {
   return (
     <div className="flex items-baseline gap-1.5">
       <span

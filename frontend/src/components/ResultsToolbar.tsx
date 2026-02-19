@@ -34,7 +34,7 @@ export function ResultsToolbar({
   reconnectAttempt,
   displayRecords,
   onZoomOut,
-}: ResultsToolbarProps) {
+}: Readonly<ResultsToolbarProps>) {
   const c = useThemeClass(dark);
 
   return (

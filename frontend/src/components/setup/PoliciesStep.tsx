@@ -50,7 +50,7 @@ export function PoliciesStep({
   retention,
   onRotationChange,
   onRetentionChange,
-}: PoliciesStepProps) {
+}: Readonly<PoliciesStepProps>) {
   const c = useThemeClass(dark);
   return (
     <div className="flex flex-col gap-6">

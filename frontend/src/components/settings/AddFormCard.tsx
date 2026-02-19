@@ -17,7 +17,7 @@ export function AddFormCard({
   isPending,
   typeBadge,
   children,
-}: AddFormCardProps) {
+}: Readonly<AddFormCardProps>) {
   const c = useThemeClass(dark);
   return (
     <div

@@ -5,7 +5,7 @@ import { formatBytes } from "../../utils/units";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { HelpButton } from "../HelpButton";
 
-export function IngestersPanel({ dark }: { dark: boolean }) {
+export function IngestersPanel({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
   const { data: ingesters, isLoading } = useIngesters();
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -70,7 +70,7 @@ export function IngestersPanel({ dark }: { dark: boolean }) {
   );
 }
 
-function IngesterDetail({ id, dark }: { id: string; dark: boolean }) {
+function IngesterDetail({ id, dark }: Readonly<{ id: string; dark: boolean }>) {
   const c = useThemeClass(dark);
   const { data, isLoading } = useIngesterStatus(id);
 

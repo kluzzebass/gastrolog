@@ -11,7 +11,7 @@ import { FormField, TextInput } from "./FormField";
 import { PrimaryButton } from "./Buttons";
 import { UsedByStatus, refsFor } from "./UsedByStatus";
 
-function FilterDescription({ dark }: { dark: boolean }) {
+function FilterDescription({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
   const code = `font-mono text-[0.95em] px-1 py-px rounded ${c("bg-ink-well text-copper-dim", "bg-light-well text-copper")}`;
   return (
@@ -46,7 +46,7 @@ function FilterDescription({ dark }: { dark: boolean }) {
   );
 }
 
-export function FiltersSettings({ dark }: { dark: boolean }) {
+export function FiltersSettings({ dark }: Readonly<{ dark: boolean }>) {
   const _c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putFilter = usePutFilter();

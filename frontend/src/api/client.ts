@@ -47,10 +47,10 @@ const unauthInterceptor: Interceptor = (next) => async (req) => {
       err instanceof ConnectError &&
       err.code === Code.Unauthenticated &&
       !req.service.typeName.endsWith(".AuthService") &&
-      !["/login", "/register"].includes(window.location.pathname)
+      !["/login", "/register"].includes(globalThis.location.pathname)
     ) {
       setToken(null);
-      window.location.href = "/login";
+      globalThis.location.href = "/login";
     }
     throw err;
   }
@@ -58,7 +58,7 @@ const unauthInterceptor: Interceptor = (next) => async (req) => {
 
 // Same origin in both dev and prod. In dev, vite-plugin-http2-proxy
 // forwards RPC calls to the backend over HTTP/2 (required for streaming).
-const API_BASE_URL = window.location.origin;
+const API_BASE_URL = globalThis.location.origin;
 
 const transport = createConnectTransport({
   baseUrl: API_BASE_URL,

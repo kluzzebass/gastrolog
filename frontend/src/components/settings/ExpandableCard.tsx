@@ -23,7 +23,7 @@ export function ExpandableCard({
   children,
   status,
   headerRight,
-}: ExpandableCardProps) {
+}: Readonly<ExpandableCardProps>) {
   const c = useThemeClass(dark);
 
   return (

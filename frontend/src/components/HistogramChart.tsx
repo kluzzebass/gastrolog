@@ -19,13 +19,13 @@ export function HistogramChart({
   onBrushSelect,
   onPan,
   onSegmentClick,
-}: {
+}: Readonly<{
   data: HistogramData;
   dark: boolean;
   onBrushSelect?: (start: Date, end: Date) => void;
   onPan?: (start: Date, end: Date) => void;
   onSegmentClick?: (level: string) => void;
-}) {
+}>) {
   const { buckets } = data;
   const barsRef = useRef<HTMLDivElement>(null);
   const [brushStart, setBrushStart] = useState<number | null>(null);
@@ -79,11 +79,11 @@ export function HistogramChart({
       }
       setBrushStart(null);
       setBrushEnd(null);
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
+      globalThis.removeEventListener("mousemove", onMouseMove);
+      globalThis.removeEventListener("mouseup", onMouseUp);
     };
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
+    globalThis.addEventListener("mousemove", onMouseMove);
+    globalThis.addEventListener("mouseup", onMouseUp);
   };
 
   const brushLo =
@@ -124,8 +124,8 @@ export function HistogramChart({
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
       setPanOffset(0);
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
+      globalThis.removeEventListener("mousemove", onMouseMove);
+      globalThis.removeEventListener("mouseup", onMouseUp);
 
       const el = axisRef.current;
       if (!el) return;
@@ -138,8 +138,8 @@ export function HistogramChart({
       const last = lastBucket.ts.getTime();
       onPan(new Date(first + deltaMs), new Date(last + deltaMs));
     };
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
+    globalThis.addEventListener("mousemove", onMouseMove);
+    globalThis.addEventListener("mouseup", onMouseUp);
   };
 
   // Format time label based on range span.

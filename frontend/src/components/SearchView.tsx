@@ -138,8 +138,8 @@ export function SearchView() {
         if (!detailPinned) setDetailCollapsed(true);
       }
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    globalThis.addEventListener("keydown", handler);
+    return () => globalThis.removeEventListener("keydown", handler);
   }, [detailPinned, showPlan]);
 
   const queryHistory = useQueryHistory();

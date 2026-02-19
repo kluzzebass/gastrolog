@@ -10,7 +10,7 @@ export function PrimaryButton({
   onClick,
   disabled,
   children,
-}: PrimaryButtonProps) {
+}: Readonly<PrimaryButtonProps>) {
   return (
     <button
       onClick={onClick}
@@ -36,7 +36,7 @@ export function GhostButton({
   bordered,
   children,
   className: extra,
-}: GhostButtonProps) {
+}: Readonly<GhostButtonProps>) {
   const c = useThemeClass(dark);
   return (
     <button

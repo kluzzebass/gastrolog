@@ -13,7 +13,7 @@ export function StoreParamsForm({
   params,
   onChange,
   dark,
-}: StoreParamsFormProps) {
+}: Readonly<StoreParamsFormProps>) {
   const set = (key: string, value: string) =>
     onChange({ ...params, [key]: value });
   const get = (key: string) => params[key] ?? "";

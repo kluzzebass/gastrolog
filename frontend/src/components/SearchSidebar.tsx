@@ -58,7 +58,7 @@ export function SearchSidebar({
   kvFields,
   onFieldSelect,
   activeQuery,
-}: SearchSidebarProps) {
+}: Readonly<SearchSidebarProps>) {
   const c = useThemeClass(dark);
 
   const allSeverities = [

@@ -28,7 +28,7 @@ export function SettingsCard({
   status,
   headerRight,
   footer,
-}: SettingsCardProps) {
+}: Readonly<SettingsCardProps>) {
   const c = useThemeClass(dark);
   const [confirmDelete, setConfirmDelete] = useState(false);
 

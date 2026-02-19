@@ -16,13 +16,13 @@ export function ExplainPanel({
   totalChunks,
   expression,
   dark,
-}: {
+}: Readonly<{
   chunks: ChunkPlan[];
   direction: string;
   totalChunks: number;
   expression: string;
   dark: boolean;
-}) {
+}>) {
   const c = useThemeClass(dark);
   const [highlightRanges, setHighlightRanges] = useState<Range[]>([]);
 
@@ -109,11 +109,11 @@ function ExpressionBox({
   expression,
   dark,
   highlightRanges,
-}: {
+}: Readonly<{
   expression: string;
   dark: boolean;
   highlightRanges: Range[];
-}) {
+}>) {
   const c = useThemeClass(dark);
   const segments = buildSegments(expression, highlightRanges);
 
@@ -137,7 +137,7 @@ function ExpressionBox({
   );
 }
 
-function CostSummary({ chunks, dark }: { chunks: ChunkPlan[]; dark: boolean }) {
+function CostSummary({ chunks, dark }: Readonly<{ chunks: ChunkPlan[]; dark: boolean }>) {
   const c = useThemeClass(dark);
 
   const totalRecords = chunks.reduce(
@@ -228,14 +228,14 @@ function ExplainChunk({
   onToggle,
   onStepHover,
   onStepLeave,
-}: {
+}: Readonly<{
   plan: ChunkPlan;
   dark: boolean;
   collapsed: boolean;
   onToggle: () => void;
   onStepHover: (step: PipelineStep) => void;
   onStepLeave: () => void;
-}) {
+}>) {
   const c = useThemeClass(dark);
   const isSkipped = plan.scanMode === "skipped";
   const hasBranches = plan.branchPlans.length > 0;
@@ -417,14 +417,14 @@ function ExplainBranch({
   dark,
   onStepHover,
   onStepLeave,
-}: {
+}: Readonly<{
   branch: BranchPlan;
   index: number;
   totalRecords: number;
   dark: boolean;
   onStepHover: (step: PipelineStep) => void;
   onStepLeave: () => void;
-}) {
+}>) {
   const c = useThemeClass(dark);
 
   return (
@@ -495,13 +495,13 @@ function PipelineFunnel({
   dark,
   onStepHover,
   onStepLeave,
-}: {
+}: Readonly<{
   steps: PipelineStep[];
   totalRecords: number;
   dark: boolean;
   onStepHover?: (step: PipelineStep) => void;
   onStepLeave?: () => void;
-}) {
+}>) {
   const c = useThemeClass(dark);
   const maxVal = Math.max(
     totalRecords,

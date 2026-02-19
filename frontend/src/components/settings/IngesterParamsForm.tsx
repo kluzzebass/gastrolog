@@ -78,11 +78,11 @@ function ChatterboxForm({
   params,
   onChange,
   dark,
-}: {
+}: Readonly<{
   params: Record<string, string>;
   onChange: (params: Record<string, string>) => void;
   dark: boolean;
-}) {
+}>) {
   const c = useThemeClass(dark);
   const set = (key: string, value: string) =>
     onChange({ ...params, [key]: value });
@@ -274,11 +274,11 @@ function TailForm({
   params,
   onChange,
   dark,
-}: {
+}: Readonly<{
   params: Record<string, string>;
   onChange: (params: Record<string, string>) => void;
   dark: boolean;
-}) {
+}>) {
   const c = useThemeClass(dark);
 
   // Convert between JSON array and newline-separated text.
@@ -346,11 +346,11 @@ function DockerForm({
   params,
   onChange,
   dark,
-}: {
+}: Readonly<{
   params: Record<string, string>;
   onChange: (params: Record<string, string>) => void;
   dark: boolean;
-}) {
+}>) {
   const c = useThemeClass(dark);
   const { data: certData } = useCertificates();
   const testIngester = useTestIngester();
@@ -533,7 +533,7 @@ export function IngesterParamsForm({
   params,
   onChange,
   dark,
-}: IngesterParamsFormProps) {
+}: Readonly<IngesterParamsFormProps>) {
   if (ingesterType === "chatterbox") {
     return <ChatterboxForm params={params} onChange={onChange} dark={dark} />;
   }

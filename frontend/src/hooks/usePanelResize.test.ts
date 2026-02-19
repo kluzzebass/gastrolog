@@ -45,7 +45,7 @@ describe("usePanelResize", () => {
     expect(result.current.resizing).toBe(true);
 
     act(() => {
-      window.dispatchEvent(new MouseEvent("mouseup"));
+      globalThis.dispatchEvent(new MouseEvent("mouseup"));
     });
     expect(result.current.resizing).toBe(false);
   });
@@ -68,25 +68,25 @@ describe("usePanelResize", () => {
 
     // Simulate mouse at x=700 → right direction = 1000 - 700 = 300
     act(() => {
-      window.dispatchEvent(new MouseEvent("mousemove", { clientX: 700 }));
+      globalThis.dispatchEvent(new MouseEvent("mousemove", { clientX: 700 }));
     });
     expect(_width).toBe(300);
 
     // Mouse at x=950 → right = 1000 - 950 = 50, clamped to min=100
     act(() => {
-      window.dispatchEvent(new MouseEvent("mousemove", { clientX: 950 }));
+      globalThis.dispatchEvent(new MouseEvent("mousemove", { clientX: 950 }));
     });
     expect(_width).toBe(100);
 
     // Mouse at x=100 → right = 1000 - 100 = 900, clamped to max=500
     act(() => {
-      window.dispatchEvent(new MouseEvent("mousemove", { clientX: 100 }));
+      globalThis.dispatchEvent(new MouseEvent("mousemove", { clientX: 100 }));
     });
     expect(_width).toBe(500);
 
     // Clean up
     act(() => {
-      window.dispatchEvent(new MouseEvent("mouseup"));
+      globalThis.dispatchEvent(new MouseEvent("mouseup"));
     });
   });
 
@@ -105,24 +105,24 @@ describe("usePanelResize", () => {
 
     // Mouse at x=250 → left direction = 250
     act(() => {
-      window.dispatchEvent(new MouseEvent("mousemove", { clientX: 250 }));
+      globalThis.dispatchEvent(new MouseEvent("mousemove", { clientX: 250 }));
     });
     expect(_width).toBe(250);
 
     // Mouse at x=50 → clamped to min=100
     act(() => {
-      window.dispatchEvent(new MouseEvent("mousemove", { clientX: 50 }));
+      globalThis.dispatchEvent(new MouseEvent("mousemove", { clientX: 50 }));
     });
     expect(_width).toBe(100);
 
     // Mouse at x=600 → clamped to max=500
     act(() => {
-      window.dispatchEvent(new MouseEvent("mousemove", { clientX: 600 }));
+      globalThis.dispatchEvent(new MouseEvent("mousemove", { clientX: 600 }));
     });
     expect(_width).toBe(500);
 
     act(() => {
-      window.dispatchEvent(new MouseEvent("mouseup"));
+      globalThis.dispatchEvent(new MouseEvent("mouseup"));
     });
   });
 });

@@ -11,7 +11,7 @@ interface AuthPageProps {
   mode: "login" | "register";
 }
 
-export function AuthPage({ mode }: AuthPageProps) {
+export function AuthPage({ mode }: Readonly<AuthPageProps>) {
   const navigate = useNavigate();
   const authStatus = useAuthStatus();
   const login = useLogin();
@@ -28,13 +28,13 @@ export function AuthPage({ mode }: AuthPageProps) {
     const saved = localStorage.getItem("gastrolog:theme");
     if (saved === "dark") return true;
     if (saved === "light") return false;
-    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+    return globalThis.matchMedia("(prefers-color-scheme: dark)").matches;
   });
 
   useEffect(() => {
     const saved = localStorage.getItem("gastrolog:theme");
     if (saved === "dark" || saved === "light") return; // explicit choice, ignore system
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const mq = globalThis.matchMedia("(prefers-color-scheme: dark)");
     const handler = (e: MediaQueryListEvent) => setDark(e.matches);
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
@@ -61,7 +61,7 @@ export function AuthPage({ mode }: AuthPageProps) {
   const mismatch =
     isRegister && confirmPassword.length > 0 && password !== confirmPassword;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError("");
 

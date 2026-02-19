@@ -12,12 +12,12 @@ export function ChangePasswordDialog({
   dark,
   onClose,
   onSuccess,
-}: {
+}: Readonly<{
   username: string;
   dark: boolean;
   onClose: () => void;
   onSuccess: () => void;
-}) {
+}>) {
   const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -35,7 +35,7 @@ export function ChangePasswordDialog({
   const mismatch =
     confirmPassword.length > 0 && newPassword !== confirmPassword;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError("");
 

@@ -23,14 +23,14 @@ export function TimeRangePicker({
   activePreset,
   onPresetClick,
   onApply,
-}: {
+}: Readonly<{
   dark: boolean;
   rangeStart: Date | null;
   rangeEnd: Date | null;
   activePreset: string;
   onPresetClick: (preset: string) => void;
   onApply: (start: Date, end: Date) => void;
-}) {
+}>) {
   const c = useThemeClass(dark);
   const [viewMonth, setViewMonth] = useState(() => rangeEnd ?? new Date());
   const [pendingStart, setPendingStart] = useState<Date | null>(rangeStart);

@@ -30,13 +30,13 @@ function JobProgress({
   dark,
   onComplete,
   onFailed,
-}: {
+}: Readonly<{
   jobId: string;
   label: string;
   dark: boolean;
   onComplete: (job: Job) => void;
   onFailed: (job: Job) => void;
-}) {
+}>) {
   const c = useThemeClass(dark);
   const { data: job } = useJob(jobId);
   const qc = useQueryClient();
@@ -84,7 +84,7 @@ function JobProgress({
   );
 }
 
-export function StoresSettings({ dark }: { dark: boolean }) {
+export function StoresSettings({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putStore = usePutStore();

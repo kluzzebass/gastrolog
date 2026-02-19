@@ -74,7 +74,7 @@ function PemCertForm({
   onDragLeave,
   isEditing,
   hideActions,
-}: PemCertFormProps) {
+}: Readonly<PemCertFormProps>) {
   const c = useThemeClass(dark);
   return (
     <div
@@ -178,7 +178,7 @@ function FilesCertForm({
   onCancel,
   saving,
   hideActions,
-}: FilesCertFormProps) {
+}: Readonly<FilesCertFormProps>) {
   const c = useThemeClass(dark);
   return (
     <div className="transition-all">
@@ -243,7 +243,7 @@ function FilesCertForm({
   );
 }
 
-export function CertificatesSettings({ dark }: { dark: boolean }) {
+export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
   const [adding, setAdding] = useState<CertSource | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);

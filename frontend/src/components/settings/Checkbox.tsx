@@ -7,7 +7,7 @@ interface CheckboxProps {
   dark: boolean;
 }
 
-export function Checkbox({ checked, onChange, label, dark }: CheckboxProps) {
+export function Checkbox({ checked, onChange, label, dark }: Readonly<CheckboxProps>) {
   const c = useThemeClass(dark);
   return (
     <div

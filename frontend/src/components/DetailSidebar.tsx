@@ -42,7 +42,7 @@ export function DetailSidebar({
   contextLoading,
   contextReversed,
   onContextRecordSelect,
-}: DetailSidebarProps) {
+}: Readonly<DetailSidebarProps>) {
   const c = useThemeClass(dark);
 
   return (

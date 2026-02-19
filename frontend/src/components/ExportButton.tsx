@@ -56,10 +56,10 @@ function download(content: string, filename: string, mime: string) {
 export function ExportButton({
   records,
   dark,
-}: {
+}: Readonly<{
   records: ProtoRecord[];
   dark: boolean;
-}) {
+}>) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useClickOutside(

@@ -22,7 +22,7 @@ export function Dialog({
   dark,
   size = "xl",
   children,
-}: DialogProps) {
+}: Readonly<DialogProps>) {
   const c = useThemeClass(dark);
 
   useEffect(() => {
@@ -32,8 +32,8 @@ export function Dialog({
         onClose();
       }
     };
-    window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
+    globalThis.addEventListener("keydown", handler, true);
+    return () => globalThis.removeEventListener("keydown", handler, true);
   }, [onClose]);
 
   const bg =
@@ -70,10 +70,10 @@ export function Dialog({
 export function CloseButton({
   onClick,
   dark,
-}: {
+}: Readonly<{
   onClick: () => void;
   dark: boolean;
-}) {
+}>) {
   const c = useThemeClass(dark);
   return (
     <button
