@@ -326,6 +326,8 @@ export function HistogramChart({
                               }
                             : undefined
                         }
+                        {...clickableProps(onSegmentClick ? () => onSegmentClick("other") : undefined)}
+                        aria-label={onSegmentClick ? "Filter by other" : undefined}
                       />
                     )}
                   </div>

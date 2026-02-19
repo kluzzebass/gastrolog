@@ -158,28 +158,29 @@ export function SearchView() {
   const [isScrolledDown, setIsScrolledDown] = useState(false);
 
 
+  const { addToast } = useToast();
+  const toastError = (err: Error) => addToast(err.message, "error");
+
   const {
     records,
     isSearching,
-    error: searchError,
     hasMore,
     search,
     loadMore,
     setRecords,
     reset: resetSearch,
-  } = useSearch();
+  } = useSearch({ onError: toastError });
   const {
     records: followRecords,
     isFollowing,
     reconnecting,
     reconnectAttempt,
-    error: followError,
     newCount: followNewCount,
     follow,
     stop: stopFollow,
     reset: resetFollow,
     resetNewCount: resetFollowNewCount,
-  } = useFollow();
+  } = useFollow({ onError: toastError });
   const {
     chunks: explainChunks,
     direction: explainDirection,
@@ -203,21 +204,8 @@ export function SearchView() {
   const { data: stores, isLoading: storesLoading } = useStores();
   const { data: stats, isLoading: statsLoading } = useStats();
 
-  const { addToast } = useToast();
   const logout = useLogout();
   const currentUser = useCurrentUser();
-
-  // Push errors from hooks to the toast system.
-  useEffect(() => {
-    if (searchError) {
-      addToast(searchError.message, "error");
-    }
-  }, [searchError]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (followError) {
-      addToast(followError.message, "error");
-    }
-  }, [followError]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Navigate to a new query — pushes browser history, preserving current route.
   const setUrlQuery = (newQ: string) => {

@@ -112,6 +112,10 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
           {hasChildren && (
             <svg
               onClick={(e) => { e.stopPropagation(); toggleExpanded(t.id); }}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); toggleExpanded(t.id); } }}
+              role="button"
+              tabIndex={0}
+              aria-label={isExpanded ? "Collapse section" : "Expand section"}
               className={`w-3 h-3 mr-1 shrink-0 transition-transform cursor-pointer ${isExpanded ? "rotate-90" : ""}`}
               viewBox="0 0 12 12"
               fill="currentColor"

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, type MutableRefObject } from "react";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { queryClient, Query, Record } from "../client";
 
@@ -22,7 +22,10 @@ function isAbortError(err: unknown): boolean {
   );
 }
 
-export function useFollow() {
+export function useFollow(options?: { onError?: (err: Error) => void }) {
+  const onErrorRef = useRef(options?.onError) as MutableRefObject<((err: Error) => void) | undefined>;
+  onErrorRef.current = options?.onError;
+
   const [state, setState] = useState<FollowState>({
     records: [],
     isFollowing: false,
@@ -124,6 +127,7 @@ export function useFollow() {
             error: err as ConnectError,
             reconnecting: false,
           }));
+          onErrorRef.current?.(err as ConnectError);
           return;
         }
         // Schedule reconnect with backoff.

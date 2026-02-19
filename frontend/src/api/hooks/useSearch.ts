@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, type MutableRefObject } from "react";
 import { queryClient, Query, Record } from "../client";
 
 export interface SearchState {
@@ -58,7 +58,10 @@ export function extractTokens(queryStr: string): string[] {
   return tokens;
 }
 
-export function useSearch() {
+export function useSearch(options?: { onError?: (err: Error) => void }) {
+  const onErrorRef = useRef(options?.onError) as MutableRefObject<((err: Error) => void) | undefined>;
+  onErrorRef.current = options?.onError;
+
   const [state, setState] = useState<SearchState>({
     records: [],
     isSearching: false,
@@ -143,13 +146,15 @@ export function useSearch() {
           return;
         }
         abortRef.current = null;
+        const error = err instanceof Error ? err : new Error(String(err));
         setState((prev) => ({
           ...prev,
           isSearching: false,
           hasMore: false,
           resumeToken: null,
-          error: err instanceof Error ? err : new Error(String(err)),
+          error,
         }));
+        onErrorRef.current?.(error);
       }
     },
     [state.records, state.resumeToken],

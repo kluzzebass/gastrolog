@@ -13,6 +13,10 @@ export function Checkbox({ checked, onChange, label, dark }: Readonly<CheckboxPr
     <div
       className="flex items-center gap-2 cursor-pointer select-none"
       onClick={() => onChange(!checked)}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onChange(!checked); } }}
+      role="checkbox"
+      aria-checked={checked}
+      tabIndex={0}
     >
       <button
         type="button"

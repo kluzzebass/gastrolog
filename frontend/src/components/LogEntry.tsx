@@ -76,6 +76,7 @@ export const LogEntry = forwardRef<
     <article
       ref={ref}
       onClick={onSelect}
+      {...clickableProps(onSelect)}
       className={`group grid grid-cols-[10ch_3.5ch_1fr_auto] px-5 py-1.5 border-b cursor-pointer transition-colors duration-100 ${
         isSelected
           ? dark
