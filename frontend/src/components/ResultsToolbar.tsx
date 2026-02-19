@@ -9,8 +9,6 @@ interface ResultsToolbarProps {
   followReversed: boolean;
   toggleReverse: () => void;
   selectedRecord: ProtoRecord | null;
-  rangeStart: Date | null;
-  rangeEnd: Date | null;
   records: ProtoRecord[];
   followRecords: ProtoRecord[];
   hasMore: boolean;
@@ -136,16 +134,7 @@ export function ResultsToolbar({
           {!isFollowMode && hasMore ? "+" : ""}
         </span>
       </div>
-      <div className="flex items-center gap-3">
-        <ExportButton records={displayRecords} dark={dark} />
-        {(isFollowMode ? followRecords : records).length > 0 && (
-          <span
-            className={`font-mono text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-          >
-            {new Date().toLocaleTimeString("en-US", { hour12: false })}
-          </span>
-        )}
-      </div>
+      <ExportButton records={displayRecords} dark={dark} />
     </div>
   );
 }

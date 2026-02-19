@@ -795,8 +795,6 @@ export function SearchView() {
               followReversed={followReversed}
               toggleReverse={toggleReverse}
               selectedRecord={selectedRecord}
-              rangeStart={rangeStart}
-              rangeEnd={rangeEnd}
               records={records}
               followRecords={followRecords}
               hasMore={hasMore}
