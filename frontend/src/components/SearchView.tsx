@@ -237,6 +237,15 @@ export function SearchView() {
     expressionRef.current = q;
     queryHistory.add(q);
 
+    // Follow mode doesn't use time ranges — handle it before time directive
+    // parsing so the default-range injection (which navigates) can't interfere.
+    if (isFollowMode) {
+      resetSearch();
+      resetFollow();
+      follow(q);
+      return;
+    }
+
     // Sync sidebar preset and range display from last= in the URL.
     const lastMatch = q.match(/\blast=(\S+)/);
     if (lastMatch?.[1]) {
@@ -265,28 +274,21 @@ export function SearchView() {
       return;
     }
 
-    if (isFollowMode) {
-      // On /follow: stop any in-flight search, start following.
-      resetSearch();
-      resetFollow();
-      follow(q);
-    } else {
-      // On /search: stop any active follow, start searching.
-      if (isFollowing) {
-        stopFollow();
-      }
-      resetFollow();
-      // When transitioning from follow → search via the stop button,
-      // skip the auto-search so the accumulated follow records stay visible.
-      if (skipNextSearchRef.current) {
-        skipNextSearchRef.current = false;
-        return;
-      }
-      loadMoreGateRef.current = false;
-      search(q);
-      fetchHistogram(q);
-      if (showPlan) explain(q);
+    // On /search: stop any active follow, start searching.
+    if (isFollowing) {
+      stopFollow();
     }
+    resetFollow();
+    // When transitioning from follow → search via the stop button,
+    // skip the auto-search so the accumulated follow records stay visible.
+    if (skipNextSearchRef.current) {
+      skipNextSearchRef.current = false;
+      return;
+    }
+    loadMoreGateRef.current = false;
+    search(q);
+    fetchHistogram(q);
+    if (showPlan) explain(q);
   }, [q, isFollowMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // On mount: focus input, seed default time range if no URL query.
