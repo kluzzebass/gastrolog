@@ -228,11 +228,9 @@ export function SearchView() {
   };
 
   // Sync draft when URL changes (browser back/forward).
-  const [prevQ, setPrevQ] = useState(q);
-  if (q !== prevQ) {
-    setPrevQ(q);
+  useEffect(() => {
     setDraft(q);
-  }
+  }, [q]);
 
   // Fire search or follow depending on the current route.
   useEffect(() => {
