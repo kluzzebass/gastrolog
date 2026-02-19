@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from "react";
+import { useThemeClass } from "../hooks/useThemeClass";
 import { CopyIcon, CheckIcon } from "./icons";
 
 export function CopyButton({
@@ -10,6 +11,7 @@ export function CopyButton({
   dark: boolean;
   className?: string;
 }>) {
+  const c = useThemeClass(dark);
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -26,9 +28,7 @@ export function CopyButton({
 
   const color = copied
     ? "text-severity-info"
-    : dark
-      ? "text-text-ghost hover:text-copper"
-      : "text-light-text-ghost hover:text-copper";
+    : c("text-text-ghost hover:text-copper", "text-light-text-ghost hover:text-copper");
 
   return (
     <button

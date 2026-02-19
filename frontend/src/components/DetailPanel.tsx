@@ -5,7 +5,6 @@ import {
   relativeTime,
   formatBytes,
   formatChunkId,
-  clickableProps,
 } from "../utils";
 import { syntaxHighlight } from "../syntax";
 import { CopyButton } from "./CopyButton";
@@ -220,76 +219,100 @@ export function DetailPanelContent({
 
       {/* Context */}
       <DetailSection label="Context" dark={dark}>
-        {contextLoading ? (
-          <div
-            className={`text-[0.8em] font-mono py-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
-          >
-            Loading context...
-          </div>
-        ) : (contextBefore?.length ?? 0) > 0 ||
-          (contextAfter?.length ?? 0) > 0 ? (
-          <div
-            className={`rounded overflow-hidden border ${c("border-ink-border-subtle bg-ink", "border-light-border-subtle bg-light-bg")}`}
-          >
-            {(() => {
-              const makeList = (
-                recs: ProtoRecord[] | undefined,
-                prefix: string,
-              ) =>
-                recs?.map((rec, i) => (
-                  <ContextRecord
-                    key={`${prefix}-${i}`}
-                    record={rec}
-                    isAnchor={false}
-                    dark={dark}
-                    onSelect={
-                      onContextRecordSelect
-                        ? () => onContextRecordSelect(rec)
-                        : undefined
-                    }
-                  />
-                ));
-              const anchor = (
-                <ContextRecord
-                  key="anchor"
-                  record={record}
-                  isAnchor={true}
-                  dark={dark}
-                  onSelect={
-                    onContextRecordSelect
-                      ? () => onContextRecordSelect(record)
-                      : undefined
-                  }
-                />
-              );
-              // Reversed (newest first): after (reversed), anchor, before (reversed)
-              // Forward (oldest first): before, anchor, after
-              if (contextReversed) {
-                return (
-                  <>
-                    {makeList(contextAfter?.slice().reverse(), "after")}
-                    {anchor}
-                    {makeList(contextBefore?.slice().reverse(), "before")}
-                  </>
-                );
-              }
-              return (
-                <>
-                  {makeList(contextBefore, "before")}
-                  {anchor}
-                  {makeList(contextAfter, "after")}
-                </>
-              );
-            })()}
-          </div>
-        ) : (
-          <div
-            className={`text-[0.8em] font-mono py-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
-          >
-            No surrounding records
-          </div>
-        )}
+        <ContextSection
+          dark={dark}
+          record={record}
+          contextBefore={contextBefore}
+          contextAfter={contextAfter}
+          contextLoading={contextLoading}
+          contextReversed={contextReversed}
+          onContextRecordSelect={onContextRecordSelect}
+        />
       </DetailSection>
+    </div>
+  );
+}
+
+function ContextList({
+  records,
+  prefix,
+  dark,
+  onSelect,
+}: Readonly<{
+  records: ProtoRecord[] | undefined;
+  prefix: string;
+  dark: boolean;
+  onSelect?: (rec: ProtoRecord) => void;
+}>) {
+  return records?.map((rec, i) => (
+    <ContextRecord
+      key={`${prefix}-${i}`}
+      record={rec}
+      isAnchor={false}
+      dark={dark}
+      onSelect={onSelect ? () => onSelect(rec) : undefined}
+    />
+  ));
+}
+
+function ContextSection({
+  dark,
+  record,
+  contextBefore,
+  contextAfter,
+  contextLoading,
+  contextReversed,
+  onContextRecordSelect,
+}: Readonly<{
+  dark: boolean;
+  record: ProtoRecord;
+  contextBefore?: ProtoRecord[];
+  contextAfter?: ProtoRecord[];
+  contextLoading?: boolean;
+  contextReversed?: boolean;
+  onContextRecordSelect?: (record: ProtoRecord) => void;
+}>) {
+  const c = useThemeClass(dark);
+
+  if (contextLoading) {
+    return (
+      <div className={`text-[0.8em] font-mono py-2 ${c("text-text-ghost", "text-light-text-ghost")}`}>
+        Loading context...
+      </div>
+    );
+  }
+
+  const hasContext = (contextBefore?.length ?? 0) > 0 || (contextAfter?.length ?? 0) > 0;
+  if (!hasContext) {
+    return (
+      <div className={`text-[0.8em] font-mono py-2 ${c("text-text-ghost", "text-light-text-ghost")}`}>
+        No surrounding records
+      </div>
+    );
+  }
+
+  const anchor = (
+    <ContextRecord
+      key="anchor"
+      record={record}
+      isAnchor={true}
+      dark={dark}
+      onSelect={onContextRecordSelect ? () => onContextRecordSelect(record) : undefined}
+    />
+  );
+
+  // Reversed (newest first): after (reversed), anchor, before (reversed)
+  // Forward (oldest first): before, anchor, after
+  const before = contextReversed ? contextAfter?.slice().reverse() : contextBefore;
+  const after = contextReversed ? contextBefore?.slice().reverse() : contextAfter;
+  const beforePrefix = contextReversed ? "after" : "before";
+  const afterPrefix = contextReversed ? "before" : "after";
+
+  return (
+    <div className={`rounded overflow-hidden border ${c("border-ink-border-subtle bg-ink", "border-light-border-subtle bg-light-bg")}`}>
+      <ContextList records={before} prefix={beforePrefix} dark={dark} onSelect={onContextRecordSelect} />
+      {anchor}
+      <ContextList records={after} prefix={afterPrefix} dark={dark} onSelect={onContextRecordSelect} />
     </div>
   );
 }
@@ -305,11 +328,12 @@ function DetailSection({
   children: React.ReactNode;
   action?: React.ReactNode;
 }>) {
+  const c = useThemeClass(dark);
   return (
     <div>
       <div className="flex items-center gap-2 mb-1.5">
         <h4
-          className={`text-[0.7em] font-medium uppercase tracking-[0.15em] ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
+          className={`text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
         >
           {label}
         </h4>
@@ -331,27 +355,34 @@ function DetailRow({
   dark: boolean;
   onClick?: () => void;
 }>) {
+  const c = useThemeClass(dark);
+  const valueClass = onClick
+    ? `cursor-pointer transition-colors ${c("text-text-muted hover:text-copper", "text-light-text-muted hover:text-copper")}`
+    : c("text-text-normal", "text-light-text-normal");
+
   return (
     <div
-      className={`flex py-1 border-b last:border-b-0 ${dark ? "border-ink-border-subtle" : "border-light-border-subtle"}`}
+      className={`flex py-1 border-b last:border-b-0 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
     >
       <dt
-        className={`w-24 shrink-0 text-[0.8em] ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
+        className={`w-24 shrink-0 text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
       >
         {label}
       </dt>
-      <dd
-        className={`flex-1 text-[0.85em] font-mono break-all ${
-          onClick
-            ? `cursor-pointer transition-colors ${dark ? "text-text-muted hover:text-copper" : "text-light-text-muted hover:text-copper"}`
-            : dark
-              ? "text-text-normal"
-              : "text-light-text-normal"
-        }`}
-        onClick={onClick}
-        {...clickableProps(onClick)}
-      >
-        {value}
+      <dd className="flex-1 min-w-0">
+        {onClick ? (
+          <button
+            type="button"
+            onClick={onClick}
+            className={`text-[0.85em] font-mono break-all text-left w-full ${valueClass}`}
+          >
+            {value}
+          </button>
+        ) : (
+          <span className={`text-[0.85em] font-mono break-all ${valueClass}`}>
+            {value}
+          </span>
+        )}
       </dd>
     </div>
   );

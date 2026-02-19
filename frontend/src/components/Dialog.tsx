@@ -48,17 +48,19 @@ export function Dialog({
     <FocusTrap
       focusTrapOptions={{ escapeDeactivates: false, allowOutsideClick: true }}
     >
-      <div
-        className="fixed inset-0 z-50 flex items-center justify-center"
-        onClick={onClose}
-      >
-        <div className="absolute inset-0 bg-black/40" />
+      <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <button
+          type="button"
+          className="absolute inset-0 bg-black/40 cursor-default"
+          onClick={onClose}
+          aria-label="Close dialog"
+          tabIndex={-1}
+        />
         <div
           role="dialog"
           aria-modal="true"
           aria-label={ariaLabel}
           className={`relative rounded-lg shadow-2xl ${sizeClasses[size]} ${bg}`}
-          onClick={(e) => e.stopPropagation()}
         >
           {children}
         </div>

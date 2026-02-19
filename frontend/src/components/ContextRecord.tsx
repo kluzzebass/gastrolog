@@ -1,5 +1,5 @@
 import type { ProtoRecord } from "../utils";
-import { clickableProps } from "../utils";
+import { useThemeClass } from "../hooks/useThemeClass";
 import { syntaxHighlight } from "../syntax";
 import { detectSeverity } from "./LogEntry";
 
@@ -14,6 +14,7 @@ export function ContextRecord({
   dark: boolean;
   onSelect?: () => void;
 }>) {
+  const c = useThemeClass(dark);
   const rawText = new TextDecoder().decode(record.raw);
   const parts = syntaxHighlight(rawText);
   const severity = detectSeverity(record.attrs);
@@ -27,20 +28,12 @@ export function ContextRecord({
     hour12: false,
   });
 
-  return (
-    <div
-      onClick={onSelect}
-      {...clickableProps(onSelect)}
-      className={`grid grid-cols-[10ch_3.5ch_1fr] px-2 py-0.5 text-[0.8em] leading-snug border-l-2 ${
-        isAnchor
-          ? dark
-            ? "border-l-copper bg-copper/10 text-text-normal"
-            : "border-l-copper bg-copper/8 text-light-text-normal"
-          : dark
-            ? "border-l-transparent text-text-ghost hover:text-text-muted"
-            : "border-l-transparent text-light-text-ghost hover:text-light-text-muted"
-      } ${onSelect ? "cursor-pointer" : ""}`}
-    >
+  const borderClass = isAnchor
+    ? c("border-l-copper bg-copper/10 text-text-normal", "border-l-copper bg-copper/8 text-light-text-normal")
+    : c("border-l-transparent text-text-ghost hover:text-text-muted", "border-l-transparent text-light-text-ghost hover:text-light-text-muted");
+
+  const children = (
+    <>
       <span className="font-mono text-[0.9em] tabular-nums self-center shrink-0">
         {ts}
       </span>
@@ -53,7 +46,7 @@ export function ContextRecord({
           </span>
         )}
       </span>
-      <span className="font-mono text-[0.9em] truncate whitespace-pre self-center pl-1.5">
+      <span className="font-mono text-[0.9em] truncate whitespace-pre self-center pl-1.5 text-left">
         {parts.map((part, i) => {
           const style = part.color ? { color: part.color } : undefined;
           return (
@@ -63,6 +56,18 @@ export function ContextRecord({
           );
         })}
       </span>
-    </div>
+    </>
   );
+
+  const baseClass = `grid grid-cols-[10ch_3.5ch_1fr] px-2 py-0.5 text-[0.8em] leading-snug border-l-2 ${borderClass}`;
+
+  if (onSelect) {
+    return (
+      <button type="button" onClick={onSelect} className={`${baseClass} cursor-pointer w-full text-left`}>
+        {children}
+      </button>
+    );
+  }
+
+  return <div className={baseClass}>{children}</div>;
 }
