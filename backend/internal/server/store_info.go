@@ -117,12 +117,19 @@ func (s *StoreServer) GetStats(
 			}
 			resp.TotalRecords += meta.RecordCount
 			storeStat.RecordCount += meta.RecordCount
-			storeStat.DataBytes += meta.Bytes
+			if meta.DiskBytes > 0 {
+				// DiskBytes includes all files (data + indexes), so no
+				// separate IndexBytes accounting needed.
+				storeStat.DataBytes += meta.DiskBytes
+			} else {
+				storeStat.DataBytes += meta.Bytes
 
-			// Sum index sizes for this chunk.
-			if sizes, err := s.orch.IndexSizes(storeID, meta.ID); err == nil {
-				for _, size := range sizes {
-					storeStat.IndexBytes += size
+				// Only sum index sizes separately when DiskBytes is
+				// unavailable (active/unsealed chunks).
+				if sizes, err := s.orch.IndexSizes(storeID, meta.ID); err == nil {
+					for _, size := range sizes {
+						storeStat.IndexBytes += size
+					}
 				}
 			}
 
