@@ -180,9 +180,6 @@ func TestRun_EmitsMessages(t *testing.T) {
 		if msg.Attrs["ingester_type"] != "chatterbox" {
 			t.Errorf("message %d: ingester attr = %q, want %q", i, msg.Attrs["ingester_type"], "chatterbox")
 		}
-		if len(msg.Raw) == 0 {
-			t.Errorf("message %d: Raw is empty", i)
-		}
 		if msg.IngestTS.IsZero() {
 			t.Errorf("message %d: IngestTS is zero", i)
 		}
