@@ -106,6 +106,30 @@ export const appendOrExpression = (q: string, value: string): string => {
   return directives ? `${directives} ${newExpr}` : newExpr;
 };
 
+/**
+ * Determine which action the main search/follow effect should take.
+ *
+ * Follow mode is handled first — it doesn't use time ranges, so the
+ * default-range injection (which navigates and could change the route)
+ * must never run when following.
+ */
+export type QueryEffectAction = "follow" | "search" | "inject-default-range" | "skip-search";
+
+export function resolveQueryEffectAction(
+  q: string,
+  isFollowMode: boolean,
+  skipNextSearch: boolean,
+): QueryEffectAction {
+  if (isFollowMode) return "follow";
+
+  const hasLast = /\blast=\S+/.test(q);
+  const hasStart = q.includes("start=");
+
+  if (!hasLast && !hasStart) return "inject-default-range";
+  if (skipNextSearch) return "skip-search";
+  return "search";
+}
+
 export const buildSeverityExpr = (severities: string[]): string => {
   if (severities.length === 0) return "";
   if (severities.length === 1) return `level=${severities[0]}`;

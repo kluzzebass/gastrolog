@@ -25,6 +25,7 @@ import {
   injectTimeRange,
   injectStore,
   buildSeverityExpr,
+  resolveQueryEffectAction,
 } from "../utils/queryHelpers";
 import { normalizeTimeDirectives } from "../utils/normalizeTimeDirectives";
 import { useThemeSync } from "../hooks/useThemeSync";
@@ -237,58 +238,64 @@ export function SearchView() {
     expressionRef.current = q;
     queryHistory.add(q);
 
-    // Follow mode doesn't use time ranges — handle it before time directive
-    // parsing so the default-range injection (which navigates) can't interfere.
-    if (isFollowMode) {
-      resetSearch();
-      resetFollow();
-      follow(q);
-      return;
-    }
+    const action = resolveQueryEffectAction(q, isFollowMode, skipNextSearchRef.current);
 
-    // Sync sidebar preset and range display from last= in the URL.
-    const lastMatch = q.match(/\blast=(\S+)/);
-    if (lastMatch?.[1]) {
-      const key = lastMatch[1];
-      const ms = timeRangeMs[key];
-      if (ms) {
-        setTimeRange(key);
-        const now = new Date();
-        setRangeStart(new Date(now.getTime() - ms));
-        setRangeEnd(now);
-      }
-    } else if (q.includes("start=")) {
-      setTimeRange("custom");
-    } else {
-      // No time directives — inject default range so the query is bounded.
-      const defaultRange = "5m";
-      setTimeRange(defaultRange);
-      const ms = timeRangeMs[defaultRange];
-      if (ms) {
-        const now = new Date();
-        setRangeStart(new Date(now.getTime() - ms));
-        setRangeEnd(now);
-      }
-      const fixed = injectTimeRange(q, defaultRange, isReversed);
-      navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, q: fixed }), replace: true } as any);
-      return;
-    }
+    switch (action) {
+      case "follow":
+        resetSearch();
+        resetFollow();
+        follow(q);
+        return;
 
-    // On /search: stop any active follow, start searching.
-    if (isFollowing) {
-      stopFollow();
+      case "inject-default-range": {
+        // No time directives — inject default range so the query is bounded.
+        const defaultRange = "5m";
+        setTimeRange(defaultRange);
+        const ms = timeRangeMs[defaultRange];
+        if (ms) {
+          const now = new Date();
+          setRangeStart(new Date(now.getTime() - ms));
+          setRangeEnd(now);
+        }
+        const fixed = injectTimeRange(q, defaultRange, isReversed);
+        navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, q: fixed }), replace: true } as any);
+        return;
+      }
+
+      case "skip-search":
+      case "search": {
+        // Sync sidebar preset and range display from the URL.
+        const lastMatch = q.match(/\blast=(\S+)/);
+        if (lastMatch?.[1]) {
+          const key = lastMatch[1];
+          const ms = timeRangeMs[key];
+          if (ms) {
+            setTimeRange(key);
+            const now = new Date();
+            setRangeStart(new Date(now.getTime() - ms));
+            setRangeEnd(now);
+          }
+        } else if (q.includes("start=")) {
+          setTimeRange("custom");
+        }
+
+        if (action === "skip-search") {
+          skipNextSearchRef.current = false;
+          return;
+        }
+
+        // On /search: stop any active follow, start searching.
+        if (isFollowing) {
+          stopFollow();
+        }
+        resetFollow();
+        loadMoreGateRef.current = false;
+        search(q);
+        fetchHistogram(q);
+        if (showPlan) explain(q);
+        return;
+      }
     }
-    resetFollow();
-    // When transitioning from follow → search via the stop button,
-    // skip the auto-search so the accumulated follow records stay visible.
-    if (skipNextSearchRef.current) {
-      skipNextSearchRef.current = false;
-      return;
-    }
-    loadMoreGateRef.current = false;
-    search(q);
-    fetchHistogram(q);
-    if (showPlan) explain(q);
   }, [q, isFollowMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // On mount: focus input, seed default time range if no URL query.

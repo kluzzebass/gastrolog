@@ -13,6 +13,7 @@ import {
   extractDirectives,
   replaceExpression,
   appendOrExpression,
+  resolveQueryEffectAction,
 } from "./queryHelpers";
 
 describe("stripTimeRange", () => {
@@ -186,4 +187,34 @@ describe("buildSeverityExpr", () => {
     expect(buildSeverityExpr(["error", "warn", "info"])).toBe(
       "(level=error OR level=warn OR level=info)",
     ));
+});
+
+describe("resolveQueryEffectAction", () => {
+  // Regression: follow mode queries have time directives stripped by
+  // startFollow(), so they always lack last=/start=. Before the fix,
+  // this fell into the "inject-default-range" branch which navigated
+  // away from /follow, immediately kicking the user out of follow mode.
+  test("follow mode with no time directives returns 'follow'", () =>
+    expect(resolveQueryEffectAction("myquery", true, false)).toBe("follow"));
+
+  test("follow mode with bare query returns 'follow'", () =>
+    expect(resolveQueryEffectAction("", true, false)).toBe("follow"));
+
+  test("follow mode ignores last= in query", () =>
+    expect(resolveQueryEffectAction("last=5m foo", true, false)).toBe("follow"));
+
+  test("follow mode ignores skipNextSearch", () =>
+    expect(resolveQueryEffectAction("foo", true, true)).toBe("follow"));
+
+  test("search with last= returns 'search'", () =>
+    expect(resolveQueryEffectAction("last=5m foo", false, false)).toBe("search"));
+
+  test("search with start= returns 'search'", () =>
+    expect(resolveQueryEffectAction("start=2024-01-01 foo", false, false)).toBe("search"));
+
+  test("search with no time directives returns 'inject-default-range'", () =>
+    expect(resolveQueryEffectAction("foo", false, false)).toBe("inject-default-range"));
+
+  test("search with skipNextSearch returns 'skip-search'", () =>
+    expect(resolveQueryEffectAction("last=5m foo", false, true)).toBe("skip-search"));
 });
