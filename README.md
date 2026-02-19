@@ -1,7 +1,5 @@
 # GastroLog
 
-## Generalized Automatic System for Temporal Record Organization and Logging
-
 GastroLog is a log aggregation and search service. It collects logs from various sources, stores them in time-ordered chunks, and builds indexes for fast full-text search.
 
 ![GastroLog screenshot](docs/screenshot.png)
