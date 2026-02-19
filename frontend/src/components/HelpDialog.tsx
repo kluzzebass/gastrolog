@@ -37,7 +37,9 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
   });
 
   // Auto-expand when navigating to a topic inside a collapsed parent
-  useEffect(() => {
+  const [prevActiveId, setPrevActiveId] = useState(activeId);
+  if (activeId !== prevActiveId) {
+    setPrevActiveId(activeId);
     setExpanded((prev) => {
       let changed = false;
       const next = new Set(prev);
@@ -49,7 +51,7 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
       }
       return changed ? next : prev;
     });
-  }, [activeId]);
+  }
 
   const topic: HelpTopic | undefined = findTopic(activeId);
   const contentRef = useRef<HTMLDivElement>(null);

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { Dialog } from "../Dialog";
 import {
@@ -159,26 +159,24 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
   const certIds = certs.map((c) => c.id);
   const _certDisplayName = (id: string) => certs.find((c) => c.id === id)?.name || id;
 
-  useEffect(() => {
-    if (data && !initialized) {
-      setTokenDuration(data.tokenDuration);
-      setJwtSecret(data.jwtSecretConfigured ? JWT_KEEP : "");
-      setMinPwLen(
-        data.minPasswordLength ? String(data.minPasswordLength) : "8",
-      );
-      setMaxJobs(data.maxConcurrentJobs ? String(data.maxConcurrentJobs) : "4");
-      setTlsDefaultCert(data.tlsDefaultCert ?? "");
-      setTlsEnabled(data.tlsEnabled ?? false);
-      setHttpToHttpsRedirect(data.httpToHttpsRedirect ?? false);
-      setHttpsPort(data.httpsPort ?? "");
-      setRequireMixedCase(data.requireMixedCase ?? false);
-      setRequireDigit(data.requireDigit ?? false);
-      setRequireSpecial(data.requireSpecial ?? false);
-      setMaxConsecutiveRepeats(data.maxConsecutiveRepeats ? String(data.maxConsecutiveRepeats) : "0");
-      setForbidAnimalNoise(data.forbidAnimalNoise ?? false);
-      setInitialized(true);
-    }
-  }, [data, initialized]);
+  if (data && !initialized) {
+    setTokenDuration(data.tokenDuration);
+    setJwtSecret(data.jwtSecretConfigured ? JWT_KEEP : "");
+    setMinPwLen(
+      data.minPasswordLength ? String(data.minPasswordLength) : "8",
+    );
+    setMaxJobs(data.maxConcurrentJobs ? String(data.maxConcurrentJobs) : "4");
+    setTlsDefaultCert(data.tlsDefaultCert ?? "");
+    setTlsEnabled(data.tlsEnabled ?? false);
+    setHttpToHttpsRedirect(data.httpToHttpsRedirect ?? false);
+    setHttpsPort(data.httpsPort ?? "");
+    setRequireMixedCase(data.requireMixedCase ?? false);
+    setRequireDigit(data.requireDigit ?? false);
+    setRequireSpecial(data.requireSpecial ?? false);
+    setMaxConsecutiveRepeats(data.maxConsecutiveRepeats ? String(data.maxConsecutiveRepeats) : "0");
+    setForbidAnimalNoise(data.forbidAnimalNoise ?? false);
+    setInitialized(true);
+  }
 
   const dirty =
     initialized &&
@@ -198,26 +196,33 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
       forbidAnimalNoise !== (data.forbidAnimalNoise ?? false));
 
   const handleSave = async () => {
+    const hasCert = certIds.includes(tlsDefaultCert);
+    const effectiveTls = hasCert ? tlsEnabled : false;
+    const effectiveRedirect = hasCert ? httpToHttpsRedirect : false;
+    const effectiveJwtSecret = jwtSecret === JWT_KEEP ? JWT_KEEP : jwtSecret;
+    const effectiveMinPwLen = parseInt(minPwLen, 10) || 8;
+    const effectiveMaxJobs = parseInt(maxJobs, 10) || 4;
+    const effectiveMaxRepeats = parseInt(maxConsecutiveRepeats, 10) || 0;
     try {
       await putConfig.mutateAsync({
         tokenDuration,
-        jwtSecret: jwtSecret === JWT_KEEP ? JWT_KEEP : jwtSecret,
-        minPasswordLength: parseInt(minPwLen, 10) || 8,
-        maxConcurrentJobs: parseInt(maxJobs, 10) || 4,
+        jwtSecret: effectiveJwtSecret,
+        minPasswordLength: effectiveMinPwLen,
+        maxConcurrentJobs: effectiveMaxJobs,
         tlsDefaultCert,
-        tlsEnabled: certIds.includes(tlsDefaultCert) ? tlsEnabled : false,
-        httpToHttpsRedirect:
-          certIds.includes(tlsDefaultCert) ? httpToHttpsRedirect : false,
+        tlsEnabled: effectiveTls,
+        httpToHttpsRedirect: effectiveRedirect,
         httpsPort,
         requireMixedCase,
         requireDigit,
         requireSpecial,
-        maxConsecutiveRepeats: parseInt(maxConsecutiveRepeats, 10) || 0,
+        maxConsecutiveRepeats: effectiveMaxRepeats,
         forbidAnimalNoise,
       });
       addToast("Server configuration updated", "info");
     } catch (err: any) {
-      addToast(err.message ?? "Failed to update server configuration", "error");
+      const msg = err.message ?? "Failed to update server configuration";
+      addToast(msg, "error");
     }
   };
 

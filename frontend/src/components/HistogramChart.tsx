@@ -262,7 +262,7 @@ export function HistogramChart({
 
             return (
               <div
-                key={i}
+                key={bucket.ts.toISOString()}
                 className="flex-1 min-w-0 group relative"
                 style={{ height: "100%" }}
               >
@@ -400,7 +400,7 @@ export function HistogramChart({
             const idx = Math.min(i * labelStep, buckets.length - 1);
             return (
               <span
-                key={i}
+                key={`tick-${idx}`}
                 className={`text-[0.65em] font-mono select-none ${c("text-text-ghost", "text-light-text-ghost")}`}
               >
                 {formatTime(buckets[idx]!.ts)}

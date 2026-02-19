@@ -337,7 +337,7 @@ function TaskDetail({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
             className={`text-[0.8em] font-mono space-y-1 ${c("text-text-muted", "text-light-text-muted")}`}
           >
             {job.errorDetails.map((detail, i) => (
-              <div key={i}>{detail}</div>
+              <div key={`err-${i}-${detail.slice(0, 50)}`}>{detail}</div>
             ))}
           </div>
         </div>

@@ -115,11 +115,12 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
         const result = validateCron(edit.cron);
         if (!result.valid) throw new Error(`Invalid cron: ${result.error}`);
       }
+      const maxRecordsValue = edit.maxRecords ? BigInt(edit.maxRecords) : 0n;
       return {
         id,
         name: policies.find((p) => p.id === id)?.name ?? "",
         maxBytes: parseBytes(edit.maxBytes),
-        maxRecords: edit.maxRecords ? BigInt(edit.maxRecords) : 0n,
+        maxRecords: maxRecordsValue,
         maxAgeSeconds: parseDuration(edit.maxAge),
         cron: edit.cron,
       };
@@ -154,12 +155,13 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
         return;
       }
     }
+    const maxRecordsValue = newMaxRecords ? BigInt(newMaxRecords) : 0n;
     try {
       await putPolicy.mutateAsync({
         id: "",
         name: newName.trim(),
         maxBytes: parseBytes(newMaxBytes),
-        maxRecords: newMaxRecords ? BigInt(newMaxRecords) : 0n,
+        maxRecords: maxRecordsValue,
         maxAgeSeconds: parseDuration(newMaxAge),
         cron: newCron,
       });
@@ -171,7 +173,8 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
       setNewMaxAge("5m");
       setNewCron("");
     } catch (err: any) {
-      addToast(err.message ?? "Failed to create policy", "error");
+      const errorMessage = err.message ?? "Failed to create policy";
+      addToast(errorMessage, "error");
     }
   };
 

@@ -126,7 +126,7 @@ export const LogEntry = forwardRef<
           if (part.url) {
             return (
               <a
-                key={i}
+                key={`p-${i}`}
                 href={part.url}
                 target="_blank"
                 rel="noopener noreferrer"
@@ -141,7 +141,7 @@ export const LogEntry = forwardRef<
           if (part.clickValue) {
             return (
               <span
-                key={i}
+                key={`p-${i}`}
                 style={style}
                 className={`cursor-pointer hover:brightness-125 ${className}`}
                 data-click-value={part.clickValue}
@@ -151,7 +151,7 @@ export const LogEntry = forwardRef<
             );
           }
           return (
-            <span key={i} style={style} className={className}>
+            <span key={`p-${i}`} style={style} className={className}>
               {part.text}
             </span>
           );

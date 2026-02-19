@@ -87,7 +87,7 @@ export function ExplainPanel({
         <div className="flex flex-col gap-2">
           {chunks.map((plan, i) => (
             <ExplainChunk
-              key={i}
+              key={plan.chunkId}
               plan={plan}
               dark={dark}
               collapsed={!!collapsed[i]}
@@ -121,13 +121,13 @@ function ExpressionBox({
       {segments.map((seg, i) =>
         seg.highlighted ? (
           <mark
-            key={i}
+            key={`seg-${i}`}
             className={`rounded-sm transition-colors duration-150 ${c("bg-copper/25 text-copper", "bg-copper/20 text-copper")}`}
           >
             {seg.text}
           </mark>
         ) : (
-          <span key={i}>{seg.text}</span>
+          <span key={`seg-${i}`}>{seg.text}</span>
         ),
       )}
     </div>
@@ -350,7 +350,7 @@ function ExplainChunk({
             <div className="flex flex-col gap-4">
               {plan.branchPlans.map((bp, j) => (
                 <ExplainBranch
-                  key={j}
+                  key={`branch-${j}-${bp.expression}`}
                   branch={bp}
                   index={j}
                   totalRecords={totalRecords}
@@ -394,7 +394,7 @@ function ExplainChunk({
               .filter((f) => f && f !== "none")
               .map((f, i) => (
                 <span
-                  key={i}
+                  key={`filter-${f}`}
                   className={`px-1.5 py-px rounded ${c("bg-severity-warn/10 text-severity-warn", "bg-severity-warn/10 text-severity-warn")}`}
                 >
                   {f}
@@ -517,7 +517,7 @@ function PipelineFunnel({
 
         return (
           <div
-            key={i}
+            key={`step-${i}-${step.name}`}
             className="relative pb-3 min-w-0"
             onMouseEnter={() => onStepHover?.(step)}
             onMouseLeave={() => onStepLeave?.()}

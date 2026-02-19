@@ -228,9 +228,11 @@ export function SearchView() {
   };
 
   // Sync draft when URL changes (browser back/forward).
-  useEffect(() => {
+  const [prevQ, setPrevQ] = useState(q);
+  if (q !== prevQ) {
+    setPrevQ(q);
     setDraft(q);
-  }, [q]);
+  }
 
   // Fire search or follow depending on the current route.
   useEffect(() => {
@@ -936,7 +938,7 @@ export function SearchView() {
                       const selected = sameRecord(selectedRecord, record);
                       return (
                         <LogEntry
-                          key={i}
+                          key={record.ref ? `${record.ref.storeId}:${record.ref.chunkId}:${record.ref.pos}` : `follow-${i}`}
                           ref={selected ? selectedRowRef : undefined}
                           record={record}
                           tokens={tokens}

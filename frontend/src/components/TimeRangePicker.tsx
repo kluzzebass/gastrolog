@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useThemeClass } from "../hooks/useThemeClass";
 import {
   startOfMonth,
@@ -44,14 +44,16 @@ export function TimeRangePicker({
   const [picking, setPicking] = useState<"start" | "end">("start");
 
   // Sync from parent when presets or histogram brush update the range.
-  useEffect(() => {
+  const [prevRange, setPrevRange] = useState<{ start: Date | null; end: Date | null }>({ start: rangeStart, end: rangeEnd });
+  if (rangeStart !== prevRange.start || rangeEnd !== prevRange.end) {
+    setPrevRange({ start: rangeStart, end: rangeEnd });
     setPendingStart(rangeStart);
     setPendingEnd(rangeEnd);
     if (rangeStart) setStartTime(format(rangeStart, "HH:mm"));
     if (rangeEnd) setEndTime(format(rangeEnd, "HH:mm"));
     if (rangeEnd) setViewMonth(rangeEnd);
     setPicking("start");
-  }, [rangeStart, rangeEnd]);
+  }
 
   const handleDayClick = (day: Date) => {
     if (picking === "start") {

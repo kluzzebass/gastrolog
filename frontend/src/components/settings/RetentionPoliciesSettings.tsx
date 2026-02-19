@@ -61,13 +61,16 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
     mutation: putPolicy,
     deleteMutation: deletePolicy,
     label: "Retention policy",
-    onSaveTransform: (id, edit: PolicyEdit) => ({
-      id,
-      name: policies.find((p) => p.id === id)?.name ?? "",
-      maxAgeSeconds: parseDuration(edit.maxAge),
-      maxBytes: parseBytes(edit.maxBytes),
-      maxChunks: edit.maxChunks ? BigInt(edit.maxChunks) : 0n,
-    }),
+    onSaveTransform: (id, edit: PolicyEdit) => {
+      const maxChunksValue = edit.maxChunks ? BigInt(edit.maxChunks) : 0n;
+      return {
+        id,
+        name: policies.find((p) => p.id === id)?.name ?? "",
+        maxAgeSeconds: parseDuration(edit.maxAge),
+        maxBytes: parseBytes(edit.maxBytes),
+        maxChunks: maxChunksValue,
+      };
+    },
     onDeleteSuccess: (id) => {
       const referencedBy = stores
         .filter((s) => s.retention === id)
@@ -91,13 +94,14 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
       addToast("Policy name is required", "warn");
       return;
     }
+    const maxChunksValue = newMaxChunks ? BigInt(newMaxChunks) : 0n;
     try {
       await putPolicy.mutateAsync({
         id: "",
         name: newName.trim(),
         maxAgeSeconds: parseDuration(newMaxAge),
         maxBytes: parseBytes(newMaxBytes),
-        maxChunks: newMaxChunks ? BigInt(newMaxChunks) : 0n,
+        maxChunks: maxChunksValue,
       });
       addToast(`Retention policy "${newName.trim()}" created`, "info");
       setAdding(false);
@@ -106,7 +110,8 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
       setNewMaxBytes("");
       setNewMaxChunks("");
     } catch (err: any) {
-      addToast(err.message ?? "Failed to create retention policy", "error");
+      const errorMessage = err.message ?? "Failed to create retention policy";
+      addToast(errorMessage, "error");
     }
   };
 

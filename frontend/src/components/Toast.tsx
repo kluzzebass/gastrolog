@@ -53,7 +53,8 @@ export function ToastProvider({ children }: Readonly<{ children: React.ReactNode
       return;
     }
 
-    const id = `toast-${++nextId}`;
+    nextId++;
+    const id = `toast-${nextId}`;
     const toast: Toast = { id, message, level, createdAt: Date.now() };
     setToasts((prev) => [...prev, toast]);
 

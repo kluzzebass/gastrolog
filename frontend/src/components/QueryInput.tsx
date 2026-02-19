@@ -106,7 +106,7 @@ export const QueryInput = forwardRef<HTMLTextAreaElement, QueryInputProps>(
           style={{ borderWidth: 1, borderColor: "transparent" }}
         >
           {spans.map((span, i) => (
-            <span key={i} style={roleStyle(span.role, dark)}>
+            <span key={`${i}-${span.role}`} style={roleStyle(span.role, dark)}>
               {span.text}
             </span>
           ))}

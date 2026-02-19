@@ -70,6 +70,22 @@ export function SetupWizard() {
 
   const handleCreate = async () => {
     setCreating(true);
+
+    // Extract conditional expressions before try/catch for React Compiler compatibility
+    const hasRotation = rotation.maxAge || rotation.maxBytes || rotation.maxRecords || rotation.cron;
+    const rotationMaxBytes = rotation.maxBytes ? BigInt(rotation.maxBytes) : BigInt(0);
+    const rotationMaxRecords = rotation.maxRecords ? BigInt(rotation.maxRecords) : BigInt(0);
+    const rotationName = rotation.name || "default";
+
+    const hasRetention = retention.maxChunks || retention.maxAge || retention.maxBytes;
+    const retentionMaxChunks = retention.maxChunks ? BigInt(retention.maxChunks) : BigInt(0);
+    const retentionMaxAge = retention.maxAge || "";
+    const retentionMaxBytes = retention.maxBytes ? BigInt(retention.maxBytes) : BigInt(0);
+    const retentionName = retention.name || "default";
+
+    const storeName = store.name || "default";
+    const ingesterName = ingester.name || ingester.type;
+
     try {
       const filterId = crypto.randomUUID();
       const storeId = crypto.randomUUID();
@@ -85,40 +101,32 @@ export function SetupWizard() {
       });
 
       // 2. Create rotation policy (if any fields are set)
-      const hasRotation = rotation.maxAge || rotation.maxBytes || rotation.maxRecords || rotation.cron;
       let rotationId = "";
       if (hasRotation) {
         rotationId = crypto.randomUUID();
         await configClient.putRotationPolicy({
           config: {
             id: rotationId,
-            name: rotation.name || "default",
+            name: rotationName,
             maxAgeSeconds: parseDurationToSeconds(rotation.maxAge),
-            maxBytes: rotation.maxBytes ? BigInt(rotation.maxBytes) : BigInt(0),
-            maxRecords: rotation.maxRecords
-              ? BigInt(rotation.maxRecords)
-              : BigInt(0),
+            maxBytes: rotationMaxBytes,
+            maxRecords: rotationMaxRecords,
             cron: rotation.cron,
           },
         });
       }
 
       // 3. Create retention policy (if any fields are set)
-      const hasRetention = retention.maxChunks || retention.maxAge || retention.maxBytes;
       let retentionId = "";
       if (hasRetention) {
         retentionId = crypto.randomUUID();
         await configClient.putRetentionPolicy({
           config: {
             id: retentionId,
-            name: retention.name || "default",
-            maxChunks: retention.maxChunks
-              ? BigInt(retention.maxChunks)
-              : BigInt(0),
-            maxAgeSeconds: parseDurationToSeconds(retention.maxAge || ""),
-            maxBytes: retention.maxBytes
-              ? BigInt(retention.maxBytes)
-              : BigInt(0),
+            name: retentionName,
+            maxChunks: retentionMaxChunks,
+            maxAgeSeconds: parseDurationToSeconds(retentionMaxAge),
+            maxBytes: retentionMaxBytes,
           },
         });
       }
@@ -131,7 +139,7 @@ export function SetupWizard() {
       await configClient.putStore({
         config: {
           id: storeId,
-          name: store.name || "default",
+          name: storeName,
           type: store.type,
           enabled: true,
           filter: filterId,
@@ -145,7 +153,7 @@ export function SetupWizard() {
       await configClient.putIngester({
         config: {
           id: ingesterId,
-          name: ingester.name || ingester.type,
+          name: ingesterName,
           type: ingester.type,
           enabled: true,
           params: ingester.params,
@@ -157,10 +165,8 @@ export function SetupWizard() {
       addToast("Configuration created successfully!", "info");
       navigate({ to: "/search", search: { q: "", help: undefined, settings: undefined, inspector: undefined } });
     } catch (err) {
-      addToast(
-        err instanceof Error ? err.message : "Failed to create configuration",
-        "error",
-      );
+      const errorMessage = err instanceof Error ? err.message : "Failed to create configuration";
+      addToast(errorMessage, "error");
     } finally {
       setCreating(false);
     }

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { unzipSync, decompressSync } from "fflate";
 import { HelpButton } from "../HelpButton";
 
@@ -288,7 +288,8 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
       addToast(`Certificate "${n}" saved`, "info");
       resetForm();
     } catch (err: unknown) {
-      addToast((err as Error)?.message ?? "Failed to save certificate", "error");
+      const msg = (err as Error)?.message ?? "Failed to save certificate";
+      addToast(msg, "error");
     }
   };
 
@@ -325,6 +326,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
       return;
     }
     const certName = certs.find((c) => c.id === id)?.name ?? "";
+    const displayName = certName || id;
     // keyPem empty when editing means keep existing key
     try {
       await putCert.mutateAsync({
@@ -336,10 +338,11 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
         keyFile: "",
         setAsDefault,
       });
-      addToast(`Certificate "${certName || id}" saved`, "info");
+      addToast(`Certificate "${displayName}" saved`, "info");
       setExpanded(null);
     } catch (err: unknown) {
-      addToast((err as Error)?.message ?? "Failed to save certificate", "error");
+      const msg = (err as Error)?.message ?? "Failed to save certificate";
+      addToast(msg, "error");
     }
   };
 
@@ -349,6 +352,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
       return;
     }
     const certName = certs.find((c) => c.id === id)?.name ?? "";
+    const displayName = certName || id;
     try {
       await putCert.mutateAsync({
         id,
@@ -359,10 +363,11 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
         keyFile: keyFile.trim(),
         setAsDefault,
       });
-      addToast(`Certificate "${certName || id}" saved`, "info");
+      addToast(`Certificate "${displayName}" saved`, "info");
       setExpanded(null);
     } catch (err: unknown) {
-      addToast((err as Error)?.message ?? "Failed to save certificate", "error");
+      const msg = (err as Error)?.message ?? "Failed to save certificate";
+      addToast(msg, "error");
     }
   };
 
@@ -372,7 +377,8 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
       await deleteCert.mutateAsync(id);
       addToast(`Certificate "${certName}" deleted`, "info");
     } catch (err: unknown) {
-      addToast((err as Error)?.message ?? "Failed to delete certificate", "error");
+      const msg = (err as Error)?.message ?? "Failed to delete certificate";
+      addToast(msg, "error");
     }
   };
 
@@ -386,16 +392,18 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
     setAdding("files");
   };
 
-  useEffect(() => {
-    if (expanded && certData && certData.id === expanded) {
-      const _isFileBased = !!(certData.certFile && certData.keyFile);
-      setCertPem(certData.certPem ?? "");
-      setKeyPem("");
-      setCertFile(certData.certFile ?? "");
-      setKeyFile(certData.keyFile ?? "");
-      setSetAsDefault(defaultCert === expanded);
-    }
-  }, [expanded, certData, defaultCert]);
+  const [syncedCertId, setSyncedCertId] = useState<string | null>(null);
+  if (expanded && certData && certData.id === expanded && syncedCertId !== expanded) {
+    setSyncedCertId(expanded);
+    setCertPem(certData.certPem ?? "");
+    setKeyPem("");
+    setCertFile(certData.certFile ?? "");
+    setKeyFile(certData.keyFile ?? "");
+    setSetAsDefault(defaultCert === expanded);
+  }
+  if (!expanded && syncedCertId !== null) {
+    setSyncedCertId(null);
+  }
 
   const assignPem = (text: string) => {
     if (

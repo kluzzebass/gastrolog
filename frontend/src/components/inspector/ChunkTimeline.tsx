@@ -114,7 +114,7 @@ export function ChunkTimeline({
         {/* Grid lines */}
         {ticks.map((tick, i) => (
           <line
-            key={i}
+            key={`grid-${tick.x}`}
             x1={tick.x * 1000}
             y1={topPad}
             x2={tick.x * 1000}
@@ -222,7 +222,7 @@ export function ChunkTimeline({
           vectorEffect="non-scaling-stroke"
         />
         {ticks.map((tick, i) => (
-          <g key={i}>
+          <g key={`axis-${tick.x}`}>
             <line
               x1={tick.x * 1000}
               y1={topPad + barHeight}

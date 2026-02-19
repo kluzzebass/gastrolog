@@ -121,7 +121,7 @@ export function DetailPanelContent({
             const style = span.color ? { color: span.color } : undefined;
             return span.url ? (
               <a
-                key={i} // NOSONAR: stable derived list, no natural key
+                key={`msg-${i}`}
                 href={span.url}
                 target="_blank"
                 rel="noopener noreferrer"
@@ -131,7 +131,7 @@ export function DetailPanelContent({
                 {span.text}
               </a>
             ) : (
-              <span key={i} style={style}> {/* NOSONAR: stable derived list, no natural key */}
+              <span key={`msg-${i}`} style={style}>
                 {span.text}
               </span>
             );

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import {
   useConfig,
@@ -40,22 +40,22 @@ function JobProgress({
   const c = useThemeClass(dark);
   const { data: job } = useJob(jobId);
   const qc = useQueryClient();
-  const [handled, setHandled] = useState(false);
+  const handledRef = useRef(false);
 
   useEffect(() => {
-    if (!job || handled) return;
+    if (!job || handledRef.current) return;
     if (job.status === JobStatus.COMPLETED) {
-      setHandled(true);
+      handledRef.current = true;
       qc.invalidateQueries({ queryKey: ["stores"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
       qc.invalidateQueries({ queryKey: ["indexes"] });
       qc.invalidateQueries({ queryKey: ["config"] });
       onComplete(job);
     } else if (job.status === JobStatus.FAILED) {
-      setHandled(true);
+      handledRef.current = true;
       onFailed(job);
     }
-  }, [job, handled, onComplete, onFailed, qc]);
+  }, [job, onComplete, onFailed, qc]);
 
   if (!job) return null;
 
@@ -217,7 +217,8 @@ export function StoresSettings({ dark }: Readonly<{ dark: boolean }>) {
       setNewRetention("");
       setNewParams({});
     } catch (err: any) {
-      addToast(err.message ?? "Failed to create store", "error");
+      const errorMessage = err.message ?? "Failed to create store";
+      addToast(errorMessage, "error");
     }
   };
 
@@ -388,7 +389,8 @@ export function StoresSettings({ dark }: Readonly<{ dark: boolean }>) {
                       await seal.mutateAsync(store.id);
                       addToast("Active chunk rotated", "info");
                     } catch (err: any) {
-                      addToast(err.message ?? "Rotate failed", "error");
+                      const errorMessage = err.message ?? "Rotate failed";
+                      addToast(errorMessage, "error");
                     }
                   }}
                 >
@@ -412,7 +414,8 @@ export function StoresSettings({ dark }: Readonly<{ dark: boolean }>) {
                         },
                       }));
                     } catch (err: any) {
-                      addToast(err.message ?? "Reindex failed", "error");
+                      const errorMessage = err.message ?? "Reindex failed";
+                      addToast(errorMessage, "error");
                     }
                   }}
                 >
@@ -609,17 +612,18 @@ export function StoresSettings({ dark }: Readonly<{ dark: boolean }>) {
                           if (!trimmedName) return;
                           const srcLabel = store.name || store.id;
                           if (!confirm(`Migrate "${srcLabel}" to "${trimmedName}"? This will immediately disable "${srcLabel}" and delete it after all records are moved.`)) return;
+                          const destType = mt.type || undefined;
+                          const params: Record<string, string> = {};
+                          if (mt.dir.trim()) {
+                            params["dir"] = mt.dir.trim();
+                          }
+                          const destParams = Object.keys(params).length > 0 ? params : undefined;
                           try {
-                            const params: Record<string, string> = {};
-                            if (mt.dir.trim()) {
-                              params["dir"] = mt.dir.trim();
-                            }
                             const result = await migrate.mutateAsync({
                               source: store.id,
                               destination: trimmedName,
-                              destinationType: mt.type || undefined,
-                              destinationParams:
-                                Object.keys(params).length > 0 ? params : undefined,
+                              destinationType: destType,
+                              destinationParams: destParams,
                             });
                             setActiveJobs((prev) => ({
                               ...prev,
@@ -634,7 +638,8 @@ export function StoresSettings({ dark }: Readonly<{ dark: boolean }>) {
                               return next;
                             });
                           } catch (err: any) {
-                            addToast(err.message ?? "Migrate failed", "error");
+                            const errorMessage = err.message ?? "Migrate failed";
+                            addToast(errorMessage, "error");
                           }
                         }}
                       >
@@ -700,7 +705,8 @@ export function StoresSettings({ dark }: Readonly<{ dark: boolean }>) {
                             Object.fromEntries(Object.entries(prev).filter(([k]) => k !== store.id)),
                           );
                         } catch (err: any) {
-                          addToast(err.message ?? "Merge failed", "error");
+                          const errorMessage = err.message ?? "Merge failed";
+                          addToast(errorMessage, "error");
                         }
                       }}
                     >
