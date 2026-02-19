@@ -122,17 +122,12 @@ function PemCertForm({
             )}`}
           />
         </FormField>
-        <FormField
-          label="Use as default"
-          description="Use this certificate for TLS-wrapping the main server (when HTTPS is enabled)"
+        <Checkbox
+          checked={setAsDefault}
+          onChange={setSetAsDefault}
+          label="Use as default for TLS-wrapping the main server"
           dark={dark}
-        >
-          <Checkbox
-            checked={setAsDefault}
-            onChange={setSetAsDefault}
-            dark={dark}
-          />
-        </FormField>
+        />
         {!hideActions && (
           <div className="flex justify-end gap-2 pt-2">
             {onCancel && (
@@ -215,17 +210,12 @@ function FilesCertForm({
             mono
           />
         </FormField>
-        <FormField
-          label="Use as default"
-          description="Use this certificate for TLS-wrapping the main server (when HTTPS is enabled)"
+        <Checkbox
+          checked={setAsDefault}
+          onChange={setSetAsDefault}
+          label="Use as default for TLS-wrapping the main server"
           dark={dark}
-        >
-          <Checkbox
-            checked={setAsDefault}
-            onChange={setSetAsDefault}
-            dark={dark}
-          />
-        </FormField>
+        />
         {!hideActions && (
           <div className="flex justify-end gap-2 pt-2">
             {onCancel && (

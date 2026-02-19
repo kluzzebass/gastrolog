@@ -55,6 +55,7 @@ function CronField({
         placeholder="0 * * * *"
         dark={dark}
         mono
+        examples={["0 * * * *", "0 0 * * *"]}
       />
       {trimmed && validation && (
         <div className="mt-1 text-[0.75em]">
@@ -205,7 +206,6 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
           <div className="grid grid-cols-3 gap-3">
             <FormField
               label="Max Bytes"
-              description="e.g. 64MB, 1GB"
               dark={dark}
             >
               <TextInput
@@ -214,6 +214,7 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
                 placeholder="64MB"
                 dark={dark}
                 mono
+                examples={["64MB", "256MB", "1GB"]}
               />
             </FormField>
             <FormField label="Max Records" dark={dark}>
@@ -226,7 +227,6 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
             </FormField>
             <FormField
               label="Max Age"
-              description="e.g. 5m, 1h"
               dark={dark}
             >
               <TextInput
@@ -235,6 +235,7 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
                 placeholder="5m"
                 dark={dark}
                 mono
+                examples={["1h", "24h", "7d"]}
               />
             </FormField>
           </div>
@@ -268,8 +269,7 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
               <div className="grid grid-cols-3 gap-3">
                 <FormField
                   label="Max Bytes"
-                  description="e.g. 64MB, 1GB"
-                  dark={dark}
+                      dark={dark}
                 >
                   <TextInput
                     value={edit.maxBytes}
@@ -277,6 +277,7 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
                     placeholder="64MB"
                     dark={dark}
                     mono
+                    examples={["64MB", "256MB", "1GB"]}
                   />
                 </FormField>
                 <FormField label="Max Records" dark={dark}>
@@ -289,8 +290,7 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
                 </FormField>
                 <FormField
                   label="Max Age"
-                  description="e.g. 5m, 1h"
-                  dark={dark}
+                      dark={dark}
                 >
                   <TextInput
                     value={edit.maxAge}
@@ -298,6 +298,7 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
                     placeholder="5m"
                     dark={dark}
                     mono
+                    examples={["1h", "24h", "7d"]}
                   />
                 </FormField>
               </div>

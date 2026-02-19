@@ -149,6 +149,7 @@ export function FiltersSettings({ dark }: Readonly<{ dark: boolean }>) {
               placeholder="*"
               dark={dark}
               mono
+              examples={["*", "+", "env=prod"]}
             />
           </FormField>
         </AddFormCard>

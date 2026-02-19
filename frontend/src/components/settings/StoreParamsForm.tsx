@@ -32,6 +32,7 @@ export function StoreParamsForm({
             placeholder="/var/lib/gastrolog/data"
             dark={dark}
             mono
+            examples={["/var/lib/gastrolog/data"]}
           />
         </FormField>
         <Checkbox

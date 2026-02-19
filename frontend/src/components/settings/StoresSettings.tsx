@@ -596,6 +596,7 @@ export function StoresSettings({ dark }: Readonly<{ dark: boolean }>) {
                             placeholder="/path/to/store"
                             dark={dark}
                             mono
+                            examples={["/var/lib/gastrolog/data"]}
                           />
                         </FormField>
                       )}

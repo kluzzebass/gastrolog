@@ -141,7 +141,6 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
           <div className="grid grid-cols-3 gap-3">
             <FormField
               label="Max Age"
-              description="e.g. 720h, 30d"
               dark={dark}
             >
               <TextInput
@@ -150,11 +149,11 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
                 placeholder="720h"
                 dark={dark}
                 mono
+                examples={["720h", "30d", "90d"]}
               />
             </FormField>
             <FormField
               label="Max Bytes"
-              description="e.g. 10GB, 500MB"
               dark={dark}
             >
               <TextInput
@@ -163,6 +162,7 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
                 placeholder="10GB"
                 dark={dark}
                 mono
+                examples={["1GB", "10GB", "100GB"]}
               />
             </FormField>
             <FormField label="Max Chunks" dark={dark}>
@@ -203,8 +203,7 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
               <div className="grid grid-cols-3 gap-3">
                 <FormField
                   label="Max Age"
-                  description="e.g. 720h, 30d"
-                  dark={dark}
+                      dark={dark}
                 >
                   <TextInput
                     value={edit.maxAge}
@@ -212,12 +211,12 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
                     placeholder="720h"
                     dark={dark}
                     mono
+                    examples={["720h", "30d", "90d"]}
                   />
                 </FormField>
                 <FormField
                   label="Max Bytes"
-                  description="e.g. 10GB, 500MB"
-                  dark={dark}
+                      dark={dark}
                 >
                   <TextInput
                     value={edit.maxBytes}
@@ -225,6 +224,7 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
                     placeholder="10GB"
                     dark={dark}
                     mono
+                    examples={["1GB", "10GB", "100GB"]}
                   />
                 </FormField>
                 <FormField label="Max Chunks" dark={dark}>

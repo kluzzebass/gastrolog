@@ -270,7 +270,7 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
 
             <FormField
               label="Token Duration"
-              description="How long authentication tokens remain valid. Use Go duration syntax, e.g. 168h, 720h, 24h."
+              description="How long authentication tokens remain valid."
               dark={dark}
             >
               <TextInput
@@ -279,6 +279,7 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
                 placeholder="168h"
                 dark={dark}
                 mono
+                examples={["24h", "168h", "720h"]}
               />
             </FormField>
 
@@ -375,6 +376,7 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
                 placeholder="4"
                 dark={dark}
                 min={1}
+                examples={["2", "4", "8"]}
               />
             </FormField>
           </section>

@@ -220,6 +220,7 @@ function ChatterboxForm({
             placeholder="100ms"
             dark={dark}
             mono
+            examples={["50ms", "100ms", "500ms"]}
           />
         </FormField>
         <FormField
@@ -233,6 +234,7 @@ function ChatterboxForm({
             placeholder="1s"
             dark={dark}
             mono
+            examples={["500ms", "1s", "5s"]}
           />
         </FormField>
       </div>
@@ -250,6 +252,7 @@ function ChatterboxForm({
             placeholder="10"
             dark={dark}
             min={1}
+            examples={["5", "10", "50"]}
           />
         </FormField>
         <FormField
@@ -263,6 +266,7 @@ function ChatterboxForm({
             placeholder="5"
             dark={dark}
             min={1}
+            examples={["3", "5", "20"]}
           />
         </FormField>
       </div>
@@ -336,6 +340,7 @@ function TailForm({
           placeholder="30s"
           dark={dark}
           mono
+          examples={["30s", "1m", "5m"]}
         />
       </FormField>
     </div>
@@ -370,7 +375,7 @@ function DockerForm({
     <div className="flex flex-col gap-4">
       <FormField
         label="Docker Host"
-        description="Docker daemon address, e.g. unix:///var/run/docker.sock or tcp://docker-host:2376"
+        description="Docker daemon address"
         dark={dark}
       >
         <TextInput
@@ -379,6 +384,7 @@ function DockerForm({
           placeholder="unix:///var/run/docker.sock"
           dark={dark}
           mono
+          examples={["unix:///var/run/docker.sock", "tcp://localhost:2376"]}
         />
       </FormField>
 
@@ -394,6 +400,7 @@ function DockerForm({
           placeholder="image=nginx* AND label.env=prod"
           dark={dark}
           mono
+          examples={["image=nginx*", "label.env=prod"]}
         />
       </FormField>
 
@@ -410,6 +417,7 @@ function DockerForm({
             placeholder="30s"
             dark={dark}
             mono
+            examples={["30s", "1m", "5m"]}
           />
         </FormField>
         <div className="flex items-end gap-4 pb-1">
@@ -559,6 +567,7 @@ export function IngesterParamsForm({
           placeholder=":3100"
           dark={dark}
           mono
+          examples={[":3100"]}
         />
       </FormField>
     );
@@ -577,6 +586,7 @@ export function IngesterParamsForm({
           placeholder=":2514"
           dark={dark}
           mono
+          examples={[":2514"]}
         />
       </FormField>
     );
@@ -596,6 +606,7 @@ export function IngesterParamsForm({
             placeholder=":514"
             dark={dark}
             mono
+            examples={[":514"]}
           />
         </FormField>
         <FormField
@@ -609,6 +620,7 @@ export function IngesterParamsForm({
             placeholder=""
             dark={dark}
             mono
+            examples={[":514"]}
           />
         </FormField>
       </div>

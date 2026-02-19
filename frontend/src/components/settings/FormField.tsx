@@ -34,6 +34,44 @@ export function FormField({
   );
 }
 
+function ExampleValues({
+  examples,
+  value,
+  onChange,
+  dark,
+}: Readonly<{
+  examples?: string[];
+  value: string;
+  onChange: (v: string) => void;
+  dark: boolean;
+}>) {
+  const c = useThemeClass(dark);
+  if (!examples?.length || value) return null;
+  return (
+    <div
+      className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+    >
+      {examples.map((ex, i) => (
+        <span key={ex}>
+          {i > 0 && ", "}
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={() => onChange(ex)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onChange(ex); }}
+            className={`font-mono cursor-pointer transition-colors ${c(
+              "hover:text-copper",
+              "hover:text-copper",
+            )}`}
+          >
+            {ex}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 interface TextInputProps {
   value: string;
   onChange: (v: string) => void;
@@ -41,6 +79,7 @@ interface TextInputProps {
   dark: boolean;
   disabled?: boolean;
   mono?: boolean;
+  examples?: string[];
 }
 
 export function TextInput({
@@ -50,22 +89,26 @@ export function TextInput({
   dark,
   disabled,
   mono,
+  examples,
 }: Readonly<TextInputProps>) {
   const c = useThemeClass(dark);
   return (
-    <input
-      type="text"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      disabled={disabled}
-      className={`px-2.5 py-1.5 text-[0.85em] border rounded focus:outline-none transition-colors ${
-        mono ? "font-mono" : ""
-      } ${c(
-        "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-        "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
-      )} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
-    />
+    <>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        disabled={disabled}
+        className={`px-2.5 py-1.5 text-[0.85em] border rounded focus:outline-none transition-colors ${
+          mono ? "font-mono" : ""
+        } ${c(
+          "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
+          "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
+        )} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
+      />
+      <ExampleValues examples={examples} value={value} onChange={onChange} dark={dark} />
+    </>
   );
 }
 
@@ -111,6 +154,7 @@ interface NumberInputProps {
   dark: boolean;
   disabled?: boolean;
   min?: number;
+  examples?: string[];
 }
 
 export function NumberInput({
@@ -120,27 +164,31 @@ export function NumberInput({
   dark,
   disabled,
   min,
+  examples,
 }: Readonly<NumberInputProps>) {
   const c = useThemeClass(dark);
   return (
-    <input
-      type="text"
-      inputMode="numeric"
-      value={value}
-      onChange={(e) => {
-        const v = e.target.value;
-        if (v === "" || /^\d+$/.test(v)) {
-          if (min !== undefined && v !== "" && parseInt(v, 10) < min) return;
-          onChange(v);
-        }
-      }}
-      placeholder={placeholder}
-      disabled={disabled}
-      className={`px-2.5 py-1.5 text-[0.85em] font-mono border rounded focus:outline-none transition-colors ${c(
-        "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-        "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
-      )} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
-    />
+    <>
+      <input
+        type="text"
+        inputMode="numeric"
+        value={value}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v === "" || /^\d+$/.test(v)) {
+            if (min !== undefined && v !== "" && parseInt(v, 10) < min) return;
+            onChange(v);
+          }
+        }}
+        placeholder={placeholder}
+        disabled={disabled}
+        className={`px-2.5 py-1.5 text-[0.85em] font-mono border rounded focus:outline-none transition-colors ${c(
+          "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
+          "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
+        )} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
+      />
+      <ExampleValues examples={examples} value={value} onChange={onChange} dark={dark} />
+    </>
   );
 }
 
