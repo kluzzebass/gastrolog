@@ -546,6 +546,48 @@ export function SearchView() {
     }
   };
 
+  const handleSpanClick = (value: string, shiftKey: boolean) => {
+    const trimmed = draft.trim();
+    if (shiftKey) {
+      // Shift-click: build/extend an OR group at the end of the draft.
+      if (trimmed.endsWith(")")) {
+        // Find the matching ( for the trailing ).
+        let depth = 0;
+        let matchIdx = -1;
+        for (let i = trimmed.length - 1; i >= 0; i--) {
+          if (trimmed[i] === ")") depth++;
+          else if (trimmed[i] === "(") {
+            depth--;
+            if (depth === 0) { matchIdx = i; break; }
+          }
+        }
+        const atBoundary = matchIdx === 0 || trimmed[matchIdx - 1] === " ";
+        if (matchIdx >= 0 && atBoundary && /\bOR\b/.test(trimmed.slice(matchIdx))) {
+          // Extend existing OR group.
+          setDraft(trimmed.slice(0, -1) + " OR " + value + ")");
+          queryInputRef.current?.focus();
+          return;
+        }
+      }
+      // Wrap last token + new value in an OR group.
+      const lastSpace = trimmed.lastIndexOf(" ");
+      if (lastSpace >= 0) {
+        const prefix = trimmed.slice(0, lastSpace);
+        const lastToken = trimmed.slice(lastSpace + 1);
+        setDraft(`${prefix} (${lastToken} OR ${value})`);
+      } else if (trimmed) {
+        setDraft(`(${trimmed} OR ${value})`);
+      } else {
+        setDraft(value);
+      }
+    } else {
+      // Plain click: append value to existing query.
+      setDraft(trimmed ? `${trimmed} ${value}` : value);
+    }
+    // Focus the query input so the user can review and press Enter.
+    queryInputRef.current?.focus();
+  };
+
   const handleTokenToggle = (token: string) => {
     if (q.includes(token)) {
       const newQuery = q.replace(token, "").replace(/\s+/g, " ").trim();
@@ -903,6 +945,7 @@ export function SearchView() {
                             setSelectedRecord(selected ? null : record)
                           }
                           onFilterToggle={handleTokenToggle}
+                          onSpanClick={handleSpanClick}
                           dark={dark}
                         />
                       );

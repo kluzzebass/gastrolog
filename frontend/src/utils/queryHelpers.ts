@@ -73,6 +73,39 @@ export const injectStore = (q: string, storeId: string): string => {
   return base ? `${token} ${base}` : token;
 };
 
+/** Extract the directive tokens (last=, start=, end=, reverse=, store=, limit=, chunk=, pos=) from a query. */
+export const extractDirectives = (q: string): string => {
+  const directives: string[] = [];
+  const re = /\b(last|start|end|reverse|store|limit|chunk|pos)=\S+/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(q)) !== null) {
+    directives.push(m[0]);
+  }
+  return directives.join(" ");
+};
+
+/** Replace the expression part of a query with a new value, preserving directives. */
+export const replaceExpression = (q: string, value: string): string => {
+  const directives = extractDirectives(q);
+  return directives ? `${directives} ${value}` : value;
+};
+
+/** Append a value to the expression using OR, wrapping in parens as needed. */
+export const appendOrExpression = (q: string, value: string): string => {
+  const directives = extractDirectives(q);
+  const expr = stripAllDirectives(q);
+  let newExpr: string;
+  if (!expr) {
+    newExpr = value;
+  } else if (expr.startsWith("(") && expr.endsWith(")")) {
+    // Already a group — insert before closing paren.
+    newExpr = expr.slice(0, -1) + " OR " + value + ")";
+  } else {
+    newExpr = "(" + expr + " OR " + value + ")";
+  }
+  return directives ? `${directives} ${newExpr}` : newExpr;
+};
+
 export const buildSeverityExpr = (severities: string[]): string => {
   if (severities.length === 0) return "";
   if (severities.length === 1) return `level=${severities[0]}`;

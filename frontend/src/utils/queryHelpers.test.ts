@@ -10,6 +10,9 @@ import {
   injectTimeRange,
   injectStore,
   buildSeverityExpr,
+  extractDirectives,
+  replaceExpression,
+  appendOrExpression,
 } from "./queryHelpers";
 
 describe("stripTimeRange", () => {
@@ -119,6 +122,56 @@ describe("injectStore", () => {
   test("all store strips", () =>
     expect(injectStore("store=old foo", "all")).toBe("foo"));
   test("all store on empty", () => expect(injectStore("", "all")).toBe(""));
+});
+
+describe("extractDirectives", () => {
+  test("extracts all directive types", () =>
+    expect(extractDirectives("last=5m reverse=true store=main foo")).toBe(
+      "last=5m reverse=true store=main",
+    ));
+  test("no directives", () => expect(extractDirectives("foo bar")).toBe(""));
+  test("empty string", () => expect(extractDirectives("")).toBe(""));
+});
+
+describe("replaceExpression", () => {
+  test("replaces expression preserving directives", () =>
+    expect(replaceExpression("last=5m reverse=true foo", "bar")).toBe(
+      "last=5m reverse=true bar",
+    ));
+  test("no directives — just the value", () =>
+    expect(replaceExpression("foo", "bar")).toBe("bar"));
+  test("empty query — just the value", () =>
+    expect(replaceExpression("", "bar")).toBe("bar"));
+  test("only directives", () =>
+    expect(replaceExpression("last=5m reverse=true", "bar")).toBe(
+      "last=5m reverse=true bar",
+    ));
+});
+
+describe("appendOrExpression", () => {
+  test("empty expression — just the value", () =>
+    expect(appendOrExpression("last=5m reverse=true", "192.168.1.1")).toBe(
+      "last=5m reverse=true 192.168.1.1",
+    ));
+  test("single term — wraps in parens with OR", () =>
+    expect(
+      appendOrExpression("last=5m reverse=true 10.0.0.1", "192.168.1.1"),
+    ).toBe("last=5m reverse=true (10.0.0.1 OR 192.168.1.1)"));
+  test("existing group — appends inside parens", () =>
+    expect(
+      appendOrExpression(
+        "last=5m reverse=true (10.0.0.1 OR 10.0.0.2)",
+        "192.168.1.1",
+      ),
+    ).toBe("last=5m reverse=true (10.0.0.1 OR 10.0.0.2 OR 192.168.1.1)"));
+  test("no directives — single term", () =>
+    expect(appendOrExpression("foo", "bar")).toBe("(foo OR bar)"));
+  test("no directives — existing group", () =>
+    expect(appendOrExpression("(foo OR bar)", "baz")).toBe(
+      "(foo OR bar OR baz)",
+    ));
+  test("completely empty query", () =>
+    expect(appendOrExpression("", "foo")).toBe("foo"));
 });
 
 describe("buildSeverityExpr", () => {

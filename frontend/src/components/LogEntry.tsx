@@ -52,10 +52,11 @@ export const LogEntry = forwardRef<
     isSelected: boolean;
     onSelect: () => void;
     onFilterToggle?: (token: string) => void;
+    onSpanClick?: (value: string, shiftKey: boolean) => void;
     dark: boolean;
   }
 >(function LogEntry(
-  { record, tokens, isSelected, onSelect, onFilterToggle, dark },
+  { record, tokens, isSelected, onSelect, onFilterToggle, onSpanClick, dark },
   ref,
 ) {
   const rawText = new TextDecoder().decode(record.raw);
@@ -107,6 +108,13 @@ export const LogEntry = forwardRef<
       </span>
       <div
         className={`font-mono text-[0.85em] leading-relaxed truncate whitespace-pre self-center pl-1.5 ${dark ? "text-text-normal" : "text-light-text-normal"}`}
+        onClick={onSpanClick ? (e) => {
+          const el = (e.target as HTMLElement).closest("[data-click-value]") as HTMLElement | null;
+          if (el) {
+            e.stopPropagation();
+            onSpanClick(el.dataset.clickValue!, e.shiftKey);
+          }
+        } : undefined}
       >
         {parts.map((part, i) => {
           const className = part.searchHit
@@ -115,19 +123,34 @@ export const LogEntry = forwardRef<
               : "bg-light-highlight-bg border border-light-highlight-border text-light-highlight-text px-0.5 rounded-sm"
             : "";
           const style = part.color ? { color: part.color } : undefined;
-          return part.url ? (
-            <a
-              key={i}
-              href={part.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={style}
-              className={`underline decoration-current/30 hover:decoration-current/60 ${className}`}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {part.text}
-            </a>
-          ) : (
+          if (part.url) {
+            return (
+              <a
+                key={i}
+                href={part.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={style}
+                className={`underline decoration-current/30 hover:decoration-current/60 ${className}`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {part.text}
+              </a>
+            );
+          }
+          if (part.clickValue) {
+            return (
+              <span
+                key={i}
+                style={style}
+                className={`cursor-pointer hover:brightness-125 ${className}`}
+                data-click-value={part.clickValue}
+              >
+                {part.text}
+              </span>
+            );
+          }
+          return (
             <span key={i} style={style} className={className}>
               {part.text}
             </span>

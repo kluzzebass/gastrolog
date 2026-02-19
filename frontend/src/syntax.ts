@@ -5,6 +5,7 @@ interface SyntaxSpan {
   text: string;
   color?: string; // CSS color value, undefined = inherit
   url?: string; // If set, render as a clickable link
+  clickValue?: string; // If set, clicking populates the search bar
 }
 
 interface HighlightedSpan {
@@ -12,6 +13,7 @@ interface HighlightedSpan {
   color?: string;
   searchHit: boolean;
   url?: string;
+  clickValue?: string;
 }
 
 // --- Colors (CSS variable references) ---
@@ -49,6 +51,7 @@ export function composeWithSearch(
       text: s.text,
       color: s.color,
       url: s.url,
+      clickValue: s.clickValue,
       searchHit: false,
     }));
   }
@@ -71,6 +74,7 @@ export function composeWithSearch(
           text: span.text.slice(lastIndex, match.index),
           color: span.color,
           url: span.url,
+          clickValue: span.clickValue,
           searchHit: false,
         });
       }
@@ -78,6 +82,7 @@ export function composeWithSearch(
         text: match[0],
         color: span.color,
         url: span.url,
+        clickValue: span.clickValue,
         searchHit: true,
       });
       lastIndex = pattern.lastIndex;
@@ -88,6 +93,7 @@ export function composeWithSearch(
         text: span.text.slice(lastIndex),
         color: span.color,
         url: span.url,
+        clickValue: span.clickValue,
         searchHit: false,
       });
     }
@@ -109,9 +115,14 @@ function highlightJSON(text: string): SyntaxSpan[] {
   let expectKey = false;
   let afterColon = false;
 
-  const push = (start: number, end: number, color?: string) => {
+  const push = (
+    start: number,
+    end: number,
+    color?: string,
+    clickValue?: string,
+  ) => {
     if (end > start) {
-      spans.push({ text: text.slice(start, end), color });
+      spans.push({ text: text.slice(start, end), color, clickValue });
     }
   };
 
@@ -147,9 +158,12 @@ function highlightJSON(text: string): SyntaxSpan[] {
         i++;
       }
       if (i < len) i++; // skip closing quote
-      const color = expectKey ? C_KEY : C_STRING;
-      push(start, i, color);
-      if (expectKey) {
+      const isKey = expectKey;
+      const color = isKey ? C_KEY : C_STRING;
+      // Value strings are clickable (content without quotes).
+      const cv = !isKey ? text.slice(start + 1, i - 1) : undefined;
+      push(start, i, color, cv);
+      if (isKey) {
         expectKey = false;
       }
       afterColon = false;
@@ -178,7 +192,8 @@ function highlightJSON(text: string): SyntaxSpan[] {
           break;
         }
       }
-      push(start, i, C_NUMBER);
+      const numStr = text.slice(start, i);
+      push(start, i, C_NUMBER, numStr);
       afterColon = false;
     } else if (
       afterColon &&
@@ -225,6 +240,7 @@ interface ColorInterval {
   end: number;
   color: string;
   url?: string;
+  clickValue?: string;
 }
 
 // Compiled once at module load; reset lastIndex before each use.
@@ -299,6 +315,14 @@ function highlightKVPlain(text: string): SyntaxSpan[] {
   // 0. Access log (CLF/Combined) — highest priority, claims key positions.
   const alm = RE_ACCESS_LOG.exec(text);
   if (alm) {
+    // IP address (first field) — clickable
+    intervals.push({
+      start: 0,
+      end: alm[1]!.length,
+      color: C_NUMBER,
+      clickValue: alm[1]!,
+    });
+
     // Timestamp [...]
     const tsStart = text.indexOf(alm[2]!, alm[1]!.length);
     intervals.push({
@@ -310,22 +334,24 @@ function highlightKVPlain(text: string): SyntaxSpan[] {
     // Find the quoted request string to locate method/path/protocol within it.
     const qStart = text.indexOf('"' + alm[3]!, tsStart + alm[2]!.length) + 1;
 
-    // Method
+    // Method — clickable
     intervals.push({
       start: qStart,
       end: qStart + alm[3]!.length,
       color: httpMethodColor(alm[3]!),
+      clickValue: alm[3]!,
     });
 
-    // Path
+    // Path — clickable
     const pathStart = qStart + alm[3]!.length + 1; // +1 for space
     intervals.push({
       start: pathStart,
       end: pathStart + alm[4]!.length,
       color: C_NUMBER,
+      clickValue: alm[4]!,
     });
 
-    // Protocol
+    // Protocol — NOT clickable (dim)
     const protoStart = pathStart + alm[4]!.length + 1; // +1 for space
     intervals.push({
       start: protoStart,
@@ -333,12 +359,13 @@ function highlightKVPlain(text: string): SyntaxSpan[] {
       color: C_DIM,
     });
 
-    // Status code — find it after the closing quote + space
+    // Status code — clickable
     const afterQuote = protoStart + alm[5]!.length + 2; // +2 for '" '
     intervals.push({
       start: afterQuote,
       end: afterQuote + alm[6]!.length,
       color: httpStatusColor(alm[6]!),
+      clickValue: alm[6]!,
     });
 
     // Quotes and surrounding punctuation — dim them
@@ -362,29 +389,32 @@ function highlightKVPlain(text: string): SyntaxSpan[] {
       color: C_DIM,
     });
 
-    // Hostname → number color (same as IPs/hostnames)
+    // Hostname → number color (same as IPs/hostnames) — clickable
     const hostOff = tsOff + slm[2]!.length + 1; // +1 for space
     intervals.push({
       start: hostOff,
       end: hostOff + slm[3]!.length,
       color: C_NUMBER,
+      clickValue: slm[3]!,
     });
 
-    // Program name → key color (copper)
+    // Program name → key color (copper) — clickable
     const progOff = hostOff + slm[3]!.length + 1; // +1 for space
     intervals.push({
       start: progOff,
       end: progOff + slm[4]!.length,
       color: C_KEY,
+      clickValue: slm[4]!,
     });
 
-    // PID if present → number color
+    // PID if present → number color — clickable
     if (slm[5]) {
       const pidOff = progOff + slm[4]!.length + 1; // +1 for [
       intervals.push({
         start: pidOff,
         end: pidOff + slm[5].length,
         color: C_NUMBER,
+        clickValue: slm[5],
       });
       // Dim the brackets
       intervals.push({
@@ -421,7 +451,12 @@ function highlightKVPlain(text: string): SyntaxSpan[] {
     } else {
       color = C_SEV_TRACE;
     }
-    intervals.push({ start: m.index, end: m.index + m[0].length, color });
+    intervals.push({
+      start: m.index,
+      end: m.index + m[0].length,
+      color,
+      clickValue: m[0],
+    });
   }
 
   // 2. Key=value pairs — color the key and = sign.
@@ -452,27 +487,29 @@ function highlightKVPlain(text: string): SyntaxSpan[] {
     intervals.push({ start: m.index, end, color: C_NUMBER, url: href });
   }
 
-  // 5. File paths (absolute unix/windows paths).
+  // 5. File paths (absolute unix/windows paths) — clickable.
   reset(RE_PATH);
   while ((m = RE_PATH.exec(text)) !== null) {
     intervals.push({
       start: m.index,
       end: m.index + m[0].length,
       color: C_NUMBER,
+      clickValue: m[0],
     });
   }
 
-  // 6. UUIDs (8-4-4-4-12 hex).
+  // 6. UUIDs (8-4-4-4-12 hex) — clickable.
   reset(RE_UUID);
   while ((m = RE_UUID.exec(text)) !== null) {
     intervals.push({
       start: m.index,
       end: m.index + m[0].length,
       color: C_NUMBER,
+      clickValue: m[0],
     });
   }
 
-  // 7. IPv6 addresses.
+  // 7. IPv6 addresses — clickable.
   reset(RE_IPV6);
   while ((m = RE_IPV6.exec(text)) !== null) {
     if (m[0].length >= 3) {
@@ -480,57 +517,63 @@ function highlightKVPlain(text: string): SyntaxSpan[] {
         start: m.index,
         end: m.index + m[0].length,
         color: C_NUMBER,
+        clickValue: m[0],
       });
     }
   }
 
-  // 8. IPv4 addresses (with optional /CIDR or :port).
+  // 8. IPv4 addresses (with optional /CIDR or :port) — clickable.
   reset(RE_IPV4);
   while ((m = RE_IPV4.exec(text)) !== null) {
     intervals.push({
       start: m.index,
       end: m.index + m[0].length,
       color: C_NUMBER,
+      clickValue: m[0],
     });
   }
 
-  // 9. MAC addresses.
+  // 9. MAC addresses — clickable.
   reset(RE_MAC);
   while ((m = RE_MAC.exec(text)) !== null) {
     intervals.push({
       start: m.index,
       end: m.index + m[0].length,
       color: C_NUMBER,
+      clickValue: m[0],
     });
   }
 
-  // 10. Email addresses.
+  // 10. Email addresses — clickable.
   reset(RE_EMAIL);
   while ((m = RE_EMAIL.exec(text)) !== null) {
     intervals.push({
       start: m.index,
       end: m.index + m[0].length,
       color: C_NUMBER,
+      clickValue: m[0],
     });
   }
 
-  // 11. Hostnames (at least one dot, TLD 2-6 alpha chars).
+  // 11. Hostnames (at least one dot, TLD 2-6 alpha chars) — clickable.
   reset(RE_HOST);
   while ((m = RE_HOST.exec(text)) !== null) {
     intervals.push({
       start: m.index,
       end: m.index + m[0].length,
       color: C_NUMBER,
+      clickValue: m[0],
     });
   }
 
-  // 12. Quoted strings.
+  // 12. Quoted strings — clickable (content without quotes).
   reset(RE_QUOTED);
   while ((m = RE_QUOTED.exec(text)) !== null) {
     intervals.push({
       start: m.index,
       end: m.index + m[0].length,
       color: C_STRING,
+      clickValue: m[0].slice(1, -1),
     });
   }
 
@@ -538,43 +581,49 @@ function highlightKVPlain(text: string): SyntaxSpan[] {
 }
 
 /** Convert a set of (possibly overlapping) color intervals to non-overlapping spans.
- *  First interval wins at each character position (priority by insertion order). */
+ *  First interval wins at each character position (priority by insertion order).
+ *
+ *  Uses a sweep-line over interval boundaries instead of per-character arrays
+ *  so cost is O(n log n) in the number of intervals, not O(text.length). */
 export function intervalsToSpans(
   text: string,
   intervals: ColorInterval[],
 ): SyntaxSpan[] {
   if (intervals.length === 0) return [{ text }];
 
-  // Build per-character color+url map. First match wins.
-  const colors = new Array<string | undefined>(text.length);
-  const urls = new Array<string | undefined>(text.length);
+  // Collect all unique boundary positions and sort them.
+  const posSet = new Set<number>();
+  posSet.add(0);
+  posSet.add(text.length);
   for (const iv of intervals) {
-    for (let i = iv.start; i < iv.end && i < text.length; i++) {
-      if (colors[i] === undefined) {
-        colors[i] = iv.color;
-        urls[i] = iv.url;
+    if (iv.start > 0 && iv.start < text.length) posSet.add(iv.start);
+    if (iv.end > 0 && iv.end < text.length) posSet.add(iv.end);
+  }
+  const positions = Array.from(posSet).sort((a, b) => a - b);
+
+  // For each segment between consecutive positions, find the first interval
+  // that covers it (first-in-list wins, preserving insertion-order priority).
+  const spans: SyntaxSpan[] = [];
+  for (let p = 0; p < positions.length - 1; p++) {
+    const segStart = positions[p]!;
+    const segEnd = positions[p + 1]!;
+    let color: string | undefined;
+    let url: string | undefined;
+    let clickValue: string | undefined;
+    for (const iv of intervals) {
+      if (iv.start <= segStart && iv.end >= segEnd) {
+        color = iv.color;
+        url = iv.url;
+        clickValue = iv.clickValue;
+        break;
       }
     }
-  }
-
-  // Merge runs of same color+url into spans.
-  const spans: SyntaxSpan[] = [];
-  let runStart = 0;
-  let runColor = colors[0];
-  let runUrl = urls[0];
-
-  for (let i = 1; i <= text.length; i++) {
-    const c = i < text.length ? colors[i] : null; // sentinel
-    const u = i < text.length ? urls[i] : null;
-    if (c !== runColor || u !== runUrl) {
-      spans.push({
-        text: text.slice(runStart, i),
-        color: runColor,
-        url: runUrl,
-      });
-      runStart = i;
-      runColor = c ?? undefined;
-      runUrl = u ?? undefined;
+    // Merge with previous span if attributes match.
+    const prev = spans.length > 0 ? spans[spans.length - 1]! : null;
+    if (prev && prev.color === color && prev.url === url && prev.clickValue === clickValue) {
+      prev.text += text.slice(segStart, segEnd);
+    } else {
+      spans.push({ text: text.slice(segStart, segEnd), color, url, clickValue });
     }
   }
 
