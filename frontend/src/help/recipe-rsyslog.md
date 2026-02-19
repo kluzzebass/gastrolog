@@ -14,7 +14,9 @@ Add to `/etc/rsyslog.d/gastrolog.conf`:
 
 `@` means UDP. Replace `gastrolog.example.com` with your GastroLog host.
 
-**GastroLog side:** Create a [Syslog ingester](help:ingester-syslog) with `udp_addr` set to `:514`.
+---
+
+**In GastroLog:** Go to [Settings → Ingesters](settings:ingesters) and create a [Syslog ingester](help:ingester-syslog) with `udp_addr` set to `:514`.
 
 ## TCP (reliable)
 
@@ -28,7 +30,9 @@ Add to `/etc/rsyslog.d/gastrolog.conf`:
 
 `@@` means TCP.
 
-**GastroLog side:** Create a [Syslog ingester](help:ingester-syslog) with `tcp_addr` set to `:514`.
+---
+
+**In GastroLog:** Go to [Settings → Ingesters](settings:ingesters) and create a [Syslog ingester](help:ingester-syslog) with `tcp_addr` set to `:514`.
 
 ## RELP (guaranteed delivery)
 
@@ -59,7 +63,9 @@ module(load="omrelp")
 
 `action.resumeRetryCount="-1"` means retry forever if the connection drops.
 
-**GastroLog side:** Create a [RELP ingester](help:ingester-relp) with `addr` set to `:2514`.
+---
+
+**In GastroLog:** Go to [Settings → Ingesters](settings:ingesters) and create a [RELP ingester](help:ingester-relp) with `addr` set to `:2514`.
 
 ## Filtering what gets forwarded
 

@@ -6,7 +6,7 @@ Source code: [github.com/kluzzebass/gastrolog](https://github.com/kluzzebass/gas
 
 ## License
 
-MIT License
+[MIT License](https://opensource.org/licenses/MIT)
 
 Copyright (c) 2026 Jan Fredrik Leversund
 
@@ -26,37 +26,37 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 | Library | License |
 |---------|---------|
-| [Connect RPC](https://github.com/connectrpc/connect-go) | Apache 2.0 |
-| [Cobra](https://github.com/spf13/cobra) | Apache 2.0 |
-| [Docker SDK](https://github.com/docker/docker) | Apache 2.0 |
-| [klauspost/compress](https://github.com/klauspost/compress) | Apache 2.0 |
-| [zstd-seekable](https://github.com/SaveTheRbtz/zstd-seekable-format-go) | Apache 2.0 |
-| [protobuf-go](https://github.com/protocolbuffers/protobuf-go) | BSD 3-Clause |
-| [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) | BSD 3-Clause |
-| [golang.org/x/crypto](https://pkg.go.dev/golang.org/x/crypto) | BSD 3-Clause |
-| [golang.org/x/net](https://pkg.go.dev/golang.org/x/net) | BSD 3-Clause |
-| [golang.org/x/sync](https://pkg.go.dev/golang.org/x/sync) | BSD 3-Clause |
-| [fsnotify](https://github.com/fsnotify/fsnotify) | BSD 3-Clause |
-| [uuid](https://github.com/google/uuid) | BSD 3-Clause |
-| [brotli](https://github.com/andybalholm/brotli) | MIT |
-| [golang-jwt](https://github.com/golang-jwt/jwt) | MIT |
-| [gocron](https://github.com/go-co-op/gocron) | MIT |
-| [doublestar](https://github.com/bmatcuk/doublestar) | MIT |
-| [go-relp](https://github.com/thierry-f-78/go-relp) | MIT |
+| [Connect RPC](https://github.com/connectrpc/connect-go) | [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) |
+| [Cobra](https://github.com/spf13/cobra) | [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) |
+| [Docker SDK](https://github.com/docker/docker) | [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) |
+| [klauspost/compress](https://github.com/klauspost/compress) | [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) |
+| [zstd-seekable](https://github.com/SaveTheRbtz/zstd-seekable-format-go) | [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) |
+| [protobuf-go](https://github.com/protocolbuffers/protobuf-go) | [BSD 3-Clause](https://opensource.org/licenses/BSD-3-Clause) |
+| [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) | [BSD 3-Clause](https://opensource.org/licenses/BSD-3-Clause) |
+| [golang.org/x/crypto](https://pkg.go.dev/golang.org/x/crypto) | [BSD 3-Clause](https://opensource.org/licenses/BSD-3-Clause) |
+| [golang.org/x/net](https://pkg.go.dev/golang.org/x/net) | [BSD 3-Clause](https://opensource.org/licenses/BSD-3-Clause) |
+| [golang.org/x/sync](https://pkg.go.dev/golang.org/x/sync) | [BSD 3-Clause](https://opensource.org/licenses/BSD-3-Clause) |
+| [fsnotify](https://github.com/fsnotify/fsnotify) | [BSD 3-Clause](https://opensource.org/licenses/BSD-3-Clause) |
+| [uuid](https://github.com/google/uuid) | [BSD 3-Clause](https://opensource.org/licenses/BSD-3-Clause) |
+| [brotli](https://github.com/andybalholm/brotli) | [MIT](https://opensource.org/licenses/MIT) |
+| [golang-jwt](https://github.com/golang-jwt/jwt) | [MIT](https://opensource.org/licenses/MIT) |
+| [gocron](https://github.com/go-co-op/gocron) | [MIT](https://opensource.org/licenses/MIT) |
+| [doublestar](https://github.com/bmatcuk/doublestar) | [MIT](https://opensource.org/licenses/MIT) |
+| [go-relp](https://github.com/thierry-f-78/go-relp) | [MIT](https://opensource.org/licenses/MIT) |
 
 ## Third-Party Libraries — Frontend
 
 | Library | License |
 |---------|---------|
-| [Connect RPC](https://github.com/connectrpc/connect-es) | Apache 2.0 |
-| [Protobuf-ES](https://github.com/bufbuild/protobuf-es) | Apache 2.0 |
-| [React](https://github.com/facebook/react) | MIT |
-| [TanStack Query](https://github.com/TanStack/query) | MIT |
-| [TanStack Router](https://github.com/TanStack/router) | MIT |
-| [Tailwind CSS](https://github.com/tailwindlabs/tailwindcss) | MIT |
-| [Mermaid](https://github.com/mermaid-js/mermaid) | MIT |
-| [date-fns](https://github.com/date-fns/date-fns) | MIT |
-| [react-markdown](https://github.com/remarkjs/react-markdown) | MIT |
-| [remark-gfm](https://github.com/remarkjs/remark-gfm) | MIT |
-| [fflate](https://github.com/101arrowz/fflate) | MIT |
-| [focus-trap-react](https://github.com/focus-trap/focus-trap-react) | MIT |
+| [Connect RPC](https://github.com/connectrpc/connect-es) | [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) |
+| [Protobuf-ES](https://github.com/bufbuild/protobuf-es) | [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) |
+| [React](https://github.com/facebook/react) | [MIT](https://opensource.org/licenses/MIT) |
+| [TanStack Query](https://github.com/TanStack/query) | [MIT](https://opensource.org/licenses/MIT) |
+| [TanStack Router](https://github.com/TanStack/router) | [MIT](https://opensource.org/licenses/MIT) |
+| [Tailwind CSS](https://github.com/tailwindlabs/tailwindcss) | [MIT](https://opensource.org/licenses/MIT) |
+| [Mermaid](https://github.com/mermaid-js/mermaid) | [MIT](https://opensource.org/licenses/MIT) |
+| [date-fns](https://github.com/date-fns/date-fns) | [MIT](https://opensource.org/licenses/MIT) |
+| [react-markdown](https://github.com/remarkjs/react-markdown) | [MIT](https://opensource.org/licenses/MIT) |
+| [remark-gfm](https://github.com/remarkjs/remark-gfm) | [MIT](https://opensource.org/licenses/MIT) |
+| [fflate](https://github.com/101arrowz/fflate) | [MIT](https://opensource.org/licenses/MIT) |
+| [focus-trap-react](https://github.com/focus-trap/focus-trap-react) | [MIT](https://opensource.org/licenses/MIT) |

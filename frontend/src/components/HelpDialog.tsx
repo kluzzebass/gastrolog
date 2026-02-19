@@ -13,6 +13,7 @@ interface HelpDialogProps {
   topicId?: string;
   onClose: () => void;
   onNavigate: (topicId: string) => void;
+  onOpenSettings?: (tab: string) => void;
 }
 
 /** Check if `id` is the topic or any descendant of `topic`. */
@@ -21,7 +22,7 @@ function isWithin(topic: HelpTopic, id: string): boolean {
   return topic.children?.some((c) => isWithin(c, id)) ?? false;
 }
 
-export function HelpDialog({ dark, topicId, onClose, onNavigate }: HelpDialogProps) {
+export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings }: HelpDialogProps) {
   const c = useThemeClass(dark);
   const activeId = topicId ?? helpTopics[0]?.id ?? "";
   const [expanded, setExpanded] = useState<Set<string>>(() => {
@@ -66,7 +67,7 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate }: HelpDialogPro
   // Memoize so react-markdown doesn't unmount/remount custom components
   // (e.g. MermaidDiagram) on every parent re-render.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const mdComponents = useMemo(() => markdownComponents(dark, navigateToTopic), [dark, expanded]);
+  const mdComponents = useMemo(() => markdownComponents(dark, navigateToTopic, onOpenSettings), [dark, expanded, onOpenSettings]);
 
   function selectTopic(t: HelpTopic) {
     onNavigate(t.id);
@@ -142,11 +143,6 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate }: HelpDialogPro
 
         {/* Content */}
         <div ref={contentRef} className="flex-1 overflow-y-auto app-scroll p-6 pt-10">
-          <h2
-            className={`font-display text-[1.4em] font-semibold mb-4 ${c("text-text-bright", "text-light-text-bright")}`}
-          >
-            Help
-          </h2>
           {topic ? (
             <Markdown remarkPlugins={[remarkGfm]} components={mdComponents} urlTransform={(url) => url}>
               {topic.content}
@@ -173,7 +169,7 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate }: HelpDialogPro
   );
 }
 
-function markdownComponents(dark: boolean, onNavigate: (topicId: string) => void) {
+function markdownComponents(dark: boolean, onNavigate: (topicId: string) => void, onOpenSettings?: (tab: string) => void) {
   const c: (d: string, l: string) => string = dark
     ? (d) => d
     : (_, l) => l;
@@ -282,6 +278,17 @@ function markdownComponents(dark: boolean, onNavigate: (topicId: string) => void
         return (
           <button
             onClick={() => onNavigate(topicId)}
+            className="text-copper hover:underline cursor-pointer"
+          >
+            {children}
+          </button>
+        );
+      }
+      if (href?.startsWith("settings:") && onOpenSettings) {
+        const tab = href.slice(9);
+        return (
+          <button
+            onClick={() => onOpenSettings(tab)}
             className="text-copper hover:underline cursor-pointer"
           >
             {children}

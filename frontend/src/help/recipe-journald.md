@@ -32,7 +32,9 @@ module(load="omrelp")
 )
 ```
 
-**GastroLog side:** Create a [RELP ingester](help:ingester-relp) with `addr` set to `:2514`.
+---
+
+**In GastroLog:** Go to [Settings → Ingesters](settings:ingesters) and create a [RELP ingester](help:ingester-relp) with `addr` set to `:2514`.
 
 ### Forward via syslog TCP
 
@@ -44,7 +46,9 @@ module(load="imjournal")
 *.* @@gastrolog.example.com:514
 ```
 
-**GastroLog side:** Create a [Syslog ingester](help:ingester-syslog) with `tcp_addr` set to `:514`.
+---
+
+**In GastroLog:** Go to [Settings → Ingesters](settings:ingesters) and create a [Syslog ingester](help:ingester-syslog) with `tcp_addr` set to `:514`.
 
 ### Filtering
 

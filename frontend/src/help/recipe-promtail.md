@@ -61,9 +61,9 @@ loki.write "gastrolog" {
 }
 ```
 
-## GastroLog side
+---
 
-Create an [HTTP ingester](help:ingester-http) with `addr` set to `:3100` (the default).
+**In GastroLog:** Go to [Settings → Ingesters](settings:ingesters) and create an [HTTP ingester](help:ingester-http) with `addr` set to `:3100` (the default).
 
 ## Delivery guarantees
 

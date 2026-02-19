@@ -108,14 +108,14 @@ openssl s_client -connect dockerhost.example.com:2376 \
 
 ## 3. Upload certificates to GastroLog
 
-In GastroLog, go to **Settings → Certificates** and add two certificates:
+In GastroLog, go to [Settings → Certificates](settings:certificates) and add two certificates:
 
 1. **CA certificate** — paste `ca.pem` content. Name it something like `docker-ca`.
 2. **Client certificate** — paste both `client-cert.pem` and `client-key.pem`. Name it `docker-client`.
 
 ## 4. Configure the Docker ingester
 
-In **Settings → Ingesters**, create a new Docker ingester with these parameters:
+In [Settings → Ingesters](settings:ingesters), create a new Docker ingester with these parameters:
 
 | Param | Value |
 |-------|-------|
@@ -129,7 +129,7 @@ Use the **Test Connection** button to verify connectivity before saving.
 
 ## Filtering containers
 
-Use the `filter` param to limit which containers are logged. It accepts boolean expressions over container metadata (`name`, `image`, `label.<key>`):
+Use the `filter` param to limit which containers are logged. It uses the same expression language as [search queries](help:query-language) and [routing filters](help:routing), applied to container metadata (`name`, `image`, `label.<key>`):
 
 - `filter` set to `label.logging=true` — only containers with the Docker label `logging=true`
 - `filter` set to `name=myapp-*` — only containers whose name starts with `myapp-`

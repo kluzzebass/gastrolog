@@ -702,6 +702,7 @@ export function SearchView() {
               topicId={helpParam}
               onClose={() => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, help: undefined }) } as any)}
               onNavigate={(id) => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, help: id }) } as any)}
+              onOpenSettings={(tab) => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, help: undefined, settings: tab }) } as any)}
             />
           )}
 
