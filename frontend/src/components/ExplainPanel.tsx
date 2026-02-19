@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { ChunkPlan, BranchPlan, PipelineStep } from "../api/client";
 import { formatChunkId } from "../utils";
@@ -26,16 +26,13 @@ export function ExplainPanel({
   const c = useThemeClass(dark);
   const [highlightRanges, setHighlightRanges] = useState<Range[]>([]);
 
-  const handleStepHover = useCallback(
-    (step: PipelineStep) => {
-      setHighlightRanges(stepToRanges(step, expression));
-    },
-    [expression],
-  );
+  const handleStepHover = (step: PipelineStep) => {
+    setHighlightRanges(stepToRanges(step, expression));
+  };
 
-  const handleStepLeave = useCallback(() => {
+  const handleStepLeave = () => {
     setHighlightRanges([]);
-  }, []);
+  };
 
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>(() => {
     // Auto-collapse if more than 3 chunks

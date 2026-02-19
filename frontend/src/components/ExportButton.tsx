@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useRef } from "react";
 import { useClickOutside } from "../hooks/useClickOutside";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { DownloadIcon } from "./icons";
@@ -64,21 +64,18 @@ export function ExportButton({
   const ref = useRef<HTMLDivElement>(null);
   useClickOutside(
     ref,
-    useCallback(() => setOpen(false), []),
+    () => setOpen(false),
   );
 
-  const handleExport = useCallback(
-    (format: Format) => {
-      const ts = new Date().toISOString().replace(/[:.]/g, "-");
-      if (format === "json") {
-        download(toJSON(records), `gastrolog-${ts}.json`, "application/json");
-      } else {
-        download(toCSV(records), `gastrolog-${ts}.csv`, "text/csv");
-      }
-      setOpen(false);
-    },
-    [records],
-  );
+  const handleExport = (format: Format) => {
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    if (format === "json") {
+      download(toJSON(records), `gastrolog-${ts}.json`, "application/json");
+    } else {
+      download(toCSV(records), `gastrolog-${ts}.csv`, "text/csv");
+    }
+    setOpen(false);
+  };
 
   const c = useThemeClass(dark);
 

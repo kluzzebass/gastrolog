@@ -5,7 +5,11 @@ import http2Proxy from "vite-plugin-http2-proxy";
 
 export default defineConfig({
   plugins: [
-    react(),
+    react({
+      babel: {
+        plugins: ["babel-plugin-react-compiler"],
+      },
+    }),
     tailwindcss(),
     http2Proxy({
       "^/gastrolog\\.v1\\.": {

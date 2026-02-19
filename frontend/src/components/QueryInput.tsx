@@ -1,4 +1,4 @@
-import { forwardRef, useMemo, type ReactNode } from "react";
+import { forwardRef, type ReactNode } from "react";
 import { tokenize, type HighlightRole } from "../queryTokenizer";
 import { useThemeClass } from "../hooks/useThemeClass";
 
@@ -66,7 +66,7 @@ export const QueryInput = forwardRef<HTMLTextAreaElement, QueryInputProps>(
     },
     ref,
   ) => {
-    const { spans, errorMessage } = useMemo(() => tokenize(value), [value]);
+    const { spans, errorMessage } = tokenize(value);
 
     const c = useThemeClass(dark);
 

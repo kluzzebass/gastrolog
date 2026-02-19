@@ -1,7 +1,6 @@
 import {
   createContext,
   useContext,
-  useCallback,
   useState,
   useEffect,
   useRef,
@@ -39,37 +38,34 @@ export function ToastProvider({ children }: Readonly<{ children: React.ReactNode
   const toastsRef = useRef(toasts);
   toastsRef.current = toasts;
 
-  const dismissToast = useCallback((id: string) => {
+  const dismissToast = (id: string) => {
     const timer = timersRef.current.get(id);
     if (timer) {
       clearTimeout(timer);
       timersRef.current.delete(id);
     }
     setToasts((prev) => prev.filter((t) => t.id !== id));
-  }, []);
+  };
 
-  const addToast = useCallback(
-    (message: string, level: ToastLevel = "error") => {
-      // Deduplicate: skip if a toast with the same message and level already exists.
-      if (toastsRef.current.some((t) => t.message === message && t.level === level)) {
-        return;
-      }
+  const addToast = (message: string, level: ToastLevel = "error") => {
+    // Deduplicate: skip if a toast with the same message and level already exists.
+    if (toastsRef.current.some((t) => t.message === message && t.level === level)) {
+      return;
+    }
 
-      const id = `toast-${++nextId}`;
-      const toast: Toast = { id, message, level, createdAt: Date.now() };
-      setToasts((prev) => [...prev, toast]);
+    const id = `toast-${++nextId}`;
+    const toast: Toast = { id, message, level, createdAt: Date.now() };
+    setToasts((prev) => [...prev, toast]);
 
-      const timeout = level === "error" ? 15000 : 8000;
-      const timer = setTimeout(() => {
-        timersRef.current.delete(id);
-        setToasts((prev) => prev.filter((t) => t.id !== id));
-      }, timeout);
-      timersRef.current.set(id, timer);
+    const timeout = level === "error" ? 15000 : 8000;
+    const timer = setTimeout(() => {
+      timersRef.current.delete(id);
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, timeout);
+    timersRef.current.set(id, timer);
 
-      return id;
-    },
-    [],
-  );
+    return id;
+  };
 
   // Cleanup timers on unmount.
   useEffect(() => {

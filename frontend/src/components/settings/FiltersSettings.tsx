@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useConfig, usePutFilter, useDeleteFilter } from "../../api/hooks";
 import { useToast } from "../Toast";
@@ -62,14 +62,11 @@ export function FiltersSettings({ dark }: Readonly<{ dark: boolean }>) {
   const filters = config?.filters ?? [];
   const stores = config?.stores ?? [];
 
-  const defaults = useCallback(
-    (id: string) => {
-      const fc = filters.find((f) => f.id === id);
-      if (!fc) return { expression: "" };
-      return { expression: fc.expression };
-    },
-    [filters],
-  );
+  const defaults = (id: string) => {
+    const fc = filters.find((f) => f.id === id);
+    if (!fc) return { expression: "" };
+    return { expression: fc.expression };
+  };
 
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
 

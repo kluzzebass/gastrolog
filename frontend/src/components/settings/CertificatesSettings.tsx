@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { unzipSync, decompressSync } from "fflate";
 import { HelpButton } from "../HelpButton";
 
@@ -407,7 +407,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
     }
   }, [expanded, certData, defaultCert]);
 
-  const assignPem = useCallback((text: string) => {
+  const assignPem = (text: string) => {
     if (
       text.includes("-----BEGIN CERTIFICATE-----") ||
       text.includes("-----BEGIN TRUSTED CERTIFICATE-----")
@@ -421,59 +421,56 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
     ) {
       setKeyPem(text.trim());
     }
-  }, []);
+  };
 
-  const handleDrop = useCallback(
-    async (e: React.DragEvent) => {
-      e.preventDefault();
-      e.currentTarget.classList.remove("ring-2", "ring-copper");
-      const files = Array.from(e.dataTransfer.files);
-      if (files.length === 0) return;
-      for (const file of files) {
-        const name = file.name.toLowerCase();
-        if (name.endsWith(".zip")) {
-          const buf = await file.arrayBuffer();
-          const unzipped = unzipSync(new Uint8Array(buf));
-          for (const [_path, data] of Object.entries(unzipped)) {
-            const text = new TextDecoder().decode(data);
-            assignPem(text);
-          }
-        } else if (name.endsWith(".tar.gz") || name.endsWith(".tgz") || name.endsWith(".tar")) {
-          const buf = await file.arrayBuffer();
-          let data = new Uint8Array(buf);
-          if (name.endsWith(".gz") || name.endsWith(".tgz")) {
-            data = decompressSync(data) as Uint8Array<ArrayBuffer>;
-          }
-          const entries = parseTar(data);
-          for (const [, content] of entries) {
-            const text = new TextDecoder().decode(content);
-            assignPem(text);
-          }
-        } else {
-          const text = await file.text();
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.currentTarget.classList.remove("ring-2", "ring-copper");
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+    for (const file of files) {
+      const name = file.name.toLowerCase();
+      if (name.endsWith(".zip")) {
+        const buf = await file.arrayBuffer();
+        const unzipped = unzipSync(new Uint8Array(buf));
+        for (const [_path, data] of Object.entries(unzipped)) {
+          const text = new TextDecoder().decode(data);
           assignPem(text);
         }
+      } else if (name.endsWith(".tar.gz") || name.endsWith(".tgz") || name.endsWith(".tar")) {
+        const buf = await file.arrayBuffer();
+        let data = new Uint8Array(buf);
+        if (name.endsWith(".gz") || name.endsWith(".tgz")) {
+          data = decompressSync(data) as Uint8Array<ArrayBuffer>;
+        }
+        const entries = parseTar(data);
+        for (const [, content] of entries) {
+          const text = new TextDecoder().decode(content);
+          assignPem(text);
+        }
+      } else {
+        const text = await file.text();
+        assignPem(text);
       }
-    },
-    [assignPem],
-  );
+    }
+  };
 
-  const handleDragOver = useCallback((e: React.DragEvent) => {
+  const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
-  }, []);
+  };
 
-  const handleDragEnter = useCallback((e: React.DragEvent) => {
+  const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
     e.currentTarget.classList.add("ring-2", "ring-copper");
-  }, []);
+  };
 
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
+  const handleDragLeave = (e: React.DragEvent) => {
     e.preventDefault();
     if (!e.currentTarget.contains(e.relatedTarget as Node)) {
       e.currentTarget.classList.remove("ring-2", "ring-copper");
     }
-  }, []);
+  };
 
   const isExpandedFileBased = expanded && certData && certData.id === expanded && !!(certData.certFile && certData.keyFile);
 

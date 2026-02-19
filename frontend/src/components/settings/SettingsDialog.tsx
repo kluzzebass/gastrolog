@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { Dialog } from "../Dialog";
 import {
@@ -77,10 +77,7 @@ export function SettingsDialog({
   isAdmin,
 }: Readonly<SettingsDialogProps>) {
   const c = useThemeClass(dark);
-  const tabs = useMemo(
-    () => allTabs.filter((t) => !t.adminOnly || isAdmin),
-    [isAdmin],
-  );
+  const tabs = allTabs.filter((t) => !t.adminOnly || isAdmin);
 
   return (
     <Dialog onClose={onClose} ariaLabel="Settings" dark={dark}>

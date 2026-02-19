@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   useSearch as useRouterSearch,
   useNavigate,
@@ -93,17 +93,17 @@ export function SearchView() {
     inspectorGlow,
   } = useDialogState();
 
-  const openHelp = useCallback((topicId?: string) => {
+  const openHelp = (topicId?: string) => {
     navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, help: topicId || "general" }) } as any);
-  }, [navigate]);
+  };
 
-  const openSettings = useCallback((tab?: string) => {
+  const openSettings = (tab?: string) => {
     navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, settings: tab || "service" }) } as any);
-  }, [navigate]);
+  };
 
-  const openInspector = useCallback((tab?: string) => {
+  const openInspector = (tab?: string) => {
     navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: tab || "stores" }) } as any);
-  }, [navigate]);
+  };
 
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(
     null,
@@ -218,16 +218,13 @@ export function SearchView() {
   }, [followError]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Navigate to a new query — pushes browser history, preserving current route.
-  const setUrlQuery = useCallback(
-    (newQ: string) => {
-      navigate({
-        to: isFollowMode ? "/follow" : "/search",
-        search: (prev: Record<string, unknown>) => ({ ...prev, q: newQ }),
-        replace: false,
-      } as any);
-    },
-    [navigate, isFollowMode],
-  );
+  const setUrlQuery = (newQ: string) => {
+    navigate({
+      to: isFollowMode ? "/follow" : "/search",
+      search: (prev: Record<string, unknown>) => ({ ...prev, q: newQ }),
+      replace: false,
+    } as any);
+  };
 
   // Sync draft when URL changes (browser back/forward).
   useEffect(() => {
@@ -496,17 +493,11 @@ export function SearchView() {
 
   const liveHistogramData = useLiveHistogram(followRecords);
   const tokens = extractTokens(q);
-  const draftHasErrors = useMemo(() => tokenize(draft).hasErrors, [draft]);
+  const draftHasErrors = tokenize(draft).hasErrors;
   const displayRecords = isFollowMode ? followRecords : records;
-  const attrFields = useMemo(
-    () => aggregateFields(displayRecords, "attrs"),
-    [displayRecords],
-  );
-  const kvFields = useMemo(
-    () => aggregateFields(displayRecords, "kv"),
-    [displayRecords],
-  );
-  const allFields = useMemo(() => {
+  const attrFields = aggregateFields(displayRecords, "attrs");
+  const kvFields = aggregateFields(displayRecords, "kv");
+  const allFields = (() => {
     const seen = new Set<string>();
     const merged = [];
     for (const f of [...attrFields, ...kvFields]) {
@@ -516,7 +507,7 @@ export function SearchView() {
       }
     }
     return merged;
-  }, [attrFields, kvFields]);
+  })();
   const autocomplete = useAutocomplete(draft, cursorPos, allFields);
 
   const handleFieldSelect = (key: string, value: string) => {

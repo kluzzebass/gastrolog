@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { useConfig, usePutIngester, useDeleteIngester } from "../../api/hooks";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
@@ -38,14 +38,11 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
 
   const ingesters = config?.ingesters ?? [];
 
-  const defaults = useCallback(
-    (id: string) => {
-      const ing = ingesters.find((i) => i.id === id);
-      if (!ing) return { enabled: true, params: {} as Record<string, string> };
-      return { enabled: ing.enabled, params: { ...ing.params } };
-    },
-    [ingesters],
-  );
+  const defaults = (id: string) => {
+    const ing = ingesters.find((i) => i.id === id);
+    if (!ing) return { enabled: true, params: {} as Record<string, string> };
+    return { enabled: ing.enabled, params: { ...ing.params } };
+  };
 
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
 

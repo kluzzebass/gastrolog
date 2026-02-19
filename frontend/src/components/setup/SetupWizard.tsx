@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useThemeSync } from "../../hooks/useThemeSync";
 import { useThemeClass } from "../../hooks/useThemeClass";
@@ -54,7 +54,7 @@ export function SetupWizard() {
     params: {},
   });
 
-  const canProceed = useCallback(() => {
+  const canProceed = () => {
     switch (step) {
       case 0: return true; // Welcome
       case 1: // Store
@@ -66,7 +66,7 @@ export function SetupWizard() {
       case 4: return true; // Review
       default: return false;
     }
-  }, [step, store, ingester.type]);
+  };
 
   const handleCreate = async () => {
     setCreating(true);

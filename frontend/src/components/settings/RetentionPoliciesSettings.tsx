@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import {
   useConfig,
@@ -45,18 +45,15 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
   const policies = config?.retentionPolicies ?? [];
   const stores = config?.stores ?? [];
 
-  const defaults = useCallback(
-    (id: string): PolicyEdit => {
-      const pol = policies.find((p) => p.id === id);
-      if (!pol) return { maxAge: "", maxBytes: "", maxChunks: "" };
-      return {
-        maxAge: formatDuration(pol.maxAgeSeconds),
-        maxBytes: formatBytes(pol.maxBytes),
-        maxChunks: pol.maxChunks > 0n ? pol.maxChunks.toString() : "",
-      };
-    },
-    [policies],
-  );
+  const defaults = (id: string): PolicyEdit => {
+    const pol = policies.find((p) => p.id === id);
+    if (!pol) return { maxAge: "", maxBytes: "", maxChunks: "" };
+    return {
+      maxAge: formatDuration(pol.maxAgeSeconds),
+      maxBytes: formatBytes(pol.maxBytes),
+      maxChunks: pol.maxChunks > 0n ? pol.maxChunks.toString() : "",
+    };
+  };
 
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
 

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useRef } from "react";
 import { useClickOutside } from "../hooks/useClickOutside";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { UserIcon, LockIcon, SignOutIcon } from "./icons";
@@ -20,7 +20,7 @@ export function UserMenu({
   const ref = useRef<HTMLDivElement>(null);
   useClickOutside(
     ref,
-    useCallback(() => setOpen(false), []),
+    () => setOpen(false),
   );
 
   const c = useThemeClass(dark);

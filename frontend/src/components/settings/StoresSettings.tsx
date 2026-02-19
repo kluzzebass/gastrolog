@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import {
   useConfig,
@@ -135,27 +135,24 @@ export function StoresSettings({ dark }: Readonly<{ dark: boolean }>) {
     ...retentionPolicies.map((r) => ({ value: r.id, label: r.name || r.id })),
   ];
 
-  const defaults = useCallback(
-    (id: string) => {
-      const store = stores.find((s) => s.id === id);
-      if (!store)
-        return {
-          filter: "",
-          policy: "",
-          retention: "",
-          enabled: true,
-          params: {} as Record<string, string>,
-        };
+  const defaults = (id: string) => {
+    const store = stores.find((s) => s.id === id);
+    if (!store)
       return {
-        filter: store.filter,
-        policy: store.policy,
-        retention: store.retention,
-        enabled: store.enabled,
-        params: { ...store.params },
+        filter: "",
+        policy: "",
+        retention: "",
+        enabled: true,
+        params: {} as Record<string, string>,
       };
-    },
-    [stores],
-  );
+    return {
+      filter: store.filter,
+      policy: store.policy,
+      retention: store.retention,
+      enabled: store.enabled,
+      params: { ...store.params },
+    };
+  };
 
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
 
@@ -187,13 +184,13 @@ export function StoresSettings({ dark }: Readonly<{ dark: boolean }>) {
     clearEdit,
   });
 
-  const clearJob = useCallback((storeId: string) => {
+  const clearJob = (storeId: string) => {
     setActiveJobs((prev) => {
       const next = { ...prev };
       delete next[storeId];
       return next;
     });
-  }, []);
+  };
 
   const handleCreate = async () => {
     if (!newName.trim()) {

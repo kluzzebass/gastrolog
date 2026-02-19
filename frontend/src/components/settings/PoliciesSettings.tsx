@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import {
   useConfig,
   usePutRotationPolicy,
@@ -92,19 +92,16 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const policies = config?.rotationPolicies ?? [];
   const stores = config?.stores ?? [];
 
-  const defaults = useCallback(
-    (id: string): PolicyEdit => {
-      const pol = policies.find((p) => p.id === id);
-      if (!pol) return { maxBytes: "", maxRecords: "", maxAge: "", cron: "" };
-      return {
-        maxBytes: formatBytes(pol.maxBytes),
-        maxRecords: pol.maxRecords > 0n ? pol.maxRecords.toString() : "",
-        maxAge: formatDuration(pol.maxAgeSeconds),
-        cron: pol.cron,
-      };
-    },
-    [policies],
-  );
+  const defaults = (id: string): PolicyEdit => {
+    const pol = policies.find((p) => p.id === id);
+    if (!pol) return { maxBytes: "", maxRecords: "", maxAge: "", cron: "" };
+    return {
+      maxBytes: formatBytes(pol.maxBytes),
+      maxRecords: pol.maxRecords > 0n ? pol.maxRecords.toString() : "",
+      maxAge: formatDuration(pol.maxAgeSeconds),
+      cron: pol.cron,
+    };
+  };
 
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
 

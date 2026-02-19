@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import type { ChunkMeta } from "../../api/gen/gastrolog/v1/store_pb";
 import { formatBytes, formatDurationMs } from "../../utils/units";
@@ -19,7 +19,7 @@ export function ChunkTimeline({
   const c = useThemeClass(dark);
   const [hoveredChunk, setHoveredChunk] = useState<string | null>(null);
 
-  const { bars, ticks } = useMemo(() => {
+  const { bars, ticks } = (() => {
     if (chunks.length === 0) return { bars: [], ticks: [] };
 
     let globalMin = Infinity;
@@ -88,7 +88,7 @@ export function ChunkTimeline({
     const ticks = generateTicks(min, min + span, 6);
 
     return { bars, ticks };
-  }, [chunks]);
+  })();
 
   if (bars.length === 0) return null;
 
