@@ -5,7 +5,7 @@
 // parses values with parseHumanTime, and replaces them in the original
 // expression string while preserving all other tokens exactly.
 
-import { lex, type QueryToken } from "../queryTokenizer";
+import { lex } from "../queryTokenizer";
 import { parseHumanTime, type ParseOptions } from "./parseHumanTime";
 
 const TIME_DIRECTIVES = new Set([

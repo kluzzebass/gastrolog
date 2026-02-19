@@ -1,5 +1,4 @@
 import { describe, expect, test, mock } from "bun:test";
-import React from "react";
 import { render, fireEvent } from "@testing-library/react";
 import { CloseButton } from "./Dialog";
 

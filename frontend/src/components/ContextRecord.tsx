@@ -50,7 +50,7 @@ export function ContextRecord({
         {parts.map((part, i) => {
           const style = part.color ? { color: part.color } : undefined;
           return (
-            <span key={i} style={style}>
+            <span key={i} style={style}> {/* NOSONAR: stable derived list, no natural key */}
               {part.text}
             </span>
           );

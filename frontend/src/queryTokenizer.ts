@@ -558,7 +558,6 @@ function validate(spans: HighlightSpan[]): ValidateResult {
 
     // Glob can be standalone (like a token) or as KV key (already classified)
     if (s.role === "glob") {
-      const saved = pos;
       advance(); // consume glob
       // Check if it's a KV: glob=...
       if (cur()?.role === "eq") {

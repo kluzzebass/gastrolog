@@ -140,7 +140,7 @@ export function SearchView() {
     };
     globalThis.addEventListener("keydown", handler);
     return () => globalThis.removeEventListener("keydown", handler);
-  }, [detailPinned, showPlan]);
+  }, [detailPinned, showPlan, setDetailCollapsed, setShowPlan]);
 
   const queryHistory = useQueryHistory();
   const savedQueries = useSavedQueries();
