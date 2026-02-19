@@ -23,7 +23,7 @@ Having all three lets you answer different questions: "when did this happen?" (S
 Records are stored in **chunks** — bounded, append-only segments that hold a batch of records.
 
 - An **active chunk** accepts new records; a **sealed chunk** is immutable and never modified
-- Sealing triggers **index builds** that accelerate queries
+- Sealing triggers **index builds** that accelerate queries, and optionally **compression** to reduce storage
 - Each chunk tracks its own time range and record count
 - Deleting old data means removing entire chunks — no compaction or garbage collection needed
 

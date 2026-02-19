@@ -1,4 +1,4 @@
-import { isValidElement, useEffect, useMemo, useRef, useState } from "react";
+import { isValidElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Dialog } from "./Dialog";
@@ -59,15 +59,31 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
     contentRef.current?.scrollTo(0, 0);
   }, [activeId]);
 
-  function navigateToTopic(id: string) {
-    const target = findTopic(id);
-    if (target) selectTopic(target);
-  }
+  // Use refs for callbacks so mdComponents stays stable across parent re-renders.
+  // Without this, polling queries in SearchView cause HelpDialog to re-render,
+  // which recreates mdComponents, which causes react-markdown to unmount/remount
+  // MermaidDiagram every few seconds.
+  const onNavigateRef = useRef(onNavigate);
+  onNavigateRef.current = onNavigate;
+  const onOpenSettingsRef = useRef(onOpenSettings);
+  onOpenSettingsRef.current = onOpenSettings;
 
-  // Memoize so react-markdown doesn't unmount/remount custom components
-  // (e.g. MermaidDiagram) on every parent re-render.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const mdComponents = useMemo(() => markdownComponents(dark, navigateToTopic, onOpenSettings), [dark, expanded, onOpenSettings]);
+  const stableNavigate = useCallback((id: string) => {
+    const target = findTopic(id);
+    if (target) {
+      onNavigateRef.current(target.id);
+      if (target.children) {
+        setExpanded((prev) => new Set(prev).add(target.id));
+      }
+    }
+  }, []);
+
+  const stableOpenSettings = useCallback((tab: string) => {
+    onOpenSettingsRef.current?.(tab);
+  }, []);
+
+  // Only recreate when dark mode changes — callbacks are stable via refs.
+  const mdComponents = useMemo(() => markdownComponents(dark, stableNavigate, stableOpenSettings), [dark, stableNavigate, stableOpenSettings]);
 
   function selectTopic(t: HelpTopic) {
     onNavigate(t.id);
