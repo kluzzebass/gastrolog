@@ -1,6 +1,7 @@
 package query
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"iter"
@@ -380,18 +381,32 @@ func tokenFilter(tokens []string) recordFilter {
 }
 
 // matchesTokens checks if the record's raw data contains all query tokens.
+// Indexable tokens are matched against the tokenized record; non-indexable tokens
+// (containing dots, etc.) fall back to case-insensitive substring search.
 func matchesTokens(raw []byte, queryTokens []string) bool {
 	if len(queryTokens) == 0 {
 		return true
 	}
-	recordTokens := tokenizer.Tokens(raw)
-	tokenSet := make(map[string]bool, len(recordTokens))
-	for _, t := range recordTokens {
-		tokenSet[t] = true
-	}
+
+	var recordTokens []string
+	var rawLower []byte
+
 	for _, qt := range queryTokens {
-		if !tokenSet[qt] {
-			return false
+		qtLower := strings.ToLower(qt)
+		if tokenizer.IsIndexable(qtLower) {
+			if recordTokens == nil {
+				recordTokens = tokenizer.Tokens(raw)
+			}
+			if !slices.Contains(recordTokens, qtLower) {
+				return false
+			}
+		} else {
+			if rawLower == nil {
+				rawLower = bytes.ToLower(raw)
+			}
+			if !bytes.Contains(rawLower, []byte(qtLower)) {
+				return false
+			}
 		}
 	}
 	return true
@@ -971,11 +986,16 @@ func evalPredicate(pred *querylang.PredicateExpr, rec chunk.Record) bool {
 }
 
 // matchesSingleToken checks if a record contains a specific token.
+// If the token is indexable (pure token-alphabet characters), it uses tokenized
+// matching. Otherwise (e.g. IP addresses, dotted names) it falls back to
+// case-insensitive substring search on the raw record data.
 func matchesSingleToken(raw []byte, token string) bool {
-	// Lowercase the token for case-insensitive matching.
 	tokenLower := strings.ToLower(token)
-	recordTokens := tokenizer.Tokens(raw)
-	return slices.Contains(recordTokens, tokenLower)
+	if tokenizer.IsIndexable(tokenLower) {
+		recordTokens := tokenizer.Tokens(raw)
+		return slices.Contains(recordTokens, tokenLower)
+	}
+	return bytes.Contains(bytes.ToLower(raw), []byte(tokenLower))
 }
 
 // matchesSingleKV checks if a record contains a specific key=value pair

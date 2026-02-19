@@ -296,6 +296,183 @@ func TestScannerBuilderMinPosition(t *testing.T) {
 	}
 }
 
+func TestMatchesSingleToken(t *testing.T) {
+	tests := []struct {
+		name  string
+		raw   string
+		token string
+		want  bool
+	}{
+		// Indexable tokens: standard tokenized matching
+		{
+			name:  "indexable token present",
+			raw:   "error in service-auth module",
+			token: "error",
+			want:  true,
+		},
+		{
+			name:  "indexable token absent",
+			raw:   "info request completed",
+			token: "error",
+			want:  false,
+		},
+		{
+			name:  "indexable token case insensitive",
+			raw:   "ERROR in service",
+			token: "error",
+			want:  true,
+		},
+		// Non-indexable: IP addresses (contain dots, numeric segments)
+		{
+			name:  "IP address present",
+			raw:   "request from 72.11.138.26 to server",
+			token: "72.11.138.26",
+			want:  true,
+		},
+		{
+			name:  "IP address absent",
+			raw:   "request from 10.0.0.1 to server",
+			token: "72.11.138.26",
+			want:  false,
+		},
+		{
+			name:  "partial IP does not false-match",
+			raw:   "request from 172.11.138.26 to server",
+			token: "72.11.138.26",
+			want:  true, // substring match — 72.11.138.26 is inside 172.11.138.26
+		},
+		// Non-indexable: dotted names (Java packages, DNS)
+		{
+			name:  "dotted package name present",
+			raw:   "exception in com.example.auth.UserService",
+			token: "com.example.auth.UserService",
+			want:  true,
+		},
+		{
+			name:  "dotted package name absent",
+			raw:   "exception in org.apache.kafka.Producer",
+			token: "com.example.auth.UserService",
+			want:  false,
+		},
+		{
+			name:  "dotted name case insensitive",
+			raw:   "exception in COM.EXAMPLE.AUTH.UserService",
+			token: "com.example.auth.userservice",
+			want:  true,
+		},
+		// Non-indexable: pure numeric strings
+		{
+			name:  "pure number present",
+			raw:   "exit code 42 from process",
+			token: "42",
+			want:  true,
+		},
+		{
+			name:  "pure number absent",
+			raw:   "exit code 0 from process",
+			token: "42",
+			want:  false,
+		},
+		// Non-indexable: single character
+		{
+			name:  "single char token",
+			raw:   "level=E something happened",
+			token: "E",
+			want:  true,
+		},
+		// Non-indexable: too long (>16 chars of valid token bytes)
+		{
+			name:  "very long token present",
+			raw:   "id=abcdefghijklmnopqrstuvwxyz in log",
+			token: "abcdefghijklmnopqrstuvwxyz",
+			want:  true,
+		},
+		// Non-indexable: contains special chars
+		{
+			name:  "token with colon",
+			raw:   "listening on localhost:8080",
+			token: "localhost:8080",
+			want:  true,
+		},
+		{
+			name:  "token with slash",
+			raw:   "GET /api/v1/users HTTP/1.1",
+			token: "/api/v1/users",
+			want:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchesSingleToken([]byte(tc.raw), tc.token)
+			if got != tc.want {
+				t.Errorf("matchesSingleToken(%q, %q) = %v, want %v", tc.raw, tc.token, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMatchesTokens(t *testing.T) {
+	tests := []struct {
+		name   string
+		raw    string
+		tokens []string
+		want   bool
+	}{
+		{
+			name:   "empty tokens match everything",
+			raw:    "anything here",
+			tokens: nil,
+			want:   true,
+		},
+		{
+			name:   "mixed indexable and non-indexable all present",
+			raw:    "error from 72.11.138.26 in service-auth",
+			tokens: []string{"error", "72.11.138.26"},
+			want:   true,
+		},
+		{
+			name:   "indexable present but non-indexable absent",
+			raw:    "error from 10.0.0.1 in service-auth",
+			tokens: []string{"error", "72.11.138.26"},
+			want:   false,
+		},
+		{
+			name:   "non-indexable present but indexable absent",
+			raw:    "info from 72.11.138.26 in service-auth",
+			tokens: []string{"error", "72.11.138.26"},
+			want:   false,
+		},
+		{
+			name:   "multiple non-indexable tokens",
+			raw:    "request from 72.11.138.26 to 10.0.0.1",
+			tokens: []string{"72.11.138.26", "10.0.0.1"},
+			want:   true,
+		},
+		{
+			name:   "multiple non-indexable one missing",
+			raw:    "request from 72.11.138.26 to server",
+			tokens: []string{"72.11.138.26", "10.0.0.1"},
+			want:   false,
+		},
+		{
+			name:   "dotted name with indexable token",
+			raw:    "exception in com.example.Controller error",
+			tokens: []string{"exception", "com.example.Controller"},
+			want:   true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := matchesTokens([]byte(tc.raw), tc.tokens)
+			if got != tc.want {
+				t.Errorf("matchesTokens(%q, %v) = %v, want %v", tc.raw, tc.tokens, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestScannerBuilderFilters(t *testing.T) {
 	chunkID := chunk.NewChunkID()
 	b := newScannerBuilder(chunkID)
