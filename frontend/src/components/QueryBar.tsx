@@ -267,95 +267,134 @@ export function QueryBar({
             />
           )}
         </div>
-        <button
-          onClick={executeQuery}
-          disabled={isSearching || draftHasErrors}
-          aria-label="Search"
-          title="Search"
-          className="px-2 py-2.5 rounded border border-transparent bg-copper text-white hover:bg-copper-glow transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="w-4.5 h-4.5"
-          >
-            <circle cx="11" cy="11" r="8" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
-        </button>
-        <button
-          onClick={isFollowMode ? stopFollowMode : startFollow}
-          disabled={!isFollowMode && draftHasErrors}
-          aria-label={isFollowMode ? "Stop following" : "Follow"}
-          title={isFollowMode ? "Stop following" : "Follow"}
-          className={`px-2 py-2.5 rounded border transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${
-            isFollowMode
-              ? "bg-severity-error/15 border-severity-error text-severity-error hover:bg-severity-error/25"
-              : c(
-                  "border-ink-border text-text-muted hover:border-copper-dim hover:text-copper-dim",
-                  "border-light-border text-light-text-muted hover:border-copper hover:text-copper",
-                )
-          }`}
-        >
-          {isFollowMode ? (
-            <svg
-              viewBox="0 0 24 24"
-              fill="currentColor"
-              stroke="none"
-              className="w-4.5 h-4.5"
-            >
-              <rect x="6" y="6" width="12" height="12" rx="1" />
-            </svg>
-          ) : (
-            <svg
-              viewBox="0 0 24 24"
-              fill="currentColor"
-              stroke="none"
-              className="w-4.5 h-4.5"
-            >
-              <polygon points="6,4 20,12 6,20" />
-            </svg>
-          )}
-        </button>
-        <button
-          onClick={handleShowPlan}
-          disabled={!showPlan && draftHasErrors}
-          aria-label="Explain query plan"
-          title="Explain query plan"
-          className={`px-2 py-2.5 border rounded transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${
-            showPlan
-              ? c(
-                  "border-copper text-copper",
-                  "border-copper text-copper",
-                )
-              : c(
-                  "border-ink-border text-text-muted hover:border-copper-dim hover:text-copper-dim",
-                  "border-light-border text-light-text-muted hover:border-copper hover:text-copper",
-                )
-          }`}
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="w-4.5 h-4.5"
-          >
-            <rect x="3" y="3" width="7" height="5" rx="1" />
-            <rect x="14" y="8" width="7" height="5" rx="1" />
-            <rect x="3" y="16" width="7" height="5" rx="1" />
-            <path d="M10 5.5h2.5a1 1 0 0 1 1 1v4" />
-            <path d="M14 11.5h-2.5a1 1 0 0 0-1 1v4" />
-          </svg>
-        </button>
+        <QueryActionButtons
+          dark={dark}
+          executeQuery={executeQuery}
+          isSearching={isSearching}
+          isFollowMode={isFollowMode}
+          startFollow={startFollow}
+          stopFollowMode={stopFollowMode}
+          draftHasErrors={draftHasErrors}
+          showPlan={showPlan}
+          handleShowPlan={handleShowPlan}
+        />
       </div>
 
     </div>
+  );
+}
+
+function QueryActionButtons({
+  dark,
+  executeQuery,
+  isSearching,
+  isFollowMode,
+  startFollow,
+  stopFollowMode,
+  draftHasErrors,
+  showPlan,
+  handleShowPlan,
+}: Readonly<{
+  dark: boolean;
+  executeQuery: () => void;
+  isSearching: boolean;
+  isFollowMode: boolean;
+  startFollow: () => void;
+  stopFollowMode: () => void;
+  draftHasErrors: boolean;
+  showPlan: boolean;
+  handleShowPlan: () => void;
+}>) {
+  const c = useThemeClass(dark);
+  return (
+    <>
+      <button
+        onClick={executeQuery}
+        disabled={isSearching || draftHasErrors}
+        aria-label="Search"
+        title="Search"
+        className="px-2 py-2.5 rounded border border-transparent bg-copper text-white hover:bg-copper-glow transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="w-4.5 h-4.5"
+        >
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+      </button>
+      <button
+        onClick={isFollowMode ? stopFollowMode : startFollow}
+        disabled={!isFollowMode && draftHasErrors}
+        aria-label={isFollowMode ? "Stop following" : "Follow"}
+        title={isFollowMode ? "Stop following" : "Follow"}
+        className={`px-2 py-2.5 rounded border transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${
+          isFollowMode
+            ? "bg-severity-error/15 border-severity-error text-severity-error hover:bg-severity-error/25"
+            : c(
+                "border-ink-border text-text-muted hover:border-copper-dim hover:text-copper-dim",
+                "border-light-border text-light-text-muted hover:border-copper hover:text-copper",
+              )
+        }`}
+      >
+        {isFollowMode ? (
+          <svg
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            stroke="none"
+            className="w-4.5 h-4.5"
+          >
+            <rect x="6" y="6" width="12" height="12" rx="1" />
+          </svg>
+        ) : (
+          <svg
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            stroke="none"
+            className="w-4.5 h-4.5"
+          >
+            <polygon points="6,4 20,12 6,20" />
+          </svg>
+        )}
+      </button>
+      <button
+        onClick={handleShowPlan}
+        disabled={!showPlan && draftHasErrors}
+        aria-label="Explain query plan"
+        title="Explain query plan"
+        className={`px-2 py-2.5 border rounded transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${
+          showPlan
+            ? c(
+                "border-copper text-copper",
+                "border-copper text-copper",
+              )
+            : c(
+                "border-ink-border text-text-muted hover:border-copper-dim hover:text-copper-dim",
+                "border-light-border text-light-text-muted hover:border-copper hover:text-copper",
+              )
+        }`}
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="w-4.5 h-4.5"
+        >
+          <rect x="3" y="3" width="7" height="5" rx="1" />
+          <rect x="14" y="8" width="7" height="5" rx="1" />
+          <rect x="3" y="16" width="7" height="5" rx="1" />
+          <path d="M10 5.5h2.5a1 1 0 0 1 1 1v4" />
+          <path d="M14 11.5h-2.5a1 1 0 0 0-1 1v4" />
+        </svg>
+      </button>
+    </>
   );
 }

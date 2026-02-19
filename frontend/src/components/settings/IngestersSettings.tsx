@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useReducer } from "react";
 import { useConfig, usePutIngester, useDeleteIngester } from "../../api/hooks";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
@@ -21,6 +21,53 @@ const ingesterTypes = [
   { value: "tail", label: "tail" },
 ];
 
+// -- Reducer for "Add ingester" form state --
+
+interface AddIngesterFormState {
+  adding: boolean;
+  typeConfirmed: boolean;
+  newName: string;
+  newType: string;
+  newParams: Record<string, string>;
+}
+
+const addIngesterFormInitial: AddIngesterFormState = {
+  adding: false,
+  typeConfirmed: false,
+  newName: "",
+  newType: "chatterbox",
+  newParams: {},
+};
+
+type AddIngesterFormAction =
+  | { type: "setAdding"; value: boolean }
+  | { type: "confirmType"; ingesterType: string }
+  | { type: "setNewName"; value: string }
+  | { type: "setNewParams"; value: Record<string, string> }
+  | { type: "resetForm" }
+  | { type: "toggleAdding" };
+
+function addIngesterFormReducer(state: AddIngesterFormState, action: AddIngesterFormAction): AddIngesterFormState {
+  switch (action.type) {
+    case "setAdding":
+      return { ...state, adding: action.value };
+    case "confirmType":
+      return { ...state, newType: action.ingesterType, newParams: {}, typeConfirmed: true };
+    case "setNewName":
+      return { ...state, newName: action.value };
+    case "setNewParams":
+      return { ...state, newParams: action.value };
+    case "resetForm":
+      return addIngesterFormInitial;
+    case "toggleAdding":
+      return state.adding
+        ? addIngesterFormInitial
+        : { ...addIngesterFormInitial, adding: true };
+    default:
+      return state;
+  }
+}
+
 export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
@@ -29,12 +76,9 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
   const { addToast } = useToast();
 
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
-  const [typeConfirmed, setTypeConfirmed] = useState(false);
 
-  const [newName, setNewName] = useState("");
-  const [newType, setNewType] = useState("chatterbox");
-  const [newParams, setNewParams] = useState<Record<string, string>>({});
+  const [addForm, dispatchAdd] = useReducer(addIngesterFormReducer, addIngesterFormInitial);
+  const { adding, typeConfirmed, newName, newType, newParams } = addForm;
 
   const ingesters = config?.ingesters ?? [];
 
@@ -77,11 +121,7 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
         params: newParams,
       });
       addToast(`Ingester "${newName.trim()}" created`, "info");
-      setAdding(false);
-      setTypeConfirmed(false);
-      setNewName("");
-      setNewType("chatterbox");
-      setNewParams({});
+      dispatchAdd({ type: "resetForm" });
     } catch (err: any) {
       addToast(err.message ?? "Failed to create ingester", "error");
     }
@@ -93,13 +133,7 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
       helpTopicId="ingesters"
       addLabel="Add Ingester"
       adding={adding}
-      onToggleAdd={() => {
-        setAdding(!adding);
-        setTypeConfirmed(false);
-        setNewName("");
-        setNewType("chatterbox");
-        setNewParams({});
-      }}
+      onToggleAdd={() => dispatchAdd({ type: "toggleAdding" })}
       isLoading={isLoading}
       isEmpty={ingesters.length === 0}
       emptyMessage='No ingesters configured. Click "Add Ingester" to create one.'
@@ -111,11 +145,7 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
               <button
                 key={t.value}
                 type="button"
-                onClick={() => {
-                  setNewType(t.value);
-                  setNewParams({});
-                  setTypeConfirmed(true);
-                }}
+                onClick={() => dispatchAdd({ type: "confirmType", ingesterType: t.value })}
                 className={`px-3 py-1.5 text-[0.8em] font-mono rounded border transition-colors ${c(
                   "border-ink-border-subtle text-text-secondary hover:border-copper hover:text-copper",
                   "border-light-border-subtle text-light-text-secondary hover:border-copper hover:text-copper",
@@ -125,7 +155,7 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
               </button>
             ))}
             <GhostButton
-              onClick={() => setAdding(false)}
+              onClick={() => dispatchAdd({ type: "resetForm" })}
               dark={dark}
             >
               Cancel
@@ -137,10 +167,7 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
       {adding && typeConfirmed && (
         <AddFormCard
           dark={dark}
-          onCancel={() => {
-            setAdding(false);
-            setTypeConfirmed(false);
-          }}
+          onCancel={() => dispatchAdd({ type: "resetForm" })}
           onCreate={handleCreate}
           isPending={putIngester.isPending}
           typeBadge={newType}
@@ -148,7 +175,7 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
           <FormField label="Name" dark={dark}>
             <TextInput
               value={newName}
-              onChange={setNewName}
+              onChange={(v) => dispatchAdd({ type: "setNewName", value: v })}
               placeholder="my-ingester"
               dark={dark}
             />
@@ -156,7 +183,7 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
           <IngesterParamsForm
             ingesterType={newType}
             params={newParams}
-            onChange={setNewParams}
+            onChange={(v) => dispatchAdd({ type: "setNewParams", value: v })}
             dark={dark}
           />
         </AddFormCard>

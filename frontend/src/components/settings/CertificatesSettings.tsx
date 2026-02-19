@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useReducer } from "react";
 import { unzipSync, decompressSync } from "fflate";
 import { HelpButton } from "../HelpButton";
 
@@ -35,6 +35,88 @@ import { FormField, TextInput } from "./FormField";
 import { SettingsCard } from "./SettingsCard";
 
 type CertSource = "pem" | "files";
+
+// -- Reducer for CertificatesSettings form + UI state --
+
+interface CertFormState {
+  adding: CertSource | null;
+  expanded: string | null;
+  syncedCertId: string | null;
+  name: string;
+  certPem: string;
+  keyPem: string;
+  certFile: string;
+  keyFile: string;
+  setAsDefault: boolean;
+}
+
+const certFormInitial: CertFormState = {
+  adding: null,
+  expanded: null,
+  syncedCertId: null,
+  name: "",
+  certPem: "",
+  keyPem: "",
+  certFile: "",
+  keyFile: "",
+  setAsDefault: false,
+};
+
+type CertFormAction =
+  | { type: "setName"; value: string }
+  | { type: "setCertPem"; value: string }
+  | { type: "setKeyPem"; value: string }
+  | { type: "setCertFile"; value: string }
+  | { type: "setKeyFile"; value: string }
+  | { type: "setSetAsDefault"; value: boolean }
+  | { type: "setAdding"; value: CertSource | null }
+  | { type: "setExpanded"; value: string | null }
+  | { type: "setSyncedCertId"; value: string | null }
+  | { type: "reset" }
+  | { type: "startAdd"; source: CertSource }
+  | { type: "syncFromCert"; certPem: string; certFile: string; keyFile: string; setAsDefault: boolean; syncedCertId: string }
+  | { type: "clearForExpand"; expandId: string };
+
+function certFormReducer(state: CertFormState, action: CertFormAction): CertFormState {
+  switch (action.type) {
+    case "setName":
+      return { ...state, name: action.value };
+    case "setCertPem":
+      return { ...state, certPem: action.value };
+    case "setKeyPem":
+      return { ...state, keyPem: action.value };
+    case "setCertFile":
+      return { ...state, certFile: action.value };
+    case "setKeyFile":
+      return { ...state, keyFile: action.value };
+    case "setSetAsDefault":
+      return { ...state, setAsDefault: action.value };
+    case "setAdding":
+      return { ...state, adding: action.value };
+    case "setExpanded":
+      return { ...state, expanded: action.value };
+    case "setSyncedCertId":
+      return { ...state, syncedCertId: action.value };
+    case "reset":
+      return certFormInitial;
+    case "startAdd":
+      return { ...certFormInitial, adding: action.source };
+    case "syncFromCert":
+      return {
+        ...state,
+        certPem: action.certPem,
+        keyPem: "",
+        certFile: action.certFile,
+        keyFile: action.keyFile,
+        setAsDefault: action.setAsDefault,
+        syncedCertId: action.syncedCertId,
+      };
+    case "clearForExpand":
+      return { ...state, certPem: "", keyPem: "", certFile: "", keyFile: "", expanded: action.expandId };
+    default:
+      return state;
+  }
+}
 
 interface PemCertFormProps {
   dark: boolean;
@@ -235,14 +317,8 @@ function FilesCertForm({
 
 export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
-  const [adding, setAdding] = useState<CertSource | null>(null);
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const [name, setName] = useState("");
-  const [certPem, setCertPem] = useState("");
-  const [keyPem, setKeyPem] = useState("");
-  const [certFile, setCertFile] = useState("");
-  const [keyFile, setKeyFile] = useState("");
-  const [setAsDefault, setSetAsDefault] = useState(false);
+  const [form, dispatch] = useReducer(certFormReducer, certFormInitial);
+  const { adding, expanded, syncedCertId, name, certPem, keyPem, certFile, keyFile, setAsDefault } = form;
 
   const { data, isLoading } = useCertificates();
   const { data: serverConfig } = useServerConfig();
@@ -254,16 +330,14 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const certs = data?.certificates ?? [];
   const defaultCert = serverConfig?.tlsDefaultCert ?? "";
 
-  const resetForm = () => {
-    setName("");
-    setCertPem("");
-    setKeyPem("");
-    setCertFile("");
-    setKeyFile("");
-    setSetAsDefault(false);
-    setAdding(null);
-    setExpanded(null);
-  };
+  const setCertPem = (v: string) => dispatch({ type: "setCertPem", value: v });
+  const setKeyPem = (v: string) => dispatch({ type: "setKeyPem", value: v });
+  const setCertFile = (v: string) => dispatch({ type: "setCertFile", value: v });
+  const setKeyFile = (v: string) => dispatch({ type: "setKeyFile", value: v });
+  const setSetAsDefault = (v: boolean) => dispatch({ type: "setSetAsDefault", value: v });
+  const setName = (v: string) => dispatch({ type: "setName", value: v });
+
+  const resetForm = () => dispatch({ type: "reset" });
 
   const handleSavePem = async () => {
     const n = name.trim();
@@ -339,7 +413,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
         setAsDefault,
       });
       addToast(`Certificate "${displayName}" saved`, "info");
-      setExpanded(null);
+      dispatch({ type: "setExpanded", value: null });
     } catch (err: unknown) {
       const msg = (err as Error)?.message ?? "Failed to save certificate";
       addToast(msg, "error");
@@ -364,7 +438,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
         setAsDefault,
       });
       addToast(`Certificate "${displayName}" saved`, "info");
-      setExpanded(null);
+      dispatch({ type: "setExpanded", value: null });
     } catch (err: unknown) {
       const msg = (err as Error)?.message ?? "Failed to save certificate";
       addToast(msg, "error");
@@ -382,27 +456,21 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
     }
   };
 
-  const startAddPem = () => {
-    resetForm();
-    setAdding("pem");
-  };
+  const startAddPem = () => dispatch({ type: "startAdd", source: "pem" });
+  const startAddFiles = () => dispatch({ type: "startAdd", source: "files" });
 
-  const startAddFiles = () => {
-    resetForm();
-    setAdding("files");
-  };
-
-  const [syncedCertId, setSyncedCertId] = useState<string | null>(null);
   if (expanded && certData && certData.id === expanded && syncedCertId !== expanded) {
-    setSyncedCertId(expanded);
-    setCertPem(certData.certPem ?? "");
-    setKeyPem("");
-    setCertFile(certData.certFile ?? "");
-    setKeyFile(certData.keyFile ?? "");
-    setSetAsDefault(defaultCert === expanded);
+    dispatch({
+      type: "syncFromCert",
+      certPem: certData.certPem ?? "",
+      certFile: certData.certFile ?? "",
+      keyFile: certData.keyFile ?? "",
+      setAsDefault: defaultCert === expanded,
+      syncedCertId: expanded,
+    });
   }
   if (!expanded && syncedCertId !== null) {
-    setSyncedCertId(null);
+    dispatch({ type: "setSyncedCertId", value: null });
   }
 
   const assignPem = (text: string) => {
@@ -514,92 +582,58 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
       </p>
 
       {adding === "pem" && (
-        <div
-          className={`border rounded-lg p-4 mb-5 transition-all ${c("border-copper/40 bg-ink-surface", "border-copper/40 bg-light-surface")}`}
+        <AddCertificatePanel
+          title="Add pasted certificate"
+          dark={dark}
+          name={name}
+          setName={setName}
           onDrop={handleDrop}
           onDragOver={handleDragOver}
           onDragEnter={handleDragEnter}
           onDragLeave={handleDragLeave}
         >
-          <h3
-            className={`text-[1em] font-semibold mb-4 ${c("text-text-bright", "text-light-text-bright")}`}
-          >
-            Add pasted certificate
-          </h3>
-          <div className="flex flex-col gap-4">
-            <FormField
-              label="Name"
-              description="Identifier for this certificate (e.g. server, ingester.http)"
-              dark={dark}
-            >
-              <TextInput
-                value={name}
-                onChange={setName}
-                placeholder="server"
-                dark={dark}
-                mono
-              />
-            </FormField>
-            <PemCertForm
-              dark={dark}
-              name={name}
-              certPem={certPem}
-              keyPem={keyPem}
-              setAsDefault={setAsDefault}
-              setCertPem={setCertPem}
-              setKeyPem={setKeyPem}
-              setSetAsDefault={setSetAsDefault}
-              onSave={handleSavePem}
-              onCancel={resetForm}
-              saving={putCert.isPending}
-              onDrop={handleDrop}
-              onDragOver={handleDragOver}
-              onDragEnter={handleDragEnter}
-              onDragLeave={handleDragLeave}
-              isEditing={false}
-            />
-          </div>
-        </div>
+          <PemCertForm
+            dark={dark}
+            name={name}
+            certPem={certPem}
+            keyPem={keyPem}
+            setAsDefault={setAsDefault}
+            setCertPem={setCertPem}
+            setKeyPem={setKeyPem}
+            setSetAsDefault={setSetAsDefault}
+            onSave={handleSavePem}
+            onCancel={resetForm}
+            saving={putCert.isPending}
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            isEditing={false}
+          />
+        </AddCertificatePanel>
       )}
 
       {adding === "files" && (
-        <div
-          className={`border rounded-lg p-4 mb-5 transition-all ${c("border-copper/40 bg-ink-surface", "border-copper/40 bg-light-surface")}`}
+        <AddCertificatePanel
+          title="Add monitored files certificate"
+          dark={dark}
+          name={name}
+          setName={setName}
         >
-          <h3
-            className={`text-[1em] font-semibold mb-4 ${c("text-text-bright", "text-light-text-bright")}`}
-          >
-            Add monitored files certificate
-          </h3>
-          <div className="flex flex-col gap-4">
-            <FormField
-              label="Name"
-              description="Identifier for this certificate (e.g. server, ingester.http)"
-              dark={dark}
-            >
-              <TextInput
-                value={name}
-                onChange={setName}
-                placeholder="server"
-                dark={dark}
-                mono
-              />
-            </FormField>
-            <FilesCertForm
-              dark={dark}
-              name={name}
-              certFile={certFile}
-              keyFile={keyFile}
-              setAsDefault={setAsDefault}
-              setCertFile={setCertFile}
-              setKeyFile={setKeyFile}
-              setSetAsDefault={setSetAsDefault}
-              onSave={handleSaveFiles}
-              onCancel={resetForm}
-              saving={putCert.isPending}
-            />
-          </div>
-        </div>
+          <FilesCertForm
+            dark={dark}
+            name={name}
+            certFile={certFile}
+            keyFile={keyFile}
+            setAsDefault={setAsDefault}
+            setCertFile={setCertFile}
+            setKeyFile={setKeyFile}
+            setSetAsDefault={setSetAsDefault}
+            onSave={handleSaveFiles}
+            onCancel={resetForm}
+            saving={putCert.isPending}
+          />
+        </AddCertificatePanel>
       )}
 
       {certs.length > 0 && (
@@ -613,13 +647,9 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
               expanded={expanded === cert.id}
               onToggle={() => {
                 if (expanded === cert.id) {
-                  setExpanded(null);
+                  dispatch({ type: "setExpanded", value: null });
                 } else {
-                  setCertPem("");
-                  setKeyPem("");
-                  setCertFile("");
-                  setKeyFile("");
-                  setExpanded(cert.id);
+                  dispatch({ type: "clearForExpand", expandId: cert.id });
                 }
               }}
               onDelete={() => handleDelete(cert.id)}
@@ -687,6 +717,61 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
           No certificates configured. Add one to enable TLS.
         </div>
       )}
+    </div>
+  );
+}
+
+function AddCertificatePanel({
+  title,
+  dark,
+  name,
+  setName,
+  onDrop,
+  onDragOver,
+  onDragEnter,
+  onDragLeave,
+  children,
+}: Readonly<{
+  title: string;
+  dark: boolean;
+  name: string;
+  setName: (v: string) => void;
+  onDrop?: (e: React.DragEvent) => void;
+  onDragOver?: (e: React.DragEvent) => void;
+  onDragEnter?: (e: React.DragEvent) => void;
+  onDragLeave?: (e: React.DragEvent) => void;
+  children: React.ReactNode;
+}>) {
+  const c = useThemeClass(dark);
+  return (
+    <div
+      className={`border rounded-lg p-4 mb-5 transition-all ${c("border-copper/40 bg-ink-surface", "border-copper/40 bg-light-surface")}`}
+      onDrop={onDrop}
+      onDragOver={onDragOver}
+      onDragEnter={onDragEnter}
+      onDragLeave={onDragLeave}
+    >
+      <h3
+        className={`text-[1em] font-semibold mb-4 ${c("text-text-bright", "text-light-text-bright")}`}
+      >
+        {title}
+      </h3>
+      <div className="flex flex-col gap-4">
+        <FormField
+          label="Name"
+          description="Identifier for this certificate (e.g. server, ingester.http)"
+          dark={dark}
+        >
+          <TextInput
+            value={name}
+            onChange={setName}
+            placeholder="server"
+            dark={dark}
+            mono
+          />
+        </FormField>
+        {children}
+      </div>
     </div>
   );
 }

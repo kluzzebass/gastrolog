@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useReducer } from "react";
 import {
   useListUsers,
   useCreateUser,
@@ -23,6 +23,86 @@ const roleOptions = [
   { value: "user", label: "User" },
 ];
 
+// -- Reducer for "Add user" form state --
+
+interface AddUserFormState {
+  adding: boolean;
+  newUsername: string;
+  newPassword: string;
+  newRole: string;
+  showNewPw: boolean;
+}
+
+const addUserFormInitial: AddUserFormState = {
+  adding: false,
+  newUsername: "",
+  newPassword: "",
+  newRole: "user",
+  showNewPw: false,
+};
+
+type AddUserFormAction =
+  | { type: "setAdding"; value: boolean }
+  | { type: "setNewUsername"; value: string }
+  | { type: "setNewPassword"; value: string }
+  | { type: "setNewRole"; value: string }
+  | { type: "toggleShowNewPw" }
+  | { type: "resetForm" };
+
+function addUserFormReducer(state: AddUserFormState, action: AddUserFormAction): AddUserFormState {
+  switch (action.type) {
+    case "setAdding":
+      return { ...state, adding: action.value };
+    case "setNewUsername":
+      return { ...state, newUsername: action.value };
+    case "setNewPassword":
+      return { ...state, newPassword: action.value };
+    case "setNewRole":
+      return { ...state, newRole: action.value };
+    case "toggleShowNewPw":
+      return { ...state, showNewPw: !state.showNewPw };
+    case "resetForm":
+      return addUserFormInitial;
+    default:
+      return state;
+  }
+}
+
+// -- Reducer for "Reset password" dialog state --
+
+interface ResetPwState {
+  resetOpen: string | null;
+  resetPw: string;
+  showResetPw: boolean;
+}
+
+const resetPwInitial: ResetPwState = {
+  resetOpen: null,
+  resetPw: "",
+  showResetPw: false,
+};
+
+type ResetPwAction =
+  | { type: "openReset"; userId: string }
+  | { type: "setResetPw"; value: string }
+  | { type: "toggleShowResetPw" }
+  | { type: "closeReset" };
+
+function resetPwReducer(state: ResetPwState, action: ResetPwAction): ResetPwState {
+  switch (action.type) {
+    case "openReset":
+      return { resetOpen: action.userId, resetPw: "", showResetPw: false };
+    case "setResetPw":
+      return { ...state, resetPw: action.value };
+    case "toggleShowResetPw":
+      return { ...state, showResetPw: !state.showResetPw };
+    case "closeReset":
+      return resetPwInitial;
+    default:
+      return state;
+  }
+}
+
 export function UsersSettings({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
   const { data: users, isLoading } = useListUsers();
@@ -35,17 +115,13 @@ export function UsersSettings({ dark }: Readonly<{ dark: boolean }>) {
   const { addToast } = useToast();
 
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
-  const [newUsername, setNewUsername] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [newRole, setNewRole] = useState("user");
-
-  // Per-user edit state for role changes and password resets.
   const [roleEdits, setRoleEdits] = useState<Record<string, string>>({});
-  const [resetOpen, setResetOpen] = useState<string | null>(null);
-  const [resetPw, setResetPw] = useState("");
-  const [showNewPw, setShowNewPw] = useState(false);
-  const [showResetPw, setShowResetPw] = useState(false);
+
+  const [addForm, dispatchAdd] = useReducer(addUserFormReducer, addUserFormInitial);
+  const { adding, newUsername, newPassword, newRole, showNewPw } = addForm;
+
+  const [resetState, dispatchReset] = useReducer(resetPwReducer, resetPwInitial);
+  const { resetOpen, resetPw, showResetPw } = resetState;
 
   const handleCreate = async () => {
     if (!newUsername.trim()) {
@@ -63,11 +139,7 @@ export function UsersSettings({ dark }: Readonly<{ dark: boolean }>) {
         role: newRole,
       });
       addToast(`User "${newUsername.trim()}" created`, "info");
-      setAdding(false);
-      setNewUsername("");
-      setNewPassword("");
-      setNewRole("user");
-      setShowNewPw(false);
+      dispatchAdd({ type: "resetForm" });
     } catch (err: any) {
       addToast(err.message ?? "Failed to create user", "error");
     }
@@ -97,9 +169,7 @@ export function UsersSettings({ dark }: Readonly<{ dark: boolean }>) {
     try {
       await resetPassword.mutateAsync({ id: user.id, newPassword: resetPw });
       addToast(`Password reset for "${user.username}"`, "info");
-      setResetOpen(null);
-      setResetPw("");
-      setShowResetPw(false);
+      dispatchReset({ type: "closeReset" });
     } catch (err: any) {
       addToast(err.message ?? "Failed to reset password", "error");
     }
@@ -120,7 +190,7 @@ export function UsersSettings({ dark }: Readonly<{ dark: boolean }>) {
       helpTopicId="user-management"
       addLabel="Add User"
       adding={adding}
-      onToggleAdd={() => setAdding(!adding)}
+      onToggleAdd={() => dispatchAdd({ type: "setAdding", value: !adding })}
       isLoading={false}
       isEmpty={!isLoading && (users?.length ?? 0) === 0}
       emptyMessage="No users configured."
@@ -129,7 +199,7 @@ export function UsersSettings({ dark }: Readonly<{ dark: boolean }>) {
       {adding && (
         <AddFormCard
           dark={dark}
-          onCancel={() => setAdding(false)}
+          onCancel={() => dispatchAdd({ type: "resetForm" })}
           onCreate={handleCreate}
           isPending={createUser.isPending}
         >
@@ -137,7 +207,7 @@ export function UsersSettings({ dark }: Readonly<{ dark: boolean }>) {
             <FormField label="Username" dark={dark}>
               <TextInput
                 value={newUsername}
-                onChange={setNewUsername}
+                onChange={(v) => dispatchAdd({ type: "setNewUsername", value: v })}
                 placeholder="username"
                 dark={dark}
                 mono
@@ -146,7 +216,7 @@ export function UsersSettings({ dark }: Readonly<{ dark: boolean }>) {
             <FormField label="Role" dark={dark}>
               <SelectInput
                 value={newRole}
-                onChange={setNewRole}
+                onChange={(v) => dispatchAdd({ type: "setNewRole", value: v })}
                 options={roleOptions}
                 dark={dark}
               />
@@ -155,9 +225,9 @@ export function UsersSettings({ dark }: Readonly<{ dark: boolean }>) {
           <FormField label="Password" dark={dark}>
             <PasswordInput
               value={newPassword}
-              onChange={setNewPassword}
+              onChange={(v) => dispatchAdd({ type: "setNewPassword", value: v })}
               show={showNewPw}
-              onToggle={() => setShowNewPw(!showNewPw)}
+              onToggle={() => dispatchAdd({ type: "toggleShowNewPw" })}
               placeholder="password"
               dark={dark}
             />
@@ -230,9 +300,9 @@ export function UsersSettings({ dark }: Readonly<{ dark: boolean }>) {
                       <FormField label="New Password" dark={dark}>
                         <PasswordInput
                           value={resetPw}
-                          onChange={setResetPw}
+                          onChange={(v) => dispatchReset({ type: "setResetPw", value: v })}
                           show={showResetPw}
-                          onToggle={() => setShowResetPw(!showResetPw)}
+                          onToggle={() => dispatchReset({ type: "toggleShowResetPw" })}
                           placeholder="new password"
                           dark={dark}
                         />
@@ -245,11 +315,7 @@ export function UsersSettings({ dark }: Readonly<{ dark: boolean }>) {
                       {resetPassword.isPending ? "Resetting..." : "Reset"}
                     </PrimaryButton>
                     <GhostButton
-                      onClick={() => {
-                        setResetOpen(null);
-                        setResetPw("");
-                        setShowResetPw(false);
-                      }}
+                      onClick={() => dispatchReset({ type: "closeReset" })}
                       dark={dark}
                     >
                       Cancel
@@ -261,10 +327,7 @@ export function UsersSettings({ dark }: Readonly<{ dark: boolean }>) {
                 </div>
               ) : (
                 <GhostButton
-                  onClick={() => {
-                    setResetOpen(user.id);
-                    setResetPw("");
-                  }}
+                  onClick={() => dispatchReset({ type: "openReset", userId: user.id })}
                   dark={dark}
                   bordered
                   className="self-start"

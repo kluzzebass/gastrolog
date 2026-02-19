@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useReducer } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import {
   useConfig,
@@ -27,6 +27,51 @@ interface PolicyEdit {
   maxChunks: string;
 }
 
+// -- Reducer for "Add retention policy" form state --
+
+interface AddRetentionFormState {
+  adding: boolean;
+  newName: string;
+  newMaxAge: string;
+  newMaxBytes: string;
+  newMaxChunks: string;
+}
+
+const addRetentionFormInitial: AddRetentionFormState = {
+  adding: false,
+  newName: "",
+  newMaxAge: "720h",
+  newMaxBytes: "",
+  newMaxChunks: "",
+};
+
+type AddRetentionFormAction =
+  | { type: "setAdding"; value: boolean }
+  | { type: "setNewName"; value: string }
+  | { type: "setNewMaxAge"; value: string }
+  | { type: "setNewMaxBytes"; value: string }
+  | { type: "setNewMaxChunks"; value: string }
+  | { type: "resetForm" };
+
+function addRetentionFormReducer(state: AddRetentionFormState, action: AddRetentionFormAction): AddRetentionFormState {
+  switch (action.type) {
+    case "setAdding":
+      return { ...state, adding: action.value };
+    case "setNewName":
+      return { ...state, newName: action.value };
+    case "setNewMaxAge":
+      return { ...state, newMaxAge: action.value };
+    case "setNewMaxBytes":
+      return { ...state, newMaxBytes: action.value };
+    case "setNewMaxChunks":
+      return { ...state, newMaxChunks: action.value };
+    case "resetForm":
+      return addRetentionFormInitial;
+    default:
+      return state;
+  }
+}
+
 export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const _c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
@@ -35,12 +80,9 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
   const { addToast } = useToast();
 
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
 
-  const [newName, setNewName] = useState("");
-  const [newMaxAge, setNewMaxAge] = useState("720h");
-  const [newMaxBytes, setNewMaxBytes] = useState("");
-  const [newMaxChunks, setNewMaxChunks] = useState("");
+  const [addForm, dispatchAdd] = useReducer(addRetentionFormReducer, addRetentionFormInitial);
+  const { adding, newName, newMaxAge, newMaxBytes, newMaxChunks } = addForm;
 
   const policies = config?.retentionPolicies ?? [];
   const stores = config?.stores ?? [];
@@ -104,11 +146,7 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
         maxChunks: maxChunksValue,
       });
       addToast(`Retention policy "${newName.trim()}" created`, "info");
-      setAdding(false);
-      setNewName("");
-      setNewMaxAge("720h");
-      setNewMaxBytes("");
-      setNewMaxChunks("");
+      dispatchAdd({ type: "resetForm" });
     } catch (err: any) {
       const errorMessage = err.message ?? "Failed to create retention policy";
       addToast(errorMessage, "error");
@@ -122,7 +160,7 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
       helpTopicId="policy-retention"
       addLabel="Add Policy"
       adding={adding}
-      onToggleAdd={() => setAdding(!adding)}
+      onToggleAdd={() => dispatchAdd({ type: "setAdding", value: !adding })}
       isLoading={isLoading}
       isEmpty={policies.length === 0}
       emptyMessage='No retention policies configured. Click "Add Policy" to create one.'
@@ -131,14 +169,14 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
       {adding && (
         <AddFormCard
           dark={dark}
-          onCancel={() => setAdding(false)}
+          onCancel={() => dispatchAdd({ type: "resetForm" })}
           onCreate={handleCreate}
           isPending={putPolicy.isPending}
         >
           <FormField label="Name" dark={dark}>
             <TextInput
               value={newName}
-              onChange={setNewName}
+              onChange={(v) => dispatchAdd({ type: "setNewName", value: v })}
               placeholder="default"
               dark={dark}
             />
@@ -150,7 +188,7 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
             >
               <TextInput
                 value={newMaxAge}
-                onChange={setNewMaxAge}
+                onChange={(v) => dispatchAdd({ type: "setNewMaxAge", value: v })}
                 placeholder="720h"
                 dark={dark}
                 mono
@@ -163,7 +201,7 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
             >
               <TextInput
                 value={newMaxBytes}
-                onChange={setNewMaxBytes}
+                onChange={(v) => dispatchAdd({ type: "setNewMaxBytes", value: v })}
                 placeholder="10GB"
                 dark={dark}
                 mono
@@ -173,7 +211,7 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
             <FormField label="Max Chunks" dark={dark}>
               <NumberInput
                 value={newMaxChunks}
-                onChange={setNewMaxChunks}
+                onChange={(v) => dispatchAdd({ type: "setNewMaxChunks", value: v })}
                 placeholder="100"
                 dark={dark}
               />

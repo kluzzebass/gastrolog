@@ -13,6 +13,8 @@ const SEVERITY_COLORS = [
 
 const SEVERITY_LEVELS = ["error", "warn", "info", "debug", "trace"] as const;
 
+type HistogramBucket = HistogramData["buckets"][number];
+
 export function HistogramChart({
   data,
   dark,
@@ -235,144 +237,16 @@ export function HistogramChart({
               }}
             />
           )}
-          {buckets.map((bucket, i) => {
-            const pct = maxCount > 0 ? bucket.count / maxCount : 0;
-            const lc = bucket.levelCounts;
-            const hasLevels = lc && Object.keys(lc).length > 0;
-            const levelSum = hasLevels
-              ? Object.values(lc).reduce((a, b) => a + b, 0)
-              : 0;
-            const other = bucket.count - levelSum;
-
-            // Stack order bottom-to-top: error, warn, info, debug, trace, other
-            const segments: { key: string; count: number; color: string }[] =
-              [];
-            if (hasLevels) {
-              for (const [key, color] of SEVERITY_COLORS) {
-                if (lc[key]! > 0)
-                  segments.push({ key, count: lc[key]!, color });
-              }
-              if (other > 0)
-                segments.push({
-                  key: "other",
-                  count: other,
-                  color: "var(--color-copper)",
-                });
-            }
-
-            return (
-              <div
-                key={bucket.ts.toISOString()}
-                className="flex-1 min-w-0 group relative"
-                style={{ height: "100%" }}
-              >
-                {bucket.count > 0 && (
-                  <div
-                    className="absolute bottom-0 inset-x-0 rounded-t-sm overflow-hidden transition-colors"
-                    style={{
-                      height: `${Math.max(pct * 100, 4)}%`,
-                    }}
-                  >
-                    {hasLevels && segments.length > 0 ? (
-                      <div
-                        className={`flex flex-col-reverse w-full h-full ${onSegmentClick ? "" : `transition-opacity ${c("opacity-60 group-hover:opacity-100", "opacity-50 group-hover:opacity-80")}`}`}
-                      >
-                        {segments.map((seg) => (
-                          <div
-                            key={seg.key}
-                            className={`w-full shrink-0 ${onSegmentClick ? `cursor-pointer transition-opacity ${c("opacity-60 hover:opacity-100", "opacity-50 hover:opacity-90")}` : ""}`}
-                            style={{
-                              height: `${(seg.count / bucket.count) * 100}%`,
-                              backgroundColor: seg.color,
-                            }}
-                            onMouseDown={
-                              onSegmentClick
-                                ? (e) => e.stopPropagation()
-                                : undefined
-                            }
-                            onClick={
-                              onSegmentClick
-                                ? (e) => {
-                                    e.stopPropagation();
-                                    onSegmentClick(seg.key);
-                                  }
-                                : undefined
-                            }
-                            {...clickableProps(onSegmentClick ? () => onSegmentClick(seg.key) : undefined)}
-                            aria-label={onSegmentClick ? `Filter by ${seg.key}` : undefined}
-                          />
-                        ))}
-                      </div>
-                    ) : (
-                      <div
-                        className={`w-full h-full transition-opacity bg-copper ${
-                          onSegmentClick
-                            ? `cursor-pointer ${c("opacity-60 hover:opacity-100", "opacity-50 hover:opacity-90")}`
-                            : c(
-                                "opacity-60 group-hover:opacity-100",
-                                "opacity-50 group-hover:opacity-80",
-                              )
-                        }`}
-                        onMouseDown={
-                          onSegmentClick
-                            ? (e) => e.stopPropagation()
-                            : undefined
-                        }
-                        onClick={
-                          onSegmentClick
-                            ? (e) => {
-                                e.stopPropagation();
-                                onSegmentClick("other");
-                              }
-                            : undefined
-                        }
-                        {...clickableProps(onSegmentClick ? () => onSegmentClick("other") : undefined)}
-                        aria-label={onSegmentClick ? "Filter by other" : undefined}
-                      />
-                    )}
-                  </div>
-                )}
-                {/* Tooltip */}
-                <div
-                  className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 text-[0.7em] font-mono rounded whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-10 ${c("bg-ink-surface text-text-bright border border-ink-border-subtle", "bg-light-surface text-light-text-bright border border-light-border-subtle")}`}
-                >
-                  <div>
-                    {bucket.count.toLocaleString()} &middot;{" "}
-                    {formatTime(bucket.ts)}
-                  </div>
-                  {hasLevels && (
-                    <div className="mt-0.5 space-y-px">
-                      {SEVERITY_LEVELS.map(
-                        (level) =>
-                          lc[level]! > 0 && (
-                            <div
-                              key={level}
-                              className="flex items-center gap-1.5"
-                            >
-                              <span
-                                className="inline-block w-1.5 h-1.5 rounded-full"
-                                style={{
-                                  backgroundColor: `var(--color-severity-${level})`,
-                                }}
-                              />
-                              <span className="opacity-70">{level}</span>
-                              <span>{lc[level]!.toLocaleString()}</span>
-                            </div>
-                          ),
-                      )}
-                      {other > 0 && (
-                        <div className="flex items-center gap-1.5">
-                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-copper/60" />
-                          <span className="opacity-70">other</span>
-                          <span>{other.toLocaleString()}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+          {buckets.map((bucket) => (
+            <HistogramBar
+              key={bucket.ts.toISOString()}
+              bucket={bucket}
+              maxCount={maxCount}
+              dark={dark}
+              onSegmentClick={onSegmentClick}
+              formatTime={formatTime}
+            />
+          ))}
         </div>
       </div>
       {/* Time axis with pan arrows + draggable labels */}
@@ -424,6 +298,181 @@ export function HistogramChart({
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+function HistogramBar({
+  bucket,
+  maxCount,
+  dark,
+  onSegmentClick,
+  formatTime,
+}: Readonly<{
+  bucket: HistogramBucket;
+  maxCount: number;
+  dark: boolean;
+  onSegmentClick?: (level: string) => void;
+  formatTime: (d: Date) => string;
+}>) {
+  const c = useThemeClass(dark);
+  const pct = maxCount > 0 ? bucket.count / maxCount : 0;
+  const lc = bucket.levelCounts;
+  const hasLevels = lc && Object.keys(lc).length > 0;
+  const levelSum = hasLevels
+    ? Object.values(lc).reduce((a, b) => a + b, 0)
+    : 0;
+  const other = bucket.count - levelSum;
+
+  // Stack order bottom-to-top: error, warn, info, debug, trace, other
+  const segments: { key: string; count: number; color: string }[] = [];
+  if (hasLevels) {
+    for (const [key, color] of SEVERITY_COLORS) {
+      if (lc[key]! > 0) segments.push({ key, count: lc[key]!, color });
+    }
+    if (other > 0)
+      segments.push({
+        key: "other",
+        count: other,
+        color: "var(--color-copper)",
+      });
+  }
+
+  return (
+    <div
+      className="flex-1 min-w-0 group relative"
+      style={{ height: "100%" }}
+    >
+      {bucket.count > 0 && (
+        <div
+          className="absolute bottom-0 inset-x-0 rounded-t-sm overflow-hidden transition-colors"
+          style={{
+            height: `${Math.max(pct * 100, 4)}%`,
+          }}
+        >
+          {hasLevels && segments.length > 0 ? (
+            <div
+              className={`flex flex-col-reverse w-full h-full ${onSegmentClick ? "" : `transition-opacity ${c("opacity-60 group-hover:opacity-100", "opacity-50 group-hover:opacity-80")}`}`}
+            >
+              {segments.map((seg) => (
+                <div
+                  key={seg.key}
+                  className={`w-full shrink-0 ${onSegmentClick ? `cursor-pointer transition-opacity ${c("opacity-60 hover:opacity-100", "opacity-50 hover:opacity-90")}` : ""}`}
+                  style={{
+                    height: `${(seg.count / bucket.count) * 100}%`,
+                    backgroundColor: seg.color,
+                  }}
+                  onMouseDown={
+                    onSegmentClick
+                      ? (e) => e.stopPropagation()
+                      : undefined
+                  }
+                  onClick={
+                    onSegmentClick
+                      ? (e) => {
+                          e.stopPropagation();
+                          onSegmentClick(seg.key);
+                        }
+                      : undefined
+                  }
+                  {...clickableProps(onSegmentClick ? () => onSegmentClick(seg.key) : undefined)}
+                  aria-label={onSegmentClick ? `Filter by ${seg.key}` : undefined}
+                />
+              ))}
+            </div>
+          ) : (
+            <div
+              className={`w-full h-full transition-opacity bg-copper ${
+                onSegmentClick
+                  ? `cursor-pointer ${c("opacity-60 hover:opacity-100", "opacity-50 hover:opacity-90")}`
+                  : c(
+                      "opacity-60 group-hover:opacity-100",
+                      "opacity-50 group-hover:opacity-80",
+                    )
+              }`}
+              onMouseDown={
+                onSegmentClick
+                  ? (e) => e.stopPropagation()
+                  : undefined
+              }
+              onClick={
+                onSegmentClick
+                  ? (e) => {
+                      e.stopPropagation();
+                      onSegmentClick("other");
+                    }
+                  : undefined
+              }
+              {...clickableProps(onSegmentClick ? () => onSegmentClick("other") : undefined)}
+              aria-label={onSegmentClick ? "Filter by other" : undefined}
+            />
+          )}
+        </div>
+      )}
+      {/* Tooltip */}
+      <HistogramBarTooltip
+        bucket={bucket}
+        hasLevels={!!hasLevels}
+        other={other}
+        dark={dark}
+        formatTime={formatTime}
+      />
+    </div>
+  );
+}
+
+function HistogramBarTooltip({
+  bucket,
+  hasLevels,
+  other,
+  dark,
+  formatTime,
+}: Readonly<{
+  bucket: HistogramBucket;
+  hasLevels: boolean;
+  other: number;
+  dark: boolean;
+  formatTime: (d: Date) => string;
+}>) {
+  const c = useThemeClass(dark);
+  const lc = bucket.levelCounts;
+  return (
+    <div
+      className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 text-[0.7em] font-mono rounded whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-10 ${c("bg-ink-surface text-text-bright border border-ink-border-subtle", "bg-light-surface text-light-text-bright border border-light-border-subtle")}`}
+    >
+      <div>
+        {bucket.count.toLocaleString()} &middot;{" "}
+        {formatTime(bucket.ts)}
+      </div>
+      {hasLevels && (
+        <div className="mt-0.5 space-y-px">
+          {SEVERITY_LEVELS.map(
+            (level) =>
+              lc[level]! > 0 && (
+                <div
+                  key={level}
+                  className="flex items-center gap-1.5"
+                >
+                  <span
+                    className="inline-block w-1.5 h-1.5 rounded-full"
+                    style={{
+                      backgroundColor: `var(--color-severity-${level})`,
+                    }}
+                  />
+                  <span className="opacity-70">{level}</span>
+                  <span>{lc[level]!.toLocaleString()}</span>
+                </div>
+              ),
+          )}
+          {other > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-copper/60" />
+              <span className="opacity-70">other</span>
+              <span>{other.toLocaleString()}</span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

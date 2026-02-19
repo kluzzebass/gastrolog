@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useReducer } from "react";
 import {
   useConfig,
   usePutRotationPolicy,
@@ -27,6 +27,56 @@ interface PolicyEdit {
   maxRecords: string;
   maxAge: string;
   cron: string;
+}
+
+// -- Reducer for "Add rotation policy" form state --
+
+interface AddRotationFormState {
+  adding: boolean;
+  newName: string;
+  newMaxBytes: string;
+  newMaxRecords: string;
+  newMaxAge: string;
+  newCron: string;
+}
+
+const addRotationFormInitial: AddRotationFormState = {
+  adding: false,
+  newName: "",
+  newMaxBytes: "",
+  newMaxRecords: "",
+  newMaxAge: "5m",
+  newCron: "",
+};
+
+type AddRotationFormAction =
+  | { type: "setAdding"; value: boolean }
+  | { type: "setNewName"; value: string }
+  | { type: "setNewMaxBytes"; value: string }
+  | { type: "setNewMaxRecords"; value: string }
+  | { type: "setNewMaxAge"; value: string }
+  | { type: "setNewCron"; value: string }
+  | { type: "resetForm" };
+
+function addRotationFormReducer(state: AddRotationFormState, action: AddRotationFormAction): AddRotationFormState {
+  switch (action.type) {
+    case "setAdding":
+      return { ...state, adding: action.value };
+    case "setNewName":
+      return { ...state, newName: action.value };
+    case "setNewMaxBytes":
+      return { ...state, newMaxBytes: action.value };
+    case "setNewMaxRecords":
+      return { ...state, newMaxRecords: action.value };
+    case "setNewMaxAge":
+      return { ...state, newMaxAge: action.value };
+    case "setNewCron":
+      return { ...state, newCron: action.value };
+    case "resetForm":
+      return addRotationFormInitial;
+    default:
+      return state;
+  }
 }
 
 function CronField({
@@ -82,13 +132,9 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const { addToast } = useToast();
 
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
 
-  const [newName, setNewName] = useState("");
-  const [newMaxBytes, setNewMaxBytes] = useState("");
-  const [newMaxRecords, setNewMaxRecords] = useState("");
-  const [newMaxAge, setNewMaxAge] = useState("5m");
-  const [newCron, setNewCron] = useState("");
+  const [addForm, dispatchAdd] = useReducer(addRotationFormReducer, addRotationFormInitial);
+  const { adding, newName, newMaxBytes, newMaxRecords, newMaxAge, newCron } = addForm;
 
   const policies = config?.rotationPolicies ?? [];
   const stores = config?.stores ?? [];
@@ -166,12 +212,7 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
         cron: newCron,
       });
       addToast(`Policy "${newName.trim()}" created`, "info");
-      setAdding(false);
-      setNewName("");
-      setNewMaxBytes("");
-      setNewMaxRecords("");
-      setNewMaxAge("5m");
-      setNewCron("");
+      dispatchAdd({ type: "resetForm" });
     } catch (err: any) {
       const errorMessage = err.message ?? "Failed to create policy";
       addToast(errorMessage, "error");
@@ -185,7 +226,7 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
       helpTopicId="policy-rotation"
       addLabel="Add Policy"
       adding={adding}
-      onToggleAdd={() => setAdding(!adding)}
+      onToggleAdd={() => dispatchAdd({ type: "setAdding", value: !adding })}
       isLoading={isLoading}
       isEmpty={policies.length === 0}
       emptyMessage='No rotation policies configured. Click "Add Policy" to create one.'
@@ -194,14 +235,14 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
       {adding && (
         <AddFormCard
           dark={dark}
-          onCancel={() => setAdding(false)}
+          onCancel={() => dispatchAdd({ type: "resetForm" })}
           onCreate={handleCreate}
           isPending={putPolicy.isPending}
         >
           <FormField label="Name" dark={dark}>
             <TextInput
               value={newName}
-              onChange={setNewName}
+              onChange={(v) => dispatchAdd({ type: "setNewName", value: v })}
               placeholder="default"
               dark={dark}
             />
@@ -213,7 +254,7 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
             >
               <TextInput
                 value={newMaxBytes}
-                onChange={setNewMaxBytes}
+                onChange={(v) => dispatchAdd({ type: "setNewMaxBytes", value: v })}
                 placeholder="64MB"
                 dark={dark}
                 mono
@@ -223,7 +264,7 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
             <FormField label="Max Records" dark={dark}>
               <NumberInput
                 value={newMaxRecords}
-                onChange={setNewMaxRecords}
+                onChange={(v) => dispatchAdd({ type: "setNewMaxRecords", value: v })}
                 placeholder="100000"
                 dark={dark}
               />
@@ -234,7 +275,7 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
             >
               <TextInput
                 value={newMaxAge}
-                onChange={setNewMaxAge}
+                onChange={(v) => dispatchAdd({ type: "setNewMaxAge", value: v })}
                 placeholder="5m"
                 dark={dark}
                 mono
@@ -242,7 +283,7 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
               />
             </FormField>
           </div>
-          <CronField value={newCron} onChange={setNewCron} dark={dark} />
+          <CronField value={newCron} onChange={(v) => dispatchAdd({ type: "setNewCron", value: v })} dark={dark} />
         </AddFormCard>
       )}
 

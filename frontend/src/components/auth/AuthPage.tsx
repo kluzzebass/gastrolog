@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useReducer } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { SpinnerIcon } from "../icons";
@@ -6,6 +6,46 @@ import { ConnectError } from "@connectrpc/connect";
 import { useAuthStatus, useLogin, useRegister, useServerConfig } from "../../api/hooks";
 import { AuthFormField } from "./AuthFormField";
 import { PasswordRules } from "./PasswordRules";
+
+// -- Reducer for AuthPage form state --
+
+interface AuthFormState {
+  username: string;
+  password: string;
+  confirmPassword: string;
+  error: string;
+}
+
+const authFormInitial: AuthFormState = {
+  username: "",
+  password: "",
+  confirmPassword: "",
+  error: "",
+};
+
+type AuthFormAction =
+  | { type: "setUsername"; value: string }
+  | { type: "setPassword"; value: string }
+  | { type: "setConfirmPassword"; value: string }
+  | { type: "setError"; value: string }
+  | { type: "reset" };
+
+function authFormReducer(state: AuthFormState, action: AuthFormAction): AuthFormState {
+  switch (action.type) {
+    case "setUsername":
+      return { ...state, username: action.value };
+    case "setPassword":
+      return { ...state, password: action.value };
+    case "setConfirmPassword":
+      return { ...state, confirmPassword: action.value };
+    case "setError":
+      return { ...state, error: action.value };
+    case "reset":
+      return authFormInitial;
+    default:
+      return state;
+  }
+}
 
 interface AuthPageProps {
   mode: "login" | "register";
@@ -18,10 +58,12 @@ export function AuthPage({ mode }: Readonly<AuthPageProps>) {
   const register = useRegister();
   const { data: serverConfig } = useServerConfig();
 
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [error, setError] = useState("");
+  const [form, dispatch] = useReducer(authFormReducer, authFormInitial);
+  const { username, password, confirmPassword, error } = form;
+  const setUsername = (v: string) => dispatch({ type: "setUsername", value: v });
+  const setPassword = (v: string) => dispatch({ type: "setPassword", value: v });
+  const setConfirmPassword = (v: string) => dispatch({ type: "setConfirmPassword", value: v });
+  const setError = (v: string) => dispatch({ type: "setError", value: v });
   const usernameRef = useRef<HTMLInputElement>(null);
 
   const [dark, setDark] = useState(() => {

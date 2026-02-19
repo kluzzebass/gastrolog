@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useReducer } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useThemeSync } from "../../hooks/useThemeSync";
 import { useThemeClass } from "../../hooks/useThemeClass";
@@ -19,6 +19,43 @@ import { ReviewStep } from "./ReviewStep";
 
 const STEPS = ["Welcome", "Store", "Policies", "Ingester", "Review"] as const;
 
+// -- Reducer for wizard step data --
+
+interface WizardDataState {
+  store: StoreData;
+  rotation: RotationData;
+  retention: RetentionData;
+  ingester: IngesterData;
+}
+
+const wizardDataInitial: WizardDataState = {
+  store: { name: "default", type: "file", dir: "" },
+  rotation: { name: "default", maxAge: "", maxBytes: "", maxRecords: "", cron: "" },
+  retention: { name: "default", maxChunks: "", maxAge: "", maxBytes: "" },
+  ingester: { name: "", type: "", params: {} },
+};
+
+type WizardDataAction =
+  | { type: "setStore"; value: StoreData }
+  | { type: "setRotation"; value: RotationData }
+  | { type: "setRetention"; value: RetentionData }
+  | { type: "setIngester"; value: IngesterData };
+
+function wizardDataReducer(state: WizardDataState, action: WizardDataAction): WizardDataState {
+  switch (action.type) {
+    case "setStore":
+      return { ...state, store: action.value };
+    case "setRotation":
+      return { ...state, rotation: action.value };
+    case "setRetention":
+      return { ...state, retention: action.value };
+    case "setIngester":
+      return { ...state, ingester: action.value };
+    default:
+      return state;
+  }
+}
+
 export function SetupWizard() {
   const { dark } = useThemeSync();
   const c = useThemeClass(dark);
@@ -30,29 +67,12 @@ export function SetupWizard() {
   const [creating, setCreating] = useState(false);
 
   // Step data
-  const [store, setStore] = useState<StoreData>({
-    name: "default",
-    type: "file",
-    dir: "",
-  });
-  const [rotation, setRotation] = useState<RotationData>({
-    name: "default",
-    maxAge: "",
-    maxBytes: "",
-    maxRecords: "",
-    cron: "",
-  });
-  const [retention, setRetention] = useState<RetentionData>({
-    name: "default",
-    maxChunks: "",
-    maxAge: "",
-    maxBytes: "",
-  });
-  const [ingester, setIngester] = useState<IngesterData>({
-    name: "",
-    type: "",
-    params: {},
-  });
+  const [wizardData, dispatchData] = useReducer(wizardDataReducer, wizardDataInitial);
+  const { store, rotation, retention, ingester } = wizardData;
+  const setStore = (v: StoreData) => dispatchData({ type: "setStore", value: v });
+  const setRotation = (v: RotationData) => dispatchData({ type: "setRotation", value: v });
+  const setRetention = (v: RetentionData) => dispatchData({ type: "setRetention", value: v });
+  const setIngester = (v: IngesterData) => dispatchData({ type: "setIngester", value: v });
 
   const canProceed = () => {
     switch (step) {
