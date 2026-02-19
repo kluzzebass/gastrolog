@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, type MutableRefObject } from "react";
 import { queryClient, Query, Record } from "../client";
 
-export interface SearchState {
+interface SearchState {
   records: Record[];
   isSearching: boolean;
   error: Error | null;

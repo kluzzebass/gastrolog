@@ -11,7 +11,7 @@ interface SeverityInfo {
   filter: string;
 }
 
-export const BADGE_STYLE: Record<string, { label: string; cls: string }> = {
+const BADGE_STYLE: Record<string, { label: string; cls: string }> = {
   error: { label: "ERR", cls: "border-severity-error/50 text-severity-error" },
   warn: { label: "WRN", cls: "border-severity-warn/50 text-severity-warn" },
   info: { label: "INF", cls: "border-severity-info/50 text-severity-info" },

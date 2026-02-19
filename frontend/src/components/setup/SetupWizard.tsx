@@ -282,7 +282,7 @@ export function SetupWizard() {
           <div className="flex gap-2">
             {step > 0 && (
               <GhostButton
-                onClick={() => setStep(step - 1)}
+                onClick={() => setStep((s) => s - 1)}
                 dark={dark}
                 bordered
               >
@@ -302,7 +302,7 @@ export function SetupWizard() {
           <div>
             {step > 0 && step < STEPS.length - 1 && (
               <PrimaryButton
-                onClick={() => setStep(step + 1)}
+                onClick={() => setStep((s) => s + 1)}
                 disabled={!canProceed()}
               >
                 Next

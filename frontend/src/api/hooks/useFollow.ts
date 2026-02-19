@@ -6,7 +6,7 @@ const MAX_RECORDS = 5000;
 const INITIAL_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 30_000;
 
-export interface FollowState {
+interface FollowState {
   records: Record[];
   isFollowing: boolean;
   reconnecting: boolean;

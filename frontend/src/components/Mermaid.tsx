@@ -63,23 +63,43 @@ interface MermaidDiagramProps {
 export function MermaidDiagram({ chart, dark }: Readonly<MermaidDiagramProps>) {
   const c = useThemeClass(dark);
   const ref = useRef<HTMLDivElement>(null);
-  const [result, setResult] = useState<{ svg: string; error: string }>({ svg: "", error: "" });
+  const [error, setError] = useState("");
 
   useEffect(() => {
+    const container = ref.current;
+    if (!container) return;
+
     initMermaid(dark);
     const id = `mermaid-${Math.random().toString(36).slice(2, 11)}`;
+    let cancelled = false;
+
     mermaid
       .render(id, chart)
-      .then(({ svg }) => setResult({ svg, error: "" }))
-      .catch(() => setResult({ svg: "", error: "Failed to render diagram" }));
+      .then(({ svg }) => {
+        if (cancelled) return;
+        container.replaceChildren();
+        const doc = new DOMParser().parseFromString(svg, "image/svg+xml");
+        const svgEl = doc.documentElement;
+        if (svgEl instanceof SVGElement) {
+          container.appendChild(svgEl);
+        }
+        setError("");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        container.replaceChildren();
+        setError("Failed to render diagram");
+      });
+
+    return () => { cancelled = true; };
   }, [chart, dark]);
 
-  if (result.error) {
+  if (error) {
     return (
       <div
         className={`mb-3 p-3 rounded text-[0.85em] ${c("bg-ink-surface text-text-ghost", "bg-light-hover text-light-text-ghost")}`}
       >
-        {result.error}
+        {error}
       </div>
     );
   }
@@ -88,7 +108,6 @@ export function MermaidDiagram({ chart, dark }: Readonly<MermaidDiagramProps>) {
     <div
       ref={ref}
       className="mb-3 overflow-x-auto app-scroll [&_svg]:max-w-full"
-      dangerouslySetInnerHTML={{ __html: result.svg }}
     />
   );
 }

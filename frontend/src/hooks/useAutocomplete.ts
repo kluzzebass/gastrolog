@@ -52,7 +52,7 @@ export function getValueContext(text: string, wordStart: number): string | null 
   return key.length > 0 ? key : null;
 }
 
-export interface AutocompleteState {
+interface AutocompleteState {
   suggestions: string[];
   selectedIndex: number;
   isOpen: boolean;

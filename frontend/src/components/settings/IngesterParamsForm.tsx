@@ -126,12 +126,12 @@ function ChatterboxForm({
   return (
     <div className="flex flex-col gap-4">
       {/* Format selection with weights */}
-      <div className="flex flex-col gap-1">
-        <label
+      <fieldset className="flex flex-col gap-1">
+        <legend
           className={`text-[0.8em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}
         >
           Log Formats
-        </label>
+        </legend>
         <p
           className={`text-[0.7em] mb-1.5 ${c("text-text-ghost", "text-light-text-ghost")}`}
         >
@@ -205,7 +205,7 @@ function ChatterboxForm({
             );
           })}
         </div>
-      </div>
+      </fieldset>
 
       {/* Timing */}
       <div className="grid grid-cols-2 gap-3">
@@ -307,6 +307,7 @@ function TailForm({
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
         <label
+          htmlFor="file-patterns"
           className={`text-[0.8em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}
         >
           File Patterns
@@ -318,6 +319,7 @@ function TailForm({
           recursive matching.
         </p>
         <textarea
+          id="file-patterns"
           value={text}
           onChange={(e) => handleTextChange(e.target.value)}
           placeholder={"/var/log/app.log\n/var/log/**/*.log"}

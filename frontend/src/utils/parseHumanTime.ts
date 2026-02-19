@@ -23,7 +23,7 @@ export interface ParseOptions {
 
 let cachedDateOrder: "mdy" | "dmy" | "ymd" | null = null;
 
-export function detectDateOrder(): "mdy" | "dmy" | "ymd" {
+function detectDateOrder(): "mdy" | "dmy" | "ymd" {
   if (cachedDateOrder) return cachedDateOrder;
   try {
     // Format a date where day, month, year are all distinct and unambiguous.
@@ -51,8 +51,7 @@ export function detectDateOrder(): "mdy" | "dmy" | "ymd" {
   return cachedDateOrder;
 }
 
-// Exported for testing — allows resetting cached locale detection.
-export function resetDateOrderCache(): void {
+function resetDateOrderCache(): void {
   cachedDateOrder = null;
 }
 
