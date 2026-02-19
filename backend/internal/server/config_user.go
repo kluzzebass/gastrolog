@@ -7,14 +7,50 @@ import (
 	"fmt"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/auth"
 )
 
-// userPreferences is the JSON structure stored per user.
+// userPreferences is the JSON structure stored in the users.preferences column.
 type userPreferences struct {
-	Theme string `json:"theme,omitempty"`
+	Theme        string       `json:"theme,omitempty"`
+	SavedQueries []savedQuery `json:"saved_queries,omitempty"`
+}
+
+// savedQuery is one entry in the user's saved queries list.
+type savedQuery struct {
+	Name  string `json:"name"`
+	Query string `json:"query"`
+}
+
+// loadPrefs reads and parses the preferences JSON for the authenticated user.
+func (s *ConfigServer) loadPrefs(ctx context.Context, claims *auth.Claims) (uuid.UUID, userPreferences, error) {
+	uid, err := uuid.Parse(claims.UserID)
+	if err != nil {
+		return uuid.Nil, userPreferences{}, fmt.Errorf("parse user id: %w", err)
+	}
+	raw, err := s.cfgStore.GetUserPreferences(ctx, uid)
+	if err != nil {
+		return uid, userPreferences{}, err
+	}
+	var prefs userPreferences
+	if raw != nil {
+		if err := json.Unmarshal([]byte(*raw), &prefs); err != nil {
+			return uid, userPreferences{}, fmt.Errorf("parse preferences: %w", err)
+		}
+	}
+	return uid, prefs, nil
+}
+
+// savePrefs marshals and writes the preferences JSON for a user.
+func (s *ConfigServer) savePrefs(ctx context.Context, uid uuid.UUID, prefs userPreferences) error {
+	data, err := json.Marshal(prefs)
+	if err != nil {
+		return err
+	}
+	return s.cfgStore.PutUserPreferences(ctx, uid, string(data))
 }
 
 // GetPreferences returns the current user's preferences.
@@ -27,22 +63,14 @@ func (s *ConfigServer) GetPreferences(
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("not authenticated"))
 	}
 
-	key := "user:" + claims.UserID + ":prefs"
-	raw, err := s.cfgStore.GetSetting(ctx, key)
+	_, prefs, err := s.loadPrefs(ctx, claims)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	resp := &apiv1.GetPreferencesResponse{}
-	if raw != nil {
-		var prefs userPreferences
-		if err := json.Unmarshal([]byte(*raw), &prefs); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("parse preferences: %w", err))
-		}
-		resp.Theme = prefs.Theme
-	}
-
-	return connect.NewResponse(resp), nil
+	return connect.NewResponse(&apiv1.GetPreferencesResponse{
+		Theme: prefs.Theme,
+	}), nil
 }
 
 // PutPreferences updates the current user's preferences.
@@ -55,26 +83,17 @@ func (s *ConfigServer) PutPreferences(
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("not authenticated"))
 	}
 
-	prefs := userPreferences{
-		Theme: req.Msg.Theme,
-	}
-	data, err := json.Marshal(prefs)
+	uid, prefs, err := s.loadPrefs(ctx, claims)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	key := "user:" + claims.UserID + ":prefs"
-	if err := s.cfgStore.PutSetting(ctx, key, string(data)); err != nil {
+	prefs.Theme = req.Msg.Theme
+	if err := s.savePrefs(ctx, uid, prefs); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
 	return connect.NewResponse(&apiv1.PutPreferencesResponse{}), nil
-}
-
-// savedQuery is the JSON structure for a single saved query.
-type savedQuery struct {
-	Name  string `json:"name"`
-	Query string `json:"query"`
 }
 
 // GetSavedQueries returns the current user's saved queries.
@@ -87,26 +106,18 @@ func (s *ConfigServer) GetSavedQueries(
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("not authenticated"))
 	}
 
-	key := "user:" + claims.UserID + ":saved_queries"
-	raw, err := s.cfgStore.GetSetting(ctx, key)
+	_, prefs, err := s.loadPrefs(ctx, claims)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
 	resp := &apiv1.GetSavedQueriesResponse{}
-	if raw != nil {
-		var queries []savedQuery
-		if err := json.Unmarshal([]byte(*raw), &queries); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("parse saved queries: %w", err))
-		}
-		for _, q := range queries {
-			resp.Queries = append(resp.Queries, &apiv1.SavedQuery{
-				Name:  q.Name,
-				Query: q.Query,
-			})
-		}
+	for _, q := range prefs.SavedQueries {
+		resp.Queries = append(resp.Queries, &apiv1.SavedQuery{
+			Name:  q.Name,
+			Query: q.Query,
+		})
 	}
-
 	return connect.NewResponse(resp), nil
 }
 
@@ -123,40 +134,28 @@ func (s *ConfigServer) PutSavedQuery(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("query name required"))
 	}
 
-	key := "user:" + claims.UserID + ":saved_queries"
-	raw, err := s.cfgStore.GetSetting(ctx, key)
+	uid, prefs, err := s.loadPrefs(ctx, claims)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	var queries []savedQuery
-	if raw != nil {
-		if err := json.Unmarshal([]byte(*raw), &queries); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("parse saved queries: %w", err))
-		}
-	}
-
 	// Upsert: replace if name exists, append otherwise.
 	found := false
-	for i, q := range queries {
+	for i, q := range prefs.SavedQueries {
 		if q.Name == req.Msg.Query.Name {
-			queries[i].Query = req.Msg.Query.Query
+			prefs.SavedQueries[i].Query = req.Msg.Query.Query
 			found = true
 			break
 		}
 	}
 	if !found {
-		queries = append(queries, savedQuery{
+		prefs.SavedQueries = append(prefs.SavedQueries, savedQuery{
 			Name:  req.Msg.Query.Name,
 			Query: req.Msg.Query.Query,
 		})
 	}
 
-	data, err := json.Marshal(queries)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-	if err := s.cfgStore.PutSetting(ctx, key, string(data)); err != nil {
+	if err := s.savePrefs(ctx, uid, prefs); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
@@ -176,38 +175,21 @@ func (s *ConfigServer) DeleteSavedQuery(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("query name required"))
 	}
 
-	key := "user:" + claims.UserID + ":saved_queries"
-	raw, err := s.cfgStore.GetSetting(ctx, key)
+	uid, prefs, err := s.loadPrefs(ctx, claims)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	var queries []savedQuery
-	if raw != nil {
-		if err := json.Unmarshal([]byte(*raw), &queries); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("parse saved queries: %w", err))
-		}
-	}
-
-	filtered := queries[:0]
-	for _, q := range queries {
+	filtered := prefs.SavedQueries[:0]
+	for _, q := range prefs.SavedQueries {
 		if q.Name != req.Msg.Name {
 			filtered = append(filtered, q)
 		}
 	}
+	prefs.SavedQueries = filtered
 
-	if len(filtered) == 0 {
-		if err := s.cfgStore.DeleteSetting(ctx, key); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err)
-		}
-	} else {
-		data, err := json.Marshal(filtered)
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err)
-		}
-		if err := s.cfgStore.PutSetting(ctx, key, string(data)); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err)
-		}
+	if err := s.savePrefs(ctx, uid, prefs); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
 	return connect.NewResponse(&apiv1.DeleteSavedQueryResponse{}), nil

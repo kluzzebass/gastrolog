@@ -1199,6 +1199,73 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 	})
 
+	t.Run("UserPreferences", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		id := newID()
+		now := time.Now().UTC()
+		if err := s.CreateUser(ctx, config.User{
+			ID: id, Username: "alice", PasswordHash: "h1", Role: "user",
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("CreateUser: %v", err)
+		}
+
+		// Initially nil.
+		got, err := s.GetUserPreferences(ctx, id)
+		if err != nil {
+			t.Fatalf("GetUserPreferences: %v", err)
+		}
+		if got != nil {
+			t.Fatalf("expected nil preferences initially, got %q", *got)
+		}
+
+		// Put preferences.
+		prefs := `{"theme":"dark","saved_queries":[{"name":"errors","query":"level=error"}]}`
+		if err := s.PutUserPreferences(ctx, id, prefs); err != nil {
+			t.Fatalf("PutUserPreferences: %v", err)
+		}
+
+		got, err = s.GetUserPreferences(ctx, id)
+		if err != nil {
+			t.Fatalf("GetUserPreferences: %v", err)
+		}
+		if got == nil {
+			t.Fatal("expected preferences, got nil")
+		}
+		if *got != prefs {
+			t.Errorf("expected %q, got %q", prefs, *got)
+		}
+
+		// Non-existent user returns nil.
+		got, err = s.GetUserPreferences(ctx, uuid.Must(uuid.NewV7()))
+		if err != nil {
+			t.Fatalf("GetUserPreferences non-existent: %v", err)
+		}
+		if got != nil {
+			t.Fatalf("expected nil for non-existent user, got %q", *got)
+		}
+
+		// Put for non-existent user errors.
+		err = s.PutUserPreferences(ctx, uuid.Must(uuid.NewV7()), `{}`)
+		if err == nil {
+			t.Fatal("expected error putting preferences for non-existent user")
+		}
+
+		// Preferences are deleted with the user.
+		if err := s.DeleteUser(ctx, id); err != nil {
+			t.Fatalf("DeleteUser: %v", err)
+		}
+		got, err = s.GetUserPreferences(ctx, id)
+		if err != nil {
+			t.Fatalf("GetUserPreferences after delete: %v", err)
+		}
+		if got != nil {
+			t.Fatalf("expected nil after user delete, got %q", *got)
+		}
+	})
+
 	t.Run("UsersNotInLoad", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()

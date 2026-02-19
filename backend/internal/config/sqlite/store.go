@@ -778,3 +778,33 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	}
 	return count, nil
 }
+
+func (s *Store) GetUserPreferences(ctx context.Context, id uuid.UUID) (*string, error) {
+	var prefs *string
+	err := s.db.QueryRowContext(ctx,
+		"SELECT preferences FROM users WHERE id = ?", id).Scan(&prefs)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get user preferences %q: %w", id, err)
+	}
+	return prefs, nil
+}
+
+func (s *Store) PutUserPreferences(ctx context.Context, id uuid.UUID, prefs string) error {
+	res, err := s.db.ExecContext(ctx,
+		"UPDATE users SET preferences = ?, updated_at = ? WHERE id = ?",
+		prefs, time.Now().UTC().Format(timeFormat), id)
+	if err != nil {
+		return fmt.Errorf("put user preferences %q: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("put user preferences %q: %w", id, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("user %q not found", id)
+	}
+	return nil
+}

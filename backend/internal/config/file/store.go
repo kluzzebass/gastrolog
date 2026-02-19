@@ -698,3 +698,33 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	}
 	return len(users), nil
 }
+
+func (s *Store) GetUserPreferences(ctx context.Context, id uuid.UUID) (*string, error) {
+	users, err := s.loadUsers()
+	if err != nil {
+		return nil, err
+	}
+	u, ok := users[id]
+	if !ok {
+		return nil, nil
+	}
+	if u.Preferences == "" {
+		return nil, nil
+	}
+	return &u.Preferences, nil
+}
+
+func (s *Store) PutUserPreferences(ctx context.Context, id uuid.UUID, prefs string) error {
+	users, err := s.loadUsers()
+	if err != nil {
+		return err
+	}
+	u, ok := users[id]
+	if !ok {
+		return fmt.Errorf("user %q not found", id)
+	}
+	u.Preferences = prefs
+	u.UpdatedAt = time.Now().UTC()
+	users[id] = u
+	return s.flushUsers(users)
+}

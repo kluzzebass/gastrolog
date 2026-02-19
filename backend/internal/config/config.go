@@ -93,6 +93,8 @@ type Store interface {
 	UpdateUserRole(ctx context.Context, id uuid.UUID, role string) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
 	CountUsers(ctx context.Context) (int, error)
+	GetUserPreferences(ctx context.Context, id uuid.UUID) (*string, error)
+	PutUserPreferences(ctx context.Context, id uuid.UUID, prefs string) error
 }
 
 // Config describes the desired system shape.
@@ -170,6 +172,7 @@ type User struct {
 	Username     string    `json:"username"`
 	PasswordHash string    `json:"password_hash"`
 	Role         string    `json:"role"` // "admin" or "user"
+	Preferences  string    `json:"preferences,omitempty"` // opaque JSON blob
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }

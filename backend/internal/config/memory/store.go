@@ -479,6 +479,34 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	return len(s.users), nil
 }
 
+func (s *Store) GetUserPreferences(ctx context.Context, id uuid.UUID) (*string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	u, ok := s.users[id]
+	if !ok {
+		return nil, nil
+	}
+	if u.Preferences == "" {
+		return nil, nil
+	}
+	return &u.Preferences, nil
+}
+
+func (s *Store) PutUserPreferences(ctx context.Context, id uuid.UUID, prefs string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	u, ok := s.users[id]
+	if !ok {
+		return fmt.Errorf("user %q not found", id)
+	}
+	u.Preferences = prefs
+	u.UpdatedAt = time.Now().UTC()
+	s.users[id] = u
+	return nil
+}
+
 // Deep copy helpers
 
 func copyFilterConfig(fc config.FilterConfig) config.FilterConfig {
