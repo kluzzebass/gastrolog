@@ -162,7 +162,8 @@ func (r *Ingester) handlePush(w http.ResponseWriter, req *http.Request) {
 
 	var pushReq PushRequest
 	if err := json.Unmarshal(data, &pushReq); err != nil {
-		http.Error(w, fmt.Sprintf("failed to parse JSON: %v", err), http.StatusBadRequest)
+		r.logger.Warn("failed to parse push request", "error", err)
+		http.Error(w, "invalid JSON in request body", http.StatusBadRequest)
 		return
 	}
 
@@ -172,7 +173,8 @@ func (r *Ingester) handlePush(w http.ResponseWriter, req *http.Request) {
 		for _, val := range stream.Values {
 			msg, err := r.parseValue(val, stream.Stream)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
+				r.logger.Warn("failed to parse stream value", "error", err)
+				http.Error(w, "invalid stream entry", http.StatusBadRequest)
 				return
 			}
 			messages = append(messages, msg)
