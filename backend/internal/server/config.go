@@ -202,6 +202,9 @@ func (s *ConfigServer) PutServerConfig(
 		sc.Auth.MinPasswordLength = int(*req.Msg.MinPasswordLength)
 	}
 	if req.Msg.MaxConcurrentJobs != nil {
+		if *req.Msg.MaxConcurrentJobs < 1 {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("max_concurrent_jobs must be at least 1, got %d", *req.Msg.MaxConcurrentJobs))
+		}
 		sc.Scheduler.MaxConcurrentJobs = int(*req.Msg.MaxConcurrentJobs)
 	}
 	if req.Msg.TlsDefaultCert != nil {
