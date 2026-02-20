@@ -1,18 +1,20 @@
 import { useState, useRef } from "react";
 import { useClickOutside } from "../hooks/useClickOutside";
 import { useThemeClass } from "../hooks/useThemeClass";
-import { UserIcon, LockIcon, SignOutIcon } from "./icons";
+import { UserIcon, LockIcon, SlidersIcon, SignOutIcon } from "./icons";
 
 export function UserMenu({
   username,
   role,
   dark,
+  onPreferences,
   onChangePassword,
   onLogout,
 }: Readonly<{
   username: string;
   role: string;
   dark: boolean;
+  onPreferences: () => void;
   onChangePassword: () => void;
   onLogout: () => void;
 }>) {
@@ -73,6 +75,16 @@ export function UserMenu({
             >
               <LockIcon className="w-3.5 h-3.5" />
               Change password
+            </MenuItem>
+            <MenuItem
+              dark={dark}
+              onClick={() => {
+                setOpen(false);
+                onPreferences();
+              }}
+            >
+              <SlidersIcon className="w-3.5 h-3.5" />
+              Preferences
             </MenuItem>
             <MenuItem
               dark={dark}

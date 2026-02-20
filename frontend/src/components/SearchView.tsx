@@ -49,6 +49,7 @@ import {
   useDeleteSavedQuery,
 } from "../api/hooks/useSavedQueries";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
+import { PreferencesDialog } from "./PreferencesDialog";
 import { Dialog, CloseButton } from "./Dialog";
 import { tokenize } from "../queryTokenizer";
 import { useAutocomplete } from "../hooks/useAutocomplete";
@@ -91,6 +92,7 @@ export function SearchView() {
     showHistory, setShowHistory,
     showSavedQueries, setShowSavedQueries,
     showChangePassword, setShowChangePassword,
+    showPreferences, setShowPreferences,
     inspectorGlow,
   } = useDialogState();
 
@@ -609,10 +611,6 @@ export function SearchView() {
 
       <HeaderBar
         dark={dark}
-        theme={theme}
-        setTheme={setTheme}
-        highlightMode={highlightMode}
-        setHighlightMode={setHighlightMode}
         statsLoading={statsLoading}
         totalRecords={totalRecords}
         totalStores={totalStores}
@@ -623,6 +621,7 @@ export function SearchView() {
         onShowInspector={() => openInspector()}
         onShowSettings={() => openSettings()}
         currentUser={currentUser ? { username: currentUser.username, role: currentUser.role } : null}
+        onPreferences={() => setShowPreferences(true)}
         onChangePassword={() => setShowChangePassword(true)}
         onLogout={logout}
       />
@@ -721,6 +720,17 @@ export function SearchView() {
           )}
 
           {/* Settings Dialog */}
+          {showPreferences && (
+            <PreferencesDialog
+              dark={dark}
+              theme={theme}
+              setTheme={setTheme}
+              highlightMode={highlightMode}
+              setHighlightMode={setHighlightMode}
+              onClose={() => setShowPreferences(false)}
+            />
+          )}
+
           {showChangePassword && currentUser && (
             <ChangePasswordDialog
               username={currentUser.username}
