@@ -138,6 +138,7 @@ export function usePutServerConfig() {
       queryTimeout?: string;
       refreshTokenDuration?: string;
       maxResultCount?: number;
+      setupWizardDismissed?: boolean;
     }) => {
       const req: Record<string, unknown> = {};
       if (args.tokenDuration !== undefined) req.tokenDuration = args.tokenDuration;
@@ -172,6 +173,8 @@ export function usePutServerConfig() {
         req.refreshTokenDuration = args.refreshTokenDuration;
       if (args.maxResultCount !== undefined)
         req.maxResultCount = args.maxResultCount;
+      if (args.setupWizardDismissed !== undefined)
+        req.setupWizardDismissed = args.setupWizardDismissed;
       await configClient.putServerConfig(req as Parameters<typeof configClient.putServerConfig>[0]);
     },
     onSuccess: () => {

@@ -58,7 +58,7 @@ import { HelpDialog } from "./HelpDialog";
 import { HelpProvider } from "../hooks/useHelp";
 import { ResultsToolbar } from "./ResultsToolbar";
 import { QueryBar } from "./QueryBar";
-import { useConfig } from "../api/hooks/useConfig";
+import { useConfig, useServerConfig } from "../api/hooks/useConfig";
 
 export function SearchView() {
   const { q, help: helpParam, settings: settingsParam, inspector: inspectorParam } = useRouterSearch({ strict: false }) as { q: string; help?: string; settings?: string; inspector?: string };
@@ -66,13 +66,14 @@ export function SearchView() {
   const location = useLocation();
   const isFollowMode = location.pathname === "/follow";
 
-  // Redirect to setup wizard if no stores are configured and setup hasn't been skipped.
+  // Redirect to setup wizard if no stores are configured and wizard hasn't been dismissed.
   const config = useConfig();
+  const serverConfig = useServerConfig();
   useEffect(() => {
-    if (config.data && config.data.stores.length === 0 && !localStorage.getItem("setup_skipped")) {
+    if (config.data && serverConfig.data && config.data.stores.length === 0 && !serverConfig.data.setupWizardDismissed) {
       navigate({ to: "/setup" } as any);
     }
-  }, [config.data]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [config.data, serverConfig.data]); // eslint-disable-line react-hooks/exhaustive-deps
   const [draft, setDraft] = useState(q);
   const [cursorPos, setCursorPos] = useState(0);
   const [selectedStore, setSelectedStore] = useState("all");

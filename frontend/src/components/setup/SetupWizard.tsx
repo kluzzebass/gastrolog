@@ -4,6 +4,7 @@ import { useThemeSync } from "../../hooks/useThemeSync";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
 import { configClient } from "../../api/client";
+import { usePutServerConfig } from "../../api/hooks/useConfig";
 import { useQueryClient } from "@tanstack/react-query";
 import { PrimaryButton, GhostButton } from "../settings/Buttons";
 import { WelcomeStep } from "./WelcomeStep";
@@ -62,6 +63,7 @@ export function SetupWizard() {
   const navigate = useNavigate();
   const { addToast } = useToast();
   const queryClient = useQueryClient();
+  const putServerConfig = usePutServerConfig();
 
   const [step, setStep] = useState(0);
   const [creating, setCreating] = useState(false);
@@ -180,7 +182,6 @@ export function SetupWizard() {
         },
       });
 
-      localStorage.removeItem("setup_skipped");
       await queryClient.invalidateQueries({ queryKey: ["config"] });
       addToast("Configuration created successfully!", "info");
       navigate({ to: "/search", search: { q: "", help: undefined, settings: undefined, inspector: undefined } });
@@ -290,8 +291,8 @@ export function SetupWizard() {
               </GhostButton>
             )}
             <GhostButton
-              onClick={() => {
-                localStorage.setItem("setup_skipped", "1");
+              onClick={async () => {
+                await putServerConfig.mutateAsync({ setupWizardDismissed: true });
                 navigate({ to: "/search", search: { q: "", help: undefined, settings: undefined, inspector: undefined } });
               }}
               dark={dark}

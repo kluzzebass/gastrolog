@@ -1460,6 +1460,13 @@ export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
    */
   maxResultCount = 0;
 
+  /**
+   * True when the user has dismissed the setup wizard.
+   *
+   * @generated from field: bool setup_wizard_dismissed = 18;
+   */
+  setupWizardDismissed = false;
+
   constructor(data?: PartialMessage<GetServerConfigResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1485,6 +1492,7 @@ export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
     { no: 15, name: "query_timeout", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 16, name: "refresh_token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 17, name: "max_result_count", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 18, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetServerConfigResponse {
@@ -1593,6 +1601,11 @@ export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
    */
   maxResultCount?: number;
 
+  /**
+   * @generated from field: optional bool setup_wizard_dismissed = 18;
+   */
+  setupWizardDismissed?: boolean;
+
   constructor(data?: PartialMessage<PutServerConfigRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1618,6 +1631,7 @@ export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
     { no: 15, name: "query_timeout", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 16, name: "refresh_token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 17, name: "max_result_count", kind: "scalar", T: 5 /* ScalarType.INT32 */, opt: true },
+    { no: 18, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutServerConfigRequest {

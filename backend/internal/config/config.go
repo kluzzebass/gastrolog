@@ -120,10 +120,11 @@ type Config struct {
 // ServerConfig holds server-level configuration, organized by concern.
 // It is serialized as JSON and stored under the "server" settings key.
 type ServerConfig struct {
-	Auth      AuthConfig      `json:"auth"`
-	Query     QueryConfig     `json:"query"`
-	Scheduler SchedulerConfig `json:"scheduler"`
-	TLS       TLSConfig       `json:"tls"`
+	Auth                 AuthConfig      `json:"auth"`
+	Query                QueryConfig     `json:"query"`
+	Scheduler            SchedulerConfig `json:"scheduler"`
+	TLS                  TLSConfig       `json:"tls"`
+	SetupWizardDismissed bool            `json:"setup_wizard_dismissed,omitempty"`
 }
 
 // QueryConfig holds configuration for the query engine.
