@@ -2066,10 +2066,11 @@ func (*GetPreferencesRequest) Descriptor() ([]byte, []int) {
 }
 
 type GetPreferencesResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Theme         string                 `protobuf:"bytes,1,opt,name=theme,proto3" json:"theme,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Theme           string                 `protobuf:"bytes,1,opt,name=theme,proto3" json:"theme,omitempty"`
+	SyntaxHighlight string                 `protobuf:"bytes,2,opt,name=syntax_highlight,json=syntaxHighlight,proto3" json:"syntax_highlight,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *GetPreferencesResponse) Reset() {
@@ -2109,11 +2110,19 @@ func (x *GetPreferencesResponse) GetTheme() string {
 	return ""
 }
 
+func (x *GetPreferencesResponse) GetSyntaxHighlight() string {
+	if x != nil {
+		return x.SyntaxHighlight
+	}
+	return ""
+}
+
 type PutPreferencesRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Theme         string                 `protobuf:"bytes,1,opt,name=theme,proto3" json:"theme,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Theme           string                 `protobuf:"bytes,1,opt,name=theme,proto3" json:"theme,omitempty"`
+	SyntaxHighlight string                 `protobuf:"bytes,2,opt,name=syntax_highlight,json=syntaxHighlight,proto3" json:"syntax_highlight,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *PutPreferencesRequest) Reset() {
@@ -2149,6 +2158,13 @@ func (*PutPreferencesRequest) Descriptor() ([]byte, []int) {
 func (x *PutPreferencesRequest) GetTheme() string {
 	if x != nil {
 		return x.Theme
+	}
+	return ""
+}
+
+func (x *PutPreferencesRequest) GetSyntaxHighlight() string {
+	if x != nil {
+		return x.SyntaxHighlight
 	}
 	return ""
 }
@@ -3379,11 +3395,13 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x17_refresh_token_durationB\x13\n" +
 	"\x11_max_result_count\"\x19\n" +
 	"\x17PutServerConfigResponse\"\x17\n" +
-	"\x15GetPreferencesRequest\".\n" +
+	"\x15GetPreferencesRequest\"Y\n" +
 	"\x16GetPreferencesResponse\x12\x14\n" +
-	"\x05theme\x18\x01 \x01(\tR\x05theme\"-\n" +
+	"\x05theme\x18\x01 \x01(\tR\x05theme\x12)\n" +
+	"\x10syntax_highlight\x18\x02 \x01(\tR\x0fsyntaxHighlight\"X\n" +
 	"\x15PutPreferencesRequest\x12\x14\n" +
-	"\x05theme\x18\x01 \x01(\tR\x05theme\"\x18\n" +
+	"\x05theme\x18\x01 \x01(\tR\x05theme\x12)\n" +
+	"\x10syntax_highlight\x18\x02 \x01(\tR\x0fsyntaxHighlight\"\x18\n" +
 	"\x16PutPreferencesResponse\"6\n" +
 	"\n" +
 	"SavedQuery\x12\x12\n" +

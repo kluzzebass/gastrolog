@@ -1,6 +1,6 @@
 import type { ProtoRecord } from "../utils";
 import { useThemeClass } from "../hooks/useThemeClass";
-import { syntaxHighlight } from "../syntax";
+import { syntaxHighlight, type HighlightMode } from "../syntax";
 import { detectSeverity } from "./LogEntry";
 
 export function ContextRecord({
@@ -8,15 +8,17 @@ export function ContextRecord({
   isAnchor,
   dark,
   onSelect,
+  highlightMode = "full",
 }: Readonly<{
   record: ProtoRecord;
   isAnchor: boolean;
   dark: boolean;
   onSelect?: () => void;
+  highlightMode?: HighlightMode;
 }>) {
   const c = useThemeClass(dark);
   const rawText = new TextDecoder().decode(record.raw);
-  const parts = syntaxHighlight(rawText);
+  const parts = syntaxHighlight(rawText, highlightMode);
   const severity = detectSeverity(record.attrs);
   const writeTime = record.writeTs ? record.writeTs.toDate() : new Date();
 

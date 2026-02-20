@@ -275,10 +275,12 @@ message GetPreferencesRequest {}
 
 message GetPreferencesResponse {
   string theme = 1;
+  string syntax_highlight = 2;
 }
 
 message PutPreferencesRequest {
   string theme = 1;
+  string syntax_highlight = 2;
 }
 
 message PutPreferencesResponse {}

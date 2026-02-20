@@ -15,8 +15,9 @@ import (
 
 // userPreferences is the JSON structure stored in the users.preferences column.
 type userPreferences struct {
-	Theme        string       `json:"theme,omitempty"`
-	SavedQueries []savedQuery `json:"saved_queries,omitempty"`
+	Theme            string       `json:"theme,omitempty"`
+	SyntaxHighlight  string       `json:"syntax_highlight,omitempty"`
+	SavedQueries     []savedQuery `json:"saved_queries,omitempty"`
 }
 
 // savedQuery is one entry in the user's saved queries list.
@@ -69,7 +70,8 @@ func (s *ConfigServer) GetPreferences(
 	}
 
 	return connect.NewResponse(&apiv1.GetPreferencesResponse{
-		Theme: prefs.Theme,
+		Theme:           prefs.Theme,
+		SyntaxHighlight: prefs.SyntaxHighlight,
 	}), nil
 }
 
@@ -89,6 +91,7 @@ func (s *ConfigServer) PutPreferences(
 	}
 
 	prefs.Theme = req.Msg.Theme
+	prefs.SyntaxHighlight = req.Msg.SyntaxHighlight
 	if err := s.savePrefs(ctx, uid, prefs); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}

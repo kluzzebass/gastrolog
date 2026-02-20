@@ -109,7 +109,7 @@ export function SearchView() {
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(
     null,
   );
-  const { theme, setTheme, dark } = useThemeSync();
+  const { theme, setTheme, dark, highlightMode, setHighlightMode } = useThemeSync();
 
   const {
     sidebarWidth, sidebarCollapsed, setSidebarCollapsed, handleSidebarResize,
@@ -611,6 +611,8 @@ export function SearchView() {
         dark={dark}
         theme={theme}
         setTheme={setTheme}
+        highlightMode={highlightMode}
+        setHighlightMode={setHighlightMode}
         statsLoading={statsLoading}
         totalRecords={totalRecords}
         totalStores={totalStores}
@@ -944,6 +946,7 @@ export function SearchView() {
                           onFilterToggle={handleTokenToggle}
                           onSpanClick={handleSpanClick}
                           dark={dark}
+                          highlightMode={highlightMode}
                         />
                       );
                     })}
@@ -981,6 +984,7 @@ export function SearchView() {
           contextAfter={contextAfter}
           contextLoading={contextLoading}
           contextReversed={isReversed}
+          highlightMode={highlightMode}
           onContextRecordSelect={(rec) => {
             const ts = rec.writeTs?.toDate();
             if (ts) {

@@ -1,7 +1,7 @@
 import { forwardRef } from "react";
 import type { ProtoRecord } from "../utils";
 import { clickableProps } from "../utils";
-import { syntaxHighlight, composeWithSearch } from "../syntax";
+import { syntaxHighlight, composeWithSearch, type HighlightMode } from "../syntax";
 import { CopyButton } from "./CopyButton";
 
 interface SeverityInfo {
@@ -54,13 +54,14 @@ export const LogEntry = forwardRef<
     onFilterToggle?: (token: string) => void;
     onSpanClick?: (value: string, shiftKey: boolean) => void;
     dark: boolean;
+    highlightMode?: HighlightMode;
   }
 >(function LogEntry(
-  { record, tokens, isSelected, onSelect, onFilterToggle, onSpanClick, dark },
+  { record, tokens, isSelected, onSelect, onFilterToggle, onSpanClick, dark, highlightMode = "full" },
   ref,
 ) {
   const rawText = new TextDecoder().decode(record.raw);
-  const parts = composeWithSearch(syntaxHighlight(rawText), tokens);
+  const parts = composeWithSearch(syntaxHighlight(rawText, highlightMode), tokens);
   const severity = detectSeverity(record.attrs);
   const ingestTime = record.ingestTs ? record.ingestTs.toDate() : new Date();
 

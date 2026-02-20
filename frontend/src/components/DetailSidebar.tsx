@@ -1,6 +1,7 @@
 import { Record as ProtoRecord } from "../api/client";
 import { DetailPanelContent } from "./DetailPanel";
 import { useThemeClass } from "../hooks/useThemeClass";
+import type { HighlightMode } from "../syntax";
 
 interface DetailSidebarProps {
   dark: boolean;
@@ -21,6 +22,7 @@ interface DetailSidebarProps {
   contextLoading: boolean;
   contextReversed: boolean;
   onContextRecordSelect: (rec: ProtoRecord) => void;
+  highlightMode?: HighlightMode;
 }
 
 export function DetailSidebar({
@@ -42,6 +44,7 @@ export function DetailSidebar({
   contextLoading,
   contextReversed,
   onContextRecordSelect,
+  highlightMode = "full",
 }: Readonly<DetailSidebarProps>) {
   const c = useThemeClass(dark);
 
@@ -144,6 +147,7 @@ export function DetailSidebar({
             contextLoading={contextLoading}
             contextReversed={contextReversed}
             onContextRecordSelect={onContextRecordSelect}
+            highlightMode={highlightMode}
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-48 px-4">

@@ -2,11 +2,14 @@ import { StatPill } from "./StatPill";
 import { UserMenu } from "./UserMenu";
 import type { Theme } from "../utils";
 import { useThemeClass } from "../hooks/useThemeClass";
+import type { HighlightMode } from "../hooks/useThemeSync";
 
 interface HeaderBarProps {
   dark: boolean;
   theme: Theme;
   setTheme: (t: Theme) => void;
+  highlightMode: HighlightMode;
+  setHighlightMode: (m: HighlightMode) => void;
   statsLoading: boolean;
   totalRecords: bigint;
   totalStores: bigint;
@@ -25,6 +28,8 @@ export function HeaderBar({
   dark,
   theme,
   setTheme,
+  highlightMode,
+  setHighlightMode,
   statsLoading,
   totalRecords,
   totalStores,
@@ -115,6 +120,36 @@ export function HeaderBar({
             : theme === "light"
               ? "\u2600"
               : "\u25D1"}
+        </button>
+
+        <button
+          onClick={() => setHighlightMode(highlightMode === "full" ? "subtle" : "full")}
+          aria-label={`Syntax highlighting: ${highlightMode}`}
+          title={`Syntax highlighting: ${highlightMode}`}
+          className={`w-7 h-7 flex items-center justify-center text-sm rounded transition-all duration-200 ${c(
+            "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
+            "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
+          )} ${highlightMode === "full" ? c("text-copper", "text-copper") : ""}`}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="w-4 h-4"
+          >
+            {highlightMode === "full" ? (
+              <>
+                <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                <path d="M2 17l10 5 10-5" />
+                <path d="M2 12l10 5 10-5" />
+              </>
+            ) : (
+              <path d="M12 2L2 7l10 5 10-5-10-5z" />
+            )}
+          </svg>
         </button>
 
         <button

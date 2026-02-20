@@ -6,7 +6,7 @@ import {
   formatBytes,
   formatChunkId,
 } from "../utils";
-import { syntaxHighlight } from "../syntax";
+import { syntaxHighlight, type HighlightMode } from "../syntax";
 import { CopyButton } from "./CopyButton";
 import { ContextRecord } from "./ContextRecord";
 
@@ -23,6 +23,7 @@ export function DetailPanelContent({
   contextLoading,
   contextReversed,
   onContextRecordSelect,
+  highlightMode = "full",
 }: Readonly<{
   record: ProtoRecord;
   dark: boolean;
@@ -35,6 +36,7 @@ export function DetailPanelContent({
   contextLoading?: boolean;
   contextReversed?: boolean;
   onContextRecordSelect?: (record: ProtoRecord) => void;
+  highlightMode?: HighlightMode;
 }>) {
   const c = useThemeClass(dark);
   const rawText = new TextDecoder().decode(record.raw);
@@ -117,7 +119,7 @@ export function DetailPanelContent({
         <pre
           className={`text-[0.85em] font-mono p-3 rounded border whitespace-pre-wrap wrap-break-word leading-relaxed ${c("border-ink-border-subtle bg-ink text-text-normal", "border-light-border-subtle bg-light-bg text-light-text-normal")}`}
         >
-          {syntaxHighlight(displayText).map((span, i) => {
+          {syntaxHighlight(displayText, highlightMode).map((span, i) => {
             const style = span.color ? { color: span.color } : undefined;
             return span.url ? (
               <a
@@ -227,6 +229,7 @@ export function DetailPanelContent({
           contextLoading={contextLoading}
           contextReversed={contextReversed}
           onContextRecordSelect={onContextRecordSelect}
+          highlightMode={highlightMode}
         />
       </DetailSection>
     </div>
@@ -238,11 +241,13 @@ function ContextList({
   prefix,
   dark,
   onSelect,
+  highlightMode = "full",
 }: Readonly<{
   records: ProtoRecord[] | undefined;
   prefix: string;
   dark: boolean;
   onSelect?: (rec: ProtoRecord) => void;
+  highlightMode?: HighlightMode;
 }>) {
   return records?.map((rec, i) => (
     <ContextRecord
@@ -251,6 +256,7 @@ function ContextList({
       isAnchor={false}
       dark={dark}
       onSelect={onSelect ? () => onSelect(rec) : undefined}
+      highlightMode={highlightMode}
     />
   ));
 }
@@ -263,6 +269,7 @@ function ContextSection({
   contextLoading,
   contextReversed,
   onContextRecordSelect,
+  highlightMode = "full",
 }: Readonly<{
   dark: boolean;
   record: ProtoRecord;
@@ -271,6 +278,7 @@ function ContextSection({
   contextLoading?: boolean;
   contextReversed?: boolean;
   onContextRecordSelect?: (record: ProtoRecord) => void;
+  highlightMode?: HighlightMode;
 }>) {
   const c = useThemeClass(dark);
 
@@ -298,6 +306,7 @@ function ContextSection({
       isAnchor={true}
       dark={dark}
       onSelect={onContextRecordSelect ? () => onContextRecordSelect(record) : undefined}
+      highlightMode={highlightMode}
     />
   );
 
@@ -310,9 +319,9 @@ function ContextSection({
 
   return (
     <div className={`rounded overflow-hidden border ${c("border-ink-border-subtle bg-ink", "border-light-border-subtle bg-light-bg")}`}>
-      <ContextList records={before} prefix={beforePrefix} dark={dark} onSelect={onContextRecordSelect} />
+      <ContextList records={before} prefix={beforePrefix} dark={dark} onSelect={onContextRecordSelect} highlightMode={highlightMode} />
       {anchor}
-      <ContextList records={after} prefix={afterPrefix} dark={dark} onSelect={onContextRecordSelect} />
+      <ContextList records={after} prefix={afterPrefix} dark={dark} onSelect={onContextRecordSelect} highlightMode={highlightMode} />
     </div>
   );
 }

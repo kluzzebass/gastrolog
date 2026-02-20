@@ -15,8 +15,8 @@ export function usePreferences() {
 export function usePutPreferences() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (args: { theme: string }) => {
-      await configClient.putPreferences({ theme: args.theme });
+    mutationFn: async (args: { theme: string; syntaxHighlight: string }) => {
+      await configClient.putPreferences({ theme: args.theme, syntaxHighlight: args.syntaxHighlight });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["preferences"] }),
   });

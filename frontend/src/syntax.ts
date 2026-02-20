@@ -32,8 +32,14 @@ const C_SEV_TRACE = "var(--color-severity-trace)";
 
 // --- Public API ---
 
-/** Syntax-highlight a log message. Detects JSON vs KV/plain automatically. */
-export function syntaxHighlight(text: string): SyntaxSpan[] {
+export type HighlightMode = "full" | "subtle";
+
+/** Syntax-highlight a log message. Detects JSON vs KV/plain automatically.
+ *  In "subtle" mode, only severity keywords are colored. */
+export function syntaxHighlight(text: string, mode: HighlightMode = "full"): SyntaxSpan[] {
+  if (mode === "subtle") {
+    return highlightSubtle(text);
+  }
   const trimmed = text.trimStart();
   if (trimmed.startsWith("{")) {
     return highlightJSON(text);
@@ -100,6 +106,42 @@ export function composeWithSearch(
   }
 
   return result;
+}
+
+// --- Subtle highlighter (severity keywords only) ---
+
+function highlightSubtle(text: string): SyntaxSpan[] {
+  const intervals: ColorInterval[] = [];
+  let m: RegExpExecArray | null;
+
+  reset(RE_SEV);
+  while ((m = RE_SEV.exec(text)) !== null) {
+    const word = m[1]!.toUpperCase();
+    let color: string;
+    if (
+      word === "ERROR" ||
+      word === "ERR" ||
+      word === "FATAL" ||
+      word === "CRITICAL"
+    ) {
+      color = C_SEV_ERROR;
+    } else if (word === "WARN" || word === "WARNING") {
+      color = C_SEV_WARN;
+    } else if (word === "INFO" || word === "NOTICE") {
+      color = C_SEV_INFO;
+    } else if (word === "DEBUG") {
+      color = C_SEV_DEBUG;
+    } else {
+      color = C_SEV_TRACE;
+    }
+    intervals.push({
+      start: m.index,
+      end: m.index + m[0].length,
+      color,
+    });
+  }
+
+  return intervalsToSpans(text, intervals);
 }
 
 // --- JSON highlighter ---
