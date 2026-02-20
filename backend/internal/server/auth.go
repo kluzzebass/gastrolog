@@ -271,6 +271,11 @@ func (s *AuthServer) ChangePassword(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update password: %w", err))
 	}
 
+	// Invalidate existing tokens so the user must re-login with the new password.
+	if err := s.cfgStore.InvalidateTokens(ctx, user.ID, time.Now().UTC()); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("invalidate tokens: %w", err))
+	}
+
 	return connect.NewResponse(&apiv1.ChangePasswordResponse{}), nil
 }
 
@@ -391,6 +396,11 @@ func (s *AuthServer) UpdateUserRole(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update role: %w", err))
 	}
 
+	// Invalidate existing tokens so the user's role claim gets refreshed on re-login.
+	if err := s.cfgStore.InvalidateTokens(ctx, userID, time.Now().UTC()); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("invalidate tokens: %w", err))
+	}
+
 	// Re-fetch to get the updated user.
 	user, err = s.cfgStore.GetUser(ctx, userID)
 	if err != nil {
@@ -434,6 +444,11 @@ func (s *AuthServer) ResetPassword(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update password: %w", err))
 	}
 
+	// Invalidate existing tokens so the user must re-login with the new password.
+	if err := s.cfgStore.InvalidateTokens(ctx, userID, time.Now().UTC()); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("invalidate tokens: %w", err))
+	}
+
 	return connect.NewResponse(&apiv1.ResetPasswordResponse{}), nil
 }
 
@@ -459,6 +474,29 @@ func (s *AuthServer) DeleteUser(
 	}
 
 	return connect.NewResponse(&apiv1.DeleteUserResponse{}), nil
+}
+
+// Logout invalidates the current user's token by setting TokenInvalidatedAt to now.
+func (s *AuthServer) Logout(
+	ctx context.Context,
+	req *connect.Request[apiv1.LogoutRequest],
+) (*connect.Response[apiv1.LogoutResponse], error) {
+	claims := auth.ClaimsFromContext(ctx)
+	if claims == nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("no claims in context"))
+	}
+
+	userID, connErr := parseUUID(claims.UserID)
+	if connErr != nil {
+		return nil, connErr
+	}
+
+	now := time.Now().UTC()
+	if err := s.cfgStore.InvalidateTokens(ctx, userID, now); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("invalidate tokens: %w", err))
+	}
+
+	return connect.NewResponse(&apiv1.LogoutResponse{}), nil
 }
 
 // userToProto converts a config.User to a proto UserInfo, stripping the password hash.

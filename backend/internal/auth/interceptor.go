@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -16,22 +17,32 @@ type UserCounter interface {
 	CountUsers(ctx context.Context) (int, error)
 }
 
+// TokenValidator checks whether a token is still valid after JWT verification.
+// This is used for server-side token revocation (e.g. after logout, password
+// change, or role change).
+type TokenValidator interface {
+	IsTokenValid(ctx context.Context, userID string, issuedAt time.Time) (bool, error)
+}
+
 // AuthInterceptor is a Connect interceptor that validates JWT tokens
 // and enforces access levels per endpoint.
 type AuthInterceptor struct {
-	tokens  *TokenService
-	counter UserCounter
-	public  map[string]bool
-	admin   map[string]bool
+	tokens    *TokenService
+	counter   UserCounter
+	validator TokenValidator
+	public    map[string]bool
+	admin     map[string]bool
 }
 
 // NewAuthInterceptor creates an interceptor with the standard access level
 // configuration. Public endpoints require no auth. Admin endpoints require
 // role=admin. Everything else requires a valid token.
-func NewAuthInterceptor(tokens *TokenService, counter UserCounter) *AuthInterceptor {
+// validator may be nil (token revocation is skipped).
+func NewAuthInterceptor(tokens *TokenService, counter UserCounter, validator TokenValidator) *AuthInterceptor {
 	return &AuthInterceptor{
-		tokens:  tokens,
-		counter: counter,
+		tokens:    tokens,
+		counter:   counter,
+		validator: validator,
 		public: map[string]bool{
 			gastrologv1connect.LifecycleServiceHealthProcedure:      true,
 			gastrologv1connect.AuthServiceGetAuthStatusProcedure:    true,
@@ -137,6 +148,17 @@ func (i *AuthInterceptor) authenticate(ctx context.Context, procedure string, he
 	claims, err := i.tokens.Verify(token)
 	if err != nil {
 		return ctx, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("invalid token: %w", err))
+	}
+
+	// Check server-side token revocation (logout, password change, role change).
+	if i.validator != nil && claims.IssuedAt != nil {
+		valid, err := i.validator.IsTokenValid(ctx, claims.UserID, claims.IssuedAt.Time)
+		if err != nil {
+			return ctx, connect.NewError(connect.CodeInternal, fmt.Errorf("validate token: %w", err))
+		}
+		if !valid {
+			return ctx, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("token has been revoked"))
+		}
 	}
 
 	// Admin check.

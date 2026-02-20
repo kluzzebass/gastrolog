@@ -691,6 +691,21 @@ func (s *Store) DeleteUser(ctx context.Context, id uuid.UUID) error {
 	return s.flushUsers(users)
 }
 
+func (s *Store) InvalidateTokens(ctx context.Context, id uuid.UUID, at time.Time) error {
+	users, err := s.loadUsers()
+	if err != nil {
+		return err
+	}
+	u, ok := users[id]
+	if !ok {
+		return fmt.Errorf("user %q not found", id)
+	}
+	u.TokenInvalidatedAt = at
+	u.UpdatedAt = time.Now().UTC()
+	users[id] = u
+	return s.flushUsers(users)
+}
+
 func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	users, err := s.loadUsers()
 	if err != nil {

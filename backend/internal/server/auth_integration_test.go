@@ -21,7 +21,7 @@ import (
 func TestIntegration_RegisterThenDenyQuery(t *testing.T) {
 	cfgStore := configmem.NewStore()
 	tokens := auth.NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
-	interceptor := auth.NewAuthInterceptor(tokens, cfgStore)
+	interceptor := auth.NewAuthInterceptor(tokens, cfgStore, nil)
 	opts := connect.WithInterceptors(interceptor)
 
 	authServer := server.NewAuthServer(cfgStore, tokens)

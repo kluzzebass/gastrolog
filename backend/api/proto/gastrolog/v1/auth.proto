@@ -33,6 +33,9 @@ service AuthService {
 
   // DeleteUser removes a user account. Admin only.
   rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+
+  // Logout invalidates the current user's token.
+  rpc Logout(LogoutRequest) returns (LogoutResponse);
 }
 
 message Token {
@@ -118,3 +121,7 @@ message DeleteUserRequest {
 }
 
 message DeleteUserResponse {}
+
+message LogoutRequest {}
+
+message LogoutResponse {}

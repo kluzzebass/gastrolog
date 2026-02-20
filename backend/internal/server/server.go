@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	"crypto/tls"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 
@@ -63,6 +65,10 @@ type Server struct {
 	inFlight sync.WaitGroup // tracks in-flight requests for graceful drain
 	draining atomic.Bool    // true when server is draining (rejecting new requests)
 
+	rl       *rateLimiter   // per-IP rate limiter for auth endpoints
+	rlCancel context.CancelFunc
+	rlWG     sync.WaitGroup
+
 	// Dynamic TLS: HTTPS listener when enabled
 	httpsListener net.Listener
 	httpsServer   *http.Server
@@ -80,6 +86,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orche
 		certManager: cfg.CertManager,
 		logger:      logging.Default(cfg.Logger).With("component", "server"),
 		shutdown:    make(chan struct{}),
+		rl:          newRateLimiter(5.0/60.0, 5), // 5 req/min per IP, burst of 5
 	}
 }
 
@@ -172,7 +179,7 @@ func (s *Server) buildMux() *http.ServeMux {
 
 	var handlerOpts []connect.HandlerOption
 	if s.tokens != nil {
-		authInterceptor := auth.NewAuthInterceptor(s.tokens, s.cfgStore)
+		authInterceptor := auth.NewAuthInterceptor(s.tokens, s.cfgStore, &tokenValidator{store: s.cfgStore})
 		handlerOpts = append(handlerOpts, connect.WithInterceptors(authInterceptor))
 	}
 
@@ -216,9 +223,15 @@ func (s *Server) Serve(listener net.Listener) error {
 	s.listener = listener
 	s.mu.Unlock()
 
+	// Start rate-limiter cleanup goroutine.
+	rlCtx, rlCancel := context.WithCancel(context.Background())
+	s.rlCancel = rlCancel
+	s.rl.startCleanup(rlCtx, &s.rlWG, 3*time.Minute, 5*time.Minute)
+
 	// Build the core handler once — reused by both HTTP and HTTPS.
+	// Chain: tracking → CORS → rateLimit → compress → mux
 	mux := s.buildMux()
-	s.handler = s.trackingMiddleware(s.corsMiddleware(compressMiddleware(mux)))
+	s.handler = s.trackingMiddleware(s.corsMiddleware(rateLimitMiddleware(s.rl)(compressMiddleware(mux))))
 
 	// HTTP adds redirect-to-HTTPS + h2c (HTTP/2 without TLS).
 	redirectHandler := s.redirectMiddleware(s.handler)
@@ -316,6 +329,11 @@ func (s *Server) reconfigureTLS() {
 		return
 	}
 	tlsConfig := s.certManager.TLSConfig()
+	// Harden server-side TLS: require TLS 1.2+ and prefer modern curves.
+	// CertManager.TLSConfig() is generic (also used for client certs);
+	// server hardening is applied here, not in the shared config.
+	tlsConfig.MinVersion = tls.VersionTLS12
+	tlsConfig.CurvePreferences = []tls.CurveID{tls.X25519, tls.CurveP256}
 	tlsLn := tls.NewListener(ln, tlsConfig)
 
 	s.httpsListener = tlsLn
@@ -379,6 +397,12 @@ func (s *Server) ServeTCP(addr string) error {
 
 // Stop gracefully stops the server.
 func (s *Server) Stop(ctx context.Context) error {
+	// Stop rate-limiter cleanup goroutine.
+	if s.rlCancel != nil {
+		s.rlCancel()
+		s.rlWG.Wait()
+	}
+
 	s.mu.Lock()
 	server := s.server
 	httpsServer := s.httpsServer
@@ -442,6 +466,29 @@ func (s *Server) Handler() http.Handler {
 	mux := s.buildMux()
 	handler := h2c.NewHandler(mux, &http2.Server{})
 	return s.trackingMiddleware(handler)
+}
+
+// tokenValidator adapts config.Store to auth.TokenValidator.
+type tokenValidator struct {
+	store config.Store
+}
+
+func (tv *tokenValidator) IsTokenValid(ctx context.Context, userID string, issuedAt time.Time) (bool, error) {
+	uid, err := uuid.Parse(userID)
+	if err != nil {
+		return false, fmt.Errorf("parse user ID %q: %w", userID, err)
+	}
+	user, err := tv.store.GetUser(ctx, uid)
+	if err != nil {
+		return false, err
+	}
+	if user == nil {
+		return false, nil // deleted user
+	}
+	if !user.TokenInvalidatedAt.IsZero() && !issuedAt.After(user.TokenInvalidatedAt) {
+		return false, nil // token issued before invalidation
+	}
+	return true, nil
 }
 
 // Client creates a set of Connect clients for the given base URL.

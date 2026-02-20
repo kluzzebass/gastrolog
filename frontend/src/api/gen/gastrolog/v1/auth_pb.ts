@@ -806,3 +806,65 @@ export class DeleteUserResponse extends Message<DeleteUserResponse> {
   }
 }
 
+/**
+ * @generated from message gastrolog.v1.LogoutRequest
+ */
+export class LogoutRequest extends Message<LogoutRequest> {
+  constructor(data?: PartialMessage<LogoutRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.LogoutRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): LogoutRequest {
+    return new LogoutRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): LogoutRequest {
+    return new LogoutRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): LogoutRequest {
+    return new LogoutRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: LogoutRequest | PlainMessage<LogoutRequest> | undefined, b: LogoutRequest | PlainMessage<LogoutRequest> | undefined): boolean {
+    return proto3.util.equals(LogoutRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.LogoutResponse
+ */
+export class LogoutResponse extends Message<LogoutResponse> {
+  constructor(data?: PartialMessage<LogoutResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.LogoutResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): LogoutResponse {
+    return new LogoutResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): LogoutResponse {
+    return new LogoutResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): LogoutResponse {
+    return new LogoutResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: LogoutResponse | PlainMessage<LogoutResponse> | undefined, b: LogoutResponse | PlainMessage<LogoutResponse> | undefined): boolean {
+    return proto3.util.equals(LogoutResponse, a, b);
+  }
+}
+

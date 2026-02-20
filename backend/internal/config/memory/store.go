@@ -472,6 +472,20 @@ func (s *Store) DeleteUser(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+func (s *Store) InvalidateTokens(ctx context.Context, id uuid.UUID, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	u, ok := s.users[id]
+	if !ok {
+		return fmt.Errorf("user %q not found", id)
+	}
+	u.TokenInvalidatedAt = at
+	u.UpdatedAt = time.Now().UTC()
+	s.users[id] = u
+	return nil
+}
+
 func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

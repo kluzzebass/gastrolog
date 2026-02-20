@@ -81,7 +81,13 @@ export function useChangePassword() {
 export function useLogout() {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  return useCallback(() => {
+  return useCallback(async () => {
+    try {
+      await authClient.logout({});
+    } catch {
+      // Best-effort: clear local state even if the server call fails
+      // (e.g. token already expired).
+    }
     setToken(null);
     qc.clear();
     navigate({ to: "/login" });

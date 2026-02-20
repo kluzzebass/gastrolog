@@ -89,13 +89,17 @@ func TestMigrationsIdempotent(t *testing.T) {
 	}
 	defer s2.Close()
 
-	// Verify schema_migrations has exactly one version.
+	// Verify schema_migrations has the right number of versions.
+	migrations, err := loadMigrations()
+	if err != nil {
+		t.Fatalf("loadMigrations: %v", err)
+	}
 	var count int
 	if err := s2.db.QueryRow("SELECT count(*) FROM schema_migrations").Scan(&count); err != nil {
 		t.Fatalf("count: %v", err)
 	}
-	if count != 1 {
-		t.Errorf("expected 1 migration version, got %d", count)
+	if count != len(migrations) {
+		t.Errorf("expected %d migration versions, got %d", len(migrations), count)
 	}
 }
 

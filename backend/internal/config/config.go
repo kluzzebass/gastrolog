@@ -92,6 +92,7 @@ type Store interface {
 	UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error
 	UpdateUserRole(ctx context.Context, id uuid.UUID, role string) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
+	InvalidateTokens(ctx context.Context, id uuid.UUID, at time.Time) error
 	CountUsers(ctx context.Context) (int, error)
 	GetUserPreferences(ctx context.Context, id uuid.UUID) (*string, error)
 	PutUserPreferences(ctx context.Context, id uuid.UUID, prefs string) error
@@ -168,13 +169,14 @@ type AuthConfig struct {
 
 // User represents a user account.
 type User struct {
-	ID           uuid.UUID `json:"id"`
-	Username     string    `json:"username"`
-	PasswordHash string    `json:"password_hash"`
-	Role         string    `json:"role"` // "admin" or "user"
-	Preferences  string    `json:"preferences,omitempty"` // opaque JSON blob
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID                 uuid.UUID `json:"id"`
+	Username           string    `json:"username"`
+	PasswordHash       string    `json:"password_hash"`
+	Role               string    `json:"role"` // "admin" or "user"
+	Preferences        string    `json:"preferences,omitempty"`          // opaque JSON blob
+	TokenInvalidatedAt time.Time `json:"token_invalidated_at,omitzero"` // tokens issued before this are invalid
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 // FilterConfig defines a named filter expression.

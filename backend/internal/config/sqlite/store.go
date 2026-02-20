@@ -633,68 +633,68 @@ func (s *Store) DeleteCertificate(ctx context.Context, id uuid.UUID) error {
 // Users
 
 func (s *Store) CreateUser(ctx context.Context, user config.User) error {
+	var tia *string
+	if !user.TokenInvalidatedAt.IsZero() {
+		v := user.TokenInvalidatedAt.Format(timeFormat)
+		tia = &v
+	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO users (id, username, password_hash, role, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO users (id, username, password_hash, role, created_at, updated_at, token_invalidated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`, user.ID, user.Username, user.PasswordHash, user.Role,
-		user.CreatedAt.Format(timeFormat), user.UpdatedAt.Format(timeFormat))
+		user.CreatedAt.Format(timeFormat), user.UpdatedAt.Format(timeFormat), tia)
 	if err != nil {
 		return fmt.Errorf("create user %q: %w", user.Username, err)
 	}
 	return nil
 }
 
-func (s *Store) GetUser(ctx context.Context, id uuid.UUID) (*config.User, error) {
-	row := s.db.QueryRowContext(ctx,
-		"SELECT id, username, password_hash, role, created_at, updated_at FROM users WHERE id = ?", id)
-
+// scanUser scans a user row including the token_invalidated_at column.
+func scanUser(row interface{ Scan(...any) error }, label string) (*config.User, error) {
 	var u config.User
 	var createdAt, updatedAt string
-	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &createdAt, &updatedAt)
+	var tia *string
+	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &createdAt, &updatedAt, &tia)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get user %q: %w", id, err)
+		return nil, fmt.Errorf("%s: %w", label, err)
 	}
 	u.CreatedAt, err = time.Parse(timeFormat, createdAt)
 	if err != nil {
-		return nil, fmt.Errorf("get user %q: parse created_at %q: %w", id, createdAt, err)
+		return nil, fmt.Errorf("%s: parse created_at %q: %w", label, createdAt, err)
 	}
 	u.UpdatedAt, err = time.Parse(timeFormat, updatedAt)
 	if err != nil {
-		return nil, fmt.Errorf("get user %q: parse updated_at %q: %w", id, updatedAt, err)
+		return nil, fmt.Errorf("%s: parse updated_at %q: %w", label, updatedAt, err)
+	}
+	if tia != nil {
+		u.TokenInvalidatedAt, err = time.Parse(timeFormat, *tia)
+		if err != nil {
+			return nil, fmt.Errorf("%s: parse token_invalidated_at %q: %w", label, *tia, err)
+		}
 	}
 	return &u, nil
+}
+
+const userColumns = "id, username, password_hash, role, created_at, updated_at, token_invalidated_at"
+
+func (s *Store) GetUser(ctx context.Context, id uuid.UUID) (*config.User, error) {
+	row := s.db.QueryRowContext(ctx,
+		"SELECT "+userColumns+" FROM users WHERE id = ?", id)
+	return scanUser(row, fmt.Sprintf("get user %q", id))
 }
 
 func (s *Store) GetUserByUsername(ctx context.Context, username string) (*config.User, error) {
 	row := s.db.QueryRowContext(ctx,
-		"SELECT id, username, password_hash, role, created_at, updated_at FROM users WHERE username = ?", username)
-
-	var u config.User
-	var createdAt, updatedAt string
-	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &createdAt, &updatedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get user by username %q: %w", username, err)
-	}
-	u.CreatedAt, err = time.Parse(timeFormat, createdAt)
-	if err != nil {
-		return nil, fmt.Errorf("get user by username %q: parse created_at %q: %w", username, createdAt, err)
-	}
-	u.UpdatedAt, err = time.Parse(timeFormat, updatedAt)
-	if err != nil {
-		return nil, fmt.Errorf("get user by username %q: parse updated_at %q: %w", username, updatedAt, err)
-	}
-	return &u, nil
+		"SELECT "+userColumns+" FROM users WHERE username = ?", username)
+	return scanUser(row, fmt.Sprintf("get user by username %q", username))
 }
 
 func (s *Store) ListUsers(ctx context.Context) ([]config.User, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, username, password_hash, role, created_at, updated_at FROM users ORDER BY created_at")
+		"SELECT "+userColumns+" FROM users ORDER BY created_at")
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
@@ -702,20 +702,11 @@ func (s *Store) ListUsers(ctx context.Context) ([]config.User, error) {
 
 	var users []config.User
 	for rows.Next() {
-		var u config.User
-		var createdAt, updatedAt string
-		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &createdAt, &updatedAt); err != nil {
-			return nil, fmt.Errorf("scan user: %w", err)
-		}
-		u.CreatedAt, err = time.Parse(timeFormat, createdAt)
+		u, err := scanUser(rows, "scan user")
 		if err != nil {
-			return nil, fmt.Errorf("scan user %q: parse created_at %q: %w", u.Username, createdAt, err)
+			return nil, err
 		}
-		u.UpdatedAt, err = time.Parse(timeFormat, updatedAt)
-		if err != nil {
-			return nil, fmt.Errorf("scan user %q: parse updated_at %q: %w", u.Username, updatedAt, err)
-		}
-		users = append(users, u)
+		users = append(users, *u)
 	}
 	return users, rows.Err()
 }
@@ -747,6 +738,23 @@ func (s *Store) UpdateUserRole(ctx context.Context, id uuid.UUID, role string) e
 	n, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("update role for %q: %w", id, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("user %q not found", id)
+	}
+	return nil
+}
+
+func (s *Store) InvalidateTokens(ctx context.Context, id uuid.UUID, at time.Time) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE users SET token_invalidated_at = ?, updated_at = ? WHERE id = ?
+	`, at.Format(timeFormat), time.Now().UTC().Format(timeFormat), id)
+	if err != nil {
+		return fmt.Errorf("invalidate tokens for %q: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("invalidate tokens for %q: %w", id, err)
 	}
 	if n == 0 {
 		return fmt.Errorf("user %q not found", id)

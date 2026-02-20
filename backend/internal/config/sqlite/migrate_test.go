@@ -36,13 +36,18 @@ func TestRunMigrationsFreshDB(t *testing.T) {
 		t.Fatalf("runMigrations: %v", err)
 	}
 
-	// Verify schema_migrations recorded the version.
-	var version int
-	if err := db.QueryRow("SELECT version FROM schema_migrations").Scan(&version); err != nil {
-		t.Fatalf("query version: %v", err)
+	// Verify schema_migrations recorded all migrations.
+	migrations, err := loadMigrations()
+	if err != nil {
+		t.Fatalf("loadMigrations: %v", err)
 	}
-	if version != 1 {
-		t.Errorf("expected version 1, got %d", version)
+
+	var count int
+	if err := db.QueryRow("SELECT count(*) FROM schema_migrations").Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != len(migrations) {
+		t.Errorf("expected %d migration records, got %d", len(migrations), count)
 	}
 }
 
@@ -65,11 +70,16 @@ func TestRunMigrationsIdempotent(t *testing.T) {
 		t.Fatalf("second run: %v", err)
 	}
 
+	migrations, err := loadMigrations()
+	if err != nil {
+		t.Fatalf("loadMigrations: %v", err)
+	}
+
 	var count int
 	if err := db.QueryRow("SELECT count(*) FROM schema_migrations").Scan(&count); err != nil {
 		t.Fatalf("count: %v", err)
 	}
-	if count != 1 {
-		t.Errorf("expected 1 migration record, got %d", count)
+	if count != len(migrations) {
+		t.Errorf("expected %d migration records, got %d", len(migrations), count)
 	}
 }

@@ -1266,6 +1266,49 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 	})
 
+	t.Run("InvalidateTokens", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		id := newID()
+		now := time.Now().UTC().Truncate(time.Second)
+		if err := s.CreateUser(ctx, config.User{
+			ID: id, Username: "alice", PasswordHash: "h1", Role: "user",
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("CreateUser: %v", err)
+		}
+
+		// Initially zero.
+		user, err := s.GetUser(ctx, id)
+		if err != nil {
+			t.Fatalf("GetUser: %v", err)
+		}
+		if !user.TokenInvalidatedAt.IsZero() {
+			t.Errorf("expected zero TokenInvalidatedAt, got %v", user.TokenInvalidatedAt)
+		}
+
+		// Invalidate.
+		invalidAt := time.Now().UTC().Truncate(time.Second)
+		if err := s.InvalidateTokens(ctx, id, invalidAt); err != nil {
+			t.Fatalf("InvalidateTokens: %v", err)
+		}
+
+		user, err = s.GetUser(ctx, id)
+		if err != nil {
+			t.Fatalf("GetUser after invalidate: %v", err)
+		}
+		got := user.TokenInvalidatedAt.Truncate(time.Second)
+		if !got.Equal(invalidAt) {
+			t.Errorf("TokenInvalidatedAt: expected %v, got %v", invalidAt, got)
+		}
+
+		// Non-existent user returns error.
+		if err := s.InvalidateTokens(ctx, uuid.Must(uuid.NewV7()), invalidAt); err == nil {
+			t.Fatal("expected error invalidating non-existent user")
+		}
+	})
+
 	t.Run("UsersNotInLoad", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()

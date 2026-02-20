@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { ChangePasswordRequest, ChangePasswordResponse, CreateUserRequest, CreateUserResponse, DeleteUserRequest, DeleteUserResponse, GetAuthStatusRequest, GetAuthStatusResponse, ListUsersRequest, ListUsersResponse, LoginRequest, LoginResponse, RegisterRequest, RegisterResponse, ResetPasswordRequest, ResetPasswordResponse, UpdateUserRoleRequest, UpdateUserRoleResponse } from "./auth_pb.js";
+import { ChangePasswordRequest, ChangePasswordResponse, CreateUserRequest, CreateUserResponse, DeleteUserRequest, DeleteUserResponse, GetAuthStatusRequest, GetAuthStatusResponse, ListUsersRequest, ListUsersResponse, LoginRequest, LoginResponse, LogoutRequest, LogoutResponse, RegisterRequest, RegisterResponse, ResetPasswordRequest, ResetPasswordResponse, UpdateUserRoleRequest, UpdateUserRoleResponse } from "./auth_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -112,6 +112,17 @@ export const AuthService = {
       name: "DeleteUser",
       I: DeleteUserRequest,
       O: DeleteUserResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * Logout invalidates the current user's token.
+     *
+     * @generated from rpc gastrolog.v1.AuthService.Logout
+     */
+    logout: {
+      name: "Logout",
+      I: LogoutRequest,
+      O: LogoutResponse,
       kind: MethodKind.Unary,
     },
   }

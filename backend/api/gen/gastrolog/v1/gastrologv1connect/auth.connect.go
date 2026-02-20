@@ -55,6 +55,8 @@ const (
 	AuthServiceResetPasswordProcedure = "/gastrolog.v1.AuthService/ResetPassword"
 	// AuthServiceDeleteUserProcedure is the fully-qualified name of the AuthService's DeleteUser RPC.
 	AuthServiceDeleteUserProcedure = "/gastrolog.v1.AuthService/DeleteUser"
+	// AuthServiceLogoutProcedure is the fully-qualified name of the AuthService's Logout RPC.
+	AuthServiceLogoutProcedure = "/gastrolog.v1.AuthService/Logout"
 )
 
 // AuthServiceClient is a client for the gastrolog.v1.AuthService service.
@@ -78,6 +80,8 @@ type AuthServiceClient interface {
 	ResetPassword(context.Context, *connect.Request[v1.ResetPasswordRequest]) (*connect.Response[v1.ResetPasswordResponse], error)
 	// DeleteUser removes a user account. Admin only.
 	DeleteUser(context.Context, *connect.Request[v1.DeleteUserRequest]) (*connect.Response[v1.DeleteUserResponse], error)
+	// Logout invalidates the current user's token.
+	Logout(context.Context, *connect.Request[v1.LogoutRequest]) (*connect.Response[v1.LogoutResponse], error)
 }
 
 // NewAuthServiceClient constructs a client for the gastrolog.v1.AuthService service. By default, it
@@ -145,6 +149,12 @@ func NewAuthServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(authServiceMethods.ByName("DeleteUser")),
 			connect.WithClientOptions(opts...),
 		),
+		logout: connect.NewClient[v1.LogoutRequest, v1.LogoutResponse](
+			httpClient,
+			baseURL+AuthServiceLogoutProcedure,
+			connect.WithSchema(authServiceMethods.ByName("Logout")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -159,6 +169,7 @@ type authServiceClient struct {
 	updateUserRole *connect.Client[v1.UpdateUserRoleRequest, v1.UpdateUserRoleResponse]
 	resetPassword  *connect.Client[v1.ResetPasswordRequest, v1.ResetPasswordResponse]
 	deleteUser     *connect.Client[v1.DeleteUserRequest, v1.DeleteUserResponse]
+	logout         *connect.Client[v1.LogoutRequest, v1.LogoutResponse]
 }
 
 // Register calls gastrolog.v1.AuthService.Register.
@@ -206,6 +217,11 @@ func (c *authServiceClient) DeleteUser(ctx context.Context, req *connect.Request
 	return c.deleteUser.CallUnary(ctx, req)
 }
 
+// Logout calls gastrolog.v1.AuthService.Logout.
+func (c *authServiceClient) Logout(ctx context.Context, req *connect.Request[v1.LogoutRequest]) (*connect.Response[v1.LogoutResponse], error) {
+	return c.logout.CallUnary(ctx, req)
+}
+
 // AuthServiceHandler is an implementation of the gastrolog.v1.AuthService service.
 type AuthServiceHandler interface {
 	// Register creates the first user account during initial setup.
@@ -227,6 +243,8 @@ type AuthServiceHandler interface {
 	ResetPassword(context.Context, *connect.Request[v1.ResetPasswordRequest]) (*connect.Response[v1.ResetPasswordResponse], error)
 	// DeleteUser removes a user account. Admin only.
 	DeleteUser(context.Context, *connect.Request[v1.DeleteUserRequest]) (*connect.Response[v1.DeleteUserResponse], error)
+	// Logout invalidates the current user's token.
+	Logout(context.Context, *connect.Request[v1.LogoutRequest]) (*connect.Response[v1.LogoutResponse], error)
 }
 
 // NewAuthServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -290,6 +308,12 @@ func NewAuthServiceHandler(svc AuthServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(authServiceMethods.ByName("DeleteUser")),
 		connect.WithHandlerOptions(opts...),
 	)
+	authServiceLogoutHandler := connect.NewUnaryHandler(
+		AuthServiceLogoutProcedure,
+		svc.Logout,
+		connect.WithSchema(authServiceMethods.ByName("Logout")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.AuthService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AuthServiceRegisterProcedure:
@@ -310,6 +334,8 @@ func NewAuthServiceHandler(svc AuthServiceHandler, opts ...connect.HandlerOption
 			authServiceResetPasswordHandler.ServeHTTP(w, r)
 		case AuthServiceDeleteUserProcedure:
 			authServiceDeleteUserHandler.ServeHTTP(w, r)
+		case AuthServiceLogoutProcedure:
+			authServiceLogoutHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -353,4 +379,8 @@ func (UnimplementedAuthServiceHandler) ResetPassword(context.Context, *connect.R
 
 func (UnimplementedAuthServiceHandler) DeleteUser(context.Context, *connect.Request[v1.DeleteUserRequest]) (*connect.Response[v1.DeleteUserResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.AuthService.DeleteUser is not implemented"))
+}
+
+func (UnimplementedAuthServiceHandler) Logout(context.Context, *connect.Request[v1.LogoutRequest]) (*connect.Response[v1.LogoutResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.AuthService.Logout is not implemented"))
 }

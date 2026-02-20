@@ -114,7 +114,7 @@ func newTestSetup(t *testing.T, counter *mockCounter) *testSetup {
 	t.Helper()
 
 	tokens := auth.NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
-	interceptor := auth.NewAuthInterceptor(tokens, counter)
+	interceptor := auth.NewAuthInterceptor(tokens, counter, nil)
 	opts := connect.WithInterceptors(interceptor)
 
 	mux := http.NewServeMux()
