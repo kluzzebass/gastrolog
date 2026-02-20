@@ -245,6 +245,7 @@ message GetServerConfigResponse {
   string https_port = 13;  // Configured HTTPS port; empty = HTTP port + 1.
   string max_follow_duration = 14; // Max lifetime for Follow streams (Go duration). Empty = no limit.
   string query_timeout = 15; // Max duration for queries (Go duration). Empty = 30s default.
+  string refresh_token_duration = 16; // Lifetime of refresh tokens (Go duration). Empty = 168h default.
 }
 
 message PutServerConfigRequest {
@@ -263,6 +264,7 @@ message PutServerConfigRequest {
   optional string https_port = 13;
   optional string max_follow_duration = 14;
   optional string query_timeout = 15;
+  optional string refresh_token_duration = 16;
 }
 
 message PutServerConfigResponse {}

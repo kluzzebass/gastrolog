@@ -34,8 +34,9 @@ type envelope struct {
 // Configuration is persisted as JSON for human readability.
 // Writes are atomic via temp file + rename with round-trip validation.
 type Store struct {
-	path      string
-	usersPath string
+	path              string
+	usersPath         string
+	refreshTokensPath string
 }
 
 var _ config.Store = (*Store)(nil)
@@ -44,7 +45,10 @@ var _ config.Store = (*Store)(nil)
 // configPath is the path to the config JSON file.
 // usersPath is the path to the users JSON file.
 func NewStore(configPath, usersPath string) *Store {
-	return &Store{path: configPath, usersPath: usersPath}
+	// Derive refresh tokens path from users path by replacing filename.
+	dir := filepath.Dir(usersPath)
+	refreshTokensPath := filepath.Join(dir, "refresh_tokens.json")
+	return &Store{path: configPath, usersPath: usersPath, refreshTokensPath: refreshTokensPath}
 }
 
 // Load reads the full configuration from disk.
@@ -742,4 +746,89 @@ func (s *Store) PutUserPreferences(ctx context.Context, id uuid.UUID, prefs stri
 	u.UpdatedAt = time.Now().UTC()
 	users[id] = u
 	return s.flushUsers(users)
+}
+
+// Refresh tokens
+
+func (s *Store) loadRefreshTokens() (map[uuid.UUID]config.RefreshToken, error) {
+	data, err := os.ReadFile(s.refreshTokensPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return make(map[uuid.UUID]config.RefreshToken), nil
+		}
+		return nil, fmt.Errorf("read refresh tokens file: %w", err)
+	}
+	var tokens map[uuid.UUID]config.RefreshToken
+	if err := json.Unmarshal(data, &tokens); err != nil {
+		return nil, fmt.Errorf("parse refresh tokens file: %w", err)
+	}
+	if tokens == nil {
+		tokens = make(map[uuid.UUID]config.RefreshToken)
+	}
+	return tokens, nil
+}
+
+func (s *Store) flushRefreshTokens(tokens map[uuid.UUID]config.RefreshToken) error {
+	dir := filepath.Dir(s.refreshTokensPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("create refresh tokens directory: %w", err)
+	}
+	data, err := json.MarshalIndent(tokens, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal refresh tokens: %w", err)
+	}
+	tmpPath := s.refreshTokensPath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("write temp refresh tokens file: %w", err)
+	}
+	if err := os.Rename(tmpPath, s.refreshTokensPath); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("rename refresh tokens file: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) CreateRefreshToken(ctx context.Context, token config.RefreshToken) error {
+	tokens, err := s.loadRefreshTokens()
+	if err != nil {
+		return err
+	}
+	tokens[token.ID] = token
+	return s.flushRefreshTokens(tokens)
+}
+
+func (s *Store) GetRefreshTokenByHash(ctx context.Context, tokenHash string) (*config.RefreshToken, error) {
+	tokens, err := s.loadRefreshTokens()
+	if err != nil {
+		return nil, err
+	}
+	for _, rt := range tokens {
+		if rt.TokenHash == tokenHash {
+			return &rt, nil
+		}
+	}
+	return nil, nil
+}
+
+func (s *Store) DeleteRefreshToken(ctx context.Context, id uuid.UUID) error {
+	tokens, err := s.loadRefreshTokens()
+	if err != nil {
+		return err
+	}
+	delete(tokens, id)
+	return s.flushRefreshTokens(tokens)
+}
+
+func (s *Store) DeleteUserRefreshTokens(ctx context.Context, userID uuid.UUID) error {
+	tokens, err := s.loadRefreshTokens()
+	if err != nil {
+		return err
+	}
+	for id, rt := range tokens {
+		if rt.UserID == userID {
+			delete(tokens, id)
+		}
+	}
+	return s.flushRefreshTokens(tokens)
 }

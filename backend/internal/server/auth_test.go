@@ -21,7 +21,7 @@ func newAuthTestClient(t *testing.T) (gastrologv1connect.AuthServiceClient, *con
 
 	cfgStore := configmem.NewStore()
 	tokens := auth.NewTokenService([]byte("test-secret-32-bytes-long-key!!"), 7*24*time.Hour)
-	authServer := server.NewAuthServer(cfgStore, tokens)
+	authServer := server.NewAuthServer(cfgStore, tokens, nil)
 
 	_, handler := gastrologv1connect.NewAuthServiceHandler(authServer)
 	ts := httptest.NewServer(handler)

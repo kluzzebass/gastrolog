@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/auth"
 	"gastrolog/internal/config"
+	"gastrolog/internal/logging"
 )
 
 var usernameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{3,64}$`)
@@ -24,15 +26,17 @@ var usernameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{3,64}$`)
 type AuthServer struct {
 	cfgStore config.Store
 	tokens   *auth.TokenService
+	logger   *slog.Logger
 }
 
 var _ gastrologv1connect.AuthServiceHandler = (*AuthServer)(nil)
 
 // NewAuthServer creates a new AuthServer.
-func NewAuthServer(cfgStore config.Store, tokens *auth.TokenService) *AuthServer {
+func NewAuthServer(cfgStore config.Store, tokens *auth.TokenService, logger *slog.Logger) *AuthServer {
 	return &AuthServer{
 		cfgStore: cfgStore,
 		tokens:   tokens,
+		logger:   logging.Default(logger),
 	}
 }
 
@@ -51,6 +55,48 @@ type passwordPolicy struct {
 	RequireSpecial        bool
 	MaxConsecutiveRepeats int
 	ForbidAnimalNoise    bool
+}
+
+// loadRefreshDuration reads the refresh token duration from server config.
+// Returns 168h (7 days) as default.
+func (s *AuthServer) loadRefreshDuration(ctx context.Context) time.Duration {
+	raw, err := s.cfgStore.GetSetting(ctx, "server")
+	if err != nil || raw == nil {
+		return 168 * time.Hour
+	}
+	var sc config.ServerConfig
+	if err := json.Unmarshal([]byte(*raw), &sc); err != nil {
+		return 168 * time.Hour
+	}
+	if sc.Auth.RefreshTokenDuration == "" {
+		return 168 * time.Hour
+	}
+	d, err := time.ParseDuration(sc.Auth.RefreshTokenDuration)
+	if err != nil {
+		return 168 * time.Hour
+	}
+	return d
+}
+
+// issueRefreshToken generates a refresh token, stores its hash, and returns the opaque token.
+func (s *AuthServer) issueRefreshToken(ctx context.Context, userID uuid.UUID) (string, error) {
+	token, hash, err := auth.GenerateRefreshToken()
+	if err != nil {
+		return "", err
+	}
+	refreshDuration := s.loadRefreshDuration(ctx)
+	now := time.Now().UTC()
+	rt := config.RefreshToken{
+		ID:        uuid.Must(uuid.NewV7()),
+		UserID:    userID,
+		TokenHash: hash,
+		ExpiresAt: now.Add(refreshDuration),
+		CreatedAt: now,
+	}
+	if err := s.cfgStore.CreateRefreshToken(ctx, rt); err != nil {
+		return "", fmt.Errorf("store refresh token: %w", err)
+	}
+	return token, nil
 }
 
 // loadPasswordPolicy reads the password policy from server config.
@@ -174,10 +220,16 @@ func (s *AuthServer) Register(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("create user: %w", err))
 	}
 
-	// Issue token.
+	// Issue access token.
 	token, expiresAt, err := s.tokens.Issue(userID.String(), username, "admin")
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("issue token: %w", err))
+	}
+
+	// Issue refresh token.
+	refreshToken, err := s.issueRefreshToken(ctx, userID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("issue refresh token: %w", err))
 	}
 
 	return connect.NewResponse(&apiv1.RegisterResponse{
@@ -185,6 +237,7 @@ func (s *AuthServer) Register(
 			Token:     token,
 			ExpiresAt: expiresAt.Unix(),
 		},
+		RefreshToken: refreshToken,
 	}), nil
 }
 
@@ -217,11 +270,87 @@ func (s *AuthServer) Login(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("issue token: %w", err))
 	}
 
+	// Issue refresh token.
+	refreshToken, err := s.issueRefreshToken(ctx, user.ID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("issue refresh token: %w", err))
+	}
+
 	return connect.NewResponse(&apiv1.LoginResponse{
 		Token: &apiv1.Token{
 			Token:     token,
 			ExpiresAt: expiresAt.Unix(),
 		},
+		RefreshToken: refreshToken,
+	}), nil
+}
+
+// RefreshToken exchanges a valid refresh token for a new access + refresh token pair.
+func (s *AuthServer) RefreshToken(
+	ctx context.Context,
+	req *connect.Request[apiv1.RefreshTokenRequest],
+) (*connect.Response[apiv1.RefreshTokenResponse], error) {
+	incoming := req.Msg.RefreshToken
+	if incoming == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("refresh_token is required"))
+	}
+
+	// Hash the incoming token and look it up.
+	hash := auth.HashRefreshToken(incoming)
+	stored, err := s.cfgStore.GetRefreshTokenByHash(ctx, hash)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("lookup refresh token: %w", err))
+	}
+	if stored == nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("invalid refresh token"))
+	}
+
+	// Check expiry.
+	if time.Now().UTC().After(stored.ExpiresAt) {
+		// Clean up the expired token.
+		_ = s.cfgStore.DeleteRefreshToken(ctx, stored.ID)
+		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("refresh token expired"))
+	}
+
+	// Verify user still exists.
+	user, err := s.cfgStore.GetUser(ctx, stored.UserID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get user: %w", err))
+	}
+	if user == nil {
+		_ = s.cfgStore.DeleteRefreshToken(ctx, stored.ID)
+		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("user no longer exists"))
+	}
+
+	// Check TokenInvalidatedAt — any refresh token issued before this is rejected.
+	if !user.TokenInvalidatedAt.IsZero() && stored.CreatedAt.Before(user.TokenInvalidatedAt) {
+		_ = s.cfgStore.DeleteRefreshToken(ctx, stored.ID)
+		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("refresh token revoked"))
+	}
+
+	// Rotation: delete the old token.
+	if err := s.cfgStore.DeleteRefreshToken(ctx, stored.ID); err != nil {
+		s.logger.Warn("failed to delete old refresh token", "err", err)
+	}
+
+	// Issue new access token.
+	accessToken, expiresAt, err := s.tokens.Issue(user.ID.String(), user.Username, user.Role)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("issue token: %w", err))
+	}
+
+	// Issue new refresh token.
+	newRefreshToken, err := s.issueRefreshToken(ctx, user.ID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("issue refresh token: %w", err))
+	}
+
+	return connect.NewResponse(&apiv1.RefreshTokenResponse{
+		Token: &apiv1.Token{
+			Token:     accessToken,
+			ExpiresAt: expiresAt.Unix(),
+		},
+		RefreshToken: newRefreshToken,
 	}), nil
 }
 
@@ -272,8 +401,12 @@ func (s *AuthServer) ChangePassword(
 	}
 
 	// Invalidate existing tokens so the user must re-login with the new password.
-	if err := s.cfgStore.InvalidateTokens(ctx, user.ID, time.Now().UTC()); err != nil {
+	now := time.Now().UTC()
+	if err := s.cfgStore.InvalidateTokens(ctx, user.ID, now); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("invalidate tokens: %w", err))
+	}
+	if err := s.cfgStore.DeleteUserRefreshTokens(ctx, user.ID); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("delete refresh tokens: %w", err))
 	}
 
 	return connect.NewResponse(&apiv1.ChangePasswordResponse{}), nil
@@ -400,6 +533,9 @@ func (s *AuthServer) UpdateUserRole(
 	if err := s.cfgStore.InvalidateTokens(ctx, userID, time.Now().UTC()); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("invalidate tokens: %w", err))
 	}
+	if err := s.cfgStore.DeleteUserRefreshTokens(ctx, userID); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("delete refresh tokens: %w", err))
+	}
 
 	// Re-fetch to get the updated user.
 	user, err = s.cfgStore.GetUser(ctx, userID)
@@ -448,6 +584,9 @@ func (s *AuthServer) ResetPassword(
 	if err := s.cfgStore.InvalidateTokens(ctx, userID, time.Now().UTC()); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("invalidate tokens: %w", err))
 	}
+	if err := s.cfgStore.DeleteUserRefreshTokens(ctx, userID); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("delete refresh tokens: %w", err))
+	}
 
 	return connect.NewResponse(&apiv1.ResetPasswordResponse{}), nil
 }
@@ -467,6 +606,11 @@ func (s *AuthServer) DeleteUser(
 	if claims := auth.ClaimsFromContext(ctx); claims != nil && claims.UserID == userID.String() {
 		return nil, connect.NewError(connect.CodeInvalidArgument,
 			fmt.Errorf("cannot delete your own account"))
+	}
+
+	// Clean up refresh tokens before deleting the user.
+	if err := s.cfgStore.DeleteUserRefreshTokens(ctx, userID); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("delete refresh tokens: %w", err))
 	}
 
 	if err := s.cfgStore.DeleteUser(ctx, userID); err != nil {
@@ -494,6 +638,9 @@ func (s *AuthServer) Logout(
 	now := time.Now().UTC()
 	if err := s.cfgStore.InvalidateTokens(ctx, userID, now); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("invalidate tokens: %w", err))
+	}
+	if err := s.cfgStore.DeleteUserRefreshTokens(ctx, userID); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("delete refresh tokens: %w", err))
 	}
 
 	return connect.NewResponse(&apiv1.LogoutResponse{}), nil

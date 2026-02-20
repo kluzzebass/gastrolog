@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -154,6 +155,7 @@ func (s *ConfigServer) GetServerConfig(
 		resp.ForbidAnimalNoise = sc.Auth.ForbidAnimalNoise
 		resp.MaxFollowDuration = sc.Query.MaxFollowDuration
 		resp.QueryTimeout = sc.Query.Timeout
+		resp.RefreshTokenDuration = sc.Auth.RefreshTokenDuration
 	}
 
 	// If no persisted value, report the live default from the orchestrator.
@@ -233,6 +235,35 @@ func (s *ConfigServer) PutServerConfig(
 	}
 	if req.Msg.QueryTimeout != nil {
 		sc.Query.Timeout = *req.Msg.QueryTimeout
+	}
+	if req.Msg.RefreshTokenDuration != nil {
+		sc.Auth.RefreshTokenDuration = *req.Msg.RefreshTokenDuration
+	}
+
+	// Validate token durations.
+	var tokenDur, refreshDur time.Duration
+	if sc.Auth.TokenDuration != "" {
+		d, err := time.ParseDuration(sc.Auth.TokenDuration)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid token duration %q: %w", sc.Auth.TokenDuration, err))
+		}
+		if d < time.Minute {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("token duration must be at least 1 minute, got %s", sc.Auth.TokenDuration))
+		}
+		tokenDur = d
+	}
+	if sc.Auth.RefreshTokenDuration != "" {
+		d, err := time.ParseDuration(sc.Auth.RefreshTokenDuration)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid refresh token duration %q: %w", sc.Auth.RefreshTokenDuration, err))
+		}
+		if d < time.Hour {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("refresh token duration must be at least 1 hour, got %s", sc.Auth.RefreshTokenDuration))
+		}
+		refreshDur = d
+	}
+	if tokenDur > 0 && refreshDur > 0 && refreshDur <= tokenDur {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("refresh token duration (%s) must be longer than token duration (%s)", sc.Auth.RefreshTokenDuration, sc.Auth.TokenDuration))
 	}
 
 	data, err := json.Marshal(sc)

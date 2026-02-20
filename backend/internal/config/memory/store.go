@@ -24,7 +24,8 @@ type Store struct {
 	ingesters         map[uuid.UUID]config.IngesterConfig
 	settings          map[string]string
 	certs             map[uuid.UUID]config.CertPEM
-	users             map[uuid.UUID]config.User // keyed by ID (UUID)
+	users         map[uuid.UUID]config.User         // keyed by ID (UUID)
+	refreshTokens map[uuid.UUID]config.RefreshToken // keyed by token ID
 }
 
 var _ config.Store = (*Store)(nil)
@@ -39,7 +40,8 @@ func NewStore() *Store {
 		ingesters:         make(map[uuid.UUID]config.IngesterConfig),
 		settings:          make(map[string]string),
 		certs:             make(map[uuid.UUID]config.CertPEM),
-		users:             make(map[uuid.UUID]config.User),
+		users:         make(map[uuid.UUID]config.User),
+		refreshTokens: make(map[uuid.UUID]config.RefreshToken),
 	}
 }
 
@@ -518,6 +520,48 @@ func (s *Store) PutUserPreferences(ctx context.Context, id uuid.UUID, prefs stri
 	u.Preferences = prefs
 	u.UpdatedAt = time.Now().UTC()
 	s.users[id] = u
+	return nil
+}
+
+// Refresh tokens
+
+func (s *Store) CreateRefreshToken(ctx context.Context, token config.RefreshToken) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.refreshTokens[token.ID] = token
+	return nil
+}
+
+func (s *Store) GetRefreshTokenByHash(ctx context.Context, tokenHash string) (*config.RefreshToken, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, rt := range s.refreshTokens {
+		if rt.TokenHash == tokenHash {
+			return &rt, nil
+		}
+	}
+	return nil, nil
+}
+
+func (s *Store) DeleteRefreshToken(ctx context.Context, id uuid.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.refreshTokens, id)
+	return nil
+}
+
+func (s *Store) DeleteUserRefreshTokens(ctx context.Context, userID uuid.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for id, rt := range s.refreshTokens {
+		if rt.UserID == userID {
+			delete(s.refreshTokens, id)
+		}
+	}
 	return nil
 }
 

@@ -44,10 +44,11 @@ func NewAuthInterceptor(tokens *TokenService, counter UserCounter, validator Tok
 		counter:   counter,
 		validator: validator,
 		public: map[string]bool{
-			gastrologv1connect.LifecycleServiceHealthProcedure:      true,
-			gastrologv1connect.AuthServiceGetAuthStatusProcedure:    true,
-			gastrologv1connect.AuthServiceLoginProcedure:            true,
-			gastrologv1connect.AuthServiceRegisterProcedure:         true, // self-guards after first user
+			gastrologv1connect.LifecycleServiceHealthProcedure:       true,
+			gastrologv1connect.AuthServiceGetAuthStatusProcedure:     true,
+			gastrologv1connect.AuthServiceLoginProcedure:             true,
+			gastrologv1connect.AuthServiceRegisterProcedure:          true, // self-guards after first user
+			gastrologv1connect.AuthServiceRefreshTokenProcedure:      true, // uses opaque token, not JWT
 			gastrologv1connect.ConfigServiceGetServerConfigProcedure: true, // password policy needed on register page
 		},
 		admin: map[string]bool{

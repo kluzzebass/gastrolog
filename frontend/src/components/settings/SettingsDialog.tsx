@@ -32,6 +32,26 @@ import { PrimaryButton, GhostButton } from "./Buttons";
 import { Checkbox } from "./Checkbox";
 import { HelpButton } from "../HelpButton";
 
+/** Parse a Go duration string (e.g. "1h30m", "15m", "90s") into total seconds, or null if unparseable. */
+function parseDurationSeconds(s: string): number | null {
+  if (!s.trim()) return null;
+  let total = 0;
+  let rest = s.trim();
+  let matched = false;
+  while (rest.length > 0) {
+    const m = rest.match(/^(\d+(?:\.\d+)?)(h|m|s)/);
+    if (!m) return null;
+    const val = parseFloat(m[1]!);
+    const unit = m[2]!;
+    if (unit === "h") total += val * 3600;
+    else if (unit === "m") total += val * 60;
+    else total += val;
+    rest = rest.slice(m[0].length);
+    matched = true;
+  }
+  return matched ? total : null;
+}
+
 export type SettingsTab =
   | "service"
   | "certificates"
@@ -152,6 +172,7 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
   const [requireSpecial, setRequireSpecial] = useState(false);
   const [maxConsecutiveRepeats, setMaxConsecutiveRepeats] = useState("");
   const [forbidAnimalNoise, setForbidAnimalNoise] = useState(false);
+  const [refreshTokenDuration, setRefreshTokenDuration] = useState("");
   const [maxFollowDuration, setMaxFollowDuration] = useState("");
   const [queryTimeout, setQueryTimeout] = useState("");
   const [initialized, setInitialized] = useState(false);
@@ -177,6 +198,7 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
     setRequireSpecial(data.requireSpecial ?? false);
     setMaxConsecutiveRepeats(data.maxConsecutiveRepeats ? String(data.maxConsecutiveRepeats) : "0");
     setForbidAnimalNoise(data.forbidAnimalNoise ?? false);
+    setRefreshTokenDuration(data.refreshTokenDuration ?? "");
     setMaxFollowDuration(data.maxFollowDuration ?? "");
     setQueryTimeout(data.queryTimeout ?? "");
     setInitialized(true);
@@ -198,6 +220,7 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
       requireSpecial !== (data.requireSpecial ?? false) ||
       maxConsecutiveRepeats !== String(data.maxConsecutiveRepeats || 0) ||
       forbidAnimalNoise !== (data.forbidAnimalNoise ?? false) ||
+      refreshTokenDuration !== (data.refreshTokenDuration ?? "") ||
       maxFollowDuration !== (data.maxFollowDuration ?? "") ||
       queryTimeout !== (data.queryTimeout ?? ""));
 
@@ -224,6 +247,7 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
         requireSpecial,
         maxConsecutiveRepeats: effectiveMaxRepeats,
         forbidAnimalNoise,
+        refreshTokenDuration,
         maxFollowDuration,
         queryTimeout,
       });
@@ -251,6 +275,7 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
       setRequireSpecial(data.requireSpecial ?? false);
       setMaxConsecutiveRepeats(data.maxConsecutiveRepeats ? String(data.maxConsecutiveRepeats) : "0");
       setForbidAnimalNoise(data.forbidAnimalNoise ?? false);
+      setRefreshTokenDuration(data.refreshTokenDuration ?? "");
       setMaxFollowDuration(data.maxFollowDuration ?? "");
       setQueryTimeout(data.queryTimeout ?? "");
     }
@@ -285,17 +310,47 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
 
             <FormField
               label="Token Duration"
-              description="How long authentication tokens remain valid."
+              description="How long access tokens remain valid. Short-lived tokens are more secure when paired with refresh tokens."
               dark={dark}
             >
               <TextInput
                 value={tokenDuration}
                 onChange={setTokenDuration}
+                placeholder="15m"
+                dark={dark}
+                mono
+                examples={["15m", "1h", "24h"]}
+              />
+              {(() => {
+                const secs = parseDurationSeconds(tokenDuration);
+                if (secs !== null && secs < 60)
+                  return <p className="text-[0.75em] text-amber-500 mt-1">Must be at least 1 minute</p>;
+                return null;
+              })()}
+            </FormField>
+
+            <FormField
+              label="Refresh Token Duration"
+              description="How long refresh tokens remain valid. Users must re-authenticate after this period of inactivity."
+              dark={dark}
+            >
+              <TextInput
+                value={refreshTokenDuration}
+                onChange={setRefreshTokenDuration}
                 placeholder="168h"
                 dark={dark}
                 mono
                 examples={["24h", "168h", "720h"]}
               />
+              {(() => {
+                const secs = parseDurationSeconds(refreshTokenDuration);
+                const tokenSecs = parseDurationSeconds(tokenDuration);
+                if (secs !== null && secs < 3600)
+                  return <p className="text-[0.75em] text-amber-500 mt-1">Must be at least 1 hour</p>;
+                if (secs !== null && tokenSecs !== null && secs <= tokenSecs)
+                  return <p className="text-[0.75em] text-amber-500 mt-1">Must be longer than the token duration</p>;
+                return null;
+              })()}
             </FormField>
 
             <FormField

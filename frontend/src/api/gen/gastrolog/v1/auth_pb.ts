@@ -103,6 +103,11 @@ export class RegisterResponse extends Message<RegisterResponse> {
    */
   token?: Token;
 
+  /**
+   * @generated from field: string refresh_token = 2;
+   */
+  refreshToken = "";
+
   constructor(data?: PartialMessage<RegisterResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -112,6 +117,7 @@ export class RegisterResponse extends Message<RegisterResponse> {
   static readonly typeName = "gastrolog.v1.RegisterResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "token", kind: "message", T: Token },
+    { no: 2, name: "refresh_token", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RegisterResponse {
@@ -183,6 +189,11 @@ export class LoginResponse extends Message<LoginResponse> {
    */
   token?: Token;
 
+  /**
+   * @generated from field: string refresh_token = 2;
+   */
+  refreshToken = "";
+
   constructor(data?: PartialMessage<LoginResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -192,6 +203,7 @@ export class LoginResponse extends Message<LoginResponse> {
   static readonly typeName = "gastrolog.v1.LoginResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "token", kind: "message", T: Token },
+    { no: 2, name: "refresh_token", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): LoginResponse {
@@ -208,6 +220,86 @@ export class LoginResponse extends Message<LoginResponse> {
 
   static equals(a: LoginResponse | PlainMessage<LoginResponse> | undefined, b: LoginResponse | PlainMessage<LoginResponse> | undefined): boolean {
     return proto3.util.equals(LoginResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.RefreshTokenRequest
+ */
+export class RefreshTokenRequest extends Message<RefreshTokenRequest> {
+  /**
+   * @generated from field: string refresh_token = 1;
+   */
+  refreshToken = "";
+
+  constructor(data?: PartialMessage<RefreshTokenRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RefreshTokenRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "refresh_token", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RefreshTokenRequest {
+    return new RefreshTokenRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RefreshTokenRequest {
+    return new RefreshTokenRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RefreshTokenRequest {
+    return new RefreshTokenRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RefreshTokenRequest | PlainMessage<RefreshTokenRequest> | undefined, b: RefreshTokenRequest | PlainMessage<RefreshTokenRequest> | undefined): boolean {
+    return proto3.util.equals(RefreshTokenRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.RefreshTokenResponse
+ */
+export class RefreshTokenResponse extends Message<RefreshTokenResponse> {
+  /**
+   * @generated from field: gastrolog.v1.Token token = 1;
+   */
+  token?: Token;
+
+  /**
+   * @generated from field: string refresh_token = 2;
+   */
+  refreshToken = "";
+
+  constructor(data?: PartialMessage<RefreshTokenResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RefreshTokenResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "token", kind: "message", T: Token },
+    { no: 2, name: "refresh_token", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RefreshTokenResponse {
+    return new RefreshTokenResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RefreshTokenResponse {
+    return new RefreshTokenResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RefreshTokenResponse {
+    return new RefreshTokenResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RefreshTokenResponse | PlainMessage<RefreshTokenResponse> | undefined, b: RefreshTokenResponse | PlainMessage<RefreshTokenResponse> | undefined): boolean {
+    return proto3.util.equals(RefreshTokenResponse, a, b);
   }
 }
 

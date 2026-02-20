@@ -1446,6 +1446,13 @@ export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
    */
   queryTimeout = "";
 
+  /**
+   * Lifetime of refresh tokens (Go duration). Empty = 168h default.
+   *
+   * @generated from field: string refresh_token_duration = 16;
+   */
+  refreshTokenDuration = "";
+
   constructor(data?: PartialMessage<GetServerConfigResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1469,6 +1476,7 @@ export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
     { no: 13, name: "https_port", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 14, name: "max_follow_duration", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 15, name: "query_timeout", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 16, name: "refresh_token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetServerConfigResponse {
@@ -1567,6 +1575,11 @@ export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
    */
   queryTimeout?: string;
 
+  /**
+   * @generated from field: optional string refresh_token_duration = 16;
+   */
+  refreshTokenDuration?: string;
+
   constructor(data?: PartialMessage<PutServerConfigRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1590,6 +1603,7 @@ export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
     { no: 13, name: "https_port", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 14, name: "max_follow_duration", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 15, name: "query_timeout", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 16, name: "refresh_token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutServerConfigRequest {

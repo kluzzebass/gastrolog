@@ -1663,9 +1663,10 @@ type GetServerConfigResponse struct {
 	RequireSpecial        bool                   `protobuf:"varint,10,opt,name=require_special,json=requireSpecial,proto3" json:"require_special,omitempty"`
 	MaxConsecutiveRepeats int32                  `protobuf:"varint,11,opt,name=max_consecutive_repeats,json=maxConsecutiveRepeats,proto3" json:"max_consecutive_repeats,omitempty"`
 	ForbidAnimalNoise     bool                   `protobuf:"varint,12,opt,name=forbid_animal_noise,json=forbidAnimalNoise,proto3" json:"forbid_animal_noise,omitempty"`
-	HttpsPort             string                 `protobuf:"bytes,13,opt,name=https_port,json=httpsPort,proto3" json:"https_port,omitempty"`                           // Configured HTTPS port; empty = HTTP port + 1.
-	MaxFollowDuration     string                 `protobuf:"bytes,14,opt,name=max_follow_duration,json=maxFollowDuration,proto3" json:"max_follow_duration,omitempty"` // Max lifetime for Follow streams (Go duration). Empty = no limit.
-	QueryTimeout          string                 `protobuf:"bytes,15,opt,name=query_timeout,json=queryTimeout,proto3" json:"query_timeout,omitempty"`                  // Max duration for queries (Go duration). Empty = 30s default.
+	HttpsPort             string                 `protobuf:"bytes,13,opt,name=https_port,json=httpsPort,proto3" json:"https_port,omitempty"`                                    // Configured HTTPS port; empty = HTTP port + 1.
+	MaxFollowDuration     string                 `protobuf:"bytes,14,opt,name=max_follow_duration,json=maxFollowDuration,proto3" json:"max_follow_duration,omitempty"`          // Max lifetime for Follow streams (Go duration). Empty = no limit.
+	QueryTimeout          string                 `protobuf:"bytes,15,opt,name=query_timeout,json=queryTimeout,proto3" json:"query_timeout,omitempty"`                           // Max duration for queries (Go duration). Empty = 30s default.
+	RefreshTokenDuration  string                 `protobuf:"bytes,16,opt,name=refresh_token_duration,json=refreshTokenDuration,proto3" json:"refresh_token_duration,omitempty"` // Lifetime of refresh tokens (Go duration). Empty = 168h default.
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -1805,6 +1806,13 @@ func (x *GetServerConfigResponse) GetQueryTimeout() string {
 	return ""
 }
 
+func (x *GetServerConfigResponse) GetRefreshTokenDuration() string {
+	if x != nil {
+		return x.RefreshTokenDuration
+	}
+	return ""
+}
+
 type PutServerConfigRequest struct {
 	state                 protoimpl.MessageState `protogen:"open.v1"`
 	TokenDuration         *string                `protobuf:"bytes,1,opt,name=token_duration,json=tokenDuration,proto3,oneof" json:"token_duration,omitempty"`
@@ -1822,6 +1830,7 @@ type PutServerConfigRequest struct {
 	HttpsPort             *string                `protobuf:"bytes,13,opt,name=https_port,json=httpsPort,proto3,oneof" json:"https_port,omitempty"`
 	MaxFollowDuration     *string                `protobuf:"bytes,14,opt,name=max_follow_duration,json=maxFollowDuration,proto3,oneof" json:"max_follow_duration,omitempty"`
 	QueryTimeout          *string                `protobuf:"bytes,15,opt,name=query_timeout,json=queryTimeout,proto3,oneof" json:"query_timeout,omitempty"`
+	RefreshTokenDuration  *string                `protobuf:"bytes,16,opt,name=refresh_token_duration,json=refreshTokenDuration,proto3,oneof" json:"refresh_token_duration,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -1957,6 +1966,13 @@ func (x *PutServerConfigRequest) GetMaxFollowDuration() string {
 func (x *PutServerConfigRequest) GetQueryTimeout() string {
 	if x != nil && x.QueryTimeout != nil {
 		return *x.QueryTimeout
+	}
+	return ""
+}
+
+func (x *PutServerConfigRequest) GetRefreshTokenDuration() string {
+	if x != nil && x.RefreshTokenDuration != nil {
+		return *x.RefreshTokenDuration
 	}
 	return ""
 }
@@ -3284,7 +3300,7 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x15DeleteIngesterRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x18\n" +
 	"\x16DeleteIngesterResponse\"\x18\n" +
-	"\x16GetServerConfigRequest\"\xac\x05\n" +
+	"\x16GetServerConfigRequest\"\xe2\x05\n" +
 	"\x17GetServerConfigResponse\x12%\n" +
 	"\x0etoken_duration\x18\x01 \x01(\tR\rtokenDuration\x122\n" +
 	"\x15jwt_secret_configured\x18\x02 \x01(\bR\x13jwtSecretConfigured\x12.\n" +
@@ -3303,7 +3319,8 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\n" +
 	"https_port\x18\r \x01(\tR\thttpsPort\x12.\n" +
 	"\x13max_follow_duration\x18\x0e \x01(\tR\x11maxFollowDuration\x12#\n" +
-	"\rquery_timeout\x18\x0f \x01(\tR\fqueryTimeout\"\x9d\b\n" +
+	"\rquery_timeout\x18\x0f \x01(\tR\fqueryTimeout\x124\n" +
+	"\x16refresh_token_duration\x18\x10 \x01(\tR\x14refreshTokenDuration\"\xf3\b\n" +
 	"\x16PutServerConfigRequest\x12*\n" +
 	"\x0etoken_duration\x18\x01 \x01(\tH\x00R\rtokenDuration\x88\x01\x01\x12\"\n" +
 	"\n" +
@@ -3324,7 +3341,8 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\n" +
 	"https_port\x18\r \x01(\tH\fR\thttpsPort\x88\x01\x01\x123\n" +
 	"\x13max_follow_duration\x18\x0e \x01(\tH\rR\x11maxFollowDuration\x88\x01\x01\x12(\n" +
-	"\rquery_timeout\x18\x0f \x01(\tH\x0eR\fqueryTimeout\x88\x01\x01B\x11\n" +
+	"\rquery_timeout\x18\x0f \x01(\tH\x0eR\fqueryTimeout\x88\x01\x01\x129\n" +
+	"\x16refresh_token_duration\x18\x10 \x01(\tH\x0fR\x14refreshTokenDuration\x88\x01\x01B\x11\n" +
 	"\x0f_token_durationB\r\n" +
 	"\v_jwt_secretB\x16\n" +
 	"\x14_min_password_lengthB\x16\n" +
@@ -3339,7 +3357,8 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x14_forbid_animal_noiseB\r\n" +
 	"\v_https_portB\x16\n" +
 	"\x14_max_follow_durationB\x10\n" +
-	"\x0e_query_timeout\"\x19\n" +
+	"\x0e_query_timeoutB\x19\n" +
+	"\x17_refresh_token_duration\"\x19\n" +
 	"\x17PutServerConfigResponse\"\x17\n" +
 	"\x15GetPreferencesRequest\".\n" +
 	"\x16GetPreferencesResponse\x12\x14\n" +

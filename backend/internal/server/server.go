@@ -204,7 +204,7 @@ func (s *Server) buildMux() *http.ServeMux {
 	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager)
 	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
 	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown)
-	authServer := NewAuthServer(s.cfgStore, s.tokens)
+	authServer := NewAuthServer(s.cfgStore, s.tokens, s.logger)
 	jobServer := NewJobServer(s.orch.Scheduler())
 
 	mux.Handle(gastrologv1connect.NewQueryServiceHandler(queryServer, handlerOpts...))

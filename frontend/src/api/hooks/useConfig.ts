@@ -136,6 +136,7 @@ export function usePutServerConfig() {
       forbidAnimalNoise?: boolean;
       maxFollowDuration?: string;
       queryTimeout?: string;
+      refreshTokenDuration?: string;
     }) => {
       const req: Record<string, unknown> = {};
       if (args.tokenDuration !== undefined) req.tokenDuration = args.tokenDuration;
@@ -166,6 +167,8 @@ export function usePutServerConfig() {
         req.maxFollowDuration = args.maxFollowDuration;
       if (args.queryTimeout !== undefined)
         req.queryTimeout = args.queryTimeout;
+      if (args.refreshTokenDuration !== undefined)
+        req.refreshTokenDuration = args.refreshTokenDuration;
       await configClient.putServerConfig(req as Parameters<typeof configClient.putServerConfig>[0]);
     },
     onSuccess: () => {

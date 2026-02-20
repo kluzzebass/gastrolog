@@ -128,6 +128,7 @@ func (x *RegisterRequest) GetPassword() string {
 type RegisterResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Token         *Token                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
+	RefreshToken  string                 `protobuf:"bytes,2,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -167,6 +168,13 @@ func (x *RegisterResponse) GetToken() *Token {
 		return x.Token
 	}
 	return nil
+}
+
+func (x *RegisterResponse) GetRefreshToken() string {
+	if x != nil {
+		return x.RefreshToken
+	}
+	return ""
 }
 
 type LoginRequest struct {
@@ -224,6 +232,7 @@ func (x *LoginRequest) GetPassword() string {
 type LoginResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Token         *Token                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
+	RefreshToken  string                 `protobuf:"bytes,2,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -265,6 +274,109 @@ func (x *LoginResponse) GetToken() *Token {
 	return nil
 }
 
+func (x *LoginResponse) GetRefreshToken() string {
+	if x != nil {
+		return x.RefreshToken
+	}
+	return ""
+}
+
+type RefreshTokenRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RefreshToken  string                 `protobuf:"bytes,1,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefreshTokenRequest) Reset() {
+	*x = RefreshTokenRequest{}
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefreshTokenRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefreshTokenRequest) ProtoMessage() {}
+
+func (x *RefreshTokenRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefreshTokenRequest.ProtoReflect.Descriptor instead.
+func (*RefreshTokenRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *RefreshTokenRequest) GetRefreshToken() string {
+	if x != nil {
+		return x.RefreshToken
+	}
+	return ""
+}
+
+type RefreshTokenResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Token         *Token                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
+	RefreshToken  string                 `protobuf:"bytes,2,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RefreshTokenResponse) Reset() {
+	*x = RefreshTokenResponse{}
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RefreshTokenResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RefreshTokenResponse) ProtoMessage() {}
+
+func (x *RefreshTokenResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RefreshTokenResponse.ProtoReflect.Descriptor instead.
+func (*RefreshTokenResponse) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *RefreshTokenResponse) GetToken() *Token {
+	if x != nil {
+		return x.Token
+	}
+	return nil
+}
+
+func (x *RefreshTokenResponse) GetRefreshToken() string {
+	if x != nil {
+		return x.RefreshToken
+	}
+	return ""
+}
+
 type ChangePasswordRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
@@ -276,7 +388,7 @@ type ChangePasswordRequest struct {
 
 func (x *ChangePasswordRequest) Reset() {
 	*x = ChangePasswordRequest{}
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[5]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -288,7 +400,7 @@ func (x *ChangePasswordRequest) String() string {
 func (*ChangePasswordRequest) ProtoMessage() {}
 
 func (x *ChangePasswordRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[5]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -301,7 +413,7 @@ func (x *ChangePasswordRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChangePasswordRequest.ProtoReflect.Descriptor instead.
 func (*ChangePasswordRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{5}
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ChangePasswordRequest) GetUsername() string {
@@ -333,7 +445,7 @@ type ChangePasswordResponse struct {
 
 func (x *ChangePasswordResponse) Reset() {
 	*x = ChangePasswordResponse{}
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[6]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -345,7 +457,7 @@ func (x *ChangePasswordResponse) String() string {
 func (*ChangePasswordResponse) ProtoMessage() {}
 
 func (x *ChangePasswordResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[6]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -358,7 +470,7 @@ func (x *ChangePasswordResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChangePasswordResponse.ProtoReflect.Descriptor instead.
 func (*ChangePasswordResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{6}
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{8}
 }
 
 type GetAuthStatusRequest struct {
@@ -369,7 +481,7 @@ type GetAuthStatusRequest struct {
 
 func (x *GetAuthStatusRequest) Reset() {
 	*x = GetAuthStatusRequest{}
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[7]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -381,7 +493,7 @@ func (x *GetAuthStatusRequest) String() string {
 func (*GetAuthStatusRequest) ProtoMessage() {}
 
 func (x *GetAuthStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[7]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -394,7 +506,7 @@ func (x *GetAuthStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAuthStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetAuthStatusRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{7}
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{9}
 }
 
 type GetAuthStatusResponse struct {
@@ -406,7 +518,7 @@ type GetAuthStatusResponse struct {
 
 func (x *GetAuthStatusResponse) Reset() {
 	*x = GetAuthStatusResponse{}
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[8]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -418,7 +530,7 @@ func (x *GetAuthStatusResponse) String() string {
 func (*GetAuthStatusResponse) ProtoMessage() {}
 
 func (x *GetAuthStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[8]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -431,7 +543,7 @@ func (x *GetAuthStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAuthStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetAuthStatusResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{8}
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *GetAuthStatusResponse) GetNeedsSetup() bool {
@@ -455,7 +567,7 @@ type UserInfo struct {
 
 func (x *UserInfo) Reset() {
 	*x = UserInfo{}
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[9]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -467,7 +579,7 @@ func (x *UserInfo) String() string {
 func (*UserInfo) ProtoMessage() {}
 
 func (x *UserInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[9]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -480,7 +592,7 @@ func (x *UserInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserInfo.ProtoReflect.Descriptor instead.
 func (*UserInfo) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{9}
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *UserInfo) GetUsername() string {
@@ -529,7 +641,7 @@ type CreateUserRequest struct {
 
 func (x *CreateUserRequest) Reset() {
 	*x = CreateUserRequest{}
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[10]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -541,7 +653,7 @@ func (x *CreateUserRequest) String() string {
 func (*CreateUserRequest) ProtoMessage() {}
 
 func (x *CreateUserRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[10]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -554,7 +666,7 @@ func (x *CreateUserRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateUserRequest.ProtoReflect.Descriptor instead.
 func (*CreateUserRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{10}
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *CreateUserRequest) GetUsername() string {
@@ -587,7 +699,7 @@ type CreateUserResponse struct {
 
 func (x *CreateUserResponse) Reset() {
 	*x = CreateUserResponse{}
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[11]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -599,7 +711,7 @@ func (x *CreateUserResponse) String() string {
 func (*CreateUserResponse) ProtoMessage() {}
 
 func (x *CreateUserResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[11]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -612,7 +724,7 @@ func (x *CreateUserResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateUserResponse.ProtoReflect.Descriptor instead.
 func (*CreateUserResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{11}
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *CreateUserResponse) GetUser() *UserInfo {
@@ -630,7 +742,7 @@ type ListUsersRequest struct {
 
 func (x *ListUsersRequest) Reset() {
 	*x = ListUsersRequest{}
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[12]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -642,7 +754,7 @@ func (x *ListUsersRequest) String() string {
 func (*ListUsersRequest) ProtoMessage() {}
 
 func (x *ListUsersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[12]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -655,7 +767,7 @@ func (x *ListUsersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListUsersRequest.ProtoReflect.Descriptor instead.
 func (*ListUsersRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{12}
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{14}
 }
 
 type ListUsersResponse struct {
@@ -667,7 +779,7 @@ type ListUsersResponse struct {
 
 func (x *ListUsersResponse) Reset() {
 	*x = ListUsersResponse{}
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[13]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -679,7 +791,7 @@ func (x *ListUsersResponse) String() string {
 func (*ListUsersResponse) ProtoMessage() {}
 
 func (x *ListUsersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[13]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -692,7 +804,7 @@ func (x *ListUsersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListUsersResponse.ProtoReflect.Descriptor instead.
 func (*ListUsersResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{13}
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ListUsersResponse) GetUsers() []*UserInfo {
@@ -712,7 +824,7 @@ type UpdateUserRoleRequest struct {
 
 func (x *UpdateUserRoleRequest) Reset() {
 	*x = UpdateUserRoleRequest{}
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[14]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -724,7 +836,7 @@ func (x *UpdateUserRoleRequest) String() string {
 func (*UpdateUserRoleRequest) ProtoMessage() {}
 
 func (x *UpdateUserRoleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[14]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -737,7 +849,7 @@ func (x *UpdateUserRoleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateUserRoleRequest.ProtoReflect.Descriptor instead.
 func (*UpdateUserRoleRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{14}
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *UpdateUserRoleRequest) GetId() string {
@@ -763,7 +875,7 @@ type UpdateUserRoleResponse struct {
 
 func (x *UpdateUserRoleResponse) Reset() {
 	*x = UpdateUserRoleResponse{}
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[15]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -775,7 +887,7 @@ func (x *UpdateUserRoleResponse) String() string {
 func (*UpdateUserRoleResponse) ProtoMessage() {}
 
 func (x *UpdateUserRoleResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[15]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -788,7 +900,7 @@ func (x *UpdateUserRoleResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateUserRoleResponse.ProtoReflect.Descriptor instead.
 func (*UpdateUserRoleResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{15}
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *UpdateUserRoleResponse) GetUser() *UserInfo {
@@ -808,7 +920,7 @@ type ResetPasswordRequest struct {
 
 func (x *ResetPasswordRequest) Reset() {
 	*x = ResetPasswordRequest{}
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[16]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -820,7 +932,7 @@ func (x *ResetPasswordRequest) String() string {
 func (*ResetPasswordRequest) ProtoMessage() {}
 
 func (x *ResetPasswordRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[16]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -833,7 +945,7 @@ func (x *ResetPasswordRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResetPasswordRequest.ProtoReflect.Descriptor instead.
 func (*ResetPasswordRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{16}
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ResetPasswordRequest) GetId() string {
@@ -858,7 +970,7 @@ type ResetPasswordResponse struct {
 
 func (x *ResetPasswordResponse) Reset() {
 	*x = ResetPasswordResponse{}
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[17]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -870,7 +982,7 @@ func (x *ResetPasswordResponse) String() string {
 func (*ResetPasswordResponse) ProtoMessage() {}
 
 func (x *ResetPasswordResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[17]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -883,7 +995,7 @@ func (x *ResetPasswordResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResetPasswordResponse.ProtoReflect.Descriptor instead.
 func (*ResetPasswordResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{17}
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{19}
 }
 
 type DeleteUserRequest struct {
@@ -895,7 +1007,7 @@ type DeleteUserRequest struct {
 
 func (x *DeleteUserRequest) Reset() {
 	*x = DeleteUserRequest{}
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[18]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -907,7 +1019,7 @@ func (x *DeleteUserRequest) String() string {
 func (*DeleteUserRequest) ProtoMessage() {}
 
 func (x *DeleteUserRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[18]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -920,7 +1032,7 @@ func (x *DeleteUserRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteUserRequest.ProtoReflect.Descriptor instead.
 func (*DeleteUserRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{18}
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *DeleteUserRequest) GetId() string {
@@ -938,7 +1050,7 @@ type DeleteUserResponse struct {
 
 func (x *DeleteUserResponse) Reset() {
 	*x = DeleteUserResponse{}
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[19]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -950,7 +1062,7 @@ func (x *DeleteUserResponse) String() string {
 func (*DeleteUserResponse) ProtoMessage() {}
 
 func (x *DeleteUserResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[19]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -963,7 +1075,7 @@ func (x *DeleteUserResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteUserResponse.ProtoReflect.Descriptor instead.
 func (*DeleteUserResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{19}
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{21}
 }
 
 type LogoutRequest struct {
@@ -974,7 +1086,7 @@ type LogoutRequest struct {
 
 func (x *LogoutRequest) Reset() {
 	*x = LogoutRequest{}
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[20]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -986,7 +1098,7 @@ func (x *LogoutRequest) String() string {
 func (*LogoutRequest) ProtoMessage() {}
 
 func (x *LogoutRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[20]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -999,7 +1111,7 @@ func (x *LogoutRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogoutRequest.ProtoReflect.Descriptor instead.
 func (*LogoutRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{20}
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{22}
 }
 
 type LogoutResponse struct {
@@ -1010,7 +1122,7 @@ type LogoutResponse struct {
 
 func (x *LogoutResponse) Reset() {
 	*x = LogoutResponse{}
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[21]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1022,7 +1134,7 @@ func (x *LogoutResponse) String() string {
 func (*LogoutResponse) ProtoMessage() {}
 
 func (x *LogoutResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_auth_proto_msgTypes[21]
+	mi := &file_gastrolog_v1_auth_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1035,7 +1147,7 @@ func (x *LogoutResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogoutResponse.ProtoReflect.Descriptor instead.
 func (*LogoutResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{21}
+	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{23}
 }
 
 var File_gastrolog_v1_auth_proto protoreflect.FileDescriptor
@@ -1049,14 +1161,21 @@ const file_gastrolog_v1_auth_proto_rawDesc = "" +
 	"expires_at\x18\x02 \x01(\x03R\texpiresAt\"I\n" +
 	"\x0fRegisterRequest\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
-	"\bpassword\x18\x02 \x01(\tR\bpassword\"=\n" +
+	"\bpassword\x18\x02 \x01(\tR\bpassword\"b\n" +
 	"\x10RegisterResponse\x12)\n" +
-	"\x05token\x18\x01 \x01(\v2\x13.gastrolog.v1.TokenR\x05token\"F\n" +
+	"\x05token\x18\x01 \x01(\v2\x13.gastrolog.v1.TokenR\x05token\x12#\n" +
+	"\rrefresh_token\x18\x02 \x01(\tR\frefreshToken\"F\n" +
 	"\fLoginRequest\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
-	"\bpassword\x18\x02 \x01(\tR\bpassword\":\n" +
+	"\bpassword\x18\x02 \x01(\tR\bpassword\"_\n" +
 	"\rLoginResponse\x12)\n" +
-	"\x05token\x18\x01 \x01(\v2\x13.gastrolog.v1.TokenR\x05token\"y\n" +
+	"\x05token\x18\x01 \x01(\v2\x13.gastrolog.v1.TokenR\x05token\x12#\n" +
+	"\rrefresh_token\x18\x02 \x01(\tR\frefreshToken\":\n" +
+	"\x13RefreshTokenRequest\x12#\n" +
+	"\rrefresh_token\x18\x01 \x01(\tR\frefreshToken\"f\n" +
+	"\x14RefreshTokenResponse\x12)\n" +
+	"\x05token\x18\x01 \x01(\v2\x13.gastrolog.v1.TokenR\x05token\x12#\n" +
+	"\rrefresh_token\x18\x02 \x01(\tR\frefreshToken\"y\n" +
 	"\x15ChangePasswordRequest\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12!\n" +
 	"\fold_password\x18\x02 \x01(\tR\voldPassword\x12!\n" +
@@ -1096,10 +1215,11 @@ const file_gastrolog_v1_auth_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x14\n" +
 	"\x12DeleteUserResponse\"\x0f\n" +
 	"\rLogoutRequest\"\x10\n" +
-	"\x0eLogoutResponse2\xbd\x06\n" +
+	"\x0eLogoutResponse2\x94\a\n" +
 	"\vAuthService\x12I\n" +
 	"\bRegister\x12\x1d.gastrolog.v1.RegisterRequest\x1a\x1e.gastrolog.v1.RegisterResponse\x12@\n" +
-	"\x05Login\x12\x1a.gastrolog.v1.LoginRequest\x1a\x1b.gastrolog.v1.LoginResponse\x12[\n" +
+	"\x05Login\x12\x1a.gastrolog.v1.LoginRequest\x1a\x1b.gastrolog.v1.LoginResponse\x12U\n" +
+	"\fRefreshToken\x12!.gastrolog.v1.RefreshTokenRequest\x1a\".gastrolog.v1.RefreshTokenResponse\x12[\n" +
 	"\x0eChangePassword\x12#.gastrolog.v1.ChangePasswordRequest\x1a$.gastrolog.v1.ChangePasswordResponse\x12X\n" +
 	"\rGetAuthStatus\x12\".gastrolog.v1.GetAuthStatusRequest\x1a#.gastrolog.v1.GetAuthStatusResponse\x12O\n" +
 	"\n" +
@@ -1123,62 +1243,67 @@ func file_gastrolog_v1_auth_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_auth_proto_rawDescData
 }
 
-var file_gastrolog_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_gastrolog_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_gastrolog_v1_auth_proto_goTypes = []any{
 	(*Token)(nil),                  // 0: gastrolog.v1.Token
 	(*RegisterRequest)(nil),        // 1: gastrolog.v1.RegisterRequest
 	(*RegisterResponse)(nil),       // 2: gastrolog.v1.RegisterResponse
 	(*LoginRequest)(nil),           // 3: gastrolog.v1.LoginRequest
 	(*LoginResponse)(nil),          // 4: gastrolog.v1.LoginResponse
-	(*ChangePasswordRequest)(nil),  // 5: gastrolog.v1.ChangePasswordRequest
-	(*ChangePasswordResponse)(nil), // 6: gastrolog.v1.ChangePasswordResponse
-	(*GetAuthStatusRequest)(nil),   // 7: gastrolog.v1.GetAuthStatusRequest
-	(*GetAuthStatusResponse)(nil),  // 8: gastrolog.v1.GetAuthStatusResponse
-	(*UserInfo)(nil),               // 9: gastrolog.v1.UserInfo
-	(*CreateUserRequest)(nil),      // 10: gastrolog.v1.CreateUserRequest
-	(*CreateUserResponse)(nil),     // 11: gastrolog.v1.CreateUserResponse
-	(*ListUsersRequest)(nil),       // 12: gastrolog.v1.ListUsersRequest
-	(*ListUsersResponse)(nil),      // 13: gastrolog.v1.ListUsersResponse
-	(*UpdateUserRoleRequest)(nil),  // 14: gastrolog.v1.UpdateUserRoleRequest
-	(*UpdateUserRoleResponse)(nil), // 15: gastrolog.v1.UpdateUserRoleResponse
-	(*ResetPasswordRequest)(nil),   // 16: gastrolog.v1.ResetPasswordRequest
-	(*ResetPasswordResponse)(nil),  // 17: gastrolog.v1.ResetPasswordResponse
-	(*DeleteUserRequest)(nil),      // 18: gastrolog.v1.DeleteUserRequest
-	(*DeleteUserResponse)(nil),     // 19: gastrolog.v1.DeleteUserResponse
-	(*LogoutRequest)(nil),          // 20: gastrolog.v1.LogoutRequest
-	(*LogoutResponse)(nil),         // 21: gastrolog.v1.LogoutResponse
+	(*RefreshTokenRequest)(nil),    // 5: gastrolog.v1.RefreshTokenRequest
+	(*RefreshTokenResponse)(nil),   // 6: gastrolog.v1.RefreshTokenResponse
+	(*ChangePasswordRequest)(nil),  // 7: gastrolog.v1.ChangePasswordRequest
+	(*ChangePasswordResponse)(nil), // 8: gastrolog.v1.ChangePasswordResponse
+	(*GetAuthStatusRequest)(nil),   // 9: gastrolog.v1.GetAuthStatusRequest
+	(*GetAuthStatusResponse)(nil),  // 10: gastrolog.v1.GetAuthStatusResponse
+	(*UserInfo)(nil),               // 11: gastrolog.v1.UserInfo
+	(*CreateUserRequest)(nil),      // 12: gastrolog.v1.CreateUserRequest
+	(*CreateUserResponse)(nil),     // 13: gastrolog.v1.CreateUserResponse
+	(*ListUsersRequest)(nil),       // 14: gastrolog.v1.ListUsersRequest
+	(*ListUsersResponse)(nil),      // 15: gastrolog.v1.ListUsersResponse
+	(*UpdateUserRoleRequest)(nil),  // 16: gastrolog.v1.UpdateUserRoleRequest
+	(*UpdateUserRoleResponse)(nil), // 17: gastrolog.v1.UpdateUserRoleResponse
+	(*ResetPasswordRequest)(nil),   // 18: gastrolog.v1.ResetPasswordRequest
+	(*ResetPasswordResponse)(nil),  // 19: gastrolog.v1.ResetPasswordResponse
+	(*DeleteUserRequest)(nil),      // 20: gastrolog.v1.DeleteUserRequest
+	(*DeleteUserResponse)(nil),     // 21: gastrolog.v1.DeleteUserResponse
+	(*LogoutRequest)(nil),          // 22: gastrolog.v1.LogoutRequest
+	(*LogoutResponse)(nil),         // 23: gastrolog.v1.LogoutResponse
 }
 var file_gastrolog_v1_auth_proto_depIdxs = []int32{
 	0,  // 0: gastrolog.v1.RegisterResponse.token:type_name -> gastrolog.v1.Token
 	0,  // 1: gastrolog.v1.LoginResponse.token:type_name -> gastrolog.v1.Token
-	9,  // 2: gastrolog.v1.CreateUserResponse.user:type_name -> gastrolog.v1.UserInfo
-	9,  // 3: gastrolog.v1.ListUsersResponse.users:type_name -> gastrolog.v1.UserInfo
-	9,  // 4: gastrolog.v1.UpdateUserRoleResponse.user:type_name -> gastrolog.v1.UserInfo
-	1,  // 5: gastrolog.v1.AuthService.Register:input_type -> gastrolog.v1.RegisterRequest
-	3,  // 6: gastrolog.v1.AuthService.Login:input_type -> gastrolog.v1.LoginRequest
-	5,  // 7: gastrolog.v1.AuthService.ChangePassword:input_type -> gastrolog.v1.ChangePasswordRequest
-	7,  // 8: gastrolog.v1.AuthService.GetAuthStatus:input_type -> gastrolog.v1.GetAuthStatusRequest
-	10, // 9: gastrolog.v1.AuthService.CreateUser:input_type -> gastrolog.v1.CreateUserRequest
-	12, // 10: gastrolog.v1.AuthService.ListUsers:input_type -> gastrolog.v1.ListUsersRequest
-	14, // 11: gastrolog.v1.AuthService.UpdateUserRole:input_type -> gastrolog.v1.UpdateUserRoleRequest
-	16, // 12: gastrolog.v1.AuthService.ResetPassword:input_type -> gastrolog.v1.ResetPasswordRequest
-	18, // 13: gastrolog.v1.AuthService.DeleteUser:input_type -> gastrolog.v1.DeleteUserRequest
-	20, // 14: gastrolog.v1.AuthService.Logout:input_type -> gastrolog.v1.LogoutRequest
-	2,  // 15: gastrolog.v1.AuthService.Register:output_type -> gastrolog.v1.RegisterResponse
-	4,  // 16: gastrolog.v1.AuthService.Login:output_type -> gastrolog.v1.LoginResponse
-	6,  // 17: gastrolog.v1.AuthService.ChangePassword:output_type -> gastrolog.v1.ChangePasswordResponse
-	8,  // 18: gastrolog.v1.AuthService.GetAuthStatus:output_type -> gastrolog.v1.GetAuthStatusResponse
-	11, // 19: gastrolog.v1.AuthService.CreateUser:output_type -> gastrolog.v1.CreateUserResponse
-	13, // 20: gastrolog.v1.AuthService.ListUsers:output_type -> gastrolog.v1.ListUsersResponse
-	15, // 21: gastrolog.v1.AuthService.UpdateUserRole:output_type -> gastrolog.v1.UpdateUserRoleResponse
-	17, // 22: gastrolog.v1.AuthService.ResetPassword:output_type -> gastrolog.v1.ResetPasswordResponse
-	19, // 23: gastrolog.v1.AuthService.DeleteUser:output_type -> gastrolog.v1.DeleteUserResponse
-	21, // 24: gastrolog.v1.AuthService.Logout:output_type -> gastrolog.v1.LogoutResponse
-	15, // [15:25] is the sub-list for method output_type
-	5,  // [5:15] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	0,  // 2: gastrolog.v1.RefreshTokenResponse.token:type_name -> gastrolog.v1.Token
+	11, // 3: gastrolog.v1.CreateUserResponse.user:type_name -> gastrolog.v1.UserInfo
+	11, // 4: gastrolog.v1.ListUsersResponse.users:type_name -> gastrolog.v1.UserInfo
+	11, // 5: gastrolog.v1.UpdateUserRoleResponse.user:type_name -> gastrolog.v1.UserInfo
+	1,  // 6: gastrolog.v1.AuthService.Register:input_type -> gastrolog.v1.RegisterRequest
+	3,  // 7: gastrolog.v1.AuthService.Login:input_type -> gastrolog.v1.LoginRequest
+	5,  // 8: gastrolog.v1.AuthService.RefreshToken:input_type -> gastrolog.v1.RefreshTokenRequest
+	7,  // 9: gastrolog.v1.AuthService.ChangePassword:input_type -> gastrolog.v1.ChangePasswordRequest
+	9,  // 10: gastrolog.v1.AuthService.GetAuthStatus:input_type -> gastrolog.v1.GetAuthStatusRequest
+	12, // 11: gastrolog.v1.AuthService.CreateUser:input_type -> gastrolog.v1.CreateUserRequest
+	14, // 12: gastrolog.v1.AuthService.ListUsers:input_type -> gastrolog.v1.ListUsersRequest
+	16, // 13: gastrolog.v1.AuthService.UpdateUserRole:input_type -> gastrolog.v1.UpdateUserRoleRequest
+	18, // 14: gastrolog.v1.AuthService.ResetPassword:input_type -> gastrolog.v1.ResetPasswordRequest
+	20, // 15: gastrolog.v1.AuthService.DeleteUser:input_type -> gastrolog.v1.DeleteUserRequest
+	22, // 16: gastrolog.v1.AuthService.Logout:input_type -> gastrolog.v1.LogoutRequest
+	2,  // 17: gastrolog.v1.AuthService.Register:output_type -> gastrolog.v1.RegisterResponse
+	4,  // 18: gastrolog.v1.AuthService.Login:output_type -> gastrolog.v1.LoginResponse
+	6,  // 19: gastrolog.v1.AuthService.RefreshToken:output_type -> gastrolog.v1.RefreshTokenResponse
+	8,  // 20: gastrolog.v1.AuthService.ChangePassword:output_type -> gastrolog.v1.ChangePasswordResponse
+	10, // 21: gastrolog.v1.AuthService.GetAuthStatus:output_type -> gastrolog.v1.GetAuthStatusResponse
+	13, // 22: gastrolog.v1.AuthService.CreateUser:output_type -> gastrolog.v1.CreateUserResponse
+	15, // 23: gastrolog.v1.AuthService.ListUsers:output_type -> gastrolog.v1.ListUsersResponse
+	17, // 24: gastrolog.v1.AuthService.UpdateUserRole:output_type -> gastrolog.v1.UpdateUserRoleResponse
+	19, // 25: gastrolog.v1.AuthService.ResetPassword:output_type -> gastrolog.v1.ResetPasswordResponse
+	21, // 26: gastrolog.v1.AuthService.DeleteUser:output_type -> gastrolog.v1.DeleteUserResponse
+	23, // 27: gastrolog.v1.AuthService.Logout:output_type -> gastrolog.v1.LogoutResponse
+	17, // [17:28] is the sub-list for method output_type
+	6,  // [6:17] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_auth_proto_init() }
@@ -1192,7 +1317,7 @@ func file_gastrolog_v1_auth_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_auth_proto_rawDesc), len(file_gastrolog_v1_auth_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   22,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -96,6 +96,12 @@ type Store interface {
 	CountUsers(ctx context.Context) (int, error)
 	GetUserPreferences(ctx context.Context, id uuid.UUID) (*string, error)
 	PutUserPreferences(ctx context.Context, id uuid.UUID, prefs string) error
+
+	// Refresh tokens
+	CreateRefreshToken(ctx context.Context, token RefreshToken) error
+	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (*RefreshToken, error)
+	DeleteRefreshToken(ctx context.Context, id uuid.UUID) error
+	DeleteUserRefreshTokens(ctx context.Context, userID uuid.UUID) error
 }
 
 // Config describes the desired system shape.
@@ -169,6 +175,16 @@ type AuthConfig struct {
 	RequireSpecial        bool   `json:"require_special,omitempty"`         // require at least one special char
 	MaxConsecutiveRepeats int    `json:"max_consecutive_repeats,omitempty"` // 0 = no limit
 	ForbidAnimalNoise    bool   `json:"forbid_animal_noise,omitempty"`    // require an animal noise
+	RefreshTokenDuration string `json:"refresh_token_duration,omitempty"` // Go duration, e.g. "168h"
+}
+
+// RefreshToken represents a stored refresh token (hash only, not the opaque token itself).
+type RefreshToken struct {
+	ID        uuid.UUID `json:"id"`
+	UserID    uuid.UUID `json:"user_id"`
+	TokenHash string    `json:"token_hash"` // SHA-256 of the opaque token
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // User represents a user account.

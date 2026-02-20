@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
-import { authClient, getToken, setToken } from "../client";
+import { authClient, getToken, setToken, setRefreshToken } from "../client";
 
 export function useAuthStatus() {
   return useQuery({
@@ -24,6 +24,7 @@ export function useLogin() {
       if (data.token) {
         setToken(data.token.token);
       }
+      setRefreshToken(data.refreshToken);
       qc.invalidateQueries({ queryKey: ["authStatus"] });
     },
   });
@@ -39,6 +40,7 @@ export function useRegister() {
       if (data.token) {
         setToken(data.token.token);
       }
+      setRefreshToken(data.refreshToken);
       qc.invalidateQueries({ queryKey: ["authStatus"] });
     },
   });
@@ -89,6 +91,7 @@ export function useLogout() {
       // (e.g. token already expired).
     }
     setToken(null);
+    setRefreshToken(null);
     qc.clear();
     navigate({ to: "/login" });
   }, [qc, navigate]);

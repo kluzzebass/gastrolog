@@ -816,3 +816,58 @@ func (s *Store) PutUserPreferences(ctx context.Context, id uuid.UUID, prefs stri
 	}
 	return nil
 }
+
+// Refresh tokens
+
+func (s *Store) CreateRefreshToken(ctx context.Context, token config.RefreshToken) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, created_at)
+		VALUES (?, ?, ?, ?, ?)
+	`, token.ID, token.UserID, token.TokenHash,
+		token.ExpiresAt.Format(timeFormat), token.CreatedAt.Format(timeFormat))
+	if err != nil {
+		return fmt.Errorf("create refresh token %q: %w", token.ID, err)
+	}
+	return nil
+}
+
+func (s *Store) GetRefreshTokenByHash(ctx context.Context, tokenHash string) (*config.RefreshToken, error) {
+	row := s.db.QueryRowContext(ctx,
+		"SELECT id, user_id, token_hash, expires_at, created_at FROM refresh_tokens WHERE token_hash = ?",
+		tokenHash)
+
+	var rt config.RefreshToken
+	var expiresAt, createdAt string
+	err := row.Scan(&rt.ID, &rt.UserID, &rt.TokenHash, &expiresAt, &createdAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get refresh token by hash: %w", err)
+	}
+	rt.ExpiresAt, err = time.Parse(timeFormat, expiresAt)
+	if err != nil {
+		return nil, fmt.Errorf("parse expires_at %q: %w", expiresAt, err)
+	}
+	rt.CreatedAt, err = time.Parse(timeFormat, createdAt)
+	if err != nil {
+		return nil, fmt.Errorf("parse created_at %q: %w", createdAt, err)
+	}
+	return &rt, nil
+}
+
+func (s *Store) DeleteRefreshToken(ctx context.Context, id uuid.UUID) error {
+	_, err := s.db.ExecContext(ctx, "DELETE FROM refresh_tokens WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("delete refresh token %q: %w", id, err)
+	}
+	return nil
+}
+
+func (s *Store) DeleteUserRefreshTokens(ctx context.Context, userID uuid.UUID) error {
+	_, err := s.db.ExecContext(ctx, "DELETE FROM refresh_tokens WHERE user_id = ?", userID)
+	if err != nil {
+		return fmt.Errorf("delete refresh tokens for user %q: %w", userID, err)
+	}
+	return nil
+}

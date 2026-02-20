@@ -1309,6 +1309,151 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 	})
 
+	// Refresh tokens
+
+	t.Run("CreateGetRefreshToken", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		tokenID := newID()
+		userID := newID()
+		now := time.Now().UTC().Truncate(time.Second)
+		rt := config.RefreshToken{
+			ID:        tokenID,
+			UserID:    userID,
+			TokenHash: "sha256-hash-abc123",
+			ExpiresAt: now.Add(7 * 24 * time.Hour),
+			CreatedAt: now,
+		}
+
+		if err := s.CreateRefreshToken(ctx, rt); err != nil {
+			t.Fatalf("CreateRefreshToken: %v", err)
+		}
+
+		got, err := s.GetRefreshTokenByHash(ctx, "sha256-hash-abc123")
+		if err != nil {
+			t.Fatalf("GetRefreshTokenByHash: %v", err)
+		}
+		if got == nil {
+			t.Fatal("expected refresh token, got nil")
+		}
+		if got.ID != tokenID {
+			t.Errorf("ID: expected %s, got %s", tokenID, got.ID)
+		}
+		if got.UserID != userID {
+			t.Errorf("UserID: expected %s, got %s", userID, got.UserID)
+		}
+		if got.TokenHash != "sha256-hash-abc123" {
+			t.Errorf("TokenHash: expected %q, got %q", "sha256-hash-abc123", got.TokenHash)
+		}
+		if got.ExpiresAt.Truncate(time.Second) != rt.ExpiresAt.Truncate(time.Second) {
+			t.Errorf("ExpiresAt: expected %v, got %v", rt.ExpiresAt, got.ExpiresAt)
+		}
+		if got.CreatedAt.Truncate(time.Second) != now {
+			t.Errorf("CreatedAt: expected %v, got %v", now, got.CreatedAt)
+		}
+	})
+
+	t.Run("GetRefreshTokenByHashNotFound", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		got, err := s.GetRefreshTokenByHash(ctx, "nonexistent-hash")
+		if err != nil {
+			t.Fatalf("GetRefreshTokenByHash: %v", err)
+		}
+		if got != nil {
+			t.Fatalf("expected nil for unknown hash, got %+v", got)
+		}
+	})
+
+	t.Run("DeleteRefreshToken", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		tokenID := newID()
+		rt := config.RefreshToken{
+			ID:        tokenID,
+			UserID:    newID(),
+			TokenHash: "hash-to-delete",
+			ExpiresAt: time.Now().Add(time.Hour),
+			CreatedAt: time.Now(),
+		}
+
+		if err := s.CreateRefreshToken(ctx, rt); err != nil {
+			t.Fatalf("CreateRefreshToken: %v", err)
+		}
+
+		if err := s.DeleteRefreshToken(ctx, tokenID); err != nil {
+			t.Fatalf("DeleteRefreshToken: %v", err)
+		}
+
+		got, err := s.GetRefreshTokenByHash(ctx, "hash-to-delete")
+		if err != nil {
+			t.Fatalf("GetRefreshTokenByHash after delete: %v", err)
+		}
+		if got != nil {
+			t.Fatalf("expected nil after delete, got %+v", got)
+		}
+	})
+
+	t.Run("DeleteUserRefreshTokens", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		userID := newID()
+		otherUserID := newID()
+
+		// Create two tokens for the target user and one for another.
+		for i, hash := range []string{"user-hash-1", "user-hash-2"} {
+			rt := config.RefreshToken{
+				ID:        newID(),
+				UserID:    userID,
+				TokenHash: hash,
+				ExpiresAt: time.Now().Add(time.Hour),
+				CreatedAt: time.Now().Add(time.Duration(i) * time.Second),
+			}
+			if err := s.CreateRefreshToken(ctx, rt); err != nil {
+				t.Fatalf("CreateRefreshToken %d: %v", i, err)
+			}
+		}
+		otherRT := config.RefreshToken{
+			ID:        newID(),
+			UserID:    otherUserID,
+			TokenHash: "other-user-hash",
+			ExpiresAt: time.Now().Add(time.Hour),
+			CreatedAt: time.Now(),
+		}
+		if err := s.CreateRefreshToken(ctx, otherRT); err != nil {
+			t.Fatalf("CreateRefreshToken other: %v", err)
+		}
+
+		// Delete all tokens for the target user.
+		if err := s.DeleteUserRefreshTokens(ctx, userID); err != nil {
+			t.Fatalf("DeleteUserRefreshTokens: %v", err)
+		}
+
+		// Target user's tokens should be gone.
+		for _, hash := range []string{"user-hash-1", "user-hash-2"} {
+			got, err := s.GetRefreshTokenByHash(ctx, hash)
+			if err != nil {
+				t.Fatalf("GetRefreshTokenByHash %q: %v", hash, err)
+			}
+			if got != nil {
+				t.Errorf("expected nil for deleted user token %q, got %+v", hash, got)
+			}
+		}
+
+		// Other user's token should still exist.
+		got, err := s.GetRefreshTokenByHash(ctx, "other-user-hash")
+		if err != nil {
+			t.Fatalf("GetRefreshTokenByHash other: %v", err)
+		}
+		if got == nil {
+			t.Fatal("expected other user's token to survive, got nil")
+		}
+	})
+
 	t.Run("UsersNotInLoad", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()

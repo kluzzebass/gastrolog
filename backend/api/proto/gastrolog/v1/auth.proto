@@ -13,6 +13,9 @@ service AuthService {
   // Login authenticates a user and returns a token.
   rpc Login(LoginRequest) returns (LoginResponse);
 
+  // RefreshToken exchanges a valid refresh token for a new access + refresh token pair.
+  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
+
   // ChangePassword updates the authenticated user's password.
   rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
 
@@ -50,6 +53,7 @@ message RegisterRequest {
 
 message RegisterResponse {
   Token token = 1;
+  string refresh_token = 2;
 }
 
 message LoginRequest {
@@ -59,6 +63,16 @@ message LoginRequest {
 
 message LoginResponse {
   Token token = 1;
+  string refresh_token = 2;
+}
+
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+message RefreshTokenResponse {
+  Token token = 1;
+  string refresh_token = 2;
 }
 
 message ChangePasswordRequest {

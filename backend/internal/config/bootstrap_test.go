@@ -82,8 +82,11 @@ func TestBootstrap(t *testing.T) {
 	if sc.Auth.JWTSecret == "" {
 		t.Error("expected non-empty JWT secret after bootstrap")
 	}
-	if sc.Auth.TokenDuration != "168h" {
-		t.Errorf("expected token duration 168h, got %q", sc.Auth.TokenDuration)
+	if sc.Auth.TokenDuration != "15m" {
+		t.Errorf("expected token duration 15m, got %q", sc.Auth.TokenDuration)
+	}
+	if sc.Auth.RefreshTokenDuration != "168h" {
+		t.Errorf("expected refresh token duration 168h, got %q", sc.Auth.RefreshTokenDuration)
 	}
 }
 

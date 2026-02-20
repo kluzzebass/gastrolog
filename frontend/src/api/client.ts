@@ -14,6 +14,7 @@ import { JobService } from "./gen/gastrolog/v1/job_connect";
 
 // Token management — stored in localStorage, read by the auth interceptor.
 const TOKEN_KEY = "gastrolog_token";
+const REFRESH_TOKEN_KEY = "gastrolog_refresh_token";
 let currentToken: string | null = localStorage.getItem(TOKEN_KEY);
 
 export function getToken(): string | null {
@@ -29,6 +30,18 @@ export function setToken(token: string | null) {
   }
 }
 
+export function getRefreshToken(): string | null {
+  return localStorage.getItem(REFRESH_TOKEN_KEY);
+}
+
+export function setRefreshToken(token: string | null) {
+  if (token) {
+    localStorage.setItem(REFRESH_TOKEN_KEY, token);
+  } else {
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+  }
+}
+
 // Attaches the stored JWT to every outgoing RPC request.
 const authInterceptor: Interceptor = (next) => async (req) => {
   if (currentToken) {
@@ -37,8 +50,26 @@ const authInterceptor: Interceptor = (next) => async (req) => {
   return next(req);
 };
 
+// Track whether a refresh is already in-flight to avoid concurrent refreshes.
+let refreshPromise: Promise<boolean> | null = null;
+
+async function tryRefresh(): Promise<boolean> {
+  const rt = getRefreshToken();
+  if (!rt) return false;
+  try {
+    const res = await authClient.refreshToken({ refreshToken: rt });
+    if (res.token) {
+      setToken(res.token.token);
+    }
+    setRefreshToken(res.refreshToken);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Catches Unauthenticated errors on any RPC (except AuthService) and
-// redirects to login, preventing stale-token scenarios from silently failing.
+// attempts a refresh before redirecting to login.
 const unauthInterceptor: Interceptor = (next) => async (req) => {
   try {
     return await next(req);
@@ -49,7 +80,21 @@ const unauthInterceptor: Interceptor = (next) => async (req) => {
       !req.service.typeName.endsWith(".AuthService") &&
       !["/login", "/register"].includes(globalThis.location.pathname)
     ) {
+      // Try to refresh the token.
+      if (!refreshPromise) {
+        refreshPromise = tryRefresh().finally(() => {
+          refreshPromise = null;
+        });
+      }
+      const refreshed = await refreshPromise;
+      if (refreshed) {
+        // Retry the original request with the new token.
+        req.header.set("Authorization", `Bearer ${currentToken}`);
+        return await next(req);
+      }
+      // Refresh failed — clear everything and redirect.
       setToken(null);
+      setRefreshToken(null);
       globalThis.location.href = "/login";
     }
     throw err;
