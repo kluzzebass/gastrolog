@@ -34,7 +34,7 @@ export function FormField({
   );
 }
 
-function ExampleValues({
+export function ExampleValues({
   examples,
   value,
   onChange,

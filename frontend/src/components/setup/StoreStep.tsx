@@ -66,9 +66,9 @@ export function StoreStep({ dark, data, onChange }: Readonly<StoreStepProps>) {
           <TextInput
             value={data.dir}
             onChange={(v) => onChange({ ...data, dir: v })}
-            placeholder="/var/lib/gastrolog/data"
             dark={dark}
             mono
+            examples={["/var/log/gastrolog/data", "/stores"]}
           />
         </FormField>
       )}

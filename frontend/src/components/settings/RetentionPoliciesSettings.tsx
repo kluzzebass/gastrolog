@@ -191,7 +191,7 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
               <TextInput
                 value={newMaxAge}
                 onChange={(v) => dispatchAdd({ type: "setNewMaxAge", value: v })}
-                placeholder="720h"
+                placeholder=""
                 dark={dark}
                 mono
                 examples={["720h", "30d", "90d"]}
@@ -204,7 +204,7 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
               <TextInput
                 value={newMaxBytes}
                 onChange={(v) => dispatchAdd({ type: "setNewMaxBytes", value: v })}
-                placeholder="10GB"
+                placeholder=""
                 dark={dark}
                 mono
                 examples={["1GB", "10GB", "100GB"]}
@@ -214,7 +214,7 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
               <NumberInput
                 value={newMaxChunks}
                 onChange={(v) => dispatchAdd({ type: "setNewMaxChunks", value: v })}
-                placeholder="100"
+                placeholder=""
                 dark={dark}
               />
             </FormField>
@@ -260,7 +260,7 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
                   <TextInput
                     value={edit.maxAge}
                     onChange={(v) => setEdit(id, { maxAge: v })}
-                    placeholder="720h"
+                    placeholder=""
                     dark={dark}
                     mono
                     examples={["720h", "30d", "90d"]}
@@ -273,7 +273,7 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
                   <TextInput
                     value={edit.maxBytes}
                     onChange={(v) => setEdit(id, { maxBytes: v })}
-                    placeholder="10GB"
+                    placeholder=""
                     dark={dark}
                     mono
                     examples={["1GB", "10GB", "100GB"]}
@@ -283,7 +283,7 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
                   <NumberInput
                     value={edit.maxChunks}
                     onChange={(v) => setEdit(id, { maxChunks: v })}
-                    placeholder="100"
+                    placeholder=""
                     dark={dark}
                   />
                 </FormField>

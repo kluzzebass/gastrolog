@@ -103,7 +103,7 @@ function CronField({
       <TextInput
         value={value}
         onChange={onChange}
-        placeholder="0 * * * *"
+        placeholder=""
         dark={dark}
         mono
         examples={["0 * * * *", "0 0 * * *"]}
@@ -257,7 +257,7 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
               <TextInput
                 value={newMaxBytes}
                 onChange={(v) => dispatchAdd({ type: "setNewMaxBytes", value: v })}
-                placeholder="64MB"
+                placeholder=""
                 dark={dark}
                 mono
                 examples={["64MB", "256MB", "1GB"]}
@@ -267,7 +267,7 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
               <NumberInput
                 value={newMaxRecords}
                 onChange={(v) => dispatchAdd({ type: "setNewMaxRecords", value: v })}
-                placeholder="100000"
+                placeholder=""
                 dark={dark}
               />
             </FormField>
@@ -278,7 +278,7 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
               <TextInput
                 value={newMaxAge}
                 onChange={(v) => dispatchAdd({ type: "setNewMaxAge", value: v })}
-                placeholder="5m"
+                placeholder=""
                 dark={dark}
                 mono
                 examples={["1h", "24h", "7d"]}
@@ -327,7 +327,7 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
                   <TextInput
                     value={edit.maxBytes}
                     onChange={(v) => setEdit(id, { maxBytes: v })}
-                    placeholder="64MB"
+                    placeholder=""
                     dark={dark}
                     mono
                     examples={["64MB", "256MB", "1GB"]}
@@ -337,7 +337,7 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
                   <NumberInput
                     value={edit.maxRecords}
                     onChange={(v) => setEdit(id, { maxRecords: v })}
-                    placeholder="100000"
+                    placeholder=""
                     dark={dark}
                   />
                 </FormField>
@@ -348,7 +348,7 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
                   <TextInput
                     value={edit.maxAge}
                     onChange={(v) => setEdit(id, { maxAge: v })}
-                    placeholder="5m"
+                    placeholder=""
                     dark={dark}
                     mono
                     examples={["1h", "24h", "7d"]}

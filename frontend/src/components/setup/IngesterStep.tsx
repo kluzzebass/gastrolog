@@ -27,8 +27,10 @@ export function IngesterStep({ dark, data, onChange }: Readonly<IngesterStepProp
   const c = useThemeClass(dark);
 
   const selectType = (type: string) => {
+    // Keep user-typed name; clear if it still matches the previous auto-name.
+    const isAutoName = !data.name || data.name === data.type;
     onChange({
-      name: data.name || type,
+      name: isAutoName ? "" : data.name,
       type,
       params: {},
     });

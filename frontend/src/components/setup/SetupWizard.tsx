@@ -12,6 +12,7 @@ import { StoreStep, type StoreData } from "./StoreStep";
 import {
   PoliciesStep,
   parseDurationToSeconds,
+  parseBytesToBigInt,
   type RotationData,
   type RetentionData,
 } from "./PoliciesStep";
@@ -30,9 +31,9 @@ interface WizardDataState {
 }
 
 const wizardDataInitial: WizardDataState = {
-  store: { name: "default", type: "file", dir: "" },
-  rotation: { name: "default", maxAge: "", maxBytes: "", maxRecords: "", cron: "" },
-  retention: { name: "default", maxChunks: "", maxAge: "", maxBytes: "" },
+  store: { name: "", type: "file", dir: "" },
+  rotation: { name: "", maxAge: "", maxBytes: "", maxRecords: "", cron: "" },
+  retention: { name: "", maxChunks: "", maxAge: "", maxBytes: "" },
   ingester: { name: "", type: "", params: {} },
 };
 
@@ -80,7 +81,6 @@ export function SetupWizard() {
     switch (step) {
       case 0: return true; // Welcome
       case 1: // Store
-        if (!store.name.trim()) return false;
         if (store.type === "file" && !store.dir.trim()) return false;
         return true;
       case 2: return true; // Policies (defaults are fine)
@@ -95,14 +95,14 @@ export function SetupWizard() {
 
     // Extract conditional expressions before try/catch for React Compiler compatibility
     const hasRotation = rotation.maxAge || rotation.maxBytes || rotation.maxRecords || rotation.cron;
-    const rotationMaxBytes = rotation.maxBytes ? BigInt(rotation.maxBytes) : BigInt(0);
+    const rotationMaxBytes = parseBytesToBigInt(rotation.maxBytes);
     const rotationMaxRecords = rotation.maxRecords ? BigInt(rotation.maxRecords) : BigInt(0);
     const rotationName = rotation.name || "default";
 
     const hasRetention = retention.maxChunks || retention.maxAge || retention.maxBytes;
     const retentionMaxChunks = retention.maxChunks ? BigInt(retention.maxChunks) : BigInt(0);
     const retentionMaxAge = retention.maxAge || "";
-    const retentionMaxBytes = retention.maxBytes ? BigInt(retention.maxBytes) : BigInt(0);
+    const retentionMaxBytes = parseBytesToBigInt(retention.maxBytes);
     const retentionName = retention.name || "default";
 
     const storeName = store.name || "default";

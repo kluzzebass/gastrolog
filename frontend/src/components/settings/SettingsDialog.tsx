@@ -505,7 +505,6 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
               <NumberInput
                 value={maxResultCount}
                 onChange={setMaxResultCount}
-                placeholder="10000"
                 dark={dark}
                 min={0}
                 examples={["1000", "10000", "100000"]}

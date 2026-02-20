@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FormField, TextInput, NumberInput, SelectInput } from "./FormField";
+import { FormField, TextInput, NumberInput, SelectInput, ExampleValues } from "./FormField";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useCertificates } from "../../api/hooks/useConfig";
 import { useTestIngester } from "../../api/hooks/useIngesters";
@@ -211,7 +211,7 @@ function ChatterboxForm({
       <div className="grid grid-cols-2 gap-3">
         <FormField
           label="Min Interval"
-          description="Minimum delay between messages (default: 100ms)"
+          description="Minimum delay between messages"
           dark={dark}
         >
           <TextInput
@@ -225,7 +225,7 @@ function ChatterboxForm({
         </FormField>
         <FormField
           label="Max Interval"
-          description="Maximum delay between messages (default: 1s)"
+          description="Maximum delay between messages"
           dark={dark}
         >
           <TextInput
@@ -243,7 +243,7 @@ function ChatterboxForm({
       <div className="grid grid-cols-2 gap-3">
         <FormField
           label="Host Count"
-          description="Distinct hosts to simulate (default: 10)"
+          description="Distinct hosts to simulate"
           dark={dark}
         >
           <NumberInput
@@ -257,7 +257,7 @@ function ChatterboxForm({
         </FormField>
         <FormField
           label="Service Count"
-          description="Distinct services to simulate (default: 5)"
+          description="Distinct services to simulate"
           dark={dark}
         >
           <NumberInput
@@ -329,11 +329,17 @@ function TailForm({
             "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
           )}`}
         />
+        <ExampleValues
+          examples={["/var/log/**/*.log", "/var/log/syslog", "/var/log/auth.log"]}
+          value={text}
+          onChange={handleTextChange}
+          dark={dark}
+        />
       </div>
 
       <FormField
         label="Poll Interval"
-        description="How often to re-scan for new files and save bookmarks (default: 30s, 0s to disable)"
+        description="How often to re-scan for new files and save bookmarks (0 to disable)"
         dark={dark}
       >
         <TextInput
@@ -410,7 +416,7 @@ function DockerForm({
       <div className="grid grid-cols-2 gap-3">
         <FormField
           label="Poll Interval"
-          description="Backup container discovery interval (default: 30s)"
+          description="Backup container discovery interval"
           dark={dark}
         >
           <TextInput
@@ -560,7 +566,7 @@ export function IngesterParamsForm({
     return (
       <FormField
         label="Listen Address"
-        description="TCP address for HTTP/Loki Push API (default: :3100)"
+        description="TCP address for HTTP/Loki Push API"
         dark={dark}
       >
         <TextInput
@@ -579,7 +585,7 @@ export function IngesterParamsForm({
     return (
       <FormField
         label="Listen Address"
-        description="TCP address for RELP (default: :2514)"
+        description="TCP address for RELP"
         dark={dark}
       >
         <TextInput
@@ -599,7 +605,7 @@ export function IngesterParamsForm({
       <div className="grid grid-cols-2 gap-3">
         <FormField
           label="UDP Address"
-          description="UDP listen address (default: :514)"
+          description="UDP listen address"
           dark={dark}
         >
           <TextInput
