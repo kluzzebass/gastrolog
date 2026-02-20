@@ -183,15 +183,23 @@ func (s *Server) buildMux() *http.ServeMux {
 		handlerOpts = append(handlerOpts, connect.WithInterceptors(authInterceptor))
 	}
 
-	queryTimeout := 30 * time.Second // default
+	var queryTimeout time.Duration
+	var maxFollowDuration time.Duration
 	if s.cfgStore != nil {
-		if sc, err := config.LoadServerConfig(context.Background(), s.cfgStore); err == nil && sc.Query.Timeout != "" {
-			if d, err := time.ParseDuration(sc.Query.Timeout); err == nil {
-				queryTimeout = d
+		if sc, err := config.LoadServerConfig(context.Background(), s.cfgStore); err == nil {
+			if sc.Query.Timeout != "" {
+				if d, err := time.ParseDuration(sc.Query.Timeout); err == nil {
+					queryTimeout = d
+				}
+			}
+			if sc.Query.MaxFollowDuration != "" {
+				if d, err := time.ParseDuration(sc.Query.MaxFollowDuration); err == nil {
+					maxFollowDuration = d
+				}
 			}
 		}
 	}
-	queryServer := NewQueryServer(s.orch, queryTimeout)
+	queryServer := NewQueryServer(s.orch, queryTimeout, maxFollowDuration)
 	storeServer := NewStoreServer(s.orch, s.cfgStore, s.factories, s.logger)
 	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager)
 	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
@@ -229,9 +237,9 @@ func (s *Server) Serve(listener net.Listener) error {
 	s.rl.startCleanup(rlCtx, &s.rlWG, 3*time.Minute, 5*time.Minute)
 
 	// Build the core handler once — reused by both HTTP and HTTPS.
-	// Chain: tracking → CORS → rateLimit → compress → mux
+	// Chain: tracking → CORS → securityHeaders → rateLimit → compress → mux
 	mux := s.buildMux()
-	s.handler = s.trackingMiddleware(s.corsMiddleware(rateLimitMiddleware(s.rl)(compressMiddleware(mux))))
+	s.handler = s.trackingMiddleware(s.corsMiddleware(securityHeadersMiddleware(rateLimitMiddleware(s.rl)(compressMiddleware(mux)))))
 
 	// HTTP adds redirect-to-HTTPS + h2c (HTTP/2 without TLS).
 	redirectHandler := s.redirectMiddleware(s.handler)

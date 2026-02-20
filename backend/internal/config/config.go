@@ -122,8 +122,12 @@ type ServerConfig struct {
 // QueryConfig holds configuration for the query engine.
 type QueryConfig struct {
 	// Timeout is the maximum duration for a single query (Search, Histogram, GetContext).
-	// Uses Go duration format (e.g., "30s", "1m"). Empty or "0s" disables the timeout.
+	// Uses Go duration format (e.g., "30s", "1m"). Empty disables the timeout.
 	Timeout string `json:"timeout,omitempty"`
+
+	// MaxFollowDuration is the maximum lifetime for a Follow stream.
+	// Uses Go duration format (e.g., "4h"). Empty disables the limit.
+	MaxFollowDuration string `json:"max_follow_duration,omitempty"`
 }
 
 // TLSConfig holds TLS server settings.

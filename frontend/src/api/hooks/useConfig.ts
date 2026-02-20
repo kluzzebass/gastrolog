@@ -134,6 +134,8 @@ export function usePutServerConfig() {
       requireSpecial?: boolean;
       maxConsecutiveRepeats?: number;
       forbidAnimalNoise?: boolean;
+      maxFollowDuration?: string;
+      queryTimeout?: string;
     }) => {
       const req: Record<string, unknown> = {};
       if (args.tokenDuration !== undefined) req.tokenDuration = args.tokenDuration;
@@ -160,6 +162,10 @@ export function usePutServerConfig() {
         req.maxConsecutiveRepeats = args.maxConsecutiveRepeats;
       if (args.forbidAnimalNoise !== undefined)
         req.forbidAnimalNoise = args.forbidAnimalNoise;
+      if (args.maxFollowDuration !== undefined)
+        req.maxFollowDuration = args.maxFollowDuration;
+      if (args.queryTimeout !== undefined)
+        req.queryTimeout = args.queryTimeout;
       await configClient.putServerConfig(req as Parameters<typeof configClient.putServerConfig>[0]);
     },
     onSuccess: () => {

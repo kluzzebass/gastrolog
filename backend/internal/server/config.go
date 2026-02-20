@@ -152,6 +152,8 @@ func (s *ConfigServer) GetServerConfig(
 		resp.RequireSpecial = sc.Auth.RequireSpecial
 		resp.MaxConsecutiveRepeats = int32(sc.Auth.MaxConsecutiveRepeats)
 		resp.ForbidAnimalNoise = sc.Auth.ForbidAnimalNoise
+		resp.MaxFollowDuration = sc.Query.MaxFollowDuration
+		resp.QueryTimeout = sc.Query.Timeout
 	}
 
 	// If no persisted value, report the live default from the orchestrator.
@@ -225,6 +227,12 @@ func (s *ConfigServer) PutServerConfig(
 	}
 	if req.Msg.ForbidAnimalNoise != nil {
 		sc.Auth.ForbidAnimalNoise = *req.Msg.ForbidAnimalNoise
+	}
+	if req.Msg.MaxFollowDuration != nil {
+		sc.Query.MaxFollowDuration = *req.Msg.MaxFollowDuration
+	}
+	if req.Msg.QueryTimeout != nil {
+		sc.Query.Timeout = *req.Msg.QueryTimeout
 	}
 
 	data, err := json.Marshal(sc)

@@ -152,6 +152,8 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
   const [requireSpecial, setRequireSpecial] = useState(false);
   const [maxConsecutiveRepeats, setMaxConsecutiveRepeats] = useState("");
   const [forbidAnimalNoise, setForbidAnimalNoise] = useState(false);
+  const [maxFollowDuration, setMaxFollowDuration] = useState("");
+  const [queryTimeout, setQueryTimeout] = useState("");
   const [initialized, setInitialized] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
 
@@ -175,6 +177,8 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
     setRequireSpecial(data.requireSpecial ?? false);
     setMaxConsecutiveRepeats(data.maxConsecutiveRepeats ? String(data.maxConsecutiveRepeats) : "0");
     setForbidAnimalNoise(data.forbidAnimalNoise ?? false);
+    setMaxFollowDuration(data.maxFollowDuration ?? "");
+    setQueryTimeout(data.queryTimeout ?? "");
     setInitialized(true);
   }
 
@@ -193,7 +197,9 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
       requireDigit !== (data.requireDigit ?? false) ||
       requireSpecial !== (data.requireSpecial ?? false) ||
       maxConsecutiveRepeats !== String(data.maxConsecutiveRepeats || 0) ||
-      forbidAnimalNoise !== (data.forbidAnimalNoise ?? false));
+      forbidAnimalNoise !== (data.forbidAnimalNoise ?? false) ||
+      maxFollowDuration !== (data.maxFollowDuration ?? "") ||
+      queryTimeout !== (data.queryTimeout ?? ""));
 
   const handleSave = async () => {
     const hasCert = certIds.includes(tlsDefaultCert);
@@ -218,6 +224,8 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
         requireSpecial,
         maxConsecutiveRepeats: effectiveMaxRepeats,
         forbidAnimalNoise,
+        maxFollowDuration,
+        queryTimeout,
       });
       addToast("Server configuration updated", "info");
     } catch (err: any) {
@@ -243,6 +251,8 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
       setRequireSpecial(data.requireSpecial ?? false);
       setMaxConsecutiveRepeats(data.maxConsecutiveRepeats ? String(data.maxConsecutiveRepeats) : "0");
       setForbidAnimalNoise(data.forbidAnimalNoise ?? false);
+      setMaxFollowDuration(data.maxFollowDuration ?? "");
+      setQueryTimeout(data.queryTimeout ?? "");
     }
   };
 
@@ -382,6 +392,43 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
                 dark={dark}
                 min={1}
                 examples={["2", "4", "8"]}
+              />
+            </FormField>
+          </section>
+
+          {/* ── Query ── */}
+          <section className="flex flex-col gap-5">
+            <h3 className={`text-[0.75em] uppercase tracking-wider font-medium pb-1 border-b ${c("text-text-ghost border-ink-border", "text-light-text-ghost border-light-border")}`}>
+              Query
+            </h3>
+
+            <FormField
+              label="Query Timeout"
+              description="Maximum duration for Search, Histogram, and GetContext queries. Leave empty to disable."
+              dark={dark}
+            >
+              <TextInput
+                value={queryTimeout}
+                onChange={setQueryTimeout}
+                placeholder="30s"
+                dark={dark}
+                mono
+                examples={["15s", "30s", "1m", "5m"]}
+              />
+            </FormField>
+
+            <FormField
+              label="Max Follow Duration"
+              description="Maximum lifetime for a Follow stream before the server closes it. Leave empty to disable."
+              dark={dark}
+            >
+              <TextInput
+                value={maxFollowDuration}
+                onChange={setMaxFollowDuration}
+                placeholder="4h"
+                dark={dark}
+                mono
+                examples={["1h", "4h", "8h", "24h"]}
               />
             </FormField>
           </section>

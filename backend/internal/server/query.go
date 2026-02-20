@@ -22,15 +22,16 @@ import (
 
 // QueryServer implements the QueryService.
 type QueryServer struct {
-	orch         *orchestrator.Orchestrator
-	queryTimeout time.Duration
+	orch              *orchestrator.Orchestrator
+	queryTimeout      time.Duration
+	maxFollowDuration time.Duration // 0 = no limit
 }
 
 var _ gastrologv1connect.QueryServiceHandler = (*QueryServer)(nil)
 
 // NewQueryServer creates a new QueryServer.
-func NewQueryServer(orch *orchestrator.Orchestrator, queryTimeout time.Duration) *QueryServer {
-	return &QueryServer{orch: orch, queryTimeout: queryTimeout}
+func NewQueryServer(orch *orchestrator.Orchestrator, queryTimeout, maxFollowDuration time.Duration) *QueryServer {
+	return &QueryServer{orch: orch, queryTimeout: queryTimeout, maxFollowDuration: maxFollowDuration}
 }
 
 // Search executes a query and streams matching records.
@@ -119,6 +120,12 @@ func (s *QueryServer) Follow(
 	req *connect.Request[apiv1.FollowRequest],
 	stream *connect.ServerStream[apiv1.FollowResponse],
 ) error {
+	if s.maxFollowDuration > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.maxFollowDuration)
+		defer cancel()
+	}
+
 	eng := s.orch.MultiStoreQueryEngine()
 
 	q, err := protoToQuery(req.Msg.Query)
@@ -132,7 +139,7 @@ func (s *QueryServer) Follow(
 	// Send each record immediately for real-time tailing.
 	for rec, err := range iter {
 		if err != nil {
-			if errors.Is(err, context.Canceled) {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return nil // Normal termination for follow
 			}
 			return connect.NewError(connect.CodeInternal, err)
@@ -221,6 +228,21 @@ func (s *QueryServer) Histogram(
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, s.queryTimeout)
 		defer cancel()
+	}
+
+	const maxHistogramBuckets int32 = 1000
+	if req.Msg.Buckets > maxHistogramBuckets {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("buckets must be <= %d, got %d", maxHistogramBuckets, req.Msg.Buckets))
+	}
+	if req.Msg.Buckets < 0 {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("buckets must be non-negative"))
+	}
+
+	if len(req.Msg.Expression) > maxExpressionLength {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("expression too long: %d bytes (max %d)", len(req.Msg.Expression), maxExpressionLength))
 	}
 
 	// Parse expression to extract time bounds, store filter, and query filters.
@@ -381,10 +403,15 @@ func protoToQuery(pq *apiv1.Query) (query.Query, error) {
 	return q, nil
 }
 
+const maxExpressionLength = 4096
+
 // parseExpression parses a raw query expression string into a Query.
 // Control arguments (start=, end=, limit=) are extracted; the remainder
 // is parsed through the querylang parser into BoolExpr.
 func parseExpression(expr string) (query.Query, error) {
+	if len(expr) > maxExpressionLength {
+		return query.Query{}, fmt.Errorf("expression too long: %d bytes (max %d)", len(expr), maxExpressionLength)
+	}
 	parts := strings.Fields(expr)
 	if len(parts) == 0 {
 		return query.Query{}, nil

@@ -99,6 +99,10 @@ func Bootstrap(ctx context.Context, store Store) error {
 			JWTSecret:     base64.StdEncoding.EncodeToString(secret),
 			TokenDuration: "168h", // 7 days
 		},
+		Query: QueryConfig{
+			Timeout:           "30s",
+			MaxFollowDuration: "4h",
+		},
 	}
 	serverJSON, err := json.Marshal(serverCfg)
 	if err != nil {
@@ -123,6 +127,10 @@ func BootstrapMinimal(ctx context.Context, store Store) error {
 		Auth: AuthConfig{
 			JWTSecret:     base64.StdEncoding.EncodeToString(secret),
 			TokenDuration: "168h", // 7 days
+		},
+		Query: QueryConfig{
+			Timeout:           "30s",
+			MaxFollowDuration: "4h",
 		},
 	}
 	serverJSON, err := json.Marshal(serverCfg)

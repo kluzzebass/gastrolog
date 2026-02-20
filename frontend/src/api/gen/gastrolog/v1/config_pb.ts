@@ -1432,6 +1432,20 @@ export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
    */
   httpsPort = "";
 
+  /**
+   * Max lifetime for Follow streams (Go duration). Empty = no limit.
+   *
+   * @generated from field: string max_follow_duration = 14;
+   */
+  maxFollowDuration = "";
+
+  /**
+   * Max duration for queries (Go duration). Empty = 30s default.
+   *
+   * @generated from field: string query_timeout = 15;
+   */
+  queryTimeout = "";
+
   constructor(data?: PartialMessage<GetServerConfigResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1453,6 +1467,8 @@ export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
     { no: 11, name: "max_consecutive_repeats", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
     { no: 12, name: "forbid_animal_noise", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 13, name: "https_port", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 14, name: "max_follow_duration", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 15, name: "query_timeout", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetServerConfigResponse {
@@ -1541,6 +1557,16 @@ export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
    */
   httpsPort?: string;
 
+  /**
+   * @generated from field: optional string max_follow_duration = 14;
+   */
+  maxFollowDuration?: string;
+
+  /**
+   * @generated from field: optional string query_timeout = 15;
+   */
+  queryTimeout?: string;
+
   constructor(data?: PartialMessage<PutServerConfigRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1562,6 +1588,8 @@ export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
     { no: 11, name: "max_consecutive_repeats", kind: "scalar", T: 5 /* ScalarType.INT32 */, opt: true },
     { no: 12, name: "forbid_animal_noise", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
     { no: 13, name: "https_port", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 14, name: "max_follow_duration", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 15, name: "query_timeout", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutServerConfigRequest {
