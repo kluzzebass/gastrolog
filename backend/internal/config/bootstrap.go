@@ -90,6 +90,15 @@ func Bootstrap(ctx context.Context, store Store) error {
 	}
 
 	// Generate a random JWT secret and store it as server config.
+	//
+	// Security note: the JWT secret is stored as base64 in the config store
+	// (SQLite DB or JSON file). It is NOT encrypted at rest. An attacker with
+	// read access to the config store can forge authentication tokens.
+	//
+	// Mitigations: restrict filesystem permissions on the config store
+	// (e.g. 0600 / owner-only) and use full-disk encryption where possible.
+	// Application-level encryption was considered but only shifts the problem
+	// to key management without meaningful security gain in this deployment model.
 	secret := make([]byte, 32)
 	if _, err := rand.Read(secret); err != nil {
 		return fmt.Errorf("generate JWT secret: %w", err)
