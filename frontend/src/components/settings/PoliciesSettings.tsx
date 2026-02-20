@@ -23,6 +23,7 @@ import {
 } from "../../utils/units";
 
 interface PolicyEdit {
+  name: string;
   maxBytes: string;
   maxRecords: string;
   maxAge: string;
@@ -141,8 +142,9 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
 
   const defaults = (id: string): PolicyEdit => {
     const pol = policies.find((p) => p.id === id);
-    if (!pol) return { maxBytes: "", maxRecords: "", maxAge: "", cron: "" };
+    if (!pol) return { name: "", maxBytes: "", maxRecords: "", maxAge: "", cron: "" };
     return {
+      name: pol.name,
       maxBytes: formatBytes(pol.maxBytes),
       maxRecords: pol.maxRecords > 0n ? pol.maxRecords.toString() : "",
       maxAge: formatDuration(pol.maxAgeSeconds),
@@ -164,7 +166,7 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
       const maxRecordsValue = edit.maxRecords ? BigInt(edit.maxRecords) : 0n;
       return {
         id,
-        name: policies.find((p) => p.id === id)?.name ?? "",
+        name: edit.name,
         maxBytes: parseBytes(edit.maxBytes),
         maxRecords: maxRecordsValue,
         maxAgeSeconds: parseDuration(edit.maxAge),
@@ -310,6 +312,13 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
             status={<UsedByStatus dark={dark} refs={refs} />}
           >
             <div className="flex flex-col gap-3">
+              <FormField label="Name" dark={dark}>
+                <TextInput
+                  value={edit.name}
+                  onChange={(v) => setEdit(id, { name: v })}
+                  dark={dark}
+                />
+              </FormField>
               <div className="grid grid-cols-3 gap-3">
                 <FormField
                   label="Max Bytes"

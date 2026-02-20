@@ -139,6 +139,16 @@ export function useUpdateUserRole() {
   });
 }
 
+export function useRenameUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { id: string; newUsername: string }) => {
+      return authClient.renameUser(args);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
+  });
+}
+
 export function useDeleteUser() {
   const qc = useQueryClient();
   return useMutation({

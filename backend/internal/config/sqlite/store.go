@@ -745,6 +745,23 @@ func (s *Store) UpdateUserRole(ctx context.Context, id uuid.UUID, role string) e
 	return nil
 }
 
+func (s *Store) UpdateUsername(ctx context.Context, id uuid.UUID, username string) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE users SET username = ?, updated_at = ? WHERE id = ?
+	`, username, time.Now().UTC().Format(timeFormat), id)
+	if err != nil {
+		return fmt.Errorf("update username for %q: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update username for %q: %w", id, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("user %q not found", id)
+	}
+	return nil
+}
+
 func (s *Store) InvalidateTokens(ctx context.Context, id uuid.UUID, at time.Time) error {
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE users SET token_invalidated_at = ?, updated_at = ? WHERE id = ?

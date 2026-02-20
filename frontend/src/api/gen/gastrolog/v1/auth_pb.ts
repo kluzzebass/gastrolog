@@ -831,6 +831,86 @@ export class ResetPasswordResponse extends Message<ResetPasswordResponse> {
 }
 
 /**
+ * @generated from message gastrolog.v1.RenameUserRequest
+ */
+export class RenameUserRequest extends Message<RenameUserRequest> {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id = "";
+
+  /**
+   * @generated from field: string new_username = 2;
+   */
+  newUsername = "";
+
+  constructor(data?: PartialMessage<RenameUserRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RenameUserRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "new_username", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RenameUserRequest {
+    return new RenameUserRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RenameUserRequest {
+    return new RenameUserRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RenameUserRequest {
+    return new RenameUserRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RenameUserRequest | PlainMessage<RenameUserRequest> | undefined, b: RenameUserRequest | PlainMessage<RenameUserRequest> | undefined): boolean {
+    return proto3.util.equals(RenameUserRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.RenameUserResponse
+ */
+export class RenameUserResponse extends Message<RenameUserResponse> {
+  /**
+   * @generated from field: gastrolog.v1.UserInfo user = 1;
+   */
+  user?: UserInfo;
+
+  constructor(data?: PartialMessage<RenameUserResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RenameUserResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "user", kind: "message", T: UserInfo },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RenameUserResponse {
+    return new RenameUserResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RenameUserResponse {
+    return new RenameUserResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RenameUserResponse {
+    return new RenameUserResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RenameUserResponse | PlainMessage<RenameUserResponse> | undefined, b: RenameUserResponse | PlainMessage<RenameUserResponse> | undefined): boolean {
+    return proto3.util.equals(RenameUserResponse, a, b);
+  }
+}
+
+/**
  * @generated from message gastrolog.v1.DeleteUserRequest
  */
 export class DeleteUserRequest extends Message<DeleteUserRequest> {

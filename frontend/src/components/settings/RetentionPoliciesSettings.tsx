@@ -22,6 +22,7 @@ import {
 } from "../../utils/units";
 
 interface PolicyEdit {
+  name: string;
   maxAge: string;
   maxBytes: string;
   maxChunks: string;
@@ -89,8 +90,9 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
 
   const defaults = (id: string): PolicyEdit => {
     const pol = policies.find((p) => p.id === id);
-    if (!pol) return { maxAge: "", maxBytes: "", maxChunks: "" };
+    if (!pol) return { name: "", maxAge: "", maxBytes: "", maxChunks: "" };
     return {
+      name: pol.name,
       maxAge: formatDuration(pol.maxAgeSeconds),
       maxBytes: formatBytes(pol.maxBytes),
       maxChunks: pol.maxChunks > 0n ? pol.maxChunks.toString() : "",
@@ -107,7 +109,7 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
       const maxChunksValue = edit.maxChunks ? BigInt(edit.maxChunks) : 0n;
       return {
         id,
-        name: policies.find((p) => p.id === id)?.name ?? "",
+        name: edit.name,
         maxAgeSeconds: parseDuration(edit.maxAge),
         maxBytes: parseBytes(edit.maxBytes),
         maxChunks: maxChunksValue,
@@ -243,6 +245,13 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
             status={<UsedByStatus dark={dark} refs={refs} />}
           >
             <div className="flex flex-col gap-3">
+              <FormField label="Name" dark={dark}>
+                <TextInput
+                  value={edit.name}
+                  onChange={(v) => setEdit(id, { name: v })}
+                  dark={dark}
+                />
+              </FormField>
               <div className="grid grid-cols-3 gap-3">
                 <FormField
                   label="Max Age"

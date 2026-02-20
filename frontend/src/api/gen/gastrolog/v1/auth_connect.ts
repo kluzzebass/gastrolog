@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { ChangePasswordRequest, ChangePasswordResponse, CreateUserRequest, CreateUserResponse, DeleteUserRequest, DeleteUserResponse, GetAuthStatusRequest, GetAuthStatusResponse, ListUsersRequest, ListUsersResponse, LoginRequest, LoginResponse, LogoutRequest, LogoutResponse, RefreshTokenRequest, RefreshTokenResponse, RegisterRequest, RegisterResponse, ResetPasswordRequest, ResetPasswordResponse, UpdateUserRoleRequest, UpdateUserRoleResponse } from "./auth_pb.js";
+import { ChangePasswordRequest, ChangePasswordResponse, CreateUserRequest, CreateUserResponse, DeleteUserRequest, DeleteUserResponse, GetAuthStatusRequest, GetAuthStatusResponse, ListUsersRequest, ListUsersResponse, LoginRequest, LoginResponse, LogoutRequest, LogoutResponse, RefreshTokenRequest, RefreshTokenResponse, RegisterRequest, RegisterResponse, RenameUserRequest, RenameUserResponse, ResetPasswordRequest, ResetPasswordResponse, UpdateUserRoleRequest, UpdateUserRoleResponse } from "./auth_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -112,6 +112,17 @@ export const AuthService = {
       name: "ResetPassword",
       I: ResetPasswordRequest,
       O: ResetPasswordResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * RenameUser changes a user's username. Admin only.
+     *
+     * @generated from rpc gastrolog.v1.AuthService.RenameUser
+     */
+    renameUser: {
+      name: "RenameUser",
+      I: RenameUserRequest,
+      O: RenameUserResponse,
       kind: MethodKind.Unary,
     },
     /**

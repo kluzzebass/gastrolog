@@ -56,6 +56,8 @@ const (
 	// AuthServiceResetPasswordProcedure is the fully-qualified name of the AuthService's ResetPassword
 	// RPC.
 	AuthServiceResetPasswordProcedure = "/gastrolog.v1.AuthService/ResetPassword"
+	// AuthServiceRenameUserProcedure is the fully-qualified name of the AuthService's RenameUser RPC.
+	AuthServiceRenameUserProcedure = "/gastrolog.v1.AuthService/RenameUser"
 	// AuthServiceDeleteUserProcedure is the fully-qualified name of the AuthService's DeleteUser RPC.
 	AuthServiceDeleteUserProcedure = "/gastrolog.v1.AuthService/DeleteUser"
 	// AuthServiceLogoutProcedure is the fully-qualified name of the AuthService's Logout RPC.
@@ -83,6 +85,8 @@ type AuthServiceClient interface {
 	UpdateUserRole(context.Context, *connect.Request[v1.UpdateUserRoleRequest]) (*connect.Response[v1.UpdateUserRoleResponse], error)
 	// ResetPassword sets a new password for a user. Admin only.
 	ResetPassword(context.Context, *connect.Request[v1.ResetPasswordRequest]) (*connect.Response[v1.ResetPasswordResponse], error)
+	// RenameUser changes a user's username. Admin only.
+	RenameUser(context.Context, *connect.Request[v1.RenameUserRequest]) (*connect.Response[v1.RenameUserResponse], error)
 	// DeleteUser removes a user account. Admin only.
 	DeleteUser(context.Context, *connect.Request[v1.DeleteUserRequest]) (*connect.Response[v1.DeleteUserResponse], error)
 	// Logout invalidates the current user's token.
@@ -154,6 +158,12 @@ func NewAuthServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(authServiceMethods.ByName("ResetPassword")),
 			connect.WithClientOptions(opts...),
 		),
+		renameUser: connect.NewClient[v1.RenameUserRequest, v1.RenameUserResponse](
+			httpClient,
+			baseURL+AuthServiceRenameUserProcedure,
+			connect.WithSchema(authServiceMethods.ByName("RenameUser")),
+			connect.WithClientOptions(opts...),
+		),
 		deleteUser: connect.NewClient[v1.DeleteUserRequest, v1.DeleteUserResponse](
 			httpClient,
 			baseURL+AuthServiceDeleteUserProcedure,
@@ -180,6 +190,7 @@ type authServiceClient struct {
 	listUsers      *connect.Client[v1.ListUsersRequest, v1.ListUsersResponse]
 	updateUserRole *connect.Client[v1.UpdateUserRoleRequest, v1.UpdateUserRoleResponse]
 	resetPassword  *connect.Client[v1.ResetPasswordRequest, v1.ResetPasswordResponse]
+	renameUser     *connect.Client[v1.RenameUserRequest, v1.RenameUserResponse]
 	deleteUser     *connect.Client[v1.DeleteUserRequest, v1.DeleteUserResponse]
 	logout         *connect.Client[v1.LogoutRequest, v1.LogoutResponse]
 }
@@ -229,6 +240,11 @@ func (c *authServiceClient) ResetPassword(ctx context.Context, req *connect.Requ
 	return c.resetPassword.CallUnary(ctx, req)
 }
 
+// RenameUser calls gastrolog.v1.AuthService.RenameUser.
+func (c *authServiceClient) RenameUser(ctx context.Context, req *connect.Request[v1.RenameUserRequest]) (*connect.Response[v1.RenameUserResponse], error) {
+	return c.renameUser.CallUnary(ctx, req)
+}
+
 // DeleteUser calls gastrolog.v1.AuthService.DeleteUser.
 func (c *authServiceClient) DeleteUser(ctx context.Context, req *connect.Request[v1.DeleteUserRequest]) (*connect.Response[v1.DeleteUserResponse], error) {
 	return c.deleteUser.CallUnary(ctx, req)
@@ -260,6 +276,8 @@ type AuthServiceHandler interface {
 	UpdateUserRole(context.Context, *connect.Request[v1.UpdateUserRoleRequest]) (*connect.Response[v1.UpdateUserRoleResponse], error)
 	// ResetPassword sets a new password for a user. Admin only.
 	ResetPassword(context.Context, *connect.Request[v1.ResetPasswordRequest]) (*connect.Response[v1.ResetPasswordResponse], error)
+	// RenameUser changes a user's username. Admin only.
+	RenameUser(context.Context, *connect.Request[v1.RenameUserRequest]) (*connect.Response[v1.RenameUserResponse], error)
 	// DeleteUser removes a user account. Admin only.
 	DeleteUser(context.Context, *connect.Request[v1.DeleteUserRequest]) (*connect.Response[v1.DeleteUserResponse], error)
 	// Logout invalidates the current user's token.
@@ -327,6 +345,12 @@ func NewAuthServiceHandler(svc AuthServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(authServiceMethods.ByName("ResetPassword")),
 		connect.WithHandlerOptions(opts...),
 	)
+	authServiceRenameUserHandler := connect.NewUnaryHandler(
+		AuthServiceRenameUserProcedure,
+		svc.RenameUser,
+		connect.WithSchema(authServiceMethods.ByName("RenameUser")),
+		connect.WithHandlerOptions(opts...),
+	)
 	authServiceDeleteUserHandler := connect.NewUnaryHandler(
 		AuthServiceDeleteUserProcedure,
 		svc.DeleteUser,
@@ -359,6 +383,8 @@ func NewAuthServiceHandler(svc AuthServiceHandler, opts ...connect.HandlerOption
 			authServiceUpdateUserRoleHandler.ServeHTTP(w, r)
 		case AuthServiceResetPasswordProcedure:
 			authServiceResetPasswordHandler.ServeHTTP(w, r)
+		case AuthServiceRenameUserProcedure:
+			authServiceRenameUserHandler.ServeHTTP(w, r)
 		case AuthServiceDeleteUserProcedure:
 			authServiceDeleteUserHandler.ServeHTTP(w, r)
 		case AuthServiceLogoutProcedure:
@@ -406,6 +432,10 @@ func (UnimplementedAuthServiceHandler) UpdateUserRole(context.Context, *connect.
 
 func (UnimplementedAuthServiceHandler) ResetPassword(context.Context, *connect.Request[v1.ResetPasswordRequest]) (*connect.Response[v1.ResetPasswordResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.AuthService.ResetPassword is not implemented"))
+}
+
+func (UnimplementedAuthServiceHandler) RenameUser(context.Context, *connect.Request[v1.RenameUserRequest]) (*connect.Response[v1.RenameUserResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.AuthService.RenameUser is not implemented"))
 }
 
 func (UnimplementedAuthServiceHandler) DeleteUser(context.Context, *connect.Request[v1.DeleteUserRequest]) (*connect.Response[v1.DeleteUserResponse], error) {

@@ -591,6 +591,62 @@ func (s *AuthServer) ResetPassword(
 	return connect.NewResponse(&apiv1.ResetPasswordResponse{}), nil
 }
 
+// RenameUser changes a user's username. Admin only.
+func (s *AuthServer) RenameUser(
+	ctx context.Context,
+	req *connect.Request[apiv1.RenameUserRequest],
+) (*connect.Response[apiv1.RenameUserResponse], error) {
+	userID, connErr := parseUUID(req.Msg.Id)
+	if connErr != nil {
+		return nil, connErr
+	}
+	newUsername := req.Msg.NewUsername
+
+	if !usernameRe.MatchString(newUsername) {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("username must be 3-64 characters, alphanumeric, underscores, or hyphens"))
+	}
+
+	user, err := s.cfgStore.GetUser(ctx, userID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get user: %w", err))
+	}
+	if user == nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user %q not found", userID))
+	}
+
+	// Check uniqueness.
+	existing, err := s.cfgStore.GetUserByUsername(ctx, newUsername)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("check username: %w", err))
+	}
+	if existing != nil && existing.ID != userID {
+		return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("username %q is already taken", newUsername))
+	}
+
+	if err := s.cfgStore.UpdateUsername(ctx, userID, newUsername); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update username: %w", err))
+	}
+
+	// Invalidate existing tokens so the user's username claim gets refreshed on re-login.
+	if err := s.cfgStore.InvalidateTokens(ctx, userID, time.Now().UTC()); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("invalidate tokens: %w", err))
+	}
+	if err := s.cfgStore.DeleteUserRefreshTokens(ctx, userID); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("delete refresh tokens: %w", err))
+	}
+
+	// Re-fetch to get the updated user.
+	user, err = s.cfgStore.GetUser(ctx, userID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get user: %w", err))
+	}
+
+	return connect.NewResponse(&apiv1.RenameUserResponse{
+		User: userToProto(*user),
+	}), nil
+}
+
 // DeleteUser removes a user account. Admin only.
 // An admin cannot delete their own account.
 func (s *AuthServer) DeleteUser(

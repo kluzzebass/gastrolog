@@ -84,8 +84,8 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
 
   const defaults = (id: string) => {
     const ing = ingesters.find((i) => i.id === id);
-    if (!ing) return { enabled: true, params: {} as Record<string, string> };
-    return { enabled: ing.enabled, params: { ...ing.params } };
+    if (!ing) return { name: "", enabled: true, params: {} as Record<string, string> };
+    return { name: ing.name, enabled: ing.enabled, params: { ...ing.params } };
   };
 
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
@@ -96,10 +96,10 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
     label: "Ingester",
     onSaveTransform: (
       id,
-      edit: { enabled: boolean; params: Record<string, string>; type: string },
+      edit: { name: string; enabled: boolean; params: Record<string, string>; type: string },
     ) => ({
       id,
-      name: ingesters.find((i) => i.id === id)?.name ?? "",
+      name: edit.name,
       type: edit.type,
       enabled: edit.enabled,
       params: edit.params,
@@ -227,6 +227,13 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
             }
           >
             <div className="flex flex-col gap-3">
+              <FormField label="Name" dark={dark}>
+                <TextInput
+                  value={edit.name}
+                  onChange={(v) => setEdit(ing.id, { name: v })}
+                  dark={dark}
+                />
+              </FormField>
               <Checkbox
                 checked={edit.enabled}
                 onChange={(v) => setEdit(ing.id, { enabled: v })}

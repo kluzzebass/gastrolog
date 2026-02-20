@@ -91,6 +91,7 @@ type Store interface {
 	ListUsers(ctx context.Context) ([]User, error)
 	UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error
 	UpdateUserRole(ctx context.Context, id uuid.UUID, role string) error
+	UpdateUsername(ctx context.Context, id uuid.UUID, username string) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
 	InvalidateTokens(ctx context.Context, id uuid.UUID, at time.Time) error
 	CountUsers(ctx context.Context) (int, error)

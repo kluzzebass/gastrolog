@@ -4,18 +4,20 @@ import {
   useCreateUser,
   useResetPassword,
   useUpdateUserRole,
+  useRenameUser,
   useDeleteUser,
   useCurrentUser,
 } from "../../api/hooks/useAuth";
 import { useServerConfig } from "../../api/hooks/useConfig";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
+import { useEditState } from "../../hooks/useEditState";
 import { PasswordRules } from "../auth/PasswordRules";
 import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, SelectInput } from "./FormField";
-import { PrimaryButton, GhostButton } from "./Buttons";
+import { PrimaryButton } from "./Buttons";
 import { EyeIcon, EyeOffIcon } from "../icons";
 
 const roleOptions = [
@@ -68,39 +70,11 @@ function addUserFormReducer(state: AddUserFormState, action: AddUserFormAction):
   }
 }
 
-// -- Reducer for "Reset password" dialog state --
-
-interface ResetPwState {
-  resetOpen: string | null;
-  resetPw: string;
-  showResetPw: boolean;
-}
-
-const resetPwInitial: ResetPwState = {
-  resetOpen: null,
-  resetPw: "",
-  showResetPw: false,
-};
-
-type ResetPwAction =
-  | { type: "openReset"; userId: string }
-  | { type: "setResetPw"; value: string }
-  | { type: "toggleShowResetPw" }
-  | { type: "closeReset" };
-
-function resetPwReducer(state: ResetPwState, action: ResetPwAction): ResetPwState {
-  switch (action.type) {
-    case "openReset":
-      return { resetOpen: action.userId, resetPw: "", showResetPw: false };
-    case "setResetPw":
-      return { ...state, resetPw: action.value };
-    case "toggleShowResetPw":
-      return { ...state, showResetPw: !state.showResetPw };
-    case "closeReset":
-      return resetPwInitial;
-    default:
-      return state;
-  }
+interface UserEdit {
+  username: string;
+  role: string;
+  newPassword: string;
+  showPassword: boolean;
 }
 
 export function UsersSettings({ dark }: Readonly<{ dark: boolean }>) {
@@ -109,19 +83,57 @@ export function UsersSettings({ dark }: Readonly<{ dark: boolean }>) {
   const createUser = useCreateUser();
   const resetPassword = useResetPassword();
   const updateUserRole = useUpdateUserRole();
+  const renameUser = useRenameUser();
   const deleteUser = useDeleteUser();
   const currentUser = useCurrentUser();
   const { data: serverConfig } = useServerConfig();
   const { addToast } = useToast();
 
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [roleEdits, setRoleEdits] = useState<Record<string, string>>({});
 
   const [addForm, dispatchAdd] = useReducer(addUserFormReducer, addUserFormInitial);
   const { adding, newUsername, newPassword, newRole, showNewPw } = addForm;
 
-  const [resetState, dispatchReset] = useReducer(resetPwReducer, resetPwInitial);
-  const { resetOpen, resetPw, showResetPw } = resetState;
+  const defaults = (id: string): UserEdit => {
+    const user = users?.find((u) => u.id === id);
+    if (!user) return { username: "", role: "user", newPassword: "", showPassword: false };
+    return { username: user.username, role: user.role, newPassword: "", showPassword: false };
+  };
+
+  const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
+
+  const isSaving = renameUser.isPending || updateUserRole.isPending || resetPassword.isPending;
+
+  const handleSave = async (id: string) => {
+    const user = users?.find((u) => u.id === id);
+    if (!user) return;
+    const edit = getEdit(id);
+
+    try {
+      if (edit.username !== user.username) {
+        await renameUser.mutateAsync({ id, newUsername: edit.username.trim() });
+      }
+      if (edit.role !== user.role) {
+        await updateUserRole.mutateAsync({ id, role: edit.role });
+      }
+      if (edit.newPassword) {
+        await resetPassword.mutateAsync({ id, newPassword: edit.newPassword });
+      }
+      clearEdit(id);
+      addToast(`User "${edit.username || user.username}" updated`, "info");
+    } catch (err: any) {
+      addToast(err.message ?? "Failed to update user", "error");
+    }
+  };
+
+  const handleDeleteUser = async (user: { id: string; username: string }) => {
+    try {
+      await deleteUser.mutateAsync(user.id);
+      addToast(`User "${user.username}" deleted`, "info");
+    } catch (err: any) {
+      addToast(err.message ?? "Failed to delete user", "error");
+    }
+  };
 
   const handleCreate = async () => {
     if (!newUsername.trim()) {
@@ -142,45 +154,6 @@ export function UsersSettings({ dark }: Readonly<{ dark: boolean }>) {
       dispatchAdd({ type: "resetForm" });
     } catch (err: any) {
       addToast(err.message ?? "Failed to create user", "error");
-    }
-  };
-
-  const handleRoleSave = async (user: { id: string; username: string }) => {
-    const role = roleEdits[user.id];
-    if (!role) return;
-    try {
-      await updateUserRole.mutateAsync({ id: user.id, role });
-      setRoleEdits((prev) => {
-        const next = { ...prev };
-        delete next[user.id];
-        return next;
-      });
-      addToast(`Role updated for "${user.username}"`, "info");
-    } catch (err: any) {
-      addToast(err.message ?? "Failed to update role", "error");
-    }
-  };
-
-  const handleResetPassword = async (user: { id: string; username: string }) => {
-    if (!resetPw) {
-      addToast("New password is required", "warn");
-      return;
-    }
-    try {
-      await resetPassword.mutateAsync({ id: user.id, newPassword: resetPw });
-      addToast(`Password reset for "${user.username}"`, "info");
-      dispatchReset({ type: "closeReset" });
-    } catch (err: any) {
-      addToast(err.message ?? "Failed to reset password", "error");
-    }
-  };
-
-  const handleDeleteUser = async (user: { id: string; username: string }) => {
-    try {
-      await deleteUser.mutateAsync(user.id);
-      addToast(`User "${user.username}" deleted`, "info");
-    } catch (err: any) {
-      addToast(err.message ?? "Failed to delete user", "error");
     }
   };
 
@@ -248,10 +221,7 @@ export function UsersSettings({ dark }: Readonly<{ dark: boolean }>) {
 
       {users?.map((user) => {
         const isSelf = currentUser?.username === user.username;
-        const editedRole = roleEdits[user.id];
-        const roleDirty =
-          editedRole !== undefined && editedRole !== user.role;
-
+        const edit = getEdit(user.id);
         return (
           <SettingsCard
             key={user.id}
@@ -263,79 +233,48 @@ export function UsersSettings({ dark }: Readonly<{ dark: boolean }>) {
               setExpanded(expanded === user.id ? null : user.id)
             }
             onDelete={isSelf ? undefined : () => handleDeleteUser(user)}
+            footer={
+              <PrimaryButton
+                onClick={() => handleSave(user.id)}
+                disabled={isSaving || !isDirty(user.id)}
+              >
+                {isSaving ? "Saving..." : "Save"}
+              </PrimaryButton>
+            }
           >
-            <div className="flex flex-col gap-4">
-              <div className="flex items-end gap-3">
-                <div className="flex-1">
-                  <FormField label="Role" dark={dark}>
-                    <SelectInput
-                      value={editedRole ?? user.role}
-                      onChange={(v) =>
-                        setRoleEdits((prev) => ({
-                          ...prev,
-                          [user.id]: v,
-                        }))
-                      }
-                      options={roleOptions}
-                      dark={dark}
-                      disabled={isSelf}
-                    />
-                  </FormField>
-                </div>
-                {roleDirty && (
-                  <PrimaryButton
-                    onClick={() => handleRoleSave(user)}
-                    disabled={updateUserRole.isPending}
-                  >
-                    {updateUserRole.isPending ? "Saving..." : "Save"}
-                  </PrimaryButton>
-                )}
+            <div className="flex flex-col gap-3">
+              <div className="grid grid-cols-2 gap-3">
+                <FormField label="Username" dark={dark}>
+                  <TextInput
+                    value={edit.username}
+                    onChange={(v) => setEdit(user.id, { username: v })}
+                    dark={dark}
+                    mono
+                  />
+                </FormField>
+                <FormField label="Role" dark={dark}>
+                  <SelectInput
+                    value={edit.role}
+                    onChange={(v) => setEdit(user.id, { role: v })}
+                    options={roleOptions}
+                    dark={dark}
+                    disabled={isSelf}
+                  />
+                </FormField>
               </div>
-
-              {/* Reset password */}
-              {resetOpen === user.id ? (
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-end gap-3">
-                    <div className="flex-1">
-                      <FormField label="New Password" dark={dark}>
-                        <PasswordInput
-                          value={resetPw}
-                          onChange={(v) => dispatchReset({ type: "setResetPw", value: v })}
-                          show={showResetPw}
-                          onToggle={() => dispatchReset({ type: "toggleShowResetPw" })}
-                          placeholder="new password"
-                          dark={dark}
-                        />
-                      </FormField>
-                    </div>
-                    <PrimaryButton
-                      onClick={() => handleResetPassword(user)}
-                      disabled={resetPassword.isPending}
-                    >
-                      {resetPassword.isPending ? "Resetting..." : "Reset"}
-                    </PrimaryButton>
-                    <GhostButton
-                      onClick={() => dispatchReset({ type: "closeReset" })}
-                      dark={dark}
-                    >
-                      Cancel
-                    </GhostButton>
-                  </div>
-                  {serverConfig && (
-                    <PasswordRules password={resetPw} config={serverConfig} dark={dark} />
-                  )}
-                </div>
-              ) : (
-                <GhostButton
-                  onClick={() => dispatchReset({ type: "openReset", userId: user.id })}
+              <FormField label="Reset Password" dark={dark}>
+                <PasswordInput
+                  value={edit.newPassword}
+                  onChange={(v) => setEdit(user.id, { newPassword: v })}
+                  show={edit.showPassword}
+                  onToggle={() => setEdit(user.id, { showPassword: !edit.showPassword })}
+                  placeholder="leave blank to keep current"
                   dark={dark}
-                  bordered
-                  className="self-start"
-                >
-                  Reset Password
-                </GhostButton>
+                />
+              </FormField>
+              {edit.newPassword && serverConfig && (
+                <PasswordRules password={edit.newPassword} config={serverConfig} dark={dark} />
               )}
-
               <div
                 className={`text-[0.75em] ${c("text-text-ghost", "text-light-text-ghost")}`}
               >

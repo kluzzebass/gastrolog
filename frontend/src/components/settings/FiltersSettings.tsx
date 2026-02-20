@@ -64,8 +64,8 @@ export function FiltersSettings({ dark }: Readonly<{ dark: boolean }>) {
 
   const defaults = (id: string) => {
     const fc = filters.find((f) => f.id === id);
-    if (!fc) return { expression: "" };
-    return { expression: fc.expression };
+    if (!fc) return { name: "", expression: "" };
+    return { name: fc.name, expression: fc.expression };
   };
 
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
@@ -74,9 +74,9 @@ export function FiltersSettings({ dark }: Readonly<{ dark: boolean }>) {
     mutation: putFilter,
     deleteMutation: deleteFilter,
     label: "Filter",
-    onSaveTransform: (id, edit: { expression: string }) => ({
+    onSaveTransform: (id, edit: { name: string; expression: string }) => ({
       id,
-      name: filters.find((f) => f.id === id)?.name ?? "",
+      name: edit.name,
       expression: edit.expression,
     }),
     onDeleteCheck: (id) => {
@@ -178,6 +178,13 @@ export function FiltersSettings({ dark }: Readonly<{ dark: boolean }>) {
             status={<UsedByStatus dark={dark} refs={refs} />}
           >
             <div className="flex flex-col gap-3">
+              <FormField label="Name" dark={dark}>
+                <TextInput
+                  value={edit.name}
+                  onChange={(v) => setEdit(id, { name: v })}
+                  dark={dark}
+                />
+              </FormField>
               <FormField
                 label="Expression"
                 description={<FilterDescription dark={dark} />}

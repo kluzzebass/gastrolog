@@ -463,6 +463,26 @@ func (s *Store) UpdateUserRole(ctx context.Context, id uuid.UUID, role string) e
 	return nil
 }
 
+func (s *Store) UpdateUsername(ctx context.Context, id uuid.UUID, username string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	u, ok := s.users[id]
+	if !ok {
+		return fmt.Errorf("user %q not found", id)
+	}
+	// Check uniqueness.
+	for uid, other := range s.users {
+		if uid != id && other.Username == username {
+			return fmt.Errorf("username %q is already taken", username)
+		}
+	}
+	u.Username = username
+	u.UpdatedAt = time.Now().UTC()
+	s.users[id] = u
+	return nil
+}
+
 func (s *Store) DeleteUser(ctx context.Context, id uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -139,6 +139,7 @@ export function StoresSettings({ dark }: Readonly<{ dark: boolean }>) {
     const store = stores.find((s) => s.id === id);
     if (!store)
       return {
+        name: "",
         filter: "",
         policy: "",
         retention: "",
@@ -146,6 +147,7 @@ export function StoresSettings({ dark }: Readonly<{ dark: boolean }>) {
         params: {} as Record<string, string>,
       };
     return {
+      name: store.name,
       filter: store.filter,
       policy: store.policy,
       retention: store.retention,
@@ -163,6 +165,7 @@ export function StoresSettings({ dark }: Readonly<{ dark: boolean }>) {
     onSaveTransform: (
       id,
       edit: {
+        name: string;
         filter: string;
         policy: string;
         retention: string;
@@ -172,7 +175,7 @@ export function StoresSettings({ dark }: Readonly<{ dark: boolean }>) {
       },
     ) => ({
       id,
-      name: stores.find((s) => s.id === id)?.name ?? "",
+      name: edit.name,
       type: edit.type,
       filter: edit.filter,
       policy: edit.policy,
@@ -496,6 +499,13 @@ export function StoresSettings({ dark }: Readonly<{ dark: boolean }>) {
             }
           >
             <div className="flex flex-col gap-3">
+              <FormField label="Name" dark={dark}>
+                <TextInput
+                  value={edit.name}
+                  onChange={(v) => setEdit(store.id, { name: v })}
+                  dark={dark}
+                />
+              </FormField>
               <Checkbox
                 checked={edit.enabled}
                 onChange={(v) => setEdit(store.id, { enabled: v })}

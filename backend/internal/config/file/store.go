@@ -683,6 +683,27 @@ func (s *Store) UpdateUserRole(ctx context.Context, id uuid.UUID, role string) e
 	return s.flushUsers(users)
 }
 
+func (s *Store) UpdateUsername(ctx context.Context, id uuid.UUID, username string) error {
+	users, err := s.loadUsers()
+	if err != nil {
+		return err
+	}
+	u, ok := users[id]
+	if !ok {
+		return fmt.Errorf("user %q not found", id)
+	}
+	// Check uniqueness.
+	for uid, other := range users {
+		if uid != id && other.Username == username {
+			return fmt.Errorf("username %q is already taken", username)
+		}
+	}
+	u.Username = username
+	u.UpdatedAt = time.Now().UTC()
+	users[id] = u
+	return s.flushUsers(users)
+}
+
 func (s *Store) DeleteUser(ctx context.Context, id uuid.UUID) error {
 	users, err := s.loadUsers()
 	if err != nil {
