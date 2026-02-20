@@ -78,7 +78,7 @@ func main() {
 
 	rootCmd.PersistentFlags().String("home", "", "home directory (default: platform config dir)")
 	rootCmd.PersistentFlags().String("config-type", "sqlite", "config store type: sqlite, json, or memory")
-	rootCmd.PersistentFlags().String("pprof", "", "pprof HTTP server address (e.g. localhost:6060)")
+	rootCmd.PersistentFlags().String("pprof", "", "pprof HTTP server address (e.g. localhost:6060). WARNING: exposes CPU/memory profiles and goroutine dumps — bind to loopback only, never expose publicly")
 
 	serverCmd := &cobra.Command{
 		Use:   "server",
