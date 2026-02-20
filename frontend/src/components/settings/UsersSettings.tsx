@@ -77,7 +77,7 @@ interface UserEdit {
   showPassword: boolean;
 }
 
-export function UsersSettings({ dark }: Readonly<{ dark: boolean }>) {
+export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: boolean }>) {
   const c = useThemeClass(dark);
   const { data: users, isLoading } = useListUsers();
   const createUser = useCreateUser();
@@ -160,14 +160,16 @@ export function UsersSettings({ dark }: Readonly<{ dark: boolean }>) {
   return (
     <SettingsSection
       title="Users"
+      titleSuffix={noAuth ? "— disabled by --no-auth" : undefined}
       helpTopicId="user-management"
-      addLabel="Add User"
+      addLabel={noAuth ? undefined : "Add User"}
       adding={adding}
       onToggleAdd={() => dispatchAdd({ type: "setAdding", value: !adding })}
       isLoading={false}
       isEmpty={!isLoading && (users?.length ?? 0) === 0}
-      emptyMessage="No users configured."
+      emptyMessage={noAuth ? "Authentication is disabled. Start the server without --no-auth to manage users." : "No users configured."}
       dark={dark}
+      disabled={noAuth}
     >
       {adding && (
         <AddFormCard

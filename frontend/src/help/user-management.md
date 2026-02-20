@@ -38,3 +38,7 @@ GastroLog uses **JWT (JSON Web Tokens)** signed with HMAC-SHA256.
 ## Password Policy
 
 A configurable **minimum password length** is enforced for all password changes and new user creation. The default minimum is 8 characters. This is set in [Service settings](help:service-settings).
+
+## No-Auth Mode
+
+Starting the server with `--no-auth` disables all authentication. Every request is treated as an implicit admin user. The login page is skipped, and user management is hidden from settings. This is intended for trusted networks or local development where authentication is unnecessary overhead.

@@ -4,6 +4,7 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { SpinnerIcon } from "../icons";
 import { ConnectError } from "@connectrpc/connect";
 import { useAuthStatus, useLogin, useRegister, useServerConfig } from "../../api/hooks";
+import { setToken } from "../../api/client";
 import { AuthFormField } from "./AuthFormField";
 import { PasswordRules } from "./PasswordRules";
 
@@ -85,6 +86,11 @@ export function AuthPage({ mode }: Readonly<AuthPageProps>) {
   // Redirect based on auth status.
   useEffect(() => {
     if (authStatus.isLoading || !authStatus.data) return;
+    if (authStatus.data.authDisabled) {
+      setToken("no-auth");
+      navigate({ to: "/search", search: { q: "", help: undefined, settings: undefined, inspector: undefined } });
+      return;
+    }
     if (authStatus.data.needsSetup && mode === "login") {
       navigate({ to: "/register" });
     } else if (!authStatus.data.needsSetup && mode === "register") {

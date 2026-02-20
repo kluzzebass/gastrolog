@@ -37,6 +37,9 @@ type Config struct {
 	// CertManager provides TLS certificates. When non-nil and a server cert is configured,
 	// the server can serve HTTPS (see gastrolog-q232).
 	CertManager CertManager
+
+	// NoAuth disables authentication. All requests are treated as admin.
+	NoAuth bool
 }
 
 // CertManager interface for TLS certificate management.
@@ -55,6 +58,7 @@ type Server struct {
 	factories   orchestrator.Factories
 	tokens      *auth.TokenService
 	certManager CertManager
+	noAuth      bool
 	logger      *slog.Logger
 
 	mu       sync.Mutex
@@ -84,6 +88,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orche
 		factories:   factories,
 		tokens:      tokens,
 		certManager: cfg.CertManager,
+		noAuth:      cfg.NoAuth,
 		logger:      logging.Default(cfg.Logger).With("component", "server"),
 		shutdown:    make(chan struct{}),
 		rl:          newRateLimiter(5.0/60.0, 5), // 5 req/min per IP, burst of 5
@@ -178,7 +183,9 @@ func (s *Server) buildMux() *http.ServeMux {
 	mux := http.NewServeMux()
 
 	var handlerOpts []connect.HandlerOption
-	if s.tokens != nil {
+	if s.noAuth {
+		handlerOpts = append(handlerOpts, connect.WithInterceptors(&auth.NoAuthInterceptor{}))
+	} else if s.tokens != nil {
 		authInterceptor := auth.NewAuthInterceptor(s.tokens, s.cfgStore, &tokenValidator{store: s.cfgStore})
 		handlerOpts = append(handlerOpts, connect.WithInterceptors(authInterceptor))
 	}
@@ -206,7 +213,7 @@ func (s *Server) buildMux() *http.ServeMux {
 	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager)
 	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
 	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown)
-	authServer := NewAuthServer(s.cfgStore, s.tokens, s.logger)
+	authServer := NewAuthServer(s.cfgStore, s.tokens, s.logger, s.noAuth)
 	jobServer := NewJobServer(s.orch.Scheduler())
 
 	mux.Handle(gastrologv1connect.NewQueryServiceHandler(queryServer, handlerOpts...))

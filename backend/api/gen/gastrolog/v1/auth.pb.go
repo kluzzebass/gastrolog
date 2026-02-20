@@ -512,6 +512,7 @@ func (*GetAuthStatusRequest) Descriptor() ([]byte, []int) {
 type GetAuthStatusResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	NeedsSetup    bool                   `protobuf:"varint,1,opt,name=needs_setup,json=needsSetup,proto3" json:"needs_setup,omitempty"`
+	AuthDisabled  bool                   `protobuf:"varint,2,opt,name=auth_disabled,json=authDisabled,proto3" json:"auth_disabled,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -549,6 +550,13 @@ func (*GetAuthStatusResponse) Descriptor() ([]byte, []int) {
 func (x *GetAuthStatusResponse) GetNeedsSetup() bool {
 	if x != nil {
 		return x.NeedsSetup
+	}
+	return false
+}
+
+func (x *GetAuthStatusResponse) GetAuthDisabled() bool {
+	if x != nil {
+		return x.AuthDisabled
 	}
 	return false
 }
@@ -1277,10 +1285,11 @@ const file_gastrolog_v1_auth_proto_rawDesc = "" +
 	"\fold_password\x18\x02 \x01(\tR\voldPassword\x12!\n" +
 	"\fnew_password\x18\x03 \x01(\tR\vnewPassword\"\x18\n" +
 	"\x16ChangePasswordResponse\"\x16\n" +
-	"\x14GetAuthStatusRequest\"8\n" +
+	"\x14GetAuthStatusRequest\"]\n" +
 	"\x15GetAuthStatusResponse\x12\x1f\n" +
 	"\vneeds_setup\x18\x01 \x01(\bR\n" +
-	"needsSetup\"\x88\x01\n" +
+	"needsSetup\x12#\n" +
+	"\rauth_disabled\x18\x02 \x01(\bR\fauthDisabled\"\x88\x01\n" +
 	"\bUserInfo\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x12\n" +
 	"\x04role\x18\x02 \x01(\tR\x04role\x12\x1d\n" +

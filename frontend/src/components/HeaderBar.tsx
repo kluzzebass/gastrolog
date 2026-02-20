@@ -1,5 +1,6 @@
 import { StatPill } from "./StatPill";
 import { UserMenu } from "./UserMenu";
+import { SlidersIcon } from "./icons";
 import { useThemeClass } from "../hooks/useThemeClass";
 
 interface HeaderBarProps {
@@ -163,7 +164,7 @@ export function HeaderBar({
           </svg>
         </button>
 
-        {currentUser && (
+        {currentUser ? (
           <UserMenu
             username={currentUser.username}
             role={currentUser.role}
@@ -172,6 +173,18 @@ export function HeaderBar({
             onChangePassword={onChangePassword}
             onLogout={onLogout}
           />
+        ) : (
+          <button
+            onClick={onPreferences}
+            aria-label="Preferences"
+            title="Preferences"
+            className={`w-7 h-7 flex items-center justify-center rounded transition-all duration-200 ${c(
+              "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
+              "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
+            )}`}
+          >
+            <SlidersIcon className="w-4 h-4" />
+          </button>
         )}
       </div>
     </header>

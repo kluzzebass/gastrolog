@@ -90,6 +90,7 @@ message GetAuthStatusRequest {}
 
 message GetAuthStatusResponse {
   bool needs_setup = 1;
+  bool auth_disabled = 2;
 }
 
 // UserInfo represents a user account without sensitive fields.

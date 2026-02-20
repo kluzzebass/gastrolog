@@ -7,9 +7,44 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/golang-jwt/jwt/v5"
 
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 )
+
+// NoAuthInterceptor is a Connect interceptor that injects synthetic admin
+// claims into every request, bypassing all authentication.
+type NoAuthInterceptor struct{}
+
+func noAuthClaims() *Claims {
+	return &Claims{
+		Role:   "admin",
+		UserID: "00000000-0000-0000-0000-000000000000",
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   "admin",
+			ExpiresAt: jwt.NewNumericDate(time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)),
+		},
+	}
+}
+
+// WrapUnary implements connect.Interceptor for unary RPCs.
+func (i *NoAuthInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		return next(WithClaims(ctx, noAuthClaims()), req)
+	}
+}
+
+// WrapStreamingHandler implements connect.Interceptor for server-side streaming RPCs.
+func (i *NoAuthInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
+	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
+		return next(WithClaims(ctx, noAuthClaims()), conn)
+	}
+}
+
+// WrapStreamingClient is a no-op for server-side interceptors.
+func (i *NoAuthInterceptor) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
+	return next
+}
 
 // UserCounter provides user count for first-boot detection.
 // config.Store satisfies this interface.

@@ -4,7 +4,8 @@ import { HelpButton } from "../HelpButton";
 
 interface SettingsSectionProps {
   title: string;
-  addLabel: string;
+  titleSuffix?: string;
+  addLabel?: string;
   adding: boolean;
   onToggleAdd: () => void;
   isLoading: boolean;
@@ -14,11 +15,14 @@ interface SettingsSectionProps {
   /** Replaces the default add/cancel button when provided. */
   addSlot?: React.ReactNode;
   helpTopicId?: string;
+  /** When true, content is visually disabled (greyed out, no interaction). */
+  disabled?: boolean;
   children: React.ReactNode;
 }
 
 export function SettingsSection({
   title,
+  titleSuffix,
   addLabel,
   adding,
   onToggleAdd,
@@ -29,6 +33,7 @@ export function SettingsSection({
   children,
   addSlot,
   helpTopicId,
+  disabled,
 }: Readonly<SettingsSectionProps>) {
   const c = useThemeClass(dark);
 
@@ -51,16 +56,21 @@ export function SettingsSection({
           >
             {title}
           </h2>
+          {titleSuffix && (
+            <span className={`text-[0.55em] font-normal font-body ${c("text-text-ghost", "text-light-text-ghost")}`}>
+              {titleSuffix}
+            </span>
+          )}
           {helpTopicId && <HelpButton topicId={helpTopicId} />}
         </div>
-        {addSlot || (
+        {addLabel && (addSlot || (
           <PrimaryButton onClick={onToggleAdd}>
             {adding ? "Cancel" : addLabel}
           </PrimaryButton>
-        )}
+        ))}
       </div>
 
-      <div className="flex flex-col gap-3">
+      <div className={`flex flex-col gap-3 ${disabled ? "opacity-50 pointer-events-none" : ""}`}>
         {children}
 
         {isEmpty && !adding && (

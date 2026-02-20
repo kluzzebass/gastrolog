@@ -28,6 +28,10 @@ alias run := run-sqlite
 run-bootstrap:
   go run ./cmd/gastrolog server --bootstrap --home data
 
+# Runs the gastrolog backend with authentication disabled (all requests treated as admin).
+run-noauth:
+  go run ./cmd/gastrolog server --no-auth --home data
+
 # Runs the gastrolog backend with pprof server.
 pprof:
   go run ./cmd/gastrolog server --pprof localhost:6060

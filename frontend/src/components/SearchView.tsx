@@ -14,7 +14,7 @@ import {
   extractTokens,
 } from "../api/hooks";
 import { useStores, useStats, useLogout, useCurrentUser } from "../api/hooks";
-import { Record as ProtoRecord } from "../api/client";
+import { Record as ProtoRecord, getToken } from "../api/client";
 
 import { timeRangeMs, aggregateFields, sameRecord } from "../utils";
 import {
@@ -749,7 +749,8 @@ export function SearchView() {
               tab={settingsParam as any}
               onTabChange={(tab) => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, settings: tab }) } as any)}
               onClose={() => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, settings: undefined }) } as any)}
-              isAdmin={currentUser?.role === "admin"}
+              isAdmin={currentUser?.role === "admin" || getToken() === "no-auth"}
+              noAuth={getToken() === "no-auth"}
             />
           )}
 

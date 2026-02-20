@@ -24,7 +24,7 @@ func TestIntegration_RegisterThenDenyQuery(t *testing.T) {
 	interceptor := auth.NewAuthInterceptor(tokens, cfgStore, nil)
 	opts := connect.WithInterceptors(interceptor)
 
-	authServer := server.NewAuthServer(cfgStore, tokens, nil)
+	authServer := server.NewAuthServer(cfgStore, tokens, nil, false)
 
 	mux := http.NewServeMux()
 	mux.Handle(gastrologv1connect.NewAuthServiceHandler(authServer, opts))

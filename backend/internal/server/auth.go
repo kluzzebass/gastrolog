@@ -27,16 +27,18 @@ type AuthServer struct {
 	cfgStore config.Store
 	tokens   *auth.TokenService
 	logger   *slog.Logger
+	noAuth   bool
 }
 
 var _ gastrologv1connect.AuthServiceHandler = (*AuthServer)(nil)
 
 // NewAuthServer creates a new AuthServer.
-func NewAuthServer(cfgStore config.Store, tokens *auth.TokenService, logger *slog.Logger) *AuthServer {
+func NewAuthServer(cfgStore config.Store, tokens *auth.TokenService, logger *slog.Logger, noAuth bool) *AuthServer {
 	return &AuthServer{
 		cfgStore: cfgStore,
 		tokens:   tokens,
 		logger:   logging.Default(logger),
+		noAuth:   noAuth,
 	}
 }
 
@@ -417,6 +419,13 @@ func (s *AuthServer) GetAuthStatus(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetAuthStatusRequest],
 ) (*connect.Response[apiv1.GetAuthStatusResponse], error) {
+	if s.noAuth {
+		return connect.NewResponse(&apiv1.GetAuthStatusResponse{
+			NeedsSetup:   false,
+			AuthDisabled: true,
+		}), nil
+	}
+
 	count, err := s.cfgStore.CountUsers(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("count users: %w", err))

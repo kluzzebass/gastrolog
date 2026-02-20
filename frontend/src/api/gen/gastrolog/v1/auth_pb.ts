@@ -423,6 +423,11 @@ export class GetAuthStatusResponse extends Message<GetAuthStatusResponse> {
    */
   needsSetup = false;
 
+  /**
+   * @generated from field: bool auth_disabled = 2;
+   */
+  authDisabled = false;
+
   constructor(data?: PartialMessage<GetAuthStatusResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -432,6 +437,7 @@ export class GetAuthStatusResponse extends Message<GetAuthStatusResponse> {
   static readonly typeName = "gastrolog.v1.GetAuthStatusResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "needs_setup", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 2, name: "auth_disabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetAuthStatusResponse {

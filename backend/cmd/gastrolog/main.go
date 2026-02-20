@@ -88,16 +88,18 @@ func main() {
 			configType, _ := cmd.Flags().GetString("config-type")
 			serverAddr, _ := cmd.Flags().GetString("addr")
 			bootstrap, _ := cmd.Flags().GetBool("bootstrap")
+			noAuth, _ := cmd.Flags().GetBool("no-auth")
 
 			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 			defer cancel()
 
-			return run(ctx, logger, homeFlag, configType, serverAddr, bootstrap)
+			return run(ctx, logger, homeFlag, configType, serverAddr, bootstrap, noAuth)
 		},
 	}
 
 	serverCmd.Flags().String("addr", ":4564", "listen address (host:port)")
 	serverCmd.Flags().Bool("bootstrap", false, "bootstrap with default config (memory store + chatterbox)")
+	serverCmd.Flags().Bool("no-auth", false, "disable authentication (all requests treated as admin)")
 
 	versionCmd := &cobra.Command{
 		Use:   "version",
@@ -114,7 +116,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverAddr string, bootstrap bool) error {
+func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverAddr string, bootstrap, noAuth bool) error {
 	// Resolve home directory.
 	hd, err := resolveHome(homeFlag)
 	if err != nil {
@@ -212,9 +214,15 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 	logger.Info("orchestrator started")
 
 	// Create TokenService from server config for auth RPCs.
-	tokens, err := buildTokenService(ctx, cfgStore)
-	if err != nil {
-		return fmt.Errorf("build token service: %w", err)
+	// Skipped in no-auth mode since authentication is disabled.
+	var tokens *auth.TokenService
+	if !noAuth {
+		tokens, err = buildTokenService(ctx, cfgStore)
+		if err != nil {
+			return fmt.Errorf("build token service: %w", err)
+		}
+	} else {
+		logger.Info("authentication disabled (--no-auth)")
 	}
 
 	// Certificate manager: load certs from config store.
@@ -239,7 +247,7 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 	var srv *server.Server
 	var serverWg sync.WaitGroup
 	if serverAddr != "" {
-		srv = server.New(orch, cfgStore, factories, tokens, server.Config{Logger: logger, CertManager: certMgr})
+		srv = server.New(orch, cfgStore, factories, tokens, server.Config{Logger: logger, CertManager: certMgr, NoAuth: noAuth})
 		serverWg.Go(func() {
 			if err := srv.ServeTCP(serverAddr); err != nil {
 				logger.Error("server error", "error", err)

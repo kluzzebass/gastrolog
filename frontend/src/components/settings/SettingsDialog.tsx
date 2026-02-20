@@ -68,6 +68,7 @@ interface SettingsDialogProps {
   onTabChange: (tab: SettingsTab) => void;
   onClose: () => void;
   isAdmin?: boolean;
+  noAuth?: boolean;
 }
 
 type TabDef = {
@@ -95,6 +96,7 @@ export function SettingsDialog({
   onTabChange,
   onClose,
   isAdmin,
+  noAuth,
 }: Readonly<SettingsDialogProps>) {
   const c = useThemeClass(dark);
   const tabs = allTabs.filter((t) => !t.adminOnly || isAdmin);
@@ -130,9 +132,9 @@ export function SettingsDialog({
         </nav>
 
         <div className="flex-1 overflow-y-auto app-scroll p-5 pt-10">
-          {tab === "service" && <ServiceSettings dark={dark} />}
+          {tab === "service" && <ServiceSettings dark={dark} noAuth={noAuth} />}
           {tab === "certificates" && <CertificatesSettings dark={dark} />}
-          {tab === "users" && <UsersSettings dark={dark} />}
+          {tab === "users" && <UsersSettings dark={dark} noAuth={noAuth} />}
           {tab === "ingesters" && <IngestersSettings dark={dark} />}
           {tab === "filters" && <FiltersSettings dark={dark} />}
           {tab === "policies" && <PoliciesSettings dark={dark} />}
@@ -152,7 +154,7 @@ export function SettingsDialog({
   );
 }
 
-function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
+function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: boolean }>) {
   const c = useThemeClass(dark);
   const { data, isLoading } = useServerConfig();
   const { data: certData } = useCertificates();
@@ -309,9 +311,10 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
       ) : (
         <div className="flex flex-col gap-8 max-w-lg">
           {/* ── Authentication ── */}
-          <section className="flex flex-col gap-5">
+          <section className={`flex flex-col gap-5 ${noAuth ? "opacity-50 pointer-events-none" : ""}`}>
             <h3 className={`text-[0.75em] uppercase tracking-wider font-medium pb-1 border-b ${c("text-text-ghost border-ink-border", "text-light-text-ghost border-light-border")}`}>
               Authentication
+              {noAuth && <span className={`ml-2 normal-case tracking-normal ${c("text-text-ghost", "text-light-text-ghost")}`}>— disabled by --no-auth</span>}
             </h3>
 
             <FormField
@@ -394,9 +397,10 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
           </section>
 
           {/* ── Password Policy ── */}
-          <section className="flex flex-col gap-5">
+          <section className={`flex flex-col gap-5 ${noAuth ? "opacity-50 pointer-events-none" : ""}`}>
             <h3 className={`text-[0.75em] uppercase tracking-wider font-medium pb-1 border-b ${c("text-text-ghost border-ink-border", "text-light-text-ghost border-light-border")}`}>
               Password Policy
+              {noAuth && <span className={`ml-2 normal-case tracking-normal ${c("text-text-ghost", "text-light-text-ghost")}`}>— disabled by --no-auth</span>}
             </h3>
 
             <div className="flex items-baseline gap-4">
