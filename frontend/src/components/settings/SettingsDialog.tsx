@@ -175,6 +175,7 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
   const [refreshTokenDuration, setRefreshTokenDuration] = useState("");
   const [maxFollowDuration, setMaxFollowDuration] = useState("");
   const [queryTimeout, setQueryTimeout] = useState("");
+  const [maxResultCount, setMaxResultCount] = useState("");
   const [initialized, setInitialized] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
 
@@ -201,6 +202,7 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
     setRefreshTokenDuration(data.refreshTokenDuration ?? "");
     setMaxFollowDuration(data.maxFollowDuration ?? "");
     setQueryTimeout(data.queryTimeout ?? "");
+    setMaxResultCount(data.maxResultCount ? String(data.maxResultCount) : "10000");
     setInitialized(true);
   }
 
@@ -222,7 +224,8 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
       forbidAnimalNoise !== (data.forbidAnimalNoise ?? false) ||
       refreshTokenDuration !== (data.refreshTokenDuration ?? "") ||
       maxFollowDuration !== (data.maxFollowDuration ?? "") ||
-      queryTimeout !== (data.queryTimeout ?? ""));
+      queryTimeout !== (data.queryTimeout ?? "") ||
+      maxResultCount !== String(data.maxResultCount || 10000));
 
   const handleSave = async () => {
     const hasCert = certIds.includes(tlsDefaultCert);
@@ -232,6 +235,7 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
     const effectiveMinPwLen = parseInt(minPwLen, 10) || 8;
     const effectiveMaxJobs = parseInt(maxJobs, 10) || 4;
     const effectiveMaxRepeats = parseInt(maxConsecutiveRepeats, 10) || 0;
+    const effectiveMaxResultCount = parseInt(maxResultCount, 10) || 0;
     try {
       await putConfig.mutateAsync({
         tokenDuration,
@@ -250,6 +254,7 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
         refreshTokenDuration,
         maxFollowDuration,
         queryTimeout,
+        maxResultCount: effectiveMaxResultCount,
       });
       addToast("Server configuration updated", "info");
     } catch (err: any) {
@@ -278,6 +283,7 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
       setRefreshTokenDuration(data.refreshTokenDuration ?? "");
       setMaxFollowDuration(data.maxFollowDuration ?? "");
       setQueryTimeout(data.queryTimeout ?? "");
+      setMaxResultCount(data.maxResultCount ? String(data.maxResultCount) : "10000");
     }
   };
 
@@ -484,6 +490,21 @@ function ServiceSettings({ dark }: Readonly<{ dark: boolean }>) {
                 dark={dark}
                 mono
                 examples={["1h", "4h", "8h", "24h"]}
+              />
+            </FormField>
+
+            <FormField
+              label="Max Result Count"
+              description="Maximum number of records a single search request can return. Set to 0 for unlimited."
+              dark={dark}
+            >
+              <NumberInput
+                value={maxResultCount}
+                onChange={setMaxResultCount}
+                placeholder="10000"
+                dark={dark}
+                min={0}
+                examples={["1000", "10000", "100000"]}
               />
             </FormField>
           </section>

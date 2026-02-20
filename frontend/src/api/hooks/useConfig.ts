@@ -137,6 +137,7 @@ export function usePutServerConfig() {
       maxFollowDuration?: string;
       queryTimeout?: string;
       refreshTokenDuration?: string;
+      maxResultCount?: number;
     }) => {
       const req: Record<string, unknown> = {};
       if (args.tokenDuration !== undefined) req.tokenDuration = args.tokenDuration;
@@ -169,6 +170,8 @@ export function usePutServerConfig() {
         req.queryTimeout = args.queryTimeout;
       if (args.refreshTokenDuration !== undefined)
         req.refreshTokenDuration = args.refreshTokenDuration;
+      if (args.maxResultCount !== undefined)
+        req.maxResultCount = args.maxResultCount;
       await configClient.putServerConfig(req as Parameters<typeof configClient.putServerConfig>[0]);
     },
     onSuccess: () => {

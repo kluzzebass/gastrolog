@@ -25,13 +25,14 @@ type QueryServer struct {
 	orch              *orchestrator.Orchestrator
 	queryTimeout      time.Duration
 	maxFollowDuration time.Duration // 0 = no limit
+	maxResultCount    int64         // 0 = unlimited
 }
 
 var _ gastrologv1connect.QueryServiceHandler = (*QueryServer)(nil)
 
 // NewQueryServer creates a new QueryServer.
-func NewQueryServer(orch *orchestrator.Orchestrator, queryTimeout, maxFollowDuration time.Duration) *QueryServer {
-	return &QueryServer{orch: orch, queryTimeout: queryTimeout, maxFollowDuration: maxFollowDuration}
+func NewQueryServer(orch *orchestrator.Orchestrator, queryTimeout, maxFollowDuration time.Duration, maxResultCount int64) *QueryServer {
+	return &QueryServer{orch: orch, queryTimeout: queryTimeout, maxFollowDuration: maxFollowDuration, maxResultCount: maxResultCount}
 }
 
 // Search executes a query and streams matching records.
@@ -52,6 +53,11 @@ func (s *QueryServer) Search(
 	q, err := protoToQuery(req.Msg.Query)
 	if err != nil {
 		return connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
+	// Clamp query limit to server-configured max.
+	if s.maxResultCount > 0 && (q.Limit == 0 || int64(q.Limit) > s.maxResultCount) {
+		q.Limit = int(s.maxResultCount)
 	}
 
 	// Parse resume token from request

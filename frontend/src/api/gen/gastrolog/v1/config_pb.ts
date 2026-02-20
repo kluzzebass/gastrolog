@@ -1453,6 +1453,13 @@ export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
    */
   refreshTokenDuration = "";
 
+  /**
+   * Max records per Search request. 0 = unlimited.
+   *
+   * @generated from field: int32 max_result_count = 17;
+   */
+  maxResultCount = 0;
+
   constructor(data?: PartialMessage<GetServerConfigResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1477,6 +1484,7 @@ export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
     { no: 14, name: "max_follow_duration", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 15, name: "query_timeout", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 16, name: "refresh_token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 17, name: "max_result_count", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetServerConfigResponse {
@@ -1580,6 +1588,11 @@ export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
    */
   refreshTokenDuration?: string;
 
+  /**
+   * @generated from field: optional int32 max_result_count = 17;
+   */
+  maxResultCount?: number;
+
   constructor(data?: PartialMessage<PutServerConfigRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1604,6 +1617,7 @@ export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
     { no: 14, name: "max_follow_duration", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 15, name: "query_timeout", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 16, name: "refresh_token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 17, name: "max_result_count", kind: "scalar", T: 5 /* ScalarType.INT32 */, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutServerConfigRequest {

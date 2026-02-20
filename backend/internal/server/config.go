@@ -156,6 +156,7 @@ func (s *ConfigServer) GetServerConfig(
 		resp.MaxFollowDuration = sc.Query.MaxFollowDuration
 		resp.QueryTimeout = sc.Query.Timeout
 		resp.RefreshTokenDuration = sc.Auth.RefreshTokenDuration
+		resp.MaxResultCount = int32(sc.Query.MaxResultCount)
 	}
 
 	// If no persisted value, report the live default from the orchestrator.
@@ -238,6 +239,12 @@ func (s *ConfigServer) PutServerConfig(
 	}
 	if req.Msg.RefreshTokenDuration != nil {
 		sc.Auth.RefreshTokenDuration = *req.Msg.RefreshTokenDuration
+	}
+	if req.Msg.MaxResultCount != nil {
+		if *req.Msg.MaxResultCount < 0 {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("max_result_count must be non-negative, got %d", *req.Msg.MaxResultCount))
+		}
+		sc.Query.MaxResultCount = int(*req.Msg.MaxResultCount)
 	}
 
 	// Validate token durations.

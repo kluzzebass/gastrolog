@@ -134,6 +134,10 @@ type QueryConfig struct {
 	// MaxFollowDuration is the maximum lifetime for a Follow stream.
 	// Uses Go duration format (e.g., "4h"). Empty disables the limit.
 	MaxFollowDuration string `json:"max_follow_duration,omitempty"`
+
+	// MaxResultCount caps the number of records a single Search request can return.
+	// 0 means unlimited (no cap). Default: 10000.
+	MaxResultCount int `json:"max_result_count,omitempty"`
 }
 
 // TLSConfig holds TLS server settings.

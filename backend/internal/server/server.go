@@ -185,6 +185,7 @@ func (s *Server) buildMux() *http.ServeMux {
 
 	var queryTimeout time.Duration
 	var maxFollowDuration time.Duration
+	var maxResultCount int64
 	if s.cfgStore != nil {
 		if sc, err := config.LoadServerConfig(context.Background(), s.cfgStore); err == nil {
 			if sc.Query.Timeout != "" {
@@ -197,9 +198,10 @@ func (s *Server) buildMux() *http.ServeMux {
 					maxFollowDuration = d
 				}
 			}
+			maxResultCount = int64(sc.Query.MaxResultCount)
 		}
 	}
-	queryServer := NewQueryServer(s.orch, queryTimeout, maxFollowDuration)
+	queryServer := NewQueryServer(s.orch, queryTimeout, maxFollowDuration, maxResultCount)
 	storeServer := NewStoreServer(s.orch, s.cfgStore, s.factories, s.logger)
 	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager)
 	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
