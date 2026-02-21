@@ -1,126 +1,90 @@
-import generalConcepts from './general-concepts.md?raw';
-import ingestion from './ingestion.md?raw';
-import ingesterSyslog from './ingester-syslog.md?raw';
-import ingesterHttp from './ingester-http.md?raw';
-import ingesterRelp from './ingester-relp.md?raw';
-import ingesterTail from './ingester-tail.md?raw';
-import ingesterDocker from './ingester-docker.md?raw';
-import ingesterChatterbox from './ingester-chatterbox.md?raw';
-import ingesterOtlp from './ingester-otlp.md?raw';
-import ingesterFluentfwd from './ingester-fluentfwd.md?raw';
-import ingesterKafka from './ingester-kafka.md?raw';
-import digesters from './digesters.md?raw';
-import digesterLevel from './digester-level.md?raw';
-import digesterTimestamp from './digester-timestamp.md?raw';
-import routing from './routing.md?raw';
-import storage from './storage.md?raw';
-import storageFile from './storage-file.md?raw';
-import storageMemory from './storage-memory.md?raw';
-import policyRotation from './policy-rotation.md?raw';
-import policyRetention from './policy-retention.md?raw';
-import indexers from './indexers.md?raw';
-import queryEngine from './query-engine.md?raw';
-import queryLanguage from './query-language.md?raw';
-import explain from './explain.md?raw';
-import savedQueries from './saved-queries.md?raw';
-import security from './security.md?raw';
-import userManagement from './user-management.md?raw';
-import certificates from './certificates.md?raw';
-import inspector from './inspector.md?raw';
-import inspectorStores from './inspector-stores.md?raw';
-import inspectorIngesters from './inspector-ingesters.md?raw';
-import inspectorJobs from './inspector-jobs.md?raw';
-import serviceSettings from './service-settings.md?raw';
-import settingsOverview from './settings.md?raw';
-import recipes from './recipes.md?raw';
-import recipeDockerMtls from './recipe-docker-mtls.md?raw';
-import recipeRsyslog from './recipe-rsyslog.md?raw';
-import recipePromtail from './recipe-promtail.md?raw';
-import recipeJournald from './recipe-journald.md?raw';
-import about from './about.md?raw';
-
 export interface HelpTopic {
   id: string;
   title: string;
-  content: string;
+  /** Lazy content loader — call to get the markdown string. */
+  load: () => Promise<string>;
   children?: HelpTopic[];
+}
+
+function md(loader: () => Promise<{ default: string }>) {
+  return () => loader().then((m) => m.default);
 }
 
 // Topics ordered to follow the data flow through the system:
 // Ingest → Digest → Route → Store → Index → Search
 export const helpTopics: HelpTopic[] = [
-  { id: 'general-concepts', title: 'General Concepts', content: generalConcepts },
+  { id: 'general-concepts', title: 'General Concepts', load: md(() => import('./general-concepts.md?raw')) },
   {
-    id: 'ingestion', title: 'Ingestion', content: ingestion,
+    id: 'ingestion', title: 'Ingestion', load: md(() => import('./ingestion.md?raw')),
     children: [
-      { id: 'ingester-syslog', title: 'Syslog', content: ingesterSyslog },
-      { id: 'ingester-http', title: 'HTTP (Loki)', content: ingesterHttp },
-      { id: 'ingester-relp', title: 'RELP', content: ingesterRelp },
-      { id: 'ingester-otlp', title: 'OTLP', content: ingesterOtlp },
-      { id: 'ingester-fluentfwd', title: 'Fluent Forward', content: ingesterFluentfwd },
-      { id: 'ingester-kafka', title: 'Kafka', content: ingesterKafka },
-      { id: 'ingester-tail', title: 'Tail', content: ingesterTail },
-      { id: 'ingester-docker', title: 'Docker', content: ingesterDocker },
-      { id: 'ingester-chatterbox', title: 'Chatterbox', content: ingesterChatterbox },
+      { id: 'ingester-syslog', title: 'Syslog', load: md(() => import('./ingester-syslog.md?raw')) },
+      { id: 'ingester-http', title: 'HTTP (Loki)', load: md(() => import('./ingester-http.md?raw')) },
+      { id: 'ingester-relp', title: 'RELP', load: md(() => import('./ingester-relp.md?raw')) },
+      { id: 'ingester-otlp', title: 'OTLP', load: md(() => import('./ingester-otlp.md?raw')) },
+      { id: 'ingester-fluentfwd', title: 'Fluent Forward', load: md(() => import('./ingester-fluentfwd.md?raw')) },
+      { id: 'ingester-kafka', title: 'Kafka', load: md(() => import('./ingester-kafka.md?raw')) },
+      { id: 'ingester-tail', title: 'Tail', load: md(() => import('./ingester-tail.md?raw')) },
+      { id: 'ingester-docker', title: 'Docker', load: md(() => import('./ingester-docker.md?raw')) },
+      { id: 'ingester-chatterbox', title: 'Chatterbox', load: md(() => import('./ingester-chatterbox.md?raw')) },
     ],
   },
   {
-    id: 'digesters', title: 'Digestion', content: digesters,
+    id: 'digesters', title: 'Digestion', load: md(() => import('./digesters.md?raw')),
     children: [
-      { id: 'digester-level', title: 'Level', content: digesterLevel },
-      { id: 'digester-timestamp', title: 'Timestamp', content: digesterTimestamp },
+      { id: 'digester-level', title: 'Level', load: md(() => import('./digester-level.md?raw')) },
+      { id: 'digester-timestamp', title: 'Timestamp', load: md(() => import('./digester-timestamp.md?raw')) },
     ],
   },
-  { id: 'routing', title: 'Filtering', content: routing },
+  { id: 'routing', title: 'Filtering', load: md(() => import('./routing.md?raw')) },
   {
-    id: 'storage', title: 'Storage', content: storage,
+    id: 'storage', title: 'Storage', load: md(() => import('./storage.md?raw')),
     children: [
-      { id: 'storage-file', title: 'File Store', content: storageFile },
-      { id: 'storage-memory', title: 'Memory Store', content: storageMemory },
-      { id: 'policy-rotation', title: 'Rotation Policies', content: policyRotation },
-      { id: 'policy-retention', title: 'Retention Policies', content: policyRetention },
+      { id: 'storage-file', title: 'File Store', load: md(() => import('./storage-file.md?raw')) },
+      { id: 'storage-memory', title: 'Memory Store', load: md(() => import('./storage-memory.md?raw')) },
+      { id: 'policy-rotation', title: 'Rotation Policies', load: md(() => import('./policy-rotation.md?raw')) },
+      { id: 'policy-retention', title: 'Retention Policies', load: md(() => import('./policy-retention.md?raw')) },
     ],
   },
-  { id: 'indexers', title: 'Indexing', content: indexers },
+  { id: 'indexers', title: 'Indexing', load: md(() => import('./indexers.md?raw')) },
   {
-    id: 'query-engine', title: 'Searching', content: queryEngine,
+    id: 'query-engine', title: 'Searching', load: md(() => import('./query-engine.md?raw')),
     children: [
-      { id: 'query-language', title: 'Query Language', content: queryLanguage },
-      { id: 'saved-queries', title: 'Saved Queries', content: savedQueries },
-      { id: 'explain', title: 'Explain', content: explain },
-    ],
-  },
-  {
-    id: 'security', title: 'Security', content: security,
-    children: [
-      { id: 'user-management', title: 'Users & Authentication', content: userManagement },
-      { id: 'certificates', title: 'Certificates', content: certificates },
+      { id: 'query-language', title: 'Query Language', load: md(() => import('./query-language.md?raw')) },
+      { id: 'saved-queries', title: 'Saved Queries', load: md(() => import('./saved-queries.md?raw')) },
+      { id: 'explain', title: 'Explain', load: md(() => import('./explain.md?raw')) },
     ],
   },
   {
-    id: 'inspector', title: 'Inspector', content: inspector,
+    id: 'security', title: 'Security', load: md(() => import('./security.md?raw')),
     children: [
-      { id: 'inspector-stores', title: 'Stores', content: inspectorStores },
-      { id: 'inspector-ingesters', title: 'Ingesters', content: inspectorIngesters },
-      { id: 'inspector-jobs', title: 'Jobs', content: inspectorJobs },
+      { id: 'user-management', title: 'Users & Authentication', load: md(() => import('./user-management.md?raw')) },
+      { id: 'certificates', title: 'Certificates', load: md(() => import('./certificates.md?raw')) },
     ],
   },
   {
-    id: 'settings', title: 'Settings', content: settingsOverview,
+    id: 'inspector', title: 'Inspector', load: md(() => import('./inspector.md?raw')),
     children: [
-      { id: 'service-settings', title: 'Service', content: serviceSettings },
+      { id: 'inspector-stores', title: 'Stores', load: md(() => import('./inspector-stores.md?raw')) },
+      { id: 'inspector-ingesters', title: 'Ingesters', load: md(() => import('./inspector-ingesters.md?raw')) },
+      { id: 'inspector-jobs', title: 'Jobs', load: md(() => import('./inspector-jobs.md?raw')) },
     ],
   },
   {
-    id: 'recipes', title: 'Recipes', content: recipes,
+    id: 'settings', title: 'Settings', load: md(() => import('./settings.md?raw')),
     children: [
-      { id: 'recipe-docker-mtls', title: 'Docker with mTLS', content: recipeDockerMtls },
-      { id: 'recipe-rsyslog', title: 'rsyslog', content: recipeRsyslog },
-      { id: 'recipe-promtail', title: 'Promtail / Grafana Agent', content: recipePromtail },
-      { id: 'recipe-journald', title: 'systemd journal', content: recipeJournald },
+      { id: 'service-settings', title: 'Service', load: md(() => import('./service-settings.md?raw')) },
     ],
   },
-  { id: 'about', title: 'About', content: about },
+  {
+    id: 'recipes', title: 'Recipes', load: md(() => import('./recipes.md?raw')),
+    children: [
+      { id: 'recipe-docker-mtls', title: 'Docker with mTLS', load: md(() => import('./recipe-docker-mtls.md?raw')) },
+      { id: 'recipe-rsyslog', title: 'rsyslog', load: md(() => import('./recipe-rsyslog.md?raw')) },
+      { id: 'recipe-promtail', title: 'Promtail / Grafana Agent', load: md(() => import('./recipe-promtail.md?raw')) },
+      { id: 'recipe-journald', title: 'systemd journal', load: md(() => import('./recipe-journald.md?raw')) },
+    ],
+  },
+  { id: 'about', title: 'About', load: md(() => import('./about.md?raw')) },
 ];
 
 /**

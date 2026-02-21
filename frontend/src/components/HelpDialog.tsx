@@ -1,12 +1,15 @@
-import { isValidElement, useEffect, useMemo, useRef, useState } from "react";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { isValidElement, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog } from "./Dialog";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { helpTopics, findTopic, resolveTopicId, allTopics } from "../help/topics";
 import type { HelpTopic } from "../help/topics";
-import { MermaidDiagram } from "./Mermaid";
 import { getHelpIcon } from "../help/icons";
+
+const Markdown = lazy(() => import("react-markdown"));
+const MermaidDiagram = lazy(() => import("./Mermaid").then((m) => ({ default: m.MermaidDiagram })));
+
+let remarkGfmPlugin: any[] = [];
+import("remark-gfm").then((m) => { remarkGfmPlugin = [m.default]; });
 
 interface HelpDialogProps {
   dark: boolean;
@@ -59,18 +62,23 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
   const [search, setSearch] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
 
-  // Build search index once
-  const searchIndex = useMemo<SearchEntry[]>(() =>
-    allTopics().map((t) => ({
+  // Lazily build search index — only loads all content when user starts searching
+  const [searchIndex, setSearchIndex] = useState<SearchEntry[] | null>(null);
+  const searchIndexLoading = useRef(false);
+  useEffect(() => {
+    if (!search.trim() || searchIndex || searchIndexLoading.current) return;
+    searchIndexLoading.current = true;
+    const topics = allTopics();
+    Promise.all(topics.map((t) => t.load().then((content) => ({
       topic: t,
       titleLower: t.title.toLowerCase(),
-      plainText: stripMarkdown(t.content),
-    })),
-  []);
+      plainText: stripMarkdown(content),
+    })))).then(setSearchIndex);
+  }, [search, searchIndex]);
 
   const searchResults = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return null;
+    if (!q || !searchIndex) return null;
     const terms = q.split(/\s+/);
     return searchIndex.filter((entry) =>
       terms.every((term) => entry.titleLower.includes(term) || entry.plainText.includes(term)),
@@ -96,11 +104,19 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
 
   const topic: HelpTopic | undefined = findTopic(activeId);
   const contentRef = useRef<HTMLDivElement>(null);
+  const [topicContent, setTopicContent] = useState<string | null>(null);
+  const [loadingContent, setLoadingContent] = useState(false);
 
-  // Reset scroll position when switching topics
+  // Load topic content and reset scroll when switching topics
   useEffect(() => {
     contentRef.current?.scrollTo(0, 0);
-  }, [activeId]);
+    if (!topic) { setTopicContent(null); return; }
+    setLoadingContent(true);
+    topic.load().then((content) => {
+      setTopicContent(content);
+      setLoadingContent(false);
+    });
+  }, [activeId, topic]);
 
   const navigate = (id: string) => {
     const target = findTopic(id);
@@ -291,10 +307,16 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
 
         {/* Content */}
         <div ref={contentRef} className="flex-1 overflow-y-auto app-scroll p-6">
-          {topic ? (
-            <Markdown remarkPlugins={[remarkGfm]} components={mdComponents} urlTransform={(url) => url}>
-              {topic.content}
-            </Markdown>
+          {topic && topicContent && !loadingContent ? (
+            <Suspense fallback={null}>
+              <Markdown remarkPlugins={remarkGfmPlugin} components={mdComponents} urlTransform={(url) => url}>
+                {topicContent}
+              </Markdown>
+            </Suspense>
+          ) : topic ? (
+            <p className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+              Loading...
+            </p>
           ) : (
             <p
               className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}
@@ -374,7 +396,7 @@ function markdownComponents(dark: boolean, onNavigate: (topicId: string) => void
       }
       // Mermaid diagram
       if (className?.includes("language-mermaid")) {
-        return <MermaidDiagram chart={String(children).trim()} dark={dark} />;
+        return <Suspense fallback={<div className="py-4 text-center text-text-ghost text-[0.85em]">Loading diagram...</div>}><MermaidDiagram chart={String(children).trim()} dark={dark} /></Suspense>;
       }
       // Code block (inside <pre>)
       return <code className={`font-mono text-[0.85em] ${className}`}>{children}</code>;

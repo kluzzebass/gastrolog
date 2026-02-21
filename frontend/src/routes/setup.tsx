@@ -1,6 +1,8 @@
+import { lazy } from "react";
 import { createRoute } from "@tanstack/react-router";
 import { rootRoute } from "./__root";
-import { SetupWizard } from "../components/setup/SetupWizard";
+
+const SetupWizard = lazy(() => import("../components/setup/SetupWizard").then((m) => ({ default: m.SetupWizard })));
 
 export const setupRoute = createRoute({
   getParentRoute: () => rootRoute,

@@ -1,6 +1,8 @@
+import { lazy } from "react";
 import { createRoute } from "@tanstack/react-router";
 import { rootRoute } from "./__root";
-import { AuthPage } from "../components/auth/AuthPage";
+
+const AuthPage = lazy(() => import("../components/auth/AuthPage").then((m) => ({ default: m.AuthPage })));
 
 export const loginRoute = createRoute({
   getParentRoute: () => rootRoute,

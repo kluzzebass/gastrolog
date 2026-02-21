@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { lazy, Suspense, useState, useRef, useEffect } from "react";
 import {
   useSearch as useRouterSearch,
   useNavigate,
@@ -36,25 +36,36 @@ import { useTimeRange } from "../hooks/useTimeRange";
 import { EmptyState } from "./EmptyState";
 import { LogEntry } from "./LogEntry";
 import { HistogramChart } from "./HistogramChart";
-import { ExplainPanel } from "./ExplainPanel";
 import { SearchSidebar } from "./SearchSidebar";
 import { DetailSidebar } from "./DetailSidebar";
 import { useToast } from "./Toast";
-import { SettingsDialog } from "./settings/SettingsDialog";
-import { InspectorDialog } from "./inspector/InspectorDialog";
 import { useQueryHistory } from "../hooks/useQueryHistory";
 import {
   useSavedQueries,
   usePutSavedQuery,
   useDeleteSavedQuery,
 } from "../api/hooks/useSavedQueries";
-import { ChangePasswordDialog } from "./ChangePasswordDialog";
-import { PreferencesDialog } from "./PreferencesDialog";
 import { Dialog } from "./Dialog";
 import { tokenize } from "../queryTokenizer";
 import { useAutocomplete } from "../hooks/useAutocomplete";
 import { HeaderBar } from "./HeaderBar";
-import { HelpDialog } from "./HelpDialog";
+
+// Code-split dialogs: chunks are fetched eagerly (start loading at module
+// parse time) so they're cached before the user clicks.  React.lazy gives
+// us Suspense integration for free.
+const explainImport = import("./ExplainPanel");
+const settingsImport = import("./settings/SettingsDialog");
+const inspectorImport = import("./inspector/InspectorDialog");
+const changePasswordImport = import("./ChangePasswordDialog");
+const preferencesImport = import("./PreferencesDialog");
+const helpImport = import("./HelpDialog");
+
+const ExplainPanel = lazy(() => explainImport.then((m) => ({ default: m.ExplainPanel })));
+const SettingsDialog = lazy(() => settingsImport.then((m) => ({ default: m.SettingsDialog })));
+const InspectorDialog = lazy(() => inspectorImport.then((m) => ({ default: m.InspectorDialog })));
+const ChangePasswordDialog = lazy(() => changePasswordImport.then((m) => ({ default: m.ChangePasswordDialog })));
+const PreferencesDialog = lazy(() => preferencesImport.then((m) => ({ default: m.PreferencesDialog })));
+const HelpDialog = lazy(() => helpImport.then((m) => ({ default: m.HelpDialog })));
 import { HelpProvider } from "../hooks/useHelp";
 import { ResultsToolbar } from "./ResultsToolbar";
 import { QueryBar } from "./QueryBar";
@@ -713,71 +724,83 @@ export function SearchView() {
                   Run a query to see the execution plan.
                 </div>
               ) : (
-                <ExplainPanel
-                  chunks={explainChunks}
-                  direction={explainDirection}
-                  totalChunks={explainTotalChunks}
-                  expression={explainExpression}
-                  dark={dark}
-                />
+                <Suspense fallback={null}>
+                  <ExplainPanel
+                    chunks={explainChunks}
+                    direction={explainDirection}
+                    totalChunks={explainTotalChunks}
+                    expression={explainExpression}
+                    dark={dark}
+                  />
+                </Suspense>
               )}
             </Dialog>
           )}
 
           {/* Settings Dialog */}
           {showPreferences && (
-            <PreferencesDialog
-              dark={dark}
-              theme={theme}
-              setTheme={setTheme}
-              highlightMode={highlightMode}
-              setHighlightMode={setHighlightMode}
-              palette={palette}
-              setPalette={setPalette}
-              onClose={() => setShowPreferences(false)}
-            />
+            <Suspense fallback={null}>
+              <PreferencesDialog
+                dark={dark}
+                theme={theme}
+                setTheme={setTheme}
+                highlightMode={highlightMode}
+                setHighlightMode={setHighlightMode}
+                palette={palette}
+                setPalette={setPalette}
+                onClose={() => setShowPreferences(false)}
+              />
+            </Suspense>
           )}
 
           {showChangePassword && currentUser && (
-            <ChangePasswordDialog
-              username={currentUser.username}
-              dark={dark}
-              onClose={() => setShowChangePassword(false)}
-              onSuccess={() => {
-                setShowChangePassword(false);
-                addToast("Password changed successfully", "info");
-              }}
-            />
+            <Suspense fallback={null}>
+              <ChangePasswordDialog
+                username={currentUser.username}
+                dark={dark}
+                onClose={() => setShowChangePassword(false)}
+                onSuccess={() => {
+                  setShowChangePassword(false);
+                  addToast("Password changed successfully", "info");
+                }}
+              />
+            </Suspense>
           )}
 
           {settingsParam && (
-            <SettingsDialog
-              dark={dark}
-              tab={settingsParam as any}
-              onTabChange={(tab) => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, settings: tab }) } as any)}
-              onClose={() => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, settings: undefined }) } as any)}
-              isAdmin={currentUser?.role === "admin" || getToken() === "no-auth"}
-              noAuth={getToken() === "no-auth"}
-            />
+            <Suspense fallback={null}>
+              <SettingsDialog
+                dark={dark}
+                tab={settingsParam as any}
+                onTabChange={(tab) => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, settings: tab }) } as any)}
+                onClose={() => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, settings: undefined }) } as any)}
+                isAdmin={currentUser?.role === "admin" || getToken() === "no-auth"}
+                noAuth={getToken() === "no-auth"}
+              />
+            </Suspense>
           )}
 
           {inspectorParam && (
-            <InspectorDialog
-              dark={dark}
-              tab={inspectorParam as any}
-              onTabChange={(tab) => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: tab }) } as any)}
-              onClose={() => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: undefined }) } as any)}
-            />
+            <Suspense fallback={null}>
+              <InspectorDialog
+                dark={dark}
+                tab={inspectorParam as any}
+                onTabChange={(tab) => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: tab }) } as any)}
+                onClose={() => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: undefined }) } as any)}
+              />
+            </Suspense>
           )}
 
           {helpParam && (
-            <HelpDialog
-              dark={dark}
-              topicId={helpParam}
-              onClose={() => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, help: undefined }) } as any)}
-              onNavigate={(id) => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, help: id }) } as any)}
-              onOpenSettings={(tab) => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, help: undefined, settings: tab }) } as any)}
-            />
+            <Suspense fallback={null}>
+              <HelpDialog
+                dark={dark}
+                topicId={helpParam}
+                onClose={() => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, help: undefined }) } as any)}
+                onNavigate={(id) => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, help: id }) } as any)}
+                onOpenSettings={(tab) => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, help: undefined, settings: tab }) } as any)}
+              />
+            </Suspense>
           )}
 
           {/* Histogram — server-side for search, client-side for follow */}
