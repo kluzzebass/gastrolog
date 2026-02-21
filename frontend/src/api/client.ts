@@ -96,6 +96,9 @@ const unauthInterceptor: Interceptor = (next) => async (req) => {
       setToken(null);
       setRefreshToken(null);
       globalThis.location.href = "/login";
+      // Don't re-throw — the redirect is in progress and downstream
+      // handlers would show an error toast for a stale auth failure.
+      return await new Promise(() => {});
     }
     throw err;
   }
