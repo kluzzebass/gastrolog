@@ -11,6 +11,9 @@ You can run multiple ingesters simultaneously, each feeding into the same pipeli
 | [**Syslog**](help:ingester-syslog) | Receives syslog messages over UDP/TCP (RFC 3164 and RFC 5424) |
 | [**HTTP**](help:ingester-http) | Accepts Loki-compatible HTTP pushes — drop-in replacement for a Loki endpoint |
 | [**RELP**](help:ingester-relp) | Reliable Event Logging Protocol with delivery acknowledgements |
+| [**OTLP**](help:ingester-otlp) | OpenTelemetry log records via HTTP and gRPC |
+| [**Fluent Forward**](help:ingester-fluentfwd) | Fluent Forward protocol (Fluentd / Fluent Bit) over TCP |
+| [**Kafka**](help:ingester-kafka) | Consumes messages from a Kafka topic |
 | [**Tail**](help:ingester-tail) | Follows local log files, like `tail -f` |
 | [**Docker**](help:ingester-docker) | Streams container logs from a Docker daemon |
 | [**Chatterbox**](help:ingester-chatterbox) | Generates random test messages for development |

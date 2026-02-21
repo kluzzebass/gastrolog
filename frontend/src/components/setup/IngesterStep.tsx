@@ -17,6 +17,9 @@ interface IngesterStepProps {
 const INGESTER_TYPES = [
   { id: "syslog", label: "Syslog", description: "RFC 3164/5424 UDP + TCP" },
   { id: "http", label: "HTTP (Loki)", description: "Loki-compatible push API" },
+  { id: "otlp", label: "OTLP", description: "OpenTelemetry logs (HTTP + gRPC)" },
+  { id: "fluentfwd", label: "Fluent Forward", description: "Fluentd / Fluent Bit protocol" },
+  { id: "kafka", label: "Kafka", description: "Kafka topic consumer" },
   { id: "docker", label: "Docker", description: "Container log streaming" },
   { id: "tail", label: "Tail", description: "File tailing with glob patterns" },
   { id: "relp", label: "RELP", description: "Reliable Event Logging Protocol" },

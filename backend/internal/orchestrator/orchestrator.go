@@ -202,3 +202,22 @@ func (o *Orchestrator) GetIngesterStats(id uuid.UUID) *IngesterStats {
 	defer o.mu.RUnlock()
 	return o.ingesterStats[id]
 }
+
+// IngestQueueDepth returns the current number of messages in the ingest channel.
+func (o *Orchestrator) IngestQueueDepth() int {
+	return len(o.ingestCh)
+}
+
+// IngestQueueCapacity returns the capacity of the ingest channel.
+func (o *Orchestrator) IngestQueueCapacity() int {
+	return cap(o.ingestCh)
+}
+
+// IngestQueueNearFull returns true if the ingest queue is at or above 90% capacity.
+func (o *Orchestrator) IngestQueueNearFull() bool {
+	c := cap(o.ingestCh)
+	if c == 0 {
+		return false
+	}
+	return len(o.ingestCh) >= c*9/10
+}

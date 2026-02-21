@@ -139,6 +139,13 @@ type Value []json.RawMessage
 
 // handlePush handles POST /loki/api/v1/push requests.
 func (r *Ingester) handlePush(w http.ResponseWriter, req *http.Request) {
+	// Backpressure: reject early when the ingest queue is near capacity.
+	if c := cap(r.out); c > 0 && len(r.out) >= c*9/10 {
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "queue full, retry later", http.StatusTooManyRequests)
+		return
+	}
+
 	waitAck := req.Header.Get("X-Wait-Ack") == "true"
 
 	// Handle gzip compression.

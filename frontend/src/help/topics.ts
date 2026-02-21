@@ -6,6 +6,9 @@ import ingesterRelp from './ingester-relp.md?raw';
 import ingesterTail from './ingester-tail.md?raw';
 import ingesterDocker from './ingester-docker.md?raw';
 import ingesterChatterbox from './ingester-chatterbox.md?raw';
+import ingesterOtlp from './ingester-otlp.md?raw';
+import ingesterFluentfwd from './ingester-fluentfwd.md?raw';
+import ingesterKafka from './ingester-kafka.md?raw';
 import digesters from './digesters.md?raw';
 import digesterLevel from './digester-level.md?raw';
 import digesterTimestamp from './digester-timestamp.md?raw';
@@ -53,6 +56,9 @@ export const helpTopics: HelpTopic[] = [
       { id: 'ingester-syslog', title: 'Syslog', content: ingesterSyslog },
       { id: 'ingester-http', title: 'HTTP (Loki)', content: ingesterHttp },
       { id: 'ingester-relp', title: 'RELP', content: ingesterRelp },
+      { id: 'ingester-otlp', title: 'OTLP', content: ingesterOtlp },
+      { id: 'ingester-fluentfwd', title: 'Fluent Forward', content: ingesterFluentfwd },
+      { id: 'ingester-kafka', title: 'Kafka', content: ingesterKafka },
       { id: 'ingester-tail', title: 'Tail', content: ingesterTail },
       { id: 'ingester-docker', title: 'Docker', content: ingesterDocker },
       { id: 'ingester-chatterbox', title: 'Chatterbox', content: ingesterChatterbox },
