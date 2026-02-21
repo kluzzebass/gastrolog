@@ -278,11 +278,13 @@ message GetPreferencesRequest {}
 message GetPreferencesResponse {
   string theme = 1;
   string syntax_highlight = 2;
+  string palette = 3;
 }
 
 message PutPreferencesRequest {
   string theme = 1;
   string syntax_highlight = 2;
+  string palette = 3;
 }
 
 message PutPreferencesResponse {}

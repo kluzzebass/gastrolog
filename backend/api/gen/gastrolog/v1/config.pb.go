@@ -2085,6 +2085,7 @@ type GetPreferencesResponse struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Theme           string                 `protobuf:"bytes,1,opt,name=theme,proto3" json:"theme,omitempty"`
 	SyntaxHighlight string                 `protobuf:"bytes,2,opt,name=syntax_highlight,json=syntaxHighlight,proto3" json:"syntax_highlight,omitempty"`
+	Palette         string                 `protobuf:"bytes,3,opt,name=palette,proto3" json:"palette,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -2133,10 +2134,18 @@ func (x *GetPreferencesResponse) GetSyntaxHighlight() string {
 	return ""
 }
 
+func (x *GetPreferencesResponse) GetPalette() string {
+	if x != nil {
+		return x.Palette
+	}
+	return ""
+}
+
 type PutPreferencesRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Theme           string                 `protobuf:"bytes,1,opt,name=theme,proto3" json:"theme,omitempty"`
 	SyntaxHighlight string                 `protobuf:"bytes,2,opt,name=syntax_highlight,json=syntaxHighlight,proto3" json:"syntax_highlight,omitempty"`
+	Palette         string                 `protobuf:"bytes,3,opt,name=palette,proto3" json:"palette,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -2181,6 +2190,13 @@ func (x *PutPreferencesRequest) GetTheme() string {
 func (x *PutPreferencesRequest) GetSyntaxHighlight() string {
 	if x != nil {
 		return x.SyntaxHighlight
+	}
+	return ""
+}
+
+func (x *PutPreferencesRequest) GetPalette() string {
+	if x != nil {
+		return x.Palette
 	}
 	return ""
 }
@@ -3415,13 +3431,15 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x11_max_result_countB\x19\n" +
 	"\x17_setup_wizard_dismissed\"\x19\n" +
 	"\x17PutServerConfigResponse\"\x17\n" +
-	"\x15GetPreferencesRequest\"Y\n" +
+	"\x15GetPreferencesRequest\"s\n" +
 	"\x16GetPreferencesResponse\x12\x14\n" +
 	"\x05theme\x18\x01 \x01(\tR\x05theme\x12)\n" +
-	"\x10syntax_highlight\x18\x02 \x01(\tR\x0fsyntaxHighlight\"X\n" +
+	"\x10syntax_highlight\x18\x02 \x01(\tR\x0fsyntaxHighlight\x12\x18\n" +
+	"\apalette\x18\x03 \x01(\tR\apalette\"r\n" +
 	"\x15PutPreferencesRequest\x12\x14\n" +
 	"\x05theme\x18\x01 \x01(\tR\x05theme\x12)\n" +
-	"\x10syntax_highlight\x18\x02 \x01(\tR\x0fsyntaxHighlight\"\x18\n" +
+	"\x10syntax_highlight\x18\x02 \x01(\tR\x0fsyntaxHighlight\x12\x18\n" +
+	"\apalette\x18\x03 \x01(\tR\apalette\"\x18\n" +
 	"\x16PutPreferencesResponse\"6\n" +
 	"\n" +
 	"SavedQuery\x12\x12\n" +

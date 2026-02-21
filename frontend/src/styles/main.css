@@ -57,6 +57,413 @@
   --font-mono: "IBM Plex Mono", monospace;
 }
 
+/* ── Palette overrides ── */
+
+/* Nord — Arctic, muted */
+.theme-nord {
+  --color-ink: #2e3440;
+  --color-ink-raised: #3b4252;
+  --color-ink-surface: #434c5e;
+  --color-ink-hover: #4c566a;
+  --color-ink-border: #4c566a;
+  --color-ink-border-subtle: #434c5e;
+
+  --color-copper: #88c0d0;
+  --color-copper-dim: #81a1c1;
+  --color-copper-glow: #8fbcbb;
+  --color-amber: #ebcb8b;
+
+  --color-text-bright: #eceff4;
+  --color-text-normal: #d8dee9;
+  --color-text-muted: #a0aabb;
+  --color-text-ghost: #6d7a8e;
+
+  --color-severity-error: #bf616a;
+  --color-severity-warn: #ebcb8b;
+  --color-severity-info: #a3be8c;
+  --color-severity-debug: #5e81ac;
+  --color-severity-trace: #b48ead;
+
+  --color-highlight-bg: #88c0d030;
+  --color-highlight-border: #88c0d060;
+  --color-highlight-text: #d8dee9;
+
+  --color-light-highlight-bg: #5e81ac25;
+  --color-light-highlight-border: #5e81ac50;
+  --color-light-highlight-text: #2e3440;
+
+  --color-light-bg: #eceff4;
+  --color-light-raised: #f4f7fa;
+  --color-light-surface: #ffffff;
+  --color-light-hover: #e5e9f0;
+  --color-light-border: #d8dee9;
+  --color-light-border-subtle: #e0e5ed;
+  --color-light-text-bright: #2e3440;
+  --color-light-text-normal: #3b4252;
+  --color-light-text-muted: #616e80;
+  --color-light-text-ghost: #8892a0;
+}
+
+/* Solarized — precision etched */
+.theme-solarized {
+  --color-ink: #002b36;
+  --color-ink-raised: #073642;
+  --color-ink-surface: #0a3e4a;
+  --color-ink-hover: #0e4856;
+  --color-ink-border: #1a5568;
+  --color-ink-border-subtle: #0e4856;
+
+  --color-copper: #268bd2;
+  --color-copper-dim: #2176b8;
+  --color-copper-glow: #2e96e6;
+  --color-amber: #b58900;
+
+  --color-text-bright: #fdf6e3;
+  --color-text-normal: #eee8d5;
+  --color-text-muted: #93a1a1;
+  --color-text-ghost: #657b83;
+
+  --color-severity-error: #dc322f;
+  --color-severity-warn: #b58900;
+  --color-severity-info: #859900;
+  --color-severity-debug: #6c71c4;
+  --color-severity-trace: #d33682;
+
+  --color-highlight-bg: #268bd230;
+  --color-highlight-border: #268bd260;
+  --color-highlight-text: #eee8d5;
+
+  --color-light-highlight-bg: #268bd225;
+  --color-light-highlight-border: #268bd250;
+  --color-light-highlight-text: #073642;
+
+  --color-light-bg: #fdf6e3;
+  --color-light-raised: #fefbf0;
+  --color-light-surface: #ffffff;
+  --color-light-hover: #eee8d5;
+  --color-light-border: #ddd6c1;
+  --color-light-border-subtle: #e8e2cf;
+  --color-light-text-bright: #002b36;
+  --color-light-text-normal: #073642;
+  --color-light-text-muted: #586e75;
+  --color-light-text-ghost: #93a1a1;
+}
+
+/* Dracula — vivid neon */
+.theme-dracula {
+  --color-ink: #282a36;
+  --color-ink-raised: #2d303e;
+  --color-ink-surface: #343746;
+  --color-ink-hover: #3c3f52;
+  --color-ink-border: #44475a;
+  --color-ink-border-subtle: #383b4e;
+
+  --color-copper: #bd93f9;
+  --color-copper-dim: #9d79d9;
+  --color-copper-glow: #caa4fa;
+  --color-amber: #f1fa8c;
+
+  --color-text-bright: #f8f8f2;
+  --color-text-normal: #d4d4cc;
+  --color-text-muted: #a0a0a0;
+  --color-text-ghost: #6272a4;
+
+  --color-severity-error: #ff5555;
+  --color-severity-warn: #f1fa8c;
+  --color-severity-info: #50fa7b;
+  --color-severity-debug: #8be9fd;
+  --color-severity-trace: #ff79c6;
+
+  --color-highlight-bg: #bd93f930;
+  --color-highlight-border: #bd93f960;
+  --color-highlight-text: #f8f8f2;
+
+  --color-light-highlight-bg: #bd93f925;
+  --color-light-highlight-border: #bd93f950;
+  --color-light-highlight-text: #282a36;
+
+  --color-light-bg: #f4f4ee;
+  --color-light-raised: #fafaf6;
+  --color-light-surface: #ffffff;
+  --color-light-hover: #eaeae4;
+  --color-light-border: #d4d4ce;
+  --color-light-border-subtle: #e0e0da;
+  --color-light-text-bright: #282a36;
+  --color-light-text-normal: #383a46;
+  --color-light-text-muted: #626480;
+  --color-light-text-ghost: #8890a8;
+}
+
+/* Catppuccin Mocha — soft pastels on warm dark */
+.theme-catppuccin {
+  --color-ink: #1e1e2e;
+  --color-ink-raised: #313244;
+  --color-ink-surface: #45475a;
+  --color-ink-hover: #585b70;
+  --color-ink-border: #585b70;
+  --color-ink-border-subtle: #45475a;
+
+  --color-copper: #cba6f7;
+  --color-copper-dim: #b08be0;
+  --color-copper-glow: #d4b8fa;
+  --color-amber: #f9e2af;
+
+  --color-text-bright: #cdd6f4;
+  --color-text-normal: #bac2de;
+  --color-text-muted: #a6adc8;
+  --color-text-ghost: #6c7086;
+
+  --color-severity-error: #f38ba8;
+  --color-severity-warn: #f9e2af;
+  --color-severity-info: #a6e3a1;
+  --color-severity-debug: #89b4fa;
+  --color-severity-trace: #f5c2e7;
+
+  --color-highlight-bg: #cba6f730;
+  --color-highlight-border: #cba6f760;
+  --color-highlight-text: #cdd6f4;
+
+  --color-light-highlight-bg: #8839ef25;
+  --color-light-highlight-border: #8839ef50;
+  --color-light-highlight-text: #4c4f69;
+
+  --color-light-bg: #eff1f5;
+  --color-light-raised: #f5f7fb;
+  --color-light-surface: #ffffff;
+  --color-light-hover: #e6e9ef;
+  --color-light-border: #dce0e8;
+  --color-light-border-subtle: #e4e7ed;
+  --color-light-text-bright: #4c4f69;
+  --color-light-text-normal: #5c5f77;
+  --color-light-text-muted: #6c6f85;
+  --color-light-text-ghost: #8c8fa1;
+}
+
+/* Gruvbox — retro earthy warmth */
+.theme-gruvbox {
+  --color-ink: #282828;
+  --color-ink-raised: #3c3836;
+  --color-ink-surface: #504945;
+  --color-ink-hover: #665c54;
+  --color-ink-border: #665c54;
+  --color-ink-border-subtle: #504945;
+
+  --color-copper: #fe8019;
+  --color-copper-dim: #d65d0e;
+  --color-copper-glow: #fabd2f;
+  --color-amber: #fabd2f;
+
+  --color-text-bright: #ebdbb2;
+  --color-text-normal: #d5c4a1;
+  --color-text-muted: #a89984;
+  --color-text-ghost: #7c6f64;
+
+  --color-severity-error: #fb4934;
+  --color-severity-warn: #fabd2f;
+  --color-severity-info: #b8bb26;
+  --color-severity-debug: #83a598;
+  --color-severity-trace: #d3869b;
+
+  --color-highlight-bg: #fe801930;
+  --color-highlight-border: #fe801960;
+  --color-highlight-text: #ebdbb2;
+
+  --color-light-highlight-bg: #af3a0325;
+  --color-light-highlight-border: #af3a0350;
+  --color-light-highlight-text: #282828;
+
+  --color-light-bg: #fbf1c7;
+  --color-light-raised: #fdf5d6;
+  --color-light-surface: #ffffff;
+  --color-light-hover: #f2e5bc;
+  --color-light-border: #d5c4a1;
+  --color-light-border-subtle: #e0d5b8;
+  --color-light-text-bright: #282828;
+  --color-light-text-normal: #3c3836;
+  --color-light-text-muted: #665c54;
+  --color-light-text-ghost: #928374;
+}
+
+/* Tokyo Night — city lights */
+.theme-tokyonight {
+  --color-ink: #1a1b26;
+  --color-ink-raised: #24283b;
+  --color-ink-surface: #292e42;
+  --color-ink-hover: #33384e;
+  --color-ink-border: #3b4261;
+  --color-ink-border-subtle: #292e42;
+
+  --color-copper: #7aa2f7;
+  --color-copper-dim: #6183d4;
+  --color-copper-glow: #89b4fa;
+  --color-amber: #e0af68;
+
+  --color-text-bright: #c0caf5;
+  --color-text-normal: #a9b1d6;
+  --color-text-muted: #787c99;
+  --color-text-ghost: #565f89;
+
+  --color-severity-error: #f7768e;
+  --color-severity-warn: #e0af68;
+  --color-severity-info: #9ece6a;
+  --color-severity-debug: #7dcfff;
+  --color-severity-trace: #bb9af7;
+
+  --color-highlight-bg: #7aa2f730;
+  --color-highlight-border: #7aa2f760;
+  --color-highlight-text: #c0caf5;
+
+  --color-light-highlight-bg: #2e7de925;
+  --color-light-highlight-border: #2e7de950;
+  --color-light-highlight-text: #343b58;
+
+  --color-light-bg: #e8eaf0;
+  --color-light-raised: #f0f2f6;
+  --color-light-surface: #ffffff;
+  --color-light-hover: #dde0e8;
+  --color-light-border: #c8ccda;
+  --color-light-border-subtle: #d6d9e4;
+  --color-light-text-bright: #1a1b26;
+  --color-light-text-normal: #343b58;
+  --color-light-text-muted: #6172a8;
+  --color-light-text-ghost: #8890b0;
+}
+
+/* Rosé Pine — elegant naturals */
+.theme-rosepine {
+  --color-ink: #191724;
+  --color-ink-raised: #1f1d2e;
+  --color-ink-surface: #26233a;
+  --color-ink-hover: #2e2b40;
+  --color-ink-border: #403d52;
+  --color-ink-border-subtle: #2e2b40;
+
+  --color-copper: #ebbcba;
+  --color-copper-dim: #d0a09e;
+  --color-copper-glow: #f0ccc8;
+  --color-amber: #f6c177;
+
+  --color-text-bright: #e0def4;
+  --color-text-normal: #c4c0d8;
+  --color-text-muted: #908caa;
+  --color-text-ghost: #6e6a86;
+
+  --color-severity-error: #eb6f92;
+  --color-severity-warn: #f6c177;
+  --color-severity-info: #9ccfd8;
+  --color-severity-debug: #c4a7e7;
+  --color-severity-trace: #ea9a97;
+
+  --color-highlight-bg: #ebbcba30;
+  --color-highlight-border: #ebbcba60;
+  --color-highlight-text: #e0def4;
+
+  --color-light-highlight-bg: #d7827e25;
+  --color-light-highlight-border: #d7827e50;
+  --color-light-highlight-text: #575279;
+
+  --color-light-bg: #faf4ed;
+  --color-light-raised: #fcf8f4;
+  --color-light-surface: #fffaf3;
+  --color-light-hover: #f2e9e1;
+  --color-light-border: #dfdad9;
+  --color-light-border-subtle: #ebe5df;
+  --color-light-text-bright: #575279;
+  --color-light-text-normal: #625e80;
+  --color-light-text-muted: #797593;
+  --color-light-text-ghost: #9893a5;
+}
+
+/* Everforest — nature, easy on the eyes */
+.theme-everforest {
+  --color-ink: #2d353b;
+  --color-ink-raised: #343f44;
+  --color-ink-surface: #3d484d;
+  --color-ink-hover: #475258;
+  --color-ink-border: #53605c;
+  --color-ink-border-subtle: #3d484d;
+
+  --color-copper: #a7c080;
+  --color-copper-dim: #8da76a;
+  --color-copper-glow: #b5cc90;
+  --color-amber: #dbbc7f;
+
+  --color-text-bright: #d3c6aa;
+  --color-text-normal: #c0b48e;
+  --color-text-muted: #9da9a0;
+  --color-text-ghost: #7a8478;
+
+  --color-severity-error: #e67e80;
+  --color-severity-warn: #dbbc7f;
+  --color-severity-info: #83c092;
+  --color-severity-debug: #7fbbb3;
+  --color-severity-trace: #d699b6;
+
+  --color-highlight-bg: #a7c08030;
+  --color-highlight-border: #a7c08060;
+  --color-highlight-text: #d3c6aa;
+
+  --color-light-highlight-bg: #8da9a025;
+  --color-light-highlight-border: #8da9a050;
+  --color-light-highlight-text: #5c6a72;
+
+  --color-light-bg: #f3ead3;
+  --color-light-raised: #f8f2e2;
+  --color-light-surface: #fffbf0;
+  --color-light-hover: #eae4ca;
+  --color-light-border: #d8d3ba;
+  --color-light-border-subtle: #e2ddc6;
+  --color-light-text-bright: #5c6a72;
+  --color-light-text-normal: #708089;
+  --color-light-text-muted: #829181;
+  --color-light-text-ghost: #a6b0a0;
+}
+
+/* Synthwave — neon 80s retrofuture */
+.theme-synthwave {
+  --color-ink: #1a1028;
+  --color-ink-raised: #241638;
+  --color-ink-surface: #2e1c45;
+  --color-ink-hover: #382250;
+  --color-ink-border: #4a2d6a;
+  --color-ink-border-subtle: #352048;
+
+  --color-copper: #f72585;
+  --color-copper-dim: #d01070;
+  --color-copper-glow: #ff6eaa;
+  --color-amber: #fee440;
+
+  --color-text-bright: #edf0ff;
+  --color-text-normal: #c8cce8;
+  --color-text-muted: #9898c0;
+  --color-text-ghost: #6860a0;
+
+  --color-severity-error: #ff3860;
+  --color-severity-warn: #fee440;
+  --color-severity-info: #00f5d4;
+  --color-severity-debug: #7b2fff;
+  --color-severity-trace: #ff6eff;
+
+  --color-highlight-bg: #f7258530;
+  --color-highlight-border: #f7258560;
+  --color-highlight-text: #edf0ff;
+
+  --color-light-highlight-bg: #b5179e25;
+  --color-light-highlight-border: #b5179e50;
+  --color-light-highlight-text: #1a1028;
+
+  --color-light-bg: #f4eef8;
+  --color-light-raised: #faf6fc;
+  --color-light-surface: #ffffff;
+  --color-light-hover: #ece4f2;
+  --color-light-border: #d8cce4;
+  --color-light-border-subtle: #e4daea;
+  --color-light-text-bright: #1a1028;
+  --color-light-text-normal: #382250;
+  --color-light-text-muted: #6860a0;
+  --color-light-text-ghost: #9898c0;
+}
+
 /* Base */
 html,
 body,

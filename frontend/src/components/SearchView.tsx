@@ -112,7 +112,7 @@ export function SearchView() {
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(
     null,
   );
-  const { theme, setTheme, dark, highlightMode, setHighlightMode } = useThemeSync();
+  const { theme, setTheme, dark, highlightMode, setHighlightMode, palette, setPalette } = useThemeSync();
 
   const {
     sidebarWidth, sidebarCollapsed, setSidebarCollapsed, handleSidebarResize,
@@ -728,6 +728,8 @@ export function SearchView() {
               setTheme={setTheme}
               highlightMode={highlightMode}
               setHighlightMode={setHighlightMode}
+              palette={palette}
+              setPalette={setPalette}
               onClose={() => setShowPreferences(false)}
             />
           )}

@@ -1727,6 +1727,11 @@ export class GetPreferencesResponse extends Message<GetPreferencesResponse> {
    */
   syntaxHighlight = "";
 
+  /**
+   * @generated from field: string palette = 3;
+   */
+  palette = "";
+
   constructor(data?: PartialMessage<GetPreferencesResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1737,6 +1742,7 @@ export class GetPreferencesResponse extends Message<GetPreferencesResponse> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "theme", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "syntax_highlight", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "palette", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetPreferencesResponse {
@@ -1770,6 +1776,11 @@ export class PutPreferencesRequest extends Message<PutPreferencesRequest> {
    */
   syntaxHighlight = "";
 
+  /**
+   * @generated from field: string palette = 3;
+   */
+  palette = "";
+
   constructor(data?: PartialMessage<PutPreferencesRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1780,6 +1791,7 @@ export class PutPreferencesRequest extends Message<PutPreferencesRequest> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "theme", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "syntax_highlight", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "palette", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutPreferencesRequest {

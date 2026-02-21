@@ -17,6 +17,7 @@ import (
 type userPreferences struct {
 	Theme            string       `json:"theme,omitempty"`
 	SyntaxHighlight  string       `json:"syntax_highlight,omitempty"`
+	Palette          string       `json:"palette,omitempty"`
 	SavedQueries     []savedQuery `json:"saved_queries,omitempty"`
 }
 
@@ -72,6 +73,7 @@ func (s *ConfigServer) GetPreferences(
 	return connect.NewResponse(&apiv1.GetPreferencesResponse{
 		Theme:           prefs.Theme,
 		SyntaxHighlight: prefs.SyntaxHighlight,
+		Palette:         prefs.Palette,
 	}), nil
 }
 
@@ -92,6 +94,7 @@ func (s *ConfigServer) PutPreferences(
 
 	prefs.Theme = req.Msg.Theme
 	prefs.SyntaxHighlight = req.Msg.SyntaxHighlight
+	prefs.Palette = req.Msg.Palette
 	if err := s.savePrefs(ctx, uid, prefs); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}

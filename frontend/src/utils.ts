@@ -2,6 +2,7 @@ import { Record as ProtoRecord } from "./api/client";
 
 export type { ProtoRecord };
 export type Theme = "dark" | "light" | "system";
+export type Palette = "observatory" | "nord" | "solarized" | "dracula" | "catppuccin" | "gruvbox" | "tokyonight" | "rosepine" | "everforest" | "synthwave";
 
 export const timeRangeMs: Record<string, number> = {
   "5m": 5 * 60 * 1000,
