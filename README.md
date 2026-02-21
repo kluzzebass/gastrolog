@@ -45,6 +45,9 @@ services:
       - "514:514/tcp" # Syslog (TCP)
       - "3100:3100"   # HTTP (Loki-compatible)
       - "2514:2514"   # RELP
+      - "4317:4317"   # OTLP (gRPC)
+      - "4318:4318"   # OTLP (HTTP)
+      - "24224:24224"  # Fluent Forward
     volumes:
       - config:/config                              # Configuration database
       - stores:/stores                              # Log store data
