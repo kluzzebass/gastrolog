@@ -88,6 +88,16 @@ export class HealthResponse extends Message<HealthResponse> {
    */
   uptimeSeconds = protoInt64.zero;
 
+  /**
+   * @generated from field: int64 ingest_queue_depth = 4;
+   */
+  ingestQueueDepth = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 ingest_queue_capacity = 5;
+   */
+  ingestQueueCapacity = protoInt64.zero;
+
   constructor(data?: PartialMessage<HealthResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -99,6 +109,8 @@ export class HealthResponse extends Message<HealthResponse> {
     { no: 1, name: "status", kind: "enum", T: proto3.getEnumType(Status) },
     { no: 2, name: "version", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "uptime_seconds", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 4, name: "ingest_queue_depth", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 5, name: "ingest_queue_capacity", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): HealthResponse {

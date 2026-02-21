@@ -290,7 +290,7 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
         </nav>
 
         {/* Content */}
-        <div ref={contentRef} className="flex-1 overflow-y-auto app-scroll p-6 pt-10">
+        <div ref={contentRef} className="flex-1 overflow-y-auto app-scroll p-6">
           {topic ? (
             <Markdown remarkPlugins={[remarkGfm]} components={mdComponents} urlTransform={(url) => url}>
               {topic.content}
@@ -304,14 +304,6 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
           )}
         </div>
 
-        {/* Close button */}
-        <button
-          onClick={onClose}
-          aria-label="Close"
-          className={`absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded text-lg leading-none transition-colors ${c("text-text-muted hover:text-text-bright", "text-light-text-muted hover:text-light-text-bright")}`}
-        >
-          &times;
-        </button>
       </div>
     </Dialog>
   );

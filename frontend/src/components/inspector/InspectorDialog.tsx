@@ -4,6 +4,7 @@ import { StoresIcon, IngestersIcon, JobsIcon, MetricsIcon } from "../icons";
 import { StoresPanel } from "./StoresPanel";
 import { IngestersPanel } from "./IngestersPanel";
 import { JobsPanel } from "./JobsPanel";
+import { MetricsPanel } from "./MetricsPanel";
 
 export type InspectorTab = "stores" | "ingesters" | "jobs" | "metrics";
 
@@ -65,42 +66,15 @@ export function InspectorDialog({
           ))}
         </nav>
 
-        <div className="flex-1 overflow-y-auto app-scroll p-5 pt-10">
+        <div className="flex-1 overflow-y-auto app-scroll p-5">
           {tab === "stores" && <StoresPanel dark={dark} />}
           {tab === "ingesters" && <IngestersPanel dark={dark} />}
           {tab === "jobs" && <JobsPanel dark={dark} />}
-          {tab !== "stores" && tab !== "ingesters" && tab !== "jobs" && (
-            <Placeholder tab={tab} dark={dark} />
-          )}
+          {tab === "metrics" && <MetricsPanel dark={dark} />}
         </div>
-
-        <button
-          onClick={onClose}
-          aria-label="Close"
-          className={`absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded text-lg leading-none transition-colors ${c("text-text-muted hover:text-text-bright", "text-light-text-muted hover:text-light-text-bright")}`}
-        >
-          &times;
-        </button>
       </div>
     </Dialog>
   );
 }
 
-function Placeholder({ tab, dark }: Readonly<{ tab: InspectorTab; dark: boolean }>) {
-  const c = useThemeClass(dark);
-  const labels: Record<InspectorTab, string> = {
-    stores: "Store health indicators will appear here.",
-    ingesters: "Ingester metrics will appear here.",
-    jobs: "Job status will appear here.",
-    metrics: "Dashboard metrics will appear here.",
-  };
-
-  return (
-    <div
-      className={`flex items-center justify-center h-full text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-    >
-      {labels[tab]}
-    </div>
-  );
-}
 

@@ -55,6 +55,16 @@ function initMermaid(dark: boolean) {
   });
 }
 
+// Module-level SVG cache keyed by chart+dark. When react-markdown remounts
+// MermaidDiagram (e.g. because parent re-renders recreate the components
+// object), the cached SVG is shown immediately instead of re-running the
+// async mermaid render, which would cause visible flicker.
+const svgCache = new Map<string, string>();
+
+function cacheKey(chart: string, dark: boolean): string {
+  return `${dark ? "d" : "l"}:${chart}`;
+}
+
 interface MermaidDiagramProps {
   chart: string;
   dark: boolean;
@@ -63,11 +73,14 @@ interface MermaidDiagramProps {
 export function MermaidDiagram({ chart, dark }: Readonly<MermaidDiagramProps>) {
   const c = useThemeClass(dark);
   const ref = useRef<HTMLDivElement>(null);
+  const key = cacheKey(chart, dark);
+  const cached = svgCache.get(key);
+  const [svg, setSvg] = useState(cached ?? "");
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const container = ref.current;
-    if (!container) return;
+    // Already have the SVG (from cache or a previous render) — nothing to do.
+    if (svgCache.has(key)) return;
 
     initMermaid(dark);
     const id = `mermaid-${Math.random().toString(36).slice(2, 11)}`;
@@ -75,24 +88,19 @@ export function MermaidDiagram({ chart, dark }: Readonly<MermaidDiagramProps>) {
 
     mermaid
       .render(id, chart)
-      .then(({ svg }) => {
+      .then(({ svg: rendered }) => {
         if (cancelled) return;
-        container.replaceChildren();
-        const doc = new DOMParser().parseFromString(svg, "image/svg+xml");
-        const svgEl = doc.documentElement;
-        if (svgEl instanceof SVGElement) {
-          container.appendChild(svgEl);
-        }
+        svgCache.set(key, rendered);
+        setSvg(rendered);
         setError("");
       })
       .catch(() => {
         if (cancelled) return;
-        container.replaceChildren();
         setError("Failed to render diagram");
       });
 
     return () => { cancelled = true; };
-  }, [chart, dark]);
+  }, [key, chart, dark]);
 
   if (error) {
     return (
@@ -108,6 +116,7 @@ export function MermaidDiagram({ chart, dark }: Readonly<MermaidDiagramProps>) {
     <div
       ref={ref}
       className="mb-3 overflow-x-auto app-scroll [&_svg]:max-w-full"
+      dangerouslySetInnerHTML={{ __html: svg }}
     />
   );
 }

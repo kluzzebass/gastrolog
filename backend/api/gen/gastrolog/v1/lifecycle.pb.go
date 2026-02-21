@@ -110,12 +110,14 @@ func (*HealthRequest) Descriptor() ([]byte, []int) {
 }
 
 type HealthResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Status        Status                 `protobuf:"varint,1,opt,name=status,proto3,enum=gastrolog.v1.Status" json:"status,omitempty"`
-	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
-	UptimeSeconds int64                  `protobuf:"varint,3,opt,name=uptime_seconds,json=uptimeSeconds,proto3" json:"uptime_seconds,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	Status              Status                 `protobuf:"varint,1,opt,name=status,proto3,enum=gastrolog.v1.Status" json:"status,omitempty"`
+	Version             string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	UptimeSeconds       int64                  `protobuf:"varint,3,opt,name=uptime_seconds,json=uptimeSeconds,proto3" json:"uptime_seconds,omitempty"`
+	IngestQueueDepth    int64                  `protobuf:"varint,4,opt,name=ingest_queue_depth,json=ingestQueueDepth,proto3" json:"ingest_queue_depth,omitempty"`
+	IngestQueueCapacity int64                  `protobuf:"varint,5,opt,name=ingest_queue_capacity,json=ingestQueueCapacity,proto3" json:"ingest_queue_capacity,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *HealthResponse) Reset() {
@@ -165,6 +167,20 @@ func (x *HealthResponse) GetVersion() string {
 func (x *HealthResponse) GetUptimeSeconds() int64 {
 	if x != nil {
 		return x.UptimeSeconds
+	}
+	return 0
+}
+
+func (x *HealthResponse) GetIngestQueueDepth() int64 {
+	if x != nil {
+		return x.IngestQueueDepth
+	}
+	return 0
+}
+
+func (x *HealthResponse) GetIngestQueueCapacity() int64 {
+	if x != nil {
+		return x.IngestQueueCapacity
 	}
 	return 0
 }
@@ -254,11 +270,13 @@ var File_gastrolog_v1_lifecycle_proto protoreflect.FileDescriptor
 const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\n" +
 	"\x1cgastrolog/v1/lifecycle.proto\x12\fgastrolog.v1\"\x0f\n" +
-	"\rHealthRequest\"\x7f\n" +
+	"\rHealthRequest\"\xe1\x01\n" +
 	"\x0eHealthResponse\x12,\n" +
 	"\x06status\x18\x01 \x01(\x0e2\x14.gastrolog.v1.StatusR\x06status\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12%\n" +
-	"\x0euptime_seconds\x18\x03 \x01(\x03R\ruptimeSeconds\"'\n" +
+	"\x0euptime_seconds\x18\x03 \x01(\x03R\ruptimeSeconds\x12,\n" +
+	"\x12ingest_queue_depth\x18\x04 \x01(\x03R\x10ingestQueueDepth\x122\n" +
+	"\x15ingest_queue_capacity\x18\x05 \x01(\x03R\x13ingestQueueCapacity\"'\n" +
 	"\x0fShutdownRequest\x12\x14\n" +
 	"\x05drain\x18\x01 \x01(\bR\x05drain\"\x12\n" +
 	"\x10ShutdownResponse*_\n" +

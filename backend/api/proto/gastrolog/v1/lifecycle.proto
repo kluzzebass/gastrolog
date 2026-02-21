@@ -19,6 +19,8 @@ message HealthResponse {
   Status status = 1;
   string version = 2;
   int64 uptime_seconds = 3;
+  int64 ingest_queue_depth = 4;
+  int64 ingest_queue_capacity = 5;
 }
 
 enum Status {

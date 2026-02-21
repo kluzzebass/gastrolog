@@ -139,7 +139,7 @@ export function SettingsDialog({
           ))}
         </nav>
 
-        <div className="flex-1 overflow-y-auto app-scroll p-5 pt-10">
+        <div className="flex-1 overflow-y-auto app-scroll p-5">
           {tab === "service" && <ServiceSettings dark={dark} noAuth={noAuth} />}
           {tab === "certificates" && <CertificatesSettings dark={dark} />}
           {tab === "users" && <UsersSettings dark={dark} noAuth={noAuth} />}
@@ -149,14 +149,6 @@ export function SettingsDialog({
           {tab === "retention" && <RetentionPoliciesSettings dark={dark} onNavigateTo={navigateTo} />}
           {tab === "stores" && <StoresSettings dark={dark} expandTarget={expandTarget} onExpandTargetConsumed={clearExpandTarget} />}
         </div>
-
-        <button
-          onClick={onClose}
-          aria-label="Close"
-          className={`absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded text-lg leading-none transition-colors ${c("text-text-muted hover:text-text-bright", "text-light-text-muted hover:text-light-text-bright")}`}
-        >
-          &times;
-        </button>
       </div>
     </Dialog>
   );

@@ -56,13 +56,27 @@ export function Dialog({
           aria-label="Close dialog"
           tabIndex={-1}
         />
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={ariaLabel}
-          className={`relative rounded-lg shadow-2xl ${sizeClasses[size]} ${bg}`}
-        >
-          {children}
+        <div className="relative">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={ariaLabel}
+            className={`rounded-lg shadow-2xl ${sizeClasses[size]} ${bg}`}
+          >
+            {children}
+          </div>
+          {size === "xl" && (
+            <button
+              onClick={onClose}
+              aria-label="Close"
+              className={`absolute -top-3 -right-3 w-7 h-7 flex items-center justify-center rounded-full text-lg leading-none shadow-lg border transition-colors ${c(
+                "bg-ink-surface border-ink-border text-text-muted hover:text-text-bright hover:bg-ink-hover",
+                "bg-light-surface border-light-border text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
+              )}`}
+            >
+              &times;
+            </button>
+          )}
         </div>
       </div>
     </FocusTrap>

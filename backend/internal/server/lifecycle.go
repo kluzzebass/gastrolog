@@ -44,9 +44,11 @@ func (s *LifecycleServer) Health(
 	}
 
 	return connect.NewResponse(&apiv1.HealthResponse{
-		Status:        status,
-		Version:       Version,
-		UptimeSeconds: int64(time.Since(s.startTime).Seconds()),
+		Status:              status,
+		Version:             Version,
+		UptimeSeconds:       int64(time.Since(s.startTime).Seconds()),
+		IngestQueueDepth:    int64(s.orch.IngestQueueDepth()),
+		IngestQueueCapacity: int64(s.orch.IngestQueueCapacity()),
 	}), nil
 }
 

@@ -47,3 +47,4 @@ export {
   useTestIngester,
 } from "./useIngesters";
 export { useJob, useWatchJobs } from "./useJobs";
+export { useHealth } from "./useHealth";
