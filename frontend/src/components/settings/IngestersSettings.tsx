@@ -7,7 +7,7 @@ import { useCrudHandlers } from "../../hooks/useCrudHandlers";
 import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
-import { FormField, TextInput } from "./FormField";
+import { FormField, TextInput, SelectInput } from "./FormField";
 import { IngesterParamsForm } from "./IngesterParamsForm";
 import { PrimaryButton, GhostButton } from "./Buttons";
 import { Checkbox } from "./Checkbox";
@@ -143,20 +143,18 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
       dark={dark}
       addSlot={
         adding && !typeConfirmed ? (
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {ingesterTypes.map((t) => (
-              <button
-                key={t.value}
-                type="button"
-                onClick={() => dispatchAdd({ type: "confirmType", ingesterType: t.value })}
-                className={`px-3 py-1.5 text-[0.8em] font-mono rounded border transition-colors ${c(
-                  "border-ink-border-subtle text-text-secondary hover:border-copper hover:text-copper",
-                  "border-light-border-subtle text-light-text-secondary hover:border-copper hover:text-copper",
-                )}`}
-              >
-                {t.label}
-              </button>
-            ))}
+          <div className="flex items-center gap-1.5">
+            <SelectInput
+              value=""
+              onChange={(v) => {
+                if (v) dispatchAdd({ type: "confirmType", ingesterType: v });
+              }}
+              options={[
+                { value: "", label: "Select type\u2026" },
+                ...ingesterTypes,
+              ]}
+              dark={dark}
+            />
             <GhostButton
               onClick={() => dispatchAdd({ type: "resetForm" })}
               dark={dark}

@@ -258,25 +258,21 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
       addSlot={
         adding && !typeConfirmed ? (
           <div className="flex items-center gap-1.5">
-            {[
-              { value: "memory", label: "memory" },
-              { value: "file", label: "file" },
-            ].map((t) => (
-              <button
-                key={t.value}
-                type="button"
-                onClick={() => {
-                  setNewType(t.value);
+            <SelectInput
+              value=""
+              onChange={(v) => {
+                if (v) {
+                  setNewType(v);
                   setTypeConfirmed(true);
-                }}
-                className={`px-3 py-1.5 text-[0.8em] font-mono rounded border transition-colors ${c(
-                  "border-ink-border-subtle text-text-secondary hover:border-copper hover:text-copper",
-                  "border-light-border-subtle text-light-text-secondary hover:border-copper hover:text-copper",
-                )}`}
-              >
-                {t.label}
-              </button>
-            ))}
+                }
+              }}
+              options={[
+                { value: "", label: "Select type\u2026" },
+                { value: "memory", label: "memory" },
+                { value: "file", label: "file" },
+              ]}
+              dark={dark}
+            />
             <GhostButton
               onClick={() => setAdding(false)}
               dark={dark}
