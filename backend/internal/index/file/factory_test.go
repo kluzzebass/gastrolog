@@ -36,9 +36,9 @@ func TestFactoryDefaultValues(t *testing.T) {
 		t.Fatal("expected *Manager")
 	}
 
-	// Should have 5 indexers: token, attr, ingest, source, kv
-	if len(mgr.indexers) != 5 {
-		t.Errorf("expected 5 indexers, got %d", len(mgr.indexers))
+	// Should have 6 indexers: token, attr, ingest, source, kv, json
+	if len(mgr.indexers) != 6 {
+		t.Errorf("expected 6 indexers, got %d", len(mgr.indexers))
 	}
 }
 

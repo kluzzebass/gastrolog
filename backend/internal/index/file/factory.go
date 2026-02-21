@@ -9,6 +9,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
 	fileattr "gastrolog/internal/index/file/attr"
+	filejson "gastrolog/internal/index/file/json"
 	filekv "gastrolog/internal/index/file/kv"
 	filetoken "gastrolog/internal/index/file/token"
 	filetsidx "gastrolog/internal/index/file/tsidx"
@@ -54,6 +55,7 @@ func NewFactory() index.ManagerFactory {
 				KVBudget:   kvBudget,
 				Extractors: tokenizer.DefaultExtractors(),
 			}),
+			filejson.NewIndexer(dir, chunkManager, logger),
 		}
 
 		return NewManager(dir, indexers, logger), nil

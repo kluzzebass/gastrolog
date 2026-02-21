@@ -77,6 +77,12 @@ func (f *fakeIndexManager) FindIngestStartPosition(chunkID chunk.ChunkID, ts tim
 func (f *fakeIndexManager) FindSourceStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	return 0, false, index.ErrIndexNotFound
 }
+func (f *fakeIndexManager) OpenJSONPathIndex(chunkID chunk.ChunkID) (*index.Index[index.JSONPathIndexEntry], index.JSONIndexStatus, error) {
+	return nil, index.JSONComplete, nil
+}
+func (f *fakeIndexManager) OpenJSONPVIndex(chunkID chunk.ChunkID) (*index.Index[index.JSONPVIndexEntry], index.JSONIndexStatus, error) {
+	return nil, index.JSONComplete, nil
+}
 func (f *fakeIndexManager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
 	return map[string]int64{}
 }

@@ -101,14 +101,18 @@ func TestAnalyzeChunk_Basic(t *testing.T) {
 		t.Error("expected chunk to be sealed")
 	}
 
-	// Should have 3 summaries (token, attr_kv, kv)
-	if len(analysis.Summaries) != 3 {
-		t.Errorf("summaries count: got %d, want 3", len(analysis.Summaries))
+	// Should have 4 summaries (token, attr_kv, kv, json)
+	if len(analysis.Summaries) != 4 {
+		t.Errorf("summaries count: got %d, want 4", len(analysis.Summaries))
 	}
 
-	// All indexes should be enabled
+	// All indexes should be enabled (except json which is disabled without JSON manager)
 	for _, s := range analysis.Summaries {
-		if s.Status != StatusEnabled {
+		if s.IndexType == IndexTypeJSON {
+			if s.Status != StatusDisabled {
+				t.Errorf("index %s status: got %s, want %s", s.IndexType, s.Status, StatusDisabled)
+			}
+		} else if s.Status != StatusEnabled {
 			t.Errorf("index %s status: got %s, want %s", s.IndexType, s.Status, StatusEnabled)
 		}
 	}

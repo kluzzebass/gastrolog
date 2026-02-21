@@ -8,6 +8,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
 	memattr "gastrolog/internal/index/memory/attr"
+	memjson "gastrolog/internal/index/memory/json"
 	"gastrolog/internal/index/memory/kv"
 	memtoken "gastrolog/internal/index/memory/token"
 	"gastrolog/internal/tokenizer"
@@ -39,9 +40,10 @@ func NewFactory() index.ManagerFactory {
 			KVBudget:   kvBudget,
 			Extractors: tokenizer.DefaultExtractors(),
 		})
+		jsonIdx := memjson.NewIndexer(chunkManager)
 
-		indexers := []index.Indexer{tokIdx, attrIdx, kvIdx}
+		indexers := []index.Indexer{tokIdx, attrIdx, kvIdx, jsonIdx}
 
-		return NewManager(indexers, tokIdx, attrIdx, kvIdx, logger), nil
+		return NewManagerWithJSON(indexers, tokIdx, attrIdx, kvIdx, jsonIdx, logger), nil
 	}
 }

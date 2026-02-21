@@ -45,12 +45,13 @@ func CombinedExtract(msg []byte, extractors []KVExtractor) []KeyValue {
 }
 
 // DefaultExtractors returns the standard set of KV extractors:
-// heuristic KV, logfmt, JSON, and access log.
+// heuristic KV, logfmt, and access log.
+// JSON extraction is handled by the structural JSON index (WalkJSON),
+// not the flat KV pipeline.
 func DefaultExtractors() []KVExtractor {
 	return []KVExtractor{
 		ExtractKeyValues,
 		ExtractLogfmt,
-		ExtractJSON,
 		ExtractAccessLog,
 	}
 }

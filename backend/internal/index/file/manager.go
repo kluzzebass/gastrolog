@@ -11,6 +11,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
 	fileattr "gastrolog/internal/index/file/attr"
+	filejson "gastrolog/internal/index/file/json"
 	filekv "gastrolog/internal/index/file/kv"
 	filetoken "gastrolog/internal/index/file/token"
 	filetsidx "gastrolog/internal/index/file/tsidx"
@@ -62,6 +63,7 @@ func (m *Manager) DeleteIndexes(chunkID chunk.ChunkID) error {
 		filekv.KeyIndexPath(m.dir, chunkID),
 		filekv.ValueIndexPath(m.dir, chunkID),
 		filekv.KVIndexPath(m.dir, chunkID),
+		filejson.IndexPath(m.dir, chunkID),
 	}
 
 	for _, path := range paths {
@@ -81,6 +83,7 @@ func (m *Manager) DeleteIndexes(chunkID chunk.ChunkID) error {
 		filekv.KeyTempFilePattern(m.dir, chunkID),
 		filekv.ValueTempFilePattern(m.dir, chunkID),
 		filekv.KVTempFilePattern(m.dir, chunkID),
+		filejson.TempFilePattern(m.dir, chunkID),
 	}
 
 	for _, pattern := range patterns {
@@ -154,6 +157,28 @@ func (m *Manager) OpenKVIndex(chunkID chunk.ChunkID) (*index.Index[index.KVIndex
 	return index.NewIndex(entries), status, nil
 }
 
+func (m *Manager) OpenJSONPathIndex(chunkID chunk.ChunkID) (*index.Index[index.JSONPathIndexEntry], index.JSONIndexStatus, error) {
+	pathEntries, _, status, err := filejson.LoadIndex(m.dir, chunkID)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, index.JSONComplete, index.ErrIndexNotFound
+		}
+		return nil, status, fmt.Errorf("open json path index: %w", err)
+	}
+	return index.NewIndex(pathEntries), status, nil
+}
+
+func (m *Manager) OpenJSONPVIndex(chunkID chunk.ChunkID) (*index.Index[index.JSONPVIndexEntry], index.JSONIndexStatus, error) {
+	_, pvEntries, status, err := filejson.LoadIndex(m.dir, chunkID)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, index.JSONComplete, index.ErrIndexNotFound
+		}
+		return nil, status, fmt.Errorf("open json pv index: %w", err)
+	}
+	return index.NewIndex(pvEntries), status, nil
+}
+
 // FindIngestStartPosition implements index.IndexManager.
 func (m *Manager) FindIngestStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	entries, err := filetsidx.LoadIngestIndex(m.dir, chunkID)
@@ -193,6 +218,7 @@ func (m *Manager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
 		"kv_key":    filekv.KeyIndexPath(m.dir, chunkID),
 		"kv_val":    filekv.ValueIndexPath(m.dir, chunkID),
 		"kv_kv":     filekv.KVIndexPath(m.dir, chunkID),
+		"json":      filejson.IndexPath(m.dir, chunkID),
 	}
 	for name, path := range paths {
 		if info, err := os.Stat(path); err == nil {
@@ -216,6 +242,7 @@ func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
 		filekv.KeyIndexPath(m.dir, chunkID),
 		filekv.ValueIndexPath(m.dir, chunkID),
 		filekv.KVIndexPath(m.dir, chunkID),
+		filejson.IndexPath(m.dir, chunkID),
 	}
 
 	for _, path := range indexPaths {
@@ -237,6 +264,7 @@ func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
 		filekv.KeyTempFilePattern(m.dir, chunkID),
 		filekv.ValueTempFilePattern(m.dir, chunkID),
 		filekv.KVTempFilePattern(m.dir, chunkID),
+		filejson.TempFilePattern(m.dir, chunkID),
 	}
 
 	for _, pattern := range tempPatterns {

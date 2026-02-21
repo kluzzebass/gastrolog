@@ -31,6 +31,13 @@ type KVIndexStore interface {
 	Delete(chunkID chunk.ChunkID)
 }
 
+// JSONIndexStore provides access to JSON path and path-value indexes.
+type JSONIndexStore interface {
+	GetPath(chunkID chunk.ChunkID) ([]index.JSONPathIndexEntry, index.JSONIndexStatus, bool)
+	GetPV(chunkID chunk.ChunkID) ([]index.JSONPVIndexEntry, index.JSONIndexStatus, bool)
+	Delete(chunkID chunk.ChunkID)
+}
+
 // Manager manages in-memory index storage.
 //
 // Logging:
@@ -43,6 +50,7 @@ type Manager struct {
 	tokenStore IndexStore[index.TokenIndexEntry]
 	attrStore  AttrIndexStore
 	kvStore    KVIndexStore
+	jsonStore  JSONIndexStore
 	builder    *index.BuildHelper
 
 	// Logger for this manager instance.
@@ -69,6 +77,26 @@ func NewManager(
 	}
 }
 
+// NewManagerWithJSON creates an in-memory index manager with JSON index support.
+func NewManagerWithJSON(
+	indexers []index.Indexer,
+	tokenStore IndexStore[index.TokenIndexEntry],
+	attrStore AttrIndexStore,
+	kvStore KVIndexStore,
+	jsonStore JSONIndexStore,
+	logger *slog.Logger,
+) *Manager {
+	return &Manager{
+		indexers:   indexers,
+		tokenStore: tokenStore,
+		attrStore:  attrStore,
+		kvStore:    kvStore,
+		jsonStore:  jsonStore,
+		builder:    index.NewBuildHelper(),
+		logger:     logging.Default(logger).With("component", "index-manager", "type", "memory"),
+	}
+}
+
 func (m *Manager) BuildIndexes(ctx context.Context, chunkID chunk.ChunkID) error {
 	return m.builder.Build(ctx, chunkID, m.indexers)
 }
@@ -83,6 +111,9 @@ func (m *Manager) DeleteIndexes(chunkID chunk.ChunkID) error {
 	}
 	if m.kvStore != nil {
 		m.kvStore.Delete(chunkID)
+	}
+	if m.jsonStore != nil {
+		m.jsonStore.Delete(chunkID)
 	}
 	return nil
 }
@@ -164,6 +195,28 @@ func (m *Manager) OpenKVIndex(chunkID chunk.ChunkID) (*index.Index[index.KVIndex
 	return index.NewIndex(entries), status, nil
 }
 
+func (m *Manager) OpenJSONPathIndex(chunkID chunk.ChunkID) (*index.Index[index.JSONPathIndexEntry], index.JSONIndexStatus, error) {
+	if m.jsonStore == nil {
+		return nil, index.JSONComplete, index.ErrIndexNotFound
+	}
+	entries, status, ok := m.jsonStore.GetPath(chunkID)
+	if !ok {
+		return nil, index.JSONComplete, index.ErrIndexNotFound
+	}
+	return index.NewIndex(entries), status, nil
+}
+
+func (m *Manager) OpenJSONPVIndex(chunkID chunk.ChunkID) (*index.Index[index.JSONPVIndexEntry], index.JSONIndexStatus, error) {
+	if m.jsonStore == nil {
+		return nil, index.JSONComplete, index.ErrIndexNotFound
+	}
+	entries, status, ok := m.jsonStore.GetPV(chunkID)
+	if !ok {
+		return nil, index.JSONComplete, index.ErrIndexNotFound
+	}
+	return index.NewIndex(entries), status, nil
+}
+
 // FindIngestStartPosition returns ErrIndexNotFound; memory index manager does not
 // maintain ingest timestamp indexes.
 func (m *Manager) FindIngestStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
@@ -235,6 +288,22 @@ func (m *Manager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
 			sizes["kv_kv"] = s
 		}
 	}
+	if m.jsonStore != nil {
+		var s int64
+		if entries, _, ok := m.jsonStore.GetPath(chunkID); ok {
+			for _, e := range entries {
+				s += int64(len(e.Path)) + int64(len(e.Positions))*8
+			}
+		}
+		if entries, _, ok := m.jsonStore.GetPV(chunkID); ok {
+			for _, e := range entries {
+				s += int64(len(e.Path)) + int64(len(e.Value)) + int64(len(e.Positions))*8
+			}
+		}
+		if s > 0 {
+			sizes["json"] = s
+		}
+	}
 
 	return sizes
 }
@@ -266,6 +335,11 @@ func (m *Manager) IndexesComplete(chunkID chunk.ChunkID) (bool, error) {
 			return false, nil
 		}
 		if _, _, ok := m.kvStore.GetKV(chunkID); !ok {
+			return false, nil
+		}
+	}
+	if m.jsonStore != nil {
+		if _, _, ok := m.jsonStore.GetPath(chunkID); !ok {
 			return false, nil
 		}
 	}

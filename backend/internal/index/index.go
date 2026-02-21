@@ -116,6 +116,37 @@ const (
 	KVCapped
 )
 
+// JSONPathIndexEntry holds all record positions where a specific JSON path exists.
+type JSONPathIndexEntry struct {
+	Path      string
+	Positions []uint64
+}
+
+func (e JSONPathIndexEntry) GetKey() string         { return e.Path }
+func (e JSONPathIndexEntry) GetPositions() []uint64 { return e.Positions }
+
+// JSONPVIndexEntry holds all record positions where a specific JSON path=value pair exists.
+type JSONPVIndexEntry struct {
+	Path      string
+	Value     string
+	Positions []uint64
+}
+
+func (e JSONPVIndexEntry) GetKey() string         { return e.Path }
+func (e JSONPVIndexEntry) GetValue() string       { return e.Value }
+func (e JSONPVIndexEntry) GetPositions() []uint64 { return e.Positions }
+
+// JSONIndexStatus indicates whether the JSON index is complete or capped.
+type JSONIndexStatus int
+
+const (
+	// JSONComplete indicates the index contains all discovered path-value pairs.
+	JSONComplete JSONIndexStatus = iota
+	// JSONCapped indicates the index was capped due to budget limits.
+	// Path-value queries must fall back to runtime filtering.
+	JSONCapped
+)
+
 // Index provides read access to a built index of any entry type.
 type Index[T any] struct {
 	entries []T
@@ -165,6 +196,16 @@ type IndexManager interface {
 	// and queries must fall back to runtime filtering.
 	// Returns ErrIndexNotFound if the index doesn't exist.
 	OpenKVIndex(chunkID chunk.ChunkID) (*Index[KVIndexEntry], KVIndexStatus, error)
+
+	// OpenJSONPathIndex opens the JSON path index for the given chunk.
+	// Returns the index entries and a status indicating whether the index is complete.
+	// If status is JSONCapped, the path-value index was truncated due to budget limits.
+	OpenJSONPathIndex(chunkID chunk.ChunkID) (*Index[JSONPathIndexEntry], JSONIndexStatus, error)
+
+	// OpenJSONPVIndex opens the JSON path-value index for the given chunk.
+	// Returns the index entries and a status indicating whether the index is complete.
+	// If status is JSONCapped, the index was truncated due to budget limits.
+	OpenJSONPVIndex(chunkID chunk.ChunkID) (*Index[JSONPVIndexEntry], JSONIndexStatus, error)
 
 	// IndexesComplete reports whether all indexes exist for the given chunk.
 	// Returns true if all indexes are present, false if any are missing.

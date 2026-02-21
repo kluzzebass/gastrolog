@@ -20,6 +20,7 @@ const (
 	IndexTypeToken  IndexType = "token"
 	IndexTypeAttrKV IndexType = "attr_kv"
 	IndexTypeKV     IndexType = "kv"
+	IndexTypeJSON   IndexType = "json"
 )
 
 // IndexStatus indicates the health state of an index.
@@ -138,6 +139,17 @@ type KVIndexStats struct {
 	TopKeysByFrequency []TokenFrequency `json:"top_keys_by_frequency,omitempty"`
 }
 
+// JSONIndexStats holds statistics for the structural JSON index.
+type JSONIndexStats struct {
+	UniquePaths     int64 `json:"unique_paths"`
+	UniquePVPairs   int64 `json:"unique_pv_pairs"`
+	IndexBytes      int64 `json:"index_bytes"`
+	BudgetExhausted bool  `json:"budget_exhausted"`
+
+	PathStatus IndexStatus `json:"path_status"`
+	PVStatus   IndexStatus `json:"pv_status"`
+}
+
 // ChunkAnalysis contains all index analysis for a single chunk.
 type ChunkAnalysis struct {
 	ChunkID      chunk.ChunkID `json:"chunk_id"`
@@ -154,6 +166,7 @@ type ChunkAnalysis struct {
 	TokenStats  *TokenIndexStats  `json:"token_stats,omitempty"`
 	AttrKVStats *AttrKVIndexStats `json:"attr_kv_stats,omitempty"`
 	KVStats     *KVIndexStats     `json:"kv_stats,omitempty"`
+	JSONStats   *JSONIndexStats   `json:"json_stats,omitempty"`
 
 	// Analysis timestamp
 	AnalyzedAt time.Time `json:"analyzed_at"`

@@ -502,6 +502,10 @@ func matchesKeyValue(recAttrs chunk.Attributes, raw []byte, queryFilters []KeyVa
 			if found {
 				continue
 			}
+			// Check structural JSON paths.
+			if f.KeyPat == nil && matchJSONPathExists(raw, f.Key) {
+				continue
+			}
 			return false // Key not found in either location
 		} else if f.Key == "" {
 			// Value only: *=value pattern (any key has this value)
@@ -567,6 +571,10 @@ func matchesKeyValue(recAttrs chunk.Attributes, raw []byte, queryFilters []KeyVa
 			}
 
 			if found {
+				continue
+			}
+			// Check structural JSON paths.
+			if f.KeyPat == nil && f.ValuePat == nil && matchJSONPathValue(raw, f.Key, valLower) {
 				continue
 			}
 			return false // Not found in either location.
@@ -786,6 +794,22 @@ func applyKeyValueIndex(b *scannerBuilder, indexes index.IndexManager, chunkID c
 	kvKeyIdx, kvKeyStatus, kvKeyErr := indexes.OpenKVKeyIndex(chunkID)
 	kvValIdx, kvValStatus, kvValErr := indexes.OpenKVValueIndex(chunkID)
 
+	// JSON structural index
+	jsonPathIdx, jsonPathStatus, jsonPathErr := indexes.OpenJSONPathIndex(chunkID)
+	jsonPVIdx, jsonPVStatus, jsonPVErr := indexes.OpenJSONPVIndex(chunkID)
+	var jsonReader *index.JSONIndexReader
+	if jsonPathErr == nil || jsonPVErr == nil {
+		var pathEntries []index.JSONPathIndexEntry
+		var pvEntries []index.JSONPVIndexEntry
+		if jsonPathErr == nil {
+			pathEntries = jsonPathIdx.Entries()
+		}
+		if jsonPVErr == nil {
+			pvEntries = jsonPVIdx.Entries()
+		}
+		jsonReader = index.NewJSONIndexReader(chunkID, pathEntries, jsonPathStatus, pvEntries, jsonPVStatus)
+	}
+
 	// For each filter, union positions from both attr and kv indexes.
 	// Across filters, intersect positions.
 	for _, f := range filters {
@@ -812,6 +836,13 @@ func applyKeyValueIndex(b *scannerBuilder, indexes index.IndexManager, chunkID c
 					filterPositions = unionPositions(filterPositions, positions)
 				}
 			}
+			// JSON path index: key existence (dots become null-byte separators)
+			if jsonReader != nil {
+				jsonPath := dotToNull(keyLower)
+				if positions, found := jsonReader.LookupPath(jsonPath); found {
+					filterPositions = unionPositions(filterPositions, positions)
+				}
+			}
 		} else if f.Key == "" {
 			// Value only: *=value pattern (any key has this value)
 			// Use value indexes
@@ -827,6 +858,7 @@ func applyKeyValueIndex(b *scannerBuilder, indexes index.IndexManager, chunkID c
 					filterPositions = unionPositions(filterPositions, positions)
 				}
 			}
+			// No JSON index for value-only queries (value without path context is ambiguous)
 		} else {
 			// Both key and value: exact key=value match
 			// Use KV indexes
@@ -839,6 +871,13 @@ func applyKeyValueIndex(b *scannerBuilder, indexes index.IndexManager, chunkID c
 			if kvErr == nil && kvStatus != index.KVCapped {
 				reader := index.NewKVIndexReader(chunkID, kvIdx.Entries())
 				if positions, found := reader.Lookup(keyLower, valLower); found {
+					filterPositions = unionPositions(filterPositions, positions)
+				}
+			}
+			// JSON path-value index (dots become null-byte separators)
+			if jsonReader != nil && jsonReader.PVStatus() != index.JSONCapped {
+				jsonPath := dotToNull(keyLower)
+				if positions, found := jsonReader.LookupPathValue(jsonPath, valLower); found {
 					filterPositions = unionPositions(filterPositions, positions)
 				}
 			}
@@ -1012,10 +1051,17 @@ func matchesSingleKV(attrs chunk.Attributes, raw []byte, pred *querylang.Predica
 		}
 	}
 
-	// Check message body.
+	// Check message body (flat key=value extraction).
 	pairs := tokenizer.CombinedExtract(raw, kvExtractors)
 	for _, kv := range pairs {
 		if matchStringOrPatLower(kv.Key, keyLower, pred.KeyPat) && matchStringOrPatLower(strings.ToLower(kv.Value), valueLower, pred.ValuePat) {
+			return true
+		}
+	}
+
+	// Check structural JSON paths (e.g. "level" or "kubernetes.namespace").
+	if pred.KeyPat == nil && pred.ValuePat == nil {
+		if matchJSONPathValue(raw, pred.Key, valueLower) {
 			return true
 		}
 	}
@@ -1039,6 +1085,13 @@ func matchesKeyExists(attrs chunk.Attributes, raw []byte, pred *querylang.Predic
 	pairs := tokenizer.CombinedExtract(raw, kvExtractors)
 	for _, kv := range pairs {
 		if matchStringOrPatLower(kv.Key, keyLower, pred.KeyPat) {
+			return true
+		}
+	}
+
+	// Check structural JSON paths (e.g. "level" or "kubernetes.namespace").
+	if pred.KeyPat == nil {
+		if matchJSONPathExists(raw, pred.Key) {
 			return true
 		}
 	}
@@ -1098,4 +1151,44 @@ func ingestTimeFilter(start, end time.Time) recordFilter {
 		}
 		return true
 	}
+}
+
+// dotToNull converts dots in a key to null bytes for JSON path lookup.
+// e.g. "kubernetes.namespace" → "kubernetes\x00namespace"
+func dotToNull(key string) string {
+	return strings.ReplaceAll(key, ".", "\x00")
+}
+
+// matchJSONPathValue walks JSON in the raw record and checks if any path
+// matching the dotted key contains the expected value.
+// The key uses dots as path separators (e.g. "kubernetes.namespace").
+func matchJSONPathValue(raw []byte, key, valueLower string) bool {
+	pathTarget := dotToNull(strings.ToLower(key))
+	found := false
+	tokenizer.WalkJSON(raw, nil, func(path, value []byte) {
+		if found {
+			return
+		}
+		if strings.ToLower(string(path)) == pathTarget &&
+			strings.ToLower(string(value)) == valueLower {
+			found = true
+		}
+	})
+	return found
+}
+
+// matchJSONPathExists walks JSON in the raw record and checks if any path
+// matches the dotted key.
+func matchJSONPathExists(raw []byte, key string) bool {
+	pathTarget := dotToNull(strings.ToLower(key))
+	found := false
+	tokenizer.WalkJSON(raw, func(path []byte) {
+		if found {
+			return
+		}
+		if strings.ToLower(string(path)) == pathTarget {
+			found = true
+		}
+	}, nil)
+	return found
 }

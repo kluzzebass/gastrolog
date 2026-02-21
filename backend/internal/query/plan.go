@@ -583,6 +583,48 @@ func (e *Engine) lookupKVIndex(f KeyValueFilter, chunkID chunk.ChunkID, im index
 		}
 	}
 
+	// JSON structural index (dots in key → null-byte path separators).
+	jsonPathIdx, jsonPathStatus, jsonPathErr := im.OpenJSONPathIndex(chunkID)
+	jsonPVIdx, jsonPVStatus, jsonPVErr := im.OpenJSONPVIndex(chunkID)
+	if jsonPathErr == nil || jsonPVErr == nil {
+		var pathEntries []index.JSONPathIndexEntry
+		var pvEntries []index.JSONPVIndexEntry
+		if jsonPathErr == nil {
+			pathEntries = jsonPathIdx.Entries()
+		}
+		if jsonPVErr == nil {
+			pvEntries = jsonPVIdx.Entries()
+		}
+		jsonReader := index.NewJSONIndexReader(chunkID, pathEntries, jsonPathStatus, pvEntries, jsonPVStatus)
+
+		if f.Key != "" && f.Value == "" {
+			// Key exists: path lookup.
+			result.available = true
+			jsonPath := dotToNull(keyLower)
+			if pos, found := jsonReader.LookupPath(jsonPath); found {
+				result.positions = unionPositions(result.positions, pos)
+				detailParts = append(detailParts, fmt.Sprintf("msg_json=%d", len(pos)))
+			} else {
+				detailParts = append(detailParts, "msg_json=0")
+			}
+		} else if f.Key != "" && f.Value != "" {
+			// Key=value: path-value lookup.
+			if jsonReader.PVStatus() == index.JSONCapped {
+				detailParts = append(detailParts, "msg_json=capped")
+			} else {
+				result.available = true
+				jsonPath := dotToNull(keyLower)
+				if pos, found := jsonReader.LookupPathValue(jsonPath, valLower); found {
+					result.positions = unionPositions(result.positions, pos)
+					detailParts = append(detailParts, fmt.Sprintf("msg_json=%d", len(pos)))
+				} else {
+					detailParts = append(detailParts, "msg_json=0")
+				}
+			}
+		}
+		// No JSON index for value-only queries.
+	}
+
 	result.details = strings.Join(detailParts, " ")
 
 	if !result.available {

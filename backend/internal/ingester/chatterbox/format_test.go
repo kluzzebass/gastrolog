@@ -269,17 +269,20 @@ func TestJSONFormat_AllVariants(t *testing.T) {
 	pools := newTestPools()
 	format := NewJSONFormat(pools)
 
-	// Use enough iterations to hit all variants (5 variants, each has ~20% chance).
-	// With 500 iterations, extremely unlikely to miss any variant.
+	// Use enough iterations to hit all variants (8 variants, each has ~12.5% chance).
+	// With 1000 iterations, extremely unlikely to miss any variant.
 	variantFields := map[string]bool{
-		"method":      false, // HTTP metrics
-		"error":       false, // Error details
-		"event_type":  false, // Business event
-		"cpu_percent": false, // System metrics
-		"trace_id":    false, // Distributed tracing
+		"request":    false, // HTTP request with nested headers/response
+		"error":      false, // Error with nested context
+		"event_type": false, // Business event with nested entity
+		"resources":  false, // System metrics with nested breakdown
+		"spans":      false, // Distributed trace with spans array
+		"kubernetes": false, // Kubernetes event with deep nesting
+		"query":      false, // Database query with nested explain
+		"pipeline":   false, // Pipeline with array of stages
 	}
 
-	for i := range 500 {
+	for i := range 1000 {
 		rng := rand.New(rand.NewPCG(uint64(i), uint64(i+1)))
 		raw, _, _ := format.Generate(rng)
 

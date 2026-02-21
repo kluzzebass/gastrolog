@@ -63,6 +63,7 @@ func (a *Analyzer) AnalyzeChunk(chunkID chunk.ChunkID) (*ChunkAnalysis, error) {
 	a.analyzeTokenIndex(analysis)
 	a.analyzeAttrKVIndex(analysis)
 	a.analyzeKVIndex(analysis)
+	a.analyzeJSONIndex(analysis)
 
 	return analysis, nil
 }
@@ -465,6 +466,72 @@ func (a *Analyzer) analyzeKVIndex(ca *ChunkAnalysis) {
 		Status:         overallStatus,
 		Reason:         reason,
 	})
+}
+
+func (a *Analyzer) analyzeJSONIndex(ca *ChunkAnalysis) {
+	pathIdx, pathStatus, pathErr := a.im.OpenJSONPathIndex(ca.ChunkID)
+	pvIdx, pvStatus, pvErr := a.im.OpenJSONPVIndex(ca.ChunkID)
+
+	// If both fail, report disabled
+	if pathErr != nil && pvErr != nil {
+		ca.Summaries = append(ca.Summaries, IndexSummary{
+			IndexType: IndexTypeJSON,
+			Status:    statusFromError(pathErr),
+			Error:     errorString(pathErr),
+		})
+		return
+	}
+
+	stats := &JSONIndexStats{
+		PathStatus: jsonStatusToIndexStatus(pathStatus, pathErr),
+		PVStatus:   jsonStatusToIndexStatus(pvStatus, pvErr),
+	}
+	var totalBytes int64
+
+	if pathErr == nil {
+		entries := pathIdx.Entries()
+		stats.UniquePaths = int64(len(entries))
+		for _, e := range entries {
+			totalBytes += int64(len(e.Path)) + int64(len(e.Positions))*4
+		}
+	}
+
+	if pvErr == nil {
+		entries := pvIdx.Entries()
+		stats.UniquePVPairs = int64(len(entries))
+		for _, e := range entries {
+			totalBytes += int64(len(e.Path)) + int64(len(e.Value)) + int64(len(e.Positions))*4
+		}
+	}
+
+	stats.BudgetExhausted = pathStatus == index.JSONCapped || pvStatus == index.JSONCapped
+	stats.IndexBytes = totalBytes
+
+	overallStatus := StatusEnabled
+	var reason PartialReason
+	if stats.BudgetExhausted {
+		overallStatus = StatusPartial
+		reason = ReasonBudgetExhausted
+	}
+
+	ca.JSONStats = stats
+	ca.Summaries = append(ca.Summaries, IndexSummary{
+		IndexType:      IndexTypeJSON,
+		BytesUsed:      stats.IndexBytes,
+		PercentOfChunk: safePercent(stats.IndexBytes, ca.ChunkBytes),
+		Status:         overallStatus,
+		Reason:         reason,
+	})
+}
+
+func jsonStatusToIndexStatus(status index.JSONIndexStatus, err error) IndexStatus {
+	if err != nil {
+		return statusFromError(err)
+	}
+	if status == index.JSONCapped {
+		return StatusPartial
+	}
+	return StatusEnabled
 }
 
 // Helper functions

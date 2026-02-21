@@ -13,6 +13,7 @@ import (
 	"gastrolog/internal/index"
 	indexmem "gastrolog/internal/index/memory"
 	memattr "gastrolog/internal/index/memory/attr"
+	memjson "gastrolog/internal/index/memory/json"
 	memkv "gastrolog/internal/index/memory/kv"
 	memtoken "gastrolog/internal/index/memory/token"
 	"gastrolog/internal/query"
@@ -68,11 +69,13 @@ func newIndexManager(cm chunk.ChunkManager) index.IndexManager {
 	tokIdx := memtoken.NewIndexer(cm)
 	attrIdx := memattr.NewIndexer(cm)
 	kvIdx := memkv.NewIndexer(cm)
-	return indexmem.NewManager(
-		[]index.Indexer{tokIdx, attrIdx, kvIdx},
+	jsonIdx := memjson.NewIndexer(cm)
+	return indexmem.NewManagerWithJSON(
+		[]index.Indexer{tokIdx, attrIdx, kvIdx, jsonIdx},
 		tokIdx,
 		attrIdx,
 		kvIdx,
+		jsonIdx,
 		nil,
 	)
 }
