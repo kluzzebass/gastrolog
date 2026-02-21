@@ -104,25 +104,10 @@ function ToastOverlay({
   );
 }
 
-const LEVEL_STYLES: Record<
-  ToastLevel,
-  { bg: string; border: string; text: string }
-> = {
-  error: {
-    bg: "bg-severity-error/10",
-    border: "border-severity-error/30",
-    text: "text-severity-error",
-  },
-  warn: {
-    bg: "bg-severity-warn/10",
-    border: "border-severity-warn/30",
-    text: "text-severity-warn",
-  },
-  info: {
-    bg: "bg-severity-info/10",
-    border: "border-severity-info/30",
-    text: "text-severity-info",
-  },
+const LEVEL_STYLES: Record<ToastLevel, string> = {
+  error: "border-l-severity-error",
+  warn: "border-l-severity-warn",
+  info: "border-l-severity-info",
 };
 
 function ToastItem({
@@ -133,7 +118,7 @@ function ToastItem({
   onDismiss: (id: string) => void;
 }>) {
   const [visible, setVisible] = useState(false);
-  const s = LEVEL_STYLES[toast.level];
+  const accent = LEVEL_STYLES[toast.level];
 
   // Animate in on mount.
   useEffect(() => {
@@ -143,7 +128,7 @@ function ToastItem({
 
   return (
     <div
-      className={`flex items-start gap-2 px-3 py-2.5 rounded border shadow-lg backdrop-blur-sm text-[0.85em] transition-all duration-200 ${s.bg} ${s.border} ${s.text} ${
+      className={`flex items-start gap-2 px-3 py-2.5 rounded border-l-3 shadow-lg bg-ink-raised text-text-bright text-[0.85em] transition-all duration-200 ${accent} ${
         visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
       }`}
     >
@@ -151,7 +136,7 @@ function ToastItem({
       <button
         onClick={() => onDismiss(toast.id)}
         aria-label="Dismiss"
-        className="shrink-0 w-5 h-5 flex items-center justify-center rounded opacity-60 hover:opacity-100 transition-opacity"
+        className="shrink-0 w-5 h-5 flex items-center justify-center rounded text-text-muted hover:text-text-bright transition-colors"
       >
         &times;
       </button>
