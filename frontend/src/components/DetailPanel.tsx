@@ -371,10 +371,10 @@ function DetailRow({
 
   return (
     <div
-      className={`flex py-1 border-b last:border-b-0 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
+      className={`flex items-baseline gap-3 py-1 border-b last:border-b-0 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
     >
       <dt
-        className={`w-24 shrink-0 text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+        className={`w-28 shrink-0 text-[0.8em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
       >
         {label}
       </dt>
