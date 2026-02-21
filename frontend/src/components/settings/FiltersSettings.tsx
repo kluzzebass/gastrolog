@@ -10,6 +10,9 @@ import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput } from "./FormField";
 import { PrimaryButton } from "./Buttons";
 import { UsedByStatus, refsFor } from "./UsedByStatus";
+import type { SettingsTab } from "./SettingsDialog";
+
+type NavigateTo = (tab: SettingsTab, entityName?: string) => void;
 
 function FilterDescription({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
@@ -46,7 +49,7 @@ function FilterDescription({ dark }: Readonly<{ dark: boolean }>) {
   );
 }
 
-export function FiltersSettings({ dark }: Readonly<{ dark: boolean }>) {
+export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean; onNavigateTo?: NavigateTo }>) {
   const _c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putFilter = usePutFilter();
@@ -176,7 +179,7 @@ export function FiltersSettings({ dark }: Readonly<{ dark: boolean }>) {
                 {putFilter.isPending ? "Saving..." : "Save"}
               </PrimaryButton>
             }
-            status={<UsedByStatus dark={dark} refs={refs} />}
+            status={<UsedByStatus dark={dark} refs={refs} onNavigate={onNavigateTo ? (name) => onNavigateTo("stores", name) : undefined} />}
           >
             <div className="flex flex-col gap-3">
               <FormField label="Name" dark={dark}>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import {
   useConfig,
@@ -84,7 +84,7 @@ function JobProgress({
   );
 }
 
-export function StoresSettings({ dark }: Readonly<{ dark: boolean }>) {
+export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: Readonly<{ dark: boolean; expandTarget?: string | null; onExpandTargetConsumed?: () => void }>) {
   const c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putStore = usePutStore();
@@ -122,6 +122,16 @@ export function StoresSettings({ dark }: Readonly<{ dark: boolean }>) {
   const policies = config?.rotationPolicies ?? [];
   const retentionPolicies = config?.retentionPolicies ?? [];
   const filters = config?.filters ?? [];
+
+  // Auto-expand a store when navigated to from another settings tab.
+  useEffect(() => {
+    if (!expandTarget || stores.length === 0) return;
+    const match = stores.find((s) => (s.name || s.id) === expandTarget);
+    if (match) {
+      setExpanded(match.id);
+    }
+    onExpandTargetConsumed?.();
+  }, [expandTarget, stores, onExpandTargetConsumed]);
 
   const filterOptions = [
     { value: "", label: "(none)" },

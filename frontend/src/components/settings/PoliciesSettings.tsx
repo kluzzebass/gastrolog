@@ -14,6 +14,9 @@ import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, NumberInput } from "./FormField";
 import { PrimaryButton } from "./Buttons";
 import { UsedByStatus, refsFor } from "./UsedByStatus";
+import type { SettingsTab } from "./SettingsDialog";
+
+type NavigateTo = (tab: SettingsTab, entityName?: string) => void;
 import { validateCron, describeCron } from "../../utils/cron";
 import {
   formatBytesBigint as formatBytes,
@@ -125,7 +128,7 @@ function CronField({
   );
 }
 
-export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
+export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean; onNavigateTo?: NavigateTo }>) {
   const _c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putPolicy = usePutRotationPolicy();
@@ -310,7 +313,7 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
                 {putPolicy.isPending ? "Saving..." : "Save"}
               </PrimaryButton>
             }
-            status={<UsedByStatus dark={dark} refs={refs} />}
+            status={<UsedByStatus dark={dark} refs={refs} onNavigate={onNavigateTo ? (name) => onNavigateTo("stores", name) : undefined} />}
           >
             <div className="flex flex-col gap-3">
               <FormField label="Name" dark={dark}>

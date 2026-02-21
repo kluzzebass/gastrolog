@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { Dialog } from "../Dialog";
 import {
@@ -100,6 +100,14 @@ export function SettingsDialog({
 }: Readonly<SettingsDialogProps>) {
   const c = useThemeClass(dark);
   const tabs = allTabs.filter((t) => !t.adminOnly || isAdmin);
+  const [expandTarget, setExpandTarget] = useState<string | null>(null);
+
+  const navigateTo = useCallback((targetTab: SettingsTab, entityName?: string) => {
+    onTabChange(targetTab);
+    setExpandTarget(entityName ?? null);
+  }, [onTabChange]);
+
+  const clearExpandTarget = useCallback(() => setExpandTarget(null), []);
 
   return (
     <Dialog onClose={onClose} ariaLabel="Settings" dark={dark}>
@@ -136,10 +144,10 @@ export function SettingsDialog({
           {tab === "certificates" && <CertificatesSettings dark={dark} />}
           {tab === "users" && <UsersSettings dark={dark} noAuth={noAuth} />}
           {tab === "ingesters" && <IngestersSettings dark={dark} />}
-          {tab === "filters" && <FiltersSettings dark={dark} />}
-          {tab === "policies" && <PoliciesSettings dark={dark} />}
-          {tab === "retention" && <RetentionPoliciesSettings dark={dark} />}
-          {tab === "stores" && <StoresSettings dark={dark} />}
+          {tab === "filters" && <FiltersSettings dark={dark} onNavigateTo={navigateTo} />}
+          {tab === "policies" && <PoliciesSettings dark={dark} onNavigateTo={navigateTo} />}
+          {tab === "retention" && <RetentionPoliciesSettings dark={dark} onNavigateTo={navigateTo} />}
+          {tab === "stores" && <StoresSettings dark={dark} expandTarget={expandTarget} onExpandTargetConsumed={clearExpandTarget} />}
         </div>
 
         <button
