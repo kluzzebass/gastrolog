@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   useSearch as useRouterSearch,
   useNavigate,
@@ -50,22 +50,12 @@ import { tokenize } from "../queryTokenizer";
 import { useAutocomplete } from "../hooks/useAutocomplete";
 import { HeaderBar } from "./HeaderBar";
 
-// Code-split dialogs: chunks are fetched eagerly (start loading at module
-// parse time) so they're cached before the user clicks.  React.lazy gives
-// us Suspense integration for free.
-const explainImport = import("./ExplainPanel");
-const settingsImport = import("./settings/SettingsDialog");
-const inspectorImport = import("./inspector/InspectorDialog");
-const changePasswordImport = import("./ChangePasswordDialog");
-const preferencesImport = import("./PreferencesDialog");
-const helpImport = import("./HelpDialog");
-
-const ExplainPanel = lazy(() => explainImport.then((m) => ({ default: m.ExplainPanel })));
-const SettingsDialog = lazy(() => settingsImport.then((m) => ({ default: m.SettingsDialog })));
-const InspectorDialog = lazy(() => inspectorImport.then((m) => ({ default: m.InspectorDialog })));
-const ChangePasswordDialog = lazy(() => changePasswordImport.then((m) => ({ default: m.ChangePasswordDialog })));
-const PreferencesDialog = lazy(() => preferencesImport.then((m) => ({ default: m.PreferencesDialog })));
-const HelpDialog = lazy(() => helpImport.then((m) => ({ default: m.HelpDialog })));
+import { ExplainPanel } from "./ExplainPanel";
+import { SettingsDialog } from "./settings/SettingsDialog";
+import { InspectorDialog } from "./inspector/InspectorDialog";
+import { ChangePasswordDialog } from "./ChangePasswordDialog";
+import { PreferencesDialog } from "./PreferencesDialog";
+import { HelpDialog } from "./HelpDialog";
 import { HelpProvider } from "../hooks/useHelp";
 import { ResultsToolbar } from "./ResultsToolbar";
 import { QueryBar } from "./QueryBar";
@@ -724,7 +714,6 @@ export function SearchView() {
                   Run a query to see the execution plan.
                 </div>
               ) : (
-                <Suspense fallback={null}>
                   <ExplainPanel
                     chunks={explainChunks}
                     direction={explainDirection}
@@ -732,14 +721,12 @@ export function SearchView() {
                     expression={explainExpression}
                     dark={dark}
                   />
-                </Suspense>
               )}
             </Dialog>
           )}
 
           {/* Settings Dialog */}
           {showPreferences && (
-            <Suspense fallback={null}>
               <PreferencesDialog
                 dark={dark}
                 theme={theme}
@@ -750,11 +737,9 @@ export function SearchView() {
                 setPalette={setPalette}
                 onClose={() => setShowPreferences(false)}
               />
-            </Suspense>
           )}
 
           {showChangePassword && currentUser && (
-            <Suspense fallback={null}>
               <ChangePasswordDialog
                 username={currentUser.username}
                 dark={dark}
@@ -764,11 +749,9 @@ export function SearchView() {
                   addToast("Password changed successfully", "info");
                 }}
               />
-            </Suspense>
           )}
 
           {settingsParam && (
-            <Suspense fallback={null}>
               <SettingsDialog
                 dark={dark}
                 tab={settingsParam as any}
@@ -777,22 +760,18 @@ export function SearchView() {
                 isAdmin={currentUser?.role === "admin" || getToken() === "no-auth"}
                 noAuth={getToken() === "no-auth"}
               />
-            </Suspense>
           )}
 
           {inspectorParam && (
-            <Suspense fallback={null}>
               <InspectorDialog
                 dark={dark}
                 tab={inspectorParam as any}
                 onTabChange={(tab) => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: tab }) } as any)}
                 onClose={() => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: undefined }) } as any)}
               />
-            </Suspense>
           )}
 
           {helpParam && (
-            <Suspense fallback={null}>
               <HelpDialog
                 dark={dark}
                 topicId={helpParam}
@@ -800,7 +779,6 @@ export function SearchView() {
                 onNavigate={(id) => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, help: id }) } as any)}
                 onOpenSettings={(tab) => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, help: undefined, settings: tab }) } as any)}
               />
-            </Suspense>
           )}
 
           {/* Histogram — server-side for search, client-side for follow */}
