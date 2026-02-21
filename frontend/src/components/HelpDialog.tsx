@@ -1,9 +1,9 @@
-import { isValidElement, useEffect, useRef, useState } from "react";
+import { isValidElement, useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Dialog } from "./Dialog";
 import { useThemeClass } from "../hooks/useThemeClass";
-import { helpTopics, findTopic } from "../help/topics";
+import { helpTopics, findTopic, resolveTopicId, allTopics } from "../help/topics";
 import type { HelpTopic } from "../help/topics";
 import { MermaidDiagram } from "./Mermaid";
 import { getHelpIcon } from "../help/icons";
@@ -22,9 +22,29 @@ function isWithin(topic: HelpTopic, id: string): boolean {
   return topic.children?.some((c) => isWithin(c, id)) ?? false;
 }
 
+/** Strip markdown syntax to plain text for search indexing. */
+function stripMarkdown(md: string): string {
+  return md
+    .replace(/```[\s\S]*?```/g, " ")       // fenced code blocks
+    .replace(/`[^`]+`/g, " ")              // inline code
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1") // links/images → text
+    .replace(/#{1,6}\s+/g, " ")            // headings
+    .replace(/[*_~|>-]+/g, " ")            // emphasis, tables, blockquotes
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/** Pre-built search index entry. */
+interface SearchEntry {
+  topic: HelpTopic;
+  titleLower: string;
+  plainText: string;
+}
+
 export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings }: Readonly<HelpDialogProps>) {
   const c = useThemeClass(dark);
-  const activeId = topicId ?? helpTopics[0]?.id ?? "";
+  const activeId = resolveTopicId(topicId ?? helpTopics[0]?.id ?? "");
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     // Auto-expand the branch containing the initial topic
     const initial = new Set<string>();
@@ -35,6 +55,27 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
     }
     return initial;
   });
+
+  const [search, setSearch] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // Build search index once
+  const searchIndex = useMemo<SearchEntry[]>(() =>
+    allTopics().map((t) => ({
+      topic: t,
+      titleLower: t.title.toLowerCase(),
+      plainText: stripMarkdown(t.content),
+    })),
+  []);
+
+  const searchResults = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return null;
+    const terms = q.split(/\s+/);
+    return searchIndex.filter((entry) =>
+      terms.every((term) => entry.titleLower.includes(term) || entry.plainText.includes(term)),
+    );
+  }, [search, searchIndex]);
 
   // Auto-expand when navigating to a topic inside a collapsed parent
   const [prevActiveId, setPrevActiveId] = useState(activeId);
@@ -75,6 +116,7 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
 
   function selectTopic(t: HelpTopic) {
     onNavigate(t.id);
+    setSearch("");
     // Auto-expand when selecting a parent topic
     if (t.children && !expanded.has(t.id)) {
       setExpanded((prev) => new Set(prev).add(t.id));
@@ -90,48 +132,70 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
     });
   }
 
-  function renderTopic(t: HelpTopic, depth: number) {
+  function renderTopic(t: HelpTopic, depth: number, index: number) {
     const isActive = activeId === t.id;
     const hasChildren = !!t.children;
     const isExpanded = hasChildren && expanded.has(t.id);
+    const isTopLevel = depth === 0;
 
     return (
-      <div key={t.id}>
+      <div key={t.id} className={isTopLevel && index > 0 ? "mt-1.5" : undefined}>
         <button
           onClick={() => selectTopic(t)}
-          className={`flex items-center w-full text-left rounded text-[0.85em] transition-colors mb-0.5 ${
+          className={`flex items-center w-full text-left rounded transition-colors mb-0.5 ${
+            isTopLevel ? "text-[0.85em] font-medium" : "text-[0.8em]"
+          } ${
             isActive
-              ? "bg-copper/15 text-copper font-medium"
-              : c(
-                  "text-text-muted hover:text-text-bright hover:bg-ink-hover",
-                  "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
-                )
+              ? "bg-copper/15 text-copper"
+              : isTopLevel
+                ? c("text-text-bright hover:bg-ink-hover", "text-light-text-bright hover:bg-light-hover")
+                : c(
+                    "text-text-muted hover:text-text-bright hover:bg-ink-hover",
+                    "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
+                  )
           }`}
           style={{ paddingLeft: `${0.5 + depth * 0.75}rem`, paddingRight: '0.5rem', paddingTop: '0.375rem', paddingBottom: '0.375rem' }}
         >
-          {hasChildren && (
-            <svg
-              onClick={(e) => { e.stopPropagation(); toggleExpanded(t.id); }}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); toggleExpanded(t.id); } }}
-              role="button"
-              tabIndex={0}
-              aria-label={isExpanded ? "Collapse section" : "Expand section"}
-              className={`w-3 h-3 mr-1 shrink-0 transition-transform cursor-pointer ${isExpanded ? "rotate-90" : ""}`}
-              viewBox="0 0 12 12"
-              fill="currentColor"
-            >
-              <path d="M4.5 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          )}
+          <span className="w-3 h-3 mr-1 shrink-0 flex items-center justify-center">
+            {hasChildren && (
+              <svg
+                onClick={(e) => { e.stopPropagation(); toggleExpanded(t.id); }}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); toggleExpanded(t.id); } }}
+                role="button"
+                tabIndex={0}
+                aria-label={isExpanded ? "Collapse section" : "Expand section"}
+                className={`w-3 h-3 transition-transform cursor-pointer ${isExpanded ? "rotate-90" : ""}`}
+                viewBox="0 0 12 12"
+                fill="currentColor"
+              >
+                <path d="M4.5 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
+          </span>
           {t.title}
         </button>
         {isExpanded && (
           <div>
-            {t.children!.map((child) => renderTopic(child, depth + 1))}
+            {t.children!.map((child, i) => renderTopic(child, depth + 1, i))}
           </div>
         )}
       </div>
     );
+  }
+
+  /** Extract a short snippet around the first match in the content. */
+  function getSnippet(entry: SearchEntry): string | null {
+    const q = search.trim().toLowerCase();
+    if (!q || entry.titleLower.includes(q)) return null;
+    const terms = q.split(/\s+/);
+    const idx = terms.reduce((best, term) => {
+      const i = entry.plainText.indexOf(term);
+      return i >= 0 && (best < 0 || i < best) ? i : best;
+    }, -1);
+    if (idx < 0) return null;
+    const start = Math.max(0, idx - 30);
+    const end = Math.min(entry.plainText.length, idx + 60);
+    return (start > 0 ? "..." : "") + entry.plainText.slice(start, end) + (end < entry.plainText.length ? "..." : "");
   }
 
   return (
@@ -139,14 +203,90 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
       <div className="flex h-full overflow-hidden">
         {/* Sidebar */}
         <nav
-          className={`w-48 shrink-0 border-r overflow-y-auto app-scroll p-3 ${c("border-ink-border", "border-light-border")}`}
+          className={`w-48 shrink-0 border-r overflow-y-auto app-scroll flex flex-col ${c("border-ink-border", "border-light-border")}`}
         >
-          <h2
-            className={`text-[0.75em] uppercase tracking-wider font-medium mb-3 px-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
-          >
-            Topics
-          </h2>
-          {helpTopics.map((t) => renderTopic(t, 0))}
+          {/* Search */}
+          <div className="p-3 pb-0">
+            <div className="relative mb-3">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className={`absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none ${c("text-text-ghost", "text-light-text-ghost")}`}
+              >
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              <input
+                ref={searchRef}
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search help..."
+                className={`w-full pl-7 pr-2 py-1.5 text-[0.8em] rounded border focus:outline-none focus:border-copper ${c(
+                  "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost",
+                  "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost",
+                )}`}
+              />
+              {search && (
+                <button
+                  onClick={() => { setSearch(""); searchRef.current?.focus(); }}
+                  className={`absolute right-1.5 top-1/2 -translate-y-1/2 w-4 h-4 flex items-center justify-center rounded-sm text-[0.7em] leading-none ${c("text-text-ghost hover:text-text-muted", "text-light-text-ghost hover:text-light-text-muted")}`}
+                  aria-label="Clear search"
+                >
+                  &times;
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Topic tree or search results */}
+          <div className="flex-1 overflow-y-auto app-scroll px-3 pb-3">
+            {searchResults ? (
+              searchResults.length > 0 ? (
+                searchResults.map((entry) => {
+                  const snippet = getSnippet(entry);
+                  return (
+                    <button
+                      key={entry.topic.id}
+                      onClick={() => selectTopic(entry.topic)}
+                      className={`flex flex-col w-full text-left rounded text-[0.85em] transition-colors mb-0.5 px-2 py-1.5 ${
+                        activeId === entry.topic.id
+                          ? "bg-copper/15 text-copper font-medium"
+                          : c(
+                              "text-text-muted hover:text-text-bright hover:bg-ink-hover",
+                              "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
+                            )
+                      }`}
+                    >
+                      <span>{entry.topic.title}</span>
+                      {snippet && (
+                        <span className={`text-[0.8em] truncate ${c("text-text-ghost", "text-light-text-ghost")}`}>
+                          {snippet}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })
+              ) : (
+                <p className={`text-[0.8em] px-2 py-1 ${c("text-text-ghost", "text-light-text-ghost")}`}>
+                  No results
+                </p>
+              )
+            ) : (
+              <>
+                <h2
+                  className={`text-[0.75em] uppercase tracking-wider font-medium mb-2 px-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
+                >
+                  Topics
+                </h2>
+                {helpTopics.map((t, i) => renderTopic(t, 0, i))}
+              </>
+            )}
+          </div>
         </nav>
 
         {/* Content */}

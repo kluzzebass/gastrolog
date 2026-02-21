@@ -9,27 +9,26 @@ import ingesterChatterbox from './ingester-chatterbox.md?raw';
 import digesters from './digesters.md?raw';
 import digesterLevel from './digester-level.md?raw';
 import digesterTimestamp from './digester-timestamp.md?raw';
+import routing from './routing.md?raw';
 import storage from './storage.md?raw';
 import storageFile from './storage-file.md?raw';
 import storageMemory from './storage-memory.md?raw';
+import policyRotation from './policy-rotation.md?raw';
+import policyRetention from './policy-retention.md?raw';
 import indexers from './indexers.md?raw';
 import queryEngine from './query-engine.md?raw';
 import queryLanguage from './query-language.md?raw';
 import explain from './explain.md?raw';
 import savedQueries from './saved-queries.md?raw';
+import security from './security.md?raw';
+import userManagement from './user-management.md?raw';
+import certificates from './certificates.md?raw';
 import inspector from './inspector.md?raw';
 import inspectorStores from './inspector-stores.md?raw';
 import inspectorIngesters from './inspector-ingesters.md?raw';
 import inspectorJobs from './inspector-jobs.md?raw';
-import settingsOverview from './settings.md?raw';
 import serviceSettings from './service-settings.md?raw';
-import ingesters from './ingesters.md?raw';
-import routing from './routing.md?raw';
-import policyRotation from './policy-rotation.md?raw';
-import policyRetention from './policy-retention.md?raw';
-import storageEngines from './storage-engines.md?raw';
-import certificates from './certificates.md?raw';
-import userManagement from './user-management.md?raw';
+import settingsOverview from './settings.md?raw';
 import recipes from './recipes.md?raw';
 import recipeDockerMtls from './recipe-docker-mtls.md?raw';
 import recipeRsyslog from './recipe-rsyslog.md?raw';
@@ -44,6 +43,8 @@ export interface HelpTopic {
   children?: HelpTopic[];
 }
 
+// Topics ordered to follow the data flow through the system:
+// Ingest → Digest → Route → Store → Index → Search
 export const helpTopics: HelpTopic[] = [
   { id: 'general-concepts', title: 'General Concepts', content: generalConcepts },
   {
@@ -64,11 +65,14 @@ export const helpTopics: HelpTopic[] = [
       { id: 'digester-timestamp', title: 'Timestamp', content: digesterTimestamp },
     ],
   },
+  { id: 'routing', title: 'Routing', content: routing },
   {
     id: 'storage', title: 'Storage', content: storage,
     children: [
       { id: 'storage-file', title: 'File Store', content: storageFile },
       { id: 'storage-memory', title: 'Memory Store', content: storageMemory },
+      { id: 'policy-rotation', title: 'Rotation Policies', content: policyRotation },
+      { id: 'policy-retention', title: 'Retention Policies', content: policyRetention },
     ],
   },
   { id: 'indexers', title: 'Indexing', content: indexers },
@@ -78,6 +82,13 @@ export const helpTopics: HelpTopic[] = [
       { id: 'query-language', title: 'Query Language', content: queryLanguage },
       { id: 'saved-queries', title: 'Saved Queries', content: savedQueries },
       { id: 'explain', title: 'Explain', content: explain },
+    ],
+  },
+  {
+    id: 'security', title: 'Security', content: security,
+    children: [
+      { id: 'user-management', title: 'Users & Authentication', content: userManagement },
+      { id: 'certificates', title: 'Certificates', content: certificates },
     ],
   },
   {
@@ -92,13 +103,6 @@ export const helpTopics: HelpTopic[] = [
     id: 'settings', title: 'Settings', content: settingsOverview,
     children: [
       { id: 'service-settings', title: 'Service', content: serviceSettings },
-      { id: 'ingesters', title: 'Ingesters', content: ingesters },
-      { id: 'routing', title: 'Routing', content: routing },
-      { id: 'policy-rotation', title: 'Rotation', content: policyRotation },
-      { id: 'policy-retention', title: 'Retention', content: policyRetention },
-      { id: 'storage-engines', title: 'Stores', content: storageEngines },
-      { id: 'certificates', title: 'Certificates', content: certificates },
-      { id: 'user-management', title: 'Users & Security', content: userManagement },
     ],
   },
   {
@@ -113,8 +117,22 @@ export const helpTopics: HelpTopic[] = [
   { id: 'about', title: 'About', content: about },
 ];
 
+/**
+ * Aliases for topic IDs that were moved or merged. Settings components
+ * reference these via helpTopicId — the alias ensures they still resolve.
+ */
+const topicAliases: Record<string, string> = {
+  'ingesters': 'ingestion',
+  'storage-engines': 'storage',
+};
+
+/** Resolve an alias to its canonical topic ID. */
+export function resolveTopicId(id: string): string {
+  return topicAliases[id] ?? id;
+}
+
 export function findTopic(id: string): HelpTopic | undefined {
-  return findTopicIn(helpTopics, id);
+  return findTopicIn(helpTopics, resolveTopicId(id));
 }
 
 function findTopicIn(topics: HelpTopic[], id: string): HelpTopic | undefined {
@@ -126,4 +144,17 @@ function findTopicIn(topics: HelpTopic[], id: string): HelpTopic | undefined {
     }
   }
   return undefined;
+}
+
+/** Flatten all topics into a single array for search. */
+export function allTopics(): HelpTopic[] {
+  const result: HelpTopic[] = [];
+  function collect(topics: HelpTopic[]) {
+    for (const t of topics) {
+      result.push(t);
+      if (t.children) collect(t.children);
+    }
+  }
+  collect(helpTopics);
+  return result;
 }
