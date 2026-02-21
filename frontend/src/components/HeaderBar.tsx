@@ -40,7 +40,7 @@ export function HeaderBar({
 
   return (
     <header
-      className={`flex items-center justify-between px-7 py-3.5 border-b ${c("border-ink-border-subtle bg-ink", "border-light-border-subtle bg-light-raised")}`}
+      className={`flex items-center justify-between px-4 lg:px-7 py-3.5 border-b ${c("border-ink-border-subtle bg-ink", "border-light-border-subtle bg-light-raised")}`}
     >
       <div className="flex items-center gap-3">
         <img src="/favicon.svg" alt="GastroLog" className="w-6 h-6" />
@@ -51,9 +51,9 @@ export function HeaderBar({
         </h1>
       </div>
 
-      <div className="flex items-center gap-6">
+      <div className="flex items-center gap-3 lg:gap-6">
         {/* Stats ribbon */}
-        <div className="flex items-center gap-5">
+        <div className="hidden lg:flex items-center gap-5">
           <StatPill
             label="Records"
             value={statsLoading ? "..." : totalRecords.toLocaleString()}
@@ -99,7 +99,7 @@ export function HeaderBar({
           onClick={onShowHelp}
           aria-label="Help"
           title="Help"
-          className={`w-7 h-7 flex items-center justify-center rounded transition-all duration-200 ${c(
+          className={`w-9 h-9 flex items-center justify-center rounded transition-all duration-200 ${c(
             "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
             "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
           )}`}
@@ -123,7 +123,7 @@ export function HeaderBar({
           onClick={onShowInspector}
           aria-label="Inspector"
           title="Inspector"
-          className={`w-7 h-7 flex items-center justify-center rounded transition-all duration-500 ${c(
+          className={`w-9 h-9 flex items-center justify-center rounded transition-all duration-500 ${c(
             "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
             "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
           )} ${inspectorGlow ? "text-copper drop-shadow-[0_0_4px_var(--color-copper)]" : ""}`}
@@ -145,7 +145,7 @@ export function HeaderBar({
           onClick={onShowSettings}
           aria-label="Settings"
           title="Settings"
-          className={`w-7 h-7 flex items-center justify-center rounded transition-all duration-200 ${c(
+          className={`w-9 h-9 flex items-center justify-center rounded transition-all duration-200 ${c(
             "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
             "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
           )}`}
@@ -178,7 +178,7 @@ export function HeaderBar({
             onClick={onPreferences}
             aria-label="Preferences"
             title="Preferences"
-            className={`w-7 h-7 flex items-center justify-center rounded transition-all duration-200 ${c(
+            className={`w-9 h-9 flex items-center justify-center rounded transition-all duration-200 ${c(
               "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
               "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
             )}`}

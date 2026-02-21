@@ -3,14 +3,15 @@ import { renderHook, act } from "@testing-library/react";
 import { usePanelResize } from "./usePanelResize";
 
 describe("usePanelResize", () => {
-  test("returns handleResize and resizing=false initially", () => {
+  test("returns resizeProps and resizing=false initially", () => {
     let _width = 300;
     const { result } = renderHook(() =>
       usePanelResize((w) => (_width = w), 100, 500, "right"),
     );
 
     expect(result.current.resizing).toBe(false);
-    expect(typeof result.current.handleResize).toBe("function");
+    expect(typeof result.current.resizeProps.onMouseDown).toBe("function");
+    expect(typeof result.current.resizeProps.onTouchStart).toBe("function");
   });
 
   test("handleResize sets resizing to true", () => {
@@ -24,7 +25,7 @@ describe("usePanelResize", () => {
       const fakeEvent = {
         preventDefault: () => {},
       } as React.MouseEvent;
-      result.current.handleResize(fakeEvent);
+      result.current.resizeProps.onMouseDown(fakeEvent);
     });
 
     expect(result.current.resizing).toBe(true);
@@ -40,7 +41,7 @@ describe("usePanelResize", () => {
       const fakeEvent = {
         preventDefault: () => {},
       } as React.MouseEvent;
-      result.current.handleResize(fakeEvent);
+      result.current.resizeProps.onMouseDown(fakeEvent);
     });
     expect(result.current.resizing).toBe(true);
 
@@ -63,7 +64,7 @@ describe("usePanelResize", () => {
       const fakeEvent = {
         preventDefault: () => {},
       } as React.MouseEvent;
-      result.current.handleResize(fakeEvent);
+      result.current.resizeProps.onMouseDown(fakeEvent);
     });
 
     // Simulate mouse at x=700 → right direction = 1000 - 700 = 300
@@ -100,7 +101,7 @@ describe("usePanelResize", () => {
       const fakeEvent = {
         preventDefault: () => {},
       } as React.MouseEvent;
-      result.current.handleResize(fakeEvent);
+      result.current.resizeProps.onMouseDown(fakeEvent);
     });
 
     // Mouse at x=250 → left direction = 250

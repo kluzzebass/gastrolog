@@ -115,9 +115,10 @@ export function SearchView() {
   const { theme, setTheme, dark, highlightMode, setHighlightMode, palette, setPalette } = useThemeSync();
 
   const {
-    sidebarWidth, sidebarCollapsed, setSidebarCollapsed, handleSidebarResize,
+    isTablet,
+    sidebarWidth, sidebarCollapsed, setSidebarCollapsed, sidebarResizeProps,
     detailWidth, detailCollapsed, setDetailCollapsed, detailPinned, setDetailPinned,
-    handleDetailResize, resizing,
+    detailResizeProps, resizing,
   } = usePanelLayout();
 
   // Auto-expand detail panel and fetch context when a record is selected.
@@ -629,12 +630,16 @@ export function SearchView() {
 
       {/* ── Main Layout ── */}
       <div className="flex flex-1 overflow-hidden">
+        {isTablet && !sidebarCollapsed && (
+          <div className="fixed inset-0 bg-black/30 z-20" onClick={() => setSidebarCollapsed(true)} />
+        )}
         <SearchSidebar
           dark={dark}
+          isTablet={isTablet}
           sidebarWidth={sidebarWidth}
           sidebarCollapsed={sidebarCollapsed}
           setSidebarCollapsed={setSidebarCollapsed}
-          handleSidebarResize={handleSidebarResize}
+          sidebarResizeProps={sidebarResizeProps}
           resizing={resizing}
           rangeStart={rangeStart}
           rangeEnd={rangeEnd}
@@ -980,14 +985,18 @@ export function SearchView() {
           </div>
         </main>
 
+        {isTablet && !detailCollapsed && (
+          <div className="fixed inset-0 bg-black/30 z-20" onClick={() => setDetailCollapsed(true)} />
+        )}
         <DetailSidebar
           dark={dark}
+          isTablet={isTablet}
           detailWidth={detailWidth}
           detailCollapsed={detailCollapsed}
           setDetailCollapsed={setDetailCollapsed}
           detailPinned={detailPinned}
           setDetailPinned={setDetailPinned}
-          handleDetailResize={handleDetailResize}
+          detailResizeProps={detailResizeProps}
           resizing={resizing}
           selectedRecord={selectedRecord}
           onFieldSelect={handleFieldSelect}

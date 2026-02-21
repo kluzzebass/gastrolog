@@ -45,7 +45,7 @@ export function ResultsToolbar({
             onClick={onZoomOut}
             aria-label="Zoom out"
             title="Zoom out — double time span around selected record"
-            className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${c(
+            className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${c(
               "text-text-muted hover:text-copper hover:bg-ink-hover",
               "text-light-text-muted hover:text-copper hover:bg-light-hover",
             )}`}
@@ -77,7 +77,7 @@ export function ResultsToolbar({
               ? "Newest first (click for oldest first)"
               : "Oldest first (click for newest first)"
           }
-          className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${c(
+          className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${c(
             "text-text-muted hover:text-copper hover:bg-ink-hover",
             "text-light-text-muted hover:text-copper hover:bg-light-hover",
           )}`}

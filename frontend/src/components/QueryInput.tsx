@@ -93,7 +93,7 @@ export const QueryInput = forwardRef<HTMLTextAreaElement, QueryInputProps>(
                 : "var(--color-light-text-bright)",
             } as React.CSSProperties
           }
-          className={`query-input w-full pl-3 pr-14 py-2 text-[0.9em] leading-normal font-mono border rounded resize-none overflow-hidden focus:outline-none ${c(
+          className={`query-input w-full pl-3 pr-14 py-[8.5px] text-[0.9em] leading-normal font-mono border rounded resize-none overflow-hidden focus:outline-none ${c(
             "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost",
             "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost",
           )} selection:bg-copper/30`}
@@ -102,7 +102,7 @@ export const QueryInput = forwardRef<HTMLTextAreaElement, QueryInputProps>(
         {/* Highlight overlay — sits on top of textarea, passes clicks through */}
         <div
           aria-hidden
-          className="absolute inset-0 pl-3 pr-14 py-2 text-[0.9em] leading-normal font-mono whitespace-pre-wrap overflow-hidden pointer-events-none"
+          className="absolute inset-0 pl-3 pr-14 py-[8.5px] text-[0.9em] leading-normal font-mono whitespace-pre-wrap overflow-hidden pointer-events-none"
           style={{ borderWidth: 1, borderColor: "transparent" }}
         >
           {spans.map((span, i) => (

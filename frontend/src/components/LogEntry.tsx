@@ -78,7 +78,7 @@ export const LogEntry = forwardRef<
       ref={ref}
       onClick={onSelect}
       {...clickableProps(onSelect)}
-      className={`group grid grid-cols-[10ch_3.5ch_1fr_auto] px-5 py-1.5 border-b cursor-pointer transition-colors duration-100 ${
+      className={`group grid grid-cols-[3.5ch_1fr_auto] lg:grid-cols-[10ch_3.5ch_1fr_auto] px-4 lg:px-5 py-2 border-b cursor-pointer transition-colors duration-100 ${
         isSelected
           ? dark
             ? "bg-ink-hover"
@@ -89,7 +89,7 @@ export const LogEntry = forwardRef<
       }`}
     >
       <span
-        className={`font-mono text-[0.8em] tabular-nums self-center ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
+        className={`hidden lg:block font-mono text-[0.8em] tabular-nums self-center ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
       >
         {ts}
       </span>

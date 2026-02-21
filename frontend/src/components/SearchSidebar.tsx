@@ -6,14 +6,16 @@ import {
 } from "./Sidebar";
 import type { StoreInfo } from "../api/gen/gastrolog/v1/store_pb";
 import type { FieldSummary } from "../utils";
+import type { ResizeProps } from "../hooks/usePanelResize";
 import { useThemeClass } from "../hooks/useThemeClass";
 
 interface SearchSidebarProps {
   dark: boolean;
+  isTablet: boolean;
   sidebarWidth: number;
   sidebarCollapsed: boolean;
   setSidebarCollapsed: (v: boolean) => void;
-  handleSidebarResize: (e: React.MouseEvent) => void;
+  sidebarResizeProps: ResizeProps;
   resizing: boolean;
   rangeStart: Date | null;
   rangeEnd: Date | null;
@@ -36,10 +38,11 @@ interface SearchSidebarProps {
 
 export function SearchSidebar({
   dark,
+  isTablet,
   sidebarWidth,
   sidebarCollapsed,
   setSidebarCollapsed,
-  handleSidebarResize,
+  sidebarResizeProps,
   resizing,
   rangeStart,
   rangeEnd,
@@ -115,7 +118,11 @@ export function SearchSidebar({
       <aside
         aria-label="Sidebar"
         style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}
-        className={`shrink-0 overflow-hidden ${resizing ? "" : "transition-[width] duration-200"} ${
+        className={`${
+          isTablet && !sidebarCollapsed
+            ? `fixed left-0 top-0 h-full z-30 ${c("bg-ink", "bg-light-raised")}`
+            : `shrink-0 ${resizing ? "" : "transition-[width] duration-200"}`
+        } overflow-hidden ${
           sidebarCollapsed
             ? ""
             : `p-4 border-r app-scroll overflow-y-auto ${c("border-ink-border-subtle bg-ink", "border-light-border-subtle bg-light-raised")}`
@@ -175,7 +182,7 @@ export function SearchSidebar({
                 <button
                   key={level}
                   onClick={() => onToggleSeverity(level)}
-                  className={`px-2 py-0.5 text-[0.8em] font-medium uppercase tracking-wider rounded-sm border transition-all duration-150 ${
+                  className={`px-2 py-1.5 text-[0.8em] font-medium uppercase tracking-wider rounded-sm border transition-all duration-150 ${
                     active ? s.active : s.inactive
                   }`}
                 >
@@ -208,14 +215,14 @@ export function SearchSidebar({
 
       {/* Sidebar resize handle + collapse toggle */}
       {!sidebarCollapsed && (
-        <div className="relative shrink-0 flex">
+        <div className="relative shrink-0 flex" style={isTablet ? { position: "fixed", left: sidebarWidth, top: 0, height: "100%", zIndex: 30 } : undefined}>
           <div
-            onMouseDown={handleSidebarResize}
-            className={`w-1 cursor-col-resize transition-colors ${c("hover:bg-copper-muted/30", "hover:bg-copper-muted/20")}`}
+            {...sidebarResizeProps}
+            className={`w-3 cursor-col-resize transition-colors ${c("hover:bg-copper-muted/30", "hover:bg-copper-muted/20")}`}
           />
           <button
             onClick={() => setSidebarCollapsed(true)}
-            className={`absolute top-2 -right-3 w-4 h-6 flex items-center justify-center text-[0.6em] rounded-r z-10 transition-colors ${c(
+            className={`absolute top-2 -right-3 w-6 h-8 flex items-center justify-center text-[0.6em] rounded-r z-10 transition-colors ${c(
               "bg-ink-surface border border-l-0 border-ink-border-subtle text-text-ghost hover:text-text-muted",
               "bg-light-surface border border-l-0 border-light-border-subtle text-light-text-ghost hover:text-light-text-muted",
             )}`}

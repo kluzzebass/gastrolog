@@ -2,15 +2,17 @@ import { Record as ProtoRecord } from "../api/client";
 import { DetailPanelContent } from "./DetailPanel";
 import { useThemeClass } from "../hooks/useThemeClass";
 import type { HighlightMode } from "../syntax";
+import type { ResizeProps } from "../hooks/usePanelResize";
 
 interface DetailSidebarProps {
   dark: boolean;
+  isTablet: boolean;
   detailWidth: number;
   detailCollapsed: boolean;
   setDetailCollapsed: (v: boolean) => void;
   detailPinned: boolean;
   setDetailPinned: (v: boolean | ((p: boolean) => boolean)) => void;
-  handleDetailResize: (e: React.MouseEvent) => void;
+  detailResizeProps: ResizeProps;
   resizing: boolean;
   selectedRecord: ProtoRecord | null;
   onFieldSelect: (key: string, value: string) => void;
@@ -27,12 +29,13 @@ interface DetailSidebarProps {
 
 export function DetailSidebar({
   dark,
+  isTablet,
   detailWidth,
   detailCollapsed,
   setDetailCollapsed,
   detailPinned,
   setDetailPinned,
-  handleDetailResize,
+  detailResizeProps,
   resizing,
   selectedRecord,
   onFieldSelect,
@@ -52,10 +55,10 @@ export function DetailSidebar({
     <>
       {/* Detail resize handle + collapse toggle */}
       {!detailCollapsed && (
-        <div className="relative shrink-0 flex">
+        <div className="relative shrink-0 flex" style={isTablet ? { position: "fixed", right: detailWidth, top: 0, height: "100%", zIndex: 30 } : undefined}>
           <button
             onClick={() => setDetailCollapsed(true)}
-            className={`absolute top-2 -left-3 w-4 h-6 flex items-center justify-center text-[0.6em] rounded-l z-10 transition-colors ${c(
+            className={`absolute top-2 -left-3 w-6 h-8 flex items-center justify-center text-[0.6em] rounded-l z-10 transition-colors ${c(
               "bg-ink-surface border border-r-0 border-ink-border-subtle text-text-ghost hover:text-text-muted",
               "bg-light-surface border border-r-0 border-light-border-subtle text-light-text-ghost hover:text-light-text-muted",
             )}`}
@@ -65,8 +68,8 @@ export function DetailSidebar({
             {"\u25B8"}
           </button>
           <div
-            onMouseDown={handleDetailResize}
-            className={`w-1 cursor-col-resize transition-colors ${c("hover:bg-copper-muted/30", "hover:bg-copper-muted/20")}`}
+            {...detailResizeProps}
+            className={`w-3 cursor-col-resize transition-colors ${c("hover:bg-copper-muted/30", "hover:bg-copper-muted/20")}`}
           />
         </div>
       )}
@@ -86,7 +89,11 @@ export function DetailSidebar({
       <aside
         aria-label="Record details"
         style={{ width: detailCollapsed ? 0 : detailWidth }}
-        className={`shrink-0 overflow-hidden ${resizing ? "" : "transition-[width] duration-200"} ${
+        className={`${
+          isTablet && !detailCollapsed
+            ? `fixed right-0 top-0 h-full z-30 ${c("bg-ink-surface", "bg-light-surface")}`
+            : `shrink-0 ${resizing ? "" : "transition-[width] duration-200"}`
+        } overflow-hidden ${
           detailCollapsed
             ? ""
             : `border-l overflow-y-auto app-scroll ${c("border-ink-border-subtle bg-ink-surface", "border-light-border-subtle bg-light-surface")}`
@@ -107,7 +114,7 @@ export function DetailSidebar({
             }}
             aria-label={detailPinned ? "Unpin detail panel" : "Pin detail panel"}
             title={detailPinned ? "Unpin detail panel" : "Pin detail panel"}
-            className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${
+            className={`w-8 h-8 flex items-center justify-center rounded transition-colors ${
               detailPinned
                 ? c("text-copper", "text-copper")
                 : c(

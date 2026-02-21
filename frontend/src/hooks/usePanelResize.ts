@@ -2,6 +2,11 @@ import { useCallback, useState } from "react";
 
 type Direction = "left" | "right";
 
+export interface ResizeProps {
+  onMouseDown: (e: React.MouseEvent) => void;
+  onTouchStart: (e: React.TouchEvent) => void;
+}
+
 export function usePanelResize(
   setter: (width: number) => void,
   min: number,
@@ -10,19 +15,24 @@ export function usePanelResize(
 ) {
   const [resizing, setResizing] = useState(false);
 
-  const handleResize = useCallback(
+  const clamp = useCallback(
+    (clientX: number) => {
+      const value =
+        direction === "right"
+          ? globalThis.innerWidth - clientX
+          : clientX;
+      setter(Math.max(min, Math.min(max, value)));
+    },
+    [setter, min, max, direction],
+  );
+
+  const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
       setResizing(true);
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
-      const onMouseMove = (e: MouseEvent) => {
-        const value =
-          direction === "right"
-            ? globalThis.innerWidth - e.clientX
-            : e.clientX;
-        setter(Math.max(min, Math.min(max, value)));
-      };
+      const onMouseMove = (e: MouseEvent) => clamp(e.clientX);
       const onMouseUp = () => {
         setResizing(false);
         document.body.style.cursor = "";
@@ -33,8 +43,30 @@ export function usePanelResize(
       globalThis.addEventListener("mousemove", onMouseMove);
       globalThis.addEventListener("mouseup", onMouseUp);
     },
-    [setter, min, max, direction],
+    [clamp],
   );
 
-  return { handleResize, resizing };
+  const handleTouchStart = useCallback(
+    (e: React.TouchEvent) => {
+      setResizing(true);
+      document.body.style.userSelect = "none";
+      const onTouchMove = (e: TouchEvent) => {
+        e.preventDefault();
+        clamp(e.touches[0]!.clientX);
+      };
+      const onTouchEnd = () => {
+        setResizing(false);
+        document.body.style.userSelect = "";
+        globalThis.removeEventListener("touchmove", onTouchMove);
+        globalThis.removeEventListener("touchend", onTouchEnd);
+      };
+      globalThis.addEventListener("touchmove", onTouchMove, { passive: false });
+      globalThis.addEventListener("touchend", onTouchEnd);
+    },
+    [clamp],
+  );
+
+  const resizeProps: ResizeProps = { onMouseDown: handleMouseDown, onTouchStart: handleTouchStart };
+
+  return { resizeProps, resizing };
 }

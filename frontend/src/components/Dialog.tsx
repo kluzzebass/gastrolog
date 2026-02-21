@@ -81,7 +81,7 @@ export function CloseButton({
     <button
       onClick={onClick}
       aria-label="Close"
-      className={`absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded text-lg leading-none transition-colors ${c(
+      className={`absolute top-3 right-3 w-9 h-9 flex items-center justify-center rounded text-lg leading-none transition-colors ${c(
         "text-text-muted hover:text-text-bright",
         "text-light-text-muted hover:text-light-text-bright",
       )}`}

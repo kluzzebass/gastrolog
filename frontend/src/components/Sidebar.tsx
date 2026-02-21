@@ -62,7 +62,7 @@ export function FieldExplorer({
           <div key={key}>
             <button
               onClick={() => toggleKey(key)}
-              className={`w-full flex items-center gap-1.5 px-1.5 py-1 text-left text-[0.8em] rounded transition-colors ${dark ? "hover:bg-ink-hover text-text-muted hover:text-text-normal" : "hover:bg-light-hover text-light-text-muted hover:text-light-text-normal"}`}
+              className={`w-full flex items-center gap-1.5 px-1.5 py-1.5 text-left text-[0.8em] rounded transition-colors ${dark ? "hover:bg-ink-hover text-text-muted hover:text-text-normal" : "hover:bg-light-hover text-light-text-muted hover:text-light-text-normal"}`}
             >
               <span
                 className={`text-[0.7em] ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
@@ -88,7 +88,7 @@ export function FieldExplorer({
                     <button
                       key={value}
                       onClick={() => onSelect(key, value)}
-                      className={`w-full flex items-center gap-1.5 px-1.5 py-0.5 text-left text-[0.75em] rounded transition-colors ${
+                      className={`w-full flex items-center gap-1.5 px-1.5 py-1 text-left text-[0.75em] rounded transition-colors ${
                         isActive
                           ? dark
                             ? "bg-copper/15 text-copper"
@@ -128,7 +128,7 @@ export function StoreButton({
   return (
     <button
       onClick={onClick}
-      className={`flex justify-between items-center px-2.5 py-1.5 text-[0.9em] rounded text-left transition-all duration-150 ${
+      className={`flex justify-between items-center px-2.5 py-2 text-[0.9em] rounded text-left transition-all duration-150 ${
         active
           ? dark
             ? "bg-copper/15 text-copper border border-copper/25"

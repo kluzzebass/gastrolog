@@ -33,7 +33,7 @@ export function UserMenu({
         onClick={() => setOpen((o) => !o)}
         aria-label={`User menu: ${username}`}
         title={username}
-        className={`w-7 h-7 flex items-center justify-center rounded transition-all duration-200 ${c(
+        className={`w-9 h-9 flex items-center justify-center rounded transition-all duration-200 ${c(
           "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
           "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
         )} ${open ? c("text-text-muted bg-ink-hover", "text-light-text-muted bg-light-hover") : ""}`}
@@ -73,7 +73,7 @@ export function UserMenu({
                 onChangePassword();
               }}
             >
-              <LockIcon className="w-3.5 h-3.5" />
+              <LockIcon className="w-4 h-4" />
               Change password
             </MenuItem>
             <MenuItem
@@ -83,7 +83,7 @@ export function UserMenu({
                 onPreferences();
               }}
             >
-              <SlidersIcon className="w-3.5 h-3.5" />
+              <SlidersIcon className="w-4 h-4" />
               Preferences
             </MenuItem>
             <MenuItem
@@ -93,7 +93,7 @@ export function UserMenu({
                 onLogout();
               }}
             >
-              <SignOutIcon className="w-3.5 h-3.5" />
+              <SignOutIcon className="w-4 h-4" />
               Sign out
             </MenuItem>
           </div>
@@ -116,7 +116,7 @@ function MenuItem({
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center gap-2 px-3 py-1.5 text-[0.8em] text-left transition-colors ${c(
+      className={`w-full flex items-center gap-2 px-3 py-2.5 text-[0.8em] text-left transition-colors ${c(
         "text-text-muted hover:text-text-bright hover:bg-ink-hover",
         "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
       )}`}

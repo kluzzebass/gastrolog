@@ -86,7 +86,7 @@ export function ExportButton({
         disabled={records.length === 0}
         aria-label="Export results"
         title="Export results"
-        className={`w-6 h-6 flex items-center justify-center rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${c(
+        className={`w-8 h-8 flex items-center justify-center rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${c(
           "text-text-muted hover:text-copper hover:bg-ink-hover",
           "text-light-text-muted hover:text-copper hover:bg-light-hover",
         )}`}
@@ -101,7 +101,7 @@ export function ExportButton({
             <button
               key={fmt}
               onClick={() => handleExport(fmt)}
-              className={`block w-full text-left px-3 py-1.5 text-[0.8em] font-mono transition-colors ${c("text-text-muted hover:text-copper hover:bg-ink-hover", "text-light-text-muted hover:text-copper hover:bg-light-hover")}`}
+              className={`block w-full text-left px-3 py-2.5 text-[0.8em] font-mono transition-colors ${c("text-text-muted hover:text-copper hover:bg-ink-hover", "text-light-text-muted hover:text-copper hover:bg-light-hover")}`}
             >
               Export as {fmt.toUpperCase()}
             </button>

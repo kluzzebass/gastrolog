@@ -58,7 +58,7 @@ export function PreferencesDialog({
                   key={opt.value}
                   onClick={() => setPalette(opt.value)}
                   title={opt.label}
-                  className={`flex flex-col items-center gap-1.5 px-3 py-2 rounded border transition-colors ${
+                  className={`flex flex-col items-center gap-1.5 px-3.5 py-2.5 rounded border transition-colors ${
                     active
                       ? c(
                           "border-copper bg-copper/10",
@@ -168,7 +168,7 @@ function SegmentedControl<T extends string>({
           <button
             key={opt.value}
             onClick={() => onChange(opt.value)}
-            className={`px-3.5 py-1.5 text-[0.8em] font-medium transition-colors first:rounded-l last:rounded-r ${
+            className={`px-4 py-2.5 text-[0.8em] font-medium transition-colors first:rounded-l last:rounded-r ${
               active
                 ? c(
                     "bg-copper/15 text-copper border-copper",
