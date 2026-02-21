@@ -60,6 +60,9 @@ export function FiltersSettings({ dark }: Readonly<{ dark: boolean }>) {
   const [newExpression, setNewExpression] = useState("");
 
   const filters = config?.filters ?? [];
+  const existingNames = new Set(filters.map((f) => f.name));
+  const effectiveName = newName.trim() || "catch-all";
+  const nameConflict = existingNames.has(effectiveName);
   const stores = config?.stores ?? [];
 
   const defaults = (id: string) => {
@@ -91,17 +94,14 @@ export function FiltersSettings({ dark }: Readonly<{ dark: boolean }>) {
   const handleSave = (id: string) => saveFilter(id, getEdit(id));
 
   const handleCreate = async () => {
-    if (!newName.trim()) {
-      addToast("Filter name is required", "warn");
-      return;
-    }
+    const name = newName.trim() || "catch-all";
     try {
       await putFilter.mutateAsync({
         id: "",
-        name: newName.trim(),
+        name,
         expression: newExpression,
       });
-      addToast(`Filter "${newName.trim()}" created`, "info");
+      addToast(`Filter "${name}" created`, "info");
       setAdding(false);
       setNewName("");
       setNewExpression("");
@@ -129,6 +129,7 @@ export function FiltersSettings({ dark }: Readonly<{ dark: boolean }>) {
           onCancel={() => setAdding(false)}
           onCreate={handleCreate}
           isPending={putFilter.isPending}
+          createDisabled={nameConflict}
         >
           <FormField label="Name" dark={dark}>
             <TextInput

@@ -116,6 +116,9 @@ export function StoresSettings({ dark }: Readonly<{ dark: boolean }>) {
   const [newParams, setNewParams] = useState<Record<string, string>>({});
 
   const stores = config?.stores ?? [];
+  const existingNames = new Set(stores.map((s) => s.name));
+  const effectiveName = newName.trim() || newType;
+  const nameConflict = existingNames.has(effectiveName);
   const policies = config?.rotationPolicies ?? [];
   const retentionPolicies = config?.retentionPolicies ?? [];
   const filters = config?.filters ?? [];
@@ -196,21 +199,18 @@ export function StoresSettings({ dark }: Readonly<{ dark: boolean }>) {
   };
 
   const handleCreate = async () => {
-    if (!newName.trim()) {
-      addToast("Store name is required", "warn");
-      return;
-    }
+    const name = newName.trim() || newType;
     try {
       await putStore.mutateAsync({
         id: "",
-        name: newName.trim(),
+        name,
         type: newType,
         filter: newFilter,
         policy: newPolicy,
         retention: newRetention,
         params: newParams,
       });
-      addToast(`Store "${newName.trim()}" created`, "info");
+      addToast(`Store "${name}" created`, "info");
       setAdding(false);
       setTypeConfirmed(false);
       setNewName("");
@@ -286,13 +286,14 @@ export function StoresSettings({ dark }: Readonly<{ dark: boolean }>) {
           }}
           onCreate={handleCreate}
           isPending={putStore.isPending}
+          createDisabled={nameConflict}
           typeBadge={newType}
         >
           <FormField label="Name" dark={dark}>
             <TextInput
               value={newName}
               onChange={setNewName}
-              placeholder="my-store"
+              placeholder={newType}
               dark={dark}
             />
           </FormField>

@@ -6,6 +6,7 @@ interface AddFormCardProps {
   onCancel: () => void;
   onCreate: () => void;
   isPending: boolean;
+  createDisabled?: boolean;
   typeBadge?: string;
   children: React.ReactNode;
 }
@@ -15,6 +16,7 @@ export function AddFormCard({
   onCancel,
   onCreate,
   isPending,
+  createDisabled,
   typeBadge,
   children,
 }: Readonly<AddFormCardProps>) {
@@ -41,7 +43,7 @@ export function AddFormCard({
           <GhostButton onClick={onCancel} dark={dark} bordered>
             Cancel
           </GhostButton>
-          <PrimaryButton onClick={onCreate} disabled={isPending}>
+          <PrimaryButton onClick={onCreate} disabled={isPending || createDisabled}>
             {isPending ? "Creating..." : "Create"}
           </PrimaryButton>
         </div>

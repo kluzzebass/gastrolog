@@ -81,6 +81,9 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
   const { adding, typeConfirmed, newName, newType, newParams } = addForm;
 
   const ingesters = config?.ingesters ?? [];
+  const existingNames = new Set(ingesters.map((i) => i.name));
+  const effectiveName = newName.trim() || newType;
+  const nameConflict = existingNames.has(effectiveName);
 
   const defaults = (id: string) => {
     const ing = ingesters.find((i) => i.id === id);
@@ -108,19 +111,16 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
   });
 
   const handleCreate = async () => {
-    if (!newName.trim()) {
-      addToast("Ingester name is required", "warn");
-      return;
-    }
+    const name = newName.trim() || newType;
     try {
       await putIngester.mutateAsync({
         id: "",
-        name: newName.trim(),
+        name,
         type: newType,
         enabled: true,
         params: newParams,
       });
-      addToast(`Ingester "${newName.trim()}" created`, "info");
+      addToast(`Ingester "${name}" created`, "info");
       dispatchAdd({ type: "resetForm" });
     } catch (err: any) {
       addToast(err.message ?? "Failed to create ingester", "error");
@@ -170,13 +170,14 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
           onCancel={() => dispatchAdd({ type: "resetForm" })}
           onCreate={handleCreate}
           isPending={putIngester.isPending}
+          createDisabled={nameConflict}
           typeBadge={newType}
         >
           <FormField label="Name" dark={dark}>
             <TextInput
               value={newName}
               onChange={(v) => dispatchAdd({ type: "setNewName", value: v })}
-              placeholder="my-ingester"
+              placeholder={newType}
               dark={dark}
             />
           </FormField>

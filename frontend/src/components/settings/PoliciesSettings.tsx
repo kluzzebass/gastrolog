@@ -138,6 +138,9 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const { adding, newName, newMaxBytes, newMaxRecords, newMaxAge, newCron } = addForm;
 
   const policies = config?.rotationPolicies ?? [];
+  const existingNames = new Set(policies.map((p) => p.name));
+  const effectiveName = newName.trim() || "default";
+  const nameConflict = existingNames.has(effectiveName);
   const stores = config?.stores ?? [];
 
   const defaults = (id: string): PolicyEdit => {
@@ -192,10 +195,6 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const handleSave = (id: string) => savePolicy(id, getEdit(id));
 
   const handleCreate = async () => {
-    if (!newName.trim()) {
-      addToast("Policy name is required", "warn");
-      return;
-    }
     if (newCron) {
       const result = validateCron(newCron);
       if (!result.valid) {
@@ -203,17 +202,18 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
         return;
       }
     }
+    const name = newName.trim() || "default";
     const maxRecordsValue = newMaxRecords ? BigInt(newMaxRecords) : 0n;
     try {
       await putPolicy.mutateAsync({
         id: "",
-        name: newName.trim(),
+        name,
         maxBytes: parseBytes(newMaxBytes),
         maxRecords: maxRecordsValue,
         maxAgeSeconds: parseDuration(newMaxAge),
         cron: newCron,
       });
-      addToast(`Policy "${newName.trim()}" created`, "info");
+      addToast(`Policy "${name}" created`, "info");
       dispatchAdd({ type: "resetForm" });
     } catch (err: any) {
       const errorMessage = err.message ?? "Failed to create policy";
@@ -240,6 +240,7 @@ export function PoliciesSettings({ dark }: Readonly<{ dark: boolean }>) {
           onCancel={() => dispatchAdd({ type: "resetForm" })}
           onCreate={handleCreate}
           isPending={putPolicy.isPending}
+          createDisabled={nameConflict}
         >
           <FormField label="Name" dark={dark}>
             <TextInput

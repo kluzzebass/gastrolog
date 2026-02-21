@@ -86,6 +86,9 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
   const { adding, newName, newMaxAge, newMaxBytes, newMaxChunks } = addForm;
 
   const policies = config?.retentionPolicies ?? [];
+  const existingNames = new Set(policies.map((p) => p.name));
+  const effectiveName = newName.trim() || "default";
+  const nameConflict = existingNames.has(effectiveName);
   const stores = config?.stores ?? [];
 
   const defaults = (id: string): PolicyEdit => {
@@ -134,20 +137,17 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
   const handleSave = (id: string) => savePolicy(id, getEdit(id));
 
   const handleCreate = async () => {
-    if (!newName.trim()) {
-      addToast("Policy name is required", "warn");
-      return;
-    }
+    const name = newName.trim() || "default";
     const maxChunksValue = newMaxChunks ? BigInt(newMaxChunks) : 0n;
     try {
       await putPolicy.mutateAsync({
         id: "",
-        name: newName.trim(),
+        name,
         maxAgeSeconds: parseDuration(newMaxAge),
         maxBytes: parseBytes(newMaxBytes),
         maxChunks: maxChunksValue,
       });
-      addToast(`Retention policy "${newName.trim()}" created`, "info");
+      addToast(`Retention policy "${name}" created`, "info");
       dispatchAdd({ type: "resetForm" });
     } catch (err: any) {
       const errorMessage = err.message ?? "Failed to create retention policy";
@@ -174,6 +174,7 @@ export function RetentionPoliciesSettings({ dark }: Readonly<{ dark: boolean }>)
           onCancel={() => dispatchAdd({ type: "resetForm" })}
           onCreate={handleCreate}
           isPending={putPolicy.isPending}
+          createDisabled={nameConflict}
         >
           <FormField label="Name" dark={dark}>
             <TextInput
