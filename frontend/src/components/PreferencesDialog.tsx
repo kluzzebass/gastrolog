@@ -1,4 +1,4 @@
-import { Dialog, CloseButton } from "./Dialog";
+import { Dialog } from "./Dialog";
 import { useThemeClass } from "../hooks/useThemeClass";
 import type { Theme, Palette } from "../utils";
 import type { HighlightMode } from "../hooks/useThemeSync";
@@ -41,7 +41,6 @@ export function PreferencesDialog({
 
   return (
     <Dialog onClose={onClose} ariaLabel="Preferences" dark={dark} size="sm">
-      <CloseButton onClick={onClose} dark={dark} />
       <h2
         className={`font-display text-lg font-semibold mb-5 ${c("text-text-bright", "text-light-text-bright")}`}
       >

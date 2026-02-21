@@ -65,42 +65,18 @@ export function Dialog({
           >
             {children}
           </div>
-          {size === "xl" && (
-            <button
-              onClick={onClose}
-              aria-label="Close"
-              className={`absolute -top-3 -right-3 w-7 h-7 flex items-center justify-center rounded-full text-lg leading-none shadow-lg border transition-colors ${c(
-                "bg-ink-surface border-ink-border text-text-muted hover:text-text-bright hover:bg-ink-hover",
-                "bg-light-surface border-light-border text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
-              )}`}
-            >
-              &times;
-            </button>
-          )}
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className={`absolute -top-3 -right-3 w-7 h-7 flex items-center justify-center rounded-full text-lg leading-none shadow-lg border transition-colors ${c(
+              "bg-ink-surface border-ink-border text-text-muted hover:text-text-bright hover:bg-ink-hover",
+              "bg-light-surface border-light-border text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
+            )}`}
+          >
+            &times;
+          </button>
         </div>
       </div>
     </FocusTrap>
-  );
-}
-
-export function CloseButton({
-  onClick,
-  dark,
-}: Readonly<{
-  onClick: () => void;
-  dark: boolean;
-}>) {
-  const c = useThemeClass(dark);
-  return (
-    <button
-      onClick={onClick}
-      aria-label="Close"
-      className={`absolute top-3 right-3 w-9 h-9 flex items-center justify-center rounded text-lg leading-none transition-colors ${c(
-        "text-text-muted hover:text-text-bright",
-        "text-light-text-muted hover:text-light-text-bright",
-      )}`}
-    >
-      &times;
-    </button>
   );
 }

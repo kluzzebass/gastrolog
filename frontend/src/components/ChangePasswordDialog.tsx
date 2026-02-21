@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useThemeClass } from "../hooks/useThemeClass";
-import { Dialog, CloseButton } from "./Dialog";
+import { Dialog } from "./Dialog";
 import { SpinnerIcon } from "./icons";
 import { ConnectError } from "@connectrpc/connect";
 import { useChangePassword, useServerConfig } from "../api/hooks";
@@ -66,7 +66,6 @@ export function ChangePasswordDialog({
 
   return (
     <Dialog onClose={onClose} ariaLabel="Change Password" dark={dark} size="sm">
-      <CloseButton onClick={onClose} dark={dark} />
 
       <h2
         className={`font-display text-[1.3em] font-semibold tracking-tight mb-4 ${c("text-text-bright", "text-light-text-bright")}`}

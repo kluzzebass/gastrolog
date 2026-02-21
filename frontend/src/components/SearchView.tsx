@@ -50,7 +50,7 @@ import {
 } from "../api/hooks/useSavedQueries";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
 import { PreferencesDialog } from "./PreferencesDialog";
-import { Dialog, CloseButton } from "./Dialog";
+import { Dialog } from "./Dialog";
 import { tokenize } from "../queryTokenizer";
 import { useAutocomplete } from "../hooks/useAutocomplete";
 import { HeaderBar } from "./HeaderBar";
@@ -700,7 +700,6 @@ export function SearchView() {
               dark={dark}
               size="lg"
             >
-              <CloseButton onClick={() => setShowPlan(false)} dark={dark} />
               {isExplaining ? (
                 <div
                   className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}
