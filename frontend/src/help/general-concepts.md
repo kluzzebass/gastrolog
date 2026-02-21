@@ -46,7 +46,7 @@ Every log message follows the same pipeline:
 ```mermaid
 flowchart TD
     A[Ingest] --> B[Digest]
-    B --> C[Route]
+    B --> C[Filter]
     C --> D[Store]
     D --> E[Index]
     D --> F[Expire]
@@ -56,7 +56,7 @@ flowchart TD
 
 [**Digest**](help:digesters) — Digesters scan the message and add attributes the ingester couldn't — a normalized `level` from the log content, and a source timestamp parsed from embedded date patterns.
 
-[**Route**](help:routing) — Each store has a filter expression evaluated against the message attributes. A message can match multiple stores, or be caught by a catch-rest filter so nothing is silently dropped.
+[**Filter**](help:routing) — Each store has a filter expression evaluated against the message attributes. A message can match multiple stores, or be caught by a catch-rest filter so nothing is silently dropped.
 
 [**Store**](help:storage) — Matching stores append the record to their active chunk. When a chunk hits its rotation policy limits, it is sealed and a new one begins.
 
@@ -64,9 +64,9 @@ flowchart TD
 
 **Expire** — [Retention policies](help:policy-retention) periodically delete sealed chunks that are too old, too numerous, or pushing the store over its size budget.
 
-## Multi-Store Routing
+## Multi-Store Filtering
 
-Filters control which stores receive which records. A single ingested message can be routed to multiple stores if their filters match. Adding a new store doesn't require reconfiguring ingesters — routing is purely a configuration change.
+Filters control which stores receive which records. A single ingested message can match multiple stores and will be written to all of them. Adding a new store doesn't require reconfiguring ingesters — filtering is purely a configuration change.
 
 Special filter values:
 

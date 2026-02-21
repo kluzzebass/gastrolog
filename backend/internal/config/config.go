@@ -8,7 +8,7 @@
 //
 // ConfigStore does not:
 //   - Inspect records
-//   - Perform routing
+//   - Perform filtering
 //   - Manage lifecycle
 //   - Watch for live changes (v1 is load-on-start only)
 package config

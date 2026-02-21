@@ -1,5 +1,5 @@
 // Package orchestrator coordinates ingestion, indexing, and querying
-// without owning business logic. It routes records to chunk managers,
+// without owning business logic. It filters records to chunk managers,
 // schedules index builds on seal events, and delegates queries.
 package orchestrator
 
@@ -40,7 +40,7 @@ var (
 )
 
 // Orchestrator coordinates ingestion, indexing, and querying.
-// It routes records to chunk managers, observes seal events to trigger
+// It filters records to chunk managers, observes seal events to trigger
 // index builds, and delegates queries to query engines.
 //
 // Orchestrator does not contain business logic - it only wires components.
@@ -58,12 +58,12 @@ var (
 //   - Ingesters are registered before Start() is called.
 //   - Start() launches one goroutine per ingester plus an ingest loop.
 //   - Stop() cancels all ingesters and the ingest loop via context.
-//   - Ingesters emit IngestMessages; orchestrator resolves identity and routes.
+//   - Ingesters emit IngestMessages; orchestrator resolves identity and filters.
 //
-// Routing:
-//   - Each store has a route expression that determines which messages it receives.
-//   - Routes are compiled at registration time and evaluated against message attrs.
-//   - Special routes: "*" (catch-all), "+" (catch-the-rest), "" (receives nothing).
+// Filtering:
+//   - Each store has a filter expression that determines which messages it receives.
+//   - Filters are compiled at registration time and evaluated against message attrs.
+//   - Special filters: "*" (catch-all), "+" (catch-the-rest), "" (receives nothing).
 //
 // Logging:
 //   - Logger is dependency-injected via Config.Logger

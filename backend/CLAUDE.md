@@ -164,7 +164,7 @@ Index file headers include the chunk ID (8 bytes) after the common 4-byte prefix
 
 Coordinates ingestion, indexing, and querying without owning business logic:
 
-- Routes records to chunk managers, triggers index builds on seal, delegates queries
+- Filters records to chunk managers, triggers index builds on seal, delegates queries
 - **Ingester** interface -- sources of log messages; emit `IngestMessage` to shared channel
 - **IngestMessage** -- `{Attrs, Raw, SourceTS, IngestTS}` where `SourceTS` is parsed from the log source and `IngestTS` is set by ingester at receive time
 
@@ -215,7 +215,7 @@ internal/
   callgroup/        Generic call deduplication by key
   format/           Shared binary header encoding/decoding
   logging/          slog helpers: Discard(), Default(), ComponentFilterHandler
-  orchestrator/     Ingest routing, seal detection, search delegation
+  orchestrator/     Ingest filtering, seal detection, search delegation
   ingester/
     chatterbox/     Test ingester (random log messages)
     http/           Loki-compatible HTTP ingester

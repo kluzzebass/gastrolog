@@ -890,7 +890,7 @@ type filteredTestStores struct {
 	prod     uuid.UUID
 	staging  uuid.UUID
 	archive  uuid.UUID
-	unrouted uuid.UUID
+	catchRest uuid.UUID
 	cms      map[uuid.UUID]chunk.ChunkManager
 }
 
@@ -902,13 +902,13 @@ func newFilteredTestSetup(t *testing.T) (*orchestrator.Orchestrator, filteredTes
 		prod:     uuid.Must(uuid.NewV7()),
 		staging:  uuid.Must(uuid.NewV7()),
 		archive:  uuid.Must(uuid.NewV7()),
-		unrouted: uuid.Must(uuid.NewV7()),
+		catchRest: uuid.Must(uuid.NewV7()),
 		cms:      make(map[uuid.UUID]chunk.ChunkManager),
 	}
 
 	orch := orchestrator.New(orchestrator.Config{})
 
-	for _, id := range []uuid.UUID{stores.prod, stores.staging, stores.archive, stores.unrouted} {
+	for _, id := range []uuid.UUID{stores.prod, stores.staging, stores.archive, stores.catchRest} {
 		s := memtest.MustNewStore(t, chunkmem.Config{
 			RotationPolicy: recordCountPolicy(10000),
 		})
@@ -929,13 +929,13 @@ func newFilteredTestSetupWithLoader(t *testing.T, loader *fakeConfigLoader) (*or
 		prod:     uuid.Must(uuid.NewV7()),
 		staging:  uuid.Must(uuid.NewV7()),
 		archive:  uuid.Must(uuid.NewV7()),
-		unrouted: uuid.Must(uuid.NewV7()),
+		catchRest: uuid.Must(uuid.NewV7()),
 		cms:      make(map[uuid.UUID]chunk.ChunkManager),
 	}
 
 	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
-	for _, id := range []uuid.UUID{stores.prod, stores.staging, stores.archive, stores.unrouted} {
+	for _, id := range []uuid.UUID{stores.prod, stores.staging, stores.archive, stores.catchRest} {
 		s := memtest.MustNewStore(t, chunkmem.Config{
 			RotationPolicy: recordCountPolicy(10000),
 		})
@@ -1001,14 +1001,14 @@ func getRecordMessages(t *testing.T, cm chunk.ChunkManager) []string {
 	return msgs
 }
 
-func TestRoutingIntegration(t *testing.T) {
+func TestFilteringIntegration(t *testing.T) {
 	orch, stores := newFilteredTestSetup(t)
 
 	// Compile filters:
 	// - prod: receives env=prod messages
 	// - staging: receives env=staging messages
 	// - archive: catch-all (*)
-	// - unrouted: catch-the-rest (+)
+	// - catchRest: catch-the-rest (+)
 	prodFilter, err := orchestrator.CompileFilter(stores.prod, "env=prod")
 	if err != nil {
 		t.Fatalf("CompileFilter prod failed: %v", err)
@@ -1021,9 +1021,9 @@ func TestRoutingIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompileFilter archive failed: %v", err)
 	}
-	unfilteredFilter, err := orchestrator.CompileFilter(stores.unrouted, "+")
+	unfilteredFilter, err := orchestrator.CompileFilter(stores.catchRest, "+")
 	if err != nil {
-		t.Fatalf("CompileFilter unrouted failed: %v", err)
+		t.Fatalf("CompileFilter catchRest failed: %v", err)
 	}
 
 	fs := orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
@@ -1054,16 +1054,16 @@ func TestRoutingIntegration(t *testing.T) {
 			expected: []uuid.UUID{stores.staging, stores.archive},
 		},
 		{
-			name:     "dev message goes to archive and unrouted",
+			name:     "dev message goes to archive and catchRest",
 			attrs:    chunk.Attributes{"env": "dev", "level": "debug"},
 			raw:      "dev debug",
-			expected: []uuid.UUID{stores.archive, stores.unrouted},
+			expected: []uuid.UUID{stores.archive, stores.catchRest},
 		},
 		{
-			name:     "no env goes to archive and unrouted",
+			name:     "no env goes to archive and catchRest",
 			attrs:    chunk.Attributes{"level": "warn"},
 			raw:      "no env warn",
-			expected: []uuid.UUID{stores.archive, stores.unrouted},
+			expected: []uuid.UUID{stores.archive, stores.catchRest},
 		},
 	}
 
@@ -1109,7 +1109,7 @@ func TestRoutingIntegration(t *testing.T) {
 	}
 }
 
-func TestRoutingWithIngesters(t *testing.T) {
+func TestFilteringWithIngesters(t *testing.T) {
 	orch, stores := newFilteredTestSetup(t)
 
 	// Set up filtering: prod gets env=prod, archive is catch-all.
@@ -1138,7 +1138,7 @@ func TestRoutingWithIngesters(t *testing.T) {
 		t.Fatalf("Stop failed: %v", err)
 	}
 
-	// Verify routing: prod should have 2 messages, archive should have 3.
+	// Verify filtering: prod should have 2 messages, archive should have 3.
 	prodMsgs := getRecordMessages(t, stores.cms[stores.prod])
 	archiveMsgs := getRecordMessages(t, stores.cms[stores.archive])
 	stagingMsgs := getRecordMessages(t, stores.cms[stores.staging])
@@ -1154,7 +1154,7 @@ func TestRoutingWithIngesters(t *testing.T) {
 	}
 }
 
-func TestRoutingNoFilterSetFallback(t *testing.T) {
+func TestFilteringNoFilterSetFallback(t *testing.T) {
 	orch, stores := newFilteredTestSetup(t)
 
 	// No filter set - should fan out to all stores (legacy behavior).
@@ -1176,7 +1176,7 @@ func TestRoutingNoFilterSetFallback(t *testing.T) {
 	}
 }
 
-func TestRoutingEmptyFilterReceivesNothing(t *testing.T) {
+func TestFilteringEmptyFilterReceivesNothing(t *testing.T) {
 	orch, stores := newFilteredTestSetup(t)
 
 	// prod has empty filter (receives nothing), archive is catch-all.
@@ -1204,7 +1204,7 @@ func TestRoutingEmptyFilterReceivesNothing(t *testing.T) {
 	}
 }
 
-func TestRoutingComplexExpression(t *testing.T) {
+func TestFilteringComplexExpression(t *testing.T) {
 	orch, stores := newFilteredTestSetup(t)
 
 	// prod receives: (env=prod AND level=error) OR (env=prod AND level=critical)

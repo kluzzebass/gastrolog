@@ -129,7 +129,7 @@ Use the **Test Connection** button to verify connectivity before saving.
 
 ## Filtering containers
 
-Use the `filter` param to limit which containers are logged. It uses the same expression language as [search queries](help:query-language) and [routing filters](help:routing), applied to container metadata (`name`, `image`, `label.<key>`):
+Use the `filter` param to limit which containers are logged. It uses the same expression language as [search queries](help:query-language) and [store filters](help:routing), applied to container metadata (`name`, `image`, `label.<key>`):
 
 - `filter` set to `label.logging=true` — only containers with the Docker label `logging=true`
 - `filter` set to `name=myapp-*` — only containers whose name starts with `myapp-`

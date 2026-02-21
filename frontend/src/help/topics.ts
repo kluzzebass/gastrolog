@@ -65,7 +65,7 @@ export const helpTopics: HelpTopic[] = [
       { id: 'digester-timestamp', title: 'Timestamp', content: digesterTimestamp },
     ],
   },
-  { id: 'routing', title: 'Routing', content: routing },
+  { id: 'routing', title: 'Filtering', content: routing },
   {
     id: 'storage', title: 'Storage', content: storage,
     children: [

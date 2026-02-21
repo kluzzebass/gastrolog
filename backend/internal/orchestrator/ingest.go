@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Ingest routes a record to all registered chunk managers.
+// Ingest filters a record to matching chunk managers.
 // If a chunk is sealed as a result of the append, index builds are
 // scheduled asynchronously for that chunk.
 //

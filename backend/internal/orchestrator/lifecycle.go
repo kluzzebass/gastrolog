@@ -11,7 +11,7 @@ import (
 
 // Start launches all ingesters and the ingest loop.
 // Each ingester runs in its own goroutine, emitting messages to a shared channel.
-// The ingest loop receives messages, resolves identity, and routes to chunk managers.
+// The ingest loop receives messages, resolves identity, and filters to chunk managers.
 // Start returns immediately; use Stop() to shut down.
 func (o *Orchestrator) Start(ctx context.Context) error {
 	o.mu.Lock()
@@ -101,7 +101,7 @@ func (o *Orchestrator) Stop() error {
 	return nil
 }
 
-// ingestLoop receives messages from the ingest channel and routes them.
+// ingestLoop receives messages from the ingest channel and filters them.
 //
 // Throughput: A single goroutine processes all messages sequentially.
 // This is intentional because:
@@ -110,7 +110,7 @@ func (o *Orchestrator) Stop() error {
 //   - Index scheduling is async (fire-and-forget goroutine)
 //
 // If this becomes a bottleneck, parallelization can be added later
-// (e.g., worker pool with per-ChunkManager routing).
+// (e.g., worker pool with per-ChunkManager filtering).
 func (o *Orchestrator) ingestLoop(ctx context.Context) {
 	defer close(o.done)
 
@@ -132,7 +132,7 @@ func (o *Orchestrator) ingestLoop(ctx context.Context) {
 	}
 }
 
-// processMessage applies digesters then routes to chunk managers.
+// processMessage applies digesters then filters to chunk managers.
 func (o *Orchestrator) processMessage(msg IngestMessage) {
 	// Apply digester pipeline (enriches attrs based on message content).
 	for _, d := range o.digesters {
@@ -151,7 +151,7 @@ func (o *Orchestrator) processMessage(msg IngestMessage) {
 		Raw:      msg.Raw,
 	}
 
-	// Route to chunk managers (reuses existing Ingest logic).
+	// Filter to chunk managers (reuses existing Ingest logic).
 	err := o.ingest(rec)
 
 	// Track per-ingester stats.

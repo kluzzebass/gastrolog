@@ -8,7 +8,7 @@ The Settings dialog configures your GastroLog instance. Open it from the header 
 | Certificates | [Certificates](help:certificates) |
 | Users | [Users & Authentication](help:user-management) |
 | Ingesters | [Ingestion](help:ingestion) |
-| Filters | [Routing](help:routing) |
+| Filters | [Filtering](help:routing) |
 | Rotation Policies | [Rotation Policies](help:policy-rotation) |
 | Retention Policies | [Retention Policies](help:policy-retention) |
 | Stores | [Storage](help:storage) |
