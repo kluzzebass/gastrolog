@@ -32,7 +32,7 @@ export function MetricsPanel({ dark }: Readonly<{ dark: boolean }>) {
         Metrics
       </h2>
 
-      {health.data && <SystemSection dark={dark} health={health.data} />}
+      {health.data && <SystemSection dark={dark} health={health.data} stats={stats.data} />}
       {health.data && <IngestQueueSection dark={dark} health={health.data} />}
       {stats.data && <StorageSection dark={dark} stats={stats.data} />}
       {ingesters.data && ingesters.data.length > 0 && (
@@ -144,7 +144,8 @@ function statusLabel(s: Status): { text: string; className: string } {
 function SystemSection({
   dark,
   health,
-}: Readonly<{ dark: boolean; health: HealthData }>) {
+  stats,
+}: Readonly<{ dark: boolean; health: HealthData; stats?: StatsData }>) {
   const badge = statusLabel(health.status);
   return (
     <section>
@@ -167,6 +168,20 @@ function SystemSection({
           label="Uptime"
           value={formatUptime(health.uptimeSeconds)}
         />
+        {stats && (
+          <>
+            <StatRow
+              dark={dark}
+              label="CPU"
+              value={`${stats.processCpuPercent.toFixed(1)}%`}
+            />
+            <StatRow
+              dark={dark}
+              label="Memory"
+              value={formatBytes(Number(stats.processMemoryBytes))}
+            />
+          </>
+        )}
       </div>
     </section>
   );
@@ -236,6 +251,8 @@ type StatsData = {
   sealedChunks: bigint;
   totalRecords: bigint;
   totalBytes: bigint;
+  processCpuPercent: number;
+  processMemoryBytes: bigint;
   oldestRecord?: { toDate(): Date };
   newestRecord?: { toDate(): Date };
   storeStats: Array<{
