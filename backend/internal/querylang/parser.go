@@ -7,7 +7,7 @@ import "regexp"
 // parser in frontend/src/queryTokenizer.ts (validate function) for syntax
 // highlighting and error detection. Changes here must be reflected there.
 //
-// Grammar (EBNF):
+// Filter grammar (EBNF):
 //
 //	query      = or_expr EOF
 //	or_expr    = and_expr ( "OR" and_expr )*
@@ -28,6 +28,13 @@ import "regexp"
 //  2. NOT (prefix, right-associative)
 //  3. AND (implicit or explicit)
 //  4. OR
+//
+// Pipeline grammar (see pipeline_parser.go for ParsePipeline):
+//
+//	pipeline   = filter_expr ( "|" pipe_op )*
+//	pipe_op    = stats_op | where_op
+//	stats_op   = "stats" agg_list ( "by" group_list )?
+//	where_op   = "where" filter_expr
 type parser struct {
 	lex *Lexer
 	cur Token

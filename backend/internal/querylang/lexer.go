@@ -27,6 +27,11 @@ const (
 	TokStar             // *
 	TokRegex            // /pattern/ (regex literal, slashes stripped)
 	TokGlob             // bareword with glob metacharacters (*, ?, [)
+	TokPipe             // |
+	TokComma            // ,
+	TokPlus             // +
+	TokMinus            // -
+	TokSlash            // / (arithmetic division, only in pipe context)
 )
 
 func (k TokenKind) String() string {
@@ -63,6 +68,16 @@ func (k TokenKind) String() string {
 		return "REGEX"
 	case TokGlob:
 		return "GLOB"
+	case TokPipe:
+		return "|"
+	case TokComma:
+		return ","
+	case TokPlus:
+		return "+"
+	case TokMinus:
+		return "-"
+	case TokSlash:
+		return "/"
 	default:
 		return "UNKNOWN"
 	}
@@ -77,13 +92,20 @@ type Token struct {
 
 // Lexer tokenizes a query string.
 type Lexer struct {
-	input string
-	pos   int // current position in input
+	input    string
+	pos      int  // current position in input
+	pipeMode bool // when true, '/' emits TokSlash instead of scanning regex
 }
 
 // NewLexer creates a new lexer for the given input.
 func NewLexer(input string) *Lexer {
 	return &Lexer{input: input}
+}
+
+// SetPipeMode sets whether the lexer is in pipe mode.
+// In pipe mode, '/' emits TokSlash (division) instead of scanning a regex literal.
+func (l *Lexer) SetPipeMode(on bool) {
+	l.pipeMode = on
 }
 
 // Next returns the next token.
@@ -135,9 +157,29 @@ func (l *Lexer) Next() (Token, error) {
 		}
 		l.pos++
 		return Token{Kind: TokStar, Lit: "*", Pos: startPos}, nil
+	case '|':
+		l.pos++
+		return Token{Kind: TokPipe, Lit: "|", Pos: startPos}, nil
+	case ',':
+		l.pos++
+		return Token{Kind: TokComma, Lit: ",", Pos: startPos}, nil
+	case '+':
+		l.pos++
+		return Token{Kind: TokPlus, Lit: "+", Pos: startPos}, nil
+	case '-':
+		if l.pipeMode {
+			l.pos++
+			return Token{Kind: TokMinus, Lit: "-", Pos: startPos}, nil
+		}
+		// In filter mode, '-' is a valid bareword char (e.g. "my-token")
+		return l.scanBareword()
 	case '"', '\'':
 		return l.scanQuotedString(ch)
 	case regexDelimiter:
+		if l.pipeMode {
+			l.pos++
+			return Token{Kind: TokSlash, Lit: "/", Pos: startPos}, nil
+		}
 		return l.scanRegex()
 	}
 
@@ -307,6 +349,8 @@ func isBarewordChar(ch byte) bool {
 	case ' ', '\t', '\n', '\r':
 		return false
 	case '(', ')', '=', '*', '?', '[', '"', '\'', '/', '>', '<', '!':
+		return false
+	case '|', ',', '+':
 		return false
 	default:
 		return true
