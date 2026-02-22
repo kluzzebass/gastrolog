@@ -2,6 +2,22 @@
 
 All notable changes to GastroLog are documented here.
 
+## v0.3.1 — 2026-02-22
+
+### Features
+- **Multiple retention rules per store** — stores now support an array of retention rules, each pairing a policy with an action (expire or migrate). Enables tiered storage where chunks age-out from hot to cold stores automatically.
+- **Prometheus `/metrics` endpoint** — exposes Go runtime, ingestion, and storage metrics in Prometheus format
+
+### Fixes
+- Stores created through the UI now correctly apply rotation policies (age, size, record count thresholds were silently ignored)
+- Age-based rotation now triggers via background sweep (every 15s) even when no records are flowing to a store
+- Chunks sealed by cron rotation or background sweep now get compressed and indexed (previously skipped the post-seal pipeline)
+- Stable sort order for stores list in inspector panel
+
+### Breaking Changes
+- JSON config store (`--config-type json`) removed — use SQLite (default) or memory
+- SQLite migration 004 converts the single `retention` column to a `store_retention_rules` junction table. Existing single-policy references are preserved as expire rules.
+
 ## v0.3.0 — 2026-02-22
 
 ### Features
