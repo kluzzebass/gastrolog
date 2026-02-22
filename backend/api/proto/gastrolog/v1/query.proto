@@ -39,6 +39,22 @@ message SearchResponse {
   repeated Record records = 1;
   bytes resume_token = 2; // Token to continue from, if more results exist
   bool has_more = 3;
+
+  // Set for pipeline queries (e.g. "error | stats count by level").
+  // When present, records is empty; results are in table form.
+  TableResult table_result = 4;
+}
+
+// TableResult holds aggregated results from a pipeline stats operator.
+message TableResult {
+  repeated string columns = 1;    // Column names in order (groups first, then aggregates)
+  repeated TableRow rows = 2;     // Row data (same column order)
+  bool truncated = 3;             // True if cardinality cap was hit
+  string result_type = 4;         // "table" or "timeseries" (timeseries when bin() is used)
+}
+
+message TableRow {
+  repeated string values = 1;
 }
 
 message FollowRequest {

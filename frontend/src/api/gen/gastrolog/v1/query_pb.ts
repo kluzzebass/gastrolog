@@ -72,6 +72,14 @@ export class SearchResponse extends Message<SearchResponse> {
    */
   hasMore = false;
 
+  /**
+   * Set for pipeline queries (e.g. "error | stats count by level").
+   * When present, records is empty; results are in table form.
+   *
+   * @generated from field: gastrolog.v1.TableResult table_result = 4;
+   */
+  tableResult?: TableResult;
+
   constructor(data?: PartialMessage<SearchResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -83,6 +91,7 @@ export class SearchResponse extends Message<SearchResponse> {
     { no: 1, name: "records", kind: "message", T: Record, repeated: true },
     { no: 2, name: "resume_token", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 3, name: "has_more", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 4, name: "table_result", kind: "message", T: TableResult },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SearchResponse {
@@ -99,6 +108,108 @@ export class SearchResponse extends Message<SearchResponse> {
 
   static equals(a: SearchResponse | PlainMessage<SearchResponse> | undefined, b: SearchResponse | PlainMessage<SearchResponse> | undefined): boolean {
     return proto3.util.equals(SearchResponse, a, b);
+  }
+}
+
+/**
+ * TableResult holds aggregated results from a pipeline stats operator.
+ *
+ * @generated from message gastrolog.v1.TableResult
+ */
+export class TableResult extends Message<TableResult> {
+  /**
+   * Column names in order (groups first, then aggregates)
+   *
+   * @generated from field: repeated string columns = 1;
+   */
+  columns: string[] = [];
+
+  /**
+   * Row data (same column order)
+   *
+   * @generated from field: repeated gastrolog.v1.TableRow rows = 2;
+   */
+  rows: TableRow[] = [];
+
+  /**
+   * True if cardinality cap was hit
+   *
+   * @generated from field: bool truncated = 3;
+   */
+  truncated = false;
+
+  /**
+   * "table" or "timeseries" (timeseries when bin() is used)
+   *
+   * @generated from field: string result_type = 4;
+   */
+  resultType = "";
+
+  constructor(data?: PartialMessage<TableResult>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.TableResult";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "columns", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 2, name: "rows", kind: "message", T: TableRow, repeated: true },
+    { no: 3, name: "truncated", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 4, name: "result_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TableResult {
+    return new TableResult().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TableResult {
+    return new TableResult().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TableResult {
+    return new TableResult().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: TableResult | PlainMessage<TableResult> | undefined, b: TableResult | PlainMessage<TableResult> | undefined): boolean {
+    return proto3.util.equals(TableResult, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.TableRow
+ */
+export class TableRow extends Message<TableRow> {
+  /**
+   * @generated from field: repeated string values = 1;
+   */
+  values: string[] = [];
+
+  constructor(data?: PartialMessage<TableRow>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.TableRow";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "values", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TableRow {
+    return new TableRow().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TableRow {
+    return new TableRow().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TableRow {
+    return new TableRow().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: TableRow | PlainMessage<TableRow> | undefined, b: TableRow | PlainMessage<TableRow> | undefined): boolean {
+    return proto3.util.equals(TableRow, a, b);
   }
 }
 

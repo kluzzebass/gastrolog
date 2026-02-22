@@ -50,9 +50,20 @@ func (s *QueryServer) Search(
 
 	eng := s.orch.MultiStoreQueryEngine()
 
-	q, err := protoToQuery(req.Msg.Query)
+	q, pipeline, err := protoToQuery(req.Msg.Query)
 	if err != nil {
 		return connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
+	// Pipeline query: run aggregation and return table result.
+	if pipeline != nil && len(pipeline.Pipes) > 0 {
+		result, err := eng.RunPipeline(ctx, q, pipeline)
+		if err != nil {
+			return connect.NewError(connect.CodeInternal, err)
+		}
+		return stream.Send(&apiv1.SearchResponse{
+			TableResult: tableResultToProto(result, pipeline),
+		})
 	}
 
 	// Clamp query limit to server-configured max.
@@ -134,9 +145,15 @@ func (s *QueryServer) Follow(
 
 	eng := s.orch.MultiStoreQueryEngine()
 
-	q, err := protoToQuery(req.Msg.Query)
+	q, pipeline, err := protoToQuery(req.Msg.Query)
 	if err != nil {
 		return connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
+	// Pipeline queries are not supported in follow mode.
+	if pipeline != nil && len(pipeline.Pipes) > 0 {
+		return connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("pipeline operators (stats, where) are not supported in follow mode"))
 	}
 
 	// Use Follow which continuously polls for new records.
@@ -167,7 +184,7 @@ func (s *QueryServer) Explain(
 ) (*connect.Response[apiv1.ExplainResponse], error) {
 	eng := s.orch.MultiStoreQueryEngine()
 
-	q, err := protoToQuery(req.Msg.Query)
+	q, _, err := protoToQuery(req.Msg.Query)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
@@ -255,7 +272,7 @@ func (s *QueryServer) Histogram(
 	var q query.Query
 	if req.Msg.Expression != "" {
 		var err error
-		q, err = parseExpression(req.Msg.Expression)
+		q, _, err = parseExpression(req.Msg.Expression)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
@@ -358,9 +375,10 @@ func (s *QueryServer) GetContext(
 // protoToQuery converts a proto Query to the internal query.Query type.
 // If the Expression field is set, it is parsed server-side and takes
 // precedence over the legacy Tokens/KvPredicates fields.
-func protoToQuery(pq *apiv1.Query) (query.Query, error) {
+// Returns the pipeline if the expression contains pipe operators (e.g. "| stats count").
+func protoToQuery(pq *apiv1.Query) (query.Query, *querylang.Pipeline, error) {
 	if pq == nil {
-		return query.Query{}, nil
+		return query.Query{}, nil, nil
 	}
 
 	// If Expression is set, parse it server-side (same logic as repl/parse.go).
@@ -368,9 +386,9 @@ func protoToQuery(pq *apiv1.Query) (query.Query, error) {
 	// when set, so the frontend can control page size without injecting limit=
 	// into the expression string.
 	if pq.Expression != "" {
-		q, err := parseExpression(pq.Expression)
+		q, pipeline, err := parseExpression(pq.Expression)
 		if err != nil {
-			return q, err
+			return q, nil, err
 		}
 		if pq.Limit > 0 && q.Limit == 0 {
 			q.Limit = int(pq.Limit)
@@ -381,7 +399,7 @@ func protoToQuery(pq *apiv1.Query) (query.Query, error) {
 		if pq.End != nil && q.End.IsZero() {
 			q.End = pq.End.AsTime()
 		}
-		return q, nil
+		return q, pipeline, nil
 	}
 
 	// Legacy path: use structured Tokens/KvPredicates fields.
@@ -406,21 +424,23 @@ func protoToQuery(pq *apiv1.Query) (query.Query, error) {
 		}
 	}
 
-	return q, nil
+	return q, nil, nil
 }
 
 const maxExpressionLength = 4096
 
-// parseExpression parses a raw query expression string into a Query.
+// parseExpression parses a raw query expression string into a Query and optional Pipeline.
 // Control arguments (start=, end=, limit=) are extracted; the remainder
-// is parsed through the querylang parser into BoolExpr.
-func parseExpression(expr string) (query.Query, error) {
+// is parsed through the pipeline parser. If the expression contains pipe
+// operators (e.g. "| stats count"), the pipeline is returned; otherwise
+// only the filter expression is set on the query.
+func parseExpression(expr string) (query.Query, *querylang.Pipeline, error) {
 	if len(expr) > maxExpressionLength {
-		return query.Query{}, fmt.Errorf("expression too long: %d bytes (max %d)", len(expr), maxExpressionLength)
+		return query.Query{}, nil, fmt.Errorf("expression too long: %d bytes (max %d)", len(expr), maxExpressionLength)
 	}
 	parts := strings.Fields(expr)
 	if len(parts) == 0 {
-		return query.Query{}, nil
+		return query.Query{}, nil, nil
 	}
 
 	var q query.Query
@@ -436,21 +456,21 @@ func parseExpression(expr string) (query.Query, error) {
 			case "start":
 				t, err := parseTime(v)
 				if err != nil {
-					return q, fmt.Errorf("invalid start time: %w", err)
+					return q, nil, fmt.Errorf("invalid start time: %w", err)
 				}
 				q.Start = t
 				continue
 			case "end":
 				t, err := parseTime(v)
 				if err != nil {
-					return q, fmt.Errorf("invalid end time: %w", err)
+					return q, nil, fmt.Errorf("invalid end time: %w", err)
 				}
 				q.End = t
 				continue
 			case "last":
 				d, err := parseDuration(v)
 				if err != nil {
-					return q, fmt.Errorf("invalid last duration: %w", err)
+					return q, nil, fmt.Errorf("invalid last duration: %w", err)
 				}
 				now := time.Now()
 				q.Start = now.Add(-d)
@@ -459,42 +479,42 @@ func parseExpression(expr string) (query.Query, error) {
 			case "source_start":
 				t, err := parseTime(v)
 				if err != nil {
-					return q, fmt.Errorf("invalid source_start time: %w", err)
+					return q, nil, fmt.Errorf("invalid source_start time: %w", err)
 				}
 				q.SourceStart = t
 				continue
 			case "source_end":
 				t, err := parseTime(v)
 				if err != nil {
-					return q, fmt.Errorf("invalid source_end time: %w", err)
+					return q, nil, fmt.Errorf("invalid source_end time: %w", err)
 				}
 				q.SourceEnd = t
 				continue
 			case "ingest_start":
 				t, err := parseTime(v)
 				if err != nil {
-					return q, fmt.Errorf("invalid ingest_start time: %w", err)
+					return q, nil, fmt.Errorf("invalid ingest_start time: %w", err)
 				}
 				q.IngestStart = t
 				continue
 			case "ingest_end":
 				t, err := parseTime(v)
 				if err != nil {
-					return q, fmt.Errorf("invalid ingest_end time: %w", err)
+					return q, nil, fmt.Errorf("invalid ingest_end time: %w", err)
 				}
 				q.IngestEnd = t
 				continue
 			case "limit":
 				var n int
 				if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
-					return q, fmt.Errorf("invalid limit: %w", err)
+					return q, nil, fmt.Errorf("invalid limit: %w", err)
 				}
 				q.Limit = n
 				continue
 			case "pos":
 				var n uint64
 				if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
-					return q, fmt.Errorf("invalid pos: %w", err)
+					return q, nil, fmt.Errorf("invalid pos: %w", err)
 				}
 				q.Pos = &n
 				continue
@@ -504,14 +524,17 @@ func parseExpression(expr string) (query.Query, error) {
 	}
 
 	if len(filterParts) > 0 {
-		parsed, err := querylang.Parse(strings.Join(filterParts, " "))
+		pipeline, err := querylang.ParsePipeline(strings.Join(filterParts, " "))
 		if err != nil {
-			return q, fmt.Errorf("parse error: %w", err)
+			return q, nil, fmt.Errorf("parse error: %w", err)
 		}
-		q.BoolExpr = parsed
+		q.BoolExpr = pipeline.Filter
+		if len(pipeline.Pipes) > 0 {
+			return q, pipeline, nil
+		}
 	}
 
-	return q, nil
+	return q, nil, nil
 }
 
 // parseDuration parses a duration string like "5m", "1h", or "3d".
@@ -556,6 +579,34 @@ func pipelineStepsToProto(steps []query.PipelineStep) []*apiv1.PipelineStep {
 		}
 	}
 	return out
+}
+
+// tableResultToProto converts an internal TableResult to the proto type.
+func tableResultToProto(result *query.TableResult, pipeline *querylang.Pipeline) *apiv1.TableResult {
+	rows := make([]*apiv1.TableRow, len(result.Rows))
+	for i, row := range result.Rows {
+		rows[i] = &apiv1.TableRow{Values: row}
+	}
+
+	// Determine result type from pipeline: timeseries if bin() is present.
+	resultType := "table"
+	for _, pipe := range pipeline.Pipes {
+		if stats, ok := pipe.(*querylang.StatsOp); ok {
+			for _, g := range stats.Groups {
+				if g.Bin != nil {
+					resultType = "timeseries"
+					break
+				}
+			}
+		}
+	}
+
+	return &apiv1.TableResult{
+		Columns:    result.Columns,
+		Rows:       rows,
+		Truncated:  result.Truncated,
+		ResultType: resultType,
+	}
 }
 
 // recordToProto converts an internal Record to the proto type.
