@@ -23,6 +23,7 @@ const INGESTER_TYPES = [
   { id: "docker", label: "Docker", description: "Container log streaming" },
   { id: "tail", label: "Tail", description: "File tailing with glob patterns" },
   { id: "relp", label: "RELP", description: "Reliable Event Logging Protocol" },
+  { id: "metrics", label: "Metrics", description: "Self-monitoring system metrics" },
   { id: "chatterbox", label: "Chatterbox", description: "Test data generator" },
 ] as const;
 

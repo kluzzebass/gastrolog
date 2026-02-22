@@ -16,6 +16,7 @@ You can run multiple ingesters simultaneously, each feeding into the same pipeli
 | [**Kafka**](help:ingester-kafka) | Consumes messages from a Kafka topic |
 | [**Tail**](help:ingester-tail) | Follows local log files, like `tail -f` |
 | [**Docker**](help:ingester-docker) | Streams container logs from a Docker daemon |
+| [**Metrics**](help:ingester-metrics) | Emits process-level system metrics (CPU, memory, queue depth) |
 | [**Chatterbox**](help:ingester-chatterbox) | Generates random test messages for development |
 
 Select an ingester from the sidebar for protocol and configuration details.

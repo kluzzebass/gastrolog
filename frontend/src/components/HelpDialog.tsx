@@ -11,6 +11,9 @@ const MermaidDiagram = lazy(() => import("./Mermaid").then((m) => ({ default: m.
 let remarkGfmPlugin: any[] = [];
 import("remark-gfm").then((m) => { remarkGfmPlugin = [m.default]; });
 
+/** Stable identity transform — hoisted to module level to avoid re-renders. */
+const identityUrlTransform = (url: string) => url;
+
 interface HelpDialogProps {
   dark: boolean;
   topicId?: string;
@@ -127,8 +130,6 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
       }
     }
   };
-
-  const mdComponents = markdownComponents(dark, navigate, onOpenSettings);
 
   function selectTopic(t: HelpTopic) {
     onNavigate(t.id);
@@ -308,11 +309,12 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
         {/* Content */}
         <div ref={contentRef} className="flex-1 overflow-y-auto app-scroll p-6">
           {topic && topicContent && !loadingContent ? (
-            <Suspense fallback={null}>
-              <Markdown remarkPlugins={remarkGfmPlugin} components={mdComponents} urlTransform={(url) => url}>
-                {topicContent}
-              </Markdown>
-            </Suspense>
+            <MarkdownContent
+              dark={dark}
+              content={topicContent}
+              onNavigate={navigate}
+              onOpenSettings={onOpenSettings}
+            />
           ) : topic ? (
             <p className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
               Loading...
@@ -331,7 +333,46 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
   );
 }
 
-function markdownComponents(dark: boolean, onNavigate: (topicId: string) => void, onOpenSettings?: (tab: string) => void) {
+/**
+ * Isolated markdown renderer. Callbacks are stored in refs so the components
+ * object (and thus react-markdown's DOM) only changes when `dark` flips.
+ * Parent re-renders (e.g. polling in SearchView) no longer cause remounts
+ * that reset scroll positions inside <pre> blocks.
+ */
+function MarkdownContent({ dark, content, onNavigate, onOpenSettings }: Readonly<{
+  dark: boolean;
+  content: string;
+  onNavigate: (topicId: string) => void;
+  onOpenSettings?: (tab: string) => void;
+}>) {
+  const navRef = useRef(onNavigate);
+  navRef.current = onNavigate;
+  const settingsRef = useRef(onOpenSettings);
+  settingsRef.current = onOpenSettings;
+
+  // Cache the components object in a ref so react-markdown always receives
+  // the same reference. Only rebuild when dark mode changes.
+  const darkRef = useRef(dark);
+  const componentsRef = useRef<ReturnType<typeof buildMarkdownComponents> | null>(null);
+  if (componentsRef.current === null || darkRef.current !== dark) {
+    darkRef.current = dark;
+    componentsRef.current = buildMarkdownComponents(dark, navRef, settingsRef);
+  }
+
+  return (
+    <Suspense fallback={null}>
+      <Markdown remarkPlugins={remarkGfmPlugin} components={componentsRef.current} urlTransform={identityUrlTransform}>
+        {content}
+      </Markdown>
+    </Suspense>
+  );
+}
+
+function buildMarkdownComponents(
+  dark: boolean,
+  navRef: React.RefObject<(topicId: string) => void>,
+  settingsRef: React.RefObject<((tab: string) => void) | undefined>,
+) {
   const c: (d: string, l: string) => string = dark
     ? (d) => d
     : (_, l) => l;
@@ -384,8 +425,21 @@ function markdownComponents(dark: boolean, onNavigate: (topicId: string) => void
       children?: React.ReactNode;
       className?: string;
     }) => {
-      // Inline code (no language class)
       if (!className) {
+        const text = typeof children === "string" ? children : String(children ?? "");
+        // Fenced block without language — contains newlines.
+        // Don't apply inline padding (px/py) here; <pre> handles the box.
+        // The inline <code> padding causes a visual leading-space on the
+        // first line because padding only applies to the start of the
+        // inline element, not to each wrapped line.
+        if (text.includes("\n")) {
+          return (
+            <code className={`font-mono text-[0.85em] ${c("text-text-normal", "text-light-text-normal")}`}>
+              {text.replace(/\n$/, "")}
+            </code>
+          );
+        }
+        // Inline code
         return (
           <code
             className={`font-mono text-[0.9em] px-1.5 py-0.5 rounded ${c("bg-ink-surface text-text-normal", "bg-light-hover text-light-text-normal")}`}
@@ -439,18 +493,18 @@ function markdownComponents(dark: boolean, onNavigate: (topicId: string) => void
         const topicId = href.slice(5);
         return (
           <button
-            onClick={() => onNavigate(topicId)}
+            onClick={() => navRef.current(topicId)}
             className="text-copper hover:underline cursor-pointer"
           >
             {children}
           </button>
         );
       }
-      if (href?.startsWith("settings:") && onOpenSettings) {
+      if (href?.startsWith("settings:")) {
         const tab = href.slice(9);
         return (
           <button
-            onClick={() => onOpenSettings(tab)}
+            onClick={() => settingsRef.current?.(tab)}
             className="text-copper hover:underline cursor-pointer"
           >
             {children}

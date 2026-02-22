@@ -751,6 +751,25 @@ export function IngesterParamsForm({
     );
   }
 
+  if (ingesterType === "metrics") {
+    return (
+      <FormField
+        label="Interval"
+        description="How often to emit a metrics record"
+        dark={dark}
+      >
+        <TextInput
+          value={params["interval"] ?? ""}
+          onChange={(v) => onChange({ ...params, interval: v })}
+          placeholder="30s"
+          dark={dark}
+          mono
+          examples={["10s", "30s", "1m"]}
+        />
+      </FormField>
+    );
+  }
+
   if (ingesterType === "syslog") {
     return (
       <div className="grid grid-cols-2 gap-3">

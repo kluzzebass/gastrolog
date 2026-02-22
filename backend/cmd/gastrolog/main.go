@@ -43,6 +43,7 @@ import (
 	ingestotlp "gastrolog/internal/ingester/otlp"
 	ingestrelp "gastrolog/internal/ingester/relp"
 	ingestsyslog "gastrolog/internal/ingester/syslog"
+	ingestmetrics "gastrolog/internal/ingester/metrics"
 	ingesttail "gastrolog/internal/ingester/tail"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
@@ -197,7 +198,7 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 	orch.RegisterDigester(digesttimestamp.New())
 
 	// Apply configuration with factories.
-	factories := buildFactories(logger, homeDir, cfgStore)
+	factories := buildFactories(logger, homeDir, cfgStore, orch)
 	if err := orch.ApplyConfig(cfg, factories); err != nil {
 		return err
 	}
@@ -280,7 +281,7 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 
 // buildFactories creates the factory maps for all supported component types.
 // The logger is passed to component factories for structured logging.
-func buildFactories(logger *slog.Logger, homeDir string, cfgStore config.Store) orchestrator.Factories {
+func buildFactories(logger *slog.Logger, homeDir string, cfgStore config.Store, orch *orchestrator.Orchestrator) orchestrator.Factories {
 	return orchestrator.Factories{
 		Ingesters: map[string]orchestrator.IngesterFactory{
 			"chatterbox": chatterbox.NewIngester,
@@ -288,6 +289,7 @@ func buildFactories(logger *slog.Logger, homeDir string, cfgStore config.Store) 
 			"fluentfwd":  ingestfluentfwd.NewFactory(),
 			"http":       ingesthttp.NewFactory(),
 			"kafka":      ingestkafka.NewFactory(),
+			"metrics":    ingestmetrics.NewFactory(orch),
 			"otlp":       ingestotlp.NewFactory(),
 			"relp":       ingestrelp.NewFactory(),
 			"syslog":     ingestsyslog.NewFactory(),
