@@ -1,38 +1,87 @@
 import type { TableResult } from "../api/client";
 import { useThemeClass } from "../hooks/useThemeClass";
+import { ExportButton } from "./ExportButton";
 import { TableView } from "./TableView";
 import { TimeSeriesChart } from "./TimeSeriesChart";
+
+const POLL_OPTIONS: { label: string; ms: number | null }[] = [
+  { label: "Off", ms: null },
+  { label: "5s", ms: 5_000 },
+  { label: "10s", ms: 10_000 },
+  { label: "30s", ms: 30_000 },
+  { label: "1m", ms: 60_000 },
+];
+
+function AutoRefreshControls({
+  pollInterval,
+  onPollIntervalChange,
+  onRefresh,
+  dark,
+}: {
+  pollInterval: number | null;
+  onPollIntervalChange: (ms: number | null) => void;
+  onRefresh: () => void;
+  dark: boolean;
+}) {
+  const c = useThemeClass(dark);
+  return (
+    <div className="flex items-center gap-2">
+      <div
+        className={`flex items-center rounded overflow-hidden border ${c(
+          "border-ink-border-subtle",
+          "border-light-border-subtle",
+        )}`}
+      >
+        {POLL_OPTIONS.map((opt) => (
+          <button
+            key={opt.label}
+            onClick={() => onPollIntervalChange(opt.ms)}
+            className={`px-2 py-1 text-[0.75em] font-mono transition-colors ${
+              pollInterval === opt.ms
+                ? `${c("bg-copper/20 text-copper", "bg-copper/20 text-copper")}`
+                : `${c(
+                    "text-text-muted hover:text-text-bright hover:bg-ink-hover",
+                    "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
+                  )}`
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      <button
+        onClick={onRefresh}
+        className={`px-2.5 py-1.5 text-[0.8em] font-mono rounded transition-colors ${c(
+          "text-text-muted hover:text-copper hover:bg-ink-hover",
+          "text-light-text-muted hover:text-copper hover:bg-light-hover",
+        )}`}
+        title="Refresh now"
+      >
+        ↻
+      </button>
+    </div>
+  );
+}
 
 interface PipelineResultsProps {
   tableResult: TableResult;
   dark: boolean;
+  pollInterval: number | null;
+  onPollIntervalChange: (ms: number | null) => void;
+  onRefresh: () => void;
 }
 
 export function PipelineResults({
   tableResult,
   dark,
+  pollInterval,
+  onPollIntervalChange,
+  onRefresh,
 }: Readonly<PipelineResultsProps>) {
   const c = useThemeClass(dark);
   const { columns, rows, truncated, resultType } = tableResult;
   const rowData = rows.map((r) => r.values);
-
-  const exportCsv = () => {
-    const escape = (v: string) =>
-      v.includes(",") || v.includes('"') || v.includes("\n")
-        ? `"${v.replace(/"/g, '""')}"`
-        : v;
-    const lines = [
-      columns.map(escape).join(","),
-      ...rowData.map((row) => row.map(escape).join(",")),
-    ];
-    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "pipeline-results.csv";
-    a.click();
-    URL.revokeObjectURL(url);
-  };
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -61,15 +110,15 @@ export function PipelineResults({
             {rowData.length} row{rowData.length !== 1 ? "s" : ""}
           </span>
         </div>
-        <button
-          onClick={exportCsv}
-          className={`px-3 py-1.5 text-[0.8em] font-mono rounded transition-colors ${c(
-            "text-text-muted hover:text-copper hover:bg-ink-hover",
-            "text-light-text-muted hover:text-copper hover:bg-light-hover",
-          )}`}
-        >
-          Export CSV
-        </button>
+        <div className="flex items-center gap-2">
+          <AutoRefreshControls
+            pollInterval={pollInterval}
+            onPollIntervalChange={onPollIntervalChange}
+            onRefresh={onRefresh}
+            dark={dark}
+          />
+          <ExportButton tableData={{ columns, rows: rowData }} dark={dark} />
+        </div>
       </div>
 
       {/* Truncation warning */}

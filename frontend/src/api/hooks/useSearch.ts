@@ -75,7 +75,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
   const abortRef = useRef<AbortController | null>(null);
 
   const search = useCallback(
-    async (queryStr: string, append = false) => {
+    async (queryStr: string, append = false, keepPrevious = false) => {
       // Cancel any in-flight request on new searches (not appends).
       if (abortRef.current) {
         if (!append) {
@@ -99,9 +99,9 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
         ...prev,
         isSearching: true,
         error: null,
-        records: append ? prev.records : [],
+        records: append || keepPrevious ? prev.records : [],
         resumeToken: append ? prev.resumeToken : null,
-        tableResult: append ? prev.tableResult : null,
+        tableResult: append || keepPrevious ? prev.tableResult : null,
       }));
 
       try {

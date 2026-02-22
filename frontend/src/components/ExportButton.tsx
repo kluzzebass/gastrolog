@@ -53,11 +53,31 @@ function download(content: string, filename: string, mime: string) {
   URL.revokeObjectURL(url);
 }
 
+interface TableData {
+  columns: string[];
+  rows: string[][];
+}
+
+function tableToJSON(table: TableData): string {
+  const objs = table.rows.map((row) =>
+    Object.fromEntries(table.columns.map((col, i) => [col, row[i] ?? ""])),
+  );
+  return JSON.stringify(objs, null, 2);
+}
+
+function tableToCSV(table: TableData): string {
+  const header = table.columns.map(escapeCSV).join(",");
+  const lines = table.rows.map((row) => row.map(escapeCSV).join(","));
+  return [header, ...lines].join("\n");
+}
+
 export function ExportButton({
   records,
+  tableData,
   dark,
 }: Readonly<{
-  records: ProtoRecord[];
+  records?: ProtoRecord[];
+  tableData?: TableData;
   dark: boolean;
 }>) {
   const [open, setOpen] = useState(false);
@@ -67,12 +87,24 @@ export function ExportButton({
     () => setOpen(false),
   );
 
+  const isEmpty = tableData
+    ? tableData.rows.length === 0
+    : !records || records.length === 0;
+
   const handleExport = (format: Format) => {
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
-    if (format === "json") {
-      download(toJSON(records), `gastrolog-${ts}.json`, "application/json");
-    } else {
-      download(toCSV(records), `gastrolog-${ts}.csv`, "text/csv");
+    if (tableData) {
+      if (format === "json") {
+        download(tableToJSON(tableData), `gastrolog-${ts}.json`, "application/json");
+      } else {
+        download(tableToCSV(tableData), `gastrolog-${ts}.csv`, "text/csv");
+      }
+    } else if (records) {
+      if (format === "json") {
+        download(toJSON(records), `gastrolog-${ts}.json`, "application/json");
+      } else {
+        download(toCSV(records), `gastrolog-${ts}.csv`, "text/csv");
+      }
     }
     setOpen(false);
   };
@@ -83,7 +115,7 @@ export function ExportButton({
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((o) => !o)}
-        disabled={records.length === 0}
+        disabled={isEmpty}
         aria-label="Export results"
         title="Export results"
         className={`w-8 h-8 flex items-center justify-center rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${c(

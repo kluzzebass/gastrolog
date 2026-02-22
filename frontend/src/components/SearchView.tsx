@@ -527,6 +527,22 @@ export function SearchView() {
   const { hasErrors: draftHasErrors, hasPipeline: draftIsPipeline } = tokenize(draft, syntax);
   const isPipelineResult = tableResult !== null;
   const queryIsPipeline = hasPipeOutsideQuotes(q);
+
+  // Auto-refresh polling for pipeline results.
+  const [pollInterval, setPollInterval] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!pollInterval || !isPipelineResult) return;
+    const id = setInterval(() => {
+      search(q, false, true);
+    }, pollInterval);
+    return () => clearInterval(id);
+  }, [pollInterval, isPipelineResult, q, search]);
+
+  // Clear poll interval when query changes or leaves pipeline mode.
+  useEffect(() => {
+    setPollInterval(null);
+  }, [q]);
   const displayRecords = isFollowMode ? followRecords : records;
   const attrFields = aggregateFields(displayRecords, "attrs");
   const kvFields = aggregateFields(displayRecords, "kv");
@@ -890,7 +906,13 @@ export function SearchView() {
                 </div>
               </div>
             ) : isPipelineResult ? (
-              <PipelineResults tableResult={tableResult} dark={dark} />
+              <PipelineResults
+                tableResult={tableResult}
+                dark={dark}
+                pollInterval={pollInterval}
+                onPollIntervalChange={setPollInterval}
+                onRefresh={() => search(q, false, true)}
+              />
             ) : (
             <>
             <ResultsToolbar
