@@ -30,7 +30,7 @@ run-noauth:
 
 # Runs the gastrolog backend with pprof server.
 pprof:
-  go run ./cmd/gastrolog server --pprof localhost:6060
+  go run ./cmd/gastrolog server --home data --pprof localhost:6060
 
 # Cross-compiles for a specific OS/arch. Usage: just build-cross linux amd64
 build-cross os arch:

@@ -27,25 +27,26 @@ func init() {
 	}
 }
 
-// compressFile reads a file with a format header, compresses the data section
-// using seekable zstd (enabling random access by uncompressed offset), and
-// atomically replaces the original via temp-file-then-rename.
-// The FlagCompressed bit is OR'd into the header flags.
+// compressFile streams a file with a format header through seekable zstd
+// compression, atomically replacing the original via temp-file-then-rename.
+// The file is read in seekableFrameSize chunks to avoid loading it entirely
+// into memory. The FlagCompressed bit is OR'd into the header flags.
 func compressFile(path string, enc *zstd.Encoder, mode os.FileMode) error {
-	data, err := os.ReadFile(path)
+	src, err := os.Open(path)
 	if err != nil {
 		return err
 	}
-	if len(data) < format.HeaderSize {
+	defer src.Close()
+
+	// Read and validate header.
+	var hdr [format.HeaderSize]byte
+	if _, err := io.ReadFull(src, hdr[:]); err != nil {
 		return format.ErrHeaderTooSmall
 	}
 
-	header := data[:format.HeaderSize]
-	body := data[format.HeaderSize:]
-
 	// Build new header with FlagCompressed set.
 	newHeader := make([]byte, format.HeaderSize)
-	copy(newHeader, header)
+	copy(newHeader, hdr[:])
 	newHeader[3] |= format.FlagCompressed
 
 	// Write to temp file, then rename (atomic).
@@ -67,16 +68,27 @@ func compressFile(path string, enc *zstd.Encoder, mode os.FileMode) error {
 		return err
 	}
 
-	// Write body as seekable zstd: split into fixed-size frames for random access.
-	// Each Write() creates an independent zstd frame; Close() appends the seek table.
+	// Stream body as seekable zstd: read in fixed-size chunks, each becoming
+	// an independent zstd frame for random access. Only one chunk buffer is
+	// live at a time instead of the entire file.
 	sw, err := seekable.NewWriter(tmp, enc)
 	if err != nil {
 		cleanup()
 		return err
 	}
-	for off := 0; off < len(body); off += seekableFrameSize {
-		end := min(off+seekableFrameSize, len(body))
-		if _, err := sw.Write(body[off:end]); err != nil {
+	buf := make([]byte, seekableFrameSize)
+	for {
+		n, err := io.ReadFull(src, buf)
+		if n > 0 {
+			if _, werr := sw.Write(buf[:n]); werr != nil {
+				cleanup()
+				return werr
+			}
+		}
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			break
+		}
+		if err != nil {
 			cleanup()
 			return err
 		}

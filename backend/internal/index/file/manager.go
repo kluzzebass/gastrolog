@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"gastrolog/internal/chunk"
@@ -20,6 +21,9 @@ import (
 
 // Manager manages file-based index storage.
 //
+// Sealed chunk indexes are immutable once built, so they are cached in memory
+// after the first load. The cache is invalidated when DeleteIndexes is called.
+//
 // Logging:
 //   - Logger is dependency-injected via NewManager
 //   - Manager owns its scoped logger (component="index-manager", type="file")
@@ -30,9 +34,20 @@ type Manager struct {
 	indexers []index.Indexer
 	builder  *index.BuildHelper
 
+	// cache stores loaded indexes for sealed chunks. Keys are
+	// "chunkID:indexType" strings, values are typed index results.
+	// Only successful loads are cached; errors are never cached.
+	cache sync.Map
+
 	// Logger for this manager instance.
 	// Scoped with component="index-manager", type="file" at construction time.
 	logger *slog.Logger
+}
+
+// indexWithStatus pairs an index with its status (KV or JSON).
+type indexWithStatus[I any, S any] struct {
+	idx    I
+	status S
 }
 
 // NewManager creates a file-based index manager.
@@ -51,7 +66,10 @@ func (m *Manager) BuildIndexes(ctx context.Context, chunkID chunk.ChunkID) error
 }
 
 // DeleteIndexes removes all index files and temp files for the given chunk.
+// Also evicts all cached indexes for this chunk.
 func (m *Manager) DeleteIndexes(chunkID chunk.ChunkID) error {
+	m.evictCache(chunkID)
+
 	// Remove final index files.
 	paths := []string{
 		filetoken.IndexPath(m.dir, chunkID),
@@ -102,62 +120,112 @@ func (m *Manager) DeleteIndexes(chunkID chunk.ChunkID) error {
 }
 
 func (m *Manager) OpenTokenIndex(chunkID chunk.ChunkID) (*index.Index[index.TokenIndexEntry], error) {
+	key := chunkID.String() + ":token"
+	if v, ok := m.cache.Load(key); ok {
+		return v.(*index.Index[index.TokenIndexEntry]), nil
+	}
 	entries, err := filetoken.LoadIndex(m.dir, chunkID)
 	if err != nil {
 		return nil, fmt.Errorf("open token index: %w", err)
 	}
-	return index.NewIndex(entries), nil
+	idx := index.NewIndex(entries)
+	m.cache.Store(key, idx)
+	return idx, nil
 }
 
 func (m *Manager) OpenAttrKeyIndex(chunkID chunk.ChunkID) (*index.Index[index.AttrKeyIndexEntry], error) {
+	key := chunkID.String() + ":attr_key"
+	if v, ok := m.cache.Load(key); ok {
+		return v.(*index.Index[index.AttrKeyIndexEntry]), nil
+	}
 	entries, err := fileattr.LoadKeyIndex(m.dir, chunkID)
 	if err != nil {
 		return nil, fmt.Errorf("open attr key index: %w", err)
 	}
-	return index.NewIndex(entries), nil
+	idx := index.NewIndex(entries)
+	m.cache.Store(key, idx)
+	return idx, nil
 }
 
 func (m *Manager) OpenAttrValueIndex(chunkID chunk.ChunkID) (*index.Index[index.AttrValueIndexEntry], error) {
+	key := chunkID.String() + ":attr_val"
+	if v, ok := m.cache.Load(key); ok {
+		return v.(*index.Index[index.AttrValueIndexEntry]), nil
+	}
 	entries, err := fileattr.LoadValueIndex(m.dir, chunkID)
 	if err != nil {
 		return nil, fmt.Errorf("open attr value index: %w", err)
 	}
-	return index.NewIndex(entries), nil
+	idx := index.NewIndex(entries)
+	m.cache.Store(key, idx)
+	return idx, nil
 }
 
 func (m *Manager) OpenAttrKVIndex(chunkID chunk.ChunkID) (*index.Index[index.AttrKVIndexEntry], error) {
+	key := chunkID.String() + ":attr_kv"
+	if v, ok := m.cache.Load(key); ok {
+		return v.(*index.Index[index.AttrKVIndexEntry]), nil
+	}
 	entries, err := fileattr.LoadKVIndex(m.dir, chunkID)
 	if err != nil {
 		return nil, fmt.Errorf("open attr kv index: %w", err)
 	}
-	return index.NewIndex(entries), nil
+	idx := index.NewIndex(entries)
+	m.cache.Store(key, idx)
+	return idx, nil
 }
 
 func (m *Manager) OpenKVKeyIndex(chunkID chunk.ChunkID) (*index.Index[index.KVKeyIndexEntry], index.KVIndexStatus, error) {
+	key := chunkID.String() + ":kv_key"
+	if v, ok := m.cache.Load(key); ok {
+		c := v.(indexWithStatus[*index.Index[index.KVKeyIndexEntry], index.KVIndexStatus])
+		return c.idx, c.status, nil
+	}
 	entries, status, err := filekv.LoadKeyIndex(m.dir, chunkID)
 	if err != nil {
 		return nil, status, fmt.Errorf("open kv key index: %w", err)
 	}
-	return index.NewIndex(entries), status, nil
+	idx := index.NewIndex(entries)
+	m.cache.Store(key, indexWithStatus[*index.Index[index.KVKeyIndexEntry], index.KVIndexStatus]{idx, status})
+	return idx, status, nil
 }
 
 func (m *Manager) OpenKVValueIndex(chunkID chunk.ChunkID) (*index.Index[index.KVValueIndexEntry], index.KVIndexStatus, error) {
+	key := chunkID.String() + ":kv_val"
+	if v, ok := m.cache.Load(key); ok {
+		c := v.(indexWithStatus[*index.Index[index.KVValueIndexEntry], index.KVIndexStatus])
+		return c.idx, c.status, nil
+	}
 	entries, status, err := filekv.LoadValueIndex(m.dir, chunkID)
 	if err != nil {
 		return nil, status, fmt.Errorf("open kv value index: %w", err)
 	}
-	return index.NewIndex(entries), status, nil
+	idx := index.NewIndex(entries)
+	m.cache.Store(key, indexWithStatus[*index.Index[index.KVValueIndexEntry], index.KVIndexStatus]{idx, status})
+	return idx, status, nil
 }
 
 func (m *Manager) OpenKVIndex(chunkID chunk.ChunkID) (*index.Index[index.KVIndexEntry], index.KVIndexStatus, error) {
+	key := chunkID.String() + ":kv"
+	if v, ok := m.cache.Load(key); ok {
+		c := v.(indexWithStatus[*index.Index[index.KVIndexEntry], index.KVIndexStatus])
+		return c.idx, c.status, nil
+	}
 	entries, status, err := filekv.LoadKVIndex(m.dir, chunkID)
 	if err != nil {
 		return nil, status, fmt.Errorf("open kv index: %w", err)
 	}
-	return index.NewIndex(entries), status, nil
+	idx := index.NewIndex(entries)
+	m.cache.Store(key, indexWithStatus[*index.Index[index.KVIndexEntry], index.KVIndexStatus]{idx, status})
+	return idx, status, nil
 }
 
 func (m *Manager) OpenJSONPathIndex(chunkID chunk.ChunkID) (*index.Index[index.JSONPathIndexEntry], index.JSONIndexStatus, error) {
+	key := chunkID.String() + ":json_path"
+	if v, ok := m.cache.Load(key); ok {
+		c := v.(indexWithStatus[*index.Index[index.JSONPathIndexEntry], index.JSONIndexStatus])
+		return c.idx, c.status, nil
+	}
 	pathEntries, _, status, err := filejson.LoadIndex(m.dir, chunkID)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -165,10 +233,17 @@ func (m *Manager) OpenJSONPathIndex(chunkID chunk.ChunkID) (*index.Index[index.J
 		}
 		return nil, status, fmt.Errorf("open json path index: %w", err)
 	}
-	return index.NewIndex(pathEntries), status, nil
+	idx := index.NewIndex(pathEntries)
+	m.cache.Store(key, indexWithStatus[*index.Index[index.JSONPathIndexEntry], index.JSONIndexStatus]{idx, status})
+	return idx, status, nil
 }
 
 func (m *Manager) OpenJSONPVIndex(chunkID chunk.ChunkID) (*index.Index[index.JSONPVIndexEntry], index.JSONIndexStatus, error) {
+	key := chunkID.String() + ":json_pv"
+	if v, ok := m.cache.Load(key); ok {
+		c := v.(indexWithStatus[*index.Index[index.JSONPVIndexEntry], index.JSONIndexStatus])
+		return c.idx, c.status, nil
+	}
 	_, pvEntries, status, err := filejson.LoadIndex(m.dir, chunkID)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -176,17 +251,27 @@ func (m *Manager) OpenJSONPVIndex(chunkID chunk.ChunkID) (*index.Index[index.JSO
 		}
 		return nil, status, fmt.Errorf("open json pv index: %w", err)
 	}
-	return index.NewIndex(pvEntries), status, nil
+	idx := index.NewIndex(pvEntries)
+	m.cache.Store(key, indexWithStatus[*index.Index[index.JSONPVIndexEntry], index.JSONIndexStatus]{idx, status})
+	return idx, status, nil
 }
 
 // FindIngestStartPosition implements index.IndexManager.
 func (m *Manager) FindIngestStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
-	entries, err := filetsidx.LoadIngestIndex(m.dir, chunkID)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 0, false, index.ErrIndexNotFound
+	key := chunkID.String() + ":ts_ingest"
+	var entries []filetsidx.Entry
+	if v, ok := m.cache.Load(key); ok {
+		entries = v.([]filetsidx.Entry)
+	} else {
+		var err error
+		entries, err = filetsidx.LoadIngestIndex(m.dir, chunkID)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return 0, false, index.ErrIndexNotFound
+			}
+			return 0, false, err
 		}
-		return 0, false, err
+		m.cache.Store(key, entries)
 	}
 	pos, found := filetsidx.FindStartPosition(entries, ts.UnixNano())
 	return pos, found, nil
@@ -194,15 +279,34 @@ func (m *Manager) FindIngestStartPosition(chunkID chunk.ChunkID, ts time.Time) (
 
 // FindSourceStartPosition implements index.IndexManager.
 func (m *Manager) FindSourceStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
-	entries, err := filetsidx.LoadSourceIndex(m.dir, chunkID)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 0, false, index.ErrIndexNotFound
+	key := chunkID.String() + ":ts_source"
+	var entries []filetsidx.Entry
+	if v, ok := m.cache.Load(key); ok {
+		entries = v.([]filetsidx.Entry)
+	} else {
+		var err error
+		entries, err = filetsidx.LoadSourceIndex(m.dir, chunkID)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return 0, false, index.ErrIndexNotFound
+			}
+			return 0, false, err
 		}
-		return 0, false, err
+		m.cache.Store(key, entries)
 	}
 	pos, found := filetsidx.FindStartPosition(entries, ts.UnixNano())
 	return pos, found, nil
+}
+
+// evictCache removes all cached indexes for the given chunk.
+func (m *Manager) evictCache(chunkID chunk.ChunkID) {
+	prefix := chunkID.String() + ":"
+	m.cache.Range(func(key, _ any) bool {
+		if k, ok := key.(string); ok && len(k) > len(prefix) && k[:len(prefix)] == prefix {
+			m.cache.Delete(key)
+		}
+		return true
+	})
 }
 
 // IndexSizes returns the on-disk file size for each index.

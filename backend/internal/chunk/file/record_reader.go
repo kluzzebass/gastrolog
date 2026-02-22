@@ -295,8 +295,12 @@ func (c *mmapCursor) readRecord(index uint64) (chunk.Record, error) {
 		return chunk.Record{}, err
 	}
 
-	// Use BuildRecordCopy to copy raw and attrs out of mmap'd memory.
-	// The returned record must outlive the cursor.
+	// For compressed chunks, raw and attrs are freshly allocated — use them
+	// directly. For mmap'd chunks, raw and attrBuf reference mmap'd memory
+	// so we must copy to ensure the record outlives the cursor.
+	if c.rawSeek != nil {
+		return BuildRecord(entry, raw, attrs), nil
+	}
 	return BuildRecordCopy(entry, raw, attrs), nil
 }
 
@@ -515,7 +519,9 @@ func (c *stdioCursor) readRecord(index uint64) (chunk.Record, error) {
 		return chunk.Record{}, err
 	}
 
-	return BuildRecordCopy(entry, raw, attrs), nil
+	// stdio reads are from file (not mmap), so raw and attrs are already
+	// freshly allocated — no copy needed.
+	return BuildRecord(entry, raw, attrs), nil
 }
 
 func (c *stdioCursor) Close() error {
