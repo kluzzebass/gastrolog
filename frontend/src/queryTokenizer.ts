@@ -665,6 +665,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
 interface TokenizeResult {
   spans: HighlightSpan[];
   hasErrors: boolean;
+  hasPipeline: boolean;
   errorMessage: string | null;
 }
 
@@ -673,6 +674,27 @@ export function tokenize(input: string): TokenizeResult {
   return {
     spans,
     hasErrors: spans.some((s) => s.role === "error"),
+    hasPipeline: hasPipeOutsideQuotes(input),
     errorMessage,
   };
+}
+
+// Check if the input contains a `|` outside of quoted strings.
+function hasPipeOutsideQuotes(input: string): boolean {
+  let inQuote: string | null = null;
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i]!;
+    if (inQuote) {
+      if (ch === "\\" && i + 1 < input.length) {
+        i++; // skip escaped char
+      } else if (ch === inQuote) {
+        inQuote = null;
+      }
+    } else if (ch === '"' || ch === "'") {
+      inQuote = ch;
+    } else if (ch === "|") {
+      return true;
+    }
+  }
+  return false;
 }

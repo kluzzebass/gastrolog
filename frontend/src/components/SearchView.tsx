@@ -519,7 +519,7 @@ export function SearchView() {
 
   const liveHistogramData = useLiveHistogram(followRecords);
   const tokens = extractTokens(q);
-  const draftHasErrors = tokenize(draft).hasErrors;
+  const { hasErrors: draftHasErrors, hasPipeline: draftIsPipeline } = tokenize(draft);
   const displayRecords = isFollowMode ? followRecords : records;
   const attrFields = aggregateFields(displayRecords, "attrs");
   const kvFields = aggregateFields(displayRecords, "kv");
@@ -689,6 +689,7 @@ export function SearchView() {
             startFollow={startFollow}
             stopFollowMode={stopFollowMode}
             draftHasErrors={draftHasErrors}
+            draftIsPipeline={draftIsPipeline}
             showPlan={showPlan}
             handleShowPlan={handleShowPlan}
           />

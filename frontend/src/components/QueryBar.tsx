@@ -38,6 +38,7 @@ interface QueryBarProps {
   startFollow: () => void;
   stopFollowMode: () => void;
   draftHasErrors: boolean;
+  draftIsPipeline: boolean;
   showPlan: boolean;
   handleShowPlan: () => void;
 }
@@ -65,6 +66,7 @@ export function QueryBar({
   startFollow,
   stopFollowMode,
   draftHasErrors,
+  draftIsPipeline,
   showPlan,
   handleShowPlan,
 }: Readonly<QueryBarProps>) {
@@ -275,6 +277,7 @@ export function QueryBar({
           startFollow={startFollow}
           stopFollowMode={stopFollowMode}
           draftHasErrors={draftHasErrors}
+          draftIsPipeline={draftIsPipeline}
           showPlan={showPlan}
           handleShowPlan={handleShowPlan}
         />
@@ -292,6 +295,7 @@ function QueryActionButtons({
   startFollow,
   stopFollowMode,
   draftHasErrors,
+  draftIsPipeline,
   showPlan,
   handleShowPlan,
 }: Readonly<{
@@ -302,6 +306,7 @@ function QueryActionButtons({
   startFollow: () => void;
   stopFollowMode: () => void;
   draftHasErrors: boolean;
+  draftIsPipeline: boolean;
   showPlan: boolean;
   handleShowPlan: () => void;
 }>) {
@@ -330,9 +335,9 @@ function QueryActionButtons({
       </button>
       <button
         onClick={isFollowMode ? stopFollowMode : startFollow}
-        disabled={!isFollowMode && draftHasErrors}
+        disabled={!isFollowMode && (draftHasErrors || draftIsPipeline)}
         aria-label={isFollowMode ? "Stop following" : "Follow"}
-        title={isFollowMode ? "Stop following" : "Follow"}
+        title={isFollowMode ? "Stop following" : draftIsPipeline ? "Pipeline queries cannot be followed" : "Follow"}
         className={`px-2 py-2.5 rounded border transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${
           isFollowMode
             ? "bg-severity-error/15 border-severity-error text-severity-error hover:bg-severity-error/25"
