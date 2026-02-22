@@ -116,16 +116,19 @@ export function useFollow(options?: { onError?: (err: Error) => void }) {
         if (isAbortError(err)) {
           return;
         }
-        // Don't reconnect on auth errors — the global interceptor will
-        // redirect to login; we just need to stop the reconnect loop.
+        // Don't reconnect on non-retriable errors:
+        // - Unauthenticated: global interceptor redirects to login
+        // - InvalidArgument: bad query (e.g. pipeline queries not supported)
         if (
           err instanceof ConnectError &&
-          err.code === Code.Unauthenticated
+          (err.code === Code.Unauthenticated ||
+            err.code === Code.InvalidArgument)
         ) {
           setState((prev) => ({
             ...prev,
             error: err as ConnectError,
             reconnecting: false,
+            isFollowing: false,
           }));
           onErrorRef.current?.(err as ConnectError);
           return;
