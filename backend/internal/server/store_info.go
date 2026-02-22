@@ -12,6 +12,7 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index/analyzer"
+	"gastrolog/internal/sysmetrics"
 )
 
 // storeName returns the human-readable name for a store, falling back to the ID.
@@ -154,6 +155,9 @@ func (s *StoreServer) GetStats(
 		resp.TotalBytes += storeStat.DataBytes + storeStat.IndexBytes
 		resp.StoreStats = append(resp.StoreStats, storeStat)
 	}
+
+	resp.ProcessCpuPercent = sysmetrics.CPUPercent()
+	resp.ProcessMemoryBytes = sysmetrics.MemoryRSS()
 
 	return connect.NewResponse(resp), nil
 }

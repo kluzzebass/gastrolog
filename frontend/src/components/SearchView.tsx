@@ -623,10 +623,10 @@ export function SearchView() {
     }
   };
 
-  const totalRecords = stats?.totalRecords ?? BigInt(0);
-  const totalStores = stats?.totalStores ?? BigInt(0);
-  const sealedChunks = stats?.sealedChunks ?? BigInt(0);
+  const cpuPercent = stats?.processCpuPercent ?? 0;
+  const memoryBytes = stats?.processMemoryBytes ?? BigInt(0);
   const totalBytes = stats?.totalBytes ?? BigInt(0);
+  const totalRecords = stats?.totalRecords ?? BigInt(0);
 
   const c = useThemeClass(dark);
 
@@ -638,9 +638,8 @@ export function SearchView() {
       <HeaderBar
         dark={dark}
         statsLoading={statsLoading}
-        totalRecords={totalRecords}
-        totalStores={totalStores}
-        sealedChunks={sealedChunks}
+        cpuPercent={cpuPercent}
+        memoryBytes={memoryBytes}
         totalBytes={totalBytes}
         inspectorGlow={inspectorGlow}
         onShowHelp={() => openHelp()}

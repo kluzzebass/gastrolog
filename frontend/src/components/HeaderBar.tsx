@@ -6,9 +6,8 @@ import { useThemeClass } from "../hooks/useThemeClass";
 interface HeaderBarProps {
   dark: boolean;
   statsLoading: boolean;
-  totalRecords: bigint;
-  totalStores: bigint;
-  sealedChunks: bigint;
+  cpuPercent: number;
+  memoryBytes: bigint;
   totalBytes: bigint;
   inspectorGlow: boolean;
   onShowHelp: () => void;
@@ -23,9 +22,8 @@ interface HeaderBarProps {
 export function HeaderBar({
   dark,
   statsLoading,
-  totalRecords,
-  totalStores,
-  sealedChunks,
+  cpuPercent,
+  memoryBytes,
   totalBytes,
   onShowHelp,
   inspectorGlow,
@@ -55,8 +53,8 @@ export function HeaderBar({
         {/* Stats ribbon */}
         <div className="hidden lg:flex items-center gap-5">
           <StatPill
-            label="Records"
-            value={statsLoading ? "..." : totalRecords.toLocaleString()}
+            label="CPU"
+            value={statsLoading ? "..." : `${cpuPercent.toFixed(1)}%`}
             dark={dark}
           />
           <span
@@ -65,18 +63,12 @@ export function HeaderBar({
             |
           </span>
           <StatPill
-            label="Stores"
-            value={statsLoading ? "..." : totalStores.toString()}
-            dark={dark}
-          />
-          <span
-            className={`text-xs ${c("text-ink-border", "text-light-border")}`}
-          >
-            |
-          </span>
-          <StatPill
-            label="Sealed"
-            value={statsLoading ? "..." : sealedChunks.toString()}
+            label="Memory"
+            value={
+              statsLoading
+                ? "..."
+                : `${(Number(memoryBytes) / 1024 / 1024).toFixed(0)} MB`
+            }
             dark={dark}
           />
           <span

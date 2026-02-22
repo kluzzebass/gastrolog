@@ -890,6 +890,20 @@ export class GetStatsResponse extends Message<GetStatsResponse> {
    */
   storeStats: StoreStats[] = [];
 
+  /**
+   * CPU usage as percentage (0-100+)
+   *
+   * @generated from field: double process_cpu_percent = 9;
+   */
+  processCpuPercent = 0;
+
+  /**
+   * RSS in bytes
+   *
+   * @generated from field: int64 process_memory_bytes = 10;
+   */
+  processMemoryBytes = protoInt64.zero;
+
   constructor(data?: PartialMessage<GetStatsResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -906,6 +920,8 @@ export class GetStatsResponse extends Message<GetStatsResponse> {
     { no: 6, name: "oldest_record", kind: "message", T: Timestamp },
     { no: 7, name: "newest_record", kind: "message", T: Timestamp },
     { no: 8, name: "store_stats", kind: "message", T: StoreStats, repeated: true },
+    { no: 9, name: "process_cpu_percent", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 10, name: "process_memory_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetStatsResponse {

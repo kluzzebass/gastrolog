@@ -1031,17 +1031,19 @@ func (x *GetStatsRequest) GetStore() string {
 }
 
 type GetStatsResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TotalStores   int64                  `protobuf:"varint,1,opt,name=total_stores,json=totalStores,proto3" json:"total_stores,omitempty"`
-	TotalChunks   int64                  `protobuf:"varint,2,opt,name=total_chunks,json=totalChunks,proto3" json:"total_chunks,omitempty"`
-	SealedChunks  int64                  `protobuf:"varint,3,opt,name=sealed_chunks,json=sealedChunks,proto3" json:"sealed_chunks,omitempty"`
-	TotalRecords  int64                  `protobuf:"varint,4,opt,name=total_records,json=totalRecords,proto3" json:"total_records,omitempty"`
-	TotalBytes    int64                  `protobuf:"varint,5,opt,name=total_bytes,json=totalBytes,proto3" json:"total_bytes,omitempty"`
-	OldestRecord  *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=oldest_record,json=oldestRecord,proto3" json:"oldest_record,omitempty"`
-	NewestRecord  *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=newest_record,json=newestRecord,proto3" json:"newest_record,omitempty"`
-	StoreStats    []*StoreStats          `protobuf:"bytes,8,rep,name=store_stats,json=storeStats,proto3" json:"store_stats,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	TotalStores        int64                  `protobuf:"varint,1,opt,name=total_stores,json=totalStores,proto3" json:"total_stores,omitempty"`
+	TotalChunks        int64                  `protobuf:"varint,2,opt,name=total_chunks,json=totalChunks,proto3" json:"total_chunks,omitempty"`
+	SealedChunks       int64                  `protobuf:"varint,3,opt,name=sealed_chunks,json=sealedChunks,proto3" json:"sealed_chunks,omitempty"`
+	TotalRecords       int64                  `protobuf:"varint,4,opt,name=total_records,json=totalRecords,proto3" json:"total_records,omitempty"`
+	TotalBytes         int64                  `protobuf:"varint,5,opt,name=total_bytes,json=totalBytes,proto3" json:"total_bytes,omitempty"`
+	OldestRecord       *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=oldest_record,json=oldestRecord,proto3" json:"oldest_record,omitempty"`
+	NewestRecord       *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=newest_record,json=newestRecord,proto3" json:"newest_record,omitempty"`
+	StoreStats         []*StoreStats          `protobuf:"bytes,8,rep,name=store_stats,json=storeStats,proto3" json:"store_stats,omitempty"`
+	ProcessCpuPercent  float64                `protobuf:"fixed64,9,opt,name=process_cpu_percent,json=processCpuPercent,proto3" json:"process_cpu_percent,omitempty"`    // CPU usage as percentage (0-100+)
+	ProcessMemoryBytes int64                  `protobuf:"varint,10,opt,name=process_memory_bytes,json=processMemoryBytes,proto3" json:"process_memory_bytes,omitempty"` // RSS in bytes
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *GetStatsResponse) Reset() {
@@ -1128,6 +1130,20 @@ func (x *GetStatsResponse) GetStoreStats() []*StoreStats {
 		return x.StoreStats
 	}
 	return nil
+}
+
+func (x *GetStatsResponse) GetProcessCpuPercent() float64 {
+	if x != nil {
+		return x.ProcessCpuPercent
+	}
+	return 0
+}
+
+func (x *GetStatsResponse) GetProcessMemoryBytes() int64 {
+	if x != nil {
+		return x.ProcessMemoryBytes
+	}
+	return 0
 }
 
 // StoreStats provides per-store statistics.
@@ -2138,7 +2154,7 @@ const file_gastrolog_v1_store_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"'\n" +
 	"\x0fGetStatsRequest\x12\x14\n" +
-	"\x05store\x18\x01 \x01(\tR\x05store\"\x80\x03\n" +
+	"\x05store\x18\x01 \x01(\tR\x05store\"\xe2\x03\n" +
 	"\x10GetStatsResponse\x12!\n" +
 	"\ftotal_stores\x18\x01 \x01(\x03R\vtotalStores\x12!\n" +
 	"\ftotal_chunks\x18\x02 \x01(\x03R\vtotalChunks\x12#\n" +
@@ -2149,7 +2165,10 @@ const file_gastrolog_v1_store_proto_rawDesc = "" +
 	"\roldest_record\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\foldestRecord\x12?\n" +
 	"\rnewest_record\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\fnewestRecord\x129\n" +
 	"\vstore_stats\x18\b \x03(\v2\x18.gastrolog.v1.StoreStatsR\n" +
-	"storeStats\"\xae\x03\n" +
+	"storeStats\x12.\n" +
+	"\x13process_cpu_percent\x18\t \x01(\x01R\x11processCpuPercent\x120\n" +
+	"\x14process_memory_bytes\x18\n" +
+	" \x01(\x03R\x12processMemoryBytes\"\xae\x03\n" +
 	"\n" +
 	"StoreStats\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
