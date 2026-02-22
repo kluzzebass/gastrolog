@@ -105,6 +105,15 @@ jobs:
 
           cd dist && sha256sum * > checksums.txt
 
+      - name: Upload linux binaries for Docker
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-binaries
+          path: |
+            backend/dist/gastrolog-linux-amd64
+            backend/dist/gastrolog-linux-arm64
+          retention-days: 1
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -200,11 +209,26 @@ jobs:
           git push
 
   docker:
-    needs: test
+    needs: release
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Download linux binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-binaries
+          path: docker-build/
+
+      - name: Prepare Docker context
+        run: |
+          chmod +x docker-build/gastrolog-linux-*
+          cat > docker-build/Dockerfile << 'DOCKERFILE'
+          FROM scratch
+          ARG TARGETARCH
+          COPY gastrolog-linux-${TARGETARCH} /gastrolog
+          EXPOSE 4564
+          ENTRYPOINT ["/gastrolog"]
+          CMD ["server", "--home", "/config"]
+          DOCKERFILE
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -222,10 +246,10 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: docker-build/
+          file: docker-build/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
-          build-args: VERSION=${{ github.ref_name }}
           tags: |
             ghcr.io/${{ github.repository }}:${{ github.ref_name }}
             ghcr.io/${{ github.repository }}:latest
