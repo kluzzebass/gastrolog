@@ -680,7 +680,7 @@ export function tokenize(input: string): TokenizeResult {
 }
 
 // Check if the input contains a `|` outside of quoted strings.
-function hasPipeOutsideQuotes(input: string): boolean {
+export function hasPipeOutsideQuotes(input: string): boolean {
   let inQuote: string | null = null;
   for (let i = 0; i < input.length; i++) {
     const ch = input[i]!;

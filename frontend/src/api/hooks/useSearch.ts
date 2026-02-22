@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, type MutableRefObject } from "react";
-import { queryClient, Query, Record } from "../client";
+import { queryClient, Query, Record, TableResult } from "../client";
 
 interface SearchState {
   records: Record[];
@@ -7,6 +7,7 @@ interface SearchState {
   error: Error | null;
   hasMore: boolean;
   resumeToken: Uint8Array | null;
+  tableResult: TableResult | null;
 }
 
 /**
@@ -68,6 +69,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
     error: null,
     hasMore: false,
     resumeToken: null,
+    tableResult: null,
   });
 
   const abortRef = useRef<AbortController | null>(null);
@@ -99,6 +101,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
         error: null,
         records: append ? prev.records : [],
         resumeToken: append ? prev.resumeToken : null,
+        tableResult: append ? prev.tableResult : null,
       }));
 
       try {
@@ -116,6 +119,19 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
           },
           { signal: abortRef.current.signal },
         )) {
+          // Pipeline queries return a single response with tableResult.
+          if (response.tableResult) {
+            setState((prev) => ({
+              ...prev,
+              tableResult: response.tableResult ?? null,
+              isSearching: false,
+              hasMore: false,
+              resumeToken: null,
+            }));
+            abortRef.current = null;
+            return;
+          }
+
           allRecords.push(...response.records);
           lastResumeToken =
             response.resumeToken.length > 0 ? response.resumeToken : null;
@@ -179,6 +195,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
       error: null,
       hasMore: false,
       resumeToken: null,
+      tableResult: null,
     });
   }, []);
 
@@ -195,6 +212,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
       error: null,
       hasMore: false,
       resumeToken: null,
+      tableResult: null,
     });
   }, []);
 

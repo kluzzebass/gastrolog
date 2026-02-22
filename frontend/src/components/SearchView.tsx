@@ -46,9 +46,10 @@ import {
   useDeleteSavedQuery,
 } from "../api/hooks/useSavedQueries";
 import { Dialog } from "./Dialog";
-import { tokenize } from "../queryTokenizer";
+import { tokenize, hasPipeOutsideQuotes } from "../queryTokenizer";
 import { useAutocomplete } from "../hooks/useAutocomplete";
 import { HeaderBar } from "./HeaderBar";
+import { PipelineResults } from "./PipelineResults";
 
 import { ExplainPanel } from "./ExplainPanel";
 import { SettingsDialog } from "./settings/SettingsDialog";
@@ -170,6 +171,7 @@ export function SearchView() {
     records,
     isSearching,
     hasMore,
+    tableResult,
     search,
     loadMore,
     setRecords,
@@ -520,6 +522,8 @@ export function SearchView() {
   const liveHistogramData = useLiveHistogram(followRecords);
   const tokens = extractTokens(q);
   const { hasErrors: draftHasErrors, hasPipeline: draftIsPipeline } = tokenize(draft);
+  const isPipelineResult = tableResult !== null;
+  const queryIsPipeline = hasPipeOutsideQuotes(q);
   const displayRecords = isFollowMode ? followRecords : records;
   const attrFields = aggregateFields(displayRecords, "attrs");
   const kvFields = aggregateFields(displayRecords, "kv");
@@ -784,6 +788,7 @@ export function SearchView() {
 
           {/* Histogram — server-side for search, client-side for follow */}
           {!isFollowMode &&
+            !isPipelineResult &&
             histogramData &&
             histogramData.buckets.length > 0 && (
               <div
@@ -873,6 +878,17 @@ export function SearchView() {
 
           {/* Results */}
           <div className="flex-1 flex flex-col overflow-hidden">
+            {isSearching && !tableResult && queryIsPipeline ? (
+              <div className="flex-1 flex items-center justify-center">
+                <div className={`text-center font-mono text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+                  <div className="inline-block w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin mb-3" />
+                  <div>Running pipeline...</div>
+                </div>
+              </div>
+            ) : isPipelineResult ? (
+              <PipelineResults tableResult={tableResult} dark={dark} />
+            ) : (
+            <>
             <ResultsToolbar
               dark={dark}
               isFollowMode={isFollowMode}
@@ -983,6 +999,8 @@ export function SearchView() {
                 )}
               </div>
             </div>
+            </>
+            )}
           </div>
         </main>
 
