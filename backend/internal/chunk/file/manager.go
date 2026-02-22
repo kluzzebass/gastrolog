@@ -191,7 +191,10 @@ func NewManager(cfg Config) (*Manager, error) {
 	var zstdEnc *zstd.Encoder
 	if cfg.Compression == CompressionZstd {
 		var err error
-		zstdEnc, err = zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
+		zstdEnc, err = zstd.NewWriter(nil,
+			zstd.WithEncoderLevel(zstd.SpeedDefault),
+			zstd.WithEncoderConcurrency(1),
+		)
 		if err != nil {
 			lockFile.Close()
 			return nil, fmt.Errorf("create zstd encoder: %w", err)
