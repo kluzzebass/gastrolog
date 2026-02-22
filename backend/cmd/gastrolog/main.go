@@ -27,7 +27,6 @@ import (
 	chunkfile "gastrolog/internal/chunk/file"
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/config"
-	configfile "gastrolog/internal/config/file"
 	configmem "gastrolog/internal/config/memory"
 	configsqlite "gastrolog/internal/config/sqlite"
 	"gastrolog/internal/home"
@@ -80,7 +79,7 @@ func main() {
 	}
 
 	rootCmd.PersistentFlags().String("home", "", "home directory (default: platform config dir)")
-	rootCmd.PersistentFlags().String("config-type", "sqlite", "config store type: sqlite, json, or memory")
+	rootCmd.PersistentFlags().String("config-type", "sqlite", "config store type: sqlite or memory")
 	rootCmd.PersistentFlags().String("pprof", "", "pprof HTTP server address (e.g. localhost:6060). WARNING: exposes CPU/memory profiles and goroutine dumps — bind to loopback only, never expose publicly")
 
 	serverCmd := &cobra.Command{
@@ -351,8 +350,6 @@ func openConfigStore(hd home.Dir, configType string) (config.Store, error) {
 	switch configType {
 	case "memory":
 		return configmem.NewStore(), nil
-	case "json":
-		return configfile.NewStore(hd.ConfigPath("json"), hd.UsersPath()), nil
 	case "sqlite":
 		return configsqlite.NewStore(hd.ConfigPath("sqlite"))
 	default:

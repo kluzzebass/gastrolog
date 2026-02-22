@@ -98,15 +98,22 @@ message GetConfigResponse {
   repeated RetentionPolicyConfig retention_policies = 5;
 }
 
+message RetentionRule {
+  string retention_policy_id = 1;
+  string action = 2;              // "expire" or "migrate"
+  string destination_id = 3;      // target store, only for action=migrate
+}
+
 message StoreConfig {
   string id = 1;
   string type = 2;
   string filter = 3;
   string policy = 4;
   map<string, string> params = 5;
-  string retention = 6;
+  // field 6 was 'retention' (single UUID) — removed
   bool enabled = 7;
   string name = 8;
+  repeated RetentionRule retention_rules = 9;
 }
 
 message IngesterConfig {

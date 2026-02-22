@@ -325,12 +325,12 @@ func (s *Store) DeleteRetentionPolicy(ctx context.Context, id uuid.UUID) error {
 
 func (s *Store) GetStore(ctx context.Context, id uuid.UUID) (*config.StoreConfig, error) {
 	row := s.db.QueryRowContext(ctx,
-		"SELECT id, name, type, filter, policy, retention, params, enabled FROM stores WHERE id = ?", id)
+		"SELECT id, name, type, filter, policy, params, enabled FROM stores WHERE id = ?", id)
 
 	var st config.StoreConfig
 	var paramsJSON *string
-	var filter, policy, retention sql.NullString
-	err := row.Scan(&st.ID, &st.Name, &st.Type, &filter, &policy, &retention, &paramsJSON, &st.Enabled)
+	var filter, policy sql.NullString
+	err := row.Scan(&st.ID, &st.Name, &st.Type, &filter, &policy, &paramsJSON, &st.Enabled)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -343,20 +343,25 @@ func (s *Store) GetStore(ctx context.Context, id uuid.UUID) (*config.StoreConfig
 	if err := scanNullUUID(policy, &st.Policy); err != nil {
 		return nil, fmt.Errorf("get store %q policy: %w", id, err)
 	}
-	if err := scanNullUUID(retention, &st.Retention); err != nil {
-		return nil, fmt.Errorf("get store %q retention: %w", id, err)
-	}
 	if paramsJSON != nil {
 		if err := json.Unmarshal([]byte(*paramsJSON), &st.Params); err != nil {
 			return nil, fmt.Errorf("unmarshal store %q params: %w", id, err)
 		}
 	}
+
+	// Load retention rules.
+	rules, err := s.loadRetentionRules(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get store %q rules: %w", id, err)
+	}
+	st.RetentionRules = rules
+
 	return &st, nil
 }
 
 func (s *Store) ListStores(ctx context.Context) ([]config.StoreConfig, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, name, type, filter, policy, retention, params, enabled FROM stores")
+		"SELECT id, name, type, filter, policy, params, enabled FROM stores")
 	if err != nil {
 		return nil, fmt.Errorf("list stores: %w", err)
 	}
@@ -366,8 +371,8 @@ func (s *Store) ListStores(ctx context.Context) ([]config.StoreConfig, error) {
 	for rows.Next() {
 		var st config.StoreConfig
 		var paramsJSON *string
-		var filter, policy, retention sql.NullString
-		if err := rows.Scan(&st.ID, &st.Name, &st.Type, &filter, &policy, &retention, &paramsJSON, &st.Enabled); err != nil {
+		var filter, policy sql.NullString
+		if err := rows.Scan(&st.ID, &st.Name, &st.Type, &filter, &policy, &paramsJSON, &st.Enabled); err != nil {
 			return nil, fmt.Errorf("scan store: %w", err)
 		}
 		if err := scanNullUUID(filter, &st.Filter); err != nil {
@@ -376,9 +381,6 @@ func (s *Store) ListStores(ctx context.Context) ([]config.StoreConfig, error) {
 		if err := scanNullUUID(policy, &st.Policy); err != nil {
 			return nil, fmt.Errorf("scan store policy: %w", err)
 		}
-		if err := scanNullUUID(retention, &st.Retention); err != nil {
-			return nil, fmt.Errorf("scan store retention: %w", err)
-		}
 		if paramsJSON != nil {
 			if err := json.Unmarshal([]byte(*paramsJSON), &st.Params); err != nil {
 				return nil, fmt.Errorf("unmarshal store params: %w", err)
@@ -386,7 +388,22 @@ func (s *Store) ListStores(ctx context.Context) ([]config.StoreConfig, error) {
 		}
 		result = append(result, st)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Load retention rules for all stores.
+	if len(result) > 0 {
+		allRules, err := s.loadAllRetentionRules(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("load retention rules: %w", err)
+		}
+		for i := range result {
+			result[i].RetentionRules = allRules[result[i].ID]
+		}
+	}
+
+	return result, nil
 }
 
 func (s *Store) PutStore(ctx context.Context, st config.StoreConfig) error {
@@ -400,31 +417,114 @@ func (s *Store) PutStore(ctx context.Context, st config.StoreConfig) error {
 		paramsJSON = &v
 	}
 
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO stores (id, name, type, filter, policy, retention, params, enabled)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx for store %q: %w", st.ID, err)
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO stores (id, name, type, filter, policy, params, enabled)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			type = excluded.type,
 			filter = excluded.filter,
 			policy = excluded.policy,
-			retention = excluded.retention,
 			params = excluded.params,
 			enabled = excluded.enabled
-	`, st.ID, st.Name, st.Type, st.Filter, st.Policy, st.Retention, paramsJSON, st.Enabled)
+	`, st.ID, st.Name, st.Type, st.Filter, st.Policy, paramsJSON, st.Enabled)
 	if err != nil {
 		return fmt.Errorf("put store %q: %w", st.ID, err)
 	}
-	return nil
+
+	// Replace retention rules.
+	if _, err := tx.ExecContext(ctx,
+		"DELETE FROM store_retention_rules WHERE store_id = ?", st.ID); err != nil {
+		return fmt.Errorf("delete rules for store %q: %w", st.ID, err)
+	}
+	for _, b := range st.RetentionRules {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO store_retention_rules (store_id, retention_policy_id, action, destination_id)
+			VALUES (?, ?, ?, ?)
+		`, st.ID, b.RetentionPolicyID, string(b.Action), b.Destination)
+		if err != nil {
+			return fmt.Errorf("insert rule for store %q: %w", st.ID, err)
+		}
+	}
+
+	return tx.Commit()
 }
 
 func (s *Store) DeleteStore(ctx context.Context, id uuid.UUID) error {
-	_, err := s.db.ExecContext(ctx,
-		"DELETE FROM stores WHERE id = ?", id)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		return fmt.Errorf("begin tx for delete store %q: %w", id, err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx,
+		"DELETE FROM store_retention_rules WHERE store_id = ?", id); err != nil {
+		return fmt.Errorf("delete rules for store %q: %w", id, err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		"DELETE FROM stores WHERE id = ?", id); err != nil {
 		return fmt.Errorf("delete store %q: %w", id, err)
 	}
-	return nil
+	return tx.Commit()
+}
+
+// loadRetentionRules reads retention rules for a single store.
+func (s *Store) loadRetentionRules(ctx context.Context, storeID uuid.UUID) ([]config.RetentionRule, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT retention_policy_id, action, destination_id FROM store_retention_rules WHERE store_id = ?", storeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var rules []config.RetentionRule
+	for rows.Next() {
+		var b config.RetentionRule
+		var action string
+		var dest sql.NullString
+		if err := rows.Scan(&b.RetentionPolicyID, &action, &dest); err != nil {
+			return nil, err
+		}
+		b.Action = config.RetentionAction(action)
+		if err := scanNullUUID(dest, &b.Destination); err != nil {
+			return nil, err
+		}
+		rules = append(rules, b)
+	}
+	return rules, rows.Err()
+}
+
+// loadAllRetentionRules reads all retention rules, grouped by store ID.
+func (s *Store) loadAllRetentionRules(ctx context.Context) (map[uuid.UUID][]config.RetentionRule, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT store_id, retention_policy_id, action, destination_id FROM store_retention_rules")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[uuid.UUID][]config.RetentionRule)
+	for rows.Next() {
+		var storeID uuid.UUID
+		var b config.RetentionRule
+		var action string
+		var dest sql.NullString
+		if err := rows.Scan(&storeID, &b.RetentionPolicyID, &action, &dest); err != nil {
+			return nil, err
+		}
+		b.Action = config.RetentionAction(action)
+		if err := scanNullUUID(dest, &b.Destination); err != nil {
+			return nil, err
+		}
+		result[storeID] = append(result[storeID], b)
+	}
+	return result, rows.Err()
 }
 
 // Ingesters

@@ -165,7 +165,7 @@ func (s *StoreServer) MigrateStore(
 		Type:      dstType,
 		Filter:    srcCfg.Filter,
 		Policy:    srcCfg.Policy,
-		Retention: srcCfg.Retention,
+		RetentionRules: srcCfg.RetentionRules,
 		Enabled:   true,
 		Params:    dstParams,
 	}

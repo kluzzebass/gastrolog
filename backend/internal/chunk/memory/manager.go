@@ -354,6 +354,38 @@ func (m *Manager) SetRotationPolicy(policy chunk.RotationPolicy) {
 	m.cfg.RotationPolicy = policy
 }
 
+func (m *Manager) CheckRotation() *string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.active == nil {
+		return nil
+	}
+
+	state := m.activeChunkState()
+	if state.Records == 0 {
+		return nil
+	}
+
+	var zeroRecord chunk.Record
+	trigger := m.cfg.RotationPolicy.ShouldRotate(state, zeroRecord)
+	if trigger == nil {
+		return nil
+	}
+
+	m.logger.Info("rotating chunk",
+		"trigger", *trigger,
+		"chunk", state.ChunkID.String(),
+		"bytes", state.Bytes,
+		"records", state.Records,
+		"age", m.cfg.Now().Sub(state.CreatedAt),
+	)
+	if err := m.sealLocked(); err != nil {
+		return nil
+	}
+	return trigger
+}
+
 // Close releases resources. For memory manager, this clears internal state.
 func (m *Manager) Close() error {
 	m.mu.Lock()

@@ -79,6 +79,16 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 	return nil
 }
 
+// postSealWork schedules compression and index builds for a newly sealed chunk.
+// Safe to call from any context (cron rotation, background sweep, etc.) —
+// acquires the orchestrator lock internally.
+func (o *Orchestrator) postSealWork(storeID uuid.UUID, chunkID chunk.ChunkID) {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	o.scheduleCompression(storeID, chunkID)
+	o.scheduleIndexBuild(storeID, chunkID)
+}
+
 // scheduleCompression triggers an asynchronous compression job for the given chunk
 // via the shared scheduler. Only dispatched if the ChunkManager implements ChunkCompressor.
 func (o *Orchestrator) scheduleCompression(registryKey uuid.UUID, chunkID chunk.ChunkID) {

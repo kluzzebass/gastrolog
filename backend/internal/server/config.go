@@ -65,8 +65,15 @@ func (s *ConfigServer) GetConfig(
 				if storeCfg.Policy != nil {
 					sc.Policy = storeCfg.Policy.String()
 				}
-				if storeCfg.Retention != nil {
-					sc.Retention = storeCfg.Retention.String()
+				for _, b := range storeCfg.RetentionRules {
+					pb := &apiv1.RetentionRule{
+						RetentionPolicyId: b.RetentionPolicyID.String(),
+						Action:            string(b.Action),
+					}
+					if b.Destination != nil {
+						pb.DestinationId = b.Destination.String()
+					}
+					sc.RetentionRules = append(sc.RetentionRules, pb)
 				}
 				resp.Stores = append(resp.Stores, sc)
 			}

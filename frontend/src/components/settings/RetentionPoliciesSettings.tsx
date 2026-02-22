@@ -13,7 +13,7 @@ import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, NumberInput } from "./FormField";
 import { PrimaryButton } from "./Buttons";
-import { UsedByStatus, refsFor } from "./UsedByStatus";
+import { UsedByStatus, ruleRefsFor } from "./UsedByStatus";
 import type { SettingsTab } from "./SettingsDialog";
 
 type NavigateTo = (tab: SettingsTab, entityName?: string) => void;
@@ -123,7 +123,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
     },
     onDeleteSuccess: (id) => {
       const referencedBy = stores
-        .filter((s) => s.retention === id)
+        .filter((s) => (s.retentionRules ?? []).some((b: { retentionPolicyId: string }) => b.retentionPolicyId === id))
         .map((s) => s.name || s.id);
       if (referencedBy.length > 0) {
         addToast(
@@ -229,7 +229,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
       {policies.map((pol) => {
         const id = pol.id;
         const edit = getEdit(id);
-        const refs = refsFor(stores, "retention", id);
+        const refs = ruleRefsFor(stores, id);
         return (
           <SettingsCard
             key={id}

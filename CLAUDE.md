@@ -6,9 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Always create new branches before picking up issues.
 
-## CRITICAL: DO NOT BUMP FILE VERSIONS OR CREATE MIGRATION CODE!
 
-This project is NOT in production. When changing file formats, just change them. Do not increment version numbers or write backward-compatibility code. Delete old data and start fresh. This does NOT apply to migration files.
+## Renaming: Always Rename Through the Entire Stack
+
+When renaming a concept, type, field, or variable, always rename it consistently across the **entire stack**: proto definitions, generated code (re-run `buf generate`), Go backend types, SQLite schema/migrations, frontend TypeScript types, UI labels, and tests. Never leave a partial rename where different layers use different names for the same concept.
 
 ## Data Integrity: Facts Before Speculation
 

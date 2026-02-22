@@ -37,6 +37,7 @@ func (f *fakeChunkManager) ReadWriteTimestamps(id chunk.ChunkID, positions []uin
 	return nil, nil
 }
 func (f *fakeChunkManager) SetRotationPolicy(policy chunk.RotationPolicy) {}
+func (f *fakeChunkManager) CheckRotation() *string                        { return nil }
 func (f *fakeChunkManager) Delete(id chunk.ChunkID) error                 { return nil }
 func (f *fakeChunkManager) Close() error                                  { return nil }
 

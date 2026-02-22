@@ -19,6 +19,7 @@ func cronJobName(storeID uuid.UUID) string {
 // shared Scheduler so all scheduled tasks are centrally visible.
 type cronRotationManager struct {
 	scheduler *Scheduler
+	onSeal    func(storeID uuid.UUID, chunkID chunk.ChunkID) // called after sealing to trigger compression + indexing
 	logger    *slog.Logger
 }
 
@@ -68,17 +69,22 @@ func (m *cronRotationManager) rotateStore(storeID uuid.UUID, cm chunk.ChunkManag
 		return
 	}
 
+	sealedID := active.ID
 	if err := cm.Seal(); err != nil {
 		m.logger.Error("cron rotation: failed to seal chunk",
-			"store", storeID, "chunk", active.ID.String(), "error", err)
+			"store", storeID, "chunk", sealedID.String(), "error", err)
 		return
 	}
 
 	m.logger.Info("rotating chunk",
 		"trigger", "cron",
 		"store", storeID,
-		"chunk", active.ID.String(),
+		"chunk", sealedID.String(),
 		"bytes", active.Bytes,
 		"records", active.RecordCount,
 	)
+
+	if m.onSeal != nil {
+		m.onSeal(storeID, sealedID)
+	}
 }

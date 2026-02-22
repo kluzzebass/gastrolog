@@ -24,6 +24,12 @@ import { Checkbox } from "./Checkbox";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Job } from "../../api/gen/gastrolog/v1/job_pb";
 
+interface RetentionRuleEdit {
+  retentionPolicyId: string;
+  action: string;
+  destinationId: string;
+}
+
 function JobProgress({
   jobId,
   label,
@@ -84,6 +90,135 @@ function JobProgress({
   );
 }
 
+function RetentionRulesEditor({
+  rules,
+  onChange,
+  retentionPolicies,
+  stores,
+  currentStoreId,
+  dark,
+}: Readonly<{
+  rules: RetentionRuleEdit[];
+  onChange: (rules: RetentionRuleEdit[]) => void;
+  retentionPolicies: Array<{ id: string; name: string }>;
+  stores: Array<{ id: string; name: string }>;
+  currentStoreId: string;
+  dark: boolean;
+}>) {
+  const c = useThemeClass(dark);
+  const policyOptions = [
+    { value: "", label: "(select policy)" },
+    ...retentionPolicies.map((r) => ({ value: r.id, label: r.name || r.id })),
+  ];
+  const actionOptions = [
+    { value: "expire", label: "expire" },
+    { value: "migrate", label: "migrate" },
+  ];
+  const storeOptions = [
+    { value: "", label: "(select store)" },
+    ...stores
+      .filter((s) => s.id !== currentStoreId)
+      .map((s) => ({ value: s.id, label: s.name || s.id })),
+  ];
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <span
+          className={`text-[0.8em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}
+        >
+          Retention Rules
+        </span>
+        <button
+          type="button"
+          onClick={() =>
+            onChange([
+              ...rules,
+              { retentionPolicyId: "", action: "expire", destinationId: "" },
+            ])
+          }
+          className={`text-[0.8em] transition-colors ${c(
+            "text-copper hover:text-copper-light",
+            "text-copper hover:text-copper-light",
+          )}`}
+        >
+          + Add
+        </button>
+      </div>
+      {rules.length === 0 && (
+        <span
+          className={`text-[0.8em] italic ${c("text-text-ghost", "text-light-text-ghost")}`}
+        >
+          No retention rules
+        </span>
+      )}
+      {rules.map((rule, idx) => (
+        <div key={idx} className="flex items-end gap-2">
+          <div className="flex-1">
+            <FormField label="Policy" dark={dark}>
+              <SelectInput
+                value={rule.retentionPolicyId}
+                onChange={(v) => {
+                  const next = rules.map((r, i) =>
+                    i === idx ? { ...r, retentionPolicyId: v } : r,
+                  );
+                  onChange(next);
+                }}
+                options={policyOptions}
+                dark={dark}
+              />
+            </FormField>
+          </div>
+          <div className="w-28">
+            <FormField label="Action" dark={dark}>
+              <SelectInput
+                value={rule.action}
+                onChange={(v) => {
+                  const next = rules.map((r, i) =>
+                    i === idx
+                      ? { ...r, action: v, destinationId: v === "expire" ? "" : r.destinationId }
+                      : r,
+                  );
+                  onChange(next);
+                }}
+                options={actionOptions}
+                dark={dark}
+              />
+            </FormField>
+          </div>
+          {rule.action === "migrate" && (
+            <div className="flex-1">
+              <FormField label="Destination" dark={dark}>
+                <SelectInput
+                  value={rule.destinationId}
+                  onChange={(v) => {
+                    const next = rules.map((r, i) =>
+                      i === idx ? { ...r, destinationId: v } : r,
+                    );
+                    onChange(next);
+                  }}
+                  options={storeOptions}
+                  dark={dark}
+                />
+              </FormField>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => onChange(rules.filter((_, i) => i !== idx))}
+            className={`pb-1.5 text-[0.85em] transition-colors ${c(
+              "text-text-ghost hover:text-severity-error",
+              "text-light-text-ghost hover:text-severity-error",
+            )}`}
+          >
+            &times;
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: Readonly<{ dark: boolean; expandTarget?: string | null; onExpandTargetConsumed?: () => void }>) {
   const c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
@@ -112,7 +247,7 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
   const [newType, setNewType] = useState("memory");
   const [newFilter, setNewFilter] = useState("");
   const [newPolicy, setNewPolicy] = useState("");
-  const [newRetention, setNewRetention] = useState("");
+  const [newRetentionRules, setNewRetentionRules] = useState<RetentionRuleEdit[]>([]);
   const [newParams, setNewParams] = useState<Record<string, string>>({});
 
   const stores = config?.stores ?? [];
@@ -143,11 +278,6 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
     ...policies.map((p) => ({ value: p.id, label: p.name || p.id })),
   ];
 
-  const retentionOptions = [
-    { value: "", label: "(none)" },
-    ...retentionPolicies.map((r) => ({ value: r.id, label: r.name || r.id })),
-  ];
-
   const defaults = (id: string) => {
     const store = stores.find((s) => s.id === id);
     if (!store)
@@ -155,7 +285,7 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
         name: "",
         filter: "",
         policy: "",
-        retention: "",
+        retentionRules: [] as RetentionRuleEdit[],
         enabled: true,
         params: {} as Record<string, string>,
       };
@@ -163,7 +293,11 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
       name: store.name,
       filter: store.filter,
       policy: store.policy,
-      retention: store.retention,
+      retentionRules: (store.retentionRules ?? []).map((b) => ({
+        retentionPolicyId: b.retentionPolicyId,
+        action: b.action,
+        destinationId: b.destinationId,
+      })),
       enabled: store.enabled,
       params: { ...store.params },
     };
@@ -181,7 +315,7 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
         name: string;
         filter: string;
         policy: string;
-        retention: string;
+        retentionRules: RetentionRuleEdit[];
         enabled: boolean;
         params: Record<string, string>;
         type: string;
@@ -192,7 +326,7 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
       type: edit.type,
       filter: edit.filter,
       policy: edit.policy,
-      retention: edit.retention,
+      retentionRules: edit.retentionRules,
       params: edit.params,
       enabled: edit.enabled,
     }),
@@ -217,7 +351,7 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
         type: newType,
         filter: newFilter,
         policy: newPolicy,
-        retention: newRetention,
+        retentionRules: newRetentionRules,
         params: newParams,
       });
       addToast(`Store "${name}" created`, "info");
@@ -227,7 +361,7 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
       setNewType("memory");
       setNewFilter("");
       setNewPolicy("");
-      setNewRetention("");
+      setNewRetentionRules([]);
       setNewParams({});
     } catch (err: any) {
       const errorMessage = err.message ?? "Failed to create store";
@@ -248,7 +382,7 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
         setNewType("memory");
         setNewFilter("");
         setNewPolicy("");
-        setNewRetention("");
+        setNewRetentionRules([]);
         setNewParams({});
       }}
       isLoading={isLoading}
@@ -303,7 +437,7 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
               dark={dark}
             />
           </FormField>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             <FormField label="Filter" dark={dark}>
               <SelectInput
                 value={newFilter}
@@ -320,15 +454,15 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                 dark={dark}
               />
             </FormField>
-            <FormField label="Retention Policy" dark={dark}>
-              <SelectInput
-                value={newRetention}
-                onChange={setNewRetention}
-                options={retentionOptions}
-                dark={dark}
-              />
-            </FormField>
           </div>
+          <RetentionRulesEditor
+            rules={newRetentionRules}
+            onChange={setNewRetentionRules}
+            retentionPolicies={retentionPolicies}
+            stores={stores}
+            currentStoreId=""
+            dark={dark}
+          />
           <StoreParamsForm
             storeType={newType}
             params={newParams}
@@ -342,8 +476,7 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
         const edit = getEdit(store.id);
         const hasPolicy = store.policy && policies.some((p) => p.id === store.policy);
         const hasFilter = store.filter && filters.some((f) => f.id === store.filter);
-        const hasRetention =
-          store.retention && retentionPolicies.some((r) => r.id === store.retention);
+        const hasRetention = (store.retentionRules ?? []).length > 0;
         const warnings = [
           ...(!hasPolicy ? ["no rotation policy"] : []),
           ...(!hasRetention ? ["no retention policy"] : []),
@@ -519,7 +652,7 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                 label="Enabled"
                 dark={dark}
               />
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 gap-3">
                 <FormField label="Filter" dark={dark}>
                   <SelectInput
                     value={edit.filter}
@@ -536,15 +669,17 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                     dark={dark}
                   />
                 </FormField>
-                <FormField label="Retention Policy" dark={dark}>
-                  <SelectInput
-                    value={edit.retention}
-                    onChange={(v) => setEdit(store.id, { retention: v })}
-                    options={retentionOptions}
-                    dark={dark}
-                  />
-                </FormField>
               </div>
+              <RetentionRulesEditor
+                rules={edit.retentionRules}
+                onChange={(rules) =>
+                  setEdit(store.id, { retentionRules: rules })
+                }
+                retentionPolicies={retentionPolicies}
+                stores={stores}
+                currentStoreId={store.id}
+                dark={dark}
+              />
               <StoreParamsForm
                 storeType={store.type}
                 params={edit.params}

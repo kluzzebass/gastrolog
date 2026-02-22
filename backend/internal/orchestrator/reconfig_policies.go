@@ -98,12 +98,11 @@ func (o *Orchestrator) ReloadRotationPolicies(ctx context.Context) error {
 	return nil
 }
 
-// ReloadRetentionPolicies loads the full config and resolves retention policy references
-// for all registered stores, hot-swapping their policies. This is called when a
+// ReloadRetentionPolicies loads the full config and resolves retention rules
+// for all registered stores, hot-swapping their rules. This is called when a
 // retention policy is created, updated, or deleted.
 //
-// Stores that don't reference any policy keep their current policy.
-// Memory stores without an explicit policy keep their default count(10) policy.
+// Stores without rules keep their current state.
 func (o *Orchestrator) ReloadRetentionPolicies(ctx context.Context) error {
 	cfg, err := o.loadConfig(ctx)
 	if err != nil {
@@ -121,24 +120,18 @@ func (o *Orchestrator) ReloadRetentionPolicies(ctx context.Context) error {
 		if !ok {
 			continue // No retention runner for this store.
 		}
-		if storeCfg.Retention == nil {
-			continue // Store doesn't reference a named policy; keep current.
+		if len(storeCfg.RetentionRules) == 0 {
+			continue // Store has no rules; keep current.
 		}
 
-		policyCfg := findRetentionPolicy(cfg.RetentionPolicies, *storeCfg.Retention)
-		if policyCfg == nil {
-			o.logger.Warn("store references unknown retention policy", "store", storeCfg.ID, "policy", *storeCfg.Retention)
+		rules, err := resolveRetentionRules(cfg, storeCfg)
+		if err != nil {
+			o.logger.Warn("failed to resolve retention rules", "store", storeCfg.ID, "error", err)
 			continue
 		}
 
-		policy, err := policyCfg.ToRetentionPolicy()
-		if err != nil {
-			return fmt.Errorf("invalid retention policy %s for store %s: %w", *storeCfg.Retention, storeCfg.ID, err)
-		}
-		if policy != nil {
-			runner.setPolicy(policy)
-			o.logger.Info("store retention policy updated", "store", storeCfg.ID, "policy", *storeCfg.Retention)
-		}
+		runner.setRules(rules)
+		o.logger.Info("store retention rules updated", "store", storeCfg.ID, "rules", len(rules))
 	}
 
 	return nil

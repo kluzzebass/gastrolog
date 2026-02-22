@@ -443,6 +443,23 @@ func ParseBytes(s string) (uint64, error) {
 	return n * multiplier, nil
 }
 
+// RetentionAction describes what happens when a retention policy matches chunks.
+type RetentionAction string
+
+const (
+	// RetentionActionExpire deletes matching chunks (the default behavior).
+	RetentionActionExpire RetentionAction = "expire"
+	// RetentionActionMigrate moves matching chunks to a destination store.
+	RetentionActionMigrate RetentionAction = "migrate"
+)
+
+// RetentionRule pairs a retention policy with an action.
+type RetentionRule struct {
+	RetentionPolicyID uuid.UUID       `json:"retentionPolicyId"`
+	Action            RetentionAction `json:"action"`
+	Destination       *uuid.UUID      `json:"destination,omitempty"` // target store, only for migrate
+}
+
 // StoreConfig describes a storage backend to instantiate.
 type StoreConfig struct {
 	// ID is the unique identifier (UUIDv7).
@@ -462,9 +479,8 @@ type StoreConfig struct {
 	// Nil means no policy (type-specific default).
 	Policy *uuid.UUID `json:"policy,omitempty"`
 
-	// Retention references a retention policy by UUID.
-	// Nil means no retention policy (chunks are kept indefinitely, or type-specific default).
-	Retention *uuid.UUID `json:"retention,omitempty"`
+	// RetentionRules pairs retention policies with actions (expire or migrate).
+	RetentionRules []RetentionRule `json:"retentionRules,omitempty"`
 
 	// Enabled indicates whether ingestion is enabled for this store.
 	// When false, the store will not receive new records from the ingest pipeline.

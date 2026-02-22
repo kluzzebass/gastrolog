@@ -646,8 +646,17 @@ func copyStoreConfig(st config.StoreConfig) config.StoreConfig {
 	if st.Policy != nil {
 		c.Policy = new(*st.Policy)
 	}
-	if st.Retention != nil {
-		c.Retention = new(*st.Retention)
+	if len(st.RetentionRules) > 0 {
+		c.RetentionRules = make([]config.RetentionRule, len(st.RetentionRules))
+		for i, b := range st.RetentionRules {
+			c.RetentionRules[i] = config.RetentionRule{
+				RetentionPolicyID: b.RetentionPolicyID,
+				Action:            b.Action,
+			}
+			if b.Destination != nil {
+				c.RetentionRules[i].Destination = new(*b.Destination)
+			}
+		}
 	}
 	return c
 }

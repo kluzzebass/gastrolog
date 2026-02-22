@@ -5,11 +5,91 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/google/uuid"
-
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
+
+	"github.com/google/uuid"
 )
+
+// --- Single-chunk move ---
+
+// MoveChunk moves a single sealed chunk from source to destination store.
+// Used by retention-triggered migration to move individual chunks.
+// Supports both filesystem-level moves (ChunkMover) and record-level copy.
+func (o *Orchestrator) MoveChunk(ctx context.Context, chunkID chunk.ChunkID, srcID, dstID uuid.UUID) error {
+	srcCM, err := o.chunkManager(srcID)
+	if err != nil {
+		return err
+	}
+	dstCM, dstIM, err := o.storeManagers(dstID)
+	if err != nil {
+		return err
+	}
+
+	// Try filesystem move first.
+	srcMover, srcOk := srcCM.(chunk.ChunkMover)
+	dstMover, dstOk := dstCM.(chunk.ChunkMover)
+	if srcOk && dstOk {
+		srcDir := srcMover.ChunkDir(chunkID)
+		dstDir := dstMover.ChunkDir(chunkID)
+
+		if err := srcMover.Disown(chunkID); err != nil {
+			return fmt.Errorf("disown chunk %s: %w", chunkID, err)
+		}
+
+		if err := chunkfile.MoveDir(srcDir, dstDir); err != nil {
+			if _, adoptErr := srcMover.Adopt(chunkID); adoptErr != nil {
+				o.logger.Error("failed to restore chunk after move error",
+					"chunk", chunkID.String(), "error", adoptErr)
+			}
+			return fmt.Errorf("move chunk %s: %w", chunkID, err)
+		}
+
+		if _, err := dstMover.Adopt(chunkID); err != nil {
+			return fmt.Errorf("adopt chunk %s in destination: %w", chunkID, err)
+		}
+
+		if dstIM != nil {
+			if err := dstIM.BuildIndexes(ctx, chunkID); err != nil {
+				o.logger.Warn("retention migrate: failed to build indexes for moved chunk",
+					"chunk", chunkID.String(), "error", err)
+			}
+		}
+		return nil
+	}
+
+	// Fallback: copy records for the single chunk.
+	cursor, err := srcCM.OpenCursor(chunkID)
+	if err != nil {
+		return fmt.Errorf("open chunk %s: %w", chunkID, err)
+	}
+	defer cursor.Close()
+
+	for {
+		rec, _, readErr := cursor.Next()
+		if errors.Is(readErr, chunk.ErrNoMoreRecords) {
+			break
+		}
+		if readErr != nil {
+			return fmt.Errorf("read chunk %s: %w", chunkID, readErr)
+		}
+		rec = rec.Copy()
+		if _, _, appendErr := dstCM.AppendPreserved(rec); appendErr != nil {
+			return fmt.Errorf("append record: %w", appendErr)
+		}
+	}
+
+	// Delete from source after successful copy.
+	if err := o.stores[srcID].Indexes.DeleteIndexes(chunkID); err != nil {
+		o.logger.Warn("retention migrate: failed to delete source indexes",
+			"chunk", chunkID.String(), "error", err)
+	}
+	if err := srcCM.Delete(chunkID); err != nil {
+		return fmt.Errorf("delete source chunk %s: %w", chunkID, err)
+	}
+
+	return nil
+}
 
 // --- Multi-store operations ---
 

@@ -44,7 +44,8 @@ func (f *cronFakeChunkManager) ReadWriteTimestamps(id chunk.ChunkID, positions [
 	return nil, nil
 }
 func (f *cronFakeChunkManager) SetRotationPolicy(policy chunk.RotationPolicy) {}
-func (f *cronFakeChunkManager) Close() error                                   { return nil }
+func (f *cronFakeChunkManager) CheckRotation() *string                        { return nil }
+func (f *cronFakeChunkManager) Close() error                                  { return nil }
 
 // ---------- helpers ----------
 

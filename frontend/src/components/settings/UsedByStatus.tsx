@@ -52,3 +52,17 @@ export function refsFor(
 ): string[] {
   return stores.filter((s) => s[field] === id).map((s) => s.name || s.id);
 }
+
+export function ruleRefsFor(
+  stores: Store[],
+  retentionPolicyId: string,
+): string[] {
+  return stores
+    .filter((s) =>
+      (s.retentionRules ?? []).some(
+        (b: { retentionPolicyId: string }) =>
+          b.retentionPolicyId === retentionPolicyId,
+      ),
+    )
+    .map((s) => s.name || s.id);
+}

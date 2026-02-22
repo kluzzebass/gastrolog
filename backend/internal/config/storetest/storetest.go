@@ -367,18 +367,22 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 	})
 
-	// Store retention reference
-	t.Run("StoreRetentionField", func(t *testing.T) {
+	// Store retention rules
+	t.Run("StoreRetentionRules", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
 
 		id := newID()
 		retID := newID()
+		dstID := newID()
 		st := config.StoreConfig{
-			ID:        id,
-			Name:      "main",
-			Type:      "file",
-			Retention: &retID,
+			ID:   id,
+			Name: "main",
+			Type: "file",
+			RetentionRules: []config.RetentionRule{
+				{RetentionPolicyID: retID, Action: config.RetentionActionExpire},
+				{RetentionPolicyID: retID, Action: config.RetentionActionMigrate, Destination: &dstID},
+			},
 		}
 		if err := s.PutStore(ctx, st); err != nil {
 			t.Fatalf("Put: %v", err)
@@ -388,7 +392,21 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		assertUUIDPtr(t, "Retention", got.Retention, retID)
+		if len(got.RetentionRules) != 2 {
+			t.Fatalf("expected 2 rules, got %d", len(got.RetentionRules))
+		}
+		if got.RetentionRules[0].RetentionPolicyID != retID {
+			t.Errorf("rule[0] policy: got %s, want %s", got.RetentionRules[0].RetentionPolicyID, retID)
+		}
+		if got.RetentionRules[0].Action != config.RetentionActionExpire {
+			t.Errorf("rule[0] action: got %q, want %q", got.RetentionRules[0].Action, config.RetentionActionExpire)
+		}
+		if got.RetentionRules[1].Action != config.RetentionActionMigrate {
+			t.Errorf("rule[1] action: got %q, want %q", got.RetentionRules[1].Action, config.RetentionActionMigrate)
+		}
+		if got.RetentionRules[1].Destination == nil || *got.RetentionRules[1].Destination != dstID {
+			t.Errorf("rule[1] destination: got %v, want %s", got.RetentionRules[1].Destination, dstID)
+		}
 	})
 
 	// Stores

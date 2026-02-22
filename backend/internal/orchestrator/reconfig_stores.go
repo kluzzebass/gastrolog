@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
 	"gastrolog/internal/query"
 
@@ -78,43 +77,32 @@ func (o *Orchestrator) AddStore(ctx context.Context, storeCfg config.StoreConfig
 	}
 
 	// Set up retention job if applicable.
-	var retPolicy chunk.RetentionPolicy
-	if storeCfg.Retention != nil && cfg != nil {
-		retCfg := findRetentionPolicy(cfg.RetentionPolicies, *storeCfg.Retention)
-		if retCfg != nil {
-			p, err := retCfg.ToRetentionPolicy()
-			if err != nil {
-				o.logger.Warn("invalid retention policy for new store", "store", storeCfg.ID, "error", err)
-			} else {
-				retPolicy = p
+	if len(storeCfg.RetentionRules) > 0 && cfg != nil {
+		rules, err := resolveRetentionRules(cfg, storeCfg)
+		if err != nil {
+			o.logger.Warn("invalid retention rules for new store", "store", storeCfg.ID, "error", err)
+		} else if len(rules) > 0 {
+			runner := &retentionRunner{
+				storeID:  storeCfg.ID,
+				cm:       cm,
+				im:       im,
+				rules: rules,
+				orch:     o,
+				now:      o.now,
+				logger:   o.logger,
 			}
+			o.retention[storeCfg.ID] = runner
+			if err := o.scheduler.AddJob(retentionJobName(storeCfg.ID), defaultRetentionSchedule, runner.sweep); err != nil {
+				o.logger.Warn("failed to add retention job for new store", "store", storeCfg.ID, "error", err)
+			}
+			o.scheduler.Describe(retentionJobName(storeCfg.ID), fmt.Sprintf("Retention sweep for '%s'", storeCfg.Name))
 		}
-	}
-	if retPolicy != nil {
-		runner := &retentionRunner{
-			storeID: storeCfg.ID,
-			cm:      cm,
-			im:      im,
-			policy:  retPolicy,
-			now:     o.now,
-			logger:  o.logger,
-		}
-		o.retention[storeCfg.ID] = runner
-		if err := o.scheduler.AddJob(retentionJobName(storeCfg.ID), defaultRetentionSchedule, runner.sweep); err != nil {
-			o.logger.Warn("failed to add retention job for new store", "store", storeCfg.ID, "error", err)
-		}
-		o.scheduler.Describe(retentionJobName(storeCfg.ID), fmt.Sprintf("Delete expired chunks from '%s'", storeCfg.Name))
 	}
 
-	// Set up cron rotation if the rotation policy has a cron schedule.
+	// Apply rotation policy (per-append threshold checks + cron schedule).
 	if storeCfg.Policy != nil && cfg != nil {
-		policyCfg := findRotationPolicy(cfg.RotationPolicies, *storeCfg.Policy)
-		if policyCfg != nil {
-			if policyCfg.Cron != nil && *policyCfg.Cron != "" {
-				if err := o.cronRotation.addJob(storeCfg.ID, storeCfg.Name, *policyCfg.Cron, cm); err != nil {
-					o.logger.Warn("failed to add cron rotation for new store", "store", storeCfg.ID, "error", err)
-				}
-			}
+		if err := o.applyRotationPolicy(cfg, storeCfg, cm); err != nil {
+			o.logger.Warn("failed to apply rotation policy for new store", "store", storeCfg.ID, "error", err)
 		}
 	}
 

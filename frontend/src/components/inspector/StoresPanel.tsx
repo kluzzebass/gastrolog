@@ -49,7 +49,7 @@ export function StoresPanel({ dark }: Readonly<{ dark: boolean }>) {
         </h2>
         <HelpButton topicId="inspector-stores" />
       </div>
-      {stores.map((store) => (
+      {[...stores].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)).map((store) => (
         <ExpandableCard
           key={store.id}
           id={store.name || store.id}

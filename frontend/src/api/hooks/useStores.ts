@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Timestamp } from "@bufbuild/protobuf";
 import { storeClient, configClient } from "../client";
+import type { RetentionRule } from "../gen/gastrolog/v1/config_pb";
 
 export function useStores() {
   return useQuery({
@@ -190,7 +191,7 @@ export function usePutStore() {
       type: string;
       filter: string;
       policy: string;
-      retention: string;
+      retentionRules: Partial<RetentionRule>[];
       params: Record<string, string>;
       enabled?: boolean;
     }) => {
@@ -201,7 +202,7 @@ export function usePutStore() {
           type: args.type,
           filter: args.filter,
           policy: args.policy,
-          retention: args.retention,
+          retentionRules: args.retentionRules,
           params: args.params,
           enabled: args.enabled ?? true,
         },

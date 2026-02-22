@@ -166,7 +166,9 @@ export function SetupWizard() {
           enabled: true,
           filter: filterId,
           policy: rotationId,
-          retention: retentionId,
+          retentionRules: retentionId
+            ? [{ retentionPolicyId: retentionId, action: "expire" }]
+            : [],
           params: storeParams,
         },
       });

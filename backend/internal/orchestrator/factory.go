@@ -67,6 +67,15 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 		return err
 	}
 
+	// Schedule the rotation sweep so time-based policies (e.g., maxAge)
+	// trigger even when no records are flowing to a store.
+	if !o.scheduler.HasJob(rotationSweepJobName) {
+		if err := o.scheduler.AddJob(rotationSweepJobName, rotationSweepSchedule, o.rotationSweep); err != nil {
+			o.logger.Warn("failed to add rotation sweep job", "error", err)
+		}
+		o.scheduler.Describe(rotationSweepJobName, "Check active chunks for time-based rotation")
+	}
+
 	return nil
 }
 
@@ -185,10 +194,10 @@ func (o *Orchestrator) applyRotationPolicy(cfg *config.Config, storeCfg config.S
 	return nil
 }
 
-// applyRetention sets up retention jobs for stores that reference retention policies.
+// applyRetention sets up retention jobs for stores that have retention rules.
 func (o *Orchestrator) applyRetention(cfg *config.Config) error {
 	for _, storeCfg := range cfg.Stores {
-		if storeCfg.Retention == nil {
+		if len(storeCfg.RetentionRules) == 0 {
 			continue
 		}
 
@@ -197,34 +206,58 @@ func (o *Orchestrator) applyRetention(cfg *config.Config) error {
 			continue
 		}
 
-		retCfg := findRetentionPolicy(cfg.RetentionPolicies, *storeCfg.Retention)
-		if retCfg == nil {
-			return fmt.Errorf("store %s references unknown retention policy: %s", storeCfg.ID, *storeCfg.Retention)
-		}
-		policy, err := retCfg.ToRetentionPolicy()
+		rules, err := resolveRetentionRules(cfg, storeCfg)
 		if err != nil {
-			return fmt.Errorf("invalid retention policy %s for store %s: %w", *storeCfg.Retention, storeCfg.ID, err)
+			return err
 		}
-		if policy == nil {
+		if len(rules) == 0 {
 			continue
 		}
 
 		runner := &retentionRunner{
-			storeID: storeCfg.ID,
-			cm:      store.Chunks,
-			im:      store.Indexes,
-			policy:  policy,
-			now:     o.now,
-			logger:  o.logger,
+			storeID:  storeCfg.ID,
+			cm:       store.Chunks,
+			im:       store.Indexes,
+			rules: rules,
+			orch:     o,
+			now:      o.now,
+			logger:   o.logger,
 		}
 		o.retention[storeCfg.ID] = runner
 		if err := o.scheduler.AddJob(retentionJobName(storeCfg.ID), defaultRetentionSchedule, runner.sweep); err != nil {
 			return fmt.Errorf("retention job for store %s: %w", storeCfg.ID, err)
 		}
-		o.scheduler.Describe(retentionJobName(storeCfg.ID), fmt.Sprintf("Delete expired chunks from '%s'", storeCfg.Name))
+		o.scheduler.Describe(retentionJobName(storeCfg.ID), fmt.Sprintf("Retention sweep for '%s'", storeCfg.Name))
 	}
 
 	return nil
+}
+
+// resolveRetentionRules converts config rules to resolved retentionRule objects.
+func resolveRetentionRules(cfg *config.Config, storeCfg config.StoreConfig) ([]retentionRule, error) {
+	var rules []retentionRule
+	for _, b := range storeCfg.RetentionRules {
+		retCfg := findRetentionPolicy(cfg.RetentionPolicies, b.RetentionPolicyID)
+		if retCfg == nil {
+			return nil, fmt.Errorf("store %s references unknown retention policy: %s", storeCfg.ID, b.RetentionPolicyID)
+		}
+		policy, err := retCfg.ToRetentionPolicy()
+		if err != nil {
+			return nil, fmt.Errorf("invalid retention policy %s for store %s: %w", b.RetentionPolicyID, storeCfg.ID, err)
+		}
+		if policy == nil {
+			continue
+		}
+		rb := retentionRule{
+			policy: policy,
+			action: b.Action,
+		}
+		if b.Destination != nil {
+			rb.destination = *b.Destination
+		}
+		rules = append(rules, rb)
+	}
+	return rules, nil
 }
 
 // applyIngesters creates and registers ingesters from the config.

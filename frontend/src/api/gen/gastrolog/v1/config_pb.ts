@@ -99,6 +99,59 @@ export class GetConfigResponse extends Message<GetConfigResponse> {
 }
 
 /**
+ * @generated from message gastrolog.v1.RetentionRule
+ */
+export class RetentionRule extends Message<RetentionRule> {
+  /**
+   * @generated from field: string retention_policy_id = 1;
+   */
+  retentionPolicyId = "";
+
+  /**
+   * "expire" or "migrate"
+   *
+   * @generated from field: string action = 2;
+   */
+  action = "";
+
+  /**
+   * target store, only for action=migrate
+   *
+   * @generated from field: string destination_id = 3;
+   */
+  destinationId = "";
+
+  constructor(data?: PartialMessage<RetentionRule>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RetentionRule";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "retention_policy_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "action", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "destination_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RetentionRule {
+    return new RetentionRule().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RetentionRule {
+    return new RetentionRule().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RetentionRule {
+    return new RetentionRule().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RetentionRule | PlainMessage<RetentionRule> | undefined, b: RetentionRule | PlainMessage<RetentionRule> | undefined): boolean {
+    return proto3.util.equals(RetentionRule, a, b);
+  }
+}
+
+/**
  * @generated from message gastrolog.v1.StoreConfig
  */
 export class StoreConfig extends Message<StoreConfig> {
@@ -128,11 +181,8 @@ export class StoreConfig extends Message<StoreConfig> {
   params: { [key: string]: string } = {};
 
   /**
-   * @generated from field: string retention = 6;
-   */
-  retention = "";
-
-  /**
+   * field 6 was 'retention' (single UUID) — removed
+   *
    * @generated from field: bool enabled = 7;
    */
   enabled = false;
@@ -141,6 +191,11 @@ export class StoreConfig extends Message<StoreConfig> {
    * @generated from field: string name = 8;
    */
   name = "";
+
+  /**
+   * @generated from field: repeated gastrolog.v1.RetentionRule retention_rules = 9;
+   */
+  retentionRules: RetentionRule[] = [];
 
   constructor(data?: PartialMessage<StoreConfig>) {
     super();
@@ -155,9 +210,9 @@ export class StoreConfig extends Message<StoreConfig> {
     { no: 3, name: "filter", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "policy", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 5, name: "params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
-    { no: 6, name: "retention", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 7, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 8, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 9, name: "retention_rules", kind: "message", T: RetentionRule, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): StoreConfig {

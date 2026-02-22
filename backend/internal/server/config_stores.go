@@ -298,12 +298,23 @@ func protoToStoreConfig(p *apiv1.StoreConfig) (config.StoreConfig, error) {
 		}
 		cfg.Policy = new(pid)
 	}
-	if p.Retention != "" {
-		rid, err := uuid.Parse(p.Retention)
-		if err != nil {
-			return config.StoreConfig{}, fmt.Errorf("invalid retention ID: %w", err)
+	for _, pb := range p.RetentionRules {
+		b := config.RetentionRule{
+			Action: config.RetentionAction(pb.Action),
 		}
-		cfg.Retention = new(rid)
+		rpID, err := uuid.Parse(pb.RetentionPolicyId)
+		if err != nil {
+			return config.StoreConfig{}, fmt.Errorf("invalid retention policy ID: %w", err)
+		}
+		b.RetentionPolicyID = rpID
+		if pb.DestinationId != "" {
+			dstID, err := uuid.Parse(pb.DestinationId)
+			if err != nil {
+				return config.StoreConfig{}, fmt.Errorf("invalid destination ID: %w", err)
+			}
+			b.Destination = &dstID
+		}
+		cfg.RetentionRules = append(cfg.RetentionRules, b)
 	}
 	return cfg, nil
 }

@@ -169,7 +169,7 @@ func New(cfg Config) *Orchestrator {
 		panic(fmt.Sprintf("create scheduler: %v", err))
 	}
 
-	return &Orchestrator{
+	o := &Orchestrator{
 		stores:          make(map[uuid.UUID]*Store),
 		ingesters:       make(map[uuid.UUID]Ingester),
 		ingesterCancels: make(map[uuid.UUID]context.CancelFunc),
@@ -182,6 +182,12 @@ func New(cfg Config) *Orchestrator {
 		now:             cfg.Now,
 		logger:          logger,
 	}
+
+	// Wire up post-seal callback for cron rotation so sealed chunks
+	// get compressed and indexed (same pipeline as ingest-triggered seals).
+	o.cronRotation.onSeal = o.postSealWork
+
+	return o
 }
 
 // Logger returns a child logger scoped for a subcomponent.

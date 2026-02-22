@@ -1447,6 +1447,40 @@ func (m *Manager) SetRotationPolicy(policy chunk.RotationPolicy) {
 	m.cfg.RotationPolicy = policy
 }
 
+func (m *Manager) CheckRotation() *string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.closed || m.active == nil {
+		return nil
+	}
+
+	state := m.activeChunkState()
+	if state.Records == 0 {
+		return nil
+	}
+
+	var zeroRecord chunk.Record
+	trigger := m.cfg.RotationPolicy.ShouldRotate(state, zeroRecord)
+	if trigger == nil {
+		return nil
+	}
+
+	m.logger.Info("rotating chunk",
+		"trigger", *trigger,
+		"chunk", state.ChunkID.String(),
+		"bytes", state.Bytes,
+		"records", state.Records,
+		"age", m.cfg.Now().Sub(state.CreatedAt),
+	)
+	if err := m.sealLocked(); err != nil {
+		m.logger.Error("failed to seal chunk during background rotation check",
+			"chunk", state.ChunkID.String(), "error", err)
+		return nil
+	}
+	return trigger
+}
+
 var _ chunk.ChunkManager = (*Manager)(nil)
 var _ chunk.ChunkMover = (*Manager)(nil)
 var _ chunk.ChunkCompressor = (*Manager)(nil)

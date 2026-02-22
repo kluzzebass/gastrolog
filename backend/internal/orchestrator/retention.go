@@ -1,12 +1,14 @@
 package orchestrator
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/config"
 	"gastrolog/internal/index"
 
 	"github.com/google/uuid"
@@ -19,32 +21,40 @@ func retentionJobName(storeID uuid.UUID) string {
 	return fmt.Sprintf("retention:%s", storeID)
 }
 
+// retentionRule is a resolved rule: a compiled policy paired with an action.
+type retentionRule struct {
+	policy      chunk.RetentionPolicy
+	action      config.RetentionAction
+	destination uuid.UUID // target store ID, only for migrate
+}
+
 // retentionRunner manages the retention sweep for a single store.
 // It is invoked by the shared scheduler on a cron schedule.
 type retentionRunner struct {
-	mu      sync.Mutex
-	storeID uuid.UUID
-	cm      chunk.ChunkManager
-	im      index.IndexManager
-	policy  chunk.RetentionPolicy
-	now     func() time.Time
-	logger  *slog.Logger
+	mu       sync.Mutex
+	storeID  uuid.UUID
+	cm       chunk.ChunkManager
+	im       index.IndexManager
+	rules []retentionRule
+	orch     *Orchestrator // for MoveChunk on migrate action
+	now      func() time.Time
+	logger   *slog.Logger
 }
 
-// setPolicy hot-swaps the retention policy.
-func (r *retentionRunner) setPolicy(policy chunk.RetentionPolicy) {
+// setRules hot-swaps the retention rules.
+func (r *retentionRunner) setRules(rules []retentionRule) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.policy = policy
+	r.rules = rules
 }
 
-// sweep evaluates the retention policy and deletes expired chunks.
+// sweep evaluates all retention rules and applies expire/migrate actions.
 func (r *retentionRunner) sweep() {
 	r.mu.Lock()
-	policy := r.policy
+	rules := r.rules
 	r.mu.Unlock()
 
-	if policy == nil {
+	if len(rules) == 0 {
 		return
 	}
 
@@ -71,26 +81,59 @@ func (r *retentionRunner) sweep() {
 		Now:    r.now(),
 	}
 
-	toDelete := policy.Apply(state)
-	if len(toDelete) == 0 {
+	// Track already-processed chunk IDs to avoid double-processing across rules.
+	processed := make(map[chunk.ChunkID]bool)
+
+	for _, b := range rules {
+		matched := b.policy.Apply(state)
+		if len(matched) == 0 {
+			continue
+		}
+
+		for _, id := range matched {
+			if processed[id] {
+				continue
+			}
+			processed[id] = true
+
+			switch b.action {
+			case config.RetentionActionExpire:
+				r.expireChunk(id)
+			case config.RetentionActionMigrate:
+				r.migrateChunk(id, b.destination)
+			default:
+				r.logger.Error("retention: unknown action", "store", r.storeID, "action", b.action)
+			}
+		}
+	}
+}
+
+// expireChunk deletes a chunk's indexes then data.
+func (r *retentionRunner) expireChunk(id chunk.ChunkID) {
+	if err := r.im.DeleteIndexes(id); err != nil {
+		r.logger.Error("retention: failed to delete indexes",
+			"store", r.storeID, "chunk", id.String(), "error", err)
 		return
 	}
 
-	for _, id := range toDelete {
-		// Delete indexes first, then chunk data.
-		if err := r.im.DeleteIndexes(id); err != nil {
-			r.logger.Error("retention: failed to delete indexes",
-				"store", r.storeID, "chunk", id.String(), "error", err)
-			continue
-		}
-
-		if err := r.cm.Delete(id); err != nil {
-			r.logger.Error("retention: failed to delete chunk",
-				"store", r.storeID, "chunk", id.String(), "error", err)
-			continue
-		}
-
-		r.logger.Info("retention: deleted chunk",
-			"store", r.storeID, "chunk", id.String())
+	if err := r.cm.Delete(id); err != nil {
+		r.logger.Error("retention: failed to delete chunk",
+			"store", r.storeID, "chunk", id.String(), "error", err)
+		return
 	}
+
+	r.logger.Info("retention: deleted chunk",
+		"store", r.storeID, "chunk", id.String())
+}
+
+// migrateChunk moves a single chunk to the destination store.
+func (r *retentionRunner) migrateChunk(id chunk.ChunkID, dstID uuid.UUID) {
+	ctx := context.Background()
+	if err := r.orch.MoveChunk(ctx, id, r.storeID, dstID); err != nil {
+		r.logger.Error("retention: failed to migrate chunk",
+			"store", r.storeID, "chunk", id.String(), "destination", dstID, "error", err)
+		return
+	}
+	r.logger.Info("retention: migrated chunk",
+		"store", r.storeID, "chunk", id.String(), "destination", dstID)
 }

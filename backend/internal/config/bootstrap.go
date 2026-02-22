@@ -38,7 +38,9 @@ func DefaultConfig() *Config {
 				Enabled:   true,
 				Filter:    new(filterID),
 				Policy:    new(rotationID),
-				Retention: new(retentionID),
+				RetentionRules: []RetentionRule{
+				{RetentionPolicyID: retentionID, Action: RetentionActionExpire},
+			},
 			},
 		},
 		Ingesters: []IngesterConfig{

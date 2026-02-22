@@ -58,6 +58,12 @@ type ChunkManager interface {
 	// This takes effect immediately; the next append will use the new policy.
 	SetRotationPolicy(policy RotationPolicy)
 
+	// CheckRotation evaluates the current rotation policy against the active
+	// chunk state without an incoming record. If the policy triggers (e.g., age
+	// exceeded), the active chunk is sealed. Returns the trigger name if rotation
+	// occurred, nil otherwise. Safe to call from background sweeps.
+	CheckRotation() *string
+
 	// Close releases resources held by the manager (file locks, mmap regions, etc).
 	// After Close, the manager must not be used.
 	Close() error

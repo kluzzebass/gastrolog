@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/config"
 	"gastrolog/internal/index"
 
 	"github.com/google/uuid"
@@ -47,7 +48,8 @@ func (f *retentionFakeChunkManager) ReadWriteTimestamps(id chunk.ChunkID, positi
 	return nil, nil
 }
 func (f *retentionFakeChunkManager) SetRotationPolicy(policy chunk.RotationPolicy) {}
-func (f *retentionFakeChunkManager) Close() error                                   { return nil }
+func (f *retentionFakeChunkManager) CheckRotation() *string                        { return nil }
+func (f *retentionFakeChunkManager) Close() error                                  { return nil }
 
 // ---------- fake index manager ----------
 
@@ -109,13 +111,19 @@ func chunkIDAt(_ time.Time) chunk.ChunkID {
 }
 
 func newRetentionRunner(cm chunk.ChunkManager, im index.IndexManager, policy chunk.RetentionPolicy) *retentionRunner {
+	var rules []retentionRule
+	if policy != nil {
+		rules = []retentionRule{
+			{policy: policy, action: config.RetentionActionExpire},
+		}
+	}
 	return &retentionRunner{
-		storeID: uuid.Must(uuid.NewV7()),
-		cm:      cm,
-		im:      im,
-		policy:  policy,
-		now:     time.Now,
-		logger:  slog.Default(),
+		storeID:  uuid.Must(uuid.NewV7()),
+		cm:       cm,
+		im:       im,
+		rules: rules,
+		now:      time.Now,
+		logger:   slog.Default(),
 	}
 }
 
@@ -212,7 +220,7 @@ func TestSweepSkipsActiveChunks(t *testing.T) {
 	}
 }
 
-func TestSweepWithNoPolicy(t *testing.T) {
+func TestSweepWithNoBindings(t *testing.T) {
 	cm := &retentionFakeChunkManager{
 		chunks: []chunk.ChunkMeta{
 			{ID: chunkIDAt(time.Now()), Sealed: true},
@@ -225,14 +233,14 @@ func TestSweepWithNoPolicy(t *testing.T) {
 	r.sweep()
 
 	if len(cm.deleted) != 0 {
-		t.Errorf("expected no chunk deletions with nil policy, got %d", len(cm.deleted))
+		t.Errorf("expected no chunk deletions with no rules, got %d", len(cm.deleted))
 	}
 	if len(im.deleted) != 0 {
-		t.Errorf("expected no index deletions with nil policy, got %d", len(im.deleted))
+		t.Errorf("expected no index deletions with no rules, got %d", len(im.deleted))
 	}
 }
 
-func TestSetPolicyHotSwap(t *testing.T) {
+func TestSetBindingsHotSwap(t *testing.T) {
 	base := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	id0 := chunkIDAt(base)
@@ -258,12 +266,14 @@ func TestSetPolicyHotSwap(t *testing.T) {
 	}
 
 	// Hot-swap to keep-1 policy. Next sweep should delete the 2 oldest.
-	r.setPolicy(chunk.NewCountRetentionPolicy(1))
+	r.setRules([]retentionRule{
+		{policy: chunk.NewCountRetentionPolicy(1), action: config.RetentionActionExpire},
+	})
 
 	r.sweep()
 
 	if len(cm.deleted) != 2 {
-		t.Fatalf("expected 2 chunk deletions after policy swap, got %d", len(cm.deleted))
+		t.Fatalf("expected 2 chunk deletions after rule swap, got %d", len(cm.deleted))
 	}
 	if cm.deleted[0] != id0 {
 		t.Errorf("expected first deleted chunk %s, got %s", id0, cm.deleted[0])

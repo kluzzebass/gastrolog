@@ -20,7 +20,6 @@ go mod tidy                                       # Clean dependencies
 
 ```bash
 just run                    # Server with SQLite config (default)
-just run-json               # Server with JSON config
 just run-memory             # Server with in-memory config (no persistence)
 just run-bootstrap          # Server with full bootstrap (memory + chatterbox)
 just pprof                  # Server + pprof on :6060

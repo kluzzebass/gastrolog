@@ -141,14 +141,23 @@ func (s *ConfigServer) DeleteRetentionPolicy(
 		return nil, connErr
 	}
 
-	// Clear retention reference on any stores that use it.
+	// Clear retention rules that reference this policy.
 	stores, err := s.cfgStore.ListStores(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	for _, st := range stores {
-		if st.Retention != nil && *st.Retention == id {
-			st.Retention = nil
+		changed := false
+		var kept []config.RetentionRule
+		for _, b := range st.RetentionRules {
+			if b.RetentionPolicyID == id {
+				changed = true
+				continue
+			}
+			kept = append(kept, b)
+		}
+		if changed {
+			st.RetentionRules = kept
 			if err := s.cfgStore.PutStore(ctx, st); err != nil {
 				return nil, connect.NewError(connect.CodeInternal, err)
 			}
