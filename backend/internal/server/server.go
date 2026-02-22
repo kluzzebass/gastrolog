@@ -60,6 +60,7 @@ type Server struct {
 	certManager CertManager
 	noAuth      bool
 	logger      *slog.Logger
+	startTime   time.Time
 
 	mu       sync.Mutex
 	listener net.Listener
@@ -90,6 +91,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orche
 		certManager: cfg.CertManager,
 		noAuth:      cfg.NoAuth,
 		logger:      logging.Default(cfg.Logger).With("component", "server"),
+		startTime:   time.Now(),
 		shutdown:    make(chan struct{}),
 		rl:          newRateLimiter(5.0/60.0, 5), // 5 req/min per IP, burst of 5
 	}
@@ -224,6 +226,7 @@ func (s *Server) buildMux() *http.ServeMux {
 	mux.Handle(gastrologv1connect.NewJobServiceHandler(jobServer, handlerOpts...))
 
 	s.registerProbes(mux)
+	s.registerMetrics(mux)
 
 	if h := frontend.Handler(); h != nil {
 		mux.Handle("/", h)
