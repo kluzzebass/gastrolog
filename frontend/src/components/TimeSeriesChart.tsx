@@ -71,7 +71,9 @@ export function TimeSeriesChart({
       for (const row of rows) {
         const t = new Date(row[timeCol]!).getTime();
         const group = row[1] ?? "";
-        const val = Number(row[2]) || 0;
+        const raw = row[2] ?? "";
+        if (raw === "") continue; // skip missing values
+        const val = Number(raw) || 0;
         if (!groups.has(group)) groups.set(group, []);
         groups.get(group)!.push({ x: t, y: val });
       }
@@ -106,10 +108,11 @@ export function TimeSeriesChart({
     const aggCols = columns.slice(1);
     const seriesList: Series[] = aggCols.map((name, i) => ({
       name,
-      points: rows.map((r, j) => ({
-        x: timestamps[j]!,
-        y: Number(r[i + 1]) || 0,
-      })),
+      points: rows.flatMap((r, j) => {
+        const raw = r[i + 1] ?? "";
+        if (raw === "") return []; // skip missing values
+        return [{ x: timestamps[j]!, y: Number(raw) || 0 }];
+      }),
       color: SERIES_COLORS[i % SERIES_COLORS.length]!,
     }));
 
