@@ -51,18 +51,13 @@ func CPUPercent() float64 {
 	return pct
 }
 
-// MemoryRSS returns the resident set size of the process in bytes.
-func MemoryRSS() int64 {
-	var rusage syscall.Rusage
-	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &rusage); err != nil {
-		return 0
-	}
-	rss := int64(rusage.Maxrss)
-	// macOS reports Maxrss in bytes; Linux reports in KB.
-	if runtime.GOOS == "linux" {
-		rss *= 1024
-	}
-	return rss
+// MemorySys returns the total memory obtained from the OS by the Go
+// runtime, in bytes. This reflects current usage and decreases when
+// memory is released back to the OS.
+func MemorySys() int64 {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return int64(m.Sys)
 }
 
 func getrusageTimes() (user, sys time.Duration) {
