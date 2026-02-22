@@ -11,6 +11,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/querylang"
+	"gastrolog/internal/tokenizer"
 )
 
 // MaxGroupCardinality limits the number of distinct groups to prevent memory exhaustion.
@@ -23,15 +24,29 @@ type TableResult struct {
 	Truncated bool       // true if cardinality cap was hit
 }
 
+// extractors is the default set of KV extractors used by RecordToRow.
+var extractors = tokenizer.DefaultExtractors()
+
 // RecordToRow converts a chunk.Record to a querylang.Row for expression evaluation.
-// It includes all record attributes plus the raw message as _raw.
+// It extracts fields from the raw message using both KV and JSON extractors,
+// then overlays record attributes (which take precedence), and adds _raw.
 func RecordToRow(rec chunk.Record) querylang.Row {
-	size := 1
+	// Extract fields from raw text (KV, logfmt, access log + JSON).
+	kvs := tokenizer.CombinedExtract(rec.Raw, extractors)
+	jsonKVs := tokenizer.ExtractJSON(rec.Raw)
+
+	size := 1 + len(kvs) + len(jsonKVs)
 	if rec.Attrs != nil {
 		size += len(rec.Attrs)
 	}
 	row := make(querylang.Row, size)
-	maps.Copy(row, rec.Attrs)
+	for _, kv := range kvs {
+		row[kv.Key] = kv.Value
+	}
+	for _, kv := range jsonKVs {
+		row[kv.Key] = kv.Value
+	}
+	maps.Copy(row, rec.Attrs) // attrs take precedence over extracted fields
 	row["_raw"] = string(rec.Raw)
 	return row
 }

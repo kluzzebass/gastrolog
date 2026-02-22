@@ -80,6 +80,64 @@ func TestRecordToRowNilAttrs(t *testing.T) {
 	}
 }
 
+func TestRecordToRowExtractsKV(t *testing.T) {
+	rec := chunk.Record{
+		WriteTS: baseTime,
+		Attrs:   chunk.Attributes{"level": "info"},
+		Raw:     []byte("cpu_percent=1.2 heap_alloc_bytes=8388608"),
+	}
+
+	row := RecordToRow(rec)
+
+	// KV pairs from raw text are extracted.
+	if row["cpu_percent"] != "1.2" {
+		t.Errorf("cpu_percent = %q, want 1.2", row["cpu_percent"])
+	}
+	if row["heap_alloc_bytes"] != "8388608" {
+		t.Errorf("heap_alloc_bytes = %q, want 8388608", row["heap_alloc_bytes"])
+	}
+	// Explicit attrs take precedence over extracted KVs.
+	if row["level"] != "info" {
+		t.Errorf("level = %q, want info", row["level"])
+	}
+}
+
+func TestRecordToRowAttrPrecedence(t *testing.T) {
+	rec := chunk.Record{
+		WriteTS: baseTime,
+		Attrs:   chunk.Attributes{"key": "from-attr"},
+		Raw:     []byte("key=from-raw"),
+	}
+
+	row := RecordToRow(rec)
+
+	if row["key"] != "from-attr" {
+		t.Errorf("key = %q, want from-attr (attr should take precedence)", row["key"])
+	}
+}
+
+func TestRecordToRowExtractsJSON(t *testing.T) {
+	rec := chunk.Record{
+		WriteTS: baseTime,
+		Raw:     []byte(`{"status":200,"method":"GET","latency":1.5,"nested":{"region":"us"}}`),
+	}
+
+	row := RecordToRow(rec)
+
+	if row["status"] != "200" {
+		t.Errorf("status = %q, want 200", row["status"])
+	}
+	if row["method"] != "get" {
+		t.Errorf("method = %q, want get (JSON extraction lowercases)", row["method"])
+	}
+	if row["latency"] != "1.5" {
+		t.Errorf("latency = %q, want 1.5", row["latency"])
+	}
+	if row["nested.region"] != "us" {
+		t.Errorf("nested.region = %q, want us", row["nested.region"])
+	}
+}
+
 func TestAggregatorBareCount(t *testing.T) {
 	stats := &querylang.StatsOp{
 		Aggs: []querylang.AggExpr{{Func: "count"}},
