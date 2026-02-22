@@ -2,6 +2,11 @@
 
 All notable changes to GastroLog are documented here.
 
+## v0.3.2 — 2026-02-22
+
+### Performance
+- **Release workflow 5x faster** — Docker job reuses pre-built linux binaries via artifacts instead of rebuilding from source (25 min → 5 min)
+
 ## v0.3.1 — 2026-02-22
 
 ### Features
