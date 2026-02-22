@@ -6,6 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Always create new branches before picking up issues.
 
+## This project uses react compiler, so no there need to memoize everything.
 
 ## Renaming: Always Rename Through the Entire Stack
 
