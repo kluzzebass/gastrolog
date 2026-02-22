@@ -21,12 +21,42 @@ export function getToken(): string | null {
   return currentToken;
 }
 
+// Proactive token refresh — schedules a refresh 1 minute before expiry.
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleProactiveRefresh(token: string) {
+  if (refreshTimer) {
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
+  }
+  try {
+    const [, payloadB64] = token.split(".");
+    if (!payloadB64) return;
+    const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")));
+    const exp = payload.exp as number | undefined;
+    if (!exp) return;
+    // Refresh 60 seconds before expiry, but at least 10 seconds from now.
+    const msUntilRefresh = Math.max((exp * 1000 - Date.now()) - 60_000, 10_000);
+    refreshTimer = setTimeout(() => {
+      refreshTimer = null;
+      tryRefresh();
+    }, msUntilRefresh);
+  } catch {
+    // Can't decode — fall back to reactive refresh.
+  }
+}
+
 export function setToken(token: string | null) {
   currentToken = token;
   if (token) {
     localStorage.setItem(TOKEN_KEY, token);
+    scheduleProactiveRefresh(token);
   } else {
     localStorage.removeItem(TOKEN_KEY);
+    if (refreshTimer) {
+      clearTimeout(refreshTimer);
+      refreshTimer = null;
+    }
   }
 }
 
@@ -120,6 +150,9 @@ export const lifecycleClient = createPromiseClient(LifecycleService, transport);
 export const configClient = createPromiseClient(ConfigService, transport);
 export const authClient = createPromiseClient(AuthService, transport);
 export const jobClient = createPromiseClient(JobService, transport);
+
+// Schedule proactive refresh for token loaded from localStorage on startup.
+if (currentToken) scheduleProactiveRefresh(currentToken);
 
 // Re-export types for convenience
 export * from "./gen/gastrolog/v1/query_pb";
