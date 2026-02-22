@@ -51,13 +51,62 @@ func CPUPercent() float64 {
 	return pct
 }
 
-// MemoryInuse returns the memory actively in use by the Go runtime, in
-// bytes. This is HeapInuse (live heap spans) plus StackInuse (goroutine
-// stacks), excluding virtual address space reserved but not committed.
-func MemoryInuse() int64 {
+// MemoryStats holds a detailed memory breakdown.
+type MemoryStats struct {
+	// Inuse is HeapInuse + StackInuse (summary value for the header).
+	Inuse int64
+	// RSS is the peak resident set size from the OS (getrusage Maxrss).
+	RSS int64
+	// HeapAlloc is bytes of live heap objects.
+	HeapAlloc int64
+	// HeapInuse is bytes in in-use heap spans.
+	HeapInuse int64
+	// HeapIdle is bytes in idle (unused) heap spans.
+	HeapIdle int64
+	// HeapReleased is heap bytes released back to the OS.
+	HeapReleased int64
+	// StackInuse is bytes in stack spans.
+	StackInuse int64
+	// Sys is total virtual memory obtained from the OS.
+	Sys int64
+	// HeapObjects is the number of live heap objects.
+	HeapObjects uint64
+	// NumGC is the number of completed GC cycles.
+	NumGC uint32
+}
+
+// Memory returns a detailed memory stats snapshot.
+func Memory() MemoryStats {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	return int64(m.HeapInuse + m.StackInuse)
+
+	rss := peakRSS()
+
+	return MemoryStats{
+		Inuse:        int64(m.HeapInuse + m.StackInuse),
+		RSS:          rss,
+		HeapAlloc:    int64(m.HeapAlloc),
+		HeapInuse:    int64(m.HeapInuse),
+		HeapIdle:     int64(m.HeapIdle),
+		HeapReleased: int64(m.HeapReleased),
+		StackInuse:   int64(m.StackInuse),
+		Sys:          int64(m.Sys),
+		HeapObjects:  m.HeapObjects,
+		NumGC:        m.NumGC,
+	}
+}
+
+func peakRSS() int64 {
+	var rusage syscall.Rusage
+	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &rusage); err != nil {
+		return 0
+	}
+	rss := int64(rusage.Maxrss)
+	// macOS reports Maxrss in bytes; Linux reports in KB.
+	if runtime.GOOS == "linux" {
+		rss *= 1024
+	}
+	return rss
 }
 
 func getrusageTimes() (user, sys time.Duration) {

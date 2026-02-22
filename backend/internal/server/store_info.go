@@ -157,7 +157,19 @@ func (s *StoreServer) GetStats(
 	}
 
 	resp.ProcessCpuPercent = sysmetrics.CPUPercent()
-	resp.ProcessMemoryBytes = sysmetrics.MemoryInuse()
+	mem := sysmetrics.Memory()
+	resp.ProcessMemoryBytes = mem.Inuse
+	resp.ProcessMemoryStats = &apiv1.ProcessMemoryStats{
+		RssBytes:          mem.RSS,
+		HeapAllocBytes:    mem.HeapAlloc,
+		HeapInuseBytes:    mem.HeapInuse,
+		HeapIdleBytes:     mem.HeapIdle,
+		HeapReleasedBytes: mem.HeapReleased,
+		StackInuseBytes:   mem.StackInuse,
+		SysBytes:          mem.Sys,
+		HeapObjects:       mem.HeapObjects,
+		NumGc:             mem.NumGC,
+	}
 
 	return connect.NewResponse(resp), nil
 }

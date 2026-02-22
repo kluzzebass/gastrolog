@@ -898,11 +898,16 @@ export class GetStatsResponse extends Message<GetStatsResponse> {
   processCpuPercent = 0;
 
   /**
-   * RSS in bytes
+   * Summary: HeapInuse + StackInuse
    *
    * @generated from field: int64 process_memory_bytes = 10;
    */
   processMemoryBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: gastrolog.v1.ProcessMemoryStats process_memory_stats = 11;
+   */
+  processMemoryStats?: ProcessMemoryStats;
 
   constructor(data?: PartialMessage<GetStatsResponse>) {
     super();
@@ -922,6 +927,7 @@ export class GetStatsResponse extends Message<GetStatsResponse> {
     { no: 8, name: "store_stats", kind: "message", T: StoreStats, repeated: true },
     { no: 9, name: "process_cpu_percent", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
     { no: 10, name: "process_memory_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 11, name: "process_memory_stats", kind: "message", T: ProcessMemoryStats },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetStatsResponse {
@@ -938,6 +944,111 @@ export class GetStatsResponse extends Message<GetStatsResponse> {
 
   static equals(a: GetStatsResponse | PlainMessage<GetStatsResponse> | undefined, b: GetStatsResponse | PlainMessage<GetStatsResponse> | undefined): boolean {
     return proto3.util.equals(GetStatsResponse, a, b);
+  }
+}
+
+/**
+ * ProcessMemoryStats provides detailed memory breakdown from the Go runtime.
+ *
+ * @generated from message gastrolog.v1.ProcessMemoryStats
+ */
+export class ProcessMemoryStats extends Message<ProcessMemoryStats> {
+  /**
+   * Peak RSS from OS (getrusage Maxrss)
+   *
+   * @generated from field: int64 rss_bytes = 1;
+   */
+  rssBytes = protoInt64.zero;
+
+  /**
+   * Live heap object bytes
+   *
+   * @generated from field: int64 heap_alloc_bytes = 2;
+   */
+  heapAllocBytes = protoInt64.zero;
+
+  /**
+   * In-use heap span bytes
+   *
+   * @generated from field: int64 heap_inuse_bytes = 3;
+   */
+  heapInuseBytes = protoInt64.zero;
+
+  /**
+   * Idle (unused) heap span bytes
+   *
+   * @generated from field: int64 heap_idle_bytes = 4;
+   */
+  heapIdleBytes = protoInt64.zero;
+
+  /**
+   * Heap bytes released to OS
+   *
+   * @generated from field: int64 heap_released_bytes = 5;
+   */
+  heapReleasedBytes = protoInt64.zero;
+
+  /**
+   * Stack span bytes
+   *
+   * @generated from field: int64 stack_inuse_bytes = 6;
+   */
+  stackInuseBytes = protoInt64.zero;
+
+  /**
+   * Total virtual memory from OS
+   *
+   * @generated from field: int64 sys_bytes = 7;
+   */
+  sysBytes = protoInt64.zero;
+
+  /**
+   * Number of live heap objects
+   *
+   * @generated from field: uint64 heap_objects = 8;
+   */
+  heapObjects = protoInt64.zero;
+
+  /**
+   * Completed GC cycles
+   *
+   * @generated from field: uint32 num_gc = 9;
+   */
+  numGc = 0;
+
+  constructor(data?: PartialMessage<ProcessMemoryStats>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ProcessMemoryStats";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "rss_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 2, name: "heap_alloc_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "heap_inuse_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 4, name: "heap_idle_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 5, name: "heap_released_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 6, name: "stack_inuse_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 7, name: "sys_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 8, name: "heap_objects", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 9, name: "num_gc", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ProcessMemoryStats {
+    return new ProcessMemoryStats().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ProcessMemoryStats {
+    return new ProcessMemoryStats().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ProcessMemoryStats {
+    return new ProcessMemoryStats().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ProcessMemoryStats | PlainMessage<ProcessMemoryStats> | undefined, b: ProcessMemoryStats | PlainMessage<ProcessMemoryStats> | undefined): boolean {
+    return proto3.util.equals(ProcessMemoryStats, a, b);
   }
 }
 

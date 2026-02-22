@@ -160,8 +160,22 @@ message GetStatsResponse {
   google.protobuf.Timestamp oldest_record = 6;
   google.protobuf.Timestamp newest_record = 7;
   repeated StoreStats store_stats = 8;
-  double process_cpu_percent = 9;   // CPU usage as percentage (0-100+)
-  int64 process_memory_bytes = 10;  // RSS in bytes
+  double process_cpu_percent = 9;            // CPU usage as percentage (0-100+)
+  int64 process_memory_bytes = 10;           // Summary: HeapInuse + StackInuse
+  ProcessMemoryStats process_memory_stats = 11;
+}
+
+// ProcessMemoryStats provides detailed memory breakdown from the Go runtime.
+message ProcessMemoryStats {
+  int64 rss_bytes = 1;            // Peak RSS from OS (getrusage Maxrss)
+  int64 heap_alloc_bytes = 2;     // Live heap object bytes
+  int64 heap_inuse_bytes = 3;     // In-use heap span bytes
+  int64 heap_idle_bytes = 4;      // Idle (unused) heap span bytes
+  int64 heap_released_bytes = 5;  // Heap bytes released to OS
+  int64 stack_inuse_bytes = 6;    // Stack span bytes
+  int64 sys_bytes = 7;            // Total virtual memory from OS
+  uint64 heap_objects = 8;        // Number of live heap objects
+  uint32 num_gc = 9;              // Completed GC cycles
 }
 
 // StoreStats provides per-store statistics.

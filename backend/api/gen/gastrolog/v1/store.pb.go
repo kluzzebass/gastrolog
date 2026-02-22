@@ -1041,7 +1041,8 @@ type GetStatsResponse struct {
 	NewestRecord       *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=newest_record,json=newestRecord,proto3" json:"newest_record,omitempty"`
 	StoreStats         []*StoreStats          `protobuf:"bytes,8,rep,name=store_stats,json=storeStats,proto3" json:"store_stats,omitempty"`
 	ProcessCpuPercent  float64                `protobuf:"fixed64,9,opt,name=process_cpu_percent,json=processCpuPercent,proto3" json:"process_cpu_percent,omitempty"`    // CPU usage as percentage (0-100+)
-	ProcessMemoryBytes int64                  `protobuf:"varint,10,opt,name=process_memory_bytes,json=processMemoryBytes,proto3" json:"process_memory_bytes,omitempty"` // RSS in bytes
+	ProcessMemoryBytes int64                  `protobuf:"varint,10,opt,name=process_memory_bytes,json=processMemoryBytes,proto3" json:"process_memory_bytes,omitempty"` // Summary: HeapInuse + StackInuse
+	ProcessMemoryStats *ProcessMemoryStats    `protobuf:"bytes,11,opt,name=process_memory_stats,json=processMemoryStats,proto3" json:"process_memory_stats,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -1146,6 +1147,122 @@ func (x *GetStatsResponse) GetProcessMemoryBytes() int64 {
 	return 0
 }
 
+func (x *GetStatsResponse) GetProcessMemoryStats() *ProcessMemoryStats {
+	if x != nil {
+		return x.ProcessMemoryStats
+	}
+	return nil
+}
+
+// ProcessMemoryStats provides detailed memory breakdown from the Go runtime.
+type ProcessMemoryStats struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	RssBytes          int64                  `protobuf:"varint,1,opt,name=rss_bytes,json=rssBytes,proto3" json:"rss_bytes,omitempty"`                              // Peak RSS from OS (getrusage Maxrss)
+	HeapAllocBytes    int64                  `protobuf:"varint,2,opt,name=heap_alloc_bytes,json=heapAllocBytes,proto3" json:"heap_alloc_bytes,omitempty"`          // Live heap object bytes
+	HeapInuseBytes    int64                  `protobuf:"varint,3,opt,name=heap_inuse_bytes,json=heapInuseBytes,proto3" json:"heap_inuse_bytes,omitempty"`          // In-use heap span bytes
+	HeapIdleBytes     int64                  `protobuf:"varint,4,opt,name=heap_idle_bytes,json=heapIdleBytes,proto3" json:"heap_idle_bytes,omitempty"`             // Idle (unused) heap span bytes
+	HeapReleasedBytes int64                  `protobuf:"varint,5,opt,name=heap_released_bytes,json=heapReleasedBytes,proto3" json:"heap_released_bytes,omitempty"` // Heap bytes released to OS
+	StackInuseBytes   int64                  `protobuf:"varint,6,opt,name=stack_inuse_bytes,json=stackInuseBytes,proto3" json:"stack_inuse_bytes,omitempty"`       // Stack span bytes
+	SysBytes          int64                  `protobuf:"varint,7,opt,name=sys_bytes,json=sysBytes,proto3" json:"sys_bytes,omitempty"`                              // Total virtual memory from OS
+	HeapObjects       uint64                 `protobuf:"varint,8,opt,name=heap_objects,json=heapObjects,proto3" json:"heap_objects,omitempty"`                     // Number of live heap objects
+	NumGc             uint32                 `protobuf:"varint,9,opt,name=num_gc,json=numGc,proto3" json:"num_gc,omitempty"`                                       // Completed GC cycles
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *ProcessMemoryStats) Reset() {
+	*x = ProcessMemoryStats{}
+	mi := &file_gastrolog_v1_store_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProcessMemoryStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProcessMemoryStats) ProtoMessage() {}
+
+func (x *ProcessMemoryStats) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_store_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProcessMemoryStats.ProtoReflect.Descriptor instead.
+func (*ProcessMemoryStats) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *ProcessMemoryStats) GetRssBytes() int64 {
+	if x != nil {
+		return x.RssBytes
+	}
+	return 0
+}
+
+func (x *ProcessMemoryStats) GetHeapAllocBytes() int64 {
+	if x != nil {
+		return x.HeapAllocBytes
+	}
+	return 0
+}
+
+func (x *ProcessMemoryStats) GetHeapInuseBytes() int64 {
+	if x != nil {
+		return x.HeapInuseBytes
+	}
+	return 0
+}
+
+func (x *ProcessMemoryStats) GetHeapIdleBytes() int64 {
+	if x != nil {
+		return x.HeapIdleBytes
+	}
+	return 0
+}
+
+func (x *ProcessMemoryStats) GetHeapReleasedBytes() int64 {
+	if x != nil {
+		return x.HeapReleasedBytes
+	}
+	return 0
+}
+
+func (x *ProcessMemoryStats) GetStackInuseBytes() int64 {
+	if x != nil {
+		return x.StackInuseBytes
+	}
+	return 0
+}
+
+func (x *ProcessMemoryStats) GetSysBytes() int64 {
+	if x != nil {
+		return x.SysBytes
+	}
+	return 0
+}
+
+func (x *ProcessMemoryStats) GetHeapObjects() uint64 {
+	if x != nil {
+		return x.HeapObjects
+	}
+	return 0
+}
+
+func (x *ProcessMemoryStats) GetNumGc() uint32 {
+	if x != nil {
+		return x.NumGc
+	}
+	return 0
+}
+
 // StoreStats provides per-store statistics.
 type StoreStats struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1167,7 +1284,7 @@ type StoreStats struct {
 
 func (x *StoreStats) Reset() {
 	*x = StoreStats{}
-	mi := &file_gastrolog_v1_store_proto_msgTypes[19]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1179,7 +1296,7 @@ func (x *StoreStats) String() string {
 func (*StoreStats) ProtoMessage() {}
 
 func (x *StoreStats) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_store_proto_msgTypes[19]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1192,7 +1309,7 @@ func (x *StoreStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StoreStats.ProtoReflect.Descriptor instead.
 func (*StoreStats) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{19}
+	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *StoreStats) GetId() string {
@@ -1288,7 +1405,7 @@ type ReindexStoreRequest struct {
 
 func (x *ReindexStoreRequest) Reset() {
 	*x = ReindexStoreRequest{}
-	mi := &file_gastrolog_v1_store_proto_msgTypes[20]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1300,7 +1417,7 @@ func (x *ReindexStoreRequest) String() string {
 func (*ReindexStoreRequest) ProtoMessage() {}
 
 func (x *ReindexStoreRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_store_proto_msgTypes[20]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1313,7 +1430,7 @@ func (x *ReindexStoreRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReindexStoreRequest.ProtoReflect.Descriptor instead.
 func (*ReindexStoreRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{20}
+	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ReindexStoreRequest) GetStore() string {
@@ -1332,7 +1449,7 @@ type ReindexStoreResponse struct {
 
 func (x *ReindexStoreResponse) Reset() {
 	*x = ReindexStoreResponse{}
-	mi := &file_gastrolog_v1_store_proto_msgTypes[21]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1344,7 +1461,7 @@ func (x *ReindexStoreResponse) String() string {
 func (*ReindexStoreResponse) ProtoMessage() {}
 
 func (x *ReindexStoreResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_store_proto_msgTypes[21]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1357,7 +1474,7 @@ func (x *ReindexStoreResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReindexStoreResponse.ProtoReflect.Descriptor instead.
 func (*ReindexStoreResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{21}
+	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ReindexStoreResponse) GetJobId() string {
@@ -1376,7 +1493,7 @@ type ValidateStoreRequest struct {
 
 func (x *ValidateStoreRequest) Reset() {
 	*x = ValidateStoreRequest{}
-	mi := &file_gastrolog_v1_store_proto_msgTypes[22]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1388,7 +1505,7 @@ func (x *ValidateStoreRequest) String() string {
 func (*ValidateStoreRequest) ProtoMessage() {}
 
 func (x *ValidateStoreRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_store_proto_msgTypes[22]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1401,7 +1518,7 @@ func (x *ValidateStoreRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidateStoreRequest.ProtoReflect.Descriptor instead.
 func (*ValidateStoreRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{22}
+	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ValidateStoreRequest) GetStore() string {
@@ -1421,7 +1538,7 @@ type ValidateStoreResponse struct {
 
 func (x *ValidateStoreResponse) Reset() {
 	*x = ValidateStoreResponse{}
-	mi := &file_gastrolog_v1_store_proto_msgTypes[23]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1433,7 +1550,7 @@ func (x *ValidateStoreResponse) String() string {
 func (*ValidateStoreResponse) ProtoMessage() {}
 
 func (x *ValidateStoreResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_store_proto_msgTypes[23]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1446,7 +1563,7 @@ func (x *ValidateStoreResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidateStoreResponse.ProtoReflect.Descriptor instead.
 func (*ValidateStoreResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{23}
+	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ValidateStoreResponse) GetValid() bool {
@@ -1474,7 +1591,7 @@ type ChunkValidation struct {
 
 func (x *ChunkValidation) Reset() {
 	*x = ChunkValidation{}
-	mi := &file_gastrolog_v1_store_proto_msgTypes[24]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1486,7 +1603,7 @@ func (x *ChunkValidation) String() string {
 func (*ChunkValidation) ProtoMessage() {}
 
 func (x *ChunkValidation) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_store_proto_msgTypes[24]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1499,7 +1616,7 @@ func (x *ChunkValidation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChunkValidation.ProtoReflect.Descriptor instead.
 func (*ChunkValidation) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{24}
+	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ChunkValidation) GetChunkId() string {
@@ -1538,7 +1655,7 @@ type MigrateStoreRequest struct {
 
 func (x *MigrateStoreRequest) Reset() {
 	*x = MigrateStoreRequest{}
-	mi := &file_gastrolog_v1_store_proto_msgTypes[25]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1550,7 +1667,7 @@ func (x *MigrateStoreRequest) String() string {
 func (*MigrateStoreRequest) ProtoMessage() {}
 
 func (x *MigrateStoreRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_store_proto_msgTypes[25]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1563,7 +1680,7 @@ func (x *MigrateStoreRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MigrateStoreRequest.ProtoReflect.Descriptor instead.
 func (*MigrateStoreRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{25}
+	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *MigrateStoreRequest) GetSource() string {
@@ -1603,7 +1720,7 @@ type MigrateStoreResponse struct {
 
 func (x *MigrateStoreResponse) Reset() {
 	*x = MigrateStoreResponse{}
-	mi := &file_gastrolog_v1_store_proto_msgTypes[26]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1615,7 +1732,7 @@ func (x *MigrateStoreResponse) String() string {
 func (*MigrateStoreResponse) ProtoMessage() {}
 
 func (x *MigrateStoreResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_store_proto_msgTypes[26]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1628,7 +1745,7 @@ func (x *MigrateStoreResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MigrateStoreResponse.ProtoReflect.Descriptor instead.
 func (*MigrateStoreResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{26}
+	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *MigrateStoreResponse) GetJobId() string {
@@ -1648,7 +1765,7 @@ type ExportStoreRequest struct {
 
 func (x *ExportStoreRequest) Reset() {
 	*x = ExportStoreRequest{}
-	mi := &file_gastrolog_v1_store_proto_msgTypes[27]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1660,7 +1777,7 @@ func (x *ExportStoreRequest) String() string {
 func (*ExportStoreRequest) ProtoMessage() {}
 
 func (x *ExportStoreRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_store_proto_msgTypes[27]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1673,7 +1790,7 @@ func (x *ExportStoreRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExportStoreRequest.ProtoReflect.Descriptor instead.
 func (*ExportStoreRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{27}
+	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *ExportStoreRequest) GetStore() string {
@@ -1693,7 +1810,7 @@ type ExportStoreResponse struct {
 
 func (x *ExportStoreResponse) Reset() {
 	*x = ExportStoreResponse{}
-	mi := &file_gastrolog_v1_store_proto_msgTypes[28]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1705,7 +1822,7 @@ func (x *ExportStoreResponse) String() string {
 func (*ExportStoreResponse) ProtoMessage() {}
 
 func (x *ExportStoreResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_store_proto_msgTypes[28]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1718,7 +1835,7 @@ func (x *ExportStoreResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExportStoreResponse.ProtoReflect.Descriptor instead.
 func (*ExportStoreResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{28}
+	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ExportStoreResponse) GetRecords() []*ExportRecord {
@@ -1748,7 +1865,7 @@ type ExportRecord struct {
 
 func (x *ExportRecord) Reset() {
 	*x = ExportRecord{}
-	mi := &file_gastrolog_v1_store_proto_msgTypes[29]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1760,7 +1877,7 @@ func (x *ExportRecord) String() string {
 func (*ExportRecord) ProtoMessage() {}
 
 func (x *ExportRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_store_proto_msgTypes[29]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1773,7 +1890,7 @@ func (x *ExportRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExportRecord.ProtoReflect.Descriptor instead.
 func (*ExportRecord) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{29}
+	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *ExportRecord) GetSourceTs() *timestamppb.Timestamp {
@@ -1815,7 +1932,7 @@ type ImportRecordsRequest struct {
 
 func (x *ImportRecordsRequest) Reset() {
 	*x = ImportRecordsRequest{}
-	mi := &file_gastrolog_v1_store_proto_msgTypes[30]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1827,7 +1944,7 @@ func (x *ImportRecordsRequest) String() string {
 func (*ImportRecordsRequest) ProtoMessage() {}
 
 func (x *ImportRecordsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_store_proto_msgTypes[30]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1840,7 +1957,7 @@ func (x *ImportRecordsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImportRecordsRequest.ProtoReflect.Descriptor instead.
 func (*ImportRecordsRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{30}
+	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ImportRecordsRequest) GetStore() string {
@@ -1866,7 +1983,7 @@ type ImportRecordsResponse struct {
 
 func (x *ImportRecordsResponse) Reset() {
 	*x = ImportRecordsResponse{}
-	mi := &file_gastrolog_v1_store_proto_msgTypes[31]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1878,7 +1995,7 @@ func (x *ImportRecordsResponse) String() string {
 func (*ImportRecordsResponse) ProtoMessage() {}
 
 func (x *ImportRecordsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_store_proto_msgTypes[31]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1891,7 +2008,7 @@ func (x *ImportRecordsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImportRecordsResponse.ProtoReflect.Descriptor instead.
 func (*ImportRecordsResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{31}
+	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *ImportRecordsResponse) GetRecordsImported() int64 {
@@ -1911,7 +2028,7 @@ type MergeStoresRequest struct {
 
 func (x *MergeStoresRequest) Reset() {
 	*x = MergeStoresRequest{}
-	mi := &file_gastrolog_v1_store_proto_msgTypes[32]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1923,7 +2040,7 @@ func (x *MergeStoresRequest) String() string {
 func (*MergeStoresRequest) ProtoMessage() {}
 
 func (x *MergeStoresRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_store_proto_msgTypes[32]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1936,7 +2053,7 @@ func (x *MergeStoresRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeStoresRequest.ProtoReflect.Descriptor instead.
 func (*MergeStoresRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{32}
+	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *MergeStoresRequest) GetSource() string {
@@ -1962,7 +2079,7 @@ type MergeStoresResponse struct {
 
 func (x *MergeStoresResponse) Reset() {
 	*x = MergeStoresResponse{}
-	mi := &file_gastrolog_v1_store_proto_msgTypes[33]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1974,7 +2091,7 @@ func (x *MergeStoresResponse) String() string {
 func (*MergeStoresResponse) ProtoMessage() {}
 
 func (x *MergeStoresResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_store_proto_msgTypes[33]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1987,7 +2104,7 @@ func (x *MergeStoresResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MergeStoresResponse.ProtoReflect.Descriptor instead.
 func (*MergeStoresResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{33}
+	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *MergeStoresResponse) GetJobId() string {
@@ -2006,7 +2123,7 @@ type SealStoreRequest struct {
 
 func (x *SealStoreRequest) Reset() {
 	*x = SealStoreRequest{}
-	mi := &file_gastrolog_v1_store_proto_msgTypes[34]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2018,7 +2135,7 @@ func (x *SealStoreRequest) String() string {
 func (*SealStoreRequest) ProtoMessage() {}
 
 func (x *SealStoreRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_store_proto_msgTypes[34]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2031,7 +2148,7 @@ func (x *SealStoreRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SealStoreRequest.ProtoReflect.Descriptor instead.
 func (*SealStoreRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{34}
+	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *SealStoreRequest) GetStore() string {
@@ -2049,7 +2166,7 @@ type SealStoreResponse struct {
 
 func (x *SealStoreResponse) Reset() {
 	*x = SealStoreResponse{}
-	mi := &file_gastrolog_v1_store_proto_msgTypes[35]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2061,7 +2178,7 @@ func (x *SealStoreResponse) String() string {
 func (*SealStoreResponse) ProtoMessage() {}
 
 func (x *SealStoreResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_store_proto_msgTypes[35]
+	mi := &file_gastrolog_v1_store_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2074,7 +2191,7 @@ func (x *SealStoreResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SealStoreResponse.ProtoReflect.Descriptor instead.
 func (*SealStoreResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{35}
+	return file_gastrolog_v1_store_proto_rawDescGZIP(), []int{36}
 }
 
 var File_gastrolog_v1_store_proto protoreflect.FileDescriptor
@@ -2154,7 +2271,7 @@ const file_gastrolog_v1_store_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"'\n" +
 	"\x0fGetStatsRequest\x12\x14\n" +
-	"\x05store\x18\x01 \x01(\tR\x05store\"\xe2\x03\n" +
+	"\x05store\x18\x01 \x01(\tR\x05store\"\xb6\x04\n" +
 	"\x10GetStatsResponse\x12!\n" +
 	"\ftotal_stores\x18\x01 \x01(\x03R\vtotalStores\x12!\n" +
 	"\ftotal_chunks\x18\x02 \x01(\x03R\vtotalChunks\x12#\n" +
@@ -2168,7 +2285,18 @@ const file_gastrolog_v1_store_proto_rawDesc = "" +
 	"storeStats\x12.\n" +
 	"\x13process_cpu_percent\x18\t \x01(\x01R\x11processCpuPercent\x120\n" +
 	"\x14process_memory_bytes\x18\n" +
-	" \x01(\x03R\x12processMemoryBytes\"\xae\x03\n" +
+	" \x01(\x03R\x12processMemoryBytes\x12R\n" +
+	"\x14process_memory_stats\x18\v \x01(\v2 .gastrolog.v1.ProcessMemoryStatsR\x12processMemoryStats\"\xe0\x02\n" +
+	"\x12ProcessMemoryStats\x12\x1b\n" +
+	"\trss_bytes\x18\x01 \x01(\x03R\brssBytes\x12(\n" +
+	"\x10heap_alloc_bytes\x18\x02 \x01(\x03R\x0eheapAllocBytes\x12(\n" +
+	"\x10heap_inuse_bytes\x18\x03 \x01(\x03R\x0eheapInuseBytes\x12&\n" +
+	"\x0fheap_idle_bytes\x18\x04 \x01(\x03R\rheapIdleBytes\x12.\n" +
+	"\x13heap_released_bytes\x18\x05 \x01(\x03R\x11heapReleasedBytes\x12*\n" +
+	"\x11stack_inuse_bytes\x18\x06 \x01(\x03R\x0fstackInuseBytes\x12\x1b\n" +
+	"\tsys_bytes\x18\a \x01(\x03R\bsysBytes\x12!\n" +
+	"\fheap_objects\x18\b \x01(\x04R\vheapObjects\x12\x15\n" +
+	"\x06num_gc\x18\t \x01(\rR\x05numGc\"\xae\x03\n" +
 	"\n" +
 	"StoreStats\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -2268,7 +2396,7 @@ func file_gastrolog_v1_store_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_store_proto_rawDescData
 }
 
-var file_gastrolog_v1_store_proto_msgTypes = make([]protoimpl.MessageInfo, 39)
+var file_gastrolog_v1_store_proto_msgTypes = make([]protoimpl.MessageInfo, 40)
 var file_gastrolog_v1_store_proto_goTypes = []any{
 	(*ListStoresRequest)(nil),     // 0: gastrolog.v1.ListStoresRequest
 	(*ListStoresResponse)(nil),    // 1: gastrolog.v1.ListStoresResponse
@@ -2289,84 +2417,86 @@ var file_gastrolog_v1_store_proto_goTypes = []any{
 	(*IndexAnalysis)(nil),         // 16: gastrolog.v1.IndexAnalysis
 	(*GetStatsRequest)(nil),       // 17: gastrolog.v1.GetStatsRequest
 	(*GetStatsResponse)(nil),      // 18: gastrolog.v1.GetStatsResponse
-	(*StoreStats)(nil),            // 19: gastrolog.v1.StoreStats
-	(*ReindexStoreRequest)(nil),   // 20: gastrolog.v1.ReindexStoreRequest
-	(*ReindexStoreResponse)(nil),  // 21: gastrolog.v1.ReindexStoreResponse
-	(*ValidateStoreRequest)(nil),  // 22: gastrolog.v1.ValidateStoreRequest
-	(*ValidateStoreResponse)(nil), // 23: gastrolog.v1.ValidateStoreResponse
-	(*ChunkValidation)(nil),       // 24: gastrolog.v1.ChunkValidation
-	(*MigrateStoreRequest)(nil),   // 25: gastrolog.v1.MigrateStoreRequest
-	(*MigrateStoreResponse)(nil),  // 26: gastrolog.v1.MigrateStoreResponse
-	(*ExportStoreRequest)(nil),    // 27: gastrolog.v1.ExportStoreRequest
-	(*ExportStoreResponse)(nil),   // 28: gastrolog.v1.ExportStoreResponse
-	(*ExportRecord)(nil),          // 29: gastrolog.v1.ExportRecord
-	(*ImportRecordsRequest)(nil),  // 30: gastrolog.v1.ImportRecordsRequest
-	(*ImportRecordsResponse)(nil), // 31: gastrolog.v1.ImportRecordsResponse
-	(*MergeStoresRequest)(nil),    // 32: gastrolog.v1.MergeStoresRequest
-	(*MergeStoresResponse)(nil),   // 33: gastrolog.v1.MergeStoresResponse
-	(*SealStoreRequest)(nil),      // 34: gastrolog.v1.SealStoreRequest
-	(*SealStoreResponse)(nil),     // 35: gastrolog.v1.SealStoreResponse
-	nil,                           // 36: gastrolog.v1.IndexAnalysis.DetailsEntry
-	nil,                           // 37: gastrolog.v1.MigrateStoreRequest.DestinationParamsEntry
-	nil,                           // 38: gastrolog.v1.ExportRecord.AttrsEntry
-	(*timestamppb.Timestamp)(nil), // 39: google.protobuf.Timestamp
+	(*ProcessMemoryStats)(nil),    // 19: gastrolog.v1.ProcessMemoryStats
+	(*StoreStats)(nil),            // 20: gastrolog.v1.StoreStats
+	(*ReindexStoreRequest)(nil),   // 21: gastrolog.v1.ReindexStoreRequest
+	(*ReindexStoreResponse)(nil),  // 22: gastrolog.v1.ReindexStoreResponse
+	(*ValidateStoreRequest)(nil),  // 23: gastrolog.v1.ValidateStoreRequest
+	(*ValidateStoreResponse)(nil), // 24: gastrolog.v1.ValidateStoreResponse
+	(*ChunkValidation)(nil),       // 25: gastrolog.v1.ChunkValidation
+	(*MigrateStoreRequest)(nil),   // 26: gastrolog.v1.MigrateStoreRequest
+	(*MigrateStoreResponse)(nil),  // 27: gastrolog.v1.MigrateStoreResponse
+	(*ExportStoreRequest)(nil),    // 28: gastrolog.v1.ExportStoreRequest
+	(*ExportStoreResponse)(nil),   // 29: gastrolog.v1.ExportStoreResponse
+	(*ExportRecord)(nil),          // 30: gastrolog.v1.ExportRecord
+	(*ImportRecordsRequest)(nil),  // 31: gastrolog.v1.ImportRecordsRequest
+	(*ImportRecordsResponse)(nil), // 32: gastrolog.v1.ImportRecordsResponse
+	(*MergeStoresRequest)(nil),    // 33: gastrolog.v1.MergeStoresRequest
+	(*MergeStoresResponse)(nil),   // 34: gastrolog.v1.MergeStoresResponse
+	(*SealStoreRequest)(nil),      // 35: gastrolog.v1.SealStoreRequest
+	(*SealStoreResponse)(nil),     // 36: gastrolog.v1.SealStoreResponse
+	nil,                           // 37: gastrolog.v1.IndexAnalysis.DetailsEntry
+	nil,                           // 38: gastrolog.v1.MigrateStoreRequest.DestinationParamsEntry
+	nil,                           // 39: gastrolog.v1.ExportRecord.AttrsEntry
+	(*timestamppb.Timestamp)(nil), // 40: google.protobuf.Timestamp
 }
 var file_gastrolog_v1_store_proto_depIdxs = []int32{
 	2,  // 0: gastrolog.v1.ListStoresResponse.stores:type_name -> gastrolog.v1.StoreInfo
 	2,  // 1: gastrolog.v1.GetStoreResponse.store:type_name -> gastrolog.v1.StoreInfo
 	7,  // 2: gastrolog.v1.ListChunksResponse.chunks:type_name -> gastrolog.v1.ChunkMeta
-	39, // 3: gastrolog.v1.ChunkMeta.start_ts:type_name -> google.protobuf.Timestamp
-	39, // 4: gastrolog.v1.ChunkMeta.end_ts:type_name -> google.protobuf.Timestamp
+	40, // 3: gastrolog.v1.ChunkMeta.start_ts:type_name -> google.protobuf.Timestamp
+	40, // 4: gastrolog.v1.ChunkMeta.end_ts:type_name -> google.protobuf.Timestamp
 	7,  // 5: gastrolog.v1.GetChunkResponse.chunk:type_name -> gastrolog.v1.ChunkMeta
 	12, // 6: gastrolog.v1.GetIndexesResponse.indexes:type_name -> gastrolog.v1.IndexInfo
 	15, // 7: gastrolog.v1.AnalyzeChunkResponse.analyses:type_name -> gastrolog.v1.ChunkAnalysis
 	16, // 8: gastrolog.v1.ChunkAnalysis.indexes:type_name -> gastrolog.v1.IndexAnalysis
-	36, // 9: gastrolog.v1.IndexAnalysis.details:type_name -> gastrolog.v1.IndexAnalysis.DetailsEntry
-	39, // 10: gastrolog.v1.GetStatsResponse.oldest_record:type_name -> google.protobuf.Timestamp
-	39, // 11: gastrolog.v1.GetStatsResponse.newest_record:type_name -> google.protobuf.Timestamp
-	19, // 12: gastrolog.v1.GetStatsResponse.store_stats:type_name -> gastrolog.v1.StoreStats
-	39, // 13: gastrolog.v1.StoreStats.oldest_record:type_name -> google.protobuf.Timestamp
-	39, // 14: gastrolog.v1.StoreStats.newest_record:type_name -> google.protobuf.Timestamp
-	24, // 15: gastrolog.v1.ValidateStoreResponse.chunks:type_name -> gastrolog.v1.ChunkValidation
-	37, // 16: gastrolog.v1.MigrateStoreRequest.destination_params:type_name -> gastrolog.v1.MigrateStoreRequest.DestinationParamsEntry
-	29, // 17: gastrolog.v1.ExportStoreResponse.records:type_name -> gastrolog.v1.ExportRecord
-	39, // 18: gastrolog.v1.ExportRecord.source_ts:type_name -> google.protobuf.Timestamp
-	39, // 19: gastrolog.v1.ExportRecord.ingest_ts:type_name -> google.protobuf.Timestamp
-	38, // 20: gastrolog.v1.ExportRecord.attrs:type_name -> gastrolog.v1.ExportRecord.AttrsEntry
-	29, // 21: gastrolog.v1.ImportRecordsRequest.records:type_name -> gastrolog.v1.ExportRecord
-	0,  // 22: gastrolog.v1.StoreService.ListStores:input_type -> gastrolog.v1.ListStoresRequest
-	3,  // 23: gastrolog.v1.StoreService.GetStore:input_type -> gastrolog.v1.GetStoreRequest
-	5,  // 24: gastrolog.v1.StoreService.ListChunks:input_type -> gastrolog.v1.ListChunksRequest
-	8,  // 25: gastrolog.v1.StoreService.GetChunk:input_type -> gastrolog.v1.GetChunkRequest
-	10, // 26: gastrolog.v1.StoreService.GetIndexes:input_type -> gastrolog.v1.GetIndexesRequest
-	13, // 27: gastrolog.v1.StoreService.AnalyzeChunk:input_type -> gastrolog.v1.AnalyzeChunkRequest
-	17, // 28: gastrolog.v1.StoreService.GetStats:input_type -> gastrolog.v1.GetStatsRequest
-	20, // 29: gastrolog.v1.StoreService.ReindexStore:input_type -> gastrolog.v1.ReindexStoreRequest
-	22, // 30: gastrolog.v1.StoreService.ValidateStore:input_type -> gastrolog.v1.ValidateStoreRequest
-	25, // 31: gastrolog.v1.StoreService.MigrateStore:input_type -> gastrolog.v1.MigrateStoreRequest
-	27, // 32: gastrolog.v1.StoreService.ExportStore:input_type -> gastrolog.v1.ExportStoreRequest
-	30, // 33: gastrolog.v1.StoreService.ImportRecords:input_type -> gastrolog.v1.ImportRecordsRequest
-	32, // 34: gastrolog.v1.StoreService.MergeStores:input_type -> gastrolog.v1.MergeStoresRequest
-	34, // 35: gastrolog.v1.StoreService.SealStore:input_type -> gastrolog.v1.SealStoreRequest
-	1,  // 36: gastrolog.v1.StoreService.ListStores:output_type -> gastrolog.v1.ListStoresResponse
-	4,  // 37: gastrolog.v1.StoreService.GetStore:output_type -> gastrolog.v1.GetStoreResponse
-	6,  // 38: gastrolog.v1.StoreService.ListChunks:output_type -> gastrolog.v1.ListChunksResponse
-	9,  // 39: gastrolog.v1.StoreService.GetChunk:output_type -> gastrolog.v1.GetChunkResponse
-	11, // 40: gastrolog.v1.StoreService.GetIndexes:output_type -> gastrolog.v1.GetIndexesResponse
-	14, // 41: gastrolog.v1.StoreService.AnalyzeChunk:output_type -> gastrolog.v1.AnalyzeChunkResponse
-	18, // 42: gastrolog.v1.StoreService.GetStats:output_type -> gastrolog.v1.GetStatsResponse
-	21, // 43: gastrolog.v1.StoreService.ReindexStore:output_type -> gastrolog.v1.ReindexStoreResponse
-	23, // 44: gastrolog.v1.StoreService.ValidateStore:output_type -> gastrolog.v1.ValidateStoreResponse
-	26, // 45: gastrolog.v1.StoreService.MigrateStore:output_type -> gastrolog.v1.MigrateStoreResponse
-	28, // 46: gastrolog.v1.StoreService.ExportStore:output_type -> gastrolog.v1.ExportStoreResponse
-	31, // 47: gastrolog.v1.StoreService.ImportRecords:output_type -> gastrolog.v1.ImportRecordsResponse
-	33, // 48: gastrolog.v1.StoreService.MergeStores:output_type -> gastrolog.v1.MergeStoresResponse
-	35, // 49: gastrolog.v1.StoreService.SealStore:output_type -> gastrolog.v1.SealStoreResponse
-	36, // [36:50] is the sub-list for method output_type
-	22, // [22:36] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	37, // 9: gastrolog.v1.IndexAnalysis.details:type_name -> gastrolog.v1.IndexAnalysis.DetailsEntry
+	40, // 10: gastrolog.v1.GetStatsResponse.oldest_record:type_name -> google.protobuf.Timestamp
+	40, // 11: gastrolog.v1.GetStatsResponse.newest_record:type_name -> google.protobuf.Timestamp
+	20, // 12: gastrolog.v1.GetStatsResponse.store_stats:type_name -> gastrolog.v1.StoreStats
+	19, // 13: gastrolog.v1.GetStatsResponse.process_memory_stats:type_name -> gastrolog.v1.ProcessMemoryStats
+	40, // 14: gastrolog.v1.StoreStats.oldest_record:type_name -> google.protobuf.Timestamp
+	40, // 15: gastrolog.v1.StoreStats.newest_record:type_name -> google.protobuf.Timestamp
+	25, // 16: gastrolog.v1.ValidateStoreResponse.chunks:type_name -> gastrolog.v1.ChunkValidation
+	38, // 17: gastrolog.v1.MigrateStoreRequest.destination_params:type_name -> gastrolog.v1.MigrateStoreRequest.DestinationParamsEntry
+	30, // 18: gastrolog.v1.ExportStoreResponse.records:type_name -> gastrolog.v1.ExportRecord
+	40, // 19: gastrolog.v1.ExportRecord.source_ts:type_name -> google.protobuf.Timestamp
+	40, // 20: gastrolog.v1.ExportRecord.ingest_ts:type_name -> google.protobuf.Timestamp
+	39, // 21: gastrolog.v1.ExportRecord.attrs:type_name -> gastrolog.v1.ExportRecord.AttrsEntry
+	30, // 22: gastrolog.v1.ImportRecordsRequest.records:type_name -> gastrolog.v1.ExportRecord
+	0,  // 23: gastrolog.v1.StoreService.ListStores:input_type -> gastrolog.v1.ListStoresRequest
+	3,  // 24: gastrolog.v1.StoreService.GetStore:input_type -> gastrolog.v1.GetStoreRequest
+	5,  // 25: gastrolog.v1.StoreService.ListChunks:input_type -> gastrolog.v1.ListChunksRequest
+	8,  // 26: gastrolog.v1.StoreService.GetChunk:input_type -> gastrolog.v1.GetChunkRequest
+	10, // 27: gastrolog.v1.StoreService.GetIndexes:input_type -> gastrolog.v1.GetIndexesRequest
+	13, // 28: gastrolog.v1.StoreService.AnalyzeChunk:input_type -> gastrolog.v1.AnalyzeChunkRequest
+	17, // 29: gastrolog.v1.StoreService.GetStats:input_type -> gastrolog.v1.GetStatsRequest
+	21, // 30: gastrolog.v1.StoreService.ReindexStore:input_type -> gastrolog.v1.ReindexStoreRequest
+	23, // 31: gastrolog.v1.StoreService.ValidateStore:input_type -> gastrolog.v1.ValidateStoreRequest
+	26, // 32: gastrolog.v1.StoreService.MigrateStore:input_type -> gastrolog.v1.MigrateStoreRequest
+	28, // 33: gastrolog.v1.StoreService.ExportStore:input_type -> gastrolog.v1.ExportStoreRequest
+	31, // 34: gastrolog.v1.StoreService.ImportRecords:input_type -> gastrolog.v1.ImportRecordsRequest
+	33, // 35: gastrolog.v1.StoreService.MergeStores:input_type -> gastrolog.v1.MergeStoresRequest
+	35, // 36: gastrolog.v1.StoreService.SealStore:input_type -> gastrolog.v1.SealStoreRequest
+	1,  // 37: gastrolog.v1.StoreService.ListStores:output_type -> gastrolog.v1.ListStoresResponse
+	4,  // 38: gastrolog.v1.StoreService.GetStore:output_type -> gastrolog.v1.GetStoreResponse
+	6,  // 39: gastrolog.v1.StoreService.ListChunks:output_type -> gastrolog.v1.ListChunksResponse
+	9,  // 40: gastrolog.v1.StoreService.GetChunk:output_type -> gastrolog.v1.GetChunkResponse
+	11, // 41: gastrolog.v1.StoreService.GetIndexes:output_type -> gastrolog.v1.GetIndexesResponse
+	14, // 42: gastrolog.v1.StoreService.AnalyzeChunk:output_type -> gastrolog.v1.AnalyzeChunkResponse
+	18, // 43: gastrolog.v1.StoreService.GetStats:output_type -> gastrolog.v1.GetStatsResponse
+	22, // 44: gastrolog.v1.StoreService.ReindexStore:output_type -> gastrolog.v1.ReindexStoreResponse
+	24, // 45: gastrolog.v1.StoreService.ValidateStore:output_type -> gastrolog.v1.ValidateStoreResponse
+	27, // 46: gastrolog.v1.StoreService.MigrateStore:output_type -> gastrolog.v1.MigrateStoreResponse
+	29, // 47: gastrolog.v1.StoreService.ExportStore:output_type -> gastrolog.v1.ExportStoreResponse
+	32, // 48: gastrolog.v1.StoreService.ImportRecords:output_type -> gastrolog.v1.ImportRecordsResponse
+	34, // 49: gastrolog.v1.StoreService.MergeStores:output_type -> gastrolog.v1.MergeStoresResponse
+	36, // 50: gastrolog.v1.StoreService.SealStore:output_type -> gastrolog.v1.SealStoreResponse
+	37, // [37:51] is the sub-list for method output_type
+	23, // [23:37] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_store_proto_init() }
@@ -2380,7 +2510,7 @@ func file_gastrolog_v1_store_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_store_proto_rawDesc), len(file_gastrolog_v1_store_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   39,
+			NumMessages:   40,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

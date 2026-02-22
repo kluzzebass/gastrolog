@@ -33,6 +33,7 @@ export function MetricsPanel({ dark }: Readonly<{ dark: boolean }>) {
       </h2>
 
       {health.data && <SystemSection dark={dark} health={health.data} stats={stats.data} />}
+      {stats.data && <MemorySection dark={dark} stats={stats.data} />}
       {health.data && <IngestQueueSection dark={dark} health={health.data} />}
       {stats.data && <StorageSection dark={dark} stats={stats.data} />}
       {ingesters.data && ingesters.data.length > 0 && (
@@ -169,19 +170,73 @@ function SystemSection({
           value={formatUptime(health.uptimeSeconds)}
         />
         {stats && (
-          <>
-            <StatRow
-              dark={dark}
-              label="CPU"
-              value={`${stats.processCpuPercent.toFixed(1)}%`}
-            />
-            <StatRow
-              dark={dark}
-              label="Memory"
-              value={formatBytes(Number(stats.processMemoryBytes))}
-            />
-          </>
+          <StatRow
+            dark={dark}
+            label="CPU"
+            value={`${stats.processCpuPercent.toFixed(1)}%`}
+          />
         )}
+      </div>
+    </section>
+  );
+}
+
+/* ---- Memory ---- */
+
+function MemorySection({
+  dark,
+  stats,
+}: Readonly<{ dark: boolean; stats: StatsData }>) {
+  const mem = stats.processMemoryStats;
+  return (
+    <section>
+      <SectionHeader dark={dark}>Memory</SectionHeader>
+      <div className="flex flex-col gap-1.5">
+        <StatRow
+          dark={dark}
+          label="RSS (peak)"
+          value={mem ? formatBytes(Number(mem.rssBytes)) : "\u2014"}
+        />
+        <StatRow
+          dark={dark}
+          label="Heap alloc"
+          value={mem ? formatBytes(Number(mem.heapAllocBytes)) : "\u2014"}
+        />
+        <StatRow
+          dark={dark}
+          label="Heap in-use"
+          value={mem ? formatBytes(Number(mem.heapInuseBytes)) : "\u2014"}
+        />
+        <StatRow
+          dark={dark}
+          label="Heap idle"
+          value={mem ? formatBytes(Number(mem.heapIdleBytes)) : "\u2014"}
+        />
+        <StatRow
+          dark={dark}
+          label="Heap released"
+          value={mem ? formatBytes(Number(mem.heapReleasedBytes)) : "\u2014"}
+        />
+        <StatRow
+          dark={dark}
+          label="Stack in-use"
+          value={mem ? formatBytes(Number(mem.stackInuseBytes)) : "\u2014"}
+        />
+        <StatRow
+          dark={dark}
+          label="Virtual (sys)"
+          value={mem ? formatBytes(Number(mem.sysBytes)) : "\u2014"}
+        />
+        <StatRow
+          dark={dark}
+          label="Heap objects"
+          value={mem ? Number(mem.heapObjects).toLocaleString() : "\u2014"}
+        />
+        <StatRow
+          dark={dark}
+          label="GC cycles"
+          value={mem ? mem.numGc.toLocaleString() : "\u2014"}
+        />
       </div>
     </section>
   );
@@ -245,6 +300,18 @@ function IngestQueueSection({
 
 /* ---- Storage ---- */
 
+type MemoryStatsData = {
+  rssBytes: bigint;
+  heapAllocBytes: bigint;
+  heapInuseBytes: bigint;
+  heapIdleBytes: bigint;
+  heapReleasedBytes: bigint;
+  stackInuseBytes: bigint;
+  sysBytes: bigint;
+  heapObjects: bigint;
+  numGc: number;
+};
+
 type StatsData = {
   totalStores: bigint;
   totalChunks: bigint;
@@ -253,6 +320,7 @@ type StatsData = {
   totalBytes: bigint;
   processCpuPercent: number;
   processMemoryBytes: bigint;
+  processMemoryStats?: MemoryStatsData;
   oldestRecord?: { toDate(): Date };
   newestRecord?: { toDate(): Date };
   storeStats: Array<{
