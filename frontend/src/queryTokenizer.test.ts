@@ -475,3 +475,153 @@ describe("complex queries", () => {
     roundtrip('msg="hello \\"world\\""');
   });
 });
+
+describe("pipe syntax: lexing and roundtrip", () => {
+  const cases = [
+    "error | stats count",
+    "error | stats count by level",
+    "level=error | stats count, avg(duration) by level",
+    "error | where level=error | stats count",
+    "error | stats count by bin(5m)",
+    "error | stats avg(toNumber(duration) / 1000) as avg_sec",
+  ];
+  for (const input of cases) {
+    test(`roundtrip: ${JSON.stringify(input)}`, () => roundtrip(input));
+  }
+});
+
+describe("pipe syntax: classification", () => {
+  test("pipe symbol", () => {
+    const result = spans("error | stats count");
+    expect(result).toContainEqual(["|", "pipe"]);
+  });
+
+  test("pipe keyword: stats", () => {
+    const result = spans("error | stats count");
+    expect(result).toContainEqual(["stats", "pipe-keyword"]);
+  });
+
+  test("pipe keyword: where", () => {
+    const result = spans("error | where level=error");
+    expect(result).toContainEqual(["where", "pipe-keyword"]);
+  });
+
+  test("function: count", () => {
+    const result = spans("error | stats count");
+    expect(result).toContainEqual(["count", "function"]);
+  });
+
+  test("function: avg with parens", () => {
+    const result = spans("error | stats avg(duration)");
+    expect(result).toContainEqual(["avg", "function"]);
+  });
+
+  test("function: bin in group-by", () => {
+    const result = spans("error | stats count by bin(5m)");
+    expect(result).toContainEqual(["bin", "function"]);
+  });
+
+  test("by keyword", () => {
+    const result = spans("error | stats count by level");
+    expect(result).toContainEqual(["by", "pipe-keyword"]);
+  });
+
+  test("as keyword", () => {
+    const result = spans("error | stats count as total");
+    expect(result).toContainEqual(["as", "pipe-keyword"]);
+  });
+
+  test("comma separator", () => {
+    const result = spans("error | stats count, avg(duration)");
+    expect(result).toContainEqual([",", "comma"]);
+  });
+
+  test("where clause classifies filter part", () => {
+    const result = spans("error | where level=error");
+    expect(result).toContainEqual(["level", "key"]);
+    expect(result).toContainEqual(["=", "eq"]);
+    expect(result).toContainEqual(["error", "value"]);
+  });
+
+  test("filter part before pipe retains normal classification", () => {
+    const result = spans("level=error | stats count");
+    expect(result[0]).toEqual(["level", "key"]);
+    expect(result[1]).toEqual(["=", "eq"]);
+    expect(result[2]).toEqual(["error", "value"]);
+  });
+
+  test("nested function: toNumber", () => {
+    const result = spans("error | stats avg(toNumber(duration))");
+    expect(result).toContainEqual(["toNumber", "function"]);
+  });
+});
+
+describe("pipe syntax: validation (valid)", () => {
+  const valid = [
+    "error | stats count",
+    "error | stats count by level",
+    "error | stats count, avg(duration) by level",
+    "error | where level=error",
+    "error | where level=error | stats count",
+    "error | stats count by bin(5m)",
+    "error | stats count as total",
+    "error | stats avg(duration) as avg_dur by level",
+    "level=error AND msg=timeout | stats count",
+    "error | stats avg(toNumber(duration) / 1000) as avg_sec",
+    "| stats count",
+    "| stats count by level",
+  ];
+
+  for (const q of valid) {
+    test(JSON.stringify(q), () => {
+      const result = tokenize(q);
+      expect(result.hasErrors).toBe(false);
+      expect(result.errorMessage).toBeNull();
+    });
+  }
+});
+
+describe("pipe syntax: validation (invalid)", () => {
+  test("pipe at end", () => {
+    const r = tokenize("error |");
+    expect(r.hasErrors).toBe(true);
+    expect(r.errorMessage).toContain("pipe");
+  });
+
+  test("unknown pipe keyword", () => {
+    const r = tokenize("error | badop count");
+    expect(r.hasErrors).toBe(true);
+  });
+
+  test("stats without aggregation", () => {
+    const r = tokenize("error | stats");
+    expect(r.hasErrors).toBe(true);
+  });
+
+  test("missing closing paren in function", () => {
+    const r = tokenize("error | stats avg(duration");
+    expect(r.hasErrors).toBe(true);
+  });
+
+  test("where without expression", () => {
+    const r = tokenize("error | where");
+    expect(r.hasErrors).toBe(true);
+  });
+});
+
+describe("pipe syntax: hasPipeline flag", () => {
+  test("pipeline query sets hasPipeline", () => {
+    const r = tokenize("error | stats count");
+    expect(r.hasPipeline).toBe(true);
+  });
+
+  test("non-pipeline query has no hasPipeline", () => {
+    const r = tokenize("error AND level=warn");
+    expect(r.hasPipeline).toBe(false);
+  });
+
+  test("pipe inside quotes does not set hasPipeline", () => {
+    const r = tokenize('msg="a | b"');
+    expect(r.hasPipeline).toBe(false);
+  });
+});

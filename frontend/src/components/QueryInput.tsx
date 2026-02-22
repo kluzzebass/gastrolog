@@ -41,6 +41,14 @@ function roleStyle(role: HighlightRole, dark: boolean): React.CSSProperties {
       return { color: "var(--color-text-ghost)" };
     case "star":
       return { color: "var(--color-severity-debug)" };
+    case "pipe":
+      return { color: "var(--color-severity-warn)", fontWeight: 700 };
+    case "pipe-keyword":
+      return { color: "var(--color-severity-warn)", fontWeight: 700 };
+    case "function":
+      return { color: "var(--color-copper)" };
+    case "comma":
+      return { color: "var(--color-text-ghost)" };
     case "error":
       return {
         color: "var(--color-severity-error)",

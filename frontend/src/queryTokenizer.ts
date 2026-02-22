@@ -18,6 +18,8 @@ type QueryTokenKind =
   | "star"
   | "glob" // bareword with glob metacharacters (*, ?, [)
   | "regex" // /pattern/
+  | "pipe" // |
+  | "comma" // ,
   | "whitespace"
   | "error"; // unterminated quote or regex
 
@@ -35,6 +37,10 @@ export type HighlightRole =
   | "regex" // /pattern/ regex literal
   | "paren" // ( or )
   | "star" // *
+  | "pipe" // |
+  | "pipe-keyword" // stats, where
+  | "function" // count, avg, sum, min, max, bin, toNumber
+  | "comma" // ,
   | "whitespace"
   | "error";
 
@@ -62,6 +68,12 @@ export const DIRECTIVES = new Set([
   "ingest_end",
 ]);
 
+const PIPE_KEYWORDS = new Set(["stats", "where"]);
+
+const PIPE_FUNCTIONS = new Set([
+  "count", "avg", "sum", "min", "max", "bin", "tonumber",
+]);
+
 // Phase 1: Raw lexing — character scan producing tokens with whitespace preserved.
 export function lex(input: string): QueryToken[] {
   const tokens: QueryToken[] = [];
@@ -87,6 +99,20 @@ export function lex(input: string): QueryToken[] {
         pos: start,
         kind: "whitespace",
       });
+      continue;
+    }
+
+    // Pipe
+    if (ch === "|") {
+      tokens.push({ text: "|", pos, kind: "pipe" });
+      pos++;
+      continue;
+    }
+
+    // Comma
+    if (ch === ",") {
+      tokens.push({ text: ",", pos, kind: "comma" });
+      pos++;
       continue;
     }
 
@@ -194,37 +220,47 @@ export function lex(input: string): QueryToken[] {
       continue;
     }
 
-    // Regex literal: /pattern/
+    // Regex literal: /pattern/ (only in filter context, not after pipe)
     if (ch === "/") {
-      const start = pos;
-      pos++; // skip opening /
-      while (pos < input.length) {
-        if (input[pos] === "\\" && pos + 1 < input.length && input[pos + 1] === "/") {
-          pos += 2; // skip escaped slash
-          continue;
+      // In pipe context (after |), / is division — don't lex as regex.
+      // Check if we've seen a pipe token.
+      const afterPipe = tokens.some((t) => t.kind === "pipe");
+      if (!afterPipe) {
+        const start = pos;
+        pos++; // skip opening /
+        while (pos < input.length) {
+          if (input[pos] === "\\" && pos + 1 < input.length && input[pos + 1] === "/") {
+            pos += 2; // skip escaped slash
+            continue;
+          }
+          if (input[pos] === "/") {
+            pos++; // skip closing /
+            tokens.push({
+              text: input.slice(start, pos),
+              pos: start,
+              kind: "regex",
+            });
+            break;
+          }
+          pos++;
         }
-        if (input[pos] === "/") {
-          pos++; // skip closing /
+        // Unterminated regex
+        if (
+          tokens.length === 0 ||
+          tokens[tokens.length - 1]!.pos !== start
+        ) {
           tokens.push({
             text: input.slice(start, pos),
             pos: start,
-            kind: "regex",
+            kind: "error",
           });
-          break;
         }
-        pos++;
+        continue;
       }
-      // Unterminated regex
-      if (
-        tokens.length === 0 ||
-        tokens[tokens.length - 1]!.pos !== start
-      ) {
-        tokens.push({
-          text: input.slice(start, pos),
-          pos: start,
-          kind: "error",
-        });
-      }
+      // In pipe context: treat / as a word (division operator highlighting
+      // is handled at the classifier level via "compare-op" or "token").
+      tokens.push({ text: "/", pos, kind: "word" });
+      pos++;
       continue;
     }
 
@@ -279,7 +315,9 @@ function isBarewordChar(ch: string): boolean {
     ch !== "/" &&
     ch !== ">" &&
     ch !== "<" &&
-    ch !== "!"
+    ch !== "!" &&
+    ch !== "|" &&
+    ch !== ","
   );
 }
 
@@ -299,9 +337,42 @@ function isValueKind(kind: QueryTokenKind): boolean {
   return kind === "word" || kind === "glob" || kind === "star" || kind === "quoted";
 }
 
-// Phase 2: Post-pass — detect key=value sequences and classify roles.
-// Whitespace-tolerant: skips whitespace tokens when looking ahead for operator and value.
+// Phase 2: Post-pass — classify tokens into highlight roles.
+// Split on pipes first, then classify filter and pipe segments separately.
 function classify(raw: QueryToken[]): HighlightSpan[] {
+  // Find pipe token indices to split into segments.
+  const pipeIndices: number[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    if (raw[i]!.kind === "pipe") pipeIndices.push(i);
+  }
+
+  if (pipeIndices.length === 0) {
+    // No pipes — classify entire input as a filter expression.
+    return classifyFilter(raw);
+  }
+
+  const spans: HighlightSpan[] = [];
+
+  // Filter segment: everything before the first pipe.
+  const filterTokens = raw.slice(0, pipeIndices[0]!);
+  spans.push(...classifyFilter(filterTokens));
+
+  // Pipe segments.
+  for (let p = 0; p < pipeIndices.length; p++) {
+    const pipeIdx = pipeIndices[p]!;
+    spans.push({ text: "|", role: "pipe" });
+
+    const nextPipe = p + 1 < pipeIndices.length ? pipeIndices[p + 1]! : raw.length;
+    const segTokens = raw.slice(pipeIdx + 1, nextPipe);
+    spans.push(...classifyPipeSegment(segTokens));
+  }
+
+  return spans;
+}
+
+// Classify a filter expression segment (the part before | or a where clause).
+// Detects key=value triples and maps remaining tokens to roles.
+function classifyFilter(raw: QueryToken[]): HighlightSpan[] {
   const spans: HighlightSpan[] = [];
 
   let i = 0;
@@ -357,51 +428,207 @@ function classify(raw: QueryToken[]): HighlightSpan[] {
       }
     }
 
-    // Map remaining tokens to roles
-    switch (tok.kind) {
-      case "operator":
-        spans.push({ text: tok.text, role: "operator" });
-        break;
-      case "quoted":
-        spans.push({ text: tok.text, role: "quoted" });
-        break;
-      case "lparen":
-      case "rparen":
-        spans.push({ text: tok.text, role: "paren" });
-        break;
-      case "eq":
-        spans.push({ text: tok.text, role: "eq" });
-        break;
-      case "ne":
-      case "gt":
-      case "gte":
-      case "lt":
-      case "lte":
-        spans.push({ text: tok.text, role: "compare-op" });
-        break;
-      case "star":
-        spans.push({ text: tok.text, role: "star" });
-        break;
-      case "glob":
-        spans.push({ text: tok.text, role: "glob" });
-        break;
-      case "regex":
-        spans.push({ text: tok.text, role: "regex" });
-        break;
-      case "whitespace":
-        spans.push({ text: tok.text, role: "whitespace" });
-        break;
-      case "error":
-        spans.push({ text: tok.text, role: "error" });
-        break;
-      default:
-        spans.push({ text: tok.text, role: "token" });
-        break;
-    }
+    // Map remaining tokens to roles.
+    spans.push(mapTokenToRole(tok));
     i++;
   }
 
   return spans;
+}
+
+// Classify a pipe segment (everything after | up to the next | or end).
+// Recognizes pipe keywords (stats, where), functions, "by", "as", commas.
+function classifyPipeSegment(tokens: QueryToken[]): HighlightSpan[] {
+  const spans: HighlightSpan[] = [];
+
+  // Find the keyword (first non-whitespace word).
+  let keywordIdx = -1;
+  let keyword = "";
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i]!.kind === "whitespace") continue;
+    if (tokens[i]!.kind === "word") {
+      keyword = tokens[i]!.text.toLowerCase();
+      keywordIdx = i;
+    }
+    break;
+  }
+
+  if (keyword === "where") {
+    // "where" segment: keyword + filter expression.
+    for (let i = 0; i < tokens.length; i++) {
+      if (i < keywordIdx) {
+        spans.push({ text: tokens[i]!.text, role: "whitespace" });
+      } else if (i === keywordIdx) {
+        spans.push({ text: tokens[i]!.text, role: "pipe-keyword" });
+      } else {
+        // Everything after "where" is a filter expression.
+        spans.push(...classifyFilter(tokens.slice(i)));
+        break;
+      }
+    }
+    return spans;
+  }
+
+  if (keyword === "stats") {
+    // "stats" segment: keyword, then aggregation expressions.
+    for (let i = 0; i < tokens.length; i++) {
+      if (i < keywordIdx) {
+        spans.push({ text: tokens[i]!.text, role: "whitespace" });
+      } else if (i === keywordIdx) {
+        spans.push({ text: tokens[i]!.text, role: "pipe-keyword" });
+      } else {
+        // Classify the rest as stats arguments.
+        spans.push(...classifyStatsArgs(tokens.slice(i)));
+        break;
+      }
+    }
+    return spans;
+  }
+
+  // Unknown keyword — emit leading whitespace, then keyword as error, rest as tokens.
+  if (keywordIdx >= 0) {
+    for (let i = 0; i < keywordIdx; i++) {
+      spans.push({ text: tokens[i]!.text, role: "whitespace" });
+    }
+    // Unknown pipe keyword — still classify remaining tokens generically.
+    for (let i = keywordIdx; i < tokens.length; i++) {
+      spans.push(mapTokenToRole(tokens[i]!));
+    }
+  } else {
+    for (const tok of tokens) {
+      spans.push(mapTokenToRole(tok));
+    }
+  }
+
+  return spans;
+}
+
+// Classify the arguments portion of a stats segment.
+// Recognizes: function calls, "by" keyword, "as" keyword, commas, field refs.
+function classifyStatsArgs(tokens: QueryToken[]): HighlightSpan[] {
+  const spans: HighlightSpan[] = [];
+
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i]!;
+
+    if (tok.kind === "whitespace") {
+      spans.push({ text: tok.text, role: "whitespace" });
+      continue;
+    }
+
+    if (tok.kind === "comma") {
+      spans.push({ text: tok.text, role: "comma" });
+      continue;
+    }
+
+    if (tok.kind === "lparen") {
+      spans.push({ text: tok.text, role: "paren" });
+      continue;
+    }
+
+    if (tok.kind === "rparen") {
+      spans.push({ text: tok.text, role: "paren" });
+      continue;
+    }
+
+    if (tok.kind === "quoted") {
+      spans.push({ text: tok.text, role: "quoted" });
+      continue;
+    }
+
+    if (tok.kind === "word") {
+      const lower = tok.text.toLowerCase();
+
+      // "by" keyword separating aggregations from group-by.
+      if (lower === "by") {
+        spans.push({ text: tok.text, role: "pipe-keyword" });
+        continue;
+      }
+
+      // "as" keyword for aliases.
+      if (lower === "as") {
+        spans.push({ text: tok.text, role: "pipe-keyword" });
+        continue;
+      }
+
+      // Known function: check if followed by "(" (whitespace-tolerant).
+      if (PIPE_FUNCTIONS.has(lower)) {
+        // "count" can appear without parens as bare aggregate.
+        let j = i + 1;
+        while (j < tokens.length && tokens[j]!.kind === "whitespace") j++;
+        if (lower === "count" && (j >= tokens.length || tokens[j]!.kind !== "lparen")) {
+          // Bare "count" — still a function.
+          spans.push({ text: tok.text, role: "function" });
+          continue;
+        }
+        if (j < tokens.length && tokens[j]!.kind === "lparen") {
+          spans.push({ text: tok.text, role: "function" });
+          continue;
+        }
+      }
+
+      // Arithmetic operators in pipe context: +, -, *, /
+      // These are lexed as separate word tokens; classify as compare-op for styling.
+
+      // Otherwise: field reference or value — classify as token.
+      spans.push({ text: tok.text, role: "token" });
+      continue;
+    }
+
+    // Arithmetic: *, /, etc. — in pipe context these are operators.
+    if (tok.kind === "star") {
+      spans.push({ text: tok.text, role: "star" });
+      continue;
+    }
+
+    // Comparison ops that appear in pipe expressions.
+    if (isCompareOpKind(tok.kind)) {
+      spans.push({ text: tok.text, role: "compare-op" });
+      continue;
+    }
+
+    // Fallback.
+    spans.push(mapTokenToRole(tok));
+  }
+
+  return spans;
+}
+
+// Map a single token to its default highlight role.
+function mapTokenToRole(tok: QueryToken): HighlightSpan {
+  switch (tok.kind) {
+    case "operator":
+      return { text: tok.text, role: "operator" };
+    case "quoted":
+      return { text: tok.text, role: "quoted" };
+    case "lparen":
+    case "rparen":
+      return { text: tok.text, role: "paren" };
+    case "eq":
+      return { text: tok.text, role: "eq" };
+    case "ne":
+    case "gt":
+    case "gte":
+    case "lt":
+    case "lte":
+      return { text: tok.text, role: "compare-op" };
+    case "star":
+      return { text: tok.text, role: "star" };
+    case "glob":
+      return { text: tok.text, role: "glob" };
+    case "regex":
+      return { text: tok.text, role: "regex" };
+    case "pipe":
+      return { text: tok.text, role: "pipe" };
+    case "comma":
+      return { text: tok.text, role: "comma" };
+    case "whitespace":
+      return { text: tok.text, role: "whitespace" };
+    case "error":
+      return { text: tok.text, role: "error" };
+    default:
+      return { text: tok.text, role: "token" };
+  }
 }
 
 // Phase 3: Validate via recursive descent parser mirroring backend grammar.
@@ -410,14 +637,22 @@ function classify(raw: QueryToken[]): HighlightSpan[] {
 // Finds the first span index where parsing fails; marks it and everything
 // after it as "error".
 //
-// Grammar (matches backend/internal/querylang/parser.go):
-//   query      = or_expr EOF
-//   or_expr    = and_expr ( "OR" and_expr )*
-//   and_expr   = unary_expr ( [ "AND" ] unary_expr )*
-//   unary_expr = "NOT" unary_expr | primary
-//   primary    = "(" or_expr ")" | predicate
-//   predicate  = kv_triple | regex | token | quoted | star_pred
-//   kv_triple  = (key|directive-key) (eq|compare-op) (value|quoted|star)
+// Grammar (matches backend/internal/querylang/{parser,pipeline_parser}.go):
+//   pipeline    = filter_expr ( "|" pipe_op )*
+//   filter_expr = or_expr
+//   or_expr     = and_expr ( "OR" and_expr )*
+//   and_expr    = unary_expr ( [ "AND" ] unary_expr )*
+//   unary_expr  = "NOT" unary_expr | primary
+//   primary     = "(" or_expr ")" | predicate
+//   predicate   = kv_triple | regex | token | quoted | star_pred
+//   kv_triple   = (key|directive-key) (eq|compare-op) (value|quoted|star)
+//   pipe_op     = stats_op | where_op
+//   stats_op    = "stats" agg_list ( "by" group_list )?
+//   agg_list    = agg_expr ( "," agg_expr )*
+//   agg_expr    = "count" ( "as" IDENT )? | IDENT "(" pipe_expr ")" ( "as" IDENT )?
+//   group_list  = group_expr ( "," group_expr )*
+//   group_expr  = "bin" "(" ... ")" | IDENT
+//   where_op    = "where" filter_expr
 interface ValidateResult {
   spans: HighlightSpan[];
   errorMessage: string | null;
@@ -643,7 +878,276 @@ function validate(spans: HighlightSpan[]): ValidateResult {
     return false;
   }
 
-  parseOrExpr();
+  // Parse pipeline: filter_expr ( "|" pipe_op )*
+  function parsePipeline(): void {
+    // The filter part may be empty (e.g. "| stats count") — only parse if there's content.
+    const s = cur();
+    if (s && s.role !== "pipe") {
+      parseOrExpr();
+      if (errorAt >= 0) return;
+    }
+
+    // Parse pipe operators.
+    while (cur()?.role === "pipe") {
+      advance(); // consume |
+      parsePipeOp();
+      if (errorAt >= 0) return;
+    }
+  }
+
+  // Parse a single pipe operator: stats_op | where_op
+  function parsePipeOp(): void {
+    const s = cur();
+    if (!s) {
+      fail("expected pipe operator after '|'");
+      return;
+    }
+
+    if (s.role !== "pipe-keyword") {
+      fail(`expected pipe keyword (stats, where), got '${s.text}'`);
+      return;
+    }
+
+    const keyword = s.text.toLowerCase();
+    advance(); // consume keyword
+
+    switch (keyword) {
+      case "stats":
+        parseStatsOp();
+        return;
+      case "where":
+        parseWhereOp();
+        return;
+      default:
+        fail(`unknown pipe operator '${s.text}'`);
+        return;
+    }
+  }
+
+  // Parse stats: agg_list ( "by" group_list )?
+  function parseStatsOp(): void {
+    parseAggList();
+    if (errorAt >= 0) return;
+
+    // Optional "by" clause.
+    if (cur()?.role === "pipe-keyword" && cur()!.text.toLowerCase() === "by") {
+      advance(); // consume "by"
+      parseGroupList();
+    }
+  }
+
+  // Parse agg_list: agg_expr ( "," agg_expr )*
+  function parseAggList(): void {
+    parseAggExpr();
+    if (errorAt >= 0) return;
+
+    while (cur()?.role === "comma") {
+      advance(); // consume ","
+      parseAggExpr();
+      if (errorAt >= 0) return;
+    }
+  }
+
+  // Parse agg_expr: "count" ("as" IDENT)? | func "(" pipe_expr ")" ("as" IDENT)?
+  function parseAggExpr(): void {
+    const s = cur();
+    if (!s) {
+      fail("expected aggregation expression");
+      return;
+    }
+
+    if (s.role === "function") {
+      const funcName = s.text.toLowerCase();
+      advance(); // consume function name
+
+      if (funcName === "count" && cur()?.role !== "paren") {
+        // Bare "count" without parens.
+        parseOptionalAs();
+        return;
+      }
+
+      // Expect "("
+      if (cur()?.role !== "paren" || cur()!.text !== "(") {
+        fail(`expected '(' after '${s.text}'`);
+        return;
+      }
+      advance(); // consume "("
+
+      // Parse the argument expression (consume until matching ")").
+      parsePipeExpr();
+      if (errorAt >= 0) return;
+
+      if (cur()?.role !== "paren" || cur()!.text !== ")") {
+        fail("expected ')'");
+        return;
+      }
+      advance(); // consume ")"
+
+      parseOptionalAs();
+      return;
+    }
+
+    // Could be a bare field or expression — accept anything that looks like a token.
+    if (s.role === "token" || s.role === "quoted") {
+      advance();
+      parseOptionalAs();
+      return;
+    }
+
+    fail(`expected aggregation function or field, got '${s.text}'`);
+  }
+
+  // Parse a pipe expression (inside function args).
+  // Simplified: accept tokens, numbers, fields, nested function calls, and arithmetic.
+  function parsePipeExpr(): void {
+    parsePipeAtom();
+    if (errorAt >= 0) return;
+
+    // Optional arithmetic: op atom op atom ...
+    while (isPipeArithOp()) {
+      advance(); // consume operator
+      parsePipeAtom();
+      if (errorAt >= 0) return;
+    }
+  }
+
+  function isPipeArithOp(): boolean {
+    const s = cur();
+    if (!s) return false;
+    // In pipe context, / and * are arithmetic operators but they're lexed
+    // as word "/" and star "*" respectively. Also match compare-ops for >, <, etc.
+    if (s.role === "star") return true;
+    if (s.role === "token" && (s.text === "/" || s.text === "+" || s.text === "-")) return true;
+    if (s.role === "compare-op") return true;
+    return false;
+  }
+
+  function parsePipeAtom(): void {
+    const s = cur();
+    if (!s) {
+      fail("expected expression");
+      return;
+    }
+
+    // Parenthesized sub-expression.
+    if (s.role === "paren" && s.text === "(") {
+      advance(); // consume "("
+      parsePipeExpr();
+      if (errorAt >= 0) return;
+      if (cur()?.role !== "paren" || cur()!.text !== ")") {
+        fail("expected ')'");
+        return;
+      }
+      advance(); // consume ")"
+      return;
+    }
+
+    // Function call.
+    if (s.role === "function") {
+      advance(); // consume function name
+      if (cur()?.role === "paren" && cur()!.text === "(") {
+        advance(); // consume "("
+        // Parse comma-separated arguments.
+        if (cur()?.role !== "paren" || cur()!.text !== ")") {
+          parsePipeExpr();
+          if (errorAt >= 0) return;
+          while (cur()?.role === "comma") {
+            advance(); // consume ","
+            parsePipeExpr();
+            if (errorAt >= 0) return;
+          }
+        }
+        if (cur()?.role !== "paren" || cur()!.text !== ")") {
+          fail("expected ')'");
+          return;
+        }
+        advance(); // consume ")"
+      }
+      return;
+    }
+
+    // Token (field reference or number literal).
+    if (s.role === "token" || s.role === "quoted") {
+      advance();
+      return;
+    }
+
+    fail(`unexpected '${s.text}' in expression`);
+  }
+
+  // Parse optional "as" alias.
+  function parseOptionalAs(): void {
+    if (cur()?.role === "pipe-keyword" && cur()!.text.toLowerCase() === "as") {
+      advance(); // consume "as"
+      const alias = cur();
+      if (!alias || alias.role !== "token") {
+        fail("expected alias name after 'as'");
+        return;
+      }
+      advance(); // consume alias
+    }
+  }
+
+  // Parse group_list: group_expr ( "," group_expr )*
+  function parseGroupList(): void {
+    parseGroupExpr();
+    if (errorAt >= 0) return;
+
+    while (cur()?.role === "comma") {
+      advance(); // consume ","
+      parseGroupExpr();
+      if (errorAt >= 0) return;
+    }
+  }
+
+  // Parse group_expr: "bin" "(" ... ")" | IDENT
+  function parseGroupExpr(): void {
+    const s = cur();
+    if (!s) {
+      fail("expected group expression");
+      return;
+    }
+
+    // bin() function call.
+    if (s.role === "function" && s.text.toLowerCase() === "bin") {
+      advance(); // consume "bin"
+      if (cur()?.role !== "paren" || cur()!.text !== "(") {
+        fail("expected '(' after 'bin'");
+        return;
+      }
+      advance(); // consume "("
+      // Consume args until ")".
+      while (cur() && !(cur()!.role === "paren" && cur()!.text === ")")) {
+        advance();
+      }
+      if (cur()?.role !== "paren" || cur()!.text !== ")") {
+        fail("expected ')'");
+        return;
+      }
+      advance(); // consume ")"
+      return;
+    }
+
+    // Simple field reference.
+    if (s.role === "token") {
+      advance();
+      return;
+    }
+
+    fail(`expected field name or bin(), got '${s.text}'`);
+  }
+
+  // Parse where: filter_expr
+  function parseWhereOp(): void {
+    const s = cur();
+    if (!s) {
+      fail("expected expression after 'where'");
+      return;
+    }
+    parseOrExpr();
+  }
+
+  parsePipeline();
 
   if (errorAt < 0 && pos < indices.length) {
     errorAt = indices[pos]!;
