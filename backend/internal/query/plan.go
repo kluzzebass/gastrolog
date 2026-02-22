@@ -511,8 +511,6 @@ func (e *Engine) lookupKVIndex(f KeyValueFilter, chunkID chunk.ChunkID, im index
 			if pos, found := reader.Lookup(keyLower); found {
 				result.positions = unionPositions(result.positions, pos)
 				detailParts = append(detailParts, fmt.Sprintf("attr_key=%d", len(pos)))
-			} else {
-				detailParts = append(detailParts, "attr_key=0")
 			}
 		}
 		if kvKeyErr == nil {
@@ -524,8 +522,6 @@ func (e *Engine) lookupKVIndex(f KeyValueFilter, chunkID chunk.ChunkID, im index
 				if pos, found := reader.Lookup(keyLower); found {
 					result.positions = unionPositions(result.positions, pos)
 					detailParts = append(detailParts, fmt.Sprintf("msg_key=%d", len(pos)))
-				} else {
-					detailParts = append(detailParts, "msg_key=0")
 				}
 			}
 		}
@@ -537,8 +533,6 @@ func (e *Engine) lookupKVIndex(f KeyValueFilter, chunkID chunk.ChunkID, im index
 			if pos, found := reader.Lookup(valLower); found {
 				result.positions = unionPositions(result.positions, pos)
 				detailParts = append(detailParts, fmt.Sprintf("attr_val=%d", len(pos)))
-			} else {
-				detailParts = append(detailParts, "attr_val=0")
 			}
 		}
 		if kvValErr == nil {
@@ -550,8 +544,6 @@ func (e *Engine) lookupKVIndex(f KeyValueFilter, chunkID chunk.ChunkID, im index
 				if pos, found := reader.Lookup(valLower); found {
 					result.positions = unionPositions(result.positions, pos)
 					detailParts = append(detailParts, fmt.Sprintf("msg_val=%d", len(pos)))
-				} else {
-					detailParts = append(detailParts, "msg_val=0")
 				}
 			}
 		}
@@ -563,8 +555,6 @@ func (e *Engine) lookupKVIndex(f KeyValueFilter, chunkID chunk.ChunkID, im index
 			if pos, found := reader.Lookup(keyLower); found {
 				result.positions = unionPositions(result.positions, pos)
 				detailParts = append(detailParts, fmt.Sprintf("attr_key=%d", len(pos)))
-			} else {
-				detailParts = append(detailParts, "attr_key=0")
 			}
 		}
 		if kvKeyErr == nil {
@@ -576,8 +566,6 @@ func (e *Engine) lookupKVIndex(f KeyValueFilter, chunkID chunk.ChunkID, im index
 				if pos, found := reader.Lookup(keyLower); found {
 					result.positions = unionPositions(result.positions, pos)
 					detailParts = append(detailParts, fmt.Sprintf("msg_key=%d", len(pos)))
-				} else {
-					detailParts = append(detailParts, "msg_key=0")
 				}
 			}
 		}
@@ -590,8 +578,6 @@ func (e *Engine) lookupKVIndex(f KeyValueFilter, chunkID chunk.ChunkID, im index
 			if pos, found := reader.Lookup(keyLower, valLower); found {
 				result.positions = unionPositions(result.positions, pos)
 				detailParts = append(detailParts, fmt.Sprintf("attr_kv=%d", len(pos)))
-			} else {
-				detailParts = append(detailParts, "attr_kv=0")
 			}
 		}
 		if kvErr == nil {
@@ -603,8 +589,6 @@ func (e *Engine) lookupKVIndex(f KeyValueFilter, chunkID chunk.ChunkID, im index
 				if pos, found := reader.Lookup(keyLower, valLower); found {
 					result.positions = unionPositions(result.positions, pos)
 					detailParts = append(detailParts, fmt.Sprintf("msg_kv=%d", len(pos)))
-				} else {
-					detailParts = append(detailParts, "msg_kv=0")
 				}
 			}
 		}
@@ -631,8 +615,6 @@ func (e *Engine) lookupKVIndex(f KeyValueFilter, chunkID chunk.ChunkID, im index
 			if pos, found := jsonReader.LookupPath(jsonPath); found {
 				result.positions = unionPositions(result.positions, pos)
 				detailParts = append(detailParts, fmt.Sprintf("msg_json=%d", len(pos)))
-			} else {
-				detailParts = append(detailParts, "msg_json=0")
 			}
 		} else if f.Key != "" && f.Value != "" && f.Op != querylang.OpEq {
 			// Non-eq comparison: path-only lookup (runtime compare on value).
@@ -641,8 +623,6 @@ func (e *Engine) lookupKVIndex(f KeyValueFilter, chunkID chunk.ChunkID, im index
 			if pos, found := jsonReader.LookupPath(jsonPath); found {
 				result.positions = unionPositions(result.positions, pos)
 				detailParts = append(detailParts, fmt.Sprintf("msg_json=%d", len(pos)))
-			} else {
-				detailParts = append(detailParts, "msg_json=0")
 			}
 		} else if f.Key != "" && f.Value != "" {
 			// Key=value: path-value lookup.
