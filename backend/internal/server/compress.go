@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"io"
 	"net/http"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -19,10 +20,33 @@ var gzipWriterPool = sync.Pool{
 	},
 }
 
-var brotliWriterPool = sync.Pool{
-	New: func() any {
-		return brotli.NewWriterLevel(io.Discard, brotliDynamicQuality)
-	},
+// brotliPool is a channel-based bounded pool that prevents GC eviction.
+// sync.Pool evicts all entries every GC cycle, causing ~582 KB of ring buffer
+// reallocation per writer. A channel-based pool holds strong references,
+// keeping writers alive across GC cycles and eliminating the churn.
+var brotliPool = func() chan *brotli.Writer {
+	size := max(runtime.GOMAXPROCS(0), 4)
+	ch := make(chan *brotli.Writer, size)
+	return ch
+}()
+
+func getBrotliWriter(dst io.Writer) *brotli.Writer {
+	select {
+	case w := <-brotliPool:
+		w.Reset(dst)
+		return w
+	default:
+		return brotli.NewWriterLevel(dst, brotliDynamicQuality)
+	}
+}
+
+func putBrotliWriter(w *brotli.Writer) {
+	w.Reset(io.Discard) // release reference to the response writer
+	select {
+	case brotliPool <- w:
+	default:
+		// Pool full — discard the writer.
+	}
 }
 
 // compressMiddleware applies brotli or gzip compression to responses when the
@@ -105,9 +129,7 @@ func (cw *compressWriter) WriteHeader(code int) {
 
 	switch cw.encoding {
 	case "br":
-		bw := brotliWriterPool.Get().(*brotli.Writer)
-		bw.Reset(cw.ResponseWriter)
-		cw.writer = bw
+		cw.writer = getBrotliWriter(cw.ResponseWriter)
 	case "gzip":
 		gz := gzipWriterPool.Get().(*gzip.Writer)
 		gz.Reset(cw.ResponseWriter)
@@ -148,7 +170,7 @@ func (cw *compressWriter) Close() {
 	// Return to pool.
 	switch cw.encoding {
 	case "br":
-		brotliWriterPool.Put(cw.writer)
+		putBrotliWriter(cw.writer.(*brotli.Writer))
 	case "gzip":
 		gzipWriterPool.Put(cw.writer)
 	}
