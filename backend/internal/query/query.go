@@ -553,16 +553,16 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 			// Apply KV filter for positive predicates
 			if len(kv) > 0 {
 				if meta.Sealed {
-					ok, empty := applyKeyValueIndex(b, im, meta.ID, kv)
+					_, empty := applyKeyValueIndex(b, im, meta.ID, kv)
 					if empty {
 						return emptyScanner(), nil
 					}
-					if !ok {
-						b.addFilter(keyValueFilter(kv))
-					}
-				} else {
-					b.addFilter(keyValueFilter(kv))
 				}
+				// Always add runtime filter: the index narrows positions by
+				// key existence, but comparison operators (>=, <=, etc.) still
+				// need runtime value verification. For OpEq this is redundant
+				// but harmless — matches the pattern used by glob filters.
+				b.addFilter(keyValueFilter(kv))
 			}
 
 			// Apply negation filter for NOT predicates

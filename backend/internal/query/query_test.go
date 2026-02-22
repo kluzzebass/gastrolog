@@ -2543,3 +2543,60 @@ func TestSearchGlobWithNOT(t *testing.T) {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
 }
+
+// Regression test: comparison operators (>=, <) must apply runtime value
+// checks even when the sealed-chunk index accelerates by key existence.
+// Before the fix, sealed chunks returned ALL records where the key existed
+// instead of only those matching the comparison.
+func TestSearchComparisonOperatorSealedVsActive(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte(`method=GET status=200 path=/health`)},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte(`method=POST status=404 path=/api/missing`)},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte(`method=GET status=500 path=/api/error`)},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte(`method=GET status=403 path=/admin`)},
+		{IngestTS: t5, Attrs: attrsA, Raw: []byte(`method=PUT status=201 path=/api/create`)},
+	}
+
+	// status>=400 status<500 should match only 404 (t2) and 403 (t4).
+	expr, err := querylang.Parse("status>=400 status<500")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	// Test sealed chunk (uses index acceleration).
+	sealedEng := setup(t, records)
+	sealedResults, err := collect(search(sealedEng, context.Background(), query.Query{BoolExpr: expr}))
+	if err != nil {
+		t.Fatalf("sealed search: %v", err)
+	}
+
+	// Test active chunk (uses runtime filter only).
+	activeEng := setupWithActive(t, nil, records)
+	activeResults, err := collect(search(activeEng, context.Background(), query.Query{BoolExpr: expr}))
+	if err != nil {
+		t.Fatalf("active search: %v", err)
+	}
+
+	if len(sealedResults) != 2 {
+		t.Errorf("sealed: expected 2 results, got %d", len(sealedResults))
+		for i, r := range sealedResults {
+			t.Logf("  sealed[%d]: %s", i, r.Raw)
+		}
+	}
+	if len(activeResults) != 2 {
+		t.Errorf("active: expected 2 results, got %d", len(activeResults))
+		for i, r := range activeResults {
+			t.Logf("  active[%d]: %s", i, r.Raw)
+		}
+	}
+	if len(sealedResults) != len(activeResults) {
+		t.Fatalf("sealed (%d) and active (%d) result counts differ", len(sealedResults), len(activeResults))
+	}
+
+	// Verify the correct records matched.
+	for i, r := range sealedResults {
+		if string(r.Raw) != string(activeResults[i].Raw) {
+			t.Errorf("result[%d]: sealed=%q active=%q", i, r.Raw, activeResults[i].Raw)
+		}
+	}
+}
