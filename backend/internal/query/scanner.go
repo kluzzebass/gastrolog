@@ -1092,8 +1092,13 @@ func matchesSingleToken(raw []byte, token string) bool {
 }
 
 // compareValues compares two string values using the given operator.
-// Numeric comparison is tried first (both sides parse as float64).
-// Falls back to case-insensitive lexicographic comparison.
+// a is the record value, b is the query value.
+//
+// For ordering ops (>, >=, <, <=):
+//   - If the query value is numeric, require the record value to also be numeric.
+//     Non-numeric record values are skipped (return false). This prevents
+//     status>=500 from matching status=sent via lexicographic comparison.
+//   - If the query value is non-numeric, use case-insensitive lexicographic comparison.
 func compareValues(a, b string, op querylang.CompareOp) bool {
 	switch op {
 	case querylang.OpEq:
@@ -1102,7 +1107,7 @@ func compareValues(a, b string, op querylang.CompareOp) bool {
 		return !strings.EqualFold(a, b)
 	}
 
-	// Try numeric comparison first.
+	// Try numeric comparison.
 	af, aErr := strconv.ParseFloat(a, 64)
 	bf, bErr := strconv.ParseFloat(b, 64)
 	if aErr == nil && bErr == nil {
@@ -1118,7 +1123,13 @@ func compareValues(a, b string, op querylang.CompareOp) bool {
 		}
 	}
 
-	// Fall back to case-insensitive lexicographic comparison.
+	// Query value is numeric but record value isn't — not comparable.
+	if bErr == nil && aErr != nil {
+		return false
+	}
+
+	// Both non-numeric (or record numeric, query non-numeric):
+	// case-insensitive lexicographic comparison.
 	cmp := strings.Compare(strings.ToLower(a), strings.ToLower(b))
 	switch op {
 	case querylang.OpGt:

@@ -86,7 +86,7 @@ In addition to `=` (equality), comparison operators `!=`, `>`, `>=`, `<`, `<=` a
 - `level!=debug` — exclude debug level
 - `host<"web-10"` — lexicographic comparison
 
-**Numeric comparison** is tried first: if both sides parse as numbers, numeric ordering is used. Otherwise, **case-insensitive lexicographic** ordering applies.
+**Numeric comparison** is tried first: if both sides parse as numbers, numeric ordering is used. If the query value is numeric but the record value is not (e.g. `status>=500` vs `status=sent`), the record is skipped. If the query value is non-numeric, **case-insensitive lexicographic** ordering applies.
 
 Comparison operators cannot be used with wildcards (`*`) or glob patterns. For example, `status>=err*` is a parse error — use `=` for glob matching.
 
