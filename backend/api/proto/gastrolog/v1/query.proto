@@ -25,6 +25,10 @@ service QueryService {
   // GetContext returns records surrounding a specific record, across all stores.
   // Uses the anchor record's write timestamp to find nearby records.
   rpc GetContext(GetContextRequest) returns (GetContextResponse);
+
+  // GetSyntax returns the query language keyword sets for frontend tokenization.
+  // Called once at startup so the frontend stays in sync with the backend.
+  rpc GetSyntax(GetSyntaxRequest) returns (GetSyntaxResponse);
 }
 
 message SearchRequest {
@@ -196,4 +200,12 @@ message GetContextResponse {
   repeated Record before = 1;  // Records before anchor, oldest first, all stores
   Record anchor = 2;           // The anchor record itself
   repeated Record after = 3;   // Records after anchor, oldest first, all stores
+}
+
+message GetSyntaxRequest {}
+
+message GetSyntaxResponse {
+  repeated string directives = 1;       // Query control args (reverse, start, end, last, ...)
+  repeated string pipe_keywords = 2;    // Pipe operator keywords (stats, where)
+  repeated string pipe_functions = 3;   // Functions usable in pipe expressions (count, avg, bin, ...)
 }

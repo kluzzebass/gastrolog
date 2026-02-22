@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import type { FieldSummary } from "../utils";
 import { timeRangeMs } from "../utils";
-import { DIRECTIVES } from "../queryTokenizer";
+import { DEFAULT_SYNTAX, type SyntaxSets } from "../queryTokenizer";
 
 const OPERATORS = ["AND", "OR", "NOT"];
 
@@ -64,6 +64,7 @@ export function useAutocomplete(
   draft: string,
   cursorPos: number,
   fields: FieldSummary[],
+  syntax: SyntaxSets = DEFAULT_SYNTAX,
 ) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [dismissed, setDismissed] = useState(false);
@@ -147,7 +148,7 @@ export function useAutocomplete(
     // Key position: suggest attribute keys, directives, operators.
     const keySet = new Set<string>();
     for (const f of fields) keySet.add(f.key);
-    for (const d of DIRECTIVES) keySet.add(d);
+    for (const d of syntax.directives) keySet.add(d);
 
     const keyMatches = Array.from(keySet)
       .filter(
@@ -166,7 +167,7 @@ export function useAutocomplete(
       replaceRange: { start: ctx.start, end: ctx.end },
       suffix: "", // suffix is determined per-suggestion at accept time
     };
-  }, [draft, cursorPos, fields, dismissed]);
+  }, [draft, cursorPos, fields, dismissed, syntax]);
 
   // Reset selection when suggestions change.
   const sugKey = suggestions.join("\0");

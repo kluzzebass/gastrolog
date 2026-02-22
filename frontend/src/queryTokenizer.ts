@@ -55,24 +55,28 @@ export interface HighlightSpan {
   role: HighlightRole;
 }
 
-export const DIRECTIVES = new Set([
-  "reverse",
-  "start",
-  "end",
-  "last",
-  "limit",
-  "pos",
-  "source_start",
-  "source_end",
-  "ingest_start",
-  "ingest_end",
-]);
+// Keyword sets used by the classifier and validator.
+// Exported as an interface so the frontend can supply server-provided sets.
+export interface SyntaxSets {
+  directives: Set<string>;
+  pipeKeywords: Set<string>;
+  pipeFunctions: Set<string>;
+}
 
-const PIPE_KEYWORDS = new Set(["stats", "where"]);
+// Default sets — used when the backend hasn't been queried yet (e.g. tests).
+export const DEFAULT_SYNTAX: SyntaxSets = {
+  directives: new Set([
+    "reverse", "start", "end", "last", "limit", "pos",
+    "source_start", "source_end", "ingest_start", "ingest_end",
+  ]),
+  pipeKeywords: new Set(["stats", "where"]),
+  pipeFunctions: new Set([
+    "count", "avg", "sum", "min", "max", "bin", "tonumber",
+  ]),
+};
 
-const PIPE_FUNCTIONS = new Set([
-  "count", "avg", "sum", "min", "max", "bin", "tonumber",
-]);
+/** @deprecated Use DEFAULT_SYNTAX.directives instead. */
+export const DIRECTIVES = DEFAULT_SYNTAX.directives;
 
 // Phase 1: Raw lexing — character scan producing tokens with whitespace preserved.
 export function lex(input: string): QueryToken[] {
@@ -339,7 +343,7 @@ function isValueKind(kind: QueryTokenKind): boolean {
 
 // Phase 2: Post-pass — classify tokens into highlight roles.
 // Split on pipes first, then classify filter and pipe segments separately.
-function classify(raw: QueryToken[]): HighlightSpan[] {
+function classify(raw: QueryToken[], syntax: SyntaxSets): HighlightSpan[] {
   // Find pipe token indices to split into segments.
   const pipeIndices: number[] = [];
   for (let i = 0; i < raw.length; i++) {
@@ -348,14 +352,14 @@ function classify(raw: QueryToken[]): HighlightSpan[] {
 
   if (pipeIndices.length === 0) {
     // No pipes — classify entire input as a filter expression.
-    return classifyFilter(raw);
+    return classifyFilter(raw, syntax);
   }
 
   const spans: HighlightSpan[] = [];
 
   // Filter segment: everything before the first pipe.
   const filterTokens = raw.slice(0, pipeIndices[0]!);
-  spans.push(...classifyFilter(filterTokens));
+  spans.push(...classifyFilter(filterTokens, syntax));
 
   // Pipe segments.
   for (let p = 0; p < pipeIndices.length; p++) {
@@ -364,7 +368,7 @@ function classify(raw: QueryToken[]): HighlightSpan[] {
 
     const nextPipe = p + 1 < pipeIndices.length ? pipeIndices[p + 1]! : raw.length;
     const segTokens = raw.slice(pipeIdx + 1, nextPipe);
-    spans.push(...classifyPipeSegment(segTokens));
+    spans.push(...classifyPipeSegment(segTokens, syntax));
   }
 
   return spans;
@@ -372,7 +376,7 @@ function classify(raw: QueryToken[]): HighlightSpan[] {
 
 // Classify a filter expression segment (the part before | or a where clause).
 // Detects key=value triples and maps remaining tokens to roles.
-function classifyFilter(raw: QueryToken[]): HighlightSpan[] {
+function classifyFilter(raw: QueryToken[], syntax: SyntaxSets): HighlightSpan[] {
   const spans: HighlightSpan[] = [];
 
   let i = 0;
@@ -394,7 +398,7 @@ function classifyFilter(raw: QueryToken[]): HighlightSpan[] {
 
         if (valTok && isValueKind(valTok.kind)) {
           const isEq = opTok.kind === "eq";
-          const isDirective = isEq && tok.kind === "word" && DIRECTIVES.has(tok.text.toLowerCase());
+          const isDirective = isEq && tok.kind === "word" && syntax.directives.has(tok.text.toLowerCase());
           const opRole: HighlightRole = isEq ? "eq" : "compare-op";
 
           // Emit all tokens from i through k (including intervening whitespace).
@@ -438,7 +442,7 @@ function classifyFilter(raw: QueryToken[]): HighlightSpan[] {
 
 // Classify a pipe segment (everything after | up to the next | or end).
 // Recognizes pipe keywords (stats, where), functions, "by", "as", commas.
-function classifyPipeSegment(tokens: QueryToken[]): HighlightSpan[] {
+function classifyPipeSegment(tokens: QueryToken[], syntax: SyntaxSets): HighlightSpan[] {
   const spans: HighlightSpan[] = [];
 
   // Find the keyword (first non-whitespace word).
@@ -453,32 +457,22 @@ function classifyPipeSegment(tokens: QueryToken[]): HighlightSpan[] {
     break;
   }
 
-  if (keyword === "where") {
-    // "where" segment: keyword + filter expression.
-    for (let i = 0; i < tokens.length; i++) {
-      if (i < keywordIdx) {
-        spans.push({ text: tokens[i]!.text, role: "whitespace" });
-      } else if (i === keywordIdx) {
-        spans.push({ text: tokens[i]!.text, role: "pipe-keyword" });
-      } else {
-        // Everything after "where" is a filter expression.
-        spans.push(...classifyFilter(tokens.slice(i)));
-        break;
-      }
-    }
-    return spans;
-  }
+  if (syntax.pipeKeywords.has(keyword)) {
+    const isFilterKeyword = keyword === "where";
 
-  if (keyword === "stats") {
-    // "stats" segment: keyword, then aggregation expressions.
     for (let i = 0; i < tokens.length; i++) {
       if (i < keywordIdx) {
         spans.push({ text: tokens[i]!.text, role: "whitespace" });
       } else if (i === keywordIdx) {
         spans.push({ text: tokens[i]!.text, role: "pipe-keyword" });
       } else {
-        // Classify the rest as stats arguments.
-        spans.push(...classifyStatsArgs(tokens.slice(i)));
+        if (isFilterKeyword) {
+          // Everything after "where" is a filter expression.
+          spans.push(...classifyFilter(tokens.slice(i), syntax));
+        } else {
+          // Everything after "stats" (or similar) is stats arguments.
+          spans.push(...classifyStatsArgs(tokens.slice(i), syntax));
+        }
         break;
       }
     }
@@ -505,7 +499,7 @@ function classifyPipeSegment(tokens: QueryToken[]): HighlightSpan[] {
 
 // Classify the arguments portion of a stats segment.
 // Recognizes: function calls, "by" keyword, "as" keyword, commas, field refs.
-function classifyStatsArgs(tokens: QueryToken[]): HighlightSpan[] {
+function classifyStatsArgs(tokens: QueryToken[], syntax: SyntaxSets): HighlightSpan[] {
   const spans: HighlightSpan[] = [];
 
   for (let i = 0; i < tokens.length; i++) {
@@ -552,7 +546,7 @@ function classifyStatsArgs(tokens: QueryToken[]): HighlightSpan[] {
       }
 
       // Known function: check if followed by "(" (whitespace-tolerant).
-      if (PIPE_FUNCTIONS.has(lower)) {
+      if (syntax.pipeFunctions.has(lower)) {
         // "count" can appear without parens as bare aggregate.
         let j = i + 1;
         while (j < tokens.length && tokens[j]!.kind === "whitespace") j++;
@@ -1173,8 +1167,8 @@ interface TokenizeResult {
   errorMessage: string | null;
 }
 
-export function tokenize(input: string): TokenizeResult {
-  const { spans, errorMessage } = validate(classify(lex(input)));
+export function tokenize(input: string, syntax: SyntaxSets = DEFAULT_SYNTAX): TokenizeResult {
+  const { spans, errorMessage } = validate(classify(lex(input), syntax));
   return {
     spans,
     hasErrors: spans.some((s) => s.role === "error"),

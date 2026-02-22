@@ -372,6 +372,21 @@ func (s *QueryServer) GetContext(
 	return connect.NewResponse(resp), nil
 }
 
+// GetSyntax returns the query language keyword sets for frontend tokenization.
+func (s *QueryServer) GetSyntax(
+	_ context.Context,
+	_ *connect.Request[apiv1.GetSyntaxRequest],
+) (*connect.Response[apiv1.GetSyntaxResponse], error) {
+	return connect.NewResponse(&apiv1.GetSyntaxResponse{
+		Directives: []string{
+			"reverse", "start", "end", "last", "limit", "pos",
+			"source_start", "source_end", "ingest_start", "ingest_end",
+		},
+		PipeKeywords:  []string{"stats", "where"},
+		PipeFunctions: []string{"count", "avg", "sum", "min", "max", "bin", "tonumber"},
+	}), nil
+}
+
 // protoToQuery converts a proto Query to the internal query.Query type.
 // If the Expression field is set, it is parsed server-side and takes
 // precedence over the legacy Tokens/KvPredicates fields.

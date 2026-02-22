@@ -6,6 +6,7 @@ import type { HistoryEntry } from "../hooks/useQueryHistory";
 import { useHelp } from "../hooks/useHelp";
 import type { SavedQuery } from "../api/gen/gastrolog/v1/config_pb";
 import { useThemeClass } from "../hooks/useThemeClass";
+import type { SyntaxSets } from "../queryTokenizer";
 
 interface QueryBarProps {
   dark: boolean;
@@ -41,6 +42,7 @@ interface QueryBarProps {
   draftIsPipeline: boolean;
   showPlan: boolean;
   handleShowPlan: () => void;
+  syntax?: SyntaxSets;
 }
 
 export function QueryBar({
@@ -69,6 +71,7 @@ export function QueryBar({
   draftIsPipeline,
   showPlan,
   handleShowPlan,
+  syntax,
 }: Readonly<QueryBarProps>) {
   const c = useThemeClass(dark);
   const { openHelp } = useHelp();
@@ -82,6 +85,7 @@ export function QueryBar({
           <QueryInput
             ref={queryInputRef}
             value={draft}
+            syntax={syntax}
             onChange={(e) => {
               setDraft(e.target.value);
               setCursorPos(e.target.selectionStart ?? 0);

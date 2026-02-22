@@ -43,6 +43,8 @@ const (
 	QueryServiceHistogramProcedure = "/gastrolog.v1.QueryService/Histogram"
 	// QueryServiceGetContextProcedure is the fully-qualified name of the QueryService's GetContext RPC.
 	QueryServiceGetContextProcedure = "/gastrolog.v1.QueryService/GetContext"
+	// QueryServiceGetSyntaxProcedure is the fully-qualified name of the QueryService's GetSyntax RPC.
+	QueryServiceGetSyntaxProcedure = "/gastrolog.v1.QueryService/GetSyntax"
 )
 
 // QueryServiceClient is a client for the gastrolog.v1.QueryService service.
@@ -60,6 +62,9 @@ type QueryServiceClient interface {
 	// GetContext returns records surrounding a specific record, across all stores.
 	// Uses the anchor record's write timestamp to find nearby records.
 	GetContext(context.Context, *connect.Request[v1.GetContextRequest]) (*connect.Response[v1.GetContextResponse], error)
+	// GetSyntax returns the query language keyword sets for frontend tokenization.
+	// Called once at startup so the frontend stays in sync with the backend.
+	GetSyntax(context.Context, *connect.Request[v1.GetSyntaxRequest]) (*connect.Response[v1.GetSyntaxResponse], error)
 }
 
 // NewQueryServiceClient constructs a client for the gastrolog.v1.QueryService service. By default,
@@ -103,6 +108,12 @@ func NewQueryServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(queryServiceMethods.ByName("GetContext")),
 			connect.WithClientOptions(opts...),
 		),
+		getSyntax: connect.NewClient[v1.GetSyntaxRequest, v1.GetSyntaxResponse](
+			httpClient,
+			baseURL+QueryServiceGetSyntaxProcedure,
+			connect.WithSchema(queryServiceMethods.ByName("GetSyntax")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -113,6 +124,7 @@ type queryServiceClient struct {
 	explain    *connect.Client[v1.ExplainRequest, v1.ExplainResponse]
 	histogram  *connect.Client[v1.HistogramRequest, v1.HistogramResponse]
 	getContext *connect.Client[v1.GetContextRequest, v1.GetContextResponse]
+	getSyntax  *connect.Client[v1.GetSyntaxRequest, v1.GetSyntaxResponse]
 }
 
 // Search calls gastrolog.v1.QueryService.Search.
@@ -140,6 +152,11 @@ func (c *queryServiceClient) GetContext(ctx context.Context, req *connect.Reques
 	return c.getContext.CallUnary(ctx, req)
 }
 
+// GetSyntax calls gastrolog.v1.QueryService.GetSyntax.
+func (c *queryServiceClient) GetSyntax(ctx context.Context, req *connect.Request[v1.GetSyntaxRequest]) (*connect.Response[v1.GetSyntaxResponse], error) {
+	return c.getSyntax.CallUnary(ctx, req)
+}
+
 // QueryServiceHandler is an implementation of the gastrolog.v1.QueryService service.
 type QueryServiceHandler interface {
 	// Search executes a query and streams matching records.
@@ -155,6 +172,9 @@ type QueryServiceHandler interface {
 	// GetContext returns records surrounding a specific record, across all stores.
 	// Uses the anchor record's write timestamp to find nearby records.
 	GetContext(context.Context, *connect.Request[v1.GetContextRequest]) (*connect.Response[v1.GetContextResponse], error)
+	// GetSyntax returns the query language keyword sets for frontend tokenization.
+	// Called once at startup so the frontend stays in sync with the backend.
+	GetSyntax(context.Context, *connect.Request[v1.GetSyntaxRequest]) (*connect.Response[v1.GetSyntaxResponse], error)
 }
 
 // NewQueryServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -194,6 +214,12 @@ func NewQueryServiceHandler(svc QueryServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(queryServiceMethods.ByName("GetContext")),
 		connect.WithHandlerOptions(opts...),
 	)
+	queryServiceGetSyntaxHandler := connect.NewUnaryHandler(
+		QueryServiceGetSyntaxProcedure,
+		svc.GetSyntax,
+		connect.WithSchema(queryServiceMethods.ByName("GetSyntax")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.QueryService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case QueryServiceSearchProcedure:
@@ -206,6 +232,8 @@ func NewQueryServiceHandler(svc QueryServiceHandler, opts ...connect.HandlerOpti
 			queryServiceHistogramHandler.ServeHTTP(w, r)
 		case QueryServiceGetContextProcedure:
 			queryServiceGetContextHandler.ServeHTTP(w, r)
+		case QueryServiceGetSyntaxProcedure:
+			queryServiceGetSyntaxHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -233,4 +261,8 @@ func (UnimplementedQueryServiceHandler) Histogram(context.Context, *connect.Requ
 
 func (UnimplementedQueryServiceHandler) GetContext(context.Context, *connect.Request[v1.GetContextRequest]) (*connect.Response[v1.GetContextResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.QueryService.GetContext is not implemented"))
+}
+
+func (UnimplementedQueryServiceHandler) GetSyntax(context.Context, *connect.Request[v1.GetSyntaxRequest]) (*connect.Response[v1.GetSyntaxResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.QueryService.GetSyntax is not implemented"))
 }

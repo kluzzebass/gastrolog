@@ -46,7 +46,7 @@ import {
   useDeleteSavedQuery,
 } from "../api/hooks/useSavedQueries";
 import { Dialog } from "./Dialog";
-import { tokenize, hasPipeOutsideQuotes } from "../queryTokenizer";
+import { tokenize, hasPipeOutsideQuotes, type SyntaxSets } from "../queryTokenizer";
 import { useAutocomplete } from "../hooks/useAutocomplete";
 import { HeaderBar } from "./HeaderBar";
 import { PipelineResults } from "./PipelineResults";
@@ -61,6 +61,7 @@ import { HelpProvider } from "../hooks/useHelp";
 import { ResultsToolbar } from "./ResultsToolbar";
 import { QueryBar } from "./QueryBar";
 import { useConfig, useServerConfig } from "../api/hooks/useConfig";
+import { useSyntax } from "../api/hooks/useSyntax";
 
 export function SearchView() {
   const { q, help: helpParam, settings: settingsParam, inspector: inspectorParam } = useRouterSearch({ strict: false }) as { q: string; help?: string; settings?: string; inspector?: string };
@@ -213,6 +214,8 @@ export function SearchView() {
 
   const logout = useLogout();
   const currentUser = useCurrentUser();
+  const syntaxQuery = useSyntax();
+  const syntax: SyntaxSets | undefined = syntaxQuery.data;
 
   // Navigate to a new query — pushes browser history, preserving current route.
   const setUrlQuery = (newQ: string) => {
@@ -521,7 +524,7 @@ export function SearchView() {
 
   const liveHistogramData = useLiveHistogram(followRecords);
   const tokens = extractTokens(q);
-  const { hasErrors: draftHasErrors, hasPipeline: draftIsPipeline } = tokenize(draft);
+  const { hasErrors: draftHasErrors, hasPipeline: draftIsPipeline } = tokenize(draft, syntax);
   const isPipelineResult = tableResult !== null;
   const queryIsPipeline = hasPipeOutsideQuotes(q);
   const displayRecords = isFollowMode ? followRecords : records;
@@ -538,7 +541,7 @@ export function SearchView() {
     }
     return merged;
   })();
-  const autocomplete = useAutocomplete(draft, cursorPos, allFields);
+  const autocomplete = useAutocomplete(draft, cursorPos, allFields, syntax);
 
   const handleFieldSelect = (key: string, value: string) => {
     const needsQuotes = /[^a-zA-Z0-9_\-.]/.test(value);
@@ -696,6 +699,7 @@ export function SearchView() {
             draftIsPipeline={draftIsPipeline}
             showPlan={showPlan}
             handleShowPlan={handleShowPlan}
+            syntax={syntax}
           />
 
           {/* Execution Plan Dialog */}

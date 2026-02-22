@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { ExplainRequest, ExplainResponse, FollowRequest, FollowResponse, GetContextRequest, GetContextResponse, HistogramRequest, HistogramResponse, SearchRequest, SearchResponse } from "./query_pb.js";
+import { ExplainRequest, ExplainResponse, FollowRequest, FollowResponse, GetContextRequest, GetContextResponse, GetSyntaxRequest, GetSyntaxResponse, HistogramRequest, HistogramResponse, SearchRequest, SearchResponse } from "./query_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -70,6 +70,18 @@ export const QueryService = {
       name: "GetContext",
       I: GetContextRequest,
       O: GetContextResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * GetSyntax returns the query language keyword sets for frontend tokenization.
+     * Called once at startup so the frontend stays in sync with the backend.
+     *
+     * @generated from rpc gastrolog.v1.QueryService.GetSyntax
+     */
+    getSyntax: {
+      name: "GetSyntax",
+      I: GetSyntaxRequest,
+      O: GetSyntaxResponse,
       kind: MethodKind.Unary,
     },
   }

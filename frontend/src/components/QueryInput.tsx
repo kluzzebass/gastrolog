@@ -1,5 +1,5 @@
 import { forwardRef, type ReactNode } from "react";
-import { tokenize, type HighlightRole } from "../queryTokenizer";
+import { tokenize, type HighlightRole, type SyntaxSets } from "../queryTokenizer";
 import { useThemeClass } from "../hooks/useThemeClass";
 
 interface QueryInputProps {
@@ -10,6 +10,7 @@ interface QueryInputProps {
   onClick?: (e: React.MouseEvent<HTMLTextAreaElement>) => void;
   placeholder?: string;
   dark: boolean;
+  syntax?: SyntaxSets;
   children?: ReactNode;
 }
 
@@ -71,11 +72,12 @@ export const QueryInput = forwardRef<HTMLTextAreaElement, QueryInputProps>(
       onClick,
       placeholder,
       dark,
+      syntax,
       children,
     },
     ref,
   ) => {
-    const { spans, errorMessage } = tokenize(value);
+    const { spans, errorMessage } = tokenize(value, syntax);
 
     const c = useThemeClass(dark);
 

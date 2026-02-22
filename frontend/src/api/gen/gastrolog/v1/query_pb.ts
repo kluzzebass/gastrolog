@@ -1265,3 +1265,89 @@ export class GetContextResponse extends Message<GetContextResponse> {
   }
 }
 
+/**
+ * @generated from message gastrolog.v1.GetSyntaxRequest
+ */
+export class GetSyntaxRequest extends Message<GetSyntaxRequest> {
+  constructor(data?: PartialMessage<GetSyntaxRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetSyntaxRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetSyntaxRequest {
+    return new GetSyntaxRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetSyntaxRequest {
+    return new GetSyntaxRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetSyntaxRequest {
+    return new GetSyntaxRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetSyntaxRequest | PlainMessage<GetSyntaxRequest> | undefined, b: GetSyntaxRequest | PlainMessage<GetSyntaxRequest> | undefined): boolean {
+    return proto3.util.equals(GetSyntaxRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.GetSyntaxResponse
+ */
+export class GetSyntaxResponse extends Message<GetSyntaxResponse> {
+  /**
+   * Query control args (reverse, start, end, last, ...)
+   *
+   * @generated from field: repeated string directives = 1;
+   */
+  directives: string[] = [];
+
+  /**
+   * Pipe operator keywords (stats, where)
+   *
+   * @generated from field: repeated string pipe_keywords = 2;
+   */
+  pipeKeywords: string[] = [];
+
+  /**
+   * Functions usable in pipe expressions (count, avg, bin, ...)
+   *
+   * @generated from field: repeated string pipe_functions = 3;
+   */
+  pipeFunctions: string[] = [];
+
+  constructor(data?: PartialMessage<GetSyntaxResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetSyntaxResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "directives", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 2, name: "pipe_keywords", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 3, name: "pipe_functions", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetSyntaxResponse {
+    return new GetSyntaxResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetSyntaxResponse {
+    return new GetSyntaxResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetSyntaxResponse {
+    return new GetSyntaxResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetSyntaxResponse | PlainMessage<GetSyntaxResponse> | undefined, b: GetSyntaxResponse | PlainMessage<GetSyntaxResponse> | undefined): boolean {
+    return proto3.util.equals(GetSyntaxResponse, a, b);
+  }
+}
+
