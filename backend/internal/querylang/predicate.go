@@ -23,6 +23,37 @@ const (
 	PredGlob
 )
 
+// CompareOp identifies the comparison operator in a KV predicate.
+type CompareOp int
+
+const (
+	OpEq  CompareOp = iota // =
+	OpNe                   // !=
+	OpGt                   // >
+	OpGte                  // >=
+	OpLt                   // <
+	OpLte                  // <=
+)
+
+func (op CompareOp) String() string {
+	switch op {
+	case OpEq:
+		return "="
+	case OpNe:
+		return "!="
+	case OpGt:
+		return ">"
+	case OpGte:
+		return ">="
+	case OpLt:
+		return "<"
+	case OpLte:
+		return "<="
+	default:
+		return "="
+	}
+}
+
 func (k PredicateKind) String() string {
 	switch k {
 	case PredToken:

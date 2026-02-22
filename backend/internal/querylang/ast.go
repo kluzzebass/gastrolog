@@ -69,6 +69,7 @@ func (n *NotExpr) String() string {
 // PredicateExpr represents a leaf predicate.
 type PredicateExpr struct {
 	Kind    PredicateKind
+	Op      CompareOp      // comparison operator (default OpEq); only meaningful for PredKV
 	Key     string         // empty for Token kind
 	Value   string         // the token or value; for PredRegex/PredGlob, the raw pattern
 	Pattern *regexp.Regexp // compiled regex; set for PredRegex and PredGlob
@@ -87,7 +88,7 @@ func (p *PredicateExpr) String() string {
 	case PredToken:
 		return fmt.Sprintf("token(%s)", p.Value)
 	case PredKV:
-		return fmt.Sprintf("%s=%s", p.Key, p.Value)
+		return fmt.Sprintf("%s%s%s", p.Key, p.Op, p.Value)
 	case PredKeyExists:
 		return fmt.Sprintf("%s=*", p.Key)
 	case PredValueExists:

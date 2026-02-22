@@ -20,6 +20,7 @@ var (
 	ErrUnmatchedParen  = errors.New("unmatched parenthesis")
 	ErrUnexpectedToken = errors.New("unexpected token")
 	ErrUnexpectedEOF   = errors.New("unexpected end of query")
+	ErrInvalidCompare  = errors.New("invalid comparison")
 )
 
 // ParseError provides detailed error information including position.

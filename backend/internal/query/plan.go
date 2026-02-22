@@ -555,6 +555,33 @@ func (e *Engine) lookupKVIndex(f KeyValueFilter, chunkID chunk.ChunkID, im index
 				}
 			}
 		}
+	} else if f.Op != querylang.OpEq {
+		// Non-eq comparison: use key-only index, runtime value comparison.
+		if attrKeyErr == nil {
+			result.available = true
+			reader := index.NewAttrKeyIndexReader(chunkID, attrKeyIdx.Entries())
+			if pos, found := reader.Lookup(keyLower); found {
+				result.positions = unionPositions(result.positions, pos)
+				detailParts = append(detailParts, fmt.Sprintf("attr_key=%d", len(pos)))
+			} else {
+				detailParts = append(detailParts, "attr_key=0")
+			}
+		}
+		if kvKeyErr == nil {
+			if kvKeyStatus == index.KVCapped {
+				detailParts = append(detailParts, "msg_key=capped")
+			} else {
+				result.available = true
+				reader := index.NewKVKeyIndexReader(chunkID, kvKeyIdx.Entries())
+				if pos, found := reader.Lookup(keyLower); found {
+					result.positions = unionPositions(result.positions, pos)
+					detailParts = append(detailParts, fmt.Sprintf("msg_key=%d", len(pos)))
+				} else {
+					detailParts = append(detailParts, "msg_key=0")
+				}
+			}
+		}
+		detailParts = append(detailParts, "filter=runtime_compare")
 	} else {
 		// Both key and value: exact key=value match.
 		if attrKVErr == nil {
@@ -599,6 +626,16 @@ func (e *Engine) lookupKVIndex(f KeyValueFilter, chunkID chunk.ChunkID, im index
 
 		if f.Key != "" && f.Value == "" {
 			// Key exists: path lookup.
+			result.available = true
+			jsonPath := dotToNull(keyLower)
+			if pos, found := jsonReader.LookupPath(jsonPath); found {
+				result.positions = unionPositions(result.positions, pos)
+				detailParts = append(detailParts, fmt.Sprintf("msg_json=%d", len(pos)))
+			} else {
+				detailParts = append(detailParts, "msg_json=0")
+			}
+		} else if f.Key != "" && f.Value != "" && f.Op != querylang.OpEq {
+			// Non-eq comparison: path-only lookup (runtime compare on value).
 			result.available = true
 			jsonPath := dotToNull(keyLower)
 			if pos, found := jsonReader.LookupPath(jsonPath); found {
@@ -677,7 +714,7 @@ func formatKVFilter(f KeyValueFilter) string {
 	if value == "" {
 		value = "*"
 	}
-	return key + "=" + value
+	return key + f.Op.String() + value
 }
 
 // classifyTokenMiss returns why a token is not in the index.

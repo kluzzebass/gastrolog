@@ -77,6 +77,21 @@ Filter by key=value in record attributes or message body. Both sources are check
 
 Key-value matching is case-insensitive.
 
+### Comparison Operators
+
+In addition to `=` (equality), comparison operators `!=`, `>`, `>=`, `<`, `<=` are supported:
+
+- `status>=500` — HTTP status codes 500 and above
+- `duration>1000` — durations over 1000
+- `level!=debug` — exclude debug level
+- `host<"web-10"` — lexicographic comparison
+
+**Numeric comparison** is tried first: if both sides parse as numbers, numeric ordering is used. Otherwise, **case-insensitive lexicographic** ordering applies.
+
+Comparison operators cannot be used with wildcards (`*`) or glob patterns. For example, `status>=err*` is a parse error — use `=` for glob matching.
+
+Comparison filters use key-only index acceleration on sealed chunks: the index narrows to records where the key exists, then runtime comparison filters on the value.
+
 ## Time Bounds
 
 Filter by timestamp. Values are resolved in the browser using your local timezone.
@@ -169,3 +184,13 @@ Records with tokens starting with "error" but not "debug".
 level=err* host=web-*
 ```
 Records where level matches "err*" and host matches "web-*".
+
+```
+status>=500
+```
+Records with HTTP status 500 or above (numeric comparison).
+
+```
+status>=400 level!=debug
+```
+Records with status 400+ excluding debug level.

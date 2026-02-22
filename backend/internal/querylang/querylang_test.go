@@ -891,6 +891,207 @@ func TestExtractGlobPrefix(t *testing.T) {
 	}
 }
 
+// --- Comparison operator tests ---
+
+func TestLexerComparisonOperators(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected []struct {
+			kind TokenKind
+			lit  string
+		}
+	}{
+		{
+			"status>=500",
+			[]struct {
+				kind TokenKind
+				lit  string
+			}{{TokWord, "status"}, {TokGte, ">="}, {TokWord, "500"}, {TokEOF, ""}},
+		},
+		{
+			"status>500",
+			[]struct {
+				kind TokenKind
+				lit  string
+			}{{TokWord, "status"}, {TokGt, ">"}, {TokWord, "500"}, {TokEOF, ""}},
+		},
+		{
+			"status<=400",
+			[]struct {
+				kind TokenKind
+				lit  string
+			}{{TokWord, "status"}, {TokLte, "<="}, {TokWord, "400"}, {TokEOF, ""}},
+		},
+		{
+			"status<400",
+			[]struct {
+				kind TokenKind
+				lit  string
+			}{{TokWord, "status"}, {TokLt, "<"}, {TokWord, "400"}, {TokEOF, ""}},
+		},
+		{
+			"level!=debug",
+			[]struct {
+				kind TokenKind
+				lit  string
+			}{{TokWord, "level"}, {TokNe, "!="}, {TokWord, "debug"}, {TokEOF, ""}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			lex := NewLexer(tt.input)
+			for i, want := range tt.expected {
+				tok, err := lex.Next()
+				if err != nil {
+					t.Fatalf("token %d: unexpected error: %v", i, err)
+				}
+				if tok.Kind != want.kind {
+					t.Errorf("token %d: Kind = %v, want %v", i, tok.Kind, want.kind)
+				}
+				if tok.Kind != TokEOF && tok.Lit != want.lit {
+					t.Errorf("token %d: Lit = %q, want %q", i, tok.Lit, want.lit)
+				}
+			}
+		})
+	}
+}
+
+func TestLexerStandaloneBang(t *testing.T) {
+	lex := NewLexer("!foo")
+	_, err := lex.Next()
+	if err == nil {
+		t.Fatal("expected error for standalone '!', got nil")
+	}
+	if !errors.Is(err, ErrUnexpectedToken) {
+		t.Errorf("error = %v, want ErrUnexpectedToken", err)
+	}
+}
+
+func TestParseComparisonOperators(t *testing.T) {
+	tests := []struct {
+		input string
+		key   string
+		op    CompareOp
+		value string
+	}{
+		{"status>=500", "status", OpGte, "500"},
+		{"status>500", "status", OpGt, "500"},
+		{"status<=400", "status", OpLte, "400"},
+		{"status<400", "status", OpLt, "400"},
+		{"level!=debug", "level", OpNe, "debug"},
+		{"status=200", "status", OpEq, "200"},
+		{`host<"web-10"`, "host", OpLt, "web-10"},
+		{`duration>"1000"`, "duration", OpGt, "1000"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			expr, err := Parse(tt.input)
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
+			}
+			pred, ok := expr.(*PredicateExpr)
+			if !ok {
+				t.Fatalf("Parse(%q) = %T, want *PredicateExpr", tt.input, expr)
+			}
+			if pred.Kind != PredKV {
+				t.Errorf("Parse(%q).Kind = %v, want PredKV", tt.input, pred.Kind)
+			}
+			if pred.Key != tt.key {
+				t.Errorf("Parse(%q).Key = %q, want %q", tt.input, pred.Key, tt.key)
+			}
+			if pred.Op != tt.op {
+				t.Errorf("Parse(%q).Op = %v, want %v", tt.input, pred.Op, tt.op)
+			}
+			if pred.Value != tt.value {
+				t.Errorf("Parse(%q).Value = %q, want %q", tt.input, pred.Value, tt.value)
+			}
+		})
+	}
+}
+
+func TestParseComparisonInBooleanExpressions(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"compare AND token", "status>=500 AND error"},
+		{"compare OR compare", "status>=500 OR status<=200"},
+		{"NOT compare", "NOT level!=debug"},
+		{"implicit AND with compare", "status>=500 level!=debug"},
+		{"compare in parens", "(status>=500 OR status<=200) AND error"},
+		{"compare with spaces", "status >= 500"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			expr, err := Parse(tt.input)
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
+			}
+			if expr == nil {
+				t.Fatalf("Parse(%q) returned nil", tt.input)
+			}
+			t.Logf("Parse(%q) = %s", tt.input, expr.String())
+		})
+	}
+}
+
+func TestParseComparisonErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr error
+	}{
+		{"compare with star value", "status>*", ErrInvalidCompare},
+		{"compare with glob value", "status>=err*", ErrInvalidCompare},
+		{"ne with star value", "level!=*", ErrInvalidCompare},
+		{"compare with star key", "*>500", ErrInvalidCompare},
+		{"compare with glob key", "err*>500", ErrInvalidCompare},
+		{"standalone bang", "!foo", ErrUnexpectedToken},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Parse(tt.input)
+			if err == nil {
+				t.Fatalf("Parse(%q) expected error, got nil", tt.input)
+			}
+			if !errors.Is(err, tt.wantErr) {
+				t.Errorf("Parse(%q) error = %v, want %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestComparisonExprString(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"status>=500", "status>=500"},
+		{"status>500", "status>500"},
+		{"level!=debug", "level!=debug"},
+		{"status<=400", "status<=400"},
+		{"status<400", "status<400"},
+		{"status=200", "status=200"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			expr, err := Parse(tt.input)
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
+			}
+			got := expr.String()
+			if got != tt.want {
+				t.Errorf("Parse(%q).String() = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSlashNoLongerInBareword(t *testing.T) {
 	// Verify that '/' terminates barewords.
 	// "path/to" should NOT parse as a single token.

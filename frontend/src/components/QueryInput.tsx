@@ -22,6 +22,7 @@ function roleStyle(role: HighlightRole, dark: boolean): React.CSSProperties {
     case "key":
       return { color: "var(--color-copper)" };
     case "eq":
+    case "compare-op":
       return { color: "var(--color-text-ghost)" };
     case "value":
     case "token":

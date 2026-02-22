@@ -19,6 +19,11 @@ const (
 	TokLParen           // (
 	TokRParen           // )
 	TokEq               // =
+	TokNe               // !=
+	TokGt               // >
+	TokGte              // >=
+	TokLt               // <
+	TokLte              // <=
 	TokStar             // *
 	TokRegex            // /pattern/ (regex literal, slashes stripped)
 	TokGlob             // bareword with glob metacharacters (*, ?, [)
@@ -42,6 +47,16 @@ func (k TokenKind) String() string {
 		return ")"
 	case TokEq:
 		return "="
+	case TokNe:
+		return "!="
+	case TokGt:
+		return ">"
+	case TokGte:
+		return ">="
+	case TokLt:
+		return "<"
+	case TokLte:
+		return "<="
 	case TokStar:
 		return "*"
 	case TokRegex:
@@ -93,6 +108,26 @@ func (l *Lexer) Next() (Token, error) {
 	case '=':
 		l.pos++
 		return Token{Kind: TokEq, Lit: "=", Pos: startPos}, nil
+	case '!':
+		if l.pos+1 < len(l.input) && l.input[l.pos+1] == '=' {
+			l.pos += 2
+			return Token{Kind: TokNe, Lit: "!=", Pos: startPos}, nil
+		}
+		return Token{}, newParseError(startPos, ErrUnexpectedToken, "unexpected '!' (did you mean '!='?)")
+	case '>':
+		if l.pos+1 < len(l.input) && l.input[l.pos+1] == '=' {
+			l.pos += 2
+			return Token{Kind: TokGte, Lit: ">=", Pos: startPos}, nil
+		}
+		l.pos++
+		return Token{Kind: TokGt, Lit: ">", Pos: startPos}, nil
+	case '<':
+		if l.pos+1 < len(l.input) && l.input[l.pos+1] == '=' {
+			l.pos += 2
+			return Token{Kind: TokLte, Lit: "<=", Pos: startPos}, nil
+		}
+		l.pos++
+		return Token{Kind: TokLt, Lit: "<", Pos: startPos}, nil
 	case '*':
 		// Peek ahead: if followed by a bareword char or glob meta, this is a glob prefix (e.g. *error).
 		if l.pos+1 < len(l.input) && isGlobBarewordChar(l.input[l.pos+1]) {
@@ -266,12 +301,12 @@ func (l *Lexer) scanRegex() (Token, error) {
 }
 
 // isBarewordChar returns true if ch can be part of a bareword.
-// Barewords exclude: whitespace, ()=*?"'/ and [
+// Barewords exclude: whitespace, ()=*?"'/ and [ and comparison chars ><!
 func isBarewordChar(ch byte) bool {
 	switch ch {
 	case ' ', '\t', '\n', '\r':
 		return false
-	case '(', ')', '=', '*', '?', '[', '"', '\'', '/':
+	case '(', ')', '=', '*', '?', '[', '"', '\'', '/', '>', '<', '!':
 		return false
 	default:
 		return true

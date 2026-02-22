@@ -38,6 +38,10 @@ type KeyValueFilter struct {
 	// instead of exact string comparison.
 	KeyPat   *regexp.Regexp // compiled glob for key (e.g., err*=value)
 	ValuePat *regexp.Regexp // compiled glob for value (e.g., key=err*)
+
+	// Op is the comparison operator (default OpEq). Non-eq ops use key-only
+	// index acceleration with runtime value comparison.
+	Op querylang.CompareOp
 }
 
 // Query describes what records to search for.

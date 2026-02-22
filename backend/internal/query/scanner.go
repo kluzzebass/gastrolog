@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -539,6 +540,38 @@ func matchesKeyValue(recAttrs chunk.Attributes, raw []byte, queryFilters []KeyVa
 				continue
 			}
 			return false // Value not found in either location
+		} else if f.Op != querylang.OpEq {
+			// Comparison operator (!=, >, >=, <, <=): use compareValues.
+			found := false
+			for k, v := range recAttrs {
+				if strings.EqualFold(k, f.Key) && compareValues(v, f.Value, f.Op) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				pairs := getMsgPairs()
+				for k, values := range pairs {
+					if k != keyLower {
+						continue
+					}
+					for v := range values {
+						if compareValues(v, f.Value, f.Op) {
+							found = true
+							break
+						}
+					}
+					if found {
+						break
+					}
+				}
+			}
+			if !found {
+				found = matchJSONPathCompare(raw, f.Key, f.Value, f.Op)
+			}
+			if !found {
+				return false
+			}
 		} else {
 			// Both key and value: exact or glob key=value match
 			// Check attributes first (cheaper).
@@ -859,6 +892,27 @@ func applyKeyValueIndex(b *scannerBuilder, indexes index.IndexManager, chunkID c
 				}
 			}
 			// No JSON index for value-only queries (value without path context is ambiguous)
+		} else if f.Op != querylang.OpEq {
+			// Non-eq comparison operator: use key-only index to find positions
+			// where the key exists, then runtime filter on value comparison.
+			if attrKeyErr == nil {
+				reader := index.NewAttrKeyIndexReader(chunkID, attrKeyIdx.Entries())
+				if positions, found := reader.Lookup(keyLower); found {
+					filterPositions = unionPositions(filterPositions, positions)
+				}
+			}
+			if kvKeyErr == nil && kvKeyStatus != index.KVCapped {
+				reader := index.NewKVKeyIndexReader(chunkID, kvKeyIdx.Entries())
+				if positions, found := reader.Lookup(keyLower); found {
+					filterPositions = unionPositions(filterPositions, positions)
+				}
+			}
+			if jsonReader != nil {
+				jsonPath := dotToNull(keyLower)
+				if positions, found := jsonReader.LookupPath(jsonPath); found {
+					filterPositions = unionPositions(filterPositions, positions)
+				}
+			}
 		} else {
 			// Both key and value: exact key=value match
 			// Use KV indexes
@@ -919,7 +973,7 @@ func ConjunctionToFilters(conj *querylang.Conjunction) (tokens []string, kv []Ke
 		case querylang.PredToken:
 			tokens = append(tokens, p.Value)
 		case querylang.PredKV:
-			kv = append(kv, KeyValueFilter{Key: p.Key, Value: p.Value, KeyPat: p.KeyPat, ValuePat: p.ValuePat})
+			kv = append(kv, KeyValueFilter{Key: p.Key, Value: p.Value, KeyPat: p.KeyPat, ValuePat: p.ValuePat, Op: p.Op})
 		case querylang.PredKeyExists:
 			kv = append(kv, KeyValueFilter{Key: p.Key, Value: "", KeyPat: p.KeyPat})
 		case querylang.PredValueExists:
@@ -1037,13 +1091,79 @@ func matchesSingleToken(raw []byte, token string) bool {
 	return bytes.Contains(bytes.ToLower(raw), []byte(tokenLower))
 }
 
+// compareValues compares two string values using the given operator.
+// Numeric comparison is tried first (both sides parse as float64).
+// Falls back to case-insensitive lexicographic comparison.
+func compareValues(a, b string, op querylang.CompareOp) bool {
+	switch op {
+	case querylang.OpEq:
+		return strings.EqualFold(a, b)
+	case querylang.OpNe:
+		return !strings.EqualFold(a, b)
+	}
+
+	// Try numeric comparison first.
+	af, aErr := strconv.ParseFloat(a, 64)
+	bf, bErr := strconv.ParseFloat(b, 64)
+	if aErr == nil && bErr == nil {
+		switch op {
+		case querylang.OpGt:
+			return af > bf
+		case querylang.OpGte:
+			return af >= bf
+		case querylang.OpLt:
+			return af < bf
+		case querylang.OpLte:
+			return af <= bf
+		}
+	}
+
+	// Fall back to case-insensitive lexicographic comparison.
+	cmp := strings.Compare(strings.ToLower(a), strings.ToLower(b))
+	switch op {
+	case querylang.OpGt:
+		return cmp > 0
+	case querylang.OpGte:
+		return cmp >= 0
+	case querylang.OpLt:
+		return cmp < 0
+	case querylang.OpLte:
+		return cmp <= 0
+	}
+	return false
+}
+
 // matchesSingleKV checks if a record contains a specific key=value pair
 // in either attributes or extracted message body pairs.
-// Supports glob patterns via keyPat/valPat (from PredicateExpr.KeyPat/ValuePat).
+// Supports glob patterns via keyPat/valPat (from PredicateExpr.KeyPat/ValuePat)
+// and comparison operators via pred.Op.
 func matchesSingleKV(attrs chunk.Attributes, raw []byte, pred *querylang.PredicateExpr) bool {
 	keyLower := strings.ToLower(pred.Key)
 	valueLower := strings.ToLower(pred.Value)
 
+	// For comparison operators other than eq, use compareValues.
+	if pred.Op != querylang.OpEq {
+		// Check attributes.
+		for k, v := range attrs {
+			if strings.EqualFold(k, pred.Key) && compareValues(v, pred.Value, pred.Op) {
+				return true
+			}
+		}
+		// Check message body.
+		pairs := tokenizer.CombinedExtract(raw, kvExtractors)
+		for _, kv := range pairs {
+			if kv.Key == keyLower && compareValues(kv.Value, pred.Value, pred.Op) {
+				return true
+			}
+		}
+		// Check structural JSON paths.
+		if matchJSONPathCompare(raw, pred.Key, pred.Value, pred.Op) {
+			return true
+		}
+		return false
+	}
+
+	// OpEq: original exact-match logic.
 	// Check attributes (case-insensitive).
 	for k, v := range attrs {
 		if matchStringOrPat(k, pred.Key, pred.KeyPat) && matchStringOrPat(v, pred.Value, pred.ValuePat) {
@@ -1171,6 +1291,23 @@ func matchJSONPathValue(raw []byte, key, valueLower string) bool {
 		}
 		if strings.ToLower(string(path)) == pathTarget &&
 			strings.ToLower(string(value)) == valueLower {
+			found = true
+		}
+	})
+	return found
+}
+
+// matchJSONPathCompare walks JSON in the raw record and checks if any path
+// matching the dotted key satisfies the comparison operator against the expected value.
+func matchJSONPathCompare(raw []byte, key, queryValue string, op querylang.CompareOp) bool {
+	pathTarget := dotToNull(strings.ToLower(key))
+	found := false
+	tokenizer.WalkJSON(raw, nil, func(path, value []byte) {
+		if found {
+			return
+		}
+		if strings.ToLower(string(path)) == pathTarget &&
+			compareValues(string(value), queryValue, op) {
 			found = true
 		}
 	})

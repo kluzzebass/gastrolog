@@ -10,6 +10,11 @@ type QueryTokenKind =
   | "lparen"
   | "rparen"
   | "eq"
+  | "ne" // !=
+  | "gt" // >
+  | "gte" // >=
+  | "lt" // <
+  | "lte" // <=
   | "star"
   | "glob" // bareword with glob metacharacters (*, ?, [)
   | "regex" // /pattern/
@@ -22,6 +27,7 @@ export type HighlightRole =
   | "directive-key" // key portion of a control arg (last, reverse, ...)
   | "key" // key in key=value predicate
   | "eq" // = sign
+  | "compare-op" // comparison operator (!=, >, >=, <, <=)
   | "value" // value in key=value predicate
   | "token" // bare search term
   | "quoted" // quoted string (standalone or as value)
@@ -98,6 +104,36 @@ export function lex(input: string): QueryToken[] {
     if (ch === "=") {
       tokens.push({ text: "=", pos, kind: "eq" });
       pos++;
+      continue;
+    }
+    if (ch === "!") {
+      if (pos + 1 < input.length && input[pos + 1] === "=") {
+        tokens.push({ text: "!=", pos, kind: "ne" });
+        pos += 2;
+      } else {
+        tokens.push({ text: "!", pos, kind: "error" });
+        pos++;
+      }
+      continue;
+    }
+    if (ch === ">") {
+      if (pos + 1 < input.length && input[pos + 1] === "=") {
+        tokens.push({ text: ">=", pos, kind: "gte" });
+        pos += 2;
+      } else {
+        tokens.push({ text: ">", pos, kind: "gt" });
+        pos++;
+      }
+      continue;
+    }
+    if (ch === "<") {
+      if (pos + 1 < input.length && input[pos + 1] === "=") {
+        tokens.push({ text: "<=", pos, kind: "lte" });
+        pos += 2;
+      } else {
+        tokens.push({ text: "<", pos, kind: "lt" });
+        pos++;
+      }
       continue;
     }
     if (ch === "*") {
@@ -240,7 +276,10 @@ function isBarewordChar(ch: string): boolean {
     ch !== "[" &&
     ch !== '"' &&
     ch !== "'" &&
-    ch !== "/"
+    ch !== "/" &&
+    ch !== ">" &&
+    ch !== "<" &&
+    ch !== "!"
   );
 }
 
@@ -252,7 +291,16 @@ function isGlobBarewordChar(ch: string): boolean {
   return isBarewordChar(ch) || ch === "?" || ch === "[";
 }
 
+function isCompareOpKind(kind: QueryTokenKind): boolean {
+  return kind === "eq" || kind === "ne" || kind === "gt" || kind === "gte" || kind === "lt" || kind === "lte";
+}
+
+function isValueKind(kind: QueryTokenKind): boolean {
+  return kind === "word" || kind === "glob" || kind === "star" || kind === "quoted";
+}
+
 // Phase 2: Post-pass — detect key=value sequences and classify roles.
+// Whitespace-tolerant: skips whitespace tokens when looking ahead for operator and value.
 function classify(raw: QueryToken[]): HighlightSpan[] {
   const spans: HighlightSpan[] = [];
 
@@ -260,61 +308,53 @@ function classify(raw: QueryToken[]): HighlightSpan[] {
   while (i < raw.length) {
     const tok = raw[i]!;
 
-    // Detect word/glob = (word|glob|star|quoted) patterns (with no whitespace around =)
-    if (
-      (tok.kind === "word" || tok.kind === "star" || tok.kind === "glob") &&
-      i + 2 < raw.length &&
-      raw[i + 1]!.kind === "eq" &&
-      (raw[i + 2]!.kind === "word" ||
-        raw[i + 2]!.kind === "glob" ||
-        raw[i + 2]!.kind === "star" ||
-        raw[i + 2]!.kind === "quoted")
-    ) {
-      const key = tok.text;
-      const eq = raw[i + 1]!;
-      const val = raw[i + 2]!;
+    // Try to detect key <op> value patterns (whitespace-tolerant lookahead).
+    if (tok.kind === "word" || tok.kind === "star" || tok.kind === "glob") {
+      // Skip whitespace to find operator.
+      let j = i + 1;
+      while (j < raw.length && raw[j]!.kind === "whitespace") j++;
+      const opTok = j < raw.length ? raw[j]! : null;
 
-      if (tok.kind === "word" && DIRECTIVES.has(key.toLowerCase())) {
-        // Directive: italic key, dim =, normal value
-        spans.push({ text: key, role: "directive-key" });
-        spans.push({ text: eq.text, role: "eq" });
-        spans.push({
-          text: val.text,
-          role:
-            val.kind === "quoted"
-              ? "quoted"
-              : val.kind === "star"
-                ? "star"
-                : val.kind === "glob"
-                  ? "glob"
-                  : "value",
-        });
-      } else {
-        // key=value predicate (key may be word, glob, or star)
-        spans.push({
-          text: key,
-          role:
-            tok.kind === "star"
-              ? "star"
-              : tok.kind === "glob"
-                ? "glob"
-                : "key",
-        });
-        spans.push({ text: eq.text, role: "eq" });
-        spans.push({
-          text: val.text,
-          role:
-            val.kind === "quoted"
-              ? "quoted"
-              : val.kind === "star"
-                ? "star"
-                : val.kind === "glob"
-                  ? "glob"
-                  : "value",
-        });
+      if (opTok && isCompareOpKind(opTok.kind)) {
+        // Skip whitespace to find value.
+        let k = j + 1;
+        while (k < raw.length && raw[k]!.kind === "whitespace") k++;
+        const valTok = k < raw.length ? raw[k]! : null;
+
+        if (valTok && isValueKind(valTok.kind)) {
+          const isEq = opTok.kind === "eq";
+          const isDirective = isEq && tok.kind === "word" && DIRECTIVES.has(tok.text.toLowerCase());
+          const opRole: HighlightRole = isEq ? "eq" : "compare-op";
+
+          // Emit all tokens from i through k (including intervening whitespace).
+          if (isDirective) {
+            spans.push({ text: tok.text, role: "directive-key" });
+          } else {
+            spans.push({
+              text: tok.text,
+              role: tok.kind === "star" ? "star" : tok.kind === "glob" ? "glob" : "key",
+            });
+          }
+          // Whitespace between key and op.
+          for (let w = i + 1; w < j; w++) {
+            spans.push({ text: raw[w]!.text, role: "whitespace" });
+          }
+          spans.push({ text: opTok.text, role: opRole });
+          // Whitespace between op and value.
+          for (let w = j + 1; w < k; w++) {
+            spans.push({ text: raw[w]!.text, role: "whitespace" });
+          }
+          spans.push({
+            text: valTok.text,
+            role: valTok.kind === "quoted" ? "quoted"
+              : valTok.kind === "star" ? "star"
+              : valTok.kind === "glob" ? "glob"
+              : "value",
+          });
+          i = k + 1;
+          continue;
+        }
       }
-      i += 3;
-      continue;
     }
 
     // Map remaining tokens to roles
@@ -331,6 +371,13 @@ function classify(raw: QueryToken[]): HighlightSpan[] {
         break;
       case "eq":
         spans.push({ text: tok.text, role: "eq" });
+        break;
+      case "ne":
+      case "gt":
+      case "gte":
+      case "lt":
+      case "lte":
+        spans.push({ text: tok.text, role: "compare-op" });
         break;
       case "star":
         spans.push({ text: tok.text, role: "star" });
@@ -370,7 +417,7 @@ function classify(raw: QueryToken[]): HighlightSpan[] {
 //   unary_expr = "NOT" unary_expr | primary
 //   primary    = "(" or_expr ")" | predicate
 //   predicate  = kv_triple | regex | token | quoted | star_pred
-//   kv_triple  = (key|directive-key) eq (value|quoted|star)
+//   kv_triple  = (key|directive-key) (eq|compare-op) (value|quoted|star)
 interface ValidateResult {
   spans: HighlightSpan[];
   errorMessage: string | null;
@@ -512,11 +559,12 @@ function validate(spans: HighlightSpan[]): ValidateResult {
 
     if (s.role === "key" || s.role === "directive-key") {
       advance(); // consume key
-      if (cur()?.role !== "eq") {
-        fail("expected '=' after key");
+      const op = cur();
+      if (!op || (op.role !== "eq" && op.role !== "compare-op")) {
+        fail("expected operator after key");
         return false;
       }
-      advance(); // consume eq
+      advance(); // consume eq or compare-op
       const v = cur();
       if (
         !v ||
@@ -525,7 +573,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
           v.role !== "star" &&
           v.role !== "glob")
       ) {
-        fail("expected value after '='");
+        fail(`expected value after '${op.text}'`);
         return false;
       }
       advance(); // consume value
@@ -535,8 +583,9 @@ function validate(spans: HighlightSpan[]): ValidateResult {
     if (s.role === "star") {
       const saved = pos;
       advance(); // consume *
-      if (cur()?.role === "eq") {
-        advance(); // consume eq
+      const op = cur();
+      if (op && (op.role === "eq" || op.role === "compare-op")) {
+        advance(); // consume operator
         const v = cur();
         if (
           !v ||
@@ -545,7 +594,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
             v.role !== "star" &&
             v.role !== "glob")
         ) {
-          fail("expected value after '*='");
+          fail(`expected value after '*${op.text}'`);
           return false;
         }
         advance(); // consume value
@@ -559,9 +608,10 @@ function validate(spans: HighlightSpan[]): ValidateResult {
     // Glob can be standalone (like a token) or as KV key (already classified)
     if (s.role === "glob") {
       advance(); // consume glob
-      // Check if it's a KV: glob=...
-      if (cur()?.role === "eq") {
-        advance(); // consume eq
+      // Check if it's a KV: glob op ...
+      const op = cur();
+      if (op && (op.role === "eq" || op.role === "compare-op")) {
+        advance(); // consume operator
         const v = cur();
         if (
           !v ||
@@ -570,14 +620,13 @@ function validate(spans: HighlightSpan[]): ValidateResult {
             v.role !== "star" &&
             v.role !== "glob")
         ) {
-          fail("expected value after '='");
+          fail(`expected value after '${op.text}'`);
           return false;
         }
         advance(); // consume value
         return true;
       }
       // Standalone glob predicate
-      // Restore to just after the glob (advance already consumed it)
       return true;
     }
 
