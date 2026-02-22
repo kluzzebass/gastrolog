@@ -157,7 +157,7 @@ func (s *StoreServer) GetStats(
 	}
 
 	resp.ProcessCpuPercent = sysmetrics.CPUPercent()
-	resp.ProcessMemoryBytes = sysmetrics.MemorySys()
+	resp.ProcessMemoryBytes = sysmetrics.MemoryInuse()
 
 	return connect.NewResponse(resp), nil
 }

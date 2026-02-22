@@ -51,13 +51,13 @@ func CPUPercent() float64 {
 	return pct
 }
 
-// MemorySys returns the total memory obtained from the OS by the Go
-// runtime, in bytes. This reflects current usage and decreases when
-// memory is released back to the OS.
-func MemorySys() int64 {
+// MemoryInuse returns the memory actively in use by the Go runtime, in
+// bytes. This is HeapInuse (live heap spans) plus StackInuse (goroutine
+// stacks), excluding virtual address space reserved but not committed.
+func MemoryInuse() int64 {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	return int64(m.Sys)
+	return int64(m.HeapInuse + m.StackInuse)
 }
 
 func getrusageTimes() (user, sys time.Duration) {
