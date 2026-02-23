@@ -552,16 +552,23 @@ export function SearchView() {
   const isPipelineResult = tableResult !== null;
   const queryIsPipeline = hasPipeOutsideQuotes(q);
 
-  // Auto-refresh polling for pipeline results.
+  // Auto-refresh polling for both pipeline and filter results.
   const [pollInterval, setPollInterval] = useState<number | null>(null);
 
   useEffect(() => {
-    if (!pollInterval || !isPipelineResult) return;
+    if (!pollInterval || isFollowMode) return;
     const id = setInterval(() => {
-      search(q, false, true);
+      search(q, false, false, true);
+      // Also refresh the volume histogram for filter queries.
+      if (!hasPipeOutsideQuotes(q)) {
+        const timechartExpr = q.trim()
+          ? `${q.trim()} | timechart 50 by level`
+          : `| timechart 50 by level`;
+        histogramSearch(timechartExpr, false, false, true);
+      }
     }, pollInterval);
     return () => clearInterval(id);
-  }, [pollInterval, isPipelineResult, q, search]);
+  }, [pollInterval, isFollowMode, q, search, histogramSearch]);
 
   // Clear poll interval when query changes or leaves pipeline mode.
   useEffect(() => {
@@ -953,6 +960,8 @@ export function SearchView() {
               displayRecords={displayRecords}
               followBufferSize={followBufferSize}
               onFollowBufferSizeChange={handleFollowBufferSizeChange}
+              pollInterval={pollInterval}
+              onPollIntervalChange={setPollInterval}
               onZoomOut={() => {
                 const anchor = selectedRecord?.writeTs?.toDate();
                 if (!anchor) return;

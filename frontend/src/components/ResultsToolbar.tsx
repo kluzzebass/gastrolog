@@ -1,4 +1,5 @@
 import { Record as ProtoRecord } from "../api/client";
+import { AutoRefreshControls } from "./AutoRefreshControls";
 import { ExportButton } from "./ExportButton";
 import { useThemeClass } from "../hooks/useThemeClass";
 
@@ -19,6 +20,8 @@ interface ResultsToolbarProps {
   displayRecords: ProtoRecord[];
   followBufferSize: number;
   onFollowBufferSizeChange: (size: number) => void;
+  pollInterval: number | null;
+  onPollIntervalChange: (ms: number | null) => void;
   onZoomOut: () => void;
 }
 
@@ -37,6 +40,8 @@ export function ResultsToolbar({
   displayRecords,
   followBufferSize,
   onFollowBufferSizeChange,
+  pollInterval,
+  onPollIntervalChange,
   onZoomOut,
 }: Readonly<ResultsToolbarProps>) {
   const c = useThemeClass(dark);
@@ -160,7 +165,16 @@ export function ResultsToolbar({
           </span>
         )}
       </div>
-      <ExportButton records={displayRecords} dark={dark} />
+      <div className="flex items-center gap-3">
+        {!isFollowMode && (
+          <AutoRefreshControls
+            pollInterval={pollInterval}
+            onPollIntervalChange={onPollIntervalChange}
+            dark={dark}
+          />
+        )}
+        <ExportButton records={displayRecords} dark={dark} />
+      </div>
     </div>
   );
 }

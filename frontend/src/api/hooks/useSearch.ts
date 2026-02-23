@@ -75,7 +75,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
   const abortRef = useRef<AbortController | null>(null);
 
   const search = useCallback(
-    async (queryStr: string, append = false, keepPrevious = false) => {
+    async (queryStr: string, append = false, keepPrevious = false, silent = false) => {
       // Cancel any in-flight request on new searches (not appends).
       if (abortRef.current) {
         if (!append) {
@@ -95,17 +95,21 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
       query.expression = queryStr;
       query.limit = BigInt(100);
 
-      setState((prev) => ({
-        ...prev,
-        isSearching: true,
-        error: null,
-        records: append || keepPrevious ? prev.records : [],
-        resumeToken: append ? prev.resumeToken : null,
-        // Only preserve tableResult on append (infinite scroll).
-        // keepPrevious preserves records for smooth transitions, but stale
-        // pipeline results must not bleed into a new non-pipeline search.
-        tableResult: append ? prev.tableResult : null,
-      }));
+      // Silent mode: don't touch state until the full response arrives.
+      // Used by poll/auto-refresh to avoid UI jank.
+      if (!silent) {
+        setState((prev) => ({
+          ...prev,
+          isSearching: true,
+          error: null,
+          records: append || keepPrevious ? prev.records : [],
+          resumeToken: append ? prev.resumeToken : null,
+          // Only preserve tableResult on append (infinite scroll).
+          // keepPrevious preserves records for smooth transitions, but stale
+          // pipeline results must not bleed into a new non-pipeline search.
+          tableResult: append ? prev.tableResult : null,
+        }));
+      }
 
       try {
         const allRecords: Record[] = append ? [...state.records] : [];
@@ -140,19 +144,24 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
             response.resumeToken.length > 0 ? response.resumeToken : null;
           hasMore = response.hasMore;
 
-          // Update state incrementally as records arrive
-          setState((prev) => ({
-            ...prev,
-            records: [...allRecords],
-            tableResult: null,
-            hasMore,
-            resumeToken: lastResumeToken,
-          }));
+          // In silent mode, buffer everything and swap at the end.
+          if (!silent) {
+            // Update state incrementally as records arrive
+            setState((prev) => ({
+              ...prev,
+              records: [...allRecords],
+              tableResult: null,
+              hasMore,
+              resumeToken: lastResumeToken,
+            }));
+          }
         }
 
         abortRef.current = null;
         setState((prev) => ({
           ...prev,
+          // In silent mode, this is the single atomic swap.
+          records: silent ? [...allRecords] : prev.records,
           isSearching: false,
           hasMore,
           resumeToken: lastResumeToken,
