@@ -119,8 +119,8 @@ func headOnlyLimit(ops []querylang.PipeOp) int {
 		switch o := op.(type) {
 		case *querylang.HeadOp:
 			headN = o.N
-		case *querylang.SortOp:
-			return 0 // sort requires all records
+		case *querylang.SortOp, *querylang.TailOp, *querylang.SliceOp:
+			return 0 // sort, tail, and slice require all records
 		case *querylang.WhereOp, *querylang.EvalOp, *querylang.RenameOp, *querylang.FieldsOp:
 			// these are fine
 		default:

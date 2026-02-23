@@ -147,6 +147,34 @@ The `head` operator keeps only the first N records or rows, discarding the rest.
 
 When used without `sort`, `head` can optimize the underlying scan to stop early.
 
+## Tail Operator
+
+The `tail` operator keeps only the last N records or rows, discarding everything before them.
+
+```
+* | tail 50
+```
+
+Combine `head` and `tail` to select a specific row range. For example, to get rows 12–54:
+
+```
+* | head 54 | tail 43
+```
+
+Tail is not supported in follow mode (it requires all records before producing output).
+
+## Slice Operator
+
+The `slice` operator selects a range of rows by position. Both arguments are 1-indexed and inclusive.
+
+```
+* | slice 12 54
+```
+
+This returns rows 12 through 54. Equivalent to `| head 54 | tail 43`, but without the mental math.
+
+Slice is not supported in follow mode.
+
 ## Rename Operator
 
 The `rename` operator changes field names. Multiple renames are comma-separated. The keyword `as` separates the old name from the new name.

@@ -107,6 +107,10 @@ func (p *parser) parsePipeOp() (PipeOp, error) {
 		return p.parseSortOp()
 	case "head":
 		return p.parseHeadOp()
+	case "tail":
+		return p.parseTailOp()
+	case "slice":
+		return p.parseSliceOp()
 	case "rename":
 		return p.parseRenameOp()
 	case "fields":
@@ -681,6 +685,70 @@ func (p *parser) parseHeadOp() (*HeadOp, error) {
 		return nil, err
 	}
 	return &HeadOp{N: n}, nil
+}
+
+// parseTailOp parses: "tail" NUMBER
+func (p *parser) parseTailOp() (*TailOp, error) {
+	if err := p.advance(); err != nil { // consume "tail"
+		return nil, err
+	}
+
+	if p.cur.Kind != TokWord || !isNumericLiteral(p.cur.Lit) {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected number after 'tail', got %s", p.cur.Lit)
+	}
+
+	var n int
+	if _, err := fmt.Sscanf(p.cur.Lit, "%d", &n); err != nil {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "invalid tail count: %s", p.cur.Lit)
+	}
+	if n <= 0 {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "tail count must be positive, got %d", n)
+	}
+
+	if err := p.advance(); err != nil { // consume number
+		return nil, err
+	}
+	return &TailOp{N: n}, nil
+}
+
+// parseSliceOp parses: "slice" START END (both 1-indexed, inclusive)
+func (p *parser) parseSliceOp() (*SliceOp, error) {
+	if err := p.advance(); err != nil { // consume "slice"
+		return nil, err
+	}
+
+	if p.cur.Kind != TokWord || !isNumericLiteral(p.cur.Lit) {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected start index after 'slice', got %s", p.cur.Lit)
+	}
+	var start int
+	if _, err := fmt.Sscanf(p.cur.Lit, "%d", &start); err != nil {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "invalid slice start: %s", p.cur.Lit)
+	}
+	if start <= 0 {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "slice start must be positive, got %d", start)
+	}
+	if err := p.advance(); err != nil { // consume start
+		return nil, err
+	}
+
+	if p.cur.Kind != TokWord || !isNumericLiteral(p.cur.Lit) {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected end index after slice start, got %s", p.cur.Lit)
+	}
+	var end int
+	if _, err := fmt.Sscanf(p.cur.Lit, "%d", &end); err != nil {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "invalid slice end: %s", p.cur.Lit)
+	}
+	if end <= 0 {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "slice end must be positive, got %d", end)
+	}
+	if end < start {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "slice end (%d) must be >= start (%d)", end, start)
+	}
+	if err := p.advance(); err != nil { // consume end
+		return nil, err
+	}
+
+	return &SliceOp{Start: start, End: end}, nil
 }
 
 // parseRenameOp parses: "rename" field "as" field ("," field "as" field)*

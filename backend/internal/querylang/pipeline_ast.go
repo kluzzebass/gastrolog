@@ -194,6 +194,29 @@ func (h *HeadOp) String() string {
 	return fmt.Sprintf("head %d", h.N)
 }
 
+// TailOp represents: tail N
+type TailOp struct {
+	N int
+}
+
+func (TailOp) pipeOp() {}
+
+func (t *TailOp) String() string {
+	return fmt.Sprintf("tail %d", t.N)
+}
+
+// SliceOp represents: slice START END (1-indexed, inclusive)
+type SliceOp struct {
+	Start int // first row to include (1-indexed)
+	End   int // last row to include (1-indexed, inclusive)
+}
+
+func (SliceOp) pipeOp() {}
+
+func (s *SliceOp) String() string {
+	return fmt.Sprintf("slice %d %d", s.Start, s.End)
+}
+
 // RenameOp represents: rename old as new (, old as new)*
 type RenameOp struct {
 	Renames []RenameMapping

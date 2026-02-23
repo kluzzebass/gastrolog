@@ -815,6 +815,37 @@ func TestParsePipelineHead(t *testing.T) {
 	}
 }
 
+func TestParsePipelineTail(t *testing.T) {
+	p, err := ParsePipeline("error | tail 5")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	ta, ok := p.Pipes[0].(*TailOp)
+	if !ok {
+		t.Fatalf("expected TailOp, got %T", p.Pipes[0])
+	}
+	if ta.N != 5 {
+		t.Errorf("expected N=5, got %d", ta.N)
+	}
+}
+
+func TestParsePipelineSlice(t *testing.T) {
+	p, err := ParsePipeline("error | slice 12 54")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	sl, ok := p.Pipes[0].(*SliceOp)
+	if !ok {
+		t.Fatalf("expected SliceOp, got %T", p.Pipes[0])
+	}
+	if sl.Start != 12 {
+		t.Errorf("expected Start=12, got %d", sl.Start)
+	}
+	if sl.End != 54 {
+		t.Errorf("expected End=54, got %d", sl.End)
+	}
+}
+
 func TestParsePipelineRename(t *testing.T) {
 	p, err := ParsePipeline("error | rename src as source, dst as destination")
 	if err != nil {
@@ -935,6 +966,14 @@ func TestParsePipelineNewOpsString(t *testing.T) {
 			"error | fields - debug",
 			"token(error) | fields - debug",
 		},
+		{
+			"error | tail 5",
+			"token(error) | tail 5",
+		},
+		{
+			"error | slice 12 54",
+			"token(error) | slice 12 54",
+		},
 	}
 
 	for _, tt := range tests {
@@ -964,6 +1003,16 @@ func TestParsePipelineNewOpsErrors(t *testing.T) {
 		{"head zero", "error | head 0"},
 		{"head negative", "error | head -1"},
 		{"head not number", "error | head abc"},
+		{"tail no number", "error | tail"},
+		{"tail zero", "error | tail 0"},
+		{"tail negative", "error | tail -1"},
+		{"tail not number", "error | tail abc"},
+		{"slice no args", "error | slice"},
+		{"slice one arg", "error | slice 5"},
+		{"slice zero start", "error | slice 0 10"},
+		{"slice end before start", "error | slice 10 5"},
+		{"slice not number start", "error | slice abc 10"},
+		{"slice not number end", "error | slice 5 abc"},
 		{"rename no as", "error | rename src"},
 		{"rename no new", "error | rename src as"},
 		{"fields no field", "error | fields"},

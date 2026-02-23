@@ -39,6 +39,10 @@ func applyRecordOps(it iter.Seq2[chunk.Record, error], ops []querylang.PipeOp) (
 			applyRecordSort(records, o)
 		case *querylang.HeadOp:
 			records = applyRecordHead(records, o)
+		case *querylang.TailOp:
+			records = applyRecordTail(records, o)
+		case *querylang.SliceOp:
+			records = applyRecordSlice(records, o)
 		case *querylang.RenameOp:
 			applyRecordRename(records, o)
 		case *querylang.FieldsOp:
@@ -110,6 +114,27 @@ func applyRecordHead(records []chunk.Record, op *querylang.HeadOp) []chunk.Recor
 	return records
 }
 
+// applyRecordTail keeps only the last N records.
+func applyRecordTail(records []chunk.Record, op *querylang.TailOp) []chunk.Record {
+	if len(records) > op.N {
+		return records[len(records)-op.N:]
+	}
+	return records
+}
+
+// applyRecordSlice keeps records from Start to End (1-indexed, inclusive).
+func applyRecordSlice(records []chunk.Record, op *querylang.SliceOp) []chunk.Record {
+	start := op.Start - 1 // convert to 0-indexed
+	end := op.End         // exclusive upper bound (End is inclusive, so +1-1=0)
+	if start >= len(records) {
+		return nil
+	}
+	if end > len(records) {
+		end = len(records)
+	}
+	return records[start:end]
+}
+
 // applyRecordRename renames keys in record Attrs.
 func applyRecordRename(records []chunk.Record, op *querylang.RenameOp) {
 	for i := range records {
@@ -168,6 +193,10 @@ func applyTableOps(table *TableResult, ops []querylang.PipeOp) (*TableResult, er
 			applyTableSort(table, o)
 		case *querylang.HeadOp:
 			applyTableHead(table, o)
+		case *querylang.TailOp:
+			applyTableTail(table, o)
+		case *querylang.SliceOp:
+			applyTableSlice(table, o)
 		case *querylang.RenameOp:
 			applyTableRename(table, o)
 		case *querylang.FieldsOp:
@@ -259,6 +288,27 @@ func applyTableHead(table *TableResult, op *querylang.HeadOp) {
 	if len(table.Rows) > op.N {
 		table.Rows = table.Rows[:op.N]
 	}
+}
+
+// applyTableTail keeps only the last N rows.
+func applyTableTail(table *TableResult, op *querylang.TailOp) {
+	if len(table.Rows) > op.N {
+		table.Rows = table.Rows[len(table.Rows)-op.N:]
+	}
+}
+
+// applyTableSlice keeps rows from Start to End (1-indexed, inclusive).
+func applyTableSlice(table *TableResult, op *querylang.SliceOp) {
+	start := op.Start - 1 // convert to 0-indexed
+	end := op.End         // exclusive upper bound
+	if start >= len(table.Rows) {
+		table.Rows = nil
+		return
+	}
+	if end > len(table.Rows) {
+		end = len(table.Rows)
+	}
+	table.Rows = table.Rows[start:end]
 }
 
 // applyTableRename renames columns.

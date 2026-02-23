@@ -165,7 +165,7 @@ func (s *QueryServer) Follow(
 	}
 
 	// Pipeline queries: allow non-aggregating streaming-compatible operators in
-	// follow mode. Reject stats (needs all records) and sort (not streaming).
+	// follow mode. Reject stats (needs all records), sort and tail (not streaming).
 	if pipeline != nil && len(pipeline.Pipes) > 0 {
 		for _, pipe := range pipeline.Pipes {
 			switch pipe.(type) {
@@ -175,6 +175,12 @@ func (s *QueryServer) Follow(
 			case *querylang.SortOp:
 				return connect.NewError(connect.CodeInvalidArgument,
 					fmt.Errorf("sort operator is not supported in follow mode"))
+			case *querylang.TailOp:
+				return connect.NewError(connect.CodeInvalidArgument,
+					fmt.Errorf("tail operator is not supported in follow mode"))
+			case *querylang.SliceOp:
+				return connect.NewError(connect.CodeInvalidArgument,
+					fmt.Errorf("slice operator is not supported in follow mode"))
 			}
 		}
 	}
@@ -405,7 +411,7 @@ func (s *QueryServer) GetSyntax(
 			"reverse", "start", "end", "last", "limit", "pos",
 			"source_start", "source_end", "ingest_start", "ingest_end",
 		},
-		PipeKeywords:  []string{"stats", "where", "eval", "sort", "head", "rename", "fields", "raw"},
+		PipeKeywords:  []string{"stats", "where", "eval", "sort", "head", "tail", "slice", "rename", "fields", "raw"},
 		PipeFunctions: []string{"count", "avg", "sum", "min", "max", "bin", "tonumber"},
 	}), nil
 }
