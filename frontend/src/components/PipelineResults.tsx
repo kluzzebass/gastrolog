@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { TableResult } from "../api/client";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { ExportButton } from "./ExportButton";
@@ -64,6 +65,84 @@ function AutoRefreshControls({
   );
 }
 
+function ViewModeToggle({
+  mode,
+  onModeChange,
+  dark,
+}: {
+  mode: "chart" | "table";
+  onModeChange: (mode: "chart" | "table") => void;
+  dark: boolean;
+}) {
+  const c = useThemeClass(dark);
+  const options = [
+    { key: "chart" as const, label: "Chart" },
+    { key: "table" as const, label: "Table" },
+  ];
+  return (
+    <div
+      className={`flex items-center rounded overflow-hidden border ${c(
+        "border-ink-border-subtle",
+        "border-light-border-subtle",
+      )}`}
+    >
+      {options.map((opt) => (
+        <button
+          key={opt.key}
+          onClick={() => onModeChange(opt.key)}
+          className={`px-2 py-1 text-[0.75em] font-mono transition-colors ${
+            mode === opt.key
+              ? `${c("bg-copper/20 text-copper", "bg-copper/20 text-copper")}`
+              : `${c(
+                  "text-text-muted hover:text-text-bright hover:bg-ink-hover",
+                  "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
+                )}`
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SingleValueDisplay({
+  value,
+  label,
+  dark,
+}: {
+  value: string;
+  label: string;
+  dark: boolean;
+}) {
+  const c = useThemeClass(dark);
+
+  // Format large numbers with locale separators.
+  const num = Number(value);
+  const formatted = !isNaN(num) ? num.toLocaleString() : value;
+
+  return (
+    <div className="flex flex-col items-center justify-center py-12 px-5">
+      <span
+        className={`font-mono text-[3.5em] font-semibold leading-tight ${c(
+          "text-copper",
+          "text-copper",
+        )}`}
+      >
+        {formatted}
+      </span>
+      <span
+        className={`font-body text-[1em] mt-2 ${c(
+          "text-text-muted",
+          "text-light-text-muted",
+        )}`}
+      >
+        {label}
+      </span>
+    </div>
+  );
+}
+
 interface PipelineResultsProps {
   tableResult: TableResult;
   dark: boolean;
@@ -82,6 +161,11 @@ export function PipelineResults({
   const c = useThemeClass(dark);
   const { columns, rows, truncated, resultType } = tableResult;
   const rowData = rows.map((r) => r.values);
+  const [viewMode, setViewMode] = useState<"chart" | "table">("chart");
+
+  // Single-value display: 1 column, 1 row, result type is "table" (not "raw").
+  const isSingleValue =
+    resultType === "table" && columns.length === 1 && rowData.length === 1;
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -111,6 +195,13 @@ export function PipelineResults({
           </span>
         </div>
         <div className="flex items-center gap-2">
+          {resultType === "timeseries" && (
+            <ViewModeToggle
+              mode={viewMode}
+              onModeChange={setViewMode}
+              dark={dark}
+            />
+          )}
           <AutoRefreshControls
             pollInterval={pollInterval}
             onPollIntervalChange={onPollIntervalChange}
@@ -133,9 +224,15 @@ export function PipelineResults({
         </div>
       )}
 
-      {/* Chart or table */}
+      {/* Chart, table, or single value */}
       <div className="flex-1 overflow-auto app-scroll">
-        {resultType === "timeseries" ? (
+        {isSingleValue ? (
+          <SingleValueDisplay
+            value={rowData[0]![0]!}
+            label={columns[0]!}
+            dark={dark}
+          />
+        ) : resultType === "timeseries" && viewMode === "chart" ? (
           <div className="px-5 py-4 relative">
             <TimeSeriesChart columns={columns} rows={rowData} dark={dark} />
           </div>

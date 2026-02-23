@@ -100,12 +100,107 @@ Most filters belong in the main query (left of the first `|`), where they benefi
 
 Multiple `where` operators can be chained — all conditions must match.
 
+## Eval Operator
+
+The `eval` operator computes new fields or overwrites existing ones using [expressions](help:scalar-functions). Computed fields are added to each record's attributes and are visible to subsequent operators.
+
+```
+* | eval duration_ms = duration / 1000
+```
+
+Multiple assignments are comma-separated. Later assignments can reference fields created by earlier ones:
+
+```
+* | eval bytes_total = bytes_sent + bytes_received, kb_total = bytes_total / 1024
+```
+
+Eval works both before and after `stats`:
+
+```
+* | stats sum(bytes) as total by host | eval total_mb = total / 1048576
+```
+
+## Sort Operator
+
+The `sort` operator orders records or table rows by one or more fields. Prefix a field name with `-` for descending order. Fields are compared numerically when possible, falling back to string comparison.
+
+```
+* | sort status
+* | sort -count, status
+```
+
+Combine with `head` for top-N queries:
+
+```
+level=error | stats count by host | sort -count | head 10
+```
+
+Sort is not supported in follow mode (it requires all records before producing output).
+
+## Head Operator
+
+The `head` operator keeps only the first N records or rows, discarding the rest.
+
+```
+* | head 100
+```
+
+When used without `sort`, `head` can optimize the underlying scan to stop early.
+
+## Rename Operator
+
+The `rename` operator changes field names. Multiple renames are comma-separated. The keyword `as` separates the old name from the new name.
+
+```
+* | rename src as source, dst as destination
+```
+
+Works on both records and table columns:
+
+```
+* | stats count by host | rename count as total
+```
+
+## Fields Operator
+
+The `fields` operator controls which fields are visible. In keep mode (default), only the listed fields are retained. In drop mode (prefix with `-`), the listed fields are removed.
+
+Keep mode — show only these fields:
+
+```
+* | fields host, level, message
+```
+
+Drop mode — remove these fields:
+
+```
+* | fields - debug, trace, pid
+```
+
+## Raw Operator
+
+The `raw` operator forces the pipeline output into a plain table — no charts, no single-value display. Useful for debugging what the pipeline actually produces.
+
+Without stats, `raw` converts records into a table with columns for timestamps, all attributes, and the raw message:
+
+```
+level=error | head 10 | raw
+```
+
+After stats, `raw` forces the result into a flat table even when `bin()` would normally produce a chart:
+
+```
+* | stats count by bin(5m) | raw
+```
+
 ## Result Display
 
-Pipeline results are shown in two formats depending on the query:
+Pipeline results are shown depending on the query:
 
+- **Record list** — when there is no `stats` operator. Records are displayed in the standard log entry view with any computed or filtered fields.
+- **Single value** — when `stats` produces a single column and single row (e.g. `| stats count`). Displayed as a large formatted number.
 - **Table** — when there is no `bin()` in the group clause. Displays rows and columns with sort and export controls.
-- **Time series chart** — when `bin()` is present. Hover to inspect individual data points.
+- **Time series chart** — when `bin()` is present. Hover to inspect individual data points. A Chart/Table toggle lets you switch to a raw data view.
 
 Results can be exported to CSV or JSON using the export button.
 
@@ -149,4 +244,28 @@ Bytes transferred per minute by direction:
 
 ```
 * | stats sum(bytes_sent) as sent, sum(bytes_received) as received by bin(5m)
+```
+
+Top 10 hosts by error count:
+
+```
+level=error | stats count by host | sort -count | head 10
+```
+
+Compute a derived field and filter on it:
+
+```
+* | eval duration_s = duration / 1000 | where duration_s>5
+```
+
+Show only specific fields:
+
+```
+service=api | fields host, method, status, duration
+```
+
+Rename columns for readability:
+
+```
+* | stats count, avg(duration) by method | rename count as requests, avg_duration as latency_ms
 ```

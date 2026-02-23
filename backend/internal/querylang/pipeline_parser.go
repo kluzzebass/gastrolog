@@ -1,6 +1,9 @@
 package querylang
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // Pipeline parser for pipe-based query transformation.
 //
@@ -97,6 +100,18 @@ func (p *parser) parsePipeOp() (PipeOp, error) {
 		return p.parseStatsOp()
 	case "where":
 		return p.parseWhereOp()
+	case "eval":
+		return p.parseEvalOp()
+	case "sort":
+		return p.parseSortOp()
+	case "head":
+		return p.parseHeadOp()
+	case "rename":
+		return p.parseRenameOp()
+	case "fields":
+		return p.parseFieldsOp()
+	case "raw":
+		return p.parseRawOp()
 	default:
 		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "unknown pipe operator: %s", p.cur.Lit)
 	}
@@ -558,6 +573,206 @@ func isNumericLiteral(s string) bool {
 		}
 	}
 	return true
+}
+
+// parseEvalOp parses: "eval" field "=" expr ("," field "=" expr)*
+func (p *parser) parseEvalOp() (*EvalOp, error) {
+	if err := p.advance(); err != nil { // consume "eval"
+		return nil, err
+	}
+
+	var assignments []EvalAssignment
+	for {
+		if p.cur.Kind != TokWord {
+			return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected field name in eval, got %s", p.cur.Kind)
+		}
+		field := p.cur.Lit
+		if err := p.advance(); err != nil { // consume field name
+			return nil, err
+		}
+
+		if p.cur.Kind != TokEq {
+			return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected '=' after field name '%s' in eval", field)
+		}
+		if err := p.advance(); err != nil { // consume "="
+			return nil, err
+		}
+
+		expr, err := p.parsePipeExpr()
+		if err != nil {
+			return nil, err
+		}
+		assignments = append(assignments, EvalAssignment{Field: field, Expr: expr})
+
+		if p.cur.Kind != TokComma {
+			break
+		}
+		if err := p.advance(); err != nil { // consume ","
+			return nil, err
+		}
+	}
+
+	if len(assignments) == 0 {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "eval requires at least one assignment")
+	}
+
+	return &EvalOp{Assignments: assignments}, nil
+}
+
+// parseSortOp parses: "sort" ["-"]field ("," ["-"]field)*
+func (p *parser) parseSortOp() (*SortOp, error) {
+	if err := p.advance(); err != nil { // consume "sort"
+		return nil, err
+	}
+
+	var fields []SortField
+	for {
+		desc := false
+		if p.cur.Kind == TokMinus {
+			desc = true
+			if err := p.advance(); err != nil { // consume "-"
+				return nil, err
+			}
+		}
+
+		if p.cur.Kind != TokWord {
+			return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected field name in sort, got %s", p.cur.Kind)
+		}
+		fields = append(fields, SortField{Name: p.cur.Lit, Desc: desc})
+		if err := p.advance(); err != nil { // consume field name
+			return nil, err
+		}
+
+		if p.cur.Kind != TokComma {
+			break
+		}
+		if err := p.advance(); err != nil { // consume ","
+			return nil, err
+		}
+	}
+
+	if len(fields) == 0 {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "sort requires at least one field")
+	}
+
+	return &SortOp{Fields: fields}, nil
+}
+
+// parseHeadOp parses: "head" NUMBER
+func (p *parser) parseHeadOp() (*HeadOp, error) {
+	if err := p.advance(); err != nil { // consume "head"
+		return nil, err
+	}
+
+	if p.cur.Kind != TokWord || !isNumericLiteral(p.cur.Lit) {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected number after 'head', got %s", p.cur.Lit)
+	}
+
+	var n int
+	if _, err := fmt.Sscanf(p.cur.Lit, "%d", &n); err != nil {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "invalid head count: %s", p.cur.Lit)
+	}
+	if n <= 0 {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "head count must be positive, got %d", n)
+	}
+
+	if err := p.advance(); err != nil { // consume number
+		return nil, err
+	}
+	return &HeadOp{N: n}, nil
+}
+
+// parseRenameOp parses: "rename" field "as" field ("," field "as" field)*
+func (p *parser) parseRenameOp() (*RenameOp, error) {
+	if err := p.advance(); err != nil { // consume "rename"
+		return nil, err
+	}
+
+	var renames []RenameMapping
+	for {
+		if p.cur.Kind != TokWord {
+			return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected field name in rename, got %s", p.cur.Kind)
+		}
+		old := p.cur.Lit
+		if err := p.advance(); err != nil { // consume old name
+			return nil, err
+		}
+
+		if p.cur.Kind != TokWord || strings.ToLower(p.cur.Lit) != "as" {
+			return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected 'as' after field name '%s' in rename", old)
+		}
+		if err := p.advance(); err != nil { // consume "as"
+			return nil, err
+		}
+
+		if p.cur.Kind != TokWord {
+			return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected new field name after 'as' in rename")
+		}
+		renames = append(renames, RenameMapping{Old: old, New: p.cur.Lit})
+		if err := p.advance(); err != nil { // consume new name
+			return nil, err
+		}
+
+		if p.cur.Kind != TokComma {
+			break
+		}
+		if err := p.advance(); err != nil { // consume ","
+			return nil, err
+		}
+	}
+
+	if len(renames) == 0 {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "rename requires at least one mapping")
+	}
+
+	return &RenameOp{Renames: renames}, nil
+}
+
+// parseFieldsOp parses: "fields" ["-"] field ("," field)*
+func (p *parser) parseFieldsOp() (*FieldsOp, error) {
+	if err := p.advance(); err != nil { // consume "fields"
+		return nil, err
+	}
+
+	drop := false
+	if p.cur.Kind == TokMinus {
+		drop = true
+		if err := p.advance(); err != nil { // consume "-"
+			return nil, err
+		}
+	}
+
+	var names []string
+	for {
+		if p.cur.Kind != TokWord {
+			return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected field name in fields, got %s", p.cur.Kind)
+		}
+		names = append(names, p.cur.Lit)
+		if err := p.advance(); err != nil { // consume field name
+			return nil, err
+		}
+
+		if p.cur.Kind != TokComma {
+			break
+		}
+		if err := p.advance(); err != nil { // consume ","
+			return nil, err
+		}
+	}
+
+	if len(names) == 0 {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "fields requires at least one field name")
+	}
+
+	return &FieldsOp{Names: names, Drop: drop}, nil
+}
+
+// parseRawOp parses: "raw" (no arguments).
+func (p *parser) parseRawOp() (*RawOp, error) {
+	if err := p.advance(); err != nil { // consume "raw"
+		return nil, err
+	}
+	return &RawOp{}, nil
 }
 
 // checkDuplicateAliases validates that no two aggregations produce the same

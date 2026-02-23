@@ -625,3 +625,147 @@ describe("pipe syntax: hasPipeline flag", () => {
     expect(r.hasPipeline).toBe(false);
   });
 });
+
+describe("new pipe operators: classification", () => {
+  test("eval keyword", () => {
+    const result = spans("error | eval ms = duration / 1000");
+    expect(result).toContainEqual(["eval", "pipe-keyword"]);
+  });
+
+  test("eval = sign", () => {
+    const result = spans("error | eval ms = duration / 1000");
+    expect(result).toContainEqual(["=", "eq"]);
+  });
+
+  test("sort keyword", () => {
+    const result = spans("error | sort -count");
+    expect(result).toContainEqual(["sort", "pipe-keyword"]);
+  });
+
+  test("head keyword", () => {
+    const result = spans("error | head 10");
+    expect(result).toContainEqual(["head", "pipe-keyword"]);
+  });
+
+  test("rename keyword with as", () => {
+    const result = spans("error | rename src as source");
+    expect(result).toContainEqual(["rename", "pipe-keyword"]);
+    expect(result).toContainEqual(["as", "pipe-keyword"]);
+  });
+
+  test("fields keyword", () => {
+    const result = spans("error | fields host, level");
+    expect(result).toContainEqual(["fields", "pipe-keyword"]);
+  });
+});
+
+describe("new pipe operators: validation (valid)", () => {
+  const valid = [
+    "error | eval ms = duration / 1000",
+    "error | eval a = x + 1, b = y * 2",
+    "error | sort status",
+    "error | sort -count, status",
+    "error | head 10",
+    "error | head 1",
+    "error | rename src as source",
+    "error | rename src as source, dst as destination",
+    "error | fields host, level, message",
+    "error | fields - debug, trace",
+    "error | eval ms = duration / 1000 | sort -ms | head 5",
+    "error | stats count by status | sort -count | head 10",
+    "error | stats count by host | rename count as total",
+    "error | stats count, avg(duration) by method | fields method, count",
+  ];
+
+  for (const q of valid) {
+    test(JSON.stringify(q), () => {
+      const result = tokenize(q);
+      if (result.hasErrors) {
+        throw new Error(`Expected no errors for "${q}", got: ${result.errorMessage}`);
+      }
+    });
+  }
+});
+
+describe("new pipe operators: validation (invalid)", () => {
+  test("eval without assignment", () => {
+    const r = tokenize("error | eval");
+    expect(r.hasErrors).toBe(true);
+  });
+
+  test("eval without equals", () => {
+    const r = tokenize("error | eval x");
+    expect(r.hasErrors).toBe(true);
+  });
+
+  test("sort without field", () => {
+    const r = tokenize("error | sort");
+    expect(r.hasErrors).toBe(true);
+  });
+
+  test("head without number", () => {
+    const r = tokenize("error | head");
+    expect(r.hasErrors).toBe(true);
+  });
+
+  test("head with non-number", () => {
+    const r = tokenize("error | head abc");
+    expect(r.hasErrors).toBe(true);
+  });
+
+  test("rename without as", () => {
+    const r = tokenize("error | rename src");
+    expect(r.hasErrors).toBe(true);
+  });
+
+  test("rename without new name", () => {
+    const r = tokenize("error | rename src as");
+    expect(r.hasErrors).toBe(true);
+  });
+
+  test("fields without field name", () => {
+    const r = tokenize("error | fields");
+    expect(r.hasErrors).toBe(true);
+  });
+});
+
+describe("raw operator", () => {
+  test("raw keyword classified", () => {
+    const result = spans("error | raw");
+    expect(result).toContainEqual(["raw", "pipe-keyword"]);
+  });
+
+  test("raw validates", () => {
+    const r = tokenize("error | raw");
+    expect(r.hasErrors).toBe(false);
+  });
+
+  test("raw after stats validates", () => {
+    const r = tokenize("error | stats count by bin(5m) | raw");
+    expect(r.hasErrors).toBe(false);
+  });
+
+  test("raw with other ops validates", () => {
+    const r = tokenize("error | eval ms = duration / 1000 | raw");
+    expect(r.hasErrors).toBe(false);
+  });
+
+  test("raw roundtrip", () => {
+    roundtrip("error | raw");
+    roundtrip("error | stats count | raw");
+  });
+});
+
+describe("new pipe operators: roundtrip", () => {
+  const cases = [
+    "error | eval ms = duration / 1000",
+    "error | sort -count, status",
+    "error | head 10",
+    "error | rename src as source, dst as destination",
+    "error | fields host, level, message",
+    "error | fields - debug, trace",
+  ];
+  for (const input of cases) {
+    test(`roundtrip: ${JSON.stringify(input)}`, () => roundtrip(input));
+  }
+});

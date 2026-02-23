@@ -55,15 +55,29 @@ func (s *QueryServer) Search(
 		return connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	// Pipeline query: run aggregation and return table result.
+	// Pipeline query: run and return table or records.
 	if pipeline != nil && len(pipeline.Pipes) > 0 {
 		result, err := eng.RunPipeline(ctx, q, pipeline)
 		if err != nil {
 			return connect.NewError(connect.CodeInternal, err)
 		}
-		return stream.Send(&apiv1.SearchResponse{
-			TableResult: tableResultToProto(result, pipeline),
-		})
+		if result.Table != nil {
+			return stream.Send(&apiv1.SearchResponse{
+				TableResult: tableResultToProto(result.Table, pipeline),
+			})
+		}
+		// Non-aggregating pipeline: stream records.
+		batch := make([]*apiv1.Record, 0, 100)
+		for _, rec := range result.Records {
+			batch = append(batch, recordToProto(rec))
+			if len(batch) >= 100 {
+				if err := stream.Send(&apiv1.SearchResponse{Records: batch, HasMore: true}); err != nil {
+					return err
+				}
+				batch = batch[:0]
+			}
+		}
+		return stream.Send(&apiv1.SearchResponse{Records: batch})
 	}
 
 	// Clamp query limit to server-configured max.
@@ -150,10 +164,19 @@ func (s *QueryServer) Follow(
 		return connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	// Pipeline queries are not supported in follow mode.
+	// Pipeline queries: allow non-aggregating streaming-compatible operators in
+	// follow mode. Reject stats (needs all records) and sort (not streaming).
 	if pipeline != nil && len(pipeline.Pipes) > 0 {
-		return connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("pipeline operators (stats, where) are not supported in follow mode"))
+		for _, pipe := range pipeline.Pipes {
+			switch pipe.(type) {
+			case *querylang.StatsOp:
+				return connect.NewError(connect.CodeInvalidArgument,
+					fmt.Errorf("stats operator is not supported in follow mode"))
+			case *querylang.SortOp:
+				return connect.NewError(connect.CodeInvalidArgument,
+					fmt.Errorf("sort operator is not supported in follow mode"))
+			}
+		}
 	}
 
 	// Use Follow which continuously polls for new records.
@@ -382,7 +405,7 @@ func (s *QueryServer) GetSyntax(
 			"reverse", "start", "end", "last", "limit", "pos",
 			"source_start", "source_end", "ingest_start", "ingest_end",
 		},
-		PipeKeywords:  []string{"stats", "where"},
+		PipeKeywords:  []string{"stats", "where", "eval", "sort", "head", "rename", "fields", "raw"},
 		PipeFunctions: []string{"count", "avg", "sum", "min", "max", "bin", "tonumber"},
 	}), nil
 }
@@ -603,9 +626,14 @@ func tableResultToProto(result *query.TableResult, pipeline *querylang.Pipeline)
 		rows[i] = &apiv1.TableRow{Values: row}
 	}
 
-	// Determine result type from pipeline: timeseries if bin() is present.
+	// Determine result type from pipeline: timeseries if bin() is present,
+	// but raw forces plain table.
 	resultType := "table"
+	hasRaw := false
 	for _, pipe := range pipeline.Pipes {
+		if _, ok := pipe.(*querylang.RawOp); ok {
+			hasRaw = true
+		}
 		if stats, ok := pipe.(*querylang.StatsOp); ok {
 			for _, g := range stats.Groups {
 				if g.Bin != nil {
@@ -614,6 +642,9 @@ func tableResultToProto(result *query.TableResult, pipeline *querylang.Pipeline)
 				}
 			}
 		}
+	}
+	if hasRaw {
+		resultType = "raw"
 	}
 
 	return &apiv1.TableResult{

@@ -81,7 +81,7 @@ export const DEFAULT_SYNTAX: SyntaxSets = {
     "reverse", "start", "end", "last", "limit", "pos",
     "source_start", "source_end", "ingest_start", "ingest_end",
   ]),
-  pipeKeywords: new Set(["stats", "where"]),
+  pipeKeywords: new Set(["stats", "where", "eval", "sort", "head", "rename", "fields", "raw"]),
   pipeFunctions: new Set([
     "count", "avg", "sum", "min", "max", "bin", "tonumber",
     // Scalar functions.
@@ -523,6 +523,15 @@ function classifyPipeSegment(tokens: QueryToken[], syntax: SyntaxSets): Highligh
         if (isFilterKeyword) {
           // Everything after "where" is a filter expression.
           spans.push(...classifyFilter(tokens.slice(i), syntax));
+        } else if (keyword === "eval") {
+          // eval: field = expr, field = expr, ...
+          spans.push(...classifyEvalArgs(tokens.slice(i), syntax));
+        } else if (keyword === "rename") {
+          // rename: field as field, field as field, ...
+          spans.push(...classifyRenameArgs(tokens.slice(i)));
+        } else if (keyword === "sort" || keyword === "head" || keyword === "fields") {
+          // sort/head/fields: tokens with - as punctuation
+          spans.push(...classifySimplePipeArgs(tokens.slice(i)));
         } else {
           // Everything after "stats" (or similar) is stats arguments.
           spans.push(...classifyStatsArgs(tokens.slice(i), syntax));
@@ -544,6 +553,91 @@ function classifyPipeSegment(tokens: QueryToken[], syntax: SyntaxSets): Highligh
     }
   } else {
     for (const tok of tokens) {
+      spans.push(mapTokenToRole(tok));
+    }
+  }
+
+  return spans;
+}
+
+// Classify eval arguments: field = expr, field = expr, ...
+// Fields before = are "token", = is "eq", expressions use classifyStatsArgs.
+function classifyEvalArgs(tokens: QueryToken[], syntax: SyntaxSets): HighlightSpan[] {
+  const spans: HighlightSpan[] = [];
+
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i]!;
+
+    if (tok.kind === "whitespace") {
+      spans.push({ text: tok.text, role: "whitespace" });
+      continue;
+    }
+
+    if (tok.kind === "comma") {
+      spans.push({ text: tok.text, role: "comma" });
+      continue;
+    }
+
+    if (tok.kind === "eq") {
+      spans.push({ text: tok.text, role: "eq" });
+      continue;
+    }
+
+    // After = sign, everything until next comma or end is an expression.
+    // Delegate to classifyStatsArgs for expression highlighting.
+    if (tok.kind === "word" || tok.kind === "quoted") {
+      // Check if this might be a field name followed by =.
+      let j = i + 1;
+      while (j < tokens.length && tokens[j]!.kind === "whitespace") j++;
+      if (j < tokens.length && tokens[j]!.kind === "eq") {
+        // Field name before =.
+        spans.push({ text: tok.text, role: "token" });
+        continue;
+      }
+    }
+
+    // Expression part — use stats args classifier for function calls etc.
+    spans.push(...classifyStatsArgs(tokens.slice(i, i + 1), syntax));
+  }
+
+  return spans;
+}
+
+// Classify rename arguments: field as field, field as field, ...
+function classifyRenameArgs(tokens: QueryToken[]): HighlightSpan[] {
+  const spans: HighlightSpan[] = [];
+
+  for (const tok of tokens) {
+    if (tok.kind === "whitespace") {
+      spans.push({ text: tok.text, role: "whitespace" });
+    } else if (tok.kind === "comma") {
+      spans.push({ text: tok.text, role: "comma" });
+    } else if (tok.kind === "word" && tok.text.toLowerCase() === "as") {
+      spans.push({ text: tok.text, role: "pipe-keyword" });
+    } else if (tok.kind === "word") {
+      spans.push({ text: tok.text, role: "token" });
+    } else {
+      spans.push(mapTokenToRole(tok));
+    }
+  }
+
+  return spans;
+}
+
+// Classify simple pipe arguments (sort, head, fields): tokens with - as punctuation.
+function classifySimplePipeArgs(tokens: QueryToken[]): HighlightSpan[] {
+  const spans: HighlightSpan[] = [];
+
+  for (const tok of tokens) {
+    if (tok.kind === "whitespace") {
+      spans.push({ text: tok.text, role: "whitespace" });
+    } else if (tok.kind === "comma") {
+      spans.push({ text: tok.text, role: "comma" });
+    } else if (tok.kind === "word" && tok.text === "-") {
+      spans.push({ text: tok.text, role: "compare-op" });
+    } else if (tok.kind === "word") {
+      spans.push({ text: tok.text, role: "token" });
+    } else {
       spans.push(mapTokenToRole(tok));
     }
   }
@@ -997,6 +1091,24 @@ function validate(spans: HighlightSpan[]): ValidateResult {
       case "where":
         parseWhereOp();
         return;
+      case "eval":
+        parseEvalOp();
+        return;
+      case "sort":
+        parseSortOp();
+        return;
+      case "head":
+        parseHeadOp();
+        return;
+      case "rename":
+        parseRenameOp();
+        return;
+      case "fields":
+        parseFieldsOp();
+        return;
+      case "raw":
+        // raw takes no arguments — nothing to parse.
+        return;
       default:
         fail(`unknown pipe operator '${s.text}'`);
         return;
@@ -1224,6 +1336,128 @@ function validate(spans: HighlightSpan[]): ValidateResult {
       return;
     }
     parseOrExpr();
+  }
+
+  // Parse eval: field = expr (, field = expr)*
+  function parseEvalOp(): void {
+    parseEvalAssignment();
+    if (errorAt >= 0) return;
+    while (cur()?.role === "comma") {
+      advance(); // consume ","
+      parseEvalAssignment();
+      if (errorAt >= 0) return;
+    }
+  }
+
+  function parseEvalAssignment(): void {
+    const s = cur();
+    if (!s || s.role !== "token") {
+      fail("expected field name in eval");
+      return;
+    }
+    advance(); // consume field name
+    if (cur()?.role !== "eq") {
+      fail("expected '=' after field name in eval");
+      return;
+    }
+    advance(); // consume "="
+    parsePipeExpr();
+  }
+
+  // Parse sort: [-]field (, [-]field)*
+  function parseSortOp(): void {
+    parseSortField();
+    if (errorAt >= 0) return;
+    while (cur()?.role === "comma") {
+      advance(); // consume ","
+      parseSortField();
+      if (errorAt >= 0) return;
+    }
+  }
+
+  function parseSortField(): void {
+    // Optional leading "-" for descending.
+    if (cur()?.role === "compare-op" && cur()!.text === "-") {
+      advance(); // consume "-"
+    } else if (cur()?.role === "token" && cur()!.text === "-") {
+      advance(); // consume "-"
+    }
+    const s = cur();
+    if (!s || s.role !== "token") {
+      fail("expected field name in sort");
+      return;
+    }
+    advance(); // consume field name
+  }
+
+  // Parse head: NUMBER
+  function parseHeadOp(): void {
+    const s = cur();
+    if (!s || s.role !== "token") {
+      fail("expected number after 'head'");
+      return;
+    }
+    if (!/^\d+$/.test(s.text)) {
+      fail("expected positive integer after 'head'");
+      return;
+    }
+    advance(); // consume number
+  }
+
+  // Parse rename: field as field (, field as field)*
+  function parseRenameOp(): void {
+    parseRenameMapping();
+    if (errorAt >= 0) return;
+    while (cur()?.role === "comma") {
+      advance(); // consume ","
+      parseRenameMapping();
+      if (errorAt >= 0) return;
+    }
+  }
+
+  function parseRenameMapping(): void {
+    const s = cur();
+    if (!s || s.role !== "token") {
+      fail("expected field name in rename");
+      return;
+    }
+    advance(); // consume old name
+    if (cur()?.role !== "pipe-keyword" || cur()!.text.toLowerCase() !== "as") {
+      fail("expected 'as' after field name in rename");
+      return;
+    }
+    advance(); // consume "as"
+    const n = cur();
+    if (!n || n.role !== "token") {
+      fail("expected new field name after 'as' in rename");
+      return;
+    }
+    advance(); // consume new name
+  }
+
+  // Parse fields: [-] field (, field)*
+  function parseFieldsOp(): void {
+    // Optional leading "-" for drop mode.
+    if (cur()?.role === "compare-op" && cur()!.text === "-") {
+      advance(); // consume "-"
+    } else if (cur()?.role === "token" && cur()!.text === "-") {
+      advance(); // consume "-"
+    }
+    const s = cur();
+    if (!s || s.role !== "token") {
+      fail("expected field name in fields");
+      return;
+    }
+    advance(); // consume field name
+    while (cur()?.role === "comma") {
+      advance(); // consume ","
+      const f = cur();
+      if (!f || f.role !== "token") {
+        fail("expected field name in fields");
+        return;
+      }
+      advance(); // consume field name
+    }
   }
 
   parsePipeline();

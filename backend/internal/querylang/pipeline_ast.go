@@ -137,6 +137,111 @@ func (b *BinExpr) String() string {
 	return fmt.Sprintf("bin(%s)", b.Duration)
 }
 
+// EvalOp represents: eval field = expr (, field = expr)*
+type EvalOp struct {
+	Assignments []EvalAssignment
+}
+
+// EvalAssignment is a single field = expression assignment.
+type EvalAssignment struct {
+	Field string
+	Expr  PipeExpr
+}
+
+func (EvalOp) pipeOp() {}
+
+func (e *EvalOp) String() string {
+	parts := make([]string, len(e.Assignments))
+	for i, a := range e.Assignments {
+		parts[i] = a.Field + " = " + a.Expr.String()
+	}
+	return "eval " + strings.Join(parts, ", ")
+}
+
+// SortOp represents: sort [-]field (, [-]field)*
+type SortOp struct {
+	Fields []SortField
+}
+
+// SortField is a single sort field with optional descending flag.
+type SortField struct {
+	Name string
+	Desc bool
+}
+
+func (SortOp) pipeOp() {}
+
+func (s *SortOp) String() string {
+	parts := make([]string, len(s.Fields))
+	for i, f := range s.Fields {
+		if f.Desc {
+			parts[i] = "-" + f.Name
+		} else {
+			parts[i] = f.Name
+		}
+	}
+	return "sort " + strings.Join(parts, ", ")
+}
+
+// HeadOp represents: head N
+type HeadOp struct {
+	N int
+}
+
+func (HeadOp) pipeOp() {}
+
+func (h *HeadOp) String() string {
+	return fmt.Sprintf("head %d", h.N)
+}
+
+// RenameOp represents: rename old as new (, old as new)*
+type RenameOp struct {
+	Renames []RenameMapping
+}
+
+// RenameMapping is a single old → new rename.
+type RenameMapping struct {
+	Old string
+	New string
+}
+
+func (RenameOp) pipeOp() {}
+
+func (r *RenameOp) String() string {
+	parts := make([]string, len(r.Renames))
+	for i, m := range r.Renames {
+		parts[i] = m.Old + " as " + m.New
+	}
+	return "rename " + strings.Join(parts, ", ")
+}
+
+// FieldsOp represents: fields [-] field (, field)*
+// If Drop is true, the listed fields are removed; otherwise only they are kept.
+type FieldsOp struct {
+	Names []string
+	Drop  bool
+}
+
+func (FieldsOp) pipeOp() {}
+
+func (f *FieldsOp) String() string {
+	prefix := "fields "
+	if f.Drop {
+		prefix = "fields - "
+	}
+	return prefix + strings.Join(f.Names, ", ")
+}
+
+// RawOp represents: raw
+// Forces the pipeline result into a flat table — no charts, no single-value display.
+// For non-aggregating pipelines, converts records to a table.
+// For post-stats pipelines, forces resultType to "table".
+type RawOp struct{}
+
+func (RawOp) pipeOp() {}
+
+func (RawOp) String() string { return "raw" }
+
 // PipeExpr is the interface for expressions used in pipe operators.
 // These are distinct from filter Expr — they represent computed values,
 // not boolean search predicates.

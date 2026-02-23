@@ -728,6 +728,287 @@ func TestParsePipelineRealWorld(t *testing.T) {
 	}
 }
 
+// --- New operator tests ---
+
+func TestParsePipelineEval(t *testing.T) {
+	p, err := ParsePipeline("error | eval duration_ms = duration / 1000")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	if len(p.Pipes) != 1 {
+		t.Fatalf("expected 1 pipe, got %d", len(p.Pipes))
+	}
+	ev, ok := p.Pipes[0].(*EvalOp)
+	if !ok {
+		t.Fatalf("expected EvalOp, got %T", p.Pipes[0])
+	}
+	if len(ev.Assignments) != 1 {
+		t.Fatalf("expected 1 assignment, got %d", len(ev.Assignments))
+	}
+	if ev.Assignments[0].Field != "duration_ms" {
+		t.Errorf("expected field 'duration_ms', got %q", ev.Assignments[0].Field)
+	}
+	arith, ok := ev.Assignments[0].Expr.(*ArithExpr)
+	if !ok || arith.Op != ArithDiv {
+		t.Errorf("expected ArithDiv expression, got %T", ev.Assignments[0].Expr)
+	}
+}
+
+func TestParsePipelineEvalMultiple(t *testing.T) {
+	p, err := ParsePipeline("error | eval a = x + 1, b = y * 2")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	ev := p.Pipes[0].(*EvalOp)
+	if len(ev.Assignments) != 2 {
+		t.Fatalf("expected 2 assignments, got %d", len(ev.Assignments))
+	}
+	if ev.Assignments[0].Field != "a" || ev.Assignments[1].Field != "b" {
+		t.Errorf("unexpected fields: %s, %s", ev.Assignments[0].Field, ev.Assignments[1].Field)
+	}
+}
+
+func TestParsePipelineSort(t *testing.T) {
+	p, err := ParsePipeline("error | sort status")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	s, ok := p.Pipes[0].(*SortOp)
+	if !ok {
+		t.Fatalf("expected SortOp, got %T", p.Pipes[0])
+	}
+	if len(s.Fields) != 1 {
+		t.Fatalf("expected 1 field, got %d", len(s.Fields))
+	}
+	if s.Fields[0].Name != "status" || s.Fields[0].Desc {
+		t.Errorf("expected ascending 'status', got %+v", s.Fields[0])
+	}
+}
+
+func TestParsePipelineSortDesc(t *testing.T) {
+	p, err := ParsePipeline("error | sort -count, status")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	s := p.Pipes[0].(*SortOp)
+	if len(s.Fields) != 2 {
+		t.Fatalf("expected 2 fields, got %d", len(s.Fields))
+	}
+	if s.Fields[0].Name != "count" || !s.Fields[0].Desc {
+		t.Errorf("expected descending 'count', got %+v", s.Fields[0])
+	}
+	if s.Fields[1].Name != "status" || s.Fields[1].Desc {
+		t.Errorf("expected ascending 'status', got %+v", s.Fields[1])
+	}
+}
+
+func TestParsePipelineHead(t *testing.T) {
+	p, err := ParsePipeline("error | head 10")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	h, ok := p.Pipes[0].(*HeadOp)
+	if !ok {
+		t.Fatalf("expected HeadOp, got %T", p.Pipes[0])
+	}
+	if h.N != 10 {
+		t.Errorf("expected N=10, got %d", h.N)
+	}
+}
+
+func TestParsePipelineRename(t *testing.T) {
+	p, err := ParsePipeline("error | rename src as source, dst as destination")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	r, ok := p.Pipes[0].(*RenameOp)
+	if !ok {
+		t.Fatalf("expected RenameOp, got %T", p.Pipes[0])
+	}
+	if len(r.Renames) != 2 {
+		t.Fatalf("expected 2 renames, got %d", len(r.Renames))
+	}
+	if r.Renames[0].Old != "src" || r.Renames[0].New != "source" {
+		t.Errorf("rename 0: expected src → source, got %+v", r.Renames[0])
+	}
+	if r.Renames[1].Old != "dst" || r.Renames[1].New != "destination" {
+		t.Errorf("rename 1: expected dst → destination, got %+v", r.Renames[1])
+	}
+}
+
+func TestParsePipelineFieldsKeep(t *testing.T) {
+	p, err := ParsePipeline("error | fields host, level, message")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	f, ok := p.Pipes[0].(*FieldsOp)
+	if !ok {
+		t.Fatalf("expected FieldsOp, got %T", p.Pipes[0])
+	}
+	if f.Drop {
+		t.Error("expected keep mode, got drop")
+	}
+	if len(f.Names) != 3 {
+		t.Fatalf("expected 3 fields, got %d", len(f.Names))
+	}
+}
+
+func TestParsePipelineFieldsDrop(t *testing.T) {
+	p, err := ParsePipeline("error | fields - debug, trace")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	f := p.Pipes[0].(*FieldsOp)
+	if !f.Drop {
+		t.Error("expected drop mode, got keep")
+	}
+	if len(f.Names) != 2 {
+		t.Fatalf("expected 2 fields, got %d", len(f.Names))
+	}
+}
+
+func TestParsePipelineChained(t *testing.T) {
+	// Test multiple new operators chained together.
+	p, err := ParsePipeline("error | eval ms = duration / 1000 | sort -ms | head 5")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	if len(p.Pipes) != 3 {
+		t.Fatalf("expected 3 pipes, got %d", len(p.Pipes))
+	}
+	if _, ok := p.Pipes[0].(*EvalOp); !ok {
+		t.Errorf("pipe 0: expected EvalOp, got %T", p.Pipes[0])
+	}
+	if _, ok := p.Pipes[1].(*SortOp); !ok {
+		t.Errorf("pipe 1: expected SortOp, got %T", p.Pipes[1])
+	}
+	if _, ok := p.Pipes[2].(*HeadOp); !ok {
+		t.Errorf("pipe 2: expected HeadOp, got %T", p.Pipes[2])
+	}
+}
+
+func TestParsePipelinePostStats(t *testing.T) {
+	// Operators after stats work on table data.
+	p, err := ParsePipeline("error | stats count by status | sort -count | head 10")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	if len(p.Pipes) != 3 {
+		t.Fatalf("expected 3 pipes, got %d", len(p.Pipes))
+	}
+	if _, ok := p.Pipes[0].(*StatsOp); !ok {
+		t.Errorf("pipe 0: expected StatsOp, got %T", p.Pipes[0])
+	}
+	if _, ok := p.Pipes[1].(*SortOp); !ok {
+		t.Errorf("pipe 1: expected SortOp, got %T", p.Pipes[1])
+	}
+	if _, ok := p.Pipes[2].(*HeadOp); !ok {
+		t.Errorf("pipe 2: expected HeadOp, got %T", p.Pipes[2])
+	}
+}
+
+func TestParsePipelineNewOpsString(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{
+			"error | eval ms = duration / 1000",
+			"token(error) | eval ms = (duration / 1000)",
+		},
+		{
+			"error | sort -count, status",
+			"token(error) | sort -count, status",
+		},
+		{
+			"error | head 10",
+			"token(error) | head 10",
+		},
+		{
+			"error | rename src as source",
+			"token(error) | rename src as source",
+		},
+		{
+			"error | fields host, level",
+			"token(error) | fields host, level",
+		},
+		{
+			"error | fields - debug",
+			"token(error) | fields - debug",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			p, err := ParsePipeline(tt.input)
+			if err != nil {
+				t.Fatalf("ParsePipeline(%q) error: %v", tt.input, err)
+			}
+			got := p.String()
+			if got != tt.want {
+				t.Errorf("String() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParsePipelineNewOpsErrors(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"eval no assignment", "error | eval"},
+		{"eval no equals", "error | eval x"},
+		{"eval no expr", "error | eval x ="},
+		{"sort no field", "error | sort"},
+		{"head no number", "error | head"},
+		{"head zero", "error | head 0"},
+		{"head negative", "error | head -1"},
+		{"head not number", "error | head abc"},
+		{"rename no as", "error | rename src"},
+		{"rename no new", "error | rename src as"},
+		{"fields no field", "error | fields"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParsePipeline(tt.input)
+			if err == nil {
+				t.Fatalf("ParsePipeline(%q) expected error, got nil", tt.input)
+			}
+		})
+	}
+}
+
+func TestParsePipelineRaw(t *testing.T) {
+	p, err := ParsePipeline("error | raw")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	if len(p.Pipes) != 1 {
+		t.Fatalf("expected 1 pipe, got %d", len(p.Pipes))
+	}
+	if _, ok := p.Pipes[0].(*RawOp); !ok {
+		t.Fatalf("expected RawOp, got %T", p.Pipes[0])
+	}
+}
+
+func TestParsePipelineRawAfterStats(t *testing.T) {
+	p, err := ParsePipeline("error | stats count by bin(5m) | raw")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	if len(p.Pipes) != 2 {
+		t.Fatalf("expected 2 pipes, got %d", len(p.Pipes))
+	}
+	if _, ok := p.Pipes[0].(*StatsOp); !ok {
+		t.Errorf("pipe 0: expected StatsOp, got %T", p.Pipes[0])
+	}
+	if _, ok := p.Pipes[1].(*RawOp); !ok {
+		t.Errorf("pipe 1: expected RawOp, got %T", p.Pipes[1])
+	}
+}
+
 func TestParsePipelineWhereRegex(t *testing.T) {
 	// where clause should support regex (since it reuses filter parser in filter mode).
 	p, err := ParsePipeline("error | stats count by status | where /5\\d\\d/")
