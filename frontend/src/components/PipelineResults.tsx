@@ -1,8 +1,11 @@
 import { useState } from "react";
 import type { TableResult } from "../api/client";
 import { useThemeClass } from "../hooks/useThemeClass";
+import { classifyTableResult } from "../utils/classifyTableResult";
 import { tableResultToHistogramData } from "../utils/histogramData";
 import { AutoRefreshControls } from "./AutoRefreshControls";
+import { BarChart } from "./charts/BarChart";
+import { DonutChart } from "./charts/DonutChart";
 import { ExportButton } from "./ExportButton";
 import { HistogramChart } from "./HistogramChart";
 import { TableView } from "./TableView";
@@ -108,6 +111,15 @@ export function PipelineResults({
   const isSingleValue =
     resultType === "table" && columns.length === 1 && rowData.length === 1;
 
+  // Classify table results for chart selection.
+  const tableClassification =
+    resultType === "table" ? classifyTableResult(columns, rowData) : "table";
+  const hasChartView =
+    resultType === "timeseries" ||
+    resultType === "timechart" ||
+    tableClassification === "bar-chart" ||
+    tableClassification === "donut-chart";
+
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       {/* Header */}
@@ -136,7 +148,7 @@ export function PipelineResults({
           </span>
         </div>
         <div className="flex items-center gap-2">
-          {(resultType === "timeseries" || resultType === "timechart") && (
+          {hasChartView && (
             <ViewModeToggle
               mode={viewMode}
               onModeChange={setViewMode}
@@ -191,6 +203,14 @@ export function PipelineResults({
         ) : resultType === "timeseries" && viewMode === "chart" ? (
           <div className="px-5 py-4 relative">
             <TimeSeriesChart columns={columns} rows={rowData} dark={dark} />
+          </div>
+        ) : tableClassification === "donut-chart" && viewMode === "chart" ? (
+          <div className="px-5 py-4">
+            <DonutChart columns={columns} rows={rowData} dark={dark} />
+          </div>
+        ) : tableClassification === "bar-chart" && viewMode === "chart" ? (
+          <div className="px-5 py-4">
+            <BarChart columns={columns} rows={rowData} dark={dark} />
           </div>
         ) : (
           <TableView columns={columns} rows={rowData} dark={dark} />

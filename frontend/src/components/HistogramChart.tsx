@@ -1,28 +1,15 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
+import { scaleBand, scaleLinear } from "@visx/scale";
+import { BarStack } from "@visx/shape";
+import { AxisBottom } from "@visx/axis";
+import { Group } from "@visx/group";
+import { ParentSize } from "@visx/responsive";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { clickableProps } from "../utils";
 import type { HistogramData } from "../utils/histogramData";
-
-/** Known severity levels get their theme CSS variable colors. */
-const SEVERITY_COLOR_MAP: Record<string, string> = {
-  error: "var(--color-severity-error)",
-  warn: "var(--color-severity-warn)",
-  info: "var(--color-severity-info)",
-  debug: "var(--color-severity-debug)",
-  trace: "var(--color-severity-trace)",
-};
-
-/** Palette for arbitrary (non-severity) group values. */
-const GROUP_PALETTE = [
-  "oklch(0.72 0.15 45)",   // copper-ish
-  "oklch(0.72 0.15 160)",  // teal
-  "oklch(0.72 0.15 270)",  // violet
-  "oklch(0.72 0.15 90)",   // olive
-  "oklch(0.72 0.15 330)",  // pink
-  "oklch(0.72 0.15 210)",  // cyan
-  "oklch(0.72 0.15 120)",  // green
-  "oklch(0.72 0.15 20)",   // orange
-];
+import { AnimatedBar } from "./charts/AnimatedBar";
+import { SEVERITY_COLOR_MAP, GROUP_PALETTE } from "./charts/chartColors";
+import { ChartTooltip, useChartTooltip, type TooltipData } from "./charts/ChartTooltip";
 
 /**
  * Builds an ordered color map for all group values found in the data.
@@ -38,7 +25,6 @@ function buildColorMap(data: HistogramData): Map<string, string> {
 
   const colorMap = new Map<string, string>();
   let paletteIdx = 0;
-  // Severity levels first (stable order), then alphabetical for the rest.
   const severityOrder = ["error", "warn", "info", "debug", "trace"];
   for (const key of severityOrder) {
     if (seen.has(key)) {
@@ -53,7 +39,15 @@ function buildColorMap(data: HistogramData): Map<string, string> {
   return colorMap;
 }
 
-type HistogramBucket = HistogramData["buckets"][number];
+interface StackDatum {
+  tsKey: string;
+  ts: Date;
+  index: number;
+  total: number;
+  [group: string]: number | string | Date;
+}
+
+const margin = { top: 4, right: 0, bottom: 0, left: 0 };
 
 export function HistogramChart({
   data,
@@ -73,12 +67,19 @@ export function HistogramChart({
   onSegmentClick?: (level: string) => void;
 }>) {
   const { buckets } = data;
-  const barsRef = useRef<HTMLDivElement>(null);
+  const c = useThemeClass(dark);
+  const tooltip = useChartTooltip();
+  const svgRef = useRef<SVGSVGElement>(null);
+
+  // Track which group is hovered for legend highlighting.
+  const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
+
+  // Brush state.
   const [brushStart, setBrushStart] = useState<number | null>(null);
   const [brushEnd, setBrushEnd] = useState<number | null>(null);
   const brushingRef = useRef(false);
-  const c = useThemeClass(dark);
-  // Pan handlers.
+
+  // Pan state.
   const axisRef = useRef<HTMLDivElement>(null);
   const panStartX = useRef<number>(0);
   const [panAxisWidth, setPanAxisWidth] = useState(1);
@@ -90,14 +91,54 @@ export function HistogramChart({
   const colorMap = buildColorMap(data);
   const groupKeys = [...colorMap.keys()];
 
+  // Check if any bucket has ungrouped ("other") counts for the legend.
+  const hasOther = groupKeys.length > 0 && buckets.some((b) => {
+    const groupSum = Object.values(b.groupCounts).reduce((a, v) => a + v, 0);
+    return b.count - groupSum > 0;
+  });
+  const legendKeys = hasOther ? [...groupKeys, "other"] : groupKeys;
+
   const firstBucket = buckets[0]!;
   const lastBucket = buckets[buckets.length - 1]!;
-  const maxCount = Math.max(...buckets.map((b) => b.count), 1);
   const totalCount = buckets.reduce((sum, b) => sum + b.count, 0);
   const barHeight = barHeightProp ?? 48;
 
+  // Build stack data: one datum per bucket, with a key per group + "other".
+  const hasGroups = groupKeys.length > 0;
+  const stackKeys = hasGroups ? [...groupKeys, "__other"] : ["__total"];
+
+  const stackData: StackDatum[] = buckets.map((b, i) => {
+    const d: StackDatum = {
+      tsKey: b.ts.toISOString(),
+      ts: b.ts,
+      index: i,
+      total: b.count,
+    };
+    if (hasGroups) {
+      let groupSum = 0;
+      for (const key of groupKeys) {
+        const count = b.groupCounts[key] ?? 0;
+        d[key] = count;
+        groupSum += count;
+      }
+      d.__other = b.count - groupSum;
+    } else {
+      d.__total = b.count;
+    }
+    return d;
+  });
+
+  const maxCount = Math.max(...buckets.map((b) => b.count), 1);
+
+  const colorScale = (key: string): string => {
+    if (key === "__total") return "var(--color-copper)";
+    if (key === "__other") return "var(--color-copper)";
+    return colorMap.get(key) ?? "var(--color-copper)";
+  };
+
+  // Helpers for brush.
   const getBucketIndex = (clientX: number): number => {
-    const el = barsRef.current;
+    const el = svgRef.current;
     if (!el) return 0;
     const rect = el.getBoundingClientRect();
     const x = clientX - rect.left;
@@ -113,14 +154,14 @@ export function HistogramChart({
     setBrushEnd(idx);
     brushingRef.current = true;
 
-    const onMouseMove = (e: MouseEvent) => {
+    const onMouseMove = (ev: MouseEvent) => {
       if (!brushingRef.current) return;
-      setBrushEnd(getBucketIndex(e.clientX));
+      setBrushEnd(getBucketIndex(ev.clientX));
     };
-    const onMouseUp = (e: MouseEvent) => {
+    const onMouseUp = (ev: MouseEvent) => {
       if (!brushingRef.current) return;
       brushingRef.current = false;
-      const endIdx = getBucketIndex(e.clientX);
+      const endIdx = getBucketIndex(ev.clientX);
       const lo = Math.min(idx, endIdx);
       const hi = Math.max(idx, endIdx);
       if (lo !== hi) {
@@ -144,6 +185,7 @@ export function HistogramChart({
       ? Math.max(brushStart, brushEnd)
       : null;
 
+  // Pan handlers.
   const handlePanStep = (direction: -1 | 1) => {
     if (!onPan || buckets.length < 2) return;
     const windowMs = lastBucket.ts.getTime() - firstBucket.ts.getTime();
@@ -165,10 +207,10 @@ export function HistogramChart({
     document.body.style.cursor = "grabbing";
     document.body.style.userSelect = "none";
 
-    const onMouseMove = (e: MouseEvent) => {
-      setPanOffset(e.clientX - panStartX.current);
+    const onMouseMove = (ev: MouseEvent) => {
+      setPanOffset(ev.clientX - panStartX.current);
     };
-    const onMouseUp = (e: MouseEvent) => {
+    const onMouseUp = (ev: MouseEvent) => {
       panningRef.current = false;
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
@@ -178,9 +220,9 @@ export function HistogramChart({
 
       const el = axisRef.current;
       if (!el) return;
-      const deltaX = panStartX.current - e.clientX; // drag left = positive = go back
+      const deltaX = panStartX.current - ev.clientX;
       const axisWidth = el.getBoundingClientRect().width;
-      if (Math.abs(deltaX) < 3) return; // ignore tiny movements
+      if (Math.abs(deltaX) < 3) return;
       const windowMs = lastBucket.ts.getTime() - firstBucket.ts.getTime();
       const deltaMs = (deltaX / axisWidth) * windowMs;
       const first = firstBucket.ts.getTime();
@@ -191,7 +233,7 @@ export function HistogramChart({
     globalThis.addEventListener("mouseup", onMouseUp);
   };
 
-  // Format time label based on range span.
+  // Time formatting.
   const rangeMs =
     buckets.length > 1 ? lastBucket.ts.getTime() - firstBucket.ts.getTime() : 0;
 
@@ -214,11 +256,10 @@ export function HistogramChart({
     });
   };
 
-  // Show ~5 evenly spaced time labels.
   const labelCount = Math.min(5, buckets.length);
   const labelStep = Math.max(1, Math.floor(buckets.length / labelCount));
 
-  // Compute human-readable pan delta during drag.
+  // Pan delta.
   const windowMs =
     buckets.length > 1 ? lastBucket.ts.getTime() - firstBucket.ts.getTime() : 0;
   const panDeltaMs =
@@ -244,31 +285,121 @@ export function HistogramChart({
     return h > 0 ? `${sign}${d}d ${h}h` : `${sign}${d}d`;
   };
 
+  // Build tooltip data for a bucket (no side effects).
+  const buildBucketTooltipData = (
+    bucket: HistogramData["buckets"][number],
+    highlightGroup?: string,
+  ): TooltipData => {
+    const items: TooltipData["items"] = [];
+    if (hasGroups) {
+      // "other" is the topmost stack segment — list it first.
+      const groupSum = Object.values(bucket.groupCounts).reduce((a, b) => a + b, 0);
+      const other = bucket.count - groupSum;
+      if (other > 0) {
+        items.push({
+          color: "var(--color-copper)",
+          label: "other",
+          value: other.toLocaleString(),
+        });
+      }
+      // Reversed order to match visual stacking (top-to-bottom).
+      for (const key of [...groupKeys].reverse()) {
+        const count = bucket.groupCounts[key];
+        if (count && count > 0) {
+          items.push({
+            color: colorMap.get(key) ?? "var(--color-copper)",
+            label: key,
+            value: count.toLocaleString(),
+          });
+        }
+      }
+    }
+    const title = `${bucket.count.toLocaleString()} \u00b7 ${formatTime(bucket.ts)}`;
+    return { title, items, highlightLabel: highlightGroup };
+  };
+
+  // Tooltip for a bucket (position + data).
+  const showBucketTooltip = (
+    bucket: HistogramData["buckets"][number],
+    e: React.MouseEvent,
+    highlightGroup?: string,
+  ) => {
+    tooltip.showTooltip({
+      tooltipData: buildBucketTooltipData(bucket, highlightGroup),
+      tooltipLeft: e.clientX,
+      tooltipTop: e.clientY,
+    });
+  };
+
+  // Data-only refresh (no position change) for when poll data arrives while hovering.
+  const refreshTooltip = (bucketIdx: number, highlightGroup?: string) => {
+    const bucket = buckets[bucketIdx];
+    if (!bucket) return;
+    tooltip.updateData(buildBucketTooltipData(bucket, highlightGroup));
+  };
+
   return (
     <div className="relative">
       {showHeader ? (
         <div className="flex items-baseline justify-between mb-1.5">
-          <span
-            className={`text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-          >
-            Volume
-          </span>
+          <div className="flex items-baseline gap-3">
+            <span
+              className={`text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+            >
+              Volume
+            </span>
+            {legendKeys.length > 0 && (
+              <div className="flex flex-wrap gap-x-2.5 gap-y-0.5">
+                {legendKeys.map((key) => (
+                  <div
+                    key={key}
+                    className={`flex items-center gap-1 transition-opacity ${
+                      hoveredGroup !== null && hoveredGroup !== key ? "opacity-40" : ""
+                    }`}
+                  >
+                    <span
+                      className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
+                      style={{ backgroundColor: colorMap.get(key) ?? "var(--color-copper)" }}
+                    />
+                    <span
+                      className={`text-[0.65em] font-mono ${
+                        hoveredGroup === key
+                          ? c("text-text-bright", "text-light-text-bright")
+                          : c("text-text-muted", "text-light-text-muted")
+                      }`}
+                    >
+                      {key}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <span
             className={`font-mono text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}
           >
             {totalCount.toLocaleString()} records
           </span>
         </div>
-      ) : groupKeys.length > 0 ? (
+      ) : legendKeys.length > 0 ? (
         <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2">
-          {groupKeys.map((key) => (
-            <div key={key} className="flex items-center gap-1">
+          {legendKeys.map((key) => (
+            <div
+              key={key}
+              className={`flex items-center gap-1 transition-opacity ${
+                hoveredGroup !== null && hoveredGroup !== key ? "opacity-40" : ""
+              }`}
+            >
               <span
                 className="inline-block w-2 h-2 rounded-full shrink-0"
-                style={{ backgroundColor: colorMap.get(key) }}
+                style={{ backgroundColor: colorMap.get(key) ?? "var(--color-copper)" }}
               />
               <span
-                className={`text-[0.7em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}
+                className={`text-[0.7em] font-mono ${
+                  hoveredGroup === key
+                    ? c("text-text-bright", "text-light-text-bright")
+                    : c("text-text-muted", "text-light-text-muted")
+                }`}
               >
                 {key}
               </span>
@@ -276,8 +407,9 @@ export function HistogramChart({
           ))}
         </div>
       ) : null}
+
       <div className="relative" style={{ height: barHeight }}>
-        {/* Pan delta indicator — centered over bars */}
+        {/* Pan delta indicator */}
         {panOffset !== 0 && (
           <div
             className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-2 py-0.5 text-[0.7em] font-mono rounded whitespace-nowrap pointer-events-none z-20 ${c(
@@ -288,34 +420,37 @@ export function HistogramChart({
             {formatDuration(panDeltaMs)}
           </div>
         )}
-        <div
-          ref={barsRef}
-          onMouseDown={handleMouseDown}
-          className={`relative flex items-end h-full gap-px ${onBrushSelect ? "cursor-crosshair" : ""}`}
-        >
-          {brushLo !== null && brushHi !== null && (
-            <div
-              className="absolute inset-y-0 bg-copper/20 pointer-events-none z-10 rounded-sm"
-              style={{
-                left: `${(brushLo / buckets.length) * 100}%`,
-                width: `${((brushHi - brushLo + 1) / buckets.length) * 100}%`,
-              }}
-            />
-          )}
-          {buckets.map((bucket) => (
-            <HistogramBar
-              key={bucket.ts.toISOString()}
-              bucket={bucket}
-              maxCount={maxCount}
-              colorMap={colorMap}
-              groupKeys={groupKeys}
-              dark={dark}
-              onSegmentClick={onSegmentClick}
-              formatTime={formatTime}
-            />
-          ))}
-        </div>
+        <ParentSize>
+          {({ width }) =>
+            width > 0 ? (
+              <HistogramSVG
+                width={width}
+                height={barHeight}
+                stackData={stackData}
+                stackKeys={stackKeys}
+                maxCount={maxCount}
+                colorScale={colorScale}
+                buckets={buckets}
+                groupKeys={groupKeys}
+                colorMap={colorMap}
+                hasGroups={hasGroups}
+                dark={dark}
+                svgRef={svgRef}
+                brushLo={brushLo}
+                brushHi={brushHi}
+                onMouseDown={handleMouseDown}
+                onSegmentClick={onSegmentClick}
+                showBucketTooltip={showBucketTooltip}
+                refreshTooltip={refreshTooltip}
+                hideTooltip={tooltip.hideTooltip}
+                onBrushSelect={onBrushSelect}
+                onHoverGroup={setHoveredGroup}
+              />
+            ) : null
+          }
+        </ParentSize>
       </div>
+
       {/* Time axis with pan arrows + draggable labels */}
       <div className="flex items-center mt-1 gap-1 min-h-5">
         {onPan && (
@@ -365,201 +500,225 @@ export function HistogramChart({
           </button>
         )}
       </div>
-    </div>
-  );
-}
 
-function HistogramBar({
-  bucket,
-  maxCount,
-  colorMap,
-  groupKeys,
-  dark,
-  onSegmentClick,
-  formatTime,
-}: Readonly<{
-  bucket: HistogramBucket;
-  maxCount: number;
-  colorMap: Map<string, string>;
-  groupKeys: string[];
-  dark: boolean;
-  onSegmentClick?: (level: string) => void;
-  formatTime: (d: Date) => string;
-}>) {
-  const c = useThemeClass(dark);
-  const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
-  const pct = maxCount > 0 ? bucket.count / maxCount : 0;
-  const gc = bucket.groupCounts;
-  const hasGroups = gc && Object.keys(gc).length > 0;
-  const groupSum = hasGroups
-    ? Object.values(gc).reduce((a, b) => a + b, 0)
-    : 0;
-  const other = bucket.count - groupSum;
-
-  // Stack order bottom-to-top: ordered group keys, then "other"
-  const segments: { key: string; count: number; color: string }[] = [];
-  if (hasGroups) {
-    for (const key of groupKeys) {
-      const count = gc[key];
-      if (count && count > 0) {
-        segments.push({ key, count, color: colorMap.get(key)! });
-      }
-    }
-    if (other > 0)
-      segments.push({
-        key: "other",
-        count: other,
-        color: "var(--color-copper)",
-      });
-  }
-
-  return (
-    <div
-      className="flex-1 min-w-0 group relative"
-      style={{ height: "100%" }}
-    >
-      {bucket.count > 0 && (
-        <div
-          className="absolute bottom-0 inset-x-0 rounded-t-sm overflow-hidden transition-colors"
-          style={{
-            height: `${Math.max(pct * 100, 4)}%`,
-          }}
-        >
-          {hasGroups && segments.length > 0 ? (
-            <div
-              className={`flex flex-col-reverse w-full h-full ${onSegmentClick ? "" : `transition-opacity ${c("opacity-60 group-hover:opacity-100", "opacity-50 group-hover:opacity-80")}`}`}
-            >
-              {segments.map((seg) => (
-                <div
-                  key={seg.key}
-                  className={`w-full shrink-0 ${onSegmentClick ? `cursor-pointer transition-opacity ${c("opacity-60 hover:opacity-100", "opacity-50 hover:opacity-90")}` : ""}`}
-                  style={{
-                    height: `${(seg.count / bucket.count) * 100}%`,
-                    backgroundColor: seg.color,
-                  }}
-                  onMouseEnter={() => setHoveredGroup(seg.key)}
-                  onMouseLeave={() => setHoveredGroup(null)}
-                  onMouseDown={
-                    onSegmentClick
-                      ? (e) => e.stopPropagation()
-                      : undefined
-                  }
-                  onClick={
-                    onSegmentClick
-                      ? (e) => {
-                          e.stopPropagation();
-                          onSegmentClick(seg.key);
-                        }
-                      : undefined
-                  }
-                  {...clickableProps(onSegmentClick ? () => onSegmentClick(seg.key) : undefined)}
-                  aria-label={onSegmentClick ? `Filter by ${seg.key}` : undefined}
-                />
-              ))}
-            </div>
-          ) : (
-            <div
-              className={`w-full h-full transition-opacity bg-copper ${
-                onSegmentClick
-                  ? `cursor-pointer ${c("opacity-60 hover:opacity-100", "opacity-50 hover:opacity-90")}`
-                  : c(
-                      "opacity-60 group-hover:opacity-100",
-                      "opacity-50 group-hover:opacity-80",
-                    )
-              }`}
-              onMouseDown={
-                onSegmentClick
-                  ? (e) => e.stopPropagation()
-                  : undefined
-              }
-              onClick={
-                onSegmentClick
-                  ? (e) => {
-                      e.stopPropagation();
-                      onSegmentClick("other");
-                    }
-                  : undefined
-              }
-              {...clickableProps(onSegmentClick ? () => onSegmentClick("other") : undefined)}
-              aria-label={onSegmentClick ? "Filter by other" : undefined}
-            />
-          )}
-        </div>
-      )}
       {/* Tooltip */}
-      <HistogramBarTooltip
-        bucket={bucket}
-        hasGroups={!!hasGroups}
-        other={other}
-        colorMap={colorMap}
-        groupKeys={groupKeys}
-        dark={dark}
-        formatTime={formatTime}
-        hoveredGroup={hoveredGroup}
-      />
+      {tooltip.tooltipOpen && tooltip.tooltipData && (
+        <ChartTooltip
+          tooltipRef={tooltip.tooltipRef}
+          data={tooltip.tooltipData as TooltipData}
+          dark={dark}
+        />
+      )}
     </div>
   );
 }
 
-function HistogramBarTooltip({
-  bucket,
-  hasGroups,
-  other,
-  colorMap,
+/** The inner SVG chart — separated so ParentSize can provide width. */
+function HistogramSVG({
+  width,
+  height,
+  stackData,
+  stackKeys,
+  maxCount,
+  colorScale,
+  buckets,
   groupKeys,
+  colorMap,
+  hasGroups,
   dark,
-  formatTime,
-  hoveredGroup,
+  svgRef,
+  brushLo,
+  brushHi,
+  onMouseDown,
+  onSegmentClick,
+  showBucketTooltip,
+  refreshTooltip,
+  hideTooltip,
+  onBrushSelect,
+  onHoverGroup,
 }: Readonly<{
-  bucket: HistogramBucket;
-  hasGroups: boolean;
-  other: number;
-  colorMap: Map<string, string>;
+  width: number;
+  height: number;
+  stackData: StackDatum[];
+  stackKeys: string[];
+  maxCount: number;
+  colorScale: (key: string) => string;
+  buckets: HistogramData["buckets"];
   groupKeys: string[];
+  colorMap: Map<string, string>;
+  hasGroups: boolean;
   dark: boolean;
-  formatTime: (d: Date) => string;
-  hoveredGroup: string | null;
+  svgRef: React.RefObject<SVGSVGElement | null>;
+  brushLo: number | null;
+  brushHi: number | null;
+  onMouseDown: (e: React.MouseEvent) => void;
+  onSegmentClick?: (level: string) => void;
+  showBucketTooltip: (
+    bucket: HistogramData["buckets"][number],
+    e: React.MouseEvent,
+    highlightGroup?: string,
+  ) => void;
+  refreshTooltip: (bucketIdx: number, highlightGroup?: string) => void;
+  hideTooltip: () => void;
+  onBrushSelect?: (start: Date, end: Date) => void;
+  onHoverGroup: (group: string | null) => void;
 }>) {
   const c = useThemeClass(dark);
-  const gc = bucket.groupCounts;
-  // Tooltip order: top-to-bottom matches visual bar stacking (reversed).
-  const tooltipKeys = [...groupKeys].reverse();
+  const [hoveredBar, setHoveredBar] = useState<number | null>(null);
+  const hoveredGroupRef = useRef<string | undefined>(undefined);
+  const mouseYRef = useRef<number>(0);
+
+  const xMax = width - margin.left - margin.right;
+  const yMax = height - margin.top - margin.bottom;
+
+  // When bucket data changes while hovering, recompute which segment the
+  // (stationary) cursor is now over and refresh the tooltip accordingly.
+  useEffect(() => {
+    if (hoveredBar === null) return;
+    const datum = stackData[hoveredBar];
+    if (!datum) return;
+
+    // Rebuild yScale from current props to hit-test the new stack layout.
+    const ys = scaleLinear<number>({ domain: [0, maxCount], range: [yMax, 0] });
+    let cumulative = 0;
+    let groupKey: string | undefined;
+    for (const key of stackKeys) {
+      const val = (datum[key] as number) || 0;
+      if (val <= 0) { cumulative += val; continue; }
+      const segTop = ys(cumulative + val) ?? 0;
+      const segBottom = ys(cumulative) ?? 0;
+      if (mouseYRef.current >= segTop && mouseYRef.current <= segBottom) {
+        groupKey = key === "__total" ? undefined : key === "__other" ? "other" : key;
+        break;
+      }
+      cumulative += val;
+    }
+
+    hoveredGroupRef.current = groupKey;
+    onHoverGroup(groupKey ?? null);
+    refreshTooltip(hoveredBar, groupKey);
+  }, [buckets]);
+
+  const xScale = scaleBand<string>({
+    domain: stackData.map((d) => d.tsKey),
+    range: [0, xMax],
+    padding: 0.08,
+  });
+
+  const yScale = scaleLinear<number>({
+    domain: [0, maxCount],
+    range: [yMax, 0],
+  });
+
   return (
-    <div
-      className={`absolute top-0 left-1/2 -translate-x-1/2 px-2 py-1 text-[0.7em] font-mono rounded whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-10 ${c("bg-ink-surface text-text-bright border border-ink-border-subtle", "bg-light-surface text-light-text-bright border border-light-border-subtle")}`}
+    <svg
+      ref={svgRef}
+      width={width}
+      height={height}
+      className={`select-none ${onBrushSelect ? "cursor-crosshair" : ""}`}
+      onMouseDown={onMouseDown}
+      onMouseLeave={() => {
+        setHoveredBar(null);
+        onHoverGroup(null);
+        hideTooltip();
+      }}
     >
-      <div>
-        {bucket.count.toLocaleString()} &middot;{" "}
-        {formatTime(bucket.ts)}
-      </div>
-      {hasGroups && (
-        <div className="mt-0.5 space-y-px">
-          {other > 0 && (
-            <div className={`flex items-center gap-1.5 ${hoveredGroup === "other" ? "font-bold" : ""}`}>
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-copper/60" />
-              <span className={hoveredGroup === "other" ? "" : "opacity-70"}>other</span>
-              <span>{other.toLocaleString()}</span>
-            </div>
-          )}
-          {tooltipKeys.map((key) => {
-            const count = gc[key];
-            if (!count || count <= 0) return null;
-            return (
-              <div
-                key={key}
-                className={`flex items-center gap-1.5 ${hoveredGroup === key ? "font-bold" : ""}`}
-              >
-                <span
-                  className="inline-block w-1.5 h-1.5 rounded-full"
-                  style={{ backgroundColor: colorMap.get(key) }}
-                />
-                <span className={hoveredGroup === key ? "" : "opacity-70"}>{key}</span>
-                <span>{count.toLocaleString()}</span>
-              </div>
+      <Group left={margin.left} top={margin.top}>
+        {/* Brush overlay */}
+        {brushLo !== null && brushHi !== null && (
+          <rect
+            x={(brushLo / buckets.length) * xMax}
+            y={0}
+            width={((brushHi - brushLo + 1) / buckets.length) * xMax}
+            height={yMax}
+            fill="var(--color-copper)"
+            opacity={0.2}
+            rx={2}
+            className="pointer-events-none"
+          />
+        )}
+
+        <BarStack
+          data={stackData}
+          keys={stackKeys}
+          x={(d) => d.tsKey}
+          xScale={xScale}
+          yScale={yScale}
+          color={colorScale}
+        >
+          {(barStacks) => {
+            // Pre-compute the topmost stack index per column for rounded corners.
+            const topStackPerColumn = new Map<number, number>();
+            for (let si = barStacks.length - 1; si >= 0; si--) {
+              for (const bar of barStacks[si]!.bars) {
+                if (bar.height > 0 && !topStackPerColumn.has(bar.index)) {
+                  topStackPerColumn.set(bar.index, si);
+                }
+              }
+            }
+
+            return barStacks.map((barStack) =>
+              barStack.bars.map((bar) => {
+                const bucketIdx = bar.index;
+                const bucket = buckets[bucketIdx]!;
+                const isHovered = hoveredBar === bucketIdx;
+                const groupKey = bar.key === "__total"
+                  ? undefined
+                  : bar.key === "__other"
+                    ? "other"
+                    : bar.key;
+
+                if (bar.height <= 0) return null;
+
+                const isTop = topStackPerColumn.get(bucketIdx) === barStack.index;
+
+                return (
+                  <AnimatedBar
+                    key={`${barStack.index}-${bar.index}`}
+                    x={bar.x}
+                    y={bar.y}
+                    width={bar.width}
+                    height={bar.height}
+                    fill={bar.color}
+                    opacity={isHovered ? 1 : dark ? 0.6 : 0.5}
+                    rx={isTop ? 2 : 0}
+                    className="transition-opacity"
+                    onMouseMove={(e) => {
+                      const svg = svgRef.current;
+                      if (svg) {
+                        mouseYRef.current = e.clientY - svg.getBoundingClientRect().top - margin.top;
+                      }
+                      setHoveredBar(bucketIdx);
+                      hoveredGroupRef.current = groupKey;
+                      onHoverGroup(groupKey ?? null);
+                      showBucketTooltip(bucket, e, groupKey);
+                    }}
+                    onMouseDown={
+                      onSegmentClick && groupKey
+                        ? (e) => e.stopPropagation()
+                        : undefined
+                    }
+                    onClick={
+                      onSegmentClick && groupKey
+                        ? (e) => {
+                            e.stopPropagation();
+                            onSegmentClick(groupKey);
+                          }
+                        : undefined
+                    }
+                    {...(onSegmentClick && groupKey
+                      ? {
+                          ...clickableProps(() => onSegmentClick(groupKey)),
+                          cursor: "pointer",
+                        }
+                      : {})}
+                  />
+                );
+              }),
             );
-          })}
-        </div>
-      )}
-    </div>
+          }}
+        </BarStack>
+      </Group>
+    </svg>
   );
 }

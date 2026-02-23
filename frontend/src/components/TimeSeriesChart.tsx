@@ -1,5 +1,14 @@
-import { useState, useRef, useMemo, useEffect } from "react";
+import { useState } from "react";
+import { scaleTime, scaleLinear } from "@visx/scale";
+import { LinePath, AreaClosed } from "@visx/shape";
+import { AxisBottom, AxisLeft } from "@visx/axis";
+import { GridRows } from "@visx/grid";
+import { Group } from "@visx/group";
+import { ParentSize } from "@visx/responsive";
+import { curveMonotoneX } from "@visx/curve";
 import { useThemeClass } from "../hooks/useThemeClass";
+import { SERIES_COLORS } from "./charts/chartColors";
+import { ChartTooltip, useChartTooltip, type TooltipData } from "./charts/ChartTooltip";
 
 interface TimeSeriesChartProps {
   columns: string[];
@@ -7,114 +16,48 @@ interface TimeSeriesChartProps {
   dark: boolean;
 }
 
-// Color cycle for multi-series — uses CSS variables matching the severity palette.
-const SERIES_COLORS = [
-  "var(--color-copper)",
-  "var(--color-severity-error)",
-  "var(--color-severity-warn)",
-  "var(--color-severity-info)",
-  "var(--color-severity-debug)",
-  "var(--color-severity-trace)",
-];
-
 interface Series {
   name: string;
   points: { x: number; y: number }[];
   color: string;
 }
 
-export function TimeSeriesChart({
-  columns,
-  rows,
-  dark,
-}: Readonly<TimeSeriesChartProps>) {
-  const c = useThemeClass(dark);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(600);
-  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+const margin = { top: 20, right: 20, bottom: 50, left: 60 };
 
-  // Responsive width via ResizeObserver.
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect.width;
-      if (w && w > 0) setWidth(w);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
+function parseData(columns: string[], rows: string[][]) {
+  if (columns.length < 2 || rows.length === 0) {
+    return { series: [] as Series[], timestamps: [] as number[], yMin: 0, yMax: 1 };
+  }
 
-  const height = 240;
-  const padding = { top: 20, right: 20, bottom: 50, left: 60 };
-  const plotW = width - padding.left - padding.right;
-  const plotH = height - padding.top - padding.bottom;
+  const timeCol = 0;
+  const timestamps = rows.map((r) => new Date(r[timeCol]!).getTime());
 
-  // Parse data into series.
-  const { series, timestamps, yMin, yMax } = useMemo(() => {
-    if (columns.length < 2 || rows.length === 0) {
-      return { series: [] as Series[], timestamps: [] as number[], yMin: 0, yMax: 1 };
+  // Detect 3-column pivot: [time, group, agg]
+  if (columns.length === 3 && rows.some((r) => isNaN(Number(r[1])))) {
+    const groups = new Map<string, { x: number; y: number }[]>();
+    const uniqueTimes = [...new Set(timestamps)].sort((a, b) => a - b);
+
+    for (const row of rows) {
+      const t = new Date(row[timeCol]!).getTime();
+      const group = row[1] ?? "";
+      const raw = row[2] ?? "";
+      if (raw === "") continue;
+      const val = Number(raw) || 0;
+      if (!groups.has(group)) groups.set(group, []);
+      groups.get(group)!.push({ x: t, y: val });
     }
 
-    const timeCol = 0;
-    const timestamps = rows.map((r) => new Date(r[timeCol]!).getTime());
-
-    // Detect 3-column pivot: [time, group, agg]
-    if (
-      columns.length === 3 &&
-      rows.some((r) => isNaN(Number(r[1])))
-    ) {
-      // Pivot: group by column 1, aggregate column 2
-      const groups = new Map<string, { x: number; y: number }[]>();
-      const uniqueTimes = [...new Set(timestamps)].sort((a, b) => a - b);
-
-      for (const row of rows) {
-        const t = new Date(row[timeCol]!).getTime();
-        const group = row[1] ?? "";
-        const raw = row[2] ?? "";
-        if (raw === "") continue; // skip missing values
-        const val = Number(raw) || 0;
-        if (!groups.has(group)) groups.set(group, []);
-        groups.get(group)!.push({ x: t, y: val });
-      }
-
-      let colorIdx = 0;
-      const seriesList: Series[] = [];
-      for (const [name, points] of groups) {
-        points.sort((a, b) => a.x - b.x);
-        seriesList.push({
-          name,
-          points,
-          color: SERIES_COLORS[colorIdx % SERIES_COLORS.length]!,
-        });
-        colorIdx++;
-      }
-
-      let allMin = Infinity;
-      let allMax = -Infinity;
-      for (const s of seriesList) {
-        for (const p of s.points) {
-          if (p.y < allMin) allMin = p.y;
-          if (p.y > allMax) allMax = p.y;
-        }
-      }
-      if (allMin === Infinity) { allMin = 0; allMax = 1; }
-      if (allMin === allMax) { allMin -= 1; allMax += 1; }
-
-      return { series: seriesList, timestamps: uniqueTimes, yMin: allMin, yMax: allMax };
+    let colorIdx = 0;
+    const seriesList: Series[] = [];
+    for (const [name, points] of groups) {
+      points.sort((a, b) => a.x - b.x);
+      seriesList.push({
+        name,
+        points,
+        color: SERIES_COLORS[colorIdx % SERIES_COLORS.length]!,
+      });
+      colorIdx++;
     }
-
-    // Standard: columns 1..N are numeric series
-    const aggCols = columns.slice(1);
-    const seriesList: Series[] = aggCols.map((name, i) => ({
-      name,
-      points: rows.flatMap((r, j) => {
-        const raw = r[i + 1] ?? "";
-        if (raw === "") return []; // skip missing values
-        return [{ x: timestamps[j]!, y: Number(raw) || 0 }];
-      }),
-      color: SERIES_COLORS[i % SERIES_COLORS.length]!,
-    }));
 
     let allMin = Infinity;
     let allMax = -Infinity;
@@ -127,62 +70,76 @@ export function TimeSeriesChart({
     if (allMin === Infinity) { allMin = 0; allMax = 1; }
     if (allMin === allMax) { allMin -= 1; allMax += 1; }
 
-    const uniqueTimes = [...new Set(timestamps)].sort((a, b) => a - b);
     return { series: seriesList, timestamps: uniqueTimes, yMin: allMin, yMax: allMax };
-  }, [columns, rows]);
+  }
 
+  // Standard: columns 1..N are numeric series
+  const aggCols = columns.slice(1);
+  const seriesList: Series[] = aggCols.map((name, i) => ({
+    name,
+    points: rows.flatMap((r, j) => {
+      const raw = r[i + 1] ?? "";
+      if (raw === "") return [];
+      return [{ x: timestamps[j]!, y: Number(raw) || 0 }];
+    }),
+    color: SERIES_COLORS[i % SERIES_COLORS.length]!,
+  }));
+
+  let allMin = Infinity;
+  let allMax = -Infinity;
+  for (const s of seriesList) {
+    for (const p of s.points) {
+      if (p.y < allMin) allMin = p.y;
+      if (p.y > allMax) allMax = p.y;
+    }
+  }
+  if (allMin === Infinity) { allMin = 0; allMax = 1; }
+  if (allMin === allMax) { allMin -= 1; allMax += 1; }
+
+  const uniqueTimes = [...new Set(timestamps)].sort((a, b) => a - b);
+  return { series: seriesList, timestamps: uniqueTimes, yMin: allMin, yMax: allMax };
+}
+
+function TimeSeriesInner({
+  columns,
+  rows,
+  dark,
+  width,
+}: TimeSeriesChartProps & { width: number }) {
+  const c = useThemeClass(dark);
+  const height = 240;
+  const tooltip = useChartTooltip();
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+
+  const { series, timestamps, yMin, yMax } = parseData(columns, rows);
   if (series.length === 0) return null;
 
-  const xMin = timestamps[0]!;
-  const xMax = timestamps[timestamps.length - 1]!;
-  const xRange = xMax - xMin || 1;
-  // Add 10% padding to y-axis
+  const xMax = width - margin.left - margin.right;
+  const yMaxPx = height - margin.top - margin.bottom;
+
   const yPad = (yMax - yMin) * 0.1 || 1;
   const yLo = yMin - yPad;
   const yHi = yMax + yPad;
-  const yRange = yHi - yLo || 1;
 
-  const scaleX = (t: number) => padding.left + ((t - xMin) / xRange) * plotW;
-  const scaleY = (v: number) => padding.top + plotH - ((v - yLo) / yRange) * plotH;
+  const xScale = scaleTime<number>({
+    domain: [timestamps[0]!, timestamps[timestamps.length - 1]!],
+    range: [0, xMax],
+  });
 
-  const buildPath = (points: { x: number; y: number }[]) =>
-    points
-      .map((p, i) => `${i === 0 ? "M" : "L"}${scaleX(p.x).toFixed(1)},${scaleY(p.y).toFixed(1)}`)
-      .join(" ");
+  const yScale = scaleLinear<number>({
+    domain: [yLo, yHi],
+    range: [yMaxPx, 0],
+    nice: true,
+  });
 
-  const buildArea = (points: { x: number; y: number }[]) => {
-    if (points.length === 0) return "";
-    // When data spans both negative and positive, use 0 as baseline.
-    const baseline = (yLo < 0 && yHi > 0) ? scaleY(0) : scaleY(yLo);
-    const line = points
-      .map((p, i) => `${i === 0 ? "M" : "L"}${scaleX(p.x).toFixed(1)},${scaleY(p.y).toFixed(1)}`)
-      .join(" ");
-    const last = points[points.length - 1]!;
-    const first = points[0]!;
-    return `${line} L${scaleX(last.x).toFixed(1)},${baseline} L${scaleX(first.x).toFixed(1)},${baseline} Z`;
-  };
-
-  // Y-axis ticks (5 ticks).
-  const yTicks: number[] = [];
-  for (let i = 0; i <= 4; i++) {
-    yTicks.push(yLo + (yRange * i) / 4);
-  }
-
-  // X-axis ticks (up to 5).
-  const xTickCount = Math.min(5, timestamps.length);
-  const xTicks: number[] = [];
-  for (let i = 0; i < xTickCount; i++) {
-    const idx = Math.round((i / (xTickCount - 1 || 1)) * (timestamps.length - 1));
-    xTicks.push(timestamps[idx]!);
-  }
+  const xRange = (timestamps[timestamps.length - 1]! - timestamps[0]!) || 1;
 
   const formatTime = (ms: number) => {
     const d = new Date(ms);
-    const rangeMs = xMax - xMin;
-    if (rangeMs > 24 * 60 * 60 * 1000) {
+    if (xRange > 24 * 60 * 60 * 1000) {
       return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
     }
-    if (rangeMs < 60 * 60 * 1000) {
+    if (xRange < 60 * 60 * 1000) {
       return d.toLocaleTimeString("en-US", {
         hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
       });
@@ -200,11 +157,10 @@ export function TimeSeriesChart({
     return Number.isInteger(v) ? String(v) : v.toFixed(1);
   };
 
-  // Find nearest x-index for hover.
   const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const dataX = xMin + ((mx - padding.left) / plotW) * xRange;
+    const mx = e.clientX - rect.left - margin.left;
+    const dataX = xScale.invert(mx).getTime();
     let nearest = 0;
     let minDist = Infinity;
     for (let i = 0; i < timestamps.length; i++) {
@@ -215,113 +171,134 @@ export function TimeSeriesChart({
       }
     }
     setHoverIdx(nearest);
+
+    const hoverTs = timestamps[nearest]!;
+    const items = series
+      .map((s) => {
+        const p = s.points.find((pt) => pt.x === hoverTs);
+        return p ? { color: s.color, label: s.name, value: formatYValue(p.y) } : null;
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+
+    tooltip.showTooltip({
+      tooltipData: { title: formatTime(hoverTs), items },
+      tooltipLeft: e.clientX,
+      tooltipTop: e.clientY,
+    });
   };
 
-  const hoverX = hoverIdx !== null ? scaleX(timestamps[hoverIdx]!) : null;
   const singleSeries = series.length === 1;
+  const legendHeight = series.length > 1 ? 30 : 0;
 
   return (
-    <div ref={containerRef} className="w-full">
+    <div className="relative">
       <svg
         width={width}
-        height={height + (series.length > 1 ? 30 : 0)}
+        height={height + legendHeight}
         className="select-none"
         onMouseMove={handleMouseMove}
-        onMouseLeave={() => setHoverIdx(null)}
+        onMouseLeave={() => {
+          setHoverIdx(null);
+          tooltip.hideTooltip();
+        }}
       >
-        {/* Grid lines */}
-        {yTicks.map((tick) => (
-          <line
-            key={tick}
-            x1={padding.left}
-            y1={scaleY(tick)}
-            x2={width - padding.right}
-            y2={scaleY(tick)}
+        <Group left={margin.left} top={margin.top}>
+          <GridRows
+            scale={yScale}
+            width={xMax}
             stroke={dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)"}
+            numTicks={5}
           />
-        ))}
 
-        {/* Area fills (single series only) */}
-        {singleSeries && (
-          <path
-            d={buildArea(series[0]!.points)}
-            fill={series[0]!.color}
-            opacity={0.15}
+          {/* Area fill (single series only) */}
+          {singleSeries && (
+            <AreaClosed
+              data={series[0]!.points}
+              x={(d) => xScale(d.x) ?? 0}
+              y={(d) => yScale(d.y) ?? 0}
+              yScale={yScale}
+              fill={series[0]!.color}
+              opacity={0.15}
+              curve={curveMonotoneX}
+            />
+          )}
+
+          {/* Lines */}
+          {series.map((s) => (
+            <LinePath
+              key={s.name}
+              data={s.points}
+              x={(d) => xScale(d.x) ?? 0}
+              y={(d) => yScale(d.y) ?? 0}
+              stroke={s.color}
+              strokeWidth={singleSeries ? 2 : 1.5}
+              strokeLinejoin="round"
+              curve={curveMonotoneX}
+            />
+          ))}
+
+          {/* Hover crosshair */}
+          {hoverIdx !== null && (
+            <line
+              x1={xScale(timestamps[hoverIdx]!)}
+              y1={0}
+              x2={xScale(timestamps[hoverIdx]!)}
+              y2={yMaxPx}
+              stroke={dark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.2)"}
+              strokeDasharray="3,3"
+            />
+          )}
+
+          {/* Hover dots */}
+          {hoverIdx !== null &&
+            series.map((s) => {
+              const p = s.points.find((pt) => pt.x === timestamps[hoverIdx]!);
+              if (!p) return null;
+              return (
+                <circle
+                  key={s.name}
+                  cx={xScale(p.x)}
+                  cy={yScale(p.y)}
+                  r={3.5}
+                  fill={s.color}
+                  stroke={dark ? "#1a1a1a" : "#fff"}
+                  strokeWidth={1.5}
+                />
+              );
+            })}
+
+          <AxisLeft
+            scale={yScale}
+            numTicks={5}
+            tickFormat={(v) => formatYValue(v as number)}
+            stroke="transparent"
+            tickStroke="transparent"
+            tickLabelProps={{
+              className: `text-[0.6em] font-mono ${c("fill-text-ghost", "fill-light-text-ghost")}`,
+              textAnchor: "end" as const,
+              dx: -4,
+              dy: 3,
+            }}
           />
-        )}
-
-        {/* Lines */}
-        {series.map((s) => (
-          <path
-            key={s.name}
-            d={buildPath(s.points)}
-            fill="none"
-            stroke={s.color}
-            strokeWidth={singleSeries ? 2 : 1.5}
-            strokeLinejoin="round"
+          <AxisBottom
+            scale={xScale}
+            top={yMaxPx}
+            numTicks={5}
+            tickFormat={(v) => formatTime((v as Date).getTime())}
+            stroke="transparent"
+            tickStroke="transparent"
+            tickLabelProps={{
+              className: `text-[0.6em] font-mono ${c("fill-text-ghost", "fill-light-text-ghost")}`,
+              textAnchor: "middle" as const,
+              dy: 4,
+            }}
           />
-        ))}
-
-        {/* Hover crosshair */}
-        {hoverX !== null && (
-          <line
-            x1={hoverX}
-            y1={padding.top}
-            x2={hoverX}
-            y2={padding.top + plotH}
-            stroke={dark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.2)"}
-            strokeDasharray="3,3"
-          />
-        )}
-
-        {/* Hover dots */}
-        {hoverIdx !== null &&
-          series.map((s) => {
-            const p = s.points.find((pt) => pt.x === timestamps[hoverIdx]!);
-            if (!p) return null;
-            return (
-              <circle
-                key={s.name}
-                cx={scaleX(p.x)}
-                cy={scaleY(p.y)}
-                r={3.5}
-                fill={s.color}
-                stroke={dark ? "#1a1a1a" : "#fff"}
-                strokeWidth={1.5}
-              />
-            );
-          })}
-
-        {/* Y-axis labels */}
-        {yTicks.map((tick) => (
-          <text
-            key={tick}
-            x={padding.left - 8}
-            y={scaleY(tick) + 4}
-            textAnchor="end"
-            className={`text-[0.6em] font-mono ${c("fill-text-ghost", "fill-light-text-ghost")}`}
-          >
-            {formatYValue(tick)}
-          </text>
-        ))}
-
-        {/* X-axis labels */}
-        {xTicks.map((tick, i) => (
-          <text
-            key={i}
-            x={scaleX(tick)}
-            y={height - 8}
-            textAnchor="middle"
-            className={`text-[0.6em] font-mono ${c("fill-text-ghost", "fill-light-text-ghost")}`}
-          >
-            {formatTime(tick)}
-          </text>
-        ))}
+        </Group>
 
         {/* Legend (multi-series) */}
         {series.length > 1 &&
           series.map((s, i) => {
-            const lx = padding.left + i * 100;
+            const lx = margin.left + i * 100;
             const ly = height + 15;
             return (
               <g key={s.name}>
@@ -338,38 +315,23 @@ export function TimeSeriesChart({
           })}
       </svg>
 
-      {/* Tooltip */}
-      {hoverIdx !== null && (
-        <div
-          className={`absolute pointer-events-none px-2 py-1 rounded text-[0.75em] font-mono whitespace-nowrap z-10 ${c(
-            "bg-ink-surface text-text-bright border border-ink-border-subtle",
-            "bg-light-surface text-light-text-bright border border-light-border-subtle",
-          )}`}
-          style={{
-            left: Math.min(hoverX! + 12, width - 150),
-            top: padding.top,
-          }}
-        >
-          <div className={c("text-text-ghost", "text-light-text-ghost")}>
-            {formatTime(timestamps[hoverIdx]!)}
-          </div>
-          {series.map((s) => {
-            const p = s.points.find((pt) => pt.x === timestamps[hoverIdx]!);
-            return p ? (
-              <div key={s.name} className="flex items-center gap-1.5">
-                <span
-                  className="inline-block w-1.5 h-1.5 rounded-full"
-                  style={{ backgroundColor: s.color }}
-                />
-                {series.length > 1 && (
-                  <span className="opacity-70">{s.name}</span>
-                )}
-                <span>{formatYValue(p.y)}</span>
-              </div>
-            ) : null;
-          })}
-        </div>
+      {tooltip.tooltipOpen && tooltip.tooltipData && (
+        <ChartTooltip
+          tooltipRef={tooltip.tooltipRef}
+          data={tooltip.tooltipData as TooltipData}
+          dark={dark}
+        />
       )}
     </div>
+  );
+}
+
+export function TimeSeriesChart(props: Readonly<TimeSeriesChartProps>) {
+  return (
+    <ParentSize>
+      {({ width }) =>
+        width > 0 ? <TimeSeriesInner {...props} width={width} /> : null
+      }
+    </ParentSize>
   );
 }
