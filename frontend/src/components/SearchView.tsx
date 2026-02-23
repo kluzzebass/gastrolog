@@ -81,6 +81,17 @@ export function SearchView() {
   const [cursorPos, setCursorPos] = useState(0);
   const [selectedStore, setSelectedStore] = useState("all");
 
+  // Follow buffer size — persisted to localStorage.
+  const [followBufferSize, setFollowBufferSize] = useState(() => {
+    const stored = localStorage.getItem("gastrolog:followBufferSize");
+    const n = stored ? parseInt(stored, 10) : NaN;
+    return n > 0 ? n : 5000;
+  });
+  const handleFollowBufferSizeChange = (size: number) => {
+    setFollowBufferSize(size);
+    localStorage.setItem("gastrolog:followBufferSize", String(size));
+  };
+
   // Whether results are in reverse (newest-first) order.
   const isReversed = !q.includes("reverse=false");
 
@@ -189,7 +200,7 @@ export function SearchView() {
     stop: stopFollow,
     reset: resetFollow,
     resetNewCount: resetFollowNewCount,
-  } = useFollow({ onError: toastError });
+  } = useFollow({ onError: toastError, maxRecords: followBufferSize });
   const {
     chunks: explainChunks,
     direction: explainDirection,
@@ -940,6 +951,8 @@ export function SearchView() {
               reconnecting={reconnecting}
               reconnectAttempt={reconnectAttempt}
               displayRecords={displayRecords}
+              followBufferSize={followBufferSize}
+              onFollowBufferSizeChange={handleFollowBufferSizeChange}
               onZoomOut={() => {
                 const anchor = selectedRecord?.writeTs?.toDate();
                 if (!anchor) return;

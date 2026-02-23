@@ -1,8 +1,8 @@
-import { useState, useCallback, useRef, type MutableRefObject } from "react";
+import { useState, useCallback, useEffect, useRef, type MutableRefObject } from "react";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { queryClient, Query, Record } from "../client";
 
-const MAX_RECORDS = 5000;
+const DEFAULT_MAX_RECORDS = 5000;
 const INITIAL_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 30_000;
 
@@ -22,7 +22,10 @@ function isAbortError(err: unknown): boolean {
   );
 }
 
-export function useFollow(options?: { onError?: (err: Error) => void }) {
+export function useFollow(options?: { onError?: (err: Error) => void; maxRecords?: number }) {
+  const maxRecords = options?.maxRecords ?? DEFAULT_MAX_RECORDS;
+  const maxRecordsRef = useRef(maxRecords);
+  maxRecordsRef.current = maxRecords;
   const onErrorRef = useRef(options?.onError) as MutableRefObject<((err: Error) => void) | undefined>;
   onErrorRef.current = options?.onError;
 
@@ -45,6 +48,15 @@ export function useFollow(options?: { onError?: (err: Error) => void }) {
   // Throttle: coalesce rapid stream messages into a single render per frame.
   const flushRef = useRef<number | null>(null);
   const dirtyRef = useRef(false);
+
+  // Trim buffer when maxRecords decreases while following.
+  useEffect(() => {
+    const buffer = bufferRef.current;
+    if (buffer.length > maxRecords) {
+      buffer.length = maxRecords;
+      setState((prev) => ({ ...prev, records: [...buffer] }));
+    }
+  }, [maxRecords]);
 
   const cancelReconnect = useCallback(() => {
     if (reconnectTimer.current !== null) {
@@ -89,8 +101,8 @@ export function useFollow(options?: { onError?: (err: Error) => void }) {
           }
 
           buffer.unshift(...response.records);
-          if (buffer.length > MAX_RECORDS) {
-            buffer.length = MAX_RECORDS;
+          if (buffer.length > maxRecordsRef.current) {
+            buffer.length = maxRecordsRef.current;
           }
 
           newCountRef.current += response.records.length;

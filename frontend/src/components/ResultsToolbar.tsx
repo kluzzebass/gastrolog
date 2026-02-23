@@ -2,6 +2,8 @@ import { Record as ProtoRecord } from "../api/client";
 import { ExportButton } from "./ExportButton";
 import { useThemeClass } from "../hooks/useThemeClass";
 
+export const FOLLOW_BUFFER_SIZES = [100, 500, 1000, 2500, 5000, 10_000, 25_000] as const;
+
 interface ResultsToolbarProps {
   dark: boolean;
   isFollowMode: boolean;
@@ -15,6 +17,8 @@ interface ResultsToolbarProps {
   reconnecting: boolean;
   reconnectAttempt: number;
   displayRecords: ProtoRecord[];
+  followBufferSize: number;
+  onFollowBufferSizeChange: (size: number) => void;
   onZoomOut: () => void;
 }
 
@@ -31,6 +35,8 @@ export function ResultsToolbar({
   reconnecting,
   reconnectAttempt,
   displayRecords,
+  followBufferSize,
+  onFollowBufferSizeChange,
   onZoomOut,
 }: Readonly<ResultsToolbarProps>) {
   const c = useThemeClass(dark);
@@ -133,6 +139,26 @@ export function ResultsToolbar({
           {isFollowMode ? followRecords.length : records.length}
           {!isFollowMode && hasMore ? "+" : ""}
         </span>
+        {isFollowMode && (
+          <span className={`flex items-center gap-1 font-mono text-[0.75em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+            <span>/</span>
+            <select
+              value={followBufferSize}
+              onChange={(e) => onFollowBufferSizeChange(Number(e.target.value))}
+              className={`bg-transparent border rounded px-1 py-0.5 cursor-pointer ${c(
+                "border-ink-border-subtle text-text-muted hover:text-text-bright",
+                "border-light-border-subtle text-light-text-muted hover:text-light-text-bright",
+              )}`}
+              title="Follow buffer size — max records kept in memory"
+            >
+              {FOLLOW_BUFFER_SIZES.map((size) => (
+                <option key={size} value={size}>
+                  {size.toLocaleString()}
+                </option>
+              ))}
+            </select>
+          </span>
+        )}
       </div>
       <ExportButton records={displayRecords} dark={dark} />
     </div>
