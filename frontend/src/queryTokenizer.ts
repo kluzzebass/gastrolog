@@ -81,7 +81,7 @@ export const DEFAULT_SYNTAX: SyntaxSets = {
     "reverse", "start", "end", "last", "limit", "pos",
     "source_start", "source_end", "ingest_start", "ingest_end",
   ]),
-  pipeKeywords: new Set(["stats", "where", "eval", "sort", "head", "tail", "slice", "rename", "fields", "raw"]),
+  pipeKeywords: new Set(["stats", "where", "eval", "sort", "head", "tail", "slice", "rename", "fields", "timechart", "raw"]),
   pipeFunctions: new Set([
     "count", "avg", "sum", "min", "max", "bin", "tonumber",
     // Scalar functions.
@@ -529,7 +529,7 @@ function classifyPipeSegment(tokens: QueryToken[], syntax: SyntaxSets): Highligh
         } else if (keyword === "rename") {
           // rename: field as field, field as field, ...
           spans.push(...classifyRenameArgs(tokens.slice(i)));
-        } else if (keyword === "sort" || keyword === "head" || keyword === "tail" || keyword === "slice" || keyword === "fields") {
+        } else if (keyword === "sort" || keyword === "head" || keyword === "tail" || keyword === "slice" || keyword === "timechart" || keyword === "fields") {
           // sort/head/fields: tokens with - as punctuation
           spans.push(...classifySimplePipeArgs(tokens.slice(i)));
         } else {
@@ -1103,6 +1103,9 @@ function validate(spans: HighlightSpan[]): ValidateResult {
       case "tail":
         parseTailOp();
         return;
+      case "timechart":
+        parseTimechartOp();
+        return;
       case "slice":
         parseSliceOp();
         return;
@@ -1418,6 +1421,20 @@ function validate(spans: HighlightSpan[]): ValidateResult {
     }
     if (!/^\d+$/.test(s.text)) {
       fail("expected positive integer after 'tail'");
+      return;
+    }
+    advance(); // consume number
+  }
+
+  // Parse timechart: NUMBER
+  function parseTimechartOp(): void {
+    const s = cur();
+    if (!s || s.role !== "token") {
+      fail("expected number after 'timechart'");
+      return;
+    }
+    if (!/^\d+$/.test(s.text)) {
+      fail("expected positive integer after 'timechart'");
       return;
     }
     advance(); // consume number

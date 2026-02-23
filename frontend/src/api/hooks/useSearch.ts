@@ -101,7 +101,10 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
         error: null,
         records: append || keepPrevious ? prev.records : [],
         resumeToken: append ? prev.resumeToken : null,
-        tableResult: append || keepPrevious ? prev.tableResult : null,
+        // Only preserve tableResult on append (infinite scroll).
+        // keepPrevious preserves records for smooth transitions, but stale
+        // pipeline results must not bleed into a new non-pipeline search.
+        tableResult: append ? prev.tableResult : null,
       }));
 
       try {
@@ -141,6 +144,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
           setState((prev) => ({
             ...prev,
             records: [...allRecords],
+            tableResult: null,
             hasMore,
             resumeToken: lastResumeToken,
           }));

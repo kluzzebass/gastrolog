@@ -18,10 +18,6 @@ service QueryService {
   // Explain returns the query execution plan without executing.
   rpc Explain(ExplainRequest) returns (ExplainResponse);
 
-  // Histogram returns record counts bucketed by time for the given query.
-  // Uses binary search on chunk indexes for O(buckets * log(n)) performance.
-  rpc Histogram(HistogramRequest) returns (HistogramResponse);
-
   // GetContext returns records surrounding a specific record, across all stores.
   // Uses the anchor record's write timestamp to find nearby records.
   rpc GetContext(GetContextRequest) returns (GetContextResponse);
@@ -169,25 +165,6 @@ message PipelineStep {
   string reason = 5;
   string detail = 6;
   string predicate = 7; // What we're filtering for, e.g. "token(error, warn)"
-}
-
-message HistogramRequest {
-  google.protobuf.Timestamp start = 1;
-  google.protobuf.Timestamp end = 2;
-  int32 buckets = 3; // Number of time buckets (default 50 if 0)
-  string expression = 4; // Optional: only used to extract store= filter
-}
-
-message HistogramResponse {
-  repeated HistogramBucket buckets = 1;
-  google.protobuf.Timestamp start = 2; // Actual start of histogram range
-  google.protobuf.Timestamp end = 3;   // Actual end of histogram range
-}
-
-message HistogramBucket {
-  google.protobuf.Timestamp ts = 1; // Bucket start time
-  int64 count = 2;                  // Record count in this bucket
-  map<string, int64> level_counts = 3; // Per-severity counts, e.g. {"error": 12, "warn": 45}
 }
 
 message GetContextRequest {

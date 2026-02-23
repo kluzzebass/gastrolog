@@ -1028,6 +1028,70 @@ func TestParsePipelineNewOpsErrors(t *testing.T) {
 	}
 }
 
+func TestParsePipelineTimechart(t *testing.T) {
+	p, err := ParsePipeline("error | timechart 50")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	if len(p.Pipes) != 1 {
+		t.Fatalf("expected 1 pipe, got %d", len(p.Pipes))
+	}
+	tc, ok := p.Pipes[0].(*TimechartOp)
+	if !ok {
+		t.Fatalf("expected TimechartOp, got %T", p.Pipes[0])
+	}
+	if tc.N != 50 {
+		t.Errorf("expected N=50, got %d", tc.N)
+	}
+}
+
+func TestParsePipelineTimechartBarePipe(t *testing.T) {
+	p, err := ParsePipeline("| timechart 100")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	if p.Filter != nil {
+		t.Errorf("expected nil filter (match-all), got %v", p.Filter)
+	}
+	tc := p.Pipes[0].(*TimechartOp)
+	if tc.N != 100 {
+		t.Errorf("expected N=100, got %d", tc.N)
+	}
+}
+
+func TestParsePipelineTimechartString(t *testing.T) {
+	p, err := ParsePipeline("error | timechart 50")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	got := p.String()
+	want := "token(error) | timechart 50"
+	if got != want {
+		t.Errorf("String() = %q, want %q", got, want)
+	}
+}
+
+func TestParsePipelineTimechartErrors(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"timechart no number", "error | timechart"},
+		{"timechart zero", "error | timechart 0"},
+		{"timechart negative", "error | timechart -1"},
+		{"timechart not number", "error | timechart abc"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParsePipeline(tt.input)
+			if err == nil {
+				t.Fatalf("ParsePipeline(%q) expected error, got nil", tt.input)
+			}
+		})
+	}
+}
+
 func TestParsePipelineRaw(t *testing.T) {
 	p, err := ParsePipeline("error | raw")
 	if err != nil {

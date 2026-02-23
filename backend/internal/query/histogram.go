@@ -3,29 +3,17 @@ package query
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
+	"gastrolog/internal/querylang"
 )
 
-// HistogramQuery describes what to compute.
-type HistogramQuery struct {
-	Query      Query // Time bounds, filters, store filter
-	NumBuckets int
-}
-
-// HistogramResult holds bucketed counts.
-type HistogramResult struct {
-	Start       time.Time
-	End         time.Time
-	Counts      []int64
-	LevelCounts []map[string]int64
-}
-
-// severityLevels are the canonical severity names we track in histograms.
+// severityLevels are the canonical severity names we track in timecharts.
 var severityLevels = []string{"error", "warn", "info", "debug", "trace"}
 
 // classifySeverity maps a raw value to a canonical severity level.
@@ -81,16 +69,19 @@ var severityAttrKVLookups = map[string][][2]string{
 	"trace": {{"severity_name", "trace"}},
 }
 
-// Histogram returns record counts bucketed by time.
+// runTimechart executes a timechart pipeline operator. It counts records by
+// time bucket with severity breakdown, using index binary search (no record
+// scanning) for unfiltered queries.
 //
 // Two modes:
-//   - Unfiltered (no tokens, kv, severity): uses FindStartPosition binary search
-//     on idx.log for O(buckets * log(n)) per chunk. Very fast.
-//   - Filtered: runs the full query engine search (unlimited) and buckets each
-//     matching record. Capped at 1M records to prevent runaway scans.
-func (e *Engine) Histogram(ctx context.Context, hq HistogramQuery) (*HistogramResult, error) {
-	q := hq.Query
-	numBuckets := hq.NumBuckets
+//   - No pre-ops and no filter: fast path using FindStartPosition binary search.
+//     O(buckets * log(n)) per chunk. Severity uses KV index lookups.
+//   - With pre-ops or filter: falls back to Search() → applyRecordOps() →
+//     manual binning. Capped at 1M records.
+//
+// Returns a TableResult with columns ["_time", "level", "count"].
+func (e *Engine) runTimechart(ctx context.Context, q Query, tc *querylang.TimechartOp, preOps []querylang.PipeOp) (*TableResult, error) {
+	numBuckets := tc.N
 	if numBuckets <= 0 {
 		numBuckets = 50
 	}
@@ -133,13 +124,13 @@ func (e *Engine) Histogram(ctx context.Context, hq HistogramQuery) (*HistogramRe
 		}
 	}
 
-	// Normalize: histogram always needs lower < upper regardless of query direction.
+	// Normalize: timechart always needs lower < upper regardless of query direction.
 	start, end := q.Start, q.End
 	if !start.IsZero() && !end.IsZero() && end.Before(start) {
 		start, end = end, start
 	}
 	if start.IsZero() || end.IsZero() || !start.Before(end) {
-		return &HistogramResult{}, nil
+		return &TableResult{Columns: []string{"_time", "level", "count"}}, nil
 	}
 
 	bucketWidth := end.Sub(start) / time.Duration(numBuckets)
@@ -152,40 +143,64 @@ func (e *Engine) Histogram(ctx context.Context, hq HistogramQuery) (*HistogramRe
 	for i := range levelCounts {
 		levelCounts[i] = make(map[string]int64)
 	}
-	hasFilter := q.BoolExpr != nil
 
-	if hasFilter {
-		// Filtered path: scan matching records and bucket them.
+	hasFilter := q.BoolExpr != nil
+	hasPreOps := len(preOps) > 0
+
+	if hasFilter || hasPreOps {
+		// Filtered/pre-ops path: scan matching records and bucket them.
 		q.Limit = 0
 		iter, _ := e.Search(ctx, q, nil)
-		const maxScan = 1_000_000
-		scanned := 0
-		for rec, err := range iter {
+
+		if hasPreOps {
+			records, err := applyRecordOps(iter, preOps)
 			if err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					break
-				}
 				return nil, err
 			}
-			ts := rec.WriteTS
-			if ts.Before(start) || !ts.Before(end) {
-				continue
+			for _, rec := range records {
+				ts := rec.WriteTS
+				if ts.Before(start) || !ts.Before(end) {
+					continue
+				}
+				idx := int(ts.Sub(start) / bucketWidth)
+				if idx >= numBuckets {
+					idx = numBuckets - 1
+				}
+				counts[idx]++
+				if level := severityFromRecord(rec); level != "" {
+					levelCounts[idx][level]++
+				}
 			}
-			idx := int(ts.Sub(start) / bucketWidth)
-			if idx >= numBuckets {
-				idx = numBuckets - 1
-			}
-			counts[idx]++
-			if level := severityFromRecord(rec); level != "" {
-				levelCounts[idx][level]++
-			}
-			scanned++
-			if scanned >= maxScan {
-				break
+		} else {
+			const maxScan = 1_000_000
+			scanned := 0
+			for rec, err := range iter {
+				if err != nil {
+					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+						break
+					}
+					return nil, err
+				}
+				ts := rec.WriteTS
+				if ts.Before(start) || !ts.Before(end) {
+					continue
+				}
+				idx := int(ts.Sub(start) / bucketWidth)
+				if idx >= numBuckets {
+					idx = numBuckets - 1
+				}
+				counts[idx]++
+				if level := severityFromRecord(rec); level != "" {
+					levelCounts[idx][level]++
+				}
+				scanned++
+				if scanned >= maxScan {
+					break
+				}
 			}
 		}
 	} else {
-		// Unfiltered path: use FindStartPosition for O(buckets * log(n)).
+		// Unfiltered fast path: use FindStartPosition for O(buckets * log(n)).
 		for _, storeID := range selectedStores {
 			cm, im := e.getStoreManagers(storeID)
 			if cm == nil {
@@ -202,28 +217,57 @@ func (e *Engine) Histogram(ctx context.Context, hq HistogramQuery) (*HistogramRe
 				if meta.EndTS.Before(start) || !meta.StartTS.Before(end) {
 					continue
 				}
-				histogramChunkFast(cm, meta, start, bucketWidth, numBuckets, counts)
+				timechartChunkFast(cm, meta, start, bucketWidth, numBuckets, counts)
 				if meta.Sealed {
-					histogramChunkSeverity(cm, im, meta, start, bucketWidth, numBuckets, levelCounts)
+					timechartChunkSeverity(cm, im, meta, start, bucketWidth, numBuckets, levelCounts)
 				} else {
-					// Unsealed chunks have no indexes; scan records for severity.
-					histogramChunkSeverityScan(cm, meta, start, bucketWidth, numBuckets, levelCounts)
+					timechartChunkSeverityScan(cm, meta, start, bucketWidth, numBuckets, levelCounts)
 				}
 			}
 		}
 	}
 
-	return &HistogramResult{
-		Start:       start,
-		End:         end,
-		Counts:      counts,
-		LevelCounts: levelCounts,
-	}, nil
+	return timechartToTable(start, bucketWidth, numBuckets, counts, levelCounts), nil
 }
 
-// histogramChunkFast counts records per bucket using binary search on idx.log.
+// timechartToTable converts bucketed counts into a TableResult with columns
+// ["_time", "level", "count"]. Each bucket × level combination is a row.
+func timechartToTable(start time.Time, bucketWidth time.Duration, numBuckets int, counts []int64, levelCounts []map[string]int64) *TableResult {
+	columns := []string{"_time", "level", "count"}
+	var rows [][]string
+
+	for i := range numBuckets {
+		ts := start.Add(bucketWidth * time.Duration(i)).Format(time.RFC3339Nano)
+		total := counts[i]
+
+		if len(levelCounts[i]) == 0 {
+			// No severity breakdown — emit a single row with empty level.
+			rows = append(rows, []string{ts, "", fmt.Sprintf("%d", total)})
+			continue
+		}
+
+		// Emit one row per level that has counts.
+		var levelTotal int64
+		for _, level := range severityLevels {
+			count, ok := levelCounts[i][level]
+			if !ok || count == 0 {
+				continue
+			}
+			rows = append(rows, []string{ts, level, fmt.Sprintf("%d", count)})
+			levelTotal += count
+		}
+		// Emit remainder as empty-level row if total > sum of level counts.
+		if remainder := total - levelTotal; remainder > 0 {
+			rows = append(rows, []string{ts, "", fmt.Sprintf("%d", remainder)})
+		}
+	}
+
+	return &TableResult{Columns: columns, Rows: rows}
+}
+
+// timechartChunkFast counts records per bucket using binary search on idx.log.
 // O(buckets * log(n)) per chunk, no record scanning.
-func histogramChunkFast(
+func timechartChunkFast(
 	cm chunk.ChunkManager,
 	meta chunk.ChunkMeta,
 	start time.Time,
@@ -270,9 +314,9 @@ func histogramChunkFast(
 	}
 }
 
-// histogramChunkSeverity populates per-level counts for a chunk using KV indexes.
+// timechartChunkSeverity populates per-level counts for a chunk using KV indexes.
 // Only works on sealed, indexed chunks.
-func histogramChunkSeverity(
+func timechartChunkSeverity(
 	cm chunk.ChunkManager,
 	im index.IndexManager,
 	meta chunk.ChunkMeta,
@@ -296,8 +340,6 @@ func histogramChunkSeverity(
 	attrKVIdx, err := im.OpenAttrKVIndex(meta.ID)
 	var attrKVReader *index.KVIndexReader
 	if err == nil {
-		// AttrKVIndex uses AttrKVIndexEntry, but we need KVIndexReader.
-		// Convert entries.
 		attrEntries := attrKVIdx.Entries()
 		kvEntries := make([]index.KVIndexEntry, len(attrEntries))
 		for i, e := range attrEntries {
@@ -307,7 +349,6 @@ func histogramChunkSeverity(
 	}
 
 	for _, level := range severityLevels {
-		// Collect positions from both KV and attr KV indexes.
 		var allPositions []uint64
 
 		for _, kv := range severityKVLookups[level] {
@@ -328,11 +369,9 @@ func histogramChunkSeverity(
 			continue
 		}
 
-		// Deduplicate positions (a record might match both level=error and severity_name=error).
 		slices.Sort(allPositions)
 		allPositions = slices.Compact(allPositions)
 
-		// Read WriteTS for each position and bucket them.
 		timestamps, err := cm.ReadWriteTimestamps(meta.ID, allPositions)
 		if err != nil {
 			continue
@@ -351,10 +390,9 @@ func histogramChunkSeverity(
 	}
 }
 
-// histogramChunkSeverityScan populates per-level counts for an unsealed chunk
-// by scanning records and checking attrs. The level digester sets a "level"
-// attribute at ingest time, so this is reliable without indexes.
-func histogramChunkSeverityScan(
+// timechartChunkSeverityScan populates per-level counts for an unsealed chunk
+// by scanning records and checking attrs.
+func timechartChunkSeverityScan(
 	cm chunk.ChunkManager,
 	meta chunk.ChunkMeta,
 	start time.Time,

@@ -255,6 +255,20 @@ func (f *FieldsOp) String() string {
 	return prefix + strings.Join(f.Names, ", ")
 }
 
+// TimechartOp represents: timechart N
+// Counts records by time bucket with severity breakdown, using index-based
+// binary search for unfiltered queries. Treated like StatsOp — cannot coexist
+// with stats, acts as the aggregation step.
+type TimechartOp struct {
+	N int // number of time buckets
+}
+
+func (TimechartOp) pipeOp() {}
+
+func (t *TimechartOp) String() string {
+	return fmt.Sprintf("timechart %d", t.N)
+}
+
 // RawOp represents: raw
 // Forces the pipeline result into a flat table — no charts, no single-value display.
 // For non-aggregating pipelines, converts records to a table.

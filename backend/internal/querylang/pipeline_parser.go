@@ -115,6 +115,8 @@ func (p *parser) parsePipeOp() (PipeOp, error) {
 		return p.parseRenameOp()
 	case "fields":
 		return p.parseFieldsOp()
+	case "timechart":
+		return p.parseTimechartOp()
 	case "raw":
 		return p.parseRawOp()
 	default:
@@ -749,6 +751,30 @@ func (p *parser) parseSliceOp() (*SliceOp, error) {
 	}
 
 	return &SliceOp{Start: start, End: end}, nil
+}
+
+// parseTimechartOp parses: "timechart" NUMBER
+func (p *parser) parseTimechartOp() (*TimechartOp, error) {
+	if err := p.advance(); err != nil { // consume "timechart"
+		return nil, err
+	}
+
+	if p.cur.Kind != TokWord || !isNumericLiteral(p.cur.Lit) {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected number after 'timechart', got %s", p.cur.Lit)
+	}
+
+	var n int
+	if _, err := fmt.Sscanf(p.cur.Lit, "%d", &n); err != nil {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "invalid timechart bucket count: %s", p.cur.Lit)
+	}
+	if n <= 0 {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "timechart bucket count must be positive, got %d", n)
+	}
+
+	if err := p.advance(); err != nil { // consume number
+		return nil, err
+	}
+	return &TimechartOp{N: n}, nil
 }
 
 // parseRenameOp parses: "rename" field "as" field ("," field "as" field)*

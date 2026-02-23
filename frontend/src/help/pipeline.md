@@ -205,6 +205,18 @@ Drop mode — remove these fields:
 * | fields - debug, trace, pid
 ```
 
+## Timechart Operator
+
+The `timechart` operator counts records per time bucket with severity breakdown. Uses index-based binary search — no record scanning needed for unfiltered queries.
+
+```
+| timechart 50
+```
+
+The argument is the number of buckets. Bin width is computed automatically from the query's time range. Results include per-bucket severity counts (error, warn, info, debug, trace) when severity information is available.
+
+Timechart cannot be combined with `stats` and is not supported in follow mode.
+
 ## Raw Operator
 
 The `raw` operator forces the pipeline output into a plain table — no charts, no single-value display. Useful for debugging what the pipeline actually produces.

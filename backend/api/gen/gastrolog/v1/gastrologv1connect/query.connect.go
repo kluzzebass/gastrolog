@@ -39,8 +39,6 @@ const (
 	QueryServiceFollowProcedure = "/gastrolog.v1.QueryService/Follow"
 	// QueryServiceExplainProcedure is the fully-qualified name of the QueryService's Explain RPC.
 	QueryServiceExplainProcedure = "/gastrolog.v1.QueryService/Explain"
-	// QueryServiceHistogramProcedure is the fully-qualified name of the QueryService's Histogram RPC.
-	QueryServiceHistogramProcedure = "/gastrolog.v1.QueryService/Histogram"
 	// QueryServiceGetContextProcedure is the fully-qualified name of the QueryService's GetContext RPC.
 	QueryServiceGetContextProcedure = "/gastrolog.v1.QueryService/GetContext"
 	// QueryServiceGetSyntaxProcedure is the fully-qualified name of the QueryService's GetSyntax RPC.
@@ -56,9 +54,6 @@ type QueryServiceClient interface {
 	Follow(context.Context, *connect.Request[v1.FollowRequest]) (*connect.ServerStreamForClient[v1.FollowResponse], error)
 	// Explain returns the query execution plan without executing.
 	Explain(context.Context, *connect.Request[v1.ExplainRequest]) (*connect.Response[v1.ExplainResponse], error)
-	// Histogram returns record counts bucketed by time for the given query.
-	// Uses binary search on chunk indexes for O(buckets * log(n)) performance.
-	Histogram(context.Context, *connect.Request[v1.HistogramRequest]) (*connect.Response[v1.HistogramResponse], error)
 	// GetContext returns records surrounding a specific record, across all stores.
 	// Uses the anchor record's write timestamp to find nearby records.
 	GetContext(context.Context, *connect.Request[v1.GetContextRequest]) (*connect.Response[v1.GetContextResponse], error)
@@ -96,12 +91,6 @@ func NewQueryServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(queryServiceMethods.ByName("Explain")),
 			connect.WithClientOptions(opts...),
 		),
-		histogram: connect.NewClient[v1.HistogramRequest, v1.HistogramResponse](
-			httpClient,
-			baseURL+QueryServiceHistogramProcedure,
-			connect.WithSchema(queryServiceMethods.ByName("Histogram")),
-			connect.WithClientOptions(opts...),
-		),
 		getContext: connect.NewClient[v1.GetContextRequest, v1.GetContextResponse](
 			httpClient,
 			baseURL+QueryServiceGetContextProcedure,
@@ -122,7 +111,6 @@ type queryServiceClient struct {
 	search     *connect.Client[v1.SearchRequest, v1.SearchResponse]
 	follow     *connect.Client[v1.FollowRequest, v1.FollowResponse]
 	explain    *connect.Client[v1.ExplainRequest, v1.ExplainResponse]
-	histogram  *connect.Client[v1.HistogramRequest, v1.HistogramResponse]
 	getContext *connect.Client[v1.GetContextRequest, v1.GetContextResponse]
 	getSyntax  *connect.Client[v1.GetSyntaxRequest, v1.GetSyntaxResponse]
 }
@@ -140,11 +128,6 @@ func (c *queryServiceClient) Follow(ctx context.Context, req *connect.Request[v1
 // Explain calls gastrolog.v1.QueryService.Explain.
 func (c *queryServiceClient) Explain(ctx context.Context, req *connect.Request[v1.ExplainRequest]) (*connect.Response[v1.ExplainResponse], error) {
 	return c.explain.CallUnary(ctx, req)
-}
-
-// Histogram calls gastrolog.v1.QueryService.Histogram.
-func (c *queryServiceClient) Histogram(ctx context.Context, req *connect.Request[v1.HistogramRequest]) (*connect.Response[v1.HistogramResponse], error) {
-	return c.histogram.CallUnary(ctx, req)
 }
 
 // GetContext calls gastrolog.v1.QueryService.GetContext.
@@ -166,9 +149,6 @@ type QueryServiceHandler interface {
 	Follow(context.Context, *connect.Request[v1.FollowRequest], *connect.ServerStream[v1.FollowResponse]) error
 	// Explain returns the query execution plan without executing.
 	Explain(context.Context, *connect.Request[v1.ExplainRequest]) (*connect.Response[v1.ExplainResponse], error)
-	// Histogram returns record counts bucketed by time for the given query.
-	// Uses binary search on chunk indexes for O(buckets * log(n)) performance.
-	Histogram(context.Context, *connect.Request[v1.HistogramRequest]) (*connect.Response[v1.HistogramResponse], error)
 	// GetContext returns records surrounding a specific record, across all stores.
 	// Uses the anchor record's write timestamp to find nearby records.
 	GetContext(context.Context, *connect.Request[v1.GetContextRequest]) (*connect.Response[v1.GetContextResponse], error)
@@ -202,12 +182,6 @@ func NewQueryServiceHandler(svc QueryServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(queryServiceMethods.ByName("Explain")),
 		connect.WithHandlerOptions(opts...),
 	)
-	queryServiceHistogramHandler := connect.NewUnaryHandler(
-		QueryServiceHistogramProcedure,
-		svc.Histogram,
-		connect.WithSchema(queryServiceMethods.ByName("Histogram")),
-		connect.WithHandlerOptions(opts...),
-	)
 	queryServiceGetContextHandler := connect.NewUnaryHandler(
 		QueryServiceGetContextProcedure,
 		svc.GetContext,
@@ -228,8 +202,6 @@ func NewQueryServiceHandler(svc QueryServiceHandler, opts ...connect.HandlerOpti
 			queryServiceFollowHandler.ServeHTTP(w, r)
 		case QueryServiceExplainProcedure:
 			queryServiceExplainHandler.ServeHTTP(w, r)
-		case QueryServiceHistogramProcedure:
-			queryServiceHistogramHandler.ServeHTTP(w, r)
 		case QueryServiceGetContextProcedure:
 			queryServiceGetContextHandler.ServeHTTP(w, r)
 		case QueryServiceGetSyntaxProcedure:
@@ -253,10 +225,6 @@ func (UnimplementedQueryServiceHandler) Follow(context.Context, *connect.Request
 
 func (UnimplementedQueryServiceHandler) Explain(context.Context, *connect.Request[v1.ExplainRequest]) (*connect.Response[v1.ExplainResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.QueryService.Explain is not implemented"))
-}
-
-func (UnimplementedQueryServiceHandler) Histogram(context.Context, *connect.Request[v1.HistogramRequest]) (*connect.Response[v1.HistogramResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.QueryService.Histogram is not implemented"))
 }
 
 func (UnimplementedQueryServiceHandler) GetContext(context.Context, *connect.Request[v1.GetContextRequest]) (*connect.Response[v1.GetContextResponse], error) {

@@ -181,6 +181,9 @@ func (s *QueryServer) Follow(
 			case *querylang.SliceOp:
 				return connect.NewError(connect.CodeInvalidArgument,
 					fmt.Errorf("slice operator is not supported in follow mode"))
+			case *querylang.TimechartOp:
+				return connect.NewError(connect.CodeInvalidArgument,
+					fmt.Errorf("timechart operator is not supported in follow mode"))
 			}
 		}
 	}
@@ -271,84 +274,6 @@ func (s *QueryServer) Explain(
 	return connect.NewResponse(resp), nil
 }
 
-// Histogram returns record counts bucketed by time.
-func (s *QueryServer) Histogram(
-	ctx context.Context,
-	req *connect.Request[apiv1.HistogramRequest],
-) (*connect.Response[apiv1.HistogramResponse], error) {
-	if s.queryTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, s.queryTimeout)
-		defer cancel()
-	}
-
-	const maxHistogramBuckets int32 = 1000
-	if req.Msg.Buckets > maxHistogramBuckets {
-		return nil, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("buckets must be <= %d, got %d", maxHistogramBuckets, req.Msg.Buckets))
-	}
-	if req.Msg.Buckets < 0 {
-		return nil, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("buckets must be non-negative"))
-	}
-
-	if len(req.Msg.Expression) > maxExpressionLength {
-		return nil, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("expression too long: %d bytes (max %d)", len(req.Msg.Expression), maxExpressionLength))
-	}
-
-	// Parse expression to extract time bounds, store filter, and query filters.
-	var q query.Query
-	if req.Msg.Expression != "" {
-		var err error
-		q, _, err = parseExpression(req.Msg.Expression)
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument, err)
-		}
-	}
-
-	if req.Msg.Start != nil {
-		q.Start = req.Msg.Start.AsTime()
-	}
-	if req.Msg.End != nil {
-		q.End = req.Msg.End.AsTime()
-	}
-
-	eng := s.orch.MultiStoreQueryEngine()
-	result, err := eng.Histogram(ctx, query.HistogramQuery{
-		Query:      q,
-		NumBuckets: int(req.Msg.Buckets),
-	})
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-
-	if len(result.Counts) == 0 {
-		return connect.NewResponse(&apiv1.HistogramResponse{}), nil
-	}
-
-	numBuckets := len(result.Counts)
-	bucketWidth := result.End.Sub(result.Start) / time.Duration(numBuckets)
-
-	resp := &apiv1.HistogramResponse{
-		Start:   timestamppb.New(result.Start),
-		End:     timestamppb.New(result.End),
-		Buckets: make([]*apiv1.HistogramBucket, numBuckets),
-	}
-	for i := range numBuckets {
-		bucket := &apiv1.HistogramBucket{
-			Ts:    timestamppb.New(result.Start.Add(bucketWidth * time.Duration(i))),
-			Count: result.Counts[i],
-		}
-		if len(result.LevelCounts[i]) > 0 {
-			bucket.LevelCounts = result.LevelCounts[i]
-		}
-		resp.Buckets[i] = bucket
-	}
-
-	return connect.NewResponse(resp), nil
-}
-
 // GetContext returns records surrounding a specific record, across all stores.
 func (s *QueryServer) GetContext(
 	ctx context.Context,
@@ -411,7 +336,7 @@ func (s *QueryServer) GetSyntax(
 			"reverse", "start", "end", "last", "limit", "pos",
 			"source_start", "source_end", "ingest_start", "ingest_end",
 		},
-		PipeKeywords:  []string{"stats", "where", "eval", "sort", "head", "tail", "slice", "rename", "fields", "raw"},
+		PipeKeywords:  []string{"stats", "where", "eval", "sort", "head", "tail", "slice", "rename", "fields", "timechart", "raw"},
 		PipeFunctions: []string{"count", "avg", "sum", "min", "max", "bin", "tonumber"},
 	}), nil
 }
@@ -632,13 +557,16 @@ func tableResultToProto(result *query.TableResult, pipeline *querylang.Pipeline)
 		rows[i] = &apiv1.TableRow{Values: row}
 	}
 
-	// Determine result type from pipeline: timeseries if bin() is present,
-	// but raw forces plain table.
+	// Determine result type from pipeline: timeseries if bin() or timechart
+	// is present, but raw forces plain table.
 	resultType := "table"
 	hasRaw := false
 	for _, pipe := range pipeline.Pipes {
 		if _, ok := pipe.(*querylang.RawOp); ok {
 			hasRaw = true
+		}
+		if _, ok := pipe.(*querylang.TimechartOp); ok {
+			resultType = "timeseries"
 		}
 		if stats, ok := pipe.(*querylang.StatsOp); ok {
 			for _, g := range stats.Groups {

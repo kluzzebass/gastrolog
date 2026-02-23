@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { ExplainRequest, ExplainResponse, FollowRequest, FollowResponse, GetContextRequest, GetContextResponse, GetSyntaxRequest, GetSyntaxResponse, HistogramRequest, HistogramResponse, SearchRequest, SearchResponse } from "./query_pb.js";
+import { ExplainRequest, ExplainResponse, FollowRequest, FollowResponse, GetContextRequest, GetContextResponse, GetSyntaxRequest, GetSyntaxResponse, SearchRequest, SearchResponse } from "./query_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -46,18 +46,6 @@ export const QueryService = {
       name: "Explain",
       I: ExplainRequest,
       O: ExplainResponse,
-      kind: MethodKind.Unary,
-    },
-    /**
-     * Histogram returns record counts bucketed by time for the given query.
-     * Uses binary search on chunk indexes for O(buckets * log(n)) performance.
-     *
-     * @generated from rpc gastrolog.v1.QueryService.Histogram
-     */
-    histogram: {
-      name: "Histogram",
-      I: HistogramRequest,
-      O: HistogramResponse,
       kind: MethodKind.Unary,
     },
     /**

@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from "react";
-import { queryClient, HistogramBucket } from "../client";
+import { queryClient, Query } from "../client";
 
 export interface HistogramData {
   buckets: {
@@ -36,30 +36,88 @@ export function useHistogram() {
       setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
       try {
-        const response = await queryClient.histogram(
-          { expression, buckets: numBuckets },
-          { signal: abortRef.current.signal },
-        );
+        // Build a pipeline query: append "| timechart N" to the expression.
+        // Empty expression becomes "| timechart N" (bare pipe = match-all).
+        const timechartExpr = expression.trim()
+          ? `${expression.trim()} | timechart ${numBuckets}`
+          : `| timechart ${numBuckets}`;
 
-        const buckets = response.buckets.map((b: HistogramBucket) => ({
-          ts: b.ts ? b.ts.toDate() : new Date(),
-          count: Number(b.count),
-          levelCounts: Object.fromEntries(
-            Object.entries(b.levelCounts).map(([k, v]) => [k, Number(v)]),
-          ),
-        }));
+        const query = new Query();
+        query.expression = timechartExpr;
+
+        // Stream the search response — timechart returns a single response
+        // with tableResult containing columns ["_time", "level", "count"].
+        let tableResult: { columns: string[]; rows: { values: string[] }[] } | null = null;
+
+        for await (const response of queryClient.search(
+          { query, resumeToken: new Uint8Array(0) },
+          { signal: abortRef.current.signal },
+        )) {
+          if (response.tableResult) {
+            tableResult = response.tableResult;
+            break;
+          }
+        }
+
+        if (!tableResult) {
+          setState({ data: null, isLoading: false, error: null });
+          abortRef.current = null;
+          return;
+        }
+
+        // Transform TableResult (columns: _time, level, count) into HistogramData.
+        // Rows are per bucket × level; group by _time to build buckets.
+        const timeIdx = tableResult.columns.indexOf("_time");
+        const levelIdx = tableResult.columns.indexOf("level");
+        const countIdx = tableResult.columns.indexOf("count");
+
+        if (timeIdx < 0 || countIdx < 0) {
+          setState({ data: null, isLoading: false, error: null });
+          abortRef.current = null;
+          return;
+        }
+
+        // Group rows by timestamp.
+        const bucketMap = new Map<string, { count: number; levelCounts: Record<string, number> }>();
+
+        for (const row of tableResult.rows) {
+          const tsStr = row.values[timeIdx]!;
+          const level = levelIdx >= 0 ? row.values[levelIdx]! : "";
+          const count = Number(row.values[countIdx]!);
+
+          let bucket = bucketMap.get(tsStr);
+          if (!bucket) {
+            bucket = { count: 0, levelCounts: {} };
+            bucketMap.set(tsStr, bucket);
+          }
+          bucket.count += count;
+          if (level) {
+            bucket.levelCounts[level] = (bucket.levelCounts[level] ?? 0) + count;
+          }
+        }
+
+        // Convert to sorted array.
+        const buckets = Array.from(bucketMap.entries())
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([tsStr, data]) => ({
+            ts: new Date(tsStr),
+            count: data.count,
+            levelCounts: data.levelCounts,
+          }));
+
+        const start = buckets.length > 0 ? buckets[0]!.ts : null;
+        const end = buckets.length > 0 ? buckets[buckets.length - 1]!.ts : null;
 
         setState({
-          data: {
-            buckets,
-            start: response.start ? response.start.toDate() : null,
-            end: response.end ? response.end.toDate() : null,
-          },
+          data: { buckets, start, end },
           isLoading: false,
           error: null,
         });
       } catch (err) {
-        if (err instanceof Error && err.name === "AbortError") {
+        if (
+          (err instanceof Error && err.name === "AbortError") ||
+          (err instanceof Error && err.message.includes("aborted"))
+        ) {
           return;
         }
         setState((prev) => ({
@@ -68,6 +126,7 @@ export function useHistogram() {
           error: err instanceof Error ? err : new Error(String(err)),
         }));
       }
+      abortRef.current = null;
     },
     [],
   );

@@ -33,27 +33,54 @@ func CompileFilter(expr querylang.Expr) func(chunk.Record) bool {
 // Without stats, returns records; with stats, returns a table.
 // The raw operator forces all results into a flat table.
 func (e *Engine) RunPipeline(ctx context.Context, q Query, pipeline *querylang.Pipeline) (*PipelineResult, error) {
-	// Split operators into pre-stats and post-stats, detect raw.
+	// Split operators into pre-stats and post-stats, detect raw and timechart.
 	var preOps, postOps []querylang.PipeOp
 	var statsOp *querylang.StatsOp
+	var timechartOp *querylang.TimechartOp
 	hasRaw := false
 	for _, pipe := range pipeline.Pipes {
 		if s, ok := pipe.(*querylang.StatsOp); ok {
 			if statsOp != nil {
 				return nil, fmt.Errorf("pipeline can contain at most one stats operator")
 			}
+			if timechartOp != nil {
+				return nil, fmt.Errorf("pipeline cannot contain both timechart and stats")
+			}
 			statsOp = s
+			continue
+		}
+		if tc, ok := pipe.(*querylang.TimechartOp); ok {
+			if timechartOp != nil {
+				return nil, fmt.Errorf("pipeline can contain at most one timechart operator")
+			}
+			if statsOp != nil {
+				return nil, fmt.Errorf("pipeline cannot contain both timechart and stats")
+			}
+			timechartOp = tc
 			continue
 		}
 		if _, ok := pipe.(*querylang.RawOp); ok {
 			hasRaw = true
 			continue // raw is consumed as a flag, not an operator to execute
 		}
-		if statsOp == nil {
+		if statsOp == nil && timechartOp == nil {
 			preOps = append(preOps, pipe)
 		} else {
 			postOps = append(postOps, pipe)
 		}
+	}
+
+	// Timechart: fast index-based counting path.
+	if timechartOp != nil {
+		table, err := e.runTimechart(ctx, q, timechartOp, preOps)
+		if err != nil {
+			return nil, err
+		}
+		table, err = applyTableOps(table, postOps)
+		if err != nil {
+			return nil, err
+		}
+		return &PipelineResult{Table: table}, nil
 	}
 
 	// Determine if we can apply a head optimization: when the pipeline is
