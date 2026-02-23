@@ -24,6 +24,15 @@ export function useIngesterStatus(id: string) {
   });
 }
 
+/** Strip empty-string values from params so the backend treats them as unset. */
+function stripEmptyParams(params: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== "") out[k] = v;
+  }
+  return out;
+}
+
 export function usePutIngester() {
   const qc = useQueryClient();
   return useMutation({
@@ -40,7 +49,7 @@ export function usePutIngester() {
           name: args.name,
           type: args.type,
           enabled: args.enabled,
-          params: args.params,
+          params: stripEmptyParams(args.params),
         },
       });
     },
@@ -63,7 +72,7 @@ export function useTestIngester() {
     mutationFn: async (args: { type: string; params: Record<string, string> }) => {
       const response = await configClient.testIngester({
         type: args.type,
-        params: args.params,
+        params: stripEmptyParams(args.params),
       });
       return response;
     },

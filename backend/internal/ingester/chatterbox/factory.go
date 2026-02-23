@@ -60,7 +60,7 @@ func NewIngester(id uuid.UUID, params map[string]string, logger *slog.Logger) (o
 	hostCount := defaultHostCount
 	serviceCount := defaultServiceCount
 
-	if v, ok := params["minInterval"]; ok {
+	if v := params["minInterval"]; v != "" {
 		parsed, err := time.ParseDuration(v)
 		if err != nil {
 			return nil, fmt.Errorf("invalid minInterval %q: %w", v, err)
@@ -71,7 +71,7 @@ func NewIngester(id uuid.UUID, params map[string]string, logger *slog.Logger) (o
 		minInterval = parsed
 	}
 
-	if v, ok := params["maxInterval"]; ok {
+	if v := params["maxInterval"]; v != "" {
 		parsed, err := time.ParseDuration(v)
 		if err != nil {
 			return nil, fmt.Errorf("invalid maxInterval %q: %w", v, err)
@@ -86,7 +86,7 @@ func NewIngester(id uuid.UUID, params map[string]string, logger *slog.Logger) (o
 		return nil, fmt.Errorf("minInterval (%v) must not exceed maxInterval (%v)", minInterval, maxInterval)
 	}
 
-	if v, ok := params["hostCount"]; ok {
+	if v := params["hostCount"]; v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
 			return nil, fmt.Errorf("invalid hostCount %q: %w", v, err)
@@ -97,7 +97,7 @@ func NewIngester(id uuid.UUID, params map[string]string, logger *slog.Logger) (o
 		hostCount = n
 	}
 
-	if v, ok := params["serviceCount"]; ok {
+	if v := params["serviceCount"]; v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
 			return nil, fmt.Errorf("invalid serviceCount %q: %w", v, err)
