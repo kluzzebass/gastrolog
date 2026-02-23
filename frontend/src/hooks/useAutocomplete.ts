@@ -9,7 +9,6 @@ const OPERATORS = ["AND", "OR", "NOT"];
 // Scalar functions (abs, ceil, len, substr, etc.) belong in where/eval only.
 const AGG_FUNCTIONS = new Set([
   "count", "avg", "sum", "min", "max",
-  "dcount", "median", "first", "last", "values",
 ]);
 
 // Known values for directives that have a fixed set of options.

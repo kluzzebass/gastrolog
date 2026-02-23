@@ -331,13 +331,20 @@ func (s *QueryServer) GetSyntax(
 	_ context.Context,
 	_ *connect.Request[apiv1.GetSyntaxRequest],
 ) (*connect.Response[apiv1.GetSyntaxResponse], error) {
+	// Aggregation functions valid inside stats bodies.
+	aggs := []string{"count", "avg", "sum", "min", "max", "bin"}
+	// Combine aggs + scalar functions for the full pipeFunctions set.
+	funcs := make([]string, 0, len(aggs)+len(querylang.ScalarFuncNames))
+	funcs = append(funcs, aggs...)
+	funcs = append(funcs, querylang.ScalarFuncNames...)
+
 	return connect.NewResponse(&apiv1.GetSyntaxResponse{
 		Directives: []string{
 			"reverse", "start", "end", "last", "limit", "pos",
 			"source_start", "source_end", "ingest_start", "ingest_end",
 		},
 		PipeKeywords:  []string{"stats", "where", "eval", "sort", "head", "tail", "slice", "rename", "fields", "timechart", "raw"},
-		PipeFunctions: []string{"count", "avg", "sum", "min", "max", "bin", "tonumber"},
+		PipeFunctions: funcs,
 	}), nil
 }
 

@@ -653,6 +653,11 @@ describe("new pipe operators: classification", () => {
     expect(result).toContainEqual(["as", "pipe-keyword"]);
   });
 
+  test("eval function call classified as function", () => {
+    const result = spans("error | eval x = upper(level)");
+    expect(result).toContainEqual(["upper", "function"]);
+  });
+
   test("fields keyword", () => {
     const result = spans("error | fields host, level");
     expect(result).toContainEqual(["fields", "pipe-keyword"]);
@@ -663,6 +668,9 @@ describe("new pipe operators: validation (valid)", () => {
   const valid = [
     "error | eval ms = duration / 1000",
     "error | eval a = x + 1, b = y * 2",
+    "error | eval x = upper(level)",
+    "error | eval x = upper(level), y = len(msg)",
+    "error | eval norm_level = upper(level) | timechart 30 by norm_level",
     "error | sort status",
     "error | sort -count, status",
     "error | head 10",

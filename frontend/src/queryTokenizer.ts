@@ -90,8 +90,6 @@ export const DEFAULT_SYNTAX: SyntaxSets = {
     "len", "lower", "upper", "substr", "replace", "trim", "concat",
     "coalesce", "isnull", "typeof",
     "bitor", "bitand", "bitxor", "bitnot", "bitshl", "bitshr",
-    // Aggregation functions.
-    "dcount", "median", "first", "last", "values",
   ]),
 };
 
@@ -583,21 +581,32 @@ function classifyEvalArgs(tokens: QueryToken[], syntax: SyntaxSets): HighlightSp
       continue;
     }
 
-    // After = sign, everything until next comma or end is an expression.
-    // Delegate to classifyStatsArgs for expression highlighting.
+    // Check if this is a field name followed by = (assignment target).
     if (tok.kind === "word" || tok.kind === "quoted") {
-      // Check if this might be a field name followed by =.
       let j = i + 1;
       while (j < tokens.length && tokens[j]!.kind === "whitespace") j++;
       if (j < tokens.length && tokens[j]!.kind === "eq") {
-        // Field name before =.
         spans.push({ text: tok.text, role: "token" });
         continue;
       }
     }
 
-    // Expression part — use stats args classifier for function calls etc.
-    spans.push(...classifyStatsArgs(tokens.slice(i, i + 1), syntax));
+    // Expression part — find the extent (up to next comma or next "ident =")
+    // and pass the whole slice so classifyStatsArgs can do lookahead.
+    let end = i + 1;
+    while (end < tokens.length) {
+      if (tokens[end]!.kind === "comma") break;
+      // Stop before "word whitespace* =" — that's the next assignment.
+      if (tokens[end]!.kind === "word") {
+        let peek = end + 1;
+        while (peek < tokens.length && tokens[peek]!.kind === "whitespace") peek++;
+        if (peek < tokens.length && tokens[peek]!.kind === "eq") break;
+      }
+      end++;
+    }
+
+    spans.push(...classifyStatsArgs(tokens.slice(i, end), syntax));
+    i = end - 1; // loop will increment
   }
 
   return spans;
