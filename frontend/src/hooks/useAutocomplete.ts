@@ -5,6 +5,13 @@ import { DEFAULT_SYNTAX, type SyntaxSets } from "../queryTokenizer";
 
 const OPERATORS = ["AND", "OR", "NOT"];
 
+// Aggregation functions valid in stats/timechart bodies.
+// Scalar functions (abs, ceil, len, substr, etc.) belong in where/eval only.
+const AGG_FUNCTIONS = new Set([
+  "count", "avg", "sum", "min", "max",
+  "dcount", "median", "first", "last", "values",
+]);
+
 // Known values for directives that have a fixed set of options.
 // last= derives from the same timeRangeMs map used by TimeRangePicker.
 const DIRECTIVE_VALUES: Record<string, string[]> = {
@@ -14,7 +21,7 @@ const DIRECTIVE_VALUES: Record<string, string[]> = {
 
 // Characters that break a word in the query language.
 export function isWordBreak(ch: string): boolean {
-  return " \t\n\r()=*\"'".includes(ch);
+  return " \t\n\r()=*\"'|,".includes(ch);
 }
 
 // Extract the word at cursor and its replace range.
@@ -52,6 +59,165 @@ export function getValueContext(text: string, wordStart: number): string | null 
   return key.length > 0 ? key : null;
 }
 
+// Detect whether the cursor is inside a pipe segment and what kind of position.
+// bodyStart (returned for kind=body) is the absolute position right after the keyword.
+export function getPipeContext(
+  text: string,
+  cursor: number,
+): { kind: "keyword" } | { kind: "body"; keyword: string; bodyStart: number } | null {
+  // Scan from 0 to cursor, tracking quote state, to find the last unquoted |.
+  let lastPipe = -1;
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < cursor; i++) {
+    const ch = text[i]!;
+    if (ch === "'" && !inDouble) inSingle = !inSingle;
+    else if (ch === '"' && !inSingle) inDouble = !inDouble;
+    else if (ch === "|" && !inSingle && !inDouble) lastPipe = i;
+  }
+  if (lastPipe === -1) return null;
+
+  // Extract segment from after | to cursor.
+  const segment = text.slice(lastPipe + 1, cursor);
+
+  // Find the first word in the segment.
+  let ws = 0;
+  while (ws < segment.length && /\s/.test(segment[ws]!)) ws++;
+  let we = ws;
+  while (we < segment.length && !/\s/.test(segment[we]!)) we++;
+
+  const keyword = segment.slice(ws, we);
+
+  // No keyword yet or cursor is still within the first word.
+  if (keyword.length === 0 || cursor <= lastPipe + 1 + we) {
+    return { kind: "keyword" };
+  }
+
+  return { kind: "body", keyword, bodyStart: lastPipe + 1 + we };
+}
+
+// Check whether the body text contains an unquoted keyword token.
+export function bodyHasToken(bodyText: string, token: string): boolean {
+  const lower = token.toLowerCase();
+  return bodyText
+    .trim()
+    .split(/\s+/)
+    .some((t) => t.toLowerCase() === lower);
+}
+
+// Scan backward from wordStart to find the previous word, bounded by boundary.
+export function prevWordBeforeCursor(
+  text: string,
+  wordStart: number,
+  boundary: number,
+): string | null {
+  let i = wordStart - 1;
+  // Skip whitespace.
+  while (i >= boundary && /\s/.test(text[i]!)) i--;
+  if (i < boundary) return null;
+  const end = i + 1;
+  while (i >= boundary && !/[\s|]/.test(text[i]!)) i--;
+  const word = text.slice(i + 1, end);
+  return word.length > 0 ? word : null;
+}
+
+// ── Pipe grammar table ──
+//
+// Each operator declares what to suggest given signals about the cursor
+// position:  whether the body is empty, what the previous word is, and
+// whether the body already contains a structural keyword like "by".
+//
+// A SuggestRule says which pools to draw from.  "none" means suppress
+// the dropdown entirely.  Omitting a condition (undefined) means "skip
+// this check and fall through to the next one."
+
+export type SuggestRule = {
+  fields?: boolean; // include field names
+  aggs?: boolean; // include aggregation functions (AGG_FUNCTIONS)
+  funcs?: boolean; // include all pipeFunctions (scalar + agg)
+  literals?: string[]; // include these exact keywords
+};
+
+type Suggest = SuggestRule | "none";
+
+export interface PipeGrammar {
+  empty: Suggest; // body is empty (just typed "| kw ")
+  afterAs?: Suggest; // previous word is "as"
+  afterBy?: Suggest; // previous word is "by"
+  pastBy?: Suggest; // body contains "by" somewhere earlier
+  afterNumber?: Suggest; // previous word is a number
+  fallback: Suggest; // everything else
+}
+
+export const PIPE_GRAMMARS: Record<string, PipeGrammar> = {
+  // stats agg_list [by group_list]
+  stats: {
+    empty: { aggs: true },
+    afterAs: "none",
+    afterBy: { fields: true, literals: ["bin"] },
+    pastBy: { fields: true, literals: ["bin"] },
+    fallback: { funcs: true, fields: true, literals: ["as", "by"] },
+  },
+  // timechart NUMBER [by FIELD]
+  timechart: {
+    empty: "none",
+    afterBy: { fields: true },
+    pastBy: { fields: true },
+    afterNumber: { literals: ["by"] },
+    fallback: "none",
+  },
+  // where filter_expr
+  where: {
+    empty: { funcs: true, fields: true },
+    fallback: { funcs: true, fields: true },
+  },
+  // eval IDENT = expr [, IDENT = expr]*
+  eval: {
+    empty: { fields: true },
+    fallback: { funcs: true, fields: true },
+  },
+  // sort [-]field [, [-]field]*
+  sort: {
+    empty: { fields: true },
+    fallback: { fields: true },
+  },
+  // rename field as newname [, field as newname]*
+  rename: {
+    empty: { fields: true },
+    afterAs: "none",
+    fallback: { fields: true, literals: ["as"] },
+  },
+  // fields [-] field_list
+  fields: {
+    empty: { fields: true },
+    fallback: { fields: true },
+  },
+  // These take numeric/no arguments — never suggest.
+  head: { empty: "none", fallback: "none" },
+  tail: { empty: "none", fallback: "none" },
+  slice: { empty: "none", fallback: "none" },
+  raw: { empty: "none", fallback: "none" },
+};
+
+// Resolve a grammar + context signals into a concrete SuggestRule or "none".
+export function resolveGrammar(
+  grammar: PipeGrammar,
+  prev: string | null,
+  bodyText: string,
+): Suggest {
+  if (!prev) return grammar.empty;
+  if (prev === "as" && grammar.afterAs !== undefined) return grammar.afterAs;
+  if (prev === "by" && grammar.afterBy !== undefined) return grammar.afterBy;
+  if (grammar.pastBy !== undefined && bodyHasToken(bodyText, "by"))
+    return grammar.pastBy;
+  if (
+    grammar.afterNumber !== undefined &&
+    /^\d+$/.test(prev)
+  )
+    return grammar.afterNumber;
+  return grammar.fallback;
+}
+
 interface AutocompleteState {
   suggestions: string[];
   selectedIndex: number;
@@ -76,98 +242,185 @@ export function useAutocomplete(
     if (dismissed) setDismissed(false);
   }
 
-  const { suggestions, replaceRange, suffix: _suffix } = useMemo(() => {
-    const empty = {
-      suggestions: [] as string[],
-      replaceRange: null,
-      suffix: "",
-    };
-    if (dismissed) return empty;
+  const { suggestions, replaceRange, suffix: _suffix, inPipeContext } =
+    useMemo(() => {
+      const empty = {
+        suggestions: [] as string[],
+        replaceRange: null,
+        suffix: "",
+        inPipeContext: false,
+      };
+      if (dismissed) return empty;
 
-    const ctx = wordAtCursor(draft, cursorPos);
+      const ctx = wordAtCursor(draft, cursorPos);
+      const pipeCtx = getPipeContext(draft, cursorPos);
 
-    // Cursor immediately after "=" with no value typed yet.
-    if (!ctx && cursorPos > 0 && draft[cursorPos - 1] === "=") {
-      const valueKey = getValueContext(draft, cursorPos);
+      // ── Pipe context suggestions ──
+      if (pipeCtx) {
+        const fieldNames = fields.map((f) => f.key);
+        const range = ctx
+          ? { start: ctx.start, end: ctx.end }
+          : { start: cursorPos, end: cursorPos };
+        const prefix = ctx ? ctx.word.toLowerCase() : "";
+
+        if (pipeCtx.kind === "keyword") {
+          const matches = Array.from(syntax.pipeKeywords)
+            .filter(
+              (k) =>
+                k.toLowerCase().startsWith(prefix) &&
+                k.toLowerCase() !== prefix,
+            )
+            .sort();
+          return {
+            suggestions: matches.slice(0, 10),
+            replaceRange: range,
+            suffix: " ",
+            inPipeContext: true,
+          };
+        }
+
+        // kind === "body" — look up the grammar table for this operator.
+        const kw = pipeCtx.keyword.toLowerCase();
+        const grammar = PIPE_GRAMMARS[kw];
+        if (!grammar) return empty;
+
+        const prevWord = ctx
+          ? prevWordBeforeCursor(draft, ctx.start, pipeCtx.bodyStart)
+          : prevWordBeforeCursor(draft, cursorPos, pipeCtx.bodyStart);
+        const prev = prevWord?.toLowerCase() ?? null;
+        const wordBoundary = ctx ? ctx.start : cursorPos;
+        const bodyText = draft.slice(pipeCtx.bodyStart, wordBoundary);
+
+        const rule = resolveGrammar(grammar, prev, bodyText);
+        if (rule === "none") return empty;
+
+        // Build candidates from the resolved rule.
+        const candidates: string[] = [];
+        if (rule.literals) candidates.push(...rule.literals);
+        if (rule.aggs) {
+          candidates.push(
+            ...Array.from(syntax.pipeFunctions)
+              .filter((f) => AGG_FUNCTIONS.has(f))
+              .sort(),
+          );
+        }
+        if (rule.funcs) {
+          candidates.push(...Array.from(syntax.pipeFunctions).sort());
+        }
+        if (rule.fields) {
+          candidates.push(...fieldNames.sort());
+        }
+
+        const matches = candidates
+          .filter(
+            (c) =>
+              c.toLowerCase().startsWith(prefix) &&
+              c.toLowerCase() !== prefix,
+          )
+          .slice(0, 10);
+        return {
+          suggestions: matches,
+          replaceRange: range,
+          suffix: " ",
+          inPipeContext: true,
+        };
+      }
+
+      // ── Filter context (no pipe) ──
+
+      // Cursor immediately after "=" with no value typed yet.
+      if (!ctx && cursorPos > 0 && draft[cursorPos - 1] === "=") {
+        const valueKey = getValueContext(draft, cursorPos);
+        if (valueKey) {
+          // Check directive values first, then field values.
+          const dirVals = DIRECTIVE_VALUES[valueKey.toLowerCase()];
+          if (dirVals) {
+            return {
+              suggestions: dirVals,
+              replaceRange: { start: cursorPos, end: cursorPos },
+              suffix: " ",
+              inPipeContext: false,
+            };
+          }
+          const field = fields.find(
+            (f) => f.key.toLowerCase() === valueKey.toLowerCase(),
+          );
+          if (field && field.values.length > 0) {
+            return {
+              suggestions: field.values.map((v) => v.value).slice(0, 10),
+              replaceRange: { start: cursorPos, end: cursorPos },
+              suffix: " ",
+              inPipeContext: false,
+            };
+          }
+        }
+        return empty;
+      }
+
+      if (!ctx) return empty;
+
+      const prefix = ctx.word.toLowerCase();
+      const valueKey = getValueContext(draft, ctx.start);
+
       if (valueKey) {
+        // Value position: suggest known values for this key.
         // Check directive values first, then field values.
         const dirVals = DIRECTIVE_VALUES[valueKey.toLowerCase()];
+        let candidates: string[];
         if (dirVals) {
-          return {
-            suggestions: dirVals,
-            replaceRange: { start: cursorPos, end: cursorPos },
-            suffix: " ",
-          };
+          candidates = dirVals;
+        } else {
+          const field = fields.find(
+            (f) => f.key.toLowerCase() === valueKey.toLowerCase(),
+          );
+          if (!field) return empty;
+          candidates = field.values.map((v) => v.value);
         }
-        const field = fields.find(
-          (f) => f.key.toLowerCase() === valueKey.toLowerCase(),
-        );
-        if (field && field.values.length > 0) {
-          return {
-            suggestions: field.values.map((v) => v.value).slice(0, 10),
-            replaceRange: { start: cursorPos, end: cursorPos },
-            suffix: " ",
-          };
-        }
+        const matches = candidates
+          .filter(
+            (v) =>
+              v.toLowerCase().startsWith(prefix) &&
+              v.toLowerCase() !== prefix,
+          )
+          .slice(0, 10);
+        return {
+          suggestions: matches,
+          replaceRange: { start: ctx.start, end: ctx.end },
+          suffix: " ",
+          inPipeContext: false,
+        };
       }
-      return empty;
-    }
 
-    if (!ctx) return empty;
-
-    const prefix = ctx.word.toLowerCase();
-    const valueKey = getValueContext(draft, ctx.start);
-
-    if (valueKey) {
-      // Value position: suggest known values for this key.
-      // Check directive values first, then field values.
-      const dirVals = DIRECTIVE_VALUES[valueKey.toLowerCase()];
-      let candidates: string[];
-      if (dirVals) {
-        candidates = dirVals;
-      } else {
-        const field = fields.find(
-          (f) => f.key.toLowerCase() === valueKey.toLowerCase(),
-        );
-        if (!field) return empty;
-        candidates = field.values.map((v) => v.value);
+      // Key position: suggest field names, directives, scalar functions, operators.
+      const keySet = new Set<string>();
+      for (const f of fields) keySet.add(f.key);
+      for (const d of syntax.directives) keySet.add(d);
+      for (const fn of syntax.pipeFunctions) {
+        if (!AGG_FUNCTIONS.has(fn)) keySet.add(fn);
       }
-      const matches = candidates
+
+      const keyMatches = Array.from(keySet)
         .filter(
-          (v) =>
-            v.toLowerCase().startsWith(prefix) && v.toLowerCase() !== prefix,
+          (k) =>
+            k.toLowerCase().startsWith(prefix) &&
+            k.toLowerCase() !== prefix,
         )
-        .slice(0, 10);
+        .sort();
+
+      const opMatches = OPERATORS.filter(
+        (op) =>
+          op.toLowerCase().startsWith(prefix) &&
+          op.toLowerCase() !== prefix,
+      );
+
+      const suggestions = [...keyMatches, ...opMatches].slice(0, 10);
       return {
-        suggestions: matches,
+        suggestions,
         replaceRange: { start: ctx.start, end: ctx.end },
-        suffix: " ",
+        suffix: "", // suffix is determined per-suggestion at accept time
+        inPipeContext: false,
       };
-    }
-
-    // Key position: suggest attribute keys, directives, operators.
-    const keySet = new Set<string>();
-    for (const f of fields) keySet.add(f.key);
-    for (const d of syntax.directives) keySet.add(d);
-
-    const keyMatches = Array.from(keySet)
-      .filter(
-        (k) => k.toLowerCase().startsWith(prefix) && k.toLowerCase() !== prefix,
-      )
-      .sort();
-
-    const opMatches = OPERATORS.filter(
-      (op) =>
-        op.toLowerCase().startsWith(prefix) && op.toLowerCase() !== prefix,
-    );
-
-    const suggestions = [...keyMatches, ...opMatches].slice(0, 10);
-    return {
-      suggestions,
-      replaceRange: { start: ctx.start, end: ctx.end },
-      suffix: "", // suffix is determined per-suggestion at accept time
-    };
-  }, [draft, cursorPos, fields, dismissed, syntax]);
+    }, [draft, cursorPos, fields, dismissed, syntax]);
 
   // Reset selection when suggestions change.
   const sugKey = suggestions.join("\0");
@@ -213,6 +466,19 @@ export function useAutocomplete(
         return null;
 
       const suggestion = suggestions[idx]!;
+
+      // Pipe context: always use " " as suffix.
+      if (inPipeContext) {
+        const suf = " ";
+        const newDraft =
+          draft.slice(0, replaceRange.start) +
+          suggestion +
+          suf +
+          draft.slice(replaceRange.end);
+        const newCursor = replaceRange.start + suggestion.length + suf.length;
+        return { newDraft, newCursor };
+      }
+
       const valueKey = getValueContext(draft, replaceRange.start);
 
       // Keys get "=" appended, values and operators get " ".
@@ -243,7 +509,7 @@ export function useAutocomplete(
       const newCursor = replaceRange.start + suggestion.length + suf.length;
       return { newDraft, newCursor };
     },
-    [selectedIndex, isOpen, suggestions, replaceRange, draft],
+    [selectedIndex, isOpen, suggestions, replaceRange, draft, inPipeContext],
   );
 
   return {
