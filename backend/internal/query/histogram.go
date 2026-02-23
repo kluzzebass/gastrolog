@@ -4,82 +4,27 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
-	"strings"
 	"time"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/index"
 	"gastrolog/internal/querylang"
 )
 
-// severityLevels are the canonical severity names we track in timecharts.
-var severityLevels = []string{"error", "warn", "info", "debug", "trace"}
-
-// classifySeverity maps a raw value to a canonical severity level.
-// Handles values set by the level digester (already normalized) and
-// raw syslog severity_name values that bypass the digester.
-func classifySeverity(v string) string {
-	switch strings.ToLower(v) {
-	case "error", "err", "fatal", "critical", "emerg", "emergency", "alert", "crit":
-		return "error"
-	case "warn", "warning":
-		return "warn"
-	case "info", "notice", "informational":
-		return "info"
-	case "debug":
-		return "debug"
-	case "trace":
-		return "trace"
-	}
-	return ""
-}
-
-// severityFromRecord returns the canonical severity level for a record
-// based on its attributes. The level digester sets a normalized "level"
-// attribute at ingest time; syslog sets "severity_name" directly.
-func severityFromRecord(rec chunk.Record) string {
-	for _, key := range []string{"level", "severity_name"} {
-		if v, ok := rec.Attrs[key]; ok {
-			if level := classifySeverity(v); level != "" {
-				return level
-			}
-		}
-	}
-	return ""
-}
-
-// severityKVLookups maps canonical severity names to the key=value pairs to look up
-// in the KV index (extracted from message text, e.g. level=error).
-var severityKVLookups = map[string][][2]string{
-	"error": {{"level", "error"}, {"level", "err"}},
-	"warn":  {{"level", "warn"}, {"level", "warning"}},
-	"info":  {{"level", "info"}},
-	"debug": {{"level", "debug"}},
-	"trace": {{"level", "trace"}},
-}
-
-// severityAttrKVLookups maps canonical severity names to the key=value pairs to look up
-// in the attr KV index (from record attributes, e.g. severity_name=error).
-var severityAttrKVLookups = map[string][][2]string{
-	"error": {{"severity_name", "err"}, {"severity_name", "error"}},
-	"warn":  {{"severity_name", "warning"}, {"severity_name", "warn"}},
-	"info":  {{"severity_name", "info"}},
-	"debug": {{"severity_name", "debug"}},
-	"trace": {{"severity_name", "trace"}},
-}
-
 // runTimechart executes a timechart pipeline operator. It counts records by
-// time bucket with severity breakdown, using index binary search (no record
-// scanning) for unfiltered queries.
+// time bucket with an optional field breakdown.
+//
+// When By is empty, just counts total records per bucket.
+// When By is set, groups by the named record attribute (requires record scan).
 //
 // Two modes:
-//   - No pre-ops and no filter: fast path using FindStartPosition binary search.
-//     O(buckets * log(n)) per chunk. Severity uses KV index lookups.
-//   - With pre-ops or filter: falls back to Search() → applyRecordOps() →
-//     manual binning. Capped at 1M records.
+//   - No grouping, no filter, no pre-ops: fast path using FindStartPosition
+//     binary search. O(buckets * log(n)) per chunk, no record scanning.
+//   - Otherwise: falls back to Search() → applyRecordOps() → manual binning.
+//     Capped at 1M records.
 //
-// Returns a TableResult with columns ["_time", "level", "count"].
+// Returns a TableResult with columns ["_time", "count"] or ["_time", "<field>", "count"].
 func (e *Engine) runTimechart(ctx context.Context, q Query, tc *querylang.TimechartOp, preOps []querylang.PipeOp) (*TableResult, error) {
 	numBuckets := tc.N
 	if numBuckets <= 0 {
@@ -124,13 +69,16 @@ func (e *Engine) runTimechart(ctx context.Context, q Query, tc *querylang.Timech
 		}
 	}
 
+	// Determine group-by field name. Empty = no grouping (just total counts).
+	groupField := tc.By
+
 	// Normalize: timechart always needs lower < upper regardless of query direction.
 	start, end := q.Start, q.End
 	if !start.IsZero() && !end.IsZero() && end.Before(start) {
 		start, end = end, start
 	}
 	if start.IsZero() || end.IsZero() || !start.Before(end) {
-		return &TableResult{Columns: []string{"_time", "level", "count"}}, nil
+		return &TableResult{Columns: timechartColumns(groupField)}, nil
 	}
 
 	bucketWidth := end.Sub(start) / time.Duration(numBuckets)
@@ -139,16 +87,38 @@ func (e *Engine) runTimechart(ctx context.Context, q Query, tc *querylang.Timech
 	}
 
 	counts := make([]int64, numBuckets)
-	levelCounts := make([]map[string]int64, numBuckets)
-	for i := range levelCounts {
-		levelCounts[i] = make(map[string]int64)
+	groupCounts := make([]map[string]int64, numBuckets)
+	for i := range groupCounts {
+		groupCounts[i] = make(map[string]int64)
 	}
 
 	hasFilter := q.BoolExpr != nil
 	hasPreOps := len(preOps) > 0
+	hasGroupBy := groupField != ""
 
-	if hasFilter || hasPreOps {
-		// Filtered/pre-ops path: scan matching records and bucket them.
+	if !hasGroupBy && !hasFilter && !hasPreOps {
+		// No grouping, no filter: fast path using FindStartPosition.
+		for _, storeID := range selectedStores {
+			cm, _ := e.getStoreManagers(storeID)
+			if cm == nil {
+				continue
+			}
+			metas, err := cm.List()
+			if err != nil {
+				continue
+			}
+			for _, meta := range metas {
+				if meta.RecordCount == 0 {
+					continue
+				}
+				if meta.EndTS.Before(start) || !meta.StartTS.Before(end) {
+					continue
+				}
+				timechartChunkFast(cm, meta, start, bucketWidth, numBuckets, counts)
+			}
+		}
+	} else {
+		// Scan path: all grouping, filtering, and pre-ops go through record scan.
 		q.Limit = 0
 		iter, _ := e.Search(ctx, q, nil)
 
@@ -167,8 +137,10 @@ func (e *Engine) runTimechart(ctx context.Context, q Query, tc *querylang.Timech
 					idx = numBuckets - 1
 				}
 				counts[idx]++
-				if level := severityFromRecord(rec); level != "" {
-					levelCounts[idx][level]++
+				if hasGroupBy {
+					if v := rec.Attrs[groupField]; v != "" {
+						groupCounts[idx][v]++
+					}
 				}
 			}
 		} else {
@@ -190,8 +162,10 @@ func (e *Engine) runTimechart(ctx context.Context, q Query, tc *querylang.Timech
 					idx = numBuckets - 1
 				}
 				counts[idx]++
-				if level := severityFromRecord(rec); level != "" {
-					levelCounts[idx][level]++
+				if hasGroupBy {
+					if v := rec.Attrs[groupField]; v != "" {
+						groupCounts[idx][v]++
+					}
 				}
 				scanned++
 				if scanned >= maxScan {
@@ -199,65 +173,67 @@ func (e *Engine) runTimechart(ctx context.Context, q Query, tc *querylang.Timech
 				}
 			}
 		}
-	} else {
-		// Unfiltered fast path: use FindStartPosition for O(buckets * log(n)).
-		for _, storeID := range selectedStores {
-			cm, im := e.getStoreManagers(storeID)
-			if cm == nil {
-				continue
-			}
-			metas, err := cm.List()
-			if err != nil {
-				continue
-			}
-			for _, meta := range metas {
-				if meta.RecordCount == 0 {
-					continue
-				}
-				if meta.EndTS.Before(start) || !meta.StartTS.Before(end) {
-					continue
-				}
-				timechartChunkFast(cm, meta, start, bucketWidth, numBuckets, counts)
-				if meta.Sealed {
-					timechartChunkSeverity(cm, im, meta, start, bucketWidth, numBuckets, levelCounts)
-				} else {
-					timechartChunkSeverityScan(cm, meta, start, bucketWidth, numBuckets, levelCounts)
-				}
-			}
-		}
 	}
 
-	return timechartToTable(start, bucketWidth, numBuckets, counts, levelCounts), nil
+	return timechartToTable(groupField, start, bucketWidth, numBuckets, counts, groupCounts), nil
 }
 
-// timechartToTable converts bucketed counts into a TableResult with columns
-// ["_time", "level", "count"]. Each bucket × level combination is a row.
-func timechartToTable(start time.Time, bucketWidth time.Duration, numBuckets int, counts []int64, levelCounts []map[string]int64) *TableResult {
-	columns := []string{"_time", "level", "count"}
+// timechartColumns returns the column list for a timechart result.
+// Without grouping: ["_time", "count"]. With grouping: ["_time", "<field>", "count"].
+func timechartColumns(groupField string) []string {
+	if groupField == "" {
+		return []string{"_time", "count"}
+	}
+	return []string{"_time", groupField, "count"}
+}
+
+// timechartToTable converts bucketed counts into a TableResult.
+// Without grouping: one row per bucket with columns ["_time", "count"].
+// With grouping: one row per bucket × group with columns ["_time", "<field>", "count"].
+func timechartToTable(groupField string, start time.Time, bucketWidth time.Duration, numBuckets int, counts []int64, groupCounts []map[string]int64) *TableResult {
+	columns := timechartColumns(groupField)
 	var rows [][]string
+
+	if groupField == "" {
+		// No grouping — one row per bucket.
+		for i := range numBuckets {
+			ts := start.Add(bucketWidth * time.Duration(i)).Format(time.RFC3339Nano)
+			rows = append(rows, []string{ts, fmt.Sprintf("%d", counts[i])})
+		}
+		return &TableResult{Columns: columns, Rows: rows}
+	}
+
+	// Grouped: collect all group values across all buckets for stable ordering.
+	groupSet := make(map[string]struct{})
+	for _, gc := range groupCounts {
+		for k := range gc {
+			groupSet[k] = struct{}{}
+		}
+	}
+	groupKeys := slices.Sorted(maps.Keys(groupSet))
 
 	for i := range numBuckets {
 		ts := start.Add(bucketWidth * time.Duration(i)).Format(time.RFC3339Nano)
 		total := counts[i]
 
-		if len(levelCounts[i]) == 0 {
-			// No severity breakdown — emit a single row with empty level.
+		if len(groupCounts[i]) == 0 {
+			// No group breakdown — emit a single row with empty group.
 			rows = append(rows, []string{ts, "", fmt.Sprintf("%d", total)})
 			continue
 		}
 
-		// Emit one row per level that has counts.
-		var levelTotal int64
-		for _, level := range severityLevels {
-			count, ok := levelCounts[i][level]
+		// Emit one row per group value that has counts.
+		var groupTotal int64
+		for _, key := range groupKeys {
+			count, ok := groupCounts[i][key]
 			if !ok || count == 0 {
 				continue
 			}
-			rows = append(rows, []string{ts, level, fmt.Sprintf("%d", count)})
-			levelTotal += count
+			rows = append(rows, []string{ts, key, fmt.Sprintf("%d", count)})
+			groupTotal += count
 		}
-		// Emit remainder as empty-level row if total > sum of level counts.
-		if remainder := total - levelTotal; remainder > 0 {
+		// Emit remainder as empty-group row if total > sum of group counts.
+		if remainder := total - groupTotal; remainder > 0 {
 			rows = append(rows, []string{ts, "", fmt.Sprintf("%d", remainder)})
 		}
 	}
@@ -314,116 +290,3 @@ func timechartChunkFast(
 	}
 }
 
-// timechartChunkSeverity populates per-level counts for a chunk using KV indexes.
-// Only works on sealed, indexed chunks.
-func timechartChunkSeverity(
-	cm chunk.ChunkManager,
-	im index.IndexManager,
-	meta chunk.ChunkMeta,
-	start time.Time,
-	bucketWidth time.Duration,
-	numBuckets int,
-	levelCounts []map[string]int64,
-) {
-	if im == nil {
-		return
-	}
-
-	// Open KV index (from message text).
-	kvIdx, _, err := im.OpenKVIndex(meta.ID)
-	if err != nil {
-		return
-	}
-	kvReader := index.NewKVIndexReader(meta.ID, kvIdx.Entries())
-
-	// Open attr KV index (from record attributes).
-	attrKVIdx, err := im.OpenAttrKVIndex(meta.ID)
-	var attrKVReader *index.KVIndexReader
-	if err == nil {
-		attrEntries := attrKVIdx.Entries()
-		kvEntries := make([]index.KVIndexEntry, len(attrEntries))
-		for i, e := range attrEntries {
-			kvEntries[i] = index.KVIndexEntry(e)
-		}
-		attrKVReader = index.NewKVIndexReader(meta.ID, kvEntries)
-	}
-
-	for _, level := range severityLevels {
-		var allPositions []uint64
-
-		for _, kv := range severityKVLookups[level] {
-			if positions, found := kvReader.Lookup(kv[0], kv[1]); found {
-				allPositions = append(allPositions, positions...)
-			}
-		}
-
-		if attrKVReader != nil {
-			for _, kv := range severityAttrKVLookups[level] {
-				if positions, found := attrKVReader.Lookup(kv[0], kv[1]); found {
-					allPositions = append(allPositions, positions...)
-				}
-			}
-		}
-
-		if len(allPositions) == 0 {
-			continue
-		}
-
-		slices.Sort(allPositions)
-		allPositions = slices.Compact(allPositions)
-
-		timestamps, err := cm.ReadWriteTimestamps(meta.ID, allPositions)
-		if err != nil {
-			continue
-		}
-
-		for _, ts := range timestamps {
-			if ts.Before(start) || !ts.Before(start.Add(bucketWidth*time.Duration(numBuckets))) {
-				continue
-			}
-			idx := int(ts.Sub(start) / bucketWidth)
-			if idx >= numBuckets {
-				idx = numBuckets - 1
-			}
-			levelCounts[idx][level]++
-		}
-	}
-}
-
-// timechartChunkSeverityScan populates per-level counts for an unsealed chunk
-// by scanning records and checking attrs.
-func timechartChunkSeverityScan(
-	cm chunk.ChunkManager,
-	meta chunk.ChunkMeta,
-	start time.Time,
-	bucketWidth time.Duration,
-	numBuckets int,
-	levelCounts []map[string]int64,
-) {
-	cursor, err := cm.OpenCursor(meta.ID)
-	if err != nil {
-		return
-	}
-	defer cursor.Close()
-
-	end := start.Add(bucketWidth * time.Duration(numBuckets))
-	for {
-		rec, _, err := cursor.Next()
-		if err != nil {
-			break
-		}
-		ts := rec.WriteTS
-		if ts.Before(start) || !ts.Before(end) {
-			continue
-		}
-		level := severityFromRecord(rec)
-		if level == "" {
-			continue
-		}
-		idx := int(ts.Sub(start) / bucketWidth)
-		if idx >= numBuckets {
-			idx = numBuckets - 1
-		}
-		levelCounts[idx][level]++
-	}
-}

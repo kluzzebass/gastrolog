@@ -1,7 +1,9 @@
 import { useState } from "react";
 import type { TableResult } from "../api/client";
 import { useThemeClass } from "../hooks/useThemeClass";
+import { tableResultToHistogramData } from "../utils/histogramData";
 import { ExportButton } from "./ExportButton";
+import { HistogramChart } from "./HistogramChart";
 import { TableView } from "./TableView";
 import { TimeSeriesChart } from "./TimeSeriesChart";
 
@@ -178,7 +180,7 @@ export function PipelineResults({
           </span>
         </div>
         <div className="flex items-center gap-2">
-          {resultType === "timeseries" && (
+          {(resultType === "timeseries" || resultType === "timechart") && (
             <ViewModeToggle
               mode={viewMode}
               onModeChange={setViewMode}
@@ -214,6 +216,22 @@ export function PipelineResults({
             label={columns[0]!}
             dark={dark}
           />
+        ) : resultType === "timechart" && viewMode === "chart" ? (
+          (() => {
+            const histData = tableResultToHistogramData(columns, rows);
+            return histData && histData.buckets.length > 0 ? (
+              <div className="px-5 py-4">
+                <HistogramChart
+                  data={histData}
+                  dark={dark}
+                  barHeight={200}
+                  showHeader={false}
+                />
+              </div>
+            ) : (
+              <TableView columns={columns} rows={rowData} dark={dark} />
+            );
+          })()
         ) : resultType === "timeseries" && viewMode === "chart" ? (
           <div className="px-5 py-4 relative">
             <TimeSeriesChart columns={columns} rows={rowData} dark={dark} />

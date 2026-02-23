@@ -255,17 +255,21 @@ func (f *FieldsOp) String() string {
 	return prefix + strings.Join(f.Names, ", ")
 }
 
-// TimechartOp represents: timechart N
-// Counts records by time bucket with severity breakdown, using index-based
-// binary search for unfiltered queries. Treated like StatsOp — cannot coexist
-// with stats, acts as the aggregation step.
+// TimechartOp represents: timechart N [by field]
+// Counts records by time bucket with an optional field breakdown. When By is
+// empty, defaults to severity level grouping. Treated like StatsOp — cannot
+// coexist with stats, acts as the aggregation step.
 type TimechartOp struct {
-	N int // number of time buckets
+	N  int    // number of time buckets
+	By string // optional group-by field; empty = severity level
 }
 
 func (TimechartOp) pipeOp() {}
 
 func (t *TimechartOp) String() string {
+	if t.By != "" {
+		return fmt.Sprintf("timechart %d by %s", t.N, t.By)
+	}
 	return fmt.Sprintf("timechart %d", t.N)
 }
 

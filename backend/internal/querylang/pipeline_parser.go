@@ -753,7 +753,7 @@ func (p *parser) parseSliceOp() (*SliceOp, error) {
 	return &SliceOp{Start: start, End: end}, nil
 }
 
-// parseTimechartOp parses: "timechart" NUMBER
+// parseTimechartOp parses: "timechart" NUMBER ["by" FIELD]
 func (p *parser) parseTimechartOp() (*TimechartOp, error) {
 	if err := p.advance(); err != nil { // consume "timechart"
 		return nil, err
@@ -774,7 +774,23 @@ func (p *parser) parseTimechartOp() (*TimechartOp, error) {
 	if err := p.advance(); err != nil { // consume number
 		return nil, err
 	}
-	return &TimechartOp{N: n}, nil
+
+	// Optional: "by" FIELD
+	var by string
+	if p.cur.Kind == TokWord && p.cur.Lit == "by" {
+		if err := p.advance(); err != nil { // consume "by"
+			return nil, err
+		}
+		if p.cur.Kind != TokWord {
+			return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected field name after 'by', got %s", p.cur.Kind)
+		}
+		by = p.cur.Lit
+		if err := p.advance(); err != nil { // consume field name
+			return nil, err
+		}
+	}
+
+	return &TimechartOp{N: n, By: by}, nil
 }
 
 // parseRenameOp parses: "rename" field "as" field ("," field "as" field)*

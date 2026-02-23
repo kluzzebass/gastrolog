@@ -1,29 +1,73 @@
 import { useState, useRef } from "react";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { clickableProps } from "../utils";
-import type { HistogramData } from "../api/hooks/useHistogram";
+import type { HistogramData } from "../utils/histogramData";
 
-const SEVERITY_COLORS = [
-  ["error", "var(--color-severity-error)"],
-  ["warn", "var(--color-severity-warn)"],
-  ["info", "var(--color-severity-info)"],
-  ["debug", "var(--color-severity-debug)"],
-  ["trace", "var(--color-severity-trace)"],
-] as const;
+/** Known severity levels get their theme CSS variable colors. */
+const SEVERITY_COLOR_MAP: Record<string, string> = {
+  error: "var(--color-severity-error)",
+  warn: "var(--color-severity-warn)",
+  info: "var(--color-severity-info)",
+  debug: "var(--color-severity-debug)",
+  trace: "var(--color-severity-trace)",
+};
 
-const SEVERITY_LEVELS = ["error", "warn", "info", "debug", "trace"] as const;
+/** Palette for arbitrary (non-severity) group values. */
+const GROUP_PALETTE = [
+  "oklch(0.72 0.15 45)",   // copper-ish
+  "oklch(0.72 0.15 160)",  // teal
+  "oklch(0.72 0.15 270)",  // violet
+  "oklch(0.72 0.15 90)",   // olive
+  "oklch(0.72 0.15 330)",  // pink
+  "oklch(0.72 0.15 210)",  // cyan
+  "oklch(0.72 0.15 120)",  // green
+  "oklch(0.72 0.15 20)",   // orange
+];
+
+/**
+ * Builds an ordered color map for all group values found in the data.
+ * Severity levels get their theme colors; everything else gets palette colors.
+ */
+function buildColorMap(data: HistogramData): Map<string, string> {
+  const seen = new Set<string>();
+  for (const b of data.buckets) {
+    for (const key of Object.keys(b.groupCounts)) {
+      seen.add(key);
+    }
+  }
+
+  const colorMap = new Map<string, string>();
+  let paletteIdx = 0;
+  // Severity levels first (stable order), then alphabetical for the rest.
+  const severityOrder = ["error", "warn", "info", "debug", "trace"];
+  for (const key of severityOrder) {
+    if (seen.has(key)) {
+      colorMap.set(key, SEVERITY_COLOR_MAP[key]!);
+      seen.delete(key);
+    }
+  }
+  for (const key of [...seen].sort()) {
+    colorMap.set(key, GROUP_PALETTE[paletteIdx % GROUP_PALETTE.length]!);
+    paletteIdx++;
+  }
+  return colorMap;
+}
 
 type HistogramBucket = HistogramData["buckets"][number];
 
 export function HistogramChart({
   data,
   dark,
+  barHeight: barHeightProp,
+  showHeader = true,
   onBrushSelect,
   onPan,
   onSegmentClick,
 }: Readonly<{
   data: HistogramData;
   dark: boolean;
+  barHeight?: number;
+  showHeader?: boolean;
   onBrushSelect?: (start: Date, end: Date) => void;
   onPan?: (start: Date, end: Date) => void;
   onSegmentClick?: (level: string) => void;
@@ -43,11 +87,14 @@ export function HistogramChart({
 
   if (buckets.length === 0) return null;
 
+  const colorMap = buildColorMap(data);
+  const groupKeys = [...colorMap.keys()];
+
   const firstBucket = buckets[0]!;
   const lastBucket = buckets[buckets.length - 1]!;
   const maxCount = Math.max(...buckets.map((b) => b.count), 1);
   const totalCount = buckets.reduce((sum, b) => sum + b.count, 0);
-  const barHeight = 48;
+  const barHeight = barHeightProp ?? 48;
 
   const getBucketIndex = (clientX: number): number => {
     const el = barsRef.current;
@@ -199,18 +246,36 @@ export function HistogramChart({
 
   return (
     <div className="relative">
-      <div className="flex items-baseline justify-between mb-1.5">
-        <span
-          className={`text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-        >
-          Volume
-        </span>
-        <span
-          className={`font-mono text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}
-        >
-          {totalCount.toLocaleString()} records
-        </span>
-      </div>
+      {showHeader ? (
+        <div className="flex items-baseline justify-between mb-1.5">
+          <span
+            className={`text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+          >
+            Volume
+          </span>
+          <span
+            className={`font-mono text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}
+          >
+            {totalCount.toLocaleString()} records
+          </span>
+        </div>
+      ) : groupKeys.length > 0 ? (
+        <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2">
+          {groupKeys.map((key) => (
+            <div key={key} className="flex items-center gap-1">
+              <span
+                className="inline-block w-2 h-2 rounded-full shrink-0"
+                style={{ backgroundColor: colorMap.get(key) }}
+              />
+              <span
+                className={`text-[0.7em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}
+              >
+                {key}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <div className="relative" style={{ height: barHeight }}>
         {/* Pan delta indicator — centered over bars */}
         {panOffset !== 0 && (
@@ -242,6 +307,8 @@ export function HistogramChart({
               key={bucket.ts.toISOString()}
               bucket={bucket}
               maxCount={maxCount}
+              colorMap={colorMap}
+              groupKeys={groupKeys}
               dark={dark}
               onSegmentClick={onSegmentClick}
               formatTime={formatTime}
@@ -305,31 +372,38 @@ export function HistogramChart({
 function HistogramBar({
   bucket,
   maxCount,
+  colorMap,
+  groupKeys,
   dark,
   onSegmentClick,
   formatTime,
 }: Readonly<{
   bucket: HistogramBucket;
   maxCount: number;
+  colorMap: Map<string, string>;
+  groupKeys: string[];
   dark: boolean;
   onSegmentClick?: (level: string) => void;
   formatTime: (d: Date) => string;
 }>) {
   const c = useThemeClass(dark);
-  const [hoveredLevel, setHoveredLevel] = useState<string | null>(null);
+  const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
   const pct = maxCount > 0 ? bucket.count / maxCount : 0;
-  const lc = bucket.levelCounts;
-  const hasLevels = lc && Object.keys(lc).length > 0;
-  const levelSum = hasLevels
-    ? Object.values(lc).reduce((a, b) => a + b, 0)
+  const gc = bucket.groupCounts;
+  const hasGroups = gc && Object.keys(gc).length > 0;
+  const groupSum = hasGroups
+    ? Object.values(gc).reduce((a, b) => a + b, 0)
     : 0;
-  const other = bucket.count - levelSum;
+  const other = bucket.count - groupSum;
 
-  // Stack order bottom-to-top: error, warn, info, debug, trace, other
+  // Stack order bottom-to-top: ordered group keys, then "other"
   const segments: { key: string; count: number; color: string }[] = [];
-  if (hasLevels) {
-    for (const [key, color] of SEVERITY_COLORS) {
-      if (lc[key]! > 0) segments.push({ key, count: lc[key]!, color });
+  if (hasGroups) {
+    for (const key of groupKeys) {
+      const count = gc[key];
+      if (count && count > 0) {
+        segments.push({ key, count, color: colorMap.get(key)! });
+      }
     }
     if (other > 0)
       segments.push({
@@ -351,7 +425,7 @@ function HistogramBar({
             height: `${Math.max(pct * 100, 4)}%`,
           }}
         >
-          {hasLevels && segments.length > 0 ? (
+          {hasGroups && segments.length > 0 ? (
             <div
               className={`flex flex-col-reverse w-full h-full ${onSegmentClick ? "" : `transition-opacity ${c("opacity-60 group-hover:opacity-100", "opacity-50 group-hover:opacity-80")}`}`}
             >
@@ -363,8 +437,8 @@ function HistogramBar({
                     height: `${(seg.count / bucket.count) * 100}%`,
                     backgroundColor: seg.color,
                   }}
-                  onMouseEnter={() => setHoveredLevel(seg.key)}
-                  onMouseLeave={() => setHoveredLevel(null)}
+                  onMouseEnter={() => setHoveredGroup(seg.key)}
+                  onMouseLeave={() => setHoveredGroup(null)}
                   onMouseDown={
                     onSegmentClick
                       ? (e) => e.stopPropagation()
@@ -415,71 +489,75 @@ function HistogramBar({
       {/* Tooltip */}
       <HistogramBarTooltip
         bucket={bucket}
-        hasLevels={!!hasLevels}
+        hasGroups={!!hasGroups}
         other={other}
+        colorMap={colorMap}
+        groupKeys={groupKeys}
         dark={dark}
         formatTime={formatTime}
-        hoveredLevel={hoveredLevel}
+        hoveredGroup={hoveredGroup}
       />
     </div>
   );
 }
 
-// Tooltip severity order: top-to-bottom matches visual bar stacking (top = other/trace, bottom = error).
-const TOOLTIP_SEVERITY_LEVELS = [...SEVERITY_LEVELS].reverse();
-
 function HistogramBarTooltip({
   bucket,
-  hasLevels,
+  hasGroups,
   other,
+  colorMap,
+  groupKeys,
   dark,
   formatTime,
-  hoveredLevel,
+  hoveredGroup,
 }: Readonly<{
   bucket: HistogramBucket;
-  hasLevels: boolean;
+  hasGroups: boolean;
   other: number;
+  colorMap: Map<string, string>;
+  groupKeys: string[];
   dark: boolean;
   formatTime: (d: Date) => string;
-  hoveredLevel: string | null;
+  hoveredGroup: string | null;
 }>) {
   const c = useThemeClass(dark);
-  const lc = bucket.levelCounts;
+  const gc = bucket.groupCounts;
+  // Tooltip order: top-to-bottom matches visual bar stacking (reversed).
+  const tooltipKeys = [...groupKeys].reverse();
   return (
     <div
-      className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 text-[0.7em] font-mono rounded whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-10 ${c("bg-ink-surface text-text-bright border border-ink-border-subtle", "bg-light-surface text-light-text-bright border border-light-border-subtle")}`}
+      className={`absolute top-0 left-1/2 -translate-x-1/2 px-2 py-1 text-[0.7em] font-mono rounded whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-10 ${c("bg-ink-surface text-text-bright border border-ink-border-subtle", "bg-light-surface text-light-text-bright border border-light-border-subtle")}`}
     >
       <div>
         {bucket.count.toLocaleString()} &middot;{" "}
         {formatTime(bucket.ts)}
       </div>
-      {hasLevels && (
+      {hasGroups && (
         <div className="mt-0.5 space-y-px">
           {other > 0 && (
-            <div className={`flex items-center gap-1.5 ${hoveredLevel === "other" ? "font-bold" : ""}`}>
+            <div className={`flex items-center gap-1.5 ${hoveredGroup === "other" ? "font-bold" : ""}`}>
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-copper/60" />
-              <span className={hoveredLevel === "other" ? "" : "opacity-70"}>other</span>
+              <span className={hoveredGroup === "other" ? "" : "opacity-70"}>other</span>
               <span>{other.toLocaleString()}</span>
             </div>
           )}
-          {TOOLTIP_SEVERITY_LEVELS.map(
-            (level) =>
-              lc[level]! > 0 && (
-                <div
-                  key={level}
-                  className={`flex items-center gap-1.5 ${hoveredLevel === level ? "font-bold" : ""}`}
-                >
-                  <span
-                    className="inline-block w-1.5 h-1.5 rounded-full"
-                    style={{
-                      backgroundColor: `var(--color-severity-${level})`,
-                    }}
-                  />
-                  <span className={hoveredLevel === level ? "" : "opacity-70"}>{level}</span>
-                  <span>{lc[level]!.toLocaleString()}</span>
-                </div>
-              ),
-          )}
+          {tooltipKeys.map((key) => {
+            const count = gc[key];
+            if (!count || count <= 0) return null;
+            return (
+              <div
+                key={key}
+                className={`flex items-center gap-1.5 ${hoveredGroup === key ? "font-bold" : ""}`}
+              >
+                <span
+                  className="inline-block w-1.5 h-1.5 rounded-full"
+                  style={{ backgroundColor: colorMap.get(key) }}
+                />
+                <span className={hoveredGroup === key ? "" : "opacity-70"}>{key}</span>
+                <span>{count.toLocaleString()}</span>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

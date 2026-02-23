@@ -1092,6 +1092,38 @@ func TestParsePipelineTimechartErrors(t *testing.T) {
 	}
 }
 
+func TestParsePipelineTimechartBy(t *testing.T) {
+	p, err := ParsePipeline("error | timechart 50 by status")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	if len(p.Pipes) != 1 {
+		t.Fatalf("expected 1 pipe, got %d", len(p.Pipes))
+	}
+	tc, ok := p.Pipes[0].(*TimechartOp)
+	if !ok {
+		t.Fatalf("expected TimechartOp, got %T", p.Pipes[0])
+	}
+	if tc.N != 50 {
+		t.Errorf("expected N=50, got %d", tc.N)
+	}
+	if tc.By != "status" {
+		t.Errorf("expected By=status, got %q", tc.By)
+	}
+	got := p.String()
+	want := "token(error) | timechart 50 by status"
+	if got != want {
+		t.Errorf("String() = %q, want %q", got, want)
+	}
+}
+
+func TestParsePipelineTimechartByMissingField(t *testing.T) {
+	_, err := ParsePipeline("error | timechart 50 by")
+	if err == nil {
+		t.Fatal("expected error for 'timechart 50 by' with no field")
+	}
+}
+
 func TestParsePipelineRaw(t *testing.T) {
 	p, err := ParsePipeline("error | raw")
 	if err != nil {

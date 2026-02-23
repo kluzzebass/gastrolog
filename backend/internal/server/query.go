@@ -566,7 +566,7 @@ func tableResultToProto(result *query.TableResult, pipeline *querylang.Pipeline)
 			hasRaw = true
 		}
 		if _, ok := pipe.(*querylang.TimechartOp); ok {
-			resultType = "timeseries"
+			resultType = "timechart"
 		}
 		if stats, ok := pipe.(*querylang.StatsOp); ok {
 			for _, g := range stats.Groups {

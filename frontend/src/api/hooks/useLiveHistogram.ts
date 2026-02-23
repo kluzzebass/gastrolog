@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { Record as ProtoRecord } from "../client";
-import type { HistogramData } from "./useHistogram";
+import type { HistogramData } from "../../utils/histogramData";
 
 const NUM_BUCKETS = 50;
 
@@ -46,13 +46,13 @@ export function useLiveHistogram(records: ProtoRecord[]): HistogramData | null {
     const buckets: {
       ts: Date;
       count: number;
-      levelCounts: { [key: string]: number };
+      groupCounts: { [key: string]: number };
     }[] = [];
     for (let i = 0; i < NUM_BUCKETS; i++) {
       buckets.push({
         ts: new Date(minMs + i * bucketWidth),
         count: 0,
-        levelCounts: {},
+        groupCounts: {},
       });
     }
 
@@ -65,12 +65,13 @@ export function useLiveHistogram(records: ProtoRecord[]): HistogramData | null {
       const bucket = buckets[idx]!;
       bucket.count++;
       if (t.level) {
-        bucket.levelCounts[t.level] = (bucket.levelCounts[t.level] ?? 0) + 1;
+        bucket.groupCounts[t.level] = (bucket.groupCounts[t.level] ?? 0) + 1;
       }
     }
 
     return {
       buckets,
+      groupField: "level",
       start: new Date(minMs),
       end: new Date(maxMs),
     };

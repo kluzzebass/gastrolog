@@ -8,11 +8,11 @@ import {
   useSearch,
   useFollow,
   useExplain,
-  useHistogram,
   useLiveHistogram,
   useRecordContext,
   extractTokens,
 } from "../api/hooks";
+import { tableResultToHistogramData } from "../utils/histogramData";
 import { useStores, useStats, useLogout, useCurrentUser } from "../api/hooks";
 import { Record as ProtoRecord, getToken } from "../api/client";
 
@@ -199,10 +199,9 @@ export function SearchView() {
     explain,
   } = useExplain();
   const {
-    data: histogramData,
-    isLoading: _isHistogramLoading,
-    fetchHistogram,
-  } = useHistogram();
+    tableResult: histogramTableResult,
+    search: histogramSearch,
+  } = useSearch({ onError: toastError });
   const {
     before: contextBefore,
     after: contextAfter,
@@ -290,7 +289,12 @@ export function SearchView() {
         resetFollow();
         loadMoreGateRef.current = false;
         search(q, false, true);
-        fetchHistogram(q);
+        if (!hasPipeOutsideQuotes(q)) {
+          const timechartExpr = q.trim()
+            ? `${q.trim()} | timechart 50 by level`
+            : `| timechart 50 by level`;
+          histogramSearch(timechartExpr, false, true);
+        }
         if (showPlan) explain(q);
         return;
       }
@@ -396,7 +400,12 @@ export function SearchView() {
       // Query unchanged — re-run the search directly since the URL
       // won't change and the effect won't fire.
       search(q, false, true);
-      fetchHistogram(q);
+      if (!hasPipeOutsideQuotes(q)) {
+          const timechartExpr = q.trim()
+            ? `${q.trim()} | timechart 50 by level`
+            : `| timechart 50 by level`;
+          histogramSearch(timechartExpr, false, true);
+        }
       if (showPlan) explain(q);
     } else {
       navigate({ to: "/search", search: (prev: Record<string, unknown>) => ({ ...prev, q: normalized }), replace: false } as any);
@@ -523,6 +532,9 @@ export function SearchView() {
     }
   };
 
+  const histogramData = histogramTableResult
+    ? tableResultToHistogramData(histogramTableResult.columns, histogramTableResult.rows)
+    : null;
   const liveHistogramData = useLiveHistogram(followRecords);
   const tokens = extractTokens(q);
   const { hasErrors: draftHasErrors, hasPipeline: draftIsPipeline } = tokenize(draft, syntax);

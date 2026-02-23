@@ -624,7 +624,8 @@ function classifyRenameArgs(tokens: QueryToken[]): HighlightSpan[] {
   return spans;
 }
 
-// Classify simple pipe arguments (sort, head, fields): tokens with - as punctuation.
+// Classify simple pipe arguments (sort, head, fields, timechart): tokens with
+// - as punctuation and "by"/"as" as keywords.
 function classifySimplePipeArgs(tokens: QueryToken[]): HighlightSpan[] {
   const spans: HighlightSpan[] = [];
 
@@ -635,6 +636,8 @@ function classifySimplePipeArgs(tokens: QueryToken[]): HighlightSpan[] {
       spans.push({ text: tok.text, role: "comma" });
     } else if (tok.kind === "word" && tok.text === "-") {
       spans.push({ text: tok.text, role: "compare-op" });
+    } else if (tok.kind === "word" && (tok.text.toLowerCase() === "by" || tok.text.toLowerCase() === "as")) {
+      spans.push({ text: tok.text, role: "pipe-keyword" });
     } else if (tok.kind === "word") {
       spans.push({ text: tok.text, role: "token" });
     } else {
@@ -1426,7 +1429,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
     advance(); // consume number
   }
 
-  // Parse timechart: NUMBER
+  // Parse timechart: NUMBER ["by" FIELD]
   function parseTimechartOp(): void {
     const s = cur();
     if (!s || s.role !== "token") {
@@ -1438,6 +1441,18 @@ function validate(spans: HighlightSpan[]): ValidateResult {
       return;
     }
     advance(); // consume number
+
+    // Optional "by" FIELD
+    const byKw = cur();
+    if (byKw && byKw.role === "pipe-keyword" && byKw.text.toLowerCase() === "by") {
+      advance(); // consume "by"
+      const field = cur();
+      if (!field || field.role !== "token") {
+        fail("expected field name after 'by'");
+        return;
+      }
+      advance(); // consume field
+    }
   }
 
   // Parse slice: START END (both positive integers)
