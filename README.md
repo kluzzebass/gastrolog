@@ -1,16 +1,18 @@
 # GastroLog
 
-GastroLog is a log aggregation and search service. It collects logs from various sources, stores them in time-ordered chunks, and builds indexes for fast full-text search.
+GastroLog is a log aggregation and search service. It collects logs from various sources, stores them in time-ordered chunks, and builds indexes for fast full-text search and interactive analytics.
 
 ![GastroLog screenshot](docs/screenshot.png)
 
 ## Features
 
-- **Multiple ingesters** — Syslog (UDP/TCP), HTTP (Loki-compatible), RELP, file tail, Docker container logs
-- **Chunk-based storage** — Append-only segments that seal automatically and trigger index builds
-- **Full-text search** — Token, attribute, and key-value indexes with a purpose-built query language
+- **Multiple ingesters** — Syslog (UDP/TCP), HTTP (Loki-compatible), RELP, OTLP (gRPC/HTTP), Fluent Forward, Kafka, file tail, Docker container logs, self-monitoring metrics
+- **Chunk-based storage** — Append-only segments that seal automatically and trigger index builds, with optional zstd compression and tiered retention
+- **Full-text search** — Token, attribute, and key-value indexes with a purpose-built query language supporting boolean logic, comparisons, regex, and globs
+- **Pipeline analytics** — Pipe-based query transformations (`| stats`, `| eval`, `| sort`, `| head`, `| where`, `| rename`, `| fields`, `| raw`) with 10 aggregation functions, 20+ scalar functions, time bucketing, and arithmetic expressions
+- **Visualizations** — Time series charts, single-value displays, sortable tables with CSV/JSON export, chart/table toggle, and auto-refresh polling
 - **Multi-store routing** — Route messages to different stores based on filter expressions
-- **Rotation and retention policies** — Per-store control over chunk size and data lifecycle
+- **Rotation and retention policies** — Per-store control over chunk size, data lifecycle, and migration between stores
 - **Embedded web UI** — Single binary serves both the API and the frontend
 - **Built-in authentication** — JWT-based with user management
 
@@ -78,7 +80,7 @@ gastrolog version           Print version
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--home` | Home directory (config database, user credentials) | `~/.config/gastrolog` (Linux), `~/Library/Application Support/gastrolog` (macOS) |
-| `--config-type` | Config store: `sqlite`, `json`, `memory` | `sqlite` |
+| `--config-type` | Config store: `sqlite`, `memory` | `sqlite` |
 | `--pprof` | pprof HTTP address (e.g. `localhost:6060`) | disabled |
 
 **Server flags:**
@@ -87,6 +89,29 @@ gastrolog version           Print version
 |------|-------------|---------|
 | `--addr` | Listen address (host:port) | `:4564` |
 | `--bootstrap` | Bootstrap with default config | `false` |
+
+## Query Language
+
+GastroLog's query language combines a filter phase with an optional pipeline of transformation operators.
+
+```
+# Boolean search with attribute filters
+level=error service=api status>=500
+
+# Aggregation with time bucketing (renders as a time series chart)
+level=error | stats count by bin(5m)
+
+# Top 10 hosts by error count
+level=error | stats count by host | sort -count | head 10
+
+# Computed fields and filtering
+* | eval duration_s = duration / 1000 | where duration_s > 5
+
+# Multi-series breakdown
+* | stats avg(duration) by bin(1m), method
+```
+
+The built-in help system documents the full query language, all operators, and scalar functions.
 
 ## Building from Source
 
