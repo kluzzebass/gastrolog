@@ -912,7 +912,6 @@ export function SearchView() {
                 dark={dark}
                 pollInterval={pollInterval}
                 onPollIntervalChange={setPollInterval}
-                onRefresh={() => search(q, false, true)}
               />
             ) : (
             <>

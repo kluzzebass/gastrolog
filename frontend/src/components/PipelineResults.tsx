@@ -16,51 +16,36 @@ const POLL_OPTIONS: { label: string; ms: number | null }[] = [
 function AutoRefreshControls({
   pollInterval,
   onPollIntervalChange,
-  onRefresh,
   dark,
 }: {
   pollInterval: number | null;
   onPollIntervalChange: (ms: number | null) => void;
-  onRefresh: () => void;
   dark: boolean;
 }) {
   const c = useThemeClass(dark);
   return (
-    <div className="flex items-center gap-2">
-      <div
-        className={`flex items-center rounded overflow-hidden border ${c(
-          "border-ink-border-subtle",
-          "border-light-border-subtle",
-        )}`}
-      >
-        {POLL_OPTIONS.map((opt) => (
-          <button
-            key={opt.label}
-            onClick={() => onPollIntervalChange(opt.ms)}
-            className={`px-2 py-1 text-[0.75em] font-mono transition-colors ${
-              pollInterval === opt.ms
-                ? `${c("bg-copper/20 text-copper", "bg-copper/20 text-copper")}`
-                : `${c(
-                    "text-text-muted hover:text-text-bright hover:bg-ink-hover",
-                    "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
-                  )}`
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
-
-      <button
-        onClick={onRefresh}
-        className={`px-2.5 py-1.5 text-[0.8em] font-mono rounded transition-colors ${c(
-          "text-text-muted hover:text-copper hover:bg-ink-hover",
-          "text-light-text-muted hover:text-copper hover:bg-light-hover",
-        )}`}
-        title="Refresh now"
-      >
-        ↻
-      </button>
+    <div
+      className={`flex items-center rounded overflow-hidden border ${c(
+        "border-ink-border-subtle",
+        "border-light-border-subtle",
+      )}`}
+    >
+      {POLL_OPTIONS.map((opt) => (
+        <button
+          key={opt.label}
+          onClick={() => onPollIntervalChange(opt.ms)}
+          className={`px-2 py-1 text-[0.75em] font-mono transition-colors ${
+            pollInterval === opt.ms
+              ? `${c("bg-copper/20 text-copper", "bg-copper/20 text-copper")}`
+              : `${c(
+                  "text-text-muted hover:text-text-bright hover:bg-ink-hover",
+                  "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
+                )}`
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -148,7 +133,6 @@ interface PipelineResultsProps {
   dark: boolean;
   pollInterval: number | null;
   onPollIntervalChange: (ms: number | null) => void;
-  onRefresh: () => void;
 }
 
 export function PipelineResults({
@@ -156,7 +140,6 @@ export function PipelineResults({
   dark,
   pollInterval,
   onPollIntervalChange,
-  onRefresh,
 }: Readonly<PipelineResultsProps>) {
   const c = useThemeClass(dark);
   const { columns, rows, truncated, resultType } = tableResult;
@@ -205,7 +188,6 @@ export function PipelineResults({
           <AutoRefreshControls
             pollInterval={pollInterval}
             onPollIntervalChange={onPollIntervalChange}
-            onRefresh={onRefresh}
             dark={dark}
           />
           <ExportButton tableData={{ columns, rows: rowData }} dark={dark} />
