@@ -2,6 +2,15 @@
 
 All notable changes to GastroLog are documented here.
 
+## v0.4.1 — 2026-02-23
+
+### Features
+- **Cancel button for queries** — the search button transforms into a cancel button while a query is running, allowing you to abort long-running pipeline queries
+
+### Fixes
+- Pipeline record operators (`where`, `eval`, `sort`, `rename`, `fields`, `raw`) now see extracted fields (KV pairs, JSON, logfmt) from the log message, not just explicit attributes
+- Pipeline queries no longer require a filter expression before the pipe — `last=5m | raw` and `| stats count` now work as implicit match-all
+
 ## v0.4.0 — 2026-02-23
 
 ### Features
