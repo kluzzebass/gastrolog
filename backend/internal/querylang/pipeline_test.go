@@ -622,7 +622,6 @@ func TestParsePipelineErrors(t *testing.T) {
 		input   string
 		wantErr error
 	}{
-		{"pipe at start", "| stats count", ErrUnexpectedToken},
 		{"empty after pipe", "error |", ErrUnexpectedEOF},
 		{"unknown pipe operator", "error | foo count", ErrUnexpectedToken},
 		{"stats without agg", "error | stats by status", ErrUnexpectedToken},
@@ -990,6 +989,39 @@ func TestParsePipelineRaw(t *testing.T) {
 	}
 	if _, ok := p.Pipes[0].(*RawOp); !ok {
 		t.Fatalf("expected RawOp, got %T", p.Pipes[0])
+	}
+}
+
+func TestParsePipelineBarePipe(t *testing.T) {
+	// A query starting with "|" (no filter) should be valid — implies match-all.
+	p, err := ParsePipeline("| raw")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	if p.Filter != nil {
+		t.Errorf("expected nil filter (match-all), got %v", p.Filter)
+	}
+	if len(p.Pipes) != 1 {
+		t.Fatalf("expected 1 pipe, got %d", len(p.Pipes))
+	}
+	if _, ok := p.Pipes[0].(*RawOp); !ok {
+		t.Fatalf("expected RawOp, got %T", p.Pipes[0])
+	}
+}
+
+func TestParsePipelineBarePipeStats(t *testing.T) {
+	p, err := ParsePipeline("| stats count by bin(5m)")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	if p.Filter != nil {
+		t.Errorf("expected nil filter (match-all), got %v", p.Filter)
+	}
+	if len(p.Pipes) != 1 {
+		t.Fatalf("expected 1 pipe, got %d", len(p.Pipes))
+	}
+	if _, ok := p.Pipes[0].(*StatsOp); !ok {
+		t.Fatalf("expected StatsOp, got %T", p.Pipes[0])
 	}
 }
 

@@ -43,18 +43,19 @@ func ParsePipeline(input string) (*Pipeline, error) {
 		return nil, newParseError(0, ErrEmptyQuery, "empty query")
 	}
 
-	// Check if the query starts with a pipe (no filter expression).
+	// If the query starts with a pipe, treat it as match-all (nil filter).
+	// This happens when directives (last=5m, etc.) consume all filter tokens.
+	var pipeline *Pipeline
 	if p.cur.Kind == TokPipe {
-		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "query must start with a filter expression before '|'")
+		pipeline = &Pipeline{Filter: nil}
+	} else {
+		// Parse the filter expression.
+		filter, err := p.parseOrExpr()
+		if err != nil {
+			return nil, err
+		}
+		pipeline = &Pipeline{Filter: filter}
 	}
-
-	// Parse the filter expression.
-	filter, err := p.parseOrExpr()
-	if err != nil {
-		return nil, err
-	}
-
-	pipeline := &Pipeline{Filter: filter}
 
 	// Parse pipe operators.
 	for p.cur.Kind == TokPipe {
