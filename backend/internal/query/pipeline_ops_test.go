@@ -267,6 +267,91 @@ func TestApplyTableEval(t *testing.T) {
 	}
 }
 
+func TestMaterializeFieldsFromRaw(t *testing.T) {
+	// Records with KV pairs in Raw but not in Attrs should become visible after materialization.
+	records := []chunk.Record{
+		makeRec(baseTime, chunk.Attributes{"level": "info"}, `duration=250 method=GET status=200`),
+		makeRec(baseTime, nil, `host=web-01 bytes=4096`),
+	}
+
+	materializeFields(records)
+
+	// First record: extracted KV pairs should be in Attrs, existing Attrs preserved.
+	if records[0].Attrs["level"] != "info" {
+		t.Errorf("existing attr 'level' should be preserved, got %q", records[0].Attrs["level"])
+	}
+	if records[0].Attrs["duration"] != "250" {
+		t.Errorf("extracted 'duration' = %q, want '250'", records[0].Attrs["duration"])
+	}
+	if records[0].Attrs["method"] == "" {
+		t.Error("extracted 'method' should be present")
+	}
+	if records[0].Attrs["status"] != "200" {
+		t.Errorf("extracted 'status' = %q, want '200'", records[0].Attrs["status"])
+	}
+
+	// Second record: nil Attrs should be created with extracted fields.
+	if records[1].Attrs["host"] != "web-01" {
+		t.Errorf("extracted 'host' = %q, want 'web-01'", records[1].Attrs["host"])
+	}
+	if records[1].Attrs["bytes"] != "4096" {
+		t.Errorf("extracted 'bytes' = %q, want '4096'", records[1].Attrs["bytes"])
+	}
+}
+
+func TestMaterializeFieldsAttrPrecedence(t *testing.T) {
+	// Attrs should take precedence over extracted fields with the same name.
+	records := []chunk.Record{
+		makeRec(baseTime, chunk.Attributes{"status": "override"}, `status=200`),
+	}
+
+	materializeFields(records)
+
+	if records[0].Attrs["status"] != "override" {
+		t.Errorf("attr should win over extracted: got %q, want 'override'", records[0].Attrs["status"])
+	}
+}
+
+func TestMaterializeFieldsJSON(t *testing.T) {
+	// JSON fields should be extracted from the raw message.
+	records := []chunk.Record{
+		makeRec(baseTime, nil, `{"method":"POST","status":201,"path":"/api/users"}`),
+	}
+
+	materializeFields(records)
+
+	if records[0].Attrs["method"] == "" {
+		t.Error("extracted JSON 'method' should be present")
+	}
+	if records[0].Attrs["status"] != "201" {
+		t.Errorf("extracted JSON 'status' = %q, want '201'", records[0].Attrs["status"])
+	}
+}
+
+func TestRecordsToTableWithExtractedFields(t *testing.T) {
+	// recordsToTable should include extracted fields as columns, not just Attrs.
+	records := []chunk.Record{
+		makeRec(baseTime, chunk.Attributes{"level": "info"}, `duration=250 method=GET`),
+	}
+
+	table := recordsToTable(records)
+
+	// Check that extracted fields appear as columns.
+	colSet := make(map[string]bool)
+	for _, c := range table.Columns {
+		colSet[c] = true
+	}
+	if !colSet["duration"] {
+		t.Error("extracted field 'duration' should be a column")
+	}
+	if !colSet["method"] {
+		t.Error("extracted field 'method' should be a column")
+	}
+	if !colSet["level"] {
+		t.Error("attr 'level' should be a column")
+	}
+}
+
 func TestCompareSortValues(t *testing.T) {
 	// Numeric comparison.
 	if compareSortValues("5", "20") >= 0 {

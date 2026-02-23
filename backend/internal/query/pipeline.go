@@ -131,9 +131,12 @@ func headOnlyLimit(ops []querylang.PipeOp) int {
 }
 
 // recordsToTable converts a slice of records into a flat TableResult.
-// Columns are: _write_ts, _ingest_ts, _source_ts, then all attribute keys
-// (sorted), then _raw.
+// Columns are: _write_ts, _ingest_ts, _source_ts, then all field keys
+// (extracted KV/JSON + attributes, sorted), then _raw.
 func recordsToTable(records []chunk.Record) *TableResult {
+	// Materialize extracted fields so they appear as columns.
+	materializeFields(records)
+
 	// Collect all unique attribute keys.
 	keySet := make(map[string]struct{})
 	for _, rec := range records {

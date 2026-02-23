@@ -22,6 +22,10 @@ func applyRecordOps(it iter.Seq2[chunk.Record, error], ops []querylang.PipeOp) (
 		records = append(records, rec.Copy())
 	}
 
+	// Materialize extracted fields (KV, JSON, logfmt) into Attrs so all
+	// operators see the full field set, not just explicit attributes.
+	materializeFields(records)
+
 	eval := querylang.NewEvaluator()
 
 	for _, op := range ops {
@@ -300,6 +304,26 @@ func applyTableFields(table *TableResult, op *querylang.FieldsOp) {
 }
 
 // --- helpers ---
+
+// materializeFields extracts KV, JSON, and logfmt fields from each record's
+// Raw message and merges them into Attrs. Existing Attrs take precedence.
+// This ensures all pipeline operators see extracted fields, not just explicit attributes.
+func materializeFields(records []chunk.Record) {
+	for i := range records {
+		row := RecordToRow(records[i])
+		if records[i].Attrs == nil {
+			records[i].Attrs = make(chunk.Attributes, len(row))
+		}
+		for k, v := range row {
+			if k == "_raw" {
+				continue
+			}
+			if _, exists := records[i].Attrs[k]; !exists {
+				records[i].Attrs[k] = v
+			}
+		}
+	}
+}
 
 // compareSortValues compares two string values, trying numeric comparison first.
 func compareSortValues(a, b string) int {
