@@ -289,7 +289,7 @@ export function SearchView() {
         }
         resetFollow();
         loadMoreGateRef.current = false;
-        search(q);
+        search(q, false, true);
         fetchHistogram(q);
         if (showPlan) explain(q);
         return;
@@ -395,7 +395,7 @@ export function SearchView() {
     if (normalized === q && !isFollowMode) {
       // Query unchanged — re-run the search directly since the URL
       // won't change and the effect won't fire.
-      search(q);
+      search(q, false, true);
       fetchHistogram(q);
       if (showPlan) explain(q);
     } else {
