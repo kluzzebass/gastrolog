@@ -2,6 +2,27 @@
 
 All notable changes to GastroLog are documented here.
 
+## v0.4.0 — 2026-02-23
+
+### Features
+- **Pipeline query language** — pipe-based transformation pipeline extending the query language with post-filter operators separated by `|`. Operators: `stats` (aggregation with 10 functions: count, sum, avg, min, max, dcount, median, first, last, values), `where`, `eval`, `sort`, `head`, `rename`, `fields`, `raw`. Time bucketing with `bin()`, grouping with `by`, aliases with `as`.
+- **Expressions** — full arithmetic (`+`, `-`, `*`, `/`, `%`), comparison operators, and 20+ scalar functions (`len`, `lower`, `upper`, `trim`, `substr`, `replace`, `coalesce`, `if`, `toNumber`, `round`, `ceil`, `floor`, `abs`, `pow`, `log`, `now`, etc.) usable in `stats`, `eval`, `where`, and filter expressions.
+- **Comparison operators in filter expressions** — `!=`, `>`, `>=`, `<`, `<=` (e.g. `status>=500`)
+- **Pipeline visualizations** — time series charts for `bin()` queries with hover crosshair and tooltips, single-value display for scalar aggregations, sortable tables for grouped results, chart/table toggle, and auto-refresh polling at configurable intervals.
+- **Self-monitoring metrics ingester** — built-in ingester type that ships GastroLog's own runtime metrics as log records
+- **System metrics in header** — replaced record/store/ingester counts with live CPU, memory, and storage utilization; detailed memory breakdown in inspector metrics panel
+
+### Performance
+- Reduced memory allocation churn during pipeline auto-refresh polling
+- Channel-based pool for brotli compression writers (prevents GC eviction)
+- Bounded zstd encoder concurrency to prevent unbounded memory growth
+
+### Fixes
+- Time series chart correctly renders negative Y values
+- Missing values in time series chart are skipped instead of plotted as zero
+- Follow mode surfaces non-retriable errors instead of silently reconnecting
+- Proactive JWT refresh before token expiry
+
 ## v0.3.2 — 2026-02-22
 
 ### Performance
