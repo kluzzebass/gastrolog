@@ -316,6 +316,7 @@ function HistogramBar({
   formatTime: (d: Date) => string;
 }>) {
   const c = useThemeClass(dark);
+  const [hoveredLevel, setHoveredLevel] = useState<string | null>(null);
   const pct = maxCount > 0 ? bucket.count / maxCount : 0;
   const lc = bucket.levelCounts;
   const hasLevels = lc && Object.keys(lc).length > 0;
@@ -362,6 +363,8 @@ function HistogramBar({
                     height: `${(seg.count / bucket.count) * 100}%`,
                     backgroundColor: seg.color,
                   }}
+                  onMouseEnter={() => setHoveredLevel(seg.key)}
+                  onMouseLeave={() => setHoveredLevel(null)}
                   onMouseDown={
                     onSegmentClick
                       ? (e) => e.stopPropagation()
@@ -416,10 +419,14 @@ function HistogramBar({
         other={other}
         dark={dark}
         formatTime={formatTime}
+        hoveredLevel={hoveredLevel}
       />
     </div>
   );
 }
+
+// Tooltip severity order: top-to-bottom matches visual bar stacking (top = other/trace, bottom = error).
+const TOOLTIP_SEVERITY_LEVELS = [...SEVERITY_LEVELS].reverse();
 
 function HistogramBarTooltip({
   bucket,
@@ -427,12 +434,14 @@ function HistogramBarTooltip({
   other,
   dark,
   formatTime,
+  hoveredLevel,
 }: Readonly<{
   bucket: HistogramBucket;
   hasLevels: boolean;
   other: number;
   dark: boolean;
   formatTime: (d: Date) => string;
+  hoveredLevel: string | null;
 }>) {
   const c = useThemeClass(dark);
   const lc = bucket.levelCounts;
@@ -446,12 +455,19 @@ function HistogramBarTooltip({
       </div>
       {hasLevels && (
         <div className="mt-0.5 space-y-px">
-          {SEVERITY_LEVELS.map(
+          {other > 0 && (
+            <div className={`flex items-center gap-1.5 ${hoveredLevel === "other" ? "font-bold" : ""}`}>
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-copper/60" />
+              <span className={hoveredLevel === "other" ? "" : "opacity-70"}>other</span>
+              <span>{other.toLocaleString()}</span>
+            </div>
+          )}
+          {TOOLTIP_SEVERITY_LEVELS.map(
             (level) =>
               lc[level]! > 0 && (
                 <div
                   key={level}
-                  className="flex items-center gap-1.5"
+                  className={`flex items-center gap-1.5 ${hoveredLevel === level ? "font-bold" : ""}`}
                 >
                   <span
                     className="inline-block w-1.5 h-1.5 rounded-full"
@@ -459,17 +475,10 @@ function HistogramBarTooltip({
                       backgroundColor: `var(--color-severity-${level})`,
                     }}
                   />
-                  <span className="opacity-70">{level}</span>
+                  <span className={hoveredLevel === level ? "" : "opacity-70"}>{level}</span>
                   <span>{lc[level]!.toLocaleString()}</span>
                 </div>
               ),
-          )}
-          {other > 0 && (
-            <div className="flex items-center gap-1.5">
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-copper/60" />
-              <span className="opacity-70">other</span>
-              <span>{other.toLocaleString()}</span>
-            </div>
           )}
         </div>
       )}
