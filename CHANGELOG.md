@@ -2,6 +2,23 @@
 
 All notable changes to GastroLog are documented here.
 
+## v0.5.0 — 2026-02-24
+
+### Features
+- **Pipeline autocomplete** — context-aware autocomplete for pipe operators with a declarative grammar table. After `|`, suggests keywords; inside operator bodies, suggests only what the grammar allows (aggregation functions, fields, `by`/`as` clauses, etc.)
+- **Unified timechart histogram** — the severity histogram is now powered by the `timechart` pipeline operator, producing stacked bar charts with animated transitions via visx
+- **Auto-refresh for filter queries** — filter queries (not just pipelines) now support configurable auto-refresh polling
+- **Configurable follow mode buffer** — sliding window size for follow mode is now user-configurable
+- **Tail and slice operators** — new `tail N` and `slice START END` pipeline operators for result subsetting
+- **Ingester default params** — backend serves ingester type defaults via `GetIngesterDefaults` RPC, so the frontend no longer hardcodes them
+
+### Fixes
+- Eval pipe function calls (`upper`, `lower`, `len`, etc.) now highlight correctly — `GetSyntax` RPC returns all scalar functions, and the tokenizer correctly classifies function calls in eval expressions
+- Histogram tooltip order matches the visual bar stacking, with the hovered level highlighted
+- Previous results stay visible while a new search is loading (no flash of empty state)
+- Empty ingester params treated as unset instead of rejected
+- Expired tokens silently refresh instead of showing error toasts
+
 ## v0.4.1 — 2026-02-23
 
 ### Features
