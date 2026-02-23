@@ -98,6 +98,20 @@ async function tryRefresh(): Promise<boolean> {
   }
 }
 
+/**
+ * Attempt to refresh the auth token, deduplicating concurrent calls.
+ * Exported for streaming hooks that catch Unauthenticated errors outside
+ * the interceptor's reach (errors during async iteration).
+ */
+export function refreshAuth(): Promise<boolean> {
+  if (!refreshPromise) {
+    refreshPromise = tryRefresh().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+}
+
 // Catches Unauthenticated errors on any RPC (except AuthService) and
 // attempts a refresh before redirecting to login.
 const unauthInterceptor: Interceptor = (next) => async (req) => {
@@ -153,6 +167,29 @@ export const jobClient = createPromiseClient(JobService, transport);
 
 // Schedule proactive refresh for token loaded from localStorage on startup.
 if (currentToken) scheduleProactiveRefresh(currentToken);
+
+// When the tab regains focus, check if the token needs refreshing.
+// Browsers throttle setTimeout in background tabs, so the proactive
+// refresh timer may have missed its window.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible" || !currentToken) return;
+  try {
+    const [, payloadB64] = currentToken.split(".");
+    if (!payloadB64) return;
+    const payload = JSON.parse(
+      atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")),
+    );
+    const exp = payload.exp as number | undefined;
+    if (!exp) return;
+    // Token expires within 2 minutes — refresh now.
+    if (exp * 1000 - Date.now() < 120_000) {
+      refreshAuth();
+    }
+  } catch {
+    // Can't decode — try refreshing defensively.
+    refreshAuth();
+  }
+});
 
 // Re-export types for convenience
 export * from "./gen/gastrolog/v1/query_pb";

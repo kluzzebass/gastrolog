@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, type MutableRefObject } from "react";
-import { queryClient, Query, Record, TableResult } from "../client";
+import { ConnectError, Code } from "@connectrpc/connect";
+import { queryClient, Query, Record, TableResult, refreshAuth } from "../client";
 
 interface SearchState {
   records: Record[];
@@ -172,6 +173,23 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
           (err instanceof Error && err.message.includes("aborted"))
         ) {
           // Search was cancelled, ignore
+          return;
+        }
+        // Unauthenticated during streaming (e.g. token expired while tab
+        // was backgrounded): silently refresh and retry.
+        if (
+          err instanceof ConnectError &&
+          err.code === Code.Unauthenticated
+        ) {
+          abortRef.current = null;
+          const refreshed = await refreshAuth();
+          if (refreshed) {
+            search(queryStr, append, keepPrevious, silent);
+            return;
+          }
+          // Refresh failed — don't surface error, interceptor will
+          // redirect to login on the next request.
+          setState((prev) => ({ ...prev, isSearching: false }));
           return;
         }
         abortRef.current = null;

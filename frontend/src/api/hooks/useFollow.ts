@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, type MutableRefObject } from "react";
 import { ConnectError, Code } from "@connectrpc/connect";
-import { queryClient, Query, Record } from "../client";
+import { queryClient, Query, Record, refreshAuth } from "../client";
 
 const DEFAULT_MAX_RECORDS = 5000;
 const INITIAL_BACKOFF_MS = 1000;
@@ -128,13 +128,10 @@ export function useFollow(options?: { onError?: (err: Error) => void; maxRecords
         if (isAbortError(err)) {
           return;
         }
-        // Don't reconnect on non-retriable errors:
-        // - Unauthenticated: global interceptor redirects to login
-        // - InvalidArgument: bad query (e.g. pipeline queries not supported)
+        // InvalidArgument: bad query (e.g. pipeline queries not supported) — fatal.
         if (
           err instanceof ConnectError &&
-          (err.code === Code.Unauthenticated ||
-            err.code === Code.InvalidArgument)
+          err.code === Code.InvalidArgument
         ) {
           setState((prev) => ({
             ...prev,
@@ -143,6 +140,26 @@ export function useFollow(options?: { onError?: (err: Error) => void; maxRecords
             isFollowing: false,
           }));
           onErrorRef.current?.(err as ConnectError);
+          return;
+        }
+        // Unauthenticated during streaming (e.g. token expired while tab
+        // was backgrounded): silently refresh and reconnect.
+        if (
+          err instanceof ConnectError &&
+          err.code === Code.Unauthenticated
+        ) {
+          const refreshed = await refreshAuth();
+          if (refreshed) {
+            scheduleReconnect(queryStr, 0);
+            return;
+          }
+          // Refresh failed — stop following, interceptor will redirect
+          // to login on the next request.
+          setState((prev) => ({
+            ...prev,
+            isFollowing: false,
+            reconnecting: false,
+          }));
           return;
         }
         // Schedule reconnect with backoff.
