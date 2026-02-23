@@ -1,6 +1,9 @@
 package querylang
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 // Parser parses a query string into an AST.
 // This is the source of truth for query syntax. The frontend has a mirrored
@@ -75,6 +78,26 @@ func (p *parser) advance() error {
 	}
 	p.cur = tok
 	return nil
+}
+
+// knownScalarFuncs uses the canonical set from scalar.go (IsScalarFunc).
+// This comment exists for grep-ability — the actual set lives in ScalarFuncNames.
+
+// parserState captures the parser state for backtracking.
+type parserState struct {
+	lexState LexerState
+	cur      Token
+}
+
+// save returns a snapshot of the parser state for backtracking.
+func (p *parser) save() parserState {
+	return parserState{lexState: p.lex.Save(), cur: p.cur}
+}
+
+// restore rewinds the parser to a previously saved state.
+func (p *parser) restore(s parserState) {
+	p.lex.Restore(s.lexState)
+	p.cur = s.cur
 }
 
 // parseOrExpr parses: or_expr = and_expr ( "OR" and_expr )*
@@ -227,8 +250,9 @@ func (p *parser) compareOp() CompareOp {
 	}
 }
 
-// parsePredicate parses: predicate = kv_pred | token_pred
-// kv_pred = ( WORD | "*" ) compare_op ( WORD | "*" )
+// parsePredicate parses: predicate = expr_pred | kv_pred | token_pred
+// expr_pred  = pipe_expr compare_op WORD   (when LHS starts with a known scalar function)
+// kv_pred    = ( WORD | "*" ) compare_op ( WORD | "*" )
 // token_pred = WORD
 func (p *parser) parsePredicate() (Expr, error) {
 	// Handle unexpected tokens.
@@ -241,6 +265,18 @@ func (p *parser) parsePredicate() (Expr, error) {
 		return nil, newParseError(p.cur.Pos, ErrUnmatchedParen, "unmatched closing parenthesis")
 	case TokEq, TokNe, TokGt, TokGte, TokLt, TokLte:
 		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "unexpected '%s'", p.cur.Lit)
+	}
+
+	// Try expression predicate: when current token is a known scalar function
+	// followed by '(', speculatively parse as pipe_expr <op> value.
+	if p.cur.Kind == TokWord && IsScalarFunc(strings.ToLower(p.cur.Lit)) {
+		peek, peekErr := p.lex.Peek()
+		if peekErr == nil && peek.Kind == TokLParen {
+			if expr, err := p.tryParseExprPredicate(); expr != nil {
+				return expr, err
+			}
+			// Backtracking happened inside tryParseExprPredicate; fall through to normal parsing.
+		}
 	}
 
 	// Regex predicate: /pattern/
@@ -328,6 +364,57 @@ func (p *parser) buildGlobPredicate(tok Token) (*PredicateExpr, error) {
 		return nil, newParseError(tok.Pos, ErrInvalidGlob, "invalid glob pattern %q: %v", tok.Lit, err)
 	}
 	return &PredicateExpr{Kind: PredGlob, Value: tok.Lit, Pattern: pattern}, nil
+}
+
+// tryParseExprPredicate speculatively parses an expression predicate.
+// The caller has verified that p.cur is a known scalar function name and the
+// next token is '('. We switch to pipe mode, parse a pipe expression,
+// then check for a comparison operator and RHS value.
+// Returns (nil, nil) if backtracking occurred (no expression predicate found).
+func (p *parser) tryParseExprPredicate() (Expr, error) {
+	saved := p.save()
+
+	// Switch to pipe mode so the pipe expression parser handles '-', '/' etc.
+	p.lex.SetPipeMode(true)
+
+	lhs, err := p.parsePipeExpr()
+	if err != nil {
+		// Parse error in pipe expression — backtrack.
+		p.restore(saved)
+		return nil, nil
+	}
+
+	// Switch back to filter mode.
+	p.lex.SetPipeMode(false)
+
+	// Expect a comparison operator.
+	if !p.isCompareOp() {
+		p.restore(saved)
+		return nil, nil
+	}
+
+	op := p.compareOp()
+	if err := p.advance(); err != nil {
+		return nil, err
+	}
+
+	// Expect RHS value (WORD or quoted string).
+	if p.cur.Kind != TokWord {
+		p.restore(saved)
+		return nil, nil
+	}
+
+	value := p.cur.Lit
+	if err := p.advance(); err != nil {
+		return nil, err
+	}
+
+	return &PredicateExpr{
+		Kind:    PredExpr,
+		Op:      op,
+		Value:   value,
+		ExprLHS: lhs,
+	}, nil
 }
 
 // buildKVPredicate creates the appropriate KV predicate from key=value tokens,

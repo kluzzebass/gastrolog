@@ -405,10 +405,15 @@ func (p *parser) parseMulExpr() (PipeExpr, error) {
 		return nil, err
 	}
 
-	for p.cur.Kind == TokStar || p.cur.Kind == TokSlash {
-		op := ArithMul
-		if p.cur.Kind == TokSlash {
+	for p.cur.Kind == TokStar || p.cur.Kind == TokSlash || p.cur.Kind == TokPercent {
+		var op ArithOp
+		switch p.cur.Kind {
+		case TokSlash:
 			op = ArithDiv
+		case TokPercent:
+			op = ArithMod
+		default:
+			op = ArithMul
 		}
 		if err := p.advance(); err != nil {
 			return nil, err
@@ -423,8 +428,18 @@ func (p *parser) parseMulExpr() (PipeExpr, error) {
 	return left, nil
 }
 
-// parseUnaryPipeExpr parses: primary_expr (no unary operators in v1).
+// parseUnaryPipeExpr parses: "-" unary_expr | primary_expr.
 func (p *parser) parseUnaryPipeExpr() (PipeExpr, error) {
+	if p.cur.Kind == TokMinus {
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
+		expr, err := p.parseUnaryPipeExpr()
+		if err != nil {
+			return nil, err
+		}
+		return &UnaryExpr{Op: ArithSub, Expr: expr}, nil
+	}
 	return p.parsePrimaryPipeExpr()
 }
 

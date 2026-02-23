@@ -24,6 +24,11 @@ filter | stats agg, agg, ... by group, group, ...
 | `avg(field)` | Average of numeric field values |
 | `min(field)` | Minimum numeric field value |
 | `max(field)` | Maximum numeric field value |
+| `dcount(field)` | Count of distinct values |
+| `median(field)` | Median of numeric field values |
+| `first(field)` | First non-missing value seen |
+| `last(field)` | Last non-missing value seen |
+| `values(field)` | Comma-separated list of distinct values |
 
 Fields are extracted automatically from record attributes, key=value pairs in the message text, and JSON message bodies. Attributes take precedence over extracted fields when names collide.
 
@@ -75,15 +80,13 @@ By default, `bin()` uses the record's write timestamp. To bucket by a different 
 
 Built-in timestamp fields: `_write_ts`, `_ingest_ts`, `_source_ts`.
 
-### Arithmetic Expressions
+## Expressions
 
-Aggregation arguments support arithmetic:
+Aggregation arguments and `where` conditions support arithmetic and [scalar functions](help:scalar-functions). These also work directly in [filter expressions](help:query-language) as expression predicates.
 
 ```
 * | stats sum(bytes_sent + bytes_received) as total_bytes
 ```
-
-Operators: `+`, `-`, `*`, `/`, with standard precedence. Parentheses for grouping.
 
 ## Where Operator
 

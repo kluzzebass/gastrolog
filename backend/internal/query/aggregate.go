@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/querylang"
 	"gastrolog/internal/tokenizer"
@@ -130,7 +131,8 @@ func NewAggregator(stats *querylang.StatsOp) (*Aggregator, error) {
 	// Validate aggregate functions.
 	for _, agg := range stats.Aggs {
 		switch strings.ToLower(agg.Func) {
-		case "count", "sum", "avg", "min", "max":
+		case "count", "sum", "avg", "min", "max",
+			"dcount", "median", "first", "last", "values":
 			// OK
 		default:
 			return nil, fmt.Errorf("unknown aggregate function: %s", agg.Func)
@@ -559,6 +561,114 @@ func (a *maxAcc) Result() querylang.Value {
 	return querylang.NumValue(a.max)
 }
 
+// dcountAcc counts distinct non-missing string values.
+type dcountAcc struct {
+	seen map[string]bool
+}
+
+func (a *dcountAcc) Add(v querylang.Value) {
+	if v.Missing {
+		return
+	}
+	if a.seen == nil {
+		a.seen = make(map[string]bool)
+	}
+	a.seen[v.Str] = true
+}
+
+func (a *dcountAcc) Result() querylang.Value {
+	return querylang.NumValue(float64(len(a.seen)))
+}
+
+// medianAcc collects numeric values and returns the median.
+type medianAcc struct {
+	vals []float64
+}
+
+func (a *medianAcc) Add(v querylang.Value) {
+	if n, ok := v.ToNum(); ok {
+		a.vals = append(a.vals, n)
+	}
+}
+
+func (a *medianAcc) Result() querylang.Value {
+	if len(a.vals) == 0 {
+		return querylang.MissingValue()
+	}
+	slices.Sort(a.vals)
+	n := len(a.vals)
+	if n%2 == 1 {
+		return querylang.NumValue(a.vals[n/2])
+	}
+	return querylang.NumValue((a.vals[n/2-1] + a.vals[n/2]) / 2)
+}
+
+// firstAcc tracks the first non-missing value seen.
+type firstAcc struct {
+	val querylang.Value
+	set bool
+}
+
+func (a *firstAcc) Add(v querylang.Value) {
+	if !a.set && !v.Missing {
+		a.val = v
+		a.set = true
+	}
+}
+
+func (a *firstAcc) Result() querylang.Value {
+	if !a.set {
+		return querylang.MissingValue()
+	}
+	return a.val
+}
+
+// lastAcc tracks the last non-missing value seen.
+type lastAcc struct {
+	val querylang.Value
+	set bool
+}
+
+func (a *lastAcc) Add(v querylang.Value) {
+	if !v.Missing {
+		a.val = v
+		a.set = true
+	}
+}
+
+func (a *lastAcc) Result() querylang.Value {
+	if !a.set {
+		return querylang.MissingValue()
+	}
+	return a.val
+}
+
+// valuesAcc collects distinct values and returns them comma-separated.
+type valuesAcc struct {
+	seen  map[string]bool
+	order []string
+}
+
+func (a *valuesAcc) Add(v querylang.Value) {
+	if v.Missing {
+		return
+	}
+	if a.seen == nil {
+		a.seen = make(map[string]bool)
+	}
+	if !a.seen[v.Str] {
+		a.seen[v.Str] = true
+		a.order = append(a.order, v.Str)
+	}
+}
+
+func (a *valuesAcc) Result() querylang.Value {
+	if len(a.order) == 0 {
+		return querylang.MissingValue()
+	}
+	return querylang.StrValue(strings.Join(a.order, ", "))
+}
+
 func newAccumulator(funcName string) (accumulator, error) {
 	switch strings.ToLower(funcName) {
 	case "count":
@@ -571,6 +681,16 @@ func newAccumulator(funcName string) (accumulator, error) {
 		return &minAcc{}, nil
 	case "max":
 		return &maxAcc{}, nil
+	case "dcount":
+		return &dcountAcc{}, nil
+	case "median":
+		return &medianAcc{}, nil
+	case "first":
+		return &firstAcc{}, nil
+	case "last":
+		return &lastAcc{}, nil
+	case "values":
+		return &valuesAcc{}, nil
 	default:
 		return nil, fmt.Errorf("unknown aggregate function: %s", funcName)
 	}

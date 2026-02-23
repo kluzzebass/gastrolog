@@ -21,6 +21,10 @@ const (
 
 	// PredGlob represents a glob pattern match against tokenized words: error*
 	PredGlob
+
+	// PredExpr represents an expression predicate: len(message) > 100
+	// Uses a pipe expression as the LHS, compared against a literal RHS value.
+	PredExpr
 )
 
 // CompareOp identifies the comparison operator in a KV predicate.
@@ -68,6 +72,8 @@ func (k PredicateKind) String() string {
 		return "regex"
 	case PredGlob:
 		return "glob"
+	case PredExpr:
+		return "expr"
 	default:
 		return "unknown"
 	}

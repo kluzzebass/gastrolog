@@ -24,6 +24,10 @@ import (
 // Must match the extractors registered in the KV indexer factories.
 var kvExtractors = tokenizer.DefaultExtractors()
 
+// pipeEval is a shared, stateless evaluator for expression predicates.
+// It's goroutine-safe because Eval only reads from the function registry.
+var pipeEval = querylang.NewEvaluator()
+
 // prunePositions returns positions >= minPos from a sorted slice.
 func prunePositions(positions []uint64, minPos uint64) []uint64 {
 	idx := sort.Search(len(positions), func(i int) bool {
@@ -968,6 +972,8 @@ func ConjunctionToFilters(conj *querylang.Conjunction) (tokens []string, kv []Ke
 	var regexFilters []recordFilter
 
 	// Extract positive predicates for index acceleration
+	var exprFilters []recordFilter
+
 	for _, p := range conj.Positive {
 		switch p.Kind {
 		case querylang.PredToken:
@@ -982,15 +988,21 @@ func ConjunctionToFilters(conj *querylang.Conjunction) (tokens []string, kv []Ke
 			regexFilters = append(regexFilters, regexFilter(p.Pattern))
 		case querylang.PredGlob:
 			globs = append(globs, GlobFilter{Pattern: p.Pattern, RawPattern: p.Value})
+		case querylang.PredExpr:
+			pred := p // capture loop variable
+			exprFilters = append(exprFilters, func(rec chunk.Record) bool {
+				return evalPredicate(pred, rec)
+			})
 		}
 	}
 
-	// Build combined filter for negatives + regexes
+	// Build combined filter for negatives + regexes + expression predicates
 	var filters []recordFilter
 	if len(conj.Negative) > 0 {
 		filters = append(filters, negativePredicatesFilter(conj.Negative))
 	}
 	filters = append(filters, regexFilters...)
+	filters = append(filters, exprFilters...)
 
 	if len(filters) == 1 {
 		negFilter = filters[0]
@@ -1072,6 +1084,14 @@ func evalPredicate(pred *querylang.PredicateExpr, rec chunk.Record) bool {
 
 	case querylang.PredGlob:
 		return matchesSingleGlob(rec.Raw, pred.Pattern)
+
+	case querylang.PredExpr:
+		row := RecordToRow(rec)
+		val, err := pipeEval.Eval(pred.ExprLHS, row)
+		if err != nil || val.Missing {
+			return false
+		}
+		return compareValues(val.Str, pred.Value, pred.Op)
 
 	default:
 		return false

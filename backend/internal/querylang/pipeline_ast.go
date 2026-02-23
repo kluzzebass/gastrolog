@@ -202,6 +202,7 @@ const (
 	ArithSub                // -
 	ArithMul                // *
 	ArithDiv                // /
+	ArithMod                // %
 )
 
 func (op ArithOp) String() string {
@@ -214,6 +215,8 @@ func (op ArithOp) String() string {
 		return "*"
 	case ArithDiv:
 		return "/"
+	case ArithMod:
+		return "%"
 	default:
 		return "?"
 	}
@@ -230,4 +233,16 @@ func (ArithExpr) pipeExpr() {}
 
 func (a *ArithExpr) String() string {
 	return fmt.Sprintf("(%s %s %s)", a.Left.String(), a.Op, a.Right.String())
+}
+
+// UnaryExpr represents a unary expression: -expr.
+type UnaryExpr struct {
+	Op   ArithOp
+	Expr PipeExpr
+}
+
+func (UnaryExpr) pipeExpr() {}
+
+func (u *UnaryExpr) String() string {
+	return fmt.Sprintf("(%s%s)", u.Op, u.Expr.String())
 }

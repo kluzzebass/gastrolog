@@ -781,13 +781,172 @@ func TestAggregatorMissingSourceTS(t *testing.T) {
 
 func TestAggregatorUnknownFunction(t *testing.T) {
 	stats := &querylang.StatsOp{
-		Aggs: []querylang.AggExpr{{Func: "median"}},
+		Aggs: []querylang.AggExpr{{Func: "percentile99"}},
 	}
 
 	_, err := NewAggregator(stats)
 	if err == nil {
 		t.Fatal("expected error for unknown function")
 	}
+}
+
+func TestAggregatorDcount(t *testing.T) {
+	stats := &querylang.StatsOp{
+		Aggs: []querylang.AggExpr{{
+			Func: "dcount",
+			Arg:  &querylang.FieldRef{Name: "method"},
+		}},
+	}
+
+	agg, err := NewAggregator(stats)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	agg.Add(makeRec(baseTime, chunk.Attributes{"method": "GET"}, ""))
+	agg.Add(makeRec(baseTime, chunk.Attributes{"method": "POST"}, ""))
+	agg.Add(makeRec(baseTime, chunk.Attributes{"method": "GET"}, ""))
+	agg.Add(makeRec(baseTime, nil, "")) // missing
+
+	result := agg.Result(time.Time{}, time.Time{})
+	if result.Rows[0][0] != "2" {
+		t.Errorf("dcount = %q, want 2", result.Rows[0][0])
+	}
+}
+
+func TestAggregatorMedianOdd(t *testing.T) {
+	stats := &querylang.StatsOp{
+		Aggs: []querylang.AggExpr{{
+			Func: "median",
+			Arg:  &querylang.FieldRef{Name: "val"},
+		}},
+	}
+
+	agg, err := NewAggregator(stats)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, v := range []string{"10", "30", "20"} {
+		agg.Add(makeRec(baseTime, chunk.Attributes{"val": v}, ""))
+	}
+
+	result := agg.Result(time.Time{}, time.Time{})
+	if result.Rows[0][0] != "20" {
+		t.Errorf("median = %q, want 20", result.Rows[0][0])
+	}
+}
+
+func TestAggregatorMedianEven(t *testing.T) {
+	stats := &querylang.StatsOp{
+		Aggs: []querylang.AggExpr{{
+			Func: "median",
+			Arg:  &querylang.FieldRef{Name: "val"},
+		}},
+	}
+
+	agg, err := NewAggregator(stats)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, v := range []string{"10", "20", "30", "40"} {
+		agg.Add(makeRec(baseTime, chunk.Attributes{"val": v}, ""))
+	}
+
+	result := agg.Result(time.Time{}, time.Time{})
+	if result.Rows[0][0] != "25" {
+		t.Errorf("median = %q, want 25", result.Rows[0][0])
+	}
+}
+
+func TestAggregatorFirstLast(t *testing.T) {
+	stats := &querylang.StatsOp{
+		Aggs: []querylang.AggExpr{
+			{Func: "first", Arg: &querylang.FieldRef{Name: "val"}},
+			{Func: "last", Arg: &querylang.FieldRef{Name: "val"}},
+		},
+	}
+
+	agg, err := NewAggregator(stats)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	agg.Add(makeRec(baseTime, nil, ""))                                 // missing
+	agg.Add(makeRec(baseTime, chunk.Attributes{"val": "alpha"}, ""))
+	agg.Add(makeRec(baseTime, chunk.Attributes{"val": "beta"}, ""))
+	agg.Add(makeRec(baseTime, chunk.Attributes{"val": "gamma"}, ""))
+
+	result := agg.Result(time.Time{}, time.Time{})
+	if result.Rows[0][0] != "alpha" {
+		t.Errorf("first = %q, want alpha", result.Rows[0][0])
+	}
+	if result.Rows[0][1] != "gamma" {
+		t.Errorf("last = %q, want gamma", result.Rows[0][1])
+	}
+}
+
+func TestAggregatorValues(t *testing.T) {
+	stats := &querylang.StatsOp{
+		Aggs: []querylang.AggExpr{{
+			Func: "values",
+			Arg:  &querylang.FieldRef{Name: "method"},
+		}},
+	}
+
+	agg, err := NewAggregator(stats)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	agg.Add(makeRec(baseTime, chunk.Attributes{"method": "GET"}, ""))
+	agg.Add(makeRec(baseTime, chunk.Attributes{"method": "POST"}, ""))
+	agg.Add(makeRec(baseTime, chunk.Attributes{"method": "GET"}, ""))  // duplicate
+	agg.Add(makeRec(baseTime, nil, ""))                                 // missing
+
+	result := agg.Result(time.Time{}, time.Time{})
+	if result.Rows[0][0] != "GET, POST" {
+		t.Errorf("values = %q, want 'GET, POST'", result.Rows[0][0])
+	}
+}
+
+func TestAggregatorNewAccumulatorsEmpty(t *testing.T) {
+	t.Run("dcount empty", func(t *testing.T) {
+		acc := &dcountAcc{}
+		v := acc.Result()
+		if v.Num != 0 {
+			t.Errorf("empty dcount = %v, want 0", v.Num)
+		}
+	})
+
+	t.Run("median empty", func(t *testing.T) {
+		acc := &medianAcc{}
+		if !acc.Result().Missing {
+			t.Error("expected missing for empty median")
+		}
+	})
+
+	t.Run("first empty", func(t *testing.T) {
+		acc := &firstAcc{}
+		if !acc.Result().Missing {
+			t.Error("expected missing for empty first")
+		}
+	})
+
+	t.Run("last empty", func(t *testing.T) {
+		acc := &lastAcc{}
+		if !acc.Result().Missing {
+			t.Error("expected missing for empty last")
+		}
+	})
+
+	t.Run("values empty", func(t *testing.T) {
+		acc := &valuesAcc{}
+		if !acc.Result().Missing {
+			t.Error("expected missing for empty values")
+		}
+	})
 }
 
 func TestAggregatorMultipleBinGroups(t *testing.T) {

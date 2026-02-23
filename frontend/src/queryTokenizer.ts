@@ -63,6 +63,18 @@ export interface SyntaxSets {
   pipeFunctions: Set<string>;
 }
 
+// Scalar functions that can appear in filter expression predicates.
+// These are the same as pipeFunctions minus aggregation-only functions
+// (count, avg, sum, min, max, bin, dcount, median, first, last, values).
+const SCALAR_FUNCTIONS = new Set([
+  "tonumber", "tostring",
+  "abs", "ceil", "floor", "round", "sqrt", "pow",
+  "log", "log10", "log2", "exp",
+  "len", "lower", "upper", "substr", "replace", "trim", "concat",
+  "coalesce", "isnull", "typeof",
+  "bitor", "bitand", "bitxor", "bitnot", "bitshl", "bitshr",
+]);
+
 // Default sets — used when the backend hasn't been queried yet (e.g. tests).
 export const DEFAULT_SYNTAX: SyntaxSets = {
   directives: new Set([
@@ -72,6 +84,14 @@ export const DEFAULT_SYNTAX: SyntaxSets = {
   pipeKeywords: new Set(["stats", "where"]),
   pipeFunctions: new Set([
     "count", "avg", "sum", "min", "max", "bin", "tonumber",
+    // Scalar functions.
+    "tostring", "abs", "ceil", "floor", "round", "sqrt", "pow",
+    "log", "log10", "log2", "exp",
+    "len", "lower", "upper", "substr", "replace", "trim", "concat",
+    "coalesce", "isnull", "typeof",
+    "bitor", "bitand", "bitxor", "bitnot", "bitshl", "bitshr",
+    // Aggregation functions.
+    "dcount", "median", "first", "last", "values",
   ]),
 };
 
@@ -375,13 +395,47 @@ function classify(raw: QueryToken[], syntax: SyntaxSets): HighlightSpan[] {
 }
 
 // Classify a filter expression segment (the part before | or a where clause).
-// Detects key=value triples and maps remaining tokens to roles.
+// Detects key=value triples, scalar function predicates, and maps remaining tokens to roles.
 function classifyFilter(raw: QueryToken[], syntax: SyntaxSets): HighlightSpan[] {
   const spans: HighlightSpan[] = [];
 
   let i = 0;
   while (i < raw.length) {
     const tok = raw[i]!;
+
+    // Try to detect scalar function calls in filter context: func(args...) <op> value.
+    // When a word matches a known scalar function and is followed by '(', classify
+    // the function call with pipe-style highlighting.
+    if (tok.kind === "word" && SCALAR_FUNCTIONS.has(tok.text.toLowerCase())) {
+      // Look ahead for '(' (skip whitespace).
+      let j = i + 1;
+      while (j < raw.length && raw[j]!.kind === "whitespace") j++;
+      if (j < raw.length && raw[j]!.kind === "lparen") {
+        // Find the matching ')' by counting paren depth.
+        let depth = 0;
+        let closeIdx = -1;
+        for (let k = j; k < raw.length; k++) {
+          if (raw[k]!.kind === "lparen") depth++;
+          else if (raw[k]!.kind === "rparen") {
+            depth--;
+            if (depth === 0) { closeIdx = k; break; }
+          }
+        }
+        if (closeIdx >= 0) {
+          // Classify the function call tokens using stats-style highlighting.
+          spans.push({ text: tok.text, role: "function" });
+          // Whitespace between function name and '('.
+          for (let w = i + 1; w < j; w++) {
+            spans.push({ text: raw[w]!.text, role: "whitespace" });
+          }
+          // Arguments from '(' to ')' inclusive.
+          const argTokens = raw.slice(j, closeIdx + 1);
+          spans.push(...classifyStatsArgs(argTokens, syntax));
+          i = closeIdx + 1;
+          continue;
+        }
+      }
+    }
 
     // Try to detect key <op> value patterns (whitespace-tolerant lookahead).
     if (tok.kind === "word" || tok.kind === "star" || tok.kind === "glob") {
@@ -686,7 +740,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
     }
   }
 
-  // Is the current span a predicate start? (token, quoted, key, directive-key, star, glob, or kv triple)
+  // Is the current span a predicate start? (token, quoted, key, directive-key, star, glob, function, or paren)
   function isPredStart(): boolean {
     const s = cur();
     if (!s) return false;
@@ -698,6 +752,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
       s.role === "key" ||
       s.role === "directive-key" ||
       s.role === "star" ||
+      s.role === "function" ||
       (s.role === "paren" && s.text === "(")
     );
   }
@@ -784,6 +839,36 @@ function validate(spans: HighlightSpan[]): ValidateResult {
     if (!s) {
       fail("unexpected end of expression");
       return false;
+    }
+
+    // Expression predicate: function(args...) <op> value
+    if (s.role === "function") {
+      // Parse the pipe expression (function call + optional arithmetic).
+      parsePipeExpr();
+      if (errorAt >= 0) return false;
+      // Expect comparison operator.
+      const op = cur();
+      if (op && (op.role === "eq" || op.role === "compare-op")) {
+        advance(); // consume operator
+        const v = cur();
+        if (
+          !v ||
+          (v.role !== "value" &&
+            v.role !== "token" &&
+            v.role !== "quoted" &&
+            v.role !== "star" &&
+            v.role !== "glob")
+        ) {
+          fail(`expected value after '${op.text}'`);
+          return false;
+        }
+        advance(); // consume value
+        return true;
+      }
+      // No comparison operator — this is valid (function was consumed as pipe expr).
+      // But in filter context a standalone function call isn't valid; validation
+      // continues and the next token determines the result.
+      return true;
     }
 
     if (s.role === "key" || s.role === "directive-key") {
@@ -1011,7 +1096,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
     // In pipe context, / and * are arithmetic operators but they're lexed
     // as word "/" and star "*" respectively. Also match compare-ops for >, <, etc.
     if (s.role === "star") return true;
-    if (s.role === "token" && (s.text === "/" || s.text === "+" || s.text === "-")) return true;
+    if (s.role === "token" && (s.text === "/" || s.text === "+" || s.text === "-" || s.text === "%")) return true;
     if (s.role === "compare-op") return true;
     return false;
   }

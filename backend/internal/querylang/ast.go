@@ -69,9 +69,9 @@ func (n *NotExpr) String() string {
 // PredicateExpr represents a leaf predicate.
 type PredicateExpr struct {
 	Kind    PredicateKind
-	Op      CompareOp      // comparison operator (default OpEq); only meaningful for PredKV
+	Op      CompareOp      // comparison operator (default OpEq); only meaningful for PredKV and PredExpr
 	Key     string         // empty for Token kind
-	Value   string         // the token or value; for PredRegex/PredGlob, the raw pattern
+	Value   string         // the token or value; for PredRegex/PredGlob, the raw pattern; for PredExpr, the RHS literal
 	Pattern *regexp.Regexp // compiled regex; set for PredRegex and PredGlob
 
 	// Glob patterns for KV predicates. When a glob is used in key or value position
@@ -79,6 +79,9 @@ type PredicateExpr struct {
 	// PredKeyExists/PredValueExists, but matching uses regex instead of exact compare.
 	KeyPat   *regexp.Regexp // compiled glob for key position (e.g., err*=value)
 	ValuePat *regexp.Regexp // compiled glob for value position (e.g., key=err*)
+
+	// ExprLHS holds the pipe expression for PredExpr kind (e.g., len(message) in "len(message) > 100").
+	ExprLHS PipeExpr
 }
 
 func (PredicateExpr) expr() {}
@@ -97,6 +100,8 @@ func (p *PredicateExpr) String() string {
 		return fmt.Sprintf("regex(/%s/)", p.Value)
 	case PredGlob:
 		return fmt.Sprintf("glob(%s)", p.Value)
+	case PredExpr:
+		return fmt.Sprintf("expr(%s%s%s)", p.ExprLHS.String(), p.Op, p.Value)
 	default:
 		return fmt.Sprintf("unknown(%d)", p.Kind)
 	}

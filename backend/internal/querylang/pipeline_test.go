@@ -475,6 +475,102 @@ func TestParsePipelineExprComplexNested(t *testing.T) {
 	}
 }
 
+func TestParsePipelineExprModulo(t *testing.T) {
+	p, err := ParsePipeline("error | stats avg(a % 3)")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	stats := p.Pipes[0].(*StatsOp)
+	arith, ok := stats.Aggs[0].Arg.(*ArithExpr)
+	if !ok || arith.Op != ArithMod {
+		t.Fatalf("expected ArithMod, got %T %v", stats.Aggs[0].Arg, stats.Aggs[0].Arg)
+	}
+}
+
+func TestParsePipelineExprModuloPrecedence(t *testing.T) {
+	// a + b % c should parse as a + (b % c) — % has same precedence as *.
+	p, err := ParsePipeline("error | stats avg(a + b % c)")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	stats := p.Pipes[0].(*StatsOp)
+	add, ok := stats.Aggs[0].Arg.(*ArithExpr)
+	if !ok || add.Op != ArithAdd {
+		t.Fatalf("expected top-level ArithAdd, got %T", stats.Aggs[0].Arg)
+	}
+	mod, ok := add.Right.(*ArithExpr)
+	if !ok || mod.Op != ArithMod {
+		t.Errorf("expected right to be ArithMod, got %T", add.Right)
+	}
+}
+
+func TestParsePipelineExprUnaryNegation(t *testing.T) {
+	p, err := ParsePipeline("error | stats avg(-a)")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	stats := p.Pipes[0].(*StatsOp)
+	unary, ok := stats.Aggs[0].Arg.(*UnaryExpr)
+	if !ok {
+		t.Fatalf("expected UnaryExpr, got %T", stats.Aggs[0].Arg)
+	}
+	if unary.Op != ArithSub {
+		t.Errorf("expected ArithSub, got %v", unary.Op)
+	}
+	ref, ok := unary.Expr.(*FieldRef)
+	if !ok || ref.Name != "a" {
+		t.Errorf("expected FieldRef(a), got %v", unary.Expr)
+	}
+}
+
+func TestParsePipelineExprDoubleNegation(t *testing.T) {
+	p, err := ParsePipeline("error | stats avg(--a)")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	stats := p.Pipes[0].(*StatsOp)
+	outer, ok := stats.Aggs[0].Arg.(*UnaryExpr)
+	if !ok {
+		t.Fatalf("expected UnaryExpr, got %T", stats.Aggs[0].Arg)
+	}
+	inner, ok := outer.Expr.(*UnaryExpr)
+	if !ok {
+		t.Fatalf("expected nested UnaryExpr, got %T", outer.Expr)
+	}
+	_, ok = inner.Expr.(*FieldRef)
+	if !ok {
+		t.Errorf("expected FieldRef, got %T", inner.Expr)
+	}
+}
+
+func TestLexerPercentToken(t *testing.T) {
+	lex := NewLexer("a % b")
+	lex.SetPipeMode(true)
+
+	expected := []struct {
+		kind TokenKind
+		lit  string
+	}{
+		{TokWord, "a"},
+		{TokPercent, "%"},
+		{TokWord, "b"},
+		{TokEOF, ""},
+	}
+
+	for i, want := range expected {
+		tok, err := lex.Next()
+		if err != nil {
+			t.Fatalf("token %d: unexpected error: %v", i, err)
+		}
+		if tok.Kind != want.kind {
+			t.Errorf("token %d: Kind = %v, want %v", i, tok.Kind, want.kind)
+		}
+		if tok.Kind != TokEOF && tok.Lit != want.lit {
+			t.Errorf("token %d: Lit = %q, want %q", i, tok.Lit, want.lit)
+		}
+	}
+}
+
 // --- String() tests ---
 
 func TestPipelineString(t *testing.T) {

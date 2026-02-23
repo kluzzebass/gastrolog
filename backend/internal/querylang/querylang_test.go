@@ -1112,3 +1112,161 @@ func TestSlashNoLongerInBareword(t *testing.T) {
 		t.Errorf("second token = (%v, %q), want (REGEX, \"to\")", tok.Kind, tok.Lit)
 	}
 }
+
+// --- Expression predicate tests ---
+
+func TestParseExprPredicate(t *testing.T) {
+	tests := []struct {
+		input string
+		lhs   string
+		op    CompareOp
+		value string
+	}{
+		{"len(message) > 100", "len(message)", OpGt, "100"},
+		{"len(message) >= 100", "len(message)", OpGte, "100"},
+		{"len(message) = 5", "len(message)", OpEq, "5"},
+		{"len(message) != 0", "len(message)", OpNe, "0"},
+		{"len(message) < 50", "len(message)", OpLt, "50"},
+		{"len(message) <= 50", "len(message)", OpLte, "50"},
+		{"abs(status) > 0", "abs(status)", OpGt, "0"},
+		{"lower(level) = error", "lower(level)", OpEq, "error"},
+		{"round(duration, 2) > 1.5", "round(duration, 2)", OpGt, "1.5"},
+		{"len(message) + 1 > 100", "(len(message) + 1)", OpGt, "100"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			expr, err := Parse(tt.input)
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
+			}
+			pred, ok := expr.(*PredicateExpr)
+			if !ok {
+				t.Fatalf("Parse(%q) = %T, want *PredicateExpr", tt.input, expr)
+			}
+			if pred.Kind != PredExpr {
+				t.Errorf("Parse(%q).Kind = %v, want PredExpr", tt.input, pred.Kind)
+			}
+			if pred.ExprLHS == nil {
+				t.Fatalf("Parse(%q).ExprLHS is nil", tt.input)
+			}
+			if pred.ExprLHS.String() != tt.lhs {
+				t.Errorf("Parse(%q).ExprLHS = %q, want %q", tt.input, pred.ExprLHS.String(), tt.lhs)
+			}
+			if pred.Op != tt.op {
+				t.Errorf("Parse(%q).Op = %v, want %v", tt.input, pred.Op, tt.op)
+			}
+			if pred.Value != tt.value {
+				t.Errorf("Parse(%q).Value = %q, want %q", tt.input, pred.Value, tt.value)
+			}
+		})
+	}
+}
+
+func TestParseExprPredicateInBooleanExpressions(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"expr AND token", "len(message) > 100 AND error"},
+		{"token AND expr", "error AND len(message) > 100"},
+		{"NOT expr", "NOT len(message) > 100"},
+		{"expr OR kv", "len(message) > 100 OR level=error"},
+		{"implicit AND with expr", "error len(message) > 100"},
+		{"expr in parens", "(len(message) > 100 OR level=error) AND error"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			expr, err := Parse(tt.input)
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
+			}
+			if expr == nil {
+				t.Fatalf("Parse(%q) returned nil", tt.input)
+			}
+			t.Logf("Parse(%q) = %s", tt.input, expr.String())
+		})
+	}
+}
+
+func TestParseExprPredicateBacktrack(t *testing.T) {
+	// "len" without parens should parse as a token predicate, not an expression.
+	expr, err := Parse("len")
+	if err != nil {
+		t.Fatalf("Parse(\"len\") error: %v", err)
+	}
+	pred, ok := expr.(*PredicateExpr)
+	if !ok {
+		t.Fatalf("Parse(\"len\") = %T, want *PredicateExpr", expr)
+	}
+	if pred.Kind != PredToken {
+		t.Errorf("Parse(\"len\").Kind = %v, want PredToken", pred.Kind)
+	}
+}
+
+func TestParseExprPredicateBacktrackNoCompareOp(t *testing.T) {
+	// "len(foo)" without a comparison operator should backtrack.
+	// "len" becomes a token, "(foo)" becomes a grouped expression with token "foo".
+	// Result: implicit AND of token(len) and token(foo).
+	expr, err := Parse("len(foo)")
+	if err != nil {
+		t.Fatalf("Parse(\"len(foo)\") error: %v", err)
+	}
+	// Should be AND(token(len), token(foo)) since backtrack makes "len" a token
+	// and "(foo)" a parenthesized group.
+	and, ok := expr.(*AndExpr)
+	if !ok {
+		t.Fatalf("Parse(\"len(foo)\") = %T (%s), want *AndExpr", expr, expr.String())
+	}
+	if len(and.Terms) != 2 {
+		t.Errorf("Parse(\"len(foo)\") has %d terms, want 2", len(and.Terms))
+	}
+}
+
+func TestExprPredicateString(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"len(message) > 100", "expr(len(message)>100)"},
+		{"abs(value) = 0", "expr(abs(value)=0)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			expr, err := Parse(tt.input)
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
+			}
+			got := expr.String()
+			if got != tt.want {
+				t.Errorf("Parse(%q).String() = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExprPredicatePipeline(t *testing.T) {
+	// Expression predicates should work in pipeline filter sections.
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"expr in pipeline filter", "len(message) > 100 | stats count"},
+		{"expr in where clause", "error | where len(message) > 100 | stats count"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pipeline, err := ParsePipeline(tt.input)
+			if err != nil {
+				t.Fatalf("ParsePipeline(%q) error: %v", tt.input, err)
+			}
+			if pipeline == nil {
+				t.Fatalf("ParsePipeline(%q) returned nil", tt.input)
+			}
+			t.Logf("ParsePipeline(%q) = %s", tt.input, pipeline.String())
+		})
+	}
+}

@@ -32,6 +32,7 @@ const (
 	TokPlus             // +
 	TokMinus            // -
 	TokSlash            // / (arithmetic division, only in pipe context)
+	TokPercent          // % (modulo, only in pipe context)
 )
 
 func (k TokenKind) String() string {
@@ -78,6 +79,8 @@ func (k TokenKind) String() string {
 		return "-"
 	case TokSlash:
 		return "/"
+	case TokPercent:
+		return "%"
 	default:
 		return "UNKNOWN"
 	}
@@ -106,6 +109,23 @@ func NewLexer(input string) *Lexer {
 // In pipe mode, '/' emits TokSlash (division) instead of scanning a regex literal.
 func (l *Lexer) SetPipeMode(on bool) {
 	l.pipeMode = on
+}
+
+// LexerState captures the lexer position for backtracking.
+type LexerState struct {
+	pos      int
+	pipeMode bool
+}
+
+// Save returns a snapshot of the lexer state.
+func (l *Lexer) Save() LexerState {
+	return LexerState{pos: l.pos, pipeMode: l.pipeMode}
+}
+
+// Restore rewinds the lexer to a previously saved state.
+func (l *Lexer) Restore(s LexerState) {
+	l.pos = s.pos
+	l.pipeMode = s.pipeMode
 }
 
 // Next returns the next token.
@@ -166,6 +186,9 @@ func (l *Lexer) Next() (Token, error) {
 	case '+':
 		l.pos++
 		return Token{Kind: TokPlus, Lit: "+", Pos: startPos}, nil
+	case '%':
+		l.pos++
+		return Token{Kind: TokPercent, Lit: "%", Pos: startPos}, nil
 	case '-':
 		if l.pipeMode {
 			l.pos++
@@ -350,7 +373,7 @@ func isBarewordChar(ch byte) bool {
 		return false
 	case '(', ')', '=', '*', '?', '[', '"', '\'', '/', '>', '<', '!':
 		return false
-	case '|', ',', '+':
+	case '|', ',', '+', '%':
 		return false
 	default:
 		return true

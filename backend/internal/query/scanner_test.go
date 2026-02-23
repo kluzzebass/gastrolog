@@ -2,6 +2,7 @@ package query
 
 import (
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/querylang"
 	"slices"
 	"testing"
 )
@@ -470,6 +471,126 @@ func TestMatchesTokens(t *testing.T) {
 				t.Errorf("matchesTokens(%q, %v) = %v, want %v", tc.raw, tc.tokens, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestEvalPredicateExpr(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		raw   string
+		attrs chunk.Attributes
+		want  bool
+	}{
+		{
+			name:  "len > threshold matches",
+			query: "len(message) > 5",
+			attrs: chunk.Attributes{"message": "hello world"},
+			want:  true,
+		},
+		{
+			name:  "len > threshold does not match",
+			query: "len(message) > 100",
+			attrs: chunk.Attributes{"message": "hello"},
+			want:  false,
+		},
+		{
+			name:  "len = exact match",
+			query: "len(message) = 5",
+			attrs: chunk.Attributes{"message": "hello"},
+			want:  true,
+		},
+		{
+			name:  "lower equality",
+			query: "lower(level) = error",
+			attrs: chunk.Attributes{"level": "ERROR"},
+			want:  true,
+		},
+		{
+			name:  "abs comparison",
+			query: "abs(value) > 5",
+			attrs: chunk.Attributes{"value": "-10"},
+			want:  true,
+		},
+		{
+			name:  "missing field returns false",
+			query: "len(nonexistent) > 0",
+			attrs: chunk.Attributes{},
+			want:  false,
+		},
+		{
+			name:  "len from raw text KV",
+			query: "len(msg) > 3",
+			raw:   "msg=hello",
+			want:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			expr, err := querylang.Parse(tc.query)
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tc.query, err)
+			}
+			pred, ok := expr.(*querylang.PredicateExpr)
+			if !ok {
+				t.Fatalf("Parse(%q) = %T, want *PredicateExpr", tc.query, expr)
+			}
+			if pred.Kind != querylang.PredExpr {
+				t.Fatalf("Parse(%q).Kind = %v, want PredExpr", tc.query, pred.Kind)
+			}
+
+			rec := chunk.Record{
+				Attrs: tc.attrs,
+				Raw:   []byte(tc.raw),
+			}
+			got := evalPredicate(pred, rec)
+			if got != tc.want {
+				t.Errorf("evalPredicate(%q, ...) = %v, want %v", tc.query, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestConjunctionToFiltersExprPredicate(t *testing.T) {
+	// Expression predicates should end up as runtime filters (no index acceleration).
+	expr, err := querylang.Parse("len(message) > 5")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+
+	dnf := querylang.ToDNF(expr)
+	if len(dnf.Branches) != 1 {
+		t.Fatalf("expected 1 branch, got %d", len(dnf.Branches))
+	}
+
+	tokens, kv, globs, negFilter := ConjunctionToFilters(&dnf.Branches[0])
+
+	// No index-accelerated filters for expression predicates.
+	if len(tokens) != 0 {
+		t.Errorf("expected 0 tokens, got %d", len(tokens))
+	}
+	if len(kv) != 0 {
+		t.Errorf("expected 0 kv filters, got %d", len(kv))
+	}
+	if len(globs) != 0 {
+		t.Errorf("expected 0 globs, got %d", len(globs))
+	}
+
+	// Expression predicate should be in the negFilter (runtime filter).
+	if negFilter == nil {
+		t.Fatal("expected non-nil negFilter for expression predicate")
+	}
+
+	// Test that the filter works.
+	recMatch := chunk.Record{Attrs: chunk.Attributes{"message": "hello world"}}
+	recNoMatch := chunk.Record{Attrs: chunk.Attributes{"message": "hi"}}
+
+	if !negFilter(recMatch) {
+		t.Error("expected filter to match record with long message")
+	}
+	if negFilter(recNoMatch) {
+		t.Error("expected filter to reject record with short message")
 	}
 }
 

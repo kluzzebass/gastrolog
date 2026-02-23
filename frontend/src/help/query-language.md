@@ -92,6 +92,33 @@ Comparison operators cannot be used with wildcards (`*`) or glob patterns. For e
 
 Comparison filters use key-only index acceleration on sealed chunks: the index narrows to records where the key exists, then runtime comparison filters on the value.
 
+## Expression Predicates
+
+Scalar functions can be used directly in filter expressions. This allows filtering on computed values without needing a pipeline.
+
+```
+len(message) > 100
+```
+
+The syntax is `expression <op> value`, where the left-hand side is any scalar function expression and the right-hand side is a literal value. All comparison operators work: `=`, `!=`, `>`, `>=`, `<`, `<=`.
+
+Examples:
+
+- `len(message) > 100` — records with messages longer than 100 characters
+- `lower(level) = error` — case-insensitive level check via function
+- `abs(score) >= 5` — absolute value comparison
+- `round(duration, 2) > 1.5` — rounded numeric comparison
+
+Expression predicates combine with all boolean operators:
+
+- `len(message) > 100 AND level=error` — combine with key=value
+- `NOT len(message) > 1000` — negation
+- `(len(message) > 100 OR level=error) AND host=web-01` — grouping
+
+Fields are extracted from record attributes, key=value pairs in the message text, and JSON message bodies — same as [pipeline queries](help:pipeline).
+
+Expression predicates always run at scan time (no index acceleration). See [scalar functions](help:scalar-functions) for the full list of available functions and arithmetic operators.
+
 ## Time Bounds
 
 Filter by timestamp. Values are resolved in the browser using your local timezone.

@@ -96,6 +96,9 @@ func (e *Evaluator) Eval(expr PipeExpr, row Row) (Value, error) {
 	case *ArithExpr:
 		return e.evalArith(ex, row)
 
+	case *UnaryExpr:
+		return e.evalUnary(ex, row)
+
 	default:
 		return Value{}, fmt.Errorf("unsupported expression type: %T", expr)
 	}
@@ -164,6 +167,11 @@ func (e *Evaluator) evalArith(expr *ArithExpr, row Row) (Value, error) {
 			return NumValue(math.NaN()), nil
 		}
 		result = lf / rf
+	case ArithMod:
+		if rf == 0 {
+			return NumValue(math.NaN()), nil
+		}
+		result = math.Mod(lf, rf)
 	default:
 		return Value{}, fmt.Errorf("unknown arithmetic operator: %v", expr.Op)
 	}
@@ -171,27 +179,17 @@ func (e *Evaluator) evalArith(expr *ArithExpr, row Row) (Value, error) {
 	return NumValue(result), nil
 }
 
-// registerBuiltins adds the built-in scalar functions.
-func (e *Evaluator) registerBuiltins() {
-	e.funcs["tonumber"] = builtinToNumber
-}
-
-// builtinToNumber converts a value to a number.
-// If already numeric, returns as-is. Otherwise parses the string.
-func builtinToNumber(args []Value) (Value, error) {
-	if len(args) != 1 {
-		return Value{}, fmt.Errorf("toNumber requires exactly 1 argument, got %d", len(args))
+func (e *Evaluator) evalUnary(expr *UnaryExpr, row Row) (Value, error) {
+	val, err := e.Eval(expr.Expr, row)
+	if err != nil {
+		return Value{}, err
 	}
-	v := args[0]
-	if v.Missing {
+	if val.Missing {
 		return MissingValue(), nil
 	}
-	if v.IsNum {
-		return v, nil
+	n, ok := val.ToNum()
+	if !ok {
+		return Value{}, fmt.Errorf("unary %s requires numeric operand: %q", expr.Op, val.Str)
 	}
-	f, err := strconv.ParseFloat(v.Str, 64)
-	if err != nil {
-		return MissingValue(), nil // unparseable → missing (skip silently per design)
-	}
-	return NumValue(f), nil
+	return NumValue(-n), nil
 }
