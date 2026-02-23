@@ -138,7 +138,7 @@ export function TimeSeriesChart({
   const xRange = xMax - xMin || 1;
   // Add 10% padding to y-axis
   const yPad = (yMax - yMin) * 0.1 || 1;
-  const yLo = Math.max(0, yMin - yPad);
+  const yLo = yMin - yPad;
   const yHi = yMax + yPad;
   const yRange = yHi - yLo || 1;
 
@@ -152,7 +152,8 @@ export function TimeSeriesChart({
 
   const buildArea = (points: { x: number; y: number }[]) => {
     if (points.length === 0) return "";
-    const baseline = scaleY(yLo);
+    // When data spans both negative and positive, use 0 as baseline.
+    const baseline = (yLo < 0 && yHi > 0) ? scaleY(0) : scaleY(yLo);
     const line = points
       .map((p, i) => `${i === 0 ? "M" : "L"}${scaleX(p.x).toFixed(1)},${scaleY(p.y).toFixed(1)}`)
       .join(" ");
@@ -192,8 +193,10 @@ export function TimeSeriesChart({
   };
 
   const formatYValue = (v: number) => {
-    if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-    if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+    const abs = Math.abs(v);
+    const sign = v < 0 ? "-" : "";
+    if (abs >= 1_000_000) return `${sign}${(abs / 1_000_000).toFixed(1)}M`;
+    if (abs >= 1_000) return `${sign}${(abs / 1_000).toFixed(1)}K`;
     return Number.isInteger(v) ? String(v) : v.toFixed(1);
   };
 
