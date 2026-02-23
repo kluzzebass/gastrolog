@@ -216,11 +216,20 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
     });
   }, []);
 
+  const cancel = useCallback(() => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+    setState((prev) => ({ ...prev, isSearching: false }));
+  }, []);
+
   return {
     ...state,
     search,
     loadMore,
     reset,
+    cancel,
     setRecords,
   };
 }

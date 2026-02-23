@@ -176,6 +176,7 @@ export function SearchView() {
     search,
     loadMore,
     setRecords,
+    cancel: cancelSearch,
     reset: resetSearch,
   } = useSearch({ onError: toastError });
   const {
@@ -706,6 +707,7 @@ export function SearchView() {
             onSaveQuery={(name, query) => putSavedQuery.mutate({ name, query })}
             onDeleteSavedQuery={(name) => deleteSavedQuery.mutate(name)}
             executeQuery={executeQuery}
+            cancelSearch={cancelSearch}
             isSearching={isSearching}
             isFollowMode={isFollowMode}
             startFollow={startFollow}

@@ -34,6 +34,7 @@ interface QueryBarProps {
   onSaveQuery: (name: string, query: string) => void;
   onDeleteSavedQuery: (name: string) => void;
   executeQuery: () => void;
+  cancelSearch: () => void;
   isSearching: boolean;
   isFollowMode: boolean;
   startFollow: () => void;
@@ -63,6 +64,7 @@ export function QueryBar({
   onSaveQuery,
   onDeleteSavedQuery,
   executeQuery,
+  cancelSearch,
   isSearching,
   isFollowMode,
   startFollow,
@@ -276,6 +278,7 @@ export function QueryBar({
         <QueryActionButtons
           dark={dark}
           executeQuery={executeQuery}
+          cancelSearch={cancelSearch}
           isSearching={isSearching}
           isFollowMode={isFollowMode}
           startFollow={startFollow}
@@ -294,6 +297,7 @@ export function QueryBar({
 function QueryActionButtons({
   dark,
   executeQuery,
+  cancelSearch,
   isSearching,
   isFollowMode,
   startFollow,
@@ -305,6 +309,7 @@ function QueryActionButtons({
 }: Readonly<{
   dark: boolean;
   executeQuery: () => void;
+  cancelSearch: () => void;
   isSearching: boolean;
   isFollowMode: boolean;
   startFollow: () => void;
@@ -317,26 +322,48 @@ function QueryActionButtons({
   const c = useThemeClass(dark);
   return (
     <>
-      <button
-        onClick={executeQuery}
-        disabled={isSearching || draftHasErrors}
-        aria-label="Search"
-        title="Search"
-        className="px-2 py-2.5 rounded border border-transparent bg-copper text-white hover:bg-copper-glow transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="w-4.5 h-4.5"
+      {isSearching ? (
+        <button
+          onClick={cancelSearch}
+          aria-label="Cancel search"
+          title="Cancel search"
+          className="px-2 py-2.5 rounded border border-transparent bg-severity-error text-white hover:bg-severity-error/80 transition-all duration-200"
         >
-          <circle cx="11" cy="11" r="8" />
-          <line x1="21" y1="21" x2="16.65" y2="16.65" />
-        </svg>
-      </button>
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="w-4.5 h-4.5"
+          >
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      ) : (
+        <button
+          onClick={executeQuery}
+          disabled={draftHasErrors}
+          aria-label="Search"
+          title="Search"
+          className="px-2 py-2.5 rounded border border-transparent bg-copper text-white hover:bg-copper-glow transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="w-4.5 h-4.5"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+        </button>
+      )}
       <button
         onClick={isFollowMode ? stopFollowMode : startFollow}
         disabled={!isFollowMode && (draftHasErrors || draftIsPipeline)}
