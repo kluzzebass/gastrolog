@@ -2757,3 +2757,108 @@ export class TestIngesterResponse extends Message<TestIngesterResponse> {
   }
 }
 
+/**
+ * @generated from message gastrolog.v1.GetIngesterDefaultsRequest
+ */
+export class GetIngesterDefaultsRequest extends Message<GetIngesterDefaultsRequest> {
+  constructor(data?: PartialMessage<GetIngesterDefaultsRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetIngesterDefaultsRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetIngesterDefaultsRequest {
+    return new GetIngesterDefaultsRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetIngesterDefaultsRequest {
+    return new GetIngesterDefaultsRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetIngesterDefaultsRequest {
+    return new GetIngesterDefaultsRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetIngesterDefaultsRequest | PlainMessage<GetIngesterDefaultsRequest> | undefined, b: GetIngesterDefaultsRequest | PlainMessage<GetIngesterDefaultsRequest> | undefined): boolean {
+    return proto3.util.equals(GetIngesterDefaultsRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.IngesterTypeDefaults
+ */
+export class IngesterTypeDefaults extends Message<IngesterTypeDefaults> {
+  /**
+   * @generated from field: map<string, string> params = 1;
+   */
+  params: { [key: string]: string } = {};
+
+  constructor(data?: PartialMessage<IngesterTypeDefaults>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.IngesterTypeDefaults";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): IngesterTypeDefaults {
+    return new IngesterTypeDefaults().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): IngesterTypeDefaults {
+    return new IngesterTypeDefaults().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): IngesterTypeDefaults {
+    return new IngesterTypeDefaults().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: IngesterTypeDefaults | PlainMessage<IngesterTypeDefaults> | undefined, b: IngesterTypeDefaults | PlainMessage<IngesterTypeDefaults> | undefined): boolean {
+    return proto3.util.equals(IngesterTypeDefaults, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.GetIngesterDefaultsResponse
+ */
+export class GetIngesterDefaultsResponse extends Message<GetIngesterDefaultsResponse> {
+  /**
+   * @generated from field: map<string, gastrolog.v1.IngesterTypeDefaults> types = 1;
+   */
+  types: { [key: string]: IngesterTypeDefaults } = {};
+
+  constructor(data?: PartialMessage<GetIngesterDefaultsResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetIngesterDefaultsResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "types", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "message", T: IngesterTypeDefaults} },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetIngesterDefaultsResponse {
+    return new GetIngesterDefaultsResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetIngesterDefaultsResponse {
+    return new GetIngesterDefaultsResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetIngesterDefaultsResponse {
+    return new GetIngesterDefaultsResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetIngesterDefaultsResponse | PlainMessage<GetIngesterDefaultsResponse> | undefined, b: GetIngesterDefaultsResponse | PlainMessage<GetIngesterDefaultsResponse> | undefined): boolean {
+    return proto3.util.equals(GetIngesterDefaultsResponse, a, b);
+  }
+}
+

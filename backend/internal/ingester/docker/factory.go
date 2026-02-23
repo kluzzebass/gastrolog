@@ -15,6 +15,16 @@ import (
 	"gastrolog/internal/querylang"
 )
 
+// ParamDefaults returns the default parameter values for a Docker ingester.
+func ParamDefaults() map[string]string {
+	return map[string]string{
+		"host":          "unix:///var/run/docker.sock",
+		"poll_interval": "30s",
+		"stdout":        "true",
+		"stderr":        "true",
+	}
+}
+
 // NewFactory returns an IngesterFactory for Docker container log ingesters.
 // The config store is used to resolve certificate names for TLS.
 func NewFactory(cfgStore config.Store) orchestrator.IngesterFactory {

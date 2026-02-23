@@ -27,9 +27,10 @@ import (
 //   - Factories create child loggers scoped to their component
 //   - If Logger is nil, components use discard loggers
 type Factories struct {
-	Ingesters     map[string]IngesterFactory
-	ChunkManagers map[string]chunk.ManagerFactory
-	IndexManagers map[string]index.ManagerFactory
+	Ingesters        map[string]IngesterFactory
+	IngesterDefaults map[string]func() map[string]string
+	ChunkManagers    map[string]chunk.ManagerFactory
+	IndexManagers    map[string]index.ManagerFactory
 
 	// Logger is the base logger passed to component factories.
 	// Components derive child loggers with their own scope.

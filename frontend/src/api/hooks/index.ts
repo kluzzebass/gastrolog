@@ -49,3 +49,5 @@ export { useJob, useWatchJobs } from "./useJobs";
 export { useHealth } from "./useHealth";
 export { useSyntax } from "./useSyntax";
 export type { SyntaxKeywords } from "./useSyntax";
+export { useIngesterDefaults } from "./useIngesterDefaults";
+export type { IngesterDefaults } from "./useIngesterDefaults";

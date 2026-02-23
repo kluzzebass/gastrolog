@@ -3,6 +3,7 @@ import { FormField, TextInput, NumberInput, SelectInput, ExampleValues } from ".
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useCertificates } from "../../api/hooks/useConfig";
 import { useTestIngester } from "../../api/hooks/useIngesters";
+import { useIngesterDefaults } from "../../api/hooks/useIngesterDefaults";
 import { Checkbox } from "./Checkbox";
 
 interface IngesterParamsFormProps {
@@ -78,10 +79,12 @@ function ChatterboxForm({
   params,
   onChange,
   dark,
+  defaults: d,
 }: Readonly<{
   params: Record<string, string>;
   onChange: (params: Record<string, string>) => void;
   dark: boolean;
+  defaults: Record<string, string>;
 }>) {
   const c = useThemeClass(dark);
   const set = (key: string, value: string) =>
@@ -217,7 +220,7 @@ function ChatterboxForm({
           <TextInput
             value={get("minInterval")}
             onChange={(v) => set("minInterval", v)}
-            placeholder="100ms"
+            placeholder={d["minInterval"] ?? ""}
             dark={dark}
             mono
             examples={["50ms", "100ms", "500ms"]}
@@ -231,7 +234,7 @@ function ChatterboxForm({
           <TextInput
             value={get("maxInterval")}
             onChange={(v) => set("maxInterval", v)}
-            placeholder="1s"
+            placeholder={d["maxInterval"] ?? ""}
             dark={dark}
             mono
             examples={["500ms", "1s", "5s"]}
@@ -249,7 +252,7 @@ function ChatterboxForm({
           <NumberInput
             value={get("hostCount")}
             onChange={(v) => set("hostCount", v)}
-            placeholder="10"
+            placeholder={d["hostCount"] ?? ""}
             dark={dark}
             min={1}
             examples={["5", "10", "50"]}
@@ -263,7 +266,7 @@ function ChatterboxForm({
           <NumberInput
             value={get("serviceCount")}
             onChange={(v) => set("serviceCount", v)}
-            placeholder="5"
+            placeholder={d["serviceCount"] ?? ""}
             dark={dark}
             min={1}
             examples={["3", "5", "20"]}
@@ -278,10 +281,12 @@ function TailForm({
   params,
   onChange,
   dark,
+  defaults: d,
 }: Readonly<{
   params: Record<string, string>;
   onChange: (params: Record<string, string>) => void;
   dark: boolean;
+  defaults: Record<string, string>;
 }>) {
   const c = useThemeClass(dark);
 
@@ -345,7 +350,7 @@ function TailForm({
         <TextInput
           value={params["poll_interval"] ?? ""}
           onChange={(v) => onChange({ ...params, poll_interval: v })}
-          placeholder="30s"
+          placeholder={d["poll_interval"] ?? ""}
           dark={dark}
           mono
           examples={["30s", "1m", "5m"]}
@@ -359,10 +364,12 @@ function DockerForm({
   params,
   onChange,
   dark,
+  defaults: d,
 }: Readonly<{
   params: Record<string, string>;
   onChange: (params: Record<string, string>) => void;
   dark: boolean;
+  defaults: Record<string, string>;
 }>) {
   const c = useThemeClass(dark);
   const { data: certData } = useCertificates();
@@ -389,7 +396,7 @@ function DockerForm({
         <TextInput
           value={params["host"] ?? ""}
           onChange={(v) => set("host", v)}
-          placeholder="unix:///var/run/docker.sock"
+          placeholder={d["host"] ?? ""}
           dark={dark}
           mono
           examples={["unix:///var/run/docker.sock", "tcp://localhost:2376"]}
@@ -422,7 +429,7 @@ function DockerForm({
           <TextInput
             value={params["poll_interval"] ?? ""}
             onChange={(v) => set("poll_interval", v)}
-            placeholder="30s"
+            placeholder={d["poll_interval"] ?? ""}
             dark={dark}
             mono
             examples={["30s", "1m", "5m"]}
@@ -550,16 +557,19 @@ export function IngesterParamsForm({
   onChange,
   dark,
 }: Readonly<IngesterParamsFormProps>) {
+  const { data: allDefaults } = useIngesterDefaults();
+  const d = allDefaults?.[ingesterType] ?? {};
+
   if (ingesterType === "chatterbox") {
-    return <ChatterboxForm params={params} onChange={onChange} dark={dark} />;
+    return <ChatterboxForm params={params} onChange={onChange} dark={dark} defaults={d} />;
   }
 
   if (ingesterType === "tail") {
-    return <TailForm params={params} onChange={onChange} dark={dark} />;
+    return <TailForm params={params} onChange={onChange} dark={dark} defaults={d} />;
   }
 
   if (ingesterType === "docker") {
-    return <DockerForm params={params} onChange={onChange} dark={dark} />;
+    return <DockerForm params={params} onChange={onChange} dark={dark} defaults={d} />;
   }
 
   if (ingesterType === "otlp") {
@@ -573,7 +583,7 @@ export function IngesterParamsForm({
           <TextInput
             value={params["http_addr"] ?? ""}
             onChange={(v) => onChange({ ...params, http_addr: v })}
-            placeholder=":4318"
+            placeholder={d["http_addr"] ?? ""}
             dark={dark}
             mono
             examples={[":4318"]}
@@ -587,7 +597,7 @@ export function IngesterParamsForm({
           <TextInput
             value={params["grpc_addr"] ?? ""}
             onChange={(v) => onChange({ ...params, grpc_addr: v })}
-            placeholder=":4317"
+            placeholder={d["grpc_addr"] ?? ""}
             dark={dark}
             mono
             examples={[":4317"]}
@@ -607,7 +617,7 @@ export function IngesterParamsForm({
         <TextInput
           value={params["addr"] ?? ""}
           onChange={(v) => onChange({ ...params, addr: v })}
-          placeholder=":24224"
+          placeholder={d["addr"] ?? ""}
           dark={dark}
           mono
           examples={[":24224"]}
@@ -659,7 +669,7 @@ export function IngesterParamsForm({
             <TextInput
               value={params["group"] ?? ""}
               onChange={(v) => set("group", v)}
-              placeholder="gastrolog"
+              placeholder={d["group"] ?? ""}
               dark={dark}
               mono
               examples={["gastrolog"]}
@@ -723,7 +733,7 @@ export function IngesterParamsForm({
         <TextInput
           value={params["addr"] ?? ""}
           onChange={(v) => onChange({ ...params, addr: v })}
-          placeholder=":3100"
+          placeholder={d["addr"] ?? ""}
           dark={dark}
           mono
           examples={[":3100"]}
@@ -742,7 +752,7 @@ export function IngesterParamsForm({
         <TextInput
           value={params["addr"] ?? ""}
           onChange={(v) => onChange({ ...params, addr: v })}
-          placeholder=":2514"
+          placeholder={d["addr"] ?? ""}
           dark={dark}
           mono
           examples={[":2514"]}
@@ -761,7 +771,7 @@ export function IngesterParamsForm({
         <TextInput
           value={params["interval"] ?? ""}
           onChange={(v) => onChange({ ...params, interval: v })}
-          placeholder="30s"
+          placeholder={d["interval"] ?? ""}
           dark={dark}
           mono
           examples={["10s", "30s", "1m"]}
@@ -781,7 +791,7 @@ export function IngesterParamsForm({
           <TextInput
             value={params["udp_addr"] ?? ""}
             onChange={(v) => onChange({ ...params, udp_addr: v })}
-            placeholder=":514"
+            placeholder={d["udp_addr"] ?? ""}
             dark={dark}
             mono
             examples={[":514"]}

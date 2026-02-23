@@ -11,6 +11,13 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
+// ParamDefaults returns the default parameter values for a Kafka ingester.
+func ParamDefaults() map[string]string {
+	return map[string]string{
+		"group": "gastrolog",
+	}
+}
+
 // NewFactory returns an IngesterFactory for Kafka ingesters.
 func NewFactory() orchestrator.IngesterFactory {
 	return func(id uuid.UUID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {

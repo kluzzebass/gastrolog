@@ -10,6 +10,14 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
+// ParamDefaults returns the default parameter values for an OTLP ingester.
+func ParamDefaults() map[string]string {
+	return map[string]string{
+		"http_addr": ":4318",
+		"grpc_addr": ":4317",
+	}
+}
+
 // NewFactory returns an IngesterFactory for OTLP ingesters.
 func NewFactory() orchestrator.IngesterFactory {
 	return func(id uuid.UUID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {

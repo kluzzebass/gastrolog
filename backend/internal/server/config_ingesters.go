@@ -203,6 +203,18 @@ func (s *ConfigServer) DeleteIngester(
 	return connect.NewResponse(&apiv1.DeleteIngesterResponse{}), nil
 }
 
+// GetIngesterDefaults returns default parameter values for each ingester type.
+func (s *ConfigServer) GetIngesterDefaults(
+	ctx context.Context,
+	req *connect.Request[apiv1.GetIngesterDefaultsRequest],
+) (*connect.Response[apiv1.GetIngesterDefaultsResponse], error) {
+	types := make(map[string]*apiv1.IngesterTypeDefaults, len(s.factories.IngesterDefaults))
+	for name, fn := range s.factories.IngesterDefaults {
+		types[name] = &apiv1.IngesterTypeDefaults{Params: fn()}
+	}
+	return connect.NewResponse(&apiv1.GetIngesterDefaultsResponse{Types: types}), nil
+}
+
 // TestIngester tests connectivity for an ingester configuration without saving it.
 func (s *ConfigServer) TestIngester(
 	ctx context.Context,

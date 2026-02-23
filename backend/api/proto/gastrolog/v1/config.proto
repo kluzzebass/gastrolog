@@ -86,6 +86,9 @@ service ConfigService {
 
   // TestIngester tests connectivity for an ingester configuration without saving it.
   rpc TestIngester(TestIngesterRequest) returns (TestIngesterResponse);
+
+  // GetIngesterDefaults returns default parameter values for each ingester type.
+  rpc GetIngesterDefaults(GetIngesterDefaultsRequest) returns (GetIngesterDefaultsResponse);
 }
 
 message GetConfigRequest {}
@@ -382,4 +385,14 @@ message TestIngesterRequest {
 message TestIngesterResponse {
   bool success = 1;
   string message = 2;
+}
+
+message GetIngesterDefaultsRequest {}
+
+message IngesterTypeDefaults {
+  map<string, string> params = 1;
+}
+
+message GetIngesterDefaultsResponse {
+  map<string, IngesterTypeDefaults> types = 1;
 }

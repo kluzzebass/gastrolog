@@ -19,6 +19,13 @@ type StatsSource interface {
 	IngestQueueCapacity() int
 }
 
+// ParamDefaults returns the default parameter values for a metrics ingester.
+func ParamDefaults() map[string]string {
+	return map[string]string{
+		"interval": defaultInterval.String(),
+	}
+}
+
 // NewFactory returns an IngesterFactory for the self-monitoring metrics ingester.
 // The StatsSource is captured by the returned closure (same pattern as docker's NewFactory).
 func NewFactory(src StatsSource) orchestrator.IngesterFactory {

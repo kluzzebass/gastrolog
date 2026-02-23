@@ -111,6 +111,9 @@ const (
 	// ConfigServiceTestIngesterProcedure is the fully-qualified name of the ConfigService's
 	// TestIngester RPC.
 	ConfigServiceTestIngesterProcedure = "/gastrolog.v1.ConfigService/TestIngester"
+	// ConfigServiceGetIngesterDefaultsProcedure is the fully-qualified name of the ConfigService's
+	// GetIngesterDefaults RPC.
+	ConfigServiceGetIngesterDefaultsProcedure = "/gastrolog.v1.ConfigService/GetIngesterDefaults"
 )
 
 // ConfigServiceClient is a client for the gastrolog.v1.ConfigService service.
@@ -169,6 +172,8 @@ type ConfigServiceClient interface {
 	ResumeStore(context.Context, *connect.Request[v1.ResumeStoreRequest]) (*connect.Response[v1.ResumeStoreResponse], error)
 	// TestIngester tests connectivity for an ingester configuration without saving it.
 	TestIngester(context.Context, *connect.Request[v1.TestIngesterRequest]) (*connect.Response[v1.TestIngesterResponse], error)
+	// GetIngesterDefaults returns default parameter values for each ingester type.
+	GetIngesterDefaults(context.Context, *connect.Request[v1.GetIngesterDefaultsRequest]) (*connect.Response[v1.GetIngesterDefaultsResponse], error)
 }
 
 // NewConfigServiceClient constructs a client for the gastrolog.v1.ConfigService service. By
@@ -344,6 +349,12 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("TestIngester")),
 			connect.WithClientOptions(opts...),
 		),
+		getIngesterDefaults: connect.NewClient[v1.GetIngesterDefaultsRequest, v1.GetIngesterDefaultsResponse](
+			httpClient,
+			baseURL+ConfigServiceGetIngesterDefaultsProcedure,
+			connect.WithSchema(configServiceMethods.ByName("GetIngesterDefaults")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -376,6 +387,7 @@ type configServiceClient struct {
 	pauseStore            *connect.Client[v1.PauseStoreRequest, v1.PauseStoreResponse]
 	resumeStore           *connect.Client[v1.ResumeStoreRequest, v1.ResumeStoreResponse]
 	testIngester          *connect.Client[v1.TestIngesterRequest, v1.TestIngesterResponse]
+	getIngesterDefaults   *connect.Client[v1.GetIngesterDefaultsRequest, v1.GetIngesterDefaultsResponse]
 }
 
 // GetConfig calls gastrolog.v1.ConfigService.GetConfig.
@@ -513,6 +525,11 @@ func (c *configServiceClient) TestIngester(ctx context.Context, req *connect.Req
 	return c.testIngester.CallUnary(ctx, req)
 }
 
+// GetIngesterDefaults calls gastrolog.v1.ConfigService.GetIngesterDefaults.
+func (c *configServiceClient) GetIngesterDefaults(ctx context.Context, req *connect.Request[v1.GetIngesterDefaultsRequest]) (*connect.Response[v1.GetIngesterDefaultsResponse], error) {
+	return c.getIngesterDefaults.CallUnary(ctx, req)
+}
+
 // ConfigServiceHandler is an implementation of the gastrolog.v1.ConfigService service.
 type ConfigServiceHandler interface {
 	// GetConfig returns the current configuration.
@@ -569,6 +586,8 @@ type ConfigServiceHandler interface {
 	ResumeStore(context.Context, *connect.Request[v1.ResumeStoreRequest]) (*connect.Response[v1.ResumeStoreResponse], error)
 	// TestIngester tests connectivity for an ingester configuration without saving it.
 	TestIngester(context.Context, *connect.Request[v1.TestIngesterRequest]) (*connect.Response[v1.TestIngesterResponse], error)
+	// GetIngesterDefaults returns default parameter values for each ingester type.
+	GetIngesterDefaults(context.Context, *connect.Request[v1.GetIngesterDefaultsRequest]) (*connect.Response[v1.GetIngesterDefaultsResponse], error)
 }
 
 // NewConfigServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -740,6 +759,12 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("TestIngester")),
 		connect.WithHandlerOptions(opts...),
 	)
+	configServiceGetIngesterDefaultsHandler := connect.NewUnaryHandler(
+		ConfigServiceGetIngesterDefaultsProcedure,
+		svc.GetIngesterDefaults,
+		connect.WithSchema(configServiceMethods.ByName("GetIngesterDefaults")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.ConfigService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ConfigServiceGetConfigProcedure:
@@ -796,6 +821,8 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServiceResumeStoreHandler.ServeHTTP(w, r)
 		case ConfigServiceTestIngesterProcedure:
 			configServiceTestIngesterHandler.ServeHTTP(w, r)
+		case ConfigServiceGetIngesterDefaultsProcedure:
+			configServiceGetIngesterDefaultsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -911,4 +938,8 @@ func (UnimplementedConfigServiceHandler) ResumeStore(context.Context, *connect.R
 
 func (UnimplementedConfigServiceHandler) TestIngester(context.Context, *connect.Request[v1.TestIngesterRequest]) (*connect.Response[v1.TestIngesterResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.TestIngester is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) GetIngesterDefaults(context.Context, *connect.Request[v1.GetIngesterDefaultsRequest]) (*connect.Response[v1.GetIngesterDefaultsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.GetIngesterDefaults is not implemented"))
 }

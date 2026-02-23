@@ -36,6 +36,16 @@ const (
 // allFormats lists all supported format names in default order.
 var allFormats = []string{FormatPlain, FormatKV, FormatJSON, FormatAccess, FormatSyslog, FormatWeird, FormatMultirecord}
 
+// ParamDefaults returns the default parameter values for a chatterbox ingester.
+func ParamDefaults() map[string]string {
+	return map[string]string{
+		"minInterval":  defaultMinInterval.String(),
+		"maxInterval":  defaultMaxInterval.String(),
+		"hostCount":    strconv.Itoa(defaultHostCount),
+		"serviceCount": strconv.Itoa(defaultServiceCount),
+	}
+}
+
 // NewIngester creates a new chatterbox ingester from configuration parameters.
 //
 // Supported parameters:
