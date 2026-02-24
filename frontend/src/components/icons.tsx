@@ -365,3 +365,158 @@ export function MetricsIcon({ className }: Readonly<IconProps>) {
     </svg>
   );
 }
+
+export function HistoryIcon({ className }: Readonly<IconProps>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </svg>
+  );
+}
+
+export function BookmarkIcon({ className }: Readonly<IconProps>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}
+
+export function FormatIcon({ className }: Readonly<IconProps>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <circle cx="12" cy="8" r="1.5" />
+      <circle cx="12" cy="4.5" r="2" />
+      <circle cx="15.5" cy="6.8" r="2" />
+      <circle cx="14.2" cy="11" r="2" />
+      <circle cx="9.8" cy="11" r="2" />
+      <circle cx="8.5" cy="6.8" r="2" />
+      <line x1="12" y1="13" x2="12" y2="22" />
+      <path d="M12 16c2-1 4-0.5 5 1" />
+      <path d="M12 19c-2-1-4-0.5-5 1" />
+    </svg>
+  );
+}
+
+export function HelpCircleIcon({ className }: Readonly<IconProps>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  );
+}
+
+export function SearchIcon({ className }: Readonly<IconProps>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <circle cx="11" cy="11" r="8" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </svg>
+  );
+}
+
+export function XIcon({ className }: Readonly<IconProps>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  );
+}
+
+export function PlayIcon({ className }: Readonly<IconProps>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      stroke="none"
+      className={className}
+    >
+      <polygon points="6,4 20,12 6,20" />
+    </svg>
+  );
+}
+
+export function StopIcon({ className }: Readonly<IconProps>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      stroke="none"
+      className={className}
+    >
+      <rect x="6" y="6" width="12" height="12" rx="1" />
+    </svg>
+  );
+}
+
+export function PlanIcon({ className }: Readonly<IconProps>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <rect x="3" y="3" width="7" height="5" rx="1" />
+      <rect x="14" y="8" width="7" height="5" rx="1" />
+      <rect x="3" y="16" width="7" height="5" rx="1" />
+      <path d="M10 5.5h2.5a1 1 0 0 1 1 1v4" />
+      <path d="M14 11.5h-2.5a1 1 0 0 0-1 1v4" />
+    </svg>
+  );
+}

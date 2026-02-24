@@ -2,11 +2,56 @@ import { QueryInput } from "./QueryInput";
 import { QueryHistory } from "./QueryHistory";
 import { SavedQueries } from "./SavedQueries";
 import { QueryAutocomplete } from "./QueryAutocomplete";
+import {
+  HistoryIcon,
+  BookmarkIcon,
+  FormatIcon,
+  HelpCircleIcon,
+  SearchIcon,
+  XIcon,
+  PlayIcon,
+  StopIcon,
+  PlanIcon,
+} from "./icons";
 import type { HistoryEntry } from "../hooks/useQueryHistory";
 import { useHelp } from "../hooks/useHelp";
 import type { SavedQuery } from "../api/gen/gastrolog/v1/config_pb";
 import { useThemeClass } from "../hooks/useThemeClass";
 import type { SyntaxSets } from "../queryTokenizer";
+
+// Format a query by placing each pipe segment on its own line.
+// Respects quoted strings — only splits on unquoted |.
+function formatPipeQuery(query: string): string {
+  const segments: string[] = [];
+  let current = "";
+  let inQuote: string | null = null;
+
+  for (let i = 0; i < query.length; i++) {
+    const ch = query[i]!;
+    if (inQuote) {
+      current += ch;
+      if (ch === "\\" && i + 1 < query.length) {
+        current += query[++i];
+      } else if (ch === inQuote) {
+        inQuote = null;
+      }
+    } else if (ch === '"' || ch === "'") {
+      inQuote = ch;
+      current += ch;
+    } else if (ch === "|") {
+      segments.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  segments.push(current);
+
+  // First segment is the filter, rest are pipe operators.
+  return segments
+    .map((s, i) => (i === 0 ? s.trim() : "| " + s.trim()))
+    .join("\n");
+}
 
 interface QueryBarProps {
   dark: boolean;
@@ -132,6 +177,26 @@ export function QueryBar({
                   return;
                 }
               }
+              // Auto-format pipes: typing "|" inserts "\n| " instead.
+              if (e.key === "|") {
+                e.preventDefault();
+                const ta = e.target as HTMLTextAreaElement;
+                const start = ta.selectionStart;
+                const end = ta.selectionEnd;
+                const before = draft.slice(0, start);
+                const after = draft.slice(end);
+                // Trim trailing whitespace on current line before inserting.
+                const trimmed = before.replace(/[ \t]+$/, "");
+                const newDraft = trimmed + "\n| " + after;
+                const newCursor = trimmed.length + 3; // after "| "
+                setDraft(newDraft);
+                cursorRef.current = newCursor;
+                requestAnimationFrame(() => {
+                  ta.selectionStart = newCursor;
+                  ta.selectionEnd = newCursor;
+                });
+                return;
+              }
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 if (!draftHasErrors) executeQuery();
@@ -158,18 +223,7 @@ export function QueryBar({
               aria-label="Query history"
               title="Query history"
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="w-4 h-4"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <polyline points="12 6 12 12 16 14" />
-              </svg>
+              <HistoryIcon className="w-4 h-4" />
             </button>
             <button
               onMouseDown={(e) => {
@@ -185,17 +239,23 @@ export function QueryBar({
               aria-label="Saved queries"
               title="Saved queries"
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="w-4 h-4"
-              >
-                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
-              </svg>
+              <BookmarkIcon className="w-4 h-4" />
+            </button>
+            <button
+              onMouseDown={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                setDraft(formatPipeQuery(draft));
+                queryInputRef.current?.focus();
+              }}
+              className={`transition-colors ${c(
+                "text-text-ghost hover:text-copper",
+                "text-light-text-ghost hover:text-copper",
+              )}`}
+              aria-label="Format query"
+              title="Format query"
+            >
+              <FormatIcon className="w-4 h-4" />
             </button>
             <button
               onClick={() => openHelp("query-language")}
@@ -206,19 +266,7 @@ export function QueryBar({
               aria-label="Query language help"
               title="Query language help"
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="w-4 h-4"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-                <line x1="12" y1="17" x2="12.01" y2="17" />
-              </svg>
+              <HelpCircleIcon className="w-4 h-4" />
             </button>
           </QueryInput>
           {showHistory && (
@@ -328,18 +376,7 @@ function QueryActionButtons({
           title="Cancel search"
           className="px-2 py-2.5 rounded border border-transparent bg-severity-error text-white hover:bg-severity-error/80 transition-all duration-200"
         >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="w-4.5 h-4.5"
-          >
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
+          <XIcon className="w-4.5 h-4.5" />
         </button>
       ) : (
         <button
@@ -349,18 +386,7 @@ function QueryActionButtons({
           title="Search"
           className="px-2 py-2.5 rounded border border-transparent bg-copper text-white hover:bg-copper-glow transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="w-4.5 h-4.5"
-          >
-            <circle cx="11" cy="11" r="8" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
+          <SearchIcon className="w-4.5 h-4.5" />
         </button>
       )}
       <button
@@ -378,23 +404,9 @@ function QueryActionButtons({
         }`}
       >
         {isFollowMode ? (
-          <svg
-            viewBox="0 0 24 24"
-            fill="currentColor"
-            stroke="none"
-            className="w-4.5 h-4.5"
-          >
-            <rect x="6" y="6" width="12" height="12" rx="1" />
-          </svg>
+          <StopIcon className="w-4.5 h-4.5" />
         ) : (
-          <svg
-            viewBox="0 0 24 24"
-            fill="currentColor"
-            stroke="none"
-            className="w-4.5 h-4.5"
-          >
-            <polygon points="6,4 20,12 6,20" />
-          </svg>
+          <PlayIcon className="w-4.5 h-4.5" />
         )}
       </button>
       <button
@@ -414,21 +426,7 @@ function QueryActionButtons({
               )
         }`}
       >
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="w-4.5 h-4.5"
-        >
-          <rect x="3" y="3" width="7" height="5" rx="1" />
-          <rect x="14" y="8" width="7" height="5" rx="1" />
-          <rect x="3" y="16" width="7" height="5" rx="1" />
-          <path d="M10 5.5h2.5a1 1 0 0 1 1 1v4" />
-          <path d="M14 11.5h-2.5a1 1 0 0 0-1 1v4" />
-        </svg>
+        <PlanIcon className="w-4.5 h-4.5" />
       </button>
     </>
   );
