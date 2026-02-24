@@ -138,7 +138,9 @@ func (e *Engine) RunPipeline(ctx context.Context, q Query, pipeline *querylang.P
 	}
 
 	if ph.statsOp == nil {
-		if ph.hasRaw {
+		// Any pipeline with operators defaults to table (raw) output.
+		// Only a bare pipe-less query returns records for the log viewer.
+		if ph.hasRaw || len(ph.preOps) > 0 {
 			return &PipelineResult{Table: recordsToTable(records)}, nil
 		}
 		return &PipelineResult{Records: records}, nil

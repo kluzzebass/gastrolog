@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useDeferredValue } from "react";
 import {
   useSearch as useRouterSearch,
   useNavigate,
@@ -80,7 +80,8 @@ export function SearchView() {
     }
   }, [config.data, serverConfig.data]); // eslint-disable-line react-hooks/exhaustive-deps
   const [draft, setDraft] = useState(q);
-  const [cursorPos, setCursorPos] = useState(0);
+  const deferredDraft = useDeferredValue(draft);
+  const cursorRef = useRef(0);
   const [selectedStore, setSelectedStore] = useState("all");
 
   // Follow buffer size — persisted to localStorage.
@@ -230,7 +231,7 @@ export function SearchView() {
   const currentUser = useCurrentUser();
   const syntaxQuery = useSyntax();
   const syntax: SyntaxSets | undefined = syntaxQuery.data;
-  const validation = useValidation(draft);
+  const validation = useValidation(deferredDraft);
 
   // Navigate to a new query — pushes browser history, preserving current route.
   const setUrlQuery = (newQ: string) => {
@@ -556,7 +557,7 @@ export function SearchView() {
     : null;
   const liveHistogramData = useLiveHistogram(followRecords);
   const tokens = extractTokens(q);
-  const { hasErrors: draftHasErrors, hasPipeline: draftIsPipeline } = tokenize(draft, syntax, validation.errorOffset);
+  const { hasErrors: draftHasErrors, hasPipeline: draftIsPipeline } = tokenize(deferredDraft, syntax, validation.errorOffset);
   const isPipelineResult = tableResult !== null;
   const queryIsPipeline = hasPipeOutsideQuotes(q);
 
@@ -597,8 +598,8 @@ export function SearchView() {
     return merged;
   })();
   const baseFieldNames = allFields.map((f) => f.key);
-  const pipeFields = usePipelineFields(draft, cursorPos, baseFieldNames);
-  const autocomplete = useAutocomplete(draft, cursorPos, allFields, syntax, pipeFields.fields, pipeFields.completions);
+  const pipeFields = usePipelineFields(deferredDraft, cursorRef.current, baseFieldNames);
+  const autocomplete = useAutocomplete(deferredDraft, cursorRef.current, allFields, syntax, pipeFields.fields, pipeFields.completions);
 
   const handleFieldSelect = (key: string, value: string) => {
     const needsQuotes = /[^a-zA-Z0-9_\-.]/.test(value);
@@ -733,7 +734,7 @@ export function SearchView() {
             dark={dark}
             draft={draft}
             setDraft={setDraft}
-            setCursorPos={setCursorPos}
+            cursorRef={cursorRef}
             queryInputRef={queryInputRef}
             autocomplete={autocomplete}
             showHistory={showHistory}

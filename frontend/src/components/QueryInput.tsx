@@ -1,4 +1,4 @@
-import { forwardRef, type ReactNode } from "react";
+import { forwardRef, useDeferredValue, type ReactNode } from "react";
 import { tokenize, type HighlightRole, type SyntaxSets } from "../queryTokenizer";
 import { useThemeClass } from "../hooks/useThemeClass";
 
@@ -6,7 +6,6 @@ interface QueryInputProps {
   value: string;
   onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
-  onKeyUp?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   onClick?: (e: React.MouseEvent<HTMLTextAreaElement>) => void;
   placeholder?: string;
   dark: boolean;
@@ -70,7 +69,6 @@ export const QueryInput = forwardRef<HTMLTextAreaElement, QueryInputProps>(
       value,
       onChange,
       onKeyDown,
-      onKeyUp,
       onClick,
       placeholder,
       dark,
@@ -81,7 +79,9 @@ export const QueryInput = forwardRef<HTMLTextAreaElement, QueryInputProps>(
     },
     ref,
   ) => {
-    const { spans, errorMessage: clientErrorMessage } = tokenize(value, syntax, errorOffset);
+    // Tokenize a deferred copy so the textarea is never blocked by highlighting.
+    const displayValue = useDeferredValue(value);
+    const { spans, errorMessage: clientErrorMessage } = tokenize(displayValue, syntax, errorOffset);
     const errorMessage = errorMessageProp ?? clientErrorMessage;
 
     const c = useThemeClass(dark);
@@ -94,7 +94,6 @@ export const QueryInput = forwardRef<HTMLTextAreaElement, QueryInputProps>(
           value={value}
           onChange={onChange}
           onKeyDown={onKeyDown}
-          onKeyUp={onKeyUp}
           onClick={onClick}
           spellCheck={false}
           rows={1}

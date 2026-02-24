@@ -12,7 +12,7 @@ interface QueryBarProps {
   dark: boolean;
   draft: string;
   setDraft: (v: string) => void;
-  setCursorPos: (pos: number) => void;
+  cursorRef: React.RefObject<number>;
   queryInputRef: React.RefObject<HTMLTextAreaElement | null>;
   autocomplete: {
     suggestions: string[];
@@ -52,7 +52,7 @@ export function QueryBar({
   dark,
   draft,
   setDraft,
-  setCursorPos,
+  cursorRef,
   queryInputRef,
   autocomplete,
   showHistory,
@@ -96,7 +96,7 @@ export function QueryBar({
             errorMessage={errorMessage}
             onChange={(e) => {
               setDraft(e.target.value);
-              setCursorPos(e.target.selectionStart ?? 0);
+              cursorRef.current = e.target.selectionStart ?? 0;
             }}
             onKeyDown={(e) => {
               if (autocomplete.isOpen) {
@@ -110,15 +110,12 @@ export function QueryBar({
                   autocomplete.selectPrev();
                   return;
                 }
-                if (
-                  e.key === "Tab" ||
-                  (e.key === "Enter" && !e.shiftKey)
-                ) {
+                if (e.key === "Tab") {
                   e.preventDefault();
                   const result = autocomplete.accept();
                   if (result) {
                     setDraft(result.newDraft);
-                    setCursorPos(result.newCursor);
+                    cursorRef.current = result.newCursor;
                     requestAnimationFrame(() => {
                       const ta = queryInputRef.current;
                       if (ta) {
@@ -140,13 +137,9 @@ export function QueryBar({
                 if (!draftHasErrors) executeQuery();
               }
             }}
-            onKeyUp={(e) => {
-              const ta = e.target as HTMLTextAreaElement;
-              setCursorPos(ta.selectionStart ?? 0);
-            }}
             onClick={(e) => {
               const ta = e.target as HTMLTextAreaElement;
-              setCursorPos(ta.selectionStart ?? 0);
+              cursorRef.current = ta.selectionStart ?? 0;
             }}
             placeholder="Search logs... tokens for full-text, key=value for attributes"
             dark={dark}
@@ -266,7 +259,7 @@ export function QueryBar({
                 const result = autocomplete.accept(i);
                 if (result) {
                   setDraft(result.newDraft);
-                  setCursorPos(result.newCursor);
+                  cursorRef.current = result.newCursor;
                   requestAnimationFrame(() => {
                     const ta = queryInputRef.current;
                     if (ta) {
