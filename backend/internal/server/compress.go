@@ -85,7 +85,7 @@ func compressMiddleware(next http.Handler) http.Handler {
 
 // acceptsEncoding checks whether the Accept-Encoding header includes the given encoding.
 func acceptsEncoding(header, encoding string) bool {
-	for _, part := range strings.Split(header, ",") {
+	for part := range strings.SplitSeq(header, ",") {
 		if enc, _, _ := strings.Cut(strings.TrimSpace(part), ";"); strings.TrimSpace(enc) == encoding {
 			return true
 		}
@@ -153,7 +153,7 @@ func (cw *compressWriter) Flush() {
 	if cw.compressing {
 		// brotli.Writer implements Flush(); gzip.Writer implements Flush().
 		if f, ok := cw.writer.(interface{ Flush() error }); ok {
-			f.Flush()
+			_ = f.Flush()
 		}
 	}
 	if f, ok := cw.ResponseWriter.(http.Flusher); ok {
@@ -165,7 +165,7 @@ func (cw *compressWriter) Close() {
 	if !cw.compressing || cw.writer == nil {
 		return
 	}
-	cw.writer.Close()
+	_ = cw.writer.Close()
 
 	// Return to pool.
 	switch cw.encoding {

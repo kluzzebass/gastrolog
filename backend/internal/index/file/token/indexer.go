@@ -3,6 +3,7 @@ package token
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -96,7 +97,7 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	// writeIdx[tok] = how many positions written so far for this token
 	fileOffset := make(map[string]uint32, len(counts))
 	writeIdx := make(map[string]uint32, len(counts))
-	offset := uint32(postingBlobStart)
+	offset := uint32(postingBlobStart) //nolint:gosec // G115: postingBlobStart is a small file offset well within uint32 range
 	for _, tok := range sortedTokens {
 		fileOffset[tok] = offset
 		writeIdx[tok] = 0
@@ -106,7 +107,7 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 
 	// Create temp file and pre-allocate space.
 	chunkDir := filepath.Join(t.dir, chunkID.String())
-	if err := os.MkdirAll(chunkDir, 0o755); err != nil {
+	if err := os.MkdirAll(chunkDir, 0o750); err != nil {
 		return fmt.Errorf("create index dir: %w", err)
 	}
 
@@ -118,22 +119,22 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	tmpName := tmpFile.Name()
 
 	if err := tmpFile.Chmod(0o644); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpName)
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpName) //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
 		return fmt.Errorf("chmod temp index: %w", err)
 	}
 
 	// Truncate to final size to pre-allocate space.
 	if err := tmpFile.Truncate(totalFileSize); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpName)
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpName) //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
 		return fmt.Errorf("truncate index file: %w", err)
 	}
 
 	// Write header.
-	if err := writeIndexHeader(tmpFile, uint32(len(sortedTokens))); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpName)
+	if err := writeIndexHeader(tmpFile, uint32(len(sortedTokens))); err != nil { //nolint:gosec // G115: token count bounded by index budget
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpName) //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
 		return fmt.Errorf("write header: %w", err)
 	}
 
@@ -141,8 +142,8 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	postingOffset := uint32(0) // relative offset within posting blob
 	for _, tok := range sortedTokens {
 		if err := writeKeyEntry(tmpFile, tok, postingOffset, counts[tok]); err != nil {
-			tmpFile.Close()
-			os.Remove(tmpName)
+			_ = tmpFile.Close()
+			_ = os.Remove(tmpName) //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
 			return fmt.Errorf("write key entry: %w", err)
 		}
 		postingOffset += counts[tok] * positionSize
@@ -151,19 +152,19 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	// PASS 2: Write positions directly to file at pre-computed offsets.
 	pass2Start := time.Now()
 	if err := t.fillPostingsToFile(ctx, chunkID, intern, tmpFile, fileOffset, writeIdx, totalFileSize); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpName)
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpName) //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
 		return fmt.Errorf("pass 2 (fill): %w", err)
 	}
 	pass2Duration := time.Since(pass2Start)
 
 	if err := tmpFile.Close(); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName) //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
 		return fmt.Errorf("close temp index: %w", err)
 	}
 
-	if err := os.Rename(tmpName, target); err != nil {
-		os.Remove(tmpName)
+	if err := os.Rename(tmpName, filepath.Clean(target)); err != nil { //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
+		_ = os.Remove(tmpName) //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
 		return fmt.Errorf("rename index: %w", err)
 	}
 
@@ -277,7 +278,7 @@ func writeKeyEntry(w *os.File, tok string, postingOffset uint32, postingCount ui
 	buf := make([]byte, tokenLenSize+len(tok)+postingOffsetSize+postingCountSize)
 	cursor := 0
 
-	binary.LittleEndian.PutUint16(buf[cursor:cursor+tokenLenSize], uint16(len(tok)))
+	binary.LittleEndian.PutUint16(buf[cursor:cursor+tokenLenSize], uint16(len(tok))) //nolint:gosec // G115: token length bounded by tokenizer max token length
 	cursor += tokenLenSize
 
 	copy(buf[cursor:cursor+len(tok)], tok)
@@ -300,7 +301,7 @@ func (t *Indexer) countTokens(ctx context.Context, chunkID chunk.ChunkID, intern
 	if err != nil {
 		return nil, 0, fmt.Errorf("open cursor: %w", err)
 	}
-	defer cursor.Close()
+	defer func() { _ = cursor.Close() }()
 
 	counts := make(map[string]uint32)
 	var recordCount uint64
@@ -319,7 +320,7 @@ func (t *Indexer) countTokens(ctx context.Context, chunkID chunk.ChunkID, intern
 
 		rec, _, err := cursor.Next()
 		if err != nil {
-			if err == chunk.ErrNoMoreRecords {
+			if errors.Is(err, chunk.ErrNoMoreRecords) {
 				break
 			}
 			return nil, 0, fmt.Errorf("read record: %w", err)
@@ -354,14 +355,14 @@ func (t *Indexer) fillPostingsToFile(ctx context.Context, chunkID chunk.ChunkID,
 	if err != nil {
 		return fmt.Errorf("open cursor: %w", err)
 	}
-	defer cursor.Close()
+	defer func() { _ = cursor.Close() }()
 
 	// Mmap the file for writing.
-	data, err := syscall.Mmap(int(f.Fd()), 0, int(fileSize), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
+	data, err := syscall.Mmap(int(f.Fd()), 0, int(fileSize), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED) //nolint:gosec // G115: uintptr->int is safe on 64-bit; fileSize checked above
 	if err != nil {
 		return fmt.Errorf("mmap: %w", err)
 	}
-	defer syscall.Munmap(data)
+	defer func() { _ = syscall.Munmap(data) }()
 
 	// Reusable per-record deduplication buffer.
 	seenInRecord := make(map[string]struct{}, 32)
@@ -376,7 +377,7 @@ func (t *Indexer) fillPostingsToFile(ctx context.Context, chunkID chunk.ChunkID,
 
 		rec, ref, err := cursor.Next()
 		if err != nil {
-			if err == chunk.ErrNoMoreRecords {
+			if errors.Is(err, chunk.ErrNoMoreRecords) {
 				break
 			}
 			return fmt.Errorf("read record: %w", err)
@@ -403,7 +404,7 @@ func (t *Indexer) fillPostingsToFile(ctx context.Context, chunkID chunk.ChunkID,
 			// Write position directly to mmap'd memory.
 			idx := writeIdx[tok]
 			offset := fileOffset[tok] + idx*positionSize
-			binary.LittleEndian.PutUint32(data[offset:], uint32(ref.Pos))
+			binary.LittleEndian.PutUint32(data[offset:], uint32(ref.Pos)) //nolint:gosec // G115: record positions are bounded by chunk record count (< 2^32)
 			writeIdx[tok] = idx + 1
 			return true
 		})

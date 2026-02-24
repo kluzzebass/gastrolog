@@ -46,3 +46,12 @@ export function resolveColor(cssColor: string): string {
   if (!match) return cssColor;
   return getComputedStyle(document.documentElement).getPropertyValue(match[1]!).trim() || cssColor;
 }
+
+/** Format a numeric value for chart axis labels and tooltips. */
+export const formatChartValue = (v: number): string => {
+  const abs = Math.abs(v);
+  const sign = v < 0 ? "-" : "";
+  if (abs >= 1_000_000) return `${sign}${(abs / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `${sign}${(abs / 1_000).toFixed(1)}K`;
+  return Number.isInteger(v) ? String(v) : v.toFixed(1);
+};

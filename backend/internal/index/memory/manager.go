@@ -232,80 +232,100 @@ func (m *Manager) FindSourceStartPosition(chunkID chunk.ChunkID, ts time.Time) (
 // IndexSizes estimates the in-memory data footprint for each index.
 func (m *Manager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
 	sizes := make(map[string]int64)
-
-	if m.tokenStore != nil {
-		if entries, ok := m.tokenStore.Get(chunkID); ok {
-			var s int64
-			for _, e := range entries {
-				s += int64(len(e.Token)) + int64(len(e.Positions))*8
-			}
-			sizes["token"] = s
-		}
-	}
-	if m.attrStore != nil {
-		if entries, ok := m.attrStore.GetKey(chunkID); ok {
-			var s int64
-			for _, e := range entries {
-				s += int64(len(e.Key)) + int64(len(e.Positions))*8
-			}
-			sizes["attr_key"] = s
-		}
-		if entries, ok := m.attrStore.GetValue(chunkID); ok {
-			var s int64
-			for _, e := range entries {
-				s += int64(len(e.Value)) + int64(len(e.Positions))*8
-			}
-			sizes["attr_val"] = s
-		}
-		if entries, ok := m.attrStore.GetKV(chunkID); ok {
-			var s int64
-			for _, e := range entries {
-				s += int64(len(e.Key)) + int64(len(e.Value)) + int64(len(e.Positions))*8
-			}
-			sizes["attr_kv"] = s
-		}
-	}
-	if m.kvStore != nil {
-		if entries, _, ok := m.kvStore.GetKey(chunkID); ok {
-			var s int64
-			for _, e := range entries {
-				s += int64(len(e.Key)) + int64(len(e.Positions))*8
-			}
-			sizes["kv_key"] = s
-		}
-		if entries, _, ok := m.kvStore.GetValue(chunkID); ok {
-			var s int64
-			for _, e := range entries {
-				s += int64(len(e.Value)) + int64(len(e.Positions))*8
-			}
-			sizes["kv_val"] = s
-		}
-		if entries, _, ok := m.kvStore.GetKV(chunkID); ok {
-			var s int64
-			for _, e := range entries {
-				s += int64(len(e.Key)) + int64(len(e.Value)) + int64(len(e.Positions))*8
-			}
-			sizes["kv_kv"] = s
-		}
-	}
-	if m.jsonStore != nil {
-		var s int64
-		if entries, _, ok := m.jsonStore.GetPath(chunkID); ok {
-			for _, e := range entries {
-				s += int64(len(e.Path)) + int64(len(e.Positions))*8
-			}
-		}
-		if entries, _, ok := m.jsonStore.GetPV(chunkID); ok {
-			for _, e := range entries {
-				s += int64(len(e.Path)) + int64(len(e.Value)) + int64(len(e.Positions))*8
-			}
-		}
-		if s > 0 {
-			sizes["json"] = s
-		}
-	}
-
+	m.tokenSizes(chunkID, sizes)
+	m.attrSizes(chunkID, sizes)
+	m.kvSizes(chunkID, sizes)
+	m.jsonSizes(chunkID, sizes)
 	return sizes
+}
+
+func (m *Manager) tokenSizes(chunkID chunk.ChunkID, sizes map[string]int64) {
+	if m.tokenStore == nil {
+		return
+	}
+	entries, ok := m.tokenStore.Get(chunkID)
+	if !ok {
+		return
+	}
+	var s int64
+	for _, e := range entries {
+		s += int64(len(e.Token)) + int64(len(e.Positions))*8
+	}
+	sizes["token"] = s
+}
+
+func (m *Manager) attrSizes(chunkID chunk.ChunkID, sizes map[string]int64) {
+	if m.attrStore == nil {
+		return
+	}
+	if entries, ok := m.attrStore.GetKey(chunkID); ok {
+		var s int64
+		for _, e := range entries {
+			s += int64(len(e.Key)) + int64(len(e.Positions))*8
+		}
+		sizes["attr_key"] = s
+	}
+	if entries, ok := m.attrStore.GetValue(chunkID); ok {
+		var s int64
+		for _, e := range entries {
+			s += int64(len(e.Value)) + int64(len(e.Positions))*8
+		}
+		sizes["attr_val"] = s
+	}
+	if entries, ok := m.attrStore.GetKV(chunkID); ok {
+		var s int64
+		for _, e := range entries {
+			s += int64(len(e.Key)) + int64(len(e.Value)) + int64(len(e.Positions))*8
+		}
+		sizes["attr_kv"] = s
+	}
+}
+
+func (m *Manager) kvSizes(chunkID chunk.ChunkID, sizes map[string]int64) {
+	if m.kvStore == nil {
+		return
+	}
+	if entries, _, ok := m.kvStore.GetKey(chunkID); ok {
+		var s int64
+		for _, e := range entries {
+			s += int64(len(e.Key)) + int64(len(e.Positions))*8
+		}
+		sizes["kv_key"] = s
+	}
+	if entries, _, ok := m.kvStore.GetValue(chunkID); ok {
+		var s int64
+		for _, e := range entries {
+			s += int64(len(e.Value)) + int64(len(e.Positions))*8
+		}
+		sizes["kv_val"] = s
+	}
+	if entries, _, ok := m.kvStore.GetKV(chunkID); ok {
+		var s int64
+		for _, e := range entries {
+			s += int64(len(e.Key)) + int64(len(e.Value)) + int64(len(e.Positions))*8
+		}
+		sizes["kv_kv"] = s
+	}
+}
+
+func (m *Manager) jsonSizes(chunkID chunk.ChunkID, sizes map[string]int64) {
+	if m.jsonStore == nil {
+		return
+	}
+	var s int64
+	if entries, _, ok := m.jsonStore.GetPath(chunkID); ok {
+		for _, e := range entries {
+			s += int64(len(e.Path)) + int64(len(e.Positions))*8
+		}
+	}
+	if entries, _, ok := m.jsonStore.GetPV(chunkID); ok {
+		for _, e := range entries {
+			s += int64(len(e.Path)) + int64(len(e.Value)) + int64(len(e.Positions))*8
+		}
+	}
+	if s > 0 {
+		sizes["json"] = s
+	}
 }
 
 // IndexesComplete reports whether all indexes exist for the given chunk.

@@ -1,6 +1,7 @@
 package attr
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -42,7 +43,7 @@ func decodeKeyIndex(data []byte) ([]index.AttrKeyIndexEntry, error) {
 		return nil, fmt.Errorf("attr key index: %w", err)
 	}
 	if h.Flags&format.FlagComplete == 0 {
-		return nil, fmt.Errorf("attr key index: incomplete (missing complete flag)")
+		return nil, errors.New("attr key index: incomplete (missing complete flag)")
 	}
 
 	return inverted.DecodeKeyIndex(data, headerSize, func(key string, positions []uint64) index.AttrKeyIndexEntry {
@@ -69,7 +70,7 @@ func decodeValueIndex(data []byte) ([]index.AttrValueIndexEntry, error) {
 		return nil, fmt.Errorf("attr value index: %w", err)
 	}
 	if h.Flags&format.FlagComplete == 0 {
-		return nil, fmt.Errorf("attr value index: incomplete (missing complete flag)")
+		return nil, errors.New("attr value index: incomplete (missing complete flag)")
 	}
 
 	return inverted.DecodeValueIndex(data, headerSize, func(value string, positions []uint64) index.AttrValueIndexEntry {
@@ -96,7 +97,7 @@ func decodeKVIndex(data []byte) ([]index.AttrKVIndexEntry, error) {
 		return nil, fmt.Errorf("attr kv index: %w", err)
 	}
 	if h.Flags&format.FlagComplete == 0 {
-		return nil, fmt.Errorf("attr kv index: incomplete (missing complete flag)")
+		return nil, errors.New("attr kv index: incomplete (missing complete flag)")
 	}
 
 	return inverted.DecodeKVIndex(data, headerSize, func(key, value string, positions []uint64) index.AttrKVIndexEntry {
@@ -108,7 +109,7 @@ func decodeKVIndex(data []byte) ([]index.AttrKVIndexEntry, error) {
 
 func LoadKeyIndex(dir string, chunkID chunk.ChunkID) ([]index.AttrKeyIndexEntry, error) {
 	path := KeyIndexPath(dir, chunkID)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read attr key index: %w", err)
 	}
@@ -117,7 +118,7 @@ func LoadKeyIndex(dir string, chunkID chunk.ChunkID) ([]index.AttrKeyIndexEntry,
 
 func LoadValueIndex(dir string, chunkID chunk.ChunkID) ([]index.AttrValueIndexEntry, error) {
 	path := ValueIndexPath(dir, chunkID)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read attr value index: %w", err)
 	}
@@ -126,7 +127,7 @@ func LoadValueIndex(dir string, chunkID chunk.ChunkID) ([]index.AttrValueIndexEn
 
 func LoadKVIndex(dir string, chunkID chunk.ChunkID) ([]index.AttrKVIndexEntry, error) {
 	path := KVIndexPath(dir, chunkID)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read attr kv index: %w", err)
 	}

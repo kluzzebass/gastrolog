@@ -1,7 +1,7 @@
 import ReactEChartsCore from "echarts-for-react/esm/core";
 import { echarts } from "./echartsSetup";
 import { buildThemeOption } from "./echartsTheme";
-import { getColorForCategory, resolveColor } from "./chartColors";
+import { getColorForCategory, resolveColor, formatChartValue } from "./chartColors";
 import type { EChartsOption } from "echarts";
 
 interface BarChartProps {
@@ -14,14 +14,6 @@ interface Datum {
   label: string;
   value: number;
 }
-
-const formatValue = (v: number) => {
-  const abs = Math.abs(v);
-  const sign = v < 0 ? "-" : "";
-  if (abs >= 1_000_000) return `${sign}${(abs / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `${sign}${(abs / 1_000).toFixed(1)}K`;
-  return Number.isInteger(v) ? String(v) : v.toFixed(1);
-};
 
 export function BarChart({ columns, rows, dark }: Readonly<BarChartProps>) {
   const theme = buildThemeOption(dark);
@@ -60,7 +52,7 @@ export function BarChart({ columns, rows, dark }: Readonly<BarChartProps>) {
       type: "value",
       axisLabel: {
         ...(theme.yAxis as any)?.axisLabel,
-        formatter: (v: number) => formatValue(v),
+        formatter: (v: number) => formatChartValue(v),
       },
     },
     tooltip: {
@@ -71,7 +63,7 @@ export function BarChart({ columns, rows, dark }: Readonly<BarChartProps>) {
         const p = Array.isArray(params) ? params[0] : params;
         const color = p.color as string;
         const dot = `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${color};margin-right:6px;"></span>`;
-        return `<div style="opacity:0.7">${p.name}</div>${dot}${columns[valueColIdx]} <b>${formatValue(p.value as number)}</b>`;
+        return `<div style="opacity:0.7">${p.name}</div>${dot}${columns[valueColIdx]} <b>${formatChartValue(p.value as number)}</b>`;
       },
     },
     series: [

@@ -153,7 +153,7 @@ func (p *parser) parseAndExpr() (Expr, error) {
 // in an implicit AND sequence. This does NOT include TokAnd itself, which is
 // handled explicitly in parseAndExpr.
 func (p *parser) isAndStart() bool {
-	switch p.cur.Kind {
+	switch p.cur.Kind { //nolint:exhaustive // only listing tokens that can start an AND operand
 	case TokAnd:
 		// Explicit AND
 		return true
@@ -194,38 +194,42 @@ func (p *parser) parseUnaryExpr() (Expr, error) {
 
 // parsePrimary parses: primary = "(" or_expr ")" | predicate
 func (p *parser) parsePrimary() (Expr, error) {
-	if p.cur.Kind == TokLParen {
-		openPos := p.cur.Pos
-		if err := p.advance(); err != nil {
-			return nil, err
-		}
+	if p.cur.Kind != TokLParen {
+		return p.parsePredicate()
+	}
+	return p.parseParenExpr()
+}
 
-		// Check for empty parens.
-		if p.cur.Kind == TokRParen {
-			return nil, newParseError(openPos, ErrEmptyQuery, "empty parentheses")
-		}
-
-		expr, err := p.parseOrExpr()
-		if err != nil {
-			return nil, err
-		}
-
-		if p.cur.Kind != TokRParen {
-			return nil, newParseError(openPos, ErrUnmatchedParen, "unmatched opening parenthesis")
-		}
-		if err := p.advance(); err != nil {
-			return nil, err
-		}
-
-		return expr, nil
+// parseParenExpr parses a parenthesized expression: "(" or_expr ")"
+func (p *parser) parseParenExpr() (Expr, error) {
+	openPos := p.cur.Pos
+	if err := p.advance(); err != nil {
+		return nil, err
 	}
 
-	return p.parsePredicate()
+	// Check for empty parens.
+	if p.cur.Kind == TokRParen {
+		return nil, newParseError(openPos, ErrEmptyQuery, "empty parentheses")
+	}
+
+	expr, err := p.parseOrExpr()
+	if err != nil {
+		return nil, err
+	}
+
+	if p.cur.Kind != TokRParen {
+		return nil, newParseError(openPos, ErrUnmatchedParen, "unmatched opening parenthesis")
+	}
+	if err := p.advance(); err != nil {
+		return nil, err
+	}
+
+	return expr, nil
 }
 
 // isCompareOp returns true if the current token is a comparison operator.
 func (p *parser) isCompareOp() bool {
-	switch p.cur.Kind {
+	switch p.cur.Kind { //nolint:exhaustive // only comparison operator tokens are relevant
 	case TokEq, TokNe, TokGt, TokGte, TokLt, TokLte:
 		return true
 	}
@@ -234,7 +238,7 @@ func (p *parser) isCompareOp() bool {
 
 // compareOp maps the current comparison operator token to a CompareOp.
 func (p *parser) compareOp() CompareOp {
-	switch p.cur.Kind {
+	switch p.cur.Kind { //nolint:exhaustive // only comparison operator tokens are relevant
 	case TokNe:
 		return OpNe
 	case TokGt:
@@ -255,44 +259,72 @@ func (p *parser) compareOp() CompareOp {
 // kv_pred    = ( WORD | "*" ) compare_op ( WORD | "*" )
 // token_pred = WORD
 func (p *parser) parsePredicate() (Expr, error) {
-	// Handle unexpected tokens.
-	switch p.cur.Kind {
-	case TokEOF:
-		return nil, newParseError(p.cur.Pos, ErrUnexpectedEOF, "unexpected end of query")
-	case TokOr, TokAnd:
-		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "unexpected keyword %s", p.cur.Lit)
-	case TokRParen:
-		return nil, newParseError(p.cur.Pos, ErrUnmatchedParen, "unmatched closing parenthesis")
-	case TokEq, TokNe, TokGt, TokGte, TokLt, TokLte:
-		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "unexpected '%s'", p.cur.Lit)
+	if err := p.checkPredicateStart(); err != nil {
+		return nil, err
 	}
 
 	// Try expression predicate: when current token is a known scalar function
 	// followed by '(', speculatively parse as pipe_expr <op> value.
-	if p.cur.Kind == TokWord && IsScalarFunc(strings.ToLower(p.cur.Lit)) {
-		peek, peekErr := p.lex.Peek()
-		if peekErr == nil && peek.Kind == TokLParen {
-			if expr, err := p.tryParseExprPredicate(); expr != nil {
-				return expr, err
-			}
-			// Backtracking happened inside tryParseExprPredicate; fall through to normal parsing.
-		}
+	if expr, err := p.tryScalarExprPredicate(); expr != nil || err != nil {
+		return expr, err
 	}
 
 	// Regex predicate: /pattern/
 	if p.cur.Kind == TokRegex {
-		pattern := p.cur.Lit
-		pos := p.cur.Pos
-		re, err := regexp.Compile("(?i)" + pattern)
-		if err != nil {
-			return nil, newParseError(pos, ErrInvalidRegex, "invalid regex /%s/: %v", pattern, err)
-		}
-		if err := p.advance(); err != nil {
-			return nil, err
-		}
-		return &PredicateExpr{Kind: PredRegex, Value: pattern, Pattern: re}, nil
+		return p.parseRegexPredicate()
 	}
 
+	return p.parseTokenOrKV()
+}
+
+// checkPredicateStart returns an error if the current token cannot start a predicate.
+func (p *parser) checkPredicateStart() error {
+	switch p.cur.Kind { //nolint:exhaustive // only listing tokens that are invalid at predicate start
+	case TokEOF:
+		return newParseError(p.cur.Pos, ErrUnexpectedEOF, "unexpected end of query")
+	case TokOr, TokAnd:
+		return newParseError(p.cur.Pos, ErrUnexpectedToken, "unexpected keyword %s", p.cur.Lit)
+	case TokRParen:
+		return newParseError(p.cur.Pos, ErrUnmatchedParen, "unmatched closing parenthesis")
+	case TokEq, TokNe, TokGt, TokGte, TokLt, TokLte:
+		return newParseError(p.cur.Pos, ErrUnexpectedToken, "unexpected '%s'", p.cur.Lit)
+	}
+	return nil
+}
+
+// tryScalarExprPredicate attempts to parse a scalar function expression predicate.
+// Returns (nil, nil) if this is not a scalar expression predicate.
+func (p *parser) tryScalarExprPredicate() (Expr, error) {
+	if p.cur.Kind != TokWord || !IsScalarFunc(strings.ToLower(p.cur.Lit)) {
+		return nil, nil
+	}
+	peek, peekErr := p.lex.Peek()
+	if peekErr != nil || peek.Kind != TokLParen {
+		return nil, nil //nolint:nilerr // peek failure means no match, not an error
+	}
+	if expr, err := p.tryParseExprPredicate(); expr != nil {
+		return expr, err
+	}
+	// Backtracking happened inside tryParseExprPredicate; fall through.
+	return nil, nil
+}
+
+// parseRegexPredicate parses a regex predicate: /pattern/
+func (p *parser) parseRegexPredicate() (Expr, error) {
+	pattern := p.cur.Lit
+	pos := p.cur.Pos
+	re, err := regexp.Compile("(?i)" + pattern)
+	if err != nil {
+		return nil, newParseError(pos, ErrInvalidRegex, "invalid regex /%s/: %v", pattern, err)
+	}
+	if err := p.advance(); err != nil {
+		return nil, err
+	}
+	return &PredicateExpr{Kind: PredRegex, Value: pattern, Pattern: re}, nil
+}
+
+// parseTokenOrKV parses a token, glob, or key-value predicate.
+func (p *parser) parseTokenOrKV() (Expr, error) {
 	// First part: WORD, GLOB, or "*"
 	if p.cur.Kind != TokWord && p.cur.Kind != TokStar && p.cur.Kind != TokGlob {
 		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected word or '*', got %s", p.cur.Kind)
@@ -303,40 +335,35 @@ func (p *parser) parsePredicate() (Expr, error) {
 		return nil, err
 	}
 
-	// Check for comparison operator to distinguish kv_pred from token_pred/glob_pred.
+	// No comparison operator — standalone token or glob.
 	if !p.isCompareOp() {
-		// Standalone token or glob (not allowed to be "*" alone)
-		if first.Kind == TokStar {
-			return nil, newParseError(first.Pos, ErrUnexpectedToken, "'*' must be followed by '='")
-		}
-		if first.Kind == TokGlob {
-			return p.buildGlobPredicate(first)
-		}
-		return &PredicateExpr{Kind: PredToken, Value: first.Lit}, nil
+		return p.buildStandalonePredicate(first)
 	}
 
-	// kv_pred: consume comparison operator.
+	return p.parseKVPredicate(first)
+}
+
+// buildStandalonePredicate creates a token or glob predicate from a standalone word.
+func (p *parser) buildStandalonePredicate(tok Token) (Expr, error) {
+	if tok.Kind == TokStar {
+		return nil, newParseError(tok.Pos, ErrUnexpectedToken, "'*' must be followed by '='")
+	}
+	if tok.Kind == TokGlob {
+		return p.buildGlobPredicate(tok)
+	}
+	return &PredicateExpr{Kind: PredToken, Value: tok.Lit}, nil
+}
+
+// parseKVPredicate parses a key-value predicate after the key and comparison operator.
+func (p *parser) parseKVPredicate(first Token) (Expr, error) {
 	op := p.compareOp()
 	opTok := p.cur
 	if err := p.advance(); err != nil {
 		return nil, err
 	}
 
-	// Non-eq operators restrict what follows: no globs, no stars.
-	if op != OpEq {
-		if p.cur.Kind == TokStar {
-			return nil, newParseError(p.cur.Pos, ErrInvalidCompare, "comparison operator '%s' cannot be used with '*'", opTok.Lit)
-		}
-		if p.cur.Kind == TokGlob {
-			return nil, newParseError(p.cur.Pos, ErrInvalidCompare, "comparison operator '%s' cannot be used with glob patterns", opTok.Lit)
-		}
-		// Also restrict star/glob on the key side.
-		if first.Kind == TokStar {
-			return nil, newParseError(first.Pos, ErrInvalidCompare, "comparison operator '%s' cannot be used with '*' key", opTok.Lit)
-		}
-		if first.Kind == TokGlob {
-			return nil, newParseError(first.Pos, ErrInvalidCompare, "comparison operator '%s' cannot be used with glob key", opTok.Lit)
-		}
+	if err := p.validateCompareOperands(op, opTok, first); err != nil {
+		return nil, err
 	}
 
 	// Second part: WORD, GLOB, or "*"
@@ -355,6 +382,26 @@ func (p *parser) parsePredicate() (Expr, error) {
 	}
 	pred.Op = op
 	return pred, nil
+}
+
+// validateCompareOperands checks that non-eq operators don't use globs or stars.
+func (p *parser) validateCompareOperands(op CompareOp, opTok Token, first Token) error {
+	if op == OpEq {
+		return nil
+	}
+	if p.cur.Kind == TokStar {
+		return newParseError(p.cur.Pos, ErrInvalidCompare, "comparison operator '%s' cannot be used with '*'", opTok.Lit)
+	}
+	if p.cur.Kind == TokGlob {
+		return newParseError(p.cur.Pos, ErrInvalidCompare, "comparison operator '%s' cannot be used with glob patterns", opTok.Lit)
+	}
+	if first.Kind == TokStar {
+		return newParseError(first.Pos, ErrInvalidCompare, "comparison operator '%s' cannot be used with '*' key", opTok.Lit)
+	}
+	if first.Kind == TokGlob {
+		return newParseError(first.Pos, ErrInvalidCompare, "comparison operator '%s' cannot be used with glob key", opTok.Lit)
+	}
+	return nil
 }
 
 // buildGlobPredicate creates a PredGlob from a standalone glob token.
@@ -381,7 +428,7 @@ func (p *parser) tryParseExprPredicate() (Expr, error) {
 	if err != nil {
 		// Parse error in pipe expression — backtrack.
 		p.restore(saved)
-		return nil, nil
+		return nil, nil //nolint:nilerr // parse failure triggers backtrack, not an error
 	}
 
 	// Switch back to filter mode.

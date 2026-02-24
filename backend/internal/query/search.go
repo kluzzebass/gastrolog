@@ -17,6 +17,382 @@ import (
 // positionExhausted is a sentinel value indicating a chunk has been fully consumed.
 const positionExhausted = math.MaxUint64
 
+// storeChunk pairs a store ID with its chunk metadata.
+type storeChunk struct {
+	storeID uuid.UUID
+	meta    chunk.ChunkMeta
+}
+
+// mergeKey uniquely identifies a chunk within a store.
+type mergeKey struct {
+	storeID uuid.UUID
+	chunkID chunk.ChunkID
+}
+
+// activeScanner tracks an open iterator for a chunk during merge operations.
+type activeScanner struct {
+	storeID uuid.UUID
+	chunkID chunk.ChunkID
+	iter    func() (recordWithRef, error, bool)
+	stop    func()
+}
+
+// pendingRecord holds a record collected during Follow polling.
+type pendingRecord struct {
+	storeID uuid.UUID
+	rec     chunk.Record
+	ref     chunk.RecordRef
+}
+
+// mergeState holds shared mutable state for heap-based merge operations.
+// It is used by Search, SearchThenFollow, and their helper methods.
+type mergeState struct {
+	h              heap.Interface
+	scanners       []activeScanner
+	chunkPositions map[mergeKey]uint64
+	lastRefs       *[]MultiStorePosition
+}
+
+// cleanup stops all active scanners.
+func (ms *mergeState) cleanup() {
+	for _, s := range ms.scanners {
+		if s.stop != nil {
+			s.stop()
+		}
+	}
+}
+
+// buildLastRefs populates lastRefs from chunkPositions.
+func (ms *mergeState) buildLastRefs() {
+	refs := make([]MultiStorePosition, 0, len(ms.chunkPositions))
+	for key, pos := range ms.chunkPositions {
+		refs = append(refs, MultiStorePosition{
+			StoreID:  key.storeID,
+			ChunkID:  key.chunkID,
+			Position: pos,
+		})
+	}
+	*ms.lastRefs = refs
+}
+
+// findScanner looks up a scanner by store and chunk ID.
+func (ms *mergeState) findScanner(storeID uuid.UUID, chunkID chunk.ChunkID) *activeScanner {
+	for i := range ms.scanners {
+		if ms.scanners[i].storeID == storeID && ms.scanners[i].chunkID == chunkID {
+			return &ms.scanners[i]
+		}
+	}
+	return nil
+}
+
+// advanceScanner advances the scanner for the given entry, pushing the next
+// record onto the heap or marking the chunk as exhausted.
+// Returns (error, false) if advancing produced an error; (nil, true) otherwise.
+func (ms *mergeState) advanceScanner(entry *cursorEntry) (error, bool) {
+	key := mergeKey{storeID: entry.storeID, chunkID: entry.chunkID}
+	scanner := ms.findScanner(entry.storeID, entry.chunkID)
+	if scanner == nil || scanner.iter == nil {
+		return nil, true
+	}
+
+	rr, err, ok := scanner.iter()
+	if !ok {
+		scanner.stop()
+		scanner.iter = nil
+		scanner.stop = nil
+		ms.chunkPositions[key] = positionExhausted
+		return nil, true
+	}
+	if err != nil {
+		return err, false
+	}
+
+	entry.rec = rr.Record
+	entry.ref = rr.Ref
+	heap.Push(ms.h, entry)
+	return nil, true
+}
+
+// collectStoreChunks gathers chunks from selected stores that overlap the query.
+func (e *Engine) collectStoreChunks(
+	selectedStores []uuid.UUID,
+	q Query,
+	chunkIDs []chunk.ChunkID,
+) ([]storeChunk, error) {
+	var allChunks []storeChunk
+	for _, storeID := range selectedStores {
+		cm, _ := e.getStoreManagers(storeID)
+		if cm == nil {
+			continue
+		}
+
+		metas, err := cm.List()
+		if err != nil {
+			return nil, err
+		}
+
+		candidates := e.selectChunks(metas, q, chunkIDs)
+		for _, meta := range candidates {
+			allChunks = append(allChunks, storeChunk{storeID: storeID, meta: meta})
+		}
+	}
+	return allChunks, nil
+}
+
+// validateResumeToken checks that all non-exhausted positions in the resume
+// token reference chunks that still exist.
+func validateResumeToken(resume *ResumeToken, allChunks []storeChunk) error {
+	if resume == nil || len(resume.Positions) == 0 {
+		return nil
+	}
+
+	available := make(map[chunk.ChunkID]bool, len(allChunks))
+	for _, sc := range allChunks {
+		available[sc.meta.ID] = true
+	}
+
+	for _, pos := range resume.Positions {
+		if pos.Position == positionExhausted {
+			continue
+		}
+		if !available[pos.ChunkID] {
+			return ErrInvalidResumeToken
+		}
+	}
+	return nil
+}
+
+// buildResumePositionMap converts a resume token into a nested map for
+// efficient lookup during heap initialization.
+func buildResumePositionMap(resume *ResumeToken) map[uuid.UUID]map[chunk.ChunkID]uint64 {
+	m := make(map[uuid.UUID]map[chunk.ChunkID]uint64)
+	if resume == nil {
+		return m
+	}
+	for _, pos := range resume.Positions {
+		if m[pos.StoreID] == nil {
+			m[pos.StoreID] = make(map[chunk.ChunkID]uint64)
+		}
+		m[pos.StoreID][pos.ChunkID] = pos.Position
+	}
+	return m
+}
+
+// newMergeHeap creates a heap.Interface appropriate for the query direction.
+func newMergeHeap(reverse bool, capacity int) heap.Interface {
+	if reverse {
+		rh := make(mergeHeapReverse, 0, capacity)
+		return &rh
+	}
+	fh := make(mergeHeap, 0, capacity)
+	return &fh
+}
+
+// lookupResumePosition returns the resume start position for a chunk, if any.
+// Returns nil if no resume position exists. Sets the chunk as exhausted in
+// chunkPositions and returns (nil, true) if the chunk was already exhausted.
+func lookupResumePosition(
+	resumePositions map[uuid.UUID]map[chunk.ChunkID]uint64,
+	sc storeChunk,
+	chunkPositions map[mergeKey]uint64,
+) (startPos *uint64, exhausted bool) {
+	storePositions, ok := resumePositions[sc.storeID]
+	if !ok {
+		return nil, false
+	}
+	pos, ok := storePositions[sc.meta.ID]
+	if !ok {
+		return nil, false
+	}
+	if pos == positionExhausted {
+		chunkPositions[mergeKey{storeID: sc.storeID, chunkID: sc.meta.ID}] = positionExhausted
+		return nil, true
+	}
+	return &pos, false
+}
+
+// resolveStartPosition finds the resume start position for a single chunk
+// from a resume token. Returns nil if no position is found.
+func resolveStartPosition(resume *ResumeToken, storeID uuid.UUID, chunkID chunk.ChunkID) *uint64 {
+	if resume == nil {
+		return nil
+	}
+	for _, pos := range resume.Positions {
+		if pos.StoreID == storeID && pos.ChunkID == chunkID {
+			return &pos.Position
+		}
+	}
+	return nil
+}
+
+// searchSingleChunk handles the fast path when only one chunk matches.
+// It returns (completed, shouldReturn). When shouldReturn is true the
+// caller should return from the yield function.
+func (e *Engine) searchSingleChunk(
+	ctx context.Context,
+	q Query,
+	sc storeChunk,
+	resume *ResumeToken,
+	lastRefs *[]MultiStorePosition,
+	yield func(chunk.Record, error) bool,
+) (completed bool) {
+	startPos := resolveStartPosition(resume, sc.storeID, sc.meta.ID)
+
+	count := 0
+	for rr, err := range e.searchChunkWithRef(ctx, q, sc.storeID, sc.meta, startPos) {
+		if err != nil {
+			*lastRefs = []MultiStorePosition{{StoreID: rr.StoreID, ChunkID: rr.Ref.ChunkID, Position: rr.Ref.Pos}}
+			yield(chunk.Record{}, err)
+			return false
+		}
+
+		*lastRefs = []MultiStorePosition{{StoreID: rr.StoreID, ChunkID: rr.Ref.ChunkID, Position: rr.Ref.Pos}}
+
+		if !yield(rr.record(), nil) {
+			return false
+		}
+
+		count++
+		if q.Limit > 0 && count >= q.Limit {
+			return false
+		}
+	}
+	return true
+}
+
+// primeHeapWithResume opens iterators for each chunk, respecting resume
+// positions, and pushes the first record from each onto the heap.
+// Returns a non-nil error if any iterator fails on its first record.
+func (e *Engine) primeHeapWithResume(
+	ctx context.Context,
+	q Query,
+	allChunks []storeChunk,
+	resumePositions map[uuid.UUID]map[chunk.ChunkID]uint64,
+	ms *mergeState,
+) error {
+	for _, sc := range allChunks {
+		startPos, exhausted := lookupResumePosition(resumePositions, sc, ms.chunkPositions)
+		if exhausted {
+			continue
+		}
+
+		if err := e.openAndPrimeScanner(ctx, q, sc, startPos, ms); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// primeHeap opens iterators for each chunk (no resume) and pushes the first
+// record from each onto the heap. Returns a non-nil error if any iterator
+// fails on its first record.
+func (e *Engine) primeHeap(
+	ctx context.Context,
+	q Query,
+	allChunks []storeChunk,
+	ms *mergeState,
+) error {
+	for _, sc := range allChunks {
+		if err := e.openAndPrimeScanner(ctx, q, sc, nil, ms); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// openAndPrimeScanner opens a single chunk iterator and pushes its first
+// record onto the merge heap. If the chunk is immediately exhausted, it
+// marks it in chunkPositions. Returns error if the first Next() call fails.
+func (e *Engine) openAndPrimeScanner(
+	ctx context.Context,
+	q Query,
+	sc storeChunk,
+	startPos *uint64,
+	ms *mergeState,
+) error {
+	iterSeq := e.searchChunkWithRef(ctx, q, sc.storeID, sc.meta, startPos)
+	next, stop := iter.Pull2(iterSeq)
+
+	rr, err, ok := next()
+	if !ok {
+		stop()
+		ms.chunkPositions[mergeKey{storeID: sc.storeID, chunkID: sc.meta.ID}] = positionExhausted
+		return nil
+	}
+	if err != nil {
+		stop()
+		return err
+	}
+
+	entry := &cursorEntry{
+		storeID: sc.storeID,
+		chunkID: sc.meta.ID,
+		rec:     rr.Record,
+		ref:     rr.Ref,
+	}
+	heap.Push(ms.h, entry)
+
+	ms.scanners = append(ms.scanners, activeScanner{
+		storeID: sc.storeID,
+		chunkID: sc.meta.ID,
+		iter:    next,
+		stop:    stop,
+	})
+	return nil
+}
+
+// mergeLoopResult indicates why the merge loop exited.
+type mergeLoopResult int
+
+const (
+	mergeCompleted   mergeLoopResult = iota // all records consumed
+	mergeStopped                            // yield returned false or limit hit
+	mergeError                              // context error or iterator error
+)
+
+// runMergeLoop pops entries from the heap, yields them, and advances scanners.
+// count is the initial record count (for limit tracking).
+// Returns the final count and the reason the loop exited.
+func runMergeLoop(
+	ctx context.Context,
+	q Query,
+	ms *mergeState,
+	count int,
+	yield func(chunk.Record, error) bool,
+) (int, mergeLoopResult) {
+	for ms.h.Len() > 0 {
+		if err := ctx.Err(); err != nil {
+			ms.buildLastRefs()
+			yield(chunk.Record{}, err)
+			return count, mergeError
+		}
+
+		entry := heap.Pop(ms.h).(*cursorEntry)
+		key := mergeKey{storeID: entry.storeID, chunkID: entry.chunkID}
+		ms.chunkPositions[key] = entry.ref.Pos
+
+		entry.rec.Ref = entry.ref
+		entry.rec.StoreID = entry.storeID
+		if !yield(entry.rec, nil) {
+			ms.buildLastRefs()
+			return count, mergeStopped
+		}
+
+		count++
+		if q.Limit > 0 && count >= q.Limit {
+			ms.buildLastRefs()
+			return count, mergeStopped
+		}
+
+		if err, ok := ms.advanceScanner(entry); !ok {
+			ms.buildLastRefs()
+			yield(chunk.Record{}, err)
+			return count, mergeError
+		}
+	}
+	return count, mergeCompleted
+}
+
 // Search returns an iterator over records matching the query, ordered by ingest timestamp.
 // The iterator yields (record, nil) for each match, or (zero, err) on error.
 // After yielding an error, iteration stops.
@@ -65,29 +441,10 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 			return
 		}
 
-		// Collect all chunks from selected stores with time overlap.
-		type storeChunk struct {
-			storeID uuid.UUID
-			meta    chunk.ChunkMeta
-		}
-		var allChunks []storeChunk
-
-		for _, storeID := range selectedStores {
-			cm, _ := e.getStoreManagers(storeID)
-			if cm == nil {
-				continue
-			}
-
-			metas, err := cm.List()
-			if err != nil {
-				yield(chunk.Record{}, err)
-				return
-			}
-
-			candidates := e.selectChunks(metas, q, chunkIDs)
-			for _, meta := range candidates {
-				allChunks = append(allChunks, storeChunk{storeID: storeID, meta: meta})
-			}
+		allChunks, err := e.collectStoreChunks(selectedStores, q, chunkIDs)
+		if err != nil {
+			yield(chunk.Record{}, err)
+			return
 		}
 
 		if len(allChunks) == 0 {
@@ -96,242 +453,36 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 		}
 
 		// Validate resume token: all referenced chunks must exist.
-		if resume != nil && len(resume.Positions) > 0 {
-			// Build set of available chunk IDs.
-			availableChunks := make(map[chunk.ChunkID]bool)
-			for _, sc := range allChunks {
-				availableChunks[sc.meta.ID] = true
-			}
-
-			// Check each resume position references an existing chunk.
-			for _, pos := range resume.Positions {
-				// Skip exhausted markers - they don't need to exist anymore.
-				if pos.Position == positionExhausted {
-					continue
-				}
-				if !availableChunks[pos.ChunkID] {
-					yield(chunk.Record{}, ErrInvalidResumeToken)
-					return
-				}
-			}
+		if err := validateResumeToken(resume, allChunks); err != nil {
+			yield(chunk.Record{}, err)
+			return
 		}
 
 		// For single chunk, use simple iteration (no heap needed).
 		if len(allChunks) == 1 {
-			sc := allChunks[0]
-			var startPos *uint64
-			if resume != nil {
-				for _, pos := range resume.Positions {
-					if pos.StoreID == sc.storeID && pos.ChunkID == sc.meta.ID {
-						startPos = &pos.Position
-						break
-					}
-				}
-			}
-
-			count := 0
-			for rr, err := range e.searchChunkWithRef(ctx, q, sc.storeID, sc.meta, startPos) {
-				if err != nil {
-					lastRefs = []MultiStorePosition{{StoreID: rr.StoreID, ChunkID: rr.Ref.ChunkID, Position: rr.Ref.Pos}}
-					yield(chunk.Record{}, err)
-					return
-				}
-
-				lastRefs = []MultiStorePosition{{StoreID: rr.StoreID, ChunkID: rr.Ref.ChunkID, Position: rr.Ref.Pos}}
-
-				if !yield(rr.record(), nil) {
-					return
-				}
-
-				count++
-				if q.Limit > 0 && count >= q.Limit {
-					return
-				}
-			}
-			completed = true
+			completed = e.searchSingleChunk(ctx, q, allChunks[0], resume, &lastRefs, yield)
 			return
 		}
 
 		// Multiple chunks: use heap-based merge sort.
-		// Build resume position map for quick lookup.
-		resumePositions := make(map[uuid.UUID]map[chunk.ChunkID]uint64)
-		if resume != nil {
-			for _, pos := range resume.Positions {
-				if resumePositions[pos.StoreID] == nil {
-					resumePositions[pos.StoreID] = make(map[chunk.ChunkID]uint64)
-				}
-				resumePositions[pos.StoreID][pos.ChunkID] = pos.Position
-			}
+		resumePositions := buildResumePositionMap(resume)
+
+		ms := &mergeState{
+			h:              newMergeHeap(q.Reverse(), len(allChunks)),
+			chunkPositions: make(map[mergeKey]uint64),
+			lastRefs:       &lastRefs,
+		}
+		defer ms.cleanup()
+
+		if err := e.primeHeapWithResume(ctx, q, allChunks, resumePositions, ms); err != nil {
+			yield(chunk.Record{}, err)
+			return
 		}
 
-		// Track current position for ALL chunks (for resume token).
-		// Position is updated as records are yielded, or set to positionExhausted when done.
-		type chunkKey struct {
-			storeID uuid.UUID
-			chunkID chunk.ChunkID
+		_, result := runMergeLoop(ctx, q, ms, 0, yield)
+		if result == mergeCompleted {
+			completed = true
 		}
-		chunkPositions := make(map[chunkKey]uint64)
-
-		// Initialize heap with first record from each chunk.
-		var h heap.Interface
-		if q.Reverse() {
-			rh := make(mergeHeapReverse, 0, len(allChunks))
-			h = &rh
-		} else {
-			fh := make(mergeHeap, 0, len(allChunks))
-			h = &fh
-		}
-
-		// Track active cursors for cleanup.
-		type activeScanner struct {
-			storeID uuid.UUID
-			chunkID chunk.ChunkID
-			iter    func() (recordWithRef, error, bool)
-			stop    func()
-		}
-		var activeScanners []activeScanner
-		defer func() {
-			for _, s := range activeScanners {
-				if s.stop != nil {
-					s.stop()
-				}
-			}
-		}()
-
-		// Open iterators for each chunk and prime the heap.
-		for _, sc := range allChunks {
-			key := chunkKey{storeID: sc.storeID, chunkID: sc.meta.ID}
-
-			// Check if this chunk was already exhausted in a previous iteration.
-			if storePositions, ok := resumePositions[sc.storeID]; ok {
-				if pos, ok := storePositions[sc.meta.ID]; ok && pos == positionExhausted {
-					// Chunk was exhausted, mark it and skip.
-					chunkPositions[key] = positionExhausted
-					continue
-				}
-			}
-
-			var startPos *uint64
-			if storePositions, ok := resumePositions[sc.storeID]; ok {
-				if pos, ok := storePositions[sc.meta.ID]; ok {
-					startPos = &pos
-				}
-			}
-
-			// Create iterator for this chunk.
-			iterSeq := e.searchChunkWithRef(ctx, q, sc.storeID, sc.meta, startPos)
-			next, stop := iter.Pull2(iterSeq)
-
-			// Get first record.
-			rr, err, ok := next()
-			if !ok {
-				stop()
-				// Chunk is exhausted from the start.
-				chunkPositions[key] = positionExhausted
-				continue
-			}
-			if err != nil {
-				stop()
-				yield(chunk.Record{}, err)
-				return
-			}
-
-			// Note: we don't initialize chunkPositions here because the record
-			// hasn't been yielded yet. Position is only set when we yield.
-
-			entry := &cursorEntry{
-				storeID: sc.storeID,
-				chunkID: sc.meta.ID,
-				rec:     rr.Record,
-				ref:     rr.Ref,
-			}
-			heap.Push(h, entry)
-
-			activeScanners = append(activeScanners, activeScanner{
-				storeID: sc.storeID,
-				chunkID: sc.meta.ID,
-				iter:    next,
-				stop:    stop,
-			})
-		}
-
-		// Helper to build resume token from current positions.
-		buildLastRefs := func() {
-			lastRefs = nil
-			for key, pos := range chunkPositions {
-				lastRefs = append(lastRefs, MultiStorePosition{
-					StoreID:  key.storeID,
-					ChunkID:  key.chunkID,
-					Position: pos,
-				})
-			}
-		}
-
-		// Find scanner by storeID and chunkID.
-		findScanner := func(storeID uuid.UUID, chunkID chunk.ChunkID) *activeScanner {
-			for i := range activeScanners {
-				if activeScanners[i].storeID == storeID && activeScanners[i].chunkID == chunkID {
-					return &activeScanners[i]
-				}
-			}
-			return nil
-		}
-
-		// Merge loop.
-		count := 0
-		for h.Len() > 0 {
-			if err := ctx.Err(); err != nil {
-				buildLastRefs()
-				yield(chunk.Record{}, err)
-				return
-			}
-
-			entry := heap.Pop(h).(*cursorEntry)
-			key := chunkKey{storeID: entry.storeID, chunkID: entry.chunkID}
-
-			// Update position for this chunk.
-			chunkPositions[key] = entry.ref.Pos
-
-			entry.rec.Ref = entry.ref
-			entry.rec.StoreID = entry.storeID
-			if !yield(entry.rec, nil) {
-				buildLastRefs()
-				return
-			}
-
-			count++
-			if q.Limit > 0 && count >= q.Limit {
-				buildLastRefs()
-				return
-			}
-
-			// Advance this scanner.
-			scanner := findScanner(entry.storeID, entry.chunkID)
-			if scanner == nil || scanner.iter == nil {
-				continue
-			}
-
-			rr, err, ok := scanner.iter()
-			if !ok {
-				scanner.stop()
-				scanner.iter = nil
-				scanner.stop = nil
-				// Mark chunk as exhausted.
-				chunkPositions[key] = positionExhausted
-				continue
-			}
-			if err != nil {
-				buildLastRefs()
-				yield(chunk.Record{}, err)
-				return
-			}
-
-			entry.rec = rr.Record
-			entry.ref = rr.Ref
-			heap.Push(h, entry)
-		}
-
-		completed = true
 	}
 
 	nextToken := func() *ResumeToken {
@@ -379,29 +530,10 @@ func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeTo
 			return
 		}
 
-		// Collect all chunks from selected stores with time overlap.
-		type storeChunk struct {
-			storeID uuid.UUID
-			meta    chunk.ChunkMeta
-		}
-		var allChunks []storeChunk
-
-		for _, storeID := range selectedStores {
-			cm, _ := e.getStoreManagers(storeID)
-			if cm == nil {
-				continue
-			}
-
-			metas, err := cm.List()
-			if err != nil {
-				yield(chunk.Record{}, err)
-				return
-			}
-
-			candidates := e.selectChunks(metas, q, chunkIDs)
-			for _, meta := range candidates {
-				allChunks = append(allChunks, storeChunk{storeID: storeID, meta: meta})
-			}
+		allChunks, err := e.collectStoreChunks(selectedStores, q, chunkIDs)
+		if err != nil {
+			yield(chunk.Record{}, err)
+			return
 		}
 
 		if len(allChunks) == 0 {
@@ -413,251 +545,53 @@ func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeTo
 		followQuery := q
 		followQuery.BoolExpr = nil
 
-		// Track current position for ALL chunks (for resume token).
-		type chunkKey struct {
-			storeID uuid.UUID
-			chunkID chunk.ChunkID
+		ms := &mergeState{
+			h:              newMergeHeap(q.Reverse(), len(allChunks)),
+			chunkPositions: make(map[mergeKey]uint64),
+			lastRefs:       &lastRefs,
 		}
-		chunkPositions := make(map[chunkKey]uint64)
+		defer ms.cleanup()
 
-		// Helper to build resume token from current positions.
-		buildLastRefs := func() {
-			lastRefs = nil
-			for key, pos := range chunkPositions {
-				lastRefs = append(lastRefs, MultiStorePosition{
-					StoreID:  key.storeID,
-					ChunkID:  key.chunkID,
-					Position: pos,
-				})
-			}
+		// Phase 1: Find the first match using filtered query.
+		if err := e.primeHeap(ctx, q, allChunks, ms); err != nil {
+			yield(chunk.Record{}, err)
+			return
 		}
 
-		// Track active cursors for cleanup.
-		type activeScanner struct {
-			storeID uuid.UUID
-			chunkID chunk.ChunkID
-			iter    func() (recordWithRef, error, bool)
-			stop    func()
-		}
-		var activeScanners []activeScanner
-		defer func() {
-			for _, s := range activeScanners {
-				if s.stop != nil {
-					s.stop()
-				}
-			}
-		}()
-
-		// Find scanner by storeID and chunkID.
-		findScanner := func(storeID uuid.UUID, chunkID chunk.ChunkID) *activeScanner {
-			for i := range activeScanners {
-				if activeScanners[i].storeID == storeID && activeScanners[i].chunkID == chunkID {
-					return &activeScanners[i]
-				}
-			}
-			return nil
-		}
-
-		// Initialize heap with first record from each chunk (using filtered query).
-		var h heap.Interface
-		if q.Reverse() {
-			rh := make(mergeHeapReverse, 0, len(allChunks))
-			h = &rh
-		} else {
-			fh := make(mergeHeap, 0, len(allChunks))
-			h = &fh
-		}
-
-		// Open iterators for each chunk and prime the heap.
-		for _, sc := range allChunks {
-			iterSeq := e.searchChunkWithRef(ctx, q, sc.storeID, sc.meta, nil)
-			next, stop := iter.Pull2(iterSeq)
-
-			rr, err, ok := next()
-			if !ok {
-				stop()
-				continue
-			}
-			if err != nil {
-				stop()
-				yield(chunk.Record{}, err)
-				return
-			}
-
-			entry := &cursorEntry{
-				storeID: sc.storeID,
-				chunkID: sc.meta.ID,
-				rec:     rr.Record,
-				ref:     rr.Ref,
-			}
-			heap.Push(h, entry)
-
-			activeScanners = append(activeScanners, activeScanner{
-				storeID: sc.storeID,
-				chunkID: sc.meta.ID,
-				iter:    next,
-				stop:    stop,
-			})
-		}
-
-		if h.Len() == 0 {
+		if ms.h.Len() == 0 {
 			// No matches found.
 			completed = true
 			return
 		}
 
-		// Phase 1: Pop the first match from heap (oldest/newest depending on direction).
-		firstMatch := heap.Pop(h).(*cursorEntry)
-		key := chunkKey{storeID: firstMatch.storeID, chunkID: firstMatch.chunkID}
-		chunkPositions[key] = firstMatch.ref.Pos
+		// Pop the first match from heap (oldest/newest depending on direction).
+		firstMatch := heap.Pop(ms.h).(*cursorEntry)
+		key := mergeKey{storeID: firstMatch.storeID, chunkID: firstMatch.chunkID}
+		ms.chunkPositions[key] = firstMatch.ref.Pos
 
 		if !yield(firstMatch.rec, nil) {
-			buildLastRefs()
+			ms.buildLastRefs()
 			return
 		}
 
 		count := 1
 		if q.Limit > 0 && count >= q.Limit {
-			buildLastRefs()
+			ms.buildLastRefs()
 			return
 		}
 
-		// Phase 2: Follow mode - switch all scanners to unfiltered query and continue merge.
-		// Close all existing scanners.
-		for _, s := range activeScanners {
-			if s.stop != nil {
-				s.stop()
-			}
-		}
-		activeScanners = nil
-
-		// Clear heap.
-		for h.Len() > 0 {
-			heap.Pop(h)
-		}
-
-		// For follow mode, we need to continue from the first match's position.
-		// - For the chunk containing the first match: start from position+1
-		// - For other chunks: they need to start from a position with IngestTS > firstMatch.IngestTS
-		//   We use time-based filtering by adjusting followQuery.Start
-		firstMatchTS := firstMatch.rec.IngestTS
-
-		// Reopen iterators for ALL chunks with follow query (no filters), starting appropriately.
-		for _, sc := range allChunks {
-			key := chunkKey{storeID: sc.storeID, chunkID: sc.meta.ID}
-
-			var startPos *uint64
-			if key.storeID == firstMatch.storeID && key.chunkID == firstMatch.chunkID {
-				// This chunk had the first match - start from the match position.
-				// searchChunkWithRef will skip this position (since startPos means "already returned"),
-				// so we pass the match position itself, not position+1.
-				startPos = &firstMatch.ref.Pos
-			}
-			// For other chunks, we'll rely on the heap to filter by timestamp.
-			// All chunks are iterated from start, but only records after firstMatchTS will be yielded.
-
-			iterSeq := e.searchChunkWithRef(ctx, followQuery, sc.storeID, sc.meta, startPos)
-			next, stop := iter.Pull2(iterSeq)
-
-			// Skip records until we find one with IngestTS > firstMatchTS (for non-match chunks).
-			var rr recordWithRef
-			var err error
-			var ok bool
-			for {
-				rr, err, ok = next()
-				if !ok {
-					stop()
-					chunkPositions[key] = positionExhausted
-					break
-				}
-				if err != nil {
-					stop()
-					buildLastRefs()
-					yield(chunk.Record{}, err)
-					return
-				}
-				// For the first-match chunk, we already skipped past the match.
-				// For other chunks, skip records at or before firstMatchTS.
-				if key.storeID == firstMatch.storeID && key.chunkID == firstMatch.chunkID {
-					break // Don't skip - we're already positioned correctly.
-				}
-				if rr.Record.IngestTS.After(firstMatchTS) {
-					break // Found a record after the first match.
-				}
-				// Continue to next record.
-			}
-
-			if !ok {
-				continue
-			}
-
-			entry := &cursorEntry{
-				storeID: sc.storeID,
-				chunkID: sc.meta.ID,
-				rec:     rr.Record,
-				ref:     rr.Ref,
-			}
-			heap.Push(h, entry)
-
-			activeScanners = append(activeScanners, activeScanner{
-				storeID: sc.storeID,
-				chunkID: sc.meta.ID,
-				iter:    next,
-				stop:    stop,
-			})
+		// Phase 2: Follow mode - switch all scanners to unfiltered query.
+		if err := e.reopenFollowScanners(ctx, followQuery, allChunks, firstMatch, ms); err != nil {
+			ms.buildLastRefs()
+			yield(chunk.Record{}, err)
+			return
 		}
 
 		// Merge loop for follow phase.
-		for h.Len() > 0 {
-			if err := ctx.Err(); err != nil {
-				buildLastRefs()
-				yield(chunk.Record{}, err)
-				return
-			}
-
-			entry := heap.Pop(h).(*cursorEntry)
-			key := chunkKey{storeID: entry.storeID, chunkID: entry.chunkID}
-			chunkPositions[key] = entry.ref.Pos
-
-			entry.rec.Ref = entry.ref
-			entry.rec.StoreID = entry.storeID
-			if !yield(entry.rec, nil) {
-				buildLastRefs()
-				return
-			}
-
-			count++
-			if q.Limit > 0 && count >= q.Limit {
-				buildLastRefs()
-				return
-			}
-
-			// Advance this scanner.
-			scanner := findScanner(entry.storeID, entry.chunkID)
-			if scanner == nil || scanner.iter == nil {
-				continue
-			}
-
-			rr, err, ok := scanner.iter()
-			if !ok {
-				scanner.stop()
-				scanner.iter = nil
-				scanner.stop = nil
-				chunkPositions[key] = positionExhausted
-				continue
-			}
-			if err != nil {
-				buildLastRefs()
-				yield(chunk.Record{}, err)
-				return
-			}
-
-			entry.rec = rr.Record
-			entry.ref = rr.Ref
-			heap.Push(h, entry)
+		_, result := runMergeLoop(ctx, q, ms, count, yield)
+		if result == mergeCompleted {
+			completed = true
 		}
-
-		completed = true
 	}
 
 	nextToken := func() *ResumeToken {
@@ -668,6 +602,105 @@ func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeTo
 	}
 
 	return seq, nextToken
+}
+
+// reopenFollowScanners closes all existing scanners and reopens them with
+// an unfiltered query, positioned after the first match. Used by SearchThenFollow
+// to transition from the search phase to the follow phase.
+func (e *Engine) reopenFollowScanners(
+	ctx context.Context,
+	followQuery Query,
+	allChunks []storeChunk,
+	firstMatch *cursorEntry,
+	ms *mergeState,
+) error {
+	// Close all existing scanners.
+	ms.cleanup()
+	ms.scanners = nil
+
+	// Clear heap.
+	for ms.h.Len() > 0 {
+		heap.Pop(ms.h)
+	}
+
+	firstMatchTS := firstMatch.rec.IngestTS
+
+	for _, sc := range allChunks {
+		key := mergeKey{storeID: sc.storeID, chunkID: sc.meta.ID}
+		isFirstMatchChunk := key.storeID == firstMatch.storeID && key.chunkID == firstMatch.chunkID
+
+		var startPos *uint64
+		if isFirstMatchChunk {
+			// This chunk had the first match - start from the match position.
+			// searchChunkWithRef will skip this position (since startPos means "already returned"),
+			// so we pass the match position itself, not position+1.
+			startPos = &firstMatch.ref.Pos
+		}
+
+		rr, next, stop, ok, err := e.seekFollowPosition(ctx, followQuery, sc, startPos, isFirstMatchChunk, firstMatchTS)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			ms.chunkPositions[key] = positionExhausted
+			continue
+		}
+
+		entry := &cursorEntry{
+			storeID: sc.storeID,
+			chunkID: sc.meta.ID,
+			rec:     rr.Record,
+			ref:     rr.Ref,
+		}
+		heap.Push(ms.h, entry)
+
+		ms.scanners = append(ms.scanners, activeScanner{
+			storeID: sc.storeID,
+			chunkID: sc.meta.ID,
+			iter:    next,
+			stop:    stop,
+		})
+	}
+	return nil
+}
+
+// seekFollowPosition opens an iterator for a chunk in follow mode and
+// advances it past records at or before firstMatchTS (for non-first-match chunks).
+// Returns the first valid record, the pull iterator functions, and whether
+// a valid record was found.
+func (e *Engine) seekFollowPosition(
+	ctx context.Context,
+	followQuery Query,
+	sc storeChunk,
+	startPos *uint64,
+	isFirstMatchChunk bool,
+	firstMatchTS time.Time,
+) (recordWithRef, func() (recordWithRef, error, bool), func(), bool, error) {
+	iterSeq := e.searchChunkWithRef(ctx, followQuery, sc.storeID, sc.meta, startPos)
+	next, stop := iter.Pull2(iterSeq)
+
+	for {
+		rr, err, ok := next()
+		if !ok {
+			stop()
+			return recordWithRef{}, nil, nil, false, nil
+		}
+		if err != nil {
+			stop()
+			return recordWithRef{}, nil, nil, false, err
+		}
+
+		// For the first-match chunk, we're already positioned correctly.
+		if isFirstMatchChunk {
+			return rr, next, stop, true, nil
+		}
+
+		// For other chunks, skip records at or before firstMatchTS.
+		if rr.Record.IngestTS.After(firstMatchTS) {
+			return rr, next, stop, true, nil
+		}
+		// Continue to next record.
+	}
 }
 
 // Follow tails records from all stores, waiting for new arrivals.
@@ -688,187 +721,229 @@ func (e *Engine) Follow(ctx context.Context, q Query) iter.Seq2[chunk.Record, er
 	q.BoolExpr = remainingExpr
 
 	return func(yield func(chunk.Record, error) bool) {
-		// Track last seen position per store+chunk.
-		type chunkKey struct {
-			storeID uuid.UUID
-			chunkID chunk.ChunkID
-		}
-		lastPositions := make(map[chunkKey]uint64)
-		knownStores := make(map[uuid.UUID]bool)
-
-		// initStorePositions marks all existing chunks in a store as seen,
-		// so Follow only yields records that arrive after this point.
-		initStorePositions := func(storeID uuid.UUID) {
-			cm, _ := e.getStoreManagers(storeID)
-			if cm == nil {
-				return
-			}
-			metas, err := cm.List()
-			if err != nil {
-				return
-			}
-			for _, meta := range metas {
-				key := chunkKey{storeID: storeID, chunkID: meta.ID}
-				if meta.Sealed {
-					lastPositions[key] = positionExhausted
-				} else {
-					cursor, err := cm.OpenCursor(meta.ID)
-					if err != nil {
-						continue
-					}
-					hasRecords := false
-					var lastPos uint64
-					for {
-						_, ref, err := cursor.Next()
-						if err != nil {
-							break
-						}
-						hasRecords = true
-						lastPos = ref.Pos
-					}
-					cursor.Close()
-					if hasRecords {
-						lastPositions[key] = lastPos
-					}
-				}
-			}
-			knownStores[storeID] = true
-		}
-
-		// resolveStores returns the stores to poll this iteration.
-		// When no store= predicate exists, it re-evaluates the live store
-		// list each call, initializing positions for any newly discovered store.
-		resolveStores := func() []uuid.UUID {
-			if storeFilter != nil {
-				// Explicit store= predicate: fixed set, but still init new ones.
-				for _, id := range storeFilter {
-					if !knownStores[id] {
-						initStorePositions(id)
-					}
-				}
-				return storeFilter
-			}
-			// No predicate: follow all current stores.
-			all := e.listStores()
-			for _, id := range all {
-				if !knownStores[id] {
-					initStorePositions(id)
-				}
-			}
-			return all
+		fs := &followState{
+			engine:        e,
+			q:             q,
+			storeFilter:   storeFilter,
+			lastPositions: make(map[mergeKey]uint64),
+			knownStores:   make(map[uuid.UUID]bool),
 		}
 
 		// Initialize positions for stores that exist right now.
-		resolveStores()
+		fs.resolveStores()
 
-		// Poll interval for new records.
-		const pollInterval = 100 * time.Millisecond
+		fs.pollLoop(ctx, yield)
+	}
+}
 
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
+// followState holds mutable state for the Follow polling loop.
+type followState struct {
+	engine        *Engine
+	q             Query
+	storeFilter   []uuid.UUID
+	lastPositions map[mergeKey]uint64
+	knownStores   map[uuid.UUID]bool
+}
 
-			// Re-resolve stores each iteration to pick up adds/removes.
-			selectedStores := resolveStores()
+// initStorePositions marks all existing chunks in a store as seen,
+// so Follow only yields records that arrive after this point.
+func (fs *followState) initStorePositions(storeID uuid.UUID) {
+	cm, _ := fs.engine.getStoreManagers(storeID)
+	if cm == nil {
+		return
+	}
+	metas, err := cm.List()
+	if err != nil {
+		return
+	}
+	for _, meta := range metas {
+		key := mergeKey{storeID: storeID, chunkID: meta.ID}
+		if meta.Sealed {
+			fs.lastPositions[key] = positionExhausted
+			continue
+		}
+		fs.initActiveChunkPosition(cm, storeID, meta)
+	}
+	fs.knownStores[storeID] = true
+}
 
-			// Collect records from all stores since last positions.
-			type pendingRecord struct {
-				storeID uuid.UUID
-				rec     chunk.Record
-				ref     chunk.RecordRef
-			}
-			var pending []pendingRecord
+// initActiveChunkPosition scans an active (unsealed) chunk to find the last
+// record position, so Follow starts from after existing records.
+func (fs *followState) initActiveChunkPosition(cm chunk.ChunkManager, storeID uuid.UUID, meta chunk.ChunkMeta) {
+	cursor, err := cm.OpenCursor(meta.ID)
+	if err != nil {
+		return
+	}
+	defer func() { _ = cursor.Close() }()
 
-			for _, storeID := range selectedStores {
-				cm, _ := e.getStoreManagers(storeID)
-				if cm == nil {
-					continue
-				}
+	hasRecords := false
+	var lastPos uint64
+	for {
+		_, ref, err := cursor.Next()
+		if err != nil {
+			break
+		}
+		hasRecords = true
+		lastPos = ref.Pos
+	}
+	if hasRecords {
+		fs.lastPositions[mergeKey{storeID: storeID, chunkID: meta.ID}] = lastPos
+	}
+}
 
-				// Get all chunks (including active).
-				metas, err := cm.List()
-				if err != nil {
-					if !yield(chunk.Record{}, err) {
-						return
-					}
-					continue
-				}
-
-				for _, meta := range metas {
-					key := chunkKey{storeID: storeID, chunkID: meta.ID}
-
-					// Skip exhausted chunks (sealed chunks we've already processed).
-					if lastPos, ok := lastPositions[key]; ok && lastPos == positionExhausted {
-						continue
-					}
-
-					cursor, err := cm.OpenCursor(meta.ID)
-					if err != nil {
-						continue
-					}
-
-					// Seek past already-seen records.
-					if lastPos, ok := lastPositions[key]; ok {
-						if err := cursor.Seek(chunk.RecordRef{ChunkID: meta.ID, Pos: lastPos}); err != nil {
-							cursor.Close()
-							continue
-						}
-						// Skip the record at lastPos (already yielded).
-						if _, _, err := cursor.Next(); err != nil {
-							cursor.Close()
-							continue
-						}
-					}
-
-					// Read new records.
-					for {
-						rec, ref, err := cursor.Next()
-						if err != nil {
-							break // ErrNoMoreRecords or other error
-						}
-
-						// Apply query filter if present.
-						if q.BoolExpr != nil && !e.matchesFilter(rec, q) {
-							lastPositions[key] = ref.Pos
-							continue
-						}
-
-						pending = append(pending, pendingRecord{
-							storeID: storeID,
-							rec:     rec,
-							ref:     ref,
-						})
-						lastPositions[key] = ref.Pos
-					}
-					cursor.Close()
-				}
-			}
-
-			// Sort pending records by IngestTS.
-			slices.SortFunc(pending, func(a, b pendingRecord) int {
-				return a.rec.IngestTS.Compare(b.rec.IngestTS)
-			})
-
-			// Yield sorted records.
-			for _, p := range pending {
-				p.rec.Ref = p.ref
-				p.rec.StoreID = p.storeID
-				if !yield(p.rec, nil) {
-					return
-				}
-			}
-
-			// Wait before polling again.
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(pollInterval):
-			}
+// resolveStores returns the stores to poll this iteration.
+// When no store= predicate exists, it re-evaluates the live store
+// list each call, initializing positions for any newly discovered store.
+func (fs *followState) resolveStores() []uuid.UUID {
+	stores := fs.storeFilter
+	if stores == nil {
+		stores = fs.engine.listStores()
+	}
+	for _, id := range stores {
+		if !fs.knownStores[id] {
+			fs.initStorePositions(id)
 		}
 	}
+	return stores
+}
+
+// pollLoop is the main Follow polling loop. It repeatedly collects new
+// records from all stores, sorts them by timestamp, and yields them.
+func (fs *followState) pollLoop(ctx context.Context, yield func(chunk.Record, error) bool) {
+	const pollInterval = 100 * time.Millisecond
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		selectedStores := fs.resolveStores()
+
+		pending := fs.collectNewRecords(selectedStores, yield)
+		if pending == nil {
+			// yield returned false during error handling; caller wants to stop.
+			return
+		}
+
+		slices.SortFunc(pending, func(a, b pendingRecord) int {
+			return a.rec.IngestTS.Compare(b.rec.IngestTS)
+		})
+
+		if !fs.yieldPending(pending, yield) {
+			return
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(pollInterval):
+		}
+	}
+}
+
+// collectNewRecords scans all selected stores for records newer than
+// the last seen positions. Returns nil if yield returned false (caller stop).
+func (fs *followState) collectNewRecords(
+	selectedStores []uuid.UUID,
+	yield func(chunk.Record, error) bool,
+) []pendingRecord {
+	var pending []pendingRecord
+
+	for _, storeID := range selectedStores {
+		cm, _ := fs.engine.getStoreManagers(storeID)
+		if cm == nil {
+			continue
+		}
+
+		metas, err := cm.List()
+		if err != nil {
+			if !yield(chunk.Record{}, err) {
+				return nil
+			}
+			continue
+		}
+
+		for _, meta := range metas {
+			fs.collectChunkRecords(cm, storeID, meta, &pending)
+		}
+	}
+	return pending
+}
+
+// collectChunkRecords reads new records from a single chunk, appending
+// them to pending. Records already seen (based on lastPositions) are skipped.
+func (fs *followState) collectChunkRecords(
+	cm chunk.ChunkManager,
+	storeID uuid.UUID,
+	meta chunk.ChunkMeta,
+	pending *[]pendingRecord,
+) {
+	key := mergeKey{storeID: storeID, chunkID: meta.ID}
+
+	if lastPos, ok := fs.lastPositions[key]; ok && lastPos == positionExhausted {
+		return
+	}
+
+	cursor, err := cm.OpenCursor(meta.ID)
+	if err != nil {
+		return
+	}
+	defer func() { _ = cursor.Close() }()
+
+	if !fs.seekPastSeen(cursor, key, meta.ID) {
+		return
+	}
+
+	for {
+		rec, ref, err := cursor.Next()
+		if err != nil {
+			break
+		}
+
+		if fs.q.BoolExpr != nil && !fs.engine.matchesFilter(rec, fs.q) {
+			fs.lastPositions[key] = ref.Pos
+			continue
+		}
+
+		*pending = append(*pending, pendingRecord{
+			storeID: storeID,
+			rec:     rec,
+			ref:     ref,
+		})
+		fs.lastPositions[key] = ref.Pos
+	}
+}
+
+// seekPastSeen positions the cursor past already-seen records.
+// Returns false if the cursor could not be positioned (should skip this chunk).
+func (fs *followState) seekPastSeen(cursor chunk.RecordCursor, key mergeKey, chunkID chunk.ChunkID) bool {
+	lastPos, ok := fs.lastPositions[key]
+	if !ok {
+		return true
+	}
+	if err := cursor.Seek(chunk.RecordRef{ChunkID: chunkID, Pos: lastPos}); err != nil {
+		return false
+	}
+	// Skip the record at lastPos (already yielded).
+	if _, _, err := cursor.Next(); err != nil {
+		return false
+	}
+	return true
+}
+
+// yieldPending yields sorted pending records. Returns false if yield
+// returned false (caller wants to stop).
+func (fs *followState) yieldPending(pending []pendingRecord, yield func(chunk.Record, error) bool) bool {
+	for _, p := range pending {
+		p.rec.Ref = p.ref
+		p.rec.StoreID = p.storeID
+		if !yield(p.rec, nil) {
+			return false
+		}
+	}
+	return true
 }
 
 // matchesFilter checks if a record matches the query's boolean expression.
@@ -929,85 +1004,22 @@ func (e *Engine) SearchWithContext(ctx context.Context, q Query) (iter.Seq2[chun
 			return a.StartTS.Compare(b.StartTS)
 		})
 
-		count := 0
+		cs := &contextSearchState{
+			engine:       e,
+			ctx:          ctx,
+			q:            q,
+			allChunksAsc: allChunksAsc,
+			nextRef:      &nextRef,
+		}
+
 		for _, meta := range allChunks {
 			if err := ctx.Err(); err != nil {
 				yield(chunk.Record{}, err)
 				return
 			}
 
-			for rr, err := range e.searchChunkWithRef(ctx, q, uuid.UUID{}, meta, nil) {
-				if err != nil {
-					nextRef = &rr.Ref
-					yield(chunk.Record{}, err)
-					return
-				}
-
-				// Gather context before (in iteration order).
-				// For forward: before = chronologically older records
-				// For reverse: before = chronologically newer records
-				if q.ContextBefore > 0 {
-					var beforeRecs []chunk.Record
-					var err error
-					if q.Reverse() {
-						// In reverse mode, "before" in iteration order means chronologically after.
-						beforeRecs, err = e.gatherContextAfter(ctx, allChunksAsc, rr.Ref, q.ContextBefore, true)
-					} else {
-						beforeRecs, err = e.gatherContextBefore(ctx, allChunksAsc, rr.Ref, q.ContextBefore, false)
-					}
-					if err != nil {
-						yield(chunk.Record{}, err)
-						return
-					}
-					for _, rec := range beforeRecs {
-						if !yield(rec, nil) {
-							nextRef = &rr.Ref
-							return
-						}
-						count++
-						if q.Limit > 0 && count >= q.Limit {
-							nextRef = &rr.Ref
-							return
-						}
-					}
-				}
-
-				// Yield the match.
-				nextRef = &rr.Ref
-				if !yield(rr.record(), nil) {
-					return
-				}
-				count++
-				if q.Limit > 0 && count >= q.Limit {
-					return
-				}
-
-				// Gather context after (in iteration order).
-				// For forward: after = chronologically newer records
-				// For reverse: after = chronologically older records
-				if q.ContextAfter > 0 {
-					var afterRecs []chunk.Record
-					var err error
-					if q.Reverse() {
-						// In reverse mode, "after" in iteration order means chronologically before.
-						afterRecs, err = e.gatherContextBefore(ctx, allChunksAsc, rr.Ref, q.ContextAfter, true)
-					} else {
-						afterRecs, err = e.gatherContextAfter(ctx, allChunksAsc, rr.Ref, q.ContextAfter, false)
-					}
-					if err != nil {
-						yield(chunk.Record{}, err)
-						return
-					}
-					for _, rec := range afterRecs {
-						if !yield(rec, nil) {
-							return
-						}
-						count++
-						if q.Limit > 0 && count >= q.Limit {
-							return
-						}
-					}
-				}
+			if !cs.processChunk(meta, yield) {
+				return
 			}
 		}
 
@@ -1022,4 +1034,142 @@ func (e *Engine) SearchWithContext(ctx context.Context, q Query) (iter.Seq2[chun
 	}
 
 	return seq, nextToken
+}
+
+// contextSearchState holds mutable state for SearchWithContext's inner loop.
+type contextSearchState struct {
+	engine       *Engine
+	ctx          context.Context
+	q            Query
+	allChunksAsc []chunk.ChunkMeta
+	nextRef      **chunk.RecordRef
+	count        int
+}
+
+// processChunk iterates over matches in a single chunk, yielding each match
+// with its surrounding context records. Returns false if iteration should stop.
+func (cs *contextSearchState) processChunk(meta chunk.ChunkMeta, yield func(chunk.Record, error) bool) bool {
+	for rr, err := range cs.engine.searchChunkWithRef(cs.ctx, cs.q, uuid.UUID{}, meta, nil) {
+		if err != nil {
+			*cs.nextRef = &rr.Ref
+			yield(chunk.Record{}, err)
+			return false
+		}
+
+		n, stopped := cs.engine.yieldContextBefore(cs.ctx, cs.q, cs.allChunksAsc, rr, cs.count, cs.nextRef, yield)
+		if stopped {
+			return false
+		}
+		cs.count = n
+
+		*cs.nextRef = &rr.Ref
+		if !yield(rr.record(), nil) {
+			return false
+		}
+		cs.count++
+		if cs.q.Limit > 0 && cs.count >= cs.q.Limit {
+			return false
+		}
+
+		n, stopped = cs.engine.yieldContextAfter(cs.ctx, cs.q, cs.allChunksAsc, rr, cs.count, yield)
+		if stopped {
+			return false
+		}
+		cs.count = n
+	}
+	return true
+}
+
+// yieldContextBefore gathers and yields context records before a match.
+// Returns the updated count and whether iteration should stop.
+func (e *Engine) yieldContextBefore(
+	ctx context.Context,
+	q Query,
+	allChunksAsc []chunk.ChunkMeta,
+	rr recordWithRef,
+	count int,
+	nextRef **chunk.RecordRef,
+	yield func(chunk.Record, error) bool,
+) (int, bool) {
+	if q.ContextBefore <= 0 {
+		return count, false
+	}
+
+	beforeRecs, err := e.gatherContextRecords(ctx, allChunksAsc, rr.Ref, q.ContextBefore, q.Reverse(), true)
+	if err != nil {
+		yield(chunk.Record{}, err)
+		return count, true
+	}
+
+	for _, rec := range beforeRecs {
+		if !yield(rec, nil) {
+			ref := rr.Ref
+			*nextRef = &ref
+			return count, true
+		}
+		count++
+		if q.Limit > 0 && count >= q.Limit {
+			ref := rr.Ref
+			*nextRef = &ref
+			return count, true
+		}
+	}
+	return count, false
+}
+
+// yieldContextAfter gathers and yields context records after a match.
+// Returns the updated count and whether iteration should stop.
+func (e *Engine) yieldContextAfter(
+	ctx context.Context,
+	q Query,
+	allChunksAsc []chunk.ChunkMeta,
+	rr recordWithRef,
+	count int,
+	yield func(chunk.Record, error) bool,
+) (int, bool) {
+	if q.ContextAfter <= 0 {
+		return count, false
+	}
+
+	afterRecs, err := e.gatherContextRecords(ctx, allChunksAsc, rr.Ref, q.ContextAfter, q.Reverse(), false)
+	if err != nil {
+		yield(chunk.Record{}, err)
+		return count, true
+	}
+
+	for _, rec := range afterRecs {
+		if !yield(rec, nil) {
+			return count, true
+		}
+		count++
+		if q.Limit > 0 && count >= q.Limit {
+			return count, true
+		}
+	}
+	return count, false
+}
+
+// gatherContextRecords gathers context records either before or after an anchor.
+// For "before" context (isBefore=true):
+//   - forward mode: gathers chronologically older records
+//   - reverse mode: gathers chronologically newer records ("before" in iteration order)
+//
+// For "after" context (isBefore=false):
+//   - forward mode: gathers chronologically newer records
+//   - reverse mode: gathers chronologically older records ("after" in iteration order)
+func (e *Engine) gatherContextRecords(
+	ctx context.Context,
+	chunksAsc []chunk.ChunkMeta,
+	anchor chunk.RecordRef,
+	n int,
+	reverse bool,
+	isBefore bool,
+) ([]chunk.Record, error) {
+	// In reverse mode, the direction is inverted:
+	// "before" in iteration order = chronologically after
+	// "after" in iteration order = chronologically before
+	if isBefore != reverse {
+		return e.gatherContextBefore(ctx, chunksAsc, anchor, n, reverse)
+	}
+	return e.gatherContextAfter(ctx, chunksAsc, anchor, n, reverse)
 }

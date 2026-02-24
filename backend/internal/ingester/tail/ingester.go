@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -72,7 +73,7 @@ func (ing *ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMess
 	if err != nil {
 		return err
 	}
-	defer watcher.Close()
+	defer func() { _ = watcher.Close() }()
 
 	// Watch parent directories for new file creation.
 	for _, dir := range watchDirsForPatterns(ing.patterns) {
@@ -130,7 +131,7 @@ func (ing *ingester) openFile(path string, bm bookmarks) {
 		return
 	}
 
-	f, err := os.Open(path)
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		ing.logger.Warn("failed to open file", "path", path, "error", err)
 		return
@@ -138,7 +139,7 @@ func (ing *ingester) openFile(path string, bm bookmarks) {
 
 	info, err := f.Stat()
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		ing.logger.Warn("failed to stat file", "path", path, "error", err)
 		return
 	}
@@ -160,7 +161,7 @@ func (ing *ingester) openFile(path string, bm bookmarks) {
 	}
 
 	if _, err := f.Seek(tf.offset, io.SeekStart); err != nil {
-		f.Close()
+		_ = f.Close()
 		ing.logger.Warn("failed to seek", "path", path, "error", err)
 		return
 	}
@@ -181,7 +182,7 @@ func (ing *ingester) readNewLines(tf *tailedFile, out chan<- orchestrator.Ingest
 	// Check for inode change (file was rotated/replaced).
 	if newInode, ok := getInode(info); ok && tf.inode != 0 && newInode != tf.inode {
 		ing.logger.Info("inode change detected, reopening", "path", tf.path)
-		tf.file.Close()
+		_ = tf.file.Close()
 		f, err := os.Open(tf.path)
 		if err != nil {
 			ing.logger.Warn("failed to reopen after rotation", "path", tf.path, "error", err)
@@ -189,7 +190,7 @@ func (ing *ingester) readNewLines(tf *tailedFile, out chan<- orchestrator.Ingest
 		}
 		newInfo, err := f.Stat()
 		if err != nil {
-			f.Close()
+			_ = f.Close()
 			return
 		}
 		tf.file = f
@@ -256,26 +257,26 @@ func (ing *ingester) readNewLines(tf *tailedFile, out chan<- orchestrator.Ingest
 		}
 	}
 
-	// After scanning, update offset to current file position.
-	// scanner.Scan() returns false when it hits EOF or an error.
-	// The offset should be at the end of the last complete line.
+	ing.updateOffset(tf, info, scanner.Err())
+}
+
+func (ing *ingester) updateOffset(tf *tailedFile, info os.FileInfo, scanErr error) {
 	newOffset, err := tf.file.Seek(0, io.SeekCurrent)
-	if err == nil {
-		// If scanner stopped due to EOF mid-line, the remaining bytes
-		// are a partial line. We need to account for this.
-		if scanner.Err() == nil {
-			// Successful scan to EOF — offset is past all complete lines.
-			// Check if there's trailing data without a newline.
-			if newOffset < info.Size() {
-				// There's data after the last newline — it's a partial line.
-				remaining := make([]byte, info.Size()-newOffset)
-				n, _ := tf.file.ReadAt(remaining, newOffset)
-				if n > 0 {
-					tf.lineBuf = append(tf.lineBuf, remaining[:n]...)
-				}
-			}
-			tf.offset = newOffset
-		}
+	if err != nil || scanErr != nil {
+		return
+	}
+	ing.bufferPartialLine(tf, info, newOffset)
+	tf.offset = newOffset
+}
+
+func (ing *ingester) bufferPartialLine(tf *tailedFile, info os.FileInfo, newOffset int64) {
+	if newOffset >= info.Size() {
+		return
+	}
+	remaining := make([]byte, info.Size()-newOffset)
+	n, _ := tf.file.ReadAt(remaining, newOffset)
+	if n > 0 {
+		tf.lineBuf = append(tf.lineBuf, remaining[:n]...)
 	}
 }
 
@@ -308,7 +309,7 @@ func (ing *ingester) handleFSEvent(event fsnotify.Event, bm bookmarks, out chan<
 
 	case event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename):
 		if tf, ok := ing.files[event.Name]; ok {
-			tf.file.Close()
+			_ = tf.file.Close()
 			delete(ing.files, event.Name)
 			ing.logger.Debug("file removed/renamed", "path", event.Name)
 		}
@@ -357,7 +358,7 @@ func (ing *ingester) saveAndCleanup(bm bookmarks) {
 			Inode:  tf.inode,
 			Offset: tf.offset,
 		}
-		tf.file.Close()
+		_ = tf.file.Close()
 	}
 
 	if err := saveBookmarks(ing.stateFile, bm); err != nil {

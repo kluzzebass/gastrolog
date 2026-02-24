@@ -3,6 +3,7 @@ package kv
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -124,6 +125,13 @@ func kvCost(key, value string, posCount int) int {
 	return stringLenSize + len(key) + stringLenSize + len(value) + postingOffsetSize + postingCountSize + posCount*positionSize
 }
 
+type kvCollectResult struct {
+	keyCandidates   map[string]*kvCandidate
+	valueCandidates map[string]*kvCandidate
+	kvCandidates    map[string]*kvCandidate
+	capped          bool
+}
+
 func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	meta, err := idx.manager.Meta(chunkID)
 	if err != nil {
@@ -133,108 +141,15 @@ func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 		return chunk.ErrChunkNotSealed
 	}
 
-	cursor, err := idx.manager.OpenCursor(chunkID)
+	result, err := idx.collectCandidates(ctx, chunkID)
 	if err != nil {
-		return fmt.Errorf("open cursor: %w", err)
-	}
-	defer cursor.Close()
-
-	// Pass 1: Collect all candidates with counts and positions
-	// We collect everything first, then apply budget-based admission.
-	keyCandidates := make(map[string]*kvCandidate)   // key -> positions where key appears
-	valueCandidates := make(map[string]*kvCandidate) // value -> positions where value appears
-	kvCandidates := make(map[string]*kvCandidate)    // "key\x00value" -> positions
-	valuesPerKey := make(map[string]map[string]struct{})
-
-	capped := false
-
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		rec, ref, err := cursor.Next()
-		if err != nil {
-			if err == chunk.ErrNoMoreRecords {
-				break
-			}
-			return fmt.Errorf("read record: %w", err)
-		}
-
-		if capped {
-			continue // Still count records but don't collect more candidates
-		}
-
-		// Extract key=value pairs from message using all registered extractors.
-		pairs := tokenizer.CombinedExtract(rec.Raw, idx.extractors)
-
-		// Dedupe within record
-		seenKeys := make(map[string]struct{})
-		seenValues := make(map[string]struct{})
-		seenKV := make(map[string]struct{})
-
-		for _, kv := range pairs {
-			kvKey := kv.Key + "\x00" + kv.Value
-
-			// Check key hard cap
-			if _, ok := keyCandidates[kv.Key]; !ok {
-				if len(keyCandidates) >= MaxUniqueKeys {
-					capped = true
-					break
-				}
-				keyCandidates[kv.Key] = &kvCandidate{key: kv.Key}
-				valuesPerKey[kv.Key] = make(map[string]struct{})
-			}
-
-			// Check values per key hard cap
-			if _, ok := valuesPerKey[kv.Key][kv.Value]; !ok {
-				if len(valuesPerKey[kv.Key]) >= MaxValuesPerKey {
-					capped = true
-					break
-				}
-				valuesPerKey[kv.Key][kv.Value] = struct{}{}
-			}
-
-			// Check total entries hard cap
-			if len(kvCandidates) >= MaxTotalEntries {
-				capped = true
-				break
-			}
-
-			// Add to value candidates
-			if _, ok := valueCandidates[kv.Value]; !ok {
-				valueCandidates[kv.Value] = &kvCandidate{value: kv.Value}
-			}
-
-			// Add to kv candidates
-			if _, ok := kvCandidates[kvKey]; !ok {
-				kvCandidates[kvKey] = &kvCandidate{key: kv.Key, value: kv.Value}
-			}
-
-			// Record positions (dedupe within record)
-			if _, seen := seenKeys[kv.Key]; !seen {
-				seenKeys[kv.Key] = struct{}{}
-				keyCandidates[kv.Key].positions = append(keyCandidates[kv.Key].positions, ref.Pos)
-				keyCandidates[kv.Key].frequency++
-			}
-			if _, seen := seenValues[kv.Value]; !seen {
-				seenValues[kv.Value] = struct{}{}
-				valueCandidates[kv.Value].positions = append(valueCandidates[kv.Value].positions, ref.Pos)
-				valueCandidates[kv.Value].frequency++
-			}
-			if _, seen := seenKV[kvKey]; !seen {
-				seenKV[kvKey] = struct{}{}
-				kvCandidates[kvKey].positions = append(kvCandidates[kvKey].positions, ref.Pos)
-				kvCandidates[kvKey].frequency++
-			}
-		}
+		return err
 	}
 
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	// If hard caps exceeded, mark as capped
-	if capped {
+	if result.capped {
 		idx.keyIndex[chunkID] = nil
 		idx.valIndex[chunkID] = nil
 		idx.kvIndex[chunkID] = nil
@@ -242,116 +157,169 @@ func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 		return nil
 	}
 
-	// Compute exact costs for all candidates
-	for k, c := range keyCandidates {
+	idx.computeCosts(result)
+	keyEntries, valueEntries, kvEntries := idx.admitAndBuild(result)
+
+	idx.keyIndex[chunkID] = keyEntries
+	idx.valIndex[chunkID] = valueEntries
+	idx.kvIndex[chunkID] = kvEntries
+	idx.status[chunkID] = index.KVComplete
+
+	return nil
+}
+
+func (idx *Indexer) collectCandidates(ctx context.Context, chunkID chunk.ChunkID) (*kvCollectResult, error) {
+	cursor, err := idx.manager.OpenCursor(chunkID)
+	if err != nil {
+		return nil, fmt.Errorf("open cursor: %w", err)
+	}
+	defer func() { _ = cursor.Close() }()
+
+	result := &kvCollectResult{
+		keyCandidates:   make(map[string]*kvCandidate),
+		valueCandidates: make(map[string]*kvCandidate),
+		kvCandidates:    make(map[string]*kvCandidate),
+	}
+	valuesPerKey := make(map[string]map[string]struct{})
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		rec, ref, err := cursor.Next()
+		if err != nil {
+			if errors.Is(err, chunk.ErrNoMoreRecords) {
+				break
+			}
+			return nil, fmt.Errorf("read record: %w", err)
+		}
+
+		if result.capped {
+			continue
+		}
+
+		pairs := tokenizer.CombinedExtract(rec.Raw, idx.extractors)
+		processRecordPairs(result, valuesPerKey, pairs, ref.Pos)
+	}
+
+	return result, nil
+}
+
+func processRecordPairs(result *kvCollectResult, valuesPerKey map[string]map[string]struct{}, pairs []tokenizer.KeyValue, pos uint64) {
+	seenKeys := make(map[string]struct{})
+	seenValues := make(map[string]struct{})
+	seenKV := make(map[string]struct{})
+
+	for _, kv := range pairs {
+		kvKey := kv.Key + "\x00" + kv.Value
+
+		if _, ok := result.keyCandidates[kv.Key]; !ok {
+			if len(result.keyCandidates) >= MaxUniqueKeys {
+				result.capped = true
+				return
+			}
+			result.keyCandidates[kv.Key] = &kvCandidate{key: kv.Key}
+			valuesPerKey[kv.Key] = make(map[string]struct{})
+		}
+
+		if _, ok := valuesPerKey[kv.Key][kv.Value]; !ok {
+			if len(valuesPerKey[kv.Key]) >= MaxValuesPerKey {
+				result.capped = true
+				return
+			}
+			valuesPerKey[kv.Key][kv.Value] = struct{}{}
+		}
+
+		if len(result.kvCandidates) >= MaxTotalEntries {
+			result.capped = true
+			return
+		}
+
+		if _, ok := result.valueCandidates[kv.Value]; !ok {
+			result.valueCandidates[kv.Value] = &kvCandidate{value: kv.Value}
+		}
+		if _, ok := result.kvCandidates[kvKey]; !ok {
+			result.kvCandidates[kvKey] = &kvCandidate{key: kv.Key, value: kv.Value}
+		}
+
+		if _, seen := seenKeys[kv.Key]; !seen {
+			seenKeys[kv.Key] = struct{}{}
+			result.keyCandidates[kv.Key].positions = append(result.keyCandidates[kv.Key].positions, pos)
+			result.keyCandidates[kv.Key].frequency++
+		}
+		if _, seen := seenValues[kv.Value]; !seen {
+			seenValues[kv.Value] = struct{}{}
+			result.valueCandidates[kv.Value].positions = append(result.valueCandidates[kv.Value].positions, pos)
+			result.valueCandidates[kv.Value].frequency++
+		}
+		if _, seen := seenKV[kvKey]; !seen {
+			seenKV[kvKey] = struct{}{}
+			result.kvCandidates[kvKey].positions = append(result.kvCandidates[kvKey].positions, pos)
+			result.kvCandidates[kvKey].frequency++
+		}
+	}
+}
+
+func (idx *Indexer) computeCosts(result *kvCollectResult) {
+	for k, c := range result.keyCandidates {
 		c.cost = keyCost(k, len(c.positions))
 	}
-	for v, c := range valueCandidates {
+	for v, c := range result.valueCandidates {
 		c.cost = valueCost(v, len(c.positions))
 	}
-	for _, c := range kvCandidates {
+	for _, c := range result.kvCandidates {
 		c.cost = kvCost(c.key, c.value, len(c.positions))
 	}
+}
 
-	// Apply budget-based admission for KV index
-	// Sort by descending frequency, then ascending cost
-	kvList := make([]*kvCandidate, 0, len(kvCandidates))
-	for _, c := range kvCandidates {
-		kvList = append(kvList, c)
+func sortCandidates(candidates map[string]*kvCandidate) []*kvCandidate {
+	list := make([]*kvCandidate, 0, len(candidates))
+	for _, c := range candidates {
+		list = append(list, c)
 	}
-	slices.SortFunc(kvList, func(a, b *kvCandidate) int {
-		// Descending frequency
-		if a.frequency != b.frequency {
-			return int(b.frequency) - int(a.frequency)
-		}
-		// Ascending cost (smaller first)
-		return a.cost - b.cost
-	})
-
-	// Admit KV entries within budget
-	var admittedKV []*kvCandidate
-	kvTotalBytes := int64(headerSize) // Start with header overhead
-	for _, c := range kvList {
-		if kvTotalBytes+int64(c.cost) > idx.kvBudget {
-			break
-		}
-		admittedKV = append(admittedKV, c)
-		kvTotalBytes += int64(c.cost)
-	}
-
-	// Key index: admit all keys (key-only indexing stays enabled)
-	// We still respect the budget, but key index is typically much smaller
-	// so typically all keys fit. If they don't, admit by frequency.
-	keyList := make([]*kvCandidate, 0, len(keyCandidates))
-	for _, c := range keyCandidates {
-		keyList = append(keyList, c)
-	}
-	slices.SortFunc(keyList, func(a, b *kvCandidate) int {
+	slices.SortFunc(list, func(a, b *kvCandidate) int {
 		if a.frequency != b.frequency {
 			return int(b.frequency) - int(a.frequency)
 		}
 		return a.cost - b.cost
 	})
+	return list
+}
 
-	var admittedKeys []*kvCandidate
-	keyTotalBytes := int64(headerSize)
-	for _, c := range keyList {
-		if keyTotalBytes+int64(c.cost) > idx.kvBudget {
+func admitWithinBudget(sorted []*kvCandidate, budget int64) []*kvCandidate {
+	var admitted []*kvCandidate
+	totalBytes := int64(headerSize)
+	for _, c := range sorted {
+		if totalBytes+int64(c.cost) > budget {
 			break
 		}
-		admittedKeys = append(admittedKeys, c)
-		keyTotalBytes += int64(c.cost)
+		admitted = append(admitted, c)
+		totalBytes += int64(c.cost)
 	}
+	return admitted
+}
 
-	// Value index: same approach
-	valueList := make([]*kvCandidate, 0, len(valueCandidates))
-	for _, c := range valueCandidates {
-		valueList = append(valueList, c)
-	}
-	slices.SortFunc(valueList, func(a, b *kvCandidate) int {
-		if a.frequency != b.frequency {
-			return int(b.frequency) - int(a.frequency)
-		}
-		return a.cost - b.cost
-	})
+func (idx *Indexer) admitAndBuild(result *kvCollectResult) ([]index.KVKeyIndexEntry, []index.KVValueIndexEntry, []index.KVIndexEntry) {
+	admittedKeys := admitWithinBudget(sortCandidates(result.keyCandidates), idx.kvBudget)
+	admittedValues := admitWithinBudget(sortCandidates(result.valueCandidates), idx.kvBudget)
+	admittedKV := admitWithinBudget(sortCandidates(result.kvCandidates), idx.kvBudget)
 
-	var admittedValues []*kvCandidate
-	valueTotalBytes := int64(headerSize)
-	for _, c := range valueList {
-		if valueTotalBytes+int64(c.cost) > idx.kvBudget {
-			break
-		}
-		admittedValues = append(admittedValues, c)
-		valueTotalBytes += int64(c.cost)
-	}
-
-	// Build final entries from admitted candidates
 	keyEntries := make([]index.KVKeyIndexEntry, len(admittedKeys))
 	for i, c := range admittedKeys {
-		keyEntries[i] = index.KVKeyIndexEntry{
-			Key:       c.key,
-			Positions: c.positions,
-		}
+		keyEntries[i] = index.KVKeyIndexEntry{Key: c.key, Positions: c.positions}
 	}
 
 	valueEntries := make([]index.KVValueIndexEntry, len(admittedValues))
 	for i, c := range admittedValues {
-		valueEntries[i] = index.KVValueIndexEntry{
-			Value:     c.value,
-			Positions: c.positions,
-		}
+		valueEntries[i] = index.KVValueIndexEntry{Value: c.value, Positions: c.positions}
 	}
 
 	kvEntries := make([]index.KVIndexEntry, len(admittedKV))
 	for i, c := range admittedKV {
-		kvEntries[i] = index.KVIndexEntry{
-			Key:       c.key,
-			Value:     c.value,
-			Positions: c.positions,
-		}
+		kvEntries[i] = index.KVIndexEntry{Key: c.key, Value: c.value, Positions: c.positions}
 	}
 
-	// Sort entries by key/value for binary search
 	slices.SortFunc(keyEntries, func(a, b index.KVKeyIndexEntry) int {
 		return cmp.Compare(a.Key, b.Key)
 	})
@@ -365,12 +333,7 @@ func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 		return cmp.Compare(a.Value, b.Value)
 	})
 
-	idx.keyIndex[chunkID] = keyEntries
-	idx.valIndex[chunkID] = valueEntries
-	idx.kvIndex[chunkID] = kvEntries
-	idx.status[chunkID] = index.KVComplete
-
-	return nil
+	return keyEntries, valueEntries, kvEntries
 }
 
 func (idx *Indexer) GetKey(chunkID chunk.ChunkID) ([]index.KVKeyIndexEntry, index.KVIndexStatus, bool) {

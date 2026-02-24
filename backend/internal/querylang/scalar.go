@@ -1,6 +1,7 @@
 package querylang
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -88,8 +89,18 @@ func (e *Evaluator) registerBuiltins() {
 	e.funcs["bitand"] = bitwiseFunc2("bitand", func(a, b int64) int64 { return a & b })
 	e.funcs["bitxor"] = bitwiseFunc2("bitxor", func(a, b int64) int64 { return a ^ b })
 	e.funcs["bitnot"] = bitwiseFunc1("bitnot", func(a int64) int64 { return ^a })
-	e.funcs["bitshl"] = bitwiseFunc2("bitshl", func(a, b int64) int64 { return a << uint(b) })
-	e.funcs["bitshr"] = bitwiseFunc2("bitshr", func(a, b int64) int64 { return a >> uint(b) })
+	e.funcs["bitshl"] = bitwiseFunc2("bitshl", func(a, b int64) int64 {
+		if b < 0 || b >= 64 {
+			return 0
+		}
+		return a << uint(b)
+	})
+	e.funcs["bitshr"] = bitwiseFunc2("bitshr", func(a, b int64) int64 {
+		if b < 0 || b >= 64 {
+			return 0
+		}
+		return a >> uint(b)
+	})
 }
 
 // --- Type coercion ---
@@ -107,7 +118,7 @@ func builtinToNumber(args []Value) (Value, error) {
 	}
 	f, err := strconv.ParseFloat(v.Str, 64)
 	if err != nil {
-		return MissingValue(), nil
+		return MissingValue(), nil //nolint:nilerr // unconvertible string yields missing value, not an error
 	}
 	return NumValue(f), nil
 }
@@ -238,10 +249,7 @@ func builtinSubstr(args []Value) (Value, error) {
 	if si >= len(s) {
 		return StrValue(""), nil
 	}
-	end := si + li
-	if end > len(s) {
-		end = len(s)
-	}
+	end := min(si+li, len(s))
 	return StrValue(s[si:end]), nil
 }
 
@@ -267,7 +275,7 @@ func builtinTrim(args []Value) (Value, error) {
 
 func builtinConcat(args []Value) (Value, error) {
 	if len(args) == 0 {
-		return Value{}, fmt.Errorf("concat requires at least 1 argument")
+		return Value{}, errors.New("concat requires at least 1 argument")
 	}
 	var sb strings.Builder
 	for _, a := range args {
@@ -283,7 +291,7 @@ func builtinConcat(args []Value) (Value, error) {
 
 func builtinCoalesce(args []Value) (Value, error) {
 	if len(args) == 0 {
-		return Value{}, fmt.Errorf("coalesce requires at least 1 argument")
+		return Value{}, errors.New("coalesce requires at least 1 argument")
 	}
 	for _, a := range args {
 		if !a.Missing {

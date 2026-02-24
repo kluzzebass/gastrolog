@@ -69,7 +69,7 @@ func (r *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 
 	var wg sync.WaitGroup
 	defer func() {
-		listener.Close()
+		_ = listener.Close()
 		wg.Wait()
 	}()
 
@@ -82,11 +82,12 @@ func (r *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 		}
 
 		// Set accept deadline to allow checking context.
-		listener.(*net.TCPListener).SetDeadline(time.Now().Add(time.Second))
+		_ = listener.(*net.TCPListener).SetDeadline(time.Now().Add(time.Second))
 
 		conn, err := listener.Accept()
 		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
 				continue
 			}
 			if errors.Is(err, net.ErrClosed) {
@@ -114,7 +115,7 @@ func (r *Ingester) Addr() net.Addr {
 
 // handleConn handles a single RELP connection.
 func (r *Ingester) handleConn(ctx context.Context, conn net.Conn, out chan<- orchestrator.IngestMessage) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	remoteIP := ""
 	if tcpAddr, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
@@ -134,7 +135,7 @@ func (r *Ingester) handleConn(ctx context.Context, conn net.Conn, out chan<- orc
 		r.logger.Debug("RELP session setup failed", "error", err, "remote", remoteIP)
 		return
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	r.logger.Debug("RELP session established", "remote", remoteIP)
 

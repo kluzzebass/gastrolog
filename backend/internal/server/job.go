@@ -78,7 +78,7 @@ func (s *JobServer) WatchJobs(
 
 		h := fnv.New64a()
 		data, _ := proto.Marshal(resp)
-		h.Write(data)
+		_, _ = h.Write(data)
 		hash := h.Sum64()
 
 		if hash != lastHash {

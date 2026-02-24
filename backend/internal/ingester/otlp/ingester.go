@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"strconv"
@@ -74,7 +75,7 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMess
 	mux.HandleFunc("GET /ready", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	httpSrv := &http.Server{Handler: mux}
+	httpSrv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 
 	go func() {
 		if err := httpSrv.Serve(httpLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -86,7 +87,7 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMess
 	// Start gRPC server.
 	grpcLn, err := net.Listen("tcp", ing.grpcAddr)
 	if err != nil {
-		httpSrv.Close()
+		_ = httpSrv.Close()
 		return fmt.Errorf("otlp grpc listen: %w", err)
 	}
 
@@ -106,11 +107,11 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMess
 		ing.logger.Info("otlp ingester stopping")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		httpSrv.Shutdown(shutdownCtx)
+		_ = httpSrv.Shutdown(shutdownCtx)
 		grpcSrv.GracefulStop()
 		return nil
 	case err := <-errCh:
-		httpSrv.Close()
+		_ = httpSrv.Close()
 		grpcSrv.Stop()
 		return err
 	}
@@ -127,7 +128,7 @@ func (ing *Ingester) handleHTTP(w http.ResponseWriter, req *http.Request) {
 			http.Error(w, "failed to decompress gzip body", http.StatusBadRequest)
 			return
 		}
-		defer gz.Close()
+		defer func() { _ = gz.Close() }()
 		body = gz
 	}
 
@@ -169,7 +170,7 @@ func (ing *Ingester) handleHTTP(w http.ResponseWriter, req *http.Request) {
 	respData, _ := proto.Marshal(resp)
 	w.Header().Set("Content-Type", "application/x-protobuf")
 	w.WriteHeader(http.StatusOK)
-	w.Write(respData)
+	_, _ = w.Write(respData)
 }
 
 // errBackpressure signals the queue is near capacity.
@@ -177,7 +178,6 @@ var errBackpressure = errors.New("backpressure: ingest queue near capacity")
 
 // processExportRequest converts OTLP log records to IngestMessages and sends them.
 func (ing *Ingester) processExportRequest(ctx context.Context, req *collogspb.ExportLogsServiceRequest) error {
-	// Backpressure: reject early when the ingest queue is near capacity.
 	if c := cap(ing.out); c > 0 && len(ing.out) >= c*9/10 {
 		return errBackpressure
 	}
@@ -191,57 +191,7 @@ func (ing *Ingester) processExportRequest(ctx context.Context, req *collogspb.Ex
 			scopeAttrs := flattenKVList(sl.GetScope().GetAttributes())
 
 			for _, lr := range sl.GetLogRecords() {
-				attrs := make(map[string]string, len(resourceAttrs)+len(scopeAttrs)+8)
-
-				// Resource attrs (lowest precedence).
-				for k, v := range resourceAttrs {
-					attrs[k] = v
-				}
-				// Scope attrs.
-				for k, v := range scopeAttrs {
-					attrs[k] = v
-				}
-				// Record attrs (highest precedence).
-				for k, v := range flattenKVList(lr.GetAttributes()) {
-					attrs[k] = v
-				}
-
-				// Severity.
-				if lr.GetSeverityText() != "" {
-					attrs["severity"] = lr.GetSeverityText()
-				}
-				if lr.GetSeverityNumber() != logspb.SeverityNumber_SEVERITY_NUMBER_UNSPECIFIED {
-					attrs["severity_number"] = strconv.Itoa(int(lr.GetSeverityNumber()))
-				}
-
-				// Trace/span IDs.
-				if len(lr.GetTraceId()) > 0 {
-					attrs["trace_id"] = hex.EncodeToString(lr.GetTraceId())
-				}
-				if len(lr.GetSpanId()) > 0 {
-					attrs["span_id"] = hex.EncodeToString(lr.GetSpanId())
-				}
-
-				attrs["ingester_type"] = "otlp"
-				attrs["ingester_id"] = ing.id
-
-				// Source timestamp.
-				var sourceTS time.Time
-				if lr.GetTimeUnixNano() != 0 {
-					sourceTS = time.Unix(0, int64(lr.GetTimeUnixNano()))
-				} else if lr.GetObservedTimeUnixNano() != 0 {
-					sourceTS = time.Unix(0, int64(lr.GetObservedTimeUnixNano()))
-				}
-
-				raw := anyValueToString(lr.GetBody())
-
-				msg := orchestrator.IngestMessage{
-					Attrs:    attrs,
-					Raw:      []byte(raw),
-					SourceTS: sourceTS,
-					IngestTS: now,
-				}
-
+				msg := ing.logRecordToMessage(lr, resourceAttrs, scopeAttrs, now)
 				select {
 				case ing.out <- msg:
 				case <-ctx.Done():
@@ -251,6 +201,45 @@ func (ing *Ingester) processExportRequest(ctx context.Context, req *collogspb.Ex
 		}
 	}
 	return nil
+}
+
+func (ing *Ingester) logRecordToMessage(lr *logspb.LogRecord, resourceAttrs, scopeAttrs map[string]string, now time.Time) orchestrator.IngestMessage {
+	attrs := make(map[string]string, len(resourceAttrs)+len(scopeAttrs)+8)
+
+	maps.Copy(attrs, resourceAttrs)
+	maps.Copy(attrs, scopeAttrs)
+	maps.Copy(attrs, flattenKVList(lr.GetAttributes()))
+
+	if lr.GetSeverityText() != "" {
+		attrs["severity"] = lr.GetSeverityText()
+	}
+	if lr.GetSeverityNumber() != logspb.SeverityNumber_SEVERITY_NUMBER_UNSPECIFIED {
+		attrs["severity_number"] = strconv.Itoa(int(lr.GetSeverityNumber()))
+	}
+	if len(lr.GetTraceId()) > 0 {
+		attrs["trace_id"] = hex.EncodeToString(lr.GetTraceId())
+	}
+	if len(lr.GetSpanId()) > 0 {
+		attrs["span_id"] = hex.EncodeToString(lr.GetSpanId())
+	}
+
+	attrs["ingester_type"] = "otlp"
+	attrs["ingester_id"] = ing.id
+
+	var sourceTS time.Time
+	switch {
+	case lr.GetTimeUnixNano() != 0:
+		sourceTS = time.Unix(0, int64(lr.GetTimeUnixNano())) //nolint:gosec // G115: OTLP nanosecond timestamps are well within int64 range
+	case lr.GetObservedTimeUnixNano() != 0:
+		sourceTS = time.Unix(0, int64(lr.GetObservedTimeUnixNano())) //nolint:gosec // G115: OTLP nanosecond timestamps are well within int64 range
+	}
+
+	return orchestrator.IngestMessage{
+		Attrs:    attrs,
+		Raw:      []byte(anyValueToString(lr.GetBody())),
+		SourceTS: sourceTS,
+		IngestTS: now,
+	}
 }
 
 // logsServiceServer implements the gRPC LogsService.

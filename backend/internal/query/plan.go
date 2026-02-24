@@ -137,99 +137,15 @@ func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMe
 	currentPositions := cp.RecordCount
 
 	// 1. Time seek - binary search idx.log for start position.
-	lower, _ := q.TimeBounds()
-	if !lower.IsZero() {
-		step := PipelineStep{
-			Index:           "time",
-			Predicate:       fmt.Sprintf("start >= %s", lower.Format("15:04:05")),
-			PositionsBefore: currentPositions,
-		}
+	currentPositions = e.buildTimeSeekStep(&cp, q, meta, cm, currentPositions)
 
-		if pos, found, err := cm.FindStartPosition(meta.ID, lower); err == nil && found {
-			skipped := int(pos)
-			currentPositions = cp.RecordCount - skipped
-			step.PositionsAfter = currentPositions
-			step.Action = "seek"
-			step.Reason = "binary_search"
-			step.Details = fmt.Sprintf("skip %d via idx.log", skipped)
-		} else {
-			step.PositionsAfter = currentPositions
-			step.Action = "seek"
-			step.Reason = "binary_search"
-			step.Details = "start before chunk"
-		}
-		cp.Pipeline = append(cp.Pipeline, step)
-	}
-
-	// Process boolean expression.
+	// 2. Process boolean expression.
 	if q.BoolExpr != nil {
-		dnf := querylang.ToDNF(q.BoolExpr)
-
-		if len(dnf.Branches) == 0 {
-			cp.ScanMode = "skipped"
-			cp.SkipReason = "empty DNF"
-			cp.EstimatedScan = 0
+		if done := e.buildBoolExprPlan(&cp, q, meta, im, currentPositions); done {
 			return cp
 		}
-
-		if len(dnf.Branches) == 1 {
-			// Single branch: build pipeline directly.
-			branch := &dnf.Branches[0]
-			var skipped bool
-			var skipReason string
-			var runtimeFilters []string
-
-			currentPositions, skipped, skipReason, runtimeFilters = e.buildBranchPipeline(
-				&cp.Pipeline, branch, meta, currentPositions, im)
-
-			if skipped {
-				cp.ScanMode = "skipped"
-				cp.SkipReason = skipReason
-				cp.EstimatedScan = 0
-				return cp
-			}
-
-			// Build runtime filter string.
-			if len(runtimeFilters) > 0 {
-				cp.RuntimeFilter = strings.Join(runtimeFilters, " AND ")
-			}
-			if len(branch.Negative) > 0 {
-				var negParts []string
-				for _, p := range branch.Negative {
-					negParts = append(negParts, "NOT "+p.String())
-				}
-				negStr := strings.Join(negParts, " AND ")
-				if cp.RuntimeFilter != "none" && cp.RuntimeFilter != "" {
-					cp.RuntimeFilter += " AND " + negStr
-				} else {
-					cp.RuntimeFilter = negStr
-				}
-			}
-		} else {
-			// Multi-branch DNF: build per-branch plans.
-			var totalEstimated int
-			allSkipped := true
-
-			for _, branch := range dnf.Branches {
-				bp := e.buildBranchPlan(&branch, meta, cp.RecordCount, im)
-				cp.BranchPlans = append(cp.BranchPlans, bp)
-
-				if !bp.Skipped {
-					allSkipped = false
-					totalEstimated += bp.EstimatedScan
-				}
-			}
-
-			if allSkipped {
-				cp.ScanMode = "skipped"
-				cp.SkipReason = "all branches empty"
-				cp.EstimatedScan = 0
-				return cp
-			}
-
-			currentPositions = totalEstimated
-			cp.RuntimeFilter = "DNF filter"
-		}
+		// currentPositions may have been updated via cp.EstimatedScan.
+		currentPositions = cp.EstimatedScan
 	}
 
 	// Determine final scan mode.
@@ -241,15 +157,144 @@ func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMe
 	cp.EstimatedScan = currentPositions
 
 	// Add time bounds to runtime filter if present.
-	if !q.Start.IsZero() || !q.End.IsZero() {
-		if cp.RuntimeFilter != "none" && cp.RuntimeFilter != "" {
-			cp.RuntimeFilter += " AND time bounds"
-		} else {
-			cp.RuntimeFilter = "time bounds"
+	appendTimeBoundsFilter(&cp, q)
+
+	return cp
+}
+
+// buildTimeSeekStep builds the time-seek pipeline step. Returns updated position count.
+func (e *Engine) buildTimeSeekStep(cp *ChunkPlan, q Query, meta chunk.ChunkMeta, cm chunk.ChunkManager, currentPositions int) int {
+	lower, _ := q.TimeBounds()
+	if lower.IsZero() {
+		return currentPositions
+	}
+
+	step := PipelineStep{
+		Index:           "time",
+		Predicate:       "start >= " + lower.Format("15:04:05"),
+		PositionsBefore: currentPositions,
+		Action:          "seek",
+		Reason:          "binary_search",
+	}
+
+	if pos, found, err := cm.FindStartPosition(meta.ID, lower); err == nil && found {
+		skipped := int(pos) //nolint:gosec // G115: pos is a record position, always fits in int on 64-bit
+		currentPositions = cp.RecordCount - skipped
+		step.PositionsAfter = currentPositions
+		step.Details = fmt.Sprintf("skip %d via idx.log", skipped)
+	} else {
+		step.PositionsAfter = currentPositions
+		step.Details = "start before chunk"
+	}
+	cp.Pipeline = append(cp.Pipeline, step)
+	return currentPositions
+}
+
+// buildBoolExprPlan processes the boolean expression for a chunk plan.
+// Returns true if the chunk plan is fully resolved (skipped or multi-branch).
+func (e *Engine) buildBoolExprPlan(cp *ChunkPlan, q Query, meta chunk.ChunkMeta, im index.IndexManager, currentPositions int) bool {
+	dnf := querylang.ToDNF(q.BoolExpr)
+
+	if len(dnf.Branches) == 0 {
+		cp.ScanMode = "skipped"
+		cp.SkipReason = "empty DNF"
+		cp.EstimatedScan = 0
+		return true
+	}
+
+	if len(dnf.Branches) == 1 {
+		return e.buildSingleBranchChunkPlan(cp, &dnf.Branches[0], meta, im, currentPositions)
+	}
+
+	return e.buildMultiBranchChunkPlan(cp, dnf, meta, im)
+}
+
+// buildSingleBranchChunkPlan processes a single-branch DNF for a chunk plan.
+// Returns true if the chunk plan is fully resolved (skipped).
+func (e *Engine) buildSingleBranchChunkPlan(cp *ChunkPlan, branch *querylang.Conjunction, meta chunk.ChunkMeta, im index.IndexManager, currentPositions int) bool {
+	currentPositions, skipped, skipReason, runtimeFilters := e.buildBranchPipeline(
+		&cp.Pipeline, branch, meta, currentPositions, im)
+
+	if skipped {
+		cp.ScanMode = "skipped"
+		cp.SkipReason = skipReason
+		cp.EstimatedScan = 0
+		return true
+	}
+
+	// Build runtime filter string.
+	if len(runtimeFilters) > 0 {
+		cp.RuntimeFilter = strings.Join(runtimeFilters, " AND ")
+	}
+	appendNegativeFilter(cp, branch)
+
+	cp.EstimatedScan = currentPositions
+	return false
+}
+
+// buildMultiBranchChunkPlan processes a multi-branch DNF for a chunk plan.
+// Returns true (always resolves the bool expr portion).
+func (e *Engine) buildMultiBranchChunkPlan(cp *ChunkPlan, dnf querylang.DNF, meta chunk.ChunkMeta, im index.IndexManager) bool {
+	var totalEstimated int
+	allSkipped := true
+
+	for _, branch := range dnf.Branches {
+		bp := e.buildBranchPlan(&branch, meta, cp.RecordCount, im)
+		cp.BranchPlans = append(cp.BranchPlans, bp)
+
+		if !bp.Skipped {
+			allSkipped = false
+			totalEstimated += bp.EstimatedScan
 		}
 	}
 
-	return cp
+	if allSkipped {
+		cp.ScanMode = "skipped"
+		cp.SkipReason = "all branches empty"
+		cp.EstimatedScan = 0
+		return true
+	}
+
+	cp.EstimatedScan = totalEstimated
+	cp.RuntimeFilter = "DNF filter"
+	return false
+}
+
+// appendNegativeFilter appends negative predicate runtime filter to a chunk plan.
+func appendNegativeFilter(cp *ChunkPlan, branch *querylang.Conjunction) {
+	if len(branch.Negative) == 0 {
+		return
+	}
+	var negParts []string
+	for _, p := range branch.Negative {
+		negParts = append(negParts, "NOT "+p.String())
+	}
+	negStr := strings.Join(negParts, " AND ")
+	if cp.RuntimeFilter != "none" && cp.RuntimeFilter != "" {
+		cp.RuntimeFilter += " AND " + negStr
+	} else {
+		cp.RuntimeFilter = negStr
+	}
+}
+
+// appendTimeBoundsFilter appends time bounds to the runtime filter if present.
+func appendTimeBoundsFilter(cp *ChunkPlan, q Query) {
+	if q.Start.IsZero() && q.End.IsZero() {
+		return
+	}
+	if cp.RuntimeFilter != "none" && cp.RuntimeFilter != "" {
+		cp.RuntimeFilter += " AND time bounds"
+	} else {
+		cp.RuntimeFilter = "time bounds"
+	}
+}
+
+// branchStepResult is the outcome of processing one type of index lookup within a branch pipeline.
+type branchStepResult struct {
+	currentPositions int
+	skipped          bool
+	skipReason       string
+	runtimeFilters   []string
 }
 
 // buildBranchPipeline builds pipeline steps for a single DNF branch.
@@ -261,182 +306,254 @@ func (e *Engine) buildBranchPipeline(pipeline *[]PipelineStep, branch *querylang
 
 	// Token index.
 	if len(tokens) > 0 {
-		predicate := fmt.Sprintf("token(%s)", strings.Join(tokens, ", "))
-		step := PipelineStep{
-			Index:           "token",
-			Predicate:       predicate,
-			PositionsBefore: currentPositions,
+		res := e.buildTokenStep(pipeline, tokens, meta, currentPositions, im)
+		if res.skipped {
+			return 0, true, res.skipReason, nil
 		}
-
-		tokIdx, err := im.OpenTokenIndex(meta.ID)
-		if err == nil {
-			reader := index.NewTokenIndexReader(meta.ID, tokIdx.Entries())
-			var positions []uint64
-			allFound := true
-			var missingToken string
-			var missingReason string
-			var missingDefinitive bool
-
-			for i, tok := range tokens {
-				pos, found := reader.Lookup(tok)
-				if !found {
-					allFound = false
-					missingToken = tok
-					missingReason, missingDefinitive = classifyTokenMiss(tok)
-					break
-				}
-				if i == 0 {
-					positions = pos
-				} else {
-					positions = intersectPositions(positions, pos)
-				}
-			}
-
-			if !allFound {
-				if missingDefinitive {
-					// Token is indexable but absent — no records contain it.
-					step.PositionsAfter = 0
-					step.Action = "skipped"
-					step.Reason = "no_match"
-					step.Details = fmt.Sprintf("'%s' not in chunk", missingToken)
-					*pipeline = append(*pipeline, step)
-					return 0, true, fmt.Sprintf("no match (%s)", predicate), nil
-				}
-				step.PositionsAfter = currentPositions
-				step.Action = "runtime"
-				step.Reason = missingReason
-				step.Details = fmt.Sprintf("'%s' not indexable (%s)", missingToken, missingReason)
-				runtimeFilters = append(runtimeFilters, predicate)
-			} else if len(positions) == 0 {
-				step.PositionsAfter = 0
-				step.Action = "skipped"
-				step.Reason = "empty_intersection"
-				step.Details = "no records match all tokens"
-				*pipeline = append(*pipeline, step)
-				return 0, true, fmt.Sprintf("empty intersection (%s)", predicate), nil
-			} else {
-				step.PositionsAfter = len(positions)
-				step.Action = "indexed"
-				step.Reason = "indexed"
-				step.Details = fmt.Sprintf("%d token(s) intersected", len(tokens))
-				currentPositions = len(positions)
-			}
-		} else if errors.Is(err, index.ErrIndexNotFound) {
-			step.PositionsAfter = currentPositions
-			step.Action = "runtime"
-			step.Reason = "index_missing"
-			step.Details = "no token index"
-			runtimeFilters = append(runtimeFilters, predicate)
-		}
-		*pipeline = append(*pipeline, step)
+		currentPositions = res.currentPositions
+		runtimeFilters = append(runtimeFilters, res.runtimeFilters...)
 	}
 
 	// Glob patterns (prefix acceleration via token index).
-	if len(globs) > 0 {
-		for _, g := range globs {
-			predicate := fmt.Sprintf("glob(%s)", g.RawPattern)
-			step := PipelineStep{
-				Index:           "token",
-				Predicate:       predicate,
-				PositionsBefore: currentPositions,
-			}
-
-			prefix, hasPrefix := querylang.ExtractGlobPrefix(g.RawPattern)
-			if !hasPrefix {
-				step.PositionsAfter = currentPositions
-				step.Action = "runtime"
-				step.Reason = "no_prefix"
-				step.Details = "glob has no literal prefix for index lookup"
-				runtimeFilters = append(runtimeFilters, predicate)
-			} else {
-				tokIdx, err := im.OpenTokenIndex(meta.ID)
-				if err == nil {
-					reader := index.NewTokenIndexReader(meta.ID, tokIdx.Entries())
-					positions, found := reader.LookupPrefix(prefix)
-					if !found {
-						step.PositionsAfter = 0
-						step.Action = "skipped"
-						step.Reason = "no_match"
-						step.Details = fmt.Sprintf("no tokens with prefix %q", prefix)
-						*pipeline = append(*pipeline, step)
-						return 0, true, fmt.Sprintf("no match (%s)", predicate), nil
-					}
-					step.PositionsAfter = len(positions)
-					step.Action = "indexed"
-					step.Reason = "prefix_lookup"
-					step.Details = fmt.Sprintf("prefix %q matched %d positions", prefix, len(positions))
-					currentPositions = min(currentPositions, len(positions))
-				} else {
-					step.PositionsAfter = currentPositions
-					step.Action = "runtime"
-					step.Reason = "index_missing"
-					step.Details = "no token index"
-					runtimeFilters = append(runtimeFilters, predicate)
-				}
-			}
-			*pipeline = append(*pipeline, step)
+	for _, g := range globs {
+		res := e.buildGlobStep(pipeline, g, meta, currentPositions, im)
+		if res.skipped {
+			return 0, true, res.skipReason, nil
 		}
+		currentPositions = res.currentPositions
+		runtimeFilters = append(runtimeFilters, res.runtimeFilters...)
 	}
 
 	// Regex predicates (always runtime, no index acceleration).
 	for _, p := range branch.Positive {
-		if p.Kind == querylang.PredRegex {
-			predicate := fmt.Sprintf("regex(/%s/)", p.Value)
-			step := PipelineStep{
-				Index:           "runtime",
-				Predicate:       predicate,
-				PositionsBefore: currentPositions,
-				PositionsAfter:  currentPositions,
-				Action:          "runtime",
-				Reason:          "no_index",
-				Details:         "regex requires sequential scan",
-			}
-			*pipeline = append(*pipeline, step)
-			runtimeFilters = append(runtimeFilters, predicate)
+		if p.Kind != querylang.PredRegex {
+			continue
 		}
+		predicate := fmt.Sprintf("regex(/%s/)", p.Value)
+		step := PipelineStep{
+			Index:           "runtime",
+			Predicate:       predicate,
+			PositionsBefore: currentPositions,
+			PositionsAfter:  currentPositions,
+			Action:          "runtime",
+			Reason:          "no_index",
+			Details:         "regex requires sequential scan",
+		}
+		*pipeline = append(*pipeline, step)
+		runtimeFilters = append(runtimeFilters, predicate)
 	}
 
 	// KV indexes.
-	if len(kv) > 0 {
-		for _, f := range kv {
-			predicate := formatKVFilter(f)
-			step := PipelineStep{
-				Index:           "kv",
-				Predicate:       predicate,
-				PositionsBefore: currentPositions,
-			}
-
-			result := e.lookupKVIndex(f, meta.ID, im)
-
-			if !result.available {
-				step.PositionsAfter = currentPositions
-				step.Action = "runtime"
-				step.Reason = result.reason
-				step.Details = result.details
-				runtimeFilters = append(runtimeFilters, predicate)
-			} else if len(result.positions) == 0 {
-				step.PositionsAfter = 0
-				step.Action = "skipped"
-				step.Reason = "no_match"
-				step.Details = result.details
-				*pipeline = append(*pipeline, step)
-				return 0, true, fmt.Sprintf("no match (%s)", predicate), nil
-			} else {
-				newCount := len(result.positions)
-				if currentPositions < int(meta.RecordCount) {
-					newCount = min(currentPositions, len(result.positions))
-				}
-				step.PositionsAfter = newCount
-				step.Action = "indexed"
-				step.Reason = "indexed"
-				step.Details = result.details
-				currentPositions = newCount
-			}
-			*pipeline = append(*pipeline, step)
+	for _, f := range kv {
+		res := e.buildKVStep(pipeline, f, meta, currentPositions, im)
+		if res.skipped {
+			return 0, true, res.skipReason, nil
 		}
+		currentPositions = res.currentPositions
+		runtimeFilters = append(runtimeFilters, res.runtimeFilters...)
 	}
 
 	return currentPositions, false, "", runtimeFilters
+}
+
+// buildTokenStep builds the token index pipeline step.
+func (e *Engine) buildTokenStep(pipeline *[]PipelineStep, tokens []string, meta chunk.ChunkMeta, currentPositions int, im index.IndexManager) branchStepResult {
+	predicate := fmt.Sprintf("token(%s)", strings.Join(tokens, ", "))
+	step := PipelineStep{
+		Index:           "token",
+		Predicate:       predicate,
+		PositionsBefore: currentPositions,
+	}
+
+	tokIdx, err := im.OpenTokenIndex(meta.ID)
+	if errors.Is(err, index.ErrIndexNotFound) {
+		step.PositionsAfter = currentPositions
+		step.Action = "runtime"
+		step.Reason = "index_missing"
+		step.Details = "no token index"
+		*pipeline = append(*pipeline, step)
+		return branchStepResult{
+			currentPositions: currentPositions,
+			runtimeFilters:   []string{predicate},
+		}
+	}
+	if err != nil {
+		*pipeline = append(*pipeline, step)
+		return branchStepResult{currentPositions: currentPositions}
+	}
+
+	result := e.lookupTokenPositions(tokens, meta, tokIdx)
+
+	switch {
+	case !result.allFound && result.missingDefinitive:
+		step.PositionsAfter = 0
+		step.Action = "skipped"
+		step.Reason = "no_match"
+		step.Details = fmt.Sprintf("'%s' not in chunk", result.missingToken)
+		*pipeline = append(*pipeline, step)
+		return branchStepResult{skipped: true, skipReason: fmt.Sprintf("no match (%s)", predicate)}
+
+	case !result.allFound:
+		step.PositionsAfter = currentPositions
+		step.Action = "runtime"
+		step.Reason = result.missingReason
+		step.Details = fmt.Sprintf("'%s' not indexable (%s)", result.missingToken, result.missingReason)
+		*pipeline = append(*pipeline, step)
+		return branchStepResult{
+			currentPositions: currentPositions,
+			runtimeFilters:   []string{predicate},
+		}
+
+	case len(result.positions) == 0:
+		step.PositionsAfter = 0
+		step.Action = "skipped"
+		step.Reason = "empty_intersection"
+		step.Details = "no records match all tokens"
+		*pipeline = append(*pipeline, step)
+		return branchStepResult{skipped: true, skipReason: fmt.Sprintf("empty intersection (%s)", predicate)}
+
+	default:
+		step.PositionsAfter = len(result.positions)
+		step.Action = "indexed"
+		step.Reason = "indexed"
+		step.Details = fmt.Sprintf("%d token(s) intersected", len(tokens))
+		currentPositions = len(result.positions)
+		*pipeline = append(*pipeline, step)
+		return branchStepResult{currentPositions: currentPositions}
+	}
+}
+
+// tokenLookupResult holds the result of looking up tokens in the token index.
+type tokenLookupResult struct {
+	positions        []uint64
+	allFound         bool
+	missingToken     string
+	missingReason    string
+	missingDefinitive bool
+}
+
+// lookupTokenPositions looks up all tokens in the token index and intersects results.
+func (e *Engine) lookupTokenPositions(tokens []string, meta chunk.ChunkMeta, tokIdx *index.Index[index.TokenIndexEntry]) tokenLookupResult {
+	reader := index.NewTokenIndexReader(meta.ID, tokIdx.Entries())
+	var positions []uint64
+
+	for i, tok := range tokens {
+		pos, found := reader.Lookup(tok)
+		if !found {
+			reason, definitive := classifyTokenMiss(tok)
+			return tokenLookupResult{
+				missingToken:     tok,
+				missingReason:    reason,
+				missingDefinitive: definitive,
+			}
+		}
+		if i == 0 {
+			positions = pos
+		} else {
+			positions = intersectPositions(positions, pos)
+		}
+	}
+
+	return tokenLookupResult{positions: positions, allFound: true}
+}
+
+// buildGlobStep builds a glob pattern pipeline step.
+func (e *Engine) buildGlobStep(pipeline *[]PipelineStep, g GlobFilter, meta chunk.ChunkMeta, currentPositions int, im index.IndexManager) branchStepResult {
+	predicate := fmt.Sprintf("glob(%s)", g.RawPattern)
+	step := PipelineStep{
+		Index:           "token",
+		Predicate:       predicate,
+		PositionsBefore: currentPositions,
+	}
+
+	prefix, hasPrefix := querylang.ExtractGlobPrefix(g.RawPattern)
+	if !hasPrefix {
+		step.PositionsAfter = currentPositions
+		step.Action = "runtime"
+		step.Reason = "no_prefix"
+		step.Details = "glob has no literal prefix for index lookup"
+		*pipeline = append(*pipeline, step)
+		return branchStepResult{
+			currentPositions: currentPositions,
+			runtimeFilters:   []string{predicate},
+		}
+	}
+
+	tokIdx, err := im.OpenTokenIndex(meta.ID)
+	if err != nil {
+		step.PositionsAfter = currentPositions
+		step.Action = "runtime"
+		step.Reason = "index_missing"
+		step.Details = "no token index"
+		*pipeline = append(*pipeline, step)
+		return branchStepResult{
+			currentPositions: currentPositions,
+			runtimeFilters:   []string{predicate},
+		}
+	}
+
+	reader := index.NewTokenIndexReader(meta.ID, tokIdx.Entries())
+	positions, found := reader.LookupPrefix(prefix)
+	if !found {
+		step.PositionsAfter = 0
+		step.Action = "skipped"
+		step.Reason = "no_match"
+		step.Details = fmt.Sprintf("no tokens with prefix %q", prefix)
+		*pipeline = append(*pipeline, step)
+		return branchStepResult{skipped: true, skipReason: fmt.Sprintf("no match (%s)", predicate)}
+	}
+
+	step.PositionsAfter = len(positions)
+	step.Action = "indexed"
+	step.Reason = "prefix_lookup"
+	step.Details = fmt.Sprintf("prefix %q matched %d positions", prefix, len(positions))
+	currentPositions = min(currentPositions, len(positions))
+	*pipeline = append(*pipeline, step)
+	return branchStepResult{currentPositions: currentPositions}
+}
+
+// buildKVStep builds a KV index pipeline step.
+func (e *Engine) buildKVStep(pipeline *[]PipelineStep, f KeyValueFilter, meta chunk.ChunkMeta, currentPositions int, im index.IndexManager) branchStepResult {
+	predicate := formatKVFilter(f)
+	step := PipelineStep{
+		Index:           "kv",
+		Predicate:       predicate,
+		PositionsBefore: currentPositions,
+	}
+
+	result := e.lookupKVIndex(f, meta.ID, im)
+
+	if !result.available {
+		step.PositionsAfter = currentPositions
+		step.Action = "runtime"
+		step.Reason = result.reason
+		step.Details = result.details
+		*pipeline = append(*pipeline, step)
+		return branchStepResult{
+			currentPositions: currentPositions,
+			runtimeFilters:   []string{predicate},
+		}
+	}
+
+	if len(result.positions) == 0 {
+		step.PositionsAfter = 0
+		step.Action = "skipped"
+		step.Reason = "no_match"
+		step.Details = result.details
+		*pipeline = append(*pipeline, step)
+		return branchStepResult{skipped: true, skipReason: fmt.Sprintf("no match (%s)", predicate)}
+	}
+
+	newCount := len(result.positions)
+	if currentPositions < int(meta.RecordCount) {
+		newCount = min(currentPositions, len(result.positions))
+	}
+	step.PositionsAfter = newCount
+	step.Action = "indexed"
+	step.Reason = "indexed"
+	step.Details = result.details
+	*pipeline = append(*pipeline, step)
+	return branchStepResult{currentPositions: newCount}
 }
 
 // buildBranchPlan builds a plan for a single DNF branch.
@@ -485,178 +602,269 @@ type kvLookupResult struct {
 	details   string
 }
 
+// kvIndexes holds all opened KV-related indexes for a chunk.
+type kvIndexes struct {
+	attrKV     *index.Index[index.AttrKVIndexEntry]
+	attrKVErr  error
+	attrKey    *index.Index[index.AttrKeyIndexEntry]
+	attrKeyErr error
+	attrVal    *index.Index[index.AttrValueIndexEntry]
+	attrValErr error
+	kv          *index.Index[index.KVIndexEntry]
+	kvStatus    index.KVIndexStatus
+	kvErr       error
+	kvKey       *index.Index[index.KVKeyIndexEntry]
+	kvKeyStatus index.KVIndexStatus
+	kvKeyErr    error
+	kvVal       *index.Index[index.KVValueIndexEntry]
+	kvValStatus index.KVIndexStatus
+	kvValErr    error
+}
+
+// openKVIndexes opens all KV-related indexes for a chunk.
+func openKVIndexes(chunkID chunk.ChunkID, im index.IndexManager) kvIndexes {
+	var idx kvIndexes
+	idx.attrKV, idx.attrKVErr = im.OpenAttrKVIndex(chunkID)
+	idx.attrKey, idx.attrKeyErr = im.OpenAttrKeyIndex(chunkID)
+	idx.attrVal, idx.attrValErr = im.OpenAttrValueIndex(chunkID)
+	idx.kv, idx.kvStatus, idx.kvErr = im.OpenKVIndex(chunkID)
+	idx.kvKey, idx.kvKeyStatus, idx.kvKeyErr = im.OpenKVKeyIndex(chunkID)
+	idx.kvVal, idx.kvValStatus, idx.kvValErr = im.OpenKVValueIndex(chunkID)
+	return idx
+}
+
 // lookupKVIndex looks up a single KV filter across all available indexes.
 func (e *Engine) lookupKVIndex(f KeyValueFilter, chunkID chunk.ChunkID, im index.IndexManager) kvLookupResult {
-	result := kvLookupResult{}
-	var detailParts []string
+	if f.Key == "" && f.Value == "" {
+		return kvLookupResult{}
+	}
 
+	idx := openKVIndexes(chunkID, im)
 	keyLower := strings.ToLower(f.Key)
 	valLower := strings.ToLower(f.Value)
 
-	// Open indexes.
-	attrKVIdx, attrKVErr := im.OpenAttrKVIndex(chunkID)
-	attrKeyIdx, attrKeyErr := im.OpenAttrKeyIndex(chunkID)
-	attrValIdx, attrValErr := im.OpenAttrValueIndex(chunkID)
-	kvIdx, kvStatus, kvErr := im.OpenKVIndex(chunkID)
-	kvKeyIdx, kvKeyStatus, kvKeyErr := im.OpenKVKeyIndex(chunkID)
-	kvValIdx, kvValStatus, kvValErr := im.OpenKVValueIndex(chunkID)
-
-	if f.Key == "" && f.Value == "" {
-		return result
-	} else if f.Value == "" {
-		// Key only: key=* pattern.
-		if attrKeyErr == nil {
-			result.available = true
-			reader := index.NewAttrKeyIndexReader(chunkID, attrKeyIdx.Entries())
-			if pos, found := reader.Lookup(keyLower); found {
-				result.positions = unionPositions(result.positions, pos)
-				detailParts = append(detailParts, fmt.Sprintf("attr_key=%d", len(pos)))
-			}
-		}
-		if kvKeyErr == nil {
-			if kvKeyStatus == index.KVCapped {
-				detailParts = append(detailParts, "msg_key=capped")
-			} else {
-				result.available = true
-				reader := index.NewKVKeyIndexReader(chunkID, kvKeyIdx.Entries())
-				if pos, found := reader.Lookup(keyLower); found {
-					result.positions = unionPositions(result.positions, pos)
-					detailParts = append(detailParts, fmt.Sprintf("msg_key=%d", len(pos)))
-				}
-			}
-		}
-	} else if f.Key == "" {
-		// Value only: *=value pattern.
-		if attrValErr == nil {
-			result.available = true
-			reader := index.NewAttrValueIndexReader(chunkID, attrValIdx.Entries())
-			if pos, found := reader.Lookup(valLower); found {
-				result.positions = unionPositions(result.positions, pos)
-				detailParts = append(detailParts, fmt.Sprintf("attr_val=%d", len(pos)))
-			}
-		}
-		if kvValErr == nil {
-			if kvValStatus == index.KVCapped {
-				detailParts = append(detailParts, "msg_val=capped")
-			} else {
-				result.available = true
-				reader := index.NewKVValueIndexReader(chunkID, kvValIdx.Entries())
-				if pos, found := reader.Lookup(valLower); found {
-					result.positions = unionPositions(result.positions, pos)
-					detailParts = append(detailParts, fmt.Sprintf("msg_val=%d", len(pos)))
-				}
-			}
-		}
-	} else if f.Op != querylang.OpEq {
-		// Non-eq comparison: use key-only index, runtime value comparison.
-		if attrKeyErr == nil {
-			result.available = true
-			reader := index.NewAttrKeyIndexReader(chunkID, attrKeyIdx.Entries())
-			if pos, found := reader.Lookup(keyLower); found {
-				result.positions = unionPositions(result.positions, pos)
-				detailParts = append(detailParts, fmt.Sprintf("attr_key=%d", len(pos)))
-			}
-		}
-		if kvKeyErr == nil {
-			if kvKeyStatus == index.KVCapped {
-				detailParts = append(detailParts, "msg_key=capped")
-			} else {
-				result.available = true
-				reader := index.NewKVKeyIndexReader(chunkID, kvKeyIdx.Entries())
-				if pos, found := reader.Lookup(keyLower); found {
-					result.positions = unionPositions(result.positions, pos)
-					detailParts = append(detailParts, fmt.Sprintf("msg_key=%d", len(pos)))
-				}
-			}
-		}
-		detailParts = append(detailParts, "filter=runtime_compare")
-	} else {
-		// Both key and value: exact key=value match.
-		if attrKVErr == nil {
-			result.available = true
-			reader := index.NewAttrKVIndexReader(chunkID, attrKVIdx.Entries())
-			if pos, found := reader.Lookup(keyLower, valLower); found {
-				result.positions = unionPositions(result.positions, pos)
-				detailParts = append(detailParts, fmt.Sprintf("attr_kv=%d", len(pos)))
-			}
-		}
-		if kvErr == nil {
-			if kvStatus == index.KVCapped {
-				detailParts = append(detailParts, "msg_kv=capped")
-			} else {
-				result.available = true
-				reader := index.NewKVIndexReader(chunkID, kvIdx.Entries())
-				if pos, found := reader.Lookup(keyLower, valLower); found {
-					result.positions = unionPositions(result.positions, pos)
-					detailParts = append(detailParts, fmt.Sprintf("msg_kv=%d", len(pos)))
-				}
-			}
-		}
-	}
-
-	// JSON structural index (dots in key → null-byte path separators).
-	jsonPathIdx, jsonPathStatus, jsonPathErr := im.OpenJSONPathIndex(chunkID)
-	jsonPVIdx, jsonPVStatus, jsonPVErr := im.OpenJSONPVIndex(chunkID)
-	if jsonPathErr == nil || jsonPVErr == nil {
-		var pathEntries []index.JSONPathIndexEntry
-		var pvEntries []index.JSONPVIndexEntry
-		if jsonPathErr == nil {
-			pathEntries = jsonPathIdx.Entries()
-		}
-		if jsonPVErr == nil {
-			pvEntries = jsonPVIdx.Entries()
-		}
-		jsonReader := index.NewJSONIndexReader(chunkID, pathEntries, jsonPathStatus, pvEntries, jsonPVStatus)
-
-		if f.Key != "" && f.Value == "" {
-			// Key exists: path lookup.
-			result.available = true
-			jsonPath := dotToNull(keyLower)
-			if pos, found := jsonReader.LookupPath(jsonPath); found {
-				result.positions = unionPositions(result.positions, pos)
-				detailParts = append(detailParts, fmt.Sprintf("msg_json=%d", len(pos)))
-			}
-		} else if f.Key != "" && f.Value != "" && f.Op != querylang.OpEq {
-			// Non-eq comparison: path-only lookup (runtime compare on value).
-			result.available = true
-			jsonPath := dotToNull(keyLower)
-			if pos, found := jsonReader.LookupPath(jsonPath); found {
-				result.positions = unionPositions(result.positions, pos)
-				detailParts = append(detailParts, fmt.Sprintf("msg_json=%d", len(pos)))
-			}
-		} else if f.Key != "" && f.Value != "" {
-			// Key=value: path-value lookup.
-			if jsonReader.PVStatus() == index.JSONCapped {
-				detailParts = append(detailParts, "msg_json=capped")
-			} else {
-				result.available = true
-				jsonPath := dotToNull(keyLower)
-				if pos, found := jsonReader.LookupPathValue(jsonPath, valLower); found {
-					result.positions = unionPositions(result.positions, pos)
-					detailParts = append(detailParts, fmt.Sprintf("msg_json=%d", len(pos)))
-				} else {
-					detailParts = append(detailParts, "msg_json=0")
-				}
-			}
-		}
-		// No JSON index for value-only queries.
-	}
+	result, detailParts := e.lookupKVStandard(f, chunkID, keyLower, valLower, &idx)
+	detailParts = e.lookupKVJSON(f, chunkID, keyLower, valLower, im, &result, detailParts)
 
 	result.details = strings.Join(detailParts, " ")
+	classifyKVResult(&result, detailParts)
+	return result
+}
 
-	if !result.available {
-		result.reason = "index_missing"
-	} else if len(result.positions) == 0 {
-		for _, d := range detailParts {
-			if strings.Contains(d, "capped") {
-				result.reason = "budget_exhausted"
-				return result
-			}
-		}
-		result.reason = "value_not_indexed"
+// lookupKVStandard performs the standard (non-JSON) KV index lookup.
+func (e *Engine) lookupKVStandard(f KeyValueFilter, chunkID chunk.ChunkID, keyLower, valLower string, idx *kvIndexes) (kvLookupResult, []string) {
+	var result kvLookupResult
+	var detailParts []string
+
+	switch {
+	case f.Value == "":
+		result, detailParts = lookupKeyOnly(chunkID, keyLower, idx)
+	case f.Key == "":
+		result, detailParts = lookupValueOnly(chunkID, valLower, idx)
+	case f.Op != querylang.OpEq:
+		result, detailParts = lookupKeyNonEq(chunkID, keyLower, idx)
+	default:
+		result, detailParts = lookupKeyValueExact(chunkID, keyLower, valLower, idx)
 	}
 
-	return result
+	return result, detailParts
+}
+
+// lookupKeyOnly handles key=* pattern KV lookups.
+func lookupKeyOnly(chunkID chunk.ChunkID, keyLower string, idx *kvIndexes) (kvLookupResult, []string) {
+	var result kvLookupResult
+	var detailParts []string
+
+	if idx.attrKeyErr == nil {
+		result.available = true
+		reader := index.NewAttrKeyIndexReader(chunkID, idx.attrKey.Entries())
+		if pos, found := reader.Lookup(keyLower); found {
+			result.positions = unionPositions(result.positions, pos)
+			detailParts = append(detailParts, fmt.Sprintf("attr_key=%d", len(pos)))
+		}
+	}
+
+	if idx.kvKeyErr != nil {
+		return result, detailParts
+	}
+	if idx.kvKeyStatus == index.KVCapped {
+		detailParts = append(detailParts, "msg_key=capped")
+		return result, detailParts
+	}
+	result.available = true
+	reader := index.NewKVKeyIndexReader(chunkID, idx.kvKey.Entries())
+	if pos, found := reader.Lookup(keyLower); found {
+		result.positions = unionPositions(result.positions, pos)
+		detailParts = append(detailParts, fmt.Sprintf("msg_key=%d", len(pos)))
+	}
+
+	return result, detailParts
+}
+
+// lookupValueOnly handles *=value pattern KV lookups.
+func lookupValueOnly(chunkID chunk.ChunkID, valLower string, idx *kvIndexes) (kvLookupResult, []string) {
+	var result kvLookupResult
+	var detailParts []string
+
+	if idx.attrValErr == nil {
+		result.available = true
+		reader := index.NewAttrValueIndexReader(chunkID, idx.attrVal.Entries())
+		if pos, found := reader.Lookup(valLower); found {
+			result.positions = unionPositions(result.positions, pos)
+			detailParts = append(detailParts, fmt.Sprintf("attr_val=%d", len(pos)))
+		}
+	}
+
+	if idx.kvValErr != nil {
+		return result, detailParts
+	}
+	if idx.kvValStatus == index.KVCapped {
+		detailParts = append(detailParts, "msg_val=capped")
+		return result, detailParts
+	}
+	result.available = true
+	reader := index.NewKVValueIndexReader(chunkID, idx.kvVal.Entries())
+	if pos, found := reader.Lookup(valLower); found {
+		result.positions = unionPositions(result.positions, pos)
+		detailParts = append(detailParts, fmt.Sprintf("msg_val=%d", len(pos)))
+	}
+
+	return result, detailParts
+}
+
+// lookupKeyNonEq handles non-eq comparison KV lookups (key-only index, runtime value comparison).
+func lookupKeyNonEq(chunkID chunk.ChunkID, keyLower string, idx *kvIndexes) (kvLookupResult, []string) {
+	var result kvLookupResult
+	var detailParts []string
+
+	if idx.attrKeyErr == nil {
+		result.available = true
+		reader := index.NewAttrKeyIndexReader(chunkID, idx.attrKey.Entries())
+		if pos, found := reader.Lookup(keyLower); found {
+			result.positions = unionPositions(result.positions, pos)
+			detailParts = append(detailParts, fmt.Sprintf("attr_key=%d", len(pos)))
+		}
+	}
+
+	if idx.kvKeyErr == nil {
+		if idx.kvKeyStatus == index.KVCapped {
+			detailParts = append(detailParts, "msg_key=capped")
+		} else {
+			result.available = true
+			reader := index.NewKVKeyIndexReader(chunkID, idx.kvKey.Entries())
+			if pos, found := reader.Lookup(keyLower); found {
+				result.positions = unionPositions(result.positions, pos)
+				detailParts = append(detailParts, fmt.Sprintf("msg_key=%d", len(pos)))
+			}
+		}
+	}
+
+	detailParts = append(detailParts, "filter=runtime_compare")
+	return result, detailParts
+}
+
+// lookupKeyValueExact handles exact key=value KV lookups.
+func lookupKeyValueExact(chunkID chunk.ChunkID, keyLower, valLower string, idx *kvIndexes) (kvLookupResult, []string) {
+	var result kvLookupResult
+	var detailParts []string
+
+	if idx.attrKVErr == nil {
+		result.available = true
+		reader := index.NewAttrKVIndexReader(chunkID, idx.attrKV.Entries())
+		if pos, found := reader.Lookup(keyLower, valLower); found {
+			result.positions = unionPositions(result.positions, pos)
+			detailParts = append(detailParts, fmt.Sprintf("attr_kv=%d", len(pos)))
+		}
+	}
+
+	if idx.kvErr == nil {
+		if idx.kvStatus == index.KVCapped {
+			detailParts = append(detailParts, "msg_kv=capped")
+		} else {
+			result.available = true
+			reader := index.NewKVIndexReader(chunkID, idx.kv.Entries())
+			if pos, found := reader.Lookup(keyLower, valLower); found {
+				result.positions = unionPositions(result.positions, pos)
+				detailParts = append(detailParts, fmt.Sprintf("msg_kv=%d", len(pos)))
+			}
+		}
+	}
+
+	return result, detailParts
+}
+
+// lookupKVJSON performs JSON structural index lookups.
+func (e *Engine) lookupKVJSON(f KeyValueFilter, chunkID chunk.ChunkID, keyLower, valLower string, im index.IndexManager, result *kvLookupResult, detailParts []string) []string {
+	jsonPathIdx, jsonPathStatus, jsonPathErr := im.OpenJSONPathIndex(chunkID)
+	jsonPVIdx, jsonPVStatus, jsonPVErr := im.OpenJSONPVIndex(chunkID)
+
+	if jsonPathErr != nil && jsonPVErr != nil {
+		return detailParts
+	}
+
+	var pathEntries []index.JSONPathIndexEntry
+	var pvEntries []index.JSONPVIndexEntry
+	if jsonPathErr == nil {
+		pathEntries = jsonPathIdx.Entries()
+	}
+	if jsonPVErr == nil {
+		pvEntries = jsonPVIdx.Entries()
+	}
+	jsonReader := index.NewJSONIndexReader(chunkID, pathEntries, jsonPathStatus, pvEntries, jsonPVStatus)
+
+	return lookupKVJSONByFilter(f, keyLower, valLower, jsonReader, result, detailParts)
+}
+
+// lookupKVJSONByFilter dispatches the JSON lookup based on the filter pattern.
+func lookupKVJSONByFilter(f KeyValueFilter, keyLower, valLower string, jsonReader *index.JSONIndexReader, result *kvLookupResult, detailParts []string) []string {
+	// No JSON index for value-only queries.
+	if f.Key == "" {
+		return detailParts
+	}
+
+	// Key exists (any value) or non-eq comparison: path-only lookup.
+	if f.Value == "" || f.Op != querylang.OpEq {
+		result.available = true
+		jsonPath := dotToNull(keyLower)
+		if pos, found := jsonReader.LookupPath(jsonPath); found {
+			result.positions = unionPositions(result.positions, pos)
+			detailParts = append(detailParts, fmt.Sprintf("msg_json=%d", len(pos)))
+		}
+		return detailParts
+	}
+
+	// Key=value exact: path-value lookup.
+	if jsonReader.PVStatus() == index.JSONCapped {
+		detailParts = append(detailParts, "msg_json=capped")
+		return detailParts
+	}
+	result.available = true
+	jsonPath := dotToNull(keyLower)
+	if pos, found := jsonReader.LookupPathValue(jsonPath, valLower); found {
+		result.positions = unionPositions(result.positions, pos)
+		detailParts = append(detailParts, fmt.Sprintf("msg_json=%d", len(pos)))
+	} else {
+		detailParts = append(detailParts, "msg_json=0")
+	}
+	return detailParts
+}
+
+// classifyKVResult sets the reason field on a kvLookupResult based on availability and positions.
+func classifyKVResult(result *kvLookupResult, detailParts []string) {
+	if !result.available {
+		result.reason = "index_missing"
+		return
+	}
+	if len(result.positions) > 0 {
+		return
+	}
+	for _, d := range detailParts {
+		if strings.Contains(d, "capped") {
+			result.reason = "budget_exhausted"
+			return
+		}
+	}
+	result.reason = "value_not_indexed"
 }
 
 // buildRuntimeFilterDesc builds a description of runtime filters for a query.

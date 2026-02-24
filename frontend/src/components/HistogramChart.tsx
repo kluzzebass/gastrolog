@@ -156,6 +156,14 @@ export function HistogramChart({
     });
   };
 
+  // Build a single tooltip line with a colored dot, label, and count.
+  const tooltipLine = (color: string, label: string, count: number, isBold: boolean): string => {
+    const dot = `<span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:${color};margin-right:5px;"></span>`;
+    const style = isBold ? "font-weight:bold" : hoveredGroup ? "opacity:0.5" : "opacity:0.7";
+    const valueStyle = isBold ? "font-weight:bold" : "";
+    return `${dot}<span style="${style}">${label}</span> <span style="${valueStyle}">${count.toLocaleString()}</span>`;
+  };
+
   // Build tooltip HTML for a bucket index.
   const tooltipFormatter = (params: any) => {
     const items: any[] = Array.isArray(params) ? params : [params];
@@ -165,25 +173,16 @@ export function HistogramChart({
     if (!bucket) return "";
 
     const lines: string[] = [];
-
     if (hasGroups) {
-      // Reversed order to match visual stacking (top-to-bottom).
       const groupSum = Object.values(bucket.groupCounts).reduce((a, b) => a + b, 0);
       const other = bucket.count - groupSum;
       if (other > 0) {
-        const isBold = hoveredGroup === "other";
-        const dot = `<span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:${copperColor};margin-right:5px;"></span>`;
-        const labelStyle = isBold ? "font-weight:bold" : hoveredGroup ? "opacity:0.5" : "opacity:0.7";
-        lines.push(`${dot}<span style="${labelStyle}">other</span> <span style="${isBold ? "font-weight:bold" : ""}">${other.toLocaleString()}</span>`);
+        lines.push(tooltipLine(copperColor, "other", other, hoveredGroup === "other"));
       }
       for (const key of [...groupKeys].reverse()) {
         const count = bucket.groupCounts[key];
         if (count && count > 0) {
-          const isBold = hoveredGroup === key;
-          const clr = resolveColor(colorMap.get(key) ?? copperColor);
-          const dot = `<span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:${clr};margin-right:5px;"></span>`;
-          const labelStyle = isBold ? "font-weight:bold" : hoveredGroup ? "opacity:0.5" : "opacity:0.7";
-          lines.push(`${dot}<span style="${labelStyle}">${key}</span> <span style="${isBold ? "font-weight:bold" : ""}">${count.toLocaleString()}</span>`);
+          lines.push(tooltipLine(resolveColor(colorMap.get(key) ?? copperColor), key, count, hoveredGroup === key));
         }
       }
     }

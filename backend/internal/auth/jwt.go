@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -74,7 +75,7 @@ func (ts *TokenService) Verify(tokenString string) (*Claims, error) {
 
 	claims, ok := token.Claims.(*Claims)
 	if !ok || !token.Valid {
-		return nil, fmt.Errorf("invalid token claims")
+		return nil, errors.New("invalid token claims")
 	}
 
 	return claims, nil

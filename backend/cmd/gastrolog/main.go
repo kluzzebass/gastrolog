@@ -11,11 +11,12 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	_ "net/http/pprof"
+	_ "net/http/pprof" //nolint:gosec // G108: pprof is intentionally available when --pprof flag is set
 	"os"
 	"os/signal"
 	"sync"
@@ -70,7 +71,8 @@ func main() {
 			if pprofAddr != "" {
 				go func() {
 					logger.Info("pprof server listening", "addr", pprofAddr)
-					if err := http.ListenAndServe(pprofAddr, nil); err != nil {
+					pprofSrv := &http.Server{Addr: pprofAddr, Handler: nil, ReadHeaderTimeout: 10 * time.Second}
+					if err := pprofSrv.ListenAndServe(); err != nil {
 						logger.Error("pprof server error", "error", err)
 					}
 				}()
@@ -120,13 +122,11 @@ func main() {
 }
 
 func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverAddr string, bootstrap, noAuth bool) error {
-	// Resolve home directory.
 	hd, err := resolveHome(homeFlag)
 	if err != nil {
 		return fmt.Errorf("resolve home directory: %w", err)
 	}
 
-	// For non-memory config types, ensure the home directory exists.
 	if configType != "memory" {
 		if err := hd.EnsureExists(); err != nil {
 			return err
@@ -134,18 +134,16 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 		logger.Info("home directory", "path", hd.Root())
 	}
 
-	// Open config store.
 	cfgStore, err := openConfigStore(hd, configType)
 	if err != nil {
 		return fmt.Errorf("open config store: %w", err)
 	}
 	if c, ok := cfgStore.(io.Closer); ok {
-		defer c.Close()
+		defer func() { _ = c.Close() }()
 	}
 
-	// Load configuration.
 	logger.Info("loading config", "type", configType)
-	cfg, err := cfgStore.Load(ctx)
+	cfg, err := ensureConfig(ctx, logger, cfgStore, bootstrap)
 	if err != nil {
 		return err
 	}
@@ -155,84 +153,104 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 		homeDir = hd.Root()
 	}
 
-	if cfg == nil {
-		if bootstrap {
-			logger.Info("no config found, bootstrapping default configuration")
-			if err := config.Bootstrap(ctx, cfgStore); err != nil {
-				return fmt.Errorf("bootstrap config: %w", err)
-			}
-		} else {
-			logger.Info("no config found, bootstrapping minimal configuration (auth only)")
-			if err := config.BootstrapMinimal(ctx, cfgStore); err != nil {
-				return fmt.Errorf("bootstrap minimal config: %w", err)
-			}
-		}
-		cfg, err = cfgStore.Load(ctx)
-		if err != nil {
-			return fmt.Errorf("load bootstrapped config: %w", err)
-		}
-	}
-
 	logger.Info("loaded config",
 		"ingesters", len(cfg.Ingesters),
 		"stores", len(cfg.Stores))
 
-	// Load persisted server config for scheduler settings.
-	var maxConcurrentJobs int
-	if raw, err := cfgStore.GetSetting(ctx, "server"); err == nil && raw != nil {
-		var sc config.ServerConfig
-		if err := json.Unmarshal([]byte(*raw), &sc); err == nil {
-			maxConcurrentJobs = sc.Scheduler.MaxConcurrentJobs
-		}
-	}
-
-	// Create orchestrator.
 	orch := orchestrator.New(orchestrator.Config{
 		Logger:            logger,
-		MaxConcurrentJobs: maxConcurrentJobs,
+		MaxConcurrentJobs: loadMaxConcurrentJobs(ctx, cfgStore),
 		ConfigLoader:      cfgStore,
 	})
-
-	// Register digesters (message enrichment pipeline).
 	orch.RegisterDigester(digestlevel.New())
 	orch.RegisterDigester(digesttimestamp.New())
 
-	// Apply configuration with factories.
 	factories := buildFactories(logger, homeDir, cfgStore, orch)
 	if err := orch.ApplyConfig(cfg, factories); err != nil {
 		return err
 	}
 
-	// Rebuild any missing indexes from interrupted builds.
 	logger.Info("checking for missing indexes")
 	if err := orch.RebuildMissingIndexes(ctx); err != nil {
 		return err
 	}
 
-	// Start the orchestrator.
 	logger.Info("starting orchestrator")
 	if err := orch.Start(ctx); err != nil {
 		return err
 	}
 	logger.Info("orchestrator started")
 
-	// Create TokenService from server config for auth RPCs.
-	// Skipped in no-auth mode since authentication is disabled.
-	var tokens *auth.TokenService
-	if !noAuth {
-		tokens, err = buildTokenService(ctx, cfgStore)
-		if err != nil {
-			return fmt.Errorf("build token service: %w", err)
-		}
-	} else {
-		logger.Info("authentication disabled (--no-auth)")
+	tokens, err := buildAuthTokens(ctx, logger, cfgStore, noAuth)
+	if err != nil {
+		return err
 	}
 
-	// Certificate manager: load certs from config store.
+	certMgr, err := loadCertManager(ctx, logger, cfgStore)
+	if err != nil {
+		return err
+	}
+
+	return serveAndAwaitShutdown(ctx, logger, serverAddr, orch, cfgStore, factories, tokens, certMgr, noAuth)
+}
+
+func ensureConfig(ctx context.Context, logger *slog.Logger, cfgStore config.Store, bootstrap bool) (*config.Config, error) {
+	cfg, err := cfgStore.Load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if cfg != nil {
+		return cfg, nil
+	}
+
+	if bootstrap {
+		logger.Info("no config found, bootstrapping default configuration")
+		if err := config.Bootstrap(ctx, cfgStore); err != nil {
+			return nil, fmt.Errorf("bootstrap config: %w", err)
+		}
+	} else {
+		logger.Info("no config found, bootstrapping minimal configuration (auth only)")
+		if err := config.BootstrapMinimal(ctx, cfgStore); err != nil {
+			return nil, fmt.Errorf("bootstrap minimal config: %w", err)
+		}
+	}
+
+	cfg, err = cfgStore.Load(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load bootstrapped config: %w", err)
+	}
+	return cfg, nil
+}
+
+func loadMaxConcurrentJobs(ctx context.Context, cfgStore config.Store) int {
+	raw, err := cfgStore.GetSetting(ctx, "server")
+	if err != nil || raw == nil {
+		return 0
+	}
+	var sc config.ServerConfig
+	if err := json.Unmarshal([]byte(*raw), &sc); err != nil {
+		return 0
+	}
+	return sc.Scheduler.MaxConcurrentJobs
+}
+
+func buildAuthTokens(ctx context.Context, logger *slog.Logger, cfgStore config.Store, noAuth bool) (*auth.TokenService, error) {
+	if noAuth {
+		logger.Info("authentication disabled (--no-auth)")
+		return nil, nil
+	}
+	tokens, err := buildTokenService(ctx, cfgStore)
+	if err != nil {
+		return nil, fmt.Errorf("build token service: %w", err)
+	}
+	return tokens, nil
+}
+
+func loadCertManager(ctx context.Context, logger *slog.Logger, cfgStore config.Store) (*cert.Manager, error) {
 	certMgr := cert.New(cert.Config{Logger: logger})
 	certList, err := cfgStore.ListCertificates(ctx)
 	if err != nil {
-		return fmt.Errorf("list certificates: %w", err)
+		return nil, fmt.Errorf("list certificates: %w", err)
 	}
 	certs := make(map[string]cert.CertSource, len(certList))
 	for _, c := range certList {
@@ -240,13 +258,15 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 	}
 	sc, err := config.LoadServerConfig(ctx, cfgStore)
 	if err != nil {
-		return fmt.Errorf("load server config for TLS: %w", err)
+		return nil, fmt.Errorf("load server config for TLS: %w", err)
 	}
 	if err := certMgr.LoadFromConfig(sc.TLS.DefaultCert, certs); err != nil {
-		return fmt.Errorf("load certs: %w", err)
+		return nil, fmt.Errorf("load certs: %w", err)
 	}
+	return certMgr, nil
+}
 
-	// Start server if address is provided.
+func serveAndAwaitShutdown(ctx context.Context, logger *slog.Logger, serverAddr string, orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, tokens *auth.TokenService, certMgr *cert.Manager, noAuth bool) error {
 	var srv *server.Server
 	var serverWg sync.WaitGroup
 	if serverAddr != "" {
@@ -258,10 +278,8 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 		})
 	}
 
-	// Wait for shutdown signal.
 	<-ctx.Done()
 
-	// Stop the server first.
 	if srv != nil {
 		logger.Info("stopping server")
 		if err := srv.Stop(ctx); err != nil {
@@ -270,7 +288,6 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 		serverWg.Wait()
 	}
 
-	// Stop the orchestrator.
 	logger.Info("shutting down orchestrator")
 	if err := orch.Stop(); err != nil {
 		return err
@@ -335,7 +352,7 @@ func buildTokenService(ctx context.Context, cfgStore config.Store) (*auth.TokenS
 		return nil, fmt.Errorf("get server setting: %w", err)
 	}
 	if val == nil {
-		return nil, fmt.Errorf("server config not found (bootstrap may have failed)")
+		return nil, errors.New("server config not found (bootstrap may have failed)")
 	}
 
 	var serverCfg config.ServerConfig

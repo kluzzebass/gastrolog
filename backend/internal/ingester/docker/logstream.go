@@ -24,6 +24,8 @@ func (s streamType) String() string {
 		return "stdout"
 	case streamStderr:
 		return "stderr"
+	case streamStdin:
+		return "stdin"
 	default:
 		return "stdin"
 	}

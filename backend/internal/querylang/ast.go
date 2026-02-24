@@ -93,9 +93,9 @@ func (p *PredicateExpr) String() string {
 	case PredKV:
 		return fmt.Sprintf("%s%s%s", p.Key, p.Op, p.Value)
 	case PredKeyExists:
-		return fmt.Sprintf("%s=*", p.Key)
+		return p.Key + "=*"
 	case PredValueExists:
-		return fmt.Sprintf("*=%s", p.Value)
+		return "*=" + p.Value
 	case PredRegex:
 		return fmt.Sprintf("regex(/%s/)", p.Value)
 	case PredGlob:

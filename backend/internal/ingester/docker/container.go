@@ -2,7 +2,6 @@ package docker
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"maps"
 	"time"
@@ -17,7 +16,7 @@ func containerAttrs(info containerInfo) map[string]string {
 	attrs["name"] = info.Name
 	attrs["image"] = info.Image
 	for k, v := range info.Labels {
-		attrs[fmt.Sprintf("label.%s", k)] = v
+		attrs["label."+k] = v
 	}
 	return attrs
 }
@@ -79,7 +78,7 @@ func streamOnce(
 	if err != nil {
 		return err
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 
 	entries := make(chan logEntry, 64)
 	streamErr := make(chan error, 1)

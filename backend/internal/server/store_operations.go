@@ -245,17 +245,8 @@ func (s *StoreServer) MergeStores(
 
 	// Auto-disable source to prevent new data flowing in during merge.
 	if s.orch.IsStoreEnabled(srcID) {
-		if err := s.orch.DisableStore(srcID); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("disable source: %w", err))
-		}
-		if s.cfgStore != nil {
-			srcCfg, err := s.getFullStoreConfig(ctx, srcID)
-			if err == nil {
-				srcCfg.Enabled = false
-				if err := s.cfgStore.PutStore(ctx, srcCfg); err != nil {
-					s.logger.Warn("persist disabled source config", "store", srcID, "error", err)
-				}
-			}
+		if err := s.disableAndPersistStore(ctx, srcID); err != nil {
+			return nil, err
 		}
 	}
 
@@ -294,63 +285,82 @@ func (s *StoreServer) ExportStore(
 		return mapStoreError(err)
 	}
 
-	const batchSize = 100
-
 	for _, meta := range metas {
-		cursor, err := s.orch.OpenCursor(storeID, meta.ID)
+		if err := s.exportChunk(storeID, meta.ID, stream); err != nil {
+			return err
+		}
+	}
+
+	return stream.Send(&apiv1.ExportStoreResponse{HasMore: false})
+}
+
+func (s *StoreServer) exportChunk(storeID uuid.UUID, chunkID chunk.ChunkID, stream *connect.ServerStream[apiv1.ExportStoreResponse]) error {
+	cursor, err := s.orch.OpenCursor(storeID, chunkID)
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, fmt.Errorf("open chunk %s: %w", chunkID, err))
+	}
+	defer func() { _ = cursor.Close() }()
+
+	const batchSize = 100
+	batch := make([]*apiv1.ExportRecord, 0, batchSize)
+
+	for {
+		rec, _, err := cursor.Next()
+		if errors.Is(err, chunk.ErrNoMoreRecords) {
+			break
+		}
 		if err != nil {
-			return connect.NewError(connect.CodeInternal, fmt.Errorf("open chunk %s: %w", meta.ID, err))
+			return connect.NewError(connect.CodeInternal, fmt.Errorf("read chunk %s: %w", chunkID, err))
 		}
 
-		batch := make([]*apiv1.ExportRecord, 0, batchSize)
-		for {
-			rec, _, err := cursor.Next()
-			if errors.Is(err, chunk.ErrNoMoreRecords) {
-				break
-			}
-			if err != nil {
-				cursor.Close()
-				return connect.NewError(connect.CodeInternal, fmt.Errorf("read chunk %s: %w", meta.ID, err))
-			}
+		batch = append(batch, recordToExportProto(rec))
 
-			exportRec := &apiv1.ExportRecord{
-				Raw: rec.Raw,
-			}
-			if !rec.SourceTS.IsZero() {
-				exportRec.SourceTs = timestamppb.New(rec.SourceTS)
-			}
-			if !rec.IngestTS.IsZero() {
-				exportRec.IngestTs = timestamppb.New(rec.IngestTS)
-			}
-			if len(rec.Attrs) > 0 {
-				exportRec.Attrs = make(map[string]string, len(rec.Attrs))
-				maps.Copy(exportRec.Attrs, rec.Attrs)
-			}
-			batch = append(batch, exportRec)
-
-			if len(batch) >= batchSize {
-				if err := stream.Send(&apiv1.ExportStoreResponse{Records: batch, HasMore: true}); err != nil {
-					cursor.Close()
-					return err
-				}
-				batch = make([]*apiv1.ExportRecord, 0, batchSize)
-			}
-		}
-		cursor.Close()
-
-		// Flush remaining records for this chunk.
-		if len(batch) > 0 {
+		if len(batch) >= batchSize {
 			if err := stream.Send(&apiv1.ExportStoreResponse{Records: batch, HasMore: true}); err != nil {
 				return err
 			}
+			batch = batch[:0]
 		}
 	}
 
-	// Final empty message to signal end.
-	if err := stream.Send(&apiv1.ExportStoreResponse{HasMore: false}); err != nil {
-		return err
+	if len(batch) > 0 {
+		return stream.Send(&apiv1.ExportStoreResponse{Records: batch, HasMore: true})
 	}
+	return nil
+}
 
+func recordToExportProto(rec chunk.Record) *apiv1.ExportRecord {
+	exportRec := &apiv1.ExportRecord{Raw: rec.Raw}
+	if !rec.SourceTS.IsZero() {
+		exportRec.SourceTs = timestamppb.New(rec.SourceTS)
+	}
+	if !rec.IngestTS.IsZero() {
+		exportRec.IngestTs = timestamppb.New(rec.IngestTS)
+	}
+	if len(rec.Attrs) > 0 {
+		exportRec.Attrs = make(map[string]string, len(rec.Attrs))
+		maps.Copy(exportRec.Attrs, rec.Attrs)
+	}
+	return exportRec
+}
+
+func (s *StoreServer) disableAndPersistStore(ctx context.Context, id uuid.UUID) error {
+	if err := s.orch.DisableStore(id); err != nil {
+		return connect.NewError(connect.CodeInternal, fmt.Errorf("disable source: %w", err))
+	}
+	if s.cfgStore == nil {
+		return nil
+	}
+	srcCfg, err := s.getFullStoreConfig(ctx, id)
+	if err != nil {
+		// Store is already disabled in memory; best-effort config persistence.
+		s.logger.Warn("get store config for persist", "store", id, "error", err)
+		return nil
+	}
+	srcCfg.Enabled = false
+	if err := s.cfgStore.PutStore(ctx, srcCfg); err != nil {
+		s.logger.Warn("persist disabled source config", "store", id, "error", err)
+	}
 	return nil
 }
 

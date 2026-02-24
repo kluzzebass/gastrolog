@@ -126,38 +126,14 @@ func isLoopback(host string) bool {
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if origin != "" {
-			scheme := "http"
-			if r.TLS != nil {
-				scheme = "https"
-			}
-			sameOrigin := scheme + "://" + r.Host
-			allowed := origin == sameOrigin
-			if !allowed {
-				// Dev with proxy: frontend (e.g. localhost:3000) proxies to backend (localhost:4564).
-				// Allow any loopback origin when request is to loopback.
-				reqHost, _, _ := net.SplitHostPort(r.Host)
-				reqHost = cmp.Or(reqHost, r.Host)
-				if isLoopback(reqHost) {
-					if u, err := url.Parse(origin); err == nil {
-						oHost, _, _ := net.SplitHostPort(u.Host)
-						if oHost == "" {
-							oHost = u.Host
-						}
-						allowed = isLoopback(oHost)
-					}
-				}
-			}
-			if allowed {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Connect-Protocol-Version, Connect-Timeout-Ms, Grpc-Timeout, X-Grpc-Web, X-User-Agent")
-				w.Header().Set("Access-Control-Expose-Headers", "Grpc-Status, Grpc-Message, Grpc-Status-Details-Bin")
-				w.Header().Set("Access-Control-Max-Age", "86400")
-			}
+		if origin != "" && isOriginAllowed(origin, r) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Connect-Protocol-Version, Connect-Timeout-Ms, Grpc-Timeout, X-Grpc-Web, X-User-Agent")
+			w.Header().Set("Access-Control-Expose-Headers", "Grpc-Status, Grpc-Message, Grpc-Status-Details-Bin")
+			w.Header().Set("Access-Control-Max-Age", "86400")
 		}
 
-		// Handle preflight requests
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -165,6 +141,30 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+func isOriginAllowed(origin string, r *http.Request) bool {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if origin == scheme+"://"+r.Host {
+		return true
+	}
+	reqHost, _, _ := net.SplitHostPort(r.Host)
+	reqHost = cmp.Or(reqHost, r.Host)
+	if !isLoopback(reqHost) {
+		return false
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	oHost, _, _ := net.SplitHostPort(u.Host)
+	if oHost == "" {
+		oHost = u.Host
+	}
+	return isLoopback(oHost)
 }
 
 // trackingMiddleware wraps an http.Handler to track in-flight requests.
@@ -192,24 +192,7 @@ func (s *Server) buildMux() *http.ServeMux {
 		handlerOpts = append(handlerOpts, connect.WithInterceptors(authInterceptor))
 	}
 
-	var queryTimeout time.Duration
-	var maxFollowDuration time.Duration
-	var maxResultCount int64
-	if s.cfgStore != nil {
-		if sc, err := config.LoadServerConfig(context.Background(), s.cfgStore); err == nil {
-			if sc.Query.Timeout != "" {
-				if d, err := time.ParseDuration(sc.Query.Timeout); err == nil {
-					queryTimeout = d
-				}
-			}
-			if sc.Query.MaxFollowDuration != "" {
-				if d, err := time.ParseDuration(sc.Query.MaxFollowDuration); err == nil {
-					maxFollowDuration = d
-				}
-			}
-			maxResultCount = int64(sc.Query.MaxResultCount)
-		}
-	}
+	queryTimeout, maxFollowDuration, maxResultCount := s.loadQueryConfig()
 	queryServer := NewQueryServer(s.orch, queryTimeout, maxFollowDuration, maxResultCount)
 	storeServer := NewStoreServer(s.orch, s.cfgStore, s.factories, s.logger)
 	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager)
@@ -235,6 +218,28 @@ func (s *Server) buildMux() *http.ServeMux {
 	return mux
 }
 
+func (s *Server) loadQueryConfig() (queryTimeout, maxFollowDuration time.Duration, maxResultCount int64) {
+	if s.cfgStore == nil {
+		return 0, 0, 0
+	}
+	sc, err := config.LoadServerConfig(context.Background(), s.cfgStore)
+	if err != nil {
+		return 0, 0, 0
+	}
+	if sc.Query.Timeout != "" {
+		if d, err := time.ParseDuration(sc.Query.Timeout); err == nil {
+			queryTimeout = d
+		}
+	}
+	if sc.Query.MaxFollowDuration != "" {
+		if d, err := time.ParseDuration(sc.Query.MaxFollowDuration); err == nil {
+			maxFollowDuration = d
+		}
+	}
+	maxResultCount = int64(sc.Query.MaxResultCount)
+	return queryTimeout, maxFollowDuration, maxResultCount
+}
+
 // Serve starts the server on the given listener.
 // HTTP is always on; HTTPS is started when TLS enabled and default cert exists.
 // It blocks until the server is stopped or an error occurs.
@@ -256,7 +261,8 @@ func (s *Server) Serve(listener net.Listener) error {
 	// HTTP adds redirect-to-HTTPS + h2c (HTTP/2 without TLS).
 	redirectHandler := s.redirectMiddleware(s.handler)
 	s.server = &http.Server{
-		Handler: h2c.NewHandler(redirectHandler, &http2.Server{}),
+		Handler:           h2c.NewHandler(redirectHandler, &http2.Server{}),
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	// Initial TLS config: start HTTPS if enabled
@@ -358,7 +364,8 @@ func (s *Server) reconfigureTLS() {
 
 	s.httpsListener = tlsLn
 	s.httpsServer = &http.Server{
-		Handler: s.handler,
+		Handler:           s.handler,
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 	s.logger.Info("HTTPS listener started", "addr", httpsAddr)
 

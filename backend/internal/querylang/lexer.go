@@ -280,20 +280,16 @@ func (l *Lexer) scanBareword() (Token, error) {
 		ch := l.input[l.pos]
 		if isBarewordChar(ch) {
 			l.pos++
-		} else if ch == '*' || ch == '?' || ch == '[' {
-			hasGlobMeta = true
-			l.pos++
-			// For '[', scan to closing ']'
-			if ch == '[' {
-				for l.pos < len(l.input) && l.input[l.pos] != ']' {
-					l.pos++
-				}
-				if l.pos < len(l.input) {
-					l.pos++ // skip ']'
-				}
-			}
-		} else {
+			continue
+		}
+		if ch != '*' && ch != '?' && ch != '[' {
 			break
+		}
+		hasGlobMeta = true
+		l.pos++
+		// For '[', scan to closing ']'
+		if ch == '[' {
+			l.scanBracketClass()
 		}
 	}
 
@@ -305,6 +301,16 @@ func (l *Lexer) scanBareword() (Token, error) {
 
 	kind := classifyWord(lit)
 	return Token{Kind: kind, Lit: lit, Pos: startPos}, nil
+}
+
+// scanBracketClass advances past a bracket character class in a glob pattern (e.g. [abc]).
+func (l *Lexer) scanBracketClass() {
+	for l.pos < len(l.input) && l.input[l.pos] != ']' {
+		l.pos++
+	}
+	if l.pos < len(l.input) {
+		l.pos++ // skip ']'
+	}
 }
 
 // scanGlobBareword scans a glob pattern starting with '*'.

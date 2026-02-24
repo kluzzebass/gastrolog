@@ -30,7 +30,7 @@ var _ config.Store = (*Store)(nil)
 // NewStore opens a SQLite database at path and runs migrations.
 func NewStore(path string) (*Store, error) {
 	if dir := filepath.Dir(path); dir != "." {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return nil, fmt.Errorf("create config directory: %w", err)
 		}
 	}
@@ -44,16 +44,16 @@ func NewStore(path string) (*Store, error) {
 
 	// Set pragmas.
 	if _, err := db.Exec("PRAGMA journal_mode = WAL"); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("set journal_mode: %w", err)
 	}
 	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("set foreign_keys: %w", err)
 	}
 
 	if err := runMigrations(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("run migrations: %w", err)
 	}
 
@@ -162,7 +162,7 @@ func (s *Store) ListFilters(ctx context.Context) ([]config.FilterConfig, error) 
 	if err != nil {
 		return nil, fmt.Errorf("list filters: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []config.FilterConfig
 	for rows.Next() {
@@ -221,7 +221,7 @@ func (s *Store) ListRotationPolicies(ctx context.Context) ([]config.RotationPoli
 	if err != nil {
 		return nil, fmt.Errorf("list rotation policies: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []config.RotationPolicyConfig
 	for rows.Next() {
@@ -283,7 +283,7 @@ func (s *Store) ListRetentionPolicies(ctx context.Context) ([]config.RetentionPo
 	if err != nil {
 		return nil, fmt.Errorf("list retention policies: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []config.RetentionPolicyConfig
 	for rows.Next() {
@@ -365,7 +365,7 @@ func (s *Store) ListStores(ctx context.Context) ([]config.StoreConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list stores: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []config.StoreConfig
 	for rows.Next() {
@@ -421,7 +421,7 @@ func (s *Store) PutStore(ctx context.Context, st config.StoreConfig) error {
 	if err != nil {
 		return fmt.Errorf("begin tx for store %q: %w", st.ID, err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO stores (id, name, type, filter, policy, params, enabled)
@@ -461,7 +461,7 @@ func (s *Store) DeleteStore(ctx context.Context, id uuid.UUID) error {
 	if err != nil {
 		return fmt.Errorf("begin tx for delete store %q: %w", id, err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx,
 		"DELETE FROM store_retention_rules WHERE store_id = ?", id); err != nil {
@@ -481,7 +481,7 @@ func (s *Store) loadRetentionRules(ctx context.Context, storeID uuid.UUID) ([]co
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var rules []config.RetentionRule
 	for rows.Next() {
@@ -507,7 +507,7 @@ func (s *Store) loadAllRetentionRules(ctx context.Context) (map[uuid.UUID][]conf
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	result := make(map[uuid.UUID][]config.RetentionRule)
 	for rows.Next() {
@@ -556,7 +556,7 @@ func (s *Store) ListIngesters(ctx context.Context) ([]config.IngesterConfig, err
 	if err != nil {
 		return nil, fmt.Errorf("list ingesters: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []config.IngesterConfig
 	for rows.Next() {
@@ -618,7 +618,7 @@ func (s *Store) listSettings(ctx context.Context) (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list settings: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	result := make(map[string]string)
 	for rows.Next() {
@@ -676,7 +676,7 @@ func (s *Store) ListCertificates(ctx context.Context) ([]config.CertPEM, error) 
 	if err != nil {
 		return nil, fmt.Errorf("list certificates: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []config.CertPEM
 	for rows.Next() {
@@ -798,7 +798,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]config.User, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var users []config.User
 	for rows.Next() {

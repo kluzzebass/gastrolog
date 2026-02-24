@@ -1,6 +1,7 @@
 package index
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -112,7 +113,7 @@ func (r *JSONIndexReader) LookupPathPrefix(prefix string) ([]uint64, bool) {
 	}
 
 	// Sort and deduplicate positions.
-	sort.Slice(positions, func(i, j int) bool { return positions[i] < positions[j] })
+	slices.Sort(positions)
 	positions = dedup(positions)
 
 	return positions, true

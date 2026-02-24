@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -55,41 +56,57 @@ func (s *QueryServer) Search(
 		return connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	// Pipeline query: run and return table or records.
 	if pipeline != nil && len(pipeline.Pipes) > 0 {
-		result, err := eng.RunPipeline(ctx, q, pipeline)
-		if err != nil {
-			return connect.NewError(connect.CodeInternal, err)
-		}
-		if result.Table != nil {
-			return stream.Send(&apiv1.SearchResponse{
-				TableResult: tableResultToProto(result.Table, pipeline),
-			})
-		}
-		// Non-aggregating pipeline: stream records.
-		batch := make([]*apiv1.Record, 0, 100)
-		for _, rec := range result.Records {
-			batch = append(batch, recordToProto(rec))
-			if len(batch) >= 100 {
-				if err := stream.Send(&apiv1.SearchResponse{Records: batch, HasMore: true}); err != nil {
-					return err
-				}
-				batch = batch[:0]
-			}
-		}
-		return stream.Send(&apiv1.SearchResponse{Records: batch})
+		return s.searchPipeline(ctx, eng, q, pipeline, stream)
 	}
 
-	// Clamp query limit to server-configured max.
+	return s.searchDirect(ctx, eng, q, req.Msg.ResumeToken, stream)
+}
+
+func (s *QueryServer) searchPipeline(
+	ctx context.Context,
+	eng *query.Engine,
+	q query.Query,
+	pipeline *querylang.Pipeline,
+	stream *connect.ServerStream[apiv1.SearchResponse],
+) error {
+	result, err := eng.RunPipeline(ctx, q, pipeline)
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, err)
+	}
+	if result.Table != nil {
+		return stream.Send(&apiv1.SearchResponse{
+			TableResult: tableResultToProto(result.Table, pipeline),
+		})
+	}
+	batch := make([]*apiv1.Record, 0, 100)
+	for _, rec := range result.Records {
+		batch = append(batch, recordToProto(rec))
+		if len(batch) >= 100 {
+			if err := stream.Send(&apiv1.SearchResponse{Records: batch, HasMore: true}); err != nil {
+				return err
+			}
+			batch = batch[:0]
+		}
+	}
+	return stream.Send(&apiv1.SearchResponse{Records: batch})
+}
+
+func (s *QueryServer) searchDirect(
+	ctx context.Context,
+	eng *query.Engine,
+	q query.Query,
+	resumeTokenData []byte,
+	stream *connect.ServerStream[apiv1.SearchResponse],
+) error {
 	if s.maxResultCount > 0 && (q.Limit == 0 || int64(q.Limit) > s.maxResultCount) {
 		q.Limit = int(s.maxResultCount)
 	}
 
-	// Parse resume token from request
 	var resume *query.ResumeToken
-	if len(req.Msg.ResumeToken) > 0 {
+	if len(resumeTokenData) > 0 {
 		var err error
-		resume, err = protoToResumeToken(req.Msg.ResumeToken)
+		resume, err = protoToResumeToken(resumeTokenData)
 		if err != nil {
 			return connect.NewError(connect.CodeInvalidArgument, err)
 		}
@@ -97,26 +114,14 @@ func (s *QueryServer) Search(
 
 	iter, getToken := eng.Search(ctx, q, resume)
 
-	// Batch records for efficiency
 	const batchSize = 100
 	batch := make([]*apiv1.Record, 0, batchSize)
 
 	for rec, err := range iter {
 		if err != nil {
-			if errors.Is(err, context.DeadlineExceeded) {
-				return connect.NewError(connect.CodeDeadlineExceeded, err)
-			}
-			if errors.Is(err, context.Canceled) {
-				return connect.NewError(connect.CodeCanceled, err)
-			}
-			if errors.Is(err, query.ErrInvalidResumeToken) {
-				return connect.NewError(connect.CodeInvalidArgument, err)
-			}
-			return connect.NewError(connect.CodeInternal, err)
+			return mapSearchError(err)
 		}
-
 		batch = append(batch, recordToProto(rec))
-
 		if len(batch) >= batchSize {
 			if err := stream.Send(&apiv1.SearchResponse{Records: batch, HasMore: true}); err != nil {
 				return err
@@ -125,23 +130,29 @@ func (s *QueryServer) Search(
 		}
 	}
 
-	// Get resume token for final response
 	var tokenBytes []byte
 	if token := getToken(); token != nil {
 		tokenBytes = resumeTokenToProto(token)
 	}
 
-	// Send remaining records. HasMore=true when a resume token exists
-	// (limit was reached and more records are available).
-	if err := stream.Send(&apiv1.SearchResponse{
+	return stream.Send(&apiv1.SearchResponse{
 		Records:     batch,
 		ResumeToken: tokenBytes,
 		HasMore:     len(tokenBytes) > 0,
-	}); err != nil {
-		return err
-	}
+	})
+}
 
-	return nil
+func mapSearchError(err error) error {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return connect.NewError(connect.CodeDeadlineExceeded, err)
+	case errors.Is(err, context.Canceled):
+		return connect.NewError(connect.CodeCanceled, err)
+	case errors.Is(err, query.ErrInvalidResumeToken):
+		return connect.NewError(connect.CodeInvalidArgument, err)
+	default:
+		return connect.NewError(connect.CodeInternal, err)
+	}
 }
 
 // Follow executes a query and streams matching records, continuously polling for new arrivals.
@@ -171,19 +182,19 @@ func (s *QueryServer) Follow(
 			switch pipe.(type) {
 			case *querylang.StatsOp:
 				return connect.NewError(connect.CodeInvalidArgument,
-					fmt.Errorf("stats operator is not supported in follow mode"))
+					errors.New("stats operator is not supported in follow mode"))
 			case *querylang.SortOp:
 				return connect.NewError(connect.CodeInvalidArgument,
-					fmt.Errorf("sort operator is not supported in follow mode"))
+					errors.New("sort operator is not supported in follow mode"))
 			case *querylang.TailOp:
 				return connect.NewError(connect.CodeInvalidArgument,
-					fmt.Errorf("tail operator is not supported in follow mode"))
+					errors.New("tail operator is not supported in follow mode"))
 			case *querylang.SliceOp:
 				return connect.NewError(connect.CodeInvalidArgument,
-					fmt.Errorf("slice operator is not supported in follow mode"))
+					errors.New("slice operator is not supported in follow mode"))
 			case *querylang.TimechartOp:
 				return connect.NewError(connect.CodeInvalidArgument,
-					fmt.Errorf("timechart operator is not supported in follow mode"))
+					errors.New("timechart operator is not supported in follow mode"))
 			}
 		}
 	}
@@ -229,7 +240,7 @@ func (s *QueryServer) Explain(
 	resp := &apiv1.ExplainResponse{
 		Chunks:      make([]*apiv1.ChunkPlan, 0, len(plan.ChunkPlans)),
 		Direction:   plan.Direction,
-		TotalChunks: int32(plan.TotalChunks),
+		TotalChunks: int32(plan.TotalChunks), //nolint:gosec // G115: chunk count always fits in int32
 	}
 	resp.Expression = plan.Query.String()
 	if !plan.Query.Start.IsZero() {
@@ -287,7 +298,7 @@ func (s *QueryServer) GetContext(
 
 	ref := req.Msg.Ref
 	if ref == nil || ref.StoreId == "" || ref.ChunkId == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("ref must include store_id, chunk_id, and pos"))
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("ref must include store_id, chunk_id, and pos"))
 	}
 
 	storeID, connErr := parseUUID(ref.StoreId)
@@ -424,93 +435,107 @@ func parseExpression(expr string) (query.Query, *querylang.Pipeline, error) {
 
 	for _, part := range parts {
 		k, v, ok := strings.Cut(part, "=")
-		if ok {
-			switch k {
-			case "reverse":
-				q.IsReverse = v == "true"
-				continue
-			case "start":
-				t, err := parseTime(v)
-				if err != nil {
-					return q, nil, fmt.Errorf("invalid start time: %w", err)
-				}
-				q.Start = t
-				continue
-			case "end":
-				t, err := parseTime(v)
-				if err != nil {
-					return q, nil, fmt.Errorf("invalid end time: %w", err)
-				}
-				q.End = t
-				continue
-			case "last":
-				d, err := parseDuration(v)
-				if err != nil {
-					return q, nil, fmt.Errorf("invalid last duration: %w", err)
-				}
-				now := time.Now()
-				q.Start = now.Add(-d)
-				q.End = now
-				continue
-			case "source_start":
-				t, err := parseTime(v)
-				if err != nil {
-					return q, nil, fmt.Errorf("invalid source_start time: %w", err)
-				}
-				q.SourceStart = t
-				continue
-			case "source_end":
-				t, err := parseTime(v)
-				if err != nil {
-					return q, nil, fmt.Errorf("invalid source_end time: %w", err)
-				}
-				q.SourceEnd = t
-				continue
-			case "ingest_start":
-				t, err := parseTime(v)
-				if err != nil {
-					return q, nil, fmt.Errorf("invalid ingest_start time: %w", err)
-				}
-				q.IngestStart = t
-				continue
-			case "ingest_end":
-				t, err := parseTime(v)
-				if err != nil {
-					return q, nil, fmt.Errorf("invalid ingest_end time: %w", err)
-				}
-				q.IngestEnd = t
-				continue
-			case "limit":
-				var n int
-				if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
-					return q, nil, fmt.Errorf("invalid limit: %w", err)
-				}
-				q.Limit = n
-				continue
-			case "pos":
-				var n uint64
-				if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
-					return q, nil, fmt.Errorf("invalid pos: %w", err)
-				}
-				q.Pos = &n
-				continue
-			}
+		if !ok {
+			filterParts = append(filterParts, part)
+			continue
 		}
-		filterParts = append(filterParts, part)
-	}
-
-	if len(filterParts) > 0 {
-		pipeline, err := querylang.ParsePipeline(strings.Join(filterParts, " "))
+		consumed, err := applyDirective(&q, k, v)
 		if err != nil {
-			return q, nil, fmt.Errorf("parse error: %w", err)
+			return q, nil, err
 		}
-		q.BoolExpr = pipeline.Filter
-		if len(pipeline.Pipes) > 0 {
-			return q, pipeline, nil
+		if !consumed {
+			filterParts = append(filterParts, part)
 		}
 	}
 
+	if len(filterParts) == 0 {
+		return q, nil, nil
+	}
+
+	pipeline, err := querylang.ParsePipeline(strings.Join(filterParts, " "))
+	if err != nil {
+		return q, nil, fmt.Errorf("parse error: %w", err)
+	}
+	q.BoolExpr = pipeline.Filter
+	if len(pipeline.Pipes) > 0 {
+		return q, pipeline, nil
+	}
 	return q, nil, nil
+}
+
+func applyDirective(q *query.Query, k, v string) (bool, error) {
+	switch k {
+	case "reverse":
+		q.IsReverse = v == "true"
+		return true, nil
+	case "start":
+		t, err := parseTime(v)
+		if err != nil {
+			return false, fmt.Errorf("invalid start time: %w", err)
+		}
+		q.Start = t
+		return true, nil
+	case "end":
+		t, err := parseTime(v)
+		if err != nil {
+			return false, fmt.Errorf("invalid end time: %w", err)
+		}
+		q.End = t
+		return true, nil
+	case "last":
+		d, err := parseDuration(v)
+		if err != nil {
+			return false, fmt.Errorf("invalid last duration: %w", err)
+		}
+		now := time.Now()
+		q.Start = now.Add(-d)
+		q.End = now
+		return true, nil
+	case "source_start":
+		t, err := parseTime(v)
+		if err != nil {
+			return false, fmt.Errorf("invalid source_start time: %w", err)
+		}
+		q.SourceStart = t
+		return true, nil
+	case "source_end":
+		t, err := parseTime(v)
+		if err != nil {
+			return false, fmt.Errorf("invalid source_end time: %w", err)
+		}
+		q.SourceEnd = t
+		return true, nil
+	case "ingest_start":
+		t, err := parseTime(v)
+		if err != nil {
+			return false, fmt.Errorf("invalid ingest_start time: %w", err)
+		}
+		q.IngestStart = t
+		return true, nil
+	case "ingest_end":
+		t, err := parseTime(v)
+		if err != nil {
+			return false, fmt.Errorf("invalid ingest_end time: %w", err)
+		}
+		q.IngestEnd = t
+		return true, nil
+	case "limit":
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
+			return false, fmt.Errorf("invalid limit: %w", err)
+		}
+		q.Limit = n
+		return true, nil
+	case "pos":
+		var n uint64
+		if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
+			return false, fmt.Errorf("invalid pos: %w", err)
+		}
+		q.Pos = &n
+		return true, nil
+	default:
+		return false, nil
+	}
 }
 
 // parseDuration parses a duration string like "5m", "1h", or "3d".
@@ -534,7 +559,7 @@ func parseTime(s string) (time.Time, error) {
 		return t, nil
 	}
 	var unix int64
-	if n, err := fmt.Sscanf(s, "%d", &unix); err == nil && n == 1 && fmt.Sprintf("%d", unix) == s {
+	if n, err := fmt.Sscanf(s, "%d", &unix); err == nil && n == 1 && strconv.FormatInt(unix, 10) == s {
 		return time.Unix(unix, 0), nil
 	}
 	return time.Time{}, fmt.Errorf("invalid time format: %s (use RFC3339 or Unix timestamp)", s)

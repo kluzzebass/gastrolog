@@ -61,8 +61,8 @@ type eventTime struct {
 
 func (et *eventTime) MarshalMsgpack() ([]byte, error) {
 	b := make([]byte, 8)
-	binary.BigEndian.PutUint32(b[0:4], uint32(et.Unix()))
-	binary.BigEndian.PutUint32(b[4:8], uint32(et.Nanosecond()))
+	binary.BigEndian.PutUint32(b[0:4], uint32(et.Unix()))       //nolint:gosec // G115: Unix timestamp fits in uint32 until 2106
+	binary.BigEndian.PutUint32(b[4:8], uint32(et.Nanosecond())) //nolint:gosec // G115: nanosecond component is always 0..999999999
 	return b, nil
 }
 
@@ -89,14 +89,14 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMess
 
 	var wg sync.WaitGroup
 	defer func() {
-		ln.Close()
+		_ = ln.Close()
 		wg.Wait()
 	}()
 
 	// Accept loop.
 	go func() {
 		<-ctx.Done()
-		ln.Close()
+		_ = ln.Close()
 	}()
 
 	for {
@@ -110,17 +110,15 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMess
 			continue
 		}
 
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			ing.handleConn(ctx, conn)
-		}()
+		})
 	}
 }
 
 // handleConn processes a single TCP connection.
 func (ing *Ingester) handleConn(ctx context.Context, conn net.Conn) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	remote := conn.RemoteAddr().String()
 	ing.logger.Debug("connection accepted", "remote", remote)
@@ -132,128 +130,140 @@ func (ing *Ingester) handleConn(ctx context.Context, conn net.Conn) {
 			return
 		}
 
-		// Each message is a msgpack array.
-		arrLen, err := dec.DecodeArrayLen()
-		if err != nil {
-			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || ctx.Err() != nil {
-				return
-			}
+		option, ok := ing.handleOneMessage(ctx, dec, remote)
+		if !ok {
+			return
+		}
+
+		sendAck(conn, option)
+	}
+}
+
+func (ing *Ingester) handleOneMessage(ctx context.Context, dec *msgpack.Decoder, remote string) (map[string]any, bool) {
+	arrLen, err := dec.DecodeArrayLen()
+	if err != nil {
+		if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) && ctx.Err() == nil {
 			ing.logger.Warn("decode error", "remote", remote, "error", err)
-			return
 		}
+		return nil, false
+	}
 
-		if arrLen < 2 || arrLen > 4 {
-			ing.logger.Warn("unexpected array length", "remote", remote, "len", arrLen)
-			return
-		}
+	if arrLen < 2 || arrLen > 4 {
+		ing.logger.Warn("unexpected array length", "remote", remote, "len", arrLen)
+		return nil, false
+	}
 
-		// First element: tag (string).
-		tag, err := dec.DecodeString()
+	tag, err := dec.DecodeString()
+	if err != nil {
+		ing.logger.Warn("decode tag error", "remote", remote, "error", err)
+		return nil, false
+	}
+
+	code, err := dec.PeekCode()
+	if err != nil {
+		ing.logger.Warn("peek error", "remote", remote, "error", err)
+		return nil, false
+	}
+
+	switch {
+	case code == msgpcode.Bin8 || code == msgpcode.Bin16 || code == msgpcode.Bin32:
+		return ing.handlePackedForward(ctx, dec, tag, arrLen, remote)
+	case isArrayCode(code):
+		return ing.handleForward(ctx, dec, tag, arrLen, remote)
+	default:
+		return ing.handleMessage(ctx, dec, tag, arrLen, remote)
+	}
+}
+
+func (ing *Ingester) handlePackedForward(ctx context.Context, dec *msgpack.Decoder, tag string, arrLen int, remote string) (map[string]any, bool) {
+	binData, err := dec.DecodeBytes()
+	if err != nil {
+		ing.logger.Warn("decode packed entries", "remote", remote, "error", err)
+		return nil, false
+	}
+
+	var option map[string]any
+	if arrLen >= 3 {
+		option, _ = decodeOption(dec)
+	}
+
+	if isCompressed(option) {
+		binData, err = gunzip(binData)
 		if err != nil {
-			ing.logger.Warn("decode tag error", "remote", remote, "error", err)
-			return
-		}
-
-		// Peek at the second element to determine mode.
-		code, err := dec.PeekCode()
-		if err != nil {
-			ing.logger.Warn("peek error", "remote", remote, "error", err)
-			return
-		}
-
-		var option map[string]any
-
-		switch {
-		case code == msgpcode.Bin8 || code == msgpcode.Bin16 || code == msgpcode.Bin32:
-			// PackedForward or CompressedPackedForward mode: [tag, bin, option?]
-			binData, err := dec.DecodeBytes()
-			if err != nil {
-				ing.logger.Warn("decode packed entries", "remote", remote, "error", err)
-				return
-			}
-
-			if arrLen >= 3 {
-				option, _ = decodeOption(dec)
-			}
-
-			// Check for compression.
-			if isCompressed(option) {
-				binData, err = gunzip(binData)
-				if err != nil {
-					ing.logger.Warn("decompress error", "remote", remote, "error", err)
-					return
-				}
-			}
-
-			if err := ing.processPackedEntries(ctx, tag, binData); err != nil {
-				if ctx.Err() != nil {
-					return
-				}
-				ing.logger.Warn("process packed entries", "remote", remote, "error", err)
-				return
-			}
-
-		case isArrayCode(code):
-			// Could be Forward mode [tag, [[time,record],...], option?]
-			// or Message mode where second element happened to look like an array:
-			// [tag, time, record, option?]
-			// Forward mode has an array of entries as second element.
-			// Peek deeper: if it's an array of arrays, it's Forward mode.
-
-			entries, err := ing.decodeEntries(dec)
-			if err != nil {
-				ing.logger.Warn("decode entries", "remote", remote, "error", err)
-				return
-			}
-
-			if arrLen >= 3 {
-				option, _ = decodeOption(dec)
-			}
-
-			if err := ing.processEntries(ctx, tag, entries); err != nil {
-				if ctx.Err() != nil {
-					return
-				}
-				ing.logger.Warn("process entries", "remote", remote, "error", err)
-				return
-			}
-
-		default:
-			// Message mode: [tag, time, record, option?]
-			ts, err := decodeTime(dec)
-			if err != nil {
-				ing.logger.Warn("decode time", "remote", remote, "error", err)
-				return
-			}
-
-			record, err := decodeRecord(dec)
-			if err != nil {
-				ing.logger.Warn("decode record", "remote", remote, "error", err)
-				return
-			}
-
-			if arrLen >= 4 {
-				option, _ = decodeOption(dec)
-			}
-
-			if err := ing.processRecord(ctx, tag, ts, record); err != nil {
-				if ctx.Err() != nil {
-					return
-				}
-				ing.logger.Warn("process record", "remote", remote, "error", err)
-				return
-			}
-		}
-
-		// Send ack if requested.
-		if chunk, ok := option["chunk"]; ok {
-			if chunkStr, ok := chunk.(string); ok {
-				ack := map[string]string{"ack": chunkStr}
-				data, _ := msgpack.Marshal(ack)
-				conn.Write(data)
-			}
+			ing.logger.Warn("decompress error", "remote", remote, "error", err)
+			return nil, false
 		}
 	}
+
+	if err := ing.processPackedEntries(ctx, tag, binData); err != nil {
+		if ctx.Err() == nil {
+			ing.logger.Warn("process packed entries", "remote", remote, "error", err)
+		}
+		return nil, false
+	}
+	return option, true
+}
+
+func (ing *Ingester) handleForward(ctx context.Context, dec *msgpack.Decoder, tag string, arrLen int, remote string) (map[string]any, bool) {
+	entries, err := ing.decodeEntries(dec)
+	if err != nil {
+		ing.logger.Warn("decode entries", "remote", remote, "error", err)
+		return nil, false
+	}
+
+	var option map[string]any
+	if arrLen >= 3 {
+		option, _ = decodeOption(dec)
+	}
+
+	if err := ing.processEntries(ctx, tag, entries); err != nil {
+		if ctx.Err() == nil {
+			ing.logger.Warn("process entries", "remote", remote, "error", err)
+		}
+		return nil, false
+	}
+	return option, true
+}
+
+func (ing *Ingester) handleMessage(ctx context.Context, dec *msgpack.Decoder, tag string, arrLen int, remote string) (map[string]any, bool) {
+	ts, err := decodeTime(dec)
+	if err != nil {
+		ing.logger.Warn("decode time", "remote", remote, "error", err)
+		return nil, false
+	}
+
+	record, err := decodeRecord(dec)
+	if err != nil {
+		ing.logger.Warn("decode record", "remote", remote, "error", err)
+		return nil, false
+	}
+
+	var option map[string]any
+	if arrLen >= 4 {
+		option, _ = decodeOption(dec)
+	}
+
+	if err := ing.processRecord(ctx, tag, ts, record); err != nil {
+		if ctx.Err() == nil {
+			ing.logger.Warn("process record", "remote", remote, "error", err)
+		}
+		return nil, false
+	}
+	return option, true
+}
+
+func sendAck(conn net.Conn, option map[string]any) {
+	chunk, ok := option["chunk"]
+	if !ok {
+		return
+	}
+	chunkStr, ok := chunk.(string)
+	if !ok {
+		return
+	}
+	ack := map[string]string{"ack": chunkStr}
+	data, _ := msgpack.Marshal(ack)
+	_, _ = conn.Write(data)
 }
 
 // entry is a [time, record] pair.
@@ -399,7 +409,7 @@ func decodeTime(dec *msgpack.Decoder) (time.Time, error) {
 	case int64:
 		return time.Unix(v, 0), nil
 	case uint64:
-		return time.Unix(int64(v), 0), nil
+		return time.Unix(int64(v), 0), nil //nolint:gosec // G115: Unix timestamps fit in int64 until year 292277026596
 	case int8:
 		return time.Unix(int64(v), 0), nil
 	case int16:
@@ -460,7 +470,7 @@ func gunzip(data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	return io.ReadAll(r)
 }
 

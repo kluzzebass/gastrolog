@@ -70,82 +70,74 @@ func ParsePriority(data []byte) (int, []byte, bool) {
 // Returns the parsed timestamp (zero if parsing fails).
 // Note: RFC 3164 timestamps have no year, so we use the current year.
 func ParseRFC3164(data []byte, attrs map[string]string) time.Time {
-	var sourceTS time.Time
-
-	// Try to parse timestamp: "Jan  2 15:04:05" or "Jan 02 15:04:05"
 	if len(data) < 15 {
-		return sourceTS
+		return time.Time{}
 	}
 
-	// Parse timestamp (first 15 characters).
-	tsStr := string(data[:15])
-	now := time.Now()
-
-	// Try both formats (single-digit day with space, double-digit day).
-	if ts, err := time.Parse("Jan  2 15:04:05", tsStr); err == nil {
-		sourceTS = ts.AddDate(now.Year(), 0, 0)
-		// Handle year rollover: if parsed time is in the future, use previous year.
-		if sourceTS.After(now.Add(24 * time.Hour)) {
-			sourceTS = sourceTS.AddDate(-1, 0, 0)
-		}
-	} else if ts, err := time.Parse("Jan 02 15:04:05", tsStr); err == nil {
-		sourceTS = ts.AddDate(now.Year(), 0, 0)
-		if sourceTS.After(now.Add(24 * time.Hour)) {
-			sourceTS = sourceTS.AddDate(-1, 0, 0)
-		}
-	}
-
-	// Find first space after timestamp area.
-	pos := 15
-	for pos < len(data) && data[pos] == ' ' {
-		pos++
-	}
-
-	// Find hostname (next space-delimited token).
-	start := pos
-	for pos < len(data) && data[pos] != ' ' && data[pos] != ':' {
-		pos++
-	}
-	if pos > start {
-		hostname := string(data[start:pos])
-		if len(hostname) <= 64 {
-			attrs["hostname"] = hostname
-		}
-	}
-
-	// Skip space.
-	for pos < len(data) && data[pos] == ' ' {
-		pos++
-	}
-
-	// Find tag (ends with : or [).
-	start = pos
-	for pos < len(data) && data[pos] != ':' && data[pos] != '[' && data[pos] != ' ' {
-		pos++
-	}
-	if pos > start {
-		tag := string(data[start:pos])
-		if len(tag) <= 64 {
-			attrs["app_name"] = tag
-		}
-	}
-
-	// Look for PID in brackets.
-	if pos < len(data) && data[pos] == '[' {
-		pos++
-		pidStart := pos
-		for pos < len(data) && data[pos] != ']' {
-			pos++
-		}
-		if pos > pidStart && pos < len(data) {
-			pid := string(data[pidStart:pos])
-			if len(pid) <= 16 {
-				attrs["proc_id"] = pid
-			}
-		}
-	}
+	sourceTS := parseRFC3164Timestamp(data[:15])
+	pos := skipSpaces(data, 15)
+	pos = parseToken(data, pos, ' ', ':', 64, "hostname", attrs)
+	pos = skipSpaces(data, pos)
+	pos = parseToken(data, pos, ':', '[', 64, "app_name", attrs)
+	parsePID(data, pos, attrs)
 
 	return sourceTS
+}
+
+func parseRFC3164Timestamp(tsData []byte) time.Time {
+	tsStr := string(tsData)
+	now := time.Now()
+	for _, layout := range []string{"Jan  2 15:04:05", "Jan 02 15:04:05"} {
+		ts, err := time.Parse(layout, tsStr)
+		if err != nil {
+			continue
+		}
+		ts = ts.AddDate(now.Year(), 0, 0)
+		if ts.After(now.Add(24 * time.Hour)) {
+			ts = ts.AddDate(-1, 0, 0)
+		}
+		return ts
+	}
+	return time.Time{}
+}
+
+func skipSpaces(data []byte, pos int) int {
+	for pos < len(data) && data[pos] == ' ' {
+		pos++
+	}
+	return pos
+}
+
+func parseToken(data []byte, pos int, stop1, stop2 byte, maxLen int, attrKey string, attrs map[string]string) int {
+	start := pos
+	for pos < len(data) && data[pos] != stop1 && data[pos] != stop2 && data[pos] != ' ' {
+		pos++
+	}
+	if pos > start {
+		tok := string(data[start:pos])
+		if len(tok) <= maxLen {
+			attrs[attrKey] = tok
+		}
+	}
+	return pos
+}
+
+func parsePID(data []byte, pos int, attrs map[string]string) {
+	if pos >= len(data) || data[pos] != '[' {
+		return
+	}
+	pos++
+	pidStart := pos
+	for pos < len(data) && data[pos] != ']' {
+		pos++
+	}
+	if pos <= pidStart || pos >= len(data) {
+		return
+	}
+	pid := string(data[pidStart:pos])
+	if len(pid) <= 16 {
+		attrs["proc_id"] = pid
+	}
 }
 
 // ParseRFC5424 parses IETF syslog format.

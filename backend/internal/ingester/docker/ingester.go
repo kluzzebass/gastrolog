@@ -187,11 +187,9 @@ func (ing *ingester) updateTimestamp(containerID string, ts time.Time) {
 
 // eventLoop listens for Docker container events and starts/stops streams.
 func (ing *ingester) eventLoop(ctx context.Context, out chan<- orchestrator.IngestMessage, wg *sync.WaitGroup) {
-	backoff := 1 * time.Second
-
 	for {
 		events, errs := ing.client.Events(ctx)
-		backoff = 1 * time.Second // Reset on successful connection.
+		backoff := 1 * time.Second // Reset on successful connection.
 
 		for {
 			select {

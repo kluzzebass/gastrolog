@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -23,12 +24,12 @@ func NewFactory() orchestrator.IngesterFactory {
 	return func(id uuid.UUID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
 		brokers := params["brokers"]
 		if brokers == "" {
-			return nil, fmt.Errorf("kafka ingester: brokers param is required")
+			return nil, errors.New("kafka ingester: brokers param is required")
 		}
 
 		topic := params["topic"]
 		if topic == "" {
-			return nil, fmt.Errorf("kafka ingester: topic param is required")
+			return nil, errors.New("kafka ingester: topic param is required")
 		}
 
 		group := cmp.Or(params["group"], "gastrolog")

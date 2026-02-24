@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import ReactEChartsCore from "echarts-for-react/esm/core";
 import { echarts } from "./echartsSetup";
 import { buildThemeOption } from "./echartsTheme";
-import { getColorForCategory, resolveColor } from "./chartColors";
+import { getColorForCategory, resolveColor, formatChartValue } from "./chartColors";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import type { EChartsOption } from "echarts";
 
@@ -17,12 +17,6 @@ interface Datum {
   value: number;
   color: string;
 }
-
-const formatValue = (v: number) => {
-  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
-  return Number.isInteger(v) ? String(v) : v.toFixed(1);
-};
 
 export function DonutChart({ columns, rows, dark }: Readonly<DonutChartProps>) {
   const c = useThemeClass(dark);
@@ -53,7 +47,7 @@ export function DonutChart({ columns, rows, dark }: Readonly<DonutChartProps>) {
         const p = params;
         const pct = ((p.value / total) * 100).toFixed(1);
         const dot = `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${p.color};margin-right:6px;"></span>`;
-        return `<div style="opacity:0.7">${p.name}</div>${dot}${columns[valueColIdx]} <b>${formatValue(p.value as number)} (${pct}%)</b>`;
+        return `<div style="opacity:0.7">${p.name}</div>${dot}${columns[valueColIdx]} <b>${formatChartValue(p.value as number)} (${pct}%)</b>`;
       },
     },
     graphic: [
@@ -62,7 +56,7 @@ export function DonutChart({ columns, rows, dark }: Readonly<DonutChartProps>) {
         left: "center",
         top: "42%",
         style: {
-          text: formatValue(total),
+          text: formatChartValue(total),
           fontFamily: "'IBM Plex Mono', monospace",
           fontSize: 22,
           fontWeight: 600,
@@ -169,7 +163,7 @@ export function DonutChart({ columns, rows, dark }: Readonly<DonutChartProps>) {
             <span
               className={`text-[0.75em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
             >
-              {formatValue(d.value)}
+              {formatChartValue(d.value)}
             </span>
           </div>
         ))}

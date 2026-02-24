@@ -80,7 +80,8 @@ func (r *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 	})
 
 	r.server = &http.Server{
-		Handler: mux,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	// Create listener.
@@ -107,7 +108,7 @@ func (r *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 		r.logger.Info("http ingester stopping")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		r.server.Shutdown(shutdownCtx)
+		_ = r.server.Shutdown(shutdownCtx)
 		return nil
 	case err := <-errCh:
 		return err
@@ -139,42 +140,54 @@ type Value []json.RawMessage
 
 // handlePush handles POST /loki/api/v1/push requests.
 func (r *Ingester) handlePush(w http.ResponseWriter, req *http.Request) {
-	// Backpressure: reject early when the ingest queue is near capacity.
 	if c := cap(r.out); c > 0 && len(r.out) >= c*9/10 {
 		w.Header().Set("Retry-After", "1")
 		http.Error(w, "queue full, retry later", http.StatusTooManyRequests)
 		return
 	}
 
-	waitAck := req.Header.Get("X-Wait-Ack") == "true"
+	messages, ok := r.decodePushBody(w, req)
+	if !ok {
+		return
+	}
 
-	// Handle gzip compression.
+	if len(messages) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	if req.Header.Get("X-Wait-Ack") == "true" {
+		r.sendAcked(w, req, messages)
+	} else {
+		r.sendFireAndForget(w, req, messages)
+	}
+}
+
+func (r *Ingester) decodePushBody(w http.ResponseWriter, req *http.Request) ([]orchestrator.IngestMessage, bool) {
 	var body io.Reader = req.Body
 	if req.Header.Get("Content-Encoding") == "gzip" {
 		gz, err := gzip.NewReader(req.Body)
 		if err != nil {
 			http.Error(w, "failed to decompress gzip body", http.StatusBadRequest)
-			return
+			return nil, false
 		}
-		defer gz.Close()
+		defer func() { _ = gz.Close() }()
 		body = gz
 	}
 
-	// Read and parse body.
-	data, err := io.ReadAll(io.LimitReader(body, 10<<20)) // 10MB limit
+	data, err := io.ReadAll(io.LimitReader(body, 10<<20))
 	if err != nil {
 		http.Error(w, "failed to read body", http.StatusBadRequest)
-		return
+		return nil, false
 	}
 
 	var pushReq PushRequest
 	if err := json.Unmarshal(data, &pushReq); err != nil {
 		r.logger.Warn("failed to parse push request", "error", err)
 		http.Error(w, "invalid JSON in request body", http.StatusBadRequest)
-		return
+		return nil, false
 	}
 
-	// Convert to IngestMessages.
 	var messages []orchestrator.IngestMessage
 	for _, stream := range pushReq.Streams {
 		for _, val := range stream.Values {
@@ -182,69 +195,61 @@ func (r *Ingester) handlePush(w http.ResponseWriter, req *http.Request) {
 			if err != nil {
 				r.logger.Warn("failed to parse stream value", "error", err)
 				http.Error(w, "invalid stream entry", http.StatusBadRequest)
-				return
+				return nil, false
 			}
 			messages = append(messages, msg)
 		}
 	}
+	return messages, true
+}
 
-	if len(messages) == 0 {
-		// Loki returns 204 even for empty requests.
-		w.WriteHeader(http.StatusNoContent)
+func (r *Ingester) sendAcked(w http.ResponseWriter, req *http.Request, messages []orchestrator.IngestMessage) {
+	ackCh := make(chan error, len(messages))
+	for i := range messages {
+		messages[i].Ack = ackCh
+	}
+
+	if !r.sendAll(w, req, messages) {
 		return
 	}
 
-	// Send messages.
-	if waitAck {
-		// Acknowledged mode: wait for all messages to be persisted.
-		ackCh := make(chan error, len(messages))
-		for i := range messages {
-			messages[i].Ack = ackCh
-		}
-
-		// Send all messages.
-		for _, msg := range messages {
-			select {
-			case r.out <- msg:
-			case <-req.Context().Done():
-				http.Error(w, "request cancelled", http.StatusServiceUnavailable)
-				return
+	var ackErr error
+	for range messages {
+		select {
+		case err := <-ackCh:
+			if err != nil && ackErr == nil {
+				ackErr = err
 			}
-		}
-
-		// Wait for all acks.
-		var ackErr error
-		for range messages {
-			select {
-			case err := <-ackCh:
-				if err != nil && ackErr == nil {
-					ackErr = err
-				}
-			case <-req.Context().Done():
-				http.Error(w, "request cancelled", http.StatusServiceUnavailable)
-				return
-			}
-		}
-
-		if ackErr != nil {
-			http.Error(w, ackErr.Error(), http.StatusInternalServerError)
+		case <-req.Context().Done():
+			http.Error(w, "request cancelled", http.StatusServiceUnavailable)
 			return
 		}
-
-		w.WriteHeader(http.StatusNoContent)
-	} else {
-		// Fire-and-forget mode: queue messages and return immediately.
-		for _, msg := range messages {
-			select {
-			case r.out <- msg:
-			case <-req.Context().Done():
-				http.Error(w, "request cancelled", http.StatusServiceUnavailable)
-				return
-			}
-		}
-
-		w.WriteHeader(http.StatusNoContent)
 	}
+
+	if ackErr != nil {
+		http.Error(w, ackErr.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (r *Ingester) sendFireAndForget(w http.ResponseWriter, req *http.Request, messages []orchestrator.IngestMessage) {
+	if !r.sendAll(w, req, messages) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (r *Ingester) sendAll(w http.ResponseWriter, req *http.Request, messages []orchestrator.IngestMessage) bool {
+	for _, msg := range messages {
+		select {
+		case r.out <- msg:
+		case <-req.Context().Done():
+			http.Error(w, "request cancelled", http.StatusServiceUnavailable)
+			return false
+		}
+	}
+	return true
 }
 
 // parseValue converts a Loki value to an IngestMessage.

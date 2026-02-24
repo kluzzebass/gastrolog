@@ -75,14 +75,15 @@ func unionPositions(a, b []uint64) []uint64 {
 	result := make([]uint64, 0, len(a)+len(b))
 	i, j := 0, 0
 	for i < len(a) && j < len(b) {
-		if a[i] == b[j] {
+		switch {
+		case a[i] == b[j]:
 			result = append(result, a[i])
 			i++
 			j++
-		} else if a[i] < b[j] {
+		case a[i] < b[j]:
 			result = append(result, a[i])
 			i++
-		} else {
+		default:
 			result = append(result, b[j])
 			j++
 		}

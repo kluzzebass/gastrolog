@@ -3,6 +3,7 @@ package attr
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -51,7 +52,7 @@ func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	if err != nil {
 		return fmt.Errorf("open cursor: %w", err)
 	}
-	defer cursor.Close()
+	defer func() { _ = cursor.Close() }()
 
 	// Single-pass scan: accumulate positions per key, value, and kv pair.
 	keyMap := make(map[string][]uint64)
@@ -65,7 +66,7 @@ func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 
 		rec, ref, err := cursor.Next()
 		if err != nil {
-			if err == chunk.ErrNoMoreRecords {
+			if errors.Is(err, chunk.ErrNoMoreRecords) {
 				break
 			}
 			return fmt.Errorf("read record: %w", err)

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -25,8 +26,8 @@ const (
 	DefaultJSONBudget = 10 * 1024 * 1024 // 10 MB
 
 	// Defensive hard caps.
-	MaxUniquePaths   = 50000
-	MaxTotalPVPairs  = 200000
+	MaxUniquePaths  = 50000
+	MaxTotalPVPairs = 200000
 )
 
 // Config holds configuration for the JSON indexer.
@@ -40,8 +41,8 @@ type Config struct {
 //
 // For each chunk, it creates a single index file (_json.idx) containing:
 //   - A shared string dictionary for paths and values
-//   - Path posting table (path → record positions)
-//   - Path-value posting table ((path,value) → record positions)
+//   - Path posting table (path -> record positions)
+//   - Path-value posting table ((path,value) -> record positions)
 //   - Concatenated posting blob
 //
 // The indexer uses budget-based admission for path-value pairs.
@@ -85,154 +86,136 @@ type candidate struct {
 	count uint32
 }
 
-func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
-	buildStart := time.Now()
+type pass1Result struct {
+	internMap   map[string]uint32
+	dictStrings []string
+	pathCounts  map[uint32]*candidate
+	pvCounts    map[pvKey]*candidate
+	recordCount uint64
+	capped      bool
+	capReason   string
+	seenPaths   map[uint32]struct{}
+	seenPVs     map[pvKey]struct{}
+}
 
-	meta, err := idx.manager.Meta(chunkID)
-	if err != nil {
-		return fmt.Errorf("get chunk meta: %w", err)
-	}
-	if !meta.Sealed {
-		return chunk.ErrChunkNotSealed
-	}
-
-	// PASS 1: Count occurrences, intern paths and values.
-	pass1Start := time.Now()
-
-	// Shared string interning for paths and values.
-	internMap := make(map[string]uint32) // string → dictID
-	var dictStrings []string             // dictID → string
-
-	internStr := func(s string) uint32 {
-		if id, ok := internMap[s]; ok {
-			return id
-		}
-		id := uint32(len(dictStrings))
-		internMap[s] = id
-		dictStrings = append(dictStrings, s)
+func (r *pass1Result) intern(s string) uint32 {
+	if id, ok := r.internMap[s]; ok {
 		return id
 	}
+	id := uint32(len(r.dictStrings)) //nolint:gosec // G115: dict size bounded by index budget
+	r.internMap[s] = id
+	r.dictStrings = append(r.dictStrings, s)
+	return id
+}
 
-	pathCounts := make(map[uint32]*candidate)  // dictID → count
-	pvCounts := make(map[pvKey]*candidate)      // (pathID, valueID) → count
+func (r *pass1Result) onPath(pathBytes []byte) {
+	if r.capped {
+		return
+	}
+	pathStr := strings.ToLower(string(pathBytes))
+	pathID := r.intern(pathStr)
 
-	var recordCount uint64
-	capped := false
-	capReason := ""
+	if _, seen := r.seenPaths[pathID]; seen {
+		return
+	}
+	r.seenPaths[pathID] = struct{}{}
+
+	if _, exists := r.pathCounts[pathID]; !exists {
+		if len(r.pathCounts) >= MaxUniquePaths {
+			r.capped = true
+			r.capReason = fmt.Sprintf("too many unique paths (limit %d)", MaxUniquePaths)
+			return
+		}
+		r.pathCounts[pathID] = &candidate{}
+	}
+	r.pathCounts[pathID].count++
+}
+
+func (r *pass1Result) onPV(pathBytes, valueBytes []byte) {
+	if r.capped {
+		return
+	}
+	pathStr := strings.ToLower(string(pathBytes))
+	valueStr := string(valueBytes)
+	pathID := r.intern(pathStr)
+	valueID := r.intern(valueStr)
+	key := pvKey{pathID, valueID}
+
+	if _, seen := r.seenPVs[key]; seen {
+		return
+	}
+	r.seenPVs[key] = struct{}{}
+
+	if _, exists := r.pvCounts[key]; !exists {
+		if len(r.pvCounts) >= MaxTotalPVPairs {
+			r.capped = true
+			r.capReason = fmt.Sprintf("too many pv pairs (limit %d)", MaxTotalPVPairs)
+			return
+		}
+		r.pvCounts[key] = &candidate{}
+	}
+	r.pvCounts[key].count++
+}
+
+func (idx *Indexer) pass1(ctx context.Context, chunkID chunk.ChunkID) (*pass1Result, time.Duration, error) {
+	pass1Start := time.Now()
+
+	r := &pass1Result{
+		internMap:  make(map[string]uint32),
+		pathCounts: make(map[uint32]*candidate),
+		pvCounts:   make(map[pvKey]*candidate),
+		seenPaths:  make(map[uint32]struct{}, 32),
+		seenPVs:    make(map[pvKey]struct{}, 32),
+	}
 
 	cursor, err := idx.manager.OpenCursor(chunkID)
 	if err != nil {
-		return fmt.Errorf("open cursor: %w", err)
+		return nil, 0, fmt.Errorf("open cursor: %w", err)
 	}
-
-	// Per-record dedup sets (reused).
-	seenPaths := make(map[uint32]struct{}, 32)
-	seenPVs := make(map[pvKey]struct{}, 32)
 
 	for {
 		if err := ctx.Err(); err != nil {
-			cursor.Close()
-			return err
+			_ = cursor.Close()
+			return nil, 0, err
 		}
 
 		rec, _, err := cursor.Next()
 		if err != nil {
-			if err == chunk.ErrNoMoreRecords {
+			if errors.Is(err, chunk.ErrNoMoreRecords) {
 				break
 			}
-			cursor.Close()
-			return fmt.Errorf("read record: %w", err)
+			_ = cursor.Close()
+			return nil, 0, fmt.Errorf("read record: %w", err)
 		}
-		recordCount++
+		r.recordCount++
 
-		if capped {
+		if r.capped {
 			continue
 		}
 
-		// Clear per-record dedup.
-		clear(seenPaths)
-		clear(seenPVs)
-
-		tokenizer.WalkJSON(rec.Raw, func(pathBytes []byte) {
-			if capped {
-				return
-			}
-
-			pathStr := strings.ToLower(string(pathBytes))
-			pathID := internStr(pathStr)
-
-			// Dedup within record.
-			if _, seen := seenPaths[pathID]; seen {
-				return
-			}
-			seenPaths[pathID] = struct{}{}
-
-			// Check hard cap.
-			if _, exists := pathCounts[pathID]; !exists {
-				if len(pathCounts) >= MaxUniquePaths {
-					capped = true
-					capReason = fmt.Sprintf("too many unique paths (limit %d)", MaxUniquePaths)
-					return
-				}
-				pathCounts[pathID] = &candidate{}
-			}
-			pathCounts[pathID].count++
-		}, func(pathBytes, valueBytes []byte) {
-			if capped {
-				return
-			}
-
-			pathStr := strings.ToLower(string(pathBytes))
-			valueStr := string(valueBytes) // already lowercased by walker
-
-			pathID := internStr(pathStr)
-			valueID := internStr(valueStr)
-			key := pvKey{pathID, valueID}
-
-			// Dedup within record.
-			if _, seen := seenPVs[key]; seen {
-				return
-			}
-			seenPVs[key] = struct{}{}
-
-			// Check hard cap.
-			if _, exists := pvCounts[key]; !exists {
-				if len(pvCounts) >= MaxTotalPVPairs {
-					capped = true
-					capReason = fmt.Sprintf("too many pv pairs (limit %d)", MaxTotalPVPairs)
-					return
-				}
-				pvCounts[key] = &candidate{}
-			}
-			pvCounts[key].count++
-		})
+		clear(r.seenPaths)
+		clear(r.seenPVs)
+		tokenizer.WalkJSON(rec.Raw, r.onPath, r.onPV)
 	}
-	cursor.Close()
-	pass1Duration := time.Since(pass1Start)
+	_ = cursor.Close()
 
-	if capped {
-		idx.logger.Warn("json index capped due to hard cap",
-			"chunk", chunkID.String(),
-			"reason", capReason,
-		)
-		return idx.writeCappedIndex(chunkID)
-	}
+	return r, time.Since(pass1Start), nil
+}
 
-	if len(pathCounts) == 0 {
-		// No JSON found in this chunk; write an empty complete index.
-		return idx.writeEmptyIndex(chunkID)
-	}
+type admissionResult struct {
+	admittedPV map[pvKey]*candidate
+	jsonStatus index.JSONIndexStatus
+}
 
-	// Budget-based admission for path-value pairs.
-	// Paths are always admitted.
+func (idx *Indexer) admitPV(p1 *pass1Result) *admissionResult {
 	type pvCandidate struct {
 		key       pvKey
 		frequency uint32
-		cost      int // positionSize * count
+		cost      int
 	}
 
-	pvList := make([]pvCandidate, 0, len(pvCounts))
-	for k, c := range pvCounts {
+	pvList := make([]pvCandidate, 0, len(p1.pvCounts))
+	for k, c := range p1.pvCounts {
 		pvList = append(pvList, pvCandidate{
 			key:       k,
 			frequency: c.count,
@@ -240,7 +223,6 @@ func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 		})
 	}
 
-	// Sort by descending frequency, ascending cost.
 	slices.SortFunc(pvList, func(a, b pvCandidate) int {
 		if a.frequency != b.frequency {
 			return int(b.frequency) - int(a.frequency)
@@ -248,7 +230,6 @@ func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 		return a.cost - b.cost
 	})
 
-	// Admit pv entries within budget.
 	admittedPV := make(map[pvKey]*candidate)
 	pvTotalBytes := int64(0)
 	jsonStatus := index.JSONComplete
@@ -258,13 +239,21 @@ func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 			jsonStatus = index.JSONCapped
 			break
 		}
-		admittedPV[c.key] = pvCounts[c.key]
+		admittedPV[c.key] = p1.pvCounts[c.key]
 		pvTotalBytes += entryCost
 	}
 
-	// Build sorted dictionary. Only include strings that are actually referenced.
+	return &admissionResult{admittedPV: admittedPV, jsonStatus: jsonStatus}
+}
+
+type dictResult struct {
+	newDict []string
+	remap   map[uint32]uint32
+}
+
+func buildDictionary(p1 *pass1Result, admittedPV map[pvKey]*candidate) *dictResult {
 	usedStrings := make(map[uint32]struct{})
-	for pathID := range pathCounts {
+	for pathID := range p1.pathCounts {
 		usedStrings[pathID] = struct{}{}
 	}
 	for k := range admittedPV {
@@ -278,34 +267,43 @@ func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	}
 	var dictEntries []dictEntry
 	for id := range usedStrings {
-		dictEntries = append(dictEntries, dictEntry{id, dictStrings[id]})
+		dictEntries = append(dictEntries, dictEntry{id, p1.dictStrings[id]})
 	}
 	slices.SortFunc(dictEntries, func(a, b dictEntry) int {
 		return cmp.Compare(a.str, b.str)
 	})
 
-	// Build new dictionary and ID remapping.
 	newDict := make([]string, len(dictEntries))
-	remap := make(map[uint32]uint32) // oldID → newID
+	remap := make(map[uint32]uint32)
 	for i, e := range dictEntries {
 		newDict[i] = e.str
 		remap[e.oldID] = uint32(i)
 	}
 
-	// Build sorted path table entries.
+	return &dictResult{newDict: newDict, remap: remap}
+}
+
+type blobLayout struct {
+	pathTable   []pathTableEntry
+	pvTable     []pvTableEntry
+	postingBlob []byte
+	pathBlobOff map[uint32]uint32
+	pvBlobOff   map[pvKey]uint32
+}
+
+func buildBlobLayout(p1 *pass1Result, admittedPV map[pvKey]*candidate, remap map[uint32]uint32) *blobLayout {
 	type pathBuildEntry struct {
 		newDictID uint32
 		count     uint32
 	}
-	pathBuild := make([]pathBuildEntry, 0, len(pathCounts))
-	for pathID, c := range pathCounts {
+	pathBuild := make([]pathBuildEntry, 0, len(p1.pathCounts))
+	for pathID, c := range p1.pathCounts {
 		pathBuild = append(pathBuild, pathBuildEntry{remap[pathID], c.count})
 	}
 	slices.SortFunc(pathBuild, func(a, b pathBuildEntry) int {
 		return cmp.Compare(a.newDictID, b.newDictID)
 	})
 
-	// Build sorted pv table entries.
 	type pvBuildEntry struct {
 		newPathID  uint32
 		newValueID uint32
@@ -322,145 +320,193 @@ func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 		return cmp.Compare(a.newValueID, b.newValueID)
 	})
 
-	// Compute posting blob layout.
 	blobSize := uint32(0)
 	pathTable := make([]pathTableEntry, len(pathBuild))
 	for i, p := range pathBuild {
-		pathTable[i] = pathTableEntry{
-			dictID:     p.newDictID,
-			blobOffset: blobSize,
-			count:      p.count,
-		}
+		pathTable[i] = pathTableEntry{dictID: p.newDictID, blobOffset: blobSize, count: p.count}
 		blobSize += p.count * positionSize
 	}
 
 	pvTable := make([]pvTableEntry, len(pvBuild))
 	for i, pv := range pvBuild {
-		pvTable[i] = pvTableEntry{
-			pathID:     pv.newPathID,
-			valueID:    pv.newValueID,
-			blobOffset: blobSize,
-			count:      pv.count,
-		}
+		pvTable[i] = pvTableEntry{pathID: pv.newPathID, valueID: pv.newValueID, blobOffset: blobSize, count: pv.count}
 		blobSize += pv.count * positionSize
 	}
 
-	// Allocate posting blob and build cursor maps.
-	postingBlob := make([]byte, blobSize)
-
-	// Maps for pass 2: track write position within each posting list.
-	pathWriteIdx := make(map[uint32]uint32) // newDictID → next write index
-	pvWriteIdx := make(map[pvKey]uint32)     // (newPathID, newValueID) → next write index
-
-	// Build reverse lookup: newDictID → path table index
-	pathBlobOffset := make(map[uint32]uint32) // newDictID → blob offset
+	pathBlobOff := make(map[uint32]uint32)
 	for _, p := range pathTable {
-		pathBlobOffset[p.dictID] = p.blobOffset
+		pathBlobOff[p.dictID] = p.blobOffset
 	}
-
-	pvBlobOffset := make(map[pvKey]uint32)
+	pvBlobOff := make(map[pvKey]uint32)
 	for _, pv := range pvTable {
-		pvBlobOffset[pvKey{pv.pathID, pv.valueID}] = pv.blobOffset
+		pvBlobOff[pvKey{pv.pathID, pv.valueID}] = pv.blobOffset
 	}
 
-	// Build old→new path lookup for pass 2.
-	// We need to know which paths and pvs are admitted.
-	admittedPathIDs := make(map[uint32]struct{}) // oldID set
-	for pathID := range pathCounts {
-		admittedPathIDs[pathID] = struct{}{}
+	return &blobLayout{
+		pathTable:   pathTable,
+		pvTable:     pvTable,
+		postingBlob: make([]byte, blobSize),
+		pathBlobOff: pathBlobOff,
+		pvBlobOff:   pvBlobOff,
 	}
-	admittedPVKeys := make(map[pvKey]struct{})
-	for k := range admittedPV {
-		admittedPVKeys[k] = struct{}{}
-	}
+}
 
-	// PASS 2: Fill posting positions.
+type pass2State struct {
+	internMap       map[string]uint32
+	admittedPathIDs map[uint32]struct{}
+	admittedPVKeys  map[pvKey]struct{}
+	remap           map[uint32]uint32
+	layout          *blobLayout
+	pathWriteIdx    map[uint32]uint32
+	pvWriteIdx      map[pvKey]uint32
+	seenPaths       map[uint32]struct{}
+	seenPVs         map[pvKey]struct{}
+	pos             uint32
+}
+
+func (s *pass2State) onPath(pathBytes []byte) {
+	pathStr := strings.ToLower(string(pathBytes))
+	oldID, ok := s.internMap[pathStr]
+	if !ok {
+		return
+	}
+	if _, admitted := s.admittedPathIDs[oldID]; !admitted {
+		return
+	}
+	if _, seen := s.seenPaths[oldID]; seen {
+		return
+	}
+	s.seenPaths[oldID] = struct{}{}
+
+	newID := s.remap[oldID]
+	blobOff := s.layout.pathBlobOff[newID]
+	writePos := s.pathWriteIdx[newID]
+	offset := blobOff + writePos*positionSize
+	if int(offset)+positionSize <= len(s.layout.postingBlob) {
+		binary.LittleEndian.PutUint32(s.layout.postingBlob[offset:], s.pos)
+		s.pathWriteIdx[newID] = writePos + 1
+	}
+}
+
+func (s *pass2State) onPV(pathBytes, valueBytes []byte) {
+	pathStr := strings.ToLower(string(pathBytes))
+	oldPathID, ok1 := s.internMap[pathStr]
+	oldValueID, ok2 := s.internMap[string(valueBytes)]
+	if !ok1 || !ok2 {
+		return
+	}
+	oldKey := pvKey{oldPathID, oldValueID}
+	if _, admitted := s.admittedPVKeys[oldKey]; !admitted {
+		return
+	}
+	if _, seen := s.seenPVs[oldKey]; seen {
+		return
+	}
+	s.seenPVs[oldKey] = struct{}{}
+
+	newKey := pvKey{s.remap[oldPathID], s.remap[oldValueID]}
+	blobOff := s.layout.pvBlobOff[newKey]
+	writePos := s.pvWriteIdx[newKey]
+	offset := blobOff + writePos*positionSize
+	if int(offset)+positionSize <= len(s.layout.postingBlob) {
+		binary.LittleEndian.PutUint32(s.layout.postingBlob[offset:], s.pos)
+		s.pvWriteIdx[newKey] = writePos + 1
+	}
+}
+
+func (idx *Indexer) pass2(ctx context.Context, chunkID chunk.ChunkID, p1 *pass1Result, admittedPV map[pvKey]*candidate, remap map[uint32]uint32, layout *blobLayout) (time.Duration, error) {
 	pass2Start := time.Now()
-	cursor2, err := idx.manager.OpenCursor(chunkID)
-	if err != nil {
-		return fmt.Errorf("open cursor pass 2: %w", err)
+
+	s := &pass2State{
+		internMap:    p1.internMap,
+		remap:        remap,
+		layout:       layout,
+		pathWriteIdx: make(map[uint32]uint32),
+		pvWriteIdx:   make(map[pvKey]uint32),
+		seenPaths:    make(map[uint32]struct{}, 32),
+		seenPVs:      make(map[pvKey]struct{}, 32),
 	}
 
-	seenPaths2 := make(map[uint32]struct{}, 32)
-	seenPVs2 := make(map[pvKey]struct{}, 32)
+	s.admittedPathIDs = make(map[uint32]struct{})
+	for pathID := range p1.pathCounts {
+		s.admittedPathIDs[pathID] = struct{}{}
+	}
+	s.admittedPVKeys = make(map[pvKey]struct{})
+	for k := range admittedPV {
+		s.admittedPVKeys[k] = struct{}{}
+	}
+
+	cursor, err := idx.manager.OpenCursor(chunkID)
+	if err != nil {
+		return 0, fmt.Errorf("open cursor pass 2: %w", err)
+	}
 
 	for {
 		if err := ctx.Err(); err != nil {
-			cursor2.Close()
-			return err
+			_ = cursor.Close()
+			return 0, err
 		}
 
-		rec, ref, err := cursor2.Next()
+		rec, ref, err := cursor.Next()
 		if err != nil {
-			if err == chunk.ErrNoMoreRecords {
+			if errors.Is(err, chunk.ErrNoMoreRecords) {
 				break
 			}
-			cursor2.Close()
-			return fmt.Errorf("read record pass 2: %w", err)
+			_ = cursor.Close()
+			return 0, fmt.Errorf("read record pass 2: %w", err)
 		}
 
-		clear(seenPaths2)
-		clear(seenPVs2)
-
-		pos := uint32(ref.Pos)
-
-		tokenizer.WalkJSON(rec.Raw, func(pathBytes []byte) {
-			pathStr := strings.ToLower(string(pathBytes))
-			oldID, ok := internMap[pathStr]
-			if !ok {
-				return
-			}
-			if _, admitted := admittedPathIDs[oldID]; !admitted {
-				return
-			}
-			if _, seen := seenPaths2[oldID]; seen {
-				return
-			}
-			seenPaths2[oldID] = struct{}{}
-
-			newID := remap[oldID]
-			blobOff := pathBlobOffset[newID]
-			writePos := pathWriteIdx[newID]
-			offset := blobOff + writePos*positionSize
-			if int(offset)+positionSize <= len(postingBlob) {
-				binary.LittleEndian.PutUint32(postingBlob[offset:], pos)
-				pathWriteIdx[newID] = writePos + 1
-			}
-		}, func(pathBytes, valueBytes []byte) {
-			pathStr := strings.ToLower(string(pathBytes))
-			valueStr := string(valueBytes)
-			oldPathID, ok1 := internMap[pathStr]
-			oldValueID, ok2 := internMap[valueStr]
-			if !ok1 || !ok2 {
-				return
-			}
-			oldKey := pvKey{oldPathID, oldValueID}
-			if _, admitted := admittedPVKeys[oldKey]; !admitted {
-				return
-			}
-			if _, seen := seenPVs2[oldKey]; seen {
-				return
-			}
-			seenPVs2[oldKey] = struct{}{}
-
-			newKey := pvKey{remap[oldPathID], remap[oldValueID]}
-			blobOff := pvBlobOffset[newKey]
-			writePos := pvWriteIdx[newKey]
-			offset := blobOff + writePos*positionSize
-			if int(offset)+positionSize <= len(postingBlob) {
-				binary.LittleEndian.PutUint32(postingBlob[offset:], pos)
-				pvWriteIdx[newKey] = writePos + 1
-			}
-		})
+		clear(s.seenPaths)
+		clear(s.seenPVs)
+		s.pos = uint32(ref.Pos) //nolint:gosec // G115: record positions bounded by chunk record count (< 2^32)
+		tokenizer.WalkJSON(rec.Raw, s.onPath, s.onPV)
 	}
-	cursor2.Close()
-	pass2Duration := time.Since(pass2Start)
+	_ = cursor.Close()
 
-	// Encode and write.
-	data := encodeIndex(newDict, pathTable, pvTable, postingBlob, jsonStatus)
+	return time.Since(pass2Start), nil
+}
+
+func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
+	buildStart := time.Now()
+
+	meta, err := idx.manager.Meta(chunkID)
+	if err != nil {
+		return fmt.Errorf("get chunk meta: %w", err)
+	}
+	if !meta.Sealed {
+		return chunk.ErrChunkNotSealed
+	}
+
+	p1, pass1Duration, err := idx.pass1(ctx, chunkID)
+	if err != nil {
+		return err
+	}
+
+	if p1.capped {
+		idx.logger.Warn("json index capped due to hard cap",
+			"chunk", chunkID.String(),
+			"reason", p1.capReason,
+		)
+		return idx.writeCappedIndex(chunkID)
+	}
+
+	if len(p1.pathCounts) == 0 {
+		return idx.writeEmptyIndex(chunkID)
+	}
+
+	ar := idx.admitPV(p1)
+	dr := buildDictionary(p1, ar.admittedPV)
+	layout := buildBlobLayout(p1, ar.admittedPV, dr.remap)
+
+	pass2Duration, err := idx.pass2(ctx, chunkID, p1, ar.admittedPV, dr.remap, layout)
+	if err != nil {
+		return err
+	}
+
+	data := encodeIndex(dr.newDict, layout.pathTable, layout.pvTable, layout.postingBlob, ar.jsonStatus)
 
 	chunkDir := filepath.Join(idx.dir, chunkID.String())
-	if err := os.MkdirAll(chunkDir, 0o755); err != nil {
+	if err := os.MkdirAll(chunkDir, 0o750); err != nil {
 		return fmt.Errorf("create index dir: %w", err)
 	}
 
@@ -468,22 +514,19 @@ func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 		return fmt.Errorf("write json index: %w", err)
 	}
 
-	droppedPV := len(pvCounts) - len(admittedPV)
-	totalDuration := time.Since(buildStart)
-
 	idx.logger.Debug("json index built",
 		"chunk", chunkID.String(),
-		"records", recordCount,
-		"dict_size", len(newDict),
-		"paths", len(pathTable),
-		"pv_pairs", len(pvTable),
-		"dropped_pv", droppedPV,
-		"blob_bytes", len(postingBlob),
+		"records", p1.recordCount,
+		"dict_size", len(dr.newDict),
+		"paths", len(layout.pathTable),
+		"pv_pairs", len(layout.pvTable),
+		"dropped_pv", len(p1.pvCounts)-len(ar.admittedPV),
+		"blob_bytes", len(layout.postingBlob),
 		"file_bytes", len(data),
-		"status", jsonStatus,
+		"status", ar.jsonStatus,
 		"pass1", pass1Duration,
 		"pass2", pass2Duration,
-		"total", totalDuration,
+		"total", time.Since(buildStart),
 	)
 
 	return nil
@@ -492,7 +535,7 @@ func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 func (idx *Indexer) writeCappedIndex(chunkID chunk.ChunkID) error {
 	data := encodeIndex(nil, nil, nil, nil, index.JSONCapped)
 	chunkDir := filepath.Join(idx.dir, chunkID.String())
-	if err := os.MkdirAll(chunkDir, 0o755); err != nil {
+	if err := os.MkdirAll(chunkDir, 0o750); err != nil {
 		return fmt.Errorf("create index dir: %w", err)
 	}
 	return idx.writeFile(chunkDir, data)
@@ -501,7 +544,7 @@ func (idx *Indexer) writeCappedIndex(chunkID chunk.ChunkID) error {
 func (idx *Indexer) writeEmptyIndex(chunkID chunk.ChunkID) error {
 	data := encodeIndex(nil, nil, nil, nil, index.JSONComplete)
 	chunkDir := filepath.Join(idx.dir, chunkID.String())
-	if err := os.MkdirAll(chunkDir, 0o755); err != nil {
+	if err := os.MkdirAll(chunkDir, 0o750); err != nil {
 		return fmt.Errorf("create index dir: %w", err)
 	}
 	return idx.writeFile(chunkDir, data)
@@ -513,27 +556,27 @@ func (idx *Indexer) writeFile(chunkDir string, data []byte) error {
 	if err != nil {
 		return fmt.Errorf("create temp: %w", err)
 	}
-	tmpName := tmpFile.Name()
+	tmpName := filepath.Clean(tmpFile.Name())
 
 	if err := tmpFile.Chmod(0o644); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpName)
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpName) //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
 		return fmt.Errorf("chmod: %w", err)
 	}
 
 	if _, err := tmpFile.Write(data); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpName)
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpName) //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
 		return fmt.Errorf("write: %w", err)
 	}
 
 	if err := tmpFile.Close(); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName) //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
 		return fmt.Errorf("close: %w", err)
 	}
 
-	if err := os.Rename(tmpName, target); err != nil {
-		os.Remove(tmpName)
+	if err := os.Rename(tmpName, filepath.Clean(target)); err != nil { //nolint:gosec // G703: both paths are from internal index path construction
+		_ = os.Remove(tmpName) //nolint:gosec // G703: tmpName is from os.CreateTemp, not user input
 		return fmt.Errorf("rename: %w", err)
 	}
 

@@ -16,6 +16,7 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"gastrolog/internal/chunk"
 	"strconv"
@@ -173,7 +174,7 @@ type SchedulerConfig struct {
 
 // AuthConfig holds configuration for user authentication.
 type AuthConfig struct {
-	JWTSecret             string `json:"jwt_secret,omitempty"`
+	JWTSecret             string `json:"jwt_secret,omitempty"` //nolint:gosec // G117: config field, not a hardcoded credential
 	TokenDuration         string `json:"token_duration,omitempty"`          // Go duration, e.g. "168h"
 	MinPasswordLength     int    `json:"min_password_length,omitempty"`     // default 8
 	RequireMixedCase      bool   `json:"require_mixed_case,omitempty"`      // require upper and lowercase
@@ -315,7 +316,7 @@ func (c RetentionPolicyConfig) ToRetentionPolicy() (chunk.RetentionPolicy, error
 			return nil, fmt.Errorf("invalid maxAge: %w", err)
 		}
 		if d <= 0 {
-			return nil, fmt.Errorf("invalid maxAge: must be positive")
+			return nil, errors.New("invalid maxAge: must be positive")
 		}
 		policies = append(policies, chunk.NewTTLRetentionPolicy(d))
 	}
@@ -325,12 +326,12 @@ func (c RetentionPolicyConfig) ToRetentionPolicy() (chunk.RetentionPolicy, error
 		if err != nil {
 			return nil, fmt.Errorf("invalid maxBytes: %w", err)
 		}
-		policies = append(policies, chunk.NewSizeRetentionPolicy(int64(bytes)))
+		policies = append(policies, chunk.NewSizeRetentionPolicy(int64(bytes))) //nolint:gosec // G115: parsed byte count is always reasonable
 	}
 
 	if c.MaxChunks != nil {
 		if *c.MaxChunks <= 0 {
-			return nil, fmt.Errorf("invalid maxChunks: must be positive")
+			return nil, errors.New("invalid maxChunks: must be positive")
 		}
 		policies = append(policies, chunk.NewCountRetentionPolicy(int(*c.MaxChunks)))
 	}
@@ -386,13 +387,13 @@ func (c RotationPolicyConfig) ToRotationPolicy() (chunk.RotationPolicy, error) {
 			return nil, fmt.Errorf("invalid maxAge: %w", err)
 		}
 		if d <= 0 {
-			return nil, fmt.Errorf("invalid maxAge: must be positive")
+			return nil, errors.New("invalid maxAge: must be positive")
 		}
 		policies = append(policies, chunk.NewAgePolicy(d, nil))
 	}
 
 	if c.MaxRecords != nil {
-		policies = append(policies, chunk.NewRecordCountPolicy(uint64(*c.MaxRecords)))
+		policies = append(policies, chunk.NewRecordCountPolicy(uint64(*c.MaxRecords))) //nolint:gosec // G115: maxRecords is a positive config value
 	}
 
 	if len(policies) == 0 {
@@ -410,7 +411,7 @@ func (c RotationPolicyConfig) ToRotationPolicy() (chunk.RotationPolicy, error) {
 func ParseBytes(s string) (uint64, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return 0, fmt.Errorf("empty value")
+		return 0, errors.New("empty value")
 	}
 
 	s = strings.ToUpper(s)

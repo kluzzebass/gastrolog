@@ -69,7 +69,7 @@ func runMigrations(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("query applied migrations: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var v int
 		if err := rows.Scan(&v); err != nil {
@@ -102,12 +102,12 @@ func runMigrations(db *sql.DB) error {
 		}
 
 		if _, err := tx.Exec(m.SQL); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return fmt.Errorf("execute migration %d: %w", m.Version, err)
 		}
 
 		if _, err := tx.Exec("INSERT INTO schema_migrations (version) VALUES (?)", m.Version); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return fmt.Errorf("record migration %d: %w", m.Version, err)
 		}
 
@@ -124,10 +124,10 @@ func runMigrations(db *sql.DB) error {
 			return fmt.Errorf("foreign key check after migration %d: %w", m.Version, err)
 		}
 		if rows.Next() {
-			rows.Close()
+			_ = rows.Close()
 			return fmt.Errorf("foreign key violations after migration %d", m.Version)
 		}
-		rows.Close()
+		_ = rows.Close()
 	}
 
 	return nil

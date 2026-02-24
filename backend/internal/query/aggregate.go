@@ -1,6 +1,7 @@
 package query
 
 import (
+	"errors"
 	"fmt"
 	"iter"
 	"maps"
@@ -114,7 +115,7 @@ func NewAggregator(stats *querylang.StatsOp) (*Aggregator, error) {
 	for i, g := range stats.Groups {
 		if g.Bin != nil {
 			if a.binIdx >= 0 {
-				return nil, fmt.Errorf("only one bin() group is allowed")
+				return nil, errors.New("only one bin() group is allowed")
 			}
 			dur, err := ParseBinDuration(g.Bin.Duration)
 			if err != nil {
@@ -233,37 +234,7 @@ func (a *Aggregator) Result(start, end time.Time) *TableResult {
 	}
 
 	// Build rows.
-	var rows [][]string
-
-	if len(a.groups) == 0 && len(a.state) == 0 {
-		// No group-by, no records → single row with default values (like SQL).
-		accs, _ := a.makeAccumulators()
-		row := make([]string, len(a.aggs))
-		for i, acc := range accs {
-			v := acc.Result()
-			if v.Missing {
-				row[i] = ""
-			} else {
-				row[i] = v.Str
-			}
-		}
-		rows = append(rows, row)
-	} else {
-		for _, key := range a.keyOrder {
-			gs := a.state[key]
-			row := make([]string, 0, len(columns))
-			row = append(row, gs.groupValues...)
-			for _, acc := range gs.accs {
-				v := acc.Result()
-				if v.Missing {
-					row = append(row, "")
-				} else {
-					row = append(row, v.Str)
-				}
-			}
-			rows = append(rows, row)
-		}
-	}
+	rows := a.buildRows(columns)
 
 	// Sort rows by group values.
 	a.sortRows(rows)
@@ -342,6 +313,50 @@ func (a *Aggregator) getTimestamp(rec chunk.Record) (time.Time, bool) {
 	}
 }
 
+// buildRows constructs result rows from the aggregation state.
+// If there are no groups and no state, returns a single row with default values (like SQL).
+func (a *Aggregator) buildRows(columns []string) [][]string {
+	if len(a.groups) == 0 && len(a.state) == 0 {
+		return a.buildDefaultRow()
+	}
+	return a.buildGroupedRows(columns)
+}
+
+// buildDefaultRow returns a single row with default accumulator values (no group-by, no records).
+func (a *Aggregator) buildDefaultRow() [][]string {
+	accs, _ := a.makeAccumulators()
+	row := make([]string, len(a.aggs))
+	for i, acc := range accs {
+		v := acc.Result()
+		if v.Missing {
+			row[i] = ""
+		} else {
+			row[i] = v.Str
+		}
+	}
+	return [][]string{row}
+}
+
+// buildGroupedRows returns one row per group key with group values and accumulator results.
+func (a *Aggregator) buildGroupedRows(columns []string) [][]string {
+	var rows [][]string
+	for _, key := range a.keyOrder {
+		gs := a.state[key]
+		row := make([]string, 0, len(columns))
+		row = append(row, gs.groupValues...)
+		for _, acc := range gs.accs {
+			v := acc.Result()
+			if v.Missing {
+				row = append(row, "")
+			} else {
+				row = append(row, v.Str)
+			}
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
 // gapFill inserts zero-valued entries for time bins that have no records.
 // For multi-dimensional groups (field + bin), it fills all bins for each
 // unique combination of non-bin group values.
@@ -350,21 +365,33 @@ func (a *Aggregator) gapFill(start, end time.Time) {
 		return
 	}
 
-	// Determine time range.
+	minTS, maxTS := a.gapFillRange(start, end)
+	if minTS.IsZero() || maxTS.IsZero() || !minTS.Before(maxTS) {
+		return
+	}
+
+	nonBinGroups := a.collectNonBinGroups()
+
+	for _, nbValues := range nonBinGroups {
+		a.fillBinsForGroup(nbValues, minTS, maxTS)
+	}
+}
+
+// gapFillRange returns the effective time range for gap-filling.
+func (a *Aggregator) gapFillRange(start, end time.Time) (time.Time, time.Time) {
 	minTS, maxTS := a.dataTimeRange()
 	if !start.IsZero() {
 		minTS = start.Truncate(a.binWidth)
 	}
 	if !end.IsZero() {
-		// Truncate end to bin boundary (inclusive).
 		maxTS = end.Truncate(a.binWidth)
 	}
-	if minTS.IsZero() || maxTS.IsZero() || !minTS.Before(maxTS) {
-		return
-	}
+	return minTS, maxTS
+}
 
-	// Find all unique non-bin group value combinations.
-	nonBinGroups := make(map[string][]string) // nbKey → nbValues
+// collectNonBinGroups returns all unique non-bin group value combinations.
+func (a *Aggregator) collectNonBinGroups() map[string][]string {
+	nonBinGroups := make(map[string][]string)
 	for _, key := range a.keyOrder {
 		gs := a.state[key]
 		nbValues := make([]string, 0, len(gs.groupValues))
@@ -378,38 +405,45 @@ func (a *Aggregator) gapFill(start, end time.Time) {
 			nonBinGroups[nbKey] = nbValues
 		}
 	}
+	return nonBinGroups
+}
 
-	// For each non-bin group combination, fill all bins from minTS to maxTS.
-	for _, nbValues := range nonBinGroups {
-		for t := minTS; !t.After(maxTS); t = t.Add(a.binWidth) {
-			binStr := t.UTC().Format(time.RFC3339)
+// fillBinsForGroup fills all bins from minTS to maxTS for a specific non-bin group combination.
+func (a *Aggregator) fillBinsForGroup(nbValues []string, minTS, maxTS time.Time) {
+	for t := minTS; !t.After(maxTS); t = t.Add(a.binWidth) {
+		binStr := t.UTC().Format(time.RFC3339)
+		fullValues := a.buildFullGroupValues(nbValues, binStr)
 
-			// Build full group values.
-			fullValues := make([]string, len(a.groups))
-			nbIdx := 0
-			for i := range a.groups {
-				if i == a.binIdx {
-					fullValues[i] = binStr
-				} else {
-					fullValues[i] = nbValues[nbIdx]
-					nbIdx++
-				}
-			}
+		key := makeGroupKey(fullValues)
+		if _, exists := a.state[key]; exists {
+			continue
+		}
+		accs, err := a.makeAccumulators()
+		if err != nil {
+			continue
+		}
+		a.state[key] = &groupState{
+			groupValues: fullValues,
+			accs:        accs,
+		}
+		a.keyOrder = append(a.keyOrder, key)
+	}
+}
 
-			key := makeGroupKey(fullValues)
-			if _, exists := a.state[key]; !exists {
-				accs, err := a.makeAccumulators()
-				if err != nil {
-					continue
-				}
-				a.state[key] = &groupState{
-					groupValues: fullValues,
-					accs:        accs,
-				}
-				a.keyOrder = append(a.keyOrder, key)
-			}
+// buildFullGroupValues constructs a complete group values slice by inserting
+// the bin timestamp at the bin index and filling non-bin values from nbValues.
+func (a *Aggregator) buildFullGroupValues(nbValues []string, binStr string) []string {
+	fullValues := make([]string, len(a.groups))
+	nbIdx := 0
+	for i := range a.groups {
+		if i == a.binIdx {
+			fullValues[i] = binStr
+		} else {
+			fullValues[i] = nbValues[nbIdx]
+			nbIdx++
 		}
 	}
+	return fullValues
 }
 
 // dataTimeRange returns the min and max bin timestamps from the current data.
@@ -443,7 +477,7 @@ func (a *Aggregator) sortRows(rows [][]string) {
 	}
 
 	slices.SortStableFunc(rows, func(ri, rj []string) int {
-		for k := 0; k < len(a.groups); k++ {
+		for k := range len(a.groups) {
 			if ri[k] == rj[k] {
 				continue
 			}

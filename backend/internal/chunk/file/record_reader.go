@@ -3,6 +3,7 @@ package file
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"syscall"
 
 	seekable "github.com/SaveTheRbtz/zstd-seekable-format-go/pkg"
@@ -17,7 +18,7 @@ var (
 
 // loadDict reads attr_dict.log, validates its header, and returns a StringDict.
 func loadDict(dictPath string) (*chunk.StringDict, error) {
-	data, err := os.ReadFile(dictPath)
+	data, err := os.ReadFile(filepath.Clean(dictPath))
 	if err != nil {
 		return nil, err
 	}
@@ -65,13 +66,13 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath s
 	}
 
 	// Open and mmap idx.log.
-	idxFile, err := os.Open(idxPath)
+	idxFile, err := os.Open(filepath.Clean(idxPath))
 	if err != nil {
 		return nil, err
 	}
 	idxInfo, err := idxFile.Stat()
 	if err != nil {
-		idxFile.Close()
+		_ = idxFile.Close()
 		return nil, err
 	}
 
@@ -79,7 +80,7 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath s
 
 	// Handle empty chunk case.
 	if recordCount == 0 {
-		idxFile.Close()
+		_ = idxFile.Close()
 		return &mmapCursor{
 			chunkID:     chunkID,
 			dict:        dict,
@@ -89,104 +90,37 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath s
 		}, nil
 	}
 
-	idxData, err := syscall.Mmap(int(idxFile.Fd()), 0, int(idxInfo.Size()), syscall.PROT_READ, syscall.MAP_SHARED)
+	idxData, err := syscall.Mmap(int(idxFile.Fd()), 0, int(idxInfo.Size()), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: uintptr->int and int64->int are safe on 64-bit
 	if err != nil {
-		idxFile.Close()
+		_ = idxFile.Close()
 		return nil, err
 	}
 
-	// Open raw.log — if compressed, use seekable reader for random access;
-	// otherwise mmap the file directly.
-	var rawData, rawMmap []byte
-	var rawFile *os.File
-	var rawSeek seekable.Reader
-
-	rawCompressed, err := isCompressed(rawPath)
+	rawData, rawMmap, rawFile, rawSeek, err := openDataFile(rawPath)
 	if err != nil {
-		syscall.Munmap(idxData)
-		idxFile.Close()
+		_ = syscall.Munmap(idxData)
+		_ = idxFile.Close()
 		return nil, err
-	}
-	if rawCompressed {
-		rawSeek, rawFile, err = openSeekableReader(rawPath)
-		if err != nil {
-			syscall.Munmap(idxData)
-			idxFile.Close()
-			return nil, err
-		}
-	} else {
-		rawFile, err = os.Open(rawPath)
-		if err != nil {
-			syscall.Munmap(idxData)
-			idxFile.Close()
-			return nil, err
-		}
-		rawInfo, err := rawFile.Stat()
-		if err != nil {
-			rawFile.Close()
-			syscall.Munmap(idxData)
-			idxFile.Close()
-			return nil, err
-		}
-		rawMmap, err = syscall.Mmap(int(rawFile.Fd()), 0, int(rawInfo.Size()), syscall.PROT_READ, syscall.MAP_SHARED)
-		if err != nil {
-			rawFile.Close()
-			syscall.Munmap(idxData)
-			idxFile.Close()
-			return nil, err
-		}
-		rawData = rawMmap[format.HeaderSize:]
 	}
 
 	cleanupRaw := func() {
 		if rawSeek != nil {
-			rawSeek.Close()
+			_ = rawSeek.Close()
 		}
 		if rawMmap != nil {
-			syscall.Munmap(rawMmap)
+			_ = syscall.Munmap(rawMmap)
 		}
 		if rawFile != nil {
-			rawFile.Close()
+			_ = rawFile.Close()
 		}
-		syscall.Munmap(idxData)
-		idxFile.Close()
+		_ = syscall.Munmap(idxData)
+		_ = idxFile.Close()
 	}
 
-	// Open attr.log — same pattern as raw.log.
-	var attrData, attrMmap []byte
-	var attrFile *os.File
-	var attrSeek seekable.Reader
-
-	attrCompressed, err := isCompressed(attrPath)
+	attrData, attrMmap, attrFile, attrSeek, err := openDataFile(attrPath)
 	if err != nil {
 		cleanupRaw()
 		return nil, err
-	}
-	if attrCompressed {
-		attrSeek, attrFile, err = openSeekableReader(attrPath)
-		if err != nil {
-			cleanupRaw()
-			return nil, err
-		}
-	} else {
-		attrFile, err = os.Open(attrPath)
-		if err != nil {
-			cleanupRaw()
-			return nil, err
-		}
-		attrInfo, err := attrFile.Stat()
-		if err != nil {
-			attrFile.Close()
-			cleanupRaw()
-			return nil, err
-		}
-		attrMmap, err = syscall.Mmap(int(attrFile.Fd()), 0, int(attrInfo.Size()), syscall.PROT_READ, syscall.MAP_SHARED)
-		if err != nil {
-			attrFile.Close()
-			cleanupRaw()
-			return nil, err
-		}
-		attrData = attrMmap[format.HeaderSize:]
 	}
 
 	return &mmapCursor{
@@ -252,7 +186,7 @@ func (c *mmapCursor) Seek(ref chunk.RecordRef) error {
 
 func (c *mmapCursor) readRecord(index uint64) (chunk.Record, error) {
 	// Read idx.log entry.
-	idxOffset := int(IdxHeaderSize) + int(index)*IdxEntrySize
+	idxOffset := int(IdxHeaderSize) + int(index)*IdxEntrySize //nolint:gosec // G115: index is bounded by record count (< 2^32)
 	if idxOffset+IdxEntrySize > len(c.idxData) {
 		return chunk.Record{}, ErrInvalidRecordIdx
 	}
@@ -392,30 +326,30 @@ func newStdioCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath 
 		return nil, err
 	}
 
-	rawFile, err := os.Open(rawPath)
+	rawFile, err := os.Open(filepath.Clean(rawPath))
 	if err != nil {
 		return nil, err
 	}
 
-	idxFile, err := os.Open(idxPath)
+	idxFile, err := os.Open(filepath.Clean(idxPath))
 	if err != nil {
-		rawFile.Close()
+		_ = rawFile.Close()
 		return nil, err
 	}
 
-	attrFile, err := os.Open(attrPath)
+	attrFile, err := os.Open(filepath.Clean(attrPath))
 	if err != nil {
-		rawFile.Close()
-		idxFile.Close()
+		_ = rawFile.Close()
+		_ = idxFile.Close()
 		return nil, err
 	}
 
 	// Get current record count.
 	idxInfo, err := idxFile.Stat()
 	if err != nil {
-		rawFile.Close()
-		idxFile.Close()
-		attrFile.Close()
+		_ = rawFile.Close()
+		_ = idxFile.Close()
+		_ = attrFile.Close()
 		return nil, err
 	}
 	recordCount := RecordCount(idxInfo.Size())
@@ -553,3 +487,30 @@ func (c *stdioCursor) Close() error {
 }
 
 var _ chunk.RecordCursor = (*stdioCursor)(nil)
+
+func openDataFile(path string) (data []byte, mmapRegion []byte, file *os.File, seek seekable.Reader, err error) {
+	compressed, err := isCompressed(path)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	if compressed {
+		seek, file, err = openSeekableReader(path)
+		return nil, nil, file, seek, err
+	}
+
+	file, err = os.Open(filepath.Clean(path))
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, nil, nil, err
+	}
+	mmapRegion, err = syscall.Mmap(int(file.Fd()), 0, int(info.Size()), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: uintptr->int and int64->int are safe on 64-bit
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, nil, nil, err
+	}
+	return mmapRegion[format.HeaderSize:], mmapRegion, file, nil, nil
+}

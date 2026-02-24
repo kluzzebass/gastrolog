@@ -110,11 +110,11 @@ func (r *Ingester) shutdown() {
 	defer r.mu.Unlock()
 
 	if r.udpConn != nil {
-		r.udpConn.Close()
+		_ = r.udpConn.Close()
 		r.udpConn = nil
 	}
 	if r.tcpListener != nil {
-		r.tcpListener.Close()
+		_ = r.tcpListener.Close()
 		r.tcpListener = nil
 	}
 }
@@ -146,11 +146,12 @@ func (r *Ingester) runUDP(ctx context.Context) error {
 		}
 
 		// Set read deadline to allow checking context.
-		conn.SetReadDeadline(time.Now().Add(time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(time.Second))
 
 		n, remoteAddr, err := conn.ReadFromUDP(buf)
 		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
 				continue
 			}
 			if errors.Is(err, net.ErrClosed) {
@@ -196,11 +197,12 @@ func (r *Ingester) runTCP(ctx context.Context) error {
 		}
 
 		// Set accept deadline to allow checking context.
-		listener.(*net.TCPListener).SetDeadline(time.Now().Add(time.Second))
+		_ = listener.(*net.TCPListener).SetDeadline(time.Now().Add(time.Second))
 
 		conn, err := listener.Accept()
 		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
 				continue
 			}
 			if errors.Is(err, net.ErrClosed) {
@@ -212,7 +214,7 @@ func (r *Ingester) runTCP(ctx context.Context) error {
 		}
 
 		wg.Go(func() {
-			defer conn.Close()
+			defer func() { _ = conn.Close() }()
 			r.handleTCPConn(ctx, conn)
 		})
 	}
@@ -234,37 +236,11 @@ func (r *Ingester) handleTCPConn(ctx context.Context, conn net.Conn) {
 		default:
 		}
 
-		// Set read deadline.
-		conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 
-		// Try to detect framing: octet-counted starts with a digit.
-		firstByte, err := reader.Peek(1)
+		line, err := r.readFrame(reader)
 		if err != nil {
-			if err != io.EOF && !errors.Is(err, net.ErrClosed) {
-				if netErr, ok := err.(net.Error); !ok || !netErr.Timeout() {
-					r.logger.Debug("TCP read error", "error", err)
-				}
-			}
-			return
-		}
-
-		var line []byte
-		if firstByte[0] >= '0' && firstByte[0] <= '9' {
-			// Octet-counted framing: "123 <message>"
-			line, err = r.readOctetCounted(reader)
-		} else {
-			// Newline-delimited framing.
-			line, err = reader.ReadBytes('\n')
-			if err == nil && len(line) > 0 && line[len(line)-1] == '\n' {
-				line = line[:len(line)-1]
-				if len(line) > 0 && line[len(line)-1] == '\r' {
-					line = line[:len(line)-1]
-				}
-			}
-		}
-
-		if err != nil {
-			if err != io.EOF && !errors.Is(err, net.ErrClosed) {
+			if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) && !isTimeout(err) {
 				r.logger.Debug("TCP read error", "error", err)
 			}
 			return
@@ -281,6 +257,43 @@ func (r *Ingester) handleTCPConn(ctx context.Context, conn net.Conn) {
 			return
 		}
 	}
+}
+
+func (r *Ingester) readFrame(reader *bufio.Reader) ([]byte, error) {
+	firstByte, err := reader.Peek(1)
+	if err != nil {
+		return nil, err
+	}
+
+	if firstByte[0] >= '0' && firstByte[0] <= '9' {
+		return r.readOctetCounted(reader)
+	}
+
+	return readNewlineDelimited(reader)
+}
+
+func readNewlineDelimited(reader *bufio.Reader) ([]byte, error) {
+	line, err := reader.ReadBytes('\n')
+	if err != nil {
+		return nil, err
+	}
+	line = trimCRLF(line)
+	return line, nil
+}
+
+func trimCRLF(line []byte) []byte {
+	if len(line) > 0 && line[len(line)-1] == '\n' {
+		line = line[:len(line)-1]
+	}
+	if len(line) > 0 && line[len(line)-1] == '\r' {
+		line = line[:len(line)-1]
+	}
+	return line
+}
+
+func isTimeout(err error) bool {
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 // readOctetCounted reads an octet-counted syslog message.

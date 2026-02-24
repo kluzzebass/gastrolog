@@ -82,6 +82,7 @@ func Memory() MemoryStats {
 
 	rss := peakRSS()
 
+	//nolint:gosec // G115: memory stats are always positive and well within int64 range
 	return MemoryStats{
 		Inuse:        int64(m.HeapInuse + m.StackInuse),
 		RSS:          rss,
@@ -101,7 +102,7 @@ func peakRSS() int64 {
 	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &rusage); err != nil {
 		return 0
 	}
-	rss := int64(rusage.Maxrss)
+	rss := rusage.Maxrss
 	// macOS reports Maxrss in bytes; Linux reports in KB.
 	if runtime.GOOS == "linux" {
 		rss *= 1024

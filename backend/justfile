@@ -43,6 +43,10 @@ build-all:
   just build-cross darwin amd64
   just build-cross darwin arm64
 
+# Lints Go code (cognitive complexity, cyclomatic complexity, gocritic).
+lint:
+  golangci-lint run ./...
+
 # Embeds built frontend assets into the backend (brotli-compressed).
 embed-frontend:
   rm -rf internal/frontend/dist/*

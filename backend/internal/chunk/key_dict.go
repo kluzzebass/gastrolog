@@ -36,7 +36,7 @@ func (d *StringDict) Add(s string) (uint32, error) {
 	if len(d.strings) >= 1<<32-1 {
 		return 0, ErrDictFull
 	}
-	id := uint32(len(d.strings))
+	id := uint32(len(d.strings)) //nolint:gosec // G115: bounded by 1<<32-1 check above
 	d.strings = append(d.strings, s)
 	d.lookup[s] = id
 	return id, nil
@@ -64,7 +64,7 @@ func (d *StringDict) Len() int {
 // EncodeDictEntry serializes one dictionary entry: [strLen:u16][string bytes].
 func EncodeDictEntry(s string) []byte {
 	buf := make([]byte, 2+len(s))
-	binary.LittleEndian.PutUint16(buf[0:2], uint16(len(s)))
+	binary.LittleEndian.PutUint16(buf[0:2], uint16(len(s))) //nolint:gosec // G115: dict entry string length bounded by key/value size limits
 	copy(buf[2:], s)
 	return buf
 }
@@ -120,7 +120,7 @@ func EncodeWithDict(attrs Attributes, dict *StringDict) (encoded []byte, newEntr
 	}
 
 	buf := make([]byte, size)
-	binary.LittleEndian.PutUint16(buf[0:2], uint16(len(attrs)))
+	binary.LittleEndian.PutUint16(buf[0:2], uint16(len(attrs))) //nolint:gosec // G115: attribute count bounded by size check above
 
 	offset := 2
 	for i := range keys {

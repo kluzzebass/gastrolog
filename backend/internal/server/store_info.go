@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
@@ -68,94 +69,105 @@ func (s *StoreServer) GetStats(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetStatsRequest],
 ) (*connect.Response[apiv1.GetStatsResponse], error) {
-	resp := &apiv1.GetStatsResponse{}
-
-	stores := s.orch.ListStores()
-	if req.Msg.Store != "" {
-		// Filter to specific store
-		storeID, connErr := parseUUID(req.Msg.Store)
-		if connErr != nil {
-			return nil, connErr
-		}
-		found := false
-		if slices.Contains(stores, storeID) {
-			stores = []uuid.UUID{storeID}
-			found = true
-		}
-		if !found {
-			return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
-		}
+	stores, err := s.resolveStoreIDs(req.Msg.Store)
+	if err != nil {
+		return nil, err
 	}
 
-	resp.TotalStores = int64(len(stores))
+	resp := &apiv1.GetStatsResponse{
+		TotalStores: int64(len(stores)),
+	}
 
 	for _, storeID := range stores {
 		metas, err := s.orch.ListChunkMetas(storeID)
 		if err != nil {
 			continue
 		}
-
-		storeStat := &apiv1.StoreStats{
-			Id:         storeID.String(),
-			ChunkCount: int64(len(metas)),
-			Enabled:    s.orch.IsStoreEnabled(storeID),
-		}
-
-		// Get store type and name from config store (orchestrator doesn't track these).
-		if cfg, err := s.getFullStoreConfig(ctx, storeID); err == nil {
-			storeStat.Type = cfg.Type
-			storeStat.Name = cfg.Name
-		}
-
-		resp.TotalChunks += int64(len(metas))
-
-		for _, meta := range metas {
-			if meta.Sealed {
-				resp.SealedChunks++
-				storeStat.SealedChunks++
-			} else {
-				storeStat.ActiveChunks++
-			}
-			resp.TotalRecords += meta.RecordCount
-			storeStat.RecordCount += meta.RecordCount
-			if meta.DiskBytes > 0 {
-				// DiskBytes includes all files (data + indexes), so no
-				// separate IndexBytes accounting needed.
-				storeStat.DataBytes += meta.DiskBytes
-			} else {
-				storeStat.DataBytes += meta.Bytes
-
-				// Only sum index sizes separately when DiskBytes is
-				// unavailable (active/unsealed chunks).
-				if sizes, err := s.orch.IndexSizes(storeID, meta.ID); err == nil {
-					for _, size := range sizes {
-						storeStat.IndexBytes += size
-					}
-				}
-			}
-
-			if !meta.StartTS.IsZero() {
-				if resp.OldestRecord == nil || meta.StartTS.Before(resp.OldestRecord.AsTime()) {
-					resp.OldestRecord = timestamppb.New(meta.StartTS)
-				}
-				if storeStat.OldestRecord == nil || meta.StartTS.Before(storeStat.OldestRecord.AsTime()) {
-					storeStat.OldestRecord = timestamppb.New(meta.StartTS)
-				}
-			}
-			if !meta.EndTS.IsZero() {
-				if resp.NewestRecord == nil || meta.EndTS.After(resp.NewestRecord.AsTime()) {
-					resp.NewestRecord = timestamppb.New(meta.EndTS)
-				}
-				if storeStat.NewestRecord == nil || meta.EndTS.After(storeStat.NewestRecord.AsTime()) {
-					storeStat.NewestRecord = timestamppb.New(meta.EndTS)
-				}
-			}
-		}
-
-		resp.TotalBytes += storeStat.DataBytes + storeStat.IndexBytes
+		storeStat := s.buildStoreStats(ctx, storeID, metas)
+		s.accumulateGlobalStats(resp, storeStat, metas)
 		resp.StoreStats = append(resp.StoreStats, storeStat)
 	}
 
+	s.fillProcessMetrics(resp)
+
+	return connect.NewResponse(resp), nil
+}
+
+func (s *StoreServer) resolveStoreIDs(storeFilter string) ([]uuid.UUID, error) {
+	stores := s.orch.ListStores()
+	if storeFilter == "" {
+		return stores, nil
+	}
+	storeID, connErr := parseUUID(storeFilter)
+	if connErr != nil {
+		return nil, connErr
+	}
+	if !slices.Contains(stores, storeID) {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
+	}
+	return []uuid.UUID{storeID}, nil
+}
+
+func (s *StoreServer) buildStoreStats(ctx context.Context, storeID uuid.UUID, metas []chunk.ChunkMeta) *apiv1.StoreStats {
+	stat := &apiv1.StoreStats{
+		Id:         storeID.String(),
+		ChunkCount: int64(len(metas)),
+		Enabled:    s.orch.IsStoreEnabled(storeID),
+	}
+	if cfg, err := s.getFullStoreConfig(ctx, storeID); err == nil {
+		stat.Type = cfg.Type
+		stat.Name = cfg.Name
+	}
+
+	for _, meta := range metas {
+		if meta.Sealed {
+			stat.SealedChunks++
+		} else {
+			stat.ActiveChunks++
+		}
+		stat.RecordCount += meta.RecordCount
+		s.accumulateChunkBytes(stat, storeID, meta)
+		updateTimeBounds(&stat.OldestRecord, meta.StartTS, (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.Before(b) })
+		updateTimeBounds(&stat.NewestRecord, meta.EndTS, (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.After(b) })
+	}
+	return stat
+}
+
+func (s *StoreServer) accumulateChunkBytes(stat *apiv1.StoreStats, storeID uuid.UUID, meta chunk.ChunkMeta) {
+	if meta.DiskBytes > 0 {
+		stat.DataBytes += meta.DiskBytes
+		return
+	}
+	stat.DataBytes += meta.Bytes
+	if sizes, err := s.orch.IndexSizes(storeID, meta.ID); err == nil {
+		for _, size := range sizes {
+			stat.IndexBytes += size
+		}
+	}
+}
+
+func (s *StoreServer) accumulateGlobalStats(resp *apiv1.GetStatsResponse, stat *apiv1.StoreStats, metas []chunk.ChunkMeta) {
+	resp.TotalChunks += int64(len(metas))
+	resp.TotalRecords += stat.RecordCount
+	resp.TotalBytes += stat.DataBytes + stat.IndexBytes
+	resp.SealedChunks += stat.SealedChunks
+
+	for _, meta := range metas {
+		updateTimeBounds(&resp.OldestRecord, meta.StartTS, (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.Before(b) })
+		updateTimeBounds(&resp.NewestRecord, meta.EndTS, (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.After(b) })
+	}
+}
+
+func updateTimeBounds(field **timestamppb.Timestamp, ts time.Time, asTime func(*timestamppb.Timestamp) time.Time, isBetter func(time.Time, time.Time) bool) {
+	if ts.IsZero() {
+		return
+	}
+	if *field == nil || isBetter(ts, asTime(*field)) {
+		*field = timestamppb.New(ts)
+	}
+}
+
+func (s *StoreServer) fillProcessMetrics(resp *apiv1.GetStatsResponse) {
 	resp.ProcessCpuPercent = sysmetrics.CPUPercent()
 	mem := sysmetrics.Memory()
 	resp.ProcessMemoryBytes = mem.Inuse
@@ -170,8 +182,6 @@ func (s *StoreServer) GetStats(
 		HeapObjects:       mem.HeapObjects,
 		NumGc:             mem.NumGC,
 	}
-
-	return connect.NewResponse(resp), nil
 }
 
 func (s *StoreServer) getStoreInfo(ctx context.Context, id uuid.UUID) (*apiv1.StoreInfo, error) {

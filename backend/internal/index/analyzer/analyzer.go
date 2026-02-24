@@ -41,13 +41,13 @@ func (a *Analyzer) AnalyzeChunk(chunkID chunk.ChunkID) (*ChunkAnalysis, error) {
 			break
 		}
 		if err != nil {
-			cursor.Close()
+			_ = cursor.Close()
 			return nil, err
 		}
 		chunkRecords++
 		chunkBytes += int64(len(rec.Raw))
 	}
-	cursor.Close()
+	_ = cursor.Close()
 
 	analysis := &ChunkAnalysis{
 		ChunkID:      chunkID,
@@ -88,55 +88,19 @@ func (a *Analyzer) AnalyzeAll() (*AggregateAnalysis, error) {
 	coverageCounts := make(map[IndexType]int64)
 
 	for _, meta := range chunks {
-		// Skip unsealed chunks - they don't have indexes yet
 		if !meta.Sealed {
 			continue
 		}
 
 		ca, err := a.AnalyzeChunk(meta.ID)
 		if err != nil {
-			// Record error but continue
 			agg.ChunksWithErrors++
 			continue
 		}
 
 		agg.ChunksAnalyzed++
 		agg.Chunks = append(agg.Chunks, *ca)
-
-		// Aggregate summaries
-		hasPartial := false
-		hasBudgetExhaustion := false
-		hasMissing := false
-
-		for _, s := range ca.Summaries {
-			agg.BytesByIndexType[s.IndexType] += s.BytesUsed
-
-			if s.Status == StatusPartial {
-				hasPartial = true
-				if s.Reason == ReasonBudgetExhausted {
-					hasBudgetExhaustion = true
-				}
-			}
-			if s.Status == StatusDisabled {
-				hasMissing = true
-			}
-
-			// Track coverage for averaging
-			if s.Status == StatusEnabled || s.Status == StatusPartial {
-				coverageSums[s.IndexType] += s.PercentOfChunk
-				coverageCounts[s.IndexType]++
-			}
-		}
-
-		if hasPartial {
-			agg.ChunksWithPartialIndexes++
-		}
-		if hasBudgetExhaustion {
-			agg.ChunksWithBudgetExhaustion++
-		}
-		if hasMissing {
-			agg.ChunksWithMissingIndexes++
-		}
+		a.aggregateChunk(agg, ca, coverageSums, coverageCounts)
 	}
 
 	// Compute averages
@@ -147,6 +111,41 @@ func (a *Analyzer) AnalyzeAll() (*AggregateAnalysis, error) {
 	}
 
 	return agg, nil
+}
+
+func (a *Analyzer) aggregateChunk(agg *AggregateAnalysis, ca *ChunkAnalysis, coverageSums map[IndexType]float64, coverageCounts map[IndexType]int64) {
+	hasPartial := false
+	hasBudgetExhaustion := false
+	hasMissing := false
+
+	for _, s := range ca.Summaries {
+		agg.BytesByIndexType[s.IndexType] += s.BytesUsed
+
+		if s.Status == StatusPartial {
+			hasPartial = true
+			if s.Reason == ReasonBudgetExhausted {
+				hasBudgetExhaustion = true
+			}
+		}
+		if s.Status == StatusDisabled {
+			hasMissing = true
+		}
+
+		if s.Status == StatusEnabled || s.Status == StatusPartial {
+			coverageSums[s.IndexType] += s.PercentOfChunk
+			coverageCounts[s.IndexType]++
+		}
+	}
+
+	if hasPartial {
+		agg.ChunksWithPartialIndexes++
+	}
+	if hasBudgetExhaustion {
+		agg.ChunksWithBudgetExhaustion++
+	}
+	if hasMissing {
+		agg.ChunksWithMissingIndexes++
+	}
 }
 
 func (a *Analyzer) analyzeTokenIndex(ca *ChunkAnalysis) {
@@ -351,7 +350,7 @@ func (a *Analyzer) analyzeAttrKVIndex(ca *ChunkAnalysis) {
 		keyStats := analyzeKeyIndex(keyIdx.Entries())
 		stats.UniqueKeys = keyStats.uniqueKeys
 		stats.TotalOccurrences = keyStats.totalOccurrences
-		stats.RecordsWithAttributes = int64(keyStats.maxPos + 1)
+		stats.RecordsWithAttributes = int64(keyStats.maxPos + 1) //nolint:gosec // G115: maxPos is a record position, always fits in int64
 		totalBytes += keyStats.indexBytes
 
 		// Convert top keys

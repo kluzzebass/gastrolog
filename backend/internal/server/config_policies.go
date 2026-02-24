@@ -202,7 +202,7 @@ func rotationPolicyToProto(cfg config.RotationPolicyConfig) *apiv1.RotationPolic
 	if cfg.MaxBytes != nil {
 		// Parse the human-readable byte string back to raw bytes.
 		if bytes, err := config.ParseBytes(*cfg.MaxBytes); err == nil {
-			p.MaxBytes = int64(bytes)
+			p.MaxBytes = int64(bytes) //nolint:gosec // G115: parsed byte count is always reasonable
 		}
 	}
 	if cfg.MaxAge != nil {
@@ -250,7 +250,7 @@ func retentionPolicyToProto(cfg config.RetentionPolicyConfig) *apiv1.RetentionPo
 	}
 	if cfg.MaxBytes != nil {
 		if bytes, err := config.ParseBytes(*cfg.MaxBytes); err == nil {
-			p.MaxBytes = int64(bytes)
+			p.MaxBytes = int64(bytes) //nolint:gosec // G115: parsed byte count is always reasonable
 		}
 	}
 	if cfg.MaxChunks != nil {

@@ -29,12 +29,12 @@ func newStaticHandler(fsys fs.FS) *staticHandler {
 		files: make(map[string]bool),
 	}
 
-	fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+	_ = fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
-		if strings.HasSuffix(p, ".br") {
-			h.files[strings.TrimSuffix(p, ".br")] = true
+		if after, found := strings.CutSuffix(p, ".br"); found {
+			h.files[after] = true
 		}
 		return nil
 	})
@@ -66,7 +66,7 @@ func (h *staticHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	data, err := io.ReadAll(f)
 	if err != nil {
@@ -96,7 +96,7 @@ func (h *staticHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", intToStr(len(data)))
 		w.WriteHeader(http.StatusOK)
 		if r.Method != http.MethodHead {
-			w.Write(data)
+			_, _ = w.Write(data)
 		}
 
 	case acceptsEncoding(ae, "gzip"):
@@ -107,13 +107,13 @@ func (h *staticHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		var buf bytes.Buffer
 		gz := gzip.NewWriter(&buf)
-		gz.Write(plain)
-		gz.Close()
+		_, _ = gz.Write(plain)
+		_ = gz.Close()
 		w.Header().Set("Content-Encoding", "gzip")
 		w.Header().Set("Content-Length", intToStr(buf.Len()))
 		w.WriteHeader(http.StatusOK)
 		if r.Method != http.MethodHead {
-			w.Write(buf.Bytes())
+			_, _ = w.Write(buf.Bytes())
 		}
 
 	default:
@@ -125,7 +125,7 @@ func (h *staticHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", intToStr(len(plain)))
 		w.WriteHeader(http.StatusOK)
 		if r.Method != http.MethodHead {
-			w.Write(plain)
+			_, _ = w.Write(plain)
 		}
 	}
 }
@@ -136,7 +136,7 @@ func decompressBrotli(data []byte) ([]byte, error) {
 
 // acceptsEncoding checks whether the Accept-Encoding header includes the given encoding.
 func acceptsEncoding(header, encoding string) bool {
-	for _, part := range strings.Split(header, ",") {
+	for part := range strings.SplitSeq(header, ",") {
 		// Strip quality value (e.g. "br;q=1.0" → "br").
 		if enc, _, _ := strings.Cut(strings.TrimSpace(part), ";"); strings.TrimSpace(enc) == encoding {
 			return true

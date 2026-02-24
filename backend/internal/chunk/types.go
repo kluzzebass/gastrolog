@@ -52,18 +52,18 @@ func (a Attributes) Encode() ([]byte, error) {
 	}
 
 	buf := make([]byte, size)
-	binary.LittleEndian.PutUint16(buf[0:2], uint16(len(a)))
+	binary.LittleEndian.PutUint16(buf[0:2], uint16(len(a))) //nolint:gosec // G115: attribute count bounded by size check above
 
 	offset := 2
 	for _, k := range keys {
 		v := a[k]
 
-		binary.LittleEndian.PutUint16(buf[offset:offset+2], uint16(len(k)))
+		binary.LittleEndian.PutUint16(buf[offset:offset+2], uint16(len(k))) //nolint:gosec // G115: key length bounded by size check above
 		offset += 2
 		copy(buf[offset:], k)
 		offset += len(k)
 
-		binary.LittleEndian.PutUint16(buf[offset:offset+2], uint16(len(v)))
+		binary.LittleEndian.PutUint16(buf[offset:offset+2], uint16(len(v))) //nolint:gosec // G115: value length bounded by size check above
 		offset += 2
 		copy(buf[offset:], v)
 		offset += len(v)

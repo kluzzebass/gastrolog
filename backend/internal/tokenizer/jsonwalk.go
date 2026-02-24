@@ -60,7 +60,7 @@ func walkJSONObject(prefix []byte, obj map[string]any, onPath JSONPathCallback, 
 		// Build path: prefix + \x00 + key (or just key if prefix is empty).
 		var path []byte
 		if len(prefix) == 0 {
-			path = append(prefix[:0:0], k...)
+			path = append(path, k...)
 		} else {
 			path = make([]byte, 0, len(prefix)+1+len(k))
 			path = append(path, prefix...)
@@ -79,68 +79,74 @@ func walkJSONObject(prefix []byte, obj map[string]any, onPath JSONPathCallback, 
 func walkJSONValue(path []byte, v any, onPath JSONPathCallback, onLeaf JSONLeafCallback) {
 	switch val := v.(type) {
 	case string:
-		if onPath != nil {
-			onPath(path)
-		}
-		if onLeaf != nil && len(val) > 0 && len(val) <= MaxValueLength {
-			valLower := toLowerASCIIBytes([]byte(val))
-			onLeaf(path, valLower)
-		}
-
+		emitPath(path, onPath)
+		walkJSONString(path, val, onLeaf)
 	case float64:
-		if onPath != nil {
-			onPath(path)
-		}
-		if onLeaf != nil {
-			var s string
-			if val == float64(int64(val)) {
-				s = strconv.FormatInt(int64(val), 10)
-			} else {
-				s = strconv.FormatFloat(val, 'f', -1, 64)
-			}
-			if len(s) <= MaxValueLength {
-				onLeaf(path, []byte(s))
-			}
-		}
-
+		emitPath(path, onPath)
+		walkJSONFloat(path, val, onLeaf)
 	case bool:
-		if onPath != nil {
-			onPath(path)
-		}
-		if onLeaf != nil {
-			if val {
-				onLeaf(path, []byte("true"))
-			} else {
-				onLeaf(path, []byte("false"))
-			}
-		}
-
+		emitPath(path, onPath)
+		walkJSONBool(path, val, onLeaf)
 	case map[string]any:
-		if onPath != nil {
-			onPath(path)
-		}
+		emitPath(path, onPath)
 		walkJSONObject(path, val, onPath, onLeaf)
-
 	case []any:
-		if onPath != nil {
-			onPath(path)
-		}
-		// Array elements get [*] segment.
-		arrayPath := make([]byte, 0, len(path)+4)
-		arrayPath = append(arrayPath, path...)
-		arrayPath = append(arrayPath, 0)
-		arrayPath = append(arrayPath, "[*]"...)
-		if len(arrayPath) <= MaxPathLength {
-			for _, elem := range val {
-				walkJSONValue(arrayPath, elem, onPath, onLeaf)
-			}
-		}
-
+		emitPath(path, onPath)
+		walkJSONArray(path, val, onPath, onLeaf)
 	case nil:
-		// null: emit path but no value.
-		if onPath != nil {
-			onPath(path)
-		}
+		emitPath(path, onPath)
+	}
+}
+
+func emitPath(path []byte, onPath JSONPathCallback) {
+	if onPath != nil {
+		onPath(path)
+	}
+}
+
+func walkJSONString(path []byte, val string, onLeaf JSONLeafCallback) {
+	if onLeaf == nil || len(val) == 0 || len(val) > MaxValueLength {
+		return
+	}
+	onLeaf(path, toLowerASCIIBytes([]byte(val)))
+}
+
+func walkJSONFloat(path []byte, val float64, onLeaf JSONLeafCallback) {
+	if onLeaf == nil {
+		return
+	}
+	var s string
+	if val == float64(int64(val)) {
+		s = strconv.FormatInt(int64(val), 10)
+	} else {
+		s = strconv.FormatFloat(val, 'f', -1, 64)
+	}
+	if len(s) <= MaxValueLength {
+		onLeaf(path, []byte(s))
+	}
+}
+
+func walkJSONBool(path []byte, val bool, onLeaf JSONLeafCallback) {
+	if onLeaf == nil {
+		return
+	}
+	if val {
+		onLeaf(path, []byte("true"))
+	} else {
+		onLeaf(path, []byte("false"))
+	}
+}
+
+func walkJSONArray(path []byte, val []any, onPath JSONPathCallback, onLeaf JSONLeafCallback) {
+	arrayPath := make([]byte, 0, len(path)+4)
+	arrayPath = append(arrayPath, path...)
+	arrayPath = append(arrayPath, 0)
+	arrayPath = append(arrayPath, "[*]"...)
+	if len(arrayPath) > MaxPathLength {
+		return
+	}
+	for _, elem := range val {
+		walkJSONValue(arrayPath, elem, onPath, onLeaf)
 	}
 }
 

@@ -19,7 +19,7 @@ func Handler() *staticHandler {
 
 	// Check if there are any real files (not just .gitignore).
 	hasContent := false
-	fs.WalkDir(sub, ".", func(path string, d fs.DirEntry, err error) error {
+	_ = fs.WalkDir(sub, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

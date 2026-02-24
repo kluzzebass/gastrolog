@@ -29,84 +29,32 @@ const MaxValueLength = 64
 // false positives should be rare.
 func ExtractKeyValues(msg []byte) []KeyValue {
 	var results []KeyValue
-	seen := make(map[string]struct{}) // dedupe within message
+	seen := make(map[string]struct{})
 
 	i := 0
 	for i < len(msg) {
-		// Find next '='
-		eqPos := -1
-		for j := i; j < len(msg); j++ {
-			if msg[j] == '=' {
-				eqPos = j
-				break
-			}
-		}
+		eqPos := findNextEquals(msg, i)
 		if eqPos == -1 {
 			break
 		}
 
-		// Extract and validate key (bytes before '=')
 		keyStart := findKeyStart(msg, eqPos)
-		if keyStart == -1 {
+		if keyStart == -1 || !isValidKeyRange(msg[keyStart:eqPos]) {
 			i = eqPos + 1
 			continue
 		}
 
-		keyBytes := msg[keyStart:eqPos]
-		if len(keyBytes) == 0 || len(keyBytes) > MaxKeyLength {
-			i = eqPos + 1
-			continue
-		}
-
-		if !isValidKey(keyBytes) {
-			i = eqPos + 1
-			continue
-		}
-
-		// Extract and validate value (bytes after '=')
-		valueStart := eqPos + 1
-		var valueBytes []byte
-		var valueEnd int
-
-		// Handle quoted values: key="value" or key='value'
-		if valueStart < len(msg) && (msg[valueStart] == '"' || msg[valueStart] == '\'') {
-			quote := msg[valueStart]
-			closePos := -1
-			for j := valueStart + 1; j < len(msg); j++ {
-				if msg[j] == quote {
-					closePos = j
-					break
-				}
-			}
-			if closePos == -1 {
-				// Unterminated quote, skip
-				i = valueStart + 1
-				continue
-			}
-			valueBytes = msg[valueStart+1 : closePos]
-			valueEnd = closePos + 1
-		} else {
-			valueEnd = findValueEnd(msg, valueStart)
-			valueBytes = msg[valueStart:valueEnd]
-		}
-
-		if len(valueBytes) == 0 || len(valueBytes) > MaxValueLength {
+		valueBytes, valueEnd, ok := extractKVValue(msg, eqPos+1)
+		if !ok {
 			i = valueEnd
 			continue
 		}
 
-		if !isValidValue(valueBytes) {
-			i = valueEnd
-			continue
-		}
-
-		// Normalize both key and value to lowercase for case-insensitive matching.
-		key := ToLowerASCII(keyBytes)
+		key := ToLowerASCII(msg[keyStart:eqPos])
 		value := ToLowerASCII(valueBytes)
 
-		// Dedupe within message
 		kvKey := key + "\x00" + value
-		if _, ok := seen[kvKey]; !ok {
+		if _, dup := seen[kvKey]; !dup {
 			seen[kvKey] = struct{}{}
 			results = append(results, KeyValue{Key: key, Value: value})
 		}
@@ -115,6 +63,58 @@ func ExtractKeyValues(msg []byte) []KeyValue {
 	}
 
 	return results
+}
+
+func findNextEquals(msg []byte, from int) int {
+	for j := from; j < len(msg); j++ {
+		if msg[j] == '=' {
+			return j
+		}
+	}
+	return -1
+}
+
+func isValidKeyRange(keyBytes []byte) bool {
+	if len(keyBytes) == 0 || len(keyBytes) > MaxKeyLength {
+		return false
+	}
+	return isValidKey(keyBytes)
+}
+
+func extractKVValue(msg []byte, valueStart int) ([]byte, int, bool) {
+	if valueStart < len(msg) && (msg[valueStart] == '"' || msg[valueStart] == '\'') {
+		return extractKVQuotedValue(msg, valueStart)
+	}
+	return extractKVUnquotedValue(msg, valueStart)
+}
+
+func extractKVQuotedValue(msg []byte, valueStart int) ([]byte, int, bool) {
+	quote := msg[valueStart]
+	closePos := -1
+	for j := valueStart + 1; j < len(msg); j++ {
+		if msg[j] == quote {
+			closePos = j
+			break
+		}
+	}
+	if closePos == -1 {
+		return nil, valueStart + 1, false
+	}
+	valueBytes := msg[valueStart+1 : closePos]
+	valueEnd := closePos + 1
+	if len(valueBytes) == 0 || len(valueBytes) > MaxValueLength || !isValidValue(valueBytes) {
+		return nil, valueEnd, false
+	}
+	return valueBytes, valueEnd, true
+}
+
+func extractKVUnquotedValue(msg []byte, valueStart int) ([]byte, int, bool) {
+	valueEnd := findValueEnd(msg, valueStart)
+	valueBytes := msg[valueStart:valueEnd]
+	if len(valueBytes) == 0 || len(valueBytes) > MaxValueLength || !isValidValue(valueBytes) {
+		return nil, valueEnd, false
+	}
+	return valueBytes, valueEnd, true
 }
 
 // findKeyStart finds the start of a potential key ending at eqPos.
@@ -173,7 +173,7 @@ func isValidKey(keyBytes []byte) bool {
 	}
 
 	// Check for empty segments (consecutive dots)
-	for i := 0; i < len(keyBytes)-1; i++ {
+	for i := range len(keyBytes) - 1 {
 		if keyBytes[i] == '.' && keyBytes[i+1] == '.' {
 			return false
 		}

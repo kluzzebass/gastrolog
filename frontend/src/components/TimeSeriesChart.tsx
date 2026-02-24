@@ -1,7 +1,7 @@
 import ReactEChartsCore from "echarts-for-react/esm/core";
 import { echarts } from "./charts/echartsSetup";
 import { buildThemeOption } from "./charts/echartsTheme";
-import { SERIES_COLORS, resolveColor } from "./charts/chartColors";
+import { SERIES_COLORS, resolveColor, formatChartValue } from "./charts/chartColors";
 import type { EChartsOption } from "echarts";
 
 interface TimeSeriesChartProps {
@@ -14,6 +14,21 @@ interface Series {
   name: string;
   points: { x: number; y: number }[];
   color: string;
+}
+
+/** Compute y-axis range across all series, with fallback for empty/flat data. */
+function yRange(seriesList: Series[]): { yMin: number; yMax: number } {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const s of seriesList) {
+    for (const p of s.points) {
+      if (p.y < min) min = p.y;
+      if (p.y > max) max = p.y;
+    }
+  }
+  if (min === Infinity) return { yMin: 0, yMax: 1 };
+  if (min === max) return { yMin: min - 1, yMax: max + 1 };
+  return { yMin: min, yMax: max };
 }
 
 function parseData(columns: string[], rows: string[][]) {
@@ -51,18 +66,7 @@ function parseData(columns: string[], rows: string[][]) {
       colorIdx++;
     }
 
-    let allMin = Infinity;
-    let allMax = -Infinity;
-    for (const s of seriesList) {
-      for (const p of s.points) {
-        if (p.y < allMin) allMin = p.y;
-        if (p.y > allMax) allMax = p.y;
-      }
-    }
-    if (allMin === Infinity) { allMin = 0; allMax = 1; }
-    if (allMin === allMax) { allMin -= 1; allMax += 1; }
-
-    return { series: seriesList, timestamps: uniqueTimes, yMin: allMin, yMax: allMax };
+    return { series: seriesList, timestamps: uniqueTimes, ...yRange(seriesList) };
   }
 
   // Standard: columns 1..N are numeric series
@@ -77,28 +81,9 @@ function parseData(columns: string[], rows: string[][]) {
     color: resolveColor(SERIES_COLORS[i % SERIES_COLORS.length]!),
   }));
 
-  let allMin = Infinity;
-  let allMax = -Infinity;
-  for (const s of seriesList) {
-    for (const p of s.points) {
-      if (p.y < allMin) allMin = p.y;
-      if (p.y > allMax) allMax = p.y;
-    }
-  }
-  if (allMin === Infinity) { allMin = 0; allMax = 1; }
-  if (allMin === allMax) { allMin -= 1; allMax += 1; }
-
   const uniqueTimes = [...new Set(timestamps)].sort((a, b) => a - b);
-  return { series: seriesList, timestamps: uniqueTimes, yMin: allMin, yMax: allMax };
+  return { series: seriesList, timestamps: uniqueTimes, ...yRange(seriesList) };
 }
-
-const formatYValue = (v: number) => {
-  const abs = Math.abs(v);
-  const sign = v < 0 ? "-" : "";
-  if (abs >= 1_000_000) return `${sign}${(abs / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `${sign}${(abs / 1_000).toFixed(1)}K`;
-  return Number.isInteger(v) ? String(v) : v.toFixed(1);
-};
 
 export function TimeSeriesChart({ columns, rows, dark }: Readonly<TimeSeriesChartProps>) {
   const theme = buildThemeOption(dark);
@@ -127,7 +112,7 @@ export function TimeSeriesChart({ columns, rows, dark }: Readonly<TimeSeriesChar
       type: "value",
       axisLabel: {
         ...(theme.yAxis as any)?.axisLabel,
-        formatter: (v: number) => formatYValue(v),
+        formatter: (v: number) => formatChartValue(v),
       },
     },
     tooltip: {
@@ -149,7 +134,7 @@ export function TimeSeriesChart({ columns, rows, dark }: Readonly<TimeSeriesChar
         });
         const lines = items.map((p: any) => {
           const dot = `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${p.color};margin-right:6px;"></span>`;
-          return `${dot}${p.seriesName} <b>${formatYValue(p.value[1] as number)}</b>`;
+          return `${dot}${p.seriesName} <b>${formatChartValue(p.value[1] as number)}</b>`;
         });
         return `<div style="opacity:0.7">${timeStr}</div>${lines.join("<br/>")}`;
       },

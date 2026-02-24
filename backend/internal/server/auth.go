@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -132,17 +133,17 @@ func validatePassword(pw string, p passwordPolicy) error {
 		hasLower := regexp.MustCompile(`[a-z]`).MatchString(pw)
 		hasUpper := regexp.MustCompile(`[A-Z]`).MatchString(pw)
 		if !hasLower || !hasUpper {
-			return fmt.Errorf("password must contain both uppercase and lowercase letters")
+			return errors.New("password must contain both uppercase and lowercase letters")
 		}
 	}
 	if p.RequireDigit {
 		if !regexp.MustCompile(`[0-9]`).MatchString(pw) {
-			return fmt.Errorf("password must contain at least one digit")
+			return errors.New("password must contain at least one digit")
 		}
 	}
 	if p.RequireSpecial {
 		if !regexp.MustCompile(`[^a-zA-Z0-9]`).MatchString(pw) {
-			return fmt.Errorf("password must contain at least one special character")
+			return errors.New("password must contain at least one special character")
 		}
 	}
 	if p.MaxConsecutiveRepeats > 0 {
@@ -164,7 +165,7 @@ func validatePassword(pw string, p passwordPolicy) error {
 		lower := strings.ToLower(pw)
 		for _, noise := range animalNoises {
 			if strings.Contains(lower, noise) {
-				return fmt.Errorf("password must not contain animal noises (e.g. moo, woof, meow)")
+				return errors.New("password must not contain animal noises (e.g. moo, woof, meow)")
 			}
 		}
 	}
@@ -184,7 +185,7 @@ func (s *AuthServer) Register(
 	}
 	if count > 0 {
 		return nil, connect.NewError(connect.CodeFailedPrecondition,
-			fmt.Errorf("registration is disabled; use the admin API to create users"))
+			errors.New("registration is disabled; use the admin API to create users"))
 	}
 
 	username := req.Msg.Username
@@ -193,7 +194,7 @@ func (s *AuthServer) Register(
 	// Validate username.
 	if !usernameRe.MatchString(username) {
 		return nil, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("username must be 3-64 characters, alphanumeric, underscores, or hyphens"))
+			errors.New("username must be 3-64 characters, alphanumeric, underscores, or hyphens"))
 	}
 
 	// Validate password.
@@ -256,7 +257,7 @@ func (s *AuthServer) Login(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get user: %w", err))
 	}
 	if user == nil {
-		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("invalid credentials"))
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("invalid credentials"))
 	}
 
 	ok, err := auth.VerifyPassword(password, user.PasswordHash)
@@ -264,7 +265,7 @@ func (s *AuthServer) Login(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("verify password: %w", err))
 	}
 	if !ok {
-		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("invalid credentials"))
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("invalid credentials"))
 	}
 
 	token, expiresAt, err := s.tokens.Issue(user.ID.String(), username, user.Role)
@@ -294,7 +295,7 @@ func (s *AuthServer) RefreshToken(
 ) (*connect.Response[apiv1.RefreshTokenResponse], error) {
 	incoming := req.Msg.RefreshToken
 	if incoming == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("refresh_token is required"))
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("refresh_token is required"))
 	}
 
 	// Hash the incoming token and look it up.
@@ -304,14 +305,14 @@ func (s *AuthServer) RefreshToken(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("lookup refresh token: %w", err))
 	}
 	if stored == nil {
-		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("invalid refresh token"))
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("invalid refresh token"))
 	}
 
 	// Check expiry.
 	if time.Now().UTC().After(stored.ExpiresAt) {
 		// Clean up the expired token.
 		_ = s.cfgStore.DeleteRefreshToken(ctx, stored.ID)
-		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("refresh token expired"))
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("refresh token expired"))
 	}
 
 	// Verify user still exists.
@@ -321,13 +322,13 @@ func (s *AuthServer) RefreshToken(
 	}
 	if user == nil {
 		_ = s.cfgStore.DeleteRefreshToken(ctx, stored.ID)
-		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("user no longer exists"))
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("user no longer exists"))
 	}
 
 	// Check TokenInvalidatedAt — any refresh token issued before this is rejected.
 	if !user.TokenInvalidatedAt.IsZero() && stored.CreatedAt.Before(user.TokenInvalidatedAt) {
 		_ = s.cfgStore.DeleteRefreshToken(ctx, stored.ID)
-		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("refresh token revoked"))
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("refresh token revoked"))
 	}
 
 	// Rotation: delete the old token.
@@ -381,7 +382,7 @@ func (s *AuthServer) ChangePassword(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get user: %w", err))
 	}
 	if user == nil {
-		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("user not found"))
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("user not found"))
 	}
 
 	ok, err := auth.VerifyPassword(oldPassword, user.PasswordHash)
@@ -389,7 +390,7 @@ func (s *AuthServer) ChangePassword(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("verify password: %w", err))
 	}
 	if !ok {
-		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("old password is incorrect"))
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("old password is incorrect"))
 	}
 
 	// Hash new password.
@@ -447,7 +448,7 @@ func (s *AuthServer) CreateUser(
 
 	if !usernameRe.MatchString(username) {
 		return nil, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("username must be 3-64 characters, alphanumeric, underscores, or hyphens"))
+			errors.New("username must be 3-64 characters, alphanumeric, underscores, or hyphens"))
 	}
 
 	if err := validatePassword(password, s.loadPasswordPolicy(ctx)); err != nil {
@@ -456,7 +457,7 @@ func (s *AuthServer) CreateUser(
 
 	if role != "admin" && role != "user" {
 		return nil, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("role must be \"admin\" or \"user\""))
+			errors.New("role must be \"admin\" or \"user\""))
 	}
 
 	existing, err := s.cfgStore.GetUserByUsername(ctx, username)
@@ -523,7 +524,7 @@ func (s *AuthServer) UpdateUserRole(
 
 	if role != "admin" && role != "user" {
 		return nil, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("role must be \"admin\" or \"user\""))
+			errors.New("role must be \"admin\" or \"user\""))
 	}
 
 	user, err := s.cfgStore.GetUser(ctx, userID)
@@ -613,7 +614,7 @@ func (s *AuthServer) RenameUser(
 
 	if !usernameRe.MatchString(newUsername) {
 		return nil, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("username must be 3-64 characters, alphanumeric, underscores, or hyphens"))
+			errors.New("username must be 3-64 characters, alphanumeric, underscores, or hyphens"))
 	}
 
 	user, err := s.cfgStore.GetUser(ctx, userID)
@@ -670,7 +671,7 @@ func (s *AuthServer) DeleteUser(
 	// Prevent self-deletion.
 	if claims := auth.ClaimsFromContext(ctx); claims != nil && claims.UserID == userID.String() {
 		return nil, connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("cannot delete your own account"))
+			errors.New("cannot delete your own account"))
 	}
 
 	// Clean up refresh tokens before deleting the user.
@@ -692,7 +693,7 @@ func (s *AuthServer) Logout(
 ) (*connect.Response[apiv1.LogoutResponse], error) {
 	claims := auth.ClaimsFromContext(ctx)
 	if claims == nil {
-		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("no claims in context"))
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("no claims in context"))
 	}
 
 	userID, connErr := parseUUID(claims.UserID)

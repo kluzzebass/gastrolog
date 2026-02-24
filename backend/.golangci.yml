@@ -1,0 +1,37 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - errcheck
+    - errorlint
+    - exhaustive
+    - gocognit
+    - gocritic
+    - gocyclo
+    - gosec
+    - govet
+    - ineffassign
+    - intrange
+    - misspell
+    - modernize
+    - nestif
+    - nilerr
+    - nolintlint
+    - perfsprint
+    - predeclared
+    - staticcheck
+    - unconvert
+  exclusions:
+    paths:
+      - _test\.go
+      - storetest/
+
+linters-settings:
+  gocognit:
+    min-complexity: 15
+  gocyclo:
+    min-complexity: 15
+  nestif:
+    min-complexity: 4

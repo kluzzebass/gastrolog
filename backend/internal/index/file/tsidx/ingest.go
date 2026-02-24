@@ -2,6 +2,7 @@ package tsidx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -48,7 +49,7 @@ func (i *IngestIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error 
 	if err != nil {
 		return fmt.Errorf("open cursor: %w", err)
 	}
-	defer cursor.Close()
+	defer func() { _ = cursor.Close() }()
 
 	var pos uint32
 	for {
@@ -57,18 +58,18 @@ func (i *IngestIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error 
 		}
 		rec, ref, err := cursor.Next()
 		if err != nil {
-			if err == chunk.ErrNoMoreRecords {
+			if errors.Is(err, chunk.ErrNoMoreRecords) {
 				break
 			}
 			return fmt.Errorf("read record: %w", err)
 		}
 		ts := rec.IngestTS.UnixNano()
-		entries = append(entries, Entry{TS: ts, Pos: uint32(ref.Pos)})
+		entries = append(entries, Entry{TS: ts, Pos: uint32(ref.Pos)}) //nolint:gosec // G115: record positions are bounded by chunk record count (< 2^32)
 		pos++
 	}
 
 	chunkDir := filepath.Join(i.dir, chunkID.String())
-	if err := os.MkdirAll(chunkDir, 0o755); err != nil {
+	if err := os.MkdirAll(chunkDir, 0o750); err != nil {
 		return fmt.Errorf("create index dir: %w", err)
 	}
 
@@ -78,21 +79,21 @@ func (i *IngestIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error 
 		return fmt.Errorf("create temp index: %w", err)
 	}
 	tmpName := tmpFile.Name()
-	defer os.Remove(tmpName)
+	defer func() { _ = os.Remove(tmpName) }()
 
 	if err := tmpFile.Chmod(0o644); err != nil {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		return fmt.Errorf("chmod temp: %w", err)
 	}
 	data := encodeIndex(entries, format.TypeIngestIndex)
 	if _, err := tmpFile.Write(data); err != nil {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		return fmt.Errorf("write index: %w", err)
 	}
 	if err := tmpFile.Close(); err != nil {
 		return fmt.Errorf("close temp: %w", err)
 	}
-	if err := os.Rename(tmpName, target); err != nil {
+	if err := os.Rename(tmpName, filepath.Clean(target)); err != nil { //nolint:gosec // G703: target is constructed from internal index path, not user input
 		return fmt.Errorf("rename index: %w", err)
 	}
 

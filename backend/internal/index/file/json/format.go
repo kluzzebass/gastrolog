@@ -99,27 +99,27 @@ func encodeIndex(
 	// Offsets.
 	dictOff := uint32(fileHeaderSize)
 	pathOff := dictOff + uint32(dictSize)
-	pvOff := pathOff + uint32(pathTableSize)
-	blobOff := pvOff + uint32(pvTableSize)
+	pvOff := pathOff + uint32(pathTableSize)   //nolint:gosec // G115: sizes bounded by index budget
+	blobOff := pvOff + uint32(pvTableSize) //nolint:gosec // G115: sizes bounded by index budget
 
 	binary.LittleEndian.PutUint32(buf[cursor:], dictOff)
 	cursor += 4
-	binary.LittleEndian.PutUint32(buf[cursor:], uint32(len(dict)))
+	binary.LittleEndian.PutUint32(buf[cursor:], uint32(len(dict))) //nolint:gosec // G115: dict size bounded by index budget
 	cursor += 4
 	binary.LittleEndian.PutUint32(buf[cursor:], pathOff)
 	cursor += 4
-	binary.LittleEndian.PutUint32(buf[cursor:], uint32(len(pathEntries)))
+	binary.LittleEndian.PutUint32(buf[cursor:], uint32(len(pathEntries))) //nolint:gosec // G115: path count bounded by index budget
 	cursor += 4
 	binary.LittleEndian.PutUint32(buf[cursor:], pvOff)
 	cursor += 4
-	binary.LittleEndian.PutUint32(buf[cursor:], uint32(len(pvEntries)))
+	binary.LittleEndian.PutUint32(buf[cursor:], uint32(len(pvEntries))) //nolint:gosec // G115: pv count bounded by index budget
 	cursor += 4
 	binary.LittleEndian.PutUint32(buf[cursor:], blobOff)
 	cursor += 4
 
 	// String dictionary.
 	for _, s := range dict {
-		binary.LittleEndian.PutUint16(buf[cursor:], uint16(len(s)))
+		binary.LittleEndian.PutUint16(buf[cursor:], uint16(len(s))) //nolint:gosec // G115: string length bounded by dict encoding
 		cursor += stringLenSize
 		copy(buf[cursor:], s)
 		cursor += len(s)
@@ -190,7 +190,7 @@ func decodeIndex(data []byte) ([]index.JSONPathIndexEntry, []index.JSONPVIndexEn
 		return nil, nil, index.JSONComplete, fmt.Errorf("json index: %w", err)
 	}
 	if h.Flags&format.FlagComplete == 0 {
-		return nil, nil, index.JSONComplete, fmt.Errorf("json index: incomplete (missing complete flag)")
+		return nil, nil, index.JSONComplete, errors.New("json index: incomplete (missing complete flag)")
 	}
 
 	status, err := decodeStatus(data[format.HeaderSize])
@@ -307,7 +307,7 @@ func readPositions(data []byte, blobBase, blobOff, count uint32) []uint64 {
 // LoadIndex loads the JSON index from disk.
 func LoadIndex(dir string, chunkID chunk.ChunkID) ([]index.JSONPathIndexEntry, []index.JSONPVIndexEntry, index.JSONIndexStatus, error) {
 	path := IndexPath(dir, chunkID)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, nil, index.JSONComplete, fmt.Errorf("read json index: %w", err)
 	}

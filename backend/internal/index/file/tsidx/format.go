@@ -48,11 +48,11 @@ func encodeIndex(entries []Entry, typ byte) []byte {
 	cursor := 0
 	h := format.Header{Type: typ, Version: currentVersion, Flags: format.FlagComplete}
 	cursor += h.EncodeInto(buf[cursor:])
-	binary.LittleEndian.PutUint32(buf[cursor:cursor+countSize], uint32(len(sorted)))
+	binary.LittleEndian.PutUint32(buf[cursor:cursor+countSize], uint32(len(sorted))) //nolint:gosec // G115: entry count bounded by chunk record count
 	cursor += countSize
 
 	for _, e := range sorted {
-		binary.LittleEndian.PutUint64(buf[cursor:cursor+8], uint64(e.TS))
+		binary.LittleEndian.PutUint64(buf[cursor:cursor+8], uint64(e.TS)) //nolint:gosec // G115: timestamp nanoseconds stored as uint64 for binary encoding
 		cursor += 8
 		binary.LittleEndian.PutUint32(buf[cursor:cursor+4], e.Pos)
 		cursor += 4
@@ -80,7 +80,7 @@ func decodeIndex(data []byte, expectedType byte) ([]Entry, error) {
 		if cursor+entrySize > len(data) {
 			return nil, ErrIndexTooSmall
 		}
-		entries[i].TS = int64(binary.LittleEndian.Uint64(data[cursor : cursor+8]))
+		entries[i].TS = int64(binary.LittleEndian.Uint64(data[cursor : cursor+8])) //nolint:gosec // G115: nanosecond timestamps fit in int64
 		entries[i].Pos = binary.LittleEndian.Uint32(data[cursor+8 : cursor+entrySize])
 		cursor += entrySize
 	}
@@ -90,7 +90,7 @@ func decodeIndex(data []byte, expectedType byte) ([]Entry, error) {
 // FindStartPosition returns the position of the first entry with TS >= ts.
 // Returns (pos, true) if found, (0, false) if ts is after all entries.
 func FindStartPosition(entries []Entry, ts int64) (uint64, bool) {
-	n := uint32(len(entries))
+	n := uint32(len(entries)) //nolint:gosec // G115: entry count bounded by chunk record count (< 2^32)
 	if n == 0 {
 		return 0, false
 	}
@@ -126,7 +126,7 @@ func SourceIndexPath(dir string, chunkID chunk.ChunkID) string {
 // LoadIngestIndex loads the ingest index from disk.
 func LoadIngestIndex(dir string, chunkID chunk.ChunkID) ([]Entry, error) {
 	path := IngestIndexPath(dir, chunkID)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read ingest index: %w", err)
 	}
@@ -136,7 +136,7 @@ func LoadIngestIndex(dir string, chunkID chunk.ChunkID) ([]Entry, error) {
 // LoadSourceIndex loads the source index from disk.
 func LoadSourceIndex(dir string, chunkID chunk.ChunkID) ([]Entry, error) {
 	path := SourceIndexPath(dir, chunkID)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read source index: %w", err)
 	}

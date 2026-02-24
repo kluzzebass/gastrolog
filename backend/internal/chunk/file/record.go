@@ -82,9 +82,9 @@ func EncodeIdxEntry(e IdxEntry, buf []byte) {
 // Timestamps are stored as Unix nanoseconds.
 func DecodeIdxEntry(buf []byte) IdxEntry {
 	return IdxEntry{
-		SourceTS:   time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxSourceTSOffset:]))),
-		IngestTS:   time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxIngestTSOffset:]))),
-		WriteTS:    time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxWriteTSOffset:]))),
+		SourceTS:   time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxSourceTSOffset:]))),  //nolint:gosec // G115: nanosecond timestamps fit in int64
+		IngestTS:   time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxIngestTSOffset:]))),  //nolint:gosec // G115: nanosecond timestamps fit in int64
+		WriteTS:    time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxWriteTSOffset:]))),   //nolint:gosec // G115: nanosecond timestamps fit in int64
 		RawOffset:  binary.LittleEndian.Uint32(buf[idxRawOffsetOffset:]),
 		RawSize:    binary.LittleEndian.Uint32(buf[idxRawSizeOffset:]),
 		AttrOffset: binary.LittleEndian.Uint32(buf[idxAttrOffsetOffset:]),
@@ -94,7 +94,7 @@ func DecodeIdxEntry(buf []byte) IdxEntry {
 
 // IdxFileOffset returns the byte offset in idx.log for a given record index.
 func IdxFileOffset(recordIndex uint64) int64 {
-	return int64(IdxHeaderSize) + int64(recordIndex)*int64(IdxEntrySize)
+	return int64(IdxHeaderSize) + int64(recordIndex)*int64(IdxEntrySize) //nolint:gosec // G115: record index fits in int64
 }
 
 // RecordCount returns the number of records in an idx.log file given its size.

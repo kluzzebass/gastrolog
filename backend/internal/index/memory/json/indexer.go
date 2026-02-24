@@ -3,6 +3,7 @@ package json
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -66,6 +67,63 @@ type pvKey struct {
 	valueStr string
 }
 
+type collectResult struct {
+	pathCounts map[string][]uint64
+	pvCounts   map[pvKey][]uint64
+	capped     bool
+}
+
+type collectState struct {
+	pathCounts map[string][]uint64
+	pvCounts   map[pvKey][]uint64
+	capped     bool
+	seenPaths  map[string]struct{}
+	seenPVs    map[pvKey]struct{}
+	pos        uint64
+}
+
+func (s *collectState) onPath(pathBytes []byte) {
+	if s.capped {
+		return
+	}
+	pathStr := strings.ToLower(string(pathBytes))
+
+	if _, seen := s.seenPaths[pathStr]; seen {
+		return
+	}
+	s.seenPaths[pathStr] = struct{}{}
+
+	if _, exists := s.pathCounts[pathStr]; !exists {
+		if len(s.pathCounts) >= MaxUniquePaths {
+			s.capped = true
+			return
+		}
+	}
+	s.pathCounts[pathStr] = append(s.pathCounts[pathStr], s.pos)
+}
+
+func (s *collectState) onPV(pathBytes, valueBytes []byte) {
+	if s.capped {
+		return
+	}
+	pathStr := strings.ToLower(string(pathBytes))
+	valueStr := string(valueBytes)
+	key := pvKey{pathStr, valueStr}
+
+	if _, seen := s.seenPVs[key]; seen {
+		return
+	}
+	s.seenPVs[key] = struct{}{}
+
+	if _, exists := s.pvCounts[key]; !exists {
+		if len(s.pvCounts) >= MaxTotalPVPairs {
+			s.capped = true
+			return
+		}
+	}
+	s.pvCounts[key] = append(s.pvCounts[key], s.pos)
+}
+
 func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	meta, err := idx.manager.Meta(chunkID)
 	if err != nil {
@@ -75,101 +133,79 @@ func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 		return chunk.ErrChunkNotSealed
 	}
 
-	cursor, err := idx.manager.OpenCursor(chunkID)
+	result, err := idx.collectCandidates(ctx, chunkID)
 	if err != nil {
-		return fmt.Errorf("open cursor: %w", err)
-	}
-	defer cursor.Close()
-
-	// Collect candidates.
-	pathCounts := make(map[string][]uint64)  // path → positions
-	pvCounts := make(map[pvKey][]uint64)      // (path, value) → positions
-
-	capped := false
-	seenPaths := make(map[string]struct{}, 32)
-	seenPVs := make(map[pvKey]struct{}, 32)
-
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		rec, ref, err := cursor.Next()
-		if err != nil {
-			if err == chunk.ErrNoMoreRecords {
-				break
-			}
-			return fmt.Errorf("read record: %w", err)
-		}
-
-		if capped {
-			continue
-		}
-
-		clear(seenPaths)
-		clear(seenPVs)
-
-		tokenizer.WalkJSON(rec.Raw, func(pathBytes []byte) {
-			if capped {
-				return
-			}
-			pathStr := strings.ToLower(string(pathBytes))
-
-			if _, seen := seenPaths[pathStr]; seen {
-				return
-			}
-			seenPaths[pathStr] = struct{}{}
-
-			if _, exists := pathCounts[pathStr]; !exists {
-				if len(pathCounts) >= MaxUniquePaths {
-					capped = true
-					return
-				}
-			}
-			pathCounts[pathStr] = append(pathCounts[pathStr], ref.Pos)
-		}, func(pathBytes, valueBytes []byte) {
-			if capped {
-				return
-			}
-			pathStr := strings.ToLower(string(pathBytes))
-			valueStr := string(valueBytes)
-			key := pvKey{pathStr, valueStr}
-
-			if _, seen := seenPVs[key]; seen {
-				return
-			}
-			seenPVs[key] = struct{}{}
-
-			if _, exists := pvCounts[key]; !exists {
-				if len(pvCounts) >= MaxTotalPVPairs {
-					capped = true
-					return
-				}
-			}
-			pvCounts[key] = append(pvCounts[key], ref.Pos)
-		})
+		return err
 	}
 
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	if capped {
+	if result.capped {
 		idx.pathIdx[chunkID] = nil
 		idx.pvIdx[chunkID] = nil
 		idx.status[chunkID] = index.JSONCapped
 		return nil
 	}
 
-	// Budget-based admission for path-value pairs.
-	type pvCandidate struct {
-		key       pvKey
-		positions []uint64
-		frequency int
-		cost      int
+	pathEntries, pvEntries, status := idx.admitAndBuild(result)
+	idx.pathIdx[chunkID] = pathEntries
+	idx.pvIdx[chunkID] = pvEntries
+	idx.status[chunkID] = status
+
+	return nil
+}
+
+func (idx *Indexer) collectCandidates(ctx context.Context, chunkID chunk.ChunkID) (*collectResult, error) {
+	cursor, err := idx.manager.OpenCursor(chunkID)
+	if err != nil {
+		return nil, fmt.Errorf("open cursor: %w", err)
+	}
+	defer func() { _ = cursor.Close() }()
+
+	s := &collectState{
+		pathCounts: make(map[string][]uint64),
+		pvCounts:   make(map[pvKey][]uint64),
+		seenPaths:  make(map[string]struct{}, 32),
+		seenPVs:    make(map[pvKey]struct{}, 32),
 	}
 
-	pvList := make([]pvCandidate, 0, len(pvCounts))
-	for k, positions := range pvCounts {
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		rec, ref, err := cursor.Next()
+		if err != nil {
+			if errors.Is(err, chunk.ErrNoMoreRecords) {
+				break
+			}
+			return nil, fmt.Errorf("read record: %w", err)
+		}
+
+		if s.capped {
+			continue
+		}
+
+		clear(s.seenPaths)
+		clear(s.seenPVs)
+		s.pos = ref.Pos
+		tokenizer.WalkJSON(rec.Raw, s.onPath, s.onPV)
+	}
+
+	return &collectResult{pathCounts: s.pathCounts, pvCounts: s.pvCounts, capped: s.capped}, nil
+}
+
+type pvCandidate struct {
+	key       pvKey
+	positions []uint64
+	frequency int
+	cost      int
+}
+
+func (idx *Indexer) admitAndBuild(result *collectResult) ([]index.JSONPathIndexEntry, []index.JSONPVIndexEntry, index.JSONIndexStatus) {
+	pvList := make([]pvCandidate, 0, len(result.pvCounts))
+	for k, positions := range result.pvCounts {
 		pvList = append(pvList, pvCandidate{
 			key:       k,
 			positions: positions,
@@ -197,9 +233,8 @@ func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 		pvTotalBytes += int64(c.cost)
 	}
 
-	// Build path entries.
-	pathEntries := make([]index.JSONPathIndexEntry, 0, len(pathCounts))
-	for path, positions := range pathCounts {
+	pathEntries := make([]index.JSONPathIndexEntry, 0, len(result.pathCounts))
+	for path, positions := range result.pathCounts {
 		pathEntries = append(pathEntries, index.JSONPathIndexEntry{
 			Path:      path,
 			Positions: positions,
@@ -209,7 +244,6 @@ func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 		return cmp.Compare(a.Path, b.Path)
 	})
 
-	// Build pv entries.
 	pvEntries := make([]index.JSONPVIndexEntry, len(admittedPV))
 	for i, c := range admittedPV {
 		pvEntries[i] = index.JSONPVIndexEntry{
@@ -225,11 +259,7 @@ func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 		return cmp.Compare(a.Value, b.Value)
 	})
 
-	idx.pathIdx[chunkID] = pathEntries
-	idx.pvIdx[chunkID] = pvEntries
-	idx.status[chunkID] = jsonStatus
-
-	return nil
+	return pathEntries, pvEntries, jsonStatus
 }
 
 // GetPath returns the path index entries for the given chunk.

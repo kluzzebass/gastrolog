@@ -47,7 +47,7 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		recvCtx, recvCancel := context.WithCancel(ctx)
 		o.ingesterCancels[id] = recvCancel
 		o.logger.Info("starting ingester", "id", id)
-		o.ingesterWg.Go(func() { r.Run(recvCtx, o.ingestCh) })
+		o.ingesterWg.Go(func() { _ = r.Run(recvCtx, o.ingestCh) })
 	}
 
 	// Launch ingest loop.
@@ -87,7 +87,7 @@ func (o *Orchestrator) Stop() error {
 
 	// Stop shared scheduler — waits for running jobs (index builds,
 	// cron rotation, retention) to finish.
-	o.scheduler.Stop()
+	_ = o.scheduler.Stop()
 
 	o.mu.Lock()
 	o.running = false
@@ -155,21 +155,32 @@ func (o *Orchestrator) processMessage(msg IngestMessage) {
 	err := o.ingest(rec)
 
 	// Track per-ingester stats.
-	if idStr := msg.Attrs["ingester_id"]; idStr != "" {
-		if id, parseErr := uuid.Parse(idStr); parseErr == nil {
-			if stats := o.ingesterStats[id]; stats != nil {
-				stats.MessagesIngested.Add(1)
-				stats.BytesIngested.Add(int64(len(msg.Raw)))
-				if err != nil {
-					stats.Errors.Add(1)
-				}
-			}
-		}
-	}
+	o.trackIngesterStats(msg, err)
 
 	// Send ack if requested.
 	if msg.Ack != nil {
 		msg.Ack <- err
+	}
+}
+
+// trackIngesterStats updates per-ingester counters for the given message.
+func (o *Orchestrator) trackIngesterStats(msg IngestMessage, ingestErr error) {
+	idStr := msg.Attrs["ingester_id"]
+	if idStr == "" {
+		return
+	}
+	id, parseErr := uuid.Parse(idStr)
+	if parseErr != nil {
+		return
+	}
+	stats := o.ingesterStats[id]
+	if stats == nil {
+		return
+	}
+	stats.MessagesIngested.Add(1)
+	stats.BytesIngested.Add(int64(len(msg.Raw)))
+	if ingestErr != nil {
+		stats.Errors.Add(1)
 	}
 }
 

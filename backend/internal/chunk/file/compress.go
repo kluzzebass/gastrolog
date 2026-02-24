@@ -32,11 +32,11 @@ func init() {
 // The file is read in seekableFrameSize chunks to avoid loading it entirely
 // into memory. The FlagCompressed bit is OR'd into the header flags.
 func compressFile(path string, enc *zstd.Encoder, mode os.FileMode) error {
-	src, err := os.Open(path)
+	src, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	// Read and validate header.
 	var hdr [format.HeaderSize]byte
@@ -58,8 +58,8 @@ func compressFile(path string, enc *zstd.Encoder, mode os.FileMode) error {
 	tmpPath := tmp.Name()
 
 	cleanup := func() {
-		tmp.Close()
-		os.Remove(tmpPath)
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
 	}
 
 	// Write header.
@@ -103,20 +103,20 @@ func compressFile(path string, enc *zstd.Encoder, mode os.FileMode) error {
 		return err
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath is from os.CreateTemp, not user input
 		return err
 	}
 
-	return os.Rename(tmpPath, path)
+	return os.Rename(tmpPath, path) //nolint:gosec // G703: both paths are internal, not user input
 }
 
 // isCompressed reads a file's header and returns whether FlagCompressed is set.
 func isCompressed(path string) (bool, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return false, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var hdr [format.HeaderSize]byte
 	if _, err := io.ReadFull(f, hdr[:]); err != nil {
@@ -134,13 +134,13 @@ func isCompressed(path string) (bool, error) {
 // access — only the frame(s) covering the requested byte range are decompressed.
 // Caller must close both the returned reader and the file.
 func openSeekableReader(path string) (seekable.Reader, *os.File, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return nil, nil, err
 	}
 	info, err := f.Stat()
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, nil, err
 	}
 
@@ -150,7 +150,7 @@ func openSeekableReader(path string) (seekable.Reader, *os.File, error) {
 	section := io.NewSectionReader(f, int64(format.HeaderSize), info.Size()-int64(format.HeaderSize))
 	r, err := seekable.NewReader(section, zstdDec)
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, nil, err
 	}
 	return r, f, nil

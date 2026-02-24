@@ -80,15 +80,14 @@ func EncodeKeyIndex[T KeyEntry](entries []T, headerBytes []byte, entryCountOffse
 	copy(buf, headerBytes)
 
 	// Write entry count
-	binary.LittleEndian.PutUint32(buf[entryCountOffset:], uint32(len(entries)))
-
+	binary.LittleEndian.PutUint32(buf[entryCountOffset:], uint32(len(entries))) //nolint:gosec // G115: entry count bounded by index budget
 	stringCursor := len(headerBytes)
 	postingCursor := len(headerBytes) + stringTableSize
 	postingOffset := 0
 
 	for _, e := range entries {
 		keyBytes := []byte(e.GetKey())
-		binary.LittleEndian.PutUint16(buf[stringCursor:], uint16(len(keyBytes)))
+		binary.LittleEndian.PutUint16(buf[stringCursor:], uint16(len(keyBytes))) //nolint:gosec // G115: key length bounded by token size
 		stringCursor += StringLenSize
 
 		copy(buf[stringCursor:], keyBytes)
@@ -97,7 +96,7 @@ func EncodeKeyIndex[T KeyEntry](entries []T, headerBytes []byte, entryCountOffse
 		binary.LittleEndian.PutUint32(buf[stringCursor:], uint32(postingOffset))
 		stringCursor += PostingOffsetSize
 
-		binary.LittleEndian.PutUint32(buf[stringCursor:], uint32(len(e.GetPositions())))
+		binary.LittleEndian.PutUint32(buf[stringCursor:], uint32(len(e.GetPositions()))) //nolint:gosec // G115: position count bounded by chunk record count
 		stringCursor += PostingCountSize
 
 		for _, pos := range e.GetPositions() {
@@ -125,15 +124,14 @@ func EncodeValueIndex[T ValueEntry](entries []T, headerBytes []byte, entryCountO
 	buf := make([]byte, len(headerBytes)+stringTableSize+postingBlobSize)
 
 	copy(buf, headerBytes)
-	binary.LittleEndian.PutUint32(buf[entryCountOffset:], uint32(len(entries)))
-
+	binary.LittleEndian.PutUint32(buf[entryCountOffset:], uint32(len(entries))) //nolint:gosec // G115: entry count bounded by index budget
 	stringCursor := len(headerBytes)
 	postingCursor := len(headerBytes) + stringTableSize
 	postingOffset := 0
 
 	for _, e := range entries {
 		valBytes := []byte(e.GetValue())
-		binary.LittleEndian.PutUint16(buf[stringCursor:], uint16(len(valBytes)))
+		binary.LittleEndian.PutUint16(buf[stringCursor:], uint16(len(valBytes))) //nolint:gosec // G115: value length bounded by token size
 		stringCursor += StringLenSize
 
 		copy(buf[stringCursor:], valBytes)
@@ -142,7 +140,7 @@ func EncodeValueIndex[T ValueEntry](entries []T, headerBytes []byte, entryCountO
 		binary.LittleEndian.PutUint32(buf[stringCursor:], uint32(postingOffset))
 		stringCursor += PostingOffsetSize
 
-		binary.LittleEndian.PutUint32(buf[stringCursor:], uint32(len(e.GetPositions())))
+		binary.LittleEndian.PutUint32(buf[stringCursor:], uint32(len(e.GetPositions()))) //nolint:gosec // G115: position count bounded by chunk record count
 		stringCursor += PostingCountSize
 
 		for _, pos := range e.GetPositions() {
@@ -171,21 +169,20 @@ func EncodeKVIndex[T KVEntry](entries []T, headerBytes []byte, entryCountOffset 
 	buf := make([]byte, len(headerBytes)+stringTableSize+postingBlobSize)
 
 	copy(buf, headerBytes)
-	binary.LittleEndian.PutUint32(buf[entryCountOffset:], uint32(len(entries)))
-
+	binary.LittleEndian.PutUint32(buf[entryCountOffset:], uint32(len(entries))) //nolint:gosec // G115: entry count bounded by index budget
 	stringCursor := len(headerBytes)
 	postingCursor := len(headerBytes) + stringTableSize
 	postingOffset := 0
 
 	for _, e := range entries {
 		keyBytes := []byte(e.GetKey())
-		binary.LittleEndian.PutUint16(buf[stringCursor:], uint16(len(keyBytes)))
+		binary.LittleEndian.PutUint16(buf[stringCursor:], uint16(len(keyBytes))) //nolint:gosec // G115: key length bounded by token size
 		stringCursor += StringLenSize
 		copy(buf[stringCursor:], keyBytes)
 		stringCursor += len(keyBytes)
 
 		valBytes := []byte(e.GetValue())
-		binary.LittleEndian.PutUint16(buf[stringCursor:], uint16(len(valBytes)))
+		binary.LittleEndian.PutUint16(buf[stringCursor:], uint16(len(valBytes))) //nolint:gosec // G115: value length bounded by token size
 		stringCursor += StringLenSize
 		copy(buf[stringCursor:], valBytes)
 		stringCursor += len(valBytes)
@@ -193,7 +190,7 @@ func EncodeKVIndex[T KVEntry](entries []T, headerBytes []byte, entryCountOffset 
 		binary.LittleEndian.PutUint32(buf[stringCursor:], uint32(postingOffset))
 		stringCursor += PostingOffsetSize
 
-		binary.LittleEndian.PutUint32(buf[stringCursor:], uint32(len(e.GetPositions())))
+		binary.LittleEndian.PutUint32(buf[stringCursor:], uint32(len(e.GetPositions()))) //nolint:gosec // G115: position count bounded by chunk record count
 		stringCursor += PostingCountSize
 
 		for _, pos := range e.GetPositions() {

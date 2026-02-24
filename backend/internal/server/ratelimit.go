@@ -114,7 +114,7 @@ func rateLimitMiddleware(rl *rateLimiter) func(http.Handler) http.Handler {
 				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("Retry-After", "60")
 				w.WriteHeader(http.StatusTooManyRequests)
-				json.NewEncoder(w).Encode(connectError{
+				_ = json.NewEncoder(w).Encode(connectError{
 					Code:    "resource_exhausted",
 					Message: "too many requests, try again later",
 				})

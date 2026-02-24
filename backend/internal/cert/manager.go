@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 
@@ -167,7 +168,7 @@ func (m *Manager) startWatcher() {
 	}
 
 	go func() {
-		defer watcher.Close()
+		defer func() { _ = watcher.Close() }()
 		for {
 			select {
 			case <-m.watcherStop:
@@ -221,11 +222,11 @@ func (m *Manager) reloadFileCert(name string) {
 
 // loadFromFiles reads cert and key from disk.
 func (m *Manager) loadFromFiles(certFile, keyFile string) (certPEM, keyPEM string, err error) {
-	certB, err := os.ReadFile(certFile)
+	certB, err := os.ReadFile(filepath.Clean(certFile))
 	if err != nil {
 		return "", "", fmt.Errorf("read cert: %w", err)
 	}
-	keyB, err := os.ReadFile(keyFile)
+	keyB, err := os.ReadFile(filepath.Clean(keyFile))
 	if err != nil {
 		return "", "", fmt.Errorf("read key: %w", err)
 	}

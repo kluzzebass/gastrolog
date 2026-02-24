@@ -79,17 +79,18 @@ func (o *Orchestrator) ReloadRotationPolicies(ctx context.Context) error {
 		hasCronJob := o.cronRotation.hasJob(storeCfg.ID)
 		hasCronConfig := policyCfg.Cron != nil && *policyCfg.Cron != ""
 
-		if hasCronConfig && hasCronJob {
+		switch {
+		case hasCronConfig && hasCronJob:
 			// Schedule may have changed — update.
 			if err := o.cronRotation.updateJob(storeCfg.ID, storeCfg.Name, *policyCfg.Cron, cm); err != nil {
 				o.logger.Error("failed to update cron rotation", "store", storeCfg.ID, "error", err)
 			}
-		} else if hasCronConfig && !hasCronJob {
+		case hasCronConfig && !hasCronJob:
 			// New cron schedule — add.
 			if err := o.cronRotation.addJob(storeCfg.ID, storeCfg.Name, *policyCfg.Cron, cm); err != nil {
 				o.logger.Error("failed to add cron rotation", "store", storeCfg.ID, "error", err)
 			}
-		} else if !hasCronConfig && hasCronJob {
+		case !hasCronConfig && hasCronJob:
 			// Cron removed — stop.
 			o.cronRotation.removeJob(storeCfg.ID)
 		}

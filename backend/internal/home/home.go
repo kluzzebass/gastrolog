@@ -68,7 +68,7 @@ func (d Dir) StoreDir(storeID string) string {
 
 // EnsureExists creates the home directory (and parents) if it doesn't exist.
 func (d Dir) EnsureExists() error {
-	if err := os.MkdirAll(d.root, 0755); err != nil {
+	if err := os.MkdirAll(d.root, 0o750); err != nil {
 		return fmt.Errorf("create home directory %s: %w", d.root, err)
 	}
 	return nil

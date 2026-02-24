@@ -429,7 +429,7 @@ func (p *parser) parseMulExpr() (PipeExpr, error) {
 
 	for p.cur.Kind == TokStar || p.cur.Kind == TokSlash || p.cur.Kind == TokPercent {
 		var op ArithOp
-		switch p.cur.Kind {
+		switch p.cur.Kind { //nolint:exhaustive // loop condition limits to *, /, %
 		case TokSlash:
 			op = ArithDiv
 		case TokPercent:
@@ -467,7 +467,7 @@ func (p *parser) parseUnaryPipeExpr() (PipeExpr, error) {
 
 // parsePrimaryPipeExpr parses: IDENT "(" expr_list ")" | IDENT | NUMBER | STRING | "(" expr ")"
 func (p *parser) parsePrimaryPipeExpr() (PipeExpr, error) {
-	switch p.cur.Kind {
+	switch p.cur.Kind { //nolint:exhaustive // only WORD, LPAREN are valid expression starts
 	case TokWord:
 		name := p.cur.Lit
 

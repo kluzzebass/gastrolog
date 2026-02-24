@@ -224,7 +224,7 @@ func (s *ConfigServer) TestIngester(
 	case "docker":
 		msg, err := docker.TestConnection(ctx, req.Msg.Params, s.cfgStore)
 		if err != nil {
-			return connect.NewResponse(&apiv1.TestIngesterResponse{
+			return connect.NewResponse(&apiv1.TestIngesterResponse{ //nolint:nilerr // test failure is reported in the response body, not as an RPC error
 				Success: false,
 				Message: err.Error(),
 			}), nil

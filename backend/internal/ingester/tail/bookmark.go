@@ -24,7 +24,7 @@ func loadBookmarks(path string) (bookmarks, error) {
 		return b, nil
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return b, nil
@@ -33,7 +33,8 @@ func loadBookmarks(path string) (bookmarks, error) {
 	}
 
 	if err := json.Unmarshal(data, &b); err != nil {
-		return bookmarks{Files: make(map[string]fileBookmark)}, nil
+		// Corrupt bookmark file; start fresh rather than failing.
+		return bookmarks{Files: make(map[string]fileBookmark)}, nil //nolint:nilerr // corrupt bookmark file is treated as empty state
 	}
 	if b.Files == nil {
 		b.Files = make(map[string]fileBookmark)
@@ -47,7 +48,7 @@ func saveBookmarks(path string, b bookmarks) error {
 		return nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
 
@@ -57,7 +58,7 @@ func saveBookmarks(path string, b bookmarks) error {
 	}
 
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)

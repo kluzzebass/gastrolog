@@ -7,6 +7,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
+	"gastrolog/internal/index"
 
 	"github.com/google/uuid"
 )
@@ -30,32 +31,7 @@ func (o *Orchestrator) MoveChunk(ctx context.Context, chunkID chunk.ChunkID, src
 	srcMover, srcOk := srcCM.(chunk.ChunkMover)
 	dstMover, dstOk := dstCM.(chunk.ChunkMover)
 	if srcOk && dstOk {
-		srcDir := srcMover.ChunkDir(chunkID)
-		dstDir := dstMover.ChunkDir(chunkID)
-
-		if err := srcMover.Disown(chunkID); err != nil {
-			return fmt.Errorf("disown chunk %s: %w", chunkID, err)
-		}
-
-		if err := chunkfile.MoveDir(srcDir, dstDir); err != nil {
-			if _, adoptErr := srcMover.Adopt(chunkID); adoptErr != nil {
-				o.logger.Error("failed to restore chunk after move error",
-					"chunk", chunkID.String(), "error", adoptErr)
-			}
-			return fmt.Errorf("move chunk %s: %w", chunkID, err)
-		}
-
-		if _, err := dstMover.Adopt(chunkID); err != nil {
-			return fmt.Errorf("adopt chunk %s in destination: %w", chunkID, err)
-		}
-
-		if dstIM != nil {
-			if err := dstIM.BuildIndexes(ctx, chunkID); err != nil {
-				o.logger.Warn("retention migrate: failed to build indexes for moved chunk",
-					"chunk", chunkID.String(), "error", err)
-			}
-		}
-		return nil
+		return o.moveChunkFS(ctx, chunkID, srcMover, dstMover, dstIM)
 	}
 
 	// Fallback: copy records for the single chunk.
@@ -63,7 +39,7 @@ func (o *Orchestrator) MoveChunk(ctx context.Context, chunkID chunk.ChunkID, src
 	if err != nil {
 		return fmt.Errorf("open chunk %s: %w", chunkID, err)
 	}
-	defer cursor.Close()
+	defer func() { _ = cursor.Close() }()
 
 	for {
 		rec, _, readErr := cursor.Next()
@@ -88,6 +64,36 @@ func (o *Orchestrator) MoveChunk(ctx context.Context, chunkID chunk.ChunkID, src
 		return fmt.Errorf("delete source chunk %s: %w", chunkID, err)
 	}
 
+	return nil
+}
+
+// moveChunkFS performs a filesystem-level move of a sealed chunk between stores.
+func (o *Orchestrator) moveChunkFS(ctx context.Context, chunkID chunk.ChunkID, srcMover, dstMover chunk.ChunkMover, dstIM index.IndexManager) error {
+	srcDir := srcMover.ChunkDir(chunkID)
+	dstDir := dstMover.ChunkDir(chunkID)
+
+	if err := srcMover.Disown(chunkID); err != nil {
+		return fmt.Errorf("disown chunk %s: %w", chunkID, err)
+	}
+
+	if err := chunkfile.MoveDir(srcDir, dstDir); err != nil {
+		if _, adoptErr := srcMover.Adopt(chunkID); adoptErr != nil {
+			o.logger.Error("failed to restore chunk after move error",
+				"chunk", chunkID.String(), "error", adoptErr)
+		}
+		return fmt.Errorf("move chunk %s: %w", chunkID, err)
+	}
+
+	if _, err := dstMover.Adopt(chunkID); err != nil {
+		return fmt.Errorf("adopt chunk %s in destination: %w", chunkID, err)
+	}
+
+	if dstIM != nil {
+		if err := dstIM.BuildIndexes(ctx, chunkID); err != nil {
+			o.logger.Warn("retention migrate: failed to build indexes for moved chunk",
+				"chunk", chunkID.String(), "error", err)
+		}
+	}
 	return nil
 }
 
@@ -124,18 +130,18 @@ func (o *Orchestrator) CopyRecords(ctx context.Context, srcID, dstID uuid.UUID, 
 				break
 			}
 			if readErr != nil {
-				cursor.Close()
+				_ = cursor.Close()
 				return fmt.Errorf("read chunk %s: %w", meta.ID, readErr)
 			}
 
 			rec = rec.Copy()
 			if _, _, appendErr := dstCM.AppendPreserved(rec); appendErr != nil {
-				cursor.Close()
+				_ = cursor.Close()
 				return fmt.Errorf("append record: %w", appendErr)
 			}
 			job.AddRecords(1)
 		}
-		cursor.Close()
+		_ = cursor.Close()
 		job.IncrChunks()
 	}
 

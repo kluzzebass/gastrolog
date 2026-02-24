@@ -75,7 +75,7 @@ func globToRegex(pattern string) (string, error) {
 // via prefix lookup on sorted token indexes.
 // Returns ("", false) if the pattern starts with a metacharacter.
 func ExtractGlobPrefix(pattern string) (string, bool) {
-	for i := 0; i < len(pattern); i++ {
+	for i := range len(pattern) {
 		switch pattern[i] {
 		case '*', '?', '[':
 			if i == 0 {

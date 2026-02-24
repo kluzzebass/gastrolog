@@ -241,7 +241,7 @@ func (s *StoreServer) ValidateStore(
 				}
 				recordCount++
 			}
-			cursor.Close()
+			_ = cursor.Close()
 
 			if meta.RecordCount > 0 && recordCount != meta.RecordCount {
 				cv.Valid = false

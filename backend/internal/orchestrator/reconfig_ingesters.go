@@ -29,7 +29,7 @@ func (o *Orchestrator) AddIngester(id uuid.UUID, r Ingester) error {
 		o.ingesterCancels[id] = cancel
 
 		o.ingesterWg.Go(func() {
-			r.Run(ctx, o.ingestCh)
+			_ = r.Run(ctx, o.ingestCh)
 		})
 		o.logger.Info("ingester started", "id", id)
 	}

@@ -1,6 +1,7 @@
 package chatterbox
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
@@ -145,7 +146,7 @@ func NewIngester(id uuid.UUID, params map[string]string, logger *slog.Logger) (o
 		id:          id.String(),
 		minInterval: minInterval,
 		maxInterval: maxInterval,
-		rng:         rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64())),
+		rng:         rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64())), //nolint:gosec // G404: chatterbox is a test data generator, not security-sensitive
 		formats:     formats,
 		weights:     cumulativeWeights,
 		totalWeight: totalWeight,
@@ -180,7 +181,7 @@ func parseFormats(formatsParam string) ([]string, error) {
 	}
 
 	if len(formats) == 0 {
-		return nil, fmt.Errorf("no valid formats specified")
+		return nil, errors.New("no valid formats specified")
 	}
 
 	return formats, nil

@@ -65,7 +65,7 @@ func encodeIndex(entries []index.TokenIndexEntry) []byte {
 	h := format.Header{Type: format.TypeTokenIndex, Version: currentVersion, Flags: format.FlagComplete}
 	cursor += h.EncodeInto(buf[cursor:])
 
-	binary.LittleEndian.PutUint32(buf[cursor:cursor+keyCountSize], uint32(len(sorted)))
+	binary.LittleEndian.PutUint32(buf[cursor:cursor+keyCountSize], uint32(len(sorted))) //nolint:gosec // G115: entry count bounded by index token count
 	cursor += keyCountSize
 
 	// Write key table and posting blob.
@@ -75,7 +75,7 @@ func encodeIndex(entries []index.TokenIndexEntry) []byte {
 
 	for _, e := range sorted {
 		tokenBytes := []byte(e.Token)
-		binary.LittleEndian.PutUint16(buf[keyCursor:keyCursor+tokenLenSize], uint16(len(tokenBytes)))
+		binary.LittleEndian.PutUint16(buf[keyCursor:keyCursor+tokenLenSize], uint16(len(tokenBytes))) //nolint:gosec // G115: token length bounded by tokenizer max token length
 		keyCursor += tokenLenSize
 
 		copy(buf[keyCursor:keyCursor+len(tokenBytes)], tokenBytes)
@@ -84,7 +84,7 @@ func encodeIndex(entries []index.TokenIndexEntry) []byte {
 		binary.LittleEndian.PutUint32(buf[keyCursor:keyCursor+postingOffsetSize], uint32(postingOffset))
 		keyCursor += postingOffsetSize
 
-		binary.LittleEndian.PutUint32(buf[keyCursor:keyCursor+postingCountSize], uint32(len(e.Positions)))
+		binary.LittleEndian.PutUint32(buf[keyCursor:keyCursor+postingCountSize], uint32(len(e.Positions))) //nolint:gosec // G115: position count bounded by chunk record count
 		keyCursor += postingCountSize
 
 		for _, pos := range e.Positions {
@@ -165,7 +165,7 @@ func decodeIndex(data []byte) ([]index.TokenIndexEntry, error) {
 
 func LoadIndex(dir string, chunkID chunk.ChunkID) ([]index.TokenIndexEntry, error) {
 	path := IndexPath(dir, chunkID)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read token index: %w", err)
 	}

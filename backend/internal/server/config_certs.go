@@ -104,31 +104,13 @@ func (s *ConfigServer) PutCertificate(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name required"))
 	}
 
-	// Load existing cert by ID (if given) or by name for key-reuse logic.
-	var existing *config.CertPEM
-	var err error
-	if req.Msg.Id != "" {
-		reqID, connErr := parseUUID(req.Msg.Id)
-		if connErr != nil {
-			return nil, connErr
-		}
-		existing, err = s.cfgStore.GetCertificate(ctx, reqID)
-	} else {
-		existing, err = s.findCertByName(ctx, req.Msg.Name)
-	}
+	existing, err := s.loadExistingCert(ctx, req.Msg.Id, req.Msg.Name)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-	if existing == nil {
-		existing = &config.CertPEM{}
+		return nil, err
 	}
 
-	hasPEM := req.Msg.CertPem != "" && req.Msg.KeyPem != ""
-	hasFiles := req.Msg.CertFile != "" && req.Msg.KeyFile != ""
-	// Update PEM cert: certPem + empty keyPem means keep existing key
-	hasPEMUpdate := req.Msg.CertPem != "" && (req.Msg.KeyPem != "" || (existing.KeyPEM != "" && existing.CertFile == ""))
-	if !hasPEM && !hasFiles && !hasPEMUpdate {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("provide either cert_pem+key_pem or cert_file+key_file"))
+	if err := validateCertInput(req.Msg, existing); err != nil {
+		return nil, err
 	}
 
 	keyPEM := req.Msg.KeyPem
@@ -136,34 +118,11 @@ func (s *ConfigServer) PutCertificate(
 		keyPEM = existing.KeyPEM
 	}
 
-	// Validate PEM before storing to avoid enabling HTTPS with invalid certs
-	if req.Msg.CertPem != "" && keyPEM != "" {
-		if _, err := tls.X509KeyPair([]byte(req.Msg.CertPem), []byte(keyPEM)); err != nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid certificate or key PEM: %w", err))
-		}
-	}
-	if hasFiles {
-		keyPath := req.Msg.KeyFile
-		if keyPath == "" {
-			keyPath = existing.KeyFile
-		}
-		if keyPath != "" {
-			if _, err := tls.LoadX509KeyPair(req.Msg.CertFile, keyPath); err != nil {
-				return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid certificate or key file: %w", err))
-			}
-		}
+	if err := validateCertMaterial(req.Msg, keyPEM, existing); err != nil {
+		return nil, err
 	}
 
-	// Reuse existing ID, or generate new UUID.
-	certID := existing.ID
-	if certID == uuid.Nil {
-		if req.Msg.Id != "" {
-			// Already validated above.
-			certID, _ = uuid.Parse(req.Msg.Id)
-		} else {
-			certID = uuid.Must(uuid.NewV7())
-		}
-	}
+	certID := resolveCertID(existing.ID, req.Msg.Id)
 
 	newCert := config.CertPEM{
 		ID:       certID,
@@ -177,15 +136,9 @@ func (s *ConfigServer) PutCertificate(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	// Update default cert in server config if requested.
 	if req.Msg.SetAsDefault {
-		sc, err := config.LoadServerConfig(ctx, s.cfgStore)
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err)
-		}
-		sc.TLS.DefaultCert = req.Msg.Name
-		if err := config.SaveServerConfig(ctx, s.cfgStore, sc); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err)
+		if err := s.setDefaultCert(ctx, req.Msg.Name); err != nil {
+			return nil, err
 		}
 	}
 
@@ -196,6 +149,83 @@ func (s *ConfigServer) PutCertificate(
 		s.onTLSConfigChange()
 	}
 	return connect.NewResponse(&apiv1.PutCertificateResponse{}), nil
+}
+
+func (s *ConfigServer) loadExistingCert(ctx context.Context, id, name string) (config.CertPEM, error) {
+	var existing *config.CertPEM
+	var err error
+	if id != "" {
+		reqID, connErr := parseUUID(id)
+		if connErr != nil {
+			return config.CertPEM{}, connErr
+		}
+		existing, err = s.cfgStore.GetCertificate(ctx, reqID)
+	} else {
+		existing, err = s.findCertByName(ctx, name)
+	}
+	if err != nil {
+		return config.CertPEM{}, connect.NewError(connect.CodeInternal, err)
+	}
+	if existing == nil {
+		return config.CertPEM{}, nil
+	}
+	return *existing, nil
+}
+
+func validateCertInput(msg *apiv1.PutCertificateRequest, existing config.CertPEM) *connect.Error {
+	hasPEM := msg.CertPem != "" && msg.KeyPem != ""
+	hasFiles := msg.CertFile != "" && msg.KeyFile != ""
+	hasPEMUpdate := msg.CertPem != "" && (msg.KeyPem != "" || (existing.KeyPEM != "" && existing.CertFile == ""))
+	if !hasPEM && !hasFiles && !hasPEMUpdate {
+		return connect.NewError(connect.CodeInvalidArgument, errors.New("provide either cert_pem+key_pem or cert_file+key_file"))
+	}
+	return nil
+}
+
+func validateCertMaterial(msg *apiv1.PutCertificateRequest, keyPEM string, existing config.CertPEM) *connect.Error {
+	if msg.CertPem != "" && keyPEM != "" {
+		if _, err := tls.X509KeyPair([]byte(msg.CertPem), []byte(keyPEM)); err != nil {
+			return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid certificate or key PEM: %w", err))
+		}
+	}
+	hasFiles := msg.CertFile != "" && msg.KeyFile != ""
+	if !hasFiles {
+		return nil
+	}
+	keyPath := msg.KeyFile
+	if keyPath == "" {
+		keyPath = existing.KeyFile
+	}
+	if keyPath == "" {
+		return nil
+	}
+	if _, err := tls.LoadX509KeyPair(msg.CertFile, keyPath); err != nil {
+		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid certificate or key file: %w", err))
+	}
+	return nil
+}
+
+func resolveCertID(existingID uuid.UUID, reqID string) uuid.UUID {
+	if existingID != uuid.Nil {
+		return existingID
+	}
+	if reqID != "" {
+		id, _ := uuid.Parse(reqID)
+		return id
+	}
+	return uuid.Must(uuid.NewV7())
+}
+
+func (s *ConfigServer) setDefaultCert(ctx context.Context, name string) error {
+	sc, err := config.LoadServerConfig(ctx, s.cfgStore)
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, err)
+	}
+	sc.TLS.DefaultCert = name
+	if err := config.SaveServerConfig(ctx, s.cfgStore, sc); err != nil {
+		return connect.NewError(connect.CodeInternal, err)
+	}
+	return nil
 }
 
 // DeleteCertificate removes a certificate.

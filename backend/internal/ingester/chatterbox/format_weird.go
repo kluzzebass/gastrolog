@@ -23,7 +23,7 @@ func (f *WeirdFormat) Generate(rng *rand.Rand) ([]byte, map[string]string, time.
 		// Random bytes
 		data = make([]byte, 50+rng.IntN(200))
 		for i := range data {
-			data[i] = byte(rng.IntN(256))
+			data[i] = byte(rng.IntN(256)) //nolint:gosec // G115: IntN(256) always fits in byte
 		}
 	case 1:
 		// Control characters mixed with text
@@ -43,7 +43,7 @@ func (f *WeirdFormat) Generate(rng *rand.Rand) ([]byte, map[string]string, time.
 		// Very long tokens
 		data = make([]byte, 1000+rng.IntN(1000))
 		for i := range data {
-			data[i] = 'a' + byte(rng.IntN(26))
+			data[i] = 'a' + byte(rng.IntN(26)) //nolint:gosec // G115: IntN(26) always fits in byte
 		}
 	case 4:
 		// Repeated patterns
@@ -71,9 +71,9 @@ func (f *WeirdFormat) Generate(rng *rand.Rand) ([]byte, map[string]string, time.
 		data = []byte("START")
 		for range 20 {
 			if rng.IntN(2) == 0 {
-				data = append(data, byte(rng.IntN(32))) // control char
+				data = append(data, byte(rng.IntN(32))) //nolint:gosec // G115: IntN(32) always fits in byte
 			} else {
-				data = append(data, byte('A'+rng.IntN(26)))
+				data = append(data, byte('A'+rng.IntN(26))) //nolint:gosec // G115: 'A'+IntN(26) always fits in byte
 			}
 		}
 		data = append(data, []byte("END")...)

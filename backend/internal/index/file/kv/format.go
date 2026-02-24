@@ -1,6 +1,7 @@
 package kv
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -58,7 +59,7 @@ func decodeKeyIndex(data []byte) ([]index.KVKeyIndexEntry, index.KVIndexStatus, 
 		return nil, index.KVComplete, fmt.Errorf("kv key index: %w", err)
 	}
 	if h.Flags&format.FlagComplete == 0 {
-		return nil, index.KVComplete, fmt.Errorf("kv key index: incomplete (missing complete flag)")
+		return nil, index.KVComplete, errors.New("kv key index: incomplete (missing complete flag)")
 	}
 
 	// Read status
@@ -104,7 +105,7 @@ func decodeValueIndex(data []byte) ([]index.KVValueIndexEntry, index.KVIndexStat
 		return nil, index.KVComplete, fmt.Errorf("kv value index: %w", err)
 	}
 	if h.Flags&format.FlagComplete == 0 {
-		return nil, index.KVComplete, fmt.Errorf("kv value index: incomplete (missing complete flag)")
+		return nil, index.KVComplete, errors.New("kv value index: incomplete (missing complete flag)")
 	}
 
 	// Read status
@@ -150,7 +151,7 @@ func decodeKVIndex(data []byte) ([]index.KVIndexEntry, index.KVIndexStatus, erro
 		return nil, index.KVComplete, fmt.Errorf("kv index: %w", err)
 	}
 	if h.Flags&format.FlagComplete == 0 {
-		return nil, index.KVComplete, fmt.Errorf("kv index: incomplete (missing complete flag)")
+		return nil, index.KVComplete, errors.New("kv index: incomplete (missing complete flag)")
 	}
 
 	// Read status
@@ -184,7 +185,7 @@ func decodeStatus(b byte) (index.KVIndexStatus, error) {
 
 func LoadKeyIndex(dir string, chunkID chunk.ChunkID) ([]index.KVKeyIndexEntry, index.KVIndexStatus, error) {
 	path := KeyIndexPath(dir, chunkID)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, index.KVComplete, fmt.Errorf("read kv key index: %w", err)
 	}
@@ -193,7 +194,7 @@ func LoadKeyIndex(dir string, chunkID chunk.ChunkID) ([]index.KVKeyIndexEntry, i
 
 func LoadValueIndex(dir string, chunkID chunk.ChunkID) ([]index.KVValueIndexEntry, index.KVIndexStatus, error) {
 	path := ValueIndexPath(dir, chunkID)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, index.KVComplete, fmt.Errorf("read kv value index: %w", err)
 	}
@@ -202,7 +203,7 @@ func LoadValueIndex(dir string, chunkID chunk.ChunkID) ([]index.KVValueIndexEntr
 
 func LoadKVIndex(dir string, chunkID chunk.ChunkID) ([]index.KVIndexEntry, index.KVIndexStatus, error) {
 	path := KVIndexPath(dir, chunkID)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, index.KVComplete, fmt.Errorf("read kv index: %w", err)
 	}

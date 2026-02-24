@@ -41,13 +41,14 @@ func intersectPositions(a, b []uint64) []uint64 {
 	var result []uint64
 	i, j := 0, 0
 	for i < len(a) && j < len(b) {
-		if a[i] == b[j] {
+		switch {
+		case a[i] == b[j]:
 			result = append(result, a[i])
 			i++
 			j++
-		} else if a[i] < b[j] {
+		case a[i] < b[j]:
 			i++
-		} else {
+		default:
 			j++
 		}
 	}
@@ -59,14 +60,15 @@ func unionPositions(a, b []uint64) []uint64 {
 	result := make([]uint64, 0, len(a)+len(b))
 	i, j := 0, 0
 	for i < len(a) && j < len(b) {
-		if a[i] == b[j] {
+		switch {
+		case a[i] == b[j]:
 			result = append(result, a[i])
 			i++
 			j++
-		} else if a[i] < b[j] {
+		case a[i] < b[j]:
 			result = append(result, a[i])
 			i++
-		} else {
+		default:
 			result = append(result, b[j])
 			j++
 		}
@@ -183,50 +185,63 @@ func (b *scannerBuilder) build(ctx context.Context, cursor chunk.RecordCursor, q
 
 // buildSequentialScanner creates a scanner that reads records sequentially.
 func (b *scannerBuilder) buildSequentialScanner(ctx context.Context, cursor chunk.RecordCursor, q Query) iter.Seq2[recordWithRef, error] {
+	if q.Reverse() {
+		return b.buildSequentialScannerReverse(ctx, cursor, q)
+	}
+	return b.buildSequentialScannerForward(ctx, cursor, q)
+}
+
+// buildSequentialScannerReverse creates a reverse sequential scanner (newest first).
+func (b *scannerBuilder) buildSequentialScannerReverse(ctx context.Context, cursor chunk.RecordCursor, q Query) iter.Seq2[recordWithRef, error] {
 	lower, upper := q.TimeBounds()
 	filters := b.filters
 	storeID := b.storeID
 
-	if q.Reverse() {
-		return func(yield func(recordWithRef, error) bool) {
-			n := 0
-			for {
-				if n&1023 == 0 {
-					if err := ctx.Err(); err != nil {
-						yield(recordWithRef{StoreID: storeID}, err)
-						return
-					}
-				}
-				n++
-
-				rec, ref, err := cursor.Prev()
-				if errors.Is(err, chunk.ErrNoMoreRecords) {
-					return
-				}
-				if err != nil {
-					yield(recordWithRef{StoreID: storeID, Ref: ref}, err)
-					return
-				}
-
-				// Time bounds.
-				if !lower.IsZero() && rec.IngestTS.Before(lower) {
-					return // too old, stop
-				}
-				if !upper.IsZero() && !rec.IngestTS.Before(upper) {
-					continue // too new, skip
-				}
-
-				// Apply filters.
-				if !applyFilters(rec, filters) {
-					continue
-				}
-
-				if !yield(recordWithRef{StoreID: storeID, Record: rec, Ref: ref}, nil) {
+	return func(yield func(recordWithRef, error) bool) {
+		n := 0
+		for {
+			if n&1023 == 0 {
+				if err := ctx.Err(); err != nil {
+					yield(recordWithRef{StoreID: storeID}, err)
 					return
 				}
 			}
+			n++
+
+			rec, ref, err := cursor.Prev()
+			if errors.Is(err, chunk.ErrNoMoreRecords) {
+				return
+			}
+			if err != nil {
+				yield(recordWithRef{StoreID: storeID, Ref: ref}, err)
+				return
+			}
+
+			// Time bounds.
+			if !lower.IsZero() && rec.IngestTS.Before(lower) {
+				return // too old, stop
+			}
+			if !upper.IsZero() && !rec.IngestTS.Before(upper) {
+				continue // too new, skip
+			}
+
+			// Apply filters.
+			if !applyFilters(rec, filters) {
+				continue
+			}
+
+			if !yield(recordWithRef{StoreID: storeID, Record: rec, Ref: ref}, nil) {
+				return
+			}
 		}
 	}
+}
+
+// buildSequentialScannerForward creates a forward sequential scanner (oldest first).
+func (b *scannerBuilder) buildSequentialScannerForward(ctx context.Context, cursor chunk.RecordCursor, q Query) iter.Seq2[recordWithRef, error] {
+	lower, upper := q.TimeBounds()
+	filters := b.filters
+	storeID := b.storeID
 
 	return func(yield func(recordWithRef, error) bool) {
 		n := 0
@@ -270,74 +285,72 @@ func (b *scannerBuilder) buildSequentialScanner(ctx context.Context, cursor chun
 
 // buildPositionScanner creates a scanner that seeks to specific positions.
 func (b *scannerBuilder) buildPositionScanner(ctx context.Context, cursor chunk.RecordCursor, q Query) iter.Seq2[recordWithRef, error] {
+	if q.Reverse() {
+		return b.buildPositionScannerReverse(ctx, cursor, q)
+	}
+	return b.buildPositionScannerForward(ctx, cursor, q)
+}
+
+// buildPositionScannerReverse creates a reverse position scanner (newest first).
+func (b *scannerBuilder) buildPositionScannerReverse(ctx context.Context, cursor chunk.RecordCursor, q Query) iter.Seq2[recordWithRef, error] {
 	lower, upper := q.TimeBounds()
 	positions := b.positions
 	chunkID := b.chunkID
 	storeID := b.storeID
 	filters := b.filters
 
-	if q.Reverse() {
-		return func(yield func(recordWithRef, error) bool) {
-			for i := len(positions) - 1; i >= 0; i-- {
-				if i&1023 == 0 {
-					if err := ctx.Err(); err != nil {
-						yield(recordWithRef{StoreID: storeID}, err)
-						return
-					}
-				}
-
-				pos := positions[i]
-				ref := chunk.RecordRef{ChunkID: chunkID, Pos: pos}
-				if err := cursor.Seek(ref); err != nil {
-					yield(recordWithRef{StoreID: storeID, Ref: ref}, err)
-					return
-				}
-
-				rec, ref, err := cursor.Next()
-				if errors.Is(err, chunk.ErrNoMoreRecords) {
-					return
-				}
-				if err != nil {
-					yield(recordWithRef{StoreID: storeID, Ref: ref}, err)
-					return
-				}
-
-				// Time bounds.
-				if !lower.IsZero() && rec.IngestTS.Before(lower) {
-					return // too old, stop
-				}
-				if !upper.IsZero() && !rec.IngestTS.Before(upper) {
-					continue // too new, skip
-				}
-
-				// Apply filters.
-				if !applyFilters(rec, filters) {
-					continue
-				}
-
-				if !yield(recordWithRef{StoreID: storeID, Record: rec, Ref: ref}, nil) {
-					return
-				}
-			}
-		}
-	}
-
 	return func(yield func(recordWithRef, error) bool) {
-		for i, pos := range positions {
-			if i&1023 == 0 {
-				if err := ctx.Err(); err != nil {
-					yield(recordWithRef{StoreID: storeID}, err)
-					return
-				}
+		for i := len(positions) - 1; i >= 0; i-- {
+			if err := checkCtxEvery(ctx, i); err != nil {
+				yield(recordWithRef{StoreID: storeID}, err)
+				return
 			}
 
-			ref := chunk.RecordRef{ChunkID: chunkID, Pos: pos}
-			if err := cursor.Seek(ref); err != nil {
+			pos := positions[i]
+			rec, ref, err := seekAndRead(cursor, chunkID, pos)
+			if errors.Is(err, chunk.ErrNoMoreRecords) {
+				return
+			}
+			if err != nil {
 				yield(recordWithRef{StoreID: storeID, Ref: ref}, err)
 				return
 			}
 
-			rec, ref, err := cursor.Next()
+			// Time bounds.
+			if !lower.IsZero() && rec.IngestTS.Before(lower) {
+				return // too old, stop
+			}
+			if !upper.IsZero() && !rec.IngestTS.Before(upper) {
+				continue // too new, skip
+			}
+
+			if !applyFilters(rec, filters) {
+				continue
+			}
+
+			if !yield(recordWithRef{StoreID: storeID, Record: rec, Ref: ref}, nil) {
+				return
+			}
+		}
+	}
+}
+
+// buildPositionScannerForward creates a forward position scanner (oldest first).
+func (b *scannerBuilder) buildPositionScannerForward(ctx context.Context, cursor chunk.RecordCursor, q Query) iter.Seq2[recordWithRef, error] {
+	lower, upper := q.TimeBounds()
+	positions := b.positions
+	chunkID := b.chunkID
+	storeID := b.storeID
+	filters := b.filters
+
+	return func(yield func(recordWithRef, error) bool) {
+		for i, pos := range positions {
+			if err := checkCtxEvery(ctx, i); err != nil {
+				yield(recordWithRef{StoreID: storeID}, err)
+				return
+			}
+
+			rec, ref, err := seekAndRead(cursor, chunkID, pos)
 			if errors.Is(err, chunk.ErrNoMoreRecords) {
 				return
 			}
@@ -354,7 +367,6 @@ func (b *scannerBuilder) buildPositionScanner(ctx context.Context, cursor chunk.
 				return // too new, stop
 			}
 
-			// Apply filters.
 			if !applyFilters(rec, filters) {
 				continue
 			}
@@ -364,6 +376,24 @@ func (b *scannerBuilder) buildPositionScanner(ctx context.Context, cursor chunk.
 			}
 		}
 	}
+}
+
+// checkCtxEvery checks context cancellation every 1024 iterations.
+// Returns nil if the context is still active or if it's not a check iteration.
+func checkCtxEvery(ctx context.Context, n int) error {
+	if n&1023 == 0 {
+		return ctx.Err()
+	}
+	return nil
+}
+
+// seekAndRead seeks to a position and reads the record there.
+func seekAndRead(cursor chunk.RecordCursor, chunkID chunk.ChunkID, pos uint64) (chunk.Record, chunk.RecordRef, error) {
+	ref := chunk.RecordRef{ChunkID: chunkID, Pos: pos}
+	if err := cursor.Seek(ref); err != nil {
+		return chunk.Record{}, ref, err
+	}
+	return cursor.Next()
 }
 
 // applyFilters returns true if the record passes all filters.
@@ -405,13 +435,13 @@ func matchesTokens(raw []byte, queryTokens []string) bool {
 			if !slices.Contains(recordTokens, qtLower) {
 				return false
 			}
-		} else {
-			if rawLower == nil {
-				rawLower = bytes.ToLower(raw)
-			}
-			if !bytes.Contains(rawLower, []byte(qtLower)) {
-				return false
-			}
+			continue
+		}
+		if rawLower == nil {
+			rawLower = bytes.ToLower(raw)
+		}
+		if !bytes.Contains(rawLower, []byte(qtLower)) {
+			return false
 		}
 	}
 	return true
@@ -432,6 +462,42 @@ func regexFilter(pattern *regexp.Regexp) recordFilter {
 	}
 }
 
+// msgPairCache lazily extracts key=value pairs from a record's message body.
+// Extraction happens at most once; subsequent calls return cached results.
+type msgPairCache struct {
+	raw       []byte
+	msgPairs  map[string]map[string]struct{}
+	msgValues map[string]struct{}
+}
+
+func newMsgPairCache(raw []byte) msgPairCache {
+	return msgPairCache{raw: raw}
+}
+
+func (c *msgPairCache) pairs() map[string]map[string]struct{} {
+	if c.msgPairs == nil {
+		pairs := tokenizer.CombinedExtract(c.raw, kvExtractors)
+		c.msgPairs = make(map[string]map[string]struct{})
+		c.msgValues = make(map[string]struct{})
+		for _, kv := range pairs {
+			if c.msgPairs[kv.Key] == nil {
+				c.msgPairs[kv.Key] = make(map[string]struct{})
+			}
+			// Keys are already lowercase from extractor, values are preserved.
+			// For matching, we lowercase both.
+			valLower := strings.ToLower(kv.Value)
+			c.msgPairs[kv.Key][valLower] = struct{}{}
+			c.msgValues[valLower] = struct{}{}
+		}
+	}
+	return c.msgPairs
+}
+
+func (c *msgPairCache) values() map[string]struct{} {
+	c.pairs() // ensure msgValues is populated
+	return c.msgValues
+}
+
 // matchesKeyValue checks if all query key=value pairs are found in either
 // the record's attributes or the message body (OR semantics per pair, AND across pairs).
 //
@@ -444,180 +510,147 @@ func matchesKeyValue(recAttrs chunk.Attributes, raw []byte, queryFilters []KeyVa
 		return true
 	}
 
-	// Lazily extract key=value pairs from message body only if needed.
-	var msgPairs map[string]map[string]struct{}
-	var msgValues map[string]struct{} // all values (for *=value pattern)
-	getMsgPairs := func() map[string]map[string]struct{} {
-		if msgPairs == nil {
-			pairs := tokenizer.CombinedExtract(raw, kvExtractors)
-			msgPairs = make(map[string]map[string]struct{})
-			msgValues = make(map[string]struct{})
-			for _, kv := range pairs {
-				if msgPairs[kv.Key] == nil {
-					msgPairs[kv.Key] = make(map[string]struct{})
-				}
-				// Keys are already lowercase from extractor, values are preserved.
-				// For matching, we lowercase both.
-				valLower := strings.ToLower(kv.Value)
-				msgPairs[kv.Key][valLower] = struct{}{}
-				msgValues[valLower] = struct{}{}
-			}
-		}
-		return msgPairs
-	}
-	getMsgValues := func() map[string]struct{} {
-		getMsgPairs() // ensure msgValues is populated
-		return msgValues
-	}
+	cache := newMsgPairCache(raw)
 
-	// Check all filters (AND semantics across filters).
 	for _, f := range queryFilters {
-		keyLower := strings.ToLower(f.Key)
-		valLower := strings.ToLower(f.Value)
-
 		if f.Key == "" && f.Value == "" {
-			// Both empty - matches everything, skip this filter
 			continue
-		} else if f.Value == "" {
-			// Key only: key=* pattern (key exists with any value)
-			// Check attrs
-			found := false
-			for k := range recAttrs {
-				if matchStringOrPat(k, f.Key, f.KeyPat) {
-					found = true
-					break
-				}
-			}
-			if found {
-				continue
-			}
-			// Check message body
-			pairs := getMsgPairs()
-			if f.KeyPat != nil {
-				// Glob key: scan all keys
-				for k := range pairs {
-					if f.KeyPat.MatchString(k) {
-						found = true
-						break
-					}
-				}
-			} else if _, ok := pairs[keyLower]; ok {
-				found = true
-			}
-			if found {
-				continue
-			}
-			// Check structural JSON paths.
-			if f.KeyPat == nil && matchJSONPathExists(raw, f.Key) {
-				continue
-			}
-			return false // Key not found in either location
-		} else if f.Key == "" {
-			// Value only: *=value pattern (any key has this value)
-			// Check attrs
-			found := false
-			for _, v := range recAttrs {
-				if matchStringOrPat(v, f.Value, f.ValuePat) {
-					found = true
-					break
-				}
-			}
-			if found {
-				continue
-			}
-			// Check message body
-			if f.ValuePat != nil {
-				values := getMsgValues()
-				for v := range values {
-					if f.ValuePat.MatchString(v) {
-						found = true
-						break
-					}
-				}
-			} else {
-				values := getMsgValues()
-				if _, ok := values[valLower]; ok {
-					found = true
-				}
-			}
-			if found {
-				continue
-			}
-			return false // Value not found in either location
-		} else if f.Op != querylang.OpEq {
-			// Comparison operator (!=, >, >=, <, <=): use compareValues.
-			found := false
-			for k, v := range recAttrs {
-				if strings.EqualFold(k, f.Key) && compareValues(v, f.Value, f.Op) {
-					found = true
-					break
-				}
-			}
-			if !found {
-				pairs := getMsgPairs()
-				for k, values := range pairs {
-					if k != keyLower {
-						continue
-					}
-					for v := range values {
-						if compareValues(v, f.Value, f.Op) {
-							found = true
-							break
-						}
-					}
-					if found {
-						break
-					}
-				}
-			}
-			if !found {
-				found = matchJSONPathCompare(raw, f.Key, f.Value, f.Op)
-			}
-			if !found {
-				return false
-			}
-		} else {
-			// Both key and value: exact or glob key=value match
-			// Check attributes first (cheaper).
-			found := false
-			for k, v := range recAttrs {
-				if matchStringOrPat(k, f.Key, f.KeyPat) && matchStringOrPat(v, f.Value, f.ValuePat) {
-					found = true
-					break
-				}
-			}
-			if found {
-				continue
-			}
-
-			// Check message body.
-			pairs := getMsgPairs()
-			for k, values := range pairs {
-				if !matchStringOrPatLower(k, keyLower, f.KeyPat) {
-					continue
-				}
-				for v := range values {
-					if matchStringOrPatLower(v, valLower, f.ValuePat) {
-						found = true
-						break
-					}
-				}
-				if found {
-					break
-				}
-			}
-
-			if found {
-				continue
-			}
-			// Check structural JSON paths.
-			if f.KeyPat == nil && f.ValuePat == nil && matchJSONPathValue(raw, f.Key, valLower) {
-				continue
-			}
-			return false // Not found in either location.
+		}
+		if !matchesSingleKVFilter(recAttrs, raw, &cache, f) {
+			return false
 		}
 	}
 	return true
+}
+
+// matchesSingleKVFilter dispatches a single KeyValueFilter to the appropriate
+// matching strategy. Returns true if the filter matched.
+func matchesSingleKVFilter(recAttrs chunk.Attributes, raw []byte, cache *msgPairCache, f KeyValueFilter) bool {
+	switch {
+	case f.Value == "":
+		return matchesKVKeyOnly(recAttrs, raw, cache, f)
+	case f.Key == "":
+		return matchesKVValueOnly(recAttrs, cache, f)
+	case f.Op != querylang.OpEq:
+		return matchesKVComparison(recAttrs, raw, cache, f)
+	default:
+		return matchesKVExact(recAttrs, raw, cache, f)
+	}
+}
+
+// matchesKVKeyOnly handles key=* pattern: key exists with any value.
+func matchesKVKeyOnly(recAttrs chunk.Attributes, raw []byte, cache *msgPairCache, f KeyValueFilter) bool {
+	keyLower := strings.ToLower(f.Key)
+
+	// Check attrs.
+	for k := range recAttrs {
+		if matchStringOrPat(k, f.Key, f.KeyPat) {
+			return true
+		}
+	}
+
+	// Check message body.
+	pairs := cache.pairs()
+	if f.KeyPat != nil {
+		for k := range pairs {
+			if f.KeyPat.MatchString(k) {
+				return true
+			}
+		}
+	} else if _, ok := pairs[keyLower]; ok {
+		return true
+	}
+
+	// Check structural JSON paths.
+	if f.KeyPat == nil && matchJSONPathExists(raw, f.Key) {
+		return true
+	}
+	return false
+}
+
+// matchesKVValueOnly handles *=value pattern: any key has this value.
+func matchesKVValueOnly(recAttrs chunk.Attributes, cache *msgPairCache, f KeyValueFilter) bool {
+	valLower := strings.ToLower(f.Value)
+
+	// Check attrs.
+	for _, v := range recAttrs {
+		if matchStringOrPat(v, f.Value, f.ValuePat) {
+			return true
+		}
+	}
+
+	// Check message body.
+	values := cache.values()
+	if f.ValuePat != nil {
+		for v := range values {
+			if f.ValuePat.MatchString(v) {
+				return true
+			}
+		}
+	} else if _, ok := values[valLower]; ok {
+		return true
+	}
+	return false
+}
+
+// matchesKVComparison handles comparison operators (!=, >, >=, <, <=).
+func matchesKVComparison(recAttrs chunk.Attributes, raw []byte, cache *msgPairCache, f KeyValueFilter) bool {
+	keyLower := strings.ToLower(f.Key)
+
+	// Check attrs.
+	for k, v := range recAttrs {
+		if strings.EqualFold(k, f.Key) && compareValues(v, f.Value, f.Op) {
+			return true
+		}
+	}
+
+	// Check message body.
+	pairs := cache.pairs()
+	for k, values := range pairs {
+		if k != keyLower {
+			continue
+		}
+		for v := range values {
+			if compareValues(v, f.Value, f.Op) {
+				return true
+			}
+		}
+	}
+
+	// Check structural JSON paths.
+	return matchJSONPathCompare(raw, f.Key, f.Value, f.Op)
+}
+
+// matchesKVExact handles exact or glob key=value match (OpEq).
+func matchesKVExact(recAttrs chunk.Attributes, raw []byte, cache *msgPairCache, f KeyValueFilter) bool {
+	keyLower := strings.ToLower(f.Key)
+	valLower := strings.ToLower(f.Value)
+
+	// Check attributes first (cheaper).
+	for k, v := range recAttrs {
+		if matchStringOrPat(k, f.Key, f.KeyPat) && matchStringOrPat(v, f.Value, f.ValuePat) {
+			return true
+		}
+	}
+
+	// Check message body.
+	pairs := cache.pairs()
+	for k, values := range pairs {
+		if !matchStringOrPatLower(k, keyLower, f.KeyPat) {
+			continue
+		}
+		for v := range values {
+			if matchStringOrPatLower(v, valLower, f.ValuePat) {
+				return true
+			}
+		}
+	}
+
+	// Check structural JSON paths.
+	if f.KeyPat == nil && f.ValuePat == nil && matchJSONPathValue(raw, f.Key, valLower) {
+		return true
+	}
+	return false
 }
 
 // matchStringOrPat matches a string against either an exact value (case-insensitive) or a compiled glob pattern.
@@ -772,7 +805,7 @@ func applyTokenIndex(b *scannerBuilder, indexes index.IndexManager, chunkID chun
 	reader := index.NewTokenIndexReader(chunkID, tokIdx.Entries())
 
 	// All tokens must be present in the index (AND semantics).
-	for i, tok := range tokens {
+	for _, tok := range tokens {
 		tok = strings.ToLower(tok)
 		positions, found := reader.Lookup(tok)
 		if !found {
@@ -786,21 +819,66 @@ func applyTokenIndex(b *scannerBuilder, indexes index.IndexManager, chunkID chun
 			}
 			return false, false // not indexable: need runtime filter
 		}
-		if i == 0 {
-			if !b.addPositions(positions) {
-				// Intersection resulted in empty set - no matches
-				return true, true
-			}
-		} else {
-			// Intersect with existing positions.
-			if !b.addPositions(positions) {
-				// Intersection resulted in empty set - no matches
-				return true, true
-			}
+		if !b.addPositions(positions) {
+			// Intersection resulted in empty set - no matches
+			return true, true
 		}
 	}
 
 	return true, false
+}
+
+// kvIndexSet holds all opened KV-related indexes for a chunk.
+// Fields are populated once and reused across multiple filter lookups.
+type kvIndexSet struct {
+	chunkID chunk.ChunkID
+
+	attrKVIdx  *index.Index[index.AttrKVIndexEntry]
+	attrKVErr  error
+	attrKeyIdx *index.Index[index.AttrKeyIndexEntry]
+	attrKeyErr error
+	attrValIdx *index.Index[index.AttrValueIndexEntry]
+	attrValErr error
+
+	kvIdx       *index.Index[index.KVIndexEntry]
+	kvStatus    index.KVIndexStatus
+	kvErr       error
+	kvKeyIdx    *index.Index[index.KVKeyIndexEntry]
+	kvKeyStatus index.KVIndexStatus
+	kvKeyErr    error
+	kvValIdx    *index.Index[index.KVValueIndexEntry]
+	kvValStatus index.KVIndexStatus
+	kvValErr    error
+
+	jsonReader *index.JSONIndexReader
+}
+
+func openKVIndexSet(indexes index.IndexManager, chunkID chunk.ChunkID) kvIndexSet {
+	s := kvIndexSet{chunkID: chunkID}
+
+	s.attrKVIdx, s.attrKVErr = indexes.OpenAttrKVIndex(chunkID)
+	s.attrKeyIdx, s.attrKeyErr = indexes.OpenAttrKeyIndex(chunkID)
+	s.attrValIdx, s.attrValErr = indexes.OpenAttrValueIndex(chunkID)
+
+	s.kvIdx, s.kvStatus, s.kvErr = indexes.OpenKVIndex(chunkID)
+	s.kvKeyIdx, s.kvKeyStatus, s.kvKeyErr = indexes.OpenKVKeyIndex(chunkID)
+	s.kvValIdx, s.kvValStatus, s.kvValErr = indexes.OpenKVValueIndex(chunkID)
+
+	jsonPathIdx, jsonPathStatus, jsonPathErr := indexes.OpenJSONPathIndex(chunkID)
+	jsonPVIdx, jsonPVStatus, jsonPVErr := indexes.OpenJSONPVIndex(chunkID)
+	if jsonPathErr == nil || jsonPVErr == nil {
+		var pathEntries []index.JSONPathIndexEntry
+		var pvEntries []index.JSONPVIndexEntry
+		if jsonPathErr == nil {
+			pathEntries = jsonPathIdx.Entries()
+		}
+		if jsonPVErr == nil {
+			pvEntries = jsonPVIdx.Entries()
+		}
+		s.jsonReader = index.NewJSONIndexReader(chunkID, pathEntries, jsonPathStatus, pvEntries, jsonPVStatus)
+	}
+
+	return s
 }
 
 // applyKeyValueIndex tries to use both attr and kv indexes for position filtering.
@@ -820,126 +898,16 @@ func applyKeyValueIndex(b *scannerBuilder, indexes index.IndexManager, chunkID c
 		return true, false
 	}
 
-	// Open all indexes we might need. We'll check availability per-filter.
-	// Attr indexes (authoritative)
-	attrKVIdx, attrKVErr := indexes.OpenAttrKVIndex(chunkID)
-	attrKeyIdx, attrKeyErr := indexes.OpenAttrKeyIndex(chunkID)
-	attrValIdx, attrValErr := indexes.OpenAttrValueIndex(chunkID)
-
-	// KV indexes (heuristic, from message body)
-	kvIdx, kvStatus, kvErr := indexes.OpenKVIndex(chunkID)
-	kvKeyIdx, kvKeyStatus, kvKeyErr := indexes.OpenKVKeyIndex(chunkID)
-	kvValIdx, kvValStatus, kvValErr := indexes.OpenKVValueIndex(chunkID)
-
-	// JSON structural index
-	jsonPathIdx, jsonPathStatus, jsonPathErr := indexes.OpenJSONPathIndex(chunkID)
-	jsonPVIdx, jsonPVStatus, jsonPVErr := indexes.OpenJSONPVIndex(chunkID)
-	var jsonReader *index.JSONIndexReader
-	if jsonPathErr == nil || jsonPVErr == nil {
-		var pathEntries []index.JSONPathIndexEntry
-		var pvEntries []index.JSONPVIndexEntry
-		if jsonPathErr == nil {
-			pathEntries = jsonPathIdx.Entries()
-		}
-		if jsonPVErr == nil {
-			pvEntries = jsonPVIdx.Entries()
-		}
-		jsonReader = index.NewJSONIndexReader(chunkID, pathEntries, jsonPathStatus, pvEntries, jsonPVStatus)
-	}
+	idxSet := openKVIndexSet(indexes, chunkID)
 
 	// For each filter, union positions from both attr and kv indexes.
 	// Across filters, intersect positions.
 	for _, f := range filters {
-		keyLower := strings.ToLower(f.Key)
-		valLower := strings.ToLower(f.Value)
-
-		var filterPositions []uint64
-
 		if f.Key == "" && f.Value == "" {
-			// Both empty - matches everything, skip this filter
 			continue
-		} else if f.Value == "" {
-			// Key only: key=* pattern (key exists with any value)
-			// Use key indexes
-			if attrKeyErr == nil {
-				reader := index.NewAttrKeyIndexReader(chunkID, attrKeyIdx.Entries())
-				if positions, found := reader.Lookup(keyLower); found {
-					filterPositions = unionPositions(filterPositions, positions)
-				}
-			}
-			if kvKeyErr == nil && kvKeyStatus != index.KVCapped {
-				reader := index.NewKVKeyIndexReader(chunkID, kvKeyIdx.Entries())
-				if positions, found := reader.Lookup(keyLower); found {
-					filterPositions = unionPositions(filterPositions, positions)
-				}
-			}
-			// JSON path index: key existence (dots become null-byte separators)
-			if jsonReader != nil {
-				jsonPath := dotToNull(keyLower)
-				if positions, found := jsonReader.LookupPath(jsonPath); found {
-					filterPositions = unionPositions(filterPositions, positions)
-				}
-			}
-		} else if f.Key == "" {
-			// Value only: *=value pattern (any key has this value)
-			// Use value indexes
-			if attrValErr == nil {
-				reader := index.NewAttrValueIndexReader(chunkID, attrValIdx.Entries())
-				if positions, found := reader.Lookup(valLower); found {
-					filterPositions = unionPositions(filterPositions, positions)
-				}
-			}
-			if kvValErr == nil && kvValStatus != index.KVCapped {
-				reader := index.NewKVValueIndexReader(chunkID, kvValIdx.Entries())
-				if positions, found := reader.Lookup(valLower); found {
-					filterPositions = unionPositions(filterPositions, positions)
-				}
-			}
-			// No JSON index for value-only queries (value without path context is ambiguous)
-		} else if f.Op != querylang.OpEq {
-			// Non-eq comparison operator: use key-only index to find positions
-			// where the key exists, then runtime filter on value comparison.
-			if attrKeyErr == nil {
-				reader := index.NewAttrKeyIndexReader(chunkID, attrKeyIdx.Entries())
-				if positions, found := reader.Lookup(keyLower); found {
-					filterPositions = unionPositions(filterPositions, positions)
-				}
-			}
-			if kvKeyErr == nil && kvKeyStatus != index.KVCapped {
-				reader := index.NewKVKeyIndexReader(chunkID, kvKeyIdx.Entries())
-				if positions, found := reader.Lookup(keyLower); found {
-					filterPositions = unionPositions(filterPositions, positions)
-				}
-			}
-			if jsonReader != nil {
-				jsonPath := dotToNull(keyLower)
-				if positions, found := jsonReader.LookupPath(jsonPath); found {
-					filterPositions = unionPositions(filterPositions, positions)
-				}
-			}
-		} else {
-			// Both key and value: exact key=value match
-			// Use KV indexes
-			if attrKVErr == nil {
-				reader := index.NewAttrKVIndexReader(chunkID, attrKVIdx.Entries())
-				if positions, found := reader.Lookup(keyLower, valLower); found {
-					filterPositions = unionPositions(filterPositions, positions)
-				}
-			}
-			if kvErr == nil && kvStatus != index.KVCapped {
-				reader := index.NewKVIndexReader(chunkID, kvIdx.Entries())
-				if positions, found := reader.Lookup(keyLower, valLower); found {
-					filterPositions = unionPositions(filterPositions, positions)
-				}
-			}
-			// JSON path-value index (dots become null-byte separators)
-			if jsonReader != nil && jsonReader.PVStatus() != index.JSONCapped {
-				jsonPath := dotToNull(keyLower)
-				if positions, found := jsonReader.LookupPathValue(jsonPath, valLower); found {
-					filterPositions = unionPositions(filterPositions, positions)
-				}
-			}
 		}
+
+		filterPositions := kvIndexFilterPositions(&idxSet, f)
 
 		// If no positions found for this filter, fall back to runtime filtering.
 		// KV indexes are accelerators, not authorities - an index miss does NOT
@@ -955,6 +923,125 @@ func applyKeyValueIndex(b *scannerBuilder, indexes index.IndexManager, chunkID c
 	}
 
 	return true, false
+}
+
+// kvIndexFilterPositions dispatches a single filter to the appropriate index lookup
+// and returns the union of positions from all applicable indexes.
+func kvIndexFilterPositions(s *kvIndexSet, f KeyValueFilter) []uint64 {
+	switch {
+	case f.Value == "":
+		return kvIndexKeyOnly(s, f)
+	case f.Key == "":
+		return kvIndexValueOnly(s, f)
+	case f.Op != querylang.OpEq:
+		return kvIndexComparison(s, f)
+	default:
+		return kvIndexExact(s, f)
+	}
+}
+
+// kvIndexKeyOnly looks up positions where a key exists (key=* pattern).
+func kvIndexKeyOnly(s *kvIndexSet, f KeyValueFilter) []uint64 {
+	keyLower := strings.ToLower(f.Key)
+	var positions []uint64
+
+	if s.attrKeyErr == nil {
+		reader := index.NewAttrKeyIndexReader(s.chunkID, s.attrKeyIdx.Entries())
+		if p, found := reader.Lookup(keyLower); found {
+			positions = unionPositions(positions, p)
+		}
+	}
+	if s.kvKeyErr == nil && s.kvKeyStatus != index.KVCapped {
+		reader := index.NewKVKeyIndexReader(s.chunkID, s.kvKeyIdx.Entries())
+		if p, found := reader.Lookup(keyLower); found {
+			positions = unionPositions(positions, p)
+		}
+	}
+	// JSON path index: key existence (dots become null-byte separators).
+	if s.jsonReader != nil {
+		jsonPath := dotToNull(keyLower)
+		if p, found := s.jsonReader.LookupPath(jsonPath); found {
+			positions = unionPositions(positions, p)
+		}
+	}
+	return positions
+}
+
+// kvIndexValueOnly looks up positions where any key has a given value (*=value pattern).
+func kvIndexValueOnly(s *kvIndexSet, f KeyValueFilter) []uint64 {
+	valLower := strings.ToLower(f.Value)
+	var positions []uint64
+
+	if s.attrValErr == nil {
+		reader := index.NewAttrValueIndexReader(s.chunkID, s.attrValIdx.Entries())
+		if p, found := reader.Lookup(valLower); found {
+			positions = unionPositions(positions, p)
+		}
+	}
+	if s.kvValErr == nil && s.kvValStatus != index.KVCapped {
+		reader := index.NewKVValueIndexReader(s.chunkID, s.kvValIdx.Entries())
+		if p, found := reader.Lookup(valLower); found {
+			positions = unionPositions(positions, p)
+		}
+	}
+	// No JSON index for value-only queries (value without path context is ambiguous).
+	return positions
+}
+
+// kvIndexComparison looks up positions for non-eq comparison operators.
+// Uses key-only index to find positions where the key exists; the caller
+// applies the value comparison at runtime.
+func kvIndexComparison(s *kvIndexSet, f KeyValueFilter) []uint64 {
+	keyLower := strings.ToLower(f.Key)
+	var positions []uint64
+
+	if s.attrKeyErr == nil {
+		reader := index.NewAttrKeyIndexReader(s.chunkID, s.attrKeyIdx.Entries())
+		if p, found := reader.Lookup(keyLower); found {
+			positions = unionPositions(positions, p)
+		}
+	}
+	if s.kvKeyErr == nil && s.kvKeyStatus != index.KVCapped {
+		reader := index.NewKVKeyIndexReader(s.chunkID, s.kvKeyIdx.Entries())
+		if p, found := reader.Lookup(keyLower); found {
+			positions = unionPositions(positions, p)
+		}
+	}
+	if s.jsonReader != nil {
+		jsonPath := dotToNull(keyLower)
+		if p, found := s.jsonReader.LookupPath(jsonPath); found {
+			positions = unionPositions(positions, p)
+		}
+	}
+	return positions
+}
+
+// kvIndexExact looks up positions for exact key=value match (OpEq).
+func kvIndexExact(s *kvIndexSet, f KeyValueFilter) []uint64 {
+	keyLower := strings.ToLower(f.Key)
+	valLower := strings.ToLower(f.Value)
+	var positions []uint64
+
+	if s.attrKVErr == nil {
+		reader := index.NewAttrKVIndexReader(s.chunkID, s.attrKVIdx.Entries())
+		if p, found := reader.Lookup(keyLower, valLower); found {
+			positions = unionPositions(positions, p)
+		}
+	}
+	if s.kvErr == nil && s.kvStatus != index.KVCapped {
+		reader := index.NewKVIndexReader(s.chunkID, s.kvIdx.Entries())
+		if p, found := reader.Lookup(keyLower, valLower); found {
+			positions = unionPositions(positions, p)
+		}
+	}
+	// JSON path-value index (dots become null-byte separators).
+	if s.jsonReader != nil && s.jsonReader.PVStatus() != index.JSONCapped {
+		jsonPath := dotToNull(keyLower)
+		if p, found := s.jsonReader.LookupPathValue(jsonPath, valLower); found {
+			positions = unionPositions(positions, p)
+		}
+	}
+	return positions
 }
 
 // GlobFilter represents a glob pattern filter for index acceleration.
@@ -1120,7 +1207,7 @@ func matchesSingleToken(raw []byte, token string) bool {
 //     status>=500 from matching status=sent via lexicographic comparison.
 //   - If the query value is non-numeric, use case-insensitive lexicographic comparison.
 func compareValues(a, b string, op querylang.CompareOp) bool {
-	switch op {
+	switch op { //nolint:exhaustive // ordering ops handled below after numeric parsing
 	case querylang.OpEq:
 		return strings.EqualFold(a, b)
 	case querylang.OpNe:
@@ -1131,7 +1218,7 @@ func compareValues(a, b string, op querylang.CompareOp) bool {
 	af, aErr := strconv.ParseFloat(a, 64)
 	bf, bErr := strconv.ParseFloat(b, 64)
 	if aErr == nil && bErr == nil {
-		switch op {
+		switch op { //nolint:exhaustive // OpEq/OpNe handled above
 		case querylang.OpGt:
 			return af > bf
 		case querylang.OpGte:
@@ -1151,7 +1238,7 @@ func compareValues(a, b string, op querylang.CompareOp) bool {
 	// Both non-numeric (or record numeric, query non-numeric):
 	// case-insensitive lexicographic comparison.
 	cmp := strings.Compare(strings.ToLower(a), strings.ToLower(b))
-	switch op {
+	switch op { //nolint:exhaustive // OpEq/OpNe handled above
 	case querylang.OpGt:
 		return cmp > 0
 	case querylang.OpGte:

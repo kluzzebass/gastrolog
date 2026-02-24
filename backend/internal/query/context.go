@@ -56,15 +56,15 @@ func (e *Engine) GetContext(ctx context.Context, ref ContextRef, before, after i
 
 	anchorRef := chunk.RecordRef{ChunkID: ref.ChunkID, Pos: ref.Pos}
 	if err := cursor.Seek(anchorRef); err != nil {
-		cursor.Close()
+		_ = cursor.Close()
 		return nil, fmt.Errorf("failed to seek to position %d: %w", ref.Pos, err)
 	}
 	anchorRec, _, err := cursor.Next()
 	if err != nil {
-		cursor.Close()
+		_ = cursor.Close()
 		return nil, fmt.Errorf("failed to read anchor record: %w", err)
 	}
-	cursor.Close()
+	_ = cursor.Close()
 	anchorRec.StoreID = ref.StoreID
 	anchorRec.Ref = anchorRef
 
@@ -167,13 +167,13 @@ func (e *Engine) gatherContextBefore(ctx context.Context, chunksAsc []chunk.Chun
 		if ci == chunkIdx {
 			// Seek to anchor position.
 			if err := cursor.Seek(anchor); err != nil {
-				cursor.Close()
+				_ = cursor.Close()
 				return nil, err
 			}
 		} else {
 			// Seek to end of previous chunk.
-			if err := cursor.Seek(chunk.RecordRef{ChunkID: meta.ID, Pos: uint64(meta.RecordCount)}); err != nil {
-				cursor.Close()
+			if err := cursor.Seek(chunk.RecordRef{ChunkID: meta.ID, Pos: uint64(meta.RecordCount)}); err != nil { //nolint:gosec // G115: RecordCount is always non-negative
+				_ = cursor.Close()
 				return nil, err
 			}
 		}
@@ -185,13 +185,13 @@ func (e *Engine) gatherContextBefore(ctx context.Context, chunksAsc []chunk.Chun
 				break
 			}
 			if err != nil {
-				cursor.Close()
+				_ = cursor.Close()
 				return nil, err
 			}
 			collected = append(collected, rec)
 		}
 
-		cursor.Close()
+		_ = cursor.Close()
 	}
 
 	// Reverse so oldest is first (for forward mode).
@@ -238,12 +238,12 @@ func (e *Engine) gatherContextAfter(ctx context.Context, chunksAsc []chunk.Chunk
 		if ci == chunkIdx {
 			// Seek to anchor position and skip it.
 			if err := cursor.Seek(anchor); err != nil {
-				cursor.Close()
+				_ = cursor.Close()
 				return nil, err
 			}
 			// Skip the anchor record itself.
 			if _, _, err := cursor.Next(); err != nil && !errors.Is(err, chunk.ErrNoMoreRecords) {
-				cursor.Close()
+				_ = cursor.Close()
 				return nil, err
 			}
 		}
@@ -256,13 +256,13 @@ func (e *Engine) gatherContextAfter(ctx context.Context, chunksAsc []chunk.Chunk
 				break
 			}
 			if err != nil {
-				cursor.Close()
+				_ = cursor.Close()
 				return nil, err
 			}
 			collected = append(collected, rec)
 		}
 
-		cursor.Close()
+		_ = cursor.Close()
 	}
 
 	// For reverse mode, we want newest first.

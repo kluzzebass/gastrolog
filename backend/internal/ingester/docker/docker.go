@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -239,14 +240,14 @@ func buildTLSConfig(cfg *clientTLSConfig) (*tls.Config, error) {
 	}
 
 	tc := &tls.Config{
-		InsecureSkipVerify: !cfg.Verify,
+		InsecureSkipVerify: !cfg.Verify, //nolint:gosec // G402: user-configurable TLS verification for Docker socket connections
 	}
 
 	// Load CA certificate.
 	if cfg.CAPem != "" {
 		pool := x509.NewCertPool()
 		if !pool.AppendCertsFromPEM([]byte(cfg.CAPem)) {
-			return nil, fmt.Errorf("CA certificate contains no valid PEM data")
+			return nil, errors.New("CA certificate contains no valid PEM data")
 		}
 		tc.RootCAs = pool
 	} else if cfg.CAFile != "" {
@@ -256,7 +257,7 @@ func buildTLSConfig(cfg *clientTLSConfig) (*tls.Config, error) {
 		}
 		pool := x509.NewCertPool()
 		if !pool.AppendCertsFromPEM(caPEM) {
-			return nil, fmt.Errorf("CA file contains no valid certificates")
+			return nil, errors.New("CA file contains no valid certificates")
 		}
 		tc.RootCAs = pool
 	}

@@ -22,7 +22,7 @@ import (
 type SASLConfig struct {
 	Mechanism string // "plain", "scram-sha-256", "scram-sha-512"
 	User      string
-	Password  string
+	Password  string //nolint:gosec // G117: config field, not a hardcoded credential
 }
 
 // Config holds Kafka ingester configuration.
@@ -88,7 +88,7 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMess
 		fetches := client.PollFetches(ctx)
 		if ctx.Err() != nil {
 			ing.logger.Info("kafka consumer stopping")
-			client.CommitUncommittedOffsets(context.Background())
+			_ = client.CommitUncommittedOffsets(context.Background())
 			return nil
 		}
 

@@ -2,7 +2,7 @@ package query
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"maps"
 	"slices"
 	"time"
@@ -28,96 +28,66 @@ func CompileFilter(expr querylang.Expr) func(chunk.Record) bool {
 	return dnfFilter(&dnf)
 }
 
-// RunPipeline executes a pipeline query against the search engine.
-// Operators are split into pre-stats and post-stats phases.
-// Without stats, returns records; with stats, returns a table.
-// The raw operator forces all results into a flat table.
-func (e *Engine) RunPipeline(ctx context.Context, q Query, pipeline *querylang.Pipeline) (*PipelineResult, error) {
-	// Split operators into pre-stats and post-stats, detect raw and timechart.
-	var preOps, postOps []querylang.PipeOp
-	var statsOp *querylang.StatsOp
-	var timechartOp *querylang.TimechartOp
-	hasRaw := false
+// pipelinePhases holds the result of classifying a pipeline's operators.
+type pipelinePhases struct {
+	preOps      []querylang.PipeOp
+	postOps     []querylang.PipeOp
+	statsOp     *querylang.StatsOp
+	timechartOp *querylang.TimechartOp
+	hasRaw      bool
+}
+
+// classifyPipes splits pipeline operators into pre-stats and post-stats phases,
+// and extracts the stats/timechart/raw flags.
+func classifyPipes(pipeline *querylang.Pipeline) (*pipelinePhases, error) {
+	p := &pipelinePhases{}
 	for _, pipe := range pipeline.Pipes {
-		if s, ok := pipe.(*querylang.StatsOp); ok {
-			if statsOp != nil {
-				return nil, fmt.Errorf("pipeline can contain at most one stats operator")
+		switch op := pipe.(type) {
+		case *querylang.StatsOp:
+			if p.statsOp != nil {
+				return nil, errors.New("pipeline can contain at most one stats operator")
 			}
-			if timechartOp != nil {
-				return nil, fmt.Errorf("pipeline cannot contain both timechart and stats")
+			if p.timechartOp != nil {
+				return nil, errors.New("pipeline cannot contain both timechart and stats")
 			}
-			statsOp = s
-			continue
-		}
-		if tc, ok := pipe.(*querylang.TimechartOp); ok {
-			if timechartOp != nil {
-				return nil, fmt.Errorf("pipeline can contain at most one timechart operator")
+			p.statsOp = op
+		case *querylang.TimechartOp:
+			if p.timechartOp != nil {
+				return nil, errors.New("pipeline can contain at most one timechart operator")
 			}
-			if statsOp != nil {
-				return nil, fmt.Errorf("pipeline cannot contain both timechart and stats")
+			if p.statsOp != nil {
+				return nil, errors.New("pipeline cannot contain both timechart and stats")
 			}
-			timechartOp = tc
-			continue
-		}
-		if _, ok := pipe.(*querylang.RawOp); ok {
-			hasRaw = true
-			continue // raw is consumed as a flag, not an operator to execute
-		}
-		if statsOp == nil && timechartOp == nil {
-			preOps = append(preOps, pipe)
-		} else {
-			postOps = append(postOps, pipe)
+			p.timechartOp = op
+		case *querylang.RawOp:
+			p.hasRaw = true
+		default:
+			if p.statsOp == nil && p.timechartOp == nil {
+				p.preOps = append(p.preOps, pipe)
+			} else {
+				p.postOps = append(p.postOps, pipe)
+			}
 		}
 	}
+	return p, nil
+}
 
-	// Timechart: fast index-based counting path.
-	if timechartOp != nil {
-		table, err := e.runTimechart(ctx, q, timechartOp, preOps)
-		if err != nil {
-			return nil, err
-		}
-		table, err = applyTableOps(table, postOps)
-		if err != nil {
-			return nil, err
-		}
-		return &PipelineResult{Table: table}, nil
-	}
-
-	// Determine if we can apply a head optimization: when the pipeline is
-	// just filters + head (no sort, no stats), we can set q.Limit to avoid
-	// a full scan.
-	if statsOp == nil {
-		if n := headOnlyLimit(preOps); n > 0 {
-			q.Limit = n
-		} else {
-			// Non-aggregating pipelines need all records.
-			q.Limit = 0
-		}
-	} else {
-		// Aggregation needs all matching records.
-		q.Limit = 0
-	}
-
-	// Get matching records from the search engine.
-	iter, _ := e.Search(ctx, q, nil)
-
-	// Collect and apply pre-stats operators.
-	records, err := applyRecordOps(iter, preOps)
+// runTimechartPipeline handles the timechart fast path.
+func (e *Engine) runTimechartPipeline(ctx context.Context, q Query, ph *pipelinePhases) (*PipelineResult, error) {
+	table, err := e.runTimechart(ctx, q, ph.timechartOp, ph.preOps)
 	if err != nil {
 		return nil, err
 	}
-
-	// No stats.
-	if statsOp == nil {
-		if hasRaw {
-			// Raw mode: convert records to a flat table.
-			return &PipelineResult{Table: recordsToTable(records)}, nil
-		}
-		return &PipelineResult{Records: records}, nil
+	table, err = applyTableOps(table, ph.postOps)
+	if err != nil {
+		return nil, err
 	}
+	return &PipelineResult{Table: table}, nil
+}
 
-	// Create aggregator and feed records.
-	agg, err := NewAggregator(statsOp)
+// runAggregation feeds records into a stats aggregator and returns a table.
+func (e *Engine) runAggregation(records []chunk.Record, ph *pipelinePhases, q Query) (*PipelineResult, error) {
+	agg, err := NewAggregator(ph.statsOp)
 	if err != nil {
 		return nil, err
 	}
@@ -127,14 +97,49 @@ func (e *Engine) RunPipeline(ctx context.Context, q Query, pipeline *querylang.P
 		}
 	}
 	table := agg.Result(q.Start, q.End)
+	table, err = applyTableOps(table, ph.postOps)
+	if err != nil {
+		return nil, err
+	}
+	return &PipelineResult{Table: table}, nil
+}
 
-	// Apply post-stats operators to the table.
-	table, err = applyTableOps(table, postOps)
+// RunPipeline executes a pipeline query against the search engine.
+// Operators are split into pre-stats and post-stats phases.
+// Without stats, returns records; with stats, returns a table.
+// The raw operator forces all results into a flat table.
+func (e *Engine) RunPipeline(ctx context.Context, q Query, pipeline *querylang.Pipeline) (*PipelineResult, error) {
+	ph, err := classifyPipes(pipeline)
 	if err != nil {
 		return nil, err
 	}
 
-	return &PipelineResult{Table: table}, nil
+	if ph.timechartOp != nil {
+		return e.runTimechartPipeline(ctx, q, ph)
+	}
+
+	// Head optimization: when the pipeline is just filters + head (no sort,
+	// no stats), set q.Limit to avoid a full scan.
+	if ph.statsOp == nil {
+		if n := headOnlyLimit(ph.preOps); n > 0 {
+			q.Limit = n
+		}
+	}
+
+	iter, _ := e.Search(ctx, q, nil)
+	records, err := applyRecordOps(iter, ph.preOps)
+	if err != nil {
+		return nil, err
+	}
+
+	if ph.statsOp == nil {
+		if ph.hasRaw {
+			return &PipelineResult{Table: recordsToTable(records)}, nil
+		}
+		return &PipelineResult{Records: records}, nil
+	}
+
+	return e.runAggregation(records, ph, q)
 }
 
 // headOnlyLimit returns the head N limit if the pipeline consists only of

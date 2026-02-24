@@ -147,7 +147,7 @@ func (m *Manager) activeChunkState() chunk.ActiveChunkState {
 		StartTS:     m.active.meta.StartTS,
 		LastWriteTS: m.active.meta.EndTS,
 		CreatedAt:   m.active.createdAt,
-		Bytes:       uint64(m.active.size),
+		Bytes:       uint64(m.active.size), //nolint:gosec // G115: size is always non-negative
 		Records:     uint64(len(m.active.records)),
 	}
 }
@@ -299,7 +299,7 @@ func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, boo
 		return 0, false, nil
 	}
 
-	return uint64(lo - 1), true, nil
+	return uint64(lo - 1), true, nil //nolint:gosec // G115: lo is always > 0 here (checked above)
 }
 
 // ReadWriteTimestamps reads the WriteTS for each given record position in a chunk.

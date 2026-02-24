@@ -36,7 +36,7 @@ func NewFactory() chunk.ManagerFactory {
 			}
 			maxRecords = n
 		}
-		cfg.RotationPolicy = chunk.NewRecordCountPolicy(uint64(maxRecords))
+		cfg.RotationPolicy = chunk.NewRecordCountPolicy(uint64(maxRecords)) //nolint:gosec // G115: maxRecords validated > 0 above
 
 		return NewManager(cfg)
 	}

@@ -446,13 +446,14 @@ func tryCtime(raw []byte, pos int) (time.Time, bool) {
 
 	// Build format string.
 	layouts := []string{}
-	if hasYear && hasFrac {
+	switch {
+	case hasYear && hasFrac:
 		layouts = append(layouts, "Jan  2 15:04:05.000000000 2006", "Jan 02 15:04:05.000000000 2006")
-	} else if hasYear {
+	case hasYear:
 		layouts = append(layouts, "Jan  2 15:04:05 2006", "Jan 02 15:04:05 2006")
-	} else if hasFrac {
+	case hasFrac:
 		layouts = append(layouts, "Jan  2 15:04:05.000000000", "Jan 02 15:04:05.000000000")
-	} else {
+	default:
 		layouts = append(layouts, "Jan  2 15:04:05", "Jan 02 15:04:05")
 	}
 

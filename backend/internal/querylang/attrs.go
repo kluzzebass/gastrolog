@@ -33,7 +33,7 @@ func CompileAttrFilter(expr string) (*DNF, error) {
 func ValidateAttrFilter(expr Expr) error {
 	switch e := expr.(type) {
 	case *PredicateExpr:
-		switch e.Kind {
+		switch e.Kind { //nolint:exhaustive // only rejecting content-based predicates; KV/key-exists/value-exists/expr are valid
 		case PredToken:
 			return fmt.Errorf("token predicates not allowed in filters (use key=value): %q", e.Value)
 		case PredRegex:
@@ -101,72 +101,83 @@ func matchBranchAttrs(branch *Conjunction, attrs map[string]string) bool {
 func EvalAttrPredicate(pred *PredicateExpr, attrs map[string]string) bool {
 	switch pred.Kind {
 	case PredKV:
-		if pred.KeyPat != nil {
-			// Glob key, check all matching keys.
-			for k, v := range attrs {
-				if pred.KeyPat.MatchString(k) {
-					if matchValue(pred, v) {
-						return true
-					}
-				}
-			}
-			return false
-		}
-		// Exact key lookup (case-insensitive).
-		if v, ok := attrs[pred.Key]; ok {
-			if matchValue(pred, v) {
-				return true
-			}
-		}
-		for k, v := range attrs {
-			if strings.EqualFold(k, pred.Key) && matchValue(pred, v) {
-				return true
-			}
-		}
-		return false
-
+		return evalKV(pred, attrs)
 	case PredKeyExists:
-		if pred.KeyPat != nil {
-			for k := range attrs {
-				if pred.KeyPat.MatchString(k) {
-					return true
-				}
-			}
-			return false
-		}
-		if _, ok := attrs[pred.Key]; ok {
-			return true
-		}
-		for k := range attrs {
-			if strings.EqualFold(k, pred.Key) {
-				return true
-			}
-		}
-		return false
-
+		return evalKeyExists(pred, attrs)
 	case PredValueExists:
-		if pred.ValuePat != nil {
-			for _, v := range attrs {
-				if pred.ValuePat.MatchString(v) {
-					return true
-				}
-			}
-			return false
-		}
-		for _, v := range attrs {
-			if strings.EqualFold(v, pred.Value) {
-				return true
-			}
-		}
-		return false
-
-	case PredToken, PredRegex, PredGlob:
+		return evalValueExists(pred, attrs)
+	case PredToken, PredRegex, PredGlob, PredExpr:
 		// Not applicable to attr matching — should be caught by validation.
 		return false
-
 	default:
 		return false
 	}
+}
+
+// evalKV evaluates a key=value predicate against attributes.
+func evalKV(pred *PredicateExpr, attrs map[string]string) bool {
+	if pred.KeyPat != nil {
+		return evalKVGlobKey(pred, attrs)
+	}
+	// Exact key lookup (case-insensitive).
+	if v, ok := attrs[pred.Key]; ok && matchValue(pred, v) {
+		return true
+	}
+	for k, v := range attrs {
+		if strings.EqualFold(k, pred.Key) && matchValue(pred, v) {
+			return true
+		}
+	}
+	return false
+}
+
+// evalKVGlobKey evaluates a KV predicate with a glob key pattern.
+func evalKVGlobKey(pred *PredicateExpr, attrs map[string]string) bool {
+	for k, v := range attrs {
+		if pred.KeyPat.MatchString(k) && matchValue(pred, v) {
+			return true
+		}
+	}
+	return false
+}
+
+// evalKeyExists evaluates a key-exists predicate against attributes.
+func evalKeyExists(pred *PredicateExpr, attrs map[string]string) bool {
+	if pred.KeyPat != nil {
+		for k := range attrs {
+			if pred.KeyPat.MatchString(k) {
+				return true
+			}
+		}
+		return false
+	}
+	if _, ok := attrs[pred.Key]; ok {
+		return true
+	}
+	for k := range attrs {
+		if strings.EqualFold(k, pred.Key) {
+			return true
+		}
+	}
+	return false
+}
+
+// evalValueExists evaluates a value-exists predicate against attributes.
+func evalValueExists(pred *PredicateExpr, attrs map[string]string) bool {
+	if pred.ValuePat != nil {
+		for _, v := range attrs {
+			if pred.ValuePat.MatchString(v) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, v := range attrs {
+		if strings.EqualFold(v, pred.Value) {
+			return true
+		}
+	}
+	return false
 }
 
 // matchValue checks if a value matches a predicate's value, using glob pattern

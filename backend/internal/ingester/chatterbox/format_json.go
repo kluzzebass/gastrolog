@@ -161,11 +161,11 @@ func (f *JSONFormat) Generate(rng *rand.Rand) ([]byte, map[string]string, time.T
 	default:
 		// Pipeline with array of stages
 		stageNames := []string{"parse", "validate", "enrich", "transform", "route", "deliver"}
-		stageCount := 2 + rng.IntN(len(stageNames)-1)
+		stageCount := 2 + rng.IntN(len(stageNames)-1) // 2..len(stageNames)
 		stages := make([]any, stageCount)
 		for i := range stageCount {
 			stages[i] = map[string]any{
-				"name":        stageNames[i],
+				"name":        stageNames[i%len(stageNames)],
 				"duration_ms": rng.Float64() * 50,
 				"records_in":  100 + rng.IntN(9900),
 				"records_out": 100 + rng.IntN(9900),

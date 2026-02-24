@@ -134,11 +134,12 @@ func (q Query) Normalize() Query {
 
 	for _, f := range q.KV {
 		var pred *querylang.PredicateExpr
-		if f.Key == "" && f.Value != "" {
+		switch {
+		case f.Key == "" && f.Value != "":
 			pred = &querylang.PredicateExpr{Kind: querylang.PredValueExists, Value: f.Value}
-		} else if f.Key != "" && f.Value == "" {
+		case f.Key != "" && f.Value == "":
 			pred = &querylang.PredicateExpr{Kind: querylang.PredKeyExists, Key: f.Key}
-		} else if f.Key != "" && f.Value != "" {
+		case f.Key != "" && f.Value != "":
 			pred = &querylang.PredicateExpr{Kind: querylang.PredKV, Key: f.Key, Value: f.Value}
 		}
 		if pred != nil {
@@ -212,6 +213,7 @@ type ResumeToken struct {
 	Positions []MultiStorePosition
 
 	// Legacy field for backward compatibility with single-store resume tokens.
+	//
 	// Deprecated: use Positions instead.
 	Next chunk.RecordRef
 }
@@ -336,54 +338,71 @@ func (e *Engine) listStores() []uuid.UUID {
 // If chunkIDs is non-nil, only chunks with matching IDs are included.
 func (e *Engine) selectChunks(metas []chunk.ChunkMeta, q Query, chunkIDs []chunk.ChunkID) []chunk.ChunkMeta {
 	lower, upper := q.TimeBounds()
-
-	// Build lookup set for chunk ID filtering.
-	var chunkSet map[chunk.ChunkID]struct{}
-	if chunkIDs != nil {
-		chunkSet = make(map[chunk.ChunkID]struct{}, len(chunkIDs))
-		for _, id := range chunkIDs {
-			chunkSet[id] = struct{}{}
-		}
-	}
+	chunkSet := buildChunkIDSet(chunkIDs)
 
 	var out []chunk.ChunkMeta
 	for _, m := range metas {
-		// Chunk ID filter (if specified).
-		if chunkSet != nil {
-			if _, ok := chunkSet[m.ID]; !ok {
-				continue
-			}
+		if chunkMatchesQuery(m, q, lower, upper, chunkSet) {
+			out = append(out, m)
 		}
-		if m.Sealed {
-			// Chunk must overlap [lower, upper)
-			if !lower.IsZero() && m.EndTS.Before(lower) {
-				continue
-			}
-			if !upper.IsZero() && !m.StartTS.Before(upper) {
-				continue
-			}
-		}
-
-		// Filter by IngestTS bounds if query specifies them.
-		if !q.IngestStart.IsZero() && !m.IngestEnd.IsZero() && m.IngestEnd.Before(q.IngestStart) {
-			continue
-		}
-		if !q.IngestEnd.IsZero() && !m.IngestStart.IsZero() && !m.IngestStart.Before(q.IngestEnd) {
-			continue
-		}
-
-		// Filter by SourceTS bounds if query specifies them.
-		// Chunk with no SourceTS data (both zero) is included.
-		if !q.SourceStart.IsZero() && !m.SourceEnd.IsZero() && m.SourceEnd.Before(q.SourceStart) {
-			continue
-		}
-		if !q.SourceEnd.IsZero() && !m.SourceStart.IsZero() && !m.SourceStart.Before(q.SourceEnd) {
-			continue
-		}
-
-		out = append(out, m)
 	}
-	if q.Reverse() {
+	sortChunksByStartTS(out, q.Reverse())
+	return out
+}
+
+// buildChunkIDSet creates a lookup set from chunk IDs, or returns nil if chunkIDs is nil.
+func buildChunkIDSet(chunkIDs []chunk.ChunkID) map[chunk.ChunkID]struct{} {
+	if chunkIDs == nil {
+		return nil
+	}
+	set := make(map[chunk.ChunkID]struct{}, len(chunkIDs))
+	for _, id := range chunkIDs {
+		set[id] = struct{}{}
+	}
+	return set
+}
+
+// chunkMatchesQuery returns true if a chunk should be included in the query results.
+func chunkMatchesQuery(m chunk.ChunkMeta, q Query, lower, upper time.Time, chunkSet map[chunk.ChunkID]struct{}) bool {
+	// Chunk ID filter (if specified).
+	if chunkSet != nil {
+		if _, ok := chunkSet[m.ID]; !ok {
+			return false
+		}
+	}
+	if m.Sealed {
+		// Chunk must overlap [lower, upper)
+		if !lower.IsZero() && m.EndTS.Before(lower) {
+			return false
+		}
+		if !upper.IsZero() && !m.StartTS.Before(upper) {
+			return false
+		}
+	}
+
+	// Filter by IngestTS bounds if query specifies them.
+	if !q.IngestStart.IsZero() && !m.IngestEnd.IsZero() && m.IngestEnd.Before(q.IngestStart) {
+		return false
+	}
+	if !q.IngestEnd.IsZero() && !m.IngestStart.IsZero() && !m.IngestStart.Before(q.IngestEnd) {
+		return false
+	}
+
+	// Filter by SourceTS bounds if query specifies them.
+	// Chunk with no SourceTS data (both zero) is included.
+	if !q.SourceStart.IsZero() && !m.SourceEnd.IsZero() && m.SourceEnd.Before(q.SourceStart) {
+		return false
+	}
+	if !q.SourceEnd.IsZero() && !m.SourceStart.IsZero() && !m.SourceStart.Before(q.SourceEnd) {
+		return false
+	}
+
+	return true
+}
+
+// sortChunksByStartTS sorts chunks by StartTS in ascending or descending order.
+func sortChunksByStartTS(out []chunk.ChunkMeta, reverse bool) {
+	if reverse {
 		slices.SortFunc(out, func(a, b chunk.ChunkMeta) int {
 			return b.StartTS.Compare(a.StartTS) // descending
 		})
@@ -392,7 +411,6 @@ func (e *Engine) selectChunks(metas []chunk.ChunkMeta, q Query, chunkIDs []chunk
 			return a.StartTS.Compare(b.StartTS) // ascending
 		})
 	}
-	return out
 }
 
 // searchChunkWithRef returns an iterator over records in a single chunk, including their refs.
@@ -412,30 +430,11 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, storeID uuid.U
 			yield(recordWithRef{}, err)
 			return
 		}
-		defer cursor.Close()
+		defer func() { _ = cursor.Close() }()
 
-		// Handle resume position.
-		if startPos != nil {
-			if err := cursor.Seek(chunk.RecordRef{ChunkID: meta.ID, Pos: *startPos}); err != nil {
-				yield(recordWithRef{}, err)
-				return
-			}
-			// Skip the record at startPos - it was already returned before the break.
-			// For forward: call Next() to move past resume position.
-			// For reverse: cursor.Prev() decrements before returning, so seeking to
-			// the resume position is sufficient - the first Prev() will skip it.
-			if !q.Reverse() {
-				if _, _, err := cursor.Next(); err != nil && !errors.Is(err, chunk.ErrNoMoreRecords) {
-					yield(recordWithRef{}, err)
-					return
-				}
-			}
-		} else if q.Reverse() {
-			// For reverse without resume, seek to end of chunk.
-			if err := cursor.Seek(chunk.RecordRef{ChunkID: meta.ID, Pos: uint64(meta.RecordCount)}); err != nil {
-				yield(recordWithRef{}, err)
-				return
-			}
+		if err := positionCursor(cursor, q, meta, startPos); err != nil {
+			yield(recordWithRef{}, err)
+			return
 		}
 
 		// Try to use indexes for sealed chunks, fall back to sequential scan
@@ -460,6 +459,32 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, storeID uuid.U
 	}
 }
 
+// positionCursor sets the cursor to the correct starting position for the query.
+// For resume: seek to startPos and skip past it (forward) or leave at it (reverse).
+// For reverse without resume: seek to end of chunk.
+func positionCursor(cursor chunk.RecordCursor, q Query, meta chunk.ChunkMeta, startPos *uint64) error {
+	if startPos != nil {
+		if err := cursor.Seek(chunk.RecordRef{ChunkID: meta.ID, Pos: *startPos}); err != nil {
+			return err
+		}
+		// Skip the record at startPos - it was already returned before the break.
+		// For forward: call Next() to move past resume position.
+		// For reverse: cursor.Prev() decrements before returning, so seeking to
+		// the resume position is sufficient - the first Prev() will skip it.
+		if !q.Reverse() {
+			if _, _, err := cursor.Next(); err != nil && !errors.Is(err, chunk.ErrNoMoreRecords) {
+				return err
+			}
+		}
+		return nil
+	}
+	if q.Reverse() {
+		// For reverse without resume, seek to end of chunk.
+		return cursor.Seek(chunk.RecordRef{ChunkID: meta.ID, Pos: uint64(meta.RecordCount)}) //nolint:gosec // G115: RecordCount is always non-negative
+	}
+	return nil
+}
+
 // buildScannerWithManagers creates a scanner for a chunk using the composable filter pipeline.
 // It tries to use indexes when available, falling back to runtime filters when not.
 // storeID is included in the returned recordWithRef for multi-store queries.
@@ -467,26 +492,7 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 	b := newScannerBuilder(meta.ID)
 	b.storeID = storeID
 
-	// Set minimum position from time bounds.
-	// WriteTS: binary search on idx.log.
-	lower, _ := q.TimeBounds()
-	if !lower.IsZero() {
-		if pos, found, err := cm.FindStartPosition(meta.ID, lower); err == nil && found {
-			b.setMinPosition(pos)
-		}
-	}
-	// IngestTS: use ingest index when available.
-	if !q.IngestStart.IsZero() && meta.Sealed {
-		if pos, found, err := im.FindIngestStartPosition(meta.ID, q.IngestStart); err == nil && found {
-			b.setMinPosition(pos)
-		}
-	}
-	// SourceTS: use source index when available.
-	if !q.SourceStart.IsZero() && meta.Sealed {
-		if pos, found, err := im.FindSourceStartPosition(meta.ID, q.SourceStart); err == nil && found {
-			b.setMinPosition(pos)
-		}
-	}
+	setMinPositionsFromBounds(b, q, meta, cm, im)
 
 	// Resume position takes precedence over time-based start.
 	if startPos != nil {
@@ -498,144 +504,12 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 		b.addPositions([]uint64{*q.Pos})
 	}
 
-	// Convert BoolExpr to DNF and process.
-	// For single-branch DNF: use index acceleration for positive predicates, runtime filter for negatives.
-	// For multi-branch DNF: union positions from branches, apply DNF filter for correctness.
-	if q.BoolExpr == nil {
-		// No filter expression - return all records (subject to time bounds).
-		// This is handled by the scanner builder with no filters.
-	} else {
-		dnf := querylang.ToDNF(q.BoolExpr)
-
-		if len(dnf.Branches) == 0 {
-			// Empty DNF - no matches
+	// Convert BoolExpr to DNF and apply index acceleration + runtime filters.
+	if q.BoolExpr != nil {
+		if empty, err := applyBoolExpr(b, q.BoolExpr, meta, im); err != nil {
+			return nil, err
+		} else if empty {
 			return emptyScanner(), nil
-		}
-
-		if len(dnf.Branches) == 1 {
-			// Single branch: use index acceleration
-			tokens, kv, globs, negFilter := ConjunctionToFilters(&dnf.Branches[0])
-
-			// Apply token filter for positive predicates
-			if len(tokens) > 0 {
-				if meta.Sealed {
-					ok, empty := applyTokenIndex(b, im, meta.ID, tokens)
-					if empty {
-						return emptyScanner(), nil
-					}
-					if !ok {
-						b.addFilter(tokenFilter(tokens))
-					}
-				} else {
-					b.addFilter(tokenFilter(tokens))
-				}
-			}
-
-			// Apply glob filter for positive predicates
-			if len(globs) > 0 {
-				if meta.Sealed {
-					ok, empty := applyGlobIndex(b, im, meta.ID, globs)
-					if empty {
-						return emptyScanner(), nil
-					}
-					if !ok {
-						b.addFilter(globTokenFilter(globs))
-					} else {
-						// Index gave us prefix-based positions, but we still need a runtime
-						// filter to verify the full glob pattern matches a token.
-						b.addFilter(globTokenFilter(globs))
-					}
-				} else {
-					b.addFilter(globTokenFilter(globs))
-				}
-			}
-
-			// Apply KV filter for positive predicates
-			if len(kv) > 0 {
-				if meta.Sealed {
-					_, empty := applyKeyValueIndex(b, im, meta.ID, kv)
-					if empty {
-						return emptyScanner(), nil
-					}
-				}
-				// Always add runtime filter: the index narrows positions by
-				// key existence, but comparison operators (>=, <=, etc.) still
-				// need runtime value verification. For OpEq this is redundant
-				// but harmless — matches the pattern used by glob filters.
-				b.addFilter(keyValueFilter(kv))
-			}
-
-			// Apply negation filter for NOT predicates
-			if negFilter != nil {
-				b.addFilter(negFilter)
-			}
-		} else {
-			// Multi-branch DNF: execute each branch and union positions.
-			// Each branch can use indexes independently.
-			var allPositions []uint64
-			anyBranchHasPositions := false
-
-			for _, branch := range dnf.Branches {
-				branchBuilder := newScannerBuilder(meta.ID)
-				if b.hasMinPos {
-					branchBuilder.setMinPosition(b.minPos)
-				}
-
-				tokens, kv, globs, _ := ConjunctionToFilters(&branch)
-				branchEmpty := false
-
-				// Try to get positions from token index
-				if len(tokens) > 0 && meta.Sealed {
-					ok, empty := applyTokenIndex(branchBuilder, im, meta.ID, tokens)
-					if empty {
-						branchEmpty = true
-					}
-					_ = ok
-				}
-
-				// Try to get positions from glob index
-				if !branchEmpty && len(globs) > 0 && meta.Sealed {
-					ok, empty := applyGlobIndex(branchBuilder, im, meta.ID, globs)
-					if empty {
-						branchEmpty = true
-					}
-					_ = ok
-				}
-
-				// Try to get positions from KV index
-				if !branchEmpty && len(kv) > 0 && meta.Sealed {
-					ok, empty := applyKeyValueIndex(branchBuilder, im, meta.ID, kv)
-					if empty {
-						branchEmpty = true
-					}
-					_ = ok
-				}
-
-				if branchEmpty {
-					continue // this branch has no matches, skip
-				}
-
-				if branchBuilder.positions != nil {
-					// This branch contributed positions - union them
-					allPositions = unionPositions(allPositions, branchBuilder.positions)
-					anyBranchHasPositions = true
-				} else {
-					// Branch requires sequential scan (no index narrowing)
-					// Fall back to full runtime filter
-					anyBranchHasPositions = false
-					break
-				}
-			}
-
-			if anyBranchHasPositions && len(allPositions) > 0 {
-				// Use unioned positions from all branches
-				b.positions = allPositions
-			}
-			// Note: if all branches were empty, positions stays nil (sequential scan)
-
-			// Apply DNF filter for correctness.
-			// This evaluates primitive predicates per-branch, not recursive AST evaluation.
-			b.addFilter(dnfFilter(&dnf))
 		}
 	}
 
@@ -662,6 +536,188 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 	}
 
 	return b.build(ctx, cursor, q), nil
+}
+
+// setMinPositionsFromBounds sets the scanner builder's minimum position from time bounds
+// using binary search on WriteTS, IngestTS, and SourceTS indexes.
+func setMinPositionsFromBounds(b *scannerBuilder, q Query, meta chunk.ChunkMeta, cm chunk.ChunkManager, im index.IndexManager) {
+	// WriteTS: binary search on idx.log.
+	lower, _ := q.TimeBounds()
+	if !lower.IsZero() {
+		if pos, found, err := cm.FindStartPosition(meta.ID, lower); err == nil && found {
+			b.setMinPosition(pos)
+		}
+	}
+	// IngestTS: use ingest index when available.
+	if !q.IngestStart.IsZero() && meta.Sealed {
+		if pos, found, err := im.FindIngestStartPosition(meta.ID, q.IngestStart); err == nil && found {
+			b.setMinPosition(pos)
+		}
+	}
+	// SourceTS: use source index when available.
+	if !q.SourceStart.IsZero() && meta.Sealed {
+		if pos, found, err := im.FindSourceStartPosition(meta.ID, q.SourceStart); err == nil && found {
+			b.setMinPosition(pos)
+		}
+	}
+}
+
+// applyBoolExpr converts a BoolExpr to DNF and applies index acceleration and runtime filters
+// to the scanner builder. Returns (true, nil) if the chunk is definitely empty.
+func applyBoolExpr(b *scannerBuilder, expr querylang.Expr, meta chunk.ChunkMeta, im index.IndexManager) (empty bool, err error) {
+	dnf := querylang.ToDNF(expr)
+
+	if len(dnf.Branches) == 0 {
+		return true, nil
+	}
+
+	if len(dnf.Branches) == 1 {
+		return applySingleBranchDNF(b, &dnf.Branches[0], meta, im), nil
+	}
+
+	applyMultiBranchDNF(b, &dnf, meta, im)
+	return false, nil
+}
+
+// applySingleBranchDNF applies index acceleration and runtime filters for a single DNF branch.
+// Returns true if the chunk is definitely empty (no matches).
+func applySingleBranchDNF(b *scannerBuilder, branch *querylang.Conjunction, meta chunk.ChunkMeta, im index.IndexManager) (empty bool) {
+	tokens, kv, globs, negFilter := ConjunctionToFilters(branch)
+
+	if applySingleBranchTokens(b, tokens, meta, im) {
+		return true
+	}
+	if applySingleBranchGlobs(b, globs, meta, im) {
+		return true
+	}
+	if applySingleBranchKV(b, kv, meta, im) {
+		return true
+	}
+
+	if negFilter != nil {
+		b.addFilter(negFilter)
+	}
+	return false
+}
+
+// applySingleBranchTokens applies token index acceleration for a single DNF branch.
+// Returns true if the chunk is definitely empty.
+func applySingleBranchTokens(b *scannerBuilder, tokens []string, meta chunk.ChunkMeta, im index.IndexManager) bool {
+	if len(tokens) == 0 {
+		return false
+	}
+	if !meta.Sealed {
+		b.addFilter(tokenFilter(tokens))
+		return false
+	}
+	ok, empty := applyTokenIndex(b, im, meta.ID, tokens)
+	if empty {
+		return true
+	}
+	if !ok {
+		b.addFilter(tokenFilter(tokens))
+	}
+	return false
+}
+
+// applySingleBranchGlobs applies glob index acceleration for a single DNF branch.
+// Returns true if the chunk is definitely empty.
+func applySingleBranchGlobs(b *scannerBuilder, globs []GlobFilter, meta chunk.ChunkMeta, im index.IndexManager) bool {
+	if len(globs) == 0 {
+		return false
+	}
+	if !meta.Sealed {
+		b.addFilter(globTokenFilter(globs))
+		return false
+	}
+	_, empty := applyGlobIndex(b, im, meta.ID, globs)
+	if empty {
+		return true
+	}
+	// Always add runtime filter: prefix-based positions still need full glob verification.
+	b.addFilter(globTokenFilter(globs))
+	return false
+}
+
+// applySingleBranchKV applies key-value index acceleration for a single DNF branch.
+// Returns true if the chunk is definitely empty.
+func applySingleBranchKV(b *scannerBuilder, kv []KeyValueFilter, meta chunk.ChunkMeta, im index.IndexManager) bool {
+	if len(kv) == 0 {
+		return false
+	}
+	if meta.Sealed {
+		if _, empty := applyKeyValueIndex(b, im, meta.ID, kv); empty {
+			return true
+		}
+	}
+	// Always add runtime filter: the index narrows positions by
+	// key existence, but comparison operators (>=, <=, etc.) still
+	// need runtime value verification. For OpEq this is redundant
+	// but harmless — matches the pattern used by glob filters.
+	b.addFilter(keyValueFilter(kv))
+	return false
+}
+
+// applyMultiBranchDNF handles multi-branch DNF: unions positions from branches
+// and adds a DNF filter for correctness.
+func applyMultiBranchDNF(b *scannerBuilder, dnf *querylang.DNF, meta chunk.ChunkMeta, im index.IndexManager) {
+	var allPositions []uint64
+	anyBranchHasPositions := false
+
+	for i := range dnf.Branches {
+		positions, hasPositions, branchEmpty := collectBranchPositions(b, &dnf.Branches[i], meta, im)
+		if branchEmpty {
+			continue
+		}
+		if !hasPositions {
+			// Branch requires sequential scan — fall back to full runtime filter.
+			anyBranchHasPositions = false
+			break
+		}
+		allPositions = unionPositions(allPositions, positions)
+		anyBranchHasPositions = true
+	}
+
+	if anyBranchHasPositions && len(allPositions) > 0 {
+		b.positions = allPositions
+	}
+
+	// Apply DNF filter for correctness.
+	// This evaluates primitive predicates per-branch, not recursive AST evaluation.
+	b.addFilter(dnfFilter(dnf))
+}
+
+// collectBranchPositions tries index acceleration on a single DNF branch.
+// Returns the collected positions, whether the branch contributed positions,
+// and whether the branch is definitely empty.
+func collectBranchPositions(parent *scannerBuilder, branch *querylang.Conjunction, meta chunk.ChunkMeta, im index.IndexManager) (positions []uint64, hasPositions bool, branchEmpty bool) {
+	bb := newScannerBuilder(meta.ID)
+	if parent.hasMinPos {
+		bb.setMinPosition(parent.minPos)
+	}
+
+	tokens, kv, globs, _ := ConjunctionToFilters(branch)
+
+	if len(tokens) > 0 && meta.Sealed {
+		if _, empty := applyTokenIndex(bb, im, meta.ID, tokens); empty {
+			return nil, false, true
+		}
+	}
+	if len(globs) > 0 && meta.Sealed {
+		if _, empty := applyGlobIndex(bb, im, meta.ID, globs); empty {
+			return nil, false, true
+		}
+	}
+	if len(kv) > 0 && meta.Sealed {
+		if _, empty := applyKeyValueIndex(bb, im, meta.ID, kv); empty {
+			return nil, false, true
+		}
+	}
+
+	if bb.positions == nil {
+		return nil, false, false
+	}
+	return bb.positions, true, false
 }
 
 // emptyScanner returns a scanner that yields no records.

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -167,17 +168,17 @@ func (i *AuthInterceptor) authenticate(ctx context.Context, procedure string, he
 		if procedure == gastrologv1connect.AuthServiceRegisterProcedure {
 			return ctx, nil
 		}
-		return ctx, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("no users registered; call Register to create the first user"))
+		return ctx, connect.NewError(connect.CodeUnauthenticated, errors.New("no users registered; call Register to create the first user"))
 	}
 
 	// Extract Bearer token.
 	authHeader := headers.Get("Authorization")
 	if authHeader == "" {
-		return ctx, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("missing authorization header"))
+		return ctx, connect.NewError(connect.CodeUnauthenticated, errors.New("missing authorization header"))
 	}
 	token, ok := strings.CutPrefix(authHeader, "Bearer ")
 	if !ok {
-		return ctx, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("authorization header must use Bearer scheme"))
+		return ctx, connect.NewError(connect.CodeUnauthenticated, errors.New("authorization header must use Bearer scheme"))
 	}
 
 	// Verify token.
@@ -193,13 +194,13 @@ func (i *AuthInterceptor) authenticate(ctx context.Context, procedure string, he
 			return ctx, connect.NewError(connect.CodeInternal, fmt.Errorf("validate token: %w", err))
 		}
 		if !valid {
-			return ctx, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("token has been revoked"))
+			return ctx, connect.NewError(connect.CodeUnauthenticated, errors.New("token has been revoked"))
 		}
 	}
 
 	// Admin check.
 	if i.admin[procedure] && claims.Role != "admin" {
-		return ctx, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("admin role required"))
+		return ctx, connect.NewError(connect.CodePermissionDenied, errors.New("admin role required"))
 	}
 
 	return WithClaims(ctx, claims), nil

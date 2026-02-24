@@ -21,7 +21,7 @@ func main() {
 
 	// Collect files first (avoid walking while mutating).
 	var files []string
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(filepath.Clean(dir), func(path string, d fs.DirEntry, err error) error { //nolint:gosec // G703: path comes from WalkDir callback, not user input
 		if err != nil {
 			return err
 		}
@@ -46,16 +46,16 @@ func main() {
 }
 
 func compressFile(path string) error {
-	src, err := os.ReadFile(path)
+	src, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return err
 	}
 
-	dst, err := os.Create(path + ".br")
+	dst, err := os.Create(filepath.Clean(path) + ".br")
 	if err != nil {
 		return err
 	}
-	defer dst.Close()
+	defer func() { _ = dst.Close() }()
 
 	w := brotli.NewWriterLevel(dst, brotli.BestCompression)
 	if _, err := w.Write(src); err != nil {

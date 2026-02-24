@@ -22,30 +22,30 @@ func (s *Server) writeMetrics(w http.ResponseWriter) {
 	orch := s.orch
 
 	// -- Server info --
-	fmt.Fprintf(w, "# HELP gastrolog_info Server version and metadata.\n")
-	fmt.Fprintf(w, "# TYPE gastrolog_info gauge\n")
-	fmt.Fprintf(w, "gastrolog_info{version=%q} 1\n", Version)
+	_, _ = fmt.Fprintf(w, "# HELP gastrolog_info Server version and metadata.\n")
+	_, _ = fmt.Fprintf(w, "# TYPE gastrolog_info gauge\n")
+	_, _ = fmt.Fprintf(w, "gastrolog_info{version=%q} 1\n", Version)
 
-	fmt.Fprintf(w, "# HELP gastrolog_up Whether the server is running.\n")
-	fmt.Fprintf(w, "# TYPE gastrolog_up gauge\n")
+	_, _ = fmt.Fprintf(w, "# HELP gastrolog_up Whether the server is running.\n")
+	_, _ = fmt.Fprintf(w, "# TYPE gastrolog_up gauge\n")
 	if orch.IsRunning() {
-		fmt.Fprintf(w, "gastrolog_up 1\n")
+		_, _ = fmt.Fprintf(w, "gastrolog_up 1\n")
 	} else {
-		fmt.Fprintf(w, "gastrolog_up 0\n")
+		_, _ = fmt.Fprintf(w, "gastrolog_up 0\n")
 	}
 
-	fmt.Fprintf(w, "# HELP gastrolog_uptime_seconds Seconds since server start.\n")
-	fmt.Fprintf(w, "# TYPE gastrolog_uptime_seconds gauge\n")
-	fmt.Fprintf(w, "gastrolog_uptime_seconds %.0f\n", time.Since(s.startTime).Seconds())
+	_, _ = fmt.Fprintf(w, "# HELP gastrolog_uptime_seconds Seconds since server start.\n")
+	_, _ = fmt.Fprintf(w, "# TYPE gastrolog_uptime_seconds gauge\n")
+	_, _ = fmt.Fprintf(w, "gastrolog_uptime_seconds %.0f\n", time.Since(s.startTime).Seconds())
 
 	// -- Ingest queue --
-	fmt.Fprintf(w, "# HELP gastrolog_ingest_queue_depth Current messages in the ingest queue.\n")
-	fmt.Fprintf(w, "# TYPE gastrolog_ingest_queue_depth gauge\n")
-	fmt.Fprintf(w, "gastrolog_ingest_queue_depth %d\n", orch.IngestQueueDepth())
+	_, _ = fmt.Fprintf(w, "# HELP gastrolog_ingest_queue_depth Current messages in the ingest queue.\n")
+	_, _ = fmt.Fprintf(w, "# TYPE gastrolog_ingest_queue_depth gauge\n")
+	_, _ = fmt.Fprintf(w, "gastrolog_ingest_queue_depth %d\n", orch.IngestQueueDepth())
 
-	fmt.Fprintf(w, "# HELP gastrolog_ingest_queue_capacity Total capacity of the ingest queue.\n")
-	fmt.Fprintf(w, "# TYPE gastrolog_ingest_queue_capacity gauge\n")
-	fmt.Fprintf(w, "gastrolog_ingest_queue_capacity %d\n", orch.IngestQueueCapacity())
+	_, _ = fmt.Fprintf(w, "# HELP gastrolog_ingest_queue_capacity Total capacity of the ingest queue.\n")
+	_, _ = fmt.Fprintf(w, "# TYPE gastrolog_ingest_queue_capacity gauge\n")
+	_, _ = fmt.Fprintf(w, "gastrolog_ingest_queue_capacity %d\n", orch.IngestQueueCapacity())
 
 	// -- Per-ingester metrics --
 	s.writeIngesterMetrics(w, orch)
@@ -71,8 +71,8 @@ func (s *Server) writeIngesterMetrics(w http.ResponseWriter, orch *orchestrator.
 		}
 	}
 
-	fmt.Fprintf(w, "# HELP gastrolog_ingester_messages_total Total messages ingested.\n")
-	fmt.Fprintf(w, "# TYPE gastrolog_ingester_messages_total counter\n")
+	_, _ = fmt.Fprintf(w, "# HELP gastrolog_ingester_messages_total Total messages ingested.\n")
+	_, _ = fmt.Fprintf(w, "# TYPE gastrolog_ingester_messages_total counter\n")
 	for _, id := range ids {
 		idStr := id.String()
 		name := nameMap[idStr]
@@ -80,12 +80,12 @@ func (s *Server) writeIngesterMetrics(w http.ResponseWriter, orch *orchestrator.
 		if stats == nil {
 			continue
 		}
-		fmt.Fprintf(w, "gastrolog_ingester_messages_total{ingester=%q,name=%q} %d\n",
+		_, _ = fmt.Fprintf(w, "gastrolog_ingester_messages_total{ingester=%q,name=%q} %d\n",
 			idStr, name, stats.MessagesIngested.Load())
 	}
 
-	fmt.Fprintf(w, "# HELP gastrolog_ingester_bytes_total Total bytes ingested.\n")
-	fmt.Fprintf(w, "# TYPE gastrolog_ingester_bytes_total counter\n")
+	_, _ = fmt.Fprintf(w, "# HELP gastrolog_ingester_bytes_total Total bytes ingested.\n")
+	_, _ = fmt.Fprintf(w, "# TYPE gastrolog_ingester_bytes_total counter\n")
 	for _, id := range ids {
 		idStr := id.String()
 		name := nameMap[idStr]
@@ -93,12 +93,12 @@ func (s *Server) writeIngesterMetrics(w http.ResponseWriter, orch *orchestrator.
 		if stats == nil {
 			continue
 		}
-		fmt.Fprintf(w, "gastrolog_ingester_bytes_total{ingester=%q,name=%q} %d\n",
+		_, _ = fmt.Fprintf(w, "gastrolog_ingester_bytes_total{ingester=%q,name=%q} %d\n",
 			idStr, name, stats.BytesIngested.Load())
 	}
 
-	fmt.Fprintf(w, "# HELP gastrolog_ingester_errors_total Total ingestion errors.\n")
-	fmt.Fprintf(w, "# TYPE gastrolog_ingester_errors_total counter\n")
+	_, _ = fmt.Fprintf(w, "# HELP gastrolog_ingester_errors_total Total ingestion errors.\n")
+	_, _ = fmt.Fprintf(w, "# TYPE gastrolog_ingester_errors_total counter\n")
 	for _, id := range ids {
 		idStr := id.String()
 		name := nameMap[idStr]
@@ -106,7 +106,7 @@ func (s *Server) writeIngesterMetrics(w http.ResponseWriter, orch *orchestrator.
 		if stats == nil {
 			continue
 		}
-		fmt.Fprintf(w, "gastrolog_ingester_errors_total{ingester=%q,name=%q} %d\n",
+		_, _ = fmt.Fprintf(w, "gastrolog_ingester_errors_total{ingester=%q,name=%q} %d\n",
 			idStr, name, stats.Errors.Load())
 	}
 }
@@ -132,14 +132,14 @@ func (s *Server) writeStoreMetrics(w http.ResponseWriter, orch *orchestrator.Orc
 		}
 	}
 
-	fmt.Fprintf(w, "# HELP gastrolog_store_chunks_total Total chunks per store.\n")
-	fmt.Fprintf(w, "# TYPE gastrolog_store_chunks_total gauge\n")
-	fmt.Fprintf(w, "# HELP gastrolog_store_chunks_sealed Sealed chunks per store.\n")
-	fmt.Fprintf(w, "# TYPE gastrolog_store_chunks_sealed gauge\n")
-	fmt.Fprintf(w, "# HELP gastrolog_store_records_total Total records per store.\n")
-	fmt.Fprintf(w, "# TYPE gastrolog_store_records_total gauge\n")
-	fmt.Fprintf(w, "# HELP gastrolog_store_bytes Total data bytes per store.\n")
-	fmt.Fprintf(w, "# TYPE gastrolog_store_bytes gauge\n")
+	_, _ = fmt.Fprintf(w, "# HELP gastrolog_store_chunks_total Total chunks per store.\n")
+	_, _ = fmt.Fprintf(w, "# TYPE gastrolog_store_chunks_total gauge\n")
+	_, _ = fmt.Fprintf(w, "# HELP gastrolog_store_chunks_sealed Sealed chunks per store.\n")
+	_, _ = fmt.Fprintf(w, "# TYPE gastrolog_store_chunks_sealed gauge\n")
+	_, _ = fmt.Fprintf(w, "# HELP gastrolog_store_records_total Total records per store.\n")
+	_, _ = fmt.Fprintf(w, "# TYPE gastrolog_store_records_total gauge\n")
+	_, _ = fmt.Fprintf(w, "# HELP gastrolog_store_bytes Total data bytes per store.\n")
+	_, _ = fmt.Fprintf(w, "# TYPE gastrolog_store_bytes gauge\n")
 
 	for _, storeID := range stores {
 		idStr := storeID.String()
@@ -166,9 +166,9 @@ func (s *Server) writeStoreMetrics(w http.ResponseWriter, orch *orchestrator.Orc
 		}
 
 		labels := fmt.Sprintf("store=%q,name=%q,type=%q", idStr, meta.name, meta.storeType)
-		fmt.Fprintf(w, "gastrolog_store_chunks_total{%s} %d\n", labels, len(metas))
-		fmt.Fprintf(w, "gastrolog_store_chunks_sealed{%s} %d\n", labels, sealed)
-		fmt.Fprintf(w, "gastrolog_store_records_total{%s} %d\n", labels, records)
-		fmt.Fprintf(w, "gastrolog_store_bytes{%s} %d\n", labels, dataBytes)
+		_, _ = fmt.Fprintf(w, "gastrolog_store_chunks_total{%s} %d\n", labels, len(metas))
+		_, _ = fmt.Fprintf(w, "gastrolog_store_chunks_sealed{%s} %d\n", labels, sealed)
+		_, _ = fmt.Fprintf(w, "gastrolog_store_records_total{%s} %d\n", labels, records)
+		_, _ = fmt.Fprintf(w, "gastrolog_store_bytes{%s} %d\n", labels, dataBytes)
 	}
 }

@@ -81,5 +81,5 @@ func parsePHC(encoded string) (salt, hash []byte, memory, time uint32, threads u
 		return nil, nil, 0, 0, 0, 0, fmt.Errorf("decode hash: %w", err)
 	}
 
-	return salt, hash, m, t, p, uint32(len(hash)), nil
+	return salt, hash, m, t, p, uint32(len(hash)), nil //nolint:gosec // G115: hash length is always 32 bytes
 }

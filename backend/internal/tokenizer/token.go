@@ -40,18 +40,14 @@ func IterTokens(data []byte, buf []byte, maxLen int, fn func(token []byte) bool)
 			if len(current) < maxLen {
 				current = append(current, Lowercase(b))
 			}
-			// If at max length, keep consuming but don't append.
-		} else {
-			if len(current) >= minTokenLen && isIndexable(current) {
-				if !fn(current) {
-					return
-				}
-			}
-			current = current[:0]
+			continue
 		}
+		if len(current) >= minTokenLen && isIndexable(current) && !fn(current) {
+			return
+		}
+		current = current[:0]
 	}
 
-	// Don't forget trailing token.
 	if len(current) >= minTokenLen && isIndexable(current) {
 		fn(current)
 	}
@@ -79,25 +75,26 @@ func TokensWithMaxLen(data []byte, maxLen int) []string {
 			if len(current) < maxLen {
 				current = append(current, Lowercase(b))
 			}
-		} else {
-			if len(current) >= minTokenLen && isIndexable(current) {
-				if tokens == nil {
-					tokens = make([]string, 0, len(data)/8)
-				}
-				tokens = append(tokens, string(current))
-			}
-			current = current[:0]
+			continue
 		}
+		if len(current) >= minTokenLen && isIndexable(current) {
+			tokens = appendToken(tokens, current, len(data))
+		}
+		current = current[:0]
 	}
 
 	if len(current) >= minTokenLen && isIndexable(current) {
-		if tokens == nil {
-			tokens = make([]string, 0, 1)
-		}
-		tokens = append(tokens, string(current))
+		tokens = appendToken(tokens, current, len(data))
 	}
 
 	return tokens
+}
+
+func appendToken(tokens []string, current []byte, dataLen int) []string {
+	if tokens == nil {
+		tokens = make([]string, 0, dataLen/8)
+	}
+	return append(tokens, string(current))
 }
 
 // isTokenByte returns true if b is a valid token character.

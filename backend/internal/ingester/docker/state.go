@@ -24,7 +24,7 @@ func loadState(path string) (state, error) {
 		return s, nil
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return s, nil
@@ -33,7 +33,8 @@ func loadState(path string) (state, error) {
 	}
 
 	if err := json.Unmarshal(data, &s); err != nil {
-		return state{Containers: make(map[string]containerBookmark)}, nil
+		// Corrupt state file; start fresh rather than failing.
+		return state{Containers: make(map[string]containerBookmark)}, nil //nolint:nilerr // corrupt bookmark file is treated as empty state
 	}
 	if s.Containers == nil {
 		s.Containers = make(map[string]containerBookmark)
@@ -47,7 +48,7 @@ func saveState(path string, s state) error {
 		return nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
 
@@ -57,7 +58,7 @@ func saveState(path string, s state) error {
 	}
 
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)

@@ -22,7 +22,7 @@ func (r *recordReader) Next() (chunk.Record, chunk.RecordRef, error) {
 	pos := r.fwdIndex
 	record := r.records[pos]
 	r.fwdIndex++
-	return record, chunk.RecordRef{ChunkID: r.chunkID, Pos: uint64(pos)}, nil
+	return record, chunk.RecordRef{ChunkID: r.chunkID, Pos: uint64(pos)}, nil //nolint:gosec // G115: pos is a slice index, always non-negative
 }
 
 func (r *recordReader) Prev() (chunk.Record, chunk.RecordRef, error) {
@@ -36,8 +36,8 @@ func (r *recordReader) Prev() (chunk.Record, chunk.RecordRef, error) {
 }
 
 func (r *recordReader) Seek(ref chunk.RecordRef) error {
-	r.fwdIndex = int(ref.Pos)
-	r.revIndex = int(ref.Pos)
+	r.fwdIndex = int(ref.Pos) //nolint:gosec // G115: Pos is bounded by slice length
+	r.revIndex = int(ref.Pos) //nolint:gosec // G115: Pos is bounded by slice length
 	return nil
 }
 

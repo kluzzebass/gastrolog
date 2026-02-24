@@ -66,65 +66,62 @@ func extractJSONObject(result *[]KeyValue, seen map[string]struct{}, prefix stri
 func extractJSONValue(result *[]KeyValue, seen map[string]struct{}, key string, v any, depth int) {
 	switch val := v.(type) {
 	case string:
-		if len(val) == 0 || len(val) > MaxValueLength {
-			return
+		if len(val) > 0 && len(val) <= MaxValueLength {
+			addJSONPair(result, seen, key, val)
 		}
-		addJSONPair(result, seen, key, val)
-
 	case float64:
-		// Format numbers cleanly: integers without decimal, floats with minimal precision.
-		var s string
-		if val == float64(int64(val)) {
-			s = strconv.FormatInt(int64(val), 10)
-		} else {
-			s = strconv.FormatFloat(val, 'f', -1, 64)
-		}
-		if len(s) > MaxValueLength {
-			return
-		}
-		addJSONPair(result, seen, key, s)
-
+		extractJSONFloat(result, seen, key, val)
 	case bool:
-		if val {
-			addJSONPair(result, seen, key, "true")
-		} else {
-			addJSONPair(result, seen, key, "false")
-		}
-
+		addJSONPair(result, seen, key, formatBool(val))
 	case map[string]any:
 		extractJSONObject(result, seen, key, val, depth+1)
-
 	case []any:
-		if depth+1 >= maxJSONDepth {
-			return
-		}
-		for _, elem := range val {
-			// Only index scalar array elements; skip nested objects/arrays.
-			switch ev := elem.(type) {
-			case string:
-				if len(ev) > 0 && len(ev) <= MaxValueLength {
-					addJSONPair(result, seen, key, ev)
-				}
-			case float64:
-				var s string
-				if ev == float64(int64(ev)) {
-					s = strconv.FormatInt(int64(ev), 10)
-				} else {
-					s = strconv.FormatFloat(ev, 'f', -1, 64)
-				}
-				addJSONPair(result, seen, key, s)
-			case bool:
-				if ev {
-					addJSONPair(result, seen, key, "true")
-				} else {
-					addJSONPair(result, seen, key, "false")
-				}
-			}
-		}
-
+		extractJSONArray(result, seen, key, val, depth)
 	case nil:
-		// null values: skip, nothing useful to index.
 	}
+}
+
+func extractJSONFloat(result *[]KeyValue, seen map[string]struct{}, key string, val float64) {
+	s := formatFloat(val)
+	if len(s) <= MaxValueLength {
+		addJSONPair(result, seen, key, s)
+	}
+}
+
+func extractJSONArray(result *[]KeyValue, seen map[string]struct{}, key string, val []any, depth int) {
+	if depth+1 >= maxJSONDepth {
+		return
+	}
+	for _, elem := range val {
+		extractJSONArrayElem(result, seen, key, elem)
+	}
+}
+
+func extractJSONArrayElem(result *[]KeyValue, seen map[string]struct{}, key string, elem any) {
+	switch ev := elem.(type) {
+	case string:
+		if len(ev) > 0 && len(ev) <= MaxValueLength {
+			addJSONPair(result, seen, key, ev)
+		}
+	case float64:
+		addJSONPair(result, seen, key, formatFloat(ev))
+	case bool:
+		addJSONPair(result, seen, key, formatBool(ev))
+	}
+}
+
+func formatFloat(val float64) string {
+	if val == float64(int64(val)) {
+		return strconv.FormatInt(int64(val), 10)
+	}
+	return strconv.FormatFloat(val, 'f', -1, 64)
+}
+
+func formatBool(val bool) string {
+	if val {
+		return "true"
+	}
+	return "false"
 }
 
 func addJSONPair(result *[]KeyValue, seen map[string]struct{}, key, value string) {
