@@ -230,6 +230,8 @@ export function useAutocomplete(
   cursorPos: number,
   fields: FieldSummary[],
   syntax: SyntaxSets = DEFAULT_SYNTAX,
+  pipelineFields?: string[],
+  pipelineCompletions?: string[],
 ) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [dismissed, setDismissed] = useState(false);
@@ -294,8 +296,20 @@ export function useAutocomplete(
         if (rule === "none") return empty;
 
         // Build candidates from the resolved rule.
+        // When backend pipeline fields are available, use them instead of local fields.
+        const backendHasFields = pipelineFields && pipelineFields.length > 0;
         const candidates: string[] = [];
-        if (rule.literals) candidates.push(...rule.literals);
+        // Add backend completions (structural keywords like "by", "as") first.
+        if (pipelineCompletions && pipelineCompletions.length > 0 && rule.literals) {
+          // Merge: backend completions take priority, fallback to rule literals.
+          const compSet = new Set(pipelineCompletions);
+          for (const lit of rule.literals) compSet.add(lit);
+          candidates.push(...Array.from(compSet));
+        } else if (pipelineCompletions && pipelineCompletions.length > 0) {
+          candidates.push(...pipelineCompletions);
+        } else if (rule.literals) {
+          candidates.push(...rule.literals);
+        }
         if (rule.aggs) {
           candidates.push(
             ...Array.from(syntax.pipeFunctions)
@@ -307,7 +321,11 @@ export function useAutocomplete(
           candidates.push(...Array.from(syntax.pipeFunctions).sort());
         }
         if (rule.fields) {
-          candidates.push(...fieldNames.sort());
+          if (backendHasFields) {
+            candidates.push(...[...pipelineFields].sort());
+          } else {
+            candidates.push(...fieldNames.sort());
+          }
         }
 
         const matches = candidates
@@ -419,7 +437,7 @@ export function useAutocomplete(
         suffix: "", // suffix is determined per-suggestion at accept time
         inPipeContext: false,
       };
-    }, [draft, cursorPos, fields, dismissed, syntax]);
+    }, [draft, cursorPos, fields, dismissed, syntax, pipelineFields, pipelineCompletions]);
 
   // Reset selection when suggestions change.
   const sugKey = suggestions.join("\0");

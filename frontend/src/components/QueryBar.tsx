@@ -44,6 +44,8 @@ interface QueryBarProps {
   showPlan: boolean;
   handleShowPlan: () => void;
   syntax?: SyntaxSets;
+  errorOffset?: number;
+  errorMessage?: string | null;
 }
 
 export function QueryBar({
@@ -74,6 +76,8 @@ export function QueryBar({
   showPlan,
   handleShowPlan,
   syntax,
+  errorOffset,
+  errorMessage,
 }: Readonly<QueryBarProps>) {
   const c = useThemeClass(dark);
   const { openHelp } = useHelp();
@@ -88,6 +92,8 @@ export function QueryBar({
             ref={queryInputRef}
             value={draft}
             syntax={syntax}
+            errorOffset={errorOffset}
+            errorMessage={errorMessage}
             onChange={(e) => {
               setDraft(e.target.value);
               setCursorPos(e.target.selectionStart ?? 0);

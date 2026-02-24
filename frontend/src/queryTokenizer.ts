@@ -1570,14 +1570,74 @@ interface TokenizeResult {
   errorMessage: string | null;
 }
 
-export function tokenize(input: string, syntax: SyntaxSets = DEFAULT_SYNTAX): TokenizeResult {
-  const { spans, errorMessage } = validate(classify(lex(input), syntax));
+/**
+ * Tokenize and highlight a query expression.
+ *
+ * When errorOffset >= 0 (from backend ValidateQuery), marks spans at and after
+ * that byte offset as "error". When errorOffset is -1 or omitted, runs the
+ * client-side validate() for backwards compatibility.
+ */
+export function tokenize(
+  input: string,
+  syntax: SyntaxSets = DEFAULT_SYNTAX,
+  errorOffset: number = -2, // -2 = use client-side validation, -1 = valid
+): TokenizeResult {
+  const spans = classify(lex(input), syntax);
+
+  if (errorOffset === -2) {
+    // No backend result yet — fall back to client-side validation.
+    const { spans: validated, errorMessage } = validate(spans);
+    return {
+      spans: validated,
+      hasErrors: validated.some((s) => s.role === "error"),
+      hasPipeline: hasPipeOutsideQuotes(input),
+      errorMessage,
+    };
+  }
+
+  if (errorOffset >= 0) {
+    // Backend says there's an error at this byte offset.
+    // Mark spans from that offset onward as "error".
+    const marked = applyErrorOffset(spans, errorOffset);
+    return {
+      spans: marked,
+      hasErrors: true,
+      hasPipeline: hasPipeOutsideQuotes(input),
+      errorMessage: null, // errorMessage is provided separately by the hook
+    };
+  }
+
+  // errorOffset === -1 means valid.
   return {
     spans,
-    hasErrors: spans.some((s) => s.role === "error"),
+    hasErrors: spans.some((s) => s.role === "error"), // still catch lex errors like unterminated strings
     hasPipeline: hasPipeOutsideQuotes(input),
-    errorMessage,
+    errorMessage: null,
   };
+}
+
+/**
+ * Given a byte offset where the backend found an error, mark all spans at or
+ * after that position as "error" (except whitespace).
+ */
+function applyErrorOffset(
+  spans: HighlightSpan[],
+  errorOffset: number,
+): HighlightSpan[] {
+  // Walk spans and track byte position to find where errorOffset falls.
+  let bytePos = 0;
+  let foundError = false;
+  return spans.map((span) => {
+    const spanStart = bytePos;
+    bytePos += span.text.length;
+    if (!foundError && spanStart + span.text.length > errorOffset) {
+      foundError = true;
+    }
+    if (foundError && span.role !== "whitespace") {
+      return { ...span, role: "error" as HighlightRole };
+    }
+    return span;
+  });
 }
 
 // Check if the input contains a `|` outside of quoted strings.

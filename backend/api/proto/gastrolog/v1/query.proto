@@ -25,6 +25,14 @@ service QueryService {
   // GetSyntax returns the query language keyword sets for frontend tokenization.
   // Called once at startup so the frontend stays in sync with the backend.
   rpc GetSyntax(GetSyntaxRequest) returns (GetSyntaxResponse);
+
+  // ValidateQuery checks whether a query expression is syntactically valid.
+  // Returns the first error position and message if invalid.
+  rpc ValidateQuery(ValidateQueryRequest) returns (ValidateQueryResponse);
+
+  // GetPipelineFields returns the available fields and completions at a
+  // given cursor position within a pipeline expression.
+  rpc GetPipelineFields(GetPipelineFieldsRequest) returns (GetPipelineFieldsResponse);
 }
 
 message SearchRequest {
@@ -185,4 +193,25 @@ message GetSyntaxResponse {
   repeated string directives = 1;       // Query control args (reverse, start, end, last, ...)
   repeated string pipe_keywords = 2;    // Pipe operator keywords (stats, where)
   repeated string pipe_functions = 3;   // Functions usable in pipe expressions (count, avg, bin, ...)
+}
+
+message ValidateQueryRequest {
+  string expression = 1;
+}
+
+message ValidateQueryResponse {
+  bool valid = 1;
+  string error_message = 2;    // empty if valid
+  int32 error_offset = 3;      // byte offset in original expression (-1 if valid)
+}
+
+message GetPipelineFieldsRequest {
+  string expression = 1;
+  int32 cursor = 2;                // byte offset of cursor
+  repeated string base_fields = 3; // fields frontend has seen from search results
+}
+
+message GetPipelineFieldsResponse {
+  repeated string fields = 1;       // available fields at cursor position
+  repeated string completions = 2;  // context keywords ("by", "as", "rdns", etc.)
 }

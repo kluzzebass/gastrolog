@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { ExplainRequest, ExplainResponse, FollowRequest, FollowResponse, GetContextRequest, GetContextResponse, GetSyntaxRequest, GetSyntaxResponse, SearchRequest, SearchResponse } from "./query_pb.js";
+import { ExplainRequest, ExplainResponse, FollowRequest, FollowResponse, GetContextRequest, GetContextResponse, GetPipelineFieldsRequest, GetPipelineFieldsResponse, GetSyntaxRequest, GetSyntaxResponse, SearchRequest, SearchResponse, ValidateQueryRequest, ValidateQueryResponse } from "./query_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -70,6 +70,30 @@ export const QueryService = {
       name: "GetSyntax",
       I: GetSyntaxRequest,
       O: GetSyntaxResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * ValidateQuery checks whether a query expression is syntactically valid.
+     * Returns the first error position and message if invalid.
+     *
+     * @generated from rpc gastrolog.v1.QueryService.ValidateQuery
+     */
+    validateQuery: {
+      name: "ValidateQuery",
+      I: ValidateQueryRequest,
+      O: ValidateQueryResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * GetPipelineFields returns the available fields and completions at a
+     * given cursor position within a pipeline expression.
+     *
+     * @generated from rpc gastrolog.v1.QueryService.GetPipelineFields
+     */
+    getPipelineFields: {
+      name: "GetPipelineFields",
+      I: GetPipelineFieldsRequest,
+      O: GetPipelineFieldsResponse,
       kind: MethodKind.Unary,
     },
   }

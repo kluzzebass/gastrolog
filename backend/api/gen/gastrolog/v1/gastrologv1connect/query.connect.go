@@ -43,6 +43,12 @@ const (
 	QueryServiceGetContextProcedure = "/gastrolog.v1.QueryService/GetContext"
 	// QueryServiceGetSyntaxProcedure is the fully-qualified name of the QueryService's GetSyntax RPC.
 	QueryServiceGetSyntaxProcedure = "/gastrolog.v1.QueryService/GetSyntax"
+	// QueryServiceValidateQueryProcedure is the fully-qualified name of the QueryService's
+	// ValidateQuery RPC.
+	QueryServiceValidateQueryProcedure = "/gastrolog.v1.QueryService/ValidateQuery"
+	// QueryServiceGetPipelineFieldsProcedure is the fully-qualified name of the QueryService's
+	// GetPipelineFields RPC.
+	QueryServiceGetPipelineFieldsProcedure = "/gastrolog.v1.QueryService/GetPipelineFields"
 )
 
 // QueryServiceClient is a client for the gastrolog.v1.QueryService service.
@@ -60,6 +66,12 @@ type QueryServiceClient interface {
 	// GetSyntax returns the query language keyword sets for frontend tokenization.
 	// Called once at startup so the frontend stays in sync with the backend.
 	GetSyntax(context.Context, *connect.Request[v1.GetSyntaxRequest]) (*connect.Response[v1.GetSyntaxResponse], error)
+	// ValidateQuery checks whether a query expression is syntactically valid.
+	// Returns the first error position and message if invalid.
+	ValidateQuery(context.Context, *connect.Request[v1.ValidateQueryRequest]) (*connect.Response[v1.ValidateQueryResponse], error)
+	// GetPipelineFields returns the available fields and completions at a
+	// given cursor position within a pipeline expression.
+	GetPipelineFields(context.Context, *connect.Request[v1.GetPipelineFieldsRequest]) (*connect.Response[v1.GetPipelineFieldsResponse], error)
 }
 
 // NewQueryServiceClient constructs a client for the gastrolog.v1.QueryService service. By default,
@@ -103,16 +115,30 @@ func NewQueryServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(queryServiceMethods.ByName("GetSyntax")),
 			connect.WithClientOptions(opts...),
 		),
+		validateQuery: connect.NewClient[v1.ValidateQueryRequest, v1.ValidateQueryResponse](
+			httpClient,
+			baseURL+QueryServiceValidateQueryProcedure,
+			connect.WithSchema(queryServiceMethods.ByName("ValidateQuery")),
+			connect.WithClientOptions(opts...),
+		),
+		getPipelineFields: connect.NewClient[v1.GetPipelineFieldsRequest, v1.GetPipelineFieldsResponse](
+			httpClient,
+			baseURL+QueryServiceGetPipelineFieldsProcedure,
+			connect.WithSchema(queryServiceMethods.ByName("GetPipelineFields")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // queryServiceClient implements QueryServiceClient.
 type queryServiceClient struct {
-	search     *connect.Client[v1.SearchRequest, v1.SearchResponse]
-	follow     *connect.Client[v1.FollowRequest, v1.FollowResponse]
-	explain    *connect.Client[v1.ExplainRequest, v1.ExplainResponse]
-	getContext *connect.Client[v1.GetContextRequest, v1.GetContextResponse]
-	getSyntax  *connect.Client[v1.GetSyntaxRequest, v1.GetSyntaxResponse]
+	search            *connect.Client[v1.SearchRequest, v1.SearchResponse]
+	follow            *connect.Client[v1.FollowRequest, v1.FollowResponse]
+	explain           *connect.Client[v1.ExplainRequest, v1.ExplainResponse]
+	getContext        *connect.Client[v1.GetContextRequest, v1.GetContextResponse]
+	getSyntax         *connect.Client[v1.GetSyntaxRequest, v1.GetSyntaxResponse]
+	validateQuery     *connect.Client[v1.ValidateQueryRequest, v1.ValidateQueryResponse]
+	getPipelineFields *connect.Client[v1.GetPipelineFieldsRequest, v1.GetPipelineFieldsResponse]
 }
 
 // Search calls gastrolog.v1.QueryService.Search.
@@ -140,6 +166,16 @@ func (c *queryServiceClient) GetSyntax(ctx context.Context, req *connect.Request
 	return c.getSyntax.CallUnary(ctx, req)
 }
 
+// ValidateQuery calls gastrolog.v1.QueryService.ValidateQuery.
+func (c *queryServiceClient) ValidateQuery(ctx context.Context, req *connect.Request[v1.ValidateQueryRequest]) (*connect.Response[v1.ValidateQueryResponse], error) {
+	return c.validateQuery.CallUnary(ctx, req)
+}
+
+// GetPipelineFields calls gastrolog.v1.QueryService.GetPipelineFields.
+func (c *queryServiceClient) GetPipelineFields(ctx context.Context, req *connect.Request[v1.GetPipelineFieldsRequest]) (*connect.Response[v1.GetPipelineFieldsResponse], error) {
+	return c.getPipelineFields.CallUnary(ctx, req)
+}
+
 // QueryServiceHandler is an implementation of the gastrolog.v1.QueryService service.
 type QueryServiceHandler interface {
 	// Search executes a query and streams matching records.
@@ -155,6 +191,12 @@ type QueryServiceHandler interface {
 	// GetSyntax returns the query language keyword sets for frontend tokenization.
 	// Called once at startup so the frontend stays in sync with the backend.
 	GetSyntax(context.Context, *connect.Request[v1.GetSyntaxRequest]) (*connect.Response[v1.GetSyntaxResponse], error)
+	// ValidateQuery checks whether a query expression is syntactically valid.
+	// Returns the first error position and message if invalid.
+	ValidateQuery(context.Context, *connect.Request[v1.ValidateQueryRequest]) (*connect.Response[v1.ValidateQueryResponse], error)
+	// GetPipelineFields returns the available fields and completions at a
+	// given cursor position within a pipeline expression.
+	GetPipelineFields(context.Context, *connect.Request[v1.GetPipelineFieldsRequest]) (*connect.Response[v1.GetPipelineFieldsResponse], error)
 }
 
 // NewQueryServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -194,6 +236,18 @@ func NewQueryServiceHandler(svc QueryServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(queryServiceMethods.ByName("GetSyntax")),
 		connect.WithHandlerOptions(opts...),
 	)
+	queryServiceValidateQueryHandler := connect.NewUnaryHandler(
+		QueryServiceValidateQueryProcedure,
+		svc.ValidateQuery,
+		connect.WithSchema(queryServiceMethods.ByName("ValidateQuery")),
+		connect.WithHandlerOptions(opts...),
+	)
+	queryServiceGetPipelineFieldsHandler := connect.NewUnaryHandler(
+		QueryServiceGetPipelineFieldsProcedure,
+		svc.GetPipelineFields,
+		connect.WithSchema(queryServiceMethods.ByName("GetPipelineFields")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.QueryService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case QueryServiceSearchProcedure:
@@ -206,6 +260,10 @@ func NewQueryServiceHandler(svc QueryServiceHandler, opts ...connect.HandlerOpti
 			queryServiceGetContextHandler.ServeHTTP(w, r)
 		case QueryServiceGetSyntaxProcedure:
 			queryServiceGetSyntaxHandler.ServeHTTP(w, r)
+		case QueryServiceValidateQueryProcedure:
+			queryServiceValidateQueryHandler.ServeHTTP(w, r)
+		case QueryServiceGetPipelineFieldsProcedure:
+			queryServiceGetPipelineFieldsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -233,4 +291,12 @@ func (UnimplementedQueryServiceHandler) GetContext(context.Context, *connect.Req
 
 func (UnimplementedQueryServiceHandler) GetSyntax(context.Context, *connect.Request[v1.GetSyntaxRequest]) (*connect.Response[v1.GetSyntaxResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.QueryService.GetSyntax is not implemented"))
+}
+
+func (UnimplementedQueryServiceHandler) ValidateQuery(context.Context, *connect.Request[v1.ValidateQueryRequest]) (*connect.Response[v1.ValidateQueryResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.QueryService.ValidateQuery is not implemented"))
+}
+
+func (UnimplementedQueryServiceHandler) GetPipelineFields(context.Context, *connect.Request[v1.GetPipelineFieldsRequest]) (*connect.Response[v1.GetPipelineFieldsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.QueryService.GetPipelineFields is not implemented"))
 }
