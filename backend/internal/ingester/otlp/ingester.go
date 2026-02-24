@@ -3,13 +3,11 @@
 package otlp
 
 import (
-	"compress/gzip"
 	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"maps"
 	"net"
@@ -27,6 +25,7 @@ import (
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
 
+	"gastrolog/internal/ingester/bodyutil"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 )
@@ -120,21 +119,9 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMess
 // handleHTTP handles POST /v1/logs requests.
 // Accepts protobuf (application/x-protobuf) and JSON (application/json).
 func (ing *Ingester) handleHTTP(w http.ResponseWriter, req *http.Request) {
-	// Read body, handling gzip.
-	var body io.Reader = req.Body
-	if req.Header.Get("Content-Encoding") == "gzip" {
-		gz, err := gzip.NewReader(req.Body)
-		if err != nil {
-			http.Error(w, "failed to decompress gzip body", http.StatusBadRequest)
-			return
-		}
-		defer func() { _ = gz.Close() }()
-		body = gz
-	}
-
-	data, err := io.ReadAll(io.LimitReader(body, 10<<20))
+	data, err := bodyutil.ReadBody(req.Body, req.Header.Get("Content-Encoding"), 10<<20)
 	if err != nil {
-		http.Error(w, "failed to read body", http.StatusBadRequest)
+		http.Error(w, "failed to read body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 

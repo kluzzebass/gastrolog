@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
+
 	"gastrolog/internal/orchestrator"
 )
 
@@ -259,6 +261,69 @@ func TestLokiPushGzipCompression(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for message")
+	}
+}
+
+func TestLokiPushZstdCompression(t *testing.T) {
+	out := make(chan orchestrator.IngestMessage, 10)
+	recv := New(Config{Addr: "127.0.0.1:0"})
+
+	ctx := t.Context()
+
+	go recv.Run(ctx, out)
+	time.Sleep(50 * time.Millisecond)
+
+	ts := time.Now().UnixNano()
+	body := `{"streams": [{"stream": {"host": "server1"}, "values": [["` + strconv.FormatInt(ts, 10) + `", "zstd message"]]}]}`
+
+	enc, _ := zstd.NewWriter(nil)
+	compressed := enc.EncodeAll([]byte(body), nil)
+
+	req, _ := http.NewRequest("POST", "http://"+recv.Addr().String()+"/loki/api/v1/push", bytes.NewReader(compressed))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "zstd")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", resp.StatusCode)
+	}
+
+	select {
+	case msg := <-out:
+		if string(msg.Raw) != "zstd message" {
+			t.Errorf("expected 'zstd message', got %q", msg.Raw)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for message")
+	}
+}
+
+func TestLokiPushUnsupportedEncoding(t *testing.T) {
+	out := make(chan orchestrator.IngestMessage, 10)
+	recv := New(Config{Addr: "127.0.0.1:0"})
+
+	ctx := t.Context()
+
+	go recv.Run(ctx, out)
+	time.Sleep(50 * time.Millisecond)
+
+	req, _ := http.NewRequest("POST", "http://"+recv.Addr().String()+"/loki/api/v1/push", strings.NewReader("data"))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "br")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for unsupported encoding, got %d", resp.StatusCode)
 	}
 }
 

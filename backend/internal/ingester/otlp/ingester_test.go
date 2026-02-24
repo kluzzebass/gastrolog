@@ -12,9 +12,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/klauspost/compress/zstd"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/encoding"
+	grpcgzip "google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -705,5 +708,155 @@ func TestOTLPMultipleResourceLogs(t *testing.T) {
 	}
 	if hosts["host2"] != "from host2" {
 		t.Errorf("expected 'from host2', got %q", hosts["host2"])
+	}
+}
+
+// --- Zstd Compression Tests ---
+
+func TestOTLPHTTPZstd(t *testing.T) {
+	httpAddr, _, out := listenAndStartOTLP(t, 10)
+
+	ts := time.Now().Truncate(time.Microsecond)
+	req := makeExportRequest(nil, nil, makeStringLogRecord("zstd OTLP", ts))
+	data, _ := protojson.Marshal(req)
+
+	enc, _ := zstd.NewWriter(nil)
+	compressed := enc.EncodeAll(data, nil)
+
+	httpReq, _ := http.NewRequest("POST", "http://"+httpAddr+"/v1/logs", bytes.NewReader(compressed))
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Content-Encoding", "zstd")
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, body)
+	}
+
+	msg := recv(t, out)
+	if string(msg.Raw) != "zstd OTLP" {
+		t.Errorf("raw: expected %q, got %q", "zstd OTLP", msg.Raw)
+	}
+}
+
+func TestOTLPHTTPZstdProtobuf(t *testing.T) {
+	httpAddr, _, out := listenAndStartOTLP(t, 10)
+
+	ts := time.Now().Truncate(time.Microsecond)
+	req := makeExportRequest(nil, nil, makeStringLogRecord("zstd proto", ts))
+	data, _ := proto.Marshal(req)
+
+	enc, _ := zstd.NewWriter(nil)
+	compressed := enc.EncodeAll(data, nil)
+
+	httpReq, _ := http.NewRequest("POST", "http://"+httpAddr+"/v1/logs", bytes.NewReader(compressed))
+	httpReq.Header.Set("Content-Type", "application/x-protobuf")
+	httpReq.Header.Set("Content-Encoding", "zstd")
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, body)
+	}
+
+	msg := recv(t, out)
+	if string(msg.Raw) != "zstd proto" {
+		t.Errorf("raw: expected %q, got %q", "zstd proto", msg.Raw)
+	}
+}
+
+func TestOTLPHTTPUnsupportedEncoding(t *testing.T) {
+	httpAddr, _, _ := listenAndStartOTLP(t, 10)
+
+	httpReq, _ := http.NewRequest("POST", "http://"+httpAddr+"/v1/logs", bytes.NewReader([]byte("data")))
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Content-Encoding", "br")
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		t.Fatalf("POST failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for unsupported encoding, got %d", resp.StatusCode)
+	}
+}
+
+// --- gRPC Compression Tests ---
+
+func TestOTLPGRPCGzipCompression(t *testing.T) {
+	// Verify gzip compressor is registered (by our blank import).
+	if encoding.GetCompressor(grpcgzip.Name) == nil {
+		t.Fatal("gzip compressor not registered")
+	}
+
+	_, grpcAddr, out := listenAndStartOTLP(t, 10)
+
+	conn, err := grpc.NewClient(grpcAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.UseCompressor(grpcgzip.Name)),
+	)
+	if err != nil {
+		t.Fatalf("grpc dial: %v", err)
+	}
+	defer conn.Close()
+
+	client := collogspb.NewLogsServiceClient(conn)
+
+	ts := time.Now().Truncate(time.Microsecond)
+	req := makeExportRequest(nil, nil, makeStringLogRecord("grpc gzip", ts))
+
+	_, err = client.Export(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	msg := recv(t, out)
+	if string(msg.Raw) != "grpc gzip" {
+		t.Errorf("raw: expected %q, got %q", "grpc gzip", msg.Raw)
+	}
+}
+
+func TestOTLPGRPCZstdCompression(t *testing.T) {
+	// Verify zstd compressor is registered (by our grpccomp.go init).
+	if encoding.GetCompressor("zstd") == nil {
+		t.Fatal("zstd compressor not registered")
+	}
+
+	_, grpcAddr, out := listenAndStartOTLP(t, 10)
+
+	conn, err := grpc.NewClient(grpcAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.UseCompressor("zstd")),
+	)
+	if err != nil {
+		t.Fatalf("grpc dial: %v", err)
+	}
+	defer conn.Close()
+
+	client := collogspb.NewLogsServiceClient(conn)
+
+	ts := time.Now().Truncate(time.Microsecond)
+	req := makeExportRequest(nil, nil, makeStringLogRecord("grpc zstd", ts))
+
+	_, err = client.Export(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	msg := recv(t, out)
+	if string(msg.Raw) != "grpc zstd" {
+		t.Errorf("raw: expected %q, got %q", "grpc zstd", msg.Raw)
 	}
 }

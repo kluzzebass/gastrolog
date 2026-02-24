@@ -2,18 +2,17 @@
 package http
 
 import (
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
 	"time"
 
+	"gastrolog/internal/ingester/bodyutil"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 )
@@ -164,20 +163,9 @@ func (r *Ingester) handlePush(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Ingester) decodePushBody(w http.ResponseWriter, req *http.Request) ([]orchestrator.IngestMessage, bool) {
-	var body io.Reader = req.Body
-	if req.Header.Get("Content-Encoding") == "gzip" {
-		gz, err := gzip.NewReader(req.Body)
-		if err != nil {
-			http.Error(w, "failed to decompress gzip body", http.StatusBadRequest)
-			return nil, false
-		}
-		defer func() { _ = gz.Close() }()
-		body = gz
-	}
-
-	data, err := io.ReadAll(io.LimitReader(body, 10<<20))
+	data, err := bodyutil.ReadBody(req.Body, req.Header.Get("Content-Encoding"), 10<<20)
 	if err != nil {
-		http.Error(w, "failed to read body", http.StatusBadRequest)
+		http.Error(w, "failed to read body: "+err.Error(), http.StatusBadRequest)
 		return nil, false
 	}
 
