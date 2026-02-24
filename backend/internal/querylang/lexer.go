@@ -88,9 +88,10 @@ func (k TokenKind) String() string {
 
 // Token represents a lexical token.
 type Token struct {
-	Kind TokenKind
-	Lit  string // for quoted strings: unescaped content without quotes
-	Pos  int    // byte offset in input for error reporting
+	Kind   TokenKind
+	Lit    string // for quoted strings: unescaped content without quotes
+	Pos    int    // byte offset in input for error reporting
+	Quoted bool   // true if the token came from a quoted string (", ')
 }
 
 // Lexer tokenizes a query string.
@@ -233,7 +234,7 @@ func (l *Lexer) scanQuotedString(quote byte) (Token, error) {
 
 		if ch == quote {
 			l.pos++ // skip closing quote
-			return Token{Kind: TokWord, Lit: sb.String(), Pos: startPos}, nil
+			return Token{Kind: TokWord, Lit: sb.String(), Pos: startPos, Quoted: true}, nil
 		}
 
 		if ch == '\\' {

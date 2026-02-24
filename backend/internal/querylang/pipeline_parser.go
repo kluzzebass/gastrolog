@@ -472,13 +472,22 @@ func (p *parser) parsePrimaryPipeExpr() (PipeExpr, error) {
 	switch p.cur.Kind { //nolint:exhaustive // only WORD, LPAREN are valid expression starts
 	case TokWord:
 		name := p.cur.Lit
+		quoted := p.cur.Quoted
 
 		// Check if this is a number (digits, possibly with decimal point).
-		if isNumericLiteral(name) {
+		if !quoted && isNumericLiteral(name) {
 			if err := p.advance(); err != nil {
 				return nil, err
 			}
 			return &NumberLit{Value: name}, nil
+		}
+
+		// Quoted strings are string literals, not field references.
+		if quoted {
+			if err := p.advance(); err != nil {
+				return nil, err
+			}
+			return &StringLit{Value: name}, nil
 		}
 
 		if err := p.advance(); err != nil {

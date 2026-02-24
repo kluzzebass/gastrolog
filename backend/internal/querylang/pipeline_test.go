@@ -767,6 +767,46 @@ func TestParsePipelineEvalMultiple(t *testing.T) {
 	}
 }
 
+func TestParsePipelineEvalStringLiteral(t *testing.T) {
+	p, err := ParsePipeline(`error | eval tag = "hello world"`)
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	ev, ok := p.Pipes[0].(*EvalOp)
+	if !ok {
+		t.Fatalf("expected EvalOp, got %T", p.Pipes[0])
+	}
+	if len(ev.Assignments) != 1 {
+		t.Fatalf("expected 1 assignment, got %d", len(ev.Assignments))
+	}
+	if ev.Assignments[0].Field != "tag" {
+		t.Errorf("expected field 'tag', got %q", ev.Assignments[0].Field)
+	}
+	sl, ok := ev.Assignments[0].Expr.(*StringLit)
+	if !ok {
+		t.Fatalf("expected StringLit, got %T", ev.Assignments[0].Expr)
+	}
+	if sl.Value != "hello world" {
+		t.Errorf("expected 'hello world', got %q", sl.Value)
+	}
+}
+
+func TestParsePipelineEvalQuotedIP(t *testing.T) {
+	// Quoted strings that look like IPs must be StringLit, not FieldRef.
+	p, err := ParsePipeline(`| eval ip = "8.8.8.8"`)
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	ev := p.Pipes[0].(*EvalOp)
+	sl, ok := ev.Assignments[0].Expr.(*StringLit)
+	if !ok {
+		t.Fatalf("expected StringLit for quoted IP, got %T", ev.Assignments[0].Expr)
+	}
+	if sl.Value != "8.8.8.8" {
+		t.Errorf("expected '8.8.8.8', got %q", sl.Value)
+	}
+}
+
 func TestParsePipelineSort(t *testing.T) {
 	p, err := ParsePipeline("error | sort status")
 	if err != nil {
