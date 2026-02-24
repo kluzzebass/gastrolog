@@ -119,6 +119,8 @@ func (p *parser) parsePipeOp() (PipeOp, error) {
 		return p.parseTimechartOp()
 	case "raw":
 		return p.parseRawOp()
+	case "lookup":
+		return p.parseLookupOp()
 	default:
 		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "unknown pipe operator: %s", p.cur.Lit)
 	}
@@ -884,6 +886,31 @@ func (p *parser) parseRawOp() (*RawOp, error) {
 		return nil, err
 	}
 	return &RawOp{}, nil
+}
+
+// parseLookupOp parses: "lookup" TABLE FIELD
+func (p *parser) parseLookupOp() (*LookupOp, error) {
+	if err := p.advance(); err != nil { // consume "lookup"
+		return nil, err
+	}
+
+	if p.cur.Kind != TokWord {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected table name after 'lookup', got %s", p.cur.Kind)
+	}
+	table := p.cur.Lit
+	if err := p.advance(); err != nil { // consume table name
+		return nil, err
+	}
+
+	if p.cur.Kind != TokWord {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected field name after 'lookup %s', got %s", table, p.cur.Kind)
+	}
+	field := p.cur.Lit
+	if err := p.advance(); err != nil { // consume field name
+		return nil, err
+	}
+
+	return &LookupOp{Table: table, Field: field}, nil
 }
 
 // checkDuplicateAliases validates that no two aggregations produce the same

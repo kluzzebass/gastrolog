@@ -1,6 +1,7 @@
 package query
 
 import (
+	"context"
 	"fmt"
 	"iter"
 	"slices"
@@ -8,12 +9,13 @@ import (
 	"strings"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/lookup"
 	"gastrolog/internal/querylang"
 )
 
 // applyRecordOps collects all records from the iterator and applies the given
 // pipeline operators in order. Each operator transforms the record slice.
-func applyRecordOps(it iter.Seq2[chunk.Record, error], ops []querylang.PipeOp) ([]chunk.Record, error) {
+func applyRecordOps(ctx context.Context, it iter.Seq2[chunk.Record, error], ops []querylang.PipeOp, resolve lookup.Resolver) ([]chunk.Record, error) {
 	var records []chunk.Record
 	for rec, err := range it {
 		if err != nil {
@@ -47,6 +49,8 @@ func applyRecordOps(it iter.Seq2[chunk.Record, error], ops []querylang.PipeOp) (
 			applyRecordRename(records, o)
 		case *querylang.FieldsOp:
 			applyRecordFields(records, o)
+		case *querylang.LookupOp:
+			applyRecordLookup(ctx, records, o, resolve)
 		default:
 			return nil, fmt.Errorf("unsupported pre-stats operator: %T", op)
 		}
@@ -179,7 +183,7 @@ func applyRecordFields(records []chunk.Record, op *querylang.FieldsOp) {
 // --- Table operators (post-stats) ---
 
 // applyTableOps applies pipeline operators to a table result (post-stats).
-func applyTableOps(table *TableResult, ops []querylang.PipeOp) (*TableResult, error) {
+func applyTableOps(ctx context.Context, table *TableResult, ops []querylang.PipeOp, resolve lookup.Resolver) (*TableResult, error) {
 	eval := querylang.NewEvaluator()
 
 	for _, op := range ops {
@@ -201,6 +205,8 @@ func applyTableOps(table *TableResult, ops []querylang.PipeOp) (*TableResult, er
 			applyTableRename(table, o)
 		case *querylang.FieldsOp:
 			applyTableFields(table, o)
+		case *querylang.LookupOp:
+			table = applyTableLookup(ctx, table, o, resolve)
 		default:
 			return nil, fmt.Errorf("unsupported post-stats operator: %T", op)
 		}
@@ -351,6 +357,89 @@ func applyTableFields(table *TableResult, op *querylang.FieldsOp) {
 		}
 		table.Rows[i] = newRow
 	}
+}
+
+// --- lookup operators ---
+
+// applyRecordLookup enriches records by looking up a field value in a table.
+func applyRecordLookup(ctx context.Context, records []chunk.Record, op *querylang.LookupOp, resolve lookup.Resolver) {
+	if resolve == nil {
+		return
+	}
+	table := resolve(op.Table)
+	if table == nil {
+		return
+	}
+	for i := range records {
+		val, ok := records[i].Attrs[op.Field]
+		if !ok || val == "" {
+			continue
+		}
+		result := table.Lookup(ctx, val)
+		if result == nil {
+			continue
+		}
+		if records[i].Attrs == nil {
+			records[i].Attrs = make(chunk.Attributes)
+		}
+		for suffix, v := range result {
+			records[i].Attrs[op.Field+"_"+suffix] = v
+		}
+	}
+}
+
+// applyTableLookup enriches table rows by looking up a column value in a table.
+func applyTableLookup(ctx context.Context, table *TableResult, op *querylang.LookupOp, resolve lookup.Resolver) *TableResult {
+	if resolve == nil {
+		return table
+	}
+	lt := resolve(op.Table)
+	if lt == nil {
+		return table
+	}
+
+	// Find source column index.
+	srcIdx := -1
+	for i, c := range table.Columns {
+		if c == op.Field {
+			srcIdx = i
+			break
+		}
+	}
+	if srcIdx < 0 {
+		return table
+	}
+
+	// Append new columns for each suffix.
+	suffixes := lt.Suffixes()
+	for _, suffix := range suffixes {
+		table.Columns = append(table.Columns, op.Field+"_"+suffix)
+	}
+
+	for i, row := range table.Rows {
+		// Extend row to match new column count.
+		for range suffixes {
+			table.Rows[i] = append(table.Rows[i], "")
+		}
+		if srcIdx >= len(row) {
+			continue
+		}
+		val := row[srcIdx]
+		if val == "" {
+			continue
+		}
+		result := lt.Lookup(ctx, val)
+		if result == nil {
+			continue
+		}
+		for j, suffix := range suffixes {
+			if v, ok := result[suffix]; ok {
+				table.Rows[i][len(row)+j] = v
+			}
+		}
+	}
+
+	return table
 }
 
 // --- helpers ---

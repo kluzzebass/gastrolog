@@ -1,9 +1,11 @@
 package query
 
 import (
+	"context"
 	"testing"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/lookup"
 	"gastrolog/internal/querylang"
 )
 
@@ -349,6 +351,150 @@ func TestRecordsToTableWithExtractedFields(t *testing.T) {
 	}
 	if !colSet["level"] {
 		t.Error("attr 'level' should be a column")
+	}
+}
+
+// --- Lookup operator tests ---
+
+// staticTable is a test LookupTable with fixed responses.
+type staticTable struct {
+	data     map[string]map[string]string
+	suffixes []string
+}
+
+func (s *staticTable) Lookup(_ context.Context, value string) map[string]string {
+	return s.data[value]
+}
+
+func (s *staticTable) Suffixes() []string {
+	return s.suffixes
+}
+
+func TestApplyRecordLookup(t *testing.T) {
+	records := []chunk.Record{
+		makeRec(baseTime, chunk.Attributes{"src_ip": "8.8.8.8"}, ""),
+		makeRec(baseTime, chunk.Attributes{"src_ip": "1.2.3.4"}, ""),
+		makeRec(baseTime, chunk.Attributes{"other": "field"}, ""), // no src_ip
+	}
+
+	table := &staticTable{
+		data: map[string]map[string]string{
+			"8.8.8.8": {"hostname": "dns.google"},
+		},
+		suffixes: []string{"hostname"},
+	}
+
+	resolve := func(name string) lookup.LookupTable {
+		if name == "rdns" {
+			return table
+		}
+		return nil
+	}
+
+	op := &querylang.LookupOp{Table: "rdns", Field: "src_ip"}
+	applyRecordLookup(context.Background(), records, op, resolve)
+
+	if records[0].Attrs["src_ip_hostname"] != "dns.google" {
+		t.Errorf("record 0 src_ip_hostname = %q, want 'dns.google'", records[0].Attrs["src_ip_hostname"])
+	}
+	if _, ok := records[1].Attrs["src_ip_hostname"]; ok {
+		t.Errorf("record 1 should not have src_ip_hostname (lookup miss)")
+	}
+	if _, ok := records[2].Attrs["src_ip_hostname"]; ok {
+		t.Errorf("record 2 should not have src_ip_hostname (no src_ip field)")
+	}
+}
+
+func TestApplyRecordLookupNilResolver(t *testing.T) {
+	records := []chunk.Record{
+		makeRec(baseTime, chunk.Attributes{"src_ip": "8.8.8.8"}, ""),
+	}
+
+	op := &querylang.LookupOp{Table: "rdns", Field: "src_ip"}
+	applyRecordLookup(context.Background(), records, op, nil) // should not panic
+
+	if _, ok := records[0].Attrs["src_ip_hostname"]; ok {
+		t.Error("should not enrich with nil resolver")
+	}
+}
+
+func TestApplyRecordLookupUnknownTable(t *testing.T) {
+	records := []chunk.Record{
+		makeRec(baseTime, chunk.Attributes{"src_ip": "8.8.8.8"}, ""),
+	}
+
+	resolve := func(name string) lookup.LookupTable { return nil }
+
+	op := &querylang.LookupOp{Table: "nonexistent", Field: "src_ip"}
+	applyRecordLookup(context.Background(), records, op, resolve)
+
+	if _, ok := records[0].Attrs["src_ip_hostname"]; ok {
+		t.Error("should not enrich with unknown table")
+	}
+}
+
+func TestApplyTableLookup(t *testing.T) {
+	table := &TableResult{
+		Columns: []string{"src_ip", "count"},
+		Rows: [][]string{
+			{"8.8.8.8", "100"},
+			{"1.2.3.4", "50"},
+			{"", "10"},
+		},
+	}
+
+	lt := &staticTable{
+		data: map[string]map[string]string{
+			"8.8.8.8": {"hostname": "dns.google"},
+		},
+		suffixes: []string{"hostname"},
+	}
+
+	resolve := func(name string) lookup.LookupTable {
+		if name == "rdns" {
+			return lt
+		}
+		return nil
+	}
+
+	op := &querylang.LookupOp{Table: "rdns", Field: "src_ip"}
+	result := applyTableLookup(context.Background(), table, op, resolve)
+
+	if len(result.Columns) != 3 {
+		t.Fatalf("expected 3 columns, got %d: %v", len(result.Columns), result.Columns)
+	}
+	if result.Columns[2] != "src_ip_hostname" {
+		t.Errorf("column 2 = %q, want 'src_ip_hostname'", result.Columns[2])
+	}
+	if result.Rows[0][2] != "dns.google" {
+		t.Errorf("row 0 hostname = %q, want 'dns.google'", result.Rows[0][2])
+	}
+	if result.Rows[1][2] != "" {
+		t.Errorf("row 1 hostname = %q, want '' (miss)", result.Rows[1][2])
+	}
+	if result.Rows[2][2] != "" {
+		t.Errorf("row 2 hostname = %q, want '' (empty src_ip)", result.Rows[2][2])
+	}
+}
+
+func TestApplyTableLookupMissingColumn(t *testing.T) {
+	table := &TableResult{
+		Columns: []string{"other_field", "count"},
+		Rows:    [][]string{{"value", "10"}},
+	}
+
+	lt := &staticTable{
+		data:     map[string]map[string]string{},
+		suffixes: []string{"hostname"},
+	}
+	resolve := func(name string) lookup.LookupTable { return lt }
+
+	op := &querylang.LookupOp{Table: "rdns", Field: "src_ip"}
+	result := applyTableLookup(context.Background(), table, op, resolve)
+
+	// Should be unchanged — src_ip column doesn't exist.
+	if len(result.Columns) != 2 {
+		t.Errorf("expected 2 columns (unchanged), got %d", len(result.Columns))
 	}
 }
 

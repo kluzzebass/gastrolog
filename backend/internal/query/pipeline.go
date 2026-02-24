@@ -78,7 +78,7 @@ func (e *Engine) runTimechartPipeline(ctx context.Context, q Query, ph *pipeline
 	if err != nil {
 		return nil, err
 	}
-	table, err = applyTableOps(table, ph.postOps)
+	table, err = applyTableOps(ctx, table, ph.postOps, e.lookupResolver)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +86,7 @@ func (e *Engine) runTimechartPipeline(ctx context.Context, q Query, ph *pipeline
 }
 
 // runAggregation feeds records into a stats aggregator and returns a table.
-func (e *Engine) runAggregation(records []chunk.Record, ph *pipelinePhases, q Query) (*PipelineResult, error) {
+func (e *Engine) runAggregation(ctx context.Context, records []chunk.Record, ph *pipelinePhases, q Query) (*PipelineResult, error) {
 	agg, err := NewAggregator(ph.statsOp)
 	if err != nil {
 		return nil, err
@@ -97,7 +97,7 @@ func (e *Engine) runAggregation(records []chunk.Record, ph *pipelinePhases, q Qu
 		}
 	}
 	table := agg.Result(q.Start, q.End)
-	table, err = applyTableOps(table, ph.postOps)
+	table, err = applyTableOps(ctx, table, ph.postOps, e.lookupResolver)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +132,7 @@ func (e *Engine) RunPipeline(ctx context.Context, q Query, pipeline *querylang.P
 	}
 
 	iter, _ := e.Search(ctx, q, nil)
-	records, err := applyRecordOps(iter, ph.preOps)
+	records, err := applyRecordOps(ctx, iter, ph.preOps, e.lookupResolver)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +144,7 @@ func (e *Engine) RunPipeline(ctx context.Context, q Query, pipeline *querylang.P
 		return &PipelineResult{Records: records}, nil
 	}
 
-	return e.runAggregation(records, ph, q)
+	return e.runAggregation(ctx, records, ph, q)
 }
 
 // headOnlyLimit returns the head N limit if the pipeline consists only of
@@ -158,7 +158,7 @@ func headOnlyLimit(ops []querylang.PipeOp) int {
 			headN = o.N
 		case *querylang.SortOp, *querylang.TailOp, *querylang.SliceOp:
 			return 0 // sort, tail, and slice require all records
-		case *querylang.WhereOp, *querylang.EvalOp, *querylang.RenameOp, *querylang.FieldsOp:
+		case *querylang.WhereOp, *querylang.EvalOp, *querylang.RenameOp, *querylang.FieldsOp, *querylang.LookupOp:
 			// these are fine
 		default:
 			return 0

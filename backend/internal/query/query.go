@@ -17,6 +17,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/lookup"
 	"gastrolog/internal/querylang"
 
 	"github.com/google/uuid"
@@ -283,6 +284,9 @@ type Engine struct {
 	// Multi-store mode
 	registry StoreRegistry
 
+	// Lookup enrichment resolver (optional). Set via SetLookupResolver.
+	lookupResolver lookup.Resolver
+
 	// Logger for this engine instance.
 	// Scoped with component="query-engine" at construction time.
 	logger *slog.Logger
@@ -308,6 +312,11 @@ func NewWithRegistry(registry StoreRegistry, logger *slog.Logger) *Engine {
 		registry: registry,
 		logger:   logging.Default(logger).With("component", "query-engine"),
 	}
+}
+
+// SetLookupResolver sets the lookup resolver used by pipeline lookup operators.
+func (e *Engine) SetLookupResolver(r lookup.Resolver) {
+	e.lookupResolver = r
 }
 
 // isMultiStore returns true if this engine operates in multi-store mode.

@@ -26,6 +26,7 @@ import (
 	"gastrolog/internal/config"
 	"gastrolog/internal/frontend"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/lookup"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -193,7 +194,8 @@ func (s *Server) buildMux() *http.ServeMux {
 	}
 
 	queryTimeout, maxFollowDuration, maxResultCount := s.loadQueryConfig()
-	queryServer := NewQueryServer(s.orch, queryTimeout, maxFollowDuration, maxResultCount)
+	lookupRegistry := lookup.Registry{"rdns": lookup.NewRDNS()}
+	queryServer := NewQueryServer(s.orch, lookupRegistry.Resolve, queryTimeout, maxFollowDuration, maxResultCount)
 	storeServer := NewStoreServer(s.orch, s.cfgStore, s.factories, s.logger)
 	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager)
 	configServer.SetOnTLSConfigChange(s.reconfigureTLS)

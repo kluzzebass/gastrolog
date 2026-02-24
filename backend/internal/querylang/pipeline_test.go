@@ -1186,6 +1186,73 @@ func TestParsePipelineRawAfterStats(t *testing.T) {
 	}
 }
 
+func TestParsePipelineLookup(t *testing.T) {
+	p, err := ParsePipeline("error | lookup rdns src_ip")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	if len(p.Pipes) != 1 {
+		t.Fatalf("expected 1 pipe, got %d", len(p.Pipes))
+	}
+	lu, ok := p.Pipes[0].(*LookupOp)
+	if !ok {
+		t.Fatalf("expected LookupOp, got %T", p.Pipes[0])
+	}
+	if lu.Table != "rdns" {
+		t.Errorf("Table = %q, want 'rdns'", lu.Table)
+	}
+	if lu.Field != "src_ip" {
+		t.Errorf("Field = %q, want 'src_ip'", lu.Field)
+	}
+}
+
+func TestParsePipelineLookupString(t *testing.T) {
+	p, err := ParsePipeline("error | lookup rdns src_ip")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	got := p.String()
+	want := "token(error) | lookup rdns src_ip"
+	if got != want {
+		t.Errorf("String() = %q, want %q", got, want)
+	}
+}
+
+func TestParsePipelineLookupAfterStats(t *testing.T) {
+	p, err := ParsePipeline("error | stats count by src_ip | lookup rdns src_ip")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	if len(p.Pipes) != 2 {
+		t.Fatalf("expected 2 pipes, got %d", len(p.Pipes))
+	}
+	if _, ok := p.Pipes[0].(*StatsOp); !ok {
+		t.Errorf("pipe 0: expected StatsOp, got %T", p.Pipes[0])
+	}
+	if _, ok := p.Pipes[1].(*LookupOp); !ok {
+		t.Errorf("pipe 1: expected LookupOp, got %T", p.Pipes[1])
+	}
+}
+
+func TestParsePipelineLookupErrors(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"lookup no args", "error | lookup"},
+		{"lookup one arg", "error | lookup rdns"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParsePipeline(tt.input)
+			if err == nil {
+				t.Fatalf("ParsePipeline(%q) expected error, got nil", tt.input)
+			}
+		})
+	}
+}
+
 func TestParsePipelineWhereRegex(t *testing.T) {
 	// where clause should support regex (since it reuses filter parser in filter mode).
 	p, err := ParsePipeline("error | stats count by status | where /5\\d\\d/")

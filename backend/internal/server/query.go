@@ -16,6 +16,7 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/lookup"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
@@ -24,6 +25,7 @@ import (
 // QueryServer implements the QueryService.
 type QueryServer struct {
 	orch              *orchestrator.Orchestrator
+	lookupResolver    lookup.Resolver
 	queryTimeout      time.Duration
 	maxFollowDuration time.Duration // 0 = no limit
 	maxResultCount    int64         // 0 = unlimited
@@ -32,8 +34,8 @@ type QueryServer struct {
 var _ gastrologv1connect.QueryServiceHandler = (*QueryServer)(nil)
 
 // NewQueryServer creates a new QueryServer.
-func NewQueryServer(orch *orchestrator.Orchestrator, queryTimeout, maxFollowDuration time.Duration, maxResultCount int64) *QueryServer {
-	return &QueryServer{orch: orch, queryTimeout: queryTimeout, maxFollowDuration: maxFollowDuration, maxResultCount: maxResultCount}
+func NewQueryServer(orch *orchestrator.Orchestrator, lookupResolver lookup.Resolver, queryTimeout, maxFollowDuration time.Duration, maxResultCount int64) *QueryServer {
+	return &QueryServer{orch: orch, lookupResolver: lookupResolver, queryTimeout: queryTimeout, maxFollowDuration: maxFollowDuration, maxResultCount: maxResultCount}
 }
 
 // Search executes a query and streams matching records.
@@ -50,6 +52,9 @@ func (s *QueryServer) Search(
 	}
 
 	eng := s.orch.MultiStoreQueryEngine()
+	if s.lookupResolver != nil {
+		eng.SetLookupResolver(s.lookupResolver)
+	}
 
 	q, pipeline, err := protoToQuery(req.Msg.Query)
 	if err != nil {
@@ -354,7 +359,7 @@ func (s *QueryServer) GetSyntax(
 			"reverse", "start", "end", "last", "limit", "pos",
 			"source_start", "source_end", "ingest_start", "ingest_end",
 		},
-		PipeKeywords:  []string{"stats", "where", "eval", "sort", "head", "tail", "slice", "rename", "fields", "timechart", "raw"},
+		PipeKeywords:  []string{"stats", "where", "eval", "sort", "head", "tail", "slice", "rename", "fields", "timechart", "raw", "lookup"},
 		PipeFunctions: funcs,
 	}), nil
 }

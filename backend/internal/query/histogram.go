@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/lookup"
 	"gastrolog/internal/querylang"
 
 	"github.com/google/uuid"
@@ -150,14 +151,14 @@ func (e *Engine) timechartScanPath(ctx context.Context, q Query, preOps []queryl
 	iter, _ := e.Search(ctx, q, nil)
 
 	if hasPreOps {
-		return timechartScanPreOps(iter, preOps, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, counts, groupCounts)
+		return timechartScanPreOps(ctx, iter, preOps, e.lookupResolver, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, counts, groupCounts)
 	}
 	return timechartScanDirect(iter, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, counts, groupCounts)
 }
 
 // timechartScanPreOps applies pipeline pre-ops then bins the resulting records.
-func timechartScanPreOps(iter iter.Seq2[chunk.Record, error], preOps []querylang.PipeOp, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, hasGroupBy bool, counts []int64, groupCounts []map[string]int64) error {
-	records, err := applyRecordOps(iter, preOps)
+func timechartScanPreOps(ctx context.Context, iter iter.Seq2[chunk.Record, error], preOps []querylang.PipeOp, resolve lookup.Resolver, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, hasGroupBy bool, counts []int64, groupCounts []map[string]int64) error {
+	records, err := applyRecordOps(ctx, iter, preOps, resolve)
 	if err != nil {
 		return err
 	}

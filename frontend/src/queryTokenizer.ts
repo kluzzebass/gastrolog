@@ -81,7 +81,7 @@ export const DEFAULT_SYNTAX: SyntaxSets = {
     "reverse", "start", "end", "last", "limit", "pos",
     "source_start", "source_end", "ingest_start", "ingest_end",
   ]),
-  pipeKeywords: new Set(["stats", "where", "eval", "sort", "head", "tail", "slice", "rename", "fields", "timechart", "raw"]),
+  pipeKeywords: new Set(["stats", "where", "eval", "sort", "head", "tail", "slice", "rename", "fields", "timechart", "raw", "lookup"]),
   pipeFunctions: new Set([
     "count", "avg", "sum", "min", "max", "bin", "tonumber",
     // Scalar functions.
@@ -1130,6 +1130,9 @@ function validate(spans: HighlightSpan[]): ValidateResult {
       case "raw":
         // raw takes no arguments — nothing to parse.
         return;
+      case "lookup":
+        parseLookupOp();
+        return;
       default:
         fail(`unknown pipe operator '${s.text}'`);
         return;
@@ -1542,6 +1545,22 @@ function validate(spans: HighlightSpan[]): ValidateResult {
       }
       advance(); // consume field name
     }
+  }
+
+  // Parse lookup: TABLE FIELD
+  function parseLookupOp(): void {
+    const t = cur();
+    if (!t || t.role !== "token") {
+      fail("expected table name after 'lookup'");
+      return;
+    }
+    advance(); // consume table name
+    const f = cur();
+    if (!f || f.role !== "token") {
+      fail(`expected field name after 'lookup ${t.text}'`);
+      return;
+    }
+    advance(); // consume field name
   }
 
   parsePipeline();

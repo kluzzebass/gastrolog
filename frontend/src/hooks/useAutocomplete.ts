@@ -191,6 +191,11 @@ export const PIPE_GRAMMARS: Record<string, PipeGrammar> = {
     empty: { fields: true },
     fallback: { fields: true },
   },
+  // lookup TABLE FIELD
+  lookup: {
+    empty: { literals: ["rdns"] },
+    fallback: { fields: true },
+  },
   // These take numeric/no arguments — never suggest.
   head: { empty: "none", fallback: "none" },
   tail: { empty: "none", fallback: "none" },

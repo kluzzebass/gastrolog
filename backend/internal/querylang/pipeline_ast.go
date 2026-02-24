@@ -283,6 +283,20 @@ func (RawOp) pipeOp() {}
 
 func (RawOp) String() string { return "raw" }
 
+// LookupOp represents: lookup <table> <field>
+// Enriches records by looking up a field value in an external table.
+// Output fields are named <field>_<suffix> (e.g. src_ip_hostname).
+type LookupOp struct {
+	Table string // lookup table name (e.g. "rdns")
+	Field string // field to look up (e.g. "src_ip")
+}
+
+func (LookupOp) pipeOp() {}
+
+func (l *LookupOp) String() string {
+	return fmt.Sprintf("lookup %s %s", l.Table, l.Field)
+}
+
 // PipeExpr is the interface for expressions used in pipe operators.
 // These are distinct from filter Expr — they represent computed values,
 // not boolean search predicates.
