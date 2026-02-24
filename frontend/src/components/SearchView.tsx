@@ -942,7 +942,7 @@ export function SearchView() {
 
           {/* Results */}
           <div className="flex-1 flex flex-col overflow-hidden">
-            {isSearching && !tableResult && queryIsPipeline ? (
+            {isSearching && !tableResult && queryIsPipeline && records.length === 0 ? (
               <div className="flex-1 flex items-center justify-center">
                 <div className={`text-center font-mono text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
                   <div className="inline-block w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin mb-3" />

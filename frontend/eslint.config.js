@@ -19,6 +19,10 @@ export default tseslint.config(
       // Too strict for data-fetching sync patterns (e.g. syncing server
       // preferences into local state on first load).
       "react-hooks/set-state-in-effect": "off",
+      // React Compiler handles ref safety — this rule flags the common
+      // "latest ref" pattern (ref.current = value) which is safe under
+      // the compiler.
+      "react-hooks/refs": "off",
     },
   },
   {

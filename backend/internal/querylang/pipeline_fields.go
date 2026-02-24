@@ -22,13 +22,7 @@ func FieldsAtCursor(expr string, cursor int, baseFields []string) (fields, compl
 	stripped, removedRanges := stripDirectives(expr)
 
 	// Map cursor from original expression to stripped expression.
-	strippedCursor := mapOffsetToStripped(cursor, removedRanges)
-	if strippedCursor < 0 {
-		strippedCursor = 0
-	}
-	if strippedCursor > len(stripped) {
-		strippedCursor = len(stripped)
-	}
+	strippedCursor := min(max(mapOffsetToStripped(cursor, removedRanges), 0), len(stripped))
 
 	// Lex to find pipe positions.
 	pipePositions := findPipePositions(stripped)

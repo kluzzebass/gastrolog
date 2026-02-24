@@ -75,6 +75,9 @@ func (s *QueryServer) searchPipeline(
 	pipeline *querylang.Pipeline,
 	stream *connect.ServerStream[apiv1.SearchResponse],
 ) error {
+	if s.maxResultCount > 0 && (q.Limit == 0 || int64(q.Limit) > s.maxResultCount) {
+		q.Limit = int(s.maxResultCount)
+	}
 	result, err := eng.RunPipeline(ctx, q, pipeline)
 	if err != nil {
 		return connect.NewError(connect.CodeInternal, err)
