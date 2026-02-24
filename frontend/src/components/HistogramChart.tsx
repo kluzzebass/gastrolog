@@ -63,6 +63,14 @@ export function HistogramChart({
   const [brushEnd, setBrushEnd] = useState<number | null>(null);
   const brushingRef = useRef(false);
 
+  // Stable tooltip formatter ref: echarts-for-react uses fast-deep-equal to
+  // compare the option prop. Function references always fail === comparison,
+  // so a fresh tooltipFormatter closure on every render triggers unnecessary
+  // setOption calls (replaying entrance animation). The stable wrapper
+  // delegates to the latest closure via ref indirection.
+  const formatterImplRef = useRef<(params: any) => string>(() => "");
+  const stableFormatter = useRef((params: any) => formatterImplRef.current(params)).current;
+
   // Pan state.
   const axisRef = useRef<HTMLDivElement>(null);
   const panStartX = useRef<number>(0);
@@ -190,6 +198,7 @@ export function HistogramChart({
     const header = `<div style="opacity:0.7">${bucket.count.toLocaleString()} \u00b7 ${formatTime(bucket.ts)}</div>`;
     return header + lines.join("<br/>");
   };
+  formatterImplRef.current = tooltipFormatter;
 
   const tooltipBg = dark
     ? resolveColor("var(--color-ink-surface)") || "#1a1a1a"
@@ -234,7 +243,7 @@ export function HistogramChart({
       },
       padding: [4, 8],
       extraCssText: "border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);",
-      formatter: tooltipFormatter,
+      formatter: stableFormatter,
     },
     series: seriesData,
   };
