@@ -118,6 +118,11 @@ func (e *Engine) RunPipeline(ctx context.Context, q Query, pipeline *querylang.P
 		return e.runTimechartPipeline(ctx, q, ph)
 	}
 
+	// Pipeline operators control their own result limits (head, tail, slice).
+	// Clear any incoming limit (e.g. proto-level pagination limit) so Search
+	// returns all matching records for the pipeline to process.
+	q.Limit = 0
+
 	// Head optimization: when the pipeline is just filters + head (no sort,
 	// no stats), set q.Limit to avoid a full scan.
 	if ph.statsOp == nil {
