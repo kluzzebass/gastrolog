@@ -1035,27 +1035,55 @@ func TestParsePipelineNewOpsErrors(t *testing.T) {
 		name  string
 		input string
 	}{
+		// eval
 		{"eval no assignment", "error | eval"},
 		{"eval no equals", "error | eval x"},
 		{"eval no expr", "error | eval x ="},
+		// sort
 		{"sort no field", "error | sort"},
+		// head
 		{"head no number", "error | head"},
 		{"head zero", "error | head 0"},
 		{"head negative", "error | head -1"},
+		{"head negative large", "error | head -100"},
 		{"head not number", "error | head abc"},
+		{"head dash only", "error | head -"},
+		// tail
 		{"tail no number", "error | tail"},
 		{"tail zero", "error | tail 0"},
 		{"tail negative", "error | tail -1"},
+		{"tail negative large", "error | tail -50"},
 		{"tail not number", "error | tail abc"},
+		{"tail dash only", "error | tail -"},
+		// slice
 		{"slice no args", "error | slice"},
 		{"slice one arg", "error | slice 5"},
 		{"slice zero start", "error | slice 0 10"},
+		{"slice negative start", "error | slice -2 10"},
+		{"slice negative end", "error | slice 2 -4"},
+		{"slice both negative", "error | slice -1 -5"},
 		{"slice end before start", "error | slice 10 5"},
 		{"slice not number start", "error | slice abc 10"},
 		{"slice not number end", "error | slice 5 abc"},
+		{"slice zero end", "error | slice 1 0"},
+		// rename
 		{"rename no as", "error | rename src"},
 		{"rename no new", "error | rename src as"},
+		{"rename missing keyword", "error | rename src dst"},
+		// fields
 		{"fields no field", "error | fields"},
+		// timechart
+		{"timechart no number", "error | timechart"},
+		{"timechart zero", "error | timechart 0"},
+		{"timechart negative", "error | timechart -1"},
+		{"timechart negative large", "error | timechart -50"},
+		{"timechart not number", "error | timechart abc"},
+		{"timechart by missing field", "error | timechart 50 by"},
+		// lookup
+		{"lookup no args", "error | lookup"},
+		{"lookup one arg", "error | lookup rdns"},
+		// unknown operator
+		{"unknown operator", "error | bogus"},
 	}
 
 	for _, tt := range tests {
@@ -1111,26 +1139,7 @@ func TestParsePipelineTimechartString(t *testing.T) {
 	}
 }
 
-func TestParsePipelineTimechartErrors(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-	}{
-		{"timechart no number", "error | timechart"},
-		{"timechart zero", "error | timechart 0"},
-		{"timechart negative", "error | timechart -1"},
-		{"timechart not number", "error | timechart abc"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := ParsePipeline(tt.input)
-			if err == nil {
-				t.Fatalf("ParsePipeline(%q) expected error, got nil", tt.input)
-			}
-		})
-	}
-}
+// TimechartErrors are covered by TestParsePipelineNewOpsErrors.
 
 func TestParsePipelineTimechartBy(t *testing.T) {
 	p, err := ParsePipeline("error | timechart 50 by status")
@@ -1157,12 +1166,7 @@ func TestParsePipelineTimechartBy(t *testing.T) {
 	}
 }
 
-func TestParsePipelineTimechartByMissingField(t *testing.T) {
-	_, err := ParsePipeline("error | timechart 50 by")
-	if err == nil {
-		t.Fatal("expected error for 'timechart 50 by' with no field")
-	}
-}
+// TimechartByMissingField is covered by TestParsePipelineNewOpsErrors.
 
 func TestParsePipelineRaw(t *testing.T) {
 	p, err := ParsePipeline("error | raw")
@@ -1274,24 +1278,7 @@ func TestParsePipelineLookupAfterStats(t *testing.T) {
 	}
 }
 
-func TestParsePipelineLookupErrors(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-	}{
-		{"lookup no args", "error | lookup"},
-		{"lookup one arg", "error | lookup rdns"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := ParsePipeline(tt.input)
-			if err == nil {
-				t.Fatalf("ParsePipeline(%q) expected error, got nil", tt.input)
-			}
-		})
-	}
-}
+// LookupErrors are covered by TestParsePipelineNewOpsErrors.
 
 func TestParsePipelineWhereRegex(t *testing.T) {
 	// where clause should support regex (since it reuses filter parser in filter mode).
@@ -1306,5 +1293,394 @@ func TestParsePipelineWhereRegex(t *testing.T) {
 	}
 	if pred.Kind != PredRegex {
 		t.Errorf("expected PredRegex, got %v", pred.Kind)
+	}
+}
+
+// --- Comprehensive table-driven operator tests ---
+
+func TestParsePipelineHeadTable(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		n     int
+	}{
+		{"basic", "error | head 10", 10},
+		{"one", "error | head 1", 1},
+		{"large", "error | head 99999", 99999},
+		{"bare pipe", "| head 5", 5},
+		{"after eval", "error | eval x = 1 | head 3", 3},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := ParsePipeline(tt.input)
+			if err != nil {
+				t.Fatalf("ParsePipeline(%q) error: %v", tt.input, err)
+			}
+			// Head may not be the first pipe (e.g. after eval).
+			var h *HeadOp
+			for _, pipe := range p.Pipes {
+				if op, ok := pipe.(*HeadOp); ok {
+					h = op
+					break
+				}
+			}
+			if h == nil {
+				t.Fatal("no HeadOp found")
+			}
+			if h.N != tt.n {
+				t.Errorf("expected N=%d, got %d", tt.n, h.N)
+			}
+		})
+	}
+}
+
+func TestParsePipelineTailTable(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		n     int
+	}{
+		{"basic", "error | tail 5", 5},
+		{"one", "error | tail 1", 1},
+		{"large", "error | tail 10000", 10000},
+		{"bare pipe", "| tail 20", 20},
+		{"after stats", "error | stats count by level | tail 3", 3},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := ParsePipeline(tt.input)
+			if err != nil {
+				t.Fatalf("ParsePipeline(%q) error: %v", tt.input, err)
+			}
+			var ta *TailOp
+			for _, pipe := range p.Pipes {
+				if op, ok := pipe.(*TailOp); ok {
+					ta = op
+					break
+				}
+			}
+			if ta == nil {
+				t.Fatal("no TailOp found")
+			}
+			if ta.N != tt.n {
+				t.Errorf("expected N=%d, got %d", tt.n, ta.N)
+			}
+		})
+	}
+}
+
+func TestParsePipelineSliceTable(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		start, end int
+	}{
+		{"basic", "error | slice 12 54", 12, 54},
+		{"single row", "error | slice 1 1", 1, 1},
+		{"adjacent", "error | slice 5 6", 5, 6},
+		{"large range", "error | slice 1 10000", 1, 10000},
+		{"bare pipe", "| slice 3 7", 3, 7},
+		{"equal start end", "error | slice 42 42", 42, 42},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := ParsePipeline(tt.input)
+			if err != nil {
+				t.Fatalf("ParsePipeline(%q) error: %v", tt.input, err)
+			}
+			sl, ok := p.Pipes[0].(*SliceOp)
+			if !ok {
+				t.Fatalf("expected SliceOp, got %T", p.Pipes[0])
+			}
+			if sl.Start != tt.start {
+				t.Errorf("expected Start=%d, got %d", tt.start, sl.Start)
+			}
+			if sl.End != tt.end {
+				t.Errorf("expected End=%d, got %d", tt.end, sl.End)
+			}
+		})
+	}
+}
+
+func TestParsePipelineSortTable(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		fields []SortField
+	}{
+		{"single asc", "error | sort status", []SortField{{Name: "status", Desc: false}}},
+		{"single desc", "error | sort -status", []SortField{{Name: "status", Desc: true}}},
+		{"multi mixed", "error | sort -count, status", []SortField{
+			{Name: "count", Desc: true},
+			{Name: "status", Desc: false},
+		}},
+		{"three fields", "error | sort -a, b, -c", []SortField{
+			{Name: "a", Desc: true},
+			{Name: "b", Desc: false},
+			{Name: "c", Desc: true},
+		}},
+		{"all desc", "error | sort -x, -y", []SortField{
+			{Name: "x", Desc: true},
+			{Name: "y", Desc: true},
+		}},
+		{"bare pipe", "| sort status", []SortField{{Name: "status", Desc: false}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := ParsePipeline(tt.input)
+			if err != nil {
+				t.Fatalf("ParsePipeline(%q) error: %v", tt.input, err)
+			}
+			s, ok := p.Pipes[0].(*SortOp)
+			if !ok {
+				t.Fatalf("expected SortOp, got %T", p.Pipes[0])
+			}
+			if len(s.Fields) != len(tt.fields) {
+				t.Fatalf("expected %d fields, got %d", len(tt.fields), len(s.Fields))
+			}
+			for i, want := range tt.fields {
+				got := s.Fields[i]
+				if got.Name != want.Name || got.Desc != want.Desc {
+					t.Errorf("field %d: want %+v, got %+v", i, want, got)
+				}
+			}
+		})
+	}
+}
+
+func TestParsePipelineRenameTable(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		renames []RenameMapping
+	}{
+		{"single", "error | rename src as source", []RenameMapping{{Old: "src", New: "source"}}},
+		{"multiple", "error | rename src as source, dst as destination", []RenameMapping{
+			{Old: "src", New: "source"},
+			{Old: "dst", New: "destination"},
+		}},
+		{"three", "error | rename a as b, c as d, e as f", []RenameMapping{
+			{Old: "a", New: "b"},
+			{Old: "c", New: "d"},
+			{Old: "e", New: "f"},
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := ParsePipeline(tt.input)
+			if err != nil {
+				t.Fatalf("ParsePipeline(%q) error: %v", tt.input, err)
+			}
+			r, ok := p.Pipes[0].(*RenameOp)
+			if !ok {
+				t.Fatalf("expected RenameOp, got %T", p.Pipes[0])
+			}
+			if len(r.Renames) != len(tt.renames) {
+				t.Fatalf("expected %d renames, got %d", len(tt.renames), len(r.Renames))
+			}
+			for i, want := range tt.renames {
+				got := r.Renames[i]
+				if got.Old != want.Old || got.New != want.New {
+					t.Errorf("rename %d: want %s→%s, got %s→%s", i, want.Old, want.New, got.Old, got.New)
+				}
+			}
+		})
+	}
+}
+
+func TestParsePipelineFieldsTable(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		drop  bool
+		names []string
+	}{
+		{"keep single", "error | fields host", false, []string{"host"}},
+		{"keep multi", "error | fields host, level, message", false, []string{"host", "level", "message"}},
+		{"drop single", "error | fields - debug", true, []string{"debug"}},
+		{"drop multi", "error | fields - debug, trace", true, []string{"debug", "trace"}},
+		{"bare pipe keep", "| fields status", false, []string{"status"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := ParsePipeline(tt.input)
+			if err != nil {
+				t.Fatalf("ParsePipeline(%q) error: %v", tt.input, err)
+			}
+			f, ok := p.Pipes[0].(*FieldsOp)
+			if !ok {
+				t.Fatalf("expected FieldsOp, got %T", p.Pipes[0])
+			}
+			if f.Drop != tt.drop {
+				t.Errorf("expected Drop=%v, got %v", tt.drop, f.Drop)
+			}
+			if len(f.Names) != len(tt.names) {
+				t.Fatalf("expected %d names, got %d", len(tt.names), len(f.Names))
+			}
+			for i, want := range tt.names {
+				if f.Names[i] != want {
+					t.Errorf("name %d: want %q, got %q", i, want, f.Names[i])
+				}
+			}
+		})
+	}
+}
+
+func TestParsePipelineTimechartTable(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		n     int
+		by    string
+	}{
+		{"basic", "error | timechart 50", 50, ""},
+		{"large", "error | timechart 200", 200, ""},
+		{"with by", "error | timechart 50 by status", 50, "status"},
+		{"bare pipe", "| timechart 100", 100, ""},
+		{"bare pipe with by", "| timechart 30 by host", 30, "host"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := ParsePipeline(tt.input)
+			if err != nil {
+				t.Fatalf("ParsePipeline(%q) error: %v", tt.input, err)
+			}
+			tc, ok := p.Pipes[0].(*TimechartOp)
+			if !ok {
+				t.Fatalf("expected TimechartOp, got %T", p.Pipes[0])
+			}
+			if tc.N != tt.n {
+				t.Errorf("expected N=%d, got %d", tt.n, tc.N)
+			}
+			if tc.By != tt.by {
+				t.Errorf("expected By=%q, got %q", tt.by, tc.By)
+			}
+		})
+	}
+}
+
+func TestParsePipelineLookupTable(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		table      string
+		field      string
+	}{
+		{"basic", "error | lookup rdns src_ip", "rdns", "src_ip"},
+		{"after eval", `error | eval ip = "1.2.3.4" | lookup rdns ip`, "rdns", "ip"},
+		{"after stats", "error | stats count by src_ip | lookup rdns src_ip", "rdns", "src_ip"},
+		{"bare pipe", "| lookup rdns host", "rdns", "host"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := ParsePipeline(tt.input)
+			if err != nil {
+				t.Fatalf("ParsePipeline(%q) error: %v", tt.input, err)
+			}
+			var lu *LookupOp
+			for _, pipe := range p.Pipes {
+				if op, ok := pipe.(*LookupOp); ok {
+					lu = op
+					break
+				}
+			}
+			if lu == nil {
+				t.Fatal("no LookupOp found")
+			}
+			if lu.Table != tt.table {
+				t.Errorf("Table = %q, want %q", lu.Table, tt.table)
+			}
+			if lu.Field != tt.field {
+				t.Errorf("Field = %q, want %q", lu.Field, tt.field)
+			}
+		})
+	}
+}
+
+func TestParsePipelineChainedTable(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		types []string
+	}{
+		{"eval sort head", "error | eval ms = duration / 1000 | sort -ms | head 5",
+			[]string{"EvalOp", "SortOp", "HeadOp"}},
+		{"stats sort head", "error | stats count by status | sort -count | head 10",
+			[]string{"StatsOp", "SortOp", "HeadOp"}},
+		{"eval rename fields", "error | eval x = 1 | rename x as y | fields y",
+			[]string{"EvalOp", "RenameOp", "FieldsOp"}},
+		{"head then tail", "error | head 100 | tail 10",
+			[]string{"HeadOp", "TailOp"}},
+		{"lookup after eval", `error | eval test_ip = "8.8.8.8" | lookup rdns test_ip`,
+			[]string{"EvalOp", "LookupOp"}},
+		{"stats lookup raw", "error | stats count by src_ip | lookup rdns src_ip | raw",
+			[]string{"StatsOp", "LookupOp", "RawOp"}},
+		{"five operators", "error | eval x = 1 | head 100 | sort -x | tail 10 | raw",
+			[]string{"EvalOp", "HeadOp", "SortOp", "TailOp", "RawOp"}},
+		{"eval then stats", "error | eval sev = level | stats count by sev",
+			[]string{"EvalOp", "StatsOp"}},
+		{"where then head", "error | stats count by level | where count > 10 | head 5",
+			[]string{"StatsOp", "WhereOp", "HeadOp"}},
+		{"rename then sort", "error | rename status as code | sort -code",
+			[]string{"RenameOp", "SortOp"}},
+		{"fields then slice", "error | fields host, level | slice 1 10",
+			[]string{"FieldsOp", "SliceOp"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := ParsePipeline(tt.input)
+			if err != nil {
+				t.Fatalf("ParsePipeline(%q) error: %v", tt.input, err)
+			}
+			if len(p.Pipes) != len(tt.types) {
+				t.Fatalf("expected %d pipes, got %d", len(tt.types), len(p.Pipes))
+			}
+			for i, wantType := range tt.types {
+				gotType := pipeOpName(p.Pipes[i])
+				if gotType != wantType {
+					t.Errorf("pipe %d: want %s, got %s", i, wantType, gotType)
+				}
+			}
+		})
+	}
+}
+
+func pipeOpName(op PipeOp) string {
+	switch op.(type) {
+	case *StatsOp:
+		return "StatsOp"
+	case *WhereOp:
+		return "WhereOp"
+	case *EvalOp:
+		return "EvalOp"
+	case *SortOp:
+		return "SortOp"
+	case *HeadOp:
+		return "HeadOp"
+	case *TailOp:
+		return "TailOp"
+	case *SliceOp:
+		return "SliceOp"
+	case *RenameOp:
+		return "RenameOp"
+	case *FieldsOp:
+		return "FieldsOp"
+	case *TimechartOp:
+		return "TimechartOp"
+	case *RawOp:
+		return "RawOp"
+	case *LookupOp:
+		return "LookupOp"
+	default:
+		return "unknown"
 	}
 }

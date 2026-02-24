@@ -676,10 +676,19 @@ func (p *parser) parseSortOp() (*SortOp, error) {
 	return &SortOp{Fields: fields}, nil
 }
 
-// parseHeadOp parses: "head" NUMBER
+// parseHeadOp parses: "head" ["-"] NUMBER
 func (p *parser) parseHeadOp() (*HeadOp, error) {
 	if err := p.advance(); err != nil { // consume "head"
 		return nil, err
+	}
+
+	neg := false
+	negPos := p.cur.Pos
+	if p.cur.Kind == TokMinus {
+		neg = true
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
 	}
 
 	if p.cur.Kind != TokWord || !isNumericLiteral(p.cur.Lit) {
@@ -690,8 +699,15 @@ func (p *parser) parseHeadOp() (*HeadOp, error) {
 	if _, err := fmt.Sscanf(p.cur.Lit, "%d", &n); err != nil {
 		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "invalid head count: %s", p.cur.Lit)
 	}
+	if neg {
+		n = -n
+	}
 	if n <= 0 {
-		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "head count must be positive, got %d", n)
+		pos := p.cur.Pos
+		if neg {
+			pos = negPos
+		}
+		return nil, newParseError(pos, ErrUnexpectedToken, "head count must be positive, got %d", n)
 	}
 
 	if err := p.advance(); err != nil { // consume number
@@ -700,10 +716,19 @@ func (p *parser) parseHeadOp() (*HeadOp, error) {
 	return &HeadOp{N: n}, nil
 }
 
-// parseTailOp parses: "tail" NUMBER
+// parseTailOp parses: "tail" ["-"] NUMBER
 func (p *parser) parseTailOp() (*TailOp, error) {
 	if err := p.advance(); err != nil { // consume "tail"
 		return nil, err
+	}
+
+	neg := false
+	negPos := p.cur.Pos
+	if p.cur.Kind == TokMinus {
+		neg = true
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
 	}
 
 	if p.cur.Kind != TokWord || !isNumericLiteral(p.cur.Lit) {
@@ -714,8 +739,15 @@ func (p *parser) parseTailOp() (*TailOp, error) {
 	if _, err := fmt.Sscanf(p.cur.Lit, "%d", &n); err != nil {
 		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "invalid tail count: %s", p.cur.Lit)
 	}
+	if neg {
+		n = -n
+	}
 	if n <= 0 {
-		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "tail count must be positive, got %d", n)
+		pos := p.cur.Pos
+		if neg {
+			pos = negPos
+		}
+		return nil, newParseError(pos, ErrUnexpectedToken, "tail count must be positive, got %d", n)
 	}
 
 	if err := p.advance(); err != nil { // consume number
@@ -724,10 +756,19 @@ func (p *parser) parseTailOp() (*TailOp, error) {
 	return &TailOp{N: n}, nil
 }
 
-// parseSliceOp parses: "slice" START END (both 1-indexed, inclusive)
+// parseSliceOp parses: "slice" ["-"] START ["-"] END (both 1-indexed, inclusive)
 func (p *parser) parseSliceOp() (*SliceOp, error) {
 	if err := p.advance(); err != nil { // consume "slice"
 		return nil, err
+	}
+
+	negStart := false
+	negStartPos := p.cur.Pos
+	if p.cur.Kind == TokMinus {
+		negStart = true
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
 	}
 
 	if p.cur.Kind != TokWord || !isNumericLiteral(p.cur.Lit) {
@@ -737,11 +778,27 @@ func (p *parser) parseSliceOp() (*SliceOp, error) {
 	if _, err := fmt.Sscanf(p.cur.Lit, "%d", &start); err != nil {
 		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "invalid slice start: %s", p.cur.Lit)
 	}
+	if negStart {
+		start = -start
+	}
 	if start <= 0 {
-		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "slice start must be positive, got %d", start)
+		pos := p.cur.Pos
+		if negStart {
+			pos = negStartPos
+		}
+		return nil, newParseError(pos, ErrUnexpectedToken, "slice start must be positive, got %d", start)
 	}
 	if err := p.advance(); err != nil { // consume start
 		return nil, err
+	}
+
+	negEnd := false
+	negEndPos := p.cur.Pos
+	if p.cur.Kind == TokMinus {
+		negEnd = true
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
 	}
 
 	if p.cur.Kind != TokWord || !isNumericLiteral(p.cur.Lit) {
@@ -751,8 +808,15 @@ func (p *parser) parseSliceOp() (*SliceOp, error) {
 	if _, err := fmt.Sscanf(p.cur.Lit, "%d", &end); err != nil {
 		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "invalid slice end: %s", p.cur.Lit)
 	}
+	if negEnd {
+		end = -end
+	}
 	if end <= 0 {
-		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "slice end must be positive, got %d", end)
+		pos := p.cur.Pos
+		if negEnd {
+			pos = negEndPos
+		}
+		return nil, newParseError(pos, ErrUnexpectedToken, "slice end must be positive, got %d", end)
 	}
 	if end < start {
 		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "slice end (%d) must be >= start (%d)", end, start)
@@ -764,10 +828,19 @@ func (p *parser) parseSliceOp() (*SliceOp, error) {
 	return &SliceOp{Start: start, End: end}, nil
 }
 
-// parseTimechartOp parses: "timechart" NUMBER ["by" FIELD]
+// parseTimechartOp parses: "timechart" ["-"] NUMBER ["by" FIELD]
 func (p *parser) parseTimechartOp() (*TimechartOp, error) {
 	if err := p.advance(); err != nil { // consume "timechart"
 		return nil, err
+	}
+
+	neg := false
+	negPos := p.cur.Pos
+	if p.cur.Kind == TokMinus {
+		neg = true
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
 	}
 
 	if p.cur.Kind != TokWord || !isNumericLiteral(p.cur.Lit) {
@@ -778,8 +851,15 @@ func (p *parser) parseTimechartOp() (*TimechartOp, error) {
 	if _, err := fmt.Sscanf(p.cur.Lit, "%d", &n); err != nil {
 		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "invalid timechart bucket count: %s", p.cur.Lit)
 	}
+	if neg {
+		n = -n
+	}
 	if n <= 0 {
-		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "timechart bucket count must be positive, got %d", n)
+		pos := p.cur.Pos
+		if neg {
+			pos = negPos
+		}
+		return nil, newParseError(pos, ErrUnexpectedToken, "timechart bucket count must be positive, got %d", n)
 	}
 
 	if err := p.advance(); err != nil { // consume number

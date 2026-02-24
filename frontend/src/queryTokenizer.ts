@@ -1414,9 +1414,15 @@ function validate(spans: HighlightSpan[]): ValidateResult {
     advance(); // consume field name
   }
 
-  // Parse head: NUMBER
+  // Parse head: ["-"] NUMBER
   function parseHeadOp(): void {
-    const s = cur();
+    let s = cur();
+    let neg = false;
+    if (s && s.text === "-") {
+      neg = true;
+      advance();
+      s = cur();
+    }
     if (!s || s.role !== "token") {
       fail("expected number after 'head'");
       return;
@@ -1425,17 +1431,32 @@ function validate(spans: HighlightSpan[]): ValidateResult {
       fail("expected positive integer after 'head'");
       return;
     }
+    if (neg) {
+      fail("head count must be positive");
+      return;
+    }
     advance(); // consume number
   }
 
+  // Parse tail: ["-"] NUMBER
   function parseTailOp(): void {
-    const s = cur();
+    let s = cur();
+    let neg = false;
+    if (s && s.text === "-") {
+      neg = true;
+      advance();
+      s = cur();
+    }
     if (!s || s.role !== "token") {
       fail("expected number after 'tail'");
       return;
     }
     if (!/^\d+$/.test(s.text)) {
       fail("expected positive integer after 'tail'");
+      return;
+    }
+    if (neg) {
+      fail("tail count must be positive");
       return;
     }
     advance(); // consume number
