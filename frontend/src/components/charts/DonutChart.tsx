@@ -1,11 +1,10 @@
-import { useState } from "react";
-import { arc as d3Arc } from "d3-shape";
-import { useSpring, animated, to } from "@react-spring/web";
-import { Pie } from "@visx/shape";
-import { Group } from "@visx/group";
+import { useState, useRef } from "react";
+import ReactEChartsCore from "echarts-for-react/esm/core";
+import { echarts } from "./echartsSetup";
+import { buildThemeOption } from "./echartsTheme";
+import { getColorForCategory, resolveColor } from "./chartColors";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { getColorForCategory } from "./chartColors";
-import { ChartTooltip, useChartTooltip, type TooltipData } from "./ChartTooltip";
+import type { EChartsOption } from "echarts";
 
 interface DonutChartProps {
   columns: string[];
@@ -19,55 +18,17 @@ interface Datum {
   color: string;
 }
 
-const SIZE = 240;
-const OUTER_RADIUS = SIZE / 2 - 8;
-const INNER_RADIUS = OUTER_RADIUS * 0.6;
-
-/**
- * An arc path that smoothly animates angle and radius changes via react-spring.
- */
-function AnimatedDonutArc({
-  startAngle,
-  endAngle,
-  innerRadius,
-  outerRadius,
-  padAngle,
-  cornerRadius,
-  ...rest
-}: {
-  startAngle: number;
-  endAngle: number;
-  innerRadius: number;
-  outerRadius: number;
-  padAngle: number;
-  cornerRadius: number;
-} & Omit<React.SVGProps<SVGPathElement>, "d">) {
-  const spring = useSpring({
-    startAngle,
-    endAngle,
-    outerRadius,
-    config: { tension: 210, friction: 20 },
-  });
-
-  return (
-    <animated.path
-      d={to(
-        [spring.startAngle, spring.endAngle, spring.outerRadius],
-        (s: number, e: number, r: number) =>
-          d3Arc()
-            .cornerRadius(cornerRadius)(
-            { startAngle: s, endAngle: e, innerRadius, outerRadius: r, padAngle } as any,
-          ) ?? "",
-      )}
-      {...rest}
-    />
-  );
-}
+const formatValue = (v: number) => {
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+  return Number.isInteger(v) ? String(v) : v.toFixed(1);
+};
 
 export function DonutChart({ columns, rows, dark }: Readonly<DonutChartProps>) {
   const c = useThemeClass(dark);
-  const tooltip = useChartTooltip();
+  const chartRef = useRef<ReactEChartsCore>(null);
   const [hoveredLabel, setHoveredLabel] = useState<string | null>(null);
+  const theme = buildThemeOption(dark);
 
   const valueColIdx = columns.length - 1;
   const data: Datum[] = rows.map((row, i) => {
@@ -75,87 +36,113 @@ export function DonutChart({ columns, rows, dark }: Readonly<DonutChartProps>) {
     return {
       label,
       value: Number(row[valueColIdx]) || 0,
-      color: getColorForCategory(label, i),
+      color: resolveColor(getColorForCategory(label, i)),
     };
   });
 
   const total = data.reduce((sum, d) => sum + d.value, 0);
+  const textGhost = dark ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.35)";
+  const textBright = dark ? "#e5e5e5" : "#1a1a1a";
 
-  const formatValue = (v: number) => {
-    if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-    if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
-    return Number.isInteger(v) ? String(v) : v.toFixed(1);
+  const option: EChartsOption = {
+    ...theme,
+    tooltip: {
+      ...theme.tooltip as object,
+      trigger: "item",
+      formatter: (params: any) => {
+        const p = params;
+        const pct = ((p.value / total) * 100).toFixed(1);
+        const dot = `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${p.color};margin-right:6px;"></span>`;
+        return `<div style="opacity:0.7">${p.name}</div>${dot}${columns[valueColIdx]} <b>${formatValue(p.value as number)} (${pct}%)</b>`;
+      },
+    },
+    graphic: [
+      {
+        type: "text",
+        left: "center",
+        top: "42%",
+        style: {
+          text: formatValue(total),
+          fontFamily: "'IBM Plex Mono', monospace",
+          fontSize: 22,
+          fontWeight: 600,
+          fill: textBright,
+        },
+      },
+      {
+        type: "text",
+        left: "center",
+        top: "54%",
+        style: {
+          text: "total",
+          fontFamily: "'IBM Plex Mono', monospace",
+          fontSize: 11,
+          fill: textGhost,
+        },
+      },
+    ],
+    series: [
+      {
+        type: "pie",
+        radius: ["60%", "85%"],
+        center: ["50%", "50%"],
+        padAngle: 1,
+        itemStyle: {
+          borderRadius: 3,
+          opacity: 0.85,
+        },
+        emphasis: {
+          scaleSize: 4,
+          itemStyle: { opacity: 1 },
+        },
+        label: { show: false },
+        data: data.map((d) => ({
+          name: d.label,
+          value: d.value,
+          itemStyle: { color: d.color },
+        })),
+      },
+    ],
+  };
+
+  const onEvents = {
+    mouseover: (params: any) => {
+      setHoveredLabel(params.name as string);
+    },
+    mouseout: () => {
+      setHoveredLabel(null);
+    },
+  };
+
+  const handleLegendHover = (label: string | null) => {
+    setHoveredLabel(label);
+    const instance = chartRef.current?.getEchartsInstance();
+    if (!instance) return;
+    if (label) {
+      instance.dispatchAction({
+        type: "highlight",
+        seriesIndex: 0,
+        name: label,
+      });
+    } else {
+      instance.dispatchAction({
+        type: "downplay",
+        seriesIndex: 0,
+      });
+    }
   };
 
   return (
-    <div className="flex flex-col items-center gap-4 py-4 relative">
-      <svg width={SIZE} height={SIZE}>
-        <Group top={SIZE / 2} left={SIZE / 2}>
-          <Pie
-            data={data}
-            pieValue={(d) => d.value}
-            outerRadius={OUTER_RADIUS}
-            innerRadius={INNER_RADIUS}
-            padAngle={0.02}
-            cornerRadius={3}
-          >
-            {(pie) =>
-              pie.arcs.map((arc) => (
-                <AnimatedDonutArc
-                  key={arc.data.label}
-                  startAngle={arc.startAngle}
-                  endAngle={arc.endAngle}
-                  innerRadius={INNER_RADIUS}
-                  outerRadius={hoveredLabel === arc.data.label ? OUTER_RADIUS + 4 : OUTER_RADIUS}
-                  padAngle={0.02}
-                  cornerRadius={3}
-                  fill={arc.data.color}
-                  opacity={
-                    hoveredLabel === null || hoveredLabel === arc.data.label
-                      ? 0.85
-                      : 0.4
-                  }
-                  className="transition-opacity"
-                  onMouseMove={(e) => {
-                    setHoveredLabel(arc.data.label);
-                    tooltip.showTooltip({
-                      tooltipData: {
-                        title: arc.data.label,
-                        items: [{
-                          color: arc.data.color,
-                          label: columns[valueColIdx]!,
-                          value: `${formatValue(arc.data.value)} (${((arc.data.value / total) * 100).toFixed(1)}%)`,
-                        }],
-                      },
-                      tooltipLeft: e.clientX,
-                      tooltipTop: e.clientY,
-                    });
-                  }}
-                  onMouseLeave={() => {
-                    setHoveredLabel(null);
-                    tooltip.hideTooltip();
-                  }}
-                />
-              ))
-            }
-          </Pie>
-          {/* Center total */}
-          <text
-            textAnchor="middle"
-            dy="-0.2em"
-            className={`text-[1.5em] font-mono font-semibold ${c("fill-text-bright", "fill-light-text-bright")}`}
-          >
-            {formatValue(total)}
-          </text>
-          <text
-            textAnchor="middle"
-            dy="1.2em"
-            className={`text-[0.65em] font-mono ${c("fill-text-ghost", "fill-light-text-ghost")}`}
-          >
-            total
-          </text>
-        </Group>
-      </svg>
+    <div className="flex flex-col items-center gap-4 py-4">
+      <ReactEChartsCore
+        ref={chartRef}
+        echarts={echarts}
+        option={option}
+        style={{ height: 240, width: 240 }}
+        notMerge
+        lazyUpdate
+        onEvents={onEvents}
+      />
 
       {/* Legend */}
       <div className="flex flex-wrap justify-center gap-x-4 gap-y-1">
@@ -163,15 +150,19 @@ export function DonutChart({ columns, rows, dark }: Readonly<DonutChartProps>) {
           <div
             key={d.label}
             className="flex items-center gap-1.5"
-            onMouseEnter={() => setHoveredLabel(d.label)}
-            onMouseLeave={() => setHoveredLabel(null)}
+            onMouseEnter={() => handleLegendHover(d.label)}
+            onMouseLeave={() => handleLegendHover(null)}
           >
             <span
               className="inline-block w-2 h-2 rounded-full shrink-0"
               style={{ backgroundColor: d.color }}
             />
             <span
-              className={`text-[0.75em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}
+              className={`text-[0.75em] font-mono ${
+                hoveredLabel !== null && hoveredLabel !== d.label
+                  ? "opacity-40"
+                  : c("text-text-muted", "text-light-text-muted")
+              }`}
             >
               {d.label}
             </span>
@@ -183,14 +174,6 @@ export function DonutChart({ columns, rows, dark }: Readonly<DonutChartProps>) {
           </div>
         ))}
       </div>
-
-      {tooltip.tooltipOpen && tooltip.tooltipData && (
-        <ChartTooltip
-          tooltipRef={tooltip.tooltipRef}
-          data={tooltip.tooltipData as TooltipData}
-          dark={dark}
-        />
-      )}
     </div>
   );
 }

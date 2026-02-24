@@ -35,3 +35,14 @@ export function getColorForCategory(name: string, index: number): string {
   if (severity) return severity;
   return GROUP_PALETTE[index % GROUP_PALETTE.length]!;
 }
+
+/**
+ * Resolve a CSS color value for use in canvas contexts (e.g. ECharts).
+ * CSS `var()` references are computed via getComputedStyle; other values pass through.
+ */
+export function resolveColor(cssColor: string): string {
+  if (!cssColor.startsWith("var(")) return cssColor;
+  const match = cssColor.match(/^var\(\s*(--[^),]+)/);
+  if (!match) return cssColor;
+  return getComputedStyle(document.documentElement).getPropertyValue(match[1]!).trim() || cssColor;
+}

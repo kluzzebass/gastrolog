@@ -1,15 +1,10 @@
-import { useState, useRef, useEffect } from "react";
-import { scaleBand, scaleLinear } from "@visx/scale";
-import { BarStack } from "@visx/shape";
-import { AxisBottom } from "@visx/axis";
-import { Group } from "@visx/group";
-import { ParentSize } from "@visx/responsive";
+import { useState, useRef } from "react";
+import ReactEChartsCore from "echarts-for-react/esm/core";
+import { echarts } from "./charts/echartsSetup";
 import { useThemeClass } from "../hooks/useThemeClass";
-import { clickableProps } from "../utils";
 import type { HistogramData } from "../utils/histogramData";
-import { AnimatedBar } from "./charts/AnimatedBar";
-import { SEVERITY_COLOR_MAP, GROUP_PALETTE } from "./charts/chartColors";
-import { ChartTooltip, useChartTooltip, type TooltipData } from "./charts/ChartTooltip";
+import { SEVERITY_COLOR_MAP, GROUP_PALETTE, resolveColor } from "./charts/chartColors";
+import type { EChartsOption } from "echarts";
 
 /**
  * Builds an ordered color map for all group values found in the data.
@@ -39,16 +34,6 @@ function buildColorMap(data: HistogramData): Map<string, string> {
   return colorMap;
 }
 
-interface StackDatum {
-  tsKey: string;
-  ts: Date;
-  index: number;
-  total: number;
-  [group: string]: number | string | Date;
-}
-
-const margin = { top: 4, right: 0, bottom: 0, left: 0 };
-
 export function HistogramChart({
   data,
   dark,
@@ -68,11 +53,10 @@ export function HistogramChart({
 }>) {
   const { buckets } = data;
   const c = useThemeClass(dark);
-  const tooltip = useChartTooltip();
-  const svgRef = useRef<SVGSVGElement>(null);
+  const chartContainerRef = useRef<HTMLDivElement>(null);
 
-  // Track which group is hovered for legend highlighting.
   const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
+  const [hoveredBar, setHoveredBar] = useState<number | null>(null);
 
   // Brush state.
   const [brushStart, setBrushStart] = useState<number | null>(null);
@@ -91,7 +75,6 @@ export function HistogramChart({
   const colorMap = buildColorMap(data);
   const groupKeys = [...colorMap.keys()];
 
-  // Check if any bucket has ungrouped ("other") counts for the legend.
   const hasOther = groupKeys.length > 0 && buckets.some((b) => {
     const groupSum = Object.values(b.groupCounts).reduce((a, v) => a + v, 0);
     return b.count - groupSum > 0;
@@ -103,42 +86,184 @@ export function HistogramChart({
   const totalCount = buckets.reduce((sum, b) => sum + b.count, 0);
   const barHeight = barHeightProp ?? 48;
 
-  // Build stack data: one datum per bucket, with a key per group + "other".
   const hasGroups = groupKeys.length > 0;
-  const stackKeys = hasGroups ? [...groupKeys, "__other"] : ["__total"];
+  const baseOpacity = dark ? 0.6 : 0.5;
 
-  const stackData: StackDatum[] = buckets.map((b, i) => {
-    const d: StackDatum = {
-      tsKey: b.ts.toISOString(),
-      ts: b.ts,
-      index: i,
-      total: b.count,
+  // ECharts canvas can't resolve CSS variables — compute copper once.
+  const copperColor = resolveColor("var(--color-copper)");
+
+  // Build ECharts series: one bar series per stack key.
+  // Opacity is baked per-item so we can brighten the hovered column.
+  const stackKeys = hasGroups ? [...groupKeys, "__other"] : ["__total"];
+  const categories = buckets.map((_, i) => String(i));
+
+  const seriesData = stackKeys.map((key) => {
+    const isOther = key === "__other";
+    const isTotal = key === "__total";
+    const displayName = isTotal ? "count" : isOther ? "other" : key;
+    const color = isTotal || isOther
+      ? copperColor
+      : resolveColor(colorMap.get(key) ?? copperColor);
+
+    return {
+      name: displayName,
+      type: "bar" as const,
+      stack: "total",
+      data: buckets.map((b, i) => {
+        let value: number;
+        if (isTotal) value = b.count;
+        else if (isOther) {
+          const groupSum = Object.values(b.groupCounts).reduce((a, v) => a + v, 0);
+          value = Math.max(0, b.count - groupSum);
+        } else {
+          value = b.groupCounts[key] ?? 0;
+        }
+        return {
+          value,
+          itemStyle: {
+            color,
+            opacity: hoveredBar === i ? 1 : baseOpacity,
+            borderRadius: 0,
+          },
+        };
+      }),
+      emphasis: { disabled: true },
+      barCategoryGap: "8%",
+      cursor: onSegmentClick && !isTotal ? "pointer" : "crosshair",
     };
-    if (hasGroups) {
-      let groupSum = 0;
-      for (const key of groupKeys) {
-        const count = b.groupCounts[key] ?? 0;
-        d[key] = count;
-        groupSum += count;
-      }
-      d.__other = b.count - groupSum;
-    } else {
-      d.__total = b.count;
-    }
-    return d;
   });
 
-  const maxCount = Math.max(...buckets.map((b) => b.count), 1);
+  // Time formatting.
+  const rangeMs =
+    buckets.length > 1 ? lastBucket.ts.getTime() - firstBucket.ts.getTime() : 0;
 
-  const colorScale = (key: string): string => {
-    if (key === "__total") return "var(--color-copper)";
-    if (key === "__other") return "var(--color-copper)";
-    return colorMap.get(key) ?? "var(--color-copper)";
+  const formatTime = (d: Date) => {
+    if (rangeMs > 24 * 60 * 60 * 1000) {
+      return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    }
+    if (rangeMs < 60 * 60 * 1000) {
+      return d.toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+    }
+    return d.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
   };
 
-  // Helpers for brush.
+  // Build tooltip HTML for a bucket index.
+  const tooltipFormatter = (params: any) => {
+    const items: any[] = Array.isArray(params) ? params : [params];
+    if (items.length === 0) return "";
+    const bucketIdx = items[0].dataIndex as number;
+    const bucket = buckets[bucketIdx];
+    if (!bucket) return "";
+
+    const lines: string[] = [];
+
+    if (hasGroups) {
+      // Reversed order to match visual stacking (top-to-bottom).
+      const groupSum = Object.values(bucket.groupCounts).reduce((a, b) => a + b, 0);
+      const other = bucket.count - groupSum;
+      if (other > 0) {
+        const isBold = hoveredGroup === "other";
+        const dot = `<span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:${copperColor};margin-right:5px;"></span>`;
+        const labelStyle = isBold ? "font-weight:bold" : hoveredGroup ? "opacity:0.5" : "opacity:0.7";
+        lines.push(`${dot}<span style="${labelStyle}">other</span> <span style="${isBold ? "font-weight:bold" : ""}">${other.toLocaleString()}</span>`);
+      }
+      for (const key of [...groupKeys].reverse()) {
+        const count = bucket.groupCounts[key];
+        if (count && count > 0) {
+          const isBold = hoveredGroup === key;
+          const clr = resolveColor(colorMap.get(key) ?? copperColor);
+          const dot = `<span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:${clr};margin-right:5px;"></span>`;
+          const labelStyle = isBold ? "font-weight:bold" : hoveredGroup ? "opacity:0.5" : "opacity:0.7";
+          lines.push(`${dot}<span style="${labelStyle}">${key}</span> <span style="${isBold ? "font-weight:bold" : ""}">${count.toLocaleString()}</span>`);
+        }
+      }
+    }
+
+    const header = `<div style="opacity:0.7">${bucket.count.toLocaleString()} \u00b7 ${formatTime(bucket.ts)}</div>`;
+    return header + lines.join("<br/>");
+  };
+
+  const tooltipBg = dark
+    ? resolveColor("var(--color-ink-surface)") || "#1a1a1a"
+    : resolveColor("var(--color-light-surface)") || "#ffffff";
+  const tooltipBorder = dark
+    ? resolveColor("var(--color-ink-border-subtle)") || "rgba(255,255,255,0.08)"
+    : resolveColor("var(--color-light-border-subtle)") || "rgba(0,0,0,0.08)";
+  const tooltipText = dark
+    ? resolveColor("var(--color-text-bright)") || "#e5e5e5"
+    : resolveColor("var(--color-light-text-bright)") || "#1a1a1a";
+
+  const option: EChartsOption = {
+    animation: true,
+    animationDuration: 400,
+    animationDurationUpdate: 300,
+    animationEasing: "cubicInOut",
+    animationEasingUpdate: "cubicInOut",
+    grid: {
+      top: 4,
+      right: 0,
+      bottom: 0,
+      left: 0,
+    },
+    xAxis: {
+      type: "category",
+      data: categories,
+      show: false,
+    },
+    yAxis: {
+      type: "value",
+      show: false,
+    },
+    tooltip: {
+      trigger: "axis",
+      axisPointer: { type: "none" },
+      backgroundColor: tooltipBg,
+      borderColor: tooltipBorder,
+      textStyle: {
+        fontFamily: "'IBM Plex Mono', monospace",
+        fontSize: 12,
+        color: tooltipText,
+      },
+      padding: [4, 8],
+      extraCssText: "border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);",
+      formatter: tooltipFormatter,
+    },
+    series: seriesData,
+  };
+
+  // ECharts event handlers for hover highlighting and segment click.
+  const onEvents = {
+    mouseover: (params: any) => {
+      const name = params.seriesName as string;
+      const group = name === "count" ? null : name;
+      setHoveredGroup(group);
+      setHoveredBar(params.dataIndex as number);
+    },
+    mouseout: () => {
+      setHoveredGroup(null);
+      setHoveredBar(null);
+    },
+    click: (params: any) => {
+      if (!onSegmentClick) return;
+      const name = params.seriesName as string;
+      if (name !== "count") {
+        onSegmentClick(name);
+      }
+    },
+  };
+
+  // Brush helpers — use the chart container div for hit-testing.
   const getBucketIndex = (clientX: number): number => {
-    const el = svgRef.current;
+    const el = chartContainerRef.current;
     if (!el) return 0;
     const rect = el.getBoundingClientRect();
     const x = clientX - rect.left;
@@ -148,6 +273,7 @@ export function HistogramChart({
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!onBrushSelect) return;
+    if (e.button !== 0) return;
     e.preventDefault();
     const idx = getBucketIndex(e.clientX);
     setBrushStart(idx);
@@ -233,33 +359,9 @@ export function HistogramChart({
     globalThis.addEventListener("mouseup", onMouseUp);
   };
 
-  // Time formatting.
-  const rangeMs =
-    buckets.length > 1 ? lastBucket.ts.getTime() - firstBucket.ts.getTime() : 0;
-
-  const formatTime = (d: Date) => {
-    if (rangeMs > 24 * 60 * 60 * 1000) {
-      return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    }
-    if (rangeMs < 60 * 60 * 1000) {
-      return d.toLocaleTimeString("en-US", {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: false,
-      });
-    }
-    return d.toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
-  };
-
   const labelCount = Math.min(5, buckets.length);
   const labelStep = Math.max(1, Math.floor(buckets.length / labelCount));
 
-  // Pan delta.
   const windowMs =
     buckets.length > 1 ? lastBucket.ts.getTime() - firstBucket.ts.getTime() : 0;
   const panDeltaMs =
@@ -283,59 +385,6 @@ export function HistogramChart({
     const d = Math.floor(abs / 86_400_000);
     const h = Math.round((abs % 86_400_000) / 3_600_000);
     return h > 0 ? `${sign}${d}d ${h}h` : `${sign}${d}d`;
-  };
-
-  // Build tooltip data for a bucket (no side effects).
-  const buildBucketTooltipData = (
-    bucket: HistogramData["buckets"][number],
-    highlightGroup?: string,
-  ): TooltipData => {
-    const items: TooltipData["items"] = [];
-    if (hasGroups) {
-      // "other" is the topmost stack segment — list it first.
-      const groupSum = Object.values(bucket.groupCounts).reduce((a, b) => a + b, 0);
-      const other = bucket.count - groupSum;
-      if (other > 0) {
-        items.push({
-          color: "var(--color-copper)",
-          label: "other",
-          value: other.toLocaleString(),
-        });
-      }
-      // Reversed order to match visual stacking (top-to-bottom).
-      for (const key of [...groupKeys].reverse()) {
-        const count = bucket.groupCounts[key];
-        if (count && count > 0) {
-          items.push({
-            color: colorMap.get(key) ?? "var(--color-copper)",
-            label: key,
-            value: count.toLocaleString(),
-          });
-        }
-      }
-    }
-    const title = `${bucket.count.toLocaleString()} \u00b7 ${formatTime(bucket.ts)}`;
-    return { title, items, highlightLabel: highlightGroup };
-  };
-
-  // Tooltip for a bucket (position + data).
-  const showBucketTooltip = (
-    bucket: HistogramData["buckets"][number],
-    e: React.MouseEvent,
-    highlightGroup?: string,
-  ) => {
-    tooltip.showTooltip({
-      tooltipData: buildBucketTooltipData(bucket, highlightGroup),
-      tooltipLeft: e.clientX,
-      tooltipTop: e.clientY,
-    });
-  };
-
-  // Data-only refresh (no position change) for when poll data arrives while hovering.
-  const refreshTooltip = (bucketIdx: number, highlightGroup?: string) => {
-    const bucket = buckets[bucketIdx];
-    if (!bucket) return;
-    tooltip.updateData(buildBucketTooltipData(bucket, highlightGroup));
   };
 
   return (
@@ -408,7 +457,12 @@ export function HistogramChart({
         </div>
       ) : null}
 
-      <div className="relative" style={{ height: barHeight }}>
+      <div
+        ref={chartContainerRef}
+        className="relative"
+        style={{ height: barHeight }}
+        onMouseDown={handleMouseDown}
+      >
         {/* Pan delta indicator */}
         {panOffset !== 0 && (
           <div
@@ -420,35 +474,29 @@ export function HistogramChart({
             {formatDuration(panDeltaMs)}
           </div>
         )}
-        <ParentSize>
-          {({ width }) =>
-            width > 0 ? (
-              <HistogramSVG
-                width={width}
-                height={barHeight}
-                stackData={stackData}
-                stackKeys={stackKeys}
-                maxCount={maxCount}
-                colorScale={colorScale}
-                buckets={buckets}
-                groupKeys={groupKeys}
-                colorMap={colorMap}
-                hasGroups={hasGroups}
-                dark={dark}
-                svgRef={svgRef}
-                brushLo={brushLo}
-                brushHi={brushHi}
-                onMouseDown={handleMouseDown}
-                onSegmentClick={onSegmentClick}
-                showBucketTooltip={showBucketTooltip}
-                refreshTooltip={refreshTooltip}
-                hideTooltip={tooltip.hideTooltip}
-                onBrushSelect={onBrushSelect}
-                onHoverGroup={setHoveredGroup}
-              />
-            ) : null
-          }
-        </ParentSize>
+
+        {/* ECharts canvas */}
+        <ReactEChartsCore
+          echarts={echarts}
+          option={option}
+          style={{ height: barHeight, width: "100%", cursor: onBrushSelect ? "crosshair" : "default" }}
+          notMerge
+          lazyUpdate
+          onEvents={onEvents}
+        />
+
+        {/* Brush selection overlay (pointer-events: none, purely visual) */}
+        {brushLo !== null && brushHi !== null && (
+          <div
+            className="absolute top-0 bottom-0 rounded pointer-events-none z-10"
+            style={{
+              left: `${(brushLo / buckets.length) * 100}%`,
+              width: `${((brushHi - brushLo + 1) / buckets.length) * 100}%`,
+              backgroundColor: "var(--color-copper)",
+              opacity: 0.2,
+            }}
+          />
+        )}
       </div>
 
       {/* Time axis with pan arrows + draggable labels */}
@@ -500,225 +548,6 @@ export function HistogramChart({
           </button>
         )}
       </div>
-
-      {/* Tooltip */}
-      {tooltip.tooltipOpen && tooltip.tooltipData && (
-        <ChartTooltip
-          tooltipRef={tooltip.tooltipRef}
-          data={tooltip.tooltipData as TooltipData}
-          dark={dark}
-        />
-      )}
     </div>
-  );
-}
-
-/** The inner SVG chart — separated so ParentSize can provide width. */
-function HistogramSVG({
-  width,
-  height,
-  stackData,
-  stackKeys,
-  maxCount,
-  colorScale,
-  buckets,
-  groupKeys,
-  colorMap,
-  hasGroups,
-  dark,
-  svgRef,
-  brushLo,
-  brushHi,
-  onMouseDown,
-  onSegmentClick,
-  showBucketTooltip,
-  refreshTooltip,
-  hideTooltip,
-  onBrushSelect,
-  onHoverGroup,
-}: Readonly<{
-  width: number;
-  height: number;
-  stackData: StackDatum[];
-  stackKeys: string[];
-  maxCount: number;
-  colorScale: (key: string) => string;
-  buckets: HistogramData["buckets"];
-  groupKeys: string[];
-  colorMap: Map<string, string>;
-  hasGroups: boolean;
-  dark: boolean;
-  svgRef: React.RefObject<SVGSVGElement | null>;
-  brushLo: number | null;
-  brushHi: number | null;
-  onMouseDown: (e: React.MouseEvent) => void;
-  onSegmentClick?: (level: string) => void;
-  showBucketTooltip: (
-    bucket: HistogramData["buckets"][number],
-    e: React.MouseEvent,
-    highlightGroup?: string,
-  ) => void;
-  refreshTooltip: (bucketIdx: number, highlightGroup?: string) => void;
-  hideTooltip: () => void;
-  onBrushSelect?: (start: Date, end: Date) => void;
-  onHoverGroup: (group: string | null) => void;
-}>) {
-  const c = useThemeClass(dark);
-  const [hoveredBar, setHoveredBar] = useState<number | null>(null);
-  const hoveredGroupRef = useRef<string | undefined>(undefined);
-  const mouseYRef = useRef<number>(0);
-
-  const xMax = width - margin.left - margin.right;
-  const yMax = height - margin.top - margin.bottom;
-
-  // When bucket data changes while hovering, recompute which segment the
-  // (stationary) cursor is now over and refresh the tooltip accordingly.
-  useEffect(() => {
-    if (hoveredBar === null) return;
-    const datum = stackData[hoveredBar];
-    if (!datum) return;
-
-    // Rebuild yScale from current props to hit-test the new stack layout.
-    const ys = scaleLinear<number>({ domain: [0, maxCount], range: [yMax, 0] });
-    let cumulative = 0;
-    let groupKey: string | undefined;
-    for (const key of stackKeys) {
-      const val = (datum[key] as number) || 0;
-      if (val <= 0) { cumulative += val; continue; }
-      const segTop = ys(cumulative + val) ?? 0;
-      const segBottom = ys(cumulative) ?? 0;
-      if (mouseYRef.current >= segTop && mouseYRef.current <= segBottom) {
-        groupKey = key === "__total" ? undefined : key === "__other" ? "other" : key;
-        break;
-      }
-      cumulative += val;
-    }
-
-    hoveredGroupRef.current = groupKey;
-    onHoverGroup(groupKey ?? null);
-    refreshTooltip(hoveredBar, groupKey);
-  }, [buckets]);
-
-  const xScale = scaleBand<string>({
-    domain: stackData.map((d) => d.tsKey),
-    range: [0, xMax],
-    padding: 0.08,
-  });
-
-  const yScale = scaleLinear<number>({
-    domain: [0, maxCount],
-    range: [yMax, 0],
-  });
-
-  return (
-    <svg
-      ref={svgRef}
-      width={width}
-      height={height}
-      className={`select-none ${onBrushSelect ? "cursor-crosshair" : ""}`}
-      onMouseDown={onMouseDown}
-      onMouseLeave={() => {
-        setHoveredBar(null);
-        onHoverGroup(null);
-        hideTooltip();
-      }}
-    >
-      <Group left={margin.left} top={margin.top}>
-        {/* Brush overlay */}
-        {brushLo !== null && brushHi !== null && (
-          <rect
-            x={(brushLo / buckets.length) * xMax}
-            y={0}
-            width={((brushHi - brushLo + 1) / buckets.length) * xMax}
-            height={yMax}
-            fill="var(--color-copper)"
-            opacity={0.2}
-            rx={2}
-            className="pointer-events-none"
-          />
-        )}
-
-        <BarStack
-          data={stackData}
-          keys={stackKeys}
-          x={(d) => d.tsKey}
-          xScale={xScale}
-          yScale={yScale}
-          color={colorScale}
-        >
-          {(barStacks) => {
-            // Pre-compute the topmost stack index per column for rounded corners.
-            const topStackPerColumn = new Map<number, number>();
-            for (let si = barStacks.length - 1; si >= 0; si--) {
-              for (const bar of barStacks[si]!.bars) {
-                if (bar.height > 0 && !topStackPerColumn.has(bar.index)) {
-                  topStackPerColumn.set(bar.index, si);
-                }
-              }
-            }
-
-            return barStacks.map((barStack) =>
-              barStack.bars.map((bar) => {
-                const bucketIdx = bar.index;
-                const bucket = buckets[bucketIdx]!;
-                const isHovered = hoveredBar === bucketIdx;
-                const groupKey = bar.key === "__total"
-                  ? undefined
-                  : bar.key === "__other"
-                    ? "other"
-                    : bar.key;
-
-                if (bar.height <= 0) return null;
-
-                const isTop = topStackPerColumn.get(bucketIdx) === barStack.index;
-
-                return (
-                  <AnimatedBar
-                    key={`${barStack.index}-${bar.index}`}
-                    x={bar.x}
-                    y={bar.y}
-                    width={bar.width}
-                    height={bar.height}
-                    fill={bar.color}
-                    opacity={isHovered ? 1 : dark ? 0.6 : 0.5}
-                    rx={isTop ? 2 : 0}
-                    className="transition-opacity"
-                    onMouseMove={(e) => {
-                      const svg = svgRef.current;
-                      if (svg) {
-                        mouseYRef.current = e.clientY - svg.getBoundingClientRect().top - margin.top;
-                      }
-                      setHoveredBar(bucketIdx);
-                      hoveredGroupRef.current = groupKey;
-                      onHoverGroup(groupKey ?? null);
-                      showBucketTooltip(bucket, e, groupKey);
-                    }}
-                    onMouseDown={
-                      onSegmentClick && groupKey
-                        ? (e) => e.stopPropagation()
-                        : undefined
-                    }
-                    onClick={
-                      onSegmentClick && groupKey
-                        ? (e) => {
-                            e.stopPropagation();
-                            onSegmentClick(groupKey);
-                          }
-                        : undefined
-                    }
-                    {...(onSegmentClick && groupKey
-                      ? {
-                          ...clickableProps(() => onSegmentClick(groupKey)),
-                          cursor: "pointer",
-                        }
-                      : {})}
-                  />
-                );
-              }),
-            );
-          }}
-        </BarStack>
-      </Group>
-    </svg>
   );
 }
