@@ -131,7 +131,7 @@ export function HistogramChart({
           itemStyle: {
             color,
             opacity: hoveredBar === i ? 1 : baseOpacity,
-            borderRadius: 0,
+            borderRadius: [2, 2, 0, 0],
           },
         };
       }),
