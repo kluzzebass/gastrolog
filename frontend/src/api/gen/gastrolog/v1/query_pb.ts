@@ -1184,3 +1184,193 @@ export class GetSyntaxResponse extends Message<GetSyntaxResponse> {
   }
 }
 
+/**
+ * @generated from message gastrolog.v1.ValidateQueryRequest
+ */
+export class ValidateQueryRequest extends Message<ValidateQueryRequest> {
+  /**
+   * @generated from field: string expression = 1;
+   */
+  expression = "";
+
+  constructor(data?: PartialMessage<ValidateQueryRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ValidateQueryRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ValidateQueryRequest {
+    return new ValidateQueryRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ValidateQueryRequest {
+    return new ValidateQueryRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ValidateQueryRequest {
+    return new ValidateQueryRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ValidateQueryRequest | PlainMessage<ValidateQueryRequest> | undefined, b: ValidateQueryRequest | PlainMessage<ValidateQueryRequest> | undefined): boolean {
+    return proto3.util.equals(ValidateQueryRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ValidateQueryResponse
+ */
+export class ValidateQueryResponse extends Message<ValidateQueryResponse> {
+  /**
+   * @generated from field: bool valid = 1;
+   */
+  valid = false;
+
+  /**
+   * empty if valid
+   *
+   * @generated from field: string error_message = 2;
+   */
+  errorMessage = "";
+
+  /**
+   * byte offset in original expression (-1 if valid)
+   *
+   * @generated from field: int32 error_offset = 3;
+   */
+  errorOffset = 0;
+
+  constructor(data?: PartialMessage<ValidateQueryResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ValidateQueryResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "valid", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 2, name: "error_message", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "error_offset", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ValidateQueryResponse {
+    return new ValidateQueryResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ValidateQueryResponse {
+    return new ValidateQueryResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ValidateQueryResponse {
+    return new ValidateQueryResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ValidateQueryResponse | PlainMessage<ValidateQueryResponse> | undefined, b: ValidateQueryResponse | PlainMessage<ValidateQueryResponse> | undefined): boolean {
+    return proto3.util.equals(ValidateQueryResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.GetPipelineFieldsRequest
+ */
+export class GetPipelineFieldsRequest extends Message<GetPipelineFieldsRequest> {
+  /**
+   * @generated from field: string expression = 1;
+   */
+  expression = "";
+
+  /**
+   * byte offset of cursor
+   *
+   * @generated from field: int32 cursor = 2;
+   */
+  cursor = 0;
+
+  /**
+   * fields frontend has seen from search results
+   *
+   * @generated from field: repeated string base_fields = 3;
+   */
+  baseFields: string[] = [];
+
+  constructor(data?: PartialMessage<GetPipelineFieldsRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetPipelineFieldsRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "cursor", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 3, name: "base_fields", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetPipelineFieldsRequest {
+    return new GetPipelineFieldsRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetPipelineFieldsRequest {
+    return new GetPipelineFieldsRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetPipelineFieldsRequest {
+    return new GetPipelineFieldsRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetPipelineFieldsRequest | PlainMessage<GetPipelineFieldsRequest> | undefined, b: GetPipelineFieldsRequest | PlainMessage<GetPipelineFieldsRequest> | undefined): boolean {
+    return proto3.util.equals(GetPipelineFieldsRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.GetPipelineFieldsResponse
+ */
+export class GetPipelineFieldsResponse extends Message<GetPipelineFieldsResponse> {
+  /**
+   * available fields at cursor position
+   *
+   * @generated from field: repeated string fields = 1;
+   */
+  fields: string[] = [];
+
+  /**
+   * context keywords ("by", "as", "rdns", etc.)
+   *
+   * @generated from field: repeated string completions = 2;
+   */
+  completions: string[] = [];
+
+  constructor(data?: PartialMessage<GetPipelineFieldsResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetPipelineFieldsResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "fields", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 2, name: "completions", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetPipelineFieldsResponse {
+    return new GetPipelineFieldsResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetPipelineFieldsResponse {
+    return new GetPipelineFieldsResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetPipelineFieldsResponse {
+    return new GetPipelineFieldsResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetPipelineFieldsResponse | PlainMessage<GetPipelineFieldsResponse> | undefined, b: GetPipelineFieldsResponse | PlainMessage<GetPipelineFieldsResponse> | undefined): boolean {
+    return proto3.util.equals(GetPipelineFieldsResponse, a, b);
+  }
+}
+

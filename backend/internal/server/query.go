@@ -359,6 +359,35 @@ func (s *QueryServer) GetSyntax(
 	}), nil
 }
 
+// ValidateQuery checks whether a query expression is syntactically valid.
+func (s *QueryServer) ValidateQuery(
+	_ context.Context,
+	req *connect.Request[apiv1.ValidateQueryRequest],
+) (*connect.Response[apiv1.ValidateQueryResponse], error) {
+	valid, msg, offset := querylang.ValidateExpression(req.Msg.Expression)
+	return connect.NewResponse(&apiv1.ValidateQueryResponse{
+		Valid:        valid,
+		ErrorMessage: msg,
+		ErrorOffset:  int32(offset), //nolint:gosec // G115: offset fits in int32
+	}), nil
+}
+
+// GetPipelineFields returns available fields and completions at cursor position.
+func (s *QueryServer) GetPipelineFields(
+	_ context.Context,
+	req *connect.Request[apiv1.GetPipelineFieldsRequest],
+) (*connect.Response[apiv1.GetPipelineFieldsResponse], error) {
+	fields, completions := querylang.FieldsAtCursor(
+		req.Msg.Expression,
+		int(req.Msg.Cursor),
+		req.Msg.BaseFields,
+	)
+	return connect.NewResponse(&apiv1.GetPipelineFieldsResponse{
+		Fields:      fields,
+		Completions: completions,
+	}), nil
+}
+
 // protoToQuery converts a proto Query to the internal query.Query type.
 // If the Expression field is set, it is parsed server-side and takes
 // precedence over the legacy Tokens/KvPredicates fields.

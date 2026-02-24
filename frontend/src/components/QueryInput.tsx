@@ -11,6 +11,8 @@ interface QueryInputProps {
   placeholder?: string;
   dark: boolean;
   syntax?: SyntaxSets;
+  errorOffset?: number; // byte offset from backend validation (-1 = valid, -2 = use client-side)
+  errorMessage?: string | null; // error message from backend validation
   children?: ReactNode;
 }
 
@@ -73,11 +75,14 @@ export const QueryInput = forwardRef<HTMLTextAreaElement, QueryInputProps>(
       placeholder,
       dark,
       syntax,
+      errorOffset = -2,
+      errorMessage: errorMessageProp,
       children,
     },
     ref,
   ) => {
-    const { spans, errorMessage } = tokenize(value, syntax);
+    const { spans, errorMessage: clientErrorMessage } = tokenize(value, syntax, errorOffset);
+    const errorMessage = errorMessageProp ?? clientErrorMessage;
 
     const c = useThemeClass(dark);
 

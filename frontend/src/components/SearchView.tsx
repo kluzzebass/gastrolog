@@ -62,6 +62,8 @@ import { ResultsToolbar } from "./ResultsToolbar";
 import { QueryBar } from "./QueryBar";
 import { useConfig, useServerConfig } from "../api/hooks/useConfig";
 import { useSyntax } from "../api/hooks/useSyntax";
+import { useValidation } from "../hooks/useValidation";
+import { usePipelineFields } from "../hooks/usePipelineFields";
 
 export function SearchView() {
   const { q, help: helpParam, settings: settingsParam, inspector: inspectorParam } = useRouterSearch({ strict: false }) as { q: string; help?: string; settings?: string; inspector?: string };
@@ -212,6 +214,7 @@ export function SearchView() {
   const {
     tableResult: histogramTableResult,
     search: histogramSearch,
+    reset: histogramReset,
   } = useSearch({ onError: toastError });
   const {
     before: contextBefore,
@@ -227,6 +230,7 @@ export function SearchView() {
   const currentUser = useCurrentUser();
   const syntaxQuery = useSyntax();
   const syntax: SyntaxSets | undefined = syntaxQuery.data;
+  const validation = useValidation(draft);
 
   // Navigate to a new query — pushes browser history, preserving current route.
   const setUrlQuery = (newQ: string) => {
@@ -300,7 +304,9 @@ export function SearchView() {
         resetFollow();
         loadMoreGateRef.current = false;
         search(q, false, true);
-        if (!hasPipeOutsideQuotes(q)) {
+        if (hasPipeOutsideQuotes(q)) {
+          histogramReset();
+        } else {
           const timechartExpr = q.trim()
             ? `${q.trim()} | timechart 50 by level`
             : `| timechart 50 by level`;
@@ -411,12 +417,14 @@ export function SearchView() {
       // Query unchanged — re-run the search directly since the URL
       // won't change and the effect won't fire.
       search(q, false, true);
-      if (!hasPipeOutsideQuotes(q)) {
-          const timechartExpr = q.trim()
-            ? `${q.trim()} | timechart 50 by level`
-            : `| timechart 50 by level`;
-          histogramSearch(timechartExpr, false, true);
-        }
+      if (hasPipeOutsideQuotes(q)) {
+        histogramReset();
+      } else {
+        const timechartExpr = q.trim()
+          ? `${q.trim()} | timechart 50 by level`
+          : `| timechart 50 by level`;
+        histogramSearch(timechartExpr, false, true);
+      }
       if (showPlan) explain(q);
     } else {
       navigate({ to: "/search", search: (prev: Record<string, unknown>) => ({ ...prev, q: normalized }), replace: false } as any);
@@ -548,7 +556,7 @@ export function SearchView() {
     : null;
   const liveHistogramData = useLiveHistogram(followRecords);
   const tokens = extractTokens(q);
-  const { hasErrors: draftHasErrors, hasPipeline: draftIsPipeline } = tokenize(draft, syntax);
+  const { hasErrors: draftHasErrors, hasPipeline: draftIsPipeline } = tokenize(draft, syntax, validation.errorOffset);
   const isPipelineResult = tableResult !== null;
   const queryIsPipeline = hasPipeOutsideQuotes(q);
 
@@ -588,7 +596,9 @@ export function SearchView() {
     }
     return merged;
   })();
-  const autocomplete = useAutocomplete(draft, cursorPos, allFields, syntax);
+  const baseFieldNames = allFields.map((f) => f.key);
+  const pipeFields = usePipelineFields(draft, cursorPos, baseFieldNames);
+  const autocomplete = useAutocomplete(draft, cursorPos, allFields, syntax, pipeFields.fields, pipeFields.completions);
 
   const handleFieldSelect = (key: string, value: string) => {
     const needsQuotes = /[^a-zA-Z0-9_\-.]/.test(value);
@@ -747,6 +757,8 @@ export function SearchView() {
             showPlan={showPlan}
             handleShowPlan={handleShowPlan}
             syntax={syntax}
+            errorOffset={validation.errorOffset}
+            errorMessage={validation.errorMessage}
           />
 
           {/* Execution Plan Dialog */}
