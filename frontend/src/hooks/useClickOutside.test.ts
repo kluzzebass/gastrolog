@@ -25,8 +25,8 @@ describe("useClickOutside", () => {
     expect(onClose).toHaveBeenCalled();
 
     // Clean up
-    document.body.removeChild(outside);
-    document.body.removeChild(inside);
+    outside.remove();
+    inside.remove();
   });
 
   test("does not call onClose when clicking inside the ref", () => {
@@ -49,7 +49,7 @@ describe("useClickOutside", () => {
     expect(onClose).not.toHaveBeenCalled();
 
     // Clean up
-    document.body.removeChild(inside);
+    inside.remove();
   });
 
   test("calls onClose on Escape key", () => {
@@ -69,7 +69,7 @@ describe("useClickOutside", () => {
     expect(onClose).toHaveBeenCalled();
 
     // Clean up
-    document.body.removeChild(el);
+    el.remove();
   });
 
   test("does not call onClose on non-Escape keys", () => {
@@ -88,6 +88,6 @@ describe("useClickOutside", () => {
 
     expect(onClose).not.toHaveBeenCalled();
 
-    document.body.removeChild(el);
+    el.remove();
   });
 });

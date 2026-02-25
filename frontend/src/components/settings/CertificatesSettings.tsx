@@ -2,13 +2,18 @@ import { useReducer } from "react";
 import { unzipSync, decompressSync } from "fflate";
 import { HelpButton } from "../HelpButton";
 
+function stripNul(s: string): string {
+  const idx = s.indexOf("\0");
+  return idx !== -1 ? s.slice(0, idx) : s;
+}
+
 function parseTar(data: Uint8Array): [string, Uint8Array][] {
   const entries: [string, Uint8Array][] = [];
   let offset = 0;
   while (offset + 512 <= data.length) {
     const header = data.subarray(offset, offset + 512);
-    const name = new TextDecoder().decode(header.subarray(0, 100)).replace(/\0.*$/, "");
-    const sizeStr = new TextDecoder().decode(header.subarray(124, 136)).replace(/\0.*$/, "");
+    const name = stripNul(new TextDecoder().decode(header.subarray(0, 100)));
+    const sizeStr = stripNul(new TextDecoder().decode(header.subarray(124, 136)));
     const size = parseInt(sizeStr, 8) || 0;
     offset += 512;
     if (name && size > 0 && offset + size <= data.length) {
@@ -315,6 +320,23 @@ function FilesCertForm({
   );
 }
 
+function handleDragOver(e: React.DragEvent) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "copy";
+}
+
+function handleDragEnter(e: React.DragEvent) {
+  e.preventDefault();
+  e.currentTarget.classList.add("ring-2", "ring-copper");
+}
+
+function handleDragLeave(e: React.DragEvent) {
+  e.preventDefault();
+  if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+    e.currentTarget.classList.remove("ring-2", "ring-copper");
+  }
+}
+
 export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
   const [form, dispatch] = useReducer(certFormReducer, certFormInitial);
@@ -362,7 +384,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
       addToast(`Certificate "${n}" saved`, "info");
       resetForm();
     } catch (err: unknown) {
-      const msg = (err as Error)?.message ?? "Failed to save certificate";
+      const msg = err instanceof Error ? err.message : "Failed to save certificate";
       addToast(msg, "error");
     }
   };
@@ -390,7 +412,8 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
       addToast(`Certificate "${n}" saved`, "info");
       resetForm();
     } catch (err: unknown) {
-      addToast((err as Error)?.message ?? "Failed to save certificate", "error");
+      const msg = err instanceof Error ? err.message : "Failed to save certificate";
+      addToast(msg, "error");
     }
   };
 
@@ -415,7 +438,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
       addToast(`Certificate "${displayName}" saved`, "info");
       dispatch({ type: "setExpanded", value: null });
     } catch (err: unknown) {
-      const msg = (err as Error)?.message ?? "Failed to save certificate";
+      const msg = err instanceof Error ? err.message : "Failed to save certificate";
       addToast(msg, "error");
     }
   };
@@ -440,7 +463,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
       addToast(`Certificate "${displayName}" saved`, "info");
       dispatch({ type: "setExpanded", value: null });
     } catch (err: unknown) {
-      const msg = (err as Error)?.message ?? "Failed to save certificate";
+      const msg = err instanceof Error ? err.message : "Failed to save certificate";
       addToast(msg, "error");
     }
   };
@@ -451,7 +474,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
       await deleteCert.mutateAsync(id);
       addToast(`Certificate "${certName}" deleted`, "info");
     } catch (err: unknown) {
-      const msg = (err as Error)?.message ?? "Failed to delete certificate";
+      const msg = err instanceof Error ? err.message : "Failed to delete certificate";
       addToast(msg, "error");
     }
   };
@@ -459,12 +482,12 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const startAddPem = () => dispatch({ type: "startAdd", source: "pem" });
   const startAddFiles = () => dispatch({ type: "startAdd", source: "files" });
 
-  if (expanded && certData && certData.id === expanded && syncedCertId !== expanded) {
+  if (expanded && certData?.id === expanded && syncedCertId !== expanded) {
     dispatch({
       type: "syncFromCert",
-      certPem: certData.certPem ?? "",
-      certFile: certData.certFile ?? "",
-      keyFile: certData.keyFile ?? "",
+      certPem: certData.certPem,
+      certFile: certData.certFile,
+      keyFile: certData.keyFile,
       setAsDefault: defaultCert === expanded,
       syncedCertId: expanded,
     });
@@ -521,24 +544,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
     }
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "copy";
-  };
-
-  const handleDragEnter = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.currentTarget.classList.add("ring-2", "ring-copper");
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-      e.currentTarget.classList.remove("ring-2", "ring-copper");
-    }
-  };
-
-  const isExpandedFileBased = expanded && certData && certData.id === expanded && !!(certData.certFile && certData.keyFile);
+  const isExpandedFileBased = expanded && certData?.id === expanded && !!(certData.certFile && certData.keyFile);
 
   if (isLoading) {
     return (

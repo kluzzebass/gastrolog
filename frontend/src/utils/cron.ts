@@ -65,6 +65,7 @@ const DOW_NAMES: Record<string, number> = {
   sat: 6,
 };
 
+// eslint-disable-next-line sonarjs/cognitive-complexity -- inherently complex cron field validation with ranges, steps, lists, and names
 function validateField(
   field: string,
   min: number,
@@ -78,7 +79,7 @@ function validateField(
   const parts = field.split(",");
   for (const part of parts) {
     // Step value: */5 or 1-30/5
-    const stepMatch = part.match(/^(.+)\/(\d+)$/);
+    const stepMatch = /^(.+)\/(\d+)$/.exec(part);
     const base = stepMatch ? stepMatch[1]! : part;
     const step = stepMatch ? parseInt(stepMatch[2]!, 10) : null;
 
@@ -92,7 +93,7 @@ function validateField(
     }
 
     // Range: 1-5
-    const rangeMatch = base.match(/^([a-zA-Z0-9]+)-([a-zA-Z0-9]+)$/);
+    const rangeMatch = /^([a-zA-Z0-9]+)-([a-zA-Z0-9]+)$/.exec(base);
     if (rangeMatch) {
       const lo = parseFieldValue(rangeMatch[1]!, min, max, names);
       const hi = parseFieldValue(rangeMatch[2]!, min, max, names);
@@ -146,8 +147,12 @@ export function validateCron(expr: string): { valid: boolean; error?: string } {
     // Month names for month field, DOW names for dow field.
     const monthIdx = fields.length === 6 ? 4 : 3;
     const dowIdx = fields.length === 6 ? 5 : 4;
-    const names =
-      i === monthIdx ? MONTH_NAMES : i === dowIdx ? DOW_NAMES : undefined;
+    let names: Record<string, number> | undefined;
+    if (i === monthIdx) {
+      names = MONTH_NAMES;
+    } else if (i === dowIdx) {
+      names = DOW_NAMES;
+    }
     const err = validateField(fields[i]!, min, max, fieldNames[i]!, names);
     if (err) return { valid: false, error: err };
   }
@@ -190,19 +195,30 @@ function parseCronFields(expr: string): CronFields | null {
   return null;
 }
 
+function allStar(s: string): boolean {
+  return s === "*";
+}
+
+function ordinalSuffix(d: number): string {
+  if (d === 1) return "st";
+  if (d === 2) return "nd";
+  if (d === 3) return "rd";
+  return "th";
+}
+
+// eslint-disable-next-line sonarjs/cognitive-complexity -- inherently complex cron expression describer with many patterns to match
 export function describeCron(expr: string): string {
   const f = parseCronFields(expr);
   if (!f) return "";
 
   const { second, minute, hour, dom, month, dow } = f;
-  const allStar = (s: string) => s === "*";
   const hasSeconds = second !== null;
   const secondStar = second === null || allStar(second);
 
   // Every second.
   if (
     hasSeconds &&
-    allStar(second!) &&
+    allStar(second) &&
     allStar(minute) &&
     allStar(hour) &&
     allStar(dom) &&
@@ -215,14 +231,14 @@ export function describeCron(expr: string): string {
   // Every N seconds.
   if (
     hasSeconds &&
-    second!.startsWith("*/") &&
+    second.startsWith("*/") &&
     allStar(minute) &&
     allStar(hour) &&
     allStar(dom) &&
     allStar(month) &&
     allStar(dow)
   ) {
-    const n = second!.slice(2);
+    const n = second.slice(2);
     return `Every ${n} second${n === "1" ? "" : "s"}`;
   }
 
@@ -235,7 +251,7 @@ export function describeCron(expr: string): string {
     allStar(month) &&
     allStar(dow)
   ) {
-    if (hasSeconds && allStar(second!)) {
+    if (hasSeconds && allStar(second)) {
       // already handled above as "every second"
     }
     return "Every minute";
@@ -283,7 +299,7 @@ export function describeCron(expr: string): string {
 
   // Daily at specific time.
   if (
-    (secondStar || /^\d+$/.test(second!)) &&
+    (secondStar || /^\d+$/.test(second)) &&
     /^\d+$/.test(minute) &&
     /^\d+$/.test(hour) &&
     allStar(dom) &&
@@ -301,7 +317,7 @@ export function describeCron(expr: string): string {
 
   // Weekly.
   if (
-    (secondStar || /^\d+$/.test(second!)) &&
+    (secondStar || /^\d+$/.test(second)) &&
     /^\d+$/.test(minute) &&
     /^\d+$/.test(hour) &&
     allStar(dom) &&
@@ -328,7 +344,7 @@ export function describeCron(expr: string): string {
 
   // Monthly.
   if (
-    (secondStar || /^\d+$/.test(second!)) &&
+    (secondStar || /^\d+$/.test(second)) &&
     /^\d+$/.test(minute) &&
     /^\d+$/.test(hour) &&
     /^\d+$/.test(dom) &&
@@ -340,7 +356,7 @@ export function describeCron(expr: string): string {
     const s = second !== null ? parseInt(second, 10) : 0;
     const time = formatTime(h, m, hasSeconds ? s : null);
     const d = parseInt(dom, 10);
-    const suffix = d === 1 ? "st" : d === 2 ? "nd" : d === 3 ? "rd" : "th";
+    const suffix = ordinalSuffix(d);
     return `Monthly on the ${d}${suffix} at ${time}`;
   }
 

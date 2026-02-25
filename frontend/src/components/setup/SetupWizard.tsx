@@ -210,25 +210,28 @@ export function SetupWizard() {
             "border-light-border-subtle",
           )}`}
         >
-          {STEPS.map((label, i) => (
+          {STEPS.map((label, i) => {
+            let stepClass: string;
+            if (i === step) {
+              stepClass = "bg-copper text-white";
+            } else if (i < step) {
+              stepClass = c(
+                "bg-copper/20 text-copper cursor-pointer hover:bg-copper/30",
+                "bg-copper/20 text-copper cursor-pointer hover:bg-copper/30",
+              );
+            } else {
+              stepClass = c(
+                "bg-ink-surface text-text-ghost",
+                "bg-light-well text-light-text-ghost",
+              );
+            }
+            return (
             <div key={label} className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => i < step && setStep(i)}
                 disabled={i >= step}
-                className={`w-7 h-7 rounded-full flex items-center justify-center text-[0.75em] font-mono font-medium transition-colors ${
-                  i === step
-                    ? "bg-copper text-white"
-                    : i < step
-                      ? c(
-                          "bg-copper/20 text-copper cursor-pointer hover:bg-copper/30",
-                          "bg-copper/20 text-copper cursor-pointer hover:bg-copper/30",
-                        )
-                      : c(
-                          "bg-ink-surface text-text-ghost",
-                          "bg-light-well text-light-text-ghost",
-                        )
-                }`}
+                className={`w-7 h-7 rounded-full flex items-center justify-center text-[0.75em] font-mono font-medium transition-colors ${stepClass}`}
               >
                 {i + 1}
               </button>
@@ -241,7 +244,8 @@ export function SetupWizard() {
                 />
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Step content */}

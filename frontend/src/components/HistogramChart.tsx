@@ -34,6 +34,60 @@ function buildColorMap(data: HistogramData): Map<string, string> {
   return colorMap;
 }
 
+function HistogramLegend({
+  legendKeys,
+  hoveredGroup,
+  colorMap,
+  dark,
+}: Readonly<{
+  legendKeys: string[];
+  hoveredGroup: string | null;
+  colorMap: Map<string, string>;
+  dark: boolean;
+}>) {
+  const c = useThemeClass(dark);
+  if (legendKeys.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2">
+      {legendKeys.map((key) => (
+        <div
+          key={key}
+          className={`flex items-center gap-1 transition-opacity ${
+            hoveredGroup !== null && hoveredGroup !== key ? "opacity-40" : ""
+          }`}
+        >
+          <span
+            className="inline-block w-2 h-2 rounded-full shrink-0"
+            style={{ backgroundColor: colorMap.get(key) ?? "var(--color-copper)" }}
+          />
+          <span
+            className={`text-[0.7em] font-mono ${
+              hoveredGroup === key
+                ? c("text-text-bright", "text-light-text-bright")
+                : c("text-text-muted", "text-light-text-muted")
+            }`}
+          >
+            {key}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Set grab cursor on document body for pan dragging. */
+function setGrabbingCursor() {
+  document.body.style.cursor = "grabbing";
+  document.body.style.userSelect = "none";
+}
+
+/** Reset document body cursor after pan dragging. */
+function clearGrabbingCursor() {
+  document.body.style.cursor = "";
+  document.body.style.userSelect = "";
+}
+
+// eslint-disable-next-line sonarjs/cognitive-complexity -- chart component with many interactive features (brush, pan, tooltip, legend)
 export function HistogramChart({
   data,
   dark,
@@ -90,7 +144,7 @@ export function HistogramChart({
   const legendKeys = hasOther ? [...groupKeys, "other"] : groupKeys;
 
   const firstBucket = buckets[0]!;
-  const lastBucket = buckets[buckets.length - 1]!;
+  const lastBucket = buckets.at(-1)!;
   const totalCount = buckets.reduce((sum, b) => sum + b.count, 0);
   const barHeight = barHeightProp ?? 48;
 
@@ -108,7 +162,10 @@ export function HistogramChart({
   const seriesData = stackKeys.map((key) => {
     const isOther = key === "__other";
     const isTotal = key === "__total";
-    const displayName = isTotal ? "count" : isOther ? "other" : key;
+    let displayName: string;
+    if (isTotal) displayName = "count";
+    else if (isOther) displayName = "other";
+    else displayName = key;
     const color = isTotal || isOther
       ? copperColor
       : resolveColor(colorMap.get(key) ?? copperColor);
@@ -167,7 +224,10 @@ export function HistogramChart({
   // Build a single tooltip line with a colored dot, label, and count.
   const tooltipLine = (color: string, label: string, count: number, isBold: boolean): string => {
     const dot = `<span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:${color};margin-right:5px;"></span>`;
-    const style = isBold ? "font-weight:bold" : hoveredGroup ? "opacity:0.5" : "opacity:0.7";
+    let style: string;
+    if (isBold) style = "font-weight:bold";
+    else if (hoveredGroup) style = "opacity:0.5";
+    else style = "opacity:0.7";
     const valueStyle = isBold ? "font-weight:bold" : "";
     return `${dot}<span style="${style}">${label}</span> <span style="${valueStyle}">${count.toLocaleString()}</span>`;
   };
@@ -187,7 +247,7 @@ export function HistogramChart({
       if (other > 0) {
         lines.push(tooltipLine(copperColor, "other", other, hoveredGroup === "other"));
       }
-      for (const key of [...groupKeys].reverse()) {
+      for (const key of groupKeys.toReversed()) {
         const count = bucket.groupCounts[key];
         if (count && count > 0) {
           lines.push(tooltipLine(resolveColor(colorMap.get(key) ?? copperColor), key, count, hoveredGroup === key));
@@ -195,7 +255,7 @@ export function HistogramChart({
       }
     }
 
-    const header = `<div style="opacity:0.7">${bucket.count.toLocaleString()} \u00b7 ${formatTime(bucket.ts)}</div>`;
+    const header = `<div style="opacity:0.7">${bucket.count.toLocaleString()} \u00B7 ${formatTime(bucket.ts)}</div>`;
     return header + lines.join("<br/>");
   };
   formatterImplRef.current = tooltipFormatter;
@@ -338,16 +398,14 @@ export function HistogramChart({
     panStartX.current = e.clientX;
     setPanAxisWidth(axisRef.current?.getBoundingClientRect().width || 1);
     panningRef.current = true;
-    document.body.style.cursor = "grabbing";
-    document.body.style.userSelect = "none";
+    setGrabbingCursor();
 
     const onMouseMove = (ev: MouseEvent) => {
       setPanOffset(ev.clientX - panStartX.current);
     };
     const onMouseUp = (ev: MouseEvent) => {
       panningRef.current = false;
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
+      clearGrabbingCursor();
       setPanOffset(0);
       globalThis.removeEventListener("mousemove", onMouseMove);
       globalThis.removeEventListener("mouseup", onMouseUp);
@@ -438,32 +496,14 @@ export function HistogramChart({
             {totalCount.toLocaleString()} records
           </span>
         </div>
-      ) : legendKeys.length > 0 ? (
-        <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2">
-          {legendKeys.map((key) => (
-            <div
-              key={key}
-              className={`flex items-center gap-1 transition-opacity ${
-                hoveredGroup !== null && hoveredGroup !== key ? "opacity-40" : ""
-              }`}
-            >
-              <span
-                className="inline-block w-2 h-2 rounded-full shrink-0"
-                style={{ backgroundColor: colorMap.get(key) ?? "var(--color-copper)" }}
-              />
-              <span
-                className={`text-[0.7em] font-mono ${
-                  hoveredGroup === key
-                    ? c("text-text-bright", "text-light-text-bright")
-                    : c("text-text-muted", "text-light-text-muted")
-                }`}
-              >
-                {key}
-              </span>
-            </div>
-          ))}
-        </div>
-      ) : null}
+      ) : (
+        <HistogramLegend
+          legendKeys={legendKeys}
+          hoveredGroup={hoveredGroup}
+          colorMap={colorMap}
+          dark={dark}
+        />
+      )}
 
       <div
         ref={chartContainerRef}

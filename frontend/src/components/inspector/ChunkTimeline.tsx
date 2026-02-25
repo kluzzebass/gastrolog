@@ -97,6 +97,11 @@ export function ChunkTimeline({
   const topPad = 2;
   const chartHeight = topPad + barHeight + axisHeight;
 
+  // Precompute theme-dependent colors outside the map callback.
+  const sealedHi = dark ? "#d4a070" : "#c8875c";
+  const sealedLo = dark ? "#c8875c" : "#a06b44";
+  const selectedStroke = dark ? "#f0d0a0" : "#7a4a28";
+
   return (
     <div className="w-full px-4 pt-3 pb-1">
       <div
@@ -112,7 +117,7 @@ export function ChunkTimeline({
         className="block"
       >
         {/* Grid lines */}
-        {ticks.map((tick, i) => (
+        {ticks.map((tick, _i) => (
           <line
             key={`grid-${tick.x}`}
             x1={tick.x * 1000}
@@ -130,6 +135,11 @@ export function ChunkTimeline({
           const isHovered = hoveredChunk === bar.id;
           const isSelected = selectedChunkId === bar.id;
           const highlighted = isHovered || isSelected;
+
+          const sealedFill = highlighted ? sealedHi : sealedLo;
+          const activeFill = highlighted ? "#6aaa7a" : "#5a9a6a";
+          const fill = bar.sealed ? sealedFill : activeFill;
+          const strokeColor = isSelected ? selectedStroke : "none";
 
           return (
             <g
@@ -155,22 +165,10 @@ export function ChunkTimeline({
                 height={barHeight}
                 rx="2"
                 ry="2"
-                fill={
-                  bar.sealed
-                    ? highlighted
-                      ? dark
-                        ? "#d4a070"
-                        : "#c8875c"
-                      : dark
-                        ? "#c8875c"
-                        : "#a06b44"
-                    : highlighted
-                      ? "#6aaa7a"
-                      : "#5a9a6a"
-                }
+                fill={fill}
                 opacity={highlighted ? 1 : 0.75}
                 vectorEffect="non-scaling-stroke"
-                stroke={isSelected ? (dark ? "#f0d0a0" : "#7a4a28") : "none"}
+                stroke={strokeColor}
                 strokeWidth={isSelected ? "2" : "0"}
               />
 
@@ -221,7 +219,7 @@ export function ChunkTimeline({
           strokeWidth="1"
           vectorEffect="non-scaling-stroke"
         />
-        {ticks.map((tick, i) => (
+        {ticks.map((tick, _i) => (
           <g key={`axis-${tick.x}`}>
             <line
               x1={tick.x * 1000}

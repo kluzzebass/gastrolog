@@ -147,9 +147,9 @@ describe("replaceExpression", () => {
     expect(replaceExpression("last=5m reverse=true foo", "bar")).toBe(
       "last=5m reverse=true bar",
     ));
-  test("no directives — just the value", () =>
+  test("no directives -- just the value", () =>
     expect(replaceExpression("foo", "bar")).toBe("bar"));
-  test("empty query — just the value", () =>
+  test("empty query -- just the value", () =>
     expect(replaceExpression("", "bar")).toBe("bar"));
   test("only directives", () =>
     expect(replaceExpression("last=5m reverse=true", "bar")).toBe(
@@ -157,31 +157,33 @@ describe("replaceExpression", () => {
     ));
 });
 
+/* eslint-disable sonarjs/no-hardcoded-ip -- test data uses RFC 1918 addresses */
 describe("appendOrExpression", () => {
-  test("empty expression — just the value", () =>
+  test("empty expression -- just the value", () =>
     expect(appendOrExpression("last=5m reverse=true", "192.168.1.1")).toBe(
       "last=5m reverse=true 192.168.1.1",
     ));
-  test("single term — wraps in parens with OR", () =>
+  test("single term -- wraps in parens with OR", () =>
     expect(
       appendOrExpression("last=5m reverse=true 10.0.0.1", "192.168.1.1"),
     ).toBe("last=5m reverse=true (10.0.0.1 OR 192.168.1.1)"));
-  test("existing group — appends inside parens", () =>
+  test("existing group -- appends inside parens", () =>
     expect(
       appendOrExpression(
         "last=5m reverse=true (10.0.0.1 OR 10.0.0.2)",
         "192.168.1.1",
       ),
     ).toBe("last=5m reverse=true (10.0.0.1 OR 10.0.0.2 OR 192.168.1.1)"));
-  test("no directives — single term", () =>
+  test("no directives -- single term", () =>
     expect(appendOrExpression("foo", "bar")).toBe("(foo OR bar)"));
-  test("no directives — existing group", () =>
+  test("no directives -- existing group", () =>
     expect(appendOrExpression("(foo OR bar)", "baz")).toBe(
       "(foo OR bar OR baz)",
     ));
   test("completely empty query", () =>
     expect(appendOrExpression("", "foo")).toBe("foo"));
 });
+/* eslint-enable sonarjs/no-hardcoded-ip */
 
 describe("buildSeverityExpr", () => {
   test("empty array", () => expect(buildSeverityExpr([])).toBe(""));

@@ -97,7 +97,7 @@ function recordsToRawTable(records: ProtoRecord[]): TableResult {
   const columns = ["_write_ts", "_ingest_ts", "_source_ts", ...attrKeys, "_raw"];
   const decoder = new TextDecoder();
   const rows = records.map((rec) => {
-    const values = new Array<string>(columns.length).fill("");
+    const values: string[] = Array.from({ length: columns.length }, () => "");
     values[0] = rec.writeTs?.toDate().toISOString() ?? "";
     values[1] = rec.ingestTs?.toDate().toISOString() ?? "";
     values[2] = rec.sourceTs?.toDate().toISOString() ?? "";
@@ -111,6 +111,7 @@ function recordsToRawTable(records: ProtoRecord[]): TableResult {
 }
 
 export function SearchView() {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- useRouterSearch returns optional fields; assertion narrows q to string
   const { q, help: helpParam, settings: settingsParam, inspector: inspectorParam } = useRouterSearch({ strict: false }) as { q: string; help?: string; settings?: string; inspector?: string };
   const navigate = useNavigate();
   const location = useLocation();
@@ -293,6 +294,7 @@ export function SearchView() {
   }, [q]);
 
   // Fire search or follow depending on the current route.
+  // eslint-disable-next-line sonarjs/cognitive-complexity -- query effect handles multiple route/mode transitions
   useEffect(() => {
     expressionRef.current = q;
     queryHistory.add(q);
@@ -324,7 +326,7 @@ export function SearchView() {
       case "skip-search":
       case "search": {
         // Sync sidebar preset and range display from the URL.
-        const lastMatch = q.match(/\blast=(\S+)/);
+        const lastMatch = /\blast=(\S+)/.exec(q);
         if (lastMatch?.[1]) {
           const key = lastMatch[1];
           const ms = timeRangeMs[key];
@@ -669,6 +671,7 @@ export function SearchView() {
     }
   };
 
+  // eslint-disable-next-line sonarjs/cognitive-complexity -- OR-group parser requires nested bracket matching
   const handleSpanClick = (value: string, shiftKey: boolean) => {
     const trimmed = draft.trim();
     if (shiftKey) {
@@ -694,7 +697,7 @@ export function SearchView() {
       }
       // Wrap last token + new value in an OR group.
       const lastSpace = trimmed.lastIndexOf(" ");
-      if (lastSpace >= 0) {
+      if (lastSpace !== -1) {
         const prefix = trimmed.slice(0, lastSpace);
         const lastToken = trimmed.slice(lastSpace + 1);
         setDraft(`${prefix} (${lastToken} OR ${value})`);
@@ -826,19 +829,21 @@ export function SearchView() {
               dark={dark}
               size="lg"
             >
-              {isExplaining ? (
+              {isExplaining && (
                 <div
                   className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}
                 >
                   Analyzing query plan...
                 </div>
-              ) : explainChunks.length === 0 ? (
+              )}
+              {!isExplaining && explainChunks.length === 0 && (
                 <div
                   className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}
                 >
                   Run a query to see the execution plan.
                 </div>
-              ) : (
+              )}
+              {!isExplaining && explainChunks.length > 0 && (
                   <ExplainPanel
                     chunks={explainChunks}
                     direction={explainDirection}
@@ -998,23 +1003,25 @@ export function SearchView() {
 
           {/* Results */}
           <div className="flex-1 flex flex-col overflow-hidden">
-            {isSearching && !effectiveTableResult && queryIsPipeline && records.length === 0 ? (
+            {isSearching && !effectiveTableResult && queryIsPipeline && records.length === 0 && (
               <div className="flex-1 flex items-center justify-center">
                 <div className={`text-center font-mono text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
                   <div className="inline-block w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin mb-3" />
                   <div>Running pipeline...</div>
                 </div>
               </div>
-            ) : isPipelineResult ? (
+            )}
+            {!(isSearching && !effectiveTableResult && queryIsPipeline && records.length === 0) && isPipelineResult && (
               <PipelineResults
-                tableResult={effectiveTableResult!}
+                tableResult={effectiveTableResult}
                 dark={dark}
                 pollInterval={pollInterval}
                 onPollIntervalChange={setPollInterval}
                 scrollRef={isRawQuery ? logScrollRef : undefined}
                 footer={isRawQuery ? <div ref={sentinelRef} className="h-1" /> : undefined}
               />
-            ) : (
+            )}
+            {!(isSearching && !effectiveTableResult && queryIsPipeline && records.length === 0) && !isPipelineResult && (
             <>
             <ResultsToolbar
               dark={dark}
@@ -1048,7 +1055,6 @@ export function SearchView() {
                 setRangeStart(newStart);
                 setRangeEnd(newEnd);
                 const newQuery = `start=${newStart.toISOString()} end=${newEnd.toISOString()} reverse=${isReversed}`;
-                setSelectedRecord(selectedRecord);
                 navigate({
                   to: "/search",
                   search: (prev: Record<string, unknown>) => ({ ...prev, q: newQuery }),
@@ -1080,54 +1086,59 @@ export function SearchView() {
                 ref={logScrollRef}
                 className="h-full overflow-y-auto app-scroll"
               >
-                {(isFollowMode ? followRecords : records).length === 0 &&
-                !isSearching &&
-                !isFollowMode ? (
-                  <EmptyState dark={dark} />
-                ) : (isFollowMode ? followRecords : records).length === 0 &&
-                  isFollowMode ? (
-                  <div
-                    className={`py-8 text-center text-[0.85em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
-                  >
-                    Waiting for new records...
-                  </div>
-                ) : (
-                  <div>
-                    {(isFollowMode
-                      ? followReversed
-                        ? followRecords
-                        : [...followRecords].reverse()
-                      : records
-                    ).map((record, i) => {
-                      const selected = sameRecord(selectedRecord, record);
-                      return (
-                        <LogEntry
-                          key={record.ref ? `${record.ref.storeId}:${record.ref.chunkId}:${record.ref.pos}` : `follow-${i}`}
-                          ref={selected ? selectedRowRef : undefined}
-                          record={record}
-                          tokens={tokens}
-                          isSelected={selected}
-                          onSelect={() =>
-                            setSelectedRecord(selected ? null : record)
-                          }
-                          onFilterToggle={handleTokenToggle}
-                          onSpanClick={handleSpanClick}
-                          dark={dark}
-                          highlightMode={highlightMode}
-                        />
-                      );
-                    })}
-                    {/* Infinite scroll sentinel (search only) */}
-                    {!isFollowMode && <div ref={sentinelRef} className="h-1" />}
-                    {(isSearching && records.length > 0) && (
+                {(() => {
+                  const effectiveRecords = isFollowMode ? followRecords : records;
+                  const isEmpty = effectiveRecords.length === 0;
+
+                  if (isEmpty && !isSearching && !isFollowMode) {
+                    return <EmptyState dark={dark} />;
+                  }
+                  if (isEmpty && isFollowMode) {
+                    return (
                       <div
-                        className={`py-3 text-center text-[0.85em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+                        className={`py-8 text-center text-[0.85em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
                       >
-                        Loading more...
+                        Waiting for new records...
                       </div>
-                    )}
-                  </div>
-                )}
+                    );
+                  }
+
+                  const orderedFollowRecords = followReversed ? followRecords : followRecords.toReversed();
+                  const displayList = isFollowMode ? orderedFollowRecords : records;
+
+                  return (
+                    <div>
+                      {displayList.map((record, i) => {
+                        const selected = sameRecord(selectedRecord, record);
+                        return (
+                          <LogEntry
+                            key={record.ref ? `${record.ref.storeId}:${record.ref.chunkId}:${record.ref.pos}` : `follow-${i}`}
+                            ref={selected ? selectedRowRef : undefined}
+                            record={record}
+                            tokens={tokens}
+                            isSelected={selected}
+                            onSelect={() =>
+                              setSelectedRecord(selected ? null : record)
+                            }
+                            onFilterToggle={handleTokenToggle}
+                            onSpanClick={handleSpanClick}
+                            dark={dark}
+                            highlightMode={highlightMode}
+                          />
+                        );
+                      })}
+                      {/* Infinite scroll sentinel (search only) */}
+                      {!isFollowMode && <div ref={sentinelRef} className="h-1" />}
+                      {(isSearching && records.length > 0) && (
+                        <div
+                          className={`py-3 text-center text-[0.85em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+                        >
+                          Loading more...
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
             </>

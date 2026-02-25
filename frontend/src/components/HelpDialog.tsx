@@ -33,6 +33,7 @@ function stripMarkdown(md: string): string {
   return md
     .replace(/```[\s\S]*?```/g, " ")       // fenced code blocks
     .replace(/`[^`]+`/g, " ")              // inline code
+    // eslint-disable-next-line sonarjs/slow-regex -- bounded character classes, no backtracking risk
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1") // links/images → text
     .replace(/#{1,6}\s+/g, " ")            // headings
     .replace(/[*_~|>-]+/g, " ")            // emphasis, tables, blockquotes
@@ -149,6 +150,15 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
     });
   }
 
+  function topicButtonCls(isActive: boolean, isTopLevel: boolean): string {
+    if (isActive) return "bg-copper/15 text-copper";
+    if (isTopLevel) return c("text-text-bright hover:bg-ink-hover", "text-light-text-bright hover:bg-light-hover");
+    return c(
+      "text-text-muted hover:text-text-bright hover:bg-ink-hover",
+      "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
+    );
+  }
+
   function renderTopic(t: HelpTopic, depth: number, index: number) {
     const isActive = activeId === t.id;
     const hasChildren = !!t.children;
@@ -162,14 +172,7 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
           className={`flex items-center w-full text-left rounded transition-colors mb-0.5 ${
             isTopLevel ? "text-[0.85em] font-medium" : "text-[0.8em]"
           } ${
-            isActive
-              ? "bg-copper/15 text-copper"
-              : isTopLevel
-                ? c("text-text-bright hover:bg-ink-hover", "text-light-text-bright hover:bg-light-hover")
-                : c(
-                    "text-text-muted hover:text-text-bright hover:bg-ink-hover",
-                    "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
-                  )
+            topicButtonCls(isActive, isTopLevel)
           }`}
           style={{ paddingLeft: `${0.5 + depth * 0.75}rem`, paddingRight: '0.5rem', paddingTop: '0.375rem', paddingBottom: '0.375rem' }}
         >
@@ -205,16 +208,92 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
     const q = search.trim().toLowerCase();
     if (!q || entry.titleLower.includes(q)) return null;
     const terms = q.split(/\s+/);
-    const idx = terms.reduce((best, term) => {
+    let idx = -1;
+    for (const term of terms) {
       const i = entry.plainText.indexOf(term);
-      return i >= 0 && (best < 0 || i < best) ? i : best;
-    }, -1);
+      if (i !== -1 && (idx < 0 || i < idx)) idx = i;
+    }
     if (idx < 0) return null;
     const start = Math.max(0, idx - 30);
     const end = Math.min(entry.plainText.length, idx + 60);
     return (start > 0 ? "..." : "") + entry.plainText.slice(start, end) + (end < entry.plainText.length ? "..." : "");
   }
 
+
+  function renderContent() {
+    if (topic && topicContent && !loadingContent) {
+      return (
+        <MarkdownContent
+          dark={dark}
+          content={topicContent}
+          onNavigate={navigate}
+          onOpenSettings={onOpenSettings}
+        />
+      );
+    }
+    if (topic) {
+      return (
+        <p className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+          Loading...
+        </p>
+      );
+    }
+    return (
+      <p className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+        Select a topic from the sidebar.
+      </p>
+    );
+  }
+
+  function renderSidebarContent() {
+    if (!searchResults) {
+      return (
+        <>
+          <h2
+            className={`text-[0.75em] uppercase tracking-wider font-medium mb-2 px-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
+          >
+            Topics
+          </h2>
+          {helpTopics.map((t, i) => renderTopic(t, 0, i))}
+        </>
+      );
+    }
+    if (searchResults.length === 0) {
+      return (
+        <p className={`text-[0.8em] px-2 py-1 ${c("text-text-ghost", "text-light-text-ghost")}`}>
+          No results
+        </p>
+      );
+    }
+    return (
+      <>
+        {searchResults.map((entry) => {
+          const snippet = getSnippet(entry);
+          return (
+            <button
+              key={entry.topic.id}
+              onClick={() => selectTopic(entry.topic)}
+              className={`flex flex-col w-full text-left rounded text-[0.85em] transition-colors mb-0.5 px-2 py-1.5 ${
+                activeId === entry.topic.id
+                  ? "bg-copper/15 text-copper font-medium"
+                  : c(
+                      "text-text-muted hover:text-text-bright hover:bg-ink-hover",
+                      "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
+                    )
+              }`}
+            >
+              <span>{entry.topic.title}</span>
+              {snippet && (
+                <span className={`text-[0.8em] truncate ${c("text-text-ghost", "text-light-text-ghost")}`}>
+                  {snippet}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </>
+    );
+  }
   return (
     <Dialog onClose={onClose} ariaLabel="Help" dark={dark} size="xl">
       <div className="flex h-full overflow-hidden">
@@ -262,70 +341,13 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
 
           {/* Topic tree or search results */}
           <div className="flex-1 overflow-y-auto app-scroll px-3 pb-3">
-            {searchResults ? (
-              searchResults.length > 0 ? (
-                searchResults.map((entry) => {
-                  const snippet = getSnippet(entry);
-                  return (
-                    <button
-                      key={entry.topic.id}
-                      onClick={() => selectTopic(entry.topic)}
-                      className={`flex flex-col w-full text-left rounded text-[0.85em] transition-colors mb-0.5 px-2 py-1.5 ${
-                        activeId === entry.topic.id
-                          ? "bg-copper/15 text-copper font-medium"
-                          : c(
-                              "text-text-muted hover:text-text-bright hover:bg-ink-hover",
-                              "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
-                            )
-                      }`}
-                    >
-                      <span>{entry.topic.title}</span>
-                      {snippet && (
-                        <span className={`text-[0.8em] truncate ${c("text-text-ghost", "text-light-text-ghost")}`}>
-                          {snippet}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })
-              ) : (
-                <p className={`text-[0.8em] px-2 py-1 ${c("text-text-ghost", "text-light-text-ghost")}`}>
-                  No results
-                </p>
-              )
-            ) : (
-              <>
-                <h2
-                  className={`text-[0.75em] uppercase tracking-wider font-medium mb-2 px-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
-                >
-                  Topics
-                </h2>
-                {helpTopics.map((t, i) => renderTopic(t, 0, i))}
-              </>
-            )}
+            {renderSidebarContent()}
           </div>
         </nav>
 
         {/* Content */}
         <div ref={contentRef} className="flex-1 overflow-y-auto app-scroll p-6">
-          {topic && topicContent && !loadingContent ? (
-            <MarkdownContent
-              dark={dark}
-              content={topicContent}
-              onNavigate={navigate}
-              onOpenSettings={onOpenSettings}
-            />
-          ) : topic ? (
-            <p className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
-              Loading...
-            </p>
-          ) : (
-            <p
-              className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-            >
-              Select a topic from the sidebar.
-            </p>
-          )}
+          {renderContent()}
         </div>
 
       </div>
@@ -366,6 +388,13 @@ function MarkdownContent({ dark, content, onNavigate, onOpenSettings }: Readonly
       </Markdown>
     </Suspense>
   );
+}
+
+/** Coerce React children to a plain string for code/mermaid blocks. */
+function childrenToText(children: React.ReactNode): string {
+  if (typeof children === "string") return children;
+  if (children == null) return "";
+  return `${children as string | number}`;
 }
 
 function buildMarkdownComponents(
@@ -426,7 +455,7 @@ function buildMarkdownComponents(
       className?: string;
     }) => {
       if (!className) {
-        const text = typeof children === "string" ? children : String(children ?? "");
+        const text = childrenToText(children);
         // Fenced block without language — contains newlines.
         // Don't apply inline padding (px/py) here; <pre> handles the box.
         // The inline <code> padding causes a visual leading-space on the
@@ -449,8 +478,9 @@ function buildMarkdownComponents(
         );
       }
       // Mermaid diagram
-      if (className?.includes("language-mermaid")) {
-        return <Suspense fallback={<div className="py-4 text-center text-text-ghost text-[0.85em]">Loading diagram...</div>}><MermaidDiagram chart={String(children).trim()} dark={dark} /></Suspense>;
+      if (className.includes("language-mermaid")) {
+        const chart = childrenToText(children);
+        return <Suspense fallback={<div className="py-4 text-center text-text-ghost text-[0.85em]">Loading diagram...</div>}><MermaidDiagram chart={chart.trim()} dark={dark} /></Suspense>;
       }
       // Code block (inside <pre>)
       return <code className={`font-mono text-[0.85em] ${className}`}>{children}</code>;

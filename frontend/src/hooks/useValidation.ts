@@ -58,7 +58,7 @@ export function useValidation(expression: string): ValidationResult {
     return () => {
       clearTimeout(debounceRef.current);
     };
-  }, [expression]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [expression]);  
 
   return result;
 }

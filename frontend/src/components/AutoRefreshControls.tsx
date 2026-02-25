@@ -12,11 +12,11 @@ export function AutoRefreshControls({
   pollInterval,
   onPollIntervalChange,
   dark,
-}: {
+}: Readonly<{
   pollInterval: number | null;
   onPollIntervalChange: (ms: number | null) => void;
   dark: boolean;
-}) {
+}>) {
   const c = useThemeClass(dark);
   return (
     <div
@@ -31,11 +31,11 @@ export function AutoRefreshControls({
           onClick={() => onPollIntervalChange(opt.ms)}
           className={`px-2 py-1 text-[0.75em] font-mono transition-colors ${
             pollInterval === opt.ms
-              ? `${c("bg-copper/20 text-copper", "bg-copper/20 text-copper")}`
-              : `${c(
+              ? c("bg-copper/20 text-copper", "bg-copper/20 text-copper")
+              : c(
                   "text-text-muted hover:text-text-bright hover:bg-ink-hover",
                   "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
-                )}`
+                )
           }`}
         >
           {opt.label}

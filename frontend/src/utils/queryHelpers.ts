@@ -98,7 +98,7 @@ export const appendOrExpression = (q: string, value: string): string => {
   if (!expr) {
     newExpr = value;
   } else if (expr.startsWith("(") && expr.endsWith(")")) {
-    // Already a group — insert before closing paren.
+    // Already a group -- insert before closing paren.
     newExpr = expr.slice(0, -1) + " OR " + value + ")";
   } else {
     newExpr = "(" + expr + " OR " + value + ")";
@@ -109,7 +109,7 @@ export const appendOrExpression = (q: string, value: string): string => {
 /**
  * Determine which action the main search/follow effect should take.
  *
- * Follow mode is handled first — it doesn't use time ranges, so the
+ * Follow mode is handled first -- it doesn't use time ranges, so the
  * default-range injection (which navigates and could change the route)
  * must never run when following.
  */
@@ -133,5 +133,6 @@ export function resolveQueryEffectAction(
 export const buildSeverityExpr = (severities: string[]): string => {
   if (severities.length === 0) return "";
   if (severities.length === 1) return `level=${severities[0]}`;
-  return `(${severities.map((s) => `level=${s}`).join(" OR ")})`;
+  const inner = severities.map((s) => "level=" + s).join(" OR ");
+  return "(" + inner + ")";
 };

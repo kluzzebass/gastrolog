@@ -34,7 +34,7 @@ export function stepToRanges(step: PipelineStep, expression: string): Range[] {
       ];
 
     case "token": {
-      const inner = step.predicate.match(/^token\((.+)\)$/)?.[1];
+      const inner = /^token\((.+)\)$/.exec(step.predicate)?.[1];
       if (!inner) return [];
       return inner
         .split(/,\s*/)
@@ -63,7 +63,7 @@ export function buildSegments(
   const sorted = [...ranges].sort((a, b) => a[0] - b[0]);
   const merged: Range[] = [sorted[0]!];
   for (let i = 1; i < sorted.length; i++) {
-    const prev = merged[merged.length - 1]!;
+    const prev = merged.at(-1)!;
     if (sorted[i]![0] <= prev[1]) {
       prev[1] = Math.max(prev[1], sorted[i]![1]);
     } else {
@@ -90,7 +90,7 @@ export function buildSegments(
 }
 
 /** Format a proto Timestamp for display. */
-export function formatTs(ts: { toDate(): Date } | undefined): string {
+export function formatTs(ts?: { toDate(): Date }): string {
   if (!ts) return "";
   return ts.toDate().toLocaleTimeString("en-US", {
     hour: "2-digit",

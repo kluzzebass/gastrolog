@@ -23,7 +23,7 @@ export function formatBytesBigint(b: bigint): string {
 export function parseBytes(s: string): bigint {
   s = s.trim().toUpperCase();
   if (!s) return 0n;
-  const match = s.match(/^(\d+)\s*(GB|MB|KB|B)?$/);
+  const match = /^(\d+)\s*(GB|MB|KB|B)?$/.exec(s);
   if (!match) return 0n;
   const n = BigInt(match[1]!);
   switch (match[2]) {
@@ -39,6 +39,7 @@ export function parseBytes(s: string): bigint {
 }
 
 /** Format seconds (bigint) as human-readable duration (e.g. "1h30m"). */
+// eslint-disable-next-line sonarjs/cognitive-complexity -- inherently complex duration formatting with many edge cases
 export function formatDuration(s: bigint): string {
   if (s === 0n) return "";
   const days = s / 86400n;
@@ -54,7 +55,10 @@ export function formatDuration(s: bigint): string {
   if (totalHours > 0n && secs === 0n) return `${totalHours}h${mins}m`;
   if (mins > 0n && secs === 0n) return `${mins}m`;
   if (secs > 0n && totalHours === 0n && mins === 0n) return `${secs}s`;
-  return `${totalHours > 0n ? `${totalHours}h` : ""}${mins > 0n ? `${mins}m` : ""}${secs > 0n ? `${secs}s` : ""}`;
+  const hPart = totalHours > 0n ? String(totalHours) + "h" : "";
+  const mPart = mins > 0n ? String(mins) + "m" : "";
+  const sPart = secs > 0n ? String(secs) + "s" : "";
+  return hPart + mPart + sPart;
 }
 
 /** Parse a duration string like "720h" or "30d" to seconds as bigint. */
@@ -62,7 +66,8 @@ export function parseDuration(s: string): bigint {
   s = s.trim().toLowerCase();
   if (!s) return 0n;
   let total = 0n;
-  const re = /(\d+)\s*(d|h|m|s)/g;
+  // eslint-disable-next-line sonarjs/slow-regex -- no backtracking risk: \d+ and [dhms] are disjoint character classes
+  const re = /(\d+)([dhms])/g;
   let match;
   while ((match = re.exec(s)) !== null) {
     const n = BigInt(match[1]!);

@@ -67,7 +67,7 @@ export function FieldExplorer({
               <span
                 className={`text-[0.7em] ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
               >
-                {isExpanded ? "\u25be" : "\u25b8"}
+                {isExpanded ? "\u25BE" : "\u25B8"}
               </span>
               <span className="flex-1 font-mono truncate">{key}</span>
               <span
@@ -88,15 +88,13 @@ export function FieldExplorer({
                     <button
                       key={value}
                       onClick={() => onSelect(key, value)}
-                      className={`w-full flex items-center gap-1.5 px-1.5 py-1 text-left text-[0.75em] rounded transition-colors ${
-                        isActive
-                          ? dark
-                            ? "bg-copper/15 text-copper"
-                            : "bg-copper/10 text-copper"
-                          : dark
-                            ? "hover:bg-ink-hover text-text-ghost hover:text-copper-glow"
-                            : "hover:bg-light-hover text-light-text-ghost hover:text-copper"
-                      }`}
+                      className={(() => {
+                        const base = "w-full flex items-center gap-1.5 px-1.5 py-1 text-left text-[0.75em] rounded transition-colors";
+                        if (isActive) {
+                          return `${base} ${dark ? "bg-copper/15 text-copper" : "bg-copper/10 text-copper"}`;
+                        }
+                        return `${base} ${dark ? "hover:bg-ink-hover text-text-ghost hover:text-copper-glow" : "hover:bg-light-hover text-light-text-ghost hover:text-copper"}`;
+                      })()}
                     >
                       <span className="flex-1 font-mono truncate">{value}</span>
                       <span className="tabular-nums">{vCount}</span>
@@ -125,22 +123,22 @@ export function StoreButton({
   onClick: () => void;
   dark: boolean;
 }>) {
+  const ghostCls = dark ? "text-text-ghost" : "text-light-text-ghost";
+
   return (
     <button
       onClick={onClick}
-      className={`flex justify-between items-center px-2.5 py-2 text-[0.9em] rounded text-left transition-all duration-150 ${
-        active
-          ? dark
-            ? "bg-copper/15 text-copper border border-copper/25"
-            : "bg-copper/10 text-copper border border-copper/25"
-          : dark
-            ? "text-text-muted hover:text-text-normal hover:bg-ink-hover border border-transparent"
-            : "text-light-text-muted hover:text-light-text-normal hover:bg-light-hover border border-transparent"
-      }`}
+      className={(() => {
+        const base = "flex justify-between items-center px-2.5 py-2 text-[0.9em] rounded text-left transition-all duration-150";
+        if (active) {
+          return `${base} ${dark ? "bg-copper/15" : "bg-copper/10"} text-copper border border-copper/25`;
+        }
+        return `${base} ${dark ? "text-text-muted hover:text-text-normal hover:bg-ink-hover" : "text-light-text-muted hover:text-light-text-normal hover:bg-light-hover"} border border-transparent`;
+      })()}
     >
       <span className="font-medium">{label}</span>
       <span
-        className={`font-mono text-[0.8em] ${active ? "text-copper-dim" : dark ? "text-text-ghost" : "text-light-text-ghost"}`}
+        className={`font-mono text-[0.8em] ${active ? "text-copper-dim" : ghostCls}`}
       >
         {count}
       </span>

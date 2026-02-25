@@ -42,7 +42,7 @@ export function getColorForCategory(name: string, index: number): string {
  */
 export function resolveColor(cssColor: string): string {
   if (!cssColor.startsWith("var(")) return cssColor;
-  const match = cssColor.match(/^var\(\s*(--[^),]+)/);
+  const match = /^var\(\s*(--[^),]+)/.exec(cssColor);
   if (!match) return cssColor;
   return getComputedStyle(document.documentElement).getPropertyValue(match[1]!).trim() || cssColor;
 }

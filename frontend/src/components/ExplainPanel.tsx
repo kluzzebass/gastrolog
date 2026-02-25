@@ -218,6 +218,66 @@ function CostSummary({ chunks, dark }: Readonly<{ chunks: ChunkPlan[]; dark: boo
   );
 }
 
+function ChunkPipelineBody({
+  hasBranches,
+  branchPlans,
+  steps,
+  totalRecords,
+  dark,
+  onStepHover,
+  onStepLeave,
+}: Readonly<{
+  hasBranches: boolean;
+  branchPlans: BranchPlan[];
+  steps: PipelineStep[];
+  totalRecords: number;
+  dark: boolean;
+  onStepHover: (step: PipelineStep) => void;
+  onStepLeave: () => void;
+}>) {
+  if (hasBranches) {
+    return (
+      <div className="flex flex-col gap-4">
+        {branchPlans.map((bp, j) => (
+          <ExplainBranch
+            key={`branch-${j}-${bp.expression}`}
+            branch={bp}
+            index={j}
+            totalRecords={totalRecords}
+            dark={dark}
+            onStepHover={onStepHover}
+            onStepLeave={onStepLeave}
+          />
+        ))}
+      </div>
+    );
+  }
+  if (steps.length > 0) {
+    return (
+      <PipelineFunnel
+        steps={steps}
+        totalRecords={totalRecords}
+        dark={dark}
+        onStepHover={onStepHover}
+        onStepLeave={onStepLeave}
+      />
+    );
+  }
+  return null;
+}
+
+function chunkBadgeCls(isSkipped: boolean, sealed: boolean): string {
+  if (isSkipped) return "bg-severity-error/15 text-severity-error border border-severity-error/25";
+  if (sealed) return "bg-severity-info/15 text-severity-info border border-severity-info/25";
+  return "bg-copper/15 text-copper border border-copper/25";
+}
+
+function chunkBadgeLabel(isSkipped: boolean, sealed: boolean): string {
+  if (isSkipped) return "Skip";
+  if (sealed) return "Sealed";
+  return "Active";
+}
+
 function ExplainChunk({
   plan,
   dark,
@@ -289,14 +349,10 @@ function ExplainChunk({
           </span>
           <span
             className={`text-xs px-1.5 py-0.5 rounded uppercase tracking-wider font-semibold ${
-              isSkipped
-                ? "bg-severity-error/15 text-severity-error border border-severity-error/25"
-                : plan.sealed
-                  ? "bg-severity-info/15 text-severity-info border border-severity-info/25"
-                  : "bg-copper/15 text-copper border border-copper/25"
+              chunkBadgeCls(isSkipped, plan.sealed)
             }`}
           >
-            {isSkipped ? "Skip" : plan.sealed ? "Sealed" : "Active"}
+            {chunkBadgeLabel(isSkipped, plan.sealed)}
           </span>
           <span
             className={`font-mono text-sm ${c("text-text-normal", "text-light-text-normal")}`}
@@ -346,29 +402,15 @@ function ExplainChunk({
       {/* Chunk body — pipeline */}
       {!collapsed && !isSkipped && (
         <div className="px-3.5 py-4">
-          {hasBranches ? (
-            <div className="flex flex-col gap-4">
-              {plan.branchPlans.map((bp, j) => (
-                <ExplainBranch
-                  key={`branch-${j}-${bp.expression}`}
-                  branch={bp}
-                  index={j}
-                  totalRecords={totalRecords}
-                  dark={dark}
-                  onStepHover={onStepHover}
-                  onStepLeave={onStepLeave}
-                />
-              ))}
-            </div>
-          ) : plan.steps.length > 0 ? (
-            <PipelineFunnel
-              steps={plan.steps}
-              totalRecords={totalRecords}
-              dark={dark}
-              onStepHover={onStepHover}
-              onStepLeave={onStepLeave}
-            />
-          ) : null}
+          <ChunkPipelineBody
+            hasBranches={hasBranches}
+            branchPlans={plan.branchPlans}
+            steps={plan.steps}
+            totalRecords={totalRecords}
+            dark={dark}
+            onStepHover={onStepHover}
+            onStepLeave={onStepLeave}
+          />
 
           {/* Footer */}
           <div
@@ -392,7 +434,7 @@ function ExplainChunk({
             </span>
             {plan.runtimeFilters
               .filter((f) => f && f !== "none")
-              .map((f, i) => (
+              .map((f) => (
                 <span
                   key={`filter-${f}`}
                   className={`px-1.5 py-px rounded ${c("bg-severity-warn/10 text-severity-warn", "bg-severity-warn/10 text-severity-warn")}`}

@@ -37,7 +37,12 @@ function toCSV(records: ProtoRecord[]): string {
   const header = keys.map(escapeCSV).join(",");
   const lines = rows.map((row) =>
     keys
-      .map((k) => escapeCSV(String((row as Record<string, unknown>)[k] ?? "")))
+      .map((k) => {
+        const val = (row as Record<string, unknown>)[k];
+        if (val == null) return escapeCSV("");
+        if (typeof val === "object") return escapeCSV(JSON.stringify(val));
+        return escapeCSV(`${val as string | number | boolean}`);
+      })
       .join(","),
   );
   return [header, ...lines].join("\n");

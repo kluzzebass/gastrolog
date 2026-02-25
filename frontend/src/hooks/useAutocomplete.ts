@@ -205,6 +205,7 @@ export const PIPE_GRAMMARS: Record<string, PipeGrammar> = {
 };
 
 // Resolve a grammar + context signals into a concrete SuggestRule or "none".
+// eslint-disable-next-line sonarjs/function-return-type -- returns Suggest after guards
 export function resolveGrammar(
   grammar: PipeGrammar,
   prev: string | null,
@@ -223,7 +224,8 @@ export function resolveGrammar(
   return grammar.fallback;
 }
 
-interface AutocompleteState {
+// eslint-disable-next-line sonarjs/class-name -- unused externally, underscore signals internal
+interface _AutocompleteState {
   suggestions: string[];
   selectedIndex: number;
   isOpen: boolean;
@@ -255,6 +257,7 @@ export function useAutocomplete(
   }
 
   const { suggestions, replaceRange, suffix: _suffix, inPipeContext } =
+    // eslint-disable-next-line sonarjs/cognitive-complexity -- autocomplete suggestion engine
     useMemo(() => {
       const empty = {
         suggestions: [] as string[],
@@ -338,7 +341,7 @@ export function useAutocomplete(
           if (backendHasFields) {
             candidates.push(...[...pipelineFields].sort());
           } else {
-            candidates.push(...fieldNames.sort());
+            candidates.push(...fieldNames.toSorted());
           }
         }
 

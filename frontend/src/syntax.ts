@@ -146,6 +146,7 @@ function highlightSubtle(text: string): SyntaxSpan[] {
 
 // --- JSON highlighter ---
 
+// eslint-disable-next-line sonarjs/cognitive-complexity -- JSON tokenizer with key/value/keyword state tracking
 function highlightJSON(text: string): SyntaxSpan[] {
   const spans: SyntaxSpan[] = [];
   let i = 0;
@@ -244,11 +245,9 @@ function highlightJSON(text: string): SyntaxSpan[] {
         text.startsWith("null", i))
     ) {
       // Boolean/null keyword
-      const kw = text.startsWith("true", i)
-        ? "true"
-        : text.startsWith("false", i)
-          ? "false"
-          : "null";
+      let kw = "null";
+      if (text.startsWith("true", i)) kw = "true";
+      else if (text.startsWith("false", i)) kw = "false";
       push(i, i + kw.length, C_KEYWORD);
       i += kw.length;
       afterColon = false;
@@ -290,6 +289,7 @@ const RE_SEV =
   /\b(ERROR|ERR|WARN(?:ING)?|INFO|DEBUG|TRACE|FATAL|CRITICAL|NOTICE)\b/gi;
 const RE_KV =
   /(?:^|[\s,;:()[\]{}])([a-zA-Z_][a-zA-Z0-9_.]*?)=(?:"[^"]*"|'[^']*'|[^\s,;)\]}"'=&{[]+)/g;
+/* eslint-disable sonarjs/regex-complexity -- network/timestamp regexes are inherently complex */
 const RE_TS =
   /\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?|\[\d{2}\/[A-Z][a-z]{2}\/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{4}\]|\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}|(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) [A-Z][a-z]{2} [ \d]\d \d{2}:\d{2}:\d{2}(?:\.\d+)?(?:\s\d{4})?|[A-Z][a-z]{2} [ \d]\d \d{2}:\d{2}:\d{2}/g;
 const RE_URL = /\bhttps?:\/\/[^\s"'<>]+/g;
@@ -310,6 +310,7 @@ const RE_QUOTED = /"[^"]*"|'[^']*'/g;
 // {ip} {ident} {user} [{timestamp}] "{method} {path} {protocol}" {status} {size}
 const RE_ACCESS_LOG =
   /^(\S+) \S+ \S+ (\[[^\]]+\]) "(GET|POST|PUT|DELETE|HEAD|OPTIONS|PATCH|TRACE|CONNECT) ([^"]*?) (HTTP\/[\d.]+)" (\d{3}) (\d+|-)/;
+/* eslint-enable sonarjs/regex-complexity */
 
 // Syslog: RFC 3164 format.
 // <priority>timestamp hostname program[pid]: message
@@ -350,6 +351,7 @@ function httpStatusColor(status: string): string {
   }
 }
 
+// eslint-disable-next-line sonarjs/cognitive-complexity -- multi-regex sweep over log line
 function highlightKVPlain(text: string): SyntaxSpan[] {
   const intervals: ColorInterval[] = [];
   let m: RegExpExecArray | null;
@@ -457,14 +459,11 @@ function highlightKVPlain(text: string): SyntaxSpan[] {
         end: pidOff + slm[5].length,
         color: C_NUMBER,
         clickValue: slm[5],
-      });
-      // Dim the brackets
-      intervals.push({
+      }, {
         start: pidOff - 1,
         end: pidOff,
         color: C_DIM,
-      });
-      intervals.push({
+      }, {
         start: pidOff + slm[5].length,
         end: pidOff + slm[5].length + 1,
         color: C_DIM,
@@ -627,6 +626,7 @@ function highlightKVPlain(text: string): SyntaxSpan[] {
  *
  *  Uses a sweep-line over interval boundaries instead of per-character arrays
  *  so cost is O(n log n) in the number of intervals, not O(text.length). */
+// eslint-disable-next-line sonarjs/cognitive-complexity -- sweep-line merge algorithm
 export function intervalsToSpans(
   text: string,
   intervals: ColorInterval[],
@@ -634,9 +634,7 @@ export function intervalsToSpans(
   if (intervals.length === 0) return [{ text }];
 
   // Collect all unique boundary positions and sort them.
-  const posSet = new Set<number>();
-  posSet.add(0);
-  posSet.add(text.length);
+  const posSet = new Set<number>([0, text.length]);
   for (const iv of intervals) {
     if (iv.start > 0 && iv.start < text.length) posSet.add(iv.start);
     if (iv.end > 0 && iv.end < text.length) posSet.add(iv.end);
@@ -661,7 +659,7 @@ export function intervalsToSpans(
       }
     }
     // Merge with previous span if attributes match.
-    const prev = spans.length > 0 ? spans[spans.length - 1]! : null;
+    const prev = spans.length > 0 ? spans.at(-1)! : null;
     if (prev && prev.color === color && prev.url === url && prev.clickValue === clickValue) {
       prev.text += text.slice(segStart, segEnd);
     } else {
@@ -677,7 +675,7 @@ export function mergeAdjacentSpans(spans: SyntaxSpan[]): SyntaxSpan[] {
   if (spans.length <= 1) return spans;
   const merged: SyntaxSpan[] = [spans[0]!];
   for (let i = 1; i < spans.length; i++) {
-    const prev = merged[merged.length - 1]!;
+    const prev = merged.at(-1)!;
     if (prev.color === spans[i]!.color) {
       prev.text += spans[i]!.text;
     } else {

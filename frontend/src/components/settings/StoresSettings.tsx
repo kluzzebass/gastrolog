@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import {
   useConfig,
@@ -250,7 +250,8 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
   const [newRetentionRules, setNewRetentionRules] = useState<RetentionRuleEdit[]>([]);
   const [newParams, setNewParams] = useState<Record<string, string>>({});
 
-  const stores = config?.stores ?? [];
+  const configStores = config?.stores;
+  const stores = configStores ?? [];
   const existingNames = new Set(stores.map((s) => s.name));
   const effectiveName = newName.trim() || newType;
   const nameConflict = existingNames.has(effectiveName);
@@ -260,13 +261,13 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
 
   // Auto-expand a store when navigated to from another settings tab.
   useEffect(() => {
-    if (!expandTarget || stores.length === 0) return;
-    const match = stores.find((s) => (s.name || s.id) === expandTarget);
+    if (!expandTarget || !configStores || configStores.length === 0) return;
+    const match = configStores.find((s) => (s.name || s.id) === expandTarget);
     if (match) {
       setExpanded(match.id);
     }
     onExpandTargetConsumed?.();
-  }, [expandTarget, stores, onExpandTargetConsumed]);
+  }, [expandTarget, configStores, onExpandTargetConsumed]);
 
   const filterOptions = [
     { value: "", label: "(none)" },
@@ -293,7 +294,7 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
       name: store.name,
       filter: store.filter,
       policy: store.policy,
-      retentionRules: (store.retentionRules ?? []).map((b) => ({
+      retentionRules: store.retentionRules.map((b) => ({
         retentionPolicyId: b.retentionPolicyId,
         action: b.action,
         destinationId: b.destinationId,
@@ -476,7 +477,7 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
         const edit = getEdit(store.id);
         const hasPolicy = store.policy && policies.some((p) => p.id === store.policy);
         const hasFilter = store.filter && filters.some((f) => f.id === store.filter);
-        const hasRetention = (store.retentionRules ?? []).length > 0;
+        const hasRetention = store.retentionRules.length > 0;
         const warnings = [
           ...(!hasPolicy ? ["no rotation policy"] : []),
           ...(!hasRetention ? ["no retention policy"] : []),
@@ -505,8 +506,9 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                     onComplete={(job) => {
                       const chunks = Number(job.chunksDone);
                       const errors = job.errorDetails.length;
+                      const errorSuffix = errors > 0 ? ", " + String(errors) + " error(s)" : "";
                       addToast(
-                        `${activeJob.label} done: ${chunks} chunk(s)${errors > 0 ? `, ${errors} error(s)` : ""}`,
+                        activeJob.label + " done: " + String(chunks) + " chunk(s)" + errorSuffix,
                         errors > 0 ? "warn" : "info",
                       );
                       clearJob(store.id);
