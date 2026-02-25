@@ -16,7 +16,7 @@ func TestGeoIP_Suffixes(t *testing.T) {
 	defer g.Close()
 
 	got := g.Suffixes()
-	want := []string{"country", "city"}
+	want := []string{"country", "city", "subdivision", "latitude", "longitude", "timezone", "accuracy_radius"}
 	if len(got) != len(want) {
 		t.Fatalf("Suffixes() = %v, want %v", got, want)
 	}
@@ -75,8 +75,8 @@ func TestGeoIP_LoadBadFile(t *testing.T) {
 
 // generateTestMMDB creates a minimal MMDB file in a temp directory and returns
 // the path. The database contains:
-//   - 8.8.8.8/32: country=US, city=Mountain View
-//   - 1.1.1.1/32: country=AU only (no city — tests partial data)
+//   - 8.8.8.8/32: full record (country, city, subdivision, location)
+//   - 1.1.1.1/32: country=AU only (tests partial data)
 func generateTestMMDB(t *testing.T) string {
 	t.Helper()
 
@@ -89,7 +89,7 @@ func generateTestMMDB(t *testing.T) string {
 		t.Fatalf("mmdbwriter.New: %v", err)
 	}
 
-	// 8.8.8.8/32 — full record: country + city.
+	// 8.8.8.8/32 — full record: country + city + subdivision + location.
 	_, net8, _ := net.ParseCIDR("8.8.8.8/32")
 	if err := tree.Insert(net8, mmdbtype.Map{
 		"country": mmdbtype.Map{
@@ -99,6 +99,20 @@ func generateTestMMDB(t *testing.T) string {
 			"names": mmdbtype.Map{
 				"en": mmdbtype.String("Mountain View"),
 			},
+		},
+		"subdivisions": mmdbtype.Slice{
+			mmdbtype.Map{
+				"iso_code": mmdbtype.String("CA"),
+				"names": mmdbtype.Map{
+					"en": mmdbtype.String("California"),
+				},
+			},
+		},
+		"location": mmdbtype.Map{
+			"latitude":        mmdbtype.Float64(37.386),
+			"longitude":       mmdbtype.Float64(-122.0838),
+			"time_zone":       mmdbtype.String("America/Los_Angeles"),
+			"accuracy_radius": mmdbtype.Uint16(1000),
 		},
 	}); err != nil {
 		t.Fatalf("Insert 8.8.8.8: %v", err)
@@ -155,8 +169,20 @@ func TestGeoIP_LoadAndLookup(t *testing.T) {
 	if got["city"] != "Mountain View" {
 		t.Errorf("city = %q, want %q", got["city"], "Mountain View")
 	}
-	if _, ok := got["asn"]; ok {
-		t.Errorf("unexpected asn key: %q", got["asn"])
+	if got["subdivision"] != "California" {
+		t.Errorf("subdivision = %q, want %q", got["subdivision"], "California")
+	}
+	if got["latitude"] != "37.3860" {
+		t.Errorf("latitude = %q, want %q", got["latitude"], "37.3860")
+	}
+	if got["longitude"] != "-122.0838" {
+		t.Errorf("longitude = %q, want %q", got["longitude"], "-122.0838")
+	}
+	if got["timezone"] != "America/Los_Angeles" {
+		t.Errorf("timezone = %q, want %q", got["timezone"], "America/Los_Angeles")
+	}
+	if got["accuracy_radius"] != "1000" {
+		t.Errorf("accuracy_radius = %q, want %q", got["accuracy_radius"], "1000")
 	}
 }
 

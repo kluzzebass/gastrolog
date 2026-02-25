@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,7 +19,7 @@ type GeoIPInfo struct {
 	BuildTime    time.Time
 }
 
-// mmdbRecord contains only the fields we decode from the MMDB file.
+// mmdbRecord contains the fields we decode from a GeoLite2-City / GeoIP2-City MMDB file.
 type mmdbRecord struct {
 	Country struct {
 		ISOCode string `maxminddb:"iso_code"`
@@ -26,6 +27,16 @@ type mmdbRecord struct {
 	City struct {
 		Names map[string]string `maxminddb:"names"`
 	} `maxminddb:"city"`
+	Subdivisions []struct {
+		ISOCode string            `maxminddb:"iso_code"`
+		Names   map[string]string `maxminddb:"names"`
+	} `maxminddb:"subdivisions"`
+	Location struct {
+		Latitude       float64 `maxminddb:"latitude"`
+		Longitude      float64 `maxminddb:"longitude"`
+		TimeZone       string  `maxminddb:"time_zone"`
+		AccuracyRadius uint16  `maxminddb:"accuracy_radius"`
+	} `maxminddb:"location"`
 }
 
 // GeoIP is a lookup table backed by a MaxMind MMDB file.
@@ -48,7 +59,7 @@ func NewGeoIP() *GeoIP {
 
 // Suffixes returns the output suffixes this table produces.
 func (g *GeoIP) Suffixes() []string {
-	return []string{"country", "city"}
+	return []string{"country", "city", "subdivision", "latitude", "longitude", "timezone", "accuracy_radius"}
 }
 
 // Lookup resolves an IP address to geographic metadata.
@@ -69,12 +80,29 @@ func (g *GeoIP) Lookup(_ context.Context, value string) map[string]string {
 		return nil
 	}
 
-	out := make(map[string]string, 2)
+	out := make(map[string]string, 7)
 	if rec.Country.ISOCode != "" {
 		out["country"] = rec.Country.ISOCode
 	}
 	if name := rec.City.Names["en"]; name != "" {
 		out["city"] = name
+	}
+	if len(rec.Subdivisions) > 0 {
+		if name := rec.Subdivisions[0].Names["en"]; name != "" {
+			out["subdivision"] = name
+		} else if rec.Subdivisions[0].ISOCode != "" {
+			out["subdivision"] = rec.Subdivisions[0].ISOCode
+		}
+	}
+	if rec.Location.Latitude != 0 || rec.Location.Longitude != 0 {
+		out["latitude"] = strconv.FormatFloat(rec.Location.Latitude, 'f', 4, 64)
+		out["longitude"] = strconv.FormatFloat(rec.Location.Longitude, 'f', 4, 64)
+	}
+	if rec.Location.TimeZone != "" {
+		out["timezone"] = rec.Location.TimeZone
+	}
+	if rec.Location.AccuracyRadius > 0 {
+		out["accuracy_radius"] = strconv.FormatUint(uint64(rec.Location.AccuracyRadius), 10)
 	}
 
 	if len(out) == 0 {
