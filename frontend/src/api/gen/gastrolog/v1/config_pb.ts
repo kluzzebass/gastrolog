@@ -1536,6 +1536,27 @@ export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
    */
   asnDbPath = "";
 
+  /**
+   * Whether automatic MaxMind database downloading is enabled.
+   *
+   * @generated from field: bool maxmind_auto_download = 21;
+   */
+  maxmindAutoDownload = false;
+
+  /**
+   * True when account_id + license_key are both set; credentials never exposed.
+   *
+   * @generated from field: bool maxmind_license_configured = 22;
+   */
+  maxmindLicenseConfigured = false;
+
+  /**
+   * RFC3339 timestamp of last successful MaxMind download.
+   *
+   * @generated from field: string maxmind_last_update = 23;
+   */
+  maxmindLastUpdate = "";
+
   constructor(data?: PartialMessage<GetServerConfigResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1564,6 +1585,9 @@ export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
     { no: 18, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 19, name: "geoip_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 20, name: "asn_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 21, name: "maxmind_auto_download", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 22, name: "maxmind_license_configured", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 23, name: "maxmind_last_update", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetServerConfigResponse {
@@ -1687,6 +1711,21 @@ export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
    */
   asnDbPath?: string;
 
+  /**
+   * @generated from field: optional bool maxmind_auto_download = 21;
+   */
+  maxmindAutoDownload?: boolean;
+
+  /**
+   * @generated from field: optional string maxmind_account_id = 22;
+   */
+  maxmindAccountId?: string;
+
+  /**
+   * @generated from field: optional string maxmind_license_key = 23;
+   */
+  maxmindLicenseKey?: string;
+
   constructor(data?: PartialMessage<PutServerConfigRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1715,6 +1754,9 @@ export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
     { no: 18, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
     { no: 19, name: "geoip_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 20, name: "asn_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 21, name: "maxmind_auto_download", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
+    { no: 22, name: "maxmind_account_id", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 23, name: "maxmind_license_key", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutServerConfigRequest {

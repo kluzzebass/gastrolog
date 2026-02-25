@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -41,6 +43,10 @@ type Config struct {
 
 	// NoAuth disables authentication. All requests are treated as admin.
 	NoAuth bool
+
+	// HomeDir is the gastrolog home directory path. Used for auto-downloaded
+	// lookup databases. Empty when running with in-memory config.
+	HomeDir string
 }
 
 // CertManager interface for TLS certificate management.
@@ -62,6 +68,7 @@ type Server struct {
 	noAuth      bool
 	logger      *slog.Logger
 	startTime   time.Time
+	homeDir     string // gastrolog home directory; empty for in-memory config
 
 	mu       sync.Mutex
 	listener net.Listener
@@ -93,6 +100,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orche
 		noAuth:      cfg.NoAuth,
 		logger:      logging.Default(cfg.Logger).With("component", "server"),
 		startTime:   time.Now(),
+		homeDir:     cfg.HomeDir,
 		shutdown:    make(chan struct{}),
 		rl:          newRateLimiter(5.0/60.0, 5), // 5 req/min per IP, burst of 5
 	}
@@ -267,24 +275,166 @@ func (s *Server) loadInitialLookupConfig(geoipTable *lookup.GeoIP, asnTable *loo
 	s.applyLookupConfig(sc.Lookup, geoipTable, asnTable)
 }
 
+// effectiveLookupPaths resolves the actual MMDB paths to use.
+// Manual paths take precedence; otherwise auto-downloaded paths are used when enabled.
+func (s *Server) effectiveLookupPaths(cfg config.LookupConfig) (geoip, asn string) {
+	geoip = cfg.GeoIPDBPath
+	asn = cfg.ASNDBPath
+
+	if s.homeDir == "" || !cfg.MaxMindAutoDownload {
+		return geoip, asn
+	}
+
+	lookupDir := filepath.Join(s.homeDir, "lookups")
+	if geoip == "" {
+		candidate := filepath.Join(lookupDir, "GeoLite2-City.mmdb")
+		if _, err := os.Stat(candidate); err == nil {
+			geoip = candidate
+		}
+	}
+	if asn == "" {
+		candidate := filepath.Join(lookupDir, "GeoLite2-ASN.mmdb")
+		if _, err := os.Stat(candidate); err == nil {
+			asn = candidate
+		}
+	}
+	return geoip, asn
+}
+
 // applyLookupConfig loads (or reloads) GeoIP and ASN databases from the given config.
+// It also manages the maxmind-update cron job for automatic downloads.
 func (s *Server) applyLookupConfig(cfg config.LookupConfig, geoipTable *lookup.GeoIP, asnTable *lookup.ASN) {
-	if cfg.GeoIPDBPath != "" {
-		if info, err := geoipTable.Load(cfg.GeoIPDBPath); err != nil {
-			s.logger.Warn("failed to load GeoIP database", "path", cfg.GeoIPDBPath, "error", err)
+	geoipPath, asnPath := s.effectiveLookupPaths(cfg)
+
+	if geoipPath != "" {
+		if info, err := geoipTable.Load(geoipPath); err != nil {
+			s.logger.Warn("failed to load GeoIP database", "path", geoipPath, "error", err)
 		} else {
-			s.logger.Info("loaded GeoIP database", "path", cfg.GeoIPDBPath, "type", info.DatabaseType, "build", info.BuildTime.Format("2006-01-02"))
-			_ = geoipTable.WatchFile(cfg.GeoIPDBPath)
+			s.logger.Info("loaded GeoIP database", "path", geoipPath, "type", info.DatabaseType, "build", info.BuildTime.Format("2006-01-02"))
+			_ = geoipTable.WatchFile(geoipPath)
 		}
 	}
-	if cfg.ASNDBPath != "" {
-		if info, err := asnTable.Load(cfg.ASNDBPath); err != nil {
-			s.logger.Warn("failed to load ASN database", "path", cfg.ASNDBPath, "error", err)
+	if asnPath != "" {
+		if info, err := asnTable.Load(asnPath); err != nil {
+			s.logger.Warn("failed to load ASN database", "path", asnPath, "error", err)
 		} else {
-			s.logger.Info("loaded ASN database", "path", cfg.ASNDBPath, "type", info.DatabaseType, "build", info.BuildTime.Format("2006-01-02"))
-			_ = asnTable.WatchFile(cfg.ASNDBPath)
+			s.logger.Info("loaded ASN database", "path", asnPath, "type", info.DatabaseType, "build", info.BuildTime.Format("2006-01-02"))
+			_ = asnTable.WatchFile(asnPath)
 		}
 	}
+
+	// Manage the maxmind-update cron job.
+	s.manageMaxMindJob(cfg, geoipTable, asnTable)
+}
+
+// manageMaxMindJob adds or removes the maxmind-update cron job based on config.
+func (s *Server) manageMaxMindJob(cfg config.LookupConfig, geoipTable *lookup.GeoIP, asnTable *lookup.ASN) {
+	scheduler := s.orch.Scheduler()
+	if scheduler == nil {
+		return
+	}
+
+	hasCredentials := cfg.MaxMindAccountID != "" && cfg.MaxMindLicenseKey != ""
+	if !cfg.MaxMindAutoDownload || !hasCredentials || s.homeDir == "" {
+		scheduler.RemoveJob("maxmind-update")
+		return
+	}
+
+	updateFn := func() { s.runMaxMindUpdate(geoipTable, asnTable) }
+
+	// Add recurring cron job: 03:00 on Tuesdays and Fridays.
+	if err := scheduler.AddJob("maxmind-update", "0 3 * * 2,5", updateFn); err != nil {
+		// Job may already exist (e.g. config re-applied). Update it.
+		if err := scheduler.UpdateJob("maxmind-update", "0 3 * * 2,5", updateFn); err != nil {
+			s.logger.Warn("failed to update maxmind-update job", "error", err)
+		}
+	}
+	scheduler.Describe("maxmind-update", "Download MaxMind GeoLite2 databases")
+
+	// If databases don't exist yet, trigger an immediate one-time download.
+	lookupDir := filepath.Join(s.homeDir, "lookups")
+	geoipExists := fileExists(filepath.Join(lookupDir, "GeoLite2-City.mmdb"))
+	asnExists := fileExists(filepath.Join(lookupDir, "GeoLite2-ASN.mmdb"))
+	if !geoipExists || !asnExists {
+		_ = scheduler.RunOnce("maxmind-update-initial", updateFn)
+	}
+}
+
+// runMaxMindUpdate downloads both MaxMind editions and updates the config timestamp.
+func (s *Server) runMaxMindUpdate(geoipTable *lookup.GeoIP, asnTable *lookup.ASN) {
+	ctx := context.Background()
+
+	sc, err := config.LoadServerConfig(ctx, s.cfgStore)
+	if err != nil {
+		s.logger.Warn("maxmind update: load config failed", "error", err)
+		return
+	}
+
+	if !sc.Lookup.MaxMindAutoDownload || sc.Lookup.MaxMindAccountID == "" || sc.Lookup.MaxMindLicenseKey == "" {
+		return
+	}
+
+	lookupDir := filepath.Join(s.homeDir, "lookups")
+	if err := os.MkdirAll(lookupDir, 0o750); err != nil {
+		s.logger.Warn("maxmind update: create lookup dir", "error", err)
+		return
+	}
+
+	var anySuccess bool
+	for _, edition := range []string{"GeoLite2-City", "GeoLite2-ASN"} {
+		if err := lookup.DownloadDB(ctx, sc.Lookup.MaxMindAccountID, sc.Lookup.MaxMindLicenseKey, edition, lookupDir); err != nil {
+			s.logger.Warn("maxmind update: download failed", "edition", edition, "error", err)
+		} else {
+			s.logger.Info("maxmind update: downloaded", "edition", edition)
+			anySuccess = true
+		}
+	}
+
+	if !anySuccess {
+		return
+	}
+
+	// Reload databases from effective paths.
+	sc, _ = config.LoadServerConfig(ctx, s.cfgStore)
+	geoipPath, asnPath := s.effectiveLookupPaths(sc.Lookup)
+	s.reloadGeoIP(geoipPath, geoipTable)
+	s.reloadASN(asnPath, asnTable)
+
+	// Update the last-update timestamp.
+	sc.Lookup.MaxMindLastUpdate = time.Now()
+	if err := config.SaveServerConfig(ctx, s.cfgStore, sc); err != nil {
+		s.logger.Warn("maxmind update: save timestamp failed", "error", err)
+	}
+}
+
+func (s *Server) reloadGeoIP(path string, table *lookup.GeoIP) {
+	if path == "" {
+		return
+	}
+	info, err := table.Load(path)
+	if err != nil {
+		s.logger.Warn("maxmind update: reload GeoIP failed", "error", err)
+		return
+	}
+	s.logger.Info("maxmind update: reloaded GeoIP", "build", info.BuildTime.Format("2006-01-02"))
+}
+
+func (s *Server) reloadASN(path string, table *lookup.ASN) {
+	if path == "" {
+		return
+	}
+	info, err := table.Load(path)
+	if err != nil {
+		s.logger.Warn("maxmind update: reload ASN failed", "error", err)
+		return
+	}
+	s.logger.Info("maxmind update: reloaded ASN", "build", info.BuildTime.Format("2006-01-02"))
+}
+
+// fileExists returns true if the path exists and is a regular file.
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 // Serve starts the server on the given listener.

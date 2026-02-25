@@ -116,6 +116,7 @@ export function useServerConfig() {
 }
 
 export const JWT_KEEP = "__KEEP_EXISTING__";
+export const MAXMIND_KEEP = "__KEEP_EXISTING__";
 
 export function usePutServerConfig() {
   const qc = useQueryClient();
@@ -141,46 +142,20 @@ export function usePutServerConfig() {
       setupWizardDismissed?: boolean;
       geoipDbPath?: string;
       asnDbPath?: string;
+      maxmindAutoDownload?: boolean;
+      maxmindAccountId?: string;
+      maxmindLicenseKey?: string;
     }) => {
+      // Build request with only defined fields, skipping sentinel-guarded secrets.
+      const { jwtSecret, maxmindLicenseKey, ...rest } = args;
       const req: Record<string, unknown> = {};
-      if (args.tokenDuration !== undefined) req.tokenDuration = args.tokenDuration;
-      if (args.jwtSecret !== undefined && args.jwtSecret !== JWT_KEEP)
-        req.jwtSecret = args.jwtSecret;
-      if (args.minPasswordLength !== undefined)
-        req.minPasswordLength = args.minPasswordLength;
-      if (args.maxConcurrentJobs !== undefined)
-        req.maxConcurrentJobs = args.maxConcurrentJobs;
-      if (args.tlsDefaultCert !== undefined)
-        req.tlsDefaultCert = args.tlsDefaultCert;
-      if (args.tlsEnabled !== undefined) req.tlsEnabled = args.tlsEnabled;
-      if (args.httpToHttpsRedirect !== undefined)
-        req.httpToHttpsRedirect = args.httpToHttpsRedirect;
-      if (args.httpsPort !== undefined)
-        req.httpsPort = args.httpsPort;
-      if (args.requireMixedCase !== undefined)
-        req.requireMixedCase = args.requireMixedCase;
-      if (args.requireDigit !== undefined)
-        req.requireDigit = args.requireDigit;
-      if (args.requireSpecial !== undefined)
-        req.requireSpecial = args.requireSpecial;
-      if (args.maxConsecutiveRepeats !== undefined)
-        req.maxConsecutiveRepeats = args.maxConsecutiveRepeats;
-      if (args.forbidAnimalNoise !== undefined)
-        req.forbidAnimalNoise = args.forbidAnimalNoise;
-      if (args.maxFollowDuration !== undefined)
-        req.maxFollowDuration = args.maxFollowDuration;
-      if (args.queryTimeout !== undefined)
-        req.queryTimeout = args.queryTimeout;
-      if (args.refreshTokenDuration !== undefined)
-        req.refreshTokenDuration = args.refreshTokenDuration;
-      if (args.maxResultCount !== undefined)
-        req.maxResultCount = args.maxResultCount;
-      if (args.setupWizardDismissed !== undefined)
-        req.setupWizardDismissed = args.setupWizardDismissed;
-      if (args.geoipDbPath !== undefined)
-        req.geoipDbPath = args.geoipDbPath;
-      if (args.asnDbPath !== undefined)
-        req.asnDbPath = args.asnDbPath;
+      for (const [key, value] of Object.entries(rest)) {
+        req[key] = value;
+      }
+      if (jwtSecret !== undefined && jwtSecret !== JWT_KEEP)
+        req.jwtSecret = jwtSecret;
+      if (maxmindLicenseKey !== undefined && maxmindLicenseKey !== MAXMIND_KEEP)
+        req.maxmindLicenseKey = maxmindLicenseKey;
       await configClient.putServerConfig(req as Parameters<typeof configClient.putServerConfig>[0]);
     },
     onSuccess: () => {

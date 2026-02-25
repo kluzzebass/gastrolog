@@ -131,8 +131,12 @@ type ServerConfig struct {
 
 // LookupConfig holds configuration for lookup tables (e.g. GeoIP enrichment).
 type LookupConfig struct {
-	GeoIPDBPath string `json:"geoip_db_path,omitempty"` // Path to MaxMind GeoIP2/GeoLite2-City MMDB file
-	ASNDBPath   string `json:"asn_db_path,omitempty"`   // Path to MaxMind GeoIP2/GeoLite2-ASN MMDB file
+	GeoIPDBPath         string    `json:"geoip_db_path,omitempty"`          // Path to MaxMind GeoIP2/GeoLite2-City MMDB file
+	ASNDBPath           string    `json:"asn_db_path,omitempty"`            // Path to MaxMind GeoIP2/GeoLite2-ASN MMDB file
+	MaxMindAutoDownload bool      `json:"maxmind_auto_download,omitempty"`  // Enable automatic MaxMind database downloading
+	MaxMindAccountID    string    `json:"maxmind_account_id,omitempty"`     // MaxMind account ID for HTTP Basic Auth
+	MaxMindLicenseKey   string    `json:"maxmind_license_key,omitempty"`    // MaxMind license key for HTTP Basic Auth
+	MaxMindLastUpdate   time.Time `json:"maxmind_last_update,omitzero"`     // Last successful download timestamp
 }
 
 // QueryConfig holds configuration for the query engine.

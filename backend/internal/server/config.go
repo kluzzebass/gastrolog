@@ -191,6 +191,11 @@ func (s *ConfigServer) GetServerConfig(
 		resp.SetupWizardDismissed = sc.SetupWizardDismissed
 		resp.GeoipDbPath = sc.Lookup.GeoIPDBPath
 		resp.AsnDbPath = sc.Lookup.ASNDBPath
+		resp.MaxmindAutoDownload = sc.Lookup.MaxMindAutoDownload
+		resp.MaxmindLicenseConfigured = sc.Lookup.MaxMindAccountID != "" && sc.Lookup.MaxMindLicenseKey != ""
+		if !sc.Lookup.MaxMindLastUpdate.IsZero() {
+			resp.MaxmindLastUpdate = sc.Lookup.MaxMindLastUpdate.Format(time.RFC3339)
+		}
 	}
 
 	// If no persisted value, report the live default from the orchestrator.
@@ -238,7 +243,9 @@ func (s *ConfigServer) PutServerConfig(
 		s.onTLSConfigChange()
 	}
 
-	if s.onLookupConfigChange != nil && (req.Msg.GeoipDbPath != nil || req.Msg.AsnDbPath != nil) {
+	lookupChanged := req.Msg.GeoipDbPath != nil || req.Msg.AsnDbPath != nil ||
+		req.Msg.MaxmindAutoDownload != nil || req.Msg.MaxmindAccountId != nil || req.Msg.MaxmindLicenseKey != nil
+	if s.onLookupConfigChange != nil && lookupChanged {
 		s.onLookupConfigChange(sc.Lookup)
 	}
 
@@ -331,6 +338,15 @@ func mergeServerConfigFields(msg *apiv1.PutServerConfigRequest, sc *config.Serve
 	}
 	if msg.AsnDbPath != nil {
 		sc.Lookup.ASNDBPath = *msg.AsnDbPath
+	}
+	if msg.MaxmindAutoDownload != nil {
+		sc.Lookup.MaxMindAutoDownload = *msg.MaxmindAutoDownload
+	}
+	if msg.MaxmindAccountId != nil {
+		sc.Lookup.MaxMindAccountID = *msg.MaxmindAccountId
+	}
+	if msg.MaxmindLicenseKey != nil {
+		sc.Lookup.MaxMindLicenseKey = *msg.MaxmindLicenseKey
 	}
 	return nil
 }

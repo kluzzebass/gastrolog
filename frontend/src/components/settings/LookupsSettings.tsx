@@ -1,9 +1,15 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { useServerConfig, usePutServerConfig } from "../../api/hooks/useConfig";
+import {
+  useServerConfig,
+  usePutServerConfig,
+  MAXMIND_KEEP,
+} from "../../api/hooks/useConfig";
 import { useToast } from "../Toast";
 import { FormField, TextInput } from "./FormField";
+import { Checkbox } from "./Checkbox";
 import { PrimaryButton, GhostButton } from "./Buttons";
+import { ExpandableCard } from "./ExpandableCard";
 
 export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
@@ -13,11 +19,26 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
 
   const [geoipDbPath, setGeoipDbPath] = useState("");
   const [asnDbPath, setAsnDbPath] = useState("");
+  const [autoDownload, setAutoDownload] = useState(false);
+  const [accountId, setAccountId] = useState("");
+  const [licenseKey, setLicenseKey] = useState("");
   const [initialized, setInitialized] = useState(false);
+
+  const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({
+    maxmind: true,
+    geoip: false,
+    asn: false,
+  });
+
+  const toggle = (key: string) =>
+    setExpandedCards((prev) => ({ ...prev, [key]: !prev[key] }));
 
   if (data && !initialized) {
     setGeoipDbPath(data.geoipDbPath ?? "");
     setAsnDbPath(data.asnDbPath ?? "");
+    setAutoDownload(data.maxmindAutoDownload ?? false);
+    setAccountId("");
+    setLicenseKey("");
     setInitialized(true);
   }
 
@@ -25,11 +46,22 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
     initialized &&
     data &&
     (geoipDbPath !== (data.geoipDbPath ?? "") ||
-      asnDbPath !== (data.asnDbPath ?? ""));
+      asnDbPath !== (data.asnDbPath ?? "") ||
+      autoDownload !== (data.maxmindAutoDownload ?? false) ||
+      accountId !== "" ||
+      licenseKey !== "");
 
   const handleSave = async () => {
     try {
-      await putConfig.mutateAsync({ geoipDbPath, asnDbPath });
+      await putConfig.mutateAsync({
+        geoipDbPath,
+        asnDbPath,
+        maxmindAutoDownload: autoDownload,
+        maxmindAccountId: accountId || undefined,
+        maxmindLicenseKey: licenseKey || MAXMIND_KEEP,
+      });
+      setAccountId("");
+      setLicenseKey("");
       addToast("Lookup configuration updated", "info");
     } catch (err: any) {
       const msg = err.message ?? "Failed to update lookup configuration";
@@ -41,6 +73,9 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
     if (data) {
       setGeoipDbPath(data.geoipDbPath ?? "");
       setAsnDbPath(data.asnDbPath ?? "");
+      setAutoDownload(data.maxmindAutoDownload ?? false);
+      setAccountId("");
+      setLicenseKey("");
     }
   };
 
@@ -61,52 +96,179 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
           Loading...
         </div>
       ) : (
-        <div className="flex flex-col gap-8 max-w-lg">
-          <section className="flex flex-col gap-5">
-            <h3
-              className={`text-[0.75em] uppercase tracking-wider font-medium pb-1 border-b ${c("text-text-ghost border-ink-border", "text-light-text-ghost border-light-border")}`}
-            >
-              GeoIP
-            </h3>
-
-            <FormField
-              label="MaxMind MMDB Path"
-              description="Path to a MaxMind GeoLite2-City or GeoIP2-City database file (.mmdb). Used by the `| lookup geoip` pipeline operator to enrich IP addresses with country and city. The file is hot-reloaded on changes. Hot-reload does not follow symlinks."
-              dark={dark}
-            >
-              <TextInput
-                value={geoipDbPath}
-                onChange={setGeoipDbPath}
-                placeholder="path/to/GeoLite2-City.mmdb"
+        <div className="flex flex-col gap-3">
+          <ExpandableCard
+            id="MaxMind Auto-Download"
+            dark={dark}
+            expanded={!!expandedCards.maxmind}
+            onToggle={() => toggle("maxmind")}
+            monoTitle={false}
+            typeBadge={autoDownload ? "enabled" : undefined}
+            typeBadgeAccent={true}
+            status={
+              data?.maxmindLicenseConfigured ? (
+                <span className="text-green-500 text-[0.8em]">&#10003;</span>
+              ) : undefined
+            }
+          >
+            <div className="flex flex-col gap-4">
+              <Checkbox
+                checked={autoDownload}
+                onChange={setAutoDownload}
+                label="Enable automatic database downloads"
                 dark={dark}
-                mono
               />
-            </FormField>
-          </section>
 
-          <section className="flex flex-col gap-5">
-            <h3
-              className={`text-[0.75em] uppercase tracking-wider font-medium pb-1 border-b ${c("text-text-ghost border-ink-border", "text-light-text-ghost border-light-border")}`}
-            >
-              ASN
-            </h3>
+              <p
+                className={`text-[0.8em] leading-relaxed ${c("text-text-muted", "text-light-text-muted")}`}
+              >
+                When enabled, GeoLite2-City and GeoLite2-ASN databases are
+                downloaded automatically and updated twice weekly (Tue/Fri at
+                03:00). Requires a free{" "}
+                <a
+                  href="https://www.maxmind.com/en/geolite2/signup"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-copper hover:underline"
+                >
+                  MaxMind account
+                </a>
+                .
+              </p>
 
-            <FormField
-              label="MaxMind MMDB Path"
-              description="Path to a MaxMind GeoLite2-ASN or GeoIP2-ISP database file (.mmdb). Used by the `| lookup asn` pipeline operator to enrich IP addresses with AS number and organization. The file is hot-reloaded on changes. Hot-reload does not follow symlinks."
-              dark={dark}
-            >
-              <TextInput
-                value={asnDbPath}
-                onChange={setAsnDbPath}
-                placeholder="path/to/GeoLite2-ASN.mmdb"
+              <FormField
+                label="Account ID"
+                description="Your MaxMind account ID (numeric)."
                 dark={dark}
-                mono
-              />
-            </FormField>
-          </section>
+              >
+                <TextInput
+                  value={accountId}
+                  onChange={setAccountId}
+                  placeholder={
+                    data?.maxmindLicenseConfigured
+                      ? "(configured — leave blank to keep)"
+                      : "123456"
+                  }
+                  dark={dark}
+                  mono
+                />
+              </FormField>
 
-          <div className="flex gap-2 mt-1">
+              <FormField
+                label="License Key"
+                description="Your MaxMind license key."
+                dark={dark}
+              >
+                <PasswordInput
+                  value={licenseKey}
+                  onChange={setLicenseKey}
+                  placeholder={
+                    data?.maxmindLicenseConfigured
+                      ? "(configured — leave blank to keep)"
+                      : "Enter license key"
+                  }
+                  dark={dark}
+                />
+              </FormField>
+
+              {data?.maxmindLastUpdate && (
+                <div
+                  className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+                >
+                  Last updated:{" "}
+                  {new Date(data.maxmindLastUpdate).toLocaleString()}
+                </div>
+              )}
+            </div>
+          </ExpandableCard>
+
+          <ExpandableCard
+            id="GeoIP"
+            dark={dark}
+            expanded={!!expandedCards.geoip}
+            onToggle={() => toggle("geoip")}
+            monoTitle={false}
+            typeBadge={
+              geoipDbPath ? "manual path" : autoDownload ? "auto" : undefined
+            }
+            typeBadgeAccent={!geoipDbPath && autoDownload}
+          >
+            <div className="flex flex-col gap-4">
+              <p
+                className={`text-[0.8em] leading-relaxed ${c("text-text-muted", "text-light-text-muted")}`}
+              >
+                Enriches IP addresses with country, city, and coordinates via{" "}
+                <span className="font-mono">| lookup geoip</span>.
+              </p>
+
+              <FormField
+                label="Manual MMDB Path"
+                description={
+                  autoDownload
+                    ? "Overrides the auto-downloaded GeoLite2-City database. Leave blank to use auto-download."
+                    : "Path to a GeoLite2-City or GeoIP2-City .mmdb file. Hot-reloaded on changes."
+                }
+                dark={dark}
+              >
+                <TextInput
+                  value={geoipDbPath}
+                  onChange={setGeoipDbPath}
+                  placeholder={
+                    autoDownload
+                      ? "(using auto-downloaded GeoLite2-City)"
+                      : "path/to/GeoLite2-City.mmdb"
+                  }
+                  dark={dark}
+                  mono
+                />
+              </FormField>
+            </div>
+          </ExpandableCard>
+
+          <ExpandableCard
+            id="ASN"
+            dark={dark}
+            expanded={!!expandedCards.asn}
+            onToggle={() => toggle("asn")}
+            monoTitle={false}
+            typeBadge={
+              asnDbPath ? "manual path" : autoDownload ? "auto" : undefined
+            }
+            typeBadgeAccent={!asnDbPath && autoDownload}
+          >
+            <div className="flex flex-col gap-4">
+              <p
+                className={`text-[0.8em] leading-relaxed ${c("text-text-muted", "text-light-text-muted")}`}
+              >
+                Enriches IP addresses with AS number and organization via{" "}
+                <span className="font-mono">| lookup asn</span>.
+              </p>
+
+              <FormField
+                label="Manual MMDB Path"
+                description={
+                  autoDownload
+                    ? "Overrides the auto-downloaded GeoLite2-ASN database. Leave blank to use auto-download."
+                    : "Path to a GeoLite2-ASN or GeoIP2-ISP .mmdb file. Hot-reloaded on changes."
+                }
+                dark={dark}
+              >
+                <TextInput
+                  value={asnDbPath}
+                  onChange={setAsnDbPath}
+                  placeholder={
+                    autoDownload
+                      ? "(using auto-downloaded GeoLite2-ASN)"
+                      : "path/to/GeoLite2-ASN.mmdb"
+                  }
+                  dark={dark}
+                  mono
+                />
+              </FormField>
+            </div>
+          </ExpandableCard>
+
+          <div className="flex gap-2 mt-2">
             <PrimaryButton
               onClick={handleSave}
               disabled={!dirty || putConfig.isPending}
@@ -122,5 +284,32 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
         </div>
       )}
     </div>
+  );
+}
+
+function PasswordInput({
+  value,
+  onChange,
+  placeholder,
+  dark,
+}: Readonly<{
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  dark: boolean;
+}>) {
+  const c = useThemeClass(dark);
+  return (
+    <input
+      type="password"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      autoComplete="off"
+      className={`px-2.5 py-1.5 text-[0.85em] font-mono border rounded focus:outline-none transition-colors ${c(
+        "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
+        "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
+      )}`}
+    />
   );
 }
