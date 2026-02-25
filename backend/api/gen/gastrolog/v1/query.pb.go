@@ -1343,6 +1343,7 @@ type GetSyntaxResponse struct {
 	Directives    []string               `protobuf:"bytes,1,rep,name=directives,proto3" json:"directives,omitempty"`                            // Query control args (reverse, start, end, last, ...)
 	PipeKeywords  []string               `protobuf:"bytes,2,rep,name=pipe_keywords,json=pipeKeywords,proto3" json:"pipe_keywords,omitempty"`    // Pipe operator keywords (stats, where)
 	PipeFunctions []string               `protobuf:"bytes,3,rep,name=pipe_functions,json=pipeFunctions,proto3" json:"pipe_functions,omitempty"` // Functions usable in pipe expressions (count, avg, bin, ...)
+	LookupTables  []string               `protobuf:"bytes,4,rep,name=lookup_tables,json=lookupTables,proto3" json:"lookup_tables,omitempty"`    // Registered lookup table names (rdns, geoip, ...)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1394,6 +1395,13 @@ func (x *GetSyntaxResponse) GetPipeKeywords() []string {
 func (x *GetSyntaxResponse) GetPipeFunctions() []string {
 	if x != nil {
 		return x.PipeFunctions
+	}
+	return nil
+}
+
+func (x *GetSyntaxResponse) GetLookupTables() []string {
+	if x != nil {
+		return x.LookupTables
 	}
 	return nil
 }
@@ -1727,13 +1735,14 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\x06before\x18\x01 \x03(\v2\x14.gastrolog.v1.RecordR\x06before\x12,\n" +
 	"\x06anchor\x18\x02 \x01(\v2\x14.gastrolog.v1.RecordR\x06anchor\x12*\n" +
 	"\x05after\x18\x03 \x03(\v2\x14.gastrolog.v1.RecordR\x05after\"\x12\n" +
-	"\x10GetSyntaxRequest\"\x7f\n" +
+	"\x10GetSyntaxRequest\"\xa4\x01\n" +
 	"\x11GetSyntaxResponse\x12\x1e\n" +
 	"\n" +
 	"directives\x18\x01 \x03(\tR\n" +
 	"directives\x12#\n" +
 	"\rpipe_keywords\x18\x02 \x03(\tR\fpipeKeywords\x12%\n" +
-	"\x0epipe_functions\x18\x03 \x03(\tR\rpipeFunctions\"6\n" +
+	"\x0epipe_functions\x18\x03 \x03(\tR\rpipeFunctions\x12#\n" +
+	"\rlookup_tables\x18\x04 \x03(\tR\flookupTables\"6\n" +
 	"\x14ValidateQueryRequest\x12\x1e\n" +
 	"\n" +
 	"expression\x18\x01 \x01(\tR\n" +

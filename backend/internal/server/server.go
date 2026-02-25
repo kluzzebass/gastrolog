@@ -194,11 +194,39 @@ func (s *Server) buildMux() *http.ServeMux {
 	}
 
 	queryTimeout, maxFollowDuration, maxResultCount := s.loadQueryConfig()
-	lookupRegistry := lookup.Registry{"rdns": lookup.NewRDNS()}
-	queryServer := NewQueryServer(s.orch, lookupRegistry.Resolve, queryTimeout, maxFollowDuration, maxResultCount)
+
+	geoipTable := lookup.NewGeoIP()
+	lookupRegistry := lookup.Registry{
+		"rdns":  lookup.NewRDNS(),
+		"geoip": geoipTable,
+	}
+
+	// Load initial GeoIP config.
+	if s.cfgStore != nil {
+		if sc, err := config.LoadServerConfig(context.Background(), s.cfgStore); err == nil && sc.Lookup.GeoIPDBPath != "" {
+			if info, err := geoipTable.Load(sc.Lookup.GeoIPDBPath); err != nil {
+				s.logger.Warn("failed to load GeoIP database", "path", sc.Lookup.GeoIPDBPath, "error", err)
+			} else {
+				s.logger.Info("loaded GeoIP database", "path", sc.Lookup.GeoIPDBPath, "type", info.DatabaseType, "build", info.BuildTime.Format("2006-01-02"))
+				_ = geoipTable.WatchFile(sc.Lookup.GeoIPDBPath)
+			}
+		}
+	}
+
+	queryServer := NewQueryServer(s.orch, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount)
 	storeServer := NewStoreServer(s.orch, s.cfgStore, s.factories, s.logger)
 	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager)
 	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
+	configServer.SetOnLookupConfigChange(func(cfg config.LookupConfig) {
+		if cfg.GeoIPDBPath != "" {
+			if info, err := geoipTable.Load(cfg.GeoIPDBPath); err != nil {
+				s.logger.Warn("failed to reload GeoIP database", "path", cfg.GeoIPDBPath, "error", err)
+			} else {
+				s.logger.Info("reloaded GeoIP database", "path", cfg.GeoIPDBPath, "type", info.DatabaseType, "build", info.BuildTime.Format("2006-01-02"))
+				_ = geoipTable.WatchFile(cfg.GeoIPDBPath)
+			}
+		}
+	})
 	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown)
 	authServer := NewAuthServer(s.cfgStore, s.tokens, s.logger, s.noAuth)
 	jobServer := NewJobServer(s.orch.Scheduler())

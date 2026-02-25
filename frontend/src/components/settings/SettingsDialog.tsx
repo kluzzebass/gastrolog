@@ -12,6 +12,7 @@ import {
   RetentionIcon,
   PolicyIcon,
   UsersIcon,
+  LookupIcon,
 } from "../icons";
 import { StoresSettings } from "./StoresSettings";
 import { IngestersSettings } from "./IngestersSettings";
@@ -20,6 +21,7 @@ import { FiltersSettings } from "./FiltersSettings";
 import { PoliciesSettings } from "./PoliciesSettings";
 import { RetentionPoliciesSettings } from "./RetentionPoliciesSettings";
 import { UsersSettings } from "./UsersSettings";
+import { LookupsSettings } from "./LookupsSettings";
 import {
   useServerConfig,
   usePutServerConfig,
@@ -55,6 +57,7 @@ function parseDurationSeconds(s: string): number | null {
 export type SettingsTab =
   | "service"
   | "certificates"
+  | "lookups"
   | "stores"
   | "ingesters"
   | "filters"
@@ -82,6 +85,7 @@ type TabDef = {
 const allTabs: TabDef[] = [
   { id: "service", label: "Service", icon: ServiceIcon, helpTopicId: "service-settings" },
   { id: "certificates", label: "Certificates", icon: CertIcon, helpTopicId: "certificates" },
+  { id: "lookups", label: "Lookups", icon: LookupIcon },
   { id: "users", label: "Users", icon: UsersIcon, adminOnly: true, helpTopicId: "user-management" },
   { id: "ingesters", label: "Ingesters", icon: IngestersIcon, helpTopicId: "ingesters" },
   { id: "filters", label: "Filters", icon: FilterIcon, helpTopicId: "routing" },
@@ -142,6 +146,7 @@ export function SettingsDialog({
         <div className="flex-1 overflow-y-auto app-scroll p-5">
           {tab === "service" && <ServiceSettings dark={dark} noAuth={noAuth} />}
           {tab === "certificates" && <CertificatesSettings dark={dark} />}
+          {tab === "lookups" && <LookupsSettings dark={dark} />}
           {tab === "users" && <UsersSettings dark={dark} noAuth={noAuth} />}
           {tab === "ingesters" && <IngestersSettings dark={dark} />}
           {tab === "filters" && <FiltersSettings dark={dark} onNavigateTo={navigateTo} />}

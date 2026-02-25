@@ -1154,6 +1154,13 @@ export class GetSyntaxResponse extends Message<GetSyntaxResponse> {
    */
   pipeFunctions: string[] = [];
 
+  /**
+   * Registered lookup table names (rdns, geoip, ...)
+   *
+   * @generated from field: repeated string lookup_tables = 4;
+   */
+  lookupTables: string[] = [];
+
   constructor(data?: PartialMessage<GetSyntaxResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1165,6 +1172,7 @@ export class GetSyntaxResponse extends Message<GetSyntaxResponse> {
     { no: 1, name: "directives", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
     { no: 2, name: "pipe_keywords", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
     { no: 3, name: "pipe_functions", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 4, name: "lookup_tables", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetSyntaxResponse {

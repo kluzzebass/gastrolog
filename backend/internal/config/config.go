@@ -125,7 +125,13 @@ type ServerConfig struct {
 	Query                QueryConfig     `json:"query"`
 	Scheduler            SchedulerConfig `json:"scheduler"`
 	TLS                  TLSConfig       `json:"tls"`
+	Lookup               LookupConfig    `json:"lookup,omitzero"`
 	SetupWizardDismissed bool            `json:"setup_wizard_dismissed,omitempty"`
+}
+
+// LookupConfig holds configuration for lookup tables (e.g. GeoIP enrichment).
+type LookupConfig struct {
+	GeoIPDBPath string `json:"geoip_db_path,omitempty"` // Path to MaxMind MMDB file
 }
 
 // QueryConfig holds configuration for the query engine.

@@ -501,6 +501,25 @@ export function StopIcon({ className }: Readonly<IconProps>) {
   );
 }
 
+export function LookupIcon({ className }: Readonly<IconProps>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <circle cx="11" cy="11" r="8" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+      <circle cx="11" cy="8" r="1" fill="currentColor" stroke="none" />
+      <line x1="11" y1="11" x2="11" y2="15" />
+    </svg>
+  );
+}
+
 export function PlanIcon({ className }: Readonly<IconProps>) {
   return (
     <svg

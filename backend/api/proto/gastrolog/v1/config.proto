@@ -258,6 +258,7 @@ message GetServerConfigResponse {
   string refresh_token_duration = 16; // Lifetime of refresh tokens (Go duration). Empty = 168h default.
   int32 max_result_count = 17; // Max records per Search request. 0 = unlimited.
   bool setup_wizard_dismissed = 18; // True when the user has dismissed the setup wizard.
+  string geoip_db_path = 19; // Path to MaxMind MMDB file for GeoIP lookups.
 }
 
 message PutServerConfigRequest {
@@ -279,6 +280,7 @@ message PutServerConfigRequest {
   optional string refresh_token_duration = 16;
   optional int32 max_result_count = 17;
   optional bool setup_wizard_dismissed = 18;
+  optional string geoip_db_path = 19;
 }
 
 message PutServerConfigResponse {}

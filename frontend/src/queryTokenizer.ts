@@ -61,6 +61,7 @@ export interface SyntaxSets {
   directives: Set<string>;
   pipeKeywords: Set<string>;
   pipeFunctions: Set<string>;
+  lookupTables: Set<string>;
 }
 
 // Scalar functions that can appear in filter expression predicates.
@@ -91,6 +92,7 @@ export const DEFAULT_SYNTAX: SyntaxSets = {
     "coalesce", "isnull", "typeof",
     "bitor", "bitand", "bitxor", "bitnot", "bitshl", "bitshr",
   ]),
+  lookupTables: new Set(["rdns", "geoip"]),
 };
 
 /** @deprecated Use DEFAULT_SYNTAX.directives instead. */

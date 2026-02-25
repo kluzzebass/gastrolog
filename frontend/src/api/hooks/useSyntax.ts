@@ -5,6 +5,7 @@ export interface SyntaxKeywords {
   directives: Set<string>;
   pipeKeywords: Set<string>;
   pipeFunctions: Set<string>;
+  lookupTables: Set<string>;
 }
 
 export function useSyntax() {
@@ -16,6 +17,7 @@ export function useSyntax() {
         directives: new Set(response.directives),
         pipeKeywords: new Set(response.pipeKeywords),
         pipeFunctions: new Set(response.pipeFunctions),
+        lookupTables: new Set(response.lookupTables),
       };
     },
     staleTime: Infinity, // Never refetch — keyword sets don't change at runtime.

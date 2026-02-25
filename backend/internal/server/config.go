@@ -16,11 +16,12 @@ import (
 
 // ConfigServer implements the ConfigService.
 type ConfigServer struct {
-	orch              *orchestrator.Orchestrator
-	cfgStore          config.Store
-	factories         orchestrator.Factories
-	certManager       CertManager
-	onTLSConfigChange func()
+	orch                  *orchestrator.Orchestrator
+	cfgStore              config.Store
+	factories             orchestrator.Factories
+	certManager           CertManager
+	onTLSConfigChange     func()
+	onLookupConfigChange  func(config.LookupConfig)
 }
 
 var _ gastrologv1connect.ConfigServiceHandler = (*ConfigServer)(nil)
@@ -38,6 +39,11 @@ func NewConfigServer(orch *orchestrator.Orchestrator, cfgStore config.Store, fac
 // SetOnTLSConfigChange sets a callback invoked when TLS config changes (for dynamic listener reconfig).
 func (s *ConfigServer) SetOnTLSConfigChange(fn func()) {
 	s.onTLSConfigChange = fn
+}
+
+// SetOnLookupConfigChange sets a callback invoked when lookup config changes (e.g. GeoIP DB path).
+func (s *ConfigServer) SetOnLookupConfigChange(fn func(config.LookupConfig)) {
+	s.onLookupConfigChange = fn
 }
 
 // GetConfig returns the current configuration.
@@ -183,6 +189,7 @@ func (s *ConfigServer) GetServerConfig(
 		resp.RefreshTokenDuration = sc.Auth.RefreshTokenDuration
 		resp.MaxResultCount = int32(sc.Query.MaxResultCount) //nolint:gosec // G115: small config value, always fits in int32
 		resp.SetupWizardDismissed = sc.SetupWizardDismissed
+		resp.GeoipDbPath = sc.Lookup.GeoIPDBPath
 	}
 
 	// If no persisted value, report the live default from the orchestrator.
@@ -228,6 +235,10 @@ func (s *ConfigServer) PutServerConfig(
 
 	if s.onTLSConfigChange != nil {
 		s.onTLSConfigChange()
+	}
+
+	if s.onLookupConfigChange != nil && req.Msg.GeoipDbPath != nil {
+		s.onLookupConfigChange(sc.Lookup)
 	}
 
 	return connect.NewResponse(&apiv1.PutServerConfigResponse{}), nil
@@ -313,6 +324,9 @@ func mergeServerConfigFields(msg *apiv1.PutServerConfigRequest, sc *config.Serve
 	}
 	if msg.SetupWizardDismissed != nil {
 		sc.SetupWizardDismissed = *msg.SetupWizardDismissed
+	}
+	if msg.GeoipDbPath != nil {
+		sc.Lookup.GeoIPDBPath = *msg.GeoipDbPath
 	}
 	return nil
 }

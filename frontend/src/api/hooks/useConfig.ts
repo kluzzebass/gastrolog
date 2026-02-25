@@ -139,6 +139,7 @@ export function usePutServerConfig() {
       refreshTokenDuration?: string;
       maxResultCount?: number;
       setupWizardDismissed?: boolean;
+      geoipDbPath?: string;
     }) => {
       const req: Record<string, unknown> = {};
       if (args.tokenDuration !== undefined) req.tokenDuration = args.tokenDuration;
@@ -175,6 +176,8 @@ export function usePutServerConfig() {
         req.maxResultCount = args.maxResultCount;
       if (args.setupWizardDismissed !== undefined)
         req.setupWizardDismissed = args.setupWizardDismissed;
+      if (args.geoipDbPath !== undefined)
+        req.geoipDbPath = args.geoipDbPath;
       await configClient.putServerConfig(req as Parameters<typeof configClient.putServerConfig>[0]);
     },
     onSuccess: () => {

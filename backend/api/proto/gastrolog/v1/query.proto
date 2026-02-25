@@ -193,6 +193,7 @@ message GetSyntaxResponse {
   repeated string directives = 1;       // Query control args (reverse, start, end, last, ...)
   repeated string pipe_keywords = 2;    // Pipe operator keywords (stats, where)
   repeated string pipe_functions = 3;   // Functions usable in pipe expressions (count, avg, bin, ...)
+  repeated string lookup_tables = 4;    // Registered lookup table names (rdns, geoip, ...)
 }
 
 message ValidateQueryRequest {

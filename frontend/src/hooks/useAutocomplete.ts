@@ -135,6 +135,7 @@ export type SuggestRule = {
   aggs?: boolean; // include aggregation functions (AGG_FUNCTIONS)
   funcs?: boolean; // include all pipeFunctions (scalar + agg)
   literals?: string[]; // include these exact keywords
+  lookupTables?: boolean; // include registered lookup table names from syntax
 };
 
 type Suggest = SuggestRule | "none";
@@ -193,7 +194,7 @@ export const PIPE_GRAMMARS: Record<string, PipeGrammar> = {
   },
   // lookup TABLE FIELD
   lookup: {
-    empty: { literals: ["rdns"] },
+    empty: { lookupTables: true },
     fallback: { fields: true },
   },
   // These take numeric/no arguments — never suggest.
@@ -319,6 +320,9 @@ export function useAutocomplete(
           candidates.push(...pipelineCompletions);
         } else if (rule.literals) {
           candidates.push(...rule.literals);
+        }
+        if (rule.lookupTables) {
+          candidates.push(...Array.from(syntax.lookupTables).sort());
         }
         if (rule.aggs) {
           candidates.push(

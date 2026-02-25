@@ -26,6 +26,7 @@ import (
 type QueryServer struct {
 	orch              *orchestrator.Orchestrator
 	lookupResolver    lookup.Resolver
+	lookupNames       []string
 	queryTimeout      time.Duration
 	maxFollowDuration time.Duration // 0 = no limit
 	maxResultCount    int64         // 0 = unlimited
@@ -34,8 +35,8 @@ type QueryServer struct {
 var _ gastrologv1connect.QueryServiceHandler = (*QueryServer)(nil)
 
 // NewQueryServer creates a new QueryServer.
-func NewQueryServer(orch *orchestrator.Orchestrator, lookupResolver lookup.Resolver, queryTimeout, maxFollowDuration time.Duration, maxResultCount int64) *QueryServer {
-	return &QueryServer{orch: orch, lookupResolver: lookupResolver, queryTimeout: queryTimeout, maxFollowDuration: maxFollowDuration, maxResultCount: maxResultCount}
+func NewQueryServer(orch *orchestrator.Orchestrator, lookupResolver lookup.Resolver, lookupNames []string, queryTimeout, maxFollowDuration time.Duration, maxResultCount int64) *QueryServer {
+	return &QueryServer{orch: orch, lookupResolver: lookupResolver, lookupNames: lookupNames, queryTimeout: queryTimeout, maxFollowDuration: maxFollowDuration, maxResultCount: maxResultCount}
 }
 
 // Search executes a query and streams matching records.
@@ -392,6 +393,7 @@ func (s *QueryServer) GetSyntax(
 		},
 		PipeKeywords:  []string{"stats", "where", "eval", "sort", "head", "tail", "slice", "rename", "fields", "timechart", "raw", "lookup"},
 		PipeFunctions: funcs,
+		LookupTables:  s.lookupNames,
 	}), nil
 }
 

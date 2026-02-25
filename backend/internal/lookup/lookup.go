@@ -3,7 +3,10 @@
 // get added to the record as <field>_<suffix>.
 package lookup
 
-import "context"
+import (
+	"context"
+	"sort"
+)
 
 // LookupTable enriches a single field value with additional fields.
 // Implementations must be safe for concurrent use.
@@ -27,4 +30,14 @@ type Registry map[string]LookupTable
 // Resolve returns the table for the given name, or nil if not found.
 func (r Registry) Resolve(name string) LookupTable {
 	return r[name]
+}
+
+// Names returns the sorted table name keys.
+func (r Registry) Names() []string {
+	names := make([]string, 0, len(r))
+	for name := range r {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }

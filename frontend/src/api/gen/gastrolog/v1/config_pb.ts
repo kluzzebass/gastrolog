@@ -1522,6 +1522,13 @@ export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
    */
   setupWizardDismissed = false;
 
+  /**
+   * Path to MaxMind MMDB file for GeoIP lookups.
+   *
+   * @generated from field: string geoip_db_path = 19;
+   */
+  geoipDbPath = "";
+
   constructor(data?: PartialMessage<GetServerConfigResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1548,6 +1555,7 @@ export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
     { no: 16, name: "refresh_token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 17, name: "max_result_count", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
     { no: 18, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 19, name: "geoip_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetServerConfigResponse {
@@ -1661,6 +1669,11 @@ export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
    */
   setupWizardDismissed?: boolean;
 
+  /**
+   * @generated from field: optional string geoip_db_path = 19;
+   */
+  geoipDbPath?: string;
+
   constructor(data?: PartialMessage<PutServerConfigRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1687,6 +1700,7 @@ export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
     { no: 16, name: "refresh_token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 17, name: "max_result_count", kind: "scalar", T: 5 /* ScalarType.INT32 */, opt: true },
     { no: 18, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
+    { no: 19, name: "geoip_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutServerConfigRequest {
