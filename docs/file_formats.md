@@ -5,7 +5,7 @@ All multi-byte integers are **little-endian**. UUIDs are stored as raw 16-byte v
 ## Directory Layout
 
 ```
-<data_dir>/
+<home>/
   <chunk-uuid>/
     raw.log             Raw log bytes (append-only)
     idx.log             Record metadata entries (append-only)

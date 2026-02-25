@@ -35,7 +35,7 @@ A **store** groups chunks under a single namespace with shared configuration:
 - **Filter**: An expression controlling which ingested records are routed to this store
 - **Rotation policy**: Rules for when to seal the active chunk and start a new one
 - **Retention policy**: Rules for when to delete old sealed chunks
-- **Params**: Engine-specific configuration (e.g., data directory)
+- **Params**: Engine-specific configuration (e.g., home directory path)
 
 You can have multiple stores for different purposes — production logs in one, debug logs in another, each with independent rotation and retention.
 
