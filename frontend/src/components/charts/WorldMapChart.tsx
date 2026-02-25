@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import ReactEChartsCore from "echarts-for-react/esm/core";
 import { feature } from "topojson-client";
 import type { Topology } from "topojson-specification";
@@ -161,6 +161,7 @@ function buildChoroplethOption(
   rows: string[][],
   theme: EChartsOption,
   colors: { copper: string; border: string; empty: string; textGhost: string },
+  restoreRoam: boolean,
 ): EChartsOption {
   const valueColIdx = columns.length - 1;
   const data: ChoroplethDatum[] = [];
@@ -216,8 +217,8 @@ function buildChoroplethOption(
         type: "map",
         map: "world",
         roam: true,
-        ...(savedCenter ? { center: savedCenter } : {}),
-        ...(savedZoom ? { zoom: savedZoom } : {}),
+        ...(restoreRoam && savedCenter ? { center: savedCenter } : {}),
+        ...(restoreRoam && savedZoom ? { zoom: savedZoom } : {}),
         scaleLimit: { min: 1, max: 8 },
         itemStyle: {
           areaColor: colors.empty,
@@ -246,6 +247,7 @@ function buildScatterOption(
   lonIdx: number,
   theme: EChartsOption,
   colors: { copper: string; border: string; empty: string; textGhost: string },
+  restoreRoam: boolean,
 ): EChartsOption {
   const valueColIdx = columns.length - 1;
   const valueCol = columns[valueColIdx]!;
@@ -280,8 +282,8 @@ function buildScatterOption(
     geo: {
       map: "world",
       roam: true,
-      ...(savedCenter ? { center: savedCenter } : {}),
-      ...(savedZoom ? { zoom: savedZoom } : {}),
+      ...(restoreRoam && savedCenter ? { center: savedCenter } : {}),
+      ...(restoreRoam && savedZoom ? { zoom: savedZoom } : {}),
       scaleLimit: { min: 1, max: 8 },
       itemStyle: {
         areaColor: colors.empty,
@@ -361,10 +363,23 @@ export function WorldMapChart({
   };
 
   const isScatter = mode === "scatter";
+  const mounted = useRef(false);
+
+  // Only restore saved roam state on initial mount (or remount after parent
+  // re-render). On data refreshes, omit center/zoom so ECharts keeps its own
+  // internal roam state — prevents desync between the geo background and
+  // scatter layer that caused points to jump ahead of the map.
+  const restoreRoam = !mounted.current;
+
   // For scatter, the stats group-by clause puts lat/lon as the first two columns.
   const option = isScatter
-    ? buildScatterOption(columns, rows, 0, 1, theme, colors)
-    : buildChoroplethOption(columns, rows, theme, colors);
+    ? buildScatterOption(columns, rows, 0, 1, theme, colors, restoreRoam)
+    : buildChoroplethOption(columns, rows, theme, colors, restoreRoam);
+
+  // After first render, stop restoring roam state on subsequent data refreshes.
+  useEffect(() => {
+    mounted.current = true;
+  }, []);
 
   const onEvents = {
     geoRoam: () => {
@@ -394,8 +409,8 @@ export function WorldMapChart({
         ref={chartRef}
         echarts={echarts}
         option={option}
+        opts={{ renderer: "svg" }}
         style={{ height: 420, width: "100%" }}
-        lazyUpdate
         onEvents={onEvents}
       />
     </div>
