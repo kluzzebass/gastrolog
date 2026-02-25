@@ -1082,6 +1082,12 @@ func TestParsePipelineNewOpsErrors(t *testing.T) {
 		// lookup
 		{"lookup no args", "error | lookup"},
 		{"lookup one arg", "error | lookup rdns"},
+		// map
+		{"map no mode", "error | stats count by country | map"},
+		{"map unknown mode", "error | stats count by country | map foo"},
+		{"map choropleth no field", "error | stats count by country | map choropleth"},
+		{"map scatter no fields", "error | stats count by lat | map scatter"},
+		{"map scatter one field", "error | stats count by lat | map scatter lat"},
 		// unknown operator
 		{"unknown operator", "error | bogus"},
 	}
@@ -1654,6 +1660,125 @@ func TestParsePipelineChainedTable(t *testing.T) {
 	}
 }
 
+// --- Visualization operator tests ---
+
+func TestParsePipelineBarchart(t *testing.T) {
+	p, err := ParsePipeline("error | stats count by status | barchart")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	if len(p.Pipes) != 2 {
+		t.Fatalf("expected 2 pipes, got %d", len(p.Pipes))
+	}
+	if _, ok := p.Pipes[1].(*BarchartOp); !ok {
+		t.Fatalf("expected BarchartOp, got %T", p.Pipes[1])
+	}
+}
+
+func TestParsePipelineBarchartString(t *testing.T) {
+	p, err := ParsePipeline("error | stats count by status | barchart")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	got := p.String()
+	want := "token(error) | stats count by status | barchart"
+	if got != want {
+		t.Errorf("String() = %q, want %q", got, want)
+	}
+}
+
+func TestParsePipelineDonut(t *testing.T) {
+	p, err := ParsePipeline("error | stats count by level | donut")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	if len(p.Pipes) != 2 {
+		t.Fatalf("expected 2 pipes, got %d", len(p.Pipes))
+	}
+	if _, ok := p.Pipes[1].(*DonutOp); !ok {
+		t.Fatalf("expected DonutOp, got %T", p.Pipes[1])
+	}
+}
+
+func TestParsePipelineDonutString(t *testing.T) {
+	p, err := ParsePipeline("error | stats count by level | donut")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	got := p.String()
+	want := "token(error) | stats count by level | donut"
+	if got != want {
+		t.Errorf("String() = %q, want %q", got, want)
+	}
+}
+
+func TestParsePipelineMapChoropleth(t *testing.T) {
+	p, err := ParsePipeline("error | stats count by country | map choropleth country")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	if len(p.Pipes) != 2 {
+		t.Fatalf("expected 2 pipes, got %d", len(p.Pipes))
+	}
+	mp, ok := p.Pipes[1].(*MapOp)
+	if !ok {
+		t.Fatalf("expected MapOp, got %T", p.Pipes[1])
+	}
+	if mp.Mode != MapChoropleth {
+		t.Errorf("expected MapChoropleth, got %v", mp.Mode)
+	}
+	if mp.CountryField != "country" {
+		t.Errorf("expected CountryField=country, got %q", mp.CountryField)
+	}
+}
+
+func TestParsePipelineMapChoroplethString(t *testing.T) {
+	p, err := ParsePipeline("error | stats count by country | map choropleth country")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	got := p.String()
+	want := "token(error) | stats count by country | map choropleth country"
+	if got != want {
+		t.Errorf("String() = %q, want %q", got, want)
+	}
+}
+
+func TestParsePipelineMapScatter(t *testing.T) {
+	p, err := ParsePipeline("error | stats count by lat, lon | map scatter lat lon")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	if len(p.Pipes) != 2 {
+		t.Fatalf("expected 2 pipes, got %d", len(p.Pipes))
+	}
+	mp, ok := p.Pipes[1].(*MapOp)
+	if !ok {
+		t.Fatalf("expected MapOp, got %T", p.Pipes[1])
+	}
+	if mp.Mode != MapScatter {
+		t.Errorf("expected MapScatter, got %v", mp.Mode)
+	}
+	if mp.LatField != "lat" {
+		t.Errorf("expected LatField=lat, got %q", mp.LatField)
+	}
+	if mp.LonField != "lon" {
+		t.Errorf("expected LonField=lon, got %q", mp.LonField)
+	}
+}
+
+func TestParsePipelineMapScatterString(t *testing.T) {
+	p, err := ParsePipeline("error | stats count by lat, lon | map scatter lat lon")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	got := p.String()
+	want := "token(error) | stats count by lat, lon | map scatter lat lon"
+	if got != want {
+		t.Errorf("String() = %q, want %q", got, want)
+	}
+}
+
 func pipeOpName(op PipeOp) string {
 	switch op.(type) {
 	case *StatsOp:
@@ -1680,6 +1805,12 @@ func pipeOpName(op PipeOp) string {
 		return "RawOp"
 	case *LookupOp:
 		return "LookupOp"
+	case *BarchartOp:
+		return "BarchartOp"
+	case *DonutOp:
+		return "DonutOp"
+	case *MapOp:
+		return "MapOp"
 	default:
 		return "unknown"
 	}
