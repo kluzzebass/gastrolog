@@ -256,7 +256,7 @@ export function SearchView() {
     expression: explainExpression,
     isLoading: isExplaining,
     explain,
-  } = useExplain();
+  } = useExplain({ onError: toastError });
   const {
     tableResult: histogramTableResult,
     search: histogramSearch,
@@ -268,7 +268,7 @@ export function SearchView() {
     isLoading: contextLoading,
     fetchContext,
     reset: resetContext,
-  } = useRecordContext();
+  } = useRecordContext({ onError: toastError });
   const { data: stores, isLoading: storesLoading } = useStores();
   const { data: stats, isLoading: statsLoading } = useStats();
 

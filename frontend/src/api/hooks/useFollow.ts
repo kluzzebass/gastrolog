@@ -162,7 +162,8 @@ export function useFollow(options?: { onError?: (err: Error) => void; maxRecords
           }));
           return;
         }
-        // Schedule reconnect with backoff.
+        // Schedule reconnect with backoff — surface error to caller.
+        onErrorRef.current?.(err instanceof Error ? err : new Error(String(err)));
         scheduleReconnect(queryStr, attempt);
       }
     },

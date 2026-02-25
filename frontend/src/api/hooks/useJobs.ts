@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, type MutableRefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { jobClient } from "../client";
@@ -22,7 +22,10 @@ export interface WatchJobsState {
   error: Error | null;
 }
 
-export function useWatchJobs() {
+export function useWatchJobs(options?: { onError?: (err: Error) => void }) {
+  const onErrorRef = useRef(options?.onError) as MutableRefObject<((err: Error) => void) | undefined>;
+  onErrorRef.current = options?.onError;
+
   const [state, setState] = useState<WatchJobsState>({
     jobs: [],
     connected: false,
@@ -96,6 +99,7 @@ export function useWatchJobs() {
           }));
           return;
         }
+        onErrorRef.current?.(err instanceof Error ? err : new Error(String(err)));
         scheduleReconnect(attempt);
       }
     },

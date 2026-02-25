@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useWatchJobs } from "../../api/hooks";
+import { toastError } from "../Toast";
 import { JobStatus, JobKind } from "../../api/gen/gastrolog/v1/job_pb";
 import type { Job } from "../../api/gen/gastrolog/v1/job_pb";
 import { ExpandableCard } from "../settings/ExpandableCard";
@@ -62,7 +63,7 @@ function useTick() {
 
 export function JobsPanel({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
-  const { jobs, connected, reconnecting } = useWatchJobs();
+  const { jobs, connected, reconnecting } = useWatchJobs({ onError: toastError });
   const [expanded, setExpanded] = useState<string | null>(null);
   useTick();
 

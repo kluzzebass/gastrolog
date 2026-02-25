@@ -3,8 +3,10 @@ import {
   useContext,
   useState,
   useEffect,
-  useRef,
+  useSyncExternalStore,
 } from "react";
+import { ConnectError, Code } from "@connectrpc/connect";
+import { useThemeClass } from "../hooks/useThemeClass";
 
 type ToastLevel = "error" | "warn" | "info";
 
@@ -14,6 +16,73 @@ interface Toast {
   level: ToastLevel;
   createdAt: number;
 }
+
+// ---------------------------------------------------------------------------
+// Module-scoped toast store — callable from anywhere (React or plain JS).
+// ---------------------------------------------------------------------------
+
+type Listener = () => void;
+const listeners = new Set<Listener>();
+let toasts: Toast[] = [];
+let nextId = 0;
+const timers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function notify() {
+  for (const fn of listeners) fn();
+}
+
+function subscribe(fn: Listener) {
+  listeners.add(fn);
+  return () => {
+    listeners.delete(fn);
+  };
+}
+
+function getSnapshot() {
+  return toasts;
+}
+
+/** Add a toast from anywhere — works outside the React tree. */
+export function addToast(message: string, level: ToastLevel = "error") {
+  if (toasts.some((t) => t.message === message && t.level === level)) return;
+
+  nextId++;
+  const id = `toast-${nextId}`;
+  const toast: Toast = { id, message, level, createdAt: Date.now() };
+  toasts = [...toasts, toast];
+
+  const timeout = level === "error" ? 15000 : 8000;
+  const timer = setTimeout(() => {
+    timers.delete(id);
+    toasts = toasts.filter((t) => t.id !== id);
+    notify();
+  }, timeout);
+  timers.set(id, timer);
+
+  notify();
+  return id;
+}
+
+function dismissToast(id: string) {
+  const timer = timers.get(id);
+  if (timer) {
+    clearTimeout(timer);
+    timers.delete(id);
+  }
+  toasts = toasts.filter((t) => t.id !== id);
+  notify();
+}
+
+/** Imperative error toaster — safe to call outside the React tree. */
+export function toastError(err: unknown) {
+  if (err instanceof ConnectError && err.code === Code.Unauthenticated) return;
+  const message = err instanceof Error ? err.message : String(err);
+  addToast(message, "error");
+}
+
+// ---------------------------------------------------------------------------
+// React bindings
+// ---------------------------------------------------------------------------
 
 interface ToastContextValue {
   addToast: (message: string, level?: ToastLevel) => void;
@@ -28,60 +97,16 @@ export function useToast(): ToastContextValue {
   return ctx;
 }
 
-let nextId = 0;
-
-export function ToastProvider({ children }: Readonly<{ children: React.ReactNode }>) {
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
-    new Map(),
-  );
-  const toastsRef = useRef(toasts);
-  toastsRef.current = toasts;
-
-  const dismissToast = (id: string) => {
-    const timer = timersRef.current.get(id);
-    if (timer) {
-      clearTimeout(timer);
-      timersRef.current.delete(id);
-    }
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  };
-
-  const addToast = (message: string, level: ToastLevel = "error") => {
-    // Deduplicate: skip if a toast with the same message and level already exists.
-    if (toastsRef.current.some((t) => t.message === message && t.level === level)) {
-      return;
-    }
-
-    nextId++;
-    const id = `toast-${nextId}`;
-    const toast: Toast = { id, message, level, createdAt: Date.now() };
-    setToasts((prev) => [...prev, toast]);
-
-    const timeout = level === "error" ? 15000 : 8000;
-    const timer = setTimeout(() => {
-      timersRef.current.delete(id);
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, timeout);
-    timersRef.current.set(id, timer);
-
-    return id;
-  };
-
-  // Cleanup timers on unmount.
-  useEffect(() => {
-    const timers = timersRef.current;
-    return () => {
-      for (const timer of timers.values()) {
-        clearTimeout(timer);
-      }
-    };
-  }, []);
+export function ToastProvider({
+  children,
+  dark,
+}: Readonly<{ children: React.ReactNode; dark: boolean }>) {
+  const current = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   return (
     <ToastContext.Provider value={{ addToast, dismissToast }}>
       {children}
-      <ToastOverlay toasts={toasts} onDismiss={dismissToast} />
+      <ToastOverlay toasts={current} onDismiss={dismissToast} dark={dark} />
     </ToastContext.Provider>
   );
 }
@@ -89,16 +114,18 @@ export function ToastProvider({ children }: Readonly<{ children: React.ReactNode
 function ToastOverlay({
   toasts,
   onDismiss,
+  dark,
 }: Readonly<{
   toasts: Toast[];
   onDismiss: (id: string) => void;
+  dark: boolean;
 }>) {
   if (toasts.length === 0) return null;
 
   return (
     <div role="status" aria-live="polite" className="fixed bottom-4 right-4 z-100 flex flex-col-reverse gap-2 max-w-sm">
       {toasts.map((toast) => (
-        <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} />
+        <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} dark={dark} />
       ))}
     </div>
   );
@@ -113,14 +140,16 @@ const LEVEL_STYLES: Record<ToastLevel, string> = {
 function ToastItem({
   toast,
   onDismiss,
+  dark,
 }: Readonly<{
   toast: Toast;
   onDismiss: (id: string) => void;
+  dark: boolean;
 }>) {
   const [visible, setVisible] = useState(false);
+  const c = useThemeClass(dark);
   const accent = LEVEL_STYLES[toast.level];
 
-  // Animate in on mount.
   useEffect(() => {
     const frame = requestAnimationFrame(() => setVisible(true));
     return () => cancelAnimationFrame(frame);
@@ -128,7 +157,10 @@ function ToastItem({
 
   return (
     <div
-      className={`flex items-start gap-2 px-3 py-2.5 rounded border-l-3 shadow-lg bg-ink-raised text-text-bright text-[0.85em] transition-all duration-200 ${accent} ${
+      className={`flex items-start gap-2 px-3 py-2.5 rounded border-l-3 shadow-lg ${c(
+        "bg-ink-raised text-text-bright",
+        "bg-light-raised text-light-text-bright",
+      )} text-[0.85em] transition-all duration-200 ${accent} ${
         visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
       }`}
     >
@@ -136,7 +168,10 @@ function ToastItem({
       <button
         onClick={() => onDismiss(toast.id)}
         aria-label="Dismiss"
-        className="shrink-0 w-5 h-5 flex items-center justify-center rounded text-text-muted hover:text-text-bright transition-colors"
+        className={`shrink-0 w-5 h-5 flex items-center justify-center rounded ${c(
+          "text-text-muted hover:text-text-bright",
+          "text-light-text-muted hover:text-light-text-bright",
+        )} transition-colors`}
       >
         &times;
       </button>

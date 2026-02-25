@@ -8,7 +8,7 @@ export function App() {
   const c = useThemeClass(dark);
 
   return (
-    <ToastProvider>
+    <ToastProvider dark={dark}>
       <div
         className={`grain h-screen overflow-hidden flex flex-col font-body text-base ${c(
           "bg-ink text-text-normal",
