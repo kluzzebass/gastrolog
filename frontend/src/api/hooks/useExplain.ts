@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, type MutableRefObject } from "react";
 import { queryClient, Query, ChunkPlan } from "../client";
 
 export interface ExplainState {
@@ -10,7 +10,10 @@ export interface ExplainState {
   error: Error | null;
 }
 
-export function useExplain() {
+export function useExplain(options?: { onError?: (err: Error) => void }) {
+  const onErrorRef = useRef(options?.onError) as MutableRefObject<((err: Error) => void) | undefined>;
+  onErrorRef.current = options?.onError;
+
   const [state, setState] = useState<ExplainState>({
     chunks: [],
     direction: "",
@@ -42,14 +45,16 @@ export function useExplain() {
         error: null,
       });
     } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
       setState({
         chunks: [],
         direction: "",
         totalChunks: 0,
         expression: "",
         isLoading: false,
-        error: err instanceof Error ? err : new Error(String(err)),
+        error,
       });
+      onErrorRef.current?.(error);
     }
   }, []);
 
