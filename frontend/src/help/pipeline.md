@@ -285,13 +285,52 @@ After stats, `raw` forces the result into a flat table even when `bin()` would n
 * | stats count by bin(5m) | raw
 ```
 
+## Visualization Operators
+
+By default, pipeline results choose a display based on the data shape (table, time series chart, single value). The following operators let you explicitly request a chart type. They must appear after `stats` or `timechart`. If the data doesn't match the chart's requirements, the result falls back to a table.
+
+### Barchart
+
+The `barchart` operator forces a bar chart. Requires at least 2 columns and 2 rows, with the last column numeric.
+
+```
+* | stats count by status | sort -count | barchart
+```
+
+### Donut
+
+The `donut` operator forces a donut chart. Requires exactly 2 columns and at least 2 rows, with the last column numeric.
+
+```
+* | stats count by level | donut
+```
+
+### Map
+
+The `map` operator renders geographic data. It has two modes:
+
+**Choropleth** — shades countries by value. The specified column must contain ISO 3166-1 alpha-2 country codes (e.g. `US`, `DE`, `JP`).
+
+```
+* | stats count by client_ip_country | map choropleth client_ip_country
+```
+
+**Scatter** — plots points on a world map. Both columns must be numeric (latitude and longitude).
+
+```
+* | stats count by lat, lon | map scatter lat lon
+```
+
+Visualization operators are not supported in follow mode.
+
 ## Result Display
 
 Pipeline results are shown depending on the query:
 
 - **Record list** — when there is no `stats` operator. Records are displayed in the standard log entry view with any computed or filtered fields.
 - **Single value** — when `stats` produces a single column and single row (e.g. `| stats count`). Displayed as a large formatted number.
-- **Table** — when there is no `bin()` in the group clause. Displays rows and columns with sort and export controls.
+- **Explicit chart** — when a visualization operator (`barchart`, `donut`, `map`) is present. The operator determines the chart type.
+- **Table** — when there is no `bin()` in the group clause and no visualization operator. Displays rows and columns with sort and export controls.
 - **Time series chart** — when `bin()` is present. Hover to inspect individual data points. A Chart/Table toggle lets you switch to a raw data view.
 
 Results can be exported to CSV or JSON using the export button.
@@ -360,4 +399,22 @@ Rename columns for readability:
 
 ```
 * | stats count, avg(duration) by method | rename count as requests, avg_duration as latency_ms
+```
+
+Error distribution as a donut chart:
+
+```
+* | stats count by level | donut
+```
+
+Top status codes as a bar chart:
+
+```
+* | stats count by status | sort -count | head 10 | barchart
+```
+
+Requests by country on a world map:
+
+```
+* | lookup geoip client_ip | stats count by client_ip_country | map choropleth client_ip_country
 ```

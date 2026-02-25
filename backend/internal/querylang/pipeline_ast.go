@@ -297,6 +297,64 @@ func (l *LookupOp) String() string {
 	return fmt.Sprintf("lookup %s %s", l.Table, l.Field)
 }
 
+// BarchartOp represents: barchart
+// Forces the pipeline result to render as a bar chart.
+// Validates: ≥2 columns, ≥2 rows, last column numeric.
+type BarchartOp struct{}
+
+func (BarchartOp) pipeOp() {}
+
+func (BarchartOp) String() string { return "barchart" }
+
+// DonutOp represents: donut
+// Forces the pipeline result to render as a donut chart.
+// Validates: exactly 2 columns, ≥2 rows, last column numeric.
+type DonutOp struct{}
+
+func (DonutOp) pipeOp() {}
+
+func (DonutOp) String() string { return "donut" }
+
+// MapMode identifies a map subcommand.
+type MapMode int
+
+const (
+	MapChoropleth MapMode = iota
+	MapScatter
+)
+
+func (m MapMode) String() string {
+	switch m {
+	case MapChoropleth:
+		return "choropleth"
+	case MapScatter:
+		return "scatter"
+	default:
+		return "?"
+	}
+}
+
+// MapOp represents: map choropleth <field> | map scatter <lat> <lon>
+type MapOp struct {
+	Mode         MapMode
+	CountryField string // choropleth: country column name
+	LatField     string // scatter: latitude column name
+	LonField     string // scatter: longitude column name
+}
+
+func (MapOp) pipeOp() {}
+
+func (m *MapOp) String() string {
+	switch m.Mode {
+	case MapChoropleth:
+		return "map choropleth " + m.CountryField
+	case MapScatter:
+		return "map scatter " + m.LatField + " " + m.LonField
+	default:
+		return "map"
+	}
+}
+
 // PipeExpr is the interface for expressions used in pipe operators.
 // These are distinct from filter Expr — they represent computed values,
 // not boolean search predicates.

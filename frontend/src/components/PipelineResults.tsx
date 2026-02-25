@@ -1,7 +1,6 @@
 import { useState } from "react";
 import type { TableResult } from "../api/client";
 import { useThemeClass } from "../hooks/useThemeClass";
-import { classifyTableResult } from "../utils/classifyTableResult";
 import { tableResultToHistogramData } from "../utils/histogramData";
 import { AutoRefreshControls } from "./AutoRefreshControls";
 import { BarChart } from "./charts/BarChart";
@@ -116,16 +115,13 @@ export function PipelineResults({
   const isSingleValue =
     resultType === "table" && columns.length === 1 && rowData.length === 1;
 
-  // Classify table results for chart selection.
-  const tableClassification =
-    resultType === "table" ? classifyTableResult(columns, rowData) : "table";
   const hasChartView =
     resultType === "timeseries" ||
     resultType === "timechart" ||
-    tableClassification === "bar-chart" ||
-    tableClassification === "donut-chart" ||
-    tableClassification === "world-map" ||
-    tableClassification === "scatter-map";
+    resultType === "barchart" ||
+    resultType === "donut" ||
+    resultType === "map-choropleth" ||
+    resultType === "map-scatter";
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -207,21 +203,25 @@ export function PipelineResults({
               <TableView columns={columns} rows={rowData} dark={dark} />
             );
           })()
-        ) : resultType === "timeseries" && viewMode === "chart" ? (
-          <div className="px-5 py-4 relative">
-            <TimeSeriesChart columns={columns} rows={rowData} dark={dark} />
-          </div>
-        ) : (tableClassification === "world-map" || tableClassification === "scatter-map") && viewMode === "chart" ? (
+        ) : resultType === "barchart" && viewMode === "chart" ? (
           <div className="px-5 py-4">
-            <WorldMapChart columns={columns} rows={rowData} dark={dark} />
+            <BarChart columns={columns} rows={rowData} dark={dark} />
           </div>
-        ) : tableClassification === "donut-chart" && viewMode === "chart" ? (
+        ) : resultType === "donut" && viewMode === "chart" ? (
           <div className="px-5 py-4">
             <DonutChart columns={columns} rows={rowData} dark={dark} />
           </div>
-        ) : tableClassification === "bar-chart" && viewMode === "chart" ? (
+        ) : resultType === "map-choropleth" && viewMode === "chart" ? (
           <div className="px-5 py-4">
-            <BarChart columns={columns} rows={rowData} dark={dark} />
+            <WorldMapChart columns={columns} rows={rowData} dark={dark} mode="choropleth" />
+          </div>
+        ) : resultType === "map-scatter" && viewMode === "chart" ? (
+          <div className="px-5 py-4">
+            <WorldMapChart columns={columns} rows={rowData} dark={dark} mode="scatter" />
+          </div>
+        ) : resultType === "timeseries" && viewMode === "chart" ? (
+          <div className="px-5 py-4 relative">
+            <TimeSeriesChart columns={columns} rows={rowData} dark={dark} />
           </div>
         ) : (
           <TableView columns={columns} rows={rowData} dark={dark} />

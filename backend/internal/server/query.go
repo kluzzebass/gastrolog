@@ -232,6 +232,15 @@ func (s *QueryServer) Follow(
 			case *querylang.TimechartOp:
 				return connect.NewError(connect.CodeInvalidArgument,
 					errors.New("timechart operator is not supported in follow mode"))
+			case *querylang.BarchartOp:
+				return connect.NewError(connect.CodeInvalidArgument,
+					errors.New("barchart operator is not supported in follow mode"))
+			case *querylang.DonutOp:
+				return connect.NewError(connect.CodeInvalidArgument,
+					errors.New("donut operator is not supported in follow mode"))
+			case *querylang.MapOp:
+				return connect.NewError(connect.CodeInvalidArgument,
+					errors.New("map operator is not supported in follow mode"))
 			}
 		}
 	}
@@ -391,7 +400,7 @@ func (s *QueryServer) GetSyntax(
 			"reverse", "start", "end", "last", "limit", "pos",
 			"source_start", "source_end", "ingest_start", "ingest_end",
 		},
-		PipeKeywords:  []string{"stats", "where", "eval", "sort", "head", "tail", "slice", "rename", "fields", "timechart", "raw", "lookup"},
+		PipeKeywords:  []string{"stats", "where", "eval", "sort", "head", "tail", "slice", "rename", "fields", "timechart", "raw", "lookup", "barchart", "donut", "map"},
 		PipeFunctions: funcs,
 		LookupTables:  s.lookupNames,
 	}), nil
@@ -661,6 +670,7 @@ func tableResultToProto(result *query.TableResult, pipeline *querylang.Pipeline)
 	// is present, but raw forces plain table.
 	resultType := "table"
 	hasRaw := false
+	var vizOp querylang.PipeOp
 	for _, pipe := range pipeline.Pipes {
 		if _, ok := pipe.(*querylang.RawOp); ok {
 			hasRaw = true
@@ -676,9 +686,21 @@ func tableResultToProto(result *query.TableResult, pipeline *querylang.Pipeline)
 				}
 			}
 		}
+		switch pipe.(type) {
+		case *querylang.BarchartOp, *querylang.DonutOp, *querylang.MapOp:
+			vizOp = pipe
+		}
 	}
 	if hasRaw {
 		resultType = "raw"
+	}
+
+	// Explicit viz operator overrides the result type if validation passes.
+	// On validation failure, falls back to whatever resultType was computed above.
+	if vizOp != nil && !hasRaw {
+		if vizType := query.ValidateVizOp(vizOp, result); vizType != "" {
+			resultType = vizType
+		}
 	}
 
 	return &apiv1.TableResult{

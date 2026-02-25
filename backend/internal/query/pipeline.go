@@ -35,6 +35,7 @@ type pipelinePhases struct {
 	statsOp     *querylang.StatsOp
 	timechartOp *querylang.TimechartOp
 	hasRaw      bool
+	vizOp       querylang.PipeOp // explicit visualization operator (barchart, donut, map)
 }
 
 // classifyPipes splits pipeline operators into pre-stats and post-stats phases,
@@ -61,6 +62,11 @@ func classifyPipes(pipeline *querylang.Pipeline) (*pipelinePhases, error) {
 			p.timechartOp = op
 		case *querylang.RawOp:
 			p.hasRaw = true
+		case *querylang.BarchartOp, *querylang.DonutOp, *querylang.MapOp:
+			if p.vizOp != nil {
+				return nil, errors.New("pipeline can contain at most one visualization operator")
+			}
+			p.vizOp = pipe
 		default:
 			if p.statsOp == nil && p.timechartOp == nil {
 				p.preOps = append(p.preOps, pipe)

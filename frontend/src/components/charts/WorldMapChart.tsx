@@ -7,7 +7,6 @@ import { echarts } from "./echartsSetup";
 import { buildThemeOption } from "./echartsTheme";
 import { resolveColor, formatChartValue } from "./chartColors";
 import { isoToMapName } from "./countryMapping";
-import { findLatLonColumns } from "../../utils/classifyTableResult";
 import type { EChartsOption } from "echarts";
 
 /**
@@ -144,6 +143,7 @@ interface WorldMapChartProps {
   columns: string[];
   rows: string[][];
   dark: boolean;
+  mode: "choropleth" | "scatter";
 }
 
 interface ChoroplethDatum {
@@ -242,11 +242,11 @@ function buildChoroplethOption(
 function buildScatterOption(
   columns: string[],
   rows: string[][],
+  latIdx: number,
+  lonIdx: number,
   theme: EChartsOption,
   colors: { copper: string; border: string; empty: string; textGhost: string },
 ): EChartsOption {
-  const latLon = findLatLonColumns(columns)!;
-  const [latIdx, lonIdx] = latLon;
   const valueColIdx = columns.length - 1;
   const valueCol = columns[valueColIdx]!;
 
@@ -346,6 +346,7 @@ export function WorldMapChart({
   columns,
   rows,
   dark,
+  mode,
 }: Readonly<WorldMapChartProps>) {
   const chartRef = useRef<ReactEChartsCore>(null);
   const theme = buildThemeOption(dark);
@@ -359,9 +360,10 @@ export function WorldMapChart({
     textGhost: dark ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.35)",
   };
 
-  const isScatter = findLatLonColumns(columns) !== null;
+  const isScatter = mode === "scatter";
+  // For scatter, the stats group-by clause puts lat/lon as the first two columns.
   const option = isScatter
-    ? buildScatterOption(columns, rows, theme, colors)
+    ? buildScatterOption(columns, rows, 0, 1, theme, colors)
     : buildChoroplethOption(columns, rows, theme, colors);
 
   const onEvents = {

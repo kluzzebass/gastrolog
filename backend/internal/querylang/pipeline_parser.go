@@ -10,7 +10,10 @@ import (
 // Grammar (extending the existing filter grammar):
 //
 //	pipeline      = filter_expr ( "|" pipe_op )*
-//	pipe_op       = stats_op | where_op
+//	pipe_op       = stats_op | where_op | eval_op | sort_op | head_op
+//	              | tail_op | slice_op | rename_op | fields_op
+//	              | timechart_op | raw_op | lookup_op
+//	              | barchart_op | donut_op | map_op
 //	stats_op      = "stats" agg_list ( "by" group_list )?
 //	agg_list      = agg_expr ( "," agg_expr )*
 //	agg_expr      = "count" ( "as" IDENT )?
@@ -121,6 +124,12 @@ func (p *parser) parsePipeOp() (PipeOp, error) {
 		return p.parseRawOp()
 	case "lookup":
 		return p.parseLookupOp()
+	case "barchart":
+		return p.parseBarchartOp()
+	case "donut":
+		return p.parseDonutOp()
+	case "map":
+		return p.parseMapOp()
 	default:
 		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "unknown pipe operator: %s", p.cur.Lit)
 	}
@@ -1000,6 +1009,71 @@ func (p *parser) parseLookupOp() (*LookupOp, error) {
 	}
 
 	return &LookupOp{Table: table, Field: field}, nil
+}
+
+// parseBarchartOp parses: "barchart" (no arguments).
+func (p *parser) parseBarchartOp() (*BarchartOp, error) {
+	if err := p.advance(); err != nil { // consume "barchart"
+		return nil, err
+	}
+	return &BarchartOp{}, nil
+}
+
+// parseDonutOp parses: "donut" (no arguments).
+func (p *parser) parseDonutOp() (*DonutOp, error) {
+	if err := p.advance(); err != nil { // consume "donut"
+		return nil, err
+	}
+	return &DonutOp{}, nil
+}
+
+// parseMapOp parses: "map" ("choropleth" FIELD | "scatter" LAT LON)
+func (p *parser) parseMapOp() (*MapOp, error) {
+	if err := p.advance(); err != nil { // consume "map"
+		return nil, err
+	}
+
+	if p.cur.Kind != TokWord {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected 'choropleth' or 'scatter' after 'map', got %s", p.cur.Kind)
+	}
+
+	switch strings.ToLower(p.cur.Lit) {
+	case "choropleth":
+		if err := p.advance(); err != nil { // consume "choropleth"
+			return nil, err
+		}
+		if p.cur.Kind != TokWord {
+			return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected country field name after 'map choropleth', got %s", p.cur.Kind)
+		}
+		field := p.cur.Lit
+		if err := p.advance(); err != nil { // consume field name
+			return nil, err
+		}
+		return &MapOp{Mode: MapChoropleth, CountryField: field}, nil
+
+	case "scatter":
+		if err := p.advance(); err != nil { // consume "scatter"
+			return nil, err
+		}
+		if p.cur.Kind != TokWord {
+			return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected latitude field after 'map scatter', got %s", p.cur.Kind)
+		}
+		lat := p.cur.Lit
+		if err := p.advance(); err != nil { // consume lat field
+			return nil, err
+		}
+		if p.cur.Kind != TokWord {
+			return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected longitude field after 'map scatter %s', got %s", lat, p.cur.Kind)
+		}
+		lon := p.cur.Lit
+		if err := p.advance(); err != nil { // consume lon field
+			return nil, err
+		}
+		return &MapOp{Mode: MapScatter, LatField: lat, LonField: lon}, nil
+
+	default:
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "unknown map mode: %s (expected 'choropleth' or 'scatter')", p.cur.Lit)
+	}
 }
 
 // checkDuplicateAliases validates that no two aggregations produce the same
