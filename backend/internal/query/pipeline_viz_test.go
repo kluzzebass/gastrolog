@@ -242,6 +242,28 @@ func TestValidateMapScatter(t *testing.T) {
 			},
 			wantOK: false,
 		},
+		{
+			name: "valid with empty lat/lon rows",
+			op:   &querylang.MapOp{Mode: querylang.MapScatter, LatField: "lat", LonField: "lon"},
+			table: &TableResult{
+				Columns: []string{"lat", "lon", "count"},
+				Rows: [][]string{
+					{"40.7", "-74.0", "50"},
+					{"", "", "38"},
+					{"51.5", "-0.1", "30"},
+				},
+			},
+			wantOK: true,
+		},
+		{
+			name: "all rows empty lat/lon",
+			op:   &querylang.MapOp{Mode: querylang.MapScatter, LatField: "lat", LonField: "lon"},
+			table: &TableResult{
+				Columns: []string{"lat", "lon", "count"},
+				Rows:    [][]string{{"", "", "50"}, {"", "", "30"}},
+			},
+			wantOK: false,
+		},
 	}
 
 	for _, tt := range tests {

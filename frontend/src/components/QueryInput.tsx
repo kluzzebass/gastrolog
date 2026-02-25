@@ -1,5 +1,4 @@
 import { forwardRef, useDeferredValue, type ReactNode } from "react";
-import { tokenize, type HighlightRole, type SyntaxSets } from "../queryTokenizer";
 import { useThemeClass } from "../hooks/useThemeClass";
 
 interface QueryInputProps {
@@ -9,13 +8,13 @@ interface QueryInputProps {
   onClick?: (e: React.MouseEvent<HTMLTextAreaElement>) => void;
   placeholder?: string;
   dark: boolean;
-  syntax?: SyntaxSets;
-  errorOffset?: number; // byte offset from backend validation (-1 = valid, -2 = use client-side)
-  errorMessage?: string | null; // error message from backend validation
+  highlightSpans?: Array<{ text: string; role: string }>;
+  highlightExpression?: string; // which expression spans are for
+  errorMessage?: string | null;
   children?: ReactNode;
 }
 
-function roleStyle(role: HighlightRole, dark: boolean): React.CSSProperties {
+function roleStyle(role: string, dark: boolean): React.CSSProperties {
   switch (role) {
     case "operator":
       return { color: "var(--color-severity-warn)", fontWeight: 700 };
@@ -65,6 +64,114 @@ function roleStyle(role: HighlightRole, dark: boolean): React.CSSProperties {
   }
 }
 
+/** Number of leading characters shared by both strings. */
+function commonPrefixLen(a: string, b: string): number {
+  const len = Math.min(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    if (a[i] !== b[i]) return i;
+  }
+  return len;
+}
+
+/** Number of trailing characters shared by both strings, not overlapping `prefixLen`. */
+function commonSuffixLen(a: string, b: string, prefixLen: number): number {
+  let i = 0;
+  const maxLen = Math.min(a.length, b.length) - prefixLen;
+  while (i < maxLen && a[a.length - 1 - i] === b[b.length - 1 - i]) {
+    i++;
+  }
+  return i;
+}
+
+type Span = { text: string; role: string };
+
+/** Trim spans to keep only the first `len` characters. */
+function takeSpans(spans: Span[], len: number): Span[] {
+  const result: Span[] = [];
+  let remaining = len;
+  for (const span of spans) {
+    if (remaining <= 0) break;
+    if (span.text.length <= remaining) {
+      result.push(span);
+      remaining -= span.text.length;
+    } else {
+      result.push({ text: span.text.slice(0, remaining), role: span.role });
+      remaining = 0;
+    }
+  }
+  return result;
+}
+
+/** Drop the first `len` characters from spans and return the remainder. */
+function dropSpans(spans: Span[], len: number): Span[] {
+  const result: Span[] = [];
+  let skip = len;
+  for (const span of spans) {
+    if (skip >= span.text.length) {
+      skip -= span.text.length;
+      continue;
+    }
+    if (skip > 0) {
+      result.push({ text: span.text.slice(skip), role: span.role });
+      skip = 0;
+    } else {
+      result.push(span);
+    }
+  }
+  return result;
+}
+
+/**
+ * Build the overlay spans for the current displayValue.
+ *
+ * - Fresh match (backend spans match displayValue exactly) → use them.
+ * - Stale → find common prefix and suffix between the old expression and
+ *   the new text, keep colored spans for both ends, fill the changed middle
+ *   with neutral "token" color.
+ * - No spans at all → entire text in neutral.
+ */
+function resolveSpans(
+  displayValue: string,
+  highlightSpans: Span[] | undefined,
+  highlightExpression: string | undefined,
+): Span[] {
+  const hasSpans = highlightSpans && highlightSpans.length > 0;
+
+  // Fresh match — backend spans cover this exact text.
+  if (hasSpans && highlightExpression === displayValue) {
+    return highlightSpans;
+  }
+
+  // Stale spans — reuse prefix + suffix that still match.
+  if (hasSpans && highlightExpression) {
+    const pfx = commonPrefixLen(highlightExpression, displayValue);
+    const sfx = commonSuffixLen(highlightExpression, displayValue, pfx);
+
+    const result: Span[] = [];
+
+    if (pfx > 0) {
+      result.push(...takeSpans(highlightSpans, pfx));
+    }
+
+    // Middle section: characters in displayValue between prefix and suffix.
+    const middleLen = displayValue.length - pfx - sfx;
+    if (middleLen > 0) {
+      result.push({ text: displayValue.slice(pfx, pfx + middleLen), role: "token" });
+    }
+
+    if (sfx > 0) {
+      // Suffix spans: drop the first (staleLen - sfx) chars from the stale spans.
+      result.push(...dropSpans(highlightSpans, highlightExpression.length - sfx));
+    }
+
+    if (result.length > 0) return result;
+  }
+
+  // Nothing usable — show entire text unstyled.
+  if (displayValue) return [{ text: displayValue, role: "token" }];
+  return [];
+}
+
 export const QueryInput = forwardRef<HTMLTextAreaElement, QueryInputProps>(
   (
     {
@@ -74,17 +181,16 @@ export const QueryInput = forwardRef<HTMLTextAreaElement, QueryInputProps>(
       onClick,
       placeholder,
       dark,
-      syntax,
-      errorOffset = -2,
-      errorMessage: errorMessageProp,
+      highlightSpans,
+      highlightExpression,
+      errorMessage,
       children,
     },
     ref,
   ) => {
-    // Tokenize a deferred copy so the textarea is never blocked by highlighting.
+    // Use a deferred copy so the textarea is never blocked by highlighting.
     const displayValue = useDeferredValue(value);
-    const { spans, errorMessage: clientErrorMessage } = tokenize(displayValue, syntax, errorOffset);
-    const errorMessage = errorMessageProp ?? clientErrorMessage;
+    const spans = resolveSpans(displayValue, highlightSpans, highlightExpression);
 
     const c = useThemeClass(dark);
 

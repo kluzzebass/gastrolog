@@ -18,7 +18,6 @@ import type { HistoryEntry } from "../hooks/useQueryHistory";
 import { useHelp } from "../hooks/useHelp";
 import type { SavedQuery } from "../api/gen/gastrolog/v1/config_pb";
 import { useThemeClass } from "../hooks/useThemeClass";
-import type { SyntaxSets } from "../queryTokenizer";
 
 /**
  * Insert text into a textarea using execCommand so the browser's undo
@@ -105,8 +104,8 @@ interface QueryBarProps {
   draftIsPipeline: boolean;
   showPlan: boolean;
   handleShowPlan: () => void;
-  syntax?: SyntaxSets;
-  errorOffset?: number;
+  highlightSpans?: Array<{ text: string; role: string }>;
+  highlightExpression?: string;
   errorMessage?: string | null;
 }
 
@@ -137,8 +136,8 @@ export function QueryBar({
   draftIsPipeline,
   showPlan,
   handleShowPlan,
-  syntax,
-  errorOffset,
+  highlightSpans,
+  highlightExpression,
   errorMessage,
 }: Readonly<QueryBarProps>) {
   const c = useThemeClass(dark);
@@ -198,8 +197,8 @@ export function QueryBar({
             <QueryInput
               ref={queryInputRef}
               value={draft}
-              syntax={syntax}
-              errorOffset={errorOffset}
+              highlightSpans={highlightSpans}
+              highlightExpression={highlightExpression}
               errorMessage={errorMessage}
               onChange={(e) => {
                 setDraft(e.target.value);

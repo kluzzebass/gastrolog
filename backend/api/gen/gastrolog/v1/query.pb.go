@@ -1455,6 +1455,9 @@ type ValidateQueryResponse struct {
 	Valid         bool                   `protobuf:"varint,1,opt,name=valid,proto3" json:"valid,omitempty"`
 	ErrorMessage  string                 `protobuf:"bytes,2,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"` // empty if valid
 	ErrorOffset   int32                  `protobuf:"varint,3,opt,name=error_offset,json=errorOffset,proto3" json:"error_offset,omitempty"`   // byte offset in original expression (-1 if valid)
+	Spans         []*HighlightSpan       `protobuf:"bytes,4,rep,name=spans,proto3" json:"spans,omitempty"`                                   // syntax highlighting spans (concatenation reproduces input)
+	Expression    string                 `protobuf:"bytes,5,opt,name=expression,proto3" json:"expression,omitempty"`                         // echo back input for staleness detection
+	HasPipeline   bool                   `protobuf:"varint,6,opt,name=has_pipeline,json=hasPipeline,proto3" json:"has_pipeline,omitempty"`   // whether query contains pipe operators
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1510,6 +1513,79 @@ func (x *ValidateQueryResponse) GetErrorOffset() int32 {
 	return 0
 }
 
+func (x *ValidateQueryResponse) GetSpans() []*HighlightSpan {
+	if x != nil {
+		return x.Spans
+	}
+	return nil
+}
+
+func (x *ValidateQueryResponse) GetExpression() string {
+	if x != nil {
+		return x.Expression
+	}
+	return ""
+}
+
+func (x *ValidateQueryResponse) GetHasPipeline() bool {
+	if x != nil {
+		return x.HasPipeline
+	}
+	return false
+}
+
+type HighlightSpan struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Text          string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"` // raw source text
+	Role          string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"` // "operator", "key", "value", "pipe-keyword", "function", etc.
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HighlightSpan) Reset() {
+	*x = HighlightSpan{}
+	mi := &file_gastrolog_v1_query_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HighlightSpan) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HighlightSpan) ProtoMessage() {}
+
+func (x *HighlightSpan) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_query_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HighlightSpan.ProtoReflect.Descriptor instead.
+func (*HighlightSpan) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *HighlightSpan) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *HighlightSpan) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
 type GetPipelineFieldsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Expression    string                 `protobuf:"bytes,1,opt,name=expression,proto3" json:"expression,omitempty"`
@@ -1521,7 +1597,7 @@ type GetPipelineFieldsRequest struct {
 
 func (x *GetPipelineFieldsRequest) Reset() {
 	*x = GetPipelineFieldsRequest{}
-	mi := &file_gastrolog_v1_query_proto_msgTypes[23]
+	mi := &file_gastrolog_v1_query_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1533,7 +1609,7 @@ func (x *GetPipelineFieldsRequest) String() string {
 func (*GetPipelineFieldsRequest) ProtoMessage() {}
 
 func (x *GetPipelineFieldsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_query_proto_msgTypes[23]
+	mi := &file_gastrolog_v1_query_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1546,7 +1622,7 @@ func (x *GetPipelineFieldsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPipelineFieldsRequest.ProtoReflect.Descriptor instead.
 func (*GetPipelineFieldsRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{23}
+	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *GetPipelineFieldsRequest) GetExpression() string {
@@ -1580,7 +1656,7 @@ type GetPipelineFieldsResponse struct {
 
 func (x *GetPipelineFieldsResponse) Reset() {
 	*x = GetPipelineFieldsResponse{}
-	mi := &file_gastrolog_v1_query_proto_msgTypes[24]
+	mi := &file_gastrolog_v1_query_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1592,7 +1668,7 @@ func (x *GetPipelineFieldsResponse) String() string {
 func (*GetPipelineFieldsResponse) ProtoMessage() {}
 
 func (x *GetPipelineFieldsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_query_proto_msgTypes[24]
+	mi := &file_gastrolog_v1_query_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1605,7 +1681,7 @@ func (x *GetPipelineFieldsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPipelineFieldsResponse.ProtoReflect.Descriptor instead.
 func (*GetPipelineFieldsResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{24}
+	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *GetPipelineFieldsResponse) GetFields() []string {
@@ -1746,11 +1822,19 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\x14ValidateQueryRequest\x12\x1e\n" +
 	"\n" +
 	"expression\x18\x01 \x01(\tR\n" +
-	"expression\"u\n" +
+	"expression\"\xeb\x01\n" +
 	"\x15ValidateQueryResponse\x12\x14\n" +
 	"\x05valid\x18\x01 \x01(\bR\x05valid\x12#\n" +
 	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage\x12!\n" +
-	"\ferror_offset\x18\x03 \x01(\x05R\verrorOffset\"s\n" +
+	"\ferror_offset\x18\x03 \x01(\x05R\verrorOffset\x121\n" +
+	"\x05spans\x18\x04 \x03(\v2\x1b.gastrolog.v1.HighlightSpanR\x05spans\x12\x1e\n" +
+	"\n" +
+	"expression\x18\x05 \x01(\tR\n" +
+	"expression\x12!\n" +
+	"\fhas_pipeline\x18\x06 \x01(\bR\vhasPipeline\"7\n" +
+	"\rHighlightSpan\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\x12\x12\n" +
+	"\x04role\x18\x02 \x01(\tR\x04role\"s\n" +
 	"\x18GetPipelineFieldsRequest\x12\x1e\n" +
 	"\n" +
 	"expression\x18\x01 \x01(\tR\n" +
@@ -1783,7 +1867,7 @@ func file_gastrolog_v1_query_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_query_proto_rawDescData
 }
 
-var file_gastrolog_v1_query_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
+var file_gastrolog_v1_query_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_gastrolog_v1_query_proto_goTypes = []any{
 	(*SearchRequest)(nil),             // 0: gastrolog.v1.SearchRequest
 	(*SearchResponse)(nil),            // 1: gastrolog.v1.SearchResponse
@@ -1808,10 +1892,11 @@ var file_gastrolog_v1_query_proto_goTypes = []any{
 	(*GetSyntaxResponse)(nil),         // 20: gastrolog.v1.GetSyntaxResponse
 	(*ValidateQueryRequest)(nil),      // 21: gastrolog.v1.ValidateQueryRequest
 	(*ValidateQueryResponse)(nil),     // 22: gastrolog.v1.ValidateQueryResponse
-	(*GetPipelineFieldsRequest)(nil),  // 23: gastrolog.v1.GetPipelineFieldsRequest
-	(*GetPipelineFieldsResponse)(nil), // 24: gastrolog.v1.GetPipelineFieldsResponse
-	nil,                               // 25: gastrolog.v1.Record.AttrsEntry
-	(*timestamppb.Timestamp)(nil),     // 26: google.protobuf.Timestamp
+	(*HighlightSpan)(nil),             // 23: gastrolog.v1.HighlightSpan
+	(*GetPipelineFieldsRequest)(nil),  // 24: gastrolog.v1.GetPipelineFieldsRequest
+	(*GetPipelineFieldsResponse)(nil), // 25: gastrolog.v1.GetPipelineFieldsResponse
+	nil,                               // 26: gastrolog.v1.Record.AttrsEntry
+	(*timestamppb.Timestamp)(nil),     // 27: google.protobuf.Timestamp
 }
 var file_gastrolog_v1_query_proto_depIdxs = []int32{
 	8,  // 0: gastrolog.v1.SearchRequest.query:type_name -> gastrolog.v1.Query
@@ -1822,45 +1907,46 @@ var file_gastrolog_v1_query_proto_depIdxs = []int32{
 	10, // 5: gastrolog.v1.FollowResponse.records:type_name -> gastrolog.v1.Record
 	8,  // 6: gastrolog.v1.ExplainRequest.query:type_name -> gastrolog.v1.Query
 	14, // 7: gastrolog.v1.ExplainResponse.chunks:type_name -> gastrolog.v1.ChunkPlan
-	26, // 8: gastrolog.v1.ExplainResponse.query_start:type_name -> google.protobuf.Timestamp
-	26, // 9: gastrolog.v1.ExplainResponse.query_end:type_name -> google.protobuf.Timestamp
-	26, // 10: gastrolog.v1.Query.start:type_name -> google.protobuf.Timestamp
-	26, // 11: gastrolog.v1.Query.end:type_name -> google.protobuf.Timestamp
+	27, // 8: gastrolog.v1.ExplainResponse.query_start:type_name -> google.protobuf.Timestamp
+	27, // 9: gastrolog.v1.ExplainResponse.query_end:type_name -> google.protobuf.Timestamp
+	27, // 10: gastrolog.v1.Query.start:type_name -> google.protobuf.Timestamp
+	27, // 11: gastrolog.v1.Query.end:type_name -> google.protobuf.Timestamp
 	9,  // 12: gastrolog.v1.Query.kv_predicates:type_name -> gastrolog.v1.KVPredicate
-	26, // 13: gastrolog.v1.Record.ingest_ts:type_name -> google.protobuf.Timestamp
-	26, // 14: gastrolog.v1.Record.write_ts:type_name -> google.protobuf.Timestamp
-	25, // 15: gastrolog.v1.Record.attrs:type_name -> gastrolog.v1.Record.AttrsEntry
+	27, // 13: gastrolog.v1.Record.ingest_ts:type_name -> google.protobuf.Timestamp
+	27, // 14: gastrolog.v1.Record.write_ts:type_name -> google.protobuf.Timestamp
+	26, // 15: gastrolog.v1.Record.attrs:type_name -> gastrolog.v1.Record.AttrsEntry
 	11, // 16: gastrolog.v1.Record.ref:type_name -> gastrolog.v1.RecordRef
-	26, // 17: gastrolog.v1.Record.source_ts:type_name -> google.protobuf.Timestamp
+	27, // 17: gastrolog.v1.Record.source_ts:type_name -> google.protobuf.Timestamp
 	13, // 18: gastrolog.v1.ResumeToken.positions:type_name -> gastrolog.v1.StorePosition
 	16, // 19: gastrolog.v1.ChunkPlan.steps:type_name -> gastrolog.v1.PipelineStep
-	26, // 20: gastrolog.v1.ChunkPlan.start_ts:type_name -> google.protobuf.Timestamp
-	26, // 21: gastrolog.v1.ChunkPlan.end_ts:type_name -> google.protobuf.Timestamp
+	27, // 20: gastrolog.v1.ChunkPlan.start_ts:type_name -> google.protobuf.Timestamp
+	27, // 21: gastrolog.v1.ChunkPlan.end_ts:type_name -> google.protobuf.Timestamp
 	15, // 22: gastrolog.v1.ChunkPlan.branch_plans:type_name -> gastrolog.v1.BranchPlan
 	16, // 23: gastrolog.v1.BranchPlan.steps:type_name -> gastrolog.v1.PipelineStep
 	11, // 24: gastrolog.v1.GetContextRequest.ref:type_name -> gastrolog.v1.RecordRef
 	10, // 25: gastrolog.v1.GetContextResponse.before:type_name -> gastrolog.v1.Record
 	10, // 26: gastrolog.v1.GetContextResponse.anchor:type_name -> gastrolog.v1.Record
 	10, // 27: gastrolog.v1.GetContextResponse.after:type_name -> gastrolog.v1.Record
-	0,  // 28: gastrolog.v1.QueryService.Search:input_type -> gastrolog.v1.SearchRequest
-	4,  // 29: gastrolog.v1.QueryService.Follow:input_type -> gastrolog.v1.FollowRequest
-	6,  // 30: gastrolog.v1.QueryService.Explain:input_type -> gastrolog.v1.ExplainRequest
-	17, // 31: gastrolog.v1.QueryService.GetContext:input_type -> gastrolog.v1.GetContextRequest
-	19, // 32: gastrolog.v1.QueryService.GetSyntax:input_type -> gastrolog.v1.GetSyntaxRequest
-	21, // 33: gastrolog.v1.QueryService.ValidateQuery:input_type -> gastrolog.v1.ValidateQueryRequest
-	23, // 34: gastrolog.v1.QueryService.GetPipelineFields:input_type -> gastrolog.v1.GetPipelineFieldsRequest
-	1,  // 35: gastrolog.v1.QueryService.Search:output_type -> gastrolog.v1.SearchResponse
-	5,  // 36: gastrolog.v1.QueryService.Follow:output_type -> gastrolog.v1.FollowResponse
-	7,  // 37: gastrolog.v1.QueryService.Explain:output_type -> gastrolog.v1.ExplainResponse
-	18, // 38: gastrolog.v1.QueryService.GetContext:output_type -> gastrolog.v1.GetContextResponse
-	20, // 39: gastrolog.v1.QueryService.GetSyntax:output_type -> gastrolog.v1.GetSyntaxResponse
-	22, // 40: gastrolog.v1.QueryService.ValidateQuery:output_type -> gastrolog.v1.ValidateQueryResponse
-	24, // 41: gastrolog.v1.QueryService.GetPipelineFields:output_type -> gastrolog.v1.GetPipelineFieldsResponse
-	35, // [35:42] is the sub-list for method output_type
-	28, // [28:35] is the sub-list for method input_type
-	28, // [28:28] is the sub-list for extension type_name
-	28, // [28:28] is the sub-list for extension extendee
-	0,  // [0:28] is the sub-list for field type_name
+	23, // 28: gastrolog.v1.ValidateQueryResponse.spans:type_name -> gastrolog.v1.HighlightSpan
+	0,  // 29: gastrolog.v1.QueryService.Search:input_type -> gastrolog.v1.SearchRequest
+	4,  // 30: gastrolog.v1.QueryService.Follow:input_type -> gastrolog.v1.FollowRequest
+	6,  // 31: gastrolog.v1.QueryService.Explain:input_type -> gastrolog.v1.ExplainRequest
+	17, // 32: gastrolog.v1.QueryService.GetContext:input_type -> gastrolog.v1.GetContextRequest
+	19, // 33: gastrolog.v1.QueryService.GetSyntax:input_type -> gastrolog.v1.GetSyntaxRequest
+	21, // 34: gastrolog.v1.QueryService.ValidateQuery:input_type -> gastrolog.v1.ValidateQueryRequest
+	24, // 35: gastrolog.v1.QueryService.GetPipelineFields:input_type -> gastrolog.v1.GetPipelineFieldsRequest
+	1,  // 36: gastrolog.v1.QueryService.Search:output_type -> gastrolog.v1.SearchResponse
+	5,  // 37: gastrolog.v1.QueryService.Follow:output_type -> gastrolog.v1.FollowResponse
+	7,  // 38: gastrolog.v1.QueryService.Explain:output_type -> gastrolog.v1.ExplainResponse
+	18, // 39: gastrolog.v1.QueryService.GetContext:output_type -> gastrolog.v1.GetContextResponse
+	20, // 40: gastrolog.v1.QueryService.GetSyntax:output_type -> gastrolog.v1.GetSyntaxResponse
+	22, // 41: gastrolog.v1.QueryService.ValidateQuery:output_type -> gastrolog.v1.ValidateQueryResponse
+	25, // 42: gastrolog.v1.QueryService.GetPipelineFields:output_type -> gastrolog.v1.GetPipelineFieldsResponse
+	36, // [36:43] is the sub-list for method output_type
+	29, // [29:36] is the sub-list for method input_type
+	29, // [29:29] is the sub-list for extension type_name
+	29, // [29:29] is the sub-list for extension extendee
+	0,  // [0:29] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_query_proto_init() }
@@ -1874,7 +1960,7 @@ func file_gastrolog_v1_query_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_query_proto_rawDesc), len(file_gastrolog_v1_query_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   26,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

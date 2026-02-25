@@ -1252,6 +1252,27 @@ export class ValidateQueryResponse extends Message<ValidateQueryResponse> {
    */
   errorOffset = 0;
 
+  /**
+   * syntax highlighting spans (concatenation reproduces input)
+   *
+   * @generated from field: repeated gastrolog.v1.HighlightSpan spans = 4;
+   */
+  spans: HighlightSpan[] = [];
+
+  /**
+   * echo back input for staleness detection
+   *
+   * @generated from field: string expression = 5;
+   */
+  expression = "";
+
+  /**
+   * whether query contains pipe operators
+   *
+   * @generated from field: bool has_pipeline = 6;
+   */
+  hasPipeline = false;
+
   constructor(data?: PartialMessage<ValidateQueryResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1263,6 +1284,9 @@ export class ValidateQueryResponse extends Message<ValidateQueryResponse> {
     { no: 1, name: "valid", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 2, name: "error_message", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "error_offset", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 4, name: "spans", kind: "message", T: HighlightSpan, repeated: true },
+    { no: 5, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "has_pipeline", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ValidateQueryResponse {
@@ -1279,6 +1303,53 @@ export class ValidateQueryResponse extends Message<ValidateQueryResponse> {
 
   static equals(a: ValidateQueryResponse | PlainMessage<ValidateQueryResponse> | undefined, b: ValidateQueryResponse | PlainMessage<ValidateQueryResponse> | undefined): boolean {
     return proto3.util.equals(ValidateQueryResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.HighlightSpan
+ */
+export class HighlightSpan extends Message<HighlightSpan> {
+  /**
+   * raw source text
+   *
+   * @generated from field: string text = 1;
+   */
+  text = "";
+
+  /**
+   * "operator", "key", "value", "pipe-keyword", "function", etc.
+   *
+   * @generated from field: string role = 2;
+   */
+  role = "";
+
+  constructor(data?: PartialMessage<HighlightSpan>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.HighlightSpan";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "text", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "role", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): HighlightSpan {
+    return new HighlightSpan().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): HighlightSpan {
+    return new HighlightSpan().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): HighlightSpan {
+    return new HighlightSpan().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: HighlightSpan | PlainMessage<HighlightSpan> | undefined, b: HighlightSpan | PlainMessage<HighlightSpan> | undefined): boolean {
+    return proto3.util.equals(HighlightSpan, a, b);
   }
 }
 

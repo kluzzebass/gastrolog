@@ -47,7 +47,8 @@ import {
   useDeleteSavedQuery,
 } from "../api/hooks/useSavedQueries";
 import { Dialog } from "./Dialog";
-import { tokenize, hasPipeOutsideQuotes, type SyntaxSets } from "../queryTokenizer";
+import { hasPipeOutsideQuotes } from "../lib/hasPipeOutsideQuotes";
+import type { SyntaxSets } from "../lib/syntaxSets";
 import { useAutocomplete } from "../hooks/useAutocomplete";
 import { HeaderBar } from "./HeaderBar";
 import { PipelineResults } from "./PipelineResults";
@@ -610,7 +611,10 @@ export function SearchView() {
     : null;
   const liveHistogramData = useLiveHistogram(followRecords);
   const tokens = extractTokens(q);
-  const { hasErrors: draftHasErrors, hasPipeline: draftIsPipeline } = tokenize(deferredDraft, syntax, validation.errorOffset);
+  const draftHasErrors = !validation.valid;
+  const draftIsPipeline = validation.expression === deferredDraft
+    ? validation.hasPipeline
+    : hasPipeOutsideQuotes(deferredDraft);
   const isRawQuery = queryHasRaw(q);
   const rawTableResult = isRawQuery && !tableResult && records.length > 0
     ? recordsToRawTable(records)
@@ -816,8 +820,8 @@ export function SearchView() {
             draftIsPipeline={draftIsPipeline}
             showPlan={showPlan}
             handleShowPlan={handleShowPlan}
-            syntax={syntax}
-            errorOffset={validation.errorOffset}
+            highlightSpans={validation.spans}
+            highlightExpression={validation.expression}
             errorMessage={validation.errorMessage}
           />
 
