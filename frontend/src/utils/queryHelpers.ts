@@ -6,25 +6,25 @@ export const stripTimeRange = (q: string): string =>
     .replace(/\bstart=\S+/g, "")
     .replace(/\bend=\S+/g, "")
     .replace(/\breverse=\S+/g, "")
-    .replace(/\s+/g, " ")
+    .replace(/[^\S\n]+/g, " ")
     .trim();
 
 export const stripStore = (q: string): string =>
   q
     .replace(/\bstore=\S+/g, "")
-    .replace(/\s+/g, " ")
+    .replace(/[^\S\n]+/g, " ")
     .trim();
 
 export const stripChunk = (q: string): string =>
   q
     .replace(/\bchunk=\S+/g, "")
-    .replace(/\s+/g, " ")
+    .replace(/[^\S\n]+/g, " ")
     .trim();
 
 export const stripPos = (q: string): string =>
   q
     .replace(/\bpos=\S+/g, "")
-    .replace(/\s+/g, " ")
+    .replace(/[^\S\n]+/g, " ")
     .trim();
 
 export const stripSeverity = (qs: string): string =>
@@ -32,7 +32,7 @@ export const stripSeverity = (qs: string): string =>
     .replace(/\((?:level=\w+\s+OR\s+)*level=\w+\)/g, "")
     .replace(/\blevel=(?:error|warn|info|debug|trace)\b/g, "")
     .replace(/\bnot\s+level=\*\b/gi, "")
-    .replace(/\s+/g, " ")
+    .replace(/[^\S\n]+/g, " ")
     .trim();
 
 /** Strip all directives, returning only the user's search expression. */
@@ -46,7 +46,7 @@ export const stripAllDirectives = (q: string): string =>
     .replace(/\blimit=\S+/g, "")
     .replace(/\bchunk=\S+/g, "")
     .replace(/\bpos=\S+/g, "")
-    .replace(/\s+/g, " ")
+    .replace(/[^\S\n]+/g, " ")
     .trim();
 
 export const buildTimeTokens = (range: string, reverse: boolean): string => {

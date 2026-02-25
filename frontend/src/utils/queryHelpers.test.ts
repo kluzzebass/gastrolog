@@ -36,6 +36,10 @@ describe("stripTimeRange", () => {
     expect(stripTimeRange("last=5m reverse=false")).toBe(""));
   test("collapses whitespace", () =>
     expect(stripTimeRange("last=5m   foo   bar")).toBe("foo bar"));
+  test("preserves newlines in multi-line queries", () =>
+    expect(
+      stripTimeRange("last=5m reverse=true remote_host=*\n  | lookup geoip remote_host\n  | sort -count"),
+    ).toBe("remote_host=*\n | lookup geoip remote_host\n | sort -count"));
 });
 
 describe("stripStore", () => {
@@ -111,6 +115,10 @@ describe("injectTimeRange", () => {
     ));
   test("All range into query", () =>
     expect(injectTimeRange("foo", "All", true)).toBe("reverse=true foo"));
+  test("preserves newlines in multi-line pipeline", () =>
+    expect(
+      injectTimeRange("last=5m reverse=true remote_host=*\n  | lookup geoip remote_host\n  | sort -count", "15m", true),
+    ).toBe("last=15m reverse=true remote_host=*\n | lookup geoip remote_host\n | sort -count"));
 });
 
 describe("injectStore", () => {
