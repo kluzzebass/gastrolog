@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { QueryInput } from "./QueryInput";
 import { QueryHistory } from "./QueryHistory";
 import { SavedQueries } from "./SavedQueries";
@@ -142,185 +143,232 @@ export function QueryBar({
 }: Readonly<QueryBarProps>) {
   const c = useThemeClass(dark);
   const { openHelp } = useHelp();
+  const [focused, setFocused] = useState(false);
+
+  const collapsed = !focused;
+  const lines = draft.split("\n");
+  const firstLine = lines[0] || "";
+  const hiddenCount = lines.length - 1;
+
+  const expand = () => {
+    setFocused(true);
+    requestAnimationFrame(() => queryInputRef.current?.focus());
+  };
 
   return (
     <div
       className={`px-5 py-4 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
     >
       <div className="flex gap-3 items-start">
-        <div className="flex-1 relative">
-          <QueryInput
-            ref={queryInputRef}
-            value={draft}
-            syntax={syntax}
-            errorOffset={errorOffset}
-            errorMessage={errorMessage}
-            onChange={(e) => {
-              setDraft(e.target.value);
-              cursorRef.current = e.target.selectionStart ?? 0;
-            }}
+        {collapsed ? (
+          /* ── Collapsed: single-line preview ── */
+          <div
+            className={`flex-1 flex items-center gap-2 min-w-0 cursor-pointer rounded border px-2.5 py-[9px] font-mono text-sm ${c(
+              "bg-ink-well border-ink-border text-text-secondary hover:border-copper-dim",
+              "bg-light-input border-light-border text-light-text-secondary hover:border-copper",
+            )}`}
+            onClick={expand}
+            role="button"
+            tabIndex={0}
             onKeyDown={(e) => {
-              if (autocomplete.isOpen) {
-                if (e.key === "Tab") {
+              if (e.key === "Enter" || e.key === " ") expand();
+            }}
+          >
+            <span className="truncate">{firstLine || "Search logs..."}</span>
+            {hiddenCount > 0 && (
+              <span className={`shrink-0 text-xs tabular-nums ${c("text-text-ghost", "text-light-text-ghost")}`}>
+                +{hiddenCount} line{hiddenCount > 1 ? "s" : ""}
+              </span>
+            )}
+          </div>
+        ) : (
+          /* ── Expanded: full query input ── */
+          <div
+            className="flex-1 relative"
+            onFocusCapture={() => setFocused(true)}
+            onBlurCapture={(e) => {
+              // Stay expanded if focus moved to another element within this container.
+              if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                setFocused(false);
+                setShowHistory(false);
+                setShowSavedQueries(false);
+              }
+            }}
+          >
+            <QueryInput
+              ref={queryInputRef}
+              value={draft}
+              syntax={syntax}
+              errorOffset={errorOffset}
+              errorMessage={errorMessage}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                cursorRef.current = e.target.selectionStart ?? 0;
+              }}
+              onKeyDown={(e) => {
+                if (autocomplete.isOpen) {
+                  if (e.key === "Tab") {
+                    e.preventDefault();
+                    const result = autocomplete.accept();
+                    if (result) {
+                      const ta = queryInputRef.current;
+                      if (ta) {
+                        // Replace the entire value via insertText to preserve undo.
+                        insertText(ta, result.newDraft, 0, draft.length);
+                        // insertText places cursor at end of inserted text;
+                        // we need it at the accept position.
+                        ta.selectionStart = result.newCursor;
+                        ta.selectionEnd = result.newCursor;
+                        cursorRef.current = result.newCursor;
+                      }
+                    }
+                    return;
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    autocomplete.dismiss();
+                    return;
+                  }
+                }
+                // Auto-format pipes: typing "|" inserts "\n| " instead.
+                if (e.key === "|") {
                   e.preventDefault();
-                  const result = autocomplete.accept();
+                  const ta = e.target as HTMLTextAreaElement;
+                  const start = ta.selectionStart;
+                  const end = ta.selectionEnd;
+                  // Trim trailing whitespace on current line before inserting.
+                  const before = draft.slice(0, start);
+                  const trimStart = before.replace(/[ \t]+$/, "").length;
+                  const newCursor = insertText(ta, "\n| ", trimStart, end);
+                  cursorRef.current = newCursor;
+                  return;
+                }
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (!draftHasErrors) executeQuery();
+                }
+              }}
+              onClick={(e) => {
+                const ta = e.target as HTMLTextAreaElement;
+                cursorRef.current = ta.selectionStart ?? 0;
+              }}
+              placeholder="Search logs... tokens for full-text, key=value for attributes"
+              dark={dark}
+            >
+              <button
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  setShowHistory((h: boolean) => !h);
+                  setShowSavedQueries(false);
+                }}
+                className={`transition-colors ${c(
+                  "text-text-ghost hover:text-copper",
+                  "text-light-text-ghost hover:text-copper",
+                )}`}
+                aria-label="Query history"
+                title="Query history"
+              >
+                <HistoryIcon className="w-4 h-4" />
+              </button>
+              <button
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  setShowSavedQueries((s: boolean) => !s);
+                  setShowHistory(false);
+                }}
+                className={`transition-colors ${c(
+                  "text-text-ghost hover:text-copper",
+                  "text-light-text-ghost hover:text-copper",
+                )}`}
+                aria-label="Saved queries"
+                title="Saved queries"
+              >
+                <BookmarkIcon className="w-4 h-4" />
+              </button>
+              <button
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  const ta = queryInputRef.current;
+                  if (ta) {
+                    insertText(ta, formatPipeQuery(draft), 0, draft.length);
+                  }
+                }}
+                className={`transition-colors ${c(
+                  "text-text-ghost hover:text-copper",
+                  "text-light-text-ghost hover:text-copper",
+                )}`}
+                aria-label="Format query"
+                title="Format query"
+              >
+                <FormatIcon className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => openHelp("query-language")}
+                className={`transition-colors ${c(
+                  "text-text-ghost hover:text-copper",
+                  "text-light-text-ghost hover:text-copper",
+                )}`}
+                aria-label="Query language help"
+                title="Query language help"
+              >
+                <HelpCircleIcon className="w-4 h-4" />
+              </button>
+            </QueryInput>
+            {showHistory && (
+              <QueryHistory
+                entries={historyEntries}
+                dark={dark}
+                onSelect={(query) => {
+                  setDraft(query);
+                  setShowHistory(false);
+                  queryInputRef.current?.focus();
+                }}
+                onRemove={onHistoryRemove}
+                onClear={onHistoryClear}
+                onClose={() => setShowHistory(false)}
+              />
+            )}
+            {showSavedQueries && (
+              <SavedQueries
+                queries={savedQueries}
+                dark={dark}
+                currentQuery={draft}
+                onSelect={(query) => {
+                  setDraft(query);
+                  setShowSavedQueries(false);
+                  queryInputRef.current?.focus();
+                }}
+                onSave={onSaveQuery}
+                onDelete={onDeleteSavedQuery}
+                onClose={() => setShowSavedQueries(false)}
+              />
+            )}
+            {autocomplete.isOpen && !showHistory && !showSavedQueries && (
+              <QueryAutocomplete
+                suggestions={autocomplete.suggestions}
+                selectedIndex={autocomplete.selectedIndex}
+                dark={dark}
+                onSelect={(i) => {
+                  const result = autocomplete.accept(i);
                   if (result) {
                     const ta = queryInputRef.current;
                     if (ta) {
-                      // Replace the entire value via insertText to preserve undo.
-                      const newCursor = insertText(ta, result.newDraft, 0, draft.length);
-                      // insertText places cursor at end of inserted text;
-                      // we need it at the accept position.
+                      insertText(ta, result.newDraft, 0, draft.length);
                       ta.selectionStart = result.newCursor;
                       ta.selectionEnd = result.newCursor;
                       cursorRef.current = result.newCursor;
                     }
                   }
-                  return;
-                }
-                if (e.key === "Escape") {
-                  e.preventDefault();
-                  autocomplete.dismiss();
-                  return;
-                }
-              }
-              // Auto-format pipes: typing "|" inserts "\n| " instead.
-              if (e.key === "|") {
-                e.preventDefault();
-                const ta = e.target as HTMLTextAreaElement;
-                const start = ta.selectionStart;
-                const end = ta.selectionEnd;
-                // Trim trailing whitespace on current line before inserting.
-                const before = draft.slice(0, start);
-                const trimStart = before.replace(/[ \t]+$/, "").length;
-                const newCursor = insertText(ta, "\n| ", trimStart, end);
-                cursorRef.current = newCursor;
-                return;
-              }
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                if (!draftHasErrors) executeQuery();
-              }
-            }}
-            onClick={(e) => {
-              const ta = e.target as HTMLTextAreaElement;
-              cursorRef.current = ta.selectionStart ?? 0;
-            }}
-            placeholder="Search logs... tokens for full-text, key=value for attributes"
-            dark={dark}
-          >
-            <button
-              onMouseDown={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                setShowHistory((h: boolean) => !h);
-                setShowSavedQueries(false);
-              }}
-              className={`transition-colors ${c(
-                "text-text-ghost hover:text-copper",
-                "text-light-text-ghost hover:text-copper",
-              )}`}
-              aria-label="Query history"
-              title="Query history"
-            >
-              <HistoryIcon className="w-4 h-4" />
-            </button>
-            <button
-              onMouseDown={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                setShowSavedQueries((s: boolean) => !s);
-                setShowHistory(false);
-              }}
-              className={`transition-colors ${c(
-                "text-text-ghost hover:text-copper",
-                "text-light-text-ghost hover:text-copper",
-              )}`}
-              aria-label="Saved queries"
-              title="Saved queries"
-            >
-              <BookmarkIcon className="w-4 h-4" />
-            </button>
-            <button
-              onMouseDown={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                const ta = queryInputRef.current;
-                if (ta) {
-                  insertText(ta, formatPipeQuery(draft), 0, draft.length);
-                }
-              }}
-              className={`transition-colors ${c(
-                "text-text-ghost hover:text-copper",
-                "text-light-text-ghost hover:text-copper",
-              )}`}
-              aria-label="Format query"
-              title="Format query"
-            >
-              <FormatIcon className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => openHelp("query-language")}
-              className={`transition-colors ${c(
-                "text-text-ghost hover:text-copper",
-                "text-light-text-ghost hover:text-copper",
-              )}`}
-              aria-label="Query language help"
-              title="Query language help"
-            >
-              <HelpCircleIcon className="w-4 h-4" />
-            </button>
-          </QueryInput>
-          {showHistory && (
-            <QueryHistory
-              entries={historyEntries}
-              dark={dark}
-              onSelect={(query) => {
-                setDraft(query);
-                setShowHistory(false);
-                queryInputRef.current?.focus();
-              }}
-              onRemove={onHistoryRemove}
-              onClear={onHistoryClear}
-              onClose={() => setShowHistory(false)}
-            />
-          )}
-          {showSavedQueries && (
-            <SavedQueries
-              queries={savedQueries}
-              dark={dark}
-              currentQuery={draft}
-              onSelect={(query) => {
-                setDraft(query);
-                setShowSavedQueries(false);
-                queryInputRef.current?.focus();
-              }}
-              onSave={onSaveQuery}
-              onDelete={onDeleteSavedQuery}
-              onClose={() => setShowSavedQueries(false)}
-            />
-          )}
-          {autocomplete.isOpen && !showHistory && !showSavedQueries && (
-            <QueryAutocomplete
-              suggestions={autocomplete.suggestions}
-              selectedIndex={autocomplete.selectedIndex}
-              dark={dark}
-              onSelect={(i) => {
-                const result = autocomplete.accept(i);
-                if (result) {
-                  const ta = queryInputRef.current;
-                  if (ta) {
-                    insertText(ta, result.newDraft, 0, draft.length);
-                    ta.selectionStart = result.newCursor;
-                    ta.selectionEnd = result.newCursor;
-                    cursorRef.current = result.newCursor;
-                  }
-                }
-              }}
-              onClose={autocomplete.dismiss}
-            />
-          )}
-        </div>
+                }}
+                onClose={autocomplete.dismiss}
+              />
+            )}
+          </div>
+        )}
+
         <QueryActionButtons
           dark={dark}
           executeQuery={executeQuery}
@@ -335,7 +383,6 @@ export function QueryBar({
           handleShowPlan={handleShowPlan}
         />
       </div>
-
     </div>
   );
 }
