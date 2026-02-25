@@ -78,7 +78,8 @@ func validateChoropleth(op *querylang.MapOp, table *TableResult) bool {
 	return true
 }
 
-// validateScatter checks that lat and lon columns exist and are numeric.
+// validateScatter checks that lat and lon columns exist and non-empty values
+// are numeric. Rows with empty lat/lon (e.g. failed geoip lookups) are skipped.
 func validateScatter(op *querylang.MapOp, table *TableResult) bool {
 	latIdx := columnIndex(table.Columns, op.LatField)
 	lonIdx := columnIndex(table.Columns, op.LonField)
@@ -88,15 +89,21 @@ func validateScatter(op *querylang.MapOp, table *TableResult) bool {
 	if len(table.Rows) < 2 {
 		return false
 	}
+	valid := 0
 	for _, row := range table.Rows {
-		if _, err := strconv.ParseFloat(row[latIdx], 64); err != nil {
+		lat, lon := row[latIdx], row[lonIdx]
+		if lat == "" || lon == "" {
+			continue
+		}
+		if _, err := strconv.ParseFloat(lat, 64); err != nil {
 			return false
 		}
-		if _, err := strconv.ParseFloat(row[lonIdx], 64); err != nil {
+		if _, err := strconv.ParseFloat(lon, 64); err != nil {
 			return false
 		}
+		valid++
 	}
-	return true
+	return valid >= 2
 }
 
 // lastColumnNumeric returns true if every row's last column is parseable as a float.

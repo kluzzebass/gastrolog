@@ -411,11 +411,22 @@ func (s *QueryServer) ValidateQuery(
 	_ context.Context,
 	req *connect.Request[apiv1.ValidateQueryRequest],
 ) (*connect.Response[apiv1.ValidateQueryResponse], error) {
-	valid, msg, offset := querylang.ValidateExpression(req.Msg.Expression)
+	expr := req.Msg.Expression
+	valid, msg, offset := querylang.ValidateExpression(expr)
+	spans, hasPipeline := querylang.Highlight(expr, offset)
+
+	protoSpans := make([]*apiv1.HighlightSpan, len(spans))
+	for i, sp := range spans {
+		protoSpans[i] = &apiv1.HighlightSpan{Text: sp.Text, Role: string(sp.Role)}
+	}
+
 	return connect.NewResponse(&apiv1.ValidateQueryResponse{
 		Valid:        valid,
 		ErrorMessage: msg,
 		ErrorOffset:  int32(offset), //nolint:gosec // G115: offset fits in int32
+		Spans:        protoSpans,
+		Expression:   expr,
+		HasPipeline:  hasPipeline,
 	}), nil
 }
 

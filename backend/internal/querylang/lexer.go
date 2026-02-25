@@ -409,6 +409,9 @@ func classifyWord(word string) TokenKind {
 	}
 }
 
+// Pos returns the current byte position of the lexer in the input.
+func (l *Lexer) Pos() int { return l.pos }
+
 // Peek returns the next token without consuming it.
 func (l *Lexer) Peek() (Token, error) {
 	savedPos := l.pos

@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import type { FieldSummary } from "../utils";
 import { timeRangeMs } from "../utils";
-import { DEFAULT_SYNTAX, type SyntaxSets } from "../queryTokenizer";
+import { DEFAULT_SYNTAX, type SyntaxSets } from "../lib/syntaxSets";
 
 const OPERATORS = ["AND", "OR", "NOT"];
 

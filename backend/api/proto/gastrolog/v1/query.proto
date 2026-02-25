@@ -204,6 +204,14 @@ message ValidateQueryResponse {
   bool valid = 1;
   string error_message = 2;    // empty if valid
   int32 error_offset = 3;      // byte offset in original expression (-1 if valid)
+  repeated HighlightSpan spans = 4;   // syntax highlighting spans (concatenation reproduces input)
+  string expression = 5;              // echo back input for staleness detection
+  bool has_pipeline = 6;              // whether query contains pipe operators
+}
+
+message HighlightSpan {
+  string text = 1;   // raw source text
+  string role = 2;   // "operator", "key", "value", "pipe-keyword", "function", etc.
 }
 
 message GetPipelineFieldsRequest {
