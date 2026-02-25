@@ -291,7 +291,19 @@ message PutServerConfigRequest {
   optional string maxmind_license_key = 23;
 }
 
-message PutServerConfigResponse {}
+message PutServerConfigResponse {
+  MmdbValidation geoip_validation = 1; // Populated when geoip_db_path was set.
+  MmdbValidation asn_validation = 2;   // Populated when asn_db_path was set.
+}
+
+// MmdbValidation is the result of probing a MaxMind MMDB file on save.
+message MmdbValidation {
+  bool valid = 1;
+  string error = 2;          // Non-empty on failure; describes the issue.
+  string database_type = 3;  // e.g. "GeoLite2-City", "GeoIP2-ISP"
+  string build_time = 4;     // RFC 3339 timestamp.
+  uint32 node_count = 5;     // Number of nodes in the search tree.
+}
 
 message GetPreferencesRequest {}
 

@@ -11,6 +11,7 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/config"
+	"gastrolog/internal/lookup"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -249,7 +250,30 @@ func (s *ConfigServer) PutServerConfig(
 		s.onLookupConfigChange(sc.Lookup)
 	}
 
-	return connect.NewResponse(&apiv1.PutServerConfigResponse{}), nil
+	resp := &apiv1.PutServerConfigResponse{}
+
+	// Validate MMDB paths that were explicitly set in this request.
+	if req.Msg.GeoipDbPath != nil && *req.Msg.GeoipDbPath != "" {
+		resp.GeoipValidation = validateMMDBPath(*req.Msg.GeoipDbPath)
+	}
+	if req.Msg.AsnDbPath != nil && *req.Msg.AsnDbPath != "" {
+		resp.AsnValidation = validateMMDBPath(*req.Msg.AsnDbPath)
+	}
+
+	return connect.NewResponse(resp), nil
+}
+
+func validateMMDBPath(path string) *apiv1.MmdbValidation {
+	info, err := lookup.ValidateMMDB(path)
+	if err != nil {
+		return &apiv1.MmdbValidation{Error: err.Error()}
+	}
+	return &apiv1.MmdbValidation{
+		Valid:        true,
+		DatabaseType: info.DatabaseType,
+		BuildTime:    info.BuildTime.Format(time.RFC3339),
+		NodeCount:    uint32(info.NodeCount), //nolint:gosec // NodeCount fits in uint32 for all real MMDB files
+	}
 }
 
 func (s *ConfigServer) loadServerConfig(ctx context.Context) (config.ServerConfig, error) {

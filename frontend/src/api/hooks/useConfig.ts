@@ -156,7 +156,8 @@ export function usePutServerConfig() {
         req.jwtSecret = jwtSecret;
       if (maxmindLicenseKey !== undefined && maxmindLicenseKey !== MAXMIND_KEEP)
         req.maxmindLicenseKey = maxmindLicenseKey;
-      await configClient.putServerConfig(req as Parameters<typeof configClient.putServerConfig>[0]);
+      const resp = await configClient.putServerConfig(req as Parameters<typeof configClient.putServerConfig>[0]);
+      return resp;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["serverConfig"] });

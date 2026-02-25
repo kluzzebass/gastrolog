@@ -5,6 +5,7 @@ import {
   usePutServerConfig,
   MAXMIND_KEEP,
 } from "../../api/hooks/useConfig";
+import type { MmdbValidation } from "../../api/gen/gastrolog/v1/config_pb";
 import { useToast } from "../Toast";
 import { FormField, TextInput } from "./FormField";
 import { Checkbox } from "./Checkbox";
@@ -24,6 +25,9 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   const [accountId, setAccountId] = useState("");
   const [licenseKey, setLicenseKey] = useState("");
   const [initialized, setInitialized] = useState(false);
+
+  const [geoipValidation, setGeoipValidation] = useState<MmdbValidation | undefined>();
+  const [asnValidation, setAsnValidation] = useState<MmdbValidation | undefined>();
 
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({
     maxmind: true,
@@ -54,7 +58,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
 
   const handleSave = async () => {
     try {
-      await putConfig.mutateAsync({
+      const resp = await putConfig.mutateAsync({
         geoipDbPath,
         asnDbPath,
         maxmindAutoDownload: autoDownload,
@@ -63,6 +67,8 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
       });
       setAccountId("");
       setLicenseKey("");
+      setGeoipValidation(resp.geoipValidation);
+      setAsnValidation(resp.asnValidation);
       addToast("Lookup configuration updated", "info");
     } catch (err: any) {
       const msg = err.message ?? "Failed to update lookup configuration";
@@ -225,7 +231,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
               >
                 <TextInput
                   value={geoipDbPath}
-                  onChange={setGeoipDbPath}
+                  onChange={(v) => { setGeoipDbPath(v); setGeoipValidation(undefined); }}
                   placeholder={
                     autoDownload
                       ? "(using auto-downloaded GeoLite2-City)"
@@ -235,6 +241,9 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
                   mono
                 />
               </FormField>
+              {geoipValidation && (
+                <ValidationResult validation={geoipValidation} dark={dark} />
+              )}
             </div>
           </ExpandableCard>
 
@@ -266,7 +275,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
               >
                 <TextInput
                   value={asnDbPath}
-                  onChange={setAsnDbPath}
+                  onChange={(v) => { setAsnDbPath(v); setAsnValidation(undefined); }}
                   placeholder={
                     autoDownload
                       ? "(using auto-downloaded GeoLite2-ASN)"
@@ -276,6 +285,9 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
                   mono
                 />
               </FormField>
+              {asnValidation && (
+                <ValidationResult validation={asnValidation} dark={dark} />
+              )}
             </div>
           </ExpandableCard>
 
@@ -294,6 +306,42 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function ValidationResult({
+  validation,
+  dark,
+}: Readonly<{
+  validation: MmdbValidation;
+  dark: boolean;
+}>) {
+  const c = useThemeClass(dark);
+  if (validation.valid) {
+    const built = validation.buildTime
+      ? new Date(validation.buildTime).toLocaleDateString()
+      : "unknown";
+    return (
+      <div
+        className={`text-[0.8em] leading-relaxed rounded px-2.5 py-1.5 border ${c(
+          "bg-green-950/30 border-green-800/40 text-green-400",
+          "bg-green-50 border-green-200 text-green-700",
+        )}`}
+      >
+        <span className="font-semibold">{validation.databaseType}</span>
+        {" \u2014 "}built {built}, {validation.nodeCount.toLocaleString()} nodes
+      </div>
+    );
+  }
+  return (
+    <div
+      className={`text-[0.8em] leading-relaxed rounded px-2.5 py-1.5 border ${c(
+        "bg-red-950/30 border-red-800/40 text-red-400",
+        "bg-red-50 border-red-200 text-red-700",
+      )}`}
+    >
+      {validation.error}
     </div>
   );
 }

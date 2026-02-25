@@ -1780,6 +1780,20 @@ export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
  * @generated from message gastrolog.v1.PutServerConfigResponse
  */
 export class PutServerConfigResponse extends Message<PutServerConfigResponse> {
+  /**
+   * Populated when geoip_db_path was set.
+   *
+   * @generated from field: gastrolog.v1.MmdbValidation geoip_validation = 1;
+   */
+  geoipValidation?: MmdbValidation;
+
+  /**
+   * Populated when asn_db_path was set.
+   *
+   * @generated from field: gastrolog.v1.MmdbValidation asn_validation = 2;
+   */
+  asnValidation?: MmdbValidation;
+
   constructor(data?: PartialMessage<PutServerConfigResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1788,6 +1802,8 @@ export class PutServerConfigResponse extends Message<PutServerConfigResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutServerConfigResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "geoip_validation", kind: "message", T: MmdbValidation },
+    { no: 2, name: "asn_validation", kind: "message", T: MmdbValidation },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutServerConfigResponse {
@@ -1804,6 +1820,77 @@ export class PutServerConfigResponse extends Message<PutServerConfigResponse> {
 
   static equals(a: PutServerConfigResponse | PlainMessage<PutServerConfigResponse> | undefined, b: PutServerConfigResponse | PlainMessage<PutServerConfigResponse> | undefined): boolean {
     return proto3.util.equals(PutServerConfigResponse, a, b);
+  }
+}
+
+/**
+ * MmdbValidation is the result of probing a MaxMind MMDB file on save.
+ *
+ * @generated from message gastrolog.v1.MmdbValidation
+ */
+export class MmdbValidation extends Message<MmdbValidation> {
+  /**
+   * @generated from field: bool valid = 1;
+   */
+  valid = false;
+
+  /**
+   * Non-empty on failure; describes the issue.
+   *
+   * @generated from field: string error = 2;
+   */
+  error = "";
+
+  /**
+   * e.g. "GeoLite2-City", "GeoIP2-ISP"
+   *
+   * @generated from field: string database_type = 3;
+   */
+  databaseType = "";
+
+  /**
+   * RFC 3339 timestamp.
+   *
+   * @generated from field: string build_time = 4;
+   */
+  buildTime = "";
+
+  /**
+   * Number of nodes in the search tree.
+   *
+   * @generated from field: uint32 node_count = 5;
+   */
+  nodeCount = 0;
+
+  constructor(data?: PartialMessage<MmdbValidation>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.MmdbValidation";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "valid", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 2, name: "error", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "database_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "build_time", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "node_count", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): MmdbValidation {
+    return new MmdbValidation().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): MmdbValidation {
+    return new MmdbValidation().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): MmdbValidation {
+    return new MmdbValidation().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: MmdbValidation | PlainMessage<MmdbValidation> | undefined, b: MmdbValidation | PlainMessage<MmdbValidation> | undefined): boolean {
+    return proto3.util.equals(MmdbValidation, a, b);
   }
 }
 
