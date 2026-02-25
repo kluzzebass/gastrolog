@@ -76,10 +76,9 @@ Special filter values:
 
 ## Configuration
 
-GastroLog stores its configuration (stores, ingesters, filters, policies, users, certificates) in a pluggable config store. Three backends are available:
+GastroLog stores its configuration (stores, ingesters, filters, policies, users, certificates) in a pluggable config store. Two backends are available:
 
 - **SQLite** (default): Persistent relational storage with ACID transactions
-- **JSON**: File-based persistence with atomic writes
 - **Memory**: In-process only, useful for testing and ephemeral instances
 
 All configuration is managed through the Settings dialog or the API.
