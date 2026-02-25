@@ -505,3 +505,190 @@ func tableRowToQueryRow(columns []string, row []string) querylang.Row {
 	}
 	return qrow
 }
+
+// --- Streaming pipeline support ---
+
+// CanStreamPipeline reports whether a pipeline's operators can be applied
+// per-record in a streaming fashion (with resume-token pagination).
+// Pipelines that require full materialization (sort, tail, slice, stats,
+// timechart, raw) return false.
+func CanStreamPipeline(pipeline *querylang.Pipeline) bool {
+	for _, op := range pipeline.Pipes {
+		switch op.(type) {
+		case *querylang.WhereOp, *querylang.EvalOp, *querylang.RenameOp,
+			*querylang.FieldsOp, *querylang.HeadOp, *querylang.LookupOp,
+			*querylang.RawOp:
+			// streamable
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// RecordTransform applies a sequence of streamable pipeline operators to
+// individual records. It pre-compiles where filters and caches lookup
+// tables so the per-record cost is minimal.
+type RecordTransform struct {
+	steps   []transformStep
+	eval    *querylang.Evaluator
+	headN   int // 0 = no head limit
+	emitted int
+}
+
+// transformStep is a single pipeline operator compiled for per-record use.
+type transformStep struct {
+	kind    stepKind
+	filter  func(chunk.Record) bool
+	evalOp  *querylang.EvalOp
+	rename  *querylang.RenameOp
+	fields  *querylang.FieldsOp
+	lookupT lookup.LookupTable
+	lookupF string // lookup field name
+}
+
+type stepKind int
+
+const (
+	stepWhere stepKind = iota
+	stepEval
+	stepRename
+	stepFields
+	stepLookup
+)
+
+// NewRecordTransform compiles a sequence of pipeline operators into a
+// per-record transform. All ops must be streamable (see CanStreamPipeline).
+func NewRecordTransform(ops []querylang.PipeOp, resolve lookup.Resolver) *RecordTransform {
+	rt := &RecordTransform{eval: querylang.NewEvaluator()}
+	for _, op := range ops {
+		switch o := op.(type) {
+		case *querylang.WhereOp:
+			rt.steps = append(rt.steps, transformStep{
+				kind:   stepWhere,
+				filter: CompileFilter(o.Expr),
+			})
+		case *querylang.EvalOp:
+			rt.steps = append(rt.steps, transformStep{kind: stepEval, evalOp: o})
+		case *querylang.RenameOp:
+			rt.steps = append(rt.steps, transformStep{kind: stepRename, rename: o})
+		case *querylang.FieldsOp:
+			rt.steps = append(rt.steps, transformStep{kind: stepFields, fields: o})
+		case *querylang.LookupOp:
+			var lt lookup.LookupTable
+			if resolve != nil {
+				lt = resolve(o.Table)
+			}
+			rt.steps = append(rt.steps, transformStep{
+				kind:    stepLookup,
+				lookupT: lt,
+				lookupF: o.Field,
+			})
+		case *querylang.HeadOp:
+			rt.headN = o.N
+		}
+	}
+	return rt
+}
+
+// Apply transforms a single record through the pipeline operators.
+// Returns (record, keep). When keep is false the record was filtered out
+// or the head limit was reached; the caller should skip it.
+// The record is copied and fields are materialized before transforms run.
+func (rt *RecordTransform) Apply(ctx context.Context, rec chunk.Record) (chunk.Record, bool) {
+	if rt.headN > 0 && rt.emitted >= rt.headN {
+		return rec, false
+	}
+
+	rec = rec.Copy()
+	materializeFields([]chunk.Record{rec})
+
+	for i := range rt.steps {
+		s := &rt.steps[i]
+		switch s.kind {
+		case stepWhere:
+			if !s.filter(rec) {
+				return rec, false
+			}
+		case stepEval:
+			rec = s.applyEval(rec, rt.eval)
+		case stepRename:
+			s.applyRename(&rec)
+		case stepFields:
+			s.applyFields(&rec)
+		case stepLookup:
+			s.applyLookup(ctx, &rec)
+		}
+	}
+
+	rt.emitted++
+	return rec, true
+}
+
+func (s *transformStep) applyEval(rec chunk.Record, eval *querylang.Evaluator) chunk.Record {
+	row := RecordToRow(rec)
+	for _, a := range s.evalOp.Assignments {
+		val, err := eval.Eval(a.Expr, row)
+		if err == nil && !val.Missing {
+			if rec.Attrs == nil {
+				rec.Attrs = make(chunk.Attributes)
+			}
+			rec.Attrs[a.Field] = val.Str
+			row[a.Field] = val.Str
+		}
+	}
+	return rec
+}
+
+func (s *transformStep) applyRename(rec *chunk.Record) {
+	for _, m := range s.rename.Renames {
+		if v, ok := rec.Attrs[m.Old]; ok {
+			if rec.Attrs == nil {
+				rec.Attrs = make(chunk.Attributes)
+			}
+			rec.Attrs[m.New] = v
+			delete(rec.Attrs, m.Old)
+		}
+	}
+}
+
+func (s *transformStep) applyFields(rec *chunk.Record) {
+	if rec.Attrs == nil {
+		return
+	}
+	nameSet := make(map[string]bool, len(s.fields.Names))
+	for _, n := range s.fields.Names {
+		nameSet[n] = true
+	}
+	for k := range rec.Attrs {
+		if s.fields.Drop == nameSet[k] {
+			delete(rec.Attrs, k)
+		}
+	}
+}
+
+func (s *transformStep) applyLookup(ctx context.Context, rec *chunk.Record) {
+	if s.lookupT == nil {
+		return
+	}
+	val, ok := rec.Attrs[s.lookupF]
+	if !ok || val == "" {
+		return
+	}
+	result := s.lookupT.Lookup(ctx, val)
+	if result == nil {
+		return
+	}
+	if rec.Attrs == nil {
+		rec.Attrs = make(chunk.Attributes)
+	}
+	for suffix, v := range result {
+		rec.Attrs[s.lookupF+"_"+suffix] = v
+	}
+}
+
+// HeadN returns the head limit, or 0 if there is none.
+func (rt *RecordTransform) HeadN() int { return rt.headN }
+
+// Done reports whether the head limit has been reached.
+func (rt *RecordTransform) Done() bool { return rt.headN > 0 && rt.emitted >= rt.headN }

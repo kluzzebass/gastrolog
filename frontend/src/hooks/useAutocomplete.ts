@@ -240,12 +240,17 @@ export function useAutocomplete(
 ) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [dismissed, setDismissed] = useState(false);
-  const [lastDraft, setLastDraft] = useState(draft);
+  // Track which word the cursor was in when dismiss happened,
+  // so we only re-open when the user moves to a different word.
+  const [dismissedWordStart, setDismissedWordStart] = useState(-1);
 
-  // Reset dismissed state when draft changes.
-  if (draft !== lastDraft) {
-    setLastDraft(draft);
-    if (dismissed) setDismissed(false);
+  const currentWord = wordAtCursor(draft, cursorPos);
+  const currentWordStart = currentWord ? currentWord.start : -1;
+
+  // Reset dismissed state only when the cursor moves to a different word.
+  if (dismissed && currentWordStart !== dismissedWordStart) {
+    setDismissed(false);
+    setDismissedWordStart(-1);
   }
 
   const { suggestions, replaceRange, suffix: _suffix, inPipeContext } =
@@ -468,17 +473,10 @@ export function useAutocomplete(
     return () => clearTimeout(debounceRef.current);
   }, [hasSuggestions, dismissed, sugKey]);
 
-  const selectNext = useCallback(() => {
-    setSelectedIndex((i) => (i + 1) % suggestions.length);
-  }, [suggestions.length]);
-
-  const selectPrev = useCallback(() => {
-    setSelectedIndex((i) => (i - 1 + suggestions.length) % suggestions.length);
-  }, [suggestions.length]);
-
   const dismiss = useCallback(() => {
     setDismissed(true);
-  }, []);
+    setDismissedWordStart(currentWordStart);
+  }, [currentWordStart]);
 
   // Accept a suggestion: returns the new draft string and cursor position.
   const accept = useCallback(
@@ -538,10 +536,7 @@ export function useAutocomplete(
     suggestions,
     selectedIndex,
     isOpen,
-    selectNext,
-    selectPrev,
     accept,
     dismiss,
-    setSelectedIndex,
   };
 }

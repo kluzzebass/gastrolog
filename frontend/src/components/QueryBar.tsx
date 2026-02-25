@@ -63,8 +63,6 @@ interface QueryBarProps {
     suggestions: string[];
     selectedIndex: number;
     isOpen: boolean;
-    selectNext: () => void;
-    selectPrev: () => void;
     accept: (index?: number) => { newDraft: string; newCursor: number } | null;
     dismiss: () => void;
   };
@@ -145,16 +143,6 @@ export function QueryBar({
             }}
             onKeyDown={(e) => {
               if (autocomplete.isOpen) {
-                if (e.key === "ArrowDown") {
-                  e.preventDefault();
-                  autocomplete.selectNext();
-                  return;
-                }
-                if (e.key === "ArrowUp") {
-                  e.preventDefault();
-                  autocomplete.selectPrev();
-                  return;
-                }
                 if (e.key === "Tab") {
                   e.preventDefault();
                   const result = autocomplete.accept();

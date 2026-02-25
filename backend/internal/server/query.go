@@ -62,12 +62,22 @@ func (s *QueryServer) Search(
 	}
 
 	if pipeline != nil && len(pipeline.Pipes) > 0 {
+		if query.CanStreamPipeline(pipeline) {
+			// Streamable pipeline: apply ops per-record on top of the
+			// normal search iterator with full resume-token support.
+			transform := query.NewRecordTransform(pipeline.Pipes, s.lookupResolver)
+			return s.searchDirect(ctx, eng, q, req.Msg.ResumeToken, transform, stream)
+		}
+		// Aggregating / full-materialization pipeline (stats, timechart,
+		// sort, tail, slice, raw).
 		return s.searchPipeline(ctx, eng, q, pipeline, stream)
 	}
 
-	return s.searchDirect(ctx, eng, q, req.Msg.ResumeToken, stream)
+	return s.searchDirect(ctx, eng, q, req.Msg.ResumeToken, nil, stream)
 }
 
+// searchPipeline handles pipelines that require full materialization
+// (stats, timechart, sort, tail, slice, raw).
 func (s *QueryServer) searchPipeline(
 	ctx context.Context,
 	eng *query.Engine,
@@ -87,6 +97,8 @@ func (s *QueryServer) searchPipeline(
 			TableResult: tableResultToProto(result.Table, pipeline),
 		})
 	}
+	// Non-aggregating but needs full materialization (sort/tail/slice):
+	// stream all records.
 	batch := make([]*apiv1.Record, 0, 100)
 	for _, rec := range result.Records {
 		batch = append(batch, recordToProto(rec))
@@ -100,11 +112,14 @@ func (s *QueryServer) searchPipeline(
 	return stream.Send(&apiv1.SearchResponse{Records: batch})
 }
 
+// searchDirect streams search results with optional per-record pipeline
+// transforms. When transform is nil, records are sent as-is (regular search).
 func (s *QueryServer) searchDirect(
 	ctx context.Context,
 	eng *query.Engine,
 	q query.Query,
 	resumeTokenData []byte,
+	transform *query.RecordTransform,
 	stream *connect.ServerStream[apiv1.SearchResponse],
 ) error {
 	if s.maxResultCount > 0 && (q.Limit == 0 || int64(q.Limit) > s.maxResultCount) {
@@ -129,18 +144,31 @@ func (s *QueryServer) searchDirect(
 		if err != nil {
 			return mapSearchError(err)
 		}
-		batch = append(batch, recordToProto(rec))
+		if transform != nil {
+			rec, ok := transform.Apply(ctx, rec)
+			if !ok {
+				continue
+			}
+			batch = append(batch, recordToProto(rec))
+		} else {
+			batch = append(batch, recordToProto(rec))
+		}
 		if len(batch) >= batchSize {
 			if err := stream.Send(&apiv1.SearchResponse{Records: batch, HasMore: true}); err != nil {
 				return err
 			}
 			batch = batch[:0]
 		}
+		if transform != nil && transform.Done() {
+			break
+		}
 	}
 
 	var tokenBytes []byte
-	if token := getToken(); token != nil {
-		tokenBytes = resumeTokenToProto(token)
+	if transform == nil || !transform.Done() {
+		if token := getToken(); token != nil {
+			tokenBytes = resumeTokenToProto(token)
+		}
 	}
 
 	return stream.Send(&apiv1.SearchResponse{

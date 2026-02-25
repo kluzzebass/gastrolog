@@ -81,8 +81,12 @@ func EncodeIdxEntry(e IdxEntry, buf []byte) {
 // DecodeIdxEntry decodes an idx.log entry from a 38-byte buffer.
 // Timestamps are stored as Unix nanoseconds.
 func DecodeIdxEntry(buf []byte) IdxEntry {
+	var sourceTS time.Time
+	if ns := int64(binary.LittleEndian.Uint64(buf[idxSourceTSOffset:])); ns > 0 { //nolint:gosec // G115: nanosecond timestamps fit in int64
+		sourceTS = time.Unix(0, ns)
+	}
 	return IdxEntry{
-		SourceTS:   time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxSourceTSOffset:]))),  //nolint:gosec // G115: nanosecond timestamps fit in int64
+		SourceTS:   sourceTS,
 		IngestTS:   time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxIngestTSOffset:]))),  //nolint:gosec // G115: nanosecond timestamps fit in int64
 		WriteTS:    time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxWriteTSOffset:]))),   //nolint:gosec // G115: nanosecond timestamps fit in int64
 		RawOffset:  binary.LittleEndian.Uint32(buf[idxRawOffsetOffset:]),
