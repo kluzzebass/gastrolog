@@ -131,7 +131,8 @@ type ServerConfig struct {
 
 // LookupConfig holds configuration for lookup tables (e.g. GeoIP enrichment).
 type LookupConfig struct {
-	GeoIPDBPath string `json:"geoip_db_path,omitempty"` // Path to MaxMind MMDB file
+	GeoIPDBPath string `json:"geoip_db_path,omitempty"` // Path to MaxMind GeoIP2/GeoLite2-City MMDB file
+	ASNDBPath   string `json:"asn_db_path,omitempty"`   // Path to MaxMind GeoIP2/GeoLite2-ASN MMDB file
 }
 
 // QueryConfig holds configuration for the query engine.

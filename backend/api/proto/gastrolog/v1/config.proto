@@ -259,6 +259,7 @@ message GetServerConfigResponse {
   int32 max_result_count = 17; // Max records per Search request. 0 = unlimited.
   bool setup_wizard_dismissed = 18; // True when the user has dismissed the setup wizard.
   string geoip_db_path = 19; // Path to MaxMind MMDB file for GeoIP lookups.
+  string asn_db_path = 20; // Path to MaxMind MMDB file for ASN lookups.
 }
 
 message PutServerConfigRequest {
@@ -281,6 +282,7 @@ message PutServerConfigRequest {
   optional int32 max_result_count = 17;
   optional bool setup_wizard_dismissed = 18;
   optional string geoip_db_path = 19;
+  optional string asn_db_path = 20;
 }
 
 message PutServerConfigResponse {}

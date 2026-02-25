@@ -1731,6 +1731,7 @@ type GetServerConfigResponse struct {
 	MaxResultCount        int32                  `protobuf:"varint,17,opt,name=max_result_count,json=maxResultCount,proto3" json:"max_result_count,omitempty"`                   // Max records per Search request. 0 = unlimited.
 	SetupWizardDismissed  bool                   `protobuf:"varint,18,opt,name=setup_wizard_dismissed,json=setupWizardDismissed,proto3" json:"setup_wizard_dismissed,omitempty"` // True when the user has dismissed the setup wizard.
 	GeoipDbPath           string                 `protobuf:"bytes,19,opt,name=geoip_db_path,json=geoipDbPath,proto3" json:"geoip_db_path,omitempty"`                             // Path to MaxMind MMDB file for GeoIP lookups.
+	AsnDbPath             string                 `protobuf:"bytes,20,opt,name=asn_db_path,json=asnDbPath,proto3" json:"asn_db_path,omitempty"`                                   // Path to MaxMind MMDB file for ASN lookups.
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -1898,6 +1899,13 @@ func (x *GetServerConfigResponse) GetGeoipDbPath() string {
 	return ""
 }
 
+func (x *GetServerConfigResponse) GetAsnDbPath() string {
+	if x != nil {
+		return x.AsnDbPath
+	}
+	return ""
+}
+
 type PutServerConfigRequest struct {
 	state                 protoimpl.MessageState `protogen:"open.v1"`
 	TokenDuration         *string                `protobuf:"bytes,1,opt,name=token_duration,json=tokenDuration,proto3,oneof" json:"token_duration,omitempty"`
@@ -1919,6 +1927,7 @@ type PutServerConfigRequest struct {
 	MaxResultCount        *int32                 `protobuf:"varint,17,opt,name=max_result_count,json=maxResultCount,proto3,oneof" json:"max_result_count,omitempty"`
 	SetupWizardDismissed  *bool                  `protobuf:"varint,18,opt,name=setup_wizard_dismissed,json=setupWizardDismissed,proto3,oneof" json:"setup_wizard_dismissed,omitempty"`
 	GeoipDbPath           *string                `protobuf:"bytes,19,opt,name=geoip_db_path,json=geoipDbPath,proto3,oneof" json:"geoip_db_path,omitempty"`
+	AsnDbPath             *string                `protobuf:"bytes,20,opt,name=asn_db_path,json=asnDbPath,proto3,oneof" json:"asn_db_path,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -2082,6 +2091,13 @@ func (x *PutServerConfigRequest) GetSetupWizardDismissed() bool {
 func (x *PutServerConfigRequest) GetGeoipDbPath() string {
 	if x != nil && x.GeoipDbPath != nil {
 		return *x.GeoipDbPath
+	}
+	return ""
+}
+
+func (x *PutServerConfigRequest) GetAsnDbPath() string {
+	if x != nil && x.AsnDbPath != nil {
+		return *x.AsnDbPath
 	}
 	return ""
 }
@@ -3569,7 +3585,7 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x15DeleteIngesterRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x18\n" +
 	"\x16DeleteIngesterResponse\"\x18\n" +
-	"\x16GetServerConfigRequest\"\xe6\x06\n" +
+	"\x16GetServerConfigRequest\"\x86\a\n" +
 	"\x17GetServerConfigResponse\x12%\n" +
 	"\x0etoken_duration\x18\x01 \x01(\tR\rtokenDuration\x122\n" +
 	"\x15jwt_secret_configured\x18\x02 \x01(\bR\x13jwtSecretConfigured\x12.\n" +
@@ -3592,7 +3608,8 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x16refresh_token_duration\x18\x10 \x01(\tR\x14refreshTokenDuration\x12(\n" +
 	"\x10max_result_count\x18\x11 \x01(\x05R\x0emaxResultCount\x124\n" +
 	"\x16setup_wizard_dismissed\x18\x12 \x01(\bR\x14setupWizardDismissed\x12\"\n" +
-	"\rgeoip_db_path\x18\x13 \x01(\tR\vgeoipDbPath\"\xc8\n" +
+	"\rgeoip_db_path\x18\x13 \x01(\tR\vgeoipDbPath\x12\x1e\n" +
+	"\vasn_db_path\x18\x14 \x01(\tR\tasnDbPath\"\xfd\n" +
 	"\n" +
 	"\x16PutServerConfigRequest\x12*\n" +
 	"\x0etoken_duration\x18\x01 \x01(\tH\x00R\rtokenDuration\x88\x01\x01\x12\"\n" +
@@ -3618,7 +3635,8 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x16refresh_token_duration\x18\x10 \x01(\tH\x0fR\x14refreshTokenDuration\x88\x01\x01\x12-\n" +
 	"\x10max_result_count\x18\x11 \x01(\x05H\x10R\x0emaxResultCount\x88\x01\x01\x129\n" +
 	"\x16setup_wizard_dismissed\x18\x12 \x01(\bH\x11R\x14setupWizardDismissed\x88\x01\x01\x12'\n" +
-	"\rgeoip_db_path\x18\x13 \x01(\tH\x12R\vgeoipDbPath\x88\x01\x01B\x11\n" +
+	"\rgeoip_db_path\x18\x13 \x01(\tH\x12R\vgeoipDbPath\x88\x01\x01\x12#\n" +
+	"\vasn_db_path\x18\x14 \x01(\tH\x13R\tasnDbPath\x88\x01\x01B\x11\n" +
 	"\x0f_token_durationB\r\n" +
 	"\v_jwt_secretB\x16\n" +
 	"\x14_min_password_lengthB\x16\n" +
@@ -3637,7 +3655,8 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x17_refresh_token_durationB\x13\n" +
 	"\x11_max_result_countB\x19\n" +
 	"\x17_setup_wizard_dismissedB\x10\n" +
-	"\x0e_geoip_db_path\"\x19\n" +
+	"\x0e_geoip_db_pathB\x0e\n" +
+	"\f_asn_db_path\"\x19\n" +
 	"\x17PutServerConfigResponse\"\x17\n" +
 	"\x15GetPreferencesRequest\"s\n" +
 	"\x16GetPreferencesResponse\x12\x14\n" +

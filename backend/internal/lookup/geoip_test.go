@@ -16,7 +16,7 @@ func TestGeoIP_Suffixes(t *testing.T) {
 	defer g.Close()
 
 	got := g.Suffixes()
-	want := []string{"country", "city", "asn"}
+	want := []string{"country", "city"}
 	if len(got) != len(want) {
 		t.Fatalf("Suffixes() = %v, want %v", got, want)
 	}
@@ -75,8 +75,8 @@ func TestGeoIP_LoadBadFile(t *testing.T) {
 
 // generateTestMMDB creates a minimal MMDB file in a temp directory and returns
 // the path. The database contains:
-//   - 8.8.8.8/32: country=US, city=Mountain View, ASN=15169/GOOGLE
-//   - 1.1.1.1/32: country=AU only (no city, no ASN — tests partial data)
+//   - 8.8.8.8/32: country=US, city=Mountain View
+//   - 1.1.1.1/32: country=AU only (no city — tests partial data)
 func generateTestMMDB(t *testing.T) string {
 	t.Helper()
 
@@ -89,8 +89,7 @@ func generateTestMMDB(t *testing.T) string {
 		t.Fatalf("mmdbwriter.New: %v", err)
 	}
 
-	// 8.8.8.8/32 — full record: country + city + ASN.
-	// ASN fields are at root level, matching GeoLite2-ASN / GeoIP2-ASN layout.
+	// 8.8.8.8/32 — full record: country + city.
 	_, net8, _ := net.ParseCIDR("8.8.8.8/32")
 	if err := tree.Insert(net8, mmdbtype.Map{
 		"country": mmdbtype.Map{
@@ -101,8 +100,6 @@ func generateTestMMDB(t *testing.T) string {
 				"en": mmdbtype.String("Mountain View"),
 			},
 		},
-		"autonomous_system_number":       mmdbtype.Uint32(15169),
-		"autonomous_system_organization": mmdbtype.String("GOOGLE"),
 	}); err != nil {
 		t.Fatalf("Insert 8.8.8.8: %v", err)
 	}
@@ -158,8 +155,8 @@ func TestGeoIP_LoadAndLookup(t *testing.T) {
 	if got["city"] != "Mountain View" {
 		t.Errorf("city = %q, want %q", got["city"], "Mountain View")
 	}
-	if got["asn"] != "AS15169" {
-		t.Errorf("asn = %q, want %q", got["asn"], "AS15169")
+	if _, ok := got["asn"]; ok {
+		t.Errorf("unexpected asn key: %q", got["asn"])
 	}
 }
 
@@ -194,7 +191,7 @@ func TestGeoIP_PartialAndMiss(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	// 1.1.1.1 has country only — no city or ASN.
+	// 1.1.1.1 has country only — no city.
 	got := g.Lookup(context.Background(), "1.1.1.1")
 	if got == nil {
 		t.Fatal("Lookup(1.1.1.1) = nil, want non-nil")
@@ -204,9 +201,6 @@ func TestGeoIP_PartialAndMiss(t *testing.T) {
 	}
 	if _, ok := got["city"]; ok {
 		t.Errorf("unexpected city key: %q", got["city"])
-	}
-	if _, ok := got["asn"]; ok {
-		t.Errorf("unexpected asn key: %q", got["asn"])
 	}
 
 	// 10.0.0.1 (private IP) — complete miss, should return nil.

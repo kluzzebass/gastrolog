@@ -190,6 +190,7 @@ func (s *ConfigServer) GetServerConfig(
 		resp.MaxResultCount = int32(sc.Query.MaxResultCount) //nolint:gosec // G115: small config value, always fits in int32
 		resp.SetupWizardDismissed = sc.SetupWizardDismissed
 		resp.GeoipDbPath = sc.Lookup.GeoIPDBPath
+		resp.AsnDbPath = sc.Lookup.ASNDBPath
 	}
 
 	// If no persisted value, report the live default from the orchestrator.
@@ -237,7 +238,7 @@ func (s *ConfigServer) PutServerConfig(
 		s.onTLSConfigChange()
 	}
 
-	if s.onLookupConfigChange != nil && req.Msg.GeoipDbPath != nil {
+	if s.onLookupConfigChange != nil && (req.Msg.GeoipDbPath != nil || req.Msg.AsnDbPath != nil) {
 		s.onLookupConfigChange(sc.Lookup)
 	}
 
@@ -327,6 +328,9 @@ func mergeServerConfigFields(msg *apiv1.PutServerConfigRequest, sc *config.Serve
 	}
 	if msg.GeoipDbPath != nil {
 		sc.Lookup.GeoIPDBPath = *msg.GeoipDbPath
+	}
+	if msg.AsnDbPath != nil {
+		sc.Lookup.ASNDBPath = *msg.AsnDbPath
 	}
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,26 +13,22 @@ import (
 	"github.com/oschwald/maxminddb-golang"
 )
 
-// GeoIPInfo describes a loaded MMDB database.
-type GeoIPInfo struct {
+// ASNInfo describes a loaded ASN MMDB database.
+type ASNInfo struct {
 	DatabaseType string
 	BuildTime    time.Time
 }
 
-// mmdbRecord contains only the fields we decode from the MMDB file.
-type mmdbRecord struct {
-	Country struct {
-		ISOCode string `maxminddb:"iso_code"`
-	} `maxminddb:"country"`
-	City struct {
-		Names map[string]string `maxminddb:"names"`
-	} `maxminddb:"city"`
+// asnRecord contains only the fields we decode from a GeoLite2-ASN / GeoIP2-ASN MMDB file.
+type asnRecord struct {
+	Number       uint   `maxminddb:"autonomous_system_number"`
+	Organization string `maxminddb:"autonomous_system_organization"`
 }
 
-// GeoIP is a lookup table backed by a MaxMind MMDB file.
-// It maps IP addresses to geographic metadata (country, city).
+// ASN is a lookup table backed by a MaxMind ASN MMDB file.
+// It maps IP addresses to autonomous system metadata (ASN, AS organization).
 // Safe for concurrent use; the reader is swapped atomically.
-type GeoIP struct {
+type ASN struct {
 	reader atomic.Pointer[maxminddb.Reader]
 
 	mu        sync.Mutex
@@ -40,21 +37,21 @@ type GeoIP struct {
 	watchDone chan struct{}
 }
 
-// NewGeoIP creates a GeoIP lookup table. Starts empty (nil reader);
+// NewASN creates an ASN lookup table. Starts empty (nil reader);
 // Lookup returns nil until a database is loaded via Load.
-func NewGeoIP() *GeoIP {
-	return &GeoIP{}
+func NewASN() *ASN {
+	return &ASN{}
 }
 
 // Suffixes returns the output suffixes this table produces.
-func (g *GeoIP) Suffixes() []string {
-	return []string{"country", "city"}
+func (a *ASN) Suffixes() []string {
+	return []string{"asn", "as_org"}
 }
 
-// Lookup resolves an IP address to geographic metadata.
+// Lookup resolves an IP address to ASN metadata.
 // Returns nil on miss, parse error, or if no database is loaded.
-func (g *GeoIP) Lookup(_ context.Context, value string) map[string]string {
-	r := g.reader.Load()
+func (a *ASN) Lookup(_ context.Context, value string) map[string]string {
+	r := a.reader.Load()
 	if r == nil {
 		return nil
 	}
@@ -64,17 +61,17 @@ func (g *GeoIP) Lookup(_ context.Context, value string) map[string]string {
 		return nil
 	}
 
-	var rec mmdbRecord
+	var rec asnRecord
 	if err := r.Lookup(ip, &rec); err != nil {
 		return nil
 	}
 
 	out := make(map[string]string, 2)
-	if rec.Country.ISOCode != "" {
-		out["country"] = rec.Country.ISOCode
+	if rec.Number != 0 {
+		out["asn"] = "AS" + strconv.FormatUint(uint64(rec.Number), 10)
 	}
-	if name := rec.City.Names["en"]; name != "" {
-		out["city"] = name
+	if rec.Organization != "" {
+		out["as_org"] = rec.Organization
 	}
 
 	if len(out) == 0 {
@@ -83,19 +80,19 @@ func (g *GeoIP) Lookup(_ context.Context, value string) map[string]string {
 	return out
 }
 
-// Load opens an MMDB file and swaps the atomic reader pointer.
+// Load opens an ASN MMDB file and swaps the atomic reader pointer.
 // The old reader is closed after the swap. Returns metadata about
 // the loaded database on success.
-func (g *GeoIP) Load(path string) (GeoIPInfo, error) {
+func (a *ASN) Load(path string) (ASNInfo, error) {
 	r, err := maxminddb.Open(path)
 	if err != nil {
-		return GeoIPInfo{}, fmt.Errorf("open mmdb %q: %w", path, err)
+		return ASNInfo{}, fmt.Errorf("open mmdb %q: %w", path, err)
 	}
-	info := GeoIPInfo{
+	info := ASNInfo{
 		DatabaseType: r.Metadata.DatabaseType,
 		BuildTime:    time.Unix(int64(r.Metadata.BuildEpoch), 0), //nolint:gosec // BuildEpoch is a uint, safe for unix timestamps
 	}
-	old := g.reader.Swap(r)
+	old := a.reader.Swap(r)
 	if old != nil {
 		_ = old.Close()
 	}
@@ -105,12 +102,12 @@ func (g *GeoIP) Load(path string) (GeoIPInfo, error) {
 // WatchFile watches an MMDB file for changes using fsnotify.
 // On write/create events, it reloads the database via Load.
 // Calling WatchFile again replaces the previous watch.
-func (g *GeoIP) WatchFile(path string) error {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+func (a *ASN) WatchFile(path string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
 	// Stop any existing watcher.
-	g.stopWatchLocked()
+	a.stopWatchLocked()
 
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -121,15 +118,15 @@ func (g *GeoIP) WatchFile(path string) error {
 		return fmt.Errorf("watch %q: %w", path, err)
 	}
 
-	g.watcher = w
-	g.watchPath = path
-	g.watchDone = make(chan struct{})
+	a.watcher = w
+	a.watchPath = path
+	a.watchDone = make(chan struct{})
 
-	go g.watchLoop(w, path, g.watchDone)
+	go a.watchLoop(w, path, a.watchDone)
 	return nil
 }
 
-func (g *GeoIP) watchLoop(w *fsnotify.Watcher, path string, done chan struct{}) {
+func (a *ASN) watchLoop(w *fsnotify.Watcher, path string, done chan struct{}) {
 	defer close(done)
 	for {
 		select {
@@ -138,7 +135,7 @@ func (g *GeoIP) watchLoop(w *fsnotify.Watcher, path string, done chan struct{}) 
 				return
 			}
 			if ev.Op&(fsnotify.Write|fsnotify.Create) != 0 {
-				_, _ = g.Load(path)
+				_, _ = a.Load(path)
 			}
 		case _, ok := <-w.Errors:
 			if !ok {
@@ -148,23 +145,23 @@ func (g *GeoIP) watchLoop(w *fsnotify.Watcher, path string, done chan struct{}) 
 	}
 }
 
-func (g *GeoIP) stopWatchLocked() {
-	if g.watcher != nil {
-		_ = g.watcher.Close()
-		<-g.watchDone
-		g.watcher = nil
-		g.watchPath = ""
-		g.watchDone = nil
+func (a *ASN) stopWatchLocked() {
+	if a.watcher != nil {
+		_ = a.watcher.Close()
+		<-a.watchDone
+		a.watcher = nil
+		a.watchPath = ""
+		a.watchDone = nil
 	}
 }
 
 // Close stops the file watcher and closes the current MMDB reader.
-func (g *GeoIP) Close() {
-	g.mu.Lock()
-	g.stopWatchLocked()
-	g.mu.Unlock()
+func (a *ASN) Close() {
+	a.mu.Lock()
+	a.stopWatchLocked()
+	a.mu.Unlock()
 
-	if r := g.reader.Swap(nil); r != nil {
+	if r := a.reader.Swap(nil); r != nil {
 		_ = r.Close()
 	}
 }

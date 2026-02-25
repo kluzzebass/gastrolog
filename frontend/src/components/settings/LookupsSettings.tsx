@@ -12,18 +12,24 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   const { addToast } = useToast();
 
   const [geoipDbPath, setGeoipDbPath] = useState("");
+  const [asnDbPath, setAsnDbPath] = useState("");
   const [initialized, setInitialized] = useState(false);
 
   if (data && !initialized) {
     setGeoipDbPath(data.geoipDbPath ?? "");
+    setAsnDbPath(data.asnDbPath ?? "");
     setInitialized(true);
   }
 
-  const dirty = initialized && data && geoipDbPath !== (data.geoipDbPath ?? "");
+  const dirty =
+    initialized &&
+    data &&
+    (geoipDbPath !== (data.geoipDbPath ?? "") ||
+      asnDbPath !== (data.asnDbPath ?? ""));
 
   const handleSave = async () => {
     try {
-      await putConfig.mutateAsync({ geoipDbPath });
+      await putConfig.mutateAsync({ geoipDbPath, asnDbPath });
       addToast("Lookup configuration updated", "info");
     } catch (err: any) {
       const msg = err.message ?? "Failed to update lookup configuration";
@@ -34,6 +40,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   const handleReset = () => {
     if (data) {
       setGeoipDbPath(data.geoipDbPath ?? "");
+      setAsnDbPath(data.asnDbPath ?? "");
     }
   };
 
@@ -64,13 +71,35 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
 
             <FormField
               label="MaxMind MMDB Path"
-              description="Path to a MaxMind GeoLite2 or GeoIP2 database file (.mmdb). Used by the `| lookup geoip` pipeline operator to enrich IP addresses with country, city, and ASN. The file is hot-reloaded on changes. Hot-reload does not follow symlinks."
+              description="Path to a MaxMind GeoLite2-City or GeoIP2-City database file (.mmdb). Used by the `| lookup geoip` pipeline operator to enrich IP addresses with country and city. The file is hot-reloaded on changes. Hot-reload does not follow symlinks."
               dark={dark}
             >
               <TextInput
                 value={geoipDbPath}
                 onChange={setGeoipDbPath}
                 placeholder="path/to/GeoLite2-City.mmdb"
+                dark={dark}
+                mono
+              />
+            </FormField>
+          </section>
+
+          <section className="flex flex-col gap-5">
+            <h3
+              className={`text-[0.75em] uppercase tracking-wider font-medium pb-1 border-b ${c("text-text-ghost border-ink-border", "text-light-text-ghost border-light-border")}`}
+            >
+              ASN
+            </h3>
+
+            <FormField
+              label="MaxMind MMDB Path"
+              description="Path to a MaxMind GeoLite2-ASN or GeoIP2-ISP database file (.mmdb). Used by the `| lookup asn` pipeline operator to enrich IP addresses with AS number and organization. The file is hot-reloaded on changes. Hot-reload does not follow symlinks."
+              dark={dark}
+            >
+              <TextInput
+                value={asnDbPath}
+                onChange={setAsnDbPath}
+                placeholder="path/to/GeoLite2-ASN.mmdb"
                 dark={dark}
                 mono
               />

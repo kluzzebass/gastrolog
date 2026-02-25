@@ -196,36 +196,21 @@ func (s *Server) buildMux() *http.ServeMux {
 	queryTimeout, maxFollowDuration, maxResultCount := s.loadQueryConfig()
 
 	geoipTable := lookup.NewGeoIP()
+	asnTable := lookup.NewASN()
 	lookupRegistry := lookup.Registry{
 		"rdns":  lookup.NewRDNS(),
 		"geoip": geoipTable,
+		"asn":   asnTable,
 	}
 
-	// Load initial GeoIP config.
-	if s.cfgStore != nil {
-		if sc, err := config.LoadServerConfig(context.Background(), s.cfgStore); err == nil && sc.Lookup.GeoIPDBPath != "" {
-			if info, err := geoipTable.Load(sc.Lookup.GeoIPDBPath); err != nil {
-				s.logger.Warn("failed to load GeoIP database", "path", sc.Lookup.GeoIPDBPath, "error", err)
-			} else {
-				s.logger.Info("loaded GeoIP database", "path", sc.Lookup.GeoIPDBPath, "type", info.DatabaseType, "build", info.BuildTime.Format("2006-01-02"))
-				_ = geoipTable.WatchFile(sc.Lookup.GeoIPDBPath)
-			}
-		}
-	}
+	s.loadInitialLookupConfig(geoipTable, asnTable)
 
 	queryServer := NewQueryServer(s.orch, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount)
 	storeServer := NewStoreServer(s.orch, s.cfgStore, s.factories, s.logger)
 	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager)
 	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
 	configServer.SetOnLookupConfigChange(func(cfg config.LookupConfig) {
-		if cfg.GeoIPDBPath != "" {
-			if info, err := geoipTable.Load(cfg.GeoIPDBPath); err != nil {
-				s.logger.Warn("failed to reload GeoIP database", "path", cfg.GeoIPDBPath, "error", err)
-			} else {
-				s.logger.Info("reloaded GeoIP database", "path", cfg.GeoIPDBPath, "type", info.DatabaseType, "build", info.BuildTime.Format("2006-01-02"))
-				_ = geoipTable.WatchFile(cfg.GeoIPDBPath)
-			}
-		}
+		s.applyLookupConfig(cfg, geoipTable, asnTable)
 	})
 	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown)
 	authServer := NewAuthServer(s.cfgStore, s.tokens, s.logger, s.noAuth)
@@ -268,6 +253,38 @@ func (s *Server) loadQueryConfig() (queryTimeout, maxFollowDuration time.Duratio
 	}
 	maxResultCount = int64(sc.Query.MaxResultCount)
 	return queryTimeout, maxFollowDuration, maxResultCount
+}
+
+// loadInitialLookupConfig loads GeoIP and ASN databases from persisted config at startup.
+func (s *Server) loadInitialLookupConfig(geoipTable *lookup.GeoIP, asnTable *lookup.ASN) {
+	if s.cfgStore == nil {
+		return
+	}
+	sc, err := config.LoadServerConfig(context.Background(), s.cfgStore)
+	if err != nil {
+		return
+	}
+	s.applyLookupConfig(sc.Lookup, geoipTable, asnTable)
+}
+
+// applyLookupConfig loads (or reloads) GeoIP and ASN databases from the given config.
+func (s *Server) applyLookupConfig(cfg config.LookupConfig, geoipTable *lookup.GeoIP, asnTable *lookup.ASN) {
+	if cfg.GeoIPDBPath != "" {
+		if info, err := geoipTable.Load(cfg.GeoIPDBPath); err != nil {
+			s.logger.Warn("failed to load GeoIP database", "path", cfg.GeoIPDBPath, "error", err)
+		} else {
+			s.logger.Info("loaded GeoIP database", "path", cfg.GeoIPDBPath, "type", info.DatabaseType, "build", info.BuildTime.Format("2006-01-02"))
+			_ = geoipTable.WatchFile(cfg.GeoIPDBPath)
+		}
+	}
+	if cfg.ASNDBPath != "" {
+		if info, err := asnTable.Load(cfg.ASNDBPath); err != nil {
+			s.logger.Warn("failed to load ASN database", "path", cfg.ASNDBPath, "error", err)
+		} else {
+			s.logger.Info("loaded ASN database", "path", cfg.ASNDBPath, "type", info.DatabaseType, "build", info.BuildTime.Format("2006-01-02"))
+			_ = asnTable.WatchFile(cfg.ASNDBPath)
+		}
+	}
 }
 
 // Serve starts the server on the given listener.
