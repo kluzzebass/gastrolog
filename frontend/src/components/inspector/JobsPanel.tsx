@@ -147,7 +147,7 @@ export function JobsPanel({ dark }: Readonly<{ dark: boolean }>) {
                 "text-light-text-ghost border-light-border-subtle",
               )}`}
             >
-              <span>Name</span>
+              <span>Description</span>
               <span>Schedule</span>
               <span>Last run</span>
               <span>Next run</span>

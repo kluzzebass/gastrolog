@@ -260,6 +260,9 @@ message GetServerConfigResponse {
   bool setup_wizard_dismissed = 18; // True when the user has dismissed the setup wizard.
   string geoip_db_path = 19; // Path to MaxMind MMDB file for GeoIP lookups.
   string asn_db_path = 20; // Path to MaxMind MMDB file for ASN lookups.
+  bool maxmind_auto_download = 21; // Whether automatic MaxMind database downloading is enabled.
+  bool maxmind_license_configured = 22; // True when account_id + license_key are both set; credentials never exposed.
+  string maxmind_last_update = 23; // RFC3339 timestamp of last successful MaxMind download.
 }
 
 message PutServerConfigRequest {
@@ -283,6 +286,9 @@ message PutServerConfigRequest {
   optional bool setup_wizard_dismissed = 18;
   optional string geoip_db_path = 19;
   optional string asn_db_path = 20;
+  optional bool maxmind_auto_download = 21;
+  optional string maxmind_account_id = 22;
+  optional string maxmind_license_key = 23;
 }
 
 message PutServerConfigResponse {}

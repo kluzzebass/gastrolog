@@ -191,7 +191,7 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 		return err
 	}
 
-	return serveAndAwaitShutdown(ctx, logger, serverAddr, orch, cfgStore, factories, tokens, certMgr, noAuth)
+	return serveAndAwaitShutdown(ctx, logger, serverAddr, homeDir, orch, cfgStore, factories, tokens, certMgr, noAuth)
 }
 
 func ensureConfig(ctx context.Context, logger *slog.Logger, cfgStore config.Store, bootstrap bool) (*config.Config, error) {
@@ -266,11 +266,11 @@ func loadCertManager(ctx context.Context, logger *slog.Logger, cfgStore config.S
 	return certMgr, nil
 }
 
-func serveAndAwaitShutdown(ctx context.Context, logger *slog.Logger, serverAddr string, orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, tokens *auth.TokenService, certMgr *cert.Manager, noAuth bool) error {
+func serveAndAwaitShutdown(ctx context.Context, logger *slog.Logger, serverAddr, homeDir string, orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, tokens *auth.TokenService, certMgr *cert.Manager, noAuth bool) error {
 	var srv *server.Server
 	var serverWg sync.WaitGroup
 	if serverAddr != "" {
-		srv = server.New(orch, cfgStore, factories, tokens, server.Config{Logger: logger, CertManager: certMgr, NoAuth: noAuth})
+		srv = server.New(orch, cfgStore, factories, tokens, server.Config{Logger: logger, CertManager: certMgr, NoAuth: noAuth, HomeDir: homeDir})
 		serverWg.Go(func() {
 			if err := srv.ServeTCP(serverAddr); err != nil {
 				logger.Error("server error", "error", err)

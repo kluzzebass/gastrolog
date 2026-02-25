@@ -11,6 +11,7 @@ interface ExpandableCardProps {
   children: React.ReactNode;
   status?: React.ReactNode;
   headerRight?: React.ReactNode;
+  monoTitle?: boolean;
 }
 
 export function ExpandableCard({
@@ -23,6 +24,7 @@ export function ExpandableCard({
   children,
   status,
   headerRight,
+  monoTitle = true,
 }: Readonly<ExpandableCardProps>) {
   const c = useThemeClass(dark);
 
@@ -50,7 +52,7 @@ export function ExpandableCard({
             {"\u25B6"}
           </span>
           <span
-            className={`font-mono text-[0.9em] font-medium ${c("text-text-bright", "text-light-text-bright")}`}
+            className={`${monoTitle ? "font-mono" : ""} text-[0.9em] font-medium ${c("text-text-bright", "text-light-text-bright")}`}
           >
             {id}
           </span>

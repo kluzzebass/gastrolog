@@ -66,6 +66,11 @@ func (d Dir) StoreDir(storeID string) string {
 	return filepath.Join(d.root, "stores", storeID)
 }
 
+// LookupDir returns the directory for auto-downloaded lookup databases (e.g. MaxMind MMDB files).
+func (d Dir) LookupDir() string {
+	return filepath.Join(d.root, "lookups")
+}
+
 // EnsureExists creates the home directory (and parents) if it doesn't exist.
 func (d Dir) EnsureExists() error {
 	if err := os.MkdirAll(d.root, 0o750); err != nil {
