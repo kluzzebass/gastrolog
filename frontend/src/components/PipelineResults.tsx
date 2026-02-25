@@ -6,6 +6,7 @@ import { tableResultToHistogramData } from "../utils/histogramData";
 import { AutoRefreshControls } from "./AutoRefreshControls";
 import { BarChart } from "./charts/BarChart";
 import { DonutChart } from "./charts/DonutChart";
+import { WorldMapChart } from "./charts/WorldMapChart";
 import { ExportButton } from "./ExportButton";
 import { HistogramChart } from "./HistogramChart";
 import { TableView } from "./TableView";
@@ -122,7 +123,9 @@ export function PipelineResults({
     resultType === "timeseries" ||
     resultType === "timechart" ||
     tableClassification === "bar-chart" ||
-    tableClassification === "donut-chart";
+    tableClassification === "donut-chart" ||
+    tableClassification === "world-map" ||
+    tableClassification === "scatter-map";
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -207,6 +210,10 @@ export function PipelineResults({
         ) : resultType === "timeseries" && viewMode === "chart" ? (
           <div className="px-5 py-4 relative">
             <TimeSeriesChart columns={columns} rows={rowData} dark={dark} />
+          </div>
+        ) : (tableClassification === "world-map" || tableClassification === "scatter-map") && viewMode === "chart" ? (
+          <div className="px-5 py-4">
+            <WorldMapChart columns={columns} rows={rowData} dark={dark} />
           </div>
         ) : tableClassification === "donut-chart" && viewMode === "chart" ? (
           <div className="px-5 py-4">
