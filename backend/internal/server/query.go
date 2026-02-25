@@ -492,6 +492,7 @@ func parseExpression(expr string) (query.Query, *querylang.Pipeline, error) {
 	if len(expr) > maxExpressionLength {
 		return query.Query{}, nil, fmt.Errorf("expression too long: %d bytes (max %d)", len(expr), maxExpressionLength)
 	}
+	expr = querylang.StripComments(expr)
 	parts := strings.Fields(expr)
 	if len(parts) == 0 {
 		return query.Query{}, nil, nil

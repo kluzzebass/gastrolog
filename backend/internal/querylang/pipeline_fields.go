@@ -18,11 +18,13 @@ func FieldsAtCursor(expr string, cursor int, baseFields []string) (fields, compl
 		return baseFields, nil
 	}
 
-	// Strip directives.
-	stripped, removedRanges := stripDirectives(expr)
+	// Strip comments first, then directives.
+	commentStripped, commentRanges := stripCommentsWithRanges(expr)
+	stripped, removedRanges := stripDirectives(commentStripped)
 
-	// Map cursor from original expression to stripped expression.
-	strippedCursor := min(max(mapOffsetToStripped(cursor, removedRanges), 0), len(stripped))
+	// Map cursor from original expression through comment stripping, then directive stripping.
+	cursorAfterComments := min(max(mapOffsetToStripped(cursor, commentRanges), 0), len(commentStripped))
+	strippedCursor := min(max(mapOffsetToStripped(cursorAfterComments, removedRanges), 0), len(stripped))
 
 	// Lex to find pipe positions.
 	pipePositions := findPipePositions(stripped)

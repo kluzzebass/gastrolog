@@ -35,8 +35,11 @@ func ValidateExpression(expr string) (bool, string, int) {
 		return true, "", -1
 	}
 
+	// Strip comments first, recording removed ranges for offset mapping.
+	commentStripped, commentRanges := stripCommentsWithRanges(expr)
+
 	// Strip directives the same way parseExpression does, recording removed ranges.
-	stripped, removedRanges := stripDirectives(expr)
+	stripped, removedRanges := stripDirectives(commentStripped)
 
 	// If everything was directives, the query is valid (directive-only).
 	if strings.TrimSpace(stripped) == "" {
@@ -49,8 +52,9 @@ func ValidateExpression(expr string) (bool, string, int) {
 		if !errors.As(err, &pe) {
 			return false, err.Error(), 0
 		}
-		// Map the error offset back to the original expression.
-		originalPos := mapOffsetToOriginal(pe.Pos, removedRanges)
+		// Map the error offset back through directive removal, then comment removal.
+		posInCommentStripped := mapOffsetToOriginal(pe.Pos, removedRanges)
+		originalPos := mapOffsetToOriginal(posInCommentStripped, commentRanges)
 		return false, pe.Message, originalPos
 	}
 
@@ -107,6 +111,73 @@ func stripDirectives(expr string) (string, []directiveRange) {
 	}
 
 	return result.String(), removed
+}
+
+// stripCommentsWithRanges strips # line comments from a query string and
+// records the byte ranges of removed comments for offset mapping.
+// Characters inside quoted strings ("..." or '...') and regex literals (/.../)
+// are not treated as comment starts. Newlines after comments are preserved.
+func stripCommentsWithRanges(s string) (string, []directiveRange) {
+	var buf strings.Builder
+	buf.Grow(len(s))
+
+	var removed []directiveRange
+	inSingle := false
+	inDouble := false
+	inRegex := false
+	escaped := false
+
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+
+		if escaped {
+			buf.WriteByte(c)
+			escaped = false
+			continue
+		}
+
+		if c == '\\' && (inSingle || inDouble || inRegex) {
+			buf.WriteByte(c)
+			escaped = true
+			continue
+		}
+
+		if c == '"' && !inSingle && !inRegex {
+			inDouble = !inDouble
+			buf.WriteByte(c)
+			continue
+		}
+
+		if c == '\'' && !inDouble && !inRegex {
+			inSingle = !inSingle
+			buf.WriteByte(c)
+			continue
+		}
+
+		if c == '/' && !inSingle && !inDouble {
+			inRegex = !inRegex
+			buf.WriteByte(c)
+			continue
+		}
+
+		if c == '#' && !inSingle && !inDouble && !inRegex {
+			commentStart := i
+			// Skip to end of line.
+			for i < len(s) && s[i] != '\n' {
+				i++
+			}
+			removed = append(removed, directiveRange{start: commentStart, end: i})
+			// Preserve the newline to maintain line structure.
+			if i < len(s) {
+				buf.WriteByte('\n')
+			}
+			continue
+		}
+
+		buf.WriteByte(c)
+	}
+
+	return buf.String(), removed
 }
 
 // mapOffsetToOriginal maps a byte offset in the stripped string back to the

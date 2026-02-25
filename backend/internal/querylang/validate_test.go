@@ -143,6 +143,36 @@ func TestValidateExpression(t *testing.T) {
 			wantValid:  true,
 			wantOffset: -1,
 		},
+		{
+			name:       "comment at end of line",
+			expr:       "error # comment",
+			wantValid:  true,
+			wantOffset: -1,
+		},
+		{
+			name:       "comment on own line",
+			expr:       "error\n# comment\n| stats count",
+			wantValid:  true,
+			wantOffset: -1,
+		},
+		{
+			name:       "inline comment after pipe",
+			expr:       "| stats count by src_ip # per-IP\n| sort -count",
+			wantValid:  true,
+			wantOffset: -1,
+		},
+		{
+			name:       "only a comment",
+			expr:       "# just a comment",
+			wantValid:  true,
+			wantOffset: -1,
+		},
+		{
+			name:       "multi-line with commented-out pipe",
+			expr:       "last=5m reverse=true remote_host=*\n  | lookup geoip remote_host # hello\n  # test\n  | stats count by remote_host_country\n  | sort -count",
+			wantValid:  true,
+			wantOffset: -1,
+		},
 	}
 
 	for _, tt := range tests {

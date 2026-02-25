@@ -777,3 +777,71 @@ describe("new pipe operators: roundtrip", () => {
     test(`roundtrip: ${JSON.stringify(input)}`, () => roundtrip(input));
   }
 });
+
+describe("comments", () => {
+  test("comment at end of line", () => {
+    const result = spans("error foo # this is a comment");
+    expect(result).toEqual([
+      ["error", "token"],
+      ["foo", "token"],
+      ["# this is a comment", "comment"],
+    ]);
+  });
+
+  test("comment on its own line", () => {
+    const result = spans("error foo\n# full line comment\n| stats count");
+    expect(result).toContainEqual(["# full line comment", "comment"]);
+    expect(result).toContainEqual(["|", "pipe"]);
+    expect(result).toContainEqual(["stats", "pipe-keyword"]);
+  });
+
+  test("hash inside double quotes is not a comment", () => {
+    const result = spans('message="error #42"');
+    expect(result).toContainEqual(['"error #42"', "quoted"]);
+    expect(result.some(([_, r]) => r === "comment")).toBe(false);
+  });
+
+  test("hash inside single quotes is not a comment", () => {
+    const result = spans("message='error #42'");
+    expect(result).toContainEqual(["'error #42'", "quoted"]);
+    expect(result.some(([_, r]) => r === "comment")).toBe(false);
+  });
+
+  test("hash inside regex is not a comment", () => {
+    const result = spans("/error #\\d+/");
+    expect(result).toEqual([["/error #\\d+/", "regex"]]);
+  });
+
+  test("only a comment", () => {
+    const result = spans("# just a comment");
+    expect(result).toEqual([["# just a comment", "comment"]]);
+  });
+
+  test("comment roundtrip", () => {
+    roundtrip("error foo # comment");
+    roundtrip("error\n# comment\n| stats count");
+    roundtrip("# just a comment");
+  });
+
+  test("comment does not break validation", () => {
+    const r = tokenize("error # comment");
+    expect(r.hasErrors).toBe(false);
+  });
+
+  test("multi-line with commented-out pipe", () => {
+    const r = tokenize("last=5m remote_host=*\n  # | where country=US\n  | stats count");
+    expect(r.hasErrors).toBe(false);
+    expect(r.hasPipeline).toBe(true);
+  });
+
+  test("pipe inside comment does not set hasPipeline", () => {
+    const r = tokenize("error # | stats count");
+    expect(r.hasPipeline).toBe(false);
+  });
+
+  test("trailing comment after pipe stage", () => {
+    const result = spans("| stats count by src_ip  # per-IP breakdown\n| sort -count");
+    expect(result).toContainEqual(["# per-IP breakdown", "comment"]);
+    expect(result).toContainEqual(["sort", "pipe-keyword"]);
+  });
+});

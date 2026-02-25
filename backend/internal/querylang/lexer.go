@@ -374,13 +374,14 @@ func (l *Lexer) scanRegex() (Token, error) {
 
 // isBarewordChar returns true if ch can be part of a bareword.
 // Barewords exclude: whitespace, ()=*?"'/ and [ and comparison chars ><!
+// Also excludes # which starts a line comment.
 func isBarewordChar(ch byte) bool {
 	switch ch {
 	case ' ', '\t', '\n', '\r':
 		return false
 	case '(', ')', '=', '*', '?', '[', '"', '\'', '/', '>', '<', '!':
 		return false
-	case '|', ',', '+', '%':
+	case '|', ',', '+', '%', '#':
 		return false
 	default:
 		return true

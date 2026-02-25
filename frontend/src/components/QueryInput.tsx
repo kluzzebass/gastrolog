@@ -51,6 +51,8 @@ function roleStyle(role: HighlightRole, dark: boolean): React.CSSProperties {
       return { color: "var(--color-copper)" };
     case "comma":
       return { color: "var(--color-text-ghost)" };
+    case "comment":
+      return { color: "var(--color-text-ghost)", fontStyle: "italic" };
     case "error":
       return {
         color: "var(--color-severity-error)",

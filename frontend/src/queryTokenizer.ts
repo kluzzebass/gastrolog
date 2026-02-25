@@ -20,6 +20,7 @@ type QueryTokenKind =
   | "regex" // /pattern/
   | "pipe" // |
   | "comma" // ,
+  | "comment" // # line comment
   | "whitespace"
   | "error"; // unterminated quote or regex
 
@@ -41,6 +42,7 @@ export type HighlightRole =
   | "pipe-keyword" // stats, where
   | "function" // count, avg, sum, min, max, bin, toNumber
   | "comma" // ,
+  | "comment" // # line comment
   | "whitespace"
   | "error";
 
@@ -288,6 +290,16 @@ export function lex(input: string): QueryToken[] {
       continue;
     }
 
+    // Comment: # to end of line
+    if (ch === "#") {
+      const start = pos;
+      while (pos < input.length && input[pos] !== "\n") {
+        pos++;
+      }
+      tokens.push({ text: input.slice(start, pos), pos: start, kind: "comment" });
+      continue;
+    }
+
     // Bareword (may contain glob metacharacters *, ?, [)
     const start = pos;
     let hasGlobMeta = false;
@@ -341,7 +353,8 @@ function isBarewordChar(ch: string): boolean {
     ch !== "<" &&
     ch !== "!" &&
     ch !== "|" &&
-    ch !== ","
+    ch !== "," &&
+    ch !== "#"
   );
 }
 
@@ -402,6 +415,12 @@ function classifyFilter(raw: QueryToken[], syntax: SyntaxSets): HighlightSpan[] 
   let i = 0;
   while (i < raw.length) {
     const tok = raw[i]!;
+
+    if (tok.kind === "comment") {
+      spans.push({ text: tok.text, role: "comment" });
+      i++;
+      continue;
+    }
 
     // Try to detect scalar function calls in filter context: func(args...) <op> value.
     // When a word matches a known scalar function and is followed by '(', classify
@@ -503,7 +522,7 @@ function classifyPipeSegment(tokens: QueryToken[], syntax: SyntaxSets): Highligh
   let keywordIdx = -1;
   let keyword = "";
   for (let i = 0; i < tokens.length; i++) {
-    if (tokens[i]!.kind === "whitespace") continue;
+    if (tokens[i]!.kind === "whitespace" || tokens[i]!.kind === "comment") continue;
     if (tokens[i]!.kind === "word") {
       keyword = tokens[i]!.text.toLowerCase();
       keywordIdx = i;
@@ -516,7 +535,7 @@ function classifyPipeSegment(tokens: QueryToken[], syntax: SyntaxSets): Highligh
 
     for (let i = 0; i < tokens.length; i++) {
       if (i < keywordIdx) {
-        spans.push({ text: tokens[i]!.text, role: "whitespace" });
+        spans.push({ text: tokens[i]!.text, role: tokens[i]!.kind === "comment" ? "comment" : "whitespace" });
       } else if (i === keywordIdx) {
         spans.push({ text: tokens[i]!.text, role: "pipe-keyword" });
       } else {
@@ -567,6 +586,11 @@ function classifyEvalArgs(tokens: QueryToken[], syntax: SyntaxSets): HighlightSp
 
   for (let i = 0; i < tokens.length; i++) {
     const tok = tokens[i]!;
+
+    if (tok.kind === "comment") {
+      spans.push({ text: tok.text, role: "comment" });
+      continue;
+    }
 
     if (tok.kind === "whitespace") {
       spans.push({ text: tok.text, role: "whitespace" });
@@ -619,7 +643,9 @@ function classifyRenameArgs(tokens: QueryToken[]): HighlightSpan[] {
   const spans: HighlightSpan[] = [];
 
   for (const tok of tokens) {
-    if (tok.kind === "whitespace") {
+    if (tok.kind === "comment") {
+      spans.push({ text: tok.text, role: "comment" });
+    } else if (tok.kind === "whitespace") {
       spans.push({ text: tok.text, role: "whitespace" });
     } else if (tok.kind === "comma") {
       spans.push({ text: tok.text, role: "comma" });
@@ -641,7 +667,9 @@ function classifySimplePipeArgs(tokens: QueryToken[]): HighlightSpan[] {
   const spans: HighlightSpan[] = [];
 
   for (const tok of tokens) {
-    if (tok.kind === "whitespace") {
+    if (tok.kind === "comment") {
+      spans.push({ text: tok.text, role: "comment" });
+    } else if (tok.kind === "whitespace") {
       spans.push({ text: tok.text, role: "whitespace" });
     } else if (tok.kind === "comma") {
       spans.push({ text: tok.text, role: "comma" });
@@ -666,6 +694,11 @@ function classifyStatsArgs(tokens: QueryToken[], syntax: SyntaxSets): HighlightS
 
   for (let i = 0; i < tokens.length; i++) {
     const tok = tokens[i]!;
+
+    if (tok.kind === "comment") {
+      spans.push({ text: tok.text, role: "comment" });
+      continue;
+    }
 
     if (tok.kind === "whitespace") {
       spans.push({ text: tok.text, role: "whitespace" });
@@ -778,6 +811,8 @@ function mapTokenToRole(tok: QueryToken): HighlightSpan {
       return { text: tok.text, role: "pipe" };
     case "comma":
       return { text: tok.text, role: "comma" };
+    case "comment":
+      return { text: tok.text, role: "comment" };
     case "whitespace":
       return { text: tok.text, role: "whitespace" };
     case "error":
@@ -815,10 +850,10 @@ interface ValidateResult {
 }
 
 function validate(spans: HighlightSpan[]): ValidateResult {
-  // Filter to non-whitespace span indices for parsing.
+  // Filter to non-whitespace, non-comment span indices for parsing.
   const indices: number[] = [];
   for (let i = 0; i < spans.length; i++) {
-    if (spans[i]!.role !== "whitespace") indices.push(i);
+    if (spans[i]!.role !== "whitespace" && spans[i]!.role !== "comment") indices.push(i);
   }
 
   // Already-errored spans (unterminated quotes) — skip validation if present.
@@ -1597,7 +1632,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
 
   return {
     spans: spans.map((span, i) =>
-      i >= errorAt && span.role !== "whitespace"
+      i >= errorAt && span.role !== "whitespace" && span.role !== "comment"
         ? { ...span, role: "error" as HighlightRole }
         : span,
     ),
@@ -1675,7 +1710,7 @@ function applyErrorOffset(
     if (!foundError && spanStart + span.text.length > errorOffset) {
       foundError = true;
     }
-    if (foundError && span.role !== "whitespace") {
+    if (foundError && span.role !== "whitespace" && span.role !== "comment") {
       return { ...span, role: "error" as HighlightRole };
     }
     return span;
@@ -1695,6 +1730,9 @@ export function hasPipeOutsideQuotes(input: string): boolean {
       }
     } else if (ch === '"' || ch === "'") {
       inQuote = ch;
+    } else if (ch === "#") {
+      // Skip to end of line (comment).
+      while (i < input.length && input[i] !== "\n") i++;
     } else if (ch === "|") {
       return true;
     }
