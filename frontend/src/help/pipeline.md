@@ -217,6 +217,58 @@ The argument is the number of buckets. Bin width is computed automatically from 
 
 Timechart cannot be combined with `stats` and is not supported in follow mode.
 
+## Lookup Operator
+
+The `lookup` operator enriches records by looking up a field value in a [lookup table](help:lookup-tables). The table returns one or more suffix fields that are merged into each record as `<field>_<suffix>`.
+
+```
+* | lookup <table> <field>
+```
+
+For example, to resolve IP addresses to hostnames:
+
+```
+* | lookup rdns src_ip
+```
+
+This adds `src_ip_hostname` to each record (where a reverse DNS result exists). Records with no match are passed through unchanged.
+
+Lookup works on both raw records and table rows after `stats`:
+
+```
+* | stats count by src_ip | lookup geoip src_ip
+```
+
+### Available Tables
+
+| Table | Database | Output Suffixes |
+|-------|----------|-----------------|
+| `rdns` | Built-in (live DNS) | `hostname` |
+| `geoip` | MaxMind GeoLite2-City / GeoIP2-City | `country`, `city`, `subdivision`, `latitude`, `longitude`, `timezone`, `accuracy_radius` |
+| `asn` | MaxMind GeoLite2-ASN / GeoIP2-ISP | `asn`, `as_org` |
+
+The `rdns` table works out of the box. The `geoip` and `asn` tables require configuring MMDB database paths in [Settings → Lookups](help:lookup-tables).
+
+### Examples
+
+Enrich firewall logs with geography and AS info:
+
+```
+src_ip=* | lookup geoip src_ip | lookup asn src_ip
+```
+
+Top countries by request count:
+
+```
+* | lookup geoip client_ip | stats count by client_ip_country | sort -count | head 10
+```
+
+Reverse DNS for top talkers:
+
+```
+* | stats sum(bytes) as total by src_ip | sort -total | head 20 | lookup rdns src_ip
+```
+
 ## Raw Operator
 
 The `raw` operator forces the pipeline output into a plain table — no charts, no single-value display. Useful for debugging what the pipeline actually produces.
