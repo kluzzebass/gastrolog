@@ -19,6 +19,24 @@ import type { SavedQuery } from "../api/gen/gastrolog/v1/config_pb";
 import { useThemeClass } from "../hooks/useThemeClass";
 import type { SyntaxSets } from "../queryTokenizer";
 
+/**
+ * Insert text into a textarea using execCommand so the browser's undo
+ * stack is preserved.  Optionally replaces a range (start..end).
+ * Returns the new cursor position after the inserted text.
+ */
+function insertText(
+  ta: HTMLTextAreaElement,
+  text: string,
+  start?: number,
+  end?: number,
+): number {
+  if (start !== undefined) ta.selectionStart = start;
+  if (end !== undefined) ta.selectionEnd = end;
+  ta.focus();
+  document.execCommand("insertText", false, text);
+  return ta.selectionStart;
+}
+
 // Format a query by placing each pipe segment on its own line.
 // Respects quoted strings — only splits on unquoted |.
 function formatPipeQuery(query: string): string {
@@ -147,15 +165,16 @@ export function QueryBar({
                   e.preventDefault();
                   const result = autocomplete.accept();
                   if (result) {
-                    setDraft(result.newDraft);
-                    cursorRef.current = result.newCursor;
-                    requestAnimationFrame(() => {
-                      const ta = queryInputRef.current;
-                      if (ta) {
-                        ta.selectionStart = result.newCursor;
-                        ta.selectionEnd = result.newCursor;
-                      }
-                    });
+                    const ta = queryInputRef.current;
+                    if (ta) {
+                      // Replace the entire value via insertText to preserve undo.
+                      const newCursor = insertText(ta, result.newDraft, 0, draft.length);
+                      // insertText places cursor at end of inserted text;
+                      // we need it at the accept position.
+                      ta.selectionStart = result.newCursor;
+                      ta.selectionEnd = result.newCursor;
+                      cursorRef.current = result.newCursor;
+                    }
                   }
                   return;
                 }
@@ -171,18 +190,11 @@ export function QueryBar({
                 const ta = e.target as HTMLTextAreaElement;
                 const start = ta.selectionStart;
                 const end = ta.selectionEnd;
-                const before = draft.slice(0, start);
-                const after = draft.slice(end);
                 // Trim trailing whitespace on current line before inserting.
-                const trimmed = before.replace(/[ \t]+$/, "");
-                const newDraft = trimmed + "\n| " + after;
-                const newCursor = trimmed.length + 3; // after "| "
-                setDraft(newDraft);
+                const before = draft.slice(0, start);
+                const trimStart = before.replace(/[ \t]+$/, "").length;
+                const newCursor = insertText(ta, "\n| ", trimStart, end);
                 cursorRef.current = newCursor;
-                requestAnimationFrame(() => {
-                  ta.selectionStart = newCursor;
-                  ta.selectionEnd = newCursor;
-                });
                 return;
               }
               if (e.key === "Enter" && !e.shiftKey) {
@@ -233,8 +245,10 @@ export function QueryBar({
               onMouseDown={(e) => {
                 e.stopPropagation();
                 e.preventDefault();
-                setDraft(formatPipeQuery(draft));
-                queryInputRef.current?.focus();
+                const ta = queryInputRef.current;
+                if (ta) {
+                  insertText(ta, formatPipeQuery(draft), 0, draft.length);
+                }
               }}
               className={`transition-colors ${c(
                 "text-text-ghost hover:text-copper",
@@ -294,16 +308,13 @@ export function QueryBar({
               onSelect={(i) => {
                 const result = autocomplete.accept(i);
                 if (result) {
-                  setDraft(result.newDraft);
-                  cursorRef.current = result.newCursor;
-                  requestAnimationFrame(() => {
-                    const ta = queryInputRef.current;
-                    if (ta) {
-                      ta.selectionStart = result.newCursor;
-                      ta.selectionEnd = result.newCursor;
-                      ta.focus();
-                    }
-                  });
+                  const ta = queryInputRef.current;
+                  if (ta) {
+                    insertText(ta, result.newDraft, 0, draft.length);
+                    ta.selectionStart = result.newCursor;
+                    ta.selectionEnd = result.newCursor;
+                    cursorRef.current = result.newCursor;
+                  }
                 }
               }}
               onClose={autocomplete.dismiss}
