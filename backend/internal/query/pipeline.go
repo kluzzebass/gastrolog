@@ -119,8 +119,9 @@ func (e *Engine) RunPipeline(ctx context.Context, q Query, pipeline *querylang.P
 	}
 
 	// Pipeline operators control their own result limits (head, tail, slice).
-	// Clear any incoming limit (e.g. proto-level pagination limit) so Search
-	// returns all matching records for the pipeline to process.
+	// Save the incoming limit so we can reapply it if the pipeline doesn't
+	// have its own cap; then clear it so Search returns all matching records.
+	origLimit := q.Limit
 	q.Limit = 0
 
 	// Head optimization: when the pipeline is just filters + head (no sort,
@@ -138,15 +139,34 @@ func (e *Engine) RunPipeline(ctx context.Context, q Query, pipeline *querylang.P
 	}
 
 	if ph.statsOp == nil {
-		// Any pipeline with operators defaults to table (raw) output.
-		// Only a bare pipe-less query returns records for the log viewer.
-		if ph.hasRaw || len(ph.preOps) > 0 {
+		// Explicit "raw" forces table output.
+		if ph.hasRaw {
 			return &PipelineResult{Table: recordsToTable(records)}, nil
+		}
+		// Pipeline with operators but no visualizer: return records for
+		// the log viewer.  Reapply the original limit if the pipeline
+		// didn't already cap results via head/tail/slice.
+		if len(ph.preOps) > 0 && origLimit > 0 && !hasExplicitCap(ph.preOps) {
+			if len(records) > origLimit {
+				records = records[:origLimit]
+			}
 		}
 		return &PipelineResult{Records: records}, nil
 	}
 
 	return e.runAggregation(ctx, records, ph, q)
+}
+
+// hasExplicitCap returns true if the pipeline contains a head, tail, or slice
+// operator that already limits the number of output records.
+func hasExplicitCap(ops []querylang.PipeOp) bool {
+	for _, op := range ops {
+		switch op.(type) {
+		case *querylang.HeadOp, *querylang.TailOp, *querylang.SliceOp:
+			return true
+		}
+	}
+	return false
 }
 
 // headOnlyLimit returns the head N limit if the pipeline consists only of

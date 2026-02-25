@@ -235,5 +235,7 @@ func (r Record) Copy() Record {
 		WriteTS:  r.WriteTS,
 		Attrs:    r.Attrs.Copy(),
 		Raw:      raw,
+		Ref:      r.Ref,
+		StoreID:  r.StoreID,
 	}
 }

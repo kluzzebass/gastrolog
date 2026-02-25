@@ -15,6 +15,7 @@ import {
 import { tableResultToHistogramData } from "../utils/histogramData";
 import { useStores, useStats, useLogout, useCurrentUser } from "../api/hooks";
 import { Record as ProtoRecord, getToken } from "../api/client";
+import { TableResult, TableRow } from "../api/gen/gastrolog/v1/query_pb";
 
 import { timeRangeMs, aggregateFields, sameRecord } from "../utils";
 import {
@@ -64,6 +65,50 @@ import { useConfig, useServerConfig } from "../api/hooks/useConfig";
 import { useSyntax } from "../api/hooks/useSyntax";
 import { useValidation } from "../hooks/useValidation";
 import { usePipelineFields } from "../hooks/usePipelineFields";
+
+/** Check whether the query ends with a `| raw` pipe segment. */
+function queryHasRaw(query: string): boolean {
+  // Walk backwards through pipe segments (respecting quotes) and check
+  // if the last non-empty segment is just "raw".
+  let inQuote: string | null = null;
+  let lastPipe = -1;
+  for (let i = 0; i < query.length; i++) {
+    const ch = query[i]!;
+    if (inQuote) {
+      if (ch === "\\" && i + 1 < query.length) i++;
+      else if (ch === inQuote) inQuote = null;
+    } else if (ch === '"' || ch === "'") {
+      inQuote = ch;
+    } else if (ch === "|") {
+      lastPipe = i;
+    }
+  }
+  if (lastPipe < 0) return false;
+  return query.slice(lastPipe + 1).trim().toLowerCase() === "raw";
+}
+
+/** Build a TableResult from streamed records (mirrors backend recordsToTable). */
+function recordsToRawTable(records: ProtoRecord[]): TableResult {
+  const keySet = new Set<string>();
+  for (const rec of records) {
+    for (const k of Object.keys(rec.attrs)) keySet.add(k);
+  }
+  const attrKeys = [...keySet].sort();
+  const columns = ["_write_ts", "_ingest_ts", "_source_ts", ...attrKeys, "_raw"];
+  const decoder = new TextDecoder();
+  const rows = records.map((rec) => {
+    const values = new Array<string>(columns.length).fill("");
+    values[0] = rec.writeTs?.toDate().toISOString() ?? "";
+    values[1] = rec.ingestTs?.toDate().toISOString() ?? "";
+    values[2] = rec.sourceTs?.toDate().toISOString() ?? "";
+    for (let j = 0; j < attrKeys.length; j++) {
+      values[3 + j] = rec.attrs[attrKeys[j]!] ?? "";
+    }
+    values[columns.length - 1] = decoder.decode(rec.raw);
+    return new TableRow({ values });
+  });
+  return new TableResult({ columns, rows, resultType: "raw" });
+}
 
 export function SearchView() {
   const { q, help: helpParam, settings: settingsParam, inspector: inspectorParam } = useRouterSearch({ strict: false }) as { q: string; help?: string; settings?: string; inspector?: string };
@@ -304,6 +349,9 @@ export function SearchView() {
         }
         resetFollow();
         loadMoreGateRef.current = false;
+        setSelectedRecord(null);
+        scrollToSelectedRef.current = false;
+        logScrollRef.current?.scrollTo(0, 0);
         search(q, false, true);
         if (hasPipeOutsideQuotes(q)) {
           histogramReset();
@@ -417,6 +465,9 @@ export function SearchView() {
     if (normalized === q && !isFollowMode) {
       // Query unchanged — re-run the search directly since the URL
       // won't change and the effect won't fire.
+      setSelectedRecord(null);
+      scrollToSelectedRef.current = false;
+      logScrollRef.current?.scrollTo(0, 0);
       search(q, false, true);
       if (hasPipeOutsideQuotes(q)) {
         histogramReset();
@@ -558,7 +609,12 @@ export function SearchView() {
   const liveHistogramData = useLiveHistogram(followRecords);
   const tokens = extractTokens(q);
   const { hasErrors: draftHasErrors, hasPipeline: draftIsPipeline } = tokenize(deferredDraft, syntax, validation.errorOffset);
-  const isPipelineResult = tableResult !== null;
+  const isRawQuery = queryHasRaw(q);
+  const rawTableResult = isRawQuery && !tableResult && records.length > 0
+    ? recordsToRawTable(records)
+    : null;
+  const effectiveTableResult = tableResult ?? rawTableResult;
+  const isPipelineResult = effectiveTableResult !== null;
   const queryIsPipeline = hasPipeOutsideQuotes(q);
 
   // Auto-refresh polling for both pipeline and filter results.
@@ -942,7 +998,7 @@ export function SearchView() {
 
           {/* Results */}
           <div className="flex-1 flex flex-col overflow-hidden">
-            {isSearching && !tableResult && queryIsPipeline ? (
+            {isSearching && !effectiveTableResult && queryIsPipeline && records.length === 0 ? (
               <div className="flex-1 flex items-center justify-center">
                 <div className={`text-center font-mono text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
                   <div className="inline-block w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin mb-3" />
@@ -951,10 +1007,12 @@ export function SearchView() {
               </div>
             ) : isPipelineResult ? (
               <PipelineResults
-                tableResult={tableResult}
+                tableResult={effectiveTableResult!}
                 dark={dark}
                 pollInterval={pollInterval}
                 onPollIntervalChange={setPollInterval}
+                scrollRef={isRawQuery ? logScrollRef : undefined}
+                footer={isRawQuery ? <div ref={sentinelRef} className="h-1" /> : undefined}
               />
             ) : (
             <>
@@ -1061,7 +1119,7 @@ export function SearchView() {
                     })}
                     {/* Infinite scroll sentinel (search only) */}
                     {!isFollowMode && <div ref={sentinelRef} className="h-1" />}
-                    {isSearching && records.length > 0 && (
+                    {(isSearching && records.length > 0) && (
                       <div
                         className={`py-3 text-center text-[0.85em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
                       >

@@ -1,6 +1,7 @@
 package querylang
 
 import (
+	"errors"
 	"strings"
 )
 
@@ -44,8 +45,8 @@ func ValidateExpression(expr string) (bool, string, int) {
 
 	pipeline, err := ParsePipeline(stripped)
 	if err != nil {
-		pe, ok := err.(*ParseError)
-		if !ok {
+		var pe *ParseError
+		if !errors.As(err, &pe) {
 			return false, err.Error(), 0
 		}
 		// Map the error offset back to the original expression.

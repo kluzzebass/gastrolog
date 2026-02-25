@@ -94,6 +94,8 @@ interface PipelineResultsProps {
   dark: boolean;
   pollInterval: number | null;
   onPollIntervalChange: (ms: number | null) => void;
+  scrollRef?: React.RefObject<HTMLDivElement | null>;
+  footer?: React.ReactNode;
 }
 
 export function PipelineResults({
@@ -101,6 +103,8 @@ export function PipelineResults({
   dark,
   pollInterval,
   onPollIntervalChange,
+  scrollRef,
+  footer,
 }: Readonly<PipelineResultsProps>) {
   const c = useThemeClass(dark);
   const { columns, rows, truncated, resultType } = tableResult;
@@ -177,7 +181,7 @@ export function PipelineResults({
       )}
 
       {/* Chart, table, or single value */}
-      <div className="flex-1 overflow-auto app-scroll">
+      <div ref={scrollRef} className="flex-1 overflow-auto app-scroll">
         {isSingleValue ? (
           <SingleValueDisplay
             value={rowData[0]![0]!}
@@ -215,6 +219,7 @@ export function PipelineResults({
         ) : (
           <TableView columns={columns} rows={rowData} dark={dark} />
         )}
+        {footer}
       </div>
     </div>
   );
