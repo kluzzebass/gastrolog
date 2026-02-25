@@ -300,7 +300,7 @@ function TaskDetail({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
   }
 
   return (
-    <div className={`${c("bg-ink-raised", "bg-light-bg")}`}>
+    <div className={c("bg-ink-raised", "bg-light-bg")}>
       {stats.length > 0 && (
         <div className="flex flex-col gap-1.5">
           {stats.map((stat) => (

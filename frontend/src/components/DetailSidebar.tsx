@@ -27,6 +27,19 @@ interface DetailSidebarProps {
   highlightMode?: HighlightMode;
 }
 
+function asideLayoutCls(
+  isTablet: boolean,
+  detailCollapsed: boolean,
+  resizing: boolean,
+  c: (d: string, l: string) => string,
+): string {
+  if (isTablet && !detailCollapsed) {
+    return `fixed right-0 top-0 h-full z-30 ${c("bg-ink-surface", "bg-light-surface")}`;
+  }
+  const transition = resizing ? "" : "transition-[width] duration-200";
+  return `shrink-0 ${transition}`;
+}
+
 export function DetailSidebar({
   dark,
   isTablet,
@@ -89,11 +102,7 @@ export function DetailSidebar({
       <aside
         aria-label="Record details"
         style={{ width: detailCollapsed ? 0 : detailWidth }}
-        className={`${
-          isTablet && !detailCollapsed
-            ? `fixed right-0 top-0 h-full z-30 ${c("bg-ink-surface", "bg-light-surface")}`
-            : `shrink-0 ${resizing ? "" : "transition-[width] duration-200"}`
-        } overflow-hidden ${
+        className={`${asideLayoutCls(isTablet, detailCollapsed, resizing, c)} overflow-hidden ${
           detailCollapsed
             ? ""
             : `border-l overflow-y-auto app-scroll ${c("border-ink-border-subtle bg-ink-surface", "border-light-border-subtle bg-light-surface")}`

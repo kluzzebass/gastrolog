@@ -255,12 +255,10 @@ function IngestQueueSection({
   if (capacity === 0) return null;
 
   const pct = (depth / capacity) * 100;
-  const barColor =
-    pct >= 90
-      ? "bg-severity-error"
-      : pct >= 75
-        ? "bg-severity-warn"
-        : "bg-copper";
+  let barColor: string;
+  if (pct >= 90) barColor = "bg-severity-error";
+  else if (pct >= 75) barColor = "bg-severity-warn";
+  else barColor = "bg-copper";
 
   return (
     <section>

@@ -2,6 +2,7 @@
 // Lightweight TypeScript port of backend/internal/querylang/lexer.go.
 // Produces position-annotated tokens including whitespace so that
 // concatenating all token texts reproduces the original input exactly.
+/* eslint-disable sonarjs/cognitive-complexity -- parser functions are inherently complex */
 
 type QueryTokenKind =
   | "word"
@@ -235,7 +236,7 @@ export function lex(input: string): QueryToken[] {
       if (
         pos > input.length ||
         tokens.length === 0 ||
-        tokens[tokens.length - 1]!.pos !== start
+        tokens.at(-1)!.pos !== start
       ) {
         tokens.push({
           text: input.slice(start, pos),
@@ -273,7 +274,7 @@ export function lex(input: string): QueryToken[] {
         // Unterminated regex
         if (
           tokens.length === 0 ||
-          tokens[tokens.length - 1]!.pos !== start
+          tokens.at(-1)!.pos !== start
         ) {
           tokens.push({
             text: input.slice(start, pos),
@@ -391,7 +392,8 @@ function classify(raw: QueryToken[], syntax: SyntaxSets): HighlightSpan[] {
   const spans: HighlightSpan[] = [];
 
   // Filter segment: everything before the first pipe.
-  const filterTokens = raw.slice(0, pipeIndices[0]!);
+  const firstPipe = pipeIndices[0] ?? raw.length;
+  const filterTokens = raw.slice(0, firstPipe);
   spans.push(...classifyFilter(filterTokens, syntax));
 
   // Pipe segments.
@@ -478,10 +480,10 @@ function classifyFilter(raw: QueryToken[], syntax: SyntaxSets): HighlightSpan[] 
           if (isDirective) {
             spans.push({ text: tok.text, role: "directive-key" });
           } else {
-            spans.push({
-              text: tok.text,
-              role: tok.kind === "star" ? "star" : tok.kind === "glob" ? "glob" : "key",
-            });
+            let keyRole: HighlightRole = "key";
+            if (tok.kind === "star") keyRole = "star";
+            else if (tok.kind === "glob") keyRole = "glob";
+            spans.push({ text: tok.text, role: keyRole });
           }
           // Whitespace between key and op.
           for (let w = i + 1; w < j; w++) {
@@ -492,13 +494,11 @@ function classifyFilter(raw: QueryToken[], syntax: SyntaxSets): HighlightSpan[] 
           for (let w = j + 1; w < k; w++) {
             spans.push({ text: raw[w]!.text, role: "whitespace" });
           }
-          spans.push({
-            text: valTok.text,
-            role: valTok.kind === "quoted" ? "quoted"
-              : valTok.kind === "star" ? "star"
-              : valTok.kind === "glob" ? "glob"
-              : "value",
-          });
+          let valRole: HighlightRole = "value";
+          if (valTok.kind === "quoted") valRole = "quoted";
+          else if (valTok.kind === "star") valRole = "star";
+          else if (valTok.kind === "glob") valRole = "glob";
+          spans.push({ text: valTok.text, role: valRole });
           i = k + 1;
           continue;
         }
@@ -584,26 +584,31 @@ function classifyPipeSegment(tokens: QueryToken[], syntax: SyntaxSets): Highligh
 function classifyEvalArgs(tokens: QueryToken[], syntax: SyntaxSets): HighlightSpan[] {
   const spans: HighlightSpan[] = [];
 
-  for (let i = 0; i < tokens.length; i++) {
+  let i = 0;
+  while (i < tokens.length) {
     const tok = tokens[i]!;
 
     if (tok.kind === "comment") {
       spans.push({ text: tok.text, role: "comment" });
+      i++;
       continue;
     }
 
     if (tok.kind === "whitespace") {
       spans.push({ text: tok.text, role: "whitespace" });
+      i++;
       continue;
     }
 
     if (tok.kind === "comma") {
       spans.push({ text: tok.text, role: "comma" });
+      i++;
       continue;
     }
 
     if (tok.kind === "eq") {
       spans.push({ text: tok.text, role: "eq" });
+      i++;
       continue;
     }
 
@@ -613,6 +618,7 @@ function classifyEvalArgs(tokens: QueryToken[], syntax: SyntaxSets): HighlightSp
       while (j < tokens.length && tokens[j]!.kind === "whitespace") j++;
       if (j < tokens.length && tokens[j]!.kind === "eq") {
         spans.push({ text: tok.text, role: "token" });
+        i++;
         continue;
       }
     }
@@ -632,7 +638,7 @@ function classifyEvalArgs(tokens: QueryToken[], syntax: SyntaxSets): HighlightSp
     }
 
     spans.push(...classifyStatsArgs(tokens.slice(i, end), syntax));
-    i = end - 1; // loop will increment
+    i = end;
   }
 
   return spans;
@@ -878,7 +884,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
   function fail(msg: string) {
     if (errorAt < 0) {
       errorAt =
-        pos < indices.length ? indices[pos]! : indices[indices.length - 1]!;
+        pos < indices.length ? indices[pos]! : indices.at(-1)!;
       errorMessage = msg;
     }
   }
@@ -911,6 +917,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
 
   function parseAndExpr(): boolean {
     if (!parseUnaryExpr()) return false;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- loop exits via break
     while (true) {
       const s = cur();
       if (!s) break;
@@ -1332,7 +1339,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
     if (cur()?.role === "pipe-keyword" && cur()!.text.toLowerCase() === "as") {
       advance(); // consume "as"
       const alias = cur();
-      if (!alias || alias.role !== "token") {
+      if (alias?.role !== "token") {
         fail("expected alias name after 'as'");
         return;
       }
@@ -1412,7 +1419,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
 
   function parseEvalAssignment(): void {
     const s = cur();
-    if (!s || s.role !== "token") {
+    if (s?.role !== "token") {
       fail("expected field name in eval");
       return;
     }
@@ -1438,13 +1445,11 @@ function validate(spans: HighlightSpan[]): ValidateResult {
 
   function parseSortField(): void {
     // Optional leading "-" for descending.
-    if (cur()?.role === "compare-op" && cur()!.text === "-") {
-      advance(); // consume "-"
-    } else if (cur()?.role === "token" && cur()!.text === "-") {
+    if ((cur()?.role === "compare-op" || cur()?.role === "token") && cur()!.text === "-") {
       advance(); // consume "-"
     }
     const s = cur();
-    if (!s || s.role !== "token") {
+    if (s?.role !== "token") {
       fail("expected field name in sort");
       return;
     }
@@ -1455,12 +1460,12 @@ function validate(spans: HighlightSpan[]): ValidateResult {
   function parseHeadOp(): void {
     let s = cur();
     let neg = false;
-    if (s && s.text === "-") {
+    if (s?.text === "-") {
       neg = true;
       advance();
       s = cur();
     }
-    if (!s || s.role !== "token") {
+    if (s?.role !== "token") {
       fail("expected number after 'head'");
       return;
     }
@@ -1479,12 +1484,12 @@ function validate(spans: HighlightSpan[]): ValidateResult {
   function parseTailOp(): void {
     let s = cur();
     let neg = false;
-    if (s && s.text === "-") {
+    if (s?.text === "-") {
       neg = true;
       advance();
       s = cur();
     }
-    if (!s || s.role !== "token") {
+    if (s?.role !== "token") {
       fail("expected number after 'tail'");
       return;
     }
@@ -1502,7 +1507,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
   // Parse timechart: NUMBER ["by" FIELD]
   function parseTimechartOp(): void {
     const s = cur();
-    if (!s || s.role !== "token") {
+    if (s?.role !== "token") {
       fail("expected number after 'timechart'");
       return;
     }
@@ -1514,10 +1519,10 @@ function validate(spans: HighlightSpan[]): ValidateResult {
 
     // Optional "by" FIELD
     const byKw = cur();
-    if (byKw && byKw.role === "pipe-keyword" && byKw.text.toLowerCase() === "by") {
+    if (byKw?.role === "pipe-keyword" && byKw.text.toLowerCase() === "by") {
       advance(); // consume "by"
       const field = cur();
-      if (!field || field.role !== "token") {
+      if (field?.role !== "token") {
         fail("expected field name after 'by'");
         return;
       }
@@ -1528,7 +1533,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
   // Parse slice: START END (both positive integers)
   function parseSliceOp(): void {
     const s = cur();
-    if (!s || s.role !== "token") {
+    if (s?.role !== "token") {
       fail("expected start index after 'slice'");
       return;
     }
@@ -1538,7 +1543,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
     }
     advance(); // consume start
     const e = cur();
-    if (!e || e.role !== "token") {
+    if (e?.role !== "token") {
       fail("expected end index after slice start");
       return;
     }
@@ -1562,7 +1567,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
 
   function parseRenameMapping(): void {
     const s = cur();
-    if (!s || s.role !== "token") {
+    if (s?.role !== "token") {
       fail("expected field name in rename");
       return;
     }
@@ -1573,7 +1578,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
     }
     advance(); // consume "as"
     const n = cur();
-    if (!n || n.role !== "token") {
+    if (n?.role !== "token") {
       fail("expected new field name after 'as' in rename");
       return;
     }
@@ -1583,13 +1588,11 @@ function validate(spans: HighlightSpan[]): ValidateResult {
   // Parse fields: [-] field (, field)*
   function parseFieldsOp(): void {
     // Optional leading "-" for drop mode.
-    if (cur()?.role === "compare-op" && cur()!.text === "-") {
-      advance(); // consume "-"
-    } else if (cur()?.role === "token" && cur()!.text === "-") {
+    if ((cur()?.role === "compare-op" || cur()?.role === "token") && cur()!.text === "-") {
       advance(); // consume "-"
     }
     const s = cur();
-    if (!s || s.role !== "token") {
+    if (s?.role !== "token") {
       fail("expected field name in fields");
       return;
     }
@@ -1597,7 +1600,7 @@ function validate(spans: HighlightSpan[]): ValidateResult {
     while (cur()?.role === "comma") {
       advance(); // consume ","
       const f = cur();
-      if (!f || f.role !== "token") {
+      if (f?.role !== "token") {
         fail("expected field name in fields");
         return;
       }
@@ -1608,13 +1611,13 @@ function validate(spans: HighlightSpan[]): ValidateResult {
   // Parse lookup: TABLE FIELD
   function parseLookupOp(): void {
     const t = cur();
-    if (!t || t.role !== "token") {
+    if (t?.role !== "token") {
       fail("expected table name after 'lookup'");
       return;
     }
     advance(); // consume table name
     const f = cur();
-    if (!f || f.role !== "token") {
+    if (f?.role !== "token") {
       fail(`expected field name after 'lookup ${t.text}'`);
       return;
     }

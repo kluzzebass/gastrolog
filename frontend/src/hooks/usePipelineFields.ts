@@ -71,7 +71,7 @@ export function usePipelineFields(
     return () => {
       clearTimeout(debounceRef.current);
     };
-  }, [expression]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [expression]);  
 
   return result;
 }

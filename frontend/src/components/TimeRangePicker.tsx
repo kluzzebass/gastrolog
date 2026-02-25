@@ -215,25 +215,23 @@ export function TimeRangePicker({
               });
             const selected = isStart || isEnd;
 
+            let dayCls: string;
+            if (selected) {
+              dayCls = "bg-copper text-white";
+            } else if (inRange) {
+              dayCls = c("bg-copper/10 text-text-normal", "bg-copper/10 text-light-text-normal");
+            } else if (inMonth) {
+              dayCls = c("text-text-muted hover:bg-ink-hover hover:text-text-normal", "text-light-text-muted hover:bg-light-hover hover:text-light-text-normal");
+            } else {
+              dayCls = c("text-text-ghost/40", "text-light-text-ghost/40");
+            }
+            const todayCls = isToday && !selected ? " underline decoration-copper" : "";
+
             return (
               <button
                 key={day.toISOString()}
                 onClick={() => handleDayClick(day)}
-                className={`text-center text-[0.7em] font-mono py-0.5 rounded transition-colors ${
-                  selected
-                    ? "bg-copper text-white"
-                    : inRange
-                      ? c(
-                          "bg-copper/10 text-text-normal",
-                          "bg-copper/10 text-light-text-normal",
-                        )
-                      : inMonth
-                        ? c(
-                            "text-text-muted hover:bg-ink-hover hover:text-text-normal",
-                            "text-light-text-muted hover:bg-light-hover hover:text-light-text-normal",
-                          )
-                        : c("text-text-ghost/40", "text-light-text-ghost/40")
-                }${isToday && !selected ? ` ${c("underline decoration-copper", "underline decoration-copper")}` : ""}`}
+                className={`text-center text-[0.7em] font-mono py-0.5 rounded transition-colors ${dayCls}${todayCls}`}
               >
                 {format(day, "d")}
               </button>

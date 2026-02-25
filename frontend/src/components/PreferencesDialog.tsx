@@ -103,7 +103,7 @@ export function PreferencesDialog({
               { value: "system", label: "System" },
             ]}
             value={theme}
-            onChange={(v) => setTheme(v as Theme)}
+            onChange={(v) => setTheme(v)}
           />
         </PreferenceGroup>
 
@@ -115,7 +115,7 @@ export function PreferencesDialog({
               { value: "subtle", label: "Subtle" },
             ]}
             value={highlightMode}
-            onChange={(v) => setHighlightMode(v as HighlightMode)}
+            onChange={(v) => setHighlightMode(v)}
           />
         </PreferenceGroup>
       </div>

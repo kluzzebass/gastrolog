@@ -17,6 +17,7 @@ const TIME_DIRECTIVES = new Set([
   "ingest_end",
 ]);
 
+// eslint-disable-next-line sonarjs/cognitive-complexity -- inherently complex time directive parser with multiple token types
 export function normalizeTimeDirectives(
   expression: string,
   opts?: ParseOptions,

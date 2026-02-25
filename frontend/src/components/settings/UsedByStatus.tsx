@@ -13,7 +13,7 @@ interface UsedByStatusProps {
 
 export function UsedByStatus({ dark, refs, onNavigate }: Readonly<UsedByStatusProps>) {
   const c = useThemeClass(dark);
-  if (refs.length === 0) return undefined;
+  if (refs.length === 0) return;
   return (
     <span
       className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}

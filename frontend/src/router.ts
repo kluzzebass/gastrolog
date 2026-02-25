@@ -10,6 +10,7 @@ const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   beforeLoad: () => {
+    // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router control flow
     throw redirect({ to: "/search", search: { q: "", help: undefined, settings: undefined, inspector: undefined } });
   },
 });

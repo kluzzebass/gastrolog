@@ -99,7 +99,7 @@ export function DetailPanelContent({
           {tsRows.map(({ label, date }) => (
             <tr key={label}>
               <td className={`${keyCls} ${borderCls}`}>{label}</td>
-              <td className={`${valCls}`}>
+              <td className={valCls}>
                 {date ? (
                   <>
                     <div className={`break-all ${c("text-text-normal", "text-light-text-normal")}`}>
@@ -206,8 +206,8 @@ export function DetailPanelContent({
           <tr>
             <td className={`${keyCls} ${borderCls}`}>Position</td>
             {valueCell(
-              record.ref?.pos?.toString() ?? "N/A",
-              record.ref?.chunkId && record.ref?.pos != null
+              record.ref?.pos.toString() ?? "N/A",
+              record.ref?.chunkId
                 ? () => onPosSelect?.(record.ref!.chunkId, record.ref!.pos.toString())
                 : undefined,
             )}
@@ -313,8 +313,8 @@ function ContextSection({
 
   // Reversed (newest first): after (reversed), anchor, before (reversed)
   // Forward (oldest first): before, anchor, after
-  const before = contextReversed ? contextAfter?.slice().reverse() : contextBefore;
-  const after = contextReversed ? contextBefore?.slice().reverse() : contextAfter;
+  const before = contextReversed ? contextAfter?.toReversed() : contextBefore;
+  const after = contextReversed ? contextBefore?.toReversed() : contextAfter;
   const beforePrefix = contextReversed ? "after" : "before";
   const afterPrefix = contextReversed ? "before" : "after";
 

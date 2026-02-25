@@ -93,7 +93,7 @@ export function useWatchJobs(options?: { onError?: (err: Error) => void }) {
         ) {
           setState((prev) => ({
             ...prev,
-            error: err as ConnectError,
+            error: err,
             connected: false,
             reconnecting: false,
           }));
@@ -157,6 +157,7 @@ export function useJob(jobId: string | null) {
       return response.job;
     },
     enabled: !!jobId,
+    // eslint-disable-next-line sonarjs/function-return-type -- TanStack Query requires number | false
     refetchInterval: (query) => {
       const status = query.state.data?.status;
       if (status === JobStatus.COMPLETED || status === JobStatus.FAILED)

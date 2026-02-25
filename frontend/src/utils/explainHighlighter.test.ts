@@ -198,7 +198,7 @@ describe("buildSegments", () => {
 
 describe("formatTs", () => {
   test("returns empty string for undefined", () => {
-    expect(formatTs(undefined)).toBe("");
+    expect(formatTs()).toBe("");
   });
 
   test("formats a timestamp", () => {

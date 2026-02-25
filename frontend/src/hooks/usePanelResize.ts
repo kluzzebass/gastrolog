@@ -47,7 +47,7 @@ export function usePanelResize(
   );
 
   const handleTouchStart = useCallback(
-    (e: React.TouchEvent) => {
+    (_e: React.TouchEvent) => {
       setResizing(true);
       document.body.style.userSelect = "none";
       const onTouchMove = (e: TouchEvent) => {

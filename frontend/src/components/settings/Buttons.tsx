@@ -51,7 +51,7 @@ export function GhostButton({
               "text-text-muted hover:text-text-bright hover:bg-ink-hover",
               "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
             )
-      }${extra ? ` ${extra}` : ""}`}
+      }${extra ? " " + extra : ""}`}
     >
       {children}
     </button>

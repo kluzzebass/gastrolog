@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { Dialog } from "../Dialog";
 import {
@@ -42,7 +42,7 @@ function parseDurationSeconds(s: string): number | null {
   let rest = s.trim();
   let matched = false;
   while (rest.length > 0) {
-    const m = rest.match(/^(\d+(?:\.\d+)?)(h|m|s)/);
+    const m = /^(\d+(?:\.\d+)?)([hms])/.exec(rest);
     if (!m) return null;
     const val = parseFloat(m[1]!);
     const unit = m[2]!;
@@ -107,12 +107,12 @@ export function SettingsDialog({
   const tabs = allTabs.filter((t) => !t.adminOnly || isAdmin);
   const [expandTarget, setExpandTarget] = useState<string | null>(null);
 
-  const navigateTo = useCallback((targetTab: SettingsTab, entityName?: string) => {
+  const navigateTo = (targetTab: SettingsTab, entityName?: string) => {
     onTabChange(targetTab);
     setExpandTarget(entityName ?? null);
-  }, [onTabChange]);
+  };
 
-  const clearExpandTarget = useCallback(() => setExpandTarget(null), []);
+  const clearExpandTarget = () => setExpandTarget(null);
 
   return (
     <Dialog onClose={onClose} ariaLabel="Settings" dark={dark}>
@@ -160,6 +160,7 @@ export function SettingsDialog({
   );
 }
 
+// eslint-disable-next-line sonarjs/cognitive-complexity -- inherently complex settings form with many fields, cards, and dirty tracking
 function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: boolean }>) {
   const c = useThemeClass(dark);
   const { data, isLoading } = useServerConfig();
@@ -188,7 +189,7 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
   const [showSecret, setShowSecret] = useState(false);
 
   const certs = certData?.certificates ?? [];
-  const certIds = certs.map((c) => c.id);
+  const certIdSet = new Set(certs.map((c) => c.id));
   const _certDisplayName = (id: string) => certs.find((c) => c.id === id)?.name || id;
 
   if (data && !initialized) {
@@ -198,18 +199,18 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
       data.minPasswordLength ? String(data.minPasswordLength) : "8",
     );
     setMaxJobs(data.maxConcurrentJobs ? String(data.maxConcurrentJobs) : "4");
-    setTlsDefaultCert(data.tlsDefaultCert ?? "");
-    setTlsEnabled(data.tlsEnabled ?? false);
-    setHttpToHttpsRedirect(data.httpToHttpsRedirect ?? false);
-    setHttpsPort(data.httpsPort ?? "");
-    setRequireMixedCase(data.requireMixedCase ?? false);
-    setRequireDigit(data.requireDigit ?? false);
-    setRequireSpecial(data.requireSpecial ?? false);
+    setTlsDefaultCert(data.tlsDefaultCert);
+    setTlsEnabled(data.tlsEnabled);
+    setHttpToHttpsRedirect(data.httpToHttpsRedirect);
+    setHttpsPort(data.httpsPort);
+    setRequireMixedCase(data.requireMixedCase);
+    setRequireDigit(data.requireDigit);
+    setRequireSpecial(data.requireSpecial);
     setMaxConsecutiveRepeats(data.maxConsecutiveRepeats ? String(data.maxConsecutiveRepeats) : "0");
-    setForbidAnimalNoise(data.forbidAnimalNoise ?? false);
-    setRefreshTokenDuration(data.refreshTokenDuration ?? "");
-    setMaxFollowDuration(data.maxFollowDuration ?? "");
-    setQueryTimeout(data.queryTimeout ?? "");
+    setForbidAnimalNoise(data.forbidAnimalNoise);
+    setRefreshTokenDuration(data.refreshTokenDuration);
+    setMaxFollowDuration(data.maxFollowDuration);
+    setQueryTimeout(data.queryTimeout);
     setMaxResultCount(data.maxResultCount ? String(data.maxResultCount) : "10000");
     setInitialized(true);
   }
@@ -221,22 +222,22 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
       (jwtSecret !== JWT_KEEP && jwtSecret !== "") ||
       minPwLen !== String(data.minPasswordLength || 8) ||
       maxJobs !== String(data.maxConcurrentJobs || 4) ||
-      tlsDefaultCert !== (data.tlsDefaultCert ?? "") ||
-      tlsEnabled !== (data.tlsEnabled ?? false) ||
-      httpToHttpsRedirect !== (data.httpToHttpsRedirect ?? false) ||
-      httpsPort !== (data.httpsPort ?? "") ||
-      requireMixedCase !== (data.requireMixedCase ?? false) ||
-      requireDigit !== (data.requireDigit ?? false) ||
-      requireSpecial !== (data.requireSpecial ?? false) ||
+      tlsDefaultCert !== data.tlsDefaultCert ||
+      tlsEnabled !== data.tlsEnabled ||
+      httpToHttpsRedirect !== data.httpToHttpsRedirect ||
+      httpsPort !== data.httpsPort ||
+      requireMixedCase !== data.requireMixedCase ||
+      requireDigit !== data.requireDigit ||
+      requireSpecial !== data.requireSpecial ||
       maxConsecutiveRepeats !== String(data.maxConsecutiveRepeats || 0) ||
-      forbidAnimalNoise !== (data.forbidAnimalNoise ?? false) ||
-      refreshTokenDuration !== (data.refreshTokenDuration ?? "") ||
-      maxFollowDuration !== (data.maxFollowDuration ?? "") ||
-      queryTimeout !== (data.queryTimeout ?? "") ||
+      forbidAnimalNoise !== data.forbidAnimalNoise ||
+      refreshTokenDuration !== data.refreshTokenDuration ||
+      maxFollowDuration !== data.maxFollowDuration ||
+      queryTimeout !== data.queryTimeout ||
       maxResultCount !== String(data.maxResultCount || 10000));
 
   const handleSave = async () => {
-    const hasCert = certIds.includes(tlsDefaultCert);
+    const hasCert = certIdSet.has(tlsDefaultCert);
     const effectiveTls = hasCert ? tlsEnabled : false;
     const effectiveRedirect = hasCert ? httpToHttpsRedirect : false;
     const effectiveJwtSecret = jwtSecret === JWT_KEEP ? JWT_KEEP : jwtSecret;
@@ -279,18 +280,18 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
         data.minPasswordLength ? String(data.minPasswordLength) : "8",
       );
       setMaxJobs(data.maxConcurrentJobs ? String(data.maxConcurrentJobs) : "4");
-      setTlsDefaultCert(data.tlsDefaultCert ?? "");
-      setTlsEnabled(data.tlsEnabled ?? false);
-      setHttpToHttpsRedirect(data.httpToHttpsRedirect ?? false);
-      setHttpsPort(data.httpsPort ?? "");
-      setRequireMixedCase(data.requireMixedCase ?? false);
-      setRequireDigit(data.requireDigit ?? false);
-      setRequireSpecial(data.requireSpecial ?? false);
+      setTlsDefaultCert(data.tlsDefaultCert);
+      setTlsEnabled(data.tlsEnabled);
+      setHttpToHttpsRedirect(data.httpToHttpsRedirect);
+      setHttpsPort(data.httpsPort);
+      setRequireMixedCase(data.requireMixedCase);
+      setRequireDigit(data.requireDigit);
+      setRequireSpecial(data.requireSpecial);
       setMaxConsecutiveRepeats(data.maxConsecutiveRepeats ? String(data.maxConsecutiveRepeats) : "0");
-      setForbidAnimalNoise(data.forbidAnimalNoise ?? false);
-      setRefreshTokenDuration(data.refreshTokenDuration ?? "");
-      setMaxFollowDuration(data.maxFollowDuration ?? "");
-      setQueryTimeout(data.queryTimeout ?? "");
+      setForbidAnimalNoise(data.forbidAnimalNoise);
+      setRefreshTokenDuration(data.refreshTokenDuration);
+      setMaxFollowDuration(data.maxFollowDuration);
+      setQueryTimeout(data.queryTimeout);
       setMaxResultCount(data.maxResultCount ? String(data.maxResultCount) : "10000");
     }
   };
@@ -457,7 +458,7 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
                 <Checkbox checked={requireMixedCase} onChange={setRequireMixedCase} label="Require mixed case (upper + lowercase)" dark={dark} />
                 <Checkbox checked={requireDigit} onChange={setRequireDigit} label="Require digit (0-9)" dark={dark} />
                 <Checkbox checked={requireSpecial} onChange={setRequireSpecial} label="Require special character" dark={dark} />
-                <Checkbox checked={forbidAnimalNoise} onChange={setForbidAnimalNoise} label="Forbid animal noises (moo, woof, meow, …)" dark={dark} />
+                <Checkbox checked={forbidAnimalNoise} onChange={setForbidAnimalNoise} label="Forbid animal noises (moo, woof, meow, ...)" dark={dark} />
               </div>
             </div>
           </ExpandableCard>
@@ -564,7 +565,7 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
                     "bg-light-surface border-light-border text-light-text-bright focus:border-copper",
                   )}`}
                 >
-                  <option value="">— none —</option>
+                  <option value="">-- none --</option>
                   {certs.map((cert) => (
                     <option key={cert.id} value={cert.id}>
                       {cert.name || cert.id}
@@ -641,4 +642,3 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
     </div>
   );
 }
-

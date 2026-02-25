@@ -28,7 +28,7 @@ interface PoliciesStepProps {
 export function parseBytesToBigInt(s: string): bigint {
   const trimmed = s.trim();
   if (!trimmed) return BigInt(0);
-  const match = trimmed.match(/^(\d+)\s*(b|kb|mb|gb|tb)?$/i);
+  const match = /^(\d+)\s*(b|kb|mb|gb|tb)?$/i.exec(trimmed);
   if (!match) return BigInt(0);
   const num = BigInt(match[1]!);
   switch ((match[2] ?? "b").toLowerCase()) {
@@ -45,7 +45,7 @@ export function parseBytesToBigInt(s: string): bigint {
 export function parseDurationToSeconds(s: string): bigint {
   const trimmed = s.trim();
   if (!trimmed) return BigInt(0);
-  const match = trimmed.match(/^(\d+)\s*(s|m|h|d)$/i);
+  const match = /^(\d+)\s*([smhd])$/i.exec(trimmed);
   if (!match) {
     // Try parsing as raw seconds.
     const n = parseInt(trimmed, 10);

@@ -118,15 +118,16 @@ export function SearchSidebar({
       <aside
         aria-label="Sidebar"
         style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}
-        className={`${
-          isTablet && !sidebarCollapsed
+        className={(() => {
+          const transitionCls = resizing ? "" : "transition-[width] duration-200";
+          const layoutCls = isTablet && !sidebarCollapsed
             ? `fixed left-0 top-0 h-full z-30 ${c("bg-ink", "bg-light-raised")}`
-            : `shrink-0 ${resizing ? "" : "transition-[width] duration-200"}`
-        } overflow-hidden ${
-          sidebarCollapsed
+            : `shrink-0 ${transitionCls}`;
+          const collapseCls = sidebarCollapsed
             ? ""
-            : `p-4 border-r app-scroll overflow-y-auto ${c("border-ink-border-subtle bg-ink", "border-light-border-subtle bg-light-raised")}`
-        }`}
+            : `p-4 border-r app-scroll overflow-y-auto ${c("border-ink-border-subtle bg-ink", "border-light-border-subtle bg-light-raised")}`;
+          return `${layoutCls} overflow-hidden ${collapseCls}`;
+        })()}
       >
         {/* Time Range */}
         <SidebarSection title="Time Range" dark={dark}>

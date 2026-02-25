@@ -1,6 +1,6 @@
 import { Record as ProtoRecord } from "./api/client";
 
-export type { ProtoRecord };
+
 export type Theme = "dark" | "light" | "system";
 export type Palette = "observatory" | "nord" | "solarized" | "dracula" | "catppuccin" | "gruvbox" | "tokyonight" | "rosepine" | "everforest" | "synthwave";
 
@@ -130,3 +130,5 @@ export function clickableProps(handler: (() => void) | undefined) {
     },
   };
 }
+
+export {type Record as ProtoRecord} from "./api/client";

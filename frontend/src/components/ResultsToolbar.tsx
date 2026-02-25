@@ -45,6 +45,7 @@ export function ResultsToolbar({
   onZoomOut,
 }: Readonly<ResultsToolbarProps>) {
   const c = useThemeClass(dark);
+  const effectiveReversed = isFollowMode ? followReversed : isReversed;
 
   return (
     <div
@@ -79,12 +80,12 @@ export function ResultsToolbar({
         <button
           onClick={toggleReverse}
           aria-label={
-            (isFollowMode ? followReversed : isReversed)
+            effectiveReversed
               ? "Sort oldest first"
               : "Sort newest first"
           }
           title={
-            (isFollowMode ? followReversed : isReversed)
+            effectiveReversed
               ? "Newest first (click for oldest first)"
               : "Oldest first (click for newest first)"
           }
@@ -102,7 +103,7 @@ export function ResultsToolbar({
             strokeLinejoin="round"
             className="w-4 h-4"
           >
-            {(isFollowMode ? followReversed : isReversed) ? (
+            {effectiveReversed ? (
               <>
                 <path d="M12 5v14" />
                 <path d="M6 13l6 6 6-6" />

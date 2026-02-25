@@ -76,6 +76,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
   const abortRef = useRef<AbortController | null>(null);
 
   const search = useCallback(
+    // eslint-disable-next-line sonarjs/cognitive-complexity -- streaming search with append/silent/auth-retry
     async (queryStr: string, append = false, keepPrevious = false, silent = false) => {
       // Cancel any in-flight request on new searches (not appends).
       if (abortRef.current) {

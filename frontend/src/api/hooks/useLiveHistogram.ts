@@ -9,6 +9,7 @@ const NUM_BUCKETS = 50;
  * Used in follow mode to show a live-updating histogram without a server call.
  */
 export function useLiveHistogram(records: ProtoRecord[]): HistogramData | null {
+  // eslint-disable-next-line sonarjs/cognitive-complexity -- histogram bucket construction
   return useMemo(() => {
     if (records.length === 0) return null;
 

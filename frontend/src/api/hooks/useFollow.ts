@@ -66,6 +66,7 @@ export function useFollow(options?: { onError?: (err: Error) => void; maxRecords
   }, []);
 
   const connectStream = useCallback(
+    // eslint-disable-next-line sonarjs/cognitive-complexity -- streaming reconnect state machine
     async (queryStr: string, attempt: number) => {
       // Cancel any previous stream.
       if (abortRef.current) {
@@ -135,11 +136,11 @@ export function useFollow(options?: { onError?: (err: Error) => void; maxRecords
         ) {
           setState((prev) => ({
             ...prev,
-            error: err as ConnectError,
+            error: err,
             reconnecting: false,
             isFollowing: false,
           }));
-          onErrorRef.current?.(err as ConnectError);
+          onErrorRef.current?.(err);
           return;
         }
         // Unauthenticated during streaming (e.g. token expired while tab
@@ -193,6 +194,7 @@ export function useFollow(options?: { onError?: (err: Error) => void; maxRecords
   );
 
   const follow = useCallback(
+    // eslint-disable-next-line @typescript-eslint/require-await -- matches async interface expected by callers
     async (queryStr: string) => {
       cancelReconnect();
       queryRef.current = queryStr;

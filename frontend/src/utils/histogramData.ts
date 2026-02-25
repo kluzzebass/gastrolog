@@ -22,7 +22,7 @@ export function tableResultToHistogramData(
   const timeIdx = columns.indexOf("_time");
   const countIdx = columns.indexOf("count");
 
-  if (timeIdx < 0 || countIdx < 0) {
+  if (timeIdx === -1 || countIdx === -1) {
     return null;
   }
 
@@ -30,7 +30,7 @@ export function tableResultToHistogramData(
   const groupIdx = columns.findIndex(
     (c, i) => i !== timeIdx && i !== countIdx,
   );
-  const groupField = groupIdx >= 0 ? columns[groupIdx]! : "";
+  const groupField = groupIdx !== -1 ? columns[groupIdx]! : "";
 
   // Group rows by timestamp.
   const bucketMap = new Map<
@@ -40,7 +40,7 @@ export function tableResultToHistogramData(
 
   for (const row of rows) {
     const tsStr = row.values[timeIdx]!;
-    const group = groupIdx >= 0 ? row.values[groupIdx]! : "";
+    const group = groupIdx !== -1 ? row.values[groupIdx]! : "";
     const count = Number(row.values[countIdx]!);
 
     let bucket = bucketMap.get(tsStr);
@@ -64,7 +64,7 @@ export function tableResultToHistogramData(
     }));
 
   const start = buckets.length > 0 ? buckets[0]!.ts : null;
-  const end = buckets.length > 0 ? buckets[buckets.length - 1]!.ts : null;
+  const end = buckets.length > 0 ? buckets.at(-1)!.ts : null;
 
   return { buckets, groupField, start, end };
 }

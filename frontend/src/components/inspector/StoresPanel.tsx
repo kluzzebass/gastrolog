@@ -327,19 +327,21 @@ function ChunkDetail({
         Indexes
       </div>
 
-      {isLoading ? (
+      {isLoading && (
         <div
           className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
         >
           Loading indexes...
         </div>
-      ) : !data?.indexes || data.indexes.length === 0 ? (
+      )}
+      {!isLoading && (!data?.indexes || data.indexes.length === 0) && (
         <div
           className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
         >
           No indexes.
         </div>
-      ) : (
+      )}
+      {!isLoading && data?.indexes && data.indexes.length > 0 && (
         <div className="flex flex-col gap-1.5">
           {data.indexes.map((idx) => (
             <div

@@ -11,6 +11,7 @@ import { Checkbox } from "./Checkbox";
 import { PrimaryButton, GhostButton } from "./Buttons";
 import { ExpandableCard } from "./ExpandableCard";
 
+// eslint-disable-next-line sonarjs/cognitive-complexity -- inherently complex settings form with multiple expandable cards and dirty tracking
 export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
   const { data, isLoading } = useServerConfig();
@@ -34,9 +35,9 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
     setExpandedCards((prev) => ({ ...prev, [key]: !prev[key] }));
 
   if (data && !initialized) {
-    setGeoipDbPath(data.geoipDbPath ?? "");
-    setAsnDbPath(data.asnDbPath ?? "");
-    setAutoDownload(data.maxmindAutoDownload ?? false);
+    setGeoipDbPath(data.geoipDbPath);
+    setAsnDbPath(data.asnDbPath);
+    setAutoDownload(data.maxmindAutoDownload);
     setAccountId("");
     setLicenseKey("");
     setInitialized(true);
@@ -45,9 +46,9 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   const dirty =
     initialized &&
     data &&
-    (geoipDbPath !== (data.geoipDbPath ?? "") ||
-      asnDbPath !== (data.asnDbPath ?? "") ||
-      autoDownload !== (data.maxmindAutoDownload ?? false) ||
+    (geoipDbPath !== data.geoipDbPath ||
+      asnDbPath !== data.asnDbPath ||
+      autoDownload !== data.maxmindAutoDownload ||
       accountId !== "" ||
       licenseKey !== "");
 
@@ -71,13 +72,27 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
 
   const handleReset = () => {
     if (data) {
-      setGeoipDbPath(data.geoipDbPath ?? "");
-      setAsnDbPath(data.asnDbPath ?? "");
-      setAutoDownload(data.maxmindAutoDownload ?? false);
+      setGeoipDbPath(data.geoipDbPath);
+      setAsnDbPath(data.asnDbPath);
+      setAutoDownload(data.maxmindAutoDownload);
       setAccountId("");
       setLicenseKey("");
     }
   };
+
+  let geoipBadge: string | undefined;
+  if (geoipDbPath) {
+    geoipBadge = "manual path";
+  } else if (autoDownload) {
+    geoipBadge = "auto";
+  }
+
+  let asnBadge: string | undefined;
+  if (asnDbPath) {
+    asnBadge = "manual path";
+  } else if (autoDownload) {
+    asnBadge = "auto";
+  }
 
   return (
     <div>
@@ -188,9 +203,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
             expanded={!!expandedCards.geoip}
             onToggle={() => toggle("geoip")}
             monoTitle={false}
-            typeBadge={
-              geoipDbPath ? "manual path" : autoDownload ? "auto" : undefined
-            }
+            typeBadge={geoipBadge}
             typeBadgeAccent={!geoipDbPath && autoDownload}
           >
             <div className="flex flex-col gap-4">
@@ -231,9 +244,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
             expanded={!!expandedCards.asn}
             onToggle={() => toggle("asn")}
             monoTitle={false}
-            typeBadge={
-              asnDbPath ? "manual path" : autoDownload ? "auto" : undefined
-            }
+            typeBadge={asnBadge}
             typeBadgeAccent={!asnDbPath && autoDownload}
           >
             <div className="flex flex-col gap-4">

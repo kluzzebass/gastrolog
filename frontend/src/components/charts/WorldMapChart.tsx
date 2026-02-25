@@ -26,7 +26,7 @@ function clipRingAtAntimeridian(ring: number[][]): number[][][] {
       current.push(p);
       continue;
     }
-    const prev = current[current.length - 1]!;
+    const prev = current.at(-1)!;
 
     // Detect antimeridian crossing: one lon near +180, next near -180 (or vice versa).
     if (crossesEdge(prev[0]!, p[0]!)) {
@@ -49,7 +49,7 @@ function clipRingAtAntimeridian(ring: number[][]): number[][][] {
   // merge them to form a closed ring.
   if (segments.length > 1) {
     const first = segments[0]!;
-    const last = segments[segments.length - 1]!;
+    const last = segments.at(-1)!;
     const firstSide = first[0]![0]! > 0;
     const lastSide = last[0]![0]! > 0;
     if (firstSide === lastSide) {
@@ -64,7 +64,7 @@ function clipRingAtAntimeridian(ring: number[][]): number[][][] {
       if (seg.length < 3) return null;
       // Ensure ring closure.
       const f = seg[0]!;
-      const l = seg[seg.length - 1]!;
+      const l = seg.at(-1)!;
       if (f[0] !== l[0] || f[1] !== l[1]) seg.push([f[0]!, f[1]!]);
       return seg;
     })
@@ -100,15 +100,15 @@ function ringCrossesAntimeridian(ring: number[][]): boolean {
  * Fix GeoJSON features whose polygons cross the antimeridian.
  * Also removes Antarctica which isn't useful for a choropleth.
  */
+function fixPoly(poly: number[][][]): number[][][][] {
+  if (!ringCrossesAntimeridian(poly[0]!)) return [poly];
+  // Only clip the outer ring; holes in antimeridian-crossing polys are rare at 110m.
+  return clipRingAtAntimeridian(poly[0]!).map((ring) => [ring]);
+}
+
 function fixAntimeridian(geojson: any): any {
   const features = geojson.features.map((f: any) => {
     if (f.id === "010") return null; // Antarctica
-
-    const fixPoly = (poly: number[][][]): number[][][][] => {
-      if (!ringCrossesAntimeridian(poly[0]!)) return [poly];
-      // Only clip the outer ring; holes in antimeridian-crossing polys are rare at 110m.
-      return clipRingAtAntimeridian(poly[0]!).map((ring) => [ring]);
-    };
 
     if (f.geometry.type === "Polygon") {
       const parts = fixPoly(f.geometry.coordinates);
@@ -184,7 +184,7 @@ function buildChoroplethOption(
       ...theme.tooltip as object,
       trigger: "item",
       formatter: (params: any) => {
-        if (!params.data || params.data.value == null) {
+        if (params.data?.value == null) {
           return `<div style="opacity:0.7">${params.name}</div><span style="opacity:0.5">No data</span>`;
         }
         const d = params.data as ChoroplethDatum;

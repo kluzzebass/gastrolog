@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { TableResult } from "../api/client";
+import type { TableResult, TableRow } from "../api/client";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { tableResultToHistogramData } from "../utils/histogramData";
 import { AutoRefreshControls } from "./AutoRefreshControls";
@@ -15,11 +15,11 @@ function ViewModeToggle({
   mode,
   onModeChange,
   dark,
-}: {
+}: Readonly<{
   mode: "chart" | "table";
   onModeChange: (mode: "chart" | "table") => void;
   dark: boolean;
-}) {
+}>) {
   const c = useThemeClass(dark);
   const options = [
     { key: "chart" as const, label: "Chart" },
@@ -38,11 +38,11 @@ function ViewModeToggle({
           onClick={() => onModeChange(opt.key)}
           className={`px-2 py-1 text-[0.75em] font-mono transition-colors ${
             mode === opt.key
-              ? `${c("bg-copper/20 text-copper", "bg-copper/20 text-copper")}`
-              : `${c(
+              ? c("bg-copper/20 text-copper", "bg-copper/20 text-copper")
+              : c(
                   "text-text-muted hover:text-text-bright hover:bg-ink-hover",
                   "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
-                )}`
+                )
           }`}
         >
           {opt.label}
@@ -56,11 +56,11 @@ function SingleValueDisplay({
   value,
   label,
   dark,
-}: {
+}: Readonly<{
   value: string;
   label: string;
   dark: boolean;
-}) {
+}>) {
   const c = useThemeClass(dark);
 
   // Format large numbers with locale separators.
@@ -87,6 +87,87 @@ function SingleValueDisplay({
       </span>
     </div>
   );
+}
+
+// eslint-disable-next-line sonarjs/cognitive-complexity -- dispatch to many visualization types based on resultType
+function PipelineResultBody({
+  isSingleValue,
+  resultType,
+  viewMode,
+  columns,
+  rows,
+  rowData,
+  dark,
+}: Readonly<{
+  isSingleValue: boolean;
+  resultType: string;
+  viewMode: "chart" | "table";
+  columns: string[];
+  rows: TableRow[];
+  rowData: string[][];
+  dark: boolean;
+}>) {
+  if (isSingleValue) {
+    return (
+      <SingleValueDisplay
+        value={rowData[0]![0]!}
+        label={columns[0]!}
+        dark={dark}
+      />
+    );
+  }
+  if (resultType === "timechart" && viewMode === "chart") {
+    const histData = tableResultToHistogramData(columns, rows);
+    if (histData && histData.buckets.length > 0) {
+      return (
+        <div className="px-5 py-4">
+          <HistogramChart
+            data={histData}
+            dark={dark}
+            barHeight={200}
+            showHeader={false}
+          />
+        </div>
+      );
+    }
+    return <TableView columns={columns} rows={rowData} dark={dark} />;
+  }
+  if (resultType === "barchart" && viewMode === "chart") {
+    return (
+      <div className="px-5 py-4">
+        <BarChart columns={columns} rows={rowData} dark={dark} />
+      </div>
+    );
+  }
+  if (resultType === "donut" && viewMode === "chart") {
+    return (
+      <div className="px-5 py-4">
+        <DonutChart columns={columns} rows={rowData} dark={dark} />
+      </div>
+    );
+  }
+  if (resultType === "map-choropleth" && viewMode === "chart") {
+    return (
+      <div className="px-5 py-4">
+        <WorldMapChart columns={columns} rows={rowData} dark={dark} mode="choropleth" />
+      </div>
+    );
+  }
+  if (resultType === "map-scatter" && viewMode === "chart") {
+    return (
+      <div className="px-5 py-4">
+        <WorldMapChart columns={columns} rows={rowData} dark={dark} mode="scatter" />
+      </div>
+    );
+  }
+  if (resultType === "timeseries" && viewMode === "chart") {
+    return (
+      <div className="px-5 py-4 relative">
+        <TimeSeriesChart columns={columns} rows={rowData} dark={dark} />
+      </div>
+    );
+  }
+  return <TableView columns={columns} rows={rowData} dark={dark} />;
 }
 
 interface PipelineResultsProps {
@@ -181,51 +262,15 @@ export function PipelineResults({
 
       {/* Chart, table, or single value */}
       <div ref={scrollRef} className="flex-1 overflow-auto app-scroll">
-        {isSingleValue ? (
-          <SingleValueDisplay
-            value={rowData[0]![0]!}
-            label={columns[0]!}
-            dark={dark}
-          />
-        ) : resultType === "timechart" && viewMode === "chart" ? (
-          (() => {
-            const histData = tableResultToHistogramData(columns, rows);
-            return histData && histData.buckets.length > 0 ? (
-              <div className="px-5 py-4">
-                <HistogramChart
-                  data={histData}
-                  dark={dark}
-                  barHeight={200}
-                  showHeader={false}
-                />
-              </div>
-            ) : (
-              <TableView columns={columns} rows={rowData} dark={dark} />
-            );
-          })()
-        ) : resultType === "barchart" && viewMode === "chart" ? (
-          <div className="px-5 py-4">
-            <BarChart columns={columns} rows={rowData} dark={dark} />
-          </div>
-        ) : resultType === "donut" && viewMode === "chart" ? (
-          <div className="px-5 py-4">
-            <DonutChart columns={columns} rows={rowData} dark={dark} />
-          </div>
-        ) : resultType === "map-choropleth" && viewMode === "chart" ? (
-          <div className="px-5 py-4">
-            <WorldMapChart columns={columns} rows={rowData} dark={dark} mode="choropleth" />
-          </div>
-        ) : resultType === "map-scatter" && viewMode === "chart" ? (
-          <div className="px-5 py-4">
-            <WorldMapChart columns={columns} rows={rowData} dark={dark} mode="scatter" />
-          </div>
-        ) : resultType === "timeseries" && viewMode === "chart" ? (
-          <div className="px-5 py-4 relative">
-            <TimeSeriesChart columns={columns} rows={rowData} dark={dark} />
-          </div>
-        ) : (
-          <TableView columns={columns} rows={rowData} dark={dark} />
-        )}
+        <PipelineResultBody
+          isSingleValue={isSingleValue}
+          resultType={resultType}
+          viewMode={viewMode}
+          columns={columns}
+          rows={rows}
+          rowData={rowData}
+          dark={dark}
+        />
         {footer}
       </div>
     </div>

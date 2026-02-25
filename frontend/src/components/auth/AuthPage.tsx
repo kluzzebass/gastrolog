@@ -124,11 +124,7 @@ export function AuthPage({ mode }: Readonly<AuthPageProps>) {
     }
 
     try {
-      if (isRegister) {
-        await register.mutateAsync({ username: username.trim(), password });
-      } else {
-        await login.mutateAsync({ username: username.trim(), password });
-      }
+      await (isRegister ? register.mutateAsync({ username: username.trim(), password }) : login.mutateAsync({ username: username.trim(), password }));
       navigate({ to: "/search", search: { q: "", help: undefined, settings: undefined, inspector: undefined } });
     } catch (err) {
       if (err instanceof ConnectError) {

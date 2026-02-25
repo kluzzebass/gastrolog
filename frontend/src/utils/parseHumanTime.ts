@@ -11,23 +11,25 @@
 //   8. Last day-of-week (last monday ... last sunday)
 //   9. Relative phrase (N unit(s) ago)
 //
-// All local-time outputs → date.toISOString() (UTC).
+// All local-time outputs -> date.toISOString() (UTC).
 // Returns null if the value is already RFC3339/Unix (passthrough) or unparseable.
 
 import { subMonths, subYears } from "date-fns";
 
+type DateOrder = "mdy" | "dmy" | "ymd";
+
 export interface ParseOptions {
   now?: Date;
-  dateOrder?: "mdy" | "dmy" | "ymd";
+  dateOrder?: DateOrder;
 }
 
-let cachedDateOrder: "mdy" | "dmy" | "ymd" | null = null;
+let cachedDateOrder: DateOrder | null = null;
 
-function detectDateOrder(): "mdy" | "dmy" | "ymd" {
+function detectDateOrder(): DateOrder {
   if (cachedDateOrder) return cachedDateOrder;
   try {
     // Format a date where day, month, year are all distinct and unambiguous.
-    // Dec 25, 2033 — month=12, day=25, year=2033
+    // Dec 25, 2033 -- month=12, day=25, year=2033
     const d = new Date(2033, 11, 25);
     const fmt = new Intl.DateTimeFormat(navigator.language, {
       year: "numeric",
@@ -51,7 +53,7 @@ function detectDateOrder(): "mdy" | "dmy" | "ymd" {
   return cachedDateOrder;
 }
 
-function resetDateOrderCache(): void {
+export function resetDateOrderCache(): void {
   cachedDateOrder = null;
 }
 
@@ -64,10 +66,10 @@ export function parseHumanTime(
 
   const now = opts?.now ?? new Date();
 
-  // 1. RFC3339 passthrough — already valid, no transform needed.
+  // 1. RFC3339 passthrough -- already valid, no transform needed.
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(v)) return null;
 
-  // 2. Unix timestamp passthrough — all digits.
+  // 2. Unix timestamp passthrough -- all digits.
   if (/^\d+$/.test(v)) return null;
 
   // 3. Relaxed ISO: 2024-01-15, 2024-01-15 08:00, 2024-01-15T08:00
@@ -108,9 +110,7 @@ export function parseHumanTime(
 function parseRelaxedISO(v: string): Date | null {
   // Match: 2024-01-15, 2024-01-15 08:00, 2024-01-15T08:00, 2024-01-15 08:00:30
   // Must NOT have timezone suffix (that would be RFC3339).
-  const m = v.match(
-    /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/,
-  );
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(v);
   if (!m) return null;
   const [, ys, ms, ds, hs, mins, ss] = m;
   const year = parseInt(ys!, 10);
@@ -126,10 +126,10 @@ function parseRelaxedISO(v: string): Date | null {
 
 function parseSlashDotDate(
   v: string,
-  dateOrder: "mdy" | "dmy" | "ymd",
+  dateOrder: DateOrder,
 ): Date | null {
   // Match: 1/15/2024, 15.1.2024, 2024/01/15, etc.
-  const m = v.match(/^(\d{1,4})[/.](\d{1,2})[/.](\d{1,4})$/);
+  const m = /^(\d{1,4})[/.](\d{1,2})[/.](\d{1,4})$/.exec(v);
   if (!m) return null;
   const [, a, b, c] = m;
   const n1 = parseInt(a!, 10);
@@ -138,13 +138,13 @@ function parseSlashDotDate(
 
   let year: number, month: number, day: number;
 
-  // 4-digit first component → YMD regardless of locale
+  // 4-digit first component -> YMD regardless of locale
   if (a!.length === 4) {
     year = n1;
     month = n2;
     day = n3;
   } else if (c!.length === 4) {
-    // 4-digit last component → use locale order for first two
+    // 4-digit last component -> use locale order for first two
     year = n3;
     if (dateOrder === "dmy") {
       day = n1;
@@ -155,7 +155,7 @@ function parseSlashDotDate(
       day = n2;
     }
   } else {
-    // All short numbers — ambiguous, try locale order with 2-digit year
+    // All short numbers -- ambiguous, try locale order with 2-digit year
     return null;
   }
 
@@ -164,7 +164,7 @@ function parseSlashDotDate(
 }
 
 function parseTimeOnly(v: string, now: Date): Date | null {
-  const m = v.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(v);
   if (!m) return null;
   const hour = parseInt(m[1]!, 10);
   const minute = parseInt(m[2]!, 10);
@@ -234,7 +234,7 @@ const DAY_NAMES: Record<string, number> = {
 };
 
 function parseLastDayOfWeek(lower: string, now: Date): Date | null {
-  const m = lower.match(/^last\s+(\w+)$/);
+  const m = /^last\s+([a-z]+)$/.exec(lower);
   if (!m) return null;
   const target = DAY_NAMES[m[1]!];
   if (target === undefined) return null;
@@ -283,7 +283,7 @@ const UNIT_MAP: Record<string, string> = {
 };
 
 function parseRelativePhrase(lower: string, now: Date): Date | null {
-  const m = lower.match(/^(\d+)\s*(\w+)\s+ago$/);
+  const m = /^(\d+)\s*([a-z]+)\s+ago$/.exec(lower);
   if (!m) return null;
   const n = parseInt(m[1]!, 10);
   const unit = UNIT_MAP[m[2]!];

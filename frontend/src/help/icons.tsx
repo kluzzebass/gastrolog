@@ -83,6 +83,7 @@ const helpIcons: Record<string, ReactNode> = {
   ),
 };
 
+// eslint-disable-next-line sonarjs/function-return-type -- record lookup returns ReactNode | undefined by design
 export function getHelpIcon(name: string): ReactNode | undefined {
   return helpIcons[name];
 }

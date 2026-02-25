@@ -121,10 +121,12 @@ function ChatterboxForm({
   };
 
   // Compute total weight for percentage display
-  const totalWeight = ALL_FORMATS.reduce((sum, f) => {
-    if (!enabled.has(f.id)) return sum;
-    return sum + (weights[f.id] ?? 1);
-  }, 0);
+  let totalWeight = 0;
+  for (const f of ALL_FORMATS) {
+    if (enabled.has(f.id)) {
+      totalWeight += weights[f.id] ?? 1;
+    }
+  }
 
   return (
     <div className="flex flex-col gap-4">

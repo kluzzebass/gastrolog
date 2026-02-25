@@ -50,7 +50,7 @@ function formatPipeQuery(query: string): string {
     if (inQuote) {
       current += ch;
       if (ch === "\\" && i + 1 < query.length) {
-        current += query[++i];
+        current += query[++i]!;
       } else if (ch === inQuote) {
         inQuote = null;
       }
@@ -203,8 +203,9 @@ export function QueryBar({
               errorMessage={errorMessage}
               onChange={(e) => {
                 setDraft(e.target.value);
-                cursorRef.current = e.target.selectionStart ?? 0;
+                cursorRef.current = e.target.selectionStart;
               }}
+              // eslint-disable-next-line sonarjs/cognitive-complexity -- keyboard handler with autocomplete, pipe formatting, and submit logic
               onKeyDown={(e) => {
                 if (autocomplete.isOpen) {
                   if (e.key === "Tab") {
@@ -238,6 +239,7 @@ export function QueryBar({
                   const end = ta.selectionEnd;
                   // Trim trailing whitespace on current line before inserting.
                   const before = draft.slice(0, start);
+                  // eslint-disable-next-line sonarjs/slow-regex -- simple trailing whitespace pattern
                   const trimStart = before.replace(/[ \t]+$/, "").length;
                   const newCursor = insertText(ta, "\n| ", trimStart, end);
                   cursorRef.current = newCursor;
@@ -250,7 +252,7 @@ export function QueryBar({
               }}
               onClick={(e) => {
                 const ta = e.target as HTMLTextAreaElement;
-                cursorRef.current = ta.selectionStart ?? 0;
+                cursorRef.current = ta.selectionStart;
               }}
               placeholder="Search logs... tokens for full-text, key=value for attributes"
               dark={dark}
@@ -387,6 +389,12 @@ export function QueryBar({
   );
 }
 
+function followButtonTitle(isFollowMode: boolean, draftIsPipeline: boolean): string {
+  if (isFollowMode) return "Stop following";
+  if (draftIsPipeline) return "Pipeline queries cannot be followed";
+  return "Follow";
+}
+
 function QueryActionButtons({
   dark,
   executeQuery,
@@ -439,7 +447,7 @@ function QueryActionButtons({
         onClick={isFollowMode ? stopFollowMode : startFollow}
         disabled={!isFollowMode && (draftHasErrors || draftIsPipeline)}
         aria-label={isFollowMode ? "Stop following" : "Follow"}
-        title={isFollowMode ? "Stop following" : draftIsPipeline ? "Pipeline queries cannot be followed" : "Follow"}
+        title={followButtonTitle(isFollowMode, draftIsPipeline)}
         className={`px-2 py-2.5 rounded border transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${
           isFollowMode
             ? "bg-severity-error/15 border-severity-error text-severity-error hover:bg-severity-error/25"

@@ -44,6 +44,19 @@ export function detectSeverity(
   return null;
 }
 
+function entryRowCls(isSelected: boolean, dark: boolean): string {
+  if (isSelected) return dark ? "bg-ink-hover" : "bg-light-hover";
+  return dark
+    ? "hover:bg-ink-surface border-b-ink-border-subtle"
+    : "hover:bg-light-hover border-b-light-border-subtle";
+}
+
+function searchHitCls(dark: boolean): string {
+  return dark
+    ? "bg-highlight-bg border border-highlight-border text-highlight-text px-0.5 rounded-sm"
+    : "bg-light-highlight-bg border border-light-highlight-border text-light-highlight-text px-0.5 rounded-sm";
+}
+
 export const LogEntry = forwardRef<
   HTMLElement,
   {
@@ -79,13 +92,7 @@ export const LogEntry = forwardRef<
       onClick={onSelect}
       {...clickableProps(onSelect)}
       className={`group grid grid-cols-[3.5ch_1fr_auto] lg:grid-cols-[10ch_3.5ch_1fr_auto] px-4 lg:px-5 py-2 border-b cursor-pointer transition-colors duration-100 ${
-        isSelected
-          ? dark
-            ? "bg-ink-hover"
-            : "bg-light-hover"
-          : dark
-            ? "hover:bg-ink-surface border-b-ink-border-subtle"
-            : "hover:bg-light-hover border-b-light-border-subtle"
+        entryRowCls(isSelected, dark)
       }`}
     >
       <span
@@ -111,7 +118,7 @@ export const LogEntry = forwardRef<
       <div
         className={`font-mono text-[0.85em] leading-relaxed truncate whitespace-pre self-center pl-1.5 ${dark ? "text-text-normal" : "text-light-text-normal"}`}
         onClick={onSpanClick ? (e) => {
-          const el = (e.target as HTMLElement).closest("[data-click-value]") as HTMLElement | null;
+          const el = (e.target as HTMLElement).closest<HTMLElement>("[data-click-value]");
           if (el) {
             e.stopPropagation();
             onSpanClick(el.dataset.clickValue!, e.shiftKey);
@@ -119,11 +126,7 @@ export const LogEntry = forwardRef<
         } : undefined}
       >
         {parts.map((part, i) => {
-          const className = part.searchHit
-            ? dark
-              ? "bg-highlight-bg border border-highlight-border text-highlight-text px-0.5 rounded-sm"
-              : "bg-light-highlight-bg border border-light-highlight-border text-light-highlight-text px-0.5 rounded-sm"
-            : "";
+          const className = part.searchHit ? searchHitCls(dark) : "";
           const style = part.color ? { color: part.color } : undefined;
           if (part.url) {
             return (
