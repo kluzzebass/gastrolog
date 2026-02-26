@@ -10,15 +10,19 @@ version := `git describe --tags --always --dirty 2>/dev/null || echo dev`
 build:
   go build -ldflags "-X main.version={{version}}" -o gastrolog ./cmd/gastrolog
 
-# Runs the gastrolog backend with sqlite config (default).
-run-sqlite:
+# Runs the gastrolog backend with raft config (default).
+run-raft:
   go run ./cmd/gastrolog server --home data
+
+# Runs the gastrolog backend with sqlite config.
+run-sqlite:
+  go run ./cmd/gastrolog server --config-type sqlite --home data
 
 # Runs the gastrolog backend with in-memory config (no persistence).
 run-memory:
   go run ./cmd/gastrolog server --config-type memory
 
-alias run := run-sqlite
+alias run := run-raft
 
 # Runs the gastrolog backend with full bootstrap (memory store + chatterbox).
 run-bootstrap:

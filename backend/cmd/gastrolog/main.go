@@ -19,6 +19,7 @@ import (
 	_ "net/http/pprof" //nolint:gosec // G108: pprof is intentionally available when --pprof flag is set
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -29,8 +30,13 @@ import (
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/config"
 	configmem "gastrolog/internal/config/memory"
+	"gastrolog/internal/config/raftfsm"
+	"gastrolog/internal/config/raftstore"
 	configsqlite "gastrolog/internal/config/sqlite"
 	"gastrolog/internal/home"
+
+	hraft "github.com/hashicorp/raft"
+	raftboltdb "github.com/hashicorp/raft-boltdb/v2"
 	digestlevel "gastrolog/internal/digester/level"
 	digesttimestamp "gastrolog/internal/digester/timestamp"
 	"gastrolog/internal/index"
@@ -82,7 +88,7 @@ func main() {
 	}
 
 	rootCmd.PersistentFlags().String("home", "", "home directory (default: platform config dir)")
-	rootCmd.PersistentFlags().String("config-type", "sqlite", "config store type: sqlite or memory")
+	rootCmd.PersistentFlags().String("config-type", "raft", "config store type: raft, sqlite, or memory")
 	rootCmd.PersistentFlags().String("pprof", "", "pprof HTTP server address (e.g. localhost:6060). WARNING: exposes CPU/memory profiles and goroutine dumps — bind to loopback only, never expose publicly")
 
 	serverCmd := &cobra.Command{
@@ -134,7 +140,7 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 		logger.Info("home directory", "path", hd.Root())
 	}
 
-	cfgStore, err := openConfigStore(hd, configType)
+	cfgStore, err := openConfigStore(hd, configType, logger)
 	if err != nil {
 		return fmt.Errorf("open config store: %w", err)
 	}
@@ -377,13 +383,111 @@ func buildTokenService(ctx context.Context, cfgStore config.Store) (*auth.TokenS
 }
 
 // openConfigStore creates a config.Store based on config type and home directory.
-func openConfigStore(hd home.Dir, configType string) (config.Store, error) {
+func openConfigStore(hd home.Dir, configType string, logger *slog.Logger) (config.Store, error) {
 	switch configType {
 	case "memory":
 		return configmem.NewStore(), nil
 	case "sqlite":
 		return configsqlite.NewStore(hd.ConfigPath("sqlite"))
+	case "raft":
+		return openRaftConfigStore(hd, logger)
 	default:
 		return nil, fmt.Errorf("unknown config store type: %q", configType)
 	}
+}
+
+// raftConfigStore wraps a raftstore.Store with cleanup logic for the
+// underlying raft instance and boltdb store.
+type raftConfigStore struct {
+	config.Store
+	raft    *hraft.Raft
+	boltDB io.Closer
+}
+
+func (s *raftConfigStore) Close() error {
+	future := s.raft.Shutdown()
+	err := future.Error()
+	if cerr := s.boltDB.Close(); cerr != nil && err == nil {
+		err = cerr
+	}
+	return err
+}
+
+// openRaftConfigStore creates a single-node raft-backed config store with
+// BoltDB persistence. On first run, the cluster is bootstrapped so this node
+// becomes leader immediately.
+func openRaftConfigStore(hd home.Dir, logger *slog.Logger) (config.Store, error) {
+	raftDir := hd.RaftDir()
+	if err := os.MkdirAll(raftDir, 0o750); err != nil {
+		return nil, fmt.Errorf("create raft directory: %w", err)
+	}
+
+	// BoltDB for both log store and stable store.
+	boltStore, err := raftboltdb.New(raftboltdb.Options{
+		Path: filepath.Join(raftDir, "raft.db"),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("open raft boltdb: %w", err)
+	}
+
+	snapStore, err := hraft.NewFileSnapshotStore(raftDir, 2, io.Discard)
+	if err != nil {
+		_ = boltStore.Close()
+		return nil, fmt.Errorf("create snapshot store: %w", err)
+	}
+
+	_, transport := hraft.NewInmemTransport("")
+
+	fsm := raftfsm.New()
+
+	conf := hraft.DefaultConfig()
+	conf.LocalID = "gastrolog-1"
+	conf.LogOutput = io.Discard
+	// Single-node: tight timeouts for near-instant election.
+	conf.HeartbeatTimeout = 100 * time.Millisecond
+	conf.ElectionTimeout = 100 * time.Millisecond
+	conf.LeaderLeaseTimeout = 100 * time.Millisecond
+
+	r, err := hraft.NewRaft(conf, fsm, boltStore, boltStore, snapStore, transport)
+	if err != nil {
+		_ = boltStore.Close()
+		return nil, fmt.Errorf("create raft: %w", err)
+	}
+
+	// Bootstrap on first run (no existing configuration).
+	existing := r.GetConfiguration()
+	if err := existing.Error(); err != nil {
+		_ = r.Shutdown().Error()
+		_ = boltStore.Close()
+		return nil, fmt.Errorf("get raft configuration: %w", err)
+	}
+	if len(existing.Configuration().Servers) == 0 {
+		boot := hraft.Configuration{
+			Servers: []hraft.Server{
+				{ID: "gastrolog-1", Address: transport.LocalAddr()},
+			},
+		}
+		if err := r.BootstrapCluster(boot).Error(); err != nil {
+			_ = r.Shutdown().Error()
+			_ = boltStore.Close()
+			return nil, fmt.Errorf("bootstrap raft: %w", err)
+		}
+	}
+
+	// Wait for leadership.
+	select {
+	case <-r.LeaderCh():
+	case <-time.After(5 * time.Second):
+		_ = r.Shutdown().Error()
+		_ = boltStore.Close()
+		return nil, errors.New("timed out waiting for raft leadership")
+	}
+
+	logger.Info("raft config store ready", "dir", raftDir)
+
+	return &raftConfigStore{
+		Store:  raftstore.New(r, fsm, 10*time.Second),
+		raft:   r,
+		boltDB: boltStore,
+	}, nil
 }

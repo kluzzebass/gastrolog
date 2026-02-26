@@ -8,6 +8,9 @@
 //	<root>/
 //	  config.json   or  config.db     (config store, type-dependent)
 //	  users.json                       (user credentials, JSON file store only)
+//	  raft/
+//	    raft.db                        (boltdb: raft log + stable store)
+//	    snapshots/                     (raft file snapshot store)
 //	  stores/
 //	    <vault-id>/                    (per-vault chunk + index data)
 package home
@@ -65,6 +68,11 @@ func (d Dir) UsersPath() string {
 // The on-disk path is "stores/" for backward compatibility with existing data.
 func (d Dir) VaultDir(vaultID string) string {
 	return filepath.Join(d.root, "stores", vaultID)
+}
+
+// RaftDir returns the directory for Raft persistent state (log store, snapshots).
+func (d Dir) RaftDir() string {
+	return filepath.Join(d.root, "raft")
 }
 
 // LookupDir returns the directory for auto-downloaded lookup databases (e.g. MaxMind MMDB files).
