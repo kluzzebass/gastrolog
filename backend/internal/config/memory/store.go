@@ -565,6 +565,17 @@ func (s *Store) GetRefreshTokenByHash(ctx context.Context, tokenHash string) (*c
 	return nil, nil
 }
 
+func (s *Store) ListRefreshTokens(ctx context.Context) ([]config.RefreshToken, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	tokens := make([]config.RefreshToken, 0, len(s.refreshTokens))
+	for _, rt := range s.refreshTokens {
+		tokens = append(tokens, rt)
+	}
+	return tokens, nil
+}
+
 func (s *Store) DeleteRefreshToken(ctx context.Context, id uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

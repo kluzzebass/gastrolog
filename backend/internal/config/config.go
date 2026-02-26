@@ -102,6 +102,7 @@ type Store interface {
 	// Refresh tokens
 	CreateRefreshToken(ctx context.Context, token RefreshToken) error
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (*RefreshToken, error)
+	ListRefreshTokens(ctx context.Context) ([]RefreshToken, error)
 	DeleteRefreshToken(ctx context.Context, id uuid.UUID) error
 	DeleteUserRefreshTokens(ctx context.Context, userID uuid.UUID) error
 }

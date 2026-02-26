@@ -973,6 +973,34 @@ func (s *Store) GetRefreshTokenByHash(ctx context.Context, tokenHash string) (*c
 	return &rt, nil
 }
 
+func (s *Store) ListRefreshTokens(ctx context.Context) ([]config.RefreshToken, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT id, user_id, token_hash, expires_at, created_at FROM refresh_tokens")
+	if err != nil {
+		return nil, fmt.Errorf("list refresh tokens: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var result []config.RefreshToken
+	for rows.Next() {
+		var rt config.RefreshToken
+		var expiresAt, createdAt string
+		if err := rows.Scan(&rt.ID, &rt.UserID, &rt.TokenHash, &expiresAt, &createdAt); err != nil {
+			return nil, fmt.Errorf("scan refresh token: %w", err)
+		}
+		rt.ExpiresAt, err = time.Parse(timeFormat, expiresAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse expires_at %q: %w", expiresAt, err)
+		}
+		rt.CreatedAt, err = time.Parse(timeFormat, createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse created_at %q: %w", createdAt, err)
+		}
+		result = append(result, rt)
+	}
+	return result, rows.Err()
+}
+
 func (s *Store) DeleteRefreshToken(ctx context.Context, id uuid.UUID) error {
 	_, err := s.db.ExecContext(ctx, "DELETE FROM refresh_tokens WHERE id = ?", id)
 	if err != nil {

@@ -1472,6 +1472,59 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 	})
 
+	t.Run("ListRefreshTokens", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		// Empty list.
+		tokens, err := s.ListRefreshTokens(ctx)
+		if err != nil {
+			t.Fatalf("ListRefreshTokens empty: %v", err)
+		}
+		if len(tokens) != 0 {
+			t.Fatalf("expected 0 tokens, got %d", len(tokens))
+		}
+
+		// Create two tokens.
+		rt1 := config.RefreshToken{
+			ID:        newID(),
+			UserID:    newID(),
+			TokenHash: "list-hash-1",
+			ExpiresAt: time.Now().Add(time.Hour).Truncate(time.Second).UTC(),
+			CreatedAt: time.Now().Truncate(time.Second).UTC(),
+		}
+		rt2 := config.RefreshToken{
+			ID:        newID(),
+			UserID:    newID(),
+			TokenHash: "list-hash-2",
+			ExpiresAt: time.Now().Add(2 * time.Hour).Truncate(time.Second).UTC(),
+			CreatedAt: time.Now().Truncate(time.Second).UTC(),
+		}
+		if err := s.CreateRefreshToken(ctx, rt1); err != nil {
+			t.Fatalf("CreateRefreshToken 1: %v", err)
+		}
+		if err := s.CreateRefreshToken(ctx, rt2); err != nil {
+			t.Fatalf("CreateRefreshToken 2: %v", err)
+		}
+
+		tokens, err = s.ListRefreshTokens(ctx)
+		if err != nil {
+			t.Fatalf("ListRefreshTokens: %v", err)
+		}
+		if len(tokens) != 2 {
+			t.Fatalf("expected 2 tokens, got %d", len(tokens))
+		}
+
+		// Verify both tokens are present (order may vary).
+		found := map[string]bool{}
+		for _, t := range tokens {
+			found[t.TokenHash] = true
+		}
+		if !found["list-hash-1"] || !found["list-hash-2"] {
+			t.Errorf("expected both tokens, found: %v", found)
+		}
+	})
+
 	t.Run("UsersNotInLoad", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
