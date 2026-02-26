@@ -14,10 +14,6 @@ build:
 run-raft:
   go run ./cmd/gastrolog server --home data
 
-# Runs the gastrolog backend with sqlite config.
-run-sqlite:
-  go run ./cmd/gastrolog server --config-type sqlite --home data
-
 # Runs the gastrolog backend with in-memory config (no persistence).
 run-memory:
   go run ./cmd/gastrolog server --config-type memory

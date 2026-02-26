@@ -13,7 +13,7 @@ Go 1.25+ backend with Connect RPC server, chunk-based storage, and multi-index q
 - **Ingester identity**: Each ingester stamps `ingester_type` and `ingester_id` on every message via factory-provided ID
 - **Server**: Connect RPC with 4 services, h2c, graceful shutdown with drain, k8s probes
 - **Histogram**: Time-bucketed record counts via binary search, severity-stacked level breakdown using KV indexes
-- **Config**: SQLite-backed with runtime CRUD (stores, ingesters, rotation policies)
+- **Config**: Raft-backed with runtime CRUD (vaults, ingesters, rotation policies)
 - **ChunkID**: 13-char base32hex timestamps (lexicographically time-sorted)
 
 ## Phase 1: Retention & Storage
@@ -77,7 +77,7 @@ Go 1.25+ backend with Connect RPC server, chunk-based storage, and multi-index q
 - [ ] systemd service file
 
 ### 5.3 Config
-- [x] Replace file-based config with SQLite (runtime CRUD for stores, ingesters, rotation policies)
+- [x] Replace file-based config with persistent store (runtime CRUD for vaults, ingesters, rotation policies)
 - [ ] Config versioning and rollback
 
 ## Phase 6: Security

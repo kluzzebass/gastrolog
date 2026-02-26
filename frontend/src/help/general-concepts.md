@@ -78,7 +78,7 @@ Special filter values:
 
 GastroLog stores its configuration (vaults, ingesters, filters, policies, users, certificates) in a pluggable config store. Two backends are available:
 
-- **SQLite** (default): Persistent relational storage with ACID transactions
+- **Raft** (default): Persistent storage with WAL and snapshot recovery
 - **Memory**: In-process only, useful for testing and ephemeral instances
 
 All configuration is managed through the Settings dialog or the API.

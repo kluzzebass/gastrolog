@@ -12,7 +12,7 @@ The role of this file is to describe common mistakes and confusion points that a
 
 ## Renaming: Always Rename Through the Entire Stack
 
-When renaming a concept, type, field, or variable, rename it consistently across the entire stack: proto definitions, generated code (re-run `buf generate`), Go backend types, SQLite schema/migrations, frontend TypeScript types, UI labels, and tests. Never leave a partial rename.
+When renaming a concept, type, field, or variable, rename it consistently across the entire stack: proto definitions, generated code (re-run `buf generate`), Go backend types, frontend TypeScript types, UI labels, and tests. Never leave a partial rename.
 
 ## Proto changes require regenerating both sides
 

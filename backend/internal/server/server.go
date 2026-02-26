@@ -52,7 +52,7 @@ type Config struct {
 	// AfterConfigApply is called after the server handler persists a config
 	// mutation that requires orchestrator side effects. For raft-backed stores
 	// this should be nil (the FSM's onApply callback handles it). For non-raft
-	// stores (memory, SQLite, tests), set this to trigger the same dispatcher.
+	// stores (memory, tests), set this to trigger the same dispatcher.
 	AfterConfigApply func(raftfsm.Notification)
 
 	// NodeID is the local raft server ID. Used to auto-assign node ownership
