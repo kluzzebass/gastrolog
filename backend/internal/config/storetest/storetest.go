@@ -1,5 +1,5 @@
 // Package vaulttest provides a shared conformance test suite for config.Store
-// implementations. Each backend (memory, file, sqlite) wires this suite to
+// implementations. Each backend (memory, raft) wires this suite to
 // verify it satisfies the full Store contract.
 package storetest
 

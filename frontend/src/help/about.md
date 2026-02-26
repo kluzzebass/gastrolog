@@ -32,7 +32,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 | [klauspost/compress](https://github.com/klauspost/compress) | [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) |
 | [zstd-seekable](https://github.com/SaveTheRbtz/zstd-seekable-format-go) | [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) |
 | [protobuf-go](https://github.com/protocolbuffers/protobuf-go) | [BSD 3-Clause](https://opensource.org/licenses/BSD-3-Clause) |
-| [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) | [BSD 3-Clause](https://opensource.org/licenses/BSD-3-Clause) |
 | [golang.org/x/crypto](https://pkg.go.dev/golang.org/x/crypto) | [BSD 3-Clause](https://opensource.org/licenses/BSD-3-Clause) |
 | [golang.org/x/net](https://pkg.go.dev/golang.org/x/net) | [BSD 3-Clause](https://opensource.org/licenses/BSD-3-Clause) |
 | [golang.org/x/sync](https://pkg.go.dev/golang.org/x/sync) | [BSD 3-Clause](https://opensource.org/licenses/BSD-3-Clause) |
