@@ -1,6 +1,6 @@
 # Searching
 
-Searching is how you retrieve records from GastroLog. When you run a search, the query engine figures out the fastest way to find matching records — narrowing down which chunks to look at, using indexes where available, and merging results from multiple stores into a single time-ordered stream.
+Searching is how you retrieve records from GastroLog. When you run a search, the query engine figures out the fastest way to find matching records — narrowing down which chunks to look at, using indexes where available, and merging results from multiple vaults into a single time-ordered stream.
 
 For the query syntax, see [Query Language](help:query-language). To aggregate results into tables and charts, see [Pipeline Queries](help:pipeline).
 
@@ -9,13 +9,13 @@ For the query syntax, see [Query Language](help:query-language). To aggregate re
 1. Your query is parsed into a normalized form (OR of ANDs) so the engine can plan each branch independently
 2. Time bounds (`start=` / `end=`) are used to skip chunks that fall outside the range
 3. The remaining chunks are scanned — sealed chunks use their [indexes](help:indexers) to jump to matching records, while the active chunk is scanned directly
-4. If you're searching across multiple stores, results are merged by timestamp
+4. If you're searching across multiple vaults, results are merged by timestamp
 
-When no `store=` filter is specified, all stores are searched in parallel.
+When no `vault=` filter is specified, all vaults are searched in parallel.
 
 ## Pagination
 
-Results come back a page at a time. A **resume token** tracks where each store left off, so the next page picks up exactly where the previous one stopped. Tokens stay valid as long as the referenced chunks still exist — if a retention policy deletes a chunk between pages, the search restarts from the beginning.
+Results come back a page at a time. A **resume token** tracks where each vault left off, so the next page picks up exactly where the previous one stopped. Tokens stay valid as long as the referenced chunks still exist — if a retention policy deletes a chunk between pages, the search restarts from the beginning.
 
 ## Follow (Live Tail)
 
@@ -29,7 +29,7 @@ Without a filter, this is very fast — it counts records from the index without
 
 ## Context View
 
-Click a record to see what was happening around it. The context view shows a configurable number of records before and after the selected one (up to 50 each), pulled from all stores by timestamp.
+Click a record to see what was happening around it. The context view shows a configurable number of records before and after the selected one (up to 50 each), pulled from all vaults by timestamp.
 
 ## Explain
 

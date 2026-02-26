@@ -40,7 +40,7 @@ func NewQueryServer(orch *orchestrator.Orchestrator, lookupResolver lookup.Resol
 }
 
 // Search executes a query and streams matching records.
-// Searches across all stores; use store=X in query expression to filter.
+// Searches across all vaults; use vault=X in query expression to filter.
 func (s *QueryServer) Search(
 	ctx context.Context,
 	req *connect.Request[apiv1.SearchRequest],
@@ -52,7 +52,7 @@ func (s *QueryServer) Search(
 		defer cancel()
 	}
 
-	eng := s.orch.MultiStoreQueryEngine()
+	eng := s.orch.MultiVaultQueryEngine()
 	if s.lookupResolver != nil {
 		eng.SetLookupResolver(s.lookupResolver)
 	}
@@ -205,7 +205,7 @@ func (s *QueryServer) Follow(
 		defer cancel()
 	}
 
-	eng := s.orch.MultiStoreQueryEngine()
+	eng := s.orch.MultiVaultQueryEngine()
 
 	q, pipeline, err := protoToQuery(req.Msg.Query)
 	if err != nil {
@@ -266,12 +266,12 @@ func (s *QueryServer) Follow(
 }
 
 // Explain returns the query execution plan without executing.
-// Explains the plan for all stores; use store=X in query expression to filter.
+// Explains the plan for all vaults; use vault=X in query expression to filter.
 func (s *QueryServer) Explain(
 	ctx context.Context,
 	req *connect.Request[apiv1.ExplainRequest],
 ) (*connect.Response[apiv1.ExplainResponse], error) {
-	eng := s.orch.MultiStoreQueryEngine()
+	eng := s.orch.MultiVaultQueryEngine()
 
 	q, _, err := protoToQuery(req.Msg.Query)
 	if err != nil {
@@ -298,7 +298,7 @@ func (s *QueryServer) Explain(
 
 	for _, cp := range plan.ChunkPlans {
 		chunkPlan := &apiv1.ChunkPlan{
-			StoreId:          cp.StoreID.String(),
+			VaultId:          cp.VaultID.String(),
 			ChunkId:          cp.ChunkID.String(),
 			Sealed:           cp.Sealed,
 			RecordCount:      int64(cp.RecordCount),
@@ -331,7 +331,7 @@ func (s *QueryServer) Explain(
 	return connect.NewResponse(resp), nil
 }
 
-// GetContext returns records surrounding a specific record, across all stores.
+// GetContext returns records surrounding a specific record, across all vaults.
 func (s *QueryServer) GetContext(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetContextRequest],
@@ -343,11 +343,11 @@ func (s *QueryServer) GetContext(
 	}
 
 	ref := req.Msg.Ref
-	if ref == nil || ref.StoreId == "" || ref.ChunkId == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("ref must include store_id, chunk_id, and pos"))
+	if ref == nil || ref.VaultId == "" || ref.ChunkId == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("ref must include vault_id, chunk_id, and pos"))
 	}
 
-	storeID, connErr := parseUUID(ref.StoreId)
+	vaultID, connErr := parseUUID(ref.VaultId)
 	if connErr != nil {
 		return nil, connErr
 	}
@@ -357,9 +357,9 @@ func (s *QueryServer) GetContext(
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid chunk_id: %w", err))
 	}
 
-	eng := s.orch.MultiStoreQueryEngine()
+	eng := s.orch.MultiVaultQueryEngine()
 	result, err := eng.GetContext(ctx, query.ContextRef{
-		StoreID: storeID,
+		VaultID: vaultID,
 		ChunkID: chunkID,
 		Pos:     ref.Pos,
 	}, int(req.Msg.Before), int(req.Msg.After))
@@ -732,7 +732,7 @@ func recordToProto(rec chunk.Record) *apiv1.Record {
 		Ref: &apiv1.RecordRef{
 			ChunkId: rec.Ref.ChunkID.String(),
 			Pos:     rec.Ref.Pos,
-			StoreId: rec.StoreID.String(),
+			VaultId: rec.VaultID.String(),
 		},
 	}
 	if !rec.SourceTS.IsZero() {
@@ -756,7 +756,7 @@ func protoToResumeToken(data []byte) (*query.ResumeToken, error) {
 
 	// Convert to internal type
 	token := &query.ResumeToken{
-		Positions: make([]query.MultiStorePosition, len(protoToken.Positions)),
+		Positions: make([]query.MultiVaultPosition, len(protoToken.Positions)),
 	}
 
 	for i, pos := range protoToken.Positions {
@@ -764,12 +764,12 @@ func protoToResumeToken(data []byte) (*query.ResumeToken, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid chunk ID in resume token: %w", err)
 		}
-		storeID, err := uuid.Parse(pos.StoreId)
+		vaultID, err := uuid.Parse(pos.VaultId)
 		if err != nil {
-			return nil, fmt.Errorf("invalid store ID in resume token: %w", err)
+			return nil, fmt.Errorf("invalid vault ID in resume token: %w", err)
 		}
-		token.Positions[i] = query.MultiStorePosition{
-			StoreID:  storeID,
+		token.Positions[i] = query.MultiVaultPosition{
+			VaultID:  vaultID,
 			ChunkID:  chunkID,
 			Position: pos.Position,
 		}
@@ -786,12 +786,12 @@ func resumeTokenToProto(token *query.ResumeToken) []byte {
 	}
 
 	protoToken := &apiv1.ResumeToken{
-		Positions: make([]*apiv1.StorePosition, len(token.Positions)),
+		Positions: make([]*apiv1.VaultPosition, len(token.Positions)),
 	}
 
 	for i, pos := range token.Positions {
-		protoToken.Positions[i] = &apiv1.StorePosition{
-			StoreId:  pos.StoreID.String(),
+		protoToken.Positions[i] = &apiv1.VaultPosition{
+			VaultId:  pos.VaultID.String(),
 			ChunkId:  pos.ChunkID.String(),
 			Position: pos.Position,
 		}

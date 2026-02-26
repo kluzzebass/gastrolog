@@ -22,7 +22,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// newConfigTestSetup creates an orchestrator, config store, and Connect client
+// newConfigTestSetup creates an orchestrator, config vault, and Connect client
 // for testing config RPCs.
 func newConfigTestSetup(t *testing.T) (gastrologv1connect.ConfigServiceClient, config.Store, *orchestrator.Orchestrator) {
 	t.Helper()
@@ -52,14 +52,14 @@ func newConfigTestSetup(t *testing.T) (gastrologv1connect.ConfigServiceClient, c
 	return client, cfgStore, orch
 }
 
-func TestDeleteStoreForce(t *testing.T) {
+func TestDeleteVaultForce(t *testing.T) {
 	client, cfgStore, orch := newConfigTestSetup(t)
 	ctx := context.Background()
 
 	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
 
-	// Create a filter first, then a store that uses it.
+	// Create a filter first, then a vault that uses it.
 	_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
 		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Expression: "*"},
 	}))
@@ -67,18 +67,18 @@ func TestDeleteStoreForce(t *testing.T) {
 		t.Fatalf("PutFilter: %v", err)
 	}
 
-	_, err = client.PutStore(ctx, connect.NewRequest(&gastrologv1.PutStoreRequest{
-		Config: &gastrologv1.StoreConfig{
-			Id:     storeID.String(),
+	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
+			Id:     vaultID.String(),
 			Type:   "memory",
 			Filter: filterID.String(),
 		},
 	}))
 	if err != nil {
-		t.Fatalf("PutStore: %v", err)
+		t.Fatalf("PutVault: %v", err)
 	}
 
-	// Ingest data so the store is non-empty.
+	// Ingest data so the vault is non-empty.
 	if err := orch.Ingest(chunk.Record{
 		Raw: []byte("test data"),
 	}); err != nil {
@@ -86,83 +86,83 @@ func TestDeleteStoreForce(t *testing.T) {
 	}
 
 	// Non-force delete should fail.
-	_, err = client.DeleteStore(ctx, connect.NewRequest(&gastrologv1.DeleteStoreRequest{
-		Id: storeID.String(),
+	_, err = client.DeleteVault(ctx, connect.NewRequest(&gastrologv1.DeleteVaultRequest{
+		Id: vaultID.String(),
 	}))
 	if err == nil {
-		t.Fatal("expected error for non-force delete of non-empty store")
+		t.Fatal("expected error for non-force delete of non-empty vault")
 	}
 	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Fatalf("expected FailedPrecondition, got %v", connect.CodeOf(err))
 	}
 
 	// Force delete should succeed.
-	_, err = client.DeleteStore(ctx, connect.NewRequest(&gastrologv1.DeleteStoreRequest{
-		Id:    storeID.String(),
+	_, err = client.DeleteVault(ctx, connect.NewRequest(&gastrologv1.DeleteVaultRequest{
+		Id:    vaultID.String(),
 		Force: true,
 	}))
 	if err != nil {
-		t.Fatalf("DeleteStore(force=true): %v", err)
+		t.Fatalf("DeleteVault(force=true): %v", err)
 	}
 
-	// Verify store is gone from runtime.
-	if cm := orch.ChunkManager(storeID); cm != nil {
+	// Verify vault is gone from runtime.
+	if cm := orch.ChunkManager(vaultID); cm != nil {
 		t.Error("ChunkManager should be nil after force delete")
 	}
 
-	// Verify store is gone from config.
-	stored, _ := cfgStore.GetStore(ctx, storeID)
+	// Verify vault is gone from config.
+	stored, _ := cfgStore.GetVault(ctx, vaultID)
 	if stored != nil {
-		t.Error("store should be removed from config store")
+		t.Error("vault should be removed from config vault")
 	}
 }
 
-func TestDeleteStoreNotFound(t *testing.T) {
+func TestDeleteVaultNotFound(t *testing.T) {
 	client, _, _ := newConfigTestSetup(t)
 	ctx := context.Background()
 
 	nonexistentID := uuid.Must(uuid.NewV7())
-	_, err := client.DeleteStore(ctx, connect.NewRequest(&gastrologv1.DeleteStoreRequest{
+	_, err := client.DeleteVault(ctx, connect.NewRequest(&gastrologv1.DeleteVaultRequest{
 		Id: nonexistentID.String(),
 	}))
 	if err == nil {
-		t.Fatal("expected error for nonexistent store")
+		t.Fatal("expected error for nonexistent vault")
 	}
 	if connect.CodeOf(err) != connect.CodeNotFound {
 		t.Fatalf("expected NotFound, got %v", connect.CodeOf(err))
 	}
 }
 
-func TestPutStoreNestedDirPrevention(t *testing.T) {
+func TestPutVaultNestedDirPrevention(t *testing.T) {
 	client, cfgStore, _ := newConfigTestSetup(t)
 	ctx := context.Background()
 
 	baseDir := t.TempDir()
 
-	store1ID := uuid.Must(uuid.NewV7())
+	vault1ID := uuid.Must(uuid.NewV7())
 	nestedChildID := uuid.Must(uuid.NewV7())
 	nestedParentID := uuid.Must(uuid.NewV7())
 	siblingID := uuid.Must(uuid.NewV7())
-	memStoreID := uuid.Must(uuid.NewV7())
+	memVaultID := uuid.Must(uuid.NewV7())
 	duplicateDirID := uuid.Must(uuid.NewV7())
 
-	// Seed a file store at baseDir/store1 directly in config (not via RPC,
+	// Seed a file vault at baseDir/vault1 directly in config (not via RPC,
 	// to avoid actually creating the directory and orchestrator entry).
-	err := cfgStore.PutStore(ctx, config.StoreConfig{
-		ID:     store1ID,
+	err := cfgStore.PutVault(ctx, config.VaultConfig{
+		ID:     vault1ID,
 		Type:   "file",
-		Params: map[string]string{"dir": baseDir + "/store1"},
+		Params: map[string]string{"dir": baseDir + "/vault1"},
 	})
 	if err != nil {
-		t.Fatalf("seed store1: %v", err)
+		t.Fatalf("seed vault1: %v", err)
 	}
 
-	// Attempt to create a file store nested inside store1.
-	_, err = client.PutStore(ctx, connect.NewRequest(&gastrologv1.PutStoreRequest{
-		Config: &gastrologv1.StoreConfig{
+	// Attempt to create a file vault nested inside vault1.
+	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
 			Id:     nestedChildID.String(),
 			Type:   "file",
-			Params: map[string]string{"dir": baseDir + "/store1/archive"},
+			Params: map[string]string{"dir": baseDir + "/vault1/archive"},
 		},
 	}))
 	if err == nil {
@@ -172,9 +172,9 @@ func TestPutStoreNestedDirPrevention(t *testing.T) {
 		t.Fatalf("expected InvalidArgument, got %v: %v", connect.CodeOf(err), err)
 	}
 
-	// Attempt to create a file store that is a parent of store1.
-	_, err = client.PutStore(ctx, connect.NewRequest(&gastrologv1.PutStoreRequest{
-		Config: &gastrologv1.StoreConfig{
+	// Attempt to create a file vault that is a parent of vault1.
+	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
 			Id:     nestedParentID.String(),
 			Type:   "file",
 			Params: map[string]string{"dir": baseDir},
@@ -188,47 +188,47 @@ func TestPutStoreNestedDirPrevention(t *testing.T) {
 	}
 
 	// Sibling directory should be OK.
-	_, err = client.PutStore(ctx, connect.NewRequest(&gastrologv1.PutStoreRequest{
-		Config: &gastrologv1.StoreConfig{
+	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
 			Id:     siblingID.String(),
 			Type:   "file",
-			Params: map[string]string{"dir": baseDir + "/store2"},
+			Params: map[string]string{"dir": baseDir + "/vault2"},
 		},
 	}))
 	if err != nil {
 		t.Fatalf("sibling directory should be allowed: %v", err)
 	}
 
-	// Memory stores should not be checked.
-	_, err = client.PutStore(ctx, connect.NewRequest(&gastrologv1.PutStoreRequest{
-		Config: &gastrologv1.StoreConfig{
-			Id:   memStoreID.String(),
+	// Memory vaults should not be checked.
+	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
+			Id:   memVaultID.String(),
 			Type: "memory",
 		},
 	}))
 	if err != nil {
-		t.Fatalf("memory store should always be allowed: %v", err)
+		t.Fatalf("memory vault should always be allowed: %v", err)
 	}
 
-	// Updating a file store's own dir to itself should be OK
+	// Updating a file vault's own dir to itself should be OK
 	// (seeded directly to avoid orchestrator conflicts).
-	_, err = client.PutStore(ctx, connect.NewRequest(&gastrologv1.PutStoreRequest{
-		Config: &gastrologv1.StoreConfig{
-			Id:     store1ID.String(),
+	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
+			Id:     vault1ID.String(),
 			Type:   "file",
-			Params: map[string]string{"dir": baseDir + "/store1"},
+			Params: map[string]string{"dir": baseDir + "/vault1"},
 		},
 	}))
 	if err != nil {
 		t.Fatalf("updating self should be allowed: %v", err)
 	}
 
-	// Same exact dir as another store should fail.
-	_, err = client.PutStore(ctx, connect.NewRequest(&gastrologv1.PutStoreRequest{
-		Config: &gastrologv1.StoreConfig{
+	// Same exact dir as another vault should fail.
+	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
 			Id:     duplicateDirID.String(),
 			Type:   "file",
-			Params: map[string]string{"dir": baseDir + "/store1"},
+			Params: map[string]string{"dir": baseDir + "/vault1"},
 		},
 	}))
 	if err == nil {
@@ -236,14 +236,14 @@ func TestPutStoreNestedDirPrevention(t *testing.T) {
 	}
 }
 
-func TestPauseResumeStoreRPC(t *testing.T) {
+func TestPauseResumeVaultRPC(t *testing.T) {
 	client, _, orch := newConfigTestSetup(t)
 	ctx := context.Background()
 
 	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
 
-	// Create a filter and a store.
+	// Create a filter and a vault.
 	_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
 		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Expression: "*"},
 	}))
@@ -251,54 +251,54 @@ func TestPauseResumeStoreRPC(t *testing.T) {
 		t.Fatalf("PutFilter: %v", err)
 	}
 
-	_, err = client.PutStore(ctx, connect.NewRequest(&gastrologv1.PutStoreRequest{
-		Config: &gastrologv1.StoreConfig{
-			Id:     storeID.String(),
+	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
+			Id:     vaultID.String(),
 			Type:   "memory",
 			Filter: filterID.String(),
 		},
 	}))
 	if err != nil {
-		t.Fatalf("PutStore: %v", err)
+		t.Fatalf("PutVault: %v", err)
 	}
 
-	// Pause the store via RPC.
-	_, err = client.PauseStore(ctx, connect.NewRequest(&gastrologv1.PauseStoreRequest{
-		Id: storeID.String(),
+	// Pause the vault via RPC.
+	_, err = client.PauseVault(ctx, connect.NewRequest(&gastrologv1.PauseVaultRequest{
+		Id: vaultID.String(),
 	}))
 	if err != nil {
-		t.Fatalf("PauseStore: %v", err)
+		t.Fatalf("PauseVault: %v", err)
 	}
 
 	// Verify runtime state.
-	if orch.IsStoreEnabled(storeID) {
-		t.Error("store should be disabled in runtime")
+	if orch.IsVaultEnabled(vaultID) {
+		t.Error("vault should be disabled in runtime")
 	}
 
-	// Verify disabled in StoreInfo via StoreService.
+	// Verify disabled in VaultInfo via VaultService.
 	handler := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{}).Handler()
-	storeClient := gastrologv1connect.NewStoreServiceClient(
+	vaultClient := gastrologv1connect.NewVaultServiceClient(
 		&http.Client{Transport: &embeddedTransport{handler: handler}},
 		"http://embedded",
 	)
-	storeResp, err := storeClient.GetStore(ctx, connect.NewRequest(&gastrologv1.GetStoreRequest{Id: storeID.String()}))
+	vaultResp, err := vaultClient.GetVault(ctx, connect.NewRequest(&gastrologv1.GetVaultRequest{Id: vaultID.String()}))
 	if err != nil {
-		t.Fatalf("GetStore: %v", err)
+		t.Fatalf("GetVault: %v", err)
 	}
-	if storeResp.Msg.Store.Enabled {
-		t.Error("StoreInfo.Enabled should be false after pause")
+	if vaultResp.Msg.Vault.Enabled {
+		t.Error("VaultInfo.Enabled should be false after pause")
 	}
 
 	// Resume via RPC.
-	_, err = client.ResumeStore(ctx, connect.NewRequest(&gastrologv1.ResumeStoreRequest{
-		Id: storeID.String(),
+	_, err = client.ResumeVault(ctx, connect.NewRequest(&gastrologv1.ResumeVaultRequest{
+		Id: vaultID.String(),
 	}))
 	if err != nil {
-		t.Fatalf("ResumeStore: %v", err)
+		t.Fatalf("ResumeVault: %v", err)
 	}
 
-	if !orch.IsStoreEnabled(storeID) {
-		t.Error("store should be enabled after resume")
+	if !orch.IsVaultEnabled(vaultID) {
+		t.Error("vault should be enabled after resume")
 	}
 
 	// Ingest should work after resume.
@@ -307,46 +307,46 @@ func TestPauseResumeStoreRPC(t *testing.T) {
 	}
 }
 
-func TestPauseStoreNotFoundRPC(t *testing.T) {
+func TestPauseVaultNotFoundRPC(t *testing.T) {
 	client, _, _ := newConfigTestSetup(t)
 	ctx := context.Background()
 
 	nonexistentID := uuid.Must(uuid.NewV7())
-	_, err := client.PauseStore(ctx, connect.NewRequest(&gastrologv1.PauseStoreRequest{
+	_, err := client.PauseVault(ctx, connect.NewRequest(&gastrologv1.PauseVaultRequest{
 		Id: nonexistentID.String(),
 	}))
 	if err == nil {
-		t.Fatal("expected error for nonexistent store")
+		t.Fatal("expected error for nonexistent vault")
 	}
 	if connect.CodeOf(err) != connect.CodeNotFound {
 		t.Fatalf("expected NotFound, got %v", connect.CodeOf(err))
 	}
 }
 
-func TestResumeStoreNotFoundRPC(t *testing.T) {
+func TestResumeVaultNotFoundRPC(t *testing.T) {
 	client, _, _ := newConfigTestSetup(t)
 	ctx := context.Background()
 
 	nonexistentID := uuid.Must(uuid.NewV7())
-	_, err := client.ResumeStore(ctx, connect.NewRequest(&gastrologv1.ResumeStoreRequest{
+	_, err := client.ResumeVault(ctx, connect.NewRequest(&gastrologv1.ResumeVaultRequest{
 		Id: nonexistentID.String(),
 	}))
 	if err == nil {
-		t.Fatal("expected error for nonexistent store")
+		t.Fatal("expected error for nonexistent vault")
 	}
 	if connect.CodeOf(err) != connect.CodeNotFound {
 		t.Fatalf("expected NotFound, got %v", connect.CodeOf(err))
 	}
 }
 
-func TestPauseStorePersistsToConfig(t *testing.T) {
+func TestPauseVaultPersistsToConfig(t *testing.T) {
 	client, cfgStore, _ := newConfigTestSetup(t)
 	ctx := context.Background()
 
 	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
 
-	// Create a filter and store.
+	// Create a filter and vault.
 	_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
 		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Expression: "*"},
 	}))
@@ -354,47 +354,46 @@ func TestPauseStorePersistsToConfig(t *testing.T) {
 		t.Fatalf("PutFilter: %v", err)
 	}
 
-	_, err = client.PutStore(ctx, connect.NewRequest(&gastrologv1.PutStoreRequest{
-		Config: &gastrologv1.StoreConfig{
-			Id:     storeID.String(),
+	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
+			Id:     vaultID.String(),
 			Type:   "memory",
 			Filter: filterID.String(),
 		},
 	}))
 	if err != nil {
-		t.Fatalf("PutStore: %v", err)
+		t.Fatalf("PutVault: %v", err)
 	}
 
 	// Pause and check config persistence.
-	_, err = client.PauseStore(ctx, connect.NewRequest(&gastrologv1.PauseStoreRequest{
-		Id: storeID.String(),
+	_, err = client.PauseVault(ctx, connect.NewRequest(&gastrologv1.PauseVaultRequest{
+		Id: vaultID.String(),
 	}))
 	if err != nil {
-		t.Fatalf("PauseStore: %v", err)
+		t.Fatalf("PauseVault: %v", err)
 	}
 
-	stored, err := cfgStore.GetStore(ctx, storeID)
+	stored, err := cfgStore.GetVault(ctx, vaultID)
 	if err != nil {
-		t.Fatalf("GetStore from config: %v", err)
+		t.Fatalf("GetVault from config: %v", err)
 	}
 	if stored.Enabled {
-		t.Error("config store should have Enabled=false after pause")
+		t.Error("config vault should have Enabled=false after pause")
 	}
 
 	// Resume and check config persistence.
-	_, err = client.ResumeStore(ctx, connect.NewRequest(&gastrologv1.ResumeStoreRequest{
-		Id: storeID.String(),
+	_, err = client.ResumeVault(ctx, connect.NewRequest(&gastrologv1.ResumeVaultRequest{
+		Id: vaultID.String(),
 	}))
 	if err != nil {
-		t.Fatalf("ResumeStore: %v", err)
+		t.Fatalf("ResumeVault: %v", err)
 	}
 
-	stored, err = cfgStore.GetStore(ctx, storeID)
+	stored, err = cfgStore.GetVault(ctx, vaultID)
 	if err != nil {
-		t.Fatalf("GetStore from config: %v", err)
+		t.Fatalf("GetVault from config: %v", err)
 	}
 	if !stored.Enabled {
-		t.Error("config store should have Enabled=true after resume")
+		t.Error("config vault should have Enabled=true after resume")
 	}
 }
-

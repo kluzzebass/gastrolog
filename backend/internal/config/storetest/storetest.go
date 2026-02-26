@@ -1,4 +1,4 @@
-// Package storetest provides a shared conformance test suite for config.Store
+// Package vaulttest provides a shared conformance test suite for config.Store
 // implementations. Each backend (memory, file, sqlite) wires this suite to
 // verify it satisfies the full Store contract.
 package storetest
@@ -15,7 +15,7 @@ import (
 
 func newID() uuid.UUID { return uuid.Must(uuid.NewV7()) }
 
-// TestStore runs the full conformance suite against a Store implementation.
+// TestVault runs the full conformance suite against a Vault implementation.
 // newStore must return a fresh, empty store for each sub-test.
 func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 	t.Run("LoadEmpty", func(t *testing.T) {
@@ -367,15 +367,15 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 	})
 
-	// Store retention rules
-	t.Run("StoreRetentionRules", func(t *testing.T) {
+	// Vault retention rules
+	t.Run("VaultRetentionRules", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
 
 		id := newID()
 		retID := newID()
 		dstID := newID()
-		st := config.StoreConfig{
+		v := config.VaultConfig{
 			ID:   id,
 			Name: "main",
 			Type: "file",
@@ -384,11 +384,11 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 				{RetentionPolicyID: retID, Action: config.RetentionActionMigrate, Destination: &dstID},
 			},
 		}
-		if err := s.PutStore(ctx, st); err != nil {
+		if err := s.PutVault(ctx, v); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		got, err := s.GetStore(ctx, id)
+		got, err := s.GetVault(ctx, id)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -409,15 +409,15 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 	})
 
-	// Stores
-	t.Run("PutGetStore", func(t *testing.T) {
+	// Vaults
+	t.Run("PutGetVault", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
 
 		id := newID()
 		filterID := newID()
 		policyID := newID()
-		st := config.StoreConfig{
+		v := config.VaultConfig{
 			ID:     id,
 			Name:   "main",
 			Type:   "file",
@@ -426,16 +426,16 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			Params: map[string]string{"dir": "/var/log"},
 		}
 
-		if err := s.PutStore(ctx, st); err != nil {
+		if err := s.PutVault(ctx, v); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		got, err := s.GetStore(ctx, id)
+		got, err := s.GetVault(ctx, id)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
 		if got == nil {
-			t.Fatal("expected store, got nil")
+			t.Fatal("expected vault, got nil")
 		}
 		if got.ID != id {
 			t.Errorf("ID: expected %s, got %s", id, got.ID)
@@ -453,24 +453,24 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 	})
 
-	t.Run("PutStoreUpsert", func(t *testing.T) {
+	t.Run("PutVaultUpsert", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
 
 		id := newID()
 		filterID1 := newID()
-		st1 := config.StoreConfig{ID: id, Name: "s1", Type: "file", Filter: &filterID1}
-		if err := s.PutStore(ctx, st1); err != nil {
+		v1 := config.VaultConfig{ID: id, Name: "s1", Type: "file", Filter: &filterID1}
+		if err := s.PutVault(ctx, v1); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
 		filterID2 := newID()
-		st2 := config.StoreConfig{ID: id, Name: "s1", Type: "memory", Filter: &filterID2}
-		if err := s.PutStore(ctx, st2); err != nil {
+		v2 := config.VaultConfig{ID: id, Name: "s1", Type: "memory", Filter: &filterID2}
+		if err := s.PutVault(ctx, v2); err != nil {
 			t.Fatalf("Put upsert: %v", err)
 		}
 
-		got, err := s.GetStore(ctx, id)
+		got, err := s.GetVault(ctx, id)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -478,20 +478,20 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Errorf("Type after upsert: expected %q, got %q", "memory", got.Type)
 		}
 
-		all, err := s.ListStores(ctx)
+		all, err := s.ListVaults(ctx)
 		if err != nil {
 			t.Fatalf("List: %v", err)
 		}
 		if len(all) != 1 {
-			t.Fatalf("expected 1 store after upsert, got %d", len(all))
+			t.Fatalf("expected 1 vault after upsert, got %d", len(all))
 		}
 	})
 
-	t.Run("ListStores", func(t *testing.T) {
+	t.Run("ListVaults", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		all, err := s.ListStores(ctx)
+		all, err := s.ListVaults(ctx)
 		if err != nil {
 			t.Fatalf("List: %v", err)
 		}
@@ -501,14 +501,14 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 
 		idA := newID()
 		idB := newID()
-		if err := s.PutStore(ctx, config.StoreConfig{ID: idA, Name: "a", Type: "file"}); err != nil {
+		if err := s.PutVault(ctx, config.VaultConfig{ID: idA, Name: "a", Type: "file"}); err != nil {
 			t.Fatalf("Put a: %v", err)
 		}
-		if err := s.PutStore(ctx, config.StoreConfig{ID: idB, Name: "b", Type: "memory"}); err != nil {
+		if err := s.PutVault(ctx, config.VaultConfig{ID: idB, Name: "b", Type: "memory"}); err != nil {
 			t.Fatalf("Put b: %v", err)
 		}
 
-		all, err = s.ListStores(ctx)
+		all, err = s.ListVaults(ctx)
 		if err != nil {
 			t.Fatalf("List: %v", err)
 		}
@@ -517,28 +517,28 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 
 		ids := map[uuid.UUID]bool{}
-		for _, st := range all {
-			ids[st.ID] = true
+		for _, v := range all {
+			ids[v.ID] = true
 		}
 		if !ids[idA] || !ids[idB] {
-			t.Errorf("expected stores %s and %s, got %v", idA, idB, ids)
+			t.Errorf("expected vaults %s and %s, got %v", idA, idB, ids)
 		}
 	})
 
-	t.Run("DeleteStore", func(t *testing.T) {
+	t.Run("DeleteVault", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
 
 		id := newID()
-		if err := s.PutStore(ctx, config.StoreConfig{ID: id, Name: "del", Type: "file"}); err != nil {
+		if err := s.PutVault(ctx, config.VaultConfig{ID: id, Name: "del", Type: "file"}); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		if err := s.DeleteStore(ctx, id); err != nil {
+		if err := s.DeleteVault(ctx, id); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
 
-		got, err := s.GetStore(ctx, id)
+		got, err := s.GetVault(ctx, id)
 		if err != nil {
 			t.Fatalf("Get after delete: %v", err)
 		}
@@ -547,22 +547,22 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 
 		// Delete non-existent is a no-op.
-		if err := s.DeleteStore(ctx, uuid.Must(uuid.NewV7())); err != nil {
+		if err := s.DeleteVault(ctx, uuid.Must(uuid.NewV7())); err != nil {
 			t.Fatalf("Delete non-existent: %v", err)
 		}
 	})
 
-	t.Run("NilStoreParams", func(t *testing.T) {
+	t.Run("NilVaultParams", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
 
 		id := newID()
-		st := config.StoreConfig{ID: id, Name: "s1", Type: "memory", Params: nil}
-		if err := s.PutStore(ctx, st); err != nil {
+		v := config.VaultConfig{ID: id, Name: "s1", Type: "memory", Params: nil}
+		if err := s.PutVault(ctx, v); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		got, err := s.GetStore(ctx, id)
+		got, err := s.GetVault(ctx, id)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -736,7 +736,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 
 		rpFastID := newID()
 		rpSlowID := newID()
-		storeID := newID()
+		vaultID := newID()
 		ing1ID := newID()
 		ing2ID := newID()
 
@@ -748,8 +748,8 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Fatalf("PutRotationPolicy: %v", err)
 		}
 		filterID := newID()
-		if err := s.PutStore(ctx, config.StoreConfig{ID: storeID, Name: "main", Type: "file", Filter: &filterID, Policy: &rpFastID}); err != nil {
-			t.Fatalf("PutStore: %v", err)
+		if err := s.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "main", Type: "file", Filter: &filterID, Policy: &rpFastID}); err != nil {
+			t.Fatalf("PutVault: %v", err)
 		}
 		if err := s.PutIngester(ctx, config.IngesterConfig{ID: ing1ID, Name: "sys1", Type: "syslog-udp", Enabled: true, Params: map[string]string{"port": "514"}}); err != nil {
 			t.Fatalf("PutIngester: %v", err)
@@ -774,8 +774,8 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if len(cfg.RotationPolicies) != 2 {
 			t.Errorf("expected 2 rotation policies, got %d", len(cfg.RotationPolicies))
 		}
-		if len(cfg.Stores) != 1 {
-			t.Errorf("expected 1 store, got %d", len(cfg.Stores))
+		if len(cfg.Vaults) != 1 {
+			t.Errorf("expected 1 vault, got %d", len(cfg.Vaults))
 		}
 		if len(cfg.Ingesters) != 2 {
 			t.Errorf("expected 2 ingesters, got %d", len(cfg.Ingesters))
@@ -803,12 +803,12 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Errorf("expected nil, got %+v", rp)
 		}
 
-		st, err := s.GetStore(ctx, nope)
+		v, err := s.GetVault(ctx, nope)
 		if err != nil {
-			t.Fatalf("GetStore: %v", err)
+			t.Fatalf("GetVault: %v", err)
 		}
-		if st != nil {
-			t.Errorf("expected nil, got %+v", st)
+		if v != nil {
+			t.Errorf("expected nil, got %+v", v)
 		}
 
 		ing, err := s.GetIngester(ctx, nope)
@@ -1105,7 +1105,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		// Empty store returns empty list.
+		// Empty vault returns empty list.
 		users, err := s.ListUsers(ctx)
 		if err != nil {
 			t.Fatalf("ListUsers: %v", err)

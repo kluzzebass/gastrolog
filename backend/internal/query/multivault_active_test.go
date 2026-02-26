@@ -15,18 +15,18 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestMultiStoreSearchActiveChunks(t *testing.T) {
+func TestMultiVaultSearchActiveChunks(t *testing.T) {
 	reg := &testRegistry{
-		stores: make(map[uuid.UUID]struct {
+		vaults: make(map[uuid.UUID]struct {
 			cm chunk.ChunkManager
 			im index.IndexManager
 		}),
 	}
 
-	// Create two stores with ACTIVE (unsealed) chunks
+	// Create two vaults with ACTIVE (unsealed) chunks
 	for range 2 {
-		storeID := uuid.Must(uuid.NewV7())
-		s := memtest.MustNewStore(t, chunkmem.Config{
+		vaultID := uuid.Must(uuid.NewV7())
+		s := memtest.MustNewVault(t, chunkmem.Config{
 			RotationPolicy: chunk.NewRecordCountPolicy(1000),
 		})
 
@@ -35,18 +35,18 @@ func TestMultiStoreSearchActiveChunks(t *testing.T) {
 		for i := range 5 {
 			s.CM.Append(chunk.Record{
 				IngestTS: t0.Add(time.Duration(i) * time.Second),
-				Raw:      fmt.Appendf(nil, "store-%s-record-%d", storeID, i),
+				Raw:      fmt.Appendf(nil, "vault-%s-record-%d", vaultID, i),
 			})
 		}
 		// NOT calling cm.Seal() - keep chunks active
 
-		reg.stores[storeID] = struct {
+		reg.vaults[vaultID] = struct {
 			cm chunk.ChunkManager
 			im index.IndexManager
 		}{s.CM, s.IM}
 	}
 
-	// Create multi-store engine
+	// Create multi-vault engine
 	eng := query.NewWithRegistry(reg, nil)
 
 	// Run query

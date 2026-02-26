@@ -90,7 +90,7 @@ type recordFilter func(chunk.Record) bool
 //   - empty (len==0): index says no matches, skip chunk entirely
 //   - non-empty: seek to these positions only
 type scannerBuilder struct {
-	storeID   uuid.UUID // store ID for multi-store queries
+	vaultID   uuid.UUID // vault ID for multi-vault queries
 	chunkID   chunk.ChunkID
 	positions []uint64       // nil = sequential, empty = no matches, non-empty = seek positions
 	filters   []recordFilter // applied in order; cheap filters should be added first
@@ -195,14 +195,14 @@ func (b *scannerBuilder) buildSequentialScanner(ctx context.Context, cursor chun
 func (b *scannerBuilder) buildSequentialScannerReverse(ctx context.Context, cursor chunk.RecordCursor, q Query) iter.Seq2[recordWithRef, error] {
 	lower, upper := q.TimeBounds()
 	filters := b.filters
-	storeID := b.storeID
+	vaultID := b.vaultID
 
 	return func(yield func(recordWithRef, error) bool) {
 		n := 0
 		for {
 			if n&1023 == 0 {
 				if err := ctx.Err(); err != nil {
-					yield(recordWithRef{StoreID: storeID}, err)
+					yield(recordWithRef{VaultID: vaultID}, err)
 					return
 				}
 			}
@@ -213,7 +213,7 @@ func (b *scannerBuilder) buildSequentialScannerReverse(ctx context.Context, curs
 				return
 			}
 			if err != nil {
-				yield(recordWithRef{StoreID: storeID, Ref: ref}, err)
+				yield(recordWithRef{VaultID: vaultID, Ref: ref}, err)
 				return
 			}
 
@@ -230,7 +230,7 @@ func (b *scannerBuilder) buildSequentialScannerReverse(ctx context.Context, curs
 				continue
 			}
 
-			if !yield(recordWithRef{StoreID: storeID, Record: rec, Ref: ref}, nil) {
+			if !yield(recordWithRef{VaultID: vaultID, Record: rec, Ref: ref}, nil) {
 				return
 			}
 		}
@@ -241,14 +241,14 @@ func (b *scannerBuilder) buildSequentialScannerReverse(ctx context.Context, curs
 func (b *scannerBuilder) buildSequentialScannerForward(ctx context.Context, cursor chunk.RecordCursor, q Query) iter.Seq2[recordWithRef, error] {
 	lower, upper := q.TimeBounds()
 	filters := b.filters
-	storeID := b.storeID
+	vaultID := b.vaultID
 
 	return func(yield func(recordWithRef, error) bool) {
 		n := 0
 		for {
 			if n&1023 == 0 {
 				if err := ctx.Err(); err != nil {
-					yield(recordWithRef{StoreID: storeID}, err)
+					yield(recordWithRef{VaultID: vaultID}, err)
 					return
 				}
 			}
@@ -259,7 +259,7 @@ func (b *scannerBuilder) buildSequentialScannerForward(ctx context.Context, curs
 				return
 			}
 			if err != nil {
-				yield(recordWithRef{StoreID: storeID, Ref: ref}, err)
+				yield(recordWithRef{VaultID: vaultID, Ref: ref}, err)
 				return
 			}
 
@@ -276,7 +276,7 @@ func (b *scannerBuilder) buildSequentialScannerForward(ctx context.Context, curs
 				continue
 			}
 
-			if !yield(recordWithRef{StoreID: storeID, Record: rec, Ref: ref}, nil) {
+			if !yield(recordWithRef{VaultID: vaultID, Record: rec, Ref: ref}, nil) {
 				return
 			}
 		}
@@ -296,13 +296,13 @@ func (b *scannerBuilder) buildPositionScannerReverse(ctx context.Context, cursor
 	lower, upper := q.TimeBounds()
 	positions := b.positions
 	chunkID := b.chunkID
-	storeID := b.storeID
+	vaultID := b.vaultID
 	filters := b.filters
 
 	return func(yield func(recordWithRef, error) bool) {
 		for i := len(positions) - 1; i >= 0; i-- {
 			if err := checkCtxEvery(ctx, i); err != nil {
-				yield(recordWithRef{StoreID: storeID}, err)
+				yield(recordWithRef{VaultID: vaultID}, err)
 				return
 			}
 
@@ -312,7 +312,7 @@ func (b *scannerBuilder) buildPositionScannerReverse(ctx context.Context, cursor
 				return
 			}
 			if err != nil {
-				yield(recordWithRef{StoreID: storeID, Ref: ref}, err)
+				yield(recordWithRef{VaultID: vaultID, Ref: ref}, err)
 				return
 			}
 
@@ -328,7 +328,7 @@ func (b *scannerBuilder) buildPositionScannerReverse(ctx context.Context, cursor
 				continue
 			}
 
-			if !yield(recordWithRef{StoreID: storeID, Record: rec, Ref: ref}, nil) {
+			if !yield(recordWithRef{VaultID: vaultID, Record: rec, Ref: ref}, nil) {
 				return
 			}
 		}
@@ -340,13 +340,13 @@ func (b *scannerBuilder) buildPositionScannerForward(ctx context.Context, cursor
 	lower, upper := q.TimeBounds()
 	positions := b.positions
 	chunkID := b.chunkID
-	storeID := b.storeID
+	vaultID := b.vaultID
 	filters := b.filters
 
 	return func(yield func(recordWithRef, error) bool) {
 		for i, pos := range positions {
 			if err := checkCtxEvery(ctx, i); err != nil {
-				yield(recordWithRef{StoreID: storeID}, err)
+				yield(recordWithRef{VaultID: vaultID}, err)
 				return
 			}
 
@@ -355,7 +355,7 @@ func (b *scannerBuilder) buildPositionScannerForward(ctx context.Context, cursor
 				return
 			}
 			if err != nil {
-				yield(recordWithRef{StoreID: storeID, Ref: ref}, err)
+				yield(recordWithRef{VaultID: vaultID, Ref: ref}, err)
 				return
 			}
 
@@ -371,7 +371,7 @@ func (b *scannerBuilder) buildPositionScannerForward(ctx context.Context, cursor
 				continue
 			}
 
-			if !yield(recordWithRef{StoreID: storeID, Record: rec, Ref: ref}, nil) {
+			if !yield(recordWithRef{VaultID: vaultID, Record: rec, Ref: ref}, nil) {
 				return
 			}
 		}

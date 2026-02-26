@@ -10,7 +10,7 @@ import (
 )
 
 func TestCompileFilter(t *testing.T) {
-	storeID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
 
 	tests := []struct {
 		name      string
@@ -82,7 +82,7 @@ func TestCompileFilter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			filter, err := CompileFilter(storeID, tt.filter)
+			filter, err := CompileFilter(vaultID, tt.filter)
 			if tt.wantError {
 				if err == nil {
 					t.Errorf("expected error, got nil")
@@ -124,40 +124,40 @@ func TestFilterSetMatch(t *testing.T) {
 	tests := []struct {
 		name       string
 		attrs      chunk.Attributes
-		wantStores []uuid.UUID
+		wantVaults []uuid.UUID
 	}{
 		{
 			name:       "prod error goes to prod-errors and archive",
 			attrs:      chunk.Attributes{"env": "prod", "level": "error"},
-			wantStores: []uuid.UUID{prodErrorsID, archiveID},
+			wantVaults: []uuid.UUID{prodErrorsID, archiveID},
 		},
 		{
 			name:       "prod info goes to archive and unfiltered (no expr match)",
 			attrs:      chunk.Attributes{"env": "prod", "level": "info"},
-			wantStores: []uuid.UUID{archiveID, unfilteredID},
+			wantVaults: []uuid.UUID{archiveID, unfilteredID},
 		},
 		{
 			name:       "staging goes to staging and archive",
 			attrs:      chunk.Attributes{"env": "staging", "level": "debug"},
-			wantStores: []uuid.UUID{stagingID, archiveID},
+			wantVaults: []uuid.UUID{stagingID, archiveID},
 		},
 		{
 			name:       "unknown env goes to archive and unfiltered",
 			attrs:      chunk.Attributes{"env": "unknown"},
-			wantStores: []uuid.UUID{archiveID, unfilteredID},
+			wantVaults: []uuid.UUID{archiveID, unfilteredID},
 		},
 		{
 			name:       "no attrs goes to archive and unfiltered",
 			attrs:      chunk.Attributes{},
-			wantStores: []uuid.UUID{archiveID, unfilteredID},
+			wantVaults: []uuid.UUID{archiveID, unfilteredID},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := filterSet.Match(tt.attrs)
-			if !sameElements(got, tt.wantStores) {
-				t.Errorf("got stores %v, want %v", got, tt.wantStores)
+			if !sameElements(got, tt.wantVaults) {
+				t.Errorf("got vaults %v, want %v", got, tt.wantVaults)
 			}
 		})
 	}
@@ -328,89 +328,89 @@ func TestFilterSetValueExists(t *testing.T) {
 }
 
 func TestFilterSetAddOrUpdate(t *testing.T) {
-	storeA := uuid.Must(uuid.NewV7())
-	storeB := uuid.Must(uuid.NewV7())
+	vaultA := uuid.Must(uuid.NewV7())
+	vaultB := uuid.Must(uuid.NewV7())
 
 	// AddOrUpdate on nil receiver creates a fresh set.
-	fs, err := (*FilterSet)(nil).AddOrUpdate(storeA, "env=prod")
+	fs, err := (*FilterSet)(nil).AddOrUpdate(vaultA, "env=prod")
 	if err != nil {
 		t.Fatalf("AddOrUpdate on nil: %v", err)
 	}
 	got := fs.Match(chunk.Attributes{"env": "prod"})
-	if !containsUUID(got, storeA) {
-		t.Error("storeA should match after AddOrUpdate")
+	if !containsUUID(got, vaultA) {
+		t.Error("vaultA should match after AddOrUpdate")
 	}
 
-	// Add a second store.
-	fs, err = fs.AddOrUpdate(storeB, "*")
+	// Add a second vault.
+	fs, err = fs.AddOrUpdate(vaultB, "*")
 	if err != nil {
-		t.Fatalf("AddOrUpdate storeB: %v", err)
+		t.Fatalf("AddOrUpdate vaultB: %v", err)
 	}
 	got = fs.Match(chunk.Attributes{"env": "prod"})
-	if !containsUUID(got, storeA) || !containsUUID(got, storeB) {
-		t.Error("both stores should match")
+	if !containsUUID(got, vaultA) || !containsUUID(got, vaultB) {
+		t.Error("both vaults should match")
 	}
 
-	// Update storeA's filter.
-	fs, err = fs.AddOrUpdate(storeA, "env=staging")
+	// Update vaultA's filter.
+	fs, err = fs.AddOrUpdate(vaultA, "env=staging")
 	if err != nil {
-		t.Fatalf("AddOrUpdate update storeA: %v", err)
+		t.Fatalf("AddOrUpdate update vaultA: %v", err)
 	}
 	got = fs.Match(chunk.Attributes{"env": "prod"})
-	if containsUUID(got, storeA) {
-		t.Error("storeA should no longer match env=prod after update")
+	if containsUUID(got, vaultA) {
+		t.Error("vaultA should no longer match env=prod after update")
 	}
 	got = fs.Match(chunk.Attributes{"env": "staging"})
-	if !containsUUID(got, storeA) {
-		t.Error("storeA should match env=staging after update")
+	if !containsUUID(got, vaultA) {
+		t.Error("vaultA should match env=staging after update")
 	}
 
 	// Invalid expression returns error.
-	_, err = fs.AddOrUpdate(storeA, "(unclosed")
+	_, err = fs.AddOrUpdate(vaultA, "(unclosed")
 	if err == nil {
 		t.Error("expected error for invalid expression")
 	}
 }
 
 func TestFilterSetWithout(t *testing.T) {
-	storeA := uuid.Must(uuid.NewV7())
-	storeB := uuid.Must(uuid.NewV7())
-	storeC := uuid.Must(uuid.NewV7())
+	vaultA := uuid.Must(uuid.NewV7())
+	vaultB := uuid.Must(uuid.NewV7())
+	vaultC := uuid.Must(uuid.NewV7())
 
-	filterA, _ := CompileFilter(storeA, "env=prod")
-	filterB, _ := CompileFilter(storeB, "env=staging")
-	filterC, _ := CompileFilter(storeC, "*")
+	filterA, _ := CompileFilter(vaultA, "env=prod")
+	filterB, _ := CompileFilter(vaultB, "env=staging")
+	filterC, _ := CompileFilter(vaultC, "*")
 
 	fs := NewFilterSet([]*CompiledFilter{filterA, filterB, filterC})
 
-	// Without a single store.
-	fs2 := fs.Without(storeA)
+	// Without a single vault.
+	fs2 := fs.Without(vaultA)
 	got := fs2.Match(chunk.Attributes{"env": "prod"})
-	if containsUUID(got, storeA) {
-		t.Error("storeA should be removed")
+	if containsUUID(got, vaultA) {
+		t.Error("vaultA should be removed")
 	}
-	if !containsUUID(got, storeC) {
-		t.Error("storeC (catch-all) should remain")
+	if !containsUUID(got, vaultC) {
+		t.Error("vaultC (catch-all) should remain")
 	}
 
-	// Without multiple stores.
-	fs3 := fs.Without(storeA, storeB)
+	// Without multiple vaults.
+	fs3 := fs.Without(vaultA, vaultB)
 	got = fs3.Match(chunk.Attributes{"env": "staging"})
-	if containsUUID(got, storeA) || containsUUID(got, storeB) {
-		t.Error("storeA and storeB should be removed")
+	if containsUUID(got, vaultA) || containsUUID(got, vaultB) {
+		t.Error("vaultA and vaultB should be removed")
 	}
-	if !containsUUID(got, storeC) {
-		t.Error("storeC should remain")
+	if !containsUUID(got, vaultC) {
+		t.Error("vaultC should remain")
 	}
 
-	// Without all stores returns nil.
-	fs4 := fs.Without(storeA, storeB, storeC)
+	// Without all vaults returns nil.
+	fs4 := fs.Without(vaultA, vaultB, vaultC)
 	if fs4 != nil {
-		t.Error("expected nil when all stores removed")
+		t.Error("expected nil when all vaults removed")
 	}
 
 	// Without on nil receiver returns nil.
-	fs5 := (*FilterSet)(nil).Without(storeA)
+	fs5 := (*FilterSet)(nil).Without(vaultA)
 	if fs5 != nil {
 		t.Error("Without on nil should return nil")
 	}

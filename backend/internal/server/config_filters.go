@@ -61,15 +61,15 @@ func (s *ConfigServer) DeleteFilter(
 		return nil, connErr
 	}
 
-	// Check referential integrity: reject if any store references this filter.
-	stores, err := s.cfgStore.ListStores(ctx)
+	// Check referential integrity: reject if any vault references this filter.
+	stores, err := s.cfgStore.ListVaults(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	for _, st := range stores {
 		if st.Filter != nil && *st.Filter == id {
 			return nil, connect.NewError(connect.CodeFailedPrecondition,
-				fmt.Errorf("filter %q is referenced by store %q", req.Msg.Id, st.ID))
+				fmt.Errorf("filter %q is referenced by vault %q", req.Msg.Id, st.ID))
 		}
 	}
 

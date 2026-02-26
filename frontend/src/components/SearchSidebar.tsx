@@ -2,9 +2,9 @@ import { TimeRangePicker } from "./TimeRangePicker";
 import {
   SidebarSection,
   FieldExplorer,
-  StoreButton,
+  VaultButton,
 } from "./Sidebar";
-import type { StoreInfo } from "../api/gen/gastrolog/v1/store_pb";
+import type { VaultInfo } from "../api/gen/gastrolog/v1/vault_pb";
 import type { FieldSummary } from "../utils";
 import type { ResizeProps } from "../hooks/usePanelResize";
 import { useThemeClass } from "../hooks/useThemeClass";
@@ -22,12 +22,12 @@ interface SearchSidebarProps {
   timeRange: string;
   onTimeRangeChange: (range: string) => void;
   onCustomRange: (start: Date, end: Date) => void;
-  stores: StoreInfo[] | undefined;
-  storesLoading: boolean;
+  vaults: VaultInfo[] | undefined;
+  vaultsLoading: boolean;
   statsLoading: boolean;
   totalRecords: bigint;
-  selectedStore: string;
-  onStoreSelect: (storeId: string) => void;
+  selectedVault: string;
+  onVaultSelect: (vaultId: string) => void;
   activeSeverities: string[];
   onToggleSeverity: (level: string) => void;
   attrFields: FieldSummary[];
@@ -49,12 +49,12 @@ export function SearchSidebar({
   timeRange,
   onTimeRangeChange,
   onCustomRange,
-  stores,
-  storesLoading,
+  vaults,
+  vaultsLoading,
   statsLoading,
   totalRecords,
-  selectedStore,
-  onStoreSelect,
+  selectedVault,
+  onVaultSelect,
   activeSeverities,
   onToggleSeverity,
   attrFields,
@@ -141,23 +141,23 @@ export function SearchSidebar({
           />
         </SidebarSection>
 
-        {/* Stores */}
-        <SidebarSection title="Stores" dark={dark}>
+        {/* Vaults */}
+        <SidebarSection title="Vaults" dark={dark}>
           <div className="flex flex-col gap-px">
-            {storesLoading ? (
+            {vaultsLoading ? (
               <div
                 className={`px-2.5 py-1.5 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
               >
                 Loading...
               </div>
             ) : (
-              stores?.map((store) => (
-                <StoreButton
-                  key={store.id}
-                  label={store.name || store.id}
-                  count={store.recordCount.toLocaleString()}
-                  active={selectedStore === store.id}
-                  onClick={() => onStoreSelect(store.id)}
+              vaults?.map((vault) => (
+                <VaultButton
+                  key={vault.id}
+                  label={vault.name || vault.id}
+                  count={vault.recordCount.toLocaleString()}
+                  active={selectedVault === vault.id}
+                  onClick={() => onVaultSelect(vault.id)}
                   dark={dark}
                 />
               ))

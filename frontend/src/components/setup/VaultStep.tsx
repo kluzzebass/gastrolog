@@ -1,24 +1,24 @@
 import { FormField, TextInput, SelectInput } from "../settings/FormField";
 import { useThemeClass } from "../../hooks/useThemeClass";
 
-export interface StoreData {
+export interface VaultData {
   name: string;
   type: string;
   dir: string;
 }
 
-interface StoreStepProps {
+interface VaultStepProps {
   dark: boolean;
-  data: StoreData;
-  onChange: (data: StoreData) => void;
+  data: VaultData;
+  onChange: (data: VaultData) => void;
 }
 
-const STORE_TYPES = [
+const VAULT_TYPES = [
   { value: "file", label: "File (recommended)" },
   { value: "memory", label: "Memory (non-persistent)" },
 ];
 
-export function StoreStep({ dark, data, onChange }: Readonly<StoreStepProps>) {
+export function VaultStep({ dark, data, onChange }: Readonly<VaultStepProps>) {
   const c = useThemeClass(dark);
   return (
     <div className="flex flex-col gap-5">
@@ -26,16 +26,16 @@ export function StoreStep({ dark, data, onChange }: Readonly<StoreStepProps>) {
         <h2
           className={`text-lg font-display font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
         >
-          Configure Store
+          Configure Vault
         </h2>
         <p
           className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
         >
-          A store holds your log data. Choose where and how logs are persisted. You can add more stores later in Settings.
+          A vault holds your log data. Choose where and how logs are persisted. You can add more vaults later in Settings.
         </p>
       </div>
 
-      <FormField label="Store Name" dark={dark}>
+      <FormField label="Vault Name" dark={dark}>
         <TextInput
           value={data.name}
           onChange={(v) => onChange({ ...data, name: v })}
@@ -45,14 +45,14 @@ export function StoreStep({ dark, data, onChange }: Readonly<StoreStepProps>) {
       </FormField>
 
       <FormField
-        label="Store Type"
-        description="File stores persist to disk. Memory stores are fast but lost on restart."
+        label="Vault Type"
+        description="File vaults persist to disk. Memory vaults are fast but lost on restart."
         dark={dark}
       >
         <SelectInput
           value={data.type}
           onChange={(v) => onChange({ ...data, type: v })}
-          options={STORE_TYPES}
+          options={VAULT_TYPES}
           dark={dark}
         />
       </FormField>
@@ -68,7 +68,7 @@ export function StoreStep({ dark, data, onChange }: Readonly<StoreStepProps>) {
             onChange={(v) => onChange({ ...data, dir: v })}
             dark={dark}
             mono
-            examples={["/var/log/gastrolog/data", "/stores"]}
+            examples={["/var/log/gastrolog/data", "/vaults"]}
           />
         </FormField>
       )}

@@ -2,12 +2,12 @@ import { useState, useEffect, useRef } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import {
   useConfig,
-  usePutStore,
-  useDeleteStore,
-  useSealStore,
-  useReindexStore,
-  useMigrateStore,
-  useMergeStores,
+  usePutVault,
+  useDeleteVault,
+  useSealVault,
+  useReindexVault,
+  useMigrateVault,
+  useMergeVaults,
   useJob,
 } from "../../api/hooks";
 import { JobStatus } from "../../api/client";
@@ -18,7 +18,7 @@ import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, SelectInput } from "./FormField";
-import { StoreParamsForm } from "./StoreParamsForm";
+import { VaultParamsForm } from "./VaultParamsForm";
 import { PrimaryButton, GhostButton } from "./Buttons";
 import { Checkbox } from "./Checkbox";
 import { useQueryClient } from "@tanstack/react-query";
@@ -52,7 +52,7 @@ function JobProgress({
     if (!job || handledRef.current) return;
     if (job.status === JobStatus.COMPLETED) {
       handledRef.current = true;
-      qc.invalidateQueries({ queryKey: ["stores"] });
+      qc.invalidateQueries({ queryKey: ["vaults"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
       qc.invalidateQueries({ queryKey: ["indexes"] });
       qc.invalidateQueries({ queryKey: ["config"] });
@@ -94,15 +94,15 @@ function RetentionRulesEditor({
   rules,
   onChange,
   retentionPolicies,
-  stores,
-  currentStoreId,
+  vaults,
+  currentVaultId,
   dark,
 }: Readonly<{
   rules: RetentionRuleEdit[];
   onChange: (rules: RetentionRuleEdit[]) => void;
   retentionPolicies: Array<{ id: string; name: string }>;
-  stores: Array<{ id: string; name: string }>;
-  currentStoreId: string;
+  vaults: Array<{ id: string; name: string }>;
+  currentVaultId: string;
   dark: boolean;
 }>) {
   const c = useThemeClass(dark);
@@ -114,10 +114,10 @@ function RetentionRulesEditor({
     { value: "expire", label: "expire" },
     { value: "migrate", label: "migrate" },
   ];
-  const storeOptions = [
-    { value: "", label: "(select store)" },
-    ...stores
-      .filter((s) => s.id !== currentStoreId)
+  const vaultOptions = [
+    { value: "", label: "(select vault)" },
+    ...vaults
+      .filter((s) => s.id !== currentVaultId)
       .map((s) => ({ value: s.id, label: s.name || s.id })),
   ];
 
@@ -197,7 +197,7 @@ function RetentionRulesEditor({
                     );
                     onChange(next);
                   }}
-                  options={storeOptions}
+                  options={vaultOptions}
                   dark={dark}
                 />
               </FormField>
@@ -219,15 +219,15 @@ function RetentionRulesEditor({
   );
 }
 
-export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: Readonly<{ dark: boolean; expandTarget?: string | null; onExpandTargetConsumed?: () => void }>) {
+export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: Readonly<{ dark: boolean; expandTarget?: string | null; onExpandTargetConsumed?: () => void }>) {
   const c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
-  const putStore = usePutStore();
-  const deleteStore = useDeleteStore();
-  const seal = useSealStore();
-  const reindex = useReindexStore();
-  const migrate = useMigrateStore();
-  const merge = useMergeStores();
+  const putVault = usePutVault();
+  const deleteVault = useDeleteVault();
+  const seal = useSealVault();
+  const reindex = useReindexVault();
+  const migrate = useMigrateVault();
+  const merge = useMergeVaults();
   const { addToast } = useToast();
 
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -237,12 +237,12 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
     Record<string, { name: string; type: string; dir: string }>
   >({});
   const [mergeTarget, setMergeTarget] = useState<Record<string, string>>({});
-  // Track active jobs per store: { storeId: { jobId, label } }
+  // Track active jobs per vault: { vaultId: { jobId, label } }
   const [activeJobs, setActiveJobs] = useState<
     Record<string, { jobId: string; label: string }>
   >({});
 
-  // New store form state.
+  // New vault form state.
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState("memory");
   const [newFilter, setNewFilter] = useState("");
@@ -250,24 +250,24 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
   const [newRetentionRules, setNewRetentionRules] = useState<RetentionRuleEdit[]>([]);
   const [newParams, setNewParams] = useState<Record<string, string>>({});
 
-  const configStores = config?.stores;
-  const stores = configStores ?? [];
-  const existingNames = new Set(stores.map((s) => s.name));
+  const configVaults = config?.vaults;
+  const vaults = configVaults ?? [];
+  const existingNames = new Set(vaults.map((s) => s.name));
   const effectiveName = newName.trim() || newType;
   const nameConflict = existingNames.has(effectiveName);
   const policies = config?.rotationPolicies ?? [];
   const retentionPolicies = config?.retentionPolicies ?? [];
   const filters = config?.filters ?? [];
 
-  // Auto-expand a store when navigated to from another settings tab.
+  // Auto-expand a vault when navigated to from another settings tab.
   useEffect(() => {
-    if (!expandTarget || !configStores || configStores.length === 0) return;
-    const match = configStores.find((s) => (s.name || s.id) === expandTarget);
+    if (!expandTarget || !configVaults || configVaults.length === 0) return;
+    const match = configVaults.find((s) => (s.name || s.id) === expandTarget);
     if (match) {
       setExpanded(match.id);
     }
     onExpandTargetConsumed?.();
-  }, [expandTarget, configStores, onExpandTargetConsumed]);
+  }, [expandTarget, configVaults, onExpandTargetConsumed]);
 
   const filterOptions = [
     { value: "", label: "(none)" },
@@ -280,8 +280,8 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
   ];
 
   const defaults = (id: string) => {
-    const store = stores.find((s) => s.id === id);
-    if (!store)
+    const vault = vaults.find((s) => s.id === id);
+    if (!vault)
       return {
         name: "",
         filter: "",
@@ -291,25 +291,25 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
         params: {} as Record<string, string>,
       };
     return {
-      name: store.name,
-      filter: store.filter,
-      policy: store.policy,
-      retentionRules: store.retentionRules.map((b) => ({
+      name: vault.name,
+      filter: vault.filter,
+      policy: vault.policy,
+      retentionRules: vault.retentionRules.map((b) => ({
         retentionPolicyId: b.retentionPolicyId,
         action: b.action,
         destinationId: b.destinationId,
       })),
-      enabled: store.enabled,
-      params: { ...store.params },
+      enabled: vault.enabled,
+      params: { ...vault.params },
     };
   };
 
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
 
-  const { handleSave: saveStore, handleDelete } = useCrudHandlers({
-    mutation: putStore,
-    deleteMutation: deleteStore,
-    label: "Store",
+  const { handleSave: saveVault, handleDelete } = useCrudHandlers({
+    mutation: putVault,
+    deleteMutation: deleteVault,
+    label: "Vault",
     onSaveTransform: (
       id,
       edit: {
@@ -335,10 +335,10 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
     clearEdit,
   });
 
-  const clearJob = (storeId: string) => {
+  const clearJob = (vaultId: string) => {
     setActiveJobs((prev) => {
       const next = { ...prev };
-      delete next[storeId];
+      delete next[vaultId];
       return next;
     });
   };
@@ -346,7 +346,7 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
   const handleCreate = async () => {
     const name = newName.trim() || newType;
     try {
-      await putStore.mutateAsync({
+      await putVault.mutateAsync({
         id: "",
         name,
         type: newType,
@@ -355,7 +355,7 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
         retentionRules: newRetentionRules,
         params: newParams,
       });
-      addToast(`Store "${name}" created`, "info");
+      addToast(`Vault "${name}" created`, "info");
       setAdding(false);
       setTypeConfirmed(false);
       setNewName("");
@@ -365,16 +365,16 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
       setNewRetentionRules([]);
       setNewParams({});
     } catch (err: any) {
-      const errorMessage = err.message ?? "Failed to create store";
+      const errorMessage = err.message ?? "Failed to create vault";
       addToast(errorMessage, "error");
     }
   };
 
   return (
     <SettingsSection
-      title="Stores"
+      title="Vaults"
       helpTopicId="storage-engines"
-      addLabel="Add Store"
+      addLabel="Add Vault"
       adding={adding}
       onToggleAdd={() => {
         setAdding(!adding);
@@ -387,8 +387,8 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
         setNewParams({});
       }}
       isLoading={isLoading}
-      isEmpty={stores.length === 0}
-      emptyMessage='No stores configured. Click "Add Store" to create one.'
+      isEmpty={vaults.length === 0}
+      emptyMessage='No vaults configured. Click "Add Vault" to create one.'
       dark={dark}
       addSlot={
         adding && !typeConfirmed ? (
@@ -426,7 +426,7 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
             setTypeConfirmed(false);
           }}
           onCreate={handleCreate}
-          isPending={putStore.isPending}
+          isPending={putVault.isPending}
           createDisabled={nameConflict}
           typeBadge={newType}
         >
@@ -460,12 +460,12 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
             rules={newRetentionRules}
             onChange={setNewRetentionRules}
             retentionPolicies={retentionPolicies}
-            stores={stores}
-            currentStoreId=""
+            vaults={vaults}
+            currentVaultId=""
             dark={dark}
           />
-          <StoreParamsForm
-            storeType={newType}
+          <VaultParamsForm
+            vaultType={newType}
             params={newParams}
             onChange={setNewParams}
             dark={dark}
@@ -473,28 +473,28 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
         </AddFormCard>
       )}
 
-      {stores.map((store) => {
-        const edit = getEdit(store.id);
-        const hasPolicy = store.policy && policies.some((p) => p.id === store.policy);
-        const hasFilter = store.filter && filters.some((f) => f.id === store.filter);
-        const hasRetention = store.retentionRules.length > 0;
+      {vaults.map((vault) => {
+        const edit = getEdit(vault.id);
+        const hasPolicy = vault.policy && policies.some((p) => p.id === vault.policy);
+        const hasFilter = vault.filter && filters.some((f) => f.id === vault.filter);
+        const hasRetention = vault.retentionRules.length > 0;
         const warnings = [
           ...(!hasPolicy ? ["no rotation policy"] : []),
           ...(!hasRetention ? ["no retention policy"] : []),
           ...(!hasFilter ? ["no filter"] : []),
         ];
-        const activeJob = activeJobs[store.id];
+        const activeJob = activeJobs[vault.id];
         return (
           <SettingsCard
-            key={store.id}
-            id={store.name || store.id}
-            typeBadge={store.type}
+            key={vault.id}
+            id={vault.name || vault.id}
+            typeBadge={vault.type}
             dark={dark}
-            expanded={expanded === store.id}
+            expanded={expanded === vault.id}
             onToggle={() =>
-              setExpanded(expanded === store.id ? null : store.id)
+              setExpanded(expanded === vault.id ? null : vault.id)
             }
-            onDelete={() => handleDelete(store.id)}
+            onDelete={() => handleDelete(vault.id)}
             deleteLabel="Delete"
             footer={
               <>
@@ -511,14 +511,14 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                         activeJob.label + " done: " + String(chunks) + " chunk(s)" + errorSuffix,
                         errors > 0 ? "warn" : "info",
                       );
-                      clearJob(store.id);
+                      clearJob(vault.id);
                     }}
                     onFailed={(job) => {
                       addToast(
                         `${activeJob.label} failed: ${job.error}`,
                         "error",
                       );
-                      clearJob(store.id);
+                      clearJob(vault.id);
                     }}
                   />
                 )}
@@ -531,7 +531,7 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                   disabled={seal.isPending || !!activeJob}
                   onClick={async () => {
                     try {
-                      await seal.mutateAsync(store.id);
+                      await seal.mutateAsync(vault.id);
                       addToast("Active chunk rotated", "info");
                     } catch (err: any) {
                       const errorMessage = err.message ?? "Rotate failed";
@@ -550,10 +550,10 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                   disabled={reindex.isPending || !!activeJob}
                   onClick={async () => {
                     try {
-                      const result = await reindex.mutateAsync(store.id);
+                      const result = await reindex.mutateAsync(vault.id);
                       setActiveJobs((prev) => ({
                         ...prev,
-                        [store.id]: {
+                        [vault.id]: {
                           jobId: result.jobId,
                           label: "Reindexing",
                         },
@@ -568,7 +568,7 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                     ? "Reindexing..."
                     : "Reindex"}
                 </button>
-                {store.enabled && (
+                {vault.enabled && (
                   <button
                     type="button"
                     className={`px-3 py-1.5 text-[0.8em] rounded border transition-colors ${c(
@@ -578,16 +578,16 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                     disabled={!!activeJob}
                     onClick={() => {
                       setMigrateTarget((prev) => {
-                        if (prev[store.id]) {
+                        if (prev[vault.id]) {
                           const next = { ...prev };
-                          delete next[store.id];
+                          delete next[vault.id];
                           return next;
                         }
-                        return { ...prev, [store.id]: { name: "", type: "", dir: "" } };
+                        return { ...prev, [vault.id]: { name: "", type: "", dir: "" } };
                       });
                     }}
                   >
-                    {migrateTarget[store.id] ? "Cancel Migrate" : "Migrate"}
+                    {migrateTarget[vault.id] ? "Cancel Migrate" : "Migrate"}
                   </button>
                 )}
                 <button
@@ -599,30 +599,30 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                   )}`}
                   onClick={() => {
                     setMergeTarget((prev) =>
-                      prev[store.id] !== undefined
-                        ? Object.fromEntries(Object.entries(prev).filter(([k]) => k !== store.id))
-                        : { ...prev, [store.id]: "" },
+                      prev[vault.id] !== undefined
+                        ? Object.fromEntries(Object.entries(prev).filter(([k]) => k !== vault.id))
+                        : { ...prev, [vault.id]: "" },
                     );
                   }}
                 >
-                  {mergeTarget[store.id] !== undefined ? "Cancel Merge" : "Merge Into..."}
+                  {mergeTarget[vault.id] !== undefined ? "Cancel Merge" : "Merge Into..."}
                 </button>
                 <PrimaryButton
                   onClick={() =>
-                    saveStore(store.id, {
-                      ...getEdit(store.id),
-                      type: store.type,
+                    saveVault(vault.id, {
+                      ...getEdit(vault.id),
+                      type: vault.type,
                     })
                   }
-                  disabled={putStore.isPending || !isDirty(store.id)}
+                  disabled={putVault.isPending || !isDirty(vault.id)}
                 >
-                  {putStore.isPending ? "Saving..." : "Save"}
+                  {putVault.isPending ? "Saving..." : "Save"}
                 </PrimaryButton>
               </>
             }
             headerRight={
               <span className="flex items-center gap-2">
-                {!store.enabled && (
+                {!vault.enabled && (
                   <span
                     className={`px-1.5 py-0.5 text-[0.8em] font-mono rounded ${c(
                       "bg-ink-hover text-text-ghost",
@@ -644,13 +644,13 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
               <FormField label="Name" dark={dark}>
                 <TextInput
                   value={edit.name}
-                  onChange={(v) => setEdit(store.id, { name: v })}
+                  onChange={(v) => setEdit(vault.id, { name: v })}
                   dark={dark}
                 />
               </FormField>
               <Checkbox
                 checked={edit.enabled}
-                onChange={(v) => setEdit(store.id, { enabled: v })}
+                onChange={(v) => setEdit(vault.id, { enabled: v })}
                 label="Enabled"
                 dark={dark}
               />
@@ -658,7 +658,7 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                 <FormField label="Filter" dark={dark}>
                   <SelectInput
                     value={edit.filter}
-                    onChange={(v) => setEdit(store.id, { filter: v })}
+                    onChange={(v) => setEdit(vault.id, { filter: v })}
                     options={filterOptions}
                     dark={dark}
                   />
@@ -666,7 +666,7 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                 <FormField label="Rotation Policy" dark={dark}>
                   <SelectInput
                     value={edit.policy}
-                    onChange={(v) => setEdit(store.id, { policy: v })}
+                    onChange={(v) => setEdit(vault.id, { policy: v })}
                     options={policyOptions}
                     dark={dark}
                   />
@@ -675,22 +675,22 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
               <RetentionRulesEditor
                 rules={edit.retentionRules}
                 onChange={(rules) =>
-                  setEdit(store.id, { retentionRules: rules })
+                  setEdit(vault.id, { retentionRules: rules })
                 }
                 retentionPolicies={retentionPolicies}
-                stores={stores}
-                currentStoreId={store.id}
+                vaults={vaults}
+                currentVaultId={vault.id}
                 dark={dark}
               />
-              <StoreParamsForm
-                storeType={store.type}
+              <VaultParamsForm
+                vaultType={vault.type}
                 params={edit.params}
-                onChange={(p) => setEdit(store.id, { params: p })}
+                onChange={(p) => setEdit(vault.id, { params: p })}
                 dark={dark}
               />
-              {migrateTarget[store.id] && (() => {
-                const mt = migrateTarget[store.id]!;
-                const resolvedType = mt.type || store.type;
+              {migrateTarget[vault.id] && (() => {
+                const mt = migrateTarget[vault.id]!;
+                const resolvedType = mt.type || vault.type;
                 const dirRequired = resolvedType === "file";
                 const canSubmit = mt.name.trim() && (!dirRequired || mt.dir.trim());
                 return (
@@ -703,10 +703,10 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                     <div
                       className={`text-[0.75em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
                     >
-                      Migrate Store
+                      Migrate Vault
                     </div>
                     <p className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
-                      Creates a new destination store, disables this store so no new data flows in, then moves all records to the destination and deletes this store.
+                      Creates a new destination vault, disables this vault so no new data flows in, then moves all records to the destination and deletes this vault.
                     </p>
                     <div className="grid grid-cols-3 gap-3">
                       <FormField label="Destination Name" dark={dark}>
@@ -715,10 +715,10 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                           onChange={(v) =>
                             setMigrateTarget((prev) => ({
                               ...prev,
-                              [store.id]: { ...prev[store.id]!, name: v },
+                              [vault.id]: { ...prev[vault.id]!, name: v },
                             }))
                           }
-                          placeholder="new-store"
+                          placeholder="new-vault"
                           dark={dark}
                           mono
                         />
@@ -729,11 +729,11 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                           onChange={(v) =>
                             setMigrateTarget((prev) => ({
                               ...prev,
-                              [store.id]: { ...prev[store.id]!, type: v, dir: "" },
+                              [vault.id]: { ...prev[vault.id]!, type: v, dir: "" },
                             }))
                           }
                           options={[
-                            { value: "", label: `same (${store.type})` },
+                            { value: "", label: `same (${vault.type})` },
                             { value: "memory", label: "memory" },
                             { value: "file", label: "file" },
                           ]}
@@ -747,10 +747,10 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                             onChange={(v) =>
                               setMigrateTarget((prev) => ({
                                 ...prev,
-                                [store.id]: { ...prev[store.id]!, dir: v },
+                                [vault.id]: { ...prev[vault.id]!, dir: v },
                               }))
                             }
-                            placeholder="/path/to/store"
+                            placeholder="/path/to/vault"
                             dark={dark}
                             mono
                             examples={["/var/lib/gastrolog/data"]}
@@ -764,7 +764,7 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                         onClick={async () => {
                           const trimmedName = mt.name.trim();
                           if (!trimmedName) return;
-                          const srcLabel = store.name || store.id;
+                          const srcLabel = vault.name || vault.id;
                           if (!confirm(`Migrate "${srcLabel}" to "${trimmedName}"? This will immediately disable "${srcLabel}" and delete it after all records are moved.`)) return;
                           const destType = mt.type || undefined;
                           const params: Record<string, string> = {};
@@ -774,21 +774,21 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                           const destParams = Object.keys(params).length > 0 ? params : undefined;
                           try {
                             const result = await migrate.mutateAsync({
-                              source: store.id,
+                              source: vault.id,
                               destination: trimmedName,
                               destinationType: destType,
                               destinationParams: destParams,
                             });
                             setActiveJobs((prev) => ({
                               ...prev,
-                              [store.id]: {
+                              [vault.id]: {
                                 jobId: result.jobId,
                                 label: "Migrating",
                               },
                             }));
                             setMigrateTarget((prev) => {
                               const next = { ...prev };
-                              delete next[store.id];
+                              delete next[vault.id];
                               return next;
                             });
                           } catch (err: any) {
@@ -803,7 +803,7 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                   </div>
                 );
               })()}
-              {mergeTarget[store.id] !== undefined && (
+              {mergeTarget[vault.id] !== undefined && (
                 <div
                   className={`flex flex-col gap-3 p-3 rounded border ${c(
                     "border-ink-border-subtle bg-ink-raised",
@@ -813,22 +813,22 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                   <div
                     className={`text-[0.75em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
                   >
-                    Merge Into Another Store
+                    Merge Into Another Vault
                   </div>
                   <p className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
-                    Disables this store, moves all records into the destination, then deletes this store.
+                    Disables this vault, moves all records into the destination, then deletes this vault.
                   </p>
                   <div className="grid grid-cols-2 gap-3">
                     <FormField label="Destination" dark={dark}>
                       <SelectInput
-                        value={mergeTarget[store.id] ?? ""}
+                        value={mergeTarget[vault.id] ?? ""}
                         onChange={(v) =>
-                          setMergeTarget((prev) => ({ ...prev, [store.id]: v }))
+                          setMergeTarget((prev) => ({ ...prev, [vault.id]: v }))
                         }
                         options={[
                           { value: "", label: "(select)" },
-                          ...stores
-                            .filter((s) => s.id !== store.id)
+                          ...vaults
+                            .filter((s) => s.id !== vault.id)
                             .map((s) => ({ value: s.id, label: s.name || s.id })),
                         ]}
                         dark={dark}
@@ -837,26 +837,26 @@ export function StoresSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                   </div>
                   <div className="flex justify-end">
                     <PrimaryButton
-                      disabled={merge.isPending || !mergeTarget[store.id] || !!activeJob}
+                      disabled={merge.isPending || !mergeTarget[vault.id] || !!activeJob}
                       onClick={async () => {
-                        const dest = mergeTarget[store.id];
+                        const dest = mergeTarget[vault.id];
                         if (!dest) return;
-                        const destName = stores.find((s) => s.id === dest)?.name || dest;
-                        if (!confirm(`Merge "${store.name || store.id}" into "${destName}"? This will immediately disable "${store.name || store.id}" and delete it after all records are moved.`)) return;
+                        const destName = vaults.find((s) => s.id === dest)?.name || dest;
+                        if (!confirm(`Merge "${vault.name || vault.id}" into "${destName}"? This will immediately disable "${vault.name || vault.id}" and delete it after all records are moved.`)) return;
                         try {
                           const result = await merge.mutateAsync({
-                            source: store.id,
+                            source: vault.id,
                             destination: dest,
                           });
                           setActiveJobs((prev) => ({
                             ...prev,
-                            [store.id]: {
+                            [vault.id]: {
                               jobId: result.jobId,
                               label: "Merging",
                             },
                           }));
                           setMergeTarget((prev) =>
-                            Object.fromEntries(Object.entries(prev).filter(([k]) => k !== store.id)),
+                            Object.fromEntries(Object.entries(prev).filter(([k]) => k !== vault.id)),
                           );
                         } catch (err: any) {
                           const errorMessage = err.message ?? "Merge failed";

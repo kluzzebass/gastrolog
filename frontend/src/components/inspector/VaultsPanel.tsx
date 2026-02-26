@@ -2,21 +2,21 @@ import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { clickableProps } from "../../utils";
 import {
-  useStores,
+  useVaults,
   useChunks,
   useIndexes,
-  useValidateStore,
+  useValidateVault,
 } from "../../api/hooks";
 import { useToast } from "../Toast";
-import type { ChunkMeta } from "../../api/gen/gastrolog/v1/store_pb";
+import type { ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
 import { formatBytes } from "../../utils/units";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { ChunkTimeline } from "./ChunkTimeline";
 import { HelpButton } from "../HelpButton";
 
-export function StoresPanel({ dark }: Readonly<{ dark: boolean }>) {
+export function VaultsPanel({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
-  const { data: stores, isLoading } = useStores();
+  const { data: vaults, isLoading } = useVaults();
   const [expanded, setExpanded] = useState<string | null>(null);
 
   if (isLoading) {
@@ -29,12 +29,12 @@ export function StoresPanel({ dark }: Readonly<{ dark: boolean }>) {
     );
   }
 
-  if (!stores || stores.length === 0) {
+  if (!vaults || vaults.length === 0) {
     return (
       <div
         className={`flex items-center justify-center h-full text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}
       >
-        No stores configured.
+        No vaults configured.
       </div>
     );
   }
@@ -45,51 +45,51 @@ export function StoresPanel({ dark }: Readonly<{ dark: boolean }>) {
         <h2
           className={`font-display text-[1.4em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
         >
-          Stores
+          Vaults
         </h2>
-        <HelpButton topicId="inspector-stores" />
+        <HelpButton topicId="inspector-vaults" />
       </div>
-      {[...stores].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)).map((store) => (
+      {[...vaults].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)).map((vault) => (
         <ExpandableCard
-          key={store.id}
-          id={store.name || store.id}
-          typeBadge={store.type}
+          key={vault.id}
+          id={vault.name || vault.id}
+          typeBadge={vault.type}
           typeBadgeAccent
           dark={dark}
-          expanded={expanded === store.id}
-          onToggle={() => setExpanded(expanded === store.id ? null : store.id)}
+          expanded={expanded === vault.id}
+          onToggle={() => setExpanded(expanded === vault.id ? null : vault.id)}
           headerRight={
             <span
               className={`text-[0.8em] flex items-center gap-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
             >
-              {!store.enabled && (
+              {!vault.enabled && (
                 <span className="px-1.5 py-0.5 text-[0.75em] font-medium uppercase tracking-wider rounded bg-severity-warn/15 text-severity-warn">
                   Disabled
                 </span>
               )}
-              {Number(store.chunkCount).toLocaleString()} chunks
+              {Number(vault.chunkCount).toLocaleString()} chunks
               {" \u00B7 "}
-              {store.recordCount.toLocaleString()} records
+              {vault.recordCount.toLocaleString()} records
             </span>
           }
         >
-          <StoreActions storeId={store.id} dark={dark} />
-          <ChunkList storeId={store.id} dark={dark} />
+          <VaultActions vaultId={vault.id} dark={dark} />
+          <ChunkList vaultId={vault.id} dark={dark} />
         </ExpandableCard>
       ))}
     </div>
   );
 }
 
-function StoreActions({
-  storeId,
+function VaultActions({
+  vaultId,
   dark,
 }: Readonly<{
-  storeId: string;
+  vaultId: string;
   dark: boolean;
 }>) {
   const c = useThemeClass(dark);
-  const validate = useValidateStore();
+  const validate = useValidateVault();
   const { addToast } = useToast();
 
   return (
@@ -108,10 +108,10 @@ function StoreActions({
         disabled={validate.isPending}
         onClick={async () => {
           try {
-            const result = await validate.mutateAsync(storeId);
+            const result = await validate.mutateAsync(vaultId);
             if (result.valid) {
               addToast(
-                `Store valid (${result.chunks.length} chunk(s) checked)`,
+                `Vault valid (${result.chunks.length} chunk(s) checked)`,
                 "info",
               );
             } else {
@@ -132,9 +132,9 @@ function StoreActions({
   );
 }
 
-function ChunkList({ storeId, dark }: Readonly<{ storeId: string; dark: boolean }>) {
+function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean }>) {
   const c = useThemeClass(dark);
-  const { data: chunks, isLoading } = useChunks(storeId);
+  const { data: chunks, isLoading } = useChunks(vaultId);
   const [expandedChunk, setExpandedChunk] = useState<string | null>(null);
 
   if (isLoading) {
@@ -264,7 +264,7 @@ function ChunkList({ storeId, dark }: Readonly<{ storeId: string; dark: boolean 
 
             {/* Expanded: index info */}
             {isExpanded && (
-              <ChunkDetail storeId={storeId} chunk={chunk} dark={dark} />
+              <ChunkDetail vaultId={vaultId} chunk={chunk} dark={dark} />
             )}
           </div>
         );
@@ -274,16 +274,16 @@ function ChunkList({ storeId, dark }: Readonly<{ storeId: string; dark: boolean 
 }
 
 function ChunkDetail({
-  storeId,
+  vaultId,
   chunk,
   dark,
 }: Readonly<{
-  storeId: string;
+  vaultId: string;
   chunk: ChunkMeta;
   dark: boolean;
 }>) {
   const c = useThemeClass(dark);
-  const { data, isLoading } = useIndexes(storeId, chunk.id);
+  const { data, isLoading } = useIndexes(vaultId, chunk.id);
 
   const logicalBytes = Number(chunk.bytes);
   const diskBytes = Number(chunk.diskBytes);
@@ -393,4 +393,3 @@ function formatTime(date: Date): string {
     second: "2-digit",
   });
 }
-

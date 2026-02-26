@@ -41,7 +41,7 @@ const (
 var (
 	ErrMissingDir      = errors.New("file chunk manager dir is required")
 	ErrManagerClosed   = errors.New("manager is closed")
-	ErrDirectoryLocked = errors.New("store directory is locked by another process")
+	ErrDirectoryLocked = errors.New("vault directory is locked by another process")
 )
 
 type Config struct {
@@ -63,8 +63,8 @@ type Config struct {
 	// Defaults to CompressionNone.
 	Compression CompressionType
 
-	// ExpectExisting indicates that this store is being loaded from config
-	// (not freshly created). If the store directory is missing, a warning
+	// ExpectExisting indicates that this vault is being loaded from config
+	// (not freshly created). If the vault directory is missing, a warning
 	// is logged about potential data loss.
 	ExpectExisting bool
 }
@@ -86,7 +86,7 @@ type Config struct {
 type Manager struct {
 	mu       sync.Mutex
 	cfg      Config
-	lockFile *os.File // Exclusive lock on store directory
+	lockFile *os.File // Exclusive lock on vault directory
 	active   *chunkState
 	metas    map[chunk.ChunkID]*chunkMeta // In-memory chunk metadata
 	closed   bool
@@ -164,7 +164,7 @@ func NewManager(cfg Config) (*Manager, error) {
 
 	// Check if the directory already exists before creating it.
 	// If we have to create it, we track that so we can warn about
-	// potential data loss (existing store with missing directory).
+	// potential data loss (existing vault with missing directory).
 	dirExisted := true
 	if _, statErr := os.Stat(cfg.Dir); os.IsNotExist(statErr) {
 		dirExisted = false
@@ -174,7 +174,7 @@ func NewManager(cfg Config) (*Manager, error) {
 		return nil, err
 	}
 
-	// Acquire exclusive lock on store directory.
+	// Acquire exclusive lock on vault directory.
 	lockPath := filepath.Join(cfg.Dir, lockFileName)
 	lockFile, err := os.OpenFile(filepath.Clean(lockPath), os.O_CREATE|os.O_RDWR, cfg.FileMode)
 	if err != nil {
@@ -214,7 +214,7 @@ func NewManager(cfg Config) (*Manager, error) {
 	}
 
 	if cfg.ExpectExisting && !dirExisted {
-		logger.Warn("store directory was missing and has been recreated empty — if this store previously held data, it may have been lost",
+		logger.Warn("vault directory was missing and has been recreated empty — if this vault previously held data, it may have been lost",
 			"dir", cfg.Dir)
 	}
 

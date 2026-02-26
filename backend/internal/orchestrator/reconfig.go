@@ -8,10 +8,10 @@ import (
 )
 
 var (
-	// ErrStoreNotEmpty is returned when attempting to remove a store that has data.
-	ErrStoreNotEmpty = errors.New("store is not empty")
-	// ErrStoreNotFound is returned when attempting to operate on a non-existent store.
-	ErrStoreNotFound = errors.New("store not found")
+	// ErrVaultNotEmpty is returned when attempting to remove a vault that has data.
+	ErrVaultNotEmpty = errors.New("vault is not empty")
+	// ErrVaultNotFound is returned when attempting to operate on a non-existent vault.
+	ErrVaultNotFound = errors.New("vault not found")
 	// ErrIngesterNotFound is returned when attempting to operate on a non-existent ingester.
 	ErrIngesterNotFound = errors.New("ingester not found")
 	// ErrDuplicateID is returned when attempting to add a component with an existing ID.

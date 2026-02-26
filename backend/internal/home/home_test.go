@@ -48,12 +48,12 @@ func TestUsersPath(t *testing.T) {
 	}
 }
 
-func TestStoreDir(t *testing.T) {
+func TestVaultDir(t *testing.T) {
 	d := New("/data")
-	if got := d.StoreDir("default"); got != "/data/stores/default" {
+	if got := d.VaultDir("default"); got != "/data/stores/default" {
 		t.Errorf("got %s", got)
 	}
-	if got := d.StoreDir("prod"); got != "/data/stores/prod" {
+	if got := d.VaultDir("prod"); got != "/data/stores/prod" {
 		t.Errorf("got %s", got)
 	}
 }

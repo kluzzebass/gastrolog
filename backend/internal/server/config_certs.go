@@ -14,7 +14,7 @@ import (
 	"gastrolog/internal/config"
 )
 
-// reloadCertManager lists all certs from the store and loads them into the cert manager.
+// reloadCertManager lists all certs from the vault and loads them into the cert manager.
 func (s *ConfigServer) reloadCertManager(ctx context.Context) error {
 	if s.certManager == nil {
 		return nil

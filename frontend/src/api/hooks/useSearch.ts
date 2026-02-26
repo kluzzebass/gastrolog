@@ -38,7 +38,7 @@ export function extractTokens(queryStr: string): string[] {
       lower.startsWith("start=") ||
       lower.startsWith("end=") ||
       lower.startsWith("last=") ||
-      lower.startsWith("store=") ||
+      lower.startsWith("vault=") ||
       lower.startsWith("limit=")
     ) {
       continue;

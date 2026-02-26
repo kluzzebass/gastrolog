@@ -6,15 +6,15 @@ option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
 
 import "google/protobuf/timestamp.proto";
 
-// StoreService provides store and chunk management.
-service StoreService {
-  // ListStores returns all registered stores.
-  rpc ListStores(ListStoresRequest) returns (ListStoresResponse);
+// VaultService provides vault and chunk management.
+service VaultService {
+  // ListVaults returns all registered vaults.
+  rpc ListVaults(ListVaultsRequest) returns (ListVaultsResponse);
 
-  // GetStore returns details for a specific store.
-  rpc GetStore(GetStoreRequest) returns (GetStoreResponse);
+  // GetVault returns details for a specific vault.
+  rpc GetVault(GetVaultRequest) returns (GetVaultResponse);
 
-  // ListChunks returns all chunks in a store.
+  // ListChunks returns all chunks in a vault.
   rpc ListChunks(ListChunksRequest) returns (ListChunksResponse);
 
   // GetChunk returns details for a specific chunk.
@@ -26,40 +26,40 @@ service StoreService {
   // AnalyzeChunk returns detailed index analysis for a chunk.
   rpc AnalyzeChunk(AnalyzeChunkRequest) returns (AnalyzeChunkResponse);
 
-  // GetStats returns overall statistics for a store.
+  // GetStats returns overall statistics for a vault.
   rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
 
-  // ReindexStore rebuilds all indexes for sealed chunks in a store.
-  rpc ReindexStore(ReindexStoreRequest) returns (ReindexStoreResponse);
+  // ReindexVault rebuilds all indexes for sealed chunks in a vault.
+  rpc ReindexVault(ReindexVaultRequest) returns (ReindexVaultResponse);
 
-  // ValidateStore checks chunk and index integrity for a store.
-  rpc ValidateStore(ValidateStoreRequest) returns (ValidateStoreResponse);
+  // ValidateVault checks chunk and index integrity for a vault.
+  rpc ValidateVault(ValidateVaultRequest) returns (ValidateVaultResponse);
 
-  // MigrateStore moves a store to a new name, type, and/or location.
+  // MigrateVault moves a vault to a new name, type, and/or location.
   // Three-phase: create destination, freeze source, async merge+delete.
-  rpc MigrateStore(MigrateStoreRequest) returns (MigrateStoreResponse);
+  rpc MigrateVault(MigrateVaultRequest) returns (MigrateVaultResponse);
 
-  // ExportStore streams all records from a store for backup.
-  rpc ExportStore(ExportStoreRequest) returns (stream ExportStoreResponse);
+  // ExportVault streams all records from a vault for backup.
+  rpc ExportVault(ExportVaultRequest) returns (stream ExportVaultResponse);
 
-  // ImportRecords appends a batch of records to a store.
+  // ImportRecords appends a batch of records to a vault.
   rpc ImportRecords(ImportRecordsRequest) returns (ImportRecordsResponse);
 
-  // MergeStores copies all records from a source store into a destination store,
+  // MergeVaults copies all records from a source vault into a destination vault,
   // then deletes the source.
-  rpc MergeStores(MergeStoresRequest) returns (MergeStoresResponse);
+  rpc MergeVaults(MergeVaultsRequest) returns (MergeVaultsResponse);
 
-  // SealStore seals the active chunk of a store.
-  rpc SealStore(SealStoreRequest) returns (SealStoreResponse);
+  // SealVault seals the active chunk of a vault.
+  rpc SealVault(SealVaultRequest) returns (SealVaultResponse);
 }
 
-message ListStoresRequest {}
+message ListVaultsRequest {}
 
-message ListStoresResponse {
-  repeated StoreInfo stores = 1;
+message ListVaultsResponse {
+  repeated VaultInfo vaults = 1;
 }
 
-message StoreInfo {
+message VaultInfo {
   string id = 1;
   string type = 2;
   string filter = 3;
@@ -69,16 +69,16 @@ message StoreInfo {
   string name = 7;
 }
 
-message GetStoreRequest {
+message GetVaultRequest {
   string id = 1;
 }
 
-message GetStoreResponse {
-  StoreInfo store = 1;
+message GetVaultResponse {
+  VaultInfo vault = 1;
 }
 
 message ListChunksRequest {
-  string store = 1;
+  string vault = 1;
 }
 
 message ListChunksResponse {
@@ -97,7 +97,7 @@ message ChunkMeta {
 }
 
 message GetChunkRequest {
-  string store = 1;
+  string vault = 1;
   string chunk_id = 2;
 }
 
@@ -106,7 +106,7 @@ message GetChunkResponse {
 }
 
 message GetIndexesRequest {
-  string store = 1;
+  string vault = 1;
   string chunk_id = 2;
 }
 
@@ -123,7 +123,7 @@ message IndexInfo {
 }
 
 message AnalyzeChunkRequest {
-  string store = 1;
+  string vault = 1;
   string chunk_id = 2; // If empty, analyze all chunks
 }
 
@@ -148,18 +148,18 @@ message IndexAnalysis {
 }
 
 message GetStatsRequest {
-  string store = 1; // If empty, aggregate across all stores
+  string vault = 1; // If empty, aggregate across all vaults
 }
 
 message GetStatsResponse {
-  int64 total_stores = 1;
+  int64 total_vaults = 1;
   int64 total_chunks = 2;
   int64 sealed_chunks = 3;
   int64 total_records = 4;
   int64 total_bytes = 5;
   google.protobuf.Timestamp oldest_record = 6;
   google.protobuf.Timestamp newest_record = 7;
-  repeated StoreStats store_stats = 8;
+  repeated VaultStats vault_stats = 8;
   double process_cpu_percent = 9;            // CPU usage as percentage (0-100+)
   int64 process_memory_bytes = 10;           // Summary: HeapInuse + StackInuse
   ProcessMemoryStats process_memory_stats = 11;
@@ -178,8 +178,8 @@ message ProcessMemoryStats {
   uint32 num_gc = 9;              // Completed GC cycles
 }
 
-// StoreStats provides per-store statistics.
-message StoreStats {
+// VaultStats provides per-vault statistics.
+message VaultStats {
   string id = 1;
   string type = 2;
   int64 chunk_count = 3;
@@ -194,19 +194,19 @@ message StoreStats {
   string name = 12;
 }
 
-message ReindexStoreRequest {
-  string store = 1;
+message ReindexVaultRequest {
+  string vault = 1;
 }
 
-message ReindexStoreResponse {
+message ReindexVaultResponse {
   string job_id = 4;
 }
 
-message ValidateStoreRequest {
-  string store = 1;
+message ValidateVaultRequest {
+  string vault = 1;
 }
 
-message ValidateStoreResponse {
+message ValidateVaultResponse {
   bool valid = 1;
   repeated ChunkValidation chunks = 2;
 }
@@ -217,26 +217,26 @@ message ChunkValidation {
   repeated string issues = 3;
 }
 
-// MigrateStore moves a store to a new name, type, and/or location.
+// MigrateVault moves a vault to a new name, type, and/or location.
 // Three-phase: create destination, freeze source, async merge+delete.
-message MigrateStoreRequest {
+message MigrateVaultRequest {
   string source = 1;
   string destination = 2;
-  // Optional: if empty, uses the same type as the source store.
+  // Optional: if empty, uses the same type as the source vault.
   string destination_type = 3;
   map<string, string> destination_params = 4;
 }
 
-message MigrateStoreResponse {
+message MigrateVaultResponse {
   string job_id = 3;
 }
 
-// ExportStore streams all records from a store.
-message ExportStoreRequest {
-  string store = 1;
+// ExportVault streams all records from a vault.
+message ExportVaultRequest {
+  string vault = 1;
 }
 
-message ExportStoreResponse {
+message ExportVaultResponse {
   repeated ExportRecord records = 1;
   bool has_more = 2;
 }
@@ -249,9 +249,9 @@ message ExportRecord {
   bytes raw = 4;
 }
 
-// ImportRecords appends a batch of records to a store.
+// ImportRecords appends a batch of records to a vault.
 message ImportRecordsRequest {
-  string store = 1;
+  string vault = 1;
   repeated ExportRecord records = 2;
 }
 
@@ -259,17 +259,17 @@ message ImportRecordsResponse {
   int64 records_imported = 1;
 }
 
-message MergeStoresRequest {
+message MergeVaultsRequest {
   string source = 1;
   string destination = 2;
 }
 
-message MergeStoresResponse {
+message MergeVaultsResponse {
   string job_id = 3;
 }
 
-message SealStoreRequest {
-  string store = 1;
+message SealVaultRequest {
+  string vault = 1;
 }
 
-message SealStoreResponse {}
+message SealVaultResponse {}

@@ -311,7 +311,7 @@ type MemoryStatsData = {
 };
 
 type StatsData = {
-  totalStores: bigint;
+  totalVaults: bigint;
   totalChunks: bigint;
   sealedChunks: bigint;
   totalRecords: bigint;
@@ -321,7 +321,7 @@ type StatsData = {
   processMemoryStats?: MemoryStatsData;
   oldestRecord?: { toDate(): Date };
   newestRecord?: { toDate(): Date };
-  storeStats: Array<{
+  vaultStats: Array<{
     id: string;
     type: string;
     chunkCount: bigint;
@@ -368,14 +368,14 @@ function StorageSection({
         )}
       </div>
 
-      {stats.storeStats.length > 1 && (
+      {stats.vaultStats.length > 1 && (
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-[0.8em]">
             <thead>
               <tr
                 className={`text-left ${c("text-text-ghost", "text-light-text-ghost")}`}
               >
-                <th className="pb-1 pr-3 font-medium">Store</th>
+                <th className="pb-1 pr-3 font-medium">Vault</th>
                 <th className="pb-1 pr-3 font-medium">Type</th>
                 <th className="pb-1 pr-3 font-medium text-right">Records</th>
                 <th className="pb-1 pr-3 font-medium text-right">Data</th>
@@ -383,7 +383,7 @@ function StorageSection({
               </tr>
             </thead>
             <tbody>
-              {stats.storeStats.map((ss) => (
+              {stats.vaultStats.map((ss) => (
                 <tr
                   key={ss.id}
                   className={c("text-text-muted", "text-light-text-muted")}

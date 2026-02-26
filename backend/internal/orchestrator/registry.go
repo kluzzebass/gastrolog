@@ -8,11 +8,11 @@ import (
 	"github.com/google/uuid"
 )
 
-// RegisterStore adds a store to the registry.
-func (o *Orchestrator) RegisterStore(store *Store) {
+// RegisterVault adds a vault to the registry.
+func (o *Orchestrator) RegisterVault(vault *Vault) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.stores[store.ID] = store
+	o.vaults[vault.ID] = vault
 }
 
 // RegisterDigester appends a digester to the processing pipeline.
@@ -37,7 +37,7 @@ func (o *Orchestrator) RegisterIngester(id uuid.UUID, r Ingester) {
 
 // SetFilterSet sets the filter set for attribute-based message filtering.
 // Must be called before Start() or Ingest().
-// If not set, messages are sent to all stores (legacy fan-out behavior).
+// If not set, messages are sent to all vaults (legacy fan-out behavior).
 func (o *Orchestrator) SetFilterSet(fs *FilterSet) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -57,7 +57,7 @@ func (o *Orchestrator) UnregisterIngester(id uuid.UUID) {
 func (o *Orchestrator) ChunkManager(key uuid.UUID) chunk.ChunkManager {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	if s := o.stores[key]; s != nil {
+	if s := o.vaults[key]; s != nil {
 		return s.Chunks
 	}
 	return nil
@@ -68,7 +68,7 @@ func (o *Orchestrator) ChunkManager(key uuid.UUID) chunk.ChunkManager {
 func (o *Orchestrator) IndexManager(key uuid.UUID) index.IndexManager {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	if s := o.stores[key]; s != nil {
+	if s := o.vaults[key]; s != nil {
 		return s.Indexes
 	}
 	return nil
@@ -81,12 +81,12 @@ func (o *Orchestrator) IsRunning() bool {
 	return o.running
 }
 
-// ListStores returns all registered store IDs.
-func (o *Orchestrator) ListStores() []uuid.UUID {
+// ListVaults returns all registered vault IDs.
+func (o *Orchestrator) ListVaults() []uuid.UUID {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	keys := make([]uuid.UUID, 0, len(o.stores))
-	for k := range o.stores {
+	keys := make([]uuid.UUID, 0, len(o.vaults))
+	for k := range o.vaults {
 		keys = append(keys, k)
 	}
 	return keys
@@ -108,14 +108,14 @@ func (o *Orchestrator) ListIngesters() []uuid.UUID {
 func (o *Orchestrator) QueryEngine(key uuid.UUID) *query.Engine {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	if s := o.stores[key]; s != nil {
+	if s := o.vaults[key]; s != nil {
 		return s.Query
 	}
 	return nil
 }
 
-// MultiStoreQueryEngine returns a query engine that searches across all stores.
-// Store predicates in queries (e.g., "store=prod") filter which stores are searched.
-func (o *Orchestrator) MultiStoreQueryEngine() *query.Engine {
+// MultiVaultQueryEngine returns a query engine that searches across all vaults.
+// Vault predicates in queries (e.g., "vault=prod") filter which vaults are searched.
+func (o *Orchestrator) MultiVaultQueryEngine() *query.Engine {
 	return query.NewWithRegistry(o, o.logger)
 }

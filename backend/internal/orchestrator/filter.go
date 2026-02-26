@@ -11,23 +11,23 @@ import (
 )
 
 
-// FilterKind identifies the type of store filter.
+// FilterKind identifies the type of vault filter.
 type FilterKind int
 
 const (
-	// FilterNone means the store receives nothing (empty filter).
+	// FilterNone means the vault receives nothing (empty filter).
 	FilterNone FilterKind = iota
-	// FilterCatchAll means the store receives all messages ("*").
+	// FilterCatchAll means the vault receives all messages ("*").
 	FilterCatchAll
-	// FilterCatchRest means the store receives unmatched messages ("+").
+	// FilterCatchRest means the vault receives unmatched messages ("+").
 	FilterCatchRest
-	// FilterExpr means the store uses an expression filter.
+	// FilterExpr means the vault uses an expression filter.
 	FilterExpr
 )
 
-// CompiledFilter is a pre-compiled store filter for fast evaluation.
+// CompiledFilter is a pre-compiled vault filter for fast evaluation.
 type CompiledFilter struct {
-	StoreID uuid.UUID
+	VaultID uuid.UUID
 	Kind    FilterKind
 	Expr    string         // original filter expression (for config reconstruction)
 	DNF     *querylang.DNF // only set for FilterExpr
@@ -35,22 +35,22 @@ type CompiledFilter struct {
 
 // CompileFilter parses a filter string and returns a compiled filter.
 // Returns an error if the filter expression is invalid or uses unsupported predicates.
-func CompileFilter(storeID uuid.UUID, filter string) (*CompiledFilter, error) {
+func CompileFilter(vaultID uuid.UUID, filter string) (*CompiledFilter, error) {
 	filter = strings.TrimSpace(filter)
 
 	// Empty filter = receives nothing
 	if filter == "" {
-		return &CompiledFilter{StoreID: storeID, Kind: FilterNone, Expr: ""}, nil
+		return &CompiledFilter{VaultID: vaultID, Kind: FilterNone, Expr: ""}, nil
 	}
 
 	// Catch-all
 	if filter == "*" {
-		return &CompiledFilter{StoreID: storeID, Kind: FilterCatchAll, Expr: "*"}, nil
+		return &CompiledFilter{VaultID: vaultID, Kind: FilterCatchAll, Expr: "*"}, nil
 	}
 
 	// Catch-the-rest
 	if filter == "+" {
-		return &CompiledFilter{StoreID: storeID, Kind: FilterCatchRest, Expr: "+"}, nil
+		return &CompiledFilter{VaultID: vaultID, Kind: FilterCatchRest, Expr: "+"}, nil
 	}
 
 	// Parse as querylang expression
@@ -68,14 +68,14 @@ func CompileFilter(storeID uuid.UUID, filter string) (*CompiledFilter, error) {
 	dnf := querylang.ToDNF(expr)
 
 	return &CompiledFilter{
-		StoreID: storeID,
+		VaultID: vaultID,
 		Kind:    FilterExpr,
 		Expr:    filter,
 		DNF:     &dnf,
 	}, nil
 }
 
-// FilterSet evaluates store filters to determine which stores receive a message.
+// FilterSet evaluates vault filters to determine which vaults receive a message.
 type FilterSet struct {
 	filters []*CompiledFilter
 }
@@ -85,19 +85,19 @@ func NewFilterSet(filters []*CompiledFilter) *FilterSet {
 	return &FilterSet{filters: filters}
 }
 
-// AddOrUpdate returns a new FilterSet with the given store's filter compiled and
+// AddOrUpdate returns a new FilterSet with the given vault's filter compiled and
 // added or updated. Returns error if the filter expression is invalid.
 // Safe to call on a nil receiver (creates a fresh set).
-func (fs *FilterSet) AddOrUpdate(storeID uuid.UUID, filterExpr string) (*FilterSet, error) {
-	f, err := CompileFilter(storeID, filterExpr)
+func (fs *FilterSet) AddOrUpdate(vaultID uuid.UUID, filterExpr string) (*FilterSet, error) {
+	f, err := CompileFilter(vaultID, filterExpr)
 	if err != nil {
-		return nil, fmt.Errorf("invalid filter for store %s: %w", storeID, err)
+		return nil, fmt.Errorf("invalid filter for vault %s: %w", vaultID, err)
 	}
 
 	var filters []*CompiledFilter
 	if fs != nil {
 		for _, existing := range fs.filters {
-			if existing.StoreID != storeID {
+			if existing.VaultID != vaultID {
 				filters = append(filters, existing)
 			}
 		}
@@ -107,21 +107,21 @@ func (fs *FilterSet) AddOrUpdate(storeID uuid.UUID, filterExpr string) (*FilterS
 	return NewFilterSet(filters), nil
 }
 
-// Without returns a new FilterSet excluding filters for the given store IDs.
+// Without returns a new FilterSet excluding filters for the given vault IDs.
 // Returns nil if the resulting set is empty. Safe to call on a nil receiver.
-func (fs *FilterSet) Without(storeIDs ...uuid.UUID) *FilterSet {
+func (fs *FilterSet) Without(vaultIDs ...uuid.UUID) *FilterSet {
 	if fs == nil {
 		return nil
 	}
 
-	exclude := make(map[uuid.UUID]struct{}, len(storeIDs))
-	for _, id := range storeIDs {
+	exclude := make(map[uuid.UUID]struct{}, len(vaultIDs))
+	for _, id := range vaultIDs {
 		exclude[id] = struct{}{}
 	}
 
 	var filters []*CompiledFilter
 	for _, f := range fs.filters {
-		if _, skip := exclude[f.StoreID]; !skip {
+		if _, skip := exclude[f.VaultID]; !skip {
 			filters = append(filters, f)
 		}
 	}
@@ -132,10 +132,10 @@ func (fs *FilterSet) Without(storeIDs ...uuid.UUID) *FilterSet {
 	return NewFilterSet(filters)
 }
 
-// Match returns the store IDs that should receive a message with the given attributes.
+// Match returns the vault IDs that should receive a message with the given attributes.
 //
 // TODO(telemetry): Track filter metrics to detect message loss:
-//   - messages_matched_total (counter per store)
+//   - messages_matched_total (counter per vault)
 //   - messages_dropped_total (counter for messages matching no filters)
 //   - messages_ingested_total (total messages received)
 //
@@ -150,10 +150,10 @@ func (fs *FilterSet) Match(attrs chunk.Attributes) []uuid.UUID {
 		case FilterNone:
 			// Skip - receives nothing
 		case FilterCatchAll:
-			result = append(result, f.StoreID)
+			result = append(result, f.VaultID)
 		case FilterExpr:
 			if querylang.MatchAttrs(f.DNF, attrs) {
-				result = append(result, f.StoreID)
+				result = append(result, f.VaultID)
 				matchedExpr = true
 			}
 		case FilterCatchRest:
@@ -165,7 +165,7 @@ func (fs *FilterSet) Match(attrs chunk.Attributes) []uuid.UUID {
 	if !matchedExpr {
 		for _, f := range fs.filters {
 			if f.Kind == FilterCatchRest {
-				result = append(result, f.StoreID)
+				result = append(result, f.VaultID)
 			}
 		}
 	}

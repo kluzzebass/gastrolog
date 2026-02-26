@@ -60,7 +60,7 @@ type QueryServiceClient interface {
 	Follow(context.Context, *connect.Request[v1.FollowRequest]) (*connect.ServerStreamForClient[v1.FollowResponse], error)
 	// Explain returns the query execution plan without executing.
 	Explain(context.Context, *connect.Request[v1.ExplainRequest]) (*connect.Response[v1.ExplainResponse], error)
-	// GetContext returns records surrounding a specific record, across all stores.
+	// GetContext returns records surrounding a specific record, across all vaults.
 	// Uses the anchor record's write timestamp to find nearby records.
 	GetContext(context.Context, *connect.Request[v1.GetContextRequest]) (*connect.Response[v1.GetContextResponse], error)
 	// GetSyntax returns the query language keyword sets for frontend tokenization.
@@ -185,7 +185,7 @@ type QueryServiceHandler interface {
 	Follow(context.Context, *connect.Request[v1.FollowRequest], *connect.ServerStream[v1.FollowResponse]) error
 	// Explain returns the query execution plan without executing.
 	Explain(context.Context, *connect.Request[v1.ExplainRequest]) (*connect.Response[v1.ExplainResponse], error)
-	// GetContext returns records surrounding a specific record, across all stores.
+	// GetContext returns records surrounding a specific record, across all vaults.
 	// Uses the anchor record's write timestamp to find nearby records.
 	GetContext(context.Context, *connect.Request[v1.GetContextRequest]) (*connect.Response[v1.GetContextResponse], error)
 	// GetSyntax returns the query language keyword sets for frontend tokenization.

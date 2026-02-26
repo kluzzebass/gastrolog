@@ -13,7 +13,7 @@ import (
 
 // ContextRef identifies the anchor record.
 type ContextRef struct {
-	StoreID uuid.UUID
+	VaultID uuid.UUID
 	ChunkID chunk.ChunkID
 	Pos     uint64
 }
@@ -25,8 +25,8 @@ type ContextResult struct {
 	After  []chunk.Record
 }
 
-// GetContext returns records surrounding a specific record, across all stores.
-// It reads the anchor record directly, then uses time-windowed multi-store
+// GetContext returns records surrounding a specific record, across all vaults.
+// It reads the anchor record directly, then uses time-windowed multi-vault
 // searches to find nearby records.
 func (e *Engine) GetContext(ctx context.Context, ref ContextRef, before, after int) (*ContextResult, error) {
 	// Defaults and caps.
@@ -44,9 +44,9 @@ func (e *Engine) GetContext(ctx context.Context, ref ContextRef, before, after i
 	}
 
 	// Read the anchor record.
-	cm, _ := e.getStoreManagers(ref.StoreID)
+	cm, _ := e.getVaultManagers(ref.VaultID)
 	if cm == nil {
-		return nil, fmt.Errorf("store %q not found", ref.StoreID)
+		return nil, fmt.Errorf("vault %q not found", ref.VaultID)
 	}
 
 	cursor, err := cm.OpenCursor(ref.ChunkID)
@@ -65,13 +65,13 @@ func (e *Engine) GetContext(ctx context.Context, ref ContextRef, before, after i
 		return nil, fmt.Errorf("failed to read anchor record: %w", err)
 	}
 	_ = cursor.Close()
-	anchorRec.StoreID = ref.StoreID
+	anchorRec.VaultID = ref.VaultID
 	anchorRec.Ref = anchorRef
 
 	anchorTS := anchorRec.WriteTS
 
 	isAnchor := func(rec chunk.Record) bool {
-		return rec.StoreID == ref.StoreID &&
+		return rec.VaultID == ref.VaultID &&
 			rec.Ref.ChunkID == ref.ChunkID &&
 			rec.Ref.Pos == ref.Pos
 	}

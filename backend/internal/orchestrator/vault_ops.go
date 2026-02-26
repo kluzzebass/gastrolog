@@ -25,45 +25,45 @@ type ChunkIndexReport struct {
 	Indexes []IndexInfo
 }
 
-// storeManagers looks up both managers for a store under RLock.
-// Returns ErrStoreNotFound if the store doesn't exist.
-func (o *Orchestrator) storeManagers(storeID uuid.UUID) (chunk.ChunkManager, index.IndexManager, error) {
+// vaultManagers looks up both managers for a vault under RLock.
+// Returns ErrVaultNotFound if the vault doesn't exist.
+func (o *Orchestrator) vaultManagers(vaultID uuid.UUID) (chunk.ChunkManager, index.IndexManager, error) {
 	o.mu.RLock()
-	s := o.stores[storeID]
+	s := o.vaults[vaultID]
 	o.mu.RUnlock()
 	if s == nil {
-		return nil, nil, fmt.Errorf("%w: %s", ErrStoreNotFound, storeID)
+		return nil, nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 	return s.Chunks, s.Indexes, nil
 }
 
-// chunkManager looks up the chunk manager for a store under RLock.
-func (o *Orchestrator) chunkManager(storeID uuid.UUID) (chunk.ChunkManager, error) {
+// chunkManager looks up the chunk manager for a vault under RLock.
+func (o *Orchestrator) chunkManager(vaultID uuid.UUID) (chunk.ChunkManager, error) {
 	o.mu.RLock()
-	s := o.stores[storeID]
+	s := o.vaults[vaultID]
 	o.mu.RUnlock()
 	if s == nil {
-		return nil, fmt.Errorf("%w: %s", ErrStoreNotFound, storeID)
+		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 	return s.Chunks, nil
 }
 
-// indexManager looks up the index manager for a store under RLock.
-func (o *Orchestrator) indexManager(storeID uuid.UUID) (index.IndexManager, error) {
+// indexManager looks up the index manager for a vault under RLock.
+func (o *Orchestrator) indexManager(vaultID uuid.UUID) (index.IndexManager, error) {
 	o.mu.RLock()
-	s := o.stores[storeID]
+	s := o.vaults[vaultID]
 	o.mu.RUnlock()
 	if s == nil {
-		return nil, fmt.Errorf("%w: %s", ErrStoreNotFound, storeID)
+		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 	return s.Indexes, nil
 }
 
 // --- Chunk read ---
 
-// ListChunkMetas returns all chunk metadata for a store.
-func (o *Orchestrator) ListChunkMetas(storeID uuid.UUID) ([]chunk.ChunkMeta, error) {
-	cm, err := o.chunkManager(storeID)
+// ListChunkMetas returns all chunk metadata for a vault.
+func (o *Orchestrator) ListChunkMetas(vaultID uuid.UUID) ([]chunk.ChunkMeta, error) {
+	cm, err := o.chunkManager(vaultID)
 	if err != nil {
 		return nil, err
 	}
@@ -71,8 +71,8 @@ func (o *Orchestrator) ListChunkMetas(storeID uuid.UUID) ([]chunk.ChunkMeta, err
 }
 
 // GetChunkMeta returns metadata for a specific chunk.
-func (o *Orchestrator) GetChunkMeta(storeID uuid.UUID, chunkID chunk.ChunkID) (chunk.ChunkMeta, error) {
-	cm, err := o.chunkManager(storeID)
+func (o *Orchestrator) GetChunkMeta(vaultID uuid.UUID, chunkID chunk.ChunkID) (chunk.ChunkMeta, error) {
+	cm, err := o.chunkManager(vaultID)
 	if err != nil {
 		return chunk.ChunkMeta{}, err
 	}
@@ -80,27 +80,27 @@ func (o *Orchestrator) GetChunkMeta(storeID uuid.UUID, chunkID chunk.ChunkID) (c
 }
 
 // OpenCursor opens a record cursor for the given chunk.
-func (o *Orchestrator) OpenCursor(storeID uuid.UUID, chunkID chunk.ChunkID) (chunk.RecordCursor, error) {
-	cm, err := o.chunkManager(storeID)
+func (o *Orchestrator) OpenCursor(vaultID uuid.UUID, chunkID chunk.ChunkID) (chunk.RecordCursor, error) {
+	cm, err := o.chunkManager(vaultID)
 	if err != nil {
 		return nil, err
 	}
 	return cm.OpenCursor(chunkID)
 }
 
-// StoreExists returns true if a store with the given ID is registered.
-func (o *Orchestrator) StoreExists(storeID uuid.UUID) bool {
+// VaultExists returns true if a vault with the given ID is registered.
+func (o *Orchestrator) VaultExists(vaultID uuid.UUID) bool {
 	o.mu.RLock()
-	s := o.stores[storeID]
+	s := o.vaults[vaultID]
 	o.mu.RUnlock()
 	return s != nil
 }
 
 // --- Chunk write ---
 
-// Append appends a record to the store's active chunk.
-func (o *Orchestrator) Append(storeID uuid.UUID, rec chunk.Record) (chunk.ChunkID, uint64, error) {
-	cm, err := o.chunkManager(storeID)
+// Append appends a record to the vault's active chunk.
+func (o *Orchestrator) Append(vaultID uuid.UUID, rec chunk.Record) (chunk.ChunkID, uint64, error) {
+	cm, err := o.chunkManager(vaultID)
 	if err != nil {
 		return chunk.ChunkID{}, 0, err
 	}
@@ -109,44 +109,44 @@ func (o *Orchestrator) Append(storeID uuid.UUID, rec chunk.Record) (chunk.ChunkI
 
 // SealActive seals the active chunk if it has records. No-op if empty or no active chunk.
 // After sealing, schedules compression and index builds (same as ingest-triggered seal).
-func (o *Orchestrator) SealActive(storeID uuid.UUID) error {
+func (o *Orchestrator) SealActive(vaultID uuid.UUID) error {
 	o.mu.RLock()
-	store := o.stores[storeID]
+	vault := o.vaults[vaultID]
 	o.mu.RUnlock()
-	if store == nil {
-		return fmt.Errorf("%w: %s", ErrStoreNotFound, storeID)
+	if vault == nil {
+		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 
-	active := store.Chunks.Active()
+	active := vault.Chunks.Active()
 	if active == nil || active.RecordCount == 0 {
 		return nil
 	}
 	chunkID := active.ID
 
-	if err := store.Chunks.Seal(); err != nil {
+	if err := vault.Chunks.Seal(); err != nil {
 		return err
 	}
 
 	// Schedule post-seal jobs (same as ingest onSeal callback).
-	// Must hold lock since scheduleCompression/scheduleIndexBuild access o.stores.
+	// Must hold lock since scheduleCompression/scheduleIndexBuild access o.vaults.
 	o.mu.Lock()
-	o.scheduleCompression(storeID, chunkID)
-	o.scheduleIndexBuild(storeID, chunkID)
+	o.scheduleCompression(vaultID, chunkID)
+	o.scheduleIndexBuild(vaultID, chunkID)
 	o.mu.Unlock()
 
 	return nil
 }
 
-// SetStoreCompression enables or disables compression for a store's chunk manager.
-// No-op if the chunk manager doesn't support compression (e.g. memory stores).
-func (o *Orchestrator) SetStoreCompression(storeID uuid.UUID, enabled bool) error {
+// SetVaultCompression enables or disables compression for a vault's chunk manager.
+// No-op if the chunk manager doesn't support compression (e.g. memory vaults).
+func (o *Orchestrator) SetVaultCompression(vaultID uuid.UUID, enabled bool) error {
 	o.mu.RLock()
-	store := o.stores[storeID]
+	vault := o.vaults[vaultID]
 	o.mu.RUnlock()
-	if store == nil {
-		return fmt.Errorf("%w: %s", ErrStoreNotFound, storeID)
+	if vault == nil {
+		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
-	if compressor, ok := store.Chunks.(chunk.ChunkCompressor); ok {
+	if compressor, ok := vault.Chunks.(chunk.ChunkCompressor); ok {
 		return compressor.SetCompressionEnabled(enabled)
 	}
 	return nil
@@ -155,8 +155,8 @@ func (o *Orchestrator) SetStoreCompression(storeID uuid.UUID, enabled bool) erro
 // --- Index ops ---
 
 // IndexSizes returns the size in bytes for each index of a chunk.
-func (o *Orchestrator) IndexSizes(storeID uuid.UUID, chunkID chunk.ChunkID) (map[string]int64, error) {
-	im, err := o.indexManager(storeID)
+func (o *Orchestrator) IndexSizes(vaultID uuid.UUID, chunkID chunk.ChunkID) (map[string]int64, error) {
+	im, err := o.indexManager(vaultID)
 	if err != nil {
 		return nil, err
 	}
@@ -164,8 +164,8 @@ func (o *Orchestrator) IndexSizes(storeID uuid.UUID, chunkID chunk.ChunkID) (map
 }
 
 // IndexesComplete reports whether all indexes exist for the given chunk.
-func (o *Orchestrator) IndexesComplete(storeID uuid.UUID, chunkID chunk.ChunkID) (bool, error) {
-	im, err := o.indexManager(storeID)
+func (o *Orchestrator) IndexesComplete(vaultID uuid.UUID, chunkID chunk.ChunkID) (bool, error) {
+	im, err := o.indexManager(vaultID)
 	if err != nil {
 		return false, err
 	}
@@ -173,8 +173,8 @@ func (o *Orchestrator) IndexesComplete(storeID uuid.UUID, chunkID chunk.ChunkID)
 }
 
 // BuildIndexes builds all indexes for a sealed chunk.
-func (o *Orchestrator) BuildIndexes(ctx context.Context, storeID uuid.UUID, chunkID chunk.ChunkID) error {
-	im, err := o.indexManager(storeID)
+func (o *Orchestrator) BuildIndexes(ctx context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID) error {
+	im, err := o.indexManager(vaultID)
 	if err != nil {
 		return err
 	}
@@ -182,8 +182,8 @@ func (o *Orchestrator) BuildIndexes(ctx context.Context, storeID uuid.UUID, chun
 }
 
 // DeleteIndexes removes all indexes for a chunk.
-func (o *Orchestrator) DeleteIndexes(storeID uuid.UUID, chunkID chunk.ChunkID) error {
-	im, err := o.indexManager(storeID)
+func (o *Orchestrator) DeleteIndexes(vaultID uuid.UUID, chunkID chunk.ChunkID) error {
+	im, err := o.indexManager(vaultID)
 	if err != nil {
 		return err
 	}
@@ -193,8 +193,8 @@ func (o *Orchestrator) DeleteIndexes(storeID uuid.UUID, chunkID chunk.ChunkID) e
 // --- Composite ---
 
 // ChunkIndexInfos returns seal status and per-index info for a chunk.
-func (o *Orchestrator) ChunkIndexInfos(storeID uuid.UUID, chunkID chunk.ChunkID) (*ChunkIndexReport, error) {
-	cm, im, err := o.storeManagers(storeID)
+func (o *Orchestrator) ChunkIndexInfos(vaultID uuid.UUID, chunkID chunk.ChunkID) (*ChunkIndexReport, error) {
+	cm, im, err := o.vaultManagers(vaultID)
 	if err != nil {
 		return nil, err
 	}
@@ -277,25 +277,25 @@ func (o *Orchestrator) ChunkIndexInfos(storeID uuid.UUID, chunkID chunk.ChunkID)
 	return report, nil
 }
 
-// NewAnalyzer creates an index analyzer for the given store.
-func (o *Orchestrator) NewAnalyzer(storeID uuid.UUID) (*analyzer.Analyzer, error) {
-	cm, im, err := o.storeManagers(storeID)
+// NewAnalyzer creates an index analyzer for the given vault.
+func (o *Orchestrator) NewAnalyzer(vaultID uuid.UUID) (*analyzer.Analyzer, error) {
+	cm, im, err := o.vaultManagers(vaultID)
 	if err != nil {
 		return nil, err
 	}
 	return analyzer.New(cm, im), nil
 }
 
-// SupportsChunkMove returns true if both stores support filesystem-level chunk moves.
+// SupportsChunkMove returns true if both vaults support filesystem-level chunk moves.
 func (o *Orchestrator) SupportsChunkMove(srcID, dstID uuid.UUID) bool {
 	o.mu.RLock()
-	srcStore := o.stores[srcID]
-	dstStore := o.stores[dstID]
+	srcVault := o.vaults[srcID]
+	dstVault := o.vaults[dstID]
 	o.mu.RUnlock()
-	if srcStore == nil || dstStore == nil {
+	if srcVault == nil || dstVault == nil {
 		return false
 	}
-	_, srcOK := srcStore.Chunks.(chunk.ChunkMover)
-	_, dstOK := dstStore.Chunks.(chunk.ChunkMover)
+	_, srcOK := srcVault.Chunks.(chunk.ChunkMover)
+	_, dstOK := dstVault.Chunks.(chunk.ChunkMover)
 	return srcOK && dstOK
 }

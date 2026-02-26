@@ -10,7 +10,7 @@ On first launch, GastroLog has no users. The first user to register is automatic
 
 | Role | Capabilities |
 |------|-------------|
-| **admin** | Full system access: query logs, manage configuration (stores, ingesters, filters, policies), manage users (create, delete, reset passwords, change roles), manage [certificates](help:certificates) |
+| **admin** | Full system access: query logs, manage configuration (vaults, ingesters, filters, policies), manage users (create, delete, reset passwords, change roles), manage [certificates](help:certificates) |
 | **user** | Query logs and change own password |
 
 ## Authentication

@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { DeleteCertificateRequest, DeleteCertificateResponse, DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteStoreRequest, DeleteStoreResponse, GetCertificateRequest, GetCertificateResponse, GetConfigRequest, GetConfigResponse, GetIngesterDefaultsRequest, GetIngesterDefaultsResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetServerConfigRequest, GetServerConfigResponse, ListCertificatesRequest, ListCertificatesResponse, ListIngestersRequest, ListIngestersResponse, PauseStoreRequest, PauseStoreResponse, PutCertificateRequest, PutCertificateResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutServerConfigRequest, PutServerConfigResponse, PutStoreRequest, PutStoreResponse, ResumeStoreRequest, ResumeStoreResponse, TestIngesterRequest, TestIngesterResponse } from "./config_pb.js";
+import { DeleteCertificateRequest, DeleteCertificateResponse, DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteVaultRequest, DeleteVaultResponse, GetCertificateRequest, GetCertificateResponse, GetConfigRequest, GetConfigResponse, GetIngesterDefaultsRequest, GetIngesterDefaultsResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetServerConfigRequest, GetServerConfigResponse, ListCertificatesRequest, ListCertificatesResponse, ListIngestersRequest, ListIngestersResponse, PauseVaultRequest, PauseVaultResponse, PutCertificateRequest, PutCertificateResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutServerConfigRequest, PutServerConfigResponse, PutVaultRequest, PutVaultResponse, ResumeVaultRequest, ResumeVaultResponse, TestIngesterRequest, TestIngesterResponse } from "./config_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -114,25 +114,25 @@ export const ConfigService = {
       kind: MethodKind.Unary,
     },
     /**
-     * PutStore creates or updates a store.
+     * PutVault creates or updates a vault.
      *
-     * @generated from rpc gastrolog.v1.ConfigService.PutStore
+     * @generated from rpc gastrolog.v1.ConfigService.PutVault
      */
-    putStore: {
-      name: "PutStore",
-      I: PutStoreRequest,
-      O: PutStoreResponse,
+    putVault: {
+      name: "PutVault",
+      I: PutVaultRequest,
+      O: PutVaultResponse,
       kind: MethodKind.Unary,
     },
     /**
-     * DeleteStore removes a store (must be empty).
+     * DeleteVault removes a vault (must be empty).
      *
-     * @generated from rpc gastrolog.v1.ConfigService.DeleteStore
+     * @generated from rpc gastrolog.v1.ConfigService.DeleteVault
      */
-    deleteStore: {
-      name: "DeleteStore",
-      I: DeleteStoreRequest,
-      O: DeleteStoreResponse,
+    deleteVault: {
+      name: "DeleteVault",
+      I: DeleteVaultRequest,
+      O: DeleteVaultResponse,
       kind: MethodKind.Unary,
     },
     /**
@@ -279,25 +279,25 @@ export const ConfigService = {
       kind: MethodKind.Unary,
     },
     /**
-     * PauseStore pauses ingestion for a store.
+     * PauseVault pauses ingestion for a vault.
      *
-     * @generated from rpc gastrolog.v1.ConfigService.PauseStore
+     * @generated from rpc gastrolog.v1.ConfigService.PauseVault
      */
-    pauseStore: {
-      name: "PauseStore",
-      I: PauseStoreRequest,
-      O: PauseStoreResponse,
+    pauseVault: {
+      name: "PauseVault",
+      I: PauseVaultRequest,
+      O: PauseVaultResponse,
       kind: MethodKind.Unary,
     },
     /**
-     * ResumeStore resumes ingestion for a store.
+     * ResumeVault resumes ingestion for a vault.
      *
-     * @generated from rpc gastrolog.v1.ConfigService.ResumeStore
+     * @generated from rpc gastrolog.v1.ConfigService.ResumeVault
      */
-    resumeStore: {
-      name: "ResumeStore",
-      I: ResumeStoreRequest,
-      O: ResumeStoreResponse,
+    resumeVault: {
+      name: "ResumeVault",
+      I: ResumeVaultRequest,
+      O: ResumeVaultResponse,
       kind: MethodKind.Unary,
     },
     /**

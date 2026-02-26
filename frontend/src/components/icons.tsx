@@ -198,7 +198,7 @@ export function FilterIcon({ className }: Readonly<IconProps>) {
   );
 }
 
-export function StoresIcon({ className }: Readonly<IconProps>) {
+export function VaultsIcon({ className }: Readonly<IconProps>) {
   return (
     <svg
       viewBox="0 0 24 24"

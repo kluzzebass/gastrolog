@@ -17,21 +17,21 @@ import (
 // positionExhausted is a sentinel value indicating a chunk has been fully consumed.
 const positionExhausted = math.MaxUint64
 
-// storeChunk pairs a store ID with its chunk metadata.
-type storeChunk struct {
-	storeID uuid.UUID
+// vaultChunk pairs a vault ID with its chunk metadata.
+type vaultChunk struct {
+	vaultID uuid.UUID
 	meta    chunk.ChunkMeta
 }
 
-// mergeKey uniquely identifies a chunk within a store.
+// mergeKey uniquely identifies a chunk within a vault.
 type mergeKey struct {
-	storeID uuid.UUID
+	vaultID uuid.UUID
 	chunkID chunk.ChunkID
 }
 
 // activeScanner tracks an open iterator for a chunk during merge operations.
 type activeScanner struct {
-	storeID uuid.UUID
+	vaultID uuid.UUID
 	chunkID chunk.ChunkID
 	iter    func() (recordWithRef, error, bool)
 	stop    func()
@@ -39,7 +39,7 @@ type activeScanner struct {
 
 // pendingRecord holds a record collected during Follow polling.
 type pendingRecord struct {
-	storeID uuid.UUID
+	vaultID uuid.UUID
 	rec     chunk.Record
 	ref     chunk.RecordRef
 }
@@ -50,7 +50,7 @@ type mergeState struct {
 	h              heap.Interface
 	scanners       []activeScanner
 	chunkPositions map[mergeKey]uint64
-	lastRefs       *[]MultiStorePosition
+	lastRefs       *[]MultiVaultPosition
 }
 
 // cleanup stops all active scanners.
@@ -64,10 +64,10 @@ func (ms *mergeState) cleanup() {
 
 // buildLastRefs populates lastRefs from chunkPositions.
 func (ms *mergeState) buildLastRefs() {
-	refs := make([]MultiStorePosition, 0, len(ms.chunkPositions))
+	refs := make([]MultiVaultPosition, 0, len(ms.chunkPositions))
 	for key, pos := range ms.chunkPositions {
-		refs = append(refs, MultiStorePosition{
-			StoreID:  key.storeID,
+		refs = append(refs, MultiVaultPosition{
+			VaultID:  key.vaultID,
 			ChunkID:  key.chunkID,
 			Position: pos,
 		})
@@ -75,10 +75,10 @@ func (ms *mergeState) buildLastRefs() {
 	*ms.lastRefs = refs
 }
 
-// findScanner looks up a scanner by store and chunk ID.
-func (ms *mergeState) findScanner(storeID uuid.UUID, chunkID chunk.ChunkID) *activeScanner {
+// findScanner looks up a scanner by vault and chunk ID.
+func (ms *mergeState) findScanner(vaultID uuid.UUID, chunkID chunk.ChunkID) *activeScanner {
 	for i := range ms.scanners {
-		if ms.scanners[i].storeID == storeID && ms.scanners[i].chunkID == chunkID {
+		if ms.scanners[i].vaultID == vaultID && ms.scanners[i].chunkID == chunkID {
 			return &ms.scanners[i]
 		}
 	}
@@ -89,8 +89,8 @@ func (ms *mergeState) findScanner(storeID uuid.UUID, chunkID chunk.ChunkID) *act
 // record onto the heap or marking the chunk as exhausted.
 // Returns (error, false) if advancing produced an error; (nil, true) otherwise.
 func (ms *mergeState) advanceScanner(entry *cursorEntry) (error, bool) {
-	key := mergeKey{storeID: entry.storeID, chunkID: entry.chunkID}
-	scanner := ms.findScanner(entry.storeID, entry.chunkID)
+	key := mergeKey{vaultID: entry.vaultID, chunkID: entry.chunkID}
+	scanner := ms.findScanner(entry.vaultID, entry.chunkID)
 	if scanner == nil || scanner.iter == nil {
 		return nil, true
 	}
@@ -113,15 +113,15 @@ func (ms *mergeState) advanceScanner(entry *cursorEntry) (error, bool) {
 	return nil, true
 }
 
-// collectStoreChunks gathers chunks from selected stores that overlap the query.
-func (e *Engine) collectStoreChunks(
-	selectedStores []uuid.UUID,
+// collectVaultChunks gathers chunks from selected vaults that overlap the query.
+func (e *Engine) collectVaultChunks(
+	selectedVaults []uuid.UUID,
 	q Query,
 	chunkIDs []chunk.ChunkID,
-) ([]storeChunk, error) {
-	var allChunks []storeChunk
-	for _, storeID := range selectedStores {
-		cm, _ := e.getStoreManagers(storeID)
+) ([]vaultChunk, error) {
+	var allChunks []vaultChunk
+	for _, vaultID := range selectedVaults {
+		cm, _ := e.getVaultManagers(vaultID)
 		if cm == nil {
 			continue
 		}
@@ -133,7 +133,7 @@ func (e *Engine) collectStoreChunks(
 
 		candidates := e.selectChunks(metas, q, chunkIDs)
 		for _, meta := range candidates {
-			allChunks = append(allChunks, storeChunk{storeID: storeID, meta: meta})
+			allChunks = append(allChunks, vaultChunk{vaultID: vaultID, meta: meta})
 		}
 	}
 	return allChunks, nil
@@ -141,7 +141,7 @@ func (e *Engine) collectStoreChunks(
 
 // validateResumeToken checks that all non-exhausted positions in the resume
 // token reference chunks that still exist.
-func validateResumeToken(resume *ResumeToken, allChunks []storeChunk) error {
+func validateResumeToken(resume *ResumeToken, allChunks []vaultChunk) error {
 	if resume == nil || len(resume.Positions) == 0 {
 		return nil
 	}
@@ -170,10 +170,10 @@ func buildResumePositionMap(resume *ResumeToken) map[uuid.UUID]map[chunk.ChunkID
 		return m
 	}
 	for _, pos := range resume.Positions {
-		if m[pos.StoreID] == nil {
-			m[pos.StoreID] = make(map[chunk.ChunkID]uint64)
+		if m[pos.VaultID] == nil {
+			m[pos.VaultID] = make(map[chunk.ChunkID]uint64)
 		}
-		m[pos.StoreID][pos.ChunkID] = pos.Position
+		m[pos.VaultID][pos.ChunkID] = pos.Position
 	}
 	return m
 }
@@ -193,19 +193,19 @@ func newMergeHeap(reverse bool, capacity int) heap.Interface {
 // chunkPositions and returns (nil, true) if the chunk was already exhausted.
 func lookupResumePosition(
 	resumePositions map[uuid.UUID]map[chunk.ChunkID]uint64,
-	sc storeChunk,
+	sc vaultChunk,
 	chunkPositions map[mergeKey]uint64,
 ) (startPos *uint64, exhausted bool) {
-	storePositions, ok := resumePositions[sc.storeID]
+	vaultPositions, ok := resumePositions[sc.vaultID]
 	if !ok {
 		return nil, false
 	}
-	pos, ok := storePositions[sc.meta.ID]
+	pos, ok := vaultPositions[sc.meta.ID]
 	if !ok {
 		return nil, false
 	}
 	if pos == positionExhausted {
-		chunkPositions[mergeKey{storeID: sc.storeID, chunkID: sc.meta.ID}] = positionExhausted
+		chunkPositions[mergeKey{vaultID: sc.vaultID, chunkID: sc.meta.ID}] = positionExhausted
 		return nil, true
 	}
 	return &pos, false
@@ -213,12 +213,12 @@ func lookupResumePosition(
 
 // resolveStartPosition finds the resume start position for a single chunk
 // from a resume token. Returns nil if no position is found.
-func resolveStartPosition(resume *ResumeToken, storeID uuid.UUID, chunkID chunk.ChunkID) *uint64 {
+func resolveStartPosition(resume *ResumeToken, vaultID uuid.UUID, chunkID chunk.ChunkID) *uint64 {
 	if resume == nil {
 		return nil
 	}
 	for _, pos := range resume.Positions {
-		if pos.StoreID == storeID && pos.ChunkID == chunkID {
+		if pos.VaultID == vaultID && pos.ChunkID == chunkID {
 			return &pos.Position
 		}
 	}
@@ -231,22 +231,22 @@ func resolveStartPosition(resume *ResumeToken, storeID uuid.UUID, chunkID chunk.
 func (e *Engine) searchSingleChunk(
 	ctx context.Context,
 	q Query,
-	sc storeChunk,
+	sc vaultChunk,
 	resume *ResumeToken,
-	lastRefs *[]MultiStorePosition,
+	lastRefs *[]MultiVaultPosition,
 	yield func(chunk.Record, error) bool,
 ) (completed bool) {
-	startPos := resolveStartPosition(resume, sc.storeID, sc.meta.ID)
+	startPos := resolveStartPosition(resume, sc.vaultID, sc.meta.ID)
 
 	count := 0
-	for rr, err := range e.searchChunkWithRef(ctx, q, sc.storeID, sc.meta, startPos) {
+	for rr, err := range e.searchChunkWithRef(ctx, q, sc.vaultID, sc.meta, startPos) {
 		if err != nil {
-			*lastRefs = []MultiStorePosition{{StoreID: rr.StoreID, ChunkID: rr.Ref.ChunkID, Position: rr.Ref.Pos}}
+			*lastRefs = []MultiVaultPosition{{VaultID: rr.VaultID, ChunkID: rr.Ref.ChunkID, Position: rr.Ref.Pos}}
 			yield(chunk.Record{}, err)
 			return false
 		}
 
-		*lastRefs = []MultiStorePosition{{StoreID: rr.StoreID, ChunkID: rr.Ref.ChunkID, Position: rr.Ref.Pos}}
+		*lastRefs = []MultiVaultPosition{{VaultID: rr.VaultID, ChunkID: rr.Ref.ChunkID, Position: rr.Ref.Pos}}
 
 		if !yield(rr.record(), nil) {
 			return false
@@ -266,7 +266,7 @@ func (e *Engine) searchSingleChunk(
 func (e *Engine) primeHeapWithResume(
 	ctx context.Context,
 	q Query,
-	allChunks []storeChunk,
+	allChunks []vaultChunk,
 	resumePositions map[uuid.UUID]map[chunk.ChunkID]uint64,
 	ms *mergeState,
 ) error {
@@ -289,7 +289,7 @@ func (e *Engine) primeHeapWithResume(
 func (e *Engine) primeHeap(
 	ctx context.Context,
 	q Query,
-	allChunks []storeChunk,
+	allChunks []vaultChunk,
 	ms *mergeState,
 ) error {
 	for _, sc := range allChunks {
@@ -306,17 +306,17 @@ func (e *Engine) primeHeap(
 func (e *Engine) openAndPrimeScanner(
 	ctx context.Context,
 	q Query,
-	sc storeChunk,
+	sc vaultChunk,
 	startPos *uint64,
 	ms *mergeState,
 ) error {
-	iterSeq := e.searchChunkWithRef(ctx, q, sc.storeID, sc.meta, startPos)
+	iterSeq := e.searchChunkWithRef(ctx, q, sc.vaultID, sc.meta, startPos)
 	next, stop := iter.Pull2(iterSeq)
 
 	rr, err, ok := next()
 	if !ok {
 		stop()
-		ms.chunkPositions[mergeKey{storeID: sc.storeID, chunkID: sc.meta.ID}] = positionExhausted
+		ms.chunkPositions[mergeKey{vaultID: sc.vaultID, chunkID: sc.meta.ID}] = positionExhausted
 		return nil
 	}
 	if err != nil {
@@ -325,7 +325,7 @@ func (e *Engine) openAndPrimeScanner(
 	}
 
 	entry := &cursorEntry{
-		storeID: sc.storeID,
+		vaultID: sc.vaultID,
 		chunkID: sc.meta.ID,
 		rec:     rr.Record,
 		ref:     rr.Ref,
@@ -333,7 +333,7 @@ func (e *Engine) openAndPrimeScanner(
 	heap.Push(ms.h, entry)
 
 	ms.scanners = append(ms.scanners, activeScanner{
-		storeID: sc.storeID,
+		vaultID: sc.vaultID,
 		chunkID: sc.meta.ID,
 		iter:    next,
 		stop:    stop,
@@ -368,11 +368,11 @@ func runMergeLoop(
 		}
 
 		entry := heap.Pop(ms.h).(*cursorEntry)
-		key := mergeKey{storeID: entry.storeID, chunkID: entry.chunkID}
+		key := mergeKey{vaultID: entry.vaultID, chunkID: entry.chunkID}
 		ms.chunkPositions[key] = entry.ref.Pos
 
 		entry.rec.Ref = entry.ref
-		entry.rec.StoreID = entry.storeID
+		entry.rec.VaultID = entry.vaultID
 		if !yield(entry.rec, nil) {
 			ms.buildLastRefs()
 			return count, mergeStopped
@@ -397,8 +397,8 @@ func runMergeLoop(
 // The iterator yields (record, nil) for each match, or (zero, err) on error.
 // After yielding an error, iteration stops.
 //
-// For multi-store engines, this searches across all stores (or stores matching
-// store=X predicates in the query) and merge-sorts results by IngestTS.
+// For multi-vault engines, this searches across all vaults (or vaults matching
+// vault=X predicates in the query) and merge-sorts results by IngestTS.
 //
 // The resume parameter allows continuing from a previous search. Pass nil to start fresh.
 // The returned nextToken function returns a ResumeToken if iteration stopped early
@@ -408,31 +408,31 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 	// Normalize query to ensure BoolExpr is set (converts legacy Tokens/KV if needed).
 	q = q.Normalize()
 
-	// Extract store predicates and get remaining query expression.
-	allStores := e.listStores()
-	selectedStores, remainingExpr := ExtractStoreFilter(q.BoolExpr, allStores)
+	// Extract vault predicates and get remaining query expression.
+	allVaults := e.listVaults()
+	selectedVaults, remainingExpr := ExtractVaultFilter(q.BoolExpr, allVaults)
 
 	// Extract chunk predicates.
 	chunkIDs, remainingExpr := ExtractChunkFilter(remainingExpr)
 
 	// Normalize resume token to new format.
-	// For single-store mode, use the first selected store as default.
-	var defaultStoreID uuid.UUID
-	if len(selectedStores) > 0 {
-		defaultStoreID = selectedStores[0]
-	} else if len(allStores) > 0 {
-		defaultStoreID = allStores[0]
+	// For single-vault mode, use the first selected vault as default.
+	var defaultVaultID uuid.UUID
+	if len(selectedVaults) > 0 {
+		defaultVaultID = selectedVaults[0]
+	} else if len(allVaults) > 0 {
+		defaultVaultID = allVaults[0]
 	}
-	resume = resume.Normalize(defaultStoreID)
-	if selectedStores == nil {
-		selectedStores = allStores // no store filter means all stores
+	resume = resume.Normalize(defaultVaultID)
+	if selectedVaults == nil {
+		selectedVaults = allVaults // no vault filter means all vaults
 	}
 
-	// Update query to use remaining expression (without store/chunk predicates).
+	// Update query to use remaining expression (without vault/chunk predicates).
 	q.BoolExpr = remainingExpr
 
 	// Track state for resume token generation.
-	var lastRefs []MultiStorePosition
+	var lastRefs []MultiVaultPosition
 	completed := false
 
 	seq := func(yield func(chunk.Record, error) bool) {
@@ -441,7 +441,7 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 			return
 		}
 
-		allChunks, err := e.collectStoreChunks(selectedStores, q, chunkIDs)
+		allChunks, err := e.collectVaultChunks(selectedVaults, q, chunkIDs)
 		if err != nil {
 			yield(chunk.Record{}, err)
 			return
@@ -502,26 +502,26 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 // The source and token filters only apply to finding the first match.
 // Time bounds and limit still apply to all yielded records.
 //
-// For multi-store engines, this searches across all stores (or stores matching
-// store=X predicates in the query) and merge-sorts results by IngestTS.
+// For multi-vault engines, this searches across all vaults (or vaults matching
+// vault=X predicates in the query) and merge-sorts results by IngestTS.
 func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeToken) (iter.Seq2[chunk.Record, error], func() *ResumeToken) {
 	// Normalize query to ensure BoolExpr is set (converts legacy Tokens/KV if needed).
 	q = q.Normalize()
 
-	// Extract store predicates and get remaining query expression.
-	allStores := e.listStores()
-	selectedStores, remainingExpr := ExtractStoreFilter(q.BoolExpr, allStores)
-	if selectedStores == nil {
-		selectedStores = allStores
+	// Extract vault predicates and get remaining query expression.
+	allVaults := e.listVaults()
+	selectedVaults, remainingExpr := ExtractVaultFilter(q.BoolExpr, allVaults)
+	if selectedVaults == nil {
+		selectedVaults = allVaults
 	}
 
 	// Extract chunk predicates.
 	chunkIDs, remainingExpr := ExtractChunkFilter(remainingExpr)
 
-	// Update query to use remaining expression (without store/chunk predicates).
+	// Update query to use remaining expression (without vault/chunk predicates).
 	q.BoolExpr = remainingExpr
 
-	var lastRefs []MultiStorePosition
+	var lastRefs []MultiVaultPosition
 	completed := false
 
 	seq := func(yield func(chunk.Record, error) bool) {
@@ -530,7 +530,7 @@ func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeTo
 			return
 		}
 
-		allChunks, err := e.collectStoreChunks(selectedStores, q, chunkIDs)
+		allChunks, err := e.collectVaultChunks(selectedVaults, q, chunkIDs)
 		if err != nil {
 			yield(chunk.Record{}, err)
 			return
@@ -566,7 +566,7 @@ func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeTo
 
 		// Pop the first match from heap (oldest/newest depending on direction).
 		firstMatch := heap.Pop(ms.h).(*cursorEntry)
-		key := mergeKey{storeID: firstMatch.storeID, chunkID: firstMatch.chunkID}
+		key := mergeKey{vaultID: firstMatch.vaultID, chunkID: firstMatch.chunkID}
 		ms.chunkPositions[key] = firstMatch.ref.Pos
 
 		if !yield(firstMatch.rec, nil) {
@@ -610,7 +610,7 @@ func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeTo
 func (e *Engine) reopenFollowScanners(
 	ctx context.Context,
 	followQuery Query,
-	allChunks []storeChunk,
+	allChunks []vaultChunk,
 	firstMatch *cursorEntry,
 	ms *mergeState,
 ) error {
@@ -626,8 +626,8 @@ func (e *Engine) reopenFollowScanners(
 	firstMatchTS := firstMatch.rec.IngestTS
 
 	for _, sc := range allChunks {
-		key := mergeKey{storeID: sc.storeID, chunkID: sc.meta.ID}
-		isFirstMatchChunk := key.storeID == firstMatch.storeID && key.chunkID == firstMatch.chunkID
+		key := mergeKey{vaultID: sc.vaultID, chunkID: sc.meta.ID}
+		isFirstMatchChunk := key.vaultID == firstMatch.vaultID && key.chunkID == firstMatch.chunkID
 
 		var startPos *uint64
 		if isFirstMatchChunk {
@@ -647,7 +647,7 @@ func (e *Engine) reopenFollowScanners(
 		}
 
 		entry := &cursorEntry{
-			storeID: sc.storeID,
+			vaultID: sc.vaultID,
 			chunkID: sc.meta.ID,
 			rec:     rr.Record,
 			ref:     rr.Ref,
@@ -655,7 +655,7 @@ func (e *Engine) reopenFollowScanners(
 		heap.Push(ms.h, entry)
 
 		ms.scanners = append(ms.scanners, activeScanner{
-			storeID: sc.storeID,
+			vaultID: sc.vaultID,
 			chunkID: sc.meta.ID,
 			iter:    next,
 			stop:    stop,
@@ -671,12 +671,12 @@ func (e *Engine) reopenFollowScanners(
 func (e *Engine) seekFollowPosition(
 	ctx context.Context,
 	followQuery Query,
-	sc storeChunk,
+	sc vaultChunk,
 	startPos *uint64,
 	isFirstMatchChunk bool,
 	firstMatchTS time.Time,
 ) (recordWithRef, func() (recordWithRef, error, bool), func(), bool, error) {
-	iterSeq := e.searchChunkWithRef(ctx, followQuery, sc.storeID, sc.meta, startPos)
+	iterSeq := e.searchChunkWithRef(ctx, followQuery, sc.vaultID, sc.meta, startPos)
 	next, stop := iter.Pull2(iterSeq)
 
 	for {
@@ -703,34 +703,34 @@ func (e *Engine) seekFollowPosition(
 	}
 }
 
-// Follow tails records from all stores, waiting for new arrivals.
+// Follow tails records from all vaults, waiting for new arrivals.
 // It first yields any existing records matching the query (optionally filtered),
 // then continuously polls for new records until the context is cancelled.
 //
 // Unlike SearchThenFollow, this method never completes on its own - it keeps
 // polling for new records until ctx is cancelled.
 //
-// For multi-store engines, records are merged by IngestTS across all stores.
+// For multi-vault engines, records are merged by IngestTS across all vaults.
 func (e *Engine) Follow(ctx context.Context, q Query) iter.Seq2[chunk.Record, error] {
 	// Normalize query to ensure BoolExpr is set.
 	q = q.Normalize()
 
-	// Extract store predicates once (the expression doesn't change).
-	// storeFilter is nil when the query has no store= predicate (follow all).
-	storeFilter, remainingExpr := ExtractStoreFilter(q.BoolExpr, nil)
+	// Extract vault predicates once (the expression doesn't change).
+	// vaultFilter is nil when the query has no vault= predicate (follow all).
+	vaultFilter, remainingExpr := ExtractVaultFilter(q.BoolExpr, nil)
 	q.BoolExpr = remainingExpr
 
 	return func(yield func(chunk.Record, error) bool) {
 		fs := &followState{
 			engine:        e,
 			q:             q,
-			storeFilter:   storeFilter,
+			vaultFilter:   vaultFilter,
 			lastPositions: make(map[mergeKey]uint64),
-			knownStores:   make(map[uuid.UUID]bool),
+			knownVaults:   make(map[uuid.UUID]bool),
 		}
 
-		// Initialize positions for stores that exist right now.
-		fs.resolveStores()
+		// Initialize positions for vaults that exist right now.
+		fs.resolveVaults()
 
 		fs.pollLoop(ctx, yield)
 	}
@@ -740,15 +740,15 @@ func (e *Engine) Follow(ctx context.Context, q Query) iter.Seq2[chunk.Record, er
 type followState struct {
 	engine        *Engine
 	q             Query
-	storeFilter   []uuid.UUID
+	vaultFilter   []uuid.UUID
 	lastPositions map[mergeKey]uint64
-	knownStores   map[uuid.UUID]bool
+	knownVaults   map[uuid.UUID]bool
 }
 
-// initStorePositions marks all existing chunks in a store as seen,
+// initVaultPositions marks all existing chunks in a vault as seen,
 // so Follow only yields records that arrive after this point.
-func (fs *followState) initStorePositions(storeID uuid.UUID) {
-	cm, _ := fs.engine.getStoreManagers(storeID)
+func (fs *followState) initVaultPositions(vaultID uuid.UUID) {
+	cm, _ := fs.engine.getVaultManagers(vaultID)
 	if cm == nil {
 		return
 	}
@@ -757,19 +757,19 @@ func (fs *followState) initStorePositions(storeID uuid.UUID) {
 		return
 	}
 	for _, meta := range metas {
-		key := mergeKey{storeID: storeID, chunkID: meta.ID}
+		key := mergeKey{vaultID: vaultID, chunkID: meta.ID}
 		if meta.Sealed {
 			fs.lastPositions[key] = positionExhausted
 			continue
 		}
-		fs.initActiveChunkPosition(cm, storeID, meta)
+		fs.initActiveChunkPosition(cm, vaultID, meta)
 	}
-	fs.knownStores[storeID] = true
+	fs.knownVaults[vaultID] = true
 }
 
 // initActiveChunkPosition scans an active (unsealed) chunk to find the last
 // record position, so Follow starts from after existing records.
-func (fs *followState) initActiveChunkPosition(cm chunk.ChunkManager, storeID uuid.UUID, meta chunk.ChunkMeta) {
+func (fs *followState) initActiveChunkPosition(cm chunk.ChunkManager, vaultID uuid.UUID, meta chunk.ChunkMeta) {
 	cursor, err := cm.OpenCursor(meta.ID)
 	if err != nil {
 		return
@@ -787,28 +787,28 @@ func (fs *followState) initActiveChunkPosition(cm chunk.ChunkManager, storeID uu
 		lastPos = ref.Pos
 	}
 	if hasRecords {
-		fs.lastPositions[mergeKey{storeID: storeID, chunkID: meta.ID}] = lastPos
+		fs.lastPositions[mergeKey{vaultID: vaultID, chunkID: meta.ID}] = lastPos
 	}
 }
 
-// resolveStores returns the stores to poll this iteration.
-// When no store= predicate exists, it re-evaluates the live store
-// list each call, initializing positions for any newly discovered store.
-func (fs *followState) resolveStores() []uuid.UUID {
-	stores := fs.storeFilter
-	if stores == nil {
-		stores = fs.engine.listStores()
+// resolveVaults returns the vaults to poll this iteration.
+// When no vault= predicate exists, it re-evaluates the live vault
+// list each call, initializing positions for any newly discovered vault.
+func (fs *followState) resolveVaults() []uuid.UUID {
+	vaults := fs.vaultFilter
+	if vaults == nil {
+		vaults = fs.engine.listVaults()
 	}
-	for _, id := range stores {
-		if !fs.knownStores[id] {
-			fs.initStorePositions(id)
+	for _, id := range vaults {
+		if !fs.knownVaults[id] {
+			fs.initVaultPositions(id)
 		}
 	}
-	return stores
+	return vaults
 }
 
 // pollLoop is the main Follow polling loop. It repeatedly collects new
-// records from all stores, sorts them by timestamp, and yields them.
+// records from all vaults, sorts them by timestamp, and yields them.
 func (fs *followState) pollLoop(ctx context.Context, yield func(chunk.Record, error) bool) {
 	const pollInterval = 100 * time.Millisecond
 
@@ -819,9 +819,9 @@ func (fs *followState) pollLoop(ctx context.Context, yield func(chunk.Record, er
 		default:
 		}
 
-		selectedStores := fs.resolveStores()
+		selectedVaults := fs.resolveVaults()
 
-		pending := fs.collectNewRecords(selectedStores, yield)
+		pending := fs.collectNewRecords(selectedVaults, yield)
 		if pending == nil {
 			// yield returned false during error handling; caller wants to stop.
 			return
@@ -843,16 +843,16 @@ func (fs *followState) pollLoop(ctx context.Context, yield func(chunk.Record, er
 	}
 }
 
-// collectNewRecords scans all selected stores for records newer than
+// collectNewRecords scans all selected vaults for records newer than
 // the last seen positions. Returns nil if yield returned false (caller stop).
 func (fs *followState) collectNewRecords(
-	selectedStores []uuid.UUID,
+	selectedVaults []uuid.UUID,
 	yield func(chunk.Record, error) bool,
 ) []pendingRecord {
-	var pending []pendingRecord
+	pending := []pendingRecord{} // non-nil empty; nil is reserved for yield-returned-false
 
-	for _, storeID := range selectedStores {
-		cm, _ := fs.engine.getStoreManagers(storeID)
+	for _, vaultID := range selectedVaults {
+		cm, _ := fs.engine.getVaultManagers(vaultID)
 		if cm == nil {
 			continue
 		}
@@ -866,7 +866,7 @@ func (fs *followState) collectNewRecords(
 		}
 
 		for _, meta := range metas {
-			fs.collectChunkRecords(cm, storeID, meta, &pending)
+			fs.collectChunkRecords(cm, vaultID, meta, &pending)
 		}
 	}
 	return pending
@@ -876,11 +876,11 @@ func (fs *followState) collectNewRecords(
 // them to pending. Records already seen (based on lastPositions) are skipped.
 func (fs *followState) collectChunkRecords(
 	cm chunk.ChunkManager,
-	storeID uuid.UUID,
+	vaultID uuid.UUID,
 	meta chunk.ChunkMeta,
 	pending *[]pendingRecord,
 ) {
-	key := mergeKey{storeID: storeID, chunkID: meta.ID}
+	key := mergeKey{vaultID: vaultID, chunkID: meta.ID}
 
 	if lastPos, ok := fs.lastPositions[key]; ok && lastPos == positionExhausted {
 		return
@@ -908,7 +908,7 @@ func (fs *followState) collectChunkRecords(
 		}
 
 		*pending = append(*pending, pendingRecord{
-			storeID: storeID,
+			vaultID: vaultID,
 			rec:     rec,
 			ref:     ref,
 		})
@@ -938,7 +938,7 @@ func (fs *followState) seekPastSeen(cursor chunk.RecordCursor, key mergeKey, chu
 func (fs *followState) yieldPending(pending []pendingRecord, yield func(chunk.Record, error) bool) bool {
 	for _, p := range pending {
 		p.rec.Ref = p.ref
-		p.rec.StoreID = p.storeID
+		p.rec.VaultID = p.vaultID
 		if !yield(p.rec, nil) {
 			return false
 		}
@@ -965,10 +965,10 @@ func (e *Engine) matchesFilter(rec chunk.Record, q Query) bool {
 // Note: This method buffers context records in memory. For large context windows,
 // consider using SearchThenFollow or manual cursor operations instead.
 func (e *Engine) SearchWithContext(ctx context.Context, q Query) (iter.Seq2[chunk.Record, error], func() *ResumeToken) {
-	// Multi-store mode not yet supported for SearchWithContext.
-	if e.isMultiStore() {
+	// Multi-vault mode not yet supported for SearchWithContext.
+	if e.isMultiVault() {
 		return func(yield func(chunk.Record, error) bool) {
-			yield(chunk.Record{}, ErrMultiStoreNotSupported)
+			yield(chunk.Record{}, ErrMultiVaultNotSupported)
 		}, func() *ResumeToken { return nil }
 	}
 

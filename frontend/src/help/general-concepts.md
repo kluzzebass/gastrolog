@@ -27,17 +27,17 @@ Records are stored in **chunks** — bounded, append-only segments that hold a b
 - Each chunk tracks its own time range and record count
 - Deleting old data means removing entire chunks — no compaction or garbage collection needed
 
-## Stores
+## Vaults
 
-A **store** groups chunks under a single namespace with shared configuration:
+A **vault** groups chunks under a single namespace with shared configuration:
 
 - **Type**: The storage engine (`file` or `memory`)
-- **Filter**: An expression controlling which ingested records are routed to this store
+- **Filter**: An expression controlling which ingested records are routed to this vault
 - **Rotation policy**: Rules for when to seal the active chunk and start a new one
 - **Retention policy**: Rules for when to delete old sealed chunks
 - **Params**: Engine-specific configuration (e.g., home directory path)
 
-You can have multiple stores for different purposes — production logs in one, debug logs in another, each with independent rotation and retention.
+You can have multiple vaults for different purposes — production logs in one, debug logs in another, each with independent rotation and retention.
 
 ## Ingestion Flow
 
@@ -47,7 +47,7 @@ Every log message follows the same pipeline:
 flowchart TD
     A[Ingest] --> B[Digest]
     B --> C[Filter]
-    C --> D[Store]
+    C --> D[Vault]
     D --> E[Index]
     D --> F[Expire]
 ```
@@ -56,17 +56,17 @@ flowchart TD
 
 [**Digest**](help:digesters) — Digesters scan the message and add attributes the ingester couldn't — a normalized `level` from the log content, and a source timestamp parsed from embedded date patterns.
 
-[**Filter**](help:routing) — Each store has a filter expression evaluated against the message attributes. A message can match multiple stores, or be caught by a catch-rest filter so nothing is silently dropped.
+[**Filter**](help:routing) — Each vault has a filter expression evaluated against the message attributes. A message can match multiple vaults, or be caught by a catch-rest filter so nothing is silently dropped.
 
-[**Store**](help:storage) — Matching stores append the record to their active chunk. When a chunk hits its rotation policy limits, it is sealed and a new one begins.
+[**Vault**](help:storage) — Matching vaults append the record to their active chunk. When a chunk hits its rotation policy limits, it is sealed and a new one begins.
 
 [**Index**](help:indexers) — Sealed chunks are indexed in the background so the query engine can search without scanning every record.
 
-**Expire** — [Retention policies](help:policy-retention) periodically delete sealed chunks that are too old, too numerous, or pushing the store over its size budget.
+**Expire** — [Retention policies](help:policy-retention) periodically delete sealed chunks that are too old, too numerous, or pushing the vault over its size budget.
 
-## Multi-Store Filtering
+## Multi-Vault Filtering
 
-Filters control which stores receive which records. A single ingested message can match multiple stores and will be written to all of them. Adding a new store doesn't require reconfiguring ingesters — filtering is purely a configuration change.
+Filters control which vaults receive which records. A single ingested message can match multiple vaults and will be written to all of them. Adding a new vault doesn't require reconfiguring ingesters — filtering is purely a configuration change.
 
 Special filter values:
 
@@ -76,7 +76,7 @@ Special filter values:
 
 ## Configuration
 
-GastroLog stores its configuration (stores, ingesters, filters, policies, users, certificates) in a pluggable config store. Two backends are available:
+GastroLog stores its configuration (vaults, ingesters, filters, policies, users, certificates) in a pluggable config store. Two backends are available:
 
 - **SQLite** (default): Persistent relational storage with ACID transactions
 - **Memory**: In-process only, useful for testing and ephemeral instances

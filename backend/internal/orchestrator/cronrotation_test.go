@@ -60,7 +60,7 @@ func newTestCronManager(t *testing.T) *cronRotationManager {
 
 // ---------- tests ----------
 
-func TestRotateStoreSealsNonEmptyChunk(t *testing.T) {
+func TestRotateVaultSealsNonEmptyChunk(t *testing.T) {
 	cm := &cronFakeChunkManager{
 		active: &chunk.ChunkMeta{
 			ID:          chunkIDAt(time.Now()),
@@ -69,16 +69,16 @@ func TestRotateStoreSealsNonEmptyChunk(t *testing.T) {
 		},
 	}
 
-	storeID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
 	m := newTestCronManager(t)
-	m.rotateStore(storeID, cm)
+	m.rotateVault(vaultID, cm)
 
 	if !cm.sealed {
 		t.Error("expected chunk to be sealed")
 	}
 }
 
-func TestRotateStoreSkipsEmptyChunk(t *testing.T) {
+func TestRotateVaultSkipsEmptyChunk(t *testing.T) {
 	cm := &cronFakeChunkManager{
 		active: &chunk.ChunkMeta{
 			ID:          chunkIDAt(time.Now()),
@@ -86,23 +86,23 @@ func TestRotateStoreSkipsEmptyChunk(t *testing.T) {
 		},
 	}
 
-	storeID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
 	m := newTestCronManager(t)
-	m.rotateStore(storeID, cm)
+	m.rotateVault(vaultID, cm)
 
 	if cm.sealed {
 		t.Error("expected empty chunk to NOT be sealed")
 	}
 }
 
-func TestRotateStoreSkipsNilActive(t *testing.T) {
+func TestRotateVaultSkipsNilActive(t *testing.T) {
 	cm := &cronFakeChunkManager{
 		active: nil,
 	}
 
-	storeID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
 	m := newTestCronManager(t)
-	m.rotateStore(storeID, cm)
+	m.rotateVault(vaultID, cm)
 
 	if cm.sealed {
 		t.Error("expected nil active to NOT trigger seal")
@@ -113,23 +113,23 @@ func TestAddAndRemoveJob(t *testing.T) {
 	cm := &cronFakeChunkManager{}
 	m := newTestCronManager(t)
 
-	storeA := uuid.Must(uuid.NewV7())
-	if err := m.addJob(storeA, "store-a", "* * * * *", cm); err != nil {
+	vaultA := uuid.Must(uuid.NewV7())
+	if err := m.addJob(vaultA, "vault-a", "* * * * *", cm); err != nil {
 		t.Fatalf("addJob failed: %v", err)
 	}
 
-	if !m.hasJob(storeA) {
+	if !m.hasJob(vaultA) {
 		t.Error("expected job to be registered")
 	}
 
-	// Adding the same store again should fail.
-	if err := m.addJob(storeA, "store-a", "0 * * * *", cm); err == nil {
+	// Adding the same vault again should fail.
+	if err := m.addJob(vaultA, "vault-a", "0 * * * *", cm); err == nil {
 		t.Error("expected error when adding duplicate job")
 	}
 
-	m.removeJob(storeA)
+	m.removeJob(vaultA)
 
-	if m.hasJob(storeA) {
+	if m.hasJob(vaultA) {
 		t.Error("expected job to be removed")
 	}
 
@@ -142,16 +142,16 @@ func TestUpdateJob(t *testing.T) {
 	cm := &cronFakeChunkManager{}
 	m := newTestCronManager(t)
 
-	storeA := uuid.Must(uuid.NewV7())
-	if err := m.addJob(storeA, "store-a", "* * * * *", cm); err != nil {
+	vaultA := uuid.Must(uuid.NewV7())
+	if err := m.addJob(vaultA, "vault-a", "* * * * *", cm); err != nil {
 		t.Fatalf("addJob failed: %v", err)
 	}
 
-	if err := m.updateJob(storeA, "store-a", "0 * * * *", cm); err != nil {
+	if err := m.updateJob(vaultA, "vault-a", "0 * * * *", cm); err != nil {
 		t.Fatalf("updateJob failed: %v", err)
 	}
 
-	if !m.hasJob(storeA) {
+	if !m.hasJob(vaultA) {
 		t.Error("expected job to still exist after update")
 	}
 }
@@ -160,12 +160,12 @@ func TestAddJobRejectsInvalidCron(t *testing.T) {
 	cm := &cronFakeChunkManager{}
 	m := newTestCronManager(t)
 
-	storeA := uuid.Must(uuid.NewV7())
-	if err := m.addJob(storeA, "store-a", "not a cron", cm); err == nil {
+	vaultA := uuid.Must(uuid.NewV7())
+	if err := m.addJob(vaultA, "vault-a", "not a cron", cm); err == nil {
 		t.Error("expected error for invalid cron expression")
 	}
 
-	if m.hasJob(storeA) {
+	if m.hasJob(vaultA) {
 		t.Error("expected no job to be registered for invalid cron")
 	}
 }
@@ -174,12 +174,12 @@ func TestSchedulerListJobs(t *testing.T) {
 	cm := &cronFakeChunkManager{}
 	m := newTestCronManager(t)
 
-	storeA := uuid.Must(uuid.NewV7())
-	storeB := uuid.Must(uuid.NewV7())
-	if err := m.addJob(storeA, "store-a", "* * * * *", cm); err != nil {
+	vaultA := uuid.Must(uuid.NewV7())
+	vaultB := uuid.Must(uuid.NewV7())
+	if err := m.addJob(vaultA, "vault-a", "* * * * *", cm); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.addJob(storeB, "store-b", "0 * * * *", cm); err != nil {
+	if err := m.addJob(vaultB, "vault-b", "0 * * * *", cm); err != nil {
 		t.Fatal(err)
 	}
 
@@ -196,10 +196,10 @@ func TestSchedulerListJobs(t *testing.T) {
 		}
 	}
 
-	if !names[cronJobName(storeA)] {
-		t.Error("expected job for store-a")
+	if !names[cronJobName(vaultA)] {
+		t.Error("expected job for vault-a")
 	}
-	if !names[cronJobName(storeB)] {
-		t.Error("expected job for store-b")
+	if !names[cronJobName(vaultB)] {
+		t.Error("expected job for vault-b")
 	}
 }

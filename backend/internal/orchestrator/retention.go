@@ -16,23 +16,23 @@ import (
 
 const defaultRetentionSchedule = "* * * * *" // every minute
 
-// retentionJobName returns the scheduler job name for a store's retention sweep.
-func retentionJobName(storeID uuid.UUID) string {
-	return fmt.Sprintf("retention:%s", storeID)
+// retentionJobName returns the scheduler job name for a vault's retention sweep.
+func retentionJobName(vaultID uuid.UUID) string {
+	return fmt.Sprintf("retention:%s", vaultID)
 }
 
 // retentionRule is a resolved rule: a compiled policy paired with an action.
 type retentionRule struct {
 	policy      chunk.RetentionPolicy
 	action      config.RetentionAction
-	destination uuid.UUID // target store ID, only for migrate
+	destination uuid.UUID // target vault ID, only for migrate
 }
 
-// retentionRunner manages the retention sweep for a single store.
+// retentionRunner manages the retention sweep for a single vault.
 // It is invoked by the shared scheduler on a cron schedule.
 type retentionRunner struct {
 	mu       sync.Mutex
-	storeID  uuid.UUID
+	vaultID  uuid.UUID
 	cm       chunk.ChunkManager
 	im       index.IndexManager
 	rules []retentionRule
@@ -60,7 +60,7 @@ func (r *retentionRunner) sweep() {
 
 	metas, err := r.cm.List()
 	if err != nil {
-		r.logger.Error("retention: failed to list chunks", "store", r.storeID, "error", err)
+		r.logger.Error("retention: failed to list chunks", "vault", r.vaultID, "error", err)
 		return
 	}
 
@@ -76,7 +76,7 @@ func (r *retentionRunner) sweep() {
 		return
 	}
 
-	state := chunk.StoreState{
+	state := chunk.VaultState{
 		Chunks: sealed,
 		Now:    r.now(),
 	}
@@ -102,7 +102,7 @@ func (r *retentionRunner) sweep() {
 			case config.RetentionActionMigrate:
 				r.migrateChunk(id, b.destination)
 			default:
-				r.logger.Error("retention: unknown action", "store", r.storeID, "action", b.action)
+				r.logger.Error("retention: unknown action", "vault", r.vaultID, "action", b.action)
 			}
 		}
 	}
@@ -112,28 +112,28 @@ func (r *retentionRunner) sweep() {
 func (r *retentionRunner) expireChunk(id chunk.ChunkID) {
 	if err := r.im.DeleteIndexes(id); err != nil {
 		r.logger.Error("retention: failed to delete indexes",
-			"store", r.storeID, "chunk", id.String(), "error", err)
+			"vault", r.vaultID, "chunk", id.String(), "error", err)
 		return
 	}
 
 	if err := r.cm.Delete(id); err != nil {
 		r.logger.Error("retention: failed to delete chunk",
-			"store", r.storeID, "chunk", id.String(), "error", err)
+			"vault", r.vaultID, "chunk", id.String(), "error", err)
 		return
 	}
 
 	r.logger.Info("retention: deleted chunk",
-		"store", r.storeID, "chunk", id.String())
+		"vault", r.vaultID, "chunk", id.String())
 }
 
-// migrateChunk moves a single chunk to the destination store.
+// migrateChunk moves a single chunk to the destination vault.
 func (r *retentionRunner) migrateChunk(id chunk.ChunkID, dstID uuid.UUID) {
 	ctx := context.Background()
-	if err := r.orch.MoveChunk(ctx, id, r.storeID, dstID); err != nil {
+	if err := r.orch.MoveChunk(ctx, id, r.vaultID, dstID); err != nil {
 		r.logger.Error("retention: failed to migrate chunk",
-			"store", r.storeID, "chunk", id.String(), "destination", dstID, "error", err)
+			"vault", r.vaultID, "chunk", id.String(), "destination", dstID, "error", err)
 		return
 	}
 	r.logger.Info("retention: migrated chunk",
-		"store", r.storeID, "chunk", id.String(), "destination", dstID)
+		"vault", r.vaultID, "chunk", id.String(), "destination", dstID)
 }

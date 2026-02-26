@@ -110,7 +110,7 @@ export function FieldExplorer({
   );
 }
 
-export function StoreButton({
+export function VaultButton({
   label,
   count,
   active,

@@ -12,22 +12,22 @@ import (
 	"gastrolog/internal/index/analyzer"
 )
 
-// ListChunks returns all chunks in a store.
-func (s *StoreServer) ListChunks(
+// ListChunks returns all chunks in a vault.
+func (s *VaultServer) ListChunks(
 	ctx context.Context,
 	req *connect.Request[apiv1.ListChunksRequest],
 ) (*connect.Response[apiv1.ListChunksResponse], error) {
-	if req.Msg.Store == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store required"))
+	if req.Msg.Vault == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("vault required"))
 	}
-	storeID, connErr := parseUUID(req.Msg.Store)
+	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
 		return nil, connErr
 	}
 
-	metas, err := s.orch.ListChunkMetas(storeID)
+	metas, err := s.orch.ListChunkMetas(vaultID)
 	if err != nil {
-		return nil, mapStoreError(err)
+		return nil, mapVaultError(err)
 	}
 
 	resp := &apiv1.ListChunksResponse{
@@ -42,14 +42,14 @@ func (s *StoreServer) ListChunks(
 }
 
 // GetChunk returns details for a specific chunk.
-func (s *StoreServer) GetChunk(
+func (s *VaultServer) GetChunk(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetChunkRequest],
 ) (*connect.Response[apiv1.GetChunkResponse], error) {
-	if req.Msg.Store == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store required"))
+	if req.Msg.Vault == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("vault required"))
 	}
-	storeID, connErr := parseUUID(req.Msg.Store)
+	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
 		return nil, connErr
 	}
@@ -59,9 +59,9 @@ func (s *StoreServer) GetChunk(
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	meta, err := s.orch.GetChunkMeta(storeID, chunkID)
+	meta, err := s.orch.GetChunkMeta(vaultID, chunkID)
 	if err != nil {
-		return nil, mapStoreError(err)
+		return nil, mapVaultError(err)
 	}
 
 	return connect.NewResponse(&apiv1.GetChunkResponse{
@@ -70,14 +70,14 @@ func (s *StoreServer) GetChunk(
 }
 
 // GetIndexes returns index status for a chunk.
-func (s *StoreServer) GetIndexes(
+func (s *VaultServer) GetIndexes(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetIndexesRequest],
 ) (*connect.Response[apiv1.GetIndexesResponse], error) {
-	if req.Msg.Store == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store required"))
+	if req.Msg.Vault == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("vault required"))
 	}
-	storeID, connErr := parseUUID(req.Msg.Store)
+	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
 		return nil, connErr
 	}
@@ -87,9 +87,9 @@ func (s *StoreServer) GetIndexes(
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	report, err := s.orch.ChunkIndexInfos(storeID, chunkID)
+	report, err := s.orch.ChunkIndexInfos(vaultID, chunkID)
 	if err != nil {
-		return nil, mapStoreError(err)
+		return nil, mapVaultError(err)
 	}
 
 	resp := &apiv1.GetIndexesResponse{
@@ -110,21 +110,21 @@ func (s *StoreServer) GetIndexes(
 }
 
 // AnalyzeChunk returns detailed index analysis for a chunk.
-func (s *StoreServer) AnalyzeChunk(
+func (s *VaultServer) AnalyzeChunk(
 	ctx context.Context,
 	req *connect.Request[apiv1.AnalyzeChunkRequest],
 ) (*connect.Response[apiv1.AnalyzeChunkResponse], error) {
-	if req.Msg.Store == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store required"))
+	if req.Msg.Vault == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("vault required"))
 	}
-	storeID, connErr := parseUUID(req.Msg.Store)
+	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
 		return nil, connErr
 	}
 
-	a, err := s.orch.NewAnalyzer(storeID)
+	a, err := s.orch.NewAnalyzer(vaultID)
 	if err != nil {
-		return nil, mapStoreError(err)
+		return nil, mapVaultError(err)
 	}
 
 	var analyses []analyzer.ChunkAnalysis
@@ -195,25 +195,25 @@ func (s *StoreServer) AnalyzeChunk(
 	return connect.NewResponse(resp), nil
 }
 
-// ValidateStore checks chunk and index integrity for a store.
-func (s *StoreServer) ValidateStore(
+// ValidateVault checks chunk and index integrity for a vault.
+func (s *VaultServer) ValidateVault(
 	ctx context.Context,
-	req *connect.Request[apiv1.ValidateStoreRequest],
-) (*connect.Response[apiv1.ValidateStoreResponse], error) {
-	if req.Msg.Store == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store required"))
+	req *connect.Request[apiv1.ValidateVaultRequest],
+) (*connect.Response[apiv1.ValidateVaultResponse], error) {
+	if req.Msg.Vault == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("vault required"))
 	}
-	storeID, connErr := parseUUID(req.Msg.Store)
+	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
 		return nil, connErr
 	}
 
-	metas, err := s.orch.ListChunkMetas(storeID)
+	metas, err := s.orch.ListChunkMetas(vaultID)
 	if err != nil {
-		return nil, mapStoreError(err)
+		return nil, mapVaultError(err)
 	}
 
-	resp := &apiv1.ValidateStoreResponse{Valid: true}
+	resp := &apiv1.ValidateVaultResponse{Valid: true}
 
 	for _, meta := range metas {
 		cv := &apiv1.ChunkValidation{
@@ -222,7 +222,7 @@ func (s *StoreServer) ValidateStore(
 		}
 
 		// Check that we can read the chunk via cursor.
-		cursor, err := s.orch.OpenCursor(storeID, meta.ID)
+		cursor, err := s.orch.OpenCursor(vaultID, meta.ID)
 		if err != nil {
 			cv.Valid = false
 			cv.Issues = append(cv.Issues, fmt.Sprintf("cannot open cursor: %v", err))
@@ -252,7 +252,7 @@ func (s *StoreServer) ValidateStore(
 
 		// For sealed chunks, check index completeness.
 		if meta.Sealed {
-			complete, err := s.orch.IndexesComplete(storeID, meta.ID)
+			complete, err := s.orch.IndexesComplete(vaultID, meta.ID)
 			if err != nil {
 				cv.Valid = false
 				cv.Issues = append(cv.Issues, fmt.Sprintf("index check error: %v", err))

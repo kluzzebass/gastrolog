@@ -155,7 +155,7 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 
 	logger.Info("loaded config",
 		"ingesters", len(cfg.Ingesters),
-		"stores", len(cfg.Stores))
+		"vaults", len(cfg.Vaults))
 
 	orch := orchestrator.New(orchestrator.Config{
 		Logger:            logger,
@@ -345,7 +345,7 @@ func resolveHome(flagValue string) (home.Dir, error) {
 	return home.Default()
 }
 
-// buildTokenService reads the server config from the store and creates a TokenService.
+// buildTokenService reads the server config from the config store and creates a TokenService.
 func buildTokenService(ctx context.Context, cfgStore config.Store) (*auth.TokenService, error) {
 	val, err := cfgStore.GetSetting(ctx, "server")
 	if err != nil {

@@ -18,7 +18,7 @@ Streams container logs from a Docker daemon. Automatically discovers containers 
 
 ## Filter expressions
 
-The `filter` param uses the same expression language as [search queries](help:query-language) and [store filters](help:routing). Containers are matched against these attributes:
+The `filter` param uses the same expression language as [search queries](help:query-language) and [vault filters](help:routing). Containers are matched against these attributes:
 
 | Attribute | Source |
 |-----------|--------|

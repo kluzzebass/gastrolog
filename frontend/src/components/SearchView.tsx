@@ -13,7 +13,7 @@ import {
   extractTokens,
 } from "../api/hooks";
 import { tableResultToHistogramData } from "../utils/histogramData";
-import { useStores, useStats, useLogout, useCurrentUser } from "../api/hooks";
+import { useVaults, useStats, useLogout, useCurrentUser } from "../api/hooks";
 import { Record as ProtoRecord, getToken } from "../api/client";
 import { TableResult, TableRow } from "../api/gen/gastrolog/v1/query_pb";
 
@@ -24,7 +24,7 @@ import {
   stripPos,
   stripSeverity,
   injectTimeRange,
-  injectStore,
+  injectVault,
   buildSeverityExpr,
   resolveQueryEffectAction,
 } from "../utils/queryHelpers";
@@ -118,18 +118,18 @@ export function SearchView() {
   const location = useLocation();
   const isFollowMode = location.pathname === "/follow";
 
-  // Redirect to setup wizard if no stores are configured and wizard hasn't been dismissed.
+  // Redirect to setup wizard if no vaults are configured and wizard hasn't been dismissed.
   const config = useConfig();
   const serverConfig = useServerConfig();
   useEffect(() => {
-    if (config.data && serverConfig.data && config.data.stores.length === 0 && !serverConfig.data.setupWizardDismissed) {
+    if (config.data && serverConfig.data && config.data.vaults.length === 0 && !serverConfig.data.setupWizardDismissed) {
       navigate({ to: "/setup" } as any);
     }
   }, [config.data, serverConfig.data]); // eslint-disable-line react-hooks/exhaustive-deps
   const [draft, setDraft] = useState(q);
   const deferredDraft = useDeferredValue(draft);
   const cursorRef = useRef(0);
-  const [selectedStore, setSelectedStore] = useState("all");
+  const [selectedVault, setSelectedVault] = useState("all");
 
   // Follow buffer size — persisted to localStorage.
   const [followBufferSize, setFollowBufferSize] = useState(() => {
@@ -170,7 +170,7 @@ export function SearchView() {
   };
 
   const openInspector = (tab?: string) => {
-    navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: tab || "stores" }) } as any);
+    navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: tab || "vaults" }) } as any);
   };
 
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(
@@ -271,7 +271,7 @@ export function SearchView() {
     fetchContext,
     reset: resetContext,
   } = useRecordContext({ onError: toastError });
-  const { data: stores, isLoading: storesLoading } = useStores();
+  const { data: vaults, isLoading: vaultsLoading } = useVaults();
   const { data: stats, isLoading: statsLoading } = useStats();
 
   const logout = useLogout();
@@ -575,10 +575,10 @@ export function SearchView() {
     }
   };
 
-  const handleStoreSelect = (storeId: string) => {
-    const next = selectedStore === storeId ? "all" : storeId;
-    setSelectedStore(next);
-    const newQuery = injectStore(q, next);
+  const handleVaultSelect = (vaultId: string) => {
+    const next = selectedVault === vaultId ? "all" : vaultId;
+    setSelectedVault(next);
+    const newQuery = injectVault(q, next);
     setUrlQuery(newQuery);
   };
 
@@ -774,12 +774,12 @@ export function SearchView() {
           timeRange={timeRange}
           onTimeRangeChange={handleTimeRange}
           onCustomRange={handleCustomRange}
-          stores={stores}
-          storesLoading={storesLoading}
+          vaults={vaults}
+          vaultsLoading={vaultsLoading}
           statsLoading={statsLoading}
           totalRecords={totalRecords}
-          selectedStore={selectedStore}
-          onStoreSelect={handleStoreSelect}
+          selectedVault={selectedVault}
+          onVaultSelect={handleVaultSelect}
           activeSeverities={activeSeverities}
           onToggleSeverity={toggleSeverity}
           attrFields={attrFields}
@@ -1116,7 +1116,7 @@ export function SearchView() {
                         const selected = sameRecord(selectedRecord, record);
                         return (
                           <LogEntry
-                            key={record.ref ? `${record.ref.storeId}:${record.ref.chunkId}:${record.ref.pos}` : `follow-${i}`}
+                            key={record.ref ? `${record.ref.vaultId}:${record.ref.chunkId}:${record.ref.pos}` : `follow-${i}`}
                             ref={selected ? selectedRowRef : undefined}
                             record={record}
                             tokens={tokens}
@@ -1166,7 +1166,7 @@ export function SearchView() {
           selectedRecord={selectedRecord}
           onFieldSelect={handleFieldSelect}
           onChunkSelect={handleChunkSelect}
-          onStoreSelect={handleStoreSelect}
+          onVaultSelect={handleVaultSelect}
           onPosSelect={handlePosSelect}
           contextBefore={contextBefore}
           contextAfter={contextAfter}

@@ -20,7 +20,7 @@ function FilterDescription({ dark }: Readonly<{ dark: boolean }>) {
   return (
     <div className="flex flex-col gap-1.5">
       <p>
-        Determines which ingested messages are stored. Each message's attributes
+        Determines which ingested messages are vaulted. Each message's attributes
         are tested against this expression.
       </p>
       <div className="flex flex-col gap-1">
@@ -29,7 +29,7 @@ function FilterDescription({ dark }: Readonly<{ dark: boolean }>) {
         </p>
         <p>
           <span className={code}>+</span> catch-the-rest — receives messages
-          that didn't match any other store's filter
+          that didn't match any other vault's filter
         </p>
         <p>
           <span className={code}>key=value</span> attribute match — e.g.{" "}
@@ -42,7 +42,7 @@ function FilterDescription({ dark }: Readonly<{ dark: boolean }>) {
         </p>
       </div>
       <p className={c("text-text-ghost", "text-light-text-ghost")}>
-        Empty expression means the store receives nothing. Token search (free
+        Empty expression means the vault receives nothing. Token search (free
         text) is not supported in filters — only key=value attribute matching.
       </p>
     </div>
@@ -66,7 +66,7 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
   const existingNames = new Set(filters.map((f) => f.name));
   const effectiveName = newName.trim() || "catch-all";
   const nameConflict = existingNames.has(effectiveName);
-  const stores = config?.stores ?? [];
+  const vaults = config?.vaults ?? [];
 
   const defaults = (id: string) => {
     const fc = filters.find((f) => f.id === id);
@@ -86,9 +86,9 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
       expression: edit.expression,
     }),
     onDeleteCheck: (id) => {
-      const refs = refsFor(stores, "filter", id);
+      const refs = refsFor(vaults, "filter", id);
       return refs.length > 0
-        ? `Filter "${id}" is referenced by store(s): ${refs.join(", ")}`
+        ? `Filter "${id}" is referenced by vault(s): ${refs.join(", ")}`
         : null;
     },
     clearEdit,
@@ -162,7 +162,7 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
       {filters.map((fc) => {
         const id = fc.id;
         const edit = getEdit(id);
-        const refs = refsFor(stores, "filter", id);
+        const refs = refsFor(vaults, "filter", id);
         return (
           <SettingsCard
             key={id}
@@ -179,7 +179,7 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
                 {putFilter.isPending ? "Saving..." : "Save"}
               </PrimaryButton>
             }
-            status={<UsedByStatus dark={dark} refs={refs} onNavigate={onNavigateTo ? (name) => onNavigateTo("stores", name) : undefined} />}
+            status={<UsedByStatus dark={dark} refs={refs} onNavigate={onNavigateTo ? (name) => onNavigateTo("vaults", name) : undefined} />}
           >
             <div className="flex flex-col gap-3">
               <FormField label="Name" dark={dark}>

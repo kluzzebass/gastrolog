@@ -24,11 +24,11 @@ func TestDefaultConfig(t *testing.T) {
 	if rp.MaxAge == nil || *rp.MaxAge != "5m" {
 		t.Errorf("expected MaxAge '5m', got %v", rp.MaxAge)
 	}
-	if len(cfg.Stores) != 1 {
-		t.Errorf("expected 1 store, got %d", len(cfg.Stores))
+	if len(cfg.Vaults) != 1 {
+		t.Errorf("expected 1 vault, got %d", len(cfg.Vaults))
 	}
-	if cfg.Stores[0].Type != "memory" {
-		t.Errorf("expected store type 'memory', got %q", cfg.Stores[0].Type)
+	if cfg.Vaults[0].Type != "memory" {
+		t.Errorf("expected vault type 'memory', got %q", cfg.Vaults[0].Type)
 	}
 	if len(cfg.Ingesters) != 1 {
 		t.Errorf("expected 1 ingester, got %d", len(cfg.Ingesters))
@@ -67,8 +67,8 @@ func TestBootstrap(t *testing.T) {
 	if len(cfg.RotationPolicies) != 1 {
 		t.Errorf("expected 1 rotation policy, got %d", len(cfg.RotationPolicies))
 	}
-	if len(cfg.Stores) != 1 {
-		t.Errorf("expected 1 store, got %d", len(cfg.Stores))
+	if len(cfg.Vaults) != 1 {
+		t.Errorf("expected 1 vault, got %d", len(cfg.Vaults))
 	}
 	if len(cfg.Ingesters) != 1 {
 		t.Errorf("expected 1 ingester, got %d", len(cfg.Ingesters))

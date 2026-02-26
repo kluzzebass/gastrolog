@@ -29,7 +29,7 @@ func (f *fakeConfigLoader) Load(_ context.Context) (*config.Config, error) {
 
 func TestReloadFilters(t *testing.T) {
 	loader := &fakeConfigLoader{}
-	orch, stores := newFilteredTestSetupWithLoader(t, loader)
+	orch, vaults := newFilteredTestSetupWithLoader(t, loader)
 
 	prodFilterID := uuid.Must(uuid.NewV7())
 	catchAllFilterID := uuid.Must(uuid.NewV7())
@@ -40,9 +40,9 @@ func TestReloadFilters(t *testing.T) {
 			{ID: prodFilterID, Expression: "env=prod"},
 			{ID: catchAllFilterID, Expression: "*"},
 		},
-		Stores: []config.StoreConfig{
-			{ID: stores.prod, Filter: new(prodFilterID)},
-			{ID: stores.archive, Filter: new(catchAllFilterID)},
+		Vaults: []config.VaultConfig{
+			{ID: vaults.prod, Filter: new(prodFilterID)},
+			{ID: vaults.archive, Filter: new(catchAllFilterID)},
 		},
 	}
 	if err := orch.ReloadFilters(context.Background()); err != nil {
@@ -59,10 +59,10 @@ func TestReloadFilters(t *testing.T) {
 		t.Fatalf("Ingest: %v", err)
 	}
 
-	if count := countRecords(t, stores.cms[stores.prod]); count != 1 {
+	if count := countRecords(t, vaults.cms[vaults.prod]); count != 1 {
 		t.Errorf("prod: expected 1 record, got %d", count)
 	}
-	if count := countRecords(t, stores.cms[stores.archive]); count != 1 {
+	if count := countRecords(t, vaults.cms[vaults.archive]); count != 1 {
 		t.Errorf("archive: expected 1 record, got %d", count)
 	}
 
@@ -72,9 +72,9 @@ func TestReloadFilters(t *testing.T) {
 			{ID: prodFilterID, Expression: "env=staging"},
 			{ID: catchAllFilterID, Expression: "*"},
 		},
-		Stores: []config.StoreConfig{
-			{ID: stores.prod, Filter: new(prodFilterID)},
-			{ID: stores.archive, Filter: new(catchAllFilterID)},
+		Vaults: []config.VaultConfig{
+			{ID: vaults.prod, Filter: new(prodFilterID)},
+			{ID: vaults.archive, Filter: new(catchAllFilterID)},
 		},
 	}
 	if err := orch.ReloadFilters(context.Background()); err != nil {
@@ -92,17 +92,17 @@ func TestReloadFilters(t *testing.T) {
 	}
 
 	// prod should still have 1 (old message), archive should have 2.
-	if count := countRecords(t, stores.cms[stores.prod]); count != 1 {
+	if count := countRecords(t, vaults.cms[vaults.prod]); count != 1 {
 		t.Errorf("prod after filter change: expected 1 record, got %d", count)
 	}
-	if count := countRecords(t, stores.cms[stores.archive]); count != 2 {
+	if count := countRecords(t, vaults.cms[vaults.archive]); count != 2 {
 		t.Errorf("archive after filter change: expected 2 records, got %d", count)
 	}
 }
 
 func TestReloadFiltersInvalidExpression(t *testing.T) {
 	loader := &fakeConfigLoader{}
-	orch, stores := newFilteredTestSetupWithLoader(t, loader)
+	orch, vaults := newFilteredTestSetupWithLoader(t, loader)
 
 	invalidFilterID := uuid.Must(uuid.NewV7())
 
@@ -110,8 +110,8 @@ func TestReloadFiltersInvalidExpression(t *testing.T) {
 		Filters: []config.FilterConfig{
 			{ID: invalidFilterID, Expression: "(unclosed"},
 		},
-		Stores: []config.StoreConfig{
-			{ID: stores.prod, Filter: new(invalidFilterID)},
+		Vaults: []config.VaultConfig{
+			{ID: vaults.prod, Filter: new(invalidFilterID)},
 		},
 	}
 	err := orch.ReloadFilters(context.Background())
@@ -120,23 +120,23 @@ func TestReloadFiltersInvalidExpression(t *testing.T) {
 	}
 }
 
-func TestReloadFiltersIgnoresUnknownStores(t *testing.T) {
+func TestReloadFiltersIgnoresUnknownVaults(t *testing.T) {
 	loader := &fakeConfigLoader{}
-	orch, stores := newFilteredTestSetupWithLoader(t, loader)
+	orch, vaults := newFilteredTestSetupWithLoader(t, loader)
 
 	prodFilterID := uuid.Must(uuid.NewV7())
 	catchAllFilterID := uuid.Must(uuid.NewV7())
-	nonexistentStoreID := uuid.Must(uuid.NewV7())
+	nonexistentVaultID := uuid.Must(uuid.NewV7())
 
-	// Include a store that doesn't exist - should be ignored.
+	// Include a vault that doesn't exist - should be ignored.
 	loader.cfg = &config.Config{
 		Filters: []config.FilterConfig{
 			{ID: prodFilterID, Expression: "env=prod"},
 			{ID: catchAllFilterID, Expression: "*"},
 		},
-		Stores: []config.StoreConfig{
-			{ID: stores.prod, Filter: new(prodFilterID)},
-			{ID: nonexistentStoreID, Filter: new(catchAllFilterID)},
+		Vaults: []config.VaultConfig{
+			{ID: vaults.prod, Filter: new(prodFilterID)},
+			{ID: nonexistentVaultID, Filter: new(catchAllFilterID)},
 		},
 	}
 	if err := orch.ReloadFilters(context.Background()); err != nil {
@@ -144,9 +144,9 @@ func TestReloadFiltersIgnoresUnknownStores(t *testing.T) {
 	}
 }
 
-func TestAddStore(t *testing.T) {
+func TestAddVault(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
 
 	loader := &fakeConfigLoader{cfg: &config.Config{
 		Filters: []config.FilterConfig{
@@ -164,20 +164,20 @@ func TestAddStore(t *testing.T) {
 		},
 	}
 
-	storeCfg := config.StoreConfig{
-		ID:     storeID,
+	vaultCfg := config.VaultConfig{
+		ID:     vaultID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
-		t.Fatalf("AddStore: %v", err)
+	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
+		t.Fatalf("AddVault: %v", err)
 	}
 
-	// Verify store was added.
-	cm := orch.ChunkManager(storeID)
+	// Verify vault was added.
+	cm := orch.ChunkManager(vaultID)
 	if cm == nil {
-		t.Fatal("ChunkManager not found after AddStore")
+		t.Fatal("ChunkManager not found after AddVault")
 	}
 
 	// Verify filtering works.
@@ -195,9 +195,9 @@ func TestAddStore(t *testing.T) {
 	}
 }
 
-func TestAddStoreDuplicate(t *testing.T) {
+func TestAddVaultDuplicate(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
 
 	loader := &fakeConfigLoader{cfg: &config.Config{
 		Filters: []config.FilterConfig{
@@ -215,26 +215,26 @@ func TestAddStoreDuplicate(t *testing.T) {
 		},
 	}
 
-	storeCfg := config.StoreConfig{
-		ID:     storeID,
+	vaultCfg := config.VaultConfig{
+		ID:     vaultID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
-		t.Fatalf("AddStore: %v", err)
+	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
+		t.Fatalf("AddVault: %v", err)
 	}
 
 	// Adding again should fail.
-	err := orch.AddStore(context.Background(), storeCfg, factories)
+	err := orch.AddVault(context.Background(), vaultCfg, factories)
 	if err == nil {
-		t.Fatal("expected error for duplicate store")
+		t.Fatal("expected error for duplicate vault")
 	}
 }
 
-func TestRemoveStoreEmpty(t *testing.T) {
+func TestRemoveVaultEmpty(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
 
 	loader := &fakeConfigLoader{cfg: &config.Config{
 		Filters: []config.FilterConfig{
@@ -252,30 +252,30 @@ func TestRemoveStoreEmpty(t *testing.T) {
 		},
 	}
 
-	storeCfg := config.StoreConfig{
-		ID:     storeID,
+	vaultCfg := config.VaultConfig{
+		ID:     vaultID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
-		t.Fatalf("AddStore: %v", err)
+	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
+		t.Fatalf("AddVault: %v", err)
 	}
 
 	// Remove should succeed since no data.
-	if err := orch.RemoveStore(storeID); err != nil {
-		t.Fatalf("RemoveStore: %v", err)
+	if err := orch.RemoveVault(vaultID); err != nil {
+		t.Fatalf("RemoveVault: %v", err)
 	}
 
-	// Verify store was removed.
-	if cm := orch.ChunkManager(storeID); cm != nil {
-		t.Error("ChunkManager should be nil after RemoveStore")
+	// Verify vault was removed.
+	if cm := orch.ChunkManager(vaultID); cm != nil {
+		t.Error("ChunkManager should be nil after RemoveVault")
 	}
 }
 
-func TestRemoveStoreNotEmpty(t *testing.T) {
+func TestRemoveVaultNotEmpty(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
 
 	loader := &fakeConfigLoader{cfg: &config.Config{
 		Filters: []config.FilterConfig{
@@ -293,14 +293,14 @@ func TestRemoveStoreNotEmpty(t *testing.T) {
 		},
 	}
 
-	storeCfg := config.StoreConfig{
-		ID:     storeID,
+	vaultCfg := config.VaultConfig{
+		ID:     vaultID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
-		t.Fatalf("AddStore: %v", err)
+	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
+		t.Fatalf("AddVault: %v", err)
 	}
 
 	// Add some data.
@@ -314,25 +314,25 @@ func TestRemoveStoreNotEmpty(t *testing.T) {
 	}
 
 	// Remove should fail.
-	err := orch.RemoveStore(storeID)
+	err := orch.RemoveVault(vaultID)
 	if err == nil {
-		t.Fatal("expected error for non-empty store")
+		t.Fatal("expected error for non-empty vault")
 	}
 }
 
-func TestRemoveStoreNotFound(t *testing.T) {
+func TestRemoveVaultNotFound(t *testing.T) {
 	loader := &fakeConfigLoader{cfg: &config.Config{}}
 	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
-	err := orch.RemoveStore(uuid.Must(uuid.NewV7()))
+	err := orch.RemoveVault(uuid.Must(uuid.NewV7()))
 	if err == nil {
-		t.Fatal("expected error for nonexistent store")
+		t.Fatal("expected error for nonexistent vault")
 	}
 }
 
-func TestForceRemoveStore(t *testing.T) {
+func TestForceRemoveVault(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
 
 	loader := &fakeConfigLoader{cfg: &config.Config{
 		Filters: []config.FilterConfig{
@@ -350,18 +350,18 @@ func TestForceRemoveStore(t *testing.T) {
 		},
 	}
 
-	storeCfg := config.StoreConfig{
-		ID:     storeID,
+	vaultCfg := config.VaultConfig{
+		ID:     vaultID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
-		t.Fatalf("AddStore: %v", err)
+	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
+		t.Fatalf("AddVault: %v", err)
 	}
 
 	// Ingest data and cause a seal to create sealed chunks.
-	cm := orch.ChunkManager(storeID)
+	cm := orch.ChunkManager(vaultID)
 	cm.SetRotationPolicy(chunk.NewRecordCountPolicy(3))
 
 	for range 10 {
@@ -375,44 +375,44 @@ func TestForceRemoveStore(t *testing.T) {
 		}
 	}
 
-	// Verify store has data.
+	// Verify vault has data.
 	metas, _ := cm.List()
 	if len(metas) == 0 {
-		t.Fatal("expected chunks in store")
+		t.Fatal("expected chunks in vault")
 	}
 
 	// Normal remove should fail.
-	if err := orch.RemoveStore(storeID); err == nil {
-		t.Fatal("expected error for non-empty store")
+	if err := orch.RemoveVault(vaultID); err == nil {
+		t.Fatal("expected error for non-empty vault")
 	}
 
 	// Force remove should succeed.
-	if err := orch.ForceRemoveStore(storeID); err != nil {
-		t.Fatalf("ForceRemoveStore: %v", err)
+	if err := orch.ForceRemoveVault(vaultID); err != nil {
+		t.Fatalf("ForceRemoveVault: %v", err)
 	}
 
-	// Verify store was completely removed.
-	if cm := orch.ChunkManager(storeID); cm != nil {
-		t.Error("ChunkManager should be nil after ForceRemoveStore")
+	// Verify vault was completely removed.
+	if cm := orch.ChunkManager(vaultID); cm != nil {
+		t.Error("ChunkManager should be nil after ForceRemoveVault")
 	}
-	if im := orch.IndexManager(storeID); im != nil {
-		t.Error("IndexManager should be nil after ForceRemoveStore")
+	if im := orch.IndexManager(vaultID); im != nil {
+		t.Error("IndexManager should be nil after ForceRemoveVault")
 	}
 }
 
-func TestForceRemoveStoreNotFound(t *testing.T) {
+func TestForceRemoveVaultNotFound(t *testing.T) {
 	loader := &fakeConfigLoader{cfg: &config.Config{}}
 	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
-	err := orch.ForceRemoveStore(uuid.Must(uuid.NewV7()))
+	err := orch.ForceRemoveVault(uuid.Must(uuid.NewV7()))
 	if err == nil {
-		t.Fatal("expected error for nonexistent store")
+		t.Fatal("expected error for nonexistent vault")
 	}
 }
 
-func TestForceRemoveEmptyStore(t *testing.T) {
+func TestForceRemoveEmptyVault(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
 
 	loader := &fakeConfigLoader{cfg: &config.Config{
 		Filters: []config.FilterConfig{
@@ -430,34 +430,34 @@ func TestForceRemoveEmptyStore(t *testing.T) {
 		},
 	}
 
-	storeCfg := config.StoreConfig{
-		ID:     storeID,
+	vaultCfg := config.VaultConfig{
+		ID:     vaultID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
-		t.Fatalf("AddStore: %v", err)
+	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
+		t.Fatalf("AddVault: %v", err)
 	}
 
-	// Force remove empty store should succeed.
-	if err := orch.ForceRemoveStore(storeID); err != nil {
-		t.Fatalf("ForceRemoveStore: %v", err)
+	// Force remove empty vault should succeed.
+	if err := orch.ForceRemoveVault(vaultID); err != nil {
+		t.Fatalf("ForceRemoveVault: %v", err)
 	}
 
-	if cm := orch.ChunkManager(storeID); cm != nil {
-		t.Error("ChunkManager should be nil after ForceRemoveStore")
+	if cm := orch.ChunkManager(vaultID); cm != nil {
+		t.Error("ChunkManager should be nil after ForceRemoveVault")
 	}
 }
 
 func TestAddIngesterWhileRunning(t *testing.T) {
-	s := memtest.MustNewStore(t, chunkmem.Config{
+	s := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(10000),
 	})
 
 	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterStore(orchestrator.NewStore(defaultID, s.CM, s.IM, s.QE))
+	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, s.IM, s.QE))
 
 	// Set catch-all filter.
 	filter, _ := orchestrator.CompileFilter(defaultID, "*")
@@ -538,7 +538,7 @@ func TestRemoveIngesterWhileRunning(t *testing.T) {
 
 	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterStore(orchestrator.NewStore(defaultID, cm, nil, nil))
+	orch.RegisterVault(orchestrator.NewVault(defaultID, cm, nil, nil))
 
 	ingesterID := uuid.Must(uuid.NewV7())
 	recv := newBlockingIngester()
@@ -585,9 +585,9 @@ func TestRemoveIngesterNotFound(t *testing.T) {
 	}
 }
 
-func TestStoreConfig(t *testing.T) {
+func TestVaultConfig(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
 
 	loader := &fakeConfigLoader{cfg: &config.Config{
 		Filters: []config.FilterConfig{
@@ -605,47 +605,47 @@ func TestStoreConfig(t *testing.T) {
 		},
 	}
 
-	storeCfg := config.StoreConfig{
-		ID:     storeID,
+	vaultCfg := config.VaultConfig{
+		ID:     vaultID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
-		t.Fatalf("AddStore: %v", err)
+	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
+		t.Fatalf("AddVault: %v", err)
 	}
 
 	// Get config back.
-	gotCfg, err := orch.StoreConfig(storeID)
+	gotCfg, err := orch.VaultConfig(vaultID)
 	if err != nil {
-		t.Fatalf("StoreConfig: %v", err)
+		t.Fatalf("VaultConfig: %v", err)
 	}
 
-	if gotCfg.ID != storeID {
-		t.Errorf("ID: expected %s, got %s", storeID, gotCfg.ID)
+	if gotCfg.ID != vaultID {
+		t.Errorf("ID: expected %s, got %s", vaultID, gotCfg.ID)
 	}
-	// StoreConfig does not track the original filter UUID reference,
+	// VaultConfig does not track the original filter UUID reference,
 	// so Filter is nil in the returned config.
 	if gotCfg.Filter != nil {
 		t.Errorf("Filter: expected nil (not tracked by orchestrator), got %v", gotCfg.Filter)
 	}
 }
 
-func TestStoreConfigNotFound(t *testing.T) {
+func TestVaultConfigNotFound(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
-	_, err := orch.StoreConfig(uuid.Must(uuid.NewV7()))
+	_, err := orch.VaultConfig(uuid.Must(uuid.NewV7()))
 	if err == nil {
-		t.Fatal("expected error for nonexistent store")
+		t.Fatal("expected error for nonexistent vault")
 	}
 }
 
-func TestUpdateStoreFilter(t *testing.T) {
-	orch, stores := newFilteredTestSetup(t)
+func TestUpdateVaultFilter(t *testing.T) {
+	orch, vaults := newFilteredTestSetup(t)
 
 	// Set initial filter: prod gets env=prod.
-	prodFilter, _ := orchestrator.CompileFilter(stores.prod, "env=prod")
-	archiveFilter, _ := orchestrator.CompileFilter(stores.archive, "*")
+	prodFilter, _ := orchestrator.CompileFilter(vaults.prod, "env=prod")
+	archiveFilter, _ := orchestrator.CompileFilter(vaults.archive, "*")
 	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{prodFilter, archiveFilter}))
 
 	// Ingest a prod message.
@@ -659,13 +659,13 @@ func TestUpdateStoreFilter(t *testing.T) {
 	}
 
 	// prod should have 1 message.
-	if count := countRecords(t, stores.cms[stores.prod]); count != 1 {
+	if count := countRecords(t, vaults.cms[vaults.prod]); count != 1 {
 		t.Errorf("prod: expected 1 record, got %d", count)
 	}
 
 	// Update prod's filter to env=staging.
-	if err := orch.UpdateStoreFilter(stores.prod, "env=staging"); err != nil {
-		t.Fatalf("UpdateStoreFilter: %v", err)
+	if err := orch.UpdateVaultFilter(vaults.prod, "env=staging"); err != nil {
+		t.Fatalf("UpdateVaultFilter: %v", err)
 	}
 
 	// Ingest another prod message - should NOT go to prod anymore.
@@ -679,19 +679,19 @@ func TestUpdateStoreFilter(t *testing.T) {
 	}
 
 	// prod should still have 1 message (filter changed).
-	if count := countRecords(t, stores.cms[stores.prod]); count != 1 {
+	if count := countRecords(t, vaults.cms[vaults.prod]); count != 1 {
 		t.Errorf("prod after filter change: expected 1 record, got %d", count)
 	}
 
 	// archive should have 2 (catch-all).
-	if count := countRecords(t, stores.cms[stores.archive]); count != 2 {
+	if count := countRecords(t, vaults.cms[vaults.archive]); count != 2 {
 		t.Errorf("archive: expected 2 records, got %d", count)
 	}
 }
 
-func TestSetRotationPolicyDirectly(t *testing.T) {
+func TestSetRotationPolicyOnVaultDirectly(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
 
 	loader := &fakeConfigLoader{cfg: &config.Config{
 		Filters: []config.FilterConfig{
@@ -700,7 +700,7 @@ func TestSetRotationPolicyDirectly(t *testing.T) {
 	}}
 	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
-	// Create a store with default rotation policy (10000 records).
+	// Create a vault with default rotation policy (10000 records).
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"memory": chunkmem.NewFactory(),
@@ -710,18 +710,18 @@ func TestSetRotationPolicyDirectly(t *testing.T) {
 		},
 	}
 
-	storeCfg := config.StoreConfig{
-		ID:     storeID,
+	vaultCfg := config.VaultConfig{
+		ID:     vaultID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
-		t.Fatalf("AddStore: %v", err)
+	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
+		t.Fatalf("AddVault: %v", err)
 	}
 
 	// Get chunk manager and set rotation policy directly.
-	cm := orch.ChunkManager(storeID)
+	cm := orch.ChunkManager(vaultID)
 	cm.SetRotationPolicy(chunk.NewRecordCountPolicy(3))
 
 	// Ingest 10 records - should trigger multiple rotations with limit of 3.
@@ -746,9 +746,9 @@ func TestSetRotationPolicyDirectly(t *testing.T) {
 	}
 }
 
-func TestPauseStore(t *testing.T) {
+func TestPauseVault(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
 
 	loader := &fakeConfigLoader{cfg: &config.Config{
 		Filters: []config.FilterConfig{
@@ -766,14 +766,14 @@ func TestPauseStore(t *testing.T) {
 		},
 	}
 
-	storeCfg := config.StoreConfig{
-		ID:     storeID,
+	vaultCfg := config.VaultConfig{
+		ID:     vaultID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
-		t.Fatalf("AddStore: %v", err)
+	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
+		t.Fatalf("AddVault: %v", err)
 	}
 
 	// Ingest a record before pausing.
@@ -786,20 +786,20 @@ func TestPauseStore(t *testing.T) {
 		t.Fatalf("Ingest: %v", err)
 	}
 
-	cm := orch.ChunkManager(storeID)
+	cm := orch.ChunkManager(vaultID)
 	if count := countRecords(t, cm); count != 1 {
 		t.Fatalf("expected 1 record before pause, got %d", count)
 	}
 
-	// Disable the store.
-	if err := orch.DisableStore(storeID); err != nil {
-		t.Fatalf("DisableStore: %v", err)
+	// Disable the vault.
+	if err := orch.DisableVault(vaultID); err != nil {
+		t.Fatalf("DisableVault: %v", err)
 	}
-	if orch.IsStoreEnabled(storeID) {
-		t.Fatal("store should be disabled")
+	if orch.IsVaultEnabled(vaultID) {
+		t.Fatal("vault should be disabled")
 	}
 
-	// Ingest another record - should be silently dropped for this store.
+	// Ingest another record - should be silently dropped for this vault.
 	rec2 := chunk.Record{
 		IngestTS: time.Now(),
 		Attrs:    chunk.Attributes{},
@@ -814,9 +814,9 @@ func TestPauseStore(t *testing.T) {
 	}
 }
 
-func TestResumeStore(t *testing.T) {
+func TestResumeVault(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
 
 	loader := &fakeConfigLoader{cfg: &config.Config{
 		Filters: []config.FilterConfig{
@@ -834,25 +834,25 @@ func TestResumeStore(t *testing.T) {
 		},
 	}
 
-	storeCfg := config.StoreConfig{
-		ID:     storeID,
+	vaultCfg := config.VaultConfig{
+		ID:     vaultID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
-		t.Fatalf("AddStore: %v", err)
+	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
+		t.Fatalf("AddVault: %v", err)
 	}
 
 	// Disable then re-enable.
-	if err := orch.DisableStore(storeID); err != nil {
-		t.Fatalf("DisableStore: %v", err)
+	if err := orch.DisableVault(vaultID); err != nil {
+		t.Fatalf("DisableVault: %v", err)
 	}
-	if err := orch.EnableStore(storeID); err != nil {
-		t.Fatalf("EnableStore: %v", err)
+	if err := orch.EnableVault(vaultID); err != nil {
+		t.Fatalf("EnableVault: %v", err)
 	}
-	if !orch.IsStoreEnabled(storeID) {
-		t.Fatal("store should be enabled after re-enable")
+	if !orch.IsVaultEnabled(vaultID) {
+		t.Fatal("vault should be enabled after re-enable")
 	}
 
 	// Ingest should work after re-enable.
@@ -865,26 +865,26 @@ func TestResumeStore(t *testing.T) {
 		t.Fatalf("Ingest after resume: %v", err)
 	}
 
-	cm := orch.ChunkManager(storeID)
+	cm := orch.ChunkManager(vaultID)
 	if count := countRecords(t, cm); count != 1 {
 		t.Errorf("expected 1 record after resume, got %d", count)
 	}
 }
 
-func TestDisableStoreNotFound(t *testing.T) {
+func TestDisableVaultNotFound(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
-	if err := orch.DisableStore(uuid.Must(uuid.NewV7())); err == nil {
-		t.Fatal("expected error for nonexistent store")
+	if err := orch.DisableVault(uuid.Must(uuid.NewV7())); err == nil {
+		t.Fatal("expected error for nonexistent vault")
 	}
-	if err := orch.EnableStore(uuid.Must(uuid.NewV7())); err == nil {
-		t.Fatal("expected error for nonexistent store")
+	if err := orch.EnableVault(uuid.Must(uuid.NewV7())); err == nil {
+		t.Fatal("expected error for nonexistent vault")
 	}
 }
 
-func TestDisableDoesNotAffectQuery(t *testing.T) {
+func TestDisableVaultDoesNotAffectQuery(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
 
 	loader := &fakeConfigLoader{cfg: &config.Config{
 		Filters: []config.FilterConfig{
@@ -902,14 +902,14 @@ func TestDisableDoesNotAffectQuery(t *testing.T) {
 		},
 	}
 
-	storeCfg := config.StoreConfig{
-		ID:     storeID,
+	vaultCfg := config.VaultConfig{
+		ID:     vaultID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
-		t.Fatalf("AddStore: %v", err)
+	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
+		t.Fatalf("AddVault: %v", err)
 	}
 
 	// Ingest data, then pause.
@@ -922,12 +922,12 @@ func TestDisableDoesNotAffectQuery(t *testing.T) {
 		}
 	}
 
-	if err := orch.DisableStore(storeID); err != nil {
-		t.Fatalf("DisableStore: %v", err)
+	if err := orch.DisableVault(vaultID); err != nil {
+		t.Fatalf("DisableVault: %v", err)
 	}
 
 	// Query should still work while disabled.
-	results, _, err := orch.Search(context.Background(), storeID, query.Query{}, nil)
+	results, _, err := orch.Search(context.Background(), vaultID, query.Query{}, nil)
 	if err != nil {
 		t.Fatalf("Search while disabled: %v", err)
 	}
@@ -944,18 +944,18 @@ func TestDisableDoesNotAffectQuery(t *testing.T) {
 	}
 }
 
-func TestUpdateStoreFilterNotFound(t *testing.T) {
+func TestUpdateVaultFilterNotFound(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
-	err := orch.UpdateStoreFilter(uuid.Must(uuid.NewV7()), "*")
+	err := orch.UpdateVaultFilter(uuid.Must(uuid.NewV7()), "*")
 	if err == nil {
-		t.Fatal("expected error for nonexistent store")
+		t.Fatal("expected error for nonexistent vault")
 	}
 }
 
-func TestUpdateStoreFilterInvalid(t *testing.T) {
+func TestUpdateVaultFilterInvalid(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
 
 	loader := &fakeConfigLoader{cfg: &config.Config{
 		Filters: []config.FilterConfig{
@@ -973,18 +973,18 @@ func TestUpdateStoreFilterInvalid(t *testing.T) {
 		},
 	}
 
-	storeCfg := config.StoreConfig{
-		ID:     storeID,
+	vaultCfg := config.VaultConfig{
+		ID:     vaultID,
 		Type:   "memory",
 		Filter: new(filterID),
 	}
 
-	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
-		t.Fatalf("AddStore: %v", err)
+	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
+		t.Fatalf("AddVault: %v", err)
 	}
 
 	// Invalid filter expression.
-	err := orch.UpdateStoreFilter(storeID, "(unclosed")
+	err := orch.UpdateVaultFilter(vaultID, "(unclosed")
 	if err == nil {
 		t.Error("expected error for invalid filter expression")
 	}

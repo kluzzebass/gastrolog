@@ -112,7 +112,7 @@ export function sameRecord(
     br = b.ref;
   if (!ar || !br) return false;
   return (
-    ar.chunkId === br.chunkId && ar.pos === br.pos && ar.storeId === br.storeId
+    ar.chunkId === br.chunkId && ar.pos === br.pos && ar.vaultId === br.vaultId
   );
 }
 

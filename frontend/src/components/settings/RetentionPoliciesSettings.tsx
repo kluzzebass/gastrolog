@@ -92,7 +92,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
   const existingNames = new Set(policies.map((p) => p.name));
   const effectiveName = newName.trim() || "default";
   const nameConflict = existingNames.has(effectiveName);
-  const stores = config?.stores ?? [];
+  const vaults = config?.vaults ?? [];
 
   const defaults = (id: string): PolicyEdit => {
     const pol = policies.find((p) => p.id === id);
@@ -122,7 +122,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
       };
     },
     onDeleteSuccess: (id) => {
-      const referencedBy = stores
+      const referencedBy = vaults
         .filter((s) => s.retentionRules.some((b: { retentionPolicyId: string }) => b.retentionPolicyId === id))
         .map((s) => s.name || s.id);
       if (referencedBy.length > 0) {
@@ -229,7 +229,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
       {policies.map((pol) => {
         const id = pol.id;
         const edit = getEdit(id);
-        const refs = ruleRefsFor(stores, id);
+        const refs = ruleRefsFor(vaults, id);
         return (
           <SettingsCard
             key={id}
@@ -246,7 +246,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
                 {putPolicy.isPending ? "Saving..." : "Save"}
               </PrimaryButton>
             }
-            status={<UsedByStatus dark={dark} refs={refs} onNavigate={onNavigateTo ? (name) => onNavigateTo("stores", name) : undefined} />}
+            status={<UsedByStatus dark={dark} refs={refs} onNavigate={onNavigateTo ? (name) => onNavigateTo("vaults", name) : undefined} />}
           >
             <div className="flex flex-col gap-3">
               <FormField label="Name" dark={dark}>

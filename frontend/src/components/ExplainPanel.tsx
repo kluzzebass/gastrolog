@@ -330,12 +330,12 @@ function ExplainChunk({
           >
             &#x25B6;
           </span>
-          {plan.storeId && (
+          {plan.vaultId && (
             <span
               className={`text-xs px-1.5 py-0.5 rounded font-medium ${c("bg-ink-border-subtle/40 text-text-normal", "bg-light-border/40 text-light-text-normal")}`}
-              title={`Store: ${plan.storeId}`}
+              title={`Vault: ${plan.vaultId}`}
             >
-              {plan.storeId}
+              {plan.vaultId}
             </span>
           )}
           <span

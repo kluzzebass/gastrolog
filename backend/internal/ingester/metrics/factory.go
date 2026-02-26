@@ -13,21 +13,21 @@ import (
 
 const (
 	defaultInterval      = 30 * time.Second
-	defaultStoreInterval = 10 * time.Second
+	defaultVaultInterval = 10 * time.Second
 )
 
-// StatsSource provides ingest queue and per-store statistics.
+// StatsSource provides ingest queue and per-vault statistics.
 type StatsSource interface {
 	IngestQueueDepth() int
 	IngestQueueCapacity() int
-	StoreSnapshots() []orchestrator.StoreSnapshot
+	VaultSnapshots() []orchestrator.VaultSnapshot
 }
 
 // ParamDefaults returns the default parameter values for a metrics ingester.
 func ParamDefaults() map[string]string {
 	return map[string]string{
 		"interval":       defaultInterval.String(),
-		"store_interval": defaultStoreInterval.String(),
+		"vault_interval": defaultVaultInterval.String(),
 	}
 }
 
@@ -47,16 +47,16 @@ func NewFactory(src StatsSource) orchestrator.IngesterFactory {
 			interval = d
 		}
 
-		storeInterval := defaultStoreInterval
-		if v := params["store_interval"]; v != "" {
+		vaultInterval := defaultVaultInterval
+		if v := params["vault_interval"]; v != "" {
 			d, err := time.ParseDuration(v)
 			if err != nil {
-				return nil, fmt.Errorf("metrics ingester %q: invalid store_interval %q: %w", id, v, err)
+				return nil, fmt.Errorf("metrics ingester %q: invalid vault_interval %q: %w", id, v, err)
 			}
 			if d <= 0 {
-				return nil, fmt.Errorf("metrics ingester %q: store_interval must be positive", id)
+				return nil, fmt.Errorf("metrics ingester %q: vault_interval must be positive", id)
 			}
-			storeInterval = d
+			vaultInterval = d
 		}
 
 		scopedLogger := logging.Default(logger).With(
@@ -68,7 +68,7 @@ func NewFactory(src StatsSource) orchestrator.IngesterFactory {
 		return &ingester{
 			id:            id.String(),
 			interval:      interval,
-			storeInterval: storeInterval,
+			vaultInterval: vaultInterval,
 			src:           src,
 			logger:        scopedLogger,
 		}, nil

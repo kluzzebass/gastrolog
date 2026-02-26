@@ -59,7 +59,7 @@ func (*GetConfigRequest) Descriptor() ([]byte, []int) {
 
 type GetConfigResponse struct {
 	state             protoimpl.MessageState   `protogen:"open.v1"`
-	Stores            []*StoreConfig           `protobuf:"bytes,1,rep,name=stores,proto3" json:"stores,omitempty"`
+	Vaults            []*VaultConfig           `protobuf:"bytes,1,rep,name=vaults,proto3" json:"vaults,omitempty"`
 	Ingesters         []*IngesterConfig        `protobuf:"bytes,2,rep,name=ingesters,proto3" json:"ingesters,omitempty"`
 	RotationPolicies  []*RotationPolicyConfig  `protobuf:"bytes,3,rep,name=rotation_policies,json=rotationPolicies,proto3" json:"rotation_policies,omitempty"`
 	Filters           []*FilterConfig          `protobuf:"bytes,4,rep,name=filters,proto3" json:"filters,omitempty"`
@@ -98,9 +98,9 @@ func (*GetConfigResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *GetConfigResponse) GetStores() []*StoreConfig {
+func (x *GetConfigResponse) GetVaults() []*VaultConfig {
 	if x != nil {
-		return x.Stores
+		return x.Vaults
 	}
 	return nil
 }
@@ -137,7 +137,7 @@ type RetentionRule struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	RetentionPolicyId string                 `protobuf:"bytes,1,opt,name=retention_policy_id,json=retentionPolicyId,proto3" json:"retention_policy_id,omitempty"`
 	Action            string                 `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`                                    // "expire" or "migrate"
-	DestinationId     string                 `protobuf:"bytes,3,opt,name=destination_id,json=destinationId,proto3" json:"destination_id,omitempty"` // target store, only for action=migrate
+	DestinationId     string                 `protobuf:"bytes,3,opt,name=destination_id,json=destinationId,proto3" json:"destination_id,omitempty"` // target vault, only for action=migrate
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -193,7 +193,7 @@ func (x *RetentionRule) GetDestinationId() string {
 	return ""
 }
 
-type StoreConfig struct {
+type VaultConfig struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	Id     string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Type   string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
@@ -208,20 +208,20 @@ type StoreConfig struct {
 	sizeCache      protoimpl.SizeCache
 }
 
-func (x *StoreConfig) Reset() {
-	*x = StoreConfig{}
+func (x *VaultConfig) Reset() {
+	*x = VaultConfig{}
 	mi := &file_gastrolog_v1_config_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *StoreConfig) String() string {
+func (x *VaultConfig) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*StoreConfig) ProtoMessage() {}
+func (*VaultConfig) ProtoMessage() {}
 
-func (x *StoreConfig) ProtoReflect() protoreflect.Message {
+func (x *VaultConfig) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_config_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -233,61 +233,61 @@ func (x *StoreConfig) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use StoreConfig.ProtoReflect.Descriptor instead.
-func (*StoreConfig) Descriptor() ([]byte, []int) {
+// Deprecated: Use VaultConfig.ProtoReflect.Descriptor instead.
+func (*VaultConfig) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *StoreConfig) GetId() string {
+func (x *VaultConfig) GetId() string {
 	if x != nil {
 		return x.Id
 	}
 	return ""
 }
 
-func (x *StoreConfig) GetType() string {
+func (x *VaultConfig) GetType() string {
 	if x != nil {
 		return x.Type
 	}
 	return ""
 }
 
-func (x *StoreConfig) GetFilter() string {
+func (x *VaultConfig) GetFilter() string {
 	if x != nil {
 		return x.Filter
 	}
 	return ""
 }
 
-func (x *StoreConfig) GetPolicy() string {
+func (x *VaultConfig) GetPolicy() string {
 	if x != nil {
 		return x.Policy
 	}
 	return ""
 }
 
-func (x *StoreConfig) GetParams() map[string]string {
+func (x *VaultConfig) GetParams() map[string]string {
 	if x != nil {
 		return x.Params
 	}
 	return nil
 }
 
-func (x *StoreConfig) GetEnabled() bool {
+func (x *VaultConfig) GetEnabled() bool {
 	if x != nil {
 		return x.Enabled
 	}
 	return false
 }
 
-func (x *StoreConfig) GetName() string {
+func (x *VaultConfig) GetName() string {
 	if x != nil {
 		return x.Name
 	}
 	return ""
 }
 
-func (x *StoreConfig) GetRetentionRules() []*RetentionRule {
+func (x *VaultConfig) GetRetentionRules() []*RetentionRule {
 	if x != nil {
 		return x.RetentionRules
 	}
@@ -1346,27 +1346,27 @@ func (*DeleteRetentionPolicyResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{24}
 }
 
-type PutStoreRequest struct {
+type PutVaultRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Config        *StoreConfig           `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
+	Config        *VaultConfig           `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *PutStoreRequest) Reset() {
-	*x = PutStoreRequest{}
+func (x *PutVaultRequest) Reset() {
+	*x = PutVaultRequest{}
 	mi := &file_gastrolog_v1_config_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *PutStoreRequest) String() string {
+func (x *PutVaultRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*PutStoreRequest) ProtoMessage() {}
+func (*PutVaultRequest) ProtoMessage() {}
 
-func (x *PutStoreRequest) ProtoReflect() protoreflect.Message {
+func (x *PutVaultRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_config_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1378,38 +1378,38 @@ func (x *PutStoreRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PutStoreRequest.ProtoReflect.Descriptor instead.
-func (*PutStoreRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use PutVaultRequest.ProtoReflect.Descriptor instead.
+func (*PutVaultRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{25}
 }
 
-func (x *PutStoreRequest) GetConfig() *StoreConfig {
+func (x *PutVaultRequest) GetConfig() *VaultConfig {
 	if x != nil {
 		return x.Config
 	}
 	return nil
 }
 
-type PutStoreResponse struct {
+type PutVaultResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *PutStoreResponse) Reset() {
-	*x = PutStoreResponse{}
+func (x *PutVaultResponse) Reset() {
+	*x = PutVaultResponse{}
 	mi := &file_gastrolog_v1_config_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *PutStoreResponse) String() string {
+func (x *PutVaultResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*PutStoreResponse) ProtoMessage() {}
+func (*PutVaultResponse) ProtoMessage() {}
 
-func (x *PutStoreResponse) ProtoReflect() protoreflect.Message {
+func (x *PutVaultResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_config_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1421,12 +1421,12 @@ func (x *PutStoreResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PutStoreResponse.ProtoReflect.Descriptor instead.
-func (*PutStoreResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use PutVaultResponse.ProtoReflect.Descriptor instead.
+func (*PutVaultResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{26}
 }
 
-type DeleteStoreRequest struct {
+type DeleteVaultRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Force         bool                   `protobuf:"varint,2,opt,name=force,proto3" json:"force,omitempty"`
@@ -1434,20 +1434,20 @@ type DeleteStoreRequest struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *DeleteStoreRequest) Reset() {
-	*x = DeleteStoreRequest{}
+func (x *DeleteVaultRequest) Reset() {
+	*x = DeleteVaultRequest{}
 	mi := &file_gastrolog_v1_config_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *DeleteStoreRequest) String() string {
+func (x *DeleteVaultRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*DeleteStoreRequest) ProtoMessage() {}
+func (*DeleteVaultRequest) ProtoMessage() {}
 
-func (x *DeleteStoreRequest) ProtoReflect() protoreflect.Message {
+func (x *DeleteVaultRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_config_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1459,45 +1459,45 @@ func (x *DeleteStoreRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DeleteStoreRequest.ProtoReflect.Descriptor instead.
-func (*DeleteStoreRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use DeleteVaultRequest.ProtoReflect.Descriptor instead.
+func (*DeleteVaultRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{27}
 }
 
-func (x *DeleteStoreRequest) GetId() string {
+func (x *DeleteVaultRequest) GetId() string {
 	if x != nil {
 		return x.Id
 	}
 	return ""
 }
 
-func (x *DeleteStoreRequest) GetForce() bool {
+func (x *DeleteVaultRequest) GetForce() bool {
 	if x != nil {
 		return x.Force
 	}
 	return false
 }
 
-type DeleteStoreResponse struct {
+type DeleteVaultResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *DeleteStoreResponse) Reset() {
-	*x = DeleteStoreResponse{}
+func (x *DeleteVaultResponse) Reset() {
+	*x = DeleteVaultResponse{}
 	mi := &file_gastrolog_v1_config_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *DeleteStoreResponse) String() string {
+func (x *DeleteVaultResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*DeleteStoreResponse) ProtoMessage() {}
+func (*DeleteVaultResponse) ProtoMessage() {}
 
-func (x *DeleteStoreResponse) ProtoReflect() protoreflect.Message {
+func (x *DeleteVaultResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_config_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1509,8 +1509,8 @@ func (x *DeleteStoreResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DeleteStoreResponse.ProtoReflect.Descriptor instead.
-func (*DeleteStoreResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use DeleteVaultResponse.ProtoReflect.Descriptor instead.
+func (*DeleteVaultResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{28}
 }
 
@@ -3232,27 +3232,27 @@ func (*DeleteCertificateResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{57}
 }
 
-type PauseStoreRequest struct {
+type PauseVaultRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *PauseStoreRequest) Reset() {
-	*x = PauseStoreRequest{}
+func (x *PauseVaultRequest) Reset() {
+	*x = PauseVaultRequest{}
 	mi := &file_gastrolog_v1_config_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *PauseStoreRequest) String() string {
+func (x *PauseVaultRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*PauseStoreRequest) ProtoMessage() {}
+func (*PauseVaultRequest) ProtoMessage() {}
 
-func (x *PauseStoreRequest) ProtoReflect() protoreflect.Message {
+func (x *PauseVaultRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_config_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -3264,38 +3264,38 @@ func (x *PauseStoreRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PauseStoreRequest.ProtoReflect.Descriptor instead.
-func (*PauseStoreRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use PauseVaultRequest.ProtoReflect.Descriptor instead.
+func (*PauseVaultRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{58}
 }
 
-func (x *PauseStoreRequest) GetId() string {
+func (x *PauseVaultRequest) GetId() string {
 	if x != nil {
 		return x.Id
 	}
 	return ""
 }
 
-type PauseStoreResponse struct {
+type PauseVaultResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *PauseStoreResponse) Reset() {
-	*x = PauseStoreResponse{}
+func (x *PauseVaultResponse) Reset() {
+	*x = PauseVaultResponse{}
 	mi := &file_gastrolog_v1_config_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *PauseStoreResponse) String() string {
+func (x *PauseVaultResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*PauseStoreResponse) ProtoMessage() {}
+func (*PauseVaultResponse) ProtoMessage() {}
 
-func (x *PauseStoreResponse) ProtoReflect() protoreflect.Message {
+func (x *PauseVaultResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_config_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -3307,32 +3307,32 @@ func (x *PauseStoreResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PauseStoreResponse.ProtoReflect.Descriptor instead.
-func (*PauseStoreResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use PauseVaultResponse.ProtoReflect.Descriptor instead.
+func (*PauseVaultResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{59}
 }
 
-type ResumeStoreRequest struct {
+type ResumeVaultRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ResumeStoreRequest) Reset() {
-	*x = ResumeStoreRequest{}
+func (x *ResumeVaultRequest) Reset() {
+	*x = ResumeVaultRequest{}
 	mi := &file_gastrolog_v1_config_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ResumeStoreRequest) String() string {
+func (x *ResumeVaultRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ResumeStoreRequest) ProtoMessage() {}
+func (*ResumeVaultRequest) ProtoMessage() {}
 
-func (x *ResumeStoreRequest) ProtoReflect() protoreflect.Message {
+func (x *ResumeVaultRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_config_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -3344,38 +3344,38 @@ func (x *ResumeStoreRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ResumeStoreRequest.ProtoReflect.Descriptor instead.
-func (*ResumeStoreRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use ResumeVaultRequest.ProtoReflect.Descriptor instead.
+func (*ResumeVaultRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{60}
 }
 
-func (x *ResumeStoreRequest) GetId() string {
+func (x *ResumeVaultRequest) GetId() string {
 	if x != nil {
 		return x.Id
 	}
 	return ""
 }
 
-type ResumeStoreResponse struct {
+type ResumeVaultResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ResumeStoreResponse) Reset() {
-	*x = ResumeStoreResponse{}
+func (x *ResumeVaultResponse) Reset() {
+	*x = ResumeVaultResponse{}
 	mi := &file_gastrolog_v1_config_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ResumeStoreResponse) String() string {
+func (x *ResumeVaultResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ResumeStoreResponse) ProtoMessage() {}
+func (*ResumeVaultResponse) ProtoMessage() {}
 
-func (x *ResumeStoreResponse) ProtoReflect() protoreflect.Message {
+func (x *ResumeVaultResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_config_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -3387,8 +3387,8 @@ func (x *ResumeStoreResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ResumeStoreResponse.ProtoReflect.Descriptor instead.
-func (*ResumeStoreResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use ResumeVaultResponse.ProtoReflect.Descriptor instead.
+func (*ResumeVaultResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{61}
 }
 
@@ -3627,7 +3627,7 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x19gastrolog/v1/config.proto\x12\fgastrolog.v1\"\x12\n" +
 	"\x10GetConfigRequest\"\xdd\x02\n" +
 	"\x11GetConfigResponse\x121\n" +
-	"\x06stores\x18\x01 \x03(\v2\x19.gastrolog.v1.StoreConfigR\x06stores\x12:\n" +
+	"\x06vaults\x18\x01 \x03(\v2\x19.gastrolog.v1.VaultConfigR\x06vaults\x12:\n" +
 	"\tingesters\x18\x02 \x03(\v2\x1c.gastrolog.v1.IngesterConfigR\tingesters\x12O\n" +
 	"\x11rotation_policies\x18\x03 \x03(\v2\".gastrolog.v1.RotationPolicyConfigR\x10rotationPolicies\x124\n" +
 	"\afilters\x18\x04 \x03(\v2\x1a.gastrolog.v1.FilterConfigR\afilters\x12R\n" +
@@ -3636,12 +3636,12 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x13retention_policy_id\x18\x01 \x01(\tR\x11retentionPolicyId\x12\x16\n" +
 	"\x06action\x18\x02 \x01(\tR\x06action\x12%\n" +
 	"\x0edestination_id\x18\x03 \x01(\tR\rdestinationId\"\xcf\x02\n" +
-	"\vStoreConfig\x12\x0e\n" +
+	"\vVaultConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x16\n" +
 	"\x06filter\x18\x03 \x01(\tR\x06filter\x12\x16\n" +
 	"\x06policy\x18\x04 \x01(\tR\x06policy\x12=\n" +
-	"\x06params\x18\x05 \x03(\v2%.gastrolog.v1.StoreConfig.ParamsEntryR\x06params\x12\x18\n" +
+	"\x06params\x18\x05 \x03(\v2%.gastrolog.v1.VaultConfig.ParamsEntryR\x06params\x12\x18\n" +
 	"\aenabled\x18\a \x01(\bR\aenabled\x12\x12\n" +
 	"\x04name\x18\b \x01(\tR\x04name\x12D\n" +
 	"\x0fretention_rules\x18\t \x03(\v2\x1b.gastrolog.v1.RetentionRuleR\x0eretentionRules\x1a9\n" +
@@ -3713,13 +3713,13 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x1cDeleteRetentionPolicyRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x1f\n" +
 	"\x1dDeleteRetentionPolicyResponse\"D\n" +
-	"\x0fPutStoreRequest\x121\n" +
-	"\x06config\x18\x01 \x01(\v2\x19.gastrolog.v1.StoreConfigR\x06config\"\x12\n" +
-	"\x10PutStoreResponse\":\n" +
-	"\x12DeleteStoreRequest\x12\x0e\n" +
+	"\x0fPutVaultRequest\x121\n" +
+	"\x06config\x18\x01 \x01(\v2\x19.gastrolog.v1.VaultConfigR\x06config\"\x12\n" +
+	"\x10PutVaultResponse\":\n" +
+	"\x12DeleteVaultRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05force\x18\x02 \x01(\bR\x05force\"\x15\n" +
-	"\x13DeleteStoreResponse\"J\n" +
+	"\x13DeleteVaultResponse\"J\n" +
 	"\x12PutIngesterRequest\x124\n" +
 	"\x06config\x18\x01 \x01(\v2\x1c.gastrolog.v1.IngesterConfigR\x06config\"\x15\n" +
 	"\x13PutIngesterResponse\"'\n" +
@@ -3867,12 +3867,12 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x18DeleteCertificateRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x1b\n" +
 	"\x19DeleteCertificateResponse\"#\n" +
-	"\x11PauseStoreRequest\x12\x0e\n" +
+	"\x11PauseVaultRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x14\n" +
-	"\x12PauseStoreResponse\"$\n" +
-	"\x12ResumeStoreRequest\x12\x0e\n" +
+	"\x12PauseVaultResponse\"$\n" +
+	"\x12ResumeVaultRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x15\n" +
-	"\x13ResumeStoreResponse\"\xab\x01\n" +
+	"\x13ResumeVaultResponse\"\xab\x01\n" +
 	"\x13TestIngesterRequest\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12E\n" +
 	"\x06params\x18\x02 \x03(\v2-.gastrolog.v1.TestIngesterRequest.ParamsEntryR\x06params\x1a9\n" +
@@ -3904,8 +3904,8 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x14DeleteRotationPolicy\x12).gastrolog.v1.DeleteRotationPolicyRequest\x1a*.gastrolog.v1.DeleteRotationPolicyResponse\x12g\n" +
 	"\x12PutRetentionPolicy\x12'.gastrolog.v1.PutRetentionPolicyRequest\x1a(.gastrolog.v1.PutRetentionPolicyResponse\x12p\n" +
 	"\x15DeleteRetentionPolicy\x12*.gastrolog.v1.DeleteRetentionPolicyRequest\x1a+.gastrolog.v1.DeleteRetentionPolicyResponse\x12I\n" +
-	"\bPutStore\x12\x1d.gastrolog.v1.PutStoreRequest\x1a\x1e.gastrolog.v1.PutStoreResponse\x12R\n" +
-	"\vDeleteStore\x12 .gastrolog.v1.DeleteStoreRequest\x1a!.gastrolog.v1.DeleteStoreResponse\x12R\n" +
+	"\bPutVault\x12\x1d.gastrolog.v1.PutVaultRequest\x1a\x1e.gastrolog.v1.PutVaultResponse\x12R\n" +
+	"\vDeleteVault\x12 .gastrolog.v1.DeleteVaultRequest\x1a!.gastrolog.v1.DeleteVaultResponse\x12R\n" +
 	"\vPutIngester\x12 .gastrolog.v1.PutIngesterRequest\x1a!.gastrolog.v1.PutIngesterResponse\x12[\n" +
 	"\x0eDeleteIngester\x12#.gastrolog.v1.DeleteIngesterRequest\x1a$.gastrolog.v1.DeleteIngesterResponse\x12^\n" +
 	"\x0fGetServerConfig\x12$.gastrolog.v1.GetServerConfigRequest\x1a%.gastrolog.v1.GetServerConfigResponse\x12^\n" +
@@ -3920,8 +3920,8 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x0ePutCertificate\x12#.gastrolog.v1.PutCertificateRequest\x1a$.gastrolog.v1.PutCertificateResponse\x12d\n" +
 	"\x11DeleteCertificate\x12&.gastrolog.v1.DeleteCertificateRequest\x1a'.gastrolog.v1.DeleteCertificateResponse\x12O\n" +
 	"\n" +
-	"PauseStore\x12\x1f.gastrolog.v1.PauseStoreRequest\x1a .gastrolog.v1.PauseStoreResponse\x12R\n" +
-	"\vResumeStore\x12 .gastrolog.v1.ResumeStoreRequest\x1a!.gastrolog.v1.ResumeStoreResponse\x12U\n" +
+	"PauseVault\x12\x1f.gastrolog.v1.PauseVaultRequest\x1a .gastrolog.v1.PauseVaultResponse\x12R\n" +
+	"\vResumeVault\x12 .gastrolog.v1.ResumeVaultRequest\x1a!.gastrolog.v1.ResumeVaultResponse\x12U\n" +
 	"\fTestIngester\x12!.gastrolog.v1.TestIngesterRequest\x1a\".gastrolog.v1.TestIngesterResponse\x12j\n" +
 	"\x13GetIngesterDefaults\x12(.gastrolog.v1.GetIngesterDefaultsRequest\x1a).gastrolog.v1.GetIngesterDefaultsResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
@@ -3942,7 +3942,7 @@ var file_gastrolog_v1_config_proto_goTypes = []any{
 	(*GetConfigRequest)(nil),              // 0: gastrolog.v1.GetConfigRequest
 	(*GetConfigResponse)(nil),             // 1: gastrolog.v1.GetConfigResponse
 	(*RetentionRule)(nil),                 // 2: gastrolog.v1.RetentionRule
-	(*StoreConfig)(nil),                   // 3: gastrolog.v1.StoreConfig
+	(*VaultConfig)(nil),                   // 3: gastrolog.v1.VaultConfig
 	(*IngesterConfig)(nil),                // 4: gastrolog.v1.IngesterConfig
 	(*FilterConfig)(nil),                  // 5: gastrolog.v1.FilterConfig
 	(*RotationPolicyConfig)(nil),          // 6: gastrolog.v1.RotationPolicyConfig
@@ -3964,10 +3964,10 @@ var file_gastrolog_v1_config_proto_goTypes = []any{
 	(*PutRetentionPolicyResponse)(nil),    // 22: gastrolog.v1.PutRetentionPolicyResponse
 	(*DeleteRetentionPolicyRequest)(nil),  // 23: gastrolog.v1.DeleteRetentionPolicyRequest
 	(*DeleteRetentionPolicyResponse)(nil), // 24: gastrolog.v1.DeleteRetentionPolicyResponse
-	(*PutStoreRequest)(nil),               // 25: gastrolog.v1.PutStoreRequest
-	(*PutStoreResponse)(nil),              // 26: gastrolog.v1.PutStoreResponse
-	(*DeleteStoreRequest)(nil),            // 27: gastrolog.v1.DeleteStoreRequest
-	(*DeleteStoreResponse)(nil),           // 28: gastrolog.v1.DeleteStoreResponse
+	(*PutVaultRequest)(nil),               // 25: gastrolog.v1.PutVaultRequest
+	(*PutVaultResponse)(nil),              // 26: gastrolog.v1.PutVaultResponse
+	(*DeleteVaultRequest)(nil),            // 27: gastrolog.v1.DeleteVaultRequest
+	(*DeleteVaultResponse)(nil),           // 28: gastrolog.v1.DeleteVaultResponse
 	(*PutIngesterRequest)(nil),            // 29: gastrolog.v1.PutIngesterRequest
 	(*PutIngesterResponse)(nil),           // 30: gastrolog.v1.PutIngesterResponse
 	(*DeleteIngesterRequest)(nil),         // 31: gastrolog.v1.DeleteIngesterRequest
@@ -3997,35 +3997,35 @@ var file_gastrolog_v1_config_proto_goTypes = []any{
 	(*PutCertificateResponse)(nil),        // 55: gastrolog.v1.PutCertificateResponse
 	(*DeleteCertificateRequest)(nil),      // 56: gastrolog.v1.DeleteCertificateRequest
 	(*DeleteCertificateResponse)(nil),     // 57: gastrolog.v1.DeleteCertificateResponse
-	(*PauseStoreRequest)(nil),             // 58: gastrolog.v1.PauseStoreRequest
-	(*PauseStoreResponse)(nil),            // 59: gastrolog.v1.PauseStoreResponse
-	(*ResumeStoreRequest)(nil),            // 60: gastrolog.v1.ResumeStoreRequest
-	(*ResumeStoreResponse)(nil),           // 61: gastrolog.v1.ResumeStoreResponse
+	(*PauseVaultRequest)(nil),             // 58: gastrolog.v1.PauseVaultRequest
+	(*PauseVaultResponse)(nil),            // 59: gastrolog.v1.PauseVaultResponse
+	(*ResumeVaultRequest)(nil),            // 60: gastrolog.v1.ResumeVaultRequest
+	(*ResumeVaultResponse)(nil),           // 61: gastrolog.v1.ResumeVaultResponse
 	(*TestIngesterRequest)(nil),           // 62: gastrolog.v1.TestIngesterRequest
 	(*TestIngesterResponse)(nil),          // 63: gastrolog.v1.TestIngesterResponse
 	(*GetIngesterDefaultsRequest)(nil),    // 64: gastrolog.v1.GetIngesterDefaultsRequest
 	(*IngesterTypeDefaults)(nil),          // 65: gastrolog.v1.IngesterTypeDefaults
 	(*GetIngesterDefaultsResponse)(nil),   // 66: gastrolog.v1.GetIngesterDefaultsResponse
-	nil,                                   // 67: gastrolog.v1.StoreConfig.ParamsEntry
+	nil,                                   // 67: gastrolog.v1.VaultConfig.ParamsEntry
 	nil,                                   // 68: gastrolog.v1.IngesterConfig.ParamsEntry
 	nil,                                   // 69: gastrolog.v1.TestIngesterRequest.ParamsEntry
 	nil,                                   // 70: gastrolog.v1.IngesterTypeDefaults.ParamsEntry
 	nil,                                   // 71: gastrolog.v1.GetIngesterDefaultsResponse.TypesEntry
 }
 var file_gastrolog_v1_config_proto_depIdxs = []int32{
-	3,  // 0: gastrolog.v1.GetConfigResponse.stores:type_name -> gastrolog.v1.StoreConfig
+	3,  // 0: gastrolog.v1.GetConfigResponse.vaults:type_name -> gastrolog.v1.VaultConfig
 	4,  // 1: gastrolog.v1.GetConfigResponse.ingesters:type_name -> gastrolog.v1.IngesterConfig
 	6,  // 2: gastrolog.v1.GetConfigResponse.rotation_policies:type_name -> gastrolog.v1.RotationPolicyConfig
 	5,  // 3: gastrolog.v1.GetConfigResponse.filters:type_name -> gastrolog.v1.FilterConfig
 	7,  // 4: gastrolog.v1.GetConfigResponse.retention_policies:type_name -> gastrolog.v1.RetentionPolicyConfig
-	67, // 5: gastrolog.v1.StoreConfig.params:type_name -> gastrolog.v1.StoreConfig.ParamsEntry
-	2,  // 6: gastrolog.v1.StoreConfig.retention_rules:type_name -> gastrolog.v1.RetentionRule
+	67, // 5: gastrolog.v1.VaultConfig.params:type_name -> gastrolog.v1.VaultConfig.ParamsEntry
+	2,  // 6: gastrolog.v1.VaultConfig.retention_rules:type_name -> gastrolog.v1.RetentionRule
 	68, // 7: gastrolog.v1.IngesterConfig.params:type_name -> gastrolog.v1.IngesterConfig.ParamsEntry
 	10, // 8: gastrolog.v1.ListIngestersResponse.ingesters:type_name -> gastrolog.v1.IngesterInfo
 	5,  // 9: gastrolog.v1.PutFilterRequest.config:type_name -> gastrolog.v1.FilterConfig
 	6,  // 10: gastrolog.v1.PutRotationPolicyRequest.config:type_name -> gastrolog.v1.RotationPolicyConfig
 	7,  // 11: gastrolog.v1.PutRetentionPolicyRequest.config:type_name -> gastrolog.v1.RetentionPolicyConfig
-	3,  // 12: gastrolog.v1.PutStoreRequest.config:type_name -> gastrolog.v1.StoreConfig
+	3,  // 12: gastrolog.v1.PutVaultRequest.config:type_name -> gastrolog.v1.VaultConfig
 	4,  // 13: gastrolog.v1.PutIngesterRequest.config:type_name -> gastrolog.v1.IngesterConfig
 	37, // 14: gastrolog.v1.PutServerConfigResponse.geoip_validation:type_name -> gastrolog.v1.MmdbValidation
 	37, // 15: gastrolog.v1.PutServerConfigResponse.asn_validation:type_name -> gastrolog.v1.MmdbValidation
@@ -4045,8 +4045,8 @@ var file_gastrolog_v1_config_proto_depIdxs = []int32{
 	19, // 29: gastrolog.v1.ConfigService.DeleteRotationPolicy:input_type -> gastrolog.v1.DeleteRotationPolicyRequest
 	21, // 30: gastrolog.v1.ConfigService.PutRetentionPolicy:input_type -> gastrolog.v1.PutRetentionPolicyRequest
 	23, // 31: gastrolog.v1.ConfigService.DeleteRetentionPolicy:input_type -> gastrolog.v1.DeleteRetentionPolicyRequest
-	25, // 32: gastrolog.v1.ConfigService.PutStore:input_type -> gastrolog.v1.PutStoreRequest
-	27, // 33: gastrolog.v1.ConfigService.DeleteStore:input_type -> gastrolog.v1.DeleteStoreRequest
+	25, // 32: gastrolog.v1.ConfigService.PutVault:input_type -> gastrolog.v1.PutVaultRequest
+	27, // 33: gastrolog.v1.ConfigService.DeleteVault:input_type -> gastrolog.v1.DeleteVaultRequest
 	29, // 34: gastrolog.v1.ConfigService.PutIngester:input_type -> gastrolog.v1.PutIngesterRequest
 	31, // 35: gastrolog.v1.ConfigService.DeleteIngester:input_type -> gastrolog.v1.DeleteIngesterRequest
 	33, // 36: gastrolog.v1.ConfigService.GetServerConfig:input_type -> gastrolog.v1.GetServerConfigRequest
@@ -4060,8 +4060,8 @@ var file_gastrolog_v1_config_proto_depIdxs = []int32{
 	52, // 44: gastrolog.v1.ConfigService.GetCertificate:input_type -> gastrolog.v1.GetCertificateRequest
 	54, // 45: gastrolog.v1.ConfigService.PutCertificate:input_type -> gastrolog.v1.PutCertificateRequest
 	56, // 46: gastrolog.v1.ConfigService.DeleteCertificate:input_type -> gastrolog.v1.DeleteCertificateRequest
-	58, // 47: gastrolog.v1.ConfigService.PauseStore:input_type -> gastrolog.v1.PauseStoreRequest
-	60, // 48: gastrolog.v1.ConfigService.ResumeStore:input_type -> gastrolog.v1.ResumeStoreRequest
+	58, // 47: gastrolog.v1.ConfigService.PauseVault:input_type -> gastrolog.v1.PauseVaultRequest
+	60, // 48: gastrolog.v1.ConfigService.ResumeVault:input_type -> gastrolog.v1.ResumeVaultRequest
 	62, // 49: gastrolog.v1.ConfigService.TestIngester:input_type -> gastrolog.v1.TestIngesterRequest
 	64, // 50: gastrolog.v1.ConfigService.GetIngesterDefaults:input_type -> gastrolog.v1.GetIngesterDefaultsRequest
 	1,  // 51: gastrolog.v1.ConfigService.GetConfig:output_type -> gastrolog.v1.GetConfigResponse
@@ -4073,8 +4073,8 @@ var file_gastrolog_v1_config_proto_depIdxs = []int32{
 	20, // 57: gastrolog.v1.ConfigService.DeleteRotationPolicy:output_type -> gastrolog.v1.DeleteRotationPolicyResponse
 	22, // 58: gastrolog.v1.ConfigService.PutRetentionPolicy:output_type -> gastrolog.v1.PutRetentionPolicyResponse
 	24, // 59: gastrolog.v1.ConfigService.DeleteRetentionPolicy:output_type -> gastrolog.v1.DeleteRetentionPolicyResponse
-	26, // 60: gastrolog.v1.ConfigService.PutStore:output_type -> gastrolog.v1.PutStoreResponse
-	28, // 61: gastrolog.v1.ConfigService.DeleteStore:output_type -> gastrolog.v1.DeleteStoreResponse
+	26, // 60: gastrolog.v1.ConfigService.PutVault:output_type -> gastrolog.v1.PutVaultResponse
+	28, // 61: gastrolog.v1.ConfigService.DeleteVault:output_type -> gastrolog.v1.DeleteVaultResponse
 	30, // 62: gastrolog.v1.ConfigService.PutIngester:output_type -> gastrolog.v1.PutIngesterResponse
 	32, // 63: gastrolog.v1.ConfigService.DeleteIngester:output_type -> gastrolog.v1.DeleteIngesterResponse
 	34, // 64: gastrolog.v1.ConfigService.GetServerConfig:output_type -> gastrolog.v1.GetServerConfigResponse
@@ -4088,8 +4088,8 @@ var file_gastrolog_v1_config_proto_depIdxs = []int32{
 	53, // 72: gastrolog.v1.ConfigService.GetCertificate:output_type -> gastrolog.v1.GetCertificateResponse
 	55, // 73: gastrolog.v1.ConfigService.PutCertificate:output_type -> gastrolog.v1.PutCertificateResponse
 	57, // 74: gastrolog.v1.ConfigService.DeleteCertificate:output_type -> gastrolog.v1.DeleteCertificateResponse
-	59, // 75: gastrolog.v1.ConfigService.PauseStore:output_type -> gastrolog.v1.PauseStoreResponse
-	61, // 76: gastrolog.v1.ConfigService.ResumeStore:output_type -> gastrolog.v1.ResumeStoreResponse
+	59, // 75: gastrolog.v1.ConfigService.PauseVault:output_type -> gastrolog.v1.PauseVaultResponse
+	61, // 76: gastrolog.v1.ConfigService.ResumeVault:output_type -> gastrolog.v1.ResumeVaultResponse
 	63, // 77: gastrolog.v1.ConfigService.TestIngester:output_type -> gastrolog.v1.TestIngesterResponse
 	66, // 78: gastrolog.v1.ConfigService.GetIngesterDefaults:output_type -> gastrolog.v1.GetIngesterDefaultsResponse
 	51, // [51:79] is the sub-list for method output_type

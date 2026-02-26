@@ -165,7 +165,7 @@ func (s *ConfigServer) PutIngester(
 		}
 	}
 
-	// Persist to config store (always, even when disabled).
+	// Persist to config vault (always, even when disabled).
 	if err := s.cfgStore.PutIngester(ctx, ingCfg); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -195,7 +195,7 @@ func (s *ConfigServer) DeleteIngester(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	// Remove from config store.
+	// Remove from config vault.
 	if err := s.cfgStore.DeleteIngester(ctx, id); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}

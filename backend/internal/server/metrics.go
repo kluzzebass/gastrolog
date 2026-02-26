@@ -50,8 +50,8 @@ func (s *Server) writeMetrics(w http.ResponseWriter) {
 	// -- Per-ingester metrics --
 	s.writeIngesterMetrics(w, orch)
 
-	// -- Store metrics --
-	s.writeStoreMetrics(w, orch)
+	// -- Vault metrics --
+	s.writeVaultMetrics(w, orch)
 }
 
 func (s *Server) writeIngesterMetrics(w http.ResponseWriter, orch *orchestrator.Orchestrator) {
@@ -111,41 +111,41 @@ func (s *Server) writeIngesterMetrics(w http.ResponseWriter, orch *orchestrator.
 	}
 }
 
-func (s *Server) writeStoreMetrics(w http.ResponseWriter, orch *orchestrator.Orchestrator) {
-	stores := orch.ListStores()
-	if len(stores) == 0 {
+func (s *Server) writeVaultMetrics(w http.ResponseWriter, orch *orchestrator.Orchestrator) {
+	vaults := orch.ListVaults()
+	if len(vaults) == 0 {
 		return
 	}
 
 	// Build name/type lookup from config.
-	type storeMeta struct {
+	type vaultMeta struct {
 		name      string
-		storeType string
+		vaultType string
 	}
-	metaMap := make(map[string]storeMeta, len(stores))
+	metaMap := make(map[string]vaultMeta, len(vaults))
 	if s.cfgStore != nil {
-		cfgStores, err := s.cfgStore.ListStores(context.Background())
+		cfgStores, err := s.cfgStore.ListVaults(context.Background())
 		if err == nil {
 			for _, st := range cfgStores {
-				metaMap[st.ID.String()] = storeMeta{name: st.Name, storeType: st.Type}
+				metaMap[st.ID.String()] = vaultMeta{name: st.Name, vaultType: st.Type}
 			}
 		}
 	}
 
-	_, _ = fmt.Fprintf(w, "# HELP gastrolog_store_chunks_total Total chunks per store.\n")
+	_, _ = fmt.Fprintf(w, "# HELP gastrolog_store_chunks_total Total chunks per vault.\n")
 	_, _ = fmt.Fprintf(w, "# TYPE gastrolog_store_chunks_total gauge\n")
-	_, _ = fmt.Fprintf(w, "# HELP gastrolog_store_chunks_sealed Sealed chunks per store.\n")
+	_, _ = fmt.Fprintf(w, "# HELP gastrolog_store_chunks_sealed Sealed chunks per vault.\n")
 	_, _ = fmt.Fprintf(w, "# TYPE gastrolog_store_chunks_sealed gauge\n")
-	_, _ = fmt.Fprintf(w, "# HELP gastrolog_store_records_total Total records per store.\n")
+	_, _ = fmt.Fprintf(w, "# HELP gastrolog_store_records_total Total records per vault.\n")
 	_, _ = fmt.Fprintf(w, "# TYPE gastrolog_store_records_total gauge\n")
-	_, _ = fmt.Fprintf(w, "# HELP gastrolog_store_bytes Total data bytes per store.\n")
+	_, _ = fmt.Fprintf(w, "# HELP gastrolog_store_bytes Total data bytes per vault.\n")
 	_, _ = fmt.Fprintf(w, "# TYPE gastrolog_store_bytes gauge\n")
 
-	for _, storeID := range stores {
-		idStr := storeID.String()
+	for _, vaultID := range vaults {
+		idStr := vaultID.String()
 		meta := metaMap[idStr]
 
-		metas, err := orch.ListChunkMetas(storeID)
+		metas, err := orch.ListChunkMetas(vaultID)
 		if err != nil {
 			continue
 		}
@@ -165,7 +165,7 @@ func (s *Server) writeStoreMetrics(w http.ResponseWriter, orch *orchestrator.Orc
 			}
 		}
 
-		labels := fmt.Sprintf("store=%q,name=%q,type=%q", idStr, meta.name, meta.storeType)
+		labels := fmt.Sprintf("vault=%q,name=%q,type=%q", idStr, meta.name, meta.vaultType)
 		_, _ = fmt.Fprintf(w, "gastrolog_store_chunks_total{%s} %d\n", labels, len(metas))
 		_, _ = fmt.Fprintf(w, "gastrolog_store_chunks_sealed{%s} %d\n", labels, sealed)
 		_, _ = fmt.Fprintf(w, "gastrolog_store_records_total{%s} %d\n", labels, records)

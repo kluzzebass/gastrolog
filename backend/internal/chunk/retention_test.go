@@ -143,7 +143,7 @@ func TestTTLRetentionPolicy(t *testing.T) {
 	policy := NewTTLRetentionPolicy(maxAge)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := policy.Apply(StoreState{Chunks: tt.chunks, Now: tt.now})
+			got := policy.Apply(VaultState{Chunks: tt.chunks, Now: tt.now})
 			if !chunkIDsEqual(got, tt.want) {
 				t.Errorf("got %s, want %s", formatIDs(got), formatIDs(tt.want))
 			}
@@ -224,7 +224,7 @@ func TestSizeRetentionPolicy(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			policy := NewSizeRetentionPolicy(tt.maxBytes)
-			got := policy.Apply(StoreState{Chunks: tt.chunks, Now: base})
+			got := policy.Apply(VaultState{Chunks: tt.chunks, Now: base})
 			if !chunkIDsEqual(got, tt.want) {
 				t.Errorf("got %s, want %s", formatIDs(got), formatIDs(tt.want))
 			}
@@ -305,7 +305,7 @@ func TestCountRetentionPolicy(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			policy := NewCountRetentionPolicy(tt.maxChunks)
-			got := policy.Apply(StoreState{Chunks: tt.chunks, Now: base})
+			got := policy.Apply(VaultState{Chunks: tt.chunks, Now: base})
 			if !chunkIDsEqual(got, tt.want) {
 				t.Errorf("got %s, want %s", formatIDs(got), formatIDs(tt.want))
 			}
@@ -338,7 +338,7 @@ func TestCompositeRetentionPolicy(t *testing.T) {
 		count := NewCountRetentionPolicy(3)
 		composite := NewCompositeRetentionPolicy(ttl, count)
 
-		got := composite.Apply(StoreState{Chunks: chunks, Now: base})
+		got := composite.Apply(VaultState{Chunks: chunks, Now: base})
 		want := []ChunkID{id1, id2}
 		if !chunkIDsEqualUnordered(got, want) {
 			t.Errorf("got %s, want %s (unordered)", formatIDs(got), formatIDs(want))
@@ -353,7 +353,7 @@ func TestCompositeRetentionPolicy(t *testing.T) {
 		count := NewCountRetentionPolicy(2)
 		composite := NewCompositeRetentionPolicy(ttl, count)
 
-		got := composite.Apply(StoreState{Chunks: chunks, Now: base})
+		got := composite.Apply(VaultState{Chunks: chunks, Now: base})
 		want := []ChunkID{id1, id2}
 		if !chunkIDsEqualUnordered(got, want) {
 			t.Errorf("got %s, want %s (unordered)", formatIDs(got), formatIDs(want))
@@ -373,7 +373,7 @@ func TestCompositeRetentionPolicy(t *testing.T) {
 		count := NewCountRetentionPolicy(2)
 		composite := NewCompositeRetentionPolicy(ttl, count)
 
-		got := composite.Apply(StoreState{Now: base})
+		got := composite.Apply(VaultState{Now: base})
 		if len(got) != 0 {
 			t.Errorf("expected no deletions, got %s", formatIDs(got))
 		}
@@ -390,7 +390,7 @@ func TestNeverRetainPolicy(t *testing.T) {
 
 	t.Run("returns nil with chunks", func(t *testing.T) {
 		policy := NeverRetainPolicy{}
-		got := policy.Apply(StoreState{
+		got := policy.Apply(VaultState{
 			Chunks: []ChunkMeta{
 				metaAt(id1, base.Add(-72*time.Hour), base.Add(-71*time.Hour), 1000),
 				metaAt(id2, base.Add(-1*time.Hour), base.Add(-30*time.Minute), 2000),
@@ -404,7 +404,7 @@ func TestNeverRetainPolicy(t *testing.T) {
 
 	t.Run("returns nil with empty state", func(t *testing.T) {
 		policy := NeverRetainPolicy{}
-		got := policy.Apply(StoreState{Now: base})
+		got := policy.Apply(VaultState{Now: base})
 		if got != nil {
 			t.Errorf("expected nil, got %s", formatIDs(got))
 		}
@@ -415,7 +415,7 @@ func TestNeverRetainPolicy(t *testing.T) {
 
 func TestAllPolicies_EmptyState(t *testing.T) {
 	base := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
-	empty := StoreState{Now: base}
+	empty := VaultState{Now: base}
 
 	policies := []struct {
 		name   string
@@ -447,7 +447,7 @@ func TestRetentionPolicyFunc(t *testing.T) {
 	base := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
 	id1 := idAt(base.Add(-1 * time.Hour))
 
-	fn := RetentionPolicyFunc(func(state StoreState) []ChunkID {
+	fn := RetentionPolicyFunc(func(state VaultState) []ChunkID {
 		var result []ChunkID
 		for _, m := range state.Chunks {
 			result = append(result, m.ID)
@@ -455,7 +455,7 @@ func TestRetentionPolicyFunc(t *testing.T) {
 		return result
 	})
 
-	got := fn.Apply(StoreState{
+	got := fn.Apply(VaultState{
 		Chunks: []ChunkMeta{
 			metaAt(id1, base.Add(-1*time.Hour), base.Add(-30*time.Minute), 100),
 		},

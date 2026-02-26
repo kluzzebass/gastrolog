@@ -16,76 +16,76 @@ import (
 	"gastrolog/internal/sysmetrics"
 )
 
-// storeName returns the human-readable name for a store, falling back to the ID.
-func (s *StoreServer) storeName(ctx context.Context, id uuid.UUID) string {
-	cfg, err := s.getFullStoreConfig(ctx, id)
+// vaultName returns the human-readable name for a vault, falling back to the ID.
+func (s *VaultServer) vaultName(ctx context.Context, id uuid.UUID) string {
+	cfg, err := s.getFullVaultConfig(ctx, id)
 	if err == nil && cfg.Name != "" {
 		return cfg.Name
 	}
 	return id.String()
 }
 
-// ListStores returns all registered stores.
-func (s *StoreServer) ListStores(
+// ListVaults returns all registered vaults.
+func (s *VaultServer) ListVaults(
 	ctx context.Context,
-	req *connect.Request[apiv1.ListStoresRequest],
-) (*connect.Response[apiv1.ListStoresResponse], error) {
-	stores := s.orch.ListStores()
+	req *connect.Request[apiv1.ListVaultsRequest],
+) (*connect.Response[apiv1.ListVaultsResponse], error) {
+	vaults := s.orch.ListVaults()
 
-	resp := &apiv1.ListStoresResponse{
-		Stores: make([]*apiv1.StoreInfo, 0, len(stores)),
+	resp := &apiv1.ListVaultsResponse{
+		Vaults: make([]*apiv1.VaultInfo, 0, len(vaults)),
 	}
 
-	for _, id := range stores {
-		info, err := s.getStoreInfo(ctx, id)
+	for _, id := range vaults {
+		info, err := s.getVaultInfo(ctx, id)
 		if err != nil {
-			continue // Skip stores with errors
+			continue // Skip vaults with errors
 		}
-		resp.Stores = append(resp.Stores, info)
+		resp.Vaults = append(resp.Vaults, info)
 	}
 
 	return connect.NewResponse(resp), nil
 }
 
-// GetStore returns details for a specific store.
-func (s *StoreServer) GetStore(
+// GetVault returns details for a specific vault.
+func (s *VaultServer) GetVault(
 	ctx context.Context,
-	req *connect.Request[apiv1.GetStoreRequest],
-) (*connect.Response[apiv1.GetStoreResponse], error) {
+	req *connect.Request[apiv1.GetVaultRequest],
+) (*connect.Response[apiv1.GetVaultResponse], error) {
 	id, connErr := parseUUID(req.Msg.Id)
 	if connErr != nil {
 		return nil, connErr
 	}
-	info, err := s.getStoreInfo(ctx, id)
+	info, err := s.getVaultInfo(ctx, id)
 	if err != nil {
-		return nil, mapStoreError(err)
+		return nil, mapVaultError(err)
 	}
 
-	return connect.NewResponse(&apiv1.GetStoreResponse{Store: info}), nil
+	return connect.NewResponse(&apiv1.GetVaultResponse{Vault: info}), nil
 }
 
-// GetStats returns overall statistics for a store.
-func (s *StoreServer) GetStats(
+// GetStats returns overall statistics for a vault.
+func (s *VaultServer) GetStats(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetStatsRequest],
 ) (*connect.Response[apiv1.GetStatsResponse], error) {
-	stores, err := s.resolveStoreIDs(req.Msg.Store)
+	vaults, err := s.resolveVaultIDs(req.Msg.Vault)
 	if err != nil {
 		return nil, err
 	}
 
 	resp := &apiv1.GetStatsResponse{
-		TotalStores: int64(len(stores)),
+		TotalVaults: int64(len(vaults)),
 	}
 
-	for _, storeID := range stores {
-		metas, err := s.orch.ListChunkMetas(storeID)
+	for _, vaultID := range vaults {
+		metas, err := s.orch.ListChunkMetas(vaultID)
 		if err != nil {
 			continue
 		}
-		storeStat := s.buildStoreStats(ctx, storeID, metas)
-		s.accumulateGlobalStats(resp, storeStat, metas)
-		resp.StoreStats = append(resp.StoreStats, storeStat)
+		vaultStat := s.buildVaultStats(ctx, vaultID, metas)
+		s.accumulateGlobalStats(resp, vaultStat, metas)
+		resp.VaultStats = append(resp.VaultStats, vaultStat)
 	}
 
 	s.fillProcessMetrics(resp)
@@ -93,28 +93,28 @@ func (s *StoreServer) GetStats(
 	return connect.NewResponse(resp), nil
 }
 
-func (s *StoreServer) resolveStoreIDs(storeFilter string) ([]uuid.UUID, error) {
-	stores := s.orch.ListStores()
-	if storeFilter == "" {
-		return stores, nil
+func (s *VaultServer) resolveVaultIDs(vaultFilter string) ([]uuid.UUID, error) {
+	vaults := s.orch.ListVaults()
+	if vaultFilter == "" {
+		return vaults, nil
 	}
-	storeID, connErr := parseUUID(storeFilter)
+	vaultID, connErr := parseUUID(vaultFilter)
 	if connErr != nil {
 		return nil, connErr
 	}
-	if !slices.Contains(stores, storeID) {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
+	if !slices.Contains(vaults, vaultID) {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("vault not found"))
 	}
-	return []uuid.UUID{storeID}, nil
+	return []uuid.UUID{vaultID}, nil
 }
 
-func (s *StoreServer) buildStoreStats(ctx context.Context, storeID uuid.UUID, metas []chunk.ChunkMeta) *apiv1.StoreStats {
-	stat := &apiv1.StoreStats{
-		Id:         storeID.String(),
+func (s *VaultServer) buildVaultStats(ctx context.Context, vaultID uuid.UUID, metas []chunk.ChunkMeta) *apiv1.VaultStats {
+	stat := &apiv1.VaultStats{
+		Id:         vaultID.String(),
 		ChunkCount: int64(len(metas)),
-		Enabled:    s.orch.IsStoreEnabled(storeID),
+		Enabled:    s.orch.IsVaultEnabled(vaultID),
 	}
-	if cfg, err := s.getFullStoreConfig(ctx, storeID); err == nil {
+	if cfg, err := s.getFullVaultConfig(ctx, vaultID); err == nil {
 		stat.Type = cfg.Type
 		stat.Name = cfg.Name
 	}
@@ -126,27 +126,27 @@ func (s *StoreServer) buildStoreStats(ctx context.Context, storeID uuid.UUID, me
 			stat.ActiveChunks++
 		}
 		stat.RecordCount += meta.RecordCount
-		s.accumulateChunkBytes(stat, storeID, meta)
+		s.accumulateChunkBytes(stat, vaultID, meta)
 		updateTimeBounds(&stat.OldestRecord, meta.StartTS, (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.Before(b) })
 		updateTimeBounds(&stat.NewestRecord, meta.EndTS, (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.After(b) })
 	}
 	return stat
 }
 
-func (s *StoreServer) accumulateChunkBytes(stat *apiv1.StoreStats, storeID uuid.UUID, meta chunk.ChunkMeta) {
+func (s *VaultServer) accumulateChunkBytes(stat *apiv1.VaultStats, vaultID uuid.UUID, meta chunk.ChunkMeta) {
 	if meta.DiskBytes > 0 {
 		stat.DataBytes += meta.DiskBytes
 		return
 	}
 	stat.DataBytes += meta.Bytes
-	if sizes, err := s.orch.IndexSizes(storeID, meta.ID); err == nil {
+	if sizes, err := s.orch.IndexSizes(vaultID, meta.ID); err == nil {
 		for _, size := range sizes {
 			stat.IndexBytes += size
 		}
 	}
 }
 
-func (s *StoreServer) accumulateGlobalStats(resp *apiv1.GetStatsResponse, stat *apiv1.StoreStats, metas []chunk.ChunkMeta) {
+func (s *VaultServer) accumulateGlobalStats(resp *apiv1.GetStatsResponse, stat *apiv1.VaultStats, metas []chunk.ChunkMeta) {
 	resp.TotalChunks += int64(len(metas))
 	resp.TotalRecords += stat.RecordCount
 	resp.TotalBytes += stat.DataBytes + stat.IndexBytes
@@ -167,7 +167,7 @@ func updateTimeBounds(field **timestamppb.Timestamp, ts time.Time, asTime func(*
 	}
 }
 
-func (s *StoreServer) fillProcessMetrics(resp *apiv1.GetStatsResponse) {
+func (s *VaultServer) fillProcessMetrics(resp *apiv1.GetStatsResponse) {
 	resp.ProcessCpuPercent = sysmetrics.CPUPercent()
 	mem := sysmetrics.Memory()
 	resp.ProcessMemoryBytes = mem.Inuse
@@ -184,7 +184,7 @@ func (s *StoreServer) fillProcessMetrics(resp *apiv1.GetStatsResponse) {
 	}
 }
 
-func (s *StoreServer) getStoreInfo(ctx context.Context, id uuid.UUID) (*apiv1.StoreInfo, error) {
+func (s *VaultServer) getVaultInfo(ctx context.Context, id uuid.UUID) (*apiv1.VaultInfo, error) {
 	metas, err := s.orch.ListChunkMetas(id)
 	if err != nil {
 		return nil, err
@@ -195,16 +195,16 @@ func (s *StoreServer) getStoreInfo(ctx context.Context, id uuid.UUID) (*apiv1.St
 		recordCount += meta.RecordCount
 	}
 
-	// Get store config from config store (has name, type, params).
-	cfg, _ := s.getFullStoreConfig(ctx, id)
+	// Get vault config from config vault (has name, type, params).
+	cfg, _ := s.getFullVaultConfig(ctx, id)
 
-	info := &apiv1.StoreInfo{
+	info := &apiv1.VaultInfo{
 		Id:          id.String(),
 		Name:        cfg.Name,
 		Type:        cfg.Type,
 		ChunkCount:  int64(len(metas)),
 		RecordCount: recordCount,
-		Enabled:     s.orch.IsStoreEnabled(id),
+		Enabled:     s.orch.IsVaultEnabled(id),
 	}
 	if cfg.Filter != nil {
 		info.Filter = cfg.Filter.String()

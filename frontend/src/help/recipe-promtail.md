@@ -78,4 +78,4 @@ clients:
 
 ## Multiple sources
 
-You can run a single HTTP ingester and have many Promtail instances ship to it. Use labels (`job`, `host`, `env`, etc.) to distinguish sources, then use [filters](help:routing) to direct them to different stores.
+You can run a single HTTP ingester and have many Promtail instances ship to it. Use labels (`job`, `host`, `env`, etc.) to distinguish sources, then use [filters](help:routing) to direct them to different vaults.

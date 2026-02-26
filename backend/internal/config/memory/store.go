@@ -20,7 +20,7 @@ type Store struct {
 	filters           map[uuid.UUID]config.FilterConfig
 	rotationPolicies  map[uuid.UUID]config.RotationPolicyConfig
 	retentionPolicies map[uuid.UUID]config.RetentionPolicyConfig
-	stores            map[uuid.UUID]config.StoreConfig
+	vaults            map[uuid.UUID]config.VaultConfig
 	ingesters         map[uuid.UUID]config.IngesterConfig
 	settings          map[string]string
 	certs             map[uuid.UUID]config.CertPEM
@@ -36,7 +36,7 @@ func NewStore() *Store {
 		filters:           make(map[uuid.UUID]config.FilterConfig),
 		rotationPolicies:  make(map[uuid.UUID]config.RotationPolicyConfig),
 		retentionPolicies: make(map[uuid.UUID]config.RetentionPolicyConfig),
-		stores:            make(map[uuid.UUID]config.StoreConfig),
+		vaults:            make(map[uuid.UUID]config.VaultConfig),
 		ingesters:         make(map[uuid.UUID]config.IngesterConfig),
 		settings:          make(map[string]string),
 		certs:             make(map[uuid.UUID]config.CertPEM),
@@ -51,7 +51,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	if len(s.filters) == 0 && len(s.rotationPolicies) == 0 && len(s.retentionPolicies) == 0 && len(s.stores) == 0 && len(s.ingesters) == 0 && len(s.settings) == 0 {
+	if len(s.filters) == 0 && len(s.rotationPolicies) == 0 && len(s.retentionPolicies) == 0 && len(s.vaults) == 0 && len(s.ingesters) == 0 && len(s.settings) == 0 {
 		return nil, nil
 	}
 
@@ -78,10 +78,10 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 		}
 	}
 
-	if len(s.stores) > 0 {
-		cfg.Stores = make([]config.StoreConfig, 0, len(s.stores))
-		for _, st := range s.stores {
-			cfg.Stores = append(cfg.Stores, copyStoreConfig(st))
+	if len(s.vaults) > 0 {
+		cfg.Vaults = make([]config.VaultConfig, 0, len(s.vaults))
+		for _, st := range s.vaults {
+			cfg.Vaults = append(cfg.Vaults, copyVaultConfig(st))
 		}
 	}
 
@@ -230,44 +230,44 @@ func (s *Store) DeleteRetentionPolicy(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// Stores
+// Vaults
 
-func (s *Store) GetStore(ctx context.Context, id uuid.UUID) (*config.StoreConfig, error) {
+func (s *Store) GetVault(ctx context.Context, id uuid.UUID) (*config.VaultConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	st, ok := s.stores[id]
+	st, ok := s.vaults[id]
 	if !ok {
 		return nil, nil
 	}
-	c := copyStoreConfig(st)
+	c := copyVaultConfig(st)
 	return &c, nil
 }
 
-func (s *Store) ListStores(ctx context.Context) ([]config.StoreConfig, error) {
+func (s *Store) ListVaults(ctx context.Context) ([]config.VaultConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	result := make([]config.StoreConfig, 0, len(s.stores))
-	for _, st := range s.stores {
-		result = append(result, copyStoreConfig(st))
+	result := make([]config.VaultConfig, 0, len(s.vaults))
+	for _, st := range s.vaults {
+		result = append(result, copyVaultConfig(st))
 	}
 	return result, nil
 }
 
-func (s *Store) PutStore(ctx context.Context, cfg config.StoreConfig) error {
+func (s *Store) PutVault(ctx context.Context, cfg config.VaultConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.stores[cfg.ID] = copyStoreConfig(cfg)
+	s.vaults[cfg.ID] = copyVaultConfig(cfg)
 	return nil
 }
 
-func (s *Store) DeleteStore(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteVault(ctx context.Context, id uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	delete(s.stores, id)
+	delete(s.vaults, id)
 	return nil
 }
 
@@ -632,8 +632,8 @@ func copyRetentionPolicy(rp config.RetentionPolicyConfig) config.RetentionPolicy
 	return c
 }
 
-func copyStoreConfig(st config.StoreConfig) config.StoreConfig {
-	c := config.StoreConfig{
+func copyVaultConfig(st config.VaultConfig) config.VaultConfig {
+	c := config.VaultConfig{
 		ID:      st.ID,
 		Name:    st.Name,
 		Type:    st.Type,

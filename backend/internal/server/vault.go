@@ -15,32 +15,32 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
-// StoreServer implements the StoreService.
-type StoreServer struct {
+// VaultServer implements the VaultService.
+type VaultServer struct {
 	orch      *orchestrator.Orchestrator
 	cfgStore  config.Store
 	factories orchestrator.Factories
 	logger    *slog.Logger
 }
 
-var _ gastrologv1connect.StoreServiceHandler = (*StoreServer)(nil)
+var _ gastrologv1connect.VaultServiceHandler = (*VaultServer)(nil)
 
-// NewStoreServer creates a new StoreServer.
-func NewStoreServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, logger *slog.Logger) *StoreServer {
-	return &StoreServer{
+// NewVaultServer creates a new VaultServer.
+func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, logger *slog.Logger) *VaultServer {
+	return &VaultServer{
 		orch:      orch,
 		cfgStore:  cfgStore,
 		factories: factories,
-		logger:    logging.Default(logger).With("component", "store-server"),
+		logger:    logging.Default(logger).With("component", "vault-server"),
 	}
 }
 
-func (s *StoreServer) now() time.Time { return time.Now() }
+func (s *VaultServer) now() time.Time { return time.Now() }
 
-// mapStoreError converts orchestrator errors to connect errors.
-// ErrStoreNotFound maps to CodeNotFound; everything else to CodeInternal.
-func mapStoreError(err error) *connect.Error {
-	if errors.Is(err, orchestrator.ErrStoreNotFound) {
+// mapVaultError converts orchestrator errors to connect errors.
+// ErrVaultNotFound maps to CodeNotFound; everything else to CodeInternal.
+func mapVaultError(err error) *connect.Error {
+	if errors.Is(err, orchestrator.ErrVaultNotFound) {
 		return connect.NewError(connect.CodeNotFound, err)
 	}
 	return connect.NewError(connect.CodeInternal, err)

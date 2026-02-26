@@ -1,20 +1,20 @@
 export {
-  useStores,
-  useStore,
+  useVaults,
+  useVault,
   useChunks,
   useIndexes,
   useStats,
-  useSealStore,
-  useReindexStore,
-  useValidateStore,
-  useMigrateStore,
-  useMergeStores,
+  useSealVault,
+  useReindexVault,
+  useValidateVault,
+  useMigrateVault,
+  useMergeVaults,
   useImportRecords,
-  usePutStore,
-  useDeleteStore,
-  usePauseStore,
-  useResumeStore,
-} from "./useStores";
+  usePutVault,
+  useDeleteVault,
+  usePauseVault,
+  useResumeVault,
+} from "./useVaults";
 export { useSearch, extractTokens } from "./useSearch";
 export { useFollow } from "./useFollow";
 export { useExplain } from "./useExplain";

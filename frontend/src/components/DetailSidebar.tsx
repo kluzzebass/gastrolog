@@ -17,7 +17,7 @@ interface DetailSidebarProps {
   selectedRecord: ProtoRecord | null;
   onFieldSelect: (key: string, value: string) => void;
   onChunkSelect: (chunkId: string) => void;
-  onStoreSelect: (storeId: string) => void;
+  onVaultSelect: (vaultId: string) => void;
   onPosSelect: (chunkId: string, pos: string) => void;
   contextBefore: ProtoRecord[];
   contextAfter: ProtoRecord[];
@@ -53,7 +53,7 @@ export function DetailSidebar({
   selectedRecord,
   onFieldSelect,
   onChunkSelect,
-  onStoreSelect,
+  onVaultSelect,
   onPosSelect,
   contextBefore,
   contextAfter,
@@ -156,7 +156,7 @@ export function DetailSidebar({
             dark={dark}
             onFieldSelect={onFieldSelect}
             onChunkSelect={onChunkSelect}
-            onStoreSelect={onStoreSelect}
+            onVaultSelect={onVaultSelect}
             onPosSelect={onPosSelect}
             contextBefore={contextBefore}
             contextAfter={contextAfter}

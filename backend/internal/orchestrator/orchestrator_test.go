@@ -46,7 +46,7 @@ func (t *trackingIndexManager) BuildIndexes(ctx context.Context, chunkID chunk.C
 }
 
 func newTestSetup(maxRecords int64) (*orchestrator.Orchestrator, chunk.ChunkManager, *trackingIndexManager, uuid.UUID) {
-	s, _ := memtest.NewStore(chunkmem.Config{
+	s, _ := memtest.NewVault(chunkmem.Config{
 		RotationPolicy: recordCountPolicy(maxRecords),
 	})
 
@@ -54,7 +54,7 @@ func newTestSetup(maxRecords int64) (*orchestrator.Orchestrator, chunk.ChunkMana
 
 	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterStore(orchestrator.NewStore(defaultID, s.CM, tracker, s.QE))
+	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, tracker, s.QE))
 
 	return orch, s.CM, tracker, defaultID
 }
@@ -251,10 +251,10 @@ func TestSearchByUUID(t *testing.T) {
 		t.Fatalf("Ingest failed: %v", err)
 	}
 
-	// Search with the store UUID.
+	// Search with the vault UUID.
 	seq, _, err := orch.Search(context.Background(), defaultID, query.Query{}, nil)
 	if err != nil {
-		t.Fatalf("Search with store UUID failed: %v", err)
+		t.Fatalf("Search with vault UUID failed: %v", err)
 	}
 
 	count := 0
@@ -442,13 +442,13 @@ func (r *blockingIngester) Run(ctx context.Context, out chan<- orchestrator.Inge
 }
 
 func newIngesterTestSetup() (*orchestrator.Orchestrator, chunk.ChunkManager) {
-	s, _ := memtest.NewStore(chunkmem.Config{
+	s, _ := memtest.NewVault(chunkmem.Config{
 		RotationPolicy: recordCountPolicy(10000),
 	})
 
 	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterStore(orchestrator.NewStore(defaultID, s.CM, s.IM, s.QE))
+	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, s.IM, s.QE))
 
 	return orch, s.CM
 }
@@ -589,7 +589,7 @@ func TestStopNotRunning(t *testing.T) {
 
 func TestIngesterIndexBuildOnSeal(t *testing.T) {
 	// Set up with small chunk size to trigger seal.
-	s, _ := memtest.NewStore(chunkmem.Config{
+	s, _ := memtest.NewVault(chunkmem.Config{
 		RotationPolicy: recordCountPolicy(2), // 2 records per chunk
 	})
 
@@ -597,7 +597,7 @@ func TestIngesterIndexBuildOnSeal(t *testing.T) {
 
 	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterStore(orchestrator.NewStore(defaultID, s.CM, tracker, s.QE))
+	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, tracker, s.QE))
 
 	// Create ingester with 3 messages to trigger seal.
 	recv := newMockIngester([]orchestrator.IngestMessage{
@@ -742,10 +742,10 @@ func TestChunkManagerAccessor(t *testing.T) {
 	}
 }
 
-func TestListStoresAccessor(t *testing.T) {
+func TestListVaultsAccessor(t *testing.T) {
 	orch, _, _, defaultID := newTestSetup(1 << 20)
 
-	keys := orch.ListStores()
+	keys := orch.ListVaults()
 	if len(keys) != 1 {
 		t.Fatalf("expected 1 key, got %d", len(keys))
 	}
@@ -770,10 +770,10 @@ func TestIndexManagerAccessor(t *testing.T) {
 	}
 }
 
-func TestListStoresReturnsAllKeys(t *testing.T) {
+func TestListVaultsReturnsAllKeys(t *testing.T) {
 	orch, _, _, defaultID := newTestSetup(1 << 20)
 
-	keys := orch.ListStores()
+	keys := orch.ListVaults()
 	if len(keys) != 1 {
 		t.Fatalf("expected 1 key, got %d", len(keys))
 	}
@@ -833,7 +833,7 @@ func TestIsRunningAccessor(t *testing.T) {
 
 func TestRebuildMissingIndexes(t *testing.T) {
 	// Set up with small chunk to seal it.
-	s, _ := memtest.NewStore(chunkmem.Config{
+	s, _ := memtest.NewVault(chunkmem.Config{
 		RotationPolicy: recordCountPolicy(2),
 	})
 
@@ -850,7 +850,7 @@ func TestRebuildMissingIndexes(t *testing.T) {
 
 	defaultID := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterStore(orchestrator.NewStore(defaultID, s.CM, tracker, nil))
+	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, tracker, nil))
 
 	// RebuildMissingIndexes should find the sealed chunk and build indexes.
 	if err := orch.RebuildMissingIndexes(context.Background()); err != nil {
@@ -885,8 +885,8 @@ func TestSearchWithContextUnknownRegistry(t *testing.T) {
 	}
 }
 
-// filteredTestStores holds the store IDs and chunk managers for the filtered test setup.
-type filteredTestStores struct {
+// filteredTestVaults holds the vault IDs and chunk managers for the filtered test setup.
+type filteredTestVaults struct {
 	prod     uuid.UUID
 	staging  uuid.UUID
 	archive  uuid.UUID
@@ -894,11 +894,11 @@ type filteredTestStores struct {
 	cms      map[uuid.UUID]chunk.ChunkManager
 }
 
-// newFilteredTestSetup creates an orchestrator with multiple stores and a filter set.
-func newFilteredTestSetup(t *testing.T) (*orchestrator.Orchestrator, filteredTestStores) {
+// newFilteredTestSetup creates an orchestrator with multiple vaults and a filter set.
+func newFilteredTestSetup(t *testing.T) (*orchestrator.Orchestrator, filteredTestVaults) {
 	t.Helper()
 
-	stores := filteredTestStores{
+	vaults := filteredTestVaults{
 		prod:     uuid.Must(uuid.NewV7()),
 		staging:  uuid.Must(uuid.NewV7()),
 		archive:  uuid.Must(uuid.NewV7()),
@@ -908,24 +908,24 @@ func newFilteredTestSetup(t *testing.T) (*orchestrator.Orchestrator, filteredTes
 
 	orch := orchestrator.New(orchestrator.Config{})
 
-	for _, id := range []uuid.UUID{stores.prod, stores.staging, stores.archive, stores.catchRest} {
-		s := memtest.MustNewStore(t, chunkmem.Config{
+	for _, id := range []uuid.UUID{vaults.prod, vaults.staging, vaults.archive, vaults.catchRest} {
+		s := memtest.MustNewVault(t, chunkmem.Config{
 			RotationPolicy: recordCountPolicy(10000),
 		})
-		stores.cms[id] = s.CM
+		vaults.cms[id] = s.CM
 
-		orch.RegisterStore(orchestrator.NewStore(id, s.CM, s.IM, s.QE))
+		orch.RegisterVault(orchestrator.NewVault(id, s.CM, s.IM, s.QE))
 	}
 
-	return orch, stores
+	return orch, vaults
 }
 
 // newFilteredTestSetupWithLoader is like newFilteredTestSetup but accepts a
 // *fakeConfigLoader and passes it as the ConfigLoader in orchestrator.Config.
-func newFilteredTestSetupWithLoader(t *testing.T, loader *fakeConfigLoader) (*orchestrator.Orchestrator, filteredTestStores) {
+func newFilteredTestSetupWithLoader(t *testing.T, loader *fakeConfigLoader) (*orchestrator.Orchestrator, filteredTestVaults) {
 	t.Helper()
 
-	stores := filteredTestStores{
+	vaults := filteredTestVaults{
 		prod:     uuid.Must(uuid.NewV7()),
 		staging:  uuid.Must(uuid.NewV7()),
 		archive:  uuid.Must(uuid.NewV7()),
@@ -935,16 +935,16 @@ func newFilteredTestSetupWithLoader(t *testing.T, loader *fakeConfigLoader) (*or
 
 	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
-	for _, id := range []uuid.UUID{stores.prod, stores.staging, stores.archive, stores.catchRest} {
-		s := memtest.MustNewStore(t, chunkmem.Config{
+	for _, id := range []uuid.UUID{vaults.prod, vaults.staging, vaults.archive, vaults.catchRest} {
+		s := memtest.MustNewVault(t, chunkmem.Config{
 			RotationPolicy: recordCountPolicy(10000),
 		})
-		stores.cms[id] = s.CM
+		vaults.cms[id] = s.CM
 
-		orch.RegisterStore(orchestrator.NewStore(id, s.CM, s.IM, s.QE))
+		orch.RegisterVault(orchestrator.NewVault(id, s.CM, s.IM, s.QE))
 	}
 
-	return orch, stores
+	return orch, vaults
 }
 
 // countRecords counts records in a chunk manager's active chunk.
@@ -1002,26 +1002,26 @@ func getRecordMessages(t *testing.T, cm chunk.ChunkManager) []string {
 }
 
 func TestFilteringIntegration(t *testing.T) {
-	orch, stores := newFilteredTestSetup(t)
+	orch, vaults := newFilteredTestSetup(t)
 
 	// Compile filters:
 	// - prod: receives env=prod messages
 	// - staging: receives env=staging messages
 	// - archive: catch-all (*)
 	// - catchRest: catch-the-rest (+)
-	prodFilter, err := orchestrator.CompileFilter(stores.prod, "env=prod")
+	prodFilter, err := orchestrator.CompileFilter(vaults.prod, "env=prod")
 	if err != nil {
 		t.Fatalf("CompileFilter prod failed: %v", err)
 	}
-	stagingFilter, err := orchestrator.CompileFilter(stores.staging, "env=staging")
+	stagingFilter, err := orchestrator.CompileFilter(vaults.staging, "env=staging")
 	if err != nil {
 		t.Fatalf("CompileFilter staging failed: %v", err)
 	}
-	archiveFilter, err := orchestrator.CompileFilter(stores.archive, "*")
+	archiveFilter, err := orchestrator.CompileFilter(vaults.archive, "*")
 	if err != nil {
 		t.Fatalf("CompileFilter archive failed: %v", err)
 	}
-	unfilteredFilter, err := orchestrator.CompileFilter(stores.catchRest, "+")
+	unfilteredFilter, err := orchestrator.CompileFilter(vaults.catchRest, "+")
 	if err != nil {
 		t.Fatalf("CompileFilter catchRest failed: %v", err)
 	}
@@ -1034,36 +1034,36 @@ func TestFilteringIntegration(t *testing.T) {
 	})
 	orch.SetFilterSet(fs)
 
-	// Test cases: message attrs -> expected stores
+	// Test cases: message attrs -> expected vaults
 	testCases := []struct {
 		name     string
 		attrs    chunk.Attributes
 		raw      string
-		expected []uuid.UUID // stores that should receive the message
+		expected []uuid.UUID // vaults that should receive the message
 	}{
 		{
 			name:     "prod message goes to prod and archive",
 			attrs:    chunk.Attributes{"env": "prod", "level": "error"},
 			raw:      "production error",
-			expected: []uuid.UUID{stores.prod, stores.archive},
+			expected: []uuid.UUID{vaults.prod, vaults.archive},
 		},
 		{
 			name:     "staging message goes to staging and archive",
 			attrs:    chunk.Attributes{"env": "staging", "level": "info"},
 			raw:      "staging info",
-			expected: []uuid.UUID{stores.staging, stores.archive},
+			expected: []uuid.UUID{vaults.staging, vaults.archive},
 		},
 		{
 			name:     "dev message goes to archive and catchRest",
 			attrs:    chunk.Attributes{"env": "dev", "level": "debug"},
 			raw:      "dev debug",
-			expected: []uuid.UUID{stores.archive, stores.catchRest},
+			expected: []uuid.UUID{vaults.archive, vaults.catchRest},
 		},
 		{
 			name:     "no env goes to archive and catchRest",
 			attrs:    chunk.Attributes{"level": "warn"},
 			raw:      "no env warn",
-			expected: []uuid.UUID{stores.archive, stores.catchRest},
+			expected: []uuid.UUID{vaults.archive, vaults.catchRest},
 		},
 	}
 
@@ -1079,29 +1079,29 @@ func TestFilteringIntegration(t *testing.T) {
 		}
 	}
 
-	// Verify each store received the expected messages.
-	storeMessages := make(map[uuid.UUID][]string)
-	for id, cm := range stores.cms {
-		storeMessages[id] = getRecordMessages(t, cm)
+	// Verify each vault received the expected messages.
+	vaultMessages := make(map[uuid.UUID][]string)
+	for id, cm := range vaults.cms {
+		vaultMessages[id] = getRecordMessages(t, cm)
 	}
 
 	for _, tc := range testCases {
-		for _, expectedStore := range tc.expected {
-			found := slices.Contains(storeMessages[expectedStore], tc.raw)
+		for _, expectedVault := range tc.expected {
+			found := slices.Contains(vaultMessages[expectedVault], tc.raw)
 			if !found {
-				t.Errorf("%s: expected message %q in store %s, but not found (store has: %v)",
-					tc.name, tc.raw, expectedStore, storeMessages[expectedStore])
+				t.Errorf("%s: expected message %q in vault %s, but not found (vault has: %v)",
+					tc.name, tc.raw, expectedVault, vaultMessages[expectedVault])
 			}
 		}
 
-		// Also verify message is NOT in stores not in expected list.
-		for storeID, msgs := range storeMessages {
-			isExpected := slices.Contains(tc.expected, storeID)
+		// Also verify message is NOT in vaults not in expected list.
+		for vaultID, msgs := range vaultMessages {
+			isExpected := slices.Contains(tc.expected, vaultID)
 			if !isExpected {
 				for _, msg := range msgs {
 					if msg == tc.raw {
-						t.Errorf("%s: message %q should NOT be in store %s",
-							tc.name, tc.raw, storeID)
+						t.Errorf("%s: message %q should NOT be in vault %s",
+							tc.name, tc.raw, vaultID)
 					}
 				}
 			}
@@ -1110,11 +1110,11 @@ func TestFilteringIntegration(t *testing.T) {
 }
 
 func TestFilteringWithIngesters(t *testing.T) {
-	orch, stores := newFilteredTestSetup(t)
+	orch, vaults := newFilteredTestSetup(t)
 
 	// Set up filtering: prod gets env=prod, archive is catch-all.
-	prodFilter, _ := orchestrator.CompileFilter(stores.prod, "env=prod")
-	archiveFilter, _ := orchestrator.CompileFilter(stores.archive, "*")
+	prodFilter, _ := orchestrator.CompileFilter(vaults.prod, "env=prod")
+	archiveFilter, _ := orchestrator.CompileFilter(vaults.archive, "*")
 
 	fs := orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{prodFilter, archiveFilter})
 	orch.SetFilterSet(fs)
@@ -1139,25 +1139,25 @@ func TestFilteringWithIngesters(t *testing.T) {
 	}
 
 	// Verify filtering: prod should have 2 messages, archive should have 3.
-	prodMsgs := getRecordMessages(t, stores.cms[stores.prod])
-	archiveMsgs := getRecordMessages(t, stores.cms[stores.archive])
-	stagingMsgs := getRecordMessages(t, stores.cms[stores.staging])
+	prodMsgs := getRecordMessages(t, vaults.cms[vaults.prod])
+	archiveMsgs := getRecordMessages(t, vaults.cms[vaults.archive])
+	stagingMsgs := getRecordMessages(t, vaults.cms[vaults.staging])
 
 	if len(prodMsgs) != 2 {
-		t.Errorf("prod store: expected 2 messages, got %d: %v", len(prodMsgs), prodMsgs)
+		t.Errorf("prod vault: expected 2 messages, got %d: %v", len(prodMsgs), prodMsgs)
 	}
 	if len(archiveMsgs) != 3 {
-		t.Errorf("archive store: expected 3 messages, got %d: %v", len(archiveMsgs), archiveMsgs)
+		t.Errorf("archive vault: expected 3 messages, got %d: %v", len(archiveMsgs), archiveMsgs)
 	}
 	if len(stagingMsgs) != 0 {
-		t.Errorf("staging store: expected 0 messages, got %d: %v", len(stagingMsgs), stagingMsgs)
+		t.Errorf("staging vault: expected 0 messages, got %d: %v", len(stagingMsgs), stagingMsgs)
 	}
 }
 
 func TestFilteringNoFilterSetFallback(t *testing.T) {
-	orch, stores := newFilteredTestSetup(t)
+	orch, vaults := newFilteredTestSetup(t)
 
-	// No filter set - should fan out to all stores (legacy behavior).
+	// No filter set - should fan out to all vaults (legacy behavior).
 	rec := chunk.Record{
 		IngestTS: time.Now(),
 		Attrs:    chunk.Attributes{"env": "test"},
@@ -1167,21 +1167,21 @@ func TestFilteringNoFilterSetFallback(t *testing.T) {
 		t.Fatalf("Ingest failed: %v", err)
 	}
 
-	// All stores should have the message.
-	for id, cm := range stores.cms {
+	// All vaults should have the message.
+	for id, cm := range vaults.cms {
 		count := countRecords(t, cm)
 		if count != 1 {
-			t.Errorf("store %s: expected 1 record (fanout), got %d", id, count)
+			t.Errorf("vault %s: expected 1 record (fanout), got %d", id, count)
 		}
 	}
 }
 
 func TestFilteringEmptyFilterReceivesNothing(t *testing.T) {
-	orch, stores := newFilteredTestSetup(t)
+	orch, vaults := newFilteredTestSetup(t)
 
 	// prod has empty filter (receives nothing), archive is catch-all.
-	prodFilter, _ := orchestrator.CompileFilter(stores.prod, "")
-	archiveFilter, _ := orchestrator.CompileFilter(stores.archive, "*")
+	prodFilter, _ := orchestrator.CompileFilter(vaults.prod, "")
+	archiveFilter, _ := orchestrator.CompileFilter(vaults.archive, "*")
 
 	fs := orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{prodFilter, archiveFilter})
 	orch.SetFilterSet(fs)
@@ -1196,23 +1196,23 @@ func TestFilteringEmptyFilterReceivesNothing(t *testing.T) {
 	}
 
 	// prod should have 0, archive should have 1.
-	if count := countRecords(t, stores.cms[stores.prod]); count != 0 {
-		t.Errorf("prod store: expected 0 records (empty filter), got %d", count)
+	if count := countRecords(t, vaults.cms[vaults.prod]); count != 0 {
+		t.Errorf("prod vault: expected 0 records (empty filter), got %d", count)
 	}
-	if count := countRecords(t, stores.cms[stores.archive]); count != 1 {
-		t.Errorf("archive store: expected 1 record, got %d", count)
+	if count := countRecords(t, vaults.cms[vaults.archive]); count != 1 {
+		t.Errorf("archive vault: expected 1 record, got %d", count)
 	}
 }
 
 func TestFilteringComplexExpression(t *testing.T) {
-	orch, stores := newFilteredTestSetup(t)
+	orch, vaults := newFilteredTestSetup(t)
 
 	// prod receives: (env=prod AND level=error) OR (env=prod AND level=critical)
-	prodFilter, err := orchestrator.CompileFilter(stores.prod, "(env=prod AND level=error) OR (env=prod AND level=critical)")
+	prodFilter, err := orchestrator.CompileFilter(vaults.prod, "(env=prod AND level=error) OR (env=prod AND level=critical)")
 	if err != nil {
 		t.Fatalf("CompileFilter failed: %v", err)
 	}
-	archiveFilter, _ := orchestrator.CompileFilter(stores.archive, "*")
+	archiveFilter, _ := orchestrator.CompileFilter(vaults.archive, "*")
 
 	fs := orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{prodFilter, archiveFilter})
 	orch.SetFilterSet(fs)
@@ -1239,7 +1239,7 @@ func TestFilteringComplexExpression(t *testing.T) {
 		}
 	}
 
-	prodMsgs := getRecordMessages(t, stores.cms[stores.prod])
+	prodMsgs := getRecordMessages(t, vaults.cms[vaults.prod])
 
 	for _, tc := range testCases {
 		found := slices.Contains(prodMsgs, tc.raw)
@@ -1249,7 +1249,7 @@ func TestFilteringComplexExpression(t *testing.T) {
 	}
 
 	// Archive should have all 4 messages.
-	if count := countRecords(t, stores.cms[stores.archive]); count != 4 {
+	if count := countRecords(t, vaults.cms[vaults.archive]); count != 4 {
 		t.Errorf("archive: expected 4 messages, got %d", count)
 	}
 }

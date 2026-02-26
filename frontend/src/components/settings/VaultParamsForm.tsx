@@ -1,24 +1,24 @@
 import { FormField, TextInput } from "./FormField";
 import { Checkbox } from "./Checkbox";
 
-interface StoreParamsFormProps {
-  storeType: string;
+interface VaultParamsFormProps {
+  vaultType: string;
   params: Record<string, string>;
   onChange: (params: Record<string, string>) => void;
   dark: boolean;
 }
 
-export function StoreParamsForm({
-  storeType,
+export function VaultParamsForm({
+  vaultType,
   params,
   onChange,
   dark,
-}: Readonly<StoreParamsFormProps>) {
+}: Readonly<VaultParamsFormProps>) {
   const set = (key: string, value: string) =>
     onChange({ ...params, [key]: value });
   const get = (key: string) => params[key] ?? "";
 
-  if (storeType === "file") {
+  if (vaultType === "file") {
     return (
       <div className="flex flex-col gap-3">
         <FormField
@@ -45,7 +45,7 @@ export function StoreParamsForm({
     );
   }
 
-  if (storeType === "memory") {
+  if (vaultType === "memory") {
     return null;
   }
 

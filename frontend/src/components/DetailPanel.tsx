@@ -16,7 +16,7 @@ export function DetailPanelContent({
   dark,
   onFieldSelect,
   onChunkSelect,
-  onStoreSelect,
+  onVaultSelect,
   onPosSelect,
   contextBefore,
   contextAfter,
@@ -29,7 +29,7 @@ export function DetailPanelContent({
   dark: boolean;
   onFieldSelect?: (key: string, value: string) => void;
   onChunkSelect?: (chunkId: string) => void;
-  onStoreSelect?: (storeId: string) => void;
+  onVaultSelect?: (vaultId: string) => void;
   onPosSelect?: (chunkId: string, pos: string) => void;
   contextBefore?: ProtoRecord[];
   contextAfter?: ProtoRecord[];
@@ -190,10 +190,10 @@ export function DetailPanelContent({
             <td colSpan={2} className={headerCls}>Reference</td>
           </tr>
           <tr>
-            <td className={`${keyCls} ${borderCls}`}>Store</td>
+            <td className={`${keyCls} ${borderCls}`}>Vault</td>
             {valueCell(
-              record.ref?.storeId ?? "N/A",
-              record.ref?.storeId ? () => onStoreSelect?.(record.ref!.storeId) : undefined,
+              record.ref?.vaultId ?? "N/A",
+              record.ref?.vaultId ? () => onVaultSelect?.(record.ref!.vaultId) : undefined,
             )}
           </tr>
           <tr>

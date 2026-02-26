@@ -21,7 +21,7 @@ export function WelcomeStep({ dark, onNext }: Readonly<WelcomeStepProps>) {
           className={`text-[0.9em] leading-relaxed max-w-md ${c("text-text-muted", "text-light-text-muted")}`}
         >
           GastroLog is a log management system built around chunk-based storage
-          and indexing. Let's set up your first store and ingester to start
+          and indexing. Let's set up your first vault and ingester to start
           collecting logs.
         </p>
       </div>

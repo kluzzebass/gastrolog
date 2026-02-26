@@ -58,11 +58,11 @@ const (
 	// ConfigServiceDeleteRetentionPolicyProcedure is the fully-qualified name of the ConfigService's
 	// DeleteRetentionPolicy RPC.
 	ConfigServiceDeleteRetentionPolicyProcedure = "/gastrolog.v1.ConfigService/DeleteRetentionPolicy"
-	// ConfigServicePutStoreProcedure is the fully-qualified name of the ConfigService's PutStore RPC.
-	ConfigServicePutStoreProcedure = "/gastrolog.v1.ConfigService/PutStore"
-	// ConfigServiceDeleteStoreProcedure is the fully-qualified name of the ConfigService's DeleteStore
+	// ConfigServicePutVaultProcedure is the fully-qualified name of the ConfigService's PutVault RPC.
+	ConfigServicePutVaultProcedure = "/gastrolog.v1.ConfigService/PutVault"
+	// ConfigServiceDeleteVaultProcedure is the fully-qualified name of the ConfigService's DeleteVault
 	// RPC.
-	ConfigServiceDeleteStoreProcedure = "/gastrolog.v1.ConfigService/DeleteStore"
+	ConfigServiceDeleteVaultProcedure = "/gastrolog.v1.ConfigService/DeleteVault"
 	// ConfigServicePutIngesterProcedure is the fully-qualified name of the ConfigService's PutIngester
 	// RPC.
 	ConfigServicePutIngesterProcedure = "/gastrolog.v1.ConfigService/PutIngester"
@@ -102,12 +102,12 @@ const (
 	// ConfigServiceDeleteCertificateProcedure is the fully-qualified name of the ConfigService's
 	// DeleteCertificate RPC.
 	ConfigServiceDeleteCertificateProcedure = "/gastrolog.v1.ConfigService/DeleteCertificate"
-	// ConfigServicePauseStoreProcedure is the fully-qualified name of the ConfigService's PauseStore
+	// ConfigServicePauseVaultProcedure is the fully-qualified name of the ConfigService's PauseVault
 	// RPC.
-	ConfigServicePauseStoreProcedure = "/gastrolog.v1.ConfigService/PauseStore"
-	// ConfigServiceResumeStoreProcedure is the fully-qualified name of the ConfigService's ResumeStore
+	ConfigServicePauseVaultProcedure = "/gastrolog.v1.ConfigService/PauseVault"
+	// ConfigServiceResumeVaultProcedure is the fully-qualified name of the ConfigService's ResumeVault
 	// RPC.
-	ConfigServiceResumeStoreProcedure = "/gastrolog.v1.ConfigService/ResumeStore"
+	ConfigServiceResumeVaultProcedure = "/gastrolog.v1.ConfigService/ResumeVault"
 	// ConfigServiceTestIngesterProcedure is the fully-qualified name of the ConfigService's
 	// TestIngester RPC.
 	ConfigServiceTestIngesterProcedure = "/gastrolog.v1.ConfigService/TestIngester"
@@ -136,10 +136,10 @@ type ConfigServiceClient interface {
 	PutRetentionPolicy(context.Context, *connect.Request[v1.PutRetentionPolicyRequest]) (*connect.Response[v1.PutRetentionPolicyResponse], error)
 	// DeleteRetentionPolicy removes a retention policy.
 	DeleteRetentionPolicy(context.Context, *connect.Request[v1.DeleteRetentionPolicyRequest]) (*connect.Response[v1.DeleteRetentionPolicyResponse], error)
-	// PutStore creates or updates a store.
-	PutStore(context.Context, *connect.Request[v1.PutStoreRequest]) (*connect.Response[v1.PutStoreResponse], error)
-	// DeleteStore removes a store (must be empty).
-	DeleteStore(context.Context, *connect.Request[v1.DeleteStoreRequest]) (*connect.Response[v1.DeleteStoreResponse], error)
+	// PutVault creates or updates a vault.
+	PutVault(context.Context, *connect.Request[v1.PutVaultRequest]) (*connect.Response[v1.PutVaultResponse], error)
+	// DeleteVault removes a vault (must be empty).
+	DeleteVault(context.Context, *connect.Request[v1.DeleteVaultRequest]) (*connect.Response[v1.DeleteVaultResponse], error)
 	// PutIngester creates or updates an ingester.
 	PutIngester(context.Context, *connect.Request[v1.PutIngesterRequest]) (*connect.Response[v1.PutIngesterResponse], error)
 	// DeleteIngester removes an ingester.
@@ -166,10 +166,10 @@ type ConfigServiceClient interface {
 	PutCertificate(context.Context, *connect.Request[v1.PutCertificateRequest]) (*connect.Response[v1.PutCertificateResponse], error)
 	// DeleteCertificate removes a certificate.
 	DeleteCertificate(context.Context, *connect.Request[v1.DeleteCertificateRequest]) (*connect.Response[v1.DeleteCertificateResponse], error)
-	// PauseStore pauses ingestion for a store.
-	PauseStore(context.Context, *connect.Request[v1.PauseStoreRequest]) (*connect.Response[v1.PauseStoreResponse], error)
-	// ResumeStore resumes ingestion for a store.
-	ResumeStore(context.Context, *connect.Request[v1.ResumeStoreRequest]) (*connect.Response[v1.ResumeStoreResponse], error)
+	// PauseVault pauses ingestion for a vault.
+	PauseVault(context.Context, *connect.Request[v1.PauseVaultRequest]) (*connect.Response[v1.PauseVaultResponse], error)
+	// ResumeVault resumes ingestion for a vault.
+	ResumeVault(context.Context, *connect.Request[v1.ResumeVaultRequest]) (*connect.Response[v1.ResumeVaultResponse], error)
 	// TestIngester tests connectivity for an ingester configuration without saving it.
 	TestIngester(context.Context, *connect.Request[v1.TestIngesterRequest]) (*connect.Response[v1.TestIngesterResponse], error)
 	// GetIngesterDefaults returns default parameter values for each ingester type.
@@ -241,16 +241,16 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("DeleteRetentionPolicy")),
 			connect.WithClientOptions(opts...),
 		),
-		putStore: connect.NewClient[v1.PutStoreRequest, v1.PutStoreResponse](
+		putVault: connect.NewClient[v1.PutVaultRequest, v1.PutVaultResponse](
 			httpClient,
-			baseURL+ConfigServicePutStoreProcedure,
-			connect.WithSchema(configServiceMethods.ByName("PutStore")),
+			baseURL+ConfigServicePutVaultProcedure,
+			connect.WithSchema(configServiceMethods.ByName("PutVault")),
 			connect.WithClientOptions(opts...),
 		),
-		deleteStore: connect.NewClient[v1.DeleteStoreRequest, v1.DeleteStoreResponse](
+		deleteVault: connect.NewClient[v1.DeleteVaultRequest, v1.DeleteVaultResponse](
 			httpClient,
-			baseURL+ConfigServiceDeleteStoreProcedure,
-			connect.WithSchema(configServiceMethods.ByName("DeleteStore")),
+			baseURL+ConfigServiceDeleteVaultProcedure,
+			connect.WithSchema(configServiceMethods.ByName("DeleteVault")),
 			connect.WithClientOptions(opts...),
 		),
 		putIngester: connect.NewClient[v1.PutIngesterRequest, v1.PutIngesterResponse](
@@ -331,16 +331,16 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("DeleteCertificate")),
 			connect.WithClientOptions(opts...),
 		),
-		pauseStore: connect.NewClient[v1.PauseStoreRequest, v1.PauseStoreResponse](
+		pauseVault: connect.NewClient[v1.PauseVaultRequest, v1.PauseVaultResponse](
 			httpClient,
-			baseURL+ConfigServicePauseStoreProcedure,
-			connect.WithSchema(configServiceMethods.ByName("PauseStore")),
+			baseURL+ConfigServicePauseVaultProcedure,
+			connect.WithSchema(configServiceMethods.ByName("PauseVault")),
 			connect.WithClientOptions(opts...),
 		),
-		resumeStore: connect.NewClient[v1.ResumeStoreRequest, v1.ResumeStoreResponse](
+		resumeVault: connect.NewClient[v1.ResumeVaultRequest, v1.ResumeVaultResponse](
 			httpClient,
-			baseURL+ConfigServiceResumeStoreProcedure,
-			connect.WithSchema(configServiceMethods.ByName("ResumeStore")),
+			baseURL+ConfigServiceResumeVaultProcedure,
+			connect.WithSchema(configServiceMethods.ByName("ResumeVault")),
 			connect.WithClientOptions(opts...),
 		),
 		testIngester: connect.NewClient[v1.TestIngesterRequest, v1.TestIngesterResponse](
@@ -369,8 +369,8 @@ type configServiceClient struct {
 	deleteRotationPolicy  *connect.Client[v1.DeleteRotationPolicyRequest, v1.DeleteRotationPolicyResponse]
 	putRetentionPolicy    *connect.Client[v1.PutRetentionPolicyRequest, v1.PutRetentionPolicyResponse]
 	deleteRetentionPolicy *connect.Client[v1.DeleteRetentionPolicyRequest, v1.DeleteRetentionPolicyResponse]
-	putStore              *connect.Client[v1.PutStoreRequest, v1.PutStoreResponse]
-	deleteStore           *connect.Client[v1.DeleteStoreRequest, v1.DeleteStoreResponse]
+	putVault              *connect.Client[v1.PutVaultRequest, v1.PutVaultResponse]
+	deleteVault           *connect.Client[v1.DeleteVaultRequest, v1.DeleteVaultResponse]
 	putIngester           *connect.Client[v1.PutIngesterRequest, v1.PutIngesterResponse]
 	deleteIngester        *connect.Client[v1.DeleteIngesterRequest, v1.DeleteIngesterResponse]
 	getServerConfig       *connect.Client[v1.GetServerConfigRequest, v1.GetServerConfigResponse]
@@ -384,8 +384,8 @@ type configServiceClient struct {
 	getCertificate        *connect.Client[v1.GetCertificateRequest, v1.GetCertificateResponse]
 	putCertificate        *connect.Client[v1.PutCertificateRequest, v1.PutCertificateResponse]
 	deleteCertificate     *connect.Client[v1.DeleteCertificateRequest, v1.DeleteCertificateResponse]
-	pauseStore            *connect.Client[v1.PauseStoreRequest, v1.PauseStoreResponse]
-	resumeStore           *connect.Client[v1.ResumeStoreRequest, v1.ResumeStoreResponse]
+	pauseVault            *connect.Client[v1.PauseVaultRequest, v1.PauseVaultResponse]
+	resumeVault           *connect.Client[v1.ResumeVaultRequest, v1.ResumeVaultResponse]
 	testIngester          *connect.Client[v1.TestIngesterRequest, v1.TestIngesterResponse]
 	getIngesterDefaults   *connect.Client[v1.GetIngesterDefaultsRequest, v1.GetIngesterDefaultsResponse]
 }
@@ -435,14 +435,14 @@ func (c *configServiceClient) DeleteRetentionPolicy(ctx context.Context, req *co
 	return c.deleteRetentionPolicy.CallUnary(ctx, req)
 }
 
-// PutStore calls gastrolog.v1.ConfigService.PutStore.
-func (c *configServiceClient) PutStore(ctx context.Context, req *connect.Request[v1.PutStoreRequest]) (*connect.Response[v1.PutStoreResponse], error) {
-	return c.putStore.CallUnary(ctx, req)
+// PutVault calls gastrolog.v1.ConfigService.PutVault.
+func (c *configServiceClient) PutVault(ctx context.Context, req *connect.Request[v1.PutVaultRequest]) (*connect.Response[v1.PutVaultResponse], error) {
+	return c.putVault.CallUnary(ctx, req)
 }
 
-// DeleteStore calls gastrolog.v1.ConfigService.DeleteStore.
-func (c *configServiceClient) DeleteStore(ctx context.Context, req *connect.Request[v1.DeleteStoreRequest]) (*connect.Response[v1.DeleteStoreResponse], error) {
-	return c.deleteStore.CallUnary(ctx, req)
+// DeleteVault calls gastrolog.v1.ConfigService.DeleteVault.
+func (c *configServiceClient) DeleteVault(ctx context.Context, req *connect.Request[v1.DeleteVaultRequest]) (*connect.Response[v1.DeleteVaultResponse], error) {
+	return c.deleteVault.CallUnary(ctx, req)
 }
 
 // PutIngester calls gastrolog.v1.ConfigService.PutIngester.
@@ -510,14 +510,14 @@ func (c *configServiceClient) DeleteCertificate(ctx context.Context, req *connec
 	return c.deleteCertificate.CallUnary(ctx, req)
 }
 
-// PauseStore calls gastrolog.v1.ConfigService.PauseStore.
-func (c *configServiceClient) PauseStore(ctx context.Context, req *connect.Request[v1.PauseStoreRequest]) (*connect.Response[v1.PauseStoreResponse], error) {
-	return c.pauseStore.CallUnary(ctx, req)
+// PauseVault calls gastrolog.v1.ConfigService.PauseVault.
+func (c *configServiceClient) PauseVault(ctx context.Context, req *connect.Request[v1.PauseVaultRequest]) (*connect.Response[v1.PauseVaultResponse], error) {
+	return c.pauseVault.CallUnary(ctx, req)
 }
 
-// ResumeStore calls gastrolog.v1.ConfigService.ResumeStore.
-func (c *configServiceClient) ResumeStore(ctx context.Context, req *connect.Request[v1.ResumeStoreRequest]) (*connect.Response[v1.ResumeStoreResponse], error) {
-	return c.resumeStore.CallUnary(ctx, req)
+// ResumeVault calls gastrolog.v1.ConfigService.ResumeVault.
+func (c *configServiceClient) ResumeVault(ctx context.Context, req *connect.Request[v1.ResumeVaultRequest]) (*connect.Response[v1.ResumeVaultResponse], error) {
+	return c.resumeVault.CallUnary(ctx, req)
 }
 
 // TestIngester calls gastrolog.v1.ConfigService.TestIngester.
@@ -550,10 +550,10 @@ type ConfigServiceHandler interface {
 	PutRetentionPolicy(context.Context, *connect.Request[v1.PutRetentionPolicyRequest]) (*connect.Response[v1.PutRetentionPolicyResponse], error)
 	// DeleteRetentionPolicy removes a retention policy.
 	DeleteRetentionPolicy(context.Context, *connect.Request[v1.DeleteRetentionPolicyRequest]) (*connect.Response[v1.DeleteRetentionPolicyResponse], error)
-	// PutStore creates or updates a store.
-	PutStore(context.Context, *connect.Request[v1.PutStoreRequest]) (*connect.Response[v1.PutStoreResponse], error)
-	// DeleteStore removes a store (must be empty).
-	DeleteStore(context.Context, *connect.Request[v1.DeleteStoreRequest]) (*connect.Response[v1.DeleteStoreResponse], error)
+	// PutVault creates or updates a vault.
+	PutVault(context.Context, *connect.Request[v1.PutVaultRequest]) (*connect.Response[v1.PutVaultResponse], error)
+	// DeleteVault removes a vault (must be empty).
+	DeleteVault(context.Context, *connect.Request[v1.DeleteVaultRequest]) (*connect.Response[v1.DeleteVaultResponse], error)
 	// PutIngester creates or updates an ingester.
 	PutIngester(context.Context, *connect.Request[v1.PutIngesterRequest]) (*connect.Response[v1.PutIngesterResponse], error)
 	// DeleteIngester removes an ingester.
@@ -580,10 +580,10 @@ type ConfigServiceHandler interface {
 	PutCertificate(context.Context, *connect.Request[v1.PutCertificateRequest]) (*connect.Response[v1.PutCertificateResponse], error)
 	// DeleteCertificate removes a certificate.
 	DeleteCertificate(context.Context, *connect.Request[v1.DeleteCertificateRequest]) (*connect.Response[v1.DeleteCertificateResponse], error)
-	// PauseStore pauses ingestion for a store.
-	PauseStore(context.Context, *connect.Request[v1.PauseStoreRequest]) (*connect.Response[v1.PauseStoreResponse], error)
-	// ResumeStore resumes ingestion for a store.
-	ResumeStore(context.Context, *connect.Request[v1.ResumeStoreRequest]) (*connect.Response[v1.ResumeStoreResponse], error)
+	// PauseVault pauses ingestion for a vault.
+	PauseVault(context.Context, *connect.Request[v1.PauseVaultRequest]) (*connect.Response[v1.PauseVaultResponse], error)
+	// ResumeVault resumes ingestion for a vault.
+	ResumeVault(context.Context, *connect.Request[v1.ResumeVaultRequest]) (*connect.Response[v1.ResumeVaultResponse], error)
 	// TestIngester tests connectivity for an ingester configuration without saving it.
 	TestIngester(context.Context, *connect.Request[v1.TestIngesterRequest]) (*connect.Response[v1.TestIngesterResponse], error)
 	// GetIngesterDefaults returns default parameter values for each ingester type.
@@ -651,16 +651,16 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("DeleteRetentionPolicy")),
 		connect.WithHandlerOptions(opts...),
 	)
-	configServicePutStoreHandler := connect.NewUnaryHandler(
-		ConfigServicePutStoreProcedure,
-		svc.PutStore,
-		connect.WithSchema(configServiceMethods.ByName("PutStore")),
+	configServicePutVaultHandler := connect.NewUnaryHandler(
+		ConfigServicePutVaultProcedure,
+		svc.PutVault,
+		connect.WithSchema(configServiceMethods.ByName("PutVault")),
 		connect.WithHandlerOptions(opts...),
 	)
-	configServiceDeleteStoreHandler := connect.NewUnaryHandler(
-		ConfigServiceDeleteStoreProcedure,
-		svc.DeleteStore,
-		connect.WithSchema(configServiceMethods.ByName("DeleteStore")),
+	configServiceDeleteVaultHandler := connect.NewUnaryHandler(
+		ConfigServiceDeleteVaultProcedure,
+		svc.DeleteVault,
+		connect.WithSchema(configServiceMethods.ByName("DeleteVault")),
 		connect.WithHandlerOptions(opts...),
 	)
 	configServicePutIngesterHandler := connect.NewUnaryHandler(
@@ -741,16 +741,16 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("DeleteCertificate")),
 		connect.WithHandlerOptions(opts...),
 	)
-	configServicePauseStoreHandler := connect.NewUnaryHandler(
-		ConfigServicePauseStoreProcedure,
-		svc.PauseStore,
-		connect.WithSchema(configServiceMethods.ByName("PauseStore")),
+	configServicePauseVaultHandler := connect.NewUnaryHandler(
+		ConfigServicePauseVaultProcedure,
+		svc.PauseVault,
+		connect.WithSchema(configServiceMethods.ByName("PauseVault")),
 		connect.WithHandlerOptions(opts...),
 	)
-	configServiceResumeStoreHandler := connect.NewUnaryHandler(
-		ConfigServiceResumeStoreProcedure,
-		svc.ResumeStore,
-		connect.WithSchema(configServiceMethods.ByName("ResumeStore")),
+	configServiceResumeVaultHandler := connect.NewUnaryHandler(
+		ConfigServiceResumeVaultProcedure,
+		svc.ResumeVault,
+		connect.WithSchema(configServiceMethods.ByName("ResumeVault")),
 		connect.WithHandlerOptions(opts...),
 	)
 	configServiceTestIngesterHandler := connect.NewUnaryHandler(
@@ -785,10 +785,10 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServicePutRetentionPolicyHandler.ServeHTTP(w, r)
 		case ConfigServiceDeleteRetentionPolicyProcedure:
 			configServiceDeleteRetentionPolicyHandler.ServeHTTP(w, r)
-		case ConfigServicePutStoreProcedure:
-			configServicePutStoreHandler.ServeHTTP(w, r)
-		case ConfigServiceDeleteStoreProcedure:
-			configServiceDeleteStoreHandler.ServeHTTP(w, r)
+		case ConfigServicePutVaultProcedure:
+			configServicePutVaultHandler.ServeHTTP(w, r)
+		case ConfigServiceDeleteVaultProcedure:
+			configServiceDeleteVaultHandler.ServeHTTP(w, r)
 		case ConfigServicePutIngesterProcedure:
 			configServicePutIngesterHandler.ServeHTTP(w, r)
 		case ConfigServiceDeleteIngesterProcedure:
@@ -815,10 +815,10 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServicePutCertificateHandler.ServeHTTP(w, r)
 		case ConfigServiceDeleteCertificateProcedure:
 			configServiceDeleteCertificateHandler.ServeHTTP(w, r)
-		case ConfigServicePauseStoreProcedure:
-			configServicePauseStoreHandler.ServeHTTP(w, r)
-		case ConfigServiceResumeStoreProcedure:
-			configServiceResumeStoreHandler.ServeHTTP(w, r)
+		case ConfigServicePauseVaultProcedure:
+			configServicePauseVaultHandler.ServeHTTP(w, r)
+		case ConfigServiceResumeVaultProcedure:
+			configServiceResumeVaultHandler.ServeHTTP(w, r)
 		case ConfigServiceTestIngesterProcedure:
 			configServiceTestIngesterHandler.ServeHTTP(w, r)
 		case ConfigServiceGetIngesterDefaultsProcedure:
@@ -868,12 +868,12 @@ func (UnimplementedConfigServiceHandler) DeleteRetentionPolicy(context.Context, 
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.DeleteRetentionPolicy is not implemented"))
 }
 
-func (UnimplementedConfigServiceHandler) PutStore(context.Context, *connect.Request[v1.PutStoreRequest]) (*connect.Response[v1.PutStoreResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.PutStore is not implemented"))
+func (UnimplementedConfigServiceHandler) PutVault(context.Context, *connect.Request[v1.PutVaultRequest]) (*connect.Response[v1.PutVaultResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.PutVault is not implemented"))
 }
 
-func (UnimplementedConfigServiceHandler) DeleteStore(context.Context, *connect.Request[v1.DeleteStoreRequest]) (*connect.Response[v1.DeleteStoreResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.DeleteStore is not implemented"))
+func (UnimplementedConfigServiceHandler) DeleteVault(context.Context, *connect.Request[v1.DeleteVaultRequest]) (*connect.Response[v1.DeleteVaultResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.DeleteVault is not implemented"))
 }
 
 func (UnimplementedConfigServiceHandler) PutIngester(context.Context, *connect.Request[v1.PutIngesterRequest]) (*connect.Response[v1.PutIngesterResponse], error) {
@@ -928,12 +928,12 @@ func (UnimplementedConfigServiceHandler) DeleteCertificate(context.Context, *con
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.DeleteCertificate is not implemented"))
 }
 
-func (UnimplementedConfigServiceHandler) PauseStore(context.Context, *connect.Request[v1.PauseStoreRequest]) (*connect.Response[v1.PauseStoreResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.PauseStore is not implemented"))
+func (UnimplementedConfigServiceHandler) PauseVault(context.Context, *connect.Request[v1.PauseVaultRequest]) (*connect.Response[v1.PauseVaultResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.PauseVault is not implemented"))
 }
 
-func (UnimplementedConfigServiceHandler) ResumeStore(context.Context, *connect.Request[v1.ResumeStoreRequest]) (*connect.Response[v1.ResumeStoreResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.ResumeStore is not implemented"))
+func (UnimplementedConfigServiceHandler) ResumeVault(context.Context, *connect.Request[v1.ResumeVaultRequest]) (*connect.Response[v1.ResumeVaultResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.ResumeVault is not implemented"))
 }
 
 func (UnimplementedConfigServiceHandler) TestIngester(context.Context, *connect.Request[v1.TestIngesterRequest]) (*connect.Response[v1.TestIngesterResponse], error) {
