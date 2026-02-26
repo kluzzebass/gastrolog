@@ -112,7 +112,7 @@ level=error | stats count by host | sort -count | head 10
 * | stats avg(duration) by bin(1m), method
 
 # GeoIP enrichment and world map
-* | lookup geoip src_ip | worldmap country_code
+* | lookup geoip client_ip | stats count by client_ip_country | map choropleth client_ip_country
 ```
 
 The built-in help system documents the full query language, all operators, and scalar functions.
