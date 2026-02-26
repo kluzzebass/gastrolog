@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { DeleteCertificateRequest, DeleteCertificateResponse, DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteVaultRequest, DeleteVaultResponse, GetCertificateRequest, GetCertificateResponse, GetConfigRequest, GetConfigResponse, GetIngesterDefaultsRequest, GetIngesterDefaultsResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetServerConfigRequest, GetServerConfigResponse, ListCertificatesRequest, ListCertificatesResponse, ListIngestersRequest, ListIngestersResponse, PauseVaultRequest, PauseVaultResponse, PutCertificateRequest, PutCertificateResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutNodeNameRequest, PutNodeNameResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutServerConfigRequest, PutServerConfigResponse, PutVaultRequest, PutVaultResponse, ResumeVaultRequest, ResumeVaultResponse, TestIngesterRequest, TestIngesterResponse } from "./config_pb.js";
+import { DeleteCertificateRequest, DeleteCertificateResponse, DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteVaultRequest, DeleteVaultResponse, GenerateNameRequest, GenerateNameResponse, GetCertificateRequest, GetCertificateResponse, GetConfigRequest, GetConfigResponse, GetIngesterDefaultsRequest, GetIngesterDefaultsResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetServerConfigRequest, GetServerConfigResponse, ListCertificatesRequest, ListCertificatesResponse, ListIngestersRequest, ListIngestersResponse, PauseVaultRequest, PauseVaultResponse, PutCertificateRequest, PutCertificateResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutNodeNameRequest, PutNodeNameResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutServerConfigRequest, PutServerConfigResponse, PutVaultRequest, PutVaultResponse, ResumeVaultRequest, ResumeVaultResponse, TestIngesterRequest, TestIngesterResponse } from "./config_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -331,6 +331,17 @@ export const ConfigService = {
       name: "PutNodeName",
       I: PutNodeNameRequest,
       O: PutNodeNameResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * GenerateName returns a random petname for use as a default entity name.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.GenerateName
+     */
+    generateName: {
+      name: "GenerateName",
+      I: GenerateNameRequest,
+      O: GenerateNameResponse,
       kind: MethodKind.Unary,
     },
   }

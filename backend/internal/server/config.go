@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	petname "github.com/dustinkirkland/golang-petname"
 	"github.com/google/uuid"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
@@ -315,6 +316,16 @@ func (s *ConfigServer) PutNodeName(
 	}
 
 	return connect.NewResponse(&apiv1.PutNodeNameResponse{}), nil
+}
+
+// GenerateName returns a random petname for use as a default entity name.
+func (s *ConfigServer) GenerateName(
+	_ context.Context,
+	_ *connect.Request[apiv1.GenerateNameRequest],
+) (*connect.Response[apiv1.GenerateNameResponse], error) {
+	return connect.NewResponse(&apiv1.GenerateNameResponse{
+		Name: petname.Generate(2, "-"),
+	}), nil
 }
 
 func (s *ConfigServer) loadServerConfig(ctx context.Context) (config.ServerConfig, error) {

@@ -117,6 +117,9 @@ const (
 	// ConfigServicePutNodeNameProcedure is the fully-qualified name of the ConfigService's PutNodeName
 	// RPC.
 	ConfigServicePutNodeNameProcedure = "/gastrolog.v1.ConfigService/PutNodeName"
+	// ConfigServiceGenerateNameProcedure is the fully-qualified name of the ConfigService's
+	// GenerateName RPC.
+	ConfigServiceGenerateNameProcedure = "/gastrolog.v1.ConfigService/GenerateName"
 )
 
 // ConfigServiceClient is a client for the gastrolog.v1.ConfigService service.
@@ -179,6 +182,8 @@ type ConfigServiceClient interface {
 	GetIngesterDefaults(context.Context, *connect.Request[v1.GetIngesterDefaultsRequest]) (*connect.Response[v1.GetIngesterDefaultsResponse], error)
 	// PutNodeName updates the human-readable name for the current node.
 	PutNodeName(context.Context, *connect.Request[v1.PutNodeNameRequest]) (*connect.Response[v1.PutNodeNameResponse], error)
+	// GenerateName returns a random petname for use as a default entity name.
+	GenerateName(context.Context, *connect.Request[v1.GenerateNameRequest]) (*connect.Response[v1.GenerateNameResponse], error)
 }
 
 // NewConfigServiceClient constructs a client for the gastrolog.v1.ConfigService service. By
@@ -366,6 +371,12 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("PutNodeName")),
 			connect.WithClientOptions(opts...),
 		),
+		generateName: connect.NewClient[v1.GenerateNameRequest, v1.GenerateNameResponse](
+			httpClient,
+			baseURL+ConfigServiceGenerateNameProcedure,
+			connect.WithSchema(configServiceMethods.ByName("GenerateName")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -400,6 +411,7 @@ type configServiceClient struct {
 	testIngester          *connect.Client[v1.TestIngesterRequest, v1.TestIngesterResponse]
 	getIngesterDefaults   *connect.Client[v1.GetIngesterDefaultsRequest, v1.GetIngesterDefaultsResponse]
 	putNodeName           *connect.Client[v1.PutNodeNameRequest, v1.PutNodeNameResponse]
+	generateName          *connect.Client[v1.GenerateNameRequest, v1.GenerateNameResponse]
 }
 
 // GetConfig calls gastrolog.v1.ConfigService.GetConfig.
@@ -547,6 +559,11 @@ func (c *configServiceClient) PutNodeName(ctx context.Context, req *connect.Requ
 	return c.putNodeName.CallUnary(ctx, req)
 }
 
+// GenerateName calls gastrolog.v1.ConfigService.GenerateName.
+func (c *configServiceClient) GenerateName(ctx context.Context, req *connect.Request[v1.GenerateNameRequest]) (*connect.Response[v1.GenerateNameResponse], error) {
+	return c.generateName.CallUnary(ctx, req)
+}
+
 // ConfigServiceHandler is an implementation of the gastrolog.v1.ConfigService service.
 type ConfigServiceHandler interface {
 	// GetConfig returns the current configuration.
@@ -607,6 +624,8 @@ type ConfigServiceHandler interface {
 	GetIngesterDefaults(context.Context, *connect.Request[v1.GetIngesterDefaultsRequest]) (*connect.Response[v1.GetIngesterDefaultsResponse], error)
 	// PutNodeName updates the human-readable name for the current node.
 	PutNodeName(context.Context, *connect.Request[v1.PutNodeNameRequest]) (*connect.Response[v1.PutNodeNameResponse], error)
+	// GenerateName returns a random petname for use as a default entity name.
+	GenerateName(context.Context, *connect.Request[v1.GenerateNameRequest]) (*connect.Response[v1.GenerateNameResponse], error)
 }
 
 // NewConfigServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -790,6 +809,12 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("PutNodeName")),
 		connect.WithHandlerOptions(opts...),
 	)
+	configServiceGenerateNameHandler := connect.NewUnaryHandler(
+		ConfigServiceGenerateNameProcedure,
+		svc.GenerateName,
+		connect.WithSchema(configServiceMethods.ByName("GenerateName")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.ConfigService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ConfigServiceGetConfigProcedure:
@@ -850,6 +875,8 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServiceGetIngesterDefaultsHandler.ServeHTTP(w, r)
 		case ConfigServicePutNodeNameProcedure:
 			configServicePutNodeNameHandler.ServeHTTP(w, r)
+		case ConfigServiceGenerateNameProcedure:
+			configServiceGenerateNameHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -973,4 +1000,8 @@ func (UnimplementedConfigServiceHandler) GetIngesterDefaults(context.Context, *c
 
 func (UnimplementedConfigServiceHandler) PutNodeName(context.Context, *connect.Request[v1.PutNodeNameRequest]) (*connect.Response[v1.PutNodeNameResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.PutNodeName is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) GenerateName(context.Context, *connect.Request[v1.GenerateNameRequest]) (*connect.Response[v1.GenerateNameResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.GenerateName is not implemented"))
 }

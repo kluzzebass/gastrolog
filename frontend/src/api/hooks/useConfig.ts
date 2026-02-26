@@ -241,3 +241,12 @@ export function usePutNodeName() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["serverConfig"] }),
   });
 }
+
+export function useGenerateName() {
+  return useMutation({
+    mutationFn: async () => {
+      const response = await configClient.generateName({});
+      return response.name;
+    },
+  });
+}

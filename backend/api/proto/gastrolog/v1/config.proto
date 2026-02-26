@@ -92,6 +92,9 @@ service ConfigService {
 
   // PutNodeName updates the human-readable name for the current node.
   rpc PutNodeName(PutNodeNameRequest) returns (PutNodeNameResponse);
+
+  // GenerateName returns a random petname for use as a default entity name.
+  rpc GenerateName(GenerateNameRequest) returns (GenerateNameResponse);
 }
 
 message GetConfigRequest {}
@@ -432,3 +435,9 @@ message PutNodeNameRequest {
 }
 
 message PutNodeNameResponse {}
+
+message GenerateNameRequest {}
+
+message GenerateNameResponse {
+  string name = 1;
+}
