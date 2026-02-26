@@ -32,6 +32,7 @@ func NewConfigCommand() *cobra.Command {
 		newRetentionPolicyCmd(),
 		newVaultCmd(),
 		newIngesterCmd(),
+		newNodeCmd(),
 		newCertCmd(),
 		newUserCmd(),
 		newServerConfigCmd(),

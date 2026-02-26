@@ -19,6 +19,7 @@ type resolver struct {
 	retentionPolicies map[string]string
 	vaults            map[string]string
 	ingesters         map[string]string
+	nodes             map[string]string
 	users             map[string]string // username → id
 	certs             map[string]string
 }
@@ -36,6 +37,7 @@ func newResolver(ctx context.Context, client *server.Client) (*resolver, error) 
 		retentionPolicies: make(map[string]string),
 		vaults:            make(map[string]string),
 		ingesters:         make(map[string]string),
+		nodes:             make(map[string]string),
 		users:             make(map[string]string),
 		certs:             make(map[string]string),
 	}
@@ -55,6 +57,9 @@ func newResolver(ctx context.Context, client *server.Client) (*resolver, error) 
 	}
 	for _, i := range cfg.Ingesters {
 		r.ingesters[strings.ToLower(i.Name)] = i.Id
+	}
+	for _, n := range cfg.NodeConfigs {
+		r.nodes[strings.ToLower(n.Name)] = n.Id
 	}
 
 	// Certs via ListCertificates.
