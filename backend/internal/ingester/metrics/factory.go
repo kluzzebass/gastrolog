@@ -11,18 +11,23 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
-const defaultInterval = 30 * time.Second
+const (
+	defaultInterval      = 30 * time.Second
+	defaultStoreInterval = 10 * time.Second
+)
 
-// StatsSource provides ingest queue statistics.
+// StatsSource provides ingest queue and per-store statistics.
 type StatsSource interface {
 	IngestQueueDepth() int
 	IngestQueueCapacity() int
+	StoreSnapshots() []orchestrator.StoreSnapshot
 }
 
 // ParamDefaults returns the default parameter values for a metrics ingester.
 func ParamDefaults() map[string]string {
 	return map[string]string{
-		"interval": defaultInterval.String(),
+		"interval":       defaultInterval.String(),
+		"store_interval": defaultStoreInterval.String(),
 	}
 }
 
@@ -42,6 +47,18 @@ func NewFactory(src StatsSource) orchestrator.IngesterFactory {
 			interval = d
 		}
 
+		storeInterval := defaultStoreInterval
+		if v := params["store_interval"]; v != "" {
+			d, err := time.ParseDuration(v)
+			if err != nil {
+				return nil, fmt.Errorf("metrics ingester %q: invalid store_interval %q: %w", id, v, err)
+			}
+			if d <= 0 {
+				return nil, fmt.Errorf("metrics ingester %q: store_interval must be positive", id)
+			}
+			storeInterval = d
+		}
+
 		scopedLogger := logging.Default(logger).With(
 			"component", "ingester",
 			"type", "metrics",
@@ -49,10 +66,11 @@ func NewFactory(src StatsSource) orchestrator.IngesterFactory {
 		)
 
 		return &ingester{
-			id:       id.String(),
-			interval: interval,
-			src:      src,
-			logger:   scopedLogger,
+			id:            id.String(),
+			interval:      interval,
+			storeInterval: storeInterval,
+			src:           src,
+			logger:        scopedLogger,
 		}, nil
 	}
 }

@@ -227,3 +227,43 @@ func (o *Orchestrator) IngestQueueNearFull() bool {
 	}
 	return len(o.ingestCh) >= c*9/10
 }
+
+// StoreSnapshot is a point-in-time summary of a store's state.
+type StoreSnapshot struct {
+	ID           uuid.UUID
+	RecordCount  int64
+	ChunkCount   int
+	SealedChunks int
+	DataBytes    int64
+	Enabled      bool
+}
+
+// StoreSnapshots returns a snapshot of stats for all registered stores.
+func (o *Orchestrator) StoreSnapshots() []StoreSnapshot {
+	storeIDs := o.ListStores()
+	snapshots := make([]StoreSnapshot, 0, len(storeIDs))
+	for _, id := range storeIDs {
+		metas, err := o.ListChunkMetas(id)
+		if err != nil {
+			continue
+		}
+		snap := StoreSnapshot{
+			ID:         id,
+			ChunkCount: len(metas),
+			Enabled:    o.IsStoreEnabled(id),
+		}
+		for _, m := range metas {
+			if m.Sealed {
+				snap.SealedChunks++
+			}
+			snap.RecordCount += m.RecordCount
+			if m.DiskBytes > 0 {
+				snap.DataBytes += m.DiskBytes
+			} else {
+				snap.DataBytes += m.Bytes
+			}
+		}
+		snapshots = append(snapshots, snap)
+	}
+	return snapshots
+}

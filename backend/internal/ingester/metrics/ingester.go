@@ -1,5 +1,5 @@
 // Package metrics provides a self-monitoring ingester that emits process-level
-// metrics (CPU, memory, goroutines, queue depth) as log records.
+// metrics (CPU, memory, goroutines, queue depth) and per-store stats as log records.
 package metrics
 
 import (
@@ -14,36 +14,52 @@ import (
 )
 
 type ingester struct {
-	id       string
-	interval time.Duration
-	src      StatsSource
-	logger   *slog.Logger
+	id            string
+	interval      time.Duration
+	storeInterval time.Duration
+	src           StatsSource
+	logger        *slog.Logger
 }
 
-// Run emits one metrics record per interval until ctx is cancelled.
+// Run emits system metrics on interval and store metrics on storeInterval
+// until ctx is cancelled.
 func (m *ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
-	m.logger.Info("started", "interval", m.interval)
+	m.logger.Info("started", "interval", m.interval, "store_interval", m.storeInterval)
 
-	ticker := time.NewTicker(m.interval)
-	defer ticker.Stop()
+	sysTicker := time.NewTicker(m.interval)
+	storeTicker := time.NewTicker(m.storeInterval)
+	defer sysTicker.Stop()
+	defer storeTicker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-ticker.C:
-		}
-
-		msg := m.collect()
-		select {
-		case out <- msg:
-		case <-ctx.Done():
-			return nil
+		case <-sysTicker.C:
+			if !send(ctx, out, m.collectSystem()) {
+				return nil
+			}
+		case <-storeTicker.C:
+			for _, msg := range m.collectStores() {
+				if !send(ctx, out, msg) {
+					return nil
+				}
+			}
 		}
 	}
 }
 
-func (m *ingester) collect() orchestrator.IngestMessage {
+// send attempts a context-aware channel send. Returns false if ctx is done.
+func send(ctx context.Context, out chan<- orchestrator.IngestMessage, msg orchestrator.IngestMessage) bool {
+	select {
+	case out <- msg:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (m *ingester) collectSystem() orchestrator.IngestMessage {
 	cpu := sysmetrics.CPUPercent()
 	mem := sysmetrics.Memory()
 	goroutines := runtime.NumGoroutine()
@@ -73,10 +89,44 @@ func (m *ingester) collect() orchestrator.IngestMessage {
 		Attrs: map[string]string{
 			"ingester_type": "metrics",
 			"ingester_id":   m.id,
+			"metric_type":   "system",
 			"level":         "info",
 		},
 		Raw:      []byte(raw),
 		SourceTS: now,
 		IngestTS: now,
 	}
+}
+
+func (m *ingester) collectStores() []orchestrator.IngestMessage {
+	snapshots := m.src.StoreSnapshots()
+	if len(snapshots) == 0 {
+		return nil
+	}
+
+	now := time.Now()
+	msgs := make([]orchestrator.IngestMessage, 0, len(snapshots))
+	for _, snap := range snapshots {
+		raw := fmt.Sprintf(
+			"record_count=%d chunk_count=%d sealed_chunks=%d data_bytes=%d enabled=%t",
+			snap.RecordCount,
+			snap.ChunkCount,
+			snap.SealedChunks,
+			snap.DataBytes,
+			snap.Enabled,
+		)
+		msgs = append(msgs, orchestrator.IngestMessage{
+			Attrs: map[string]string{
+				"ingester_type": "metrics",
+				"ingester_id":   m.id,
+				"metric_type":   "store",
+				"store_id":      snap.ID.String(),
+				"level":         "info",
+			},
+			Raw:      []byte(raw),
+			SourceTS: now,
+			IngestTS: now,
+		})
+	}
+	return msgs
 }
