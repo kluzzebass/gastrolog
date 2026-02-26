@@ -10,7 +10,8 @@ import { PrimaryButton, GhostButton } from "../settings/Buttons";
 import { WelcomeStep } from "./WelcomeStep";
 import { VaultStep, type VaultData } from "./VaultStep";
 import {
-  PoliciesStep,
+  RotationPolicyStep,
+  RetentionPolicyStep,
   parseDurationToSeconds,
   parseBytesToBigInt,
   type RotationData,
@@ -19,7 +20,7 @@ import {
 import { IngesterStep, type IngesterData } from "./IngesterStep";
 import { ReviewStep } from "./ReviewStep";
 
-const STEPS = ["Welcome", "Vault", "Policies", "Ingester", "Review"] as const;
+const STEPS = ["Welcome", "Vault", "Rotation", "Retention", "Ingester", "Review"] as const;
 
 // -- Reducer for wizard step data --
 
@@ -78,7 +79,14 @@ export function SetupWizard() {
   const setRetention = (v: RetentionData) => dispatchData({ type: "setRetention", value: v });
   const setIngester = (v: IngesterData) => dispatchData({ type: "setIngester", value: v });
 
-  // Generate petnames for each entity on mount.
+  // Generate petname placeholders for each entity on mount.
+  const [namePlaceholders, setNamePlaceholders] = useState({
+    vault: "",
+    rotation: "",
+    retention: "",
+    ingester: "",
+  });
+
   useEffect(() => {
     async function generateNames() {
       const [vn, rn, ren, inn] = await Promise.all([
@@ -87,10 +95,7 @@ export function SetupWizard() {
         generateName.mutateAsync(),
         generateName.mutateAsync(),
       ]);
-      setVault({ ...wizardDataInitial.vault, name: vn });
-      setRotation({ ...wizardDataInitial.rotation, name: rn });
-      setRetention({ ...wizardDataInitial.retention, name: ren });
-      setIngester({ ...wizardDataInitial.ingester, name: inn });
+      setNamePlaceholders({ vault: vn, rotation: rn, retention: ren, ingester: inn });
     }
     generateNames();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -101,9 +106,10 @@ export function SetupWizard() {
       case 1: // Vault
         if (vault.type === "file" && !vault.dir.trim()) return false;
         return true;
-      case 2: return true; // Policies (defaults are fine)
-      case 3: return !!ingester.type; // Need a type selected
-      case 4: return true; // Review
+      case 2: return true; // Rotation (defaults are fine)
+      case 3: return true; // Retention (defaults are fine)
+      case 4: return !!ingester.type; // Need a type selected
+      case 5: return true; // Review
       default: return false;
     }
   };
@@ -115,16 +121,16 @@ export function SetupWizard() {
     const hasRotation = rotation.maxAge || rotation.maxBytes || rotation.maxRecords || rotation.cron;
     const rotationMaxBytes = parseBytesToBigInt(rotation.maxBytes);
     const rotationMaxRecords = rotation.maxRecords ? BigInt(rotation.maxRecords) : BigInt(0);
-    const rotationName = rotation.name || "default";
+    const rotationName = rotation.name || namePlaceholders.rotation || "default";
 
     const hasRetention = retention.maxChunks || retention.maxAge || retention.maxBytes;
     const retentionMaxChunks = retention.maxChunks ? BigInt(retention.maxChunks) : BigInt(0);
     const retentionMaxAge = retention.maxAge || "";
     const retentionMaxBytes = parseBytesToBigInt(retention.maxBytes);
-    const retentionName = retention.name || "default";
+    const retentionName = retention.name || namePlaceholders.retention || "default";
 
-    const vaultName = vault.name || "default";
-    const ingesterName = ingester.name || ingester.type;
+    const vaultName = vault.name || namePlaceholders.vault || "default";
+    const ingesterName = ingester.name || namePlaceholders.ingester || ingester.type;
 
     try {
       const filterId = crypto.randomUUID();
@@ -203,8 +209,11 @@ export function SetupWizard() {
       });
 
       await putServerConfig.mutateAsync({ setupWizardDismissed: true });
-      await queryClient.invalidateQueries({ queryKey: ["config"] });
-      await queryClient.invalidateQueries({ queryKey: ["serverConfig"] });
+      // refetchType: "all" forces a refetch even for inactive queries (no
+      // subscribers on /setup).  Without this the cache keeps stale data and
+      // SearchView's redirect fires before the queries can refetch.
+      await queryClient.invalidateQueries({ queryKey: ["config"], refetchType: "all" });
+      await queryClient.invalidateQueries({ queryKey: ["serverConfig"], refetchType: "all" });
       addToast("Configuration created successfully!", "info");
       navigate({ to: "/search", search: { q: "", help: undefined, settings: undefined, inspector: undefined } });
     } catch (err) {
@@ -274,27 +283,35 @@ export function SetupWizard() {
             <WelcomeStep dark={dark} onNext={() => setStep(1)} />
           )}
           {step === 1 && (
-            <VaultStep dark={dark} data={vault} onChange={setVault} />
+            <VaultStep dark={dark} data={vault} onChange={setVault} namePlaceholder={namePlaceholders.vault} />
           )}
           {step === 2 && (
-            <PoliciesStep
+            <RotationPolicyStep
               dark={dark}
               rotation={rotation}
-              retention={retention}
               onRotationChange={setRotation}
-              onRetentionChange={setRetention}
+              rotationNamePlaceholder={namePlaceholders.rotation}
             />
           )}
           {step === 3 && (
-            <IngesterStep dark={dark} data={ingester} onChange={setIngester} />
+            <RetentionPolicyStep
+              dark={dark}
+              retention={retention}
+              onRetentionChange={setRetention}
+              retentionNamePlaceholder={namePlaceholders.retention}
+            />
           )}
           {step === 4 && (
+            <IngesterStep dark={dark} data={ingester} onChange={setIngester} namePlaceholder={namePlaceholders.ingester} />
+          )}
+          {step === 5 && (
             <ReviewStep
               dark={dark}
               vault={vault}
               rotation={rotation}
               retention={retention}
               ingester={ingester}
+              namePlaceholders={namePlaceholders}
             />
           )}
         </div>
@@ -319,7 +336,7 @@ export function SetupWizard() {
             <GhostButton
               onClick={async () => {
                 await putServerConfig.mutateAsync({ setupWizardDismissed: true });
-                await queryClient.invalidateQueries({ queryKey: ["serverConfig"] });
+                await queryClient.invalidateQueries({ queryKey: ["serverConfig"], refetchType: "all" });
                 navigate({ to: "/search", search: { q: "", help: undefined, settings: undefined, inspector: undefined } });
               }}
               dark={dark}
