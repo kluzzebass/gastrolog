@@ -105,7 +105,7 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
       await putFilter.mutateAsync({
         id: "",
         name,
-        expression: newExpression,
+        expression: newExpression.trim() || "*",
       });
       addToast(`Filter "${name}" created`, "info");
       setAdding(false);
