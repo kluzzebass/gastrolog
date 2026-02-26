@@ -51,17 +51,6 @@ func (d Dir) Root() string {
 	return d.root
 }
 
-// ConfigPath returns the path to the config file for the given config type.
-// "json" -> config.json, "sqlite" -> config.db.
-func (d Dir) ConfigPath(configType string) string {
-	switch configType {
-	case "json":
-		return filepath.Join(d.root, "config.json")
-	default:
-		return filepath.Join(d.root, "config.db")
-	}
-}
-
 // UsersPath returns the path to the users JSON file.
 func (d Dir) UsersPath() string {
 	return filepath.Join(d.root, "users.json")

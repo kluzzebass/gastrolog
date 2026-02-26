@@ -81,7 +81,7 @@ gastrolog version           Print version
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--home` | Home directory (config database, user credentials) | `~/.config/gastrolog` (Linux), `~/Library/Application Support/gastrolog` (macOS) |
-| `--config-type` | Config store: `sqlite`, `memory` | `sqlite` |
+| `--config-type` | Config store: `raft`, `memory` | `raft` |
 | `--pprof` | pprof HTTP address (e.g. `localhost:6060`) | disabled |
 
 **Server flags:**

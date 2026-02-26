@@ -35,7 +35,6 @@ import (
 	configmem "gastrolog/internal/config/memory"
 	"gastrolog/internal/config/raftfsm"
 	"gastrolog/internal/config/raftstore"
-	configsqlite "gastrolog/internal/config/sqlite"
 	"gastrolog/internal/home"
 
 	hraft "github.com/hashicorp/raft"
@@ -91,7 +90,7 @@ func main() {
 	}
 
 	rootCmd.PersistentFlags().String("home", "", "home directory (default: platform config dir)")
-	rootCmd.PersistentFlags().String("config-type", "raft", "config store type: raft, sqlite, or memory")
+	rootCmd.PersistentFlags().String("config-type", "raft", "config store type: raft or memory")
 	rootCmd.PersistentFlags().String("pprof", "", "pprof HTTP server address (e.g. localhost:6060). WARNING: exposes CPU/memory profiles and goroutine dumps — bind to loopback only, never expose publicly")
 
 	serverCmd := &cobra.Command{
@@ -443,8 +442,6 @@ func openConfigStore(hd home.Dir, configType, nodeID string, logger *slog.Logger
 	switch configType {
 	case "memory":
 		return configmem.NewStore(), nil
-	case "sqlite":
-		return configsqlite.NewStore(hd.ConfigPath("sqlite"))
 	case "raft":
 		return openRaftConfigStore(hd, nodeID, logger, fsmOpts...)
 	default:

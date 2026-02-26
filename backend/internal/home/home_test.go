@@ -27,20 +27,6 @@ func TestDefault(t *testing.T) {
 	}
 }
 
-func TestConfigPath(t *testing.T) {
-	d := New("/data")
-	if got := d.ConfigPath("json"); got != "/data/config.json" {
-		t.Errorf("json: got %s", got)
-	}
-	if got := d.ConfigPath("sqlite"); got != "/data/config.db" {
-		t.Errorf("sqlite: got %s", got)
-	}
-	// Unknown types default to .db.
-	if got := d.ConfigPath("other"); got != "/data/config.db" {
-		t.Errorf("other: got %s", got)
-	}
-}
-
 func TestUsersPath(t *testing.T) {
 	d := New("/data")
 	if got := d.UsersPath(); got != "/data/users.json" {
