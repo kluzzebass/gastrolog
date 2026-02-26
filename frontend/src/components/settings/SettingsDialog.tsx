@@ -25,6 +25,7 @@ import { LookupsSettings } from "./LookupsSettings";
 import {
   useServerConfig,
   usePutServerConfig,
+  usePutNodeName,
   useCertificates,
   JWT_KEEP,
 } from "../../api/hooks/useConfig";
@@ -166,6 +167,7 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
   const { data, isLoading } = useServerConfig();
   const { data: certData } = useCertificates();
   const putConfig = usePutServerConfig();
+  const putNodeName = usePutNodeName();
   const { addToast } = useToast();
 
   const [tokenDuration, setTokenDuration] = useState("");
@@ -185,6 +187,7 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
   const [maxFollowDuration, setMaxFollowDuration] = useState("");
   const [queryTimeout, setQueryTimeout] = useState("");
   const [maxResultCount, setMaxResultCount] = useState("");
+  const [nodeName, setNodeName] = useState("");
   const [initialized, setInitialized] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
 
@@ -212,6 +215,7 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
     setMaxFollowDuration(data.maxFollowDuration);
     setQueryTimeout(data.queryTimeout);
     setMaxResultCount(data.maxResultCount ? String(data.maxResultCount) : "10000");
+    setNodeName(data.nodeName);
     setInitialized(true);
   }
 
@@ -293,10 +297,12 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
       setMaxFollowDuration(data.maxFollowDuration);
       setQueryTimeout(data.queryTimeout);
       setMaxResultCount(data.maxResultCount ? String(data.maxResultCount) : "10000");
+      setNodeName(data.nodeName);
     }
   };
 
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({
+    node: false,
     auth: true,
     password: false,
     scheduler: false,
@@ -328,6 +334,47 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
         </div>
       ) : (
         <div className="flex flex-col gap-3">
+          <ExpandableCard
+            id="Node"
+            dark={dark}
+            expanded={!!expandedCards.node}
+            onToggle={() => toggle("node")}
+            monoTitle={false}
+          >
+            <div className="flex flex-col gap-4">
+              <FormField label="Node ID" description="Unique identifier for this node. Auto-generated, read-only." dark={dark}>
+                <TextInput value={data?.nodeId ?? ""} onChange={() => {}} dark={dark} mono disabled />
+              </FormField>
+              <FormField label="Node Name" description="Human-readable name for this node. Visible to all nodes in the cluster." dark={dark}>
+                <TextInput value={nodeName} onChange={setNodeName} placeholder="e.g. witty-hamster" dark={dark} mono />
+              </FormField>
+              <div className="flex gap-2">
+                <PrimaryButton
+                  onClick={async () => {
+                    if (!nodeName.trim()) {
+                      addToast("Node name must not be empty", "error");
+                      return;
+                    }
+                    try {
+                      await putNodeName.mutateAsync(nodeName.trim());
+                      addToast("Node name updated", "info");
+                    } catch (err: any) {
+                      addToast(err.message ?? "Failed to update node name", "error");
+                    }
+                  }}
+                  disabled={!initialized || nodeName === (data?.nodeName ?? "") || putNodeName.isPending}
+                >
+                  {putNodeName.isPending ? "Saving..." : "Save"}
+                </PrimaryButton>
+                {nodeName !== (data?.nodeName ?? "") && (
+                  <GhostButton onClick={() => setNodeName(data?.nodeName ?? "")} dark={dark}>
+                    Reset
+                  </GhostButton>
+                )}
+              </div>
+            </div>
+          </ExpandableCard>
+
           <ExpandableCard
             id="Authentication"
             dark={dark}

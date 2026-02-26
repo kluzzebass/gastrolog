@@ -26,6 +26,7 @@ type Store struct {
 	certs             map[uuid.UUID]config.CertPEM
 	users         map[uuid.UUID]config.User         // keyed by ID (UUID)
 	refreshTokens map[uuid.UUID]config.RefreshToken // keyed by token ID
+	nodes         map[uuid.UUID]config.NodeInfo     // keyed by node ID
 }
 
 var _ config.Store = (*Store)(nil)
@@ -42,6 +43,7 @@ func NewStore() *Store {
 		certs:             make(map[uuid.UUID]config.CertPEM),
 		users:         make(map[uuid.UUID]config.User),
 		refreshTokens: make(map[uuid.UUID]config.RefreshToken),
+		nodes:         make(map[uuid.UUID]config.NodeInfo),
 	}
 }
 
@@ -101,6 +103,13 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 		cfg.Certs = make([]config.CertPEM, 0, len(s.certs))
 		for _, cert := range s.certs {
 			cfg.Certs = append(cfg.Certs, copyCertPEM(cert))
+		}
+	}
+
+	if len(s.nodes) > 0 {
+		cfg.Nodes = make([]config.NodeInfo, 0, len(s.nodes))
+		for _, n := range s.nodes {
+			cfg.Nodes = append(cfg.Nodes, n)
 		}
 	}
 
@@ -338,6 +347,46 @@ func (s *Store) DeleteSetting(ctx context.Context, key string) error {
 	defer s.mu.Unlock()
 
 	delete(s.settings, key)
+	return nil
+}
+
+// Nodes
+
+func (s *Store) GetNode(ctx context.Context, id uuid.UUID) (*config.NodeInfo, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	n, ok := s.nodes[id]
+	if !ok {
+		return nil, nil
+	}
+	return &n, nil
+}
+
+func (s *Store) ListNodes(ctx context.Context) ([]config.NodeInfo, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make([]config.NodeInfo, 0, len(s.nodes))
+	for _, n := range s.nodes {
+		result = append(result, n)
+	}
+	return result, nil
+}
+
+func (s *Store) PutNode(ctx context.Context, node config.NodeInfo) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.nodes[node.ID] = node
+	return nil
+}
+
+func (s *Store) DeleteNode(ctx context.Context, id uuid.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.nodes, id)
 	return nil
 }
 

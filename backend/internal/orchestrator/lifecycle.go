@@ -134,6 +134,19 @@ func (o *Orchestrator) ingestLoop(ctx context.Context) {
 
 // processMessage applies digesters then filters to chunk managers.
 func (o *Orchestrator) processMessage(msg IngestMessage) {
+	// Stamp identity attrs so records are traceable to the ingesting node and ingester.
+	if o.localNodeID != "" || msg.IngesterID != "" {
+		if msg.Attrs == nil {
+			msg.Attrs = make(map[string]string, 2)
+		}
+		if o.localNodeID != "" {
+			msg.Attrs["node_id"] = o.localNodeID
+		}
+		if msg.IngesterID != "" {
+			msg.Attrs["ingester_id"] = msg.IngesterID
+		}
+	}
+
 	// Apply digester pipeline (enriches attrs based on message content).
 	for _, d := range o.digesters {
 		d.Digest(&msg)
@@ -165,11 +178,10 @@ func (o *Orchestrator) processMessage(msg IngestMessage) {
 
 // trackIngesterStats updates per-ingester counters for the given message.
 func (o *Orchestrator) trackIngesterStats(msg IngestMessage, ingestErr error) {
-	idStr := msg.Attrs["ingester_id"]
-	if idStr == "" {
+	if msg.IngesterID == "" {
 		return
 	}
-	id, parseErr := uuid.Parse(idStr)
+	id, parseErr := uuid.Parse(msg.IngesterID)
 	if parseErr != nil {
 		return
 	}

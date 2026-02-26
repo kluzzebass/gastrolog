@@ -105,9 +105,8 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMess
 		now := time.Now()
 
 		fetches.EachRecord(func(rec *kgo.Record) {
-			attrs := make(map[string]string, len(rec.Headers)+6)
+			attrs := make(map[string]string, len(rec.Headers)+5)
 			attrs["ingester_type"] = "kafka"
-			attrs["ingester_id"] = ing.cfg.ID
 			attrs["kafka_topic"] = rec.Topic
 			attrs["kafka_partition"] = strconv.Itoa(int(rec.Partition))
 			attrs["kafka_offset"] = strconv.FormatInt(rec.Offset, 10)
@@ -117,10 +116,11 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMess
 			}
 
 			msg := orchestrator.IngestMessage{
-				Attrs:    attrs,
-				Raw:      rec.Value,
-				SourceTS: rec.Timestamp,
-				IngestTS: now,
+				Attrs:      attrs,
+				Raw:        rec.Value,
+				SourceTS:   rec.Timestamp,
+				IngestTS:   now,
+				IngesterID: ing.cfg.ID,
 			}
 
 			select {

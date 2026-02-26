@@ -111,6 +111,14 @@ func (s *Store) GetSetting(ctx context.Context, key string) (*string, error) {
 	return s.fsm.Store().GetSetting(ctx, key)
 }
 
+func (s *Store) GetNode(ctx context.Context, id uuid.UUID) (*config.NodeInfo, error) {
+	return s.fsm.Store().GetNode(ctx, id)
+}
+
+func (s *Store) ListNodes(ctx context.Context) ([]config.NodeInfo, error) {
+	return s.fsm.Store().ListNodes(ctx)
+}
+
 func (s *Store) ListCertificates(ctx context.Context) ([]config.CertPEM, error) {
 	return s.fsm.Store().ListCertificates(ctx)
 }
@@ -197,6 +205,14 @@ func (s *Store) PutSetting(ctx context.Context, key string, value string) error 
 
 func (s *Store) DeleteSetting(ctx context.Context, key string) error {
 	return s.apply(command.NewDeleteSetting(key))
+}
+
+func (s *Store) PutNode(ctx context.Context, node config.NodeInfo) error {
+	return s.apply(command.NewPutNode(node))
+}
+
+func (s *Store) DeleteNode(ctx context.Context, id uuid.UUID) error {
+	return s.apply(command.NewDeleteNode(id))
 }
 
 func (s *Store) PutCertificate(ctx context.Context, cert config.CertPEM) error {

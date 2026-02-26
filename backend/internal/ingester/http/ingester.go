@@ -288,13 +288,13 @@ func (r *Ingester) parseValue(val Value, streamLabels map[string]string) (orches
 	}
 
 	attrs["ingester_type"] = "http"
-	attrs["ingester_id"] = r.id
 
 	return orchestrator.IngestMessage{
-		Attrs:    attrs,
-		Raw:      []byte(line),
-		SourceTS: sourceTS,
-		IngestTS: time.Now(),
+		Attrs:      attrs,
+		Raw:        []byte(line),
+		SourceTS:   sourceTS,
+		IngestTS:   time.Now(),
+		IngesterID: r.id,
 	}, nil
 }
 

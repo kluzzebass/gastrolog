@@ -85,6 +85,11 @@ func (s *ConfigServer) PutVault(
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
+	// Auto-assign local node ID when not specified.
+	if vaultCfg.NodeID == "" {
+		vaultCfg.NodeID = s.localNodeID
+	}
+
 	// Validate file vault directory against nesting.
 	if vaultCfg.Type == "file" {
 		if dir := vaultCfg.Params["dir"]; dir != "" {
@@ -250,6 +255,7 @@ func protoToVaultConfig(p *apiv1.VaultConfig) (config.VaultConfig, error) {
 		Type:    p.Type,
 		Params:  p.Params,
 		Enabled: p.Enabled,
+		NodeID:  p.NodeId,
 	}
 	if p.Filter != "" {
 		fid, err := uuid.Parse(p.Filter)

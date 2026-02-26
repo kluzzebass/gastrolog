@@ -173,8 +173,8 @@ func TestRELPSession(t *testing.T) {
 		if m.Attrs["ingester_type"] != "relp" {
 			t.Errorf("expected ingester_type relp, got %q", m.Attrs["ingester_type"])
 		}
-		if m.Attrs["ingester_id"] != "test-relp" {
-			t.Errorf("expected ingester_id test-relp, got %q", m.Attrs["ingester_id"])
+		if m.IngesterID != "test-relp" {
+			t.Errorf("expected IngesterID test-relp, got %q", m.IngesterID)
 		}
 		if m.Attrs["facility"] != "4" {
 			t.Errorf("expected facility 4, got %q", m.Attrs["facility"])

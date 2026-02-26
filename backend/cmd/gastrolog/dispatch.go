@@ -19,10 +19,11 @@ import (
 // It is called synchronously from within FSM.Apply, so actions complete before
 // the cfgStore write method returns to the server handler.
 type configDispatcher struct {
-	orch      *orchestrator.Orchestrator
-	cfgStore  config.Store
-	factories orchestrator.Factories
-	logger    *slog.Logger
+	orch         *orchestrator.Orchestrator
+	cfgStore     config.Store
+	factories    orchestrator.Factories
+	localNodeID  string
+	logger       *slog.Logger
 }
 
 // Handle dispatches a single FSM notification to the appropriate orchestrator
@@ -62,6 +63,11 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id uuid.UUID) {
 	vaultCfg, err := d.cfgStore.GetVault(ctx, id)
 	if err != nil || vaultCfg == nil {
 		d.logger.Error("dispatch: read vault config", "id", id, "error", err)
+		return
+	}
+
+	// Skip vaults belonging to another node.
+	if vaultCfg.NodeID != "" && vaultCfg.NodeID != d.localNodeID {
 		return
 	}
 
@@ -125,6 +131,11 @@ func (d *configDispatcher) handleIngesterPut(ctx context.Context, id uuid.UUID) 
 	ingCfg, err := d.cfgStore.GetIngester(ctx, id)
 	if err != nil || ingCfg == nil {
 		d.logger.Error("dispatch: read ingester config", "id", id, "error", err)
+		return
+	}
+
+	// Skip ingesters belonging to another node.
+	if ingCfg.NodeID != "" && ingCfg.NodeID != d.localNodeID {
 		return
 	}
 

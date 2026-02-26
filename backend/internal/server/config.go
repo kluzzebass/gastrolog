@@ -3,10 +3,12 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
@@ -22,6 +24,7 @@ type ConfigServer struct {
 	cfgStore              config.Store
 	factories             orchestrator.Factories
 	certManager           CertManager
+	localNodeID           string
 	onTLSConfigChange     func()
 	onLookupConfigChange  func(config.LookupConfig)
 	afterConfigApply      func(raftfsm.Notification)
@@ -30,12 +33,13 @@ type ConfigServer struct {
 var _ gastrologv1connect.ConfigServiceHandler = (*ConfigServer)(nil)
 
 // NewConfigServer creates a new ConfigServer.
-func NewConfigServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, certManager CertManager, afterConfigApply func(raftfsm.Notification)) *ConfigServer {
+func NewConfigServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, certManager CertManager, localNodeID string, afterConfigApply func(raftfsm.Notification)) *ConfigServer {
 	return &ConfigServer{
 		orch:             orch,
 		cfgStore:         cfgStore,
 		factories:        factories,
 		certManager:      certManager,
+		localNodeID:      localNodeID,
 		afterConfigApply: afterConfigApply,
 	}
 }
@@ -90,6 +94,7 @@ func vaultConfigToProto(vaultCfg config.VaultConfig) *apiv1.VaultConfig {
 		Type:    vaultCfg.Type,
 		Params:  vaultCfg.Params,
 		Enabled: vaultCfg.Enabled,
+		NodeId:  vaultCfg.NodeID,
 	}
 	if vaultCfg.Filter != nil {
 		vc.Filter = vaultCfg.Filter.String()
@@ -122,6 +127,7 @@ func (s *ConfigServer) loadConfigIngesters(ctx context.Context, resp *apiv1.GetC
 			Type:    ing.Type,
 			Params:  ing.Params,
 			Enabled: ing.Enabled,
+			NodeId:  ing.NodeID,
 		})
 	}
 }
@@ -214,6 +220,14 @@ func (s *ConfigServer) GetServerConfig(
 		resp.MaxConcurrentJobs = int32(s.orch.MaxConcurrentJobs()) //nolint:gosec // G115: small config value, always fits in int32
 	}
 
+	// Populate node identity.
+	resp.NodeId = s.localNodeID
+	if nodeUUID, err := uuid.Parse(s.localNodeID); err == nil {
+		if node, err := s.cfgStore.GetNode(ctx, nodeUUID); err == nil && node != nil {
+			resp.NodeName = node.Name
+		}
+	}
+
 	return connect.NewResponse(resp), nil
 }
 
@@ -279,6 +293,28 @@ func validateMMDBPath(path string) *apiv1.MmdbValidation {
 		BuildTime:    info.BuildTime.Format(time.RFC3339),
 		NodeCount:    uint32(info.NodeCount), //nolint:gosec // NodeCount fits in uint32 for all real MMDB files
 	}
+}
+
+// PutNodeName updates the human-readable name for the current node.
+func (s *ConfigServer) PutNodeName(
+	ctx context.Context,
+	req *connect.Request[apiv1.PutNodeNameRequest],
+) (*connect.Response[apiv1.PutNodeNameResponse], error) {
+	name := req.Msg.GetNodeName()
+	if name == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("node_name must not be empty"))
+	}
+
+	nodeUUID, err := uuid.Parse(s.localNodeID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("parse local node ID: %w", err))
+	}
+
+	if err := s.cfgStore.PutNode(ctx, config.NodeInfo{ID: nodeUUID, Name: name}); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("put node: %w", err))
+	}
+
+	return connect.NewResponse(&apiv1.PutNodeNameResponse{}), nil
 }
 
 func (s *ConfigServer) loadServerConfig(ctx context.Context) (config.ServerConfig, error) {

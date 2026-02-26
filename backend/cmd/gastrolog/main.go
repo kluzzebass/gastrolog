@@ -23,6 +23,9 @@ import (
 	"sync"
 	"time"
 
+	petname "github.com/dustinkirkland/golang-petname"
+	"github.com/google/uuid"
+
 	"gastrolog/internal/auth"
 	"gastrolog/internal/cert"
 	"gastrolog/internal/chunk"
@@ -140,13 +143,32 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 		logger.Info("home directory", "path", hd.Root())
 	}
 
-	disp := &configDispatcher{logger: logger.With("component", "dispatch")}
-	cfgStore, err := openConfigStore(hd, configType, logger, raftfsm.WithOnApply(disp.Handle))
+	// Resolve persistent node identity. For memory config (no home dir),
+	// generate an ephemeral ID each run.
+	var nodeID string
+	if configType == "memory" {
+		nodeID = uuid.Must(uuid.NewV7()).String()
+	} else {
+		nodeID, err = hd.NodeID()
+		if err != nil {
+			return fmt.Errorf("resolve node ID: %w", err)
+		}
+	}
+	logger.Info("node identity", "node_id", nodeID)
+
+	disp := &configDispatcher{localNodeID: nodeID, logger: logger.With("component", "dispatch")}
+	cfgStore, err := openConfigStore(hd, configType, nodeID, logger, raftfsm.WithOnApply(disp.Handle))
 	if err != nil {
 		return fmt.Errorf("open config store: %w", err)
 	}
 	if c, ok := cfgStore.(io.Closer); ok {
 		defer func() { _ = c.Close() }()
+	}
+
+	// Ensure this node has a NodeInfo in the config store.
+	// If not, generate a petname and persist it.
+	if err := ensureNodeInfo(ctx, cfgStore, nodeID); err != nil {
+		return fmt.Errorf("ensure node info: %w", err)
 	}
 
 	logger.Info("loading config", "type", configType)
@@ -168,6 +190,7 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 		Logger:            logger,
 		MaxConcurrentJobs: loadMaxConcurrentJobs(ctx, cfgStore),
 		ConfigLoader:      cfgStore,
+		LocalNodeID:       nodeID,
 	})
 	orch.RegisterDigester(digestlevel.New())
 	orch.RegisterDigester(digesttimestamp.New())
@@ -212,7 +235,25 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 		afterConfigApply = disp.Handle
 	}
 
-	return serveAndAwaitShutdown(ctx, logger, serverAddr, homeDir, orch, cfgStore, factories, tokens, certMgr, noAuth, afterConfigApply)
+	return serveAndAwaitShutdown(ctx, logger, serverAddr, homeDir, nodeID, orch, cfgStore, factories, tokens, certMgr, noAuth, afterConfigApply)
+}
+
+// ensureNodeInfo checks whether a NodeInfo exists for the local node ID.
+// If not, it generates a petname and persists it to the config store.
+func ensureNodeInfo(ctx context.Context, cfgStore config.Store, nodeID string) error {
+	nodeUUID, err := uuid.Parse(nodeID)
+	if err != nil {
+		return fmt.Errorf("parse node ID %q: %w", nodeID, err)
+	}
+	existing, err := cfgStore.GetNode(ctx, nodeUUID)
+	if err != nil {
+		return fmt.Errorf("get node: %w", err)
+	}
+	if existing != nil {
+		return nil
+	}
+	name := petname.Generate(2, "-")
+	return cfgStore.PutNode(ctx, config.NodeInfo{ID: nodeUUID, Name: name})
 }
 
 func ensureConfig(ctx context.Context, logger *slog.Logger, cfgStore config.Store, bootstrap bool) (*config.Config, error) {
@@ -287,11 +328,11 @@ func loadCertManager(ctx context.Context, logger *slog.Logger, cfgStore config.S
 	return certMgr, nil
 }
 
-func serveAndAwaitShutdown(ctx context.Context, logger *slog.Logger, serverAddr, homeDir string, orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, tokens *auth.TokenService, certMgr *cert.Manager, noAuth bool, afterConfigApply func(raftfsm.Notification)) error {
+func serveAndAwaitShutdown(ctx context.Context, logger *slog.Logger, serverAddr, homeDir, nodeID string, orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, tokens *auth.TokenService, certMgr *cert.Manager, noAuth bool, afterConfigApply func(raftfsm.Notification)) error {
 	var srv *server.Server
 	var serverWg sync.WaitGroup
 	if serverAddr != "" {
-		srv = server.New(orch, cfgStore, factories, tokens, server.Config{Logger: logger, CertManager: certMgr, NoAuth: noAuth, HomeDir: homeDir, AfterConfigApply: afterConfigApply})
+		srv = server.New(orch, cfgStore, factories, tokens, server.Config{Logger: logger, CertManager: certMgr, NoAuth: noAuth, HomeDir: homeDir, NodeID: nodeID, AfterConfigApply: afterConfigApply})
 		serverWg.Go(func() {
 			if err := srv.ServeTCP(serverAddr); err != nil {
 				logger.Error("server error", "error", err)
@@ -398,14 +439,14 @@ func buildTokenService(ctx context.Context, cfgStore config.Store) (*auth.TokenS
 }
 
 // openConfigStore creates a config.Store based on config type and home directory.
-func openConfigStore(hd home.Dir, configType string, logger *slog.Logger, fsmOpts ...raftfsm.Option) (config.Store, error) {
+func openConfigStore(hd home.Dir, configType, nodeID string, logger *slog.Logger, fsmOpts ...raftfsm.Option) (config.Store, error) {
 	switch configType {
 	case "memory":
 		return configmem.NewStore(), nil
 	case "sqlite":
 		return configsqlite.NewStore(hd.ConfigPath("sqlite"))
 	case "raft":
-		return openRaftConfigStore(hd, logger, fsmOpts...)
+		return openRaftConfigStore(hd, nodeID, logger, fsmOpts...)
 	default:
 		return nil, fmt.Errorf("unknown config store type: %q", configType)
 	}
@@ -431,7 +472,7 @@ func (s *raftConfigStore) Close() error {
 // openRaftConfigStore creates a single-node raft-backed config store with
 // BoltDB persistence. On first run, the cluster is bootstrapped so this node
 // becomes leader immediately.
-func openRaftConfigStore(hd home.Dir, logger *slog.Logger, fsmOpts ...raftfsm.Option) (config.Store, error) {
+func openRaftConfigStore(hd home.Dir, nodeID string, logger *slog.Logger, fsmOpts ...raftfsm.Option) (config.Store, error) {
 	raftDir := hd.RaftDir()
 	if err := os.MkdirAll(raftDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create raft directory: %w", err)
@@ -456,7 +497,7 @@ func openRaftConfigStore(hd home.Dir, logger *slog.Logger, fsmOpts ...raftfsm.Op
 	fsm := raftfsm.New(fsmOpts...)
 
 	conf := hraft.DefaultConfig()
-	conf.LocalID = "gastrolog-1"
+	conf.LocalID = hraft.ServerID(nodeID)
 	conf.LogOutput = io.Discard
 	// Single-node: tight timeouts for near-instant election.
 	conf.HeartbeatTimeout = 100 * time.Millisecond
@@ -479,7 +520,7 @@ func openRaftConfigStore(hd home.Dir, logger *slog.Logger, fsmOpts ...raftfsm.Op
 	if len(existing.Configuration().Servers) == 0 {
 		boot := hraft.Configuration{
 			Servers: []hraft.Server{
-				{ID: "gastrolog-1", Address: transport.LocalAddr()},
+				{ID: hraft.ServerID(nodeID), Address: transport.LocalAddr()},
 			},
 		}
 		if err := r.BootstrapCluster(boot).Error(); err != nil {

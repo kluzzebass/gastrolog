@@ -512,7 +512,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 		},
 	}
 
-	snap := BuildSnapshot(cfg, users, tokens)
+	snap := BuildSnapshot(cfg, users, tokens, nil)
 	b, err := MarshalSnapshot(snap)
 	if err != nil {
 		t.Fatalf("MarshalSnapshot: %v", err)
@@ -521,7 +521,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UnmarshalSnapshot: %v", err)
 	}
-	gotCfg, gotUsers, gotTokens, err := RestoreSnapshot(snap2)
+	gotCfg, gotUsers, gotTokens, _, err := RestoreSnapshot(snap2)
 	if err != nil {
 		t.Fatalf("RestoreSnapshot: %v", err)
 	}
@@ -583,7 +583,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 
 func TestSnapshotEmpty(t *testing.T) {
 	cfg := &config.Config{}
-	snap := BuildSnapshot(cfg, nil, nil)
+	snap := BuildSnapshot(cfg, nil, nil, nil)
 	b, err := MarshalSnapshot(snap)
 	if err != nil {
 		t.Fatalf("MarshalSnapshot: %v", err)
@@ -592,7 +592,7 @@ func TestSnapshotEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UnmarshalSnapshot: %v", err)
 	}
-	gotCfg, gotUsers, gotTokens, err := RestoreSnapshot(snap2)
+	gotCfg, gotUsers, gotTokens, _, err := RestoreSnapshot(snap2)
 	if err != nil {
 		t.Fatalf("RestoreSnapshot: %v", err)
 	}

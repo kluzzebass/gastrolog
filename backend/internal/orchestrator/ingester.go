@@ -12,11 +12,12 @@ import (
 // Ingesters provide attributes that are stored alongside the raw log data.
 // Attributes are passed through directly to chunk storage without transformation.
 type IngestMessage struct {
-	Attrs    map[string]string
-	Raw      []byte
-	SourceTS time.Time    // when the log was generated at the source (zero if unknown)
-	IngestTS time.Time    // when the ingester received this message
-	Ack      chan<- error // optional: if non-nil, receives nil on success or error on failure
+	Attrs      map[string]string
+	Raw        []byte
+	SourceTS   time.Time    // when the log was generated at the source (zero if unknown)
+	IngestTS   time.Time    // when the ingester received this message
+	IngesterID string       // identity of the ingester that produced this message
+	Ack        chan<- error // optional: if non-nil, receives nil on success or error on failure
 }
 
 // Ingester is a source of log messages.

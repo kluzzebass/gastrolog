@@ -231,3 +231,13 @@ export function useDeleteCertificate() {
     },
   });
 }
+
+export function usePutNodeName() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (nodeName: string) => {
+      await configClient.putNodeName({ nodeName });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["serverConfig"] }),
+  });
+}

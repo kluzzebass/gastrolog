@@ -192,8 +192,8 @@ func TestOTLPHTTPJSON(t *testing.T) {
 	if msg.Attrs["ingester_type"] != "otlp" {
 		t.Errorf("ingester_type: expected otlp, got %q", msg.Attrs["ingester_type"])
 	}
-	if msg.Attrs["ingester_id"] != "test-otlp" {
-		t.Errorf("ingester_id: expected test-otlp, got %q", msg.Attrs["ingester_id"])
+	if msg.IngesterID != "test-otlp" {
+		t.Errorf("IngesterID: expected test-otlp, got %q", msg.IngesterID)
 	}
 	if msg.SourceTS.UnixNano() != ts.UnixNano() {
 		t.Errorf("SourceTS: expected %v, got %v", ts, msg.SourceTS)

@@ -54,6 +54,10 @@ type Config struct {
 	// this should be nil (the FSM's onApply callback handles it). For non-raft
 	// stores (memory, SQLite, tests), set this to trigger the same dispatcher.
 	AfterConfigApply func(raftfsm.Notification)
+
+	// NodeID is the local raft server ID. Used to auto-assign node ownership
+	// when creating vaults and ingesters.
+	NodeID string
 }
 
 // CertManager interface for TLS certificate management.
@@ -74,6 +78,7 @@ type Server struct {
 	certManager CertManager
 	noAuth      bool
 	logger      *slog.Logger
+	localNodeID      string
 	startTime        time.Time
 	homeDir          string                     // gastrolog home directory; empty for in-memory config
 	afterConfigApply func(raftfsm.Notification) // non-raft dispatch hook
@@ -107,6 +112,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orche
 		certManager: cfg.CertManager,
 		noAuth:      cfg.NoAuth,
 		logger:      logging.Default(cfg.Logger).With("component", "server"),
+		localNodeID:      cfg.NodeID,
 		startTime:        time.Now(),
 		homeDir:          cfg.HomeDir,
 		afterConfigApply: cfg.AfterConfigApply,
@@ -224,7 +230,7 @@ func (s *Server) buildMux() *http.ServeMux {
 
 	queryServer := NewQueryServer(s.orch, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount)
 	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.logger)
-	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager, s.afterConfigApply)
+	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager, s.localNodeID, s.afterConfigApply)
 	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
 	configServer.SetOnLookupConfigChange(func(cfg config.LookupConfig) {
 		s.applyLookupConfig(cfg, geoipTable, asnTable)

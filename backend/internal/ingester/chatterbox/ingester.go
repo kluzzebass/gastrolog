@@ -84,16 +84,16 @@ func (r *Ingester) generateMessages() []orchestrator.IngestMessage {
 		attrs := make(map[string]string, len(d.Attrs)+2)
 		maps.Copy(attrs, d.Attrs)
 		attrs["ingester_type"] = "chatterbox"
-		attrs["ingester_id"] = r.id
 
 		// Offset each record by 1µs so they sort deterministically in order.
 		ingestTS := base.Add(time.Duration(i) * time.Microsecond)
 
 		msgs = append(msgs, orchestrator.IngestMessage{
-			Attrs:    attrs,
-			Raw:      d.Raw,
-			SourceTS: d.SourceTS,
-			IngestTS: ingestTS,
+			Attrs:      attrs,
+			Raw:        d.Raw,
+			SourceTS:   d.SourceTS,
+			IngestTS:   ingestTS,
+			IngesterID: r.id,
 		})
 	}
 	return msgs

@@ -94,8 +94,8 @@ func TestFluentFwdMessageMode(t *testing.T) {
 	if msg.Attrs["ingester_type"] != "fluentfwd" {
 		t.Errorf("ingester_type: expected fluentfwd, got %q", msg.Attrs["ingester_type"])
 	}
-	if msg.Attrs["ingester_id"] != "test-fwd" {
-		t.Errorf("ingester_id: expected test-fwd, got %q", msg.Attrs["ingester_id"])
+	if msg.IngesterID != "test-fwd" {
+		t.Errorf("IngesterID: expected test-fwd, got %q", msg.IngesterID)
 	}
 	if msg.SourceTS.Unix() != ts {
 		t.Errorf("SourceTS: expected %d, got %d", ts, msg.SourceTS.Unix())

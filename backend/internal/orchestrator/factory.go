@@ -82,7 +82,7 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 
 // applyVaults creates chunk/index/query managers for each vault in the config,
 // compiles filters, applies rotation policies, and registers vaults.
-func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) error {
+func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) error { //nolint:gocognit // vault setup is inherently multi-step
 	vaultIDs := make(map[uuid.UUID]bool)
 	var compiledFilters []*CompiledFilter
 
@@ -91,6 +91,11 @@ func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) erro
 			return fmt.Errorf("duplicate vault ID: %s", vaultCfg.ID)
 		}
 		vaultIDs[vaultCfg.ID] = true
+
+		// Skip vaults belonging to another node.
+		if vaultCfg.NodeID != "" && vaultCfg.NodeID != o.localNodeID {
+			continue
+		}
 
 		// Resolve filter ID to expression and compile.
 		var filterID uuid.UUID
@@ -270,6 +275,11 @@ func (o *Orchestrator) applyIngesters(cfg *config.Config, factories Factories) e
 			return fmt.Errorf("duplicate ingester ID: %s", recvCfg.ID)
 		}
 		ingesterIDs[recvCfg.ID] = true
+
+		// Skip ingesters belonging to another node.
+		if recvCfg.NodeID != "" && recvCfg.NodeID != o.localNodeID {
+			continue
+		}
 
 		if !recvCfg.Enabled {
 			continue

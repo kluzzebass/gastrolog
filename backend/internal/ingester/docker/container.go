@@ -94,7 +94,6 @@ func streamOnce(
 
 	attrs := map[string]string{
 		"ingester_type":  "docker",
-		"ingester_id":    ingesterID,
 		"container_id":   info.ID,
 		"container_name": info.Name,
 		"image":          info.Image,
@@ -121,8 +120,9 @@ func streamOnce(
 			msgAttrs["stream"] = entry.Stream
 
 			msg := orchestrator.IngestMessage{
-				Attrs: msgAttrs,
-				Raw:   entry.Line,
+				Attrs:      msgAttrs,
+				Raw:        entry.Line,
+				IngesterID: ingesterID,
 			}
 			if !entry.Timestamp.IsZero() {
 				msg.IngestTS = entry.Timestamp

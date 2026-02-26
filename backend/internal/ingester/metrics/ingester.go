@@ -88,13 +88,13 @@ func (m *ingester) collectSystem() orchestrator.IngestMessage {
 	return orchestrator.IngestMessage{
 		Attrs: map[string]string{
 			"ingester_type": "metrics",
-			"ingester_id":   m.id,
 			"metric_type":   "system",
 			"level":         "info",
 		},
-		Raw:      []byte(raw),
-		SourceTS: now,
-		IngestTS: now,
+		Raw:        []byte(raw),
+		SourceTS:   now,
+		IngestTS:   now,
+		IngesterID: m.id,
 	}
 }
 
@@ -118,14 +118,14 @@ func (m *ingester) collectVaults() []orchestrator.IngestMessage {
 		msgs = append(msgs, orchestrator.IngestMessage{
 			Attrs: map[string]string{
 				"ingester_type": "metrics",
-				"ingester_id":   m.id,
 				"metric_type":   "vault",
 				"vault_id":      snap.ID.String(),
 				"level":         "info",
 			},
-			Raw:      []byte(raw),
-			SourceTS: now,
-			IngestTS: now,
+			Raw:        []byte(raw),
+			SourceTS:   now,
+			IngestTS:   now,
+			IngesterID: m.id,
 		})
 	}
 	return msgs

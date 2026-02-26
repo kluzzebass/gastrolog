@@ -112,6 +112,9 @@ type Orchestrator struct {
 	// Config loader for hot-update operations.
 	cfgLoader ConfigLoader
 
+	// Local node identity for multi-node filtering.
+	localNodeID string
+
 	// Logger for this orchestrator instance.
 	// Scoped with component="orchestrator" at construction time.
 	logger *slog.Logger
@@ -149,6 +152,11 @@ type Config struct {
 	// hot-update operations (ReloadFilters, AddVault, etc.).
 	// If nil, hot-update methods that require config will return an error.
 	ConfigLoader ConfigLoader
+
+	// LocalNodeID is the raft server ID of this node. Used to filter
+	// vaults and ingesters during ApplyConfig — only entities assigned
+	// to this node (or with empty NodeID) are instantiated.
+	LocalNodeID string
 }
 
 // New creates an Orchestrator with empty registries.
@@ -179,6 +187,7 @@ func New(cfg Config) *Orchestrator {
 		cronRotation:    newCronRotationManager(sched, logger),
 		ingestSize:      cfg.IngestChannelSize,
 		cfgLoader:       cfg.ConfigLoader,
+		localNodeID:     cfg.LocalNodeID,
 		now:             cfg.Now,
 		logger:          logger,
 	}

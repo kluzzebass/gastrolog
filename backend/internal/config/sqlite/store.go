@@ -730,6 +730,24 @@ func (s *Store) DeleteCertificate(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// Nodes — stubbed; SQLite config store is deprecated (raft is the default).
+
+func (s *Store) GetNode(ctx context.Context, id uuid.UUID) (*config.NodeInfo, error) {
+	return nil, nil
+}
+
+func (s *Store) ListNodes(ctx context.Context) ([]config.NodeInfo, error) {
+	return nil, nil
+}
+
+func (s *Store) PutNode(ctx context.Context, node config.NodeInfo) error {
+	return nil
+}
+
+func (s *Store) DeleteNode(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
 // Users
 
 func (s *Store) CreateUser(ctx context.Context, user config.User) error {

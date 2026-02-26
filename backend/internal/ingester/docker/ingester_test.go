@@ -287,8 +287,8 @@ func TestSingleContainerTailing(t *testing.T) {
 	if msgs[0].Attrs["ingester_type"] != "docker" {
 		t.Errorf("msg[0] ingester_type = %q, want %q", msgs[0].Attrs["ingester_type"], "docker")
 	}
-	if msgs[0].Attrs["ingester_id"] != "test-docker" {
-		t.Errorf("msg[0] ingester_id = %q, want %q", msgs[0].Attrs["ingester_id"], "test-docker")
+	if msgs[0].IngesterID != "test-docker" {
+		t.Errorf("msg[0] IngesterID = %q, want %q", msgs[0].IngesterID, "test-docker")
 	}
 	if msgs[0].Attrs["container_id"] != container.ID {
 		t.Errorf("msg[0] container_id = %q, want %q", msgs[0].Attrs["container_id"], container.ID)

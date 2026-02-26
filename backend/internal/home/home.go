@@ -19,6 +19,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/google/uuid"
 )
 
 // Dir represents a gastrolog home directory.
@@ -86,4 +89,29 @@ func (d Dir) EnsureExists() error {
 		return fmt.Errorf("create home directory %s: %w", d.root, err)
 	}
 	return nil
+}
+
+// NodeID reads the persistent node identity from <root>/node_id.
+// If the file doesn't exist, a new UUIDv7 is generated and written.
+func (d Dir) NodeID() (string, error) {
+	return d.readOrCreate("node_id", func() string {
+		return uuid.Must(uuid.NewV7()).String()
+	})
+}
+
+// readOrCreate reads a single-line value from <root>/<filename>.
+// If the file doesn't exist, generate() provides the default which is persisted.
+func (d Dir) readOrCreate(filename string, generate func() string) (string, error) {
+	p := filepath.Join(d.root, filename)
+	data, err := os.ReadFile(p) //nolint:gosec // G304: path is constructed from trusted home dir + constant filename
+	if err == nil {
+		if v := strings.TrimSpace(string(data)); v != "" {
+			return v, nil
+		}
+	}
+	v := generate()
+	if err := os.WriteFile(p, []byte(v+"\n"), 0o640); err != nil { //nolint:gosec // G306: node-id file is not secret, 0640 is intentional
+		return "", fmt.Errorf("write %s: %w", filename, err)
+	}
+	return v, nil
 }

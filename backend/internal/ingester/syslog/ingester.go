@@ -348,12 +348,12 @@ func (r *Ingester) TCPAddr() net.Addr {
 func (r *Ingester) buildMessage(data []byte, remoteIP string) orchestrator.IngestMessage {
 	attrs, sourceTS := syslogparse.ParseMessage(data, remoteIP)
 	attrs["ingester_type"] = "syslog"
-	attrs["ingester_id"] = r.id
 
 	return orchestrator.IngestMessage{
-		Attrs:    attrs,
-		Raw:      data,
-		SourceTS: sourceTS,
-		IngestTS: time.Now(),
+		Attrs:      attrs,
+		Raw:        data,
+		SourceTS:   sourceTS,
+		IngestTS:   time.Now(),
+		IngesterID: r.id,
 	}
 }

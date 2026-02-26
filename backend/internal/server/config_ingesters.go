@@ -24,17 +24,18 @@ func (s *ConfigServer) ListIngesters(
 ) (*connect.Response[apiv1.ListIngestersResponse], error) {
 	ids := s.orch.ListIngesters()
 
-	// Build type and name lookup from config.
+	// Build type, name, and node_id lookup from config.
 	type ingMeta struct {
-		typ  string
-		name string
+		typ    string
+		name   string
+		nodeID string
 	}
 	metaMap := make(map[uuid.UUID]ingMeta)
 	if s.cfgStore != nil {
 		ingesters, err := s.cfgStore.ListIngesters(ctx)
 		if err == nil {
 			for _, ing := range ingesters {
-				metaMap[ing.ID] = ingMeta{typ: ing.Type, name: ing.Name}
+				metaMap[ing.ID] = ingMeta{typ: ing.Type, name: ing.Name, nodeID: ing.NodeID}
 			}
 		}
 	}
@@ -50,6 +51,7 @@ func (s *ConfigServer) ListIngesters(
 			Name:    m.name,
 			Type:    m.typ,
 			Running: s.orch.IsRunning(),
+			NodeId:  m.nodeID,
 		})
 	}
 
@@ -129,6 +131,12 @@ func (s *ConfigServer) PutIngester(
 		Type:    req.Msg.Config.Type,
 		Enabled: req.Msg.Config.Enabled,
 		Params:  req.Msg.Config.Params,
+		NodeID:  req.Msg.Config.NodeId,
+	}
+
+	// Auto-assign local node ID when not specified.
+	if ingCfg.NodeID == "" {
+		ingCfg.NodeID = s.localNodeID
 	}
 
 	// Dry-run validation: verify type is known and factory can construct the

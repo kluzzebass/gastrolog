@@ -101,7 +101,9 @@ func (f *FSM) Apply(l *raft.Log) any {
 		*gastrologv1.ConfigCommand_PutSetting,
 		*gastrologv1.ConfigCommand_DeleteSetting,
 		*gastrologv1.ConfigCommand_PutCertificate,
-		*gastrologv1.ConfigCommand_DeleteCertificate:
+		*gastrologv1.ConfigCommand_DeleteCertificate,
+		*gastrologv1.ConfigCommand_PutNode,
+		*gastrologv1.ConfigCommand_DeleteNode:
 		return f.applyConfig(ctx, cmd)
 
 	case *gastrologv1.ConfigCommand_CreateUser,
@@ -178,6 +180,18 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.ConfigCommand
 			return nil, err
 		}
 		return nil, f.store.DeleteCertificate(ctx, id)
+	case *gastrologv1.ConfigCommand_PutNode:
+		node, err := command.ExtractPutNode(c.PutNode)
+		if err != nil {
+			return nil, err
+		}
+		return nil, f.store.PutNode(ctx, node)
+	case *gastrologv1.ConfigCommand_DeleteNode:
+		id, err := command.ExtractDeleteNode(c.DeleteNode)
+		if err != nil {
+			return nil, err
+		}
+		return nil, f.store.DeleteNode(ctx, id)
 	default:
 		return nil, fmt.Errorf("unexpected config command: %T", c)
 	}
@@ -458,7 +472,12 @@ func (f *FSM) Snapshot() (raft.FSMSnapshot, error) {
 		return nil, fmt.Errorf("list refresh tokens for snapshot: %w", err)
 	}
 
-	snap := command.BuildSnapshot(cfg, users, tokens)
+	nodes, err := f.store.ListNodes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list nodes for snapshot: %w", err)
+	}
+
+	snap := command.BuildSnapshot(cfg, users, tokens, nodes)
 	data, err := command.MarshalSnapshot(snap)
 	if err != nil {
 		return nil, fmt.Errorf("marshal snapshot: %w", err)
@@ -469,7 +488,7 @@ func (f *FSM) Snapshot() (raft.FSMSnapshot, error) {
 
 // Restore replaces the FSM's state with a snapshot.
 // Raft guarantees this is never called concurrently with Apply or Snapshot.
-func (f *FSM) Restore(rc io.ReadCloser) error {
+func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit // snapshot restore is inherently complex
 	defer func() { _ = rc.Close() }()
 
 	data, err := io.ReadAll(rc)
@@ -482,7 +501,7 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 		return fmt.Errorf("unmarshal snapshot: %w", err)
 	}
 
-	cfg, users, tokens, err := command.RestoreSnapshot(snap)
+	cfg, users, tokens, nodes, err := command.RestoreSnapshot(snap)
 	if err != nil {
 		return fmt.Errorf("restore snapshot: %w", err)
 	}
@@ -538,6 +557,13 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	for _, t := range tokens {
 		if err := newStore.CreateRefreshToken(ctx, t); err != nil {
 			return fmt.Errorf("restore refresh token %s: %w", t.ID, err)
+		}
+	}
+
+	// Populate nodes.
+	for _, n := range nodes {
+		if err := newStore.PutNode(ctx, n); err != nil {
+			return fmt.Errorf("restore node %s: %w", n.ID, err)
 		}
 	}
 

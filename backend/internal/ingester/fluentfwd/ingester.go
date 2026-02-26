@@ -361,7 +361,6 @@ func (ing *Ingester) processRecord(ctx context.Context, tag string, ts time.Time
 	attrs := make(map[string]string, len(record)+4)
 	attrs["tag"] = tag
 	attrs["ingester_type"] = "fluentfwd"
-	attrs["ingester_id"] = ing.id
 
 	// Extract raw log line from well-known keys.
 	var raw string
@@ -383,10 +382,11 @@ func (ing *Ingester) processRecord(ctx context.Context, tag string, ts time.Time
 	}
 
 	msg := orchestrator.IngestMessage{
-		Attrs:    attrs,
-		Raw:      []byte(raw),
-		SourceTS: ts,
-		IngestTS: time.Now(),
+		Attrs:      attrs,
+		Raw:        []byte(raw),
+		SourceTS:   ts,
+		IngestTS:   time.Now(),
+		IngesterID: ing.id,
 	}
 
 	select {

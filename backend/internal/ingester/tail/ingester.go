@@ -249,11 +249,11 @@ func (ing *ingester) readNewLines(tf *tailedFile, out chan<- orchestrator.Ingest
 		out <- orchestrator.IngestMessage{
 			Attrs: map[string]string{
 				"ingester_type": "tail",
-				"ingester_id":   ing.id,
 				"file":          tf.path,
 			},
-			Raw:      raw,
-			IngestTS: now,
+			Raw:        raw,
+			IngestTS:   now,
+			IngesterID: ing.id,
 		}
 	}
 

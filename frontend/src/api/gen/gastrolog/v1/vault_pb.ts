@@ -113,6 +113,11 @@ export class VaultInfo extends Message<VaultInfo> {
    */
   name = "";
 
+  /**
+   * @generated from field: string node_id = 8;
+   */
+  nodeId = "";
+
   constructor(data?: PartialMessage<VaultInfo>) {
     super();
     proto3.util.initPartial(data, this);
@@ -128,6 +133,7 @@ export class VaultInfo extends Message<VaultInfo> {
     { no: 5, name: "record_count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 6, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 7, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 8, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultInfo {

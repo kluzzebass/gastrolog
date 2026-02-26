@@ -79,6 +79,12 @@ type Store interface {
 	PutSetting(ctx context.Context, key string, value string) error
 	DeleteSetting(ctx context.Context, key string) error
 
+	// Nodes (cluster node identity)
+	GetNode(ctx context.Context, id uuid.UUID) (*NodeInfo, error)
+	ListNodes(ctx context.Context) ([]NodeInfo, error)
+	PutNode(ctx context.Context, node NodeInfo) error
+	DeleteNode(ctx context.Context, id uuid.UUID) error
+
 	// Certificates (dedicated storage, not in Settings KV)
 	ListCertificates(ctx context.Context) ([]CertPEM, error)
 	GetCertificate(ctx context.Context, id uuid.UUID) (*CertPEM, error)
@@ -117,6 +123,7 @@ type Config struct {
 	Vaults            []VaultConfig           `json:"vaults,omitempty"`
 	Settings          map[string]string       `json:"settings,omitempty"`
 	Certs             []CertPEM               `json:"certs,omitempty"`
+	Nodes             []NodeInfo              `json:"nodes,omitempty"`
 }
 
 // ServerConfig holds server-level configuration, organized by concern.
@@ -166,6 +173,12 @@ type TLSConfig struct {
 	HTTPToHTTPSRedirect bool `json:"http_to_https_redirect,omitempty"`
 	// HTTPSPort is the port for the HTTPS listener. Empty means HTTP port + 1.
 	HTTPSPort string `json:"https_port,omitempty"`
+}
+
+// NodeInfo represents a cluster node with its human-readable name.
+type NodeInfo struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
 }
 
 // CertPEM holds certificate content. Either stored PEM or file paths (directory monitoring).
@@ -378,6 +391,10 @@ type IngesterConfig struct {
 	// Parsing and validation are the responsibility of the factory that consumes
 	// the params. There is no schema enforcement at the ConfigVault level.
 	Params map[string]string `json:"params,omitempty"`
+
+	// NodeID is the raft server ID of the node that owns this ingester.
+	// Empty means unscoped (legacy/migration compatibility).
+	NodeID string `json:"nodeId,omitempty"`
 }
 
 // ToRotationPolicy converts a RotationPolicyConfig to a chunk.RotationPolicy.
@@ -503,6 +520,10 @@ type VaultConfig struct {
 	// Parsing and validation are the responsibility of the factory that consumes
 	// the params. There is no schema enforcement at the ConfigVault level.
 	Params map[string]string `json:"params,omitempty"`
+
+	// NodeID is the raft server ID of the node that owns this vault.
+	// Empty means unscoped (legacy/migration compatibility).
+	NodeID string `json:"nodeId,omitempty"`
 }
 
 // LoadServerConfig reads and parses the ServerConfig from the "server" settings key.

@@ -67,6 +67,7 @@ message VaultInfo {
   int64 record_count = 5;
   bool enabled = 6;
   string name = 7;
+  string node_id = 8;
 }
 
 message GetVaultRequest {

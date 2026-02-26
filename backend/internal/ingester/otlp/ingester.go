@@ -211,7 +211,6 @@ func (ing *Ingester) logRecordToMessage(lr *logspb.LogRecord, resourceAttrs, sco
 	}
 
 	attrs["ingester_type"] = "otlp"
-	attrs["ingester_id"] = ing.id
 
 	var sourceTS time.Time
 	switch {
@@ -222,10 +221,11 @@ func (ing *Ingester) logRecordToMessage(lr *logspb.LogRecord, resourceAttrs, sco
 	}
 
 	return orchestrator.IngestMessage{
-		Attrs:    attrs,
-		Raw:      []byte(anyValueToString(lr.GetBody())),
-		SourceTS: sourceTS,
-		IngestTS: now,
+		Attrs:      attrs,
+		Raw:        []byte(anyValueToString(lr.GetBody())),
+		SourceTS:   sourceTS,
+		IngestTS:   now,
+		IngesterID: ing.id,
 	}
 }
 

@@ -157,18 +157,18 @@ func (r *Ingester) handleConn(ctx context.Context, conn net.Conn, out chan<- orc
 
 		attrs, sourceTS := syslogparse.ParseMessage(msg.Data, remoteIP)
 		attrs["ingester_type"] = "relp"
-		attrs["ingester_id"] = r.id
 
 		// Use ack channel for end-to-end delivery guarantee:
 		// the orchestrator sends nil/error after writing to chunk store.
 		ack := make(chan error, 1)
 
 		ingestMsg := orchestrator.IngestMessage{
-			Attrs:    attrs,
-			Raw:      msg.Data,
-			SourceTS: sourceTS,
-			IngestTS: time.Now(),
-			Ack:      ack,
+			Attrs:      attrs,
+			Raw:        msg.Data,
+			SourceTS:   sourceTS,
+			IngestTS:   time.Now(),
+			IngesterID: r.id,
+			Ack:        ack,
 		}
 
 		select {

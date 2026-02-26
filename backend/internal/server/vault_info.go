@@ -205,6 +205,7 @@ func (s *VaultServer) getVaultInfo(ctx context.Context, id uuid.UUID) (*apiv1.Va
 		ChunkCount:  int64(len(metas)),
 		RecordCount: recordCount,
 		Enabled:     s.orch.IsVaultEnabled(id),
+		NodeId:      cfg.NodeID,
 	}
 	if cfg.Filter != nil {
 		info.Filter = cfg.Filter.String()

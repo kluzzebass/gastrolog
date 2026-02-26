@@ -223,6 +223,7 @@ func putVaultCmd(cfg config.VaultConfig) *gastrologv1.PutVaultCommand {
 		RetentionRules: rules,
 		Enabled:        cfg.Enabled,
 		Params:         cfg.Params,
+		NodeId:         cfg.NodeID,
 	}
 }
 
@@ -283,6 +284,7 @@ func ExtractPutVault(cmd *gastrologv1.PutVaultCommand) (config.VaultConfig, erro
 		RetentionRules: rules,
 		Enabled:        cmd.GetEnabled(),
 		Params:         nilIfEmpty(cmd.GetParams()),
+		NodeID:         cmd.GetNodeId(),
 	}, nil
 }
 
@@ -302,6 +304,7 @@ func putIngesterCmd(cfg config.IngesterConfig) *gastrologv1.PutIngesterCommand {
 		Type:    cfg.Type,
 		Enabled: cfg.Enabled,
 		Params:  cfg.Params,
+		NodeId:  cfg.NodeID,
 	}
 }
 
@@ -333,6 +336,7 @@ func ExtractPutIngester(cmd *gastrologv1.PutIngesterCommand) (config.IngesterCon
 		Type:    cmd.GetType(),
 		Enabled: cmd.GetEnabled(),
 		Params:  nilIfEmpty(cmd.GetParams()),
+		NodeID:  cmd.GetNodeId(),
 	}, nil
 }
 
@@ -646,11 +650,55 @@ func ExtractDeleteUserRefreshTokens(cmd *gastrologv1.DeleteUserRefreshTokensComm
 }
 
 // ---------------------------------------------------------------------------
+// Nodes
+// ---------------------------------------------------------------------------
+
+func putNodeCmd(node config.NodeInfo) *gastrologv1.PutNodeCommand {
+	return &gastrologv1.PutNodeCommand{
+		Id:   node.ID.String(),
+		Name: node.Name,
+	}
+}
+
+// NewPutNode creates a ConfigCommand for PutNode.
+func NewPutNode(node config.NodeInfo) *gastrologv1.ConfigCommand {
+	return &gastrologv1.ConfigCommand{
+		Command: &gastrologv1.ConfigCommand_PutNode{PutNode: putNodeCmd(node)},
+	}
+}
+
+// NewDeleteNode creates a ConfigCommand for DeleteNode.
+func NewDeleteNode(id uuid.UUID) *gastrologv1.ConfigCommand {
+	return &gastrologv1.ConfigCommand{
+		Command: &gastrologv1.ConfigCommand_DeleteNode{
+			DeleteNode: &gastrologv1.DeleteNodeCommand{Id: id.String()},
+		},
+	}
+}
+
+// ExtractPutNode converts a PutNodeCommand back to a NodeInfo.
+func ExtractPutNode(cmd *gastrologv1.PutNodeCommand) (config.NodeInfo, error) {
+	id, err := uuid.Parse(cmd.GetId())
+	if err != nil {
+		return config.NodeInfo{}, fmt.Errorf("parse node id: %w", err)
+	}
+	return config.NodeInfo{
+		ID:   id,
+		Name: cmd.GetName(),
+	}, nil
+}
+
+// ExtractDeleteNode extracts the UUID from a DeleteNodeCommand.
+func ExtractDeleteNode(cmd *gastrologv1.DeleteNodeCommand) (uuid.UUID, error) {
+	return uuid.Parse(cmd.GetId())
+}
+
+// ---------------------------------------------------------------------------
 // Snapshot
 // ---------------------------------------------------------------------------
 
 // BuildSnapshot creates a ConfigSnapshot from the full config state.
-func BuildSnapshot(cfg *config.Config, users []config.User, tokens []config.RefreshToken) *gastrologv1.ConfigSnapshot {
+func BuildSnapshot(cfg *config.Config, users []config.User, tokens []config.RefreshToken, nodes []config.NodeInfo) *gastrologv1.ConfigSnapshot {
 	snap := &gastrologv1.ConfigSnapshot{
 		Settings: cfg.Settings,
 	}
@@ -679,12 +727,15 @@ func BuildSnapshot(cfg *config.Config, users []config.User, tokens []config.Refr
 	for _, t := range tokens {
 		snap.RefreshTokens = append(snap.RefreshTokens, createRefreshTokenCmd(t))
 	}
+	for _, n := range nodes {
+		snap.Nodes = append(snap.Nodes, putNodeCmd(n))
+	}
 
 	return snap
 }
 
 // RestoreSnapshot converts a ConfigSnapshot back to Go config types.
-func RestoreSnapshot(snap *gastrologv1.ConfigSnapshot) (*config.Config, []config.User, []config.RefreshToken, error) {
+func RestoreSnapshot(snap *gastrologv1.ConfigSnapshot) (*config.Config, []config.User, []config.RefreshToken, []config.NodeInfo, error) {
 	cfg := &config.Config{
 		Settings: nilIfEmpty(snap.GetSettings()),
 	}
@@ -692,42 +743,42 @@ func RestoreSnapshot(snap *gastrologv1.ConfigSnapshot) (*config.Config, []config
 	for _, f := range snap.GetFilters() {
 		fc, err := ExtractPutFilter(f)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("restore filter: %w", err)
+			return nil, nil, nil, nil, fmt.Errorf("restore filter: %w", err)
 		}
 		cfg.Filters = append(cfg.Filters, fc)
 	}
 	for _, rp := range snap.GetRotationPolicies() {
 		rc, err := ExtractPutRotationPolicy(rp)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("restore rotation policy: %w", err)
+			return nil, nil, nil, nil, fmt.Errorf("restore rotation policy: %w", err)
 		}
 		cfg.RotationPolicies = append(cfg.RotationPolicies, rc)
 	}
 	for _, rp := range snap.GetRetentionPolicies() {
 		rc, err := ExtractPutRetentionPolicy(rp)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("restore retention policy: %w", err)
+			return nil, nil, nil, nil, fmt.Errorf("restore retention policy: %w", err)
 		}
 		cfg.RetentionPolicies = append(cfg.RetentionPolicies, rc)
 	}
 	for _, v := range snap.GetVaults() {
 		vc, err := ExtractPutVault(v)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("restore vault: %w", err)
+			return nil, nil, nil, nil, fmt.Errorf("restore vault: %w", err)
 		}
 		cfg.Vaults = append(cfg.Vaults, vc)
 	}
 	for _, ing := range snap.GetIngesters() {
 		ic, err := ExtractPutIngester(ing)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("restore ingester: %w", err)
+			return nil, nil, nil, nil, fmt.Errorf("restore ingester: %w", err)
 		}
 		cfg.Ingesters = append(cfg.Ingesters, ic)
 	}
 	for _, c := range snap.GetCertificates() {
 		cc, err := ExtractPutCertificate(c)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("restore certificate: %w", err)
+			return nil, nil, nil, nil, fmt.Errorf("restore certificate: %w", err)
 		}
 		cfg.Certs = append(cfg.Certs, cc)
 	}
@@ -736,7 +787,7 @@ func RestoreSnapshot(snap *gastrologv1.ConfigSnapshot) (*config.Config, []config
 	for _, u := range snap.GetUsers() {
 		user, err := ExtractCreateUser(u)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("restore user: %w", err)
+			return nil, nil, nil, nil, fmt.Errorf("restore user: %w", err)
 		}
 		users = append(users, user)
 	}
@@ -745,12 +796,21 @@ func RestoreSnapshot(snap *gastrologv1.ConfigSnapshot) (*config.Config, []config
 	for _, t := range snap.GetRefreshTokens() {
 		token, err := ExtractCreateRefreshToken(t)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("restore refresh token: %w", err)
+			return nil, nil, nil, nil, fmt.Errorf("restore refresh token: %w", err)
 		}
 		tokens = append(tokens, token)
 	}
 
-	return cfg, users, tokens, nil
+	nodes := make([]config.NodeInfo, 0, len(snap.GetNodes()))
+	for _, n := range snap.GetNodes() {
+		node, err := ExtractPutNode(n)
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("restore node: %w", err)
+		}
+		nodes = append(nodes, node)
+	}
+
+	return cfg, users, tokens, nodes, nil
 }
 
 // ---------------------------------------------------------------------------

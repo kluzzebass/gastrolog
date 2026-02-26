@@ -34,6 +34,8 @@ message ConfigCommand {
     CreateRefreshTokenCommand create_refresh_token = 22;
     DeleteRefreshTokenCommand delete_refresh_token = 23;
     DeleteUserRefreshTokensCommand delete_user_refresh_tokens = 24;
+    PutNodeCommand put_node = 25;
+    DeleteNodeCommand delete_node = 26;
   }
 }
 
@@ -97,6 +99,7 @@ message PutVaultCommand {
   repeated VaultRetentionRule retention_rules = 6;
   bool enabled = 7;
   map<string, string> params = 8;
+  string node_id = 9;
 }
 
 message DeleteVaultCommand {
@@ -111,6 +114,7 @@ message PutIngesterCommand {
   string type = 3;
   bool enabled = 4;
   map<string, string> params = 5;
+  string node_id = 6;
 }
 
 message DeleteIngesterCommand {
@@ -203,6 +207,17 @@ message DeleteUserRefreshTokensCommand {
   string user_id = 1;
 }
 
+// --- Nodes ---
+
+message PutNodeCommand {
+  string id = 1;
+  string name = 2;
+}
+
+message DeleteNodeCommand {
+  string id = 1;
+}
+
 // --- Snapshot ---
 
 // ConfigSnapshot captures the full config state for FSM.Snapshot()/Restore().
@@ -218,4 +233,5 @@ message ConfigSnapshot {
   repeated PutCertificateCommand certificates = 7;
   repeated CreateUserCommand users = 8;
   repeated CreateRefreshTokenCommand refresh_tokens = 9;
+  repeated PutNodeCommand nodes = 10;
 }
