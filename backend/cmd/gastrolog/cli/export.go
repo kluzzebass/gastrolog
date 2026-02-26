@@ -19,6 +19,7 @@ type exportDoc struct {
 	RetentionPolicies []*v1.RetentionPolicyConfig `json:"retention_policies,omitempty"`
 	Vaults            []*v1.VaultConfig           `json:"vaults,omitempty"`
 	Ingesters         []*v1.IngesterConfig        `json:"ingesters,omitempty"`
+	Nodes             []*v1.NodeConfig            `json:"nodes,omitempty"`
 	Certificates      []*certExport               `json:"certificates,omitempty"`
 	Users             []*userExport               `json:"users,omitempty"`
 	ServerConfig      *v1.GetServerConfigResponse `json:"server_config,omitempty"`
@@ -94,6 +95,7 @@ func newExportCmd() *cobra.Command {
 				RetentionPolicies: cfgResp.Msg.RetentionPolicies,
 				Vaults:            cfgResp.Msg.Vaults,
 				Ingesters:         cfgResp.Msg.Ingesters,
+				Nodes:             cfgResp.Msg.NodeConfigs,
 				Certificates:      certs,
 				Users:             users,
 				ServerConfig:      scResp.Msg,

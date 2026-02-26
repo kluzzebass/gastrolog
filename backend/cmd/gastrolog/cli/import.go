@@ -150,6 +150,40 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 		imported++
 	}
 
+	for _, n := range doc.Nodes {
+		ensureID(n.Name, r.nodes, &n.Id)
+		_, err := client.Config.PutNodeConfig(ctx, connect.NewRequest(&v1.PutNodeConfigRequest{
+			Config: n,
+		}))
+		if err != nil {
+			return imported, fmt.Errorf("import node %q: %w", n.Name, err)
+		}
+		imported++
+	}
+
+	for _, c := range doc.Certificates {
+		ensureID(c.Name, r.certs, &c.ID)
+		_, err := client.Config.PutCertificate(ctx, connect.NewRequest(&v1.PutCertificateRequest{
+			Id:       c.ID,
+			Name:     c.Name,
+			CertFile: c.CertFile,
+			KeyFile:  c.KeyFile,
+		}))
+		if err != nil {
+			return imported, fmt.Errorf("import certificate %q: %w", c.Name, err)
+		}
+		imported++
+	}
+
+	for _, u := range doc.Users {
+		// Users can only be created with passwords, which we don't export.
+		// On import, we skip users that already exist and warn about new ones.
+		if _, ok := r.users[strings.ToLower(u.Username)]; ok {
+			continue // already exists, skip (no way to update role without password)
+		}
+		_, _ = fmt.Fprintf(os.Stderr, "Warning: skipping user %q — cannot create without password\n", u.Username)
+	}
+
 	if doc.ServerConfig != nil {
 		req := serverConfigToRequest(doc.ServerConfig)
 		_, err := client.Config.PutServerConfig(ctx, connect.NewRequest(req))
