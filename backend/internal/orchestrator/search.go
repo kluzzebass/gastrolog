@@ -16,15 +16,15 @@ func (o *Orchestrator) Search(ctx context.Context, key uuid.UUID, q query.Query,
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
-	store := o.stores[key]
-	if store == nil {
-		if len(o.stores) == 0 {
+	vault := o.vaults[key]
+	if vault == nil {
+		if len(o.vaults) == 0 {
 			return nil, nil, ErrNoQueryEngines
 		}
 		return nil, nil, ErrUnknownRegistry
 	}
 
-	seq, nextToken := store.Query.Search(ctx, q, resume)
+	seq, nextToken := vault.Query.Search(ctx, q, resume)
 	return seq, nextToken, nil
 }
 
@@ -33,15 +33,15 @@ func (o *Orchestrator) SearchThenFollow(ctx context.Context, key uuid.UUID, q qu
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
-	store := o.stores[key]
-	if store == nil {
-		if len(o.stores) == 0 {
+	vault := o.vaults[key]
+	if vault == nil {
+		if len(o.vaults) == 0 {
 			return nil, nil, ErrNoQueryEngines
 		}
 		return nil, nil, ErrUnknownRegistry
 	}
 
-	seq, nextToken := store.Query.SearchThenFollow(ctx, q, resume)
+	seq, nextToken := vault.Query.SearchThenFollow(ctx, q, resume)
 	return seq, nextToken, nil
 }
 
@@ -50,15 +50,15 @@ func (o *Orchestrator) SearchWithContext(ctx context.Context, key uuid.UUID, q q
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
-	store := o.stores[key]
-	if store == nil {
-		if len(o.stores) == 0 {
+	vault := o.vaults[key]
+	if vault == nil {
+		if len(o.vaults) == 0 {
 			return nil, nil, ErrNoQueryEngines
 		}
 		return nil, nil, ErrUnknownRegistry
 	}
 
-	seq, nextToken := store.Query.SearchWithContext(ctx, q)
+	seq, nextToken := vault.Query.SearchWithContext(ctx, q)
 	return seq, nextToken, nil
 }
 
@@ -67,13 +67,13 @@ func (o *Orchestrator) Explain(ctx context.Context, key uuid.UUID, q query.Query
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
-	store := o.stores[key]
-	if store == nil {
-		if len(o.stores) == 0 {
+	vault := o.vaults[key]
+	if vault == nil {
+		if len(o.vaults) == 0 {
 			return nil, ErrNoQueryEngines
 		}
 		return nil, ErrUnknownRegistry
 	}
 
-	return store.Query.Explain(ctx, q)
+	return vault.Query.Explain(ctx, q)
 }

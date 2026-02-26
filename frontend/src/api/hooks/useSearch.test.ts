@@ -44,8 +44,8 @@ describe("extractTokens", () => {
     expect(extractTokens("last=5m error")).toEqual(["error"]);
   });
 
-  test("filters out store= directive", () => {
-    expect(extractTokens("store=mystore error")).toEqual(["error"]);
+  test("filters out vault= directive", () => {
+    expect(extractTokens("vault=myvault error")).toEqual(["error"]);
   });
 
   test("filters out limit= directive", () => {

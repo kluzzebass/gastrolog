@@ -2,13 +2,13 @@ import { describe, expect, test } from "bun:test";
 import {
   stripTimeRange,
   stripAllDirectives,
-  stripStore,
+  stripVault,
   stripChunk,
   stripPos,
   stripSeverity,
   buildTimeTokens,
   injectTimeRange,
-  injectStore,
+  injectVault,
   buildSeverityExpr,
   extractDirectives,
   replaceExpression,
@@ -42,13 +42,13 @@ describe("stripTimeRange", () => {
     ).toBe("remote_host=*\n | lookup geoip remote_host\n | sort -count"));
 });
 
-describe("stripStore", () => {
-  test("strips store=", () =>
-    expect(stripStore("store=main foo")).toBe("foo"));
+describe("stripVault", () => {
+  test("strips vault=", () =>
+    expect(stripVault("vault=main foo")).toBe("foo"));
   test("preserves other tokens", () =>
-    expect(stripStore("level=error foo")).toBe("level=error foo"));
-  test("empty string", () => expect(stripStore("")).toBe(""));
-  test("only store token", () => expect(stripStore("store=main")).toBe(""));
+    expect(stripVault("level=error foo")).toBe("level=error foo"));
+  test("empty string", () => expect(stripVault("")).toBe(""));
+  test("only vault token", () => expect(stripVault("vault=main")).toBe(""));
 });
 
 describe("stripChunk", () => {
@@ -70,7 +70,7 @@ describe("stripSeverity", () => {
   test("not level=* kept (trailing \\b does not match after *)", () =>
     expect(stripSeverity("not level=* foo")).toBe("not level=* foo"));
   test("preserves non-severity tokens", () =>
-    expect(stripSeverity("store=main foo")).toBe("store=main foo"));
+    expect(stripSeverity("vault=main foo")).toBe("vault=main foo"));
   test("empty string", () => expect(stripSeverity("")).toBe(""));
   test("strips all known levels", () => {
     for (const level of ["error", "warn", "info", "debug", "trace"]) {
@@ -81,7 +81,7 @@ describe("stripSeverity", () => {
 
 describe("stripAllDirectives", () => {
   test("strips all directive types", () =>
-    expect(stripAllDirectives("last=5m start=x end=y reverse=true store=main limit=100 chunk=abc pos=42 foo")).toBe("foo"));
+    expect(stripAllDirectives("last=5m start=x end=y reverse=true vault=main limit=100 chunk=abc pos=42 foo")).toBe("foo"));
   test("only directives returns empty", () =>
     expect(stripAllDirectives("last=15m reverse=true")).toBe(""));
   test("preserves search expression", () =>
@@ -121,22 +121,22 @@ describe("injectTimeRange", () => {
     ).toBe("last=15m reverse=true remote_host=*\n | lookup geoip remote_host\n | sort -count"));
 });
 
-describe("injectStore", () => {
+describe("injectVault", () => {
   test("into empty query", () =>
-    expect(injectStore("", "main")).toBe("store=main"));
+    expect(injectVault("", "main")).toBe("vault=main"));
   test("into existing query", () =>
-    expect(injectStore("foo", "main")).toBe("store=main foo"));
-  test("replaces existing store", () =>
-    expect(injectStore("store=old foo", "main")).toBe("store=main foo"));
-  test("all store strips", () =>
-    expect(injectStore("store=old foo", "all")).toBe("foo"));
-  test("all store on empty", () => expect(injectStore("", "all")).toBe(""));
+    expect(injectVault("foo", "main")).toBe("vault=main foo"));
+  test("replaces existing vault", () =>
+    expect(injectVault("vault=old foo", "main")).toBe("vault=main foo"));
+  test("all vault strips", () =>
+    expect(injectVault("vault=old foo", "all")).toBe("foo"));
+  test("all vault on empty", () => expect(injectVault("", "all")).toBe(""));
 });
 
 describe("extractDirectives", () => {
   test("extracts all directive types", () =>
-    expect(extractDirectives("last=5m reverse=true store=main foo")).toBe(
-      "last=5m reverse=true store=main",
+    expect(extractDirectives("last=5m reverse=true vault=main foo")).toBe(
+      "last=5m reverse=true vault=main",
     ));
   test("no directives", () => expect(extractDirectives("foo bar")).toBe(""));
   test("empty string", () => expect(extractDirectives("")).toBe(""));

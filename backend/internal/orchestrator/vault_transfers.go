@@ -14,7 +14,7 @@ import (
 
 // --- Single-chunk move ---
 
-// MoveChunk moves a single sealed chunk from source to destination store.
+// MoveChunk moves a single sealed chunk from source to destination vault.
 // Used by retention-triggered migration to move individual chunks.
 // Supports both filesystem-level moves (ChunkMover) and record-level copy.
 func (o *Orchestrator) MoveChunk(ctx context.Context, chunkID chunk.ChunkID, srcID, dstID uuid.UUID) error {
@@ -22,7 +22,7 @@ func (o *Orchestrator) MoveChunk(ctx context.Context, chunkID chunk.ChunkID, src
 	if err != nil {
 		return err
 	}
-	dstCM, dstIM, err := o.storeManagers(dstID)
+	dstCM, dstIM, err := o.vaultManagers(dstID)
 	if err != nil {
 		return err
 	}
@@ -56,7 +56,7 @@ func (o *Orchestrator) MoveChunk(ctx context.Context, chunkID chunk.ChunkID, src
 	}
 
 	// Delete from source after successful copy.
-	if err := o.stores[srcID].Indexes.DeleteIndexes(chunkID); err != nil {
+	if err := o.vaults[srcID].Indexes.DeleteIndexes(chunkID); err != nil {
 		o.logger.Warn("retention migrate: failed to delete source indexes",
 			"chunk", chunkID.String(), "error", err)
 	}
@@ -67,7 +67,7 @@ func (o *Orchestrator) MoveChunk(ctx context.Context, chunkID chunk.ChunkID, src
 	return nil
 }
 
-// moveChunkFS performs a filesystem-level move of a sealed chunk between stores.
+// moveChunkFS performs a filesystem-level move of a sealed chunk between vaults.
 func (o *Orchestrator) moveChunkFS(ctx context.Context, chunkID chunk.ChunkID, srcMover, dstMover chunk.ChunkMover, dstIM index.IndexManager) error {
 	srcDir := srcMover.ChunkDir(chunkID)
 	dstDir := dstMover.ChunkDir(chunkID)
@@ -97,7 +97,7 @@ func (o *Orchestrator) moveChunkFS(ctx context.Context, chunkID chunk.ChunkID, s
 	return nil
 }
 
-// --- Multi-store operations ---
+// --- Multi-vault operations ---
 
 // CopyRecords copies all records from source to destination, reporting progress via job.
 // After copying, it seals the destination's active chunk and builds indexes.
@@ -106,7 +106,7 @@ func (o *Orchestrator) CopyRecords(ctx context.Context, srcID, dstID uuid.UUID, 
 	if err != nil {
 		return err
 	}
-	dstCM, dstIM, err := o.storeManagers(dstID)
+	dstCM, dstIM, err := o.vaultManagers(dstID)
 	if err != nil {
 		return err
 	}
@@ -169,13 +169,13 @@ func (o *Orchestrator) CopyRecords(ctx context.Context, srcID, dstID uuid.UUID, 
 }
 
 // MoveChunks moves sealed chunks from source to destination using filesystem-level moves.
-// Both stores must implement chunk.ChunkMover (caller should verify with SupportsChunkMove).
+// Both vaults must implement chunk.ChunkMover (caller should verify with SupportsChunkMove).
 func (o *Orchestrator) MoveChunks(ctx context.Context, srcID, dstID uuid.UUID, job *JobProgress) error {
 	srcCM, err := o.chunkManager(srcID)
 	if err != nil {
 		return err
 	}
-	dstCM, dstIM, err := o.storeManagers(dstID)
+	dstCM, dstIM, err := o.vaultManagers(dstID)
 	if err != nil {
 		return err
 	}
@@ -231,7 +231,7 @@ func (o *Orchestrator) MoveChunks(ctx context.Context, srcID, dstID uuid.UUID, j
 	return nil
 }
 
-// TransferParams describes a store-to-store data movement operation.
+// TransferParams describes a vault-to-vault data movement operation.
 type TransferParams struct {
 	SrcID uuid.UUID
 	DstID uuid.UUID
@@ -239,16 +239,16 @@ type TransferParams struct {
 	// Description is a human-readable label for the job (shown in the UI).
 	Description string
 
-	// CleanupSrc is called after the source store is removed from the orchestrator.
-	// It handles config store deletion and filesystem cleanup.
+	// CleanupSrc is called after the source vault is removed from the orchestrator.
+	// It handles config vault deletion and filesystem cleanup.
 	// A nil CleanupSrc means no external cleanup is needed.
 	CleanupSrc func(ctx context.Context) error
 }
 
-// MigrateStore freezes the source (disable + seal), moves data to destination,
+// MigrateVault freezes the source (disable + seal), moves data to destination,
 // then removes the source. The operation runs as an async job.
 // The source must already be disabled and sealed by the caller.
-func (o *Orchestrator) MigrateStore(ctx context.Context, p TransferParams) string {
+func (o *Orchestrator) MigrateVault(ctx context.Context, p TransferParams) string {
 	canMoveChunks := o.SupportsChunkMove(p.SrcID, p.DstID)
 
 	jobName := "migrate:" + p.SrcID.String() + "->" + p.DstID.String()
@@ -264,7 +264,7 @@ func (o *Orchestrator) MigrateStore(ctx context.Context, p TransferParams) strin
 			return
 		}
 
-		if err := o.ForceRemoveStore(p.SrcID); err != nil {
+		if err := o.ForceRemoveVault(p.SrcID); err != nil {
 			job.Fail(o.now(), fmt.Sprintf("delete source: %v", err))
 			return
 		}
@@ -282,10 +282,10 @@ func (o *Orchestrator) MigrateStore(ctx context.Context, p TransferParams) strin
 	return jobID
 }
 
-// MergeStores seals the source, moves data to destination, then removes the
+// MergeVaults seals the source, moves data to destination, then removes the
 // source. The operation runs as an async job. The source must already be
 // disabled by the caller.
-func (o *Orchestrator) MergeStores(ctx context.Context, p TransferParams) string {
+func (o *Orchestrator) MergeVaults(ctx context.Context, p TransferParams) string {
 	canMoveChunks := o.SupportsChunkMove(p.SrcID, p.DstID)
 
 	jobName := "merge:" + p.SrcID.String() + "->" + p.DstID.String()
@@ -306,7 +306,7 @@ func (o *Orchestrator) MergeStores(ctx context.Context, p TransferParams) string
 			return
 		}
 
-		if err := o.ForceRemoveStore(p.SrcID); err != nil {
+		if err := o.ForceRemoveVault(p.SrcID); err != nil {
 			job.Fail(o.now(), fmt.Sprintf("delete source: %v", err))
 			return
 		}

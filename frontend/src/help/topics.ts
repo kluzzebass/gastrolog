@@ -11,7 +11,7 @@ function md(loader: () => Promise<{ default: string }>) {
 }
 
 // Topics ordered to follow the data flow through the system:
-// Ingest → Digest → Route → Store → Index → Search
+// Ingest → Digest → Route → Vault → Index → Search
 export const helpTopics: HelpTopic[] = [
   { id: 'general-concepts', title: 'General Concepts', load: md(() => import('./general-concepts.md?raw')) },
   {
@@ -40,8 +40,8 @@ export const helpTopics: HelpTopic[] = [
   {
     id: 'storage', title: 'Storage', load: md(() => import('./storage.md?raw')),
     children: [
-      { id: 'storage-file', title: 'File Store', load: md(() => import('./storage-file.md?raw')) },
-      { id: 'storage-memory', title: 'Memory Store', load: md(() => import('./storage-memory.md?raw')) },
+      { id: 'storage-file', title: 'File Vault', load: md(() => import('./storage-file.md?raw')) },
+      { id: 'storage-memory', title: 'Memory Vault', load: md(() => import('./storage-memory.md?raw')) },
       { id: 'policy-rotation', title: 'Rotation Policies', load: md(() => import('./policy-rotation.md?raw')) },
       { id: 'policy-retention', title: 'Retention Policies', load: md(() => import('./policy-retention.md?raw')) },
     ],
@@ -68,7 +68,7 @@ export const helpTopics: HelpTopic[] = [
   {
     id: 'inspector', title: 'Inspector', load: md(() => import('./inspector.md?raw')),
     children: [
-      { id: 'inspector-stores', title: 'Stores', load: md(() => import('./inspector-stores.md?raw')) },
+      { id: 'inspector-vaults', title: 'Vaults', load: md(() => import('./inspector-vaults.md?raw')) },
       { id: 'inspector-ingesters', title: 'Ingesters', load: md(() => import('./inspector-ingesters.md?raw')) },
       { id: 'inspector-jobs', title: 'Jobs', load: md(() => import('./inspector-jobs.md?raw')) },
     ],
@@ -98,6 +98,7 @@ export const helpTopics: HelpTopic[] = [
 const topicAliases: Record<string, string> = {
   'ingesters': 'ingestion',
   'storage-engines': 'storage',
+  'inspector-stores': 'inspector-vaults',
 };
 
 /** Resolve an alias to its canonical topic ID. */

@@ -32,11 +32,11 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 
 	// Log startup info.
 	o.logger.Info("starting orchestrator",
-		"stores", len(o.stores),
+		"vaults", len(o.vaults),
 		"ingesters", len(o.ingesters))
 
-	if o.filterSet == nil && len(o.stores) > 1 {
-		o.logger.Warn("no filters configured, messages will fan out to all stores")
+	if o.filterSet == nil && len(o.vaults) > 1 {
+		o.logger.Warn("no filters configured, messages will fan out to all vaults")
 	}
 
 	// Start shared scheduler (cron rotation, retention, and future scheduled tasks).
@@ -195,12 +195,12 @@ func (o *Orchestrator) RebuildMissingIndexes(ctx context.Context) error {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
-	for storeID, store := range o.stores {
-		if store == nil {
+	for vaultID, vault := range o.vaults {
+		if vault == nil {
 			continue
 		}
-		cm := store.Chunks
-		im := store.Indexes
+		cm := vault.Chunks
+		im := vault.Indexes
 
 		metas, err := cm.List()
 		if err != nil {
@@ -219,11 +219,11 @@ func (o *Orchestrator) RebuildMissingIndexes(ctx context.Context) error {
 
 			if !complete {
 				o.logger.Info("rebuilding missing indexes",
-					"store", storeID,
+					"vault", vaultID,
 					"chunk", meta.ID.String())
 
-				name := fmt.Sprintf("index-rebuild:%s:%s", storeID, meta.ID)
-				if err := o.scheduler.RunOnce(name, store.Indexes.BuildIndexes, context.Background(), meta.ID); err != nil {
+				name := fmt.Sprintf("index-rebuild:%s:%s", vaultID, meta.ID)
+				if err := o.scheduler.RunOnce(name, vault.Indexes.BuildIndexes, context.Background(), meta.ID); err != nil {
 					o.logger.Warn("failed to schedule index rebuild", "name", name, "error", err)
 				}
 				o.scheduler.Describe(name, fmt.Sprintf("Rebuild missing indexes for chunk %s", meta.ID))

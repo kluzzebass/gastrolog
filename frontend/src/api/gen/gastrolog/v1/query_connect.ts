@@ -49,7 +49,7 @@ export const QueryService = {
       kind: MethodKind.Unary,
     },
     /**
-     * GetContext returns records surrounding a specific record, across all stores.
+     * GetContext returns records surrounding a specific record, across all vaults.
      * Uses the anchor record's write timestamp to find nearby records.
      *
      * @generated from rpc gastrolog.v1.QueryService.GetContext

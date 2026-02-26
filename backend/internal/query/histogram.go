@@ -32,11 +32,11 @@ import (
 func (e *Engine) runTimechart(ctx context.Context, q Query, tc *querylang.TimechartOp, preOps []querylang.PipeOp) (*TableResult, error) {
 	numBuckets := clampBuckets(tc.N)
 
-	selectedStores := e.timechartStores(q)
+	selectedVaults := e.timechartVaults(q)
 
 	// If no time range, derive from chunk metadata.
 	if q.Start.IsZero() || q.End.IsZero() {
-		e.deriveTimeRange(&q, selectedStores)
+		e.deriveTimeRange(&q, selectedVaults)
 	}
 
 	// Determine group-by field name. Empty = no grouping (just total counts).
@@ -67,7 +67,7 @@ func (e *Engine) runTimechart(ctx context.Context, q Query, tc *querylang.Timech
 	hasGroupBy := groupField != ""
 
 	if !hasGroupBy && !hasFilter && !hasPreOps {
-		e.timechartFastPath(selectedStores, start, end, bucketWidth, numBuckets, counts)
+		e.timechartFastPath(selectedVaults, start, end, bucketWidth, numBuckets, counts)
 	} else if err := e.timechartScanPath(ctx, q, preOps, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, hasPreOps, counts, groupCounts); err != nil {
 		return nil, err
 	}
@@ -86,21 +86,21 @@ func clampBuckets(n int) int {
 	return n
 }
 
-// timechartStores returns the stores to query for a timechart, applying any store filter.
-func (e *Engine) timechartStores(q Query) []uuid.UUID {
-	allStores := e.listStores()
+// timechartVaults returns the vaults to query for a timechart, applying any vault filter.
+func (e *Engine) timechartVaults(q Query) []uuid.UUID {
+	allVaults := e.listVaults()
 	if q.BoolExpr != nil {
-		if stores, _ := ExtractStoreFilter(q.BoolExpr, allStores); stores != nil {
-			return stores
+		if vaults, _ := ExtractVaultFilter(q.BoolExpr, allVaults); vaults != nil {
+			return vaults
 		}
 	}
-	return allStores
+	return allVaults
 }
 
-// deriveTimeRange fills in missing Start/End from chunk metadata across the selected stores.
-func (e *Engine) deriveTimeRange(q *Query, selectedStores []uuid.UUID) {
-	for _, storeID := range selectedStores {
-		cm, _ := e.getStoreManagers(storeID)
+// deriveTimeRange fills in missing Start/End from chunk metadata across the selected vaults.
+func (e *Engine) deriveTimeRange(q *Query, selectedVaults []uuid.UUID) {
+	for _, vaultID := range selectedVaults {
+		cm, _ := e.getVaultManagers(vaultID)
 		if cm == nil {
 			continue
 		}
@@ -123,9 +123,9 @@ func (e *Engine) deriveTimeRange(q *Query, selectedStores []uuid.UUID) {
 }
 
 // timechartFastPath counts records per bucket using binary search (no record scanning).
-func (e *Engine) timechartFastPath(selectedStores []uuid.UUID, start time.Time, end time.Time, bucketWidth time.Duration, numBuckets int, counts []int64) {
-	for _, storeID := range selectedStores {
-		cm, _ := e.getStoreManagers(storeID)
+func (e *Engine) timechartFastPath(selectedVaults []uuid.UUID, start time.Time, end time.Time, bucketWidth time.Duration, numBuckets int, counts []int64) {
+	for _, vaultID := range selectedVaults {
+		cm, _ := e.getVaultManagers(vaultID)
 		if cm == nil {
 			continue
 		}

@@ -21,10 +21,10 @@ import (
 )
 
 func TestDrainWaitsForInFlightRequests(t *testing.T) {
-	// Create orchestrator with a store
+	// Create orchestrator with a vault
 	orch := orchestrator.New(orchestrator.Config{})
 
-	s := memtest.MustNewStore(t, chunkmem.Config{
+	s := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
 	})
 
@@ -38,7 +38,7 @@ func TestDrainWaitsForInFlightRequests(t *testing.T) {
 	}
 
 	defaultID := uuid.Must(uuid.NewV7())
-	orch.RegisterStore(orchestrator.NewStore(defaultID, s.CM, s.IM, s.QE))
+	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, s.IM, s.QE))
 
 	// Create server
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
@@ -111,10 +111,10 @@ func TestDrainWaitsForInFlightRequests(t *testing.T) {
 }
 
 func TestDrainRejectsNewRequests(t *testing.T) {
-	// Create orchestrator with a store
+	// Create orchestrator with a vault
 	orch := orchestrator.New(orchestrator.Config{})
 
-	s := memtest.MustNewStore(t, chunkmem.Config{
+	s := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
 	})
 
@@ -128,7 +128,7 @@ func TestDrainRejectsNewRequests(t *testing.T) {
 	}
 
 	defaultID := uuid.Must(uuid.NewV7())
-	orch.RegisterStore(orchestrator.NewStore(defaultID, s.CM, s.IM, s.QE))
+	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, s.IM, s.QE))
 
 	// Create server
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
@@ -193,15 +193,15 @@ func TestDrainRejectsNewRequests(t *testing.T) {
 }
 
 func TestShutdownWithoutDrain(t *testing.T) {
-	// Create orchestrator with a store
+	// Create orchestrator with a vault
 	orch := orchestrator.New(orchestrator.Config{})
 
-	s := memtest.MustNewStore(t, chunkmem.Config{
+	s := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
 	})
 
 	defaultID := uuid.Must(uuid.NewV7())
-	orch.RegisterStore(orchestrator.NewStore(defaultID, s.CM, s.IM, s.QE))
+	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, s.IM, s.QE))
 
 	// Create server
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})

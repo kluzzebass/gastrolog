@@ -46,21 +46,21 @@ func waitForJob(t *testing.T, jobClient gastrologv1connect.JobServiceClient, job
 	return nil
 }
 
-// newStoreTestSetup creates an orchestrator with a memory store containing test data,
-// and returns a StoreService client.
-type storeTestClients struct {
-	store     gastrologv1connect.StoreServiceClient
+// newVaultTestSetup creates an orchestrator with a memory vault containing test data,
+// and returns a VaultService client.
+type vaultTestClients struct {
+	vault     gastrologv1connect.VaultServiceClient
 	job       gastrologv1connect.JobServiceClient
 	defaultID uuid.UUID
 }
 
-func newStoreTestSetup(t *testing.T, recordCount int) storeTestClients {
+func newVaultTestSetup(t *testing.T, recordCount int) vaultTestClients {
 	t.Helper()
 
 	orch := orchestrator.New(orchestrator.Config{})
 	defaultID := uuid.Must(uuid.NewV7())
 
-	s := memtest.MustNewStore(t, chunkmem.Config{
+	s := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(5), // Seal every 5 records.
 	})
 
@@ -75,9 +75,9 @@ func newStoreTestSetup(t *testing.T, recordCount int) storeTestClients {
 
 	memtest.BuildIndexes(t, s.CM, s.IM)
 
-	orch.RegisterStore(orchestrator.NewStore(defaultID, s.CM, s.IM, s.QE))
+	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, s.IM, s.QE))
 
-	// Set filter so orchestrator knows about the store.
+	// Set filter so orchestrator knows about the vault.
 	filter, _ := orchestrator.CompileFilter(defaultID, "*")
 	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{filter}))
 
@@ -87,22 +87,22 @@ func newStoreTestSetup(t *testing.T, recordCount int) storeTestClients {
 	httpClient := &http.Client{
 		Transport: &embeddedTransport{handler: handler},
 	}
-	return storeTestClients{
-		store:     gastrologv1connect.NewStoreServiceClient(httpClient, "http://embedded"),
+	return vaultTestClients{
+		vault:     gastrologv1connect.NewVaultServiceClient(httpClient, "http://embedded"),
 		job:       gastrologv1connect.NewJobServiceClient(httpClient, "http://embedded"),
 		defaultID: defaultID,
 	}
 }
 
-func TestReindexStore(t *testing.T) {
-	clients := newStoreTestSetup(t, 12) // 12 records = 2 sealed (5 each) + 1 active (2)
+func TestReindexVault(t *testing.T) {
+	clients := newVaultTestSetup(t, 12) // 12 records = 2 sealed (5 each) + 1 active (2)
 	ctx := context.Background()
 
-	resp, err := clients.store.ReindexStore(ctx, connect.NewRequest(&gastrologv1.ReindexStoreRequest{
-		Store: clients.defaultID.String(),
+	resp, err := clients.vault.ReindexVault(ctx, connect.NewRequest(&gastrologv1.ReindexVaultRequest{
+		Vault: clients.defaultID.String(),
 	}))
 	if err != nil {
-		t.Fatalf("ReindexStore: %v", err)
+		t.Fatalf("ReindexVault: %v", err)
 	}
 
 	if resp.Msg.JobId == "" {
@@ -121,47 +121,47 @@ func TestReindexStore(t *testing.T) {
 	}
 }
 
-func TestReindexStoreNotFound(t *testing.T) {
-	clients := newStoreTestSetup(t, 0)
+func TestReindexVaultNotFound(t *testing.T) {
+	clients := newVaultTestSetup(t, 0)
 	ctx := context.Background()
 
-	_, err := clients.store.ReindexStore(ctx, connect.NewRequest(&gastrologv1.ReindexStoreRequest{
-		Store: uuid.Must(uuid.NewV7()).String(),
+	_, err := clients.vault.ReindexVault(ctx, connect.NewRequest(&gastrologv1.ReindexVaultRequest{
+		Vault: uuid.Must(uuid.NewV7()).String(),
 	}))
 	if err == nil {
-		t.Fatal("expected error for nonexistent store")
+		t.Fatal("expected error for nonexistent vault")
 	}
 	if connect.CodeOf(err) != connect.CodeNotFound {
 		t.Fatalf("expected NotFound, got %v", connect.CodeOf(err))
 	}
 }
 
-func TestReindexStoreEmpty(t *testing.T) {
-	clients := newStoreTestSetup(t, 0)
+func TestReindexVaultEmpty(t *testing.T) {
+	clients := newVaultTestSetup(t, 0)
 	ctx := context.Background()
 
-	resp, err := clients.store.ReindexStore(ctx, connect.NewRequest(&gastrologv1.ReindexStoreRequest{
-		Store: clients.defaultID.String(),
+	resp, err := clients.vault.ReindexVault(ctx, connect.NewRequest(&gastrologv1.ReindexVaultRequest{
+		Vault: clients.defaultID.String(),
 	}))
 	if err != nil {
-		t.Fatalf("ReindexStore: %v", err)
+		t.Fatalf("ReindexVault: %v", err)
 	}
 
 	job := waitForJob(t, clients.job, resp.Msg.JobId)
 	if job.ChunksDone != 0 {
-		t.Errorf("expected 0 chunks done for empty store, got %d", job.ChunksDone)
+		t.Errorf("expected 0 chunks done for empty vault, got %d", job.ChunksDone)
 	}
 }
 
-func TestValidateStore(t *testing.T) {
-	clients := newStoreTestSetup(t, 12)
+func TestValidateVault(t *testing.T) {
+	clients := newVaultTestSetup(t, 12)
 	ctx := context.Background()
 
-	resp, err := clients.store.ValidateStore(ctx, connect.NewRequest(&gastrologv1.ValidateStoreRequest{
-		Store: clients.defaultID.String(),
+	resp, err := clients.vault.ValidateVault(ctx, connect.NewRequest(&gastrologv1.ValidateVaultRequest{
+		Vault: clients.defaultID.String(),
 	}))
 	if err != nil {
-		t.Fatalf("ValidateStore: %v", err)
+		t.Fatalf("ValidateVault: %v", err)
 	}
 
 	if !resp.Msg.Valid {
@@ -178,15 +178,15 @@ func TestValidateStore(t *testing.T) {
 	}
 }
 
-func TestValidateStoreNotFound(t *testing.T) {
-	clients := newStoreTestSetup(t, 0)
+func TestValidateVaultNotFound(t *testing.T) {
+	clients := newVaultTestSetup(t, 0)
 	ctx := context.Background()
 
-	_, err := clients.store.ValidateStore(ctx, connect.NewRequest(&gastrologv1.ValidateStoreRequest{
-		Store: uuid.Must(uuid.NewV7()).String(),
+	_, err := clients.vault.ValidateVault(ctx, connect.NewRequest(&gastrologv1.ValidateVaultRequest{
+		Vault: uuid.Must(uuid.NewV7()).String(),
 	}))
 	if err == nil {
-		t.Fatal("expected error for nonexistent store")
+		t.Fatal("expected error for nonexistent vault")
 	}
 	if connect.CodeOf(err) != connect.CodeNotFound {
 		t.Fatalf("expected NotFound, got %v", connect.CodeOf(err))
@@ -194,16 +194,16 @@ func TestValidateStoreNotFound(t *testing.T) {
 }
 
 func TestGetStatsDetailed(t *testing.T) {
-	clients := newStoreTestSetup(t, 12)
+	clients := newVaultTestSetup(t, 12)
 	ctx := context.Background()
 
-	resp, err := clients.store.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{}))
+	resp, err := clients.vault.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{}))
 	if err != nil {
 		t.Fatalf("GetStats: %v", err)
 	}
 
-	if resp.Msg.TotalStores != 1 {
-		t.Errorf("expected 1 store, got %d", resp.Msg.TotalStores)
+	if resp.Msg.TotalVaults != 1 {
+		t.Errorf("expected 1 vault, got %d", resp.Msg.TotalVaults)
 	}
 	if resp.Msg.TotalChunks != 3 {
 		t.Errorf("expected 3 chunks, got %d", resp.Msg.TotalChunks)
@@ -215,68 +215,68 @@ func TestGetStatsDetailed(t *testing.T) {
 		t.Errorf("expected 12 records, got %d", resp.Msg.TotalRecords)
 	}
 
-	// Check per-store stats.
-	if len(resp.Msg.StoreStats) != 1 {
-		t.Fatalf("expected 1 store stat, got %d", len(resp.Msg.StoreStats))
+	// Check per-vault stats.
+	if len(resp.Msg.VaultStats) != 1 {
+		t.Fatalf("expected 1 vault stat, got %d", len(resp.Msg.VaultStats))
 	}
 
-	ss := resp.Msg.StoreStats[0]
-	if ss.Id != clients.defaultID.String() {
-		t.Errorf("expected store ID %q, got %q", clients.defaultID.String(), ss.Id)
+	vs := resp.Msg.VaultStats[0]
+	if vs.Id != clients.defaultID.String() {
+		t.Errorf("expected vault ID %q, got %q", clients.defaultID.String(), vs.Id)
 	}
-	if ss.ChunkCount != 3 {
-		t.Errorf("store stat: expected 3 chunks, got %d", ss.ChunkCount)
+	if vs.ChunkCount != 3 {
+		t.Errorf("vault stat: expected 3 chunks, got %d", vs.ChunkCount)
 	}
-	if ss.SealedChunks != 2 {
-		t.Errorf("store stat: expected 2 sealed, got %d", ss.SealedChunks)
+	if vs.SealedChunks != 2 {
+		t.Errorf("vault stat: expected 2 sealed, got %d", vs.SealedChunks)
 	}
-	if ss.ActiveChunks != 1 {
-		t.Errorf("store stat: expected 1 active, got %d", ss.ActiveChunks)
+	if vs.ActiveChunks != 1 {
+		t.Errorf("vault stat: expected 1 active, got %d", vs.ActiveChunks)
 	}
-	if ss.RecordCount != 12 {
-		t.Errorf("store stat: expected 12 records, got %d", ss.RecordCount)
+	if vs.RecordCount != 12 {
+		t.Errorf("vault stat: expected 12 records, got %d", vs.RecordCount)
 	}
-	if ss.DataBytes <= 0 {
-		t.Errorf("store stat: expected positive data bytes, got %d", ss.DataBytes)
+	if vs.DataBytes <= 0 {
+		t.Errorf("vault stat: expected positive data bytes, got %d", vs.DataBytes)
 	}
-	if ss.OldestRecord == nil {
-		t.Error("store stat: expected oldest record timestamp")
+	if vs.OldestRecord == nil {
+		t.Error("vault stat: expected oldest record timestamp")
 	}
-	if ss.NewestRecord == nil {
-		t.Error("store stat: expected newest record timestamp")
+	if vs.NewestRecord == nil {
+		t.Error("vault stat: expected newest record timestamp")
 	}
 }
 
-func TestGetStatsFilterByStore(t *testing.T) {
-	clients := newStoreTestSetup(t, 5)
+func TestGetStatsFilterByVault(t *testing.T) {
+	clients := newVaultTestSetup(t, 5)
 	ctx := context.Background()
 
-	// Filter to a specific store.
-	resp, err := clients.store.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
-		Store: clients.defaultID.String(),
+	// Filter to a specific vault.
+	resp, err := clients.vault.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
+		Vault: clients.defaultID.String(),
 	}))
 	if err != nil {
 		t.Fatalf("GetStats: %v", err)
 	}
 
-	if resp.Msg.TotalStores != 1 {
-		t.Errorf("expected 1 store, got %d", resp.Msg.TotalStores)
+	if resp.Msg.TotalVaults != 1 {
+		t.Errorf("expected 1 vault, got %d", resp.Msg.TotalVaults)
 	}
-	if len(resp.Msg.StoreStats) != 1 {
-		t.Errorf("expected 1 store stat, got %d", len(resp.Msg.StoreStats))
+	if len(resp.Msg.VaultStats) != 1 {
+		t.Errorf("expected 1 vault stat, got %d", len(resp.Msg.VaultStats))
 	}
 }
 
-// newFullStoreTestSetup creates a store test setup with cfgStore and factories,
+// newFullVaultTestSetup creates a vault test setup with cfgStore and factories,
 // needed for clone/migrate/export/import tests.
-type fullStoreTestClients struct {
-	store     gastrologv1connect.StoreServiceClient
+type fullVaultTestClients struct {
+	vault     gastrologv1connect.VaultServiceClient
 	job       gastrologv1connect.JobServiceClient
 	cfgStore  config.Store
 	defaultID uuid.UUID
 }
 
-func newFullStoreTestSetup(t *testing.T, recordCount int) fullStoreTestClients {
+func newFullVaultTestSetup(t *testing.T, recordCount int) fullVaultTestClients {
 	t.Helper()
 
 	cfgStore := cfgmem.NewStore()
@@ -292,15 +292,15 @@ func newFullStoreTestSetup(t *testing.T, recordCount int) fullStoreTestClients {
 		},
 	}
 
-	// Create default store via config + orchestrator.
-	storeCfg := config.StoreConfig{
+	// Create default vault via config + orchestrator.
+	vaultCfg := config.VaultConfig{
 		ID:   defaultID,
 		Type: "memory",
 	}
-	cfgStore.PutStore(context.Background(), storeCfg)
+	cfgStore.PutVault(context.Background(), vaultCfg)
 
-	if err := orch.AddStore(context.Background(), storeCfg, factories); err != nil {
-		t.Fatalf("AddStore: %v", err)
+	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
+		t.Fatalf("AddVault: %v", err)
 	}
 
 	// Ingest test data.
@@ -329,25 +329,25 @@ func newFullStoreTestSetup(t *testing.T, recordCount int) fullStoreTestClients {
 	httpClient := &http.Client{
 		Transport: &embeddedTransport{handler: handler},
 	}
-	return fullStoreTestClients{
-		store:     gastrologv1connect.NewStoreServiceClient(httpClient, "http://embedded"),
+	return fullVaultTestClients{
+		vault:     gastrologv1connect.NewVaultServiceClient(httpClient, "http://embedded"),
 		job:       gastrologv1connect.NewJobServiceClient(httpClient, "http://embedded"),
 		cfgStore:  cfgStore,
 		defaultID: defaultID,
 	}
 }
 
-func TestMigrateStore(t *testing.T) {
-	tc := newFullStoreTestSetup(t, 12)
+func TestMigrateVault(t *testing.T) {
+	tc := newFullVaultTestSetup(t, 12)
 	ctx := context.Background()
 
 	// No DestinationType — should default to same as source ("memory").
-	resp, err := tc.store.MigrateStore(ctx, connect.NewRequest(&gastrologv1.MigrateStoreRequest{
+	resp, err := tc.vault.MigrateVault(ctx, connect.NewRequest(&gastrologv1.MigrateVaultRequest{
 		Source:      tc.defaultID.String(),
 		Destination: "migrated",
 	}))
 	if err != nil {
-		t.Fatalf("MigrateStore: %v", err)
+		t.Fatalf("MigrateVault: %v", err)
 	}
 
 	if resp.Msg.JobId == "" {
@@ -356,9 +356,9 @@ func TestMigrateStore(t *testing.T) {
 
 	// Source should be disabled in config (sync phase persists this before returning).
 	// Note: the async job may have already deleted the source, so check config directly.
-	srcCfg, err := tc.cfgStore.GetStore(ctx, tc.defaultID)
+	srcCfg, err := tc.cfgStore.GetVault(ctx, tc.defaultID)
 	if err != nil {
-		t.Fatalf("cfgStore.GetStore(%s): %v", tc.defaultID, err)
+		t.Fatalf("cfgStore.GetVault(%s): %v", tc.defaultID, err)
 	}
 	if srcCfg != nil && srcCfg.Enabled {
 		t.Error("expected source config to have enabled=false")
@@ -370,46 +370,46 @@ func TestMigrateStore(t *testing.T) {
 	}
 
 	// Source should be gone after job completes.
-	_, err = tc.store.GetStore(ctx, connect.NewRequest(&gastrologv1.GetStoreRequest{
+	_, err = tc.vault.GetVault(ctx, connect.NewRequest(&gastrologv1.GetVaultRequest{
 		Id: tc.defaultID.String(),
 	}))
 	if err == nil {
-		t.Error("expected source store to be deleted after migration")
+		t.Error("expected source vault to be deleted after migration")
 	}
 
-	// Find destination store by name (ID is a UUID now).
-	listResp, err := tc.store.ListStores(ctx, connect.NewRequest(&gastrologv1.ListStoresRequest{}))
+	// Find destination vault by name (ID is a UUID now).
+	listResp, err := tc.vault.ListVaults(ctx, connect.NewRequest(&gastrologv1.ListVaultsRequest{}))
 	if err != nil {
-		t.Fatalf("ListStores: %v", err)
+		t.Fatalf("ListVaults: %v", err)
 	}
 	var dstID string
-	for _, s := range listResp.Msg.Stores {
+	for _, s := range listResp.Msg.Vaults {
 		if s.Name == "migrated" {
 			dstID = s.Id
 			break
 		}
 	}
 	if dstID == "" {
-		t.Fatal("destination store 'migrated' not found in ListStores")
+		t.Fatal("destination vault 'migrated' not found in ListVaults")
 	}
 
 	// Destination should have the records.
-	stats, err := tc.store.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
-		Store: dstID,
+	stats, err := tc.vault.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
+		Vault: dstID,
 	}))
 	if err != nil {
 		t.Fatalf("GetStats for migrated: %v", err)
 	}
 	if stats.Msg.TotalRecords != 12 {
-		t.Errorf("migrated store should have 12 records, got %d", stats.Msg.TotalRecords)
+		t.Errorf("migrated vault should have 12 records, got %d", stats.Msg.TotalRecords)
 	}
 }
 
-func TestMigrateStoreNotFound(t *testing.T) {
-	tc := newFullStoreTestSetup(t, 0)
+func TestMigrateVaultNotFound(t *testing.T) {
+	tc := newFullVaultTestSetup(t, 0)
 	ctx := context.Background()
 
-	_, err := tc.store.MigrateStore(ctx, connect.NewRequest(&gastrologv1.MigrateStoreRequest{
+	_, err := tc.vault.MigrateVault(ctx, connect.NewRequest(&gastrologv1.MigrateVaultRequest{
 		Source:      uuid.Must(uuid.NewV7()).String(),
 		Destination: "dest",
 	}))
@@ -421,15 +421,15 @@ func TestMigrateStoreNotFound(t *testing.T) {
 	}
 }
 
-func TestExportStore(t *testing.T) {
-	tc := newFullStoreTestSetup(t, 12)
+func TestExportVault(t *testing.T) {
+	tc := newFullVaultTestSetup(t, 12)
 	ctx := context.Background()
 
-	stream, err := tc.store.ExportStore(ctx, connect.NewRequest(&gastrologv1.ExportStoreRequest{
-		Store: tc.defaultID.String(),
+	stream, err := tc.vault.ExportVault(ctx, connect.NewRequest(&gastrologv1.ExportVaultRequest{
+		Vault: tc.defaultID.String(),
 	}))
 	if err != nil {
-		t.Fatalf("ExportStore: %v", err)
+		t.Fatalf("ExportVault: %v", err)
 	}
 
 	var totalRecords int
@@ -461,22 +461,22 @@ func TestExportStore(t *testing.T) {
 	}
 }
 
-func TestExportStoreNotFound(t *testing.T) {
-	tc := newFullStoreTestSetup(t, 0)
+func TestExportVaultNotFound(t *testing.T) {
+	tc := newFullVaultTestSetup(t, 0)
 	ctx := context.Background()
 
-	stream, err := tc.store.ExportStore(ctx, connect.NewRequest(&gastrologv1.ExportStoreRequest{
-		Store: uuid.Must(uuid.NewV7()).String(),
+	stream, err := tc.vault.ExportVault(ctx, connect.NewRequest(&gastrologv1.ExportVaultRequest{
+		Vault: uuid.Must(uuid.NewV7()).String(),
 	}))
 	if err != nil {
-		t.Fatalf("ExportStore call: %v", err)
+		t.Fatalf("ExportVault call: %v", err)
 	}
 	// Should get error on first receive.
 	if stream.Receive() {
-		t.Fatal("expected no messages for nonexistent store")
+		t.Fatal("expected no messages for nonexistent vault")
 	}
 	if stream.Err() == nil {
-		t.Fatal("expected error for nonexistent store")
+		t.Fatal("expected error for nonexistent vault")
 	}
 	if connect.CodeOf(stream.Err()) != connect.CodeNotFound {
 		t.Fatalf("expected NotFound, got %v", connect.CodeOf(stream.Err()))
@@ -484,7 +484,7 @@ func TestExportStoreNotFound(t *testing.T) {
 }
 
 func TestImportRecords(t *testing.T) {
-	tc := newFullStoreTestSetup(t, 0) // Empty store.
+	tc := newFullVaultTestSetup(t, 0) // Empty vault.
 	ctx := context.Background()
 
 	now := time.Now()
@@ -497,8 +497,8 @@ func TestImportRecords(t *testing.T) {
 		_ = now // timestamps optional
 	}
 
-	resp, err := tc.store.ImportRecords(ctx, connect.NewRequest(&gastrologv1.ImportRecordsRequest{
-		Store:   tc.defaultID.String(),
+	resp, err := tc.vault.ImportRecords(ctx, connect.NewRequest(&gastrologv1.ImportRecordsRequest{
+		Vault:   tc.defaultID.String(),
 		Records: records,
 	}))
 	if err != nil {
@@ -509,28 +509,28 @@ func TestImportRecords(t *testing.T) {
 		t.Errorf("expected 10 records imported, got %d", resp.Msg.RecordsImported)
 	}
 
-	// Verify records exist in the store.
-	stats, err := tc.store.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
-		Store: tc.defaultID.String(),
+	// Verify records exist in the vault.
+	stats, err := tc.vault.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
+		Vault: tc.defaultID.String(),
 	}))
 	if err != nil {
 		t.Fatalf("GetStats: %v", err)
 	}
 	if stats.Msg.TotalRecords != 10 {
-		t.Errorf("expected 10 records in store, got %d", stats.Msg.TotalRecords)
+		t.Errorf("expected 10 records in vault, got %d", stats.Msg.TotalRecords)
 	}
 }
 
-func TestImportRecordsStoreNotFound(t *testing.T) {
-	tc := newFullStoreTestSetup(t, 0)
+func TestImportRecordsVaultNotFound(t *testing.T) {
+	tc := newFullVaultTestSetup(t, 0)
 	ctx := context.Background()
 
-	_, err := tc.store.ImportRecords(ctx, connect.NewRequest(&gastrologv1.ImportRecordsRequest{
-		Store:   uuid.Must(uuid.NewV7()).String(),
+	_, err := tc.vault.ImportRecords(ctx, connect.NewRequest(&gastrologv1.ImportRecordsRequest{
+		Vault:   uuid.Must(uuid.NewV7()).String(),
 		Records: []*gastrologv1.ExportRecord{{Raw: []byte("test")}},
 	}))
 	if err == nil {
-		t.Fatal("expected error for nonexistent store")
+		t.Fatal("expected error for nonexistent vault")
 	}
 	if connect.CodeOf(err) != connect.CodeNotFound {
 		t.Fatalf("expected NotFound, got %v", connect.CodeOf(err))
@@ -538,15 +538,15 @@ func TestImportRecordsStoreNotFound(t *testing.T) {
 }
 
 func TestExportImportRoundTrip(t *testing.T) {
-	tc := newFullStoreTestSetup(t, 12)
+	tc := newFullVaultTestSetup(t, 12)
 	ctx := context.Background()
 
-	// Export from default store.
-	stream, err := tc.store.ExportStore(ctx, connect.NewRequest(&gastrologv1.ExportStoreRequest{
-		Store: tc.defaultID.String(),
+	// Export from default vault.
+	stream, err := tc.vault.ExportVault(ctx, connect.NewRequest(&gastrologv1.ExportVaultRequest{
+		Vault: tc.defaultID.String(),
 	}))
 	if err != nil {
-		t.Fatalf("ExportStore: %v", err)
+		t.Fatalf("ExportVault: %v", err)
 	}
 
 	var allRecords []*gastrologv1.ExportRecord
@@ -565,9 +565,9 @@ func TestExportImportRoundTrip(t *testing.T) {
 		t.Fatalf("expected 12 exported records, got %d", len(allRecords))
 	}
 
-	// Import the exported records back into the same store as additional records.
-	resp, err := tc.store.ImportRecords(ctx, connect.NewRequest(&gastrologv1.ImportRecordsRequest{
-		Store:   tc.defaultID.String(),
+	// Import the exported records back into the same vault as additional records.
+	resp, err := tc.vault.ImportRecords(ctx, connect.NewRequest(&gastrologv1.ImportRecordsRequest{
+		Vault:   tc.defaultID.String(),
 		Records: allRecords,
 	}))
 	if err != nil {
@@ -578,9 +578,9 @@ func TestExportImportRoundTrip(t *testing.T) {
 		t.Errorf("expected 12 records imported, got %d", resp.Msg.RecordsImported)
 	}
 
-	// Default store should now have 24 records (12 original + 12 imported).
-	stats, err := tc.store.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
-		Store: tc.defaultID.String(),
+	// Default vault should now have 24 records (12 original + 12 imported).
+	stats, err := tc.vault.GetStats(ctx, connect.NewRequest(&gastrologv1.GetStatsRequest{
+		Vault: tc.defaultID.String(),
 	}))
 	if err != nil {
 		t.Fatalf("GetStats: %v", err)
@@ -590,17 +590,17 @@ func TestExportImportRoundTrip(t *testing.T) {
 	}
 }
 
-// twoStoreTestClients holds clients and orchestrator for two-store merge tests.
-type twoStoreTestClients struct {
-	store gastrologv1connect.StoreServiceClient
+// twoVaultTestClients holds clients and orchestrator for two-vault merge tests.
+type twoVaultTestClients struct {
+	vault gastrologv1connect.VaultServiceClient
 	job   gastrologv1connect.JobServiceClient
 	orch  *orchestrator.Orchestrator
 	srcID uuid.UUID
 	dstID uuid.UUID
 }
 
-// newTwoStoreTestSetup creates an orchestrator with two memory stores for merge testing.
-func newTwoStoreTestSetup(t *testing.T) twoStoreTestClients {
+// newTwoVaultTestSetup creates an orchestrator with two memory vaults for merge testing.
+func newTwoVaultTestSetup(t *testing.T) twoVaultTestClients {
 	t.Helper()
 
 	cfgStore := cfgmem.NewStore()
@@ -625,7 +625,7 @@ func newTwoStoreTestSetup(t *testing.T) twoStoreTestClients {
 		Transport: &embeddedTransport{handler: handler},
 	}
 
-	// Use config client to create stores.
+	// Use config client to create vaults.
 	cfgClient := gastrologv1connect.NewConfigServiceClient(httpClient, "http://embedded")
 	ctx := context.Background()
 
@@ -637,15 +637,15 @@ func newTwoStoreTestSetup(t *testing.T) twoStoreTestClients {
 	}
 
 	for _, id := range []uuid.UUID{srcID, dstID} {
-		_, err := cfgClient.PutStore(ctx, connect.NewRequest(&gastrologv1.PutStoreRequest{
-			Config: &gastrologv1.StoreConfig{
+		_, err := cfgClient.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+			Config: &gastrologv1.VaultConfig{
 				Id:     id.String(),
 				Type:   "memory",
 				Filter: filterID.String(),
 			},
 		}))
 		if err != nil {
-			t.Fatalf("PutStore(%s): %v", id, err)
+			t.Fatalf("PutVault(%s): %v", id, err)
 		}
 	}
 
@@ -660,8 +660,8 @@ func newTwoStoreTestSetup(t *testing.T) twoStoreTestClients {
 		}
 	}
 
-	return twoStoreTestClients{
-		store: gastrologv1connect.NewStoreServiceClient(httpClient, "http://embedded"),
+	return twoVaultTestClients{
+		vault: gastrologv1connect.NewVaultServiceClient(httpClient, "http://embedded"),
 		job:   gastrologv1connect.NewJobServiceClient(httpClient, "http://embedded"),
 		orch:  orch,
 		srcID: srcID,
@@ -669,18 +669,18 @@ func newTwoStoreTestSetup(t *testing.T) twoStoreTestClients {
 	}
 }
 
-func TestMergeStoresMemory(t *testing.T) {
-	tc := newTwoStoreTestSetup(t)
+func TestMergeVaultsMemory(t *testing.T) {
+	tc := newTwoVaultTestSetup(t)
 	ctx := context.Background()
 
-	// Memory-backed stores fall back to record-by-record copy.
-	// Source is auto-disabled by MergeStores.
-	resp, err := tc.store.MergeStores(ctx, connect.NewRequest(&gastrologv1.MergeStoresRequest{
+	// Memory-backed vaults fall back to record-by-record copy.
+	// Source is auto-disabled by MergeVaults.
+	resp, err := tc.vault.MergeVaults(ctx, connect.NewRequest(&gastrologv1.MergeVaultsRequest{
 		Source:      tc.srcID.String(),
 		Destination: tc.dstID.String(),
 	}))
 	if err != nil {
-		t.Fatalf("MergeStores: %v", err)
+		t.Fatalf("MergeVaults: %v", err)
 	}
 	if resp.Msg.JobId == "" {
 		t.Fatal("expected non-empty job_id")
@@ -703,7 +703,7 @@ func TestMergeStoresMemory(t *testing.T) {
 	}
 }
 
-func TestMergeStoresFileBacked(t *testing.T) {
+func TestMergeVaultsFileBacked(t *testing.T) {
 	cfgStore := cfgmem.NewStore()
 	orch := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
 	homeDir := t.TempDir()
@@ -725,7 +725,7 @@ func TestMergeStoresFileBacked(t *testing.T) {
 	}
 
 	cfgClient := gastrologv1connect.NewConfigServiceClient(httpClient, "http://embedded")
-	storeClient := gastrologv1connect.NewStoreServiceClient(httpClient, "http://embedded")
+	vaultClient := gastrologv1connect.NewVaultServiceClient(httpClient, "http://embedded")
 	jobClient := gastrologv1connect.NewJobServiceClient(httpClient, "http://embedded")
 	ctx := context.Background()
 
@@ -741,17 +741,17 @@ func TestMergeStoresFileBacked(t *testing.T) {
 	}
 
 	for _, id := range []uuid.UUID{srcID, dstID} {
-		storeDir := filepath.Join(homeDir, "stores", id.String())
-		_, err := cfgClient.PutStore(ctx, connect.NewRequest(&gastrologv1.PutStoreRequest{
-			Config: &gastrologv1.StoreConfig{
+		vaultDir := filepath.Join(homeDir, "vaults", id.String())
+		_, err := cfgClient.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+			Config: &gastrologv1.VaultConfig{
 				Id:     id.String(),
 				Type:   "file",
 				Filter: filterID.String(),
-				Params: map[string]string{"dir": storeDir},
+				Params: map[string]string{"dir": vaultDir},
 			},
 		}))
 		if err != nil {
-			t.Fatalf("PutStore(%s): %v", id, err)
+			t.Fatalf("PutVault(%s): %v", id, err)
 		}
 	}
 
@@ -799,13 +799,13 @@ func TestMergeStoresFileBacked(t *testing.T) {
 		t.Fatalf("expected 10 records in src, got %d", len(originalWriteTSs))
 	}
 
-	// Source is auto-disabled by MergeStores.
-	resp, err := storeClient.MergeStores(ctx, connect.NewRequest(&gastrologv1.MergeStoresRequest{
+	// Source is auto-disabled by MergeVaults.
+	resp, err := vaultClient.MergeVaults(ctx, connect.NewRequest(&gastrologv1.MergeVaultsRequest{
 		Source:      srcID.String(),
 		Destination: dstID.String(),
 	}))
 	if err != nil {
-		t.Fatalf("MergeStores: %v", err)
+		t.Fatalf("MergeVaults: %v", err)
 	}
 	if resp.Msg.JobId == "" {
 		t.Fatal("expected non-empty job_id")
@@ -856,11 +856,11 @@ func TestMergeStoresFileBacked(t *testing.T) {
 	}
 }
 
-func TestMergeStoresNotFound(t *testing.T) {
-	clients := newStoreTestSetup(t, 5)
+func TestMergeVaultsNotFound(t *testing.T) {
+	clients := newVaultTestSetup(t, 5)
 	ctx := context.Background()
 
-	_, err := clients.store.MergeStores(ctx, connect.NewRequest(&gastrologv1.MergeStoresRequest{
+	_, err := clients.vault.MergeVaults(ctx, connect.NewRequest(&gastrologv1.MergeVaultsRequest{
 		Source:      uuid.Must(uuid.NewV7()).String(),
 		Destination: clients.defaultID.String(),
 	}))
@@ -872,11 +872,11 @@ func TestMergeStoresNotFound(t *testing.T) {
 	}
 }
 
-func TestMergeStoresSameStore(t *testing.T) {
-	clients := newStoreTestSetup(t, 5)
+func TestMergeVaultsSameVault(t *testing.T) {
+	clients := newVaultTestSetup(t, 5)
 	ctx := context.Background()
 
-	_, err := clients.store.MergeStores(ctx, connect.NewRequest(&gastrologv1.MergeStoresRequest{
+	_, err := clients.vault.MergeVaults(ctx, connect.NewRequest(&gastrologv1.MergeVaultsRequest{
 		Source:      clients.defaultID.String(),
 		Destination: clients.defaultID.String(),
 	}))
@@ -888,14 +888,14 @@ func TestMergeStoresSameStore(t *testing.T) {
 	}
 }
 
-func TestMigrateStoreFileRequiresDir(t *testing.T) {
-	tc := newFullStoreTestSetup(t, 5)
+func TestMigrateVaultFileRequiresDir(t *testing.T) {
+	tc := newFullVaultTestSetup(t, 5)
 	ctx := context.Background()
 
 	// Migrating to "file" type without providing dir should fail.
-	_, err := tc.store.MigrateStore(ctx, connect.NewRequest(&gastrologv1.MigrateStoreRequest{
+	_, err := tc.vault.MigrateVault(ctx, connect.NewRequest(&gastrologv1.MigrateVaultRequest{
 		Source:          tc.defaultID.String(),
-		Destination:     "file-store",
+		Destination:     "file-vault",
 		DestinationType: "file",
 	}))
 	if err == nil {
@@ -906,25 +906,25 @@ func TestMigrateStoreFileRequiresDir(t *testing.T) {
 	}
 }
 
-func TestMergeStoresAutoDisablesSource(t *testing.T) {
-	tc := newTwoStoreTestSetup(t)
+func TestMergeVaultsAutoDisablesSource(t *testing.T) {
+	tc := newTwoVaultTestSetup(t)
 	ctx := context.Background()
 
 	// Verify source is enabled before merge.
-	if !tc.orch.IsStoreEnabled(tc.srcID) {
+	if !tc.orch.IsVaultEnabled(tc.srcID) {
 		t.Fatal("expected source to be enabled before merge")
 	}
 
-	_, err := tc.store.MergeStores(ctx, connect.NewRequest(&gastrologv1.MergeStoresRequest{
+	_, err := tc.vault.MergeVaults(ctx, connect.NewRequest(&gastrologv1.MergeVaultsRequest{
 		Source:      tc.srcID.String(),
 		Destination: tc.dstID.String(),
 	}))
 	if err != nil {
-		t.Fatalf("MergeStores: %v", err)
+		t.Fatalf("MergeVaults: %v", err)
 	}
 
-	// Source should be auto-disabled after MergeStores returns.
-	if tc.orch.IsStoreEnabled(tc.srcID) {
-		t.Error("expected source to be auto-disabled by MergeStores")
+	// Source should be auto-disabled after MergeVaults returns.
+	if tc.orch.IsVaultEnabled(tc.srcID) {
+		t.Error("expected source to be auto-disabled by MergeVaults")
 	}
 }

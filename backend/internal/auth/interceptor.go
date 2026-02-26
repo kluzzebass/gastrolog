@@ -96,14 +96,14 @@ func NewAuthInterceptor(tokens *TokenService, counter UserCounter, validator Tok
 			gastrologv1connect.AuthServiceDeleteUserProcedure:     true,
 			// Lifecycle
 			gastrologv1connect.LifecycleServiceShutdownProcedure: true,
-			// StoreService
-			gastrologv1connect.StoreServiceListStoresProcedure:   true,
-			gastrologv1connect.StoreServiceGetStoreProcedure:     true,
-			gastrologv1connect.StoreServiceListChunksProcedure:   true,
-			gastrologv1connect.StoreServiceGetChunkProcedure:     true,
-			gastrologv1connect.StoreServiceGetIndexesProcedure:   true,
-			gastrologv1connect.StoreServiceAnalyzeChunkProcedure: true,
-			gastrologv1connect.StoreServiceGetStatsProcedure:     true,
+			// VaultService
+			gastrologv1connect.VaultServiceListVaultsProcedure:   true,
+			gastrologv1connect.VaultServiceGetVaultProcedure:     true,
+			gastrologv1connect.VaultServiceListChunksProcedure:   true,
+			gastrologv1connect.VaultServiceGetChunkProcedure:     true,
+			gastrologv1connect.VaultServiceGetIndexesProcedure:   true,
+			gastrologv1connect.VaultServiceAnalyzeChunkProcedure: true,
+			gastrologv1connect.VaultServiceGetStatsProcedure:     true,
 			// ConfigService
 			gastrologv1connect.ConfigServiceGetConfigProcedure:             true,
 			gastrologv1connect.ConfigServiceListIngestersProcedure:         true,
@@ -114,8 +114,8 @@ func NewAuthInterceptor(tokens *TokenService, counter UserCounter, validator Tok
 			gastrologv1connect.ConfigServiceDeleteRotationPolicyProcedure:  true,
 			gastrologv1connect.ConfigServicePutRetentionPolicyProcedure:    true,
 			gastrologv1connect.ConfigServiceDeleteRetentionPolicyProcedure: true,
-			gastrologv1connect.ConfigServicePutStoreProcedure:              true,
-			gastrologv1connect.ConfigServiceDeleteStoreProcedure:           true,
+			gastrologv1connect.ConfigServicePutVaultProcedure:              true,
+			gastrologv1connect.ConfigServiceDeleteVaultProcedure:           true,
 			gastrologv1connect.ConfigServicePutIngesterProcedure:           true,
 			gastrologv1connect.ConfigServiceDeleteIngesterProcedure:        true,
 			gastrologv1connect.ConfigServicePutServerConfigProcedure:       true,

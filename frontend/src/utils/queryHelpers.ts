@@ -9,9 +9,9 @@ export const stripTimeRange = (q: string): string =>
     .replace(/[^\S\n]+/g, " ")
     .trim();
 
-export const stripStore = (q: string): string =>
+export const stripVault = (q: string): string =>
   q
-    .replace(/\bstore=\S+/g, "")
+    .replace(/\bvault=\S+/g, "")
     .replace(/[^\S\n]+/g, " ")
     .trim();
 
@@ -42,7 +42,7 @@ export const stripAllDirectives = (q: string): string =>
     .replace(/\bstart=\S+/g, "")
     .replace(/\bend=\S+/g, "")
     .replace(/\breverse=\S+/g, "")
-    .replace(/\bstore=\S+/g, "")
+    .replace(/\bvault=\S+/g, "")
     .replace(/\blimit=\S+/g, "")
     .replace(/\bchunk=\S+/g, "")
     .replace(/\bpos=\S+/g, "")
@@ -66,17 +66,17 @@ export const injectTimeRange = (
   return base ? `${timeTokens} ${base}` : timeTokens;
 };
 
-export const injectStore = (q: string, storeId: string): string => {
-  const base = stripStore(q);
-  if (storeId === "all") return base;
-  const token = `store=${storeId}`;
+export const injectVault = (q: string, vaultId: string): string => {
+  const base = stripVault(q);
+  if (vaultId === "all") return base;
+  const token = `vault=${vaultId}`;
   return base ? `${token} ${base}` : token;
 };
 
-/** Extract the directive tokens (last=, start=, end=, reverse=, store=, limit=, chunk=, pos=) from a query. */
+/** Extract the directive tokens (last=, start=, end=, reverse=, vault=, limit=, chunk=, pos=) from a query. */
 export const extractDirectives = (q: string): string => {
   const directives: string[] = [];
-  const re = /\b(last|start|end|reverse|store|limit|chunk|pos)=\S+/g;
+  const re = /\b(last|start|end|reverse|vault|limit|chunk|pos)=\S+/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(q)) !== null) {
     directives.push(m[0]);

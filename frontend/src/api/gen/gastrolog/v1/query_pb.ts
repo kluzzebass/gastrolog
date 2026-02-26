@@ -446,7 +446,7 @@ export class Query extends Message<Query> {
    * Supports the full query language: bare words (tokens), key=value,
    * AND/OR/NOT, parentheses, start=/end=/limit= control args.
    * Examples: "error timeout", "(error OR warn) AND NOT debug",
-   *           "start=2024-01-01T00:00:00Z level=error store=prod"
+   *           "start=2024-01-01T00:00:00Z level=error vault=prod"
    *
    * @generated from field: string expression = 8;
    */
@@ -616,11 +616,11 @@ export class RecordRef extends Message<RecordRef> {
   pos = protoInt64.zero;
 
   /**
-   * Store this record belongs to
+   * Vault this record belongs to
    *
-   * @generated from field: string store_id = 3;
+   * @generated from field: string vault_id = 3;
    */
-  storeId = "";
+  vaultId = "";
 
   constructor(data?: PartialMessage<RecordRef>) {
     super();
@@ -632,7 +632,7 @@ export class RecordRef extends Message<RecordRef> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "pos", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 3, name: "store_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RecordRef {
@@ -653,16 +653,16 @@ export class RecordRef extends Message<RecordRef> {
 }
 
 /**
- * ResumeToken encodes pagination state for multi-store queries.
- * The positions array tracks the last returned position for each store/chunk.
+ * ResumeToken encodes pagination state for multi-vault queries.
+ * The positions array tracks the last returned position for each vault/chunk.
  *
  * @generated from message gastrolog.v1.ResumeToken
  */
 export class ResumeToken extends Message<ResumeToken> {
   /**
-   * @generated from field: repeated gastrolog.v1.StorePosition positions = 1;
+   * @generated from field: repeated gastrolog.v1.VaultPosition positions = 1;
    */
-  positions: StorePosition[] = [];
+  positions: VaultPosition[] = [];
 
   constructor(data?: PartialMessage<ResumeToken>) {
     super();
@@ -672,7 +672,7 @@ export class ResumeToken extends Message<ResumeToken> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ResumeToken";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "positions", kind: "message", T: StorePosition, repeated: true },
+    { no: 1, name: "positions", kind: "message", T: VaultPosition, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ResumeToken {
@@ -693,13 +693,13 @@ export class ResumeToken extends Message<ResumeToken> {
 }
 
 /**
- * @generated from message gastrolog.v1.StorePosition
+ * @generated from message gastrolog.v1.VaultPosition
  */
-export class StorePosition extends Message<StorePosition> {
+export class VaultPosition extends Message<VaultPosition> {
   /**
-   * @generated from field: string store_id = 1;
+   * @generated from field: string vault_id = 1;
    */
-  storeId = "";
+  vaultId = "";
 
   /**
    * @generated from field: string chunk_id = 2;
@@ -713,33 +713,33 @@ export class StorePosition extends Message<StorePosition> {
    */
   position = protoInt64.zero;
 
-  constructor(data?: PartialMessage<StorePosition>) {
+  constructor(data?: PartialMessage<VaultPosition>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.StorePosition";
+  static readonly typeName = "gastrolog.v1.VaultPosition";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "store_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "position", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): StorePosition {
-    return new StorePosition().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultPosition {
+    return new VaultPosition().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): StorePosition {
-    return new StorePosition().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): VaultPosition {
+    return new VaultPosition().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): StorePosition {
-    return new StorePosition().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): VaultPosition {
+    return new VaultPosition().fromJsonString(jsonString, options);
   }
 
-  static equals(a: StorePosition | PlainMessage<StorePosition> | undefined, b: StorePosition | PlainMessage<StorePosition> | undefined): boolean {
-    return proto3.util.equals(StorePosition, a, b);
+  static equals(a: VaultPosition | PlainMessage<VaultPosition> | undefined, b: VaultPosition | PlainMessage<VaultPosition> | undefined): boolean {
+    return proto3.util.equals(VaultPosition, a, b);
   }
 }
 
@@ -785,9 +785,9 @@ export class ChunkPlan extends Message<ChunkPlan> {
   runtimeFilters: string[] = [];
 
   /**
-   * @generated from field: string store_id = 8;
+   * @generated from field: string vault_id = 8;
    */
-  storeId = "";
+  vaultId = "";
 
   /**
    * @generated from field: google.protobuf.Timestamp start_ts = 9;
@@ -824,7 +824,7 @@ export class ChunkPlan extends Message<ChunkPlan> {
     { no: 5, name: "scan_mode", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 6, name: "estimated_records", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 7, name: "runtime_filters", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
-    { no: 8, name: "store_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 8, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 9, name: "start_ts", kind: "message", T: Timestamp },
     { no: 10, name: "end_ts", kind: "message", T: Timestamp },
     { no: 11, name: "skip_reason", kind: "scalar", T: 9 /* ScalarType.STRING */ },
@@ -1048,7 +1048,7 @@ export class GetContextRequest extends Message<GetContextRequest> {
  */
 export class GetContextResponse extends Message<GetContextResponse> {
   /**
-   * Records before anchor, oldest first, all stores
+   * Records before anchor, oldest first, all vaults
    *
    * @generated from field: repeated gastrolog.v1.Record before = 1;
    */
@@ -1062,7 +1062,7 @@ export class GetContextResponse extends Message<GetContextResponse> {
   anchor?: Record;
 
   /**
-   * Records after anchor, oldest first, all stores
+   * Records after anchor, oldest first, all vaults
    *
    * @generated from field: repeated gastrolog.v1.Record after = 3;
    */

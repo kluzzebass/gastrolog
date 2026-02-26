@@ -102,7 +102,7 @@ function IngesterDetail({ id, dark }: Readonly<{ id: string; dark: boolean }>) {
     { label: "Bytes ingested", value: formatBytes(Number(data.bytesIngested)) },
     {
       label: "Dropped",
-      hint: "No store filter matched, or storage I/O failed",
+      hint: "No vault filter matched, or storage I/O failed",
       value: Number(data.errors).toLocaleString(),
       isError: Number(data.errors) > 0,
     },

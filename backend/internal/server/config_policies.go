@@ -46,7 +46,7 @@ func (s *ConfigServer) PutRotationPolicy(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	// Hot-reload rotation policies for running stores.
+	// Hot-reload rotation policies for running vaults.
 	if err := s.orch.ReloadRotationPolicies(ctx); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload rotation policies: %w", err))
 	}
@@ -68,15 +68,15 @@ func (s *ConfigServer) DeleteRotationPolicy(
 		return nil, connErr
 	}
 
-	// Clear policy reference on any stores that use it.
-	stores, err := s.cfgStore.ListStores(ctx)
+	// Clear policy reference on any vaults that use it.
+	stores, err := s.cfgStore.ListVaults(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	for _, st := range stores {
 		if st.Policy != nil && *st.Policy == id {
 			st.Policy = nil
-			if err := s.cfgStore.PutStore(ctx, st); err != nil {
+			if err := s.cfgStore.PutVault(ctx, st); err != nil {
 				return nil, connect.NewError(connect.CodeInternal, err)
 			}
 		}
@@ -119,7 +119,7 @@ func (s *ConfigServer) PutRetentionPolicy(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	// Hot-reload retention policies for running stores.
+	// Hot-reload retention policies for running vaults.
 	if err := s.orch.ReloadRetentionPolicies(ctx); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload retention policies: %w", err))
 	}
@@ -142,7 +142,7 @@ func (s *ConfigServer) DeleteRetentionPolicy(
 	}
 
 	// Clear retention rules that reference this policy.
-	stores, err := s.cfgStore.ListStores(ctx)
+	stores, err := s.cfgStore.ListVaults(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -158,7 +158,7 @@ func (s *ConfigServer) DeleteRetentionPolicy(
 		}
 		if changed {
 			st.RetentionRules = kept
-			if err := s.cfgStore.PutStore(ctx, st); err != nil {
+			if err := s.cfgStore.PutVault(ctx, st); err != nil {
 				return nil, connect.NewError(connect.CodeInternal, err)
 			}
 		}

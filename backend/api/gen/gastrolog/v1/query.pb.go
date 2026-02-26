@@ -488,7 +488,7 @@ type Query struct {
 	// AND/OR/NOT, parentheses, start=/end=/limit= control args.
 	// Examples: "error timeout", "(error OR warn) AND NOT debug",
 	//
-	//	"start=2024-01-01T00:00:00Z level=error store=prod"
+	//	"start=2024-01-01T00:00:00Z level=error vault=prod"
 	Expression    string `protobuf:"bytes,8,opt,name=expression,proto3" json:"expression,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -720,7 +720,7 @@ type RecordRef struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ChunkId       string                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
 	Pos           uint64                 `protobuf:"varint,2,opt,name=pos,proto3" json:"pos,omitempty"`
-	StoreId       string                 `protobuf:"bytes,3,opt,name=store_id,json=storeId,proto3" json:"store_id,omitempty"` // Store this record belongs to
+	VaultId       string                 `protobuf:"bytes,3,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"` // Vault this record belongs to
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -769,18 +769,18 @@ func (x *RecordRef) GetPos() uint64 {
 	return 0
 }
 
-func (x *RecordRef) GetStoreId() string {
+func (x *RecordRef) GetVaultId() string {
 	if x != nil {
-		return x.StoreId
+		return x.VaultId
 	}
 	return ""
 }
 
-// ResumeToken encodes pagination state for multi-store queries.
-// The positions array tracks the last returned position for each store/chunk.
+// ResumeToken encodes pagination state for multi-vault queries.
+// The positions array tracks the last returned position for each vault/chunk.
 type ResumeToken struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Positions     []*StorePosition       `protobuf:"bytes,1,rep,name=positions,proto3" json:"positions,omitempty"`
+	Positions     []*VaultPosition       `protobuf:"bytes,1,rep,name=positions,proto3" json:"positions,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -815,36 +815,36 @@ func (*ResumeToken) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{12}
 }
 
-func (x *ResumeToken) GetPositions() []*StorePosition {
+func (x *ResumeToken) GetPositions() []*VaultPosition {
 	if x != nil {
 		return x.Positions
 	}
 	return nil
 }
 
-type StorePosition struct {
+type VaultPosition struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	StoreId       string                 `protobuf:"bytes,1,opt,name=store_id,json=storeId,proto3" json:"store_id,omitempty"`
+	VaultId       string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
 	ChunkId       string                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
 	Position      uint64                 `protobuf:"varint,3,opt,name=position,proto3" json:"position,omitempty"` // MaxUint64 indicates chunk is exhausted
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *StorePosition) Reset() {
-	*x = StorePosition{}
+func (x *VaultPosition) Reset() {
+	*x = VaultPosition{}
 	mi := &file_gastrolog_v1_query_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *StorePosition) String() string {
+func (x *VaultPosition) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*StorePosition) ProtoMessage() {}
+func (*VaultPosition) ProtoMessage() {}
 
-func (x *StorePosition) ProtoReflect() protoreflect.Message {
+func (x *VaultPosition) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_query_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -856,26 +856,26 @@ func (x *StorePosition) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use StorePosition.ProtoReflect.Descriptor instead.
-func (*StorePosition) Descriptor() ([]byte, []int) {
+// Deprecated: Use VaultPosition.ProtoReflect.Descriptor instead.
+func (*VaultPosition) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{13}
 }
 
-func (x *StorePosition) GetStoreId() string {
+func (x *VaultPosition) GetVaultId() string {
 	if x != nil {
-		return x.StoreId
+		return x.VaultId
 	}
 	return ""
 }
 
-func (x *StorePosition) GetChunkId() string {
+func (x *VaultPosition) GetChunkId() string {
 	if x != nil {
 		return x.ChunkId
 	}
 	return ""
 }
 
-func (x *StorePosition) GetPosition() uint64 {
+func (x *VaultPosition) GetPosition() uint64 {
 	if x != nil {
 		return x.Position
 	}
@@ -891,7 +891,7 @@ type ChunkPlan struct {
 	ScanMode         string                 `protobuf:"bytes,5,opt,name=scan_mode,json=scanMode,proto3" json:"scan_mode,omitempty"` // "sequential", "index-driven", or "skipped"
 	EstimatedRecords int64                  `protobuf:"varint,6,opt,name=estimated_records,json=estimatedRecords,proto3" json:"estimated_records,omitempty"`
 	RuntimeFilters   []string               `protobuf:"bytes,7,rep,name=runtime_filters,json=runtimeFilters,proto3" json:"runtime_filters,omitempty"`
-	StoreId          string                 `protobuf:"bytes,8,opt,name=store_id,json=storeId,proto3" json:"store_id,omitempty"`
+	VaultId          string                 `protobuf:"bytes,8,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
 	StartTs          *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=start_ts,json=startTs,proto3" json:"start_ts,omitempty"`
 	EndTs            *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=end_ts,json=endTs,proto3" json:"end_ts,omitempty"`
 	SkipReason       string                 `protobuf:"bytes,11,opt,name=skip_reason,json=skipReason,proto3" json:"skip_reason,omitempty"`
@@ -979,9 +979,9 @@ func (x *ChunkPlan) GetRuntimeFilters() []string {
 	return nil
 }
 
-func (x *ChunkPlan) GetStoreId() string {
+func (x *ChunkPlan) GetVaultId() string {
 	if x != nil {
-		return x.StoreId
+		return x.VaultId
 	}
 	return ""
 }
@@ -1244,9 +1244,9 @@ func (x *GetContextRequest) GetAfter() int32 {
 
 type GetContextResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Before        []*Record              `protobuf:"bytes,1,rep,name=before,proto3" json:"before,omitempty"` // Records before anchor, oldest first, all stores
+	Before        []*Record              `protobuf:"bytes,1,rep,name=before,proto3" json:"before,omitempty"` // Records before anchor, oldest first, all vaults
 	Anchor        *Record                `protobuf:"bytes,2,opt,name=anchor,proto3" json:"anchor,omitempty"` // The anchor record itself
-	After         []*Record              `protobuf:"bytes,3,rep,name=after,proto3" json:"after,omitempty"`   // Records after anchor, oldest first, all stores
+	After         []*Record              `protobuf:"bytes,3,rep,name=after,proto3" json:"after,omitempty"`   // Records after anchor, oldest first, all vaults
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1763,11 +1763,11 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\tRecordRef\x12\x19\n" +
 	"\bchunk_id\x18\x01 \x01(\tR\achunkId\x12\x10\n" +
 	"\x03pos\x18\x02 \x01(\x04R\x03pos\x12\x19\n" +
-	"\bstore_id\x18\x03 \x01(\tR\astoreId\"H\n" +
+	"\bvault_id\x18\x03 \x01(\tR\avaultId\"H\n" +
 	"\vResumeToken\x129\n" +
-	"\tpositions\x18\x01 \x03(\v2\x1b.gastrolog.v1.StorePositionR\tpositions\"a\n" +
-	"\rStorePosition\x12\x19\n" +
-	"\bstore_id\x18\x01 \x01(\tR\astoreId\x12\x19\n" +
+	"\tpositions\x18\x01 \x03(\v2\x1b.gastrolog.v1.VaultPositionR\tpositions\"a\n" +
+	"\rVaultPosition\x12\x19\n" +
+	"\bvault_id\x18\x01 \x01(\tR\avaultId\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\tR\achunkId\x12\x1a\n" +
 	"\bposition\x18\x03 \x01(\x04R\bposition\"\xe9\x03\n" +
 	"\tChunkPlan\x12\x19\n" +
@@ -1778,7 +1778,7 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\tscan_mode\x18\x05 \x01(\tR\bscanMode\x12+\n" +
 	"\x11estimated_records\x18\x06 \x01(\x03R\x10estimatedRecords\x12'\n" +
 	"\x0fruntime_filters\x18\a \x03(\tR\x0eruntimeFilters\x12\x19\n" +
-	"\bstore_id\x18\b \x01(\tR\astoreId\x125\n" +
+	"\bvault_id\x18\b \x01(\tR\avaultId\x125\n" +
 	"\bstart_ts\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\astartTs\x121\n" +
 	"\x06end_ts\x18\n" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\x05endTs\x12\x1f\n" +
@@ -1882,7 +1882,7 @@ var file_gastrolog_v1_query_proto_goTypes = []any{
 	(*Record)(nil),                    // 10: gastrolog.v1.Record
 	(*RecordRef)(nil),                 // 11: gastrolog.v1.RecordRef
 	(*ResumeToken)(nil),               // 12: gastrolog.v1.ResumeToken
-	(*StorePosition)(nil),             // 13: gastrolog.v1.StorePosition
+	(*VaultPosition)(nil),             // 13: gastrolog.v1.VaultPosition
 	(*ChunkPlan)(nil),                 // 14: gastrolog.v1.ChunkPlan
 	(*BranchPlan)(nil),                // 15: gastrolog.v1.BranchPlan
 	(*PipelineStep)(nil),              // 16: gastrolog.v1.PipelineStep
@@ -1917,7 +1917,7 @@ var file_gastrolog_v1_query_proto_depIdxs = []int32{
 	26, // 15: gastrolog.v1.Record.attrs:type_name -> gastrolog.v1.Record.AttrsEntry
 	11, // 16: gastrolog.v1.Record.ref:type_name -> gastrolog.v1.RecordRef
 	27, // 17: gastrolog.v1.Record.source_ts:type_name -> google.protobuf.Timestamp
-	13, // 18: gastrolog.v1.ResumeToken.positions:type_name -> gastrolog.v1.StorePosition
+	13, // 18: gastrolog.v1.ResumeToken.positions:type_name -> gastrolog.v1.VaultPosition
 	16, // 19: gastrolog.v1.ChunkPlan.steps:type_name -> gastrolog.v1.PipelineStep
 	27, // 20: gastrolog.v1.ChunkPlan.start_ts:type_name -> google.protobuf.Timestamp
 	27, // 21: gastrolog.v1.ChunkPlan.end_ts:type_name -> google.protobuf.Timestamp

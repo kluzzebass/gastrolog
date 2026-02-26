@@ -51,7 +51,7 @@ export function IngesterStep({ dark, data, onChange }: Readonly<IngesterStepProp
         <p
           className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
         >
-          An ingester receives log data and feeds it into your store. You can add more ingesters later in Settings.
+          An ingester receives log data and feeds it into your vault. You can add more ingesters later in Settings.
         </p>
       </div>
 

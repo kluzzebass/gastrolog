@@ -66,7 +66,7 @@ func TestSchema(t *testing.T) {
 		tables[name] = true
 	}
 
-	for _, want := range []string{"rotation_policies", "stores", "ingesters", "filters", "retention_policies", "settings", "tls_certificates", "users", "schema_migrations"} {
+	for _, want := range []string{"rotation_policies", "vaults", "ingesters", "filters", "retention_policies", "settings", "tls_certificates", "users", "schema_migrations", "vault_retention_rules"} {
 		if !tables[want] {
 			t.Errorf("expected table %q, got tables: %v", want, tables)
 		}

@@ -61,7 +61,7 @@ var (
 //   - Ingesters emit IngestMessages; orchestrator resolves identity and filters.
 //
 // Filtering:
-//   - Each store has a filter expression that determines which messages it receives.
+//   - Each vault has a filter expression that determines which messages it receives.
 //   - Filters are compiled at registration time and evaluated against message attrs.
 //   - Special filters: "*" (catch-all), "+" (catch-the-rest), "" (receives nothing).
 //
@@ -73,8 +73,8 @@ var (
 type Orchestrator struct {
 	mu sync.RWMutex
 
-	// Store registry. Each store bundles Chunks, Indexes, and Query.
-	stores map[uuid.UUID]*Store
+	// Vault registry. Each vault bundles Chunks, Indexes, and Query.
+	vaults map[uuid.UUID]*Vault
 
 	// Ingester management.
 	ingesters       map[uuid.UUID]Ingester
@@ -84,7 +84,7 @@ type Orchestrator struct {
 	// Digesters (message enrichment pipeline).
 	digesters []Digester
 
-	// Store filters.
+	// Vault filters.
 	filterSet *FilterSet
 
 
@@ -97,7 +97,7 @@ type Orchestrator struct {
 	ingesterWg   sync.WaitGroup // tracks ingester goroutines
 	ingestLoopWg sync.WaitGroup // tracks ingest loop goroutine
 
-	// Retention runners (keyed by store ID, invoked by the shared scheduler).
+	// Retention runners (keyed by vault ID, invoked by the shared scheduler).
 	retention map[uuid.UUID]*retentionRunner
 
 	// Shared scheduler for all periodic tasks (cron rotation, retention, etc.).
@@ -146,7 +146,7 @@ type Config struct {
 
 	// ConfigLoader provides read access to the full configuration.
 	// If set, the orchestrator can reload config internally during
-	// hot-update operations (ReloadFilters, AddStore, etc.).
+	// hot-update operations (ReloadFilters, AddVault, etc.).
 	// If nil, hot-update methods that require config will return an error.
 	ConfigLoader ConfigLoader
 }
@@ -170,7 +170,7 @@ func New(cfg Config) *Orchestrator {
 	}
 
 	o := &Orchestrator{
-		stores:          make(map[uuid.UUID]*Store),
+		vaults:          make(map[uuid.UUID]*Vault),
 		ingesters:       make(map[uuid.UUID]Ingester),
 		ingesterCancels: make(map[uuid.UUID]context.CancelFunc),
 		ingesterStats:   make(map[uuid.UUID]*IngesterStats),
@@ -228,8 +228,8 @@ func (o *Orchestrator) IngestQueueNearFull() bool {
 	return len(o.ingestCh) >= c*9/10
 }
 
-// StoreSnapshot is a point-in-time summary of a store's state.
-type StoreSnapshot struct {
+// VaultSnapshot is a point-in-time summary of a vault's state.
+type VaultSnapshot struct {
 	ID           uuid.UUID
 	RecordCount  int64
 	ChunkCount   int
@@ -238,19 +238,19 @@ type StoreSnapshot struct {
 	Enabled      bool
 }
 
-// StoreSnapshots returns a snapshot of stats for all registered stores.
-func (o *Orchestrator) StoreSnapshots() []StoreSnapshot {
-	storeIDs := o.ListStores()
-	snapshots := make([]StoreSnapshot, 0, len(storeIDs))
-	for _, id := range storeIDs {
+// VaultSnapshots returns a snapshot of stats for all registered vaults.
+func (o *Orchestrator) VaultSnapshots() []VaultSnapshot {
+	vaultIDs := o.ListVaults()
+	snapshots := make([]VaultSnapshot, 0, len(vaultIDs))
+	for _, id := range vaultIDs {
 		metas, err := o.ListChunkMetas(id)
 		if err != nil {
 			continue
 		}
-		snap := StoreSnapshot{
+		snap := VaultSnapshot{
 			ID:         id,
 			ChunkCount: len(metas),
-			Enabled:    o.IsStoreEnabled(id),
+			Enabled:    o.IsVaultEnabled(id),
 		}
 		for _, m := range metas {
 			if m.Sealed {

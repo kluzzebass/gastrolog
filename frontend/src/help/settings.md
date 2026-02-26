@@ -11,6 +11,6 @@ The Settings dialog configures your GastroLog instance. Open it from the header 
 | Filters | [Filtering](help:routing) |
 | Rotation Policies | [Rotation Policies](help:policy-rotation) |
 | Retention Policies | [Retention Policies](help:policy-retention) |
-| Stores | [Storage](help:storage) |
+| Vaults | [Storage](help:storage) |
 
 Each topic is documented in the relevant section of the help system — follow the links above or browse the sidebar.

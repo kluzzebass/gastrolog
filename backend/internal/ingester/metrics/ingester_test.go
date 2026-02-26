@@ -14,12 +14,12 @@ import (
 type fakeStats struct {
 	depth     int
 	capacity  int
-	snapshots []orchestrator.StoreSnapshot
+	snapshots []orchestrator.VaultSnapshot
 }
 
 func (f *fakeStats) IngestQueueDepth() int    { return f.depth }
 func (f *fakeStats) IngestQueueCapacity() int { return f.capacity }
-func (f *fakeStats) StoreSnapshots() []orchestrator.StoreSnapshot {
+func (f *fakeStats) VaultSnapshots() []orchestrator.VaultSnapshot {
 	return f.snapshots
 }
 
@@ -36,8 +36,8 @@ func TestNewFactory(t *testing.T) {
 		if m.interval != 30*time.Second {
 			t.Errorf("got interval %v, want 30s", m.interval)
 		}
-		if m.storeInterval != 10*time.Second {
-			t.Errorf("got storeInterval %v, want 10s", m.storeInterval)
+		if m.vaultInterval != 10*time.Second {
+			t.Errorf("got vaultInterval %v, want 10s", m.vaultInterval)
 		}
 	})
 
@@ -52,14 +52,14 @@ func TestNewFactory(t *testing.T) {
 		}
 	})
 
-	t.Run("custom store_interval", func(t *testing.T) {
-		ing, err := factory(uuid.New(), map[string]string{"store_interval": "5s"}, nil)
+	t.Run("custom vault_interval", func(t *testing.T) {
+		ing, err := factory(uuid.New(), map[string]string{"vault_interval": "5s"}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		m := ing.(*ingester)
-		if m.storeInterval != 5*time.Second {
-			t.Errorf("got storeInterval %v, want 5s", m.storeInterval)
+		if m.vaultInterval != 5*time.Second {
+			t.Errorf("got vaultInterval %v, want 5s", m.vaultInterval)
 		}
 	})
 
@@ -77,17 +77,17 @@ func TestNewFactory(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid store_interval", func(t *testing.T) {
-		_, err := factory(uuid.New(), map[string]string{"store_interval": "bad"}, nil)
+	t.Run("invalid vault_interval", func(t *testing.T) {
+		_, err := factory(uuid.New(), map[string]string{"vault_interval": "bad"}, nil)
 		if err == nil {
-			t.Fatal("expected error for invalid store_interval")
+			t.Fatal("expected error for invalid vault_interval")
 		}
 	})
 
-	t.Run("non-positive store_interval", func(t *testing.T) {
-		_, err := factory(uuid.New(), map[string]string{"store_interval": "-1s"}, nil)
+	t.Run("non-positive vault_interval", func(t *testing.T) {
+		_, err := factory(uuid.New(), map[string]string{"vault_interval": "-1s"}, nil)
 		if err == nil {
-			t.Fatal("expected error for negative store_interval")
+			t.Fatal("expected error for negative vault_interval")
 		}
 	})
 }
@@ -96,10 +96,10 @@ func TestSystemMetrics(t *testing.T) {
 	src := &fakeStats{depth: 3, capacity: 1000}
 	factory := NewFactory(src)
 
-	// Use a long store_interval so only system fires in time.
+	// Use a long vault_interval so only system fires in time.
 	ing, err := factory(uuid.New(), map[string]string{
 		"interval":       "10ms",
-		"store_interval": "1h",
+		"vault_interval": "1h",
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -146,14 +146,14 @@ func TestSystemMetrics(t *testing.T) {
 	}
 }
 
-func TestStoreMetrics(t *testing.T) {
-	storeID := uuid.New()
+func TestVaultMetrics(t *testing.T) {
+	vaultID := uuid.New()
 	src := &fakeStats{
 		depth:    0,
 		capacity: 100,
-		snapshots: []orchestrator.StoreSnapshot{
+		snapshots: []orchestrator.VaultSnapshot{
 			{
-				ID:           storeID,
+				ID:           vaultID,
 				RecordCount:  42,
 				ChunkCount:   3,
 				SealedChunks: 2,
@@ -164,10 +164,10 @@ func TestStoreMetrics(t *testing.T) {
 	}
 	factory := NewFactory(src)
 
-	// Use a long system interval so only store fires in time.
+	// Use a long system interval so only vault fires in time.
 	ing, err := factory(uuid.New(), map[string]string{
 		"interval":       "1h",
-		"store_interval": "10ms",
+		"vault_interval": "10ms",
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -194,17 +194,17 @@ func TestStoreMetrics(t *testing.T) {
 				t.Errorf("missing %q in raw line: %s", key, raw)
 			}
 		}
-		if msg.Attrs["metric_type"] != "store" {
-			t.Errorf("got metric_type=%q, want store", msg.Attrs["metric_type"])
+		if msg.Attrs["metric_type"] != "vault" {
+			t.Errorf("got metric_type=%q, want vault", msg.Attrs["metric_type"])
 		}
-		if msg.Attrs["store_id"] != storeID.String() {
-			t.Errorf("got store_id=%q, want %s", msg.Attrs["store_id"], storeID)
+		if msg.Attrs["vault_id"] != vaultID.String() {
+			t.Errorf("got vault_id=%q, want %s", msg.Attrs["vault_id"], vaultID)
 		}
 		if msg.Attrs["ingester_type"] != "metrics" {
 			t.Errorf("got ingester_type=%q, want metrics", msg.Attrs["ingester_type"])
 		}
 	case <-ctx.Done():
-		t.Fatal("timed out waiting for store message")
+		t.Fatal("timed out waiting for vault message")
 	}
 
 	cancel()
@@ -217,16 +217,16 @@ func TestDualTickerIndependence(t *testing.T) {
 	src := &fakeStats{
 		depth:    1,
 		capacity: 100,
-		snapshots: []orchestrator.StoreSnapshot{
+		snapshots: []orchestrator.VaultSnapshot{
 			{ID: uuid.New(), RecordCount: 10, ChunkCount: 1, Enabled: true},
 		},
 	}
 	factory := NewFactory(src)
 
-	// Store interval is shorter, so store metrics should arrive first.
+	// Vault interval is shorter, so vault metrics should arrive first.
 	ing, err := factory(uuid.New(), map[string]string{
 		"interval":       "200ms",
-		"store_interval": "10ms",
+		"vault_interval": "10ms",
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -239,11 +239,11 @@ func TestDualTickerIndependence(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- ing.Run(ctx, out) }()
 
-	// First message should be a store metric.
+	// First message should be a vault metric.
 	select {
 	case msg := <-out:
-		if msg.Attrs["metric_type"] != "store" {
-			t.Errorf("expected first message metric_type=store, got %q", msg.Attrs["metric_type"])
+		if msg.Attrs["metric_type"] != "vault" {
+			t.Errorf("expected first message metric_type=vault, got %q", msg.Attrs["metric_type"])
 		}
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for first message")
@@ -273,15 +273,15 @@ func TestDualTickerIndependence(t *testing.T) {
 	}
 }
 
-func TestCollectStoresEmpty(t *testing.T) {
+func TestCollectVaultsEmpty(t *testing.T) {
 	src := &fakeStats{depth: 0, capacity: 100}
 	m := &ingester{
 		id:            "test",
 		interval:      time.Second,
-		storeInterval: time.Second,
+		vaultInterval: time.Second,
 		src:           src,
 	}
-	msgs := m.collectStores()
+	msgs := m.collectVaults()
 	if len(msgs) != 0 {
 		t.Errorf("expected 0 messages for empty snapshots, got %d", len(msgs))
 	}
@@ -292,7 +292,7 @@ func TestParamDefaults(t *testing.T) {
 	if defaults["interval"] != "30s" {
 		t.Errorf("got interval default %q, want 30s", defaults["interval"])
 	}
-	if defaults["store_interval"] != "10s" {
-		t.Errorf("got store_interval default %q, want 10s", defaults["store_interval"])
+	if defaults["vault_interval"] != "10s" {
+		t.Errorf("got vault_interval default %q, want 10s", defaults["vault_interval"])
 	}
 }

@@ -8,7 +8,7 @@ import { usePutServerConfig } from "../../api/hooks/useConfig";
 import { useQueryClient } from "@tanstack/react-query";
 import { PrimaryButton, GhostButton } from "../settings/Buttons";
 import { WelcomeStep } from "./WelcomeStep";
-import { StoreStep, type StoreData } from "./StoreStep";
+import { VaultStep, type VaultData } from "./VaultStep";
 import {
   PoliciesStep,
   parseDurationToSeconds,
@@ -19,34 +19,34 @@ import {
 import { IngesterStep, type IngesterData } from "./IngesterStep";
 import { ReviewStep } from "./ReviewStep";
 
-const STEPS = ["Welcome", "Store", "Policies", "Ingester", "Review"] as const;
+const STEPS = ["Welcome", "Vault", "Policies", "Ingester", "Review"] as const;
 
 // -- Reducer for wizard step data --
 
 interface WizardDataState {
-  store: StoreData;
+  vault: VaultData;
   rotation: RotationData;
   retention: RetentionData;
   ingester: IngesterData;
 }
 
 const wizardDataInitial: WizardDataState = {
-  store: { name: "", type: "file", dir: "" },
+  vault: { name: "", type: "file", dir: "" },
   rotation: { name: "", maxAge: "", maxBytes: "", maxRecords: "", cron: "" },
   retention: { name: "", maxChunks: "", maxAge: "", maxBytes: "" },
   ingester: { name: "", type: "", params: {} },
 };
 
 type WizardDataAction =
-  | { type: "setStore"; value: StoreData }
+  | { type: "setVault"; value: VaultData }
   | { type: "setRotation"; value: RotationData }
   | { type: "setRetention"; value: RetentionData }
   | { type: "setIngester"; value: IngesterData };
 
 function wizardDataReducer(state: WizardDataState, action: WizardDataAction): WizardDataState {
   switch (action.type) {
-    case "setStore":
-      return { ...state, store: action.value };
+    case "setVault":
+      return { ...state, vault: action.value };
     case "setRotation":
       return { ...state, rotation: action.value };
     case "setRetention":
@@ -71,8 +71,8 @@ export function SetupWizard() {
 
   // Step data
   const [wizardData, dispatchData] = useReducer(wizardDataReducer, wizardDataInitial);
-  const { store, rotation, retention, ingester } = wizardData;
-  const setStore = (v: StoreData) => dispatchData({ type: "setStore", value: v });
+  const { vault, rotation, retention, ingester } = wizardData;
+  const setVault = (v: VaultData) => dispatchData({ type: "setVault", value: v });
   const setRotation = (v: RotationData) => dispatchData({ type: "setRotation", value: v });
   const setRetention = (v: RetentionData) => dispatchData({ type: "setRetention", value: v });
   const setIngester = (v: IngesterData) => dispatchData({ type: "setIngester", value: v });
@@ -80,8 +80,8 @@ export function SetupWizard() {
   const canProceed = () => {
     switch (step) {
       case 0: return true; // Welcome
-      case 1: // Store
-        if (store.type === "file" && !store.dir.trim()) return false;
+      case 1: // Vault
+        if (vault.type === "file" && !vault.dir.trim()) return false;
         return true;
       case 2: return true; // Policies (defaults are fine)
       case 3: return !!ingester.type; // Need a type selected
@@ -105,12 +105,12 @@ export function SetupWizard() {
     const retentionMaxBytes = parseBytesToBigInt(retention.maxBytes);
     const retentionName = retention.name || "default";
 
-    const storeName = store.name || "default";
+    const vaultName = vault.name || "default";
     const ingesterName = ingester.name || ingester.type;
 
     try {
       const filterId = crypto.randomUUID();
-      const storeId = crypto.randomUUID();
+      const vaultId = crypto.randomUUID();
       const ingesterId = crypto.randomUUID();
 
       // 1. Create filter (catch-all)
@@ -153,23 +153,23 @@ export function SetupWizard() {
         });
       }
 
-      // 4. Create store
-      const storeParams: Record<string, string> = {};
-      if (store.type === "file" && store.dir) {
-        storeParams["dir"] = store.dir;
+      // 4. Create vault
+      const vaultParams: Record<string, string> = {};
+      if (vault.type === "file" && vault.dir) {
+        vaultParams["dir"] = vault.dir;
       }
-      await configClient.putStore({
+      await configClient.putVault({
         config: {
-          id: storeId,
-          name: storeName,
-          type: store.type,
+          id: vaultId,
+          name: vaultName,
+          type: vault.type,
           enabled: true,
           filter: filterId,
           policy: rotationId,
           retentionRules: retentionId
             ? [{ retentionPolicyId: retentionId, action: "expire" }]
             : [],
-          params: storeParams,
+          params: vaultParams,
         },
       });
 
@@ -254,7 +254,7 @@ export function SetupWizard() {
             <WelcomeStep dark={dark} onNext={() => setStep(1)} />
           )}
           {step === 1 && (
-            <StoreStep dark={dark} data={store} onChange={setStore} />
+            <VaultStep dark={dark} data={vault} onChange={setVault} />
           )}
           {step === 2 && (
             <PoliciesStep
@@ -271,7 +271,7 @@ export function SetupWizard() {
           {step === 4 && (
             <ReviewStep
               dark={dark}
-              store={store}
+              vault={vault}
               rotation={rotation}
               retention={retention}
               ingester={ingester}

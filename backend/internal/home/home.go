@@ -1,7 +1,7 @@
 // Package home manages the gastrolog home directory layout.
 //
 // The home directory owns all persistent state: config files, user databases,
-// and per-store chunk/index directories.
+// and per-vault chunk/index directories.
 //
 // Layout:
 //
@@ -9,7 +9,7 @@
 //	  config.json   or  config.db     (config store, type-dependent)
 //	  users.json                       (user credentials, JSON file store only)
 //	  stores/
-//	    <store-id>/                    (per-store chunk + index data)
+//	    <vault-id>/                    (per-vault chunk + index data)
 package home
 
 import (
@@ -45,10 +45,10 @@ func (d Dir) Root() string {
 	return d.root
 }
 
-// ConfigPath returns the path to the config file for the given store type.
+// ConfigPath returns the path to the config file for the given config type.
 // "json" -> config.json, "sqlite" -> config.db.
-func (d Dir) ConfigPath(storeType string) string {
-	switch storeType {
+func (d Dir) ConfigPath(configType string) string {
+	switch configType {
 	case "json":
 		return filepath.Join(d.root, "config.json")
 	default:
@@ -61,9 +61,10 @@ func (d Dir) UsersPath() string {
 	return filepath.Join(d.root, "users.json")
 }
 
-// StoreDir returns the directory for a specific store's chunk/index data.
-func (d Dir) StoreDir(storeID string) string {
-	return filepath.Join(d.root, "stores", storeID)
+// VaultDir returns the directory for a specific vault's chunk/index data.
+// The on-disk path is "stores/" for backward compatibility with existing data.
+func (d Dir) VaultDir(vaultID string) string {
+	return filepath.Join(d.root, "stores", vaultID)
 }
 
 // LookupDir returns the directory for auto-downloaded lookup databases (e.g. MaxMind MMDB files).

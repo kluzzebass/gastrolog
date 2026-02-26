@@ -208,7 +208,7 @@ type ChunkMeta struct {
 //   - IngestTS: when our ingester received the message
 //   - WriteTS:  when the chunk manager wrote the record (monotonic within a chunk)
 //
-// Ref and StoreID are populated by the query engine when returning search
+// Ref and VaultID are populated by the query engine when returning search
 // results. They are zero-valued when appending records or reading via cursor.
 //
 // Note: When reading from file-backed chunks, Raw and Attrs may reference
@@ -221,7 +221,7 @@ type Record struct {
 	Attrs    Attributes
 	Raw      []byte
 	Ref      RecordRef
-	StoreID  uuid.UUID
+	VaultID  uuid.UUID
 }
 
 // Copy returns a deep copy of the record with its own Raw slice and Attrs map.
@@ -236,6 +236,6 @@ func (r Record) Copy() Record {
 		Attrs:    r.Attrs.Copy(),
 		Raw:      raw,
 		Ref:      r.Ref,
-		StoreID:  r.StoreID,
+		VaultID:  r.VaultID,
 	}
 }

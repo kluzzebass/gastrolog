@@ -8,9 +8,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// Store bundles the chunk manager, index manager, and query engine for a single store.
-// The invariant that every store ID has all three is now structurally enforced.
-type Store struct {
+// Vault bundles the chunk manager, index manager, and query engine for a single vault.
+// The invariant that every vault ID has all three is now structurally enforced.
+type Vault struct {
 	ID      uuid.UUID
 	Chunks  chunk.ChunkManager
 	Indexes index.IndexManager
@@ -18,9 +18,9 @@ type Store struct {
 	Enabled bool
 }
 
-// NewStore creates a Store from its components.
-func NewStore(id uuid.UUID, cm chunk.ChunkManager, im index.IndexManager, qe *query.Engine) *Store {
-	return &Store{
+// NewVault creates a Vault from its components.
+func NewVault(id uuid.UUID, cm chunk.ChunkManager, im index.IndexManager, qe *query.Engine) *Vault {
+	return &Vault{
 		ID:      id,
 		Chunks:  cm,
 		Indexes: im,
@@ -35,7 +35,7 @@ type scheduleIndexFunc func(chunkID chunk.ChunkID)
 // Append writes the record to the chunk manager, detects seal, and calls onSeal
 // if the active chunk changed (indicating the previous chunk was sealed).
 // onSeal is invoked to schedule an asynchronous index build for the sealed chunk.
-func (s *Store) Append(rec chunk.Record, onSeal scheduleIndexFunc) error {
+func (s *Vault) Append(rec chunk.Record, onSeal scheduleIndexFunc) error {
 	activeBefore := s.Chunks.Active()
 	_, _, err := s.Chunks.Append(rec)
 	if err != nil {

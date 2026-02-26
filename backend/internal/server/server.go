@@ -197,7 +197,7 @@ func (s *Server) buildMux() *http.ServeMux {
 	if s.noAuth {
 		handlerOpts = append(handlerOpts, connect.WithInterceptors(&auth.NoAuthInterceptor{}))
 	} else if s.tokens != nil {
-		authInterceptor := auth.NewAuthInterceptor(s.tokens, s.cfgStore, &tokenValidator{store: s.cfgStore})
+		authInterceptor := auth.NewAuthInterceptor(s.tokens, s.cfgStore, &tokenValidator{cfgStore: s.cfgStore})
 		handlerOpts = append(handlerOpts, connect.WithInterceptors(authInterceptor))
 	}
 
@@ -214,7 +214,7 @@ func (s *Server) buildMux() *http.ServeMux {
 	s.loadInitialLookupConfig(geoipTable, asnTable)
 
 	queryServer := NewQueryServer(s.orch, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount)
-	storeServer := NewStoreServer(s.orch, s.cfgStore, s.factories, s.logger)
+	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.logger)
 	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager)
 	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
 	configServer.SetOnLookupConfigChange(func(cfg config.LookupConfig) {
@@ -225,7 +225,7 @@ func (s *Server) buildMux() *http.ServeMux {
 	jobServer := NewJobServer(s.orch.Scheduler())
 
 	mux.Handle(gastrologv1connect.NewQueryServiceHandler(queryServer, handlerOpts...))
-	mux.Handle(gastrologv1connect.NewStoreServiceHandler(storeServer, handlerOpts...))
+	mux.Handle(gastrologv1connect.NewVaultServiceHandler(vaultServer, handlerOpts...))
 	mux.Handle(gastrologv1connect.NewConfigServiceHandler(configServer, handlerOpts...))
 	mux.Handle(gastrologv1connect.NewLifecycleServiceHandler(lifecycleServer, handlerOpts...))
 	mux.Handle(gastrologv1connect.NewAuthServiceHandler(authServer, handlerOpts...))
@@ -694,7 +694,7 @@ func (s *Server) Handler() http.Handler {
 
 // tokenValidator adapts config.Store to auth.TokenValidator.
 type tokenValidator struct {
-	store config.Store
+	cfgStore config.Store
 }
 
 func (tv *tokenValidator) IsTokenValid(ctx context.Context, userID string, issuedAt time.Time) (bool, error) {
@@ -702,7 +702,7 @@ func (tv *tokenValidator) IsTokenValid(ctx context.Context, userID string, issue
 	if err != nil {
 		return false, fmt.Errorf("parse user ID %q: %w", userID, err)
 	}
-	user, err := tv.store.GetUser(ctx, uid)
+	user, err := tv.cfgStore.GetUser(ctx, uid)
 	if err != nil {
 		return false, err
 	}
@@ -718,7 +718,7 @@ func (tv *tokenValidator) IsTokenValid(ctx context.Context, userID string, issue
 // Client creates a set of Connect clients for the given base URL.
 type Client struct {
 	Query     gastrologv1connect.QueryServiceClient
-	Store     gastrologv1connect.StoreServiceClient
+	Vault     gastrologv1connect.VaultServiceClient
 	Config    gastrologv1connect.ConfigServiceClient
 	Lifecycle gastrologv1connect.LifecycleServiceClient
 	Auth      gastrologv1connect.AuthServiceClient
@@ -729,7 +729,7 @@ type Client struct {
 func NewClient(baseURL string, opts ...connect.ClientOption) *Client {
 	return &Client{
 		Query:     gastrologv1connect.NewQueryServiceClient(http.DefaultClient, baseURL, opts...),
-		Store:     gastrologv1connect.NewStoreServiceClient(http.DefaultClient, baseURL, opts...),
+		Vault:     gastrologv1connect.NewVaultServiceClient(http.DefaultClient, baseURL, opts...),
 		Config:    gastrologv1connect.NewConfigServiceClient(http.DefaultClient, baseURL, opts...),
 		Lifecycle: gastrologv1connect.NewLifecycleServiceClient(http.DefaultClient, baseURL, opts...),
 		Auth:      gastrologv1connect.NewAuthServiceClient(http.DefaultClient, baseURL, opts...),
@@ -741,7 +741,7 @@ func NewClient(baseURL string, opts ...connect.ClientOption) *Client {
 func NewClientWithHTTP(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) *Client {
 	return &Client{
 		Query:     gastrologv1connect.NewQueryServiceClient(httpClient, baseURL, opts...),
-		Store:     gastrologv1connect.NewStoreServiceClient(httpClient, baseURL, opts...),
+		Vault:     gastrologv1connect.NewVaultServiceClient(httpClient, baseURL, opts...),
 		Config:    gastrologv1connect.NewConfigServiceClient(httpClient, baseURL, opts...),
 		Lifecycle: gastrologv1connect.NewLifecycleServiceClient(httpClient, baseURL, opts...),
 		Auth:      gastrologv1connect.NewAuthServiceClient(httpClient, baseURL, opts...),

@@ -19,8 +19,8 @@ const (
 	ParamFileMode      = "fileMode"
 	ParamCompression   = "compression" // "none" or "zstd"
 
-	// ParamExpectExisting is injected by the orchestrator when loading stores
-	// from config. It tells the chunk manager to warn if the store directory
+	// ParamExpectExisting is injected by the orchestrator when loading vaults
+	// from config. It tells the chunk manager to warn if the vault directory
 	// is missing (potential data loss). Not persisted in config.
 	ParamExpectExisting = "_expect_existing"
 )

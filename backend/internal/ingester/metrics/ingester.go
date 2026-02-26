@@ -1,5 +1,5 @@
 // Package metrics provides a self-monitoring ingester that emits process-level
-// metrics (CPU, memory, goroutines, queue depth) and per-store stats as log records.
+// metrics (CPU, memory, goroutines, queue depth) and per-vault stats as log records.
 package metrics
 
 import (
@@ -16,20 +16,20 @@ import (
 type ingester struct {
 	id            string
 	interval      time.Duration
-	storeInterval time.Duration
+	vaultInterval time.Duration
 	src           StatsSource
 	logger        *slog.Logger
 }
 
-// Run emits system metrics on interval and store metrics on storeInterval
+// Run emits system metrics on interval and vault metrics on vaultInterval
 // until ctx is cancelled.
 func (m *ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
-	m.logger.Info("started", "interval", m.interval, "store_interval", m.storeInterval)
+	m.logger.Info("started", "interval", m.interval, "vault_interval", m.vaultInterval)
 
 	sysTicker := time.NewTicker(m.interval)
-	storeTicker := time.NewTicker(m.storeInterval)
+	vaultTicker := time.NewTicker(m.vaultInterval)
 	defer sysTicker.Stop()
-	defer storeTicker.Stop()
+	defer vaultTicker.Stop()
 
 	for {
 		select {
@@ -39,8 +39,8 @@ func (m *ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 			if !send(ctx, out, m.collectSystem()) {
 				return nil
 			}
-		case <-storeTicker.C:
-			for _, msg := range m.collectStores() {
+		case <-vaultTicker.C:
+			for _, msg := range m.collectVaults() {
 				if !send(ctx, out, msg) {
 					return nil
 				}
@@ -98,8 +98,8 @@ func (m *ingester) collectSystem() orchestrator.IngestMessage {
 	}
 }
 
-func (m *ingester) collectStores() []orchestrator.IngestMessage {
-	snapshots := m.src.StoreSnapshots()
+func (m *ingester) collectVaults() []orchestrator.IngestMessage {
+	snapshots := m.src.VaultSnapshots()
 	if len(snapshots) == 0 {
 		return nil
 	}
@@ -119,8 +119,8 @@ func (m *ingester) collectStores() []orchestrator.IngestMessage {
 			Attrs: map[string]string{
 				"ingester_type": "metrics",
 				"ingester_id":   m.id,
-				"metric_type":   "store",
-				"store_id":      snap.ID.String(),
+				"metric_type":   "vault",
+				"vault_id":      snap.ID.String(),
 				"level":         "info",
 			},
 			Raw:      []byte(raw),

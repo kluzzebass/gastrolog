@@ -2,9 +2,9 @@ package chunk
 
 import "time"
 
-// StoreState is an immutable snapshot of all sealed chunks in a store.
+// VaultState is an immutable snapshot of all sealed chunks in a vault.
 // It contains all information needed to make retention decisions without IO.
-type StoreState struct {
+type VaultState struct {
 	// Chunks contains metadata for all sealed chunks, sorted by StartTS ascending (oldest first).
 	Chunks []ChunkMeta
 
@@ -16,15 +16,15 @@ type StoreState struct {
 // Policies are pure functions: no IO, no locks, no mutation.
 //
 // Apply is called periodically by the retention goroutine with a snapshot
-// of the store's sealed chunks. It returns the IDs of chunks to delete.
+// of the vault's sealed chunks. It returns the IDs of chunks to delete.
 type RetentionPolicy interface {
-	Apply(state StoreState) []ChunkID
+	Apply(state VaultState) []ChunkID
 }
 
 // RetentionPolicyFunc is an adapter to allow ordinary functions to be used as RetentionPolicy.
-type RetentionPolicyFunc func(state StoreState) []ChunkID
+type RetentionPolicyFunc func(state VaultState) []ChunkID
 
-func (f RetentionPolicyFunc) Apply(state StoreState) []ChunkID {
+func (f RetentionPolicyFunc) Apply(state VaultState) []ChunkID {
 	return f(state)
 }
 
@@ -39,7 +39,7 @@ func NewCompositeRetentionPolicy(policies ...RetentionPolicy) *CompositeRetentio
 	return &CompositeRetentionPolicy{policies: policies}
 }
 
-func (c *CompositeRetentionPolicy) Apply(state StoreState) []ChunkID {
+func (c *CompositeRetentionPolicy) Apply(state VaultState) []ChunkID {
 	seen := make(map[ChunkID]struct{})
 	var result []ChunkID
 
@@ -66,7 +66,7 @@ func NewTTLRetentionPolicy(maxAge time.Duration) *TTLRetentionPolicy {
 	return &TTLRetentionPolicy{maxAge: maxAge}
 }
 
-func (p *TTLRetentionPolicy) Apply(state StoreState) []ChunkID {
+func (p *TTLRetentionPolicy) Apply(state VaultState) []ChunkID {
 	if p.maxAge <= 0 {
 		return nil
 	}
@@ -83,18 +83,18 @@ func (p *TTLRetentionPolicy) Apply(state StoreState) []ChunkID {
 	return result
 }
 
-// SizeRetentionPolicy deletes the oldest sealed chunks when total store size
+// SizeRetentionPolicy deletes the oldest sealed chunks when total vault size
 // exceeds maxBytes. Keeps the newest chunks that fit within the budget.
 type SizeRetentionPolicy struct {
 	maxBytes int64
 }
 
-// NewSizeRetentionPolicy creates a policy that keeps total store size under maxBytes.
+// NewSizeRetentionPolicy creates a policy that keeps total vault size under maxBytes.
 func NewSizeRetentionPolicy(maxBytes int64) *SizeRetentionPolicy {
 	return &SizeRetentionPolicy{maxBytes: maxBytes}
 }
 
-func (p *SizeRetentionPolicy) Apply(state StoreState) []ChunkID {
+func (p *SizeRetentionPolicy) Apply(state VaultState) []ChunkID {
 	if p.maxBytes <= 0 {
 		return nil
 	}
@@ -133,7 +133,7 @@ func NewCountRetentionPolicy(maxChunks int) *CountRetentionPolicy {
 	return &CountRetentionPolicy{maxChunks: maxChunks}
 }
 
-func (p *CountRetentionPolicy) Apply(state StoreState) []ChunkID {
+func (p *CountRetentionPolicy) Apply(state VaultState) []ChunkID {
 	if p.maxChunks <= 0 || len(state.Chunks) <= p.maxChunks {
 		return nil
 	}
@@ -151,6 +151,6 @@ func (p *CountRetentionPolicy) Apply(state StoreState) []ChunkID {
 // NeverRetainPolicy is a retention policy that never deletes anything.
 type NeverRetainPolicy struct{}
 
-func (NeverRetainPolicy) Apply(state StoreState) []ChunkID {
+func (NeverRetainPolicy) Apply(state VaultState) []ChunkID {
 	return nil
 }

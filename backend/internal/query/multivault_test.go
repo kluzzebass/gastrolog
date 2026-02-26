@@ -18,46 +18,46 @@ import (
 )
 
 type testRegistry struct {
-	stores map[uuid.UUID]struct {
+	vaults map[uuid.UUID]struct {
 		cm chunk.ChunkManager
 		im index.IndexManager
 	}
 }
 
-func (r *testRegistry) ListStores() []uuid.UUID {
+func (r *testRegistry) ListVaults() []uuid.UUID {
 	var keys []uuid.UUID
-	for k := range r.stores {
+	for k := range r.vaults {
 		keys = append(keys, k)
 	}
 	return keys
 }
 
-func (r *testRegistry) ChunkManager(storeID uuid.UUID) chunk.ChunkManager {
-	if s, ok := r.stores[storeID]; ok {
+func (r *testRegistry) ChunkManager(vaultID uuid.UUID) chunk.ChunkManager {
+	if s, ok := r.vaults[vaultID]; ok {
 		return s.cm
 	}
 	return nil
 }
 
-func (r *testRegistry) IndexManager(storeID uuid.UUID) index.IndexManager {
-	if s, ok := r.stores[storeID]; ok {
+func (r *testRegistry) IndexManager(vaultID uuid.UUID) index.IndexManager {
+	if s, ok := r.vaults[vaultID]; ok {
 		return s.im
 	}
 	return nil
 }
 
-func TestMultiStoreSearch(t *testing.T) {
+func TestMultiVaultSearch(t *testing.T) {
 	reg := &testRegistry{
-		stores: make(map[uuid.UUID]struct {
+		vaults: make(map[uuid.UUID]struct {
 			cm chunk.ChunkManager
 			im index.IndexManager
 		}),
 	}
 
-	// Create two stores
+	// Create two vaults
 	for range 2 {
-		storeID := uuid.Must(uuid.NewV7())
-		s := memtest.MustNewStore(t, chunkmem.Config{
+		vaultID := uuid.Must(uuid.NewV7())
+		s := memtest.MustNewVault(t, chunkmem.Config{
 			RotationPolicy: chunk.NewRecordCountPolicy(1000),
 		})
 
@@ -66,18 +66,18 @@ func TestMultiStoreSearch(t *testing.T) {
 		for i := range 5 {
 			s.CM.Append(chunk.Record{
 				IngestTS: t0.Add(time.Duration(i) * time.Second),
-				Raw:      fmt.Appendf(nil, "store-%s-record-%d", storeID, i),
+				Raw:      fmt.Appendf(nil, "vault-%s-record-%d", vaultID, i),
 			})
 		}
 		s.CM.Seal()
 
-		reg.stores[storeID] = struct {
+		reg.vaults[vaultID] = struct {
 			cm chunk.ChunkManager
 			im index.IndexManager
 		}{s.CM, s.IM}
 	}
 
-	// Create multi-store engine
+	// Create multi-vault engine
 	eng := query.NewWithRegistry(reg, nil)
 
 	// Run query
@@ -103,8 +103,8 @@ func TestMultiStoreSearch(t *testing.T) {
 // incoming query limit (e.g. from proto-level pagination) so stats pipelines
 // process all matching records, not just the first page.
 func TestRunPipelineIgnoresIncomingLimit(t *testing.T) {
-	storeID := uuid.Must(uuid.NewV7())
-	s := memtest.MustNewStore(t, chunkmem.Config{
+	vaultID := uuid.Must(uuid.NewV7())
+	s := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
 	})
 
@@ -123,11 +123,11 @@ func TestRunPipelineIgnoresIncomingLimit(t *testing.T) {
 	s.CM.Seal()
 
 	reg := &testRegistry{
-		stores: map[uuid.UUID]struct {
+		vaults: map[uuid.UUID]struct {
 			cm chunk.ChunkManager
 			im index.IndexManager
 		}{
-			storeID: {s.CM, s.IM},
+			vaultID: {s.CM, s.IM},
 		},
 	}
 	eng := query.NewWithRegistry(reg, nil)

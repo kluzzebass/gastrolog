@@ -20,12 +20,12 @@ type QueryPlan struct {
 	Query       Query
 	Direction   string      // "forward" or "reverse"
 	ChunkPlans  []ChunkPlan // per-chunk execution plans
-	TotalChunks int         // total chunks in the store
+	TotalChunks int         // total chunks in the vault
 }
 
 // ChunkPlan describes the execution plan for a single chunk.
 type ChunkPlan struct {
-	StoreID       uuid.UUID // store this chunk belongs to
+	VaultID       uuid.UUID // vault this chunk belongs to
 	ChunkID       chunk.ChunkID
 	Sealed        bool
 	RecordCount   int
@@ -60,22 +60,22 @@ type PipelineStep struct {
 }
 
 // Explain returns the query execution plan without executing the query.
-// For multi-store engines, this explains the plan across all stores.
+// For multi-vault engines, this explains the plan across all vaults.
 func (e *Engine) Explain(ctx context.Context, q Query) (*QueryPlan, error) {
 	// Normalize query to ensure BoolExpr is set.
 	q = q.Normalize()
 
-	// Extract store predicates and get remaining query expression.
-	allStores := e.listStores()
-	selectedStores, remainingExpr := ExtractStoreFilter(q.BoolExpr, allStores)
-	if selectedStores == nil {
-		selectedStores = allStores
+	// Extract vault predicates and get remaining query expression.
+	allVaults := e.listVaults()
+	selectedVaults, remainingExpr := ExtractVaultFilter(q.BoolExpr, allVaults)
+	if selectedVaults == nil {
+		selectedVaults = allVaults
 	}
 
 	// Extract chunk predicates.
 	chunkIDs, remainingExpr := ExtractChunkFilter(remainingExpr)
 
-	// Update query to use remaining expression (without store/chunk predicates).
+	// Update query to use remaining expression (without vault/chunk predicates).
 	queryForPlan := q
 	queryForPlan.BoolExpr = remainingExpr
 
@@ -87,9 +87,9 @@ func (e *Engine) Explain(ctx context.Context, q Query) (*QueryPlan, error) {
 		plan.Direction = "reverse"
 	}
 
-	// Collect chunks from all selected stores.
-	for _, storeID := range selectedStores {
-		cm, im := e.getStoreManagers(storeID)
+	// Collect chunks from all selected vaults.
+	for _, vaultID := range selectedVaults {
+		cm, im := e.getVaultManagers(vaultID)
 		if cm == nil {
 			continue
 		}
@@ -105,7 +105,7 @@ func (e *Engine) Explain(ctx context.Context, q Query) (*QueryPlan, error) {
 		candidates := e.selectChunks(metas, queryForPlan, chunkIDs)
 
 		for _, meta := range candidates {
-			cp := e.buildChunkPlan(ctx, queryForPlan, meta, storeID, cm, im)
+			cp := e.buildChunkPlan(ctx, queryForPlan, meta, vaultID, cm, im)
 			plan.ChunkPlans = append(plan.ChunkPlans, cp)
 		}
 	}
@@ -114,9 +114,9 @@ func (e *Engine) Explain(ctx context.Context, q Query) (*QueryPlan, error) {
 }
 
 // buildChunkPlan builds the execution plan for a single chunk.
-func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMeta, storeID uuid.UUID, cm chunk.ChunkManager, im index.IndexManager) ChunkPlan {
+func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMeta, vaultID uuid.UUID, cm chunk.ChunkManager, im index.IndexManager) ChunkPlan {
 	cp := ChunkPlan{
-		StoreID:       storeID,
+		VaultID:       vaultID,
 		ChunkID:       meta.ID,
 		Sealed:        meta.Sealed,
 		RecordCount:   int(meta.RecordCount),

@@ -104,7 +104,7 @@ func TestApplyConfigNil(t *testing.T) {
 	}
 }
 
-func TestApplyConfigStores(t *testing.T) {
+func TestApplyConfigVaults(t *testing.T) {
 	orch := New(Config{})
 
 	factories := Factories{
@@ -120,13 +120,13 @@ func TestApplyConfigStores(t *testing.T) {
 		},
 	}
 
-	store1ID := uuid.Must(uuid.NewV7())
-	store2ID := uuid.Must(uuid.NewV7())
+	vault1ID := uuid.Must(uuid.NewV7())
+	vault2ID := uuid.Must(uuid.NewV7())
 
 	cfg := &config.Config{
-		Stores: []config.StoreConfig{
-			{ID: store1ID, Type: "memory", Params: map[string]string{}},
-			{ID: store2ID, Type: "memory", Params: map[string]string{}},
+		Vaults: []config.VaultConfig{
+			{ID: vault1ID, Type: "memory", Params: map[string]string{}},
+			{ID: vault2ID, Type: "memory", Params: map[string]string{}},
 		},
 	}
 
@@ -135,19 +135,19 @@ func TestApplyConfigStores(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify stores were registered.
-	keys := orch.ListStores()
+	// Verify vaults were registered.
+	keys := orch.ListVaults()
 	if len(keys) != 2 {
-		t.Errorf("expected 2 stores, got %d", len(keys))
+		t.Errorf("expected 2 vaults, got %d", len(keys))
 	}
-	if orch.ChunkManager(store1ID) == nil || orch.ChunkManager(store2ID) == nil {
-		t.Error("expected both stores to have chunk managers")
+	if orch.ChunkManager(vault1ID) == nil || orch.ChunkManager(vault2ID) == nil {
+		t.Error("expected both vaults to have chunk managers")
 	}
-	if orch.IndexManager(store1ID) == nil || orch.IndexManager(store2ID) == nil {
-		t.Error("expected both stores to have index managers")
+	if orch.IndexManager(vault1ID) == nil || orch.IndexManager(vault2ID) == nil {
+		t.Error("expected both vaults to have index managers")
 	}
-	if orch.QueryEngine(store1ID) == nil || orch.QueryEngine(store2ID) == nil {
-		t.Error("expected both stores to have query engines")
+	if orch.QueryEngine(vault1ID) == nil || orch.QueryEngine(vault2ID) == nil {
+		t.Error("expected both vaults to have query engines")
 	}
 }
 
@@ -185,7 +185,7 @@ func TestApplyConfigUnknownChunkManagerType(t *testing.T) {
 	orch := New(Config{})
 
 	cfg := &config.Config{
-		Stores: []config.StoreConfig{
+		Vaults: []config.VaultConfig{
 			{ID: uuid.Must(uuid.NewV7()), Type: "unknown", Params: map[string]string{}},
 		},
 	}
@@ -212,7 +212,7 @@ func TestApplyConfigUnknownIndexManagerType(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Stores: []config.StoreConfig{
+		Vaults: []config.VaultConfig{
 			{ID: uuid.Must(uuid.NewV7()), Type: "memory", Params: map[string]string{}},
 		},
 	}
@@ -240,7 +240,7 @@ func TestApplyConfigUnknownIngesterType(t *testing.T) {
 	}
 }
 
-func TestApplyConfigDuplicateStoreID(t *testing.T) {
+func TestApplyConfigDuplicateVaultID(t *testing.T) {
 	orch := New(Config{})
 
 	factories := Factories{
@@ -258,7 +258,7 @@ func TestApplyConfigDuplicateStoreID(t *testing.T) {
 
 	dupID := uuid.Must(uuid.NewV7())
 	cfg := &config.Config{
-		Stores: []config.StoreConfig{
+		Vaults: []config.VaultConfig{
 			{ID: dupID, Type: "memory", Params: map[string]string{}},
 			{ID: dupID, Type: "memory", Params: map[string]string{}}, // duplicate
 		},
@@ -266,7 +266,7 @@ func TestApplyConfigDuplicateStoreID(t *testing.T) {
 
 	err := orch.ApplyConfig(cfg, factories)
 	if err == nil {
-		t.Error("expected error for duplicate store ID")
+		t.Error("expected error for duplicate vault ID")
 	}
 }
 
@@ -312,7 +312,7 @@ func TestApplyConfigChunkManagerFactoryError(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Stores: []config.StoreConfig{
+		Vaults: []config.VaultConfig{
 			{ID: uuid.Must(uuid.NewV7()), Type: "memory", Params: map[string]string{}},
 		},
 	}
@@ -340,7 +340,7 @@ func TestApplyConfigIndexManagerFactoryError(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Stores: []config.StoreConfig{
+		Vaults: []config.VaultConfig{
 			{ID: uuid.Must(uuid.NewV7()), Type: "memory", Params: map[string]string{}},
 		},
 	}
@@ -409,7 +409,7 @@ func TestApplyConfigParamsPassedToIngesterFactory(t *testing.T) {
 	}
 }
 
-func TestApplyConfigParamsPassedToStoreFactories(t *testing.T) {
+func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 	orch := New(Config{})
 
 	var cmReceivedParams map[string]string
@@ -431,7 +431,7 @@ func TestApplyConfigParamsPassedToStoreFactories(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Stores: []config.StoreConfig{
+		Vaults: []config.VaultConfig{
 			{ID: uuid.Must(uuid.NewV7()), Type: "test", Params: map[string]string{
 				"dir":      "/data/chunks",
 				"kvBudget": "500",
@@ -482,7 +482,7 @@ func TestApplyConfigIndexManagerReceivesChunkManager(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Stores: []config.StoreConfig{
+		Vaults: []config.VaultConfig{
 			{ID: uuid.Must(uuid.NewV7()), Type: "test", Params: map[string]string{}},
 		},
 	}

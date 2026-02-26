@@ -1,11 +1,11 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
-import type { StoreData } from "./StoreStep";
+import type { VaultData } from "./VaultStep";
 import type { RotationData, RetentionData } from "./PoliciesStep";
 import type { IngesterData } from "./IngesterStep";
 
 interface ReviewStepProps {
   dark: boolean;
-  store: StoreData;
+  vault: VaultData;
   rotation: RotationData;
   retention: RetentionData;
   ingester: IngesterData;
@@ -85,7 +85,7 @@ function Row({
 
 export function ReviewStep({
   dark,
-  store,
+  vault,
   rotation,
   retention,
   ingester,
@@ -106,11 +106,11 @@ export function ReviewStep({
         </p>
       </div>
 
-      <Section title="Store" dark={dark}>
-        <Row label="Name" value={store.name || "default"} dark={dark} />
-        <Row label="Type" value={store.type} dark={dark} />
-        {store.type === "file" && (
-          <Row label="Directory" value={store.dir} dark={dark} />
+      <Section title="Vault" dark={dark}>
+        <Row label="Name" value={vault.name || "default"} dark={dark} />
+        <Row label="Type" value={vault.type} dark={dark} />
+        {vault.type === "file" && (
+          <Row label="Directory" value={vault.dir} dark={dark} />
         )}
       </Section>
 

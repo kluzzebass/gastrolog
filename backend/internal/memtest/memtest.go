@@ -19,31 +19,31 @@ import (
 	"gastrolog/internal/query"
 )
 
-// Store bundles a memory chunk manager, index manager, and query engine.
-type Store struct {
+// Vault bundles a memory chunk manager, index manager, and query engine.
+type Vault struct {
 	CM chunk.ChunkManager
 	IM index.IndexManager
 	QE *query.Engine
 }
 
-// NewStore creates a memory-backed Store with the given chunk manager config.
+// NewVault creates a memory-backed Vault with the given chunk manager config.
 // The index manager is wired with token, attr, and kv indexers.
-func NewStore(cfg chunkmem.Config) (Store, error) {
+func NewVault(cfg chunkmem.Config) (Vault, error) {
 	cm, err := chunkmem.NewManager(cfg)
 	if err != nil {
-		return Store{}, err
+		return Vault{}, err
 	}
 	im := newIndexManager(cm)
 	qe := query.New(cm, im, nil)
-	return Store{CM: cm, IM: im, QE: qe}, nil
+	return Vault{CM: cm, IM: im, QE: qe}, nil
 }
 
-// MustNewStore is like NewStore but calls t.Fatal on error.
-func MustNewStore(t *testing.T, cfg chunkmem.Config) Store {
+// MustNewVault is like NewVault but calls t.Fatal on error.
+func MustNewVault(t *testing.T, cfg chunkmem.Config) Vault {
 	t.Helper()
-	s, err := NewStore(cfg)
+	s, err := NewVault(cfg)
 	if err != nil {
-		t.Fatalf("memtest.NewStore: %v", err)
+		t.Fatalf("memtest.NewVault: %v", err)
 	}
 	return s
 }

@@ -179,41 +179,41 @@ func (q Query) TimeBounds() (lower, upper time.Time) {
 	return q.Start, q.End
 }
 
-// WithStorePredicate returns a copy of the query with a store=X predicate added.
+// WithVaultPredicate returns a copy of the query with a vault=X predicate added.
 // The predicate is ANDed with any existing BoolExpr.
-func (q Query) WithStorePredicate(storeID string) Query {
-	storePred := &querylang.PredicateExpr{
+func (q Query) WithVaultPredicate(vaultID string) Query {
+	vaultPred := &querylang.PredicateExpr{
 		Kind:  querylang.PredKV,
-		Key:   "store",
-		Value: storeID,
+		Key:   "vault",
+		Value: vaultID,
 	}
 
 	result := q
 	if q.BoolExpr == nil {
-		result.BoolExpr = storePred
+		result.BoolExpr = vaultPred
 	} else {
-		result.BoolExpr = querylang.FlattenAnd(q.BoolExpr, storePred)
+		result.BoolExpr = querylang.FlattenAnd(q.BoolExpr, vaultPred)
 	}
 	return result
 }
 
-// MultiStorePosition represents a position within a specific store's chunk.
-type MultiStorePosition struct {
-	StoreID  uuid.UUID
+// MultiVaultPosition represents a position within a specific vault's chunk.
+type MultiVaultPosition struct {
+	VaultID  uuid.UUID
 	ChunkID  chunk.ChunkID
 	Position uint64
 }
 
 // ResumeToken allows resuming a query from where it left off.
-// For multi-store queries, Positions contains the last position in each active chunk.
+// For multi-vault queries, Positions contains the last position in each active chunk.
 // Tokens are valid as long as the referenced chunks exist.
 type ResumeToken struct {
-	// Positions contains the last yielded position for each store/chunk combination.
-	// For single-store queries with one chunk, this will have one entry.
-	// For multi-store queries, this may have multiple entries (one per active chunk).
-	Positions []MultiStorePosition
+	// Positions contains the last yielded position for each vault/chunk combination.
+	// For single-vault queries with one chunk, this will have one entry.
+	// For multi-vault queries, this may have multiple entries (one per active chunk).
+	Positions []MultiVaultPosition
 
-	// Legacy field for backward compatibility with single-store resume tokens.
+	// Legacy field for backward compatibility with single-vault resume tokens.
 	//
 	// Deprecated: use Positions instead.
 	Next chunk.RecordRef
@@ -221,8 +221,8 @@ type ResumeToken struct {
 
 // Normalize converts a legacy resume token (using Next) to the new format (using Positions).
 // If Positions is already populated, returns the token unchanged.
-// The storeID parameter is used for legacy tokens that don't include store information.
-func (t *ResumeToken) Normalize(defaultStoreID uuid.UUID) *ResumeToken {
+// The vaultID parameter is used for legacy tokens that don't include vault information.
+func (t *ResumeToken) Normalize(defaultVaultID uuid.UUID) *ResumeToken {
 	if t == nil {
 		return nil
 	}
@@ -236,8 +236,8 @@ func (t *ResumeToken) Normalize(defaultStoreID uuid.UUID) *ResumeToken {
 		return t
 	}
 	return &ResumeToken{
-		Positions: []MultiStorePosition{{
-			StoreID:  defaultStoreID,
+		Positions: []MultiVaultPosition{{
+			VaultID:  defaultVaultID,
 			ChunkID:  t.Next.ChunkID,
 			Position: t.Next.Pos,
 		}},
@@ -247,29 +247,29 @@ func (t *ResumeToken) Normalize(defaultStoreID uuid.UUID) *ResumeToken {
 // ErrInvalidResumeToken is returned when a resume token references a chunk that no longer exists.
 var ErrInvalidResumeToken = errors.New("invalid resume token: chunk no longer exists")
 
-// ErrMultiStoreNotSupported is returned when an operation doesn't support multi-store mode.
-var ErrMultiStoreNotSupported = errors.New("operation not supported in multi-store mode")
+// ErrMultiVaultNotSupported is returned when an operation doesn't support multi-vault mode.
+var ErrMultiVaultNotSupported = errors.New("operation not supported in multi-vault mode")
 
 // recordWithRef combines a record with its reference for internal iteration.
-// StoreID is included for multi-store queries.
+// VaultID is included for multi-vault queries.
 type recordWithRef struct {
-	StoreID uuid.UUID
+	VaultID uuid.UUID
 	Record  chunk.Record
 	Ref     chunk.RecordRef
 }
 
-// record returns the Record with Ref and StoreID populated.
+// record returns the Record with Ref and VaultID populated.
 func (rr recordWithRef) record() chunk.Record {
 	rr.Record.Ref = rr.Ref
-	rr.Record.StoreID = rr.StoreID
+	rr.Record.VaultID = rr.VaultID
 	return rr.Record
 }
 
 // Engine executes queries against chunk and index managers.
 //
 // The engine can operate in two modes:
-//   - Single-store mode: created with New(), queries one store
-//   - Multi-store mode: created with NewWithRegistry(), queries across stores
+//   - Single-vault mode: created with New(), queries one vault
+//   - Multi-vault mode: created with NewWithRegistry(), queries across vaults
 //
 // Logging:
 //   - Logger is dependency-injected via the constructor
@@ -277,12 +277,12 @@ func (rr recordWithRef) record() chunk.Record {
 //   - Logging is intentionally sparse; only lifecycle events are logged
 //   - No logging in hot paths (search iteration, filtering)
 type Engine struct {
-	// Single-store mode (legacy)
+	// Single-vault mode (legacy)
 	chunks  chunk.ChunkManager
 	indexes index.IndexManager
 
-	// Multi-store mode
-	registry StoreRegistry
+	// Multi-vault mode
+	registry VaultRegistry
 
 	// Lookup enrichment resolver (optional). Set via SetLookupResolver.
 	lookupResolver lookup.Resolver
@@ -293,7 +293,7 @@ type Engine struct {
 }
 
 // New creates a query engine backed by the given chunk and index managers.
-// This creates a single-store engine for backward compatibility.
+// This creates a single-vault engine for backward compatibility.
 // If logger is nil, logging is disabled.
 func New(chunks chunk.ChunkManager, indexes index.IndexManager, logger *slog.Logger) *Engine {
 	return &Engine{
@@ -303,11 +303,11 @@ func New(chunks chunk.ChunkManager, indexes index.IndexManager, logger *slog.Log
 	}
 }
 
-// NewWithRegistry creates a query engine that can search across multiple stores.
-// Store predicates in queries (e.g., "store=prod") filter which stores are searched.
-// If no store predicate is present, all stores are searched.
+// NewWithRegistry creates a query engine that can search across multiple vaults.
+// Vault predicates in queries (e.g., "vault=prod") filter which vaults are searched.
+// If no vault predicate is present, all vaults are searched.
 // If logger is nil, logging is disabled.
-func NewWithRegistry(registry StoreRegistry, logger *slog.Logger) *Engine {
+func NewWithRegistry(registry VaultRegistry, logger *slog.Logger) *Engine {
 	return &Engine{
 		registry: registry,
 		logger:   logging.Default(logger).With("component", "query-engine"),
@@ -319,24 +319,24 @@ func (e *Engine) SetLookupResolver(r lookup.Resolver) {
 	e.lookupResolver = r
 }
 
-// isMultiStore returns true if this engine operates in multi-store mode.
-func (e *Engine) isMultiStore() bool {
+// isMultiVault returns true if this engine operates in multi-vault mode.
+func (e *Engine) isMultiVault() bool {
 	return e.registry != nil
 }
 
-// getStoreManagers returns the chunk and index managers for a store.
-// For single-store mode, storeID is ignored.
-func (e *Engine) getStoreManagers(storeID uuid.UUID) (chunk.ChunkManager, index.IndexManager) {
+// getVaultManagers returns the chunk and index managers for a vault.
+// For single-vault mode, vaultID is ignored.
+func (e *Engine) getVaultManagers(vaultID uuid.UUID) (chunk.ChunkManager, index.IndexManager) {
 	if e.registry != nil {
-		return e.registry.ChunkManager(storeID), e.registry.IndexManager(storeID)
+		return e.registry.ChunkManager(vaultID), e.registry.IndexManager(vaultID)
 	}
 	return e.chunks, e.indexes
 }
 
-// listStores returns all store IDs this engine can query.
-func (e *Engine) listStores() []uuid.UUID {
+// listVaults returns all vault IDs this engine can query.
+func (e *Engine) listVaults() []uuid.UUID {
 	if e.registry != nil {
-		return e.registry.ListStores()
+		return e.registry.ListVaults()
 	}
 	return []uuid.UUID{uuid.Nil}
 }
@@ -423,14 +423,14 @@ func sortChunksByStartTS(out []chunk.ChunkMeta, reverse bool) {
 }
 
 // searchChunkWithRef returns an iterator over records in a single chunk, including their refs.
-// storeID identifies which store the chunk belongs to (for multi-store queries).
+// vaultID identifies which vault the chunk belongs to (for multi-vault queries).
 // startPos allows resuming from a specific position within the chunk.
 // Unsealed chunks are scanned sequentially without indexes.
-func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, storeID uuid.UUID, meta chunk.ChunkMeta, startPos *uint64) iter.Seq2[recordWithRef, error] {
+func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, vaultID uuid.UUID, meta chunk.ChunkMeta, startPos *uint64) iter.Seq2[recordWithRef, error] {
 	return func(yield func(recordWithRef, error) bool) {
-		cm, im := e.getStoreManagers(storeID)
+		cm, im := e.getVaultManagers(vaultID)
 		if cm == nil {
-			yield(recordWithRef{}, errors.New("store not found: "+storeID.String()))
+			yield(recordWithRef{}, errors.New("vault not found: "+vaultID.String()))
 			return
 		}
 
@@ -448,7 +448,7 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, storeID uuid.U
 
 		// Try to use indexes for sealed chunks, fall back to sequential scan
 		// if indexes aren't available yet (chunk sealed but not yet indexed).
-		scanner, err := e.buildScannerWithManagers(ctx, cursor, q, storeID, meta, startPos, cm, im)
+		scanner, err := e.buildScannerWithManagers(ctx, cursor, q, vaultID, meta, startPos, cm, im)
 		if err != nil {
 			yield(recordWithRef{}, err)
 			return
@@ -460,7 +460,7 @@ func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, storeID uuid.U
 				return
 			}
 			rr.Record.Ref = rr.Ref
-			rr.Record.StoreID = rr.StoreID
+			rr.Record.VaultID = rr.VaultID
 			if !yield(rr, nil) {
 				return
 			}
@@ -496,10 +496,10 @@ func positionCursor(cursor chunk.RecordCursor, q Query, meta chunk.ChunkMeta, st
 
 // buildScannerWithManagers creates a scanner for a chunk using the composable filter pipeline.
 // It tries to use indexes when available, falling back to runtime filters when not.
-// storeID is included in the returned recordWithRef for multi-store queries.
-func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.RecordCursor, q Query, storeID uuid.UUID, meta chunk.ChunkMeta, startPos *uint64, cm chunk.ChunkManager, im index.IndexManager) (iter.Seq2[recordWithRef, error], error) {
+// vaultID is included in the returned recordWithRef for multi-vault queries.
+func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.RecordCursor, q Query, vaultID uuid.UUID, meta chunk.ChunkMeta, startPos *uint64, cm chunk.ChunkManager, im index.IndexManager) (iter.Seq2[recordWithRef, error], error) {
 	b := newScannerBuilder(meta.ID)
-	b.storeID = storeID
+	b.vaultID = vaultID
 
 	setMinPositionsFromBounds(b, q, meta, cm, im)
 

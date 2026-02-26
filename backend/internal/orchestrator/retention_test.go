@@ -118,7 +118,7 @@ func newRetentionRunner(cm chunk.ChunkManager, im index.IndexManager, policy chu
 		}
 	}
 	return &retentionRunner{
-		storeID:  uuid.Must(uuid.NewV7()),
+		vaultID:  uuid.Must(uuid.NewV7()),
 		cm:       cm,
 		im:       im,
 		rules: rules,

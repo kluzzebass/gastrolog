@@ -7,14 +7,14 @@ import {
   CertIcon,
   ServiceIcon,
   FilterIcon,
-  StoresIcon,
+  VaultsIcon,
   IngestersIcon,
   RetentionIcon,
   PolicyIcon,
   UsersIcon,
   LookupIcon,
 } from "../icons";
-import { StoresSettings } from "./StoresSettings";
+import { VaultsSettings } from "./VaultsSettings";
 import { IngestersSettings } from "./IngestersSettings";
 import { CertificatesSettings } from "./CertificatesSettings";
 import { FiltersSettings } from "./FiltersSettings";
@@ -59,7 +59,7 @@ export type SettingsTab =
   | "service"
   | "certificates"
   | "lookups"
-  | "stores"
+  | "vaults"
   | "ingesters"
   | "filters"
   | "policies"
@@ -92,7 +92,7 @@ const allTabs: TabDef[] = [
   { id: "filters", label: "Filters", icon: FilterIcon, helpTopicId: "routing" },
   { id: "policies", label: "Rotation Policies", icon: PolicyIcon, helpTopicId: "policy-rotation" },
   { id: "retention", label: "Retention Policies", icon: RetentionIcon, helpTopicId: "policy-retention" },
-  { id: "stores", label: "Stores", icon: StoresIcon, helpTopicId: "storage-engines" },
+  { id: "vaults", label: "Vaults", icon: VaultsIcon, helpTopicId: "storage-engines" },
 ];
 
 export function SettingsDialog({
@@ -153,7 +153,7 @@ export function SettingsDialog({
           {tab === "filters" && <FiltersSettings dark={dark} onNavigateTo={navigateTo} />}
           {tab === "policies" && <PoliciesSettings dark={dark} onNavigateTo={navigateTo} />}
           {tab === "retention" && <RetentionPoliciesSettings dark={dark} onNavigateTo={navigateTo} />}
-          {tab === "stores" && <StoresSettings dark={dark} expandTarget={expandTarget} onExpandTargetConsumed={clearExpandTarget} />}
+          {tab === "vaults" && <VaultsSettings dark={dark} expandTarget={expandTarget} onExpandTargetConsumed={clearExpandTarget} />}
         </div>
       </div>
     </Dialog>

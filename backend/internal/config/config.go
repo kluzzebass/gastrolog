@@ -61,11 +61,11 @@ type Store interface {
 	PutRetentionPolicy(ctx context.Context, cfg RetentionPolicyConfig) error
 	DeleteRetentionPolicy(ctx context.Context, id uuid.UUID) error
 
-	// Stores
-	GetStore(ctx context.Context, id uuid.UUID) (*StoreConfig, error)
-	ListStores(ctx context.Context) ([]StoreConfig, error)
-	PutStore(ctx context.Context, cfg StoreConfig) error
-	DeleteStore(ctx context.Context, id uuid.UUID) error
+	// Vaults
+	GetVault(ctx context.Context, id uuid.UUID) (*VaultConfig, error)
+	ListVaults(ctx context.Context) ([]VaultConfig, error)
+	PutVault(ctx context.Context, cfg VaultConfig) error
+	DeleteVault(ctx context.Context, id uuid.UUID) error
 
 	// Ingesters
 	GetIngester(ctx context.Context, id uuid.UUID) (*IngesterConfig, error)
@@ -113,7 +113,7 @@ type Config struct {
 	RotationPolicies  []RotationPolicyConfig  `json:"rotationPolicies,omitempty"`
 	RetentionPolicies []RetentionPolicyConfig `json:"retentionPolicies,omitempty"`
 	Ingesters         []IngesterConfig        `json:"ingesters,omitempty"`
-	Stores            []StoreConfig           `json:"stores,omitempty"`
+	Vaults            []VaultConfig           `json:"vaults,omitempty"`
 	Settings          map[string]string       `json:"settings,omitempty"`
 	Certs             []CertPEM               `json:"certs,omitempty"`
 }
@@ -218,7 +218,7 @@ type User struct {
 }
 
 // FilterConfig defines a named filter expression.
-// Stores reference filters by UUID to determine which messages they receive.
+// Vaults reference filters by UUID to determine which messages they receive.
 type FilterConfig struct {
 	// ID is the unique identifier (UUIDv7).
 	ID uuid.UUID `json:"id"`
@@ -232,7 +232,7 @@ type FilterConfig struct {
 	//   - "+": catch-the-rest, receives messages that matched no other filter
 	//   - any other value: querylang expression matched against message attrs
 	//     (e.g., "env=prod AND level=error")
-	// Empty expression means the store receives nothing.
+	// Empty expression means the vault receives nothing.
 	Expression string `json:"expression"`
 }
 
@@ -308,7 +308,7 @@ type RetentionPolicyConfig struct {
 	// Uses Go duration format (e.g., "720h", "24h").
 	MaxAge *string `json:"maxAge,omitempty"`
 
-	// MaxBytes deletes oldest sealed chunks when total store size exceeds this value.
+	// MaxBytes deletes oldest sealed chunks when total vault size exceeds this value.
 	// Supports suffixes: B, KB, MB, GB (e.g., "10GB", "500MB").
 	MaxBytes *string `json:"maxBytes,omitempty"`
 
@@ -375,7 +375,7 @@ type IngesterConfig struct {
 
 	// Params contains type-specific configuration as opaque string key-value pairs.
 	// Parsing and validation are the responsibility of the factory that consumes
-	// the params. There is no schema enforcement at the ConfigStore level.
+	// the params. There is no schema enforcement at the ConfigVault level.
 	Params map[string]string `json:"params,omitempty"`
 }
 
@@ -461,7 +461,7 @@ type RetentionAction string
 const (
 	// RetentionActionExpire deletes matching chunks (the default behavior).
 	RetentionActionExpire RetentionAction = "expire"
-	// RetentionActionMigrate moves matching chunks to a destination store.
+	// RetentionActionMigrate moves matching chunks to a destination vault.
 	RetentionActionMigrate RetentionAction = "migrate"
 )
 
@@ -469,22 +469,22 @@ const (
 type RetentionRule struct {
 	RetentionPolicyID uuid.UUID       `json:"retentionPolicyId"`
 	Action            RetentionAction `json:"action"`
-	Destination       *uuid.UUID      `json:"destination,omitempty"` // target store, only for migrate
+	Destination       *uuid.UUID      `json:"destination,omitempty"` // target vault, only for migrate
 }
 
-// StoreConfig describes a storage backend to instantiate.
-type StoreConfig struct {
+// VaultConfig describes a storage backend to instantiate.
+type VaultConfig struct {
 	// ID is the unique identifier (UUIDv7).
 	ID uuid.UUID `json:"id"`
 
 	// Name is the human-readable display name (unique).
 	Name string `json:"name"`
 
-	// Type identifies the store implementation (e.g., "file", "memory").
+	// Type identifies the vault implementation (e.g., "file", "memory").
 	Type string `json:"type"`
 
 	// Filter references a filter by UUID.
-	// Nil means no filter (store receives nothing).
+	// Nil means no filter (vault receives nothing).
 	Filter *uuid.UUID `json:"filter,omitempty"`
 
 	// Policy references a rotation policy by UUID.
@@ -494,13 +494,13 @@ type StoreConfig struct {
 	// RetentionRules pairs retention policies with actions (expire or migrate).
 	RetentionRules []RetentionRule `json:"retentionRules,omitempty"`
 
-	// Enabled indicates whether ingestion is enabled for this store.
-	// When false, the store will not receive new records from the ingest pipeline.
+	// Enabled indicates whether ingestion is enabled for this vault.
+	// When false, the vault will not receive new records from the ingest pipeline.
 	Enabled bool `json:"enabled,omitempty"`
 
 	// Params contains type-specific configuration as opaque string key-value pairs.
 	// Parsing and validation are the responsibility of the factory that consumes
-	// the params. There is no schema enforcement at the ConfigStore level.
+	// the params. There is no schema enforcement at the ConfigVault level.
 	Params map[string]string `json:"params,omitempty"`
 }
 

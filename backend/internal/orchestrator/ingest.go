@@ -45,33 +45,33 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
-	if len(o.stores) == 0 {
+	if len(o.vaults) == 0 {
 		return ErrNoChunkManagers
 	}
 
-	// Determine which stores should receive this message.
-	var targetStores []uuid.UUID
+	// Determine which vaults should receive this message.
+	var targetVaults []uuid.UUID
 	if o.filterSet != nil {
-		targetStores = o.filterSet.Match(rec.Attrs)
+		targetVaults = o.filterSet.Match(rec.Attrs)
 	} else {
-		// Legacy behavior: fan-out to all stores.
-		targetStores = make([]uuid.UUID, 0, len(o.stores))
-		for key := range o.stores {
-			targetStores = append(targetStores, key)
+		// Legacy behavior: fan-out to all vaults.
+		targetVaults = make([]uuid.UUID, 0, len(o.vaults))
+		for key := range o.vaults {
+			targetVaults = append(targetVaults, key)
 		}
 	}
 
-	// Dispatch to target stores only.
-	for _, key := range targetStores {
-		store := o.stores[key]
-		if store == nil || !store.Enabled {
+	// Dispatch to target vaults only.
+	for _, key := range targetVaults {
+		vault := o.vaults[key]
+		if vault == nil || !vault.Enabled {
 			continue
 		}
 		onSeal := func(cid chunk.ChunkID) {
 			o.scheduleCompression(key, cid)
 			o.scheduleIndexBuild(key, cid)
 		}
-		if err := store.Append(rec, onSeal); err != nil {
+		if err := vault.Append(rec, onSeal); err != nil {
 			return err
 		}
 	}
@@ -92,12 +92,12 @@ func (o *Orchestrator) postSealWork(storeID uuid.UUID, chunkID chunk.ChunkID) {
 // scheduleCompression triggers an asynchronous compression job for the given chunk
 // via the shared scheduler. Only dispatched if the ChunkManager implements ChunkCompressor.
 func (o *Orchestrator) scheduleCompression(registryKey uuid.UUID, chunkID chunk.ChunkID) {
-	store := o.stores[registryKey]
-	if store == nil {
+	vault := o.vaults[registryKey]
+	if vault == nil {
 		return
 	}
 
-	compressor, ok := store.Chunks.(chunk.ChunkCompressor)
+	compressor, ok := vault.Chunks.(chunk.ChunkCompressor)
 	if !ok {
 		return
 	}
@@ -113,18 +113,18 @@ func (o *Orchestrator) scheduleCompression(registryKey uuid.UUID, chunkID chunk.
 // and subject to the scheduler's concurrency limit.
 // The IndexManager handles deduplication of concurrent builds for the same chunk.
 func (o *Orchestrator) scheduleIndexBuild(registryKey uuid.UUID, chunkID chunk.ChunkID) {
-	store := o.stores[registryKey]
-	if store == nil {
+	vault := o.vaults[registryKey]
+	if vault == nil {
 		return
 	}
 
 	// Wrap the index build to refresh chunk disk sizes afterward,
 	// since index files are written into the chunk directory.
 	buildFn := func(ctx context.Context, id chunk.ChunkID) error {
-		if err := store.Indexes.BuildIndexes(ctx, id); err != nil {
+		if err := vault.Indexes.BuildIndexes(ctx, id); err != nil {
 			return err
 		}
-		if compressor, ok := store.Chunks.(chunk.ChunkCompressor); ok {
+		if compressor, ok := vault.Chunks.(chunk.ChunkCompressor); ok {
 			compressor.RefreshDiskSizes(id)
 		}
 		return nil

@@ -18,7 +18,7 @@ service QueryService {
   // Explain returns the query execution plan without executing.
   rpc Explain(ExplainRequest) returns (ExplainResponse);
 
-  // GetContext returns records surrounding a specific record, across all stores.
+  // GetContext returns records surrounding a specific record, across all vaults.
   // Uses the anchor record's write timestamp to find nearby records.
   rpc GetContext(GetContextRequest) returns (GetContextResponse);
 
@@ -36,7 +36,7 @@ service QueryService {
 }
 
 message SearchRequest {
-  // store field removed - use store=X in query expression instead
+  // store field removed - use vault=X in query expression instead
   reserved 1;
   reserved "store";
   Query query = 2;
@@ -66,7 +66,7 @@ message TableRow {
 }
 
 message FollowRequest {
-  // store field removed - use store=X in query expression instead
+  // store field removed - use vault=X in query expression instead
   reserved 1;
   reserved "store";
   Query query = 2;
@@ -77,7 +77,7 @@ message FollowResponse {
 }
 
 message ExplainRequest {
-  // store field removed - use store=X in query expression instead
+  // store field removed - use vault=X in query expression instead
   reserved 1;
   reserved "store";
   Query query = 2;
@@ -106,7 +106,7 @@ message Query {
   // Supports the full query language: bare words (tokens), key=value,
   // AND/OR/NOT, parentheses, start=/end=/limit= control args.
   // Examples: "error timeout", "(error OR warn) AND NOT debug",
-  //           "start=2024-01-01T00:00:00Z level=error store=prod"
+  //           "start=2024-01-01T00:00:00Z level=error vault=prod"
   string expression = 8;
 }
 
@@ -127,17 +127,17 @@ message Record {
 message RecordRef {
   string chunk_id = 1;
   uint64 pos = 2;
-  string store_id = 3; // Store this record belongs to
+  string vault_id = 3; // Vault this record belongs to
 }
 
-// ResumeToken encodes pagination state for multi-store queries.
-// The positions array tracks the last returned position for each store/chunk.
+// ResumeToken encodes pagination state for multi-vault queries.
+// The positions array tracks the last returned position for each vault/chunk.
 message ResumeToken {
-  repeated StorePosition positions = 1;
+  repeated VaultPosition positions = 1;
 }
 
-message StorePosition {
-  string store_id = 1;
+message VaultPosition {
+  string vault_id = 1;
   string chunk_id = 2;
   uint64 position = 3; // MaxUint64 indicates chunk is exhausted
 }
@@ -150,7 +150,7 @@ message ChunkPlan {
   string scan_mode = 5; // "sequential", "index-driven", or "skipped"
   int64 estimated_records = 6;
   repeated string runtime_filters = 7;
-  string store_id = 8;
+  string vault_id = 8;
   google.protobuf.Timestamp start_ts = 9;
   google.protobuf.Timestamp end_ts = 10;
   string skip_reason = 11;
@@ -182,9 +182,9 @@ message GetContextRequest {
 }
 
 message GetContextResponse {
-  repeated Record before = 1;  // Records before anchor, oldest first, all stores
+  repeated Record before = 1;  // Records before anchor, oldest first, all vaults
   Record anchor = 2;           // The anchor record itself
-  repeated Record after = 3;   // Records after anchor, oldest first, all stores
+  repeated Record after = 3;   // Records after anchor, oldest first, all vaults
 }
 
 message GetSyntaxRequest {}

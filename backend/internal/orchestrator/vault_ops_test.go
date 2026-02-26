@@ -16,16 +16,16 @@ import (
 
 func newFacadeSetup(t *testing.T) (*orchestrator.Orchestrator, uuid.UUID) {
 	t.Helper()
-	s := memtest.MustNewStore(t, chunkmem.Config{
+	s := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(5),
 	})
 	id := uuid.Must(uuid.NewV7())
 	orch := orchestrator.New(orchestrator.Config{})
-	orch.RegisterStore(orchestrator.NewStore(id, s.CM, s.IM, s.QE))
+	orch.RegisterVault(orchestrator.NewVault(id, s.CM, s.IM, s.QE))
 	return orch, id
 }
 
-func appendRecords(t *testing.T, orch *orchestrator.Orchestrator, storeID uuid.UUID, n int) {
+func appendRecords(t *testing.T, orch *orchestrator.Orchestrator, vaultID uuid.UUID, n int) {
 	t.Helper()
 	for i := range n {
 		ts := time.Date(2025, 1, 1, 0, 0, i, 0, time.UTC)
@@ -33,19 +33,19 @@ func appendRecords(t *testing.T, orch *orchestrator.Orchestrator, storeID uuid.U
 			IngestTS: ts,
 			Raw:      []byte("msg"),
 		}
-		if _, _, err := orch.Append(storeID, rec); err != nil {
+		if _, _, err := orch.Append(vaultID, rec); err != nil {
 			t.Fatalf("Append record %d: %v", i, err)
 		}
 	}
 }
 
-func TestStoreExists(t *testing.T) {
+func TestVaultExists(t *testing.T) {
 	orch, id := newFacadeSetup(t)
-	if !orch.StoreExists(id) {
-		t.Fatal("StoreExists returned false for registered store")
+	if !orch.VaultExists(id) {
+		t.Fatal("VaultExists returned false for registered vault")
 	}
-	if orch.StoreExists(uuid.Must(uuid.NewV7())) {
-		t.Fatal("StoreExists returned true for unknown store")
+	if orch.VaultExists(uuid.Must(uuid.NewV7())) {
+		t.Fatal("VaultExists returned true for unknown vault")
 	}
 }
 
@@ -62,11 +62,11 @@ func TestListChunkMetas(t *testing.T) {
 	}
 }
 
-func TestListChunkMetas_UnknownStore(t *testing.T) {
+func TestListChunkMetas_UnknownVault(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 	_, err := orch.ListChunkMetas(uuid.Must(uuid.NewV7()))
-	if !errors.Is(err, orchestrator.ErrStoreNotFound) {
-		t.Fatalf("expected ErrStoreNotFound, got %v", err)
+	if !errors.Is(err, orchestrator.ErrVaultNotFound) {
+		t.Fatalf("expected ErrVaultNotFound, got %v", err)
 	}
 }
 
@@ -116,15 +116,15 @@ func TestSealActive_Empty(t *testing.T) {
 	orch, id := newFacadeSetup(t)
 	// No records appended — seal should be a no-op.
 	if err := orch.SealActive(id); err != nil {
-		t.Fatalf("SealActive on empty store: %v", err)
+		t.Fatalf("SealActive on empty vault: %v", err)
 	}
 }
 
-func TestSealActive_UnknownStore(t *testing.T) {
+func TestSealActive_UnknownVault(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 	err := orch.SealActive(uuid.Must(uuid.NewV7()))
-	if !errors.Is(err, orchestrator.ErrStoreNotFound) {
-		t.Fatalf("expected ErrStoreNotFound, got %v", err)
+	if !errors.Is(err, orchestrator.ErrVaultNotFound) {
+		t.Fatalf("expected ErrVaultNotFound, got %v", err)
 	}
 }
 
@@ -161,11 +161,11 @@ func TestAppend(t *testing.T) {
 	_ = pos
 }
 
-func TestAppend_UnknownStore(t *testing.T) {
+func TestAppend_UnknownVault(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 	_, _, err := orch.Append(uuid.Must(uuid.NewV7()), chunk.Record{Raw: []byte("x")})
-	if !errors.Is(err, orchestrator.ErrStoreNotFound) {
-		t.Fatalf("expected ErrStoreNotFound, got %v", err)
+	if !errors.Is(err, orchestrator.ErrVaultNotFound) {
+		t.Fatalf("expected ErrVaultNotFound, got %v", err)
 	}
 }
 
@@ -264,48 +264,48 @@ func TestNewAnalyzer(t *testing.T) {
 	}
 }
 
-func TestNewAnalyzer_UnknownStore(t *testing.T) {
+func TestNewAnalyzer_UnknownVault(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 	_, err := orch.NewAnalyzer(uuid.Must(uuid.NewV7()))
-	if !errors.Is(err, orchestrator.ErrStoreNotFound) {
-		t.Fatalf("expected ErrStoreNotFound, got %v", err)
+	if !errors.Is(err, orchestrator.ErrVaultNotFound) {
+		t.Fatalf("expected ErrVaultNotFound, got %v", err)
 	}
 }
 
-func TestSupportsChunkMove_MemoryStores(t *testing.T) {
+func TestSupportsChunkMove_MemoryVaults(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
-	s1 := memtest.MustNewStore(t, chunkmem.Config{})
-	s2 := memtest.MustNewStore(t, chunkmem.Config{})
+	s1 := memtest.MustNewVault(t, chunkmem.Config{})
+	s2 := memtest.MustNewVault(t, chunkmem.Config{})
 	id1 := uuid.Must(uuid.NewV7())
 	id2 := uuid.Must(uuid.NewV7())
-	orch.RegisterStore(orchestrator.NewStore(id1, s1.CM, s1.IM, s1.QE))
-	orch.RegisterStore(orchestrator.NewStore(id2, s2.CM, s2.IM, s2.QE))
+	orch.RegisterVault(orchestrator.NewVault(id1, s1.CM, s1.IM, s1.QE))
+	orch.RegisterVault(orchestrator.NewVault(id2, s2.CM, s2.IM, s2.QE))
 
-	// Memory stores don't support ChunkMover.
+	// Memory vaults don't support ChunkMover.
 	if orch.SupportsChunkMove(id1, id2) {
-		t.Fatal("memory stores should not support chunk move")
+		t.Fatal("memory vaults should not support chunk move")
 	}
 }
 
 func TestCopyRecords(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
-	srcStore := memtest.MustNewStore(t, chunkmem.Config{
+	srcVault := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(5),
 	})
-	dstStore := memtest.MustNewStore(t, chunkmem.Config{})
+	dstVault := memtest.MustNewVault(t, chunkmem.Config{})
 
 	srcID := uuid.Must(uuid.NewV7())
 	dstID := uuid.Must(uuid.NewV7())
-	orch.RegisterStore(orchestrator.NewStore(srcID, srcStore.CM, srcStore.IM, srcStore.QE))
-	orch.RegisterStore(orchestrator.NewStore(dstID, dstStore.CM, dstStore.IM, dstStore.QE))
+	orch.RegisterVault(orchestrator.NewVault(srcID, srcVault.CM, srcVault.IM, srcVault.QE))
+	orch.RegisterVault(orchestrator.NewVault(dstID, dstVault.CM, dstVault.IM, dstVault.QE))
 
 	// Append records to source.
 	for i := range 8 {
 		ts := time.Date(2025, 1, 1, 0, 0, i, 0, time.UTC)
 		rec := chunk.Record{IngestTS: ts, Raw: []byte("msg")}
-		if _, _, err := srcStore.CM.Append(rec); err != nil {
+		if _, _, err := srcVault.CM.Append(rec); err != nil {
 			t.Fatalf("append: %v", err)
 		}
 	}

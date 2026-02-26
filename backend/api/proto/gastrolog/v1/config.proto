@@ -33,11 +33,11 @@ service ConfigService {
   // DeleteRetentionPolicy removes a retention policy.
   rpc DeleteRetentionPolicy(DeleteRetentionPolicyRequest) returns (DeleteRetentionPolicyResponse);
 
-  // PutStore creates or updates a store.
-  rpc PutStore(PutStoreRequest) returns (PutStoreResponse);
+  // PutVault creates or updates a vault.
+  rpc PutVault(PutVaultRequest) returns (PutVaultResponse);
 
-  // DeleteStore removes a store (must be empty).
-  rpc DeleteStore(DeleteStoreRequest) returns (DeleteStoreResponse);
+  // DeleteVault removes a vault (must be empty).
+  rpc DeleteVault(DeleteVaultRequest) returns (DeleteVaultResponse);
 
   // PutIngester creates or updates an ingester.
   rpc PutIngester(PutIngesterRequest) returns (PutIngesterResponse);
@@ -78,11 +78,11 @@ service ConfigService {
   // DeleteCertificate removes a certificate.
   rpc DeleteCertificate(DeleteCertificateRequest) returns (DeleteCertificateResponse);
 
-  // PauseStore pauses ingestion for a store.
-  rpc PauseStore(PauseStoreRequest) returns (PauseStoreResponse);
+  // PauseVault pauses ingestion for a vault.
+  rpc PauseVault(PauseVaultRequest) returns (PauseVaultResponse);
 
-  // ResumeStore resumes ingestion for a store.
-  rpc ResumeStore(ResumeStoreRequest) returns (ResumeStoreResponse);
+  // ResumeVault resumes ingestion for a vault.
+  rpc ResumeVault(ResumeVaultRequest) returns (ResumeVaultResponse);
 
   // TestIngester tests connectivity for an ingester configuration without saving it.
   rpc TestIngester(TestIngesterRequest) returns (TestIngesterResponse);
@@ -94,7 +94,7 @@ service ConfigService {
 message GetConfigRequest {}
 
 message GetConfigResponse {
-  repeated StoreConfig stores = 1;
+  repeated VaultConfig vaults = 1;
   repeated IngesterConfig ingesters = 2;
   repeated RotationPolicyConfig rotation_policies = 3;
   repeated FilterConfig filters = 4;
@@ -104,10 +104,10 @@ message GetConfigResponse {
 message RetentionRule {
   string retention_policy_id = 1;
   string action = 2;              // "expire" or "migrate"
-  string destination_id = 3;      // target store, only for action=migrate
+  string destination_id = 3;      // target vault, only for action=migrate
 }
 
-message StoreConfig {
+message VaultConfig {
   string id = 1;
   string type = 2;
   string filter = 3;
@@ -212,18 +212,18 @@ message DeleteRetentionPolicyRequest {
 
 message DeleteRetentionPolicyResponse {}
 
-message PutStoreRequest {
-  StoreConfig config = 1;
+message PutVaultRequest {
+  VaultConfig config = 1;
 }
 
-message PutStoreResponse {}
+message PutVaultResponse {}
 
-message DeleteStoreRequest {
+message DeleteVaultRequest {
   string id = 1;
   bool force = 2;
 }
 
-message DeleteStoreResponse {}
+message DeleteVaultResponse {}
 
 message PutIngesterRequest {
   IngesterConfig config = 1;
@@ -387,17 +387,17 @@ message DeleteCertificateRequest {
 
 message DeleteCertificateResponse {}
 
-message PauseStoreRequest {
+message PauseVaultRequest {
   string id = 1;
 }
 
-message PauseStoreResponse {}
+message PauseVaultResponse {}
 
-message ResumeStoreRequest {
+message ResumeVaultRequest {
   string id = 1;
 }
 
-message ResumeStoreResponse {}
+message ResumeVaultResponse {}
 
 message TestIngesterRequest {
   string type = 1;

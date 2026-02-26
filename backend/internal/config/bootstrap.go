@@ -11,13 +11,13 @@ import (
 )
 
 // DefaultConfig returns the bootstrap configuration for first-run.
-// The default store is always in-memory; file-backed stores are only created
+// The default vault is always in-memory; file-backed vaults are only created
 // when the user explicitly configures one.
 func DefaultConfig() *Config {
 	filterID := uuid.Must(uuid.NewV7())
 	rotationID := uuid.Must(uuid.NewV7())
 	retentionID := uuid.Must(uuid.NewV7())
-	storeID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
 	ingesterID := uuid.Must(uuid.NewV7())
 
 	return &Config{
@@ -30,9 +30,9 @@ func DefaultConfig() *Config {
 		RetentionPolicies: []RetentionPolicyConfig{
 			{ID: retentionID, Name: "default", MaxChunks: new(int64(10))},
 		},
-		Stores: []StoreConfig{
+		Vaults: []VaultConfig{
 			{
-				ID:        storeID,
+				ID:        vaultID,
 				Name:      "default",
 				Type:      "memory",
 				Enabled:   true,
@@ -80,8 +80,8 @@ func Bootstrap(ctx context.Context, store Store) error {
 			return err
 		}
 	}
-	for _, st := range cfg.Stores {
-		if err := store.PutStore(ctx, st); err != nil {
+	for _, v := range cfg.Vaults {
+		if err := store.PutVault(ctx, v); err != nil {
 			return err
 		}
 	}
@@ -93,11 +93,11 @@ func Bootstrap(ctx context.Context, store Store) error {
 
 	// Generate a random JWT secret and store it as server config.
 	//
-	// Security note: the JWT secret is stored as base64 in the config store
+	// Security note: the JWT secret is stored as base64 in the config vault
 	// (SQLite DB or JSON file). It is NOT encrypted at rest. An attacker with
-	// read access to the config store can forge authentication tokens.
+	// read access to the config vault can forge authentication tokens.
 	//
-	// Mitigations: restrict filesystem permissions on the config store
+	// Mitigations: restrict filesystem permissions on the config vault
 	// (e.g. 0600 / owner-only) and use full-disk encryption where possible.
 	// Application-level encryption was considered but only shifts the problem
 	// to key management without meaningful security gain in this deployment model.
@@ -128,8 +128,8 @@ func Bootstrap(ctx context.Context, store Store) error {
 }
 
 // BootstrapMinimal writes only the server config (JWT secret + token duration)
-// to the store. This allows auth to work without creating any stores, filters,
-// policies, or ingesters — suitable for first-time setup via the wizard UI.
+// to the store. This allows auth to work without creating any vaults, filters,
+// policies, or ingesters -- suitable for first-time setup via the wizard UI.
 func BootstrapMinimal(ctx context.Context, store Store) error {
 	secret := make([]byte, 32)
 	if _, err := rand.Read(secret); err != nil {

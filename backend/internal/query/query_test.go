@@ -73,7 +73,7 @@ func fakeClockForBatches(batches [][]chunk.Record) func() time.Time {
 func setup(t *testing.T, batches ...[]chunk.Record) *query.Engine {
 	t.Helper()
 
-	s := memtest.MustNewStore(t, chunkmem.Config{
+	s := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(10000), // Large enough to not auto-rotate
 		Now:            fakeClockForBatches(batches),
 	})
@@ -100,7 +100,7 @@ func setupWithActive(t *testing.T, sealed [][]chunk.Record, active []chunk.Recor
 
 	// Combine sealed batches with active batch for clock generation
 	allBatches := append(sealed, active)
-	s := memtest.MustNewStore(t, chunkmem.Config{
+	s := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(10000),
 		Now:            fakeClockForBatches(allBatches),
 	})
@@ -1854,7 +1854,7 @@ func TestSearchSealedWithoutIndexes(t *testing.T) {
 	}
 
 	// Create chunk manager and append records.
-	s := memtest.MustNewStore(t, chunkmem.Config{
+	s := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(10000),
 		Now:            fakeClockForBatches([][]chunk.Record{records}),
 	})

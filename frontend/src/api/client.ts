@@ -6,7 +6,7 @@ import {
 } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { QueryService } from "./gen/gastrolog/v1/query_connect";
-import { StoreService } from "./gen/gastrolog/v1/store_connect";
+import { VaultService } from "./gen/gastrolog/v1/vault_connect";
 import { LifecycleService } from "./gen/gastrolog/v1/lifecycle_connect";
 import { ConfigService } from "./gen/gastrolog/v1/config_connect";
 import { AuthService } from "./gen/gastrolog/v1/auth_connect";
@@ -159,7 +159,7 @@ const transport = createConnectTransport({
 
 // Service clients
 export const queryClient = createPromiseClient(QueryService, transport);
-export const storeClient = createPromiseClient(StoreService, transport);
+export const vaultClient = createPromiseClient(VaultService, transport);
 export const lifecycleClient = createPromiseClient(LifecycleService, transport);
 export const configClient = createPromiseClient(ConfigService, transport);
 export const authClient = createPromiseClient(AuthService, transport);
@@ -193,7 +193,7 @@ document.addEventListener("visibilitychange", () => {
 
 // Re-export types for convenience
 export * from "./gen/gastrolog/v1/query_pb";
-export * from "./gen/gastrolog/v1/store_pb";
+export * from "./gen/gastrolog/v1/vault_pb";
 export * from "./gen/gastrolog/v1/lifecycle_pb";
 export * from "./gen/gastrolog/v1/config_pb";
 export * from "./gen/gastrolog/v1/auth_pb";

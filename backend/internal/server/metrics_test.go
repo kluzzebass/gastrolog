@@ -20,11 +20,11 @@ import (
 func TestMetricsEndpoint(t *testing.T) {
 	orch := orchestrator.New(orchestrator.Config{})
 
-	s := memtest.MustNewStore(t, chunkmem.Config{
+	s := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
 	})
 
-	// Add some records so store has data.
+	// Add some records so vault has data.
 	t0 := time.Now()
 	for i := range 5 {
 		s.CM.Append(chunk.Record{
@@ -33,8 +33,8 @@ func TestMetricsEndpoint(t *testing.T) {
 		})
 	}
 
-	storeID := uuid.Must(uuid.NewV7())
-	orch.RegisterStore(orchestrator.NewStore(storeID, s.CM, s.IM, s.QE))
+	vaultID := uuid.Must(uuid.NewV7())
+	orch.RegisterVault(orchestrator.NewVault(vaultID, s.CM, s.IM, s.QE))
 
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
 	handler := srv.Handler()
@@ -81,9 +81,9 @@ func TestMetricsEndpoint(t *testing.T) {
 		}
 	}
 
-	// Store should have records.
+	// Vault should have records.
 	if !strings.Contains(text, "gastrolog_store_records_total") {
-		t.Error("missing store records metric")
+		t.Error("missing vault records metric")
 	}
 }
 

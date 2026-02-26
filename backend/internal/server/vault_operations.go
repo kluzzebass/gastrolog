@@ -18,13 +18,13 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
-// makeCleanupFunc returns a callback that removes the source store from the
-// config store and cleans up its store directory. Safe to call from async jobs.
-func (s *StoreServer) makeCleanupFunc(srcID uuid.UUID, srcFileDir string) func(ctx context.Context) error {
+// makeCleanupFunc returns a callback that removes the source vault from the
+// config vault and cleans up its vault directory. Safe to call from async jobs.
+func (s *VaultServer) makeCleanupFunc(srcID uuid.UUID, srcFileDir string) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		if s.cfgStore != nil {
-			if err := s.cfgStore.DeleteStore(ctx, srcID); err != nil {
-				s.logger.Warn("cleanup: delete store config", "store", srcID, "error", err)
+			if err := s.cfgStore.DeleteVault(ctx, srcID); err != nil {
+				s.logger.Warn("cleanup: delete vault config", "vault", srcID, "error", err)
 			}
 		}
 		if srcFileDir != "" {
@@ -36,51 +36,51 @@ func (s *StoreServer) makeCleanupFunc(srcID uuid.UUID, srcFileDir string) func(c
 	}
 }
 
-// SealStore seals the active chunk of a store.
-func (s *StoreServer) SealStore(
+// SealVault seals the active chunk of a vault.
+func (s *VaultServer) SealVault(
 	ctx context.Context,
-	req *connect.Request[apiv1.SealStoreRequest],
-) (*connect.Response[apiv1.SealStoreResponse], error) {
-	if req.Msg.Store == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store required"))
+	req *connect.Request[apiv1.SealVaultRequest],
+) (*connect.Response[apiv1.SealVaultResponse], error) {
+	if req.Msg.Vault == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("vault required"))
 	}
-	storeID, connErr := parseUUID(req.Msg.Store)
+	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
 		return nil, connErr
 	}
 
-	if !s.orch.StoreExists(storeID) {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
+	if !s.orch.VaultExists(vaultID) {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("vault not found"))
 	}
 
-	if err := s.orch.SealActive(storeID); err != nil {
+	if err := s.orch.SealActive(vaultID); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("seal active chunk: %w", err))
 	}
 
-	return connect.NewResponse(&apiv1.SealStoreResponse{}), nil
+	return connect.NewResponse(&apiv1.SealVaultResponse{}), nil
 }
 
-// ReindexStore rebuilds all indexes for sealed chunks in a store.
+// ReindexVault rebuilds all indexes for sealed chunks in a vault.
 // The work is submitted as an async job; the response contains the job ID.
-func (s *StoreServer) ReindexStore(
+func (s *VaultServer) ReindexVault(
 	ctx context.Context,
-	req *connect.Request[apiv1.ReindexStoreRequest],
-) (*connect.Response[apiv1.ReindexStoreResponse], error) {
-	if req.Msg.Store == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store required"))
+	req *connect.Request[apiv1.ReindexVaultRequest],
+) (*connect.Response[apiv1.ReindexVaultResponse], error) {
+	if req.Msg.Vault == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("vault required"))
 	}
-	storeID, connErr := parseUUID(req.Msg.Store)
+	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
 		return nil, connErr
 	}
 
-	if !s.orch.StoreExists(storeID) {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("store not found"))
+	if !s.orch.VaultExists(vaultID) {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("vault not found"))
 	}
 
-	jobName := "reindex:" + storeID.String()
+	jobName := "reindex:" + vaultID.String()
 	jobID := s.orch.Scheduler().Submit(jobName, func(ctx context.Context, job *orchestrator.JobProgress) {
-		metas, err := s.orch.ListChunkMetas(storeID)
+		metas, err := s.orch.ListChunkMetas(vaultID)
 		if err != nil {
 			job.Fail(s.now(), err.Error())
 			return
@@ -98,28 +98,28 @@ func (s *StoreServer) ReindexStore(
 			if !meta.Sealed {
 				continue
 			}
-			if err := s.orch.DeleteIndexes(storeID, meta.ID); err != nil {
+			if err := s.orch.DeleteIndexes(vaultID, meta.ID); err != nil {
 				job.AddErrorDetail(fmt.Sprintf("delete indexes for chunk %s: %v", meta.ID, err))
 				continue
 			}
-			if err := s.orch.BuildIndexes(ctx, storeID, meta.ID); err != nil {
+			if err := s.orch.BuildIndexes(ctx, vaultID, meta.ID); err != nil {
 				job.AddErrorDetail(fmt.Sprintf("build indexes for chunk %s: %v", meta.ID, err))
 				continue
 			}
 			job.IncrChunks()
 		}
 	})
-	s.orch.Scheduler().Describe(jobName, fmt.Sprintf("Rebuild all indexes for '%s'", s.storeName(ctx, storeID)))
+	s.orch.Scheduler().Describe(jobName, fmt.Sprintf("Rebuild all indexes for '%s'", s.vaultName(ctx, vaultID)))
 
-	return connect.NewResponse(&apiv1.ReindexStoreResponse{JobId: jobID}), nil
+	return connect.NewResponse(&apiv1.ReindexVaultResponse{JobId: jobID}), nil
 }
 
-// MigrateStore moves a store to a new name, type, and/or location.
+// MigrateVault moves a vault to a new name, type, and/or location.
 // Three-phase: create destination, freeze source, async merge+delete.
-func (s *StoreServer) MigrateStore(
+func (s *VaultServer) MigrateVault(
 	ctx context.Context,
-	req *connect.Request[apiv1.MigrateStoreRequest],
-) (*connect.Response[apiv1.MigrateStoreResponse], error) {
+	req *connect.Request[apiv1.MigrateVaultRequest],
+) (*connect.Response[apiv1.MigrateVaultResponse], error) {
 	if req.Msg.Source == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("source required"))
 	}
@@ -133,12 +133,12 @@ func (s *StoreServer) MigrateStore(
 	}
 
 	// Source must exist.
-	if !s.orch.StoreExists(srcID) {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("source store not found"))
+	if !s.orch.VaultExists(srcID) {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("source vault not found"))
 	}
 
 	// Get source config for filter/policy and to resolve destination type.
-	srcCfg, err := s.getFullStoreConfig(ctx, srcID)
+	srcCfg, err := s.getFullVaultConfig(ctx, srcID)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("read source config: %w", err))
 	}
@@ -153,13 +153,13 @@ func (s *StoreServer) MigrateStore(
 	if dstParams == nil {
 		dstParams = make(map[string]string)
 	}
-	// File stores require an explicit dir — no auto-derive.
+	// File vaults require an explicit dir — no auto-derive.
 	if dstType == "file" && dstParams[chunkfile.ParamDir] == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("destination_params.dir required for file stores"))
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("destination_params.dir required for file vaults"))
 	}
 
-	// Phase 1: Create destination store with inherited filter/policy.
-	dstCfg := config.StoreConfig{
+	// Phase 1: Create destination vault with inherited filter/policy.
+	dstCfg := config.VaultConfig{
 		ID:        uuid.Must(uuid.NewV7()),
 		Name:      req.Msg.Destination,
 		Type:      dstType,
@@ -170,17 +170,17 @@ func (s *StoreServer) MigrateStore(
 		Params:    dstParams,
 	}
 
-	if err := s.createStore(ctx, dstCfg); err != nil {
+	if err := s.createVault(ctx, dstCfg); err != nil {
 		return nil, err
 	}
 
 	// Phase 2: Freeze source — disable ingestion and persist.
-	if err := s.orch.DisableStore(srcID); err != nil {
+	if err := s.orch.DisableVault(srcID); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("disable source: %w", err))
 	}
 	if s.cfgStore != nil {
 		srcCfg.Enabled = false
-		if err := s.cfgStore.PutStore(ctx, srcCfg); err != nil {
+		if err := s.cfgStore.PutVault(ctx, srcCfg); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("persist disabled source: %w", err))
 		}
 	}
@@ -192,7 +192,7 @@ func (s *StoreServer) MigrateStore(
 
 	// Phase 3: Async merge + delete.
 	dstID := dstCfg.ID
-	srcName := s.storeName(ctx, srcID)
+	srcName := s.vaultName(ctx, srcID)
 
 	// Capture file dir before the job runs (source config will be deleted).
 	var srcFileDir string
@@ -200,22 +200,22 @@ func (s *StoreServer) MigrateStore(
 		srcFileDir = srcCfg.Params[chunkfile.ParamDir]
 	}
 
-	jobID := s.orch.MigrateStore(ctx, orchestrator.TransferParams{
+	jobID := s.orch.MigrateVault(ctx, orchestrator.TransferParams{
 		SrcID:       srcID,
 		DstID:       dstID,
-		Description: fmt.Sprintf("Migrate '%s' to '%s'", srcName, s.storeName(ctx, dstID)),
+		Description: fmt.Sprintf("Migrate '%s' to '%s'", srcName, s.vaultName(ctx, dstID)),
 		CleanupSrc:  s.makeCleanupFunc(srcID, srcFileDir),
 	})
 
-	return connect.NewResponse(&apiv1.MigrateStoreResponse{JobId: jobID}), nil
+	return connect.NewResponse(&apiv1.MigrateVaultResponse{JobId: jobID}), nil
 }
 
-// MergeStores moves all chunks from a source store into a destination store,
-// then deletes the source. Both stores must support chunk-level moves (ChunkMover).
-func (s *StoreServer) MergeStores(
+// MergeVaults moves all chunks from a source vault into a destination vault,
+// then deletes the source. Both vaults must support chunk-level moves (ChunkMover).
+func (s *VaultServer) MergeVaults(
 	ctx context.Context,
-	req *connect.Request[apiv1.MergeStoresRequest],
-) (*connect.Response[apiv1.MergeStoresResponse], error) {
+	req *connect.Request[apiv1.MergeVaultsRequest],
+) (*connect.Response[apiv1.MergeVaultsResponse], error) {
 	if req.Msg.Source == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("source required"))
 	}
@@ -235,67 +235,67 @@ func (s *StoreServer) MergeStores(
 		return nil, connErr
 	}
 
-	// Both stores must exist.
-	if !s.orch.StoreExists(srcID) {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("source store not found"))
+	// Both vaults must exist.
+	if !s.orch.VaultExists(srcID) {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("source vault not found"))
 	}
-	if !s.orch.StoreExists(dstID) {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("destination store not found"))
+	if !s.orch.VaultExists(dstID) {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("destination vault not found"))
 	}
 
 	// Auto-disable source to prevent new data flowing in during merge.
-	if s.orch.IsStoreEnabled(srcID) {
-		if err := s.disableAndPersistStore(ctx, srcID); err != nil {
+	if s.orch.IsVaultEnabled(srcID) {
+		if err := s.disableAndPersistVault(ctx, srcID); err != nil {
 			return nil, err
 		}
 	}
 
 	// Capture source file dir before job runs (source config will be deleted).
 	var srcFileDir string
-	if srcCfg, err := s.getFullStoreConfig(ctx, srcID); err == nil && srcCfg.Type == "file" {
+	if srcCfg, err := s.getFullVaultConfig(ctx, srcID); err == nil && srcCfg.Type == "file" {
 		srcFileDir = srcCfg.Params[chunkfile.ParamDir]
 	}
 
-	jobID := s.orch.MergeStores(ctx, orchestrator.TransferParams{
+	jobID := s.orch.MergeVaults(ctx, orchestrator.TransferParams{
 		SrcID:       srcID,
 		DstID:       dstID,
-		Description: fmt.Sprintf("Merge '%s' into '%s'", s.storeName(ctx, srcID), s.storeName(ctx, dstID)),
+		Description: fmt.Sprintf("Merge '%s' into '%s'", s.vaultName(ctx, srcID), s.vaultName(ctx, dstID)),
 		CleanupSrc:  s.makeCleanupFunc(srcID, srcFileDir),
 	})
 
-	return connect.NewResponse(&apiv1.MergeStoresResponse{JobId: jobID}), nil
+	return connect.NewResponse(&apiv1.MergeVaultsResponse{JobId: jobID}), nil
 }
 
-// ExportStore streams all records from a store.
-func (s *StoreServer) ExportStore(
+// ExportVault streams all records from a vault.
+func (s *VaultServer) ExportVault(
 	ctx context.Context,
-	req *connect.Request[apiv1.ExportStoreRequest],
-	stream *connect.ServerStream[apiv1.ExportStoreResponse],
+	req *connect.Request[apiv1.ExportVaultRequest],
+	stream *connect.ServerStream[apiv1.ExportVaultResponse],
 ) error {
-	if req.Msg.Store == "" {
-		return connect.NewError(connect.CodeInvalidArgument, errors.New("store required"))
+	if req.Msg.Vault == "" {
+		return connect.NewError(connect.CodeInvalidArgument, errors.New("vault required"))
 	}
-	storeID, connErr := parseUUID(req.Msg.Store)
+	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
 		return connErr
 	}
 
-	metas, err := s.orch.ListChunkMetas(storeID)
+	metas, err := s.orch.ListChunkMetas(vaultID)
 	if err != nil {
-		return mapStoreError(err)
+		return mapVaultError(err)
 	}
 
 	for _, meta := range metas {
-		if err := s.exportChunk(storeID, meta.ID, stream); err != nil {
+		if err := s.exportChunk(vaultID, meta.ID, stream); err != nil {
 			return err
 		}
 	}
 
-	return stream.Send(&apiv1.ExportStoreResponse{HasMore: false})
+	return stream.Send(&apiv1.ExportVaultResponse{HasMore: false})
 }
 
-func (s *StoreServer) exportChunk(storeID uuid.UUID, chunkID chunk.ChunkID, stream *connect.ServerStream[apiv1.ExportStoreResponse]) error {
-	cursor, err := s.orch.OpenCursor(storeID, chunkID)
+func (s *VaultServer) exportChunk(vaultID uuid.UUID, chunkID chunk.ChunkID, stream *connect.ServerStream[apiv1.ExportVaultResponse]) error {
+	cursor, err := s.orch.OpenCursor(vaultID, chunkID)
 	if err != nil {
 		return connect.NewError(connect.CodeInternal, fmt.Errorf("open chunk %s: %w", chunkID, err))
 	}
@@ -316,7 +316,7 @@ func (s *StoreServer) exportChunk(storeID uuid.UUID, chunkID chunk.ChunkID, stre
 		batch = append(batch, recordToExportProto(rec))
 
 		if len(batch) >= batchSize {
-			if err := stream.Send(&apiv1.ExportStoreResponse{Records: batch, HasMore: true}); err != nil {
+			if err := stream.Send(&apiv1.ExportVaultResponse{Records: batch, HasMore: true}); err != nil {
 				return err
 			}
 			batch = batch[:0]
@@ -324,7 +324,7 @@ func (s *StoreServer) exportChunk(storeID uuid.UUID, chunkID chunk.ChunkID, stre
 	}
 
 	if len(batch) > 0 {
-		return stream.Send(&apiv1.ExportStoreResponse{Records: batch, HasMore: true})
+		return stream.Send(&apiv1.ExportVaultResponse{Records: batch, HasMore: true})
 	}
 	return nil
 }
@@ -344,35 +344,35 @@ func recordToExportProto(rec chunk.Record) *apiv1.ExportRecord {
 	return exportRec
 }
 
-func (s *StoreServer) disableAndPersistStore(ctx context.Context, id uuid.UUID) error {
-	if err := s.orch.DisableStore(id); err != nil {
+func (s *VaultServer) disableAndPersistVault(ctx context.Context, id uuid.UUID) error {
+	if err := s.orch.DisableVault(id); err != nil {
 		return connect.NewError(connect.CodeInternal, fmt.Errorf("disable source: %w", err))
 	}
 	if s.cfgStore == nil {
 		return nil
 	}
-	srcCfg, err := s.getFullStoreConfig(ctx, id)
+	srcCfg, err := s.getFullVaultConfig(ctx, id)
 	if err != nil {
-		// Store is already disabled in memory; best-effort config persistence.
-		s.logger.Warn("get store config for persist", "store", id, "error", err)
+		// Vault is already disabled in memory; best-effort config persistence.
+		s.logger.Warn("get vault config for persist", "vault", id, "error", err)
 		return nil
 	}
 	srcCfg.Enabled = false
-	if err := s.cfgStore.PutStore(ctx, srcCfg); err != nil {
-		s.logger.Warn("persist disabled source config", "store", id, "error", err)
+	if err := s.cfgStore.PutVault(ctx, srcCfg); err != nil {
+		s.logger.Warn("persist disabled source config", "vault", id, "error", err)
 	}
 	return nil
 }
 
-// ImportRecords appends a batch of records to a store.
-func (s *StoreServer) ImportRecords(
+// ImportRecords appends a batch of records to a vault.
+func (s *VaultServer) ImportRecords(
 	ctx context.Context,
 	req *connect.Request[apiv1.ImportRecordsRequest],
 ) (*connect.Response[apiv1.ImportRecordsResponse], error) {
-	if req.Msg.Store == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("store required"))
+	if req.Msg.Vault == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("vault required"))
 	}
-	storeID, connErr := parseUUID(req.Msg.Store)
+	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
 		return nil, connErr
 	}
@@ -393,8 +393,8 @@ func (s *StoreServer) ImportRecords(
 			maps.Copy(rec.Attrs, exportRec.Attrs)
 		}
 
-		if _, _, err := s.orch.Append(storeID, rec); err != nil {
-			return nil, mapStoreError(err)
+		if _, _, err := s.orch.Append(vaultID, rec); err != nil {
+			return nil, mapVaultError(err)
 		}
 		imported++
 	}
@@ -404,36 +404,36 @@ func (s *StoreServer) ImportRecords(
 	}), nil
 }
 
-// getFullStoreConfig retrieves store config from the config store (with type/params),
+// getFullVaultConfig retrieves vault config from the config vault (with type/params),
 // falling back to the orchestrator's limited config.
-func (s *StoreServer) getFullStoreConfig(ctx context.Context, id uuid.UUID) (config.StoreConfig, error) {
+func (s *VaultServer) getFullVaultConfig(ctx context.Context, id uuid.UUID) (config.VaultConfig, error) {
 	if s.cfgStore != nil {
-		cfg, err := s.cfgStore.GetStore(ctx, id)
+		cfg, err := s.cfgStore.GetVault(ctx, id)
 		if err == nil && cfg != nil {
 			return *cfg, nil
 		}
 	}
-	return s.orch.StoreConfig(id)
+	return s.orch.VaultConfig(id)
 }
 
-// createStore persists a store config and adds it to the orchestrator.
-func (s *StoreServer) createStore(ctx context.Context, cfg config.StoreConfig) *connect.Error {
-	// Persist to config store.
+// createVault persists a vault config and adds it to the orchestrator.
+func (s *VaultServer) createVault(ctx context.Context, cfg config.VaultConfig) *connect.Error {
+	// Persist to config vault.
 	if s.cfgStore != nil {
-		if err := s.cfgStore.PutStore(ctx, cfg); err != nil {
+		if err := s.cfgStore.PutVault(ctx, cfg); err != nil {
 			return connect.NewError(connect.CodeInternal, fmt.Errorf("persist config: %w", err))
 		}
 	}
 
 	// Add to orchestrator.
-	if err := s.orch.AddStore(ctx, cfg, s.factories); err != nil {
+	if err := s.orch.AddVault(ctx, cfg, s.factories); err != nil {
 		// Rollback config entry on orchestrator failure.
 		if s.cfgStore != nil {
-			if delErr := s.cfgStore.DeleteStore(ctx, cfg.ID); delErr != nil {
-				s.logger.Warn("rollback: delete store config", "store", cfg.ID, "error", delErr)
+			if delErr := s.cfgStore.DeleteVault(ctx, cfg.ID); delErr != nil {
+				s.logger.Warn("rollback: delete vault config", "vault", cfg.ID, "error", delErr)
 			}
 		}
-		return connect.NewError(connect.CodeInternal, fmt.Errorf("add store: %w", err))
+		return connect.NewError(connect.CodeInternal, fmt.Errorf("add vault: %w", err))
 	}
 
 	return nil

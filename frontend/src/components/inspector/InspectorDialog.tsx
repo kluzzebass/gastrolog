@@ -1,12 +1,12 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { Dialog } from "../Dialog";
-import { StoresIcon, IngestersIcon, JobsIcon, MetricsIcon } from "../icons";
-import { StoresPanel } from "./StoresPanel";
+import { VaultsIcon, IngestersIcon, JobsIcon, MetricsIcon } from "../icons";
+import { VaultsPanel } from "./VaultsPanel";
 import { IngestersPanel } from "./IngestersPanel";
 import { JobsPanel } from "./JobsPanel";
 import { MetricsPanel } from "./MetricsPanel";
 
-export type InspectorTab = "stores" | "ingesters" | "jobs" | "metrics";
+export type InspectorTab = "vaults" | "ingesters" | "jobs" | "metrics";
 
 interface InspectorDialogProps {
   dark: boolean;
@@ -22,7 +22,7 @@ type TabDef = {
 };
 
 const allTabs: TabDef[] = [
-  { id: "stores", label: "Stores", icon: StoresIcon },
+  { id: "vaults", label: "Vaults", icon: VaultsIcon },
   { id: "ingesters", label: "Ingesters", icon: IngestersIcon },
   { id: "jobs", label: "Jobs", icon: JobsIcon },
   { id: "metrics", label: "Metrics", icon: MetricsIcon },
@@ -67,7 +67,7 @@ export function InspectorDialog({
         </nav>
 
         <div className="flex-1 overflow-y-auto app-scroll p-5">
-          {tab === "stores" && <StoresPanel dark={dark} />}
+          {tab === "vaults" && <VaultsPanel dark={dark} />}
           {tab === "ingesters" && <IngestersPanel dark={dark} />}
           {tab === "jobs" && <JobsPanel dark={dark} />}
           {tab === "metrics" && <MetricsPanel dark={dark} />}

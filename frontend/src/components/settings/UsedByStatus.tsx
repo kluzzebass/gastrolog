@@ -1,6 +1,6 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
 
-interface Store {
+interface Vault {
   id: string;
   [key: string]: any;
 }
@@ -46,18 +46,18 @@ export function UsedByStatus({ dark, refs, onNavigate }: Readonly<UsedByStatusPr
 }
 
 export function refsFor(
-  stores: Store[],
+  vaults: Vault[],
   field: string,
   id: string,
 ): string[] {
-  return stores.filter((s) => s[field] === id).map((s) => s.name || s.id);
+  return vaults.filter((s) => s[field] === id).map((s) => s.name || s.id);
 }
 
 export function ruleRefsFor(
-  stores: Store[],
+  vaults: Vault[],
   retentionPolicyId: string,
 ): string[] {
-  return stores
+  return vaults
     .filter((s) =>
       (s.retentionRules ?? []).some(
         (b: { retentionPolicyId: string }) =>

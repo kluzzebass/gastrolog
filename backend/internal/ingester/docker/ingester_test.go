@@ -155,8 +155,8 @@ func collectMessages(ctx context.Context, out <-chan orchestrator.IngestMessage,
 // --- Tests ---
 
 func TestFactoryValidation(t *testing.T) {
-	store := configmem.NewStore()
-	factory := NewFactory(store)
+	vault := configmem.NewStore()
+	factory := NewFactory(vault)
 
 	tests := []struct {
 		name    string

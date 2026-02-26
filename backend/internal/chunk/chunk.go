@@ -22,7 +22,7 @@ var (
 // Factories validate required params, apply defaults, and return a fully
 // constructed manager or a descriptive error.
 // Factories must not start goroutines or perform I/O beyond validation.
-// The logger parameter provides a store-scoped logger; may be nil.
+// The logger parameter provides a vault-scoped logger; may be nil.
 type ManagerFactory func(params map[string]string, logger *slog.Logger) (ChunkManager, error)
 
 // ChunkManager manages the lifecycle of chunks.

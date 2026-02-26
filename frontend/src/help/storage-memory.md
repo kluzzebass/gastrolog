@@ -1,4 +1,4 @@
-# Memory Store
+# Memory Vault
 
 Type: `memory`
 

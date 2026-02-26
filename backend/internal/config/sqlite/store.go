@@ -87,7 +87,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 		SELECT (SELECT count(*) FROM filters)
 		     + (SELECT count(*) FROM rotation_policies)
 		     + (SELECT count(*) FROM retention_policies)
-		     + (SELECT count(*) FROM stores)
+		     + (SELECT count(*) FROM vaults)
 		     + (SELECT count(*) FROM ingesters)
 		     + (SELECT count(*) FROM settings)
 	`).Scan(&count)
@@ -110,7 +110,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	stores, err := s.ListStores(ctx)
+	vaults, err := s.ListVaults(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +132,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 		Filters:           filters,
 		RotationPolicies:  rotationPolicies,
 		RetentionPolicies: retentionPolicies,
-		Stores:            stores,
+		Vaults:            vaults,
 		Ingesters:         ingesters,
 		Settings:          settings,
 		Certs:             certs,
@@ -321,13 +321,13 @@ func (s *Store) DeleteRetentionPolicy(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// Stores
+// Vaults
 
-func (s *Store) GetStore(ctx context.Context, id uuid.UUID) (*config.StoreConfig, error) {
+func (s *Store) GetVault(ctx context.Context, id uuid.UUID) (*config.VaultConfig, error) {
 	row := s.db.QueryRowContext(ctx,
-		"SELECT id, name, type, filter, policy, params, enabled FROM stores WHERE id = ?", id)
+		"SELECT id, name, type, filter, policy, params, enabled FROM vaults WHERE id = ?", id)
 
-	var st config.StoreConfig
+	var st config.VaultConfig
 	var paramsJSON *string
 	var filter, policy sql.NullString
 	err := row.Scan(&st.ID, &st.Name, &st.Type, &filter, &policy, &paramsJSON, &st.Enabled)
@@ -359,17 +359,17 @@ func (s *Store) GetStore(ctx context.Context, id uuid.UUID) (*config.StoreConfig
 	return &st, nil
 }
 
-func (s *Store) ListStores(ctx context.Context) ([]config.StoreConfig, error) {
+func (s *Store) ListVaults(ctx context.Context) ([]config.VaultConfig, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, name, type, filter, policy, params, enabled FROM stores")
+		"SELECT id, name, type, filter, policy, params, enabled FROM vaults")
 	if err != nil {
 		return nil, fmt.Errorf("list stores: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
-	var result []config.StoreConfig
+	var result []config.VaultConfig
 	for rows.Next() {
-		var st config.StoreConfig
+		var st config.VaultConfig
 		var paramsJSON *string
 		var filter, policy sql.NullString
 		if err := rows.Scan(&st.ID, &st.Name, &st.Type, &filter, &policy, &paramsJSON, &st.Enabled); err != nil {
@@ -406,7 +406,7 @@ func (s *Store) ListStores(ctx context.Context) ([]config.StoreConfig, error) {
 	return result, nil
 }
 
-func (s *Store) PutStore(ctx context.Context, st config.StoreConfig) error {
+func (s *Store) PutVault(ctx context.Context, st config.VaultConfig) error {
 	var paramsJSON *string
 	if st.Params != nil {
 		data, err := json.Marshal(st.Params)
@@ -424,7 +424,7 @@ func (s *Store) PutStore(ctx context.Context, st config.StoreConfig) error {
 	defer func() { _ = tx.Rollback() }()
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO stores (id, name, type, filter, policy, params, enabled)
+		INSERT INTO vaults (id, name, type, filter, policy, params, enabled)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
@@ -440,12 +440,12 @@ func (s *Store) PutStore(ctx context.Context, st config.StoreConfig) error {
 
 	// Replace retention rules.
 	if _, err := tx.ExecContext(ctx,
-		"DELETE FROM store_retention_rules WHERE store_id = ?", st.ID); err != nil {
+		"DELETE FROM vault_retention_rules WHERE vault_id = ?", st.ID); err != nil {
 		return fmt.Errorf("delete rules for store %q: %w", st.ID, err)
 	}
 	for _, b := range st.RetentionRules {
 		_, err := tx.ExecContext(ctx, `
-			INSERT INTO store_retention_rules (store_id, retention_policy_id, action, destination_id)
+			INSERT INTO vault_retention_rules (vault_id, retention_policy_id, action, destination_id)
 			VALUES (?, ?, ?, ?)
 		`, st.ID, b.RetentionPolicyID, string(b.Action), b.Destination)
 		if err != nil {
@@ -456,7 +456,7 @@ func (s *Store) PutStore(ctx context.Context, st config.StoreConfig) error {
 	return tx.Commit()
 }
 
-func (s *Store) DeleteStore(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteVault(ctx context.Context, id uuid.UUID) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx for delete store %q: %w", id, err)
@@ -464,11 +464,11 @@ func (s *Store) DeleteStore(ctx context.Context, id uuid.UUID) error {
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx,
-		"DELETE FROM store_retention_rules WHERE store_id = ?", id); err != nil {
+		"DELETE FROM vault_retention_rules WHERE vault_id = ?", id); err != nil {
 		return fmt.Errorf("delete rules for store %q: %w", id, err)
 	}
 	if _, err := tx.ExecContext(ctx,
-		"DELETE FROM stores WHERE id = ?", id); err != nil {
+		"DELETE FROM vaults WHERE id = ?", id); err != nil {
 		return fmt.Errorf("delete store %q: %w", id, err)
 	}
 	return tx.Commit()
@@ -477,7 +477,7 @@ func (s *Store) DeleteStore(ctx context.Context, id uuid.UUID) error {
 // loadRetentionRules reads retention rules for a single store.
 func (s *Store) loadRetentionRules(ctx context.Context, storeID uuid.UUID) ([]config.RetentionRule, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT retention_policy_id, action, destination_id FROM store_retention_rules WHERE store_id = ?", storeID)
+		"SELECT retention_policy_id, action, destination_id FROM vault_retention_rules WHERE vault_id = ?", storeID)
 	if err != nil {
 		return nil, err
 	}
@@ -503,7 +503,7 @@ func (s *Store) loadRetentionRules(ctx context.Context, storeID uuid.UUID) ([]co
 // loadAllRetentionRules reads all retention rules, grouped by store ID.
 func (s *Store) loadAllRetentionRules(ctx context.Context) (map[uuid.UUID][]config.RetentionRule, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT store_id, retention_policy_id, action, destination_id FROM store_retention_rules")
+		"SELECT vault_id, retention_policy_id, action, destination_id FROM vault_retention_rules")
 	if err != nil {
 		return nil, err
 	}

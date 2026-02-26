@@ -8,7 +8,7 @@ import (
 
 // cursorEntry represents a cursor with its current record in the merge heap.
 type cursorEntry struct {
-	storeID uuid.UUID
+	vaultID uuid.UUID
 	chunkID chunk.ChunkID
 	rec     chunk.Record
 	ref     chunk.RecordRef

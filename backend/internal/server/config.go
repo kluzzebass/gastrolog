@@ -54,7 +54,7 @@ func (s *ConfigServer) GetConfig(
 ) (*connect.Response[apiv1.GetConfigResponse], error) {
 	resp := &apiv1.GetConfigResponse{}
 	if s.cfgStore != nil {
-		s.loadConfigStores(ctx, resp)
+		s.loadConfigVaults(ctx, resp)
 		s.loadConfigIngesters(ctx, resp)
 		s.loadConfigFilters(ctx, resp)
 		s.loadConfigRotationPolicies(ctx, resp)
@@ -63,31 +63,31 @@ func (s *ConfigServer) GetConfig(
 	return connect.NewResponse(resp), nil
 }
 
-func (s *ConfigServer) loadConfigStores(ctx context.Context, resp *apiv1.GetConfigResponse) {
-	cfgStores, err := s.cfgStore.ListStores(ctx)
+func (s *ConfigServer) loadConfigVaults(ctx context.Context, resp *apiv1.GetConfigResponse) {
+	cfgStores, err := s.cfgStore.ListVaults(ctx)
 	if err != nil {
 		return
 	}
-	for _, storeCfg := range cfgStores {
-		resp.Stores = append(resp.Stores, storeConfigToProto(storeCfg))
+	for _, vaultCfg := range cfgStores {
+		resp.Vaults = append(resp.Vaults, vaultConfigToProto(vaultCfg))
 	}
 }
 
-func storeConfigToProto(storeCfg config.StoreConfig) *apiv1.StoreConfig {
-	sc := &apiv1.StoreConfig{
-		Id:      storeCfg.ID.String(),
-		Name:    storeCfg.Name,
-		Type:    storeCfg.Type,
-		Params:  storeCfg.Params,
-		Enabled: storeCfg.Enabled,
+func vaultConfigToProto(vaultCfg config.VaultConfig) *apiv1.VaultConfig {
+	vc := &apiv1.VaultConfig{
+		Id:      vaultCfg.ID.String(),
+		Name:    vaultCfg.Name,
+		Type:    vaultCfg.Type,
+		Params:  vaultCfg.Params,
+		Enabled: vaultCfg.Enabled,
 	}
-	if storeCfg.Filter != nil {
-		sc.Filter = storeCfg.Filter.String()
+	if vaultCfg.Filter != nil {
+		vc.Filter = vaultCfg.Filter.String()
 	}
-	if storeCfg.Policy != nil {
-		sc.Policy = storeCfg.Policy.String()
+	if vaultCfg.Policy != nil {
+		vc.Policy = vaultCfg.Policy.String()
 	}
-	for _, b := range storeCfg.RetentionRules {
+	for _, b := range vaultCfg.RetentionRules {
 		pb := &apiv1.RetentionRule{
 			RetentionPolicyId: b.RetentionPolicyID.String(),
 			Action:            string(b.Action),
@@ -95,9 +95,9 @@ func storeConfigToProto(storeCfg config.StoreConfig) *apiv1.StoreConfig {
 		if b.Destination != nil {
 			pb.DestinationId = b.Destination.String()
 		}
-		sc.RetentionRules = append(sc.RetentionRules, pb)
+		vc.RetentionRules = append(vc.RetentionRules, pb)
 	}
-	return sc
+	return vc
 }
 
 func (s *ConfigServer) loadConfigIngesters(ctx context.Context, resp *apiv1.GetConfigResponse) {

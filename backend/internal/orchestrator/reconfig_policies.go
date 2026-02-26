@@ -30,11 +30,11 @@ func findRetentionPolicy(policies []config.RetentionPolicyConfig, id uuid.UUID) 
 }
 
 // ReloadRotationPolicies loads the full config and resolves rotation policy references
-// for all registered stores, hot-swapping their policies. This is called when a
+// for all registered vaults, hot-swapping their policies. This is called when a
 // rotation policy is created, updated, or deleted.
 //
-// Stores that don't reference any policy are left unchanged.
-// Stores referencing a policy that no longer exists get a nil policy (type default).
+// Vaults that don't reference any policy are left unchanged.
+// Vaults referencing a policy that no longer exists get a nil policy (type default).
 func (o *Orchestrator) ReloadRotationPolicies(ctx context.Context) error {
 	cfg, err := o.loadConfig(ctx)
 	if err != nil {
@@ -47,52 +47,52 @@ func (o *Orchestrator) ReloadRotationPolicies(ctx context.Context) error {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
-	for _, storeCfg := range cfg.Stores {
-		store, ok := o.stores[storeCfg.ID]
+	for _, vaultCfg := range cfg.Vaults {
+		vault, ok := o.vaults[vaultCfg.ID]
 		if !ok {
-			continue // Store not registered in orchestrator.
+			continue // Vault not registered in orchestrator.
 		}
-		cm := store.Chunks
-		if storeCfg.Policy == nil {
-			continue // Store doesn't reference a policy.
+		cm := vault.Chunks
+		if vaultCfg.Policy == nil {
+			continue // Vault doesn't reference a policy.
 		}
 
-		policyCfg := findRotationPolicy(cfg.RotationPolicies, *storeCfg.Policy)
+		policyCfg := findRotationPolicy(cfg.RotationPolicies, *vaultCfg.Policy)
 		if policyCfg == nil {
-			// Policy was deleted — nothing to do; store keeps its current policy.
+			// Policy was deleted — nothing to do; vault keeps its current policy.
 			// We can't revert to "type default" from here, and the dangling
-			// reference will be caught on next restart or store edit.
-			o.logger.Warn("store references unknown policy", "store", storeCfg.ID, "policy", *storeCfg.Policy)
+			// reference will be caught on next restart or vault edit.
+			o.logger.Warn("vault references unknown policy", "vault", vaultCfg.ID, "policy", *vaultCfg.Policy)
 			continue
 		}
 
 		policy, err := policyCfg.ToRotationPolicy()
 		if err != nil {
-			return fmt.Errorf("invalid policy %s for store %s: %w", *storeCfg.Policy, storeCfg.ID, err)
+			return fmt.Errorf("invalid policy %s for vault %s: %w", *vaultCfg.Policy, vaultCfg.ID, err)
 		}
 		if policy != nil {
-			store.Chunks.SetRotationPolicy(policy)
-			o.logger.Info("store rotation policy updated", "store", storeCfg.ID, "policy", *storeCfg.Policy)
+			vault.Chunks.SetRotationPolicy(policy)
+			o.logger.Info("vault rotation policy updated", "vault", vaultCfg.ID, "policy", *vaultCfg.Policy)
 		}
 
 		// Update cron rotation job.
-		hasCronJob := o.cronRotation.hasJob(storeCfg.ID)
+		hasCronJob := o.cronRotation.hasJob(vaultCfg.ID)
 		hasCronConfig := policyCfg.Cron != nil && *policyCfg.Cron != ""
 
 		switch {
 		case hasCronConfig && hasCronJob:
 			// Schedule may have changed — update.
-			if err := o.cronRotation.updateJob(storeCfg.ID, storeCfg.Name, *policyCfg.Cron, cm); err != nil {
-				o.logger.Error("failed to update cron rotation", "store", storeCfg.ID, "error", err)
+			if err := o.cronRotation.updateJob(vaultCfg.ID, vaultCfg.Name, *policyCfg.Cron, cm); err != nil {
+				o.logger.Error("failed to update cron rotation", "vault", vaultCfg.ID, "error", err)
 			}
 		case hasCronConfig && !hasCronJob:
 			// New cron schedule — add.
-			if err := o.cronRotation.addJob(storeCfg.ID, storeCfg.Name, *policyCfg.Cron, cm); err != nil {
-				o.logger.Error("failed to add cron rotation", "store", storeCfg.ID, "error", err)
+			if err := o.cronRotation.addJob(vaultCfg.ID, vaultCfg.Name, *policyCfg.Cron, cm); err != nil {
+				o.logger.Error("failed to add cron rotation", "vault", vaultCfg.ID, "error", err)
 			}
 		case !hasCronConfig && hasCronJob:
 			// Cron removed — stop.
-			o.cronRotation.removeJob(storeCfg.ID)
+			o.cronRotation.removeJob(vaultCfg.ID)
 		}
 	}
 
@@ -100,10 +100,10 @@ func (o *Orchestrator) ReloadRotationPolicies(ctx context.Context) error {
 }
 
 // ReloadRetentionPolicies loads the full config and resolves retention rules
-// for all registered stores, hot-swapping their rules. This is called when a
+// for all registered vaults, hot-swapping their rules. This is called when a
 // retention policy is created, updated, or deleted.
 //
-// Stores without rules keep their current state.
+// Vaults without rules keep their current state.
 func (o *Orchestrator) ReloadRetentionPolicies(ctx context.Context) error {
 	cfg, err := o.loadConfig(ctx)
 	if err != nil {
@@ -116,23 +116,23 @@ func (o *Orchestrator) ReloadRetentionPolicies(ctx context.Context) error {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
-	for _, storeCfg := range cfg.Stores {
-		runner, ok := o.retention[storeCfg.ID]
+	for _, vaultCfg := range cfg.Vaults {
+		runner, ok := o.retention[vaultCfg.ID]
 		if !ok {
-			continue // No retention runner for this store.
+			continue // No retention runner for this vault.
 		}
-		if len(storeCfg.RetentionRules) == 0 {
-			continue // Store has no rules; keep current.
+		if len(vaultCfg.RetentionRules) == 0 {
+			continue // Vault has no rules; keep current.
 		}
 
-		rules, err := resolveRetentionRules(cfg, storeCfg)
+		rules, err := resolveRetentionRules(cfg, vaultCfg)
 		if err != nil {
-			o.logger.Warn("failed to resolve retention rules", "store", storeCfg.ID, "error", err)
+			o.logger.Warn("failed to resolve retention rules", "vault", vaultCfg.ID, "error", err)
 			continue
 		}
 
 		runner.setRules(rules)
-		o.logger.Info("store retention rules updated", "store", storeCfg.ID, "rules", len(rules))
+		o.logger.Info("vault retention rules updated", "vault", vaultCfg.ID, "rules", len(rules))
 	}
 
 	return nil

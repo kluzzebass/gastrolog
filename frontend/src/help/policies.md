@@ -1,6 +1,6 @@
 # Rotation & Retention
 
-As records accumulate in a store, two lifecycle mechanisms keep things manageable. **Rotation** determines when to seal the active chunk and start a new one. **Retention** determines when to delete old sealed chunks and reclaim space.
+As records accumulate in a vault, two lifecycle mechanisms keep things manageable. **Rotation** determines when to seal the active chunk and start a new one. **Retention** determines when to delete old sealed chunks and reclaim space.
 
 ```mermaid
 stateDiagram-v2
@@ -12,4 +12,4 @@ stateDiagram-v2
     Deleted --> [*]
 ```
 
-Each store references a rotation policy and a retention policy by name. You can share policies across multiple stores or create dedicated ones. Policies are configured in the Settings dialog under Rotation Policies and Retention Policies, and assigned to stores in the Stores settings.
+Each vault references a rotation policy and a retention policy by name. You can share policies across multiple vaults or create dedicated ones. Policies are configured in the Settings dialog under Rotation Policies and Retention Policies, and assigned to vaults in the Vaults settings.

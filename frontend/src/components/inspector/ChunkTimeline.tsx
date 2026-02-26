@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import type { ChunkMeta } from "../../api/gen/gastrolog/v1/store_pb";
+import type { ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
 import { formatBytes, formatDurationMs } from "../../utils/units";
 
 interface ChunkTimelineProps {

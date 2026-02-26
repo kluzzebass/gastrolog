@@ -1,66 +1,66 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Timestamp } from "@bufbuild/protobuf";
-import { storeClient, configClient } from "../client";
+import { vaultClient, configClient } from "../client";
 import type { RetentionRule } from "../gen/gastrolog/v1/config_pb";
-import { StoreInfo, ChunkMeta, GetStatsResponse } from "../gen/gastrolog/v1/store_pb";
+import { VaultInfo, ChunkMeta, GetStatsResponse } from "../gen/gastrolog/v1/vault_pb";
 import { protoSharing, protoArraySharing } from "./protoSharing";
 
-export function useStores() {
+export function useVaults() {
   return useQuery({
-    queryKey: ["stores"],
+    queryKey: ["vaults"],
     queryFn: async () => {
-      const response = await storeClient.listStores({});
-      return response.stores;
+      const response = await vaultClient.listVaults({});
+      return response.vaults;
     },
-    structuralSharing: protoArraySharing(StoreInfo.equals),
+    structuralSharing: protoArraySharing(VaultInfo.equals),
     refetchInterval: 10_000,
   });
 }
 
-export function useStore(id: string) {
+export function useVault(id: string) {
   return useQuery({
-    queryKey: ["store", id],
+    queryKey: ["vault", id],
     queryFn: async () => {
-      const response = await storeClient.getStore({ id });
-      return response.store;
+      const response = await vaultClient.getVault({ id });
+      return response.vault;
     },
     staleTime: 0,
     enabled: !!id,
   });
 }
 
-export function useChunks(storeId: string) {
+export function useChunks(vaultId: string) {
   return useQuery({
-    queryKey: ["chunks", storeId],
+    queryKey: ["chunks", vaultId],
     queryFn: async () => {
-      const response = await storeClient.listChunks({ store: storeId });
+      const response = await vaultClient.listChunks({ vault: vaultId });
       return response.chunks;
     },
     structuralSharing: protoArraySharing(ChunkMeta.equals),
-    enabled: !!storeId,
+    enabled: !!vaultId,
     refetchInterval: 10_000,
   });
 }
 
-export function useIndexes(storeId: string, chunkId: string) {
+export function useIndexes(vaultId: string, chunkId: string) {
   return useQuery({
-    queryKey: ["indexes", storeId, chunkId],
+    queryKey: ["indexes", vaultId, chunkId],
     queryFn: async () => {
-      const response = await storeClient.getIndexes({
-        store: storeId,
+      const response = await vaultClient.getIndexes({
+        vault: vaultId,
         chunkId,
       });
       return response;
     },
-    enabled: !!storeId && !!chunkId,
+    enabled: !!vaultId && !!chunkId,
   });
 }
 
-export function useStats(storeId?: string) {
+export function useStats(vaultId?: string) {
   return useQuery({
-    queryKey: ["stats", storeId ?? "all"],
+    queryKey: ["stats", vaultId ?? "all"],
     queryFn: async () => {
-      const response = await storeClient.getStats({ store: storeId ?? "" });
+      const response = await vaultClient.getStats({ vault: vaultId ?? "" });
       return response;
     },
     structuralSharing: protoSharing(GetStatsResponse.equals),
@@ -68,49 +68,49 @@ export function useStats(storeId?: string) {
   });
 }
 
-export function useSealStore() {
+export function useSealVault() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (store: string) => {
-      await storeClient.sealStore({ store });
+    mutationFn: async (vault: string) => {
+      await vaultClient.sealVault({ vault });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["stores"] });
+      qc.invalidateQueries({ queryKey: ["vaults"] });
       qc.invalidateQueries({ queryKey: ["chunks"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
     },
   });
 }
 
-export function useReindexStore() {
+export function useReindexVault() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (store: string) => {
-      const response = await storeClient.reindexStore({ store });
+    mutationFn: async (vault: string) => {
+      const response = await vaultClient.reindexVault({ vault });
       return response;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["stores"] });
+      qc.invalidateQueries({ queryKey: ["vaults"] });
       qc.invalidateQueries({ queryKey: ["indexes"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
     },
   });
 }
 
-export function useValidateStore() {
+export function useValidateVault() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (store: string) => {
-      const response = await storeClient.validateStore({ store });
+    mutationFn: async (vault: string) => {
+      const response = await vaultClient.validateVault({ vault });
       return response;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["stores"] });
+      qc.invalidateQueries({ queryKey: ["vaults"] });
     },
   });
 }
 
-export function useMigrateStore() {
+export function useMigrateVault() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: {
@@ -119,7 +119,7 @@ export function useMigrateStore() {
       destinationType?: string;
       destinationParams?: Record<string, string>;
     }) => {
-      const response = await storeClient.migrateStore({
+      const response = await vaultClient.migrateVault({
         source: args.source,
         destination: args.destination,
         destinationType: args.destinationType ?? "",
@@ -128,25 +128,25 @@ export function useMigrateStore() {
       return response;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["stores"] });
+      qc.invalidateQueries({ queryKey: ["vaults"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
       qc.invalidateQueries({ queryKey: ["config"] });
     },
   });
 }
 
-export function useMergeStores() {
+export function useMergeVaults() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: { source: string; destination: string }) => {
-      const response = await storeClient.mergeStores({
+      const response = await vaultClient.mergeVaults({
         source: args.source,
         destination: args.destination,
       });
       return response;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["stores"] });
+      qc.invalidateQueries({ queryKey: ["vaults"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
       qc.invalidateQueries({ queryKey: ["config"] });
     },
@@ -157,7 +157,7 @@ export function useImportRecords() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: {
-      store: string;
+      vault: string;
       records: Array<{
         sourceTs?: Date;
         ingestTs?: Date;
@@ -165,8 +165,8 @@ export function useImportRecords() {
         raw: Uint8Array;
       }>;
     }) => {
-      const response = await storeClient.importRecords({
-        store: args.store,
+      const response = await vaultClient.importRecords({
+        vault: args.vault,
         records: args.records.map((r) => ({
           raw: r.raw as Uint8Array<ArrayBuffer>,
           attrs: r.attrs,
@@ -177,14 +177,14 @@ export function useImportRecords() {
       return response;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["stores"] });
+      qc.invalidateQueries({ queryKey: ["vaults"] });
       qc.invalidateQueries({ queryKey: ["chunks"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
     },
   });
 }
 
-export function usePutStore() {
+export function usePutVault() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: {
@@ -197,7 +197,7 @@ export function usePutStore() {
       params: Record<string, string>;
       enabled?: boolean;
     }) => {
-      await configClient.putStore({
+      await configClient.putVault({
         config: {
           id: args.id,
           name: args.name,
@@ -212,48 +212,48 @@ export function usePutStore() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["config"] });
-      qc.invalidateQueries({ queryKey: ["stores"] });
+      qc.invalidateQueries({ queryKey: ["vaults"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
     },
   });
 }
 
-export function useDeleteStore() {
+export function useDeleteVault() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: { id: string; force?: boolean }) => {
-      await configClient.deleteStore({ id: args.id, force: args.force ?? false });
+      await configClient.deleteVault({ id: args.id, force: args.force ?? false });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["config"] });
-      qc.invalidateQueries({ queryKey: ["stores"] });
+      qc.invalidateQueries({ queryKey: ["vaults"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
     },
   });
 }
 
-export function usePauseStore() {
+export function usePauseVault() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      await configClient.pauseStore({ id });
+      await configClient.pauseVault({ id });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["config"] });
-      qc.invalidateQueries({ queryKey: ["stores"] });
+      qc.invalidateQueries({ queryKey: ["vaults"] });
     },
   });
 }
 
-export function useResumeStore() {
+export function useResumeVault() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      await configClient.resumeStore({ id });
+      await configClient.resumeVault({ id });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["config"] });
-      qc.invalidateQueries({ queryKey: ["stores"] });
+      qc.invalidateQueries({ queryKey: ["vaults"] });
     },
   });
 }

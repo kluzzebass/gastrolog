@@ -144,7 +144,7 @@ export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolea
   const existingNames = new Set(policies.map((p) => p.name));
   const effectiveName = newName.trim() || "default";
   const nameConflict = existingNames.has(effectiveName);
-  const stores = config?.stores ?? [];
+  const vaults = config?.vaults ?? [];
 
   const defaults = (id: string): PolicyEdit => {
     const pol = policies.find((p) => p.id === id);
@@ -180,7 +180,7 @@ export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolea
       };
     },
     onDeleteSuccess: (id) => {
-      const referencedBy = stores
+      const referencedBy = vaults
         .filter((s) => s.policy === id)
         .map((s) => s.name || s.id);
       if (referencedBy.length > 0) {
@@ -296,7 +296,7 @@ export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolea
       {policies.map((pol) => {
         const id = pol.id;
         const edit = getEdit(id);
-        const refs = refsFor(stores, "policy", id);
+        const refs = refsFor(vaults, "policy", id);
         return (
           <SettingsCard
             key={id}
@@ -313,7 +313,7 @@ export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolea
                 {putPolicy.isPending ? "Saving..." : "Save"}
               </PrimaryButton>
             }
-            status={<UsedByStatus dark={dark} refs={refs} onNavigate={onNavigateTo ? (name) => onNavigateTo("stores", name) : undefined} />}
+            status={<UsedByStatus dark={dark} refs={refs} onNavigate={onNavigateTo ? (name) => onNavigateTo("vaults", name) : undefined} />}
           >
             <div className="flex flex-col gap-3">
               <FormField label="Name" dark={dark}>

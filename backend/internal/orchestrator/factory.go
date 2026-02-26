@@ -58,7 +58,7 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 		return nil
 	}
 
-	if err := o.applyStores(cfg, factories); err != nil {
+	if err := o.applyVaults(cfg, factories); err != nil {
 		return err
 	}
 	if err := o.applyRetention(cfg); err != nil {
@@ -69,7 +69,7 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 	}
 
 	// Schedule the rotation sweep so time-based policies (e.g., maxAge)
-	// trigger even when no records are flowing to a store.
+	// trigger even when no records are flowing to a vault.
 	if !o.scheduler.HasJob(rotationSweepJobName) {
 		if err := o.scheduler.AddJob(rotationSweepJobName, rotationSweepSchedule, o.rotationSweep); err != nil {
 			o.logger.Warn("failed to add rotation sweep job", "error", err)
@@ -80,86 +80,86 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 	return nil
 }
 
-// applyStores creates chunk/index/query managers for each store in the config,
-// compiles filters, applies rotation policies, and registers stores.
-func (o *Orchestrator) applyStores(cfg *config.Config, factories Factories) error {
-	storeIDs := make(map[uuid.UUID]bool)
+// applyVaults creates chunk/index/query managers for each vault in the config,
+// compiles filters, applies rotation policies, and registers vaults.
+func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) error {
+	vaultIDs := make(map[uuid.UUID]bool)
 	var compiledFilters []*CompiledFilter
 
-	for _, storeCfg := range cfg.Stores {
-		if storeIDs[storeCfg.ID] {
-			return fmt.Errorf("duplicate store ID: %s", storeCfg.ID)
+	for _, vaultCfg := range cfg.Vaults {
+		if vaultIDs[vaultCfg.ID] {
+			return fmt.Errorf("duplicate vault ID: %s", vaultCfg.ID)
 		}
-		storeIDs[storeCfg.ID] = true
+		vaultIDs[vaultCfg.ID] = true
 
 		// Resolve filter ID to expression and compile.
 		var filterID uuid.UUID
-		if storeCfg.Filter != nil {
-			filterID = *storeCfg.Filter
+		if vaultCfg.Filter != nil {
+			filterID = *vaultCfg.Filter
 		}
 		filterExpr := resolveFilterExpr(cfg, filterID)
-		f, err := CompileFilter(storeCfg.ID, filterExpr)
+		f, err := CompileFilter(vaultCfg.ID, filterExpr)
 		if err != nil {
-			return fmt.Errorf("invalid filter for store %s: %w", storeCfg.ID, err)
+			return fmt.Errorf("invalid filter for vault %s: %w", vaultCfg.ID, err)
 		}
 		compiledFilters = append(compiledFilters, f)
 
 		// Look up chunk manager factory.
-		cmFactory, ok := factories.ChunkManagers[storeCfg.Type]
+		cmFactory, ok := factories.ChunkManagers[vaultCfg.Type]
 		if !ok {
-			return fmt.Errorf("unknown chunk manager type: %s", storeCfg.Type)
+			return fmt.Errorf("unknown chunk manager type: %s", vaultCfg.Type)
 		}
 
-		// Create chunk manager with store-scoped logger.
+		// Create chunk manager with vault-scoped logger.
 		var cmLogger *slog.Logger
 		if factories.Logger != nil {
-			cmLogger = factories.Logger.With("store", storeCfg.ID)
+			cmLogger = factories.Logger.With("vault", vaultCfg.ID)
 		}
-		// Inject _expect_existing so file stores can warn about missing directories.
-		cmParams := maps.Clone(storeCfg.Params)
+		// Inject _expect_existing so file vaults can warn about missing directories.
+		cmParams := maps.Clone(vaultCfg.Params)
 		if cmParams == nil {
 			cmParams = make(map[string]string)
 		}
 		cmParams["_expect_existing"] = "true"
 		cm, err := cmFactory(cmParams, cmLogger)
 		if err != nil {
-			return fmt.Errorf("create chunk manager %s: %w", storeCfg.ID, err)
+			return fmt.Errorf("create chunk manager %s: %w", vaultCfg.ID, err)
 		}
 
 		// Apply rotation policy if specified.
-		if storeCfg.Policy != nil {
-			if err := o.applyRotationPolicy(cfg, storeCfg, cm); err != nil {
+		if vaultCfg.Policy != nil {
+			if err := o.applyRotationPolicy(cfg, vaultCfg, cm); err != nil {
 				return err
 			}
 		}
 
 		// Look up index manager factory.
-		imFactory, ok := factories.IndexManagers[storeCfg.Type]
+		imFactory, ok := factories.IndexManagers[vaultCfg.Type]
 		if !ok {
-			return fmt.Errorf("unknown index manager type: %s", storeCfg.Type)
+			return fmt.Errorf("unknown index manager type: %s", vaultCfg.Type)
 		}
 
 		// Create index manager (needs chunk manager for reading data).
 		var imLogger *slog.Logger
 		if factories.Logger != nil {
-			imLogger = factories.Logger.With("store", storeCfg.ID)
+			imLogger = factories.Logger.With("vault", vaultCfg.ID)
 		}
-		im, err := imFactory(storeCfg.Params, cm, imLogger)
+		im, err := imFactory(vaultCfg.Params, cm, imLogger)
 		if err != nil {
-			return fmt.Errorf("create index manager %s: %w", storeCfg.ID, err)
+			return fmt.Errorf("create index manager %s: %w", vaultCfg.ID, err)
 		}
 
 		// Create query engine with scoped logger.
 		var qeLogger *slog.Logger
 		if factories.Logger != nil {
-			qeLogger = factories.Logger.With("store", storeCfg.ID)
+			qeLogger = factories.Logger.With("vault", vaultCfg.ID)
 		}
 		qe := query.New(cm, im, qeLogger)
 
-		// Register store.
-		store := NewStore(storeCfg.ID, cm, im, qe)
-		store.Enabled = storeCfg.Enabled
-		o.RegisterStore(store)
+		// Register vault.
+		vault := NewVault(vaultCfg.ID, cm, im, qe)
+		vault.Enabled = vaultCfg.Enabled
+		o.RegisterVault(vault)
 	}
 
 	// Set filter set if any filters were compiled.
@@ -172,14 +172,14 @@ func (o *Orchestrator) applyStores(cfg *config.Config, factories Factories) erro
 
 // applyRotationPolicy resolves and applies a rotation policy (and optional cron schedule)
 // to a chunk manager.
-func (o *Orchestrator) applyRotationPolicy(cfg *config.Config, storeCfg config.StoreConfig, cm chunk.ChunkManager) error {
-	policyCfg := findRotationPolicy(cfg.RotationPolicies, *storeCfg.Policy)
+func (o *Orchestrator) applyRotationPolicy(cfg *config.Config, vaultCfg config.VaultConfig, cm chunk.ChunkManager) error {
+	policyCfg := findRotationPolicy(cfg.RotationPolicies, *vaultCfg.Policy)
 	if policyCfg == nil {
-		return fmt.Errorf("store %s references unknown policy: %s", storeCfg.ID, *storeCfg.Policy)
+		return fmt.Errorf("vault %s references unknown policy: %s", vaultCfg.ID, *vaultCfg.Policy)
 	}
 	policy, err := policyCfg.ToRotationPolicy()
 	if err != nil {
-		return fmt.Errorf("invalid policy %s for store %s: %w", *storeCfg.Policy, storeCfg.ID, err)
+		return fmt.Errorf("invalid policy %s for vault %s: %w", *vaultCfg.Policy, vaultCfg.ID, err)
 	}
 	if policy != nil {
 		cm.SetRotationPolicy(policy)
@@ -187,27 +187,27 @@ func (o *Orchestrator) applyRotationPolicy(cfg *config.Config, storeCfg config.S
 
 	// Set up cron rotation if configured.
 	if policyCfg.Cron != nil && *policyCfg.Cron != "" {
-		if err := o.cronRotation.addJob(storeCfg.ID, storeCfg.Name, *policyCfg.Cron, cm); err != nil {
-			return fmt.Errorf("cron rotation for store %s: %w", storeCfg.ID, err)
+		if err := o.cronRotation.addJob(vaultCfg.ID, vaultCfg.Name, *policyCfg.Cron, cm); err != nil {
+			return fmt.Errorf("cron rotation for vault %s: %w", vaultCfg.ID, err)
 		}
 	}
 
 	return nil
 }
 
-// applyRetention sets up retention jobs for stores that have retention rules.
+// applyRetention sets up retention jobs for vaults that have retention rules.
 func (o *Orchestrator) applyRetention(cfg *config.Config) error {
-	for _, storeCfg := range cfg.Stores {
-		if len(storeCfg.RetentionRules) == 0 {
+	for _, vaultCfg := range cfg.Vaults {
+		if len(vaultCfg.RetentionRules) == 0 {
 			continue
 		}
 
-		store := o.stores[storeCfg.ID]
-		if store == nil {
+		vault := o.vaults[vaultCfg.ID]
+		if vault == nil {
 			continue
 		}
 
-		rules, err := resolveRetentionRules(cfg, storeCfg)
+		rules, err := resolveRetentionRules(cfg, vaultCfg)
 		if err != nil {
 			return err
 		}
@@ -216,35 +216,35 @@ func (o *Orchestrator) applyRetention(cfg *config.Config) error {
 		}
 
 		runner := &retentionRunner{
-			storeID:  storeCfg.ID,
-			cm:       store.Chunks,
-			im:       store.Indexes,
+			vaultID:  vaultCfg.ID,
+			cm:       vault.Chunks,
+			im:       vault.Indexes,
 			rules: rules,
 			orch:     o,
 			now:      o.now,
 			logger:   o.logger,
 		}
-		o.retention[storeCfg.ID] = runner
-		if err := o.scheduler.AddJob(retentionJobName(storeCfg.ID), defaultRetentionSchedule, runner.sweep); err != nil {
-			return fmt.Errorf("retention job for store %s: %w", storeCfg.ID, err)
+		o.retention[vaultCfg.ID] = runner
+		if err := o.scheduler.AddJob(retentionJobName(vaultCfg.ID), defaultRetentionSchedule, runner.sweep); err != nil {
+			return fmt.Errorf("retention job for vault %s: %w", vaultCfg.ID, err)
 		}
-		o.scheduler.Describe(retentionJobName(storeCfg.ID), fmt.Sprintf("Retention sweep for '%s'", storeCfg.Name))
+		o.scheduler.Describe(retentionJobName(vaultCfg.ID), fmt.Sprintf("Retention sweep for '%s'", vaultCfg.Name))
 	}
 
 	return nil
 }
 
 // resolveRetentionRules converts config rules to resolved retentionRule objects.
-func resolveRetentionRules(cfg *config.Config, storeCfg config.StoreConfig) ([]retentionRule, error) {
+func resolveRetentionRules(cfg *config.Config, vaultCfg config.VaultConfig) ([]retentionRule, error) {
 	var rules []retentionRule
-	for _, b := range storeCfg.RetentionRules {
+	for _, b := range vaultCfg.RetentionRules {
 		retCfg := findRetentionPolicy(cfg.RetentionPolicies, b.RetentionPolicyID)
 		if retCfg == nil {
-			return nil, fmt.Errorf("store %s references unknown retention policy: %s", storeCfg.ID, b.RetentionPolicyID)
+			return nil, fmt.Errorf("vault %s references unknown retention policy: %s", vaultCfg.ID, b.RetentionPolicyID)
 		}
 		policy, err := retCfg.ToRetentionPolicy()
 		if err != nil {
-			return nil, fmt.Errorf("invalid retention policy %s for store %s: %w", b.RetentionPolicyID, storeCfg.ID, err)
+			return nil, fmt.Errorf("invalid retention policy %s for vault %s: %w", b.RetentionPolicyID, vaultCfg.ID, err)
 		}
 		if policy == nil {
 			continue
