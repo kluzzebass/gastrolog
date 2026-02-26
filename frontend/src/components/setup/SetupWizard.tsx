@@ -1,10 +1,10 @@
-import { useState, useReducer } from "react";
+import { useState, useReducer, useEffect } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useThemeSync } from "../../hooks/useThemeSync";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
 import { configClient } from "../../api/client";
-import { usePutServerConfig } from "../../api/hooks/useConfig";
+import { usePutServerConfig, useGenerateName } from "../../api/hooks/useConfig";
 import { useQueryClient } from "@tanstack/react-query";
 import { PrimaryButton, GhostButton } from "../settings/Buttons";
 import { WelcomeStep } from "./WelcomeStep";
@@ -68,6 +68,7 @@ export function SetupWizard() {
 
   const [step, setStep] = useState(0);
   const [creating, setCreating] = useState(false);
+  const generateName = useGenerateName();
 
   // Step data
   const [wizardData, dispatchData] = useReducer(wizardDataReducer, wizardDataInitial);
@@ -76,6 +77,23 @@ export function SetupWizard() {
   const setRotation = (v: RotationData) => dispatchData({ type: "setRotation", value: v });
   const setRetention = (v: RetentionData) => dispatchData({ type: "setRetention", value: v });
   const setIngester = (v: IngesterData) => dispatchData({ type: "setIngester", value: v });
+
+  // Generate petnames for each entity on mount.
+  useEffect(() => {
+    async function generateNames() {
+      const [vn, rn, ren, inn] = await Promise.all([
+        generateName.mutateAsync(),
+        generateName.mutateAsync(),
+        generateName.mutateAsync(),
+        generateName.mutateAsync(),
+      ]);
+      setVault({ ...wizardDataInitial.vault, name: vn });
+      setRotation({ ...wizardDataInitial.rotation, name: rn });
+      setRetention({ ...wizardDataInitial.retention, name: ren });
+      setIngester({ ...wizardDataInitial.ingester, name: inn });
+    }
+    generateNames();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const canProceed = () => {
     switch (step) {

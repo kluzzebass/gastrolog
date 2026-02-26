@@ -4,6 +4,7 @@ import {
   useConfig,
   usePutRetentionPolicy,
   useDeleteRetentionPolicy,
+  useGenerateName,
 } from "../../api/hooks";
 import { useToast } from "../Toast";
 import { useEditState } from "../../hooks/useEditState";
@@ -81,6 +82,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
   const { data: config, isLoading } = useConfig();
   const putPolicy = usePutRetentionPolicy();
   const deletePolicy = useDeleteRetentionPolicy();
+  const generateName = useGenerateName();
   const { addToast } = useToast();
 
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -165,7 +167,14 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
       helpTopicId="policy-retention"
       addLabel="Add Policy"
       adding={adding}
-      onToggleAdd={() => dispatchAdd({ type: "setAdding", value: !adding })}
+      onToggleAdd={() => {
+        if (!adding) {
+          generateName.mutateAsync().then((n) =>
+            dispatchAdd({ type: "setNewName", value: n }),
+          );
+        }
+        dispatchAdd({ type: "setAdding", value: !adding });
+      }}
       isLoading={isLoading}
       isEmpty={policies.length === 0}
       emptyMessage='No retention policies configured. Click "Add Policy" to create one.'

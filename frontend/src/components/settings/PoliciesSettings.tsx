@@ -3,6 +3,7 @@ import {
   useConfig,
   usePutRotationPolicy,
   useDeleteRotationPolicy,
+  useGenerateName,
 } from "../../api/hooks";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
@@ -133,6 +134,7 @@ export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolea
   const { data: config, isLoading } = useConfig();
   const putPolicy = usePutRotationPolicy();
   const deletePolicy = useDeleteRotationPolicy();
+  const generateName = useGenerateName();
   const { addToast } = useToast();
 
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -231,7 +233,14 @@ export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolea
       helpTopicId="policy-rotation"
       addLabel="Add Policy"
       adding={adding}
-      onToggleAdd={() => dispatchAdd({ type: "setAdding", value: !adding })}
+      onToggleAdd={() => {
+        if (!adding) {
+          generateName.mutateAsync().then((n) =>
+            dispatchAdd({ type: "setNewName", value: n }),
+          );
+        }
+        dispatchAdd({ type: "setAdding", value: !adding });
+      }}
       isLoading={isLoading}
       isEmpty={policies.length === 0}
       emptyMessage='No rotation policies configured. Click "Add Policy" to create one.'

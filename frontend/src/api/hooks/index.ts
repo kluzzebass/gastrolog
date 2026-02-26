@@ -29,6 +29,7 @@ export {
   useDeleteRotationPolicy,
   usePutRetentionPolicy,
   useDeleteRetentionPolicy,
+  useGenerateName,
 } from "./useConfig";
 export {
   useAuthStatus,

@@ -1,5 +1,5 @@
 import { useState, useReducer } from "react";
-import { useConfig, usePutIngester, useDeleteIngester } from "../../api/hooks";
+import { useConfig, usePutIngester, useDeleteIngester, useGenerateName } from "../../api/hooks";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
 import { useEditState } from "../../hooks/useEditState";
@@ -77,6 +77,7 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
   const { data: config, isLoading } = useConfig();
   const putIngester = usePutIngester();
   const deleteIngester = useDeleteIngester();
+  const generateName = useGenerateName();
   const { addToast } = useToast();
 
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -137,7 +138,14 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
       helpTopicId="ingesters"
       addLabel="Add Ingester"
       adding={adding}
-      onToggleAdd={() => dispatchAdd({ type: "toggleAdding" })}
+      onToggleAdd={() => {
+        if (!adding) {
+          generateName.mutateAsync().then((n) =>
+            dispatchAdd({ type: "setNewName", value: n }),
+          );
+        }
+        dispatchAdd({ type: "toggleAdding" });
+      }}
       isLoading={isLoading}
       isEmpty={ingesters.length === 0}
       emptyMessage='No ingesters configured. Click "Add Ingester" to create one.'

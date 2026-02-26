@@ -9,6 +9,7 @@ import {
   useMigrateVault,
   useMergeVaults,
   useJob,
+  useGenerateName,
 } from "../../api/hooks";
 import { JobStatus } from "../../api/client";
 import { useToast } from "../Toast";
@@ -242,6 +243,8 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
     Record<string, { jobId: string; label: string }>
   >({});
 
+  const generateName = useGenerateName();
+
   // New vault form state.
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState("memory");
@@ -377,6 +380,9 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
       addLabel="Add Vault"
       adding={adding}
       onToggleAdd={() => {
+        if (!adding) {
+          generateName.mutateAsync().then((n) => setNewName(n));
+        }
         setAdding(!adding);
         setTypeConfirmed(false);
         setNewName("");

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { useConfig, usePutFilter, useDeleteFilter } from "../../api/hooks";
+import { useConfig, usePutFilter, useDeleteFilter, useGenerateName } from "../../api/hooks";
 import { useToast } from "../Toast";
 import { useEditState } from "../../hooks/useEditState";
 import { useCrudHandlers } from "../../hooks/useCrudHandlers";
@@ -55,6 +55,8 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
   const putFilter = usePutFilter();
   const deleteFilter = useDeleteFilter();
   const { addToast } = useToast();
+
+  const generateName = useGenerateName();
 
   const [expanded, setExpanded] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -120,7 +122,14 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
       helpTopicId="routing"
       addLabel="Add Filter"
       adding={adding}
-      onToggleAdd={() => setAdding(!adding)}
+      onToggleAdd={() => {
+        if (!adding) {
+          generateName.mutateAsync().then((n) => setNewName(n));
+        } else {
+          setNewName("");
+        }
+        setAdding(!adding);
+      }}
       isLoading={isLoading}
       isEmpty={filters.length === 0}
       emptyMessage='No filters configured. Click "Add Filter" to create one.'
