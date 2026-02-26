@@ -7,7 +7,7 @@ All notable changes to GastroLog are documented here.
 ### Features
 - **Pipeline lookup operator** — `lookup` operator for field enrichment with reverse DNS, GeoIP (MaxMind MMDB with auto-download), and ASN lookup tables
 - **World map visualizations** — choropleth and scatter map visualizations with zoom/pan
-- **Visualization operators** — explicit `| timechart`, `| worldmap`, etc. replace heuristic chart selection
+- **Visualization operators** — explicit `| timechart`, `| map choropleth`, `| map scatter`, etc. replace heuristic chart selection
 - **Server-side query highlighting and validation** — syntax highlighting and field discovery moved to backend
 - **Line comments** — `#` comments in queries
 - **Pipeline records in log viewer** — pipeline results stream back to the log viewer when no aggregation is applied
