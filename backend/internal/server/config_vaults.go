@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -14,6 +13,7 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/config"
+	"gastrolog/internal/config/raftfsm"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -94,44 +94,14 @@ func (s *ConfigServer) PutVault(
 		}
 	}
 
-	// Persist to config vault.
+	// Persist to config store. For raft stores, the FSM notification callback
+	// handles orchestrator side effects. For non-raft stores, notify() does.
 	if err := s.cfgStore.PutVault(ctx, vaultCfg); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-
-	// Apply to runtime: check if vault already exists.
-	if slices.Contains(s.orch.ListVaults(), vaultCfg.ID) {
-		if err := s.applyExistingVaultChanges(ctx, vaultCfg); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := s.orch.AddVault(ctx, vaultCfg, s.factories); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("add vault: %w", err))
-		}
-	}
+	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: vaultCfg.ID})
 
 	return connect.NewResponse(&apiv1.PutVaultResponse{}), nil
-}
-
-func (s *ConfigServer) applyExistingVaultChanges(ctx context.Context, vaultCfg config.VaultConfig) error {
-	if err := s.orch.ReloadFilters(ctx); err != nil {
-		return connect.NewError(connect.CodeInternal, fmt.Errorf("reload filters: %w", err))
-	}
-	if err := s.orch.ReloadRotationPolicies(ctx); err != nil {
-		return connect.NewError(connect.CodeInternal, fmt.Errorf("reload rotation policies: %w", err))
-	}
-	if err := s.orch.ReloadRetentionPolicies(ctx); err != nil {
-		return connect.NewError(connect.CodeInternal, fmt.Errorf("reload retention policies: %w", err))
-	}
-	if !vaultCfg.Enabled {
-		_ = s.orch.DisableVault(vaultCfg.ID)
-	} else {
-		_ = s.orch.EnableVault(vaultCfg.ID)
-	}
-	if vaultCfg.Type == "file" {
-		_ = s.orch.SetVaultCompression(vaultCfg.ID, vaultCfg.Params["compression"] == "zstd")
-	}
-	return nil
 }
 
 // DeleteVault removes a vault. If force is false, the vault must be empty.
@@ -203,6 +173,8 @@ func (s *ConfigServer) removeVault(id uuid.UUID) error {
 }
 
 // PauseVault disables ingestion for a vault.
+// It reads the current config, flips Enabled to false, and writes it back.
+// The VaultPut FSM notification handles the runtime DisableVault call.
 func (s *ConfigServer) PauseVault(
 	ctx context.Context,
 	req *connect.Request[apiv1.PauseVaultRequest],
@@ -216,30 +188,26 @@ func (s *ConfigServer) PauseVault(
 		return nil, connErr
 	}
 
-	// Update runtime state.
-	if err := s.orch.DisableVault(id); err != nil {
-		if errors.Is(err, orchestrator.ErrVaultNotFound) {
-			return nil, connect.NewError(connect.CodeNotFound, err)
-		}
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-
-	// Persist to config.
 	vaultCfg, err := s.cfgStore.GetVault(ctx, id)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	if vaultCfg != nil {
-		vaultCfg.Enabled = false
-		if err := s.cfgStore.PutVault(ctx, *vaultCfg); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err)
-		}
+	if vaultCfg == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("vault not found"))
 	}
+
+	vaultCfg.Enabled = false
+	if err := s.cfgStore.PutVault(ctx, *vaultCfg); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
 
 	return connect.NewResponse(&apiv1.PauseVaultResponse{}), nil
 }
 
 // ResumeVault enables ingestion for a vault.
+// It reads the current config, flips Enabled to true, and writes it back.
+// The VaultPut FSM notification handles the runtime EnableVault call.
 func (s *ConfigServer) ResumeVault(
 	ctx context.Context,
 	req *connect.Request[apiv1.ResumeVaultRequest],
@@ -253,25 +221,19 @@ func (s *ConfigServer) ResumeVault(
 		return nil, connErr
 	}
 
-	// Update runtime state.
-	if err := s.orch.EnableVault(id); err != nil {
-		if errors.Is(err, orchestrator.ErrVaultNotFound) {
-			return nil, connect.NewError(connect.CodeNotFound, err)
-		}
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-
-	// Persist to config.
 	vaultCfg, err := s.cfgStore.GetVault(ctx, id)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	if vaultCfg != nil {
-		vaultCfg.Enabled = true
-		if err := s.cfgStore.PutVault(ctx, *vaultCfg); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err)
-		}
+	if vaultCfg == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("vault not found"))
 	}
+
+	vaultCfg.Enabled = true
+	if err := s.cfgStore.PutVault(ctx, *vaultCfg); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
 
 	return connect.NewResponse(&apiv1.ResumeVaultResponse{}), nil
 }

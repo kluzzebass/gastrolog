@@ -2,7 +2,10 @@ package server_test
 
 import (
 	"context"
+	"errors"
+	"maps"
 	"net/http"
+	"slices"
 	"testing"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
@@ -12,6 +15,7 @@ import (
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/config"
 	cfgmem "gastrolog/internal/config/memory"
+	"gastrolog/internal/config/raftfsm"
 	"gastrolog/internal/index"
 	indexfile "gastrolog/internal/index/file"
 	indexmem "gastrolog/internal/index/memory"
@@ -21,6 +25,74 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 )
+
+// testAfterConfigApply creates a dispatch callback for non-raft test stores.
+// It mirrors the production configDispatcher but lives in the test package.
+func testAfterConfigApply(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories) func(raftfsm.Notification) {
+	return func(n raftfsm.Notification) {
+		ctx := context.Background()
+		switch n.Kind {
+		case raftfsm.NotifyVaultPut:
+			cfg, err := cfgStore.GetVault(ctx, n.ID)
+			if err != nil || cfg == nil {
+				return
+			}
+			if slices.Contains(orch.ListVaults(), n.ID) {
+				_ = orch.ReloadFilters(ctx)
+				_ = orch.ReloadRotationPolicies(ctx)
+				_ = orch.ReloadRetentionPolicies(ctx)
+				if !cfg.Enabled {
+					_ = orch.DisableVault(n.ID)
+				} else {
+					_ = orch.EnableVault(n.ID)
+				}
+				if cfg.Type == "file" {
+					_ = orch.SetVaultCompression(n.ID, cfg.Params["compression"] == "zstd")
+				}
+			} else {
+				_ = orch.AddVault(ctx, *cfg, factories)
+			}
+		case raftfsm.NotifyVaultDeleted:
+			_ = orch.ForceRemoveVault(n.ID)
+		case raftfsm.NotifyFilterPut, raftfsm.NotifyFilterDeleted:
+			_ = orch.ReloadFilters(ctx)
+		case raftfsm.NotifyRotationPolicyPut, raftfsm.NotifyRotationPolicyDeleted:
+			_ = orch.ReloadRotationPolicies(ctx)
+		case raftfsm.NotifyRetentionPolicyPut, raftfsm.NotifyRetentionPolicyDeleted:
+			_ = orch.ReloadRetentionPolicies(ctx)
+		case raftfsm.NotifyIngesterPut:
+			cfg, err := cfgStore.GetIngester(ctx, n.ID)
+			if err != nil || cfg == nil {
+				return
+			}
+			if slices.Contains(orch.ListIngesters(), n.ID) {
+				if err := orch.RemoveIngester(n.ID); err != nil && !errors.Is(err, orchestrator.ErrIngesterNotFound) {
+					return
+				}
+			}
+			if !cfg.Enabled {
+				return
+			}
+			factory, ok := factories.Ingesters[cfg.Type]
+			if !ok {
+				return
+			}
+			params := cfg.Params
+			if factories.HomeDir != "" {
+				params = make(map[string]string, len(cfg.Params)+1)
+				maps.Copy(params, cfg.Params)
+				params["_state_dir"] = factories.HomeDir
+			}
+			ing, err := factory(cfg.ID, params, factories.Logger)
+			if err != nil {
+				return
+			}
+			_ = orch.AddIngester(cfg.ID, ing)
+		case raftfsm.NotifyIngesterDeleted:
+			_ = orch.RemoveIngester(n.ID)
+		}
+	}
+}
 
 // newConfigTestSetup creates an orchestrator, config vault, and Connect client
 // for testing config RPCs.
@@ -41,7 +113,9 @@ func newConfigTestSetup(t *testing.T) (gastrologv1connect.ConfigServiceClient, c
 		},
 	}
 
-	srv := server.New(orch, cfgStore, factories, nil, server.Config{})
+	srv := server.New(orch, cfgStore, factories, nil, server.Config{
+		AfterConfigApply: testAfterConfigApply(orch, cfgStore, factories),
+	})
 	handler := srv.Handler()
 
 	httpClient := &http.Client{

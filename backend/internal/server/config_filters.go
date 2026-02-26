@@ -10,6 +10,7 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/config"
+	"gastrolog/internal/config/raftfsm"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -38,11 +39,7 @@ func (s *ConfigServer) PutFilter(
 	if err := s.cfgStore.PutFilter(ctx, cfg); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-
-	// Reload filters in orchestrator.
-	if err := s.orch.ReloadFilters(ctx); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload filters: %w", err))
-	}
+	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyFilterPut, ID: id})
 
 	return connect.NewResponse(&apiv1.PutFilterResponse{}), nil
 }

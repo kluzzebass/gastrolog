@@ -11,6 +11,7 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/config"
+	"gastrolog/internal/config/raftfsm"
 	"gastrolog/internal/lookup"
 	"gastrolog/internal/orchestrator"
 )
@@ -23,17 +24,26 @@ type ConfigServer struct {
 	certManager           CertManager
 	onTLSConfigChange     func()
 	onLookupConfigChange  func(config.LookupConfig)
+	afterConfigApply      func(raftfsm.Notification)
 }
 
 var _ gastrologv1connect.ConfigServiceHandler = (*ConfigServer)(nil)
 
 // NewConfigServer creates a new ConfigServer.
-func NewConfigServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, certManager CertManager) *ConfigServer {
+func NewConfigServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, certManager CertManager, afterConfigApply func(raftfsm.Notification)) *ConfigServer {
 	return &ConfigServer{
-		orch:        orch,
-		cfgStore:    cfgStore,
-		factories:   factories,
-		certManager: certManager,
+		orch:             orch,
+		cfgStore:         cfgStore,
+		factories:        factories,
+		certManager:      certManager,
+		afterConfigApply: afterConfigApply,
+	}
+}
+
+// notify fires the afterConfigApply callback if set.
+func (s *ConfigServer) notify(n raftfsm.Notification) {
+	if s.afterConfigApply != nil {
+		s.afterConfigApply(n)
 	}
 }
 
@@ -233,12 +243,7 @@ func (s *ConfigServer) PutServerConfig(
 	if err := s.cfgStore.PutSetting(ctx, "server", string(data)); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-
-	if sc.Scheduler.MaxConcurrentJobs > 0 {
-		if err := s.orch.UpdateMaxConcurrentJobs(sc.Scheduler.MaxConcurrentJobs); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("update scheduler: %w", err))
-		}
-	}
+	s.notify(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: "server"})
 
 	if s.onTLSConfigChange != nil {
 		s.onTLSConfigChange()

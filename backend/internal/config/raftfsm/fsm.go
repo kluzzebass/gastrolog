@@ -18,17 +18,58 @@ import (
 	"github.com/hashicorp/raft"
 )
 
+// NotifyKind identifies the type of config mutation that was applied.
+type NotifyKind int
+
+const (
+	NotifyVaultPut NotifyKind = iota + 1
+	NotifyVaultDeleted
+	NotifyFilterPut
+	NotifyFilterDeleted
+	NotifyRotationPolicyPut
+	NotifyRotationPolicyDeleted
+	NotifyRetentionPolicyPut
+	NotifyRetentionPolicyDeleted
+	NotifyIngesterPut
+	NotifyIngesterDeleted
+	NotifySettingPut
+)
+
+// Notification describes a config mutation that the FSM just applied.
+type Notification struct {
+	Kind NotifyKind
+	ID   uuid.UUID // entity ID (zero for settings)
+	Key  string    // settings key (empty for entity mutations)
+}
+
+// Option configures the FSM at construction time.
+type Option func(*FSM)
+
+// WithOnApply registers a callback that fires synchronously after the FSM
+// successfully applies a config-entity command. The callback runs inside
+// raft.Apply, so it completes before the cfgStore write method returns.
+func WithOnApply(fn func(Notification)) Option {
+	return func(f *FSM) {
+		f.onApply = fn
+	}
+}
+
 // FSM implements raft.FSM by dispatching deserialized ConfigCommands to an
 // in-memory config store.
 type FSM struct {
-	store *memory.Store
+	store   *memory.Store
+	onApply func(Notification)
 }
 
 var _ raft.FSM = (*FSM)(nil)
 
 // New creates a new FSM with a fresh in-memory store.
-func New() *FSM {
-	return &FSM{store: memory.NewStore()}
+func New(opts ...Option) *FSM {
+	f := &FSM{store: memory.NewStore()}
+	for _, o := range opts {
+		o(f)
+	}
+	return f
 }
 
 // Store returns the underlying in-memory store for serving reads.
@@ -83,110 +124,187 @@ func (f *FSM) Apply(l *raft.Log) any {
 }
 
 // applyConfig dispatches config-entity commands (filters, policies, vaults,
-// ingesters, settings, certificates).
+// ingesters, settings, certificates) and fires a notification on success.
 func (f *FSM) applyConfig(ctx context.Context, cmd *gastrologv1.ConfigCommand) error {
+	note, err := f.dispatchConfig(ctx, cmd)
+	if err != nil {
+		return err
+	}
+	if note != nil && f.onApply != nil {
+		f.onApply(*note)
+	}
+	return nil
+}
+
+// dispatchConfig routes a config command to the store and returns a
+// notification describing the mutation, or nil for commands that don't
+// need orchestrator side effects (settings delete, certificates).
+func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.ConfigCommand) (*Notification, error) {
 	switch c := cmd.Command.(type) {
 	case *gastrologv1.ConfigCommand_PutFilter:
-		cfg, err := command.ExtractPutFilter(c.PutFilter)
-		if err != nil {
-			return err
-		}
-		return f.store.PutFilter(ctx, cfg)
-
+		return f.applyPutFilter(ctx, c.PutFilter)
 	case *gastrologv1.ConfigCommand_DeleteFilter:
-		id, err := command.ExtractDeleteFilter(c.DeleteFilter)
-		if err != nil {
-			return err
-		}
-		return f.store.DeleteFilter(ctx, id)
-
+		return f.applyDeleteFilter(ctx, c.DeleteFilter)
 	case *gastrologv1.ConfigCommand_PutRotationPolicy:
-		cfg, err := command.ExtractPutRotationPolicy(c.PutRotationPolicy)
-		if err != nil {
-			return err
-		}
-		return f.store.PutRotationPolicy(ctx, cfg)
-
+		return f.applyPutRotationPolicy(ctx, c.PutRotationPolicy)
 	case *gastrologv1.ConfigCommand_DeleteRotationPolicy:
-		id, err := command.ExtractDeleteRotationPolicy(c.DeleteRotationPolicy)
-		if err != nil {
-			return err
-		}
-		if err := f.store.DeleteRotationPolicy(ctx, id); err != nil {
-			return err
-		}
-		return f.cascadeDeleteRotationPolicy(ctx, id)
-
+		return f.applyDeleteRotationPolicy(ctx, c.DeleteRotationPolicy)
 	case *gastrologv1.ConfigCommand_PutRetentionPolicy:
-		cfg, err := command.ExtractPutRetentionPolicy(c.PutRetentionPolicy)
-		if err != nil {
-			return err
-		}
-		return f.store.PutRetentionPolicy(ctx, cfg)
-
+		return f.applyPutRetentionPolicy(ctx, c.PutRetentionPolicy)
 	case *gastrologv1.ConfigCommand_DeleteRetentionPolicy:
-		id, err := command.ExtractDeleteRetentionPolicy(c.DeleteRetentionPolicy)
-		if err != nil {
-			return err
-		}
-		if err := f.store.DeleteRetentionPolicy(ctx, id); err != nil {
-			return err
-		}
-		return f.cascadeDeleteRetentionPolicy(ctx, id)
-
+		return f.applyDeleteRetentionPolicy(ctx, c.DeleteRetentionPolicy)
 	case *gastrologv1.ConfigCommand_PutVault:
-		cfg, err := command.ExtractPutVault(c.PutVault)
-		if err != nil {
-			return err
-		}
-		return f.store.PutVault(ctx, cfg)
-
+		return f.applyPutVault(ctx, c.PutVault)
 	case *gastrologv1.ConfigCommand_DeleteVault:
-		id, err := command.ExtractDeleteVault(c.DeleteVault)
-		if err != nil {
-			return err
-		}
-		return f.store.DeleteVault(ctx, id)
-
+		return f.applyDeleteVault(ctx, c.DeleteVault)
 	case *gastrologv1.ConfigCommand_PutIngester:
-		cfg, err := command.ExtractPutIngester(c.PutIngester)
-		if err != nil {
-			return err
-		}
-		return f.store.PutIngester(ctx, cfg)
-
+		return f.applyPutIngester(ctx, c.PutIngester)
 	case *gastrologv1.ConfigCommand_DeleteIngester:
-		id, err := command.ExtractDeleteIngester(c.DeleteIngester)
-		if err != nil {
-			return err
-		}
-		return f.store.DeleteIngester(ctx, id)
-
+		return f.applyDeleteIngester(ctx, c.DeleteIngester)
 	case *gastrologv1.ConfigCommand_PutSetting:
-		key, value := command.ExtractPutSetting(c.PutSetting)
-		return f.store.PutSetting(ctx, key, value)
-
+		return f.applyPutSetting(ctx, c.PutSetting)
 	case *gastrologv1.ConfigCommand_DeleteSetting:
 		key := command.ExtractDeleteSetting(c.DeleteSetting)
-		return f.store.DeleteSetting(ctx, key)
-
+		return nil, f.store.DeleteSetting(ctx, key)
 	case *gastrologv1.ConfigCommand_PutCertificate:
 		cert, err := command.ExtractPutCertificate(c.PutCertificate)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		return f.store.PutCertificate(ctx, cert)
-
+		return nil, f.store.PutCertificate(ctx, cert)
 	case *gastrologv1.ConfigCommand_DeleteCertificate:
 		id, err := command.ExtractDeleteCertificate(c.DeleteCertificate)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		return f.store.DeleteCertificate(ctx, id)
-
+		return nil, f.store.DeleteCertificate(ctx, id)
 	default:
-		return fmt.Errorf("unexpected config command: %T", c)
+		return nil, fmt.Errorf("unexpected config command: %T", c)
 	}
+}
+
+func (f *FSM) applyPutFilter(ctx context.Context, pb *gastrologv1.PutFilterCommand) (*Notification, error) {
+	cfg, err := command.ExtractPutFilter(pb)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.store.PutFilter(ctx, cfg); err != nil {
+		return nil, err
+	}
+	return &Notification{Kind: NotifyFilterPut, ID: cfg.ID}, nil
+}
+
+func (f *FSM) applyDeleteFilter(ctx context.Context, pb *gastrologv1.DeleteFilterCommand) (*Notification, error) {
+	id, err := command.ExtractDeleteFilter(pb)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.store.DeleteFilter(ctx, id); err != nil {
+		return nil, err
+	}
+	return &Notification{Kind: NotifyFilterDeleted, ID: id}, nil
+}
+
+func (f *FSM) applyPutRotationPolicy(ctx context.Context, pb *gastrologv1.PutRotationPolicyCommand) (*Notification, error) {
+	cfg, err := command.ExtractPutRotationPolicy(pb)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.store.PutRotationPolicy(ctx, cfg); err != nil {
+		return nil, err
+	}
+	return &Notification{Kind: NotifyRotationPolicyPut, ID: cfg.ID}, nil
+}
+
+func (f *FSM) applyDeleteRotationPolicy(ctx context.Context, pb *gastrologv1.DeleteRotationPolicyCommand) (*Notification, error) {
+	id, err := command.ExtractDeleteRotationPolicy(pb)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.store.DeleteRotationPolicy(ctx, id); err != nil {
+		return nil, err
+	}
+	if err := f.cascadeDeleteRotationPolicy(ctx, id); err != nil {
+		return nil, err
+	}
+	return &Notification{Kind: NotifyRotationPolicyDeleted, ID: id}, nil
+}
+
+func (f *FSM) applyPutRetentionPolicy(ctx context.Context, pb *gastrologv1.PutRetentionPolicyCommand) (*Notification, error) {
+	cfg, err := command.ExtractPutRetentionPolicy(pb)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.store.PutRetentionPolicy(ctx, cfg); err != nil {
+		return nil, err
+	}
+	return &Notification{Kind: NotifyRetentionPolicyPut, ID: cfg.ID}, nil
+}
+
+func (f *FSM) applyDeleteRetentionPolicy(ctx context.Context, pb *gastrologv1.DeleteRetentionPolicyCommand) (*Notification, error) {
+	id, err := command.ExtractDeleteRetentionPolicy(pb)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.store.DeleteRetentionPolicy(ctx, id); err != nil {
+		return nil, err
+	}
+	if err := f.cascadeDeleteRetentionPolicy(ctx, id); err != nil {
+		return nil, err
+	}
+	return &Notification{Kind: NotifyRetentionPolicyDeleted, ID: id}, nil
+}
+
+func (f *FSM) applyPutVault(ctx context.Context, pb *gastrologv1.PutVaultCommand) (*Notification, error) {
+	cfg, err := command.ExtractPutVault(pb)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.store.PutVault(ctx, cfg); err != nil {
+		return nil, err
+	}
+	return &Notification{Kind: NotifyVaultPut, ID: cfg.ID}, nil
+}
+
+func (f *FSM) applyDeleteVault(ctx context.Context, pb *gastrologv1.DeleteVaultCommand) (*Notification, error) {
+	id, err := command.ExtractDeleteVault(pb)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.store.DeleteVault(ctx, id); err != nil {
+		return nil, err
+	}
+	return &Notification{Kind: NotifyVaultDeleted, ID: id}, nil
+}
+
+func (f *FSM) applyPutIngester(ctx context.Context, pb *gastrologv1.PutIngesterCommand) (*Notification, error) {
+	cfg, err := command.ExtractPutIngester(pb)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.store.PutIngester(ctx, cfg); err != nil {
+		return nil, err
+	}
+	return &Notification{Kind: NotifyIngesterPut, ID: cfg.ID}, nil
+}
+
+func (f *FSM) applyDeleteIngester(ctx context.Context, pb *gastrologv1.DeleteIngesterCommand) (*Notification, error) {
+	id, err := command.ExtractDeleteIngester(pb)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.store.DeleteIngester(ctx, id); err != nil {
+		return nil, err
+	}
+	return &Notification{Kind: NotifyIngesterDeleted, ID: id}, nil
+}
+
+func (f *FSM) applyPutSetting(ctx context.Context, pb *gastrologv1.PutSettingCommand) (*Notification, error) {
+	key, value := command.ExtractPutSetting(pb)
+	if err := f.store.PutSetting(ctx, key, value); err != nil {
+		return nil, err
+	}
+	return &Notification{Kind: NotifySettingPut, Key: key}, nil
 }
 
 // applyUser dispatches user-management commands.

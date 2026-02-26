@@ -11,6 +11,7 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/config"
+	"gastrolog/internal/config/raftfsm"
 )
 
 // PutRotationPolicy creates or updates a rotation policy.
@@ -45,11 +46,7 @@ func (s *ConfigServer) PutRotationPolicy(
 	if err := s.cfgStore.PutRotationPolicy(ctx, cfg); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-
-	// Hot-reload rotation policies for running vaults.
-	if err := s.orch.ReloadRotationPolicies(ctx); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload rotation policies: %w", err))
-	}
+	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyRotationPolicyPut, ID: id})
 
 	return connect.NewResponse(&apiv1.PutRotationPolicyResponse{}), nil
 }
@@ -118,11 +115,7 @@ func (s *ConfigServer) PutRetentionPolicy(
 	if err := s.cfgStore.PutRetentionPolicy(ctx, cfg); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-
-	// Hot-reload retention policies for running vaults.
-	if err := s.orch.ReloadRetentionPolicies(ctx); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("reload retention policies: %w", err))
-	}
+	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyRetentionPolicyPut, ID: id})
 
 	return connect.NewResponse(&apiv1.PutRetentionPolicyResponse{}), nil
 }

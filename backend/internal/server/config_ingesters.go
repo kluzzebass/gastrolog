@@ -12,6 +12,7 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/config"
+	"gastrolog/internal/config/raftfsm"
 	"gastrolog/internal/ingester/docker"
 	"gastrolog/internal/orchestrator"
 )
@@ -130,24 +131,14 @@ func (s *ConfigServer) PutIngester(
 		Params:  req.Msg.Config.Params,
 	}
 
-	// Check if ingester already exists in runtime — if so, remove it first.
-	existing := slices.Contains(s.orch.ListIngesters(), ingCfg.ID)
-
-	if existing {
-		if err := s.orch.RemoveIngester(ingCfg.ID); err != nil && !errors.Is(err, orchestrator.ErrIngesterNotFound) {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("remove existing ingester: %w", err))
-		}
-	}
-
-	// Only create and register the ingester if enabled.
+	// Dry-run validation: verify type is known and factory can construct the
+	// ingester before persisting. This catches bad params early.
 	if ingCfg.Enabled {
-		// Look up factory and create the ingester.
 		factory, ok := s.factories.Ingesters[ingCfg.Type]
 		if !ok {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("unknown ingester type: %s", ingCfg.Type))
 		}
 
-		// Inject _state_dir so ingesters can persist state.
 		params := ingCfg.Params
 		if s.factories.HomeDir != "" {
 			params = make(map[string]string, len(ingCfg.Params)+1)
@@ -155,20 +146,17 @@ func (s *ConfigServer) PutIngester(
 			params["_state_dir"] = s.factories.HomeDir
 		}
 
-		ingester, err := factory(ingCfg.ID, params, s.factories.Logger)
-		if err != nil {
+		// Test construction; discard the result. The FSM notification callback
+		// will create the real instance after the config is persisted.
+		if _, err := factory(ingCfg.ID, params, s.factories.Logger); err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("create ingester: %w", err))
-		}
-
-		if err := s.orch.AddIngester(ingCfg.ID, ingester); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("add ingester: %w", err))
 		}
 	}
 
-	// Persist to config vault (always, even when disabled).
 	if err := s.cfgStore.PutIngester(ctx, ingCfg); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
+	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
 
 	return connect.NewResponse(&apiv1.PutIngesterResponse{}), nil
 }

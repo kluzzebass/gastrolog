@@ -140,7 +140,8 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 		logger.Info("home directory", "path", hd.Root())
 	}
 
-	cfgStore, err := openConfigStore(hd, configType, logger)
+	disp := &configDispatcher{logger: logger.With("component", "dispatch")}
+	cfgStore, err := openConfigStore(hd, configType, logger, raftfsm.WithOnApply(disp.Handle))
 	if err != nil {
 		return fmt.Errorf("open config store: %w", err)
 	}
@@ -172,6 +173,13 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 	orch.RegisterDigester(digesttimestamp.New())
 
 	factories := buildFactories(logger, homeDir, cfgStore, orch)
+
+	// Wire the dispatcher now that orchestrator and factories are available.
+	// From this point, FSM notifications will trigger orchestrator side effects.
+	disp.orch = orch
+	disp.cfgStore = cfgStore
+	disp.factories = factories
+
 	if err := orch.ApplyConfig(cfg, factories); err != nil {
 		return err
 	}
@@ -197,7 +205,14 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 		return err
 	}
 
-	return serveAndAwaitShutdown(ctx, logger, serverAddr, homeDir, orch, cfgStore, factories, tokens, certMgr, noAuth)
+	// For non-raft stores, the server must fire notifications itself since
+	// there is no FSM callback. For raft stores the FSM handles it.
+	var afterConfigApply func(raftfsm.Notification)
+	if configType != "raft" {
+		afterConfigApply = disp.Handle
+	}
+
+	return serveAndAwaitShutdown(ctx, logger, serverAddr, homeDir, orch, cfgStore, factories, tokens, certMgr, noAuth, afterConfigApply)
 }
 
 func ensureConfig(ctx context.Context, logger *slog.Logger, cfgStore config.Store, bootstrap bool) (*config.Config, error) {
@@ -272,11 +287,11 @@ func loadCertManager(ctx context.Context, logger *slog.Logger, cfgStore config.S
 	return certMgr, nil
 }
 
-func serveAndAwaitShutdown(ctx context.Context, logger *slog.Logger, serverAddr, homeDir string, orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, tokens *auth.TokenService, certMgr *cert.Manager, noAuth bool) error {
+func serveAndAwaitShutdown(ctx context.Context, logger *slog.Logger, serverAddr, homeDir string, orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, tokens *auth.TokenService, certMgr *cert.Manager, noAuth bool, afterConfigApply func(raftfsm.Notification)) error {
 	var srv *server.Server
 	var serverWg sync.WaitGroup
 	if serverAddr != "" {
-		srv = server.New(orch, cfgStore, factories, tokens, server.Config{Logger: logger, CertManager: certMgr, NoAuth: noAuth, HomeDir: homeDir})
+		srv = server.New(orch, cfgStore, factories, tokens, server.Config{Logger: logger, CertManager: certMgr, NoAuth: noAuth, HomeDir: homeDir, AfterConfigApply: afterConfigApply})
 		serverWg.Go(func() {
 			if err := srv.ServeTCP(serverAddr); err != nil {
 				logger.Error("server error", "error", err)
@@ -383,14 +398,14 @@ func buildTokenService(ctx context.Context, cfgStore config.Store) (*auth.TokenS
 }
 
 // openConfigStore creates a config.Store based on config type and home directory.
-func openConfigStore(hd home.Dir, configType string, logger *slog.Logger) (config.Store, error) {
+func openConfigStore(hd home.Dir, configType string, logger *slog.Logger, fsmOpts ...raftfsm.Option) (config.Store, error) {
 	switch configType {
 	case "memory":
 		return configmem.NewStore(), nil
 	case "sqlite":
 		return configsqlite.NewStore(hd.ConfigPath("sqlite"))
 	case "raft":
-		return openRaftConfigStore(hd, logger)
+		return openRaftConfigStore(hd, logger, fsmOpts...)
 	default:
 		return nil, fmt.Errorf("unknown config store type: %q", configType)
 	}
@@ -416,7 +431,7 @@ func (s *raftConfigStore) Close() error {
 // openRaftConfigStore creates a single-node raft-backed config store with
 // BoltDB persistence. On first run, the cluster is bootstrapped so this node
 // becomes leader immediately.
-func openRaftConfigStore(hd home.Dir, logger *slog.Logger) (config.Store, error) {
+func openRaftConfigStore(hd home.Dir, logger *slog.Logger, fsmOpts ...raftfsm.Option) (config.Store, error) {
 	raftDir := hd.RaftDir()
 	if err := os.MkdirAll(raftDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create raft directory: %w", err)
@@ -438,7 +453,7 @@ func openRaftConfigStore(hd home.Dir, logger *slog.Logger) (config.Store, error)
 
 	_, transport := hraft.NewInmemTransport("")
 
-	fsm := raftfsm.New()
+	fsm := raftfsm.New(fsmOpts...)
 
 	conf := hraft.DefaultConfig()
 	conf.LocalID = "gastrolog-1"

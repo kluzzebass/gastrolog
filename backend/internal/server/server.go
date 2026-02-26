@@ -26,6 +26,7 @@ import (
 	"gastrolog/internal/auth"
 	"gastrolog/internal/cert"
 	"gastrolog/internal/config"
+	"gastrolog/internal/config/raftfsm"
 	"gastrolog/internal/frontend"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/lookup"
@@ -47,6 +48,12 @@ type Config struct {
 	// HomeDir is the gastrolog home directory path. Used for auto-downloaded
 	// lookup databases. Empty when running with in-memory config.
 	HomeDir string
+
+	// AfterConfigApply is called after the server handler persists a config
+	// mutation that requires orchestrator side effects. For raft-backed stores
+	// this should be nil (the FSM's onApply callback handles it). For non-raft
+	// stores (memory, SQLite, tests), set this to trigger the same dispatcher.
+	AfterConfigApply func(raftfsm.Notification)
 }
 
 // CertManager interface for TLS certificate management.
@@ -67,8 +74,9 @@ type Server struct {
 	certManager CertManager
 	noAuth      bool
 	logger      *slog.Logger
-	startTime   time.Time
-	homeDir     string // gastrolog home directory; empty for in-memory config
+	startTime        time.Time
+	homeDir          string                     // gastrolog home directory; empty for in-memory config
+	afterConfigApply func(raftfsm.Notification) // non-raft dispatch hook
 
 	mu       sync.Mutex
 	listener net.Listener
@@ -99,9 +107,10 @@ func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orche
 		certManager: cfg.CertManager,
 		noAuth:      cfg.NoAuth,
 		logger:      logging.Default(cfg.Logger).With("component", "server"),
-		startTime:   time.Now(),
-		homeDir:     cfg.HomeDir,
-		shutdown:    make(chan struct{}),
+		startTime:        time.Now(),
+		homeDir:          cfg.HomeDir,
+		afterConfigApply: cfg.AfterConfigApply,
+		shutdown:         make(chan struct{}),
 		rl:          newRateLimiter(5.0/60.0, 5), // 5 req/min per IP, burst of 5
 	}
 }
@@ -215,7 +224,7 @@ func (s *Server) buildMux() *http.ServeMux {
 
 	queryServer := NewQueryServer(s.orch, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount)
 	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.logger)
-	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager)
+	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager, s.afterConfigApply)
 	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
 	configServer.SetOnLookupConfigChange(func(cfg config.LookupConfig) {
 		s.applyLookupConfig(cfg, geoipTable, asnTable)

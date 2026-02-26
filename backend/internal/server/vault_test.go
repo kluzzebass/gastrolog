@@ -618,7 +618,9 @@ func newTwoVaultTestSetup(t *testing.T) twoVaultTestClients {
 		},
 	}
 
-	srv := server.New(orch, cfgStore, factories, nil, server.Config{})
+	srv := server.New(orch, cfgStore, factories, nil, server.Config{
+		AfterConfigApply: testAfterConfigApply(orch, cfgStore, factories),
+	})
 	handler := srv.Handler()
 
 	httpClient := &http.Client{
@@ -718,7 +720,9 @@ func TestMergeVaultsFileBacked(t *testing.T) {
 		HomeDir: homeDir,
 	}
 
-	srv := server.New(orch, cfgStore, factories, nil, server.Config{})
+	srv := server.New(orch, cfgStore, factories, nil, server.Config{
+		AfterConfigApply: testAfterConfigApply(orch, cfgStore, factories),
+	})
 	handler := srv.Handler()
 	httpClient := &http.Client{
 		Transport: &embeddedTransport{handler: handler},
