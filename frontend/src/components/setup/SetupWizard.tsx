@@ -184,7 +184,9 @@ export function SetupWizard() {
         },
       });
 
+      await putServerConfig.mutateAsync({ setupWizardDismissed: true });
       await queryClient.invalidateQueries({ queryKey: ["config"] });
+      await queryClient.invalidateQueries({ queryKey: ["serverConfig"] });
       addToast("Configuration created successfully!", "info");
       navigate({ to: "/search", search: { q: "", help: undefined, settings: undefined, inspector: undefined } });
     } catch (err) {
@@ -299,6 +301,7 @@ export function SetupWizard() {
             <GhostButton
               onClick={async () => {
                 await putServerConfig.mutateAsync({ setupWizardDismissed: true });
+                await queryClient.invalidateQueries({ queryKey: ["serverConfig"] });
                 navigate({ to: "/search", search: { q: "", help: undefined, settings: undefined, inspector: undefined } });
               }}
               dark={dark}
