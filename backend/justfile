@@ -32,6 +32,10 @@ run-noauth:
 pprof:
   go run ./cmd/gastrolog server --home data --pprof localhost:6060
 
+# Runs a config CLI command against the local server. Usage: just cfg filter list
+cfg *args:
+  go run ./cmd/gastrolog --home data config {{args}}
+
 # Cross-compiles for a specific OS/arch. Usage: just build-cross linux amd64
 build-cross os arch:
   CGO_ENABLED=0 GOOS={{os}} GOARCH={{arch}} go build -ldflags "-X main.version={{version}}" -o gastrolog-{{os}}-{{arch}} ./cmd/gastrolog

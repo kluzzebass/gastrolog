@@ -58,6 +58,11 @@ type Config struct {
 	// NodeID is the local raft server ID. Used to auto-assign node ownership
 	// when creating vaults and ingesters.
 	NodeID string
+
+	// UnixSocket is the path to a Unix domain socket for local CLI access.
+	// When set, the server listens on this socket with authentication bypassed
+	// (the OS file-system permissions provide access control). Empty disables.
+	UnixSocket string
 }
 
 // CertManager interface for TLS certificate management.
@@ -100,6 +105,12 @@ type Server struct {
 	httpsServer   *http.Server
 	httpsPort     string
 	redirectToHTTPS atomic.Bool
+
+	// Unix socket listener for local CLI access (no auth required)
+	unixSocketConfig string // path from Config.UnixSocket, consumed by Serve()
+	unixListener     net.Listener
+	unixServer       *http.Server
+	unixPath         string
 }
 
 // New creates a new Server.
@@ -115,6 +126,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orche
 		localNodeID:      cfg.NodeID,
 		startTime:        time.Now(),
 		homeDir:          cfg.HomeDir,
+		unixSocketConfig: cfg.UnixSocket,
 		afterConfigApply: cfg.AfterConfigApply,
 		shutdown:         make(chan struct{}),
 		rl:          newRateLimiter(5.0/60.0, 5), // 5 req/min per IP, burst of 5
@@ -205,13 +217,16 @@ func (s *Server) trackingMiddleware(next http.Handler) http.Handler {
 }
 
 // buildMux creates a new ServeMux with all RPC service handlers and probe endpoints registered.
-func (s *Server) buildMux() *http.ServeMux {
+func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	var handlerOpts []connect.HandlerOption
-	if s.noAuth {
+	switch {
+	case len(overrideOpts) > 0:
+		handlerOpts = overrideOpts
+	case s.noAuth:
 		handlerOpts = append(handlerOpts, connect.WithInterceptors(&auth.NoAuthInterceptor{}))
-	} else if s.tokens != nil {
+	case s.tokens != nil:
 		authInterceptor := auth.NewAuthInterceptor(s.tokens, s.cfgStore, &tokenValidator{cfgStore: s.cfgStore})
 		handlerOpts = append(handlerOpts, connect.WithInterceptors(authInterceptor))
 	}
@@ -480,6 +495,13 @@ func (s *Server) Serve(listener net.Listener) error {
 	// Initial TLS config: start HTTPS if enabled
 	s.reconfigureTLS()
 
+	// Start Unix socket for local CLI access (no auth).
+	if s.unixSocketConfig != "" {
+		if err := s.ListenUnix(s.unixSocketConfig); err != nil {
+			s.logger.Warn("unix socket failed, CLI will require --token", "error", err)
+		}
+	}
+
 	s.logger.Info("server starting", "addr", listener.Addr().String())
 
 	err := s.server.Serve(listener)
@@ -625,6 +647,50 @@ func (s *Server) ServeUnix(path string) error {
 	return s.Serve(listener)
 }
 
+// ListenUnix starts a secondary Unix socket listener alongside the primary
+// TCP listener. Requests over the socket bypass authentication, providing
+// token-free access for the local CLI. The socket file is removed on Stop.
+// Must be called after Serve has set up the handler.
+func (s *Server) ListenUnix(path string) error {
+	// Remove stale socket file from a previous unclean shutdown.
+	_ = os.Remove(path)
+
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		return fmt.Errorf("listen unix %s: %w", path, err)
+	}
+	// Restrict socket to owner only.
+	if err := os.Chmod(path, 0o600); err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("chmod unix socket: %w", err)
+	}
+
+	// Build a separate mux with NoAuthInterceptor so the Connect layer
+	// skips JWT validation entirely. The OS file permissions on the socket
+	// provide the access control.
+	noAuthOpt := connect.WithInterceptors(&auth.NoAuthInterceptor{})
+	mux := s.buildMux(noAuthOpt)
+	handler := s.trackingMiddleware(s.corsMiddleware(securityHeadersMiddleware(rateLimitMiddleware(s.rl)(compressMiddleware(mux)))))
+
+	s.mu.Lock()
+	s.unixListener = ln
+	s.unixPath = path
+	s.unixServer = &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	s.mu.Unlock()
+
+	s.logger.Info("unix socket listener started", "path", path)
+
+	go func() {
+		if err := s.unixServer.Serve(ln); err != nil && err != http.ErrServerClosed {
+			s.logger.Warn("unix socket serve error", "error", err)
+		}
+	}()
+	return nil
+}
+
 // ServeTCP starts the server on a TCP address.
 func (s *Server) ServeTCP(addr string) error {
 	listener, err := net.Listen("tcp", addr)
@@ -647,7 +713,17 @@ func (s *Server) Stop(ctx context.Context) error {
 	httpsServer := s.httpsServer
 	s.httpsServer = nil
 	s.httpsListener = nil
+	unixServer := s.unixServer
+	unixPath := s.unixPath
+	s.unixServer = nil
+	s.unixListener = nil
+	s.unixPath = ""
 	s.mu.Unlock()
+
+	if unixServer != nil {
+		_ = unixServer.Shutdown(ctx)
+		_ = os.Remove(unixPath)
+	}
 
 	if httpsServer != nil {
 		_ = httpsServer.Shutdown(ctx)

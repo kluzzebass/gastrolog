@@ -26,6 +26,7 @@ import (
 	petname "github.com/dustinkirkland/golang-petname"
 	"github.com/google/uuid"
 
+	"gastrolog/cmd/gastrolog/cli"
 	"gastrolog/internal/auth"
 	"gastrolog/internal/cert"
 	"gastrolog/internal/chunk"
@@ -122,7 +123,7 @@ func main() {
 		},
 	}
 
-	rootCmd.AddCommand(serverCmd, versionCmd)
+	rootCmd.AddCommand(serverCmd, versionCmd, cli.NewConfigCommand())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -177,8 +178,10 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 	}
 
 	homeDir := ""
+	socketPath := ""
 	if configType != "memory" {
 		homeDir = hd.Root()
+		socketPath = hd.SocketPath()
 	}
 
 	logger.Info("loaded config",
@@ -234,7 +237,7 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 		afterConfigApply = disp.Handle
 	}
 
-	return serveAndAwaitShutdown(ctx, logger, serverAddr, homeDir, nodeID, orch, cfgStore, factories, tokens, certMgr, noAuth, afterConfigApply)
+	return serveAndAwaitShutdown(ctx, logger, serverAddr, homeDir, nodeID, socketPath, orch, cfgStore, factories, tokens, certMgr, noAuth, afterConfigApply)
 }
 
 // ensureNodeConfig checks whether a NodeConfig exists for the local node ID.
@@ -327,11 +330,11 @@ func loadCertManager(ctx context.Context, logger *slog.Logger, cfgStore config.S
 	return certMgr, nil
 }
 
-func serveAndAwaitShutdown(ctx context.Context, logger *slog.Logger, serverAddr, homeDir, nodeID string, orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, tokens *auth.TokenService, certMgr *cert.Manager, noAuth bool, afterConfigApply func(raftfsm.Notification)) error {
+func serveAndAwaitShutdown(ctx context.Context, logger *slog.Logger, serverAddr, homeDir, nodeID, socketPath string, orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, tokens *auth.TokenService, certMgr *cert.Manager, noAuth bool, afterConfigApply func(raftfsm.Notification)) error {
 	var srv *server.Server
 	var serverWg sync.WaitGroup
 	if serverAddr != "" {
-		srv = server.New(orch, cfgStore, factories, tokens, server.Config{Logger: logger, CertManager: certMgr, NoAuth: noAuth, HomeDir: homeDir, NodeID: nodeID, AfterConfigApply: afterConfigApply})
+		srv = server.New(orch, cfgStore, factories, tokens, server.Config{Logger: logger, CertManager: certMgr, NoAuth: noAuth, HomeDir: homeDir, NodeID: nodeID, UnixSocket: socketPath, AfterConfigApply: afterConfigApply})
 		serverWg.Go(func() {
 			if err := srv.ServeTCP(serverAddr); err != nil {
 				logger.Error("server error", "error", err)

@@ -72,6 +72,11 @@ func (d Dir) LookupDir() string {
 	return filepath.Join(d.root, "lookups")
 }
 
+// SocketPath returns the path to the Unix domain socket for local CLI access.
+func (d Dir) SocketPath() string {
+	return filepath.Join(d.root, "gastrolog.sock")
+}
+
 // EnsureExists creates the home directory (and parents) if it doesn't exist.
 func (d Dir) EnsureExists() error {
 	if err := os.MkdirAll(d.root, 0o750); err != nil {
