@@ -2,6 +2,41 @@
 
 All notable changes to GastroLog are documented here.
 
+## v0.6.0 — 2026-02-26
+
+### Features
+- **Pipeline lookup operator** — `lookup` operator with reverse DNS, GeoIP (MaxMind MMDB), and ASN lookup tables. Extracts all GeoIP City fields (subdivision, lat/lon, timezone, accuracy radius).
+- **Auto-download MaxMind databases** — scheduled job downloads GeoLite2 City and ASN databases automatically with account credentials
+- **GeoIP MMDB path validation** — validates MMDB path on save and returns metadata inline
+- **World map visualizations** — choropleth and scatter map visualizations with zoom/pan
+- **Explicit visualization operators** — replace heuristic chart selection with explicit `| timechart`, `| worldmap`, etc.
+- **Server-side query highlighting** — backend-driven syntax highlighting replaces 1744-line frontend tokenizer
+- **Backend-driven query validation and field discovery** — server validates queries and provides field suggestions
+- **Line comments** — support `#` line comments in the query language
+- **Streaming pipeline records** — pipeline records stream through search iterator with resume tokens; log viewer shows pipeline records when no aggregation
+- **Auto-format pipe queries** — automatic query formatting with extracted QueryBar icons
+- **Auto-collapse query bar** — query bar collapses on blur
+- **Toast system** — toast notifications for silent errors
+- **Metrics ingester: per-store stats** — internal metrics ingester now emits per-store log record counts, chunk counts, and data bytes on a configurable interval (default 10s), independent from system metrics (default 30s)
+
+### Performance
+- **Migrated charts to Apache ECharts** — replaced visx with ECharts for all visualizations
+- **zstd decompression for HTTP ingesters** — HTTP and OTLP ingesters accept zstd-compressed payloads; gRPC compression for OTLP
+
+### Fixes
+- Config poll no longer causes chart remounts every 10s (structural sharing prevents unnecessary re-renders)
+- Scatter map zoom/pan glitches — canvas tearing and geo/scatter desync
+- Parse negative numbers in `head`/`tail`/`slice`/`timechart`
+- Parse quoted strings as StringLit in pipe expressions
+- Preserve newlines when time range buttons replace query directives
+- Preserve undo stack in query input
+- Restore rounded top corners on histogram bars
+- Prevent histogram double entrance animation on search
+- Clear proto-level pagination limit in RunPipeline
+- Input performance, pipeline defaults, and Enter key behavior
+- Clean up 345 ESLint warnings across frontend codebase
+- Resolve all golangci-lint warnings across 20 linters
+
 ## v0.5.0 — 2026-02-24
 
 ### Features
