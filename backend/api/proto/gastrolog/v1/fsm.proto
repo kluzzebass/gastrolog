@@ -1,0 +1,221 @@
+syntax = "proto3";
+
+package gastrolog.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
+
+// ConfigCommand is a single mutation applied to the config store via Raft.
+// Each variant maps 1:1 to a config.Store write method.
+message ConfigCommand {
+  oneof command {
+    PutFilterCommand put_filter = 1;
+    DeleteFilterCommand delete_filter = 2;
+    PutRotationPolicyCommand put_rotation_policy = 3;
+    DeleteRotationPolicyCommand delete_rotation_policy = 4;
+    PutRetentionPolicyCommand put_retention_policy = 5;
+    DeleteRetentionPolicyCommand delete_retention_policy = 6;
+    PutVaultCommand put_vault = 7;
+    DeleteVaultCommand delete_vault = 8;
+    PutIngesterCommand put_ingester = 9;
+    DeleteIngesterCommand delete_ingester = 10;
+    PutSettingCommand put_setting = 11;
+    DeleteSettingCommand delete_setting = 12;
+    PutCertificateCommand put_certificate = 13;
+    DeleteCertificateCommand delete_certificate = 14;
+    CreateUserCommand create_user = 15;
+    UpdatePasswordCommand update_password = 16;
+    UpdateUserRoleCommand update_user_role = 17;
+    UpdateUsernameCommand update_username = 18;
+    DeleteUserCommand delete_user = 19;
+    InvalidateTokensCommand invalidate_tokens = 20;
+    PutUserPreferencesCommand put_user_preferences = 21;
+    CreateRefreshTokenCommand create_refresh_token = 22;
+    DeleteRefreshTokenCommand delete_refresh_token = 23;
+    DeleteUserRefreshTokensCommand delete_user_refresh_tokens = 24;
+  }
+}
+
+// --- Filters ---
+
+message PutFilterCommand {
+  string id = 1;
+  string name = 2;
+  string expression = 3;
+}
+
+message DeleteFilterCommand {
+  string id = 1;
+}
+
+// --- Rotation Policies ---
+
+message PutRotationPolicyCommand {
+  string id = 1;
+  string name = 2;
+  optional string max_bytes = 3;
+  optional string max_age = 4;
+  optional int64 max_records = 5;
+  optional string cron = 6;
+}
+
+message DeleteRotationPolicyCommand {
+  string id = 1;
+}
+
+// --- Retention Policies ---
+
+message PutRetentionPolicyCommand {
+  string id = 1;
+  string name = 2;
+  optional string max_age = 3;
+  optional string max_bytes = 4;
+  optional int64 max_chunks = 5;
+}
+
+message DeleteRetentionPolicyCommand {
+  string id = 1;
+}
+
+// --- Vaults ---
+
+// RetentionRule for vault commands. Separate from config.proto's RetentionRule
+// to avoid naming collisions and to match Go types exactly.
+message VaultRetentionRule {
+  string retention_policy_id = 1;
+  string action = 2; // "expire" or "migrate"
+  string destination = 3; // empty = nil
+}
+
+message PutVaultCommand {
+  string id = 1;
+  string name = 2;
+  string type = 3;
+  string filter = 4; // empty = nil
+  string policy = 5; // empty = nil
+  repeated VaultRetentionRule retention_rules = 6;
+  bool enabled = 7;
+  map<string, string> params = 8;
+}
+
+message DeleteVaultCommand {
+  string id = 1;
+}
+
+// --- Ingesters ---
+
+message PutIngesterCommand {
+  string id = 1;
+  string name = 2;
+  string type = 3;
+  bool enabled = 4;
+  map<string, string> params = 5;
+}
+
+message DeleteIngesterCommand {
+  string id = 1;
+}
+
+// --- Settings ---
+
+message PutSettingCommand {
+  string key = 1;
+  string value = 2;
+}
+
+message DeleteSettingCommand {
+  string key = 1;
+}
+
+// --- Certificates ---
+
+message PutCertificateCommand {
+  string id = 1;
+  string name = 2;
+  string cert_pem = 3;
+  string key_pem = 4;
+  string cert_file = 5;
+  string key_file = 6;
+}
+
+message DeleteCertificateCommand {
+  string id = 1;
+}
+
+// --- Users ---
+
+message CreateUserCommand {
+  string id = 1;
+  string username = 2;
+  string password_hash = 3;
+  string role = 4;
+  string preferences = 5;
+  google.protobuf.Timestamp token_invalidated_at = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+message UpdatePasswordCommand {
+  string id = 1;
+  string password_hash = 2;
+}
+
+message UpdateUserRoleCommand {
+  string id = 1;
+  string role = 2;
+}
+
+message UpdateUsernameCommand {
+  string id = 1;
+  string username = 2;
+}
+
+message DeleteUserCommand {
+  string id = 1;
+}
+
+message InvalidateTokensCommand {
+  string id = 1;
+  google.protobuf.Timestamp at = 2;
+}
+
+message PutUserPreferencesCommand {
+  string id = 1;
+  string preferences = 2;
+}
+
+// --- Refresh Tokens ---
+
+message CreateRefreshTokenCommand {
+  string id = 1;
+  string user_id = 2;
+  string token_hash = 3;
+  google.protobuf.Timestamp expires_at = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message DeleteRefreshTokenCommand {
+  string id = 1;
+}
+
+message DeleteUserRefreshTokensCommand {
+  string user_id = 1;
+}
+
+// --- Snapshot ---
+
+// ConfigSnapshot captures the full config state for FSM.Snapshot()/Restore().
+// Each repeated field contains one entry per entity, using the Put/Create
+// command messages to represent complete entity state.
+message ConfigSnapshot {
+  repeated PutFilterCommand filters = 1;
+  repeated PutRotationPolicyCommand rotation_policies = 2;
+  repeated PutRetentionPolicyCommand retention_policies = 3;
+  repeated PutVaultCommand vaults = 4;
+  repeated PutIngesterCommand ingesters = 5;
+  map<string, string> settings = 6;
+  repeated PutCertificateCommand certificates = 7;
+  repeated CreateUserCommand users = 8;
+  repeated CreateRefreshTokenCommand refresh_tokens = 9;
+}
