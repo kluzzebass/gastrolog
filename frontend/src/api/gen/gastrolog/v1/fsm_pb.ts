@@ -162,16 +162,16 @@ export class ConfigCommand extends Message<ConfigCommand> {
     case: "deleteUserRefreshTokens";
   } | {
     /**
-     * @generated from field: gastrolog.v1.PutNodeCommand put_node = 25;
+     * @generated from field: gastrolog.v1.PutNodeConfigCommand put_node_config = 25;
      */
-    value: PutNodeCommand;
-    case: "putNode";
+    value: PutNodeConfigCommand;
+    case: "putNodeConfig";
   } | {
     /**
-     * @generated from field: gastrolog.v1.DeleteNodeCommand delete_node = 26;
+     * @generated from field: gastrolog.v1.DeleteNodeConfigCommand delete_node_config = 26;
      */
-    value: DeleteNodeCommand;
-    case: "deleteNode";
+    value: DeleteNodeConfigCommand;
+    case: "deleteNodeConfig";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<ConfigCommand>) {
@@ -206,8 +206,8 @@ export class ConfigCommand extends Message<ConfigCommand> {
     { no: 22, name: "create_refresh_token", kind: "message", T: CreateRefreshTokenCommand, oneof: "command" },
     { no: 23, name: "delete_refresh_token", kind: "message", T: DeleteRefreshTokenCommand, oneof: "command" },
     { no: 24, name: "delete_user_refresh_tokens", kind: "message", T: DeleteUserRefreshTokensCommand, oneof: "command" },
-    { no: 25, name: "put_node", kind: "message", T: PutNodeCommand, oneof: "command" },
-    { no: 26, name: "delete_node", kind: "message", T: DeleteNodeCommand, oneof: "command" },
+    { no: 25, name: "put_node_config", kind: "message", T: PutNodeConfigCommand, oneof: "command" },
+    { no: 26, name: "delete_node_config", kind: "message", T: DeleteNodeConfigCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ConfigCommand {
@@ -1452,9 +1452,9 @@ export class DeleteUserRefreshTokensCommand extends Message<DeleteUserRefreshTok
 }
 
 /**
- * @generated from message gastrolog.v1.PutNodeCommand
+ * @generated from message gastrolog.v1.PutNodeConfigCommand
  */
-export class PutNodeCommand extends Message<PutNodeCommand> {
+export class PutNodeConfigCommand extends Message<PutNodeConfigCommand> {
   /**
    * @generated from field: string id = 1;
    */
@@ -1465,69 +1465,69 @@ export class PutNodeCommand extends Message<PutNodeCommand> {
    */
   name = "";
 
-  constructor(data?: PartialMessage<PutNodeCommand>) {
+  constructor(data?: PartialMessage<PutNodeConfigCommand>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.PutNodeCommand";
+  static readonly typeName = "gastrolog.v1.PutNodeConfigCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutNodeCommand {
-    return new PutNodeCommand().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutNodeConfigCommand {
+    return new PutNodeConfigCommand().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutNodeCommand {
-    return new PutNodeCommand().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutNodeConfigCommand {
+    return new PutNodeConfigCommand().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutNodeCommand {
-    return new PutNodeCommand().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutNodeConfigCommand {
+    return new PutNodeConfigCommand().fromJsonString(jsonString, options);
   }
 
-  static equals(a: PutNodeCommand | PlainMessage<PutNodeCommand> | undefined, b: PutNodeCommand | PlainMessage<PutNodeCommand> | undefined): boolean {
-    return proto3.util.equals(PutNodeCommand, a, b);
+  static equals(a: PutNodeConfigCommand | PlainMessage<PutNodeConfigCommand> | undefined, b: PutNodeConfigCommand | PlainMessage<PutNodeConfigCommand> | undefined): boolean {
+    return proto3.util.equals(PutNodeConfigCommand, a, b);
   }
 }
 
 /**
- * @generated from message gastrolog.v1.DeleteNodeCommand
+ * @generated from message gastrolog.v1.DeleteNodeConfigCommand
  */
-export class DeleteNodeCommand extends Message<DeleteNodeCommand> {
+export class DeleteNodeConfigCommand extends Message<DeleteNodeConfigCommand> {
   /**
    * @generated from field: string id = 1;
    */
   id = "";
 
-  constructor(data?: PartialMessage<DeleteNodeCommand>) {
+  constructor(data?: PartialMessage<DeleteNodeConfigCommand>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.DeleteNodeCommand";
+  static readonly typeName = "gastrolog.v1.DeleteNodeConfigCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteNodeCommand {
-    return new DeleteNodeCommand().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteNodeConfigCommand {
+    return new DeleteNodeConfigCommand().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteNodeCommand {
-    return new DeleteNodeCommand().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteNodeConfigCommand {
+    return new DeleteNodeConfigCommand().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteNodeCommand {
-    return new DeleteNodeCommand().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteNodeConfigCommand {
+    return new DeleteNodeConfigCommand().fromJsonString(jsonString, options);
   }
 
-  static equals(a: DeleteNodeCommand | PlainMessage<DeleteNodeCommand> | undefined, b: DeleteNodeCommand | PlainMessage<DeleteNodeCommand> | undefined): boolean {
-    return proto3.util.equals(DeleteNodeCommand, a, b);
+  static equals(a: DeleteNodeConfigCommand | PlainMessage<DeleteNodeConfigCommand> | undefined, b: DeleteNodeConfigCommand | PlainMessage<DeleteNodeConfigCommand> | undefined): boolean {
+    return proto3.util.equals(DeleteNodeConfigCommand, a, b);
   }
 }
 
@@ -1585,9 +1585,9 @@ export class ConfigSnapshot extends Message<ConfigSnapshot> {
   refreshTokens: CreateRefreshTokenCommand[] = [];
 
   /**
-   * @generated from field: repeated gastrolog.v1.PutNodeCommand nodes = 10;
+   * @generated from field: repeated gastrolog.v1.PutNodeConfigCommand node_configs = 10;
    */
-  nodes: PutNodeCommand[] = [];
+  nodeConfigs: PutNodeConfigCommand[] = [];
 
   constructor(data?: PartialMessage<ConfigSnapshot>) {
     super();
@@ -1606,7 +1606,7 @@ export class ConfigSnapshot extends Message<ConfigSnapshot> {
     { no: 7, name: "certificates", kind: "message", T: PutCertificateCommand, repeated: true },
     { no: 8, name: "users", kind: "message", T: CreateUserCommand, repeated: true },
     { no: 9, name: "refresh_tokens", kind: "message", T: CreateRefreshTokenCommand, repeated: true },
-    { no: 10, name: "nodes", kind: "message", T: PutNodeCommand, repeated: true },
+    { no: 10, name: "node_configs", kind: "message", T: PutNodeConfigCommand, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ConfigSnapshot {

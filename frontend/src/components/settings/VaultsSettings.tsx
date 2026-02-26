@@ -247,6 +247,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
 
   // New vault form state.
   const [newName, setNewName] = useState("");
+  const [namePlaceholder, setNamePlaceholder] = useState("");
   const [newType, setNewType] = useState("memory");
   const [newFilter, setNewFilter] = useState("");
   const [newPolicy, setNewPolicy] = useState("");
@@ -256,7 +257,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
   const configVaults = config?.vaults;
   const vaults = configVaults ?? [];
   const existingNames = new Set(vaults.map((s) => s.name));
-  const effectiveName = newName.trim() || newType;
+  const effectiveName = newName.trim() || namePlaceholder || newType;
   const nameConflict = existingNames.has(effectiveName);
   const policies = config?.rotationPolicies ?? [];
   const retentionPolicies = config?.retentionPolicies ?? [];
@@ -347,7 +348,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
   };
 
   const handleCreate = async () => {
-    const name = newName.trim() || newType;
+    const name = newName.trim() || namePlaceholder || newType;
     try {
       await putVault.mutateAsync({
         id: "",
@@ -381,11 +382,12 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
       adding={adding}
       onToggleAdd={() => {
         if (!adding) {
-          generateName.mutateAsync().then((n) => setNewName(n));
+          generateName.mutateAsync().then(setNamePlaceholder);
         }
         setAdding(!adding);
         setTypeConfirmed(false);
         setNewName("");
+        setNamePlaceholder("");
         setNewType("memory");
         setNewFilter("");
         setNewPolicy("");
@@ -440,7 +442,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
             <TextInput
               value={newName}
               onChange={setNewName}
-              placeholder={newType}
+              placeholder={namePlaceholder || newType}
               dark={dark}
             />
           </FormField>

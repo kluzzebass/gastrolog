@@ -12,6 +12,7 @@ interface IngesterStepProps {
   dark: boolean;
   data: IngesterData;
   onChange: (data: IngesterData) => void;
+  namePlaceholder?: string;
 }
 
 const INGESTER_TYPES = [
@@ -27,7 +28,7 @@ const INGESTER_TYPES = [
   { id: "chatterbox", label: "Chatterbox", description: "Test data generator" },
 ] as const;
 
-export function IngesterStep({ dark, data, onChange }: Readonly<IngesterStepProps>) {
+export function IngesterStep({ dark, data, onChange, namePlaceholder }: Readonly<IngesterStepProps>) {
   const c = useThemeClass(dark);
 
   const selectType = (type: string) => {
@@ -90,7 +91,7 @@ export function IngesterStep({ dark, data, onChange }: Readonly<IngesterStepProp
             <TextInput
               value={data.name}
               onChange={(v) => onChange({ ...data, name: v })}
-              placeholder={data.type}
+              placeholder={namePlaceholder || data.type}
               dark={dark}
             />
           </FormField>

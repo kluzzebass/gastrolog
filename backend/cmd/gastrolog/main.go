@@ -164,10 +164,10 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 		defer func() { _ = c.Close() }()
 	}
 
-	// Ensure this node has a NodeInfo in the config store.
+	// Ensure this node has a NodeConfig in the config store.
 	// If not, generate a petname and persist it.
-	if err := ensureNodeInfo(ctx, cfgStore, nodeID); err != nil {
-		return fmt.Errorf("ensure node info: %w", err)
+	if err := ensureNodeConfig(ctx, cfgStore, nodeID); err != nil {
+		return fmt.Errorf("ensure node config: %w", err)
 	}
 
 	logger.Info("loading config", "type", configType)
@@ -237,9 +237,9 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 	return serveAndAwaitShutdown(ctx, logger, serverAddr, homeDir, nodeID, orch, cfgStore, factories, tokens, certMgr, noAuth, afterConfigApply)
 }
 
-// ensureNodeInfo checks whether a NodeInfo exists for the local node ID.
+// ensureNodeConfig checks whether a NodeConfig exists for the local node ID.
 // If not, it generates a petname and persists it to the config store.
-func ensureNodeInfo(ctx context.Context, cfgStore config.Store, nodeID string) error {
+func ensureNodeConfig(ctx context.Context, cfgStore config.Store, nodeID string) error {
 	nodeUUID, err := uuid.Parse(nodeID)
 	if err != nil {
 		return fmt.Errorf("parse node ID %q: %w", nodeID, err)
@@ -252,7 +252,7 @@ func ensureNodeInfo(ctx context.Context, cfgStore config.Store, nodeID string) e
 		return nil
 	}
 	name := petname.Generate(2, "-")
-	return cfgStore.PutNode(ctx, config.NodeInfo{ID: nodeUUID, Name: name})
+	return cfgStore.PutNode(ctx, config.NodeConfig{ID: nodeUUID, Name: name})
 }
 
 func ensureConfig(ctx context.Context, logger *slog.Logger, cfgStore config.Store, bootstrap bool) (*config.Config, error) {

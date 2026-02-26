@@ -26,7 +26,7 @@ type Store struct {
 	certs             map[uuid.UUID]config.CertPEM
 	users         map[uuid.UUID]config.User         // keyed by ID (UUID)
 	refreshTokens map[uuid.UUID]config.RefreshToken // keyed by token ID
-	nodes         map[uuid.UUID]config.NodeInfo     // keyed by node ID
+	nodes         map[uuid.UUID]config.NodeConfig    // keyed by node ID
 }
 
 var _ config.Store = (*Store)(nil)
@@ -43,7 +43,7 @@ func NewStore() *Store {
 		certs:             make(map[uuid.UUID]config.CertPEM),
 		users:         make(map[uuid.UUID]config.User),
 		refreshTokens: make(map[uuid.UUID]config.RefreshToken),
-		nodes:         make(map[uuid.UUID]config.NodeInfo),
+		nodes:         make(map[uuid.UUID]config.NodeConfig),
 	}
 }
 
@@ -107,7 +107,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 	}
 
 	if len(s.nodes) > 0 {
-		cfg.Nodes = make([]config.NodeInfo, 0, len(s.nodes))
+		cfg.Nodes = make([]config.NodeConfig, 0, len(s.nodes))
 		for _, n := range s.nodes {
 			cfg.Nodes = append(cfg.Nodes, n)
 		}
@@ -352,7 +352,7 @@ func (s *Store) DeleteSetting(ctx context.Context, key string) error {
 
 // Nodes
 
-func (s *Store) GetNode(ctx context.Context, id uuid.UUID) (*config.NodeInfo, error) {
+func (s *Store) GetNode(ctx context.Context, id uuid.UUID) (*config.NodeConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -363,18 +363,18 @@ func (s *Store) GetNode(ctx context.Context, id uuid.UUID) (*config.NodeInfo, er
 	return &n, nil
 }
 
-func (s *Store) ListNodes(ctx context.Context) ([]config.NodeInfo, error) {
+func (s *Store) ListNodes(ctx context.Context) ([]config.NodeConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	result := make([]config.NodeInfo, 0, len(s.nodes))
+	result := make([]config.NodeConfig, 0, len(s.nodes))
 	for _, n := range s.nodes {
 		result = append(result, n)
 	}
 	return result, nil
 }
 
-func (s *Store) PutNode(ctx context.Context, node config.NodeInfo) error {
+func (s *Store) PutNode(ctx context.Context, node config.NodeConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

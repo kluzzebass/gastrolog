@@ -653,43 +653,43 @@ func ExtractDeleteUserRefreshTokens(cmd *gastrologv1.DeleteUserRefreshTokensComm
 // Nodes
 // ---------------------------------------------------------------------------
 
-func putNodeCmd(node config.NodeInfo) *gastrologv1.PutNodeCommand {
-	return &gastrologv1.PutNodeCommand{
+func putNodeConfigCmd(node config.NodeConfig) *gastrologv1.PutNodeConfigCommand {
+	return &gastrologv1.PutNodeConfigCommand{
 		Id:   node.ID.String(),
 		Name: node.Name,
 	}
 }
 
-// NewPutNode creates a ConfigCommand for PutNode.
-func NewPutNode(node config.NodeInfo) *gastrologv1.ConfigCommand {
+// NewPutNodeConfig creates a ConfigCommand for PutNodeConfig.
+func NewPutNodeConfig(node config.NodeConfig) *gastrologv1.ConfigCommand {
 	return &gastrologv1.ConfigCommand{
-		Command: &gastrologv1.ConfigCommand_PutNode{PutNode: putNodeCmd(node)},
+		Command: &gastrologv1.ConfigCommand_PutNodeConfig{PutNodeConfig: putNodeConfigCmd(node)},
 	}
 }
 
-// NewDeleteNode creates a ConfigCommand for DeleteNode.
-func NewDeleteNode(id uuid.UUID) *gastrologv1.ConfigCommand {
+// NewDeleteNodeConfig creates a ConfigCommand for DeleteNodeConfig.
+func NewDeleteNodeConfig(id uuid.UUID) *gastrologv1.ConfigCommand {
 	return &gastrologv1.ConfigCommand{
-		Command: &gastrologv1.ConfigCommand_DeleteNode{
-			DeleteNode: &gastrologv1.DeleteNodeCommand{Id: id.String()},
+		Command: &gastrologv1.ConfigCommand_DeleteNodeConfig{
+			DeleteNodeConfig: &gastrologv1.DeleteNodeConfigCommand{Id: id.String()},
 		},
 	}
 }
 
-// ExtractPutNode converts a PutNodeCommand back to a NodeInfo.
-func ExtractPutNode(cmd *gastrologv1.PutNodeCommand) (config.NodeInfo, error) {
+// ExtractPutNodeConfig converts a PutNodeConfigCommand back to a NodeConfig.
+func ExtractPutNodeConfig(cmd *gastrologv1.PutNodeConfigCommand) (config.NodeConfig, error) {
 	id, err := uuid.Parse(cmd.GetId())
 	if err != nil {
-		return config.NodeInfo{}, fmt.Errorf("parse node id: %w", err)
+		return config.NodeConfig{}, fmt.Errorf("parse node id: %w", err)
 	}
-	return config.NodeInfo{
+	return config.NodeConfig{
 		ID:   id,
 		Name: cmd.GetName(),
 	}, nil
 }
 
-// ExtractDeleteNode extracts the UUID from a DeleteNodeCommand.
-func ExtractDeleteNode(cmd *gastrologv1.DeleteNodeCommand) (uuid.UUID, error) {
+// ExtractDeleteNodeConfig extracts the UUID from a DeleteNodeConfigCommand.
+func ExtractDeleteNodeConfig(cmd *gastrologv1.DeleteNodeConfigCommand) (uuid.UUID, error) {
 	return uuid.Parse(cmd.GetId())
 }
 
@@ -698,7 +698,7 @@ func ExtractDeleteNode(cmd *gastrologv1.DeleteNodeCommand) (uuid.UUID, error) {
 // ---------------------------------------------------------------------------
 
 // BuildSnapshot creates a ConfigSnapshot from the full config state.
-func BuildSnapshot(cfg *config.Config, users []config.User, tokens []config.RefreshToken, nodes []config.NodeInfo) *gastrologv1.ConfigSnapshot {
+func BuildSnapshot(cfg *config.Config, users []config.User, tokens []config.RefreshToken, nodes []config.NodeConfig) *gastrologv1.ConfigSnapshot {
 	snap := &gastrologv1.ConfigSnapshot{
 		Settings: cfg.Settings,
 	}
@@ -728,14 +728,14 @@ func BuildSnapshot(cfg *config.Config, users []config.User, tokens []config.Refr
 		snap.RefreshTokens = append(snap.RefreshTokens, createRefreshTokenCmd(t))
 	}
 	for _, n := range nodes {
-		snap.Nodes = append(snap.Nodes, putNodeCmd(n))
+		snap.NodeConfigs = append(snap.NodeConfigs, putNodeConfigCmd(n))
 	}
 
 	return snap
 }
 
 // RestoreSnapshot converts a ConfigSnapshot back to Go config types.
-func RestoreSnapshot(snap *gastrologv1.ConfigSnapshot) (*config.Config, []config.User, []config.RefreshToken, []config.NodeInfo, error) {
+func RestoreSnapshot(snap *gastrologv1.ConfigSnapshot) (*config.Config, []config.User, []config.RefreshToken, []config.NodeConfig, error) {
 	cfg := &config.Config{
 		Settings: nilIfEmpty(snap.GetSettings()),
 	}
@@ -801,9 +801,9 @@ func RestoreSnapshot(snap *gastrologv1.ConfigSnapshot) (*config.Config, []config
 		tokens = append(tokens, token)
 	}
 
-	nodes := make([]config.NodeInfo, 0, len(snap.GetNodes()))
-	for _, n := range snap.GetNodes() {
-		node, err := ExtractPutNode(n)
+	nodes := make([]config.NodeConfig, 0, len(snap.GetNodeConfigs()))
+	for _, n := range snap.GetNodeConfigs() {
+		node, err := ExtractPutNodeConfig(n)
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("restore node: %w", err)
 		}

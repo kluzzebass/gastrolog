@@ -11,6 +11,7 @@ interface VaultStepProps {
   dark: boolean;
   data: VaultData;
   onChange: (data: VaultData) => void;
+  namePlaceholder?: string;
 }
 
 const VAULT_TYPES = [
@@ -18,7 +19,7 @@ const VAULT_TYPES = [
   { value: "memory", label: "Memory (non-persistent)" },
 ];
 
-export function VaultStep({ dark, data, onChange }: Readonly<VaultStepProps>) {
+export function VaultStep({ dark, data, onChange, namePlaceholder }: Readonly<VaultStepProps>) {
   const c = useThemeClass(dark);
   return (
     <div className="flex flex-col gap-5">
@@ -39,7 +40,7 @@ export function VaultStep({ dark, data, onChange }: Readonly<VaultStepProps>) {
         <TextInput
           value={data.name}
           onChange={(v) => onChange({ ...data, name: v })}
-          placeholder="default"
+          placeholder={namePlaceholder || "default"}
           dark={dark}
         />
       </FormField>

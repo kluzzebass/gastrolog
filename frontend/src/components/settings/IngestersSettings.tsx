@@ -84,10 +84,11 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
 
   const [addForm, dispatchAdd] = useReducer(addIngesterFormReducer, addIngesterFormInitial);
   const { adding, typeConfirmed, newName, newType, newParams } = addForm;
+  const [namePlaceholder, setNamePlaceholder] = useState("");
 
   const ingesters = config?.ingesters ?? [];
   const existingNames = new Set(ingesters.map((i) => i.name));
-  const effectiveName = newName.trim() || newType;
+  const effectiveName = newName.trim() || namePlaceholder || newType;
   const nameConflict = existingNames.has(effectiveName);
 
   const defaults = (id: string) => {
@@ -116,7 +117,7 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
   });
 
   const handleCreate = async () => {
-    const name = newName.trim() || newType;
+    const name = newName.trim() || namePlaceholder || newType;
     try {
       await putIngester.mutateAsync({
         id: "",
@@ -140,9 +141,9 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
       adding={adding}
       onToggleAdd={() => {
         if (!adding) {
-          generateName.mutateAsync().then((n) =>
-            dispatchAdd({ type: "setNewName", value: n }),
-          );
+          generateName.mutateAsync().then(setNamePlaceholder);
+        } else {
+          setNamePlaceholder("");
         }
         dispatchAdd({ type: "toggleAdding" });
       }}
@@ -187,7 +188,7 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
             <TextInput
               value={newName}
               onChange={(v) => dispatchAdd({ type: "setNewName", value: v })}
-              placeholder={newType}
+              placeholder={namePlaceholder || newType}
               dark={dark}
             />
           </FormField>

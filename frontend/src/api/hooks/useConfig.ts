@@ -232,11 +232,11 @@ export function useDeleteCertificate() {
   });
 }
 
-export function usePutNodeName() {
+export function usePutNodeConfig() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (nodeName: string) => {
-      await configClient.putNodeName({ nodeName });
+    mutationFn: async (args: { id: string; name: string }) => {
+      await configClient.putNodeConfig({ config: { id: args.id, name: args.name } });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["serverConfig"] }),
   });

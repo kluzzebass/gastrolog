@@ -141,10 +141,11 @@ export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolea
 
   const [addForm, dispatchAdd] = useReducer(addRotationFormReducer, addRotationFormInitial);
   const { adding, newName, newMaxBytes, newMaxRecords, newMaxAge, newCron } = addForm;
+  const [namePlaceholder, setNamePlaceholder] = useState("");
 
   const policies = config?.rotationPolicies ?? [];
   const existingNames = new Set(policies.map((p) => p.name));
-  const effectiveName = newName.trim() || "default";
+  const effectiveName = newName.trim() || namePlaceholder || "default";
   const nameConflict = existingNames.has(effectiveName);
   const vaults = config?.vaults ?? [];
 
@@ -207,7 +208,7 @@ export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolea
         return;
       }
     }
-    const name = newName.trim() || "default";
+    const name = newName.trim() || namePlaceholder || "default";
     const maxRecordsValue = newMaxRecords ? BigInt(newMaxRecords) : 0n;
     try {
       await putPolicy.mutateAsync({
@@ -235,9 +236,9 @@ export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolea
       adding={adding}
       onToggleAdd={() => {
         if (!adding) {
-          generateName.mutateAsync().then((n) =>
-            dispatchAdd({ type: "setNewName", value: n }),
-          );
+          generateName.mutateAsync().then(setNamePlaceholder);
+        } else {
+          setNamePlaceholder("");
         }
         dispatchAdd({ type: "setAdding", value: !adding });
       }}
@@ -258,7 +259,7 @@ export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolea
             <TextInput
               value={newName}
               onChange={(v) => dispatchAdd({ type: "setNewName", value: v })}
-              placeholder="default"
+              placeholder={namePlaceholder || "default"}
               dark={dark}
             />
           </FormField>

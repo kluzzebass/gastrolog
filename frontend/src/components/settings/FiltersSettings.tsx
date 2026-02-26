@@ -62,11 +62,12 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
   const [adding, setAdding] = useState(false);
 
   const [newName, setNewName] = useState("");
+  const [namePlaceholder, setNamePlaceholder] = useState("");
   const [newExpression, setNewExpression] = useState("");
 
   const filters = config?.filters ?? [];
   const existingNames = new Set(filters.map((f) => f.name));
-  const effectiveName = newName.trim() || "catch-all";
+  const effectiveName = newName.trim() || namePlaceholder || "catch-all";
   const nameConflict = existingNames.has(effectiveName);
   const vaults = config?.vaults ?? [];
 
@@ -99,7 +100,7 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
   const handleSave = (id: string) => saveFilter(id, getEdit(id));
 
   const handleCreate = async () => {
-    const name = newName.trim() || "catch-all";
+    const name = newName.trim() || namePlaceholder || "catch-all";
     try {
       await putFilter.mutateAsync({
         id: "",
@@ -124,10 +125,11 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
       adding={adding}
       onToggleAdd={() => {
         if (!adding) {
-          generateName.mutateAsync().then((n) => setNewName(n));
+          generateName.mutateAsync().then(setNamePlaceholder);
         } else {
-          setNewName("");
+          setNamePlaceholder("");
         }
+        setNewName("");
         setAdding(!adding);
       }}
       isLoading={isLoading}
@@ -147,7 +149,7 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
             <TextInput
               value={newName}
               onChange={setNewName}
-              placeholder="catch-all"
+              placeholder={namePlaceholder || "catch-all"}
               dark={dark}
             />
           </FormField>

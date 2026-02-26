@@ -80,9 +80,9 @@ type Store interface {
 	DeleteSetting(ctx context.Context, key string) error
 
 	// Nodes (cluster node identity)
-	GetNode(ctx context.Context, id uuid.UUID) (*NodeInfo, error)
-	ListNodes(ctx context.Context) ([]NodeInfo, error)
-	PutNode(ctx context.Context, node NodeInfo) error
+	GetNode(ctx context.Context, id uuid.UUID) (*NodeConfig, error)
+	ListNodes(ctx context.Context) ([]NodeConfig, error)
+	PutNode(ctx context.Context, node NodeConfig) error
 	DeleteNode(ctx context.Context, id uuid.UUID) error
 
 	// Certificates (dedicated storage, not in Settings KV)
@@ -123,7 +123,7 @@ type Config struct {
 	Vaults            []VaultConfig           `json:"vaults,omitempty"`
 	Settings          map[string]string       `json:"settings,omitempty"`
 	Certs             []CertPEM               `json:"certs,omitempty"`
-	Nodes             []NodeInfo              `json:"nodes,omitempty"`
+	Nodes             []NodeConfig            `json:"nodes,omitempty"`
 }
 
 // ServerConfig holds server-level configuration, organized by concern.
@@ -175,8 +175,8 @@ type TLSConfig struct {
 	HTTPSPort string `json:"https_port,omitempty"`
 }
 
-// NodeInfo represents a cluster node with its human-readable name.
-type NodeInfo struct {
+// NodeConfig represents a cluster node configuration with its human-readable name.
+type NodeConfig struct {
 	ID   uuid.UUID `json:"id"`
 	Name string    `json:"name"`
 }

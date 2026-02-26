@@ -89,10 +89,11 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
 
   const [addForm, dispatchAdd] = useReducer(addRetentionFormReducer, addRetentionFormInitial);
   const { adding, newName, newMaxAge, newMaxBytes, newMaxChunks } = addForm;
+  const [namePlaceholder, setNamePlaceholder] = useState("");
 
   const policies = config?.retentionPolicies ?? [];
   const existingNames = new Set(policies.map((p) => p.name));
-  const effectiveName = newName.trim() || "default";
+  const effectiveName = newName.trim() || namePlaceholder || "default";
   const nameConflict = existingNames.has(effectiveName);
   const vaults = config?.vaults ?? [];
 
@@ -142,7 +143,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
   const handleSave = (id: string) => savePolicy(id, getEdit(id));
 
   const handleCreate = async () => {
-    const name = newName.trim() || "default";
+    const name = newName.trim() || namePlaceholder || "default";
     const maxChunksValue = newMaxChunks ? BigInt(newMaxChunks) : 0n;
     try {
       await putPolicy.mutateAsync({
@@ -169,9 +170,9 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
       adding={adding}
       onToggleAdd={() => {
         if (!adding) {
-          generateName.mutateAsync().then((n) =>
-            dispatchAdd({ type: "setNewName", value: n }),
-          );
+          generateName.mutateAsync().then(setNamePlaceholder);
+        } else {
+          setNamePlaceholder("");
         }
         dispatchAdd({ type: "setAdding", value: !adding });
       }}
@@ -192,7 +193,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
             <TextInput
               value={newName}
               onChange={(v) => dispatchAdd({ type: "setNewName", value: v })}
-              placeholder="default"
+              placeholder={namePlaceholder || "default"}
               dark={dark}
             />
           </FormField>

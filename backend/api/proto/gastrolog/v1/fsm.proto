@@ -34,8 +34,8 @@ message ConfigCommand {
     CreateRefreshTokenCommand create_refresh_token = 22;
     DeleteRefreshTokenCommand delete_refresh_token = 23;
     DeleteUserRefreshTokensCommand delete_user_refresh_tokens = 24;
-    PutNodeCommand put_node = 25;
-    DeleteNodeCommand delete_node = 26;
+    PutNodeConfigCommand put_node_config = 25;
+    DeleteNodeConfigCommand delete_node_config = 26;
   }
 }
 
@@ -209,12 +209,12 @@ message DeleteUserRefreshTokensCommand {
 
 // --- Nodes ---
 
-message PutNodeCommand {
+message PutNodeConfigCommand {
   string id = 1;
   string name = 2;
 }
 
-message DeleteNodeCommand {
+message DeleteNodeConfigCommand {
   string id = 1;
 }
 
@@ -233,5 +233,5 @@ message ConfigSnapshot {
   repeated PutCertificateCommand certificates = 7;
   repeated CreateUserCommand users = 8;
   repeated CreateRefreshTokenCommand refresh_tokens = 9;
-  repeated PutNodeCommand nodes = 10;
+  repeated PutNodeConfigCommand node_configs = 10;
 }

@@ -74,6 +74,7 @@ func (s *ConfigServer) GetConfig(
 		s.loadConfigFilters(ctx, resp)
 		s.loadConfigRotationPolicies(ctx, resp)
 		s.loadConfigRetentionPolicies(ctx, resp)
+		s.loadConfigNodeConfigs(ctx, resp)
 	}
 	return connect.NewResponse(resp), nil
 }
@@ -170,6 +171,19 @@ func (s *ConfigServer) loadConfigRetentionPolicies(ctx context.Context, resp *ap
 		p.Id = pol.ID.String()
 		p.Name = pol.Name
 		resp.RetentionPolicies = append(resp.RetentionPolicies, p)
+	}
+}
+
+func (s *ConfigServer) loadConfigNodeConfigs(ctx context.Context, resp *apiv1.GetConfigResponse) {
+	nodes, err := s.cfgStore.ListNodes(ctx)
+	if err != nil {
+		return
+	}
+	for _, n := range nodes {
+		resp.NodeConfigs = append(resp.NodeConfigs, &apiv1.NodeConfig{
+			Id:   n.ID.String(),
+			Name: n.Name,
+		})
 	}
 }
 
@@ -296,26 +310,35 @@ func validateMMDBPath(path string) *apiv1.MmdbValidation {
 	}
 }
 
-// PutNodeName updates the human-readable name for the current node.
-func (s *ConfigServer) PutNodeName(
+// PutNodeConfig creates or updates a node configuration.
+func (s *ConfigServer) PutNodeConfig(
 	ctx context.Context,
-	req *connect.Request[apiv1.PutNodeNameRequest],
-) (*connect.Response[apiv1.PutNodeNameResponse], error) {
-	name := req.Msg.GetNodeName()
+	req *connect.Request[apiv1.PutNodeConfigRequest],
+) (*connect.Response[apiv1.PutNodeConfigResponse], error) {
+	cfg := req.Msg.GetConfig()
+	if cfg == nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("config must not be nil"))
+	}
+	name := cfg.GetName()
 	if name == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("node_name must not be empty"))
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name must not be empty"))
 	}
 
-	nodeUUID, err := uuid.Parse(s.localNodeID)
+	// Use the ID from the request if provided, otherwise fall back to the local node.
+	idStr := cfg.GetId()
+	if idStr == "" {
+		idStr = s.localNodeID
+	}
+	nodeUUID, err := uuid.Parse(idStr)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("parse local node ID: %w", err))
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("parse node ID: %w", err))
 	}
 
-	if err := s.cfgStore.PutNode(ctx, config.NodeInfo{ID: nodeUUID, Name: name}); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("put node: %w", err))
+	if err := s.cfgStore.PutNode(ctx, config.NodeConfig{ID: nodeUUID, Name: name}); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("put node config: %w", err))
 	}
 
-	return connect.NewResponse(&apiv1.PutNodeNameResponse{}), nil
+	return connect.NewResponse(&apiv1.PutNodeConfigResponse{}), nil
 }
 
 // GenerateName returns a random petname for use as a default entity name.

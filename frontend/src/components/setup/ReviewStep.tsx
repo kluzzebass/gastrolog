@@ -9,6 +9,12 @@ interface ReviewStepProps {
   rotation: RotationData;
   retention: RetentionData;
   ingester: IngesterData;
+  namePlaceholders?: {
+    vault: string;
+    rotation: string;
+    retention: string;
+    ingester: string;
+  };
 }
 
 function Section({
@@ -89,6 +95,7 @@ export function ReviewStep({
   rotation,
   retention,
   ingester,
+  namePlaceholders,
 }: Readonly<ReviewStepProps>) {
   const c = useThemeClass(dark);
   return (
@@ -107,7 +114,7 @@ export function ReviewStep({
       </div>
 
       <Section title="Vault" dark={dark}>
-        <Row label="Name" value={vault.name || "default"} dark={dark} />
+        <Row label="Name" value={vault.name || namePlaceholders?.vault || "default"} dark={dark} />
         <Row label="Type" value={vault.type} dark={dark} />
         {vault.type === "file" && (
           <Row label="Directory" value={vault.dir} dark={dark} />
@@ -116,7 +123,7 @@ export function ReviewStep({
 
       {(rotation.maxAge || rotation.maxBytes || rotation.maxRecords || rotation.cron) ? (
         <Section title="Rotation Policy" dark={dark}>
-          <Row label="Name" value={rotation.name || "default"} dark={dark} />
+          <Row label="Name" value={rotation.name || namePlaceholders?.rotation || "default"} dark={dark} />
           {rotation.maxAge && <Row label="Max Age" value={rotation.maxAge} dark={dark} />}
           {rotation.maxBytes && <Row label="Max Bytes" value={rotation.maxBytes} dark={dark} />}
           {rotation.maxRecords && <Row label="Max Records" value={rotation.maxRecords} dark={dark} />}
@@ -128,7 +135,7 @@ export function ReviewStep({
 
       {(retention.maxChunks || retention.maxAge || retention.maxBytes) ? (
         <Section title="Retention Policy" dark={dark}>
-          <Row label="Name" value={retention.name || "default"} dark={dark} />
+          <Row label="Name" value={retention.name || namePlaceholders?.retention || "default"} dark={dark} />
           {retention.maxChunks && <Row label="Max Chunks" value={retention.maxChunks} dark={dark} />}
           {retention.maxAge && <Row label="Max Age" value={retention.maxAge} dark={dark} />}
           {retention.maxBytes && <Row label="Max Bytes" value={retention.maxBytes} dark={dark} />}
@@ -138,7 +145,7 @@ export function ReviewStep({
       )}
 
       <Section title="Ingester" dark={dark}>
-        <Row label="Name" value={ingester.name || ingester.type} dark={dark} />
+        <Row label="Name" value={ingester.name || namePlaceholders?.ingester || ingester.type} dark={dark} />
         <Row label="Type" value={ingester.type} dark={dark} />
         {Object.entries(ingester.params)
           .filter(([, v]) => v)

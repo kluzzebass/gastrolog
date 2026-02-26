@@ -25,7 +25,7 @@ import { LookupsSettings } from "./LookupsSettings";
 import {
   useServerConfig,
   usePutServerConfig,
-  usePutNodeName,
+  usePutNodeConfig,
   useCertificates,
   JWT_KEEP,
 } from "../../api/hooks/useConfig";
@@ -167,7 +167,7 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
   const { data, isLoading } = useServerConfig();
   const { data: certData } = useCertificates();
   const putConfig = usePutServerConfig();
-  const putNodeName = usePutNodeName();
+  const putNodeConfig = usePutNodeConfig();
   const { addToast } = useToast();
 
   const [tokenDuration, setTokenDuration] = useState("");
@@ -356,15 +356,15 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
                       return;
                     }
                     try {
-                      await putNodeName.mutateAsync(nodeName.trim());
+                      await putNodeConfig.mutateAsync({ id: data?.nodeId ?? "", name: nodeName.trim() });
                       addToast("Node name updated", "info");
                     } catch (err: any) {
                       addToast(err.message ?? "Failed to update node name", "error");
                     }
                   }}
-                  disabled={!initialized || nodeName === (data?.nodeName ?? "") || putNodeName.isPending}
+                  disabled={!initialized || nodeName === (data?.nodeName ?? "") || putNodeConfig.isPending}
                 >
-                  {putNodeName.isPending ? "Saving..." : "Save"}
+                  {putNodeConfig.isPending ? "Saving..." : "Save"}
                 </PrimaryButton>
                 {nodeName !== (data?.nodeName ?? "") && (
                   <GhostButton onClick={() => setNodeName(data?.nodeName ?? "")} dark={dark}>

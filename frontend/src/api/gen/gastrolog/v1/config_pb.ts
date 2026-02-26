@@ -66,6 +66,11 @@ export class GetConfigResponse extends Message<GetConfigResponse> {
    */
   retentionPolicies: RetentionPolicyConfig[] = [];
 
+  /**
+   * @generated from field: repeated gastrolog.v1.NodeConfig node_configs = 6;
+   */
+  nodeConfigs: NodeConfig[] = [];
+
   constructor(data?: PartialMessage<GetConfigResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -79,6 +84,7 @@ export class GetConfigResponse extends Message<GetConfigResponse> {
     { no: 3, name: "rotation_policies", kind: "message", T: RotationPolicyConfig, repeated: true },
     { no: 4, name: "filters", kind: "message", T: FilterConfig, repeated: true },
     { no: 5, name: "retention_policies", kind: "message", T: RetentionPolicyConfig, repeated: true },
+    { no: 6, name: "node_configs", kind: "message", T: NodeConfig, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetConfigResponse {
@@ -3054,70 +3060,113 @@ export class GetIngesterDefaultsResponse extends Message<GetIngesterDefaultsResp
 }
 
 /**
- * @generated from message gastrolog.v1.PutNodeNameRequest
+ * @generated from message gastrolog.v1.NodeConfig
  */
-export class PutNodeNameRequest extends Message<PutNodeNameRequest> {
+export class NodeConfig extends Message<NodeConfig> {
   /**
-   * @generated from field: string node_name = 1;
+   * @generated from field: string id = 1;
    */
-  nodeName = "";
+  id = "";
 
-  constructor(data?: PartialMessage<PutNodeNameRequest>) {
+  /**
+   * @generated from field: string name = 2;
+   */
+  name = "";
+
+  constructor(data?: PartialMessage<NodeConfig>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.PutNodeNameRequest";
+  static readonly typeName = "gastrolog.v1.NodeConfig";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "node_name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutNodeNameRequest {
-    return new PutNodeNameRequest().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeConfig {
+    return new NodeConfig().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutNodeNameRequest {
-    return new PutNodeNameRequest().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): NodeConfig {
+    return new NodeConfig().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutNodeNameRequest {
-    return new PutNodeNameRequest().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): NodeConfig {
+    return new NodeConfig().fromJsonString(jsonString, options);
   }
 
-  static equals(a: PutNodeNameRequest | PlainMessage<PutNodeNameRequest> | undefined, b: PutNodeNameRequest | PlainMessage<PutNodeNameRequest> | undefined): boolean {
-    return proto3.util.equals(PutNodeNameRequest, a, b);
+  static equals(a: NodeConfig | PlainMessage<NodeConfig> | undefined, b: NodeConfig | PlainMessage<NodeConfig> | undefined): boolean {
+    return proto3.util.equals(NodeConfig, a, b);
   }
 }
 
 /**
- * @generated from message gastrolog.v1.PutNodeNameResponse
+ * @generated from message gastrolog.v1.PutNodeConfigRequest
  */
-export class PutNodeNameResponse extends Message<PutNodeNameResponse> {
-  constructor(data?: PartialMessage<PutNodeNameResponse>) {
+export class PutNodeConfigRequest extends Message<PutNodeConfigRequest> {
+  /**
+   * @generated from field: gastrolog.v1.NodeConfig config = 1;
+   */
+  config?: NodeConfig;
+
+  constructor(data?: PartialMessage<PutNodeConfigRequest>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.PutNodeNameResponse";
+  static readonly typeName = "gastrolog.v1.PutNodeConfigRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "config", kind: "message", T: NodeConfig },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutNodeConfigRequest {
+    return new PutNodeConfigRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutNodeConfigRequest {
+    return new PutNodeConfigRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutNodeConfigRequest {
+    return new PutNodeConfigRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutNodeConfigRequest | PlainMessage<PutNodeConfigRequest> | undefined, b: PutNodeConfigRequest | PlainMessage<PutNodeConfigRequest> | undefined): boolean {
+    return proto3.util.equals(PutNodeConfigRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutNodeConfigResponse
+ */
+export class PutNodeConfigResponse extends Message<PutNodeConfigResponse> {
+  constructor(data?: PartialMessage<PutNodeConfigResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutNodeConfigResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutNodeNameResponse {
-    return new PutNodeNameResponse().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutNodeConfigResponse {
+    return new PutNodeConfigResponse().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutNodeNameResponse {
-    return new PutNodeNameResponse().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutNodeConfigResponse {
+    return new PutNodeConfigResponse().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutNodeNameResponse {
-    return new PutNodeNameResponse().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutNodeConfigResponse {
+    return new PutNodeConfigResponse().fromJsonString(jsonString, options);
   }
 
-  static equals(a: PutNodeNameResponse | PlainMessage<PutNodeNameResponse> | undefined, b: PutNodeNameResponse | PlainMessage<PutNodeNameResponse> | undefined): boolean {
-    return proto3.util.equals(PutNodeNameResponse, a, b);
+  static equals(a: PutNodeConfigResponse | PlainMessage<PutNodeConfigResponse> | undefined, b: PutNodeConfigResponse | PlainMessage<PutNodeConfigResponse> | undefined): boolean {
+    return proto3.util.equals(PutNodeConfigResponse, a, b);
   }
 }
 

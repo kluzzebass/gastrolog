@@ -102,8 +102,8 @@ func (f *FSM) Apply(l *raft.Log) any {
 		*gastrologv1.ConfigCommand_DeleteSetting,
 		*gastrologv1.ConfigCommand_PutCertificate,
 		*gastrologv1.ConfigCommand_DeleteCertificate,
-		*gastrologv1.ConfigCommand_PutNode,
-		*gastrologv1.ConfigCommand_DeleteNode:
+		*gastrologv1.ConfigCommand_PutNodeConfig,
+		*gastrologv1.ConfigCommand_DeleteNodeConfig:
 		return f.applyConfig(ctx, cmd)
 
 	case *gastrologv1.ConfigCommand_CreateUser,
@@ -180,14 +180,14 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.ConfigCommand
 			return nil, err
 		}
 		return nil, f.store.DeleteCertificate(ctx, id)
-	case *gastrologv1.ConfigCommand_PutNode:
-		node, err := command.ExtractPutNode(c.PutNode)
+	case *gastrologv1.ConfigCommand_PutNodeConfig:
+		node, err := command.ExtractPutNodeConfig(c.PutNodeConfig)
 		if err != nil {
 			return nil, err
 		}
 		return nil, f.store.PutNode(ctx, node)
-	case *gastrologv1.ConfigCommand_DeleteNode:
-		id, err := command.ExtractDeleteNode(c.DeleteNode)
+	case *gastrologv1.ConfigCommand_DeleteNodeConfig:
+		id, err := command.ExtractDeleteNodeConfig(c.DeleteNodeConfig)
 		if err != nil {
 			return nil, err
 		}
