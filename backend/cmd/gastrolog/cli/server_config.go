@@ -43,10 +43,6 @@ type settingsGroup struct {
 // settingsGroups defines all server config fields grouped by concern.
 // Order matters for display.
 var settingsGroups = []settingsGroup{
-	{name: "node", fields: []settingsField{
-		{key: "node_id"},
-		{key: "node_name"},
-	}},
 	{name: "auth", fields: []settingsField{
 		{key: "token_duration", setField: "token_duration"},
 		{key: "refresh_token_duration", setField: "refresh_token_duration"},
