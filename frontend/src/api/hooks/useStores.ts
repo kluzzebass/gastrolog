@@ -2,6 +2,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Timestamp } from "@bufbuild/protobuf";
 import { storeClient, configClient } from "../client";
 import type { RetentionRule } from "../gen/gastrolog/v1/config_pb";
+import { StoreInfo, ChunkMeta, GetStatsResponse } from "../gen/gastrolog/v1/store_pb";
+import { protoSharing, protoArraySharing } from "./protoSharing";
 
 export function useStores() {
   return useQuery({
@@ -10,7 +12,7 @@ export function useStores() {
       const response = await storeClient.listStores({});
       return response.stores;
     },
-    staleTime: 0,
+    structuralSharing: protoArraySharing(StoreInfo.equals),
     refetchInterval: 10_000,
   });
 }
@@ -34,7 +36,7 @@ export function useChunks(storeId: string) {
       const response = await storeClient.listChunks({ store: storeId });
       return response.chunks;
     },
-    staleTime: 0,
+    structuralSharing: protoArraySharing(ChunkMeta.equals),
     enabled: !!storeId,
     refetchInterval: 10_000,
   });
@@ -61,7 +63,7 @@ export function useStats(storeId?: string) {
       const response = await storeClient.getStats({ store: storeId ?? "" });
       return response;
     },
-    staleTime: 0,
+    structuralSharing: protoSharing(GetStatsResponse.equals),
     refetchInterval: 10_000,
   });
 }

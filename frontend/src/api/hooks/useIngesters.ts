@@ -1,5 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { configClient } from "../client";
+import { IngesterConfig, GetIngesterStatusResponse } from "../gen/gastrolog/v1/config_pb";
+import { protoSharing, protoArraySharing } from "./protoSharing";
 
 export function useIngesters() {
   return useQuery({
@@ -8,6 +10,7 @@ export function useIngesters() {
       const response = await configClient.listIngesters({});
       return response.ingesters;
     },
+    structuralSharing: protoArraySharing(IngesterConfig.equals),
     refetchInterval: 10_000,
   });
 }
@@ -19,6 +22,7 @@ export function useIngesterStatus(id: string) {
       const response = await configClient.getIngesterStatus({ id });
       return response;
     },
+    structuralSharing: protoSharing(GetIngesterStatusResponse.equals),
     enabled: !!id,
     refetchInterval: 5_000,
   });

@@ -1,5 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { configClient } from "../client";
+import { GetConfigResponse } from "../gen/gastrolog/v1/config_pb";
+import { protoSharing } from "./protoSharing";
 
 export function useConfig() {
   return useQuery({
@@ -8,7 +10,7 @@ export function useConfig() {
       const response = await configClient.getConfig({});
       return response;
     },
-    staleTime: 0,
+    structuralSharing: protoSharing(GetConfigResponse.equals),
     refetchInterval: 10_000,
   });
 }
