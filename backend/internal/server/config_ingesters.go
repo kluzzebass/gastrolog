@@ -140,24 +140,12 @@ func (s *ConfigServer) PutIngester(
 	}
 
 	// Dry-run validation: verify type is known and factory can construct the
-	// ingester before persisting. This catches bad params early.
+	// ingester before persisting. Construction test only runs on the local
+	// node — remote ingesters may depend on resources (files, sockets) that
+	// only exist on the owning node.
 	if ingCfg.Enabled {
-		factory, ok := s.factories.Ingesters[ingCfg.Type]
-		if !ok {
-			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("unknown ingester type: %s", ingCfg.Type))
-		}
-
-		params := ingCfg.Params
-		if s.factories.HomeDir != "" {
-			params = make(map[string]string, len(ingCfg.Params)+1)
-			maps.Copy(params, ingCfg.Params)
-			params["_state_dir"] = s.factories.HomeDir
-		}
-
-		// Test construction; discard the result. The FSM notification callback
-		// will create the real instance after the config is persisted.
-		if _, err := factory(ingCfg.ID, params, s.factories.Logger); err != nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("create ingester: %w", err))
+		if err := s.validateIngester(ingCfg); err != nil {
+			return nil, err
 		}
 	}
 
@@ -167,6 +155,26 @@ func (s *ConfigServer) PutIngester(
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
 
 	return connect.NewResponse(&apiv1.PutIngesterResponse{}), nil
+}
+
+func (s *ConfigServer) validateIngester(ingCfg config.IngesterConfig) error {
+	factory, ok := s.factories.Ingesters[ingCfg.Type]
+	if !ok {
+		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("unknown ingester type: %s", ingCfg.Type))
+	}
+	if ingCfg.NodeID != s.localNodeID {
+		return nil // skip construction test for remote ingesters
+	}
+	params := ingCfg.Params
+	if s.factories.HomeDir != "" {
+		params = make(map[string]string, len(ingCfg.Params)+1)
+		maps.Copy(params, ingCfg.Params)
+		params["_state_dir"] = s.factories.HomeDir
+	}
+	if _, err := factory(ingCfg.ID, params, s.factories.Logger); err != nil {
+		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("create ingester: %w", err))
+	}
+	return nil
 }
 
 // DeleteIngester removes an ingester.
@@ -183,15 +191,23 @@ func (s *ConfigServer) DeleteIngester(
 		return nil, connErr
 	}
 
-	// Remove from runtime.
-	if err := s.orch.RemoveIngester(id); err != nil {
-		if errors.Is(err, orchestrator.ErrIngesterNotFound) {
-			return nil, connect.NewError(connect.CodeNotFound, err)
-		}
+	// Verify the ingester exists in config before touching the orchestrator.
+	existing, err := s.cfgStore.GetIngester(ctx, id)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if existing == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("ingester not found"))
+	}
+
+	// Remove from local runtime. ErrIngesterNotFound is expected when the
+	// ingester belongs to another node — the owning node's FSM dispatcher
+	// handles its own cleanup.
+	if err := s.orch.RemoveIngester(id); err != nil && !errors.Is(err, orchestrator.ErrIngesterNotFound) {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	// Remove from config vault.
+	// Remove from config store.
 	if err := s.cfgStore.DeleteIngester(ctx, id); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}

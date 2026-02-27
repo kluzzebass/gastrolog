@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"maps"
+	"os"
 	"slices"
 
 	"github.com/google/uuid"
@@ -45,7 +46,7 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 	case raftfsm.NotifyVaultPut:
 		d.handleVaultPut(ctx, n.ID)
 	case raftfsm.NotifyVaultDeleted:
-		d.handleVaultDeleted(n.ID)
+		d.handleVaultDeleted(n)
 	case raftfsm.NotifyFilterPut, raftfsm.NotifyFilterDeleted:
 		d.reloadFilters(ctx)
 	case raftfsm.NotifyRotationPolicyPut, raftfsm.NotifyRotationPolicyDeleted:
@@ -107,9 +108,15 @@ func (d *configDispatcher) applyExistingVaultChanges(ctx context.Context, id uui
 	}
 }
 
-func (d *configDispatcher) handleVaultDeleted(id uuid.UUID) {
-	if err := d.orch.ForceRemoveVault(id); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
-		d.logger.Error("dispatch: force remove vault", "id", id, "error", err)
+func (d *configDispatcher) handleVaultDeleted(n raftfsm.Notification) {
+	if err := d.orch.ForceRemoveVault(n.ID); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
+		d.logger.Error("dispatch: force remove vault", "id", n.ID, "error", err)
+	}
+	// Clean up the file vault directory only on the node that owns it.
+	if n.Dir != "" && (n.NodeID == "" || n.NodeID == d.localNodeID) {
+		if err := os.RemoveAll(n.Dir); err != nil {
+			d.logger.Error("dispatch: remove vault directory", "id", n.ID, "dir", n.Dir, "error", err)
+		}
 	}
 }
 

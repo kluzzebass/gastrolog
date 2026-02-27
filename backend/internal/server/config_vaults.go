@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -125,8 +124,19 @@ func (s *ConfigServer) DeleteVault(
 		return nil, connErr
 	}
 
+	// Verify the vault exists in config before touching the orchestrator.
+	// The vault may belong to another node (not in local orchestrator) but
+	// must exist in the shared config store.
+	existing, err := s.cfgStore.GetVault(ctx, id)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if existing == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("vault not found"))
+	}
+
 	if req.Msg.Force {
-		if err := s.forceDeleteVault(ctx, id); err != nil {
+		if err := s.forceDeleteVault(id); err != nil {
 			return nil, err
 		}
 	} else {
@@ -142,23 +152,14 @@ func (s *ConfigServer) DeleteVault(
 	return connect.NewResponse(&apiv1.DeleteVaultResponse{}), nil
 }
 
-func (s *ConfigServer) forceDeleteVault(ctx context.Context, id uuid.UUID) error {
-	vaultCfg, err := s.cfgStore.GetVault(ctx, id)
-	if err != nil {
-		return connect.NewError(connect.CodeInternal, fmt.Errorf("read vault config: %w", err))
-	}
-
+func (s *ConfigServer) forceDeleteVault(id uuid.UUID) error {
 	if err := s.orch.ForceRemoveVault(id); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		return connect.NewError(connect.CodeInternal, err)
 	}
-
-	if vaultCfg != nil && vaultCfg.Type == "file" {
-		if dir := vaultCfg.Params["dir"]; dir != "" {
-			if err := os.RemoveAll(dir); err != nil {
-				return connect.NewError(connect.CodeInternal, fmt.Errorf("remove vault directory: %w", err))
-			}
-		}
-	}
+	// Directory cleanup is handled by the FSM dispatcher on the owning node
+	// (see configDispatcher.handleVaultDeleted). Doing it here would remove
+	// the directory on whichever node handles the HTTP request, which may
+	// not be the node that owns the vault's data.
 	return nil
 }
 
@@ -169,7 +170,9 @@ func (s *ConfigServer) removeVault(id uuid.UUID) error {
 	}
 	switch {
 	case errors.Is(err, orchestrator.ErrVaultNotFound):
-		return connect.NewError(connect.CodeNotFound, err)
+		// Expected when the vault belongs to another node — the owning
+		// node's FSM dispatcher handles its own runtime cleanup.
+		return nil
 	case errors.Is(err, orchestrator.ErrVaultNotEmpty):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 	default:

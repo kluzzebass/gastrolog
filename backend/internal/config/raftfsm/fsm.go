@@ -38,9 +38,11 @@ const (
 
 // Notification describes a config mutation that the FSM just applied.
 type Notification struct {
-	Kind NotifyKind
-	ID   uuid.UUID // entity ID (zero for settings)
-	Key  string    // settings key (empty for entity mutations)
+	Kind   NotifyKind
+	ID     uuid.UUID // entity ID (zero for settings)
+	Key    string    // settings key (empty for entity mutations)
+	NodeID string    // owning node (populated on vault/ingester deletes)
+	Dir    string    // file vault directory (populated on file vault deletes)
 }
 
 // Option configures the FSM at construction time.
@@ -294,10 +296,19 @@ func (f *FSM) applyDeleteVault(ctx context.Context, pb *gastrologv1.DeleteVaultC
 	if err != nil {
 		return nil, err
 	}
+	// Read vault config before deleting — the dispatcher needs NodeID and
+	// Dir to clean up the directory on the correct node.
+	note := &Notification{Kind: NotifyVaultDeleted, ID: id}
+	if existing, _ := f.store.GetVault(ctx, id); existing != nil {
+		note.NodeID = existing.NodeID
+		if existing.Type == "file" {
+			note.Dir = existing.Params["dir"]
+		}
+	}
 	if err := f.store.DeleteVault(ctx, id); err != nil {
 		return nil, err
 	}
-	return &Notification{Kind: NotifyVaultDeleted, ID: id}, nil
+	return note, nil
 }
 
 func (f *FSM) applyPutIngester(ctx context.Context, pb *gastrologv1.PutIngesterCommand) (*Notification, error) {
