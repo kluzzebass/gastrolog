@@ -8,7 +8,7 @@ import {
   useDeleteUser,
   useCurrentUser,
 } from "../../api/hooks/useAuth";
-import { useServerConfig } from "../../api/hooks/useConfig";
+import { useSettings } from "../../api/hooks/useConfig";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
 import { useEditState } from "../../hooks/useEditState";
@@ -86,7 +86,7 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
   const renameUser = useRenameUser();
   const deleteUser = useDeleteUser();
   const currentUser = useCurrentUser();
-  const { data: serverConfig } = useServerConfig();
+  const { data: settings } = useSettings();
   const { addToast } = useToast();
 
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -207,8 +207,8 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
               dark={dark}
             />
           </FormField>
-          {serverConfig && (
-            <PasswordRules password={newPassword} config={serverConfig} dark={dark} />
+          {settings && (
+            <PasswordRules password={newPassword} config={settings} dark={dark} />
           )}
         </AddFormCard>
       )}
@@ -274,8 +274,8 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
                   dark={dark}
                 />
               </FormField>
-              {edit.newPassword && serverConfig && (
-                <PasswordRules password={edit.newPassword} config={serverConfig} dark={dark} />
+              {edit.newPassword && settings && (
+                <PasswordRules password={edit.newPassword} config={settings} dark={dark} />
               )}
               <div
                 className={`text-[0.75em] ${c("text-text-ghost", "text-light-text-ghost")}`}

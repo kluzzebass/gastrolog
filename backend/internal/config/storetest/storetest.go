@@ -758,8 +758,8 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Fatalf("PutIngester: %v", err)
 		}
 
-		if err := s.PutSetting(ctx, "server", `{"auth":{"jwt_secret":"s3cret"}}`); err != nil {
-			t.Fatalf("PutSetting: %v", err)
+		if err := s.SaveServerSettings(ctx, config.AuthConfig{JWTSecret: "s3cret"}, config.QueryConfig{}, config.SchedulerConfig{}, config.TLSConfig{}, config.LookupConfig{}, false); err != nil {
+			t.Fatalf("SaveServerSettings: %v", err)
 		}
 
 		// Load should return the full Config.
@@ -780,13 +780,8 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if len(cfg.Ingesters) != 2 {
 			t.Errorf("expected 2 ingesters, got %d", len(cfg.Ingesters))
 		}
-		if len(cfg.Settings) != 1 {
-			t.Errorf("expected 1 setting, got %d", len(cfg.Settings))
-		}
-		if v, ok := cfg.Settings["server"]; !ok {
-			t.Error("missing setting 'server'")
-		} else if v != `{"auth":{"jwt_secret":"s3cret"}}` {
-			t.Errorf("setting 'server': expected JSON blob, got %q", v)
+		if cfg.Auth.JWTSecret != "s3cret" {
+			t.Errorf("expected Auth.JWTSecret %q, got %q", "s3cret", cfg.Auth.JWTSecret)
 		}
 	})
 
@@ -818,86 +813,49 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if ing != nil {
 			t.Errorf("expected nil, got %+v", ing)
 		}
-
-		setting, err := s.GetSetting(ctx, "nope")
-		if err != nil {
-			t.Fatalf("GetSetting: %v", err)
-		}
-		if setting != nil {
-			t.Errorf("expected nil, got %+v", *setting)
-		}
 	})
 
-	// Settings
-	t.Run("PutGetSetting", func(t *testing.T) {
+	// Server Settings
+	t.Run("LoadSaveServerSettings", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		value := `{"auth":{"jwt_secret":"test-secret"}}`
-		if err := s.PutSetting(ctx, "server", value); err != nil {
-			t.Fatalf("Put: %v", err)
+		wantAuth := config.AuthConfig{JWTSecret: "test-secret"}
+		wantQuery := config.QueryConfig{Timeout: "30s"}
+		if err := s.SaveServerSettings(ctx, wantAuth, wantQuery, config.SchedulerConfig{}, config.TLSConfig{}, config.LookupConfig{}, false); err != nil {
+			t.Fatalf("Save: %v", err)
 		}
 
-		got, err := s.GetSetting(ctx, "server")
+		gotAuth, gotQuery, _, _, _, _, err := s.LoadServerSettings(ctx)
 		if err != nil {
-			t.Fatalf("Get: %v", err)
+			t.Fatalf("Load: %v", err)
 		}
-		if got == nil {
-			t.Fatal("expected setting, got nil")
+		if gotAuth.JWTSecret != wantAuth.JWTSecret {
+			t.Errorf("JWTSecret: got %q, want %q", gotAuth.JWTSecret, wantAuth.JWTSecret)
 		}
-		if *got != value {
-			t.Errorf("expected %q, got %q", value, *got)
+		if gotQuery.Timeout != wantQuery.Timeout {
+			t.Errorf("Timeout: got %q, want %q", gotQuery.Timeout, wantQuery.Timeout)
 		}
 	})
 
-	t.Run("PutSettingUpsert", func(t *testing.T) {
+	t.Run("ServerSettingsUpsert", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		if err := s.PutSetting(ctx, "server", `{"auth":{}}`); err != nil {
-			t.Fatalf("Put: %v", err)
+		if err := s.SaveServerSettings(ctx, config.AuthConfig{JWTSecret: "old"}, config.QueryConfig{}, config.SchedulerConfig{}, config.TLSConfig{}, config.LookupConfig{}, false); err != nil {
+			t.Fatalf("Save: %v", err)
 		}
 
-		updated := `{"auth":{"jwt_secret":"new-secret"}}`
-		if err := s.PutSetting(ctx, "server", updated); err != nil {
-			t.Fatalf("Put upsert: %v", err)
+		if err := s.SaveServerSettings(ctx, config.AuthConfig{JWTSecret: "new-secret"}, config.QueryConfig{}, config.SchedulerConfig{}, config.TLSConfig{}, config.LookupConfig{}, false); err != nil {
+			t.Fatalf("Save upsert: %v", err)
 		}
 
-		got, err := s.GetSetting(ctx, "server")
+		gotAuth, _, _, _, _, _, err := s.LoadServerSettings(ctx)
 		if err != nil {
-			t.Fatalf("Get: %v", err)
+			t.Fatalf("Load: %v", err)
 		}
-		if got == nil {
-			t.Fatal("expected setting, got nil")
-		}
-		if *got != updated {
-			t.Errorf("expected %q, got %q", updated, *got)
-		}
-	})
-
-	t.Run("DeleteSetting", func(t *testing.T) {
-		s := newStore(t)
-		ctx := context.Background()
-
-		if err := s.PutSetting(ctx, "server", `{}`); err != nil {
-			t.Fatalf("Put: %v", err)
-		}
-
-		if err := s.DeleteSetting(ctx, "server"); err != nil {
-			t.Fatalf("Delete: %v", err)
-		}
-
-		got, err := s.GetSetting(ctx, "server")
-		if err != nil {
-			t.Fatalf("Get after delete: %v", err)
-		}
-		if got != nil {
-			t.Fatalf("expected nil after delete, got %q", *got)
-		}
-
-		// Delete non-existent is a no-op.
-		if err := s.DeleteSetting(ctx, "nonexistent"); err != nil {
-			t.Fatalf("Delete non-existent: %v", err)
+		if gotAuth.JWTSecret != "new-secret" {
+			t.Errorf("expected %q, got %q", "new-secret", gotAuth.JWTSecret)
 		}
 	})
 

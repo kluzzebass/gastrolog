@@ -3,7 +3,7 @@ import { useThemeClass } from "../hooks/useThemeClass";
 import { Dialog } from "./Dialog";
 import { SpinnerIcon } from "./icons";
 import { ConnectError } from "@connectrpc/connect";
-import { useChangePassword, useServerConfig } from "../api/hooks";
+import { useChangePassword, useSettings } from "../api/hooks";
 import { AuthFormField } from "./auth/AuthFormField";
 import { PasswordRules } from "./auth/PasswordRules";
 
@@ -24,7 +24,7 @@ export function ChangePasswordDialog({
   const [error, setError] = useState("");
   const oldRef = useRef<HTMLInputElement>(null);
   const changePassword = useChangePassword();
-  const { data: serverConfig } = useServerConfig();
+  const { data: settings } = useSettings();
 
   useEffect(() => {
     oldRef.current?.focus();
@@ -123,8 +123,8 @@ export function ChangePasswordDialog({
           </span>
         )}
 
-        {serverConfig && (
-          <PasswordRules password={newPassword} config={serverConfig} dark={dark} />
+        {settings && (
+          <PasswordRules password={newPassword} config={settings} dark={dark} />
         )}
 
         <div className="flex gap-3 mt-1">

@@ -166,8 +166,9 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.ConfigCommand
 	case *gastrologv1.ConfigCommand_PutSetting:
 		return f.applyPutSetting(ctx, c.PutSetting)
 	case *gastrologv1.ConfigCommand_DeleteSetting:
-		key := command.ExtractDeleteSetting(c.DeleteSetting)
-		return nil, f.store.DeleteSetting(ctx, key)
+		// No-op: settings KV was removed, but we keep this case for backward compat
+		// with old raft log entries.
+		return nil, nil
 	case *gastrologv1.ConfigCommand_PutCertificate:
 		cert, err := command.ExtractPutCertificate(c.PutCertificate)
 		if err != nil {
@@ -315,7 +316,15 @@ func (f *FSM) applyDeleteIngester(ctx context.Context, pb *gastrologv1.DeleteIng
 
 func (f *FSM) applyPutSetting(ctx context.Context, pb *gastrologv1.PutSettingCommand) (*Notification, error) {
 	key, value := command.ExtractPutSetting(pb)
-	if err := f.store.PutSetting(ctx, key, value); err != nil {
+	if key != "server" {
+		// Non-server settings were never used; ignore for backward compat.
+		return nil, nil
+	}
+	auth, query, sched, tls, lookup, dismissed, err := command.ExtractPutServerSettings(value)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.store.SaveServerSettings(ctx, auth, query, sched, tls, lookup, dismissed); err != nil {
 		return nil, err
 	}
 	return &Notification{Kind: NotifySettingPut, Key: key}, nil
@@ -535,9 +544,14 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit // snapshot re
 			return fmt.Errorf("restore ingester %s: %w", ing.ID, err)
 		}
 	}
-	for key, value := range cfg.Settings {
-		if err := newStore.PutSetting(ctx, key, value); err != nil {
-			return fmt.Errorf("restore setting %q: %w", key, err)
+	// Restore server settings from Config fields (populated by RestoreSnapshot).
+	// Only call SaveServerSettings if the snapshot actually contained settings;
+	// otherwise the empty save would make Load() return a non-nil Config.
+	if settings := snap.GetSettings(); len(settings) > 0 {
+		if _, ok := settings["server"]; ok {
+			if err := newStore.SaveServerSettings(ctx, cfg.Auth, cfg.Query, cfg.Scheduler, cfg.TLS, cfg.Lookup, cfg.SetupWizardDismissed); err != nil {
+				return fmt.Errorf("restore server settings: %w", err)
+			}
 		}
 	}
 	for _, cert := range cfg.Certs {

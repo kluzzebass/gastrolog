@@ -191,30 +191,30 @@ func TestApplyDeleteIngester(t *testing.T) {
 	}
 }
 
-func TestApplyPutSetting(t *testing.T) {
+func TestApplyPutServerSettings(t *testing.T) {
 	fsm := New()
-	applyCmd(t, fsm, command.NewPutSetting("key", "value"))
+	cmd, err := command.NewPutServerSettings(
+		config.AuthConfig{JWTSecret: "test-secret"},
+		config.QueryConfig{},
+		config.SchedulerConfig{MaxConcurrentJobs: 4},
+		config.TLSConfig{},
+		config.LookupConfig{},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("NewPutServerSettings: %v", err)
+	}
+	applyCmd(t, fsm, cmd)
 
-	got, err := fsm.Store().GetSetting(context.Background(), "key")
+	auth, _, sched, _, _, _, err := fsm.Store().LoadServerSettings(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got == nil || *got != "value" {
-		t.Fatalf("unexpected setting: %v", got)
+	if auth.JWTSecret != "test-secret" {
+		t.Fatalf("JWTSecret: got %q, want %q", auth.JWTSecret, "test-secret")
 	}
-}
-
-func TestApplyDeleteSetting(t *testing.T) {
-	fsm := New()
-	applyCmd(t, fsm, command.NewPutSetting("key", "value"))
-	applyCmd(t, fsm, command.NewDeleteSetting("key"))
-
-	got, err := fsm.Store().GetSetting(context.Background(), "key")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != nil {
-		t.Fatalf("expected nil, got %v", *got)
+	if sched.MaxConcurrentJobs != 4 {
+		t.Fatalf("MaxConcurrentJobs: got %d, want 4", sched.MaxConcurrentJobs)
 	}
 }
 
@@ -568,7 +568,11 @@ func TestSnapshotRestore(t *testing.T) {
 		Params: map[string]string{"port": "514"},
 	}))
 
-	applyCmd(t, fsm1, command.NewPutSetting("server", `{"auth":{}}`))
+	settingsCmd, err := command.NewPutServerSettings(config.AuthConfig{}, config.QueryConfig{}, config.SchedulerConfig{}, config.TLSConfig{}, config.LookupConfig{}, false)
+	if err != nil {
+		t.Fatalf("NewPutServerSettings: %v", err)
+	}
+	applyCmd(t, fsm1, settingsCmd)
 
 	certID := newID()
 	applyCmd(t, fsm1, command.NewPutCertificate(config.CertPEM{
@@ -635,9 +639,10 @@ func TestSnapshotRestore(t *testing.T) {
 		t.Errorf("ingester: %+v", gotIng)
 	}
 
-	gotSetting, _ := fsm2.Store().GetSetting(ctx, "server")
-	if gotSetting == nil || *gotSetting != `{"auth":{}}` {
-		t.Errorf("setting: %v", gotSetting)
+	// Server settings were saved — verify they can be loaded.
+	_, _, _, _, _, _, ssErr := fsm2.Store().LoadServerSettings(ctx)
+	if ssErr != nil {
+		t.Errorf("LoadServerSettings: %v", ssErr)
 	}
 
 	gotCert, _ := fsm2.Store().GetCertificate(ctx, certID)

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"maps"
@@ -185,17 +184,13 @@ func (d *configDispatcher) handleSettingPut(ctx context.Context, key string) {
 		return
 	}
 
-	raw, err := d.cfgStore.GetSetting(ctx, "server")
-	if err != nil || raw == nil {
+	_, _, sched, _, _, _, err := d.cfgStore.LoadServerSettings(ctx)
+	if err != nil {
+		d.logger.Error("dispatch: load server settings", "error", err)
 		return
 	}
-	var sc config.ServerConfig
-	if err := json.Unmarshal([]byte(*raw), &sc); err != nil {
-		d.logger.Error("dispatch: parse server config", "error", err)
-		return
-	}
-	if sc.Scheduler.MaxConcurrentJobs > 0 {
-		if err := d.orch.UpdateMaxConcurrentJobs(sc.Scheduler.MaxConcurrentJobs); err != nil {
+	if sched.MaxConcurrentJobs > 0 {
+		if err := d.orch.UpdateMaxConcurrentJobs(sched.MaxConcurrentJobs); err != nil {
 			d.logger.Error("dispatch: update max concurrent jobs", "error", err)
 		}
 	}

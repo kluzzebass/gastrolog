@@ -19,9 +19,9 @@ func (s *ConfigServer) reloadCertManager(ctx context.Context) error {
 	if s.certManager == nil {
 		return nil
 	}
-	sc, err := config.LoadServerConfig(ctx, s.cfgStore)
+	_, _, _, tlsCfg, _, _, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
-		return fmt.Errorf("load server config: %w", err)
+		return fmt.Errorf("load server settings: %w", err)
 	}
 	certList, err := s.cfgStore.ListCertificates(ctx)
 	if err != nil {
@@ -31,7 +31,7 @@ func (s *ConfigServer) reloadCertManager(ctx context.Context) error {
 	for _, c := range certList {
 		certs[c.Name] = cert.CertSource{CertPEM: c.CertPEM, KeyPEM: c.KeyPEM, CertFile: c.CertFile, KeyFile: c.KeyFile}
 	}
-	return s.certManager.LoadFromConfig(sc.TLS.DefaultCert, certs)
+	return s.certManager.LoadFromConfig(tlsCfg.DefaultCert, certs)
 }
 
 // ListCertificates returns all certificate names.
@@ -217,12 +217,12 @@ func resolveCertID(existingID uuid.UUID, reqID string) uuid.UUID {
 }
 
 func (s *ConfigServer) setDefaultCert(ctx context.Context, name string) error {
-	sc, err := config.LoadServerConfig(ctx, s.cfgStore)
+	auth, query, sched, tlsCfg, lookup, dismissed, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
 		return connect.NewError(connect.CodeInternal, err)
 	}
-	sc.TLS.DefaultCert = name
-	if err := config.SaveServerConfig(ctx, s.cfgStore, sc); err != nil {
+	tlsCfg.DefaultCert = name
+	if err := s.cfgStore.SaveServerSettings(ctx, auth, query, sched, tlsCfg, lookup, dismissed); err != nil {
 		return connect.NewError(connect.CodeInternal, err)
 	}
 	return nil
@@ -254,15 +254,15 @@ func (s *ConfigServer) DeleteCertificate(
 	}
 
 	// Clear default and disable TLS if the deleted cert was the default.
-	sc, err := config.LoadServerConfig(ctx, s.cfgStore)
+	auth, query, sched, tlsCfg, lookup, dismissed, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	if sc.TLS.DefaultCert == pem.Name {
-		sc.TLS.DefaultCert = ""
-		sc.TLS.TLSEnabled = false
-		sc.TLS.HTTPToHTTPSRedirect = false
-		if err := config.SaveServerConfig(ctx, s.cfgStore, sc); err != nil {
+	if tlsCfg.DefaultCert == pem.Name {
+		tlsCfg.DefaultCert = ""
+		tlsCfg.TLSEnabled = false
+		tlsCfg.HTTPToHTTPSRedirect = false
+		if err := s.cfgStore.SaveServerSettings(ctx, auth, query, sched, tlsCfg, lookup, dismissed); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, err)
 		}
 	}

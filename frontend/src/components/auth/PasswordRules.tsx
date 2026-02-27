@@ -1,41 +1,42 @@
-import type { GetServerConfigResponse } from "../../api/gen/gastrolog/v1/config_pb";
+import type { GetSettingsResponse } from "../../api/gen/gastrolog/v1/config_pb";
 
 interface PasswordRulesProps {
   password: string;
-  config: GetServerConfigResponse;
+  config: GetSettingsResponse;
   dark: boolean;
 }
 
 export function PasswordRules({ password, config, dark }: Readonly<PasswordRulesProps>) {
-  const minLength = config.minPasswordLength || 8;
+  const pp = config.auth?.passwordPolicy;
+  const minLength = pp?.minLength || 8;
 
   const rules: { label: string; met: boolean }[] = [
     { label: `At least ${minLength} characters`, met: password.length >= minLength },
   ];
 
-  if (config.requireMixedCase) {
+  if (pp?.requireMixedCase) {
     rules.push({
       label: "Upper and lowercase letters",
       met: /[a-z]/.test(password) && /[A-Z]/.test(password),
     });
   }
 
-  if (config.requireDigit) {
+  if (pp?.requireDigit) {
     rules.push({
       label: "At least one number",
       met: /\d/.test(password),
     });
   }
 
-  if (config.requireSpecial) {
+  if (pp?.requireSpecial) {
     rules.push({
       label: "At least one special character",
       met: /[^a-zA-Z0-9]/.test(password),
     });
   }
 
-  if (config.maxConsecutiveRepeats > 0) {
-    const max = config.maxConsecutiveRepeats;
+  if (pp && pp.maxConsecutiveRepeats > 0) {
+    const max = pp.maxConsecutiveRepeats;
     const pattern = new RegExp(`(.)\\1{${max},}`);
     rules.push({
       label: `No more than ${max} identical characters in a row`,
@@ -43,7 +44,7 @@ export function PasswordRules({ password, config, dark }: Readonly<PasswordRules
     });
   }
 
-  if (config.forbidAnimalNoise) {
+  if (pp?.forbidAnimalNoise) {
     const noises = [
       "moo", "woof", "bark", "meow", "oink", "quack", "baa", "neigh",
       "roar", "hiss", "chirp", "tweet", "cluck", "ribbit", "buzz",

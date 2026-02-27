@@ -85,7 +85,7 @@ func NewAuthInterceptor(tokens *TokenService, counter UserCounter, validator Tok
 			gastrologv1connect.AuthServiceLoginProcedure:             true,
 			gastrologv1connect.AuthServiceRegisterProcedure:          true, // self-guards after first user
 			gastrologv1connect.AuthServiceRefreshTokenProcedure:      true, // uses opaque token, not JWT
-			gastrologv1connect.ConfigServiceGetServerConfigProcedure: true, // password policy needed on register page
+			gastrologv1connect.ConfigServiceGetSettingsProcedure: true, // password policy needed on register page
 		},
 		admin: map[string]bool{
 			// User management (admin-only)
@@ -118,7 +118,7 @@ func NewAuthInterceptor(tokens *TokenService, counter UserCounter, validator Tok
 			gastrologv1connect.ConfigServiceDeleteVaultProcedure:           true,
 			gastrologv1connect.ConfigServicePutIngesterProcedure:           true,
 			gastrologv1connect.ConfigServiceDeleteIngesterProcedure:        true,
-			gastrologv1connect.ConfigServicePutServerConfigProcedure:       true,
+			gastrologv1connect.ConfigServicePutSettingsProcedure:       true,
 		},
 	}
 }

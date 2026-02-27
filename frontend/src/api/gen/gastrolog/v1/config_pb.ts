@@ -1408,249 +1408,585 @@ export class DeleteIngesterResponse extends Message<DeleteIngesterResponse> {
 }
 
 /**
- * @generated from message gastrolog.v1.GetServerConfigRequest
+ * @generated from message gastrolog.v1.GetSettingsRequest
  */
-export class GetServerConfigRequest extends Message<GetServerConfigRequest> {
-  constructor(data?: PartialMessage<GetServerConfigRequest>) {
+export class GetSettingsRequest extends Message<GetSettingsRequest> {
+  /**
+   * When true, return actual secret values (for export/backup).
+   *
+   * @generated from field: bool include_secrets = 1;
+   */
+  includeSecrets = false;
+
+  constructor(data?: PartialMessage<GetSettingsRequest>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.GetServerConfigRequest";
+  static readonly typeName = "gastrolog.v1.GetSettingsRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "include_secrets", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetServerConfigRequest {
-    return new GetServerConfigRequest().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetSettingsRequest {
+    return new GetSettingsRequest().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetServerConfigRequest {
-    return new GetServerConfigRequest().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetSettingsRequest {
+    return new GetSettingsRequest().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetServerConfigRequest {
-    return new GetServerConfigRequest().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetSettingsRequest {
+    return new GetSettingsRequest().fromJsonString(jsonString, options);
   }
 
-  static equals(a: GetServerConfigRequest | PlainMessage<GetServerConfigRequest> | undefined, b: GetServerConfigRequest | PlainMessage<GetServerConfigRequest> | undefined): boolean {
-    return proto3.util.equals(GetServerConfigRequest, a, b);
+  static equals(a: GetSettingsRequest | PlainMessage<GetSettingsRequest> | undefined, b: GetSettingsRequest | PlainMessage<GetSettingsRequest> | undefined): boolean {
+    return proto3.util.equals(GetSettingsRequest, a, b);
   }
 }
 
 /**
- * @generated from message gastrolog.v1.GetServerConfigResponse
+ * @generated from message gastrolog.v1.PasswordPolicySettings
  */
-export class GetServerConfigResponse extends Message<GetServerConfigResponse> {
+export class PasswordPolicySettings extends Message<PasswordPolicySettings> {
+  /**
+   * @generated from field: int32 min_length = 1;
+   */
+  minLength = 0;
+
+  /**
+   * @generated from field: bool require_mixed_case = 2;
+   */
+  requireMixedCase = false;
+
+  /**
+   * @generated from field: bool require_digit = 3;
+   */
+  requireDigit = false;
+
+  /**
+   * @generated from field: bool require_special = 4;
+   */
+  requireSpecial = false;
+
+  /**
+   * @generated from field: int32 max_consecutive_repeats = 5;
+   */
+  maxConsecutiveRepeats = 0;
+
+  /**
+   * @generated from field: bool forbid_animal_noise = 6;
+   */
+  forbidAnimalNoise = false;
+
+  constructor(data?: PartialMessage<PasswordPolicySettings>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PasswordPolicySettings";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "min_length", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 2, name: "require_mixed_case", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 3, name: "require_digit", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 4, name: "require_special", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 5, name: "max_consecutive_repeats", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 6, name: "forbid_animal_noise", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PasswordPolicySettings {
+    return new PasswordPolicySettings().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PasswordPolicySettings {
+    return new PasswordPolicySettings().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PasswordPolicySettings {
+    return new PasswordPolicySettings().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PasswordPolicySettings | PlainMessage<PasswordPolicySettings> | undefined, b: PasswordPolicySettings | PlainMessage<PasswordPolicySettings> | undefined): boolean {
+    return proto3.util.equals(PasswordPolicySettings, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.MaxMindSettings
+ */
+export class MaxMindSettings extends Message<MaxMindSettings> {
+  /**
+   * @generated from field: bool auto_download = 1;
+   */
+  autoDownload = false;
+
+  /**
+   * read-only: true when account_id + license_key are both set
+   *
+   * @generated from field: bool license_configured = 2;
+   */
+  licenseConfigured = false;
+
+  /**
+   * read-only: RFC3339 timestamp of last successful download
+   *
+   * @generated from field: string last_update = 3;
+   */
+  lastUpdate = "";
+
+  /**
+   * only populated when include_secrets
+   *
+   * @generated from field: string account_id = 4;
+   */
+  accountId = "";
+
+  /**
+   * only populated when include_secrets
+   *
+   * @generated from field: string license_key = 5;
+   */
+  licenseKey = "";
+
+  constructor(data?: PartialMessage<MaxMindSettings>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.MaxMindSettings";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "auto_download", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 2, name: "license_configured", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 3, name: "last_update", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "account_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "license_key", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): MaxMindSettings {
+    return new MaxMindSettings().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): MaxMindSettings {
+    return new MaxMindSettings().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): MaxMindSettings {
+    return new MaxMindSettings().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: MaxMindSettings | PlainMessage<MaxMindSettings> | undefined, b: MaxMindSettings | PlainMessage<MaxMindSettings> | undefined): boolean {
+    return proto3.util.equals(MaxMindSettings, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.AuthSettings
+ */
+export class AuthSettings extends Message<AuthSettings> {
   /**
    * @generated from field: string token_duration = 1;
    */
   tokenDuration = "";
 
   /**
-   * True when a JWT secret exists; the secret itself is never returned.
+   * read-only: true when a JWT secret exists
    *
    * @generated from field: bool jwt_secret_configured = 2;
    */
   jwtSecretConfigured = false;
 
   /**
-   * @generated from field: int32 min_password_length = 3;
-   */
-  minPasswordLength = 0;
-
-  /**
-   * @generated from field: int32 max_concurrent_jobs = 4;
-   */
-  maxConcurrentJobs = 0;
-
-  /**
-   * @generated from field: string tls_default_cert = 5;
-   */
-  tlsDefaultCert = "";
-
-  /**
-   * @generated from field: bool tls_enabled = 6;
-   */
-  tlsEnabled = false;
-
-  /**
-   * @generated from field: bool http_to_https_redirect = 7;
-   */
-  httpToHttpsRedirect = false;
-
-  /**
-   * @generated from field: bool require_mixed_case = 8;
-   */
-  requireMixedCase = false;
-
-  /**
-   * @generated from field: bool require_digit = 9;
-   */
-  requireDigit = false;
-
-  /**
-   * @generated from field: bool require_special = 10;
-   */
-  requireSpecial = false;
-
-  /**
-   * @generated from field: int32 max_consecutive_repeats = 11;
-   */
-  maxConsecutiveRepeats = 0;
-
-  /**
-   * @generated from field: bool forbid_animal_noise = 12;
-   */
-  forbidAnimalNoise = false;
-
-  /**
-   * Configured HTTPS port; empty = HTTP port + 1.
-   *
-   * @generated from field: string https_port = 13;
-   */
-  httpsPort = "";
-
-  /**
-   * Max lifetime for Follow streams (Go duration). Empty = no limit.
-   *
-   * @generated from field: string max_follow_duration = 14;
-   */
-  maxFollowDuration = "";
-
-  /**
-   * Max duration for queries (Go duration). Empty = 30s default.
-   *
-   * @generated from field: string query_timeout = 15;
-   */
-  queryTimeout = "";
-
-  /**
-   * Lifetime of refresh tokens (Go duration). Empty = 168h default.
-   *
-   * @generated from field: string refresh_token_duration = 16;
+   * @generated from field: string refresh_token_duration = 3;
    */
   refreshTokenDuration = "";
 
   /**
-   * Max records per Search request. 0 = unlimited.
-   *
-   * @generated from field: int32 max_result_count = 17;
+   * @generated from field: gastrolog.v1.PasswordPolicySettings password_policy = 4;
    */
-  maxResultCount = 0;
+  passwordPolicy?: PasswordPolicySettings;
 
   /**
-   * True when the user has dismissed the setup wizard.
+   * only populated when include_secrets
    *
-   * @generated from field: bool setup_wizard_dismissed = 18;
+   * @generated from field: string jwt_secret = 5;
    */
-  setupWizardDismissed = false;
+  jwtSecret = "";
 
-  /**
-   * Path to MaxMind MMDB file for GeoIP lookups.
-   *
-   * @generated from field: string geoip_db_path = 19;
-   */
-  geoipDbPath = "";
-
-  /**
-   * Path to MaxMind MMDB file for ASN lookups.
-   *
-   * @generated from field: string asn_db_path = 20;
-   */
-  asnDbPath = "";
-
-  /**
-   * Whether automatic MaxMind database downloading is enabled.
-   *
-   * @generated from field: bool maxmind_auto_download = 21;
-   */
-  maxmindAutoDownload = false;
-
-  /**
-   * True when account_id + license_key are both set; credentials never exposed.
-   *
-   * @generated from field: bool maxmind_license_configured = 22;
-   */
-  maxmindLicenseConfigured = false;
-
-  /**
-   * RFC3339 timestamp of last successful MaxMind download.
-   *
-   * @generated from field: string maxmind_last_update = 23;
-   */
-  maxmindLastUpdate = "";
-
-  /**
-   * Local raft server ID (UUID).
-   *
-   * @generated from field: string node_id = 24;
-   */
-  nodeId = "";
-
-  /**
-   * Human-readable petname for this node.
-   *
-   * @generated from field: string node_name = 25;
-   */
-  nodeName = "";
-
-  constructor(data?: PartialMessage<GetServerConfigResponse>) {
+  constructor(data?: PartialMessage<AuthSettings>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.GetServerConfigResponse";
+  static readonly typeName = "gastrolog.v1.AuthSettings";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "jwt_secret_configured", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 3, name: "min_password_length", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
-    { no: 4, name: "max_concurrent_jobs", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
-    { no: 5, name: "tls_default_cert", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 6, name: "tls_enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 7, name: "http_to_https_redirect", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 8, name: "require_mixed_case", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 9, name: "require_digit", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 10, name: "require_special", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 11, name: "max_consecutive_repeats", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
-    { no: 12, name: "forbid_animal_noise", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 13, name: "https_port", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 14, name: "max_follow_duration", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 15, name: "query_timeout", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 16, name: "refresh_token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 17, name: "max_result_count", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
-    { no: 18, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 19, name: "geoip_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 20, name: "asn_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 21, name: "maxmind_auto_download", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 22, name: "maxmind_license_configured", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 23, name: "maxmind_last_update", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 24, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 25, name: "node_name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "refresh_token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "password_policy", kind: "message", T: PasswordPolicySettings },
+    { no: 5, name: "jwt_secret", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetServerConfigResponse {
-    return new GetServerConfigResponse().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): AuthSettings {
+    return new AuthSettings().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetServerConfigResponse {
-    return new GetServerConfigResponse().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): AuthSettings {
+    return new AuthSettings().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetServerConfigResponse {
-    return new GetServerConfigResponse().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): AuthSettings {
+    return new AuthSettings().fromJsonString(jsonString, options);
   }
 
-  static equals(a: GetServerConfigResponse | PlainMessage<GetServerConfigResponse> | undefined, b: GetServerConfigResponse | PlainMessage<GetServerConfigResponse> | undefined): boolean {
-    return proto3.util.equals(GetServerConfigResponse, a, b);
+  static equals(a: AuthSettings | PlainMessage<AuthSettings> | undefined, b: AuthSettings | PlainMessage<AuthSettings> | undefined): boolean {
+    return proto3.util.equals(AuthSettings, a, b);
   }
 }
 
 /**
- * @generated from message gastrolog.v1.PutServerConfigRequest
+ * @generated from message gastrolog.v1.QuerySettings
  */
-export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
+export class QuerySettings extends Message<QuerySettings> {
+  /**
+   * @generated from field: string timeout = 1;
+   */
+  timeout = "";
+
+  /**
+   * @generated from field: string max_follow_duration = 2;
+   */
+  maxFollowDuration = "";
+
+  /**
+   * @generated from field: int32 max_result_count = 3;
+   */
+  maxResultCount = 0;
+
+  constructor(data?: PartialMessage<QuerySettings>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.QuerySettings";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "timeout", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "max_follow_duration", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "max_result_count", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): QuerySettings {
+    return new QuerySettings().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): QuerySettings {
+    return new QuerySettings().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): QuerySettings {
+    return new QuerySettings().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: QuerySettings | PlainMessage<QuerySettings> | undefined, b: QuerySettings | PlainMessage<QuerySettings> | undefined): boolean {
+    return proto3.util.equals(QuerySettings, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.SchedulerSettings
+ */
+export class SchedulerSettings extends Message<SchedulerSettings> {
+  /**
+   * @generated from field: int32 max_concurrent_jobs = 1;
+   */
+  maxConcurrentJobs = 0;
+
+  constructor(data?: PartialMessage<SchedulerSettings>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SchedulerSettings";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "max_concurrent_jobs", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SchedulerSettings {
+    return new SchedulerSettings().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SchedulerSettings {
+    return new SchedulerSettings().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SchedulerSettings {
+    return new SchedulerSettings().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SchedulerSettings | PlainMessage<SchedulerSettings> | undefined, b: SchedulerSettings | PlainMessage<SchedulerSettings> | undefined): boolean {
+    return proto3.util.equals(SchedulerSettings, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.TLSSettings
+ */
+export class TLSSettings extends Message<TLSSettings> {
+  /**
+   * @generated from field: string default_cert = 1;
+   */
+  defaultCert = "";
+
+  /**
+   * @generated from field: bool enabled = 2;
+   */
+  enabled = false;
+
+  /**
+   * @generated from field: bool http_to_https_redirect = 3;
+   */
+  httpToHttpsRedirect = false;
+
+  /**
+   * @generated from field: string https_port = 4;
+   */
+  httpsPort = "";
+
+  constructor(data?: PartialMessage<TLSSettings>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.TLSSettings";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "default_cert", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 3, name: "http_to_https_redirect", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 4, name: "https_port", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TLSSettings {
+    return new TLSSettings().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TLSSettings {
+    return new TLSSettings().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TLSSettings {
+    return new TLSSettings().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: TLSSettings | PlainMessage<TLSSettings> | undefined, b: TLSSettings | PlainMessage<TLSSettings> | undefined): boolean {
+    return proto3.util.equals(TLSSettings, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.LookupSettings
+ */
+export class LookupSettings extends Message<LookupSettings> {
+  /**
+   * @generated from field: string geoip_db_path = 1;
+   */
+  geoipDbPath = "";
+
+  /**
+   * @generated from field: string asn_db_path = 2;
+   */
+  asnDbPath = "";
+
+  /**
+   * @generated from field: gastrolog.v1.MaxMindSettings maxmind = 3;
+   */
+  maxmind?: MaxMindSettings;
+
+  constructor(data?: PartialMessage<LookupSettings>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.LookupSettings";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "geoip_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "asn_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "maxmind", kind: "message", T: MaxMindSettings },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): LookupSettings {
+    return new LookupSettings().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): LookupSettings {
+    return new LookupSettings().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): LookupSettings {
+    return new LookupSettings().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: LookupSettings | PlainMessage<LookupSettings> | undefined, b: LookupSettings | PlainMessage<LookupSettings> | undefined): boolean {
+    return proto3.util.equals(LookupSettings, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.GetSettingsResponse
+ */
+export class GetSettingsResponse extends Message<GetSettingsResponse> {
+  /**
+   * @generated from field: gastrolog.v1.AuthSettings auth = 1;
+   */
+  auth?: AuthSettings;
+
+  /**
+   * @generated from field: gastrolog.v1.QuerySettings query = 2;
+   */
+  query?: QuerySettings;
+
+  /**
+   * @generated from field: gastrolog.v1.SchedulerSettings scheduler = 3;
+   */
+  scheduler?: SchedulerSettings;
+
+  /**
+   * @generated from field: gastrolog.v1.TLSSettings tls = 4;
+   */
+  tls?: TLSSettings;
+
+  /**
+   * @generated from field: gastrolog.v1.LookupSettings lookup = 5;
+   */
+  lookup?: LookupSettings;
+
+  /**
+   * @generated from field: bool setup_wizard_dismissed = 6;
+   */
+  setupWizardDismissed = false;
+
+  /**
+   * @generated from field: string node_id = 7;
+   */
+  nodeId = "";
+
+  /**
+   * @generated from field: string node_name = 8;
+   */
+  nodeName = "";
+
+  constructor(data?: PartialMessage<GetSettingsResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetSettingsResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "auth", kind: "message", T: AuthSettings },
+    { no: 2, name: "query", kind: "message", T: QuerySettings },
+    { no: 3, name: "scheduler", kind: "message", T: SchedulerSettings },
+    { no: 4, name: "tls", kind: "message", T: TLSSettings },
+    { no: 5, name: "lookup", kind: "message", T: LookupSettings },
+    { no: 6, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 7, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 8, name: "node_name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetSettingsResponse {
+    return new GetSettingsResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetSettingsResponse {
+    return new GetSettingsResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetSettingsResponse {
+    return new GetSettingsResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetSettingsResponse | PlainMessage<GetSettingsResponse> | undefined, b: GetSettingsResponse | PlainMessage<GetSettingsResponse> | undefined): boolean {
+    return proto3.util.equals(GetSettingsResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutPasswordPolicySettings
+ */
+export class PutPasswordPolicySettings extends Message<PutPasswordPolicySettings> {
+  /**
+   * @generated from field: optional int32 min_length = 1;
+   */
+  minLength?: number;
+
+  /**
+   * @generated from field: optional bool require_mixed_case = 2;
+   */
+  requireMixedCase?: boolean;
+
+  /**
+   * @generated from field: optional bool require_digit = 3;
+   */
+  requireDigit?: boolean;
+
+  /**
+   * @generated from field: optional bool require_special = 4;
+   */
+  requireSpecial?: boolean;
+
+  /**
+   * @generated from field: optional int32 max_consecutive_repeats = 5;
+   */
+  maxConsecutiveRepeats?: number;
+
+  /**
+   * @generated from field: optional bool forbid_animal_noise = 6;
+   */
+  forbidAnimalNoise?: boolean;
+
+  constructor(data?: PartialMessage<PutPasswordPolicySettings>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutPasswordPolicySettings";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "min_length", kind: "scalar", T: 5 /* ScalarType.INT32 */, opt: true },
+    { no: 2, name: "require_mixed_case", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
+    { no: 3, name: "require_digit", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
+    { no: 4, name: "require_special", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
+    { no: 5, name: "max_consecutive_repeats", kind: "scalar", T: 5 /* ScalarType.INT32 */, opt: true },
+    { no: 6, name: "forbid_animal_noise", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutPasswordPolicySettings {
+    return new PutPasswordPolicySettings().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutPasswordPolicySettings {
+    return new PutPasswordPolicySettings().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutPasswordPolicySettings {
+    return new PutPasswordPolicySettings().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutPasswordPolicySettings | PlainMessage<PutPasswordPolicySettings> | undefined, b: PutPasswordPolicySettings | PlainMessage<PutPasswordPolicySettings> | undefined): boolean {
+    return proto3.util.equals(PutPasswordPolicySettings, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutAuthSettings
+ */
+export class PutAuthSettings extends Message<PutAuthSettings> {
   /**
    * @generated from field: optional string token_duration = 1;
    */
@@ -1662,164 +1998,356 @@ export class PutServerConfigRequest extends Message<PutServerConfigRequest> {
   jwtSecret?: string;
 
   /**
-   * @generated from field: optional int32 min_password_length = 3;
-   */
-  minPasswordLength?: number;
-
-  /**
-   * @generated from field: optional int32 max_concurrent_jobs = 4;
-   */
-  maxConcurrentJobs?: number;
-
-  /**
-   * @generated from field: optional string tls_default_cert = 5;
-   */
-  tlsDefaultCert?: string;
-
-  /**
-   * @generated from field: optional bool tls_enabled = 6;
-   */
-  tlsEnabled?: boolean;
-
-  /**
-   * @generated from field: optional bool http_to_https_redirect = 7;
-   */
-  httpToHttpsRedirect?: boolean;
-
-  /**
-   * @generated from field: optional bool require_mixed_case = 8;
-   */
-  requireMixedCase?: boolean;
-
-  /**
-   * @generated from field: optional bool require_digit = 9;
-   */
-  requireDigit?: boolean;
-
-  /**
-   * @generated from field: optional bool require_special = 10;
-   */
-  requireSpecial?: boolean;
-
-  /**
-   * @generated from field: optional int32 max_consecutive_repeats = 11;
-   */
-  maxConsecutiveRepeats?: number;
-
-  /**
-   * @generated from field: optional bool forbid_animal_noise = 12;
-   */
-  forbidAnimalNoise?: boolean;
-
-  /**
-   * @generated from field: optional string https_port = 13;
-   */
-  httpsPort?: string;
-
-  /**
-   * @generated from field: optional string max_follow_duration = 14;
-   */
-  maxFollowDuration?: string;
-
-  /**
-   * @generated from field: optional string query_timeout = 15;
-   */
-  queryTimeout?: string;
-
-  /**
-   * @generated from field: optional string refresh_token_duration = 16;
+   * @generated from field: optional string refresh_token_duration = 3;
    */
   refreshTokenDuration?: string;
 
   /**
-   * @generated from field: optional int32 max_result_count = 17;
+   * @generated from field: gastrolog.v1.PutPasswordPolicySettings password_policy = 4;
    */
-  maxResultCount?: number;
+  passwordPolicy?: PutPasswordPolicySettings;
 
-  /**
-   * @generated from field: optional bool setup_wizard_dismissed = 18;
-   */
-  setupWizardDismissed?: boolean;
-
-  /**
-   * @generated from field: optional string geoip_db_path = 19;
-   */
-  geoipDbPath?: string;
-
-  /**
-   * @generated from field: optional string asn_db_path = 20;
-   */
-  asnDbPath?: string;
-
-  /**
-   * @generated from field: optional bool maxmind_auto_download = 21;
-   */
-  maxmindAutoDownload?: boolean;
-
-  /**
-   * @generated from field: optional string maxmind_account_id = 22;
-   */
-  maxmindAccountId?: string;
-
-  /**
-   * @generated from field: optional string maxmind_license_key = 23;
-   */
-  maxmindLicenseKey?: string;
-
-  constructor(data?: PartialMessage<PutServerConfigRequest>) {
+  constructor(data?: PartialMessage<PutAuthSettings>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.PutServerConfigRequest";
+  static readonly typeName = "gastrolog.v1.PutAuthSettings";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 2, name: "jwt_secret", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
-    { no: 3, name: "min_password_length", kind: "scalar", T: 5 /* ScalarType.INT32 */, opt: true },
-    { no: 4, name: "max_concurrent_jobs", kind: "scalar", T: 5 /* ScalarType.INT32 */, opt: true },
-    { no: 5, name: "tls_default_cert", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
-    { no: 6, name: "tls_enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
-    { no: 7, name: "http_to_https_redirect", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
-    { no: 8, name: "require_mixed_case", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
-    { no: 9, name: "require_digit", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
-    { no: 10, name: "require_special", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
-    { no: 11, name: "max_consecutive_repeats", kind: "scalar", T: 5 /* ScalarType.INT32 */, opt: true },
-    { no: 12, name: "forbid_animal_noise", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
-    { no: 13, name: "https_port", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
-    { no: 14, name: "max_follow_duration", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
-    { no: 15, name: "query_timeout", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
-    { no: 16, name: "refresh_token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
-    { no: 17, name: "max_result_count", kind: "scalar", T: 5 /* ScalarType.INT32 */, opt: true },
-    { no: 18, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
-    { no: 19, name: "geoip_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
-    { no: 20, name: "asn_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
-    { no: 21, name: "maxmind_auto_download", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
-    { no: 22, name: "maxmind_account_id", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
-    { no: 23, name: "maxmind_license_key", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 3, name: "refresh_token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 4, name: "password_policy", kind: "message", T: PutPasswordPolicySettings },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutServerConfigRequest {
-    return new PutServerConfigRequest().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutAuthSettings {
+    return new PutAuthSettings().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutServerConfigRequest {
-    return new PutServerConfigRequest().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutAuthSettings {
+    return new PutAuthSettings().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutServerConfigRequest {
-    return new PutServerConfigRequest().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutAuthSettings {
+    return new PutAuthSettings().fromJsonString(jsonString, options);
   }
 
-  static equals(a: PutServerConfigRequest | PlainMessage<PutServerConfigRequest> | undefined, b: PutServerConfigRequest | PlainMessage<PutServerConfigRequest> | undefined): boolean {
-    return proto3.util.equals(PutServerConfigRequest, a, b);
+  static equals(a: PutAuthSettings | PlainMessage<PutAuthSettings> | undefined, b: PutAuthSettings | PlainMessage<PutAuthSettings> | undefined): boolean {
+    return proto3.util.equals(PutAuthSettings, a, b);
   }
 }
 
 /**
- * @generated from message gastrolog.v1.PutServerConfigResponse
+ * @generated from message gastrolog.v1.PutQuerySettings
  */
-export class PutServerConfigResponse extends Message<PutServerConfigResponse> {
+export class PutQuerySettings extends Message<PutQuerySettings> {
+  /**
+   * @generated from field: optional string timeout = 1;
+   */
+  timeout?: string;
+
+  /**
+   * @generated from field: optional string max_follow_duration = 2;
+   */
+  maxFollowDuration?: string;
+
+  /**
+   * @generated from field: optional int32 max_result_count = 3;
+   */
+  maxResultCount?: number;
+
+  constructor(data?: PartialMessage<PutQuerySettings>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutQuerySettings";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "timeout", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 2, name: "max_follow_duration", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 3, name: "max_result_count", kind: "scalar", T: 5 /* ScalarType.INT32 */, opt: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutQuerySettings {
+    return new PutQuerySettings().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutQuerySettings {
+    return new PutQuerySettings().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutQuerySettings {
+    return new PutQuerySettings().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutQuerySettings | PlainMessage<PutQuerySettings> | undefined, b: PutQuerySettings | PlainMessage<PutQuerySettings> | undefined): boolean {
+    return proto3.util.equals(PutQuerySettings, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutSchedulerSettings
+ */
+export class PutSchedulerSettings extends Message<PutSchedulerSettings> {
+  /**
+   * @generated from field: optional int32 max_concurrent_jobs = 1;
+   */
+  maxConcurrentJobs?: number;
+
+  constructor(data?: PartialMessage<PutSchedulerSettings>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutSchedulerSettings";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "max_concurrent_jobs", kind: "scalar", T: 5 /* ScalarType.INT32 */, opt: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutSchedulerSettings {
+    return new PutSchedulerSettings().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutSchedulerSettings {
+    return new PutSchedulerSettings().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutSchedulerSettings {
+    return new PutSchedulerSettings().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutSchedulerSettings | PlainMessage<PutSchedulerSettings> | undefined, b: PutSchedulerSettings | PlainMessage<PutSchedulerSettings> | undefined): boolean {
+    return proto3.util.equals(PutSchedulerSettings, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutTLSSettings
+ */
+export class PutTLSSettings extends Message<PutTLSSettings> {
+  /**
+   * @generated from field: optional string default_cert = 1;
+   */
+  defaultCert?: string;
+
+  /**
+   * @generated from field: optional bool enabled = 2;
+   */
+  enabled?: boolean;
+
+  /**
+   * @generated from field: optional bool http_to_https_redirect = 3;
+   */
+  httpToHttpsRedirect?: boolean;
+
+  /**
+   * @generated from field: optional string https_port = 4;
+   */
+  httpsPort?: string;
+
+  constructor(data?: PartialMessage<PutTLSSettings>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutTLSSettings";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "default_cert", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 2, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
+    { no: 3, name: "http_to_https_redirect", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
+    { no: 4, name: "https_port", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutTLSSettings {
+    return new PutTLSSettings().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutTLSSettings {
+    return new PutTLSSettings().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutTLSSettings {
+    return new PutTLSSettings().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutTLSSettings | PlainMessage<PutTLSSettings> | undefined, b: PutTLSSettings | PlainMessage<PutTLSSettings> | undefined): boolean {
+    return proto3.util.equals(PutTLSSettings, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutMaxMindSettings
+ */
+export class PutMaxMindSettings extends Message<PutMaxMindSettings> {
+  /**
+   * @generated from field: optional bool auto_download = 1;
+   */
+  autoDownload?: boolean;
+
+  /**
+   * @generated from field: optional string account_id = 2;
+   */
+  accountId?: string;
+
+  /**
+   * @generated from field: optional string license_key = 3;
+   */
+  licenseKey?: string;
+
+  constructor(data?: PartialMessage<PutMaxMindSettings>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutMaxMindSettings";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "auto_download", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
+    { no: 2, name: "account_id", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 3, name: "license_key", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutMaxMindSettings {
+    return new PutMaxMindSettings().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutMaxMindSettings {
+    return new PutMaxMindSettings().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutMaxMindSettings {
+    return new PutMaxMindSettings().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutMaxMindSettings | PlainMessage<PutMaxMindSettings> | undefined, b: PutMaxMindSettings | PlainMessage<PutMaxMindSettings> | undefined): boolean {
+    return proto3.util.equals(PutMaxMindSettings, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutLookupSettings
+ */
+export class PutLookupSettings extends Message<PutLookupSettings> {
+  /**
+   * @generated from field: optional string geoip_db_path = 1;
+   */
+  geoipDbPath?: string;
+
+  /**
+   * @generated from field: optional string asn_db_path = 2;
+   */
+  asnDbPath?: string;
+
+  /**
+   * @generated from field: gastrolog.v1.PutMaxMindSettings maxmind = 3;
+   */
+  maxmind?: PutMaxMindSettings;
+
+  constructor(data?: PartialMessage<PutLookupSettings>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutLookupSettings";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "geoip_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 2, name: "asn_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 3, name: "maxmind", kind: "message", T: PutMaxMindSettings },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutLookupSettings {
+    return new PutLookupSettings().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutLookupSettings {
+    return new PutLookupSettings().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutLookupSettings {
+    return new PutLookupSettings().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutLookupSettings | PlainMessage<PutLookupSettings> | undefined, b: PutLookupSettings | PlainMessage<PutLookupSettings> | undefined): boolean {
+    return proto3.util.equals(PutLookupSettings, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutSettingsRequest
+ */
+export class PutSettingsRequest extends Message<PutSettingsRequest> {
+  /**
+   * @generated from field: gastrolog.v1.PutAuthSettings auth = 1;
+   */
+  auth?: PutAuthSettings;
+
+  /**
+   * @generated from field: gastrolog.v1.PutQuerySettings query = 2;
+   */
+  query?: PutQuerySettings;
+
+  /**
+   * @generated from field: gastrolog.v1.PutSchedulerSettings scheduler = 3;
+   */
+  scheduler?: PutSchedulerSettings;
+
+  /**
+   * @generated from field: gastrolog.v1.PutTLSSettings tls = 4;
+   */
+  tls?: PutTLSSettings;
+
+  /**
+   * @generated from field: gastrolog.v1.PutLookupSettings lookup = 5;
+   */
+  lookup?: PutLookupSettings;
+
+  /**
+   * @generated from field: optional bool setup_wizard_dismissed = 6;
+   */
+  setupWizardDismissed?: boolean;
+
+  constructor(data?: PartialMessage<PutSettingsRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutSettingsRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "auth", kind: "message", T: PutAuthSettings },
+    { no: 2, name: "query", kind: "message", T: PutQuerySettings },
+    { no: 3, name: "scheduler", kind: "message", T: PutSchedulerSettings },
+    { no: 4, name: "tls", kind: "message", T: PutTLSSettings },
+    { no: 5, name: "lookup", kind: "message", T: PutLookupSettings },
+    { no: 6, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutSettingsRequest {
+    return new PutSettingsRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutSettingsRequest {
+    return new PutSettingsRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutSettingsRequest {
+    return new PutSettingsRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutSettingsRequest | PlainMessage<PutSettingsRequest> | undefined, b: PutSettingsRequest | PlainMessage<PutSettingsRequest> | undefined): boolean {
+    return proto3.util.equals(PutSettingsRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutSettingsResponse
+ */
+export class PutSettingsResponse extends Message<PutSettingsResponse> {
   /**
    * Populated when geoip_db_path was set.
    *
@@ -1834,32 +2362,32 @@ export class PutServerConfigResponse extends Message<PutServerConfigResponse> {
    */
   asnValidation?: MmdbValidation;
 
-  constructor(data?: PartialMessage<PutServerConfigResponse>) {
+  constructor(data?: PartialMessage<PutSettingsResponse>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.PutServerConfigResponse";
+  static readonly typeName = "gastrolog.v1.PutSettingsResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "geoip_validation", kind: "message", T: MmdbValidation },
     { no: 2, name: "asn_validation", kind: "message", T: MmdbValidation },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutServerConfigResponse {
-    return new PutServerConfigResponse().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutSettingsResponse {
+    return new PutSettingsResponse().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutServerConfigResponse {
-    return new PutServerConfigResponse().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutSettingsResponse {
+    return new PutSettingsResponse().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutServerConfigResponse {
-    return new PutServerConfigResponse().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutSettingsResponse {
+    return new PutSettingsResponse().fromJsonString(jsonString, options);
   }
 
-  static equals(a: PutServerConfigResponse | PlainMessage<PutServerConfigResponse> | undefined, b: PutServerConfigResponse | PlainMessage<PutServerConfigResponse> | undefined): boolean {
-    return proto3.util.equals(PutServerConfigResponse, a, b);
+  static equals(a: PutSettingsResponse | PlainMessage<PutSettingsResponse> | undefined, b: PutSettingsResponse | PlainMessage<PutSettingsResponse> | undefined): boolean {
+    return proto3.util.equals(PutSettingsResponse, a, b);
   }
 }
 

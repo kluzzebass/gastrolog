@@ -14,6 +14,17 @@ import (
 	"github.com/google/uuid"
 )
 
+// serverSettings holds the typed server-level config fields.
+type serverSettings struct {
+	auth             config.AuthConfig
+	query            config.QueryConfig
+	scheduler        config.SchedulerConfig
+	tls              config.TLSConfig
+	lookup           config.LookupConfig
+	setupDismissed   bool
+	hasServerSettings bool // true once SaveServerSettings has been called at least once
+}
+
 // Store is an in-memory ConfigStore implementation.
 type Store struct {
 	mu                sync.RWMutex
@@ -22,7 +33,7 @@ type Store struct {
 	retentionPolicies map[uuid.UUID]config.RetentionPolicyConfig
 	vaults            map[uuid.UUID]config.VaultConfig
 	ingesters         map[uuid.UUID]config.IngesterConfig
-	settings          map[string]string
+	ss                serverSettings
 	certs             map[uuid.UUID]config.CertPEM
 	users         map[uuid.UUID]config.User         // keyed by ID (UUID)
 	refreshTokens map[uuid.UUID]config.RefreshToken // keyed by token ID
@@ -39,7 +50,6 @@ func NewStore() *Store {
 		retentionPolicies: make(map[uuid.UUID]config.RetentionPolicyConfig),
 		vaults:            make(map[uuid.UUID]config.VaultConfig),
 		ingesters:         make(map[uuid.UUID]config.IngesterConfig),
-		settings:          make(map[string]string),
 		certs:             make(map[uuid.UUID]config.CertPEM),
 		users:         make(map[uuid.UUID]config.User),
 		refreshTokens: make(map[uuid.UUID]config.RefreshToken),
@@ -53,7 +63,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	if len(s.filters) == 0 && len(s.rotationPolicies) == 0 && len(s.retentionPolicies) == 0 && len(s.vaults) == 0 && len(s.ingesters) == 0 && len(s.settings) == 0 {
+	if len(s.filters) == 0 && len(s.rotationPolicies) == 0 && len(s.retentionPolicies) == 0 && len(s.vaults) == 0 && len(s.ingesters) == 0 && !s.ss.hasServerSettings {
 		return nil, nil
 	}
 
@@ -94,11 +104,6 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 		}
 	}
 
-	if len(s.settings) > 0 {
-		cfg.Settings = make(map[string]string, len(s.settings))
-		maps.Copy(cfg.Settings, s.settings)
-	}
-
 	if len(s.certs) > 0 {
 		cfg.Certs = make([]config.CertPEM, 0, len(s.certs))
 		for _, cert := range s.certs {
@@ -111,6 +116,16 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 		for _, n := range s.nodes {
 			cfg.Nodes = append(cfg.Nodes, n)
 		}
+	}
+
+	// Populate server settings on Config.
+	if s.ss.hasServerSettings {
+		cfg.Auth = s.ss.auth
+		cfg.Query = s.ss.query
+		cfg.Scheduler = s.ss.scheduler
+		cfg.TLS = s.ss.tls
+		cfg.Lookup = s.ss.lookup
+		cfg.SetupWizardDismissed = s.ss.setupDismissed
 	}
 
 	return cfg, nil
@@ -321,32 +336,28 @@ func (s *Store) DeleteIngester(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// Settings
+// Server settings
 
-func (s *Store) GetSetting(ctx context.Context, key string) (*string, error) {
+func (s *Store) LoadServerSettings(ctx context.Context) (config.AuthConfig, config.QueryConfig, config.SchedulerConfig, config.TLSConfig, config.LookupConfig, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	v, ok := s.settings[key]
-	if !ok {
-		return nil, nil
+	return s.ss.auth, s.ss.query, s.ss.scheduler, s.ss.tls, s.ss.lookup, s.ss.setupDismissed, nil
+}
+
+func (s *Store) SaveServerSettings(ctx context.Context, auth config.AuthConfig, query config.QueryConfig, sched config.SchedulerConfig, tls config.TLSConfig, lookup config.LookupConfig, setupDismissed bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.ss = serverSettings{
+		auth:              auth,
+		query:             query,
+		scheduler:         sched,
+		tls:               tls,
+		lookup:            lookup,
+		setupDismissed:    setupDismissed,
+		hasServerSettings: true,
 	}
-	return &v, nil
-}
-
-func (s *Store) PutSetting(ctx context.Context, key string, value string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.settings[key] = value
-	return nil
-}
-
-func (s *Store) DeleteSetting(ctx context.Context, key string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	delete(s.settings, key)
 	return nil
 }
 

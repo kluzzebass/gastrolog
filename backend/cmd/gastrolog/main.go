@@ -10,7 +10,6 @@ package main
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -287,15 +286,11 @@ func ensureConfig(ctx context.Context, logger *slog.Logger, cfgStore config.Stor
 }
 
 func loadMaxConcurrentJobs(ctx context.Context, cfgStore config.Store) int {
-	raw, err := cfgStore.GetSetting(ctx, "server")
-	if err != nil || raw == nil {
+	_, _, sched, _, _, _, err := cfgStore.LoadServerSettings(ctx)
+	if err != nil {
 		return 0
 	}
-	var sc config.ServerConfig
-	if err := json.Unmarshal([]byte(*raw), &sc); err != nil {
-		return 0
-	}
-	return sc.Scheduler.MaxConcurrentJobs
+	return sched.MaxConcurrentJobs
 }
 
 func buildAuthTokens(ctx context.Context, logger *slog.Logger, cfgStore config.Store, noAuth bool) (*auth.TokenService, error) {
@@ -320,11 +315,11 @@ func loadCertManager(ctx context.Context, logger *slog.Logger, cfgStore config.S
 	for _, c := range certList {
 		certs[c.ID.String()] = cert.CertSource{CertPEM: c.CertPEM, KeyPEM: c.KeyPEM, CertFile: c.CertFile, KeyFile: c.KeyFile}
 	}
-	sc, err := config.LoadServerConfig(ctx, cfgStore)
+	_, _, _, tlsCfg, _, _, err := cfgStore.LoadServerSettings(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("load server config for TLS: %w", err)
+		return nil, fmt.Errorf("load server settings for TLS: %w", err)
 	}
-	if err := certMgr.LoadFromConfig(sc.TLS.DefaultCert, certs); err != nil {
+	if err := certMgr.LoadFromConfig(tlsCfg.DefaultCert, certs); err != nil {
 		return nil, fmt.Errorf("load certs: %w", err)
 	}
 	return certMgr, nil
@@ -411,27 +406,22 @@ func resolveHome(flagValue string) (home.Dir, error) {
 
 // buildTokenService reads the server config from the config store and creates a TokenService.
 func buildTokenService(ctx context.Context, cfgStore config.Store) (*auth.TokenService, error) {
-	val, err := cfgStore.GetSetting(ctx, "server")
+	authCfg, _, _, _, _, _, err := cfgStore.LoadServerSettings(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("get server setting: %w", err)
+		return nil, fmt.Errorf("load server settings: %w", err)
 	}
-	if val == nil {
+	if authCfg.JWTSecret == "" {
 		return nil, errors.New("server config not found (bootstrap may have failed)")
 	}
 
-	var serverCfg config.ServerConfig
-	if err := json.Unmarshal([]byte(*val), &serverCfg); err != nil {
-		return nil, fmt.Errorf("parse server config: %w", err)
-	}
-
-	secret, err := base64.StdEncoding.DecodeString(serverCfg.Auth.JWTSecret)
+	secret, err := base64.StdEncoding.DecodeString(authCfg.JWTSecret)
 	if err != nil {
 		return nil, fmt.Errorf("decode JWT secret: %w", err)
 	}
 
 	duration := 168 * time.Hour // default 7 days
-	if serverCfg.Auth.TokenDuration != "" {
-		duration, err = time.ParseDuration(serverCfg.Auth.TokenDuration)
+	if authCfg.TokenDuration != "" {
+		duration, err = time.ParseDuration(authCfg.TokenDuration)
 		if err != nil {
 			return nil, fmt.Errorf("parse token duration: %w", err)
 		}

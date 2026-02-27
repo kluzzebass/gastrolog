@@ -6,6 +6,7 @@
 package command
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -346,28 +347,132 @@ func ExtractDeleteIngester(cmd *gastrologv1.DeleteIngesterCommand) (uuid.UUID, e
 }
 
 // ---------------------------------------------------------------------------
-// Settings
+// Server Settings
 // ---------------------------------------------------------------------------
 
-// NewPutSetting creates a ConfigCommand for PutSetting.
-func NewPutSetting(key, value string) *gastrologv1.ConfigCommand {
+// NewPutServerSettings creates a ConfigCommand for persisting server-level settings.
+// The settings are serialized as JSON inside a PutSettingCommand with key="server"
+// for wire/snapshot compatibility.
+func NewPutServerSettings(auth config.AuthConfig, query config.QueryConfig, sched config.SchedulerConfig, tls config.TLSConfig, lookup config.LookupConfig, setupDismissed bool) (*gastrologv1.ConfigCommand, error) {
+	blob, err := json.Marshal(serverSettingsJSON{
+		Auth:                 auth,
+		Query:                query,
+		Scheduler:            sched,
+		TLS:                  tls,
+		Lookup:               lookup,
+		SetupWizardDismissed: setupDismissed,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal server settings: %w", err)
+	}
 	return &gastrologv1.ConfigCommand{
 		Command: &gastrologv1.ConfigCommand_PutSetting{
-			PutSetting: &gastrologv1.PutSettingCommand{Key: key, Value: value},
+			PutSetting: &gastrologv1.PutSettingCommand{Key: "server", Value: string(blob)},
 		},
-	}
+	}, nil
 }
 
-// NewDeleteSetting creates a ConfigCommand for DeleteSetting.
-func NewDeleteSetting(key string) *gastrologv1.ConfigCommand {
-	return &gastrologv1.ConfigCommand{
-		Command: &gastrologv1.ConfigCommand_DeleteSetting{
-			DeleteSetting: &gastrologv1.DeleteSettingCommand{Key: key},
-		},
+// ExtractPutServerSettings parses server settings from a PutSettingCommand with key="server".
+func ExtractPutServerSettings(value string) (config.AuthConfig, config.QueryConfig, config.SchedulerConfig, config.TLSConfig, config.LookupConfig, bool, error) {
+	var ss serverSettingsJSON
+	if err := json.Unmarshal([]byte(value), &ss); err != nil {
+		return config.AuthConfig{}, config.QueryConfig{}, config.SchedulerConfig{}, config.TLSConfig{}, config.LookupConfig{}, false, fmt.Errorf("parse server settings: %w", err)
 	}
+	// Migrate flat MaxMind fields to nested MaxMindConfig if present.
+	ss.Lookup = migrateLookupConfig(ss.Lookup, value)
+	// Migrate flat password policy fields to nested PasswordPolicy if present.
+	ss.Auth = migratePasswordPolicy(ss.Auth, value)
+	return ss.Auth, ss.Query, ss.Scheduler, ss.TLS, ss.Lookup, ss.SetupWizardDismissed, nil
+}
+
+// serverSettingsJSON is the JSON shape for server settings.
+// This matches the old ServerConfig layout for backward compatibility.
+type serverSettingsJSON struct {
+	Auth                 config.AuthConfig      `json:"auth,omitzero"`
+	Query                config.QueryConfig     `json:"query,omitzero"`
+	Scheduler            config.SchedulerConfig `json:"scheduler,omitzero"`
+	TLS                  config.TLSConfig       `json:"tls,omitzero"`
+	Lookup               config.LookupConfig    `json:"lookup,omitzero"`
+	SetupWizardDismissed bool                   `json:"setup_wizard_dismissed,omitempty"`
+}
+
+// legacyLookupJSON captures the old flat MaxMind fields for migration.
+type legacyLookupJSON struct {
+	Lookup struct {
+		GeoIPDBPath         string    `json:"geoip_db_path"`
+		ASNDBPath           string    `json:"asn_db_path"`
+		MaxMindAutoDownload bool      `json:"maxmind_auto_download"`
+		MaxMindAccountID    string    `json:"maxmind_account_id"`
+		MaxMindLicenseKey   string    `json:"maxmind_license_key"`
+		MaxMindLastUpdate   time.Time `json:"maxmind_last_update"`
+	} `json:"lookup"`
+}
+
+// migrateLookupConfig checks if the JSON has old flat MaxMind fields and migrates them
+// into the nested MaxMindConfig.
+func migrateLookupConfig(lc config.LookupConfig, raw string) config.LookupConfig {
+	// If MaxMind is already populated, no migration needed.
+	if lc.MaxMind.AutoDownload || lc.MaxMind.AccountID != "" || lc.MaxMind.LicenseKey != "" || !lc.MaxMind.LastUpdate.IsZero() {
+		return lc
+	}
+	// Try to extract legacy flat fields.
+	var legacy legacyLookupJSON
+	if err := json.Unmarshal([]byte(raw), &legacy); err != nil {
+		return lc
+	}
+	ll := legacy.Lookup
+	if ll.MaxMindAutoDownload || ll.MaxMindAccountID != "" || ll.MaxMindLicenseKey != "" || !ll.MaxMindLastUpdate.IsZero() {
+		lc.MaxMind = config.MaxMindConfig{
+			AutoDownload: ll.MaxMindAutoDownload,
+			AccountID:    ll.MaxMindAccountID,
+			LicenseKey:   ll.MaxMindLicenseKey,
+			LastUpdate:   ll.MaxMindLastUpdate,
+		}
+	}
+	return lc
+}
+
+// legacyAuthJSON captures old flat password policy fields for migration.
+type legacyAuthJSON struct {
+	Auth struct {
+		MinPasswordLength     int  `json:"min_password_length"`
+		RequireMixedCase      bool `json:"require_mixed_case"`
+		RequireDigit          bool `json:"require_digit"`
+		RequireSpecial        bool `json:"require_special"`
+		MaxConsecutiveRepeats int  `json:"max_consecutive_repeats"`
+		ForbidAnimalNoise     bool `json:"forbid_animal_noise"`
+	} `json:"auth"`
+}
+
+// migratePasswordPolicy checks if the JSON has old flat password policy fields
+// on the auth object and migrates them into the nested PasswordPolicy.
+func migratePasswordPolicy(ac config.AuthConfig, raw string) config.AuthConfig {
+	// If PasswordPolicy is already populated, no migration needed.
+	pp := ac.PasswordPolicy
+	if pp.MinLength != 0 || pp.RequireMixedCase || pp.RequireDigit || pp.RequireSpecial || pp.MaxConsecutiveRepeats != 0 || pp.ForbidAnimalNoise {
+		return ac
+	}
+	// Try to extract legacy flat fields.
+	var legacy legacyAuthJSON
+	if err := json.Unmarshal([]byte(raw), &legacy); err != nil {
+		return ac
+	}
+	la := legacy.Auth
+	if la.MinPasswordLength != 0 || la.RequireMixedCase || la.RequireDigit || la.RequireSpecial || la.MaxConsecutiveRepeats != 0 || la.ForbidAnimalNoise {
+		ac.PasswordPolicy = config.PasswordPolicy{
+			MinLength:             la.MinPasswordLength,
+			RequireMixedCase:      la.RequireMixedCase,
+			RequireDigit:          la.RequireDigit,
+			RequireSpecial:        la.RequireSpecial,
+			MaxConsecutiveRepeats: la.MaxConsecutiveRepeats,
+			ForbidAnimalNoise:     la.ForbidAnimalNoise,
+		}
+	}
+	return ac
 }
 
 // ExtractPutSetting returns the key and value from a PutSettingCommand.
+// Kept for backward-compatible command dispatch.
 func ExtractPutSetting(cmd *gastrologv1.PutSettingCommand) (key, value string) {
 	return cmd.GetKey(), cmd.GetValue()
 }
@@ -698,9 +803,22 @@ func ExtractDeleteNodeConfig(cmd *gastrologv1.DeleteNodeConfigCommand) (uuid.UUI
 // ---------------------------------------------------------------------------
 
 // BuildSnapshot creates a ConfigSnapshot from the full config state.
+// Server settings (Auth, Query, etc.) are serialized as JSON in the Settings map
+// under the "server" key for wire compatibility.
 func BuildSnapshot(cfg *config.Config, users []config.User, tokens []config.RefreshToken, nodes []config.NodeConfig) *gastrologv1.ConfigSnapshot {
-	snap := &gastrologv1.ConfigSnapshot{
-		Settings: cfg.Settings,
+	snap := &gastrologv1.ConfigSnapshot{}
+
+	// Serialize server settings into the Settings map for backward compatibility.
+	blob, err := json.Marshal(serverSettingsJSON{
+		Auth:                 cfg.Auth,
+		Query:                cfg.Query,
+		Scheduler:            cfg.Scheduler,
+		TLS:                  cfg.TLS,
+		Lookup:               cfg.Lookup,
+		SetupWizardDismissed: cfg.SetupWizardDismissed,
+	})
+	if err == nil && string(blob) != "{}" {
+		snap.Settings = map[string]string{"server": string(blob)}
 	}
 
 	for _, f := range cfg.Filters {
@@ -735,9 +853,25 @@ func BuildSnapshot(cfg *config.Config, users []config.User, tokens []config.Refr
 }
 
 // RestoreSnapshot converts a ConfigSnapshot back to Go config types.
-func RestoreSnapshot(snap *gastrologv1.ConfigSnapshot) (*config.Config, []config.User, []config.RefreshToken, []config.NodeConfig, error) {
-	cfg := &config.Config{
-		Settings: nilIfEmpty(snap.GetSettings()),
+// If the snapshot's Settings map contains a "server" key, it is parsed
+// into the Config's server-level fields (Auth, Query, etc.).
+func RestoreSnapshot(snap *gastrologv1.ConfigSnapshot) (*config.Config, []config.User, []config.RefreshToken, []config.NodeConfig, error) { //nolint:gocognit // flat field mapping from snapshot proto
+	cfg := &config.Config{}
+
+	// Migrate server settings from the Settings map.
+	if settings := snap.GetSettings(); len(settings) > 0 {
+		if raw, ok := settings["server"]; ok {
+			auth, query, sched, tls, lookup, dismissed, err := ExtractPutServerSettings(raw)
+			if err != nil {
+				return nil, nil, nil, nil, fmt.Errorf("restore server settings: %w", err)
+			}
+			cfg.Auth = auth
+			cfg.Query = query
+			cfg.Scheduler = sched
+			cfg.TLS = tls
+			cfg.Lookup = lookup
+			cfg.SetupWizardDismissed = dismissed
+		}
 	}
 
 	for _, f := range snap.GetFilters() {

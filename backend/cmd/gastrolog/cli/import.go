@@ -184,9 +184,8 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 		_, _ = fmt.Fprintf(os.Stderr, "Warning: skipping user %q — cannot create without password\n", u.Username)
 	}
 
-	if doc.ServerConfig != nil {
-		req := serverConfigToRequest(doc.ServerConfig)
-		_, err := client.Config.PutServerConfig(ctx, connect.NewRequest(req))
+	if req := buildSettingsRequest(doc); req != nil {
+		_, err := client.Config.PutSettings(ctx, connect.NewRequest(req))
 		if err != nil {
 			return imported, fmt.Errorf("import server config: %w", err)
 		}
@@ -252,68 +251,134 @@ func deleteAll(ctx context.Context, client *server.Client) error {
 	return nil
 }
 
-// serverConfigToRequest converts GetServerConfigResponse fields into a PutServerConfigRequest.
-func serverConfigToRequest(sc *v1.GetServerConfigResponse) *v1.PutServerConfigRequest {
-	req := &v1.PutServerConfigRequest{}
-	if sc.TokenDuration != "" {
-		req.TokenDuration = &sc.TokenDuration
+// buildSettingsRequest converts the hierarchical export fields into a PutSettingsRequest.
+// Returns nil when no server settings are present.
+func buildSettingsRequest(doc *exportDoc) *v1.PutSettingsRequest {
+	if doc.Auth == nil && doc.Query == nil && doc.Scheduler == nil && doc.TLS == nil && doc.Lookup == nil && !doc.SetupWizardDismissed {
+		return nil
 	}
-	if sc.MinPasswordLength != 0 {
-		req.MinPasswordLength = &sc.MinPasswordLength
+	req := &v1.PutSettingsRequest{}
+	if doc.Auth != nil {
+		req.Auth = buildAuthSettings(doc.Auth)
 	}
-	if sc.MaxConcurrentJobs != 0 {
-		req.MaxConcurrentJobs = &sc.MaxConcurrentJobs
+	if doc.Query != nil {
+		req.Query = buildQuerySettings(doc.Query)
 	}
-	if sc.TlsDefaultCert != "" {
-		req.TlsDefaultCert = &sc.TlsDefaultCert
+	if doc.Scheduler != nil {
+		req.Scheduler = buildSchedulerSettings(doc.Scheduler)
 	}
-	if sc.TlsEnabled {
-		req.TlsEnabled = &sc.TlsEnabled
+	if doc.TLS != nil {
+		req.Tls = buildTLSSettings(doc.TLS)
 	}
-	if sc.HttpToHttpsRedirect {
-		req.HttpToHttpsRedirect = &sc.HttpToHttpsRedirect
+	if doc.Lookup != nil {
+		req.Lookup = buildLookupSettings(doc.Lookup)
 	}
-	if sc.RequireMixedCase {
-		req.RequireMixedCase = &sc.RequireMixedCase
-	}
-	if sc.RequireDigit {
-		req.RequireDigit = &sc.RequireDigit
-	}
-	if sc.RequireSpecial {
-		req.RequireSpecial = &sc.RequireSpecial
-	}
-	if sc.MaxConsecutiveRepeats != 0 {
-		req.MaxConsecutiveRepeats = &sc.MaxConsecutiveRepeats
-	}
-	if sc.ForbidAnimalNoise {
-		req.ForbidAnimalNoise = &sc.ForbidAnimalNoise
-	}
-	if sc.HttpsPort != "" {
-		req.HttpsPort = &sc.HttpsPort
-	}
-	if sc.MaxFollowDuration != "" {
-		req.MaxFollowDuration = &sc.MaxFollowDuration
-	}
-	if sc.QueryTimeout != "" {
-		req.QueryTimeout = &sc.QueryTimeout
-	}
-	if sc.RefreshTokenDuration != "" {
-		req.RefreshTokenDuration = &sc.RefreshTokenDuration
-	}
-	if sc.MaxResultCount != 0 {
-		req.MaxResultCount = &sc.MaxResultCount
-	}
-	if sc.SetupWizardDismissed {
-		req.SetupWizardDismissed = &sc.SetupWizardDismissed
-	}
-	if sc.GeoipDbPath != "" {
-		req.GeoipDbPath = &sc.GeoipDbPath
-	}
-	if sc.AsnDbPath != "" {
-		req.AsnDbPath = &sc.AsnDbPath
-	}
-	if sc.MaxmindAutoDownload {
-		req.MaxmindAutoDownload = &sc.MaxmindAutoDownload
+	if doc.SetupWizardDismissed {
+		req.SetupWizardDismissed = &doc.SetupWizardDismissed
 	}
 	return req
 }
+
+func buildAuthSettings(a *authExport) *v1.PutAuthSettings {
+	pa := &v1.PutAuthSettings{}
+	if a.JWTSecret != "" {
+		pa.JwtSecret = &a.JWTSecret
+	}
+	if a.TokenDuration != "" {
+		pa.TokenDuration = &a.TokenDuration
+	}
+	if a.RefreshTokenDuration != "" {
+		pa.RefreshTokenDuration = &a.RefreshTokenDuration
+	}
+	if pp := a.PasswordPolicy; pp != nil {
+		pa.PasswordPolicy = buildPasswordPolicySettings(pp)
+	}
+	return pa
+}
+
+func buildPasswordPolicySettings(pp *passwordPolicyExport) *v1.PutPasswordPolicySettings {
+	ppp := &v1.PutPasswordPolicySettings{}
+	if pp.MinLength != 0 {
+		ppp.MinLength = &pp.MinLength
+	}
+	if pp.RequireMixedCase {
+		ppp.RequireMixedCase = &pp.RequireMixedCase
+	}
+	if pp.RequireDigit {
+		ppp.RequireDigit = &pp.RequireDigit
+	}
+	if pp.RequireSpecial {
+		ppp.RequireSpecial = &pp.RequireSpecial
+	}
+	if pp.MaxConsecutiveRepeats != 0 {
+		ppp.MaxConsecutiveRepeats = &pp.MaxConsecutiveRepeats
+	}
+	if pp.ForbidAnimalNoise {
+		ppp.ForbidAnimalNoise = &pp.ForbidAnimalNoise
+	}
+	return ppp
+}
+
+func buildQuerySettings(q *queryExport) *v1.PutQuerySettings {
+	pq := &v1.PutQuerySettings{}
+	if q.Timeout != "" {
+		pq.Timeout = &q.Timeout
+	}
+	if q.MaxFollowDuration != "" {
+		pq.MaxFollowDuration = &q.MaxFollowDuration
+	}
+	if q.MaxResultCount != 0 {
+		pq.MaxResultCount = &q.MaxResultCount
+	}
+	return pq
+}
+
+func buildSchedulerSettings(s *schedulerExport) *v1.PutSchedulerSettings {
+	ps := &v1.PutSchedulerSettings{}
+	if s.MaxConcurrentJobs != 0 {
+		ps.MaxConcurrentJobs = &s.MaxConcurrentJobs
+	}
+	return ps
+}
+
+func buildTLSSettings(t *tlsExport) *v1.PutTLSSettings {
+	pt := &v1.PutTLSSettings{}
+	if t.DefaultCert != "" {
+		pt.DefaultCert = &t.DefaultCert
+	}
+	if t.TLSEnabled {
+		pt.Enabled = &t.TLSEnabled
+	}
+	if t.HTTPToHTTPSRedirect {
+		pt.HttpToHttpsRedirect = &t.HTTPToHTTPSRedirect
+	}
+	if t.HTTPSPort != "" {
+		pt.HttpsPort = &t.HTTPSPort
+	}
+	return pt
+}
+
+func buildLookupSettings(l *lookupExport) *v1.PutLookupSettings {
+	pl := &v1.PutLookupSettings{}
+	if l.GeoIPDBPath != "" {
+		pl.GeoipDbPath = &l.GeoIPDBPath
+	}
+	if l.ASNDBPath != "" {
+		pl.AsnDbPath = &l.ASNDBPath
+	}
+	if mm := l.MaxMind; mm != nil {
+		pmm := &v1.PutMaxMindSettings{}
+		if mm.AutoDownload {
+			pmm.AutoDownload = &mm.AutoDownload
+		}
+		if mm.AccountID != "" {
+			pmm.AccountId = &mm.AccountID
+		}
+		if mm.LicenseKey != "" {
+			pmm.LicenseKey = &mm.LicenseKey
+		}
+		pl.Maxmind = pmm
+	}
+	return pl
+}
+

@@ -3,7 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { SpinnerIcon } from "../icons";
 import { ConnectError } from "@connectrpc/connect";
-import { useAuthStatus, useLogin, useRegister, useServerConfig } from "../../api/hooks";
+import { useAuthStatus, useLogin, useRegister, useSettings } from "../../api/hooks";
 import { setToken } from "../../api/client";
 import { AuthFormField } from "./AuthFormField";
 import { PasswordRules } from "./PasswordRules";
@@ -57,7 +57,7 @@ export function AuthPage({ mode }: Readonly<AuthPageProps>) {
   const authStatus = useAuthStatus();
   const login = useLogin();
   const register = useRegister();
-  const { data: serverConfig } = useServerConfig();
+  const { data: settings } = useSettings();
 
   const [form, dispatch] = useReducer(authFormReducer, authFormInitial);
   const { username, password, confirmPassword, error } = form;
@@ -224,8 +224,8 @@ export function AuthPage({ mode }: Readonly<AuthPageProps>) {
                   Passwords do not match
                 </span>
               )}
-              {serverConfig && (
-                <PasswordRules password={password} config={serverConfig} dark={dark} />
+              {settings && (
+                <PasswordRules password={password} config={settings} dark={dark} />
               )}
             </>
           )}

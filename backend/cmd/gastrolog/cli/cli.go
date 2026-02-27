@@ -35,7 +35,11 @@ func NewConfigCommand() *cobra.Command {
 		newNodeCmd(),
 		newCertCmd(),
 		newUserCmd(),
-		newServerConfigCmd(),
+		newAuthCmd(),
+		newQueryCmd(),
+		newSchedulerCmd(),
+		newTLSCmd(),
+		newLookupCmd(),
 		newExportCmd(),
 		newImportCmd(),
 	)

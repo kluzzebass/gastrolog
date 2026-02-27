@@ -33,7 +33,7 @@ import {
   useCertificate,
   usePutCertificate,
   useDeleteCertificate,
-  useServerConfig,
+  useSettings,
 } from "../../api/hooks/useConfig";
 import { useToast } from "../Toast";
 import { FormField, TextInput } from "./FormField";
@@ -343,14 +343,14 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const { adding, expanded, syncedCertId, name, certPem, keyPem, certFile, keyFile, setAsDefault } = form;
 
   const { data, isLoading } = useCertificates();
-  const { data: serverConfig } = useServerConfig();
+  const { data: settings } = useSettings();
   const { data: certData } = useCertificate(expanded);
   const putCert = usePutCertificate();
   const deleteCert = useDeleteCertificate();
   const { addToast } = useToast();
 
   const certs = data?.certificates ?? [];
-  const defaultCert = serverConfig?.tlsDefaultCert ?? "";
+  const defaultCert = settings?.tls?.defaultCert ?? "";
 
   const setCertPem = (v: string) => dispatch({ type: "setCertPem", value: v });
   const setKeyPem = (v: string) => dispatch({ type: "setKeyPem", value: v });

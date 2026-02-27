@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -50,31 +49,17 @@ var animalNoises = []string{
 	"howl", "purr", "squeak", "growl", "caw", "gobble",
 }
 
-// passwordPolicy holds the password complexity rules loaded from server config.
-type passwordPolicy struct {
-	MinLength             int
-	RequireMixedCase      bool
-	RequireDigit          bool
-	RequireSpecial        bool
-	MaxConsecutiveRepeats int
-	ForbidAnimalNoise    bool
-}
-
 // loadRefreshDuration reads the refresh token duration from server config.
 // Returns 168h (7 days) as default.
 func (s *AuthServer) loadRefreshDuration(ctx context.Context) time.Duration {
-	raw, err := s.cfgStore.GetSetting(ctx, "server")
-	if err != nil || raw == nil {
+	authCfg, _, _, _, _, _, err := s.cfgStore.LoadServerSettings(ctx)
+	if err != nil {
 		return 168 * time.Hour
 	}
-	var sc config.ServerConfig
-	if err := json.Unmarshal([]byte(*raw), &sc); err != nil {
+	if authCfg.RefreshTokenDuration == "" {
 		return 168 * time.Hour
 	}
-	if sc.Auth.RefreshTokenDuration == "" {
-		return 168 * time.Hour
-	}
-	d, err := time.ParseDuration(sc.Auth.RefreshTokenDuration)
+	d, err := time.ParseDuration(authCfg.RefreshTokenDuration)
 	if err != nil {
 		return 168 * time.Hour
 	}
@@ -103,29 +88,20 @@ func (s *AuthServer) issueRefreshToken(ctx context.Context, userID uuid.UUID) (s
 }
 
 // loadPasswordPolicy reads the password policy from server config.
-func (s *AuthServer) loadPasswordPolicy(ctx context.Context) passwordPolicy {
-	p := passwordPolicy{MinLength: 8}
-	raw, err := s.cfgStore.GetSetting(ctx, "server")
-	if err != nil || raw == nil {
-		return p
+func (s *AuthServer) loadPasswordPolicy(ctx context.Context) config.PasswordPolicy {
+	authCfg, _, _, _, _, _, err := s.cfgStore.LoadServerSettings(ctx)
+	if err != nil {
+		return config.PasswordPolicy{MinLength: 8}
 	}
-	var sc config.ServerConfig
-	if err := json.Unmarshal([]byte(*raw), &sc); err != nil {
-		return p
+	p := authCfg.PasswordPolicy
+	if p.MinLength <= 0 {
+		p.MinLength = 8
 	}
-	if sc.Auth.MinPasswordLength > 0 {
-		p.MinLength = sc.Auth.MinPasswordLength
-	}
-	p.RequireMixedCase = sc.Auth.RequireMixedCase
-	p.RequireDigit = sc.Auth.RequireDigit
-	p.RequireSpecial = sc.Auth.RequireSpecial
-	p.MaxConsecutiveRepeats = sc.Auth.MaxConsecutiveRepeats
-	p.ForbidAnimalNoise = sc.Auth.ForbidAnimalNoise
 	return p
 }
 
 // validatePassword checks a password against the policy and returns a descriptive error.
-func validatePassword(pw string, p passwordPolicy) error {
+func validatePassword(pw string, p config.PasswordPolicy) error {
 	if utf8.RuneCountInString(pw) < p.MinLength {
 		return fmt.Errorf("password must be at least %d characters", p.MinLength)
 	}

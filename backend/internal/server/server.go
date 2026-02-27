@@ -275,21 +275,21 @@ func (s *Server) loadQueryConfig() (queryTimeout, maxFollowDuration time.Duratio
 	if s.cfgStore == nil {
 		return 0, 0, 0
 	}
-	sc, err := config.LoadServerConfig(context.Background(), s.cfgStore)
+	_, queryCfg, _, _, _, _, err := s.cfgStore.LoadServerSettings(context.Background())
 	if err != nil {
 		return 0, 0, 0
 	}
-	if sc.Query.Timeout != "" {
-		if d, err := time.ParseDuration(sc.Query.Timeout); err == nil {
+	if queryCfg.Timeout != "" {
+		if d, err := time.ParseDuration(queryCfg.Timeout); err == nil {
 			queryTimeout = d
 		}
 	}
-	if sc.Query.MaxFollowDuration != "" {
-		if d, err := time.ParseDuration(sc.Query.MaxFollowDuration); err == nil {
+	if queryCfg.MaxFollowDuration != "" {
+		if d, err := time.ParseDuration(queryCfg.MaxFollowDuration); err == nil {
 			maxFollowDuration = d
 		}
 	}
-	maxResultCount = int64(sc.Query.MaxResultCount)
+	maxResultCount = int64(queryCfg.MaxResultCount)
 	return queryTimeout, maxFollowDuration, maxResultCount
 }
 
@@ -298,11 +298,11 @@ func (s *Server) loadInitialLookupConfig(geoipTable *lookup.GeoIP, asnTable *loo
 	if s.cfgStore == nil {
 		return
 	}
-	sc, err := config.LoadServerConfig(context.Background(), s.cfgStore)
+	_, _, _, _, lookupCfg, _, err := s.cfgStore.LoadServerSettings(context.Background())
 	if err != nil {
 		return
 	}
-	s.applyLookupConfig(sc.Lookup, geoipTable, asnTable)
+	s.applyLookupConfig(lookupCfg, geoipTable, asnTable)
 }
 
 // effectiveLookupPaths resolves the actual MMDB paths to use.
@@ -311,7 +311,7 @@ func (s *Server) effectiveLookupPaths(cfg config.LookupConfig) (geoip, asn strin
 	geoip = cfg.GeoIPDBPath
 	asn = cfg.ASNDBPath
 
-	if s.homeDir == "" || !cfg.MaxMindAutoDownload {
+	if s.homeDir == "" || !cfg.MaxMind.AutoDownload {
 		return geoip, asn
 	}
 
@@ -364,8 +364,8 @@ func (s *Server) manageMaxMindJob(cfg config.LookupConfig, geoipTable *lookup.Ge
 		return
 	}
 
-	hasCredentials := cfg.MaxMindAccountID != "" && cfg.MaxMindLicenseKey != ""
-	if !cfg.MaxMindAutoDownload || !hasCredentials || s.homeDir == "" {
+	hasCredentials := cfg.MaxMind.AccountID != "" && cfg.MaxMind.LicenseKey != ""
+	if !cfg.MaxMind.AutoDownload || !hasCredentials || s.homeDir == "" {
 		scheduler.RemoveJob("maxmind-update")
 		return
 	}
@@ -394,13 +394,13 @@ func (s *Server) manageMaxMindJob(cfg config.LookupConfig, geoipTable *lookup.Ge
 func (s *Server) runMaxMindUpdate(geoipTable *lookup.GeoIP, asnTable *lookup.ASN) {
 	ctx := context.Background()
 
-	sc, err := config.LoadServerConfig(ctx, s.cfgStore)
+	authCfg, queryCfg, schedCfg, tlsCfg, lookupCfg, dismissed, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
 		s.logger.Warn("maxmind update: load config failed", "error", err)
 		return
 	}
 
-	if !sc.Lookup.MaxMindAutoDownload || sc.Lookup.MaxMindAccountID == "" || sc.Lookup.MaxMindLicenseKey == "" {
+	if !lookupCfg.MaxMind.AutoDownload || lookupCfg.MaxMind.AccountID == "" || lookupCfg.MaxMind.LicenseKey == "" {
 		return
 	}
 
@@ -412,7 +412,7 @@ func (s *Server) runMaxMindUpdate(geoipTable *lookup.GeoIP, asnTable *lookup.ASN
 
 	var anySuccess bool
 	for _, edition := range []string{"GeoLite2-City", "GeoLite2-ASN"} {
-		if err := lookup.DownloadDB(ctx, sc.Lookup.MaxMindAccountID, sc.Lookup.MaxMindLicenseKey, edition, lookupDir); err != nil {
+		if err := lookup.DownloadDB(ctx, lookupCfg.MaxMind.AccountID, lookupCfg.MaxMind.LicenseKey, edition, lookupDir); err != nil {
 			s.logger.Warn("maxmind update: download failed", "edition", edition, "error", err)
 		} else {
 			s.logger.Info("maxmind update: downloaded", "edition", edition)
@@ -425,14 +425,14 @@ func (s *Server) runMaxMindUpdate(geoipTable *lookup.GeoIP, asnTable *lookup.ASN
 	}
 
 	// Reload databases from effective paths.
-	sc, _ = config.LoadServerConfig(ctx, s.cfgStore)
-	geoipPath, asnPath := s.effectiveLookupPaths(sc.Lookup)
+	_, _, _, _, lookupCfg, _, _ = s.cfgStore.LoadServerSettings(ctx)
+	geoipPath, asnPath := s.effectiveLookupPaths(lookupCfg)
 	s.reloadGeoIP(geoipPath, geoipTable)
 	s.reloadASN(asnPath, asnTable)
 
 	// Update the last-update timestamp.
-	sc.Lookup.MaxMindLastUpdate = time.Now()
-	if err := config.SaveServerConfig(ctx, s.cfgStore, sc); err != nil {
+	lookupCfg.MaxMind.LastUpdate = time.Now()
+	if err := s.cfgStore.SaveServerSettings(ctx, authCfg, queryCfg, schedCfg, tlsCfg, lookupCfg, dismissed); err != nil {
 		s.logger.Warn("maxmind update: save timestamp failed", "error", err)
 	}
 }
@@ -540,14 +540,14 @@ func (s *Server) redirectMiddleware(next http.Handler) http.Handler {
 // reconfigureTLS starts/stops HTTPS listener based on config. Safe to call from any goroutine.
 func (s *Server) reconfigureTLS() {
 	ctx := context.Background()
-	sc, err := config.LoadServerConfig(ctx, s.cfgStore)
+	_, _, _, tlsCfg, _, _, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
 		s.logger.Warn("reconfigure TLS: load config failed", "error", err)
 		return
 	}
 	// Fall back to HTTP if no default cert or TLS disabled
-	tlsEnabled := sc.TLS.TLSEnabled && sc.TLS.DefaultCert != ""
-	redirectEnabled := sc.TLS.HTTPToHTTPSRedirect && tlsEnabled
+	tlsEnabled := tlsCfg.TLSEnabled && tlsCfg.DefaultCert != ""
+	redirectEnabled := tlsCfg.HTTPToHTTPSRedirect && tlsEnabled
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -566,7 +566,7 @@ func (s *Server) reconfigureTLS() {
 	}
 
 	// HTTPS port: use configured value, or derive from HTTP listener port + 1
-	httpsPort := sc.TLS.HTTPSPort
+	httpsPort := tlsCfg.HTTPSPort
 	if httpsPort == "" {
 		httpsPort = s.deriveHTTPSPort()
 	}

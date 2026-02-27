@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -105,22 +104,16 @@ func Bootstrap(ctx context.Context, store Store) error {
 	if _, err := rand.Read(secret); err != nil {
 		return fmt.Errorf("generate JWT secret: %w", err)
 	}
-	serverCfg := ServerConfig{
-		Auth: AuthConfig{
-			JWTSecret:            base64.StdEncoding.EncodeToString(secret),
-			TokenDuration:        "15m",
-			RefreshTokenDuration: "168h", // 7 days
-		},
-		Query: QueryConfig{
-			Timeout:           "30s",
-			MaxFollowDuration: "4h",
-		},
+	authCfg := AuthConfig{
+		JWTSecret:            base64.StdEncoding.EncodeToString(secret),
+		TokenDuration:        "15m",
+		RefreshTokenDuration: "168h", // 7 days
 	}
-	serverJSON, err := json.Marshal(serverCfg)
-	if err != nil {
-		return fmt.Errorf("marshal server config: %w", err)
+	queryCfg := QueryConfig{
+		Timeout:           "30s",
+		MaxFollowDuration: "4h",
 	}
-	if err := store.PutSetting(ctx, "server", string(serverJSON)); err != nil {
+	if err := store.SaveServerSettings(ctx, authCfg, queryCfg, SchedulerConfig{}, TLSConfig{}, LookupConfig{}, false); err != nil {
 		return err
 	}
 
@@ -135,23 +128,14 @@ func BootstrapMinimal(ctx context.Context, store Store) error {
 	if _, err := rand.Read(secret); err != nil {
 		return fmt.Errorf("generate JWT secret: %w", err)
 	}
-	serverCfg := ServerConfig{
-		Auth: AuthConfig{
-			JWTSecret:            base64.StdEncoding.EncodeToString(secret),
-			TokenDuration:        "15m",
-			RefreshTokenDuration: "168h", // 7 days
-		},
-		Query: QueryConfig{
-			Timeout:           "30s",
-			MaxFollowDuration: "4h",
-		},
+	authCfg := AuthConfig{
+		JWTSecret:            base64.StdEncoding.EncodeToString(secret),
+		TokenDuration:        "15m",
+		RefreshTokenDuration: "168h", // 7 days
 	}
-	serverJSON, err := json.Marshal(serverCfg)
-	if err != nil {
-		return fmt.Errorf("marshal server config: %w", err)
+	queryCfg := QueryConfig{
+		Timeout:           "30s",
+		MaxFollowDuration: "4h",
 	}
-	if err := store.PutSetting(ctx, "server", string(serverJSON)); err != nil {
-		return err
-	}
-	return nil
+	return store.SaveServerSettings(ctx, authCfg, queryCfg, SchedulerConfig{}, TLSConfig{}, LookupConfig{}, false)
 }

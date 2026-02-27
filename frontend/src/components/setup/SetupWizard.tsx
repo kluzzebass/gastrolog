@@ -4,7 +4,7 @@ import { useThemeSync } from "../../hooks/useThemeSync";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
 import { configClient } from "../../api/client";
-import { usePutServerConfig, useGenerateName } from "../../api/hooks/useConfig";
+import { usePutSettings, useGenerateName } from "../../api/hooks/useConfig";
 import { useQueryClient } from "@tanstack/react-query";
 import { PrimaryButton, GhostButton } from "../settings/Buttons";
 import { WelcomeStep } from "./WelcomeStep";
@@ -65,7 +65,7 @@ export function SetupWizard() {
   const navigate = useNavigate();
   const { addToast } = useToast();
   const queryClient = useQueryClient();
-  const putServerConfig = usePutServerConfig();
+  const putSettings = usePutSettings();
 
   const [step, setStep] = useState(0);
   const [creating, setCreating] = useState(false);
@@ -208,12 +208,12 @@ export function SetupWizard() {
         },
       });
 
-      await putServerConfig.mutateAsync({ setupWizardDismissed: true });
+      await putSettings.mutateAsync({ setupWizardDismissed: true });
       // refetchType: "all" forces a refetch even for inactive queries (no
       // subscribers on /setup).  Without this the cache keeps stale data and
       // SearchView's redirect fires before the queries can refetch.
       await queryClient.invalidateQueries({ queryKey: ["config"], refetchType: "all" });
-      await queryClient.invalidateQueries({ queryKey: ["serverConfig"], refetchType: "all" });
+      await queryClient.invalidateQueries({ queryKey: ["settings"], refetchType: "all" });
       addToast("Configuration created successfully!", "info");
       navigate({ to: "/search", search: { q: "", help: undefined, settings: undefined, inspector: undefined } });
     } catch (err) {
@@ -335,8 +335,8 @@ export function SetupWizard() {
             )}
             <GhostButton
               onClick={async () => {
-                await putServerConfig.mutateAsync({ setupWizardDismissed: true });
-                await queryClient.invalidateQueries({ queryKey: ["serverConfig"], refetchType: "all" });
+                await putSettings.mutateAsync({ setupWizardDismissed: true });
+                await queryClient.invalidateQueries({ queryKey: ["settings"], refetchType: "all" });
                 navigate({ to: "/search", search: { q: "", help: undefined, settings: undefined, inspector: undefined } });
               }}
               dark={dark}

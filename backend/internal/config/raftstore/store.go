@@ -107,8 +107,8 @@ func (s *Store) ListIngesters(ctx context.Context) ([]config.IngesterConfig, err
 	return s.fsm.Store().ListIngesters(ctx)
 }
 
-func (s *Store) GetSetting(ctx context.Context, key string) (*string, error) {
-	return s.fsm.Store().GetSetting(ctx, key)
+func (s *Store) LoadServerSettings(ctx context.Context) (config.AuthConfig, config.QueryConfig, config.SchedulerConfig, config.TLSConfig, config.LookupConfig, bool, error) {
+	return s.fsm.Store().LoadServerSettings(ctx)
 }
 
 func (s *Store) GetNode(ctx context.Context, id uuid.UUID) (*config.NodeConfig, error) {
@@ -199,12 +199,12 @@ func (s *Store) DeleteIngester(ctx context.Context, id uuid.UUID) error {
 	return s.apply(command.NewDeleteIngester(id))
 }
 
-func (s *Store) PutSetting(ctx context.Context, key string, value string) error {
-	return s.apply(command.NewPutSetting(key, value))
-}
-
-func (s *Store) DeleteSetting(ctx context.Context, key string) error {
-	return s.apply(command.NewDeleteSetting(key))
+func (s *Store) SaveServerSettings(ctx context.Context, auth config.AuthConfig, query config.QueryConfig, sched config.SchedulerConfig, tls config.TLSConfig, lookup config.LookupConfig, setupDismissed bool) error {
+	cmd, err := command.NewPutServerSettings(auth, query, sched, tls, lookup, setupDismissed)
+	if err != nil {
+		return err
+	}
+	return s.apply(cmd)
 }
 
 func (s *Store) PutNode(ctx context.Context, node config.NodeConfig) error {

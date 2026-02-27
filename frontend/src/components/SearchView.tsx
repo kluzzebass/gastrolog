@@ -62,7 +62,7 @@ import { HelpDialog } from "./HelpDialog";
 import { HelpProvider } from "../hooks/useHelp";
 import { ResultsToolbar } from "./ResultsToolbar";
 import { QueryBar } from "./QueryBar";
-import { useConfig, useServerConfig } from "../api/hooks/useConfig";
+import { useConfig, useSettings } from "../api/hooks/useConfig";
 import { useSyntax } from "../api/hooks/useSyntax";
 import { useValidation } from "../hooks/useValidation";
 import { usePipelineFields } from "../hooks/usePipelineFields";
@@ -120,12 +120,12 @@ export function SearchView() {
 
   // Redirect to setup wizard if no vaults are configured and wizard hasn't been dismissed.
   const config = useConfig();
-  const serverConfig = useServerConfig();
+  const settings = useSettings();
   useEffect(() => {
-    if (config.data && serverConfig.data && config.data.vaults.length === 0 && !serverConfig.data.setupWizardDismissed) {
+    if (config.data && settings.data && config.data.vaults.length === 0 && !settings.data.setupWizardDismissed) {
       navigate({ to: "/setup" } as any);
     }
-  }, [config.data, serverConfig.data]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [config.data, settings.data]); // eslint-disable-line react-hooks/exhaustive-deps
   const [draft, setDraft] = useState(q);
   const deferredDraft = useDeferredValue(draft);
   const cursorRef = useRef(0);

@@ -15,7 +15,6 @@ package config
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"gastrolog/internal/chunk"
@@ -26,6 +25,10 @@ import (
 	"github.com/go-co-op/gocron/v2"
 	"github.com/google/uuid"
 )
+
+// ---------------------------------------------------------------------------
+// Store interface
+// ---------------------------------------------------------------------------
 
 // Store persists and loads system configuration with granular CRUD operations.
 //
@@ -73,11 +76,9 @@ type Store interface {
 	PutIngester(ctx context.Context, cfg IngesterConfig) error
 	DeleteIngester(ctx context.Context, id uuid.UUID) error
 
-	// Settings (server-level key-value configuration)
-	// Values are opaque JSON text; the Store does not interpret them.
-	GetSetting(ctx context.Context, key string) (*string, error)
-	PutSetting(ctx context.Context, key string, value string) error
-	DeleteSetting(ctx context.Context, key string) error
+	// Server settings — typed access to Auth, Query, Scheduler, TLS, Lookup, SetupWizardDismissed.
+	LoadServerSettings(ctx context.Context) (AuthConfig, QueryConfig, SchedulerConfig, TLSConfig, LookupConfig, bool, error)
+	SaveServerSettings(ctx context.Context, auth AuthConfig, query QueryConfig, sched SchedulerConfig, tls TLSConfig, lookup LookupConfig, setupDismissed bool) error
 
 	// Nodes (cluster node identity)
 	GetNode(ctx context.Context, id uuid.UUID) (*NodeConfig, error)
@@ -85,7 +86,7 @@ type Store interface {
 	PutNode(ctx context.Context, node NodeConfig) error
 	DeleteNode(ctx context.Context, id uuid.UUID) error
 
-	// Certificates (dedicated storage, not in Settings KV)
+	// Certificates
 	ListCertificates(ctx context.Context) ([]CertPEM, error)
 	GetCertificate(ctx context.Context, id uuid.UUID) (*CertPEM, error)
 	PutCertificate(ctx context.Context, cert CertPEM) error
@@ -113,38 +114,67 @@ type Store interface {
 	DeleteUserRefreshTokens(ctx context.Context, userID uuid.UUID) error
 }
 
+// LoadServerSettings reads the server-level settings from the store.
+// Returns zero values if no settings exist.
+func LoadServerSettings(ctx context.Context, store Store) (AuthConfig, QueryConfig, SchedulerConfig, TLSConfig, LookupConfig, bool, error) {
+	return store.LoadServerSettings(ctx)
+}
+
+// SaveServerSettings persists the server-level settings to the store.
+func SaveServerSettings(ctx context.Context, store Store, auth AuthConfig, query QueryConfig, sched SchedulerConfig, tls TLSConfig, lookup LookupConfig, setupDismissed bool) error {
+	return store.SaveServerSettings(ctx, auth, query, sched, tls, lookup, setupDismissed)
+}
+
+// ---------------------------------------------------------------------------
+// Config — top-level configuration tree
+// ---------------------------------------------------------------------------
+
 // Config describes the desired system shape.
 // It is declarative: it defines what should exist, not how to create it.
+//
+// Server-level settings (Auth, Query, Scheduler, TLS, Lookup, SetupWizardDismissed)
+// live directly on Config rather than in a separate wrapper.
+// The Store interface provides typed Load/SaveServerSettings methods for
+// persisting these fields independently of entity CRUD.
 type Config struct {
+	// Entity collections.
 	Filters           []FilterConfig          `json:"filters,omitempty"`
 	RotationPolicies  []RotationPolicyConfig  `json:"rotationPolicies,omitempty"`
 	RetentionPolicies []RetentionPolicyConfig `json:"retentionPolicies,omitempty"`
 	Ingesters         []IngesterConfig        `json:"ingesters,omitempty"`
 	Vaults            []VaultConfig           `json:"vaults,omitempty"`
-	Settings          map[string]string       `json:"settings,omitempty"`
 	Certs             []CertPEM               `json:"certs,omitempty"`
 	Nodes             []NodeConfig            `json:"nodes,omitempty"`
-}
 
-// ServerConfig holds server-level configuration, organized by concern.
-// It is serialized as JSON and stored under the "server" settings key.
-type ServerConfig struct {
-	Auth                 AuthConfig      `json:"auth"`
-	Query                QueryConfig     `json:"query"`
-	Scheduler            SchedulerConfig `json:"scheduler"`
-	TLS                  TLSConfig       `json:"tls"`
+	// Server-level settings.
+	Auth                 AuthConfig      `json:"auth,omitzero"`
+	Query                QueryConfig     `json:"query,omitzero"`
+	Scheduler            SchedulerConfig `json:"scheduler,omitzero"`
+	TLS                  TLSConfig       `json:"tls,omitzero"`
 	Lookup               LookupConfig    `json:"lookup,omitzero"`
 	SetupWizardDismissed bool            `json:"setup_wizard_dismissed,omitempty"`
 }
 
-// LookupConfig holds configuration for lookup tables (e.g. GeoIP enrichment).
-type LookupConfig struct {
-	GeoIPDBPath         string    `json:"geoip_db_path,omitempty"`          // Path to MaxMind GeoIP2/GeoLite2-City MMDB file
-	ASNDBPath           string    `json:"asn_db_path,omitempty"`            // Path to MaxMind GeoIP2/GeoLite2-ASN MMDB file
-	MaxMindAutoDownload bool      `json:"maxmind_auto_download,omitempty"`  // Enable automatic MaxMind database downloading
-	MaxMindAccountID    string    `json:"maxmind_account_id,omitempty"`     // MaxMind account ID for HTTP Basic Auth
-	MaxMindLicenseKey   string    `json:"maxmind_license_key,omitempty"`    // MaxMind license key for HTTP Basic Auth
-	MaxMindLastUpdate   time.Time `json:"maxmind_last_update,omitzero"`     // Last successful download timestamp
+// ---------------------------------------------------------------------------
+// Server-level settings types
+// ---------------------------------------------------------------------------
+
+// AuthConfig holds configuration for user authentication.
+type AuthConfig struct {
+	JWTSecret            string         `json:"jwt_secret,omitempty"` //nolint:gosec // G117: config field, not a hardcoded credential
+	TokenDuration        string         `json:"token_duration,omitempty"`          // Go duration, e.g. "168h"
+	RefreshTokenDuration string         `json:"refresh_token_duration,omitempty"` // Go duration, e.g. "168h"
+	PasswordPolicy       PasswordPolicy `json:"password_policy,omitzero"`
+}
+
+// PasswordPolicy holds password complexity rules.
+type PasswordPolicy struct {
+	MinLength             int  `json:"min_password_length,omitempty"`     // default 8
+	RequireMixedCase      bool `json:"require_mixed_case,omitempty"`      // require upper and lowercase
+	RequireDigit          bool `json:"require_digit,omitempty"`           // require at least one digit
+	RequireSpecial        bool `json:"require_special,omitempty"`         // require at least one special char
+	MaxConsecutiveRepeats int  `json:"max_consecutive_repeats,omitempty"` // 0 = no limit
+	ForbidAnimalNoise     bool `json:"forbid_animal_noise,omitempty"`     // forbid animal noises as passwords
 }
 
 // QueryConfig holds configuration for the query engine.
@@ -162,6 +192,11 @@ type QueryConfig struct {
 	MaxResultCount int `json:"max_result_count,omitempty"`
 }
 
+// SchedulerConfig holds configuration for the job scheduler.
+type SchedulerConfig struct {
+	MaxConcurrentJobs int `json:"max_concurrent_jobs,omitempty"` // default 4
+}
+
 // TLSConfig holds TLS server settings.
 // Certificate data is stored separately via the Store certificate CRUD methods.
 type TLSConfig struct {
@@ -175,61 +210,24 @@ type TLSConfig struct {
 	HTTPSPort string `json:"https_port,omitempty"`
 }
 
-// NodeConfig represents a cluster node configuration with its human-readable name.
-type NodeConfig struct {
-	ID   uuid.UUID `json:"id"`
-	Name string    `json:"name"`
+// LookupConfig holds configuration for lookup tables (e.g. GeoIP enrichment).
+type LookupConfig struct {
+	GeoIPDBPath string        `json:"geoip_db_path,omitempty"` // Path to MaxMind GeoIP2/GeoLite2-City MMDB file
+	ASNDBPath   string        `json:"asn_db_path,omitempty"`   // Path to MaxMind GeoIP2/GeoLite2-ASN MMDB file
+	MaxMind     MaxMindConfig `json:"maxmind,omitzero"`
 }
 
-// CertPEM holds certificate content. Either stored PEM or file paths (directory monitoring).
-// When both are set, file paths take precedence and are watched for changes.
-type CertPEM struct {
-	ID       uuid.UUID `json:"id"`
-	Name     string    `json:"name"`
-	CertPEM  string    `json:"cert_pem,omitempty"`
-	KeyPEM   string    `json:"key_pem,omitempty"`
-	CertFile string    `json:"cert_file,omitempty"`
-	KeyFile  string    `json:"key_file,omitempty"`
+// MaxMindConfig holds credentials and state for automatic MaxMind database downloading.
+type MaxMindConfig struct {
+	AutoDownload bool      `json:"auto_download,omitempty"`
+	AccountID    string    `json:"account_id,omitempty"`
+	LicenseKey   string    `json:"license_key,omitempty"`
+	LastUpdate   time.Time `json:"last_update,omitzero"`
 }
 
-// SchedulerConfig holds configuration for the job scheduler.
-type SchedulerConfig struct {
-	MaxConcurrentJobs int `json:"max_concurrent_jobs,omitempty"` // default 4
-}
-
-// AuthConfig holds configuration for user authentication.
-type AuthConfig struct {
-	JWTSecret             string `json:"jwt_secret,omitempty"` //nolint:gosec // G117: config field, not a hardcoded credential
-	TokenDuration         string `json:"token_duration,omitempty"`          // Go duration, e.g. "168h"
-	MinPasswordLength     int    `json:"min_password_length,omitempty"`     // default 8
-	RequireMixedCase      bool   `json:"require_mixed_case,omitempty"`      // require upper and lowercase
-	RequireDigit          bool   `json:"require_digit,omitempty"`           // require at least one digit
-	RequireSpecial        bool   `json:"require_special,omitempty"`         // require at least one special char
-	MaxConsecutiveRepeats int    `json:"max_consecutive_repeats,omitempty"` // 0 = no limit
-	ForbidAnimalNoise    bool   `json:"forbid_animal_noise,omitempty"`    // require an animal noise
-	RefreshTokenDuration string `json:"refresh_token_duration,omitempty"` // Go duration, e.g. "168h"
-}
-
-// RefreshToken represents a stored refresh token (hash only, not the opaque token itself).
-type RefreshToken struct {
-	ID        uuid.UUID `json:"id"`
-	UserID    uuid.UUID `json:"user_id"`
-	TokenHash string    `json:"token_hash"` // SHA-256 of the opaque token
-	ExpiresAt time.Time `json:"expires_at"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-// User represents a user account.
-type User struct {
-	ID                 uuid.UUID `json:"id"`
-	Username           string    `json:"username"`
-	PasswordHash       string    `json:"password_hash"`
-	Role               string    `json:"role"` // "admin" or "user"
-	Preferences        string    `json:"preferences,omitempty"`          // opaque JSON blob
-	TokenInvalidatedAt time.Time `json:"token_invalidated_at,omitzero"` // tokens issued before this are invalid
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
-}
+// ---------------------------------------------------------------------------
+// Entity config types
+// ---------------------------------------------------------------------------
 
 // FilterConfig defines a named filter expression.
 // Vaults reference filters by UUID to determine which messages they receive.
@@ -293,20 +291,44 @@ func (c RotationPolicyConfig) ValidateCron() error {
 	return nil
 }
 
-// StringPtr returns a pointer to s.
-//
-//go:fix inline
-func StringPtr(s string) *string { return new(s) }
+// ToRotationPolicy converts a RotationPolicyConfig to a chunk.RotationPolicy.
+// Returns nil if no conditions are specified.
+func (c RotationPolicyConfig) ToRotationPolicy() (chunk.RotationPolicy, error) {
+	var policies []chunk.RotationPolicy
 
-// UUIDPtr returns a pointer to id.
-//
-//go:fix inline
-func UUIDPtr(id uuid.UUID) *uuid.UUID { return new(id) }
+	if c.MaxBytes != nil {
+		bytes, err := ParseBytes(*c.MaxBytes)
+		if err != nil {
+			return nil, fmt.Errorf("invalid maxBytes: %w", err)
+		}
+		policies = append(policies, chunk.NewSizePolicy(bytes))
+	}
 
-// Int64Ptr returns a pointer to n.
-//
-//go:fix inline
-func Int64Ptr(n int64) *int64 { return new(n) }
+	if c.MaxAge != nil {
+		d, err := time.ParseDuration(*c.MaxAge)
+		if err != nil {
+			return nil, fmt.Errorf("invalid maxAge: %w", err)
+		}
+		if d <= 0 {
+			return nil, errors.New("invalid maxAge: must be positive")
+		}
+		policies = append(policies, chunk.NewAgePolicy(d, nil))
+	}
+
+	if c.MaxRecords != nil {
+		policies = append(policies, chunk.NewRecordCountPolicy(uint64(*c.MaxRecords))) //nolint:gosec // G115: maxRecords is a positive config value
+	}
+
+	if len(policies) == 0 {
+		return nil, nil
+	}
+
+	if len(policies) == 1 {
+		return policies[0], nil
+	}
+
+	return chunk.NewCompositePolicy(policies...), nil
+}
 
 // RetentionPolicyConfig defines when sealed chunks should be deleted.
 // Multiple conditions can be specified; a chunk is deleted if ANY condition is met.
@@ -372,107 +394,6 @@ func (c RetentionPolicyConfig) ToRetentionPolicy() (chunk.RetentionPolicy, error
 	return chunk.NewCompositeRetentionPolicy(policies...), nil
 }
 
-// IngesterConfig describes a ingester to instantiate.
-type IngesterConfig struct {
-	// ID is the unique identifier (UUIDv7).
-	ID uuid.UUID `json:"id"`
-
-	// Name is the human-readable display name (unique).
-	Name string `json:"name"`
-
-	// Type identifies the ingester implementation (e.g., "syslog-udp", "file").
-	Type string `json:"type"`
-
-	// Enabled controls whether the ingester is started. When false, the
-	// configuration is preserved but the ingester does not run.
-	Enabled bool `json:"enabled"`
-
-	// Params contains type-specific configuration as opaque string key-value pairs.
-	// Parsing and validation are the responsibility of the factory that consumes
-	// the params. There is no schema enforcement at the ConfigVault level.
-	Params map[string]string `json:"params,omitempty"`
-
-	// NodeID is the raft server ID of the node that owns this ingester.
-	// Empty means unscoped (legacy/migration compatibility).
-	NodeID string `json:"nodeId,omitempty"`
-}
-
-// ToRotationPolicy converts a RotationPolicyConfig to a chunk.RotationPolicy.
-// Returns nil if no conditions are specified.
-func (c RotationPolicyConfig) ToRotationPolicy() (chunk.RotationPolicy, error) {
-	var policies []chunk.RotationPolicy
-
-	if c.MaxBytes != nil {
-		bytes, err := ParseBytes(*c.MaxBytes)
-		if err != nil {
-			return nil, fmt.Errorf("invalid maxBytes: %w", err)
-		}
-		policies = append(policies, chunk.NewSizePolicy(bytes))
-	}
-
-	if c.MaxAge != nil {
-		d, err := time.ParseDuration(*c.MaxAge)
-		if err != nil {
-			return nil, fmt.Errorf("invalid maxAge: %w", err)
-		}
-		if d <= 0 {
-			return nil, errors.New("invalid maxAge: must be positive")
-		}
-		policies = append(policies, chunk.NewAgePolicy(d, nil))
-	}
-
-	if c.MaxRecords != nil {
-		policies = append(policies, chunk.NewRecordCountPolicy(uint64(*c.MaxRecords))) //nolint:gosec // G115: maxRecords is a positive config value
-	}
-
-	if len(policies) == 0 {
-		return nil, nil
-	}
-
-	if len(policies) == 1 {
-		return policies[0], nil
-	}
-
-	return chunk.NewCompositePolicy(policies...), nil
-}
-
-// ParseBytes parses a byte size string with optional suffix (B, KB, MB, GB).
-func ParseBytes(s string) (uint64, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0, errors.New("empty value")
-	}
-
-	s = strings.ToUpper(s)
-
-	var multiplier uint64 = 1
-	var numStr string
-
-	switch {
-	case strings.HasSuffix(s, "GB"):
-		multiplier = 1024 * 1024 * 1024
-		numStr = strings.TrimSuffix(s, "GB")
-	case strings.HasSuffix(s, "MB"):
-		multiplier = 1024 * 1024
-		numStr = strings.TrimSuffix(s, "MB")
-	case strings.HasSuffix(s, "KB"):
-		multiplier = 1024
-		numStr = strings.TrimSuffix(s, "KB")
-	case strings.HasSuffix(s, "B"):
-		numStr = strings.TrimSuffix(s, "B")
-	default:
-		numStr = s
-	}
-
-	numStr = strings.TrimSpace(numStr)
-	n, err := strconv.ParseUint(numStr, 10, 64)
-	if err != nil {
-		return 0, err
-	}
-
-	return n * multiplier, nil
-}
-
 // RetentionAction describes what happens when a retention policy matches chunks.
 type RetentionAction string
 
@@ -526,27 +447,125 @@ type VaultConfig struct {
 	NodeID string `json:"nodeId,omitempty"`
 }
 
-// LoadServerConfig reads and parses the ServerConfig from the "server" settings key.
-// Returns a zero-value ServerConfig if no setting exists.
-func LoadServerConfig(ctx context.Context, store Store) (ServerConfig, error) {
-	raw, err := store.GetSetting(ctx, "server")
-	if err != nil {
-		return ServerConfig{}, fmt.Errorf("get server setting: %w", err)
-	}
-	var sc ServerConfig
-	if raw != nil {
-		if err := json.Unmarshal([]byte(*raw), &sc); err != nil {
-			return ServerConfig{}, fmt.Errorf("parse server config: %w", err)
-		}
-	}
-	return sc, nil
+// IngesterConfig describes a ingester to instantiate.
+type IngesterConfig struct {
+	// ID is the unique identifier (UUIDv7).
+	ID uuid.UUID `json:"id"`
+
+	// Name is the human-readable display name (unique).
+	Name string `json:"name"`
+
+	// Type identifies the ingester implementation (e.g., "syslog-udp", "file").
+	Type string `json:"type"`
+
+	// Enabled controls whether the ingester is started. When false, the
+	// configuration is preserved but the ingester does not run.
+	Enabled bool `json:"enabled"`
+
+	// Params contains type-specific configuration as opaque string key-value pairs.
+	// Parsing and validation are the responsibility of the factory that consumes
+	// the params. There is no schema enforcement at the ConfigVault level.
+	Params map[string]string `json:"params,omitempty"`
+
+	// NodeID is the raft server ID of the node that owns this ingester.
+	// Empty means unscoped (legacy/migration compatibility).
+	NodeID string `json:"nodeId,omitempty"`
 }
 
-// SaveServerConfig marshals and writes the ServerConfig to the "server" settings key.
-func SaveServerConfig(ctx context.Context, store Store, sc ServerConfig) error {
-	data, err := json.Marshal(sc)
-	if err != nil {
-		return fmt.Errorf("marshal server config: %w", err)
-	}
-	return store.PutSetting(ctx, "server", string(data))
+// CertPEM holds certificate content. Either stored PEM or file paths (directory monitoring).
+// When both are set, file paths take precedence and are watched for changes.
+type CertPEM struct {
+	ID       uuid.UUID `json:"id"`
+	Name     string    `json:"name"`
+	CertPEM  string    `json:"cert_pem,omitempty"`
+	KeyPEM   string    `json:"key_pem,omitempty"`
+	CertFile string    `json:"cert_file,omitempty"`
+	KeyFile  string    `json:"key_file,omitempty"`
 }
+
+// NodeConfig represents a cluster node configuration with its human-readable name.
+type NodeConfig struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
+// ---------------------------------------------------------------------------
+// Identity types (users, tokens)
+// ---------------------------------------------------------------------------
+
+// User represents a user account.
+type User struct {
+	ID                 uuid.UUID `json:"id"`
+	Username           string    `json:"username"`
+	PasswordHash       string    `json:"password_hash"`
+	Role               string    `json:"role"` // "admin" or "user"
+	Preferences        string    `json:"preferences,omitempty"`          // opaque JSON blob
+	TokenInvalidatedAt time.Time `json:"token_invalidated_at,omitzero"` // tokens issued before this are invalid
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+// RefreshToken represents a stored refresh token (hash only, not the opaque token itself).
+type RefreshToken struct {
+	ID        uuid.UUID `json:"id"`
+	UserID    uuid.UUID `json:"user_id"`
+	TokenHash string    `json:"token_hash"` // SHA-256 of the opaque token
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// ---------------------------------------------------------------------------
+// Utilities
+// ---------------------------------------------------------------------------
+
+// ParseBytes parses a byte size string with optional suffix (B, KB, MB, GB).
+func ParseBytes(s string) (uint64, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, errors.New("empty value")
+	}
+
+	s = strings.ToUpper(s)
+
+	var multiplier uint64 = 1
+	var numStr string
+
+	switch {
+	case strings.HasSuffix(s, "GB"):
+		multiplier = 1024 * 1024 * 1024
+		numStr = strings.TrimSuffix(s, "GB")
+	case strings.HasSuffix(s, "MB"):
+		multiplier = 1024 * 1024
+		numStr = strings.TrimSuffix(s, "MB")
+	case strings.HasSuffix(s, "KB"):
+		multiplier = 1024
+		numStr = strings.TrimSuffix(s, "KB")
+	case strings.HasSuffix(s, "B"):
+		numStr = strings.TrimSuffix(s, "B")
+	default:
+		numStr = s
+	}
+
+	numStr = strings.TrimSpace(numStr)
+	n, err := strconv.ParseUint(numStr, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	return n * multiplier, nil
+}
+
+// StringPtr returns a pointer to s.
+//
+//go:fix inline
+func StringPtr(s string) *string { return new(s) }
+
+// UUIDPtr returns a pointer to id.
+//
+//go:fix inline
+func UUIDPtr(id uuid.UUID) *uuid.UUID { return new(id) }
+
+// Int64Ptr returns a pointer to n.
+//
+//go:fix inline
+func Int64Ptr(n int64) *int64 { return new(n) }

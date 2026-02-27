@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import {
-  useServerConfig,
-  usePutServerConfig,
+  useSettings,
+  usePutSettings,
   MAXMIND_KEEP,
 } from "../../api/hooks/useConfig";
 import type { MmdbValidation } from "../../api/gen/gastrolog/v1/config_pb";
@@ -15,8 +15,8 @@ import { ExpandableCard } from "./ExpandableCard";
 // eslint-disable-next-line sonarjs/cognitive-complexity -- inherently complex settings form with multiple expandable cards and dirty tracking
 export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
-  const { data, isLoading } = useServerConfig();
-  const putConfig = usePutServerConfig();
+  const { data, isLoading } = useSettings();
+  const putConfig = usePutSettings();
   const { addToast } = useToast();
 
   const [geoipDbPath, setGeoipDbPath] = useState("");
@@ -39,9 +39,9 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
     setExpandedCards((prev) => ({ ...prev, [key]: !prev[key] }));
 
   if (data && !initialized) {
-    setGeoipDbPath(data.geoipDbPath);
-    setAsnDbPath(data.asnDbPath);
-    setAutoDownload(data.maxmindAutoDownload);
+    setGeoipDbPath(data.lookup?.geoipDbPath ?? "");
+    setAsnDbPath(data.lookup?.asnDbPath ?? "");
+    setAutoDownload(data.lookup?.maxmind?.autoDownload ?? false);
     setAccountId("");
     setLicenseKey("");
     setInitialized(true);
@@ -50,20 +50,24 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   const dirty =
     initialized &&
     data &&
-    (geoipDbPath !== data.geoipDbPath ||
-      asnDbPath !== data.asnDbPath ||
-      autoDownload !== data.maxmindAutoDownload ||
+    (geoipDbPath !== (data.lookup?.geoipDbPath ?? "") ||
+      asnDbPath !== (data.lookup?.asnDbPath ?? "") ||
+      autoDownload !== (data.lookup?.maxmind?.autoDownload ?? false) ||
       accountId !== "" ||
       licenseKey !== "");
 
   const handleSave = async () => {
     try {
       const resp = await putConfig.mutateAsync({
-        geoipDbPath,
-        asnDbPath,
-        maxmindAutoDownload: autoDownload,
-        maxmindAccountId: accountId || undefined,
-        maxmindLicenseKey: licenseKey || MAXMIND_KEEP,
+        lookup: {
+          geoipDbPath,
+          asnDbPath,
+          maxmind: {
+            autoDownload,
+            accountId: accountId || undefined,
+            licenseKey: licenseKey || MAXMIND_KEEP,
+          },
+        },
       });
       setAccountId("");
       setLicenseKey("");
@@ -78,9 +82,9 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
 
   const handleReset = () => {
     if (data) {
-      setGeoipDbPath(data.geoipDbPath);
-      setAsnDbPath(data.asnDbPath);
-      setAutoDownload(data.maxmindAutoDownload);
+      setGeoipDbPath(data.lookup?.geoipDbPath ?? "");
+      setAsnDbPath(data.lookup?.asnDbPath ?? "");
+      setAutoDownload(data.lookup?.maxmind?.autoDownload ?? false);
       setAccountId("");
       setLicenseKey("");
     }
@@ -127,7 +131,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
             typeBadge={autoDownload ? "enabled" : undefined}
             typeBadgeAccent={true}
             status={
-              data?.maxmindLicenseConfigured ? (
+              data?.lookup?.maxmind?.licenseConfigured ? (
                 <span className="text-green-500 text-[0.8em]">&#10003;</span>
               ) : undefined
             }
@@ -166,7 +170,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
                   value={accountId}
                   onChange={setAccountId}
                   placeholder={
-                    data?.maxmindLicenseConfigured
+                    data?.lookup?.maxmind?.licenseConfigured
                       ? "(configured — leave blank to keep)"
                       : "123456"
                   }
@@ -184,7 +188,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
                   value={licenseKey}
                   onChange={setLicenseKey}
                   placeholder={
-                    data?.maxmindLicenseConfigured
+                    data?.lookup?.maxmind?.licenseConfigured
                       ? "(configured — leave blank to keep)"
                       : "Enter license key"
                   }
@@ -192,12 +196,12 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
                 />
               </FormField>
 
-              {data?.maxmindLastUpdate && (
+              {data?.lookup?.maxmind?.lastUpdate && (
                 <div
                   className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
                 >
                   Last updated:{" "}
-                  {new Date(data.maxmindLastUpdate).toLocaleString()}
+                  {new Date(data.lookup!.maxmind!.lastUpdate).toLocaleString()}
                 </div>
               )}
             </div>

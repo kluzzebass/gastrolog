@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -187,56 +186,74 @@ func (s *ConfigServer) loadConfigNodeConfigs(ctx context.Context, resp *apiv1.Ge
 	}
 }
 
-// GetServerConfig returns the server-level configuration.
-func (s *ConfigServer) GetServerConfig(
+// GetSettings returns the server-level configuration.
+func (s *ConfigServer) GetSettings(
 	ctx context.Context,
-	req *connect.Request[apiv1.GetServerConfigRequest],
-) (*connect.Response[apiv1.GetServerConfigResponse], error) {
-	resp := &apiv1.GetServerConfigResponse{}
-
-	raw, err := s.cfgStore.GetSetting(ctx, "server")
+	req *connect.Request[apiv1.GetSettingsRequest],
+) (*connect.Response[apiv1.GetSettingsResponse], error) {
+	authCfg, queryCfg, schedCfg, tlsCfg, lookupCfg, setupDismissed, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	if raw != nil {
-		var sc config.ServerConfig
-		if err := json.Unmarshal([]byte(*raw), &sc); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("parse server config: %w", err))
-		}
-		resp.TokenDuration = sc.Auth.TokenDuration
-		resp.JwtSecretConfigured = sc.Auth.JWTSecret != ""
-		resp.MinPasswordLength = int32(sc.Auth.MinPasswordLength)       //nolint:gosec // G115: small config value, always fits in int32
-		resp.MaxConcurrentJobs = int32(sc.Scheduler.MaxConcurrentJobs) //nolint:gosec // G115: small config value, always fits in int32
-		resp.TlsDefaultCert = sc.TLS.DefaultCert
-		resp.TlsEnabled = sc.TLS.TLSEnabled
-		resp.HttpToHttpsRedirect = sc.TLS.HTTPToHTTPSRedirect
-		resp.HttpsPort = sc.TLS.HTTPSPort
-		resp.RequireMixedCase = sc.Auth.RequireMixedCase
-		resp.RequireDigit = sc.Auth.RequireDigit
-		resp.RequireSpecial = sc.Auth.RequireSpecial
-		resp.MaxConsecutiveRepeats = int32(sc.Auth.MaxConsecutiveRepeats) //nolint:gosec // G115: small config value, always fits in int32
-		resp.ForbidAnimalNoise = sc.Auth.ForbidAnimalNoise
-		resp.MaxFollowDuration = sc.Query.MaxFollowDuration
-		resp.QueryTimeout = sc.Query.Timeout
-		resp.RefreshTokenDuration = sc.Auth.RefreshTokenDuration
-		resp.MaxResultCount = int32(sc.Query.MaxResultCount) //nolint:gosec // G115: small config value, always fits in int32
-		resp.SetupWizardDismissed = sc.SetupWizardDismissed
-		resp.GeoipDbPath = sc.Lookup.GeoIPDBPath
-		resp.AsnDbPath = sc.Lookup.ASNDBPath
-		resp.MaxmindAutoDownload = sc.Lookup.MaxMindAutoDownload
-		resp.MaxmindLicenseConfigured = sc.Lookup.MaxMindAccountID != "" && sc.Lookup.MaxMindLicenseKey != ""
-		if !sc.Lookup.MaxMindLastUpdate.IsZero() {
-			resp.MaxmindLastUpdate = sc.Lookup.MaxMindLastUpdate.Format(time.RFC3339)
-		}
+
+	maxJobs := int32(schedCfg.MaxConcurrentJobs) //nolint:gosec // G115: small config value, always fits in int32
+	if maxJobs == 0 {
+		maxJobs = int32(s.orch.MaxConcurrentJobs()) //nolint:gosec // G115: small config value, always fits in int32
 	}
 
-	// If no persisted value, report the live default from the orchestrator.
-	if resp.MaxConcurrentJobs == 0 {
-		resp.MaxConcurrentJobs = int32(s.orch.MaxConcurrentJobs()) //nolint:gosec // G115: small config value, always fits in int32
+	mm := &apiv1.MaxMindSettings{
+		AutoDownload:     lookupCfg.MaxMind.AutoDownload,
+		LicenseConfigured: lookupCfg.MaxMind.AccountID != "" && lookupCfg.MaxMind.LicenseKey != "",
+	}
+	if !lookupCfg.MaxMind.LastUpdate.IsZero() {
+		mm.LastUpdate = lookupCfg.MaxMind.LastUpdate.Format(time.RFC3339)
 	}
 
-	// Populate node identity.
-	resp.NodeId = s.localNodeID
+	auth := &apiv1.AuthSettings{
+		TokenDuration:        authCfg.TokenDuration,
+		JwtSecretConfigured:  authCfg.JWTSecret != "",
+		RefreshTokenDuration: authCfg.RefreshTokenDuration,
+		PasswordPolicy: &apiv1.PasswordPolicySettings{
+			MinLength:             int32(authCfg.PasswordPolicy.MinLength),             //nolint:gosec // G115
+			RequireMixedCase:      authCfg.PasswordPolicy.RequireMixedCase,
+			RequireDigit:          authCfg.PasswordPolicy.RequireDigit,
+			RequireSpecial:        authCfg.PasswordPolicy.RequireSpecial,
+			MaxConsecutiveRepeats: int32(authCfg.PasswordPolicy.MaxConsecutiveRepeats), //nolint:gosec // G115
+			ForbidAnimalNoise:     authCfg.PasswordPolicy.ForbidAnimalNoise,
+		},
+	}
+
+	if req.Msg.IncludeSecrets {
+		auth.JwtSecret = authCfg.JWTSecret
+		mm.AccountId = lookupCfg.MaxMind.AccountID
+		mm.LicenseKey = lookupCfg.MaxMind.LicenseKey
+	}
+
+	resp := &apiv1.GetSettingsResponse{
+		Auth: auth,
+		Query: &apiv1.QuerySettings{
+			Timeout:           queryCfg.Timeout,
+			MaxFollowDuration: queryCfg.MaxFollowDuration,
+			MaxResultCount:    int32(queryCfg.MaxResultCount), //nolint:gosec // G115
+		},
+		Scheduler: &apiv1.SchedulerSettings{
+			MaxConcurrentJobs: maxJobs,
+		},
+		Tls: &apiv1.TLSSettings{
+			DefaultCert:         tlsCfg.DefaultCert,
+			Enabled:             tlsCfg.TLSEnabled,
+			HttpToHttpsRedirect: tlsCfg.HTTPToHTTPSRedirect,
+			HttpsPort:           tlsCfg.HTTPSPort,
+		},
+		Lookup: &apiv1.LookupSettings{
+			GeoipDbPath: lookupCfg.GeoIPDBPath,
+			AsnDbPath:   lookupCfg.ASNDBPath,
+			Maxmind:     mm,
+		},
+		SetupWizardDismissed: setupDismissed,
+		NodeId:               s.localNodeID,
+	}
+
 	if nodeUUID, err := uuid.Parse(s.localNodeID); err == nil {
 		if node, err := s.cfgStore.GetNode(ctx, nodeUUID); err == nil && node != nil {
 			resp.NodeName = node.Name
@@ -246,30 +263,26 @@ func (s *ConfigServer) GetServerConfig(
 	return connect.NewResponse(resp), nil
 }
 
-// PutServerConfig updates the server-level configuration. Merges with existing; only
+// PutSettings updates the server-level configuration. Merges with existing; only
 // fields explicitly set in the request are updated.
-func (s *ConfigServer) PutServerConfig(
+func (s *ConfigServer) PutSettings(
 	ctx context.Context,
-	req *connect.Request[apiv1.PutServerConfigRequest],
-) (*connect.Response[apiv1.PutServerConfigResponse], error) {
-	sc, err := s.loadServerConfig(ctx)
+	req *connect.Request[apiv1.PutSettingsRequest],
+) (*connect.Response[apiv1.PutSettingsResponse], error) {
+	authCfg, queryCfg, schedCfg, tlsCfg, lookupCfg, setupDismissed, err := s.loadServerSettings(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := mergeServerConfigFields(req.Msg, &sc); err != nil {
-		return nil, err
+	if connErr := mergeSettingsFields(req.Msg, &authCfg, &queryCfg, &schedCfg, &tlsCfg, &lookupCfg, &setupDismissed); connErr != nil {
+		return nil, connErr
 	}
 
-	if err := validateTokenDurations(sc.Auth); err != nil {
-		return nil, err
+	if connErr := validateTokenDurations(authCfg); connErr != nil {
+		return nil, connErr
 	}
 
-	data, err := json.Marshal(sc)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-	if err := s.cfgStore.PutSetting(ctx, "server", string(data)); err != nil {
+	if err := s.cfgStore.SaveServerSettings(ctx, authCfg, queryCfg, schedCfg, tlsCfg, lookupCfg, setupDismissed); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: "server"})
@@ -278,20 +291,21 @@ func (s *ConfigServer) PutServerConfig(
 		s.onTLSConfigChange()
 	}
 
-	lookupChanged := req.Msg.GeoipDbPath != nil || req.Msg.AsnDbPath != nil ||
-		req.Msg.MaxmindAutoDownload != nil || req.Msg.MaxmindAccountId != nil || req.Msg.MaxmindLicenseKey != nil
+	lookupChanged := req.Msg.Lookup != nil
 	if s.onLookupConfigChange != nil && lookupChanged {
-		s.onLookupConfigChange(sc.Lookup)
+		s.onLookupConfigChange(lookupCfg)
 	}
 
-	resp := &apiv1.PutServerConfigResponse{}
+	resp := &apiv1.PutSettingsResponse{}
 
 	// Validate MMDB paths that were explicitly set in this request.
-	if req.Msg.GeoipDbPath != nil && *req.Msg.GeoipDbPath != "" {
-		resp.GeoipValidation = validateMMDBPath(*req.Msg.GeoipDbPath)
-	}
-	if req.Msg.AsnDbPath != nil && *req.Msg.AsnDbPath != "" {
-		resp.AsnValidation = validateMMDBPath(*req.Msg.AsnDbPath)
+	if l := req.Msg.Lookup; l != nil {
+		if l.GeoipDbPath != nil && *l.GeoipDbPath != "" {
+			resp.GeoipValidation = validateMMDBPath(*l.GeoipDbPath)
+		}
+		if l.AsnDbPath != nil && *l.AsnDbPath != "" {
+			resp.AsnValidation = validateMMDBPath(*l.AsnDbPath)
+		}
 	}
 
 	return connect.NewResponse(resp), nil
@@ -351,103 +365,141 @@ func (s *ConfigServer) GenerateName(
 	}), nil
 }
 
-func (s *ConfigServer) loadServerConfig(ctx context.Context) (config.ServerConfig, error) {
-	raw, err := s.cfgStore.GetSetting(ctx, "server")
+func (s *ConfigServer) loadServerSettings(ctx context.Context) (config.AuthConfig, config.QueryConfig, config.SchedulerConfig, config.TLSConfig, config.LookupConfig, bool, error) {
+	auth, query, sched, tls, lookup, dismissed, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
-		return config.ServerConfig{}, connect.NewError(connect.CodeInternal, err)
+		return auth, query, sched, tls, lookup, dismissed, connect.NewError(connect.CodeInternal, err)
 	}
-	var sc config.ServerConfig
-	if raw != nil {
-		if err := json.Unmarshal([]byte(*raw), &sc); err != nil {
-			return config.ServerConfig{}, connect.NewError(connect.CodeInternal, fmt.Errorf("parse server config: %w", err))
-		}
+	if auth.PasswordPolicy.MinLength == 0 {
+		auth.PasswordPolicy.MinLength = 8
 	}
-	if sc.Auth.MinPasswordLength == 0 {
-		sc.Auth.MinPasswordLength = 8
+	if sched.MaxConcurrentJobs == 0 {
+		sched.MaxConcurrentJobs = 4
 	}
-	if sc.Scheduler.MaxConcurrentJobs == 0 {
-		sc.Scheduler.MaxConcurrentJobs = 4
-	}
-	return sc, nil
+	return auth, query, sched, tls, lookup, dismissed, nil
 }
 
-func mergeServerConfigFields(msg *apiv1.PutServerConfigRequest, sc *config.ServerConfig) *connect.Error {
-	if msg.TokenDuration != nil {
-		sc.Auth.TokenDuration = *msg.TokenDuration
+func mergeSettingsFields(msg *apiv1.PutSettingsRequest, auth *config.AuthConfig, query *config.QueryConfig, sched *config.SchedulerConfig, tlsCfg *config.TLSConfig, lookup *config.LookupConfig, setupDismissed *bool) *connect.Error {
+	if msg.Auth != nil {
+		mergeAuth(msg.Auth, auth)
 	}
-	if msg.JwtSecret != nil {
-		sc.Auth.JWTSecret = *msg.JwtSecret
-	}
-	if msg.MinPasswordLength != nil {
-		sc.Auth.MinPasswordLength = int(*msg.MinPasswordLength)
-	}
-	if msg.MaxConcurrentJobs != nil {
-		if *msg.MaxConcurrentJobs < 1 {
-			return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("max_concurrent_jobs must be at least 1, got %d", *msg.MaxConcurrentJobs))
+	if msg.Query != nil {
+		if err := mergeQuery(msg.Query, query); err != nil {
+			return err
 		}
-		sc.Scheduler.MaxConcurrentJobs = int(*msg.MaxConcurrentJobs)
 	}
-	if msg.TlsDefaultCert != nil {
-		sc.TLS.DefaultCert = *msg.TlsDefaultCert
-	}
-	if msg.TlsEnabled != nil {
-		sc.TLS.TLSEnabled = *msg.TlsEnabled && sc.TLS.DefaultCert != ""
-	}
-	if msg.HttpToHttpsRedirect != nil {
-		sc.TLS.HTTPToHTTPSRedirect = *msg.HttpToHttpsRedirect && sc.TLS.DefaultCert != ""
-	}
-	if msg.HttpsPort != nil {
-		sc.TLS.HTTPSPort = *msg.HttpsPort
-	}
-	if msg.RequireMixedCase != nil {
-		sc.Auth.RequireMixedCase = *msg.RequireMixedCase
-	}
-	if msg.RequireDigit != nil {
-		sc.Auth.RequireDigit = *msg.RequireDigit
-	}
-	if msg.RequireSpecial != nil {
-		sc.Auth.RequireSpecial = *msg.RequireSpecial
-	}
-	if msg.MaxConsecutiveRepeats != nil {
-		sc.Auth.MaxConsecutiveRepeats = int(*msg.MaxConsecutiveRepeats)
-	}
-	if msg.ForbidAnimalNoise != nil {
-		sc.Auth.ForbidAnimalNoise = *msg.ForbidAnimalNoise
-	}
-	if msg.MaxFollowDuration != nil {
-		sc.Query.MaxFollowDuration = *msg.MaxFollowDuration
-	}
-	if msg.QueryTimeout != nil {
-		sc.Query.Timeout = *msg.QueryTimeout
-	}
-	if msg.RefreshTokenDuration != nil {
-		sc.Auth.RefreshTokenDuration = *msg.RefreshTokenDuration
-	}
-	if msg.MaxResultCount != nil {
-		if *msg.MaxResultCount < 0 {
-			return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("max_result_count must be non-negative, got %d", *msg.MaxResultCount))
+	if msg.Scheduler != nil {
+		if err := mergeScheduler(msg.Scheduler, sched); err != nil {
+			return err
 		}
-		sc.Query.MaxResultCount = int(*msg.MaxResultCount)
+	}
+	if msg.Tls != nil {
+		mergeTLS(msg.Tls, tlsCfg)
+	}
+	if msg.Lookup != nil {
+		mergeLookup(msg.Lookup, lookup)
 	}
 	if msg.SetupWizardDismissed != nil {
-		sc.SetupWizardDismissed = *msg.SetupWizardDismissed
-	}
-	if msg.GeoipDbPath != nil {
-		sc.Lookup.GeoIPDBPath = *msg.GeoipDbPath
-	}
-	if msg.AsnDbPath != nil {
-		sc.Lookup.ASNDBPath = *msg.AsnDbPath
-	}
-	if msg.MaxmindAutoDownload != nil {
-		sc.Lookup.MaxMindAutoDownload = *msg.MaxmindAutoDownload
-	}
-	if msg.MaxmindAccountId != nil {
-		sc.Lookup.MaxMindAccountID = *msg.MaxmindAccountId
-	}
-	if msg.MaxmindLicenseKey != nil {
-		sc.Lookup.MaxMindLicenseKey = *msg.MaxmindLicenseKey
+		*setupDismissed = *msg.SetupWizardDismissed
 	}
 	return nil
+}
+
+func mergeAuth(a *apiv1.PutAuthSettings, auth *config.AuthConfig) {
+	if a.TokenDuration != nil {
+		auth.TokenDuration = *a.TokenDuration
+	}
+	if a.JwtSecret != nil {
+		auth.JWTSecret = *a.JwtSecret
+	}
+	if a.RefreshTokenDuration != nil {
+		auth.RefreshTokenDuration = *a.RefreshTokenDuration
+	}
+	if a.PasswordPolicy != nil {
+		mergePasswordPolicy(a.PasswordPolicy, &auth.PasswordPolicy)
+	}
+}
+
+func mergePasswordPolicy(pp *apiv1.PutPasswordPolicySettings, pol *config.PasswordPolicy) {
+	if pp.MinLength != nil {
+		pol.MinLength = int(*pp.MinLength)
+	}
+	if pp.RequireMixedCase != nil {
+		pol.RequireMixedCase = *pp.RequireMixedCase
+	}
+	if pp.RequireDigit != nil {
+		pol.RequireDigit = *pp.RequireDigit
+	}
+	if pp.RequireSpecial != nil {
+		pol.RequireSpecial = *pp.RequireSpecial
+	}
+	if pp.MaxConsecutiveRepeats != nil {
+		pol.MaxConsecutiveRepeats = int(*pp.MaxConsecutiveRepeats)
+	}
+	if pp.ForbidAnimalNoise != nil {
+		pol.ForbidAnimalNoise = *pp.ForbidAnimalNoise
+	}
+}
+
+func mergeQuery(q *apiv1.PutQuerySettings, query *config.QueryConfig) *connect.Error {
+	if q.Timeout != nil {
+		query.Timeout = *q.Timeout
+	}
+	if q.MaxFollowDuration != nil {
+		query.MaxFollowDuration = *q.MaxFollowDuration
+	}
+	if q.MaxResultCount != nil {
+		if *q.MaxResultCount < 0 {
+			return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("max_result_count must be non-negative, got %d", *q.MaxResultCount))
+		}
+		query.MaxResultCount = int(*q.MaxResultCount)
+	}
+	return nil
+}
+
+func mergeScheduler(sc *apiv1.PutSchedulerSettings, sched *config.SchedulerConfig) *connect.Error {
+	if sc.MaxConcurrentJobs != nil {
+		if *sc.MaxConcurrentJobs < 1 {
+			return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("max_concurrent_jobs must be at least 1, got %d", *sc.MaxConcurrentJobs))
+		}
+		sched.MaxConcurrentJobs = int(*sc.MaxConcurrentJobs)
+	}
+	return nil
+}
+
+func mergeTLS(t *apiv1.PutTLSSettings, tlsCfg *config.TLSConfig) {
+	if t.DefaultCert != nil {
+		tlsCfg.DefaultCert = *t.DefaultCert
+	}
+	if t.Enabled != nil {
+		tlsCfg.TLSEnabled = *t.Enabled && tlsCfg.DefaultCert != ""
+	}
+	if t.HttpToHttpsRedirect != nil {
+		tlsCfg.HTTPToHTTPSRedirect = *t.HttpToHttpsRedirect && tlsCfg.DefaultCert != ""
+	}
+	if t.HttpsPort != nil {
+		tlsCfg.HTTPSPort = *t.HttpsPort
+	}
+}
+
+func mergeLookup(l *apiv1.PutLookupSettings, lookup *config.LookupConfig) {
+	if l.GeoipDbPath != nil {
+		lookup.GeoIPDBPath = *l.GeoipDbPath
+	}
+	if l.AsnDbPath != nil {
+		lookup.ASNDBPath = *l.AsnDbPath
+	}
+	if mm := l.Maxmind; mm != nil {
+		if mm.AutoDownload != nil {
+			lookup.MaxMind.AutoDownload = *mm.AutoDownload
+		}
+		if mm.AccountId != nil {
+			lookup.MaxMind.AccountID = *mm.AccountId
+		}
+		if mm.LicenseKey != nil {
+			lookup.MaxMind.LicenseKey = *mm.LicenseKey
+		}
+	}
 }
 
 func validateTokenDurations(auth config.AuthConfig) *connect.Error {

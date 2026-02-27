@@ -45,11 +45,11 @@ service ConfigService {
   // DeleteIngester removes an ingester.
   rpc DeleteIngester(DeleteIngesterRequest) returns (DeleteIngesterResponse);
 
-  // GetServerConfig returns the server-level configuration.
-  rpc GetServerConfig(GetServerConfigRequest) returns (GetServerConfigResponse);
+  // GetSettings returns system settings (auth, query, scheduler, TLS, lookup).
+  rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);
 
-  // PutServerConfig updates the server-level configuration.
-  rpc PutServerConfig(PutServerConfigRequest) returns (PutServerConfigResponse);
+  // PutSettings updates system settings. Only fields explicitly set are updated.
+  rpc PutSettings(PutSettingsRequest) returns (PutSettingsResponse);
 
   // GetPreferences returns the current user's preferences.
   rpc GetPreferences(GetPreferencesRequest) returns (GetPreferencesResponse);
@@ -247,63 +247,128 @@ message DeleteIngesterRequest {
 
 message DeleteIngesterResponse {}
 
-message GetServerConfigRequest {}
-
-message GetServerConfigResponse {
-  string token_duration = 1;
-  bool jwt_secret_configured = 2;  // True when a JWT secret exists; the secret itself is never returned.
-  int32 min_password_length = 3;
-  int32 max_concurrent_jobs = 4;
-  string tls_default_cert = 5;
-  bool tls_enabled = 6;
-  bool http_to_https_redirect = 7;
-  bool require_mixed_case = 8;
-  bool require_digit = 9;
-  bool require_special = 10;
-  int32 max_consecutive_repeats = 11;
-  bool forbid_animal_noise = 12;
-  string https_port = 13;  // Configured HTTPS port; empty = HTTP port + 1.
-  string max_follow_duration = 14; // Max lifetime for Follow streams (Go duration). Empty = no limit.
-  string query_timeout = 15; // Max duration for queries (Go duration). Empty = 30s default.
-  string refresh_token_duration = 16; // Lifetime of refresh tokens (Go duration). Empty = 168h default.
-  int32 max_result_count = 17; // Max records per Search request. 0 = unlimited.
-  bool setup_wizard_dismissed = 18; // True when the user has dismissed the setup wizard.
-  string geoip_db_path = 19; // Path to MaxMind MMDB file for GeoIP lookups.
-  string asn_db_path = 20; // Path to MaxMind MMDB file for ASN lookups.
-  bool maxmind_auto_download = 21; // Whether automatic MaxMind database downloading is enabled.
-  bool maxmind_license_configured = 22; // True when account_id + license_key are both set; credentials never exposed.
-  string maxmind_last_update = 23; // RFC3339 timestamp of last successful MaxMind download.
-  string node_id = 24; // Local raft server ID (UUID).
-  string node_name = 25; // Human-readable petname for this node.
+message GetSettingsRequest {
+  bool include_secrets = 1; // When true, return actual secret values (for export/backup).
 }
 
-message PutServerConfigRequest {
+// Sub-messages for GetSettingsResponse (read-only fields included).
+
+message PasswordPolicySettings {
+  int32 min_length = 1;
+  bool require_mixed_case = 2;
+  bool require_digit = 3;
+  bool require_special = 4;
+  int32 max_consecutive_repeats = 5;
+  bool forbid_animal_noise = 6;
+}
+
+message MaxMindSettings {
+  bool auto_download = 1;
+  bool license_configured = 2;   // read-only: true when account_id + license_key are both set
+  string last_update = 3;         // read-only: RFC3339 timestamp of last successful download
+  string account_id = 4;          // only populated when include_secrets
+  string license_key = 5;         // only populated when include_secrets
+}
+
+message AuthSettings {
+  string token_duration = 1;
+  bool jwt_secret_configured = 2; // read-only: true when a JWT secret exists
+  string refresh_token_duration = 3;
+  PasswordPolicySettings password_policy = 4;
+  string jwt_secret = 5;           // only populated when include_secrets
+}
+
+message QuerySettings {
+  string timeout = 1;
+  string max_follow_duration = 2;
+  int32 max_result_count = 3;
+}
+
+message SchedulerSettings {
+  int32 max_concurrent_jobs = 1;
+}
+
+message TLSSettings {
+  string default_cert = 1;
+  bool enabled = 2;
+  bool http_to_https_redirect = 3;
+  string https_port = 4;
+}
+
+message LookupSettings {
+  string geoip_db_path = 1;
+  string asn_db_path = 2;
+  MaxMindSettings maxmind = 3;
+}
+
+message GetSettingsResponse {
+  AuthSettings auth = 1;
+  QuerySettings query = 2;
+  SchedulerSettings scheduler = 3;
+  TLSSettings tls = 4;
+  LookupSettings lookup = 5;
+  bool setup_wizard_dismissed = 6;
+  string node_id = 7;
+  string node_name = 8;
+}
+
+// Sub-messages for PutSettingsRequest (optional fields for merge semantics).
+
+message PutPasswordPolicySettings {
+  optional int32 min_length = 1;
+  optional bool require_mixed_case = 2;
+  optional bool require_digit = 3;
+  optional bool require_special = 4;
+  optional int32 max_consecutive_repeats = 5;
+  optional bool forbid_animal_noise = 6;
+}
+
+message PutAuthSettings {
   optional string token_duration = 1;
   optional string jwt_secret = 2;
-  optional int32 min_password_length = 3;
-  optional int32 max_concurrent_jobs = 4;
-  optional string tls_default_cert = 5;
-  optional bool tls_enabled = 6;
-  optional bool http_to_https_redirect = 7;
-  optional bool require_mixed_case = 8;
-  optional bool require_digit = 9;
-  optional bool require_special = 10;
-  optional int32 max_consecutive_repeats = 11;
-  optional bool forbid_animal_noise = 12;
-  optional string https_port = 13;
-  optional string max_follow_duration = 14;
-  optional string query_timeout = 15;
-  optional string refresh_token_duration = 16;
-  optional int32 max_result_count = 17;
-  optional bool setup_wizard_dismissed = 18;
-  optional string geoip_db_path = 19;
-  optional string asn_db_path = 20;
-  optional bool maxmind_auto_download = 21;
-  optional string maxmind_account_id = 22;
-  optional string maxmind_license_key = 23;
+  optional string refresh_token_duration = 3;
+  PutPasswordPolicySettings password_policy = 4;
 }
 
-message PutServerConfigResponse {
+message PutQuerySettings {
+  optional string timeout = 1;
+  optional string max_follow_duration = 2;
+  optional int32 max_result_count = 3;
+}
+
+message PutSchedulerSettings {
+  optional int32 max_concurrent_jobs = 1;
+}
+
+message PutTLSSettings {
+  optional string default_cert = 1;
+  optional bool enabled = 2;
+  optional bool http_to_https_redirect = 3;
+  optional string https_port = 4;
+}
+
+message PutMaxMindSettings {
+  optional bool auto_download = 1;
+  optional string account_id = 2;
+  optional string license_key = 3;
+}
+
+message PutLookupSettings {
+  optional string geoip_db_path = 1;
+  optional string asn_db_path = 2;
+  PutMaxMindSettings maxmind = 3;
+}
+
+message PutSettingsRequest {
+  PutAuthSettings auth = 1;
+  PutQuerySettings query = 2;
+  PutSchedulerSettings scheduler = 3;
+  PutTLSSettings tls = 4;
+  PutLookupSettings lookup = 5;
+  optional bool setup_wizard_dismissed = 6;
+}
+
+message PutSettingsResponse {
   MmdbValidation geoip_validation = 1; // Populated when geoip_db_path was set.
   MmdbValidation asn_validation = 2;   // Populated when asn_db_path was set.
 }

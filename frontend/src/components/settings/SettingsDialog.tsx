@@ -23,8 +23,8 @@ import { RetentionPoliciesSettings } from "./RetentionPoliciesSettings";
 import { UsersSettings } from "./UsersSettings";
 import { LookupsSettings } from "./LookupsSettings";
 import {
-  useServerConfig,
-  usePutServerConfig,
+  useSettings,
+  usePutSettings,
   usePutNodeConfig,
   useCertificates,
   JWT_KEEP,
@@ -164,9 +164,9 @@ export function SettingsDialog({
 // eslint-disable-next-line sonarjs/cognitive-complexity -- inherently complex settings form with many fields, cards, and dirty tracking
 function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: boolean }>) {
   const c = useThemeClass(dark);
-  const { data, isLoading } = useServerConfig();
+  const { data, isLoading } = useSettings();
   const { data: certData } = useCertificates();
-  const putConfig = usePutServerConfig();
+  const putConfig = usePutSettings();
   const putNodeConfig = usePutNodeConfig();
   const { addToast } = useToast();
 
@@ -196,25 +196,28 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
   const _certDisplayName = (id: string) => certs.find((c) => c.id === id)?.name || id;
 
   if (data && !initialized) {
-    setTokenDuration(data.tokenDuration);
-    setJwtSecret(data.jwtSecretConfigured ? JWT_KEEP : "");
-    setMinPwLen(
-      data.minPasswordLength ? String(data.minPasswordLength) : "8",
-    );
-    setMaxJobs(data.maxConcurrentJobs ? String(data.maxConcurrentJobs) : "4");
-    setTlsDefaultCert(data.tlsDefaultCert);
-    setTlsEnabled(data.tlsEnabled);
-    setHttpToHttpsRedirect(data.httpToHttpsRedirect);
-    setHttpsPort(data.httpsPort);
-    setRequireMixedCase(data.requireMixedCase);
-    setRequireDigit(data.requireDigit);
-    setRequireSpecial(data.requireSpecial);
-    setMaxConsecutiveRepeats(data.maxConsecutiveRepeats ? String(data.maxConsecutiveRepeats) : "0");
-    setForbidAnimalNoise(data.forbidAnimalNoise);
-    setRefreshTokenDuration(data.refreshTokenDuration);
-    setMaxFollowDuration(data.maxFollowDuration);
-    setQueryTimeout(data.queryTimeout);
-    setMaxResultCount(data.maxResultCount ? String(data.maxResultCount) : "10000");
+    const auth = data.auth;
+    const pp = auth?.passwordPolicy;
+    const query = data.query;
+    const sched = data.scheduler;
+    const tls = data.tls;
+    setTokenDuration(auth?.tokenDuration ?? "");
+    setJwtSecret(auth?.jwtSecretConfigured ? JWT_KEEP : "");
+    setMinPwLen(pp?.minLength ? String(pp.minLength) : "8");
+    setMaxJobs(sched?.maxConcurrentJobs ? String(sched.maxConcurrentJobs) : "4");
+    setTlsDefaultCert(tls?.defaultCert ?? "");
+    setTlsEnabled(tls?.enabled ?? false);
+    setHttpToHttpsRedirect(tls?.httpToHttpsRedirect ?? false);
+    setHttpsPort(tls?.httpsPort ?? "");
+    setRequireMixedCase(pp?.requireMixedCase ?? false);
+    setRequireDigit(pp?.requireDigit ?? false);
+    setRequireSpecial(pp?.requireSpecial ?? false);
+    setMaxConsecutiveRepeats(pp?.maxConsecutiveRepeats ? String(pp.maxConsecutiveRepeats) : "0");
+    setForbidAnimalNoise(pp?.forbidAnimalNoise ?? false);
+    setRefreshTokenDuration(auth?.refreshTokenDuration ?? "");
+    setMaxFollowDuration(query?.maxFollowDuration ?? "");
+    setQueryTimeout(query?.timeout ?? "");
+    setMaxResultCount(query?.maxResultCount ? String(query.maxResultCount) : "10000");
     setNodeName(data.nodeName);
     setInitialized(true);
   }
@@ -222,23 +225,23 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
   const dirty =
     initialized &&
     data &&
-    (tokenDuration !== data.tokenDuration ||
+    (tokenDuration !== (data.auth?.tokenDuration ?? "") ||
       (jwtSecret !== JWT_KEEP && jwtSecret !== "") ||
-      minPwLen !== String(data.minPasswordLength || 8) ||
-      maxJobs !== String(data.maxConcurrentJobs || 4) ||
-      tlsDefaultCert !== data.tlsDefaultCert ||
-      tlsEnabled !== data.tlsEnabled ||
-      httpToHttpsRedirect !== data.httpToHttpsRedirect ||
-      httpsPort !== data.httpsPort ||
-      requireMixedCase !== data.requireMixedCase ||
-      requireDigit !== data.requireDigit ||
-      requireSpecial !== data.requireSpecial ||
-      maxConsecutiveRepeats !== String(data.maxConsecutiveRepeats || 0) ||
-      forbidAnimalNoise !== data.forbidAnimalNoise ||
-      refreshTokenDuration !== data.refreshTokenDuration ||
-      maxFollowDuration !== data.maxFollowDuration ||
-      queryTimeout !== data.queryTimeout ||
-      maxResultCount !== String(data.maxResultCount || 10000));
+      minPwLen !== String(data.auth?.passwordPolicy?.minLength || 8) ||
+      maxJobs !== String(data.scheduler?.maxConcurrentJobs || 4) ||
+      tlsDefaultCert !== (data.tls?.defaultCert ?? "") ||
+      tlsEnabled !== (data.tls?.enabled ?? false) ||
+      httpToHttpsRedirect !== (data.tls?.httpToHttpsRedirect ?? false) ||
+      httpsPort !== (data.tls?.httpsPort ?? "") ||
+      requireMixedCase !== (data.auth?.passwordPolicy?.requireMixedCase ?? false) ||
+      requireDigit !== (data.auth?.passwordPolicy?.requireDigit ?? false) ||
+      requireSpecial !== (data.auth?.passwordPolicy?.requireSpecial ?? false) ||
+      maxConsecutiveRepeats !== String(data.auth?.passwordPolicy?.maxConsecutiveRepeats || 0) ||
+      forbidAnimalNoise !== (data.auth?.passwordPolicy?.forbidAnimalNoise ?? false) ||
+      refreshTokenDuration !== (data.auth?.refreshTokenDuration ?? "") ||
+      maxFollowDuration !== (data.query?.maxFollowDuration ?? "") ||
+      queryTimeout !== (data.query?.timeout ?? "") ||
+      maxResultCount !== String(data.query?.maxResultCount || 10000));
 
   const handleSave = async () => {
     const hasCert = certIdSet.has(tlsDefaultCert);
@@ -251,23 +254,33 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
     const effectiveMaxResultCount = parseInt(maxResultCount, 10) || 0;
     try {
       await putConfig.mutateAsync({
-        tokenDuration,
-        jwtSecret: effectiveJwtSecret,
-        minPasswordLength: effectiveMinPwLen,
-        maxConcurrentJobs: effectiveMaxJobs,
-        tlsDefaultCert,
-        tlsEnabled: effectiveTls,
-        httpToHttpsRedirect: effectiveRedirect,
-        httpsPort,
-        requireMixedCase,
-        requireDigit,
-        requireSpecial,
-        maxConsecutiveRepeats: effectiveMaxRepeats,
-        forbidAnimalNoise,
-        refreshTokenDuration,
-        maxFollowDuration,
-        queryTimeout,
-        maxResultCount: effectiveMaxResultCount,
+        auth: {
+          tokenDuration,
+          jwtSecret: effectiveJwtSecret,
+          refreshTokenDuration,
+          passwordPolicy: {
+            minLength: effectiveMinPwLen,
+            requireMixedCase,
+            requireDigit,
+            requireSpecial,
+            maxConsecutiveRepeats: effectiveMaxRepeats,
+            forbidAnimalNoise,
+          },
+        },
+        query: {
+          timeout: queryTimeout,
+          maxFollowDuration,
+          maxResultCount: effectiveMaxResultCount,
+        },
+        scheduler: {
+          maxConcurrentJobs: effectiveMaxJobs,
+        },
+        tls: {
+          defaultCert: tlsDefaultCert,
+          enabled: effectiveTls,
+          httpToHttpsRedirect: effectiveRedirect,
+          httpsPort,
+        },
       });
       addToast("Server configuration updated", "info");
     } catch (err: any) {
@@ -278,25 +291,28 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
 
   const handleReset = () => {
     if (data) {
-      setTokenDuration(data.tokenDuration);
-      setJwtSecret(data.jwtSecretConfigured ? JWT_KEEP : "");
-      setMinPwLen(
-        data.minPasswordLength ? String(data.minPasswordLength) : "8",
-      );
-      setMaxJobs(data.maxConcurrentJobs ? String(data.maxConcurrentJobs) : "4");
-      setTlsDefaultCert(data.tlsDefaultCert);
-      setTlsEnabled(data.tlsEnabled);
-      setHttpToHttpsRedirect(data.httpToHttpsRedirect);
-      setHttpsPort(data.httpsPort);
-      setRequireMixedCase(data.requireMixedCase);
-      setRequireDigit(data.requireDigit);
-      setRequireSpecial(data.requireSpecial);
-      setMaxConsecutiveRepeats(data.maxConsecutiveRepeats ? String(data.maxConsecutiveRepeats) : "0");
-      setForbidAnimalNoise(data.forbidAnimalNoise);
-      setRefreshTokenDuration(data.refreshTokenDuration);
-      setMaxFollowDuration(data.maxFollowDuration);
-      setQueryTimeout(data.queryTimeout);
-      setMaxResultCount(data.maxResultCount ? String(data.maxResultCount) : "10000");
+      const auth = data.auth;
+      const pp = auth?.passwordPolicy;
+      const query = data.query;
+      const sched = data.scheduler;
+      const tls = data.tls;
+      setTokenDuration(auth?.tokenDuration ?? "");
+      setJwtSecret(auth?.jwtSecretConfigured ? JWT_KEEP : "");
+      setMinPwLen(pp?.minLength ? String(pp.minLength) : "8");
+      setMaxJobs(sched?.maxConcurrentJobs ? String(sched.maxConcurrentJobs) : "4");
+      setTlsDefaultCert(tls?.defaultCert ?? "");
+      setTlsEnabled(tls?.enabled ?? false);
+      setHttpToHttpsRedirect(tls?.httpToHttpsRedirect ?? false);
+      setHttpsPort(tls?.httpsPort ?? "");
+      setRequireMixedCase(pp?.requireMixedCase ?? false);
+      setRequireDigit(pp?.requireDigit ?? false);
+      setRequireSpecial(pp?.requireSpecial ?? false);
+      setMaxConsecutiveRepeats(pp?.maxConsecutiveRepeats ? String(pp.maxConsecutiveRepeats) : "0");
+      setForbidAnimalNoise(pp?.forbidAnimalNoise ?? false);
+      setRefreshTokenDuration(auth?.refreshTokenDuration ?? "");
+      setMaxFollowDuration(query?.maxFollowDuration ?? "");
+      setQueryTimeout(query?.timeout ?? "");
+      setMaxResultCount(query?.maxResultCount ? String(query.maxResultCount) : "10000");
       setNodeName(data.nodeName);
     }
   };
@@ -439,7 +455,7 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
                     type={showSecret ? "text" : "password"}
                     value={jwtSecret === JWT_KEEP ? "" : jwtSecret}
                     onChange={(e) => setJwtSecret(e.target.value)}
-                    placeholder={data?.jwtSecretConfigured ? "•••••••• (paste to replace)" : "Set JWT secret"}
+                    placeholder={data?.auth?.jwtSecretConfigured ? "•••••••• (paste to replace)" : "Set JWT secret"}
                     className={`w-full px-2.5 py-1.5 pr-9 text-[0.85em] font-mono border rounded focus:outline-none transition-colors ${c(
                       "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
                       "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",

@@ -69,12 +69,12 @@ const (
 	// ConfigServiceDeleteIngesterProcedure is the fully-qualified name of the ConfigService's
 	// DeleteIngester RPC.
 	ConfigServiceDeleteIngesterProcedure = "/gastrolog.v1.ConfigService/DeleteIngester"
-	// ConfigServiceGetServerConfigProcedure is the fully-qualified name of the ConfigService's
-	// GetServerConfig RPC.
-	ConfigServiceGetServerConfigProcedure = "/gastrolog.v1.ConfigService/GetServerConfig"
-	// ConfigServicePutServerConfigProcedure is the fully-qualified name of the ConfigService's
-	// PutServerConfig RPC.
-	ConfigServicePutServerConfigProcedure = "/gastrolog.v1.ConfigService/PutServerConfig"
+	// ConfigServiceGetSettingsProcedure is the fully-qualified name of the ConfigService's GetSettings
+	// RPC.
+	ConfigServiceGetSettingsProcedure = "/gastrolog.v1.ConfigService/GetSettings"
+	// ConfigServicePutSettingsProcedure is the fully-qualified name of the ConfigService's PutSettings
+	// RPC.
+	ConfigServicePutSettingsProcedure = "/gastrolog.v1.ConfigService/PutSettings"
 	// ConfigServiceGetPreferencesProcedure is the fully-qualified name of the ConfigService's
 	// GetPreferences RPC.
 	ConfigServiceGetPreferencesProcedure = "/gastrolog.v1.ConfigService/GetPreferences"
@@ -150,10 +150,10 @@ type ConfigServiceClient interface {
 	PutIngester(context.Context, *connect.Request[v1.PutIngesterRequest]) (*connect.Response[v1.PutIngesterResponse], error)
 	// DeleteIngester removes an ingester.
 	DeleteIngester(context.Context, *connect.Request[v1.DeleteIngesterRequest]) (*connect.Response[v1.DeleteIngesterResponse], error)
-	// GetServerConfig returns the server-level configuration.
-	GetServerConfig(context.Context, *connect.Request[v1.GetServerConfigRequest]) (*connect.Response[v1.GetServerConfigResponse], error)
-	// PutServerConfig updates the server-level configuration.
-	PutServerConfig(context.Context, *connect.Request[v1.PutServerConfigRequest]) (*connect.Response[v1.PutServerConfigResponse], error)
+	// GetSettings returns system settings (auth, query, scheduler, TLS, lookup).
+	GetSettings(context.Context, *connect.Request[v1.GetSettingsRequest]) (*connect.Response[v1.GetSettingsResponse], error)
+	// PutSettings updates system settings. Only fields explicitly set are updated.
+	PutSettings(context.Context, *connect.Request[v1.PutSettingsRequest]) (*connect.Response[v1.PutSettingsResponse], error)
 	// GetPreferences returns the current user's preferences.
 	GetPreferences(context.Context, *connect.Request[v1.GetPreferencesRequest]) (*connect.Response[v1.GetPreferencesResponse], error)
 	// PutPreferences updates the current user's preferences.
@@ -275,16 +275,16 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("DeleteIngester")),
 			connect.WithClientOptions(opts...),
 		),
-		getServerConfig: connect.NewClient[v1.GetServerConfigRequest, v1.GetServerConfigResponse](
+		getSettings: connect.NewClient[v1.GetSettingsRequest, v1.GetSettingsResponse](
 			httpClient,
-			baseURL+ConfigServiceGetServerConfigProcedure,
-			connect.WithSchema(configServiceMethods.ByName("GetServerConfig")),
+			baseURL+ConfigServiceGetSettingsProcedure,
+			connect.WithSchema(configServiceMethods.ByName("GetSettings")),
 			connect.WithClientOptions(opts...),
 		),
-		putServerConfig: connect.NewClient[v1.PutServerConfigRequest, v1.PutServerConfigResponse](
+		putSettings: connect.NewClient[v1.PutSettingsRequest, v1.PutSettingsResponse](
 			httpClient,
-			baseURL+ConfigServicePutServerConfigProcedure,
-			connect.WithSchema(configServiceMethods.ByName("PutServerConfig")),
+			baseURL+ConfigServicePutSettingsProcedure,
+			connect.WithSchema(configServiceMethods.ByName("PutSettings")),
 			connect.WithClientOptions(opts...),
 		),
 		getPreferences: connect.NewClient[v1.GetPreferencesRequest, v1.GetPreferencesResponse](
@@ -395,8 +395,8 @@ type configServiceClient struct {
 	deleteVault           *connect.Client[v1.DeleteVaultRequest, v1.DeleteVaultResponse]
 	putIngester           *connect.Client[v1.PutIngesterRequest, v1.PutIngesterResponse]
 	deleteIngester        *connect.Client[v1.DeleteIngesterRequest, v1.DeleteIngesterResponse]
-	getServerConfig       *connect.Client[v1.GetServerConfigRequest, v1.GetServerConfigResponse]
-	putServerConfig       *connect.Client[v1.PutServerConfigRequest, v1.PutServerConfigResponse]
+	getSettings           *connect.Client[v1.GetSettingsRequest, v1.GetSettingsResponse]
+	putSettings           *connect.Client[v1.PutSettingsRequest, v1.PutSettingsResponse]
 	getPreferences        *connect.Client[v1.GetPreferencesRequest, v1.GetPreferencesResponse]
 	putPreferences        *connect.Client[v1.PutPreferencesRequest, v1.PutPreferencesResponse]
 	getSavedQueries       *connect.Client[v1.GetSavedQueriesRequest, v1.GetSavedQueriesResponse]
@@ -479,14 +479,14 @@ func (c *configServiceClient) DeleteIngester(ctx context.Context, req *connect.R
 	return c.deleteIngester.CallUnary(ctx, req)
 }
 
-// GetServerConfig calls gastrolog.v1.ConfigService.GetServerConfig.
-func (c *configServiceClient) GetServerConfig(ctx context.Context, req *connect.Request[v1.GetServerConfigRequest]) (*connect.Response[v1.GetServerConfigResponse], error) {
-	return c.getServerConfig.CallUnary(ctx, req)
+// GetSettings calls gastrolog.v1.ConfigService.GetSettings.
+func (c *configServiceClient) GetSettings(ctx context.Context, req *connect.Request[v1.GetSettingsRequest]) (*connect.Response[v1.GetSettingsResponse], error) {
+	return c.getSettings.CallUnary(ctx, req)
 }
 
-// PutServerConfig calls gastrolog.v1.ConfigService.PutServerConfig.
-func (c *configServiceClient) PutServerConfig(ctx context.Context, req *connect.Request[v1.PutServerConfigRequest]) (*connect.Response[v1.PutServerConfigResponse], error) {
-	return c.putServerConfig.CallUnary(ctx, req)
+// PutSettings calls gastrolog.v1.ConfigService.PutSettings.
+func (c *configServiceClient) PutSettings(ctx context.Context, req *connect.Request[v1.PutSettingsRequest]) (*connect.Response[v1.PutSettingsResponse], error) {
+	return c.putSettings.CallUnary(ctx, req)
 }
 
 // GetPreferences calls gastrolog.v1.ConfigService.GetPreferences.
@@ -592,10 +592,10 @@ type ConfigServiceHandler interface {
 	PutIngester(context.Context, *connect.Request[v1.PutIngesterRequest]) (*connect.Response[v1.PutIngesterResponse], error)
 	// DeleteIngester removes an ingester.
 	DeleteIngester(context.Context, *connect.Request[v1.DeleteIngesterRequest]) (*connect.Response[v1.DeleteIngesterResponse], error)
-	// GetServerConfig returns the server-level configuration.
-	GetServerConfig(context.Context, *connect.Request[v1.GetServerConfigRequest]) (*connect.Response[v1.GetServerConfigResponse], error)
-	// PutServerConfig updates the server-level configuration.
-	PutServerConfig(context.Context, *connect.Request[v1.PutServerConfigRequest]) (*connect.Response[v1.PutServerConfigResponse], error)
+	// GetSettings returns system settings (auth, query, scheduler, TLS, lookup).
+	GetSettings(context.Context, *connect.Request[v1.GetSettingsRequest]) (*connect.Response[v1.GetSettingsResponse], error)
+	// PutSettings updates system settings. Only fields explicitly set are updated.
+	PutSettings(context.Context, *connect.Request[v1.PutSettingsRequest]) (*connect.Response[v1.PutSettingsResponse], error)
 	// GetPreferences returns the current user's preferences.
 	GetPreferences(context.Context, *connect.Request[v1.GetPreferencesRequest]) (*connect.Response[v1.GetPreferencesResponse], error)
 	// PutPreferences updates the current user's preferences.
@@ -713,16 +713,16 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("DeleteIngester")),
 		connect.WithHandlerOptions(opts...),
 	)
-	configServiceGetServerConfigHandler := connect.NewUnaryHandler(
-		ConfigServiceGetServerConfigProcedure,
-		svc.GetServerConfig,
-		connect.WithSchema(configServiceMethods.ByName("GetServerConfig")),
+	configServiceGetSettingsHandler := connect.NewUnaryHandler(
+		ConfigServiceGetSettingsProcedure,
+		svc.GetSettings,
+		connect.WithSchema(configServiceMethods.ByName("GetSettings")),
 		connect.WithHandlerOptions(opts...),
 	)
-	configServicePutServerConfigHandler := connect.NewUnaryHandler(
-		ConfigServicePutServerConfigProcedure,
-		svc.PutServerConfig,
-		connect.WithSchema(configServiceMethods.ByName("PutServerConfig")),
+	configServicePutSettingsHandler := connect.NewUnaryHandler(
+		ConfigServicePutSettingsProcedure,
+		svc.PutSettings,
+		connect.WithSchema(configServiceMethods.ByName("PutSettings")),
 		connect.WithHandlerOptions(opts...),
 	)
 	configServiceGetPreferencesHandler := connect.NewUnaryHandler(
@@ -843,10 +843,10 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServicePutIngesterHandler.ServeHTTP(w, r)
 		case ConfigServiceDeleteIngesterProcedure:
 			configServiceDeleteIngesterHandler.ServeHTTP(w, r)
-		case ConfigServiceGetServerConfigProcedure:
-			configServiceGetServerConfigHandler.ServeHTTP(w, r)
-		case ConfigServicePutServerConfigProcedure:
-			configServicePutServerConfigHandler.ServeHTTP(w, r)
+		case ConfigServiceGetSettingsProcedure:
+			configServiceGetSettingsHandler.ServeHTTP(w, r)
+		case ConfigServicePutSettingsProcedure:
+			configServicePutSettingsHandler.ServeHTTP(w, r)
 		case ConfigServiceGetPreferencesProcedure:
 			configServiceGetPreferencesHandler.ServeHTTP(w, r)
 		case ConfigServicePutPreferencesProcedure:
@@ -938,12 +938,12 @@ func (UnimplementedConfigServiceHandler) DeleteIngester(context.Context, *connec
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.DeleteIngester is not implemented"))
 }
 
-func (UnimplementedConfigServiceHandler) GetServerConfig(context.Context, *connect.Request[v1.GetServerConfigRequest]) (*connect.Response[v1.GetServerConfigResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.GetServerConfig is not implemented"))
+func (UnimplementedConfigServiceHandler) GetSettings(context.Context, *connect.Request[v1.GetSettingsRequest]) (*connect.Response[v1.GetSettingsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.GetSettings is not implemented"))
 }
 
-func (UnimplementedConfigServiceHandler) PutServerConfig(context.Context, *connect.Request[v1.PutServerConfigRequest]) (*connect.Response[v1.PutServerConfigResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.PutServerConfig is not implemented"))
+func (UnimplementedConfigServiceHandler) PutSettings(context.Context, *connect.Request[v1.PutSettingsRequest]) (*connect.Response[v1.PutSettingsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.PutSettings is not implemented"))
 }
 
 func (UnimplementedConfigServiceHandler) GetPreferences(context.Context, *connect.Request[v1.GetPreferencesRequest]) (*connect.Response[v1.GetPreferencesResponse], error) {

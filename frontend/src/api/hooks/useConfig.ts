@@ -107,11 +107,11 @@ export function useDeleteRetentionPolicy() {
   });
 }
 
-export function useServerConfig() {
+export function useSettings() {
   return useQuery({
-    queryKey: ["serverConfig"],
+    queryKey: ["settings"],
     queryFn: async () => {
-      const response = await configClient.getServerConfig({});
+      const response = await configClient.getSettings({});
       return response;
     },
   });
@@ -120,49 +120,90 @@ export function useServerConfig() {
 export const JWT_KEEP = "__KEEP_EXISTING__";
 export const MAXMIND_KEEP = "__KEEP_EXISTING__";
 
-export function usePutServerConfig() {
+export function usePutSettings() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: {
-      tokenDuration?: string;
-      jwtSecret?: string;
-      minPasswordLength?: number;
-      maxConcurrentJobs?: number;
-      tlsDefaultCert?: string;
-      tlsEnabled?: boolean;
-      httpToHttpsRedirect?: boolean;
-      httpsPort?: string;
-      requireMixedCase?: boolean;
-      requireDigit?: boolean;
-      requireSpecial?: boolean;
-      maxConsecutiveRepeats?: number;
-      forbidAnimalNoise?: boolean;
-      maxFollowDuration?: string;
-      queryTimeout?: string;
-      refreshTokenDuration?: string;
-      maxResultCount?: number;
+      auth?: {
+        tokenDuration?: string;
+        jwtSecret?: string;
+        refreshTokenDuration?: string;
+        passwordPolicy?: {
+          minLength?: number;
+          requireMixedCase?: boolean;
+          requireDigit?: boolean;
+          requireSpecial?: boolean;
+          maxConsecutiveRepeats?: number;
+          forbidAnimalNoise?: boolean;
+        };
+      };
+      query?: {
+        timeout?: string;
+        maxFollowDuration?: string;
+        maxResultCount?: number;
+      };
+      scheduler?: {
+        maxConcurrentJobs?: number;
+      };
+      tls?: {
+        defaultCert?: string;
+        enabled?: boolean;
+        httpToHttpsRedirect?: boolean;
+        httpsPort?: string;
+      };
+      lookup?: {
+        geoipDbPath?: string;
+        asnDbPath?: string;
+        maxmind?: {
+          autoDownload?: boolean;
+          accountId?: string;
+          licenseKey?: string;
+        };
+      };
       setupWizardDismissed?: boolean;
-      geoipDbPath?: string;
-      asnDbPath?: string;
-      maxmindAutoDownload?: boolean;
-      maxmindAccountId?: string;
-      maxmindLicenseKey?: string;
     }) => {
-      // Build request with only defined fields, skipping sentinel-guarded secrets.
-      const { jwtSecret, maxmindLicenseKey, ...rest } = args;
+      // Build nested request, filtering out sentinel-guarded secrets.
       const req: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(rest)) {
-        req[key] = value;
+      if (args.auth) {
+        const authReq: Record<string, unknown> = {};
+        if (args.auth.tokenDuration !== undefined)
+          authReq.tokenDuration = args.auth.tokenDuration;
+        if (args.auth.refreshTokenDuration !== undefined)
+          authReq.refreshTokenDuration = args.auth.refreshTokenDuration;
+        if (args.auth.jwtSecret !== undefined && args.auth.jwtSecret !== JWT_KEEP)
+          authReq.jwtSecret = args.auth.jwtSecret;
+        if (args.auth.passwordPolicy)
+          authReq.passwordPolicy = args.auth.passwordPolicy;
+        req.auth = authReq;
       }
-      if (jwtSecret !== undefined && jwtSecret !== JWT_KEEP)
-        req.jwtSecret = jwtSecret;
-      if (maxmindLicenseKey !== undefined && maxmindLicenseKey !== MAXMIND_KEEP)
-        req.maxmindLicenseKey = maxmindLicenseKey;
-      const resp = await configClient.putServerConfig(req as Parameters<typeof configClient.putServerConfig>[0]);
+      if (args.query) req.query = args.query;
+      if (args.scheduler) req.scheduler = args.scheduler;
+      if (args.tls) req.tls = args.tls;
+      if (args.lookup) {
+        const lookupReq: Record<string, unknown> = {};
+        if (args.lookup.geoipDbPath !== undefined)
+          lookupReq.geoipDbPath = args.lookup.geoipDbPath;
+        if (args.lookup.asnDbPath !== undefined)
+          lookupReq.asnDbPath = args.lookup.asnDbPath;
+        if (args.lookup.maxmind) {
+          const mmReq: Record<string, unknown> = {};
+          if (args.lookup.maxmind.autoDownload !== undefined)
+            mmReq.autoDownload = args.lookup.maxmind.autoDownload;
+          if (args.lookup.maxmind.accountId !== undefined)
+            mmReq.accountId = args.lookup.maxmind.accountId;
+          if (args.lookup.maxmind.licenseKey !== undefined && args.lookup.maxmind.licenseKey !== MAXMIND_KEEP)
+            mmReq.licenseKey = args.lookup.maxmind.licenseKey;
+          lookupReq.maxmind = mmReq;
+        }
+        req.lookup = lookupReq;
+      }
+      if (args.setupWizardDismissed !== undefined)
+        req.setupWizardDismissed = args.setupWizardDismissed;
+      const resp = await configClient.putSettings(req as Parameters<typeof configClient.putSettings>[0]);
       return resp;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["serverConfig"] });
+      qc.invalidateQueries({ queryKey: ["settings"] });
       qc.invalidateQueries({ queryKey: ["certificates"] });
     },
   });
@@ -214,7 +255,7 @@ export function usePutCertificate() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["certificates"] });
-      qc.invalidateQueries({ queryKey: ["serverConfig"] });
+      qc.invalidateQueries({ queryKey: ["settings"] });
     },
   });
 }
@@ -227,7 +268,7 @@ export function useDeleteCertificate() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["certificates"] });
-      qc.invalidateQueries({ queryKey: ["serverConfig"] });
+      qc.invalidateQueries({ queryKey: ["settings"] });
     },
   });
 }
@@ -238,7 +279,7 @@ export function usePutNodeConfig() {
     mutationFn: async (args: { id: string; name: string }) => {
       await configClient.putNodeConfig({ config: { id: args.id, name: args.name } });
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["serverConfig"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["settings"] }),
   });
 }
 

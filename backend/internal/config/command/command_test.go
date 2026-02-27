@@ -182,8 +182,13 @@ func TestPutIngester(t *testing.T) {
 	}
 }
 
-func TestPutSetting(t *testing.T) {
-	cmd := NewPutSetting("server", `{"auth":{"jwt_secret":"s3cret"}}`)
+func TestPutServerSettings(t *testing.T) {
+	wantAuth := config.AuthConfig{JWTSecret: "s3cret"}
+	wantSched := config.SchedulerConfig{MaxConcurrentJobs: 4}
+	cmd, err := NewPutServerSettings(wantAuth, config.QueryConfig{}, wantSched, config.TLSConfig{}, config.LookupConfig{}, false)
+	if err != nil {
+		t.Fatalf("NewPutServerSettings: %v", err)
+	}
 	b, err := Marshal(cmd)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
@@ -192,28 +197,17 @@ func TestPutSetting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	key, value := ExtractPutSetting(cmd2.GetPutSetting())
-	if key != "server" {
-		t.Fatalf("key: got %q, want %q", key, "server")
-	}
-	if value != `{"auth":{"jwt_secret":"s3cret"}}` {
-		t.Fatalf("value: got %q", value)
-	}
-}
-
-func TestDeleteSetting(t *testing.T) {
-	cmd := NewDeleteSetting("server")
-	b, err := Marshal(cmd)
+	// The command is serialized as a PutSetting with key="server".
+	_, value := ExtractPutSetting(cmd2.GetPutSetting())
+	gotAuth, _, gotSched, _, _, _, err := ExtractPutServerSettings(value)
 	if err != nil {
-		t.Fatalf("Marshal: %v", err)
+		t.Fatalf("ExtractPutServerSettings: %v", err)
 	}
-	cmd2, err := Unmarshal(b)
-	if err != nil {
-		t.Fatalf("Unmarshal: %v", err)
+	if gotAuth.JWTSecret != wantAuth.JWTSecret {
+		t.Fatalf("JWTSecret: got %q, want %q", gotAuth.JWTSecret, wantAuth.JWTSecret)
 	}
-	got := ExtractDeleteSetting(cmd2.GetDeleteSetting())
-	if got != "server" {
-		t.Fatalf("got %q, want %q", got, "server")
+	if gotSched.MaxConcurrentJobs != wantSched.MaxConcurrentJobs {
+		t.Fatalf("MaxConcurrentJobs: got %d, want %d", gotSched.MaxConcurrentJobs, wantSched.MaxConcurrentJobs)
 	}
 }
 
@@ -481,9 +475,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 		Ingesters: []config.IngesterConfig{
 			{ID: uuid.Must(uuid.NewV7()), Name: "syslog", Type: "syslog-udp", Enabled: true, Params: map[string]string{"addr": ":514"}},
 		},
-		Settings: map[string]string{
-			"server": `{"auth":{"jwt_secret":"test"}}`,
-		},
+		Auth: config.AuthConfig{JWTSecret: "test"},
 		Certs: []config.CertPEM{
 			{ID: uuid.Must(uuid.NewV7()), Name: "default", CertPEM: "cert", KeyPEM: "key"},
 		},
@@ -545,8 +537,8 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	if !reflect.DeepEqual(gotCfg.Ingesters, cfg.Ingesters) {
 		t.Fatalf("ingesters differ")
 	}
-	if !reflect.DeepEqual(gotCfg.Settings, cfg.Settings) {
-		t.Fatalf("settings differ")
+	if gotCfg.Auth.JWTSecret != cfg.Auth.JWTSecret {
+		t.Fatalf("auth differ: got %+v, want %+v", gotCfg.Auth, cfg.Auth)
 	}
 	if !reflect.DeepEqual(gotCfg.Certs, cfg.Certs) {
 		t.Fatalf("certs differ")
