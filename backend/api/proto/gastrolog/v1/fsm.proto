@@ -36,6 +36,7 @@ message ConfigCommand {
     DeleteUserRefreshTokensCommand delete_user_refresh_tokens = 24;
     PutNodeConfigCommand put_node_config = 25;
     DeleteNodeConfigCommand delete_node_config = 26;
+    PutClusterTLSCommand put_cluster_tls = 27;
   }
 }
 
@@ -218,6 +219,16 @@ message DeleteNodeConfigCommand {
   string id = 1;
 }
 
+// --- Cluster TLS ---
+
+message PutClusterTLSCommand {
+  bytes ca_cert_pem = 1;
+  bytes ca_key_pem = 2;
+  bytes cluster_cert_pem = 3;
+  bytes cluster_key_pem = 4;
+  string join_token = 5;
+}
+
 // --- Snapshot ---
 
 // ConfigSnapshot captures the full config state for FSM.Snapshot()/Restore().
@@ -234,4 +245,5 @@ message ConfigSnapshot {
   repeated CreateUserCommand users = 8;
   repeated CreateRefreshTokenCommand refresh_tokens = 9;
   repeated PutNodeConfigCommand node_configs = 10;
+  PutClusterTLSCommand cluster_tls = 11;
 }

@@ -42,6 +42,7 @@ type Ingester struct {
 	server   *http.Server
 	out      chan<- orchestrator.IngestMessage
 	logger   *slog.Logger
+	ready    chan struct{} // closed once listener is bound
 }
 
 // Config holds HTTP ingester configuration.
@@ -62,6 +63,7 @@ func New(cfg Config) *Ingester {
 		id:     cfg.ID,
 		addr:   cfg.Addr,
 		logger: logging.Default(cfg.Logger).With("component", "ingester", "type", "http"),
+		ready:  make(chan struct{}),
 	}
 }
 
@@ -89,6 +91,7 @@ func (r *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 	if err != nil {
 		return err
 	}
+	close(r.ready) // signal that Addr() can be called safely
 
 	r.logger.Info("http ingester starting", "addr", r.listener.Addr().String())
 
@@ -114,11 +117,9 @@ func (r *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 	}
 }
 
-// Addr returns the listener address. Only valid after Run() has started.
+// Addr returns the listener address, blocking until Run() has bound it.
 func (r *Ingester) Addr() net.Addr {
-	if r.listener == nil {
-		return nil
-	}
+	<-r.ready
 	return r.listener.Addr()
 }
 

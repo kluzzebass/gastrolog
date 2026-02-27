@@ -10,6 +10,7 @@ import (
 
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -17,7 +18,8 @@ import (
 // cluster port via the ForwardApply RPC. Used by raftstore.Store on follower
 // nodes to transparently proxy config writes.
 type Forwarder struct {
-	raft *hraft.Raft
+	raft       *hraft.Raft
+	clusterTLS *ClusterTLS // nil = insecure
 
 	mu   sync.Mutex
 	conn *grpc.ClientConn
@@ -25,8 +27,9 @@ type Forwarder struct {
 }
 
 // NewForwarder creates a Forwarder that resolves the leader from r.
-func NewForwarder(r *hraft.Raft) *Forwarder {
-	return &Forwarder{raft: r}
+// If clusterTLS is non-nil, connections use mTLS; otherwise insecure.
+func NewForwarder(r *hraft.Raft, clusterTLS *ClusterTLS) *Forwarder {
+	return &Forwarder{raft: r, clusterTLS: clusterTLS}
 }
 
 // Forward sends a pre-marshaled ConfigCommand to the leader for raft.Apply().
@@ -58,8 +61,15 @@ func (f *Forwarder) leaderConn() (*grpc.ClientConn, error) {
 		f.conn = nil
 	}
 
+	var creds credentials.TransportCredentials
+	if f.clusterTLS != nil && f.clusterTLS.State() != nil {
+		creds = f.clusterTLS.TransportCredentials()
+	} else {
+		creds = insecure.NewCredentials()
+	}
+
 	conn, err := grpc.NewClient(string(addr),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(creds),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("dial leader %s: %w", addr, err)

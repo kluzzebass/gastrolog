@@ -72,6 +72,13 @@ func (d Dir) LookupDir() string {
 	return filepath.Join(d.root, "lookups")
 }
 
+// ClusterTLSPath returns the path to the local cluster TLS material file.
+// This file persists mTLS certs outside of Raft so they're available on
+// restart before Raft can communicate with peers.
+func (d Dir) ClusterTLSPath() string {
+	return filepath.Join(d.root, "cluster-tls.json")
+}
+
 // SocketPath returns the path to the Unix domain socket for local CLI access.
 func (d Dir) SocketPath() string {
 	return filepath.Join(d.root, "gastrolog.sock")

@@ -22,24 +22,29 @@ func (s *Server) forwardApply(ctx context.Context, req *gastrologv1.ForwardApply
 	return &gastrologv1.ForwardApplyResponse{}, nil
 }
 
-// forwardServiceDesc is a manually-defined gRPC ServiceDesc for
+// clusterServiceDesc is a manually-defined gRPC ServiceDesc for
 // gastrolog.v1.ClusterService. We register this manually rather than using
 // protoc-gen-go-grpc to avoid generating unused gRPC stubs for all services
 // in the proto package.
-var forwardServiceDesc = grpc.ServiceDesc{
+var clusterServiceDesc = grpc.ServiceDesc{
 	ServiceName: "gastrolog.v1.ClusterService",
-	HandlerType: (*forwardServiceServer)(nil),
+	HandlerType: (*clusterServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
 			MethodName: "ForwardApply",
 			Handler:    forwardApplyHandler,
 		},
+		{
+			MethodName: "Enroll",
+			Handler:    enrollRPCHandler,
+		},
 	},
 }
 
-// forwardServiceServer is the interface the gRPC runtime uses for type-checking.
-type forwardServiceServer interface {
+// clusterServiceServer is the interface the gRPC runtime uses for type-checking.
+type clusterServiceServer interface {
 	forwardApply(context.Context, *gastrologv1.ForwardApplyRequest) (*gastrologv1.ForwardApplyResponse, error)
+	enroll(context.Context, *gastrologv1.EnrollRequest) (*gastrologv1.EnrollResponse, error)
 }
 
 func forwardApplyHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
@@ -61,8 +66,8 @@ func forwardApplyHandler(srv any, ctx context.Context, dec func(any) error, inte
 	return interceptor(ctx, req, info, handler)
 }
 
-func registerForwardService(s *grpc.Server, srv *Server) {
-	s.RegisterService(&forwardServiceDesc, srv)
+func registerClusterService(s *grpc.Server, srv *Server) {
+	s.RegisterService(&clusterServiceDesc, srv)
 }
 
 // ForwardApplyClient is a client for the ForwardApply RPC.

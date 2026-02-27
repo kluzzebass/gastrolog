@@ -24,7 +24,6 @@ func TestLokiPushSingleStream(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
 
 	ts := time.Now().UnixNano()
 	body := `{
@@ -78,7 +77,6 @@ func TestLokiPushMultipleValues(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
 
 	ts := time.Now().UnixNano()
 	body := `{
@@ -126,7 +124,6 @@ func TestLokiPushMultipleStreams(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
 
 	ts := time.Now().UnixNano()
 	body := `{
@@ -178,7 +175,6 @@ func TestLokiPushStructuredMetadata(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
 
 	ts := time.Now().UnixNano()
 	// Third element is structured metadata.
@@ -229,7 +225,6 @@ func TestLokiPushGzipCompression(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
 
 	ts := time.Now().UnixNano()
 	body := `{"streams": [{"stream": {"host": "server1"}, "values": [["` + strconv.FormatInt(ts, 10) + `", "gzipped message"]]}]}`
@@ -271,7 +266,6 @@ func TestLokiPushZstdCompression(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
 
 	ts := time.Now().UnixNano()
 	body := `{"streams": [{"stream": {"host": "server1"}, "values": [["` + strconv.FormatInt(ts, 10) + `", "zstd message"]]}]}`
@@ -310,7 +304,6 @@ func TestLokiPushUnsupportedEncoding(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
 
 	req, _ := http.NewRequest("POST", "http://"+recv.Addr().String()+"/loki/api/v1/push", strings.NewReader("data"))
 	req.Header.Set("Content-Type", "application/json")
@@ -334,7 +327,6 @@ func TestLokiPushWaitAck(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
 
 	ts := time.Now().UnixNano()
 	body := `{"streams": [{"stream": {}, "values": [["` + strconv.FormatInt(ts, 10) + `", "ack test"]]}]}`
@@ -389,7 +381,6 @@ func TestLokiPushWaitAckError(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
 
 	ts := time.Now().UnixNano()
 	body := `{"streams": [{"stream": {}, "values": [["` + strconv.FormatInt(ts, 10) + `", "ack error test"]]}]}`
@@ -436,7 +427,6 @@ func TestLokiPushLegacyEndpoint(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
 
 	ts := time.Now().UnixNano()
 	body := `{"streams": [{"stream": {}, "values": [["` + strconv.FormatInt(ts, 10) + `", "legacy endpoint"]]}]}`
@@ -469,7 +459,6 @@ func TestLokiPushEmptyStreams(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
 
 	// Empty streams array - Loki returns 204.
 	resp, err := http.Post("http://"+recv.Addr().String()+"/loki/api/v1/push", "application/json", strings.NewReader(`{"streams": []}`))
@@ -490,7 +479,6 @@ func TestLokiPushInvalidJSON(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
 
 	resp, err := http.Post("http://"+recv.Addr().String()+"/loki/api/v1/push", "application/json", strings.NewReader(`{invalid json`))
 	if err != nil {
@@ -510,7 +498,6 @@ func TestLokiPushInvalidTimestamp(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
 
 	// Timestamp as number instead of string (Loki requires string).
 	resp, err := http.Post("http://"+recv.Addr().String()+"/loki/api/v1/push", "application/json",
@@ -532,7 +519,6 @@ func TestReadyEndpoint(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
 
 	resp, err := http.Get("http://" + recv.Addr().String() + "/ready")
 	if err != nil {
@@ -552,7 +538,6 @@ func TestLokiPushTooManyAttrs(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
 
 	// Build stream with too many labels.
 	labels := make(map[string]string)
@@ -582,7 +567,6 @@ func TestLokiPushAttrKeyTooLong(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
 
 	// Key longer than 64 chars.
 	longKey := strings.Repeat("x", 100)
@@ -607,7 +591,6 @@ func TestLokiPushAttrValueTooLong(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
 
 	// Value longer than 256 chars.
 	longValue := strings.Repeat("x", 300)

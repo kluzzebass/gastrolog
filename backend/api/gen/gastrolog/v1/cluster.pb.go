@@ -103,6 +103,129 @@ func (*ForwardApplyResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{1}
 }
 
+// EnrollRequest is sent by a joining node to the cluster leader.
+// The token_secret proves the node is authorized to join.
+type EnrollRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TokenSecret   string                 `protobuf:"bytes,1,opt,name=token_secret,json=tokenSecret,proto3" json:"token_secret,omitempty"`
+	NodeId        string                 `protobuf:"bytes,2,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	NodeAddr      string                 `protobuf:"bytes,3,opt,name=node_addr,json=nodeAddr,proto3" json:"node_addr,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EnrollRequest) Reset() {
+	*x = EnrollRequest{}
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnrollRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnrollRequest) ProtoMessage() {}
+
+func (x *EnrollRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnrollRequest.ProtoReflect.Descriptor instead.
+func (*EnrollRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *EnrollRequest) GetTokenSecret() string {
+	if x != nil {
+		return x.TokenSecret
+	}
+	return ""
+}
+
+func (x *EnrollRequest) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *EnrollRequest) GetNodeAddr() string {
+	if x != nil {
+		return x.NodeAddr
+	}
+	return ""
+}
+
+// EnrollResponse returns the cluster TLS material to the joining node.
+type EnrollResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	CaCertPem      []byte                 `protobuf:"bytes,1,opt,name=ca_cert_pem,json=caCertPem,proto3" json:"ca_cert_pem,omitempty"`
+	ClusterCertPem []byte                 `protobuf:"bytes,2,opt,name=cluster_cert_pem,json=clusterCertPem,proto3" json:"cluster_cert_pem,omitempty"`
+	ClusterKeyPem  []byte                 `protobuf:"bytes,3,opt,name=cluster_key_pem,json=clusterKeyPem,proto3" json:"cluster_key_pem,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *EnrollResponse) Reset() {
+	*x = EnrollResponse{}
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnrollResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnrollResponse) ProtoMessage() {}
+
+func (x *EnrollResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnrollResponse.ProtoReflect.Descriptor instead.
+func (*EnrollResponse) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *EnrollResponse) GetCaCertPem() []byte {
+	if x != nil {
+		return x.CaCertPem
+	}
+	return nil
+}
+
+func (x *EnrollResponse) GetClusterCertPem() []byte {
+	if x != nil {
+		return x.ClusterCertPem
+	}
+	return nil
+}
+
+func (x *EnrollResponse) GetClusterKeyPem() []byte {
+	if x != nil {
+		return x.ClusterKeyPem
+	}
+	return nil
+}
+
 var File_gastrolog_v1_cluster_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_cluster_proto_rawDesc = "" +
@@ -110,7 +233,15 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x1agastrolog/v1/cluster.proto\x12\fgastrolog.v1\"/\n" +
 	"\x13ForwardApplyRequest\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\fR\acommand\"\x16\n" +
-	"\x14ForwardApplyResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"\x14ForwardApplyResponse\"h\n" +
+	"\rEnrollRequest\x12!\n" +
+	"\ftoken_secret\x18\x01 \x01(\tR\vtokenSecret\x12\x17\n" +
+	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12\x1b\n" +
+	"\tnode_addr\x18\x03 \x01(\tR\bnodeAddr\"\x82\x01\n" +
+	"\x0eEnrollResponse\x12\x1e\n" +
+	"\vca_cert_pem\x18\x01 \x01(\fR\tcaCertPem\x12(\n" +
+	"\x10cluster_cert_pem\x18\x02 \x01(\fR\x0eclusterCertPem\x12&\n" +
+	"\x0fcluster_key_pem\x18\x03 \x01(\fR\rclusterKeyPemB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_cluster_proto_rawDescOnce sync.Once
@@ -124,10 +255,12 @@ func file_gastrolog_v1_cluster_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_cluster_proto_rawDescData
 }
 
-var file_gastrolog_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_gastrolog_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_gastrolog_v1_cluster_proto_goTypes = []any{
 	(*ForwardApplyRequest)(nil),  // 0: gastrolog.v1.ForwardApplyRequest
 	(*ForwardApplyResponse)(nil), // 1: gastrolog.v1.ForwardApplyResponse
+	(*EnrollRequest)(nil),        // 2: gastrolog.v1.EnrollRequest
+	(*EnrollResponse)(nil),       // 3: gastrolog.v1.EnrollResponse
 }
 var file_gastrolog_v1_cluster_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
@@ -148,7 +281,7 @@ func file_gastrolog_v1_cluster_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_cluster_proto_rawDesc), len(file_gastrolog_v1_cluster_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"gastrolog/internal/cluster"
 	"gastrolog/internal/config"
 	"gastrolog/internal/config/raftfsm"
 	"gastrolog/internal/orchestrator"
@@ -18,11 +19,13 @@ import (
 // It is called synchronously from within FSM.Apply, so actions complete before
 // the cfgStore write method returns to the server handler.
 type configDispatcher struct {
-	orch         *orchestrator.Orchestrator
-	cfgStore     config.Store
-	factories    orchestrator.Factories
-	localNodeID  string
-	logger       *slog.Logger
+	orch           *orchestrator.Orchestrator
+	cfgStore       config.Store
+	factories      orchestrator.Factories
+	localNodeID    string
+	logger         *slog.Logger
+	clusterTLS     *cluster.ClusterTLS // nil for single-node or memory mode
+	tlsFilePath    string              // path to persist cluster TLS on rotation
 }
 
 // Handle dispatches a single FSM notification to the appropriate orchestrator
@@ -55,6 +58,8 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		d.handleIngesterDeleted(n.ID)
 	case raftfsm.NotifySettingPut:
 		d.handleSettingPut(ctx, n.Key)
+	case raftfsm.NotifyClusterTLSPut:
+		d.handleClusterTLSPut(ctx)
 	}
 }
 
@@ -194,4 +199,29 @@ func (d *configDispatcher) handleSettingPut(ctx context.Context, key string) {
 			d.logger.Error("dispatch: update max concurrent jobs", "error", err)
 		}
 	}
+}
+
+// handleClusterTLSPut reloads cluster TLS material into the atomic holder.
+// This enables hot-reload of certificates — new connections use the updated cert.
+func (d *configDispatcher) handleClusterTLSPut(ctx context.Context) {
+	if d.clusterTLS == nil {
+		return
+	}
+	cfg, err := d.cfgStore.Load(ctx)
+	if err != nil || cfg == nil || cfg.ClusterTLS == nil {
+		d.logger.Error("dispatch: read cluster TLS for reload", "error", err)
+		return
+	}
+	tls := cfg.ClusterTLS
+	if err := d.clusterTLS.Load([]byte(tls.ClusterCertPEM), []byte(tls.ClusterKeyPEM), []byte(tls.CACertPEM)); err != nil {
+		d.logger.Error("dispatch: reload cluster TLS", "error", err)
+		return
+	}
+	// Persist updated TLS to local file for restart.
+	if d.tlsFilePath != "" {
+		if err := cluster.SaveFile(d.tlsFilePath, []byte(tls.ClusterCertPEM), []byte(tls.ClusterKeyPEM), []byte(tls.CACertPEM)); err != nil {
+			d.logger.Error("dispatch: save cluster TLS file", "error", err)
+		}
+	}
+	d.logger.Info("dispatch: cluster TLS reloaded")
 }

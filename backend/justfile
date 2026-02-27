@@ -51,6 +51,81 @@ build-all:
 lint:
   golangci-lint run ./...
 
+# --- Cluster development recipes ---
+
+# Removes all cluster node data directories.
+cluster-clean:
+  rm -rf data/node1 data/node2 data/node3 data/cluster-token
+
+# Starts cluster node 1 (leader). Writes join token to data/cluster-token.
+cluster-node1:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p data
+  # Logs go to stderr; merge into stdout so we can tee and extract the token.
+  go run ./cmd/gastrolog server \
+    --home data/node1 \
+    --addr :4564 \
+    --cluster-addr :4565 \
+    --cluster-init \
+    --bootstrap 2>&1 | while IFS= read -r line; do
+      echo "$line" >&2
+      if [[ "$line" == *"cluster join token"*"token="* ]]; then
+        token="${line##*token=}"
+        token="${token%% *}"
+        if [[ -n "$token" ]]; then
+          echo "$token" > data/cluster-token
+          echo ">>> join token saved to data/cluster-token" >&2
+        fi
+      fi
+    done
+
+# Starts cluster node 2 (follower). Requires node 1 to be running.
+cluster-node2:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [[ ! -f data/cluster-token ]]; then
+    echo "error: data/cluster-token not found — start node 1 first (just cluster-node1)"
+    exit 1
+  fi
+  TOKEN=$(cat data/cluster-token)
+  exec go run ./cmd/gastrolog server \
+    --home data/node2 \
+    --addr :4574 \
+    --cluster-addr :4575 \
+    --join-addr localhost:4565 \
+    --join-token "$TOKEN"
+
+# Starts cluster node 3 (follower). Requires node 1 to be running.
+cluster-node3:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [[ ! -f data/cluster-token ]]; then
+    echo "error: data/cluster-token not found — start node 1 first (just cluster-node1)"
+    exit 1
+  fi
+  TOKEN=$(cat data/cluster-token)
+  exec go run ./cmd/gastrolog server \
+    --home data/node3 \
+    --addr :4584 \
+    --cluster-addr :4585 \
+    --join-addr localhost:4565 \
+    --join-token "$TOKEN"
+
+# Runs an existing cluster node 1 (no init, no enrollment).
+run-node1:
+  go run ./cmd/gastrolog server --home data/node1 --addr :4564 --cluster-addr :4565
+
+# Runs an existing cluster node 2 (no init, no enrollment).
+run-node2:
+  go run ./cmd/gastrolog server --home data/node2 --addr :4574 --cluster-addr :4575
+
+# Runs an existing cluster node 3 (no init, no enrollment).
+run-node3:
+  go run ./cmd/gastrolog server --home data/node3 --addr :4584 --cluster-addr :4585
+
+# --- End cluster recipes ---
+
 # Embeds built frontend assets into the backend (brotli-compressed).
 embed-frontend:
   rm -rf internal/frontend/dist/*

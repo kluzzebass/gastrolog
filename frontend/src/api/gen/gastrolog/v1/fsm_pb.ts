@@ -172,6 +172,12 @@ export class ConfigCommand extends Message<ConfigCommand> {
      */
     value: DeleteNodeConfigCommand;
     case: "deleteNodeConfig";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.PutClusterTLSCommand put_cluster_tls = 27;
+     */
+    value: PutClusterTLSCommand;
+    case: "putClusterTls";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<ConfigCommand>) {
@@ -208,6 +214,7 @@ export class ConfigCommand extends Message<ConfigCommand> {
     { no: 24, name: "delete_user_refresh_tokens", kind: "message", T: DeleteUserRefreshTokensCommand, oneof: "command" },
     { no: 25, name: "put_node_config", kind: "message", T: PutNodeConfigCommand, oneof: "command" },
     { no: 26, name: "delete_node_config", kind: "message", T: DeleteNodeConfigCommand, oneof: "command" },
+    { no: 27, name: "put_cluster_tls", kind: "message", T: PutClusterTLSCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ConfigCommand {
@@ -1532,6 +1539,67 @@ export class DeleteNodeConfigCommand extends Message<DeleteNodeConfigCommand> {
 }
 
 /**
+ * @generated from message gastrolog.v1.PutClusterTLSCommand
+ */
+export class PutClusterTLSCommand extends Message<PutClusterTLSCommand> {
+  /**
+   * @generated from field: bytes ca_cert_pem = 1;
+   */
+  caCertPem = new Uint8Array(0);
+
+  /**
+   * @generated from field: bytes ca_key_pem = 2;
+   */
+  caKeyPem = new Uint8Array(0);
+
+  /**
+   * @generated from field: bytes cluster_cert_pem = 3;
+   */
+  clusterCertPem = new Uint8Array(0);
+
+  /**
+   * @generated from field: bytes cluster_key_pem = 4;
+   */
+  clusterKeyPem = new Uint8Array(0);
+
+  /**
+   * @generated from field: string join_token = 5;
+   */
+  joinToken = "";
+
+  constructor(data?: PartialMessage<PutClusterTLSCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutClusterTLSCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "ca_cert_pem", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "ca_key_pem", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 3, name: "cluster_cert_pem", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 4, name: "cluster_key_pem", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 5, name: "join_token", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutClusterTLSCommand {
+    return new PutClusterTLSCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutClusterTLSCommand {
+    return new PutClusterTLSCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutClusterTLSCommand {
+    return new PutClusterTLSCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutClusterTLSCommand | PlainMessage<PutClusterTLSCommand> | undefined, b: PutClusterTLSCommand | PlainMessage<PutClusterTLSCommand> | undefined): boolean {
+    return proto3.util.equals(PutClusterTLSCommand, a, b);
+  }
+}
+
+/**
  * ConfigSnapshot captures the full config state for FSM.Snapshot()/Restore().
  * Each repeated field contains one entry per entity, using the Put/Create
  * command messages to represent complete entity state.
@@ -1589,6 +1657,11 @@ export class ConfigSnapshot extends Message<ConfigSnapshot> {
    */
   nodeConfigs: PutNodeConfigCommand[] = [];
 
+  /**
+   * @generated from field: gastrolog.v1.PutClusterTLSCommand cluster_tls = 11;
+   */
+  clusterTls?: PutClusterTLSCommand;
+
   constructor(data?: PartialMessage<ConfigSnapshot>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1607,6 +1680,7 @@ export class ConfigSnapshot extends Message<ConfigSnapshot> {
     { no: 8, name: "users", kind: "message", T: CreateUserCommand, repeated: true },
     { no: 9, name: "refresh_tokens", kind: "message", T: CreateRefreshTokenCommand, repeated: true },
     { no: 10, name: "node_configs", kind: "message", T: PutNodeConfigCommand, repeated: true },
+    { no: 11, name: "cluster_tls", kind: "message", T: PutClusterTLSCommand },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ConfigSnapshot {

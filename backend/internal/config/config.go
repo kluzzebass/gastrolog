@@ -86,6 +86,10 @@ type Store interface {
 	PutNode(ctx context.Context, node NodeConfig) error
 	DeleteNode(ctx context.Context, id uuid.UUID) error
 
+	// Cluster TLS (mTLS material for cluster port).
+	// Read via Load() → Config.ClusterTLS; PutClusterTLS is the Raft write path.
+	PutClusterTLS(ctx context.Context, tls ClusterTLS) error
+
 	// Certificates
 	ListCertificates(ctx context.Context) ([]CertPEM, error)
 	GetCertificate(ctx context.Context, id uuid.UUID) (*CertPEM, error)
@@ -153,6 +157,10 @@ type Config struct {
 	TLS                  TLSConfig       `json:"tls,omitzero"`
 	Lookup               LookupConfig    `json:"lookup,omitzero"`
 	SetupWizardDismissed bool            `json:"setup_wizard_dismissed,omitempty"`
+
+	// Cluster TLS material (mTLS certs for cluster gRPC port).
+	// Nil when running in single-node mode or before cluster-init.
+	ClusterTLS *ClusterTLS `json:"cluster_tls,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -487,6 +495,17 @@ type CertPEM struct {
 type NodeConfig struct {
 	ID   uuid.UUID `json:"id"`
 	Name string    `json:"name"`
+}
+
+// ClusterTLS holds mTLS material for the cluster gRPC port.
+// All fields are PEM-encoded except JoinToken which is a hex string.
+// Stored atomically via a single Raft command to prevent inconsistent states.
+type ClusterTLS struct {
+	CACertPEM      string `json:"ca_cert_pem"`
+	CAKeyPEM       string `json:"ca_key_pem"`
+	ClusterCertPEM string `json:"cluster_cert_pem"`
+	ClusterKeyPEM  string `json:"cluster_key_pem"`
+	JoinToken      string `json:"join_token"`
 }
 
 // ---------------------------------------------------------------------------

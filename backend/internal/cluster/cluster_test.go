@@ -84,7 +84,7 @@ func newTestNode(t *testing.T, nodeID string, bootstrap bool) *testNode {
 	})
 
 	// Enable leader forwarding.
-	fwd := cluster.NewForwarder(r)
+	fwd := cluster.NewForwarder(r, nil)
 	store.SetForwarder(fwd)
 	t.Cleanup(func() { _ = fwd.Close() })
 

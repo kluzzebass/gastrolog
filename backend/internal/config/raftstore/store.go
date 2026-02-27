@@ -240,6 +240,10 @@ func (s *Store) SaveServerSettings(ctx context.Context, auth config.AuthConfig, 
 	return s.apply(cmd)
 }
 
+func (s *Store) PutClusterTLS(ctx context.Context, tls config.ClusterTLS) error {
+	return s.apply(command.NewPutClusterTLS(tls))
+}
+
 func (s *Store) PutNode(ctx context.Context, node config.NodeConfig) error {
 	return s.apply(command.NewPutNodeConfig(node))
 }

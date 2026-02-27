@@ -10,3 +10,18 @@ message ForwardApplyRequest {
 }
 
 message ForwardApplyResponse {}
+
+// EnrollRequest is sent by a joining node to the cluster leader.
+// The token_secret proves the node is authorized to join.
+message EnrollRequest {
+  string token_secret = 1;
+  string node_id = 2;
+  string node_addr = 3;
+}
+
+// EnrollResponse returns the cluster TLS material to the joining node.
+message EnrollResponse {
+  bytes ca_cert_pem = 1;
+  bytes cluster_cert_pem = 2;
+  bytes cluster_key_pem = 3;
+}

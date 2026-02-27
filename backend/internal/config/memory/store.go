@@ -38,6 +38,7 @@ type Store struct {
 	users         map[uuid.UUID]config.User         // keyed by ID (UUID)
 	refreshTokens map[uuid.UUID]config.RefreshToken // keyed by token ID
 	nodes         map[uuid.UUID]config.NodeConfig    // keyed by node ID
+	clusterTLS    *config.ClusterTLS
 }
 
 var _ config.Store = (*Store)(nil)
@@ -63,7 +64,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	if len(s.filters) == 0 && len(s.rotationPolicies) == 0 && len(s.retentionPolicies) == 0 && len(s.vaults) == 0 && len(s.ingesters) == 0 && !s.ss.hasServerSettings {
+	if len(s.filters) == 0 && len(s.rotationPolicies) == 0 && len(s.retentionPolicies) == 0 && len(s.vaults) == 0 && len(s.ingesters) == 0 && !s.ss.hasServerSettings && s.clusterTLS == nil {
 		return nil, nil
 	}
 
@@ -126,6 +127,12 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 		cfg.TLS = s.ss.tls
 		cfg.Lookup = s.ss.lookup
 		cfg.SetupWizardDismissed = s.ss.setupDismissed
+	}
+
+	// Include ClusterTLS if loaded (cluster mode).
+	if s.clusterTLS != nil {
+		c := *s.clusterTLS
+		cfg.ClusterTLS = &c
 	}
 
 	return cfg, nil
@@ -398,6 +405,16 @@ func (s *Store) DeleteNode(ctx context.Context, id uuid.UUID) error {
 	defer s.mu.Unlock()
 
 	delete(s.nodes, id)
+	return nil
+}
+
+// Cluster TLS
+
+func (s *Store) PutClusterTLS(ctx context.Context, tls config.ClusterTLS) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.clusterTLS = &tls
 	return nil
 }
 

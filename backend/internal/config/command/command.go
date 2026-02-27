@@ -799,6 +799,36 @@ func ExtractDeleteNodeConfig(cmd *gastrologv1.DeleteNodeConfigCommand) (uuid.UUI
 }
 
 // ---------------------------------------------------------------------------
+// Cluster TLS
+// ---------------------------------------------------------------------------
+
+// NewPutClusterTLS creates a ConfigCommand for PutClusterTLS.
+func NewPutClusterTLS(tls config.ClusterTLS) *gastrologv1.ConfigCommand {
+	return &gastrologv1.ConfigCommand{
+		Command: &gastrologv1.ConfigCommand_PutClusterTls{
+			PutClusterTls: &gastrologv1.PutClusterTLSCommand{
+				CaCertPem:      []byte(tls.CACertPEM),
+				CaKeyPem:       []byte(tls.CAKeyPEM),
+				ClusterCertPem: []byte(tls.ClusterCertPEM),
+				ClusterKeyPem:  []byte(tls.ClusterKeyPEM),
+				JoinToken:      tls.JoinToken,
+			},
+		},
+	}
+}
+
+// ExtractPutClusterTLS converts a PutClusterTLSCommand back to a ClusterTLS.
+func ExtractPutClusterTLS(cmd *gastrologv1.PutClusterTLSCommand) config.ClusterTLS {
+	return config.ClusterTLS{
+		CACertPEM:      string(cmd.GetCaCertPem()),
+		CAKeyPEM:       string(cmd.GetCaKeyPem()),
+		ClusterCertPEM: string(cmd.GetClusterCertPem()),
+		ClusterKeyPEM:  string(cmd.GetClusterKeyPem()),
+		JoinToken:      cmd.GetJoinToken(),
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Snapshot
 // ---------------------------------------------------------------------------
 
@@ -847,6 +877,11 @@ func BuildSnapshot(cfg *config.Config, users []config.User, tokens []config.Refr
 	}
 	for _, n := range nodes {
 		snap.NodeConfigs = append(snap.NodeConfigs, putNodeConfigCmd(n))
+	}
+
+	// Include ClusterTLS if present on Config.
+	if cfg.ClusterTLS != nil {
+		snap.ClusterTls = NewPutClusterTLS(*cfg.ClusterTLS).GetPutClusterTls()
 	}
 
 	return snap
@@ -942,6 +977,12 @@ func RestoreSnapshot(snap *gastrologv1.ConfigSnapshot) (*config.Config, []config
 			return nil, nil, nil, nil, fmt.Errorf("restore node: %w", err)
 		}
 		nodes = append(nodes, node)
+	}
+
+	// Restore ClusterTLS if present in snapshot.
+	if snap.ClusterTls != nil {
+		tls := ExtractPutClusterTLS(snap.ClusterTls)
+		cfg.ClusterTLS = &tls
 	}
 
 	return cfg, users, tokens, nodes, nil

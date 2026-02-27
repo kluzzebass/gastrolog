@@ -33,6 +33,7 @@ const (
 	NotifyIngesterPut
 	NotifyIngesterDeleted
 	NotifySettingPut
+	NotifyClusterTLSPut
 )
 
 // Notification describes a config mutation that the FSM just applied.
@@ -103,7 +104,8 @@ func (f *FSM) Apply(l *raft.Log) any {
 		*gastrologv1.ConfigCommand_PutCertificate,
 		*gastrologv1.ConfigCommand_DeleteCertificate,
 		*gastrologv1.ConfigCommand_PutNodeConfig,
-		*gastrologv1.ConfigCommand_DeleteNodeConfig:
+		*gastrologv1.ConfigCommand_DeleteNodeConfig,
+		*gastrologv1.ConfigCommand_PutClusterTls:
 		return f.applyConfig(ctx, cmd)
 
 	case *gastrologv1.ConfigCommand_CreateUser,
@@ -193,6 +195,12 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.ConfigCommand
 			return nil, err
 		}
 		return nil, f.store.DeleteNode(ctx, id)
+	case *gastrologv1.ConfigCommand_PutClusterTls:
+		tls := command.ExtractPutClusterTLS(c.PutClusterTls)
+		if err := f.store.PutClusterTLS(ctx, tls); err != nil {
+			return nil, err
+		}
+		return &Notification{Kind: NotifyClusterTLSPut}, nil
 	default:
 		return nil, fmt.Errorf("unexpected config command: %T", c)
 	}
@@ -487,6 +495,7 @@ func (f *FSM) Snapshot() (raft.FSMSnapshot, error) {
 	}
 
 	snap := command.BuildSnapshot(cfg, users, tokens, nodes)
+
 	data, err := command.MarshalSnapshot(snap)
 	if err != nil {
 		return nil, fmt.Errorf("marshal snapshot: %w", err)
@@ -578,6 +587,13 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit // snapshot re
 	for _, n := range nodes {
 		if err := newStore.PutNode(ctx, n); err != nil {
 			return fmt.Errorf("restore node %s: %w", n.ID, err)
+		}
+	}
+
+	// Restore cluster TLS from Config (populated by RestoreSnapshot).
+	if cfg.ClusterTLS != nil {
+		if err := newStore.PutClusterTLS(ctx, *cfg.ClusterTLS); err != nil {
+			return fmt.Errorf("restore cluster TLS: %w", err)
 		}
 	}
 

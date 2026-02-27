@@ -13,9 +13,11 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"strings"
 	"time"
 
 	"gastrolog/internal/logging"
@@ -25,7 +27,11 @@ import (
 	"github.com/Jille/raftadmin"
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 )
 
 // Config holds cluster server configuration.
@@ -36,6 +42,10 @@ type Config struct {
 	// LocalAddr is the advertised address other nodes use to reach this node's
 	// cluster port. Defaults to ClusterAddr if empty.
 	LocalAddr string
+
+	// TLS holds atomic TLS state for mTLS on the cluster port.
+	// When nil, the cluster port uses insecure credentials (tests, single-node).
+	TLS *ClusterTLS
 
 	// Logger for structured logging.
 	Logger *slog.Logger
@@ -55,6 +65,9 @@ type Server struct {
 
 	// applyFn applies a pre-marshaled ConfigCommand on the leader.
 	applyFn func(ctx context.Context, data []byte) error
+
+	// enrollHandler handles the Enroll RPC for joining nodes.
+	enrollHandler EnrollHandler
 }
 
 // New creates a new cluster Server and binds the listen port immediately.
@@ -84,10 +97,17 @@ func New(cfg Config) (*Server, error) {
 // raft.Transport suitable for passing to raft.NewRaft().
 // Must be called before Start().
 func (s *Server) Transport() hraft.Transport {
+	var creds credentials.TransportCredentials
+	if s.cfg.TLS != nil {
+		creds = s.cfg.TLS.TransportCredentials()
+	} else {
+		creds = insecure.NewCredentials()
+	}
+
 	s.tm = transport.New(
 		hraft.ServerAddress(s.localAddr),
 		[]grpc.DialOption{
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithTransportCredentials(creds),
 		},
 	)
 	return s.tm.Transport()
@@ -99,6 +119,16 @@ func (s *Server) SetRaft(r *hraft.Raft) {
 	s.raft = r
 }
 
+// AddVoter adds a new node to the Raft cluster as a voter.
+// The leader must be the one calling this. Blocks until the change is committed
+// or the timeout expires.
+func (s *Server) AddVoter(id, addr string, timeout time.Duration) error {
+	if s.raft == nil {
+		return errors.New("raft not initialized")
+	}
+	return s.raft.AddVoter(hraft.ServerID(id), hraft.ServerAddress(addr), 0, timeout).Error()
+}
+
 // SetApplyFn sets the function used by the ForwardApply handler to apply
 // commands on the leader node.
 func (s *Server) SetApplyFn(fn func(ctx context.Context, data []byte) error) {
@@ -108,7 +138,18 @@ func (s *Server) SetApplyFn(fn func(ctx context.Context, data []byte) error) {
 // Start creates the gRPC server, registers all services, and begins serving.
 // The listener was already bound in New().
 func (s *Server) Start() error {
-	s.grpcSrv = grpc.NewServer()
+	var opts []grpc.ServerOption
+
+	if s.cfg.TLS != nil {
+		tlsCfg := s.cfg.TLS.ServerTLSConfig()
+		opts = append(opts,
+			grpc.Creds(credentials.NewTLS(tlsCfg)),
+			grpc.ChainUnaryInterceptor(s.mTLSUnaryInterceptor),
+			grpc.ChainStreamInterceptor(s.mTLSStreamInterceptor),
+		)
+	}
+
+	s.grpcSrv = grpc.NewServer(opts...)
 
 	// Raft transport (AppendEntries, RequestVote, InstallSnapshot, etc.).
 	s.tm.Register(s.grpcSrv)
@@ -119,8 +160,8 @@ func (s *Server) Start() error {
 		leaderhealth.Setup(s.raft, s.grpcSrv, []string{"cluster"})
 	}
 
-	// Leader forwarding for config writes from followers.
-	registerForwardService(s.grpcSrv, s)
+	// Cluster service (ForwardApply + Enroll).
+	registerClusterService(s.grpcSrv, s)
 
 	s.logger.Info("cluster gRPC server starting", "addr", s.listener.Addr().String())
 
@@ -130,6 +171,43 @@ func (s *Server) Start() error {
 		}
 	}()
 
+	return nil
+}
+
+// mTLSUnaryInterceptor enforces client certificates on all RPCs except Enroll.
+func (s *Server) mTLSUnaryInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+	if err := requireClientCert(ctx, info.FullMethod); err != nil {
+		return nil, err
+	}
+	return handler(ctx, req)
+}
+
+// mTLSStreamInterceptor enforces client certificates on all streaming RPCs.
+func (s *Server) mTLSStreamInterceptor(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	if err := requireClientCert(ss.Context(), info.FullMethod); err != nil {
+		return err
+	}
+	return handler(srv, ss)
+}
+
+// requireClientCert checks that the peer presented a verified client certificate.
+// The Enroll RPC is exempt — joining nodes don't have a cert yet.
+func requireClientCert(ctx context.Context, method string) error {
+	if strings.HasSuffix(method, "/Enroll") {
+		return nil
+	}
+
+	p, ok := peer.FromContext(ctx)
+	if !ok {
+		return status.Error(codes.Unauthenticated, "no peer info")
+	}
+	tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo)
+	if !ok {
+		return status.Error(codes.Unauthenticated, "no TLS info")
+	}
+	if len(tlsInfo.State.VerifiedChains) == 0 {
+		return status.Error(codes.Unauthenticated, "client certificate required")
+	}
 	return nil
 }
 
