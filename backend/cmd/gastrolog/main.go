@@ -20,6 +20,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	petname "github.com/dustinkirkland/golang-petname"
@@ -67,6 +68,10 @@ import (
 var version = "dev"
 
 func main() {
+	// Register signal handler early, before any framework code.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	// Create base logger with ComponentFilterHandler for dynamic log level control.
 	baseHandler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelDebug, // Allow all levels; filtering done by ComponentFilterHandler
@@ -110,10 +115,11 @@ func main() {
 			joinAddr, _ := cmd.Flags().GetString("join-addr")
 			joinToken, _ := cmd.Flags().GetString("join-token")
 
-			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-			defer cancel()
-
-			return run(ctx, logger, homeFlag, configType, serverAddr, bootstrap, noAuth, clusterAddr, clusterInit, joinAddr, joinToken)
+			err := run(cmd.Context(), logger, homeFlag, configType, serverAddr, bootstrap, noAuth, clusterAddr, clusterInit, joinAddr, joinToken)
+			if cmd.Context().Err() != nil {
+				return nil //nolint:nilerr // signal-triggered shutdown is not an error
+			}
+			return err
 		},
 	}
 
@@ -135,8 +141,12 @@ func main() {
 
 	rootCmd.AddCommand(serverCmd, versionCmd, cli.NewConfigCommand())
 
-	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
+		if ctx.Err() != nil {
+			stop()
+			return // signal-triggered shutdown is not an error
+		}
+		os.Exit(1) //nolint:gocritic // stop() is just signal cleanup; process is exiting
 	}
 }
 
