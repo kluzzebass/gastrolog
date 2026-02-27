@@ -39,6 +39,64 @@ proto3.util.setEnumType(Status, "gastrolog.v1.Status", [
 ]);
 
 /**
+ * @generated from enum gastrolog.v1.ClusterNodeRole
+ */
+export enum ClusterNodeRole {
+  /**
+   * @generated from enum value: CLUSTER_NODE_ROLE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: CLUSTER_NODE_ROLE_LEADER = 1;
+   */
+  LEADER = 1,
+
+  /**
+   * @generated from enum value: CLUSTER_NODE_ROLE_FOLLOWER = 2;
+   */
+  FOLLOWER = 2,
+}
+// Retrieve enum metadata with: proto3.getEnumType(ClusterNodeRole)
+proto3.util.setEnumType(ClusterNodeRole, "gastrolog.v1.ClusterNodeRole", [
+  { no: 0, name: "CLUSTER_NODE_ROLE_UNSPECIFIED" },
+  { no: 1, name: "CLUSTER_NODE_ROLE_LEADER" },
+  { no: 2, name: "CLUSTER_NODE_ROLE_FOLLOWER" },
+]);
+
+/**
+ * @generated from enum gastrolog.v1.ClusterNodeSuffrage
+ */
+export enum ClusterNodeSuffrage {
+  /**
+   * @generated from enum value: CLUSTER_NODE_SUFFRAGE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: CLUSTER_NODE_SUFFRAGE_VOTER = 1;
+   */
+  VOTER = 1,
+
+  /**
+   * @generated from enum value: CLUSTER_NODE_SUFFRAGE_NONVOTER = 2;
+   */
+  NONVOTER = 2,
+
+  /**
+   * @generated from enum value: CLUSTER_NODE_SUFFRAGE_STAGING = 3;
+   */
+  STAGING = 3,
+}
+// Retrieve enum metadata with: proto3.getEnumType(ClusterNodeSuffrage)
+proto3.util.setEnumType(ClusterNodeSuffrage, "gastrolog.v1.ClusterNodeSuffrage", [
+  { no: 0, name: "CLUSTER_NODE_SUFFRAGE_UNSPECIFIED" },
+  { no: 1, name: "CLUSTER_NODE_SUFFRAGE_VOTER" },
+  { no: 2, name: "CLUSTER_NODE_SUFFRAGE_NONVOTER" },
+  { no: 3, name: "CLUSTER_NODE_SUFFRAGE_STAGING" },
+]);
+
+/**
  * @generated from message gastrolog.v1.HealthRequest
  */
 export class HealthRequest extends Message<HealthRequest> {
@@ -197,6 +255,275 @@ export class ShutdownResponse extends Message<ShutdownResponse> {
 
   static equals(a: ShutdownResponse | PlainMessage<ShutdownResponse> | undefined, b: ShutdownResponse | PlainMessage<ShutdownResponse> | undefined): boolean {
     return proto3.util.equals(ShutdownResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.GetClusterStatusRequest
+ */
+export class GetClusterStatusRequest extends Message<GetClusterStatusRequest> {
+  constructor(data?: PartialMessage<GetClusterStatusRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetClusterStatusRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetClusterStatusRequest {
+    return new GetClusterStatusRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetClusterStatusRequest {
+    return new GetClusterStatusRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetClusterStatusRequest {
+    return new GetClusterStatusRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetClusterStatusRequest | PlainMessage<GetClusterStatusRequest> | undefined, b: GetClusterStatusRequest | PlainMessage<GetClusterStatusRequest> | undefined): boolean {
+    return proto3.util.equals(GetClusterStatusRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.GetClusterStatusResponse
+ */
+export class GetClusterStatusResponse extends Message<GetClusterStatusResponse> {
+  /**
+   * @generated from field: bool cluster_enabled = 1;
+   */
+  clusterEnabled = false;
+
+  /**
+   * @generated from field: string leader_id = 2;
+   */
+  leaderId = "";
+
+  /**
+   * @generated from field: string leader_address = 3;
+   */
+  leaderAddress = "";
+
+  /**
+   * @generated from field: repeated gastrolog.v1.ClusterNode nodes = 4;
+   */
+  nodes: ClusterNode[] = [];
+
+  /**
+   * @generated from field: gastrolog.v1.RaftStats local_stats = 5;
+   */
+  localStats?: RaftStats;
+
+  constructor(data?: PartialMessage<GetClusterStatusResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetClusterStatusResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "cluster_enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 2, name: "leader_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "leader_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "nodes", kind: "message", T: ClusterNode, repeated: true },
+    { no: 5, name: "local_stats", kind: "message", T: RaftStats },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetClusterStatusResponse {
+    return new GetClusterStatusResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetClusterStatusResponse {
+    return new GetClusterStatusResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetClusterStatusResponse {
+    return new GetClusterStatusResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetClusterStatusResponse | PlainMessage<GetClusterStatusResponse> | undefined, b: GetClusterStatusResponse | PlainMessage<GetClusterStatusResponse> | undefined): boolean {
+    return proto3.util.equals(GetClusterStatusResponse, a, b);
+  }
+}
+
+/**
+ * RaftStats contains Raft consensus statistics for the local node.
+ * These are derived from the Hashicorp Raft Stats() call and typed methods.
+ *
+ * @generated from message gastrolog.v1.RaftStats
+ */
+export class RaftStats extends Message<RaftStats> {
+  /**
+   * "Leader", "Follower", "Candidate", "Shutdown"
+   *
+   * @generated from field: string state = 1;
+   */
+  state = "";
+
+  /**
+   * @generated from field: uint64 term = 2;
+   */
+  term = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 last_log_index = 3;
+   */
+  lastLogIndex = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 last_log_term = 4;
+   */
+  lastLogTerm = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 commit_index = 5;
+   */
+  commitIndex = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 applied_index = 6;
+   */
+  appliedIndex = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 fsm_pending = 7;
+   */
+  fsmPending = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 last_snapshot_index = 8;
+   */
+  lastSnapshotIndex = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 last_snapshot_term = 9;
+   */
+  lastSnapshotTerm = protoInt64.zero;
+
+  /**
+   * duration since last leader contact (e.g. "12ms", "never")
+   *
+   * @generated from field: string last_contact = 10;
+   */
+  lastContact = "";
+
+  /**
+   * @generated from field: uint32 num_peers = 11;
+   */
+  numPeers = 0;
+
+  /**
+   * @generated from field: uint32 protocol_version = 12;
+   */
+  protocolVersion = 0;
+
+  constructor(data?: PartialMessage<RaftStats>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RaftStats";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "state", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "term", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 3, name: "last_log_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 4, name: "last_log_term", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 5, name: "commit_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 6, name: "applied_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 7, name: "fsm_pending", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 8, name: "last_snapshot_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 9, name: "last_snapshot_term", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 10, name: "last_contact", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 11, name: "num_peers", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 12, name: "protocol_version", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RaftStats {
+    return new RaftStats().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RaftStats {
+    return new RaftStats().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RaftStats {
+    return new RaftStats().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RaftStats | PlainMessage<RaftStats> | undefined, b: RaftStats | PlainMessage<RaftStats> | undefined): boolean {
+    return proto3.util.equals(RaftStats, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ClusterNode
+ */
+export class ClusterNode extends Message<ClusterNode> {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id = "";
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name = "";
+
+  /**
+   * @generated from field: string address = 3;
+   */
+  address = "";
+
+  /**
+   * @generated from field: gastrolog.v1.ClusterNodeRole role = 4;
+   */
+  role = ClusterNodeRole.UNSPECIFIED;
+
+  /**
+   * @generated from field: gastrolog.v1.ClusterNodeSuffrage suffrage = 5;
+   */
+  suffrage = ClusterNodeSuffrage.UNSPECIFIED;
+
+  /**
+   * @generated from field: bool is_leader = 6;
+   */
+  isLeader = false;
+
+  constructor(data?: PartialMessage<ClusterNode>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ClusterNode";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "role", kind: "enum", T: proto3.getEnumType(ClusterNodeRole) },
+    { no: 5, name: "suffrage", kind: "enum", T: proto3.getEnumType(ClusterNodeSuffrage) },
+    { no: 6, name: "is_leader", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ClusterNode {
+    return new ClusterNode().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ClusterNode {
+    return new ClusterNode().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ClusterNode {
+    return new ClusterNode().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ClusterNode | PlainMessage<ClusterNode> | undefined, b: ClusterNode | PlainMessage<ClusterNode> | undefined): boolean {
+    return proto3.util.equals(ClusterNode, a, b);
   }
 }
 

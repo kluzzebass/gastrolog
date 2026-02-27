@@ -11,6 +11,9 @@ service LifecycleService {
 
   // Shutdown initiates a graceful shutdown.
   rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+
+  // GetClusterStatus returns the current cluster topology and Raft state.
+  rpc GetClusterStatus(GetClusterStatusRequest) returns (GetClusterStatusResponse);
 }
 
 message HealthRequest {}
@@ -35,3 +38,52 @@ message ShutdownRequest {
 }
 
 message ShutdownResponse {}
+
+message GetClusterStatusRequest {}
+
+message GetClusterStatusResponse {
+  bool cluster_enabled = 1;
+  string leader_id = 2;
+  string leader_address = 3;
+  repeated ClusterNode nodes = 4;
+  RaftStats local_stats = 5;
+}
+
+// RaftStats contains Raft consensus statistics for the local node.
+// These are derived from the Hashicorp Raft Stats() call and typed methods.
+message RaftStats {
+  string state = 1;              // "Leader", "Follower", "Candidate", "Shutdown"
+  uint64 term = 2;
+  uint64 last_log_index = 3;
+  uint64 last_log_term = 4;
+  uint64 commit_index = 5;
+  uint64 applied_index = 6;
+  uint64 fsm_pending = 7;
+  uint64 last_snapshot_index = 8;
+  uint64 last_snapshot_term = 9;
+  string last_contact = 10;      // duration since last leader contact (e.g. "12ms", "never")
+  uint32 num_peers = 11;
+  uint32 protocol_version = 12;
+}
+
+message ClusterNode {
+  string id = 1;
+  string name = 2;
+  string address = 3;
+  ClusterNodeRole role = 4;
+  ClusterNodeSuffrage suffrage = 5;
+  bool is_leader = 6;
+}
+
+enum ClusterNodeRole {
+  CLUSTER_NODE_ROLE_UNSPECIFIED = 0;
+  CLUSTER_NODE_ROLE_LEADER = 1;
+  CLUSTER_NODE_ROLE_FOLLOWER = 2;
+}
+
+enum ClusterNodeSuffrage {
+  CLUSTER_NODE_SUFFRAGE_UNSPECIFIED = 0;
+  CLUSTER_NODE_SUFFRAGE_VOTER = 1;
+  CLUSTER_NODE_SUFFRAGE_NONVOTER = 2;
+  CLUSTER_NODE_SUFFRAGE_STAGING = 3;
+}

@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { HealthRequest, HealthResponse, ShutdownRequest, ShutdownResponse } from "./lifecycle_pb.js";
+import { GetClusterStatusRequest, GetClusterStatusResponse, HealthRequest, HealthResponse, ShutdownRequest, ShutdownResponse } from "./lifecycle_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -34,6 +34,17 @@ export const LifecycleService = {
       name: "Shutdown",
       I: ShutdownRequest,
       O: ShutdownResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * GetClusterStatus returns the current cluster topology and Raft state.
+     *
+     * @generated from rpc gastrolog.v1.LifecycleService.GetClusterStatus
+     */
+    getClusterStatus: {
+      name: "GetClusterStatus",
+      I: GetClusterStatusRequest,
+      O: GetClusterStatusResponse,
       kind: MethodKind.Unary,
     },
   }

@@ -235,6 +235,62 @@ func (s *Server) Stop() {
 	}
 }
 
+// LeaderInfo returns the current Raft leader's address and server ID.
+// Returns empty strings if there is no known leader.
+func (s *Server) LeaderInfo() (address string, id string) {
+	if s.raft == nil {
+		return "", ""
+	}
+	addr, serverID := s.raft.LeaderWithID()
+	return string(addr), string(serverID)
+}
+
+// Servers returns the current Raft configuration as a slice of server descriptions.
+func (s *Server) Servers() ([]RaftServer, error) {
+	if s.raft == nil {
+		return nil, nil
+	}
+	future := s.raft.GetConfiguration()
+	if err := future.Error(); err != nil {
+		return nil, err
+	}
+	cfg := future.Configuration()
+	servers := make([]RaftServer, 0, len(cfg.Servers))
+	for _, srv := range cfg.Servers {
+		var suffrage string
+		switch srv.Suffrage {
+		case hraft.Voter:
+			suffrage = "Voter"
+		case hraft.Nonvoter:
+			suffrage = "Nonvoter"
+		case hraft.Staging:
+			suffrage = "Staging"
+		}
+		servers = append(servers, RaftServer{
+			ID:       string(srv.ID),
+			Address:  string(srv.Address),
+			Suffrage: suffrage,
+		})
+	}
+	return servers, nil
+}
+
+// RaftServer describes a single node in the Raft configuration.
+type RaftServer struct {
+	ID       string
+	Address  string
+	Suffrage string
+}
+
+// LocalStats returns the local Raft node's stats as a string map.
+// Returns nil if Raft is not initialized.
+func (s *Server) LocalStats() map[string]string {
+	if s.raft == nil {
+		return nil
+	}
+	return s.raft.Stats()
+}
+
 // Addr returns the listener address, or empty if not started.
 func (s *Server) Addr() string {
 	if s.listener != nil {

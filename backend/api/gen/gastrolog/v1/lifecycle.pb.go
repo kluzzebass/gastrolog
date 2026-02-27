@@ -73,6 +73,107 @@ func (Status) EnumDescriptor() ([]byte, []int) {
 	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{0}
 }
 
+type ClusterNodeRole int32
+
+const (
+	ClusterNodeRole_CLUSTER_NODE_ROLE_UNSPECIFIED ClusterNodeRole = 0
+	ClusterNodeRole_CLUSTER_NODE_ROLE_LEADER      ClusterNodeRole = 1
+	ClusterNodeRole_CLUSTER_NODE_ROLE_FOLLOWER    ClusterNodeRole = 2
+)
+
+// Enum value maps for ClusterNodeRole.
+var (
+	ClusterNodeRole_name = map[int32]string{
+		0: "CLUSTER_NODE_ROLE_UNSPECIFIED",
+		1: "CLUSTER_NODE_ROLE_LEADER",
+		2: "CLUSTER_NODE_ROLE_FOLLOWER",
+	}
+	ClusterNodeRole_value = map[string]int32{
+		"CLUSTER_NODE_ROLE_UNSPECIFIED": 0,
+		"CLUSTER_NODE_ROLE_LEADER":      1,
+		"CLUSTER_NODE_ROLE_FOLLOWER":    2,
+	}
+)
+
+func (x ClusterNodeRole) Enum() *ClusterNodeRole {
+	p := new(ClusterNodeRole)
+	*p = x
+	return p
+}
+
+func (x ClusterNodeRole) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ClusterNodeRole) Descriptor() protoreflect.EnumDescriptor {
+	return file_gastrolog_v1_lifecycle_proto_enumTypes[1].Descriptor()
+}
+
+func (ClusterNodeRole) Type() protoreflect.EnumType {
+	return &file_gastrolog_v1_lifecycle_proto_enumTypes[1]
+}
+
+func (x ClusterNodeRole) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ClusterNodeRole.Descriptor instead.
+func (ClusterNodeRole) EnumDescriptor() ([]byte, []int) {
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{1}
+}
+
+type ClusterNodeSuffrage int32
+
+const (
+	ClusterNodeSuffrage_CLUSTER_NODE_SUFFRAGE_UNSPECIFIED ClusterNodeSuffrage = 0
+	ClusterNodeSuffrage_CLUSTER_NODE_SUFFRAGE_VOTER       ClusterNodeSuffrage = 1
+	ClusterNodeSuffrage_CLUSTER_NODE_SUFFRAGE_NONVOTER    ClusterNodeSuffrage = 2
+	ClusterNodeSuffrage_CLUSTER_NODE_SUFFRAGE_STAGING     ClusterNodeSuffrage = 3
+)
+
+// Enum value maps for ClusterNodeSuffrage.
+var (
+	ClusterNodeSuffrage_name = map[int32]string{
+		0: "CLUSTER_NODE_SUFFRAGE_UNSPECIFIED",
+		1: "CLUSTER_NODE_SUFFRAGE_VOTER",
+		2: "CLUSTER_NODE_SUFFRAGE_NONVOTER",
+		3: "CLUSTER_NODE_SUFFRAGE_STAGING",
+	}
+	ClusterNodeSuffrage_value = map[string]int32{
+		"CLUSTER_NODE_SUFFRAGE_UNSPECIFIED": 0,
+		"CLUSTER_NODE_SUFFRAGE_VOTER":       1,
+		"CLUSTER_NODE_SUFFRAGE_NONVOTER":    2,
+		"CLUSTER_NODE_SUFFRAGE_STAGING":     3,
+	}
+)
+
+func (x ClusterNodeSuffrage) Enum() *ClusterNodeSuffrage {
+	p := new(ClusterNodeSuffrage)
+	*p = x
+	return p
+}
+
+func (x ClusterNodeSuffrage) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ClusterNodeSuffrage) Descriptor() protoreflect.EnumDescriptor {
+	return file_gastrolog_v1_lifecycle_proto_enumTypes[2].Descriptor()
+}
+
+func (ClusterNodeSuffrage) Type() protoreflect.EnumType {
+	return &file_gastrolog_v1_lifecycle_proto_enumTypes[2]
+}
+
+func (x ClusterNodeSuffrage) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ClusterNodeSuffrage.Descriptor instead.
+func (ClusterNodeSuffrage) EnumDescriptor() ([]byte, []int) {
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{2}
+}
+
 type HealthRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -265,6 +366,336 @@ func (*ShutdownResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{3}
 }
 
+type GetClusterStatusRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetClusterStatusRequest) Reset() {
+	*x = GetClusterStatusRequest{}
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetClusterStatusRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetClusterStatusRequest) ProtoMessage() {}
+
+func (x *GetClusterStatusRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetClusterStatusRequest.ProtoReflect.Descriptor instead.
+func (*GetClusterStatusRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{4}
+}
+
+type GetClusterStatusResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ClusterEnabled bool                   `protobuf:"varint,1,opt,name=cluster_enabled,json=clusterEnabled,proto3" json:"cluster_enabled,omitempty"`
+	LeaderId       string                 `protobuf:"bytes,2,opt,name=leader_id,json=leaderId,proto3" json:"leader_id,omitempty"`
+	LeaderAddress  string                 `protobuf:"bytes,3,opt,name=leader_address,json=leaderAddress,proto3" json:"leader_address,omitempty"`
+	Nodes          []*ClusterNode         `protobuf:"bytes,4,rep,name=nodes,proto3" json:"nodes,omitempty"`
+	LocalStats     *RaftStats             `protobuf:"bytes,5,opt,name=local_stats,json=localStats,proto3" json:"local_stats,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *GetClusterStatusResponse) Reset() {
+	*x = GetClusterStatusResponse{}
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetClusterStatusResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetClusterStatusResponse) ProtoMessage() {}
+
+func (x *GetClusterStatusResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetClusterStatusResponse.ProtoReflect.Descriptor instead.
+func (*GetClusterStatusResponse) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *GetClusterStatusResponse) GetClusterEnabled() bool {
+	if x != nil {
+		return x.ClusterEnabled
+	}
+	return false
+}
+
+func (x *GetClusterStatusResponse) GetLeaderId() string {
+	if x != nil {
+		return x.LeaderId
+	}
+	return ""
+}
+
+func (x *GetClusterStatusResponse) GetLeaderAddress() string {
+	if x != nil {
+		return x.LeaderAddress
+	}
+	return ""
+}
+
+func (x *GetClusterStatusResponse) GetNodes() []*ClusterNode {
+	if x != nil {
+		return x.Nodes
+	}
+	return nil
+}
+
+func (x *GetClusterStatusResponse) GetLocalStats() *RaftStats {
+	if x != nil {
+		return x.LocalStats
+	}
+	return nil
+}
+
+// RaftStats contains Raft consensus statistics for the local node.
+// These are derived from the Hashicorp Raft Stats() call and typed methods.
+type RaftStats struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	State             string                 `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"` // "Leader", "Follower", "Candidate", "Shutdown"
+	Term              uint64                 `protobuf:"varint,2,opt,name=term,proto3" json:"term,omitempty"`
+	LastLogIndex      uint64                 `protobuf:"varint,3,opt,name=last_log_index,json=lastLogIndex,proto3" json:"last_log_index,omitempty"`
+	LastLogTerm       uint64                 `protobuf:"varint,4,opt,name=last_log_term,json=lastLogTerm,proto3" json:"last_log_term,omitempty"`
+	CommitIndex       uint64                 `protobuf:"varint,5,opt,name=commit_index,json=commitIndex,proto3" json:"commit_index,omitempty"`
+	AppliedIndex      uint64                 `protobuf:"varint,6,opt,name=applied_index,json=appliedIndex,proto3" json:"applied_index,omitempty"`
+	FsmPending        uint64                 `protobuf:"varint,7,opt,name=fsm_pending,json=fsmPending,proto3" json:"fsm_pending,omitempty"`
+	LastSnapshotIndex uint64                 `protobuf:"varint,8,opt,name=last_snapshot_index,json=lastSnapshotIndex,proto3" json:"last_snapshot_index,omitempty"`
+	LastSnapshotTerm  uint64                 `protobuf:"varint,9,opt,name=last_snapshot_term,json=lastSnapshotTerm,proto3" json:"last_snapshot_term,omitempty"`
+	LastContact       string                 `protobuf:"bytes,10,opt,name=last_contact,json=lastContact,proto3" json:"last_contact,omitempty"` // duration since last leader contact (e.g. "12ms", "never")
+	NumPeers          uint32                 `protobuf:"varint,11,opt,name=num_peers,json=numPeers,proto3" json:"num_peers,omitempty"`
+	ProtocolVersion   uint32                 `protobuf:"varint,12,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *RaftStats) Reset() {
+	*x = RaftStats{}
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RaftStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RaftStats) ProtoMessage() {}
+
+func (x *RaftStats) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RaftStats.ProtoReflect.Descriptor instead.
+func (*RaftStats) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *RaftStats) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *RaftStats) GetTerm() uint64 {
+	if x != nil {
+		return x.Term
+	}
+	return 0
+}
+
+func (x *RaftStats) GetLastLogIndex() uint64 {
+	if x != nil {
+		return x.LastLogIndex
+	}
+	return 0
+}
+
+func (x *RaftStats) GetLastLogTerm() uint64 {
+	if x != nil {
+		return x.LastLogTerm
+	}
+	return 0
+}
+
+func (x *RaftStats) GetCommitIndex() uint64 {
+	if x != nil {
+		return x.CommitIndex
+	}
+	return 0
+}
+
+func (x *RaftStats) GetAppliedIndex() uint64 {
+	if x != nil {
+		return x.AppliedIndex
+	}
+	return 0
+}
+
+func (x *RaftStats) GetFsmPending() uint64 {
+	if x != nil {
+		return x.FsmPending
+	}
+	return 0
+}
+
+func (x *RaftStats) GetLastSnapshotIndex() uint64 {
+	if x != nil {
+		return x.LastSnapshotIndex
+	}
+	return 0
+}
+
+func (x *RaftStats) GetLastSnapshotTerm() uint64 {
+	if x != nil {
+		return x.LastSnapshotTerm
+	}
+	return 0
+}
+
+func (x *RaftStats) GetLastContact() string {
+	if x != nil {
+		return x.LastContact
+	}
+	return ""
+}
+
+func (x *RaftStats) GetNumPeers() uint32 {
+	if x != nil {
+		return x.NumPeers
+	}
+	return 0
+}
+
+func (x *RaftStats) GetProtocolVersion() uint32 {
+	if x != nil {
+		return x.ProtocolVersion
+	}
+	return 0
+}
+
+type ClusterNode struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Address       string                 `protobuf:"bytes,3,opt,name=address,proto3" json:"address,omitempty"`
+	Role          ClusterNodeRole        `protobuf:"varint,4,opt,name=role,proto3,enum=gastrolog.v1.ClusterNodeRole" json:"role,omitempty"`
+	Suffrage      ClusterNodeSuffrage    `protobuf:"varint,5,opt,name=suffrage,proto3,enum=gastrolog.v1.ClusterNodeSuffrage" json:"suffrage,omitempty"`
+	IsLeader      bool                   `protobuf:"varint,6,opt,name=is_leader,json=isLeader,proto3" json:"is_leader,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ClusterNode) Reset() {
+	*x = ClusterNode{}
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClusterNode) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClusterNode) ProtoMessage() {}
+
+func (x *ClusterNode) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_lifecycle_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClusterNode.ProtoReflect.Descriptor instead.
+func (*ClusterNode) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ClusterNode) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *ClusterNode) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ClusterNode) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+func (x *ClusterNode) GetRole() ClusterNodeRole {
+	if x != nil {
+		return x.Role
+	}
+	return ClusterNodeRole_CLUSTER_NODE_ROLE_UNSPECIFIED
+}
+
+func (x *ClusterNode) GetSuffrage() ClusterNodeSuffrage {
+	if x != nil {
+		return x.Suffrage
+	}
+	return ClusterNodeSuffrage_CLUSTER_NODE_SUFFRAGE_UNSPECIFIED
+}
+
+func (x *ClusterNode) GetIsLeader() bool {
+	if x != nil {
+		return x.IsLeader
+	}
+	return false
+}
+
 var File_gastrolog_v1_lifecycle_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
@@ -279,15 +710,55 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\x15ingest_queue_capacity\x18\x05 \x01(\x03R\x13ingestQueueCapacity\"'\n" +
 	"\x0fShutdownRequest\x12\x14\n" +
 	"\x05drain\x18\x01 \x01(\bR\x05drain\"\x12\n" +
-	"\x10ShutdownResponse*_\n" +
+	"\x10ShutdownResponse\"\x19\n" +
+	"\x17GetClusterStatusRequest\"\xf2\x01\n" +
+	"\x18GetClusterStatusResponse\x12'\n" +
+	"\x0fcluster_enabled\x18\x01 \x01(\bR\x0eclusterEnabled\x12\x1b\n" +
+	"\tleader_id\x18\x02 \x01(\tR\bleaderId\x12%\n" +
+	"\x0eleader_address\x18\x03 \x01(\tR\rleaderAddress\x12/\n" +
+	"\x05nodes\x18\x04 \x03(\v2\x19.gastrolog.v1.ClusterNodeR\x05nodes\x128\n" +
+	"\vlocal_stats\x18\x05 \x01(\v2\x17.gastrolog.v1.RaftStatsR\n" +
+	"localStats\"\xb1\x03\n" +
+	"\tRaftStats\x12\x14\n" +
+	"\x05state\x18\x01 \x01(\tR\x05state\x12\x12\n" +
+	"\x04term\x18\x02 \x01(\x04R\x04term\x12$\n" +
+	"\x0elast_log_index\x18\x03 \x01(\x04R\flastLogIndex\x12\"\n" +
+	"\rlast_log_term\x18\x04 \x01(\x04R\vlastLogTerm\x12!\n" +
+	"\fcommit_index\x18\x05 \x01(\x04R\vcommitIndex\x12#\n" +
+	"\rapplied_index\x18\x06 \x01(\x04R\fappliedIndex\x12\x1f\n" +
+	"\vfsm_pending\x18\a \x01(\x04R\n" +
+	"fsmPending\x12.\n" +
+	"\x13last_snapshot_index\x18\b \x01(\x04R\x11lastSnapshotIndex\x12,\n" +
+	"\x12last_snapshot_term\x18\t \x01(\x04R\x10lastSnapshotTerm\x12!\n" +
+	"\flast_contact\x18\n" +
+	" \x01(\tR\vlastContact\x12\x1b\n" +
+	"\tnum_peers\x18\v \x01(\rR\bnumPeers\x12)\n" +
+	"\x10protocol_version\x18\f \x01(\rR\x0fprotocolVersion\"\xda\x01\n" +
+	"\vClusterNode\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
+	"\aaddress\x18\x03 \x01(\tR\aaddress\x121\n" +
+	"\x04role\x18\x04 \x01(\x0e2\x1d.gastrolog.v1.ClusterNodeRoleR\x04role\x12=\n" +
+	"\bsuffrage\x18\x05 \x01(\x0e2!.gastrolog.v1.ClusterNodeSuffrageR\bsuffrage\x12\x1b\n" +
+	"\tis_leader\x18\x06 \x01(\bR\bisLeader*_\n" +
 	"\x06Status\x12\x16\n" +
 	"\x12STATUS_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eSTATUS_HEALTHY\x10\x01\x12\x13\n" +
 	"\x0fSTATUS_DEGRADED\x10\x02\x12\x14\n" +
-	"\x10STATUS_UNHEALTHY\x10\x032\xa2\x01\n" +
+	"\x10STATUS_UNHEALTHY\x10\x03*r\n" +
+	"\x0fClusterNodeRole\x12!\n" +
+	"\x1dCLUSTER_NODE_ROLE_UNSPECIFIED\x10\x00\x12\x1c\n" +
+	"\x18CLUSTER_NODE_ROLE_LEADER\x10\x01\x12\x1e\n" +
+	"\x1aCLUSTER_NODE_ROLE_FOLLOWER\x10\x02*\xa4\x01\n" +
+	"\x13ClusterNodeSuffrage\x12%\n" +
+	"!CLUSTER_NODE_SUFFRAGE_UNSPECIFIED\x10\x00\x12\x1f\n" +
+	"\x1bCLUSTER_NODE_SUFFRAGE_VOTER\x10\x01\x12\"\n" +
+	"\x1eCLUSTER_NODE_SUFFRAGE_NONVOTER\x10\x02\x12!\n" +
+	"\x1dCLUSTER_NODE_SUFFRAGE_STAGING\x10\x032\x85\x02\n" +
 	"\x10LifecycleService\x12C\n" +
 	"\x06Health\x12\x1b.gastrolog.v1.HealthRequest\x1a\x1c.gastrolog.v1.HealthResponse\x12I\n" +
-	"\bShutdown\x12\x1d.gastrolog.v1.ShutdownRequest\x1a\x1e.gastrolog.v1.ShutdownResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"\bShutdown\x12\x1d.gastrolog.v1.ShutdownRequest\x1a\x1e.gastrolog.v1.ShutdownResponse\x12a\n" +
+	"\x10GetClusterStatus\x12%.gastrolog.v1.GetClusterStatusRequest\x1a&.gastrolog.v1.GetClusterStatusResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_lifecycle_proto_rawDescOnce sync.Once
@@ -301,26 +772,38 @@ func file_gastrolog_v1_lifecycle_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_lifecycle_proto_rawDescData
 }
 
-var file_gastrolog_v1_lifecycle_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_gastrolog_v1_lifecycle_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_gastrolog_v1_lifecycle_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_gastrolog_v1_lifecycle_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_gastrolog_v1_lifecycle_proto_goTypes = []any{
-	(Status)(0),              // 0: gastrolog.v1.Status
-	(*HealthRequest)(nil),    // 1: gastrolog.v1.HealthRequest
-	(*HealthResponse)(nil),   // 2: gastrolog.v1.HealthResponse
-	(*ShutdownRequest)(nil),  // 3: gastrolog.v1.ShutdownRequest
-	(*ShutdownResponse)(nil), // 4: gastrolog.v1.ShutdownResponse
+	(Status)(0),                      // 0: gastrolog.v1.Status
+	(ClusterNodeRole)(0),             // 1: gastrolog.v1.ClusterNodeRole
+	(ClusterNodeSuffrage)(0),         // 2: gastrolog.v1.ClusterNodeSuffrage
+	(*HealthRequest)(nil),            // 3: gastrolog.v1.HealthRequest
+	(*HealthResponse)(nil),           // 4: gastrolog.v1.HealthResponse
+	(*ShutdownRequest)(nil),          // 5: gastrolog.v1.ShutdownRequest
+	(*ShutdownResponse)(nil),         // 6: gastrolog.v1.ShutdownResponse
+	(*GetClusterStatusRequest)(nil),  // 7: gastrolog.v1.GetClusterStatusRequest
+	(*GetClusterStatusResponse)(nil), // 8: gastrolog.v1.GetClusterStatusResponse
+	(*RaftStats)(nil),                // 9: gastrolog.v1.RaftStats
+	(*ClusterNode)(nil),              // 10: gastrolog.v1.ClusterNode
 }
 var file_gastrolog_v1_lifecycle_proto_depIdxs = []int32{
-	0, // 0: gastrolog.v1.HealthResponse.status:type_name -> gastrolog.v1.Status
-	1, // 1: gastrolog.v1.LifecycleService.Health:input_type -> gastrolog.v1.HealthRequest
-	3, // 2: gastrolog.v1.LifecycleService.Shutdown:input_type -> gastrolog.v1.ShutdownRequest
-	2, // 3: gastrolog.v1.LifecycleService.Health:output_type -> gastrolog.v1.HealthResponse
-	4, // 4: gastrolog.v1.LifecycleService.Shutdown:output_type -> gastrolog.v1.ShutdownResponse
-	3, // [3:5] is the sub-list for method output_type
-	1, // [1:3] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	0,  // 0: gastrolog.v1.HealthResponse.status:type_name -> gastrolog.v1.Status
+	10, // 1: gastrolog.v1.GetClusterStatusResponse.nodes:type_name -> gastrolog.v1.ClusterNode
+	9,  // 2: gastrolog.v1.GetClusterStatusResponse.local_stats:type_name -> gastrolog.v1.RaftStats
+	1,  // 3: gastrolog.v1.ClusterNode.role:type_name -> gastrolog.v1.ClusterNodeRole
+	2,  // 4: gastrolog.v1.ClusterNode.suffrage:type_name -> gastrolog.v1.ClusterNodeSuffrage
+	3,  // 5: gastrolog.v1.LifecycleService.Health:input_type -> gastrolog.v1.HealthRequest
+	5,  // 6: gastrolog.v1.LifecycleService.Shutdown:input_type -> gastrolog.v1.ShutdownRequest
+	7,  // 7: gastrolog.v1.LifecycleService.GetClusterStatus:input_type -> gastrolog.v1.GetClusterStatusRequest
+	4,  // 8: gastrolog.v1.LifecycleService.Health:output_type -> gastrolog.v1.HealthResponse
+	6,  // 9: gastrolog.v1.LifecycleService.Shutdown:output_type -> gastrolog.v1.ShutdownResponse
+	8,  // 10: gastrolog.v1.LifecycleService.GetClusterStatus:output_type -> gastrolog.v1.GetClusterStatusResponse
+	8,  // [8:11] is the sub-list for method output_type
+	5,  // [5:8] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_lifecycle_proto_init() }
@@ -333,8 +816,8 @@ func file_gastrolog_v1_lifecycle_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_lifecycle_proto_rawDesc), len(file_gastrolog_v1_lifecycle_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   4,
+			NumEnums:      3,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

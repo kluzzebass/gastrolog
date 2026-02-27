@@ -38,6 +38,9 @@ const (
 	// LifecycleServiceShutdownProcedure is the fully-qualified name of the LifecycleService's Shutdown
 	// RPC.
 	LifecycleServiceShutdownProcedure = "/gastrolog.v1.LifecycleService/Shutdown"
+	// LifecycleServiceGetClusterStatusProcedure is the fully-qualified name of the LifecycleService's
+	// GetClusterStatus RPC.
+	LifecycleServiceGetClusterStatusProcedure = "/gastrolog.v1.LifecycleService/GetClusterStatus"
 )
 
 // LifecycleServiceClient is a client for the gastrolog.v1.LifecycleService service.
@@ -46,6 +49,8 @@ type LifecycleServiceClient interface {
 	Health(context.Context, *connect.Request[v1.HealthRequest]) (*connect.Response[v1.HealthResponse], error)
 	// Shutdown initiates a graceful shutdown.
 	Shutdown(context.Context, *connect.Request[v1.ShutdownRequest]) (*connect.Response[v1.ShutdownResponse], error)
+	// GetClusterStatus returns the current cluster topology and Raft state.
+	GetClusterStatus(context.Context, *connect.Request[v1.GetClusterStatusRequest]) (*connect.Response[v1.GetClusterStatusResponse], error)
 }
 
 // NewLifecycleServiceClient constructs a client for the gastrolog.v1.LifecycleService service. By
@@ -71,13 +76,20 @@ func NewLifecycleServiceClient(httpClient connect.HTTPClient, baseURL string, op
 			connect.WithSchema(lifecycleServiceMethods.ByName("Shutdown")),
 			connect.WithClientOptions(opts...),
 		),
+		getClusterStatus: connect.NewClient[v1.GetClusterStatusRequest, v1.GetClusterStatusResponse](
+			httpClient,
+			baseURL+LifecycleServiceGetClusterStatusProcedure,
+			connect.WithSchema(lifecycleServiceMethods.ByName("GetClusterStatus")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // lifecycleServiceClient implements LifecycleServiceClient.
 type lifecycleServiceClient struct {
-	health   *connect.Client[v1.HealthRequest, v1.HealthResponse]
-	shutdown *connect.Client[v1.ShutdownRequest, v1.ShutdownResponse]
+	health           *connect.Client[v1.HealthRequest, v1.HealthResponse]
+	shutdown         *connect.Client[v1.ShutdownRequest, v1.ShutdownResponse]
+	getClusterStatus *connect.Client[v1.GetClusterStatusRequest, v1.GetClusterStatusResponse]
 }
 
 // Health calls gastrolog.v1.LifecycleService.Health.
@@ -90,12 +102,19 @@ func (c *lifecycleServiceClient) Shutdown(ctx context.Context, req *connect.Requ
 	return c.shutdown.CallUnary(ctx, req)
 }
 
+// GetClusterStatus calls gastrolog.v1.LifecycleService.GetClusterStatus.
+func (c *lifecycleServiceClient) GetClusterStatus(ctx context.Context, req *connect.Request[v1.GetClusterStatusRequest]) (*connect.Response[v1.GetClusterStatusResponse], error) {
+	return c.getClusterStatus.CallUnary(ctx, req)
+}
+
 // LifecycleServiceHandler is an implementation of the gastrolog.v1.LifecycleService service.
 type LifecycleServiceHandler interface {
 	// Health returns the server health status.
 	Health(context.Context, *connect.Request[v1.HealthRequest]) (*connect.Response[v1.HealthResponse], error)
 	// Shutdown initiates a graceful shutdown.
 	Shutdown(context.Context, *connect.Request[v1.ShutdownRequest]) (*connect.Response[v1.ShutdownResponse], error)
+	// GetClusterStatus returns the current cluster topology and Raft state.
+	GetClusterStatus(context.Context, *connect.Request[v1.GetClusterStatusRequest]) (*connect.Response[v1.GetClusterStatusResponse], error)
 }
 
 // NewLifecycleServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -117,12 +136,20 @@ func NewLifecycleServiceHandler(svc LifecycleServiceHandler, opts ...connect.Han
 		connect.WithSchema(lifecycleServiceMethods.ByName("Shutdown")),
 		connect.WithHandlerOptions(opts...),
 	)
+	lifecycleServiceGetClusterStatusHandler := connect.NewUnaryHandler(
+		LifecycleServiceGetClusterStatusProcedure,
+		svc.GetClusterStatus,
+		connect.WithSchema(lifecycleServiceMethods.ByName("GetClusterStatus")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.LifecycleService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case LifecycleServiceHealthProcedure:
 			lifecycleServiceHealthHandler.ServeHTTP(w, r)
 		case LifecycleServiceShutdownProcedure:
 			lifecycleServiceShutdownHandler.ServeHTTP(w, r)
+		case LifecycleServiceGetClusterStatusProcedure:
+			lifecycleServiceGetClusterStatusHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -138,4 +165,8 @@ func (UnimplementedLifecycleServiceHandler) Health(context.Context, *connect.Req
 
 func (UnimplementedLifecycleServiceHandler) Shutdown(context.Context, *connect.Request[v1.ShutdownRequest]) (*connect.Response[v1.ShutdownResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.LifecycleService.Shutdown is not implemented"))
+}
+
+func (UnimplementedLifecycleServiceHandler) GetClusterStatus(context.Context, *connect.Request[v1.GetClusterStatusRequest]) (*connect.Response[v1.GetClusterStatusResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.LifecycleService.GetClusterStatus is not implemented"))
 }

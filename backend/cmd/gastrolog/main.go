@@ -174,8 +174,6 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 			return fmt.Errorf("resolve node ID: %w", err)
 		}
 	}
-	logger.Info("node identity", "node_id", nodeID)
-
 	// Create cluster TLS holder. Populated during cluster-init or enrollment.
 	var clusterTLS *cluster.ClusterTLS
 
@@ -272,15 +270,19 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 		defer clusterSrv.Stop()
 	}
 
-	// For restarting multi-node members: wait for a leader now that our
-	// gRPC server is running and can receive Raft RPCs from peers.
-	if clusterSrv != nil && !clusterInit && joinAddr == "" {
-		if rcs, ok := cfgStore.(*raftConfigStore); ok {
-			logger.Info("waiting for cluster quorum (start 2+ nodes)")
-			if err := rcs.WaitForLeader(ctx, logger); err != nil {
+	// For restarting multi-node members: the local Raft FSM is hydrated from
+	// snapshot + log replay during NewRaft(). Reads work without a leader, so
+	// try loading config directly to start serving immediately. Quorum wait
+	// moves to the background — needed for writes, not for ingestion.
+	var localCfg *config.Config
+	clusterRestart := clusterSrv != nil && !clusterInit && joinAddr == ""
+	if clusterRestart && configType == "raft" {
+		localCfg, _ = cfgStore.Load(ctx)
+		// FSM empty — shouldn't happen for a restart. Fall back to blocking.
+		if localCfg == nil {
+			if err := waitForQuorum(ctx, cfgStore, logger); err != nil {
 				return err
 			}
-			logger.Info("cluster leader found")
 		}
 	}
 
@@ -298,15 +300,15 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 		logger.Info("voter membership granted by leader")
 	}
 
-	// For joining or restarting cluster nodes, wait for config replication
-	// from the leader. Hashicorp Raft does not replay log entries to the FSM
-	// on startup — entries are only applied once a leader commits them. So
-	// after finding the leader, we must wait for the FSM to catch up.
-	//
-	// For single-node, memory, or cluster-init leader: config is local.
+	// Load config. For restarts with a populated local FSM, use it directly.
+	// For joining nodes (empty FSM), wait for the leader to replicate config.
+	// For single-node, memory, or cluster-init: config is local.
 	var cfg *config.Config
-	clusterRestart := clusterSrv != nil && !clusterInit && joinAddr == ""
-	if (joinAddr != "" || clusterRestart) && configType == "raft" { //nolint:nestif // join vs restart vs local config paths
+	needsReplication := joinAddr != "" || (clusterRestart && configType == "raft")
+	switch {
+	case localCfg != nil:
+		cfg = localCfg
+	case needsReplication:
 		if joinAddr != "" {
 			logger.Info("joining cluster, waiting for config replication", "join_addr", joinAddr)
 		} else {
@@ -316,17 +318,31 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 		if err != nil {
 			return fmt.Errorf("wait for config replication: %w", err)
 		}
-	} else {
-		// Ensure this node has a NodeConfig in the config store.
-		// If not, generate a petname and persist it.
-		if err := ensureNodeConfig(ctx, cfgStore, nodeID); err != nil {
-			return fmt.Errorf("ensure node config: %w", err)
-		}
-
+	default:
 		logger.Info("loading config", "type", configType)
 		cfg, err = ensureConfig(ctx, logger, cfgStore, bootstrap)
 		if err != nil {
 			return err
+		}
+	}
+
+	// Ensure this node has a NodeConfig with a petname in the config store.
+	// Also write the name to <home>/node_name for easy identification on disk.
+	//
+	// For restarts from local FSM (quorum pending), ensureNodeConfig is a write
+	// that needs a leader. Run it in a background goroutine alongside the quorum
+	// wait so ingestion starts immediately.
+	if localCfg != nil {
+		logger.Info("node identity", "node_id", nodeID)
+		go ensureNodeConfigAsync(ctx, cfgStore, nodeID, configType, hd, logger)
+	} else {
+		nodeName, err := ensureNodeConfig(ctx, cfgStore, nodeID)
+		if err != nil {
+			return fmt.Errorf("ensure node config: %w", err)
+		}
+		logger.Info("node identity", "node_id", nodeID, "node_name", nodeName)
+		if configType != "memory" {
+			_ = hd.WriteNodeName(nodeName)
 		}
 	}
 
@@ -421,20 +437,56 @@ func waitForConfig(ctx context.Context, store config.Store, timeout time.Duratio
 
 // ensureNodeConfig checks whether a NodeConfig exists for the local node ID.
 // If not, it generates a petname and persists it to the config store.
-func ensureNodeConfig(ctx context.Context, cfgStore config.Store, nodeID string) error {
+// Returns the node name (existing or newly generated).
+func ensureNodeConfig(ctx context.Context, cfgStore config.Store, nodeID string) (string, error) {
 	nodeUUID, err := uuid.Parse(nodeID)
 	if err != nil {
-		return fmt.Errorf("parse node ID %q: %w", nodeID, err)
+		return "", fmt.Errorf("parse node ID %q: %w", nodeID, err)
 	}
 	existing, err := cfgStore.GetNode(ctx, nodeUUID)
 	if err != nil {
-		return fmt.Errorf("get node: %w", err)
+		return "", fmt.Errorf("get node: %w", err)
 	}
 	if existing != nil {
-		return nil
+		return existing.Name, nil
 	}
 	name := petname.Generate(2, "-")
-	return cfgStore.PutNode(ctx, config.NodeConfig{ID: nodeUUID, Name: name})
+	if err := cfgStore.PutNode(ctx, config.NodeConfig{ID: nodeUUID, Name: name}); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+// waitForQuorum blocks until a Raft leader is elected, if the config store
+// is Raft-backed. Returns nil immediately for non-Raft stores.
+func waitForQuorum(ctx context.Context, cfgStore config.Store, logger *slog.Logger) error {
+	rcs, ok := cfgStore.(*raftConfigStore)
+	if !ok {
+		return nil
+	}
+	logger.Info("waiting for cluster quorum (start 2+ nodes)")
+	if err := rcs.WaitForLeader(ctx, logger); err != nil {
+		return err
+	}
+	logger.Info("cluster leader found")
+	return nil
+}
+
+// ensureNodeConfigAsync waits for a cluster leader in the background, then
+// writes the node's petname. Used on restart to avoid blocking ingestion.
+func ensureNodeConfigAsync(ctx context.Context, cfgStore config.Store, nodeID, configType string, hd home.Dir, logger *slog.Logger) {
+	if err := waitForQuorum(ctx, cfgStore, logger); err != nil {
+		return
+	}
+	nodeName, err := ensureNodeConfig(ctx, cfgStore, nodeID)
+	if err != nil {
+		logger.Warn("ensure node config failed (will retry on next start)", "error", err)
+		return
+	}
+	logger.Info("node name", "node_id", nodeID, "node_name", nodeName)
+	if configType != "memory" {
+		_ = hd.WriteNodeName(nodeName)
+	}
 }
 
 func ensureConfig(ctx context.Context, logger *slog.Logger, cfgStore config.Store, bootstrap bool) (*config.Config, error) {
@@ -509,7 +561,7 @@ func serveAndAwaitShutdown(ctx context.Context, logger *slog.Logger, serverAddr,
 	var srv *server.Server
 	var serverWg sync.WaitGroup
 	if serverAddr != "" {
-		srv = server.New(orch, cfgStore, factories, tokens, server.Config{Logger: logger, CertManager: certMgr, NoAuth: noAuth, HomeDir: homeDir, NodeID: nodeID, UnixSocket: socketPath, AfterConfigApply: afterConfigApply})
+		srv = server.New(orch, cfgStore, factories, tokens, server.Config{Logger: logger, CertManager: certMgr, NoAuth: noAuth, HomeDir: homeDir, NodeID: nodeID, UnixSocket: socketPath, AfterConfigApply: afterConfigApply, Cluster: clusterSrv})
 		serverWg.Go(func() {
 			if err := srv.ServeTCP(serverAddr); err != nil {
 				logger.Error("server error", "error", err)

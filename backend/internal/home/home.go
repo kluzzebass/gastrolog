@@ -6,7 +6,9 @@
 // Layout:
 //
 //	<root>/
-//	  config.json   or  config.db     (config store, type-dependent)
+//	  node_id                          (persistent UUIDv7 node identity)
+//	  node_name                        (human-readable petname, mirrors config store)
+//	  config.json   or  config.db      (config store, type-dependent)
 //	  users.json                       (user credentials, JSON file store only)
 //	  raft/
 //	    raft.db                        (boltdb: raft log + stable store)
@@ -98,6 +100,14 @@ func (d Dir) NodeID() (string, error) {
 	return d.readOrCreate("node_id", func() string {
 		return uuid.Must(uuid.NewV7()).String()
 	})
+}
+
+// WriteNodeName writes the node's human-readable name to <root>/node_name.
+// The config store is the source of truth; this file is a convenience for
+// operators inspecting the home directory on disk.
+func (d Dir) WriteNodeName(name string) error {
+	p := filepath.Join(d.root, "node_name")
+	return os.WriteFile(p, []byte(name+"\n"), 0o640) //nolint:gosec // G306: node_name is not secret
 }
 
 // readOrCreate reads a single-line value from <root>/<filename>.

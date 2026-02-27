@@ -1,12 +1,13 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { Dialog } from "../Dialog";
-import { VaultsIcon, IngestersIcon, JobsIcon, MetricsIcon } from "../icons";
+import { VaultsIcon, IngestersIcon, JobsIcon, MetricsIcon, ClusterIcon } from "../icons";
 import { VaultsPanel } from "./VaultsPanel";
 import { IngestersPanel } from "./IngestersPanel";
 import { JobsPanel } from "./JobsPanel";
 import { MetricsPanel } from "./MetricsPanel";
+import { ClusterPanel } from "./ClusterPanel";
 
-export type InspectorTab = "vaults" | "ingesters" | "jobs" | "metrics";
+export type InspectorTab = "vaults" | "ingesters" | "jobs" | "metrics" | "cluster";
 
 interface InspectorDialogProps {
   dark: boolean;
@@ -26,6 +27,7 @@ const allTabs: TabDef[] = [
   { id: "ingesters", label: "Ingesters", icon: IngestersIcon },
   { id: "jobs", label: "Jobs", icon: JobsIcon },
   { id: "metrics", label: "Metrics", icon: MetricsIcon },
+  { id: "cluster", label: "Cluster", icon: ClusterIcon },
 ];
 
 export function InspectorDialog({
@@ -71,6 +73,7 @@ export function InspectorDialog({
           {tab === "ingesters" && <IngestersPanel dark={dark} />}
           {tab === "jobs" && <JobsPanel dark={dark} />}
           {tab === "metrics" && <MetricsPanel dark={dark} />}
+          {tab === "cluster" && <ClusterPanel dark={dark} />}
         </div>
       </div>
     </Dialog>

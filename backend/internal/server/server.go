@@ -63,6 +63,10 @@ type Config struct {
 	// When set, the server listens on this socket with authentication bypassed
 	// (the OS file-system permissions provide access control). Empty disables.
 	UnixSocket string
+
+	// Cluster provides Raft topology for the GetClusterStatus RPC.
+	// Nil in single-node mode.
+	Cluster ClusterStatusProvider
 }
 
 // CertManager interface for TLS certificate management.
@@ -83,6 +87,7 @@ type Server struct {
 	certManager CertManager
 	noAuth      bool
 	logger      *slog.Logger
+	cluster          ClusterStatusProvider
 	localNodeID      string
 	startTime        time.Time
 	homeDir          string                     // gastrolog home directory; empty for in-memory config
@@ -123,6 +128,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orche
 		certManager: cfg.CertManager,
 		noAuth:      cfg.NoAuth,
 		logger:      logging.Default(cfg.Logger).With("component", "server"),
+		cluster:          cfg.Cluster,
 		localNodeID:      cfg.NodeID,
 		startTime:        time.Now(),
 		homeDir:          cfg.HomeDir,
@@ -250,7 +256,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 	configServer.SetOnLookupConfigChange(func(cfg config.LookupConfig) {
 		s.applyLookupConfig(cfg, geoipTable, asnTable)
 	})
-	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown)
+	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown, s.cluster, s.cfgStore)
 	authServer := NewAuthServer(s.cfgStore, s.tokens, s.logger, s.noAuth)
 	jobServer := NewJobServer(s.orch.Scheduler())
 

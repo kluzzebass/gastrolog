@@ -2,34 +2,49 @@ package server
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"connectrpc.com/connect"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
+	"gastrolog/internal/cluster"
+	"gastrolog/internal/config"
 	"gastrolog/internal/orchestrator"
 )
 
 // Version is set at build time.
 var Version = "dev"
 
+// ClusterStatusProvider exposes Raft cluster topology. Implemented by
+// cluster.Server; defined here at the consumer site to keep the dependency narrow.
+type ClusterStatusProvider interface {
+	LeaderInfo() (address string, id string)
+	Servers() ([]cluster.RaftServer, error)
+	LocalStats() map[string]string
+}
+
 // LifecycleServer implements the LifecycleService.
 type LifecycleServer struct {
 	orch      *orchestrator.Orchestrator
 	startTime time.Time
 	shutdown  func(drain bool)
+	cluster   ClusterStatusProvider
+	cfgStore  config.Store
 }
 
 var _ gastrologv1connect.LifecycleServiceHandler = (*LifecycleServer)(nil)
 
 // NewLifecycleServer creates a new LifecycleServer.
 // The shutdown function is called when Shutdown is invoked with the drain flag.
-func NewLifecycleServer(orch *orchestrator.Orchestrator, shutdown func(drain bool)) *LifecycleServer {
+func NewLifecycleServer(orch *orchestrator.Orchestrator, shutdown func(drain bool), cluster ClusterStatusProvider, cfgStore config.Store) *LifecycleServer {
 	return &LifecycleServer{
 		orch:      orch,
 		startTime: time.Now(),
 		shutdown:  shutdown,
+		cluster:   cluster,
+		cfgStore:  cfgStore,
 	}
 }
 
@@ -64,4 +79,99 @@ func (s *LifecycleServer) Shutdown(
 		go s.shutdown(drain)
 	}
 	return connect.NewResponse(&apiv1.ShutdownResponse{}), nil
+}
+
+// GetClusterStatus returns the current cluster topology and Raft state.
+func (s *LifecycleServer) GetClusterStatus(
+	ctx context.Context,
+	req *connect.Request[apiv1.GetClusterStatusRequest],
+) (*connect.Response[apiv1.GetClusterStatusResponse], error) {
+	if s.cluster == nil {
+		return connect.NewResponse(&apiv1.GetClusterStatusResponse{
+			ClusterEnabled: false,
+		}), nil
+	}
+
+	leaderAddr, leaderID := s.cluster.LeaderInfo()
+	servers, err := s.cluster.Servers()
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	// Build a name lookup from the config store's node list.
+	nameByID := make(map[string]string)
+	if s.cfgStore != nil {
+		if nodes, err := s.cfgStore.ListNodes(ctx); err == nil {
+			for _, n := range nodes {
+				nameByID[n.ID.String()] = n.Name
+			}
+		}
+	}
+
+	nodes := make([]*apiv1.ClusterNode, 0, len(servers))
+	for _, srv := range servers {
+		role := apiv1.ClusterNodeRole_CLUSTER_NODE_ROLE_FOLLOWER
+		isLeader := srv.ID == leaderID
+		if isLeader {
+			role = apiv1.ClusterNodeRole_CLUSTER_NODE_ROLE_LEADER
+		}
+
+		var suffrage apiv1.ClusterNodeSuffrage
+		switch srv.Suffrage {
+		case "Voter":
+			suffrage = apiv1.ClusterNodeSuffrage_CLUSTER_NODE_SUFFRAGE_VOTER
+		case "Nonvoter":
+			suffrage = apiv1.ClusterNodeSuffrage_CLUSTER_NODE_SUFFRAGE_NONVOTER
+		case "Staging":
+			suffrage = apiv1.ClusterNodeSuffrage_CLUSTER_NODE_SUFFRAGE_STAGING
+		}
+
+		nodes = append(nodes, &apiv1.ClusterNode{
+			Id:       srv.ID,
+			Name:     nameByID[srv.ID],
+			Address:  srv.Address,
+			Role:     role,
+			Suffrage: suffrage,
+			IsLeader: isLeader,
+		})
+	}
+
+	return connect.NewResponse(&apiv1.GetClusterStatusResponse{
+		ClusterEnabled: true,
+		LeaderId:       leaderID,
+		LeaderAddress:  leaderAddr,
+		Nodes:          nodes,
+		LocalStats:     buildRaftStats(s.cluster.LocalStats()),
+	}), nil
+}
+
+// buildRaftStats converts the raw Hashicorp Raft Stats() map into a typed proto message.
+func buildRaftStats(m map[string]string) *apiv1.RaftStats {
+	if m == nil {
+		return nil
+	}
+	return &apiv1.RaftStats{
+		State:             m["state"],
+		Term:              parseUint64(m["term"]),
+		LastLogIndex:      parseUint64(m["last_log_index"]),
+		LastLogTerm:       parseUint64(m["last_log_term"]),
+		CommitIndex:       parseUint64(m["commit_index"]),
+		AppliedIndex:      parseUint64(m["applied_index"]),
+		FsmPending:        parseUint64(m["fsm_pending"]),
+		LastSnapshotIndex: parseUint64(m["last_snapshot_index"]),
+		LastSnapshotTerm:  parseUint64(m["last_snapshot_term"]),
+		LastContact:       m["last_contact"],
+		NumPeers:          parseUint32(m["num_peers"]),
+		ProtocolVersion:   parseUint32(m["protocol_version"]),
+	}
+}
+
+func parseUint64(s string) uint64 {
+	v, _ := strconv.ParseUint(s, 10, 64)
+	return v
+}
+
+func parseUint32(s string) uint32 {
+	v, _ := strconv.ParseUint(s, 10, 32)
+	return uint32(v)
 }
