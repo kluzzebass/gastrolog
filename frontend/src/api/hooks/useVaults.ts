@@ -196,6 +196,7 @@ export function usePutVault() {
       retentionRules: Partial<RetentionRule>[];
       params: Record<string, string>;
       enabled?: boolean;
+      nodeId?: string;
     }) => {
       await configClient.putVault({
         config: {
@@ -207,6 +208,7 @@ export function usePutVault() {
           retentionRules: args.retentionRules,
           params: args.params,
           enabled: args.enabled ?? true,
+          nodeId: args.nodeId ?? "",
         },
       });
     },

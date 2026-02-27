@@ -46,6 +46,7 @@ export function usePutIngester() {
       type: string;
       enabled: boolean;
       params: Record<string, string>;
+      nodeId?: string;
     }) => {
       await configClient.putIngester({
         config: {
@@ -54,6 +55,7 @@ export function usePutIngester() {
           type: args.type,
           enabled: args.enabled,
           params: stripEmptyParams(args.params),
+          nodeId: args.nodeId ?? "",
         },
       });
     },

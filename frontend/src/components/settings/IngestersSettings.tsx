@@ -11,6 +11,8 @@ import { FormField, TextInput, SelectInput } from "./FormField";
 import { IngesterParamsForm } from "./IngesterParamsForm";
 import { PrimaryButton, GhostButton } from "./Buttons";
 import { Checkbox } from "./Checkbox";
+import { NodeBadge } from "./NodeBadge";
+import { NodeSelect } from "./NodeSelect";
 
 const ingesterTypes = [
   { value: "chatterbox", label: "chatterbox" },
@@ -33,6 +35,7 @@ interface AddIngesterFormState {
   newName: string;
   newType: string;
   newParams: Record<string, string>;
+  newNodeId: string;
 }
 
 const addIngesterFormInitial: AddIngesterFormState = {
@@ -41,6 +44,7 @@ const addIngesterFormInitial: AddIngesterFormState = {
   newName: "",
   newType: "chatterbox",
   newParams: {},
+  newNodeId: "",
 };
 
 type AddIngesterFormAction =
@@ -48,6 +52,7 @@ type AddIngesterFormAction =
   | { type: "confirmType"; ingesterType: string }
   | { type: "setNewName"; value: string }
   | { type: "setNewParams"; value: Record<string, string> }
+  | { type: "setNewNodeId"; value: string }
   | { type: "resetForm" }
   | { type: "toggleAdding" };
 
@@ -61,6 +66,8 @@ function addIngesterFormReducer(state: AddIngesterFormState, action: AddIngester
       return { ...state, newName: action.value };
     case "setNewParams":
       return { ...state, newParams: action.value };
+    case "setNewNodeId":
+      return { ...state, newNodeId: action.value };
     case "resetForm":
       return addIngesterFormInitial;
     case "toggleAdding":
@@ -83,7 +90,7 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const [addForm, dispatchAdd] = useReducer(addIngesterFormReducer, addIngesterFormInitial);
-  const { adding, typeConfirmed, newName, newType, newParams } = addForm;
+  const { adding, typeConfirmed, newName, newType, newParams, newNodeId } = addForm;
   const [namePlaceholder, setNamePlaceholder] = useState("");
 
   const ingesters = config?.ingesters ?? [];
@@ -93,8 +100,8 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
 
   const defaults = (id: string) => {
     const ing = ingesters.find((i) => i.id === id);
-    if (!ing) return { name: "", enabled: true, params: {} as Record<string, string> };
-    return { name: ing.name, enabled: ing.enabled, params: { ...ing.params } };
+    if (!ing) return { name: "", enabled: true, params: {} as Record<string, string>, nodeId: "" };
+    return { name: ing.name, enabled: ing.enabled, params: { ...ing.params }, nodeId: ing.nodeId };
   };
 
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
@@ -105,13 +112,14 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
     label: "Ingester",
     onSaveTransform: (
       id,
-      edit: { name: string; enabled: boolean; params: Record<string, string>; type: string },
+      edit: { name: string; enabled: boolean; params: Record<string, string>; type: string; nodeId: string },
     ) => ({
       id,
       name: edit.name,
       type: edit.type,
       enabled: edit.enabled,
       params: edit.params,
+      nodeId: edit.nodeId,
     }),
     clearEdit,
   });
@@ -125,6 +133,7 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
         type: newType,
         enabled: true,
         params: newParams,
+        nodeId: newNodeId,
       });
       addToast(`Ingester "${name}" created`, "info");
       dispatchAdd({ type: "resetForm" });
@@ -192,6 +201,11 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
               dark={dark}
             />
           </FormField>
+          <NodeSelect
+            value={newNodeId}
+            onChange={(v) => dispatchAdd({ type: "setNewNodeId", value: v })}
+            dark={dark}
+          />
           <IngesterParamsForm
             ingesterType={newType}
             params={newParams}
@@ -213,16 +227,19 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
             onToggle={() => setExpanded(expanded === ing.id ? null : ing.id)}
             onDelete={() => handleDelete(ing.id)}
             headerRight={
-              !ing.enabled ? (
-                <span
-                  className={`px-1.5 py-0.5 text-[0.8em] font-mono rounded ${c(
-                    "bg-ink-hover text-text-ghost",
-                    "bg-light-hover text-light-text-ghost",
-                  )}`}
-                >
-                  disabled
-                </span>
-              ) : undefined
+              <span className="flex items-center gap-2">
+                <NodeBadge nodeId={ing.nodeId} dark={dark} />
+                {!ing.enabled && (
+                  <span
+                    className={`px-1.5 py-0.5 text-[0.8em] font-mono rounded ${c(
+                      "bg-ink-hover text-text-ghost",
+                      "bg-light-hover text-light-text-ghost",
+                    )}`}
+                  >
+                    disabled
+                  </span>
+                )}
+              </span>
             }
             footer={
               <PrimaryButton
@@ -250,6 +267,11 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
                 checked={edit.enabled}
                 onChange={(v) => setEdit(ing.id, { enabled: v })}
                 label="Enabled"
+                dark={dark}
+              />
+              <NodeSelect
+                value={edit.nodeId}
+                onChange={(v) => setEdit(ing.id, { nodeId: v })}
                 dark={dark}
               />
               <IngesterParamsForm

@@ -11,6 +11,7 @@ import { useToast } from "../Toast";
 import type { ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
 import { formatBytes } from "../../utils/units";
 import { ExpandableCard } from "../settings/ExpandableCard";
+import { NodeBadge } from "../settings/NodeBadge";
 import { ChunkTimeline } from "./ChunkTimeline";
 import { HelpButton } from "../HelpButton";
 
@@ -62,6 +63,7 @@ export function VaultsPanel({ dark }: Readonly<{ dark: boolean }>) {
             <span
               className={`text-[0.8em] flex items-center gap-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
             >
+              <NodeBadge nodeId={vault.nodeId} dark={dark} />
               {!vault.enabled && (
                 <span className="px-1.5 py-0.5 text-[0.75em] font-medium uppercase tracking-wider rounded bg-severity-warn/15 text-severity-warn">
                   Disabled

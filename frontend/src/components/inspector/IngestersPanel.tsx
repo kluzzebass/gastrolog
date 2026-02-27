@@ -3,6 +3,7 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { useIngesters, useIngesterStatus } from "../../api/hooks";
 import { formatBytes } from "../../utils/units";
 import { ExpandableCard } from "../settings/ExpandableCard";
+import { NodeBadge } from "../settings/NodeBadge";
 import { HelpButton } from "../HelpButton";
 
 export function IngestersPanel({ dark }: Readonly<{ dark: boolean }>) {
@@ -49,6 +50,7 @@ export function IngestersPanel({ dark }: Readonly<{ dark: boolean }>) {
           dark={dark}
           expanded={expanded === ing.id}
           onToggle={() => setExpanded(expanded === ing.id ? null : ing.id)}
+          headerRight={<NodeBadge nodeId={ing.nodeId} dark={dark} />}
           status={
             ing.running ? (
               <span className="px-1.5 py-0.5 text-[0.75em] rounded bg-severity-info/15 text-severity-info">

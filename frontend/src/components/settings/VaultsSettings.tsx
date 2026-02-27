@@ -22,6 +22,8 @@ import { FormField, TextInput, SelectInput } from "./FormField";
 import { VaultParamsForm } from "./VaultParamsForm";
 import { PrimaryButton, GhostButton } from "./Buttons";
 import { Checkbox } from "./Checkbox";
+import { NodeBadge } from "./NodeBadge";
+import { NodeSelect } from "./NodeSelect";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Job } from "../../api/gen/gastrolog/v1/job_pb";
 
@@ -253,6 +255,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
   const [newPolicy, setNewPolicy] = useState("");
   const [newRetentionRules, setNewRetentionRules] = useState<RetentionRuleEdit[]>([]);
   const [newParams, setNewParams] = useState<Record<string, string>>({});
+  const [newNodeId, setNewNodeId] = useState("");
 
   const configVaults = config?.vaults;
   const vaults = configVaults ?? [];
@@ -293,6 +296,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
         retentionRules: [] as RetentionRuleEdit[],
         enabled: true,
         params: {} as Record<string, string>,
+        nodeId: "",
       };
     return {
       name: vault.name,
@@ -305,6 +309,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
       })),
       enabled: vault.enabled,
       params: { ...vault.params },
+      nodeId: vault.nodeId,
     };
   };
 
@@ -324,6 +329,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
         enabled: boolean;
         params: Record<string, string>;
         type: string;
+        nodeId: string;
       },
     ) => ({
       id,
@@ -334,6 +340,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
       retentionRules: edit.retentionRules,
       params: edit.params,
       enabled: edit.enabled,
+      nodeId: edit.nodeId,
     }),
     onDeleteTransform: (id) => ({ id, force: true }),
     clearEdit,
@@ -358,6 +365,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
         policy: newPolicy,
         retentionRules: newRetentionRules,
         params: newParams,
+        nodeId: newNodeId,
       });
       addToast(`Vault "${name}" created`, "info");
       setAdding(false);
@@ -368,6 +376,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
       setNewPolicy("");
       setNewRetentionRules([]);
       setNewParams({});
+      setNewNodeId("");
     } catch (err: any) {
       const errorMessage = err.message ?? "Failed to create vault";
       addToast(errorMessage, "error");
@@ -393,6 +402,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
         setNewPolicy("");
         setNewRetentionRules([]);
         setNewParams({});
+        setNewNodeId("");
       }}
       isLoading={isLoading}
       isEmpty={vaults.length === 0}
@@ -446,6 +456,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
               dark={dark}
             />
           </FormField>
+          <NodeSelect value={newNodeId} onChange={setNewNodeId} dark={dark} />
           <div className="grid grid-cols-2 gap-3">
             <FormField label="Filter" dark={dark}>
               <SelectInput
@@ -630,6 +641,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
             }
             headerRight={
               <span className="flex items-center gap-2">
+                <NodeBadge nodeId={vault.nodeId} dark={dark} />
                 {!vault.enabled && (
                   <span
                     className={`px-1.5 py-0.5 text-[0.8em] font-mono rounded ${c(
@@ -660,6 +672,11 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                 checked={edit.enabled}
                 onChange={(v) => setEdit(vault.id, { enabled: v })}
                 label="Enabled"
+                dark={dark}
+              />
+              <NodeSelect
+                value={edit.nodeId}
+                onChange={(v) => setEdit(vault.id, { nodeId: v })}
                 dark={dark}
               />
               <div className="grid grid-cols-2 gap-3">
