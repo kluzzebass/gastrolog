@@ -89,13 +89,15 @@ type Orchestrator struct {
 
 
 	// Ingest channel and lifecycle.
-	ingestCh     chan IngestMessage
-	ingestSize   int
-	cancel       context.CancelFunc
-	done         chan struct{}
-	running      bool
-	ingesterWg   sync.WaitGroup // tracks ingester goroutines
-	ingestLoopWg sync.WaitGroup // tracks ingest loop goroutine
+	ingestCh   chan IngestMessage
+	digestedCh chan digestedRecord
+	ingestSize int
+	cancel     context.CancelFunc
+	done       chan struct{}
+	running    bool
+	ingesterWg sync.WaitGroup // tracks ingester goroutines
+	digestWg   sync.WaitGroup // tracks digest goroutine
+	writeWg    sync.WaitGroup // tracks write goroutine
 
 	// Retention runners (keyed by vault ID, invoked by the shared scheduler).
 	retention map[uuid.UUID]*retentionRunner

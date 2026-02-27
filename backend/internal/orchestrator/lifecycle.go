@@ -9,9 +9,18 @@ import (
 	"github.com/google/uuid"
 )
 
-// Start launches all ingesters and the ingest loop.
+// digestedRecord is the intermediate type passed from digestLoop to writeLoop.
+type digestedRecord struct {
+	rec        chunk.Record
+	ack        chan<- error
+	ingesterID string
+	rawLen     int // original message raw length for stats
+}
+
+// Start launches all ingesters and the digest/write pipeline.
 // Each ingester runs in its own goroutine, emitting messages to a shared channel.
-// The ingest loop receives messages, resolves identity, and filters to chunk managers.
+// The digest loop receives messages, resolves identity, runs digesters, and builds
+// records. The write loop receives digested records and appends them to vaults.
 // Start returns immediately; use Stop() to shut down.
 func (o *Orchestrator) Start(ctx context.Context) error {
 	o.mu.Lock()
@@ -21,14 +30,15 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		return ErrAlreadyRunning
 	}
 
-	// Create cancellable context for all ingesters and ingest loop.
+	// Create cancellable context for all ingesters and digest loop.
 	ctx, cancel := context.WithCancel(ctx)
 	o.cancel = cancel
 	o.done = make(chan struct{})
 	o.running = true
 
-	// Create ingest channel.
+	// Create ingest and intermediate channels.
 	o.ingestCh = make(chan IngestMessage, o.ingestSize)
+	o.digestedCh = make(chan digestedRecord, o.ingestSize)
 
 	// Log startup info.
 	o.logger.Info("starting orchestrator",
@@ -50,14 +60,20 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		o.ingesterWg.Go(func() { _ = r.Run(recvCtx, o.ingestCh) })
 	}
 
-	// Launch ingest loop.
-	o.ingestLoopWg.Go(func() { o.ingestLoop(ctx) })
+	// Launch digest + write pipeline.
+	o.digestWg.Go(func() { o.digestLoop(ctx) })
+	o.writeWg.Go(func() { o.writeLoop() })
 
 	return nil
 }
 
-// Stop cancels all ingesters, the ingest loop, and in-flight index builds,
-// then waits for everything to finish.
+// Stop cancels all ingesters, the digest/write pipeline, and in-flight index
+// builds, then waits for everything to finish.
+//
+// Ordered shutdown:
+//  1. Cancel ingester contexts → ingesterWg.Wait() → close ingestCh
+//  2. digestWg.Wait() (drains remaining messages) → close digestedCh
+//  3. writeWg.Wait() (drains remaining records) → close done
 func (o *Orchestrator) Stop() error {
 	o.mu.Lock()
 	if !o.running {
@@ -66,6 +82,7 @@ func (o *Orchestrator) Stop() error {
 	}
 	cancel := o.cancel
 	ingestCh := o.ingestCh
+	digestedCh := o.digestedCh
 	o.mu.Unlock()
 
 	// Cancel all ingester contexts (both initial and dynamically added).
@@ -75,15 +92,19 @@ func (o *Orchestrator) Stop() error {
 	}
 	o.mu.Unlock()
 
-	// Cancel main context (for ingest loop).
+	// Cancel main context (for digest loop).
 	cancel()
 
-	// Wait for ingesters to exit, then close the ingest channel.
+	// Stage 1: Wait for ingesters to exit, then close the ingest channel.
 	o.ingesterWg.Wait()
 	close(ingestCh)
 
-	// Wait for ingest loop to finish.
-	o.ingestLoopWg.Wait()
+	// Stage 2: Wait for digest loop to drain, then close the intermediate channel.
+	o.digestWg.Wait()
+	close(digestedCh)
+
+	// Stage 3: Wait for write loop to drain remaining records.
+	o.writeWg.Wait()
 
 	// Stop shared scheduler — waits for running jobs (index builds,
 	// cron rotation, retention) to finish.
@@ -94,6 +115,7 @@ func (o *Orchestrator) Stop() error {
 	o.cancel = nil
 	o.done = nil
 	o.ingestCh = nil
+	o.digestedCh = nil
 	// Clear per-ingester cancel functions.
 	o.ingesterCancels = make(map[uuid.UUID]context.CancelFunc)
 	o.mu.Unlock()
@@ -101,39 +123,32 @@ func (o *Orchestrator) Stop() error {
 	return nil
 }
 
-// ingestLoop receives messages from the ingest channel and filters them.
+// digestLoop reads IngestMessages, stamps identity, runs the digester chain,
+// builds chunk.Records, and forwards them to digestedCh.
 //
-// Throughput: A single goroutine processes all messages sequentially.
-// This is intentional because:
-//   - Chunk append is serialized anyway (single writer per ChunkManager)
-//   - Identity resolution is cheap (in-memory map lookup)
-//   - Index scheduling is async (fire-and-forget goroutine)
-//
-// If this becomes a bottleneck, parallelization can be added later
-// (e.g., worker pool with per-ChunkManager filtering).
-func (o *Orchestrator) ingestLoop(ctx context.Context) {
-	defer close(o.done)
-
+// On context cancellation it drains remaining messages from ingestCh so that
+// every message gets digested before the channel is closed.
+func (o *Orchestrator) digestLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			// Context cancelled, but drain remaining messages from channel.
-			// Channel will be closed after ingesters exit.
+			// Context cancelled — drain remaining messages.
+			// ingestCh will be closed after ingesters exit.
 			for msg := range o.ingestCh {
-				o.processMessage(msg)
+				o.digestAndForward(msg)
 			}
 			return
 		case msg, ok := <-o.ingestCh:
 			if !ok {
 				return
 			}
-			o.processMessage(msg)
+			o.digestAndForward(msg)
 		}
 	}
 }
 
-// processMessage applies digesters then filters to chunk managers.
-func (o *Orchestrator) processMessage(msg IngestMessage) {
+// digestAndForward digests a single message and sends the result to digestedCh.
+func (o *Orchestrator) digestAndForward(msg IngestMessage) {
 	// Stamp identity attrs so records are traceable to the ingesting node and ingester.
 	if o.localNodeID != "" || msg.IngesterID != "" {
 		if msg.Attrs == nil {
@@ -164,24 +179,39 @@ func (o *Orchestrator) processMessage(msg IngestMessage) {
 		Raw:      msg.Raw,
 	}
 
-	// Filter to chunk managers (reuses existing Ingest logic).
-	err := o.ingest(rec)
-
-	// Track per-ingester stats.
-	o.trackIngesterStats(msg, err)
-
-	// Send ack if requested.
-	if msg.Ack != nil {
-		msg.Ack <- err
+	o.digestedCh <- digestedRecord{
+		rec:        rec,
+		ack:        msg.Ack,
+		ingesterID: msg.IngesterID,
+		rawLen:     len(msg.Raw),
 	}
 }
 
-// trackIngesterStats updates per-ingester counters for the given message.
-func (o *Orchestrator) trackIngesterStats(msg IngestMessage, ingestErr error) {
-	if msg.IngesterID == "" {
+// writeLoop reads digested records, appends them to vaults, tracks stats,
+// and sends acks. It exits when digestedCh is closed.
+func (o *Orchestrator) writeLoop() {
+	defer close(o.done)
+
+	for dr := range o.digestedCh {
+		// Filter to chunk managers (reuses existing Ingest logic).
+		err := o.ingest(dr.rec)
+
+		// Track per-ingester stats.
+		o.trackWriteStats(dr, err)
+
+		// Send ack if requested.
+		if dr.ack != nil {
+			dr.ack <- err
+		}
+	}
+}
+
+// trackWriteStats updates per-ingester counters for a written record.
+func (o *Orchestrator) trackWriteStats(dr digestedRecord, ingestErr error) {
+	if dr.ingesterID == "" {
 		return
 	}
-	id, parseErr := uuid.Parse(msg.IngesterID)
+	id, parseErr := uuid.Parse(dr.ingesterID)
 	if parseErr != nil {
 		return
 	}
@@ -190,7 +220,7 @@ func (o *Orchestrator) trackIngesterStats(msg IngestMessage, ingestErr error) {
 		return
 	}
 	stats.MessagesIngested.Add(1)
-	stats.BytesIngested.Add(int64(len(msg.Raw)))
+	stats.BytesIngested.Add(int64(dr.rawLen))
 	if ingestErr != nil {
 		stats.Errors.Add(1)
 	}

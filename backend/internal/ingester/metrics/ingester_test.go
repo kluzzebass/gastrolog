@@ -33,11 +33,11 @@ func TestNewFactory(t *testing.T) {
 			t.Fatal(err)
 		}
 		m := ing.(*ingester)
-		if m.interval != 30*time.Second {
-			t.Errorf("got interval %v, want 30s", m.interval)
+		if m.interval != 10*time.Second {
+			t.Errorf("got interval %v, want 10s", m.interval)
 		}
-		if m.vaultInterval != 10*time.Second {
-			t.Errorf("got vaultInterval %v, want 10s", m.vaultInterval)
+		if m.vaultInterval != 30*time.Second {
+			t.Errorf("got vaultInterval %v, want 30s", m.vaultInterval)
 		}
 	})
 
@@ -289,10 +289,10 @@ func TestCollectVaultsEmpty(t *testing.T) {
 
 func TestParamDefaults(t *testing.T) {
 	defaults := ParamDefaults()
-	if defaults["interval"] != "30s" {
-		t.Errorf("got interval default %q, want 30s", defaults["interval"])
+	if defaults["interval"] != "10s" {
+		t.Errorf("got interval default %q, want 10s", defaults["interval"])
 	}
-	if defaults["vault_interval"] != "10s" {
-		t.Errorf("got vault_interval default %q, want 10s", defaults["vault_interval"])
+	if defaults["vault_interval"] != "30s" {
+		t.Errorf("got vault_interval default %q, want 30s", defaults["vault_interval"])
 	}
 }

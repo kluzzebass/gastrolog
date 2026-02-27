@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -1330,4 +1331,116 @@ func (r *ackTestIngester) Run(ctx context.Context, out chan<- orchestrator.Inges
 
 	<-ctx.Done()
 	return ctx.Err()
+}
+
+// slowDigester adds a fixed delay to simulate CPU-bound digestion work.
+type slowDigester struct {
+	delay time.Duration
+}
+
+func (d *slowDigester) Digest(_ *orchestrator.IngestMessage) {
+	time.Sleep(d.delay)
+}
+
+// slowChunkManager wraps a ChunkManager and adds a fixed delay to Append.
+type slowChunkManager struct {
+	chunk.ChunkManager
+	delay time.Duration
+}
+
+func (s *slowChunkManager) Append(rec chunk.Record) (chunk.ChunkID, uint64, error) {
+	time.Sleep(s.delay)
+	return s.ChunkManager.Append(rec)
+}
+
+func TestPipelineOverlap(t *testing.T) {
+	const (
+		n            = 10
+		digestDelay  = 10 * time.Millisecond
+		writeDelay   = 10 * time.Millisecond
+		perRecordSeq = digestDelay + writeDelay // 20ms sequential per record
+	)
+
+	s, _ := memtest.NewVault(chunkmem.Config{
+		RotationPolicy: recordCountPolicy(1 << 20),
+	})
+
+	slowCM := &slowChunkManager{ChunkManager: s.CM, delay: writeDelay}
+	vaultID := uuid.Must(uuid.NewV7())
+
+	orch := orchestrator.New(orchestrator.Config{IngestChannelSize: n})
+	orch.RegisterVault(orchestrator.NewVault(vaultID, slowCM, s.IM, s.QE))
+	orch.RegisterDigester(&slowDigester{delay: digestDelay})
+
+	// Ingester that sends n messages then waits for cancellation.
+	msgs := make([]orchestrator.IngestMessage, n)
+	for i := range n {
+		msgs[i] = orchestrator.IngestMessage{
+			Attrs:    map[string]string{"i": fmt.Sprintf("%d", i)},
+			Raw:      []byte("msg"),
+			IngestTS: time.Now(),
+		}
+	}
+
+	// Use ack on the last message to know when everything is done.
+	ackCh := make(chan error, 1)
+	msgs[n-1].Ack = ackCh
+
+	recv := newMockIngester(msgs)
+	orch.RegisterIngester(uuid.Must(uuid.NewV7()), recv)
+
+	start := time.Now()
+
+	if err := orch.Start(context.Background()); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	// Wait for last message to be acked (all records written).
+	select {
+	case err := <-ackCh:
+		if err != nil {
+			t.Fatalf("ack error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for pipeline to finish")
+	}
+
+	elapsed := time.Since(start)
+
+	if err := orch.Stop(); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+
+	// Verify all records were written.
+	cursor, err := slowCM.OpenCursor(slowCM.Active().ID)
+	if err != nil {
+		t.Fatalf("OpenCursor failed: %v", err)
+	}
+	defer cursor.Close()
+
+	count := 0
+	for {
+		_, _, err := cursor.Next()
+		if err == chunk.ErrNoMoreRecords {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Next failed: %v", err)
+		}
+		count++
+	}
+	if count != n {
+		t.Fatalf("expected %d records, got %d", n, count)
+	}
+
+	// Sequential would take n * (digestDelay + writeDelay) = 200ms.
+	// Pipelined should be roughly n * max(digestDelay, writeDelay) + min = ~110ms.
+	// Use 80% of sequential as the threshold to prove overlap.
+	seqTime := time.Duration(n) * perRecordSeq
+	threshold := seqTime * 80 / 100
+	t.Logf("elapsed=%v, sequential=%v, threshold=%v", elapsed, seqTime, threshold)
+
+	if elapsed >= threshold {
+		t.Errorf("pipeline did not overlap: elapsed %v >= threshold %v (sequential %v)", elapsed, threshold, seqTime)
+	}
 }

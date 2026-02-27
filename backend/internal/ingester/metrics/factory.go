@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	defaultInterval      = 30 * time.Second
-	defaultVaultInterval = 10 * time.Second
+	defaultInterval      = 10 * time.Second
+	defaultVaultInterval = 30 * time.Second
 )
 
 // StatsSource provides ingest queue and per-vault statistics.
