@@ -13,6 +13,7 @@ import {
   PolicyIcon,
   UsersIcon,
   LookupIcon,
+  ClusterIcon,
 } from "../icons";
 import { VaultsSettings } from "./VaultsSettings";
 import { IngestersSettings } from "./IngestersSettings";
@@ -22,10 +23,10 @@ import { PoliciesSettings } from "./PoliciesSettings";
 import { RetentionPoliciesSettings } from "./RetentionPoliciesSettings";
 import { UsersSettings } from "./UsersSettings";
 import { LookupsSettings } from "./LookupsSettings";
+import { NodesSettings } from "./NodesSettings";
 import {
   useSettings,
   usePutSettings,
-  usePutNodeConfig,
   useCertificates,
   JWT_KEEP,
 } from "../../api/hooks/useConfig";
@@ -58,6 +59,7 @@ function parseDurationSeconds(s: string): number | null {
 
 export type SettingsTab =
   | "service"
+  | "nodes"
   | "certificates"
   | "lookups"
   | "vaults"
@@ -86,6 +88,7 @@ type TabDef = {
 
 const allTabs: TabDef[] = [
   { id: "service", label: "Service", icon: ServiceIcon, helpTopicId: "service-settings" },
+  { id: "nodes", label: "Nodes", icon: ClusterIcon },
   { id: "certificates", label: "Certificates", icon: CertIcon, helpTopicId: "certificates" },
   { id: "lookups", label: "Lookups", icon: LookupIcon },
   { id: "users", label: "Users", icon: UsersIcon, adminOnly: true, helpTopicId: "user-management" },
@@ -147,6 +150,7 @@ export function SettingsDialog({
 
         <div className="flex-1 overflow-y-auto app-scroll p-5">
           {tab === "service" && <ServiceSettings dark={dark} noAuth={noAuth} />}
+          {tab === "nodes" && <NodesSettings dark={dark} />}
           {tab === "certificates" && <CertificatesSettings dark={dark} />}
           {tab === "lookups" && <LookupsSettings dark={dark} />}
           {tab === "users" && <UsersSettings dark={dark} noAuth={noAuth} />}
@@ -167,7 +171,6 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
   const { data, isLoading } = useSettings();
   const { data: certData } = useCertificates();
   const putConfig = usePutSettings();
-  const putNodeConfig = usePutNodeConfig();
   const { addToast } = useToast();
 
   const [tokenDuration, setTokenDuration] = useState("");
@@ -187,7 +190,6 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
   const [maxFollowDuration, setMaxFollowDuration] = useState("");
   const [queryTimeout, setQueryTimeout] = useState("");
   const [maxResultCount, setMaxResultCount] = useState("");
-  const [nodeName, setNodeName] = useState("");
   const [initialized, setInitialized] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
 
@@ -218,7 +220,6 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
     setMaxFollowDuration(query?.maxFollowDuration ?? "");
     setQueryTimeout(query?.timeout ?? "");
     setMaxResultCount(query?.maxResultCount ? String(query.maxResultCount) : "10000");
-    setNodeName(data.nodeName);
     setInitialized(true);
   }
 
@@ -313,12 +314,10 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
       setMaxFollowDuration(query?.maxFollowDuration ?? "");
       setQueryTimeout(query?.timeout ?? "");
       setMaxResultCount(query?.maxResultCount ? String(query.maxResultCount) : "10000");
-      setNodeName(data.nodeName);
     }
   };
 
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({
-    node: false,
     auth: true,
     password: false,
     scheduler: false,
@@ -350,47 +349,6 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
         </div>
       ) : (
         <div className="flex flex-col gap-3">
-          <ExpandableCard
-            id="Node"
-            dark={dark}
-            expanded={!!expandedCards.node}
-            onToggle={() => toggle("node")}
-            monoTitle={false}
-          >
-            <div className="flex flex-col gap-4">
-              <FormField label="Node ID" description="Unique identifier for this node. Auto-generated, read-only." dark={dark}>
-                <TextInput value={data?.nodeId ?? ""} onChange={() => {}} dark={dark} mono disabled />
-              </FormField>
-              <FormField label="Node Name" description="Human-readable name for this node. Visible to all nodes in the cluster." dark={dark}>
-                <TextInput value={nodeName} onChange={setNodeName} placeholder="e.g. witty-hamster" dark={dark} mono />
-              </FormField>
-              <div className="flex gap-2">
-                <PrimaryButton
-                  onClick={async () => {
-                    if (!nodeName.trim()) {
-                      addToast("Node name must not be empty", "error");
-                      return;
-                    }
-                    try {
-                      await putNodeConfig.mutateAsync({ id: data?.nodeId ?? "", name: nodeName.trim() });
-                      addToast("Node name updated", "info");
-                    } catch (err: any) {
-                      addToast(err.message ?? "Failed to update node name", "error");
-                    }
-                  }}
-                  disabled={!initialized || nodeName === (data?.nodeName ?? "") || putNodeConfig.isPending}
-                >
-                  {putNodeConfig.isPending ? "Saving..." : "Save"}
-                </PrimaryButton>
-                {nodeName !== (data?.nodeName ?? "") && (
-                  <GhostButton onClick={() => setNodeName(data?.nodeName ?? "")} dark={dark}>
-                    Reset
-                  </GhostButton>
-                )}
-              </div>
-            </div>
-          </ExpandableCard>
-
           <ExpandableCard
             id="Authentication"
             dark={dark}

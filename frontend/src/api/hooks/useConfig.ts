@@ -120,87 +120,85 @@ export function useSettings() {
 export const JWT_KEEP = "__KEEP_EXISTING__";
 export const MAXMIND_KEEP = "__KEEP_EXISTING__";
 
+type PutSettingsArgs = {
+  auth?: {
+    tokenDuration?: string;
+    jwtSecret?: string;
+    refreshTokenDuration?: string;
+    passwordPolicy?: {
+      minLength?: number;
+      requireMixedCase?: boolean;
+      requireDigit?: boolean;
+      requireSpecial?: boolean;
+      maxConsecutiveRepeats?: number;
+      forbidAnimalNoise?: boolean;
+    };
+  };
+  query?: {
+    timeout?: string;
+    maxFollowDuration?: string;
+    maxResultCount?: number;
+  };
+  scheduler?: {
+    maxConcurrentJobs?: number;
+  };
+  tls?: {
+    defaultCert?: string;
+    enabled?: boolean;
+    httpToHttpsRedirect?: boolean;
+    httpsPort?: string;
+  };
+  lookup?: {
+    geoipDbPath?: string;
+    asnDbPath?: string;
+    maxmind?: {
+      autoDownload?: boolean;
+      accountId?: string;
+      licenseKey?: string;
+    };
+  };
+  setupWizardDismissed?: boolean;
+};
+
+/** Build the auth sub-request, filtering out the JWT sentinel value. */
+function buildAuthReq(auth: NonNullable<PutSettingsArgs["auth"]>): Record<string, unknown> {
+  const req: Record<string, unknown> = {};
+  if (auth.tokenDuration !== undefined) req.tokenDuration = auth.tokenDuration;
+  if (auth.refreshTokenDuration !== undefined) req.refreshTokenDuration = auth.refreshTokenDuration;
+  if (auth.jwtSecret !== undefined && auth.jwtSecret !== JWT_KEEP) req.jwtSecret = auth.jwtSecret;
+  if (auth.passwordPolicy) req.passwordPolicy = auth.passwordPolicy;
+  return req;
+}
+
+/** Build the lookup sub-request, filtering out the MaxMind license sentinel value. */
+function buildLookupReq(lookup: NonNullable<PutSettingsArgs["lookup"]>): Record<string, unknown> {
+  const req: Record<string, unknown> = {};
+  if (lookup.geoipDbPath !== undefined) req.geoipDbPath = lookup.geoipDbPath;
+  if (lookup.asnDbPath !== undefined) req.asnDbPath = lookup.asnDbPath;
+  if (lookup.maxmind) {
+    const mm: Record<string, unknown> = {};
+    if (lookup.maxmind.autoDownload !== undefined) mm.autoDownload = lookup.maxmind.autoDownload;
+    if (lookup.maxmind.accountId !== undefined) mm.accountId = lookup.maxmind.accountId;
+    if (lookup.maxmind.licenseKey !== undefined && lookup.maxmind.licenseKey !== MAXMIND_KEEP)
+      mm.licenseKey = lookup.maxmind.licenseKey;
+    req.maxmind = mm;
+  }
+  return req;
+}
+
 export function usePutSettings() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (args: {
-      auth?: {
-        tokenDuration?: string;
-        jwtSecret?: string;
-        refreshTokenDuration?: string;
-        passwordPolicy?: {
-          minLength?: number;
-          requireMixedCase?: boolean;
-          requireDigit?: boolean;
-          requireSpecial?: boolean;
-          maxConsecutiveRepeats?: number;
-          forbidAnimalNoise?: boolean;
-        };
-      };
-      query?: {
-        timeout?: string;
-        maxFollowDuration?: string;
-        maxResultCount?: number;
-      };
-      scheduler?: {
-        maxConcurrentJobs?: number;
-      };
-      tls?: {
-        defaultCert?: string;
-        enabled?: boolean;
-        httpToHttpsRedirect?: boolean;
-        httpsPort?: string;
-      };
-      lookup?: {
-        geoipDbPath?: string;
-        asnDbPath?: string;
-        maxmind?: {
-          autoDownload?: boolean;
-          accountId?: string;
-          licenseKey?: string;
-        };
-      };
-      setupWizardDismissed?: boolean;
-    }) => {
-      // Build nested request, filtering out sentinel-guarded secrets.
+    mutationFn: async (args: PutSettingsArgs) => {
       const req: Record<string, unknown> = {};
-      if (args.auth) {
-        const authReq: Record<string, unknown> = {};
-        if (args.auth.tokenDuration !== undefined)
-          authReq.tokenDuration = args.auth.tokenDuration;
-        if (args.auth.refreshTokenDuration !== undefined)
-          authReq.refreshTokenDuration = args.auth.refreshTokenDuration;
-        if (args.auth.jwtSecret !== undefined && args.auth.jwtSecret !== JWT_KEEP)
-          authReq.jwtSecret = args.auth.jwtSecret;
-        if (args.auth.passwordPolicy)
-          authReq.passwordPolicy = args.auth.passwordPolicy;
-        req.auth = authReq;
-      }
+      if (args.auth) req.auth = buildAuthReq(args.auth);
       if (args.query) req.query = args.query;
       if (args.scheduler) req.scheduler = args.scheduler;
       if (args.tls) req.tls = args.tls;
-      if (args.lookup) {
-        const lookupReq: Record<string, unknown> = {};
-        if (args.lookup.geoipDbPath !== undefined)
-          lookupReq.geoipDbPath = args.lookup.geoipDbPath;
-        if (args.lookup.asnDbPath !== undefined)
-          lookupReq.asnDbPath = args.lookup.asnDbPath;
-        if (args.lookup.maxmind) {
-          const mmReq: Record<string, unknown> = {};
-          if (args.lookup.maxmind.autoDownload !== undefined)
-            mmReq.autoDownload = args.lookup.maxmind.autoDownload;
-          if (args.lookup.maxmind.accountId !== undefined)
-            mmReq.accountId = args.lookup.maxmind.accountId;
-          if (args.lookup.maxmind.licenseKey !== undefined && args.lookup.maxmind.licenseKey !== MAXMIND_KEEP)
-            mmReq.licenseKey = args.lookup.maxmind.licenseKey;
-          lookupReq.maxmind = mmReq;
-        }
-        req.lookup = lookupReq;
-      }
+      if (args.lookup) req.lookup = buildLookupReq(args.lookup);
       if (args.setupWizardDismissed !== undefined)
         req.setupWizardDismissed = args.setupWizardDismissed;
-      const resp = await configClient.putSettings(req as Parameters<typeof configClient.putSettings>[0]);
-      return resp;
+      return configClient.putSettings(req as Parameters<typeof configClient.putSettings>[0]);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["settings"] });
@@ -279,7 +277,10 @@ export function usePutNodeConfig() {
     mutationFn: async (args: { id: string; name: string }) => {
       await configClient.putNodeConfig({ config: { id: args.id, name: args.name } });
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["settings"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["settings"] });
+      qc.invalidateQueries({ queryKey: ["config"] });
+    },
   });
 }
 
