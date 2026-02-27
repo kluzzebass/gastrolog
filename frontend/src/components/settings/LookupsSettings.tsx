@@ -130,11 +130,6 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
             monoTitle={false}
             typeBadge={autoDownload ? "enabled" : undefined}
             typeBadgeAccent={true}
-            status={
-              data?.lookup?.maxmind?.licenseConfigured ? (
-                <span className="text-green-500 text-[0.8em]">&#10003;</span>
-              ) : undefined
-            }
           >
             <div className="flex flex-col gap-4">
               <Checkbox
