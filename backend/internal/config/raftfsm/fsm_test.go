@@ -193,28 +193,24 @@ func TestApplyDeleteIngester(t *testing.T) {
 
 func TestApplyPutServerSettings(t *testing.T) {
 	fsm := New()
-	cmd, err := command.NewPutServerSettings(
-		config.AuthConfig{JWTSecret: "test-secret"},
-		config.QueryConfig{},
-		config.SchedulerConfig{MaxConcurrentJobs: 4},
-		config.TLSConfig{},
-		config.LookupConfig{},
-		false,
-	)
+	cmd, err := command.NewPutServerSettings(config.ServerSettings{
+		Auth:      config.AuthConfig{JWTSecret: "test-secret"},
+		Scheduler: config.SchedulerConfig{MaxConcurrentJobs: 4},
+	})
 	if err != nil {
 		t.Fatalf("NewPutServerSettings: %v", err)
 	}
 	applyCmd(t, fsm, cmd)
 
-	auth, _, sched, _, _, _, err := fsm.Store().LoadServerSettings(context.Background())
+	ss, err := fsm.Store().LoadServerSettings(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if auth.JWTSecret != "test-secret" {
-		t.Fatalf("JWTSecret: got %q, want %q", auth.JWTSecret, "test-secret")
+	if ss.Auth.JWTSecret != "test-secret" {
+		t.Fatalf("JWTSecret: got %q, want %q", ss.Auth.JWTSecret, "test-secret")
 	}
-	if sched.MaxConcurrentJobs != 4 {
-		t.Fatalf("MaxConcurrentJobs: got %d, want 4", sched.MaxConcurrentJobs)
+	if ss.Scheduler.MaxConcurrentJobs != 4 {
+		t.Fatalf("MaxConcurrentJobs: got %d, want 4", ss.Scheduler.MaxConcurrentJobs)
 	}
 }
 
@@ -568,7 +564,7 @@ func TestSnapshotRestore(t *testing.T) {
 		Params: map[string]string{"port": "514"},
 	}))
 
-	settingsCmd, err := command.NewPutServerSettings(config.AuthConfig{}, config.QueryConfig{}, config.SchedulerConfig{}, config.TLSConfig{}, config.LookupConfig{}, false)
+	settingsCmd, err := command.NewPutServerSettings(config.ServerSettings{})
 	if err != nil {
 		t.Fatalf("NewPutServerSettings: %v", err)
 	}
@@ -640,8 +636,7 @@ func TestSnapshotRestore(t *testing.T) {
 	}
 
 	// Server settings were saved — verify they can be loaded.
-	_, _, _, _, _, _, ssErr := fsm2.Store().LoadServerSettings(ctx)
-	if ssErr != nil {
+	if _, ssErr := fsm2.Store().LoadServerSettings(ctx); ssErr != nil {
 		t.Errorf("LoadServerSettings: %v", ssErr)
 	}
 

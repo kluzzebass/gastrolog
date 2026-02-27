@@ -191,66 +191,66 @@ func (s *ConfigServer) GetSettings(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetSettingsRequest],
 ) (*connect.Response[apiv1.GetSettingsResponse], error) {
-	authCfg, queryCfg, schedCfg, tlsCfg, lookupCfg, setupDismissed, err := s.cfgStore.LoadServerSettings(ctx)
+	ss, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	maxJobs := int32(schedCfg.MaxConcurrentJobs) //nolint:gosec // G115: small config value, always fits in int32
+	maxJobs := int32(ss.Scheduler.MaxConcurrentJobs) //nolint:gosec // G115: small config value, always fits in int32
 	if maxJobs == 0 {
 		maxJobs = int32(s.orch.MaxConcurrentJobs()) //nolint:gosec // G115: small config value, always fits in int32
 	}
 
 	mm := &apiv1.MaxMindSettings{
-		AutoDownload:     lookupCfg.MaxMind.AutoDownload,
-		LicenseConfigured: lookupCfg.MaxMind.AccountID != "" && lookupCfg.MaxMind.LicenseKey != "",
+		AutoDownload:     ss.Lookup.MaxMind.AutoDownload,
+		LicenseConfigured: ss.Lookup.MaxMind.AccountID != "" && ss.Lookup.MaxMind.LicenseKey != "",
 	}
-	if !lookupCfg.MaxMind.LastUpdate.IsZero() {
-		mm.LastUpdate = lookupCfg.MaxMind.LastUpdate.Format(time.RFC3339)
+	if !ss.Lookup.MaxMind.LastUpdate.IsZero() {
+		mm.LastUpdate = ss.Lookup.MaxMind.LastUpdate.Format(time.RFC3339)
 	}
 
 	auth := &apiv1.AuthSettings{
-		TokenDuration:        authCfg.TokenDuration,
-		JwtSecretConfigured:  authCfg.JWTSecret != "",
-		RefreshTokenDuration: authCfg.RefreshTokenDuration,
+		TokenDuration:        ss.Auth.TokenDuration,
+		JwtSecretConfigured:  ss.Auth.JWTSecret != "",
+		RefreshTokenDuration: ss.Auth.RefreshTokenDuration,
 		PasswordPolicy: &apiv1.PasswordPolicySettings{
-			MinLength:             int32(authCfg.PasswordPolicy.MinLength),             //nolint:gosec // G115
-			RequireMixedCase:      authCfg.PasswordPolicy.RequireMixedCase,
-			RequireDigit:          authCfg.PasswordPolicy.RequireDigit,
-			RequireSpecial:        authCfg.PasswordPolicy.RequireSpecial,
-			MaxConsecutiveRepeats: int32(authCfg.PasswordPolicy.MaxConsecutiveRepeats), //nolint:gosec // G115
-			ForbidAnimalNoise:     authCfg.PasswordPolicy.ForbidAnimalNoise,
+			MinLength:             int32(ss.Auth.PasswordPolicy.MinLength),             //nolint:gosec // G115
+			RequireMixedCase:      ss.Auth.PasswordPolicy.RequireMixedCase,
+			RequireDigit:          ss.Auth.PasswordPolicy.RequireDigit,
+			RequireSpecial:        ss.Auth.PasswordPolicy.RequireSpecial,
+			MaxConsecutiveRepeats: int32(ss.Auth.PasswordPolicy.MaxConsecutiveRepeats), //nolint:gosec // G115
+			ForbidAnimalNoise:     ss.Auth.PasswordPolicy.ForbidAnimalNoise,
 		},
 	}
 
 	if req.Msg.IncludeSecrets {
-		auth.JwtSecret = authCfg.JWTSecret
-		mm.AccountId = lookupCfg.MaxMind.AccountID
-		mm.LicenseKey = lookupCfg.MaxMind.LicenseKey
+		auth.JwtSecret = ss.Auth.JWTSecret
+		mm.AccountId = ss.Lookup.MaxMind.AccountID
+		mm.LicenseKey = ss.Lookup.MaxMind.LicenseKey
 	}
 
 	resp := &apiv1.GetSettingsResponse{
 		Auth: auth,
 		Query: &apiv1.QuerySettings{
-			Timeout:           queryCfg.Timeout,
-			MaxFollowDuration: queryCfg.MaxFollowDuration,
-			MaxResultCount:    int32(queryCfg.MaxResultCount), //nolint:gosec // G115
+			Timeout:           ss.Query.Timeout,
+			MaxFollowDuration: ss.Query.MaxFollowDuration,
+			MaxResultCount:    int32(ss.Query.MaxResultCount), //nolint:gosec // G115
 		},
 		Scheduler: &apiv1.SchedulerSettings{
 			MaxConcurrentJobs: maxJobs,
 		},
 		Tls: &apiv1.TLSSettings{
-			DefaultCert:         tlsCfg.DefaultCert,
-			Enabled:             tlsCfg.TLSEnabled,
-			HttpToHttpsRedirect: tlsCfg.HTTPToHTTPSRedirect,
-			HttpsPort:           tlsCfg.HTTPSPort,
+			DefaultCert:         ss.TLS.DefaultCert,
+			Enabled:             ss.TLS.TLSEnabled,
+			HttpToHttpsRedirect: ss.TLS.HTTPToHTTPSRedirect,
+			HttpsPort:           ss.TLS.HTTPSPort,
 		},
 		Lookup: &apiv1.LookupSettings{
-			GeoipDbPath: lookupCfg.GeoIPDBPath,
-			AsnDbPath:   lookupCfg.ASNDBPath,
+			GeoipDbPath: ss.Lookup.GeoIPDBPath,
+			AsnDbPath:   ss.Lookup.ASNDBPath,
 			Maxmind:     mm,
 		},
-		SetupWizardDismissed: setupDismissed,
+		SetupWizardDismissed: ss.SetupWizardDismissed,
 		NodeId:               s.localNodeID,
 	}
 
@@ -269,20 +269,20 @@ func (s *ConfigServer) PutSettings(
 	ctx context.Context,
 	req *connect.Request[apiv1.PutSettingsRequest],
 ) (*connect.Response[apiv1.PutSettingsResponse], error) {
-	authCfg, queryCfg, schedCfg, tlsCfg, lookupCfg, setupDismissed, err := s.loadServerSettings(ctx)
+	ss, err := s.loadServerSettings(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	if connErr := mergeSettingsFields(req.Msg, &authCfg, &queryCfg, &schedCfg, &tlsCfg, &lookupCfg, &setupDismissed); connErr != nil {
+	if connErr := mergeSettingsFields(req.Msg, &ss); connErr != nil {
 		return nil, connErr
 	}
 
-	if connErr := validateTokenDurations(authCfg); connErr != nil {
+	if connErr := validateTokenDurations(ss.Auth); connErr != nil {
 		return nil, connErr
 	}
 
-	if err := s.cfgStore.SaveServerSettings(ctx, authCfg, queryCfg, schedCfg, tlsCfg, lookupCfg, setupDismissed); err != nil {
+	if err := s.cfgStore.SaveServerSettings(ctx, ss); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: "server"})
@@ -293,7 +293,7 @@ func (s *ConfigServer) PutSettings(
 
 	lookupChanged := req.Msg.Lookup != nil
 	if s.onLookupConfigChange != nil && lookupChanged {
-		s.onLookupConfigChange(lookupCfg)
+		s.onLookupConfigChange(ss.Lookup)
 	}
 
 	resp := &apiv1.PutSettingsResponse{}
@@ -365,42 +365,42 @@ func (s *ConfigServer) GenerateName(
 	}), nil
 }
 
-func (s *ConfigServer) loadServerSettings(ctx context.Context) (config.AuthConfig, config.QueryConfig, config.SchedulerConfig, config.TLSConfig, config.LookupConfig, bool, error) {
-	auth, query, sched, tls, lookup, dismissed, err := s.cfgStore.LoadServerSettings(ctx)
+func (s *ConfigServer) loadServerSettings(ctx context.Context) (config.ServerSettings, error) {
+	ss, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
-		return auth, query, sched, tls, lookup, dismissed, connect.NewError(connect.CodeInternal, err)
+		return ss, connect.NewError(connect.CodeInternal, err)
 	}
-	if auth.PasswordPolicy.MinLength == 0 {
-		auth.PasswordPolicy.MinLength = 8
+	if ss.Auth.PasswordPolicy.MinLength == 0 {
+		ss.Auth.PasswordPolicy.MinLength = 8
 	}
-	if sched.MaxConcurrentJobs == 0 {
-		sched.MaxConcurrentJobs = 4
+	if ss.Scheduler.MaxConcurrentJobs == 0 {
+		ss.Scheduler.MaxConcurrentJobs = 4
 	}
-	return auth, query, sched, tls, lookup, dismissed, nil
+	return ss, nil
 }
 
-func mergeSettingsFields(msg *apiv1.PutSettingsRequest, auth *config.AuthConfig, query *config.QueryConfig, sched *config.SchedulerConfig, tlsCfg *config.TLSConfig, lookup *config.LookupConfig, setupDismissed *bool) *connect.Error {
+func mergeSettingsFields(msg *apiv1.PutSettingsRequest, ss *config.ServerSettings) *connect.Error {
 	if msg.Auth != nil {
-		mergeAuth(msg.Auth, auth)
+		mergeAuth(msg.Auth, &ss.Auth)
 	}
 	if msg.Query != nil {
-		if err := mergeQuery(msg.Query, query); err != nil {
+		if err := mergeQuery(msg.Query, &ss.Query); err != nil {
 			return err
 		}
 	}
 	if msg.Scheduler != nil {
-		if err := mergeScheduler(msg.Scheduler, sched); err != nil {
+		if err := mergeScheduler(msg.Scheduler, &ss.Scheduler); err != nil {
 			return err
 		}
 	}
 	if msg.Tls != nil {
-		mergeTLS(msg.Tls, tlsCfg)
+		mergeTLS(msg.Tls, &ss.TLS)
 	}
 	if msg.Lookup != nil {
-		mergeLookup(msg.Lookup, lookup)
+		mergeLookup(msg.Lookup, &ss.Lookup)
 	}
 	if msg.SetupWizardDismissed != nil {
-		*setupDismissed = *msg.SetupWizardDismissed
+		ss.SetupWizardDismissed = *msg.SetupWizardDismissed
 	}
 	return nil
 }

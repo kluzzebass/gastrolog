@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"gastrolog/internal/config"
@@ -74,94 +75,85 @@ func TestBootstrap(t *testing.T) {
 	}
 
 	// Verify server settings were written with a JWT secret.
-	auth, _, _, _, _, _, err := s.LoadServerSettings(ctx)
+	ss, err := s.LoadServerSettings(ctx)
 	if err != nil {
 		t.Fatalf("LoadServerSettings after bootstrap: %v", err)
 	}
-	if auth.JWTSecret == "" {
+	if ss.Auth.JWTSecret == "" {
 		t.Error("expected non-empty JWT secret after bootstrap")
 	}
-	if auth.TokenDuration != "15m" {
-		t.Errorf("expected token duration 15m, got %q", auth.TokenDuration)
+	if ss.Auth.TokenDuration != "15m" {
+		t.Errorf("expected token duration 15m, got %q", ss.Auth.TokenDuration)
 	}
-	if auth.RefreshTokenDuration != "168h" {
-		t.Errorf("expected refresh token duration 168h, got %q", auth.RefreshTokenDuration)
+	if ss.Auth.RefreshTokenDuration != "168h" {
+		t.Errorf("expected refresh token duration 168h, got %q", ss.Auth.RefreshTokenDuration)
 	}
 }
 
-func TestLoadSaveServerSettings(t *testing.T) {
+func TestLoadServerSettingsEmptyReturnsZero(t *testing.T) {
 	s := memory.NewStore()
 	ctx := context.Background()
 
-	t.Run("load empty returns zero value", func(t *testing.T) {
-		auth, _, _, _, _, _, err := config.LoadServerSettings(ctx, s)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if auth.JWTSecret != "" {
-			t.Errorf("expected empty JWT secret, got %q", auth.JWTSecret)
-		}
-	})
+	ss, err := config.LoadServerSettings(ctx, s)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ss.Auth.JWTSecret != "" {
+		t.Errorf("expected empty JWT secret, got %q", ss.Auth.JWTSecret)
+	}
+}
 
-	t.Run("round trip", func(t *testing.T) {
-		wantAuth := config.AuthConfig{
+func TestSaveLoadServerSettingsRoundTrip(t *testing.T) {
+	s := memory.NewStore()
+	ctx := context.Background()
+
+	want := config.ServerSettings{
+		Auth: config.AuthConfig{
 			JWTSecret:     "test-secret-key",
 			TokenDuration: "24h",
 			PasswordPolicy: config.PasswordPolicy{
 				MinLength: 12,
 			},
-		}
-		wantSched := config.SchedulerConfig{
+		},
+		Scheduler: config.SchedulerConfig{
 			MaxConcurrentJobs: 8,
-		}
-		wantTLS := config.TLSConfig{
+		},
+		TLS: config.TLSConfig{
 			TLSEnabled:  true,
 			DefaultCert: "cert-id-123",
-		}
+		},
+	}
 
-		if err := config.SaveServerSettings(ctx, s, wantAuth, config.QueryConfig{}, wantSched, wantTLS, config.LookupConfig{}, false); err != nil {
-			t.Fatalf("SaveServerSettings: %v", err)
-		}
+	if err := config.SaveServerSettings(ctx, s, want); err != nil {
+		t.Fatalf("SaveServerSettings: %v", err)
+	}
 
-		gotAuth, _, gotSched, gotTLS, _, _, err := config.LoadServerSettings(ctx, s)
-		if err != nil {
-			t.Fatalf("LoadServerSettings: %v", err)
-		}
+	got, err := config.LoadServerSettings(ctx, s)
+	if err != nil {
+		t.Fatalf("LoadServerSettings: %v", err)
+	}
 
-		if gotAuth.JWTSecret != wantAuth.JWTSecret {
-			t.Errorf("JWTSecret: got %q, want %q", gotAuth.JWTSecret, wantAuth.JWTSecret)
-		}
-		if gotAuth.TokenDuration != wantAuth.TokenDuration {
-			t.Errorf("TokenDuration: got %q, want %q", gotAuth.TokenDuration, wantAuth.TokenDuration)
-		}
-		if gotAuth.PasswordPolicy.MinLength != wantAuth.PasswordPolicy.MinLength {
-			t.Errorf("MinLength: got %d, want %d", gotAuth.PasswordPolicy.MinLength, wantAuth.PasswordPolicy.MinLength)
-		}
-		if gotSched.MaxConcurrentJobs != wantSched.MaxConcurrentJobs {
-			t.Errorf("MaxConcurrentJobs: got %d, want %d", gotSched.MaxConcurrentJobs, wantSched.MaxConcurrentJobs)
-		}
-		if gotTLS.TLSEnabled != wantTLS.TLSEnabled {
-			t.Errorf("TLSEnabled: got %v, want %v", gotTLS.TLSEnabled, wantTLS.TLSEnabled)
-		}
-		if gotTLS.DefaultCert != wantTLS.DefaultCert {
-			t.Errorf("DefaultCert: got %q, want %q", gotTLS.DefaultCert, wantTLS.DefaultCert)
-		}
-	})
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("round trip mismatch:\ngot:  %+v\nwant: %+v", got, want)
+	}
+}
 
-	t.Run("overwrite preserves only latest", func(t *testing.T) {
-		if err := config.SaveServerSettings(ctx, s, config.AuthConfig{JWTSecret: "first"}, config.QueryConfig{}, config.SchedulerConfig{}, config.TLSConfig{}, config.LookupConfig{}, false); err != nil {
-			t.Fatalf("save first: %v", err)
-		}
-		if err := config.SaveServerSettings(ctx, s, config.AuthConfig{JWTSecret: "second"}, config.QueryConfig{}, config.SchedulerConfig{}, config.TLSConfig{}, config.LookupConfig{}, false); err != nil {
-			t.Fatalf("save second: %v", err)
-		}
+func TestSaveServerSettingsOverwritePreservesLatest(t *testing.T) {
+	s := memory.NewStore()
+	ctx := context.Background()
 
-		gotAuth, _, _, _, _, _, err := config.LoadServerSettings(ctx, s)
-		if err != nil {
-			t.Fatalf("load: %v", err)
-		}
-		if gotAuth.JWTSecret != "second" {
-			t.Errorf("got %q, want %q", gotAuth.JWTSecret, "second")
-		}
-	})
+	if err := config.SaveServerSettings(ctx, s, config.ServerSettings{Auth: config.AuthConfig{JWTSecret: "first"}}); err != nil {
+		t.Fatalf("save first: %v", err)
+	}
+	if err := config.SaveServerSettings(ctx, s, config.ServerSettings{Auth: config.AuthConfig{JWTSecret: "second"}}); err != nil {
+		t.Fatalf("save second: %v", err)
+	}
+
+	ss, err := config.LoadServerSettings(ctx, s)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if ss.Auth.JWTSecret != "second" {
+		t.Errorf("got %q, want %q", ss.Auth.JWTSecret, "second")
+	}
 }

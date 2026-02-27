@@ -140,7 +140,7 @@ func (s *Store) ListIngesters(ctx context.Context) ([]config.IngesterConfig, err
 	return s.fsm.Store().ListIngesters(ctx)
 }
 
-func (s *Store) LoadServerSettings(ctx context.Context) (config.AuthConfig, config.QueryConfig, config.SchedulerConfig, config.TLSConfig, config.LookupConfig, bool, error) {
+func (s *Store) LoadServerSettings(ctx context.Context) (config.ServerSettings, error) {
 	return s.fsm.Store().LoadServerSettings(ctx)
 }
 
@@ -232,8 +232,8 @@ func (s *Store) DeleteIngester(ctx context.Context, id uuid.UUID) error {
 	return s.apply(command.NewDeleteIngester(id))
 }
 
-func (s *Store) SaveServerSettings(ctx context.Context, auth config.AuthConfig, query config.QueryConfig, sched config.SchedulerConfig, tls config.TLSConfig, lookup config.LookupConfig, setupDismissed bool) error {
-	cmd, err := command.NewPutServerSettings(auth, query, sched, tls, lookup, setupDismissed)
+func (s *Store) SaveServerSettings(ctx context.Context, ss config.ServerSettings) error {
+	cmd, err := command.NewPutServerSettings(ss)
 	if err != nil {
 		return err
 	}

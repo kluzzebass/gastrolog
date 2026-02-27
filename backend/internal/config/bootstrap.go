@@ -113,7 +113,7 @@ func Bootstrap(ctx context.Context, store Store) error {
 		Timeout:           "30s",
 		MaxFollowDuration: "4h",
 	}
-	if err := store.SaveServerSettings(ctx, authCfg, queryCfg, SchedulerConfig{}, TLSConfig{}, LookupConfig{}, false); err != nil {
+	if err := store.SaveServerSettings(ctx, ServerSettings{Auth: authCfg, Query: queryCfg}); err != nil {
 		return err
 	}
 
@@ -137,5 +137,5 @@ func BootstrapMinimal(ctx context.Context, store Store) error {
 		Timeout:           "30s",
 		MaxFollowDuration: "4h",
 	}
-	return store.SaveServerSettings(ctx, authCfg, queryCfg, SchedulerConfig{}, TLSConfig{}, LookupConfig{}, false)
+	return store.SaveServerSettings(ctx, ServerSettings{Auth: authCfg, Query: queryCfg})
 }

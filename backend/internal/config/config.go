@@ -77,8 +77,8 @@ type Store interface {
 	DeleteIngester(ctx context.Context, id uuid.UUID) error
 
 	// Server settings — typed access to Auth, Query, Scheduler, TLS, Lookup, SetupWizardDismissed.
-	LoadServerSettings(ctx context.Context) (AuthConfig, QueryConfig, SchedulerConfig, TLSConfig, LookupConfig, bool, error)
-	SaveServerSettings(ctx context.Context, auth AuthConfig, query QueryConfig, sched SchedulerConfig, tls TLSConfig, lookup LookupConfig, setupDismissed bool) error
+	LoadServerSettings(ctx context.Context) (ServerSettings, error)
+	SaveServerSettings(ctx context.Context, ss ServerSettings) error
 
 	// Nodes (cluster node identity)
 	GetNode(ctx context.Context, id uuid.UUID) (*NodeConfig, error)
@@ -120,13 +120,24 @@ type Store interface {
 
 // LoadServerSettings reads the server-level settings from the store.
 // Returns zero values if no settings exist.
-func LoadServerSettings(ctx context.Context, store Store) (AuthConfig, QueryConfig, SchedulerConfig, TLSConfig, LookupConfig, bool, error) {
+func LoadServerSettings(ctx context.Context, store Store) (ServerSettings, error) {
 	return store.LoadServerSettings(ctx)
 }
 
 // SaveServerSettings persists the server-level settings to the store.
-func SaveServerSettings(ctx context.Context, store Store, auth AuthConfig, query QueryConfig, sched SchedulerConfig, tls TLSConfig, lookup LookupConfig, setupDismissed bool) error {
-	return store.SaveServerSettings(ctx, auth, query, sched, tls, lookup, setupDismissed)
+func SaveServerSettings(ctx context.Context, store Store, ss ServerSettings) error {
+	return store.SaveServerSettings(ctx, ss)
+}
+
+// ServerSettings groups the server-level settings that are loaded/saved
+// atomically via LoadServerSettings / SaveServerSettings.
+type ServerSettings struct {
+	Auth                 AuthConfig      `json:"auth,omitzero"`
+	Query                QueryConfig     `json:"query,omitzero"`
+	Scheduler            SchedulerConfig `json:"scheduler,omitzero"`
+	TLS                  TLSConfig       `json:"tls,omitzero"`
+	Lookup               LookupConfig    `json:"lookup,omitzero"`
+	SetupWizardDismissed bool            `json:"setup_wizard_dismissed,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

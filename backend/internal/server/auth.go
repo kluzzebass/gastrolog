@@ -52,14 +52,14 @@ var animalNoises = []string{
 // loadRefreshDuration reads the refresh token duration from server config.
 // Returns 168h (7 days) as default.
 func (s *AuthServer) loadRefreshDuration(ctx context.Context) time.Duration {
-	authCfg, _, _, _, _, _, err := s.cfgStore.LoadServerSettings(ctx)
+	ss, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
 		return 168 * time.Hour
 	}
-	if authCfg.RefreshTokenDuration == "" {
+	if ss.Auth.RefreshTokenDuration == "" {
 		return 168 * time.Hour
 	}
-	d, err := time.ParseDuration(authCfg.RefreshTokenDuration)
+	d, err := time.ParseDuration(ss.Auth.RefreshTokenDuration)
 	if err != nil {
 		return 168 * time.Hour
 	}
@@ -89,11 +89,11 @@ func (s *AuthServer) issueRefreshToken(ctx context.Context, userID uuid.UUID) (s
 
 // loadPasswordPolicy reads the password policy from server config.
 func (s *AuthServer) loadPasswordPolicy(ctx context.Context) config.PasswordPolicy {
-	authCfg, _, _, _, _, _, err := s.cfgStore.LoadServerSettings(ctx)
+	ss, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
 		return config.PasswordPolicy{MinLength: 8}
 	}
-	p := authCfg.PasswordPolicy
+	p := ss.Auth.PasswordPolicy
 	if p.MinLength <= 0 {
 		p.MinLength = 8
 	}

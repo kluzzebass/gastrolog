@@ -183,9 +183,11 @@ func TestPutIngester(t *testing.T) {
 }
 
 func TestPutServerSettings(t *testing.T) {
-	wantAuth := config.AuthConfig{JWTSecret: "s3cret"}
-	wantSched := config.SchedulerConfig{MaxConcurrentJobs: 4}
-	cmd, err := NewPutServerSettings(wantAuth, config.QueryConfig{}, wantSched, config.TLSConfig{}, config.LookupConfig{}, false)
+	want := config.ServerSettings{
+		Auth:      config.AuthConfig{JWTSecret: "s3cret"},
+		Scheduler: config.SchedulerConfig{MaxConcurrentJobs: 4},
+	}
+	cmd, err := NewPutServerSettings(want)
 	if err != nil {
 		t.Fatalf("NewPutServerSettings: %v", err)
 	}
@@ -199,15 +201,15 @@ func TestPutServerSettings(t *testing.T) {
 	}
 	// The command is serialized as a PutSetting with key="server".
 	_, value := ExtractPutSetting(cmd2.GetPutSetting())
-	gotAuth, _, gotSched, _, _, _, err := ExtractPutServerSettings(value)
+	got, err := ExtractPutServerSettings(value)
 	if err != nil {
 		t.Fatalf("ExtractPutServerSettings: %v", err)
 	}
-	if gotAuth.JWTSecret != wantAuth.JWTSecret {
-		t.Fatalf("JWTSecret: got %q, want %q", gotAuth.JWTSecret, wantAuth.JWTSecret)
+	if got.Auth.JWTSecret != want.Auth.JWTSecret {
+		t.Fatalf("JWTSecret: got %q, want %q", got.Auth.JWTSecret, want.Auth.JWTSecret)
 	}
-	if gotSched.MaxConcurrentJobs != wantSched.MaxConcurrentJobs {
-		t.Fatalf("MaxConcurrentJobs: got %d, want %d", gotSched.MaxConcurrentJobs, wantSched.MaxConcurrentJobs)
+	if got.Scheduler.MaxConcurrentJobs != want.Scheduler.MaxConcurrentJobs {
+		t.Fatalf("MaxConcurrentJobs: got %d, want %d", got.Scheduler.MaxConcurrentJobs, want.Scheduler.MaxConcurrentJobs)
 	}
 }
 

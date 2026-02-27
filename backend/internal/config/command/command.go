@@ -353,15 +353,8 @@ func ExtractDeleteIngester(cmd *gastrologv1.DeleteIngesterCommand) (uuid.UUID, e
 // NewPutServerSettings creates a ConfigCommand for persisting server-level settings.
 // The settings are serialized as JSON inside a PutSettingCommand with key="server"
 // for wire/snapshot compatibility.
-func NewPutServerSettings(auth config.AuthConfig, query config.QueryConfig, sched config.SchedulerConfig, tls config.TLSConfig, lookup config.LookupConfig, setupDismissed bool) (*gastrologv1.ConfigCommand, error) {
-	blob, err := json.Marshal(serverSettingsJSON{
-		Auth:                 auth,
-		Query:                query,
-		Scheduler:            sched,
-		TLS:                  tls,
-		Lookup:               lookup,
-		SetupWizardDismissed: setupDismissed,
-	})
+func NewPutServerSettings(ss config.ServerSettings) (*gastrologv1.ConfigCommand, error) {
+	blob, err := json.Marshal(ss)
 	if err != nil {
 		return nil, fmt.Errorf("marshal server settings: %w", err)
 	}
@@ -373,27 +366,16 @@ func NewPutServerSettings(auth config.AuthConfig, query config.QueryConfig, sche
 }
 
 // ExtractPutServerSettings parses server settings from a PutSettingCommand with key="server".
-func ExtractPutServerSettings(value string) (config.AuthConfig, config.QueryConfig, config.SchedulerConfig, config.TLSConfig, config.LookupConfig, bool, error) {
-	var ss serverSettingsJSON
+func ExtractPutServerSettings(value string) (config.ServerSettings, error) {
+	var ss config.ServerSettings
 	if err := json.Unmarshal([]byte(value), &ss); err != nil {
-		return config.AuthConfig{}, config.QueryConfig{}, config.SchedulerConfig{}, config.TLSConfig{}, config.LookupConfig{}, false, fmt.Errorf("parse server settings: %w", err)
+		return config.ServerSettings{}, fmt.Errorf("parse server settings: %w", err)
 	}
 	// Migrate flat MaxMind fields to nested MaxMindConfig if present.
 	ss.Lookup = migrateLookupConfig(ss.Lookup, value)
 	// Migrate flat password policy fields to nested PasswordPolicy if present.
 	ss.Auth = migratePasswordPolicy(ss.Auth, value)
-	return ss.Auth, ss.Query, ss.Scheduler, ss.TLS, ss.Lookup, ss.SetupWizardDismissed, nil
-}
-
-// serverSettingsJSON is the JSON shape for server settings.
-// This matches the old ServerConfig layout for backward compatibility.
-type serverSettingsJSON struct {
-	Auth                 config.AuthConfig      `json:"auth,omitzero"`
-	Query                config.QueryConfig     `json:"query,omitzero"`
-	Scheduler            config.SchedulerConfig `json:"scheduler,omitzero"`
-	TLS                  config.TLSConfig       `json:"tls,omitzero"`
-	Lookup               config.LookupConfig    `json:"lookup,omitzero"`
-	SetupWizardDismissed bool                   `json:"setup_wizard_dismissed,omitempty"`
+	return ss, nil
 }
 
 // legacyLookupJSON captures the old flat MaxMind fields for migration.
@@ -839,7 +821,7 @@ func BuildSnapshot(cfg *config.Config, users []config.User, tokens []config.Refr
 	snap := &gastrologv1.ConfigSnapshot{}
 
 	// Serialize server settings into the Settings map for backward compatibility.
-	blob, err := json.Marshal(serverSettingsJSON{
+	blob, err := json.Marshal(config.ServerSettings{
 		Auth:                 cfg.Auth,
 		Query:                cfg.Query,
 		Scheduler:            cfg.Scheduler,
@@ -896,16 +878,16 @@ func RestoreSnapshot(snap *gastrologv1.ConfigSnapshot) (*config.Config, []config
 	// Migrate server settings from the Settings map.
 	if settings := snap.GetSettings(); len(settings) > 0 {
 		if raw, ok := settings["server"]; ok {
-			auth, query, sched, tls, lookup, dismissed, err := ExtractPutServerSettings(raw)
+			ss, err := ExtractPutServerSettings(raw)
 			if err != nil {
 				return nil, nil, nil, nil, fmt.Errorf("restore server settings: %w", err)
 			}
-			cfg.Auth = auth
-			cfg.Query = query
-			cfg.Scheduler = sched
-			cfg.TLS = tls
-			cfg.Lookup = lookup
-			cfg.SetupWizardDismissed = dismissed
+			cfg.Auth = ss.Auth
+			cfg.Query = ss.Query
+			cfg.Scheduler = ss.Scheduler
+			cfg.TLS = ss.TLS
+			cfg.Lookup = ss.Lookup
+			cfg.SetupWizardDismissed = ss.SetupWizardDismissed
 		}
 	}
 

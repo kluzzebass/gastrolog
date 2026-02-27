@@ -67,6 +67,8 @@ import (
 
 var version = "dev"
 
+const errFmtSaveClusterTLS = "save cluster TLS file: %w"
+
 func main() {
 	// Register signal handler early, before any framework code.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -107,15 +109,20 @@ func main() {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			homeFlag, _ := cmd.Flags().GetString("home")
 			configType, _ := cmd.Flags().GetString("config-type")
-			serverAddr, _ := cmd.Flags().GetString("addr")
-			bootstrap, _ := cmd.Flags().GetBool("bootstrap")
-			noAuth, _ := cmd.Flags().GetBool("no-auth")
-			clusterAddr, _ := cmd.Flags().GetString("cluster-addr")
-			clusterInit, _ := cmd.Flags().GetBool("cluster-init")
-			joinAddr, _ := cmd.Flags().GetString("join-addr")
-			joinToken, _ := cmd.Flags().GetString("join-token")
 
-			err := run(cmd.Context(), logger, homeFlag, configType, serverAddr, bootstrap, noAuth, clusterAddr, clusterInit, joinAddr, joinToken)
+			cfg := runConfig{
+				HomeFlag:    homeFlag,
+				ConfigType:  configType,
+				ServerAddr:  mustString(cmd, "addr"),
+				Bootstrap:   mustBool(cmd, "bootstrap"),
+				NoAuth:      mustBool(cmd, "no-auth"),
+				ClusterAddr: mustString(cmd, "cluster-addr"),
+				ClusterInit: mustBool(cmd, "cluster-init"),
+				JoinAddr:    mustString(cmd, "join-addr"),
+				JoinToken:   mustString(cmd, "join-token"),
+			}
+
+			err := run(cmd.Context(), logger, cfg)
 			if cmd.Context().Err() != nil {
 				return nil //nolint:nilerr // signal-triggered shutdown is not an error
 			}
@@ -150,92 +157,44 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverAddr string, bootstrap, noAuth bool, clusterAddr string, clusterInit bool, joinAddr, joinToken string) error { //nolint:gocognit,gocyclo // startup orchestration is inherently complex
-	hd, err := resolveHome(homeFlag)
+func mustString(cmd *cobra.Command, name string) string { v, _ := cmd.Flags().GetString(name); return v }
+func mustBool(cmd *cobra.Command, name string) bool     { v, _ := cmd.Flags().GetBool(name); return v }
+
+// runConfig groups all CLI flags for the server command.
+type runConfig struct {
+	HomeFlag    string
+	ConfigType  string
+	ServerAddr  string
+	Bootstrap   bool
+	NoAuth      bool
+	ClusterAddr string
+	ClusterInit bool
+	JoinAddr    string
+	JoinToken   string
+}
+
+func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
+	hd, err := resolveHome(cfg.HomeFlag)
 	if err != nil {
 		return fmt.Errorf("resolve home directory: %w", err)
 	}
 
-	if configType != "memory" {
-		if err := hd.EnsureExists(); err != nil {
-			return err
-		}
-		logger.Info("home directory", "path", hd.Root())
+	nodeID, err := resolveIdentity(logger, cfg, hd)
+	if err != nil {
+		return err
 	}
 
-	// Resolve persistent node identity. For memory config (no home dir),
-	// generate an ephemeral ID each run.
-	var nodeID string
-	if configType == "memory" {
-		nodeID = uuid.Must(uuid.NewV7()).String()
-	} else {
-		nodeID, err = hd.NodeID()
-		if err != nil {
-			return fmt.Errorf("resolve node ID: %w", err)
-		}
-	}
-	// Create cluster TLS holder. Populated during cluster-init or enrollment.
-	var clusterTLS *cluster.ClusterTLS
-
-	// Joining flow: enroll with the leader before creating the cluster server.
-	// The enrollment returns TLS material that we load into the ClusterTLS holder
-	// so the Raft transport and gRPC server use mTLS from the start.
-	if joinAddr != "" && joinToken != "" && clusterAddr != "" && configType == "raft" {
-		tokenSecret, caHash, err := tlsutil.ParseJoinToken(joinToken)
-		if err != nil {
-			return fmt.Errorf("parse join token: %w", err)
-		}
-
-		logger.Info("enrolling with cluster leader", "leader_addr", joinAddr)
-		enrollCtx, enrollCancel := context.WithTimeout(ctx, 30*time.Second)
-		result, err := cluster.Enroll(enrollCtx, joinAddr, tokenSecret, caHash, nodeID, clusterAddr)
-		enrollCancel()
-		if err != nil {
-			return fmt.Errorf("cluster enrollment: %w", err)
-		}
-
-		clusterTLS = cluster.NewClusterTLS()
-		if err := clusterTLS.Load(result.ClusterCertPEM, result.ClusterKeyPEM, result.CACertPEM); err != nil {
-			return fmt.Errorf("load enrolled TLS material: %w", err)
-		}
-		if err := cluster.SaveFile(hd.ClusterTLSPath(), result.ClusterCertPEM, result.ClusterKeyPEM, result.CACertPEM); err != nil {
-			return fmt.Errorf("save cluster TLS file: %w", err)
-		}
-		logger.Info("cluster enrollment successful, TLS loaded and saved")
-	}
-
-	// Create cluster server if --cluster-addr is set (multi-node mode).
-	var clusterSrv *cluster.Server
-	if clusterAddr != "" && configType == "raft" { //nolint:nestif // cluster setup has unavoidable branching
-		// Always create the ClusterTLS holder for multi-node mode.
-		// - cluster-init: populated after Raft is ready (bootstrapClusterTLS)
-		// - join: already populated from enrollment above
-		// - restart: loaded from local file (cluster-tls.json)
-		// The dynamic transport credentials fall back to insecure until loaded.
-		if clusterTLS == nil {
-			clusterTLS = cluster.NewClusterTLS()
-			// Restart path: load TLS from local file persisted during
-			// previous cluster-init or enrollment. This must happen before
-			// Raft starts so the transport uses mTLS from the beginning.
-			if found, err := clusterTLS.LoadFile(hd.ClusterTLSPath()); err != nil {
-				return fmt.Errorf("load cluster TLS file: %w", err)
-			} else if found {
-				logger.Info("cluster TLS loaded from local file")
-			}
-		}
-
-		clusterSrv, err = cluster.New(cluster.Config{
-			ClusterAddr: clusterAddr,
-			TLS:         clusterTLS,
-			Logger:      logger.With("component", "cluster"),
-		})
-		if err != nil {
-			return fmt.Errorf("create cluster server: %w", err)
-		}
+	clusterSrv, clusterTLS, err := setupCluster(ctx, logger, cfg, hd, nodeID)
+	if err != nil {
+		return err
 	}
 
 	disp := &configDispatcher{localNodeID: nodeID, logger: logger.With("component", "dispatch"), clusterTLS: clusterTLS, tlsFilePath: hd.ClusterTLSPath()}
-	cfgStore, err := openConfigStore(hd, configType, nodeID, clusterInit, clusterSrv, clusterTLS, logger, raftfsm.WithOnApply(disp.Handle))
+	cfgStore, err := openConfigStore(cfg.ConfigType, raftStoreOpts{
+		Home: hd, NodeID: nodeID, Init: cfg.ClusterInit,
+		ClusterSrv: clusterSrv, ClusterTLS: clusterTLS,
+		Logger: logger, FSMOpts: []raftfsm.Option{raftfsm.WithOnApply(disp.Handle)},
+	})
 	if err != nil {
 		return fmt.Errorf("open config store: %w", err)
 	}
@@ -243,119 +202,26 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 		defer func() { _ = c.Close() }()
 	}
 
-	// Verify that cluster TLS is loaded for the restart case.
-	// cluster-init populates TLS later (bootstrapClusterTLS); join loaded it
-	// from enrollment; restart loaded it from the local file above.
-	if clusterTLS != nil && clusterTLS.State() == nil && !clusterInit && joinAddr == "" {
-		return errors.New("cluster TLS not found (expected cluster-tls.json from previous cluster membership)")
+	if err := startClusterServices(ctx, cfg, clusterSrv, clusterTLS, cfgStore, hd, logger); err != nil {
+		return err
 	}
-
-	// Bootstrap TLS: generate CA + cluster cert + join token and store via Raft.
-	// This happens after Raft is ready but before starting the gRPC server.
-	if clusterSrv != nil && clusterInit && clusterTLS != nil {
-		if err := bootstrapClusterTLS(ctx, cfgStore, clusterTLS, hd.ClusterTLSPath(), logger); err != nil {
-			return fmt.Errorf("bootstrap cluster TLS: %w", err)
-		}
-	}
-
-	// Start the cluster gRPC server after Raft is created. Other nodes
-	// need to reach this node's cluster port when they join.
 	if clusterSrv != nil {
-		// Wire the Enroll handler for accepting new nodes.
-		clusterSrv.SetEnrollHandler(makeEnrollHandler(cfgStore, logger))
-
-		if err := clusterSrv.Start(); err != nil {
-			return fmt.Errorf("start cluster server: %w", err)
-		}
 		defer clusterSrv.Stop()
 	}
 
-	// For restarting multi-node members: the local Raft FSM is hydrated from
-	// snapshot + log replay during NewRaft(). Reads work without a leader, so
-	// try loading config directly to start serving immediately. Quorum wait
-	// moves to the background — needed for writes, not for ingestion.
-	var localCfg *config.Config
-	clusterRestart := clusterSrv != nil && !clusterInit && joinAddr == ""
-	if clusterRestart && configType == "raft" {
-		localCfg, _ = cfgStore.Load(ctx)
-		// FSM empty — shouldn't happen for a restart. Fall back to blocking.
-		if localCfg == nil {
-			if err := waitForQuorum(ctx, cfgStore, logger); err != nil {
-				return err
-			}
-		}
+	appCfg, fromLocalFSM, err := loadStartupConfig(ctx, logger, cfg, cfgStore, clusterSrv, clusterTLS, nodeID)
+	if err != nil {
+		return err
 	}
 
-	// For joining nodes: now that our cluster server and Raft are running,
-	// ask the leader to add us as a voter. This must happen after Start()
-	// so we're reachable when the leader tries to replicate to us.
-	if joinAddr != "" && clusterTLS != nil && clusterAddr != "" {
-		logger.Info("requesting voter membership from leader", "leader_addr", joinAddr)
-		joinCtx, joinCancel := context.WithTimeout(ctx, 30*time.Second)
-		if err := cluster.JoinCluster(joinCtx, joinAddr, nodeID, clusterAddr, clusterTLS); err != nil {
-			joinCancel()
-			return fmt.Errorf("join cluster: %w", err)
-		}
-		joinCancel()
-		logger.Info("voter membership granted by leader")
-	}
-
-	// Load config. For restarts with a populated local FSM, use it directly.
-	// For joining nodes (empty FSM), wait for the leader to replicate config.
-	// For single-node, memory, or cluster-init: config is local.
-	var cfg *config.Config
-	needsReplication := joinAddr != "" || (clusterRestart && configType == "raft")
-	switch {
-	case localCfg != nil:
-		cfg = localCfg
-	case needsReplication:
-		if joinAddr != "" {
-			logger.Info("joining cluster, waiting for config replication", "join_addr", joinAddr)
-		} else {
-			logger.Info("waiting for config replication from leader")
-		}
-		cfg, err = waitForConfig(ctx, cfgStore, 60*time.Second, logger)
-		if err != nil {
-			return fmt.Errorf("wait for config replication: %w", err)
-		}
-	default:
-		logger.Info("loading config", "type", configType)
-		cfg, err = ensureConfig(ctx, logger, cfgStore, bootstrap)
-		if err != nil {
-			return err
-		}
-	}
-
-	// Ensure this node has a NodeConfig with a petname in the config store.
-	// Also write the name to <home>/node_name for easy identification on disk.
-	//
-	// For restarts from local FSM (quorum pending), ensureNodeConfig is a write
-	// that needs a leader. Run it in a background goroutine alongside the quorum
-	// wait so ingestion starts immediately.
-	if localCfg != nil {
-		logger.Info("node identity", "node_id", nodeID)
-		go ensureNodeConfigAsync(ctx, cfgStore, nodeID, configType, hd, logger)
-	} else {
-		nodeName, err := ensureNodeConfig(ctx, cfgStore, nodeID)
-		if err != nil {
-			return fmt.Errorf("ensure node config: %w", err)
-		}
-		logger.Info("node identity", "node_id", nodeID, "node_name", nodeName)
-		if configType != "memory" {
-			_ = hd.WriteNodeName(nodeName)
-		}
-	}
-
-	homeDir := ""
-	socketPath := ""
-	if configType != "memory" {
-		homeDir = hd.Root()
-		socketPath = hd.SocketPath()
+	homeDir, socketPath, err := finalizeNodeSetup(ctx, logger, cfgStore, nodeID, cfg.ConfigType, fromLocalFSM, hd)
+	if err != nil {
+		return err
 	}
 
 	logger.Info("loaded config",
-		"ingesters", len(cfg.Ingesters),
-		"vaults", len(cfg.Vaults))
+		"ingesters", len(appCfg.Ingesters),
+		"vaults", len(appCfg.Vaults))
 
 	orch := orchestrator.New(orchestrator.Config{
 		Logger:            logger,
@@ -374,7 +240,7 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 	disp.cfgStore = cfgStore
 	disp.factories = factories
 
-	if err := orch.ApplyConfig(cfg, factories); err != nil {
+	if err := orch.ApplyConfig(appCfg, factories); err != nil {
 		return err
 	}
 
@@ -389,7 +255,7 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 	}
 	logger.Info("orchestrator started")
 
-	tokens, err := buildAuthTokens(ctx, logger, cfgStore, noAuth)
+	tokens, err := buildAuthTokens(ctx, logger, cfgStore, cfg.NoAuth)
 	if err != nil {
 		return err
 	}
@@ -402,11 +268,228 @@ func run(ctx context.Context, logger *slog.Logger, homeFlag, configType, serverA
 	// For non-raft stores, the server must fire notifications itself since
 	// there is no FSM callback. For raft stores the FSM handles it.
 	var afterConfigApply func(raftfsm.Notification)
-	if configType != "raft" {
+	if cfg.ConfigType != "raft" {
 		afterConfigApply = disp.Handle
 	}
 
-	return serveAndAwaitShutdown(ctx, logger, serverAddr, homeDir, nodeID, socketPath, orch, cfgStore, factories, tokens, certMgr, noAuth, afterConfigApply, clusterSrv)
+	return serveAndAwaitShutdown(ctx, serverDeps{
+		Logger:           logger,
+		ServerAddr:       cfg.ServerAddr,
+		HomeDir:          homeDir,
+		NodeID:           nodeID,
+		SocketPath:       socketPath,
+		Orch:             orch,
+		CfgStore:         cfgStore,
+		Factories:        factories,
+		Tokens:           tokens,
+		CertMgr:          certMgr,
+		NoAuth:           cfg.NoAuth,
+		AfterConfigApply: afterConfigApply,
+		ClusterSrv:       clusterSrv,
+	})
+}
+
+// resolveIdentity ensures the home directory exists and resolves the node ID.
+func resolveIdentity(logger *slog.Logger, cfg runConfig, hd home.Dir) (string, error) {
+	if cfg.ConfigType != "memory" {
+		if err := hd.EnsureExists(); err != nil {
+			return "", err
+		}
+		logger.Info("home directory", "path", hd.Root())
+	}
+
+	if cfg.ConfigType == "memory" {
+		return uuid.Must(uuid.NewV7()).String(), nil
+	}
+	nodeID, err := hd.NodeID()
+	if err != nil {
+		return "", fmt.Errorf("resolve node ID: %w", err)
+	}
+	return nodeID, nil
+}
+
+// startClusterServices verifies cluster TLS, bootstraps TLS if needed, and starts
+// the cluster gRPC server. No-op for single-node mode.
+func startClusterServices(ctx context.Context, cfg runConfig, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, cfgStore config.Store, hd home.Dir, logger *slog.Logger) error {
+	// Verify that cluster TLS is loaded for the restart case.
+	if clusterTLS != nil && clusterTLS.State() == nil && !cfg.ClusterInit && cfg.JoinAddr == "" {
+		return errors.New("cluster TLS not found (expected cluster-tls.json from previous cluster membership)")
+	}
+
+	// Bootstrap TLS: generate CA + cluster cert + join token and store via Raft.
+	if clusterSrv != nil && cfg.ClusterInit && clusterTLS != nil {
+		if err := bootstrapClusterTLS(ctx, cfgStore, clusterTLS, hd.ClusterTLSPath(), logger); err != nil {
+			return fmt.Errorf("bootstrap cluster TLS: %w", err)
+		}
+	}
+
+	// Start the cluster gRPC server after Raft is created.
+	if clusterSrv != nil {
+		clusterSrv.SetEnrollHandler(makeEnrollHandler(cfgStore, logger))
+		if err := clusterSrv.Start(); err != nil {
+			return fmt.Errorf("start cluster server: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// setupCluster handles cluster enrollment and cluster server creation.
+// Returns nil cluster server and nil TLS for single-node mode.
+func setupCluster(ctx context.Context, logger *slog.Logger, cfg runConfig, hd home.Dir, nodeID string) (*cluster.Server, *cluster.ClusterTLS, error) {
+	var clusterTLS *cluster.ClusterTLS
+
+	// Joining flow: enroll with the leader before creating the cluster server.
+	if cfg.JoinAddr != "" && cfg.JoinToken != "" && cfg.ClusterAddr != "" && cfg.ConfigType == "raft" {
+		var err error
+		clusterTLS, err = enrollInCluster(ctx, logger, cfg, hd, nodeID)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	// Not in cluster mode — nothing more to do.
+	if cfg.ClusterAddr == "" || cfg.ConfigType != "raft" {
+		return nil, clusterTLS, nil
+	}
+
+	// Load TLS from disk if not already obtained via enrollment.
+	if clusterTLS == nil {
+		clusterTLS = cluster.NewClusterTLS()
+		if found, err := clusterTLS.LoadFile(hd.ClusterTLSPath()); err != nil {
+			return nil, nil, fmt.Errorf("load cluster TLS file: %w", err)
+		} else if found {
+			logger.Info("cluster TLS loaded from local file")
+		}
+	}
+
+	clusterSrv, err := cluster.New(cluster.Config{
+		ClusterAddr: cfg.ClusterAddr,
+		TLS:         clusterTLS,
+		Logger:      logger.With("component", "cluster"),
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("create cluster server: %w", err)
+	}
+
+	return clusterSrv, clusterTLS, nil
+}
+
+// enrollInCluster performs the Enroll RPC to obtain TLS material from the
+// cluster leader, loads it into a ClusterTLS, and saves it to disk.
+func enrollInCluster(ctx context.Context, logger *slog.Logger, cfg runConfig, hd home.Dir, nodeID string) (*cluster.ClusterTLS, error) {
+	tokenSecret, caHash, err := tlsutil.ParseJoinToken(cfg.JoinToken)
+	if err != nil {
+		return nil, fmt.Errorf("parse join token: %w", err)
+	}
+
+	logger.Info("enrolling with cluster leader", "leader_addr", cfg.JoinAddr)
+	enrollCtx, enrollCancel := context.WithTimeout(ctx, 30*time.Second)
+	result, err := cluster.Enroll(enrollCtx, cfg.JoinAddr, tokenSecret, caHash, nodeID, cfg.ClusterAddr)
+	enrollCancel()
+	if err != nil {
+		return nil, fmt.Errorf("cluster enrollment: %w", err)
+	}
+
+	clusterTLS := cluster.NewClusterTLS()
+	if err := clusterTLS.Load(result.ClusterCertPEM, result.ClusterKeyPEM, result.CACertPEM); err != nil {
+		return nil, fmt.Errorf("load enrolled TLS material: %w", err)
+	}
+	if err := cluster.SaveFile(hd.ClusterTLSPath(), result.ClusterCertPEM, result.ClusterKeyPEM, result.CACertPEM); err != nil {
+		return nil, fmt.Errorf(errFmtSaveClusterTLS, err)
+	}
+	logger.Info("cluster enrollment successful, TLS loaded and saved")
+	return clusterTLS, nil
+}
+
+// loadStartupConfig handles quorum wait, cluster joining, and config loading/bootstrap.
+// Returns the loaded config and whether it was loaded from the local FSM (restart case).
+func loadStartupConfig(ctx context.Context, logger *slog.Logger, cfg runConfig, cfgStore config.Store, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, nodeID string) (*config.Config, bool, error) {
+	// For restarting multi-node members: try loading from local FSM.
+	var localCfg *config.Config
+	clusterRestart := clusterSrv != nil && !cfg.ClusterInit && cfg.JoinAddr == "" && cfg.ConfigType == "raft"
+	if clusterRestart {
+		localCfg, _ = cfgStore.Load(ctx)
+	}
+	if clusterRestart && localCfg == nil {
+		if err := waitForQuorum(ctx, cfgStore, logger); err != nil {
+			return nil, false, err
+		}
+	}
+
+	// For joining nodes: request voter membership from the leader.
+	if err := requestVoterMembership(ctx, logger, cfg, clusterTLS, nodeID); err != nil {
+		return nil, false, err
+	}
+
+	// Load config from the appropriate source.
+	var appCfg *config.Config
+	var err error
+	needsReplication := cfg.JoinAddr != "" || clusterRestart
+	switch {
+	case localCfg != nil:
+		appCfg = localCfg
+	case needsReplication:
+		msg := "waiting for config replication from leader"
+		if cfg.JoinAddr != "" {
+			msg = "joining cluster, waiting for config replication"
+		}
+		logger.Info(msg, "join_addr", cfg.JoinAddr)
+		appCfg, err = waitForConfig(ctx, cfgStore, 60*time.Second, logger)
+		if err != nil {
+			return nil, false, fmt.Errorf("wait for config replication: %w", err)
+		}
+	default:
+		logger.Info("loading config", "type", cfg.ConfigType)
+		appCfg, err = ensureConfig(ctx, logger, cfgStore, cfg.Bootstrap)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+
+	return appCfg, localCfg != nil, nil
+}
+
+// requestVoterMembership asks the cluster leader to add this node as a Raft voter.
+// It is a no-op if the join parameters are not set.
+func requestVoterMembership(ctx context.Context, logger *slog.Logger, cfg runConfig, clusterTLS *cluster.ClusterTLS, nodeID string) error {
+	if cfg.JoinAddr == "" || clusterTLS == nil || cfg.ClusterAddr == "" {
+		return nil
+	}
+	logger.Info("requesting voter membership from leader", "leader_addr", cfg.JoinAddr)
+	joinCtx, joinCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer joinCancel()
+	if err := cluster.JoinCluster(joinCtx, cfg.JoinAddr, nodeID, cfg.ClusterAddr, clusterTLS); err != nil {
+		return fmt.Errorf("join cluster: %w", err)
+	}
+	logger.Info("voter membership granted by leader")
+	return nil
+}
+
+// finalizeNodeSetup ensures this node has a NodeConfig with a petname and
+// resolves the home directory and socket path for non-memory stores.
+func finalizeNodeSetup(ctx context.Context, logger *slog.Logger, cfgStore config.Store, nodeID, configType string, fromLocalFSM bool, hd home.Dir) (string, string, error) {
+	if fromLocalFSM {
+		logger.Info("node identity", "node_id", nodeID)
+		go ensureNodeConfigAsync(ctx, cfgStore, nodeID, configType, hd, logger)
+	} else {
+		nodeName, err := ensureNodeConfig(ctx, cfgStore, nodeID)
+		if err != nil {
+			return "", "", fmt.Errorf("ensure node config: %w", err)
+		}
+		logger.Info("node identity", "node_id", nodeID, "node_name", nodeName)
+		if configType != "memory" {
+			_ = hd.WriteNodeName(nodeName)
+		}
+	}
+
+	homeDir := ""
+	socketPath := ""
+	if configType != "memory" {
+		homeDir = hd.Root()
+		socketPath = hd.SocketPath()
+	}
+	return homeDir, socketPath, nil
 }
 
 // waitForConfig polls the config store until a non-nil config is available.
@@ -518,11 +601,11 @@ func ensureConfig(ctx context.Context, logger *slog.Logger, cfgStore config.Stor
 }
 
 func loadMaxConcurrentJobs(ctx context.Context, cfgStore config.Store) int {
-	_, _, sched, _, _, _, err := cfgStore.LoadServerSettings(ctx)
+	ss, err := cfgStore.LoadServerSettings(ctx)
 	if err != nil {
 		return 0
 	}
-	return sched.MaxConcurrentJobs
+	return ss.Scheduler.MaxConcurrentJobs
 }
 
 func buildAuthTokens(ctx context.Context, logger *slog.Logger, cfgStore config.Store, noAuth bool) (*auth.TokenService, error) {
@@ -547,24 +630,42 @@ func loadCertManager(ctx context.Context, logger *slog.Logger, cfgStore config.S
 	for _, c := range certList {
 		certs[c.ID.String()] = cert.CertSource{CertPEM: c.CertPEM, KeyPEM: c.KeyPEM, CertFile: c.CertFile, KeyFile: c.KeyFile}
 	}
-	_, _, _, tlsCfg, _, _, err := cfgStore.LoadServerSettings(ctx)
+	ss, err := cfgStore.LoadServerSettings(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load server settings for TLS: %w", err)
 	}
-	if err := certMgr.LoadFromConfig(tlsCfg.DefaultCert, certs); err != nil {
+	if err := certMgr.LoadFromConfig(ss.TLS.DefaultCert, certs); err != nil {
 		return nil, fmt.Errorf("load certs: %w", err)
 	}
 	return certMgr, nil
 }
 
-func serveAndAwaitShutdown(ctx context.Context, logger *slog.Logger, serverAddr, homeDir, nodeID, socketPath string, orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, tokens *auth.TokenService, certMgr *cert.Manager, noAuth bool, afterConfigApply func(raftfsm.Notification), clusterSrv *cluster.Server) error {
+// serverDeps bundles the dependencies needed to start the HTTP server and
+// await shutdown. This avoids an excessively long parameter list.
+type serverDeps struct {
+	Logger           *slog.Logger
+	ServerAddr       string
+	HomeDir          string
+	NodeID           string
+	SocketPath       string
+	Orch             *orchestrator.Orchestrator
+	CfgStore         config.Store
+	Factories        orchestrator.Factories
+	Tokens           *auth.TokenService
+	CertMgr          *cert.Manager
+	NoAuth           bool
+	AfterConfigApply func(raftfsm.Notification)
+	ClusterSrv       *cluster.Server
+}
+
+func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 	var srv *server.Server
 	var serverWg sync.WaitGroup
-	if serverAddr != "" {
-		srv = server.New(orch, cfgStore, factories, tokens, server.Config{Logger: logger, CertManager: certMgr, NoAuth: noAuth, HomeDir: homeDir, NodeID: nodeID, UnixSocket: socketPath, AfterConfigApply: afterConfigApply, Cluster: clusterSrv})
+	if deps.ServerAddr != "" {
+		srv = server.New(deps.Orch, deps.CfgStore, deps.Factories, deps.Tokens, server.Config{Logger: deps.Logger, CertManager: deps.CertMgr, NoAuth: deps.NoAuth, HomeDir: deps.HomeDir, NodeID: deps.NodeID, UnixSocket: deps.SocketPath, AfterConfigApply: deps.AfterConfigApply, Cluster: deps.ClusterSrv})
 		serverWg.Go(func() {
-			if err := srv.ServeTCP(serverAddr); err != nil {
-				logger.Error("server error", "error", err)
+			if err := srv.ServeTCP(deps.ServerAddr); err != nil {
+				deps.Logger.Error("server error", "error", err)
 			}
 		})
 	}
@@ -572,27 +673,25 @@ func serveAndAwaitShutdown(ctx context.Context, logger *slog.Logger, serverAddr,
 	<-ctx.Done()
 
 	// Shutdown order: HTTP server → orchestrator → cluster server.
-	// The cluster server stops after orchestrator so that in-flight Raft
-	// RPCs (e.g. final log replication) can complete.
 	if srv != nil {
-		logger.Info("stopping server")
+		deps.Logger.Info("stopping server")
 		if err := srv.Stop(ctx); err != nil {
-			logger.Error("server stop error", "error", err)
+			deps.Logger.Error("server stop error", "error", err)
 		}
 		serverWg.Wait()
 	}
 
-	logger.Info("shutting down orchestrator")
-	if err := orch.Stop(); err != nil {
+	deps.Logger.Info("shutting down orchestrator")
+	if err := deps.Orch.Stop(); err != nil {
 		return err
 	}
 
-	if clusterSrv != nil {
-		logger.Info("stopping cluster server")
-		clusterSrv.Stop()
+	if deps.ClusterSrv != nil {
+		deps.Logger.Info("stopping cluster server")
+		deps.ClusterSrv.Stop()
 	}
 
-	logger.Info("shutdown complete")
+	deps.Logger.Info("shutdown complete")
 	return nil
 }
 
@@ -647,22 +746,22 @@ func resolveHome(flagValue string) (home.Dir, error) {
 
 // buildTokenService reads the server config from the config store and creates a TokenService.
 func buildTokenService(ctx context.Context, cfgStore config.Store) (*auth.TokenService, error) {
-	authCfg, _, _, _, _, _, err := cfgStore.LoadServerSettings(ctx)
+	ss, err := cfgStore.LoadServerSettings(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load server settings: %w", err)
 	}
-	if authCfg.JWTSecret == "" {
+	if ss.Auth.JWTSecret == "" {
 		return nil, errors.New("server config not found (bootstrap may have failed)")
 	}
 
-	secret, err := base64.StdEncoding.DecodeString(authCfg.JWTSecret)
+	secret, err := base64.StdEncoding.DecodeString(ss.Auth.JWTSecret)
 	if err != nil {
 		return nil, fmt.Errorf("decode JWT secret: %w", err)
 	}
 
 	duration := 168 * time.Hour // default 7 days
-	if authCfg.TokenDuration != "" {
-		duration, err = time.ParseDuration(authCfg.TokenDuration)
+	if ss.Auth.TokenDuration != "" {
+		duration, err = time.ParseDuration(ss.Auth.TokenDuration)
 		if err != nil {
 			return nil, fmt.Errorf("parse token duration: %w", err)
 		}
@@ -671,14 +770,25 @@ func buildTokenService(ctx context.Context, cfgStore config.Store) (*auth.TokenS
 	return auth.NewTokenService(secret, duration), nil
 }
 
+// raftStoreOpts groups the parameters needed to open a raft-backed config store.
+type raftStoreOpts struct {
+	Home       home.Dir
+	NodeID     string
+	Init       bool
+	ClusterSrv *cluster.Server
+	ClusterTLS *cluster.ClusterTLS
+	Logger     *slog.Logger
+	FSMOpts    []raftfsm.Option
+}
+
 // openConfigStore creates a config.Store based on config type and home directory.
 // For raft mode with a cluster server, the Raft transport is wired through gRPC.
-func openConfigStore(hd home.Dir, configType, nodeID string, clusterInit bool, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, logger *slog.Logger, fsmOpts ...raftfsm.Option) (config.Store, error) {
+func openConfigStore(configType string, opts raftStoreOpts) (config.Store, error) {
 	switch configType {
 	case "memory":
 		return configmem.NewStore(), nil
 	case "raft":
-		return openRaftConfigStore(hd, nodeID, clusterInit, clusterSrv, clusterTLS, logger, fsmOpts...)
+		return openRaftConfigStore(opts)
 	default:
 		return nil, fmt.Errorf("unknown config store type: %q", configType)
 	}
@@ -728,21 +838,14 @@ func (s *raftConfigStore) Close() error {
 }
 
 // openRaftConfigStore creates a raft-backed config store with BoltDB persistence.
-//
-// In single-node mode (clusterSrv == nil): uses in-memory transport, tight
-// timeouts, and auto-bootstraps on first run. This preserves backward compat.
-//
-// In multi-node mode (clusterSrv != nil): uses gRPC transport, production
-// timeouts, conditional bootstrap, and leader forwarding.
-func openRaftConfigStore(hd home.Dir, nodeID string, clusterInit bool, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, logger *slog.Logger, fsmOpts ...raftfsm.Option) (config.Store, error) {
-	multiNode := clusterSrv != nil
+func openRaftConfigStore(opts raftStoreOpts) (config.Store, error) {
+	multiNode := opts.ClusterSrv != nil
 
-	raftDir := hd.RaftDir()
+	raftDir := opts.Home.RaftDir()
 	if err := os.MkdirAll(raftDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create raft directory: %w", err)
 	}
 
-	// BoltDB for both log store and stable store.
 	boltStore, err := raftboltdb.New(raftboltdb.Options{
 		Path: filepath.Join(raftDir, "raft.db"),
 	})
@@ -756,31 +859,15 @@ func openRaftConfigStore(hd home.Dir, nodeID string, clusterInit bool, clusterSr
 		return nil, fmt.Errorf("create snapshot store: %w", err)
 	}
 
-	// Transport: gRPC in multi-node mode, in-memory for single-node.
 	var transport hraft.Transport
 	if multiNode {
-		transport = clusterSrv.Transport()
+		transport = opts.ClusterSrv.Transport()
 	} else {
 		_, transport = hraft.NewInmemTransport("")
 	}
 
-	fsm := raftfsm.New(fsmOpts...)
-
-	conf := hraft.DefaultConfig()
-	conf.LocalID = hraft.ServerID(nodeID)
-	conf.LogOutput = io.Discard
-
-	if multiNode {
-		// Production timeouts for multi-node clusters.
-		conf.HeartbeatTimeout = 1000 * time.Millisecond
-		conf.ElectionTimeout = 1000 * time.Millisecond
-		conf.LeaderLeaseTimeout = 500 * time.Millisecond
-	} else {
-		// Single-node: tight timeouts for near-instant election.
-		conf.HeartbeatTimeout = 100 * time.Millisecond
-		conf.ElectionTimeout = 100 * time.Millisecond
-		conf.LeaderLeaseTimeout = 100 * time.Millisecond
-	}
+	fsm := raftfsm.New(opts.FSMOpts...)
+	conf := newRaftConfig(opts.NodeID, multiNode)
 
 	r, err := hraft.NewRaft(conf, fsm, boltStore, boltStore, snapStore, transport)
 	if err != nil {
@@ -788,64 +875,21 @@ func openRaftConfigStore(hd home.Dir, nodeID string, clusterInit bool, clusterSr
 		return nil, fmt.Errorf("create raft: %w", err)
 	}
 
-	// Bootstrap: conditional on existing state and mode.
-	existing := r.GetConfiguration()
-	if err := existing.Error(); err != nil {
-		_ = r.Shutdown().Error()
-		_ = boltStore.Close()
-		return nil, fmt.Errorf("get raft configuration: %w", err)
+	if err := bootstrapAndWaitForLeader(r, boltStore, transport, opts, multiNode); err != nil {
+		return nil, err
 	}
 
-	needsBootstrap := len(existing.Configuration().Servers) == 0
-	if needsBootstrap {
-		// In single-node mode, always auto-bootstrap (backward compat).
-		// In multi-node mode, only bootstrap if --cluster-init is set.
-		if !multiNode || clusterInit {
-			boot := hraft.Configuration{
-				Servers: []hraft.Server{
-					{ID: hraft.ServerID(nodeID), Address: transport.LocalAddr()},
-				},
-			}
-			if err := r.BootstrapCluster(boot).Error(); err != nil {
-				_ = r.Shutdown().Error()
-				_ = boltStore.Close()
-				return nil, fmt.Errorf("bootstrap raft: %w", err)
-			}
-			logger.Info("raft cluster bootstrapped", "node_id", nodeID)
-		} else {
-			logger.Info("raft: no existing configuration; waiting to be added to a cluster")
-		}
-	}
-
-	// Wait for leadership or a known leader before proceeding.
-	// - Single-node / cluster-init: this node must become leader.
-	// - Multi-node restart: wait for any leader (requires quorum — 2+ nodes).
-	if !multiNode || clusterInit {
-		select {
-		case <-r.LeaderCh():
-		case <-time.After(5 * time.Second):
-			_ = r.Shutdown().Error()
-			_ = boltStore.Close()
-			return nil, errors.New("timed out waiting for raft leadership")
-		}
-	}
-
-	logger.Info("raft config store ready", "dir", raftDir, "multi_node", multiNode)
+	opts.Logger.Info("raft config store ready", "dir", raftDir, "multi_node", multiNode)
 
 	store := raftstore.New(r, fsm, 10*time.Second)
 
 	var fwd *cluster.Forwarder
 	if multiNode {
-		// Wire the cluster server with the Raft instance.
-		clusterSrv.SetRaft(r)
-
-		// Provide the apply function for ForwardApply handler on the leader.
-		clusterSrv.SetApplyFn(func(ctx context.Context, data []byte) error {
+		opts.ClusterSrv.SetRaft(r)
+		opts.ClusterSrv.SetApplyFn(func(ctx context.Context, data []byte) error {
 			return store.ApplyRaw(data)
 		})
-
-		// Enable leader forwarding on followers.
-		fwd = cluster.NewForwarder(r, clusterTLS)
+		fwd = cluster.NewForwarder(r, opts.ClusterTLS)
 		store.SetForwarder(fwd)
 	}
 
@@ -855,6 +899,65 @@ func openRaftConfigStore(hd home.Dir, nodeID string, clusterInit bool, clusterSr
 		boltDB:    boltStore,
 		forwarder: fwd,
 	}, nil
+}
+
+// newRaftConfig creates a hashicorp/raft config with appropriate timeouts.
+func newRaftConfig(nodeID string, multiNode bool) *hraft.Config {
+	conf := hraft.DefaultConfig()
+	conf.LocalID = hraft.ServerID(nodeID)
+	conf.LogOutput = io.Discard
+	if multiNode {
+		conf.HeartbeatTimeout = 1000 * time.Millisecond
+		conf.ElectionTimeout = 1000 * time.Millisecond
+		conf.LeaderLeaseTimeout = 500 * time.Millisecond
+	} else {
+		conf.HeartbeatTimeout = 100 * time.Millisecond
+		conf.ElectionTimeout = 100 * time.Millisecond
+		conf.LeaderLeaseTimeout = 100 * time.Millisecond
+	}
+	return conf
+}
+
+// bootstrapAndWaitForLeader handles conditional Raft bootstrap and waits for
+// leadership when required.
+func bootstrapAndWaitForLeader(r *hraft.Raft, boltStore io.Closer, transport hraft.Transport, opts raftStoreOpts, multiNode bool) error {
+	existing := r.GetConfiguration()
+	if err := existing.Error(); err != nil {
+		_ = r.Shutdown().Error()
+		_ = boltStore.Close()
+		return fmt.Errorf("get raft configuration: %w", err)
+	}
+
+	needsBootstrap := len(existing.Configuration().Servers) == 0
+	if needsBootstrap {
+		if !multiNode || opts.Init {
+			boot := hraft.Configuration{
+				Servers: []hraft.Server{
+					{ID: hraft.ServerID(opts.NodeID), Address: transport.LocalAddr()},
+				},
+			}
+			if err := r.BootstrapCluster(boot).Error(); err != nil {
+				_ = r.Shutdown().Error()
+				_ = boltStore.Close()
+				return fmt.Errorf("bootstrap raft: %w", err)
+			}
+			opts.Logger.Info("raft cluster bootstrapped", "node_id", opts.NodeID)
+		} else {
+			opts.Logger.Info("raft: no existing configuration; waiting to be added to a cluster")
+		}
+	}
+
+	if !multiNode || opts.Init {
+		select {
+		case <-r.LeaderCh():
+		case <-time.After(5 * time.Second):
+			_ = r.Shutdown().Error()
+			_ = boltStore.Close()
+			return errors.New("timed out waiting for raft leadership")
+		}
+	}
+
+	return nil
 }
 
 // bootstrapClusterTLS generates CA, cluster cert, and join token, then stores
@@ -872,7 +975,7 @@ func bootstrapClusterTLS(ctx context.Context, cfgStore config.Store, ctls *clust
 			return fmt.Errorf("load existing cluster TLS: %w", err)
 		}
 		if err := cluster.SaveFile(tlsFilePath, []byte(existing.ClusterCertPEM), []byte(existing.ClusterKeyPEM), []byte(existing.CACertPEM)); err != nil {
-			return fmt.Errorf("save cluster TLS file: %w", err)
+			return fmt.Errorf(errFmtSaveClusterTLS, err)
 		}
 		logger.Info("cluster TLS loaded from existing config")
 		_, caHash, _ := tlsutil.ParseJoinToken(existing.JoinToken)
@@ -912,7 +1015,7 @@ func bootstrapClusterTLS(ctx context.Context, cfgStore config.Store, ctls *clust
 
 	// Persist to local file for restart without Raft quorum.
 	if err := cluster.SaveFile(tlsFilePath, cert.CertPEM, cert.KeyPEM, ca.CertPEM); err != nil {
-		return fmt.Errorf("save cluster TLS file: %w", err)
+		return fmt.Errorf(errFmtSaveClusterTLS, err)
 	}
 
 	logger.Info("cluster TLS bootstrapped")

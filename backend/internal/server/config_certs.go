@@ -19,10 +19,11 @@ func (s *ConfigServer) reloadCertManager(ctx context.Context) error {
 	if s.certManager == nil {
 		return nil
 	}
-	_, _, _, tlsCfg, _, _, err := s.cfgStore.LoadServerSettings(ctx)
+	ss, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
 		return fmt.Errorf("load server settings: %w", err)
 	}
+	tlsCfg := ss.TLS
 	certList, err := s.cfgStore.ListCertificates(ctx)
 	if err != nil {
 		return fmt.Errorf("list certificates: %w", err)
@@ -217,12 +218,12 @@ func resolveCertID(existingID uuid.UUID, reqID string) uuid.UUID {
 }
 
 func (s *ConfigServer) setDefaultCert(ctx context.Context, name string) error {
-	auth, query, sched, tlsCfg, lookup, dismissed, err := s.cfgStore.LoadServerSettings(ctx)
+	ss, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
 		return connect.NewError(connect.CodeInternal, err)
 	}
-	tlsCfg.DefaultCert = name
-	if err := s.cfgStore.SaveServerSettings(ctx, auth, query, sched, tlsCfg, lookup, dismissed); err != nil {
+	ss.TLS.DefaultCert = name
+	if err := s.cfgStore.SaveServerSettings(ctx, ss); err != nil {
 		return connect.NewError(connect.CodeInternal, err)
 	}
 	return nil
@@ -254,15 +255,15 @@ func (s *ConfigServer) DeleteCertificate(
 	}
 
 	// Clear default and disable TLS if the deleted cert was the default.
-	auth, query, sched, tlsCfg, lookup, dismissed, err := s.cfgStore.LoadServerSettings(ctx)
+	ss, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	if tlsCfg.DefaultCert == pem.Name {
-		tlsCfg.DefaultCert = ""
-		tlsCfg.TLSEnabled = false
-		tlsCfg.HTTPToHTTPSRedirect = false
-		if err := s.cfgStore.SaveServerSettings(ctx, auth, query, sched, tlsCfg, lookup, dismissed); err != nil {
+	if ss.TLS.DefaultCert == pem.Name {
+		ss.TLS.DefaultCert = ""
+		ss.TLS.TLSEnabled = false
+		ss.TLS.HTTPToHTTPSRedirect = false
+		if err := s.cfgStore.SaveServerSettings(ctx, ss); err != nil {
 			return nil, connect.NewError(connect.CodeInternal, err)
 		}
 	}

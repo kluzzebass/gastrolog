@@ -189,13 +189,13 @@ func (d *configDispatcher) handleSettingPut(ctx context.Context, key string) {
 		return
 	}
 
-	_, _, sched, _, _, _, err := d.cfgStore.LoadServerSettings(ctx)
+	ss, err := d.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
 		d.logger.Error("dispatch: load server settings", "error", err)
 		return
 	}
-	if sched.MaxConcurrentJobs > 0 {
-		if err := d.orch.UpdateMaxConcurrentJobs(sched.MaxConcurrentJobs); err != nil {
+	if ss.Scheduler.MaxConcurrentJobs > 0 {
+		if err := d.orch.UpdateMaxConcurrentJobs(ss.Scheduler.MaxConcurrentJobs); err != nil {
 			d.logger.Error("dispatch: update max concurrent jobs", "error", err)
 		}
 	}

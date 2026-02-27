@@ -16,12 +16,7 @@ import (
 
 // serverSettings holds the typed server-level config fields.
 type serverSettings struct {
-	auth             config.AuthConfig
-	query            config.QueryConfig
-	scheduler        config.SchedulerConfig
-	tls              config.TLSConfig
-	lookup           config.LookupConfig
-	setupDismissed   bool
+	ss                config.ServerSettings
 	hasServerSettings bool // true once SaveServerSettings has been called at least once
 }
 
@@ -121,12 +116,12 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 
 	// Populate server settings on Config.
 	if s.ss.hasServerSettings {
-		cfg.Auth = s.ss.auth
-		cfg.Query = s.ss.query
-		cfg.Scheduler = s.ss.scheduler
-		cfg.TLS = s.ss.tls
-		cfg.Lookup = s.ss.lookup
-		cfg.SetupWizardDismissed = s.ss.setupDismissed
+		cfg.Auth = s.ss.ss.Auth
+		cfg.Query = s.ss.ss.Query
+		cfg.Scheduler = s.ss.ss.Scheduler
+		cfg.TLS = s.ss.ss.TLS
+		cfg.Lookup = s.ss.ss.Lookup
+		cfg.SetupWizardDismissed = s.ss.ss.SetupWizardDismissed
 	}
 
 	// Include ClusterTLS if loaded (cluster mode).
@@ -345,24 +340,19 @@ func (s *Store) DeleteIngester(ctx context.Context, id uuid.UUID) error {
 
 // Server settings
 
-func (s *Store) LoadServerSettings(ctx context.Context) (config.AuthConfig, config.QueryConfig, config.SchedulerConfig, config.TLSConfig, config.LookupConfig, bool, error) {
+func (s *Store) LoadServerSettings(ctx context.Context) (config.ServerSettings, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	return s.ss.auth, s.ss.query, s.ss.scheduler, s.ss.tls, s.ss.lookup, s.ss.setupDismissed, nil
+	return s.ss.ss, nil
 }
 
-func (s *Store) SaveServerSettings(ctx context.Context, auth config.AuthConfig, query config.QueryConfig, sched config.SchedulerConfig, tls config.TLSConfig, lookup config.LookupConfig, setupDismissed bool) error {
+func (s *Store) SaveServerSettings(ctx context.Context, ss config.ServerSettings) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.ss = serverSettings{
-		auth:              auth,
-		query:             query,
-		scheduler:         sched,
-		tls:               tls,
-		lookup:            lookup,
-		setupDismissed:    setupDismissed,
+		ss:                ss,
 		hasServerSettings: true,
 	}
 	return nil

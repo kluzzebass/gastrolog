@@ -758,7 +758,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Fatalf("PutIngester: %v", err)
 		}
 
-		if err := s.SaveServerSettings(ctx, config.AuthConfig{JWTSecret: "s3cret"}, config.QueryConfig{}, config.SchedulerConfig{}, config.TLSConfig{}, config.LookupConfig{}, false); err != nil {
+		if err := s.SaveServerSettings(ctx, config.ServerSettings{Auth: config.AuthConfig{JWTSecret: "s3cret"}}); err != nil {
 			t.Fatalf("SaveServerSettings: %v", err)
 		}
 
@@ -822,19 +822,19 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 
 		wantAuth := config.AuthConfig{JWTSecret: "test-secret"}
 		wantQuery := config.QueryConfig{Timeout: "30s"}
-		if err := s.SaveServerSettings(ctx, wantAuth, wantQuery, config.SchedulerConfig{}, config.TLSConfig{}, config.LookupConfig{}, false); err != nil {
+		if err := s.SaveServerSettings(ctx, config.ServerSettings{Auth: wantAuth, Query: wantQuery}); err != nil {
 			t.Fatalf("Save: %v", err)
 		}
 
-		gotAuth, gotQuery, _, _, _, _, err := s.LoadServerSettings(ctx)
+		ss, err := s.LoadServerSettings(ctx)
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
-		if gotAuth.JWTSecret != wantAuth.JWTSecret {
-			t.Errorf("JWTSecret: got %q, want %q", gotAuth.JWTSecret, wantAuth.JWTSecret)
+		if ss.Auth.JWTSecret != wantAuth.JWTSecret {
+			t.Errorf("JWTSecret: got %q, want %q", ss.Auth.JWTSecret, wantAuth.JWTSecret)
 		}
-		if gotQuery.Timeout != wantQuery.Timeout {
-			t.Errorf("Timeout: got %q, want %q", gotQuery.Timeout, wantQuery.Timeout)
+		if ss.Query.Timeout != wantQuery.Timeout {
+			t.Errorf("Timeout: got %q, want %q", ss.Query.Timeout, wantQuery.Timeout)
 		}
 	})
 
@@ -842,20 +842,20 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		if err := s.SaveServerSettings(ctx, config.AuthConfig{JWTSecret: "old"}, config.QueryConfig{}, config.SchedulerConfig{}, config.TLSConfig{}, config.LookupConfig{}, false); err != nil {
+		if err := s.SaveServerSettings(ctx, config.ServerSettings{Auth: config.AuthConfig{JWTSecret: "old"}}); err != nil {
 			t.Fatalf("Save: %v", err)
 		}
 
-		if err := s.SaveServerSettings(ctx, config.AuthConfig{JWTSecret: "new-secret"}, config.QueryConfig{}, config.SchedulerConfig{}, config.TLSConfig{}, config.LookupConfig{}, false); err != nil {
+		if err := s.SaveServerSettings(ctx, config.ServerSettings{Auth: config.AuthConfig{JWTSecret: "new-secret"}}); err != nil {
 			t.Fatalf("Save upsert: %v", err)
 		}
 
-		gotAuth, _, _, _, _, _, err := s.LoadServerSettings(ctx)
+		ss, err := s.LoadServerSettings(ctx)
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
-		if gotAuth.JWTSecret != "new-secret" {
-			t.Errorf("expected %q, got %q", "new-secret", gotAuth.JWTSecret)
+		if ss.Auth.JWTSecret != "new-secret" {
+			t.Errorf("expected %q, got %q", "new-secret", ss.Auth.JWTSecret)
 		}
 	})
 

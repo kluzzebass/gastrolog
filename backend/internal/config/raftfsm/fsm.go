@@ -328,11 +328,11 @@ func (f *FSM) applyPutSetting(ctx context.Context, pb *gastrologv1.PutSettingCom
 		// Non-server settings were never used; ignore for backward compat.
 		return nil, nil
 	}
-	auth, query, sched, tls, lookup, dismissed, err := command.ExtractPutServerSettings(value)
+	ss, err := command.ExtractPutServerSettings(value)
 	if err != nil {
 		return nil, err
 	}
-	if err := f.store.SaveServerSettings(ctx, auth, query, sched, tls, lookup, dismissed); err != nil {
+	if err := f.store.SaveServerSettings(ctx, ss); err != nil {
 		return nil, err
 	}
 	return &Notification{Kind: NotifySettingPut, Key: key}, nil
@@ -558,7 +558,14 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit // snapshot re
 	// otherwise the empty save would make Load() return a non-nil Config.
 	if settings := snap.GetSettings(); len(settings) > 0 {
 		if _, ok := settings["server"]; ok {
-			if err := newStore.SaveServerSettings(ctx, cfg.Auth, cfg.Query, cfg.Scheduler, cfg.TLS, cfg.Lookup, cfg.SetupWizardDismissed); err != nil {
+			if err := newStore.SaveServerSettings(ctx, config.ServerSettings{
+				Auth:                 cfg.Auth,
+				Query:                cfg.Query,
+				Scheduler:            cfg.Scheduler,
+				TLS:                  cfg.TLS,
+				Lookup:               cfg.Lookup,
+				SetupWizardDismissed: cfg.SetupWizardDismissed,
+			}); err != nil {
 				return fmt.Errorf("restore server settings: %w", err)
 			}
 		}
