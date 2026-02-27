@@ -209,19 +209,23 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 		defer clusterSrv.Stop()
 	}
 
-	appCfg, fromLocalFSM, err := loadStartupConfig(ctx, logger, cfg, cfgStore, clusterSrv, clusterTLS, nodeID)
+	// Non-blocking: try local FSM, bootstrap, or return nil for replication cases.
+	appCfg, fromLocalFSM, err := loadLocalConfig(ctx, logger, cfg, cfgStore, clusterSrv, clusterTLS, nodeID)
 	if err != nil {
 		return err
 	}
 
-	homeDir, socketPath, err := finalizeNodeSetup(ctx, logger, cfgStore, nodeID, cfg.ConfigType, fromLocalFSM, hd)
+	asyncNodeConfig := fromLocalFSM || appCfg == nil
+	homeDir, socketPath, err := finalizeNodeSetup(ctx, logger, cfgStore, nodeID, cfg.ConfigType, asyncNodeConfig, hd)
 	if err != nil {
 		return err
 	}
 
-	logger.Info("loaded config",
-		"ingesters", len(appCfg.Ingesters),
-		"vaults", len(appCfg.Vaults))
+	if appCfg != nil {
+		logger.Info("loaded config",
+			"ingesters", len(appCfg.Ingesters),
+			"vaults", len(appCfg.Vaults))
+	}
 
 	orch := orchestrator.New(orchestrator.Config{
 		Logger:            logger,
@@ -240,6 +244,7 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 	disp.cfgStore = cfgStore
 	disp.factories = factories
 
+	// ApplyConfig is nil-safe: returns nil immediately when appCfg is nil.
 	if err := orch.ApplyConfig(appCfg, factories); err != nil {
 		return err
 	}
@@ -254,6 +259,14 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 		return err
 	}
 	logger.Info("orchestrator started")
+
+	// For replication cases (cluster restart without local config, joining
+	// nodes): block until server settings replicate from the leader before
+	// starting the HTTP server. The orchestrator is already running and
+	// receives vaults/ingesters via FSM dispatch as they replicate.
+	if err := awaitReplication(ctx, appCfg, cfg.ConfigType, cfgStore, logger); err != nil {
+		return err
+	}
 
 	tokens, err := buildAuthTokens(ctx, logger, cfgStore, cfg.NoAuth)
 	if err != nil {
@@ -402,52 +415,45 @@ func enrollInCluster(ctx context.Context, logger *slog.Logger, cfg runConfig, hd
 	return clusterTLS, nil
 }
 
-// loadStartupConfig handles quorum wait, cluster joining, and config loading/bootstrap.
-// Returns the loaded config and whether it was loaded from the local FSM (restart case).
-func loadStartupConfig(ctx context.Context, logger *slog.Logger, cfg runConfig, cfgStore config.Store, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, nodeID string) (*config.Config, bool, error) {
-	// For restarting multi-node members: try loading from local FSM.
-	var localCfg *config.Config
-	clusterRestart := clusterSrv != nil && !cfg.ClusterInit && cfg.JoinAddr == "" && cfg.ConfigType == "raft"
-	if clusterRestart {
-		localCfg, _ = cfgStore.Load(ctx)
-	}
-	if clusterRestart && localCfg == nil {
-		if err := waitForQuorum(ctx, cfgStore, logger); err != nil {
-			return nil, false, err
-		}
-	}
-
+// loadLocalConfig attempts to load config from the local FSM or bootstrap.
+// Returns nil config (without blocking) when config must replicate from the
+// cluster leader — the orchestrator starts empty and receives vaults/ingesters
+// via FSM dispatch as they arrive.
+func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg runConfig, cfgStore config.Store, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, nodeID string) (*config.Config, bool, error) {
 	// For joining nodes: request voter membership from the leader.
 	if err := requestVoterMembership(ctx, logger, cfg, clusterTLS, nodeID); err != nil {
 		return nil, false, err
 	}
 
-	// Load config from the appropriate source.
-	var appCfg *config.Config
-	var err error
-	needsReplication := cfg.JoinAddr != "" || clusterRestart
-	switch {
-	case localCfg != nil:
-		appCfg = localCfg
-	case needsReplication:
-		msg := "waiting for config replication from leader"
-		if cfg.JoinAddr != "" {
-			msg = "joining cluster, waiting for config replication"
+	// For restarting multi-node members: try loading from local FSM.
+	// On a proper restart, NewRaft replays the log/snapshot into the FSM
+	// synchronously, so Load() should return non-nil.
+	clusterRestart := clusterSrv != nil && !cfg.ClusterInit && cfg.JoinAddr == "" && cfg.ConfigType == "raft"
+	if clusterRestart {
+		localCfg, _ := cfgStore.Load(ctx)
+		if localCfg != nil {
+			return localCfg, true, nil
 		}
-		logger.Info(msg, "join_addr", cfg.JoinAddr)
-		appCfg, err = waitForConfig(ctx, cfgStore, 60*time.Second, logger)
-		if err != nil {
-			return nil, false, fmt.Errorf("wait for config replication: %w", err)
-		}
-	default:
-		logger.Info("loading config", "type", cfg.ConfigType)
-		appCfg, err = ensureConfig(ctx, logger, cfgStore, cfg.Bootstrap)
-		if err != nil {
-			return nil, false, err
-		}
+		// First start or lost Raft state — orchestrator will start empty,
+		// HTTP server will wait for settings to replicate.
+		logger.Info("no local config, orchestrator will start empty")
+		return nil, false, nil
 	}
 
-	return appCfg, localCfg != nil, nil
+	// Joining a cluster: config will replicate via Raft after voter
+	// membership is granted. Return nil so the orchestrator starts empty.
+	if cfg.JoinAddr != "" {
+		logger.Info("joining cluster, config will replicate from leader")
+		return nil, false, nil
+	}
+
+	// Single-node / init: load or bootstrap immediately.
+	logger.Info("loading config", "type", cfg.ConfigType)
+	appCfg, err := ensureConfig(ctx, logger, cfgStore, cfg.Bootstrap)
+	if err != nil {
+		return nil, false, err
+	}
+	return appCfg, false, nil
 }
 
 // requestVoterMembership asks the cluster leader to add this node as a Raft voter.
@@ -468,8 +474,11 @@ func requestVoterMembership(ctx context.Context, logger *slog.Logger, cfg runCon
 
 // finalizeNodeSetup ensures this node has a NodeConfig with a petname and
 // resolves the home directory and socket path for non-memory stores.
-func finalizeNodeSetup(ctx context.Context, logger *slog.Logger, cfgStore config.Store, nodeID, configType string, fromLocalFSM bool, hd home.Dir) (string, string, error) {
-	if fromLocalFSM {
+// When asyncNodeConfig is true (restart from local FSM, or no config yet),
+// the petname write is deferred to a background goroutine because the config
+// store may not be writable yet (needs Raft quorum).
+func finalizeNodeSetup(ctx context.Context, logger *slog.Logger, cfgStore config.Store, nodeID, configType string, asyncNodeConfig bool, hd home.Dir) (string, string, error) {
+	if asyncNodeConfig {
 		logger.Info("node identity", "node_id", nodeID)
 		go ensureNodeConfigAsync(ctx, cfgStore, nodeID, configType, hd, logger)
 	} else {
@@ -492,27 +501,48 @@ func finalizeNodeSetup(ctx context.Context, logger *slog.Logger, cfgStore config
 	return homeDir, socketPath, nil
 }
 
-// waitForConfig polls the config store until a non-nil config is available.
-// Used by joining nodes that wait for the leader to replicate config via Raft.
-func waitForConfig(ctx context.Context, store config.Store, timeout time.Duration, logger *slog.Logger) (*config.Config, error) {
+// awaitReplication is a no-op when config was loaded locally. For replication
+// cases (cluster restart without local FSM, joining nodes), it polls until
+// server settings replicate from the leader. Server settings require Raft
+// quorum, so this implicitly waits for leader election too. A separate
+// waitForQuorum call is NOT needed here — ensureNodeConfigAsync already
+// logs quorum progress in the background.
+func awaitReplication(ctx context.Context, appCfg *config.Config, configType string, cfgStore config.Store, logger *slog.Logger) error {
+	if appCfg != nil || configType != "raft" {
+		return nil
+	}
+	return waitForServerSettings(ctx, cfgStore, 60*time.Second, logger)
+}
+
+// waitForServerSettings polls until server settings (specifically the JWT
+// secret) are available in the config store. This is the minimal prerequisite
+// for starting the HTTP server — it needs the JWT secret for auth and TLS
+// config for certs. The orchestrator is already running and receiving
+// vaults/ingesters via FSM dispatch while this blocks.
+func waitForServerSettings(ctx context.Context, cfgStore config.Store, timeout time.Duration, logger *slog.Logger) error {
+	logger.Info("waiting for server settings replication")
 	deadline := time.After(timeout)
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
+	remind := time.NewTicker(10 * time.Second)
+	defer remind.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return ctx.Err()
 		case <-deadline:
-			return nil, errors.New("timed out waiting for config replication from leader")
+			return errors.New("timed out waiting for server settings replication")
+		case <-remind.C:
+			logger.Info("still waiting for server settings replication")
 		case <-ticker.C:
-			cfg, err := store.Load(ctx)
+			ss, err := cfgStore.LoadServerSettings(ctx)
 			if err != nil {
-				logger.Debug("waiting for config", "error", err)
 				continue
 			}
-			if cfg != nil {
-				return cfg, nil
+			if ss.Auth.JWTSecret != "" {
+				logger.Info("server settings received")
+				return nil
 			}
 		}
 	}
@@ -829,6 +859,14 @@ func (s *raftConfigStore) Close() error {
 	if s.forwarder != nil {
 		_ = s.forwarder.Close()
 	}
+	// Take a snapshot before shutting down so that the next NewRaft can
+	// restore FSM state from the snapshot without needing quorum. Without
+	// this, NewRaft starts with an empty FSM and must wait for the leader
+	// to re-send all log entries after quorum is re-established.
+	if f := s.raft.Snapshot(); f.Error() != nil {
+		// Best-effort: snapshot may fail if nothing was applied yet.
+		_ = f.Error()
+	}
 	future := s.raft.Shutdown()
 	err := future.Error()
 	if cerr := s.boltDB.Close(); cerr != nil && err == nil {
@@ -906,6 +944,19 @@ func newRaftConfig(nodeID string, multiNode bool) *hraft.Config {
 	conf := hraft.DefaultConfig()
 	conf.LocalID = hraft.ServerID(nodeID)
 	conf.LogOutput = io.Discard
+
+	// Lower snapshot threshold and interval from defaults (8192 entries,
+	// 120s). A config store typically has ~20 entries, so the default
+	// threshold would never be reached. Without a snapshot, NewRaft
+	// cannot restore FSM state on restart — it only restores from
+	// snapshots, not from log entries. This forces every multi-node
+	// restart to wait for quorum + leader re-send.
+	// The shutdown hook in Close() also takes an explicit snapshot, but
+	// the periodic check acts as a safety net for ungraceful exits.
+	conf.SnapshotThreshold = 4
+	conf.SnapshotInterval = 30 * time.Second
+	conf.TrailingLogs = 4
+
 	if multiNode {
 		conf.HeartbeatTimeout = 1000 * time.Millisecond
 		conf.ElectionTimeout = 1000 * time.Millisecond
