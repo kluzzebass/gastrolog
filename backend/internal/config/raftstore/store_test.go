@@ -1,6 +1,8 @@
 package raftstore
 
 import (
+	"context"
+	"errors"
 	"io"
 	"testing"
 	"time"
@@ -87,5 +89,128 @@ func TestApplyBadData(t *testing.T) {
 	}
 	if _, ok := resp.(error); !ok {
 		t.Fatalf("expected error, got %T: %v", resp, resp)
+	}
+}
+
+// mockForwarder records Forward calls for testing.
+type mockForwarder struct {
+	called bool
+	data   []byte
+	err    error
+}
+
+func (m *mockForwarder) Forward(ctx context.Context, data []byte) error {
+	m.called = true
+	m.data = data
+	return m.err
+}
+
+func TestApplyForwardsOnNotLeader(t *testing.T) {
+	// Create a raft instance that is NOT the leader: bootstrap but
+	// immediately add a second non-existent node so this node steps down.
+	// Simpler approach: create a non-bootstrapped raft that returns ErrNotLeader.
+	fsm := raftfsm.New()
+
+	conf := hraft.DefaultConfig()
+	conf.LocalID = "follower"
+	conf.LogOutput = io.Discard
+	conf.HeartbeatTimeout = 50 * time.Millisecond
+	conf.ElectionTimeout = 50 * time.Millisecond
+	conf.LeaderLeaseTimeout = 50 * time.Millisecond
+
+	logStore := hraft.NewInmemStore()
+	stableStore := hraft.NewInmemStore()
+	snapStore := hraft.NewInmemSnapshotStore()
+	_, transport := hraft.NewInmemTransport("follower")
+
+	r, err := hraft.NewRaft(conf, fsm, logStore, stableStore, snapStore, transport)
+	if err != nil {
+		t.Fatalf("NewRaft: %v", err)
+	}
+	t.Cleanup(func() { _ = r.Shutdown().Error() })
+
+	// Don't bootstrap — this node has no leader, so Apply returns ErrNotLeader.
+
+	s := New(r, fsm, 5*time.Second)
+	fwd := &mockForwarder{}
+	s.SetForwarder(fwd)
+
+	// ApplyRaw should detect ErrNotLeader and forward.
+	testData := []byte("test-command-data")
+	err = s.ApplyRaw(testData)
+	if err != nil {
+		t.Fatalf("ApplyRaw returned error: %v", err)
+	}
+	if !fwd.called {
+		t.Fatal("forwarder was not called")
+	}
+	if string(fwd.data) != string(testData) {
+		t.Errorf("forwarder got %q, want %q", fwd.data, testData)
+	}
+}
+
+func TestApplyNoForwarderReturnsError(t *testing.T) {
+	// Non-bootstrapped raft, no forwarder set.
+	fsm := raftfsm.New()
+
+	conf := hraft.DefaultConfig()
+	conf.LocalID = "follower"
+	conf.LogOutput = io.Discard
+	conf.HeartbeatTimeout = 50 * time.Millisecond
+	conf.ElectionTimeout = 50 * time.Millisecond
+	conf.LeaderLeaseTimeout = 50 * time.Millisecond
+
+	logStore := hraft.NewInmemStore()
+	stableStore := hraft.NewInmemStore()
+	snapStore := hraft.NewInmemSnapshotStore()
+	_, transport := hraft.NewInmemTransport("follower")
+
+	r, err := hraft.NewRaft(conf, fsm, logStore, stableStore, snapStore, transport)
+	if err != nil {
+		t.Fatalf("NewRaft: %v", err)
+	}
+	t.Cleanup(func() { _ = r.Shutdown().Error() })
+
+	s := New(r, fsm, 5*time.Second)
+	// No forwarder set.
+
+	err = s.ApplyRaw([]byte("test-command-data"))
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	// The error should contain "not leader" (wrapped by "raft apply: ...").
+	if got := err.Error(); got == "" {
+		t.Fatal("expected non-empty error")
+	}
+}
+
+func TestApplyForwarderError(t *testing.T) {
+	fsm := raftfsm.New()
+
+	conf := hraft.DefaultConfig()
+	conf.LocalID = "follower"
+	conf.LogOutput = io.Discard
+	conf.HeartbeatTimeout = 50 * time.Millisecond
+	conf.ElectionTimeout = 50 * time.Millisecond
+	conf.LeaderLeaseTimeout = 50 * time.Millisecond
+
+	logStore := hraft.NewInmemStore()
+	stableStore := hraft.NewInmemStore()
+	snapStore := hraft.NewInmemSnapshotStore()
+	_, transport := hraft.NewInmemTransport("follower")
+
+	r, err := hraft.NewRaft(conf, fsm, logStore, stableStore, snapStore, transport)
+	if err != nil {
+		t.Fatalf("NewRaft: %v", err)
+	}
+	t.Cleanup(func() { _ = r.Shutdown().Error() })
+
+	s := New(r, fsm, 5*time.Second)
+	fwdErr := errors.New("leader unreachable")
+	s.SetForwarder(&mockForwarder{err: fwdErr})
+
+	err = s.ApplyRaw([]byte("test-data"))
+	if !errors.Is(err, fwdErr) {
+		t.Fatalf("expected forwarder error, got: %v", err)
 	}
 }

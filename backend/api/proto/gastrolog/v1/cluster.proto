@@ -1,0 +1,12 @@
+syntax = "proto3";
+package gastrolog.v1;
+
+option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
+
+// ForwardApplyRequest carries a pre-marshaled ConfigCommand for the leader
+// to apply via raft.Apply(). Used by followers to proxy config writes.
+message ForwardApplyRequest {
+  bytes command = 1;
+}
+
+message ForwardApplyResponse {}

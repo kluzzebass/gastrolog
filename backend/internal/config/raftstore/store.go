@@ -1,14 +1,15 @@
-// Package raftstore provides a config.Store backed by a single-node
-// hashicorp/raft instance. Writes go through raft.Apply() which persists
-// commands to the raft log (boltdb) before dispatching to the FSM. Reads
-// delegate directly to the FSM's in-memory store.
+// Package raftstore provides a config.Store backed by hashicorp/raft.
+// Writes go through raft.Apply() which persists commands to the raft log
+// (boltdb) before dispatching to the FSM. Reads delegate directly to the
+// FSM's in-memory store.
 //
-// This gives us a persistent WAL + snapshot machinery for free. Multi-node
-// consensus is out of scope here — see gastrolog-e1ig.
+// In multi-node mode, writes on a follower are transparently forwarded to
+// the leader via the Forwarder interface.
 package raftstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -23,12 +24,19 @@ import (
 
 var _ config.Store = (*Store)(nil)
 
+// Forwarder forwards pre-marshaled config commands to the Raft leader.
+// Implemented by cluster.Forwarder in multi-node mode.
+type Forwarder interface {
+	Forward(ctx context.Context, data []byte) error
+}
+
 // Store implements config.Store by routing writes through raft.Apply() for
 // persistence and reading from the FSM's in-memory store.
 type Store struct {
 	fsm          *raftfsm.FSM
 	raft         *raft.Raft
 	applyTimeout time.Duration
+	forwarder    Forwarder // nil for single-node
 }
 
 // New creates a new Store.
@@ -40,15 +48,34 @@ func New(r *raft.Raft, fsm *raftfsm.FSM, applyTimeout time.Duration) *Store {
 	}
 }
 
-// apply serializes a ConfigCommand and submits it through raft.Apply(),
-// which persists to the log before dispatching to FSM.Apply().
+// SetForwarder enables leader forwarding for multi-node clusters.
+// When set, writes that fail with ErrNotLeader are forwarded to the
+// leader's cluster port instead of returning an error.
+func (s *Store) SetForwarder(f Forwarder) {
+	s.forwarder = f
+}
+
+// apply serializes a ConfigCommand and submits it through raft.Apply().
+// If this node is not the leader and a forwarder is configured, the command
+// is forwarded to the leader transparently.
 func (s *Store) apply(cmd *gastrologv1.ConfigCommand) error {
 	data, err := command.Marshal(cmd)
 	if err != nil {
 		return fmt.Errorf("marshal command: %w", err)
 	}
+	return s.applyRaw(data)
+}
+
+// applyRaw submits pre-marshaled command bytes through raft.Apply(),
+// forwarding to the leader if this node is a follower.
+func (s *Store) applyRaw(data []byte) error {
 	future := s.raft.Apply(data, s.applyTimeout)
 	if err := future.Error(); err != nil {
+		if errors.Is(err, raft.ErrNotLeader) && s.forwarder != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), s.applyTimeout)
+			defer cancel()
+			return s.forwarder.Forward(ctx, data)
+		}
 		return fmt.Errorf("raft apply: %w", err)
 	}
 	if resp := future.Response(); resp != nil {
@@ -57,6 +84,12 @@ func (s *Store) apply(cmd *gastrologv1.ConfigCommand) error {
 		}
 	}
 	return nil
+}
+
+// ApplyRaw applies pre-marshaled command bytes. Used by the cluster
+// ForwardApply handler on the leader to apply commands received from followers.
+func (s *Store) ApplyRaw(data []byte) error {
+	return s.applyRaw(data)
 }
 
 // ---------------------------------------------------------------------------
