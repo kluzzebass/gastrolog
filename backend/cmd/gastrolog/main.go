@@ -221,12 +221,6 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 		return err
 	}
 
-	if appCfg != nil {
-		logger.Info("loaded config",
-			"ingesters", len(appCfg.Ingesters),
-			"vaults", len(appCfg.Vaults))
-	}
-
 	orch := orchestrator.New(orchestrator.Config{
 		Logger:            logger,
 		MaxConcurrentJobs: loadMaxConcurrentJobs(ctx, cfgStore),
@@ -244,21 +238,9 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 	disp.cfgStore = cfgStore
 	disp.factories = factories
 
-	// ApplyConfig is nil-safe: returns nil immediately when appCfg is nil.
-	if err := orch.ApplyConfig(appCfg, factories); err != nil {
+	if err := startOrchestrator(ctx, logger, orch, appCfg, factories); err != nil {
 		return err
 	}
-
-	logger.Info("checking for missing indexes")
-	if err := orch.RebuildMissingIndexes(ctx); err != nil {
-		return err
-	}
-
-	logger.Info("starting orchestrator")
-	if err := orch.Start(ctx); err != nil {
-		return err
-	}
-	logger.Info("orchestrator started")
 
 	// For replication cases (cluster restart without local config, joining
 	// nodes): block until server settings replicate from the leader before
@@ -300,6 +282,29 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 		AfterConfigApply: afterConfigApply,
 		ClusterSrv:       clusterSrv,
 	})
+}
+
+// startOrchestrator applies config, rebuilds missing indexes, and starts the
+// orchestrator. ApplyConfig is nil-safe: returns nil immediately when appCfg is nil.
+func startOrchestrator(ctx context.Context, logger *slog.Logger, orch *orchestrator.Orchestrator, appCfg *config.Config, factories orchestrator.Factories) error {
+	if appCfg != nil {
+		logger.Info("loaded config",
+			"ingesters", len(appCfg.Ingesters),
+			"vaults", len(appCfg.Vaults))
+	}
+	if err := orch.ApplyConfig(appCfg, factories); err != nil {
+		return err
+	}
+	logger.Info("checking for missing indexes")
+	if err := orch.RebuildMissingIndexes(ctx); err != nil {
+		return err
+	}
+	logger.Info("starting orchestrator")
+	if err := orch.Start(ctx); err != nil {
+		return err
+	}
+	logger.Info("orchestrator started")
+	return nil
 }
 
 // resolveIdentity ensures the home directory exists and resolves the node ID.
