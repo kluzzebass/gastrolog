@@ -38,6 +38,10 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			MethodName: "Enroll",
 			Handler:    enrollRPCHandler,
 		},
+		{
+			MethodName: "Broadcast",
+			Handler:    broadcastHandler,
+		},
 	},
 }
 
@@ -45,6 +49,7 @@ var clusterServiceDesc = grpc.ServiceDesc{
 type clusterServiceServer interface {
 	forwardApply(context.Context, *gastrologv1.ForwardApplyRequest) (*gastrologv1.ForwardApplyResponse, error)
 	enroll(context.Context, *gastrologv1.EnrollRequest) (*gastrologv1.EnrollResponse, error)
+	broadcast(context.Context, *gastrologv1.BroadcastRequest) (*gastrologv1.BroadcastResponse, error)
 }
 
 func forwardApplyHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {

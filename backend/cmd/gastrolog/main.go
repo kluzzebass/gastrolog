@@ -242,6 +242,12 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 		return err
 	}
 
+	// Create the cluster broadcaster for peer-to-peer message fan-out.
+	var broadcaster *cluster.Broadcaster
+	if rcs, ok := cfgStore.(*raftConfigStore); ok && clusterSrv != nil {
+		broadcaster = cluster.NewBroadcaster(rcs.raft, clusterTLS, nodeID, logger.With("component", "broadcast"))
+	}
+
 	// For replication cases (cluster restart without local config, joining
 	// nodes): block until server settings replicate from the leader before
 	// starting the HTTP server. The orchestrator is already running and
@@ -281,6 +287,7 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 		NoAuth:           cfg.NoAuth,
 		AfterConfigApply: afterConfigApply,
 		ClusterSrv:       clusterSrv,
+		Broadcaster:      broadcaster,
 	})
 }
 
@@ -691,6 +698,7 @@ type serverDeps struct {
 	NoAuth           bool
 	AfterConfigApply func(raftfsm.Notification)
 	ClusterSrv       *cluster.Server
+	Broadcaster      *cluster.Broadcaster
 }
 
 func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
@@ -719,6 +727,10 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 	deps.Logger.Info("shutting down orchestrator")
 	if err := deps.Orch.Stop(); err != nil {
 		return err
+	}
+
+	if deps.Broadcaster != nil {
+		_ = deps.Broadcaster.Close()
 	}
 
 	if deps.ClusterSrv != nil {

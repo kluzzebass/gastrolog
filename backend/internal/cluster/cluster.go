@@ -68,6 +68,9 @@ type Server struct {
 
 	// enrollHandler handles the Enroll RPC for joining nodes.
 	enrollHandler EnrollHandler
+
+	// subscribers receives broadcast messages from peers.
+	subscribers subscriberRegistry
 }
 
 // New creates a new cluster Server and binds the listen port immediately.

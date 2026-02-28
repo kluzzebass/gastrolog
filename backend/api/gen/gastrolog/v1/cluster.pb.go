@@ -9,6 +9,7 @@ package gastrologv1
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -226,11 +227,363 @@ func (x *EnrollResponse) GetClusterKeyPem() []byte {
 	return nil
 }
 
+// BroadcastRequest sends a typed message to a peer node.
+type BroadcastRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Message       *BroadcastMessage      `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BroadcastRequest) Reset() {
+	*x = BroadcastRequest{}
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BroadcastRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BroadcastRequest) ProtoMessage() {}
+
+func (x *BroadcastRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BroadcastRequest.ProtoReflect.Descriptor instead.
+func (*BroadcastRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *BroadcastRequest) GetMessage() *BroadcastMessage {
+	if x != nil {
+		return x.Message
+	}
+	return nil
+}
+
+type BroadcastResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BroadcastResponse) Reset() {
+	*x = BroadcastResponse{}
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BroadcastResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BroadcastResponse) ProtoMessage() {}
+
+func (x *BroadcastResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BroadcastResponse.ProtoReflect.Descriptor instead.
+func (*BroadcastResponse) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{5}
+}
+
+// BroadcastMessage is the envelope for all peer-to-peer broadcast messages.
+// The oneof payload makes it extensible — new message types are added as
+// new variants without breaking existing receivers.
+type BroadcastMessage struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	SenderId  string                 `protobuf:"bytes,1,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
+	Timestamp *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	// Types that are valid to be assigned to Payload:
+	//
+	//	*BroadcastMessage_NodeStats
+	Payload       isBroadcastMessage_Payload `protobuf_oneof:"payload"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BroadcastMessage) Reset() {
+	*x = BroadcastMessage{}
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BroadcastMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BroadcastMessage) ProtoMessage() {}
+
+func (x *BroadcastMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BroadcastMessage.ProtoReflect.Descriptor instead.
+func (*BroadcastMessage) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *BroadcastMessage) GetSenderId() string {
+	if x != nil {
+		return x.SenderId
+	}
+	return ""
+}
+
+func (x *BroadcastMessage) GetTimestamp() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Timestamp
+	}
+	return nil
+}
+
+func (x *BroadcastMessage) GetPayload() isBroadcastMessage_Payload {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+func (x *BroadcastMessage) GetNodeStats() *NodeStats {
+	if x != nil {
+		if x, ok := x.Payload.(*BroadcastMessage_NodeStats); ok {
+			return x.NodeStats
+		}
+	}
+	return nil
+}
+
+type isBroadcastMessage_Payload interface {
+	isBroadcastMessage_Payload()
+}
+
+type BroadcastMessage_NodeStats struct {
+	NodeStats *NodeStats `protobuf:"bytes,10,opt,name=node_stats,json=nodeStats,proto3,oneof"`
+}
+
+func (*BroadcastMessage_NodeStats) isBroadcastMessage_Payload() {}
+
+// NodeStats reports runtime statistics for a single cluster node.
+type NodeStats struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	CpuPercent          float64                `protobuf:"fixed64,1,opt,name=cpu_percent,json=cpuPercent,proto3" json:"cpu_percent,omitempty"`
+	MemoryInuse         uint64                 `protobuf:"varint,2,opt,name=memory_inuse,json=memoryInuse,proto3" json:"memory_inuse,omitempty"`
+	MemoryRss           uint64                 `protobuf:"varint,3,opt,name=memory_rss,json=memoryRss,proto3" json:"memory_rss,omitempty"`
+	MemoryHeapAlloc     uint64                 `protobuf:"varint,4,opt,name=memory_heap_alloc,json=memoryHeapAlloc,proto3" json:"memory_heap_alloc,omitempty"`
+	MemorySys           uint64                 `protobuf:"varint,5,opt,name=memory_sys,json=memorySys,proto3" json:"memory_sys,omitempty"`
+	Goroutines          uint32                 `protobuf:"varint,6,opt,name=goroutines,proto3" json:"goroutines,omitempty"`
+	IngestQueueDepth    uint32                 `protobuf:"varint,7,opt,name=ingest_queue_depth,json=ingestQueueDepth,proto3" json:"ingest_queue_depth,omitempty"`
+	IngestQueueCapacity uint32                 `protobuf:"varint,8,opt,name=ingest_queue_capacity,json=ingestQueueCapacity,proto3" json:"ingest_queue_capacity,omitempty"`
+	Vaults              []*VaultStats          `protobuf:"bytes,9,rep,name=vaults,proto3" json:"vaults,omitempty"`
+	Ingesters           []*IngesterNodeStats   `protobuf:"bytes,10,rep,name=ingesters,proto3" json:"ingesters,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *NodeStats) Reset() {
+	*x = NodeStats{}
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NodeStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NodeStats) ProtoMessage() {}
+
+func (x *NodeStats) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NodeStats.ProtoReflect.Descriptor instead.
+func (*NodeStats) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *NodeStats) GetCpuPercent() float64 {
+	if x != nil {
+		return x.CpuPercent
+	}
+	return 0
+}
+
+func (x *NodeStats) GetMemoryInuse() uint64 {
+	if x != nil {
+		return x.MemoryInuse
+	}
+	return 0
+}
+
+func (x *NodeStats) GetMemoryRss() uint64 {
+	if x != nil {
+		return x.MemoryRss
+	}
+	return 0
+}
+
+func (x *NodeStats) GetMemoryHeapAlloc() uint64 {
+	if x != nil {
+		return x.MemoryHeapAlloc
+	}
+	return 0
+}
+
+func (x *NodeStats) GetMemorySys() uint64 {
+	if x != nil {
+		return x.MemorySys
+	}
+	return 0
+}
+
+func (x *NodeStats) GetGoroutines() uint32 {
+	if x != nil {
+		return x.Goroutines
+	}
+	return 0
+}
+
+func (x *NodeStats) GetIngestQueueDepth() uint32 {
+	if x != nil {
+		return x.IngestQueueDepth
+	}
+	return 0
+}
+
+func (x *NodeStats) GetIngestQueueCapacity() uint32 {
+	if x != nil {
+		return x.IngestQueueCapacity
+	}
+	return 0
+}
+
+func (x *NodeStats) GetVaults() []*VaultStats {
+	if x != nil {
+		return x.Vaults
+	}
+	return nil
+}
+
+func (x *NodeStats) GetIngesters() []*IngesterNodeStats {
+	if x != nil {
+		return x.Ingesters
+	}
+	return nil
+}
+
+// IngesterNodeStats reports per-ingester statistics on a cluster node.
+type IngesterNodeStats struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Id               string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	MessagesIngested uint64                 `protobuf:"varint,2,opt,name=messages_ingested,json=messagesIngested,proto3" json:"messages_ingested,omitempty"`
+	BytesIngested    uint64                 `protobuf:"varint,3,opt,name=bytes_ingested,json=bytesIngested,proto3" json:"bytes_ingested,omitempty"`
+	Errors           uint64                 `protobuf:"varint,4,opt,name=errors,proto3" json:"errors,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *IngesterNodeStats) Reset() {
+	*x = IngesterNodeStats{}
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IngesterNodeStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IngesterNodeStats) ProtoMessage() {}
+
+func (x *IngesterNodeStats) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IngesterNodeStats.ProtoReflect.Descriptor instead.
+func (*IngesterNodeStats) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *IngesterNodeStats) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *IngesterNodeStats) GetMessagesIngested() uint64 {
+	if x != nil {
+		return x.MessagesIngested
+	}
+	return 0
+}
+
+func (x *IngesterNodeStats) GetBytesIngested() uint64 {
+	if x != nil {
+		return x.BytesIngested
+	}
+	return 0
+}
+
+func (x *IngesterNodeStats) GetErrors() uint64 {
+	if x != nil {
+		return x.Errors
+	}
+	return 0
+}
+
 var File_gastrolog_v1_cluster_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\n" +
-	"\x1agastrolog/v1/cluster.proto\x12\fgastrolog.v1\"/\n" +
+	"\x1agastrolog/v1/cluster.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x18gastrolog/v1/vault.proto\"/\n" +
 	"\x13ForwardApplyRequest\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\fR\acommand\"\x16\n" +
 	"\x14ForwardApplyResponse\"h\n" +
@@ -241,7 +594,39 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x0eEnrollResponse\x12\x1e\n" +
 	"\vca_cert_pem\x18\x01 \x01(\fR\tcaCertPem\x12(\n" +
 	"\x10cluster_cert_pem\x18\x02 \x01(\fR\x0eclusterCertPem\x12&\n" +
-	"\x0fcluster_key_pem\x18\x03 \x01(\fR\rclusterKeyPemB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"\x0fcluster_key_pem\x18\x03 \x01(\fR\rclusterKeyPem\"L\n" +
+	"\x10BroadcastRequest\x128\n" +
+	"\amessage\x18\x01 \x01(\v2\x1e.gastrolog.v1.BroadcastMessageR\amessage\"\x13\n" +
+	"\x11BroadcastResponse\"\xae\x01\n" +
+	"\x10BroadcastMessage\x12\x1b\n" +
+	"\tsender_id\x18\x01 \x01(\tR\bsenderId\x128\n" +
+	"\ttimestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x128\n" +
+	"\n" +
+	"node_stats\x18\n" +
+	" \x01(\v2\x17.gastrolog.v1.NodeStatsH\x00R\tnodeStatsB\t\n" +
+	"\apayload\"\xac\x03\n" +
+	"\tNodeStats\x12\x1f\n" +
+	"\vcpu_percent\x18\x01 \x01(\x01R\n" +
+	"cpuPercent\x12!\n" +
+	"\fmemory_inuse\x18\x02 \x01(\x04R\vmemoryInuse\x12\x1d\n" +
+	"\n" +
+	"memory_rss\x18\x03 \x01(\x04R\tmemoryRss\x12*\n" +
+	"\x11memory_heap_alloc\x18\x04 \x01(\x04R\x0fmemoryHeapAlloc\x12\x1d\n" +
+	"\n" +
+	"memory_sys\x18\x05 \x01(\x04R\tmemorySys\x12\x1e\n" +
+	"\n" +
+	"goroutines\x18\x06 \x01(\rR\n" +
+	"goroutines\x12,\n" +
+	"\x12ingest_queue_depth\x18\a \x01(\rR\x10ingestQueueDepth\x122\n" +
+	"\x15ingest_queue_capacity\x18\b \x01(\rR\x13ingestQueueCapacity\x120\n" +
+	"\x06vaults\x18\t \x03(\v2\x18.gastrolog.v1.VaultStatsR\x06vaults\x12=\n" +
+	"\tingesters\x18\n" +
+	" \x03(\v2\x1f.gastrolog.v1.IngesterNodeStatsR\tingesters\"\x8f\x01\n" +
+	"\x11IngesterNodeStats\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12+\n" +
+	"\x11messages_ingested\x18\x02 \x01(\x04R\x10messagesIngested\x12%\n" +
+	"\x0ebytes_ingested\x18\x03 \x01(\x04R\rbytesIngested\x12\x16\n" +
+	"\x06errors\x18\x04 \x01(\x04R\x06errorsB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_cluster_proto_rawDescOnce sync.Once
@@ -255,19 +640,31 @@ func file_gastrolog_v1_cluster_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_cluster_proto_rawDescData
 }
 
-var file_gastrolog_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_gastrolog_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_gastrolog_v1_cluster_proto_goTypes = []any{
-	(*ForwardApplyRequest)(nil),  // 0: gastrolog.v1.ForwardApplyRequest
-	(*ForwardApplyResponse)(nil), // 1: gastrolog.v1.ForwardApplyResponse
-	(*EnrollRequest)(nil),        // 2: gastrolog.v1.EnrollRequest
-	(*EnrollResponse)(nil),       // 3: gastrolog.v1.EnrollResponse
+	(*ForwardApplyRequest)(nil),   // 0: gastrolog.v1.ForwardApplyRequest
+	(*ForwardApplyResponse)(nil),  // 1: gastrolog.v1.ForwardApplyResponse
+	(*EnrollRequest)(nil),         // 2: gastrolog.v1.EnrollRequest
+	(*EnrollResponse)(nil),        // 3: gastrolog.v1.EnrollResponse
+	(*BroadcastRequest)(nil),      // 4: gastrolog.v1.BroadcastRequest
+	(*BroadcastResponse)(nil),     // 5: gastrolog.v1.BroadcastResponse
+	(*BroadcastMessage)(nil),      // 6: gastrolog.v1.BroadcastMessage
+	(*NodeStats)(nil),             // 7: gastrolog.v1.NodeStats
+	(*IngesterNodeStats)(nil),     // 8: gastrolog.v1.IngesterNodeStats
+	(*timestamppb.Timestamp)(nil), // 9: google.protobuf.Timestamp
+	(*VaultStats)(nil),            // 10: gastrolog.v1.VaultStats
 }
 var file_gastrolog_v1_cluster_proto_depIdxs = []int32{
-	0, // [0:0] is the sub-list for method output_type
-	0, // [0:0] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	6,  // 0: gastrolog.v1.BroadcastRequest.message:type_name -> gastrolog.v1.BroadcastMessage
+	9,  // 1: gastrolog.v1.BroadcastMessage.timestamp:type_name -> google.protobuf.Timestamp
+	7,  // 2: gastrolog.v1.BroadcastMessage.node_stats:type_name -> gastrolog.v1.NodeStats
+	10, // 3: gastrolog.v1.NodeStats.vaults:type_name -> gastrolog.v1.VaultStats
+	8,  // 4: gastrolog.v1.NodeStats.ingesters:type_name -> gastrolog.v1.IngesterNodeStats
+	5,  // [5:5] is the sub-list for method output_type
+	5,  // [5:5] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_cluster_proto_init() }
@@ -275,13 +672,17 @@ func file_gastrolog_v1_cluster_proto_init() {
 	if File_gastrolog_v1_cluster_proto != nil {
 		return
 	}
+	file_gastrolog_v1_vault_proto_init()
+	file_gastrolog_v1_cluster_proto_msgTypes[6].OneofWrappers = []any{
+		(*BroadcastMessage_NodeStats)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_cluster_proto_rawDesc), len(file_gastrolog_v1_cluster_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

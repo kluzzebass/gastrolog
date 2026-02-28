@@ -1,6 +1,9 @@
 syntax = "proto3";
 package gastrolog.v1;
 
+import "google/protobuf/timestamp.proto";
+import "gastrolog/v1/vault.proto";
+
 option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
 
 // ForwardApplyRequest carries a pre-marshaled ConfigCommand for the leader
@@ -24,4 +27,45 @@ message EnrollResponse {
   bytes ca_cert_pem = 1;
   bytes cluster_cert_pem = 2;
   bytes cluster_key_pem = 3;
+}
+
+// BroadcastRequest sends a typed message to a peer node.
+message BroadcastRequest {
+  BroadcastMessage message = 1;
+}
+
+message BroadcastResponse {}
+
+// BroadcastMessage is the envelope for all peer-to-peer broadcast messages.
+// The oneof payload makes it extensible — new message types are added as
+// new variants without breaking existing receivers.
+message BroadcastMessage {
+  string sender_id = 1;
+  google.protobuf.Timestamp timestamp = 2;
+
+  oneof payload {
+    NodeStats node_stats = 10;
+  }
+}
+
+// NodeStats reports runtime statistics for a single cluster node.
+message NodeStats {
+  double cpu_percent = 1;
+  uint64 memory_inuse = 2;
+  uint64 memory_rss = 3;
+  uint64 memory_heap_alloc = 4;
+  uint64 memory_sys = 5;
+  uint32 goroutines = 6;
+  uint32 ingest_queue_depth = 7;
+  uint32 ingest_queue_capacity = 8;
+  repeated VaultStats vaults = 9;
+  repeated IngesterNodeStats ingesters = 10;
+}
+
+// IngesterNodeStats reports per-ingester statistics on a cluster node.
+message IngesterNodeStats {
+  string id = 1;
+  uint64 messages_ingested = 2;
+  uint64 bytes_ingested = 3;
+  uint64 errors = 4;
 }
