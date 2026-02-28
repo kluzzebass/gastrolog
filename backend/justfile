@@ -124,6 +124,14 @@ run-node2:
 run-node3:
   go run ./cmd/gastrolog server --home data/node3 --addr :4584 --cluster-addr :4585
 
+# Runs all 3 cluster nodes in one terminal with colored output.
+cluster-run:
+  go run ./cmd/multirun \
+    --name node1,node2,node3 \
+    "go run ./cmd/gastrolog server --home data/node1 --addr :4564 --cluster-addr :4565" \
+    "go run ./cmd/gastrolog server --home data/node2 --addr :4574 --cluster-addr :4575" \
+    "go run ./cmd/gastrolog server --home data/node3 --addr :4584 --cluster-addr :4585"
+
 # --- End cluster recipes ---
 
 # Embeds built frontend assets into the backend (brotli-compressed).
