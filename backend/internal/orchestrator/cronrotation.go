@@ -33,7 +33,7 @@ func newCronRotationManager(scheduler *Scheduler, logger *slog.Logger) *cronRota
 // addJob registers a cron rotation job for a vault.
 func (m *cronRotationManager) addJob(vaultID uuid.UUID, vaultName, cronExpr string, cm chunk.ChunkManager) error {
 	name := cronJobName(vaultID)
-	if err := m.scheduler.AddJob(name, cronExpr, m.rotateVault, vaultID, cm); err != nil {
+	if err := m.scheduler.AddJob(name, cronExpr, m.rotateVault, vaultID, vaultName, cm); err != nil {
 		return err
 	}
 	m.scheduler.Describe(name, fmt.Sprintf("Rotate active chunk in '%s'", vaultName))
@@ -48,7 +48,7 @@ func (m *cronRotationManager) removeJob(vaultID uuid.UUID) {
 // updateJob replaces the cron rotation job for a vault with a new schedule.
 func (m *cronRotationManager) updateJob(vaultID uuid.UUID, vaultName, cronExpr string, cm chunk.ChunkManager) error {
 	name := cronJobName(vaultID)
-	if err := m.scheduler.UpdateJob(name, cronExpr, m.rotateVault, vaultID, cm); err != nil {
+	if err := m.scheduler.UpdateJob(name, cronExpr, m.rotateVault, vaultID, vaultName, cm); err != nil {
 		return err
 	}
 	m.scheduler.Describe(name, fmt.Sprintf("Rotate active chunk in '%s'", vaultName))
@@ -61,24 +61,25 @@ func (m *cronRotationManager) hasJob(vaultID uuid.UUID) bool {
 }
 
 // rotateVault seals the active chunk for a vault if it has records.
-func (m *cronRotationManager) rotateVault(vaultID uuid.UUID, cm chunk.ChunkManager) {
+func (m *cronRotationManager) rotateVault(vaultID uuid.UUID, vaultName string, cm chunk.ChunkManager) {
 	active := cm.Active()
 	if active == nil || active.RecordCount == 0 {
 		m.logger.Debug("cron rotation: skipping empty chunk",
-			"vault", vaultID)
+			"vault", vaultID, "name", vaultName)
 		return
 	}
 
 	sealedID := active.ID
 	if err := cm.Seal(); err != nil {
 		m.logger.Error("cron rotation: failed to seal chunk",
-			"vault", vaultID, "chunk", sealedID.String(), "error", err)
+			"vault", vaultID, "name", vaultName, "chunk", sealedID.String(), "error", err)
 		return
 	}
 
 	m.logger.Info("rotating chunk",
 		"trigger", "cron",
 		"vault", vaultID,
+		"name", vaultName,
 		"chunk", sealedID.String(),
 		"bytes", active.Bytes,
 		"records", active.RecordCount,

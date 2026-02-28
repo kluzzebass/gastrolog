@@ -26,10 +26,11 @@ func (o *Orchestrator) RegisterDigester(d Digester) {
 
 // RegisterIngester adds a ingester to the registry.
 // Must be called before Start().
-func (o *Orchestrator) RegisterIngester(id uuid.UUID, r Ingester) {
+func (o *Orchestrator) RegisterIngester(id uuid.UUID, name, ingType string, r Ingester) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.ingesters[id] = r
+	o.ingesterMeta[id] = ingesterInfo{Name: name, Type: ingType}
 	if o.ingesterStats[id] == nil {
 		o.ingesterStats[id] = &IngesterStats{}
 	}
@@ -50,6 +51,7 @@ func (o *Orchestrator) UnregisterIngester(id uuid.UUID) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	delete(o.ingesters, id)
+	delete(o.ingesterMeta, id)
 }
 
 // ChunkManager returns the chunk manager registered under the given key.

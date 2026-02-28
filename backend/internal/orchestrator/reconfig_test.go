@@ -475,7 +475,7 @@ func TestAddIngesterWhileRunning(t *testing.T) {
 	})
 
 	ingesterID := uuid.Must(uuid.NewV7())
-	if err := orch.AddIngester(ingesterID, recv); err != nil {
+	if err := orch.AddIngester(ingesterID, "test", "mock", recv); err != nil {
 		t.Fatalf("AddIngester: %v", err)
 	}
 
@@ -498,11 +498,11 @@ func TestAddIngesterDuplicate(t *testing.T) {
 	recv1 := newBlockingIngester()
 	recv2 := newBlockingIngester()
 
-	if err := orch.AddIngester(ingesterID, recv1); err != nil {
+	if err := orch.AddIngester(ingesterID, "test-1", "mock", recv1); err != nil {
 		t.Fatalf("AddIngester: %v", err)
 	}
 
-	err := orch.AddIngester(ingesterID, recv2)
+	err := orch.AddIngester(ingesterID, "test-2", "mock", recv2)
 	if err == nil {
 		t.Fatal("expected error for duplicate ingester")
 	}
@@ -513,7 +513,7 @@ func TestRemoveIngesterNotRunning(t *testing.T) {
 
 	ingesterID := uuid.Must(uuid.NewV7())
 	recv := newBlockingIngester()
-	if err := orch.AddIngester(ingesterID, recv); err != nil {
+	if err := orch.AddIngester(ingesterID, "test", "mock", recv); err != nil {
 		t.Fatalf("AddIngester: %v", err)
 	}
 
@@ -542,7 +542,7 @@ func TestRemoveIngesterWhileRunning(t *testing.T) {
 
 	ingesterID := uuid.Must(uuid.NewV7())
 	recv := newBlockingIngester()
-	if err := orch.AddIngester(ingesterID, recv); err != nil {
+	if err := orch.AddIngester(ingesterID, "test", "mock", recv); err != nil {
 		t.Fatalf("AddIngester: %v", err)
 	}
 

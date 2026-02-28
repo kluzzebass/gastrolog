@@ -460,7 +460,7 @@ func TestIngesterMessageReachesChunkManager(t *testing.T) {
 	recv := newMockIngester([]orchestrator.IngestMessage{
 		{Attrs: map[string]string{"host": "server1"}, Raw: []byte("test message")},
 	})
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), recv)
+	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test", "mock", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -496,7 +496,7 @@ func TestIngesterContextCancellation(t *testing.T) {
 	orch, _ := newIngesterTestSetup()
 
 	recv := newBlockingIngester()
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), recv)
+	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test", "mock", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -529,8 +529,8 @@ func TestMultipleIngesters(t *testing.T) {
 		{Attrs: map[string]string{"source": "recv2"}, Raw: []byte("from recv2")},
 	})
 
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), recv1)
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), recv2)
+	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test-1", "mock", recv1)
+	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test-2", "mock", recv2)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -606,7 +606,7 @@ func TestIngesterIndexBuildOnSeal(t *testing.T) {
 		{Attrs: map[string]string{"host": "s1"}, Raw: []byte("two")},
 		{Attrs: map[string]string{"host": "s1"}, Raw: []byte("three")},
 	})
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), recv)
+	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test", "mock", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -631,7 +631,7 @@ func TestUnregisterIngester(t *testing.T) {
 
 	recv := newBlockingIngester()
 	ingesterID := uuid.Must(uuid.NewV7())
-	orch.RegisterIngester(ingesterID, recv)
+	orch.RegisterIngester(ingesterID, "test", "mock", recv)
 	orch.UnregisterIngester(ingesterID)
 
 	if err := orch.Start(context.Background()); err != nil {
@@ -691,7 +691,7 @@ func TestHighVolumeIngestion(t *testing.T) {
 	orch, cm := newIngesterTestSetup()
 
 	recv := newCountingIngester(100)
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), recv)
+	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test", "mock", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -790,8 +790,8 @@ func TestListIngestersAccessor(t *testing.T) {
 	recv2 := newBlockingIngester()
 	id1 := uuid.Must(uuid.NewV7())
 	id2 := uuid.Must(uuid.NewV7())
-	orch.RegisterIngester(id1, recv1)
-	orch.RegisterIngester(id2, recv2)
+	orch.RegisterIngester(id1, "test-1", "mock", recv1)
+	orch.RegisterIngester(id2, "test-2", "mock", recv2)
 
 	keys := orch.ListIngesters()
 	if len(keys) != 2 {
@@ -1126,7 +1126,7 @@ func TestFilteringWithIngesters(t *testing.T) {
 		{Attrs: map[string]string{"env": "prod"}, Raw: []byte("prod msg 2")},
 		{Attrs: map[string]string{"env": "staging"}, Raw: []byte("staging msg")},
 	})
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), recv)
+	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test", "mock", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -1272,7 +1272,7 @@ func TestIngestAckSuccess(t *testing.T) {
 		msg:     msg,
 		started: make(chan struct{}),
 	}
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), recv)
+	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test", "mock", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -1301,7 +1301,7 @@ func TestIngestAckNotSentWhenNil(t *testing.T) {
 	recv := newMockIngester([]orchestrator.IngestMessage{
 		{Attrs: map[string]string{"host": "server1"}, Raw: []byte("no ack message")},
 	})
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), recv)
+	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test", "mock", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -1387,7 +1387,7 @@ func TestPipelineOverlap(t *testing.T) {
 	msgs[n-1].Ack = ackCh
 
 	recv := newMockIngester(msgs)
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), recv)
+	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test", "mock", recv)
 
 	start := time.Now()
 

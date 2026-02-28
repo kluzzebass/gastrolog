@@ -56,7 +56,8 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	for id, r := range o.ingesters {
 		recvCtx, recvCancel := context.WithCancel(ctx)
 		o.ingesterCancels[id] = recvCancel
-		o.logger.Info("starting ingester", "id", id)
+		meta := o.ingesterMeta[id]
+		o.logger.Info("starting ingester", "id", id, "name", meta.Name, "type", meta.Type)
 		o.ingesterWg.Go(func() { _ = r.Run(recvCtx, o.ingestCh) })
 	}
 

@@ -163,6 +163,8 @@ func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) erro
 
 		// Register vault.
 		vault := NewVault(vaultCfg.ID, cm, im, qe)
+		vault.Name = vaultCfg.Name
+		vault.Type = vaultCfg.Type
 		vault.Enabled = vaultCfg.Enabled
 		o.RegisterVault(vault)
 	}
@@ -310,7 +312,7 @@ func (o *Orchestrator) applyIngesters(cfg *config.Config, factories Factories) e
 			return fmt.Errorf("create ingester %s: %w", recvCfg.ID, err)
 		}
 
-		o.RegisterIngester(recvCfg.ID, recv)
+		o.RegisterIngester(recvCfg.ID, recvCfg.Name, recvCfg.Type, recv)
 	}
 
 	return nil

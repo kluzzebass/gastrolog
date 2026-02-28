@@ -62,7 +62,7 @@ func (o *Orchestrator) ReloadRotationPolicies(ctx context.Context) error {
 			// Policy was deleted — nothing to do; vault keeps its current policy.
 			// We can't revert to "type default" from here, and the dangling
 			// reference will be caught on next restart or vault edit.
-			o.logger.Warn("vault references unknown policy", "vault", vaultCfg.ID, "policy", *vaultCfg.Policy)
+			o.logger.Warn("vault references unknown policy", "vault", vaultCfg.ID, "name", vaultCfg.Name, "policy", *vaultCfg.Policy)
 			continue
 		}
 
@@ -72,7 +72,7 @@ func (o *Orchestrator) ReloadRotationPolicies(ctx context.Context) error {
 		}
 		if policy != nil {
 			vault.Chunks.SetRotationPolicy(policy)
-			o.logger.Info("vault rotation policy updated", "vault", vaultCfg.ID, "policy", *vaultCfg.Policy)
+			o.logger.Info("vault rotation policy updated", "vault", vaultCfg.ID, "name", vaultCfg.Name, "policy", *vaultCfg.Policy)
 		}
 
 		// Update cron rotation job.
@@ -127,12 +127,12 @@ func (o *Orchestrator) ReloadRetentionPolicies(ctx context.Context) error {
 
 		rules, err := resolveRetentionRules(cfg, vaultCfg)
 		if err != nil {
-			o.logger.Warn("failed to resolve retention rules", "vault", vaultCfg.ID, "error", err)
+			o.logger.Warn("failed to resolve retention rules", "vault", vaultCfg.ID, "name", vaultCfg.Name, "error", err)
 			continue
 		}
 
 		runner.setRules(rules)
-		o.logger.Info("vault retention rules updated", "vault", vaultCfg.ID, "rules", len(rules))
+		o.logger.Info("vault retention rules updated", "vault", vaultCfg.ID, "name", vaultCfg.Name, "rules", len(rules))
 	}
 
 	return nil

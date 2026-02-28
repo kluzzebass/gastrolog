@@ -87,7 +87,7 @@ func testAfterConfigApply(orch *orchestrator.Orchestrator, cfgStore config.Store
 			if err != nil {
 				return
 			}
-			_ = orch.AddIngester(cfg.ID, ing)
+			_ = orch.AddIngester(cfg.ID, cfg.Name, cfg.Type, ing)
 		case raftfsm.NotifyIngesterDeleted:
 			_ = orch.RemoveIngester(n.ID)
 		}

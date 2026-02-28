@@ -29,6 +29,7 @@ func (o *Orchestrator) rotationSweep() {
 		if trigger := vault.Chunks.CheckRotation(); trigger != nil {
 			o.logger.Info("background rotation triggered",
 				"vault", id,
+				"name", vault.Name,
 				"trigger", *trigger,
 			)
 			if activeBefore != nil {

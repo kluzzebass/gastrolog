@@ -12,6 +12,8 @@ import (
 // The invariant that every vault ID has all three is now structurally enforced.
 type Vault struct {
 	ID      uuid.UUID
+	Name    string
+	Type    string
 	Chunks  chunk.ChunkManager
 	Indexes index.IndexManager
 	Query   *query.Engine

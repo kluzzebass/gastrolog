@@ -40,6 +40,7 @@ const (
 type Notification struct {
 	Kind   NotifyKind
 	ID     uuid.UUID // entity ID (zero for settings)
+	Name   string    // entity name (populated on deletes where config is read pre-delete)
 	Key    string    // settings key (empty for entity mutations)
 	NodeID string    // owning node (populated on vault/ingester deletes)
 	Dir    string    // file vault directory (populated on file vault deletes)
@@ -300,6 +301,7 @@ func (f *FSM) applyDeleteVault(ctx context.Context, pb *gastrologv1.DeleteVaultC
 	// Dir to clean up the directory on the correct node.
 	note := &Notification{Kind: NotifyVaultDeleted, ID: id}
 	if existing, _ := f.store.GetVault(ctx, id); existing != nil {
+		note.Name = existing.Name
 		note.NodeID = existing.NodeID
 		if existing.Type == "file" {
 			note.Dir = existing.Params["dir"]
@@ -327,10 +329,16 @@ func (f *FSM) applyDeleteIngester(ctx context.Context, pb *gastrologv1.DeleteIng
 	if err != nil {
 		return nil, err
 	}
+	// Read ingester config before deleting so the dispatcher has name/node info.
+	note := &Notification{Kind: NotifyIngesterDeleted, ID: id}
+	if existing, _ := f.store.GetIngester(ctx, id); existing != nil {
+		note.Name = existing.Name
+		note.NodeID = existing.NodeID
+	}
 	if err := f.store.DeleteIngester(ctx, id); err != nil {
 		return nil, err
 	}
-	return &Notification{Kind: NotifyIngesterDeleted, ID: id}, nil
+	return note, nil
 }
 
 func (f *FSM) applyPutSetting(ctx context.Context, pb *gastrologv1.PutSettingCommand) (*Notification, error) {

@@ -56,7 +56,7 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 	case raftfsm.NotifyIngesterPut:
 		d.handleIngesterPut(ctx, n.ID)
 	case raftfsm.NotifyIngesterDeleted:
-		d.handleIngesterDeleted(n.ID)
+		d.handleIngesterDeleted(n)
 	case raftfsm.NotifySettingPut:
 		d.handleSettingPut(ctx, n.Key)
 	case raftfsm.NotifyClusterTLSPut:
@@ -79,7 +79,7 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id uuid.UUID) {
 	if !slices.Contains(d.orch.ListVaults(), id) {
 		// New vault — add it to the orchestrator.
 		if err := d.orch.AddVault(ctx, *vaultCfg, d.factories); err != nil {
-			d.logger.Error("dispatch: add vault", "id", id, "error", err)
+			d.logger.Error("dispatch: add vault", "id", id, "name", vaultCfg.Name, "type", vaultCfg.Type, "error", err)
 		}
 		return
 	}
@@ -110,12 +110,12 @@ func (d *configDispatcher) applyExistingVaultChanges(ctx context.Context, id uui
 
 func (d *configDispatcher) handleVaultDeleted(n raftfsm.Notification) {
 	if err := d.orch.ForceRemoveVault(n.ID); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
-		d.logger.Error("dispatch: force remove vault", "id", n.ID, "error", err)
+		d.logger.Error("dispatch: force remove vault", "id", n.ID, "name", n.Name, "error", err)
 	}
 	// Clean up the file vault directory only on the node that owns it.
 	if n.Dir != "" && (n.NodeID == "" || n.NodeID == d.localNodeID) {
 		if err := os.RemoveAll(n.Dir); err != nil {
-			d.logger.Error("dispatch: remove vault directory", "id", n.ID, "dir", n.Dir, "error", err)
+			d.logger.Error("dispatch: remove vault directory", "id", n.ID, "name", n.Name, "dir", n.Dir, "error", err)
 		}
 	}
 }
@@ -153,7 +153,7 @@ func (d *configDispatcher) handleIngesterPut(ctx context.Context, id uuid.UUID) 
 	// Remove existing ingester if present (idempotent re-add).
 	if slices.Contains(d.orch.ListIngesters(), id) {
 		if err := d.orch.RemoveIngester(id); err != nil && !errors.Is(err, orchestrator.ErrIngesterNotFound) {
-			d.logger.Error("dispatch: remove existing ingester", "id", id, "error", err)
+			d.logger.Error("dispatch: remove existing ingester", "id", id, "name", ingCfg.Name, "type", ingCfg.Type, "error", err)
 		}
 	}
 
@@ -163,7 +163,7 @@ func (d *configDispatcher) handleIngesterPut(ctx context.Context, id uuid.UUID) 
 
 	factory, ok := d.factories.Ingesters[ingCfg.Type]
 	if !ok {
-		d.logger.Error("dispatch: unknown ingester type", "id", id, "type", ingCfg.Type)
+		d.logger.Error("dispatch: unknown ingester type", "id", id, "name", ingCfg.Name, "type", ingCfg.Type)
 		return
 	}
 
@@ -176,18 +176,18 @@ func (d *configDispatcher) handleIngesterPut(ctx context.Context, id uuid.UUID) 
 
 	ingester, err := factory(ingCfg.ID, params, d.factories.Logger)
 	if err != nil {
-		d.logger.Error("dispatch: create ingester", "id", id, "error", err)
+		d.logger.Error("dispatch: create ingester", "id", id, "name", ingCfg.Name, "type", ingCfg.Type, "error", err)
 		return
 	}
 
-	if err := d.orch.AddIngester(ingCfg.ID, ingester); err != nil {
-		d.logger.Error("dispatch: add ingester", "id", id, "error", err)
+	if err := d.orch.AddIngester(ingCfg.ID, ingCfg.Name, ingCfg.Type, ingester); err != nil {
+		d.logger.Error("dispatch: add ingester", "id", id, "name", ingCfg.Name, "type", ingCfg.Type, "error", err)
 	}
 }
 
-func (d *configDispatcher) handleIngesterDeleted(id uuid.UUID) {
-	if err := d.orch.RemoveIngester(id); err != nil && !errors.Is(err, orchestrator.ErrIngesterNotFound) {
-		d.logger.Error("dispatch: remove ingester", "id", id, "error", err)
+func (d *configDispatcher) handleIngesterDeleted(n raftfsm.Notification) {
+	if err := d.orch.RemoveIngester(n.ID); err != nil && !errors.Is(err, orchestrator.ErrIngesterNotFound) {
+		d.logger.Error("dispatch: remove ingester", "id", n.ID, "name", n.Name, "error", err)
 	}
 }
 

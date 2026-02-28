@@ -62,6 +62,8 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg config.VaultConfig
 
 	// Register vault. AddVault does not apply disabled state (unlike ApplyConfig).
 	vault := NewVault(vaultCfg.ID, cm, im, qe)
+	vault.Name = vaultCfg.Name
+	vault.Type = vaultCfg.Type
 	o.vaults[vaultCfg.ID] = vault
 
 	// Update filter set to include the new vault's filter.
@@ -106,7 +108,7 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg config.VaultConfig
 		}
 	}
 
-	o.logger.Info("vault added", "id", vaultCfg.ID, "type", vaultCfg.Type, "filter", filterExpr)
+	o.logger.Info("vault added", "id", vaultCfg.ID, "name", vaultCfg.Name, "type", vaultCfg.Type, "filter", filterExpr)
 	return nil
 }
 
@@ -150,7 +152,7 @@ func (o *Orchestrator) RemoveVault(id uuid.UUID) error {
 	// Rebuild filter set without this vault.
 	o.rebuildFilterSetLocked()
 
-	o.logger.Info("vault removed", "id", id)
+	o.logger.Info("vault removed", "id", id, "name", vault.Name, "type", vault.Type)
 	return nil
 }
 
@@ -167,7 +169,7 @@ func (o *Orchestrator) DisableVault(id uuid.UUID) error {
 	}
 
 	vault.Enabled = false
-	o.logger.Info("vault disabled", "id", id)
+	o.logger.Info("vault disabled", "id", id, "name", vault.Name, "type", vault.Type)
 	return nil
 }
 
@@ -183,7 +185,7 @@ func (o *Orchestrator) EnableVault(id uuid.UUID) error {
 	}
 
 	vault.Enabled = true
-	o.logger.Info("vault enabled", "id", id)
+	o.logger.Info("vault enabled", "id", id, "name", vault.Name, "type", vault.Type)
 	return nil
 }
 
@@ -256,7 +258,7 @@ func (o *Orchestrator) ForceRemoveVault(id uuid.UUID) error {
 	// Rebuild filter set without this vault.
 	o.rebuildFilterSetLocked()
 
-	o.logger.Info("vault force-removed", "id", id)
+	o.logger.Info("vault force-removed", "id", id, "name", vault.Name, "type", vault.Type)
 	return nil
 }
 

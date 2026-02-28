@@ -26,6 +26,13 @@ type IngesterStats struct {
 	Errors           atomic.Int64
 }
 
+// ingesterInfo holds metadata about an ingester for logging purposes.
+// The Ingester interface is a bare Run() — metadata lives alongside it.
+type ingesterInfo struct {
+	Name string
+	Type string
+}
+
 var (
 	// ErrNoChunkManagers is returned when no chunk managers are registered.
 	ErrNoChunkManagers = errors.New("no chunk managers registered")
@@ -80,6 +87,7 @@ type Orchestrator struct {
 	ingesters       map[uuid.UUID]Ingester
 	ingesterCancels map[uuid.UUID]context.CancelFunc // per-ingester cancel functions
 	ingesterStats   map[uuid.UUID]*IngesterStats     // per-ingester metrics
+	ingesterMeta    map[uuid.UUID]ingesterInfo        // per-ingester name/type for logging
 
 	// Digesters (message enrichment pipeline).
 	digesters []Digester
@@ -184,6 +192,7 @@ func New(cfg Config) *Orchestrator {
 		ingesters:       make(map[uuid.UUID]Ingester),
 		ingesterCancels: make(map[uuid.UUID]context.CancelFunc),
 		ingesterStats:   make(map[uuid.UUID]*IngesterStats),
+		ingesterMeta:    make(map[uuid.UUID]ingesterInfo),
 		retention:       make(map[uuid.UUID]*retentionRunner),
 		scheduler:       sched,
 		cronRotation:    newCronRotationManager(sched, logger),

@@ -10,7 +10,7 @@ import (
 // AddIngester adds and optionally starts a new ingester.
 // If the orchestrator is running, the ingester is started immediately.
 // Returns ErrDuplicateID if a ingester with this ID already exists.
-func (o *Orchestrator) AddIngester(id uuid.UUID, r Ingester) error {
+func (o *Orchestrator) AddIngester(id uuid.UUID, name, ingType string, r Ingester) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -19,6 +19,7 @@ func (o *Orchestrator) AddIngester(id uuid.UUID, r Ingester) error {
 	}
 
 	o.ingesters[id] = r
+	o.ingesterMeta[id] = ingesterInfo{Name: name, Type: ingType}
 	if o.ingesterStats[id] == nil {
 		o.ingesterStats[id] = &IngesterStats{}
 	}
@@ -31,7 +32,7 @@ func (o *Orchestrator) AddIngester(id uuid.UUID, r Ingester) error {
 		o.ingesterWg.Go(func() {
 			_ = r.Run(ctx, o.ingestCh)
 		})
-		o.logger.Info("ingester started", "id", id)
+		o.logger.Info("ingester started", "id", id, "name", name, "type", ingType)
 	}
 
 	return nil
@@ -55,7 +56,9 @@ func (o *Orchestrator) RemoveIngester(id uuid.UUID) error {
 		delete(o.ingesterCancels, id)
 	}
 
+	meta := o.ingesterMeta[id]
 	delete(o.ingesters, id)
+	delete(o.ingesterMeta, id)
 	o.mu.Unlock()
 
 	// Note: We don't wait for the specific ingester to finish here because
@@ -63,6 +66,6 @@ func (o *Orchestrator) RemoveIngester(id uuid.UUID) error {
 	// when its context is cancelled, and the WaitGroup will decrement.
 	// This is a best-effort removal - the ingester may still be draining.
 
-	o.logger.Info("ingester removed", "id", id)
+	o.logger.Info("ingester removed", "id", id, "name", meta.Name, "type", meta.Type)
 	return nil
 }
