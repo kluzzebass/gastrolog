@@ -654,7 +654,7 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
           </ExpandableCard>
 
           <ExpandableCard
-            id="Cluster"
+            id="Broadcasting"
             dark={dark}
             expanded={!!expandedCards.cluster}
             onToggle={() => toggle("cluster")}
