@@ -385,8 +385,6 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
 
   return (
     <SettingsSection
-      title="Vaults"
-      helpTopicId="storage-engines"
       addLabel="Add Vault"
       adding={adding}
       onToggleAdd={() => {

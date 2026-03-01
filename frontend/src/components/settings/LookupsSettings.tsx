@@ -106,14 +106,6 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-5">
-        <h2
-          className={`font-display text-[1.4em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
-        >
-          Lookups
-        </h2>
-      </div>
-
       {isLoading ? (
         <div
           className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}

@@ -164,8 +164,6 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
 
   return (
     <SettingsSection
-      title="Retention Policies"
-      helpTopicId="policy-retention"
       addLabel="Add Policy"
       adding={adding}
       onToggleAdd={() => {

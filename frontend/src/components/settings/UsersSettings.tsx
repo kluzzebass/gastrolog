@@ -159,9 +159,6 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
 
   return (
     <SettingsSection
-      title="Users"
-      titleSuffix={noAuth ? "— disabled by --no-auth" : undefined}
-      helpTopicId="user-management"
       addLabel={noAuth ? undefined : "Add User"}
       adding={adding}
       onToggleAdd={() => dispatchAdd({ type: "setAdding", value: !adding })}

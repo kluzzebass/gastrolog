@@ -119,8 +119,6 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
 
   return (
     <SettingsSection
-      title="Filters"
-      helpTopicId="routing"
       addLabel="Add Filter"
       adding={adding}
       onToggleAdd={() => {

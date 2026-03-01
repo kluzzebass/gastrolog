@@ -144,8 +144,6 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
 
   return (
     <SettingsSection
-      title="Ingesters"
-      helpTopicId="ingesters"
       addLabel="Add Ingester"
       adding={adding}
       onToggleAdd={() => {

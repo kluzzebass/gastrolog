@@ -1,6 +1,5 @@
 import { useReducer } from "react";
 import { unzipSync, decompressSync } from "fflate";
-import { HelpButton } from "../HelpButton";
 
 function stripNul(s: string): string {
   const idx = s.indexOf("\0");
@@ -558,16 +557,8 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-5">
-        <div className="flex items-center gap-2">
-          <h2
-            className={`font-display text-[1.4em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
-          >
-            Certificates
-          </h2>
-          <HelpButton topicId="certificates" />
-        </div>
-        {!adding && !expanded && (
+      {!adding && !expanded && (
+        <div className="flex items-center justify-end mb-5">
           <div className="flex gap-2">
             <PrimaryButton onClick={startAddPem}>
               Add pasted certificate
@@ -576,8 +567,8 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
               Add monitored files
             </PrimaryButton>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       <p
         className={`text-[0.85em] mb-5 ${c("text-text-muted", "text-light-text-muted")}`}

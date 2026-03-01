@@ -149,6 +149,18 @@ export function SettingsDialog({
         </nav>
 
         <div className="flex-1 overflow-y-auto app-scroll p-5">
+          {(() => {
+            const active = tabs.find((t) => t.id === tab);
+            if (!active) return null;
+            return (
+              <div className="flex items-center gap-2 mb-5">
+                <h2 className={`font-display text-[1.4em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}>
+                  {active.label}
+                </h2>
+                {active.helpTopicId && <HelpButton topicId={active.helpTopicId} />}
+              </div>
+            );
+          })()}
           {tab === "service" && <ServiceSettings dark={dark} noAuth={noAuth} />}
           {tab === "nodes" && <NodesSettings dark={dark} />}
           {tab === "certificates" && <CertificatesSettings dark={dark} />}
@@ -338,17 +350,6 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-5">
-        <div className="flex items-center gap-2">
-          <h2
-            className={`font-display text-[1.4em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
-          >
-            Cluster
-          </h2>
-          <HelpButton topicId="service-settings" />
-        </div>
-      </div>
-
       {isLoading ? (
         <div
           className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}

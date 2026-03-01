@@ -93,14 +93,6 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-5">
-        <h2
-          className={`font-display text-[1.4em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
-        >
-          Nodes
-        </h2>
-      </div>
-
       <div className="flex flex-col gap-3">
         {nodes.toSorted((a, b) => a.name.localeCompare(b.name)).map((node) => {
           const isLocal = node.id === localNodeId;

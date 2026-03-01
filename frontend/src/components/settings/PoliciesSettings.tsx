@@ -230,8 +230,6 @@ export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolea
 
   return (
     <SettingsSection
-      title="Rotation Policies"
-      helpTopicId="policy-rotation"
       addLabel="Add Policy"
       adding={adding}
       onToggleAdd={() => {
