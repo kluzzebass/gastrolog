@@ -46,7 +46,7 @@ func NewBroadcaster(r *hraft.Raft, clusterTLS *ClusterTLS, nodeID string, logger
 func (b *Broadcaster) Send(ctx context.Context, msg *gastrologv1.BroadcastMessage) {
 	peers, err := b.peers()
 	if err != nil {
-		b.logger.Warn("broadcast: get peers", "error", err)
+		b.logger.Debug("broadcast: get peers", "error", err)
 		return
 	}
 	if len(peers) == 0 {
@@ -88,7 +88,7 @@ func (b *Broadcaster) logPeerError(id hraft.ServerID, action string, err error) 
 	b.mu.Unlock()
 
 	if !alreadyFailed {
-		b.logger.Warn("broadcast: "+action, "peer", id, "error", err)
+		b.logger.Debug("broadcast: "+action, "peer", id, "error", err)
 	}
 }
 
