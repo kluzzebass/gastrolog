@@ -71,6 +71,10 @@ type Server struct {
 
 	// subscribers receives broadcast messages from peers.
 	subscribers subscriberRegistry
+
+	// recordAppender writes forwarded records into local vaults.
+	// Set after the orchestrator is created, before forwarding starts.
+	recordAppender RecordAppender
 }
 
 // New creates a new cluster Server and binds the listen port immediately.

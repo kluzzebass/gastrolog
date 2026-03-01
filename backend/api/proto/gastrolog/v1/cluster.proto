@@ -100,3 +100,15 @@ message IngesterNodeStats {
   bool running = 5;
   string name = 6;
 }
+
+// ForwardRecordsRequest ships a batch of records to the node that owns
+// the destination vault. Sent by the ingesting node when a route targets
+// a remote vault.
+message ForwardRecordsRequest {
+  string vault_id = 1;
+  repeated ExportRecord records = 2;
+}
+
+message ForwardRecordsResponse {
+  int64 records_written = 1;
+}

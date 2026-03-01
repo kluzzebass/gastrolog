@@ -416,6 +416,109 @@ func TestFilterSetWithout(t *testing.T) {
 	}
 }
 
+func TestAddOrUpdateWithNodePreservesNodeID(t *testing.T) {
+	vaultA := uuid.Must(uuid.NewV7())
+	vaultB := uuid.Must(uuid.NewV7())
+
+	fs, err := (*FilterSet)(nil).AddOrUpdateWithNode(vaultA, "env=prod", "node-A")
+	if err != nil {
+		t.Fatalf("AddOrUpdateWithNode on nil: %v", err)
+	}
+
+	// NodeID should be set.
+	if fs.filters[0].NodeID != "node-A" {
+		t.Errorf("NodeID = %q, want %q", fs.filters[0].NodeID, "node-A")
+	}
+
+	// Add a local vault (empty NodeID).
+	fs, err = fs.AddOrUpdateWithNode(vaultB, "*", "")
+	if err != nil {
+		t.Fatalf("AddOrUpdateWithNode vaultB: %v", err)
+	}
+
+	if len(fs.filters) != 2 {
+		t.Fatalf("expected 2 filters, got %d", len(fs.filters))
+	}
+
+	// Update vaultA — NodeID should update too.
+	fs, err = fs.AddOrUpdateWithNode(vaultA, "env=staging", "node-C")
+	if err != nil {
+		t.Fatalf("AddOrUpdateWithNode update: %v", err)
+	}
+
+	for _, f := range fs.filters {
+		if f.VaultID == vaultA && f.NodeID != "node-C" {
+			t.Errorf("vaultA NodeID = %q, want %q", f.NodeID, "node-C")
+		}
+	}
+}
+
+func TestMatchWithNodeReturnsNodeIDs(t *testing.T) {
+	localID := uuid.Must(uuid.NewV7())
+	remoteID := uuid.Must(uuid.NewV7())
+
+	local, _ := CompileFilter(localID, "*")
+	remote, _ := CompileFilter(remoteID, "env=prod")
+	remote.NodeID = "node-B"
+
+	fs := NewFilterSet([]*CompiledFilter{local, remote})
+
+	results := fs.MatchWithNode(chunk.Attributes{"env": "prod"})
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+
+	var foundLocal, foundRemote bool
+	for _, r := range results {
+		if r.VaultID == localID && r.NodeID == "" {
+			foundLocal = true
+		}
+		if r.VaultID == remoteID && r.NodeID == "node-B" {
+			foundRemote = true
+		}
+	}
+	if !foundLocal {
+		t.Error("local vault not found in results")
+	}
+	if !foundRemote {
+		t.Error("remote vault not found in results")
+	}
+}
+
+func TestMatchWithNodeCatchRest(t *testing.T) {
+	exprID := uuid.Must(uuid.NewV7())
+	catchRestID := uuid.Must(uuid.NewV7())
+
+	expr, _ := CompileFilter(exprID, "env=prod")
+	expr.NodeID = "node-A"
+
+	catchRest, _ := CompileFilter(catchRestID, "+")
+	catchRest.NodeID = "node-B"
+
+	fs := NewFilterSet([]*CompiledFilter{expr, catchRest})
+
+	// Matching record — catch-rest should NOT appear.
+	results := fs.MatchWithNode(chunk.Attributes{"env": "prod"})
+	for _, r := range results {
+		if r.VaultID == catchRestID {
+			t.Error("catch-rest should not match when expression filter matches")
+		}
+	}
+
+	// Non-matching record — catch-rest SHOULD appear.
+	results = fs.MatchWithNode(chunk.Attributes{"env": "staging"})
+	var found bool
+	for _, r := range results {
+		if r.VaultID == catchRestID && r.NodeID == "node-B" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("catch-rest should match when no expression filter matches")
+	}
+}
+
 // Helper functions
 
 func sameElements(a, b []uuid.UUID) bool {

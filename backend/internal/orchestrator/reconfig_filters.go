@@ -32,6 +32,17 @@ func findFilter(filters []config.FilterConfig, id uuid.UUID) *config.FilterConfi
 	return nil
 }
 
+// resolveVaultNodeID looks up the NodeID for a vault in the config.
+// Returns empty string if the vault is not found or has no node assignment.
+func resolveVaultNodeID(cfg *config.Config, vaultID uuid.UUID) string {
+	for i := range cfg.Vaults {
+		if cfg.Vaults[i].ID == vaultID {
+			return cfg.Vaults[i].NodeID
+		}
+	}
+	return ""
+}
+
 // ReloadFilters loads the full config and recompiles filter expressions from
 // routes for all registered vaults. This can be called while the system is
 // running without disrupting ingestion.
@@ -76,11 +87,19 @@ func (o *Orchestrator) reloadFiltersFromRoutes(cfg *config.Config) error {
 		}
 
 		for _, destID := range route.Destinations {
-			if _, ok := o.vaults[destID]; !ok {
-				continue
+			nodeID := ""
+			if _, ok := o.vaults[destID]; ok {
+				// Local vault — nodeID stays empty.
+			} else if o.forwarder != nil {
+				nodeID = resolveVaultNodeID(cfg, destID)
+				if nodeID == "" || nodeID == o.localNodeID {
+					continue // unassigned or our node but not registered
+				}
+			} else {
+				continue // single-node mode, skip remote
 			}
 			var err error
-			fs, err = fs.AddOrUpdate(destID, filterExpr)
+			fs, err = fs.AddOrUpdateWithNode(destID, filterExpr, nodeID)
 			if err != nil {
 				return fmt.Errorf("invalid filter for route %s, vault %s: %w", route.ID, destID, err)
 			}
@@ -119,6 +138,9 @@ func (o *Orchestrator) rebuildFilterSetLocked() {
 
 	var removed []uuid.UUID
 	for _, f := range o.filterSet.filters {
+		if f.NodeID != "" {
+			continue // remote vault — not expected in o.vaults
+		}
 		if _, exists := o.vaults[f.VaultID]; !exists {
 			removed = append(removed, f.VaultID)
 		}

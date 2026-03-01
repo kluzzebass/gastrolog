@@ -780,6 +780,105 @@ func (x *IngesterNodeStats) GetName() string {
 	return ""
 }
 
+// ForwardRecordsRequest ships a batch of records to the node that owns
+// the destination vault. Sent by the ingesting node when a route targets
+// a remote vault.
+type ForwardRecordsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	VaultId       string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	Records       []*ExportRecord        `protobuf:"bytes,2,rep,name=records,proto3" json:"records,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ForwardRecordsRequest) Reset() {
+	*x = ForwardRecordsRequest{}
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ForwardRecordsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ForwardRecordsRequest) ProtoMessage() {}
+
+func (x *ForwardRecordsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ForwardRecordsRequest.ProtoReflect.Descriptor instead.
+func (*ForwardRecordsRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ForwardRecordsRequest) GetVaultId() string {
+	if x != nil {
+		return x.VaultId
+	}
+	return ""
+}
+
+func (x *ForwardRecordsRequest) GetRecords() []*ExportRecord {
+	if x != nil {
+		return x.Records
+	}
+	return nil
+}
+
+type ForwardRecordsResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	RecordsWritten int64                  `protobuf:"varint,1,opt,name=records_written,json=recordsWritten,proto3" json:"records_written,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ForwardRecordsResponse) Reset() {
+	*x = ForwardRecordsResponse{}
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ForwardRecordsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ForwardRecordsResponse) ProtoMessage() {}
+
+func (x *ForwardRecordsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ForwardRecordsResponse.ProtoReflect.Descriptor instead.
+func (*ForwardRecordsResponse) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ForwardRecordsResponse) GetRecordsWritten() int64 {
+	if x != nil {
+		return x.RecordsWritten
+	}
+	return 0
+}
+
 var File_gastrolog_v1_cluster_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_cluster_proto_rawDesc = "" +
@@ -848,7 +947,12 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x0ebytes_ingested\x18\x03 \x01(\x04R\rbytesIngested\x12\x16\n" +
 	"\x06errors\x18\x04 \x01(\x04R\x06errors\x12\x18\n" +
 	"\arunning\x18\x05 \x01(\bR\arunning\x12\x12\n" +
-	"\x04name\x18\x06 \x01(\tR\x04nameB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"\x04name\x18\x06 \x01(\tR\x04name\"h\n" +
+	"\x15ForwardRecordsRequest\x12\x19\n" +
+	"\bvault_id\x18\x01 \x01(\tR\avaultId\x124\n" +
+	"\arecords\x18\x02 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"A\n" +
+	"\x16ForwardRecordsResponse\x12'\n" +
+	"\x0frecords_written\x18\x01 \x01(\x03R\x0erecordsWrittenB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_cluster_proto_rawDescOnce sync.Once
@@ -862,35 +966,39 @@ func file_gastrolog_v1_cluster_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_cluster_proto_rawDescData
 }
 
-var file_gastrolog_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_gastrolog_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_gastrolog_v1_cluster_proto_goTypes = []any{
-	(*ForwardApplyRequest)(nil),   // 0: gastrolog.v1.ForwardApplyRequest
-	(*ForwardApplyResponse)(nil),  // 1: gastrolog.v1.ForwardApplyResponse
-	(*EnrollRequest)(nil),         // 2: gastrolog.v1.EnrollRequest
-	(*EnrollResponse)(nil),        // 3: gastrolog.v1.EnrollResponse
-	(*BroadcastRequest)(nil),      // 4: gastrolog.v1.BroadcastRequest
-	(*BroadcastResponse)(nil),     // 5: gastrolog.v1.BroadcastResponse
-	(*BroadcastMessage)(nil),      // 6: gastrolog.v1.BroadcastMessage
-	(*NodeJobs)(nil),              // 7: gastrolog.v1.NodeJobs
-	(*NodeStats)(nil),             // 8: gastrolog.v1.NodeStats
-	(*IngesterNodeStats)(nil),     // 9: gastrolog.v1.IngesterNodeStats
-	(*timestamppb.Timestamp)(nil), // 10: google.protobuf.Timestamp
-	(*Job)(nil),                   // 11: gastrolog.v1.Job
-	(*VaultStats)(nil),            // 12: gastrolog.v1.VaultStats
+	(*ForwardApplyRequest)(nil),    // 0: gastrolog.v1.ForwardApplyRequest
+	(*ForwardApplyResponse)(nil),   // 1: gastrolog.v1.ForwardApplyResponse
+	(*EnrollRequest)(nil),          // 2: gastrolog.v1.EnrollRequest
+	(*EnrollResponse)(nil),         // 3: gastrolog.v1.EnrollResponse
+	(*BroadcastRequest)(nil),       // 4: gastrolog.v1.BroadcastRequest
+	(*BroadcastResponse)(nil),      // 5: gastrolog.v1.BroadcastResponse
+	(*BroadcastMessage)(nil),       // 6: gastrolog.v1.BroadcastMessage
+	(*NodeJobs)(nil),               // 7: gastrolog.v1.NodeJobs
+	(*NodeStats)(nil),              // 8: gastrolog.v1.NodeStats
+	(*IngesterNodeStats)(nil),      // 9: gastrolog.v1.IngesterNodeStats
+	(*ForwardRecordsRequest)(nil),  // 10: gastrolog.v1.ForwardRecordsRequest
+	(*ForwardRecordsResponse)(nil), // 11: gastrolog.v1.ForwardRecordsResponse
+	(*timestamppb.Timestamp)(nil),  // 12: google.protobuf.Timestamp
+	(*Job)(nil),                    // 13: gastrolog.v1.Job
+	(*VaultStats)(nil),             // 14: gastrolog.v1.VaultStats
+	(*ExportRecord)(nil),           // 15: gastrolog.v1.ExportRecord
 }
 var file_gastrolog_v1_cluster_proto_depIdxs = []int32{
 	6,  // 0: gastrolog.v1.BroadcastRequest.message:type_name -> gastrolog.v1.BroadcastMessage
-	10, // 1: gastrolog.v1.BroadcastMessage.timestamp:type_name -> google.protobuf.Timestamp
+	12, // 1: gastrolog.v1.BroadcastMessage.timestamp:type_name -> google.protobuf.Timestamp
 	8,  // 2: gastrolog.v1.BroadcastMessage.node_stats:type_name -> gastrolog.v1.NodeStats
 	7,  // 3: gastrolog.v1.BroadcastMessage.node_jobs:type_name -> gastrolog.v1.NodeJobs
-	11, // 4: gastrolog.v1.NodeJobs.jobs:type_name -> gastrolog.v1.Job
-	12, // 5: gastrolog.v1.NodeStats.vaults:type_name -> gastrolog.v1.VaultStats
+	13, // 4: gastrolog.v1.NodeJobs.jobs:type_name -> gastrolog.v1.Job
+	14, // 5: gastrolog.v1.NodeStats.vaults:type_name -> gastrolog.v1.VaultStats
 	9,  // 6: gastrolog.v1.NodeStats.ingesters:type_name -> gastrolog.v1.IngesterNodeStats
-	7,  // [7:7] is the sub-list for method output_type
-	7,  // [7:7] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	15, // 7: gastrolog.v1.ForwardRecordsRequest.records:type_name -> gastrolog.v1.ExportRecord
+	8,  // [8:8] is the sub-list for method output_type
+	8,  // [8:8] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_cluster_proto_init() }
@@ -910,7 +1018,7 @@ func file_gastrolog_v1_cluster_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_cluster_proto_rawDesc), len(file_gastrolog_v1_cluster_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

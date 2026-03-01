@@ -45,38 +45,62 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
-	if len(o.vaults) == 0 {
+	if len(o.vaults) == 0 && o.forwarder == nil {
 		return ErrNoChunkManagers
 	}
 
-	// Determine which vaults should receive this message.
-	var targetVaults []uuid.UUID
-	if o.filterSet != nil {
-		targetVaults = o.filterSet.Match(rec.Attrs)
-	} else {
-		// Legacy behavior: fan-out to all vaults.
-		targetVaults = make([]uuid.UUID, 0, len(o.vaults))
-		for key := range o.vaults {
-			targetVaults = append(targetVaults, key)
-		}
+	if o.filterSet == nil {
+		return o.fanoutAll(rec)
 	}
 
-	// Dispatch to target vaults only.
-	for _, key := range targetVaults {
-		vault := o.vaults[key]
+	for _, t := range o.filterSet.MatchWithNode(rec.Attrs) {
+		if t.NodeID != "" {
+			o.forwardRemote(t, rec)
+			continue
+		}
+		if err := o.appendLocal(t.VaultID, rec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// fanoutAll is the legacy path: no filter set, send to all local vaults.
+func (o *Orchestrator) fanoutAll(rec chunk.Record) error {
+	for key, vault := range o.vaults {
 		if vault == nil || !vault.Enabled {
 			continue
 		}
+		k := key
 		onSeal := func(cid chunk.ChunkID) {
-			o.scheduleCompression(key, cid)
-			o.scheduleIndexBuild(key, cid)
+			o.scheduleCompression(k, cid)
+			o.scheduleIndexBuild(k, cid)
 		}
 		if err := vault.Append(rec, onSeal); err != nil {
 			return err
 		}
 	}
-
 	return nil
+}
+
+// appendLocal appends a record to a local vault.
+func (o *Orchestrator) appendLocal(vaultID uuid.UUID, rec chunk.Record) error {
+	vault := o.vaults[vaultID]
+	if vault == nil || !vault.Enabled {
+		return nil
+	}
+	onSeal := func(cid chunk.ChunkID) {
+		o.scheduleCompression(vaultID, cid)
+		o.scheduleIndexBuild(vaultID, cid)
+	}
+	return vault.Append(rec, onSeal)
+}
+
+// forwardRemote ships a record to the node that owns the target vault.
+func (o *Orchestrator) forwardRemote(t MatchResult, rec chunk.Record) {
+	if err := o.forwarder.Forward(context.Background(), t.NodeID, t.VaultID, []chunk.Record{rec}); err != nil {
+		o.logger.Warn("forward record failed", "node", t.NodeID, "vault", t.VaultID, "error", err)
+	}
 }
 
 // postSealWork schedules compression and index builds for a newly sealed chunk.

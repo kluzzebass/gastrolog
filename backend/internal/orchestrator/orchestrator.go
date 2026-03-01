@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
 	"gastrolog/internal/logging"
 
@@ -45,6 +46,14 @@ var (
 	// ErrNotRunning is returned when Stop is called on a stopped orchestrator.
 	ErrNotRunning = errors.New("orchestrator not running")
 )
+
+// RecordForwarder ships records to remote cluster nodes. The orchestrator
+// calls Forward() during ingestion for records that match routes targeting
+// vaults on other nodes. Implementations must be non-blocking (channel
+// enqueue) so they're safe to call under the orchestrator mutex.
+type RecordForwarder interface {
+	Forward(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error
+}
 
 // Orchestrator coordinates ingestion, indexing, and querying.
 // It filters records to chunk managers, observes seal events to trigger
@@ -95,6 +104,8 @@ type Orchestrator struct {
 	// Vault filters.
 	filterSet *FilterSet
 
+	// Record forwarder for cross-node delivery (nil in single-node mode).
+	forwarder RecordForwarder
 
 	// Ingest channel and lifecycle.
 	ingestCh   chan IngestMessage
@@ -208,6 +219,12 @@ func New(cfg Config) *Orchestrator {
 	o.cronRotation.onSeal = o.postSealWork
 
 	return o
+}
+
+// SetRecordForwarder injects the cross-node record forwarder.
+// Must be called before Start(). Safe to leave nil for single-node mode.
+func (o *Orchestrator) SetRecordForwarder(f RecordForwarder) {
+	o.forwarder = f
 }
 
 // Logger returns a child logger scoped for a subcomponent.

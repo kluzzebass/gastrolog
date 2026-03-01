@@ -236,6 +236,23 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 
 	factories := buildFactories(logger, homeDir, cfgStore, orch)
 
+	// Wire cross-node record forwarding if running in cluster mode.
+	// Client-side: forwarder ships records to remote vault-owning nodes.
+	// Server-side: appender receives forwarded records into local vaults.
+	if rcs, ok := cfgStore.(*raftConfigStore); ok && clusterSrv != nil {
+		recordForwarder := cluster.NewRecordForwarder(
+			rcs.raft, clusterTLS, nodeID,
+			logger.With("component", "record-forwarder"),
+		)
+		orch.SetRecordForwarder(recordForwarder)
+		defer func() { _ = recordForwarder.Close() }()
+
+		clusterSrv.SetRecordAppender(func(ctx context.Context, vaultID uuid.UUID, rec chunk.Record) error {
+			_, _, err := orch.Append(vaultID, rec)
+			return err
+		})
+	}
+
 	// Wire the dispatcher now that orchestrator and factories are available.
 	// From this point, FSM notifications will trigger orchestrator side effects.
 	disp.orch = orch

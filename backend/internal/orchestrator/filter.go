@@ -31,6 +31,13 @@ type CompiledFilter struct {
 	Kind    FilterKind
 	Expr    string         // original filter expression (for config reconstruction)
 	DNF     *querylang.DNF // only set for FilterExpr
+	NodeID  string         // owning node (empty = local vault)
+}
+
+// MatchResult pairs a vault ID with the node that owns it.
+type MatchResult struct {
+	VaultID uuid.UUID
+	NodeID  string // empty = local vault
 }
 
 // CompileFilter parses a filter string and returns a compiled filter.
@@ -107,6 +114,29 @@ func (fs *FilterSet) AddOrUpdate(vaultID uuid.UUID, filterExpr string) (*FilterS
 	return NewFilterSet(filters), nil
 }
 
+// AddOrUpdateWithNode is like AddOrUpdate but also sets the NodeID on the
+// compiled filter. Use this for remote vault destinations so MatchWithNode
+// can distinguish local from remote targets.
+func (fs *FilterSet) AddOrUpdateWithNode(vaultID uuid.UUID, filterExpr, nodeID string) (*FilterSet, error) {
+	f, err := CompileFilter(vaultID, filterExpr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid filter for vault %s: %w", vaultID, err)
+	}
+	f.NodeID = nodeID
+
+	var filters []*CompiledFilter
+	if fs != nil {
+		for _, existing := range fs.filters {
+			if existing.VaultID != vaultID {
+				filters = append(filters, existing)
+			}
+		}
+	}
+	filters = append(filters, f)
+
+	return NewFilterSet(filters), nil
+}
+
 // Without returns a new FilterSet excluding filters for the given vault IDs.
 // Returns nil if the resulting set is empty. Safe to call on a nil receiver.
 func (fs *FilterSet) Without(vaultIDs ...uuid.UUID) *FilterSet {
@@ -166,6 +196,40 @@ func (fs *FilterSet) Match(attrs chunk.Attributes) []uuid.UUID {
 		for _, f := range fs.filters {
 			if f.Kind == FilterCatchRest {
 				result = append(result, f.VaultID)
+			}
+		}
+	}
+
+	return result
+}
+
+// MatchWithNode returns MatchResults (vault ID + owning node) for all
+// filters that match the given attributes. Same logic as Match() but
+// preserves the NodeID so callers can partition local vs. remote delivery.
+func (fs *FilterSet) MatchWithNode(attrs chunk.Attributes) []MatchResult {
+	var result []MatchResult
+	matchedExpr := false
+
+	for _, f := range fs.filters {
+		switch f.Kind {
+		case FilterNone:
+			// Skip
+		case FilterCatchAll:
+			result = append(result, MatchResult{VaultID: f.VaultID, NodeID: f.NodeID})
+		case FilterExpr:
+			if querylang.MatchAttrs(f.DNF, attrs) {
+				result = append(result, MatchResult{VaultID: f.VaultID, NodeID: f.NodeID})
+				matchedExpr = true
+			}
+		case FilterCatchRest:
+			// Handled in second pass
+		}
+	}
+
+	if !matchedExpr {
+		for _, f := range fs.filters {
+			if f.Kind == FilterCatchRest {
+				result = append(result, MatchResult{VaultID: f.VaultID, NodeID: f.NodeID})
 			}
 		}
 	}
