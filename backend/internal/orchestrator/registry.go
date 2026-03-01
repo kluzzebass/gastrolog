@@ -1,6 +1,9 @@
 package orchestrator
 
 import (
+	"bytes"
+	"slices"
+
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
 	"gastrolog/internal/query"
@@ -83,7 +86,7 @@ func (o *Orchestrator) IsRunning() bool {
 	return o.running
 }
 
-// ListVaults returns all registered vault IDs.
+// ListVaults returns all registered vault IDs in deterministic order.
 func (o *Orchestrator) ListVaults() []uuid.UUID {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
@@ -91,10 +94,11 @@ func (o *Orchestrator) ListVaults() []uuid.UUID {
 	for k := range o.vaults {
 		keys = append(keys, k)
 	}
+	slices.SortFunc(keys, func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
 	return keys
 }
 
-// ListIngesters returns all registered ingester IDs.
+// ListIngesters returns all registered ingester IDs in deterministic order.
 func (o *Orchestrator) ListIngesters() []uuid.UUID {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
@@ -102,6 +106,7 @@ func (o *Orchestrator) ListIngesters() []uuid.UUID {
 	for k := range o.ingesters {
 		keys = append(keys, k)
 	}
+	slices.SortFunc(keys, func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
 	return keys
 }
 

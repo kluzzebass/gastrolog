@@ -43,8 +43,19 @@ type lineWriter struct {
 
 func (lw *lineWriter) writeTo(w *os.File, prefix, color, line string) {
 	lw.mu.Lock()
-	_, _ = fmt.Fprintf(w, "%s[%s]%s %s\n", color, prefix, reset, line) //nolint:gosec // writing to stdout/stderr, not HTTP
+	_, _ = fmt.Fprintf(w, "%s[%s]%s %s\n", color, prefix, reset, line)
 	lw.mu.Unlock()
+}
+
+// childProc tracks a running child process alongside its display metadata
+// and a channel that is closed once the process has exited and its output
+// has been fully flushed.
+type childProc struct {
+	name     string
+	color    string
+	proc     *os.Process   // nil if start failed
+	done     chan struct{}  // closed after exit + output flush
+	exitCode int           // valid after done is closed
 }
 
 func main() {
@@ -52,9 +63,10 @@ func main() {
 		Use:   "multirun [flags] \"cmd1\" \"cmd2\" ...",
 		Short: "Run multiple commands concurrently with colored output",
 		Long: `multirun runs multiple shell commands concurrently, prefixing each line
-of output with a colored label. On SIGINT/SIGTERM, it forwards the signal
-to all children and waits for them to exit. If any child exits non-zero,
-the rest are signaled to stop.`,
+of output with a colored label. On SIGINT/SIGTERM, it signals children one
+at a time in reverse order, waiting for each to exit before signaling the
+next. This allows clustered services to shut down gracefully while quorum
+is still available.`,
 		Args:              cobra.MinimumNArgs(1),
 		RunE:              runMulti,
 		SilenceUsage:      true,
@@ -91,9 +103,6 @@ func runMulti(cmd *cobra.Command, args []string) error {
 
 	var (
 		lw       lineWriter
-		wg       sync.WaitGroup
-		procs    []*os.Process
-		procsMu  sync.Mutex
 		exitCode int
 		exitMu   sync.Mutex
 	)
@@ -109,23 +118,22 @@ func runMulti(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Start children sequentially so children[i] always corresponds to
+	// names[i]. They all run concurrently once started.
+	children := make([]*childProc, len(args))
+	var wg sync.WaitGroup
 	for i, cmdStr := range args {
+		cp := startChild(&lw, names[i], colors[i%len(colors)], cmdStr)
+		children[i] = cp
 		wg.Add(1)
-		go func(idx int, cmdStr string) {
+		go func(cp *childProc) {
 			defer wg.Done()
-			proc := runChild(&lw, names[idx], colors[idx%len(colors)], cmdStr)
-
-			procsMu.Lock()
-			if proc != nil {
-				procs = append(procs, proc)
-			}
-			procsMu.Unlock()
-
-			failFast(waitChild(&lw, names[idx], colors[idx%len(colors)], proc, cmdStr))
-		}(i, cmdStr)
+			<-cp.done
+			failFast(cp.exitCode)
+		}(cp)
 	}
 
-	go forwardSignals(ctx, &procsMu, &procs, grace)
+	go forwardSignals(ctx, &lw, children, grace)
 
 	wg.Wait()
 
@@ -140,9 +148,17 @@ func runMulti(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// runChild starts a child process and wires up output scanners.
-// Returns the process (nil on start failure) so the caller can track it.
-func runChild(lw *lineWriter, name, color, cmdStr string) *os.Process {
+// startChild starts a child process, wires up output scanners, and returns
+// a childProc whose done channel closes when the process exits and output
+// is fully flushed. Only one goroutine calls Wait on the underlying process,
+// eliminating the race that occurs when multiple callers reap the same child.
+func startChild(lw *lineWriter, name, color, cmdStr string) *childProc {
+	cp := &childProc{
+		name:  name,
+		color: color,
+		done:  make(chan struct{}),
+	}
+
 	child := exec.Command("sh", "-c", cmdStr) //nolint:gosec // user-provided commands are the purpose of this tool
 	child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
@@ -153,8 +169,11 @@ func runChild(lw *lineWriter, name, color, cmdStr string) *os.Process {
 
 	if err := child.Start(); err != nil {
 		lw.writeTo(os.Stderr, name, color, fmt.Sprintf("error: %v", err))
-		return nil
+		cp.exitCode = 1
+		close(cp.done)
+		return cp
 	}
+	cp.proc = child.Process
 
 	// Stream stdout and stderr in separate goroutines.
 	var scanWg sync.WaitGroup
@@ -162,41 +181,29 @@ func runChild(lw *lineWriter, name, color, cmdStr string) *os.Process {
 	go scanLines(lw, &scanWg, outR, os.Stdout, name, color)
 	go scanLines(lw, &scanWg, errR, os.Stderr, name, color)
 
-	// Wait in a goroutine: close pipe writers when done so scanners finish.
+	// Single Wait goroutine: reaps the process, closes pipes so scanners
+	// finish, then signals completion via cp.done.
 	go func() {
-		_ = child.Wait()
+		err := child.Wait()
 		_ = outW.Close()
 		_ = errW.Close()
 		scanWg.Wait()
+
+		if err == nil {
+			lw.writeTo(os.Stderr, name, color, "exited")
+		} else {
+			code := 1
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				code = exitErr.ExitCode()
+			}
+			cp.exitCode = code
+			lw.writeTo(os.Stderr, name, color, fmt.Sprintf("exited with code %d", code))
+		}
+		close(cp.done)
 	}()
 
-	return child.Process
-}
-
-// waitChild waits for a process to exit and returns its exit code.
-func waitChild(lw *lineWriter, name, color string, proc *os.Process, _ string) int {
-	if proc == nil {
-		return 1
-	}
-
-	state, err := proc.Wait()
-	if err == nil && state.Success() {
-		lw.writeTo(os.Stderr, name, color, "exited")
-		return 0
-	}
-
-	code := 1
-	switch {
-	case state != nil:
-		code = state.ExitCode()
-	default:
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			code = exitErr.ExitCode()
-		}
-	}
-	lw.writeTo(os.Stderr, name, color, fmt.Sprintf("exited with code %d", code))
-	return code
+	return cp
 }
 
 func scanLines(lw *lineWriter, wg *sync.WaitGroup, r *io.PipeReader, dest *os.File, name, color string) {
@@ -208,21 +215,27 @@ func scanLines(lw *lineWriter, wg *sync.WaitGroup, r *io.PipeReader, dest *os.Fi
 	}
 }
 
-func forwardSignals(ctx context.Context, procsMu *sync.Mutex, procs *[]*os.Process, grace time.Duration) {
+// forwardSignals shuts down children one at a time in reverse order.
+// This lets clustered services (e.g. Raft nodes) maintain quorum while
+// peers shut down, allowing each to complete a clean snapshot/drain.
+func forwardSignals(ctx context.Context, lw *lineWriter, children []*childProc, grace time.Duration) {
 	<-ctx.Done()
 
-	procsMu.Lock()
-	snapshot := make([]*os.Process, len(*procs))
-	copy(snapshot, *procs)
-	procsMu.Unlock()
-
-	for _, p := range snapshot {
-		_ = syscall.Kill(-p.Pid, syscall.SIGTERM)
-	}
-
-	time.AfterFunc(grace, func() {
-		for _, p := range snapshot {
-			_ = syscall.Kill(-p.Pid, syscall.SIGKILL)
+	// Shut down in reverse order (last started → first stopped).
+	for i := len(children) - 1; i >= 0; i-- {
+		cp := children[i]
+		if cp.proc == nil {
+			continue
 		}
-	})
+
+		_ = syscall.Kill(-cp.proc.Pid, syscall.SIGTERM)
+
+		select {
+		case <-cp.done:
+			lw.writeTo(os.Stderr, "multirun", "\033[90m", cp.name+" stopped, continuing shutdown...")
+		case <-time.After(grace):
+			_ = syscall.Kill(-cp.proc.Pid, syscall.SIGKILL)
+			<-cp.done
+		}
+	}
 }

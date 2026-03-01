@@ -23,8 +23,9 @@ type Broadcaster struct {
 	nodeID     string
 	logger     *slog.Logger
 
-	mu    sync.Mutex
-	conns map[hraft.ServerID]*grpc.ClientConn
+	mu     sync.Mutex
+	conns  map[hraft.ServerID]*grpc.ClientConn
+	failed map[hraft.ServerID]bool // true = peer is unreachable (suppress repeated logs)
 }
 
 // NewBroadcaster creates a Broadcaster that resolves peers from the Raft
@@ -36,6 +37,7 @@ func NewBroadcaster(r *hraft.Raft, clusterTLS *ClusterTLS, nodeID string, logger
 		nodeID:     nodeID,
 		logger:     logger,
 		conns:      make(map[hraft.ServerID]*grpc.ClientConn),
+		failed:     make(map[hraft.ServerID]bool),
 	}
 }
 
@@ -55,12 +57,14 @@ func (b *Broadcaster) Send(ctx context.Context, msg *gastrologv1.BroadcastMessag
 	for _, p := range peers {
 		conn, err := b.peerConn(p)
 		if err != nil {
-			b.logger.Warn("broadcast: dial peer", "peer", p.ID, "error", err)
+			b.logPeerError(p.ID, "dial peer", err)
 			continue
 		}
 		if err := b.sendOne(ctx, conn, p, req); err != nil {
-			b.logger.Warn("broadcast: send", "peer", p.ID, "error", err)
+			b.logPeerError(p.ID, "send", err)
 			b.invalidate(p.ID)
+		} else {
+			b.clearPeerError(p.ID)
 		}
 	}
 }
@@ -74,6 +78,30 @@ func (b *Broadcaster) Close() error {
 		delete(b.conns, id)
 	}
 	return nil
+}
+
+// logPeerError logs the first error for a peer, then suppresses repeats.
+func (b *Broadcaster) logPeerError(id hraft.ServerID, action string, err error) {
+	b.mu.Lock()
+	alreadyFailed := b.failed[id]
+	b.failed[id] = true
+	b.mu.Unlock()
+
+	if !alreadyFailed {
+		b.logger.Warn("broadcast: "+action, "peer", id, "error", err)
+	}
+}
+
+// clearPeerError marks a peer as healthy and logs recovery if it was down.
+func (b *Broadcaster) clearPeerError(id hraft.ServerID) {
+	b.mu.Lock()
+	wasFailed := b.failed[id]
+	delete(b.failed, id)
+	b.mu.Unlock()
+
+	if wasFailed {
+		b.logger.Info("broadcast: peer recovered", "peer", id)
+	}
 }
 
 // peers returns all Raft servers except self.

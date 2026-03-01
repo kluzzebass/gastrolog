@@ -583,6 +583,7 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit // snapshot re
 				Scheduler:            cfg.Scheduler,
 				TLS:                  cfg.TLS,
 				Lookup:               cfg.Lookup,
+				Cluster:              cfg.Cluster,
 				SetupWizardDismissed: cfg.SetupWizardDismissed,
 			}); err != nil {
 				return fmt.Errorf("restore server settings: %w", err)

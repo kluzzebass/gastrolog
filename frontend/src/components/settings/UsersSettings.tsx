@@ -221,7 +221,7 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
         </div>
       )}
 
-      {users?.map((user) => {
+      {users?.toSorted((a, b) => a.username.localeCompare(b.username)).map((user) => {
         const isSelf = currentUser?.username === user.username;
         const edit = getEdit(user.id);
         return (

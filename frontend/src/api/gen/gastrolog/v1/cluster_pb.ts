@@ -4,7 +4,8 @@
 // @ts-nocheck
 
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
-import { Message, proto3 } from "@bufbuild/protobuf";
+import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
+import { VaultStats } from "./vault_pb.js";
 
 /**
  * ForwardApplyRequest carries a pre-marshaled ConfigCommand for the leader
@@ -177,6 +178,393 @@ export class EnrollResponse extends Message<EnrollResponse> {
 
   static equals(a: EnrollResponse | PlainMessage<EnrollResponse> | undefined, b: EnrollResponse | PlainMessage<EnrollResponse> | undefined): boolean {
     return proto3.util.equals(EnrollResponse, a, b);
+  }
+}
+
+/**
+ * BroadcastRequest sends a typed message to a peer node.
+ *
+ * @generated from message gastrolog.v1.BroadcastRequest
+ */
+export class BroadcastRequest extends Message<BroadcastRequest> {
+  /**
+   * @generated from field: gastrolog.v1.BroadcastMessage message = 1;
+   */
+  message?: BroadcastMessage;
+
+  constructor(data?: PartialMessage<BroadcastRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.BroadcastRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "message", kind: "message", T: BroadcastMessage },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): BroadcastRequest {
+    return new BroadcastRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): BroadcastRequest {
+    return new BroadcastRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): BroadcastRequest {
+    return new BroadcastRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: BroadcastRequest | PlainMessage<BroadcastRequest> | undefined, b: BroadcastRequest | PlainMessage<BroadcastRequest> | undefined): boolean {
+    return proto3.util.equals(BroadcastRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.BroadcastResponse
+ */
+export class BroadcastResponse extends Message<BroadcastResponse> {
+  constructor(data?: PartialMessage<BroadcastResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.BroadcastResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): BroadcastResponse {
+    return new BroadcastResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): BroadcastResponse {
+    return new BroadcastResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): BroadcastResponse {
+    return new BroadcastResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: BroadcastResponse | PlainMessage<BroadcastResponse> | undefined, b: BroadcastResponse | PlainMessage<BroadcastResponse> | undefined): boolean {
+    return proto3.util.equals(BroadcastResponse, a, b);
+  }
+}
+
+/**
+ * BroadcastMessage is the envelope for all peer-to-peer broadcast messages.
+ * The oneof payload makes it extensible — new message types are added as
+ * new variants without breaking existing receivers.
+ *
+ * @generated from message gastrolog.v1.BroadcastMessage
+ */
+export class BroadcastMessage extends Message<BroadcastMessage> {
+  /**
+   * @generated from field: string sender_id = 1;
+   */
+  senderId = "";
+
+  /**
+   * @generated from field: google.protobuf.Timestamp timestamp = 2;
+   */
+  timestamp?: Timestamp;
+
+  /**
+   * @generated from oneof gastrolog.v1.BroadcastMessage.payload
+   */
+  payload: {
+    /**
+     * @generated from field: gastrolog.v1.NodeStats node_stats = 10;
+     */
+    value: NodeStats;
+    case: "nodeStats";
+  } | { case: undefined; value?: undefined } = { case: undefined };
+
+  constructor(data?: PartialMessage<BroadcastMessage>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.BroadcastMessage";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "sender_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "timestamp", kind: "message", T: Timestamp },
+    { no: 10, name: "node_stats", kind: "message", T: NodeStats, oneof: "payload" },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): BroadcastMessage {
+    return new BroadcastMessage().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): BroadcastMessage {
+    return new BroadcastMessage().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): BroadcastMessage {
+    return new BroadcastMessage().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: BroadcastMessage | PlainMessage<BroadcastMessage> | undefined, b: BroadcastMessage | PlainMessage<BroadcastMessage> | undefined): boolean {
+    return proto3.util.equals(BroadcastMessage, a, b);
+  }
+}
+
+/**
+ * NodeStats reports runtime statistics for a single cluster node.
+ *
+ * @generated from message gastrolog.v1.NodeStats
+ */
+export class NodeStats extends Message<NodeStats> {
+  /**
+   * @generated from field: double cpu_percent = 1;
+   */
+  cpuPercent = 0;
+
+  /**
+   * @generated from field: uint64 memory_inuse = 2;
+   */
+  memoryInuse = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 memory_rss = 3;
+   */
+  memoryRss = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 memory_heap_alloc = 4;
+   */
+  memoryHeapAlloc = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 memory_sys = 5;
+   */
+  memorySys = protoInt64.zero;
+
+  /**
+   * @generated from field: uint32 goroutines = 6;
+   */
+  goroutines = 0;
+
+  /**
+   * @generated from field: uint32 ingest_queue_depth = 7;
+   */
+  ingestQueueDepth = 0;
+
+  /**
+   * @generated from field: uint32 ingest_queue_capacity = 8;
+   */
+  ingestQueueCapacity = 0;
+
+  /**
+   * @generated from field: repeated gastrolog.v1.VaultStats vaults = 9;
+   */
+  vaults: VaultStats[] = [];
+
+  /**
+   * @generated from field: repeated gastrolog.v1.IngesterNodeStats ingesters = 10;
+   */
+  ingesters: IngesterNodeStats[] = [];
+
+  /**
+   * Identity
+   *
+   * @generated from field: string node_name = 11;
+   */
+  nodeName = "";
+
+  /**
+   * @generated from field: string version = 12;
+   */
+  version = "";
+
+  /**
+   * @generated from field: string raft_state = 13;
+   */
+  raftState = "";
+
+  /**
+   * @generated from field: string suffrage = 14;
+   */
+  suffrage = "";
+
+  /**
+   * @generated from field: int64 uptime_seconds = 15;
+   */
+  uptimeSeconds = protoInt64.zero;
+
+  /**
+   * Memory detail
+   *
+   * @generated from field: uint64 memory_heap_idle = 16;
+   */
+  memoryHeapIdle = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 memory_heap_released = 17;
+   */
+  memoryHeapReleased = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 memory_stack_inuse = 18;
+   */
+  memoryStackInuse = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 memory_heap_objects = 19;
+   */
+  memoryHeapObjects = protoInt64.zero;
+
+  /**
+   * @generated from field: uint32 num_gc = 20;
+   */
+  numGc = 0;
+
+  /**
+   * Raft
+   *
+   * @generated from field: uint64 raft_term = 21;
+   */
+  raftTerm = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 raft_commit_index = 22;
+   */
+  raftCommitIndex = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 raft_applied_index = 23;
+   */
+  raftAppliedIndex = protoInt64.zero;
+
+  /**
+   * @generated from field: string raft_last_contact = 24;
+   */
+  raftLastContact = "";
+
+  /**
+   * @generated from field: uint64 raft_fsm_pending = 25;
+   */
+  raftFsmPending = protoInt64.zero;
+
+  constructor(data?: PartialMessage<NodeStats>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.NodeStats";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "cpu_percent", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 2, name: "memory_inuse", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 3, name: "memory_rss", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 4, name: "memory_heap_alloc", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 5, name: "memory_sys", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 6, name: "goroutines", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 7, name: "ingest_queue_depth", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 8, name: "ingest_queue_capacity", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 9, name: "vaults", kind: "message", T: VaultStats, repeated: true },
+    { no: 10, name: "ingesters", kind: "message", T: IngesterNodeStats, repeated: true },
+    { no: 11, name: "node_name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 12, name: "version", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 13, name: "raft_state", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 14, name: "suffrage", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 15, name: "uptime_seconds", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 16, name: "memory_heap_idle", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 17, name: "memory_heap_released", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 18, name: "memory_stack_inuse", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 19, name: "memory_heap_objects", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 20, name: "num_gc", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 21, name: "raft_term", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 22, name: "raft_commit_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 23, name: "raft_applied_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 24, name: "raft_last_contact", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 25, name: "raft_fsm_pending", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeStats {
+    return new NodeStats().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): NodeStats {
+    return new NodeStats().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): NodeStats {
+    return new NodeStats().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: NodeStats | PlainMessage<NodeStats> | undefined, b: NodeStats | PlainMessage<NodeStats> | undefined): boolean {
+    return proto3.util.equals(NodeStats, a, b);
+  }
+}
+
+/**
+ * IngesterNodeStats reports per-ingester statistics on a cluster node.
+ *
+ * @generated from message gastrolog.v1.IngesterNodeStats
+ */
+export class IngesterNodeStats extends Message<IngesterNodeStats> {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id = "";
+
+  /**
+   * @generated from field: uint64 messages_ingested = 2;
+   */
+  messagesIngested = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 bytes_ingested = 3;
+   */
+  bytesIngested = protoInt64.zero;
+
+  /**
+   * @generated from field: uint64 errors = 4;
+   */
+  errors = protoInt64.zero;
+
+  /**
+   * @generated from field: bool running = 5;
+   */
+  running = false;
+
+  /**
+   * @generated from field: string name = 6;
+   */
+  name = "";
+
+  constructor(data?: PartialMessage<IngesterNodeStats>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.IngesterNodeStats";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "messages_ingested", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 3, name: "bytes_ingested", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 4, name: "errors", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 5, name: "running", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 6, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): IngesterNodeStats {
+    return new IngesterNodeStats().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): IngesterNodeStats {
+    return new IngesterNodeStats().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): IngesterNodeStats {
+    return new IngesterNodeStats().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: IngesterNodeStats | PlainMessage<IngesterNodeStats> | undefined, b: IngesterNodeStats | PlainMessage<IngesterNodeStats> | undefined): boolean {
+    return proto3.util.equals(IngesterNodeStats, a, b);
   }
 }
 

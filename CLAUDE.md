@@ -17,8 +17,9 @@ When renaming a concept, type, field, or variable, rename it consistently across
 ## Proto changes require regenerating both sides
 
 ```bash
-cd backend/api/proto && buf generate   # Go
-cd frontend && buf generate            # TypeScript
+just gen                    # both sides at once
+just backend gen            # Go only
+just frontend gen           # TypeScript only
 ```
 
 ## Data Integrity: Facts Before Speculation

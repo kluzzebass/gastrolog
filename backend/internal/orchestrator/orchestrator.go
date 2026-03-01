@@ -229,6 +229,22 @@ func (o *Orchestrator) GetIngesterStats(id uuid.UUID) *IngesterStats {
 	return o.ingesterStats[id]
 }
 
+// IngesterName returns the registered display name for the given ingester.
+func (o *Orchestrator) IngesterName(id uuid.UUID) string {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.ingesterMeta[id].Name
+}
+
+// IsIngesterRunning reports whether the given ingester has an active cancel function,
+// meaning its goroutine was launched and hasn't been stopped.
+func (o *Orchestrator) IsIngesterRunning(id uuid.UUID) bool {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	_, ok := o.ingesterCancels[id]
+	return ok
+}
+
 // IngestQueueDepth returns the current number of messages in the ingest channel.
 func (o *Orchestrator) IngestQueueDepth() int {
 	return len(o.ingestCh)

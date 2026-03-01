@@ -215,7 +215,7 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
         </AddFormCard>
       )}
 
-      {ingesters.map((ing) => {
+      {ingesters.toSorted((a, b) => a.name.localeCompare(b.name)).map((ing) => {
         const edit = getEdit(ing.id);
         return (
           <SettingsCard

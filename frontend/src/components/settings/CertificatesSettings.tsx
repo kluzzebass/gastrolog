@@ -644,7 +644,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
 
       {certs.length > 0 && (
         <div className="flex flex-col gap-3">
-          {certs.map((cert) => (
+          {certs.toSorted((a, b) => a.name.localeCompare(b.name)).map((cert) => (
             <SettingsCard
               key={cert.id}
               id={cert.name || cert.id}

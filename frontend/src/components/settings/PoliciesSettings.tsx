@@ -303,7 +303,7 @@ export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolea
         </AddFormCard>
       )}
 
-      {policies.map((pol) => {
+      {policies.toSorted((a, b) => a.name.localeCompare(b.name)).map((pol) => {
         const id = pol.id;
         const edit = getEdit(id);
         const refs = refsFor(vaults, "policy", id);

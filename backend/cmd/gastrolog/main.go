@@ -33,16 +33,14 @@ import (
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
 	chunkmem "gastrolog/internal/chunk/memory"
+	"gastrolog/internal/cluster"
+	"gastrolog/internal/cluster/tlsutil"
 	"gastrolog/internal/config"
 	configmem "gastrolog/internal/config/memory"
 	"gastrolog/internal/config/raftfsm"
 	"gastrolog/internal/config/raftstore"
-	"gastrolog/internal/cluster"
-	"gastrolog/internal/cluster/tlsutil"
 	"gastrolog/internal/home"
 
-	hraft "github.com/hashicorp/raft"
-	raftboltdb "github.com/hashicorp/raft-boltdb/v2"
 	digestlevel "gastrolog/internal/digester/level"
 	digesttimestamp "gastrolog/internal/digester/timestamp"
 	"gastrolog/internal/index"
@@ -53,14 +51,17 @@ import (
 	ingestfluentfwd "gastrolog/internal/ingester/fluentfwd"
 	ingesthttp "gastrolog/internal/ingester/http"
 	ingestkafka "gastrolog/internal/ingester/kafka"
+	ingestmetrics "gastrolog/internal/ingester/metrics"
 	ingestotlp "gastrolog/internal/ingester/otlp"
 	ingestrelp "gastrolog/internal/ingester/relp"
 	ingestsyslog "gastrolog/internal/ingester/syslog"
-	ingestmetrics "gastrolog/internal/ingester/metrics"
 	ingesttail "gastrolog/internal/ingester/tail"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/server"
+
+	hraft "github.com/hashicorp/raft"
+	raftboltdb "github.com/hashicorp/raft-boltdb/v2"
 
 	"github.com/spf13/cobra"
 )
@@ -157,8 +158,11 @@ func main() {
 	}
 }
 
-func mustString(cmd *cobra.Command, name string) string { v, _ := cmd.Flags().GetString(name); return v }
-func mustBool(cmd *cobra.Command, name string) bool     { v, _ := cmd.Flags().GetBool(name); return v }
+func mustString(cmd *cobra.Command, name string) string {
+	v, _ := cmd.Flags().GetString(name)
+	return v
+}
+func mustBool(cmd *cobra.Command, name string) bool { v, _ := cmd.Flags().GetBool(name); return v }
 
 // runConfig groups all CLI flags for the server command.
 type runConfig struct {
@@ -242,11 +246,7 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 		return err
 	}
 
-	// Create the cluster broadcaster for peer-to-peer message fan-out.
-	var broadcaster *cluster.Broadcaster
-	if rcs, ok := cfgStore.(*raftConfigStore); ok && clusterSrv != nil {
-		broadcaster = cluster.NewBroadcaster(rcs.raft, clusterTLS, nodeID, logger.With("component", "broadcast"))
-	}
+	broadcaster, peerState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, clusterTLS, orch, nodeID)
 
 	// For replication cases (cluster restart without local config, joining
 	// nodes): block until server settings replicate from the leader before
@@ -266,13 +266,6 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 		return err
 	}
 
-	// For non-raft stores, the server must fire notifications itself since
-	// there is no FSM callback. For raft stores the FSM handles it.
-	var afterConfigApply func(raftfsm.Notification)
-	if cfg.ConfigType != "raft" {
-		afterConfigApply = disp.Handle
-	}
-
 	return serveAndAwaitShutdown(ctx, serverDeps{
 		Logger:           logger,
 		ServerAddr:       cfg.ServerAddr,
@@ -285,10 +278,22 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 		Tokens:           tokens,
 		CertMgr:          certMgr,
 		NoAuth:           cfg.NoAuth,
-		AfterConfigApply: afterConfigApply,
+		AfterConfigApply: nonRaftApplyHook(cfg.ConfigType, disp.Handle),
 		ClusterSrv:       clusterSrv,
 		Broadcaster:      broadcaster,
+		PeerState:        peerState,
+		LocalStats:       localStatsFn,
 	})
+}
+
+// nonRaftApplyHook returns the dispatcher callback for non-raft config stores.
+// Raft stores fire FSM notifications directly; other stores need the server to
+// dispatch config changes manually.
+func nonRaftApplyHook(configType string, handle func(raftfsm.Notification)) func(raftfsm.Notification) {
+	if configType != "raft" {
+		return handle
+	}
+	return nil
 }
 
 // startOrchestrator applies config, rebuilds missing indexes, and starts the
@@ -312,6 +317,56 @@ func startOrchestrator(ctx context.Context, logger *slog.Logger, orch *orchestra
 	}
 	logger.Info("orchestrator started")
 	return nil
+}
+
+// setupClusterStats creates the broadcaster, peer state tracker, and stats
+// collector. Returns nils for single-node mode. Launches the collector
+// goroutine when in cluster mode.
+func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore config.Store, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, orch *orchestrator.Orchestrator, nodeID string) (*cluster.Broadcaster, *cluster.PeerState, func() *gastrologv1.NodeStats) {
+	// Create the cluster broadcaster for peer-to-peer message fan-out.
+	var broadcaster *cluster.Broadcaster
+	if rcs, ok := cfgStore.(*raftConfigStore); ok && clusterSrv != nil {
+		broadcaster = cluster.NewBroadcaster(rcs.raft, clusterTLS, nodeID, logger.With("component", "broadcast"))
+	}
+	if broadcaster == nil || clusterSrv == nil {
+		return nil, nil, nil
+	}
+
+	// Read broadcast interval from cluster-wide settings.
+	var broadcastInterval time.Duration
+	if ss, err := cfgStore.LoadServerSettings(ctx); err == nil && ss.Cluster.BroadcastInterval != "" {
+		if d, err := time.ParseDuration(ss.Cluster.BroadcastInterval); err == nil {
+			broadcastInterval = d
+		}
+	}
+
+	peerState := cluster.NewPeerState(15 * time.Second)
+	clusterSrv.Subscribe(peerState.HandleBroadcast)
+
+	collector := cluster.NewStatsCollector(cluster.StatsCollectorConfig{
+		Broadcaster: broadcaster,
+		RaftStats:   clusterSrv,
+		Stats:       &orchStatsAdapter{orch: orch},
+		NodeID:      nodeID,
+		NodeNameFn: func() string {
+			nid, err := uuid.Parse(nodeID)
+			if err != nil {
+				return ""
+			}
+			n, err := cfgStore.GetNode(ctx, nid)
+			if err != nil || n == nil {
+				return ""
+			}
+			return n.Name
+		},
+		Version:   version,
+		StartTime: time.Now(),
+		Interval:  broadcastInterval,
+		Logger:    logger.With("component", "stats-collector"),
+	})
+	go collector.Run(ctx)
+
+	return broadcaster, peerState, collector.CollectLocal
 }
 
 // resolveIdentity ensures the home directory exists and resolves the node ID.
@@ -619,17 +674,25 @@ func ensureConfig(ctx context.Context, logger *slog.Logger, cfgStore config.Stor
 	if err != nil {
 		return nil, err
 	}
-	if cfg != nil {
+
+	// Check whether server settings (JWT secret) exist. Load() may return
+	// non-nil when only cluster TLS has been stored (before server settings
+	// are bootstrapped), so a nil check on cfg alone is insufficient.
+	ss, err := cfgStore.LoadServerSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if cfg != nil && ss.Auth.JWTSecret != "" {
 		return cfg, nil
 	}
 
-	if bootstrap {
+	if cfg == nil && bootstrap {
 		logger.Info("no config found, bootstrapping default configuration")
 		if err := config.Bootstrap(ctx, cfgStore); err != nil {
 			return nil, fmt.Errorf("bootstrap config: %w", err)
 		}
-	} else {
-		logger.Info("no config found, bootstrapping minimal configuration (auth only)")
+	} else if ss.Auth.JWTSecret == "" {
+		logger.Info("bootstrapping server settings (auth + query defaults)")
 		if err := config.BootstrapMinimal(ctx, cfgStore); err != nil {
 			return nil, fmt.Errorf("bootstrap minimal config: %w", err)
 		}
@@ -699,13 +762,15 @@ type serverDeps struct {
 	AfterConfigApply func(raftfsm.Notification)
 	ClusterSrv       *cluster.Server
 	Broadcaster      *cluster.Broadcaster
+	PeerState        *cluster.PeerState
+	LocalStats       func() *gastrologv1.NodeStats
 }
 
 func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 	var srv *server.Server
 	var serverWg sync.WaitGroup
 	if deps.ServerAddr != "" {
-		srv = server.New(deps.Orch, deps.CfgStore, deps.Factories, deps.Tokens, server.Config{Logger: deps.Logger, CertManager: deps.CertMgr, NoAuth: deps.NoAuth, HomeDir: deps.HomeDir, NodeID: deps.NodeID, UnixSocket: deps.SocketPath, AfterConfigApply: deps.AfterConfigApply, Cluster: deps.ClusterSrv})
+		srv = server.New(deps.Orch, deps.CfgStore, deps.Factories, deps.Tokens, server.Config{Logger: deps.Logger, CertManager: deps.CertMgr, NoAuth: deps.NoAuth, HomeDir: deps.HomeDir, NodeID: deps.NodeID, UnixSocket: deps.SocketPath, AfterConfigApply: deps.AfterConfigApply, Cluster: deps.ClusterSrv, PeerStats: deps.PeerState, LocalStats: deps.LocalStats})
 		serverWg.Go(func() {
 			if err := srv.ServeTCP(deps.ServerAddr); err != nil {
 				deps.Logger.Error("server error", "error", err)
@@ -997,22 +1062,24 @@ func bootstrapAndWaitForLeader(r *hraft.Raft, boltStore io.Closer, transport hra
 	}
 
 	needsBootstrap := len(existing.Configuration().Servers) == 0
-	if needsBootstrap {
-		if !multiNode || opts.Init {
-			boot := hraft.Configuration{
-				Servers: []hraft.Server{
-					{ID: hraft.ServerID(opts.NodeID), Address: transport.LocalAddr()},
-				},
-			}
-			if err := r.BootstrapCluster(boot).Error(); err != nil {
-				_ = r.Shutdown().Error()
-				_ = boltStore.Close()
-				return fmt.Errorf("bootstrap raft: %w", err)
-			}
-			opts.Logger.Info("raft cluster bootstrapped", "node_id", opts.NodeID)
-		} else {
-			opts.Logger.Info("raft: no existing configuration; waiting to be added to a cluster")
+	shouldBootstrap := needsBootstrap && (!multiNode || opts.Init)
+
+	if needsBootstrap && !shouldBootstrap {
+		opts.Logger.Info("raft: no existing configuration; waiting to be added to a cluster")
+	}
+
+	if shouldBootstrap {
+		boot := hraft.Configuration{
+			Servers: []hraft.Server{
+				{ID: hraft.ServerID(opts.NodeID), Address: transport.LocalAddr()},
+			},
 		}
+		if err := r.BootstrapCluster(boot).Error(); err != nil {
+			_ = r.Shutdown().Error()
+			_ = boltStore.Close()
+			return fmt.Errorf("bootstrap raft: %w", err)
+		}
+		opts.Logger.Info("raft cluster bootstrapped", "node_id", opts.NodeID)
 	}
 
 	if !multiNode || opts.Init {
@@ -1125,4 +1192,50 @@ func makeEnrollHandler(cfgStore config.Store, logger *slog.Logger) cluster.Enrol
 			ClusterKeyPem:  []byte(tls.ClusterKeyPEM),
 		}, nil
 	}
+}
+
+// orchStatsAdapter bridges orchestrator methods to the cluster.StatsProvider
+// interface. Lives at the composition root because it imports both packages.
+type orchStatsAdapter struct {
+	orch *orchestrator.Orchestrator
+}
+
+func (a *orchStatsAdapter) IngestQueueDepth() int    { return a.orch.IngestQueueDepth() }
+func (a *orchStatsAdapter) IngestQueueCapacity() int { return a.orch.IngestQueueCapacity() }
+
+func (a *orchStatsAdapter) VaultSnapshots() []cluster.StatsVaultSnapshot {
+	snaps := a.orch.VaultSnapshots()
+	out := make([]cluster.StatsVaultSnapshot, len(snaps))
+	for i, s := range snaps {
+		out[i] = cluster.StatsVaultSnapshot{
+			ID:           s.ID.String(),
+			RecordCount:  s.RecordCount,
+			ChunkCount:   s.ChunkCount,
+			SealedChunks: s.SealedChunks,
+			DataBytes:    s.DataBytes,
+			Enabled:      s.Enabled,
+		}
+	}
+	return out
+}
+
+func (a *orchStatsAdapter) IngesterIDs() []string {
+	ids := a.orch.ListIngesters()
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = id.String()
+	}
+	return out
+}
+
+func (a *orchStatsAdapter) IngesterStats(id string) (name string, messages, bytes, errors int64, running bool) {
+	uid, err := uuid.Parse(id)
+	if err != nil {
+		return "", 0, 0, 0, false
+	}
+	s := a.orch.GetIngesterStats(uid)
+	if s == nil {
+		return "", 0, 0, 0, false
+	}
+	return a.orch.IngesterName(uid), s.MessagesIngested.Load(), s.BytesIngested.Load(), s.Errors.Load(), a.orch.IsIngesterRunning(uid)
 }

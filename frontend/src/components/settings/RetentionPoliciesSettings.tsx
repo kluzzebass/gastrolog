@@ -45,7 +45,7 @@ interface AddRetentionFormState {
 const addRetentionFormInitial: AddRetentionFormState = {
   adding: false,
   newName: "",
-  newMaxAge: "720h",
+  newMaxAge: "",
   newMaxBytes: "",
   newMaxChunks: "",
 };
@@ -236,7 +236,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
         </AddFormCard>
       )}
 
-      {policies.map((pol) => {
+      {policies.toSorted((a, b) => a.name.localeCompare(b.name)).map((pol) => {
         const id = pol.id;
         const edit = getEdit(id);
         const refs = ruleRefsFor(vaults, id);

@@ -60,6 +60,27 @@ message NodeStats {
   uint32 ingest_queue_capacity = 8;
   repeated VaultStats vaults = 9;
   repeated IngesterNodeStats ingesters = 10;
+
+  // Identity
+  string node_name = 11;
+  string version = 12;
+  string raft_state = 13;
+  string suffrage = 14;
+  int64 uptime_seconds = 15;
+
+  // Memory detail
+  uint64 memory_heap_idle = 16;
+  uint64 memory_heap_released = 17;
+  uint64 memory_stack_inuse = 18;
+  uint64 memory_heap_objects = 19;
+  uint32 num_gc = 20;
+
+  // Raft
+  uint64 raft_term = 21;
+  uint64 raft_commit_index = 22;
+  uint64 raft_applied_index = 23;
+  string raft_last_contact = 24;
+  uint64 raft_fsm_pending = 25;
 }
 
 // IngesterNodeStats reports per-ingester statistics on a cluster node.
@@ -68,4 +89,6 @@ message IngesterNodeStats {
   uint64 messages_ingested = 2;
   uint64 bytes_ingested = 3;
   uint64 errors = 4;
+  bool running = 5;
+  string name = 6;
 }

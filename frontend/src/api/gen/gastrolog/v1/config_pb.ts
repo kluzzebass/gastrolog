@@ -1838,6 +1838,45 @@ export class LookupSettings extends Message<LookupSettings> {
 }
 
 /**
+ * @generated from message gastrolog.v1.ClusterSettings
+ */
+export class ClusterSettings extends Message<ClusterSettings> {
+  /**
+   * Go duration string, e.g. "5s". Default: "5s".
+   *
+   * @generated from field: string broadcast_interval = 1;
+   */
+  broadcastInterval = "";
+
+  constructor(data?: PartialMessage<ClusterSettings>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ClusterSettings";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "broadcast_interval", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ClusterSettings {
+    return new ClusterSettings().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ClusterSettings {
+    return new ClusterSettings().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ClusterSettings {
+    return new ClusterSettings().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ClusterSettings | PlainMessage<ClusterSettings> | undefined, b: ClusterSettings | PlainMessage<ClusterSettings> | undefined): boolean {
+    return proto3.util.equals(ClusterSettings, a, b);
+  }
+}
+
+/**
  * @generated from message gastrolog.v1.GetSettingsResponse
  */
 export class GetSettingsResponse extends Message<GetSettingsResponse> {
@@ -1881,6 +1920,11 @@ export class GetSettingsResponse extends Message<GetSettingsResponse> {
    */
   nodeName = "";
 
+  /**
+   * @generated from field: gastrolog.v1.ClusterSettings cluster = 9;
+   */
+  cluster?: ClusterSettings;
+
   constructor(data?: PartialMessage<GetSettingsResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1897,6 +1941,7 @@ export class GetSettingsResponse extends Message<GetSettingsResponse> {
     { no: 6, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 7, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 8, name: "node_name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 9, name: "cluster", kind: "message", T: ClusterSettings },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetSettingsResponse {
@@ -2278,6 +2323,43 @@ export class PutLookupSettings extends Message<PutLookupSettings> {
 }
 
 /**
+ * @generated from message gastrolog.v1.PutClusterSettings
+ */
+export class PutClusterSettings extends Message<PutClusterSettings> {
+  /**
+   * @generated from field: optional string broadcast_interval = 1;
+   */
+  broadcastInterval?: string;
+
+  constructor(data?: PartialMessage<PutClusterSettings>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutClusterSettings";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "broadcast_interval", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutClusterSettings {
+    return new PutClusterSettings().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutClusterSettings {
+    return new PutClusterSettings().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutClusterSettings {
+    return new PutClusterSettings().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutClusterSettings | PlainMessage<PutClusterSettings> | undefined, b: PutClusterSettings | PlainMessage<PutClusterSettings> | undefined): boolean {
+    return proto3.util.equals(PutClusterSettings, a, b);
+  }
+}
+
+/**
  * @generated from message gastrolog.v1.PutSettingsRequest
  */
 export class PutSettingsRequest extends Message<PutSettingsRequest> {
@@ -2311,6 +2393,11 @@ export class PutSettingsRequest extends Message<PutSettingsRequest> {
    */
   setupWizardDismissed?: boolean;
 
+  /**
+   * @generated from field: gastrolog.v1.PutClusterSettings cluster = 7;
+   */
+  cluster?: PutClusterSettings;
+
   constructor(data?: PartialMessage<PutSettingsRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2325,6 +2412,7 @@ export class PutSettingsRequest extends Message<PutSettingsRequest> {
     { no: 4, name: "tls", kind: "message", T: PutTLSSettings },
     { no: 5, name: "lookup", kind: "message", T: PutLookupSettings },
     { no: 6, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
+    { no: 7, name: "cluster", kind: "message", T: PutClusterSettings },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutSettingsRequest {

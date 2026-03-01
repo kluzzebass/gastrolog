@@ -157,6 +157,9 @@ type PutSettingsArgs = {
       licenseKey?: string;
     };
   };
+  cluster?: {
+    broadcastInterval?: string;
+  };
   setupWizardDismissed?: boolean;
 };
 
@@ -196,6 +199,7 @@ export function usePutSettings() {
       if (args.scheduler) req.scheduler = args.scheduler;
       if (args.tls) req.tls = args.tls;
       if (args.lookup) req.lookup = buildLookupReq(args.lookup);
+      if (args.cluster) req.cluster = args.cluster;
       if (args.setupWizardDismissed !== undefined)
         req.setupWizardDismissed = args.setupWizardDismissed;
       return configClient.putSettings(req as Parameters<typeof configClient.putSettings>[0]);

@@ -25,26 +25,37 @@ type ClusterStatusProvider interface {
 	LocalStats() map[string]string
 }
 
+// NodeStatsProvider returns the latest stats for a given cluster node.
+type NodeStatsProvider interface {
+	Get(senderID string) *apiv1.NodeStats
+}
+
 // LifecycleServer implements the LifecycleService.
 type LifecycleServer struct {
-	orch      *orchestrator.Orchestrator
-	startTime time.Time
-	shutdown  func(drain bool)
-	cluster   ClusterStatusProvider
-	cfgStore  config.Store
+	orch       *orchestrator.Orchestrator
+	startTime  time.Time
+	shutdown   func(drain bool)
+	cluster    ClusterStatusProvider
+	cfgStore   config.Store
+	nodeID     string
+	peerStats  NodeStatsProvider
+	localStats func() *apiv1.NodeStats
 }
 
 var _ gastrologv1connect.LifecycleServiceHandler = (*LifecycleServer)(nil)
 
 // NewLifecycleServer creates a new LifecycleServer.
 // The shutdown function is called when Shutdown is invoked with the drain flag.
-func NewLifecycleServer(orch *orchestrator.Orchestrator, shutdown func(drain bool), cluster ClusterStatusProvider, cfgStore config.Store) *LifecycleServer {
+func NewLifecycleServer(orch *orchestrator.Orchestrator, shutdown func(drain bool), cluster ClusterStatusProvider, cfgStore config.Store, nodeID string, peerStats NodeStatsProvider, localStats func() *apiv1.NodeStats) *LifecycleServer {
 	return &LifecycleServer{
-		orch:      orch,
-		startTime: time.Now(),
-		shutdown:  shutdown,
-		cluster:   cluster,
-		cfgStore:  cfgStore,
+		orch:       orch,
+		startTime:  time.Now(),
+		shutdown:   shutdown,
+		cluster:    cluster,
+		cfgStore:   cfgStore,
+		nodeID:     nodeID,
+		peerStats:  peerStats,
+		localStats: localStats,
 	}
 }
 
@@ -126,14 +137,23 @@ func (s *LifecycleServer) GetClusterStatus(
 			suffrage = apiv1.ClusterNodeSuffrage_CLUSTER_NODE_SUFFRAGE_STAGING
 		}
 
-		nodes = append(nodes, &apiv1.ClusterNode{
+		node := &apiv1.ClusterNode{
 			Id:       srv.ID,
 			Name:     nameByID[srv.ID],
 			Address:  srv.Address,
 			Role:     role,
 			Suffrage: suffrage,
 			IsLeader: isLeader,
-		})
+		}
+
+		// Attach per-node stats: real-time for local, last broadcast for peers.
+		if isLocal := srv.ID == s.nodeID; isLocal && s.localStats != nil {
+			node.Stats = s.localStats()
+		} else if s.peerStats != nil {
+			node.Stats = s.peerStats.Get(srv.ID)
+		}
+
+		nodes = append(nodes, node)
 	}
 
 	return connect.NewResponse(&apiv1.GetClusterStatusResponse{
@@ -142,6 +162,7 @@ func (s *LifecycleServer) GetClusterStatus(
 		LeaderAddress:  leaderAddr,
 		Nodes:          nodes,
 		LocalStats:     buildRaftStats(s.cluster.LocalStats()),
+		LocalNodeId:    s.nodeID,
 	}), nil
 }
 

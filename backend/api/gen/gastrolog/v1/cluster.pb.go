@@ -406,8 +406,26 @@ type NodeStats struct {
 	IngestQueueCapacity uint32                 `protobuf:"varint,8,opt,name=ingest_queue_capacity,json=ingestQueueCapacity,proto3" json:"ingest_queue_capacity,omitempty"`
 	Vaults              []*VaultStats          `protobuf:"bytes,9,rep,name=vaults,proto3" json:"vaults,omitempty"`
 	Ingesters           []*IngesterNodeStats   `protobuf:"bytes,10,rep,name=ingesters,proto3" json:"ingesters,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// Identity
+	NodeName      string `protobuf:"bytes,11,opt,name=node_name,json=nodeName,proto3" json:"node_name,omitempty"`
+	Version       string `protobuf:"bytes,12,opt,name=version,proto3" json:"version,omitempty"`
+	RaftState     string `protobuf:"bytes,13,opt,name=raft_state,json=raftState,proto3" json:"raft_state,omitempty"`
+	Suffrage      string `protobuf:"bytes,14,opt,name=suffrage,proto3" json:"suffrage,omitempty"`
+	UptimeSeconds int64  `protobuf:"varint,15,opt,name=uptime_seconds,json=uptimeSeconds,proto3" json:"uptime_seconds,omitempty"`
+	// Memory detail
+	MemoryHeapIdle     uint64 `protobuf:"varint,16,opt,name=memory_heap_idle,json=memoryHeapIdle,proto3" json:"memory_heap_idle,omitempty"`
+	MemoryHeapReleased uint64 `protobuf:"varint,17,opt,name=memory_heap_released,json=memoryHeapReleased,proto3" json:"memory_heap_released,omitempty"`
+	MemoryStackInuse   uint64 `protobuf:"varint,18,opt,name=memory_stack_inuse,json=memoryStackInuse,proto3" json:"memory_stack_inuse,omitempty"`
+	MemoryHeapObjects  uint64 `protobuf:"varint,19,opt,name=memory_heap_objects,json=memoryHeapObjects,proto3" json:"memory_heap_objects,omitempty"`
+	NumGc              uint32 `protobuf:"varint,20,opt,name=num_gc,json=numGc,proto3" json:"num_gc,omitempty"`
+	// Raft
+	RaftTerm         uint64 `protobuf:"varint,21,opt,name=raft_term,json=raftTerm,proto3" json:"raft_term,omitempty"`
+	RaftCommitIndex  uint64 `protobuf:"varint,22,opt,name=raft_commit_index,json=raftCommitIndex,proto3" json:"raft_commit_index,omitempty"`
+	RaftAppliedIndex uint64 `protobuf:"varint,23,opt,name=raft_applied_index,json=raftAppliedIndex,proto3" json:"raft_applied_index,omitempty"`
+	RaftLastContact  string `protobuf:"bytes,24,opt,name=raft_last_contact,json=raftLastContact,proto3" json:"raft_last_contact,omitempty"`
+	RaftFsmPending   uint64 `protobuf:"varint,25,opt,name=raft_fsm_pending,json=raftFsmPending,proto3" json:"raft_fsm_pending,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *NodeStats) Reset() {
@@ -510,6 +528,111 @@ func (x *NodeStats) GetIngesters() []*IngesterNodeStats {
 	return nil
 }
 
+func (x *NodeStats) GetNodeName() string {
+	if x != nil {
+		return x.NodeName
+	}
+	return ""
+}
+
+func (x *NodeStats) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *NodeStats) GetRaftState() string {
+	if x != nil {
+		return x.RaftState
+	}
+	return ""
+}
+
+func (x *NodeStats) GetSuffrage() string {
+	if x != nil {
+		return x.Suffrage
+	}
+	return ""
+}
+
+func (x *NodeStats) GetUptimeSeconds() int64 {
+	if x != nil {
+		return x.UptimeSeconds
+	}
+	return 0
+}
+
+func (x *NodeStats) GetMemoryHeapIdle() uint64 {
+	if x != nil {
+		return x.MemoryHeapIdle
+	}
+	return 0
+}
+
+func (x *NodeStats) GetMemoryHeapReleased() uint64 {
+	if x != nil {
+		return x.MemoryHeapReleased
+	}
+	return 0
+}
+
+func (x *NodeStats) GetMemoryStackInuse() uint64 {
+	if x != nil {
+		return x.MemoryStackInuse
+	}
+	return 0
+}
+
+func (x *NodeStats) GetMemoryHeapObjects() uint64 {
+	if x != nil {
+		return x.MemoryHeapObjects
+	}
+	return 0
+}
+
+func (x *NodeStats) GetNumGc() uint32 {
+	if x != nil {
+		return x.NumGc
+	}
+	return 0
+}
+
+func (x *NodeStats) GetRaftTerm() uint64 {
+	if x != nil {
+		return x.RaftTerm
+	}
+	return 0
+}
+
+func (x *NodeStats) GetRaftCommitIndex() uint64 {
+	if x != nil {
+		return x.RaftCommitIndex
+	}
+	return 0
+}
+
+func (x *NodeStats) GetRaftAppliedIndex() uint64 {
+	if x != nil {
+		return x.RaftAppliedIndex
+	}
+	return 0
+}
+
+func (x *NodeStats) GetRaftLastContact() string {
+	if x != nil {
+		return x.RaftLastContact
+	}
+	return ""
+}
+
+func (x *NodeStats) GetRaftFsmPending() uint64 {
+	if x != nil {
+		return x.RaftFsmPending
+	}
+	return 0
+}
+
 // IngesterNodeStats reports per-ingester statistics on a cluster node.
 type IngesterNodeStats struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
@@ -517,6 +640,8 @@ type IngesterNodeStats struct {
 	MessagesIngested uint64                 `protobuf:"varint,2,opt,name=messages_ingested,json=messagesIngested,proto3" json:"messages_ingested,omitempty"`
 	BytesIngested    uint64                 `protobuf:"varint,3,opt,name=bytes_ingested,json=bytesIngested,proto3" json:"bytes_ingested,omitempty"`
 	Errors           uint64                 `protobuf:"varint,4,opt,name=errors,proto3" json:"errors,omitempty"`
+	Running          bool                   `protobuf:"varint,5,opt,name=running,proto3" json:"running,omitempty"`
+	Name             string                 `protobuf:"bytes,6,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -579,6 +704,20 @@ func (x *IngesterNodeStats) GetErrors() uint64 {
 	return 0
 }
 
+func (x *IngesterNodeStats) GetRunning() bool {
+	if x != nil {
+		return x.Running
+	}
+	return false
+}
+
+func (x *IngesterNodeStats) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
 var File_gastrolog_v1_cluster_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_cluster_proto_rawDesc = "" +
@@ -604,7 +743,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\n" +
 	"node_stats\x18\n" +
 	" \x01(\v2\x17.gastrolog.v1.NodeStatsH\x00R\tnodeStatsB\t\n" +
-	"\apayload\"\xac\x03\n" +
+	"\apayload\"\xe3\a\n" +
 	"\tNodeStats\x12\x1f\n" +
 	"\vcpu_percent\x18\x01 \x01(\x01R\n" +
 	"cpuPercent\x12!\n" +
@@ -621,12 +760,30 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x15ingest_queue_capacity\x18\b \x01(\rR\x13ingestQueueCapacity\x120\n" +
 	"\x06vaults\x18\t \x03(\v2\x18.gastrolog.v1.VaultStatsR\x06vaults\x12=\n" +
 	"\tingesters\x18\n" +
-	" \x03(\v2\x1f.gastrolog.v1.IngesterNodeStatsR\tingesters\"\x8f\x01\n" +
+	" \x03(\v2\x1f.gastrolog.v1.IngesterNodeStatsR\tingesters\x12\x1b\n" +
+	"\tnode_name\x18\v \x01(\tR\bnodeName\x12\x18\n" +
+	"\aversion\x18\f \x01(\tR\aversion\x12\x1d\n" +
+	"\n" +
+	"raft_state\x18\r \x01(\tR\traftState\x12\x1a\n" +
+	"\bsuffrage\x18\x0e \x01(\tR\bsuffrage\x12%\n" +
+	"\x0euptime_seconds\x18\x0f \x01(\x03R\ruptimeSeconds\x12(\n" +
+	"\x10memory_heap_idle\x18\x10 \x01(\x04R\x0ememoryHeapIdle\x120\n" +
+	"\x14memory_heap_released\x18\x11 \x01(\x04R\x12memoryHeapReleased\x12,\n" +
+	"\x12memory_stack_inuse\x18\x12 \x01(\x04R\x10memoryStackInuse\x12.\n" +
+	"\x13memory_heap_objects\x18\x13 \x01(\x04R\x11memoryHeapObjects\x12\x15\n" +
+	"\x06num_gc\x18\x14 \x01(\rR\x05numGc\x12\x1b\n" +
+	"\traft_term\x18\x15 \x01(\x04R\braftTerm\x12*\n" +
+	"\x11raft_commit_index\x18\x16 \x01(\x04R\x0fraftCommitIndex\x12,\n" +
+	"\x12raft_applied_index\x18\x17 \x01(\x04R\x10raftAppliedIndex\x12*\n" +
+	"\x11raft_last_contact\x18\x18 \x01(\tR\x0fraftLastContact\x12(\n" +
+	"\x10raft_fsm_pending\x18\x19 \x01(\x04R\x0eraftFsmPending\"\xbd\x01\n" +
 	"\x11IngesterNodeStats\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12+\n" +
 	"\x11messages_ingested\x18\x02 \x01(\x04R\x10messagesIngested\x12%\n" +
 	"\x0ebytes_ingested\x18\x03 \x01(\x04R\rbytesIngested\x12\x16\n" +
-	"\x06errors\x18\x04 \x01(\x04R\x06errorsB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"\x06errors\x18\x04 \x01(\x04R\x06errors\x12\x18\n" +
+	"\arunning\x18\x05 \x01(\bR\arunning\x12\x12\n" +
+	"\x04name\x18\x06 \x01(\tR\x04nameB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_cluster_proto_rawDescOnce sync.Once

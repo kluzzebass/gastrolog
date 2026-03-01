@@ -3,9 +3,11 @@
 package memory
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -13,6 +15,10 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// cmpUUID compares two UUIDs lexicographically. Since gastrolog uses UUIDv7,
+// byte order equals creation order.
+func cmpUUID(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) }
 
 // serverSettings holds the typed server-level config fields.
 type serverSettings struct {
@@ -70,6 +76,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 		for _, fc := range s.filters {
 			cfg.Filters = append(cfg.Filters, copyFilterConfig(fc))
 		}
+		slices.SortFunc(cfg.Filters, func(a, b config.FilterConfig) int { return cmpUUID(a.ID, b.ID) })
 	}
 
 	if len(s.rotationPolicies) > 0 {
@@ -77,6 +84,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 		for _, rp := range s.rotationPolicies {
 			cfg.RotationPolicies = append(cfg.RotationPolicies, copyRotationPolicy(rp))
 		}
+		slices.SortFunc(cfg.RotationPolicies, func(a, b config.RotationPolicyConfig) int { return cmpUUID(a.ID, b.ID) })
 	}
 
 	if len(s.retentionPolicies) > 0 {
@@ -84,6 +92,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 		for _, rp := range s.retentionPolicies {
 			cfg.RetentionPolicies = append(cfg.RetentionPolicies, copyRetentionPolicy(rp))
 		}
+		slices.SortFunc(cfg.RetentionPolicies, func(a, b config.RetentionPolicyConfig) int { return cmpUUID(a.ID, b.ID) })
 	}
 
 	if len(s.vaults) > 0 {
@@ -91,6 +100,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 		for _, st := range s.vaults {
 			cfg.Vaults = append(cfg.Vaults, copyVaultConfig(st))
 		}
+		slices.SortFunc(cfg.Vaults, func(a, b config.VaultConfig) int { return cmpUUID(a.ID, b.ID) })
 	}
 
 	if len(s.ingesters) > 0 {
@@ -98,6 +108,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 		for _, ing := range s.ingesters {
 			cfg.Ingesters = append(cfg.Ingesters, copyIngesterConfig(ing))
 		}
+		slices.SortFunc(cfg.Ingesters, func(a, b config.IngesterConfig) int { return cmpUUID(a.ID, b.ID) })
 	}
 
 	if len(s.certs) > 0 {
@@ -105,6 +116,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 		for _, cert := range s.certs {
 			cfg.Certs = append(cfg.Certs, copyCertPEM(cert))
 		}
+		slices.SortFunc(cfg.Certs, func(a, b config.CertPEM) int { return cmpUUID(a.ID, b.ID) })
 	}
 
 	if len(s.nodes) > 0 {
@@ -112,6 +124,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 		for _, n := range s.nodes {
 			cfg.Nodes = append(cfg.Nodes, n)
 		}
+		slices.SortFunc(cfg.Nodes, func(a, b config.NodeConfig) int { return cmpUUID(a.ID, b.ID) })
 	}
 
 	// Populate server settings on Config.
@@ -121,6 +134,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 		cfg.Scheduler = s.ss.ss.Scheduler
 		cfg.TLS = s.ss.ss.TLS
 		cfg.Lookup = s.ss.ss.Lookup
+		cfg.Cluster = s.ss.ss.Cluster
 		cfg.SetupWizardDismissed = s.ss.ss.SetupWizardDismissed
 	}
 
@@ -155,6 +169,7 @@ func (s *Store) ListFilters(ctx context.Context) ([]config.FilterConfig, error) 
 	for _, fc := range s.filters {
 		result = append(result, copyFilterConfig(fc))
 	}
+	slices.SortFunc(result, func(a, b config.FilterConfig) int { return cmpUUID(a.ID, b.ID) })
 	return result, nil
 }
 
@@ -196,6 +211,7 @@ func (s *Store) ListRotationPolicies(ctx context.Context) ([]config.RotationPoli
 	for _, rp := range s.rotationPolicies {
 		result = append(result, copyRotationPolicy(rp))
 	}
+	slices.SortFunc(result, func(a, b config.RotationPolicyConfig) int { return cmpUUID(a.ID, b.ID) })
 	return result, nil
 }
 
@@ -237,6 +253,7 @@ func (s *Store) ListRetentionPolicies(ctx context.Context) ([]config.RetentionPo
 	for _, rp := range s.retentionPolicies {
 		result = append(result, copyRetentionPolicy(rp))
 	}
+	slices.SortFunc(result, func(a, b config.RetentionPolicyConfig) int { return cmpUUID(a.ID, b.ID) })
 	return result, nil
 }
 
@@ -278,6 +295,7 @@ func (s *Store) ListVaults(ctx context.Context) ([]config.VaultConfig, error) {
 	for _, st := range s.vaults {
 		result = append(result, copyVaultConfig(st))
 	}
+	slices.SortFunc(result, func(a, b config.VaultConfig) int { return cmpUUID(a.ID, b.ID) })
 	return result, nil
 }
 
@@ -319,6 +337,7 @@ func (s *Store) ListIngesters(ctx context.Context) ([]config.IngesterConfig, err
 	for _, ing := range s.ingesters {
 		result = append(result, copyIngesterConfig(ing))
 	}
+	slices.SortFunc(result, func(a, b config.IngesterConfig) int { return cmpUUID(a.ID, b.ID) })
 	return result, nil
 }
 
@@ -379,6 +398,7 @@ func (s *Store) ListNodes(ctx context.Context) ([]config.NodeConfig, error) {
 	for _, n := range s.nodes {
 		result = append(result, n)
 	}
+	slices.SortFunc(result, func(a, b config.NodeConfig) int { return cmpUUID(a.ID, b.ID) })
 	return result, nil
 }
 
@@ -418,6 +438,7 @@ func (s *Store) ListCertificates(ctx context.Context) ([]config.CertPEM, error) 
 	for _, cert := range s.certs {
 		result = append(result, copyCertPEM(cert))
 	}
+	slices.SortFunc(result, func(a, b config.CertPEM) int { return cmpUUID(a.ID, b.ID) })
 	return result, nil
 }
 
@@ -499,6 +520,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]config.User, error) {
 	for _, u := range s.users {
 		users = append(users, u)
 	}
+	slices.SortFunc(users, func(a, b config.User) int { return cmpUUID(a.ID, b.ID) })
 	return users, nil
 }
 
@@ -640,6 +662,7 @@ func (s *Store) ListRefreshTokens(ctx context.Context) ([]config.RefreshToken, e
 	for _, rt := range s.refreshTokens {
 		tokens = append(tokens, rt)
 	}
+	slices.SortFunc(tokens, func(a, b config.RefreshToken) int { return cmpUUID(a.ID, b.ID) })
 	return tokens, nil
 }
 
@@ -717,6 +740,7 @@ func copyVaultConfig(st config.VaultConfig) config.VaultConfig {
 		Type:    st.Type,
 		Params:  copyParams(st.Params),
 		Enabled: st.Enabled,
+		NodeID:  st.NodeID,
 	}
 	if st.Filter != nil {
 		c.Filter = new(*st.Filter)
@@ -746,6 +770,7 @@ func copyIngesterConfig(ing config.IngesterConfig) config.IngesterConfig {
 		Type:    ing.Type,
 		Enabled: ing.Enabled,
 		Params:  copyParams(ing.Params),
+		NodeID:  ing.NodeID,
 	}
 }
 

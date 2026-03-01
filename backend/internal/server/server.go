@@ -22,6 +22,7 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 
+	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/auth"
 	"gastrolog/internal/cert"
@@ -67,6 +68,12 @@ type Config struct {
 	// Cluster provides Raft topology for the GetClusterStatus RPC.
 	// Nil in single-node mode.
 	Cluster ClusterStatusProvider
+
+	// PeerStats provides the latest broadcast stats from peer nodes.
+	PeerStats NodeStatsProvider
+
+	// LocalStats returns real-time stats for the local node.
+	LocalStats func() *apiv1.NodeStats
 }
 
 // CertManager interface for TLS certificate management.
@@ -88,6 +95,8 @@ type Server struct {
 	noAuth      bool
 	logger      *slog.Logger
 	cluster          ClusterStatusProvider
+	peerStats        NodeStatsProvider
+	localStatsFn     func() *apiv1.NodeStats
 	localNodeID      string
 	startTime        time.Time
 	homeDir          string                     // gastrolog home directory; empty for in-memory config
@@ -129,6 +138,8 @@ func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orche
 		noAuth:      cfg.NoAuth,
 		logger:      logging.Default(cfg.Logger).With("component", "server"),
 		cluster:          cfg.Cluster,
+		peerStats:        cfg.PeerStats,
+		localStatsFn:     cfg.LocalStats,
 		localNodeID:      cfg.NodeID,
 		startTime:        time.Now(),
 		homeDir:          cfg.HomeDir,
@@ -256,7 +267,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 	configServer.SetOnLookupConfigChange(func(cfg config.LookupConfig) {
 		s.applyLookupConfig(cfg, geoipTable, asnTable)
 	})
-	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown, s.cluster, s.cfgStore)
+	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown, s.cluster, s.cfgStore, s.localNodeID, s.peerStats, s.localStatsFn)
 	authServer := NewAuthServer(s.cfgStore, s.tokens, s.logger, s.noAuth)
 	jobServer := NewJobServer(s.orch.Scheduler())
 

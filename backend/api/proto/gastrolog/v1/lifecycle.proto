@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package gastrolog.v1;
 
+import "gastrolog/v1/cluster.proto";
+
 option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
 
 // LifecycleService provides server lifecycle management.
@@ -47,6 +49,7 @@ message GetClusterStatusResponse {
   string leader_address = 3;
   repeated ClusterNode nodes = 4;
   RaftStats local_stats = 5;
+  string local_node_id = 6;
 }
 
 // RaftStats contains Raft consensus statistics for the local node.
@@ -73,6 +76,7 @@ message ClusterNode {
   ClusterNodeRole role = 4;
   ClusterNodeSuffrage suffrage = 5;
   bool is_leader = 6;
+  NodeStats stats = 7;
 }
 
 enum ClusterNodeRole {

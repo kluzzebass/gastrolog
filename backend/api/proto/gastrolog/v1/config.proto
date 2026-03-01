@@ -301,6 +301,10 @@ message LookupSettings {
   MaxMindSettings maxmind = 3;
 }
 
+message ClusterSettings {
+  string broadcast_interval = 1; // Go duration string, e.g. "5s". Default: "5s".
+}
+
 message GetSettingsResponse {
   AuthSettings auth = 1;
   QuerySettings query = 2;
@@ -310,6 +314,7 @@ message GetSettingsResponse {
   bool setup_wizard_dismissed = 6;
   string node_id = 7;
   string node_name = 8;
+  ClusterSettings cluster = 9;
 }
 
 // Sub-messages for PutSettingsRequest (optional fields for merge semantics).
@@ -359,6 +364,10 @@ message PutLookupSettings {
   PutMaxMindSettings maxmind = 3;
 }
 
+message PutClusterSettings {
+  optional string broadcast_interval = 1;
+}
+
 message PutSettingsRequest {
   PutAuthSettings auth = 1;
   PutQuerySettings query = 2;
@@ -366,6 +375,7 @@ message PutSettingsRequest {
   PutTLSSettings tls = 4;
   PutLookupSettings lookup = 5;
   optional bool setup_wizard_dismissed = 6;
+  PutClusterSettings cluster = 7;
 }
 
 message PutSettingsResponse {

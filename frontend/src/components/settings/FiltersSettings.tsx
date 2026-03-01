@@ -170,7 +170,7 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
         </AddFormCard>
       )}
 
-      {filters.map((fc) => {
+      {filters.toSorted((a, b) => a.name.localeCompare(b.name)).map((fc) => {
         const id = fc.id;
         const edit = getEdit(id);
         const refs = refsFor(vaults, "filter", id);

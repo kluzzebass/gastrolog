@@ -153,9 +153,11 @@ func (i *AuthInterceptor) WrapStreamingClient(next connect.StreamingClientFunc) 
 // authenticate checks the token and access level for a procedure.
 // Returns the (possibly enriched) context or a Connect error.
 func (i *AuthInterceptor) authenticate(ctx context.Context, procedure string, headers interface{ Get(string) string }) (context.Context, error) {
-	// Public endpoints need no auth.
+	// Public endpoints need no auth but still benefit from knowing WHO is
+	// calling (e.g. GetSettings returns more data to authenticated users).
+	// Best-effort: parse the token if present, ignore failures.
 	if i.public[procedure] {
-		return ctx, nil
+		return i.bestEffortClaims(ctx, headers), nil
 	}
 
 	// First-boot: if no users exist, allow Register (so the first admin
@@ -171,31 +173,10 @@ func (i *AuthInterceptor) authenticate(ctx context.Context, procedure string, he
 		return ctx, connect.NewError(connect.CodeUnauthenticated, errors.New("no users registered; call Register to create the first user"))
 	}
 
-	// Extract Bearer token.
-	authHeader := headers.Get("Authorization")
-	if authHeader == "" {
-		return ctx, connect.NewError(connect.CodeUnauthenticated, errors.New("missing authorization header"))
-	}
-	token, ok := strings.CutPrefix(authHeader, "Bearer ")
-	if !ok {
-		return ctx, connect.NewError(connect.CodeUnauthenticated, errors.New("authorization header must use Bearer scheme"))
-	}
-
-	// Verify token.
-	claims, err := i.tokens.Verify(token)
+	// Extract, verify, and validate the token.
+	claims, err := i.verifiedClaims(ctx, headers)
 	if err != nil {
-		return ctx, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("invalid token: %w", err))
-	}
-
-	// Check server-side token revocation (logout, password change, role change).
-	if i.validator != nil && claims.IssuedAt != nil {
-		valid, err := i.validator.IsTokenValid(ctx, claims.UserID, claims.IssuedAt.Time)
-		if err != nil {
-			return ctx, connect.NewError(connect.CodeInternal, fmt.Errorf("validate token: %w", err))
-		}
-		if !valid {
-			return ctx, connect.NewError(connect.CodeUnauthenticated, errors.New("token has been revoked"))
-		}
+		return ctx, err
 	}
 
 	// Admin check.
@@ -204,4 +185,42 @@ func (i *AuthInterceptor) authenticate(ctx context.Context, procedure string, he
 	}
 
 	return WithClaims(ctx, claims), nil
+}
+
+// verifiedClaims extracts a Bearer token from headers, verifies its signature,
+// and checks server-side revocation. Returns the parsed claims or a Connect error.
+func (i *AuthInterceptor) verifiedClaims(ctx context.Context, headers interface{ Get(string) string }) (*Claims, error) {
+	authHeader := headers.Get("Authorization")
+	if authHeader == "" {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("missing authorization header"))
+	}
+	token, ok := strings.CutPrefix(authHeader, "Bearer ")
+	if !ok {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("authorization header must use Bearer scheme"))
+	}
+	claims, err := i.tokens.Verify(token)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("invalid token: %w", err))
+	}
+	if i.validator != nil && claims.IssuedAt != nil {
+		valid, err := i.validator.IsTokenValid(ctx, claims.UserID, claims.IssuedAt.Time)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("validate token: %w", err))
+		}
+		if !valid {
+			return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("token has been revoked"))
+		}
+	}
+	return claims, nil
+}
+
+// bestEffortClaims tries to extract and verify claims from the Authorization
+// header. On any failure (missing header, bad token, expired, revoked) it
+// returns the original context unchanged — the caller proceeds as anonymous.
+func (i *AuthInterceptor) bestEffortClaims(ctx context.Context, headers interface{ Get(string) string }) context.Context {
+	claims, err := i.verifiedClaims(ctx, headers)
+	if err != nil {
+		return ctx
+	}
+	return WithClaims(ctx, claims)
 }

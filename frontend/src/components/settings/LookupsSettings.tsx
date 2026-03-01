@@ -196,7 +196,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
                   className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
                 >
                   Last updated:{" "}
-                  {new Date(data.lookup!.maxmind!.lastUpdate).toLocaleString()}
+                  {new Date(data.lookup.maxmind.lastUpdate).toLocaleString()}
                 </div>
               )}
             </div>

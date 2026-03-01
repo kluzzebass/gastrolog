@@ -47,6 +47,10 @@ build-all:
   just build-cross darwin amd64
   just build-cross darwin arm64
 
+# Generates Go protobuf code from proto definitions.
+gen:
+  cd api/proto && buf generate
+
 # Lints Go code (cognitive complexity, cyclomatic complexity, gocritic).
 lint:
   golangci-lint run ./...

@@ -137,7 +137,13 @@ type ServerSettings struct {
 	Scheduler            SchedulerConfig `json:"scheduler,omitzero"`
 	TLS                  TLSConfig       `json:"tls,omitzero"`
 	Lookup               LookupConfig    `json:"lookup,omitzero"`
+	Cluster              ClusterConfig   `json:"cluster,omitzero"`
 	SetupWizardDismissed bool            `json:"setup_wizard_dismissed,omitempty"`
+}
+
+// ClusterConfig holds cluster-wide settings.
+type ClusterConfig struct {
+	BroadcastInterval string `json:"broadcast_interval,omitempty"` // Go duration string, e.g. "5s"
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +173,7 @@ type Config struct {
 	Scheduler            SchedulerConfig `json:"scheduler,omitzero"`
 	TLS                  TLSConfig       `json:"tls,omitzero"`
 	Lookup               LookupConfig    `json:"lookup,omitzero"`
+	Cluster              ClusterConfig   `json:"cluster,omitzero"`
 	SetupWizardDismissed bool            `json:"setup_wizard_dismissed,omitempty"`
 
 	// Cluster TLS material (mTLS certs for cluster gRPC port).

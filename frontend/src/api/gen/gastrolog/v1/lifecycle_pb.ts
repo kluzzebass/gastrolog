@@ -5,6 +5,7 @@
 
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64 } from "@bufbuild/protobuf";
+import { NodeStats } from "./cluster_pb.js";
 
 /**
  * @generated from enum gastrolog.v1.Status
@@ -318,6 +319,11 @@ export class GetClusterStatusResponse extends Message<GetClusterStatusResponse> 
    */
   localStats?: RaftStats;
 
+  /**
+   * @generated from field: string local_node_id = 6;
+   */
+  localNodeId = "";
+
   constructor(data?: PartialMessage<GetClusterStatusResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -331,6 +337,7 @@ export class GetClusterStatusResponse extends Message<GetClusterStatusResponse> 
     { no: 3, name: "leader_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "nodes", kind: "message", T: ClusterNode, repeated: true },
     { no: 5, name: "local_stats", kind: "message", T: RaftStats },
+    { no: 6, name: "local_node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetClusterStatusResponse {
@@ -494,6 +501,11 @@ export class ClusterNode extends Message<ClusterNode> {
    */
   isLeader = false;
 
+  /**
+   * @generated from field: gastrolog.v1.NodeStats stats = 7;
+   */
+  stats?: NodeStats;
+
   constructor(data?: PartialMessage<ClusterNode>) {
     super();
     proto3.util.initPartial(data, this);
@@ -508,6 +520,7 @@ export class ClusterNode extends Message<ClusterNode> {
     { no: 4, name: "role", kind: "enum", T: proto3.getEnumType(ClusterNodeRole) },
     { no: 5, name: "suffrage", kind: "enum", T: proto3.getEnumType(ClusterNodeSuffrage) },
     { no: 6, name: "is_leader", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 7, name: "stats", kind: "message", T: NodeStats },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ClusterNode {

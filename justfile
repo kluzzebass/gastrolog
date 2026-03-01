@@ -12,6 +12,11 @@ frontend *args:
 backend *args:
     @just --justfile ./backend/justfile {{args}}
 
+# Regenerate protobuf code (Go + TypeScript)
+gen:
+    just backend gen
+    just frontend gen
+
 # Build binary with embedded frontend
 build:
     just frontend build

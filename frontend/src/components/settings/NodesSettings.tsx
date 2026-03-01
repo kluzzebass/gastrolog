@@ -102,7 +102,7 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
       </div>
 
       <div className="flex flex-col gap-3">
-        {nodes.map((node) => {
+        {nodes.toSorted((a, b) => a.name.localeCompare(b.name)).map((node) => {
           const isLocal = node.id === localNodeId;
           const displayName = getEdit(node.id).name || node.name || "Unnamed Node";
           const dirty = isDirty(node.id);

@@ -492,7 +492,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
         </AddFormCard>
       )}
 
-      {vaults.map((vault) => {
+      {vaults.toSorted((a, b) => a.name.localeCompare(b.name)).map((vault) => {
         const edit = getEdit(vault.id);
         const hasPolicy = vault.policy && policies.some((p) => p.id === vault.policy);
         const hasFilter = vault.filter && filters.some((f) => f.id === vault.filter);

@@ -409,6 +409,7 @@ type GetClusterStatusResponse struct {
 	LeaderAddress  string                 `protobuf:"bytes,3,opt,name=leader_address,json=leaderAddress,proto3" json:"leader_address,omitempty"`
 	Nodes          []*ClusterNode         `protobuf:"bytes,4,rep,name=nodes,proto3" json:"nodes,omitempty"`
 	LocalStats     *RaftStats             `protobuf:"bytes,5,opt,name=local_stats,json=localStats,proto3" json:"local_stats,omitempty"`
+	LocalNodeId    string                 `protobuf:"bytes,6,opt,name=local_node_id,json=localNodeId,proto3" json:"local_node_id,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -476,6 +477,13 @@ func (x *GetClusterStatusResponse) GetLocalStats() *RaftStats {
 		return x.LocalStats
 	}
 	return nil
+}
+
+func (x *GetClusterStatusResponse) GetLocalNodeId() string {
+	if x != nil {
+		return x.LocalNodeId
+	}
+	return ""
 }
 
 // RaftStats contains Raft consensus statistics for the local node.
@@ -620,6 +628,7 @@ type ClusterNode struct {
 	Role          ClusterNodeRole        `protobuf:"varint,4,opt,name=role,proto3,enum=gastrolog.v1.ClusterNodeRole" json:"role,omitempty"`
 	Suffrage      ClusterNodeSuffrage    `protobuf:"varint,5,opt,name=suffrage,proto3,enum=gastrolog.v1.ClusterNodeSuffrage" json:"suffrage,omitempty"`
 	IsLeader      bool                   `protobuf:"varint,6,opt,name=is_leader,json=isLeader,proto3" json:"is_leader,omitempty"`
+	Stats         *NodeStats             `protobuf:"bytes,7,opt,name=stats,proto3" json:"stats,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -696,11 +705,18 @@ func (x *ClusterNode) GetIsLeader() bool {
 	return false
 }
 
+func (x *ClusterNode) GetStats() *NodeStats {
+	if x != nil {
+		return x.Stats
+	}
+	return nil
+}
+
 var File_gastrolog_v1_lifecycle_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\n" +
-	"\x1cgastrolog/v1/lifecycle.proto\x12\fgastrolog.v1\"\x0f\n" +
+	"\x1cgastrolog/v1/lifecycle.proto\x12\fgastrolog.v1\x1a\x1agastrolog/v1/cluster.proto\"\x0f\n" +
 	"\rHealthRequest\"\xe1\x01\n" +
 	"\x0eHealthResponse\x12,\n" +
 	"\x06status\x18\x01 \x01(\x0e2\x14.gastrolog.v1.StatusR\x06status\x12\x18\n" +
@@ -711,14 +727,15 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\x0fShutdownRequest\x12\x14\n" +
 	"\x05drain\x18\x01 \x01(\bR\x05drain\"\x12\n" +
 	"\x10ShutdownResponse\"\x19\n" +
-	"\x17GetClusterStatusRequest\"\xf2\x01\n" +
+	"\x17GetClusterStatusRequest\"\x96\x02\n" +
 	"\x18GetClusterStatusResponse\x12'\n" +
 	"\x0fcluster_enabled\x18\x01 \x01(\bR\x0eclusterEnabled\x12\x1b\n" +
 	"\tleader_id\x18\x02 \x01(\tR\bleaderId\x12%\n" +
 	"\x0eleader_address\x18\x03 \x01(\tR\rleaderAddress\x12/\n" +
 	"\x05nodes\x18\x04 \x03(\v2\x19.gastrolog.v1.ClusterNodeR\x05nodes\x128\n" +
 	"\vlocal_stats\x18\x05 \x01(\v2\x17.gastrolog.v1.RaftStatsR\n" +
-	"localStats\"\xb1\x03\n" +
+	"localStats\x12\"\n" +
+	"\rlocal_node_id\x18\x06 \x01(\tR\vlocalNodeId\"\xb1\x03\n" +
 	"\tRaftStats\x12\x14\n" +
 	"\x05state\x18\x01 \x01(\tR\x05state\x12\x12\n" +
 	"\x04term\x18\x02 \x01(\x04R\x04term\x12$\n" +
@@ -733,14 +750,15 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\flast_contact\x18\n" +
 	" \x01(\tR\vlastContact\x12\x1b\n" +
 	"\tnum_peers\x18\v \x01(\rR\bnumPeers\x12)\n" +
-	"\x10protocol_version\x18\f \x01(\rR\x0fprotocolVersion\"\xda\x01\n" +
+	"\x10protocol_version\x18\f \x01(\rR\x0fprotocolVersion\"\x89\x02\n" +
 	"\vClusterNode\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
 	"\aaddress\x18\x03 \x01(\tR\aaddress\x121\n" +
 	"\x04role\x18\x04 \x01(\x0e2\x1d.gastrolog.v1.ClusterNodeRoleR\x04role\x12=\n" +
 	"\bsuffrage\x18\x05 \x01(\x0e2!.gastrolog.v1.ClusterNodeSuffrageR\bsuffrage\x12\x1b\n" +
-	"\tis_leader\x18\x06 \x01(\bR\bisLeader*_\n" +
+	"\tis_leader\x18\x06 \x01(\bR\bisLeader\x12-\n" +
+	"\x05stats\x18\a \x01(\v2\x17.gastrolog.v1.NodeStatsR\x05stats*_\n" +
 	"\x06Status\x12\x16\n" +
 	"\x12STATUS_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eSTATUS_HEALTHY\x10\x01\x12\x13\n" +
@@ -786,6 +804,7 @@ var file_gastrolog_v1_lifecycle_proto_goTypes = []any{
 	(*GetClusterStatusResponse)(nil), // 8: gastrolog.v1.GetClusterStatusResponse
 	(*RaftStats)(nil),                // 9: gastrolog.v1.RaftStats
 	(*ClusterNode)(nil),              // 10: gastrolog.v1.ClusterNode
+	(*NodeStats)(nil),                // 11: gastrolog.v1.NodeStats
 }
 var file_gastrolog_v1_lifecycle_proto_depIdxs = []int32{
 	0,  // 0: gastrolog.v1.HealthResponse.status:type_name -> gastrolog.v1.Status
@@ -793,17 +812,18 @@ var file_gastrolog_v1_lifecycle_proto_depIdxs = []int32{
 	9,  // 2: gastrolog.v1.GetClusterStatusResponse.local_stats:type_name -> gastrolog.v1.RaftStats
 	1,  // 3: gastrolog.v1.ClusterNode.role:type_name -> gastrolog.v1.ClusterNodeRole
 	2,  // 4: gastrolog.v1.ClusterNode.suffrage:type_name -> gastrolog.v1.ClusterNodeSuffrage
-	3,  // 5: gastrolog.v1.LifecycleService.Health:input_type -> gastrolog.v1.HealthRequest
-	5,  // 6: gastrolog.v1.LifecycleService.Shutdown:input_type -> gastrolog.v1.ShutdownRequest
-	7,  // 7: gastrolog.v1.LifecycleService.GetClusterStatus:input_type -> gastrolog.v1.GetClusterStatusRequest
-	4,  // 8: gastrolog.v1.LifecycleService.Health:output_type -> gastrolog.v1.HealthResponse
-	6,  // 9: gastrolog.v1.LifecycleService.Shutdown:output_type -> gastrolog.v1.ShutdownResponse
-	8,  // 10: gastrolog.v1.LifecycleService.GetClusterStatus:output_type -> gastrolog.v1.GetClusterStatusResponse
-	8,  // [8:11] is the sub-list for method output_type
-	5,  // [5:8] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	11, // 5: gastrolog.v1.ClusterNode.stats:type_name -> gastrolog.v1.NodeStats
+	3,  // 6: gastrolog.v1.LifecycleService.Health:input_type -> gastrolog.v1.HealthRequest
+	5,  // 7: gastrolog.v1.LifecycleService.Shutdown:input_type -> gastrolog.v1.ShutdownRequest
+	7,  // 8: gastrolog.v1.LifecycleService.GetClusterStatus:input_type -> gastrolog.v1.GetClusterStatusRequest
+	4,  // 9: gastrolog.v1.LifecycleService.Health:output_type -> gastrolog.v1.HealthResponse
+	6,  // 10: gastrolog.v1.LifecycleService.Shutdown:output_type -> gastrolog.v1.ShutdownResponse
+	8,  // 11: gastrolog.v1.LifecycleService.GetClusterStatus:output_type -> gastrolog.v1.GetClusterStatusResponse
+	9,  // [9:12] is the sub-list for method output_type
+	6,  // [6:9] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_lifecycle_proto_init() }
@@ -811,6 +831,7 @@ func file_gastrolog_v1_lifecycle_proto_init() {
 	if File_gastrolog_v1_lifecycle_proto != nil {
 		return
 	}
+	file_gastrolog_v1_cluster_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

@@ -1,9 +1,11 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useSettings } from "../../api/hooks/useConfig";
-import { ClusterNodeRole, ClusterNodeSuffrage, type RaftStats } from "../../api/gen/gastrolog/v1/lifecycle_pb";
+import { ClusterNodeRole, ClusterNodeSuffrage } from "../../api/gen/gastrolog/v1/lifecycle_pb";
+import type { NodeStats } from "../../api/gen/gastrolog/v1/cluster_pb";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { useState } from "react";
+import { formatBytes } from "../../utils/units";
 
 function roleName(role: ClusterNodeRole): string {
   switch (role) {
@@ -27,6 +29,20 @@ function suffrageName(suffrage: ClusterNodeSuffrage): string {
     default:
       return "Unknown";
   }
+}
+
+function formatUptime(seconds: bigint): string {
+  const s = Number(seconds);
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  }
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  return h > 0 ? `${d}d ${h}h` : `${d}d`;
 }
 
 function StatRow({
@@ -57,35 +73,206 @@ function StatRow({
   );
 }
 
-function RaftStatsGrid({
+function SectionLabel({ label, dark }: Readonly<{ label: string; dark: boolean }>) {
+  const c = useThemeClass(dark);
+  return (
+    <span
+      className={`text-[0.7em] font-medium uppercase tracking-wider ${c("text-text-ghost", "text-light-text-ghost")}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+function Divider({ dark }: Readonly<{ dark: boolean }>) {
+  const c = useThemeClass(dark);
+  return (
+    <div
+      className={`border-t my-1 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
+    />
+  );
+}
+
+function NodeStatsSection({
   stats,
   dark,
-}: Readonly<{ stats: RaftStats; dark: boolean }>) {
+}: Readonly<{ stats: NodeStats; dark: boolean }>) {
   const c = useThemeClass(dark);
   return (
     <>
-      <div
-        className={`border-t my-1 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
-      />
+      {/* System stats */}
+      <Divider dark={dark} />
       <div className="flex flex-col gap-1.5">
-        <span
-          className={`text-[0.7em] font-medium uppercase tracking-wider ${c("text-text-ghost", "text-light-text-ghost")}`}
-        >
-          Raft State
-        </span>
+        <SectionLabel label="System" dark={dark} />
         <div className="grid grid-cols-2 gap-x-6 gap-y-1">
-          <StatRow label="Term" value={stats.term.toString()} mono dark={dark} />
-          <StatRow label="State" value={stats.state || "Unknown"} dark={dark} />
-          <StatRow label="Applied" value={stats.appliedIndex.toString()} mono dark={dark} />
-          <StatRow label="Commit" value={stats.commitIndex.toString()} mono dark={dark} />
-          <StatRow label="Last Log" value={stats.lastLogIndex.toString()} mono dark={dark} />
-          <StatRow label="FSM Pending" value={stats.fsmPending.toString()} mono dark={dark} />
-          <StatRow label="Last Contact" value={stats.lastContact || "never"} dark={dark} />
-          <StatRow label="Peers" value={stats.numPeers} dark={dark} />
-          <StatRow label="Snapshot" value={stats.lastSnapshotIndex.toString()} mono dark={dark} />
-          <StatRow label="Protocol" value={`v${stats.protocolVersion}`} dark={dark} />
+          <StatRow
+            label="CPU"
+            value={`${stats.cpuPercent.toFixed(1)}%`}
+            mono
+            dark={dark}
+          />
+          <StatRow
+            label="Goroutines"
+            value={stats.goroutines.toLocaleString()}
+            mono
+            dark={dark}
+          />
+          <StatRow
+            label="Mem In-Use"
+            value={formatBytes(Number(stats.memoryInuse))}
+            mono
+            dark={dark}
+          />
+          <StatRow
+            label="RSS"
+            value={formatBytes(Number(stats.memoryRss))}
+            mono
+            dark={dark}
+          />
+          <StatRow
+            label="Heap Alloc"
+            value={formatBytes(Number(stats.memoryHeapAlloc))}
+            mono
+            dark={dark}
+          />
+          <StatRow
+            label="Heap Idle"
+            value={formatBytes(Number(stats.memoryHeapIdle))}
+            mono
+            dark={dark}
+          />
+          <StatRow
+            label="Stack"
+            value={formatBytes(Number(stats.memoryStackInuse))}
+            mono
+            dark={dark}
+          />
+          <StatRow
+            label="GC Cycles"
+            value={stats.numGc.toLocaleString()}
+            mono
+            dark={dark}
+          />
         </div>
       </div>
+
+      {/* Queue */}
+      {stats.ingestQueueCapacity > 0 && (
+        <>
+          <Divider dark={dark} />
+          <div className="flex flex-col gap-1.5">
+            <SectionLabel label="Ingest Queue" dark={dark} />
+            <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+              <StatRow
+                label="Depth"
+                value={`${stats.ingestQueueDepth} / ${stats.ingestQueueCapacity}`}
+                mono
+                dark={dark}
+              />
+              {stats.uptimeSeconds > 0n && (
+                <StatRow
+                  label="Uptime"
+                  value={formatUptime(stats.uptimeSeconds)}
+                  dark={dark}
+                />
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Raft stats */}
+      {stats.raftState && (
+        <>
+          <Divider dark={dark} />
+          <div className="flex flex-col gap-1.5">
+            <SectionLabel label="Raft State" dark={dark} />
+            <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+              <StatRow label="State" value={stats.raftState} dark={dark} />
+              <StatRow
+                label="Term"
+                value={stats.raftTerm.toString()}
+                mono
+                dark={dark}
+              />
+              <StatRow
+                label="Applied"
+                value={stats.raftAppliedIndex.toString()}
+                mono
+                dark={dark}
+              />
+              <StatRow
+                label="Commit"
+                value={stats.raftCommitIndex.toString()}
+                mono
+                dark={dark}
+              />
+              <StatRow
+                label="FSM Pending"
+                value={stats.raftFsmPending.toString()}
+                mono
+                dark={dark}
+              />
+              <StatRow
+                label="Last Contact"
+                value={stats.raftLastContact || "never"}
+                dark={dark}
+              />
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Ingesters */}
+      {stats.ingesters.length > 0 && (
+        <>
+          <Divider dark={dark} />
+          <div className="flex flex-col gap-1.5">
+            <SectionLabel label="Ingesters" dark={dark} />
+            {stats.ingesters.toSorted((a, b) => a.name.localeCompare(b.name)).map((ing) => (
+              <div key={ing.id} className="flex flex-col gap-1 ml-1">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}
+                    title={ing.id}
+                  >
+                    {ing.name || ing.id}
+                  </span>
+                  <span
+                    className={`px-1 py-0.5 text-[0.65em] font-medium uppercase tracking-wider rounded ${
+                      ing.running
+                        ? c("bg-emerald-900/40 text-emerald-400", "bg-emerald-100 text-emerald-700")
+                        : c("bg-ink-hover text-text-ghost", "bg-light-hover text-light-text-ghost")
+                    }`}
+                  >
+                    {ing.running ? "running" : "stopped"}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-x-4 gap-y-0.5">
+                  <StatRow
+                    label="Msgs"
+                    value={Number(ing.messagesIngested).toLocaleString()}
+                    mono
+                    dark={dark}
+                  />
+                  <StatRow
+                    label="Bytes"
+                    value={formatBytes(Number(ing.bytesIngested))}
+                    mono
+                    dark={dark}
+                  />
+                  <StatRow
+                    label="Errors"
+                    value={Number(ing.errors).toLocaleString()}
+                    mono
+                    dark={dark}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </>
   );
 }
@@ -135,7 +322,7 @@ export function ClusterPanel({ dark }: Readonly<{ dark: boolean }>) {
 
   return (
     <div className="flex flex-col gap-3">
-      {data.nodes.map((node) => {
+      {data.nodes.toSorted((a, b) => (a.name || "").localeCompare(b.name || "")).map((node) => {
         const isLocal = node.id === localNodeId;
         const isLeader = node.isLeader;
         const displayName = node.name || "Unnamed Node";
@@ -206,8 +393,14 @@ export function ClusterPanel({ dark }: Readonly<{ dark: boolean }>) {
                 </span>
               </div>
 
-              {isLocal && data.localStats && (
-                <RaftStatsGrid stats={data.localStats} dark={dark} />
+              {node.stats ? (
+                <NodeStatsSection stats={node.stats} dark={dark} />
+              ) : (
+                <div
+                  className={`text-[0.8em] italic ${c("text-text-ghost", "text-light-text-ghost")}`}
+                >
+                  Waiting for data...
+                </div>
               )}
             </div>
           </ExpandableCard>

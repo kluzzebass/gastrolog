@@ -12,6 +12,7 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
+	"gastrolog/internal/auth"
 	"gastrolog/internal/config"
 	"gastrolog/internal/config/raftfsm"
 	"gastrolog/internal/lookup"
@@ -187,6 +188,8 @@ func (s *ConfigServer) loadConfigNodeConfigs(ctx context.Context, resp *apiv1.Ge
 }
 
 // GetSettings returns the server-level configuration.
+// Unauthenticated callers (e.g. the registration page) only receive the
+// password policy — everything else is stripped to prevent information leakage.
 func (s *ConfigServer) GetSettings(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetSettingsRequest],
@@ -194,6 +197,23 @@ func (s *ConfigServer) GetSettings(
 	ss, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	// Unauthenticated: return only the password policy.
+	if auth.ClaimsFromContext(ctx) == nil {
+		pp := ss.Auth.PasswordPolicy
+		return connect.NewResponse(&apiv1.GetSettingsResponse{
+			Auth: &apiv1.AuthSettings{
+				PasswordPolicy: &apiv1.PasswordPolicySettings{
+					MinLength:             int32(pp.MinLength),             //nolint:gosec // G115
+					RequireMixedCase:      pp.RequireMixedCase,
+					RequireDigit:          pp.RequireDigit,
+					RequireSpecial:        pp.RequireSpecial,
+					MaxConsecutiveRepeats: int32(pp.MaxConsecutiveRepeats), //nolint:gosec // G115
+					ForbidAnimalNoise:     pp.ForbidAnimalNoise,
+				},
+			},
+		}), nil
 	}
 
 	maxJobs := int32(ss.Scheduler.MaxConcurrentJobs) //nolint:gosec // G115: small config value, always fits in int32
@@ -209,7 +229,7 @@ func (s *ConfigServer) GetSettings(
 		mm.LastUpdate = ss.Lookup.MaxMind.LastUpdate.Format(time.RFC3339)
 	}
 
-	auth := &apiv1.AuthSettings{
+	authSettings := &apiv1.AuthSettings{
 		TokenDuration:        ss.Auth.TokenDuration,
 		JwtSecretConfigured:  ss.Auth.JWTSecret != "",
 		RefreshTokenDuration: ss.Auth.RefreshTokenDuration,
@@ -224,13 +244,13 @@ func (s *ConfigServer) GetSettings(
 	}
 
 	if req.Msg.IncludeSecrets {
-		auth.JwtSecret = ss.Auth.JWTSecret
+		authSettings.JwtSecret = ss.Auth.JWTSecret
 		mm.AccountId = ss.Lookup.MaxMind.AccountID
 		mm.LicenseKey = ss.Lookup.MaxMind.LicenseKey
 	}
 
 	resp := &apiv1.GetSettingsResponse{
-		Auth: auth,
+		Auth: authSettings,
 		Query: &apiv1.QuerySettings{
 			Timeout:           ss.Query.Timeout,
 			MaxFollowDuration: ss.Query.MaxFollowDuration,
@@ -249,6 +269,9 @@ func (s *ConfigServer) GetSettings(
 			GeoipDbPath: ss.Lookup.GeoIPDBPath,
 			AsnDbPath:   ss.Lookup.ASNDBPath,
 			Maxmind:     mm,
+		},
+		Cluster: &apiv1.ClusterSettings{
+			BroadcastInterval: ss.Cluster.BroadcastInterval,
 		},
 		SetupWizardDismissed: ss.SetupWizardDismissed,
 		NodeId:               s.localNodeID,
@@ -399,6 +422,11 @@ func mergeSettingsFields(msg *apiv1.PutSettingsRequest, ss *config.ServerSetting
 	if msg.Lookup != nil {
 		mergeLookup(msg.Lookup, &ss.Lookup)
 	}
+	if msg.Cluster != nil {
+		if err := mergeCluster(msg.Cluster, &ss.Cluster); err != nil {
+			return err
+		}
+	}
 	if msg.SetupWizardDismissed != nil {
 		ss.SetupWizardDismissed = *msg.SetupWizardDismissed
 	}
@@ -500,6 +528,16 @@ func mergeLookup(l *apiv1.PutLookupSettings, lookup *config.LookupConfig) {
 			lookup.MaxMind.LicenseKey = *mm.LicenseKey
 		}
 	}
+}
+
+func mergeCluster(c *apiv1.PutClusterSettings, cluster *config.ClusterConfig) *connect.Error {
+	if c.BroadcastInterval != nil {
+		if _, err := time.ParseDuration(*c.BroadcastInterval); err != nil {
+			return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid broadcast_interval: %w", err))
+		}
+		cluster.BroadcastInterval = *c.BroadcastInterval
+	}
+	return nil
 }
 
 func validateTokenDurations(auth config.AuthConfig) *connect.Error {
