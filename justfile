@@ -33,6 +33,11 @@ build-all:
 docker tag="gastrolog:latest":
     docker build --build-arg VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev) -t {{tag}} .
 
+# Run full quality audit (backend + frontend)
+audit:
+    just backend audit
+    just frontend audit
+
 # Tag and push a release (triggers GitHub Actions build). Usage: just release patch
 release bump:
     #!/usr/bin/env bash

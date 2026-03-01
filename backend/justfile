@@ -55,6 +55,21 @@ gen:
 lint:
   golangci-lint run ./...
 
+# Full backend quality audit: lint, vet, race tests, vulnerability scan, dead code.
+audit:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "=== golangci-lint ==="
+  golangci-lint run ./...
+  echo "=== go vet ==="
+  go vet ./...
+  echo "=== go test -race ==="
+  go test -race -count=1 ./...
+  echo "=== govulncheck ==="
+  go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+  echo "=== deadcode ==="
+  go run golang.org/x/tools/cmd/deadcode@latest ./...
+
 # --- Cluster development recipes ---
 
 # Removes all cluster node data directories.

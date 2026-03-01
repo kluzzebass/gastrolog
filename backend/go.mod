@@ -4,6 +4,9 @@ go 1.26.0
 
 require (
 	connectrpc.com/connect v1.19.1
+	github.com/Jille/raft-grpc-leader-rpc v1.1.0
+	github.com/Jille/raft-grpc-transport v1.6.1
+	github.com/Jille/raftadmin v1.2.1
 	github.com/SaveTheRbtz/zstd-seekable-format-go/pkg v0.8.0
 	github.com/andybalholm/brotli v1.2.0
 	github.com/bmatcuk/doublestar/v4 v4.10.0
@@ -24,7 +27,7 @@ require (
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	go.opentelemetry.io/proto/otlp v1.9.0
 	golang.org/x/crypto v0.48.0
-	golang.org/x/net v0.50.0
+	golang.org/x/net v0.51.0
 	golang.org/x/sync v0.19.0
 	golang.org/x/time v0.14.0
 	google.golang.org/grpc v1.79.1
@@ -32,9 +35,6 @@ require (
 )
 
 require (
-	github.com/Jille/raft-grpc-leader-rpc v1.1.0 // indirect
-	github.com/Jille/raft-grpc-transport v1.6.1 // indirect
-	github.com/Jille/raftadmin v1.2.1 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/armon/go-metrics v0.4.1 // indirect
 	github.com/boltdb/bolt v1.3.1 // indirect

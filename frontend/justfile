@@ -42,3 +42,7 @@ format:
 # Lint code (if eslint configured)
 lint:
     bun x eslint "src/**/*.{ts,tsx}"
+
+# Full frontend quality audit (react-doctor)
+audit:
+    bunx react-doctor@latest . --verbose
