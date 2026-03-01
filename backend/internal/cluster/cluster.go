@@ -229,7 +229,7 @@ func (s *Server) Stop() {
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):
-		s.logger.Warn("cluster gRPC graceful stop timed out, forcing")
+		s.logger.Debug("cluster gRPC graceful stop timed out, forcing")
 		s.grpcSrv.Stop()
 	}
 
