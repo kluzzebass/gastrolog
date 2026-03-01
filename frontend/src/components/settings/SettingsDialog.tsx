@@ -87,8 +87,8 @@ type TabDef = {
 };
 
 const allTabs: TabDef[] = [
-  { id: "service", label: "Service", icon: ServiceIcon, helpTopicId: "service-settings" },
-  { id: "nodes", label: "Nodes", icon: ClusterIcon },
+  { id: "service", label: "Cluster", icon: ClusterIcon, helpTopicId: "service-settings" },
+  { id: "nodes", label: "Nodes", icon: ServiceIcon },
   { id: "certificates", label: "Certificates", icon: CertIcon, helpTopicId: "certificates" },
   { id: "lookups", label: "Lookups", icon: LookupIcon },
   { id: "users", label: "Users", icon: UsersIcon, adminOnly: true, helpTopicId: "user-management" },
@@ -343,7 +343,7 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
           <h2
             className={`font-display text-[1.4em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
           >
-            Service
+            Cluster
           </h2>
           <HelpButton topicId="service-settings" />
         </div>
