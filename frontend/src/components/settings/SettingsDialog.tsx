@@ -190,7 +190,6 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
   const [maxFollowDuration, setMaxFollowDuration] = useState("");
   const [queryTimeout, setQueryTimeout] = useState("");
   const [maxResultCount, setMaxResultCount] = useState("");
-  const [broadcastInterval, setBroadcastInterval] = useState("");
   const [initialized, setInitialized] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
 
@@ -221,7 +220,6 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
     setMaxFollowDuration(query?.maxFollowDuration ?? "");
     setQueryTimeout(query?.timeout ?? "");
     setMaxResultCount(query?.maxResultCount ? String(query.maxResultCount) : "10000");
-    setBroadcastInterval(data.cluster?.broadcastInterval || "5s");
     setInitialized(true);
   }
 
@@ -244,8 +242,7 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
       refreshTokenDuration !== (data.auth?.refreshTokenDuration ?? "") ||
       maxFollowDuration !== (data.query?.maxFollowDuration ?? "") ||
       queryTimeout !== (data.query?.timeout ?? "") ||
-      maxResultCount !== String(data.query?.maxResultCount || 10000) ||
-      broadcastInterval !== (data.cluster?.broadcastInterval || "5s"));
+      maxResultCount !== String(data.query?.maxResultCount || 10000));
 
   const handleSave = async () => {
     const hasCert = certIdSet.has(tlsDefaultCert);
@@ -285,9 +282,6 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
           httpToHttpsRedirect: effectiveRedirect,
           httpsPort,
         },
-        cluster: {
-          broadcastInterval: broadcastInterval || undefined,
-        },
       });
       addToast("Server configuration updated", "info");
     } catch (err: any) {
@@ -320,7 +314,6 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
       setMaxFollowDuration(query?.maxFollowDuration ?? "");
       setQueryTimeout(query?.timeout ?? "");
       setMaxResultCount(query?.maxResultCount ? String(query.maxResultCount) : "10000");
-      setBroadcastInterval(data.cluster?.broadcastInterval || "5s");
     }
   };
 
@@ -330,7 +323,6 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
     scheduler: false,
     query: false,
     tls: false,
-    cluster: false,
   });
 
   const toggle = (key: string) =>
@@ -650,39 +642,6 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
                   )}
                 </>
               )}
-            </div>
-          </ExpandableCard>
-
-          <ExpandableCard
-            id="Cluster"
-            dark={dark}
-            expanded={!!expandedCards.cluster}
-            onToggle={() => toggle("cluster")}
-            monoTitle={false}
-          >
-            <div className="flex flex-col gap-4">
-              <FormField
-                label="Broadcast Interval"
-                description="How often each node broadcasts its stats to peers. Lower values give fresher data but increase network traffic."
-                dark={dark}
-              >
-                <TextInput
-                  value={broadcastInterval}
-                  onChange={setBroadcastInterval}
-                  placeholder="5s"
-                  dark={dark}
-                  mono
-                  examples={["3s", "5s", "10s", "30s"]}
-                />
-                {(() => {
-                  const secs = parseDurationSeconds(broadcastInterval);
-                  if (broadcastInterval && secs === null)
-                    return <p className="text-[0.75em] text-amber-500 mt-1">Invalid duration format</p>;
-                  if (secs !== null && secs < 1)
-                    return <p className="text-[0.75em] text-amber-500 mt-1">Must be at least 1 second</p>;
-                  return null;
-                })()}
-              </FormField>
             </div>
           </ExpandableCard>
 
