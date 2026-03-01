@@ -191,7 +191,6 @@ export function usePutVault() {
       id: string;
       name: string;
       type: string;
-      filter: string;
       policy: string;
       retentionRules: Partial<RetentionRule>[];
       params: Record<string, string>;
@@ -203,7 +202,6 @@ export function usePutVault() {
           id: args.id,
           name: args.name,
           type: args.type,
-          filter: args.filter,
           policy: args.policy,
           retentionRules: args.retentionRules,
           params: args.params,

@@ -66,13 +66,8 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg config.VaultConfig
 	vault.Type = vaultCfg.Type
 	o.vaults[vaultCfg.ID] = vault
 
-	// Update filter set to include the new vault's filter.
-	var filterID uuid.UUID
-	if vaultCfg.Filter != nil {
-		filterID = *vaultCfg.Filter
-	}
-	filterExpr := resolveFilterExpr(cfg, filterID)
-	if err := o.updateFilterLocked(vaultCfg.ID, filterExpr); err != nil {
+	// Rebuild filter set from routes to include the new vault as a destination.
+	if err := o.reloadFiltersFromRoutes(cfg); err != nil {
 		// Rollback registration on filter error.
 		delete(o.vaults, vaultCfg.ID)
 		return err
@@ -108,7 +103,7 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg config.VaultConfig
 		}
 	}
 
-	o.logger.Info("vault added", "id", vaultCfg.ID, "name", vaultCfg.Name, "type", vaultCfg.Type, "filter", filterExpr)
+	o.logger.Info("vault added", "id", vaultCfg.ID, "name", vaultCfg.Name, "type", vaultCfg.Type)
 	return nil
 }
 
@@ -275,8 +270,6 @@ func (o *Orchestrator) VaultConfig(id uuid.UUID) (config.VaultConfig, error) {
 	cfg := config.VaultConfig{
 		ID: id,
 		// Type and Params are not tracked after creation.
-		// Filter is a UUID reference; the orchestrator doesn't track the original
-		// filter UUID reference, so it's left nil here.
 	}
 
 	return cfg, nil

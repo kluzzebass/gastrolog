@@ -7,6 +7,7 @@ import {
   CertIcon,
   ServiceIcon,
   FilterIcon,
+  RouteIcon,
   VaultsIcon,
   IngestersIcon,
   RetentionIcon,
@@ -19,6 +20,7 @@ import { VaultsSettings } from "./VaultsSettings";
 import { IngestersSettings } from "./IngestersSettings";
 import { CertificatesSettings } from "./CertificatesSettings";
 import { FiltersSettings } from "./FiltersSettings";
+import { RoutesSettings } from "./RoutesSettings";
 import { PoliciesSettings } from "./PoliciesSettings";
 import { RetentionPoliciesSettings } from "./RetentionPoliciesSettings";
 import { UsersSettings } from "./UsersSettings";
@@ -65,6 +67,7 @@ export type SettingsTab =
   | "vaults"
   | "ingesters"
   | "filters"
+  | "routes"
   | "policies"
   | "retention"
   | "users";
@@ -93,10 +96,11 @@ const allTabs: TabDef[] = [
   { id: "lookups", label: "Lookups", icon: LookupIcon },
   { id: "users", label: "Users", icon: UsersIcon, adminOnly: true, helpTopicId: "user-management" },
   { id: "ingesters", label: "Ingesters", icon: IngestersIcon, helpTopicId: "ingesters" },
-  { id: "filters", label: "Filters", icon: FilterIcon, helpTopicId: "routing" },
   { id: "policies", label: "Rotation Policies", icon: PolicyIcon, helpTopicId: "policy-rotation" },
   { id: "retention", label: "Retention Policies", icon: RetentionIcon, helpTopicId: "policy-retention" },
   { id: "vaults", label: "Vaults", icon: VaultsIcon, helpTopicId: "storage-engines" },
+  { id: "filters", label: "Filters", icon: FilterIcon, helpTopicId: "routing" },
+  { id: "routes", label: "Routes", icon: RouteIcon, helpTopicId: "routing" },
 ];
 
 export function SettingsDialog({
@@ -168,6 +172,7 @@ export function SettingsDialog({
           {tab === "users" && <UsersSettings dark={dark} noAuth={noAuth} />}
           {tab === "ingesters" && <IngestersSettings dark={dark} />}
           {tab === "filters" && <FiltersSettings dark={dark} onNavigateTo={navigateTo} />}
+          {tab === "routes" && <RoutesSettings dark={dark} onNavigateTo={navigateTo} />}
           {tab === "policies" && <PoliciesSettings dark={dark} onNavigateTo={navigateTo} />}
           {tab === "retention" && <RetentionPoliciesSettings dark={dark} onNavigateTo={navigateTo} />}
           {tab === "vaults" && <VaultsSettings dark={dark} expandTarget={expandTarget} onExpandTargetConsumed={clearExpandTarget} />}

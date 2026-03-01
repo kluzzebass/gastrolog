@@ -74,6 +74,7 @@ func (s *ConfigServer) GetConfig(
 		s.loadConfigFilters(ctx, resp)
 		s.loadConfigRotationPolicies(ctx, resp)
 		s.loadConfigRetentionPolicies(ctx, resp)
+		s.loadConfigRoutes(ctx, resp)
 		s.loadConfigNodeConfigs(ctx, resp)
 	}
 	return connect.NewResponse(resp), nil
@@ -97,9 +98,6 @@ func vaultConfigToProto(vaultCfg config.VaultConfig) *apiv1.VaultConfig {
 		Params:  vaultCfg.Params,
 		Enabled: vaultCfg.Enabled,
 		NodeId:  vaultCfg.NodeID,
-	}
-	if vaultCfg.Filter != nil {
-		vc.Filter = vaultCfg.Filter.String()
 	}
 	if vaultCfg.Policy != nil {
 		vc.Policy = vaultCfg.Policy.String()
@@ -171,6 +169,30 @@ func (s *ConfigServer) loadConfigRetentionPolicies(ctx context.Context, resp *ap
 		p.Id = pol.ID.String()
 		p.Name = pol.Name
 		resp.RetentionPolicies = append(resp.RetentionPolicies, p)
+	}
+}
+
+func (s *ConfigServer) loadConfigRoutes(ctx context.Context, resp *apiv1.GetConfigResponse) {
+	routes, err := s.cfgStore.ListRoutes(ctx)
+	if err != nil {
+		return
+	}
+	for _, rt := range routes {
+		prt := &apiv1.RouteConfig{
+			Id:           rt.ID.String(),
+			Name:         rt.Name,
+			Distribution: rt.Distribution,
+			Enabled:      rt.Enabled,
+		}
+		if rt.FilterID != nil {
+			prt.FilterId = rt.FilterID.String()
+		}
+		for _, destID := range rt.Destinations {
+			prt.Destinations = append(prt.Destinations, &apiv1.RouteDestination{
+				VaultId: destID.String(),
+			})
+		}
+		resp.Routes = append(resp.Routes, prt)
 	}
 }
 

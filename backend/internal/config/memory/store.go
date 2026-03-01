@@ -34,6 +34,7 @@ type Store struct {
 	retentionPolicies map[uuid.UUID]config.RetentionPolicyConfig
 	vaults            map[uuid.UUID]config.VaultConfig
 	ingesters         map[uuid.UUID]config.IngesterConfig
+	routes            map[uuid.UUID]config.RouteConfig
 	ss                serverSettings
 	certs             map[uuid.UUID]config.CertPEM
 	users         map[uuid.UUID]config.User         // keyed by ID (UUID)
@@ -52,6 +53,7 @@ func NewStore() *Store {
 		retentionPolicies: make(map[uuid.UUID]config.RetentionPolicyConfig),
 		vaults:            make(map[uuid.UUID]config.VaultConfig),
 		ingesters:         make(map[uuid.UUID]config.IngesterConfig),
+		routes:            make(map[uuid.UUID]config.RouteConfig),
 		certs:             make(map[uuid.UUID]config.CertPEM),
 		users:         make(map[uuid.UUID]config.User),
 		refreshTokens: make(map[uuid.UUID]config.RefreshToken),
@@ -65,7 +67,7 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	if len(s.filters) == 0 && len(s.rotationPolicies) == 0 && len(s.retentionPolicies) == 0 && len(s.vaults) == 0 && len(s.ingesters) == 0 && !s.ss.hasServerSettings && s.clusterTLS == nil {
+	if len(s.filters) == 0 && len(s.rotationPolicies) == 0 && len(s.retentionPolicies) == 0 && len(s.vaults) == 0 && len(s.ingesters) == 0 && len(s.routes) == 0 && !s.ss.hasServerSettings && s.clusterTLS == nil {
 		return nil, nil
 	}
 
@@ -109,6 +111,14 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 			cfg.Ingesters = append(cfg.Ingesters, copyIngesterConfig(ing))
 		}
 		slices.SortFunc(cfg.Ingesters, func(a, b config.IngesterConfig) int { return cmpUUID(a.ID, b.ID) })
+	}
+
+	if len(s.routes) > 0 {
+		cfg.Routes = make([]config.RouteConfig, 0, len(s.routes))
+		for _, rt := range s.routes {
+			cfg.Routes = append(cfg.Routes, copyRouteConfig(rt))
+		}
+		slices.SortFunc(cfg.Routes, func(a, b config.RouteConfig) int { return cmpUUID(a.ID, b.ID) })
 	}
 
 	if len(s.certs) > 0 {
@@ -354,6 +364,48 @@ func (s *Store) DeleteIngester(ctx context.Context, id uuid.UUID) error {
 	defer s.mu.Unlock()
 
 	delete(s.ingesters, id)
+	return nil
+}
+
+// Routes
+
+func (s *Store) GetRoute(ctx context.Context, id uuid.UUID) (*config.RouteConfig, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rt, ok := s.routes[id]
+	if !ok {
+		return nil, nil
+	}
+	c := copyRouteConfig(rt)
+	return &c, nil
+}
+
+func (s *Store) ListRoutes(ctx context.Context) ([]config.RouteConfig, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make([]config.RouteConfig, 0, len(s.routes))
+	for _, rt := range s.routes {
+		result = append(result, copyRouteConfig(rt))
+	}
+	slices.SortFunc(result, func(a, b config.RouteConfig) int { return cmpUUID(a.ID, b.ID) })
+	return result, nil
+}
+
+func (s *Store) PutRoute(ctx context.Context, cfg config.RouteConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.routes[cfg.ID] = copyRouteConfig(cfg)
+	return nil
+}
+
+func (s *Store) DeleteRoute(ctx context.Context, id uuid.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.routes, id)
 	return nil
 }
 
@@ -742,9 +794,6 @@ func copyVaultConfig(st config.VaultConfig) config.VaultConfig {
 		Enabled: st.Enabled,
 		NodeID:  st.NodeID,
 	}
-	if st.Filter != nil {
-		c.Filter = new(*st.Filter)
-	}
 	if st.Policy != nil {
 		c.Policy = new(*st.Policy)
 	}
@@ -772,6 +821,23 @@ func copyIngesterConfig(ing config.IngesterConfig) config.IngesterConfig {
 		Params:  copyParams(ing.Params),
 		NodeID:  ing.NodeID,
 	}
+}
+
+func copyRouteConfig(rt config.RouteConfig) config.RouteConfig {
+	c := config.RouteConfig{
+		ID:           rt.ID,
+		Name:         rt.Name,
+		Distribution: rt.Distribution,
+		Enabled:      rt.Enabled,
+	}
+	if rt.FilterID != nil {
+		c.FilterID = new(*rt.FilterID)
+	}
+	if len(rt.Destinations) > 0 {
+		c.Destinations = make([]uuid.UUID, len(rt.Destinations))
+		copy(c.Destinations, rt.Destinations)
+	}
+	return c
 }
 
 func copyCertPEM(cert config.CertPEM) config.CertPEM {

@@ -107,6 +107,42 @@ export function useDeleteRetentionPolicy() {
   });
 }
 
+export function usePutRoute() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      id: string;
+      name: string;
+      filterId: string;
+      destinations: string[];
+      distribution: string;
+      enabled: boolean;
+    }) => {
+      await configClient.putRoute({
+        config: {
+          id: args.id,
+          name: args.name,
+          filterId: args.filterId,
+          destinations: args.destinations.map((vaultId) => ({ vaultId })),
+          distribution: args.distribution,
+          enabled: args.enabled,
+        },
+      });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["config"] }),
+  });
+}
+
+export function useDeleteRoute() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await configClient.deleteRoute({ id });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["config"] }),
+  });
+}
+
 export function useSettings() {
   return useQuery({
     queryKey: ["settings"],

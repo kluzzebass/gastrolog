@@ -251,7 +251,6 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
   const [newName, setNewName] = useState("");
   const [namePlaceholder, setNamePlaceholder] = useState("");
   const [newType, setNewType] = useState("memory");
-  const [newFilter, setNewFilter] = useState("");
   const [newPolicy, setNewPolicy] = useState("");
   const [newRetentionRules, setNewRetentionRules] = useState<RetentionRuleEdit[]>([]);
   const [newParams, setNewParams] = useState<Record<string, string>>({});
@@ -264,7 +263,6 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
   const nameConflict = existingNames.has(effectiveName);
   const policies = config?.rotationPolicies ?? [];
   const retentionPolicies = config?.retentionPolicies ?? [];
-  const filters = config?.filters ?? [];
 
   // Auto-expand a vault when navigated to from another settings tab.
   useEffect(() => {
@@ -276,11 +274,6 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
     onExpandTargetConsumed?.();
   }, [expandTarget, configVaults, onExpandTargetConsumed]);
 
-  const filterOptions = [
-    { value: "", label: "(none)" },
-    ...filters.map((f) => ({ value: f.id, label: f.name || f.id })),
-  ];
-
   const policyOptions = [
     { value: "", label: "(none)" },
     ...policies.map((p) => ({ value: p.id, label: p.name || p.id })),
@@ -291,7 +284,6 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
     if (!vault)
       return {
         name: "",
-        filter: "",
         policy: "",
         retentionRules: [] as RetentionRuleEdit[],
         enabled: true,
@@ -300,7 +292,6 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
       };
     return {
       name: vault.name,
-      filter: vault.filter,
       policy: vault.policy,
       retentionRules: vault.retentionRules.map((b) => ({
         retentionPolicyId: b.retentionPolicyId,
@@ -323,7 +314,6 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
       id,
       edit: {
         name: string;
-        filter: string;
         policy: string;
         retentionRules: RetentionRuleEdit[];
         enabled: boolean;
@@ -335,7 +325,6 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
       id,
       name: edit.name,
       type: edit.type,
-      filter: edit.filter,
       policy: edit.policy,
       retentionRules: edit.retentionRules,
       params: edit.params,
@@ -361,7 +350,6 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
         id: "",
         name,
         type: newType,
-        filter: newFilter,
         policy: newPolicy,
         retentionRules: newRetentionRules,
         params: newParams,
@@ -372,7 +360,6 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
       setTypeConfirmed(false);
       setNewName("");
       setNewType("memory");
-      setNewFilter("");
       setNewPolicy("");
       setNewRetentionRules([]);
       setNewParams({});
@@ -396,7 +383,6 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
         setNewName("");
         setNamePlaceholder("");
         setNewType("memory");
-        setNewFilter("");
         setNewPolicy("");
         setNewRetentionRules([]);
         setNewParams({});
@@ -455,24 +441,14 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
             />
           </FormField>
           <NodeSelect value={newNodeId} onChange={setNewNodeId} dark={dark} />
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="Filter" dark={dark}>
-              <SelectInput
-                value={newFilter}
-                onChange={setNewFilter}
-                options={filterOptions}
-                dark={dark}
-              />
-            </FormField>
-            <FormField label="Rotation Policy" dark={dark}>
-              <SelectInput
-                value={newPolicy}
-                onChange={setNewPolicy}
-                options={policyOptions}
-                dark={dark}
-              />
-            </FormField>
-          </div>
+          <FormField label="Rotation Policy" dark={dark}>
+            <SelectInput
+              value={newPolicy}
+              onChange={setNewPolicy}
+              options={policyOptions}
+              dark={dark}
+            />
+          </FormField>
           <RetentionRulesEditor
             rules={newRetentionRules}
             onChange={setNewRetentionRules}
@@ -493,12 +469,10 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
       {vaults.toSorted((a, b) => a.name.localeCompare(b.name)).map((vault) => {
         const edit = getEdit(vault.id);
         const hasPolicy = vault.policy && policies.some((p) => p.id === vault.policy);
-        const hasFilter = vault.filter && filters.some((f) => f.id === vault.filter);
         const hasRetention = vault.retentionRules.length > 0;
         const warnings = [
           ...(!hasPolicy ? ["no rotation policy"] : []),
           ...(!hasRetention ? ["no retention policy"] : []),
-          ...(!hasFilter ? ["no filter"] : []),
         ];
         const activeJob = activeJobs[vault.id];
         return (
@@ -677,24 +651,14 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                 onChange={(v) => setEdit(vault.id, { nodeId: v })}
                 dark={dark}
               />
-              <div className="grid grid-cols-2 gap-3">
-                <FormField label="Filter" dark={dark}>
-                  <SelectInput
-                    value={edit.filter}
-                    onChange={(v) => setEdit(vault.id, { filter: v })}
-                    options={filterOptions}
-                    dark={dark}
-                  />
-                </FormField>
-                <FormField label="Rotation Policy" dark={dark}>
-                  <SelectInput
-                    value={edit.policy}
-                    onChange={(v) => setEdit(vault.id, { policy: v })}
-                    options={policyOptions}
-                    dark={dark}
-                  />
-                </FormField>
-              </div>
+              <FormField label="Rotation Policy" dark={dark}>
+                <SelectInput
+                  value={edit.policy}
+                  onChange={(v) => setEdit(vault.id, { policy: v })}
+                  options={policyOptions}
+                  dark={dark}
+                />
+              </FormField>
               <RetentionRulesEditor
                 rules={edit.retentionRules}
                 onChange={(rules) =>

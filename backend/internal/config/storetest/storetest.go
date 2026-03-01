@@ -415,13 +415,11 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		ctx := context.Background()
 
 		id := newID()
-		filterID := newID()
 		policyID := newID()
 		v := config.VaultConfig{
 			ID:     id,
 			Name:   "main",
 			Type:   "file",
-			Filter: &filterID,
 			Policy: &policyID,
 			Params: map[string]string{"dir": "/var/log"},
 		}
@@ -446,7 +444,6 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if got.Type != "file" {
 			t.Errorf("Type: expected %q, got %q", "file", got.Type)
 		}
-		assertUUIDPtr(t, "Filter", got.Filter, filterID)
 		assertUUIDPtr(t, "Policy", got.Policy, policyID)
 		if got.Params["dir"] != "/var/log" {
 			t.Errorf("Params[dir]: expected %q, got %q", "/var/log", got.Params["dir"])
@@ -458,14 +455,12 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		ctx := context.Background()
 
 		id := newID()
-		filterID1 := newID()
-		v1 := config.VaultConfig{ID: id, Name: "s1", Type: "file", Filter: &filterID1}
+		v1 := config.VaultConfig{ID: id, Name: "s1", Type: "file"}
 		if err := s.PutVault(ctx, v1); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		filterID2 := newID()
-		v2 := config.VaultConfig{ID: id, Name: "s1", Type: "memory", Filter: &filterID2}
+		v2 := config.VaultConfig{ID: id, Name: "s1", Type: "memory"}
 		if err := s.PutVault(ctx, v2); err != nil {
 			t.Fatalf("Put upsert: %v", err)
 		}
@@ -747,8 +742,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if err := s.PutRotationPolicy(ctx, config.RotationPolicyConfig{ID: rpSlowID, Name: "slow", MaxAge: new("1h")}); err != nil {
 			t.Fatalf("PutRotationPolicy: %v", err)
 		}
-		filterID := newID()
-		if err := s.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "main", Type: "file", Filter: &filterID, Policy: &rpFastID}); err != nil {
+		if err := s.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "main", Type: "file", Policy: &rpFastID}); err != nil {
 			t.Fatalf("PutVault: %v", err)
 		}
 		if err := s.PutIngester(ctx, config.IngesterConfig{ID: ing1ID, Name: "sys1", Type: "syslog-udp", Enabled: true, Params: map[string]string{"port": "514"}}); err != nil {

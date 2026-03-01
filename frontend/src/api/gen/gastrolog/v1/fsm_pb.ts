@@ -178,6 +178,18 @@ export class ConfigCommand extends Message<ConfigCommand> {
      */
     value: PutClusterTLSCommand;
     case: "putClusterTls";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.PutRouteCommand put_route = 28;
+     */
+    value: PutRouteCommand;
+    case: "putRoute";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.DeleteRouteCommand delete_route = 29;
+     */
+    value: DeleteRouteCommand;
+    case: "deleteRoute";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<ConfigCommand>) {
@@ -215,6 +227,8 @@ export class ConfigCommand extends Message<ConfigCommand> {
     { no: 25, name: "put_node_config", kind: "message", T: PutNodeConfigCommand, oneof: "command" },
     { no: 26, name: "delete_node_config", kind: "message", T: DeleteNodeConfigCommand, oneof: "command" },
     { no: 27, name: "put_cluster_tls", kind: "message", T: PutClusterTLSCommand, oneof: "command" },
+    { no: 28, name: "put_route", kind: "message", T: PutRouteCommand, oneof: "command" },
+    { no: 29, name: "delete_route", kind: "message", T: DeleteRouteCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ConfigCommand {
@@ -600,13 +614,6 @@ export class PutVaultCommand extends Message<PutVaultCommand> {
   /**
    * empty = nil
    *
-   * @generated from field: string filter = 4;
-   */
-  filter = "";
-
-  /**
-   * empty = nil
-   *
    * @generated from field: string policy = 5;
    */
   policy = "";
@@ -642,7 +649,6 @@ export class PutVaultCommand extends Message<PutVaultCommand> {
     { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 4, name: "filter", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 5, name: "policy", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 6, name: "retention_rules", kind: "message", T: VaultRetentionRule, repeated: true },
     { no: 7, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
@@ -1600,6 +1606,110 @@ export class PutClusterTLSCommand extends Message<PutClusterTLSCommand> {
 }
 
 /**
+ * @generated from message gastrolog.v1.PutRouteCommand
+ */
+export class PutRouteCommand extends Message<PutRouteCommand> {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id = "";
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name = "";
+
+  /**
+   * @generated from field: string filter_id = 3;
+   */
+  filterId = "";
+
+  /**
+   * @generated from field: repeated string destination_ids = 4;
+   */
+  destinationIds: string[] = [];
+
+  /**
+   * @generated from field: string distribution = 5;
+   */
+  distribution = "";
+
+  /**
+   * @generated from field: bool enabled = 6;
+   */
+  enabled = false;
+
+  constructor(data?: PartialMessage<PutRouteCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutRouteCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "filter_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "destination_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 5, name: "distribution", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutRouteCommand {
+    return new PutRouteCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutRouteCommand {
+    return new PutRouteCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutRouteCommand {
+    return new PutRouteCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutRouteCommand | PlainMessage<PutRouteCommand> | undefined, b: PutRouteCommand | PlainMessage<PutRouteCommand> | undefined): boolean {
+    return proto3.util.equals(PutRouteCommand, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.DeleteRouteCommand
+ */
+export class DeleteRouteCommand extends Message<DeleteRouteCommand> {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id = "";
+
+  constructor(data?: PartialMessage<DeleteRouteCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.DeleteRouteCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteRouteCommand {
+    return new DeleteRouteCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteRouteCommand {
+    return new DeleteRouteCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteRouteCommand {
+    return new DeleteRouteCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DeleteRouteCommand | PlainMessage<DeleteRouteCommand> | undefined, b: DeleteRouteCommand | PlainMessage<DeleteRouteCommand> | undefined): boolean {
+    return proto3.util.equals(DeleteRouteCommand, a, b);
+  }
+}
+
+/**
  * ConfigSnapshot captures the full config state for FSM.Snapshot()/Restore().
  * Each repeated field contains one entry per entity, using the Put/Create
  * command messages to represent complete entity state.
@@ -1662,6 +1772,11 @@ export class ConfigSnapshot extends Message<ConfigSnapshot> {
    */
   clusterTls?: PutClusterTLSCommand;
 
+  /**
+   * @generated from field: repeated gastrolog.v1.PutRouteCommand routes = 12;
+   */
+  routes: PutRouteCommand[] = [];
+
   constructor(data?: PartialMessage<ConfigSnapshot>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1681,6 +1796,7 @@ export class ConfigSnapshot extends Message<ConfigSnapshot> {
     { no: 9, name: "refresh_tokens", kind: "message", T: CreateRefreshTokenCommand, repeated: true },
     { no: 10, name: "node_configs", kind: "message", T: PutNodeConfigCommand, repeated: true },
     { no: 11, name: "cluster_tls", kind: "message", T: PutClusterTLSCommand },
+    { no: 12, name: "routes", kind: "message", T: PutRouteCommand, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ConfigSnapshot {

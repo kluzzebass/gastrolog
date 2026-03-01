@@ -188,7 +188,6 @@ export function SetupWizard() {
           name: vaultName,
           type: vault.type,
           enabled: true,
-          filter: filterId,
           policy: rotationId,
           retentionRules: retentionId
             ? [{ retentionPolicyId: retentionId, action: "expire" }]
@@ -197,7 +196,19 @@ export function SetupWizard() {
         },
       });
 
-      // 5. Create ingester
+      // 5. Create route (links filter to vault)
+      await configClient.putRoute({
+        config: {
+          id: crypto.randomUUID(),
+          name: "default",
+          filterId,
+          destinations: [{ vaultId }],
+          distribution: "fanout",
+          enabled: true,
+        },
+      });
+
+      // 6. Create ingester
       await configClient.putIngester({
         config: {
           id: ingesterId,

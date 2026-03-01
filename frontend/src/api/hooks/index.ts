@@ -29,6 +29,8 @@ export {
   useDeleteRotationPolicy,
   usePutRetentionPolicy,
   useDeleteRetentionPolicy,
+  usePutRoute,
+  useDeleteRoute,
   useGenerateName,
 } from "./useConfig";
 export {

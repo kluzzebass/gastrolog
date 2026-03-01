@@ -93,6 +93,12 @@ service ConfigService {
   // PutNodeConfig creates or updates a node configuration.
   rpc PutNodeConfig(PutNodeConfigRequest) returns (PutNodeConfigResponse);
 
+  // PutRoute creates or updates a route.
+  rpc PutRoute(PutRouteRequest) returns (PutRouteResponse);
+
+  // DeleteRoute removes a route.
+  rpc DeleteRoute(DeleteRouteRequest) returns (DeleteRouteResponse);
+
   // GenerateName returns a random petname for use as a default entity name.
   rpc GenerateName(GenerateNameRequest) returns (GenerateNameResponse);
 }
@@ -106,6 +112,7 @@ message GetConfigResponse {
   repeated FilterConfig filters = 4;
   repeated RetentionPolicyConfig retention_policies = 5;
   repeated NodeConfig node_configs = 6;
+  repeated RouteConfig routes = 7;
 }
 
 message RetentionRule {
@@ -117,7 +124,8 @@ message RetentionRule {
 message VaultConfig {
   string id = 1;
   string type = 2;
-  string filter = 3;
+  // field 3 was 'filter' (UUID) — routing moved to RouteConfig
+  reserved 3;
   string policy = 4;
   map<string, string> params = 5;
   // field 6 was 'retention' (single UUID) — removed
@@ -125,6 +133,19 @@ message VaultConfig {
   string name = 8;
   repeated RetentionRule retention_rules = 9;
   string node_id = 10;
+}
+
+message RouteDestination {
+  string vault_id = 1;
+}
+
+message RouteConfig {
+  string id = 1;
+  string name = 2;
+  string filter_id = 3;                       // references FilterConfig.id
+  repeated RouteDestination destinations = 4;
+  string distribution = 5;                     // "fanout" (default) or "round-robin"
+  bool enabled = 6;
 }
 
 message IngesterConfig {
@@ -234,6 +255,18 @@ message DeleteVaultRequest {
 }
 
 message DeleteVaultResponse {}
+
+message PutRouteRequest {
+  RouteConfig config = 1;
+}
+
+message PutRouteResponse {}
+
+message DeleteRouteRequest {
+  string id = 1;
+}
+
+message DeleteRouteResponse {}
 
 message PutIngesterRequest {
   IngesterConfig config = 1;

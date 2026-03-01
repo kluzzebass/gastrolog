@@ -140,6 +140,14 @@ func (s *Store) ListIngesters(ctx context.Context) ([]config.IngesterConfig, err
 	return s.fsm.Store().ListIngesters(ctx)
 }
 
+func (s *Store) GetRoute(ctx context.Context, id uuid.UUID) (*config.RouteConfig, error) {
+	return s.fsm.Store().GetRoute(ctx, id)
+}
+
+func (s *Store) ListRoutes(ctx context.Context) ([]config.RouteConfig, error) {
+	return s.fsm.Store().ListRoutes(ctx)
+}
+
 func (s *Store) LoadServerSettings(ctx context.Context) (config.ServerSettings, error) {
 	return s.fsm.Store().LoadServerSettings(ctx)
 }
@@ -230,6 +238,14 @@ func (s *Store) PutIngester(ctx context.Context, cfg config.IngesterConfig) erro
 
 func (s *Store) DeleteIngester(ctx context.Context, id uuid.UUID) error {
 	return s.apply(command.NewDeleteIngester(id))
+}
+
+func (s *Store) PutRoute(ctx context.Context, cfg config.RouteConfig) error {
+	return s.apply(command.NewPutRoute(cfg))
+}
+
+func (s *Store) DeleteRoute(ctx context.Context, id uuid.UUID) error {
+	return s.apply(command.NewDeleteRoute(id))
 }
 
 func (s *Store) SaveServerSettings(ctx context.Context, ss config.ServerSettings) error {

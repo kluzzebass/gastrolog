@@ -49,10 +49,10 @@ func newVaultListCmd() *cobra.Command {
 				rows = append(rows, []string{
 					v.Id, v.Name, v.Type,
 					strconv.FormatBool(v.Enabled),
-					v.Filter, v.Policy, v.NodeId,
+					v.Policy, v.NodeId,
 				})
 			}
-			p.table([]string{"ID", "NAME", "TYPE", "ENABLED", "FILTER", "POLICY", "NODE"}, rows)
+			p.table([]string{"ID", "NAME", "TYPE", "ENABLED", "POLICY", "NODE"}, rows)
 			return nil
 		},
 	}
@@ -99,7 +99,6 @@ func vaultDetailPairs(v *v1.VaultConfig) [][2]string {
 		{"Name", v.Name},
 		{"Type", v.Type},
 		{"Enabled", strconv.FormatBool(v.Enabled)},
-		{"Filter", v.Filter},
 		{"Policy", v.Policy},
 		{"Node", v.NodeId},
 	}
@@ -133,7 +132,7 @@ func newVaultCreateCmd() *cobra.Command {
 
 			client := clientFromCmd(cmd)
 
-			filterID, policyID, rules, err := resolveVaultRefs(client, filterName, policyName, retentionSpecs)
+			_, policyID, rules, err := resolveVaultRefs(client, filterName, policyName, retentionSpecs)
 			if err != nil {
 				return err
 			}
@@ -144,7 +143,6 @@ func newVaultCreateCmd() *cobra.Command {
 					Id:             id,
 					Name:           name,
 					Type:           vaultType,
-					Filter:         filterID,
 					Policy:         policyID,
 					Params:         parseParams(params),
 					Enabled:        enabled,

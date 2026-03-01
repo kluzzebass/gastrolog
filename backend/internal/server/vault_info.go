@@ -207,9 +207,6 @@ func (s *VaultServer) getVaultInfo(ctx context.Context, id uuid.UUID) (*apiv1.Va
 		Enabled:     s.orch.IsVaultEnabled(id),
 		NodeId:      cfg.NodeID,
 	}
-	if cfg.Filter != nil {
-		info.Filter = cfg.Filter.String()
-	}
 	return info, nil
 }
 

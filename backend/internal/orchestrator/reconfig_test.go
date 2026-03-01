@@ -40,9 +40,9 @@ func TestReloadFilters(t *testing.T) {
 			{ID: prodFilterID, Expression: "env=prod"},
 			{ID: catchAllFilterID, Expression: "*"},
 		},
-		Vaults: []config.VaultConfig{
-			{ID: vaults.prod, Filter: new(prodFilterID)},
-			{ID: vaults.archive, Filter: new(catchAllFilterID)},
+		Routes: []config.RouteConfig{
+			{ID: uuid.Must(uuid.NewV7()), FilterID: new(prodFilterID), Destinations: []uuid.UUID{vaults.prod}, Enabled: true},
+			{ID: uuid.Must(uuid.NewV7()), FilterID: new(catchAllFilterID), Destinations: []uuid.UUID{vaults.archive}, Enabled: true},
 		},
 	}
 	if err := orch.ReloadFilters(context.Background()); err != nil {
@@ -72,9 +72,9 @@ func TestReloadFilters(t *testing.T) {
 			{ID: prodFilterID, Expression: "env=staging"},
 			{ID: catchAllFilterID, Expression: "*"},
 		},
-		Vaults: []config.VaultConfig{
-			{ID: vaults.prod, Filter: new(prodFilterID)},
-			{ID: vaults.archive, Filter: new(catchAllFilterID)},
+		Routes: []config.RouteConfig{
+			{ID: uuid.Must(uuid.NewV7()), FilterID: new(prodFilterID), Destinations: []uuid.UUID{vaults.prod}, Enabled: true},
+			{ID: uuid.Must(uuid.NewV7()), FilterID: new(catchAllFilterID), Destinations: []uuid.UUID{vaults.archive}, Enabled: true},
 		},
 	}
 	if err := orch.ReloadFilters(context.Background()); err != nil {
@@ -110,8 +110,8 @@ func TestReloadFiltersInvalidExpression(t *testing.T) {
 		Filters: []config.FilterConfig{
 			{ID: invalidFilterID, Expression: "(unclosed"},
 		},
-		Vaults: []config.VaultConfig{
-			{ID: vaults.prod, Filter: new(invalidFilterID)},
+		Routes: []config.RouteConfig{
+			{ID: uuid.Must(uuid.NewV7()), FilterID: new(invalidFilterID), Destinations: []uuid.UUID{vaults.prod}, Enabled: true},
 		},
 	}
 	err := orch.ReloadFilters(context.Background())
@@ -134,9 +134,9 @@ func TestReloadFiltersIgnoresUnknownVaults(t *testing.T) {
 			{ID: prodFilterID, Expression: "env=prod"},
 			{ID: catchAllFilterID, Expression: "*"},
 		},
-		Vaults: []config.VaultConfig{
-			{ID: vaults.prod, Filter: new(prodFilterID)},
-			{ID: nonexistentVaultID, Filter: new(catchAllFilterID)},
+		Routes: []config.RouteConfig{
+			{ID: uuid.Must(uuid.NewV7()), FilterID: new(prodFilterID), Destinations: []uuid.UUID{vaults.prod}, Enabled: true},
+			{ID: uuid.Must(uuid.NewV7()), FilterID: new(catchAllFilterID), Destinations: []uuid.UUID{nonexistentVaultID}, Enabled: true},
 		},
 	}
 	if err := orch.ReloadFilters(context.Background()); err != nil {
@@ -152,6 +152,9 @@ func TestAddVault(t *testing.T) {
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "env=test"},
 		},
+		Routes: []config.RouteConfig{
+			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
+		},
 	}}
 	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
@@ -165,9 +168,8 @@ func TestAddVault(t *testing.T) {
 	}
 
 	vaultCfg := config.VaultConfig{
-		ID:     vaultID,
-		Type:   "memory",
-		Filter: new(filterID),
+		ID:   vaultID,
+		Type: "memory",
 	}
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
@@ -203,6 +205,9 @@ func TestAddVaultDuplicate(t *testing.T) {
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
+		Routes: []config.RouteConfig{
+			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
+		},
 	}}
 	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
@@ -216,9 +221,8 @@ func TestAddVaultDuplicate(t *testing.T) {
 	}
 
 	vaultCfg := config.VaultConfig{
-		ID:     vaultID,
-		Type:   "memory",
-		Filter: new(filterID),
+		ID:   vaultID,
+		Type: "memory",
 	}
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
@@ -240,6 +244,9 @@ func TestRemoveVaultEmpty(t *testing.T) {
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
+		Routes: []config.RouteConfig{
+			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
+		},
 	}}
 	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
@@ -253,9 +260,8 @@ func TestRemoveVaultEmpty(t *testing.T) {
 	}
 
 	vaultCfg := config.VaultConfig{
-		ID:     vaultID,
-		Type:   "memory",
-		Filter: new(filterID),
+		ID:   vaultID,
+		Type: "memory",
 	}
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
@@ -281,6 +287,9 @@ func TestRemoveVaultNotEmpty(t *testing.T) {
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
+		Routes: []config.RouteConfig{
+			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
+		},
 	}}
 	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
@@ -294,9 +303,8 @@ func TestRemoveVaultNotEmpty(t *testing.T) {
 	}
 
 	vaultCfg := config.VaultConfig{
-		ID:     vaultID,
-		Type:   "memory",
-		Filter: new(filterID),
+		ID:   vaultID,
+		Type: "memory",
 	}
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
@@ -338,6 +346,9 @@ func TestForceRemoveVault(t *testing.T) {
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
+		Routes: []config.RouteConfig{
+			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
+		},
 	}}
 	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
@@ -351,9 +362,8 @@ func TestForceRemoveVault(t *testing.T) {
 	}
 
 	vaultCfg := config.VaultConfig{
-		ID:     vaultID,
-		Type:   "memory",
-		Filter: new(filterID),
+		ID:   vaultID,
+		Type: "memory",
 	}
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
@@ -418,6 +428,9 @@ func TestForceRemoveEmptyVault(t *testing.T) {
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
+		Routes: []config.RouteConfig{
+			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
+		},
 	}}
 	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
@@ -431,9 +444,8 @@ func TestForceRemoveEmptyVault(t *testing.T) {
 	}
 
 	vaultCfg := config.VaultConfig{
-		ID:     vaultID,
-		Type:   "memory",
-		Filter: new(filterID),
+		ID:   vaultID,
+		Type: "memory",
 	}
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
@@ -593,6 +605,9 @@ func TestVaultConfig(t *testing.T) {
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "env=prod AND level=error"},
 		},
+		Routes: []config.RouteConfig{
+			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
+		},
 	}}
 	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
@@ -606,9 +621,8 @@ func TestVaultConfig(t *testing.T) {
 	}
 
 	vaultCfg := config.VaultConfig{
-		ID:     vaultID,
-		Type:   "memory",
-		Filter: new(filterID),
+		ID:   vaultID,
+		Type: "memory",
 	}
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
@@ -623,11 +637,6 @@ func TestVaultConfig(t *testing.T) {
 
 	if gotCfg.ID != vaultID {
 		t.Errorf("ID: expected %s, got %s", vaultID, gotCfg.ID)
-	}
-	// VaultConfig does not track the original filter UUID reference,
-	// so Filter is nil in the returned config.
-	if gotCfg.Filter != nil {
-		t.Errorf("Filter: expected nil (not tracked by orchestrator), got %v", gotCfg.Filter)
 	}
 }
 
@@ -697,6 +706,9 @@ func TestSetRotationPolicyOnVaultDirectly(t *testing.T) {
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
+		Routes: []config.RouteConfig{
+			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
+		},
 	}}
 	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
@@ -711,9 +723,8 @@ func TestSetRotationPolicyOnVaultDirectly(t *testing.T) {
 	}
 
 	vaultCfg := config.VaultConfig{
-		ID:     vaultID,
-		Type:   "memory",
-		Filter: new(filterID),
+		ID:   vaultID,
+		Type: "memory",
 	}
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
@@ -754,6 +765,9 @@ func TestPauseVault(t *testing.T) {
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
+		Routes: []config.RouteConfig{
+			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
+		},
 	}}
 	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
@@ -767,9 +781,8 @@ func TestPauseVault(t *testing.T) {
 	}
 
 	vaultCfg := config.VaultConfig{
-		ID:     vaultID,
-		Type:   "memory",
-		Filter: new(filterID),
+		ID:   vaultID,
+		Type: "memory",
 	}
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
@@ -822,6 +835,9 @@ func TestResumeVault(t *testing.T) {
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
+		Routes: []config.RouteConfig{
+			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
+		},
 	}}
 	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
@@ -835,9 +851,8 @@ func TestResumeVault(t *testing.T) {
 	}
 
 	vaultCfg := config.VaultConfig{
-		ID:     vaultID,
-		Type:   "memory",
-		Filter: new(filterID),
+		ID:   vaultID,
+		Type: "memory",
 	}
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
@@ -890,6 +905,9 @@ func TestDisableVaultDoesNotAffectQuery(t *testing.T) {
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
+		Routes: []config.RouteConfig{
+			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
+		},
 	}}
 	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
@@ -903,9 +921,8 @@ func TestDisableVaultDoesNotAffectQuery(t *testing.T) {
 	}
 
 	vaultCfg := config.VaultConfig{
-		ID:     vaultID,
-		Type:   "memory",
-		Filter: new(filterID),
+		ID:   vaultID,
+		Type: "memory",
 	}
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
@@ -961,6 +978,9 @@ func TestUpdateVaultFilterInvalid(t *testing.T) {
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
+		Routes: []config.RouteConfig{
+			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
+		},
 	}}
 	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 
@@ -974,9 +994,8 @@ func TestUpdateVaultFilterInvalid(t *testing.T) {
 	}
 
 	vaultCfg := config.VaultConfig{
-		ID:     vaultID,
-		Type:   "memory",
-		Filter: new(filterID),
+		ID:   vaultID,
+		Type: "memory",
 	}
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -17,20 +18,29 @@ import (
 )
 
 // validateVaultDir checks that a file vault's directory does not overlap (nest
-// inside or contain) any other file vault's directory. Returns an error
-// describing the conflict, or nil if the directory is safe.
-func (s *ConfigServer) validateVaultDir(ctx context.Context, vaultID uuid.UUID, dir string) error {
+// inside or contain) any other file vault's directory.
+//
+// For vaults on the same node (or with no node set), path comparison is always
+// performed. For vaults on a different node, os.Stat determines whether the
+// directory is accessible on this host (e.g. two nodes on the same machine);
+// if stat fails the directory is on a remote host and the check is skipped.
+//
+// When both directories exist on disk, os.SameFile provides an additional
+// inode-level check that catches symlinks and bind mounts.
+func (s *ConfigServer) validateVaultDir(ctx context.Context, vaultID uuid.UUID, newNodeID, dir string) error {
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
 		return fmt.Errorf("resolve path: %w", err)
 	}
-	// Normalize: ensure trailing separator for prefix comparison.
 	normDir := filepath.Clean(absDir) + string(filepath.Separator)
 
 	existing, err := s.cfgStore.ListVaults(ctx)
 	if err != nil {
 		return fmt.Errorf("list vaults: %w", err)
 	}
+
+	// Stat the new directory (may not exist yet for new vaults).
+	newInfo, _ := os.Stat(absDir)
 
 	for _, st := range existing {
 		if st.ID == vaultID {
@@ -45,11 +55,28 @@ func (s *ConfigServer) validateVaultDir(ctx context.Context, vaultID uuid.UUID, 
 		}
 		absOther, err := filepath.Abs(otherDir)
 		if err != nil {
-			continue // Can't resolve — skip.
+			continue
 		}
+
+		sameNode := st.NodeID == "" || newNodeID == "" || st.NodeID == newNodeID
+
+		// Stat the other vault's directory for inode comparison.
+		otherInfo, otherStatErr := os.Stat(absOther)
+
+		if !sameNode && otherStatErr != nil {
+			// Different node and directory not accessible on this host — skip.
+			continue
+		}
+
+		// Inode check: catches symlinks, bind mounts, hardlinks even across
+		// nodes on the same machine.
+		if newInfo != nil && otherStatErr == nil && os.SameFile(newInfo, otherInfo) {
+			return fmt.Errorf("directory %q is already used by vault %q", dir, st.ID)
+		}
+
+		// Path-based nesting check using clean absolute paths.
 		normOther := filepath.Clean(absOther) + string(filepath.Separator)
 
-		// Check for exact match or nesting in either direction.
 		if normDir == normOther {
 			return fmt.Errorf("directory %q is already used by vault %q", dir, st.ID)
 		}
@@ -92,7 +119,7 @@ func (s *ConfigServer) PutVault(
 	// Validate file vault directory against nesting.
 	if vaultCfg.Type == "file" {
 		if dir := vaultCfg.Params["dir"]; dir != "" {
-			if err := s.validateVaultDir(ctx, vaultCfg.ID, dir); err != nil {
+			if err := s.validateVaultDir(ctx, vaultCfg.ID, vaultCfg.NodeID, dir); err != nil {
 				return nil, connect.NewError(connect.CodeInvalidArgument, err)
 			}
 		}
@@ -133,6 +160,14 @@ func (s *ConfigServer) DeleteVault(
 	}
 	if existing == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("vault not found"))
+	}
+
+	// Referential integrity: reject if any route references this vault as a destination.
+	if routeID, used, err := s.vaultReferencedByRoute(ctx, id); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	} else if used {
+		return nil, connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Errorf("vault %q is referenced as destination in route %q", req.Msg.Id, routeID))
 	}
 
 	if req.Msg.Force {
@@ -259,13 +294,6 @@ func protoToVaultConfig(p *apiv1.VaultConfig) (config.VaultConfig, error) {
 		Params:  p.Params,
 		Enabled: p.Enabled,
 		NodeID:  p.NodeId,
-	}
-	if p.Filter != "" {
-		fid, err := uuid.Parse(p.Filter)
-		if err != nil {
-			return config.VaultConfig{}, fmt.Errorf("invalid filter ID: %w", err)
-		}
-		cfg.Filter = new(fid)
 	}
 	if p.Policy != "" {
 		pid, err := uuid.Parse(p.Policy)

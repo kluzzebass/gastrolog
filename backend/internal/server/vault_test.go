@@ -641,9 +641,8 @@ func newTwoVaultTestSetup(t *testing.T) twoVaultTestClients {
 	for _, id := range []uuid.UUID{srcID, dstID} {
 		_, err := cfgClient.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 			Config: &gastrologv1.VaultConfig{
-				Id:     id.String(),
-				Type:   "memory",
-				Filter: filterID.String(),
+				Id:   id.String(),
+				Type: "memory",
 			},
 		}))
 		if err != nil {
@@ -750,7 +749,6 @@ func TestMergeVaultsFileBacked(t *testing.T) {
 			Config: &gastrologv1.VaultConfig{
 				Id:     id.String(),
 				Type:   "file",
-				Filter: filterID.String(),
 				Params: map[string]string{"dir": vaultDir},
 			},
 		}))

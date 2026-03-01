@@ -34,6 +34,8 @@ const (
 	NotifyIngesterDeleted
 	NotifySettingPut
 	NotifyClusterTLSPut
+	NotifyRoutePut
+	NotifyRouteDeleted
 )
 
 // Notification describes a config mutation that the FSM just applied.
@@ -108,7 +110,9 @@ func (f *FSM) Apply(l *raft.Log) any {
 		*gastrologv1.ConfigCommand_DeleteCertificate,
 		*gastrologv1.ConfigCommand_PutNodeConfig,
 		*gastrologv1.ConfigCommand_DeleteNodeConfig,
-		*gastrologv1.ConfigCommand_PutClusterTls:
+		*gastrologv1.ConfigCommand_PutClusterTls,
+		*gastrologv1.ConfigCommand_PutRoute,
+		*gastrologv1.ConfigCommand_DeleteRoute:
 		return f.applyConfig(ctx, cmd)
 
 	case *gastrologv1.ConfigCommand_CreateUser,
@@ -204,6 +208,10 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.ConfigCommand
 			return nil, err
 		}
 		return &Notification{Kind: NotifyClusterTLSPut}, nil
+	case *gastrologv1.ConfigCommand_PutRoute:
+		return f.applyPutRoute(ctx, c.PutRoute)
+	case *gastrologv1.ConfigCommand_DeleteRoute:
+		return f.applyDeleteRoute(ctx, c.DeleteRoute)
 	default:
 		return nil, fmt.Errorf("unexpected config command: %T", c)
 	}
@@ -355,6 +363,28 @@ func (f *FSM) applyPutSetting(ctx context.Context, pb *gastrologv1.PutSettingCom
 		return nil, err
 	}
 	return &Notification{Kind: NotifySettingPut, Key: key}, nil
+}
+
+func (f *FSM) applyPutRoute(ctx context.Context, pb *gastrologv1.PutRouteCommand) (*Notification, error) {
+	cfg, err := command.ExtractPutRoute(pb)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.store.PutRoute(ctx, cfg); err != nil {
+		return nil, err
+	}
+	return &Notification{Kind: NotifyRoutePut, ID: cfg.ID}, nil
+}
+
+func (f *FSM) applyDeleteRoute(ctx context.Context, pb *gastrologv1.DeleteRouteCommand) (*Notification, error) {
+	id, err := command.ExtractDeleteRoute(pb)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.store.DeleteRoute(ctx, id); err != nil {
+		return nil, err
+	}
+	return &Notification{Kind: NotifyRouteDeleted, ID: id}, nil
 }
 
 // applyUser dispatches user-management commands.
@@ -570,6 +600,11 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit // snapshot re
 	for _, ing := range cfg.Ingesters {
 		if err := newStore.PutIngester(ctx, ing); err != nil {
 			return fmt.Errorf("restore ingester %s: %w", ing.ID, err)
+		}
+	}
+	for _, rt := range cfg.Routes {
+		if err := newStore.PutRoute(ctx, rt); err != nil {
+			return fmt.Errorf("restore route %s: %w", rt.ID, err)
 		}
 	}
 	// Restore server settings from Config fields (populated by RestoreSnapshot).

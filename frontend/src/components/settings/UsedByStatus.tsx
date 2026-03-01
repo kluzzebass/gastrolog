@@ -53,6 +53,31 @@ export function refsFor(
   return vaults.filter((s) => s[field] === id).map((s) => s.name || s.id);
 }
 
+interface Route {
+  id: string;
+  name: string;
+  filterId: string;
+  destinations: { vaultId: string }[];
+}
+
+export function routeRefsForFilter(
+  routes: Route[],
+  filterId: string,
+): string[] {
+  return routes
+    .filter((r) => r.filterId === filterId)
+    .map((r) => r.name || r.id);
+}
+
+export function routeRefsForVault(
+  routes: Route[],
+  vaultId: string,
+): string[] {
+  return routes
+    .filter((r) => r.destinations.some((d) => d.vaultId === vaultId))
+    .map((r) => r.name || r.id);
+}
+
 export function ruleRefsFor(
   vaults: Vault[],
   retentionPolicyId: string,

@@ -129,9 +129,8 @@ func TestApplyDeleteRetentionPolicy(t *testing.T) {
 func TestApplyPutVault(t *testing.T) {
 	fsm := New()
 	id := newID()
-	filterID := newID()
 	applyCmd(t, fsm, command.NewPutVault(config.VaultConfig{
-		ID: id, Name: "vault", Type: "file", Filter: &filterID, Enabled: true,
+		ID: id, Name: "vault", Type: "file", Enabled: true,
 		Params: map[string]string{"path": "/data"},
 	}))
 
@@ -551,7 +550,7 @@ func TestSnapshotRestore(t *testing.T) {
 	vaultID := newID()
 	applyCmd(t, fsm1, command.NewPutVault(config.VaultConfig{
 		ID: vaultID, Name: "vault1", Type: "file",
-		Filter: &filterID, Policy: &rpID, Enabled: true,
+		Policy: &rpID, Enabled: true,
 		Params: map[string]string{"path": "/data"},
 		RetentionRules: []config.RetentionRule{
 			{RetentionPolicyID: retID, Action: config.RetentionActionExpire},

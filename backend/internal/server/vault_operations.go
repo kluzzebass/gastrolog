@@ -158,12 +158,11 @@ func (s *VaultServer) MigrateVault(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("destination_params.dir required for file vaults"))
 	}
 
-	// Phase 1: Create destination vault with inherited filter/policy.
+	// Phase 1: Create destination vault with inherited policy.
 	dstCfg := config.VaultConfig{
 		ID:        uuid.Must(uuid.NewV7()),
 		Name:      req.Msg.Destination,
 		Type:      dstType,
-		Filter:    srcCfg.Filter,
 		Policy:    srcCfg.Policy,
 		RetentionRules: srcCfg.RetentionRules,
 		Enabled:   true,

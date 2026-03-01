@@ -82,9 +82,8 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 
 // applyVaults creates chunk/index/query managers for each vault in the config,
 // compiles filters, applies rotation policies, and registers vaults.
-func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) error { //nolint:gocognit // vault setup is inherently multi-step
+func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) error {
 	vaultIDs := make(map[uuid.UUID]bool)
-	var compiledFilters []*CompiledFilter
 
 	for _, vaultCfg := range cfg.Vaults {
 		if vaultIDs[vaultCfg.ID] {
@@ -97,17 +96,9 @@ func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) erro
 			continue
 		}
 
-		// Resolve filter ID to expression and compile.
-		var filterID uuid.UUID
-		if vaultCfg.Filter != nil {
-			filterID = *vaultCfg.Filter
-		}
-		filterExpr := resolveFilterExpr(cfg, filterID)
-		f, err := CompileFilter(vaultCfg.ID, filterExpr)
-		if err != nil {
-			return fmt.Errorf("invalid filter for vault %s: %w", vaultCfg.ID, err)
-		}
-		compiledFilters = append(compiledFilters, f)
+		// Routes are compiled separately — vault-level filter was removed.
+		// Legacy: compile a catch-all for vaults not covered by any route,
+		// or leave the filter set to be built from routes below.
 
 		// Look up chunk manager factory.
 		cmFactory, ok := factories.ChunkManagers[vaultCfg.Type]
@@ -169,9 +160,9 @@ func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) erro
 		o.RegisterVault(vault)
 	}
 
-	// Set filter set if any filters were compiled.
-	if len(compiledFilters) > 0 {
-		o.SetFilterSet(NewFilterSet(compiledFilters))
+	// Build filter set from routes.
+	if err := o.reloadFiltersFromRoutes(cfg); err != nil {
+		return err
 	}
 
 	return nil

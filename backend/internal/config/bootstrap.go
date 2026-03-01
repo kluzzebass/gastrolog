@@ -17,6 +17,7 @@ func DefaultConfig() *Config {
 	rotationID := uuid.Must(uuid.NewV7())
 	retentionID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
+	routeID := uuid.Must(uuid.NewV7())
 	ingesterID := uuid.Must(uuid.NewV7())
 
 	return &Config{
@@ -31,15 +32,24 @@ func DefaultConfig() *Config {
 		},
 		Vaults: []VaultConfig{
 			{
-				ID:        vaultID,
-				Name:      "default",
-				Type:      "memory",
-				Enabled:   true,
-				Filter:    new(filterID),
-				Policy:    new(rotationID),
+				ID:      vaultID,
+				Name:    "default",
+				Type:    "memory",
+				Enabled: true,
+				Policy:  new(rotationID),
 				RetentionRules: []RetentionRule{
-				{RetentionPolicyID: retentionID, Action: RetentionActionExpire},
+					{RetentionPolicyID: retentionID, Action: RetentionActionExpire},
+				},
 			},
+		},
+		Routes: []RouteConfig{
+			{
+				ID:           routeID,
+				Name:         "default",
+				FilterID:     new(filterID),
+				Destinations: []uuid.UUID{vaultID},
+				Distribution: "fanout",
+				Enabled:      true,
 			},
 		},
 		Ingesters: []IngesterConfig{
@@ -81,6 +91,11 @@ func Bootstrap(ctx context.Context, store Store) error {
 	}
 	for _, v := range cfg.Vaults {
 		if err := store.PutVault(ctx, v); err != nil {
+			return err
+		}
+	}
+	for _, rt := range cfg.Routes {
+		if err := store.PutRoute(ctx, rt); err != nil {
 			return err
 		}
 	}

@@ -76,6 +76,12 @@ type Store interface {
 	PutIngester(ctx context.Context, cfg IngesterConfig) error
 	DeleteIngester(ctx context.Context, id uuid.UUID) error
 
+	// Routes
+	GetRoute(ctx context.Context, id uuid.UUID) (*RouteConfig, error)
+	ListRoutes(ctx context.Context) ([]RouteConfig, error)
+	PutRoute(ctx context.Context, cfg RouteConfig) error
+	DeleteRoute(ctx context.Context, id uuid.UUID) error
+
 	// Server settings — typed access to Auth, Query, Scheduler, TLS, Lookup, SetupWizardDismissed.
 	LoadServerSettings(ctx context.Context) (ServerSettings, error)
 	SaveServerSettings(ctx context.Context, ss ServerSettings) error
@@ -164,6 +170,7 @@ type Config struct {
 	RetentionPolicies []RetentionPolicyConfig `json:"retentionPolicies,omitempty"`
 	Ingesters         []IngesterConfig        `json:"ingesters,omitempty"`
 	Vaults            []VaultConfig           `json:"vaults,omitempty"`
+	Routes            []RouteConfig           `json:"routes,omitempty"`
 	Certs             []CertPEM               `json:"certs,omitempty"`
 	Nodes             []NodeConfig            `json:"nodes,omitempty"`
 
@@ -448,10 +455,6 @@ type VaultConfig struct {
 	// Type identifies the vault implementation (e.g., "file", "memory").
 	Type string `json:"type"`
 
-	// Filter references a filter by UUID.
-	// Nil means no filter (vault receives nothing).
-	Filter *uuid.UUID `json:"filter,omitempty"`
-
 	// Policy references a rotation policy by UUID.
 	// Nil means no policy (type-specific default).
 	Policy *uuid.UUID `json:"policy,omitempty"`
@@ -471,6 +474,32 @@ type VaultConfig struct {
 	// NodeID is the raft server ID of the node that owns this vault.
 	// Empty means unscoped (legacy/migration compatibility).
 	NodeID string `json:"nodeId,omitempty"`
+}
+
+// RouteConfig defines a named routing rule that connects a filter to one or more
+// destination vaults. Routes decouple log routing from storage, enabling
+// multi-destination routing with distribution modes.
+type RouteConfig struct {
+	// ID is the unique identifier (UUIDv7).
+	ID uuid.UUID `json:"id"`
+
+	// Name is the human-readable display name (unique).
+	Name string `json:"name"`
+
+	// FilterID references a FilterConfig by UUID.
+	// Nil means no filter (route receives nothing).
+	FilterID *uuid.UUID `json:"filterId,omitempty"`
+
+	// Destinations lists the vault IDs that this route sends messages to.
+	Destinations []uuid.UUID `json:"destinations"`
+
+	// Distribution controls how messages are distributed to destinations.
+	// "fanout" (default): send to all destinations.
+	// "round-robin": send to one destination at a time, rotating.
+	Distribution string `json:"distribution,omitempty"`
+
+	// Enabled controls whether this route is active.
+	Enabled bool `json:"enabled,omitempty"`
 }
 
 // IngesterConfig describes a ingester to instantiate.

@@ -71,6 +71,11 @@ export class GetConfigResponse extends Message<GetConfigResponse> {
    */
   nodeConfigs: NodeConfig[] = [];
 
+  /**
+   * @generated from field: repeated gastrolog.v1.RouteConfig routes = 7;
+   */
+  routes: RouteConfig[] = [];
+
   constructor(data?: PartialMessage<GetConfigResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -85,6 +90,7 @@ export class GetConfigResponse extends Message<GetConfigResponse> {
     { no: 4, name: "filters", kind: "message", T: FilterConfig, repeated: true },
     { no: 5, name: "retention_policies", kind: "message", T: RetentionPolicyConfig, repeated: true },
     { no: 6, name: "node_configs", kind: "message", T: NodeConfig, repeated: true },
+    { no: 7, name: "routes", kind: "message", T: RouteConfig, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetConfigResponse {
@@ -172,11 +178,6 @@ export class VaultConfig extends Message<VaultConfig> {
   type = "";
 
   /**
-   * @generated from field: string filter = 3;
-   */
-  filter = "";
-
-  /**
    * @generated from field: string policy = 4;
    */
   policy = "";
@@ -218,7 +219,6 @@ export class VaultConfig extends Message<VaultConfig> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "filter", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "policy", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 5, name: "params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
     { no: 7, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
@@ -241,6 +241,114 @@ export class VaultConfig extends Message<VaultConfig> {
 
   static equals(a: VaultConfig | PlainMessage<VaultConfig> | undefined, b: VaultConfig | PlainMessage<VaultConfig> | undefined): boolean {
     return proto3.util.equals(VaultConfig, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.RouteDestination
+ */
+export class RouteDestination extends Message<RouteDestination> {
+  /**
+   * @generated from field: string vault_id = 1;
+   */
+  vaultId = "";
+
+  constructor(data?: PartialMessage<RouteDestination>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RouteDestination";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RouteDestination {
+    return new RouteDestination().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RouteDestination {
+    return new RouteDestination().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RouteDestination {
+    return new RouteDestination().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RouteDestination | PlainMessage<RouteDestination> | undefined, b: RouteDestination | PlainMessage<RouteDestination> | undefined): boolean {
+    return proto3.util.equals(RouteDestination, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.RouteConfig
+ */
+export class RouteConfig extends Message<RouteConfig> {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id = "";
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name = "";
+
+  /**
+   * references FilterConfig.id
+   *
+   * @generated from field: string filter_id = 3;
+   */
+  filterId = "";
+
+  /**
+   * @generated from field: repeated gastrolog.v1.RouteDestination destinations = 4;
+   */
+  destinations: RouteDestination[] = [];
+
+  /**
+   * "fanout" (default) or "round-robin"
+   *
+   * @generated from field: string distribution = 5;
+   */
+  distribution = "";
+
+  /**
+   * @generated from field: bool enabled = 6;
+   */
+  enabled = false;
+
+  constructor(data?: PartialMessage<RouteConfig>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RouteConfig";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "filter_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "destinations", kind: "message", T: RouteDestination, repeated: true },
+    { no: 5, name: "distribution", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RouteConfig {
+    return new RouteConfig().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RouteConfig {
+    return new RouteConfig().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RouteConfig {
+    return new RouteConfig().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RouteConfig | PlainMessage<RouteConfig> | undefined, b: RouteConfig | PlainMessage<RouteConfig> | undefined): boolean {
+    return proto3.util.equals(RouteConfig, a, b);
   }
 }
 
@@ -1268,6 +1376,142 @@ export class DeleteVaultResponse extends Message<DeleteVaultResponse> {
 
   static equals(a: DeleteVaultResponse | PlainMessage<DeleteVaultResponse> | undefined, b: DeleteVaultResponse | PlainMessage<DeleteVaultResponse> | undefined): boolean {
     return proto3.util.equals(DeleteVaultResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutRouteRequest
+ */
+export class PutRouteRequest extends Message<PutRouteRequest> {
+  /**
+   * @generated from field: gastrolog.v1.RouteConfig config = 1;
+   */
+  config?: RouteConfig;
+
+  constructor(data?: PartialMessage<PutRouteRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutRouteRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "config", kind: "message", T: RouteConfig },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutRouteRequest {
+    return new PutRouteRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutRouteRequest {
+    return new PutRouteRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutRouteRequest {
+    return new PutRouteRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutRouteRequest | PlainMessage<PutRouteRequest> | undefined, b: PutRouteRequest | PlainMessage<PutRouteRequest> | undefined): boolean {
+    return proto3.util.equals(PutRouteRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutRouteResponse
+ */
+export class PutRouteResponse extends Message<PutRouteResponse> {
+  constructor(data?: PartialMessage<PutRouteResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutRouteResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutRouteResponse {
+    return new PutRouteResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutRouteResponse {
+    return new PutRouteResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutRouteResponse {
+    return new PutRouteResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutRouteResponse | PlainMessage<PutRouteResponse> | undefined, b: PutRouteResponse | PlainMessage<PutRouteResponse> | undefined): boolean {
+    return proto3.util.equals(PutRouteResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.DeleteRouteRequest
+ */
+export class DeleteRouteRequest extends Message<DeleteRouteRequest> {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id = "";
+
+  constructor(data?: PartialMessage<DeleteRouteRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.DeleteRouteRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteRouteRequest {
+    return new DeleteRouteRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteRouteRequest {
+    return new DeleteRouteRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteRouteRequest {
+    return new DeleteRouteRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DeleteRouteRequest | PlainMessage<DeleteRouteRequest> | undefined, b: DeleteRouteRequest | PlainMessage<DeleteRouteRequest> | undefined): boolean {
+    return proto3.util.equals(DeleteRouteRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.DeleteRouteResponse
+ */
+export class DeleteRouteResponse extends Message<DeleteRouteResponse> {
+  constructor(data?: PartialMessage<DeleteRouteResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.DeleteRouteResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteRouteResponse {
+    return new DeleteRouteResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteRouteResponse {
+    return new DeleteRouteResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteRouteResponse {
+    return new DeleteRouteResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DeleteRouteResponse | PlainMessage<DeleteRouteResponse> | undefined, b: DeleteRouteResponse | PlainMessage<DeleteRouteResponse> | undefined): boolean {
+    return proto3.util.equals(DeleteRouteResponse, a, b);
   }
 }
 

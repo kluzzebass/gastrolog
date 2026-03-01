@@ -37,6 +37,8 @@ message ConfigCommand {
     PutNodeConfigCommand put_node_config = 25;
     DeleteNodeConfigCommand delete_node_config = 26;
     PutClusterTLSCommand put_cluster_tls = 27;
+    PutRouteCommand put_route = 28;
+    DeleteRouteCommand delete_route = 29;
   }
 }
 
@@ -95,7 +97,8 @@ message PutVaultCommand {
   string id = 1;
   string name = 2;
   string type = 3;
-  string filter = 4; // empty = nil
+  // field 4 was 'filter' (UUID) — routing moved to routes
+  reserved 4;
   string policy = 5; // empty = nil
   repeated VaultRetentionRule retention_rules = 6;
   bool enabled = 7;
@@ -229,6 +232,21 @@ message PutClusterTLSCommand {
   string join_token = 5;
 }
 
+// --- Routes ---
+
+message PutRouteCommand {
+  string id = 1;
+  string name = 2;
+  string filter_id = 3;
+  repeated string destination_ids = 4;
+  string distribution = 5;
+  bool enabled = 6;
+}
+
+message DeleteRouteCommand {
+  string id = 1;
+}
+
 // --- Snapshot ---
 
 // ConfigSnapshot captures the full config state for FSM.Snapshot()/Restore().
@@ -246,4 +264,5 @@ message ConfigSnapshot {
   repeated CreateRefreshTokenCommand refresh_tokens = 9;
   repeated PutNodeConfigCommand node_configs = 10;
   PutClusterTLSCommand cluster_tls = 11;
+  repeated PutRouteCommand routes = 12;
 }

@@ -219,7 +219,6 @@ func putVaultCmd(cfg config.VaultConfig) *gastrologv1.PutVaultCommand {
 		Id:             cfg.ID.String(),
 		Name:           cfg.Name,
 		Type:           cfg.Type,
-		Filter:         uuidPtrToString(cfg.Filter),
 		Policy:         uuidPtrToString(cfg.Policy),
 		RetentionRules: rules,
 		Enabled:        cfg.Enabled,
@@ -250,10 +249,6 @@ func ExtractPutVault(cmd *gastrologv1.PutVaultCommand) (config.VaultConfig, erro
 	if err != nil {
 		return config.VaultConfig{}, fmt.Errorf("parse vault id: %w", err)
 	}
-	filter, err := parseOptionalUUID(cmd.GetFilter())
-	if err != nil {
-		return config.VaultConfig{}, fmt.Errorf("parse vault filter: %w", err)
-	}
 	policy, err := parseOptionalUUID(cmd.GetPolicy())
 	if err != nil {
 		return config.VaultConfig{}, fmt.Errorf("parse vault policy: %w", err)
@@ -280,7 +275,6 @@ func ExtractPutVault(cmd *gastrologv1.PutVaultCommand) (config.VaultConfig, erro
 		ID:             id,
 		Name:           cmd.GetName(),
 		Type:           cmd.GetType(),
-		Filter:         filter,
 		Policy:         policy,
 		RetentionRules: rules,
 		Enabled:        cmd.GetEnabled(),
@@ -343,6 +337,74 @@ func ExtractPutIngester(cmd *gastrologv1.PutIngesterCommand) (config.IngesterCon
 
 // ExtractDeleteIngester extracts the UUID from a DeleteIngesterCommand.
 func ExtractDeleteIngester(cmd *gastrologv1.DeleteIngesterCommand) (uuid.UUID, error) {
+	return uuid.Parse(cmd.GetId())
+}
+
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
+
+func putRouteCmd(cfg config.RouteConfig) *gastrologv1.PutRouteCommand {
+	dests := make([]string, len(cfg.Destinations))
+	for i, d := range cfg.Destinations {
+		dests[i] = d.String()
+	}
+	return &gastrologv1.PutRouteCommand{
+		Id:             cfg.ID.String(),
+		Name:           cfg.Name,
+		FilterId:       uuidPtrToString(cfg.FilterID),
+		DestinationIds: dests,
+		Distribution:   cfg.Distribution,
+		Enabled:        cfg.Enabled,
+	}
+}
+
+// NewPutRoute creates a ConfigCommand for PutRoute.
+func NewPutRoute(cfg config.RouteConfig) *gastrologv1.ConfigCommand {
+	return &gastrologv1.ConfigCommand{
+		Command: &gastrologv1.ConfigCommand_PutRoute{PutRoute: putRouteCmd(cfg)},
+	}
+}
+
+// NewDeleteRoute creates a ConfigCommand for DeleteRoute.
+func NewDeleteRoute(id uuid.UUID) *gastrologv1.ConfigCommand {
+	return &gastrologv1.ConfigCommand{
+		Command: &gastrologv1.ConfigCommand_DeleteRoute{
+			DeleteRoute: &gastrologv1.DeleteRouteCommand{Id: id.String()},
+		},
+	}
+}
+
+// ExtractPutRoute converts a PutRouteCommand back to a RouteConfig.
+func ExtractPutRoute(cmd *gastrologv1.PutRouteCommand) (config.RouteConfig, error) {
+	id, err := uuid.Parse(cmd.GetId())
+	if err != nil {
+		return config.RouteConfig{}, fmt.Errorf("parse route id: %w", err)
+	}
+	filterID, err := parseOptionalUUID(cmd.GetFilterId())
+	if err != nil {
+		return config.RouteConfig{}, fmt.Errorf("parse route filter_id: %w", err)
+	}
+	var dests []uuid.UUID
+	for _, d := range cmd.GetDestinationIds() {
+		did, err := uuid.Parse(d)
+		if err != nil {
+			return config.RouteConfig{}, fmt.Errorf("parse route destination: %w", err)
+		}
+		dests = append(dests, did)
+	}
+	return config.RouteConfig{
+		ID:           id,
+		Name:         cmd.GetName(),
+		FilterID:     filterID,
+		Destinations: dests,
+		Distribution: cmd.GetDistribution(),
+		Enabled:      cmd.GetEnabled(),
+	}, nil
+}
+
+// ExtractDeleteRoute extracts the UUID from a DeleteRouteCommand.
+func ExtractDeleteRoute(cmd *gastrologv1.DeleteRouteCommand) (uuid.UUID, error) {
 	return uuid.Parse(cmd.GetId())
 }
 
@@ -849,6 +911,9 @@ func BuildSnapshot(cfg *config.Config, users []config.User, tokens []config.Refr
 	for _, ing := range cfg.Ingesters {
 		snap.Ingesters = append(snap.Ingesters, putIngesterCmd(ing))
 	}
+	for _, rt := range cfg.Routes {
+		snap.Routes = append(snap.Routes, putRouteCmd(rt))
+	}
 	for _, c := range cfg.Certs {
 		snap.Certificates = append(snap.Certificates, putCertificateCmd(c))
 	}
@@ -927,6 +992,13 @@ func RestoreSnapshot(snap *gastrologv1.ConfigSnapshot) (*config.Config, []config
 			return nil, nil, nil, nil, fmt.Errorf("restore ingester: %w", err)
 		}
 		cfg.Ingesters = append(cfg.Ingesters, ic)
+	}
+	for _, rt := range snap.GetRoutes() {
+		rc, err := ExtractPutRoute(rt)
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("restore route: %w", err)
+		}
+		cfg.Routes = append(cfg.Routes, rc)
 	}
 	for _, c := range snap.GetCertificates() {
 		cc, err := ExtractPutCertificate(c)

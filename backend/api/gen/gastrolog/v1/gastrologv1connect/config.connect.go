@@ -117,6 +117,11 @@ const (
 	// ConfigServicePutNodeConfigProcedure is the fully-qualified name of the ConfigService's
 	// PutNodeConfig RPC.
 	ConfigServicePutNodeConfigProcedure = "/gastrolog.v1.ConfigService/PutNodeConfig"
+	// ConfigServicePutRouteProcedure is the fully-qualified name of the ConfigService's PutRoute RPC.
+	ConfigServicePutRouteProcedure = "/gastrolog.v1.ConfigService/PutRoute"
+	// ConfigServiceDeleteRouteProcedure is the fully-qualified name of the ConfigService's DeleteRoute
+	// RPC.
+	ConfigServiceDeleteRouteProcedure = "/gastrolog.v1.ConfigService/DeleteRoute"
 	// ConfigServiceGenerateNameProcedure is the fully-qualified name of the ConfigService's
 	// GenerateName RPC.
 	ConfigServiceGenerateNameProcedure = "/gastrolog.v1.ConfigService/GenerateName"
@@ -182,6 +187,10 @@ type ConfigServiceClient interface {
 	GetIngesterDefaults(context.Context, *connect.Request[v1.GetIngesterDefaultsRequest]) (*connect.Response[v1.GetIngesterDefaultsResponse], error)
 	// PutNodeConfig creates or updates a node configuration.
 	PutNodeConfig(context.Context, *connect.Request[v1.PutNodeConfigRequest]) (*connect.Response[v1.PutNodeConfigResponse], error)
+	// PutRoute creates or updates a route.
+	PutRoute(context.Context, *connect.Request[v1.PutRouteRequest]) (*connect.Response[v1.PutRouteResponse], error)
+	// DeleteRoute removes a route.
+	DeleteRoute(context.Context, *connect.Request[v1.DeleteRouteRequest]) (*connect.Response[v1.DeleteRouteResponse], error)
 	// GenerateName returns a random petname for use as a default entity name.
 	GenerateName(context.Context, *connect.Request[v1.GenerateNameRequest]) (*connect.Response[v1.GenerateNameResponse], error)
 }
@@ -371,6 +380,18 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("PutNodeConfig")),
 			connect.WithClientOptions(opts...),
 		),
+		putRoute: connect.NewClient[v1.PutRouteRequest, v1.PutRouteResponse](
+			httpClient,
+			baseURL+ConfigServicePutRouteProcedure,
+			connect.WithSchema(configServiceMethods.ByName("PutRoute")),
+			connect.WithClientOptions(opts...),
+		),
+		deleteRoute: connect.NewClient[v1.DeleteRouteRequest, v1.DeleteRouteResponse](
+			httpClient,
+			baseURL+ConfigServiceDeleteRouteProcedure,
+			connect.WithSchema(configServiceMethods.ByName("DeleteRoute")),
+			connect.WithClientOptions(opts...),
+		),
 		generateName: connect.NewClient[v1.GenerateNameRequest, v1.GenerateNameResponse](
 			httpClient,
 			baseURL+ConfigServiceGenerateNameProcedure,
@@ -411,6 +432,8 @@ type configServiceClient struct {
 	testIngester          *connect.Client[v1.TestIngesterRequest, v1.TestIngesterResponse]
 	getIngesterDefaults   *connect.Client[v1.GetIngesterDefaultsRequest, v1.GetIngesterDefaultsResponse]
 	putNodeConfig         *connect.Client[v1.PutNodeConfigRequest, v1.PutNodeConfigResponse]
+	putRoute              *connect.Client[v1.PutRouteRequest, v1.PutRouteResponse]
+	deleteRoute           *connect.Client[v1.DeleteRouteRequest, v1.DeleteRouteResponse]
 	generateName          *connect.Client[v1.GenerateNameRequest, v1.GenerateNameResponse]
 }
 
@@ -559,6 +582,16 @@ func (c *configServiceClient) PutNodeConfig(ctx context.Context, req *connect.Re
 	return c.putNodeConfig.CallUnary(ctx, req)
 }
 
+// PutRoute calls gastrolog.v1.ConfigService.PutRoute.
+func (c *configServiceClient) PutRoute(ctx context.Context, req *connect.Request[v1.PutRouteRequest]) (*connect.Response[v1.PutRouteResponse], error) {
+	return c.putRoute.CallUnary(ctx, req)
+}
+
+// DeleteRoute calls gastrolog.v1.ConfigService.DeleteRoute.
+func (c *configServiceClient) DeleteRoute(ctx context.Context, req *connect.Request[v1.DeleteRouteRequest]) (*connect.Response[v1.DeleteRouteResponse], error) {
+	return c.deleteRoute.CallUnary(ctx, req)
+}
+
 // GenerateName calls gastrolog.v1.ConfigService.GenerateName.
 func (c *configServiceClient) GenerateName(ctx context.Context, req *connect.Request[v1.GenerateNameRequest]) (*connect.Response[v1.GenerateNameResponse], error) {
 	return c.generateName.CallUnary(ctx, req)
@@ -624,6 +657,10 @@ type ConfigServiceHandler interface {
 	GetIngesterDefaults(context.Context, *connect.Request[v1.GetIngesterDefaultsRequest]) (*connect.Response[v1.GetIngesterDefaultsResponse], error)
 	// PutNodeConfig creates or updates a node configuration.
 	PutNodeConfig(context.Context, *connect.Request[v1.PutNodeConfigRequest]) (*connect.Response[v1.PutNodeConfigResponse], error)
+	// PutRoute creates or updates a route.
+	PutRoute(context.Context, *connect.Request[v1.PutRouteRequest]) (*connect.Response[v1.PutRouteResponse], error)
+	// DeleteRoute removes a route.
+	DeleteRoute(context.Context, *connect.Request[v1.DeleteRouteRequest]) (*connect.Response[v1.DeleteRouteResponse], error)
 	// GenerateName returns a random petname for use as a default entity name.
 	GenerateName(context.Context, *connect.Request[v1.GenerateNameRequest]) (*connect.Response[v1.GenerateNameResponse], error)
 }
@@ -809,6 +846,18 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("PutNodeConfig")),
 		connect.WithHandlerOptions(opts...),
 	)
+	configServicePutRouteHandler := connect.NewUnaryHandler(
+		ConfigServicePutRouteProcedure,
+		svc.PutRoute,
+		connect.WithSchema(configServiceMethods.ByName("PutRoute")),
+		connect.WithHandlerOptions(opts...),
+	)
+	configServiceDeleteRouteHandler := connect.NewUnaryHandler(
+		ConfigServiceDeleteRouteProcedure,
+		svc.DeleteRoute,
+		connect.WithSchema(configServiceMethods.ByName("DeleteRoute")),
+		connect.WithHandlerOptions(opts...),
+	)
 	configServiceGenerateNameHandler := connect.NewUnaryHandler(
 		ConfigServiceGenerateNameProcedure,
 		svc.GenerateName,
@@ -875,6 +924,10 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServiceGetIngesterDefaultsHandler.ServeHTTP(w, r)
 		case ConfigServicePutNodeConfigProcedure:
 			configServicePutNodeConfigHandler.ServeHTTP(w, r)
+		case ConfigServicePutRouteProcedure:
+			configServicePutRouteHandler.ServeHTTP(w, r)
+		case ConfigServiceDeleteRouteProcedure:
+			configServiceDeleteRouteHandler.ServeHTTP(w, r)
 		case ConfigServiceGenerateNameProcedure:
 			configServiceGenerateNameHandler.ServeHTTP(w, r)
 		default:
@@ -1000,6 +1053,14 @@ func (UnimplementedConfigServiceHandler) GetIngesterDefaults(context.Context, *c
 
 func (UnimplementedConfigServiceHandler) PutNodeConfig(context.Context, *connect.Request[v1.PutNodeConfigRequest]) (*connect.Response[v1.PutNodeConfigResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.PutNodeConfig is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) PutRoute(context.Context, *connect.Request[v1.PutRouteRequest]) (*connect.Response[v1.PutRouteResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.PutRoute is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) DeleteRoute(context.Context, *connect.Request[v1.DeleteRouteRequest]) (*connect.Response[v1.DeleteRouteResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.DeleteRoute is not implemented"))
 }
 
 func (UnimplementedConfigServiceHandler) GenerateName(context.Context, *connect.Request[v1.GenerateNameRequest]) (*connect.Response[v1.GenerateNameResponse], error) {

@@ -558,6 +558,26 @@ export function ClusterIcon({ className }: Readonly<IconProps>) {
   );
 }
 
+export function RouteIcon({ className }: Readonly<IconProps>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <circle cx="5" cy="6" r="3" />
+      <circle cx="19" cy="6" r="3" />
+      <circle cx="12" cy="20" r="3" />
+      <path d="M5 9v2a4 4 0 0 0 4 4h2" />
+      <path d="M19 9v2a4 4 0 0 1-4 4h-2" />
+    </svg>
+  );
+}
+
 export function PlanIcon({ className }: Readonly<IconProps>) {
   return (
     <svg

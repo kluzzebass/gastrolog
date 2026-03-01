@@ -143,9 +143,8 @@ func TestDeleteVaultForce(t *testing.T) {
 
 	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
-			Id:     vaultID.String(),
-			Type:   "memory",
-			Filter: filterID.String(),
+			Id:   vaultID.String(),
+			Type: "memory",
 		},
 	}))
 	if err != nil {
@@ -327,9 +326,8 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 
 	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
-			Id:     vaultID.String(),
-			Type:   "memory",
-			Filter: filterID.String(),
+			Id:   vaultID.String(),
+			Type: "memory",
 		},
 	}))
 	if err != nil {
@@ -430,9 +428,8 @@ func TestPauseVaultPersistsToConfig(t *testing.T) {
 
 	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
-			Id:     vaultID.String(),
-			Type:   "memory",
-			Filter: filterID.String(),
+			Id:   vaultID.String(),
+			Type: "memory",
 		},
 	}))
 	if err != nil {

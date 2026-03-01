@@ -58,15 +58,15 @@ func (s *ConfigServer) DeleteFilter(
 		return nil, connErr
 	}
 
-	// Check referential integrity: reject if any vault references this filter.
-	stores, err := s.cfgStore.ListVaults(ctx)
+	// Check referential integrity: reject if any route references this filter.
+	routes, err := s.cfgStore.ListRoutes(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	for _, st := range stores {
-		if st.Filter != nil && *st.Filter == id {
+	for _, rt := range routes {
+		if rt.FilterID != nil && *rt.FilterID == id {
 			return nil, connect.NewError(connect.CodeFailedPrecondition,
-				fmt.Errorf("filter %q is referenced by vault %q", req.Msg.Id, st.ID))
+				fmt.Errorf("filter %q is referenced by route %q", req.Msg.Id, rt.ID))
 		}
 	}
 

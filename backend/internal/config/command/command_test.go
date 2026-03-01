@@ -126,7 +126,6 @@ func TestPutRetentionPolicyNilOptionals(t *testing.T) {
 }
 
 func TestPutVault(t *testing.T) {
-	filterID := uuid.Must(uuid.NewV7())
 	policyID := uuid.Must(uuid.NewV7())
 	retPolicyID := uuid.Must(uuid.NewV7())
 	destID := uuid.Must(uuid.NewV7())
@@ -135,7 +134,6 @@ func TestPutVault(t *testing.T) {
 		ID:     uuid.Must(uuid.NewV7()),
 		Name:   "production",
 		Type:   "file",
-		Filter: &filterID,
 		Policy: &policyID,
 		RetentionRules: []config.RetentionRule{
 			{RetentionPolicyID: retPolicyID, Action: config.RetentionActionExpire},
@@ -465,7 +463,6 @@ func TestSnapshotRoundTrip(t *testing.T) {
 				ID:     uuid.Must(uuid.NewV7()),
 				Name:   "main",
 				Type:   "file",
-				Filter: &filterID,
 				Policy: &policyID,
 				RetentionRules: []config.RetentionRule{
 					{RetentionPolicyID: retPolicyID, Action: config.RetentionActionMigrate, Destination: &destVaultID},

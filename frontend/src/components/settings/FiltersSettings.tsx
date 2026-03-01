@@ -9,7 +9,7 @@ import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput } from "./FormField";
 import { PrimaryButton } from "./Buttons";
-import { UsedByStatus, refsFor } from "./UsedByStatus";
+import { UsedByStatus, routeRefsForFilter } from "./UsedByStatus";
 import type { SettingsTab } from "./SettingsDialog";
 
 type NavigateTo = (tab: SettingsTab, entityName?: string) => void;
@@ -69,7 +69,7 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
   const existingNames = new Set(filters.map((f) => f.name));
   const effectiveName = newName.trim() || namePlaceholder || "catch-all";
   const nameConflict = existingNames.has(effectiveName);
-  const vaults = config?.vaults ?? [];
+  const routes = config?.routes ?? [];
 
   const defaults = (id: string) => {
     const fc = filters.find((f) => f.id === id);
@@ -89,9 +89,9 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
       expression: edit.expression,
     }),
     onDeleteCheck: (id) => {
-      const refs = refsFor(vaults, "filter", id);
+      const refs = routeRefsForFilter(routes, id);
       return refs.length > 0
-        ? `Filter "${id}" is referenced by vault(s): ${refs.join(", ")}`
+        ? `Filter "${id}" is referenced by route(s): ${refs.join(", ")}`
         : null;
     },
     clearEdit,
@@ -171,7 +171,7 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
       {filters.toSorted((a, b) => a.name.localeCompare(b.name)).map((fc) => {
         const id = fc.id;
         const edit = getEdit(id);
-        const refs = refsFor(vaults, "filter", id);
+        const refs = routeRefsForFilter(routes, id);
         return (
           <SettingsCard
             key={id}
@@ -188,7 +188,7 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
                 {putFilter.isPending ? "Saving..." : "Save"}
               </PrimaryButton>
             }
-            status={<UsedByStatus dark={dark} refs={refs} onNavigate={onNavigateTo ? (name) => onNavigateTo("vaults", name) : undefined} />}
+            status={<UsedByStatus dark={dark} refs={refs} onNavigate={onNavigateTo ? (name) => onNavigateTo("routes", name) : undefined} />}
           >
             <div className="flex flex-col gap-3">
               <FormField label="Name" dark={dark}>

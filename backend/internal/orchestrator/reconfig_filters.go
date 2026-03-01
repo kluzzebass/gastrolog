@@ -32,13 +32,12 @@ func findFilter(filters []config.FilterConfig, id uuid.UUID) *config.FilterConfi
 	return nil
 }
 
-// ReloadFilters loads the full config and recompiles filter expressions for all
-// registered vaults. This can be called while the system is running without
-// disrupting ingestion.
+// ReloadFilters loads the full config and recompiles filter expressions from
+// routes for all registered vaults. This can be called while the system is
+// running without disrupting ingestion.
 //
-// Vault filter fields are resolved as filter IDs via cfg.Filters.
-// Only vaults that are currently registered in the orchestrator are included.
-// Vaults in the config that don't exist in the orchestrator are ignored.
+// Route filter_id fields are resolved via cfg.Filters. Only destination
+// vaults that are currently registered in the orchestrator are included.
 func (o *Orchestrator) ReloadFilters(ctx context.Context) error {
 	cfg, err := o.loadConfig(ctx)
 	if err != nil {
@@ -51,33 +50,49 @@ func (o *Orchestrator) ReloadFilters(ctx context.Context) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
-	var compiled []*CompiledFilter
+	return o.reloadFiltersFromRoutes(cfg)
+}
 
-	for _, vaultCfg := range cfg.Vaults {
-		// Only include vaults that are registered.
-		if _, ok := o.vaults[vaultCfg.ID]; !ok {
+// reloadFiltersFromRoutes builds the FilterSet from route configuration.
+// Must be called with o.mu held or at startup (before Start).
+//
+// For each enabled route, resolves the filter expression and compiles a
+// CompiledFilter for each destination vault. If multiple routes target
+// the same vault, the last route's filter wins (AddOrUpdate replaces).
+func (o *Orchestrator) reloadFiltersFromRoutes(cfg *config.Config) error {
+	if cfg == nil {
+		return nil
+	}
+
+	var fs *FilterSet
+	for _, route := range cfg.Routes {
+		if !route.Enabled {
 			continue
 		}
 
-		var filterID uuid.UUID
-		if vaultCfg.Filter != nil {
-			filterID = *vaultCfg.Filter
+		var filterExpr string
+		if route.FilterID != nil {
+			filterExpr = resolveFilterExpr(cfg, *route.FilterID)
 		}
-		filterExpr := resolveFilterExpr(cfg, filterID)
-		f, err := CompileFilter(vaultCfg.ID, filterExpr)
-		if err != nil {
-			return fmt.Errorf("invalid filter for vault %s: %w", vaultCfg.ID, err)
+
+		for _, destID := range route.Destinations {
+			if _, ok := o.vaults[destID]; !ok {
+				continue
+			}
+			var err error
+			fs, err = fs.AddOrUpdate(destID, filterExpr)
+			if err != nil {
+				return fmt.Errorf("invalid filter for route %s, vault %s: %w", route.ID, destID, err)
+			}
 		}
-		compiled = append(compiled, f)
 	}
 
 	// Swap filter set atomically (we're under the lock).
-	if len(compiled) > 0 {
-		o.filterSet = NewFilterSet(compiled)
-		o.logger.Info("filters updated", "count", len(compiled))
+	o.filterSet = fs
+	if fs != nil {
+		o.logger.Info("filters updated from routes", "count", len(fs.filters))
 	} else {
-		o.filterSet = nil
-		o.logger.Warn("filters cleared, messages will fan out to all vaults")
+		o.logger.Warn("no route filters compiled, messages will fan out to all vaults")
 	}
 
 	return nil
