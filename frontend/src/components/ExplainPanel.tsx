@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { ChunkPlan, BranchPlan, PipelineStep } from "../api/client";
 import { formatChunkId } from "../utils";
+import { NodeBadge } from "./settings/NodeBadge";
 import {
   type Range,
   stepToRanges,
@@ -338,6 +339,7 @@ function ExplainChunk({
               {plan.vaultId}
             </span>
           )}
+          {plan.nodeId && <NodeBadge nodeId={plan.nodeId} dark={dark} />}
           <span
             className={`font-mono text-sm font-medium ${
               isSkipped

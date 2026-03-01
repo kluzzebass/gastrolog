@@ -112,3 +112,33 @@ message ForwardRecordsRequest {
 message ForwardRecordsResponse {
   int64 records_written = 1;
 }
+
+// ForwardSearchRequest is sent to the node that owns a remote vault,
+// asking it to execute a search locally and return matching records.
+message ForwardSearchRequest {
+  string vault_id = 1;
+  string query = 2;
+  bytes resume_token = 3;
+}
+
+message ForwardSearchResponse {
+  repeated ExportRecord records = 1;
+  bytes resume_token = 2;
+  bool has_more = 3;
+}
+
+// ForwardGetContextRequest asks a remote node to return records surrounding
+// a specific record in one of its local vaults.
+message ForwardGetContextRequest {
+  string vault_id = 1;
+  string chunk_id = 2;
+  uint64 pos = 3;
+  int32 before = 4;
+  int32 after = 5;
+}
+
+message ForwardGetContextResponse {
+  repeated ExportRecord before = 1;
+  ExportRecord anchor = 2;
+  repeated ExportRecord after = 3;
+}

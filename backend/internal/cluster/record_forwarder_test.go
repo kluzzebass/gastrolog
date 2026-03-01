@@ -11,7 +11,6 @@ import (
 	"gastrolog/internal/chunk"
 
 	"github.com/google/uuid"
-	"google.golang.org/grpc"
 )
 
 func TestBatching(t *testing.T) {
@@ -116,7 +115,6 @@ func TestForwardEnqueuesAndCloses(t *testing.T) {
 	rf := &RecordForwarder{
 		logger: discardLogger(),
 		nodes:  make(map[string]*nodeForwarder),
-		conns:  make(map[string]*grpc.ClientConn),
 	}
 
 	nodeID := "test-node"
@@ -152,7 +150,6 @@ func TestForwardClosedReturnsError(t *testing.T) {
 	rf := &RecordForwarder{
 		logger: discardLogger(),
 		nodes:  make(map[string]*nodeForwarder),
-		conns:  make(map[string]*grpc.ClientConn),
 		closed: true,
 	}
 

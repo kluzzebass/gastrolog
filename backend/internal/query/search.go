@@ -17,6 +17,22 @@ import (
 // positionExhausted is a sentinel value indicating a chunk has been fully consumed.
 const positionExhausted = math.MaxUint64
 
+// dedupKey identifies a record for deduplication. Records routed to multiple
+// vaults share the same (ingest_ts, ingester_id) pair, since both are stamped
+// before routing fans the record out. Adjacent records with the same key in
+// a sorted stream are duplicates and can be skipped.
+type dedupKey struct {
+	ingestNano int64
+	ingesterID string
+}
+
+func makeDedupKey(rec chunk.Record) dedupKey {
+	return dedupKey{
+		ingestNano: rec.IngestTS.UnixNano(),
+		ingesterID: rec.Attrs["ingester_id"],
+	}
+}
+
 // vaultChunk pairs a vault ID with its chunk metadata.
 type vaultChunk struct {
 	vaultID uuid.UUID
@@ -51,6 +67,8 @@ type mergeState struct {
 	scanners       []activeScanner
 	chunkPositions map[mergeKey]uint64
 	lastRefs       *[]MultiVaultPosition
+	lastDedup      dedupKey // last yielded record's dedup key
+	hasDedup       bool     // true after the first record is yielded
 }
 
 // cleanup stops all active scanners.
@@ -373,6 +391,23 @@ func runMergeLoop(
 
 		entry.rec.Ref = entry.ref
 		entry.rec.VaultID = entry.vaultID
+
+		// Dedup: skip records with the same (ingest_ts, ingester_id) as the
+		// previous yield. Since the merge is sorted by ingest_ts, duplicates
+		// from different vaults are always adjacent.
+		dk := makeDedupKey(entry.rec)
+		if ms.hasDedup && dk == ms.lastDedup {
+			// Duplicate — advance the scanner but don't yield or count.
+			if err, ok := ms.advanceScanner(entry); !ok {
+				ms.buildLastRefs()
+				yield(chunk.Record{}, err)
+				return count, mergeError
+			}
+			continue
+		}
+		ms.lastDedup = dk
+		ms.hasDedup = true
+
 		if !yield(entry.rec, nil) {
 			ms.buildLastRefs()
 			return count, mergeStopped
@@ -743,6 +778,8 @@ type followState struct {
 	vaultFilter   []uuid.UUID
 	lastPositions map[mergeKey]uint64
 	knownVaults   map[uuid.UUID]bool
+	lastDedup     dedupKey // dedup: last yielded record's key
+	hasDedup      bool     // dedup: true after first yield
 }
 
 // initVaultPositions marks all existing chunks in a vault as seen,
@@ -933,12 +970,20 @@ func (fs *followState) seekPastSeen(cursor chunk.RecordCursor, key mergeKey, chu
 	return true
 }
 
-// yieldPending yields sorted pending records. Returns false if yield
-// returned false (caller wants to stop).
+// yieldPending yields sorted pending records, skipping duplicates.
+// Returns false if yield returned false (caller wants to stop).
 func (fs *followState) yieldPending(pending []pendingRecord, yield func(chunk.Record, error) bool) bool {
 	for _, p := range pending {
 		p.rec.Ref = p.ref
 		p.rec.VaultID = p.vaultID
+
+		dk := makeDedupKey(p.rec)
+		if fs.hasDedup && dk == fs.lastDedup {
+			continue
+		}
+		fs.lastDedup = dk
+		fs.hasDedup = true
+
 		if !yield(p.rec, nil) {
 			return false
 		}

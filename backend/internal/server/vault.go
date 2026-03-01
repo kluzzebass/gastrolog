@@ -9,28 +9,37 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 
+	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/config"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 )
 
+// PeerVaultStatsProvider looks up vault stats from cluster peer broadcasts.
+// Implemented by cluster.PeerState; nil in single-node mode.
+type PeerVaultStatsProvider interface {
+	FindVaultStats(vaultID string) *apiv1.VaultStats
+}
+
 // VaultServer implements the VaultService.
 type VaultServer struct {
 	orch      *orchestrator.Orchestrator
 	cfgStore  config.Store
 	factories orchestrator.Factories
+	peerStats PeerVaultStatsProvider
 	logger    *slog.Logger
 }
 
 var _ gastrologv1connect.VaultServiceHandler = (*VaultServer)(nil)
 
 // NewVaultServer creates a new VaultServer.
-func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, logger *slog.Logger) *VaultServer {
+func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, peerStats PeerVaultStatsProvider, logger *slog.Logger) *VaultServer {
 	return &VaultServer{
 		orch:      orch,
 		cfgStore:  cfgStore,
 		factories: factories,
+		peerStats: peerStats,
 		logger:    logging.Default(logger).With("component", "vault-server"),
 	}
 }

@@ -809,6 +809,13 @@ export class ChunkPlan extends Message<ChunkPlan> {
    */
   branchPlans: BranchPlan[] = [];
 
+  /**
+   * Node that owns this chunk's vault
+   *
+   * @generated from field: string node_id = 13;
+   */
+  nodeId = "";
+
   constructor(data?: PartialMessage<ChunkPlan>) {
     super();
     proto3.util.initPartial(data, this);
@@ -829,6 +836,7 @@ export class ChunkPlan extends Message<ChunkPlan> {
     { no: 10, name: "end_ts", kind: "message", T: Timestamp },
     { no: 11, name: "skip_reason", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 12, name: "branch_plans", kind: "message", T: BranchPlan, repeated: true },
+    { no: 13, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkPlan {

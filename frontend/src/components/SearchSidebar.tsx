@@ -159,6 +159,8 @@ export function SearchSidebar({
                   active={selectedVault === vault.id}
                   onClick={() => onVaultSelect(vault.id)}
                   dark={dark}
+                  nodeId={vault.nodeId}
+                  remote={vault.remote}
                 />
               ))
             )}

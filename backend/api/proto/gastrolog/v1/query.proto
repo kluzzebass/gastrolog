@@ -155,6 +155,7 @@ message ChunkPlan {
   google.protobuf.Timestamp end_ts = 10;
   string skip_reason = 11;
   repeated BranchPlan branch_plans = 12;
+  string node_id = 13; // Node that owns this chunk's vault
 }
 
 message BranchPlan {

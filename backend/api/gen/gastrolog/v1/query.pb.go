@@ -896,6 +896,7 @@ type ChunkPlan struct {
 	EndTs            *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=end_ts,json=endTs,proto3" json:"end_ts,omitempty"`
 	SkipReason       string                 `protobuf:"bytes,11,opt,name=skip_reason,json=skipReason,proto3" json:"skip_reason,omitempty"`
 	BranchPlans      []*BranchPlan          `protobuf:"bytes,12,rep,name=branch_plans,json=branchPlans,proto3" json:"branch_plans,omitempty"`
+	NodeId           string                 `protobuf:"bytes,13,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"` // Node that owns this chunk's vault
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -1012,6 +1013,13 @@ func (x *ChunkPlan) GetBranchPlans() []*BranchPlan {
 		return x.BranchPlans
 	}
 	return nil
+}
+
+func (x *ChunkPlan) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
 }
 
 type BranchPlan struct {
@@ -1769,7 +1777,7 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\rVaultPosition\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\tR\avaultId\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\tR\achunkId\x12\x1a\n" +
-	"\bposition\x18\x03 \x01(\x04R\bposition\"\xe9\x03\n" +
+	"\bposition\x18\x03 \x01(\x04R\bposition\"\x82\x04\n" +
 	"\tChunkPlan\x12\x19\n" +
 	"\bchunk_id\x18\x01 \x01(\tR\achunkId\x12\x16\n" +
 	"\x06sealed\x18\x02 \x01(\bR\x06sealed\x12!\n" +
@@ -1784,7 +1792,8 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\x05endTs\x12\x1f\n" +
 	"\vskip_reason\x18\v \x01(\tR\n" +
 	"skipReason\x12;\n" +
-	"\fbranch_plans\x18\f \x03(\v2\x18.gastrolog.v1.BranchPlanR\vbranchPlans\"\xc6\x01\n" +
+	"\fbranch_plans\x18\f \x03(\v2\x18.gastrolog.v1.BranchPlanR\vbranchPlans\x12\x17\n" +
+	"\anode_id\x18\r \x01(\tR\x06nodeId\"\xc6\x01\n" +
 	"\n" +
 	"BranchPlan\x12\x1e\n" +
 	"\n" +

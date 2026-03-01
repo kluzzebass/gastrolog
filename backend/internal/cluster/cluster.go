@@ -43,6 +43,9 @@ type Config struct {
 	// cluster port. Defaults to ClusterAddr if empty.
 	LocalAddr string
 
+	// NodeID is this node's unique identifier, used to exclude self from peer lists.
+	NodeID string
+
 	// TLS holds atomic TLS state for mTLS on the cluster port.
 	// When nil, the cluster port uses insecure credentials (tests, single-node).
 	TLS *ClusterTLS
@@ -75,6 +78,18 @@ type Server struct {
 	// recordAppender writes forwarded records into local vaults.
 	// Set after the orchestrator is created, before forwarding starts.
 	recordAppender RecordAppender
+
+	// searchExecutor runs a search on a local vault for remote search requests.
+	// Set after the orchestrator is created, before search forwarding starts.
+	searchExecutor SearchExecutor
+
+	// contextExecutor fetches surrounding records from a local vault for
+	// remote GetContext requests.
+	contextExecutor ContextExecutor
+
+	// peerConns is the shared connection pool for all peer communication.
+	// Created in SetRaft once the raft instance is available.
+	peerConns *PeerConns
 }
 
 // New creates a new cluster Server and binds the listen port immediately.
@@ -124,6 +139,14 @@ func (s *Server) Transport() hraft.Transport {
 // Must be called before Start().
 func (s *Server) SetRaft(r *hraft.Raft) {
 	s.raft = r
+	s.peerConns = NewPeerConns(r, s.cfg.TLS, s.cfg.NodeID)
+}
+
+// PeerConns returns the shared peer connection pool. All components that
+// need to communicate with peer nodes should use this single pool.
+// Returns nil if SetRaft has not been called.
+func (s *Server) PeerConns() *PeerConns {
+	return s.peerConns
 }
 
 // AddVoter adds a new node to the Raft cluster as a voter.
@@ -237,6 +260,9 @@ func (s *Server) Stop() {
 		s.grpcSrv.Stop()
 	}
 
+	if s.peerConns != nil {
+		_ = s.peerConns.Close()
+	}
 	if s.tm != nil {
 		_ = s.tm.Close()
 	}

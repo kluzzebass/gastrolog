@@ -64,6 +64,11 @@ export function VaultsPanel({ dark }: Readonly<{ dark: boolean }>) {
               className={`text-[0.8em] flex items-center gap-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
             >
               <NodeBadge nodeId={vault.nodeId} dark={dark} />
+              {vault.remote && (
+                <span className="px-1.5 py-0.5 text-[0.75em] font-medium uppercase tracking-wider rounded bg-copper/15 text-copper">
+                  Remote
+                </span>
+              )}
               {!vault.enabled && (
                 <span className="px-1.5 py-0.5 text-[0.75em] font-medium uppercase tracking-wider rounded bg-severity-warn/15 text-severity-warn">
                   Disabled
@@ -75,8 +80,16 @@ export function VaultsPanel({ dark }: Readonly<{ dark: boolean }>) {
             </span>
           }
         >
-          <VaultActions vaultId={vault.id} dark={dark} />
-          <ChunkList vaultId={vault.id} dark={dark} />
+          {vault.remote ? (
+            <div className={`px-4 py-3 text-[0.85em] italic ${c("text-text-ghost", "text-light-text-ghost")}`}>
+              Managed by another node — actions not available here.
+            </div>
+          ) : (
+            <>
+              <VaultActions vaultId={vault.id} dark={dark} />
+              <ChunkList vaultId={vault.id} dark={dark} />
+            </>
+          )}
         </ExpandableCard>
       ))}
     </div>

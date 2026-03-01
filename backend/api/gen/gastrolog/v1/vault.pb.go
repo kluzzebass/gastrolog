@@ -112,6 +112,7 @@ type VaultInfo struct {
 	Enabled       bool                   `protobuf:"varint,6,opt,name=enabled,proto3" json:"enabled,omitempty"`
 	Name          string                 `protobuf:"bytes,7,opt,name=name,proto3" json:"name,omitempty"`
 	NodeId        string                 `protobuf:"bytes,8,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	Remote        bool                   `protobuf:"varint,9,opt,name=remote,proto3" json:"remote,omitempty"` // True if vault lives on another node
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -200,6 +201,13 @@ func (x *VaultInfo) GetNodeId() string {
 		return x.NodeId
 	}
 	return ""
+}
+
+func (x *VaultInfo) GetRemote() bool {
+	if x != nil {
+		return x.Remote
+	}
+	return false
 }
 
 type GetVaultRequest struct {
@@ -1860,13 +1868,19 @@ func (x *ExportVaultResponse) GetHasMore() bool {
 	return false
 }
 
-// ExportRecord is a portable record representation for export/import.
+// ExportRecord is a portable record representation for export/import and
+// cross-node search results. The ref fields are optional — only populated
+// when the record originates from a search (not import/export).
 type ExportRecord struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SourceTs      *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=source_ts,json=sourceTs,proto3" json:"source_ts,omitempty"`
-	IngestTs      *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=ingest_ts,json=ingestTs,proto3" json:"ingest_ts,omitempty"`
-	Attrs         map[string]string      `protobuf:"bytes,3,rep,name=attrs,proto3" json:"attrs,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	Raw           []byte                 `protobuf:"bytes,4,opt,name=raw,proto3" json:"raw,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	SourceTs *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=source_ts,json=sourceTs,proto3" json:"source_ts,omitempty"`
+	IngestTs *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=ingest_ts,json=ingestTs,proto3" json:"ingest_ts,omitempty"`
+	Attrs    map[string]string      `protobuf:"bytes,3,rep,name=attrs,proto3" json:"attrs,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Raw      []byte                 `protobuf:"bytes,4,opt,name=raw,proto3" json:"raw,omitempty"`
+	// Record reference (populated by ForwardSearch, empty for import/export).
+	VaultId       string `protobuf:"bytes,5,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	ChunkId       string `protobuf:"bytes,6,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
+	Pos           uint64 `protobuf:"varint,7,opt,name=pos,proto3" json:"pos,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1927,6 +1941,27 @@ func (x *ExportRecord) GetRaw() []byte {
 		return x.Raw
 	}
 	return nil
+}
+
+func (x *ExportRecord) GetVaultId() string {
+	if x != nil {
+		return x.VaultId
+	}
+	return ""
+}
+
+func (x *ExportRecord) GetChunkId() string {
+	if x != nil {
+		return x.ChunkId
+	}
+	return ""
+}
+
+func (x *ExportRecord) GetPos() uint64 {
+	if x != nil {
+		return x.Pos
+	}
+	return 0
 }
 
 // ImportRecords appends a batch of records to a vault.
@@ -2209,7 +2244,7 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x18gastrolog/v1/vault.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x13\n" +
 	"\x11ListVaultsRequest\"E\n" +
 	"\x12ListVaultsResponse\x12/\n" +
-	"\x06vaults\x18\x01 \x03(\v2\x17.gastrolog.v1.VaultInfoR\x06vaults\"\xd2\x01\n" +
+	"\x06vaults\x18\x01 \x03(\v2\x17.gastrolog.v1.VaultInfoR\x06vaults\"\xea\x01\n" +
 	"\tVaultInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x16\n" +
@@ -2219,7 +2254,8 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\frecord_count\x18\x05 \x01(\x03R\vrecordCount\x12\x18\n" +
 	"\aenabled\x18\x06 \x01(\bR\aenabled\x12\x12\n" +
 	"\x04name\x18\a \x01(\tR\x04name\x12\x17\n" +
-	"\anode_id\x18\b \x01(\tR\x06nodeId\"!\n" +
+	"\anode_id\x18\b \x01(\tR\x06nodeId\x12\x16\n" +
+	"\x06remote\x18\t \x01(\bR\x06remote\"!\n" +
 	"\x0fGetVaultRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"A\n" +
 	"\x10GetVaultResponse\x12-\n" +
@@ -2351,12 +2387,15 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\"f\n" +
 	"\x13ExportVaultResponse\x124\n" +
 	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\x12\x19\n" +
-	"\bhas_more\x18\x02 \x01(\bR\ahasMore\"\x89\x02\n" +
+	"\bhas_more\x18\x02 \x01(\bR\ahasMore\"\xd1\x02\n" +
 	"\fExportRecord\x127\n" +
 	"\tsource_ts\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\bsourceTs\x127\n" +
 	"\tingest_ts\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\bingestTs\x12;\n" +
 	"\x05attrs\x18\x03 \x03(\v2%.gastrolog.v1.ExportRecord.AttrsEntryR\x05attrs\x12\x10\n" +
-	"\x03raw\x18\x04 \x01(\fR\x03raw\x1a8\n" +
+	"\x03raw\x18\x04 \x01(\fR\x03raw\x12\x19\n" +
+	"\bvault_id\x18\x05 \x01(\tR\avaultId\x12\x19\n" +
+	"\bchunk_id\x18\x06 \x01(\tR\achunkId\x12\x10\n" +
+	"\x03pos\x18\a \x01(\x04R\x03pos\x1a8\n" +
 	"\n" +
 	"AttrsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +

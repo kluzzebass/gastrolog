@@ -25,24 +25,31 @@ func (s *VaultServer) vaultName(ctx context.Context, id uuid.UUID) string {
 	return id.String()
 }
 
-// ListVaults returns all registered vaults.
+// ListVaults returns all registered vaults, including remote vaults from
+// other cluster nodes. Remote vaults are enriched with stats from peer
+// broadcasts when available.
 func (s *VaultServer) ListVaults(
 	ctx context.Context,
 	req *connect.Request[apiv1.ListVaultsRequest],
 ) (*connect.Response[apiv1.ListVaultsResponse], error) {
-	vaults := s.orch.ListVaults()
+	localIDs := s.orch.ListVaults()
 
 	resp := &apiv1.ListVaultsResponse{
-		Vaults: make([]*apiv1.VaultInfo, 0, len(vaults)),
+		Vaults: make([]*apiv1.VaultInfo, 0, len(localIDs)),
 	}
 
-	for _, id := range vaults {
+	localSet := make(map[uuid.UUID]struct{}, len(localIDs))
+	for _, id := range localIDs {
+		localSet[id] = struct{}{}
 		info, err := s.getVaultInfo(ctx, id)
 		if err != nil {
-			continue // Skip vaults with errors
+			continue
 		}
 		resp.Vaults = append(resp.Vaults, info)
 	}
+
+	// Append remote vaults from config store (vaults owned by other nodes).
+	s.appendRemoteVaults(ctx, localSet, resp)
 
 	return connect.NewResponse(resp), nil
 }
@@ -181,6 +188,37 @@ func (s *VaultServer) fillProcessMetrics(resp *apiv1.GetStatsResponse) {
 		SysBytes:          mem.Sys,
 		HeapObjects:       mem.HeapObjects,
 		NumGc:             mem.NumGC,
+	}
+}
+
+// appendRemoteVaults adds vaults from the config store that aren't registered locally.
+func (s *VaultServer) appendRemoteVaults(ctx context.Context, localSet map[uuid.UUID]struct{}, resp *apiv1.ListVaultsResponse) {
+	if s.cfgStore == nil {
+		return
+	}
+	allCfg, err := s.cfgStore.ListVaults(ctx)
+	if err != nil {
+		return
+	}
+	for _, vc := range allCfg {
+		if _, local := localSet[vc.ID]; local {
+			continue
+		}
+		info := &apiv1.VaultInfo{
+			Id:      vc.ID.String(),
+			Name:    vc.Name,
+			Type:    vc.Type,
+			NodeId:  vc.NodeID,
+			Remote:  true,
+			Enabled: vc.Enabled,
+		}
+		if s.peerStats != nil {
+			if vs := s.peerStats.FindVaultStats(vc.ID.String()); vs != nil {
+				info.RecordCount = vs.RecordCount
+				info.ChunkCount = vs.ChunkCount
+			}
+		}
+		resp.Vaults = append(resp.Vaults, info)
 	}
 }
 

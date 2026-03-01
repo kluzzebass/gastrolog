@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { FieldSummary } from "../utils";
+import { NodeBadge } from "./settings/NodeBadge";
 
 export function SidebarSection({
   title,
@@ -116,12 +117,16 @@ export function VaultButton({
   active,
   onClick,
   dark,
+  nodeId,
+  remote,
 }: Readonly<{
   label: string;
   count: string;
   active: boolean;
   onClick: () => void;
   dark: boolean;
+  nodeId?: string;
+  remote?: boolean;
 }>) {
   const ghostCls = dark ? "text-text-ghost" : "text-light-text-ghost";
 
@@ -129,14 +134,17 @@ export function VaultButton({
     <button
       onClick={onClick}
       className={(() => {
-        const base = "flex justify-between items-center px-2.5 py-2 text-[0.9em] rounded text-left transition-all duration-150";
+        const base = `flex justify-between items-center px-2.5 py-2 text-[0.9em] rounded text-left transition-all duration-150${remote ? " opacity-80" : ""}`;
         if (active) {
           return `${base} ${dark ? "bg-copper/15" : "bg-copper/10"} text-copper border border-copper/25`;
         }
         return `${base} ${dark ? "text-text-muted hover:text-text-normal hover:bg-ink-hover" : "text-light-text-muted hover:text-light-text-normal hover:bg-light-hover"} border border-transparent`;
       })()}
     >
-      <span className="font-medium">{label}</span>
+      <span className="font-medium flex items-center gap-1.5">
+        {label}
+        {remote && nodeId && <NodeBadge nodeId={nodeId} dark={dark} />}
+      </span>
       <span
         className={`font-mono text-[0.8em] ${active ? "text-copper-dim" : ghostCls}`}
       >

@@ -99,6 +99,69 @@ func TestMultiVaultSearch(t *testing.T) {
 	}
 }
 
+// TestMultiVaultDedup verifies that records with the same (ingest_ts, ingester_id)
+// across multiple vaults are deduplicated, returning each record exactly once.
+func TestMultiVaultDedup(t *testing.T) {
+	reg := &testRegistry{
+		vaults: make(map[uuid.UUID]struct {
+			cm chunk.ChunkManager
+			im index.IndexManager
+		}),
+	}
+
+	// Create 3 vaults with identical records (simulating route fan-out).
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	records := []chunk.Record{
+		{IngestTS: t0, Attrs: chunk.Attributes{"ingester_id": "syslog-1"}, Raw: []byte("line A")},
+		{IngestTS: t0.Add(1 * time.Second), Attrs: chunk.Attributes{"ingester_id": "syslog-1"}, Raw: []byte("line B")},
+		{IngestTS: t0.Add(2 * time.Second), Attrs: chunk.Attributes{"ingester_id": "syslog-1"}, Raw: []byte("line C")},
+	}
+
+	for range 3 {
+		vaultID := uuid.Must(uuid.NewV7())
+		s := memtest.MustNewVault(t, chunkmem.Config{
+			RotationPolicy: chunk.NewRecordCountPolicy(1000),
+		})
+		for _, rec := range records {
+			s.CM.Append(rec)
+		}
+		s.CM.Seal()
+
+		reg.vaults[vaultID] = struct {
+			cm chunk.ChunkManager
+			im index.IndexManager
+		}{s.CM, s.IM}
+	}
+
+	eng := query.NewWithRegistry(reg, nil)
+
+	// Forward search.
+	iter, _ := eng.Search(context.Background(), query.Query{}, nil)
+	count := 0
+	for _, err := range iter {
+		if err != nil {
+			t.Fatalf("Error: %v", err)
+		}
+		count++
+	}
+	if count != 3 {
+		t.Errorf("forward: expected 3 unique records, got %d", count)
+	}
+
+	// Reverse search.
+	iter, _ = eng.Search(context.Background(), query.Query{IsReverse: true}, nil)
+	count = 0
+	for _, err := range iter {
+		if err != nil {
+			t.Fatalf("Error: %v", err)
+		}
+		count++
+	}
+	if count != 3 {
+		t.Errorf("reverse: expected 3 unique records, got %d", count)
+	}
+}
+
 // TestRunPipelineIgnoresIncomingLimit verifies that RunPipeline clears the
 // incoming query limit (e.g. from proto-level pagination) so stats pipelines
 // process all matching records, not just the first page.

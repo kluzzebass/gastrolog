@@ -58,11 +58,11 @@ import (
 	ingesttail "gastrolog/internal/ingester/tail"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/query"
 	"gastrolog/internal/server"
 
 	hraft "github.com/hashicorp/raft"
 	raftboltdb "github.com/hashicorp/raft-boltdb/v2"
-
 	"github.com/spf13/cobra"
 )
 
@@ -236,12 +236,15 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 
 	factories := buildFactories(logger, homeDir, cfgStore, orch)
 
-	// Wire cross-node record forwarding if running in cluster mode.
-	// Client-side: forwarder ships records to remote vault-owning nodes.
-	// Server-side: appender receives forwarded records into local vaults.
-	if rcs, ok := cfgStore.(*raftConfigStore); ok && clusterSrv != nil {
+	// Wire cross-node record forwarding and search forwarding in cluster mode.
+	// Client-side: forwarder ships records/searches to remote vault-owning nodes.
+	// Server-side: appender/executor receives forwarded requests into local vaults.
+	var searchForwarder *cluster.SearchForwarder
+	if _, ok := cfgStore.(*raftConfigStore); ok && clusterSrv != nil {
+		peerConns := clusterSrv.PeerConns()
+
 		recordForwarder := cluster.NewRecordForwarder(
-			rcs.raft, clusterTLS, nodeID,
+			peerConns,
 			logger.With("component", "record-forwarder"),
 		)
 		orch.SetRecordForwarder(recordForwarder)
@@ -251,6 +254,15 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 			_, _, err := orch.Append(vaultID, rec)
 			return err
 		})
+
+		searchForwarder = cluster.NewSearchForwarder(peerConns)
+
+		// Search executor: handles ForwardSearch RPCs from peer nodes by
+		// running a local search on the specified vault.
+		clusterSrv.SetSearchExecutor(newSearchExecutor(orch))
+
+		// Context executor: handles ForwardGetContext RPCs from peer nodes.
+		clusterSrv.SetContextExecutor(newContextExecutor(orch))
 	}
 
 	// Wire the dispatcher now that orchestrator and factories are available.
@@ -263,7 +275,7 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 		return err
 	}
 
-	broadcaster, peerState, peerJobState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, clusterTLS, orch, nodeID)
+	broadcaster, peerState, peerJobState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, nodeID)
 
 	// For replication cases (cluster restart without local config, joining
 	// nodes): block until server settings replicate from the leader before
@@ -301,6 +313,7 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 		PeerState:        peerState,
 		PeerJobState:     peerJobState,
 		LocalStats:       localStatsFn,
+		SearchForwarder:  searchForwarder,
 	})
 }
 
@@ -340,11 +353,11 @@ func startOrchestrator(ctx context.Context, logger *slog.Logger, orch *orchestra
 // setupClusterStats creates the broadcaster, peer state tracker, and stats
 // collector. Returns nils for single-node mode. Launches the collector
 // goroutine when in cluster mode.
-func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore config.Store, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, orch *orchestrator.Orchestrator, nodeID string) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats) {
+func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore config.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, nodeID string) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats) {
 	// Create the cluster broadcaster for peer-to-peer message fan-out.
 	var broadcaster *cluster.Broadcaster
-	if rcs, ok := cfgStore.(*raftConfigStore); ok && clusterSrv != nil {
-		broadcaster = cluster.NewBroadcaster(rcs.raft, clusterTLS, nodeID, logger.With("component", "broadcast"))
+	if _, ok := cfgStore.(*raftConfigStore); ok && clusterSrv != nil {
+		broadcaster = cluster.NewBroadcaster(clusterSrv.PeerConns(), logger.With("component", "broadcast"))
 	}
 	if broadcaster == nil || clusterSrv == nil {
 		return nil, nil, nil, nil
@@ -472,6 +485,7 @@ func setupCluster(ctx context.Context, logger *slog.Logger, cfg runConfig, hd ho
 
 	clusterSrv, err := cluster.New(cluster.Config{
 		ClusterAddr: cfg.ClusterAddr,
+		NodeID:      nodeID,
 		TLS:         clusterTLS,
 		Logger:      logger.With("component", "cluster"),
 	})
@@ -792,13 +806,14 @@ type serverDeps struct {
 	PeerState        *cluster.PeerState
 	PeerJobState     *cluster.PeerJobState
 	LocalStats       func() *gastrologv1.NodeStats
+	SearchForwarder  *cluster.SearchForwarder
 }
 
 func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 	var srv *server.Server
 	var serverWg sync.WaitGroup
 	if deps.ServerAddr != "" {
-		srv = server.New(deps.Orch, deps.CfgStore, deps.Factories, deps.Tokens, server.Config{Logger: deps.Logger, CertManager: deps.CertMgr, NoAuth: deps.NoAuth, HomeDir: deps.HomeDir, NodeID: deps.NodeID, UnixSocket: deps.SocketPath, AfterConfigApply: deps.AfterConfigApply, Cluster: deps.ClusterSrv, PeerStats: deps.PeerState, PeerJobs: deps.PeerJobState, LocalStats: deps.LocalStats})
+		srv = server.New(deps.Orch, deps.CfgStore, deps.Factories, deps.Tokens, server.Config{Logger: deps.Logger, CertManager: deps.CertMgr, NoAuth: deps.NoAuth, HomeDir: deps.HomeDir, NodeID: deps.NodeID, UnixSocket: deps.SocketPath, AfterConfigApply: deps.AfterConfigApply, Cluster: deps.ClusterSrv, PeerStats: deps.PeerState, PeerVaultStats: deps.PeerState, PeerJobs: deps.PeerJobState, LocalStats: deps.LocalStats, RemoteSearcher: deps.SearchForwarder})
 		serverWg.Go(func() {
 			if err := srv.ServeTCP(deps.ServerAddr); err != nil {
 				deps.Logger.Error("server error", "error", err)
@@ -1282,4 +1297,49 @@ func (a *jobBroadcastAdapter) ListJobsProto() []*gastrologv1.Job {
 		out = append(out, server.JobInfoToProto(info.Snapshot(), a.nodeID))
 	}
 	return out
+}
+
+// newSearchExecutor creates a cluster.SearchExecutor that runs local vault
+// searches for ForwardSearch RPCs received from peer nodes.
+func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
+	return func(ctx context.Context, vaultID uuid.UUID, queryExpr string, _ []byte) ([]*gastrologv1.ExportRecord, []byte, bool, error) {
+		// Scope the query to the requested vault by prepending vault=<id>.
+		scopedExpr := fmt.Sprintf("vault=%s %s", vaultID, queryExpr)
+
+		q, _, err := server.ParseExpression(scopedExpr)
+		if err != nil {
+			return nil, nil, false, fmt.Errorf("parse query: %w", err)
+		}
+
+		const maxBatch = 500
+		if q.Limit == 0 || q.Limit > maxBatch {
+			q.Limit = maxBatch
+		}
+
+		eng := o.MultiVaultQueryEngine()
+		iter, _ := eng.Search(ctx, q, nil)
+		var records []*gastrologv1.ExportRecord
+		for rec, err := range iter {
+			if err != nil {
+				return records, nil, false, err
+			}
+			records = append(records, cluster.RecordToExportRecord(rec))
+		}
+		return records, nil, false, nil
+	}
+}
+
+func newContextExecutor(o *orchestrator.Orchestrator) cluster.ContextExecutor {
+	return func(ctx context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID, pos uint64, before, after int) ([]chunk.Record, chunk.Record, []chunk.Record, error) {
+		eng := o.MultiVaultQueryEngine()
+		result, err := eng.GetContext(ctx, query.ContextRef{
+			VaultID: vaultID,
+			ChunkID: chunkID,
+			Pos:     pos,
+		}, before, after)
+		if err != nil {
+			return nil, chunk.Record{}, nil, err
+		}
+		return result.Before, result.Anchor, result.After, nil
+	}
 }

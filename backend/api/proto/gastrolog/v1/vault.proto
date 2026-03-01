@@ -68,6 +68,7 @@ message VaultInfo {
   bool enabled = 6;
   string name = 7;
   string node_id = 8;
+  bool remote = 9; // True if vault lives on another node
 }
 
 message GetVaultRequest {
@@ -242,12 +243,19 @@ message ExportVaultResponse {
   bool has_more = 2;
 }
 
-// ExportRecord is a portable record representation for export/import.
+// ExportRecord is a portable record representation for export/import and
+// cross-node search results. The ref fields are optional — only populated
+// when the record originates from a search (not import/export).
 message ExportRecord {
   google.protobuf.Timestamp source_ts = 1;
   google.protobuf.Timestamp ingest_ts = 2;
   map<string, string> attrs = 3;
   bytes raw = 4;
+
+  // Record reference (populated by ForwardSearch, empty for import/export).
+  string vault_id = 5;
+  string chunk_id = 6;
+  uint64 pos = 7;
 }
 
 // ImportRecords appends a batch of records to a vault.

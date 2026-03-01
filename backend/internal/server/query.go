@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
+	"log/slog"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -16,27 +20,45 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/config"
 	"gastrolog/internal/lookup"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
 )
 
+// RemoteSearcher sends search and context requests to remote cluster nodes.
+// Nil in single-node mode.
+type RemoteSearcher interface {
+	Search(ctx context.Context, nodeID string, req *apiv1.ForwardSearchRequest) (*apiv1.ForwardSearchResponse, error)
+	GetContext(ctx context.Context, nodeID string, req *apiv1.ForwardGetContextRequest) (*apiv1.ForwardGetContextResponse, error)
+}
+
 // QueryServer implements the QueryService.
 type QueryServer struct {
 	orch              *orchestrator.Orchestrator
+	cfgStore          config.Store
+	remoteSearcher    RemoteSearcher
+	localNodeID       string
 	lookupResolver    lookup.Resolver
 	lookupNames       []string
 	queryTimeout      time.Duration
 	maxFollowDuration time.Duration // 0 = no limit
 	maxResultCount    int64         // 0 = unlimited
+	logger            *slog.Logger
 }
 
 var _ gastrologv1connect.QueryServiceHandler = (*QueryServer)(nil)
 
 // NewQueryServer creates a new QueryServer.
-func NewQueryServer(orch *orchestrator.Orchestrator, lookupResolver lookup.Resolver, lookupNames []string, queryTimeout, maxFollowDuration time.Duration, maxResultCount int64) *QueryServer {
-	return &QueryServer{orch: orch, lookupResolver: lookupResolver, lookupNames: lookupNames, queryTimeout: queryTimeout, maxFollowDuration: maxFollowDuration, maxResultCount: maxResultCount}
+func NewQueryServer(orch *orchestrator.Orchestrator, cfgStore config.Store, lookupResolver lookup.Resolver, lookupNames []string, queryTimeout, maxFollowDuration time.Duration, maxResultCount int64, logger *slog.Logger) *QueryServer {
+	return &QueryServer{orch: orch, cfgStore: cfgStore, lookupResolver: lookupResolver, lookupNames: lookupNames, queryTimeout: queryTimeout, maxFollowDuration: maxFollowDuration, maxResultCount: maxResultCount, logger: logger}
+}
+
+// SetRemoteSearcher configures the search forwarder for cross-node queries.
+func (s *QueryServer) SetRemoteSearcher(rs RemoteSearcher, localNodeID string) {
+	s.remoteSearcher = rs
+	s.localNodeID = localNodeID
 }
 
 // Search executes a query and streams matching records.
@@ -113,8 +135,11 @@ func (s *QueryServer) searchPipeline(
 	return stream.Send(&apiv1.SearchResponse{Records: batch})
 }
 
-// searchDirect streams search results with optional per-record pipeline
-// transforms. When transform is nil, records are sent as-is (regular search).
+// searchDirect streams search results, merging local and remote vault results
+// in timestamp order with deduplication. When transform is non-nil, per-record
+// pipeline transforms are applied. Remote results are only fetched on the first
+// page (no resume token); subsequent pages are local-only since remote results
+// were already included.
 func (s *QueryServer) searchDirect(
 	ctx context.Context,
 	eng *query.Engine,
@@ -136,47 +161,15 @@ func (s *QueryServer) searchDirect(
 		}
 	}
 
+	// Collect remote results (empty slice when no remote vaults or on resume).
+	var remote []*apiv1.Record
+	if resume == nil {
+		remote = s.collectRemote(ctx, q)
+	}
+
 	iter, getToken := eng.Search(ctx, q, resume)
 
-	const batchSize = 100
-	batch := make([]*apiv1.Record, 0, batchSize)
-
-	for rec, err := range iter {
-		if err != nil {
-			return mapSearchError(err)
-		}
-		if transform != nil {
-			rec, ok := transform.Apply(ctx, rec)
-			if !ok {
-				continue
-			}
-			batch = append(batch, recordToProto(rec))
-		} else {
-			batch = append(batch, recordToProto(rec))
-		}
-		if len(batch) >= batchSize {
-			if err := stream.Send(&apiv1.SearchResponse{Records: batch, HasMore: true}); err != nil {
-				return err
-			}
-			batch = batch[:0]
-		}
-		if transform != nil && transform.Done() {
-			break
-		}
-	}
-
-	var tokenBytes []byte
-	if transform == nil || !transform.Done() {
-		if token := getToken(); token != nil {
-			tokenBytes = resumeTokenToProto(token)
-		}
-	}
-
-	return stream.Send(&apiv1.SearchResponse{
-		Records:     batch,
-		ResumeToken: tokenBytes,
-		HasMore:     len(tokenBytes) > 0,
-	})
+	return s.mergeAndStream(ctx, iter, getToken, remote, q.Reverse(), transform, stream)
 }
 
 func mapSearchError(err error) error {
@@ -190,6 +183,262 @@ func mapSearchError(err error) error {
 	default:
 		return connect.NewError(connect.CodeInternal, err)
 	}
+}
+
+// remoteVaultsByNode groups remote vault IDs by their owning node.
+func (s *QueryServer) remoteVaultsByNode(ctx context.Context) map[string][]uuid.UUID {
+	allCfg, err := s.cfgStore.ListVaults(ctx)
+	if err != nil {
+		return nil
+	}
+
+	localVaults := make(map[uuid.UUID]struct{})
+	for _, id := range s.orch.ListVaults() {
+		localVaults[id] = struct{}{}
+	}
+
+	byNode := make(map[string][]uuid.UUID)
+	for _, vc := range allCfg {
+		if _, local := localVaults[vc.ID]; local {
+			continue
+		}
+		if vc.NodeID == "" || vc.NodeID == s.localNodeID {
+			continue
+		}
+		byNode[vc.NodeID] = append(byNode[vc.NodeID], vc.ID)
+	}
+	return byNode
+}
+
+func exportToRecord(er *apiv1.ExportRecord) *apiv1.Record {
+	rec := &apiv1.Record{
+		Raw:      er.Raw,
+		SourceTs: er.SourceTs,
+		IngestTs: er.IngestTs,
+	}
+	if len(er.Attrs) > 0 {
+		rec.Attrs = make(map[string]string, len(er.Attrs))
+		maps.Copy(rec.Attrs, er.Attrs)
+	}
+	if er.VaultId != "" {
+		rec.Ref = &apiv1.RecordRef{
+			VaultId: er.VaultId,
+			ChunkId: er.ChunkId,
+			Pos:     er.Pos,
+		}
+	}
+	return rec
+}
+
+// mergeAndStream interleaves the local engine iterator with pre-fetched remote
+// results in timestamp order, deduplicates by (ingest_ts, ingester_id), applies
+// optional per-record transforms, and streams batches to the client.
+// When remote is empty (single-node or resume page), the merge is a no-op
+// passthrough with zero overhead.
+func (s *QueryServer) mergeAndStream(
+	ctx context.Context,
+	localIter iter.Seq2[chunk.Record, error],
+	getToken func() *query.ResumeToken,
+	remote []*apiv1.Record,
+	reverse bool,
+	transform *query.RecordTransform,
+	stream *connect.ServerStream[apiv1.SearchResponse],
+) error {
+	ri := 0
+	isBefore := func(a, b time.Time) bool {
+		if reverse {
+			return a.After(b)
+		}
+		return a.Before(b)
+	}
+
+	sb := newStreamBatcher(stream, 100)
+	var dedup ingestDedup
+
+	for rec, err := range localIter {
+		if err != nil {
+			return mapSearchError(err)
+		}
+
+		// Drain remote records that sort before this local record.
+		for ri < len(remote) && isBefore(remote[ri].GetIngestTs().AsTime(), rec.IngestTS) {
+			if !dedup.seen(remote[ri].GetIngestTs().AsTime(), remote[ri].GetAttrs()["ingester_id"]) {
+				if err := sb.add(remote[ri]); err != nil {
+					return err
+				}
+			}
+			ri++
+		}
+
+		if dedup.seen(rec.IngestTS, rec.Attrs["ingester_id"]) {
+			continue
+		}
+
+		done, err := emitRecord(ctx, sb, rec, transform)
+		if err != nil {
+			return err
+		}
+		if done {
+			break
+		}
+	}
+
+	// Drain remaining remote records.
+	if err := drainRemote(sb, remote[ri:], &dedup); err != nil {
+		return err
+	}
+
+	// Final batch with resume token.
+	var tokenBytes []byte
+	if transform == nil || !transform.Done() {
+		if token := getToken(); token != nil {
+			tokenBytes = resumeTokenToProto(token)
+		}
+	}
+	return stream.Send(&apiv1.SearchResponse{
+		Records:     sb.pending(),
+		ResumeToken: tokenBytes,
+		HasMore:     len(tokenBytes) > 0,
+	})
+}
+
+// emitRecord applies an optional transform to a record and writes it to the
+// batcher. Returns (done, err) where done=true means the transform is exhausted.
+func emitRecord(ctx context.Context, sb *streamBatcher, rec chunk.Record, transform *query.RecordTransform) (bool, error) {
+	if transform != nil {
+		rec, ok := transform.Apply(ctx, rec)
+		if !ok {
+			return false, nil
+		}
+		if err := sb.add(recordToProto(rec)); err != nil {
+			return false, err
+		}
+		return transform.Done(), nil
+	}
+	return false, sb.add(recordToProto(rec))
+}
+
+// drainRemote writes remaining remote records to the batcher, skipping
+// duplicates already seen in the dedup tracker.
+func drainRemote(sb *streamBatcher, records []*apiv1.Record, dedup *ingestDedup) error {
+	for _, r := range records {
+		if !dedup.seen(r.GetIngestTs().AsTime(), r.GetAttrs()["ingester_id"]) {
+			if err := sb.add(r); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// streamBatcher accumulates records and flushes them to a server stream
+// in fixed-size batches.
+type streamBatcher struct {
+	stream *connect.ServerStream[apiv1.SearchResponse]
+	batch  []*apiv1.Record
+	cap    int
+}
+
+func newStreamBatcher(stream *connect.ServerStream[apiv1.SearchResponse], batchSize int) *streamBatcher {
+	return &streamBatcher{stream: stream, batch: make([]*apiv1.Record, 0, batchSize), cap: batchSize}
+}
+
+func (b *streamBatcher) add(rec *apiv1.Record) error {
+	b.batch = append(b.batch, rec)
+	if len(b.batch) >= b.cap {
+		if err := b.stream.Send(&apiv1.SearchResponse{Records: b.batch, HasMore: true}); err != nil {
+			return err
+		}
+		b.batch = b.batch[:0]
+	}
+	return nil
+}
+
+func (b *streamBatcher) pending() []*apiv1.Record { return b.batch }
+
+// ingestDedup tracks the last yielded (ingest_ts, ingester_id) pair to skip
+// adjacent duplicates in a sorted record stream. Records routed to multiple
+// vaults share the same identity; since results are sorted by ingest_ts,
+// duplicates are always adjacent.
+type ingestDedup struct {
+	ts      time.Time
+	ingID   string
+	started bool
+}
+
+// seen returns true if this (ts, ingesterID) was already yielded.
+func (d *ingestDedup) seen(ts time.Time, ingesterID string) bool {
+	if d.started && ts.Equal(d.ts) && ingesterID == d.ingID {
+		return true
+	}
+	d.ts = ts
+	d.ingID = ingesterID
+	d.started = true
+	return false
+}
+
+// collectRemote gathers results from all remote vaults into a single sorted
+// slice. Each vault's results arrive individually sorted, but concatenating
+// multiple vaults breaks that ordering, so we re-sort the combined slice for
+// the merge step. When reverse is true, sort descending (newest first).
+func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) []*apiv1.Record {
+	if s.remoteSearcher == nil || s.cfgStore == nil {
+		return nil
+	}
+	byNode := s.remoteVaultsByNode(ctx)
+	if len(byNode) == 0 {
+		return nil
+	}
+
+	queryExpr := q.String()
+	reverse := q.Reverse()
+
+	var all []*apiv1.Record
+	for nodeID, vaultIDs := range byNode {
+		for _, vid := range vaultIDs {
+			records := s.fetchRemoteVault(ctx, nodeID, vid, queryExpr)
+			all = append(all, records...)
+		}
+	}
+
+	// Sort so mergeRecordsByIngestTS can merge correctly regardless of
+	// how many remote vaults contributed.
+	slices.SortFunc(all, func(a, b *apiv1.Record) int {
+		ta, tb := a.GetIngestTs().AsTime(), b.GetIngestTs().AsTime()
+		if reverse {
+			return tb.Compare(ta) // descending (newest first)
+		}
+		return ta.Compare(tb) // ascending (oldest first)
+	})
+
+	s.logger.Debug("search: collected remote records", "nodes", len(byNode), "total", len(all))
+	return all
+}
+
+// fetchRemoteVault sends a ForwardSearch RPC and returns the records as protos.
+func (s *QueryServer) fetchRemoteVault(
+	ctx context.Context,
+	nodeID string,
+	vaultID uuid.UUID,
+	queryExpr string,
+) []*apiv1.Record {
+	resp, err := s.remoteSearcher.Search(ctx, nodeID, &apiv1.ForwardSearchRequest{
+		VaultId: vaultID.String(),
+		Query:   queryExpr,
+	})
+	if err != nil {
+		s.logger.Warn("search: remote vault failed", "node", nodeID, "vault", vaultID, "err", err)
+		return nil
+	}
+	if len(resp.GetRecords()) == 0 {
+		return nil
+	}
+
+	records := make([]*apiv1.Record, 0, len(resp.Records))
+	for _, er := range resp.Records {
+		records = append(records, exportToRecord(er))
+	}
+	return records
 }
 
 // Follow executes a query and streams matching records, continuously polling for new arrivals.
@@ -296,6 +545,22 @@ func (s *QueryServer) Explain(
 		resp.QueryEnd = timestamppb.New(plan.Query.End)
 	}
 
+	// Cache vault→nodeID lookups to avoid repeated config reads.
+	vaultNodeCache := make(map[uuid.UUID]string)
+	vaultNodeID := func(vaultID uuid.UUID) string {
+		if nid, ok := vaultNodeCache[vaultID]; ok {
+			return nid
+		}
+		var nid string
+		if s.cfgStore != nil {
+			if vc, err := s.cfgStore.GetVault(ctx, vaultID); err == nil && vc != nil {
+				nid = vc.NodeID
+			}
+		}
+		vaultNodeCache[vaultID] = nid
+		return nid
+	}
+
 	for _, cp := range plan.ChunkPlans {
 		chunkPlan := &apiv1.ChunkPlan{
 			VaultId:          cp.VaultID.String(),
@@ -307,6 +572,7 @@ func (s *QueryServer) Explain(
 			RuntimeFilters:   []string{cp.RuntimeFilter},
 			Steps:            pipelineStepsToProto(cp.Pipeline),
 			SkipReason:       cp.SkipReason,
+			NodeId:           vaultNodeID(cp.VaultID),
 		}
 		if !cp.StartTS.IsZero() {
 			chunkPlan.StartTs = timestamppb.New(cp.StartTS)
@@ -331,7 +597,10 @@ func (s *QueryServer) Explain(
 	return connect.NewResponse(resp), nil
 }
 
-// GetContext returns records surrounding a specific record, across all vaults.
+// GetContext returns records surrounding a specific record, searching across
+// all vaults in the cluster. The anchor record is read from its owning node
+// (local cursor or remote forward), but the before/after context searches
+// run the full cluster-wide search path so that records from any vault appear.
 func (s *QueryServer) GetContext(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetContextRequest],
@@ -357,30 +626,165 @@ func (s *QueryServer) GetContext(
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid chunk_id: %w", err))
 	}
 
-	eng := s.orch.MultiVaultQueryEngine()
-	result, err := eng.GetContext(ctx, query.ContextRef{
-		VaultID: vaultID,
-		ChunkID: chunkID,
-		Pos:     ref.Pos,
-	}, int(req.Msg.Before), int(req.Msg.After))
+	// Step 1: Read the anchor record from its owning vault.
+	anchor, err := s.readAnchor(ctx, vaultID, chunkID, ref.Pos)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	// Build response.
-	resp := &apiv1.GetContextResponse{
-		Anchor: recordToProto(result.Anchor),
-		Before: make([]*apiv1.Record, 0, len(result.Before)),
-		After:  make([]*apiv1.Record, 0, len(result.After)),
+	// Step 2: Collect context using the full cluster-wide search path.
+	before := int(req.Msg.Before)
+	after := int(req.Msg.After)
+	if before == 0 {
+		before = 5
 	}
-	for _, rec := range result.Before {
-		resp.Before = append(resp.Before, recordToProto(rec))
-	}
-	for _, rec := range result.After {
-		resp.After = append(resp.After, recordToProto(rec))
+	if after == 0 {
+		after = 5
 	}
 
-	return connect.NewResponse(resp), nil
+	isAnchor := func(rec *apiv1.Record) bool {
+		return rec.Ref != nil &&
+			rec.Ref.VaultId == ref.VaultId &&
+			rec.Ref.ChunkId == ref.ChunkId &&
+			rec.Ref.Pos == ref.Pos
+	}
+
+	anchorTS := anchor.GetIngestTs().AsTime()
+
+	beforeRecs, err := s.searchContext(ctx, query.Query{
+		End:       anchorTS,
+		Limit:     before + 1,
+		IsReverse: true,
+	}, before, isAnchor)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	slices.Reverse(beforeRecs) // newest-first → oldest-first
+
+	afterRecs, err := s.searchContext(ctx, query.Query{
+		Start: anchorTS,
+		Limit: after + 1,
+	}, after, isAnchor)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	return connect.NewResponse(&apiv1.GetContextResponse{
+		Anchor: anchor,
+		Before: beforeRecs,
+		After:  afterRecs,
+	}), nil
+}
+
+// readAnchor reads a single record by its ref. If the vault is local, reads
+// via cursor. If remote, forwards to the owning node.
+func (s *QueryServer) readAnchor(ctx context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID, pos uint64) (*apiv1.Record, error) {
+	if nodeID := s.remoteNodeForVault(ctx, vaultID); nodeID != "" {
+		resp, err := s.remoteSearcher.GetContext(ctx, nodeID, &apiv1.ForwardGetContextRequest{
+			VaultId: vaultID.String(),
+			ChunkId: chunkID.String(),
+			Pos:     pos,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("remote anchor read: %w", err)
+		}
+		if resp.Anchor == nil {
+			return nil, errors.New("remote anchor not found")
+		}
+		return exportToRecord(resp.Anchor), nil
+	}
+
+	eng := s.orch.MultiVaultQueryEngine()
+	anchor, err := eng.ReadRecord(ctx, vaultID, chunkID, pos)
+	if err != nil {
+		return nil, err
+	}
+	return recordToProto(anchor), nil
+}
+
+// searchContext runs a full cluster-wide search (local engine + remote vaults)
+// and collects up to n records into a slice, skipping the anchor.
+func (s *QueryServer) searchContext(
+	ctx context.Context,
+	q query.Query,
+	n int,
+	isAnchor func(*apiv1.Record) bool,
+) ([]*apiv1.Record, error) {
+	eng := s.orch.MultiVaultQueryEngine()
+	localIter, _ := eng.Search(ctx, q, nil)
+	remote := s.collectRemote(ctx, q)
+
+	reverse := q.Reverse()
+	ri := 0
+	isBefore := func(a, b time.Time) bool {
+		if reverse {
+			return a.After(b)
+		}
+		return a.Before(b)
+	}
+
+	var dedup ingestDedup
+	var result []*apiv1.Record
+
+	for rec, err := range localIter {
+		if err != nil {
+			return result, err
+		}
+		// Drain remote records that sort before this local record.
+		for ri < len(remote) && isBefore(remote[ri].GetIngestTs().AsTime(), rec.IngestTS) {
+			if !dedup.seen(remote[ri].GetIngestTs().AsTime(), remote[ri].GetAttrs()["ingester_id"]) && !isAnchor(remote[ri]) {
+				result = append(result, remote[ri])
+				if len(result) >= n {
+					return result, nil
+				}
+			}
+			ri++
+		}
+		if dedup.seen(rec.IngestTS, rec.Attrs["ingester_id"]) {
+			continue
+		}
+		proto := recordToProto(rec)
+		if isAnchor(proto) {
+			continue
+		}
+		result = append(result, proto)
+		if len(result) >= n {
+			return result, nil
+		}
+	}
+
+	// Drain remaining remote records.
+	for ri < len(remote) {
+		if !dedup.seen(remote[ri].GetIngestTs().AsTime(), remote[ri].GetAttrs()["ingester_id"]) && !isAnchor(remote[ri]) {
+			result = append(result, remote[ri])
+			if len(result) >= n {
+				return result, nil
+			}
+		}
+		ri++
+	}
+
+	return result, nil
+}
+
+// remoteNodeForVault returns the owning node ID if the vault is remote,
+// or "" if the vault is local or lookup fails.
+func (s *QueryServer) remoteNodeForVault(ctx context.Context, vaultID uuid.UUID) string {
+	if s.remoteSearcher == nil || s.cfgStore == nil {
+		return ""
+	}
+	// Check local first — fast path.
+	if slices.Contains(s.orch.ListVaults(), vaultID) {
+		return ""
+	}
+	vc, err := s.cfgStore.GetVault(ctx, vaultID)
+	if err != nil || vc == nil {
+		return ""
+	}
+	if vc.NodeID == "" || vc.NodeID == s.localNodeID {
+		return ""
+	}
+	return vc.NodeID
 }
 
 // GetSyntax returns the query language keyword sets for frontend tokenization.
@@ -505,6 +909,12 @@ const maxExpressionLength = 4096
 
 // parseExpression parses a raw query expression string into a Query and optional Pipeline.
 // Control arguments (start=, end=, limit=) are extracted; the remainder
+// ParseExpression parses a query expression string into a Query and optional Pipeline.
+// Exported for use by the search executor in cluster forwarding.
+func ParseExpression(expr string) (query.Query, *querylang.Pipeline, error) {
+	return parseExpression(expr)
+}
+
 // is parsed through the pipeline parser. If the expression contains pipe
 // operators (e.g. "| stats count"), the pipeline is returned; otherwise
 // only the filter expression is set on the query.

@@ -6,7 +6,7 @@
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 import { Job } from "./job_pb.js";
-import { VaultStats } from "./vault_pb.js";
+import { ExportRecord, VaultStats } from "./vault_pb.js";
 
 /**
  * ForwardApplyRequest carries a pre-marshaled ConfigCommand for the leader
@@ -613,6 +613,191 @@ export class IngesterNodeStats extends Message<IngesterNodeStats> {
 
   static equals(a: IngesterNodeStats | PlainMessage<IngesterNodeStats> | undefined, b: IngesterNodeStats | PlainMessage<IngesterNodeStats> | undefined): boolean {
     return proto3.util.equals(IngesterNodeStats, a, b);
+  }
+}
+
+/**
+ * ForwardRecordsRequest ships a batch of records to the node that owns
+ * the destination vault. Sent by the ingesting node when a route targets
+ * a remote vault.
+ *
+ * @generated from message gastrolog.v1.ForwardRecordsRequest
+ */
+export class ForwardRecordsRequest extends Message<ForwardRecordsRequest> {
+  /**
+   * @generated from field: string vault_id = 1;
+   */
+  vaultId = "";
+
+  /**
+   * @generated from field: repeated gastrolog.v1.ExportRecord records = 2;
+   */
+  records: ExportRecord[] = [];
+
+  constructor(data?: PartialMessage<ForwardRecordsRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardRecordsRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "records", kind: "message", T: ExportRecord, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardRecordsRequest {
+    return new ForwardRecordsRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardRecordsRequest {
+    return new ForwardRecordsRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardRecordsRequest {
+    return new ForwardRecordsRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardRecordsRequest | PlainMessage<ForwardRecordsRequest> | undefined, b: ForwardRecordsRequest | PlainMessage<ForwardRecordsRequest> | undefined): boolean {
+    return proto3.util.equals(ForwardRecordsRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ForwardRecordsResponse
+ */
+export class ForwardRecordsResponse extends Message<ForwardRecordsResponse> {
+  /**
+   * @generated from field: int64 records_written = 1;
+   */
+  recordsWritten = protoInt64.zero;
+
+  constructor(data?: PartialMessage<ForwardRecordsResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardRecordsResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "records_written", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardRecordsResponse {
+    return new ForwardRecordsResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardRecordsResponse {
+    return new ForwardRecordsResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardRecordsResponse {
+    return new ForwardRecordsResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardRecordsResponse | PlainMessage<ForwardRecordsResponse> | undefined, b: ForwardRecordsResponse | PlainMessage<ForwardRecordsResponse> | undefined): boolean {
+    return proto3.util.equals(ForwardRecordsResponse, a, b);
+  }
+}
+
+/**
+ * ForwardSearchRequest is sent to the node that owns a remote vault,
+ * asking it to execute a search locally and return matching records.
+ *
+ * @generated from message gastrolog.v1.ForwardSearchRequest
+ */
+export class ForwardSearchRequest extends Message<ForwardSearchRequest> {
+  /**
+   * @generated from field: string vault_id = 1;
+   */
+  vaultId = "";
+
+  /**
+   * @generated from field: string query = 2;
+   */
+  query = "";
+
+  /**
+   * @generated from field: bytes resume_token = 3;
+   */
+  resumeToken = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<ForwardSearchRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardSearchRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "resume_token", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardSearchRequest {
+    return new ForwardSearchRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardSearchRequest {
+    return new ForwardSearchRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardSearchRequest {
+    return new ForwardSearchRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardSearchRequest | PlainMessage<ForwardSearchRequest> | undefined, b: ForwardSearchRequest | PlainMessage<ForwardSearchRequest> | undefined): boolean {
+    return proto3.util.equals(ForwardSearchRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ForwardSearchResponse
+ */
+export class ForwardSearchResponse extends Message<ForwardSearchResponse> {
+  /**
+   * @generated from field: repeated gastrolog.v1.ExportRecord records = 1;
+   */
+  records: ExportRecord[] = [];
+
+  /**
+   * @generated from field: bytes resume_token = 2;
+   */
+  resumeToken = new Uint8Array(0);
+
+  /**
+   * @generated from field: bool has_more = 3;
+   */
+  hasMore = false;
+
+  constructor(data?: PartialMessage<ForwardSearchResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardSearchResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "records", kind: "message", T: ExportRecord, repeated: true },
+    { no: 2, name: "resume_token", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 3, name: "has_more", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardSearchResponse {
+    return new ForwardSearchResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardSearchResponse {
+    return new ForwardSearchResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardSearchResponse {
+    return new ForwardSearchResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardSearchResponse | PlainMessage<ForwardSearchResponse> | undefined, b: ForwardSearchResponse | PlainMessage<ForwardSearchResponse> | undefined): boolean {
+    return proto3.util.equals(ForwardSearchResponse, a, b);
   }
 }
 

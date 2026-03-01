@@ -25,6 +25,32 @@ type ContextResult struct {
 	After  []chunk.Record
 }
 
+// ReadRecord reads a single record by vault, chunk, and position.
+func (e *Engine) ReadRecord(_ context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID, pos uint64) (chunk.Record, error) {
+	cm, _ := e.getVaultManagers(vaultID)
+	if cm == nil {
+		return chunk.Record{}, fmt.Errorf("vault %q not found", vaultID)
+	}
+	cursor, err := cm.OpenCursor(chunkID)
+	if err != nil {
+		return chunk.Record{}, fmt.Errorf("chunk %s not found: %w", chunkID, err)
+	}
+	ref := chunk.RecordRef{ChunkID: chunkID, Pos: pos}
+	if err := cursor.Seek(ref); err != nil {
+		_ = cursor.Close()
+		return chunk.Record{}, fmt.Errorf("seek to position %d: %w", pos, err)
+	}
+	rec, _, err := cursor.Next()
+	if err != nil {
+		_ = cursor.Close()
+		return chunk.Record{}, fmt.Errorf("read record: %w", err)
+	}
+	_ = cursor.Close()
+	rec.VaultID = vaultID
+	rec.Ref = ref
+	return rec, nil
+}
+
 // GetContext returns records surrounding a specific record, across all vaults.
 // It reads the anchor record directly, then uses time-windowed multi-vault
 // searches to find nearby records.
@@ -43,32 +69,12 @@ func (e *Engine) GetContext(ctx context.Context, ref ContextRef, before, after i
 		after = 50
 	}
 
-	// Read the anchor record.
-	cm, _ := e.getVaultManagers(ref.VaultID)
-	if cm == nil {
-		return nil, fmt.Errorf("vault %q not found", ref.VaultID)
-	}
-
-	cursor, err := cm.OpenCursor(ref.ChunkID)
+	anchorRec, err := e.ReadRecord(ctx, ref.VaultID, ref.ChunkID, ref.Pos)
 	if err != nil {
-		return nil, fmt.Errorf("chunk %s not found: %w", ref.ChunkID, err)
+		return nil, err
 	}
 
-	anchorRef := chunk.RecordRef{ChunkID: ref.ChunkID, Pos: ref.Pos}
-	if err := cursor.Seek(anchorRef); err != nil {
-		_ = cursor.Close()
-		return nil, fmt.Errorf("failed to seek to position %d: %w", ref.Pos, err)
-	}
-	anchorRec, _, err := cursor.Next()
-	if err != nil {
-		_ = cursor.Close()
-		return nil, fmt.Errorf("failed to read anchor record: %w", err)
-	}
-	_ = cursor.Close()
-	anchorRec.VaultID = ref.VaultID
-	anchorRec.Ref = anchorRef
-
-	anchorTS := anchorRec.WriteTS
+	anchorTS := anchorRec.IngestTS
 
 	isAnchor := func(rec chunk.Record) bool {
 		return rec.VaultID == ref.VaultID &&

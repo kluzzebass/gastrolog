@@ -118,6 +118,13 @@ export class VaultInfo extends Message<VaultInfo> {
    */
   nodeId = "";
 
+  /**
+   * True if vault lives on another node
+   *
+   * @generated from field: bool remote = 9;
+   */
+  remote = false;
+
   constructor(data?: PartialMessage<VaultInfo>) {
     super();
     proto3.util.initPartial(data, this);
@@ -134,6 +141,7 @@ export class VaultInfo extends Message<VaultInfo> {
     { no: 6, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 7, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 8, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 9, name: "remote", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultInfo {
