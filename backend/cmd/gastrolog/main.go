@@ -246,7 +246,7 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 		return err
 	}
 
-	broadcaster, peerState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, clusterTLS, orch, nodeID)
+	broadcaster, peerState, peerJobState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, clusterTLS, orch, nodeID)
 
 	// For replication cases (cluster restart without local config, joining
 	// nodes): block until server settings replicate from the leader before
@@ -282,6 +282,7 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 		ClusterSrv:       clusterSrv,
 		Broadcaster:      broadcaster,
 		PeerState:        peerState,
+		PeerJobState:     peerJobState,
 		LocalStats:       localStatsFn,
 	})
 }
@@ -322,14 +323,14 @@ func startOrchestrator(ctx context.Context, logger *slog.Logger, orch *orchestra
 // setupClusterStats creates the broadcaster, peer state tracker, and stats
 // collector. Returns nils for single-node mode. Launches the collector
 // goroutine when in cluster mode.
-func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore config.Store, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, orch *orchestrator.Orchestrator, nodeID string) (*cluster.Broadcaster, *cluster.PeerState, func() *gastrologv1.NodeStats) {
+func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore config.Store, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, orch *orchestrator.Orchestrator, nodeID string) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats) {
 	// Create the cluster broadcaster for peer-to-peer message fan-out.
 	var broadcaster *cluster.Broadcaster
 	if rcs, ok := cfgStore.(*raftConfigStore); ok && clusterSrv != nil {
 		broadcaster = cluster.NewBroadcaster(rcs.raft, clusterTLS, nodeID, logger.With("component", "broadcast"))
 	}
 	if broadcaster == nil || clusterSrv == nil {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	// Read broadcast interval from cluster-wide settings.
@@ -343,10 +344,14 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore config
 	peerState := cluster.NewPeerState(15 * time.Second)
 	clusterSrv.Subscribe(peerState.HandleBroadcast)
 
+	peerJobState := cluster.NewPeerJobState(15 * time.Second)
+	clusterSrv.Subscribe(peerJobState.HandleBroadcast)
+
 	collector := cluster.NewStatsCollector(cluster.StatsCollectorConfig{
 		Broadcaster: broadcaster,
 		RaftStats:   clusterSrv,
 		Stats:       &orchStatsAdapter{orch: orch},
+		Jobs:        &jobBroadcastAdapter{scheduler: orch.Scheduler(), nodeID: nodeID},
 		NodeID:      nodeID,
 		NodeNameFn: func() string {
 			nid, err := uuid.Parse(nodeID)
@@ -364,9 +369,14 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore config
 		Interval:  broadcastInterval,
 		Logger:    logger.With("component", "stats-collector"),
 	})
+
+	orch.Scheduler().SetOnJobChange(func() {
+		go collector.BroadcastJobs(ctx)
+	})
+
 	go collector.Run(ctx)
 
-	return broadcaster, peerState, collector.CollectLocal
+	return broadcaster, peerState, peerJobState, collector.CollectLocal
 }
 
 // resolveIdentity ensures the home directory exists and resolves the node ID.
@@ -763,6 +773,7 @@ type serverDeps struct {
 	ClusterSrv       *cluster.Server
 	Broadcaster      *cluster.Broadcaster
 	PeerState        *cluster.PeerState
+	PeerJobState     *cluster.PeerJobState
 	LocalStats       func() *gastrologv1.NodeStats
 }
 
@@ -770,7 +781,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 	var srv *server.Server
 	var serverWg sync.WaitGroup
 	if deps.ServerAddr != "" {
-		srv = server.New(deps.Orch, deps.CfgStore, deps.Factories, deps.Tokens, server.Config{Logger: deps.Logger, CertManager: deps.CertMgr, NoAuth: deps.NoAuth, HomeDir: deps.HomeDir, NodeID: deps.NodeID, UnixSocket: deps.SocketPath, AfterConfigApply: deps.AfterConfigApply, Cluster: deps.ClusterSrv, PeerStats: deps.PeerState, LocalStats: deps.LocalStats})
+		srv = server.New(deps.Orch, deps.CfgStore, deps.Factories, deps.Tokens, server.Config{Logger: deps.Logger, CertManager: deps.CertMgr, NoAuth: deps.NoAuth, HomeDir: deps.HomeDir, NodeID: deps.NodeID, UnixSocket: deps.SocketPath, AfterConfigApply: deps.AfterConfigApply, Cluster: deps.ClusterSrv, PeerStats: deps.PeerState, PeerJobs: deps.PeerJobState, LocalStats: deps.LocalStats})
 		serverWg.Go(func() {
 			if err := srv.ServeTCP(deps.ServerAddr); err != nil {
 				deps.Logger.Error("server error", "error", err)
@@ -1238,4 +1249,20 @@ func (a *orchStatsAdapter) IngesterStats(id string) (name string, messages, byte
 		return "", 0, 0, 0, false
 	}
 	return a.orch.IngesterName(uid), s.MessagesIngested.Load(), s.BytesIngested.Load(), s.Errors.Load(), a.orch.IsIngesterRunning(uid)
+}
+
+// jobBroadcastAdapter bridges the scheduler to the cluster.JobsProvider
+// interface. Converts orchestrator.JobInfo to proto Jobs with node_id set.
+type jobBroadcastAdapter struct {
+	scheduler *orchestrator.Scheduler
+	nodeID    string
+}
+
+func (a *jobBroadcastAdapter) ListJobsProto() []*gastrologv1.Job {
+	jobs := a.scheduler.ListJobs()
+	out := make([]*gastrologv1.Job, 0, len(jobs))
+	for _, info := range jobs {
+		out = append(out, server.JobInfoToProto(info.Snapshot(), a.nodeID))
+	}
+	return out
 }

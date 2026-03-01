@@ -144,6 +144,7 @@ type Job struct {
 	Schedule      string                 `protobuf:"bytes,12,opt,name=schedule,proto3" json:"schedule,omitempty"`              // cron expression (scheduled jobs only)
 	LastRun       *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=last_run,json=lastRun,proto3" json:"last_run,omitempty"` // last execution time
 	NextRun       *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=next_run,json=nextRun,proto3" json:"next_run,omitempty"` // next scheduled execution time
+	NodeId        string                 `protobuf:"bytes,16,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`    // origin node (empty in single-node mode)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -281,6 +282,13 @@ func (x *Job) GetNextRun() *timestamppb.Timestamp {
 		return x.NextRun
 	}
 	return nil
+}
+
+func (x *Job) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
 }
 
 type GetJobRequest struct {
@@ -535,7 +543,7 @@ var File_gastrolog_v1_job_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_job_proto_rawDesc = "" +
 	"\n" +
-	"\x16gastrolog/v1/job.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xcd\x04\n" +
+	"\x16gastrolog/v1/job.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe6\x04\n" +
 	"\x03Job\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12/\n" +
@@ -554,7 +562,8 @@ const file_gastrolog_v1_job_proto_rawDesc = "" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\vcompletedAt\x12\x1a\n" +
 	"\bschedule\x18\f \x01(\tR\bschedule\x125\n" +
 	"\blast_run\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\alastRun\x125\n" +
-	"\bnext_run\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\anextRun\"\x1f\n" +
+	"\bnext_run\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\anextRun\x12\x17\n" +
+	"\anode_id\x18\x10 \x01(\tR\x06nodeId\"\x1f\n" +
 	"\rGetJobRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"5\n" +
 	"\x0eGetJobResponse\x12#\n" +

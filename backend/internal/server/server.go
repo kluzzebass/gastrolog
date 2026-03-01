@@ -72,6 +72,10 @@ type Config struct {
 	// PeerStats provides the latest broadcast stats from peer nodes.
 	PeerStats NodeStatsProvider
 
+	// PeerJobs provides active jobs from peer cluster nodes.
+	// Nil in single-node mode.
+	PeerJobs PeerJobsProvider
+
 	// LocalStats returns real-time stats for the local node.
 	LocalStats func() *apiv1.NodeStats
 }
@@ -96,6 +100,7 @@ type Server struct {
 	logger      *slog.Logger
 	cluster          ClusterStatusProvider
 	peerStats        NodeStatsProvider
+	peerJobs         PeerJobsProvider
 	localStatsFn     func() *apiv1.NodeStats
 	localNodeID      string
 	startTime        time.Time
@@ -139,6 +144,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orche
 		logger:      logging.Default(cfg.Logger).With("component", "server"),
 		cluster:          cfg.Cluster,
 		peerStats:        cfg.PeerStats,
+		peerJobs:         cfg.PeerJobs,
 		localStatsFn:     cfg.LocalStats,
 		localNodeID:      cfg.NodeID,
 		startTime:        time.Now(),
@@ -269,7 +275,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 	})
 	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown, s.cluster, s.cfgStore, s.localNodeID, s.peerStats, s.localStatsFn)
 	authServer := NewAuthServer(s.cfgStore, s.tokens, s.logger, s.noAuth)
-	jobServer := NewJobServer(s.orch.Scheduler())
+	jobServer := NewJobServer(s.orch.Scheduler(), s.localNodeID, s.peerJobs)
 
 	mux.Handle(gastrologv1connect.NewQueryServiceHandler(queryServer, handlerOpts...))
 	mux.Handle(gastrologv1connect.NewVaultServiceHandler(vaultServer, handlerOpts...))

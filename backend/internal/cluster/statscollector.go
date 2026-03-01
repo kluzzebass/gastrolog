@@ -40,11 +40,18 @@ type RaftStatsProvider interface {
 	LocalStats() map[string]string
 }
 
+// JobsProvider returns the current job list for broadcast.
+// Defined at the consumer site to avoid importing orchestrator/server.
+type JobsProvider interface {
+	ListJobsProto() []*gastrologv1.Job
+}
+
 // StatsCollectorConfig configures a StatsCollector.
 type StatsCollectorConfig struct {
 	Broadcaster       *Broadcaster
 	RaftStats         RaftStatsProvider
 	Stats             StatsProvider
+	Jobs              JobsProvider // optional; nil in single-node mode
 	NodeID            string
 	NodeNameFn        func() string // lazily resolved node name
 	Version           string
@@ -83,6 +90,7 @@ func (c *StatsCollector) Run(ctx context.Context) {
 					Timestamp: timestamppb.Now(),
 					Payload:   &gastrologv1.BroadcastMessage_NodeStats{NodeStats: stats},
 				})
+				c.BroadcastJobs(ctx)
 			}
 		}
 	}
@@ -156,6 +164,22 @@ func (c *StatsCollector) CollectLocal() *gastrologv1.NodeStats {
 	}
 
 	return stats
+}
+
+// BroadcastJobs sends the current job list to all cluster peers.
+// Called on every tick for periodic sync, and directly by the scheduler's
+// onJobChange callback for immediate notification.
+func (c *StatsCollector) BroadcastJobs(ctx context.Context) {
+	if c.cfg.Broadcaster == nil || c.cfg.Jobs == nil {
+		return
+	}
+	c.cfg.Broadcaster.Send(ctx, &gastrologv1.BroadcastMessage{
+		SenderId:  c.cfg.NodeID,
+		Timestamp: timestamppb.Now(),
+		Payload: &gastrologv1.BroadcastMessage_NodeJobs{NodeJobs: &gastrologv1.NodeJobs{
+			Jobs: c.cfg.Jobs.ListJobsProto(),
+		}},
+	})
 }
 
 func parseUint64(s string) uint64 {

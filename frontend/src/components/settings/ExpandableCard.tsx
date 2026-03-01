@@ -45,14 +45,15 @@ export function ExpandableCard({
         {...clickableProps(onToggle)}
         aria-expanded={expanded}
       >
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 min-w-0">
           <span
             className={`text-[0.7em] transition-transform ${expanded ? "rotate-90" : ""}`}
           >
             {"\u25B6"}
           </span>
           <span
-            className={`${monoTitle ? "font-mono" : ""} text-[0.9em] font-medium ${c("text-text-bright", "text-light-text-bright")}`}
+            className={`${monoTitle ? "font-mono" : ""} text-[0.9em] font-medium truncate ${c("text-text-bright", "text-light-text-bright")}`}
+            title={id}
           >
             {id}
           </span>

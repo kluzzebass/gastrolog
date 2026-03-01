@@ -2,6 +2,7 @@ syntax = "proto3";
 package gastrolog.v1;
 
 import "google/protobuf/timestamp.proto";
+import "gastrolog/v1/job.proto";
 import "gastrolog/v1/vault.proto";
 
 option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
@@ -45,7 +46,14 @@ message BroadcastMessage {
 
   oneof payload {
     NodeStats node_stats = 10;
+    NodeJobs node_jobs = 11;
   }
+}
+
+// NodeJobs reports active job state for a single cluster node.
+// Broadcast periodically and immediately on job completion/failure.
+message NodeJobs {
+  repeated Job jobs = 1;
 }
 
 // NodeStats reports runtime statistics for a single cluster node.

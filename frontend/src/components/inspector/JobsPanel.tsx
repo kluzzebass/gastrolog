@@ -5,6 +5,7 @@ import { toastError } from "../Toast";
 import { JobStatus, JobKind } from "../../api/gen/gastrolog/v1/job_pb";
 import type { Job } from "../../api/gen/gastrolog/v1/job_pb";
 import { ExpandableCard } from "../settings/ExpandableCard";
+import { NodeBadge } from "../settings/NodeBadge";
 import { HelpButton } from "../HelpButton";
 
 /** Format a Date as `YYYY-MM-DD HH:MM:SS` (24-hour, local time). */
@@ -116,7 +117,12 @@ export function JobsPanel({ dark }: Readonly<{ dark: boolean }>) {
                 onToggle={() =>
                   setExpanded(expanded === job.id ? null : job.id)
                 }
-                status={<StatusBadge status={job.status} dark={dark} />}
+                status={
+                  <span className="flex items-center gap-1.5">
+                    <StatusBadge status={job.status} dark={dark} />
+                    <NodeBadge nodeId={job.nodeId} dark={dark} />
+                  </span>
+                }
                 headerRight={<TaskProgress job={job} dark={dark} />}
               >
                 <TaskDetail job={job} dark={dark} />
@@ -142,12 +148,13 @@ export function JobsPanel({ dark }: Readonly<{ dark: boolean }>) {
           >
             {/* Column headers */}
             <div
-              className={`grid grid-cols-[1fr_8rem_9rem_9rem] gap-3 px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c(
+              className={`grid grid-cols-[1fr_6rem_8rem_9rem_9rem] gap-3 px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c(
                 "text-text-ghost border-ink-border-subtle",
                 "text-light-text-ghost border-light-border-subtle",
               )}`}
             >
               <span>Description</span>
+              <span>Node</span>
               <span>Schedule</span>
               <span>Last run</span>
               <span>Next run</span>
@@ -156,16 +163,19 @@ export function JobsPanel({ dark }: Readonly<{ dark: boolean }>) {
             {scheduled.map((job) => (
               <div
                 key={job.id}
-                className={`grid grid-cols-[1fr_8rem_9rem_9rem] gap-3 px-4 py-2 text-[0.85em] border-b last:border-b-0 ${c(
+                className={`grid grid-cols-[1fr_6rem_8rem_9rem_9rem] gap-3 px-4 py-2 text-[0.85em] border-b last:border-b-0 ${c(
                   "border-ink-border-subtle",
                   "border-light-border-subtle",
                 )}`}
               >
                 <span
                   className={`font-mono truncate ${c("text-text-bright", "text-light-text-bright")}`}
-                  title={job.name}
+                  title={job.description || job.name || job.id}
                 >
                   {job.description || job.name || job.id}
+                </span>
+                <span>
+                  <NodeBadge nodeId={job.nodeId} dark={dark} />
                 </span>
                 <span
                   className={`font-mono text-[0.9em] ${c("text-text-muted", "text-light-text-muted")}`}
@@ -337,8 +347,8 @@ function TaskDetail({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
           <div
             className={`text-[0.8em] font-mono space-y-1 ${c("text-text-muted", "text-light-text-muted")}`}
           >
-            {job.errorDetails.map((detail, i) => (
-              <div key={`err-${i}-${detail.slice(0, 50)}`}>{detail}</div>
+            {job.errorDetails.map((detail) => (
+              <div key={detail}>{detail}</div>
             ))}
           </div>
         </div>

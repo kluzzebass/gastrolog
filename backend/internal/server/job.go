@@ -1,9 +1,11 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"hash/fnv"
+	"slices"
 	"time"
 
 	"connectrpc.com/connect"
@@ -15,19 +17,26 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
+// PeerJobsProvider returns active jobs from peer cluster nodes.
+type PeerJobsProvider interface {
+	GetAll() map[string][]*apiv1.Job
+}
+
 // JobServer implements the JobService.
 type JobServer struct {
-	scheduler *orchestrator.Scheduler
+	scheduler   *orchestrator.Scheduler
+	localNodeID string
+	peerJobs    PeerJobsProvider // nil in single-node mode
 }
 
 var _ gastrologv1connect.JobServiceHandler = (*JobServer)(nil)
 
 // NewJobServer creates a new JobServer.
-func NewJobServer(scheduler *orchestrator.Scheduler) *JobServer {
-	return &JobServer{scheduler: scheduler}
+func NewJobServer(scheduler *orchestrator.Scheduler, localNodeID string, peerJobs PeerJobsProvider) *JobServer {
+	return &JobServer{scheduler: scheduler, localNodeID: localNodeID, peerJobs: peerJobs}
 }
 
-// GetJob returns a single job by ID.
+// GetJob returns a single job by ID (local node only).
 func (s *JobServer) GetJob(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetJobRequest],
@@ -42,24 +51,19 @@ func (s *JobServer) GetJob(
 	}
 
 	return connect.NewResponse(&apiv1.GetJobResponse{
-		Job: jobInfoToProto(info.Snapshot()),
+		Job: JobInfoToProto(info.Snapshot(), s.localNodeID),
 	}), nil
 }
 
-// ListJobs returns all jobs (cron, one-time, and recently completed).
+// ListJobs returns all jobs (local + peer) including cron, one-time, and recently completed.
 func (s *JobServer) ListJobs(
 	ctx context.Context,
 	req *connect.Request[apiv1.ListJobsRequest],
 ) (*connect.Response[apiv1.ListJobsResponse], error) {
-	jobs := s.scheduler.ListJobs()
-	protoJobs := make([]*apiv1.Job, 0, len(jobs))
-	for _, info := range jobs {
-		protoJobs = append(protoJobs, jobInfoToProto(info.Snapshot()))
-	}
-	return connect.NewResponse(&apiv1.ListJobsResponse{Jobs: protoJobs}), nil
+	return connect.NewResponse(&apiv1.ListJobsResponse{Jobs: s.allJobs()}), nil
 }
 
-// WatchJobs streams the full job list whenever state changes.
+// WatchJobs streams the full job list (local + peer) whenever state changes.
 func (s *JobServer) WatchJobs(
 	ctx context.Context,
 	req *connect.Request[apiv1.WatchJobsRequest],
@@ -68,13 +72,7 @@ func (s *JobServer) WatchJobs(
 	var lastHash uint64
 
 	for {
-		jobs := s.scheduler.ListJobs()
-		resp := &apiv1.WatchJobsResponse{
-			Jobs: make([]*apiv1.Job, 0, len(jobs)),
-		}
-		for _, info := range jobs {
-			resp.Jobs = append(resp.Jobs, jobInfoToProto(info.Snapshot()))
-		}
+		resp := &apiv1.WatchJobsResponse{Jobs: s.allJobs()}
 
 		h := fnv.New64a()
 		data, _ := proto.Marshal(resp)
@@ -96,12 +94,58 @@ func (s *JobServer) WatchJobs(
 	}
 }
 
-func jobInfoToProto(info orchestrator.JobInfo) *apiv1.Job {
+// allJobs merges local jobs with peer jobs from the cluster broadcast.
+// Results are sorted: scheduled jobs first, then tasks. Within each group,
+// sorted by description (falling back to name) then by node_id.
+func (s *JobServer) allJobs() []*apiv1.Job {
+	localJobs := s.scheduler.ListJobs()
+	all := make([]*apiv1.Job, 0, len(localJobs))
+	for _, info := range localJobs {
+		all = append(all, JobInfoToProto(info.Snapshot(), s.localNodeID))
+	}
+	if s.peerJobs != nil {
+		for _, peerJobList := range s.peerJobs.GetAll() {
+			all = append(all, peerJobList...)
+		}
+	}
+
+	slices.SortFunc(all, func(a, b *apiv1.Job) int {
+		// Scheduled before tasks.
+		if a.Kind != b.Kind {
+			if a.Kind == apiv1.JobKind_JOB_KIND_SCHEDULED {
+				return -1
+			}
+			if b.Kind == apiv1.JobKind_JOB_KIND_SCHEDULED {
+				return 1
+			}
+		}
+		// By description (or name as fallback).
+		aDesc := a.Description
+		if aDesc == "" {
+			aDesc = a.Name
+		}
+		bDesc := b.Description
+		if bDesc == "" {
+			bDesc = b.Name
+		}
+		if c := cmp.Compare(aDesc, bDesc); c != 0 {
+			return c
+		}
+		// By node ID to group same-node jobs together.
+		return cmp.Compare(a.NodeId, b.NodeId)
+	})
+
+	return all
+}
+
+// JobInfoToProto converts an orchestrator.JobInfo to a proto Job message.
+func JobInfoToProto(info orchestrator.JobInfo, nodeID string) *apiv1.Job {
 	pj := &apiv1.Job{
 		Id:          info.ID,
 		Name:        info.Name,
 		Description: info.Description,
 		Schedule:    info.Schedule,
+		NodeId:      nodeID,
 	}
 
 	if info.Schedule == "once" {

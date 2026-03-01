@@ -318,6 +318,7 @@ type BroadcastMessage struct {
 	// Types that are valid to be assigned to Payload:
 	//
 	//	*BroadcastMessage_NodeStats
+	//	*BroadcastMessage_NodeJobs
 	Payload       isBroadcastMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -383,6 +384,15 @@ func (x *BroadcastMessage) GetNodeStats() *NodeStats {
 	return nil
 }
 
+func (x *BroadcastMessage) GetNodeJobs() *NodeJobs {
+	if x != nil {
+		if x, ok := x.Payload.(*BroadcastMessage_NodeJobs); ok {
+			return x.NodeJobs
+		}
+	}
+	return nil
+}
+
 type isBroadcastMessage_Payload interface {
 	isBroadcastMessage_Payload()
 }
@@ -391,7 +401,59 @@ type BroadcastMessage_NodeStats struct {
 	NodeStats *NodeStats `protobuf:"bytes,10,opt,name=node_stats,json=nodeStats,proto3,oneof"`
 }
 
+type BroadcastMessage_NodeJobs struct {
+	NodeJobs *NodeJobs `protobuf:"bytes,11,opt,name=node_jobs,json=nodeJobs,proto3,oneof"`
+}
+
 func (*BroadcastMessage_NodeStats) isBroadcastMessage_Payload() {}
+
+func (*BroadcastMessage_NodeJobs) isBroadcastMessage_Payload() {}
+
+// NodeJobs reports active job state for a single cluster node.
+// Broadcast periodically and immediately on job completion/failure.
+type NodeJobs struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Jobs          []*Job                 `protobuf:"bytes,1,rep,name=jobs,proto3" json:"jobs,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NodeJobs) Reset() {
+	*x = NodeJobs{}
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NodeJobs) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NodeJobs) ProtoMessage() {}
+
+func (x *NodeJobs) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NodeJobs.ProtoReflect.Descriptor instead.
+func (*NodeJobs) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *NodeJobs) GetJobs() []*Job {
+	if x != nil {
+		return x.Jobs
+	}
+	return nil
+}
 
 // NodeStats reports runtime statistics for a single cluster node.
 type NodeStats struct {
@@ -430,7 +492,7 @@ type NodeStats struct {
 
 func (x *NodeStats) Reset() {
 	*x = NodeStats{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[7]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -442,7 +504,7 @@ func (x *NodeStats) String() string {
 func (*NodeStats) ProtoMessage() {}
 
 func (x *NodeStats) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[7]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -455,7 +517,7 @@ func (x *NodeStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeStats.ProtoReflect.Descriptor instead.
 func (*NodeStats) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{7}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *NodeStats) GetCpuPercent() float64 {
@@ -648,7 +710,7 @@ type IngesterNodeStats struct {
 
 func (x *IngesterNodeStats) Reset() {
 	*x = IngesterNodeStats{}
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[8]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -660,7 +722,7 @@ func (x *IngesterNodeStats) String() string {
 func (*IngesterNodeStats) ProtoMessage() {}
 
 func (x *IngesterNodeStats) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_cluster_proto_msgTypes[8]
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -673,7 +735,7 @@ func (x *IngesterNodeStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IngesterNodeStats.ProtoReflect.Descriptor instead.
 func (*IngesterNodeStats) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{8}
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *IngesterNodeStats) GetId() string {
@@ -722,7 +784,7 @@ var File_gastrolog_v1_cluster_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\n" +
-	"\x1agastrolog/v1/cluster.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x18gastrolog/v1/vault.proto\"/\n" +
+	"\x1agastrolog/v1/cluster.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x16gastrolog/v1/job.proto\x1a\x18gastrolog/v1/vault.proto\"/\n" +
 	"\x13ForwardApplyRequest\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\fR\acommand\"\x16\n" +
 	"\x14ForwardApplyResponse\"h\n" +
@@ -736,14 +798,17 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x0fcluster_key_pem\x18\x03 \x01(\fR\rclusterKeyPem\"L\n" +
 	"\x10BroadcastRequest\x128\n" +
 	"\amessage\x18\x01 \x01(\v2\x1e.gastrolog.v1.BroadcastMessageR\amessage\"\x13\n" +
-	"\x11BroadcastResponse\"\xae\x01\n" +
+	"\x11BroadcastResponse\"\xe5\x01\n" +
 	"\x10BroadcastMessage\x12\x1b\n" +
 	"\tsender_id\x18\x01 \x01(\tR\bsenderId\x128\n" +
 	"\ttimestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x128\n" +
 	"\n" +
 	"node_stats\x18\n" +
-	" \x01(\v2\x17.gastrolog.v1.NodeStatsH\x00R\tnodeStatsB\t\n" +
-	"\apayload\"\xe3\a\n" +
+	" \x01(\v2\x17.gastrolog.v1.NodeStatsH\x00R\tnodeStats\x125\n" +
+	"\tnode_jobs\x18\v \x01(\v2\x16.gastrolog.v1.NodeJobsH\x00R\bnodeJobsB\t\n" +
+	"\apayload\"1\n" +
+	"\bNodeJobs\x12%\n" +
+	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xe3\a\n" +
 	"\tNodeStats\x12\x1f\n" +
 	"\vcpu_percent\x18\x01 \x01(\x01R\n" +
 	"cpuPercent\x12!\n" +
@@ -797,7 +862,7 @@ func file_gastrolog_v1_cluster_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_cluster_proto_rawDescData
 }
 
-var file_gastrolog_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_gastrolog_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_gastrolog_v1_cluster_proto_goTypes = []any{
 	(*ForwardApplyRequest)(nil),   // 0: gastrolog.v1.ForwardApplyRequest
 	(*ForwardApplyResponse)(nil),  // 1: gastrolog.v1.ForwardApplyResponse
@@ -806,22 +871,26 @@ var file_gastrolog_v1_cluster_proto_goTypes = []any{
 	(*BroadcastRequest)(nil),      // 4: gastrolog.v1.BroadcastRequest
 	(*BroadcastResponse)(nil),     // 5: gastrolog.v1.BroadcastResponse
 	(*BroadcastMessage)(nil),      // 6: gastrolog.v1.BroadcastMessage
-	(*NodeStats)(nil),             // 7: gastrolog.v1.NodeStats
-	(*IngesterNodeStats)(nil),     // 8: gastrolog.v1.IngesterNodeStats
-	(*timestamppb.Timestamp)(nil), // 9: google.protobuf.Timestamp
-	(*VaultStats)(nil),            // 10: gastrolog.v1.VaultStats
+	(*NodeJobs)(nil),              // 7: gastrolog.v1.NodeJobs
+	(*NodeStats)(nil),             // 8: gastrolog.v1.NodeStats
+	(*IngesterNodeStats)(nil),     // 9: gastrolog.v1.IngesterNodeStats
+	(*timestamppb.Timestamp)(nil), // 10: google.protobuf.Timestamp
+	(*Job)(nil),                   // 11: gastrolog.v1.Job
+	(*VaultStats)(nil),            // 12: gastrolog.v1.VaultStats
 }
 var file_gastrolog_v1_cluster_proto_depIdxs = []int32{
 	6,  // 0: gastrolog.v1.BroadcastRequest.message:type_name -> gastrolog.v1.BroadcastMessage
-	9,  // 1: gastrolog.v1.BroadcastMessage.timestamp:type_name -> google.protobuf.Timestamp
-	7,  // 2: gastrolog.v1.BroadcastMessage.node_stats:type_name -> gastrolog.v1.NodeStats
-	10, // 3: gastrolog.v1.NodeStats.vaults:type_name -> gastrolog.v1.VaultStats
-	8,  // 4: gastrolog.v1.NodeStats.ingesters:type_name -> gastrolog.v1.IngesterNodeStats
-	5,  // [5:5] is the sub-list for method output_type
-	5,  // [5:5] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	10, // 1: gastrolog.v1.BroadcastMessage.timestamp:type_name -> google.protobuf.Timestamp
+	8,  // 2: gastrolog.v1.BroadcastMessage.node_stats:type_name -> gastrolog.v1.NodeStats
+	7,  // 3: gastrolog.v1.BroadcastMessage.node_jobs:type_name -> gastrolog.v1.NodeJobs
+	11, // 4: gastrolog.v1.NodeJobs.jobs:type_name -> gastrolog.v1.Job
+	12, // 5: gastrolog.v1.NodeStats.vaults:type_name -> gastrolog.v1.VaultStats
+	9,  // 6: gastrolog.v1.NodeStats.ingesters:type_name -> gastrolog.v1.IngesterNodeStats
+	7,  // [7:7] is the sub-list for method output_type
+	7,  // [7:7] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_cluster_proto_init() }
@@ -829,9 +898,11 @@ func file_gastrolog_v1_cluster_proto_init() {
 	if File_gastrolog_v1_cluster_proto != nil {
 		return
 	}
+	file_gastrolog_v1_job_proto_init()
 	file_gastrolog_v1_vault_proto_init()
 	file_gastrolog_v1_cluster_proto_msgTypes[6].OneofWrappers = []any{
 		(*BroadcastMessage_NodeStats)(nil),
+		(*BroadcastMessage_NodeJobs)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -839,7 +910,7 @@ func file_gastrolog_v1_cluster_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_cluster_proto_rawDesc), len(file_gastrolog_v1_cluster_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -43,6 +43,7 @@ message Job {
   string schedule = 12;                           // cron expression (scheduled jobs only)
   google.protobuf.Timestamp last_run = 13;        // last execution time
   google.protobuf.Timestamp next_run = 14;        // next scheduled execution time
+  string node_id = 16;                            // origin node (empty in single-node mode)
 }
 
 message GetJobRequest { string id = 1; }

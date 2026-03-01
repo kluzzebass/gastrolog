@@ -5,6 +5,7 @@
 
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
+import { Job } from "./job_pb.js";
 import { VaultStats } from "./vault_pb.js";
 
 /**
@@ -278,6 +279,12 @@ export class BroadcastMessage extends Message<BroadcastMessage> {
      */
     value: NodeStats;
     case: "nodeStats";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.NodeJobs node_jobs = 11;
+     */
+    value: NodeJobs;
+    case: "nodeJobs";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<BroadcastMessage>) {
@@ -291,6 +298,7 @@ export class BroadcastMessage extends Message<BroadcastMessage> {
     { no: 1, name: "sender_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "timestamp", kind: "message", T: Timestamp },
     { no: 10, name: "node_stats", kind: "message", T: NodeStats, oneof: "payload" },
+    { no: 11, name: "node_jobs", kind: "message", T: NodeJobs, oneof: "payload" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): BroadcastMessage {
@@ -307,6 +315,46 @@ export class BroadcastMessage extends Message<BroadcastMessage> {
 
   static equals(a: BroadcastMessage | PlainMessage<BroadcastMessage> | undefined, b: BroadcastMessage | PlainMessage<BroadcastMessage> | undefined): boolean {
     return proto3.util.equals(BroadcastMessage, a, b);
+  }
+}
+
+/**
+ * NodeJobs reports active job state for a single cluster node.
+ * Broadcast periodically and immediately on job completion/failure.
+ *
+ * @generated from message gastrolog.v1.NodeJobs
+ */
+export class NodeJobs extends Message<NodeJobs> {
+  /**
+   * @generated from field: repeated gastrolog.v1.Job jobs = 1;
+   */
+  jobs: Job[] = [];
+
+  constructor(data?: PartialMessage<NodeJobs>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.NodeJobs";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "jobs", kind: "message", T: Job, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeJobs {
+    return new NodeJobs().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): NodeJobs {
+    return new NodeJobs().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): NodeJobs {
+    return new NodeJobs().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: NodeJobs | PlainMessage<NodeJobs> | undefined, b: NodeJobs | PlainMessage<NodeJobs> | undefined): boolean {
+    return proto3.util.equals(NodeJobs, a, b);
   }
 }
 

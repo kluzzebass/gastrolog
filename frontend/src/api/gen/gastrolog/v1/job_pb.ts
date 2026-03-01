@@ -163,6 +163,13 @@ export class Job extends Message<Job> {
    */
   nextRun?: Timestamp;
 
+  /**
+   * origin node (empty in single-node mode)
+   *
+   * @generated from field: string node_id = 16;
+   */
+  nodeId = "";
+
   constructor(data?: PartialMessage<Job>) {
     super();
     proto3.util.initPartial(data, this);
@@ -186,6 +193,7 @@ export class Job extends Message<Job> {
     { no: 12, name: "schedule", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 13, name: "last_run", kind: "message", T: Timestamp },
     { no: 14, name: "next_run", kind: "message", T: Timestamp },
+    { no: 16, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): Job {

@@ -139,6 +139,7 @@ type Scheduler struct {
 	maxConcurrent int
 	now           func() time.Time
 	logger        *slog.Logger
+	onJobChange   func() // optional; called (outside lock) when a job transitions state
 }
 
 func newScheduler(logger *slog.Logger, maxConcurrent int, now func() time.Time) (*Scheduler, error) {
@@ -174,6 +175,15 @@ func (s *Scheduler) MaxConcurrent() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.maxConcurrent
+}
+
+// SetOnJobChange registers a callback invoked (outside the lock) whenever a
+// job transitions state — started, completed, or failed. Used by the cluster
+// broadcast system for immediate peer notification.
+func (s *Scheduler) SetOnJobChange(fn func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onJobChange = fn
 }
 
 // Rebuild recreates the gocron scheduler with a new concurrency limit,
@@ -437,6 +447,9 @@ func (s *Scheduler) Submit(name string, fn func(context.Context, *JobProgress)) 
 
 	wrapper := func() {
 		prog.SetRunning(0)
+		if notify := s.onJobChange; notify != nil {
+			notify()
+		}
 		ctx := context.WithoutCancel(context.Background())
 		fn(ctx, prog)
 		// If fn didn't explicitly complete/fail, mark completed.
@@ -489,10 +502,10 @@ func (s *Scheduler) Submit(name string, fn func(context.Context, *JobProgress)) 
 // to the completed map so its progress remains available for polling.
 func (s *Scheduler) completeOneTimeJob(name string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	j, ok := s.jobs[name]
 	if !ok {
+		s.mu.Unlock()
 		return
 	}
 
@@ -513,6 +526,12 @@ func (s *Scheduler) completeOneTimeJob(name string) {
 	delete(s.schedules, name)
 	delete(s.descriptions, name)
 	delete(s.progress, id)
+	notify := s.onJobChange
+	s.mu.Unlock()
+
+	if notify != nil {
+		notify()
+	}
 }
 
 // cleanupCompletedLocked removes completed jobs older than 1 hour.
