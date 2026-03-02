@@ -324,6 +324,16 @@ export class GetClusterStatusResponse extends Message<GetClusterStatusResponse> 
    */
   localNodeId = "";
 
+  /**
+   * @generated from field: string join_token = 7;
+   */
+  joinToken = "";
+
+  /**
+   * @generated from field: string cluster_address = 8;
+   */
+  clusterAddress = "";
+
   constructor(data?: PartialMessage<GetClusterStatusResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -338,6 +348,8 @@ export class GetClusterStatusResponse extends Message<GetClusterStatusResponse> 
     { no: 4, name: "nodes", kind: "message", T: ClusterNode, repeated: true },
     { no: 5, name: "local_stats", kind: "message", T: RaftStats },
     { no: 6, name: "local_node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 7, name: "join_token", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 8, name: "cluster_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetClusterStatusResponse {

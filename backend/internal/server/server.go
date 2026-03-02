@@ -95,6 +95,10 @@ type Config struct {
 	// ConfigSignal broadcasts config changes to WatchConfig streams.
 	// May be nil in tests.
 	ConfigSignal *notify.Signal
+
+	// ClusterAddress is the cluster gRPC listen address (e.g., ":4565").
+	// Exposed in GetClusterStatus for join info. Empty for non-raft mode.
+	ClusterAddress string
 }
 
 // CertManager interface for TLS certificate management.
@@ -123,6 +127,7 @@ type Server struct {
 	peerJobs             PeerJobsProvider
 	localStatsFn     func() *apiv1.NodeStats
 	localNodeID      string
+	clusterAddress   string
 	startTime        time.Time
 	homeDir          string                     // gastrolog home directory; empty for in-memory config
 	afterConfigApply func(raftfsm.Notification) // non-raft dispatch hook
@@ -171,6 +176,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orche
 		peerJobs:             cfg.PeerJobs,
 		localStatsFn:     cfg.LocalStats,
 		localNodeID:      cfg.NodeID,
+		clusterAddress:   cfg.ClusterAddress,
 		startTime:        time.Now(),
 		homeDir:          cfg.HomeDir,
 		unixSocketConfig: cfg.UnixSocket,
@@ -304,7 +310,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 	configServer.SetOnLookupConfigChange(func(cfg config.LookupConfig) {
 		s.applyLookupConfig(cfg, geoipTable, asnTable)
 	})
-	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown, s.cluster, s.cfgStore, s.localNodeID, s.peerStats, s.localStatsFn)
+	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown, s.cluster, s.cfgStore, s.localNodeID, s.clusterAddress, s.peerStats, s.localStatsFn)
 	authServer := NewAuthServer(s.cfgStore, s.tokens, s.logger, s.noAuth)
 	jobServer := NewJobServer(s.orch.Scheduler(), s.localNodeID, s.peerJobs)
 

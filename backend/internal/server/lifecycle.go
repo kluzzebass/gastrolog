@@ -37,30 +37,32 @@ type NodeStatsProvider interface {
 
 // LifecycleServer implements the LifecycleService.
 type LifecycleServer struct {
-	orch       *orchestrator.Orchestrator
-	startTime  time.Time
-	shutdown   func(drain bool)
-	cluster    ClusterStatusProvider
-	cfgStore   config.Store
-	nodeID     string
-	peerStats  NodeStatsProvider
-	localStats func() *apiv1.NodeStats
+	orch           *orchestrator.Orchestrator
+	startTime      time.Time
+	shutdown       func(drain bool)
+	cluster        ClusterStatusProvider
+	cfgStore       config.Store
+	nodeID         string
+	clusterAddress string
+	peerStats      NodeStatsProvider
+	localStats     func() *apiv1.NodeStats
 }
 
 var _ gastrologv1connect.LifecycleServiceHandler = (*LifecycleServer)(nil)
 
 // NewLifecycleServer creates a new LifecycleServer.
 // The shutdown function is called when Shutdown is invoked with the drain flag.
-func NewLifecycleServer(orch *orchestrator.Orchestrator, shutdown func(drain bool), cluster ClusterStatusProvider, cfgStore config.Store, nodeID string, peerStats NodeStatsProvider, localStats func() *apiv1.NodeStats) *LifecycleServer {
+func NewLifecycleServer(orch *orchestrator.Orchestrator, shutdown func(drain bool), cluster ClusterStatusProvider, cfgStore config.Store, nodeID string, clusterAddress string, peerStats NodeStatsProvider, localStats func() *apiv1.NodeStats) *LifecycleServer {
 	return &LifecycleServer{
-		orch:       orch,
-		startTime:  time.Now(),
-		shutdown:   shutdown,
-		cluster:    cluster,
-		cfgStore:   cfgStore,
-		nodeID:     nodeID,
-		peerStats:  peerStats,
-		localStats: localStats,
+		orch:           orch,
+		startTime:      time.Now(),
+		shutdown:       shutdown,
+		cluster:        cluster,
+		cfgStore:       cfgStore,
+		nodeID:         nodeID,
+		clusterAddress: clusterAddress,
+		peerStats:      peerStats,
+		localStats:     localStats,
 	}
 }
 
@@ -161,14 +163,24 @@ func (s *LifecycleServer) GetClusterStatus(
 		nodes = append(nodes, node)
 	}
 
-	return connect.NewResponse(&apiv1.GetClusterStatusResponse{
+	resp := &apiv1.GetClusterStatusResponse{
 		ClusterEnabled: true,
 		LeaderId:       leaderID,
 		LeaderAddress:  leaderAddr,
 		Nodes:          nodes,
 		LocalStats:     buildRaftStats(s.cluster.LocalStats()),
 		LocalNodeId:    s.nodeID,
-	}), nil
+		ClusterAddress: s.clusterAddress,
+	}
+
+	// Expose join token when this node is leader (join info is only useful from the leader).
+	if leaderID == s.nodeID {
+		if cfg, err := s.cfgStore.Load(ctx); err == nil && cfg != nil && cfg.ClusterTLS != nil {
+			resp.JoinToken = cfg.ClusterTLS.JoinToken
+		}
+	}
+
+	return connect.NewResponse(resp), nil
 }
 
 // SetNodeSuffrage promotes or demotes a node's voting status.

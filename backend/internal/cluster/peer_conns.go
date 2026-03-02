@@ -3,9 +3,11 @@ package cluster
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -54,7 +56,17 @@ func (p *PeerConns) Conn(nodeID string) (*grpc.ClientConn, error) {
 		creds = insecure.NewCredentials()
 	}
 
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(creds))
+	conn, err := grpc.NewClient(addr,
+		grpc.WithTransportCredentials(creds),
+		grpc.WithConnectParams(grpc.ConnectParams{
+			Backoff: backoff.Config{
+				BaseDelay:  500 * time.Millisecond,
+				Multiplier: 1.6,
+				Jitter:     0.2,
+				MaxDelay:   3 * time.Second,
+			},
+		}),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("dial node %s at %s: %w", nodeID, addr, err)
 	}

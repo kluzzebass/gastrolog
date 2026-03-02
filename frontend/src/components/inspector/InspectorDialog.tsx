@@ -186,6 +186,9 @@ export function InspectorDialog({
                     {node.name || node.id.slice(0, 8)}
                   </span>
                   <span className="ml-auto flex items-center gap-1">
+                    {!isLocal && !node.stats && (
+                      <Badge variant="error" dark={dark}>offline</Badge>
+                    )}
                     {node.role === ClusterNodeRole.LEADER && (
                       <Badge variant="copper" dark={dark}>leader</Badge>
                     )}

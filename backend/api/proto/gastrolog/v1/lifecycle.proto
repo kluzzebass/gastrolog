@@ -53,6 +53,8 @@ message GetClusterStatusResponse {
   repeated ClusterNode nodes = 4;
   RaftStats local_stats = 5;
   string local_node_id = 6;
+  string join_token = 7;
+  string cluster_address = 8;
 }
 
 // RaftStats contains Raft consensus statistics for the local node.

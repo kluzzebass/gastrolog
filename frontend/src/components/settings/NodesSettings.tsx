@@ -7,6 +7,8 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { useEditState } from "../../hooks/useEditState";
 import { useToast } from "../Toast";
 import { Badge } from "../Badge";
+import { CopyButton } from "../CopyButton";
+import { EyeIcon, EyeOffIcon } from "../icons";
 import { SettingsCard } from "./SettingsCard";
 import { FormField, TextInput } from "./FormField";
 import { PrimaryButton, GhostButton } from "./Buttons";
@@ -49,6 +51,7 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
         role: cn.role,
         suffrage: cn.suffrage,
         isLeader: cn.isLeader,
+        hasStats: !!cn.stats,
       }))
     : localNodeId
       ? [
@@ -58,6 +61,7 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
             role: ClusterNodeRole.UNSPECIFIED,
             suffrage: ClusterNodeSuffrage.UNSPECIFIED,
             isLeader: false,
+            hasStats: true,
           },
         ]
       : [];
@@ -115,6 +119,9 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
               onToggle={() => toggle(node.id)}
               headerRight={
                 <div className="flex items-center gap-1.5">
+                  {clusterEnabled && !isLocal && !node.hasStats && (
+                    <Badge variant="error" dark={dark}>offline</Badge>
+                  )}
                   {clusterEnabled && node.role !== ClusterNodeRole.UNSPECIFIED && (
                     <Badge variant={node.isLeader ? "copper" : "muted"} dark={dark}>
                       {roleName(node.role)}
@@ -197,6 +204,77 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
             No nodes found.
           </div>
         )}
+      </div>
+
+      {clusterEnabled && clusterData?.joinToken && (
+        <JoinInfoCard dark={dark} joinToken={clusterData.joinToken} clusterAddress={clusterData.clusterAddress} />
+      )}
+    </div>
+  );
+}
+
+function JoinInfoCard({ dark, joinToken, clusterAddress }: Readonly<{ dark: boolean; joinToken: string; clusterAddress: string }>) {
+  const c = useThemeClass(dark);
+  const [showToken, setShowToken] = useState(false);
+
+  const maskedToken = joinToken.slice(0, 8) + "..." + joinToken.slice(-4);
+  const displayToken = showToken ? joinToken : maskedToken;
+
+  const joinCmd = `gastrolog server --join-addr ${clusterAddress || "<cluster-addr>"} --join-token ${joinToken} --cluster-addr :4575`;
+
+  return (
+    <div className={`mt-4 rounded-lg border p-4 ${c(
+      "bg-ink-well/50 border-ink-border",
+      "bg-light-well/50 border-light-border",
+    )}`}>
+      <h3 className={`text-[0.85em] font-semibold mb-3 ${c("text-text-primary", "text-light-text-primary")}`}>
+        Cluster Join Info
+      </h3>
+      <div className="flex flex-col gap-2.5">
+        <div className="flex flex-col gap-1">
+          <span className={`text-[0.75em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}>
+            Cluster Address
+          </span>
+          <div className="flex items-center gap-1.5">
+            <code className={`text-[0.8em] font-mono ${c("text-text-secondary", "text-light-text-secondary")}`}>
+              {clusterAddress || "—"}
+            </code>
+            {clusterAddress && <CopyButton text={clusterAddress} dark={dark} />}
+          </div>
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className={`text-[0.75em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}>
+            Join Token
+          </span>
+          <div className="flex items-center gap-1.5">
+            <code className={`text-[0.8em] font-mono break-all ${c("text-text-secondary", "text-light-text-secondary")}`}>
+              {displayToken}
+            </code>
+            <button
+              type="button"
+              onClick={() => setShowToken(!showToken)}
+              className={`shrink-0 transition-colors ${c("text-text-ghost hover:text-copper", "text-light-text-ghost hover:text-copper")}`}
+              title={showToken ? "Hide token" : "Reveal token"}
+            >
+              {showToken ? <EyeOffIcon className="w-3.5 h-3.5" /> : <EyeIcon className="w-3.5 h-3.5" />}
+            </button>
+            <CopyButton text={joinToken} dark={dark} />
+          </div>
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className={`text-[0.75em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}>
+            Join Command
+          </span>
+          <div className="flex items-start gap-1.5">
+            <code className={`text-[0.75em] font-mono break-all leading-relaxed ${c(
+              "text-text-ghost bg-ink-well px-2 py-1.5 rounded",
+              "text-light-text-ghost bg-light-well px-2 py-1.5 rounded",
+            )}`}>
+              {joinCmd}
+            </code>
+            <CopyButton text={joinCmd} dark={dark} className="mt-1 shrink-0" />
+          </div>
+        </div>
       </div>
     </div>
   );
