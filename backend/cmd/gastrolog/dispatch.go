@@ -65,6 +65,8 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		d.handleSettingPut(ctx, n.Key)
 	case raftfsm.NotifyClusterTLSPut:
 		d.handleClusterTLSPut(ctx)
+	case raftfsm.NotifyNodeConfigPut, raftfsm.NotifyNodeConfigDeleted:
+		// No orchestrator side effects; configSignal fires below.
 	}
 
 	// Notify WatchConfig streams for all user-visible config changes.

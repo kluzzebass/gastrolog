@@ -36,6 +36,8 @@ const (
 	NotifyClusterTLSPut
 	NotifyRoutePut
 	NotifyRouteDeleted
+	NotifyNodeConfigPut
+	NotifyNodeConfigDeleted
 )
 
 // Notification describes a config mutation that the FSM just applied.
@@ -195,13 +197,19 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.ConfigCommand
 		if err != nil {
 			return nil, err
 		}
-		return nil, f.store.PutNode(ctx, node)
+		if err := f.store.PutNode(ctx, node); err != nil {
+			return nil, err
+		}
+		return &Notification{Kind: NotifyNodeConfigPut, ID: node.ID}, nil
 	case *gastrologv1.ConfigCommand_DeleteNodeConfig:
 		id, err := command.ExtractDeleteNodeConfig(c.DeleteNodeConfig)
 		if err != nil {
 			return nil, err
 		}
-		return nil, f.store.DeleteNode(ctx, id)
+		if err := f.store.DeleteNode(ctx, id); err != nil {
+			return nil, err
+		}
+		return &Notification{Kind: NotifyNodeConfigDeleted, ID: id}, nil
 	case *gastrologv1.ConfigCommand_PutClusterTls:
 		tls := command.ExtractPutClusterTLS(c.PutClusterTls)
 		if err := f.store.PutClusterTLS(ctx, tls); err != nil {
