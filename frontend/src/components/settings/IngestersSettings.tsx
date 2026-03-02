@@ -4,6 +4,7 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
 import { useEditState } from "../../hooks/useEditState";
 import { useCrudHandlers } from "../../hooks/useCrudHandlers";
+import { Badge } from "../Badge";
 import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
@@ -228,14 +229,7 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
               <span className="flex items-center gap-2">
                 <NodeBadge nodeId={ing.nodeId} dark={dark} />
                 {!ing.enabled && (
-                  <span
-                    className={`px-1.5 py-0.5 text-[0.8em] font-mono rounded ${c(
-                      "bg-ink-hover text-text-ghost",
-                      "bg-light-hover text-light-text-ghost",
-                    )}`}
-                  >
-                    disabled
-                  </span>
+                  <Badge variant="ghost" dark={dark}>disabled</Badge>
                 )}
               </span>
             }

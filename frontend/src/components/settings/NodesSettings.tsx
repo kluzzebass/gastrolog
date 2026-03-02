@@ -5,6 +5,7 @@ import { ClusterNodeRole } from "../../api/gen/gastrolog/v1/lifecycle_pb";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useEditState } from "../../hooks/useEditState";
 import { useToast } from "../Toast";
+import { Badge } from "../Badge";
 import { SettingsCard } from "./SettingsCard";
 import { FormField, TextInput } from "./FormField";
 import { PrimaryButton, GhostButton } from "./Buttons";
@@ -12,11 +13,11 @@ import { PrimaryButton, GhostButton } from "./Buttons";
 function roleName(role: ClusterNodeRole): string {
   switch (role) {
     case ClusterNodeRole.LEADER:
-      return "Leader";
+      return "leader";
     case ClusterNodeRole.FOLLOWER:
-      return "Follower";
+      return "follower";
     default:
-      return "Unknown";
+      return "unknown";
   }
 }
 
@@ -109,25 +110,12 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
               headerRight={
                 <div className="flex items-center gap-1.5">
                   {clusterEnabled && node.role !== ClusterNodeRole.UNSPECIFIED && (
-                    <span
-                      className={`px-1.5 py-0.5 text-[0.7em] font-medium uppercase tracking-wider rounded ${
-                        node.isLeader
-                          ? "bg-copper/15 text-copper"
-                          : c("bg-ink-hover text-text-muted", "bg-light-hover text-light-text-muted")
-                      }`}
-                    >
+                    <Badge variant={node.isLeader ? "copper" : "muted"} dark={dark}>
                       {roleName(node.role)}
-                    </span>
+                    </Badge>
                   )}
                   {isLocal && (
-                    <span
-                      className={`px-1.5 py-0.5 text-[0.7em] font-medium uppercase tracking-wider rounded ${c(
-                        "bg-ink-hover text-text-muted",
-                        "bg-light-hover text-light-text-muted",
-                      )}`}
-                    >
-                      this node
-                    </span>
+                    <Badge variant="muted" dark={dark}>this node</Badge>
                   )}
                 </div>
               }

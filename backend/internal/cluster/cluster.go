@@ -87,6 +87,15 @@ type Server struct {
 	// remote GetContext requests.
 	contextExecutor ContextExecutor
 
+	// listChunksExecutor lists chunks in a local vault for remote ListChunks requests.
+	listChunksExecutor ListChunksExecutor
+
+	// getIndexesExecutor returns index status for a local chunk for remote GetIndexes requests.
+	getIndexesExecutor GetIndexesExecutor
+
+	// validateVaultExecutor validates a local vault for remote ValidateVault requests.
+	validateVaultExecutor ValidateVaultExecutor
+
 	// peerConns is the shared connection pool for all peer communication.
 	// Created in SetRaft once the raft instance is available.
 	peerConns *PeerConns

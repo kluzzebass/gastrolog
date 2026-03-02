@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import type { ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
 import { formatBytes, formatDurationMs } from "../../utils/units";
+import { Badge } from "../Badge";
 
 interface ChunkTimelineProps {
   chunks: ChunkMeta[];
@@ -93,9 +94,9 @@ export function ChunkTimeline({
   if (bars.length === 0) return null;
 
   const barHeight = 24;
-  const axisHeight = 20;
+  const tickMarkHeight = 4;
   const topPad = 2;
-  const chartHeight = topPad + barHeight + axisHeight;
+  const svgHeight = topPad + barHeight + tickMarkHeight;
 
   // Precompute theme-dependent colors outside the map callback.
   const sealedHi = dark ? "#d4a070" : "#c8875c";
@@ -109,141 +110,128 @@ export function ChunkTimeline({
       >
         Timeline
       </div>
-      <svg
-        width="100%"
-        height={chartHeight}
-        viewBox={`0 0 1000 ${chartHeight}`}
-        preserveAspectRatio="none"
-        className="block"
-      >
-        {/* Grid lines */}
-        {ticks.map((tick, _i) => (
+      <div className="relative">
+        <svg
+          width="100%"
+          height={svgHeight}
+          viewBox={`0 0 1000 ${svgHeight}`}
+          preserveAspectRatio="none"
+          className="block"
+        >
+          {/* Grid lines */}
+          {ticks.map((tick) => (
+            <line
+              key={`grid-${tick.x}`}
+              x1={tick.x * 1000}
+              y1={topPad}
+              x2={tick.x * 1000}
+              y2={topPad + barHeight}
+              stroke={dark ? "#222838" : "#e4ddd4"}
+              strokeWidth="1"
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+
+          {/* Single row of chunk bars */}
+          {bars.map((bar) => {
+            const isHovered = hoveredChunk === bar.id;
+            const isSelected = selectedChunkId === bar.id;
+            const highlighted = isHovered || isSelected;
+
+            const sealedFill = highlighted ? sealedHi : sealedLo;
+            const activeFill = highlighted ? "#6aaa7a" : "#5a9a6a";
+            const fill = bar.sealed ? sealedFill : activeFill;
+            const strokeColor = isSelected ? selectedStroke : "none";
+
+            return (
+              <g
+                key={bar.id}
+                className="cursor-pointer"
+                role="button"
+                tabIndex={0}
+                aria-label={`Chunk ${bar.id}`}
+                onMouseEnter={() => setHoveredChunk(bar.id)}
+                onMouseLeave={() => setHoveredChunk(null)}
+                onClick={() => onChunkClick?.(bar.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onChunkClick?.(bar.id);
+                  }
+                }}
+              >
+                <rect
+                  x={bar.x * 1000}
+                  y={topPad}
+                  width={bar.w * 1000}
+                  height={barHeight}
+                  rx="2"
+                  ry="2"
+                  fill={fill}
+                  opacity={highlighted ? 1 : 0.75}
+                  vectorEffect="non-scaling-stroke"
+                  stroke={strokeColor}
+                  strokeWidth={isSelected ? "2" : "0"}
+                />
+
+                {/* Active chunk pulse */}
+                {!bar.sealed && (
+                  <circle
+                    cx={bar.x * 1000 + bar.w * 1000 - 4}
+                    cy={topPad + barHeight / 2}
+                    r="3"
+                    fill="#5a9a6a"
+                    vectorEffect="non-scaling-stroke"
+                  >
+                    <animate
+                      attributeName="opacity"
+                      values="1;0.3;1"
+                      dur="2s"
+                      repeatCount="indefinite"
+                    />
+                  </circle>
+                )}
+              </g>
+            );
+          })}
+
+          {/* Time axis line + tick marks */}
           <line
-            key={`grid-${tick.x}`}
-            x1={tick.x * 1000}
-            y1={topPad}
-            x2={tick.x * 1000}
+            x1="0"
+            y1={topPad + barHeight}
+            x2="1000"
             y2={topPad + barHeight}
-            stroke={dark ? "#222838" : "#e4ddd4"}
+            stroke={dark ? "#2a3040" : "#d8d0c4"}
             strokeWidth="1"
             vectorEffect="non-scaling-stroke"
           />
-        ))}
-
-        {/* Single row of chunk bars */}
-        {bars.map((bar) => {
-          const isHovered = hoveredChunk === bar.id;
-          const isSelected = selectedChunkId === bar.id;
-          const highlighted = isHovered || isSelected;
-
-          const sealedFill = highlighted ? sealedHi : sealedLo;
-          const activeFill = highlighted ? "#6aaa7a" : "#5a9a6a";
-          const fill = bar.sealed ? sealedFill : activeFill;
-          const strokeColor = isSelected ? selectedStroke : "none";
-
-          return (
-            <g
-              key={bar.id}
-              className="cursor-pointer"
-              role="button"
-              tabIndex={0}
-              aria-label={`Chunk ${bar.id}`}
-              onMouseEnter={() => setHoveredChunk(bar.id)}
-              onMouseLeave={() => setHoveredChunk(null)}
-              onClick={() => onChunkClick?.(bar.id)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  onChunkClick?.(bar.id);
-                }
-              }}
-            >
-              <rect
-                x={bar.x * 1000}
-                y={topPad}
-                width={bar.w * 1000}
-                height={barHeight}
-                rx="2"
-                ry="2"
-                fill={fill}
-                opacity={highlighted ? 1 : 0.75}
-                vectorEffect="non-scaling-stroke"
-                stroke={strokeColor}
-                strokeWidth={isSelected ? "2" : "0"}
-              />
-
-              {/* Active chunk pulse */}
-              {!bar.sealed && (
-                <circle
-                  cx={bar.x * 1000 + bar.w * 1000 - 4}
-                  cy={topPad + barHeight / 2}
-                  r="3"
-                  fill="#5a9a6a"
-                  vectorEffect="non-scaling-stroke"
-                >
-                  <animate
-                    attributeName="opacity"
-                    values="1;0.3;1"
-                    dur="2s"
-                    repeatCount="indefinite"
-                  />
-                </circle>
-              )}
-
-              {/* Label if wide enough */}
-              {bar.w * 1000 > 55 && (
-                <text
-                  x={bar.x * 1000 + 5}
-                  y={topPad + barHeight / 2}
-                  dominantBaseline="central"
-                  fontSize="9"
-                  fontFamily="var(--font-mono, monospace)"
-                  fill={dark ? "#0d0f12" : "#faf8f4"}
-                  opacity={0.85}
-                  style={{ pointerEvents: "none" }}
-                >
-                  {bar.id.slice(0, 8)}
-                </text>
-              )}
-            </g>
-          );
-        })}
-
-        {/* Time axis */}
-        <line
-          x1="0"
-          y1={topPad + barHeight}
-          x2="1000"
-          y2={topPad + barHeight}
-          stroke={dark ? "#2a3040" : "#d8d0c4"}
-          strokeWidth="1"
-          vectorEffect="non-scaling-stroke"
-        />
-        {ticks.map((tick, _i) => (
-          <g key={`axis-${tick.x}`}>
+          {ticks.map((tick) => (
             <line
+              key={`tick-${tick.x}`}
               x1={tick.x * 1000}
               y1={topPad + barHeight}
               x2={tick.x * 1000}
-              y2={topPad + barHeight + 4}
+              y2={topPad + barHeight + tickMarkHeight}
               stroke={dark ? "#2a3040" : "#d8d0c4"}
               strokeWidth="1"
               vectorEffect="non-scaling-stroke"
             />
-            <text
-              x={tick.x * 1000}
-              y={chartHeight - 2}
-              textAnchor="middle"
-              fontSize="9"
-              fontFamily="var(--font-mono, monospace)"
-              fill={dark ? "#555d70" : "#958e84"}
-              style={{ pointerEvents: "none" }}
+          ))}
+        </svg>
+
+        {/* Tick labels as HTML so they aren't distorted by preserveAspectRatio="none" */}
+        <div className="relative h-4" aria-hidden>
+          {ticks.map((tick) => (
+            <span
+              key={`label-${tick.x}`}
+              className={`absolute top-0 font-mono text-[0.65em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+              style={{ left: `${tick.x * 100}%`, transform: "translateX(-50%)" }}
             >
               {tick.label}
-            </text>
-          </g>
-        ))}
-      </svg>
+            </span>
+          ))}
+        </div>
+      </div>
 
       {/* Tooltip — always reserve space to prevent layout shift */}
       <div
@@ -305,18 +293,12 @@ function ChunkTooltip({
           {chunk.id}
         </span>
         {chunk.sealed ? (
-          <span className="px-1.5 py-0.5 text-[0.85em] rounded bg-copper/15 text-copper">
-            sealed
-          </span>
+          <Badge variant="copper" dark={dark}>sealed</Badge>
         ) : (
-          <span className="px-1.5 py-0.5 text-[0.85em] rounded bg-severity-info/15 text-severity-info">
-            active
-          </span>
+          <Badge variant="info" dark={dark}>active</Badge>
         )}
         {chunk.compressed && (
-          <span className="px-1.5 py-0.5 text-[0.85em] rounded bg-severity-info/15 text-severity-info">
-            compressed
-          </span>
+          <Badge variant="info" dark={dark}>compressed</Badge>
         )}
       </div>
       <div

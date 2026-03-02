@@ -15,6 +15,7 @@ import { JobStatus } from "../../api/client";
 import { useToast } from "../Toast";
 import { useEditState } from "../../hooks/useEditState";
 import { useCrudHandlers } from "../../hooks/useCrudHandlers";
+import { Badge } from "../Badge";
 import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
@@ -615,14 +616,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
               <span className="flex items-center gap-2">
                 <NodeBadge nodeId={vault.nodeId} dark={dark} />
                 {!vault.enabled && (
-                  <span
-                    className={`px-1.5 py-0.5 text-[0.8em] font-mono rounded ${c(
-                      "bg-ink-hover text-text-ghost",
-                      "bg-light-hover text-light-text-ghost",
-                    )}`}
-                  >
-                    disabled
-                  </span>
+                  <Badge variant="ghost" dark={dark}>disabled</Badge>
                 )}
                 {warnings.length > 0 && (
                   <span className="text-[0.85em] text-severity-warn">

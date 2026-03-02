@@ -263,6 +263,12 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 
 		// Context executor: handles ForwardGetContext RPCs from peer nodes.
 		clusterSrv.SetContextExecutor(newContextExecutor(orch))
+
+		// Vault inspection executors: handle ForwardListChunks, ForwardGetIndexes,
+		// ForwardValidateVault RPCs from peer nodes.
+		clusterSrv.SetListChunksExecutor(newListChunksExecutor(orch))
+		clusterSrv.SetGetIndexesExecutor(newGetIndexesExecutor(orch))
+		clusterSrv.SetValidateVaultExecutor(newValidateVaultExecutor(orch))
 	}
 
 	// Wire the dispatcher now that orchestrator and factories are available.
@@ -813,7 +819,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 	var srv *server.Server
 	var serverWg sync.WaitGroup
 	if deps.ServerAddr != "" {
-		srv = server.New(deps.Orch, deps.CfgStore, deps.Factories, deps.Tokens, server.Config{Logger: deps.Logger, CertManager: deps.CertMgr, NoAuth: deps.NoAuth, HomeDir: deps.HomeDir, NodeID: deps.NodeID, UnixSocket: deps.SocketPath, AfterConfigApply: deps.AfterConfigApply, Cluster: deps.ClusterSrv, PeerStats: deps.PeerState, PeerVaultStats: deps.PeerState, PeerJobs: deps.PeerJobState, LocalStats: deps.LocalStats, RemoteSearcher: deps.SearchForwarder})
+		srv = server.New(deps.Orch, deps.CfgStore, deps.Factories, deps.Tokens, server.Config{Logger: deps.Logger, CertManager: deps.CertMgr, NoAuth: deps.NoAuth, HomeDir: deps.HomeDir, NodeID: deps.NodeID, UnixSocket: deps.SocketPath, AfterConfigApply: deps.AfterConfigApply, Cluster: deps.ClusterSrv, PeerStats: deps.PeerState, PeerVaultStats: deps.PeerState, PeerJobs: deps.PeerJobState, LocalStats: deps.LocalStats, RemoteSearcher: deps.SearchForwarder, RemoteVaultForwarder: deps.SearchForwarder})
 		serverWg.Go(func() {
 			if err := srv.ServeTCP(deps.ServerAddr); err != nil {
 				deps.Logger.Error("server error", "error", err)
@@ -1341,5 +1347,51 @@ func newContextExecutor(o *orchestrator.Orchestrator) cluster.ContextExecutor {
 			return nil, chunk.Record{}, nil, err
 		}
 		return result.Before, result.Anchor, result.After, nil
+	}
+}
+
+func newListChunksExecutor(o *orchestrator.Orchestrator) cluster.ListChunksExecutor {
+	return func(ctx context.Context, vaultID uuid.UUID) ([]*gastrologv1.ChunkMeta, error) {
+		metas, err := o.ListChunkMetas(vaultID)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]*gastrologv1.ChunkMeta, 0, len(metas))
+		for _, m := range metas {
+			out = append(out, server.ChunkMetaToProto(m))
+		}
+		return out, nil
+	}
+}
+
+func newGetIndexesExecutor(o *orchestrator.Orchestrator) cluster.GetIndexesExecutor {
+	return func(ctx context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID) (*gastrologv1.GetIndexesResponse, error) {
+		report, err := o.ChunkIndexInfos(vaultID, chunkID)
+		if err != nil {
+			return nil, err
+		}
+		resp := &gastrologv1.GetIndexesResponse{
+			Sealed:  report.Sealed,
+			Indexes: make([]*gastrologv1.IndexInfo, 0, len(report.Indexes)),
+		}
+		for _, idx := range report.Indexes {
+			resp.Indexes = append(resp.Indexes, &gastrologv1.IndexInfo{
+				Name:       idx.Name,
+				Exists:     idx.Exists,
+				EntryCount: idx.EntryCount,
+				SizeBytes:  idx.SizeBytes,
+			})
+		}
+		return resp, nil
+	}
+}
+
+func newValidateVaultExecutor(o *orchestrator.Orchestrator) cluster.ValidateVaultExecutor {
+	return func(_ context.Context, vaultID uuid.UUID) (*gastrologv1.ValidateVaultResponse, error) {
+		metas, err := o.ListChunkMetas(vaultID)
+		if err != nil {
+			return nil, err
+		}
+		return server.ValidateVaultLocal(o, vaultID, metas), nil
 	}
 }

@@ -142,3 +142,37 @@ message ForwardGetContextResponse {
   ExportRecord anchor = 2;
   repeated ExportRecord after = 3;
 }
+
+// ForwardListChunksRequest asks a remote node to list chunks in one of its
+// local vaults. Used by the coordinating node to show chunk details for
+// remote vaults in the inspector.
+message ForwardListChunksRequest {
+  string vault_id = 1;
+}
+
+message ForwardListChunksResponse {
+  repeated ChunkMeta chunks = 1;
+}
+
+// ForwardGetIndexesRequest asks a remote node to return index status for
+// a specific chunk in one of its local vaults.
+message ForwardGetIndexesRequest {
+  string vault_id = 1;
+  string chunk_id = 2;
+}
+
+message ForwardGetIndexesResponse {
+  bool sealed = 1;
+  repeated IndexInfo indexes = 2;
+}
+
+// ForwardValidateVaultRequest asks a remote node to validate a vault's
+// chunk and index integrity.
+message ForwardValidateVaultRequest {
+  string vault_id = 1;
+}
+
+message ForwardValidateVaultResponse {
+  bool valid = 1;
+  repeated ChunkValidation chunks = 2;
+}

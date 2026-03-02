@@ -27,6 +27,15 @@ type SearchExecutor func(ctx context.Context, vaultID uuid.UUID, queryExpr strin
 // Used by the ForwardGetContext handler to serve remote context requests.
 type ContextExecutor func(ctx context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID, pos uint64, before, after int) ([]chunk.Record, chunk.Record, []chunk.Record, error)
 
+// ListChunksExecutor lists chunks in a local vault for remote requests.
+type ListChunksExecutor func(ctx context.Context, vaultID uuid.UUID) ([]*gastrologv1.ChunkMeta, error)
+
+// GetIndexesExecutor returns index status for a chunk in a local vault.
+type GetIndexesExecutor func(ctx context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID) (*gastrologv1.GetIndexesResponse, error)
+
+// ValidateVaultExecutor validates a local vault and returns the result.
+type ValidateVaultExecutor func(ctx context.Context, vaultID uuid.UUID) (*gastrologv1.ValidateVaultResponse, error)
+
 // SetRecordAppender injects the callback for writing forwarded records.
 // Must be called before the cluster server receives ForwardRecords RPCs.
 func (s *Server) SetRecordAppender(fn RecordAppender) {
@@ -41,6 +50,21 @@ func (s *Server) SetSearchExecutor(fn SearchExecutor) {
 // SetContextExecutor injects the callback for handling remote GetContext requests.
 func (s *Server) SetContextExecutor(fn ContextExecutor) {
 	s.contextExecutor = fn
+}
+
+// SetListChunksExecutor injects the callback for handling remote ListChunks requests.
+func (s *Server) SetListChunksExecutor(fn ListChunksExecutor) {
+	s.listChunksExecutor = fn
+}
+
+// SetGetIndexesExecutor injects the callback for handling remote GetIndexes requests.
+func (s *Server) SetGetIndexesExecutor(fn GetIndexesExecutor) {
+	s.getIndexesExecutor = fn
+}
+
+// SetValidateVaultExecutor injects the callback for handling remote ValidateVault requests.
+func (s *Server) SetValidateVaultExecutor(fn ValidateVaultExecutor) {
+	s.validateVaultExecutor = fn
 }
 
 // forwardRecords handles the ForwardRecords RPC. Converts proto ExportRecords
@@ -157,6 +181,67 @@ func RecordToExportRecord(rec chunk.Record) *gastrologv1.ExportRecord {
 	return er
 }
 
+// forwardListChunks handles the ForwardListChunks RPC. Lists chunks in a
+// local vault and returns them to the requesting node.
+func (s *Server) forwardListChunks(ctx context.Context, req *gastrologv1.ForwardListChunksRequest) (*gastrologv1.ForwardListChunksResponse, error) {
+	if s.listChunksExecutor == nil {
+		return nil, status.Error(codes.Unavailable, "list chunks executor not configured")
+	}
+	vaultID, err := uuid.Parse(req.GetVaultId())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+	}
+	chunks, err := s.listChunksExecutor(ctx, vaultID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list chunks: %v", err)
+	}
+	return &gastrologv1.ForwardListChunksResponse{Chunks: chunks}, nil
+}
+
+// forwardGetIndexes handles the ForwardGetIndexes RPC. Returns index status
+// for a chunk in a local vault.
+func (s *Server) forwardGetIndexes(ctx context.Context, req *gastrologv1.ForwardGetIndexesRequest) (*gastrologv1.ForwardGetIndexesResponse, error) {
+	if s.getIndexesExecutor == nil {
+		return nil, status.Error(codes.Unavailable, "get indexes executor not configured")
+	}
+	vaultID, err := uuid.Parse(req.GetVaultId())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+	}
+	chunkID, err := chunk.ParseChunkID(req.GetChunkId())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid chunk_id: %v", err)
+	}
+	resp, err := s.getIndexesExecutor(ctx, vaultID, chunkID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get indexes: %v", err)
+	}
+	return &gastrologv1.ForwardGetIndexesResponse{
+		Sealed:  resp.GetSealed(),
+		Indexes: resp.GetIndexes(),
+	}, nil
+}
+
+// forwardValidateVault handles the ForwardValidateVault RPC. Validates a
+// local vault's chunk and index integrity.
+func (s *Server) forwardValidateVault(ctx context.Context, req *gastrologv1.ForwardValidateVaultRequest) (*gastrologv1.ForwardValidateVaultResponse, error) {
+	if s.validateVaultExecutor == nil {
+		return nil, status.Error(codes.Unavailable, "validate vault executor not configured")
+	}
+	vaultID, err := uuid.Parse(req.GetVaultId())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+	}
+	resp, err := s.validateVaultExecutor(ctx, vaultID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "validate vault: %v", err)
+	}
+	return &gastrologv1.ForwardValidateVaultResponse{
+		Valid:  resp.GetValid(),
+		Chunks: resp.GetChunks(),
+	}, nil
+}
+
 // forwardApply handles the ForwardApply RPC on the leader.
 // Followers call this to proxy config writes through the leader's raft.Apply().
 func (s *Server) forwardApply(ctx context.Context, req *gastrologv1.ForwardApplyRequest) (*gastrologv1.ForwardApplyResponse, error) {
@@ -201,6 +286,18 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			MethodName: "ForwardGetContext",
 			Handler:    forwardGetContextHandler,
 		},
+		{
+			MethodName: "ForwardListChunks",
+			Handler:    forwardListChunksHandler,
+		},
+		{
+			MethodName: "ForwardGetIndexes",
+			Handler:    forwardGetIndexesHandler,
+		},
+		{
+			MethodName: "ForwardValidateVault",
+			Handler:    forwardValidateVaultHandler,
+		},
 	},
 }
 
@@ -212,6 +309,9 @@ type clusterServiceServer interface {
 	forwardRecords(context.Context, *gastrologv1.ForwardRecordsRequest) (*gastrologv1.ForwardRecordsResponse, error)
 	forwardSearch(context.Context, *gastrologv1.ForwardSearchRequest) (*gastrologv1.ForwardSearchResponse, error)
 	forwardGetContext(context.Context, *gastrologv1.ForwardGetContextRequest) (*gastrologv1.ForwardGetContextResponse, error)
+	forwardListChunks(context.Context, *gastrologv1.ForwardListChunksRequest) (*gastrologv1.ForwardListChunksResponse, error)
+	forwardGetIndexes(context.Context, *gastrologv1.ForwardGetIndexesRequest) (*gastrologv1.ForwardGetIndexesResponse, error)
+	forwardValidateVault(context.Context, *gastrologv1.ForwardValidateVaultRequest) (*gastrologv1.ForwardValidateVaultResponse, error)
 }
 
 func forwardApplyHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
@@ -286,6 +386,63 @@ func forwardGetContextHandler(srv any, ctx context.Context, dec func(any) error,
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardGetContext(ctx, req.(*gastrologv1.ForwardGetContextRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
+func forwardListChunksHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.ForwardListChunksRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.forwardListChunks(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/ForwardListChunks",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.forwardListChunks(ctx, req.(*gastrologv1.ForwardListChunksRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
+func forwardGetIndexesHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.ForwardGetIndexesRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.forwardGetIndexes(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/ForwardGetIndexes",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.forwardGetIndexes(ctx, req.(*gastrologv1.ForwardGetIndexesRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
+func forwardValidateVaultHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.ForwardValidateVaultRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.forwardValidateVault(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/ForwardValidateVault",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.forwardValidateVault(ctx, req.(*gastrologv1.ForwardValidateVaultRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }

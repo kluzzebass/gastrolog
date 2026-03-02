@@ -6,13 +6,16 @@ import (
 	"fmt"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index/analyzer"
+	"gastrolog/internal/orchestrator"
 )
 
-// ListChunks returns all chunks in a vault.
+// ListChunks returns all chunks in a vault. Forwards to the owning node
+// when the vault is remote.
 func (s *VaultServer) ListChunks(
 	ctx context.Context,
 	req *connect.Request[apiv1.ListChunksRequest],
@@ -25,6 +28,18 @@ func (s *VaultServer) ListChunks(
 		return nil, connErr
 	}
 
+	// Forward to remote node if the vault isn't local.
+	if nodeID := s.remoteNodeForVault(ctx, vaultID); nodeID != "" {
+		if s.remote == nil {
+			return nil, connect.NewError(connect.CodeUnavailable, errors.New("remote vault forwarding not configured"))
+		}
+		fwdResp, err := s.remote.ListChunks(ctx, nodeID, &apiv1.ForwardListChunksRequest{VaultId: vaultID.String()})
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("forward to %s: %w", nodeID, err))
+		}
+		return connect.NewResponse(&apiv1.ListChunksResponse{Chunks: fwdResp.GetChunks()}), nil
+	}
+
 	metas, err := s.orch.ListChunkMetas(vaultID)
 	if err != nil {
 		return nil, mapVaultError(err)
@@ -35,7 +50,7 @@ func (s *VaultServer) ListChunks(
 	}
 
 	for _, meta := range metas {
-		resp.Chunks = append(resp.Chunks, chunkMetaToProto(meta))
+		resp.Chunks = append(resp.Chunks, ChunkMetaToProto(meta))
 	}
 
 	return connect.NewResponse(resp), nil
@@ -65,11 +80,12 @@ func (s *VaultServer) GetChunk(
 	}
 
 	return connect.NewResponse(&apiv1.GetChunkResponse{
-		Chunk: chunkMetaToProto(meta),
+		Chunk: ChunkMetaToProto(meta),
 	}), nil
 }
 
-// GetIndexes returns index status for a chunk.
+// GetIndexes returns index status for a chunk. Forwards to the owning node
+// when the vault is remote.
 func (s *VaultServer) GetIndexes(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetIndexesRequest],
@@ -85,6 +101,24 @@ func (s *VaultServer) GetIndexes(
 	chunkID, err := chunk.ParseChunkID(req.Msg.ChunkId)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
+	// Forward to remote node if the vault isn't local.
+	if nodeID := s.remoteNodeForVault(ctx, vaultID); nodeID != "" {
+		if s.remote == nil {
+			return nil, connect.NewError(connect.CodeUnavailable, errors.New("remote vault forwarding not configured"))
+		}
+		fwdResp, err := s.remote.GetIndexes(ctx, nodeID, &apiv1.ForwardGetIndexesRequest{
+			VaultId: vaultID.String(),
+			ChunkId: chunkID.String(),
+		})
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("forward to %s: %w", nodeID, err))
+		}
+		return connect.NewResponse(&apiv1.GetIndexesResponse{
+			Sealed:  fwdResp.GetSealed(),
+			Indexes: fwdResp.GetIndexes(),
+		}), nil
 	}
 
 	report, err := s.orch.ChunkIndexInfos(vaultID, chunkID)
@@ -195,7 +229,8 @@ func (s *VaultServer) AnalyzeChunk(
 	return connect.NewResponse(resp), nil
 }
 
-// ValidateVault checks chunk and index integrity for a vault.
+// ValidateVault checks chunk and index integrity for a vault. Forwards to the
+// owning node when the vault is remote.
 func (s *VaultServer) ValidateVault(
 	ctx context.Context,
 	req *connect.Request[apiv1.ValidateVaultRequest],
@@ -208,65 +243,90 @@ func (s *VaultServer) ValidateVault(
 		return nil, connErr
 	}
 
+	// Forward to remote node if the vault isn't local.
+	if nodeID := s.remoteNodeForVault(ctx, vaultID); nodeID != "" {
+		if s.remote == nil {
+			return nil, connect.NewError(connect.CodeUnavailable, errors.New("remote vault forwarding not configured"))
+		}
+		fwdResp, err := s.remote.ValidateVault(ctx, nodeID, &apiv1.ForwardValidateVaultRequest{VaultId: vaultID.String()})
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("forward to %s: %w", nodeID, err))
+		}
+		return connect.NewResponse(&apiv1.ValidateVaultResponse{
+			Valid:  fwdResp.GetValid(),
+			Chunks: fwdResp.GetChunks(),
+		}), nil
+	}
+
 	metas, err := s.orch.ListChunkMetas(vaultID)
 	if err != nil {
 		return nil, mapVaultError(err)
 	}
 
+	resp := ValidateVaultLocal(s.orch, vaultID, metas)
+	return connect.NewResponse(resp), nil
+}
+
+// ValidateVaultLocal runs chunk and index integrity checks on a local vault.
+// Exported so both the VaultServer RPC handler and the cluster executor can
+// share the same validation logic.
+func ValidateVaultLocal(orch *orchestrator.Orchestrator, vaultID uuid.UUID, metas []chunk.ChunkMeta) *apiv1.ValidateVaultResponse {
 	resp := &apiv1.ValidateVaultResponse{Valid: true}
-
 	for _, meta := range metas {
-		cv := &apiv1.ChunkValidation{
-			ChunkId: meta.ID.String(),
-			Valid:   true,
-		}
-
-		// Check that we can read the chunk via cursor.
-		cursor, err := s.orch.OpenCursor(vaultID, meta.ID)
-		if err != nil {
-			cv.Valid = false
-			cv.Issues = append(cv.Issues, fmt.Sprintf("cannot open cursor: %v", err))
-		} else {
-			// Count records to verify consistency with metadata.
-			var recordCount int64
-			for {
-				_, _, err := cursor.Next()
-				if errors.Is(err, chunk.ErrNoMoreRecords) {
-					break
-				}
-				if err != nil {
-					cv.Valid = false
-					cv.Issues = append(cv.Issues, fmt.Sprintf("read error at record %d: %v", recordCount, err))
-					break
-				}
-				recordCount++
-			}
-			_ = cursor.Close()
-
-			if meta.RecordCount > 0 && recordCount != meta.RecordCount {
-				cv.Valid = false
-				cv.Issues = append(cv.Issues,
-					fmt.Sprintf("record count mismatch: metadata says %d, cursor read %d", meta.RecordCount, recordCount))
-			}
-		}
-
-		// For sealed chunks, check index completeness.
-		if meta.Sealed {
-			complete, err := s.orch.IndexesComplete(vaultID, meta.ID)
-			if err != nil {
-				cv.Valid = false
-				cv.Issues = append(cv.Issues, fmt.Sprintf("index check error: %v", err))
-			} else if !complete {
-				cv.Valid = false
-				cv.Issues = append(cv.Issues, "indexes incomplete for sealed chunk")
-			}
-		}
-
+		cv := validateChunk(orch, vaultID, meta)
 		if !cv.Valid {
 			resp.Valid = false
 		}
 		resp.Chunks = append(resp.Chunks, cv)
 	}
+	return resp
+}
 
-	return connect.NewResponse(resp), nil
+// validateChunk checks a single chunk's cursor readability and index completeness.
+func validateChunk(orch *orchestrator.Orchestrator, vaultID uuid.UUID, meta chunk.ChunkMeta) *apiv1.ChunkValidation {
+	cv := &apiv1.ChunkValidation{
+		ChunkId: meta.ID.String(),
+		Valid:   true,
+	}
+
+	cursor, err := orch.OpenCursor(vaultID, meta.ID)
+	if err != nil {
+		cv.Valid = false
+		cv.Issues = append(cv.Issues, fmt.Sprintf("cannot open cursor: %v", err))
+		return cv
+	}
+
+	var recordCount int64
+	for {
+		_, _, err := cursor.Next()
+		if errors.Is(err, chunk.ErrNoMoreRecords) {
+			break
+		}
+		if err != nil {
+			cv.Valid = false
+			cv.Issues = append(cv.Issues, fmt.Sprintf("read error at record %d: %v", recordCount, err))
+			break
+		}
+		recordCount++
+	}
+	_ = cursor.Close()
+
+	if meta.RecordCount > 0 && recordCount != meta.RecordCount {
+		cv.Valid = false
+		cv.Issues = append(cv.Issues,
+			fmt.Sprintf("record count mismatch: metadata says %d, cursor read %d", meta.RecordCount, recordCount))
+	}
+
+	if meta.Sealed {
+		complete, err := orch.IndexesComplete(vaultID, meta.ID)
+		if err != nil {
+			cv.Valid = false
+			cv.Issues = append(cv.Issues, fmt.Sprintf("index check error: %v", err))
+		} else if !complete {
+			cv.Valid = false
+			cv.Issues = append(cv.Issues, "indexes incomplete for sealed chunk")
+		}
+	}
+
+	return cv
 }

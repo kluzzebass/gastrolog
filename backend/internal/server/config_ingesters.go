@@ -46,12 +46,16 @@ func (s *ConfigServer) ListIngesters(
 
 	for _, id := range ids {
 		m := metaMap[id]
+		nodeID := m.nodeID
+		if nodeID == "" {
+			nodeID = s.localNodeID
+		}
 		resp.Ingesters = append(resp.Ingesters, &apiv1.IngesterInfo{
 			Id:      id.String(),
 			Name:    m.name,
 			Type:    m.typ,
 			Running: s.orch.IsRunning(),
-			NodeId:  m.nodeID,
+			NodeId:  nodeID,
 		})
 	}
 

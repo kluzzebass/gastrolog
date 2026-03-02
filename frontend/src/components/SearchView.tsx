@@ -169,8 +169,8 @@ export function SearchView() {
     navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, settings: tab || "service" }) } as any);
   };
 
-  const openInspector = (tab?: string) => {
-    navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: tab || "vaults" }) } as any);
+  const openInspector = (param?: string) => {
+    navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: param || "entities:vaults" }) } as any);
   };
 
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(
@@ -899,8 +899,8 @@ export function SearchView() {
           {inspectorParam && (
               <InspectorDialog
                 dark={dark}
-                tab={inspectorParam as any}
-                onTabChange={(tab) => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: tab }) } as any)}
+                inspectorParam={inspectorParam}
+                onNavigate={(p) => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: p }) } as any)}
                 onClose={() => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: undefined }) } as any)}
               />
           )}

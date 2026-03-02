@@ -1,98 +1,57 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { clickableProps } from "../../utils";
-import {
-  useVaults,
-  useChunks,
-  useIndexes,
-  useValidateVault,
-} from "../../api/hooks";
+import { useChunks, useIndexes, useValidateVault } from "../../api/hooks";
 import { useToast } from "../Toast";
-import type { ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
+import type { VaultInfo, ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
 import { formatBytes } from "../../utils/units";
+import { Badge } from "../Badge";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { NodeBadge } from "../settings/NodeBadge";
 import { ChunkTimeline } from "./ChunkTimeline";
-import { HelpButton } from "../HelpButton";
 
-export function VaultsPanel({ dark }: Readonly<{ dark: boolean }>) {
-  const c = useThemeClass(dark);
-  const { data: vaults, isLoading } = useVaults();
-  const [expanded, setExpanded] = useState<string | null>(null);
+interface VaultCardProps {
+  vault: VaultInfo;
+  dark: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+  showNodeBadge?: boolean;
+}
 
-  if (isLoading) {
-    return (
-      <div
-        className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-      >
-        Loading...
-      </div>
-    );
-  }
-
-  if (!vaults || vaults.length === 0) {
-    return (
-      <div
-        className={`flex items-center justify-center h-full text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-      >
-        No vaults configured.
-      </div>
-    );
-  }
-
+export function VaultCard({
+  vault,
+  dark,
+  expanded,
+  onToggle,
+  showNodeBadge = true,
+}: Readonly<VaultCardProps>) {
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-2 mb-2">
-        <h2
-          className={`font-display text-[1.4em] font-semibold ${c("text-text-bright", "text-light-text-bright")}`}
-        >
-          Vaults
-        </h2>
-        <HelpButton topicId="inspector-vaults" />
-      </div>
-      {[...vaults].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)).map((vault) => (
-        <ExpandableCard
-          key={vault.id}
-          id={vault.name || vault.id}
-          typeBadge={vault.type}
-          typeBadgeAccent
-          dark={dark}
-          expanded={expanded === vault.id}
-          onToggle={() => setExpanded(expanded === vault.id ? null : vault.id)}
-          headerRight={
-            <span
-              className={`text-[0.8em] flex items-center gap-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
-            >
-              <NodeBadge nodeId={vault.nodeId} dark={dark} />
-              {vault.remote && (
-                <span className="px-1.5 py-0.5 text-[0.75em] font-medium uppercase tracking-wider rounded bg-copper/15 text-copper">
-                  Remote
-                </span>
-              )}
-              {!vault.enabled && (
-                <span className="px-1.5 py-0.5 text-[0.75em] font-medium uppercase tracking-wider rounded bg-severity-warn/15 text-severity-warn">
-                  Disabled
-                </span>
-              )}
-              {Number(vault.chunkCount).toLocaleString()} chunks
-              {" \u00B7 "}
-              {vault.recordCount.toLocaleString()} records
-            </span>
-          }
-        >
-          {vault.remote ? (
-            <div className={`px-4 py-3 text-[0.85em] italic ${c("text-text-ghost", "text-light-text-ghost")}`}>
-              Managed by another node — actions not available here.
-            </div>
-          ) : (
-            <>
-              <VaultActions vaultId={vault.id} dark={dark} />
-              <ChunkList vaultId={vault.id} dark={dark} />
-            </>
+    <ExpandableCard
+      key={vault.id}
+      id={vault.name || vault.id}
+      typeBadge={vault.type}
+      typeBadgeAccent
+      dark={dark}
+      expanded={expanded}
+      onToggle={onToggle}
+      headerRight={
+        <span className="flex items-center gap-1.5">
+          {showNodeBadge && <NodeBadge nodeId={vault.nodeId} dark={dark} />}
+          {!vault.enabled && (
+            <Badge variant="warn" dark={dark}>disabled</Badge>
           )}
-        </ExpandableCard>
-      ))}
-    </div>
+          <Badge variant="muted" dark={dark}>
+            {Number(vault.chunkCount).toLocaleString()} chunks
+          </Badge>
+          <Badge variant="muted" dark={dark}>
+            {vault.recordCount.toLocaleString()} records
+          </Badge>
+        </span>
+      }
+    >
+      <VaultActions vaultId={vault.id} dark={dark} />
+      <ChunkList vaultId={vault.id} dark={dark} />
+    </ExpandableCard>
   );
 }
 
@@ -246,18 +205,12 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
               </span>
               <span className="flex items-center gap-1 flex-wrap">
                 {chunk.sealed ? (
-                  <span className="px-1.5 py-0.5 text-[0.8em] rounded bg-copper/15 text-copper">
-                    sealed
-                  </span>
+                  <Badge variant="copper" dark={dark}>sealed</Badge>
                 ) : (
-                  <span className="px-1.5 py-0.5 text-[0.8em] rounded bg-severity-info/15 text-severity-info">
-                    active
-                  </span>
+                  <Badge variant="info" dark={dark}>active</Badge>
                 )}
                 {chunk.compressed && (
-                  <span className="px-1.5 py-0.5 text-[0.8em] rounded bg-severity-info/15 text-severity-info">
-                    zstd
-                  </span>
+                  <Badge variant="info" dark={dark}>zstd</Badge>
                 )}
               </span>
               <span
@@ -268,7 +221,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
               <span
                 className={`text-right font-mono ${c("text-text-muted", "text-light-text-muted")}`}
                 title={chunk.compressed && Number(chunk.diskBytes) > 0
-                  ? `${formatBytes(Number(chunk.bytes))} → ${formatBytes(Number(chunk.diskBytes))} on disk`
+                  ? `${formatBytes(Number(chunk.bytes))} \u2192 ${formatBytes(Number(chunk.diskBytes))} on disk`
                   : undefined}
               >
                 {chunk.compressed && Number(chunk.diskBytes) > 0
@@ -318,9 +271,7 @@ function ChunkDetail({
             Compression
           </div>
           <div className={`flex items-center gap-3 text-[0.85em]`}>
-            <span className="px-1.5 py-0.5 text-[0.8em] rounded bg-severity-info/15 text-severity-info">
-              zstd
-            </span>
+            <Badge variant="info" dark={dark}>zstd</Badge>
             <span
               className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}
             >
@@ -370,9 +321,7 @@ function ChunkDetail({
               </span>
               {idx.exists ? (
                 <>
-                  <span className="px-1.5 py-0.5 text-[0.8em] rounded bg-severity-info/15 text-severity-info">
-                    ok
-                  </span>
+                  <Badge variant="info" dark={dark}>ok</Badge>
                   <span
                     className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}
                   >
@@ -385,11 +334,7 @@ function ChunkDetail({
                   </span>
                 </>
               ) : (
-                <span
-                  className={`px-1.5 py-0.5 text-[0.8em] rounded ${c("bg-ink-hover text-text-ghost", "bg-light-hover text-light-text-ghost")}`}
-                >
-                  missing
-                </span>
+                <Badge variant="ghost" dark={dark}>missing</Badge>
               )}
             </div>
           ))}

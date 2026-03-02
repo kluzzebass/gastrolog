@@ -1,5 +1,6 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { clickableProps } from "../../utils";
+import { Badge } from "../Badge";
 
 interface ExpandableCardProps {
   id: string;
@@ -58,18 +59,9 @@ export function ExpandableCard({
             {id}
           </span>
           {typeBadge && (
-            <span
-              className={`px-1.5 py-0.5 text-[0.8em] font-mono rounded ${
-                typeBadgeAccent
-                  ? "bg-copper/15 text-copper"
-                  : c(
-                      "bg-ink-hover text-text-muted",
-                      "bg-light-hover text-light-text-muted",
-                    )
-              }`}
-            >
+            <Badge variant={typeBadgeAccent ? "debug" : "muted"} dark={dark}>
               {typeBadge}
-            </span>
+            </Badge>
           )}
           {status}
         </div>

@@ -80,6 +80,10 @@ type Config struct {
 	// Nil in single-node mode.
 	RemoteSearcher RemoteSearcher
 
+	// RemoteVaultForwarder forwards vault RPCs (ListChunks, GetIndexes,
+	// ValidateVault) to remote cluster nodes. Nil in single-node mode.
+	RemoteVaultForwarder RemoteVaultForwarder
+
 	// PeerJobs provides active jobs from peer cluster nodes.
 	// Nil in single-node mode.
 	PeerJobs PeerJobsProvider
@@ -109,8 +113,9 @@ type Server struct {
 	cluster          ClusterStatusProvider
 	peerStats        NodeStatsProvider
 	peerVaultStats   PeerVaultStatsProvider
-	remoteSearcher   RemoteSearcher
-	peerJobs         PeerJobsProvider
+	remoteSearcher       RemoteSearcher
+	remoteVaultForwarder RemoteVaultForwarder
+	peerJobs             PeerJobsProvider
 	localStatsFn     func() *apiv1.NodeStats
 	localNodeID      string
 	startTime        time.Time
@@ -155,8 +160,9 @@ func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orche
 		cluster:          cfg.Cluster,
 		peerStats:        cfg.PeerStats,
 		peerVaultStats:   cfg.PeerVaultStats,
-		remoteSearcher:   cfg.RemoteSearcher,
-		peerJobs:         cfg.PeerJobs,
+		remoteSearcher:       cfg.RemoteSearcher,
+		remoteVaultForwarder: cfg.RemoteVaultForwarder,
+		peerJobs:             cfg.PeerJobs,
 		localStatsFn:     cfg.LocalStats,
 		localNodeID:      cfg.NodeID,
 		startTime:        time.Now(),
@@ -282,7 +288,10 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 	if s.remoteSearcher != nil {
 		queryServer.SetRemoteSearcher(s.remoteSearcher, s.localNodeID)
 	}
-	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.logger)
+	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.localNodeID, s.logger)
+	if s.remoteVaultForwarder != nil {
+		vaultServer.SetRemoteForwarder(s.remoteVaultForwarder)
+	}
 	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager, s.localNodeID, s.afterConfigApply)
 	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
 	configServer.SetOnLookupConfigChange(func(cfg config.LookupConfig) {

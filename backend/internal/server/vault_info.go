@@ -236,6 +236,11 @@ func (s *VaultServer) getVaultInfo(ctx context.Context, id uuid.UUID) (*apiv1.Va
 	// Get vault config from config vault (has name, type, params).
 	cfg, _ := s.getFullVaultConfig(ctx, id)
 
+	nodeID := cfg.NodeID
+	if nodeID == "" {
+		nodeID = s.localNodeID
+	}
+
 	info := &apiv1.VaultInfo{
 		Id:          id.String(),
 		Name:        cfg.Name,
@@ -243,12 +248,12 @@ func (s *VaultServer) getVaultInfo(ctx context.Context, id uuid.UUID) (*apiv1.Va
 		ChunkCount:  int64(len(metas)),
 		RecordCount: recordCount,
 		Enabled:     s.orch.IsVaultEnabled(id),
-		NodeId:      cfg.NodeID,
+		NodeId:      nodeID,
 	}
 	return info, nil
 }
 
-func chunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
+func ChunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
 	return &apiv1.ChunkMeta{
 		Id:          meta.ID.String(),
 		StartTs:     timestamppb.New(meta.StartTS),

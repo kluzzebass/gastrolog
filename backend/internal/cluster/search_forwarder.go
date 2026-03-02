@@ -47,5 +47,47 @@ func (sf *SearchForwarder) GetContext(ctx context.Context, nodeID string, req *g
 	return resp, nil
 }
 
+// ListChunks sends a ForwardListChunks RPC to the given node.
+func (sf *SearchForwarder) ListChunks(ctx context.Context, nodeID string, req *gastrologv1.ForwardListChunksRequest) (*gastrologv1.ForwardListChunksResponse, error) {
+	conn, err := sf.peers.Conn(nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
+	}
+	resp := &gastrologv1.ForwardListChunksResponse{}
+	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardListChunks", req, resp); err != nil {
+		sf.peers.Invalidate(nodeID)
+		return nil, fmt.Errorf("forward list chunks to %s: %w", nodeID, err)
+	}
+	return resp, nil
+}
+
+// GetIndexes sends a ForwardGetIndexes RPC to the given node.
+func (sf *SearchForwarder) GetIndexes(ctx context.Context, nodeID string, req *gastrologv1.ForwardGetIndexesRequest) (*gastrologv1.ForwardGetIndexesResponse, error) {
+	conn, err := sf.peers.Conn(nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
+	}
+	resp := &gastrologv1.ForwardGetIndexesResponse{}
+	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardGetIndexes", req, resp); err != nil {
+		sf.peers.Invalidate(nodeID)
+		return nil, fmt.Errorf("forward get indexes to %s: %w", nodeID, err)
+	}
+	return resp, nil
+}
+
+// ValidateVault sends a ForwardValidateVault RPC to the given node.
+func (sf *SearchForwarder) ValidateVault(ctx context.Context, nodeID string, req *gastrologv1.ForwardValidateVaultRequest) (*gastrologv1.ForwardValidateVaultResponse, error) {
+	conn, err := sf.peers.Conn(nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
+	}
+	resp := &gastrologv1.ForwardValidateVaultResponse{}
+	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardValidateVault", req, resp); err != nil {
+		sf.peers.Invalidate(nodeID)
+		return nil, fmt.Errorf("forward validate vault to %s: %w", nodeID, err)
+	}
+	return resp, nil
+}
+
 // Close is a no-op — connection lifecycle is managed by PeerConns.
 func (sf *SearchForwarder) Close() error { return nil }
