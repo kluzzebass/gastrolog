@@ -170,7 +170,8 @@ export function SearchView() {
   };
 
   const openInspector = (param?: string) => {
-    navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: param || "entities:vaults" }) } as any);
+    const p = param || sessionStorage.getItem("inspector-last") || "entities:vaults";
+    navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: p }) } as any);
   };
 
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(
@@ -899,7 +900,7 @@ export function SearchView() {
               <InspectorDialog
                 dark={dark}
                 inspectorParam={inspectorParam}
-                onNavigate={(p) => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: p }) } as any)}
+                onNavigate={(p) => { sessionStorage.setItem("inspector-last", p); navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: p }) } as any); }}
                 onClose={() => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: undefined }) } as any)}
               />
           )}
