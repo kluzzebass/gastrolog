@@ -600,14 +600,14 @@ func requestClusterMembership(ctx context.Context, logger *slog.Logger, cfg runC
 // store may not be writable yet (needs Raft quorum).
 func finalizeNodeSetup(ctx context.Context, logger *slog.Logger, cfgStore config.Store, nodeID, configType string, asyncNodeConfig bool, hd home.Dir) (string, string, error) {
 	if asyncNodeConfig {
-		logger.Info("node identity", "node_id", nodeID)
+		logNodeIdentity(logger, nodeID, hd.ReadNodeName())
 		go ensureNodeConfigAsync(ctx, cfgStore, nodeID, configType, hd, logger)
 	} else {
 		nodeName, err := ensureNodeConfig(ctx, cfgStore, nodeID)
 		if err != nil {
 			return "", "", fmt.Errorf("ensure node config: %w", err)
 		}
-		logger.Info("node identity", "node_id", nodeID, "node_name", nodeName)
+		logNodeIdentity(logger, nodeID, nodeName)
 		if configType != "memory" {
 			_ = hd.WriteNodeName(nodeName)
 		}
@@ -620,6 +620,14 @@ func finalizeNodeSetup(ctx context.Context, logger *slog.Logger, cfgStore config
 		socketPath = hd.SocketPath()
 	}
 	return homeDir, socketPath, nil
+}
+
+func logNodeIdentity(logger *slog.Logger, nodeID, nodeName string) {
+	if nodeName != "" {
+		logger.Info("node identity", "node_id", nodeID, "node_name", nodeName)
+	} else {
+		logger.Info("node identity", "node_id", nodeID)
+	}
 }
 
 // awaitReplication is a no-op when config was loaded locally. For replication

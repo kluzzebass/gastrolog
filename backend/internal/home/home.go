@@ -102,6 +102,16 @@ func (d Dir) NodeID() (string, error) {
 	})
 }
 
+// ReadNodeName reads the cached node name from <root>/node_name.
+// Returns empty string if the file doesn't exist yet.
+func (d Dir) ReadNodeName() string {
+	data, err := os.ReadFile(filepath.Join(d.root, "node_name"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
 // WriteNodeName writes the node's human-readable name to <root>/node_name.
 // The config store is the source of truth; this file is a convenience for
 // operators inspecting the home directory on disk.
