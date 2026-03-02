@@ -99,12 +99,42 @@ func (o *Orchestrator) VaultExists(vaultID uuid.UUID) bool {
 // --- Chunk write ---
 
 // Append appends a record to the vault's active chunk.
+// If the append triggers a rotation (e.g. age or size policy), post-seal
+// work (compression + index builds) is scheduled automatically.
+//
+// This is the sole write path for all record sources: local ingesters,
+// cluster-forwarded records, and the ImportRecords API.
 func (o *Orchestrator) Append(vaultID uuid.UUID, rec chunk.Record) (chunk.ChunkID, uint64, error) {
-	cm, err := o.chunkManager(vaultID)
-	if err != nil {
-		return chunk.ChunkID{}, 0, err
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.appendRecord(vaultID, rec)
+}
+
+// appendRecord is the unified append-with-seal-detection path.
+// Caller MUST hold o.mu.
+func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.ChunkID, uint64, error) {
+	vault := o.vaults[vaultID]
+	if vault == nil {
+		return chunk.ChunkID{}, 0, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
-	return cm.Append(rec)
+	if !vault.Enabled {
+		return chunk.ChunkID{}, 0, nil
+	}
+
+	activeBefore := vault.Chunks.Active()
+	cid, pos, err := vault.Chunks.Append(rec)
+	if err != nil {
+		return cid, pos, err
+	}
+
+	// Detect seal: if Active() changed, the previous chunk was sealed.
+	activeAfter := vault.Chunks.Active()
+	if activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID) {
+		o.scheduleCompression(vaultID, activeBefore.ID)
+		o.scheduleIndexBuild(vaultID, activeBefore.ID)
+	}
+
+	return cid, pos, nil
 }
 
 // SealActive seals the active chunk if it has records. No-op if empty or no active chunk.

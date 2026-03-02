@@ -9,32 +9,19 @@ import (
 )
 
 // Ingest filters a record to matching chunk managers.
-// If a chunk is sealed as a result of the append, index builds are
-// scheduled asynchronously for that chunk.
+// If a chunk is sealed as a result of the append, compression and index
+// builds are scheduled asynchronously via appendRecord.
 //
 // This is the direct ingestion API for pre-constructed records.
 // For ingester-based ingestion, use Start() which runs an ingest loop
 // that receives IngestMessages, resolves identity, and calls this internally.
 //
-// Ingest acquires an exclusive lock to serialize seal detection. This
-// means only one Ingest call runs at a time, but Search calls can still
-// run concurrently (they only need the registry snapshot, not the lock
-// during iteration).
+// All record writes (local ingest, cluster-forwarded, and import) flow
+// through appendRecord, which handles seal detection and post-seal work.
 //
 // Error semantics: This is fan-out with partial failure. If CM A succeeds
 // and CM B fails, the record is persisted in A but not B, and the error
-// from B is returned. There is no rollback. This is acceptable for now
-// since we typically have one CM per registry key, but callers should be
-// aware of this behavior.
-//
-// Seal detection: compares Active() before/after append to detect when
-// the active chunk changes (indicating the previous chunk was sealed).
-// This assumes:
-//   - ChunkManagers are append-serialized (single writer per CM)
-//   - No delayed/async sealing within ChunkManager
-//
-// Future improvement: have ChunkManager.Append() return sealed chunk ID,
-// or emit seal events via callback.
+// from B is returned. There is no rollback.
 func (o *Orchestrator) Ingest(rec chunk.Record) error {
 	return o.ingest(rec)
 }
@@ -67,16 +54,8 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 
 // fanoutAll is the legacy path: no filter set, send to all local vaults.
 func (o *Orchestrator) fanoutAll(rec chunk.Record) error {
-	for key, vault := range o.vaults {
-		if vault == nil || !vault.Enabled {
-			continue
-		}
-		k := key
-		onSeal := func(cid chunk.ChunkID) {
-			o.scheduleCompression(k, cid)
-			o.scheduleIndexBuild(k, cid)
-		}
-		if err := vault.Append(rec, onSeal); err != nil {
+	for key := range o.vaults {
+		if _, _, err := o.appendRecord(key, rec); err != nil {
 			return err
 		}
 	}
@@ -85,15 +64,8 @@ func (o *Orchestrator) fanoutAll(rec chunk.Record) error {
 
 // appendLocal appends a record to a local vault.
 func (o *Orchestrator) appendLocal(vaultID uuid.UUID, rec chunk.Record) error {
-	vault := o.vaults[vaultID]
-	if vault == nil || !vault.Enabled {
-		return nil
-	}
-	onSeal := func(cid chunk.ChunkID) {
-		o.scheduleCompression(vaultID, cid)
-		o.scheduleIndexBuild(vaultID, cid)
-	}
-	return vault.Append(rec, onSeal)
+	_, _, err := o.appendRecord(vaultID, rec)
+	return err
 }
 
 // forwardRemote ships a record to the node that owns the target vault.
