@@ -1,6 +1,7 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useHealth, useStats } from "../../api/hooks";
 import { Status } from "../../api/gen/gastrolog/v1/lifecycle_pb";
+import type { ClusterNode } from "../../api/gen/gastrolog/v1/lifecycle_pb";
 import type { NodeStats } from "../../api/gen/gastrolog/v1/cluster_pb";
 import { formatBytes } from "../../utils/units";
 import { Badge } from "../Badge";
@@ -393,6 +394,94 @@ function IngestQueueSection({
         </div>
       </div>
     </section>
+  );
+}
+
+// ---- Cluster aggregate view ----
+
+/**
+ * Aggregated cluster-wide summary. Sums stats across all nodes using
+ * gossip-broadcast NodeStats — no extra RPCs needed.
+ */
+export function ClusterSummaryView({
+  nodes,
+  dark,
+}: Readonly<{ nodes: ClusterNode[]; dark: boolean }>) {
+  let totalVaults = 0;
+  let totalRecords = 0;
+  let totalBytes = 0;
+  let totalChunks = 0;
+  let totalCpu = 0;
+  let totalRss = 0;
+  let totalHeapAlloc = 0;
+  let totalGoroutines = 0;
+  let totalQueueDepth = 0;
+  let totalQueueCapacity = 0;
+  let leaderName = "";
+
+  for (const node of nodes) {
+    if (node.isLeader) leaderName = node.name || node.id;
+    const s = node.stats;
+    if (!s) continue;
+    totalCpu += s.cpuPercent;
+    totalRss += Number(s.memoryRss);
+    totalHeapAlloc += Number(s.memoryHeapAlloc);
+    totalGoroutines += s.goroutines;
+    totalQueueDepth += s.ingestQueueDepth;
+    totalQueueCapacity += s.ingestQueueCapacity;
+    for (const v of s.vaults) {
+      totalVaults++;
+      totalRecords += Number(v.recordCount);
+      totalBytes += Number(v.dataBytes);
+      totalChunks += Number(v.chunkCount);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* Cluster overview */}
+      <section>
+        <CompactSectionLabel label="Cluster" dark={dark} />
+        <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+          <CompactStatRow label="Nodes" value={nodes.length.toString()} mono dark={dark} />
+          <CompactStatRow label="Leader" value={leaderName || "none"} dark={dark} />
+          <CompactStatRow label="Vaults" value={totalVaults.toLocaleString()} mono dark={dark} />
+          <CompactStatRow label="Records" value={totalRecords.toLocaleString()} mono dark={dark} />
+          <CompactStatRow label="Data" value={formatBytes(totalBytes)} mono dark={dark} />
+          <CompactStatRow label="Chunks" value={totalChunks.toLocaleString()} mono dark={dark} />
+        </div>
+      </section>
+
+      {/* Aggregate resources */}
+      <CompactDivider dark={dark} />
+      <section>
+        <CompactSectionLabel label="Combined Resources" dark={dark} />
+        <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+          <CompactStatRow label="CPU" value={`${totalCpu.toFixed(1)}%`} mono dark={dark} />
+          <CompactStatRow label="Goroutines" value={totalGoroutines.toLocaleString()} mono dark={dark} />
+          <CompactStatRow label="RSS" value={formatBytes(totalRss)} mono dark={dark} />
+          <CompactStatRow label="Heap Alloc" value={formatBytes(totalHeapAlloc)} mono dark={dark} />
+        </div>
+      </section>
+
+      {/* Aggregate ingest queue */}
+      {totalQueueCapacity > 0 && (
+        <>
+          <CompactDivider dark={dark} />
+          <section>
+            <CompactSectionLabel label="Ingest Queue (all nodes)" dark={dark} />
+            <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+              <CompactStatRow
+                label="Depth"
+                value={`${totalQueueDepth.toLocaleString()} / ${totalQueueCapacity.toLocaleString()}`}
+                mono
+                dark={dark}
+              />
+            </div>
+          </section>
+        </>
+      )}
+    </div>
   );
 }
 

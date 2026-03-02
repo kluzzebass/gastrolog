@@ -13,7 +13,7 @@ import { HelpButton } from "../HelpButton";
 import { VaultCard } from "./VaultCard";
 import { IngesterCard } from "./IngesterCard";
 import { formatTimestamp, elapsed, countdown, useTick } from "./JobCard";
-import { LocalSystemStats, SystemStatsView } from "./SystemStatsView";
+import { LocalSystemStats, SystemStatsView, ClusterSummaryView } from "./SystemStatsView";
 import { groupByNode } from "./groupByNode";
 import type { EntityType } from "./InspectorDialog";
 
@@ -362,6 +362,22 @@ function SystemList({ dark }: Readonly<{ dark: boolean }>) {
   return (
     <div className="flex flex-col gap-3">
       <EntityHeader title="System" helpTopicId="inspector-system" dark={dark} />
+      {nodes.length > 0 && (
+        <ExpandableCard
+          id="cluster-summary"
+          dark={dark}
+          monoTitle={false}
+          expanded={expandedNodes["__cluster"] ?? true}
+          onToggle={() =>
+            setExpandedNodes((prev) => ({ ...prev, __cluster: !(prev.__cluster ?? true) }))
+          }
+          headerRight={<Badge variant="copper" dark={dark}>{nodes.length} nodes</Badge>}
+        >
+          <div className="p-3">
+            <ClusterSummaryView nodes={nodes} dark={dark} />
+          </div>
+        </ExpandableCard>
+      )}
       {nodes.length === 0 && <Empty dark={dark}>No cluster data available.</Empty>}
       {nodes.map((node) => {
         const isLocal = node.id === localNodeId;
