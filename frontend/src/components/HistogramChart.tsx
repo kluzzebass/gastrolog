@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import ReactEChartsCore from "echarts-for-react/esm/core";
 import { echarts } from "./charts/echartsSetup";
 import { useThemeClass } from "../hooks/useThemeClass";
@@ -123,7 +123,7 @@ export function HistogramChart({
   // setOption calls (replaying entrance animation). The stable wrapper
   // delegates to the latest closure via ref indirection.
   const formatterImplRef = useRef<(params: any) => string>(() => "");
-  const stableFormatter = useRef((params: any) => formatterImplRef.current(params)).current;
+  const [stableFormatter] = useState(() => (params: any) => formatterImplRef.current(params));
 
   // Pan state.
   const axisRef = useRef<HTMLDivElement>(null);
@@ -132,9 +132,8 @@ export function HistogramChart({
   const panningRef = useRef(false);
   const [panOffset, setPanOffset] = useState(0);
 
-  if (buckets.length === 0) return null;
-
-  const colorMap = buildColorMap(data);
+  // --- Data derived from buckets (safe for empty arrays) ---
+  const colorMap = buckets.length > 0 ? buildColorMap(data) : new Map<string, string>();
   const groupKeys = [...colorMap.keys()];
 
   const hasOther = groupKeys.length > 0 && buckets.some((b) => {
@@ -143,8 +142,8 @@ export function HistogramChart({
   });
   const legendKeys = hasOther ? [...groupKeys, "other"] : groupKeys;
 
-  const firstBucket = buckets[0]!;
-  const lastBucket = buckets.at(-1)!;
+  const firstBucket = buckets[0];
+  const lastBucket = buckets.at(-1);
   const totalCount = buckets.reduce((sum, b) => sum + b.count, 0);
   const barHeight = barHeightProp ?? 48;
 
@@ -199,8 +198,9 @@ export function HistogramChart({
   });
 
   // Time formatting.
-  const rangeMs =
-    buckets.length > 1 ? lastBucket.ts.getTime() - firstBucket.ts.getTime() : 0;
+  const rangeMs = firstBucket && lastBucket
+    ? lastBucket.ts.getTime() - firstBucket.ts.getTime()
+    : 0;
 
   const formatTime = (d: Date) => {
     if (rangeMs > 24 * 60 * 60 * 1000) {
@@ -258,7 +258,14 @@ export function HistogramChart({
     const header = `<div style="opacity:0.7">${bucket.count.toLocaleString()} \u00B7 ${formatTime(bucket.ts)}</div>`;
     return header + lines.join("<br/>");
   };
-  formatterImplRef.current = tooltipFormatter;
+
+  // Sync formatter ref — must be above the early return so the hook is
+  // called unconditionally on every render.
+  useEffect(() => {
+    formatterImplRef.current = tooltipFormatter;
+  });
+
+  if (buckets.length === 0) return null;
 
   const tooltipBg = dark
     ? resolveColor("var(--color-ink-surface)") || "#1a1a1a"
@@ -382,10 +389,10 @@ export function HistogramChart({
   // Pan handlers.
   const handlePanStep = (direction: -1 | 1) => {
     if (!onPan || buckets.length < 2) return;
-    const windowMs = lastBucket.ts.getTime() - firstBucket.ts.getTime();
+    const windowMs = lastBucket!.ts.getTime() - firstBucket!.ts.getTime();
     const stepMs = windowMs / 2;
-    const first = firstBucket.ts.getTime();
-    const last = lastBucket.ts.getTime();
+    const first = firstBucket!.ts.getTime();
+    const last = lastBucket!.ts.getTime();
     onPan(
       new Date(first + direction * stepMs),
       new Date(last + direction * stepMs),
@@ -415,10 +422,10 @@ export function HistogramChart({
       const deltaX = panStartX.current - ev.clientX;
       const axisWidth = el.getBoundingClientRect().width;
       if (Math.abs(deltaX) < 3) return;
-      const windowMs = lastBucket.ts.getTime() - firstBucket.ts.getTime();
+      const windowMs = lastBucket!.ts.getTime() - firstBucket!.ts.getTime();
       const deltaMs = (deltaX / axisWidth) * windowMs;
-      const first = firstBucket.ts.getTime();
-      const last = lastBucket.ts.getTime();
+      const first = firstBucket!.ts.getTime();
+      const last = lastBucket!.ts.getTime();
       onPan(new Date(first + deltaMs), new Date(last + deltaMs));
     };
     globalThis.addEventListener("mousemove", onMouseMove);
@@ -429,7 +436,7 @@ export function HistogramChart({
   const labelStep = Math.max(1, Math.floor(buckets.length / labelCount));
 
   const windowMs =
-    buckets.length > 1 ? lastBucket.ts.getTime() - firstBucket.ts.getTime() : 0;
+    buckets.length > 1 ? lastBucket!.ts.getTime() - firstBucket!.ts.getTime() : 0;
   const panDeltaMs =
     panOffset !== 0 ? -((panOffset / panAxisWidth) * windowMs) : 0;
 

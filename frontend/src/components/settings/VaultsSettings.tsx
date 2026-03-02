@@ -262,14 +262,16 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
   const retentionPolicies = config?.retentionPolicies ?? [];
 
   // Auto-expand a vault when navigated to from another settings tab.
-  useEffect(() => {
-    if (!expandTarget || !configVaults || configVaults.length === 0) return;
+  // React-recommended "adjusting state when a prop changes" pattern.
+  const [prevExpandTarget, setPrevExpandTarget] = useState(expandTarget);
+  if (expandTarget && expandTarget !== prevExpandTarget && configVaults && configVaults.length > 0) {
+    setPrevExpandTarget(expandTarget);
     const match = configVaults.find((s) => (s.name || s.id) === expandTarget);
     if (match) {
       setExpanded(match.id);
     }
     onExpandTargetConsumed?.();
-  }, [expandTarget, configVaults, onExpandTargetConsumed]);
+  }
 
   const policyOptions = [
     { value: "", label: "(none)" },

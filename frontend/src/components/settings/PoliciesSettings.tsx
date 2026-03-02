@@ -155,7 +155,7 @@ export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolea
     return {
       name: pol.name,
       maxBytes: formatBytes(pol.maxBytes),
-      maxRecords: pol.maxRecords > 0n ? pol.maxRecords.toString() : "",
+      maxRecords: pol.maxRecords > BigInt(0) ? pol.maxRecords.toString() : "",
       maxAge: formatDuration(pol.maxAgeSeconds),
       cron: pol.cron,
     };
@@ -172,7 +172,7 @@ export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolea
         const result = validateCron(edit.cron);
         if (!result.valid) throw new Error(`Invalid cron: ${result.error}`);
       }
-      const maxRecordsValue = edit.maxRecords ? BigInt(edit.maxRecords) : 0n;
+      const maxRecordsValue = edit.maxRecords ? BigInt(edit.maxRecords) : BigInt(0);
       return {
         id,
         name: edit.name,
@@ -209,7 +209,7 @@ export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolea
       }
     }
     const name = newName.trim() || namePlaceholder || "default";
-    const maxRecordsValue = newMaxRecords ? BigInt(newMaxRecords) : 0n;
+    const maxRecordsValue = newMaxRecords ? BigInt(newMaxRecords) : BigInt(0);
     try {
       await putPolicy.mutateAsync({
         id: "",

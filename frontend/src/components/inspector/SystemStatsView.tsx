@@ -172,7 +172,7 @@ function CompactView({
               mono
               dark={dark}
             />
-            {stats.uptimeSeconds > 0n && (
+            {stats.uptimeSeconds > BigInt(0) && (
               <CompactStatRow
                 label="Uptime"
                 value={formatUptime(stats.uptimeSeconds)}

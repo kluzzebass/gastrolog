@@ -289,10 +289,16 @@ export function SearchView() {
     } as any);
   };
 
-  // Sync draft when URL changes (browser back/forward).
-  useEffect(() => {
+  // Auto-refresh polling for both pipeline and filter results.
+  const [pollInterval, setPollInterval] = useState<number | null>(null);
+
+  // Sync draft and reset poll interval when URL changes (browser back/forward).
+  const [prevQ, setPrevQ] = useState(q);
+  if (q !== prevQ) {
+    setPrevQ(q);
     setDraft(q);
-  }, [q]);
+    setPollInterval(null);
+  }
 
   // Fire search or follow depending on the current route.
   // eslint-disable-next-line sonarjs/cognitive-complexity -- query effect handles multiple route/mode transitions
@@ -623,9 +629,6 @@ export function SearchView() {
   const isPipelineResult = effectiveTableResult !== null;
   const queryIsPipeline = hasPipeOutsideQuotes(q);
 
-  // Auto-refresh polling for both pipeline and filter results.
-  const [pollInterval, setPollInterval] = useState<number | null>(null);
-
   useEffect(() => {
     if (!pollInterval || isFollowMode) return;
     const id = setInterval(() => {
@@ -641,10 +644,6 @@ export function SearchView() {
     return () => clearInterval(id);
   }, [pollInterval, isFollowMode, q, search, histogramSearch]);
 
-  // Clear poll interval when query changes or leaves pipeline mode.
-  useEffect(() => {
-    setPollInterval(null);
-  }, [q]);
   const displayRecords = isFollowMode ? followRecords : records;
   const attrFields = aggregateFields(displayRecords, "attrs");
   const kvFields = aggregateFields(displayRecords, "kv");

@@ -89,10 +89,17 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
     );
   }, [search, searchIndex]);
 
-  // Auto-expand when navigating to a topic inside a collapsed parent
+  // Auto-expand and reset content when navigating to a new topic.
   const [prevActiveId, setPrevActiveId] = useState(activeId);
+  const topic: HelpTopic | undefined = findTopic(activeId);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [topicContent, setTopicContent] = useState<string | null>(null);
+  const [loadingContent, setLoadingContent] = useState(true);
+
   if (activeId !== prevActiveId) {
     setPrevActiveId(activeId);
+    setLoadingContent(true);
+    setTopicContent(null);
     setExpanded((prev) => {
       let changed = false;
       const next = new Set(prev);
@@ -106,20 +113,18 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
     });
   }
 
-  const topic: HelpTopic | undefined = findTopic(activeId);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [topicContent, setTopicContent] = useState<string | null>(null);
-  const [loadingContent, setLoadingContent] = useState(false);
-
-  // Load topic content and reset scroll when switching topics
+  // Load topic content and reset scroll when switching topics.
   useEffect(() => {
     contentRef.current?.scrollTo(0, 0);
-    if (!topic) { setTopicContent(null); return; }
-    setLoadingContent(true);
+    if (!topic) return;
+    let cancelled = false;
     topic.load().then((content) => {
-      setTopicContent(content);
-      setLoadingContent(false);
+      if (!cancelled) {
+        setTopicContent(content);
+        setLoadingContent(false);
+      }
     });
+    return () => { cancelled = true; };
   }, [activeId, topic]);
 
   const navigate = (id: string) => {
@@ -367,23 +372,13 @@ function MarkdownContent({ dark, content, onNavigate, onOpenSettings }: Readonly
   onNavigate: (topicId: string) => void;
   onOpenSettings?: (tab: string) => void;
 }>) {
-  const navRef = useRef(onNavigate);
-  navRef.current = onNavigate;
-  const settingsRef = useRef(onOpenSettings);
-  settingsRef.current = onOpenSettings;
-
-  // Cache the components object in a ref so react-markdown always receives
-  // the same reference. Only rebuild when dark mode changes.
-  const darkRef = useRef(dark);
-  const componentsRef = useRef<ReturnType<typeof buildMarkdownComponents> | null>(null);
-  if (componentsRef.current === null || darkRef.current !== dark) {
-    darkRef.current = dark;
-    componentsRef.current = buildMarkdownComponents(dark, navRef, settingsRef);
-  }
+  // React Compiler handles memoization — components object only rebuilds
+  // when dark/onNavigate/onOpenSettings actually change.
+  const components = buildMarkdownComponents(dark, onNavigate, onOpenSettings);
 
   return (
     <Suspense fallback={null}>
-      <Markdown remarkPlugins={remarkGfmPlugin} components={componentsRef.current} urlTransform={identityUrlTransform}>
+      <Markdown remarkPlugins={remarkGfmPlugin} components={components} urlTransform={identityUrlTransform}>
         {content}
       </Markdown>
     </Suspense>
@@ -399,8 +394,8 @@ function childrenToText(children: React.ReactNode): string {
 
 function buildMarkdownComponents(
   dark: boolean,
-  navRef: React.RefObject<(topicId: string) => void>,
-  settingsRef: React.RefObject<((tab: string) => void) | undefined>,
+  onNavigate: (topicId: string) => void,
+  onOpenSettings?: (tab: string) => void,
 ) {
   const c: (d: string, l: string) => string = dark
     ? (d) => d
@@ -523,7 +518,7 @@ function buildMarkdownComponents(
         const topicId = href.slice(5);
         return (
           <button
-            onClick={() => navRef.current(topicId)}
+            onClick={() => onNavigate(topicId)}
             className="text-copper hover:underline cursor-pointer"
           >
             {children}
@@ -534,7 +529,7 @@ function buildMarkdownComponents(
         const tab = href.slice(9);
         return (
           <button
-            onClick={() => settingsRef.current?.(tab)}
+            onClick={() => onOpenSettings?.(tab)}
             className="text-copper hover:underline cursor-pointer"
           >
             {children}

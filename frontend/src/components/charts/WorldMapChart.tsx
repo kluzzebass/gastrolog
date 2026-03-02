@@ -363,22 +363,23 @@ export function WorldMapChart({
   };
 
   const isScatter = mode === "scatter";
-  const mounted = useRef(false);
 
-  // Only restore saved roam state on initial mount (or remount after parent
-  // re-render). On data refreshes, omit center/zoom so ECharts keeps its own
-  // internal roam state — prevents desync between the geo background and
-  // scatter layer that caused points to jump ahead of the map.
-  const restoreRoam = !mounted.current;
-
-  // For scatter, the stats group-by clause puts lat/lon as the first two columns.
+  // Build option without saved roam state — ECharts merge-mode preserves
+  // center/zoom when they are absent from subsequent setOption calls.
   const option = isScatter
-    ? buildScatterOption(columns, rows, 0, 1, theme, colors, restoreRoam)
-    : buildChoroplethOption(columns, rows, theme, colors, restoreRoam);
+    ? buildScatterOption(columns, rows, 0, 1, theme, colors, false)
+    : buildChoroplethOption(columns, rows, theme, colors, false);
 
-  // After first render, stop restoring roam state on subsequent data refreshes.
+  // Restore saved roam state on mount (imperative — avoids setState in effect).
   useEffect(() => {
-    mounted.current = true;
+    if (!savedCenter && savedZoom == null) return;
+    const instance = chartRef.current?.getEchartsInstance();
+    if (!instance) return;
+    if (isScatter) {
+      instance.setOption({ geo: [{ center: savedCenter, zoom: savedZoom }] });
+    } else {
+      instance.setOption({ series: [{ center: savedCenter, zoom: savedZoom }] });
+    }
   }, []);
 
   const onEvents = {

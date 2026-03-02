@@ -104,7 +104,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
       name: pol.name,
       maxAge: formatDuration(pol.maxAgeSeconds),
       maxBytes: formatBytes(pol.maxBytes),
-      maxChunks: pol.maxChunks > 0n ? pol.maxChunks.toString() : "",
+      maxChunks: pol.maxChunks > BigInt(0) ? pol.maxChunks.toString() : "",
     };
   };
 
@@ -115,7 +115,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
     deleteMutation: deletePolicy,
     label: "Retention policy",
     onSaveTransform: (id, edit: PolicyEdit) => {
-      const maxChunksValue = edit.maxChunks ? BigInt(edit.maxChunks) : 0n;
+      const maxChunksValue = edit.maxChunks ? BigInt(edit.maxChunks) : BigInt(0);
       return {
         id,
         name: edit.name,
@@ -144,7 +144,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
 
   const handleCreate = async () => {
     const name = newName.trim() || namePlaceholder || "default";
-    const maxChunksValue = newMaxChunks ? BigInt(newMaxChunks) : 0n;
+    const maxChunksValue = newMaxChunks ? BigInt(newMaxChunks) : BigInt(0);
     try {
       await putPolicy.mutateAsync({
         id: "",
