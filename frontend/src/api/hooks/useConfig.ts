@@ -11,7 +11,7 @@ export function useConfig() {
       return response;
     },
     structuralSharing: protoSharing(GetConfigResponse.equals),
-    refetchInterval: 10_000,
+    staleTime: 60_000, // safety net; WatchConfig stream invalidation is primary
   });
 }
 

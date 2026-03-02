@@ -4098,3 +4098,65 @@ export class GenerateNameResponse extends Message<GenerateNameResponse> {
   }
 }
 
+/**
+ * @generated from message gastrolog.v1.WatchConfigRequest
+ */
+export class WatchConfigRequest extends Message<WatchConfigRequest> {
+  constructor(data?: PartialMessage<WatchConfigRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.WatchConfigRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): WatchConfigRequest {
+    return new WatchConfigRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): WatchConfigRequest {
+    return new WatchConfigRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): WatchConfigRequest {
+    return new WatchConfigRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: WatchConfigRequest | PlainMessage<WatchConfigRequest> | undefined, b: WatchConfigRequest | PlainMessage<WatchConfigRequest> | undefined): boolean {
+    return proto3.util.equals(WatchConfigRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.WatchConfigResponse
+ */
+export class WatchConfigResponse extends Message<WatchConfigResponse> {
+  constructor(data?: PartialMessage<WatchConfigResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.WatchConfigResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): WatchConfigResponse {
+    return new WatchConfigResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): WatchConfigResponse {
+    return new WatchConfigResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): WatchConfigResponse {
+    return new WatchConfigResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: WatchConfigResponse | PlainMessage<WatchConfigResponse> | undefined, b: WatchConfigResponse | PlainMessage<WatchConfigResponse> | undefined): boolean {
+    return proto3.util.equals(WatchConfigResponse, a, b);
+  }
+}
+

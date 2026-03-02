@@ -16,6 +16,7 @@ import (
 	"gastrolog/internal/config"
 	"gastrolog/internal/config/raftfsm"
 	"gastrolog/internal/lookup"
+	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -29,12 +30,13 @@ type ConfigServer struct {
 	onTLSConfigChange     func()
 	onLookupConfigChange  func(config.LookupConfig)
 	afterConfigApply      func(raftfsm.Notification)
+	configSignal          *notify.Signal
 }
 
 var _ gastrologv1connect.ConfigServiceHandler = (*ConfigServer)(nil)
 
 // NewConfigServer creates a new ConfigServer.
-func NewConfigServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, certManager CertManager, localNodeID string, afterConfigApply func(raftfsm.Notification)) *ConfigServer {
+func NewConfigServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, certManager CertManager, localNodeID string, afterConfigApply func(raftfsm.Notification), configSignal *notify.Signal) *ConfigServer {
 	return &ConfigServer{
 		orch:             orch,
 		cfgStore:         cfgStore,
@@ -42,6 +44,7 @@ func NewConfigServer(orch *orchestrator.Orchestrator, cfgStore config.Store, fac
 		certManager:      certManager,
 		localNodeID:      localNodeID,
 		afterConfigApply: afterConfigApply,
+		configSignal:     configSignal,
 	}
 }
 
@@ -408,6 +411,34 @@ func (s *ConfigServer) GenerateName(
 	return connect.NewResponse(&apiv1.GenerateNameResponse{
 		Name: petname.Generate(2, "-"),
 	}), nil
+}
+
+// WatchConfig streams a notification whenever configuration changes.
+func (s *ConfigServer) WatchConfig(
+	ctx context.Context,
+	req *connect.Request[apiv1.WatchConfigRequest],
+	stream *connect.ServerStream[apiv1.WatchConfigResponse],
+) error {
+	// Send one initial message so the client knows the stream is alive.
+	if err := stream.Send(&apiv1.WatchConfigResponse{}); err != nil {
+		return err
+	}
+	if s.configSignal == nil {
+		// No signal wired (e.g. tests) — block until context cancelled.
+		<-ctx.Done()
+		return nil
+	}
+	for {
+		ch := s.configSignal.C()
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ch:
+			if err := stream.Send(&apiv1.WatchConfigResponse{}); err != nil {
+				return err
+			}
+		}
+	}
 }
 
 func (s *ConfigServer) loadServerSettings(ctx context.Context) (config.ServerSettings, error) {

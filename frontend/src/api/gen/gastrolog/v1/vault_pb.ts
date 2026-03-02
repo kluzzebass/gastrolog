@@ -1554,7 +1554,9 @@ export class ExportVaultResponse extends Message<ExportVaultResponse> {
 }
 
 /**
- * ExportRecord is a portable record representation for export/import.
+ * ExportRecord is a portable record representation for export/import and
+ * cross-node search results. The ref fields are optional — only populated
+ * when the record originates from a search (not import/export).
  *
  * @generated from message gastrolog.v1.ExportRecord
  */
@@ -1579,6 +1581,23 @@ export class ExportRecord extends Message<ExportRecord> {
    */
   raw = new Uint8Array(0);
 
+  /**
+   * Record reference (populated by ForwardSearch, empty for import/export).
+   *
+   * @generated from field: string vault_id = 5;
+   */
+  vaultId = "";
+
+  /**
+   * @generated from field: string chunk_id = 6;
+   */
+  chunkId = "";
+
+  /**
+   * @generated from field: uint64 pos = 7;
+   */
+  pos = protoInt64.zero;
+
   constructor(data?: PartialMessage<ExportRecord>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1591,6 +1610,9 @@ export class ExportRecord extends Message<ExportRecord> {
     { no: 2, name: "ingest_ts", kind: "message", T: Timestamp },
     { no: 3, name: "attrs", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
     { no: 4, name: "raw", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 5, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 7, name: "pos", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ExportRecord {

@@ -13,6 +13,7 @@ import (
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/config"
 	"gastrolog/internal/config/raftfsm"
+	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -27,6 +28,7 @@ type configDispatcher struct {
 	logger         *slog.Logger
 	clusterTLS     *cluster.ClusterTLS // nil for single-node or memory mode
 	tlsFilePath    string              // path to persist cluster TLS on rotation
+	configSignal   *notify.Signal      // broadcasts config changes to WatchConfig streams
 }
 
 // Handle dispatches a single FSM notification to the appropriate orchestrator
@@ -63,6 +65,12 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		d.handleSettingPut(ctx, n.Key)
 	case raftfsm.NotifyClusterTLSPut:
 		d.handleClusterTLSPut(ctx)
+	}
+
+	// Notify WatchConfig streams for all user-visible config changes.
+	// ClusterTLSPut is internal cluster infra — skip it.
+	if d.configSignal != nil && n.Kind != raftfsm.NotifyClusterTLSPut {
+		d.configSignal.Notify()
 	}
 }
 

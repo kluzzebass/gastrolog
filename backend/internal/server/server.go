@@ -31,6 +31,7 @@ import (
 	"gastrolog/internal/frontend"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/lookup"
+	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -90,6 +91,10 @@ type Config struct {
 
 	// LocalStats returns real-time stats for the local node.
 	LocalStats func() *apiv1.NodeStats
+
+	// ConfigSignal broadcasts config changes to WatchConfig streams.
+	// May be nil in tests.
+	ConfigSignal *notify.Signal
 }
 
 // CertManager interface for TLS certificate management.
@@ -121,6 +126,7 @@ type Server struct {
 	startTime        time.Time
 	homeDir          string                     // gastrolog home directory; empty for in-memory config
 	afterConfigApply func(raftfsm.Notification) // non-raft dispatch hook
+	configSignal     *notify.Signal             // broadcasts config changes to WatchConfig streams
 
 	mu       sync.Mutex
 	listener net.Listener
@@ -169,6 +175,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orche
 		homeDir:          cfg.HomeDir,
 		unixSocketConfig: cfg.UnixSocket,
 		afterConfigApply: cfg.AfterConfigApply,
+		configSignal:     cfg.ConfigSignal,
 		shutdown:         make(chan struct{}),
 		rl:          newRateLimiter(5.0/60.0, 5), // 5 req/min per IP, burst of 5
 	}
@@ -292,7 +299,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 	if s.remoteVaultForwarder != nil {
 		vaultServer.SetRemoteForwarder(s.remoteVaultForwarder)
 	}
-	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager, s.localNodeID, s.afterConfigApply)
+	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager, s.localNodeID, s.afterConfigApply, s.configSignal)
 	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
 	configServer.SetOnLookupConfigChange(func(cfg config.LookupConfig) {
 		s.applyLookupConfig(cfg, geoipTable, asnTable)

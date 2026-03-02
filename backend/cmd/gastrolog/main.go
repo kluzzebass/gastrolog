@@ -57,6 +57,7 @@ import (
 	ingestsyslog "gastrolog/internal/ingester/syslog"
 	ingesttail "gastrolog/internal/ingester/tail"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 	"gastrolog/internal/server"
@@ -193,7 +194,8 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 		return err
 	}
 
-	disp := &configDispatcher{localNodeID: nodeID, logger: logger.With("component", "dispatch"), clusterTLS: clusterTLS, tlsFilePath: hd.ClusterTLSPath()}
+	configSignal := notify.NewSignal()
+	disp := &configDispatcher{localNodeID: nodeID, logger: logger.With("component", "dispatch"), clusterTLS: clusterTLS, tlsFilePath: hd.ClusterTLSPath(), configSignal: configSignal}
 	cfgStore, err := openConfigStore(cfg.ConfigType, raftStoreOpts{
 		Home: hd, NodeID: nodeID, Init: cfg.ClusterInit,
 		ClusterSrv: clusterSrv, ClusterTLS: clusterTLS,
@@ -314,6 +316,7 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 		CertMgr:          certMgr,
 		NoAuth:           cfg.NoAuth,
 		AfterConfigApply: nonRaftApplyHook(cfg.ConfigType, disp.Handle),
+		ConfigSignal:     configSignal,
 		ClusterSrv:       clusterSrv,
 		Broadcaster:      broadcaster,
 		PeerState:        peerState,
@@ -807,6 +810,7 @@ type serverDeps struct {
 	CertMgr          *cert.Manager
 	NoAuth           bool
 	AfterConfigApply func(raftfsm.Notification)
+	ConfigSignal     *notify.Signal
 	ClusterSrv       *cluster.Server
 	Broadcaster      *cluster.Broadcaster
 	PeerState        *cluster.PeerState
@@ -819,7 +823,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 	var srv *server.Server
 	var serverWg sync.WaitGroup
 	if deps.ServerAddr != "" {
-		srv = server.New(deps.Orch, deps.CfgStore, deps.Factories, deps.Tokens, server.Config{Logger: deps.Logger, CertManager: deps.CertMgr, NoAuth: deps.NoAuth, HomeDir: deps.HomeDir, NodeID: deps.NodeID, UnixSocket: deps.SocketPath, AfterConfigApply: deps.AfterConfigApply, Cluster: deps.ClusterSrv, PeerStats: deps.PeerState, PeerVaultStats: deps.PeerState, PeerJobs: deps.PeerJobState, LocalStats: deps.LocalStats, RemoteSearcher: deps.SearchForwarder, RemoteVaultForwarder: deps.SearchForwarder})
+		srv = server.New(deps.Orch, deps.CfgStore, deps.Factories, deps.Tokens, server.Config{Logger: deps.Logger, CertManager: deps.CertMgr, NoAuth: deps.NoAuth, HomeDir: deps.HomeDir, NodeID: deps.NodeID, UnixSocket: deps.SocketPath, AfterConfigApply: deps.AfterConfigApply, ConfigSignal: deps.ConfigSignal, Cluster: deps.ClusterSrv, PeerStats: deps.PeerState, PeerVaultStats: deps.PeerState, PeerJobs: deps.PeerJobState, LocalStats: deps.LocalStats, RemoteSearcher: deps.SearchForwarder, RemoteVaultForwarder: deps.SearchForwarder})
 		serverWg.Go(func() {
 			if err := srv.ServeTCP(deps.ServerAddr); err != nil {
 				deps.Logger.Error("server error", "error", err)

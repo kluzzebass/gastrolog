@@ -125,6 +125,9 @@ const (
 	// ConfigServiceGenerateNameProcedure is the fully-qualified name of the ConfigService's
 	// GenerateName RPC.
 	ConfigServiceGenerateNameProcedure = "/gastrolog.v1.ConfigService/GenerateName"
+	// ConfigServiceWatchConfigProcedure is the fully-qualified name of the ConfigService's WatchConfig
+	// RPC.
+	ConfigServiceWatchConfigProcedure = "/gastrolog.v1.ConfigService/WatchConfig"
 )
 
 // ConfigServiceClient is a client for the gastrolog.v1.ConfigService service.
@@ -193,6 +196,8 @@ type ConfigServiceClient interface {
 	DeleteRoute(context.Context, *connect.Request[v1.DeleteRouteRequest]) (*connect.Response[v1.DeleteRouteResponse], error)
 	// GenerateName returns a random petname for use as a default entity name.
 	GenerateName(context.Context, *connect.Request[v1.GenerateNameRequest]) (*connect.Response[v1.GenerateNameResponse], error)
+	// WatchConfig streams a notification whenever configuration changes.
+	WatchConfig(context.Context, *connect.Request[v1.WatchConfigRequest]) (*connect.ServerStreamForClient[v1.WatchConfigResponse], error)
 }
 
 // NewConfigServiceClient constructs a client for the gastrolog.v1.ConfigService service. By
@@ -398,6 +403,12 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("GenerateName")),
 			connect.WithClientOptions(opts...),
 		),
+		watchConfig: connect.NewClient[v1.WatchConfigRequest, v1.WatchConfigResponse](
+			httpClient,
+			baseURL+ConfigServiceWatchConfigProcedure,
+			connect.WithSchema(configServiceMethods.ByName("WatchConfig")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -435,6 +446,7 @@ type configServiceClient struct {
 	putRoute              *connect.Client[v1.PutRouteRequest, v1.PutRouteResponse]
 	deleteRoute           *connect.Client[v1.DeleteRouteRequest, v1.DeleteRouteResponse]
 	generateName          *connect.Client[v1.GenerateNameRequest, v1.GenerateNameResponse]
+	watchConfig           *connect.Client[v1.WatchConfigRequest, v1.WatchConfigResponse]
 }
 
 // GetConfig calls gastrolog.v1.ConfigService.GetConfig.
@@ -597,6 +609,11 @@ func (c *configServiceClient) GenerateName(ctx context.Context, req *connect.Req
 	return c.generateName.CallUnary(ctx, req)
 }
 
+// WatchConfig calls gastrolog.v1.ConfigService.WatchConfig.
+func (c *configServiceClient) WatchConfig(ctx context.Context, req *connect.Request[v1.WatchConfigRequest]) (*connect.ServerStreamForClient[v1.WatchConfigResponse], error) {
+	return c.watchConfig.CallServerStream(ctx, req)
+}
+
 // ConfigServiceHandler is an implementation of the gastrolog.v1.ConfigService service.
 type ConfigServiceHandler interface {
 	// GetConfig returns the current configuration.
@@ -663,6 +680,8 @@ type ConfigServiceHandler interface {
 	DeleteRoute(context.Context, *connect.Request[v1.DeleteRouteRequest]) (*connect.Response[v1.DeleteRouteResponse], error)
 	// GenerateName returns a random petname for use as a default entity name.
 	GenerateName(context.Context, *connect.Request[v1.GenerateNameRequest]) (*connect.Response[v1.GenerateNameResponse], error)
+	// WatchConfig streams a notification whenever configuration changes.
+	WatchConfig(context.Context, *connect.Request[v1.WatchConfigRequest], *connect.ServerStream[v1.WatchConfigResponse]) error
 }
 
 // NewConfigServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -864,6 +883,12 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("GenerateName")),
 		connect.WithHandlerOptions(opts...),
 	)
+	configServiceWatchConfigHandler := connect.NewServerStreamHandler(
+		ConfigServiceWatchConfigProcedure,
+		svc.WatchConfig,
+		connect.WithSchema(configServiceMethods.ByName("WatchConfig")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.ConfigService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ConfigServiceGetConfigProcedure:
@@ -930,6 +955,8 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServiceDeleteRouteHandler.ServeHTTP(w, r)
 		case ConfigServiceGenerateNameProcedure:
 			configServiceGenerateNameHandler.ServeHTTP(w, r)
+		case ConfigServiceWatchConfigProcedure:
+			configServiceWatchConfigHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1065,4 +1092,8 @@ func (UnimplementedConfigServiceHandler) DeleteRoute(context.Context, *connect.R
 
 func (UnimplementedConfigServiceHandler) GenerateName(context.Context, *connect.Request[v1.GenerateNameRequest]) (*connect.Response[v1.GenerateNameResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.GenerateName is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) WatchConfig(context.Context, *connect.Request[v1.WatchConfigRequest], *connect.ServerStream[v1.WatchConfigResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.WatchConfig is not implemented"))
 }

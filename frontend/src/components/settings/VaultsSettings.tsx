@@ -207,16 +207,12 @@ function RetentionRulesEditor({
               </FormField>
             </div>
           )}
-          <button
-            type="button"
+          <GhostButton
             onClick={() => onChange(rules.filter((_, i) => i !== idx))}
-            className={`pb-1.5 text-[0.85em] transition-colors ${c(
-              "text-text-ghost hover:text-severity-error",
-              "text-light-text-ghost hover:text-severity-error",
-            )}`}
+            dark={dark}
           >
-            &times;
-          </button>
+            Remove
+          </GhostButton>
         </div>
       ))}
     </div>

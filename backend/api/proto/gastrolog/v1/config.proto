@@ -101,6 +101,9 @@ service ConfigService {
 
   // GenerateName returns a random petname for use as a default entity name.
   rpc GenerateName(GenerateNameRequest) returns (GenerateNameResponse);
+
+  // WatchConfig streams a notification whenever configuration changes.
+  rpc WatchConfig(WatchConfigRequest) returns (stream WatchConfigResponse);
 }
 
 message GetConfigRequest {}
@@ -555,3 +558,7 @@ message GenerateNameRequest {}
 message GenerateNameResponse {
   string name = 1;
 }
+
+message WatchConfigRequest {}
+
+message WatchConfigResponse {}
