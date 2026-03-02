@@ -85,9 +85,7 @@ cluster-node1:
   go run ./cmd/gastrolog server \
     --home data/node1 \
     --addr :4564 \
-    --cluster-addr :4565 \
-    --cluster-init \
-    --bootstrap 2>&1 | while IFS= read -r line; do
+    --cluster-addr :4565 2>&1 | while IFS= read -r line; do
       echo "$line" >&2
       if [[ "$line" == *"cluster join token"*"token="* ]]; then
         token="${line##*token=}"

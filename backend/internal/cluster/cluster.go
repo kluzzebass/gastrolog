@@ -27,6 +27,7 @@ import (
 	"github.com/Jille/raftadmin"
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -139,6 +140,14 @@ func (s *Server) Transport() hraft.Transport {
 		hraft.ServerAddress(s.localAddr),
 		[]grpc.DialOption{
 			grpc.WithTransportCredentials(creds),
+			grpc.WithConnectParams(grpc.ConnectParams{
+				Backoff: backoff.Config{
+					BaseDelay:  500 * time.Millisecond,
+					Multiplier: 1.6,
+					Jitter:     0.2,
+					MaxDelay:   3 * time.Second,
+				},
+			}),
 		},
 	)
 	return s.tm.Transport()

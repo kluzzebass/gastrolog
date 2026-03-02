@@ -410,6 +410,8 @@ type GetClusterStatusResponse struct {
 	Nodes          []*ClusterNode         `protobuf:"bytes,4,rep,name=nodes,proto3" json:"nodes,omitempty"`
 	LocalStats     *RaftStats             `protobuf:"bytes,5,opt,name=local_stats,json=localStats,proto3" json:"local_stats,omitempty"`
 	LocalNodeId    string                 `protobuf:"bytes,6,opt,name=local_node_id,json=localNodeId,proto3" json:"local_node_id,omitempty"`
+	JoinToken      string                 `protobuf:"bytes,7,opt,name=join_token,json=joinToken,proto3" json:"join_token,omitempty"`
+	ClusterAddress string                 `protobuf:"bytes,8,opt,name=cluster_address,json=clusterAddress,proto3" json:"cluster_address,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -482,6 +484,20 @@ func (x *GetClusterStatusResponse) GetLocalStats() *RaftStats {
 func (x *GetClusterStatusResponse) GetLocalNodeId() string {
 	if x != nil {
 		return x.LocalNodeId
+	}
+	return ""
+}
+
+func (x *GetClusterStatusResponse) GetJoinToken() string {
+	if x != nil {
+		return x.JoinToken
+	}
+	return ""
+}
+
+func (x *GetClusterStatusResponse) GetClusterAddress() string {
+	if x != nil {
+		return x.ClusterAddress
 	}
 	return ""
 }
@@ -815,7 +831,7 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\x0fShutdownRequest\x12\x14\n" +
 	"\x05drain\x18\x01 \x01(\bR\x05drain\"\x12\n" +
 	"\x10ShutdownResponse\"\x19\n" +
-	"\x17GetClusterStatusRequest\"\x96\x02\n" +
+	"\x17GetClusterStatusRequest\"\xde\x02\n" +
 	"\x18GetClusterStatusResponse\x12'\n" +
 	"\x0fcluster_enabled\x18\x01 \x01(\bR\x0eclusterEnabled\x12\x1b\n" +
 	"\tleader_id\x18\x02 \x01(\tR\bleaderId\x12%\n" +
@@ -823,7 +839,10 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\x05nodes\x18\x04 \x03(\v2\x19.gastrolog.v1.ClusterNodeR\x05nodes\x128\n" +
 	"\vlocal_stats\x18\x05 \x01(\v2\x17.gastrolog.v1.RaftStatsR\n" +
 	"localStats\x12\"\n" +
-	"\rlocal_node_id\x18\x06 \x01(\tR\vlocalNodeId\"\xb1\x03\n" +
+	"\rlocal_node_id\x18\x06 \x01(\tR\vlocalNodeId\x12\x1d\n" +
+	"\n" +
+	"join_token\x18\a \x01(\tR\tjoinToken\x12'\n" +
+	"\x0fcluster_address\x18\b \x01(\tR\x0eclusterAddress\"\xb1\x03\n" +
 	"\tRaftStats\x12\x14\n" +
 	"\x05state\x18\x01 \x01(\tR\x05state\x12\x12\n" +
 	"\x04term\x18\x02 \x01(\x04R\x04term\x12$\n" +
