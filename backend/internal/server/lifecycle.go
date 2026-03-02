@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -23,6 +25,9 @@ type ClusterStatusProvider interface {
 	LeaderInfo() (address string, id string)
 	Servers() ([]cluster.RaftServer, error)
 	LocalStats() map[string]string
+	AddVoter(id, addr string, timeout time.Duration) error
+	AddNonvoter(id, addr string, timeout time.Duration) error
+	DemoteVoter(id string, timeout time.Duration) error
 }
 
 // NodeStatsProvider returns the latest stats for a given cluster node.
@@ -164,6 +169,49 @@ func (s *LifecycleServer) GetClusterStatus(
 		LocalStats:     buildRaftStats(s.cluster.LocalStats()),
 		LocalNodeId:    s.nodeID,
 	}), nil
+}
+
+// SetNodeSuffrage promotes or demotes a node's voting status.
+func (s *LifecycleServer) SetNodeSuffrage(
+	ctx context.Context,
+	req *connect.Request[apiv1.SetNodeSuffrageRequest],
+) (*connect.Response[apiv1.SetNodeSuffrageResponse], error) {
+	if s.cluster == nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("cluster not enabled"))
+	}
+
+	nodeID := req.Msg.NodeId
+	if nodeID == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("node_id is required"))
+	}
+
+	// Look up the node's address from the current Raft configuration.
+	servers, err := s.cluster.Servers()
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	var nodeAddr string
+	for _, srv := range servers {
+		if srv.ID == nodeID {
+			nodeAddr = srv.Address
+			break
+		}
+	}
+	if nodeAddr == "" {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("node %s not in cluster configuration", nodeID))
+	}
+
+	const timeout = 10 * time.Second
+	if req.Msg.Voter {
+		err = s.cluster.AddVoter(nodeID, nodeAddr, timeout)
+	} else {
+		err = s.cluster.DemoteVoter(nodeID, timeout)
+	}
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	return connect.NewResponse(&apiv1.SetNodeSuffrageResponse{}), nil
 }
 
 // buildRaftStats converts the raw Hashicorp Raft Stats() map into a typed proto message.

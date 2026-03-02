@@ -74,7 +74,7 @@ audit:
 
 # Removes all cluster node data directories.
 cluster-clean:
-  rm -rf data/node1 data/node2 data/node3 data/cluster-token
+  rm -rf data/node1 data/node2 data/node3 data/node4 data/cluster-token
 
 # Starts cluster node 1 (leader). Writes join token to data/cluster-token.
 cluster-node1:
@@ -131,6 +131,23 @@ cluster-node3:
     --join-addr localhost:4565 \
     --join-token "$TOKEN"
 
+# Starts cluster node 4 (nonvoter). Requires node 1 to be running.
+cluster-node4:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [[ ! -f data/cluster-token ]]; then
+    echo "error: data/cluster-token not found — start node 1 first (just cluster-node1)"
+    exit 1
+  fi
+  TOKEN=$(cat data/cluster-token)
+  exec go run ./cmd/gastrolog server \
+    --home data/node4 \
+    --addr :4594 \
+    --cluster-addr :4595 \
+    --join-addr localhost:4565 \
+    --join-token "$TOKEN" \
+    --voteless
+
 # Runs an existing cluster node 1 (no init, no enrollment).
 run-node1:
   go run ./cmd/gastrolog server --home data/node1 --addr :4564 --cluster-addr :4565
@@ -143,13 +160,18 @@ run-node2:
 run-node3:
   go run ./cmd/gastrolog server --home data/node3 --addr :4584 --cluster-addr :4585
 
-# Runs all 3 cluster nodes in one terminal with colored output.
+# Runs an existing cluster node 4 (nonvoter, no init, no enrollment).
+run-node4:
+  go run ./cmd/gastrolog server --home data/node4 --addr :4594 --cluster-addr :4595
+
+# Runs all 4 cluster nodes in one terminal with colored output.
 cluster-run:
   go run ./cmd/multirun \
-    --name node1,node2,node3 \
+    --name node1,node2,node3,node4 \
     "go run ./cmd/gastrolog server --home data/node1 --addr :4564 --cluster-addr :4565" \
     "go run ./cmd/gastrolog server --home data/node2 --addr :4574 --cluster-addr :4575" \
-    "go run ./cmd/gastrolog server --home data/node3 --addr :4584 --cluster-addr :4585"
+    "go run ./cmd/gastrolog server --home data/node3 --addr :4584 --cluster-addr :4585" \
+    "go run ./cmd/gastrolog server --home data/node4 --addr :4594 --cluster-addr :4595"
 
 # --- End cluster recipes ---
 

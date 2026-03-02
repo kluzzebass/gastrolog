@@ -540,3 +540,79 @@ export class ClusterNode extends Message<ClusterNode> {
   }
 }
 
+/**
+ * @generated from message gastrolog.v1.SetNodeSuffrageRequest
+ */
+export class SetNodeSuffrageRequest extends Message<SetNodeSuffrageRequest> {
+  /**
+   * @generated from field: string node_id = 1;
+   */
+  nodeId = "";
+
+  /**
+   * true = promote to voter, false = demote to nonvoter
+   *
+   * @generated from field: bool voter = 2;
+   */
+  voter = false;
+
+  constructor(data?: PartialMessage<SetNodeSuffrageRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SetNodeSuffrageRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "voter", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SetNodeSuffrageRequest {
+    return new SetNodeSuffrageRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SetNodeSuffrageRequest {
+    return new SetNodeSuffrageRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SetNodeSuffrageRequest {
+    return new SetNodeSuffrageRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SetNodeSuffrageRequest | PlainMessage<SetNodeSuffrageRequest> | undefined, b: SetNodeSuffrageRequest | PlainMessage<SetNodeSuffrageRequest> | undefined): boolean {
+    return proto3.util.equals(SetNodeSuffrageRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.SetNodeSuffrageResponse
+ */
+export class SetNodeSuffrageResponse extends Message<SetNodeSuffrageResponse> {
+  constructor(data?: PartialMessage<SetNodeSuffrageResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SetNodeSuffrageResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SetNodeSuffrageResponse {
+    return new SetNodeSuffrageResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SetNodeSuffrageResponse {
+    return new SetNodeSuffrageResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SetNodeSuffrageResponse {
+    return new SetNodeSuffrageResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SetNodeSuffrageResponse | PlainMessage<SetNodeSuffrageResponse> | undefined, b: SetNodeSuffrageResponse | PlainMessage<SetNodeSuffrageResponse> | undefined): boolean {
+    return proto3.util.equals(SetNodeSuffrageResponse, a, b);
+  }
+}
+

@@ -8,33 +8,20 @@ import { Badge } from "../Badge";
 import type { BadgeVariant } from "../Badge";
 
 /**
- * Unified system stats view.
- *
- * - When `localHealth`/`localStats` are provided (local node), shows the full
- *   rich breakdown: status, version, uptime, CPU, memory, and ingest queue.
- * - When only `nodeStats` is provided (remote node via cluster gossip), shows
- *   a compact grid: system, queue, and raft state.
- *
- * Per-vault and per-ingester details are shown in their own entity panes.
+ * System stats view for a single node, using gossip-broadcast NodeStats.
+ * Used identically for local and remote nodes — no special-casing.
  */
 interface SystemStatsViewProps {
   nodeStats: NodeStats | null;
-  localHealth?: ReturnType<typeof useHealth>["data"];
-  localStats?: ReturnType<typeof useStats>["data"];
   dark: boolean;
 }
 
 export function SystemStatsView({
   nodeStats,
-  localHealth,
-  localStats,
   dark,
 }: Readonly<SystemStatsViewProps>) {
   const c = useThemeClass(dark);
 
-  if (localHealth || localStats) {
-    return <RichView health={localHealth} stats={localStats} dark={dark} />;
-  }
   if (nodeStats) {
     return <CompactView stats={nodeStats} dark={dark} />;
   }
@@ -118,27 +105,7 @@ function StatRow({
   );
 }
 
-// ---- Rich view (local node) ----
-
-function RichView({
-  health,
-  stats,
-  dark,
-}: Readonly<{
-  health?: { status: Status; version: string; uptimeSeconds: bigint; ingestQueueDepth: bigint; ingestQueueCapacity: bigint };
-  stats?: StatsData;
-  dark: boolean;
-}>) {
-  return (
-    <div className="flex flex-col gap-6">
-      {health && <SystemSection dark={dark} health={health} stats={stats} />}
-      {stats && <MemorySection dark={dark} stats={stats} />}
-      {health && <IngestQueueSection dark={dark} health={health} />}
-    </div>
-  );
-}
-
-// ---- Compact view (remote node via cluster stats) ----
+// ---- Compact view (node stats from gossip) ----
 
 function CompactView({
   stats,

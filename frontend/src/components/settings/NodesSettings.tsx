@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useConfig, useSettings, usePutNodeConfig } from "../../api/hooks/useConfig";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
-import { ClusterNodeRole } from "../../api/gen/gastrolog/v1/lifecycle_pb";
+import { useSetNodeSuffrage } from "../../api/hooks/useSetNodeSuffrage";
+import { ClusterNodeRole, ClusterNodeSuffrage } from "../../api/gen/gastrolog/v1/lifecycle_pb";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useEditState } from "../../hooks/useEditState";
 import { useToast } from "../Toast";
@@ -31,6 +32,7 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const { data: settingsData, isLoading: settingsLoading } = useSettings();
   const { data: clusterData } = useClusterStatus();
   const putNodeConfig = usePutNodeConfig();
+  const setNodeSuffrage = useSetNodeSuffrage();
   const { addToast } = useToast();
 
   const localNodeId = settingsData?.nodeId ?? "";
@@ -45,6 +47,7 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
         id: cn.id,
         name: nodeConfigMap.get(cn.id)?.name ?? cn.name,
         role: cn.role,
+        suffrage: cn.suffrage,
         isLeader: cn.isLeader,
       }))
     : localNodeId
@@ -53,10 +56,13 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
             id: localNodeId,
             name: settingsData?.nodeName ?? "",
             role: ClusterNodeRole.UNSPECIFIED,
+            suffrage: ClusterNodeSuffrage.UNSPECIFIED,
             isLeader: false,
           },
         ]
       : [];
+
+  const isLeaderNode = clusterEnabled && nodes.some((n) => n.isLeader && n.id === localNodeId);
 
   const defaults = (id: string): NodeEdit => ({
     name: nodes.find((n) => n.id === id)?.name ?? "",
@@ -114,6 +120,9 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
                       {roleName(node.role)}
                     </Badge>
                   )}
+                  {clusterEnabled && node.suffrage === ClusterNodeSuffrage.NONVOTER && (
+                    <Badge variant="muted" dark={dark}>nonvoter</Badge>
+                  )}
                   {isLocal && (
                     <Badge variant="muted" dark={dark}>this node</Badge>
                   )}
@@ -144,6 +153,39 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
                   mono
                 />
               </FormField>
+              {clusterEnabled && !node.isLeader && isLeaderNode && (
+                <div className="pt-1">
+                  {node.suffrage === ClusterNodeSuffrage.VOTER ? (
+                    <GhostButton
+                      onClick={async () => {
+                        try {
+                          await setNodeSuffrage.mutateAsync({ nodeId: node.id, voter: false });
+                          addToast("Demoted to nonvoter", "info");
+                        } catch (err: any) {
+                          addToast(err.message ?? "Failed to demote", "error");
+                        }
+                      }}
+                      dark={dark}
+                    >
+                      Demote to Nonvoter
+                    </GhostButton>
+                  ) : node.suffrage === ClusterNodeSuffrage.NONVOTER ? (
+                    <GhostButton
+                      onClick={async () => {
+                        try {
+                          await setNodeSuffrage.mutateAsync({ nodeId: node.id, voter: true });
+                          addToast("Promoted to voter", "info");
+                        } catch (err: any) {
+                          addToast(err.message ?? "Failed to promote", "error");
+                        }
+                      }}
+                      dark={dark}
+                    >
+                      Promote to Voter
+                    </GhostButton>
+                  ) : null}
+                </div>
+              )}
             </SettingsCard>
           );
         })}

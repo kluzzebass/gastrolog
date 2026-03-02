@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { GetClusterStatusRequest, GetClusterStatusResponse, HealthRequest, HealthResponse, ShutdownRequest, ShutdownResponse } from "./lifecycle_pb.js";
+import { GetClusterStatusRequest, GetClusterStatusResponse, HealthRequest, HealthResponse, SetNodeSuffrageRequest, SetNodeSuffrageResponse, ShutdownRequest, ShutdownResponse } from "./lifecycle_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -45,6 +45,17 @@ export const LifecycleService = {
       name: "GetClusterStatus",
       I: GetClusterStatusRequest,
       O: GetClusterStatusResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * SetNodeSuffrage promotes or demotes a node's voting status.
+     *
+     * @generated from rpc gastrolog.v1.LifecycleService.SetNodeSuffrage
+     */
+    setNodeSuffrage: {
+      name: "SetNodeSuffrage",
+      I: SetNodeSuffrageRequest,
+      O: SetNodeSuffrageResponse,
       kind: MethodKind.Unary,
     },
   }

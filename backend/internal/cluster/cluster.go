@@ -168,6 +168,24 @@ func (s *Server) AddVoter(id, addr string, timeout time.Duration) error {
 	return s.raft.AddVoter(hraft.ServerID(id), hraft.ServerAddress(addr), 0, timeout).Error()
 }
 
+// AddNonvoter adds a new node to the Raft cluster as a nonvoter.
+// Nonvoters receive log replication but do not participate in elections or quorum.
+func (s *Server) AddNonvoter(id, addr string, timeout time.Duration) error {
+	if s.raft == nil {
+		return errors.New("raft not initialized")
+	}
+	return s.raft.AddNonvoter(hraft.ServerID(id), hraft.ServerAddress(addr), 0, timeout).Error()
+}
+
+// DemoteVoter demotes an existing voter to a nonvoter.
+// The node continues receiving log replication but no longer participates in elections.
+func (s *Server) DemoteVoter(id string, timeout time.Duration) error {
+	if s.raft == nil {
+		return errors.New("raft not initialized")
+	}
+	return s.raft.DemoteVoter(hraft.ServerID(id), 0, timeout).Error()
+}
+
 // SetApplyFn sets the function used by the ForwardApply handler to apply
 // commands on the leader node.
 func (s *Server) SetApplyFn(fn func(ctx context.Context, data []byte) error) {

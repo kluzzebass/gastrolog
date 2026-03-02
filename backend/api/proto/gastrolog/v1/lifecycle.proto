@@ -16,6 +16,9 @@ service LifecycleService {
 
   // GetClusterStatus returns the current cluster topology and Raft state.
   rpc GetClusterStatus(GetClusterStatusRequest) returns (GetClusterStatusResponse);
+
+  // SetNodeSuffrage promotes or demotes a node's voting status.
+  rpc SetNodeSuffrage(SetNodeSuffrageRequest) returns (SetNodeSuffrageResponse);
 }
 
 message HealthRequest {}
@@ -91,3 +94,10 @@ enum ClusterNodeSuffrage {
   CLUSTER_NODE_SUFFRAGE_NONVOTER = 2;
   CLUSTER_NODE_SUFFRAGE_STAGING = 3;
 }
+
+message SetNodeSuffrageRequest {
+  string node_id = 1;
+  bool voter = 2; // true = promote to voter, false = demote to nonvoter
+}
+
+message SetNodeSuffrageResponse {}

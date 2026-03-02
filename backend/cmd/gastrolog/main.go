@@ -122,6 +122,7 @@ func main() {
 				ClusterInit: mustBool(cmd, "cluster-init"),
 				JoinAddr:    mustString(cmd, "join-addr"),
 				JoinToken:   mustString(cmd, "join-token"),
+				Voteless:    mustBool(cmd, "voteless"),
 			}
 
 			err := run(cmd.Context(), logger, cfg)
@@ -139,6 +140,7 @@ func main() {
 	serverCmd.Flags().Bool("cluster-init", false, "initialize a new cluster (generates CA, certs, and join token)")
 	serverCmd.Flags().String("join-addr", "", "leader's cluster address to join an existing cluster")
 	serverCmd.Flags().String("join-token", "", "join token for cluster enrollment (from cluster-init node)")
+	serverCmd.Flags().Bool("voteless", false, "join cluster as a nonvoter (receives replication but does not vote in elections)")
 
 	versionCmd := &cobra.Command{
 		Use:   "version",
@@ -176,6 +178,7 @@ type runConfig struct {
 	ClusterInit bool
 	JoinAddr    string
 	JoinToken   string
+	Voteless    bool
 }
 
 func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
@@ -537,8 +540,8 @@ func enrollInCluster(ctx context.Context, logger *slog.Logger, cfg runConfig, hd
 // cluster leader — the orchestrator starts empty and receives vaults/ingesters
 // via FSM dispatch as they arrive.
 func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg runConfig, cfgStore config.Store, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, nodeID string) (*config.Config, bool, error) {
-	// For joining nodes: request voter membership from the leader.
-	if err := requestVoterMembership(ctx, logger, cfg, clusterTLS, nodeID); err != nil {
+	// For joining nodes: request cluster membership from the leader.
+	if err := requestClusterMembership(ctx, logger, cfg, clusterTLS, nodeID); err != nil {
 		return nil, false, err
 	}
 
@@ -557,7 +560,7 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg runConfig, cf
 		return nil, false, nil
 	}
 
-	// Joining a cluster: config will replicate via Raft after voter
+	// Joining a cluster: config will replicate via Raft after cluster
 	// membership is granted. Return nil so the orchestrator starts empty.
 	if cfg.JoinAddr != "" {
 		logger.Info("joining cluster, config will replicate from leader")
@@ -573,19 +576,24 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg runConfig, cf
 	return appCfg, false, nil
 }
 
-// requestVoterMembership asks the cluster leader to add this node as a Raft voter.
-// It is a no-op if the join parameters are not set.
-func requestVoterMembership(ctx context.Context, logger *slog.Logger, cfg runConfig, clusterTLS *cluster.ClusterTLS, nodeID string) error {
+// requestClusterMembership asks the cluster leader to add this node as a Raft
+// voter or nonvoter. It is a no-op if the join parameters are not set.
+func requestClusterMembership(ctx context.Context, logger *slog.Logger, cfg runConfig, clusterTLS *cluster.ClusterTLS, nodeID string) error {
 	if cfg.JoinAddr == "" || clusterTLS == nil || cfg.ClusterAddr == "" {
 		return nil
 	}
-	logger.Info("requesting voter membership from leader", "leader_addr", cfg.JoinAddr)
+	voter := !cfg.Voteless
+	kind := "voter"
+	if !voter {
+		kind = "nonvoter"
+	}
+	logger.Info("requesting "+kind+" membership from leader", "leader_addr", cfg.JoinAddr)
 	joinCtx, joinCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer joinCancel()
-	if err := cluster.JoinCluster(joinCtx, cfg.JoinAddr, nodeID, cfg.ClusterAddr, clusterTLS); err != nil {
+	if err := cluster.JoinCluster(joinCtx, cfg.JoinAddr, nodeID, cfg.ClusterAddr, clusterTLS, voter); err != nil {
 		return fmt.Errorf("join cluster: %w", err)
 	}
-	logger.Info("voter membership granted by leader")
+	logger.Info(kind+" membership granted by leader")
 	return nil
 }
 

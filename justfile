@@ -38,6 +38,10 @@ audit:
     just backend audit
     just frontend audit
 
+# Count lines of code, skipping generated/vendored/build artifacts
+cloc:
+    cloc . --exclude-dir=node_modules,dist,.claude,.dogcats,.github,.zed,deploy,data,stores,gen,vendor --exclude-ext=lock,sum --not-match-f='\.test$'
+
 # Tag and push a release (triggers GitHub Actions build). Usage: just release patch
 release bump:
     #!/usr/bin/env bash

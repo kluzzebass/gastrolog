@@ -41,6 +41,9 @@ const (
 	// LifecycleServiceGetClusterStatusProcedure is the fully-qualified name of the LifecycleService's
 	// GetClusterStatus RPC.
 	LifecycleServiceGetClusterStatusProcedure = "/gastrolog.v1.LifecycleService/GetClusterStatus"
+	// LifecycleServiceSetNodeSuffrageProcedure is the fully-qualified name of the LifecycleService's
+	// SetNodeSuffrage RPC.
+	LifecycleServiceSetNodeSuffrageProcedure = "/gastrolog.v1.LifecycleService/SetNodeSuffrage"
 )
 
 // LifecycleServiceClient is a client for the gastrolog.v1.LifecycleService service.
@@ -51,6 +54,8 @@ type LifecycleServiceClient interface {
 	Shutdown(context.Context, *connect.Request[v1.ShutdownRequest]) (*connect.Response[v1.ShutdownResponse], error)
 	// GetClusterStatus returns the current cluster topology and Raft state.
 	GetClusterStatus(context.Context, *connect.Request[v1.GetClusterStatusRequest]) (*connect.Response[v1.GetClusterStatusResponse], error)
+	// SetNodeSuffrage promotes or demotes a node's voting status.
+	SetNodeSuffrage(context.Context, *connect.Request[v1.SetNodeSuffrageRequest]) (*connect.Response[v1.SetNodeSuffrageResponse], error)
 }
 
 // NewLifecycleServiceClient constructs a client for the gastrolog.v1.LifecycleService service. By
@@ -82,6 +87,12 @@ func NewLifecycleServiceClient(httpClient connect.HTTPClient, baseURL string, op
 			connect.WithSchema(lifecycleServiceMethods.ByName("GetClusterStatus")),
 			connect.WithClientOptions(opts...),
 		),
+		setNodeSuffrage: connect.NewClient[v1.SetNodeSuffrageRequest, v1.SetNodeSuffrageResponse](
+			httpClient,
+			baseURL+LifecycleServiceSetNodeSuffrageProcedure,
+			connect.WithSchema(lifecycleServiceMethods.ByName("SetNodeSuffrage")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -90,6 +101,7 @@ type lifecycleServiceClient struct {
 	health           *connect.Client[v1.HealthRequest, v1.HealthResponse]
 	shutdown         *connect.Client[v1.ShutdownRequest, v1.ShutdownResponse]
 	getClusterStatus *connect.Client[v1.GetClusterStatusRequest, v1.GetClusterStatusResponse]
+	setNodeSuffrage  *connect.Client[v1.SetNodeSuffrageRequest, v1.SetNodeSuffrageResponse]
 }
 
 // Health calls gastrolog.v1.LifecycleService.Health.
@@ -107,6 +119,11 @@ func (c *lifecycleServiceClient) GetClusterStatus(ctx context.Context, req *conn
 	return c.getClusterStatus.CallUnary(ctx, req)
 }
 
+// SetNodeSuffrage calls gastrolog.v1.LifecycleService.SetNodeSuffrage.
+func (c *lifecycleServiceClient) SetNodeSuffrage(ctx context.Context, req *connect.Request[v1.SetNodeSuffrageRequest]) (*connect.Response[v1.SetNodeSuffrageResponse], error) {
+	return c.setNodeSuffrage.CallUnary(ctx, req)
+}
+
 // LifecycleServiceHandler is an implementation of the gastrolog.v1.LifecycleService service.
 type LifecycleServiceHandler interface {
 	// Health returns the server health status.
@@ -115,6 +132,8 @@ type LifecycleServiceHandler interface {
 	Shutdown(context.Context, *connect.Request[v1.ShutdownRequest]) (*connect.Response[v1.ShutdownResponse], error)
 	// GetClusterStatus returns the current cluster topology and Raft state.
 	GetClusterStatus(context.Context, *connect.Request[v1.GetClusterStatusRequest]) (*connect.Response[v1.GetClusterStatusResponse], error)
+	// SetNodeSuffrage promotes or demotes a node's voting status.
+	SetNodeSuffrage(context.Context, *connect.Request[v1.SetNodeSuffrageRequest]) (*connect.Response[v1.SetNodeSuffrageResponse], error)
 }
 
 // NewLifecycleServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -142,6 +161,12 @@ func NewLifecycleServiceHandler(svc LifecycleServiceHandler, opts ...connect.Han
 		connect.WithSchema(lifecycleServiceMethods.ByName("GetClusterStatus")),
 		connect.WithHandlerOptions(opts...),
 	)
+	lifecycleServiceSetNodeSuffrageHandler := connect.NewUnaryHandler(
+		LifecycleServiceSetNodeSuffrageProcedure,
+		svc.SetNodeSuffrage,
+		connect.WithSchema(lifecycleServiceMethods.ByName("SetNodeSuffrage")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.LifecycleService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case LifecycleServiceHealthProcedure:
@@ -150,6 +175,8 @@ func NewLifecycleServiceHandler(svc LifecycleServiceHandler, opts ...connect.Han
 			lifecycleServiceShutdownHandler.ServeHTTP(w, r)
 		case LifecycleServiceGetClusterStatusProcedure:
 			lifecycleServiceGetClusterStatusHandler.ServeHTTP(w, r)
+		case LifecycleServiceSetNodeSuffrageProcedure:
+			lifecycleServiceSetNodeSuffrageHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -169,4 +196,8 @@ func (UnimplementedLifecycleServiceHandler) Shutdown(context.Context, *connect.R
 
 func (UnimplementedLifecycleServiceHandler) GetClusterStatus(context.Context, *connect.Request[v1.GetClusterStatusRequest]) (*connect.Response[v1.GetClusterStatusResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.LifecycleService.GetClusterStatus is not implemented"))
+}
+
+func (UnimplementedLifecycleServiceHandler) SetNodeSuffrage(context.Context, *connect.Request[v1.SetNodeSuffrageRequest]) (*connect.Response[v1.SetNodeSuffrageResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.LifecycleService.SetNodeSuffrage is not implemented"))
 }

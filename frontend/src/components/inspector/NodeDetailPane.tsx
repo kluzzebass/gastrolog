@@ -9,7 +9,7 @@ import { toastError } from "../Toast";
 import { VaultCard } from "./VaultCard";
 import { IngesterCard } from "./IngesterCard";
 import { JobCard, ScheduledJobsTable } from "./JobCard";
-import { SystemStatsView, LocalSystemStats } from "./SystemStatsView";
+import { SystemStatsView } from "./SystemStatsView";
 import { Badge } from "../Badge";
 
 interface NodeDetailPaneProps {
@@ -20,7 +20,6 @@ interface NodeDetailPaneProps {
 export function NodeDetailPane({ nodeId, dark }: Readonly<NodeDetailPaneProps>) {
   const { data: settingsData } = useSettings();
   const localNodeId = settingsData?.nodeId ?? "";
-  const isLocal = nodeId === localNodeId;
 
   const { data: cluster } = useClusterStatus();
   const nodeInfo = cluster?.nodes.find((n) => n.id === nodeId);
@@ -45,18 +44,14 @@ export function NodeDetailPane({ nodeId, dark }: Readonly<NodeDetailPaneProps>) 
     <div className="flex flex-col gap-6">
       {/* System section */}
       <Section title="System" dark={dark}>
-        {isLocal ? (
-          <LocalSystemStats dark={dark} />
-        ) : (
-          <SystemStatsView
-            nodeStats={nodeInfo?.stats ?? null}
-            dark={dark}
-          />
-        )}
+        <SystemStatsView
+          nodeStats={nodeInfo?.stats ?? null}
+          dark={dark}
+        />
       </Section>
 
       {/* Vaults section */}
-      <Section title="Vaults" dark={dark} count={vaults.length}>
+      <Section title="Vaults" dark={dark}>
         {vaults.length === 0 ? (
           <EmptyMessage dark={dark}>No vaults on this node.</EmptyMessage>
         ) : (
@@ -78,7 +73,7 @@ export function NodeDetailPane({ nodeId, dark }: Readonly<NodeDetailPaneProps>) 
       </Section>
 
       {/* Ingesters section */}
-      <Section title="Ingesters" dark={dark} count={ingesters.length}>
+      <Section title="Ingesters" dark={dark}>
         {ingesters.length === 0 ? (
           <EmptyMessage dark={dark}>No ingesters on this node.</EmptyMessage>
         ) : (
@@ -97,27 +92,31 @@ export function NodeDetailPane({ nodeId, dark }: Readonly<NodeDetailPaneProps>) 
         )}
       </Section>
 
-      {/* Jobs section */}
-      <Section title="Jobs" dark={dark} count={tasks.length + scheduled.length}>
-        {tasks.length === 0 && scheduled.length === 0 ? (
-          <EmptyMessage dark={dark}>No jobs on this node.</EmptyMessage>
+      {/* Scheduled jobs section */}
+      <Section title="Scheduled" dark={dark}>
+        {scheduled.length === 0 ? (
+          <EmptyMessage dark={dark}>No scheduled jobs on this node.</EmptyMessage>
         ) : (
-          <div className="flex flex-col gap-4">
-            <ScheduledJobsTable jobs={scheduled} dark={dark} showNodeBadge={false} />
-            {tasks.length > 0 && (
-              <div className="flex flex-col gap-2">
-                {tasks.map((job) => (
-                  <JobCard
-                    key={job.id}
-                    job={job}
-                    dark={dark}
-                    expanded={expandedJob === job.id}
-                    onToggle={() => setExpandedJob(expandedJob === job.id ? null : job.id)}
-                    showNodeBadge={false}
-                  />
-                ))}
-              </div>
-            )}
+          <ScheduledJobsTable jobs={scheduled} dark={dark} showNodeBadge={false} />
+        )}
+      </Section>
+
+      {/* Tasks section */}
+      <Section title="Tasks" dark={dark}>
+        {tasks.length === 0 ? (
+          <EmptyMessage dark={dark}>No tasks on this node.</EmptyMessage>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {tasks.map((job) => (
+              <JobCard
+                key={job.id}
+                job={job}
+                dark={dark}
+                expanded={expandedJob === job.id}
+                onToggle={() => setExpandedJob(expandedJob === job.id ? null : job.id)}
+                showNodeBadge={false}
+              />
+            ))}
           </div>
         )}
       </Section>

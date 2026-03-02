@@ -4,7 +4,7 @@ import { useSettings, useConfig } from "../../api/hooks/useConfig";
 import { useVaults, useIngesters } from "../../api/hooks";
 import { useWatchJobs } from "../../api/hooks";
 import { toastError } from "../Toast";
-import { ClusterNodeRole } from "../../api/gen/gastrolog/v1/lifecycle_pb";
+import { ClusterNodeRole, ClusterNodeSuffrage } from "../../api/gen/gastrolog/v1/lifecycle_pb";
 import { Dialog } from "../Dialog";
 import { VaultsIcon, IngestersIcon, JobsIcon, MetricsIcon, ClusterIcon } from "../icons";
 import { Badge } from "../Badge";
@@ -189,8 +189,11 @@ export function InspectorDialog({
                     {node.role === ClusterNodeRole.LEADER && (
                       <Badge variant="copper" dark={dark}>leader</Badge>
                     )}
+                    {node.suffrage === ClusterNodeSuffrage.NONVOTER && (
+                      <Badge variant="muted" dark={dark}>nonvoter</Badge>
+                    )}
                     {isLocal && (
-                      <Badge variant="muted" dark={dark}>local</Badge>
+                      <Badge variant="muted" dark={dark}>this node</Badge>
                     )}
                   </span>
                 </button>
