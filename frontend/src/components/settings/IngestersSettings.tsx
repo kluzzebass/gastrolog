@@ -23,6 +23,7 @@ const ingesterTypes = [
   { value: "fluentfwd", label: "fluentfwd" },
   { value: "http", label: "http" },
   { value: "kafka", label: "kafka" },
+  { value: "mqtt", label: "mqtt" },
   { value: "metrics", label: "metrics" },
   { value: "otlp", label: "otlp" },
   { value: "relp", label: "relp" },

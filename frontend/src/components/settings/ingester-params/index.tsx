@@ -5,6 +5,7 @@ import { DockerForm } from "./DockerForm";
 import { OtlpForm } from "./OtlpForm";
 import { FluentfwdForm } from "./FluentfwdForm";
 import { KafkaForm } from "./KafkaForm";
+import { MqttForm } from "./MqttForm";
 import { HttpForm } from "./HttpForm";
 import { RelpForm } from "./RelpForm";
 import { MetricsForm } from "./MetricsForm";
@@ -28,6 +29,7 @@ const FORM_MAP: Record<
   otlp: OtlpForm,
   fluentfwd: FluentfwdForm,
   kafka: KafkaForm,
+  mqtt: MqttForm,
   http: HttpForm,
   relp: RelpForm,
   metrics: MetricsForm,

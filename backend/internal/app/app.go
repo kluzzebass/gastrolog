@@ -36,6 +36,7 @@ import (
 	ingestfluentfwd "gastrolog/internal/ingester/fluentfwd"
 	ingesthttp "gastrolog/internal/ingester/http"
 	ingestkafka "gastrolog/internal/ingester/kafka"
+	ingestmqtt "gastrolog/internal/ingester/mqtt"
 	ingestmetrics "gastrolog/internal/ingester/metrics"
 	ingestotlp "gastrolog/internal/ingester/otlp"
 	ingestrelp "gastrolog/internal/ingester/relp"
@@ -667,6 +668,7 @@ func buildFactories(logger *slog.Logger, homeDir string, cfgStore config.Store, 
 			"fluentfwd":  ingestfluentfwd.NewFactory(),
 			"http":       ingesthttp.NewFactory(),
 			"kafka":      ingestkafka.NewFactory(),
+			"mqtt":       ingestmqtt.NewFactory(),
 			"metrics":    ingestmetrics.NewFactory(orch),
 			"otlp":       ingestotlp.NewFactory(),
 			"relp":       ingestrelp.NewFactory(),
@@ -679,6 +681,7 @@ func buildFactories(logger *slog.Logger, homeDir string, cfgStore config.Store, 
 			"fluentfwd":  ingestfluentfwd.ParamDefaults,
 			"http":       ingesthttp.ParamDefaults,
 			"kafka":      ingestkafka.ParamDefaults,
+			"mqtt":       ingestmqtt.ParamDefaults,
 			"metrics":    ingestmetrics.ParamDefaults,
 			"otlp":       ingestotlp.ParamDefaults,
 			"relp":       ingestrelp.ParamDefaults,

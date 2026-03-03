@@ -23,6 +23,7 @@ export const helpTopics: HelpTopic[] = [
       { id: 'ingester-otlp', title: 'OTLP', load: md(() => import('./ingester-otlp.md?raw')) },
       { id: 'ingester-fluentfwd', title: 'Fluent Forward', load: md(() => import('./ingester-fluentfwd.md?raw')) },
       { id: 'ingester-kafka', title: 'Kafka', load: md(() => import('./ingester-kafka.md?raw')) },
+      { id: 'ingester-mqtt', title: 'MQTT', load: md(() => import('./ingester-mqtt.md?raw')) },
       { id: 'ingester-tail', title: 'Tail', load: md(() => import('./ingester-tail.md?raw')) },
       { id: 'ingester-docker', title: 'Docker', load: md(() => import('./ingester-docker.md?raw')) },
       { id: 'ingester-metrics', title: 'Metrics', load: md(() => import('./ingester-metrics.md?raw')) },

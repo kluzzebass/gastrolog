@@ -14,6 +14,7 @@ You can run multiple ingesters simultaneously, each feeding into the same pipeli
 | [**OTLP**](help:ingester-otlp) | OpenTelemetry log records via HTTP and gRPC |
 | [**Fluent Forward**](help:ingester-fluentfwd) | Fluent Forward protocol (Fluentd / Fluent Bit) over TCP |
 | [**Kafka**](help:ingester-kafka) | Consumes messages from a Kafka topic |
+| [**MQTT**](help:ingester-mqtt) | Subscribes to MQTT topics on a broker |
 | [**Tail**](help:ingester-tail) | Follows local log files, like `tail -f` |
 | [**Docker**](help:ingester-docker) | Streams container logs from a Docker daemon |
 | [**Metrics**](help:ingester-metrics) | Emits process-level system metrics (CPU, memory, queue depth) |
