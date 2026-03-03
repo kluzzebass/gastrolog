@@ -15,6 +15,7 @@ import (
 	"gastrolog/internal/config/raftfsm"
 	"gastrolog/internal/config/raftstore"
 	"gastrolog/internal/home"
+	"gastrolog/internal/logging"
 
 	hraft "github.com/hashicorp/raft"
 	raftboltdb "github.com/hashicorp/raft-boltdb/v2"
@@ -111,7 +112,7 @@ func openRaftConfigStore(opts raftStoreOpts) (*raftConfigStore, error) {
 	}
 
 	fsm := raftfsm.New(opts.FSMOpts...)
-	conf := newRaftConfig(opts.NodeID)
+	conf := newRaftConfig(opts.NodeID, opts.Logger)
 
 	r, err := hraft.NewRaft(conf, fsm, boltStore, boltStore, snapStore, tp)
 	if err != nil {
@@ -146,10 +147,18 @@ func openRaftConfigStore(opts raftStoreOpts) (*raftConfigStore, error) {
 }
 
 // newRaftConfig creates a hashicorp/raft config with cluster-ready timeouts.
-func newRaftConfig(nodeID string) *hraft.Config {
+func newRaftConfig(nodeID string, logger *slog.Logger) *hraft.Config {
 	conf := hraft.DefaultConfig()
 	conf.LocalID = hraft.ServerID(nodeID)
-	conf.LogOutput = io.Discard
+
+	// Wire Raft's internal hclog logger to the application's slog pipeline.
+	// This makes election events, heartbeat timeouts, and state transitions
+	// visible through the normal logging system (component "raft").
+	raftLogger := logging.NewHclogAdapter(logger.With("component", "raft"))
+	// Suppress the noisy "entering follower state" log that fires on every
+	// heartbeat timeout cycle, even when the node remains a follower.
+	conf.Logger = logging.FilterHclogMessages(raftLogger, "entering follower state")
+	conf.LogOutput = nil
 
 	conf.SnapshotThreshold = 4
 	conf.SnapshotInterval = 30 * time.Second
@@ -210,9 +219,10 @@ func bootstrapAndWaitForLeader(r *hraft.Raft, boltStore io.Closer, transport hra
 }
 
 // observeLeaderChanges registers a Raft observer that logs leader elections.
+// Uses blocking mode to guarantee observations are never silently dropped.
 func observeLeaderChanges(r *hraft.Raft, logger *slog.Logger) {
 	ch := make(chan hraft.Observation, 16)
-	r.RegisterObserver(hraft.NewObserver(ch, false, func(o *hraft.Observation) bool {
+	r.RegisterObserver(hraft.NewObserver(ch, true, func(o *hraft.Observation) bool {
 		_, ok := o.Data.(hraft.LeaderObservation)
 		return ok
 	}))
