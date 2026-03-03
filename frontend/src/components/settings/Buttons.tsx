@@ -1,4 +1,6 @@
+import { useRef, useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { useClickOutside } from "../../hooks/useClickOutside";
 
 type ButtonVariant = "primary" | "ghost" | "danger";
 
@@ -54,6 +56,62 @@ export function Button({
     >
       {children}
     </button>
+  );
+}
+
+interface DropdownItem {
+  value: string;
+  label: string;
+}
+
+interface DropdownButtonProps {
+  label: string;
+  items: DropdownItem[];
+  onSelect: (value: string) => void;
+  dark?: boolean;
+}
+
+export function DropdownButton({
+  label,
+  items,
+  onSelect,
+  dark = true,
+}: Readonly<DropdownButtonProps>) {
+  const c = useThemeClass(dark);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useClickOutside(ref, () => setOpen(false));
+
+  return (
+    <div ref={ref} className="relative">
+      <Button onClick={() => setOpen((prev) => !prev)} dark={dark}>
+        {label}
+      </Button>
+      {open && (
+        <div
+          className={`absolute right-0 top-full mt-1 min-w-[10rem] rounded border shadow-lg z-50 py-1 ${c(
+            "bg-ink-surface border-ink-border",
+            "bg-light-surface border-light-border",
+          )}`}
+        >
+          {items.map((item) => (
+            <button
+              key={item.value}
+              onClick={() => {
+                setOpen(false);
+                onSelect(item.value);
+              }}
+              className={`w-full text-left px-3 py-1.5 text-[0.85em] transition-colors ${c(
+                "text-text-bright hover:bg-ink-hover",
+                "text-light-text-bright hover:bg-light-hover",
+              )}`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -1,6 +1,11 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
-import { Button } from "./Buttons";
+import { Button, DropdownButton } from "./Buttons";
+
+interface DropdownItem {
+  value: string;
+  label: string;
+}
 
 interface SettingsSectionProps {
   addLabel?: string;
@@ -10,8 +15,10 @@ interface SettingsSectionProps {
   isEmpty: boolean;
   emptyMessage: string;
   dark: boolean;
-  /** Replaces the default add/cancel button when provided. */
-  addSlot?: React.ReactNode;
+  /** Dropdown items for the Add button. When provided, clicking the button opens a menu instead of toggling directly. */
+  addOptions?: DropdownItem[];
+  /** Called when a dropdown option is selected. Only used when addOptions is provided. */
+  onAddSelect?: (value: string) => void;
   /** When true, content is visually disabled (greyed out, no interaction). */
   disabled?: boolean;
   children: React.ReactNode;
@@ -26,7 +33,8 @@ export function SettingsSection({
   emptyMessage,
   dark,
   children,
-  addSlot,
+  addOptions,
+  onAddSelect,
   disabled,
 }: Readonly<SettingsSectionProps>) {
   const c = useThemeClass(dark);
@@ -39,10 +47,17 @@ export function SettingsSection({
     <div>
       {addLabel && (
         <div className="flex items-center justify-end mb-5">
-          {addSlot || (
-            <Button onClick={onToggleAdd}>
-              {adding ? "Cancel" : addLabel}
-            </Button>
+          {adding ? (
+            <Button onClick={onToggleAdd}>Cancel</Button>
+          ) : addOptions && onAddSelect ? (
+            <DropdownButton
+              label={addLabel}
+              items={addOptions}
+              onSelect={onAddSelect}
+              dark={dark}
+            />
+          ) : (
+            <Button onClick={onToggleAdd}>{addLabel}</Button>
           )}
         </div>
       )}

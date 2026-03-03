@@ -9,7 +9,7 @@ import { Badge } from "../Badge";
 import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
-import { FormField, TextInput, SelectInput } from "./FormField";
+import { FormField, TextInput } from "./FormField";
 import { IngesterParamsForm } from "./ingester-params";
 import { Button } from "./Buttons";
 import { Checkbox } from "./Checkbox";
@@ -34,7 +34,6 @@ const ingesterTypes = [
 
 interface AddIngesterFormState {
   adding: boolean;
-  typeConfirmed: boolean;
   newName: string;
   newType: string;
   newParams: Record<string, string>;
@@ -43,7 +42,6 @@ interface AddIngesterFormState {
 
 const addIngesterFormInitial: AddIngesterFormState = {
   adding: false,
-  typeConfirmed: false,
   newName: "",
   newType: "chatterbox",
   newParams: {},
@@ -51,20 +49,16 @@ const addIngesterFormInitial: AddIngesterFormState = {
 };
 
 type AddIngesterFormAction =
-  | { type: "setAdding"; value: boolean }
-  | { type: "confirmType"; ingesterType: string }
+  | { type: "startAdd"; ingesterType: string }
   | { type: "setNewName"; value: string }
   | { type: "setNewParams"; value: Record<string, string> }
   | { type: "setNewNodeId"; value: string }
-  | { type: "resetForm" }
-  | { type: "toggleAdding" };
+  | { type: "resetForm" };
 
 function addIngesterFormReducer(state: AddIngesterFormState, action: AddIngesterFormAction): AddIngesterFormState {
   switch (action.type) {
-    case "setAdding":
-      return { ...state, adding: action.value };
-    case "confirmType":
-      return { ...state, newType: action.ingesterType, newParams: {}, typeConfirmed: true };
+    case "startAdd":
+      return { ...addIngesterFormInitial, adding: true, newType: action.ingesterType };
     case "setNewName":
       return { ...state, newName: action.value };
     case "setNewParams":
@@ -73,10 +67,6 @@ function addIngesterFormReducer(state: AddIngesterFormState, action: AddIngester
       return { ...state, newNodeId: action.value };
     case "resetForm":
       return addIngesterFormInitial;
-    case "toggleAdding":
-      return state.adding
-        ? addIngesterFormInitial
-        : { ...addIngesterFormInitial, adding: true };
     default:
       return state;
   }
@@ -93,7 +83,7 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
   const { isExpanded, toggle: toggleCard } = useExpandedCard();
 
   const [addForm, dispatchAdd] = useReducer(addIngesterFormReducer, addIngesterFormInitial);
-  const { adding, typeConfirmed, newName, newType, newParams, newNodeId } = addForm;
+  const { adding, newName, newType, newParams, newNodeId } = addForm;
   const [namePlaceholder, setNamePlaceholder] = useState("");
 
   const ingesters = config?.ingesters ?? [];
@@ -150,42 +140,20 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
       addLabel="Add Ingester"
       adding={adding}
       onToggleAdd={() => {
-        if (!adding) {
-          generateName.mutateAsync().then(setNamePlaceholder);
-        } else {
-          setNamePlaceholder("");
-        }
-        dispatchAdd({ type: "toggleAdding" });
+        setNamePlaceholder("");
+        dispatchAdd({ type: "resetForm" });
+      }}
+      addOptions={ingesterTypes}
+      onAddSelect={(type) => {
+        generateName.mutateAsync().then(setNamePlaceholder);
+        dispatchAdd({ type: "startAdd", ingesterType: type });
       }}
       isLoading={isLoading}
       isEmpty={ingesters.length === 0}
       emptyMessage='No ingesters configured. Click "Add Ingester" to create one.'
       dark={dark}
-      addSlot={
-        adding && !typeConfirmed ? (
-          <div className="flex items-center gap-1.5">
-            <SelectInput
-              value=""
-              onChange={(v) => {
-                if (v) dispatchAdd({ type: "confirmType", ingesterType: v });
-              }}
-              options={[
-                { value: "", label: "Select type\u2026" },
-                ...ingesterTypes,
-              ]}
-              dark={dark}
-            />
-            <Button variant="ghost"
-              onClick={() => dispatchAdd({ type: "resetForm" })}
-              dark={dark}
-            >
-              Cancel
-            </Button>
-          </div>
-        ) : undefined
-      }
     >
-      {adding && typeConfirmed && (
+      {adding && (
         <AddFormCard
           dark={dark}
           onCancel={() => dispatchAdd({ type: "resetForm" })}

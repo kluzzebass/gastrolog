@@ -41,7 +41,6 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
 
   const { isExpanded, toggle: toggleCard, setExpanded } = useExpandedCard();
   const [adding, setAdding] = useState(false);
-  const [typeConfirmed, setTypeConfirmed] = useState(false);
   const [migrateTarget, setMigrateTarget] = useState<
     Record<string, { name: string; type: string; dir: string }>
   >({});
@@ -165,7 +164,6 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
       });
       addToast(`Vault "${name}" created`, "info");
       setAdding(false);
-      setTypeConfirmed(false);
       setNewName("");
       setNewType("memory");
       setNewPolicy("");
@@ -182,14 +180,25 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
       addLabel="Add Vault"
       adding={adding}
       onToggleAdd={() => {
-        if (!adding) {
-          generateName.mutateAsync().then(setNamePlaceholder);
-        }
-        setAdding(!adding);
-        setTypeConfirmed(false);
+        setAdding(false);
         setNewName("");
         setNamePlaceholder("");
         setNewType("memory");
+        setNewPolicy("");
+        setNewRetentionRules([]);
+        setNewParams({});
+        setNewNodeId("");
+      }}
+      addOptions={[
+        { value: "memory", label: "memory" },
+        { value: "file", label: "file" },
+      ]}
+      onAddSelect={(type) => {
+        generateName.mutateAsync().then(setNamePlaceholder);
+        setAdding(true);
+        setNewType(type);
+        setNewName("");
+        setNamePlaceholder("");
         setNewPolicy("");
         setNewRetentionRules([]);
         setNewParams({});
@@ -199,41 +208,11 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
       isEmpty={vaults.length === 0}
       emptyMessage='No vaults configured. Click "Add Vault" to create one.'
       dark={dark}
-      addSlot={
-        adding && !typeConfirmed ? (
-          <div className="flex items-center gap-1.5">
-            <SelectInput
-              value=""
-              onChange={(v) => {
-                if (v) {
-                  setNewType(v);
-                  setTypeConfirmed(true);
-                }
-              }}
-              options={[
-                { value: "", label: "Select type\u2026" },
-                { value: "memory", label: "memory" },
-                { value: "file", label: "file" },
-              ]}
-              dark={dark}
-            />
-            <Button variant="ghost"
-              onClick={() => setAdding(false)}
-              dark={dark}
-            >
-              Cancel
-            </Button>
-          </div>
-        ) : undefined
-      }
     >
-      {adding && typeConfirmed && (
+      {adding && (
         <AddFormCard
           dark={dark}
-          onCancel={() => {
-            setAdding(false);
-            setTypeConfirmed(false);
-          }}
+          onCancel={() => setAdding(false)}
           onCreate={handleCreate}
           isPending={putVault.isPending}
           createDisabled={nameConflict}
