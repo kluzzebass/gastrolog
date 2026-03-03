@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { GetClusterStatusRequest, GetClusterStatusResponse, HealthRequest, HealthResponse, SetNodeSuffrageRequest, SetNodeSuffrageResponse, ShutdownRequest, ShutdownResponse } from "./lifecycle_pb.js";
+import { GetClusterStatusRequest, GetClusterStatusResponse, HealthRequest, HealthResponse, JoinClusterRequest, JoinClusterResponse, RemoveNodeRequest, RemoveNodeResponse, SetNodeSuffrageRequest, SetNodeSuffrageResponse, ShutdownRequest, ShutdownResponse } from "./lifecycle_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -56,6 +56,30 @@ export const LifecycleService = {
       name: "SetNodeSuffrage",
       I: SetNodeSuffrageRequest,
       O: SetNodeSuffrageResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * JoinCluster joins a running single-node server to an existing cluster at runtime.
+     * The node's Raft state is replaced by the remote cluster's state via replication.
+     *
+     * @generated from rpc gastrolog.v1.LifecycleService.JoinCluster
+     */
+    joinCluster: {
+      name: "JoinCluster",
+      I: JoinClusterRequest,
+      O: JoinClusterResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * RemoveNode evicts a node from the cluster. Must be called on the leader.
+     * The evicted node receives a best-effort shutdown notification.
+     *
+     * @generated from rpc gastrolog.v1.LifecycleService.RemoveNode
+     */
+    removeNode: {
+      name: "RemoveNode",
+      I: RemoveNodeRequest,
+      O: RemoveNodeResponse,
       kind: MethodKind.Unary,
     },
   }

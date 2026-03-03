@@ -1434,6 +1434,269 @@ func (x *ForwardValidateVaultResponse) GetChunks() []*ChunkValidation {
 	return nil
 }
 
+// NotifyEvictionRequest is sent by the leader to a node that has been removed
+// from the cluster. The evicted node should initiate a graceful shutdown.
+type NotifyEvictionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Reason        string                 `protobuf:"bytes,1,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NotifyEvictionRequest) Reset() {
+	*x = NotifyEvictionRequest{}
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NotifyEvictionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NotifyEvictionRequest) ProtoMessage() {}
+
+func (x *NotifyEvictionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NotifyEvictionRequest.ProtoReflect.Descriptor instead.
+func (*NotifyEvictionRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *NotifyEvictionRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type NotifyEvictionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NotifyEvictionResponse) Reset() {
+	*x = NotifyEvictionResponse{}
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NotifyEvictionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NotifyEvictionResponse) ProtoMessage() {}
+
+func (x *NotifyEvictionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NotifyEvictionResponse.ProtoReflect.Descriptor instead.
+func (*NotifyEvictionResponse) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{23}
+}
+
+// ForwardRemoveNodeRequest is sent by a follower to the leader to remove
+// a node from the cluster. The leader executes the Raft membership change
+// and sends the eviction notification.
+type ForwardRemoveNodeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ForwardRemoveNodeRequest) Reset() {
+	*x = ForwardRemoveNodeRequest{}
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ForwardRemoveNodeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ForwardRemoveNodeRequest) ProtoMessage() {}
+
+func (x *ForwardRemoveNodeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ForwardRemoveNodeRequest.ProtoReflect.Descriptor instead.
+func (*ForwardRemoveNodeRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *ForwardRemoveNodeRequest) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+type ForwardRemoveNodeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ForwardRemoveNodeResponse) Reset() {
+	*x = ForwardRemoveNodeResponse{}
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ForwardRemoveNodeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ForwardRemoveNodeResponse) ProtoMessage() {}
+
+func (x *ForwardRemoveNodeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ForwardRemoveNodeResponse.ProtoReflect.Descriptor instead.
+func (*ForwardRemoveNodeResponse) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{25}
+}
+
+// ForwardSetNodeSuffrageRequest is sent by a follower to the leader to
+// promote or demote a node's voting status.
+type ForwardSetNodeSuffrageRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	NodeAddr      string                 `protobuf:"bytes,2,opt,name=node_addr,json=nodeAddr,proto3" json:"node_addr,omitempty"`
+	Voter         bool                   `protobuf:"varint,3,opt,name=voter,proto3" json:"voter,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ForwardSetNodeSuffrageRequest) Reset() {
+	*x = ForwardSetNodeSuffrageRequest{}
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ForwardSetNodeSuffrageRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ForwardSetNodeSuffrageRequest) ProtoMessage() {}
+
+func (x *ForwardSetNodeSuffrageRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ForwardSetNodeSuffrageRequest.ProtoReflect.Descriptor instead.
+func (*ForwardSetNodeSuffrageRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *ForwardSetNodeSuffrageRequest) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *ForwardSetNodeSuffrageRequest) GetNodeAddr() string {
+	if x != nil {
+		return x.NodeAddr
+	}
+	return ""
+}
+
+func (x *ForwardSetNodeSuffrageRequest) GetVoter() bool {
+	if x != nil {
+		return x.Voter
+	}
+	return false
+}
+
+type ForwardSetNodeSuffrageResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ForwardSetNodeSuffrageResponse) Reset() {
+	*x = ForwardSetNodeSuffrageResponse{}
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ForwardSetNodeSuffrageResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ForwardSetNodeSuffrageResponse) ProtoMessage() {}
+
+func (x *ForwardSetNodeSuffrageResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ForwardSetNodeSuffrageResponse.ProtoReflect.Descriptor instead.
+func (*ForwardSetNodeSuffrageResponse) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{27}
+}
+
 var File_gastrolog_v1_cluster_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_cluster_proto_rawDesc = "" +
@@ -1540,7 +1803,18 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\bvault_id\x18\x01 \x01(\tR\avaultId\"k\n" +
 	"\x1cForwardValidateVaultResponse\x12\x14\n" +
 	"\x05valid\x18\x01 \x01(\bR\x05valid\x125\n" +
-	"\x06chunks\x18\x02 \x03(\v2\x1d.gastrolog.v1.ChunkValidationR\x06chunksB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"\x06chunks\x18\x02 \x03(\v2\x1d.gastrolog.v1.ChunkValidationR\x06chunks\"/\n" +
+	"\x15NotifyEvictionRequest\x12\x16\n" +
+	"\x06reason\x18\x01 \x01(\tR\x06reason\"\x18\n" +
+	"\x16NotifyEvictionResponse\"3\n" +
+	"\x18ForwardRemoveNodeRequest\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\"\x1b\n" +
+	"\x19ForwardRemoveNodeResponse\"k\n" +
+	"\x1dForwardSetNodeSuffrageRequest\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1b\n" +
+	"\tnode_addr\x18\x02 \x01(\tR\bnodeAddr\x12\x14\n" +
+	"\x05voter\x18\x03 \x01(\bR\x05voter\" \n" +
+	"\x1eForwardSetNodeSuffrageResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_cluster_proto_rawDescOnce sync.Once
@@ -1554,54 +1828,60 @@ func file_gastrolog_v1_cluster_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_cluster_proto_rawDescData
 }
 
-var file_gastrolog_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_gastrolog_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_gastrolog_v1_cluster_proto_goTypes = []any{
-	(*ForwardApplyRequest)(nil),          // 0: gastrolog.v1.ForwardApplyRequest
-	(*ForwardApplyResponse)(nil),         // 1: gastrolog.v1.ForwardApplyResponse
-	(*EnrollRequest)(nil),                // 2: gastrolog.v1.EnrollRequest
-	(*EnrollResponse)(nil),               // 3: gastrolog.v1.EnrollResponse
-	(*BroadcastRequest)(nil),             // 4: gastrolog.v1.BroadcastRequest
-	(*BroadcastResponse)(nil),            // 5: gastrolog.v1.BroadcastResponse
-	(*BroadcastMessage)(nil),             // 6: gastrolog.v1.BroadcastMessage
-	(*NodeJobs)(nil),                     // 7: gastrolog.v1.NodeJobs
-	(*NodeStats)(nil),                    // 8: gastrolog.v1.NodeStats
-	(*IngesterNodeStats)(nil),            // 9: gastrolog.v1.IngesterNodeStats
-	(*ForwardRecordsRequest)(nil),        // 10: gastrolog.v1.ForwardRecordsRequest
-	(*ForwardRecordsResponse)(nil),       // 11: gastrolog.v1.ForwardRecordsResponse
-	(*ForwardSearchRequest)(nil),         // 12: gastrolog.v1.ForwardSearchRequest
-	(*ForwardSearchResponse)(nil),        // 13: gastrolog.v1.ForwardSearchResponse
-	(*ForwardGetContextRequest)(nil),     // 14: gastrolog.v1.ForwardGetContextRequest
-	(*ForwardGetContextResponse)(nil),    // 15: gastrolog.v1.ForwardGetContextResponse
-	(*ForwardListChunksRequest)(nil),     // 16: gastrolog.v1.ForwardListChunksRequest
-	(*ForwardListChunksResponse)(nil),    // 17: gastrolog.v1.ForwardListChunksResponse
-	(*ForwardGetIndexesRequest)(nil),     // 18: gastrolog.v1.ForwardGetIndexesRequest
-	(*ForwardGetIndexesResponse)(nil),    // 19: gastrolog.v1.ForwardGetIndexesResponse
-	(*ForwardValidateVaultRequest)(nil),  // 20: gastrolog.v1.ForwardValidateVaultRequest
-	(*ForwardValidateVaultResponse)(nil), // 21: gastrolog.v1.ForwardValidateVaultResponse
-	(*timestamppb.Timestamp)(nil),        // 22: google.protobuf.Timestamp
-	(*Job)(nil),                          // 23: gastrolog.v1.Job
-	(*VaultStats)(nil),                   // 24: gastrolog.v1.VaultStats
-	(*ExportRecord)(nil),                 // 25: gastrolog.v1.ExportRecord
-	(*ChunkMeta)(nil),                    // 26: gastrolog.v1.ChunkMeta
-	(*IndexInfo)(nil),                    // 27: gastrolog.v1.IndexInfo
-	(*ChunkValidation)(nil),              // 28: gastrolog.v1.ChunkValidation
+	(*ForwardApplyRequest)(nil),            // 0: gastrolog.v1.ForwardApplyRequest
+	(*ForwardApplyResponse)(nil),           // 1: gastrolog.v1.ForwardApplyResponse
+	(*EnrollRequest)(nil),                  // 2: gastrolog.v1.EnrollRequest
+	(*EnrollResponse)(nil),                 // 3: gastrolog.v1.EnrollResponse
+	(*BroadcastRequest)(nil),               // 4: gastrolog.v1.BroadcastRequest
+	(*BroadcastResponse)(nil),              // 5: gastrolog.v1.BroadcastResponse
+	(*BroadcastMessage)(nil),               // 6: gastrolog.v1.BroadcastMessage
+	(*NodeJobs)(nil),                       // 7: gastrolog.v1.NodeJobs
+	(*NodeStats)(nil),                      // 8: gastrolog.v1.NodeStats
+	(*IngesterNodeStats)(nil),              // 9: gastrolog.v1.IngesterNodeStats
+	(*ForwardRecordsRequest)(nil),          // 10: gastrolog.v1.ForwardRecordsRequest
+	(*ForwardRecordsResponse)(nil),         // 11: gastrolog.v1.ForwardRecordsResponse
+	(*ForwardSearchRequest)(nil),           // 12: gastrolog.v1.ForwardSearchRequest
+	(*ForwardSearchResponse)(nil),          // 13: gastrolog.v1.ForwardSearchResponse
+	(*ForwardGetContextRequest)(nil),       // 14: gastrolog.v1.ForwardGetContextRequest
+	(*ForwardGetContextResponse)(nil),      // 15: gastrolog.v1.ForwardGetContextResponse
+	(*ForwardListChunksRequest)(nil),       // 16: gastrolog.v1.ForwardListChunksRequest
+	(*ForwardListChunksResponse)(nil),      // 17: gastrolog.v1.ForwardListChunksResponse
+	(*ForwardGetIndexesRequest)(nil),       // 18: gastrolog.v1.ForwardGetIndexesRequest
+	(*ForwardGetIndexesResponse)(nil),      // 19: gastrolog.v1.ForwardGetIndexesResponse
+	(*ForwardValidateVaultRequest)(nil),    // 20: gastrolog.v1.ForwardValidateVaultRequest
+	(*ForwardValidateVaultResponse)(nil),   // 21: gastrolog.v1.ForwardValidateVaultResponse
+	(*NotifyEvictionRequest)(nil),          // 22: gastrolog.v1.NotifyEvictionRequest
+	(*NotifyEvictionResponse)(nil),         // 23: gastrolog.v1.NotifyEvictionResponse
+	(*ForwardRemoveNodeRequest)(nil),       // 24: gastrolog.v1.ForwardRemoveNodeRequest
+	(*ForwardRemoveNodeResponse)(nil),      // 25: gastrolog.v1.ForwardRemoveNodeResponse
+	(*ForwardSetNodeSuffrageRequest)(nil),  // 26: gastrolog.v1.ForwardSetNodeSuffrageRequest
+	(*ForwardSetNodeSuffrageResponse)(nil), // 27: gastrolog.v1.ForwardSetNodeSuffrageResponse
+	(*timestamppb.Timestamp)(nil),          // 28: google.protobuf.Timestamp
+	(*Job)(nil),                            // 29: gastrolog.v1.Job
+	(*VaultStats)(nil),                     // 30: gastrolog.v1.VaultStats
+	(*ExportRecord)(nil),                   // 31: gastrolog.v1.ExportRecord
+	(*ChunkMeta)(nil),                      // 32: gastrolog.v1.ChunkMeta
+	(*IndexInfo)(nil),                      // 33: gastrolog.v1.IndexInfo
+	(*ChunkValidation)(nil),                // 34: gastrolog.v1.ChunkValidation
 }
 var file_gastrolog_v1_cluster_proto_depIdxs = []int32{
 	6,  // 0: gastrolog.v1.BroadcastRequest.message:type_name -> gastrolog.v1.BroadcastMessage
-	22, // 1: gastrolog.v1.BroadcastMessage.timestamp:type_name -> google.protobuf.Timestamp
+	28, // 1: gastrolog.v1.BroadcastMessage.timestamp:type_name -> google.protobuf.Timestamp
 	8,  // 2: gastrolog.v1.BroadcastMessage.node_stats:type_name -> gastrolog.v1.NodeStats
 	7,  // 3: gastrolog.v1.BroadcastMessage.node_jobs:type_name -> gastrolog.v1.NodeJobs
-	23, // 4: gastrolog.v1.NodeJobs.jobs:type_name -> gastrolog.v1.Job
-	24, // 5: gastrolog.v1.NodeStats.vaults:type_name -> gastrolog.v1.VaultStats
+	29, // 4: gastrolog.v1.NodeJobs.jobs:type_name -> gastrolog.v1.Job
+	30, // 5: gastrolog.v1.NodeStats.vaults:type_name -> gastrolog.v1.VaultStats
 	9,  // 6: gastrolog.v1.NodeStats.ingesters:type_name -> gastrolog.v1.IngesterNodeStats
-	25, // 7: gastrolog.v1.ForwardRecordsRequest.records:type_name -> gastrolog.v1.ExportRecord
-	25, // 8: gastrolog.v1.ForwardSearchResponse.records:type_name -> gastrolog.v1.ExportRecord
-	25, // 9: gastrolog.v1.ForwardGetContextResponse.before:type_name -> gastrolog.v1.ExportRecord
-	25, // 10: gastrolog.v1.ForwardGetContextResponse.anchor:type_name -> gastrolog.v1.ExportRecord
-	25, // 11: gastrolog.v1.ForwardGetContextResponse.after:type_name -> gastrolog.v1.ExportRecord
-	26, // 12: gastrolog.v1.ForwardListChunksResponse.chunks:type_name -> gastrolog.v1.ChunkMeta
-	27, // 13: gastrolog.v1.ForwardGetIndexesResponse.indexes:type_name -> gastrolog.v1.IndexInfo
-	28, // 14: gastrolog.v1.ForwardValidateVaultResponse.chunks:type_name -> gastrolog.v1.ChunkValidation
+	31, // 7: gastrolog.v1.ForwardRecordsRequest.records:type_name -> gastrolog.v1.ExportRecord
+	31, // 8: gastrolog.v1.ForwardSearchResponse.records:type_name -> gastrolog.v1.ExportRecord
+	31, // 9: gastrolog.v1.ForwardGetContextResponse.before:type_name -> gastrolog.v1.ExportRecord
+	31, // 10: gastrolog.v1.ForwardGetContextResponse.anchor:type_name -> gastrolog.v1.ExportRecord
+	31, // 11: gastrolog.v1.ForwardGetContextResponse.after:type_name -> gastrolog.v1.ExportRecord
+	32, // 12: gastrolog.v1.ForwardListChunksResponse.chunks:type_name -> gastrolog.v1.ChunkMeta
+	33, // 13: gastrolog.v1.ForwardGetIndexesResponse.indexes:type_name -> gastrolog.v1.IndexInfo
+	34, // 14: gastrolog.v1.ForwardValidateVaultResponse.chunks:type_name -> gastrolog.v1.ChunkValidation
 	15, // [15:15] is the sub-list for method output_type
 	15, // [15:15] is the sub-list for method input_type
 	15, // [15:15] is the sub-list for extension type_name
@@ -1626,7 +1906,7 @@ func file_gastrolog_v1_cluster_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_cluster_proto_rawDesc), len(file_gastrolog_v1_cluster_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   22,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -34,7 +34,7 @@ import {
 } from "../../api/hooks/useConfig";
 import { useToast } from "../Toast";
 import { FormField, TextInput, NumberInput } from "./FormField";
-import { PrimaryButton, GhostButton } from "./Buttons";
+import { Button } from "./Buttons";
 import { Checkbox } from "./Checkbox";
 import { HelpButton } from "../HelpButton";
 import { ExpandableCard } from "./ExpandableCard";
@@ -693,16 +693,16 @@ function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth?: bo
           </ExpandableCard>
 
           <div className="flex gap-2 mt-2">
-            <PrimaryButton
+            <Button
               onClick={handleSave}
               disabled={!dirty || putConfig.isPending}
             >
               {putConfig.isPending ? "Saving..." : "Save"}
-            </PrimaryButton>
+            </Button>
             {dirty && (
-              <GhostButton onClick={handleReset} dark={dark}>
+              <Button variant="ghost" onClick={handleReset} dark={dark}>
                 Reset
-              </GhostButton>
+              </Button>
             )}
           </div>
         </div>

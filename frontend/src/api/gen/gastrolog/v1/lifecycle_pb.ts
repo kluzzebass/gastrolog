@@ -628,3 +628,151 @@ export class SetNodeSuffrageResponse extends Message<SetNodeSuffrageResponse> {
   }
 }
 
+/**
+ * @generated from message gastrolog.v1.JoinClusterRequest
+ */
+export class JoinClusterRequest extends Message<JoinClusterRequest> {
+  /**
+   * cluster address of the leader to join (e.g., "10.0.0.1:4565")
+   *
+   * @generated from field: string leader_address = 1;
+   */
+  leaderAddress = "";
+
+  /**
+   * join token from the leader's cluster status
+   *
+   * @generated from field: string join_token = 2;
+   */
+  joinToken = "";
+
+  constructor(data?: PartialMessage<JoinClusterRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.JoinClusterRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "leader_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "join_token", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): JoinClusterRequest {
+    return new JoinClusterRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): JoinClusterRequest {
+    return new JoinClusterRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): JoinClusterRequest {
+    return new JoinClusterRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: JoinClusterRequest | PlainMessage<JoinClusterRequest> | undefined, b: JoinClusterRequest | PlainMessage<JoinClusterRequest> | undefined): boolean {
+    return proto3.util.equals(JoinClusterRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.JoinClusterResponse
+ */
+export class JoinClusterResponse extends Message<JoinClusterResponse> {
+  constructor(data?: PartialMessage<JoinClusterResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.JoinClusterResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): JoinClusterResponse {
+    return new JoinClusterResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): JoinClusterResponse {
+    return new JoinClusterResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): JoinClusterResponse {
+    return new JoinClusterResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: JoinClusterResponse | PlainMessage<JoinClusterResponse> | undefined, b: JoinClusterResponse | PlainMessage<JoinClusterResponse> | undefined): boolean {
+    return proto3.util.equals(JoinClusterResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.RemoveNodeRequest
+ */
+export class RemoveNodeRequest extends Message<RemoveNodeRequest> {
+  /**
+   * ID of the node to evict from the cluster
+   *
+   * @generated from field: string node_id = 1;
+   */
+  nodeId = "";
+
+  constructor(data?: PartialMessage<RemoveNodeRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RemoveNodeRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RemoveNodeRequest {
+    return new RemoveNodeRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RemoveNodeRequest {
+    return new RemoveNodeRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RemoveNodeRequest {
+    return new RemoveNodeRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RemoveNodeRequest | PlainMessage<RemoveNodeRequest> | undefined, b: RemoveNodeRequest | PlainMessage<RemoveNodeRequest> | undefined): boolean {
+    return proto3.util.equals(RemoveNodeRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.RemoveNodeResponse
+ */
+export class RemoveNodeResponse extends Message<RemoveNodeResponse> {
+  constructor(data?: PartialMessage<RemoveNodeResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RemoveNodeResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RemoveNodeResponse {
+    return new RemoveNodeResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RemoveNodeResponse {
+    return new RemoveNodeResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RemoveNodeResponse {
+    return new RemoveNodeResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RemoveNodeResponse | PlainMessage<RemoveNodeResponse> | undefined, b: RemoveNodeResponse | PlainMessage<RemoveNodeResponse> | undefined): boolean {
+    return proto3.util.equals(RemoveNodeResponse, a, b);
+  }
+}
+

@@ -9,7 +9,7 @@ import type { MmdbValidation } from "../../api/gen/gastrolog/v1/config_pb";
 import { useToast } from "../Toast";
 import { FormField, TextInput } from "./FormField";
 import { Checkbox } from "./Checkbox";
-import { PrimaryButton, GhostButton } from "./Buttons";
+import { Button } from "./Buttons";
 import { ExpandableCard } from "./ExpandableCard";
 
 // eslint-disable-next-line sonarjs/cognitive-complexity -- inherently complex settings form with multiple expandable cards and dirty tracking
@@ -283,16 +283,16 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
           </ExpandableCard>
 
           <div className="flex gap-2 mt-2">
-            <PrimaryButton
+            <Button
               onClick={handleSave}
               disabled={!dirty || putConfig.isPending}
             >
               {putConfig.isPending ? "Saving..." : "Save"}
-            </PrimaryButton>
+            </Button>
             {dirty && (
-              <GhostButton onClick={handleReset} dark={dark}>
+              <Button variant="ghost" onClick={handleReset} dark={dark}>
                 Reset
-              </GhostButton>
+              </Button>
             )}
           </div>
         </div>

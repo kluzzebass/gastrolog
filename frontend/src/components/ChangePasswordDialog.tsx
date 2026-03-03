@@ -33,7 +33,7 @@ export function ChangePasswordDialog({
   const c = useThemeClass(dark);
   const isPending = changePassword.isPending;
   const mismatch =
-    confirmPassword.length > 0 && newPassword !== confirmPassword;
+    newPassword.length > 0 && newPassword !== confirmPassword;
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -117,14 +117,8 @@ export function ChangePasswordDialog({
           dark={dark}
         />
 
-        {mismatch && (
-          <span className="text-[0.78em] -mt-3 text-severity-error">
-            Passwords do not match
-          </span>
-        )}
-
         {settings && (
-          <PasswordRules password={newPassword} config={settings} dark={dark} />
+          <PasswordRules password={newPassword} confirmPassword={confirmPassword} config={settings} dark={dark} />
         )}
 
         <div className="flex gap-3 mt-1">

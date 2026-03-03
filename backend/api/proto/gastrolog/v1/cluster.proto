@@ -176,3 +176,30 @@ message ForwardValidateVaultResponse {
   bool valid = 1;
   repeated ChunkValidation chunks = 2;
 }
+
+// NotifyEvictionRequest is sent by the leader to a node that has been removed
+// from the cluster. The evicted node should initiate a graceful shutdown.
+message NotifyEvictionRequest {
+  string reason = 1;
+}
+
+message NotifyEvictionResponse {}
+
+// ForwardRemoveNodeRequest is sent by a follower to the leader to remove
+// a node from the cluster. The leader executes the Raft membership change
+// and sends the eviction notification.
+message ForwardRemoveNodeRequest {
+  string node_id = 1;
+}
+
+message ForwardRemoveNodeResponse {}
+
+// ForwardSetNodeSuffrageRequest is sent by a follower to the leader to
+// promote or demote a node's voting status.
+message ForwardSetNodeSuffrageRequest {
+  string node_id = 1;
+  string node_addr = 2;
+  bool voter = 3;
+}
+
+message ForwardSetNodeSuffrageResponse {}

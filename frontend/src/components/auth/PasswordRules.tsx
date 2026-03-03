@@ -2,15 +2,16 @@ import type { GetSettingsResponse } from "../../api/gen/gastrolog/v1/config_pb";
 
 interface PasswordRulesProps {
   password: string;
+  confirmPassword?: string;
   config: GetSettingsResponse;
   dark: boolean;
 }
 
-export function PasswordRules({ password, config, dark }: Readonly<PasswordRulesProps>) {
+export function PasswordRules({ password, confirmPassword, config, dark }: Readonly<PasswordRulesProps>) {
   const pp = config.auth?.passwordPolicy;
   const minLength = pp?.minLength || 8;
 
-  const rules: { label: string; met: boolean }[] = [
+  const rules: { label: string; met: boolean; error?: boolean }[] = [
     { label: `At least ${minLength} characters`, met: password.length >= minLength },
   ];
 
@@ -57,6 +58,15 @@ export function PasswordRules({ password, config, dark }: Readonly<PasswordRules
     });
   }
 
+  if (confirmPassword != null) {
+    const matches = password === confirmPassword;
+    rules.push({
+      label: "Passwords match",
+      met: confirmPassword.length > 0 && matches,
+      error: password.length > 0 && !matches,
+    });
+  }
+
   const c = dark ? (d: string) => d : (_: string, l: string) => l;
 
   return (
@@ -67,7 +77,9 @@ export function PasswordRules({ password, config, dark }: Readonly<PasswordRules
           className={`flex items-center gap-1.5 text-[0.78em] ${
             rule.met
               ? "text-severity-info"
-              : c("text-text-ghost", "text-light-text-ghost")
+              : rule.error
+                ? "text-severity-error"
+                : c("text-text-ghost", "text-light-text-ghost")
           }`}
         >
           <span className="text-[0.9em]">{rule.met ? "\u2713" : "\u2022"}</span>

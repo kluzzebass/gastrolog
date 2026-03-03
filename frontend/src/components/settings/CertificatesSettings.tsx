@@ -25,7 +25,7 @@ function parseTar(data: Uint8Array): [string, Uint8Array][] {
 }
 
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { PrimaryButton, GhostButton } from "./Buttons";
+import { Button } from "./Buttons";
 import { Checkbox } from "./Checkbox";
 import {
   useCertificates,
@@ -217,13 +217,13 @@ function PemCertForm({
         {!hideActions && (
           <div className="flex justify-end gap-2 pt-2">
             {onCancel && (
-              <GhostButton onClick={onCancel} dark={dark}>
+              <Button variant="ghost" onClick={onCancel} dark={dark}>
                 Cancel
-              </GhostButton>
+              </Button>
             )}
-            <PrimaryButton onClick={onSave} disabled={saving}>
+            <Button onClick={onSave} disabled={saving}>
               {saving ? "Saving..." : "Save"}
-            </PrimaryButton>
+            </Button>
           </div>
         )}
       </div>
@@ -305,13 +305,13 @@ function FilesCertForm({
         {!hideActions && (
           <div className="flex justify-end gap-2 pt-2">
             {onCancel && (
-              <GhostButton onClick={onCancel} dark={dark}>
+              <Button variant="ghost" onClick={onCancel} dark={dark}>
                 Cancel
-              </GhostButton>
+              </Button>
             )}
-            <PrimaryButton onClick={onSave} disabled={saving}>
+            <Button onClick={onSave} disabled={saving}>
               {saving ? "Saving..." : "Save"}
-            </PrimaryButton>
+            </Button>
           </div>
         )}
       </div>
@@ -560,12 +560,12 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
       {!adding && !expanded && (
         <div className="flex items-center justify-end mb-5">
           <div className="flex gap-2">
-            <PrimaryButton onClick={startAddPem}>
+            <Button onClick={startAddPem}>
               Add pasted certificate
-            </PrimaryButton>
-            <PrimaryButton onClick={startAddFiles}>
+            </Button>
+            <Button onClick={startAddFiles}>
               Add monitored files
-            </PrimaryButton>
+            </Button>
           </div>
         </div>
       )}
@@ -653,7 +653,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
               deleteLabel="Delete"
               footer={
                 expanded === cert.id ? (
-                  <PrimaryButton
+                  <Button
                     onClick={() =>
                       isExpandedFileBased
                         ? handleSaveEditFiles(cert.id)
@@ -662,7 +662,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
                     disabled={putCert.isPending}
                   >
                     {putCert.isPending ? "Saving..." : "Save"}
-                  </PrimaryButton>
+                  </Button>
                 ) : undefined
               }
             >

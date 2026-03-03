@@ -1,5 +1,5 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { PrimaryButton, GhostButton } from "./Buttons";
+import { Button } from "./Buttons";
 
 interface AddFormCardProps {
   dark: boolean;
@@ -40,12 +40,12 @@ export function AddFormCard({
         )}
         {children}
         <div className="flex justify-end gap-2 pt-2">
-          <GhostButton onClick={onCancel} dark={dark} bordered>
+          <Button variant="ghost" onClick={onCancel} dark={dark} bordered>
             Cancel
-          </GhostButton>
-          <PrimaryButton onClick={onCreate} disabled={isPending || createDisabled}>
+          </Button>
+          <Button onClick={onCreate} disabled={isPending || createDisabled}>
             {isPending ? "Creating..." : "Create"}
-          </PrimaryButton>
+          </Button>
         </div>
       </div>
     </div>

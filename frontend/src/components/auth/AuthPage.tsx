@@ -107,7 +107,7 @@ export function AuthPage({ mode }: Readonly<AuthPageProps>) {
   const isRegister = mode === "register";
   const isPending = login.isPending || register.isPending;
   const mismatch =
-    isRegister && confirmPassword.length > 0 && password !== confirmPassword;
+    isRegister && password.length > 0 && password !== confirmPassword;
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -219,13 +219,8 @@ export function AuthPage({ mode }: Readonly<AuthPageProps>) {
                 disabled={isPending}
                 dark={dark}
               />
-              {mismatch && (
-                <span className="text-[0.78em] -mt-3 text-severity-error">
-                  Passwords do not match
-                </span>
-              )}
               {settings && (
-                <PasswordRules password={password} config={settings} dark={dark} />
+                <PasswordRules password={password} confirmPassword={confirmPassword} config={settings} dark={dark} />
               )}
             </>
           )}

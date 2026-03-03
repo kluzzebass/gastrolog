@@ -1,17 +1,17 @@
 import { describe, expect, test, mock } from "bun:test";
 import React from "react";
 import { render, fireEvent } from "@testing-library/react";
-import { PrimaryButton, GhostButton } from "./Buttons";
+import { Button } from "./Buttons";
 
 describe("PrimaryButton", () => {
   test("renders children", () => {
-    const { getByText } = render(<PrimaryButton onClick={() => {}}>Save</PrimaryButton>);
+    const { getByText } = render(<Button onClick={() => {}}>Save</Button>);
     expect(getByText("Save")).toBeTruthy();
   });
 
   test("calls onClick when clicked", () => {
     const onClick = mock(() => {});
-    const { getByText } = render(<PrimaryButton onClick={onClick}>Save</PrimaryButton>);
+    const { getByText } = render(<Button onClick={onClick}>Save</Button>);
     fireEvent.click(getByText("Save"));
     expect(onClick).toHaveBeenCalledTimes(1);
   });
@@ -19,7 +19,7 @@ describe("PrimaryButton", () => {
   test("respects disabled prop", () => {
     const onClick = mock(() => {});
     const { getByText } = render(
-      <PrimaryButton onClick={onClick} disabled>Save</PrimaryButton>,
+      <Button onClick={onClick} disabled>Save</Button>,
     );
     const btn = getByText("Save");
     expect(btn.getAttribute("disabled")).toBe("");
@@ -28,7 +28,7 @@ describe("PrimaryButton", () => {
   });
 
   test("has copper background styling", () => {
-    const { getByText } = render(<PrimaryButton onClick={() => {}}>Save</PrimaryButton>);
+    const { getByText } = render(<Button onClick={() => {}}>Save</Button>);
     expect(getByText("Save").className).toContain("bg-copper");
   });
 });
@@ -36,7 +36,7 @@ describe("PrimaryButton", () => {
 describe("GhostButton", () => {
   test("renders children", () => {
     const { getByText } = render(
-      <GhostButton onClick={() => {}} dark={true}>Cancel</GhostButton>,
+      <Button variant="ghost" onClick={() => {}} dark={true}>Cancel</Button>,
     );
     expect(getByText("Cancel")).toBeTruthy();
   });
@@ -44,7 +44,7 @@ describe("GhostButton", () => {
   test("calls onClick when clicked", () => {
     const onClick = mock(() => {});
     const { getByText } = render(
-      <GhostButton onClick={onClick} dark={true}>Cancel</GhostButton>,
+      <Button variant="ghost" onClick={onClick} dark={true}>Cancel</Button>,
     );
     fireEvent.click(getByText("Cancel"));
     expect(onClick).toHaveBeenCalledTimes(1);
@@ -52,14 +52,14 @@ describe("GhostButton", () => {
 
   test("bordered adds border class", () => {
     const { getByText } = render(
-      <GhostButton onClick={() => {}} dark={true} bordered>Cancel</GhostButton>,
+      <Button variant="ghost" onClick={() => {}} dark={true} bordered>Cancel</Button>,
     );
     expect(getByText("Cancel").className).toContain("border");
   });
 
   test("applies extra className", () => {
     const { getByText } = render(
-      <GhostButton onClick={() => {}} dark={true} className="ml-2">Cancel</GhostButton>,
+      <Button variant="ghost" onClick={() => {}} dark={true} className="ml-2">Cancel</Button>,
     );
     expect(getByText("Cancel").className).toContain("ml-2");
   });

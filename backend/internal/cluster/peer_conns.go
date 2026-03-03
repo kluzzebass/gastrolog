@@ -100,6 +100,20 @@ func (p *PeerConns) Peers() ([]hraft.Server, error) {
 	return peers, nil
 }
 
+// Reset swaps the raft pointer and closes all cached connections,
+// forcing fresh dials on the next Conn call. Components holding a *PeerConns
+// reference (Broadcaster, RecordForwarder, SearchForwarder) automatically
+// use the new Raft instance without recreation.
+func (p *PeerConns) Reset(r *hraft.Raft) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.raft = r
+	for id, conn := range p.conns {
+		_ = conn.Close()
+		delete(p.conns, id)
+	}
+}
+
 // Close tears down all cached connections.
 func (p *PeerConns) Close() error {
 	p.mu.Lock()
