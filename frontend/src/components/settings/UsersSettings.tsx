@@ -1,4 +1,5 @@
 import { useState, useReducer } from "react";
+import { useExpandedCard } from "../../hooks/useExpandedCards";
 import {
   useListUsers,
   useCreateUser,
@@ -8,8 +9,9 @@ import {
   useDeleteUser,
   useCurrentUser,
 } from "../../api/hooks/useAuth";
-import { useSettings } from "../../api/hooks/useConfig";
+import { useSettings } from "../../api/hooks/useSettings";
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { useToast } from "../Toast";
 import { useEditState } from "../../hooks/useEditState";
 import { PasswordRules } from "../auth/PasswordRules";
@@ -89,7 +91,7 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
   const { data: settings } = useSettings();
   const { addToast } = useToast();
 
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const { isExpanded, toggle: toggleCard } = useExpandedCard();
 
   const [addForm, dispatchAdd] = useReducer(addUserFormReducer, addUserFormInitial);
   const { adding, newUsername, newPassword, newRole, showNewPw } = addForm;
@@ -121,8 +123,8 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
       }
       clearEdit(id);
       addToast(`User "${edit.username || user.username}" updated`, "info");
-    } catch (err: any) {
-      addToast(err.message ?? "Failed to update user", "error");
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : "Failed to update user", "error");
     }
   };
 
@@ -130,8 +132,8 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
     try {
       await deleteUser.mutateAsync(user.id);
       addToast(`User "${user.username}" deleted`, "info");
-    } catch (err: any) {
-      addToast(err.message ?? "Failed to delete user", "error");
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : "Failed to delete user", "error");
     }
   };
 
@@ -152,8 +154,8 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
       });
       addToast(`User "${newUsername.trim()}" created`, "info");
       dispatchAdd({ type: "resetForm" });
-    } catch (err: any) {
-      addToast(err.message ?? "Failed to create user", "error");
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : "Failed to create user", "error");
     }
   };
 
@@ -210,13 +212,7 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
         </AddFormCard>
       )}
 
-      {isLoading && (
-        <div
-          className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-        >
-          Loading...
-        </div>
-      )}
+      {isLoading && <LoadingPlaceholder dark={dark} />}
 
       {users?.toSorted((a, b) => a.username.localeCompare(b.username)).map((user) => {
         const isSelf = currentUser?.username === user.username;
@@ -227,10 +223,8 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
             id={user.username}
             typeBadge={user.role}
             dark={dark}
-            expanded={expanded === user.id}
-            onToggle={() =>
-              setExpanded(expanded === user.id ? null : user.id)
-            }
+            expanded={isExpanded(user.id)}
+            onToggle={() => toggleCard(user.id)}
             onDelete={isSelf ? undefined : () => handleDeleteUser(user)}
             footer={
               <Button

@@ -1,5 +1,5 @@
 import { FormField, TextInput } from "../settings/FormField";
-import { IngesterParamsForm } from "../settings/IngesterParamsForm";
+import { IngesterParamsForm } from "../settings/ingester-params";
 import { useThemeClass } from "../../hooks/useThemeClass";
 
 export interface IngesterData {

@@ -1,5 +1,6 @@
 import { useState, useReducer } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { useExpandedCard } from "../../hooks/useExpandedCards";
 import {
   useConfig,
   usePutRetentionPolicy,
@@ -16,6 +17,7 @@ import { FormField, TextInput, NumberInput } from "./FormField";
 import { Button } from "./Buttons";
 import { UsedByStatus, ruleRefsFor } from "./UsedByStatus";
 import type { SettingsTab } from "./SettingsDialog";
+import { sortByName } from "../../lib/sort";
 
 type NavigateTo = (tab: SettingsTab, entityName?: string) => void;
 import {
@@ -85,7 +87,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
   const generateName = useGenerateName();
   const { addToast } = useToast();
 
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const { isExpanded, toggle: toggleCard } = useExpandedCard();
 
   const [addForm, dispatchAdd] = useReducer(addRetentionFormReducer, addRetentionFormInitial);
   const { adding, newName, newMaxAge, newMaxBytes, newMaxChunks } = addForm;
@@ -155,9 +157,8 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
       });
       addToast(`Retention policy "${name}" created`, "info");
       dispatchAdd({ type: "resetForm" });
-    } catch (err: any) {
-      const errorMessage = err.message ?? "Failed to create retention policy";
-      addToast(errorMessage, "error");
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : "Failed to create retention policy", "error");
     }
   };
 
@@ -234,7 +235,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
         </AddFormCard>
       )}
 
-      {policies.toSorted((a, b) => a.name.localeCompare(b.name)).map((pol) => {
+      {sortByName(policies).map((pol) => {
         const id = pol.id;
         const edit = getEdit(id);
         const refs = ruleRefsFor(vaults, id);
@@ -243,8 +244,8 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
             key={id}
             id={pol.name || id}
             dark={dark}
-            expanded={expanded === id}
-            onToggle={() => setExpanded(expanded === id ? null : id)}
+            expanded={isExpanded(id)}
+            onToggle={() => toggleCard(id)}
             onDelete={() => handleDelete(id)}
             footer={
               <Button

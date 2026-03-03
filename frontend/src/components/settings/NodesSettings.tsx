@@ -1,11 +1,14 @@
 import { useState } from "react";
-import { useConfig, useSettings, usePutNodeConfig } from "../../api/hooks/useConfig";
+import { useExpandedCards } from "../../hooks/useExpandedCards";
+import { useConfig, usePutNodeConfig } from "../../api/hooks/useConfig";
+import { useSettings } from "../../api/hooks/useSettings";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useSetNodeSuffrage } from "../../api/hooks/useSetNodeSuffrage";
 import { useJoinCluster } from "../../api/hooks/useJoinCluster";
 import { useRemoveNode } from "../../api/hooks/useRemoveNode";
 import { ClusterNodeRole, ClusterNodeSuffrage } from "../../api/gen/gastrolog/v1/lifecycle_pb";
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { useEditState } from "../../hooks/useEditState";
 import { useToast } from "../Toast";
 import { Badge } from "../Badge";
@@ -14,6 +17,7 @@ import { EyeIcon, EyeOffIcon } from "../icons";
 import { SettingsCard } from "./SettingsCard";
 import { FormField, TextInput } from "./FormField";
 import { Button } from "./Buttons";
+import { sortByName } from "../../lib/sort";
 
 function roleName(role: ClusterNodeRole): string {
   switch (role) {
@@ -76,10 +80,8 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
   });
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
 
-  const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
+  const { expandedCards, toggle, isExpanded } = useExpandedCards();
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
-  const toggle = (key: string) =>
-    setExpandedCards((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const handleSave = async (nodeId: string) => {
     const edit = getEdit(nodeId);
@@ -91,25 +93,21 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
       await putNodeConfig.mutateAsync({ id: nodeId, name: edit.name.trim() });
       clearEdit(nodeId);
       addToast("Node name updated", "info");
-    } catch (err: any) {
-      addToast(err.message ?? "Failed to update node name", "error");
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : "Failed to update node name", "error");
     }
   };
 
   const isLoading = configLoading || settingsLoading;
 
   if (isLoading) {
-    return (
-      <div className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
-        Loading...
-      </div>
-    );
+    return <LoadingPlaceholder dark={dark} />;
   }
 
   return (
     <div>
       <div className="flex flex-col gap-3">
-        {nodes.toSorted((a, b) => a.name.localeCompare(b.name)).map((node) => {
+        {sortByName(nodes).map((node) => {
           const isLocal = node.id === localNodeId;
           const displayName = getEdit(node.id).name || node.name || "Unnamed Node";
           const dirty = isDirty(node.id);
@@ -119,7 +117,7 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
               key={node.id}
               id={displayName}
               dark={dark}
-              expanded={expandedCards[node.id] ?? isLocal}
+              expanded={node.id in expandedCards ? isExpanded(node.id) : isLocal}
               onToggle={() => toggle(node.id)}
               headerRight={
                 <div className="flex items-center gap-1.5">
@@ -172,8 +170,8 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
                         try {
                           await setNodeSuffrage.mutateAsync({ nodeId: node.id, voter: false });
                           addToast("Demoted to nonvoter", "info");
-                        } catch (err: any) {
-                          addToast(err.message ?? "Failed to demote", "error");
+                        } catch (err: unknown) {
+                          addToast(err instanceof Error ? err.message : "Failed to demote", "error");
                         }
                       }}
                       dark={dark}
@@ -189,8 +187,8 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
                         try {
                           await setNodeSuffrage.mutateAsync({ nodeId: node.id, voter: true });
                           addToast("Promoted to voter", "info");
-                        } catch (err: any) {
-                          addToast(err.message ?? "Failed to promote", "error");
+                        } catch (err: unknown) {
+                          addToast(err instanceof Error ? err.message : "Failed to promote", "error");
                         }
                       }}
                       dark={dark}
@@ -210,8 +208,8 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
                             await removeNode.mutateAsync({ nodeId: node.id });
                             addToast("Node removed from cluster", "info");
                             setConfirmRemoveId(null);
-                          } catch (err: any) {
-                            addToast(err.message ?? "Failed to remove node", "error");
+                          } catch (err: unknown) {
+                            addToast(err instanceof Error ? err.message : "Failed to remove node", "error");
                           }
                         }}
                         disabled={removeNode.isPending}
@@ -273,8 +271,8 @@ function JoinClusterCard({ dark }: Readonly<{ dark: boolean }>) {
       setLeaderAddress("");
       setJoinToken("");
       setConfirmed(false);
-    } catch (err: any) {
-      addToast(err.message ?? "Failed to join cluster", "error");
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : "Failed to join cluster", "error");
     }
   };
 

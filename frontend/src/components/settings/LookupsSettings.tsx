@@ -1,10 +1,8 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import {
-  useSettings,
-  usePutSettings,
-  MAXMIND_KEEP,
-} from "../../api/hooks/useConfig";
+import { useExpandedCards } from "../../hooks/useExpandedCards";
+import { LoadingPlaceholder } from "../LoadingPlaceholder";
+import { useSettings, usePutSettings, MAXMIND_KEEP } from "../../api/hooks/useSettings";
 import type { MmdbValidation } from "../../api/gen/gastrolog/v1/config_pb";
 import { useToast } from "../Toast";
 import { FormField, TextInput } from "./FormField";
@@ -29,14 +27,11 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   const [geoipValidation, setGeoipValidation] = useState<MmdbValidation | undefined>();
   const [asnValidation, setAsnValidation] = useState<MmdbValidation | undefined>();
 
-  const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({
+  const { toggle, isExpanded } = useExpandedCards({
     maxmind: true,
     geoip: false,
     asn: false,
   });
-
-  const toggle = (key: string) =>
-    setExpandedCards((prev) => ({ ...prev, [key]: !prev[key] }));
 
   if (data && !initialized) {
     setGeoipDbPath(data.lookup?.geoipDbPath ?? "");
@@ -74,9 +69,8 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
       setGeoipValidation(resp.geoipValidation);
       setAsnValidation(resp.asnValidation);
       addToast("Lookup configuration updated", "info");
-    } catch (err: any) {
-      const msg = err.message ?? "Failed to update lookup configuration";
-      addToast(msg, "error");
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : "Failed to update lookup configuration", "error");
     }
   };
 
@@ -107,17 +101,13 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   return (
     <div>
       {isLoading ? (
-        <div
-          className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-        >
-          Loading...
-        </div>
+        <LoadingPlaceholder dark={dark} />
       ) : (
         <div className="flex flex-col gap-3">
           <ExpandableCard
             id="MaxMind Auto-Download"
             dark={dark}
-            expanded={!!expandedCards.maxmind}
+            expanded={isExpanded("maxmind")}
             onToggle={() => toggle("maxmind")}
             monoTitle={false}
             typeBadge={autoDownload ? "enabled" : undefined}
@@ -197,7 +187,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
           <ExpandableCard
             id="GeoIP"
             dark={dark}
-            expanded={!!expandedCards.geoip}
+            expanded={isExpanded("geoip")}
             onToggle={() => toggle("geoip")}
             monoTitle={false}
             typeBadge={geoipBadge}
@@ -241,7 +231,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
           <ExpandableCard
             id="ASN"
             dark={dark}
-            expanded={!!expandedCards.asn}
+            expanded={isExpanded("asn")}
             onToggle={() => toggle("asn")}
             monoTitle={false}
             typeBadge={asnBadge}

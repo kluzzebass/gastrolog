@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { useExpandedCard } from "../../hooks/useExpandedCards";
 import { useConfig, usePutFilter, useDeleteFilter, useGenerateName } from "../../api/hooks";
 import { useToast } from "../Toast";
 import { useEditState } from "../../hooks/useEditState";
@@ -11,6 +12,7 @@ import { FormField, TextInput } from "./FormField";
 import { Button } from "./Buttons";
 import { UsedByStatus, routeRefsForFilter } from "./UsedByStatus";
 import type { SettingsTab } from "./SettingsDialog";
+import { sortByName } from "../../lib/sort";
 
 type NavigateTo = (tab: SettingsTab, entityName?: string) => void;
 
@@ -58,7 +60,7 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
 
   const generateName = useGenerateName();
 
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const { isExpanded, toggle } = useExpandedCard();
   const [adding, setAdding] = useState(false);
 
   const [newName, setNewName] = useState("");
@@ -111,8 +113,8 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
       setAdding(false);
       setNewName("");
       setNewExpression("");
-    } catch (err: any) {
-      addToast(err.message ?? "Failed to create filter", "error");
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : "Failed to create filter", "error");
     }
   };
 
@@ -168,7 +170,7 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
         </AddFormCard>
       )}
 
-      {filters.toSorted((a, b) => a.name.localeCompare(b.name)).map((fc) => {
+      {sortByName(filters).map((fc) => {
         const id = fc.id;
         const edit = getEdit(id);
         const refs = routeRefsForFilter(routes, id);
@@ -177,8 +179,8 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
             key={id}
             id={fc.name || id}
             dark={dark}
-            expanded={expanded === id}
-            onToggle={() => setExpanded(expanded === id ? null : id)}
+            expanded={isExpanded(id)}
+            onToggle={() => toggle(id)}
             onDelete={() => handleDelete(id)}
             footer={
               <Button

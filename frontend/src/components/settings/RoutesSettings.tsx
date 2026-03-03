@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { useExpandedCard } from "../../hooks/useExpandedCards";
 import { useConfig, usePutRoute, useDeleteRoute, useGenerateName } from "../../api/hooks";
 import { useToast } from "../Toast";
 import { useEditState } from "../../hooks/useEditState";
@@ -11,6 +12,7 @@ import { FormField, TextInput, SelectInput } from "./FormField";
 import { Button } from "./Buttons";
 import { Checkbox } from "./Checkbox";
 import type { SettingsTab } from "./SettingsDialog";
+import { sortByName } from "../../lib/sort";
 
 type NavigateTo = (tab: SettingsTab, entityName?: string) => void;
 
@@ -26,7 +28,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
   const { addToast } = useToast();
   const generateName = useGenerateName();
 
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const { isExpanded, toggle: toggleCard } = useExpandedCard();
   const [adding, setAdding] = useState(false);
 
   const [newName, setNewName] = useState("");
@@ -119,8 +121,8 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
       setNewDestinations([]);
       setNewDistribution("fanout");
       setNewEnabled(true);
-    } catch (err: any) {
-      addToast(err.message ?? "Failed to create route", "error");
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : "Failed to create route", "error");
     }
   };
 
@@ -197,7 +199,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
         </AddFormCard>
       )}
 
-      {routes.toSorted((a, b) => a.name.localeCompare(b.name)).map((route) => {
+      {sortByName(routes).map((route) => {
         const id = route.id;
         const edit = getEdit(id);
         const filterName = filters.find((f) => f.id === route.filterId)?.name;
@@ -209,8 +211,8 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
             key={id}
             id={route.name || id}
             dark={dark}
-            expanded={expanded === id}
-            onToggle={() => setExpanded(expanded === id ? null : id)}
+            expanded={isExpanded(id)}
+            onToggle={() => toggleCard(id)}
             onDelete={() => handleDelete(id)}
             typeBadge={route.distribution || "fanout"}
             status={

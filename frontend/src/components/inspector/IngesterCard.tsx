@@ -1,4 +1,5 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { useIngesterStatus } from "../../api/hooks";
 import { formatBytes } from "../../utils/units";
 import { Badge } from "../Badge";
@@ -49,13 +50,7 @@ function IngesterDetail({ id, dark }: Readonly<{ id: string; dark: boolean }>) {
   const { data, isLoading } = useIngesterStatus(id);
 
   if (isLoading) {
-    return (
-      <div
-        className={`px-4 py-3 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-      >
-        Loading...
-      </div>
-    );
+    return <LoadingPlaceholder dark={dark} className="px-4 py-3" />;
   }
 
   if (!data) {

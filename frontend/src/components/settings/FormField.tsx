@@ -192,6 +192,41 @@ export function NumberInput({
   );
 }
 
+interface TextAreaProps {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  dark: boolean;
+  disabled?: boolean;
+  rows?: number;
+  className?: string;
+}
+
+export function TextArea({
+  value,
+  onChange,
+  placeholder,
+  dark,
+  disabled,
+  rows = 4,
+  className,
+}: Readonly<TextAreaProps>) {
+  const c = useThemeClass(dark);
+  return (
+    <textarea
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      disabled={disabled}
+      rows={rows}
+      className={`px-2.5 py-1.5 text-[0.85em] font-mono border rounded focus:outline-none transition-colors resize-y ${c(
+        "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
+        "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
+      )} ${disabled ? "opacity-50 cursor-not-allowed" : ""} ${className ?? ""}`}
+    />
+  );
+}
+
 interface ParamsEditorProps {
   params: Record<string, string>;
   onChange: (params: Record<string, string>) => void;

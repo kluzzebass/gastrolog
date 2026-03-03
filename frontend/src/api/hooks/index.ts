@@ -20,19 +20,13 @@ export { useFollow } from "./useFollow";
 export { useExplain } from "./useExplain";
 export { useLiveHistogram } from "./useLiveHistogram";
 export { useRecordContext } from "./useContext";
-export {
-  useConfig,
-  useSettings,
-  usePutFilter,
-  useDeleteFilter,
-  usePutRotationPolicy,
-  useDeleteRotationPolicy,
-  usePutRetentionPolicy,
-  useDeleteRetentionPolicy,
-  usePutRoute,
-  useDeleteRoute,
-  useGenerateName,
-} from "./useConfig";
+export { useConfig, useGenerateName } from "./useConfig";
+export { usePutFilter, useDeleteFilter } from "./useFilters";
+export { usePutRotationPolicy, useDeleteRotationPolicy } from "./useRotationPolicies";
+export { usePutRetentionPolicy, useDeleteRetentionPolicy } from "./useRetentionPolicies";
+export { usePutRoute, useDeleteRoute } from "./useRoutes";
+export { useSettings } from "./useSettings";
+export { useCertificates } from "./useCertificates";
 export {
   useAuthStatus,
   useLogin,

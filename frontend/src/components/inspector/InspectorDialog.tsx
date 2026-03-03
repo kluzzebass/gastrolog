@@ -1,6 +1,7 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
-import { useSettings, useConfig } from "../../api/hooks/useConfig";
+import { useConfig } from "../../api/hooks/useConfig";
+import { useSettings } from "../../api/hooks/useSettings";
 import { useVaults, useIngesters } from "../../api/hooks";
 import { useWatchJobs } from "../../api/hooks";
 import { toastError } from "../Toast";
