@@ -687,8 +687,5 @@ func (s *transformStep) applyLookup(ctx context.Context, rec *chunk.Record) {
 	}
 }
 
-// HeadN returns the head limit, or 0 if there is none.
-func (rt *RecordTransform) HeadN() int { return rt.headN }
-
 // Done reports whether the head limit has been reached.
 func (rt *RecordTransform) Done() bool { return rt.headN > 0 && rt.emitted >= rt.headN }

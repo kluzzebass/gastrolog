@@ -117,34 +117,3 @@ func extractVaultPredicates(expr querylang.Expr, vaults map[string]struct{}) que
 	}
 }
 
-// IsVaultOnlyQuery returns true if the expression contains only vault predicates.
-// This is used to detect queries like "vault=prod" with no other filters.
-func IsVaultOnlyQuery(expr querylang.Expr) bool {
-	if expr == nil {
-		return false
-	}
-
-	switch e := expr.(type) {
-	case *querylang.PredicateExpr:
-		return e.Kind == querylang.PredKV && strings.EqualFold(e.Key, vaultKey)
-
-	case *querylang.AndExpr:
-		for _, term := range e.Terms {
-			if !IsVaultOnlyQuery(term) {
-				return false
-			}
-		}
-		return true
-
-	case *querylang.OrExpr:
-		for _, term := range e.Terms {
-			if !IsVaultOnlyQuery(term) {
-				return false
-			}
-		}
-		return true
-
-	default:
-		return false
-	}
-}

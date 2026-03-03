@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -21,22 +21,19 @@ import (
 // It is called synchronously from within FSM.Apply, so actions complete before
 // the cfgStore write method returns to the server handler.
 type configDispatcher struct {
-	orch           *orchestrator.Orchestrator
-	cfgStore       config.Store
-	factories      orchestrator.Factories
-	localNodeID    string
-	logger         *slog.Logger
-	clusterTLS     *cluster.ClusterTLS // nil for single-node or memory mode
-	tlsFilePath    string              // path to persist cluster TLS on rotation
-	configSignal   *notify.Signal      // broadcasts config changes to WatchConfig streams
+	orch         *orchestrator.Orchestrator
+	cfgStore     config.Store
+	factories    orchestrator.Factories
+	localNodeID  string
+	logger       *slog.Logger
+	clusterTLS   *cluster.ClusterTLS // nil for single-node or memory mode
+	tlsFilePath  string              // path to persist cluster TLS on rotation
+	configSignal *notify.Signal      // broadcasts config changes to WatchConfig streams
 }
 
 // Handle dispatches a single FSM notification to the appropriate orchestrator
 // methods. Errors are logged but not propagated — the config mutation has
 // already been committed to the FSM store and cannot be rolled back.
-//
-// Handle is a no-op until the orchestrator is wired (during bootstrap the
-// orchestrator does not exist yet).
 func (d *configDispatcher) Handle(n raftfsm.Notification) {
 	if d.orch == nil {
 		return // not wired yet (bootstrap phase)
@@ -70,7 +67,6 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 	}
 
 	// Notify WatchConfig streams for all user-visible config changes.
-	// ClusterTLSPut is internal cluster infra — skip it.
 	if d.configSignal != nil && n.Kind != raftfsm.NotifyClusterTLSPut {
 		d.configSignal.Notify()
 	}
@@ -83,20 +79,17 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id uuid.UUID) {
 		return
 	}
 
-	// Skip vaults belonging to another node.
 	if vaultCfg.NodeID != "" && vaultCfg.NodeID != d.localNodeID {
 		return
 	}
 
 	if !slices.Contains(d.orch.ListVaults(), id) {
-		// New vault — add it to the orchestrator.
 		if err := d.orch.AddVault(ctx, *vaultCfg, d.factories); err != nil {
 			d.logger.Error("dispatch: add vault", "id", id, "name", vaultCfg.Name, "type", vaultCfg.Type, "error", err)
 		}
 		return
 	}
 
-	// Existing vault — reload dependent config and apply state changes.
 	d.applyExistingVaultChanges(ctx, id, vaultCfg)
 }
 
@@ -124,7 +117,6 @@ func (d *configDispatcher) handleVaultDeleted(n raftfsm.Notification) {
 	if err := d.orch.ForceRemoveVault(n.ID); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		d.logger.Error("dispatch: force remove vault", "id", n.ID, "name", n.Name, "error", err)
 	}
-	// Clean up the file vault directory only on the node that owns it.
 	if n.Dir != "" && (n.NodeID == "" || n.NodeID == d.localNodeID) {
 		if err := os.RemoveAll(n.Dir); err != nil {
 			d.logger.Error("dispatch: remove vault directory", "id", n.ID, "name", n.Name, "dir", n.Dir, "error", err)
@@ -157,12 +149,10 @@ func (d *configDispatcher) handleIngesterPut(ctx context.Context, id uuid.UUID) 
 		return
 	}
 
-	// Skip ingesters belonging to another node.
 	if ingCfg.NodeID != "" && ingCfg.NodeID != d.localNodeID {
 		return
 	}
 
-	// Remove existing ingester if present (idempotent re-add).
 	if slices.Contains(d.orch.ListIngesters(), id) {
 		if err := d.orch.RemoveIngester(id); err != nil && !errors.Is(err, orchestrator.ErrIngesterNotFound) {
 			d.logger.Error("dispatch: remove existing ingester", "id", id, "name", ingCfg.Name, "type", ingCfg.Type, "error", err)
@@ -220,8 +210,6 @@ func (d *configDispatcher) handleSettingPut(ctx context.Context, key string) {
 	}
 }
 
-// handleClusterTLSPut reloads cluster TLS material into the atomic holder.
-// This enables hot-reload of certificates — new connections use the updated cert.
 func (d *configDispatcher) handleClusterTLSPut(ctx context.Context) {
 	if d.clusterTLS == nil {
 		return
@@ -236,7 +224,6 @@ func (d *configDispatcher) handleClusterTLSPut(ctx context.Context) {
 		d.logger.Error("dispatch: reload cluster TLS", "error", err)
 		return
 	}
-	// Persist updated TLS to local file for restart.
 	if d.tlsFilePath != "" {
 		if err := cluster.SaveFile(d.tlsFilePath, []byte(tls.ClusterCertPEM), []byte(tls.ClusterKeyPEM), []byte(tls.CACertPEM)); err != nil {
 			d.logger.Error("dispatch: save cluster TLS file", "error", err)

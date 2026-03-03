@@ -69,11 +69,6 @@ func (d Dir) RaftDir() string {
 	return filepath.Join(d.root, "raft")
 }
 
-// LookupDir returns the directory for auto-downloaded lookup databases (e.g. MaxMind MMDB files).
-func (d Dir) LookupDir() string {
-	return filepath.Join(d.root, "lookups")
-}
-
 // ClusterTLSPath returns the path to the local cluster TLS material file.
 // This file persists mTLS certs outside of Raft so they're available on
 // restart before Raft can communicate with peers.

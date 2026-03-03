@@ -521,11 +521,6 @@ func ExtractPutSetting(cmd *gastrologv1.PutSettingCommand) (key, value string) {
 	return cmd.GetKey(), cmd.GetValue()
 }
 
-// ExtractDeleteSetting returns the key from a DeleteSettingCommand.
-func ExtractDeleteSetting(cmd *gastrologv1.DeleteSettingCommand) string {
-	return cmd.GetKey()
-}
-
 // ---------------------------------------------------------------------------
 // Certificates
 // ---------------------------------------------------------------------------

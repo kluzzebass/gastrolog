@@ -725,15 +725,6 @@ func (s *Server) stopHTTPSLocked() {
 	s.httpsPort = ""
 }
 
-// ServeUnix starts the server on a Unix socket.
-func (s *Server) ServeUnix(path string) error {
-	listener, err := net.Listen("unix", path)
-	if err != nil {
-		return err
-	}
-	return s.Serve(listener)
-}
-
 // ListenUnix starts a secondary Unix socket listener alongside the primary
 // TCP listener. Requests over the socket bypass authentication, providing
 // token-free access for the local CLI. The socket file is removed on Stop.
