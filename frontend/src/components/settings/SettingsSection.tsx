@@ -1,4 +1,5 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { Button } from "./Buttons";
 
 interface SettingsSectionProps {
@@ -31,13 +32,7 @@ export function SettingsSection({
   const c = useThemeClass(dark);
 
   if (isLoading) {
-    return (
-      <div
-        className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-      >
-        Loading...
-      </div>
-    );
+    return <LoadingPlaceholder dark={dark} />;
   }
 
   return (

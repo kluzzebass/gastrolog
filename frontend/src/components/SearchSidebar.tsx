@@ -8,6 +8,7 @@ import type { VaultInfo } from "../api/gen/gastrolog/v1/vault_pb";
 import type { FieldSummary } from "../utils";
 import type { ResizeProps } from "../hooks/usePanelResize";
 import { useThemeClass } from "../hooks/useThemeClass";
+import { LoadingPlaceholder } from "./LoadingPlaceholder";
 
 interface SearchSidebarProps {
   dark: boolean;
@@ -145,11 +146,7 @@ export function SearchSidebar({
         <SidebarSection title="Vaults" dark={dark}>
           <div className="flex flex-col gap-px">
             {vaultsLoading ? (
-              <div
-                className={`px-2.5 py-1.5 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-              >
-                Loading...
-              </div>
+              <LoadingPlaceholder dark={dark} className="px-2.5 py-1.5" />
             ) : (
               vaults?.map((vault) => (
                 <VaultButton

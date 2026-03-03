@@ -95,8 +95,8 @@ function VaultActions({
                 .join("; ");
               addToast(`Validation failed: ${issues}`, "error");
             }
-          } catch (err: any) {
-            addToast(err.message ?? "Validation failed", "error");
+          } catch (err: unknown) {
+            addToast(err instanceof Error ? err.message : "Validation failed", "error");
           }
         }}
       >

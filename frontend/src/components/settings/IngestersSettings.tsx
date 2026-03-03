@@ -1,4 +1,5 @@
 import { useState, useReducer } from "react";
+import { useExpandedCard } from "../../hooks/useExpandedCards";
 import { useConfig, usePutIngester, useDeleteIngester, useGenerateName } from "../../api/hooks";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
@@ -9,11 +10,12 @@ import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, SelectInput } from "./FormField";
-import { IngesterParamsForm } from "./IngesterParamsForm";
+import { IngesterParamsForm } from "./ingester-params";
 import { Button } from "./Buttons";
 import { Checkbox } from "./Checkbox";
 import { NodeBadge } from "./NodeBadge";
 import { NodeSelect } from "./NodeSelect";
+import { sortByName } from "../../lib/sort";
 
 const ingesterTypes = [
   { value: "chatterbox", label: "chatterbox" },
@@ -88,7 +90,7 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
   const generateName = useGenerateName();
   const { addToast } = useToast();
 
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const { isExpanded, toggle: toggleCard } = useExpandedCard();
 
   const [addForm, dispatchAdd] = useReducer(addIngesterFormReducer, addIngesterFormInitial);
   const { adding, typeConfirmed, newName, newType, newParams, newNodeId } = addForm;
@@ -138,8 +140,8 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
       });
       addToast(`Ingester "${name}" created`, "info");
       dispatchAdd({ type: "resetForm" });
-    } catch (err: any) {
-      addToast(err.message ?? "Failed to create ingester", "error");
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : "Failed to create ingester", "error");
     }
   };
 
@@ -214,7 +216,7 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
         </AddFormCard>
       )}
 
-      {ingesters.toSorted((a, b) => a.name.localeCompare(b.name)).map((ing) => {
+      {sortByName(ingesters).map((ing) => {
         const edit = getEdit(ing.id);
         return (
           <SettingsCard
@@ -222,8 +224,8 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
             id={ing.name || ing.id}
             typeBadge={ing.type}
             dark={dark}
-            expanded={expanded === ing.id}
-            onToggle={() => setExpanded(expanded === ing.id ? null : ing.id)}
+            expanded={isExpanded(ing.id)}
+            onToggle={() => toggleCard(ing.id)}
             onDelete={() => handleDelete(ing.id)}
             headerRight={
               <span className="flex items-center gap-2">

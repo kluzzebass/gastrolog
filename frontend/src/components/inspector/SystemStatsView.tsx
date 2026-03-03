@@ -1,4 +1,5 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { useHealth, useStats } from "../../api/hooks";
 import { Status } from "../../api/gen/gastrolog/v1/lifecycle_pb";
 import type { ClusterNode } from "../../api/gen/gastrolog/v1/lifecycle_pb";
@@ -40,14 +41,8 @@ export function LocalSystemStats({ dark }: Readonly<{ dark: boolean }>) {
   const health = useHealth();
   const stats = useStats();
 
-  const c = useThemeClass(dark);
-
   if (health.isLoading && stats.isLoading) {
-    return (
-      <div className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
-        Loading...
-      </div>
-    );
+    return <LoadingPlaceholder dark={dark} />;
   }
 
   return (

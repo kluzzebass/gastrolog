@@ -1,6 +1,6 @@
 import { useConfig } from "../../api/hooks";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
-import { useSettings } from "../../api/hooks/useConfig";
+import { useSettings } from "../../api/hooks/useSettings";
 import { Badge } from "../Badge";
 
 export function NodeBadge({

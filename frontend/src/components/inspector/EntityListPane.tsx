@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { useVaults, useIngesters } from "../../api/hooks";
 import { useWatchJobs } from "../../api/hooks";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
-import { useSettings, useConfig } from "../../api/hooks/useConfig";
+import { useConfig } from "../../api/hooks/useConfig";
+import { useSettings } from "../../api/hooks/useSettings";
 import { JobKind, JobStatus } from "../../api/gen/gastrolog/v1/job_pb";
 import type { Job } from "../../api/gen/gastrolog/v1/job_pb";
 import { toastError } from "../Toast";
@@ -439,12 +441,7 @@ function SectionLabel({ dark, children }: Readonly<{ dark: boolean; children: Re
 }
 
 function Loading({ dark }: Readonly<{ dark: boolean }>) {
-  const c = useThemeClass(dark);
-  return (
-    <div className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
-      Loading...
-    </div>
-  );
+  return <LoadingPlaceholder dark={dark} />;
 }
 
 function Empty({ dark, children }: Readonly<{ dark: boolean; children: React.ReactNode }>) {

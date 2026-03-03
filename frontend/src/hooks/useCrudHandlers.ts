@@ -32,8 +32,8 @@ export function useCrudHandlers<TEdit>({
       await mutation.mutateAsync(args);
       clearEdit?.(id);
       addToast(`${label} "${id}" updated`, "info");
-    } catch (err: any) {
-      addToast(err.message ?? `Failed to update ${label.toLowerCase()}`, "error");
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : `Failed to update ${label.toLowerCase()}`, "error");
     }
   };
 
@@ -53,9 +53,9 @@ export function useCrudHandlers<TEdit>({
       } else {
         addToast(`${label} "${id}" deleted`, "info");
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       addToast(
-        err.message ?? `Failed to delete ${label.toLowerCase()}`,
+        err instanceof Error ? err.message : `Failed to delete ${label.toLowerCase()}`,
         "error",
       );
     }

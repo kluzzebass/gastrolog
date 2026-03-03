@@ -1,42 +1,28 @@
 import { useReducer } from "react";
 import { unzipSync, decompressSync } from "fflate";
 
-function stripNul(s: string): string {
-  const idx = s.indexOf("\0");
-  return idx !== -1 ? s.slice(0, idx) : s;
-}
-
-function parseTar(data: Uint8Array): [string, Uint8Array][] {
-  const entries: [string, Uint8Array][] = [];
-  let offset = 0;
-  while (offset + 512 <= data.length) {
-    const header = data.subarray(offset, offset + 512);
-    const name = stripNul(new TextDecoder().decode(header.subarray(0, 100)));
-    const sizeStr = stripNul(new TextDecoder().decode(header.subarray(124, 136)));
-    const size = parseInt(sizeStr, 8) || 0;
-    offset += 512;
-    if (name && size > 0 && offset + size <= data.length) {
-      entries.push([name, data.subarray(offset, offset + size)]);
-    }
-    offset += size;
-    offset = Math.ceil(offset / 512) * 512;
-  }
-  return entries;
-}
-
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { Button } from "./Buttons";
-import { Checkbox } from "./Checkbox";
 import {
   useCertificates,
   useCertificate,
   usePutCertificate,
   useDeleteCertificate,
-  useSettings,
-} from "../../api/hooks/useConfig";
+} from "../../api/hooks/useCertificates";
+import { useSettings } from "../../api/hooks/useSettings";
 import { useToast } from "../Toast";
-import { FormField, TextInput } from "./FormField";
 import { SettingsCard } from "./SettingsCard";
+import { sortByName } from "../../lib/sort";
+import {
+  PemCertForm,
+  FilesCertForm,
+  AddCertificatePanel,
+  parseTar,
+  handleDragOver,
+  handleDragEnter,
+  handleDragLeave,
+} from "./CertificateForms";
 
 type CertSource = "pem" | "files";
 
@@ -119,220 +105,6 @@ function certFormReducer(state: CertFormState, action: CertFormAction): CertForm
       return { ...state, certPem: "", keyPem: "", certFile: "", keyFile: "", expanded: action.expandId };
     default:
       return state;
-  }
-}
-
-interface PemCertFormProps {
-  dark: boolean;
-  name: string;
-  certPem: string;
-  keyPem: string;
-  setAsDefault: boolean;
-  setCertPem: (v: string) => void;
-  setKeyPem: (v: string) => void;
-  setSetAsDefault: (v: boolean) => void;
-  onSave: () => void;
-  onCancel?: () => void;
-  saving?: boolean;
-  onDrop: (e: React.DragEvent) => void;
-  onDragOver: (e: React.DragEvent) => void;
-  onDragEnter: (e: React.DragEvent) => void;
-  onDragLeave: (e: React.DragEvent) => void;
-  isEditing?: boolean;
-  hideActions?: boolean;
-}
-
-function PemCertForm({
-  dark,
-  name: _name,
-  certPem,
-  keyPem,
-  setAsDefault,
-  setCertPem,
-  setKeyPem,
-  setSetAsDefault,
-  onSave,
-  onCancel,
-  saving,
-  onDrop,
-  onDragOver,
-  onDragEnter,
-  onDragLeave,
-  isEditing,
-  hideActions,
-}: Readonly<PemCertFormProps>) {
-  const c = useThemeClass(dark);
-  return (
-    <div
-      onDrop={onDrop}
-      onDragOver={onDragOver}
-      onDragEnter={onDragEnter}
-      onDragLeave={onDragLeave}
-      className="transition-all"
-    >
-      <p
-        className={`text-[0.8em] mb-3 ${c("text-text-muted", "text-light-text-muted")}`}
-      >
-        Paste PEM content or drop .pem, .crt, .key, .zip, or .tar(.gz) files.
-      </p>
-      <div className="flex flex-col gap-4">
-        <FormField
-          label="Certificate (PEM)"
-          description="PEM-encoded certificate content"
-          dark={dark}
-        >
-          <textarea
-            value={certPem}
-            onChange={(e) => setCertPem(e.target.value)}
-            placeholder="-----BEGIN CERTIFICATE-----\n..."
-            rows={6}
-            className={`w-full px-2.5 py-1.5 text-[0.85em] font-mono border rounded focus:outline-none transition-colors resize-y app-scroll app-resize ${c(
-              "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-              "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
-            )}`}
-          />
-        </FormField>
-        <FormField
-          label="Private key (PEM)"
-          description={isEditing ? "Private key not shown; paste new key to replace" : "PEM-encoded private key content"}
-          dark={dark}
-        >
-          <textarea
-            value={keyPem}
-            onChange={(e) => setKeyPem(e.target.value)}
-            placeholder={isEditing ? "•••••••• (paste to replace)" : "-----BEGIN PRIVATE KEY-----\n..."}
-            rows={6}
-            className={`w-full px-2.5 py-1.5 text-[0.85em] font-mono border rounded focus:outline-none transition-colors resize-y app-scroll app-resize ${c(
-              "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-              "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
-            )}`}
-          />
-        </FormField>
-        <Checkbox
-          checked={setAsDefault}
-          onChange={setSetAsDefault}
-          label="Use as default for TLS-wrapping the main server"
-          dark={dark}
-        />
-        {!hideActions && (
-          <div className="flex justify-end gap-2 pt-2">
-            {onCancel && (
-              <Button variant="ghost" onClick={onCancel} dark={dark}>
-                Cancel
-              </Button>
-            )}
-            <Button onClick={onSave} disabled={saving}>
-              {saving ? "Saving..." : "Save"}
-            </Button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-interface FilesCertFormProps {
-  dark: boolean;
-  name: string;
-  certFile: string;
-  keyFile: string;
-  setAsDefault: boolean;
-  setCertFile: (v: string) => void;
-  setKeyFile: (v: string) => void;
-  setSetAsDefault: (v: boolean) => void;
-  onSave: () => void;
-  onCancel?: () => void;
-  saving?: boolean;
-  hideActions?: boolean;
-}
-
-function FilesCertForm({
-  dark,
-  name: _name,
-  certFile,
-  keyFile,
-  setAsDefault,
-  setCertFile,
-  setKeyFile,
-  setSetAsDefault,
-  onSave,
-  onCancel,
-  saving,
-  hideActions,
-}: Readonly<FilesCertFormProps>) {
-  const c = useThemeClass(dark);
-  return (
-    <div className="transition-all">
-      <p
-        className={`text-[0.8em] mb-3 ${c("text-text-muted", "text-light-text-muted")}`}
-      >
-        Paths to certificate and key files on the server. Files are monitored and
-        reloaded when they change.
-      </p>
-      <div className="flex flex-col gap-4">
-        <FormField
-          label="Certificate file path"
-          description="Path to the PEM-encoded certificate file"
-          dark={dark}
-        >
-          <TextInput
-            value={certFile}
-            onChange={setCertFile}
-            placeholder="/path/to/cert.pem"
-            dark={dark}
-            mono
-          />
-        </FormField>
-        <FormField
-          label="Key file path"
-          description="Path to the PEM-encoded private key file"
-          dark={dark}
-        >
-          <TextInput
-            value={keyFile}
-            onChange={setKeyFile}
-            placeholder="/path/to/key.pem"
-            dark={dark}
-            mono
-          />
-        </FormField>
-        <Checkbox
-          checked={setAsDefault}
-          onChange={setSetAsDefault}
-          label="Use as default for TLS-wrapping the main server"
-          dark={dark}
-        />
-        {!hideActions && (
-          <div className="flex justify-end gap-2 pt-2">
-            {onCancel && (
-              <Button variant="ghost" onClick={onCancel} dark={dark}>
-                Cancel
-              </Button>
-            )}
-            <Button onClick={onSave} disabled={saving}>
-              {saving ? "Saving..." : "Save"}
-            </Button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function handleDragOver(e: React.DragEvent) {
-  e.preventDefault();
-  e.dataTransfer.dropEffect = "copy";
-}
-
-function handleDragEnter(e: React.DragEvent) {
-  e.preventDefault();
-  e.currentTarget.classList.add("ring-2", "ring-copper");
-}
-
-function handleDragLeave(e: React.DragEvent) {
-  e.preventDefault();
-  if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-    e.currentTarget.classList.remove("ring-2", "ring-copper");
   }
 }
 
@@ -423,7 +195,6 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
     }
     const certName = certs.find((c) => c.id === id)?.name ?? "";
     const displayName = certName || id;
-    // keyPem empty when editing means keep existing key
     try {
       await putCert.mutateAsync({
         id,
@@ -546,13 +317,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const isExpandedFileBased = expanded && certData?.id === expanded && !!(certData.certFile && certData.keyFile);
 
   if (isLoading) {
-    return (
-      <div
-        className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-      >
-        Loading...
-      </div>
-    );
+    return <LoadingPlaceholder dark={dark} />;
   }
 
   return (
@@ -635,7 +400,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
 
       {certs.length > 0 && (
         <div className="flex flex-col gap-3">
-          {certs.toSorted((a, b) => a.name.localeCompare(b.name)).map((cert) => (
+          {sortByName(certs).map((cert) => (
             <SettingsCard
               key={cert.id}
               id={cert.name || cert.id}
@@ -714,61 +479,6 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
           No certificates configured. Add one to enable TLS.
         </div>
       )}
-    </div>
-  );
-}
-
-function AddCertificatePanel({
-  title,
-  dark,
-  name,
-  setName,
-  onDrop,
-  onDragOver,
-  onDragEnter,
-  onDragLeave,
-  children,
-}: Readonly<{
-  title: string;
-  dark: boolean;
-  name: string;
-  setName: (v: string) => void;
-  onDrop?: (e: React.DragEvent) => void;
-  onDragOver?: (e: React.DragEvent) => void;
-  onDragEnter?: (e: React.DragEvent) => void;
-  onDragLeave?: (e: React.DragEvent) => void;
-  children: React.ReactNode;
-}>) {
-  const c = useThemeClass(dark);
-  return (
-    <div
-      className={`border rounded-lg p-4 mb-5 transition-all ${c("border-copper/40 bg-ink-surface", "border-copper/40 bg-light-surface")}`}
-      onDrop={onDrop}
-      onDragOver={onDragOver}
-      onDragEnter={onDragEnter}
-      onDragLeave={onDragLeave}
-    >
-      <h3
-        className={`text-[1em] font-semibold mb-4 ${c("text-text-bright", "text-light-text-bright")}`}
-      >
-        {title}
-      </h3>
-      <div className="flex flex-col gap-4">
-        <FormField
-          label="Name"
-          description="Identifier for this certificate (e.g. server, ingester.http)"
-          dark={dark}
-        >
-          <TextInput
-            value={name}
-            onChange={setName}
-            placeholder="server"
-            dark={dark}
-            mono
-          />
-        </FormField>
-        {children}
-      </div>
     </div>
   );
 }
