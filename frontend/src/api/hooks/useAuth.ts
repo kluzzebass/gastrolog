@@ -26,6 +26,10 @@ export function useLogin() {
       }
       setRefreshToken(data.refreshToken);
       qc.invalidateQueries({ queryKey: ["authStatus"] });
+      // Refetch settings and config now that the auth token is available —
+      // the pre-login fetch only returns the password policy.
+      qc.invalidateQueries({ queryKey: ["settings"] });
+      qc.invalidateQueries({ queryKey: ["config"] });
     },
   });
 }
@@ -42,6 +46,8 @@ export function useRegister() {
       }
       setRefreshToken(data.refreshToken);
       qc.invalidateQueries({ queryKey: ["authStatus"] });
+      qc.invalidateQueries({ queryKey: ["settings"] });
+      qc.invalidateQueries({ queryKey: ["config"] });
     },
   });
 }

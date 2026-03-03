@@ -10,7 +10,7 @@ import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, SelectInput } from "./FormField";
 import { IngesterParamsForm } from "./IngesterParamsForm";
-import { PrimaryButton, GhostButton } from "./Buttons";
+import { Button } from "./Buttons";
 import { Checkbox } from "./Checkbox";
 import { NodeBadge } from "./NodeBadge";
 import { NodeSelect } from "./NodeSelect";
@@ -173,12 +173,12 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
               ]}
               dark={dark}
             />
-            <GhostButton
+            <Button variant="ghost"
               onClick={() => dispatchAdd({ type: "resetForm" })}
               dark={dark}
             >
               Cancel
-            </GhostButton>
+            </Button>
           </div>
         ) : undefined
       }
@@ -234,7 +234,7 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
               </span>
             }
             footer={
-              <PrimaryButton
+              <Button
                 onClick={() =>
                   saveIngester(ing.id, {
                     ...getEdit(ing.id),
@@ -244,7 +244,7 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
                 disabled={putIngester.isPending || !isDirty(ing.id)}
               >
                 {putIngester.isPending ? "Saving..." : "Save"}
-              </PrimaryButton>
+              </Button>
             }
           >
             <div className="flex flex-col gap-3">

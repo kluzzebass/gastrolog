@@ -76,6 +76,17 @@ type Server struct {
 	// subscribers receives broadcast messages from peers.
 	subscribers subscriberRegistry
 
+	// evictionHandler is called when this node receives a NotifyEviction RPC,
+	// meaning it has been removed from the cluster and should shut down.
+	evictionHandler func()
+
+	// removeNodeFn handles the full node removal on the leader: Raft membership
+	// change + eviction notification. Set by the composition root in main.go.
+	removeNodeFn func(ctx context.Context, nodeID string) error
+
+	// setNodeSuffrageFn handles promote/demote on the leader. Set by main.go.
+	setNodeSuffrageFn func(ctx context.Context, nodeID, nodeAddr string, voter bool) error
+
 	// recordAppender writes forwarded records into local vaults.
 	// Set after the orchestrator is created, before forwarding starts.
 	recordAppender RecordAppender
@@ -154,10 +165,15 @@ func (s *Server) Transport() hraft.Transport {
 }
 
 // SetRaft provides the Raft instance after it is created.
-// Must be called before Start().
+// Must be called before Start(). If PeerConns already exists (rejoin case),
+// it resets the pool with the new Raft instance instead of creating a new one.
 func (s *Server) SetRaft(r *hraft.Raft) {
 	s.raft = r
-	s.peerConns = NewPeerConns(r, s.cfg.TLS, s.cfg.NodeID)
+	if s.peerConns != nil {
+		s.peerConns.Reset(r)
+	} else {
+		s.peerConns = NewPeerConns(r, s.cfg.TLS, s.cfg.NodeID)
+	}
 }
 
 // PeerConns returns the shared peer connection pool. All components that
@@ -195,10 +211,47 @@ func (s *Server) DemoteVoter(id string, timeout time.Duration) error {
 	return s.raft.DemoteVoter(hraft.ServerID(id), 0, timeout).Error()
 }
 
+// RemoveServer removes a node from the Raft cluster entirely.
+// Must be called on the leader. The removed node stops receiving
+// log replication and is no longer part of quorum or elections.
+func (s *Server) RemoveServer(id string, timeout time.Duration) error {
+	if s.raft == nil {
+		return errors.New("raft not initialized")
+	}
+	return s.raft.RemoveServer(hraft.ServerID(id), 0, timeout).Error()
+}
+
+// LeadershipTransfer transfers leadership to another voter in the cluster.
+// Blocks until the transfer completes or the timeout expires.
+func (s *Server) LeadershipTransfer() error {
+	if s.raft == nil {
+		return errors.New("raft not initialized")
+	}
+	return s.raft.LeadershipTransfer().Error()
+}
+
 // SetApplyFn sets the function used by the ForwardApply handler to apply
 // commands on the leader node.
 func (s *Server) SetApplyFn(fn func(ctx context.Context, data []byte) error) {
 	s.applyFn = fn
+}
+
+// SetEvictionHandler registers the callback invoked when this node receives
+// a NotifyEviction RPC (i.e., it has been removed from the cluster).
+func (s *Server) SetEvictionHandler(fn func()) {
+	s.evictionHandler = fn
+}
+
+// SetRemoveNodeFn registers the callback for the ForwardRemoveNode RPC.
+// This is called on the leader to execute the Raft removal + notification.
+func (s *Server) SetRemoveNodeFn(fn func(ctx context.Context, nodeID string) error) {
+	s.removeNodeFn = fn
+}
+
+// SetNodeSuffrageFn registers the callback for the ForwardSetNodeSuffrage RPC.
+// This is called on the leader to execute the Raft suffrage change.
+func (s *Server) SetNodeSuffrageFn(fn func(ctx context.Context, nodeID, nodeAddr string, voter bool) error) {
+	s.setNodeSuffrageFn = fn
 }
 
 // Start creates the gRPC server, registers all services, and begins serving.
@@ -302,6 +355,34 @@ func (s *Server) Stop() {
 	if s.tm != nil {
 		_ = s.tm.Close()
 	}
+}
+
+// PrepareRejoin stops the cluster gRPC server and re-binds the listen port,
+// returning a fresh transport for the new Raft instance. Because raftadmin
+// captures the *raft.Raft pointer at registration time and gRPC doesn't
+// support service re-registration, we must stop and restart the gRPC server.
+//
+// The caller must:
+//  1. Create a new Raft with the returned transport
+//  2. Call SetRaft(newRaft), SetApplyFn(fn), SetEnrollHandler(h)
+//  3. Call Start() to restart the cluster gRPC server
+//
+// The cluster port is down for ~100-500ms. The API port stays up throughout.
+func (s *Server) PrepareRejoin() (hraft.Transport, error) {
+	s.Stop()
+
+	ln, err := net.Listen("tcp", s.cfg.ClusterAddr)
+	if err != nil {
+		return nil, fmt.Errorf("re-listen cluster port %s: %w", s.cfg.ClusterAddr, err)
+	}
+	s.listener = ln
+
+	// Update localAddr in case :0 was used (unlikely, but be correct).
+	if s.cfg.LocalAddr == "" {
+		s.localAddr = ln.Addr().String()
+	}
+
+	return s.Transport(), nil
 }
 
 // LeaderInfo returns the current Raft leader's address and server ID.

@@ -8,7 +8,7 @@ import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, SelectInput } from "./FormField";
-import { PrimaryButton, GhostButton } from "./Buttons";
+import { Button } from "./Buttons";
 import { Checkbox } from "./Checkbox";
 import type { SettingsTab } from "./SettingsDialog";
 
@@ -221,12 +221,12 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
               </span>
             }
             footer={
-              <PrimaryButton
+              <Button
                 onClick={() => handleSave(id)}
                 disabled={putRoute.isPending || !isDirty(id)}
               >
                 {putRoute.isPending ? "Saving..." : "Save"}
-              </PrimaryButton>
+              </Button>
             }
           >
             <div className="flex flex-col gap-3">
@@ -307,12 +307,12 @@ function DestinationsEditor({
               >
                 {vault?.name || dest.vaultId}
               </span>
-              <GhostButton
+              <Button variant="ghost"
                 onClick={() => onChange(destinations.filter((_, i) => i !== idx))}
                 dark={dark}
               >
                 Remove
-              </GhostButton>
+              </Button>
             </div>
           );
         })}

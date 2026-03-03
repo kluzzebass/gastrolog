@@ -254,6 +254,41 @@ func (s *Server) forwardApply(ctx context.Context, req *gastrologv1.ForwardApply
 	return &gastrologv1.ForwardApplyResponse{}, nil
 }
 
+// forwardRemoveNode handles the ForwardRemoveNode RPC on the leader.
+// Followers call this to proxy node removal through the leader.
+func (s *Server) forwardRemoveNode(ctx context.Context, req *gastrologv1.ForwardRemoveNodeRequest) (*gastrologv1.ForwardRemoveNodeResponse, error) {
+	if s.removeNodeFn == nil {
+		return nil, status.Error(codes.Unavailable, "remove node not configured")
+	}
+	if err := s.removeNodeFn(ctx, req.GetNodeId()); err != nil {
+		return nil, status.Errorf(codes.Internal, "remove node: %v", err)
+	}
+	return &gastrologv1.ForwardRemoveNodeResponse{}, nil
+}
+
+// forwardSetNodeSuffrage handles the ForwardSetNodeSuffrage RPC on the leader.
+// Followers call this to proxy suffrage changes through the leader.
+func (s *Server) forwardSetNodeSuffrage(ctx context.Context, req *gastrologv1.ForwardSetNodeSuffrageRequest) (*gastrologv1.ForwardSetNodeSuffrageResponse, error) {
+	if s.setNodeSuffrageFn == nil {
+		return nil, status.Error(codes.Unavailable, "set node suffrage not configured")
+	}
+	if err := s.setNodeSuffrageFn(ctx, req.GetNodeId(), req.GetNodeAddr(), req.GetVoter()); err != nil {
+		return nil, status.Errorf(codes.Internal, "set node suffrage: %v", err)
+	}
+	return &gastrologv1.ForwardSetNodeSuffrageResponse{}, nil
+}
+
+// notifyEviction handles the NotifyEviction RPC — tells this node it has been
+// removed from the cluster. The eviction handler (if registered) is called
+// asynchronously so the RPC can return before shutdown begins.
+func (s *Server) notifyEviction(_ context.Context, req *gastrologv1.NotifyEvictionRequest) (*gastrologv1.NotifyEvictionResponse, error) {
+	s.logger.Warn("received eviction notification", "reason", req.GetReason())
+	if s.evictionHandler != nil {
+		go s.evictionHandler()
+	}
+	return &gastrologv1.NotifyEvictionResponse{}, nil
+}
+
 // clusterServiceDesc is a manually-defined gRPC ServiceDesc for
 // gastrolog.v1.ClusterService. We register this manually rather than using
 // protoc-gen-go-grpc to avoid generating unused gRPC stubs for all services
@@ -298,6 +333,18 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			MethodName: "ForwardValidateVault",
 			Handler:    forwardValidateVaultHandler,
 		},
+		{
+			MethodName: "NotifyEviction",
+			Handler:    notifyEvictionHandler,
+		},
+		{
+			MethodName: "ForwardRemoveNode",
+			Handler:    forwardRemoveNodeHandler,
+		},
+		{
+			MethodName: "ForwardSetNodeSuffrage",
+			Handler:    forwardSetNodeSuffrageHandler,
+		},
 	},
 }
 
@@ -312,6 +359,9 @@ type clusterServiceServer interface {
 	forwardListChunks(context.Context, *gastrologv1.ForwardListChunksRequest) (*gastrologv1.ForwardListChunksResponse, error)
 	forwardGetIndexes(context.Context, *gastrologv1.ForwardGetIndexesRequest) (*gastrologv1.ForwardGetIndexesResponse, error)
 	forwardValidateVault(context.Context, *gastrologv1.ForwardValidateVaultRequest) (*gastrologv1.ForwardValidateVaultResponse, error)
+	notifyEviction(context.Context, *gastrologv1.NotifyEvictionRequest) (*gastrologv1.NotifyEvictionResponse, error)
+	forwardRemoveNode(context.Context, *gastrologv1.ForwardRemoveNodeRequest) (*gastrologv1.ForwardRemoveNodeResponse, error)
+	forwardSetNodeSuffrage(context.Context, *gastrologv1.ForwardSetNodeSuffrageRequest) (*gastrologv1.ForwardSetNodeSuffrageResponse, error)
 }
 
 func forwardApplyHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
@@ -447,6 +497,63 @@ func forwardValidateVaultHandler(srv any, ctx context.Context, dec func(any) err
 	return interceptor(ctx, req, info, handler)
 }
 
+func forwardRemoveNodeHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.ForwardRemoveNodeRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.forwardRemoveNode(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/ForwardRemoveNode",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.forwardRemoveNode(ctx, req.(*gastrologv1.ForwardRemoveNodeRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
+func forwardSetNodeSuffrageHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.ForwardSetNodeSuffrageRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.forwardSetNodeSuffrage(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/ForwardSetNodeSuffrage",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.forwardSetNodeSuffrage(ctx, req.(*gastrologv1.ForwardSetNodeSuffrageRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
+func notifyEvictionHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.NotifyEvictionRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.notifyEviction(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/NotifyEviction",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.notifyEviction(ctx, req.(*gastrologv1.NotifyEvictionRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
 func registerClusterService(s *grpc.Server, srv *Server) {
 	s.RegisterService(&clusterServiceDesc, srv)
 }
@@ -468,4 +575,55 @@ func (c *ForwardApplyClient) ForwardApply(ctx context.Context, req *gastrologv1.
 		return nil, err
 	}
 	return out, nil
+}
+
+// NotifyEvictionClient sends eviction notifications to a peer node.
+type NotifyEvictionClient struct {
+	cc grpc.ClientConnInterface
+}
+
+// NewNotifyEvictionClient creates a client bound to a connection.
+func NewNotifyEvictionClient(cc grpc.ClientConnInterface) *NotifyEvictionClient {
+	return &NotifyEvictionClient{cc: cc}
+}
+
+// NotifyEviction tells a peer node it has been evicted from the cluster.
+func (c *NotifyEvictionClient) NotifyEviction(ctx context.Context, reason string) error {
+	req := &gastrologv1.NotifyEvictionRequest{Reason: reason}
+	out := &gastrologv1.NotifyEvictionResponse{}
+	return c.cc.Invoke(ctx, "/gastrolog.v1.ClusterService/NotifyEviction", req, out)
+}
+
+// ForwardRemoveNodeClient forwards node removal to the leader via cluster gRPC.
+type ForwardRemoveNodeClient struct {
+	cc grpc.ClientConnInterface
+}
+
+// NewForwardRemoveNodeClient creates a client bound to a connection.
+func NewForwardRemoveNodeClient(cc grpc.ClientConnInterface) *ForwardRemoveNodeClient {
+	return &ForwardRemoveNodeClient{cc: cc}
+}
+
+// ForwardRemoveNode asks the leader to remove a node from the cluster.
+func (c *ForwardRemoveNodeClient) ForwardRemoveNode(ctx context.Context, nodeID string) error {
+	req := &gastrologv1.ForwardRemoveNodeRequest{NodeId: nodeID}
+	out := &gastrologv1.ForwardRemoveNodeResponse{}
+	return c.cc.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardRemoveNode", req, out)
+}
+
+// ForwardSetNodeSuffrageClient forwards suffrage changes to the leader via cluster gRPC.
+type ForwardSetNodeSuffrageClient struct {
+	cc grpc.ClientConnInterface
+}
+
+// NewForwardSetNodeSuffrageClient creates a client bound to a connection.
+func NewForwardSetNodeSuffrageClient(cc grpc.ClientConnInterface) *ForwardSetNodeSuffrageClient {
+	return &ForwardSetNodeSuffrageClient{cc: cc}
+}
+
+// ForwardSetNodeSuffrage asks the leader to change a node's suffrage.
+func (c *ForwardSetNodeSuffrageClient) ForwardSetNodeSuffrage(ctx context.Context, nodeID, nodeAddr string, voter bool) error {
+	req := &gastrologv1.ForwardSetNodeSuffrageRequest{NodeId: nodeID, NodeAddr: nodeAddr, Voter: voter}
+	out := &gastrologv1.ForwardSetNodeSuffrageResponse{}
+	return c.cc.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardSetNodeSuffrage", req, out)
 }

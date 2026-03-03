@@ -6,7 +6,7 @@ import { useToast } from "../Toast";
 import { configClient } from "../../api/client";
 import { usePutSettings, useGenerateName } from "../../api/hooks/useConfig";
 import { useQueryClient } from "@tanstack/react-query";
-import { PrimaryButton, GhostButton } from "../settings/Buttons";
+import { Button } from "../settings/Buttons";
 import { WelcomeStep } from "./WelcomeStep";
 import { VaultStep, type VaultData } from "./VaultStep";
 import {
@@ -220,11 +220,12 @@ export function SetupWizard() {
       });
 
       await putSettings.mutateAsync({ setupWizardDismissed: true });
-      // refetchType: "all" forces a refetch even for inactive queries (no
-      // subscribers on /setup).  Without this the cache keeps stale data and
-      // SearchView's redirect fires before the queries can refetch.
+      // Optimistically update the cache so SearchView's redirect doesn't
+      // fire before the follower's FSM applies the Raft log entry.
+      queryClient.setQueryData(["settings"], (old: Record<string, unknown> | undefined) =>
+        old ? { ...old, setupWizardDismissed: true } : old,
+      );
       await queryClient.invalidateQueries({ queryKey: ["config"], refetchType: "all" });
-      await queryClient.invalidateQueries({ queryKey: ["settings"], refetchType: "all" });
       addToast("Configuration created successfully!", "info");
       navigate({ to: "/search", search: { q: "", help: undefined, settings: undefined, inspector: undefined } });
     } catch (err) {
@@ -336,38 +337,40 @@ export function SetupWizard() {
         >
           <div className="flex gap-2">
             {step > 0 && (
-              <GhostButton
+              <Button variant="ghost"
                 onClick={() => setStep((s) => s - 1)}
                 dark={dark}
                 bordered
               >
                 Back
-              </GhostButton>
+              </Button>
             )}
-            <GhostButton
+            <Button variant="ghost"
               onClick={async () => {
                 await putSettings.mutateAsync({ setupWizardDismissed: true });
-                await queryClient.invalidateQueries({ queryKey: ["settings"], refetchType: "all" });
+                queryClient.setQueryData(["settings"], (old: Record<string, unknown> | undefined) =>
+                  old ? { ...old, setupWizardDismissed: true } : old,
+                );
                 navigate({ to: "/search", search: { q: "", help: undefined, settings: undefined, inspector: undefined } });
               }}
               dark={dark}
             >
               Skip
-            </GhostButton>
+            </Button>
           </div>
           <div>
             {step > 0 && step < STEPS.length - 1 && (
-              <PrimaryButton
+              <Button
                 onClick={() => setStep((s) => s + 1)}
                 disabled={!canProceed()}
               >
                 Next
-              </PrimaryButton>
+              </Button>
             )}
             {step === STEPS.length - 1 && (
-              <PrimaryButton onClick={handleCreate} disabled={creating}>
+              <Button onClick={handleCreate} disabled={creating}>
                 {creating ? "Creating..." : "Create"}
-              </PrimaryButton>
+              </Button>
             )}
           </div>
         </div>

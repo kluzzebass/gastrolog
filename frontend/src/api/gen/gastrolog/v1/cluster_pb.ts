@@ -1164,3 +1164,229 @@ export class ForwardValidateVaultResponse extends Message<ForwardValidateVaultRe
   }
 }
 
+/**
+ * NotifyEvictionRequest is sent by the leader to a node that has been removed
+ * from the cluster. The evicted node should initiate a graceful shutdown.
+ *
+ * @generated from message gastrolog.v1.NotifyEvictionRequest
+ */
+export class NotifyEvictionRequest extends Message<NotifyEvictionRequest> {
+  /**
+   * @generated from field: string reason = 1;
+   */
+  reason = "";
+
+  constructor(data?: PartialMessage<NotifyEvictionRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.NotifyEvictionRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "reason", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NotifyEvictionRequest {
+    return new NotifyEvictionRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): NotifyEvictionRequest {
+    return new NotifyEvictionRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): NotifyEvictionRequest {
+    return new NotifyEvictionRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: NotifyEvictionRequest | PlainMessage<NotifyEvictionRequest> | undefined, b: NotifyEvictionRequest | PlainMessage<NotifyEvictionRequest> | undefined): boolean {
+    return proto3.util.equals(NotifyEvictionRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.NotifyEvictionResponse
+ */
+export class NotifyEvictionResponse extends Message<NotifyEvictionResponse> {
+  constructor(data?: PartialMessage<NotifyEvictionResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.NotifyEvictionResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NotifyEvictionResponse {
+    return new NotifyEvictionResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): NotifyEvictionResponse {
+    return new NotifyEvictionResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): NotifyEvictionResponse {
+    return new NotifyEvictionResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: NotifyEvictionResponse | PlainMessage<NotifyEvictionResponse> | undefined, b: NotifyEvictionResponse | PlainMessage<NotifyEvictionResponse> | undefined): boolean {
+    return proto3.util.equals(NotifyEvictionResponse, a, b);
+  }
+}
+
+/**
+ * ForwardRemoveNodeRequest is sent by a follower to the leader to remove
+ * a node from the cluster. The leader executes the Raft membership change
+ * and sends the eviction notification.
+ *
+ * @generated from message gastrolog.v1.ForwardRemoveNodeRequest
+ */
+export class ForwardRemoveNodeRequest extends Message<ForwardRemoveNodeRequest> {
+  /**
+   * @generated from field: string node_id = 1;
+   */
+  nodeId = "";
+
+  constructor(data?: PartialMessage<ForwardRemoveNodeRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardRemoveNodeRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardRemoveNodeRequest {
+    return new ForwardRemoveNodeRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardRemoveNodeRequest {
+    return new ForwardRemoveNodeRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardRemoveNodeRequest {
+    return new ForwardRemoveNodeRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardRemoveNodeRequest | PlainMessage<ForwardRemoveNodeRequest> | undefined, b: ForwardRemoveNodeRequest | PlainMessage<ForwardRemoveNodeRequest> | undefined): boolean {
+    return proto3.util.equals(ForwardRemoveNodeRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ForwardRemoveNodeResponse
+ */
+export class ForwardRemoveNodeResponse extends Message<ForwardRemoveNodeResponse> {
+  constructor(data?: PartialMessage<ForwardRemoveNodeResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardRemoveNodeResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardRemoveNodeResponse {
+    return new ForwardRemoveNodeResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardRemoveNodeResponse {
+    return new ForwardRemoveNodeResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardRemoveNodeResponse {
+    return new ForwardRemoveNodeResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardRemoveNodeResponse | PlainMessage<ForwardRemoveNodeResponse> | undefined, b: ForwardRemoveNodeResponse | PlainMessage<ForwardRemoveNodeResponse> | undefined): boolean {
+    return proto3.util.equals(ForwardRemoveNodeResponse, a, b);
+  }
+}
+
+/**
+ * ForwardSetNodeSuffrageRequest is sent by a follower to the leader to
+ * promote or demote a node's voting status.
+ *
+ * @generated from message gastrolog.v1.ForwardSetNodeSuffrageRequest
+ */
+export class ForwardSetNodeSuffrageRequest extends Message<ForwardSetNodeSuffrageRequest> {
+  /**
+   * @generated from field: string node_id = 1;
+   */
+  nodeId = "";
+
+  /**
+   * @generated from field: string node_addr = 2;
+   */
+  nodeAddr = "";
+
+  /**
+   * @generated from field: bool voter = 3;
+   */
+  voter = false;
+
+  constructor(data?: PartialMessage<ForwardSetNodeSuffrageRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardSetNodeSuffrageRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "node_addr", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "voter", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardSetNodeSuffrageRequest {
+    return new ForwardSetNodeSuffrageRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardSetNodeSuffrageRequest {
+    return new ForwardSetNodeSuffrageRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardSetNodeSuffrageRequest {
+    return new ForwardSetNodeSuffrageRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardSetNodeSuffrageRequest | PlainMessage<ForwardSetNodeSuffrageRequest> | undefined, b: ForwardSetNodeSuffrageRequest | PlainMessage<ForwardSetNodeSuffrageRequest> | undefined): boolean {
+    return proto3.util.equals(ForwardSetNodeSuffrageRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ForwardSetNodeSuffrageResponse
+ */
+export class ForwardSetNodeSuffrageResponse extends Message<ForwardSetNodeSuffrageResponse> {
+  constructor(data?: PartialMessage<ForwardSetNodeSuffrageResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardSetNodeSuffrageResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardSetNodeSuffrageResponse {
+    return new ForwardSetNodeSuffrageResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardSetNodeSuffrageResponse {
+    return new ForwardSetNodeSuffrageResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardSetNodeSuffrageResponse {
+    return new ForwardSetNodeSuffrageResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardSetNodeSuffrageResponse | PlainMessage<ForwardSetNodeSuffrageResponse> | undefined, b: ForwardSetNodeSuffrageResponse | PlainMessage<ForwardSetNodeSuffrageResponse> | undefined): boolean {
+    return proto3.util.equals(ForwardSetNodeSuffrageResponse, a, b);
+  }
+}
+

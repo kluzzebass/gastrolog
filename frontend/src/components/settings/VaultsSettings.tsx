@@ -21,7 +21,7 @@ import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, SelectInput } from "./FormField";
 import { VaultParamsForm } from "./VaultParamsForm";
-import { PrimaryButton, GhostButton } from "./Buttons";
+import { Button } from "./Buttons";
 import { Checkbox } from "./Checkbox";
 import { NodeBadge } from "./NodeBadge";
 import { NodeSelect } from "./NodeSelect";
@@ -207,12 +207,12 @@ function RetentionRulesEditor({
               </FormField>
             </div>
           )}
-          <GhostButton
+          <Button variant="ghost"
             onClick={() => onChange(rules.filter((_, i) => i !== idx))}
             dark={dark}
           >
             Remove
-          </GhostButton>
+          </Button>
         </div>
       ))}
     </div>
@@ -409,12 +409,12 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
               ]}
               dark={dark}
             />
-            <GhostButton
+            <Button variant="ghost"
               onClick={() => setAdding(false)}
               dark={dark}
             >
               Cancel
-            </GhostButton>
+            </Button>
           </div>
         ) : undefined
       }
@@ -597,7 +597,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                 >
                   {mergeTarget[vault.id] !== undefined ? "Cancel Merge" : "Merge Into..."}
                 </button>
-                <PrimaryButton
+                <Button
                   onClick={() =>
                     saveVault(vault.id, {
                       ...getEdit(vault.id),
@@ -607,7 +607,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                   disabled={putVault.isPending || !isDirty(vault.id)}
                 >
                   {putVault.isPending ? "Saving..." : "Save"}
-                </PrimaryButton>
+                </Button>
               </>
             }
             headerRight={
@@ -738,7 +738,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                       )}
                     </div>
                     <div className="flex justify-end">
-                      <PrimaryButton
+                      <Button
                         disabled={migrate.isPending || !canSubmit || !!activeJob}
                         onClick={async () => {
                           const trimmedName = mt.name.trim();
@@ -777,7 +777,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                         }}
                       >
                         {migrate.isPending ? "Migrating..." : "Migrate"}
-                      </PrimaryButton>
+                      </Button>
                     </div>
                   </div>
                 );
@@ -815,7 +815,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                     </FormField>
                   </div>
                   <div className="flex justify-end">
-                    <PrimaryButton
+                    <Button
                       disabled={merge.isPending || !mergeTarget[vault.id] || !!activeJob}
                       onClick={async () => {
                         const dest = mergeTarget[vault.id];
@@ -844,7 +844,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                       }}
                     >
                       {merge.isPending ? "Merging..." : "Merge"}
-                    </PrimaryButton>
+                    </Button>
                   </div>
                 </div>
               )}

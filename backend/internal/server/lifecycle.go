@@ -3,7 +3,7 @@ package server
 import (
 	"context"
 	"errors"
-	"fmt"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -13,6 +13,7 @@ import (
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/config"
+	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -25,9 +26,6 @@ type ClusterStatusProvider interface {
 	LeaderInfo() (address string, id string)
 	Servers() ([]cluster.RaftServer, error)
 	LocalStats() map[string]string
-	AddVoter(id, addr string, timeout time.Duration) error
-	AddNonvoter(id, addr string, timeout time.Duration) error
-	DemoteVoter(id string, timeout time.Duration) error
 }
 
 // NodeStatsProvider returns the latest stats for a given cluster node.
@@ -46,13 +44,17 @@ type LifecycleServer struct {
 	clusterAddress string
 	peerStats      NodeStatsProvider
 	localStats     func() *apiv1.NodeStats
+	joinClusterFn  func(ctx context.Context, leaderAddr, joinToken string) error
+	removeNodeFn        func(ctx context.Context, nodeID string) error
+	setNodeSuffrageFn   func(ctx context.Context, nodeID string, voter bool) error
+	logger              *slog.Logger
 }
 
 var _ gastrologv1connect.LifecycleServiceHandler = (*LifecycleServer)(nil)
 
 // NewLifecycleServer creates a new LifecycleServer.
 // The shutdown function is called when Shutdown is invoked with the drain flag.
-func NewLifecycleServer(orch *orchestrator.Orchestrator, shutdown func(drain bool), cluster ClusterStatusProvider, cfgStore config.Store, nodeID string, clusterAddress string, peerStats NodeStatsProvider, localStats func() *apiv1.NodeStats) *LifecycleServer {
+func NewLifecycleServer(orch *orchestrator.Orchestrator, shutdown func(drain bool), cluster ClusterStatusProvider, cfgStore config.Store, nodeID string, clusterAddress string, peerStats NodeStatsProvider, localStats func() *apiv1.NodeStats, logger *slog.Logger) *LifecycleServer {
 	return &LifecycleServer{
 		orch:           orch,
 		startTime:      time.Now(),
@@ -63,7 +65,24 @@ func NewLifecycleServer(orch *orchestrator.Orchestrator, shutdown func(drain boo
 		clusterAddress: clusterAddress,
 		peerStats:      peerStats,
 		localStats:     localStats,
+		logger:         logging.Default(logger).With("component", "lifecycle"),
 	}
+}
+
+// SetJoinClusterFunc sets the callback for the JoinCluster RPC.
+// Must be called before the server starts serving.
+func (s *LifecycleServer) SetJoinClusterFunc(fn func(ctx context.Context, leaderAddr, joinToken string) error) {
+	s.joinClusterFn = fn
+}
+
+// SetRemoveNodeFunc sets the callback for the RemoveNode RPC.
+func (s *LifecycleServer) SetRemoveNodeFunc(fn func(ctx context.Context, nodeID string) error) {
+	s.removeNodeFn = fn
+}
+
+// SetNodeSuffrageFunc sets the callback for the SetNodeSuffrage RPC.
+func (s *LifecycleServer) SetNodeSuffrageFunc(fn func(ctx context.Context, nodeID string, voter bool) error) {
+	s.setNodeSuffrageFn = fn
 }
 
 // Health returns the server health status.
@@ -188,7 +207,7 @@ func (s *LifecycleServer) SetNodeSuffrage(
 	ctx context.Context,
 	req *connect.Request[apiv1.SetNodeSuffrageRequest],
 ) (*connect.Response[apiv1.SetNodeSuffrageResponse], error) {
-	if s.cluster == nil {
+	if s.setNodeSuffrageFn == nil {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("cluster not enabled"))
 	}
 
@@ -197,32 +216,9 @@ func (s *LifecycleServer) SetNodeSuffrage(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("node_id is required"))
 	}
 
-	// Look up the node's address from the current Raft configuration.
-	servers, err := s.cluster.Servers()
-	if err != nil {
+	if err := s.setNodeSuffrageFn(ctx, nodeID, req.Msg.Voter); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	var nodeAddr string
-	for _, srv := range servers {
-		if srv.ID == nodeID {
-			nodeAddr = srv.Address
-			break
-		}
-	}
-	if nodeAddr == "" {
-		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("node %s not in cluster configuration", nodeID))
-	}
-
-	const timeout = 10 * time.Second
-	if req.Msg.Voter {
-		err = s.cluster.AddVoter(nodeID, nodeAddr, timeout)
-	} else {
-		err = s.cluster.DemoteVoter(nodeID, timeout)
-	}
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-
 	return connect.NewResponse(&apiv1.SetNodeSuffrageResponse{}), nil
 }
 
@@ -255,4 +251,52 @@ func parseUint64(s string) uint64 {
 func parseUint32(s string) uint32 {
 	v, _ := strconv.ParseUint(s, 10, 32)
 	return uint32(v)
+}
+
+// JoinCluster joins a running single-node server to an existing cluster.
+func (s *LifecycleServer) JoinCluster(
+	ctx context.Context,
+	req *connect.Request[apiv1.JoinClusterRequest],
+) (*connect.Response[apiv1.JoinClusterResponse], error) {
+	if s.joinClusterFn == nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("runtime cluster join not available"))
+	}
+	leaderAddr := req.Msg.LeaderAddress
+	if leaderAddr == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("leader_address is required"))
+	}
+	joinToken := req.Msg.JoinToken
+	if joinToken == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("join_token is required"))
+	}
+
+	if err := s.joinClusterFn(ctx, leaderAddr, joinToken); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&apiv1.JoinClusterResponse{}), nil
+}
+
+// RemoveNode evicts a node from the cluster.
+func (s *LifecycleServer) RemoveNode(
+	ctx context.Context,
+	req *connect.Request[apiv1.RemoveNodeRequest],
+) (*connect.Response[apiv1.RemoveNodeResponse], error) {
+	if s.removeNodeFn == nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("node removal not available"))
+	}
+	nodeID := req.Msg.NodeId
+	if nodeID == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("node_id is required"))
+	}
+	if nodeID == s.nodeID {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("cannot remove self from cluster"))
+	}
+
+	s.logger.Info("removing node from cluster", "node_id", nodeID)
+	if err := s.removeNodeFn(ctx, nodeID); err != nil {
+		s.logger.Error("node removal failed", "node_id", nodeID, "error", err)
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	s.logger.Info("node removed from cluster", "node_id", nodeID)
+	return connect.NewResponse(&apiv1.RemoveNodeResponse{}), nil
 }

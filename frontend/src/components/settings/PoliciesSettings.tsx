@@ -13,7 +13,7 @@ import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, NumberInput } from "./FormField";
-import { PrimaryButton } from "./Buttons";
+import { Button } from "./Buttons";
 import { UsedByStatus, refsFor } from "./UsedByStatus";
 import type { SettingsTab } from "./SettingsDialog";
 
@@ -314,12 +314,12 @@ export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolea
             onToggle={() => setExpanded(expanded === id ? null : id)}
             onDelete={() => handleDelete(id)}
             footer={
-              <PrimaryButton
+              <Button
                 onClick={() => handleSave(id)}
                 disabled={putPolicy.isPending || !isDirty(id)}
               >
                 {putPolicy.isPending ? "Saving..." : "Save"}
-              </PrimaryButton>
+              </Button>
             }
             status={<UsedByStatus dark={dark} refs={refs} onNavigate={onNavigateTo ? (name) => onNavigateTo("vaults", name) : undefined} />}
           >

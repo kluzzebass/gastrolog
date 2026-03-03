@@ -13,7 +13,7 @@ import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, NumberInput } from "./FormField";
-import { PrimaryButton } from "./Buttons";
+import { Button } from "./Buttons";
 import { UsedByStatus, ruleRefsFor } from "./UsedByStatus";
 import type { SettingsTab } from "./SettingsDialog";
 
@@ -247,12 +247,12 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
             onToggle={() => setExpanded(expanded === id ? null : id)}
             onDelete={() => handleDelete(id)}
             footer={
-              <PrimaryButton
+              <Button
                 onClick={() => handleSave(id)}
                 disabled={putPolicy.isPending || !isDirty(id)}
               >
                 {putPolicy.isPending ? "Saving..." : "Save"}
-              </PrimaryButton>
+              </Button>
             }
             status={<UsedByStatus dark={dark} refs={refs} onNavigate={onNavigateTo ? (name) => onNavigateTo("vaults", name) : undefined} />}
           >

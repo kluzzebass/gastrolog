@@ -99,6 +99,18 @@ type Config struct {
 	// ClusterAddress is the cluster gRPC listen address (e.g., ":4565").
 	// Exposed in GetClusterStatus for join info. Empty for non-raft mode.
 	ClusterAddress string
+
+	// JoinClusterFunc is called by the JoinCluster RPC to join a running
+	// single-node server to an existing cluster at runtime. Nil disables.
+	JoinClusterFunc func(ctx context.Context, leaderAddr, joinToken string) error
+
+	// RemoveNodeFunc is called by the RemoveNode RPC to evict a node from the
+	// cluster. Nil disables.
+	RemoveNodeFunc func(ctx context.Context, nodeID string) error
+
+	// SetNodeSuffrageFunc is called by the SetNodeSuffrage RPC to promote or
+	// demote a node. Handles leader-forwarding internally. Nil disables.
+	SetNodeSuffrageFunc func(ctx context.Context, nodeID string, voter bool) error
 }
 
 // CertManager interface for TLS certificate management.
@@ -128,6 +140,9 @@ type Server struct {
 	localStatsFn     func() *apiv1.NodeStats
 	localNodeID      string
 	clusterAddress   string
+	joinClusterFn    func(ctx context.Context, leaderAddr, joinToken string) error
+	removeNodeFn        func(ctx context.Context, nodeID string) error
+	setNodeSuffrageFn   func(ctx context.Context, nodeID string, voter bool) error
 	startTime        time.Time
 	homeDir          string                     // gastrolog home directory; empty for in-memory config
 	afterConfigApply func(raftfsm.Notification) // non-raft dispatch hook
@@ -177,6 +192,9 @@ func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orche
 		localStatsFn:     cfg.LocalStats,
 		localNodeID:      cfg.NodeID,
 		clusterAddress:   cfg.ClusterAddress,
+		joinClusterFn:    cfg.JoinClusterFunc,
+		removeNodeFn:        cfg.RemoveNodeFunc,
+		setNodeSuffrageFn:   cfg.SetNodeSuffrageFunc,
 		startTime:        time.Now(),
 		homeDir:          cfg.HomeDir,
 		unixSocketConfig: cfg.UnixSocket,
@@ -310,7 +328,16 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 	configServer.SetOnLookupConfigChange(func(cfg config.LookupConfig) {
 		s.applyLookupConfig(cfg, geoipTable, asnTable)
 	})
-	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown, s.cluster, s.cfgStore, s.localNodeID, s.clusterAddress, s.peerStats, s.localStatsFn)
+	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown, s.cluster, s.cfgStore, s.localNodeID, s.clusterAddress, s.peerStats, s.localStatsFn, s.logger)
+	if s.joinClusterFn != nil {
+		lifecycleServer.SetJoinClusterFunc(s.joinClusterFn)
+	}
+	if s.removeNodeFn != nil {
+		lifecycleServer.SetRemoveNodeFunc(s.removeNodeFn)
+	}
+	if s.setNodeSuffrageFn != nil {
+		lifecycleServer.SetNodeSuffrageFunc(s.setNodeSuffrageFn)
+	}
 	authServer := NewAuthServer(s.cfgStore, s.tokens, s.logger, s.noAuth)
 	jobServer := NewJobServer(s.orch.Scheduler(), s.localNodeID, s.peerJobs)
 

@@ -1,5 +1,5 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { PrimaryButton } from "../settings/Buttons";
+import { Button } from "../settings/Buttons";
 
 interface WelcomeStepProps {
   dark: boolean;
@@ -25,7 +25,7 @@ export function WelcomeStep({ dark, onNext }: Readonly<WelcomeStepProps>) {
           collecting logs.
         </p>
       </div>
-      <PrimaryButton onClick={onNext}>Get Started</PrimaryButton>
+      <Button onClick={onNext}>Get Started</Button>
     </div>
   );
 }

@@ -19,7 +19,9 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -203,7 +205,7 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 
 	configSignal := notify.NewSignal()
 	disp := &configDispatcher{localNodeID: nodeID, logger: logger.With("component", "dispatch"), clusterTLS: clusterTLS, tlsFilePath: hd.ClusterTLSPath(), configSignal: configSignal}
-	cfgStore, err := openConfigStore(cfg.ConfigType, raftStoreOpts{
+	rawStore, err := openConfigStore(cfg.ConfigType, raftStoreOpts{
 		Home: hd, NodeID: nodeID, Init: cfg.ClusterInit, JoinAddr: cfg.JoinAddr,
 		ClusterSrv: clusterSrv, ClusterTLS: clusterTLS,
 		Logger: logger, FSMOpts: []raftfsm.Option{raftfsm.WithOnApply(disp.Handle)},
@@ -211,9 +213,12 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 	if err != nil {
 		return fmt.Errorf("open config store: %w", err)
 	}
-	if c, ok := cfgStore.(io.Closer); ok {
-		defer func() { _ = c.Close() }()
-	}
+
+	// Wrap in a proxy so runtime cluster join can swap the inner store.
+	// All consumers hold a reference to proxy; on join, only the inner changes.
+	proxy := config.NewStoreProxy(rawStore)
+	defer func() { _ = proxy.Close() }()
+	cfgStore := config.Store(proxy)
 
 	if err := startClusterServices(ctx, cfg, clusterSrv, clusterTLS, cfgStore, hd, logger); err != nil {
 		return err
@@ -249,7 +254,7 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 	// Client-side: forwarder ships records/searches to remote vault-owning nodes.
 	// Server-side: appender/executor receives forwarded requests into local vaults.
 	var searchForwarder *cluster.SearchForwarder
-	if _, ok := cfgStore.(*raftConfigStore); ok && clusterSrv != nil {
+	if _, ok := rawStore.(*raftConfigStore); ok && clusterSrv != nil {
 		peerConns := clusterSrv.PeerConns()
 
 		recordForwarder := cluster.NewRecordForwarder(
@@ -310,6 +315,19 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 		return err
 	}
 
+	// Build JoinCluster callback for runtime cluster join (raft mode only).
+	var joinClusterFn func(ctx context.Context, leaderAddr, joinToken string) error
+	var removeNodeFn func(ctx context.Context, nodeID string) error
+	var setNodeSuffrageFn func(ctx context.Context, nodeID string, voter bool) error
+	if cfg.ConfigType == "raft" && clusterSrv != nil {
+		joinClusterFn = makeJoinClusterFunc(proxy, clusterSrv, clusterTLS, hd, nodeID, cfg.ClusterAddr, orch, disp, logger)
+		removeNodeFn = makeRemoveNodeFunc(clusterSrv, nodeID, logger)
+		setNodeSuffrageFn = makeSetNodeSuffrageFunc(clusterSrv, nodeID, orch.Scheduler(), logger)
+
+		// Register eviction handler: reinitialize as a fresh single-node cluster.
+		clusterSrv.SetEvictionHandler(makeEvictionHandler(proxy, clusterSrv, clusterTLS, hd, nodeID, orch, disp, logger))
+	}
+
 	return serveAndAwaitShutdown(ctx, serverDeps{
 		Logger:           logger,
 		ServerAddr:       cfg.ServerAddr,
@@ -331,6 +349,9 @@ func run(ctx context.Context, logger *slog.Logger, cfg runConfig) error {
 		PeerJobState:     peerJobState,
 		LocalStats:       localStatsFn,
 		SearchForwarder:  searchForwarder,
+		JoinClusterFunc:  joinClusterFn,
+		RemoveNodeFunc:      removeNodeFn,
+		SetNodeSuffrageFunc: setNodeSuffrageFn,
 	})
 }
 
@@ -373,7 +394,7 @@ func startOrchestrator(ctx context.Context, logger *slog.Logger, orch *orchestra
 func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore config.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, nodeID string) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats) {
 	// Create the cluster broadcaster for peer-to-peer message fan-out.
 	var broadcaster *cluster.Broadcaster
-	if _, ok := cfgStore.(*raftConfigStore); ok && clusterSrv != nil {
+	if clusterSrv != nil && clusterSrv.PeerConns() != nil {
 		broadcaster = cluster.NewBroadcaster(clusterSrv.PeerConns(), logger.With("component", "broadcast"))
 	}
 	if broadcaster == nil || clusterSrv == nil {
@@ -702,7 +723,11 @@ func ensureNodeConfig(ctx context.Context, cfgStore config.Store, nodeID string)
 // waitForQuorum blocks until a Raft leader is elected, if the config store
 // is Raft-backed. Returns nil immediately for non-Raft stores.
 func waitForQuorum(ctx context.Context, cfgStore config.Store, logger *slog.Logger) error {
-	rcs, ok := cfgStore.(*raftConfigStore)
+	inner := cfgStore
+	if p, ok := cfgStore.(*config.StoreProxy); ok {
+		inner = p.Inner()
+	}
+	rcs, ok := inner.(*raftConfigStore)
 	if !ok {
 		return nil
 	}
@@ -830,13 +855,16 @@ type serverDeps struct {
 	PeerJobState     *cluster.PeerJobState
 	LocalStats       func() *gastrologv1.NodeStats
 	SearchForwarder  *cluster.SearchForwarder
+	JoinClusterFunc  func(ctx context.Context, leaderAddr, joinToken string) error
+	RemoveNodeFunc      func(ctx context.Context, nodeID string) error
+	SetNodeSuffrageFunc func(ctx context.Context, nodeID string, voter bool) error
 }
 
 func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 	var srv *server.Server
 	var serverWg sync.WaitGroup
 	if deps.ServerAddr != "" {
-		srv = server.New(deps.Orch, deps.CfgStore, deps.Factories, deps.Tokens, server.Config{Logger: deps.Logger, CertManager: deps.CertMgr, NoAuth: deps.NoAuth, HomeDir: deps.HomeDir, NodeID: deps.NodeID, UnixSocket: deps.SocketPath, AfterConfigApply: deps.AfterConfigApply, ConfigSignal: deps.ConfigSignal, Cluster: deps.ClusterSrv, PeerStats: deps.PeerState, PeerVaultStats: deps.PeerState, PeerJobs: deps.PeerJobState, LocalStats: deps.LocalStats, RemoteSearcher: deps.SearchForwarder, RemoteVaultForwarder: deps.SearchForwarder, ClusterAddress: deps.ClusterAddr})
+		srv = server.New(deps.Orch, deps.CfgStore, deps.Factories, deps.Tokens, server.Config{Logger: deps.Logger, CertManager: deps.CertMgr, NoAuth: deps.NoAuth, HomeDir: deps.HomeDir, NodeID: deps.NodeID, UnixSocket: deps.SocketPath, AfterConfigApply: deps.AfterConfigApply, ConfigSignal: deps.ConfigSignal, Cluster: deps.ClusterSrv, PeerStats: deps.PeerState, PeerVaultStats: deps.PeerState, PeerJobs: deps.PeerJobState, LocalStats: deps.LocalStats, RemoteSearcher: deps.SearchForwarder, RemoteVaultForwarder: deps.SearchForwarder, ClusterAddress: deps.ClusterAddr, JoinClusterFunc: deps.JoinClusterFunc, RemoveNodeFunc: deps.RemoveNodeFunc, SetNodeSuffrageFunc: deps.SetNodeSuffrageFunc})
 		serverWg.Go(func() {
 			if err := srv.ServeTCP(deps.ServerAddr); err != nil {
 				deps.Logger.Error("server error", "error", err)
@@ -958,6 +986,11 @@ type raftStoreOpts struct {
 	ClusterTLS *cluster.ClusterTLS
 	Logger     *slog.Logger
 	FSMOpts    []raftfsm.Option
+
+	// transport is an optional pre-created Raft transport (used during rejoin
+	// when the cluster server has already created a fresh transport).
+	// When nil, a new transport is obtained from ClusterSrv.Transport().
+	transport hraft.Transport
 }
 
 // openConfigStore creates a config.Store based on config type and home directory.
@@ -1045,18 +1078,23 @@ func openRaftConfigStore(opts raftStoreOpts) (config.Store, error) {
 		return nil, fmt.Errorf("create snapshot store: %w", err)
 	}
 
-	transport := opts.ClusterSrv.Transport()
+	tp := opts.transport
+	if tp == nil {
+		tp = opts.ClusterSrv.Transport()
+	}
 
 	fsm := raftfsm.New(opts.FSMOpts...)
 	conf := newRaftConfig(opts.NodeID)
 
-	r, err := hraft.NewRaft(conf, fsm, boltStore, boltStore, snapStore, transport)
+	r, err := hraft.NewRaft(conf, fsm, boltStore, boltStore, snapStore, tp)
 	if err != nil {
 		_ = boltStore.Close()
 		return nil, fmt.Errorf("create raft: %w", err)
 	}
 
-	if err := bootstrapAndWaitForLeader(r, boltStore, transport, opts); err != nil {
+	observeLeaderChanges(r, opts.Logger)
+
+	if err := bootstrapAndWaitForLeader(r, boltStore, tp, opts); err != nil {
 		return nil, err
 	}
 
@@ -1152,6 +1190,29 @@ func bootstrapAndWaitForLeader(r *hraft.Raft, boltStore io.Closer, transport hra
 	}
 
 	return nil
+}
+
+// observeLeaderChanges registers a Raft observer that logs leader elections
+// at Info level. The goroutine runs until the Raft instance is shut down.
+func observeLeaderChanges(r *hraft.Raft, logger *slog.Logger) {
+	ch := make(chan hraft.Observation, 16)
+	r.RegisterObserver(hraft.NewObserver(ch, false, func(o *hraft.Observation) bool {
+		_, ok := o.Data.(hraft.LeaderObservation)
+		return ok
+	}))
+	go func() {
+		for obs := range ch {
+			if lo, ok := obs.Data.(hraft.LeaderObservation); ok {
+				if lo.LeaderID == "" {
+					logger.Info("cluster lost leader")
+				} else {
+					logger.Info("cluster leader elected",
+						"node_id", string(lo.LeaderID),
+						"addr", string(lo.LeaderAddr))
+				}
+			}
+		}
+	}()
 }
 
 // bootstrapClusterTLS generates CA, cluster cert, and join token, then stores
@@ -1251,6 +1312,559 @@ func makeEnrollHandler(cfgStore config.Store, logger *slog.Logger) cluster.Enrol
 			ClusterKeyPem:  []byte(tls.ClusterKeyPEM),
 		}, nil
 	}
+}
+
+// makeJoinRollback creates a rollback function that restores the old raft
+// directory from backup and reopens the old config store.
+func makeJoinRollback(
+	proxy *config.StoreProxy,
+	clusterSrv *cluster.Server,
+	clusterTLS *cluster.ClusterTLS,
+	hd home.Dir,
+	nodeID, raftDir, backupDir string,
+	disp *configDispatcher,
+	logger *slog.Logger,
+) func() {
+	return func() {
+		logger.Warn("rolling back: restoring raft directory from backup")
+		if err := os.Rename(backupDir, raftDir); err != nil {
+			logger.Error("rollback: restore raft dir failed", "error", err)
+			return
+		}
+		oldStore, err := openRaftConfigStore(raftStoreOpts{
+			Home: hd, NodeID: nodeID,
+			ClusterSrv: clusterSrv, ClusterTLS: clusterTLS,
+			Logger: logger, FSMOpts: []raftfsm.Option{raftfsm.WithOnApply(disp.Handle)},
+		})
+		if err != nil {
+			logger.Error("rollback: reopen old store failed", "error", err)
+			proxy.ClearJoining()
+			return
+		}
+		proxy.Swap(oldStore)
+		if oldRCS, ok := oldStore.(*raftConfigStore); ok {
+			clusterSrv.SetApplyFn(func(ctx context.Context, data []byte) error {
+				return oldRCS.Store.(interface{ ApplyRaw([]byte) error }).ApplyRaw(data)
+			})
+		}
+		clusterSrv.SetEnrollHandler(makeEnrollHandler(proxy, logger))
+		if err := clusterSrv.Start(); err != nil {
+			logger.Error("rollback: restart cluster server failed", "error", err)
+		}
+	}
+}
+
+// cleanOrchestrator removes all vaults and ingesters from the orchestrator
+// (used after joining a new cluster to clear stale state from the old config).
+func cleanOrchestrator(orch *orchestrator.Orchestrator, logger *slog.Logger) {
+	for _, vaultID := range orch.ListVaults() {
+		if err := orch.ForceRemoveVault(vaultID); err != nil {
+			logger.Warn("join cleanup: remove vault failed", "vault_id", vaultID, "error", err)
+		}
+	}
+	for _, ingesterID := range orch.ListIngesters() {
+		if err := orch.RemoveIngester(ingesterID); err != nil {
+			logger.Warn("join cleanup: remove ingester failed", "ingester_id", ingesterID, "error", err)
+		}
+	}
+}
+
+// restartClusterWithStore configures the cluster server to use the given config
+// store's raft instance and starts the gRPC server.
+func restartClusterWithStore(store config.Store, proxy *config.StoreProxy, clusterSrv *cluster.Server, logger *slog.Logger) error {
+	rcs := store.(*raftConfigStore)
+	clusterSrv.SetApplyFn(func(ctx context.Context, data []byte) error {
+		return rcs.Store.(interface{ ApplyRaw([]byte) error }).ApplyRaw(data)
+	})
+	clusterSrv.SetEnrollHandler(makeEnrollHandler(proxy, logger))
+	if err := clusterSrv.Start(); err != nil {
+		return fmt.Errorf("restart cluster server: %w", err)
+	}
+	logger.Info("cluster server restarted")
+	return nil
+}
+
+// validateSingleNodeCluster checks that the proxy wraps a raft store and
+// the cluster has exactly one node (self). Returns the underlying raftConfigStore.
+func validateSingleNodeCluster(proxy *config.StoreProxy, clusterSrv *cluster.Server, nodeID string) (*raftConfigStore, error) {
+	rcs, ok := proxy.Inner().(*raftConfigStore)
+	if !ok {
+		return nil, errors.New("runtime cluster join requires raft config store")
+	}
+	servers, err := clusterSrv.Servers()
+	if err != nil {
+		return nil, fmt.Errorf("get raft servers: %w", err)
+	}
+	if len(servers) != 1 || servers[0].ID != nodeID {
+		return nil, errors.New("runtime cluster join requires a single-node cluster")
+	}
+	return rcs, nil
+}
+
+// makeJoinClusterFunc creates the callback for the JoinCluster RPC.
+// It captures all the pieces needed to swap the Raft store at runtime.
+func makeJoinClusterFunc(
+	proxy *config.StoreProxy,
+	clusterSrv *cluster.Server,
+	clusterTLS *cluster.ClusterTLS,
+	hd home.Dir,
+	nodeID string,
+	clusterAddr string,
+	orch *orchestrator.Orchestrator,
+	disp *configDispatcher,
+	logger *slog.Logger,
+) func(ctx context.Context, leaderAddr, joinToken string) error {
+	return func(ctx context.Context, leaderAddr, joinToken string) error {
+		logger.Info("runtime cluster join starting", "leader_addr", leaderAddr)
+
+		rcs, err := validateSingleNodeCluster(proxy, clusterSrv, nodeID)
+		if err != nil {
+			return err
+		}
+
+		// 1. Parse join token → tokenSecret + caHash
+		tokenSecret, caHash, err := tlsutil.ParseJoinToken(joinToken)
+		if err != nil {
+			return fmt.Errorf("parse join token: %w", err)
+		}
+
+		// 2. Enroll with remote leader → TLS material
+		logger.Info("enrolling with remote leader", "leader_addr", leaderAddr)
+		enrollCtx, enrollCancel := context.WithTimeout(ctx, 30*time.Second)
+		result, err := cluster.Enroll(enrollCtx, leaderAddr, tokenSecret, caHash, nodeID, clusterAddr)
+		enrollCancel()
+		if err != nil {
+			return fmt.Errorf("cluster enrollment: %w", err)
+		}
+
+		// 3. Hot-swap TLS: load new material + save to disk
+		if err := clusterTLS.Load(result.ClusterCertPEM, result.ClusterKeyPEM, result.CACertPEM); err != nil {
+			return fmt.Errorf("load enrolled TLS material: %w", err)
+		}
+		if err := cluster.SaveFile(hd.ClusterTLSPath(), result.ClusterCertPEM, result.ClusterKeyPEM, result.CACertPEM); err != nil {
+			return fmt.Errorf("save cluster TLS: %w", err)
+		}
+		logger.Info("TLS material swapped")
+
+		// 4. Mark proxy as joining — API requests return ErrJoining during swap
+		proxy.SetJoining()
+
+		// 5. Close old raft config store (snapshot + shutdown + close boltdb)
+		logger.Info("closing old raft config store")
+		if err := rcs.Close(); err != nil {
+			proxy.ClearJoining()
+			return fmt.Errorf("close old raft store: %w", err)
+		}
+
+		// 6. Rename <home>/raft/ → <home>/raft.bak.<timestamp>
+		raftDir := hd.RaftDir()
+		backupDir := raftDir + ".bak." + strconv.FormatInt(time.Now().UnixMilli(), 10)
+		logger.Info("backing up old raft directory", "from", raftDir, "to", backupDir)
+		if err := os.Rename(raftDir, backupDir); err != nil {
+			proxy.ClearJoining()
+			return fmt.Errorf("rename raft dir: %w", err)
+		}
+
+		rollback := makeJoinRollback(proxy, clusterSrv, clusterTLS, hd, nodeID, raftDir, backupDir, disp, logger)
+
+		// 7. PrepareRejoin: stop cluster gRPC, re-listen, get new transport
+		logger.Info("preparing cluster server for rejoin")
+		newTransport, err := clusterSrv.PrepareRejoin()
+		if err != nil {
+			rollback()
+			return fmt.Errorf("prepare rejoin: %w", err)
+		}
+
+		// 8. Open new raft config store (won't bootstrap — JoinAddr set)
+		logger.Info("opening new raft config store")
+		newStore, err := openRaftConfigStore(raftStoreOpts{
+			Home: hd, NodeID: nodeID, JoinAddr: leaderAddr,
+			ClusterSrv: clusterSrv, ClusterTLS: clusterTLS,
+			Logger: logger, FSMOpts: []raftfsm.Option{raftfsm.WithOnApply(disp.Handle)},
+			transport: newTransport,
+		})
+		if err != nil {
+			rollback()
+			return fmt.Errorf("open new raft store: %w", err)
+		}
+
+		// 9. Swap proxy — all consumers now see the new store
+		proxy.Swap(newStore)
+		logger.Info("config store swapped")
+
+		// 10. Clean up orchestrator: remove all old vaults and ingesters
+		cleanOrchestrator(orch, logger)
+
+		// 11. Restart cluster gRPC with new raft
+		if err := restartClusterWithStore(newStore, proxy, clusterSrv, logger); err != nil {
+			return err
+		}
+
+		// 12. Request membership from the remote leader
+		logger.Info("requesting cluster membership", "leader_addr", leaderAddr)
+		joinCtx, joinCancel := context.WithTimeout(ctx, 30*time.Second)
+		err = cluster.JoinCluster(joinCtx, leaderAddr, nodeID, clusterAddr, clusterTLS, true)
+		joinCancel()
+		if err != nil {
+			return fmt.Errorf("join cluster: %w", err)
+		}
+		logger.Info("cluster membership granted")
+
+		// 13. Wait for config replication (poll until server settings appear)
+		logger.Info("waiting for config replication from leader")
+		if err := waitForServerSettings(ctx, proxy, 60*time.Second, logger); err != nil {
+			return fmt.Errorf("wait for config replication: %w", err)
+		}
+
+		// 14. Ensure this node has a name in the new config store.
+		if _, err := ensureNodeConfig(ctx, proxy, nodeID); err != nil {
+			logger.Warn("failed to write node name after join", "error", err)
+		}
+
+		logger.Info("runtime cluster join complete")
+		return nil
+	}
+}
+
+// makeEvictionHandler creates the callback invoked when this node is evicted
+// from the cluster. Instead of shutting down, the node reinitializes as a
+// fresh single-node cluster so it comes back usable.
+func makeEvictionHandler(
+	proxy *config.StoreProxy,
+	clusterSrv *cluster.Server,
+	clusterTLS *cluster.ClusterTLS,
+	hd home.Dir,
+	nodeID string,
+	orch *orchestrator.Orchestrator,
+	disp *configDispatcher,
+	logger *slog.Logger,
+) func() {
+	return func() {
+		logger.Warn("evicted from cluster — reinitializing as single-node")
+
+		// 1. Get old raft config store.
+		rcs, ok := proxy.Inner().(*raftConfigStore)
+		if !ok {
+			logger.Error("eviction reinit: config store is not raft-backed, shutting down instead")
+			p, _ := os.FindProcess(os.Getpid())
+			_ = p.Signal(os.Interrupt)
+			return
+		}
+
+		// 2. Mark proxy as joining — API requests return ErrJoining during swap.
+		proxy.SetJoining()
+
+		// 3. Close old raft config store.
+		logger.Info("eviction reinit: closing old raft config store")
+		if err := rcs.Close(); err != nil {
+			logger.Error("eviction reinit: close old store failed, shutting down", "error", err)
+			proxy.ClearJoining()
+			p, _ := os.FindProcess(os.Getpid())
+			_ = p.Signal(os.Interrupt)
+			return
+		}
+
+		// 4. Rename raft/ → raft.bak.<timestamp>
+		raftDir := hd.RaftDir()
+		backupDir := raftDir + ".bak." + strconv.FormatInt(time.Now().UnixMilli(), 10)
+		logger.Info("eviction reinit: backing up old raft directory", "from", raftDir, "to", backupDir)
+		if err := os.Rename(raftDir, backupDir); err != nil {
+			logger.Error("eviction reinit: rename raft dir failed, shutting down", "error", err)
+			proxy.ClearJoining()
+			p, _ := os.FindProcess(os.Getpid())
+			_ = p.Signal(os.Interrupt)
+			return
+		}
+
+		// 5. PrepareRejoin: stop cluster gRPC, re-listen, get new transport.
+		logger.Info("eviction reinit: preparing cluster server for reinit")
+		newTransport, err := clusterSrv.PrepareRejoin()
+		if err != nil {
+			logger.Error("eviction reinit: prepare rejoin failed, shutting down", "error", err)
+			p, _ := os.FindProcess(os.Getpid())
+			_ = p.Signal(os.Interrupt)
+			return
+		}
+
+		// 6. Open new raft config store — no JoinAddr, so it bootstraps as single-node.
+		logger.Info("eviction reinit: opening fresh raft config store")
+		newStore, err := openRaftConfigStore(raftStoreOpts{
+			Home: hd, NodeID: nodeID,
+			ClusterSrv: clusterSrv, ClusterTLS: clusterTLS,
+			Logger: logger, FSMOpts: []raftfsm.Option{raftfsm.WithOnApply(disp.Handle)},
+			transport: newTransport,
+		})
+		if err != nil {
+			logger.Error("eviction reinit: open new store failed, shutting down", "error", err)
+			p, _ := os.FindProcess(os.Getpid())
+			_ = p.Signal(os.Interrupt)
+			return
+		}
+
+		// 7. Swap proxy — all consumers now see the new (empty) store.
+		proxy.Swap(newStore)
+		logger.Info("eviction reinit: config store swapped")
+
+		// 8. Clean up orchestrator: remove all old vaults and ingesters.
+		cleanOrchestrator(orch, logger)
+
+		// 9. Restart cluster gRPC with new raft.
+		if err := restartClusterWithStore(newStore, proxy, clusterSrv, logger); err != nil {
+			logger.Error("eviction reinit: restart cluster server failed, shutting down", "error", err)
+			p, _ := os.FindProcess(os.Getpid())
+			_ = p.Signal(os.Interrupt)
+			return
+		}
+
+		logger.Info("eviction reinit complete — running as single-node cluster")
+	}
+}
+
+// makeRemoveNodeFunc creates the callback for the RemoveNode RPC.
+// Any node can call this — if the current node is not the leader, the request
+// is forwarded to the leader via the ForwardRemoveNode cluster RPC.
+func makeRemoveNodeFunc(
+	clusterSrv *cluster.Server,
+	nodeID string,
+	logger *slog.Logger,
+) func(ctx context.Context, targetNodeID string) error {
+	// removeOnLeader executes the removal on the leader node:
+	// Raft membership change + best-effort eviction notification.
+	removeOnLeader := func(ctx context.Context, targetNodeID string) error {
+		// 1. Get connection to target BEFORE removal (still in Raft config).
+		peerConns := clusterSrv.PeerConns()
+		var evictConn *cluster.NotifyEvictionClient
+		if peerConns != nil {
+			if c, err := peerConns.Conn(targetNodeID); err == nil {
+				evictConn = cluster.NewNotifyEvictionClient(c)
+			} else {
+				logger.Warn("cannot pre-connect to evicted node for notification", "error", err)
+			}
+		}
+
+		// 2. Remove from Raft cluster.
+		logger.Info("removing node from cluster", "node_id", targetNodeID)
+		if err := clusterSrv.RemoveServer(targetNodeID, 10*time.Second); err != nil {
+			return fmt.Errorf("remove server: %w", err)
+		}
+		logger.Info("node removed from cluster", "node_id", targetNodeID)
+
+		// 3. Best-effort: notify the evicted node to shut down.
+		if evictConn != nil {
+			go func() {
+				notifyCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := evictConn.NotifyEviction(notifyCtx, "removed from cluster by leader"); err != nil {
+					logger.Warn("failed to notify evicted node", "node_id", targetNodeID, "error", err)
+				} else {
+					logger.Info("eviction notification sent", "node_id", targetNodeID)
+				}
+				peerConns.Invalidate(targetNodeID)
+			}()
+		}
+
+		return nil
+	}
+
+	// Register the leader-side handler on the cluster server so ForwardRemoveNode
+	// RPCs from followers invoke the same logic.
+	clusterSrv.SetRemoveNodeFn(removeOnLeader)
+
+	// The returned function handles both leader and follower cases.
+	return func(ctx context.Context, targetNodeID string) error {
+		_, leaderID := clusterSrv.LeaderInfo()
+
+		// If we are the leader, handle directly.
+		if leaderID == nodeID {
+			return removeOnLeader(ctx, targetNodeID)
+		}
+
+		// Forward to leader via cluster gRPC.
+		if leaderID == "" {
+			return errors.New("no leader available")
+		}
+		peerConns := clusterSrv.PeerConns()
+		if peerConns == nil {
+			return errors.New("peer connections not available")
+		}
+		conn, err := peerConns.Conn(leaderID)
+		if err != nil {
+			return fmt.Errorf("connect to leader %s: %w", leaderID, err)
+		}
+		logger.Info("forwarding node removal to leader", "leader_id", leaderID, "target_node_id", targetNodeID)
+		client := cluster.NewForwardRemoveNodeClient(conn)
+		return client.ForwardRemoveNode(ctx, targetNodeID)
+	}
+}
+
+// makeSetNodeSuffrageFunc creates the callback for the SetNodeSuffrage RPC.
+// Any node can call this — if the current node is not the leader, the request
+// is forwarded to the leader via the ForwardSetNodeSuffrage cluster RPC.
+func makeSetNodeSuffrageFunc(
+	clusterSrv *cluster.Server,
+	nodeID string,
+	scheduler *orchestrator.Scheduler,
+	logger *slog.Logger,
+) func(ctx context.Context, targetNodeID string, voter bool) error {
+	// suffrageOnLeader executes the suffrage change on the leader node.
+	suffrageOnLeader := func(_ context.Context, targetNodeID string, voter bool) error {
+		nodeAddr, err := lookupNodeAddr(clusterSrv, targetNodeID)
+		if err != nil {
+			return err
+		}
+		const timeout = 10 * time.Second
+		if voter {
+			logger.Info("promoting node to voter", "node_id", targetNodeID)
+			if err := clusterSrv.AddVoter(targetNodeID, nodeAddr, timeout); err != nil {
+				logger.Error("suffrage change failed", "node_id", targetNodeID, "voter", voter, "error", err)
+				return err
+			}
+			logger.Info("node promoted to voter", "node_id", targetNodeID)
+		} else {
+			logger.Info("demoting node to nonvoter", "node_id", targetNodeID)
+			if err := clusterSrv.DemoteVoter(targetNodeID, timeout); err != nil {
+				logger.Error("suffrage change failed", "node_id", targetNodeID, "voter", voter, "error", err)
+				return err
+			}
+			logger.Info("node demoted to nonvoter", "node_id", targetNodeID)
+		}
+		return nil
+	}
+
+	// Register the leader-side handler so ForwardSetNodeSuffrage RPCs from
+	// followers invoke the same logic.
+	clusterSrv.SetNodeSuffrageFn(func(ctx context.Context, nodeID, nodeAddr string, voter bool) error {
+		return suffrageOnLeader(ctx, nodeID, voter)
+	})
+
+	// demotingSelf prevents duplicate self-demotion jobs from concurrent clicks.
+	var demotingSelf atomic.Bool
+
+	// The returned function handles both leader and follower cases.
+	return func(ctx context.Context, targetNodeID string, voter bool) error {
+		_, leaderID := clusterSrv.LeaderInfo()
+
+		// Special case: demoting the leader. This is a two-phase operation:
+		// 1. Transfer leadership to another voter
+		// 2. Forward the demotion to the new leader
+		//
+		// We run this as a scheduler one-shot task so that step 2 survives
+		// even if the HTTP request context is cancelled. If leadership
+		// transfers but the forward demotion fails, the task retries.
+		if !voter && targetNodeID == leaderID && leaderID == nodeID {
+			if !demotingSelf.CompareAndSwap(false, true) {
+				return errors.New("leader demotion already in progress")
+			}
+			submitSelfDemotion(scheduler, clusterSrv, nodeID, logger, func() {
+				demotingSelf.Store(false)
+			})
+			return nil
+		}
+
+		// If we are the leader, handle directly.
+		if leaderID == nodeID {
+			return suffrageOnLeader(ctx, targetNodeID, voter)
+		}
+
+		// Forward to leader via cluster gRPC.
+		if leaderID == "" {
+			return errors.New("no leader available")
+		}
+		logger.Info("forwarding suffrage change to leader", "leader_id", leaderID, "target_node_id", targetNodeID, "voter", voter)
+		return forwardSuffrage(clusterSrv, leaderID, targetNodeID, voter)
+	}
+}
+
+// lookupNodeAddr finds a node's cluster address in the current Raft configuration.
+func lookupNodeAddr(clusterSrv *cluster.Server, targetNodeID string) (string, error) {
+	servers, err := clusterSrv.Servers()
+	if err != nil {
+		return "", fmt.Errorf("list servers: %w", err)
+	}
+	for _, srv := range servers {
+		if srv.ID == targetNodeID {
+			return srv.Address, nil
+		}
+	}
+	return "", fmt.Errorf("node %s not in cluster configuration", targetNodeID)
+}
+
+// forwardSuffrage forwards a suffrage change to the current leader via cluster gRPC.
+func forwardSuffrage(clusterSrv *cluster.Server, leaderID, targetNodeID string, voter bool) error {
+	peerConns := clusterSrv.PeerConns()
+	if peerConns == nil {
+		return errors.New("peer connections not available")
+	}
+	conn, err := peerConns.Conn(leaderID)
+	if err != nil {
+		return fmt.Errorf("connect to leader %s: %w", leaderID, err)
+	}
+	nodeAddr, err := lookupNodeAddr(clusterSrv, targetNodeID)
+	if err != nil {
+		return err
+	}
+	client := cluster.NewForwardSetNodeSuffrageClient(conn)
+	return client.ForwardSetNodeSuffrage(context.Background(), targetNodeID, nodeAddr, voter)
+}
+
+// submitSelfDemotion runs leader self-demotion as a background job: transfer
+// leadership, then forward the demotion to the new leader with retries.
+func submitSelfDemotion(
+	scheduler *orchestrator.Scheduler,
+	clusterSrv *cluster.Server,
+	nodeID string,
+	logger *slog.Logger,
+	done func(), // called when the job finishes (clears the atomic guard)
+) {
+	scheduler.Submit("demote-self", func(ctx context.Context, prog *orchestrator.JobProgress) {
+		defer done()
+		prog.SetRunning(2) // 2 phases: transfer + demote
+
+		logger.Info("transferring leadership before self-demotion")
+		if err := clusterSrv.LeadershipTransfer(); err != nil {
+			prog.Fail(time.Now(), fmt.Sprintf("leadership transfer: %v", err))
+			return
+		}
+		prog.IncrChunks() // phase 1 done
+
+		// Wait for a new leader to emerge (up to 10s).
+		var newLeaderID string
+		for range 40 {
+			time.Sleep(250 * time.Millisecond)
+			_, id := clusterSrv.LeaderInfo()
+			if id != "" && id != nodeID {
+				newLeaderID = id
+				break
+			}
+		}
+		if newLeaderID == "" {
+			prog.Fail(time.Now(), "timed out waiting for new leader after transfer")
+			return
+		}
+		logger.Info("leadership transferred", "new_leader_id", newLeaderID)
+
+		// Forward demotion to the new leader, with retries.
+		var lastErr error
+		for attempt := range 5 {
+			if attempt > 0 {
+				time.Sleep(time.Duration(attempt) * time.Second)
+				// Re-check leader in case it changed again.
+				_, id := clusterSrv.LeaderInfo()
+				if id != "" && id != nodeID {
+					newLeaderID = id
+				}
+			}
+			if err := forwardSuffrage(clusterSrv, newLeaderID, nodeID, false); err != nil {
+				lastErr = err
+				logger.Warn("forward demotion attempt failed", "attempt", attempt+1, "error", err)
+				continue
+			}
+			logger.Info("self-demotion completed via new leader", "new_leader_id", newLeaderID)
+			prog.IncrChunks() // phase 2 done
+			return
+		}
+		prog.Fail(time.Now(), fmt.Sprintf("forward demotion failed after retries: %v", lastErr))
+	})
 }
 
 // orchStatsAdapter bridges orchestrator methods to the cluster.StatsProvider

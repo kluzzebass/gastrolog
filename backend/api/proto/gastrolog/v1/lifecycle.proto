@@ -19,6 +19,14 @@ service LifecycleService {
 
   // SetNodeSuffrage promotes or demotes a node's voting status.
   rpc SetNodeSuffrage(SetNodeSuffrageRequest) returns (SetNodeSuffrageResponse);
+
+  // JoinCluster joins a running single-node server to an existing cluster at runtime.
+  // The node's Raft state is replaced by the remote cluster's state via replication.
+  rpc JoinCluster(JoinClusterRequest) returns (JoinClusterResponse);
+
+  // RemoveNode evicts a node from the cluster. Must be called on the leader.
+  // The evicted node receives a best-effort shutdown notification.
+  rpc RemoveNode(RemoveNodeRequest) returns (RemoveNodeResponse);
 }
 
 message HealthRequest {}
@@ -103,3 +111,16 @@ message SetNodeSuffrageRequest {
 }
 
 message SetNodeSuffrageResponse {}
+
+message JoinClusterRequest {
+  string leader_address = 1; // cluster address of the leader to join (e.g., "10.0.0.1:4565")
+  string join_token = 2;     // join token from the leader's cluster status
+}
+
+message JoinClusterResponse {}
+
+message RemoveNodeRequest {
+  string node_id = 1; // ID of the node to evict from the cluster
+}
+
+message RemoveNodeResponse {}

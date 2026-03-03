@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useConfig, useSettings, usePutNodeConfig } from "../../api/hooks/useConfig";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useSetNodeSuffrage } from "../../api/hooks/useSetNodeSuffrage";
+import { useJoinCluster } from "../../api/hooks/useJoinCluster";
+import { useRemoveNode } from "../../api/hooks/useRemoveNode";
 import { ClusterNodeRole, ClusterNodeSuffrage } from "../../api/gen/gastrolog/v1/lifecycle_pb";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useEditState } from "../../hooks/useEditState";
@@ -11,7 +13,7 @@ import { CopyButton } from "../CopyButton";
 import { EyeIcon, EyeOffIcon } from "../icons";
 import { SettingsCard } from "./SettingsCard";
 import { FormField, TextInput } from "./FormField";
-import { PrimaryButton, GhostButton } from "./Buttons";
+import { Button } from "./Buttons";
 
 function roleName(role: ClusterNodeRole): string {
   switch (role) {
@@ -35,6 +37,7 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const { data: clusterData } = useClusterStatus();
   const putNodeConfig = usePutNodeConfig();
   const setNodeSuffrage = useSetNodeSuffrage();
+  const removeNode = useRemoveNode();
   const { addToast } = useToast();
 
   const localNodeId = settingsData?.nodeId ?? "";
@@ -66,7 +69,7 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
         ]
       : [];
 
-  const isLeaderNode = clusterEnabled && nodes.some((n) => n.isLeader && n.id === localNodeId);
+  const voterCount = nodes.filter((n) => n.suffrage === ClusterNodeSuffrage.VOTER).length;
 
   const defaults = (id: string): NodeEdit => ({
     name: nodes.find((n) => n.id === id)?.name ?? "",
@@ -74,6 +77,7 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
 
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
+  const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const toggle = (key: string) =>
     setExpandedCards((prev) => ({ ...prev, [key]: !prev[key] }));
 
@@ -138,15 +142,15 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
               footer={
                 dirty ? (
                   <>
-                    <GhostButton onClick={() => clearEdit(node.id)} dark={dark}>
+                    <Button variant="ghost" onClick={() => clearEdit(node.id)} dark={dark}>
                       Reset
-                    </GhostButton>
-                    <PrimaryButton
+                    </Button>
+                    <Button
                       onClick={() => handleSave(node.id)}
                       disabled={putNodeConfig.isPending}
                     >
                       {putNodeConfig.isPending ? "Saving..." : "Save"}
-                    </PrimaryButton>
+                    </Button>
                   </>
                 ) : undefined
               }
@@ -160,10 +164,10 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
                   mono
                 />
               </FormField>
-              {clusterEnabled && !node.isLeader && isLeaderNode && (
-                <div className="pt-1">
-                  {node.suffrage === ClusterNodeSuffrage.VOTER ? (
-                    <GhostButton
+              {clusterEnabled && (
+                <div className="pt-1 flex items-center gap-2">
+                  {node.suffrage === ClusterNodeSuffrage.VOTER && (
+                    <Button variant="ghost"
                       onClick={async () => {
                         try {
                           await setNodeSuffrage.mutateAsync({ nodeId: node.id, voter: false });
@@ -173,11 +177,14 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
                         }
                       }}
                       dark={dark}
+                      bordered
+                      disabled={voterCount <= 1}
                     >
-                      Demote to Nonvoter
-                    </GhostButton>
-                  ) : node.suffrage === ClusterNodeSuffrage.NONVOTER ? (
-                    <GhostButton
+                      Demote
+                    </Button>
+                  )}
+                  {node.suffrage === ClusterNodeSuffrage.NONVOTER && (
+                    <Button variant="ghost"
                       onClick={async () => {
                         try {
                           await setNodeSuffrage.mutateAsync({ nodeId: node.id, voter: true });
@@ -187,10 +194,39 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
                         }
                       }}
                       dark={dark}
+                      bordered
                     >
-                      Promote to Voter
-                    </GhostButton>
-                  ) : null}
+                      Promote
+                    </Button>
+                  )}
+                  {!isLocal && (confirmRemoveId === node.id ? (
+                    <>
+                      <span className={`text-[0.75em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+                        This will evict the node from the cluster.
+                      </span>
+                      <Button variant="danger"
+                        onClick={async () => {
+                          try {
+                            await removeNode.mutateAsync({ nodeId: node.id });
+                            addToast("Node removed from cluster", "info");
+                            setConfirmRemoveId(null);
+                          } catch (err: any) {
+                            addToast(err.message ?? "Failed to remove node", "error");
+                          }
+                        }}
+                        disabled={removeNode.isPending}
+                      >
+                        {removeNode.isPending ? "Removing..." : "Remove"}
+                      </Button>
+                      <Button variant="ghost" onClick={() => setConfirmRemoveId(null)} dark={dark}>
+                        Cancel
+                      </Button>
+                    </>
+                  ) : (
+                    <Button variant="danger" onClick={() => setConfirmRemoveId(node.id)}>
+                      Remove
+                    </Button>
+                  ))}
                 </div>
               )}
             </SettingsCard>
@@ -209,6 +245,92 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
       {clusterEnabled && clusterData?.joinToken && (
         <JoinInfoCard dark={dark} joinToken={clusterData.joinToken} clusterAddress={clusterData.clusterAddress} />
       )}
+
+      {clusterEnabled && nodes.length === 1 && (
+        <JoinClusterCard dark={dark} />
+      )}
+    </div>
+  );
+}
+
+function JoinClusterCard({ dark }: Readonly<{ dark: boolean }>) {
+  const c = useThemeClass(dark);
+  const { addToast } = useToast();
+  const joinCluster = useJoinCluster();
+  const [leaderAddress, setLeaderAddress] = useState("");
+  const [joinToken, setJoinToken] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+
+  const canSubmit = leaderAddress.trim() !== "" && joinToken.trim() !== "" && confirmed;
+
+  const handleJoin = async () => {
+    try {
+      await joinCluster.mutateAsync({
+        leaderAddress: leaderAddress.trim(),
+        joinToken: joinToken.trim(),
+      });
+      addToast("Successfully joined cluster", "info");
+      setLeaderAddress("");
+      setJoinToken("");
+      setConfirmed(false);
+    } catch (err: any) {
+      addToast(err.message ?? "Failed to join cluster", "error");
+    }
+  };
+
+  return (
+    <div className={`mt-4 rounded-lg border p-4 ${c(
+      "bg-ink-well/50 border-ink-border",
+      "bg-light-well/50 border-light-border",
+    )}`}>
+      <h3 className={`text-[0.85em] font-semibold mb-1 ${c("text-text-primary", "text-light-text-primary")}`}>
+        Join Cluster
+      </h3>
+      <p className={`text-[0.75em] mb-3 ${c("text-text-ghost", "text-light-text-ghost")}`}>
+        Join an existing cluster at runtime. This node's local configuration will be replaced by the cluster's configuration.
+      </p>
+      <div className="flex flex-col gap-2.5">
+        <FormField label="Leader Address" dark={dark}>
+          <TextInput
+            value={leaderAddress}
+            onChange={setLeaderAddress}
+            placeholder="e.g. 10.0.0.1:4565"
+            dark={dark}
+            mono
+            disabled={joinCluster.isPending}
+          />
+        </FormField>
+        <FormField label="Join Token" dark={dark}>
+          <TextInput
+            value={joinToken}
+            onChange={setJoinToken}
+            placeholder="Paste join token from the leader"
+            dark={dark}
+            mono
+            disabled={joinCluster.isPending}
+          />
+        </FormField>
+        <label className={`flex items-start gap-2 text-[0.75em] cursor-pointer ${c("text-text-muted", "text-light-text-muted")}`}>
+          <input
+            type="checkbox"
+            checked={confirmed}
+            onChange={(e) => setConfirmed(e.target.checked)}
+            disabled={joinCluster.isPending}
+            className="mt-0.5"
+          />
+          <span>
+            I understand that this node's local config will be replaced by the remote cluster's config. This action cannot be undone.
+          </span>
+        </label>
+        <div className="flex justify-end pt-1">
+          <Button
+            onClick={handleJoin}
+            disabled={!canSubmit || joinCluster.isPending}
+          >
+            {joinCluster.isPending ? "Joining..." : "Join Cluster"}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -44,6 +44,12 @@ const (
 	// LifecycleServiceSetNodeSuffrageProcedure is the fully-qualified name of the LifecycleService's
 	// SetNodeSuffrage RPC.
 	LifecycleServiceSetNodeSuffrageProcedure = "/gastrolog.v1.LifecycleService/SetNodeSuffrage"
+	// LifecycleServiceJoinClusterProcedure is the fully-qualified name of the LifecycleService's
+	// JoinCluster RPC.
+	LifecycleServiceJoinClusterProcedure = "/gastrolog.v1.LifecycleService/JoinCluster"
+	// LifecycleServiceRemoveNodeProcedure is the fully-qualified name of the LifecycleService's
+	// RemoveNode RPC.
+	LifecycleServiceRemoveNodeProcedure = "/gastrolog.v1.LifecycleService/RemoveNode"
 )
 
 // LifecycleServiceClient is a client for the gastrolog.v1.LifecycleService service.
@@ -56,6 +62,12 @@ type LifecycleServiceClient interface {
 	GetClusterStatus(context.Context, *connect.Request[v1.GetClusterStatusRequest]) (*connect.Response[v1.GetClusterStatusResponse], error)
 	// SetNodeSuffrage promotes or demotes a node's voting status.
 	SetNodeSuffrage(context.Context, *connect.Request[v1.SetNodeSuffrageRequest]) (*connect.Response[v1.SetNodeSuffrageResponse], error)
+	// JoinCluster joins a running single-node server to an existing cluster at runtime.
+	// The node's Raft state is replaced by the remote cluster's state via replication.
+	JoinCluster(context.Context, *connect.Request[v1.JoinClusterRequest]) (*connect.Response[v1.JoinClusterResponse], error)
+	// RemoveNode evicts a node from the cluster. Must be called on the leader.
+	// The evicted node receives a best-effort shutdown notification.
+	RemoveNode(context.Context, *connect.Request[v1.RemoveNodeRequest]) (*connect.Response[v1.RemoveNodeResponse], error)
 }
 
 // NewLifecycleServiceClient constructs a client for the gastrolog.v1.LifecycleService service. By
@@ -93,6 +105,18 @@ func NewLifecycleServiceClient(httpClient connect.HTTPClient, baseURL string, op
 			connect.WithSchema(lifecycleServiceMethods.ByName("SetNodeSuffrage")),
 			connect.WithClientOptions(opts...),
 		),
+		joinCluster: connect.NewClient[v1.JoinClusterRequest, v1.JoinClusterResponse](
+			httpClient,
+			baseURL+LifecycleServiceJoinClusterProcedure,
+			connect.WithSchema(lifecycleServiceMethods.ByName("JoinCluster")),
+			connect.WithClientOptions(opts...),
+		),
+		removeNode: connect.NewClient[v1.RemoveNodeRequest, v1.RemoveNodeResponse](
+			httpClient,
+			baseURL+LifecycleServiceRemoveNodeProcedure,
+			connect.WithSchema(lifecycleServiceMethods.ByName("RemoveNode")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -102,6 +126,8 @@ type lifecycleServiceClient struct {
 	shutdown         *connect.Client[v1.ShutdownRequest, v1.ShutdownResponse]
 	getClusterStatus *connect.Client[v1.GetClusterStatusRequest, v1.GetClusterStatusResponse]
 	setNodeSuffrage  *connect.Client[v1.SetNodeSuffrageRequest, v1.SetNodeSuffrageResponse]
+	joinCluster      *connect.Client[v1.JoinClusterRequest, v1.JoinClusterResponse]
+	removeNode       *connect.Client[v1.RemoveNodeRequest, v1.RemoveNodeResponse]
 }
 
 // Health calls gastrolog.v1.LifecycleService.Health.
@@ -124,6 +150,16 @@ func (c *lifecycleServiceClient) SetNodeSuffrage(ctx context.Context, req *conne
 	return c.setNodeSuffrage.CallUnary(ctx, req)
 }
 
+// JoinCluster calls gastrolog.v1.LifecycleService.JoinCluster.
+func (c *lifecycleServiceClient) JoinCluster(ctx context.Context, req *connect.Request[v1.JoinClusterRequest]) (*connect.Response[v1.JoinClusterResponse], error) {
+	return c.joinCluster.CallUnary(ctx, req)
+}
+
+// RemoveNode calls gastrolog.v1.LifecycleService.RemoveNode.
+func (c *lifecycleServiceClient) RemoveNode(ctx context.Context, req *connect.Request[v1.RemoveNodeRequest]) (*connect.Response[v1.RemoveNodeResponse], error) {
+	return c.removeNode.CallUnary(ctx, req)
+}
+
 // LifecycleServiceHandler is an implementation of the gastrolog.v1.LifecycleService service.
 type LifecycleServiceHandler interface {
 	// Health returns the server health status.
@@ -134,6 +170,12 @@ type LifecycleServiceHandler interface {
 	GetClusterStatus(context.Context, *connect.Request[v1.GetClusterStatusRequest]) (*connect.Response[v1.GetClusterStatusResponse], error)
 	// SetNodeSuffrage promotes or demotes a node's voting status.
 	SetNodeSuffrage(context.Context, *connect.Request[v1.SetNodeSuffrageRequest]) (*connect.Response[v1.SetNodeSuffrageResponse], error)
+	// JoinCluster joins a running single-node server to an existing cluster at runtime.
+	// The node's Raft state is replaced by the remote cluster's state via replication.
+	JoinCluster(context.Context, *connect.Request[v1.JoinClusterRequest]) (*connect.Response[v1.JoinClusterResponse], error)
+	// RemoveNode evicts a node from the cluster. Must be called on the leader.
+	// The evicted node receives a best-effort shutdown notification.
+	RemoveNode(context.Context, *connect.Request[v1.RemoveNodeRequest]) (*connect.Response[v1.RemoveNodeResponse], error)
 }
 
 // NewLifecycleServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -167,6 +209,18 @@ func NewLifecycleServiceHandler(svc LifecycleServiceHandler, opts ...connect.Han
 		connect.WithSchema(lifecycleServiceMethods.ByName("SetNodeSuffrage")),
 		connect.WithHandlerOptions(opts...),
 	)
+	lifecycleServiceJoinClusterHandler := connect.NewUnaryHandler(
+		LifecycleServiceJoinClusterProcedure,
+		svc.JoinCluster,
+		connect.WithSchema(lifecycleServiceMethods.ByName("JoinCluster")),
+		connect.WithHandlerOptions(opts...),
+	)
+	lifecycleServiceRemoveNodeHandler := connect.NewUnaryHandler(
+		LifecycleServiceRemoveNodeProcedure,
+		svc.RemoveNode,
+		connect.WithSchema(lifecycleServiceMethods.ByName("RemoveNode")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.LifecycleService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case LifecycleServiceHealthProcedure:
@@ -177,6 +231,10 @@ func NewLifecycleServiceHandler(svc LifecycleServiceHandler, opts ...connect.Han
 			lifecycleServiceGetClusterStatusHandler.ServeHTTP(w, r)
 		case LifecycleServiceSetNodeSuffrageProcedure:
 			lifecycleServiceSetNodeSuffrageHandler.ServeHTTP(w, r)
+		case LifecycleServiceJoinClusterProcedure:
+			lifecycleServiceJoinClusterHandler.ServeHTTP(w, r)
+		case LifecycleServiceRemoveNodeProcedure:
+			lifecycleServiceRemoveNodeHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -200,4 +258,12 @@ func (UnimplementedLifecycleServiceHandler) GetClusterStatus(context.Context, *c
 
 func (UnimplementedLifecycleServiceHandler) SetNodeSuffrage(context.Context, *connect.Request[v1.SetNodeSuffrageRequest]) (*connect.Response[v1.SetNodeSuffrageResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.LifecycleService.SetNodeSuffrage is not implemented"))
+}
+
+func (UnimplementedLifecycleServiceHandler) JoinCluster(context.Context, *connect.Request[v1.JoinClusterRequest]) (*connect.Response[v1.JoinClusterResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.LifecycleService.JoinCluster is not implemented"))
+}
+
+func (UnimplementedLifecycleServiceHandler) RemoveNode(context.Context, *connect.Request[v1.RemoveNodeRequest]) (*connect.Response[v1.RemoveNodeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.LifecycleService.RemoveNode is not implemented"))
 }

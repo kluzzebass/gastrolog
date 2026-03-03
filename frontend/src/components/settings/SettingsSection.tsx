@@ -1,5 +1,5 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { PrimaryButton } from "./Buttons";
+import { Button } from "./Buttons";
 
 interface SettingsSectionProps {
   addLabel?: string;
@@ -45,9 +45,9 @@ export function SettingsSection({
       {addLabel && (
         <div className="flex items-center justify-end mb-5">
           {addSlot || (
-            <PrimaryButton onClick={onToggleAdd}>
+            <Button onClick={onToggleAdd}>
               {adding ? "Cancel" : addLabel}
-            </PrimaryButton>
+            </Button>
           )}
         </div>
       )}

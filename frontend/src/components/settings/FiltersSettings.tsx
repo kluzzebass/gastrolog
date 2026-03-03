@@ -8,7 +8,7 @@ import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput } from "./FormField";
-import { PrimaryButton } from "./Buttons";
+import { Button } from "./Buttons";
 import { UsedByStatus, routeRefsForFilter } from "./UsedByStatus";
 import type { SettingsTab } from "./SettingsDialog";
 
@@ -181,12 +181,12 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
             onToggle={() => setExpanded(expanded === id ? null : id)}
             onDelete={() => handleDelete(id)}
             footer={
-              <PrimaryButton
+              <Button
                 onClick={() => handleSave(id)}
                 disabled={putFilter.isPending || !isDirty(id)}
               >
                 {putFilter.isPending ? "Saving..." : "Save"}
-              </PrimaryButton>
+              </Button>
             }
             status={<UsedByStatus dark={dark} refs={refs} onNavigate={onNavigateTo ? (name) => onNavigateTo("routes", name) : undefined} />}
           >

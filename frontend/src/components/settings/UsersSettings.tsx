@@ -17,7 +17,7 @@ import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, SelectInput } from "./FormField";
-import { PrimaryButton } from "./Buttons";
+import { Button } from "./Buttons";
 import { EyeIcon, EyeOffIcon } from "../icons";
 
 const roleOptions = [
@@ -233,12 +233,12 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
             }
             onDelete={isSelf ? undefined : () => handleDeleteUser(user)}
             footer={
-              <PrimaryButton
+              <Button
                 onClick={() => handleSave(user.id)}
                 disabled={isSaving || !isDirty(user.id)}
               >
                 {isSaving ? "Saving..." : "Save"}
-              </PrimaryButton>
+              </Button>
             }
           >
             <div className="flex flex-col gap-3">
