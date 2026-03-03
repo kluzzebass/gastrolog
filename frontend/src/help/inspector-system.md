@@ -16,4 +16,12 @@ For the node you're connected to, the view includes:
 
 ## Remote nodes (compact view)
 
-For other cluster nodes, metrics are collected via gossip and include CPU, memory, goroutines, GC, ingest queue, Raft state, and per-ingester summaries.
+For other [cluster](help:clustering) nodes, metrics are collected via [broadcasting](help:clustering-broadcasting) and include:
+
+- **CPU** and **memory** usage
+- **Goroutines** and **GC** cycle count
+- **Ingest queue** depth and capacity
+- **Raft state** — current role (leader/follower/candidate), term, and applied log index
+- **Per-ingester** message and byte count summaries
+
+Remote node data is refreshed at the [broadcast interval](help:clustering-broadcasting) (default 5 seconds). Nodes that haven't broadcast recently show stale timestamps.

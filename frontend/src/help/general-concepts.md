@@ -76,9 +76,13 @@ Special filter values:
 
 ## Configuration
 
-GastroLog stores its configuration (vaults, ingesters, filters, policies, users, certificates) in a pluggable config store. Two backends are available:
+GastroLog stores its configuration (vaults, ingesters, filters, policies, users, certificates) in a replicated config store. Two backends are available:
 
-- **Raft** (default): Persistent storage with WAL and snapshot recovery
+- **Raft** (default): Persistent storage with WAL, snapshot recovery, and [multi-node replication](help:clustering)
 - **Memory**: In-process only, useful for testing and ephemeral instances
 
-All configuration is managed through the Settings dialog or the API.
+All configuration is managed through the [Settings](help:settings) dialog or the API.
+
+## Clustering
+
+Every GastroLog server automatically starts as a single-node [Raft cluster](help:clustering). Additional nodes can join at any time — either at startup via CLI flags or at runtime from the [Nodes](help:clustering-nodes) settings tab. Clustering replicates configuration across all nodes; log data is stored independently on each node, with queries automatically forwarded to the relevant peers.

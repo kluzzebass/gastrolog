@@ -59,6 +59,13 @@ export const helpTopics: HelpTopic[] = [
     ],
   },
   {
+    id: 'clustering', title: 'Clustering', load: md(() => import('./clustering.md?raw')),
+    children: [
+      { id: 'clustering-nodes', title: 'Nodes', load: md(() => import('./clustering-nodes.md?raw')) },
+      { id: 'clustering-broadcasting', title: 'Broadcasting', load: md(() => import('./clustering-broadcasting.md?raw')) },
+    ],
+  },
+  {
     id: 'security', title: 'Security', load: md(() => import('./security.md?raw')),
     children: [
       { id: 'user-management', title: 'Users & Authentication', load: md(() => import('./user-management.md?raw')) },
@@ -77,7 +84,8 @@ export const helpTopics: HelpTopic[] = [
   {
     id: 'settings', title: 'Settings', load: md(() => import('./settings.md?raw')),
     children: [
-      { id: 'service-settings', title: 'Service', load: md(() => import('./service-settings.md?raw')) },
+      { id: 'service-settings', title: 'Cluster', load: md(() => import('./service-settings.md?raw')) },
+      { id: 'lookups-settings', title: 'Lookups', load: md(() => import('./lookups-settings.md?raw')) },
     ],
   },
   {

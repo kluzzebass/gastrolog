@@ -59,9 +59,9 @@ type TabDef = {
 
 const allTabs: TabDef[] = [
   { id: "service", label: "Cluster", icon: ClusterIcon, helpTopicId: "service-settings" },
-  { id: "nodes", label: "Nodes", icon: ServiceIcon },
+  { id: "nodes", label: "Nodes", icon: ServiceIcon, helpTopicId: "clustering-nodes" },
   { id: "certificates", label: "Certificates", icon: CertIcon, helpTopicId: "certificates" },
-  { id: "lookups", label: "Lookups", icon: LookupIcon },
+  { id: "lookups", label: "Lookups", icon: LookupIcon, helpTopicId: "lookups-settings" },
   { id: "users", label: "Users", icon: UsersIcon, adminOnly: true, helpTopicId: "user-management" },
   { id: "ingesters", label: "Ingesters", icon: IngestersIcon, helpTopicId: "ingesters" },
   { id: "policies", label: "Rotation Policies", icon: PolicyIcon, helpTopicId: "policy-rotation" },
