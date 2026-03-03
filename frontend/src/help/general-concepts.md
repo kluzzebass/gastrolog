@@ -85,4 +85,4 @@ All configuration is managed through the [Settings](help:settings) dialog or the
 
 ## Clustering
 
-Every GastroLog server automatically starts as a single-node [Raft cluster](help:clustering). Additional nodes can join at any time — either at startup via CLI flags or at runtime from the [Nodes settings tab](settings:nodes) [(?)](help:clustering-nodes). Clustering replicates configuration across all nodes; log data is stored independently on each node, with queries automatically forwarded to the relevant peers.
+Every GastroLog server automatically starts as a single-node [Raft cluster](help:clustering). Additional nodes can join at any time — either at startup via CLI flags or at runtime from the [Nodes settings tab](settings:nodes) [![icon:help]()](help:clustering-nodes). Clustering replicates configuration across all nodes; log data is stored independently on each node, with queries automatically forwarded to the relevant peers.

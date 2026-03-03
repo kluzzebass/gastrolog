@@ -37,4 +37,4 @@ The [Explain](help:explain) view shows how the engine plans to process your quer
 
 ## Timeout
 
-An optional query timeout can be configured in [Cluster settings](settings:service) [(?)](help:service-settings). When set, queries that run too long are cancelled automatically. Uses Go duration syntax (e.g., `30s`, `1m`). Set to empty or `0s` to disable.
+An optional query timeout can be configured in [Cluster settings](settings:service) [![icon:help]()](help:service-settings). When set, queries that run too long are cancelled automatically. Uses Go duration syntax (e.g., `30s`, `1m`). Set to empty or `0s` to disable.

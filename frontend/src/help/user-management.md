@@ -17,7 +17,7 @@ On first launch, GastroLog has no users. The first user to register is automatic
 
 GastroLog uses **JWT (JSON Web Tokens)** signed with HMAC-SHA256.
 
-- **Token lifetime**: Configurable in [Cluster settings](settings:service) [(?)](help:service-settings) (default: 7 days). Uses Go duration syntax (e.g., `168h`, `720h`).
+- **Token lifetime**: Configurable in [Cluster settings](settings:service) [![icon:help]()](help:service-settings) (default: 7 days). Uses Go duration syntax (e.g., `168h`, `720h`).
 - **JWT secret**: The signing key for tokens. Changing it invalidates all existing sessions immediately.
 - Tokens carry the username, role, and user ID as claims.
 
@@ -37,7 +37,7 @@ GastroLog uses **JWT (JSON Web Tokens)** signed with HMAC-SHA256.
 
 ## Password Policy
 
-A configurable **minimum password length** is enforced for all password changes and new user creation. The default minimum is 8 characters. This is set in [Cluster settings](settings:service) [(?)](help:service-settings).
+A configurable **minimum password length** is enforced for all password changes and new user creation. The default minimum is 8 characters. This is set in [Cluster settings](settings:service) [![icon:help]()](help:service-settings).
 
 ## No-Auth Mode
 
