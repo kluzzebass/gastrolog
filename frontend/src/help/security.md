@@ -7,4 +7,4 @@ GastroLog provides authentication, role-based access control, and TLS encryption
 | [**Users & Authentication**](help:user-management) | JWT-based auth, roles (admin/user), password policy, no-auth mode |
 | [**Certificates**](help:certificates) | TLS certificates for HTTPS and secure ingester connections, SNI, hot reload |
 
-Security is configured through [Settings → Cluster](settings:service). See [Cluster settings](help:service-settings) for token lifetime, JWT secret, and TLS listener options.
+Security is configured through [Cluster settings](settings:service) [(?)](help:service-settings) — token lifetime, JWT secret, and TLS listener options.

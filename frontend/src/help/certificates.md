@@ -19,7 +19,7 @@ When multiple certificates are configured, the server selects the correct one ba
 
 ## Default Certificate
 
-Mark a certificate as the default to use it for the HTTPS listener. Enable TLS and configure the listener in [Service settings](help:service-settings).
+Mark a certificate as the default to use it for the HTTPS listener. Enable TLS and configure the listener in [Cluster settings](settings:service) [(?)](help:service-settings).
 
 ## Security
 

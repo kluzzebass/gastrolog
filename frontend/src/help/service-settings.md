@@ -12,7 +12,7 @@ Global server settings that affect authentication, query execution, background p
 
 ## Broadcasting
 
-Controls how [cluster nodes](help:clustering-nodes) share runtime metrics with each other. See [Broadcasting](help:clustering-broadcasting) for details.
+Controls how [cluster nodes](settings:nodes) [(?)](help:clustering-nodes) share runtime metrics with each other. See [Broadcasting](help:clustering-broadcasting) for details.
 
 | Setting | Description | Default |
 |---------|-------------|---------|

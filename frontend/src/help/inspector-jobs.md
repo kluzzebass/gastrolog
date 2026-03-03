@@ -10,4 +10,4 @@ One-time operations like chunk [rotation](help:policy-rotation), [index builds](
 
 Recurring operations that run on a timer or cron schedule. Each shows its name, schedule, time since last run, and countdown to the next run.
 
-The **Max Concurrent Jobs** setting in [Service settings](help:service-settings) controls how many tasks can run in parallel.
+The **Max Concurrent Jobs** setting in [Cluster settings](settings:service) [(?)](help:service-settings) controls how many tasks can run in parallel.

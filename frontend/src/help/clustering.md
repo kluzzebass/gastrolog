@@ -20,7 +20,7 @@ Start the second node with the leader's cluster address and join token:
 gastrolog server --join-addr 10.0.0.1:4565 --join-token <token>
 ```
 
-The join token is displayed in the leader's [Nodes settings tab](help:clustering-nodes) and includes cryptographic material for mutual TLS enrollment.
+The join token is displayed in the leader's [Nodes settings tab](settings:nodes) [(?)](help:clustering-nodes) and includes cryptographic material for mutual TLS enrollment.
 
 ### At runtime (UI)
 
@@ -47,7 +47,7 @@ Every node has a **Raft role** and a **suffrage** level:
 | **Voter** | Participates in leader elections, counts toward quorum |
 | **Nonvoter** | Receives replicated state but cannot vote or become leader (read replica) |
 
-See [Nodes](help:clustering-nodes) for managing node roles and suffrage.
+See [Nodes](settings:nodes) [(?)](help:clustering-nodes) for managing node roles and suffrage.
 
 ## Quorum
 
