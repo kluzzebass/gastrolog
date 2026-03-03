@@ -96,7 +96,7 @@ type Config struct {
 	// May be nil in tests.
 	ConfigSignal *notify.Signal
 
-	// ClusterAddress is the cluster gRPC listen address (e.g., ":4565").
+	// ClusterAddress is the cluster gRPC listen address (e.g., ":4566").
 	// Exposed in GetClusterStatus for join info. Empty for non-raft mode.
 	ClusterAddress string
 

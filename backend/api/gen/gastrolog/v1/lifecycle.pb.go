@@ -818,7 +818,7 @@ func (*SetNodeSuffrageResponse) Descriptor() ([]byte, []int) {
 
 type JoinClusterRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	LeaderAddress string                 `protobuf:"bytes,1,opt,name=leader_address,json=leaderAddress,proto3" json:"leader_address,omitempty"` // cluster address of the leader to join (e.g., "10.0.0.1:4565")
+	LeaderAddress string                 `protobuf:"bytes,1,opt,name=leader_address,json=leaderAddress,proto3" json:"leader_address,omitempty"` // cluster address of the leader to join (e.g., "10.0.0.1:4566")
 	JoinToken     string                 `protobuf:"bytes,2,opt,name=join_token,json=joinToken,proto3" json:"join_token,omitempty"`             // join token from the leader's cluster status
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

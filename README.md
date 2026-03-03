@@ -6,7 +6,7 @@ GastroLog is a log aggregation and search service. It collects logs from various
 
 ## Features
 
-- **Multiple ingesters** — Syslog (UDP/TCP), HTTP (Loki-compatible), RELP, OTLP (gRPC/HTTP), Fluent Forward, Kafka, file tail, Docker container logs, self-monitoring metrics
+- **Multiple ingesters** — Syslog (UDP/TCP), HTTP (Loki-compatible), RELP, OTLP (gRPC/HTTP), Fluent Forward, Kafka, MQTT (v3.1.1/v5), file tail, Docker container logs, self-monitoring metrics
 - **Chunk-based storage** — Append-only segments that seal automatically and trigger index builds, with optional zstd compression and tiered retention
 - **Full-text search** — Token, attribute, and key-value indexes with a purpose-built query language supporting boolean logic, comparisons, regex, and globs
 - **Pipeline analytics** — Pipe-based query transformations (`| stats`, `| eval`, `| sort`, `| head`, `| where`, `| rename`, `| fields`, `| lookup`, `| raw`) with 10 aggregation functions, 20+ scalar functions, time bucketing, and arithmetic expressions
@@ -15,6 +15,7 @@ GastroLog is a log aggregation and search service. It collects logs from various
 - **Multi-store routing** — Route messages to different stores based on filter expressions
 - **Rotation and retention policies** — Per-store control over chunk size, data lifecycle, and migration between stores
 - **Embedded web UI** — Single binary serves both the API and the frontend
+- **Clustering** — Multi-node Raft consensus for config replication, automatic cross-node search, non-voter read replicas, auto-generated mTLS
 - **Built-in authentication** — JWT-based with user management
 
 ## Quick Start
@@ -43,7 +44,7 @@ services:
     image: ghcr.io/kluzzebass/gastrolog:latest
     ports:
       - "4564:4564"   # HTTP  (API + web UI)
-      - "4565:4565"   # HTTPS (when TLS enabled)
+      - "4566:4566"   # Cluster gRPC (inter-node communication)
       - "514:514/udp" # Syslog (UDP)
       - "514:514/tcp" # Syslog (TCP)
       - "3100:3100"   # HTTP (Loki-compatible)
@@ -90,6 +91,11 @@ gastrolog version           Print version
 |------|-------------|---------|
 | `--addr` | Listen address (host:port) | `:4564` |
 | `--bootstrap` | Bootstrap with default config | `false` |
+| `--no-auth` | Disable authentication (all requests treated as admin) | `false` |
+| `--cluster-addr` | Cluster gRPC listen address | `:4566` |
+| `--join-addr` | Leader's cluster address to join an existing cluster | *(none)* |
+| `--join-token` | Join token from the leader node | *(none)* |
+| `--voteless` | Join as a non-voter (read replica) | `false` |
 
 ## Query Language
 
@@ -116,6 +122,64 @@ level=error | stats count by host | sort -count | head 10
 ```
 
 The built-in help system documents the full query language, all operators, and scalar functions.
+
+## Clustering
+
+Every GastroLog node auto-bootstraps as a single-node Raft cluster on first start, with auto-generated mTLS for inter-node communication. To form a multi-node cluster, join additional nodes to an existing one.
+
+### Joining via CLI
+
+The first node prints a join token on startup:
+
+```
+cluster join token (use --join-token to join)  token=<TOKEN>
+```
+
+Start additional nodes with `--join-addr` and `--join-token`:
+
+```sh
+# Node 2 (voter)
+gastrolog server --addr :4574 --cluster-addr :4575 \
+  --join-addr localhost:4566 --join-token <TOKEN>
+
+# Node 3 (non-voter / read replica)
+gastrolog server --addr :4584 --cluster-addr :4585 \
+  --join-addr localhost:4566 --join-token <TOKEN> --voteless
+```
+
+### Joining via UI
+
+A single-node cluster can also add nodes from **Settings > Nodes > Join Cluster** in the web UI.
+
+### Multi-node Docker Compose
+
+```yaml
+services:
+  node1:
+    image: ghcr.io/kluzzebass/gastrolog:latest
+    command: server --addr :4564 --cluster-addr :4566
+    ports: ["4564:4564", "4566:4566"]
+    volumes: [node1:/config]
+
+  node2:
+    image: ghcr.io/kluzzebass/gastrolog:latest
+    command: server --addr :4564 --cluster-addr :4566
+      --join-addr node1:4566 --join-token ${JOIN_TOKEN}
+    ports: ["4574:4564"]
+    volumes: [node2:/config]
+    depends_on: [node1]
+
+volumes:
+  node1:
+  node2:
+```
+
+### How it works
+
+- **Configuration** (ingesters, vaults, filters, users) is replicated across all nodes via Raft consensus
+- **Log data** is stored locally on the node that owns each vault and is **not replicated**
+- **Searches** automatically fan out to vaults on all nodes and merge results
+- Non-voters (`--voteless`) participate in search but don't vote in leader elections — useful for scaling read capacity
 
 ## Building from Source
 

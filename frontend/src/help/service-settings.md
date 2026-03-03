@@ -24,5 +24,5 @@ When a [certificate](help:certificates) is configured as the default, additional
 
 | Setting | Description |
 |---------|-------------|
-| **TLS Enabled** | Enable the HTTPS listener on port `:4565` |
+| **TLS Enabled** | Enable the HTTPS listener (defaults to API port + 1, e.g. `:4565`) |
 | **HTTP to HTTPS Redirect** | Redirect plain HTTP requests to the HTTPS port |

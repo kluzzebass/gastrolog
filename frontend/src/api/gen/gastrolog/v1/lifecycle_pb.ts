@@ -633,7 +633,7 @@ export class SetNodeSuffrageResponse extends Message<SetNodeSuffrageResponse> {
  */
 export class JoinClusterRequest extends Message<JoinClusterRequest> {
   /**
-   * cluster address of the leader to join (e.g., "10.0.0.1:4565")
+   * cluster address of the leader to join (e.g., "10.0.0.1:4566")
    *
    * @generated from field: string leader_address = 1;
    */

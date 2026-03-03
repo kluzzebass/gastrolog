@@ -17,7 +17,7 @@ There are two ways to form a multi-node cluster:
 Start the second node with the leader's cluster address and join token:
 
 ```
-gastrolog server --join-addr 10.0.0.1:4565 --join-token <token>
+gastrolog server --join-addr 10.0.0.1:4566 --join-token <token>
 ```
 
 The join token is displayed in the leader's [Nodes settings tab](settings:nodes) [![icon:help]()](help:clustering-nodes) and includes cryptographic material for mutual TLS enrollment.
@@ -28,7 +28,7 @@ A running single-node server can join an existing cluster without restarting. Go
 
 ## Cluster Transport
 
-Nodes communicate over a dedicated **cluster port** (default `:4565`), separate from the API port (`:4564`). This port carries Raft log replication, leader election messages, and peer-to-peer RPC for cross-node query forwarding.
+Nodes communicate over a dedicated **cluster port** (default `:4566`), separate from the API port (`:4564`). This port carries Raft log replication, leader election messages, and peer-to-peer RPC for cross-node query forwarding.
 
 TLS for the cluster transport is **auto-bootstrapped** — the first node generates a self-signed CA and certificates, and joining nodes receive their certificates during enrollment. No manual TLS configuration is needed for cluster communication.
 

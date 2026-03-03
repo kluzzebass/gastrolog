@@ -91,7 +91,7 @@ func main() {
 	serverCmd.Flags().String("addr", ":4564", "listen address (host:port)")
 	serverCmd.Flags().Bool("bootstrap", false, "bootstrap with default config (memory store + chatterbox)")
 	serverCmd.Flags().Bool("no-auth", false, "disable authentication (all requests treated as admin)")
-	serverCmd.Flags().String("cluster-addr", ":4565", "cluster gRPC listen address")
+	serverCmd.Flags().String("cluster-addr", ":4566", "cluster gRPC listen address")
 	serverCmd.Flags().Bool("cluster-init", false, "deprecated: raft servers auto-bootstrap on first start")
 	serverCmd.Flags().String("join-addr", "", "leader's cluster address to join an existing cluster")
 	serverCmd.Flags().String("join-token", "", "join token for cluster enrollment (from cluster-init node)")

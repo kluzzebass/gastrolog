@@ -113,7 +113,7 @@ message SetNodeSuffrageRequest {
 message SetNodeSuffrageResponse {}
 
 message JoinClusterRequest {
-  string leader_address = 1; // cluster address of the leader to join (e.g., "10.0.0.1:4565")
+  string leader_address = 1; // cluster address of the leader to join (e.g., "10.0.0.1:4566")
   string join_token = 2;     // join token from the leader's cluster status
 }
 

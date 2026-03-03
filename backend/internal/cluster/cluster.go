@@ -37,7 +37,7 @@ import (
 
 // Config holds cluster server configuration.
 type Config struct {
-	// ClusterAddr is the listen address for the cluster gRPC port (e.g., ":4565").
+	// ClusterAddr is the listen address for the cluster gRPC port (e.g., ":4566").
 	ClusterAddr string
 
 	// LocalAddr is the advertised address other nodes use to reach this node's

@@ -10,7 +10,7 @@ Every node has a display name used throughout the UI (inspector, badges, logs). 
 
 When running in cluster mode, the Nodes tab shows a **cluster info card** with:
 
-- **Cluster Address** — the address other nodes use to join (e.g., `10.0.0.1:4565`)
+- **Cluster Address** — the address other nodes use to join (e.g., `10.0.0.1:4566`)
 - **Join Token** — the enrollment token new nodes need to join
 - **Join Command** — a ready-to-copy CLI command for starting a new node
 

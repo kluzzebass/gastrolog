@@ -292,7 +292,7 @@ function JoinClusterCard({ dark }: Readonly<{ dark: boolean }>) {
           <TextInput
             value={leaderAddress}
             onChange={setLeaderAddress}
-            placeholder="e.g. 10.0.0.1:4565"
+            placeholder="e.g. 10.0.0.1:4566"
             dark={dark}
             mono
             disabled={joinCluster.isPending}
