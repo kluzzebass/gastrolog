@@ -42,7 +42,7 @@ Maps IP addresses to geographic metadata using a MaxMind MMDB database. Requires
 * | lookup geoip src_ip
 ```
 
-Configure the database path in **Settings → Lookups → GeoIP**.
+Configure the database path in [Settings → Lookups](settings:lookups) → GeoIP.
 
 ### asn — Autonomous System
 
@@ -57,11 +57,11 @@ Maps IP addresses to autonomous system information using a MaxMind MMDB database
 * | lookup asn src_ip
 ```
 
-Configure the database path in **Settings → Lookups → ASN**.
+Configure the database path in [Settings → Lookups](settings:lookups) → ASN.
 
 ## Configuration
 
-The `geoip` and `asn` tables each need a path to a MaxMind `.mmdb` file. Set these in **Settings → Lookups**. Free GeoLite2 databases are available from [MaxMind](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data) with a free account.
+The `geoip` and `asn` tables each need a path to a MaxMind `.mmdb` file. Set these in [Settings → Lookups](settings:lookups). Free GeoLite2 databases are available from [MaxMind](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data) with a free account.
 
 Database files are hot-reloaded when modified on disk — no restart required. Hot-reload watches the file directly and does not follow symlinks.
 

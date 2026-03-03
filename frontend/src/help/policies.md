@@ -12,4 +12,4 @@ stateDiagram-v2
     Deleted --> [*]
 ```
 
-Each vault references a rotation policy and a retention policy by name. You can share policies across multiple vaults or create dedicated ones. Policies are configured in the Settings dialog under Rotation Policies and Retention Policies, and assigned to vaults in the Vaults settings.
+Each vault references a rotation policy and a retention policy by name. You can share policies across multiple vaults or create dedicated ones. Policies are configured in [Settings → Rotation Policies](settings:policies) and [Retention Policies](settings:retention), and assigned to vaults in [Vaults](settings:vaults).

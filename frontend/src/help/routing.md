@@ -14,4 +14,4 @@ When a record arrives, every vault's filter is evaluated against it. A record ca
 
 ## Configuration
 
-Filters are managed in the Settings dialog under Filters. Each filter has a name and an expression. Vaults reference filters by name — you can share one filter across multiple vaults or give each vault its own.
+Filters are managed in [Settings → Filters](settings:filters). Each filter has a name and an expression. Vaults reference filters by name — you can share one filter across multiple vaults or give each vault its own.

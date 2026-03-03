@@ -1,6 +1,6 @@
 # Certificates
 
-TLS certificates for HTTPS and secure ingester connections. Managed through the Settings dialog (admin only).
+TLS certificates for HTTPS and secure ingester connections. Managed through [Settings → Certificates](settings:certificates) (admin only).
 
 ## Adding a Certificate
 
