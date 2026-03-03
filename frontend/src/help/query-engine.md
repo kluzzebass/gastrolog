@@ -1,6 +1,6 @@
 # Searching
 
-Searching is how you retrieve records from GastroLog. When you run a search, the query engine figures out the fastest way to find matching records — narrowing down which chunks to look at, using indexes where available, and merging results from multiple vaults into a single time-ordered stream.
+Searching is how you retrieve records from GastroLog. When you run a search, the query engine figures out the fastest way to find matching records — narrowing down which chunks to look at, using indexes where available, and merging results from multiple vaults — including vaults on other [cluster nodes](help:clustering) — into a single time-ordered stream.
 
 For the query syntax, see [Query Language](help:query-language). To aggregate results into tables and charts, see [Pipeline Queries](help:pipeline).
 
