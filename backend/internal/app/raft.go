@@ -153,7 +153,7 @@ func newRaftConfig(nodeID string) *hraft.Config {
 
 	conf.SnapshotThreshold = 4
 	conf.SnapshotInterval = 30 * time.Second
-	conf.TrailingLogs = 4
+	conf.TrailingLogs = 64
 
 	conf.HeartbeatTimeout = 1000 * time.Millisecond
 	conf.ElectionTimeout = 1000 * time.Millisecond
