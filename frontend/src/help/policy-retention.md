@@ -20,7 +20,7 @@ Retention policies are evaluated periodically by a [background scheduler](help:i
 4. **Chunk count**: Keeps the newest N chunks, deletes the rest
 5. The union of all deletions is applied — if any condition flags a chunk, it is deleted
 
-A [vault](help:storage) with no retention policy keeps chunks indefinitely. See also [Rotation](help:policy-rotation) for when chunks are sealed.
+In a [cluster](help:clustering), retention runs independently on the [node](help:clustering-nodes) hosting each vault. A [vault](help:storage) with no retention policy keeps chunks indefinitely. See also [Rotation](help:policy-rotation) for when chunks are sealed.
 
 ## Example
 

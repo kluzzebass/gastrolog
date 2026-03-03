@@ -2,7 +2,7 @@
 
 Ingestion is the first stage of the pipeline — where logs enter GastroLog from the outside world. Each source is handled by an **ingester** that listens for messages, wraps them as records with raw text, protocol-level attributes, and an arrival timestamp, then passes them downstream for [digestion](help:digesters) and [storage](help:storage).
 
-You can run multiple ingesters simultaneously, each feeding into the same pipeline. Ingesters are configured in [Settings → Ingesters](settings:ingesters).
+You can run multiple ingesters simultaneously, each feeding into the same pipeline. Ingesters are configured in [Settings → Ingesters](settings:ingesters). In a [cluster](help:clustering), each ingester runs on the [node](help:clustering-nodes) it is assigned to. Records that match a vault on a different node are automatically forwarded.
 
 ## Available Ingesters
 

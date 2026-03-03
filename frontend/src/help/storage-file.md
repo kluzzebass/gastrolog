@@ -14,6 +14,6 @@ Persists logs to disk. Each [chunk](help:general-concepts) becomes a directory c
 ## What You Should Know
 
 - The `dir` you configure is entirely yours to choose — it's not derived from any global setting
-- Only one process can open a vault directory at a time (enforced by a lock file)
+- Only one process can open a vault directory at a time (enforced by a lock file). In a [cluster](help:clustering), each node must have its own vault directories on local storage
 - If GastroLog crashes, it recovers on restart — at most the last partially-written record is lost
 - Maximum log file size within a chunk is **4 GB** (32-bit offsets in the file format)

@@ -2,7 +2,7 @@
 
 After a [chunk](help:general-concepts) is sealed, GastroLog builds **inverted indexes** on its contents in the background — data structures that map search terms to record positions. Instead of scanning every record, the engine looks up which positions match and reads only those. You don't configure or manage indexes — they're built automatically.
 
-Index builds happen asynchronously after sealing, so write latency is unaffected.
+Index builds happen asynchronously after sealing, so write latency is unaffected. In a [cluster](help:clustering), each node builds indexes for its own vaults. Cross-node searches use each node's local indexes.
 
 ## What Gets Indexed
 

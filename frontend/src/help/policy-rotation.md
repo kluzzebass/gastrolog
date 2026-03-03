@@ -21,6 +21,8 @@ The size limit is a **soft limit** — it checks the projected size (current siz
 
 **Cron** expressions use either 5-field (minute-level) or 6-field (second-level) syntax. Cron rotation only fires if the active chunk has at least one record.
 
+In a [cluster](help:clustering), rotation is managed by the [node](help:clustering-nodes) hosting each vault.
+
 ## Example
 
 A policy with `maxBytes: "256MB"` and `maxAge: "1h"` will seal the chunk when it reaches 256 MB **or** when it has been open for one hour, whichever comes first.

@@ -16,4 +16,6 @@ Vaults manage the full lifecycle of your data:
 | [**File**](help:storage-file) | Persists logs to disk with memory-mapped reads — for production use |
 | [**Memory**](help:storage-memory) | Keeps everything in memory — fast but lost on restart, for testing |
 
+In a [cluster](help:clustering), each vault is assigned to a specific [node](help:clustering-nodes). Log data is stored locally on that node and is **not replicated** — clustering replicates configuration only. Searches automatically reach vaults on all nodes.
+
 Select a topic from the sidebar for details on engines, rotation, and retention.

@@ -11,7 +11,7 @@ For the query syntax, see [Query Language](help:query-language). To aggregate re
 3. The remaining chunks are scanned — sealed chunks use their [indexes](help:indexers) to jump to matching records, while the active chunk is scanned directly
 4. If you're searching across multiple vaults, results are merged by timestamp
 
-When no `vault=` filter is specified, all vaults are searched in parallel.
+When no `vault=` filter is specified, all vaults are searched in parallel. In a [cluster](help:clustering), this includes vaults on remote [nodes](help:clustering-nodes) — searches are forwarded automatically and results are merged by timestamp.
 
 ## Pagination
 
@@ -19,7 +19,7 @@ Results come back a page at a time. A **resume token** tracks where each vault l
 
 ## Follow (Live Tail)
 
-Follow streams new records as they arrive, similar to `tail -f`. It only shows records that appear after you start following — existing data is skipped. When combined with a query filter, only matching new records are shown.
+Follow streams new records as they arrive, similar to `tail -f`. It only shows records that appear after you start following — existing data is skipped. When combined with a query filter, only matching new records are shown. In a [cluster](help:clustering), follow includes records arriving on all nodes.
 
 ## Histogram
 
@@ -29,7 +29,7 @@ Without a filter, this is very fast — it counts records from the index without
 
 ## Context View
 
-Click a record to see what was happening around it. The context view shows a configurable number of records before and after the selected one (up to 50 each), pulled from all vaults by timestamp.
+Click a record to see what was happening around it. The context view shows a configurable number of records before and after the selected one (up to 50 each), pulled from all vaults by timestamp — including vaults on remote [cluster nodes](help:clustering).
 
 ## Explain
 

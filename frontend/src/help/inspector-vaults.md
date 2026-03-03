@@ -4,7 +4,7 @@ The Vaults tab shows each configured [vault](help:storage) with its [chunks](hel
 
 ## Vault Overview
 
-Each vault lists its name, type, enabled/disabled status, total chunk count, and record count. Expand a vault to see its chunk timeline.
+Each vault lists its name, type, enabled/disabled status, total chunk count, and record count. Expand a vault to see its chunk timeline. In a [cluster](help:clustering), vaults are grouped by their owning [node](help:clustering-nodes).
 
 ## Chunks
 

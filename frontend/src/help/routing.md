@@ -10,7 +10,7 @@ Filtering controls which records end up in which vaults. Each vault has a filter
 
 ## How Filtering Works
 
-When a record arrives, every vault's filter is evaluated against it. A record can match multiple vaults and will be written to all of them. Filters are evaluated after [digestion](help:digesters), so attributes added by digesters (like `level`) are available for filtering.
+When a record arrives, every vault's filter is evaluated against it. A record can match multiple vaults and will be written to all of them — including vaults on other [cluster nodes](help:clustering), where the record is forwarded automatically. Filters are evaluated after [digestion](help:digesters), so attributes added by digesters (like `level`) are available for filtering.
 
 ## Configuration
 

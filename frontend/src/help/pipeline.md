@@ -1,6 +1,6 @@
 # Pipeline Queries
 
-Pipeline queries extend the [query language](help:query-language) with pipe operators that transform search results into aggregate tables and charts. A pipeline starts with a filter expression, followed by one or more pipe operators separated by `|`.
+Pipeline queries extend the [query language](help:query-language) with pipe operators that transform search results into aggregate tables and charts. In a [cluster](help:clustering), pipelines automatically include records from vaults on all [nodes](help:clustering-nodes). A pipeline starts with a filter expression, followed by one or more pipe operators separated by `|`.
 
 ```
 filter | operator | operator ...

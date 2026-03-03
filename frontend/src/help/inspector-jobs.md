@@ -1,6 +1,6 @@
 # Jobs
 
-The Jobs tab shows background work that GastroLog performs automatically.
+The Jobs tab shows background work that GastroLog performs automatically. In a [cluster](help:clustering), each node runs jobs for its own vaults independently.
 
 ## Tasks
 

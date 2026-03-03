@@ -20,4 +20,4 @@ Hover over a saved query and click the **&times;** button that appears on the ri
 
 ## Storage
 
-Saved queries are stored per-user on the server, so they follow you across browsers and devices as long as you're logged in with the same account.
+Saved queries are stored per-user in the [replicated configuration](help:clustering), so they follow you across browsers, devices, and [cluster nodes](help:clustering-nodes) as long as you're logged in with the same account.
