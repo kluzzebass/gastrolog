@@ -38,24 +38,10 @@ func WithTTL(positive, negative time.Duration) RDNSOption {
 	}
 }
 
-// WithTimeout sets the per-lookup timeout.
-func WithTimeout(d time.Duration) RDNSOption {
-	return func(r *RDNS) {
-		r.timeout = d
-	}
-}
-
 // WithCacheSize sets the max cache entries.
 func WithCacheSize(n int) RDNSOption {
 	return func(r *RDNS) {
 		r.cacheSize = n
-	}
-}
-
-// WithResolver sets a custom net.Resolver (for testing).
-func WithResolver(res *net.Resolver) RDNSOption {
-	return func(r *RDNS) {
-		r.resolver = res
 	}
 }
 

@@ -631,7 +631,3 @@ func StringPtr(s string) *string { return new(s) }
 //go:fix inline
 func UUIDPtr(id uuid.UUID) *uuid.UUID { return new(id) }
 
-// Int64Ptr returns a pointer to n.
-//
-//go:fix inline
-func Int64Ptr(n int64) *int64 { return new(n) }

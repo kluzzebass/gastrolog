@@ -119,11 +119,6 @@ func (r *JSONIndexReader) LookupPathPrefix(prefix string) ([]uint64, bool) {
 	return positions, true
 }
 
-// PathStatus returns the status of the path index.
-func (r *JSONIndexReader) PathStatus() JSONIndexStatus {
-	return r.pathStatus
-}
-
 // PVStatus returns the status of the path-value index.
 func (r *JSONIndexReader) PVStatus() JSONIndexStatus {
 	return r.pvStatus

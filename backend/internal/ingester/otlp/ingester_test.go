@@ -30,32 +30,6 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
-// startOTLP creates and starts an OTLP ingester on random ports, returning
-// the ingester, output channel, and HTTP/gRPC addresses.
-func startOTLP(t *testing.T, chanSize int) (*Ingester, chan orchestrator.IngestMessage, string, string) {
-	t.Helper()
-
-	out := make(chan orchestrator.IngestMessage, chanSize)
-	ing := New(Config{
-		ID:       "test-otlp",
-		HTTPAddr: "127.0.0.1:0",
-		GRPCAddr: "127.0.0.1:0",
-	})
-
-	ctx := t.Context()
-	go ing.Run(ctx, out)
-	// Wait for listeners to start.
-	time.Sleep(100 * time.Millisecond)
-
-	// Discover actual ports from the listeners by doing a quick ready check.
-	// We need to try ports — the ingester doesn't expose listener addrs directly.
-	// Instead, we'll use a helper: start, wait, then use the struct fields.
-	// Actually, the ingester doesn't expose addrs. Let's use a different approach:
-	// Create listeners ourselves, get ports, close them, then pass to ingester.
-	// But that's racy. Simplest: just wait and test with HTTP ready endpoint.
-	return ing, out, "", ""
-}
-
 // makeExportRequest builds an ExportLogsServiceRequest from helpers.
 func makeExportRequest(resourceAttrs map[string]string, scopeAttrs map[string]string, records ...*logspb.LogRecord) *collogspb.ExportLogsServiceRequest {
 	var resKVs []*commonpb.KeyValue
