@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTestIngester } from "../../../api/hooks/useIngesters";
 import { useThemeClass } from "../../../hooks/useThemeClass";
-import { isIngesterParamsValid } from "./index";
+import { isIngesterParamsValid } from "./validation";
 
 export function TestConnectionButton({
   type,
