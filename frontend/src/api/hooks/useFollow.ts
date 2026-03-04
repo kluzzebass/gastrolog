@@ -168,7 +168,9 @@ export function useFollow(options?: { onError?: (err: Error) => void; maxRecords
         scheduleReconnect(queryStr, attempt);
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- stable by design: all mutable
+    // state accessed via refs (bufferRef, maxRecordsRef, newCountRef, onErrorRef, abortRef).
+    // scheduleReconnect is captured via const hoisting and is also stable ([connectStream] deps).
     [],
   );
 
