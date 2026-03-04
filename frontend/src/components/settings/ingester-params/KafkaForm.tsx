@@ -1,5 +1,6 @@
 import { FormField, TextInput, SelectInput } from "../FormField";
 import { Checkbox } from "../Checkbox";
+import { TestConnectionButton } from "./TestConnectionButton";
 import type { SubFormProps } from "./types";
 
 export function KafkaForm({
@@ -21,7 +22,7 @@ export function KafkaForm({
         <TextInput
           value={params["brokers"] ?? ""}
           onChange={(v) => set("brokers", v)}
-          placeholder="localhost:9092"
+          placeholder=""
           dark={dark}
           mono
           examples={["localhost:9092", "broker1:9092,broker2:9092"]}
@@ -36,7 +37,7 @@ export function KafkaForm({
           <TextInput
             value={params["topic"] ?? ""}
             onChange={(v) => set("topic", v)}
-            placeholder="logs"
+            placeholder=""
             dark={dark}
             mono
             examples={["logs", "app-logs"]}
@@ -100,6 +101,7 @@ export function KafkaForm({
           </FormField>
         </div>
       )}
+      <TestConnectionButton type="kafka" params={params} dark={dark} />
     </div>
   );
 }

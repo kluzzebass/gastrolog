@@ -16,7 +16,7 @@ import (
 // ParamDefaults returns the default parameter values for an MQTT ingester.
 func ParamDefaults() map[string]string {
 	return map[string]string{
-		"qos":           "1",
+		"version":       "3",
 		"clean_session": "true",
 	}
 }
@@ -39,13 +39,10 @@ func NewFactory() orchestrator.IngesterFactory {
 			topics[i] = strings.TrimSpace(topics[i])
 		}
 
-		clientID := cmp.Or(params["client_id"], "gastrolog-"+id.String()[:8])
+		idStr := id.String()
+		clientID := cmp.Or(params["client_id"], "gastrolog-"+idStr[len(idStr)-8:])
 
-		qosStr := cmp.Or(params["qos"], "1")
-		qos, err := strconv.Atoi(qosStr)
-		if err != nil || qos < 0 || qos > 2 {
-			return nil, fmt.Errorf("mqtt ingester: invalid qos %q (must be 0, 1, or 2)", qosStr)
-		}
+		const qos = 1 // Subscribe at QoS 1 (at least once); broker delivers at min(pub, sub).
 
 		tls := params["tls"] == "true"
 		cleanSession := params["clean_session"] != "false"

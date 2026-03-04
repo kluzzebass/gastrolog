@@ -256,7 +256,6 @@ func startOrchestrator(ctx context.Context, logger *slog.Logger, orch *orchestra
 	if err := orch.RebuildMissingIndexes(ctx); err != nil {
 		return err
 	}
-	logger.Info("starting orchestrator")
 	if err := orch.Start(ctx); err != nil {
 		return err
 	}
@@ -504,7 +503,6 @@ func ensureNodeConfigAsync(ctx context.Context, cfgStore config.Store, nodeID, c
 		logger.Warn("ensure node config failed (will retry on next start)", "error", err)
 		return
 	}
-	logger.Info("node name", "node_id", nodeID, "node_name", nodeName)
 	if configType != "memory" {
 		_ = hd.WriteNodeName(nodeName)
 	}

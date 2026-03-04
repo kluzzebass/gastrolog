@@ -4,10 +4,12 @@ Type: `syslog`
 
 Receives syslog messages over UDP and/or TCP. Supports both RFC 3164 (BSD) and RFC 5424 (structured) formats, auto-detected per message. TCP supports both newline-delimited and octet-counted framing. Severity and facility are extracted directly from the protocol, so the [Level digester](help:digester-level) skips these messages.
 
-| Param | Description | Default |
-|-------|-------------|---------|
-| `udp_addr` | UDP listen address | `:514` (if neither addr specified) |
-| `tcp_addr` | TCP listen address | `:514` (if neither addr specified) |
+| Setting | Description | Default |
+|---------|-------------|---------|
+| UDP Address | UDP listen address | |
+| TCP Address | TCP listen address | |
+
+At least one address (UDP or TCP) must be configured.
 
 ## Attributes
 

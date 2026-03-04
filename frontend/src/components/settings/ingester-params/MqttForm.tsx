@@ -1,5 +1,6 @@
 import { FormField, TextInput, SelectInput } from "../FormField";
 import { Checkbox } from "../Checkbox";
+import { TestConnectionButton } from "./TestConnectionButton";
 import type { SubFormProps } from "./types";
 
 export function MqttForm({
@@ -21,7 +22,7 @@ export function MqttForm({
         <TextInput
           value={params["broker"] ?? ""}
           onChange={(v) => set("broker", v)}
-          placeholder="mqtt://localhost:1883"
+          placeholder=""
           dark={dark}
           mono
           examples={["mqtt://localhost:1883", "ssl://broker:8883", "ws://broker:8080/mqtt"]}
@@ -36,7 +37,7 @@ export function MqttForm({
           <TextInput
             value={params["topics"] ?? ""}
             onChange={(v) => set("topics", v)}
-            placeholder="sensors/#"
+            placeholder=""
             dark={dark}
             mono
             examples={["sensors/#", "home/+/temperature", "logs,events"]}
@@ -44,7 +45,7 @@ export function MqttForm({
         </FormField>
         <FormField
           label="Client ID"
-          description="MQTT client identifier"
+          description="MQTT client identifier. If left empty, auto-generated as gastrolog-<last 8 chars of ingester ID>"
           dark={dark}
         >
           <TextInput
@@ -57,28 +58,12 @@ export function MqttForm({
         </FormField>
       </div>
       <FormField
-        label="QoS"
-        description="Quality of Service level"
-        dark={dark}
-      >
-        <SelectInput
-          value={params["qos"] ?? d["qos"] ?? "1"}
-          onChange={(v) => set("qos", v)}
-          options={[
-            { value: "0", label: "0 — At most once" },
-            { value: "1", label: "1 — At least once" },
-            { value: "2", label: "2 — Exactly once" },
-          ]}
-          dark={dark}
-        />
-      </FormField>
-      <FormField
         label="Protocol Version"
         description="MQTT protocol version"
         dark={dark}
       >
         <SelectInput
-          value={params["version"] ?? "3"}
+          value={params["version"] ?? d["version"] ?? "3"}
           onChange={(v) => set("version", v)}
           options={[
             { value: "3", label: "v3.1.1" },
@@ -98,6 +83,7 @@ export function MqttForm({
           checked={params["clean_session"] !== "false"}
           onChange={(v) => set("clean_session", v ? "true" : "false")}
           label="Clean session"
+          helpTopicId="ingester-mqtt"
           dark={dark}
         />
       </div>
@@ -119,6 +105,7 @@ export function MqttForm({
           />
         </FormField>
       </div>
+      <TestConnectionButton type="mqtt" params={params} dark={dark} />
     </div>
   );
 }

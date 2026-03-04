@@ -4,21 +4,21 @@ Type: `docker`
 
 Streams container logs from a Docker daemon. Automatically discovers containers and attaches to their log streams.
 
-| Param | Description | Default |
-|-------|-------------|---------|
-| `host` | Docker daemon address | `unix:///var/run/docker.sock` |
-| `filter` | Container filter expression (see below) | |
-| `poll_interval` | Container discovery interval | `30s` |
-| `stdout` | Capture stdout | `true` |
-| `stderr` | Capture stderr | `true` |
-| `tls` | Enable TLS for TCP connections | `true` |
-| `tls_ca` | CA certificate name (from certificate store) | |
-| `tls_cert` | Client certificate name | |
-| `tls_verify` | Verify server TLS certificate | `true` |
+| Setting | Description | Default |
+|---------|-------------|---------|
+| Docker Host | Docker daemon address | `unix:///var/run/docker.sock` |
+| Container Filter | Container filter expression (see below) | |
+| Poll Interval | Container discovery interval | `30s` |
+| Stdout | Capture stdout | on |
+| Stderr | Capture stderr | on |
+| Enable TLS | Secure connection for TCP hosts | on |
+| CA Certificate | CA certificate name (from certificate store) | |
+| Client Certificate | Client certificate name | |
+| Verify server certificate | Verify server TLS certificate | on |
 
 ## Filter expressions
 
-The `filter` param uses the same expression language as [search queries](help:query-language) and [vault filters](help:routing). Containers are matched against these attributes:
+The Container Filter uses the same expression language as [search queries](help:query-language) and [vault filters](help:routing). Containers are matched against these attributes:
 
 | Attribute | Source |
 |-----------|--------|
@@ -36,7 +36,7 @@ The `filter` param uses the same expression language as [search queries](help:qu
 - `name=web* AND label.env=prod` — web containers in prod
 - `NOT image=postgres*` — everything except postgres
 
-Omit `filter` to collect logs from all containers.
+Leave the Container Filter empty to collect logs from all containers.
 
 ## Attributes
 

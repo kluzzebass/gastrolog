@@ -1,9 +1,8 @@
-import { useState } from "react";
 import { FormField, TextInput, SelectInput } from "../FormField";
 import { useThemeClass } from "../../../hooks/useThemeClass";
 import { useCertificates } from "../../../api/hooks/useCertificates";
-import { useTestIngester } from "../../../api/hooks/useIngesters";
 import { Checkbox } from "../Checkbox";
+import { TestConnectionButton } from "./TestConnectionButton";
 import type { SubFormProps } from "./types";
 
 export function DockerForm({
@@ -14,11 +13,6 @@ export function DockerForm({
 }: Readonly<SubFormProps>) {
   const c = useThemeClass(dark);
   const { data: certData } = useCertificates();
-  const testIngester = useTestIngester();
-  const [testResult, setTestResult] = useState<{
-    success: boolean;
-    message: string;
-  } | null>(null);
   const certs = certData?.certificates ?? [];
   const certOptions = [
     { value: "", label: "(none)" },
@@ -40,7 +34,7 @@ export function DockerForm({
           placeholder={d["host"] ?? ""}
           dark={dark}
           mono
-          examples={["unix:///var/run/docker.sock", "tcp://localhost:2376"]}
+          examples={d["_host_examples"]?.split(",") ?? ["unix:///var/run/docker.sock", "tcp://localhost:2376"]}
         />
       </FormField>
 
@@ -53,7 +47,7 @@ export function DockerForm({
         <TextInput
           value={params["filter"] ?? ""}
           onChange={(v) => set("filter", v)}
-          placeholder="image=nginx* AND label.env=prod"
+          placeholder=""
           dark={dark}
           mono
           examples={["image=nginx*", "label.env=prod"]}
@@ -144,50 +138,7 @@ export function DockerForm({
         )}
       </div>
 
-      {/* Test Connection */}
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          disabled={testIngester.isPending}
-          onClick={() => {
-            setTestResult(null);
-            testIngester.mutate(
-              { type: "docker", params },
-              {
-                onSuccess: (resp) => {
-                  setTestResult({
-                    success: resp.success,
-                    message: resp.message,
-                  });
-                },
-                onError: (err) => {
-                  setTestResult({
-                    success: false,
-                    message: err instanceof Error ? err.message : String(err),
-                  });
-                },
-              },
-            );
-          }}
-          className={`px-3 py-1.5 text-[0.8em] font-medium rounded border transition-colors ${c(
-            "bg-ink-surface border-ink-border text-text-bright hover:border-copper-dim disabled:opacity-50",
-            "bg-light-surface border-light-border text-light-text-bright hover:border-copper disabled:opacity-50",
-          )}`}
-        >
-          {testIngester.isPending ? "Testing..." : "Test Connection"}
-        </button>
-        {testResult && (
-          <span
-            className={`text-[0.8em] ${
-              testResult.success
-                ? c("text-green-400", "text-green-600")
-                : c("text-red-400", "text-red-600")
-            }`}
-          >
-            {testResult.message}
-          </span>
-        )}
-      </div>
+      <TestConnectionButton type="docker" params={params} dark={dark} />
     </div>
   );
 }

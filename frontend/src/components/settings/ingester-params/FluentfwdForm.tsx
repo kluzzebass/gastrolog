@@ -1,4 +1,5 @@
 import { FormField, TextInput } from "../FormField";
+import { TestConnectionButton } from "./TestConnectionButton";
 import type { SubFormProps } from "./types";
 
 export function FluentfwdForm({
@@ -8,19 +9,22 @@ export function FluentfwdForm({
   defaults: d,
 }: Readonly<SubFormProps>) {
   return (
-    <FormField
-      label="Listen Address"
-      description="TCP address for Fluent Forward protocol"
-      dark={dark}
-    >
-      <TextInput
-        value={params["addr"] ?? ""}
-        onChange={(v) => onChange({ ...params, addr: v })}
-        placeholder={d["addr"] ?? ""}
+    <div className="flex flex-col gap-3">
+      <FormField
+        label="Listen Address"
+        description="TCP address for Fluent Forward protocol"
         dark={dark}
-        mono
-        examples={[":24224"]}
-      />
-    </FormField>
+      >
+        <TextInput
+          value={params["addr"] ?? ""}
+          onChange={(v) => onChange({ ...params, addr: v })}
+          placeholder={d["addr"] ?? ""}
+          dark={dark}
+          mono
+          examples={[":24224"]}
+        />
+      </FormField>
+      <TestConnectionButton type="fluentfwd" params={params} dark={dark} />
+    </div>
   );
 }

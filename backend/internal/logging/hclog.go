@@ -221,3 +221,82 @@ func (f *filteringHclog) Named(name string) hclog.Logger {
 func (f *filteringHclog) ResetNamed(name string) hclog.Logger {
 	return &filteringHclog{base: f.base.ResetNamed(name), suppress: f.suppress}
 }
+
+// DowngradeHclogToDebug returns an hclog.Logger that redirects matching
+// messages to Debug regardless of their original level. Useful for noisy
+// library logs that are expected during normal operation (e.g. Raft heartbeat
+// failures when peers are unreachable, routine snapshot lifecycle).
+func DowngradeHclogToDebug(base hclog.Logger, patterns ...string) hclog.Logger {
+	return &downgradingHclog{base: base, patterns: patterns}
+}
+
+type downgradingHclog struct {
+	base     hclog.Logger
+	patterns []string
+}
+
+func (d *downgradingHclog) shouldDowngrade(msg string) bool {
+	for _, p := range d.patterns {
+		if strings.Contains(msg, p) {
+			return true
+		}
+	}
+	return false
+}
+
+func (d *downgradingHclog) Log(level hclog.Level, msg string, args ...any) {
+	if level > hclog.Debug && d.shouldDowngrade(msg) {
+		d.base.Log(hclog.Debug, msg, args...)
+		return
+	}
+	d.base.Log(level, msg, args...)
+}
+func (d *downgradingHclog) Trace(msg string, args ...any) { d.base.Trace(msg, args...) }
+func (d *downgradingHclog) Debug(msg string, args ...any) { d.base.Debug(msg, args...) }
+func (d *downgradingHclog) Info(msg string, args ...any) {
+	if d.shouldDowngrade(msg) {
+		d.base.Debug(msg, args...)
+		return
+	}
+	d.base.Info(msg, args...)
+}
+func (d *downgradingHclog) Warn(msg string, args ...any) {
+	if d.shouldDowngrade(msg) {
+		d.base.Debug(msg, args...)
+		return
+	}
+	d.base.Warn(msg, args...)
+}
+func (d *downgradingHclog) Error(msg string, args ...any) {
+	if d.shouldDowngrade(msg) {
+		d.base.Debug(msg, args...)
+		return
+	}
+	d.base.Error(msg, args...)
+}
+
+func (d *downgradingHclog) IsTrace() bool                          { return d.base.IsTrace() }
+func (d *downgradingHclog) IsDebug() bool                          { return d.base.IsDebug() }
+func (d *downgradingHclog) IsInfo() bool                           { return d.base.IsInfo() }
+func (d *downgradingHclog) IsWarn() bool                           { return d.base.IsWarn() }
+func (d *downgradingHclog) IsError() bool                          { return d.base.IsError() }
+func (d *downgradingHclog) ImpliedArgs() []any                     { return d.base.ImpliedArgs() }
+func (d *downgradingHclog) Name() string                           { return d.base.Name() }
+func (d *downgradingHclog) SetLevel(level hclog.Level)             { d.base.SetLevel(level) }
+func (d *downgradingHclog) GetLevel() hclog.Level                  { return d.base.GetLevel() }
+func (d *downgradingHclog) StandardLogger(o *hclog.StandardLoggerOptions) *log.Logger {
+	return d.base.StandardLogger(o)
+}
+func (d *downgradingHclog) StandardWriter(o *hclog.StandardLoggerOptions) io.Writer {
+	return d.base.StandardWriter(o)
+}
+
+func (d *downgradingHclog) With(args ...any) hclog.Logger {
+	return &downgradingHclog{base: d.base.With(args...), patterns: d.patterns}
+}
+func (d *downgradingHclog) Named(name string) hclog.Logger {
+	return &downgradingHclog{base: d.base.Named(name), patterns: d.patterns}
+}
+func (d *downgradingHclog) ResetNamed(name string) hclog.Logger {
+	return &downgradingHclog{base: d.base.ResetNamed(name), patterns: d.patterns}
+}

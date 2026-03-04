@@ -46,7 +46,7 @@ export function TailForm({
         <TextArea
           value={text}
           onChange={handleTextChange}
-          placeholder={"/var/log/app.log\n/var/log/**/*.log"}
+          placeholder=""
           rows={3}
           dark={dark}
         />

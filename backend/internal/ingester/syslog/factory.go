@@ -1,6 +1,7 @@
 package syslog
 
 import (
+	"errors"
 	"log/slog"
 
 	"github.com/google/uuid"
@@ -10,9 +11,7 @@ import (
 
 // ParamDefaults returns the default parameter values for a syslog ingester.
 func ParamDefaults() map[string]string {
-	return map[string]string{
-		"udp_addr": ":514",
-	}
+	return map[string]string{}
 }
 
 // NewFactory returns a IngesterFactory for syslog ingesters.
@@ -21,9 +20,8 @@ func NewFactory() orchestrator.IngesterFactory {
 		udpAddr := params["udp_addr"]
 		tcpAddr := params["tcp_addr"]
 
-		// Default to UDP on 514 if nothing specified.
 		if udpAddr == "" && tcpAddr == "" {
-			udpAddr = ":514"
+			return nil, errors.New("syslog ingester: at least one of udp_addr or tcp_addr is required")
 		}
 
 		return New(Config{

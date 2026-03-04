@@ -1,13 +1,15 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { HelpButton } from "../HelpButton";
 
 interface CheckboxProps {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label?: string;
+  helpTopicId?: string;
   dark: boolean;
 }
 
-export function Checkbox({ checked, onChange, label, dark }: Readonly<CheckboxProps>) {
+export function Checkbox({ checked, onChange, label, helpTopicId, dark }: Readonly<CheckboxProps>) {
   const c = useThemeClass(dark);
   return (
     <div
@@ -46,6 +48,11 @@ export function Checkbox({ checked, onChange, label, dark }: Readonly<CheckboxPr
           className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
         >
           {label}
+        </span>
+      )}
+      {helpTopicId && (
+        <span onClick={(e) => e.stopPropagation()}>
+          <HelpButton topicId={helpTopicId} />
         </span>
       )}
     </div>

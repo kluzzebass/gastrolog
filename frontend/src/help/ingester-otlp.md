@@ -4,10 +4,10 @@ Type: `otlp`
 
 Accepts OpenTelemetry log records via both HTTP and gRPC transports. Compatible with any OpenTelemetry SDK or collector configured to export logs.
 
-| Param | Description | Default |
-|-------|-------------|---------|
-| `http_addr` | HTTP listen address (POST /v1/logs) | `:4318` |
-| `grpc_addr` | gRPC listen address (LogsService/Export) | `:4317` |
+| Setting | Description | Default |
+|---------|-------------|---------|
+| HTTP Address | OTLP/HTTP listen address (POST /v1/logs) | `:4318` |
+| gRPC Address | OTLP/gRPC listen address | `:4317` |
 
 **HTTP** accepts both protobuf (`application/x-protobuf`) and JSON (`application/json`) request bodies, with optional gzip compression.
 

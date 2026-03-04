@@ -29,7 +29,7 @@ export function VaultParamsForm({
           <TextInput
             value={get("dir")}
             onChange={(v) => set("dir", v)}
-            placeholder="/var/lib/gastrolog/data"
+            placeholder=""
             dark={dark}
             mono
             examples={["/var/lib/gastrolog/data"]}

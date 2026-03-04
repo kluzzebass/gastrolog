@@ -10,7 +10,7 @@ import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput } from "./FormField";
-import { IngesterParamsForm } from "./ingester-params";
+import { IngesterParamsForm, isIngesterParamsValid } from "./ingester-params";
 import { Button } from "./Buttons";
 import { Checkbox } from "./Checkbox";
 import { NodeBadge } from "./NodeBadge";
@@ -160,7 +160,7 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
           onCancel={() => dispatchAdd({ type: "resetForm" })}
           onCreate={handleCreate}
           isPending={putIngester.isPending}
-          createDisabled={nameConflict}
+          createDisabled={nameConflict || !isIngesterParamsValid(newType, newParams)}
           typeBadge={newType}
         >
           <FormField label="Name" dark={dark}>
@@ -212,7 +212,7 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
                     type: ing.type,
                   })
                 }
-                disabled={putIngester.isPending || !isDirty(ing.id)}
+                disabled={putIngester.isPending || !isDirty(ing.id) || !isIngesterParamsValid(ing.type, edit.params)}
               >
                 {putIngester.isPending ? "Saving..." : "Save"}
               </Button>

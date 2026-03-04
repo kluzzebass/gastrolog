@@ -4,9 +4,9 @@ Type: `fluentfwd`
 
 Accepts messages via the Fluent Forward protocol over TCP. Compatible with Fluentd and Fluent Bit using the `forward` output plugin.
 
-| Param | Description | Default |
-|-------|-------------|---------|
-| `addr` | TCP listen address | `:24224` |
+| Setting | Description | Default |
+|---------|-------------|---------|
+| Listen Address | TCP address for Fluent Forward protocol | `:24224` |
 
 Supports all four Fluent Forward message modes: Message, Forward, PackedForward, and CompressedPackedForward. EventTime extension type (nanosecond precision) is supported.
 

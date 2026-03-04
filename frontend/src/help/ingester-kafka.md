@@ -4,15 +4,15 @@ Type: `kafka`
 
 Consumes messages from a Kafka topic using a consumer group. Each message value becomes a log record.
 
-| Param | Description | Default |
-|-------|-------------|---------|
-| `brokers` | Comma-separated broker addresses (required) | |
-| `topic` | Topic to consume (required) | |
-| `group` | Consumer group ID | `gastrolog` |
-| `tls` | Enable TLS | `false` |
-| `sasl_mechanism` | SASL auth: `plain`, `scram-sha-256`, or `scram-sha-512` | *(none)* |
-| `sasl_user` | SASL username | |
-| `sasl_password` | SASL password | |
+| Setting | Description | Default |
+|---------|-------------|---------|
+| Brokers | Comma-separated list of Kafka broker addresses (required) | |
+| Topic | Kafka topic to consume (required) | |
+| Consumer Group | Consumer group ID | `gastrolog` |
+| Enable TLS | Secure connection to brokers | off |
+| SASL Mechanism | Authentication mechanism: PLAIN, SCRAM-SHA-256, or SCRAM-SHA-512 | (none) |
+| SASL User | Username for SASL authentication | |
+| SASL Password | Password for SASL authentication | |
 
 ## Attributes
 

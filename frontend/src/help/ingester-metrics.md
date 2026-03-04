@@ -26,7 +26,8 @@ ingest_queue_capacity=1000
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| Interval | How often to emit a metrics record | `30s` |
+| System Interval | How often to emit a system metrics record | `10s` |
+| Vault Interval | How often to emit vault statistics | `30s` |
 
 ## Attributes
 

@@ -14,6 +14,13 @@ import (
 	"gastrolog/internal/config"
 	"gastrolog/internal/config/raftfsm"
 	"gastrolog/internal/ingester/docker"
+	"gastrolog/internal/ingester/fluentfwd"
+	inghttp "gastrolog/internal/ingester/http"
+	"gastrolog/internal/ingester/kafka"
+	"gastrolog/internal/ingester/mqtt"
+	"gastrolog/internal/ingester/otlp"
+	"gastrolog/internal/ingester/relp"
+	"gastrolog/internal/ingester/syslog"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -176,7 +183,7 @@ func (s *ConfigServer) validateIngester(ingCfg config.IngesterConfig) error {
 		params["_state_dir"] = s.factories.HomeDir
 	}
 	if _, err := factory(ingCfg.ID, params, s.factories.Logger); err != nil {
-		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("create ingester: %w", err))
+		return connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	return nil
 }
@@ -236,23 +243,41 @@ func (s *ConfigServer) TestIngester(
 	ctx context.Context,
 	req *connect.Request[apiv1.TestIngesterRequest],
 ) (*connect.Response[apiv1.TestIngesterResponse], error) {
+	var msg string
+	var err error
+
 	switch req.Msg.Type {
 	case "docker":
-		msg, err := docker.TestConnection(ctx, req.Msg.Params, s.cfgStore)
-		if err != nil {
-			return connect.NewResponse(&apiv1.TestIngesterResponse{ //nolint:nilerr // test failure is reported in the response body, not as an RPC error
-				Success: false,
-				Message: err.Error(),
-			}), nil
-		}
-		return connect.NewResponse(&apiv1.TestIngesterResponse{
-			Success: true,
-			Message: msg,
-		}), nil
+		msg, err = docker.TestConnection(ctx, req.Msg.Params, s.cfgStore)
+	case "mqtt":
+		msg, err = mqtt.TestConnection(ctx, req.Msg.Params)
+	case "kafka":
+		msg, err = kafka.TestConnection(ctx, req.Msg.Params)
+	case "syslog":
+		msg, err = syslog.TestConnection(req.Msg.Params)
+	case "relp":
+		msg, err = relp.TestConnection(req.Msg.Params)
+	case "http":
+		msg, err = inghttp.TestConnection(req.Msg.Params)
+	case "fluentfwd":
+		msg, err = fluentfwd.TestConnection(req.Msg.Params)
+	case "otlp":
+		msg, err = otlp.TestConnection(req.Msg.Params)
 	default:
 		return connect.NewResponse(&apiv1.TestIngesterResponse{
 			Success: false,
 			Message: fmt.Sprintf("connection test not supported for ingester type %q", req.Msg.Type),
 		}), nil
 	}
+
+	if err != nil {
+		return connect.NewResponse(&apiv1.TestIngesterResponse{ //nolint:nilerr // test failure is reported in the response body, not as an RPC error
+			Success: false,
+			Message: err.Error(),
+		}), nil
+	}
+	return connect.NewResponse(&apiv1.TestIngesterResponse{
+		Success: true,
+		Message: msg,
+	}), nil
 }

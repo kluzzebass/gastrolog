@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,13 +18,27 @@ import (
 )
 
 // ParamDefaults returns the default parameter values for a Docker ingester.
+// The _host_examples key carries comma-separated clickable socket paths
+// resolved at runtime (not a real param — consumed by the UI only).
 func ParamDefaults() map[string]string {
 	return map[string]string{
-		"host":          "unix:///var/run/docker.sock",
-		"poll_interval": "30s",
-		"stdout":        "true",
-		"stderr":        "true",
+		"poll_interval":  "30s",
+		"stdout":         "true",
+		"stderr":         "true",
+		"_host_examples": strings.Join(DockerSocketExamples(), ","),
 	}
+}
+
+// DockerSocketExamples returns well-known Docker socket paths for this host.
+// Always includes both the Docker Desktop path (~/.docker/run/docker.sock)
+// and the traditional /var/run/docker.sock so users can click and test.
+func DockerSocketExamples() []string {
+	examples := []string{"unix:///var/run/docker.sock"}
+	if home, err := os.UserHomeDir(); err == nil {
+		p := "unix://" + filepath.Join(home, ".docker", "run", "docker.sock")
+		examples = append([]string{p}, examples...)
+	}
+	return append(examples, "tcp://localhost:2376")
 }
 
 // NewFactory returns an IngesterFactory for Docker container log ingesters.

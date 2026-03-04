@@ -157,7 +157,21 @@ func newRaftConfig(nodeID string, logger *slog.Logger) *hraft.Config {
 	raftLogger := logging.NewHclogAdapter(logger.With("component", "raft"))
 	// Suppress the noisy "entering follower state" log that fires on every
 	// heartbeat timeout cycle, even when the node remains a follower.
-	conf.Logger = logging.FilterHclogMessages(raftLogger, "entering follower state")
+	filtered := logging.FilterHclogMessages(raftLogger, "entering follower state")
+	// Downgrade noisy Raft messages to DEBUG: heartbeat/replication failures
+	// fire constantly when peers are unreachable, and snapshot lifecycle
+	// messages are routine housekeeping.
+	conf.Logger = logging.DowngradeHclogToDebug(filtered,
+		"failed to heartbeat",
+		"failed to appendEntries",
+		"failed to take snapshot",
+		"starting snapshot up to",
+		"snapshot complete up to",
+		"compacting logs",
+		"pipelining replication",
+		"aborting pipeline replication",
+		"failed to contact",
+	)
 	conf.LogOutput = nil
 
 	conf.SnapshotThreshold = 4
