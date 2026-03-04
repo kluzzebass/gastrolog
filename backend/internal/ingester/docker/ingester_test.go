@@ -649,6 +649,125 @@ func TestLogDemuxMultiplexed(t *testing.T) {
 	}
 }
 
+// makePartialFrame creates a multiplexed frame WITHOUT a trailing newline,
+// simulating Docker's json-file driver splitting messages >16KB.
+func makePartialFrame(stream streamType, ts time.Time, content string) []byte {
+	payload := ts.Format(time.RFC3339Nano) + " " + content // no trailing \n
+	header := make([]byte, 8)
+	header[0] = byte(stream)
+	binary.BigEndian.PutUint32(header[4:], uint32(len(payload)))
+	return append(header, []byte(payload)...)
+}
+
+func TestPartialFrameReassembly(t *testing.T) {
+	ts := time.Date(2025, 6, 10, 12, 0, 0, 123456789, time.UTC)
+	first16K := strings.Repeat("A", 16384)
+	remaining := strings.Repeat("B", 3616)
+
+	var buf bytes.Buffer
+	// Frame 1: partial (no trailing newline) — first 16K of content.
+	buf.Write(makePartialFrame(streamStdout, ts, first16K))
+	// Frame 2: final (trailing newline) — remaining content.
+	buf.Write(makeMultiplexedFrame(streamStdout, ts, remaining))
+
+	entries := make(chan logEntry, 10)
+	go func() {
+		readMultiplexed(&buf, entries)
+		close(entries)
+	}()
+
+	var results []logEntry
+	for e := range entries {
+		results = append(results, e)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 reassembled entry, got %d", len(results))
+	}
+
+	want := first16K + remaining
+	if string(results[0].Line) != want {
+		t.Errorf("reassembled line length = %d, want %d", len(results[0].Line), len(want))
+	}
+	if !results[0].Timestamp.Equal(ts) {
+		t.Errorf("timestamp = %v, want %v", results[0].Timestamp, ts)
+	}
+	if results[0].Stream != "stdout" {
+		t.Errorf("stream = %q, want %q", results[0].Stream, "stdout")
+	}
+}
+
+func TestPartialFrameThreeWaySplit(t *testing.T) {
+	ts := time.Date(2025, 6, 10, 12, 0, 0, 0, time.UTC)
+
+	var buf bytes.Buffer
+	buf.Write(makePartialFrame(streamStdout, ts, "part1-"))
+	buf.Write(makePartialFrame(streamStdout, ts, "part2-"))
+	buf.Write(makeMultiplexedFrame(streamStdout, ts, "part3"))
+
+	entries := make(chan logEntry, 10)
+	go func() {
+		readMultiplexed(&buf, entries)
+		close(entries)
+	}()
+
+	var results []logEntry
+	for e := range entries {
+		results = append(results, e)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 reassembled entry, got %d", len(results))
+	}
+	if string(results[0].Line) != "part1-part2-part3" {
+		t.Errorf("line = %q, want %q", results[0].Line, "part1-part2-part3")
+	}
+}
+
+func TestPartialFrameInterleavedStreams(t *testing.T) {
+	ts1 := time.Date(2025, 6, 10, 12, 0, 0, 0, time.UTC)
+	ts2 := time.Date(2025, 6, 10, 12, 0, 1, 0, time.UTC)
+
+	var buf bytes.Buffer
+	// Partial stdout, then a complete stderr, then stdout continuation.
+	buf.Write(makePartialFrame(streamStdout, ts1, "stdout-part1-"))
+	buf.Write(makeMultiplexedFrame(streamStderr, ts2, "stderr-complete"))
+	buf.Write(makeMultiplexedFrame(streamStdout, ts1, "stdout-part2"))
+
+	entries := make(chan logEntry, 10)
+	go func() {
+		readMultiplexed(&buf, entries)
+		close(entries)
+	}()
+
+	var results []logEntry
+	for e := range entries {
+		results = append(results, e)
+	}
+
+	if len(results) != 2 {
+		t.Fatalf("expected 2 entries (1 stderr + 1 reassembled stdout), got %d", len(results))
+	}
+
+	// stderr should come first (it completed first in the stream).
+	if string(results[0].Line) != "stderr-complete" {
+		t.Errorf("entry[0] = %q, want %q", results[0].Line, "stderr-complete")
+	}
+	if results[0].Stream != "stderr" {
+		t.Errorf("entry[0] stream = %q, want stderr", results[0].Stream)
+	}
+
+	if string(results[1].Line) != "stdout-part1-stdout-part2" {
+		t.Errorf("entry[1] = %q, want %q", results[1].Line, "stdout-part1-stdout-part2")
+	}
+	if results[1].Stream != "stdout" {
+		t.Errorf("entry[1] stream = %q, want stdout", results[1].Stream)
+	}
+	if !results[1].Timestamp.Equal(ts1) {
+		t.Errorf("entry[1] timestamp = %v, want %v", results[1].Timestamp, ts1)
+	}
+}
+
 func TestLogDemuxTTY(t *testing.T) {
 	ts := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
 

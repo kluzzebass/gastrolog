@@ -2,6 +2,7 @@ package docker
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -40,8 +41,20 @@ type logEntry struct {
 
 // readMultiplexed reads Docker multiplexed log frames from a non-TTY container.
 // Docker uses 8-byte frame headers: [stream_type(1)][padding(3)][size(4 BE)][payload]
+//
+// Docker's json-file log driver splits messages longer than 16 KB into multiple
+// frames. Partial frames do not end with a newline; the final frame does. This
+// function reassembles partial frames so each emitted logEntry corresponds to
+// one complete original log line.
 func readMultiplexed(r io.Reader, entries chan<- logEntry) error {
 	header := make([]byte, 8)
+
+	type pendingPartial struct {
+		ts   time.Time
+		data []byte // content bytes (timestamp already stripped)
+	}
+	partials := make(map[streamType]*pendingPartial)
+
 	for {
 		if _, err := io.ReadFull(r, header); err != nil {
 			return err
@@ -59,8 +72,39 @@ func readMultiplexed(r io.Reader, entries chan<- logEntry) error {
 			return fmt.Errorf("read frame payload: %w", err)
 		}
 
-		// Payload may contain multiple lines separated by newlines.
-		// Each line has a Docker timestamp prefix when timestamps=true.
+		complete := len(payload) > 0 && payload[len(payload)-1] == '\n'
+
+		if p, ok := partials[st]; ok {
+			// Continuation of a partial message. Each Docker frame carries
+			// its own timestamp prefix — strip it and append only the content.
+			_, content := parseTimestamp(payload)
+			p.data = append(p.data, content...)
+
+			if complete {
+				line := bytes.TrimRight(p.data, "\r\n")
+				cp := make([]byte, len(line))
+				copy(cp, line)
+				entries <- logEntry{
+					Timestamp: p.ts,
+					Stream:    st.String(),
+					Line:      cp,
+				}
+				delete(partials, st)
+			}
+			continue
+		}
+
+		if !complete {
+			// First frame of a partial message — buffer the timestamp and
+			// content for reassembly with subsequent frames.
+			ts, content := parseTimestamp(payload)
+			cp := make([]byte, len(content))
+			copy(cp, content)
+			partials[st] = &pendingPartial{ts: ts, data: cp}
+			continue
+		}
+
+		// Normal complete frame. May contain multiple newline-separated lines.
 		lines := splitLines(payload)
 		for _, line := range lines {
 			if len(line) == 0 {
