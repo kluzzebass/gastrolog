@@ -45,18 +45,23 @@ func (r *subscriberRegistry) subscribe(fn func(*gastrologv1.BroadcastMessage)) f
 }
 
 // dispatch calls all registered subscribers with the message.
+// Subscribers are snapshot under the lock, then invoked outside it so
+// slow callbacks don't block the RPC handler or other subscribers.
 func (r *subscriberRegistry) dispatch(msg *gastrologv1.BroadcastMessage) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-	for _, s := range r.subs {
+	subs := make([]subscriber, len(r.subs))
+	copy(subs, r.subs)
+	r.mu.RUnlock()
+
+	for _, s := range subs {
 		s.fn(msg)
 	}
 }
 
 // Subscribe registers a callback that will be invoked for every broadcast
 // message received from peers. Returns a function to unsubscribe.
-// Callbacks are invoked synchronously within the RPC handler — they should
-// be fast (store to a map, enqueue work, etc.).
+// Callbacks are invoked sequentially outside any lock, so slow callbacks
+// delay subsequent ones but do not block subscribe/unsubscribe operations.
 func (s *Server) Subscribe(fn func(*gastrologv1.BroadcastMessage)) func() {
 	return s.subscribers.subscribe(fn)
 }
