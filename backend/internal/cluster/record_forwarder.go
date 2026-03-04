@@ -191,7 +191,7 @@ func (rf *RecordForwarder) drainChannel(nf *nodeForwarder, batch []forwardEntry)
 
 // sendBatchWithBackoff wraps sendBatch with backoff tracking.
 func (rf *RecordForwarder) sendBatchWithBackoff(nodeID string, nf *nodeForwarder, entries []forwardEntry) {
-	if rf.sendBatch(nodeID, entries) {
+	if rf.sendBatch(nodeID, nf, entries) {
 		// Success — reset backoff and log recovery if we were failing.
 		if nf.failures > 0 {
 			rf.logger.Info("forward: connection restored",
@@ -213,7 +213,7 @@ func (rf *RecordForwarder) sendBatchWithBackoff(nodeID string, nf *nodeForwarder
 
 // sendBatch groups entries by vault and sends one ForwardRecords RPC per vault.
 // Returns true if all RPCs succeeded, false on any failure.
-func (rf *RecordForwarder) sendBatch(nodeID string, entries []forwardEntry) bool {
+func (rf *RecordForwarder) sendBatch(nodeID string, nf *nodeForwarder, entries []forwardEntry) bool {
 	// Group by vault ID.
 	byVault := make(map[uuid.UUID][]*gastrologv1.ExportRecord)
 	for _, e := range entries {
@@ -232,7 +232,7 @@ func (rf *RecordForwarder) sendBatch(nodeID string, entries []forwardEntry) bool
 
 	conn, err := rf.peers.Conn(nodeID)
 	if err != nil {
-		rf.logFailure(nodeID, "dial failed", err)
+		rf.logFailure(nodeID, nf, "dial failed", err)
 		return false
 	}
 
@@ -247,7 +247,7 @@ func (rf *RecordForwarder) sendBatch(nodeID string, entries []forwardEntry) bool
 		resp := &gastrologv1.ForwardRecordsResponse{}
 		err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardRecords", req, resp)
 		if err != nil {
-			rf.logFailure(nodeID, "RPC failed", err)
+			rf.logFailure(nodeID, nf, "RPC failed", err)
 			rf.peers.Invalidate(nodeID)
 			return false
 		}
@@ -261,12 +261,11 @@ func (rf *RecordForwarder) sendBatch(nodeID string, entries []forwardEntry) bool
 // logFailure logs a forwarding failure at INFO on the first occurrence,
 // then at DEBUG for subsequent failures. Peer unavailability is normal
 // in a cluster, so this is not a warning.
-func (rf *RecordForwarder) logFailure(nodeID string, msg string, err error) {
-	rf.mu.Lock()
-	nf := rf.nodes[nodeID]
-	rf.mu.Unlock()
-
-	if nf == nil || nf.failures == 0 {
+//
+// nf is passed directly by the caller (always within the flushLoop goroutine)
+// to avoid a racy map lookup → read of nf.failures across goroutines.
+func (rf *RecordForwarder) logFailure(nodeID string, nf *nodeForwarder, msg string, err error) {
+	if nf.failures == 0 {
 		rf.logger.Info("forward: "+msg,
 			"node", nodeID, "error", err)
 	} else {
