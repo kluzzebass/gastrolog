@@ -9,6 +9,7 @@ import { MqttForm } from "./MqttForm";
 import { HttpForm } from "./HttpForm";
 import { RelpForm } from "./RelpForm";
 import { MetricsForm } from "./MetricsForm";
+import { SelfForm } from "./SelfForm";
 import { SyslogForm } from "./SyslogForm";
 import type { IngesterParamsFormProps } from "./types";
 
@@ -34,6 +35,7 @@ const FORM_MAP: Record<
   http: HttpForm,
   relp: RelpForm,
   metrics: MetricsForm,
+  self: SelfForm,
   syslog: SyslogForm,
 };
 
