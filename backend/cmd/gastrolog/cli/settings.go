@@ -105,7 +105,11 @@ func newLookupCmd() *cobra.Command {
 }
 
 func newGroupCmd(name string) *cobra.Command {
-	g := findGroup(name)
+	g, err := findGroup(name)
+	if err != nil {
+		// Programming error: hardcoded group names must match settingsGroups.
+		panic(err)
+	}
 
 	// Resolve the Put sub-message descriptor for flag registration.
 	putSubDesc := navigateDescriptor(
@@ -251,13 +255,13 @@ func ensureSubMessage(msg protoreflect.Message, path []string) protoreflect.Mess
 	return cur
 }
 
-func findGroup(name string) settingsGroup {
+func findGroup(name string) (settingsGroup, error) {
 	for _, g := range settingsGroups {
 		if g.name == name {
-			return g
+			return g, nil
 		}
 	}
-	panic("unknown settings group: " + name)
+	return settingsGroup{}, fmt.Errorf("unknown settings group: %s", name)
 }
 
 func applyFlag(cmd *cobra.Command, msg protoreflect.Message, f settingsField) error {

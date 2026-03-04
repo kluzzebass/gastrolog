@@ -302,19 +302,20 @@ func TestSettingsGroupsFieldMappings(t *testing.T) {
 
 func TestFindGroup(t *testing.T) {
 	for _, name := range []string{"auth", "password-policy", "query", "scheduler", "tls", "lookup", "maxmind"} {
-		g := findGroup(name)
+		g, err := findGroup(name)
+		if err != nil {
+			t.Fatalf("findGroup(%q): %v", name, err)
+		}
 		if g.name != name {
 			t.Errorf("findGroup(%q) returned group with name %q", name, g.name)
 		}
 	}
 
-	// Unknown group should panic.
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic for unknown group")
-		}
-	}()
-	findGroup("nonexistent")
+	// Unknown group should return an error.
+	_, err := findGroup("nonexistent")
+	if err == nil {
+		t.Error("expected error for unknown group")
+	}
 }
 
 func TestProtoGetTyped(t *testing.T) {
