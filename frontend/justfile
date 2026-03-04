@@ -43,6 +43,10 @@ format:
 lint:
     bun x eslint "src/**/*.{ts,tsx}"
 
+# Runs frontend tests.
+test *args:
+    bun test {{args}}
+
 # Full frontend quality audit (react-doctor)
 audit:
     bunx react-doctor@latest . --verbose

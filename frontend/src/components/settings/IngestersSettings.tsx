@@ -27,6 +27,7 @@ const ingesterTypes = [
   { value: "metrics", label: "metrics" },
   { value: "otlp", label: "otlp" },
   { value: "relp", label: "relp" },
+  { value: "self", label: "self" },
   { value: "syslog", label: "syslog" },
   { value: "tail", label: "tail" },
 ];

@@ -33,6 +33,11 @@ build-all:
 docker tag="gastrolog:latest":
     docker build --build-arg VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev) -t {{tag}} .
 
+# Run all tests (backend + frontend)
+test:
+    just backend test
+    just frontend test
+
 # Run full quality audit (backend + frontend)
 audit:
     just backend audit

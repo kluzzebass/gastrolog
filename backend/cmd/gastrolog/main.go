@@ -37,7 +37,14 @@ func main() {
 		Level: slog.LevelDebug, // Allow all levels; filtering done by ComponentFilterHandler
 	})
 	filterHandler := logging.NewComponentFilterHandler(baseHandler, slog.LevelInfo)
-	logger := slog.New(filterHandler)
+
+	// Install capture handler for the "self" ingester. Records from
+	// pipeline-internal components are skipped to prevent feedback loops.
+	slogCaptureCh := make(chan logging.CapturedRecord, 4096)
+	captureHandler := logging.NewCaptureHandler(filterHandler, slogCaptureCh, []string{
+		"ingester", "orchestrator", "digest", "chunk", "index", "scheduler",
+	})
+	logger := slog.New(captureHandler)
 
 	app.Version = version
 
@@ -78,6 +85,7 @@ func main() {
 				JoinAddr:    mustString(cmd, "join-addr"),
 				JoinToken:   mustString(cmd, "join-token"),
 				Voteless:    mustBool(cmd, "voteless"),
+				SlogCapture: slogCaptureCh,
 			}
 
 			err := app.Run(cmd.Context(), logger, cfg)

@@ -37,14 +37,13 @@ func TestFactory_DefaultsV3(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected v3Ingester by default, got %T", ing)
 	}
-	if v3.cfg.QoS != 1 {
-		t.Errorf("expected default QoS 1, got %d", v3.cfg.QoS)
-	}
 	if !v3.cfg.CleanSession {
 		t.Error("expected default clean_session true")
 	}
-	if v3.cfg.ClientID != "gastrolog-"+id.String()[:8] {
-		t.Errorf("expected default client ID gastrolog-%s, got %s", id.String()[:8], v3.cfg.ClientID)
+	idStr := id.String()
+	wantSuffix := idStr[len(idStr)-8:]
+	if v3.cfg.ClientID != "gastrolog-"+wantSuffix {
+		t.Errorf("expected default client ID gastrolog-%s, got %s", wantSuffix, v3.cfg.ClientID)
 	}
 }
 
@@ -94,32 +93,6 @@ func TestFactory_VersionValidation(t *testing.T) {
 	}
 }
 
-func TestFactory_QoSValidation(t *testing.T) {
-	factory := NewFactory()
-	id := uuid.New()
-
-	base := map[string]string{
-		"broker": "mqtt://localhost:1883",
-		"topics": "test",
-	}
-
-	for _, valid := range []string{"0", "1", "2"} {
-		params := copyMap(base)
-		params["qos"] = valid
-		if _, err := factory(id, params, nil); err != nil {
-			t.Errorf("qos=%s should be valid, got error: %v", valid, err)
-		}
-	}
-
-	for _, invalid := range []string{"3", "-1", "abc"} {
-		params := copyMap(base)
-		params["qos"] = invalid
-		_, err := factory(id, params, nil)
-		if err == nil {
-			t.Errorf("qos=%s should be invalid", invalid)
-		}
-	}
-}
 
 func TestFactory_TopicSplitting(t *testing.T) {
 	factory := NewFactory()
@@ -212,11 +185,14 @@ func TestFactory_CleanSessionFalse(t *testing.T) {
 
 func TestParamDefaults(t *testing.T) {
 	d := ParamDefaults()
-	if d["qos"] != "1" {
-		t.Errorf("expected default qos=1, got %q", d["qos"])
+	if d["version"] != "3" {
+		t.Errorf("expected default version=3, got %q", d["version"])
 	}
 	if d["clean_session"] != "true" {
 		t.Errorf("expected default clean_session=true, got %q", d["clean_session"])
+	}
+	if _, ok := d["qos"]; ok {
+		t.Error("qos should not be in defaults (hardcoded)")
 	}
 }
 

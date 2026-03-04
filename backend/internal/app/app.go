@@ -40,8 +40,10 @@ import (
 	ingestmetrics "gastrolog/internal/ingester/metrics"
 	ingestotlp "gastrolog/internal/ingester/otlp"
 	ingestrelp "gastrolog/internal/ingester/relp"
+	ingestself "gastrolog/internal/ingester/self"
 	ingestsyslog "gastrolog/internal/ingester/syslog"
 	ingesttail "gastrolog/internal/ingester/tail"
+	"gastrolog/internal/logging"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/server"
@@ -62,6 +64,10 @@ type RunConfig struct {
 	JoinAddr    string
 	JoinToken   string
 	Voteless    bool
+
+	// SlogCapture receives copies of slog records for the "self" ingester.
+	// Created by main and shared with the CaptureHandler. Nil disables capture.
+	SlogCapture <-chan logging.CapturedRecord
 }
 
 // Run starts the gastrolog server. It wires all components, starts the
@@ -131,7 +137,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	orch.RegisterDigester(digestlevel.New())
 	orch.RegisterDigester(digesttimestamp.New())
 
-	factories := buildFactories(logger, homeDir, cfgStore, orch)
+	factories := buildFactories(logger, homeDir, cfgStore, orch, cfg.SlogCapture)
 
 	// Wire cross-node record forwarding and search forwarding in cluster mode.
 	var searchForwarder *cluster.SearchForwarder
@@ -658,34 +664,40 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 	return nil
 }
 
-func buildFactories(logger *slog.Logger, homeDir string, cfgStore config.Store, orch *orchestrator.Orchestrator) orchestrator.Factories {
+func buildFactories(logger *slog.Logger, homeDir string, cfgStore config.Store, orch *orchestrator.Orchestrator, slogCh <-chan logging.CapturedRecord) orchestrator.Factories {
+	ingesters := map[string]orchestrator.IngesterFactory{
+		"chatterbox": chatterbox.NewIngester,
+		"docker":     ingestdocker.NewFactory(cfgStore),
+		"fluentfwd":  ingestfluentfwd.NewFactory(),
+		"http":       ingesthttp.NewFactory(),
+		"kafka":      ingestkafka.NewFactory(),
+		"mqtt":       ingestmqtt.NewFactory(),
+		"metrics":    ingestmetrics.NewFactory(orch),
+		"otlp":       ingestotlp.NewFactory(),
+		"relp":       ingestrelp.NewFactory(),
+		"syslog":     ingestsyslog.NewFactory(),
+		"tail":       ingesttail.NewFactory(),
+	}
+	defaults := map[string]func() map[string]string{
+		"chatterbox": chatterbox.ParamDefaults,
+		"docker":     ingestdocker.ParamDefaults,
+		"fluentfwd":  ingestfluentfwd.ParamDefaults,
+		"http":       ingesthttp.ParamDefaults,
+		"kafka":      ingestkafka.ParamDefaults,
+		"mqtt":       ingestmqtt.ParamDefaults,
+		"metrics":    ingestmetrics.ParamDefaults,
+		"otlp":       ingestotlp.ParamDefaults,
+		"relp":       ingestrelp.ParamDefaults,
+		"syslog":     ingestsyslog.ParamDefaults,
+		"tail":       ingesttail.ParamDefaults,
+	}
+	if slogCh != nil {
+		ingesters["self"] = ingestself.NewFactory(slogCh)
+		defaults["self"] = ingestself.ParamDefaults
+	}
 	return orchestrator.Factories{
-		Ingesters: map[string]orchestrator.IngesterFactory{
-			"chatterbox": chatterbox.NewIngester,
-			"docker":     ingestdocker.NewFactory(cfgStore),
-			"fluentfwd":  ingestfluentfwd.NewFactory(),
-			"http":       ingesthttp.NewFactory(),
-			"kafka":      ingestkafka.NewFactory(),
-			"mqtt":       ingestmqtt.NewFactory(),
-			"metrics":    ingestmetrics.NewFactory(orch),
-			"otlp":       ingestotlp.NewFactory(),
-			"relp":       ingestrelp.NewFactory(),
-			"syslog":     ingestsyslog.NewFactory(),
-			"tail":       ingesttail.NewFactory(),
-		},
-		IngesterDefaults: map[string]func() map[string]string{
-			"chatterbox": chatterbox.ParamDefaults,
-			"docker":     ingestdocker.ParamDefaults,
-			"fluentfwd":  ingestfluentfwd.ParamDefaults,
-			"http":       ingesthttp.ParamDefaults,
-			"kafka":      ingestkafka.ParamDefaults,
-			"mqtt":       ingestmqtt.ParamDefaults,
-			"metrics":    ingestmetrics.ParamDefaults,
-			"otlp":       ingestotlp.ParamDefaults,
-			"relp":       ingestrelp.ParamDefaults,
-			"syslog":     ingestsyslog.ParamDefaults,
-			"tail":       ingesttail.ParamDefaults,
-		},
+		Ingesters:        ingesters,
+		IngesterDefaults: defaults,
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"file":   chunkfile.NewFactory(),
 			"memory": chunkmem.NewFactory(),

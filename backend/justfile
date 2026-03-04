@@ -51,6 +51,10 @@ build-all:
 gen:
   cd api/proto && buf generate
 
+# Runs all Go tests.
+test *args:
+  go test ./... {{args}}
+
 # Lints Go code (cognitive complexity, cyclomatic complexity, gocritic).
 lint:
   golangci-lint run ./...

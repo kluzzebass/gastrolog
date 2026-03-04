@@ -59,7 +59,7 @@ export function ExpandableCard({
             {id}
           </span>
           {typeBadge && (
-            <Badge variant={typeBadgeAccent ? "debug" : "muted"} dark={dark}>
+            <Badge variant={typeBadgeAccent ? "copper" : "muted"} dark={dark}>
               {typeBadge}
             </Badge>
           )}

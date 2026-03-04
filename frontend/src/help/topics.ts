@@ -27,6 +27,7 @@ export const helpTopics: HelpTopic[] = [
       { id: 'ingester-tail', title: 'Tail', load: md(() => import('./ingester-tail.md?raw')) },
       { id: 'ingester-docker', title: 'Docker', load: md(() => import('./ingester-docker.md?raw')) },
       { id: 'ingester-metrics', title: 'Metrics', load: md(() => import('./ingester-metrics.md?raw')) },
+      { id: 'ingester-self', title: 'Self', load: md(() => import('./ingester-self.md?raw')) },
       { id: 'ingester-chatterbox', title: 'Chatterbox', load: md(() => import('./ingester-chatterbox.md?raw')) },
     ],
   },
