@@ -156,6 +156,90 @@ func (b *bearerInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFu
 	return next
 }
 
+// newNoAuthSetup creates a test server using NoAuthInterceptor (--no-auth mode).
+func newNoAuthSetup(t *testing.T) *testSetup {
+	t.Helper()
+
+	opts := connect.WithInterceptors(&auth.NoAuthInterceptor{})
+
+	mux := http.NewServeMux()
+	mux.Handle(gastrologv1connect.NewAuthServiceHandler(&stubAuthService{}, opts))
+	mux.Handle(gastrologv1connect.NewConfigServiceHandler(&stubConfigService{}, opts))
+	mux.Handle(gastrologv1connect.NewQueryServiceHandler(&stubQueryService{}, opts))
+
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+
+	return &testSetup{
+		authClient:   gastrologv1connect.NewAuthServiceClient(http.DefaultClient, ts.URL),
+		configClient: gastrologv1connect.NewConfigServiceClient(http.DefaultClient, ts.URL),
+		queryClient:  gastrologv1connect.NewQueryServiceClient(http.DefaultClient, ts.URL),
+		server:       ts,
+	}
+}
+
+func TestNoAuth_PublicEndpoint(t *testing.T) {
+	s := newNoAuthSetup(t)
+	_, err := s.authClient.Login(context.Background(), connect.NewRequest(&apiv1.LoginRequest{}))
+	if err != nil {
+		t.Fatalf("public endpoint should work in no-auth mode: %v", err)
+	}
+}
+
+func TestNoAuth_AuthenticatedEndpoint(t *testing.T) {
+	s := newNoAuthSetup(t)
+	_, err := s.queryClient.Explain(context.Background(), connect.NewRequest(&apiv1.ExplainRequest{}))
+	if err != nil {
+		t.Fatalf("authenticated endpoint should work without token in no-auth mode: %v", err)
+	}
+}
+
+func TestNoAuth_AdminEndpoint(t *testing.T) {
+	s := newNoAuthSetup(t)
+	_, err := s.configClient.GetConfig(context.Background(), connect.NewRequest(&apiv1.GetConfigRequest{}))
+	if err != nil {
+		t.Fatalf("admin endpoint should work without token in no-auth mode: %v", err)
+	}
+}
+
+func TestNoAuth_ClaimsAreAdmin(t *testing.T) {
+	// Verify that NoAuthInterceptor injects admin claims into context.
+	var gotClaims *auth.Claims
+	handler := &claimsCapture{fn: func(ctx context.Context) {
+		gotClaims = auth.ClaimsFromContext(ctx)
+	}}
+
+	opts := connect.WithInterceptors(&auth.NoAuthInterceptor{})
+	mux := http.NewServeMux()
+	mux.Handle(gastrologv1connect.NewAuthServiceHandler(handler, opts))
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+
+	client := gastrologv1connect.NewAuthServiceClient(http.DefaultClient, ts.URL)
+	_, _ = client.ChangePassword(context.Background(), connect.NewRequest(&apiv1.ChangePasswordRequest{}))
+
+	if gotClaims == nil {
+		t.Fatal("expected claims to be injected")
+	}
+	if gotClaims.Role != "admin" {
+		t.Errorf("expected admin role, got %q", gotClaims.Role)
+	}
+	if gotClaims.Subject != "admin" {
+		t.Errorf("expected subject 'admin', got %q", gotClaims.Subject)
+	}
+}
+
+// claimsCapture is a stub that captures context for inspection.
+type claimsCapture struct {
+	gastrologv1connect.UnimplementedAuthServiceHandler
+	fn func(ctx context.Context)
+}
+
+func (c *claimsCapture) ChangePassword(ctx context.Context, req *connect.Request[apiv1.ChangePasswordRequest]) (*connect.Response[apiv1.ChangePasswordResponse], error) {
+	c.fn(ctx)
+	return connect.NewResponse(&apiv1.ChangePasswordResponse{}), nil
+}
+
 func TestPublicEndpoint_NoToken(t *testing.T) {
 	s := newTestSetup(t, &mockCounter{count: 5})
 
