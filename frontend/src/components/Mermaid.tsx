@@ -1,6 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import mermaid from "mermaid";
+import type mermaidAPI from "mermaid";
 import { useThemeClass } from "../hooks/useThemeClass";
+
+// Lazy singleton — loaded on first render, not at import time.
+let mermaidModule: typeof mermaidAPI | null = null;
+async function getMermaid() {
+  if (!mermaidModule) {
+    const m = await import("mermaid");
+    mermaidModule = m.default;
+  }
+  return mermaidModule;
+}
 
 const darkVars = {
   background: "#141820",
@@ -46,8 +56,8 @@ const lightVars = {
   nodeTextColor: "#1a1610",
 };
 
-function initMermaid(dark: boolean) {
-  mermaid.initialize({
+function initMermaid(m: typeof mermaidAPI, dark: boolean) {
+  m.initialize({
     startOnLoad: false,
     theme: "base",
     themeVariables: dark ? darkVars : lightVars,
@@ -82,16 +92,19 @@ export function MermaidDiagram({ chart, dark }: Readonly<MermaidDiagramProps>) {
     // Already have the SVG (from cache or a previous render) — nothing to do.
     if (svgCache.has(key)) return;
 
-    initMermaid(dark);
     const id = `mermaid-${Math.random().toString(36).slice(2, 11)}`;
     let cancelled = false;
 
-    mermaid
-      .render(id, chart)
-      .then(({ svg: rendered }) => {
+    getMermaid()
+      .then((m) => {
         if (cancelled) return;
-        svgCache.set(key, rendered);
-        setSvg(rendered);
+        initMermaid(m, dark);
+        return m.render(id, chart);
+      })
+      .then((result) => {
+        if (cancelled || !result) return;
+        svgCache.set(key, result.svg);
+        setSvg(result.svg);
         setError("");
       })
       .catch(() => {
