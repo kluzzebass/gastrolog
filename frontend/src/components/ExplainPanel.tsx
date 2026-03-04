@@ -119,19 +119,25 @@ function ExpressionBox({
     <div
       className={`w-full font-mono text-[0.8em] px-3 py-1.5 rounded mb-3 whitespace-pre-wrap break-all ${c("bg-ink-surface text-text-normal", "bg-light-surface text-light-text-normal")}`}
     >
-      {segments.map((seg, i) => {
-        const key = `seg-${segments.slice(0, i).reduce((s, p) => s + p.text.length, 0)}`;
-        return seg.highlighted ? (
-          <mark
-            key={key}
-            className={`rounded-sm transition-colors duration-150 ${c("bg-copper/25 text-copper", "bg-copper/20 text-copper")}`}
-          >
-            {seg.text}
-          </mark>
-        ) : (
-          <span key={key}>{seg.text}</span>
-        );
-      })}
+      {(() => {
+        const offsets = segments.reduce<number[]>((acc, s, j) => {
+          acc.push(j === 0 ? 0 : acc[j - 1]! + segments[j - 1]!.text.length);
+          return acc;
+        }, []);
+        return segments.map((seg, i) => {
+          const key = `seg-${offsets[i]}`;
+          return seg.highlighted ? (
+            <mark
+              key={key}
+              className={`rounded-sm transition-colors duration-150 ${c("bg-copper/25 text-copper", "bg-copper/20 text-copper")}`}
+            >
+              {seg.text}
+            </mark>
+          ) : (
+            <span key={key}>{seg.text}</span>
+          );
+        });
+      })()}
     </div>
   );
 }

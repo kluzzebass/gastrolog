@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { ProtoRecord } from "../utils";
 import { useThemeClass } from "../hooks/useThemeClass";
 import {
@@ -9,6 +10,8 @@ import {
 import { syntaxHighlight, type HighlightMode } from "../syntax";
 import { CopyButton } from "./CopyButton";
 import { ContextRecord } from "./ContextRecord";
+
+const MAX_DISPLAY_LINES = 100;
 
 
 export function DetailPanelContent({
@@ -51,6 +54,14 @@ export function DetailPanelContent({
       // Not valid JSON — use raw text as-is.
     }
   }
+  const displayLines = displayText.split("\n");
+  const isLarge = displayLines.length > MAX_DISPLAY_LINES;
+  const [collapsed, setCollapsed] = useState(true);
+  const visibleText =
+    isLarge && collapsed
+      ? displayLines.slice(0, MAX_DISPLAY_LINES).join("\n")
+      : displayText;
+
   const kvPairs = extractKVPairs(rawText);
 
   const tsRows: { label: string; date: Date | null }[] = [
@@ -128,31 +139,49 @@ export function DetailPanelContent({
             </td>
           </tr>
           <tr>
-            <td colSpan={2} className={`pb-1 ${borderCls}`}>
+            <td colSpan={2} className={`pb-1 max-w-0 ${borderCls}`}>
               <pre
-                className={`text-[0.85em] font-mono p-3 rounded border whitespace-pre-wrap wrap-break-word leading-relaxed ${c("border-ink-border-subtle bg-ink text-text-normal", "border-light-border-subtle bg-light-bg text-light-text-normal")}`}
+                className={`text-[0.85em] font-mono p-3 rounded border whitespace-pre overflow-x-auto leading-relaxed app-scroll ${c("border-ink-border-subtle bg-ink text-text-normal", "border-light-border-subtle bg-light-bg text-light-text-normal")}`}
               >
-                {syntaxHighlight(displayText, highlightMode).map((span, i, arr) => {
-                  const style = span.color ? { color: span.color } : undefined;
-                  const key = `msg-${arr.slice(0, i).reduce((s, p) => s + p.text.length, 0)}`;
-                  return span.url ? (
-                    <a
-                      key={key}
-                      href={span.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={style}
-                      className="underline decoration-current/30 hover:decoration-current/60"
-                    >
-                      {span.text}
-                    </a>
-                  ) : (
-                    <span key={key} style={style}>
-                      {span.text}
-                    </span>
-                  );
-                })}
+                {(() => {
+                  const spans = syntaxHighlight(visibleText, highlightMode);
+                  const offsets = spans.reduce<number[]>((acc, span, j) => {
+                    acc.push(j === 0 ? 0 : acc[j - 1]! + spans[j - 1]!.text.length);
+                    return acc;
+                  }, []);
+                  return spans.map((span, i) => {
+                    const style = span.color ? { color: span.color } : undefined;
+                    const key = `msg-${offsets[i]}`;
+                    return span.url ? (
+                      <a
+                        key={key}
+                        href={span.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={style}
+                        className="underline decoration-current/30 hover:decoration-current/60"
+                      >
+                        {span.text}
+                      </a>
+                    ) : (
+                      <span key={key} style={style}>
+                        {span.text}
+                      </span>
+                    );
+                  });
+                })()}
               </pre>
+              {isLarge && (
+                <button
+                  type="button"
+                  onClick={() => setCollapsed((v) => !v)}
+                  className={`mt-1 text-[0.8em] font-mono px-2 py-0.5 rounded transition-colors ${c("text-copper hover:bg-copper/10", "text-copper hover:bg-copper/10")}`}
+                >
+                  {collapsed
+                    ? `Show all (${displayLines.length.toLocaleString()} lines)`
+                    : "Collapse"}
+                </button>
+              )}
             </td>
           </tr>
 

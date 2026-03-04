@@ -125,10 +125,15 @@ export const LogEntry = forwardRef<
           }
         } : undefined}
       >
-        {parts.map((part, i) => {
+        {(() => {
+          const offsets = parts.reduce<number[]>((acc, span, j) => {
+            acc.push(j === 0 ? 0 : acc[j - 1]! + parts[j - 1]!.text.length);
+            return acc;
+          }, []);
+          return parts.map((part, i) => {
             const className = part.searchHit ? searchHitCls(dark) : "";
             const style = part.color ? { color: part.color } : undefined;
-            const key = `p-${parts.slice(0, i).reduce((s, p) => s + p.text.length, 0)}`;
+            const key = `p-${offsets[i]}`;
             if (part.url) {
               return (
                 <a
@@ -161,7 +166,8 @@ export const LogEntry = forwardRef<
                 {part.text}
               </span>
             );
-          })}
+          });
+        })()}
       </div>
       <span className="self-center pl-2 opacity-0 group-hover:opacity-100 transition-opacity">
         <CopyButton text={rawText} dark={dark} />

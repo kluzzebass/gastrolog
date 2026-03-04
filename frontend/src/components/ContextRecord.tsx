@@ -49,14 +49,20 @@ export function ContextRecord({
         )}
       </span>
       <span className="font-mono text-[0.9em] truncate whitespace-pre self-center pl-1.5 text-left">
-        {parts.map((part, i) => (
-          <span
-            key={`o${parts.slice(0, i).reduce((s, p) => s + p.text.length, 0)}`}
-            style={part.color ? { color: part.color } : undefined}
-          >
-            {part.text}
-          </span>
-        ))}
+        {(() => {
+          const offsets = parts.reduce<number[]>((acc, span, j) => {
+            acc.push(j === 0 ? 0 : acc[j - 1]! + parts[j - 1]!.text.length);
+            return acc;
+          }, []);
+          return parts.map((part, i) => (
+            <span
+              key={`o${offsets[i]}`}
+              style={part.color ? { color: part.color } : undefined}
+            >
+              {part.text}
+            </span>
+          ));
+        })()}
       </span>
     </>
   );

@@ -228,14 +228,20 @@ export const QueryInput = forwardRef<HTMLTextAreaElement, QueryInputProps>(
           className="absolute inset-0 pl-3 pr-14 py-[8.5px] text-[0.9em] leading-normal font-mono whitespace-pre-wrap overflow-hidden pointer-events-none"
           style={{ borderWidth: 1, borderColor: "transparent" }}
         >
-          {spans.map((span, i) => (
-            <span
-              key={`o${spans.slice(0, i).reduce((s, p) => s + p.text.length, 0)}`}
-              style={roleStyle(span.role, dark)}
-            >
-              {span.text}
-            </span>
-          ))}
+          {(() => {
+            const offsets = spans.reduce<number[]>((acc, s, j) => {
+              acc.push(j === 0 ? 0 : acc[j - 1]! + spans[j - 1]!.text.length);
+              return acc;
+            }, []);
+            return spans.map((span, i) => (
+              <span
+                key={`o${offsets[i]}`}
+                style={roleStyle(span.role, dark)}
+              >
+                {span.text}
+              </span>
+            ));
+          })()}
         </div>
 
         {/* Overlay buttons (history, help) */}
