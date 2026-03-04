@@ -74,6 +74,9 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
   });
 
   const abortRef = useRef<AbortController | null>(null);
+  // Ref mirrors state so callbacks always read fresh values (no stale closures).
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   const search = useCallback(
     // eslint-disable-next-line sonarjs/cognitive-complexity -- streaming search with append/silent/auth-retry
@@ -114,9 +117,10 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
       }
 
       try {
-        const allRecords: Record[] = append ? [...state.records] : [];
+        const cur = stateRef.current;
+        const allRecords: Record[] = append ? [...cur.records] : [];
         let lastResumeToken: Uint8Array<ArrayBuffer> | null = append
-          ? (state.resumeToken as Uint8Array<ArrayBuffer> | null)
+          ? (cur.resumeToken as Uint8Array<ArrayBuffer> | null)
           : null;
         let hasMore = false;
 
@@ -205,16 +209,18 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
         onErrorRef.current?.(error);
       }
     },
-    [state.records, state.resumeToken],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reads from stateRef (fresh via ref), not stale closure
+    [],
   );
 
   const loadMore = useCallback(
     (queryStr: string) => {
-      if (state.hasMore && state.resumeToken) {
+      const cur = stateRef.current;
+      if (cur.hasMore && cur.resumeToken) {
         search(queryStr, true);
       }
     },
-    [search, state.hasMore, state.resumeToken],
+    [search],
   );
 
   const reset = useCallback(() => {
