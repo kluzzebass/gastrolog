@@ -145,6 +145,8 @@ type chunkState struct {
 	attrOffset  uint64    // Current write position in attr.log (after header)
 	recordCount uint64    // Number of records written
 	createdAt   time.Time // Wall-clock time when chunk was opened
+	writeMu     sync.Mutex     // serializes Phase 2 writes to preserve idx ordering on crash
+	inflight    sync.WaitGroup // tracks in-flight Phase 2 writers for safe sealing
 }
 
 const lockFileName = ".lock"
@@ -233,26 +235,30 @@ func (m *Manager) AppendPreserved(record chunk.Record) (chunk.ChunkID, uint64, e
 }
 
 func (m *Manager) doAppend(record chunk.Record, preserveWriteTS bool) (chunk.ChunkID, uint64, error) {
+	// ── Phase 1: lock → encode, reserve space ──
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if m.closed {
+		m.mu.Unlock()
 		return chunk.ChunkID{}, 0, ErrManagerClosed
 	}
 
 	if m.active == nil {
 		if err := m.openLocked(); err != nil {
+			m.mu.Unlock()
 			return chunk.ChunkID{}, 0, err
 		}
 	}
 
 	attrBytes, newKeys, err := chunk.EncodeWithDict(record.Attrs, m.active.dict)
 	if err != nil {
+		m.mu.Unlock()
 		return chunk.ChunkID{}, 0, err
 	}
 
 	attrBytes, newKeys, err = m.rotateIfNeeded(record, attrBytes, newKeys)
 	if err != nil {
+		m.mu.Unlock()
 		return chunk.ChunkID{}, 0, err
 	}
 
@@ -260,23 +266,58 @@ func (m *Manager) doAppend(record chunk.Record, preserveWriteTS bool) (chunk.Chu
 		record.WriteTS = m.cfg.Now()
 	}
 
+	// Dict writes stay under lock (small, needs shared dict state).
 	if err := m.writeDictEntries(newKeys); err != nil {
-		return chunk.ChunkID{}, 0, err
-	}
-	if err := writeAll(m.active.rawFile, record.Raw); err != nil {
-		return chunk.ChunkID{}, 0, err
-	}
-	if err := writeAll(m.active.attrFile, attrBytes); err != nil {
-		return chunk.ChunkID{}, 0, err
-	}
-	if err := m.writeIdxEntry(record, uint64(len(record.Raw)), uint64(len(attrBytes))); err != nil {
+		m.mu.Unlock()
 		return chunk.ChunkID{}, 0, err
 	}
 
+	// Pre-encode idx entry using current offsets (before advancing).
+	var idxBuf [IdxEntrySize]byte
+	EncodeIdxEntry(IdxEntry{
+		SourceTS:   record.SourceTS,
+		IngestTS:   record.IngestTS,
+		WriteTS:    record.WriteTS,
+		RawOffset:  uint32(m.active.rawOffset),  //nolint:gosec // G115: offsets bounded by chunk rotation policy
+		RawSize:    uint32(len(record.Raw)),      //nolint:gosec // G115: individual record size bounded by protocol
+		AttrOffset: uint32(m.active.attrOffset),  //nolint:gosec // G115: offsets bounded by chunk rotation policy
+		AttrSize:   uint16(len(attrBytes)),       //nolint:gosec // G115: attribute size bounded by protocol
+	}, idxBuf[:])
+
+	// Snapshot file handles and compute WriteAt positions.
+	active := m.active
+	rawPos := int64(format.HeaderSize) + int64(m.active.rawOffset)    //nolint:gosec // G115: bounded
+	attrPos := int64(format.HeaderSize) + int64(m.active.attrOffset)  //nolint:gosec // G115: bounded
+	idxPos := int64(IdxHeaderSize) + int64(m.active.recordCount)*int64(IdxEntrySize) //nolint:gosec // G115: bounded
+
+	// Reserve space: advance counters while holding the lock.
 	recordIndex := m.active.recordCount
 	m.updateActiveState(record, uint64(len(record.Raw)), uint64(len(attrBytes)))
+	chunkID := m.active.meta.id
 
-	return m.active.meta.id, recordIndex, nil
+	// Track this writer so seal/close can wait for completion.
+	active.inflight.Add(1)
+	m.mu.Unlock()
+
+	// ── Phase 2: I/O without metadata lock ──
+	// writeMu serializes disk writes so that records land in reservation
+	// order, preserving the crash-safety invariant: idx.log is always a
+	// reliable indicator of the last fully-written record.
+	defer active.inflight.Done()
+	active.writeMu.Lock()
+	defer active.writeMu.Unlock()
+
+	if _, err := active.rawFile.WriteAt(record.Raw, rawPos); err != nil {
+		return chunk.ChunkID{}, 0, err
+	}
+	if _, err := active.attrFile.WriteAt(attrBytes, attrPos); err != nil {
+		return chunk.ChunkID{}, 0, err
+	}
+	if _, err := active.idxFile.WriteAt(idxBuf[:], idxPos); err != nil {
+		return chunk.ChunkID{}, 0, err
+	}
+
+	return chunkID, recordIndex, nil
 }
 
 func (m *Manager) rotateIfNeeded(record chunk.Record, attrBytes []byte, newKeys []string) ([]byte, []string, error) {
@@ -320,28 +361,6 @@ func (m *Manager) writeDictEntries(newKeys []string) error {
 		if err := writeAll(m.active.dictFile, entry); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-func (m *Manager) writeIdxEntry(record chunk.Record, rawLen, attrLen uint64) error {
-	entry := IdxEntry{
-		SourceTS:   record.SourceTS,
-		IngestTS:   record.IngestTS,
-		WriteTS:    record.WriteTS,
-		RawOffset:  uint32(m.active.rawOffset), //nolint:gosec // G115: offsets bounded by chunk rotation policy
-		RawSize:    uint32(rawLen),            //nolint:gosec // G115: individual record size bounded by protocol
-		AttrOffset: uint32(m.active.attrOffset), //nolint:gosec // G115: offsets bounded by chunk rotation policy
-		AttrSize:   uint16(attrLen), //nolint:gosec // G115: attribute size bounded by protocol
-	}
-	var entryBuf [IdxEntrySize]byte
-	EncodeIdxEntry(entry, entryBuf[:])
-	n, err := m.active.idxFile.Write(entryBuf[:])
-	if err != nil {
-		return err
-	}
-	if n != IdxEntrySize {
-		return io.ErrShortWrite
 	}
 	return nil
 }
@@ -1022,17 +1041,17 @@ func (m *Manager) createAttrFile(id chunk.ChunkID) (*os.File, error) {
 
 func (m *Manager) openRawFile(id chunk.ChunkID) (*os.File, error) {
 	path := m.rawLogPath(id)
-	return os.OpenFile(filepath.Clean(path), os.O_RDWR|os.O_APPEND, m.cfg.FileMode)
+	return os.OpenFile(filepath.Clean(path), os.O_RDWR, m.cfg.FileMode)
 }
 
 func (m *Manager) openIdxFile(id chunk.ChunkID) (*os.File, error) {
 	path := m.idxLogPath(id)
-	return os.OpenFile(filepath.Clean(path), os.O_RDWR|os.O_APPEND, m.cfg.FileMode)
+	return os.OpenFile(filepath.Clean(path), os.O_RDWR, m.cfg.FileMode)
 }
 
 func (m *Manager) openAttrFile(id chunk.ChunkID) (*os.File, error) {
 	path := m.attrLogPath(id)
-	return os.OpenFile(filepath.Clean(path), os.O_RDWR|os.O_APPEND, m.cfg.FileMode)
+	return os.OpenFile(filepath.Clean(path), os.O_RDWR, m.cfg.FileMode)
 }
 
 func (m *Manager) createDictFile(id chunk.ChunkID) (*os.File, error) {
@@ -1066,6 +1085,11 @@ func (m *Manager) sealLocked() error {
 	if m.active == nil {
 		return nil
 	}
+
+	// Wait for any in-flight Phase 2 (WriteAt) writers to finish before
+	// modifying headers or closing files. Safe to block here: Phase 2 does
+	// not hold the mutex, and no new Phase 1 can start while we hold it.
+	m.active.inflight.Wait()
 
 	m.active.meta.sealed = true
 	id := m.active.meta.id
@@ -1141,6 +1165,9 @@ func (m *Manager) Close() error {
 
 	// Close active chunk files but don't seal (chunk remains active for recovery).
 	if m.active != nil {
+		// Wait for in-flight Phase 2 writers before closing files.
+		m.active.inflight.Wait()
+
 		if err := m.active.rawFile.Close(); err != nil {
 			errs = append(errs, err)
 		}

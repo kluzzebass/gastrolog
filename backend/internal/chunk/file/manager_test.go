@@ -2,6 +2,7 @@ package file
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -909,5 +910,89 @@ func TestListReturnsSortedChunks(t *testing.T) {
 			t.Errorf("not sorted: metas[%d].StartTS=%v <= metas[%d].StartTS=%v",
 				i, metas[i].StartTS, i-1, metas[i-1].StartTS)
 		}
+	}
+}
+
+func TestConcurrentAppend(t *testing.T) {
+	dir := t.TempDir()
+	manager, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer manager.Close()
+
+	const numGoroutines = 10
+	const recordsPerGoroutine = 100
+	total := numGoroutines * recordsPerGoroutine
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, total)
+
+	for g := range numGoroutines {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range recordsPerGoroutine {
+				rec := chunk.Record{
+					IngestTS: time.Now(),
+					Attrs:    chunk.Attributes{"src": "test", "g": fmt.Sprintf("%d", g)},
+					Raw:      []byte(fmt.Sprintf("g%d-r%d", g, i)),
+				}
+				if _, _, err := manager.Append(rec); err != nil {
+					errCh <- err
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Fatalf("concurrent append: %v", err)
+	}
+
+	// Seal and verify all records are readable.
+	if err := manager.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	metas, err := manager.List()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	var totalRecords int64
+	for _, meta := range metas {
+		totalRecords += meta.RecordCount
+	}
+	if totalRecords != int64(total) {
+		t.Fatalf("expected %d records, got %d", total, totalRecords)
+	}
+
+	// Read every record from every chunk and verify non-empty raw data.
+	for _, meta := range metas {
+		cursor, err := manager.OpenCursor(meta.ID)
+		if err != nil {
+			t.Fatalf("open cursor %s: %v", meta.ID, err)
+		}
+		for {
+			rec, _, err := cursor.Next()
+			if err == chunk.ErrNoMoreRecords {
+				break
+			}
+			if err != nil {
+				cursor.Close()
+				t.Fatalf("next: %v", err)
+			}
+			if len(rec.Raw) == 0 {
+				cursor.Close()
+				t.Fatalf("empty raw data in chunk %s", meta.ID)
+			}
+			if rec.Attrs["src"] != "test" {
+				cursor.Close()
+				t.Fatalf("wrong attrs: %v", rec.Attrs)
+			}
+		}
+		cursor.Close()
 	}
 }
