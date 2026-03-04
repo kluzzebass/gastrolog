@@ -22,7 +22,10 @@ import (
 
 func TestQueryServerSearch(t *testing.T) {
 	// Create orchestrator with a vault
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	s := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),

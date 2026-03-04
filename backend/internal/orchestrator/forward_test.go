@@ -57,7 +57,10 @@ func TestIngestForwardsToRemoteVault(t *testing.T) {
 
 	fwd := &mockForwarder{}
 
-	o := New(Config{LocalNodeID: "node-A"})
+	o, err := New(Config{LocalNodeID: "node-A"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	o.SetRecordForwarder(fwd)
 
 	// Register a local vault with a simple mock chunk manager.
@@ -101,7 +104,10 @@ func TestIngestNoForwarderSkipsRemote(t *testing.T) {
 	localVaultID := uuid.Must(uuid.NewV7())
 	remoteVaultID := uuid.Must(uuid.NewV7())
 
-	o := New(Config{LocalNodeID: "node-A"})
+	o, err := New(Config{LocalNodeID: "node-A"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	// No forwarder set (single-node mode).
 
 	localVault := &Vault{
@@ -156,7 +162,10 @@ func TestReloadFiltersIncludesRemoteWhenForwarderSet(t *testing.T) {
 	remoteVaultID := uuid.Must(uuid.NewV7())
 
 	fwd := &mockForwarder{}
-	o := New(Config{LocalNodeID: "node-A"})
+	o, err := New(Config{LocalNodeID: "node-A"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	o.SetRecordForwarder(fwd)
 
 	localVault := &Vault{
@@ -214,7 +223,10 @@ func TestRebuildFilterSetPreservesRemoteFilters(t *testing.T) {
 	remoteVaultID := uuid.Must(uuid.NewV7())
 	goneVaultID := uuid.Must(uuid.NewV7())
 
-	o := New(Config{LocalNodeID: "node-A"})
+	o, err := New(Config{LocalNodeID: "node-A"})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	localVault := &Vault{ID: localVaultID, Enabled: true, Chunks: &noopChunkManager{}}
 	o.vaults[localVaultID] = localVault

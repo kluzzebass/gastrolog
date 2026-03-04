@@ -57,7 +57,10 @@ type vaultTestClients struct {
 func newVaultTestSetup(t *testing.T, recordCount int) vaultTestClients {
 	t.Helper()
 
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	defaultID := uuid.Must(uuid.NewV7())
 
 	s := memtest.MustNewVault(t, chunkmem.Config{
@@ -280,7 +283,10 @@ func newFullVaultTestSetup(t *testing.T, recordCount int) fullVaultTestClients {
 	t.Helper()
 
 	cfgStore := cfgmem.NewStore()
-	orch := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
+	if err != nil {
+		t.Fatal(err)
+	}
 	defaultID := uuid.Must(uuid.NewV7())
 
 	factories := orchestrator.Factories{
@@ -604,7 +610,10 @@ func newTwoVaultTestSetup(t *testing.T) twoVaultTestClients {
 	t.Helper()
 
 	cfgStore := cfgmem.NewStore()
-	orch := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
+	if err != nil {
+		t.Fatal(err)
+	}
 	filterID := uuid.Must(uuid.NewV7())
 	srcID := uuid.Must(uuid.NewV7())
 	dstID := uuid.Must(uuid.NewV7())
@@ -631,7 +640,7 @@ func newTwoVaultTestSetup(t *testing.T) twoVaultTestClients {
 	cfgClient := gastrologv1connect.NewConfigServiceClient(httpClient, "http://embedded")
 	ctx := context.Background()
 
-	_, err := cfgClient.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
+	_, err = cfgClient.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
 		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Expression: "*"},
 	}))
 	if err != nil {
@@ -706,7 +715,10 @@ func TestMergeVaultsMemory(t *testing.T) {
 
 func TestMergeVaultsFileBacked(t *testing.T) {
 	cfgStore := cfgmem.NewStore()
-	orch := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
+	if err != nil {
+		t.Fatal(err)
+	}
 	homeDir := t.TempDir()
 
 	factories := orchestrator.Factories{
@@ -736,7 +748,7 @@ func TestMergeVaultsFileBacked(t *testing.T) {
 	srcID := uuid.Must(uuid.NewV7())
 	dstID := uuid.Must(uuid.NewV7())
 
-	_, err := cfgClient.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
+	_, err = cfgClient.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
 		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Expression: "*"},
 	}))
 	if err != nil {

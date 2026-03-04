@@ -22,7 +22,10 @@ import (
 
 func TestDrainWaitsForInFlightRequests(t *testing.T) {
 	// Create orchestrator with a vault
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	s := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
@@ -112,7 +115,10 @@ func TestDrainWaitsForInFlightRequests(t *testing.T) {
 
 func TestDrainRejectsNewRequests(t *testing.T) {
 	// Create orchestrator with a vault
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	s := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
@@ -165,7 +171,7 @@ func TestDrainRejectsNewRequests(t *testing.T) {
 	}
 
 	// Issue shutdown with drain=true (this runs in background and starts rejecting)
-	_, err := lifecycleClient.Shutdown(context.Background(), connect.NewRequest(&gastrologv1.ShutdownRequest{
+	_, err = lifecycleClient.Shutdown(context.Background(), connect.NewRequest(&gastrologv1.ShutdownRequest{
 		Drain: true,
 	}))
 	if err != nil {
@@ -194,7 +200,10 @@ func TestDrainRejectsNewRequests(t *testing.T) {
 
 func TestShutdownWithoutDrain(t *testing.T) {
 	// Create orchestrator with a vault
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	s := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
@@ -214,7 +223,7 @@ func TestShutdownWithoutDrain(t *testing.T) {
 	lifecycleClient := gastrologv1connect.NewLifecycleServiceClient(httpClient, "http://embedded")
 
 	// Issue shutdown with drain=false
-	_, err := lifecycleClient.Shutdown(context.Background(), connect.NewRequest(&gastrologv1.ShutdownRequest{
+	_, err = lifecycleClient.Shutdown(context.Background(), connect.NewRequest(&gastrologv1.ShutdownRequest{
 		Drain: false,
 	}))
 	if err != nil {
@@ -230,7 +239,10 @@ func TestShutdownWithoutDrain(t *testing.T) {
 }
 
 func TestHealth(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
 	handler := srv.Handler()
 
@@ -253,7 +265,10 @@ func TestHealth(t *testing.T) {
 }
 
 func TestProbeEndpoints(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
 	handler := srv.Handler()
 

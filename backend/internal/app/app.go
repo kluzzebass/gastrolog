@@ -128,12 +128,15 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return err
 	}
 
-	orch := orchestrator.New(orchestrator.Config{
+	orch, err := orchestrator.New(orchestrator.Config{
 		Logger:            logger,
 		MaxConcurrentJobs: loadMaxConcurrentJobs(ctx, cfgStore),
 		ConfigLoader:      cfgStore,
 		LocalNodeID:       nodeID,
 	})
+	if err != nil {
+		return fmt.Errorf("create orchestrator: %w", err)
+	}
 	orch.RegisterDigester(digestlevel.New())
 	orch.RegisterDigester(digesttimestamp.New())
 

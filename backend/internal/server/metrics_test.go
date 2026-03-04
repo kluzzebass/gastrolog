@@ -18,7 +18,10 @@ import (
 )
 
 func TestMetricsEndpoint(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	s := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
@@ -88,7 +91,10 @@ func TestMetricsEndpoint(t *testing.T) {
 }
 
 func TestMetricsWithRunningOrchestrator(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("failed to start orchestrator: %v", err)

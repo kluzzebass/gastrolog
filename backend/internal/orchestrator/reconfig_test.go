@@ -156,7 +156,10 @@ func TestAddVault(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -209,7 +212,10 @@ func TestAddVaultDuplicate(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -230,7 +236,7 @@ func TestAddVaultDuplicate(t *testing.T) {
 	}
 
 	// Adding again should fail.
-	err := orch.AddVault(context.Background(), vaultCfg, factories)
+	err = orch.AddVault(context.Background(), vaultCfg, factories)
 	if err == nil {
 		t.Fatal("expected error for duplicate vault")
 	}
@@ -248,7 +254,10 @@ func TestRemoveVaultEmpty(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -291,7 +300,10 @@ func TestRemoveVaultNotEmpty(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -322,7 +334,7 @@ func TestRemoveVaultNotEmpty(t *testing.T) {
 	}
 
 	// Remove should fail.
-	err := orch.RemoveVault(vaultID)
+	err = orch.RemoveVault(vaultID)
 	if err == nil {
 		t.Fatal("expected error for non-empty vault")
 	}
@@ -330,9 +342,12 @@ func TestRemoveVaultNotEmpty(t *testing.T) {
 
 func TestRemoveVaultNotFound(t *testing.T) {
 	loader := &fakeConfigLoader{cfg: &config.Config{}}
-	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	err := orch.RemoveVault(uuid.Must(uuid.NewV7()))
+	err = orch.RemoveVault(uuid.Must(uuid.NewV7()))
 	if err == nil {
 		t.Fatal("expected error for nonexistent vault")
 	}
@@ -350,7 +365,10 @@ func TestForceRemoveVault(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -412,9 +430,12 @@ func TestForceRemoveVault(t *testing.T) {
 
 func TestForceRemoveVaultNotFound(t *testing.T) {
 	loader := &fakeConfigLoader{cfg: &config.Config{}}
-	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	err := orch.ForceRemoveVault(uuid.Must(uuid.NewV7()))
+	err = orch.ForceRemoveVault(uuid.Must(uuid.NewV7()))
 	if err == nil {
 		t.Fatal("expected error for nonexistent vault")
 	}
@@ -432,7 +453,10 @@ func TestForceRemoveEmptyVault(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -468,7 +492,10 @@ func TestAddIngesterWhileRunning(t *testing.T) {
 	})
 
 	defaultID := uuid.Must(uuid.NewV7())
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, s.IM, s.QE))
 
 	// Set catch-all filter.
@@ -504,7 +531,10 @@ func TestAddIngesterWhileRunning(t *testing.T) {
 }
 
 func TestAddIngesterDuplicate(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	ingesterID := uuid.Must(uuid.NewV7())
 	recv1 := newBlockingIngester()
@@ -514,14 +544,17 @@ func TestAddIngesterDuplicate(t *testing.T) {
 		t.Fatalf("AddIngester: %v", err)
 	}
 
-	err := orch.AddIngester(ingesterID, "test-2", "mock", recv2)
+	err = orch.AddIngester(ingesterID, "test-2", "mock", recv2)
 	if err == nil {
 		t.Fatal("expected error for duplicate ingester")
 	}
 }
 
 func TestRemoveIngesterNotRunning(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	ingesterID := uuid.Must(uuid.NewV7())
 	recv := newBlockingIngester()
@@ -549,7 +582,10 @@ func TestRemoveIngesterWhileRunning(t *testing.T) {
 	})
 
 	defaultID := uuid.Must(uuid.NewV7())
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	orch.RegisterVault(orchestrator.NewVault(defaultID, cm, nil, nil))
 
 	ingesterID := uuid.Must(uuid.NewV7())
@@ -589,9 +625,12 @@ func TestRemoveIngesterWhileRunning(t *testing.T) {
 }
 
 func TestRemoveIngesterNotFound(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	err := orch.RemoveIngester(uuid.Must(uuid.NewV7()))
+	err = orch.RemoveIngester(uuid.Must(uuid.NewV7()))
 	if err == nil {
 		t.Fatal("expected error for nonexistent ingester")
 	}
@@ -609,7 +648,10 @@ func TestVaultConfig(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -641,9 +683,12 @@ func TestVaultConfig(t *testing.T) {
 }
 
 func TestVaultConfigNotFound(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	_, err := orch.VaultConfig(uuid.Must(uuid.NewV7()))
+	_, err = orch.VaultConfig(uuid.Must(uuid.NewV7()))
 	if err == nil {
 		t.Fatal("expected error for nonexistent vault")
 	}
@@ -710,7 +755,10 @@ func TestSetRotationPolicyOnVaultDirectly(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Create a vault with default rotation policy (10000 records).
 	factories := orchestrator.Factories{
@@ -769,7 +817,10 @@ func TestPauseVault(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -839,7 +890,10 @@ func TestResumeVault(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -887,7 +941,10 @@ func TestResumeVault(t *testing.T) {
 }
 
 func TestDisableVaultNotFound(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if err := orch.DisableVault(uuid.Must(uuid.NewV7())); err == nil {
 		t.Fatal("expected error for nonexistent vault")
@@ -909,7 +966,10 @@ func TestDisableVaultDoesNotAffectQuery(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -962,9 +1022,12 @@ func TestDisableVaultDoesNotAffectQuery(t *testing.T) {
 }
 
 func TestUpdateVaultFilterNotFound(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	err := orch.UpdateVaultFilter(uuid.Must(uuid.NewV7()), "*")
+	err = orch.UpdateVaultFilter(uuid.Must(uuid.NewV7()), "*")
 	if err == nil {
 		t.Fatal("expected error for nonexistent vault")
 	}
@@ -982,7 +1045,10 @@ func TestUpdateVaultFilterInvalid(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -1003,7 +1069,7 @@ func TestUpdateVaultFilterInvalid(t *testing.T) {
 	}
 
 	// Invalid filter expression.
-	err := orch.UpdateVaultFilter(vaultID, "(unclosed")
+	err = orch.UpdateVaultFilter(vaultID, "(unclosed")
 	if err == nil {
 		t.Error("expected error for invalid filter expression")
 	}

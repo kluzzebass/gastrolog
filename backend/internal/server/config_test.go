@@ -100,7 +100,10 @@ func newConfigTestSetup(t *testing.T) (gastrologv1connect.ConfigServiceClient, c
 	t.Helper()
 
 	cfgStore := cfgmem.NewStore()
-	orch := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{

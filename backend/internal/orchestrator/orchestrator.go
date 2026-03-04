@@ -181,7 +181,7 @@ type Config struct {
 }
 
 // New creates an Orchestrator with empty registries.
-func New(cfg Config) *Orchestrator {
+func New(cfg Config) (*Orchestrator, error) {
 	if cfg.IngestChannelSize <= 0 {
 		cfg.IngestChannelSize = 1000
 	}
@@ -194,8 +194,7 @@ func New(cfg Config) *Orchestrator {
 
 	sched, err := newScheduler(logger, cfg.MaxConcurrentJobs, cfg.Now)
 	if err != nil {
-		// This should never fail in practice (just creates a scheduler).
-		panic(fmt.Sprintf("create scheduler: %v", err))
+		return nil, fmt.Errorf("create scheduler: %w", err)
 	}
 
 	o := &Orchestrator{
@@ -218,7 +217,7 @@ func New(cfg Config) *Orchestrator {
 	// get compressed and indexed (same pipeline as ingest-triggered seals).
 	o.cronRotation.onSeal = o.postSealWork
 
-	return o
+	return o, nil
 }
 
 // SetRecordForwarder injects the cross-node record forwarder.

@@ -46,7 +46,8 @@ func (t *trackingIndexManager) BuildIndexes(ctx context.Context, chunkID chunk.C
 	return t.IndexManager.BuildIndexes(ctx, chunkID)
 }
 
-func newTestSetup(maxRecords int64) (*orchestrator.Orchestrator, chunk.ChunkManager, *trackingIndexManager, uuid.UUID) {
+func newTestSetup(t *testing.T, maxRecords int64) (*orchestrator.Orchestrator, chunk.ChunkManager, *trackingIndexManager, uuid.UUID) {
+	t.Helper()
 	s, _ := memtest.NewVault(chunkmem.Config{
 		RotationPolicy: recordCountPolicy(maxRecords),
 	})
@@ -54,14 +55,17 @@ func newTestSetup(maxRecords int64) (*orchestrator.Orchestrator, chunk.ChunkMana
 	tracker := &trackingIndexManager{IndexManager: s.IM}
 
 	defaultID := uuid.Must(uuid.NewV7())
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, tracker, s.QE))
 
 	return orch, s.CM, tracker, defaultID
 }
 
 func TestIngestReachesChunkManager(t *testing.T) {
-	orch, cm, _, _ := newTestSetup(1 << 20) // Large chunk, no auto-seal
+	orch, cm, _, _ := newTestSetup(t, 1 << 20) // Large chunk, no auto-seal
 
 	rec := chunk.Record{
 		IngestTS: t1,
@@ -91,7 +95,7 @@ func TestIngestReachesChunkManager(t *testing.T) {
 }
 
 func TestIngestMultipleRecords(t *testing.T) {
-	orch, cm, _, _ := newTestSetup(1 << 20)
+	orch, cm, _, _ := newTestSetup(t, 1 << 20)
 
 	records := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
@@ -137,7 +141,7 @@ func TestIngestMultipleRecords(t *testing.T) {
 
 func TestSealedChunkTriggersIndexBuild(t *testing.T) {
 	// Set MaxRecords to 2 so third record triggers seal.
-	orch, _, tracker, _ := newTestSetup(2)
+	orch, _, tracker, _ := newTestSetup(t, 2)
 
 	// Ingest 3 records to trigger seal (chunk fills at 2, third causes seal).
 	for i := range 3 {
@@ -169,7 +173,7 @@ func TestSealedChunkTriggersIndexBuild(t *testing.T) {
 
 func TestIndexBuildTriggeredOncePerSeal(t *testing.T) {
 	// Set chunk size to 2 records.
-	orch, _, tracker, _ := newTestSetup(2)
+	orch, _, tracker, _ := newTestSetup(t, 2)
 
 	// Ingest 3 records to trigger exactly one seal.
 	for i := range 3 {
@@ -193,7 +197,7 @@ func TestIndexBuildTriggeredOncePerSeal(t *testing.T) {
 }
 
 func TestSearchViaOrchestrator(t *testing.T) {
-	orch, cm, _, defaultID := newTestSetup(1 << 20)
+	orch, cm, _, defaultID := newTestSetup(t, 1 << 20)
 
 	records := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
@@ -245,7 +249,7 @@ func TestSearchViaOrchestrator(t *testing.T) {
 }
 
 func TestSearchByUUID(t *testing.T) {
-	orch, _, _, defaultID := newTestSetup(1 << 20)
+	orch, _, _, defaultID := newTestSetup(t, 1 << 20)
 
 	rec := chunk.Record{IngestTS: t1, Attrs: attrsA, Raw: []byte("test")}
 	if err := orch.Ingest(rec); err != nil {
@@ -278,7 +282,7 @@ func TestSearchByUUID(t *testing.T) {
 }
 
 func TestSearchUnknownRegistry(t *testing.T) {
-	orch, _, _, _ := newTestSetup(1 << 20)
+	orch, _, _, _ := newTestSetup(t, 1 << 20)
 
 	_, _, err := orch.Search(context.Background(), uuid.Must(uuid.NewV7()), query.Query{}, nil)
 	if err != orchestrator.ErrUnknownRegistry {
@@ -287,26 +291,32 @@ func TestSearchUnknownRegistry(t *testing.T) {
 }
 
 func TestIngestNoChunkManagers(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	rec := chunk.Record{IngestTS: t1, Attrs: attrsA, Raw: []byte("test")}
-	err := orch.Ingest(rec)
+	err = orch.Ingest(rec)
 	if err != orchestrator.ErrNoChunkManagers {
 		t.Errorf("expected ErrNoChunkManagers, got %v", err)
 	}
 }
 
 func TestSearchNoQueryEngines(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	_, _, err := orch.Search(context.Background(), uuid.Must(uuid.NewV7()), query.Query{}, nil)
+	_, _, err = orch.Search(context.Background(), uuid.Must(uuid.NewV7()), query.Query{}, nil)
 	if err != orchestrator.ErrNoQueryEngines {
 		t.Errorf("expected ErrNoQueryEngines, got %v", err)
 	}
 }
 
 func TestSearchThenFollowViaOrchestrator(t *testing.T) {
-	orch, _, _, defaultID := newTestSetup(1 << 20)
+	orch, _, _, defaultID := newTestSetup(t, 1 << 20)
 
 	records := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("info")},
@@ -345,7 +355,7 @@ func TestSearchThenFollowViaOrchestrator(t *testing.T) {
 }
 
 func TestSearchWithContextViaOrchestrator(t *testing.T) {
-	orch, _, _, defaultID := newTestSetup(1 << 20)
+	orch, _, _, defaultID := newTestSetup(t, 1 << 20)
 
 	records := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("before")},
@@ -442,20 +452,24 @@ func (r *blockingIngester) Run(ctx context.Context, out chan<- orchestrator.Inge
 	return ctx.Err()
 }
 
-func newIngesterTestSetup() (*orchestrator.Orchestrator, chunk.ChunkManager) {
+func newIngesterTestSetup(t *testing.T) (*orchestrator.Orchestrator, chunk.ChunkManager) {
+	t.Helper()
 	s, _ := memtest.NewVault(chunkmem.Config{
 		RotationPolicy: recordCountPolicy(10000),
 	})
 
 	defaultID := uuid.Must(uuid.NewV7())
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, s.IM, s.QE))
 
 	return orch, s.CM
 }
 
 func TestIngesterMessageReachesChunkManager(t *testing.T) {
-	orch, cm := newIngesterTestSetup()
+	orch, cm := newIngesterTestSetup(t)
 
 	recv := newMockIngester([]orchestrator.IngestMessage{
 		{Attrs: map[string]string{"host": "server1"}, Raw: []byte("test message")},
@@ -493,7 +507,7 @@ func TestIngesterMessageReachesChunkManager(t *testing.T) {
 }
 
 func TestIngesterContextCancellation(t *testing.T) {
-	orch, _ := newIngesterTestSetup()
+	orch, _ := newIngesterTestSetup(t)
 
 	recv := newBlockingIngester()
 	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test", "mock", recv)
@@ -520,7 +534,7 @@ func TestIngesterContextCancellation(t *testing.T) {
 }
 
 func TestMultipleIngesters(t *testing.T) {
-	orch, cm := newIngesterTestSetup()
+	orch, cm := newIngesterTestSetup(t)
 
 	recv1 := newMockIngester([]orchestrator.IngestMessage{
 		{Attrs: map[string]string{"source": "recv1"}, Raw: []byte("from recv1")},
@@ -566,7 +580,7 @@ func TestMultipleIngesters(t *testing.T) {
 }
 
 func TestStartAlreadyRunning(t *testing.T) {
-	orch, _ := newIngesterTestSetup()
+	orch, _ := newIngesterTestSetup(t)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -580,7 +594,7 @@ func TestStartAlreadyRunning(t *testing.T) {
 }
 
 func TestStopNotRunning(t *testing.T) {
-	orch, _ := newIngesterTestSetup()
+	orch, _ := newIngesterTestSetup(t)
 
 	err := orch.Stop()
 	if err != orchestrator.ErrNotRunning {
@@ -597,7 +611,10 @@ func TestIngesterIndexBuildOnSeal(t *testing.T) {
 	tracker := &trackingIndexManager{IndexManager: s.IM}
 
 	defaultID := uuid.Must(uuid.NewV7())
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, tracker, s.QE))
 
 	// Create ingester with 3 messages to trigger seal.
@@ -627,7 +644,7 @@ func TestIngesterIndexBuildOnSeal(t *testing.T) {
 }
 
 func TestUnregisterIngester(t *testing.T) {
-	orch, _ := newIngesterTestSetup()
+	orch, _ := newIngesterTestSetup(t)
 
 	recv := newBlockingIngester()
 	ingesterID := uuid.Must(uuid.NewV7())
@@ -688,7 +705,7 @@ func (r *countingIngester) Run(ctx context.Context, out chan<- orchestrator.Inge
 }
 
 func TestHighVolumeIngestion(t *testing.T) {
-	orch, cm := newIngesterTestSetup()
+	orch, cm := newIngesterTestSetup(t)
 
 	recv := newCountingIngester(100)
 	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test", "mock", recv)
@@ -728,7 +745,7 @@ func TestHighVolumeIngestion(t *testing.T) {
 // Registry accessor tests
 
 func TestChunkManagerAccessor(t *testing.T) {
-	orch, cm, _, defaultID := newTestSetup(1 << 20)
+	orch, cm, _, defaultID := newTestSetup(t, 1 << 20)
 
 	// Get by key.
 	got := orch.ChunkManager(defaultID)
@@ -744,7 +761,7 @@ func TestChunkManagerAccessor(t *testing.T) {
 }
 
 func TestListVaultsAccessor(t *testing.T) {
-	orch, _, _, defaultID := newTestSetup(1 << 20)
+	orch, _, _, defaultID := newTestSetup(t, 1 << 20)
 
 	keys := orch.ListVaults()
 	if len(keys) != 1 {
@@ -756,7 +773,7 @@ func TestListVaultsAccessor(t *testing.T) {
 }
 
 func TestIndexManagerAccessor(t *testing.T) {
-	orch, _, tracker, defaultID := newTestSetup(1 << 20)
+	orch, _, tracker, defaultID := newTestSetup(t, 1 << 20)
 
 	// Get by key.
 	got := orch.IndexManager(defaultID)
@@ -772,7 +789,7 @@ func TestIndexManagerAccessor(t *testing.T) {
 }
 
 func TestListVaultsReturnsAllKeys(t *testing.T) {
-	orch, _, _, defaultID := newTestSetup(1 << 20)
+	orch, _, _, defaultID := newTestSetup(t, 1 << 20)
 
 	keys := orch.ListVaults()
 	if len(keys) != 1 {
@@ -784,7 +801,7 @@ func TestListVaultsReturnsAllKeys(t *testing.T) {
 }
 
 func TestListIngestersAccessor(t *testing.T) {
-	orch, _ := newIngesterTestSetup()
+	orch, _ := newIngesterTestSetup(t)
 
 	recv1 := newBlockingIngester()
 	recv2 := newBlockingIngester()
@@ -809,7 +826,7 @@ func TestListIngestersAccessor(t *testing.T) {
 }
 
 func TestIsRunningAccessor(t *testing.T) {
-	orch, _ := newIngesterTestSetup()
+	orch, _ := newIngesterTestSetup(t)
 
 	if orch.IsRunning() {
 		t.Error("expected IsRunning() = false before Start()")
@@ -850,7 +867,10 @@ func TestRebuildMissingIndexes(t *testing.T) {
 	tracker := &trackingIndexManager{IndexManager: s.IM}
 
 	defaultID := uuid.Must(uuid.NewV7())
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, tracker, nil))
 
 	// RebuildMissingIndexes should find the sealed chunk and build indexes.
@@ -869,7 +889,7 @@ func TestRebuildMissingIndexes(t *testing.T) {
 }
 
 func TestSearchThenFollowUnknownRegistry(t *testing.T) {
-	orch, _, _, _ := newTestSetup(1 << 20)
+	orch, _, _, _ := newTestSetup(t, 1 << 20)
 
 	_, _, err := orch.SearchThenFollow(context.Background(), uuid.Must(uuid.NewV7()), query.Query{}, nil)
 	if err != orchestrator.ErrUnknownRegistry {
@@ -878,7 +898,7 @@ func TestSearchThenFollowUnknownRegistry(t *testing.T) {
 }
 
 func TestSearchWithContextUnknownRegistry(t *testing.T) {
-	orch, _, _, _ := newTestSetup(1 << 20)
+	orch, _, _, _ := newTestSetup(t, 1 << 20)
 
 	_, _, err := orch.SearchWithContext(context.Background(), uuid.Must(uuid.NewV7()), query.Query{})
 	if err != orchestrator.ErrUnknownRegistry {
@@ -907,7 +927,10 @@ func newFilteredTestSetup(t *testing.T) (*orchestrator.Orchestrator, filteredTes
 		cms:      make(map[uuid.UUID]chunk.ChunkManager),
 	}
 
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	for _, id := range []uuid.UUID{vaults.prod, vaults.staging, vaults.archive, vaults.catchRest} {
 		s := memtest.MustNewVault(t, chunkmem.Config{
@@ -934,7 +957,10 @@ func newFilteredTestSetupWithLoader(t *testing.T, loader *fakeConfigLoader) (*or
 		cms:      make(map[uuid.UUID]chunk.ChunkManager),
 	}
 
-	orch := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	for _, id := range []uuid.UUID{vaults.prod, vaults.staging, vaults.archive, vaults.catchRest} {
 		s := memtest.MustNewVault(t, chunkmem.Config{
@@ -1256,7 +1282,7 @@ func TestFilteringComplexExpression(t *testing.T) {
 }
 
 func TestIngestAckSuccess(t *testing.T) {
-	orch, _ := newIngesterTestSetup()
+	orch, _ := newIngesterTestSetup(t)
 
 	// Create ack channel and message with ack.
 	ackCh := make(chan error, 1)
@@ -1295,7 +1321,7 @@ func TestIngestAckSuccess(t *testing.T) {
 }
 
 func TestIngestAckNotSentWhenNil(t *testing.T) {
-	orch, _ := newIngesterTestSetup()
+	orch, _ := newIngesterTestSetup(t)
 
 	// Message without ack channel (fire-and-forget).
 	recv := newMockIngester([]orchestrator.IngestMessage{
@@ -1368,7 +1394,10 @@ func TestPipelineOverlap(t *testing.T) {
 	slowCM := &slowChunkManager{ChunkManager: s.CM, delay: writeDelay}
 	vaultID := uuid.Must(uuid.NewV7())
 
-	orch := orchestrator.New(orchestrator.Config{IngestChannelSize: n})
+	orch, err := orchestrator.New(orchestrator.Config{IngestChannelSize: n})
+	if err != nil {
+		t.Fatal(err)
+	}
 	orch.RegisterVault(orchestrator.NewVault(vaultID, slowCM, s.IM, s.QE))
 	orch.RegisterDigester(&slowDigester{delay: digestDelay})
 

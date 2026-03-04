@@ -20,7 +20,10 @@ func newFacadeSetup(t *testing.T) (*orchestrator.Orchestrator, uuid.UUID) {
 		RotationPolicy: chunk.NewRecordCountPolicy(5),
 	})
 	id := uuid.Must(uuid.NewV7())
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	orch.RegisterVault(orchestrator.NewVault(id, s.CM, s.IM, s.QE))
 	return orch, id
 }
@@ -63,8 +66,11 @@ func TestListChunkMetas(t *testing.T) {
 }
 
 func TestListChunkMetas_UnknownVault(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
-	_, err := orch.ListChunkMetas(uuid.Must(uuid.NewV7()))
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = orch.ListChunkMetas(uuid.Must(uuid.NewV7()))
 	if !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		t.Fatalf("expected ErrVaultNotFound, got %v", err)
 	}
@@ -121,8 +127,11 @@ func TestSealActive_Empty(t *testing.T) {
 }
 
 func TestSealActive_UnknownVault(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
-	err := orch.SealActive(uuid.Must(uuid.NewV7()))
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = orch.SealActive(uuid.Must(uuid.NewV7()))
 	if !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		t.Fatalf("expected ErrVaultNotFound, got %v", err)
 	}
@@ -162,8 +171,11 @@ func TestAppend(t *testing.T) {
 }
 
 func TestAppend_UnknownVault(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
-	_, _, err := orch.Append(uuid.Must(uuid.NewV7()), chunk.Record{Raw: []byte("x")})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = orch.Append(uuid.Must(uuid.NewV7()), chunk.Record{Raw: []byte("x")})
 	if !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		t.Fatalf("expected ErrVaultNotFound, got %v", err)
 	}
@@ -265,15 +277,21 @@ func TestNewAnalyzer(t *testing.T) {
 }
 
 func TestNewAnalyzer_UnknownVault(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
-	_, err := orch.NewAnalyzer(uuid.Must(uuid.NewV7()))
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = orch.NewAnalyzer(uuid.Must(uuid.NewV7()))
 	if !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		t.Fatalf("expected ErrVaultNotFound, got %v", err)
 	}
 }
 
 func TestSupportsChunkMove_MemoryVaults(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	s1 := memtest.MustNewVault(t, chunkmem.Config{})
 	s2 := memtest.MustNewVault(t, chunkmem.Config{})
@@ -289,7 +307,10 @@ func TestSupportsChunkMove_MemoryVaults(t *testing.T) {
 }
 
 func TestCopyRecords(t *testing.T) {
-	orch := orchestrator.New(orchestrator.Config{})
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	srcVault := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(5),
