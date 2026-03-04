@@ -35,6 +35,10 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
+// configLoadTimeout bounds how long background config store reads can take.
+// Prevents indefinite hangs if the Raft FSM or underlying store is slow.
+const configLoadTimeout = 5 * time.Second
+
 // Config holds server configuration.
 type Config struct {
 	// Logger for structured logging.
@@ -362,7 +366,9 @@ func (s *Server) loadQueryConfig() (queryTimeout, maxFollowDuration time.Duratio
 	if s.cfgStore == nil {
 		return 0, 0, 0
 	}
-	ss, err := s.cfgStore.LoadServerSettings(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), configLoadTimeout)
+	defer cancel()
+	ss, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
 		return 0, 0, 0
 	}
@@ -385,7 +391,9 @@ func (s *Server) loadInitialLookupConfig(geoipTable *lookup.GeoIP, asnTable *loo
 	if s.cfgStore == nil {
 		return
 	}
-	ss, err := s.cfgStore.LoadServerSettings(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), configLoadTimeout)
+	defer cancel()
+	ss, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
 		return
 	}
@@ -479,9 +487,9 @@ func (s *Server) manageMaxMindJob(cfg config.LookupConfig, geoipTable *lookup.Ge
 
 // runMaxMindUpdate downloads both MaxMind editions and updates the config timestamp.
 func (s *Server) runMaxMindUpdate(geoipTable *lookup.GeoIP, asnTable *lookup.ASN) {
-	ctx := context.Background()
-
-	ss, err := s.cfgStore.LoadServerSettings(ctx)
+	loadCtx, loadCancel := context.WithTimeout(context.Background(), configLoadTimeout)
+	ss, err := s.cfgStore.LoadServerSettings(loadCtx)
+	loadCancel()
 	if err != nil {
 		s.logger.Warn("maxmind update: load config failed", "error", err)
 		return
@@ -496,6 +504,8 @@ func (s *Server) runMaxMindUpdate(geoipTable *lookup.GeoIP, asnTable *lookup.ASN
 		s.logger.Warn("maxmind update: create lookup dir", "error", err)
 		return
 	}
+
+	ctx := context.Background()
 
 	var anySuccess bool
 	for _, edition := range []string{"GeoLite2-City", "GeoLite2-ASN"} {
@@ -512,14 +522,18 @@ func (s *Server) runMaxMindUpdate(geoipTable *lookup.GeoIP, asnTable *lookup.ASN
 	}
 
 	// Reload databases from effective paths.
-	ss, _ = s.cfgStore.LoadServerSettings(ctx)
+	reloadCtx, reloadCancel := context.WithTimeout(ctx, configLoadTimeout)
+	ss, _ = s.cfgStore.LoadServerSettings(reloadCtx)
+	reloadCancel()
 	geoipPath, asnPath := s.effectiveLookupPaths(ss.Lookup)
 	s.reloadGeoIP(geoipPath, geoipTable)
 	s.reloadASN(asnPath, asnTable)
 
 	// Update the last-update timestamp.
+	saveCtx, saveCancel := context.WithTimeout(ctx, configLoadTimeout)
+	defer saveCancel()
 	ss.Lookup.MaxMind.LastUpdate = time.Now()
-	if err := s.cfgStore.SaveServerSettings(ctx, ss); err != nil {
+	if err := s.cfgStore.SaveServerSettings(saveCtx, ss); err != nil {
 		s.logger.Warn("maxmind update: save timestamp failed", "error", err)
 	}
 }
@@ -626,7 +640,8 @@ func (s *Server) redirectMiddleware(next http.Handler) http.Handler {
 
 // reconfigureTLS starts/stops HTTPS listener based on config. Safe to call from any goroutine.
 func (s *Server) reconfigureTLS() {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), configLoadTimeout)
+	defer cancel()
 	ss, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
 		s.logger.Warn("reconfigure TLS: load config failed", "error", err)
