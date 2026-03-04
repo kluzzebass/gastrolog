@@ -295,10 +295,7 @@ func (c *mmapCursor) Close() error {
 		c.attrFile = nil
 	}
 
-	if len(errs) > 0 {
-		return errs[0]
-	}
-	return nil
+	return errors.Join(errs...)
 }
 
 var _ chunk.RecordCursor = (*mmapCursor)(nil)
@@ -480,10 +477,7 @@ func (c *stdioCursor) Close() error {
 		c.attrFile = nil
 	}
 
-	if len(errs) > 0 {
-		return errs[0]
-	}
-	return nil
+	return errors.Join(errs...)
 }
 
 var _ chunk.RecordCursor = (*stdioCursor)(nil)
