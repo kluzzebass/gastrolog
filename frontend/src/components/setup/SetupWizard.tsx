@@ -134,11 +134,25 @@ export function SetupWizard() {
     const vaultName = vault.name || namePlaceholders.vault || "default";
     const ingesterName = ingester.name || namePlaceholders.ingester || ingester.type;
 
-    try {
-      const filterId = crypto.randomUUID();
-      const vaultId = crypto.randomUUID();
-      const ingesterId = crypto.randomUUID();
+    // Pre-compute IDs and derived values outside try/catch so the React
+    // Compiler can analyze conditional/logical expressions (it can't
+    // optimize value blocks inside try/catch).
+    const filterId = crypto.randomUUID();
+    const vaultId = crypto.randomUUID();
+    const ingesterId = crypto.randomUUID();
+    const rotationId = hasRotation ? crypto.randomUUID() : "";
+    const retentionId = hasRetention ? crypto.randomUUID() : "";
 
+    const vaultParams: Record<string, string> = {};
+    if (vault.type === "file" && vault.dir) {
+      vaultParams["dir"] = vault.dir;
+    }
+    const retentionRules: { retentionPolicyId: string; action: string }[] = [];
+    if (retentionId) {
+      retentionRules.push({ retentionPolicyId: retentionId, action: "expire" });
+    }
+
+    try {
       // 1. Create filter (catch-all)
       await configClient.putFilter({
         config: {
@@ -149,9 +163,7 @@ export function SetupWizard() {
       });
 
       // 2. Create rotation policy (if any fields are set)
-      let rotationId = "";
-      if (hasRotation) {
-        rotationId = crypto.randomUUID();
+      if (rotationId) {
         await configClient.putRotationPolicy({
           config: {
             id: rotationId,
@@ -165,9 +177,7 @@ export function SetupWizard() {
       }
 
       // 3. Create retention policy (if any fields are set)
-      let retentionId = "";
-      if (hasRetention) {
-        retentionId = crypto.randomUUID();
+      if (retentionId) {
         await configClient.putRetentionPolicy({
           config: {
             id: retentionId,
@@ -180,14 +190,6 @@ export function SetupWizard() {
       }
 
       // 4. Create vault
-      const vaultParams: Record<string, string> = {};
-      if (vault.type === "file" && vault.dir) {
-        vaultParams["dir"] = vault.dir;
-      }
-      const retentionRules: { retentionPolicyId: string; action: string }[] = [];
-      if (retentionId) {
-        retentionRules.push({ retentionPolicyId: retentionId, action: "expire" });
-      }
       await configClient.putVault({
         config: {
           id: vaultId,
