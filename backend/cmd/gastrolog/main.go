@@ -43,6 +43,7 @@ func main() {
 	slogCaptureCh := make(chan logging.CapturedRecord, 4096)
 	captureHandler := logging.NewCaptureHandler(filterHandler, slogCaptureCh, []string{
 		"ingester", "orchestrator", "digest", "chunk", "index", "scheduler",
+		"record-forwarder", "broadcast", "dispatch",
 	})
 	logger := slog.New(captureHandler)
 
@@ -85,7 +86,8 @@ func main() {
 				JoinAddr:    mustString(cmd, "join-addr"),
 				JoinToken:   mustString(cmd, "join-token"),
 				Voteless:    mustBool(cmd, "voteless"),
-				SlogCapture: slogCaptureCh,
+				SlogCapture:        slogCaptureCh,
+				SlogCaptureHandler: captureHandler,
 			}
 
 			err := app.Run(cmd.Context(), logger, cfg)

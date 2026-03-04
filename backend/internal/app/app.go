@@ -68,6 +68,10 @@ type RunConfig struct {
 	// SlogCapture receives copies of slog records for the "self" ingester.
 	// Created by main and shared with the CaptureHandler. Nil disables capture.
 	SlogCapture <-chan logging.CapturedRecord
+
+	// SlogCaptureHandler is the CaptureHandler that tees slog records.
+	// Passed to the self ingester factory so it can apply the min_level param.
+	SlogCaptureHandler *logging.CaptureHandler
 }
 
 // Run starts the gastrolog server. It wires all components, starts the
@@ -140,7 +144,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	orch.RegisterDigester(digestlevel.New())
 	orch.RegisterDigester(digesttimestamp.New())
 
-	factories := buildFactories(logger, homeDir, cfgStore, orch, cfg.SlogCapture)
+	factories := buildFactories(logger, homeDir, cfgStore, orch, cfg.SlogCapture, cfg.SlogCaptureHandler)
 
 	// Wire cross-node record forwarding and search forwarding in cluster mode.
 	var searchForwarder *cluster.SearchForwarder
@@ -667,7 +671,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 	return nil
 }
 
-func buildFactories(logger *slog.Logger, homeDir string, cfgStore config.Store, orch *orchestrator.Orchestrator, slogCh <-chan logging.CapturedRecord) orchestrator.Factories {
+func buildFactories(logger *slog.Logger, homeDir string, cfgStore config.Store, orch *orchestrator.Orchestrator, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler) orchestrator.Factories {
 	ingesters := map[string]orchestrator.IngesterFactory{
 		"chatterbox": chatterbox.NewIngester,
 		"docker":     ingestdocker.NewFactory(cfgStore),
@@ -695,7 +699,7 @@ func buildFactories(logger *slog.Logger, homeDir string, cfgStore config.Store, 
 		"tail":       ingesttail.ParamDefaults,
 	}
 	if slogCh != nil {
-		ingesters["self"] = ingestself.NewFactory(slogCh)
+		ingesters["self"] = ingestself.NewFactory(slogCh, slogCapture)
 		defaults["self"] = ingestself.ParamDefaults
 	}
 	return orchestrator.Factories{

@@ -3,6 +3,7 @@ package logging
 import (
 	"context"
 	"log/slog"
+	"sync/atomic"
 )
 
 // CapturedRecord holds a copy of an slog.Record plus any pre-resolved
@@ -26,6 +27,7 @@ type CaptureHandler struct {
 	ch       chan<- CapturedRecord
 	preAttrs []slog.Attr
 	skip     map[string]struct{}
+	minLevel *atomic.Int64 // minimum severity for capture (hot-reloadable)
 }
 
 // NewCaptureHandler creates a handler that tees slog records to ch.
@@ -37,11 +39,27 @@ func NewCaptureHandler(inner slog.Handler, ch chan<- CapturedRecord, skipCompone
 	for _, c := range skipComponents {
 		skip[c] = struct{}{}
 	}
+	lvl := &atomic.Int64{}
+	lvl.Store(int64(slog.LevelWarn)) // default: capture WARN and above
 	return &CaptureHandler{
-		inner: inner,
-		ch:    ch,
-		skip:  skip,
+		inner:    inner,
+		ch:       ch,
+		skip:     skip,
+		minLevel: lvl,
 	}
+}
+
+// SetMinCaptureLevel sets the minimum severity for captured records.
+// Records below this level are still forwarded to the inner handler
+// (console output) but are not sent to the capture channel (self ingester).
+// Safe for concurrent use.
+func (h *CaptureHandler) SetMinCaptureLevel(level slog.Level) {
+	h.minLevel.Store(int64(level))
+}
+
+// MinCaptureLevel returns the current minimum capture severity.
+func (h *CaptureHandler) MinCaptureLevel() slog.Level {
+	return slog.Level(h.minLevel.Load())
 }
 
 func (h *CaptureHandler) Enabled(ctx context.Context, level slog.Level) bool {
@@ -54,6 +72,11 @@ func (h *CaptureHandler) Handle(ctx context.Context, r slog.Record) error {
 		if _, skip := h.skip[comp]; skip {
 			return h.inner.Handle(ctx, r)
 		}
+	}
+
+	// Check minimum capture level.
+	if r.Level < slog.Level(h.minLevel.Load()) {
+		return h.inner.Handle(ctx, r)
 	}
 
 	// Non-blocking send: drop if channel is full.
@@ -79,7 +102,8 @@ func (h *CaptureHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		inner:    h.inner.WithAttrs(attrs),
 		ch:       h.ch,
 		preAttrs: newPre,
-		skip:     h.skip, // shared (read-only)
+		skip:     h.skip,     // shared (read-only)
+		minLevel: h.minLevel, // shared (atomic)
 	}
 }
 
@@ -92,6 +116,7 @@ func (h *CaptureHandler) WithGroup(name string) slog.Handler {
 		ch:       h.ch,
 		preAttrs: h.preAttrs,
 		skip:     h.skip,
+		minLevel: h.minLevel,
 	}
 }
 

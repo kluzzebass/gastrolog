@@ -4,20 +4,24 @@ Type: `self`
 
 Captures GastroLog's own internal log output and feeds it into the ingest pipeline. This makes the server's operational logs persistent, searchable, and visible in the timeline alongside application logs.
 
-There are no user-configurable settings for this ingester.
+## Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Minimum Level | warn | Minimum log severity to capture. Records below this level still appear on stderr but are not ingested. Options: debug, info, warn, error |
 
 ## How It Works
 
-A capture handler is installed in the slog handler chain. Every log record that passes the component-level filter is copied to a bounded channel. The self ingester reads from this channel and emits each record as a structured JSON log line.
+A capture handler is installed in the slog handler chain. Every log record that passes both the component-level filter and the minimum capture level is copied to a bounded channel. The self ingester reads from this channel and emits each record as a structured JSON log line.
 
-Records from pipeline-internal components (orchestrator, ingester, chunk, digest, index, scheduler) are **not captured** to prevent feedback loops.
+Records from pipeline-internal components (orchestrator, ingester, chunk, digest, index, scheduler, record-forwarder, broadcast, dispatch) are **not captured** to prevent feedback loops.
 
 ## Attributes
 
 | Attribute | Source |
 |-----------|--------|
 | `level` | Log severity: debug, info, warn, error |
-| `component` | Source component (server, raft, dispatch, etc.) |
+| `component` | Source component (server, raft, cert, etc.) |
 | *(slog attributes)* | All key-value pairs from the log record |
 
 ## JSON Body
@@ -25,7 +29,7 @@ Records from pipeline-internal components (orchestrator, ingester, chunk, digest
 Each record is a JSON object containing all slog fields:
 
 ```json
-{"time":"2025-01-15T10:30:00Z","level":"INFO","msg":"node identity","component":"app","node_id":"01234..."}
+{"time":"2025-01-15T10:30:00Z","level":"WARN","msg":"TLS certificate expires soon","component":"cert","days_left":7}
 ```
 
 ## Querying
