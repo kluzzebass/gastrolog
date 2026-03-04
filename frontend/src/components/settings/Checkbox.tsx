@@ -51,7 +51,7 @@ export function Checkbox({ checked, onChange, label, helpTopicId, dark }: Readon
         </span>
       )}
       {helpTopicId && (
-        <span onClick={(e) => e.stopPropagation()}>
+        <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} role="presentation">
           <HelpButton topicId={helpTopicId} />
         </span>
       )}

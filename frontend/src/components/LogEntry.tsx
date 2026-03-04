@@ -126,41 +126,42 @@ export const LogEntry = forwardRef<
         } : undefined}
       >
         {parts.map((part, i) => {
-          const className = part.searchHit ? searchHitCls(dark) : "";
-          const style = part.color ? { color: part.color } : undefined;
-          if (part.url) {
+            const className = part.searchHit ? searchHitCls(dark) : "";
+            const style = part.color ? { color: part.color } : undefined;
+            const key = `p-${parts.slice(0, i).reduce((s, p) => s + p.text.length, 0)}`;
+            if (part.url) {
+              return (
+                <a
+                  key={key}
+                  href={part.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={style}
+                  className={`underline decoration-current/30 hover:decoration-current/60 ${className}`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {part.text}
+                </a>
+              );
+            }
+            if (part.clickValue) {
+              return (
+                <span
+                  key={key}
+                  style={style}
+                  className={`cursor-pointer hover:brightness-125 ${className}`}
+                  data-click-value={part.clickValue}
+                >
+                  {part.text}
+                </span>
+              );
+            }
             return (
-              <a
-                key={`p-${i}`}
-                href={part.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={style}
-                className={`underline decoration-current/30 hover:decoration-current/60 ${className}`}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {part.text}
-              </a>
-            );
-          }
-          if (part.clickValue) {
-            return (
-              <span
-                key={`p-${i}`}
-                style={style}
-                className={`cursor-pointer hover:brightness-125 ${className}`}
-                data-click-value={part.clickValue}
-              >
+              <span key={key} style={style} className={className}>
                 {part.text}
               </span>
             );
-          }
-          return (
-            <span key={`p-${i}`} style={style} className={className}>
-              {part.text}
-            </span>
-          );
-        })}
+          })}
       </div>
       <span className="self-center pl-2 opacity-0 group-hover:opacity-100 transition-opacity">
         <CopyButton text={rawText} dark={dark} />

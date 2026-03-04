@@ -10,6 +10,7 @@ import { Button } from "./Buttons";
 import { Checkbox } from "./Checkbox";
 import { ExpandableCard } from "./ExpandableCard";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
+import { extractMessage } from "../../utils/errors";
 
 /** Parse a Go duration string (e.g. "1h30m", "15m", "90s") into total seconds, or null if unparseable. */
 function parseDurationSeconds(s: string): number | null {
@@ -121,6 +122,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
     const effectiveMaxJobs = parseInt(maxJobs, 10) || 4;
     const effectiveMaxRepeats = parseInt(maxConsecutiveRepeats, 10) || 0;
     const effectiveMaxResultCount = parseInt(maxResultCount, 10) || 0;
+    const effectiveBroadcast = broadcastInterval || undefined;
     try {
       await putConfig.mutateAsync({
         auth: {
@@ -151,12 +153,12 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
           httpsPort,
         },
         cluster: {
-          broadcastInterval: broadcastInterval || undefined,
+          broadcastInterval: effectiveBroadcast,
         },
       });
       addToast("Server configuration updated", "info");
     } catch (err: unknown) {
-      addToast(err instanceof Error ? err.message : "Failed to update server configuration", "error");
+      addToast(extractMessage(err, "Failed to update server configuration"), "error");
     }
   };
 

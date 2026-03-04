@@ -132,8 +132,14 @@ export function RetentionRulesEditor({
           No retention rules
         </span>
       )}
-      {rules.map((rule, idx) => (
-        <div key={idx} className="flex items-end gap-2">
+      {rules.map((rule, idx) => {
+        const ruleKey = `${rule.retentionPolicyId}-${rule.action}-${rule.destinationId}`;
+        // Count prior rules with identical content to disambiguate duplicates
+        const dupCount = rules.slice(0, idx).filter(
+          (r) => r.retentionPolicyId === rule.retentionPolicyId && r.action === rule.action && r.destinationId === rule.destinationId,
+        ).length;
+        return (
+        <div key={`${ruleKey}-${dupCount}`} className="flex items-end gap-2">
           <div className="flex-1">
             <FormField label="Policy" dark={dark}>
               <SelectInput
@@ -190,7 +196,8 @@ export function RetentionRulesEditor({
             Remove
           </Button>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

@@ -21,6 +21,7 @@ import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, SelectInput } from "./FormField";
 import { Button } from "./Buttons";
 import { EyeIcon, EyeOffIcon } from "../icons";
+import { extractMessage } from "../../utils/errors";
 
 const roleOptions = [
   { value: "admin", label: "Admin" },
@@ -110,6 +111,7 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
     const user = users?.find((u) => u.id === id);
     if (!user) return;
     const edit = getEdit(id);
+    const displayName = edit.username || user.username;
 
     try {
       if (edit.username !== user.username) {
@@ -122,9 +124,9 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
         await resetPassword.mutateAsync({ id, newPassword: edit.newPassword });
       }
       clearEdit(id);
-      addToast(`User "${edit.username || user.username}" updated`, "info");
+      addToast(`User "${displayName}" updated`, "info");
     } catch (err: unknown) {
-      addToast(err instanceof Error ? err.message : "Failed to update user", "error");
+      addToast(extractMessage(err, "Failed to update user"), "error");
     }
   };
 
@@ -133,7 +135,7 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
       await deleteUser.mutateAsync(user.id);
       addToast(`User "${user.username}" deleted`, "info");
     } catch (err: unknown) {
-      addToast(err instanceof Error ? err.message : "Failed to delete user", "error");
+      addToast(extractMessage(err, "Failed to delete user"), "error");
     }
   };
 
@@ -146,16 +148,17 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
       addToast("Password is required", "warn");
       return;
     }
+    const trimmedNew = newUsername.trim();
     try {
       await createUser.mutateAsync({
-        username: newUsername.trim(),
+        username: trimmedNew,
         password: newPassword,
         role: newRole,
       });
-      addToast(`User "${newUsername.trim()}" created`, "info");
+      addToast(`User "${trimmedNew}" created`, "info");
       dispatchAdd({ type: "resetForm" });
     } catch (err: unknown) {
-      addToast(err instanceof Error ? err.message : "Failed to create user", "error");
+      addToast(extractMessage(err, "Failed to create user"), "error");
     }
   };
 

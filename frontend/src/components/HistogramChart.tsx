@@ -516,6 +516,7 @@ export function HistogramChart({
         ref={chartContainerRef}
         className="relative"
         style={{ height: barHeight }}
+        role="presentation"
         onMouseDown={handleMouseDown}
       >
         {/* Pan delta indicator */}
@@ -571,20 +572,22 @@ export function HistogramChart({
         )}
         <div
           ref={axisRef}
+          role="presentation"
           onMouseDown={handleAxisMouseDown}
           className={`flex-1 flex justify-between overflow-hidden ${onPan ? "cursor-grab active:cursor-grabbing" : ""}`}
           style={
             panOffset ? { transform: `translateX(${panOffset}px)` } : undefined
           }
         >
-          {Array.from({ length: labelCount }, (_, i) => {
-            const idx = Math.min(i * labelStep, buckets.length - 1);
+          {Array.from({ length: labelCount }, (_, labelIdx) => {
+            const bucketIdx = Math.min(labelIdx * labelStep, buckets.length - 1);
+            const ts = buckets[bucketIdx]!.ts;
             return (
               <span
-                key={`tick-${idx}`}
+                key={`tick-${ts.getTime()}`}
                 className={`text-[0.65em] font-mono select-none ${c("text-text-ghost", "text-light-text-ghost")}`}
               >
-                {formatTime(buckets[idx]!.ts)}
+                {formatTime(ts)}
               </span>
             );
           })}

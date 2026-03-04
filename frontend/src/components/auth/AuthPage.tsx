@@ -2,11 +2,11 @@ import { useState, useEffect, useRef, useReducer } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { SpinnerIcon } from "../icons";
-import { ConnectError } from "@connectrpc/connect";
 import { useAuthStatus, useLogin, useRegister, useSettings } from "../../api/hooks";
 import { setToken } from "../../api/client";
 import { AuthFormField } from "./AuthFormField";
 import { PasswordRules } from "./PasswordRules";
+import { connectMessage } from "../../utils/errors";
 
 // -- Reducer for AuthPage form state --
 
@@ -123,15 +123,15 @@ export function AuthPage({ mode }: Readonly<AuthPageProps>) {
       return;
     }
 
+    const trimmedUsername = username.trim();
+    const action = isRegister
+      ? register.mutateAsync({ username: trimmedUsername, password })
+      : login.mutateAsync({ username: trimmedUsername, password });
     try {
-      await (isRegister ? register.mutateAsync({ username: username.trim(), password }) : login.mutateAsync({ username: username.trim(), password }));
+      await action;
       navigate({ to: "/search", search: { q: "", help: undefined, settings: undefined, inspector: undefined } });
     } catch (err) {
-      if (err instanceof ConnectError) {
-        setError(err.rawMessage);
-      } else {
-        setError("An unexpected error occurred.");
-      }
+      setError(connectMessage(err, "An unexpected error occurred."));
     }
   };
 

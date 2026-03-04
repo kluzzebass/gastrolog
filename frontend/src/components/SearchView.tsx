@@ -760,7 +760,7 @@ export function SearchView() {
       {/* ── Main Layout ── */}
       <div className="flex flex-1 overflow-hidden">
         {isTablet && !sidebarCollapsed && (
-          <div className="fixed inset-0 bg-black/30 z-20" onClick={() => setSidebarCollapsed(true)} />
+          <div className="fixed inset-0 bg-black/30 z-20" role="presentation" onClick={() => setSidebarCollapsed(true)} />
         )}
         <SearchSidebar
           dark={dark}
@@ -1152,7 +1152,7 @@ export function SearchView() {
         </main>
 
         {isTablet && !detailCollapsed && (
-          <div className="fixed inset-0 bg-black/30 z-20" onClick={() => setDetailCollapsed(true)} />
+          <div className="fixed inset-0 bg-black/30 z-20" role="presentation" onClick={() => setDetailCollapsed(true)} />
         )}
         <DetailSidebar
           dark={dark}

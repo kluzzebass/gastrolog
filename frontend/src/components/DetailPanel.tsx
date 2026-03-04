@@ -132,11 +132,12 @@ export function DetailPanelContent({
               <pre
                 className={`text-[0.85em] font-mono p-3 rounded border whitespace-pre-wrap wrap-break-word leading-relaxed ${c("border-ink-border-subtle bg-ink text-text-normal", "border-light-border-subtle bg-light-bg text-light-text-normal")}`}
               >
-                {syntaxHighlight(displayText, highlightMode).map((span, i) => {
+                {syntaxHighlight(displayText, highlightMode).map((span, i, arr) => {
                   const style = span.color ? { color: span.color } : undefined;
+                  const key = `msg-${arr.slice(0, i).reduce((s, p) => s + p.text.length, 0)}`;
                   return span.url ? (
                     <a
-                      key={`msg-${i}`}
+                      key={key}
                       href={span.url}
                       target="_blank"
                       rel="noopener noreferrer"
@@ -146,7 +147,7 @@ export function DetailPanelContent({
                       {span.text}
                     </a>
                   ) : (
-                    <span key={`msg-${i}`} style={style}>
+                    <span key={key} style={style}>
                       {span.text}
                     </span>
                   );
@@ -176,8 +177,8 @@ export function DetailPanelContent({
               <tr>
                 <td colSpan={2} className={headerCls}>Extracted Fields</td>
               </tr>
-              {kvPairs.map(({ key, value }, i) => (
-                <tr key={`${key}-${i}`}>
+              {kvPairs.map(({ key, value }) => (
+                <tr key={`kv-${key}-${value}`}>
                   <td className={`${keyCls} ${borderCls}`}>{key}</td>
                   {valueCell(value, onFieldSelect ? () => onFieldSelect(key, value) : undefined)}
                 </tr>
@@ -250,9 +251,9 @@ function ContextList({
   onSelect?: (rec: ProtoRecord) => void;
   highlightMode?: HighlightMode;
 }>) {
-  return records?.map((rec, i) => (
+  return records?.map((rec) => (
     <ContextRecord
-      key={`${prefix}-${i}`}
+      key={`${prefix}-${rec.ref?.chunkId}-${rec.ref?.pos}`}
       record={rec}
       isAnchor={false}
       dark={dark}

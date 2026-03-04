@@ -163,7 +163,6 @@ export function EyeOffIcon({ className }: Readonly<IconProps>) {
   );
 }
 
-export const CertIcon = LockIcon;
 
 export function ServiceIcon({ className }: Readonly<IconProps>) {
   return (

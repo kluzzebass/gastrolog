@@ -13,6 +13,7 @@ import { Button } from "./Buttons";
 import { UsedByStatus, routeRefsForFilter } from "./UsedByStatus";
 import type { SettingsTab } from "./SettingsDialog";
 import { sortByName } from "../../lib/sort";
+import { extractMessage } from "../../utils/errors";
 
 type NavigateTo = (tab: SettingsTab, entityName?: string) => void;
 
@@ -103,18 +104,15 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
 
   const handleCreate = async () => {
     const name = newName.trim() || namePlaceholder || "catch-all";
+    const expression = newExpression.trim() || "*";
     try {
-      await putFilter.mutateAsync({
-        id: "",
-        name,
-        expression: newExpression.trim() || "*",
-      });
+      await putFilter.mutateAsync({ id: "", name, expression });
       addToast(`Filter "${name}" created`, "info");
       setAdding(false);
       setNewName("");
       setNewExpression("");
     } catch (err: unknown) {
-      addToast(err instanceof Error ? err.message : "Failed to create filter", "error");
+      addToast(extractMessage(err, "Failed to create filter"), "error");
     }
   };
 

@@ -20,6 +20,7 @@ import {
 } from "./PoliciesStep";
 import { IngesterStep, type IngesterData } from "./IngesterStep";
 import { ReviewStep } from "./ReviewStep";
+import { extractMessage } from "../../utils/errors";
 
 const STEPS = ["Welcome", "Vault", "Rotation", "Retention", "Ingester", "Review"] as const;
 
@@ -183,6 +184,10 @@ export function SetupWizard() {
       if (vault.type === "file" && vault.dir) {
         vaultParams["dir"] = vault.dir;
       }
+      const retentionRules: { retentionPolicyId: string; action: string }[] = [];
+      if (retentionId) {
+        retentionRules.push({ retentionPolicyId: retentionId, action: "expire" });
+      }
       await configClient.putVault({
         config: {
           id: vaultId,
@@ -190,9 +195,7 @@ export function SetupWizard() {
           type: vault.type,
           enabled: true,
           policy: rotationId,
-          retentionRules: retentionId
-            ? [{ retentionPolicyId: retentionId, action: "expire" }]
-            : [],
+          retentionRules,
           params: vaultParams,
         },
       });
@@ -223,16 +226,16 @@ export function SetupWizard() {
       await putSettings.mutateAsync({ setupWizardDismissed: true });
       // Optimistically update the cache so SearchView's redirect doesn't
       // fire before the follower's FSM applies the Raft log entry.
-      queryClient.setQueryData(["settings"], (old: Record<string, unknown> | undefined) =>
-        old ? { ...old, setupWizardDismissed: true } : old,
-      );
+      queryClient.setQueryData(["settings"], (old: Record<string, unknown> | undefined) => {
+        if (!old) return old;
+        return { ...old, setupWizardDismissed: true };
+      });
       await queryClient.invalidateQueries({ queryKey: ["config"], refetchType: "all" });
       addToast("Configuration created successfully!", "info");
+      setCreating(false);
       navigate({ to: "/search", search: { q: "", help: undefined, settings: undefined, inspector: undefined } });
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Failed to create configuration";
-      addToast(errorMessage, "error");
-    } finally {
+      addToast(extractMessage(err, "Failed to create configuration"), "error");
       setCreating(false);
     }
   };
