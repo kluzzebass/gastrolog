@@ -17,11 +17,29 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
+// orchActions is the subset of orchestrator.Orchestrator methods used by the
+// dispatcher. Defined at the consumer site so tests can supply a mock.
+type orchActions interface {
+	ListVaults() []uuid.UUID
+	AddVault(ctx context.Context, cfg config.VaultConfig, f orchestrator.Factories) error
+	ReloadFilters(ctx context.Context) error
+	ReloadRotationPolicies(ctx context.Context) error
+	ReloadRetentionPolicies(ctx context.Context) error
+	DisableVault(id uuid.UUID) error
+	EnableVault(id uuid.UUID) error
+	SetVaultCompression(vaultID uuid.UUID, enabled bool) error
+	ForceRemoveVault(id uuid.UUID) error
+	ListIngesters() []uuid.UUID
+	AddIngester(id uuid.UUID, name, ingType string, r orchestrator.Ingester) error
+	RemoveIngester(id uuid.UUID) error
+	UpdateMaxConcurrentJobs(n int) error
+}
+
 // configDispatcher translates FSM notifications into orchestrator side effects.
 // It is called synchronously from within FSM.Apply, so actions complete before
 // the cfgStore write method returns to the server handler.
 type configDispatcher struct {
-	orch         *orchestrator.Orchestrator
+	orch         orchActions
 	cfgStore     config.Store
 	factories    orchestrator.Factories
 	localNodeID  string
