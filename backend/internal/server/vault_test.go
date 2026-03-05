@@ -659,6 +659,22 @@ func newTwoVaultTestSetup(t *testing.T) twoVaultTestClients {
 		}
 	}
 
+	// Route the catch-all filter to both vaults so Ingest delivers records.
+	_, err = cfgClient.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
+		Config: &gastrologv1.RouteConfig{
+			Id:       uuid.Must(uuid.NewV7()).String(),
+			FilterId: filterID.String(),
+			Destinations: []*gastrologv1.RouteDestination{
+				{VaultId: srcID.String()},
+				{VaultId: dstID.String()},
+			},
+			Enabled: true,
+		},
+	}))
+	if err != nil {
+		t.Fatalf("PutRoute: %v", err)
+	}
+
 	// Ingest data into src.
 	t0 := time.Now()
 	for i := range 5 {

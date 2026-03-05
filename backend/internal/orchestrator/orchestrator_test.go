@@ -61,6 +61,11 @@ func newTestSetup(t *testing.T, maxRecords int64) (*orchestrator.Orchestrator, c
 	}
 	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, tracker, s.QE))
 
+	// Set up a catch-all route so records are delivered to the vault.
+	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
+		{VaultID: defaultID, Kind: orchestrator.FilterCatchAll, Expr: "*"},
+	}))
+
 	return orch, s.CM, tracker, defaultID
 }
 
@@ -465,6 +470,11 @@ func newIngesterTestSetup(t *testing.T) (*orchestrator.Orchestrator, chunk.Chunk
 	}
 	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, s.IM, s.QE))
 
+	// Set up a catch-all route so records are delivered to the vault.
+	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
+		{VaultID: defaultID, Kind: orchestrator.FilterCatchAll, Expr: "*"},
+	}))
+
 	return orch, s.CM
 }
 
@@ -616,6 +626,9 @@ func TestIngesterIndexBuildOnSeal(t *testing.T) {
 		t.Fatal(err)
 	}
 	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, tracker, s.QE))
+	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
+		{VaultID: defaultID, Kind: orchestrator.FilterCatchAll, Expr: "*"},
+	}))
 
 	// Create ingester with 3 messages to trigger seal.
 	recv := newMockIngester([]orchestrator.IngestMessage{
@@ -1181,24 +1194,24 @@ func TestFilteringWithIngesters(t *testing.T) {
 	}
 }
 
-func TestFilteringNoFilterSetFallback(t *testing.T) {
+func TestFilteringNoFilterSetDropsRecords(t *testing.T) {
 	orch, vaults := newFilteredTestSetup(t)
 
-	// No filter set - should fan out to all vaults (legacy behavior).
+	// No filter set — records should be silently dropped.
 	rec := chunk.Record{
 		IngestTS: time.Now(),
 		Attrs:    chunk.Attributes{"env": "test"},
-		Raw:      []byte("fanout message"),
+		Raw:      []byte("dropped message"),
 	}
 	if err := orch.Ingest(rec); err != nil {
 		t.Fatalf("Ingest failed: %v", err)
 	}
 
-	// All vaults should have the message.
+	// No vault should have the message.
 	for id, cm := range vaults.cms {
 		count := countRecords(t, cm)
-		if count != 1 {
-			t.Errorf("vault %s: expected 1 record (fanout), got %d", id, count)
+		if count != 0 {
+			t.Errorf("vault %s: expected 0 records (no routes), got %d", id, count)
 		}
 	}
 }
@@ -1399,6 +1412,9 @@ func TestPipelineOverlap(t *testing.T) {
 		t.Fatal(err)
 	}
 	orch.RegisterVault(orchestrator.NewVault(vaultID, slowCM, s.IM, s.QE))
+	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
+		{VaultID: vaultID, Kind: orchestrator.FilterCatchAll, Expr: "*"},
+	}))
 	orch.RegisterDigester(&slowDigester{delay: digestDelay})
 
 	// Ingester that sends n messages then waits for cancellation.

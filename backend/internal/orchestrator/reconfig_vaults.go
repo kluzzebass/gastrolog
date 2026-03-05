@@ -3,12 +3,35 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"maps"
+	"path/filepath"
 
 	"gastrolog/internal/config"
 	"gastrolog/internal/query"
 
 	"github.com/google/uuid"
 )
+
+// resolveVaultDir resolves a file vault's "dir" parameter relative to homeDir.
+// If dir is empty, defaults to "vaults/<vaultName>". Relative paths are joined
+// with homeDir. The returned map is always a new copy — the caller's params are
+// never mutated. The stored config retains the original relative path so each
+// node resolves independently against its own home directory.
+func resolveVaultDir(params map[string]string, homeDir, vaultName string) map[string]string {
+	dir := params["dir"]
+	if dir == "" {
+		dir = filepath.Join("vaults", vaultName)
+	}
+	if !filepath.IsAbs(dir) && homeDir != "" {
+		dir = filepath.Join(homeDir, dir)
+	}
+	out := maps.Clone(params)
+	if out == nil {
+		out = make(map[string]string)
+	}
+	out["dir"] = dir
+	return out
+}
 
 // AddVault adds a new vault (chunk manager, index manager, query engine) and updates the filter set.
 // Loads the full config internally to resolve the vault's filter ID to a filter expression.
@@ -34,7 +57,8 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg config.VaultConfig
 	if cmLogger != nil {
 		cmLogger = cmLogger.With("vault", vaultCfg.ID)
 	}
-	cm, err := cmFactory(vaultCfg.Params, cmLogger)
+	cmParams := resolveVaultDir(vaultCfg.Params, factories.HomeDir, vaultCfg.Name)
+	cm, err := cmFactory(cmParams, cmLogger)
 	if err != nil {
 		return fmt.Errorf("create chunk manager %s: %w", vaultCfg.ID, err)
 	}
@@ -48,7 +72,7 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg config.VaultConfig
 	if imLogger != nil {
 		imLogger = imLogger.With("vault", vaultCfg.ID)
 	}
-	im, err := imFactory(vaultCfg.Params, cm, imLogger)
+	im, err := imFactory(cmParams, cm, imLogger)
 	if err != nil {
 		return fmt.Errorf("create index manager %s: %w", vaultCfg.ID, err)
 	}
@@ -233,6 +257,12 @@ func (o *Orchestrator) ForceRemoveVault(id uuid.UUID) error {
 			return fmt.Errorf("delete chunk %s in vault %s: %w", meta.ID.String(), id, err)
 		}
 	}
+
+	// Cancel pending compress/index jobs before closing the chunk manager
+	// to prevent use-after-close on the managers they capture.
+	vaultPrefix := id.String()
+	o.scheduler.RemoveJobsByPrefix("compress:" + vaultPrefix)
+	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
 
 	// Close the chunk manager to release file locks.
 	if err := cm.Close(); err != nil {

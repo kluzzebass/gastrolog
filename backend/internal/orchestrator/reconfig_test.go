@@ -1021,6 +1021,124 @@ func TestDisableVaultDoesNotAffectQuery(t *testing.T) {
 	}
 }
 
+func TestReloadRetentionCreatesRunner(t *testing.T) {
+	vaultID := uuid.Must(uuid.NewV7())
+	dstID := uuid.Must(uuid.NewV7())
+	retPolicyID := uuid.Must(uuid.NewV7())
+	filterID := uuid.Must(uuid.NewV7())
+
+	// Config starts WITHOUT retention rules on the vault.
+	loader := &fakeConfigLoader{cfg: &config.Config{
+		Filters: []config.FilterConfig{
+			{ID: filterID, Expression: "*"},
+		},
+		Routes: []config.RouteConfig{
+			{ID: uuid.Must(uuid.NewV7()), FilterID: &filterID, Destinations: []uuid.UUID{vaultID}, Enabled: true},
+		},
+		RetentionPolicies: []config.RetentionPolicyConfig{
+			{ID: retPolicyID, Name: "age-2m", MaxAge: strPtr("2m")},
+		},
+		Vaults: []config.VaultConfig{
+			{ID: vaultID, Name: "src", Type: "memory"},
+		},
+	}}
+
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	factories := orchestrator.Factories{
+		ChunkManagers: map[string]chunk.ManagerFactory{"memory": chunkmem.NewFactory()},
+		IndexManagers: map[string]index.ManagerFactory{"memory": indexmem.NewFactory()},
+	}
+	if err := orch.AddVault(context.Background(), config.VaultConfig{
+		ID: vaultID, Name: "src", Type: "memory",
+	}, factories); err != nil {
+		t.Fatal(err)
+	}
+
+	// No retention job should exist yet.
+	sched := orch.Scheduler()
+	jobName := "retention:" + vaultID.String()
+	if sched.HasJob(jobName) {
+		t.Fatal("retention job should not exist before rules are added")
+	}
+
+	// Now update config to include retention rules on the vault.
+	loader.cfg.Vaults[0].RetentionRules = []config.RetentionRule{{
+		RetentionPolicyID: retPolicyID,
+		Action:            config.RetentionActionMigrate,
+		Destination:       &dstID,
+	}}
+
+	// ReloadRetentionPolicies should create the runner.
+	if err := orch.ReloadRetentionPolicies(context.Background()); err != nil {
+		t.Fatalf("ReloadRetentionPolicies: %v", err)
+	}
+
+	if !sched.HasJob(jobName) {
+		t.Fatal("retention job should exist after ReloadRetentionPolicies")
+	}
+}
+
+func TestReloadRetentionRemovesRunner(t *testing.T) {
+	vaultID := uuid.Must(uuid.NewV7())
+	dstID := uuid.Must(uuid.NewV7())
+	retPolicyID := uuid.Must(uuid.NewV7())
+	filterID := uuid.Must(uuid.NewV7())
+
+	// Config starts WITH retention rules.
+	loader := &fakeConfigLoader{cfg: &config.Config{
+		Filters: []config.FilterConfig{
+			{ID: filterID, Expression: "*"},
+		},
+		Routes: []config.RouteConfig{
+			{ID: uuid.Must(uuid.NewV7()), FilterID: &filterID, Destinations: []uuid.UUID{vaultID}, Enabled: true},
+		},
+		RetentionPolicies: []config.RetentionPolicyConfig{
+			{ID: retPolicyID, Name: "age-2m", MaxAge: strPtr("2m")},
+		},
+		Vaults: []config.VaultConfig{
+			{ID: vaultID, Name: "src", Type: "memory", RetentionRules: []config.RetentionRule{{
+				RetentionPolicyID: retPolicyID,
+				Action:            config.RetentionActionMigrate,
+				Destination:       &dstID,
+			}}},
+		},
+	}}
+
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	factories := orchestrator.Factories{
+		ChunkManagers: map[string]chunk.ManagerFactory{"memory": chunkmem.NewFactory()},
+		IndexManagers: map[string]index.ManagerFactory{"memory": indexmem.NewFactory()},
+	}
+	if err := orch.AddVault(context.Background(), loader.cfg.Vaults[0], factories); err != nil {
+		t.Fatal(err)
+	}
+
+	sched := orch.Scheduler()
+	jobName := "retention:" + vaultID.String()
+	if !sched.HasJob(jobName) {
+		t.Fatal("retention job should exist after AddVault with rules")
+	}
+
+	// Remove retention rules from config.
+	loader.cfg.Vaults[0].RetentionRules = nil
+
+	if err := orch.ReloadRetentionPolicies(context.Background()); err != nil {
+		t.Fatalf("ReloadRetentionPolicies: %v", err)
+	}
+
+	if sched.HasJob(jobName) {
+		t.Fatal("retention job should be removed after rules are cleared")
+	}
+}
+
 func TestUpdateVaultFilterNotFound(t *testing.T) {
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
@@ -1032,6 +1150,8 @@ func TestUpdateVaultFilterNotFound(t *testing.T) {
 		t.Fatal("expected error for nonexistent vault")
 	}
 }
+
+func strPtr(s string) *string { return &s }
 
 func TestUpdateVaultFilterInvalid(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())

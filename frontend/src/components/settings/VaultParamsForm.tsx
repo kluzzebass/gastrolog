@@ -6,6 +6,7 @@ interface VaultParamsFormProps {
   params: Record<string, string>;
   onChange: (params: Record<string, string>) => void;
   dark: boolean;
+  vaultName?: string;
 }
 
 export function VaultParamsForm({
@@ -13,6 +14,7 @@ export function VaultParamsForm({
   params,
   onChange,
   dark,
+  vaultName,
 }: Readonly<VaultParamsFormProps>) {
   const set = (key: string, value: string) =>
     onChange({ ...params, [key]: value });
@@ -23,16 +25,15 @@ export function VaultParamsForm({
       <div className="flex flex-col gap-3">
         <FormField
           label="Directory"
-          description="Path where chunk files are stored (required)"
+          description="Path where chunk files are stored"
           dark={dark}
         >
           <TextInput
             value={get("dir")}
             onChange={(v) => set("dir", v)}
-            placeholder=""
+            placeholder={vaultName ? `vaults/${vaultName}` : ""}
             dark={dark}
             mono
-            examples={["/var/lib/gastrolog/data"]}
           />
         </FormField>
         <Checkbox

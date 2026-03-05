@@ -47,6 +47,13 @@ var (
 	ErrNotRunning = errors.New("orchestrator not running")
 )
 
+// drainState tracks an in-progress vault drain (migration to another node).
+type drainState struct {
+	TargetNodeID string
+	JobID        string
+	Cancel       context.CancelFunc
+}
+
 // RecordForwarder ships records to remote cluster nodes. The orchestrator
 // calls Forward() during ingestion for records that match routes targeting
 // vaults on other nodes. Implementations must be non-blocking (channel
@@ -128,6 +135,9 @@ type Orchestrator struct {
 	ingesterWg sync.WaitGroup // tracks ingester goroutines
 	digestWg   sync.WaitGroup // tracks digest goroutine
 	writeWg    sync.WaitGroup // tracks write goroutine
+
+	// Draining vaults (keyed by vault ID, tracks in-progress migrations).
+	draining map[uuid.UUID]*drainState
 
 	// Retention runners (keyed by vault ID, invoked by the shared scheduler).
 	retention map[uuid.UUID]*retentionRunner
@@ -214,6 +224,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		ingesterCancels: make(map[uuid.UUID]context.CancelFunc),
 		ingesterStats:   make(map[uuid.UUID]*IngesterStats),
 		ingesterMeta:    make(map[uuid.UUID]ingesterInfo),
+		draining:        make(map[uuid.UUID]*drainState),
 		retention:       make(map[uuid.UUID]*retentionRunner),
 		scheduler:       sched,
 		cronRotation:    newCronRotationManager(sched, logger),

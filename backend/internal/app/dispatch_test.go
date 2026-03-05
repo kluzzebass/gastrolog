@@ -75,9 +75,15 @@ type mockOrch struct {
 	disableVaultErr    error
 	enableVaultErr     error
 	setCompressionErr  error
+	drainVaultErr      error
+	cancelDrainErr     error
+	isDraining         bool
 	addIngesterErr     error
 	removeIngesterErr  error
 	updateMaxJobsErr   error
+
+	drainCalls      []uuid.UUID // IDs passed to DrainVault
+	cancelDrainIDs  []uuid.UUID // IDs passed to CancelDrain
 }
 
 func (m *mockOrch) ListVaults() []uuid.UUID  { return m.vaults }
@@ -93,6 +99,15 @@ func (m *mockOrch) DisableVault(uuid.UUID) error                 { return m.disa
 func (m *mockOrch) EnableVault(uuid.UUID) error                  { return m.enableVaultErr }
 func (m *mockOrch) SetVaultCompression(uuid.UUID, bool) error    { return m.setCompressionErr }
 func (m *mockOrch) ForceRemoveVault(uuid.UUID) error             { return m.forceRemoveErr }
+func (m *mockOrch) DrainVault(_ context.Context, id uuid.UUID, _ string) error {
+	m.drainCalls = append(m.drainCalls, id)
+	return m.drainVaultErr
+}
+func (m *mockOrch) IsDraining(uuid.UUID) bool                    { return m.isDraining }
+func (m *mockOrch) CancelDrain(_ context.Context, id uuid.UUID) error {
+	m.cancelDrainIDs = append(m.cancelDrainIDs, id)
+	return m.cancelDrainErr
+}
 func (m *mockOrch) RemoveIngester(uuid.UUID) error               { return m.removeIngesterErr }
 func (m *mockOrch) UpdateMaxConcurrentJobs(int) error            { return m.updateMaxJobsErr }
 
@@ -678,6 +693,93 @@ func TestHandle_ConfigSignal(t *testing.T) {
 		case <-ch:
 		default:
 			t.Fatal("configSignal should fire on node config put")
+		}
+	})
+}
+
+func TestHandle_VaultDrain(t *testing.T) {
+	id := uuid.Must(uuid.NewV7())
+
+	t.Run("reassign_triggers_drain", func(t *testing.T) {
+		h := &captureHandler{}
+		mo := &mockOrch{vaults: []uuid.UUID{id}}
+		d := newTestDispatcher(mo, &stubCfgStore{
+			vault: &config.VaultConfig{ID: id, NodeID: "other-node", Enabled: true},
+		}, h)
+
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
+
+		if len(mo.drainCalls) != 1 || mo.drainCalls[0] != id {
+			t.Fatalf("expected DrainVault(%s), got %v", id, mo.drainCalls)
+		}
+	})
+
+	t.Run("already_draining_skipped", func(t *testing.T) {
+		h := &captureHandler{}
+		mo := &mockOrch{
+			vaults:     []uuid.UUID{id},
+			isDraining: true,
+		}
+		d := newTestDispatcher(mo, &stubCfgStore{
+			vault: &config.VaultConfig{ID: id, NodeID: "other-node", Enabled: true},
+		}, h)
+
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
+
+		if len(mo.drainCalls) != 0 {
+			t.Fatal("should not call DrainVault when already draining")
+		}
+	})
+
+	t.Run("drain_error_logged", func(t *testing.T) {
+		h := &captureHandler{}
+		mo := &mockOrch{
+			vaults:        []uuid.UUID{id},
+			drainVaultErr: errors.New("no transferrer"),
+		}
+		d := newTestDispatcher(mo, &stubCfgStore{
+			vault: &config.VaultConfig{ID: id, NodeID: "other-node", Enabled: true},
+		}, h)
+
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
+
+		if !h.hasMessage("dispatch: drain vault") {
+			t.Fatal("expected error log for DrainVault failure")
+		}
+	})
+
+	t.Run("reassign_back_cancels_drain", func(t *testing.T) {
+		h := &captureHandler{}
+		mo := &mockOrch{
+			vaults:     []uuid.UUID{id},
+			isDraining: true,
+		}
+		d := newTestDispatcher(mo, &stubCfgStore{
+			vault: &config.VaultConfig{ID: id, NodeID: "local", Enabled: true, Type: "memory"},
+		}, h)
+
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
+
+		if len(mo.cancelDrainIDs) != 1 || mo.cancelDrainIDs[0] != id {
+			t.Fatalf("expected CancelDrain(%s), got %v", id, mo.cancelDrainIDs)
+		}
+	})
+
+	t.Run("cancel_drain_error_logged", func(t *testing.T) {
+		h := &captureHandler{}
+		mo := &mockOrch{
+			vaults:         []uuid.UUID{id},
+			isDraining:     true,
+			cancelDrainErr: errors.New("boom"),
+		}
+		d := newTestDispatcher(mo, &stubCfgStore{
+			vault: &config.VaultConfig{ID: id, NodeID: "local", Enabled: true, Type: "memory"},
+		}, h)
+
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
+
+		if !h.hasMessage("dispatch: cancel drain") {
+			t.Fatal("expected error log for CancelDrain failure")
 		}
 	})
 }

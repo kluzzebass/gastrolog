@@ -126,11 +126,9 @@ func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) erro
 		if factories.Logger != nil {
 			cmLogger = factories.Logger.With("vault", vaultCfg.ID)
 		}
-		// Inject _expect_existing so file vaults can warn about missing directories.
-		cmParams := maps.Clone(vaultCfg.Params)
-		if cmParams == nil {
-			cmParams = make(map[string]string)
-		}
+		// Resolve relative vault dir against HomeDir and inject _expect_existing
+		// so file vaults can warn about missing directories.
+		cmParams := resolveVaultDir(vaultCfg.Params, factories.HomeDir, vaultCfg.Name)
 		cmParams["_expect_existing"] = "true"
 		cm, err := cmFactory(cmParams, cmLogger)
 		if err != nil {
@@ -155,7 +153,7 @@ func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) erro
 		if factories.Logger != nil {
 			imLogger = factories.Logger.With("vault", vaultCfg.ID)
 		}
-		im, err := imFactory(vaultCfg.Params, cm, imLogger)
+		im, err := imFactory(cmParams, cm, imLogger)
 		if err != nil {
 			return fmt.Errorf("create index manager %s: %w", vaultCfg.ID, err)
 		}

@@ -28,6 +28,12 @@ import (
 // When both directories exist on disk, os.SameFile provides an additional
 // inode-level check that catches symlinks and bind mounts.
 func (s *ConfigServer) validateVaultDir(ctx context.Context, vaultID uuid.UUID, newNodeID, dir string) error {
+	homeDir := s.factories.HomeDir
+
+	// Resolve relative path against homeDir (same logic as orchestrator).
+	if !filepath.IsAbs(dir) && homeDir != "" {
+		dir = filepath.Join(homeDir, dir)
+	}
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
 		return fmt.Errorf("resolve path: %w", err)
@@ -52,6 +58,10 @@ func (s *ConfigServer) validateVaultDir(ctx context.Context, vaultID uuid.UUID, 
 		otherDir := st.Params["dir"]
 		if otherDir == "" {
 			continue
+		}
+		// Resolve the other vault's dir against homeDir too.
+		if !filepath.IsAbs(otherDir) && homeDir != "" {
+			otherDir = filepath.Join(homeDir, otherDir)
 		}
 		absOther, err := filepath.Abs(otherDir)
 		if err != nil {
@@ -117,11 +127,15 @@ func (s *ConfigServer) PutVault(
 	}
 
 	// Validate file vault directory against nesting.
+	// When dir is empty, the orchestrator defaults to "vaults/<name>" —
+	// validate using that same default so nesting checks are accurate.
 	if vaultCfg.Type == "file" {
-		if dir := vaultCfg.Params["dir"]; dir != "" {
-			if err := s.validateVaultDir(ctx, vaultCfg.ID, vaultCfg.NodeID, dir); err != nil {
-				return nil, connect.NewError(connect.CodeInvalidArgument, err)
-			}
+		dir := vaultCfg.Params["dir"]
+		if dir == "" {
+			dir = filepath.Join("vaults", vaultCfg.Name)
+		}
+		if err := s.validateVaultDir(ctx, vaultCfg.ID, vaultCfg.NodeID, dir); err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
 	}
 

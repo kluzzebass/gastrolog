@@ -100,10 +100,13 @@ func (o *Orchestrator) ReloadRotationPolicies(ctx context.Context) error {
 }
 
 // ReloadRetentionPolicies loads the full config and resolves retention rules
-// for all registered vaults, hot-swapping their rules. This is called when a
-// retention policy is created, updated, or deleted.
+// for all registered vaults. This is called when a retention policy is
+// created/updated/deleted or when vault config changes.
 //
-// Vaults without rules keep their current state.
+// Handles three transitions:
+//   - Rules added to a vault without a runner → creates runner + scheduler job
+//   - Rules changed on a vault with a runner → hot-swaps rules
+//   - Rules removed from a vault with a runner → removes runner + scheduler job
 func (o *Orchestrator) ReloadRetentionPolicies(ctx context.Context) error {
 	cfg, err := o.loadConfig(ctx)
 	if err != nil {
@@ -113,26 +116,61 @@ func (o *Orchestrator) ReloadRetentionPolicies(ctx context.Context) error {
 		return nil
 	}
 
-	o.mu.RLock()
-	defer o.mu.RUnlock()
+	o.mu.Lock()
+	defer o.mu.Unlock()
 
 	for _, vaultCfg := range cfg.Vaults {
-		runner, ok := o.retention[vaultCfg.ID]
-		if !ok {
-			continue // No retention runner for this vault.
-		}
-		if len(vaultCfg.RetentionRules) == 0 {
-			continue // Vault has no rules; keep current.
+		vault := o.vaults[vaultCfg.ID]
+		if vault == nil {
+			continue // Vault not registered locally.
 		}
 
-		rules, err := resolveRetentionRules(cfg, vaultCfg)
-		if err != nil {
-			o.logger.Warn("failed to resolve retention rules", "vault", vaultCfg.ID, "name", vaultCfg.Name, "error", err)
-			continue
-		}
+		runner, hasRunner := o.retention[vaultCfg.ID]
+		hasRules := len(vaultCfg.RetentionRules) > 0
 
-		runner.setRules(rules)
-		o.logger.Info("vault retention rules updated", "vault", vaultCfg.ID, "name", vaultCfg.Name, "rules", len(rules))
+		switch {
+		case hasRules && hasRunner:
+			// Update existing runner's rules.
+			rules, err := resolveRetentionRules(cfg, vaultCfg)
+			if err != nil {
+				o.logger.Warn("failed to resolve retention rules", "vault", vaultCfg.ID, "name", vaultCfg.Name, "error", err)
+				continue
+			}
+			runner.setRules(rules)
+			o.logger.Info("vault retention rules updated", "vault", vaultCfg.ID, "name", vaultCfg.Name, "rules", len(rules))
+
+		case hasRules && !hasRunner:
+			// Create new runner for vault that gained retention rules.
+			rules, err := resolveRetentionRules(cfg, vaultCfg)
+			if err != nil {
+				o.logger.Warn("failed to resolve retention rules", "vault", vaultCfg.ID, "name", vaultCfg.Name, "error", err)
+				continue
+			}
+			if len(rules) == 0 {
+				continue
+			}
+			newRunner := &retentionRunner{
+				vaultID: vaultCfg.ID,
+				cm:      vault.Chunks,
+				im:      vault.Indexes,
+				rules:   rules,
+				orch:    o,
+				now:     o.now,
+				logger:  o.logger,
+			}
+			o.retention[vaultCfg.ID] = newRunner
+			if err := o.scheduler.AddJob(retentionJobName(vaultCfg.ID), defaultRetentionSchedule, newRunner.sweep); err != nil {
+				o.logger.Warn("failed to add retention job", "vault", vaultCfg.ID, "error", err)
+			}
+			o.scheduler.Describe(retentionJobName(vaultCfg.ID), fmt.Sprintf("Retention sweep for '%s'", vaultCfg.Name))
+			o.logger.Info("vault retention runner created", "vault", vaultCfg.ID, "name", vaultCfg.Name, "rules", len(rules))
+
+		case !hasRules && hasRunner:
+			// Rules removed — tear down the runner.
+			o.scheduler.RemoveJob(retentionJobName(vaultCfg.ID))
+			delete(o.retention, vaultCfg.ID)
+			o.logger.Info("vault retention runner removed", "vault", vaultCfg.ID, "name", vaultCfg.Name)
+		}
 	}
 
 	return nil

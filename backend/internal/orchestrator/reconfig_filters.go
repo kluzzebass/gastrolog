@@ -89,7 +89,10 @@ func (o *Orchestrator) reloadFiltersFromRoutes(cfg *config.Config) error {
 		for _, destID := range route.Destinations {
 			nodeID := ""
 			if _, ok := o.vaults[destID]; ok {
-				// Local vault — nodeID stays empty.
+				// Draining vaults are treated as remote — route to target node.
+				if ds, draining := o.draining[destID]; draining {
+					nodeID = ds.TargetNodeID
+				}
 			} else if o.forwarder != nil {
 				nodeID = resolveVaultNodeID(cfg, destID)
 				if nodeID == "" || nodeID == o.localNodeID {
@@ -111,7 +114,7 @@ func (o *Orchestrator) reloadFiltersFromRoutes(cfg *config.Config) error {
 	if fs != nil {
 		o.logger.Info("filters updated from routes", "count", len(fs.filters))
 	} else {
-		o.logger.Warn("no route filters compiled, messages will fan out to all vaults")
+		o.logger.Warn("no route filters compiled, ingested records will be dropped")
 	}
 
 	return nil

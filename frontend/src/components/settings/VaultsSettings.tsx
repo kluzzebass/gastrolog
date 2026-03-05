@@ -248,6 +248,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
             params={newParams}
             onChange={setNewParams}
             dark={dark}
+            vaultName={effectiveName}
           />
         </AddFormCard>
       )}
@@ -441,6 +442,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                 params={edit.params}
                 onChange={(p) => setEdit(vault.id, { params: p })}
                 dark={dark}
+                vaultName={edit.name || vault.name}
               />
               {migrateTarget[vault.id] && (() => {
                 const mt = migrateTarget[vault.id]!;

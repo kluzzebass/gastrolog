@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -289,6 +290,27 @@ func (s *Scheduler) RemoveJob(name string) {
 func (s *Scheduler) UpdateJob(name, cronExpr string, taskFn any, args ...any) error {
 	s.RemoveJob(name)
 	return s.AddJob(name, cronExpr, taskFn, args...)
+}
+
+// RemoveJobsByPrefix stops and removes all jobs whose name starts with prefix.
+// Used to cancel pending one-time jobs (compress, index-build) for a vault
+// that is about to be closed, preventing use-after-close on the chunk manager.
+func (s *Scheduler) RemoveJobsByPrefix(prefix string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for name, j := range s.jobs {
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		if err := s.scheduler.RemoveJob(j.ID()); err != nil {
+			s.logger.Warn("failed to remove scheduled job", "name", name, "error", err)
+		}
+		delete(s.jobs, name)
+		delete(s.schedules, name)
+		delete(s.descriptions, name)
+		delete(s.cronEntries, name)
+	}
 }
 
 // HasJob returns true if a job with the given name exists.

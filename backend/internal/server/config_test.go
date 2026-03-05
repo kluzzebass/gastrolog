@@ -154,6 +154,13 @@ func TestDeleteVaultForce(t *testing.T) {
 		t.Fatalf("PutVault: %v", err)
 	}
 
+	// Set a catch-all filter directly on the orchestrator (not via route,
+	// since the test also needs to force-delete the vault without
+	// hitting route referential integrity checks).
+	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
+		{VaultID: vaultID, Kind: orchestrator.FilterCatchAll, Expr: "*"},
+	}))
+
 	// Ingest data so the vault is non-empty.
 	if err := orch.Ingest(chunk.Record{
 		Raw: []byte("test data"),
@@ -335,6 +342,21 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 	}))
 	if err != nil {
 		t.Fatalf("PutVault: %v", err)
+	}
+
+	// Route the catch-all filter to the vault so Ingest delivers records.
+	_, err = client.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
+		Config: &gastrologv1.RouteConfig{
+			Id:       uuid.Must(uuid.NewV7()).String(),
+			FilterId: filterID.String(),
+			Destinations: []*gastrologv1.RouteDestination{
+				{VaultId: vaultID.String()},
+			},
+			Enabled: true,
+		},
+	}))
+	if err != nil {
+		t.Fatalf("PutRoute: %v", err)
 	}
 
 	// Pause the vault via RPC.

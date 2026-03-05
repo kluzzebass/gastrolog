@@ -179,6 +179,172 @@ func (o *Orchestrator) moveChunkFS(ctx context.Context, chunkID chunk.ChunkID, s
 	return nil
 }
 
+// --- Vault drain (cross-node migration on reassignment) ---
+
+// DrainVault starts an async migration of a vault's sealed chunks to a target
+// node. The vault remains registered locally (for search) but the filter set
+// routes new records to the target node via RecordForwarder. Once all sealed
+// chunks are transferred, the vault is unregistered locally.
+func (o *Orchestrator) DrainVault(ctx context.Context, vaultID uuid.UUID, targetNodeID string) error {
+	cfg, err := o.loadConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("load config for drain: %w", err)
+	}
+
+	o.mu.Lock()
+	vault := o.vaults[vaultID]
+	if vault == nil {
+		o.mu.Unlock()
+		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+	}
+	if _, already := o.draining[vaultID]; already {
+		o.mu.Unlock()
+		return fmt.Errorf("vault %s is already draining", vaultID)
+	}
+
+	// Mark as draining so filter reload treats this vault as remote.
+	drainCtx, cancel := context.WithCancel(context.Background())
+	ds := &drainState{TargetNodeID: targetNodeID, Cancel: cancel}
+	o.draining[vaultID] = ds
+
+	// Rebuild filters — draining vault will forward to targetNodeID.
+	if err := o.reloadFiltersFromRoutes(cfg); err != nil {
+		delete(o.draining, vaultID)
+		cancel()
+		o.mu.Unlock()
+		return fmt.Errorf("reload filters for drain: %w", err)
+	}
+
+	// Remove retention and rotation jobs (no longer needed locally).
+	o.scheduler.RemoveJob(retentionJobName(vaultID))
+	delete(o.retention, vaultID)
+	o.cronRotation.removeJob(vaultID)
+
+	o.mu.Unlock()
+
+	// Seal active chunk outside the lock — flush any locally-buffered records.
+	if err := o.SealActive(vaultID); err != nil {
+		o.logger.Warn("drain: failed to seal active chunk", "vault", vaultID, "error", err)
+	}
+
+	// Submit async job.
+	jobName := "drain:" + vaultID.String()
+	jobID := o.scheduler.Submit(jobName, func(ctx context.Context, job *JobProgress) {
+		o.drainWorker(drainCtx, vaultID, targetNodeID, job)
+	})
+	o.scheduler.Describe(jobName, "Drain vault to node "+targetNodeID)
+
+	o.mu.Lock()
+	if d, ok := o.draining[vaultID]; ok {
+		d.JobID = jobID
+	}
+	o.mu.Unlock()
+
+	o.logger.Info("vault drain started", "vault", vaultID, "target_node", targetNodeID, "job", jobID)
+	return nil
+}
+
+// drainWorker runs in the scheduler, transferring sealed chunks one by one.
+func (o *Orchestrator) drainWorker(ctx context.Context, vaultID uuid.UUID, targetNodeID string, job *JobProgress) {
+	cm, err := o.chunkManager(vaultID)
+	if err != nil {
+		job.Fail(o.now(), fmt.Sprintf("get chunk manager: %v", err))
+		return
+	}
+
+	metas, err := cm.List()
+	if err != nil {
+		job.Fail(o.now(), fmt.Sprintf("list chunks: %v", err))
+		return
+	}
+
+	var sealed []chunk.ChunkMeta
+	for _, m := range metas {
+		if m.Sealed {
+			sealed = append(sealed, m)
+		}
+	}
+	job.SetRunning(int64(len(sealed)))
+
+	for _, meta := range sealed {
+		if ctx.Err() != nil {
+			job.Fail(o.now(), "drain cancelled")
+			return
+		}
+		// Use moveChunkRemote directly — vault is still in o.vaults during drain.
+		if err := o.moveChunkRemote(ctx, meta.ID, vaultID, cm, vaultID, targetNodeID); err != nil {
+			job.Fail(o.now(), fmt.Sprintf("transfer chunk %s: %v", meta.ID, err))
+			return
+		}
+		job.AddRecords(meta.RecordCount)
+		job.IncrChunks()
+	}
+
+	o.finishDrain(vaultID)
+}
+
+// finishDrain cleans up after all chunks have been transferred.
+func (o *Orchestrator) finishDrain(vaultID uuid.UUID) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	delete(o.draining, vaultID)
+
+	vault := o.vaults[vaultID]
+	if vault == nil {
+		return // already removed (e.g. CancelDrain + ForceRemoveVault raced)
+	}
+
+	// Cancel pending compress/index jobs before closing the chunk manager
+	// to prevent use-after-close on the managers they capture.
+	vaultPrefix := vaultID.String()
+	o.scheduler.RemoveJobsByPrefix("compress:" + vaultPrefix)
+	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
+
+	if err := vault.Chunks.Close(); err != nil {
+		o.logger.Warn("drain: failed to close chunk manager", "vault", vaultID, "error", err)
+	}
+
+	delete(o.vaults, vaultID)
+	o.rebuildFilterSetLocked()
+
+	o.logger.Info("vault drain completed, vault unregistered", "vault", vaultID)
+}
+
+// CancelDrain cancels an in-progress drain and restores local routing.
+func (o *Orchestrator) CancelDrain(ctx context.Context, vaultID uuid.UUID) error {
+	cfg, err := o.loadConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("load config for cancel drain: %w", err)
+	}
+
+	o.mu.Lock()
+	ds, ok := o.draining[vaultID]
+	if !ok {
+		o.mu.Unlock()
+		return fmt.Errorf("vault %s is not draining", vaultID)
+	}
+
+	ds.Cancel()
+	delete(o.draining, vaultID)
+
+	if err := o.reloadFiltersFromRoutes(cfg); err != nil {
+		o.logger.Warn("cancel drain: failed to reload filters", "vault", vaultID, "error", err)
+	}
+	o.mu.Unlock()
+
+	o.logger.Info("vault drain cancelled", "vault", vaultID)
+	return nil
+}
+
+// IsDraining reports whether a vault is currently being drained.
+func (o *Orchestrator) IsDraining(vaultID uuid.UUID) bool {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	_, ok := o.draining[vaultID]
+	return ok
+}
+
 // --- Multi-vault operations ---
 
 // CopyRecords copies all records from source to destination, reporting progress via job.

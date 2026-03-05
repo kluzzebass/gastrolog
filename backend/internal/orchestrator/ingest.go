@@ -37,7 +37,7 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 	}
 
 	if o.filterSet == nil {
-		return o.fanoutAll(rec)
+		return nil // No routes configured — drop the record.
 	}
 
 	for _, t := range o.filterSet.MatchWithNode(rec.Attrs) {
@@ -46,16 +46,6 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 			continue
 		}
 		if err := o.appendLocal(t.VaultID, rec); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// fanoutAll is the legacy path: no filter set, send to all local vaults.
-func (o *Orchestrator) fanoutAll(rec chunk.Record) error {
-	for key := range o.vaults {
-		if _, _, err := o.appendRecord(key, rec); err != nil {
 			return err
 		}
 	}

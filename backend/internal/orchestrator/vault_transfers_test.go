@@ -463,3 +463,325 @@ func TestImportRecordsEmpty(t *testing.T) {
 		t.Errorf("expected empty meta for nil records, got count=%d", meta.RecordCount)
 	}
 }
+
+// --- Drain tests ---
+
+// noopForwarder satisfies RecordForwarder for tests that need filter routing
+// but don't actually forward anything.
+type noopForwarder struct{}
+
+func (noopForwarder) Forward(context.Context, string, uuid.UUID, []chunk.Record) error { return nil }
+
+// waitForJob polls the scheduler until the job completes or the timeout expires.
+func waitForJob(t *testing.T, sched *orchestrator.Scheduler, jobID string, timeout time.Duration) orchestrator.JobInfo {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		info, ok := sched.GetJob(jobID)
+		if ok {
+			snap := info.Snapshot()
+			if snap.Progress.Status == orchestrator.JobStatusCompleted || snap.Progress.Status == orchestrator.JobStatusFailed {
+				return snap
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("job %s did not complete within %v", jobID, timeout)
+	return orchestrator.JobInfo{}
+}
+
+// drainSetup creates an orchestrator with a single vault, routes, and a mock
+// transferrer suitable for drain tests. Returns the orchestrator, vault ID,
+// mock transferrer, and config loader (for route-based filter reload).
+func drainSetup(t *testing.T, recordCount int) (*orchestrator.Orchestrator, uuid.UUID, *mockTransferrer) {
+	t.Helper()
+
+	vaultID := uuid.Must(uuid.NewV7())
+	filterID := uuid.Must(uuid.NewV7())
+	routeID := uuid.Must(uuid.NewV7())
+
+	cm := newMemVault(t)
+
+	loader := &staticConfigLoader{cfg: &config.Config{
+		Vaults: []config.VaultConfig{
+			{ID: vaultID, NodeID: "node-A"},
+		},
+		Filters: []config.FilterConfig{
+			{ID: filterID, Expression: "*"},
+		},
+		Routes: []config.RouteConfig{
+			{ID: routeID, FilterID: &filterID, Destinations: []uuid.UUID{vaultID}, Enabled: true},
+		},
+	}}
+
+	orch, err := orchestrator.New(orchestrator.Config{
+		ConfigLoader: loader,
+		LocalNodeID:  "node-A",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	orch.SetRecordForwarder(noopForwarder{})
+
+	mock := &mockTransferrer{}
+	orch.SetRemoteTransferrer(mock)
+
+	orch.RegisterVault(orchestrator.NewVault(vaultID, cm, nil, nil))
+
+	// Build initial filters from routes.
+	if err := orch.ReloadFilters(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed records and seal.
+	if recordCount > 0 {
+		seedAndSeal(t, orch, vaultID, recordCount)
+	}
+
+	return orch, vaultID, mock
+}
+
+func TestDrainVault_Basic(t *testing.T) {
+	orch, vaultID, mock := drainSetup(t, 5)
+
+	// Start drain.
+	if err := orch.DrainVault(context.Background(), vaultID, "node-B"); err != nil {
+		t.Fatalf("DrainVault: %v", err)
+	}
+
+	if !orch.IsDraining(vaultID) {
+		t.Fatal("expected IsDraining to be true")
+	}
+
+	// Wait for the drain worker to complete.
+	jobs := orch.Scheduler().ListJobs()
+	var jobID string
+	for _, j := range jobs {
+		if j.Name == "drain:"+vaultID.String() {
+			jobID = j.ID
+			break
+		}
+	}
+	if jobID == "" {
+		t.Fatal("drain job not found in scheduler")
+	}
+
+	info := waitForJob(t, orch.Scheduler(), jobID, 5*time.Second)
+	if info.Progress.Status != orchestrator.JobStatusCompleted {
+		t.Fatalf("drain job failed: %s", info.Progress.Error)
+	}
+
+	// Verify TransferRecords was called with all sealed chunks.
+	if len(mock.calls) != 1 {
+		t.Fatalf("expected 1 TransferRecords call, got %d", len(mock.calls))
+	}
+	call := mock.calls[0]
+	if call.NodeID != "node-B" {
+		t.Errorf("nodeID = %q, want %q", call.NodeID, "node-B")
+	}
+	if len(call.Records) != 5 {
+		t.Errorf("expected 5 records, got %d", len(call.Records))
+	}
+
+	// Vault should be unregistered after drain.
+	if orch.VaultExists(vaultID) {
+		t.Error("vault should be unregistered after drain completes")
+	}
+	if orch.IsDraining(vaultID) {
+		t.Error("expected IsDraining to be false after drain completes")
+	}
+}
+
+func TestDrainVault_CancelDrain(t *testing.T) {
+	vaultID := uuid.Must(uuid.NewV7())
+	filterID := uuid.Must(uuid.NewV7())
+	routeID := uuid.Must(uuid.NewV7())
+
+	cm := newMemVault(t)
+
+	loader := &staticConfigLoader{cfg: &config.Config{
+		Vaults: []config.VaultConfig{
+			{ID: vaultID, NodeID: "node-A"},
+		},
+		Filters: []config.FilterConfig{
+			{ID: filterID, Expression: "*"},
+		},
+		Routes: []config.RouteConfig{
+			{ID: routeID, FilterID: &filterID, Destinations: []uuid.UUID{vaultID}, Enabled: true},
+		},
+	}}
+
+	orch, err := orchestrator.New(orchestrator.Config{
+		ConfigLoader: loader,
+		LocalNodeID:  "node-A",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	orch.SetRecordForwarder(noopForwarder{})
+
+	// Use a transferrer that blocks until context cancellation.
+	blockTransfer := &mockTransferrer{failErr: context.Canceled}
+	orch.SetRemoteTransferrer(blockTransfer)
+
+	orch.RegisterVault(orchestrator.NewVault(vaultID, cm, nil, nil))
+
+	if err := orch.ReloadFilters(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed multiple chunks so drain has work to do.
+	seedAndSeal(t, orch, vaultID, 3)
+
+	// Start drain.
+	if err := orch.DrainVault(context.Background(), vaultID, "node-B"); err != nil {
+		t.Fatalf("DrainVault: %v", err)
+	}
+
+	// Cancel immediately.
+	if err := orch.CancelDrain(context.Background(), vaultID); err != nil {
+		t.Fatalf("CancelDrain: %v", err)
+	}
+
+	if orch.IsDraining(vaultID) {
+		t.Error("expected IsDraining to be false after cancel")
+	}
+
+	// Vault should still be registered (not removed).
+	if !orch.VaultExists(vaultID) {
+		t.Error("vault should remain registered after cancel")
+	}
+
+	// Remaining chunks should still be local.
+	metas, err := orch.ListChunkMetas(vaultID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(metas) == 0 {
+		t.Error("expected at least some chunks to remain after cancel")
+	}
+}
+
+func TestDrainVault_AlreadyDraining(t *testing.T) {
+	orch, vaultID, _ := drainSetup(t, 3)
+
+	// Use a transferrer that blocks so the drain stays in progress.
+	blocking := make(chan struct{})
+	orch.SetRemoteTransferrer(&mockTransferrer{failErr: context.Canceled})
+
+	if err := orch.DrainVault(context.Background(), vaultID, "node-B"); err != nil {
+		t.Fatalf("DrainVault: %v", err)
+	}
+
+	// Second drain should error.
+	err := orch.DrainVault(context.Background(), vaultID, "node-C")
+	if err == nil {
+		t.Fatal("expected error for already-draining vault")
+	}
+
+	close(blocking)
+}
+
+func TestDrainVault_EmptyVault(t *testing.T) {
+	orch, vaultID, mock := drainSetup(t, 0)
+
+	if err := orch.DrainVault(context.Background(), vaultID, "node-B"); err != nil {
+		t.Fatalf("DrainVault: %v", err)
+	}
+
+	// Wait for drain to complete.
+	jobs := orch.Scheduler().ListJobs()
+	var jobID string
+	for _, j := range jobs {
+		if j.Name == "drain:"+vaultID.String() {
+			jobID = j.ID
+			break
+		}
+	}
+	if jobID == "" {
+		t.Fatal("drain job not found in scheduler")
+	}
+
+	info := waitForJob(t, orch.Scheduler(), jobID, 5*time.Second)
+	if info.Progress.Status != orchestrator.JobStatusCompleted {
+		t.Fatalf("drain job failed: %s", info.Progress.Error)
+	}
+
+	// No transfers should have been called.
+	if len(mock.calls) != 0 {
+		t.Errorf("expected 0 TransferRecords calls, got %d", len(mock.calls))
+	}
+
+	// Vault should be unregistered.
+	if orch.VaultExists(vaultID) {
+		t.Error("vault should be unregistered after drain")
+	}
+}
+
+func TestDrainVault_NoTransferrer(t *testing.T) {
+	vaultID := uuid.Must(uuid.NewV7())
+	filterID := uuid.Must(uuid.NewV7())
+	routeID := uuid.Must(uuid.NewV7())
+
+	cm := newMemVault(t)
+
+	loader := &staticConfigLoader{cfg: &config.Config{
+		Vaults: []config.VaultConfig{
+			{ID: vaultID, NodeID: "node-A"},
+		},
+		Filters: []config.FilterConfig{
+			{ID: filterID, Expression: "*"},
+		},
+		Routes: []config.RouteConfig{
+			{ID: routeID, FilterID: &filterID, Destinations: []uuid.UUID{vaultID}, Enabled: true},
+		},
+	}}
+
+	orch, err := orchestrator.New(orchestrator.Config{
+		ConfigLoader: loader,
+		LocalNodeID:  "node-A",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	orch.SetRecordForwarder(noopForwarder{})
+	// Deliberately do NOT set a RemoteTransferrer.
+
+	orch.RegisterVault(orchestrator.NewVault(vaultID, cm, nil, nil))
+
+	if err := orch.ReloadFilters(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	seedAndSeal(t, orch, vaultID, 2)
+
+	if err := orch.DrainVault(context.Background(), vaultID, "node-B"); err != nil {
+		t.Fatalf("DrainVault: %v", err)
+	}
+
+	// Wait for the drain worker to fail.
+	jobs := orch.Scheduler().ListJobs()
+	var jobID string
+	for _, j := range jobs {
+		if j.Name == "drain:"+vaultID.String() {
+			jobID = j.ID
+			break
+		}
+	}
+	if jobID == "" {
+		t.Fatal("drain job not found in scheduler")
+	}
+
+	info := waitForJob(t, orch.Scheduler(), jobID, 5*time.Second)
+	if info.Progress.Status != orchestrator.JobStatusFailed {
+		t.Fatalf("expected drain job to fail, got status %d", info.Progress.Status)
+	}
+
+	// Vault should still be registered (drain failed, data not lost).
+	if !orch.VaultExists(vaultID) {
+		t.Error("vault should remain registered when drain fails")
+	}
+}

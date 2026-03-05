@@ -29,6 +29,9 @@ type orchActions interface {
 	EnableVault(id uuid.UUID) error
 	SetVaultCompression(vaultID uuid.UUID, enabled bool) error
 	ForceRemoveVault(id uuid.UUID) error
+	DrainVault(ctx context.Context, vaultID uuid.UUID, targetNodeID string) error
+	IsDraining(vaultID uuid.UUID) bool
+	CancelDrain(ctx context.Context, vaultID uuid.UUID) error
 	ListIngesters() []uuid.UUID
 	AddIngester(id uuid.UUID, name, ingType string, r orchestrator.Ingester) error
 	RemoveIngester(id uuid.UUID) error
@@ -98,13 +101,16 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id uuid.UUID) {
 	}
 
 	if vaultCfg.NodeID != "" && vaultCfg.NodeID != d.localNodeID {
-		// Vault reassigned from local to remote — warn but don't act.
-		// Automated migration on reassignment is a future enhancement.
-		if slices.Contains(d.orch.ListVaults(), id) {
-			d.logger.Warn("dispatch: vault reassigned to remote node, local data remains until retention migrates it",
-				"vault", id, "name", vaultCfg.Name, "node", vaultCfg.NodeID)
-		}
+		d.maybeStartDrain(ctx, id, vaultCfg.NodeID)
 		return
+	}
+
+	// Vault assigned to this node — cancel any in-progress drain.
+	if d.orch.IsDraining(id) {
+		if err := d.orch.CancelDrain(ctx, id); err != nil {
+			d.logger.Error("dispatch: cancel drain", "id", id, "error", err)
+		}
+		// Fall through to applyExistingVaultChanges to reconfigure.
 	}
 
 	if !slices.Contains(d.orch.ListVaults(), id) {
@@ -115,6 +121,20 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id uuid.UUID) {
 	}
 
 	d.applyExistingVaultChanges(ctx, id, vaultCfg)
+}
+
+// maybeStartDrain starts draining a vault to a remote node if the vault is
+// locally registered and not already draining.
+func (d *configDispatcher) maybeStartDrain(ctx context.Context, id uuid.UUID, targetNodeID string) {
+	if !slices.Contains(d.orch.ListVaults(), id) {
+		return
+	}
+	if d.orch.IsDraining(id) {
+		return // drain already in progress
+	}
+	if err := d.orch.DrainVault(ctx, id, targetNodeID); err != nil {
+		d.logger.Error("dispatch: drain vault", "id", id, "node", targetNodeID, "error", err)
+	}
 }
 
 func (d *configDispatcher) applyExistingVaultChanges(ctx context.Context, id uuid.UUID, cfg *config.VaultConfig) {
