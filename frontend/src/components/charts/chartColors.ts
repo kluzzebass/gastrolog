@@ -1,21 +1,12 @@
+import { SEVERITY_COLOR_MAP, SEVERITY_LEVELS, SEVERITIES } from "../../lib/severity";
+
 /** Color cycle for multi-series line charts — CSS variables matching the severity palette. */
 export const SERIES_COLORS = [
   "var(--color-copper)",
-  "var(--color-severity-error)",
-  "var(--color-severity-warn)",
-  "var(--color-severity-info)",
-  "var(--color-severity-debug)",
-  "var(--color-severity-trace)",
+  ...SEVERITY_LEVELS.map((l) => SEVERITIES[l].cssVar),
 ];
 
-/** Known severity levels mapped to their theme CSS variable colors. */
-export const SEVERITY_COLOR_MAP: Record<string, string> = {
-  error: "var(--color-severity-error)",
-  warn: "var(--color-severity-warn)",
-  info: "var(--color-severity-info)",
-  debug: "var(--color-severity-debug)",
-  trace: "var(--color-severity-trace)",
-};
+export { SEVERITY_COLOR_MAP };
 
 /** OKLch palette for arbitrary (non-severity) group values. */
 export const GROUP_PALETTE = [

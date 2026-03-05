@@ -8,6 +8,7 @@ import type { VaultInfo } from "../api/gen/gastrolog/v1/vault_pb";
 import type { FieldSummary } from "../utils";
 import type { ResizeProps } from "../hooks/usePanelResize";
 import { useThemeClass } from "../hooks/useThemeClass";
+import { SEVERITY_LEVELS, SEVERITIES } from "../lib/severity";
 import { LoadingPlaceholder } from "./LoadingPlaceholder";
 
 interface SearchSidebarProps {
@@ -65,41 +66,11 @@ export function SearchSidebar({
 }: Readonly<SearchSidebarProps>) {
   const c = useThemeClass(dark);
 
-  const allSeverities = [
-    { label: "Error", level: "error", color: "severity-error" },
-    { label: "Warn", level: "warn", color: "severity-warn" },
-    { label: "Info", level: "info", color: "severity-info" },
-    { label: "Debug", level: "debug", color: "severity-debug" },
-    { label: "Trace", level: "trace", color: "severity-trace" },
-  ];
-
-  const severityStyles: Record<string, { active: string; inactive: string }> = {
-    "severity-error": {
-      active: "bg-severity-error border-severity-error text-white",
-      inactive:
-        "border-severity-error/40 text-severity-error hover:border-severity-error hover:bg-severity-error/10",
-    },
-    "severity-warn": {
-      active: "bg-severity-warn border-severity-warn text-white",
-      inactive:
-        "border-severity-warn/40 text-severity-warn hover:border-severity-warn hover:bg-severity-warn/10",
-    },
-    "severity-info": {
-      active: "bg-severity-info border-severity-info text-white",
-      inactive:
-        "border-severity-info/40 text-severity-info hover:border-severity-info hover:bg-severity-info/10",
-    },
-    "severity-debug": {
-      active: "bg-severity-debug border-severity-debug text-white",
-      inactive:
-        "border-severity-debug/40 text-severity-debug hover:border-severity-debug hover:bg-severity-debug/10",
-    },
-    "severity-trace": {
-      active: "bg-severity-trace border-severity-trace text-white",
-      inactive:
-        "border-severity-trace/40 text-severity-trace hover:border-severity-trace hover:bg-severity-trace/10",
-    },
-  };
+  const allSeverities = SEVERITY_LEVELS.map((l) => ({
+    label: SEVERITIES[l].label,
+    level: l,
+    color: SEVERITIES[l].color,
+  }));
 
   return (
     <>
@@ -175,15 +146,15 @@ export function SearchSidebar({
         {/* Quick Filters */}
         <SidebarSection title="Severity" dark={dark}>
           <div className="flex flex-wrap gap-1.5">
-            {allSeverities.map(({ label, level, color }) => {
+            {allSeverities.map(({ label, level }) => {
               const active = activeSeverities.includes(level);
-              const s = severityStyles[color]!;
+              const sev = SEVERITIES[level];
               return (
                 <button
                   key={level}
                   onClick={() => onToggleSeverity(level)}
                   className={`px-2 py-1.5 text-[0.8em] font-medium uppercase tracking-wider rounded-sm border transition-all duration-150 ${
-                    active ? s.active : s.inactive
+                    active ? sev.toggleActive : sev.toggleInactive
                   }`}
                 >
                   {label}

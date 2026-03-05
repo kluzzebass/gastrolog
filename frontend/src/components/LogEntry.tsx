@@ -3,29 +3,13 @@ import type { ProtoRecord } from "../utils";
 import { clickableProps } from "../utils";
 import { syntaxHighlight, composeWithSearch, type HighlightMode } from "../syntax";
 import { CopyButton } from "./CopyButton";
+import { SEVERITIES, classifySeverity } from "../lib/severity";
 
 interface SeverityInfo {
   level: string;
   label: string;
   cls: string;
   filter: string;
-}
-
-const BADGE_STYLE: Record<string, { label: string; cls: string }> = {
-  error: { label: "ERR", cls: "border-severity-error/50 text-severity-error" },
-  warn: { label: "WRN", cls: "border-severity-warn/50 text-severity-warn" },
-  info: { label: "INF", cls: "border-severity-info/50 text-severity-info" },
-  debug: { label: "DBG", cls: "border-severity-debug/50 text-severity-debug" },
-  trace: { label: "TRC", cls: "border-severity-trace/50 text-severity-trace" },
-};
-
-function classifySeverity(val: string): string | null {
-  if (/^(error|err|fatal|critical|emerg|alert)$/i.test(val)) return "error";
-  if (/^(warn|warning)$/i.test(val)) return "warn";
-  if (/^(info|notice|informational)$/i.test(val)) return "info";
-  if (/^debug$/i.test(val)) return "debug";
-  if (/^trace$/i.test(val)) return "trace";
-  return null;
 }
 
 export function detectSeverity(
@@ -36,8 +20,8 @@ export function detectSeverity(
     if (val) {
       const level = classifySeverity(val);
       if (level) {
-        const style = BADGE_STYLE[level]!;
-        return { level, ...style, filter: `${key}=${val}` };
+        const sev = SEVERITIES[level];
+        return { level, label: sev.short, cls: sev.badgeCls, filter: `${key}=${val}` };
       }
     }
   }

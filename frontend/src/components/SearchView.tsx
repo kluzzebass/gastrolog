@@ -48,6 +48,7 @@ import {
 } from "../api/hooks/useSavedQueries";
 import { Dialog } from "./Dialog";
 import { hasPipeOutsideQuotes } from "../lib/hasPipeOutsideQuotes";
+import { SEVERITY_LEVELS } from "../lib/severity";
 import type { SyntaxSets } from "../lib/syntaxSets";
 import { useAutocomplete } from "../hooks/useAutocomplete";
 import { HeaderBar } from "./HeaderBar";
@@ -540,7 +541,7 @@ export function SearchView() {
     if (next) explain(q);
   };
 
-  const allSeverities = ["error", "warn", "info", "debug", "trace"];
+  const allSeverities = SEVERITY_LEVELS;
 
   // Parse which severities are active from the query string.
   const activeSeverities = allSeverities.filter((s) =>
@@ -549,7 +550,7 @@ export function SearchView() {
 
   const toggleSeverity = (level: string) => {
     const current = allSeverities.filter((s) => q.includes(`level=${s}`));
-    const next = current.includes(level)
+    const next: string[] = current.includes(level as typeof current[number])
       ? current.filter((s) => s !== level)
       : [...current, level];
     const base = stripSeverity(q);
