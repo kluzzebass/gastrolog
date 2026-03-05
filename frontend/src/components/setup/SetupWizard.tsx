@@ -153,43 +153,37 @@ export function SetupWizard() {
     }
 
     try {
-      // 1. Create filter (catch-all)
-      await configClient.putFilter({
-        config: {
-          id: filterId,
-          name: "catch-all",
-          expression: "*",
-        },
-      });
+      // 1. Create independent policies in parallel.
+      await Promise.all([
+        configClient.putFilter({
+          config: { id: filterId, name: "catch-all", expression: "*" },
+        }),
+        rotationId
+          ? configClient.putRotationPolicy({
+              config: {
+                id: rotationId,
+                name: rotationName,
+                maxAgeSeconds: parseDurationToSeconds(rotation.maxAge),
+                maxBytes: rotationMaxBytes,
+                maxRecords: rotationMaxRecords,
+                cron: rotation.cron,
+              },
+            })
+          : undefined,
+        retentionId
+          ? configClient.putRetentionPolicy({
+              config: {
+                id: retentionId,
+                name: retentionName,
+                maxChunks: retentionMaxChunks,
+                maxAgeSeconds: parseDurationToSeconds(retentionMaxAge),
+                maxBytes: retentionMaxBytes,
+              },
+            })
+          : undefined,
+      ]);
 
-      // 2. Create rotation policy (if any fields are set)
-      if (rotationId) {
-        await configClient.putRotationPolicy({
-          config: {
-            id: rotationId,
-            name: rotationName,
-            maxAgeSeconds: parseDurationToSeconds(rotation.maxAge),
-            maxBytes: rotationMaxBytes,
-            maxRecords: rotationMaxRecords,
-            cron: rotation.cron,
-          },
-        });
-      }
-
-      // 3. Create retention policy (if any fields are set)
-      if (retentionId) {
-        await configClient.putRetentionPolicy({
-          config: {
-            id: retentionId,
-            name: retentionName,
-            maxChunks: retentionMaxChunks,
-            maxAgeSeconds: parseDurationToSeconds(retentionMaxAge),
-            maxBytes: retentionMaxBytes,
-          },
-        });
-      }
-
-      // 4. Create vault
+      // 2. Create vault (references rotation + retention from step 1).
       await configClient.putVault({
         config: {
           id: vaultId,
@@ -202,28 +196,28 @@ export function SetupWizard() {
         },
       });
 
-      // 5. Create route (links filter to vault)
-      await configClient.putRoute({
-        config: {
-          id: crypto.randomUUID(),
-          name: "default",
-          filterId,
-          destinations: [{ vaultId }],
-          distribution: "fanout",
-          enabled: true,
-        },
-      });
-
-      // 6. Create ingester
-      await configClient.putIngester({
-        config: {
-          id: ingesterId,
-          name: ingesterName,
-          type: ingester.type,
-          enabled: true,
-          params: ingester.params,
-        },
-      });
+      // 3. Create route + ingester in parallel (route references filter + vault).
+      await Promise.all([
+        configClient.putRoute({
+          config: {
+            id: crypto.randomUUID(),
+            name: "default",
+            filterId,
+            destinations: [{ vaultId }],
+            distribution: "fanout",
+            enabled: true,
+          },
+        }),
+        configClient.putIngester({
+          config: {
+            id: ingesterId,
+            name: ingesterName,
+            type: ingester.type,
+            enabled: true,
+            params: ingester.params,
+          },
+        }),
+      ]);
 
       await putSettings.mutateAsync({ setupWizardDismissed: true });
       // Optimistically update the cache so SearchView's redirect doesn't
