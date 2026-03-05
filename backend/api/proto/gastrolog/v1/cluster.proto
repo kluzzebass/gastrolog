@@ -3,6 +3,7 @@ package gastrolog.v1;
 
 import "google/protobuf/timestamp.proto";
 import "gastrolog/v1/job.proto";
+import "gastrolog/v1/query.proto";
 import "gastrolog/v1/vault.proto";
 
 option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
@@ -125,6 +126,7 @@ message ForwardSearchResponse {
   repeated ExportRecord records = 1;
   bytes resume_token = 2;
   bool has_more = 3;
+  TableResult table_result = 4;  // Pipeline results (timechart, stats)
 }
 
 // ForwardGetContextRequest asks a remote node to return records surrounding

@@ -75,31 +75,52 @@ func (a *jobBroadcastAdapter) ListJobsProto() []*gastrologv1.Job {
 }
 
 // newSearchExecutor creates a cluster.SearchExecutor that runs local vault
-// searches for ForwardSearch RPCs received from peer nodes.
+// searches for ForwardSearch RPCs received from peer nodes. When the query
+// contains a pipeline (stats, timechart), runs RunPipeline and returns the
+// TableResult instead of individual records.
 func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
-	return func(ctx context.Context, vaultID uuid.UUID, queryExpr string, _ []byte) ([]*gastrologv1.ExportRecord, []byte, bool, error) {
+	return func(ctx context.Context, vaultID uuid.UUID, queryExpr string, _ []byte) ([]*gastrologv1.ExportRecord, *gastrologv1.TableResult, []byte, bool, error) {
 		scopedExpr := fmt.Sprintf("vault=%s %s", vaultID, queryExpr)
 
-		q, _, err := server.ParseExpression(scopedExpr)
+		q, pipeline, err := server.ParseExpression(scopedExpr)
 		if err != nil {
-			return nil, nil, false, fmt.Errorf("parse query: %w", err)
+			return nil, nil, nil, false, fmt.Errorf("parse query: %w", err)
 		}
 
+		eng := o.MultiVaultQueryEngine()
+
+		// Pipeline query: run aggregation locally and return table result.
+		if pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline) {
+			result, err := eng.RunPipeline(ctx, q, pipeline)
+			if err != nil {
+				return nil, nil, nil, false, err
+			}
+			if result.Table != nil {
+				return nil, server.TableResultToBasicProto(result.Table), nil, false, nil
+			}
+			// Non-table pipeline (sort/tail/slice): return as records.
+			records := make([]*gastrologv1.ExportRecord, 0, len(result.Records))
+			for _, rec := range result.Records {
+				records = append(records, cluster.RecordToExportRecord(rec))
+			}
+			return records, nil, nil, false, nil
+		}
+
+		// Regular search path.
 		const maxBatch = 500
 		if q.Limit == 0 || q.Limit > maxBatch {
 			q.Limit = maxBatch
 		}
 
-		eng := o.MultiVaultQueryEngine()
 		iter, _ := eng.Search(ctx, q, nil)
 		var records []*gastrologv1.ExportRecord
 		for rec, err := range iter {
 			if err != nil {
-				return records, nil, false, err
+				return records, nil, nil, false, err
 			}
 			records = append(records, cluster.RecordToExportRecord(rec))
 		}
-		return records, nil, false, nil
+		return records, nil, nil, false, nil
 	}
 }
 

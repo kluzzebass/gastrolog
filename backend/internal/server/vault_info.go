@@ -95,6 +95,9 @@ func (s *VaultServer) GetStats(
 		resp.VaultStats = append(resp.VaultStats, vaultStat)
 	}
 
+	// Include remote vaults from peer broadcasts.
+	s.accumulateRemoteVaultStats(ctx, vaults, resp)
+
 	s.fillProcessMetrics(resp)
 
 	return connect.NewResponse(resp), nil
@@ -188,6 +191,45 @@ func (s *VaultServer) fillProcessMetrics(resp *apiv1.GetStatsResponse) {
 		SysBytes:          mem.Sys,
 		HeapObjects:       mem.HeapObjects,
 		NumGc:             mem.NumGC,
+	}
+}
+
+// accumulateRemoteVaultStats adds stats from remote vaults (via peer broadcasts)
+// to the GetStats response. Process metrics (CPU/memory) are local-only.
+func (s *VaultServer) accumulateRemoteVaultStats(ctx context.Context, localVaults []uuid.UUID, resp *apiv1.GetStatsResponse) {
+	if s.cfgStore == nil || s.peerStats == nil {
+		return
+	}
+	allCfg, err := s.cfgStore.ListVaults(ctx)
+	if err != nil {
+		return
+	}
+
+	localSet := make(map[uuid.UUID]struct{}, len(localVaults))
+	for _, id := range localVaults {
+		localSet[id] = struct{}{}
+	}
+
+	for _, vc := range allCfg {
+		if _, local := localSet[vc.ID]; local {
+			continue
+		}
+		vs := s.peerStats.FindVaultStats(vc.ID.String())
+		if vs == nil {
+			continue
+		}
+		resp.TotalVaults++
+		resp.TotalChunks += vs.ChunkCount
+		resp.TotalRecords += vs.RecordCount
+		resp.TotalBytes += vs.DataBytes + vs.IndexBytes
+		resp.SealedChunks += vs.SealedChunks
+		resp.VaultStats = append(resp.VaultStats, vs)
+		if vs.OldestRecord != nil {
+			updateTimeBounds(&resp.OldestRecord, vs.OldestRecord.AsTime(), (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.Before(b) })
+		}
+		if vs.NewestRecord != nil {
+			updateTimeBounds(&resp.NewestRecord, vs.NewestRecord.AsTime(), (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.After(b) })
+		}
 	}
 }
 

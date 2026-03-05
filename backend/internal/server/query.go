@@ -93,7 +93,7 @@ func (s *QueryServer) Search(
 		}
 		// Aggregating / full-materialization pipeline (stats, timechart,
 		// sort, tail, slice, raw).
-		return s.searchPipeline(ctx, eng, q, pipeline, stream)
+		return s.searchPipeline(ctx, eng, q, pipeline, req.Msg.Query.GetExpression(), stream)
 	}
 
 	return s.searchDirect(ctx, eng, q, req.Msg.ResumeToken, nil, stream)
@@ -101,11 +101,14 @@ func (s *QueryServer) Search(
 
 // searchPipeline handles pipelines that require full materialization
 // (stats, timechart, sort, tail, slice, raw).
+// The expression parameter is the original query string, needed to
+// forward the full expression (including pipeline) to remote nodes.
 func (s *QueryServer) searchPipeline(
 	ctx context.Context,
 	eng *query.Engine,
 	q query.Query,
 	pipeline *querylang.Pipeline,
+	expression string,
 	stream *connect.ServerStream[apiv1.SearchResponse],
 ) error {
 	if s.maxResultCount > 0 && (q.Limit == 0 || int64(q.Limit) > s.maxResultCount) {
@@ -116,6 +119,11 @@ func (s *QueryServer) searchPipeline(
 		return connect.NewError(connect.CodeInternal, err)
 	}
 	if result.Table != nil {
+		// Fan out to remote nodes and merge table results.
+		remoteResults := s.collectRemotePipeline(ctx, expression)
+		if len(remoteResults) > 0 {
+			result.Table = mergeTableResults(result.Table, remoteResults)
+		}
 		return stream.Send(&apiv1.SearchResponse{
 			TableResult: tableResultToProto(result.Table, pipeline),
 		})
@@ -439,6 +447,44 @@ func (s *QueryServer) fetchRemoteVault(
 		records = append(records, exportToRecord(er))
 	}
 	return records
+}
+
+// collectRemotePipeline fans out a pipeline query to all remote vaults and
+// collects their TableResults. Each remote node runs the full pipeline locally
+// (the executor detects the pipeline and calls RunPipeline). The coordinating
+// node then merges the results.
+func (s *QueryServer) collectRemotePipeline(ctx context.Context, expression string) []*query.TableResult {
+	if s.remoteSearcher == nil || s.cfgStore == nil {
+		return nil
+	}
+	byNode := s.remoteVaultsByNode(ctx)
+	if len(byNode) == 0 {
+		return nil
+	}
+
+	var results []*query.TableResult
+	for nodeID, vaultIDs := range byNode {
+		for _, vid := range vaultIDs {
+			resp, err := s.remoteSearcher.Search(ctx, nodeID, &apiv1.ForwardSearchRequest{
+				VaultId: vid.String(),
+				Query:   expression,
+			})
+			if err != nil {
+				s.logger.Warn("pipeline: remote vault failed", "node", nodeID, "vault", vid, "err", err)
+				continue
+			}
+			if resp.GetTableResult() != nil {
+				if tr := protoToTableResult(resp.GetTableResult()); tr != nil {
+					results = append(results, tr)
+				}
+			}
+		}
+	}
+
+	if len(results) > 0 {
+		s.logger.Debug("pipeline: collected remote table results", "nodes", len(byNode), "tables", len(results))
+	}
+	return results
 }
 
 // Follow executes a query and streams matching records, continuously polling for new arrivals.

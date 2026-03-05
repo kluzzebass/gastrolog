@@ -7,6 +7,7 @@ import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialM
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 import { Job } from "./job_pb.js";
 import { ChunkMeta, ChunkValidation, ExportRecord, IndexInfo, VaultStats } from "./vault_pb.js";
+import { TableResult } from "./query_pb.js";
 
 /**
  * ForwardApplyRequest carries a pre-marshaled ConfigCommand for the leader
@@ -771,6 +772,13 @@ export class ForwardSearchResponse extends Message<ForwardSearchResponse> {
    */
   hasMore = false;
 
+  /**
+   * Pipeline results (timechart, stats)
+   *
+   * @generated from field: gastrolog.v1.TableResult table_result = 4;
+   */
+  tableResult?: TableResult;
+
   constructor(data?: PartialMessage<ForwardSearchResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -782,6 +790,7 @@ export class ForwardSearchResponse extends Message<ForwardSearchResponse> {
     { no: 1, name: "records", kind: "message", T: ExportRecord, repeated: true },
     { no: 2, name: "resume_token", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 3, name: "has_more", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 4, name: "table_result", kind: "message", T: TableResult },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardSearchResponse {
