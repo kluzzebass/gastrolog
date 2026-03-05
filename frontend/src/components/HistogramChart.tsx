@@ -160,7 +160,27 @@ export function HistogramChart({
   const stackKeys = hasGroups ? [...groupKeys, "__other"] : ["__total"];
   const categories = buckets.map((_, i) => String(i));
 
-  const seriesData = stackKeys.map((key) => {
+  // Compute per-bucket values for each stack key to determine the topmost segment.
+  const valueGrid = stackKeys.map((key) =>
+    buckets.map((b) => {
+      if (key === "__total") return b.count;
+      if (key === "__other") {
+        const groupSum = Object.values(b.groupCounts).reduce((a, v) => a + v, 0);
+        return Math.max(0, b.count - groupSum);
+      }
+      return b.groupCounts[key] ?? 0;
+    }),
+  );
+
+  // For each bucket, find the topmost series (last with value > 0).
+  const topSeriesPerBucket = buckets.map((_, i) => {
+    for (let s = stackKeys.length - 1; s >= 0; s--) {
+      if (valueGrid[s]![i]! > 0) return s;
+    }
+    return -1;
+  });
+
+  const seriesData = stackKeys.map((key, seriesIdx) => {
     const isOther = key === "__other";
     const isTotal = key === "__total";
     let displayName: string;
@@ -175,24 +195,14 @@ export function HistogramChart({
       name: displayName,
       type: "bar" as const,
       stack: "total",
-      data: buckets.map((b, i) => {
-        let value: number;
-        if (isTotal) value = b.count;
-        else if (isOther) {
-          const groupSum = Object.values(b.groupCounts).reduce((a, v) => a + v, 0);
-          value = Math.max(0, b.count - groupSum);
-        } else {
-          value = b.groupCounts[key] ?? 0;
-        }
-        return {
-          value,
-          itemStyle: {
-            color,
-            opacity: hoveredBar === i ? 1 : baseOpacity,
-            borderRadius: [2, 2, 0, 0],
-          },
-        };
-      }),
+      data: buckets.map((_, i) => ({
+        value: valueGrid[seriesIdx]![i],
+        itemStyle: {
+          color,
+          opacity: hoveredBar === i ? 1 : baseOpacity,
+          borderRadius: topSeriesPerBucket[i] === seriesIdx ? [2, 2, 0, 0] : 0,
+        },
+      })),
       emphasis: { disabled: true },
       barCategoryGap: "8%",
       cursor: onSegmentClick && !isTotal ? "pointer" : "crosshair",
