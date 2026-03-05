@@ -54,7 +54,7 @@ import { HeaderBar } from "./HeaderBar";
 import { PipelineResults } from "./PipelineResults";
 
 import { ExplainPanel } from "./ExplainPanel";
-import { SettingsDialog } from "./settings/SettingsDialog";
+import { SettingsDialog, type SettingsTab } from "./settings/SettingsDialog";
 import { InspectorDialog } from "./inspector/InspectorDialog";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
 import { PreferencesDialog } from "./PreferencesDialog";
@@ -67,6 +67,16 @@ import { useSettings } from "../api/hooks/useSettings";
 import { useSyntax } from "../api/hooks/useSyntax";
 import { useValidation } from "../hooks/useValidation";
 import { usePipelineFields } from "../hooks/usePipelineFields";
+
+/** Search params shared by /search and /follow routes. */
+type ViewSearch = { q: string; help?: string; settings?: string; inspector?: string };
+
+/** Navigate function typed for routes with ViewSearch params. */
+type ViewNavigate = (opts: {
+  to?: string;
+  search?: ViewSearch | ((prev: ViewSearch) => ViewSearch);
+  replace?: boolean;
+}) => void;
 
 /** Check whether the query ends with a `| raw` pipe segment. */
 function queryHasRaw(query: string): boolean {
@@ -115,7 +125,8 @@ function recordsToRawTable(records: ProtoRecord[]): TableResult {
 export function SearchView() {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- useRouterSearch returns optional fields; assertion narrows q to string
   const { q, help: helpParam, settings: settingsParam, inspector: inspectorParam } = useRouterSearch({ strict: false }) as { q: string; help?: string; settings?: string; inspector?: string };
-  const navigate = useNavigate();
+  // useNavigate() without `from` can't infer search types for shared routes.
+  const navigate: ViewNavigate = useNavigate() as any;
   const location = useLocation();
   const isFollowMode = location.pathname === "/follow";
 
@@ -124,7 +135,7 @@ export function SearchView() {
   const settings = useSettings();
   useEffect(() => {
     if (config.data && settings.data && config.data.vaults.length === 0 && !settings.data.setupWizardDismissed) {
-      navigate({ to: "/setup" } as any);
+      navigate({ to: "/setup" });
     }
   }, [config.data, settings.data]); // eslint-disable-line react-hooks/exhaustive-deps
   const [draft, setDraft] = useState(q);
@@ -163,16 +174,16 @@ export function SearchView() {
   } = useDialogState();
 
   const openHelp = (topicId?: string) => {
-    navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, help: topicId || "general" }) } as any);
+    navigate({ search: (prev) => ({ ...prev, help: topicId || "general" }) });
   };
 
   const openSettings = (tab?: string) => {
-    navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, settings: tab || "service" }) } as any);
+    navigate({ search: (prev) => ({ ...prev, settings: tab || "service" }) });
   };
 
   const openInspector = (param?: string) => {
     const p = param || sessionStorage.getItem("inspector-last") || "entities:vaults";
-    navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: p }) } as any);
+    navigate({ search: (prev) => ({ ...prev, inspector: p }) });
   };
 
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(
@@ -286,9 +297,9 @@ export function SearchView() {
   const setUrlQuery = (newQ: string) => {
     navigate({
       to: isFollowMode ? "/follow" : "/search",
-      search: (prev: Record<string, unknown>) => ({ ...prev, q: newQ }),
+      search: (prev) => ({ ...prev, q: newQ }),
       replace: false,
-    } as any);
+    });
   };
 
   // Auto-refresh polling for both pipeline and filter results.
@@ -328,7 +339,7 @@ export function SearchView() {
           setRangeEnd(now);
         }
         const fixed = injectTimeRange(q, defaultRange, isReversed);
-        navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, q: fixed }), replace: true } as any);
+        navigate({ search: (prev) => ({ ...prev, q: fixed }), replace: true });
         return;
       }
 
@@ -389,7 +400,7 @@ export function SearchView() {
         setRangeEnd(now);
       }
       const initial = injectTimeRange("", timeRange, isReversed);
-      navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, q: initial }), replace: true } as any);
+      navigate({ search: (prev) => ({ ...prev, q: initial }), replace: true });
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -490,7 +501,7 @@ export function SearchView() {
       }
       if (showPlan) explain(q);
     } else {
-      navigate({ to: "/search", search: (prev: Record<string, unknown>) => ({ ...prev, q: normalized }), replace: false } as any);
+      navigate({ to: "/search", search: (prev) => ({ ...prev, q: normalized }), replace: false });
     }
   };
 
@@ -506,7 +517,7 @@ export function SearchView() {
       .replace(/\breverse=\S+/g, "")
       .replace(/\s+/g, " ")
       .trim();
-    navigate({ to: "/follow", search: (prev: Record<string, unknown>) => ({ ...prev, q: stripped }), replace: false } as any);
+    navigate({ to: "/follow", search: (prev) => ({ ...prev, q: stripped }), replace: false });
   };
 
   const stopFollowMode = () => {
@@ -520,7 +531,7 @@ export function SearchView() {
     // preserving the sort direction from follow mode.
     const base = stripTimeRange(draft);
     const restored = injectTimeRange(base, timeRange, followReversed);
-    navigate({ to: "/search", search: (prev: Record<string, unknown>) => ({ ...prev, q: restored }), replace: false } as any);
+    navigate({ to: "/search", search: (prev) => ({ ...prev, q: restored }), replace: false });
   };
 
   const handleShowPlan = () => {
@@ -889,9 +900,9 @@ export function SearchView() {
           {settingsParam && (
               <SettingsDialog
                 dark={dark}
-                tab={settingsParam as any}
-                onTabChange={(tab) => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, settings: tab }) } as any)}
-                onClose={() => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, settings: undefined }) } as any)}
+                tab={settingsParam as SettingsTab}
+                onTabChange={(tab) => navigate({ search: (prev) => ({ ...prev, settings: tab }) })}
+                onClose={() => navigate({ search: (prev) => ({ ...prev, settings: undefined }) })}
                 isAdmin={currentUser?.role === "admin" || getToken() === "no-auth"}
                 noAuth={getToken() === "no-auth"}
               />
@@ -901,8 +912,8 @@ export function SearchView() {
               <InspectorDialog
                 dark={dark}
                 inspectorParam={inspectorParam}
-                onNavigate={(p) => { sessionStorage.setItem("inspector-last", p); navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: p }) } as any); }}
-                onClose={() => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, inspector: undefined }) } as any)}
+                onNavigate={(p) => { sessionStorage.setItem("inspector-last", p); navigate({ search: (prev) => ({ ...prev, inspector: p }) }); }}
+                onClose={() => navigate({ search: (prev) => ({ ...prev, inspector: undefined }) })}
               />
           )}
 
@@ -910,9 +921,9 @@ export function SearchView() {
               <HelpDialog
                 dark={dark}
                 topicId={helpParam}
-                onClose={() => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, help: undefined }) } as any)}
-                onNavigate={(id) => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, help: id }) } as any)}
-                onOpenSettings={(tab) => navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, help: undefined, settings: tab }) } as any)}
+                onClose={() => navigate({ search: (prev) => ({ ...prev, help: undefined }) })}
+                onNavigate={(id) => navigate({ search: (prev) => ({ ...prev, help: id }) })}
+                onOpenSettings={(tab) => navigate({ search: (prev) => ({ ...prev, help: undefined, settings: tab }) })}
               />
           )}
 
@@ -967,9 +978,9 @@ export function SearchView() {
                     const newQuery = base ? `${tokens} ${base}` : tokens;
                     navigate({
                       to: "/search",
-                      search: (prev: Record<string, unknown>) => ({ ...prev, q: newQuery }),
+                      search: (prev) => ({ ...prev, q: newQuery }),
                       replace: false,
-                    } as any);
+                    });
                   }}
                   onSegmentClick={handleSegmentClick}
                 />
@@ -1063,9 +1074,9 @@ export function SearchView() {
                 const newQuery = `start=${newStart.toISOString()} end=${newEnd.toISOString()} reverse=${isReversed}`;
                 navigate({
                   to: "/search",
-                  search: (prev: Record<string, unknown>) => ({ ...prev, q: newQuery }),
+                  search: (prev) => ({ ...prev, q: newQuery }),
                   replace: false,
-                } as any);
+                });
               }}
             />
 
@@ -1187,9 +1198,9 @@ export function SearchView() {
               setSelectedRecord(rec);
               navigate({
                 to: "/search",
-                search: (prev: Record<string, unknown>) => ({ ...prev, q: newQuery }),
+                search: (prev) => ({ ...prev, q: newQuery }),
                 replace: false,
-              } as any);
+              });
             } else {
               setSelectedRecord(rec);
             }
