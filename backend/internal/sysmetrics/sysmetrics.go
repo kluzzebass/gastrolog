@@ -8,48 +8,58 @@ import (
 	"time"
 )
 
-var (
+// cpuTracker tracks CPU usage between successive calls. It is safe for
+// concurrent use. The clock and rusage fields allow dependency injection
+// for testing.
+type cpuTracker struct {
 	mu       sync.Mutex
 	lastWall time.Time
 	lastUser time.Duration
 	lastSys  time.Duration
 	lastCPU  float64
-)
-
-func init() {
-	now := time.Now()
-	utime, stime := getrusageTimes()
-	mu.Lock()
-	lastWall = now
-	lastUser = utime
-	lastSys = stime
-	mu.Unlock()
+	clock    func() time.Time
+	rusage   func() (user, sys time.Duration)
 }
 
-// CPUPercent returns the process CPU usage as a percentage (0–100+)
-// since the last call. Multi-core processes can exceed 100%.
-func CPUPercent() float64 {
-	now := time.Now()
-	utime, stime := getrusageTimes()
+func newCPUTracker(clock func() time.Time, rusage func() (user, sys time.Duration)) *cpuTracker {
+	u, s := rusage()
+	return &cpuTracker{
+		lastWall: clock(),
+		lastUser: u,
+		lastSys:  s,
+		clock:    clock,
+		rusage:   rusage,
+	}
+}
 
-	mu.Lock()
-	defer mu.Unlock()
+func (t *cpuTracker) percent() float64 {
+	now := t.clock()
+	utime, stime := t.rusage()
 
-	wall := now.Sub(lastWall)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	wall := now.Sub(t.lastWall)
 	if wall <= 0 {
-		return lastCPU
+		return t.lastCPU
 	}
 
-	cpuDelta := (utime - lastUser) + (stime - lastSys)
+	cpuDelta := (utime - t.lastUser) + (stime - t.lastSys)
 	pct := float64(cpuDelta) / float64(wall) * 100.0
 
-	lastWall = now
-	lastUser = utime
-	lastSys = stime
-	lastCPU = pct
+	t.lastWall = now
+	t.lastUser = utime
+	t.lastSys = stime
+	t.lastCPU = pct
 
 	return pct
 }
+
+var defaultTracker = newCPUTracker(time.Now, getrusageTimes)
+
+// CPUPercent returns the process CPU usage as a percentage (0–100+)
+// since the last call. Multi-core processes can exceed 100%.
+func CPUPercent() float64 { return defaultTracker.percent() }
 
 // MemoryStats holds a detailed memory breakdown.
 type MemoryStats struct {
