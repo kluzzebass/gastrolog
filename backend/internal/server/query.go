@@ -93,7 +93,7 @@ func (s *QueryServer) Search(
 		}
 		// Aggregating / full-materialization pipeline (stats, timechart,
 		// sort, tail, slice, raw).
-		return s.searchPipeline(ctx, eng, q, pipeline, req.Msg.Query.GetExpression(), stream)
+		return s.searchPipeline(ctx, eng, q, pipeline, stream)
 	}
 
 	return s.searchDirect(ctx, eng, q, req.Msg.ResumeToken, nil, stream)
@@ -101,14 +101,11 @@ func (s *QueryServer) Search(
 
 // searchPipeline handles pipelines that require full materialization
 // (stats, timechart, sort, tail, slice, raw).
-// The expression parameter is the original query string, needed to
-// forward the full expression (including pipeline) to remote nodes.
 func (s *QueryServer) searchPipeline(
 	ctx context.Context,
 	eng *query.Engine,
 	q query.Query,
 	pipeline *querylang.Pipeline,
-	expression string,
 	stream *connect.ServerStream[apiv1.SearchResponse],
 ) error {
 	if s.maxResultCount > 0 && (q.Limit == 0 || int64(q.Limit) > s.maxResultCount) {
@@ -120,7 +117,7 @@ func (s *QueryServer) searchPipeline(
 	}
 	if result.Table != nil {
 		// Fan out to remote nodes and merge table results.
-		remoteResults := s.collectRemotePipeline(ctx, expression)
+		remoteResults := s.collectRemotePipeline(ctx, q, pipeline)
 		if len(remoteResults) > 0 {
 			result.Table = mergeTableResults(result.Table, remoteResults)
 		}
@@ -453,7 +450,11 @@ func (s *QueryServer) fetchRemoteVault(
 // collects their TableResults. Each remote node runs the full pipeline locally
 // (the executor detects the pipeline and calls RunPipeline). The coordinating
 // node then merges the results.
-func (s *QueryServer) collectRemotePipeline(ctx context.Context, expression string) []*query.TableResult {
+//
+// The expression is reconstructed from the parsed q and pipeline with absolute
+// start/end timestamps so all nodes use identical time windows (avoids bucket
+// misalignment from re-evaluating relative "last=5m" on each node).
+func (s *QueryServer) collectRemotePipeline(ctx context.Context, q query.Query, pipeline *querylang.Pipeline) []*query.TableResult {
 	if s.remoteSearcher == nil || s.cfgStore == nil {
 		return nil
 	}
@@ -462,12 +463,16 @@ func (s *QueryServer) collectRemotePipeline(ctx context.Context, expression stri
 		return nil
 	}
 
+	// Reconstruct expression with absolute timestamps so remote nodes
+	// produce identical timechart bucket boundaries.
+	remoteExpr := q.String() + " " + pipeline.String()
+
 	var results []*query.TableResult
 	for nodeID, vaultIDs := range byNode {
 		for _, vid := range vaultIDs {
 			resp, err := s.remoteSearcher.Search(ctx, nodeID, &apiv1.ForwardSearchRequest{
 				VaultId: vid.String(),
-				Query:   expression,
+				Query:   remoteExpr,
 			})
 			if err != nil {
 				s.logger.Warn("pipeline: remote vault failed", "node", nodeID, "vault", vid, "err", err)
