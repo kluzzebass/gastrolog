@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -20,6 +21,25 @@ func newTestScheduler(t *testing.T) *Scheduler {
 	return sched
 }
 
+// waitJobDone polls until the job reaches a terminal status (completed or failed).
+func waitJobDone(t *testing.T, sched *Scheduler, id string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		info, ok := sched.GetJob(id)
+		if ok {
+			s := info.Snapshot().Progress.Status
+			if s == JobStatusCompleted || s == JobStatusFailed {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for job to finish")
+		}
+		runtime.Gosched()
+	}
+}
+
 func TestScheduler_SubmitAndGet(t *testing.T) {
 	sched := newTestScheduler(t)
 
@@ -36,7 +56,7 @@ func TestScheduler_SubmitAndGet(t *testing.T) {
 	}
 
 	<-done
-	time.Sleep(50 * time.Millisecond)
+	waitJobDone(t, sched, id)
 
 	info, ok := sched.GetJob(id)
 	if !ok {
@@ -73,7 +93,7 @@ func TestScheduler_ExplicitComplete(t *testing.T) {
 	})
 
 	<-done
-	time.Sleep(50 * time.Millisecond)
+	waitJobDone(t, sched, id)
 
 	info, ok := sched.GetJob(id)
 	if !ok {
@@ -100,7 +120,7 @@ func TestScheduler_Fail(t *testing.T) {
 	})
 
 	<-done
-	time.Sleep(50 * time.Millisecond)
+	waitJobDone(t, sched, id)
 
 	info, ok := sched.GetJob(id)
 	if !ok {
@@ -132,7 +152,17 @@ func TestScheduler_ListIncludesSubmitted(t *testing.T) {
 	})
 
 	wg.Wait()
-	time.Sleep(50 * time.Millisecond)
+	// Both jobs use default auto-complete; poll until ListJobs shows them.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if len(sched.ListJobs()) >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for jobs to appear in list")
+		}
+		runtime.Gosched()
+	}
 
 	jobs := sched.ListJobs()
 	names := map[string]bool{}
@@ -171,7 +201,7 @@ func TestScheduler_Cleanup(t *testing.T) {
 		close(done)
 	})
 	<-done
-	time.Sleep(50 * time.Millisecond)
+	waitJobDone(t, sched, id)
 
 	if _, ok := sched.GetJob(id); !ok {
 		t.Fatal("job should exist before cleanup")
@@ -216,7 +246,7 @@ func TestScheduler_ConcurrentProgress(t *testing.T) {
 	})
 
 	<-done
-	time.Sleep(50 * time.Millisecond)
+	waitJobDone(t, sched, id)
 
 	info, ok := sched.GetJob(id)
 	if !ok {

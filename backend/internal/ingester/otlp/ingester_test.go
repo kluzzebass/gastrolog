@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"runtime"
 	"testing"
 	"time"
 
@@ -94,7 +95,21 @@ func listenAndStartOTLP(t *testing.T, chanSize int) (string, string, chan orches
 
 	ctx := t.Context()
 	go ing.Run(ctx, out)
-	time.Sleep(100 * time.Millisecond)
+
+	// Wait for HTTP listener to be ready.
+	deadline := time.Now().Add(2 * time.Second)
+	client := &http.Client{Timeout: 50 * time.Millisecond}
+	for {
+		resp, err := client.Get("http://" + httpAddr + "/ready")
+		if err == nil {
+			resp.Body.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for OTLP HTTP listener")
+		}
+		runtime.Gosched()
+	}
 
 	return httpAddr, grpcAddr, out
 }

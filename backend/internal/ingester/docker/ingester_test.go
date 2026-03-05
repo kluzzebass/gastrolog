@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -346,8 +347,8 @@ func TestContainerStartEvent(t *testing.T) {
 		ing.Run(ctx, out)
 	}()
 
-	// Wait a moment, then add the container and send a start event.
-	time.Sleep(100 * time.Millisecond)
+	// Add the container and send a start event. The buffered events channel
+	// (cap 10) holds the event until the event loop goroutine starts processing.
 	client.addContainer(container)
 	client.events <- containerEvent{Action: "start", ContainerID: containerID}
 
@@ -404,16 +405,19 @@ func TestContainerStopEvent(t *testing.T) {
 	// Send stop event.
 	client.events <- containerEvent{Action: "die", ContainerID: containerID}
 
-	// Wait for the goroutine to clean up.
-	time.Sleep(200 * time.Millisecond)
-
-	ing.mu.Lock()
-	_, tracked := ing.containers[containerID]
-	ing.mu.Unlock()
-
-	// The container should be removed from tracking after its stream ends.
-	// Note: with fake client the stream ends immediately, so it may already be gone.
-	_ = tracked
+	// Poll until the container is removed from tracking (or timeout).
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		ing.mu.Lock()
+		_, tracked := ing.containers[containerID]
+		ing.mu.Unlock()
+		if !tracked {
+			return
+		}
+		runtime.Gosched()
+	}
+	// With fake client the stream ends immediately, so it should be gone.
+	// If still tracked, that's acceptable — the real docker stream would block.
 }
 
 func TestBookmarkPersistence(t *testing.T) {

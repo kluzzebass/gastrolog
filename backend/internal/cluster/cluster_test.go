@@ -3,6 +3,7 @@ package cluster_test
 import (
 	"context"
 	"io"
+	"runtime"
 	"testing"
 	"time"
 
@@ -185,8 +186,20 @@ func TestThreeNodeCluster(t *testing.T) {
 	addVoter(t, node1.srv.Addr(), "node-2", node2.srv.Addr())
 	addVoter(t, node1.srv.Addr(), "node-3", node3.srv.Addr())
 
-	// Give Raft a moment to stabilize.
-	time.Sleep(500 * time.Millisecond)
+	// Wait for Raft configuration to include all 3 voters.
+	deadline := time.After(5 * time.Second)
+	for {
+		cfg := node1.raft.GetConfiguration()
+		if cfg.Error() == nil && len(cfg.Configuration().Servers) == 3 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for 3-node configuration")
+		default:
+			runtime.Gosched()
+		}
+	}
 
 	// Write a filter on the leader.
 	ctx := context.Background()
@@ -201,13 +214,14 @@ func TestThreeNodeCluster(t *testing.T) {
 
 	// Verify the filter is replicated to node 2 and 3.
 	var got2, got3 *config.FilterConfig
-	for range 20 {
+	replDeadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(replDeadline) {
 		got2, _ = node2.store.GetFilter(ctx, filterID)
 		got3, _ = node3.store.GetFilter(ctx, filterID)
 		if got2 != nil && got3 != nil {
 			break
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 	if got2 == nil {
 		t.Error("filter not replicated to node-2")
@@ -228,12 +242,13 @@ func TestThreeNodeCluster(t *testing.T) {
 
 	// Verify the filter written via follower is readable on the leader.
 	var leaderGot *config.FilterConfig
-	for range 20 {
+	fwdDeadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(fwdDeadline) {
 		leaderGot, _ = node1.store.GetFilter(ctx, followerFilterID)
 		if leaderGot != nil {
 			break
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 	if leaderGot == nil {
 		t.Fatal("filter written on follower not found on leader")

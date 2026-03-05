@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"encoding/binary"
 	"net"
+	"runtime"
 	"testing"
 	"time"
 
@@ -34,7 +35,20 @@ func dialIngester(t *testing.T, chanSize int) (string, chan orchestrator.IngestM
 
 	ctx := t.Context()
 	go ing.Run(ctx, out)
-	time.Sleep(100 * time.Millisecond)
+
+	// Wait for the listener to bind by retrying dial.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		conn, err := net.DialTimeout("tcp", addr, 50*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for fluentfwd listener")
+		}
+		runtime.Gosched()
+	}
 
 	return addr, out
 }
@@ -426,10 +440,19 @@ func TestFluentFwdConnectionCloseResilience(t *testing.T) {
 	}
 	conn.Close()
 
-	time.Sleep(100 * time.Millisecond)
-
-	// The ingester should still accept new connections.
-	conn2, err := net.Dial("tcp", addr)
+	// The ingester should still accept new connections — retry until it does.
+	var conn2 net.Conn
+	retryDeadline := time.Now().Add(2 * time.Second)
+	for {
+		conn2, err = net.DialTimeout("tcp", addr, 50*time.Millisecond)
+		if err == nil {
+			break
+		}
+		if time.Now().After(retryDeadline) {
+			t.Fatalf("second dial failed (ingester may have crashed): %v", err)
+		}
+		runtime.Gosched()
+	}
 	if err != nil {
 		t.Fatalf("second dial failed (ingester may have crashed): %v", err)
 	}

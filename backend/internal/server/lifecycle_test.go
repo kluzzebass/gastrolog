@@ -3,6 +3,7 @@ package server_test
 import (
 	"context"
 	"net/http"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -76,7 +77,7 @@ func TestDrainWaitsForInFlightRequests(t *testing.T) {
 
 	// Wait for search to start
 	for !searchStarted.Load() {
-		time.Sleep(10 * time.Millisecond)
+		runtime.Gosched()
 	}
 
 	// Issue shutdown with drain=true
@@ -167,7 +168,7 @@ func TestDrainRejectsNewRequests(t *testing.T) {
 
 	// Wait for slow search to start
 	for !slowSearchStarted.Load() {
-		time.Sleep(10 * time.Millisecond)
+		runtime.Gosched()
 	}
 
 	// Issue shutdown with drain=true (this runs in background and starts rejecting)
@@ -178,24 +179,23 @@ func TestDrainRejectsNewRequests(t *testing.T) {
 		t.Fatalf("Shutdown failed: %v", err)
 	}
 
-	// Give drain time to set the draining flag
-	time.Sleep(50 * time.Millisecond)
-
-	// Try to make a new request - should be rejected because draining flag is set
-	stream, err := queryClient.Search(context.Background(), connect.NewRequest(&gastrologv1.SearchRequest{
-		Query: &gastrologv1.Query{},
-	}))
-	if err != nil {
-		// Good - rejected at connect time
-		return
+	// Poll until new requests are rejected (drain flag is set).
+	drainDeadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(drainDeadline) {
+		stream, err := queryClient.Search(context.Background(), connect.NewRequest(&gastrologv1.SearchRequest{
+			Query: &gastrologv1.Query{},
+		}))
+		if err != nil {
+			// Rejected at connect time — drain is active.
+			return
+		}
+		if !stream.Receive() && stream.Err() != nil {
+			// Rejected during receive — drain is active.
+			return
+		}
+		runtime.Gosched()
 	}
-	// For streaming, the error might come when receiving
-	if stream.Receive() {
-		t.Fatal("Expected new request to be rejected during drain")
-	}
-	if stream.Err() == nil {
-		t.Fatal("Expected error from rejected request during drain")
-	}
+	t.Fatal("Expected new request to be rejected during drain")
 }
 
 func TestShutdownWithoutDrain(t *testing.T) {

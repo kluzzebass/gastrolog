@@ -3,11 +3,24 @@ package syslog
 import (
 	"fmt"
 	"net"
+	"runtime"
 	"testing"
 	"time"
 
 	"gastrolog/internal/orchestrator"
 )
+
+// waitAddr polls f until it returns a non-nil address or the timeout expires.
+func waitAddr(t *testing.T, f func() net.Addr) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for f() == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for listener to bind")
+		}
+		runtime.Gosched()
+	}
+}
 
 func TestSyslogUDPRFC3164(t *testing.T) {
 	out := make(chan orchestrator.IngestMessage, 10)
@@ -16,7 +29,7 @@ func TestSyslogUDPRFC3164(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
+	waitAddr(t, recv.UDPAddr)
 
 	// Send RFC 3164 message.
 	conn, err := net.Dial("udp", recv.UDPAddr().String())
@@ -63,7 +76,7 @@ func TestSyslogUDPRFC5424(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
+	waitAddr(t, recv.UDPAddr)
 
 	conn, err := net.Dial("udp", recv.UDPAddr().String())
 	if err != nil {
@@ -120,7 +133,7 @@ func TestSyslogTCPNewlineDelimited(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
+	waitAddr(t, recv.TCPAddr)
 
 	conn, err := net.Dial("tcp", recv.TCPAddr().String())
 	if err != nil {
@@ -161,7 +174,7 @@ func TestSyslogTCPOctetCounted(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
+	waitAddr(t, recv.TCPAddr)
 
 	conn, err := net.Dial("tcp", recv.TCPAddr().String())
 	if err != nil {
@@ -191,7 +204,7 @@ func TestSyslogMultipleUDPMessages(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
+	waitAddr(t, recv.UDPAddr)
 
 	conn, err := net.Dial("udp", recv.UDPAddr().String())
 	if err != nil {
@@ -225,7 +238,7 @@ func TestSyslogRemoteIP(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
+	waitAddr(t, recv.UDPAddr)
 
 	conn, err := net.Dial("udp", recv.UDPAddr().String())
 	if err != nil {
@@ -252,7 +265,7 @@ func TestSyslogRFC3164WithPID(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
+	waitAddr(t, recv.UDPAddr)
 
 	conn, err := net.Dial("udp", recv.UDPAddr().String())
 	if err != nil {
@@ -287,7 +300,7 @@ func TestSyslogNoPriority(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
+	waitAddr(t, recv.UDPAddr)
 
 	conn, err := net.Dial("udp", recv.UDPAddr().String())
 	if err != nil {
@@ -322,7 +335,8 @@ func TestSyslogBothUDPAndTCP(t *testing.T) {
 	ctx := t.Context()
 
 	go recv.Run(ctx, out)
-	time.Sleep(50 * time.Millisecond)
+	waitAddr(t, recv.UDPAddr)
+	waitAddr(t, recv.TCPAddr)
 
 	// Send via UDP.
 	udpConn, _ := net.Dial("udp", recv.UDPAddr().String())

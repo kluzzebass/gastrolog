@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -127,16 +128,17 @@ func TestRELPSession(t *testing.T) {
 	}()
 
 	// Wait for listener to start.
+	deadline := time.Now().Add(2 * time.Second)
 	var addr net.Addr
-	for range 50 {
+	for {
 		addr = ing.Addr()
 		if addr != nil {
 			break
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if addr == nil {
-		t.Fatal("listener did not start")
+		if time.Now().After(deadline) {
+			t.Fatal("listener did not start")
+		}
+		runtime.Gosched()
 	}
 
 	conn, err := net.Dial("tcp", addr.String())
@@ -222,16 +224,17 @@ func TestRELPMultipleMessages(t *testing.T) {
 	go ing.Run(ctx, out)
 
 	// Wait for listener.
+	deadline := time.Now().Add(2 * time.Second)
 	var addr net.Addr
-	for range 50 {
+	for {
 		addr = ing.Addr()
 		if addr != nil {
 			break
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if addr == nil {
-		t.Fatal("listener did not start")
+		if time.Now().After(deadline) {
+			t.Fatal("listener did not start")
+		}
+		runtime.Gosched()
 	}
 
 	conn, err := net.Dial("tcp", addr.String())
@@ -286,16 +289,17 @@ func TestRELPConnectionClose(t *testing.T) {
 	go ing.Run(ctx, out)
 
 	// Wait for listener.
+	deadline := time.Now().Add(2 * time.Second)
 	var addr net.Addr
-	for range 50 {
+	for {
 		addr = ing.Addr()
 		if addr != nil {
 			break
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if addr == nil {
-		t.Fatal("listener did not start")
+		if time.Now().After(deadline) {
+			t.Fatal("listener did not start")
+		}
+		runtime.Gosched()
 	}
 
 	// Connect and immediately close — should not crash the ingester.
@@ -305,11 +309,19 @@ func TestRELPConnectionClose(t *testing.T) {
 	}
 	conn.Close()
 
-	// Give time for the handler to process the close.
-	time.Sleep(100 * time.Millisecond)
-
-	// The ingester should still be running — try another connection.
-	conn2, err := net.Dial("tcp", addr.String())
+	// The ingester should still be running — retry until a new connection succeeds.
+	retryDeadline := time.Now().Add(2 * time.Second)
+	var conn2 net.Conn
+	for {
+		conn2, err = net.DialTimeout("tcp", addr.String(), 50*time.Millisecond)
+		if err == nil {
+			break
+		}
+		if time.Now().After(retryDeadline) {
+			t.Fatalf("second dial failed (ingester may have crashed): %v", err)
+		}
+		runtime.Gosched()
+	}
 	if err != nil {
 		t.Fatalf("second dial failed (ingester may have crashed): %v", err)
 	}
