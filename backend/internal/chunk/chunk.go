@@ -103,6 +103,17 @@ type ChunkCompressor interface {
 	RefreshDiskSizes(id ChunkID)
 }
 
+// AttrScanner provides raw-free forward iteration over record metadata.
+// Chunk managers that support this enable optimized aggregation queries
+// that skip loading message bodies (raw.log), reading only idx.log + attr.log.
+// Callers should type-assert ChunkManager to check availability.
+type AttrScanner interface {
+	// ScanAttrs iterates records in a chunk starting from startPos, calling fn
+	// with each record's WriteTS and Attributes. fn returns true to continue,
+	// false to stop early. Pass startPos=0 to scan from the beginning.
+	ScanAttrs(id ChunkID, startPos uint64, fn func(writeTS time.Time, attrs Attributes) bool) error
+}
+
 // RecordCursor provides bidirectional iteration over records in a chunk.
 type RecordCursor interface {
 	Next() (Record, RecordRef, error)

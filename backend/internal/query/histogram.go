@@ -22,11 +22,13 @@ import (
 // When By is empty, just counts total records per bucket.
 // When By is set, groups by the named record attribute (requires record scan).
 //
-// Two modes:
+// Three modes:
 //   - No grouping, no filter, no pre-ops: fast path using FindStartPosition
 //     binary search. O(buckets * log(n)) per chunk, no record scanning.
-//   - Otherwise: falls back to Search() → applyRecordOps() → manual binning.
-//     Capped at 1M records.
+//   - Grouping, no filter, no pre-ops: attr-only scan using AttrScanner.
+//     Reads only idx.log + attr.log (~88 bytes/record), uncapped.
+//   - Filter or pre-ops: falls back to Search() → applyRecordOps() → manual binning.
+//     Capped at 1M records; sets Truncated when cap is hit.
 //
 // Returns a TableResult with columns ["_time", "count"] or ["_time", "<field>", "count"].
 func (e *Engine) runTimechart(ctx context.Context, q Query, tc *querylang.TimechartOp, preOps []querylang.PipeOp) (*TableResult, error) {
@@ -66,13 +68,50 @@ func (e *Engine) runTimechart(ctx context.Context, q Query, tc *querylang.Timech
 	hasPreOps := len(preOps) > 0
 	hasGroupBy := groupField != ""
 
-	if !hasGroupBy && !hasFilter && !hasPreOps {
-		e.timechartFastPath(selectedVaults, start, end, bucketWidth, numBuckets, counts)
-	} else if err := e.timechartScanPath(ctx, q, preOps, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, hasPreOps, counts, groupCounts); err != nil {
+	truncated, err := e.runTimechartStrategy(ctx, q, preOps, selectedVaults,
+		start, end, bucketWidth, numBuckets,
+		hasFilter, hasPreOps, hasGroupBy, groupField,
+		counts, groupCounts)
+	if err != nil {
 		return nil, err
 	}
 
-	return timechartToTable(groupField, start, bucketWidth, numBuckets, counts, groupCounts), nil
+	result := timechartToTable(groupField, start, bucketWidth, numBuckets, counts, groupCounts)
+	result.Truncated = truncated
+	return result, nil
+}
+
+// runTimechartStrategy selects the fastest histogram computation path based on query shape.
+// Unfiltered queries use binary search for counts + per-bucket attr sampling for groups.
+// Filtered queries fall back to full record scanning with a 1M cap.
+func (e *Engine) runTimechartStrategy(
+	ctx context.Context, q Query, preOps []querylang.PipeOp, selectedVaults []uuid.UUID,
+	start, end time.Time, bucketWidth time.Duration, numBuckets int,
+	hasFilter, hasPreOps, hasGroupBy bool, groupField string,
+	counts []int64, groupCounts []map[string]int64,
+) (bool, error) {
+	if hasFilter || hasPreOps {
+		return e.timechartScanPath(ctx, q, preOps, start, end, bucketWidth,
+			numBuckets, groupField, hasGroupBy, hasPreOps, counts, groupCounts)
+	}
+
+	// Exact total counts via binary search — O(buckets × log(n)), instant.
+	e.timechartFastPath(selectedVaults, start, end, bucketWidth, numBuckets, counts)
+
+	if !hasGroupBy {
+		return false, nil
+	}
+
+	// Group breakdown via per-bucket sampling — O(buckets × 1000).
+	if e.timechartAttrScanGroups(selectedVaults, start, end, bucketWidth, numBuckets, groupField, groupCounts) {
+		return false, nil
+	}
+
+	// AttrScanner not supported — fall back to full scan for groups.
+	// Clear fast-path counts since scanPath will recount.
+	clear(counts)
+	return e.timechartScanPath(ctx, q, preOps, start, end, bucketWidth,
+		numBuckets, groupField, hasGroupBy, hasPreOps, counts, groupCounts)
 }
 
 // clampBuckets normalizes the bucket count to the valid range [1, 500], defaulting to 50.
@@ -145,13 +184,135 @@ func (e *Engine) timechartFastPath(selectedVaults []uuid.UUID, start time.Time, 
 	}
 }
 
+// timechartAttrScanGroups populates group breakdown counts using per-bucket
+// sampling. For each bucket, binary search finds the record position range,
+// then AttrScanner reads up to samplePerBucket attrs and scales the proportions
+// to the exact count. Total cost: O(buckets × samplePerBucket) regardless of
+// dataset size (~50K records for default 50 buckets).
+// Does NOT update total counts — those come from timechartFastPath.
+// Returns handled=false if any vault doesn't implement AttrScanner.
+func (e *Engine) timechartAttrScanGroups(selectedVaults []uuid.UUID, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, groupCounts []map[string]int64) (handled bool) {
+	const samplePerBucket = 1000
+
+	// Pre-check: all vaults must support AttrScanner.
+	for _, vaultID := range selectedVaults {
+		cm, _ := e.getVaultManagers(vaultID)
+		if cm == nil {
+			continue
+		}
+		if _, ok := cm.(chunk.AttrScanner); !ok {
+			return false
+		}
+	}
+
+	for _, vaultID := range selectedVaults {
+		cm, _ := e.getVaultManagers(vaultID)
+		if cm == nil {
+			continue
+		}
+		scanner := cm.(chunk.AttrScanner)
+		metas, err := cm.List()
+		if err != nil {
+			continue
+		}
+		for _, meta := range metas {
+			if meta.RecordCount == 0 {
+				continue
+			}
+			if meta.EndTS.Before(start) || !meta.StartTS.Before(end) {
+				continue
+			}
+			timechartChunkGroups(cm, scanner, meta, start, bucketWidth, numBuckets, samplePerBucket, groupField, groupCounts)
+		}
+	}
+	return true
+}
+
+// timechartChunkGroups samples attrs per bucket within a single chunk.
+// For each bucket that overlaps the chunk, it binary-searches for the position
+// range, scans up to sampleSize records, and scales the observed group
+// proportions to the exact bucket count (from binary search).
+func timechartChunkGroups(
+	cm chunk.ChunkManager,
+	scanner chunk.AttrScanner,
+	meta chunk.ChunkMeta,
+	start time.Time,
+	bucketWidth time.Duration,
+	numBuckets int,
+	sampleSize int,
+	groupField string,
+	groupCounts []map[string]int64,
+) {
+	end := start.Add(bucketWidth * time.Duration(numBuckets))
+
+	firstBucket := 0
+	if meta.StartTS.After(start) {
+		firstBucket = int(meta.StartTS.Sub(start) / bucketWidth)
+		if firstBucket >= numBuckets {
+			return
+		}
+	}
+	lastBucket := numBuckets - 1
+	if meta.EndTS.Before(end) {
+		lastBucket = int(meta.EndTS.Sub(start) / bucketWidth)
+		if lastBucket >= numBuckets {
+			lastBucket = numBuckets - 1
+		}
+	}
+
+	for b := firstBucket; b <= lastBucket; b++ {
+		bStart := start.Add(bucketWidth * time.Duration(b))
+		bEnd := start.Add(bucketWidth * time.Duration(b+1))
+
+		var startPos uint64
+		if pos, found, err := cm.FindStartPosition(meta.ID, bStart); err == nil && found {
+			startPos = pos
+		}
+
+		var endPos uint64
+		if !bEnd.Before(meta.EndTS) {
+			endPos = uint64(meta.RecordCount) //nolint:gosec // G115: RecordCount is always non-negative
+		} else if pos, found, err := cm.FindStartPosition(meta.ID, bEnd); err == nil && found {
+			endPos = pos
+		}
+
+		bucketRecords := endPos - startPos
+		if bucketRecords == 0 {
+			continue
+		}
+
+		// Sample attrs from this bucket range.
+		localCounts := make(map[string]int64)
+		sampled := 0
+		limit := min(int(bucketRecords), sampleSize)
+
+		_ = scanner.ScanAttrs(meta.ID, startPos, func(_ time.Time, attrs chunk.Attributes) bool {
+			if v := attrs[groupField]; v != "" {
+				localCounts[v]++
+			}
+			sampled++
+			return sampled < limit
+		})
+
+		if sampled == 0 {
+			continue
+		}
+
+		// Scale sample proportions to exact bucket count.
+		for k, v := range localCounts {
+			groupCounts[b][k] += v * int64(bucketRecords) / int64(sampled)
+		}
+	}
+}
+
 // timechartScanPath counts records per bucket via record scanning with optional grouping and pre-ops.
-func (e *Engine) timechartScanPath(ctx context.Context, q Query, preOps []querylang.PipeOp, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, hasGroupBy, hasPreOps bool, counts []int64, groupCounts []map[string]int64) error {
+// Returns (truncated, error) where truncated is true when the 1M scan cap was hit.
+func (e *Engine) timechartScanPath(ctx context.Context, q Query, preOps []querylang.PipeOp, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, hasGroupBy, hasPreOps bool, counts []int64, groupCounts []map[string]int64) (bool, error) {
 	q.Limit = 0
 	iter, _ := e.Search(ctx, q, nil)
 
 	if hasPreOps {
-		return timechartScanPreOps(ctx, iter, preOps, e.lookupResolver, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, counts, groupCounts)
+		return false, timechartScanPreOps(ctx, iter, preOps, e.lookupResolver, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, counts, groupCounts)
 	}
 	return timechartScanDirect(iter, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, counts, groupCounts)
 }
@@ -169,7 +330,8 @@ func timechartScanPreOps(ctx context.Context, iter iter.Seq2[chunk.Record, error
 }
 
 // timechartScanDirect iterates records directly and bins them, capped at 1M records.
-func timechartScanDirect(records iter.Seq2[chunk.Record, error], start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, hasGroupBy bool, counts []int64, groupCounts []map[string]int64) error {
+// Returns (truncated, error) where truncated is true when the cap was hit.
+func timechartScanDirect(records iter.Seq2[chunk.Record, error], start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, hasGroupBy bool, counts []int64, groupCounts []map[string]int64) (bool, error) {
 	const maxScan = 1_000_000
 	scanned := 0
 	for rec, err := range records {
@@ -177,15 +339,15 @@ func timechartScanDirect(records iter.Seq2[chunk.Record, error], start, end time
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				break
 			}
-			return err
+			return false, err
 		}
 		timechartBinRecord(rec.WriteTS, rec.Attrs, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, counts, groupCounts)
 		scanned++
 		if scanned >= maxScan {
-			break
+			return true, nil
 		}
 	}
-	return nil
+	return false, nil
 }
 
 // timechartBinRecord places a single record into the appropriate bucket, updating counts and group counts.

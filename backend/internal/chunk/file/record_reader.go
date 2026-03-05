@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	seekable "github.com/SaveTheRbtz/zstd-seekable-format-go/pkg"
 
@@ -481,6 +482,143 @@ func (c *stdioCursor) Close() error {
 }
 
 var _ chunk.RecordCursor = (*stdioCursor)(nil)
+
+// scanAttrsSealed iterates all records in a sealed chunk, reading only idx.log
+// and attr.log (skipping raw.log entirely). For uncompressed chunks, idx and attr
+// are mmap'd; for compressed chunks, attr uses seekable zstd.
+func scanAttrsSealed(idxPath, attrPath, dictPath string, startPos uint64, fn func(writeTS time.Time, attrs chunk.Attributes) bool) error {
+	dict, err := loadDict(dictPath)
+	if err != nil {
+		return err
+	}
+
+	// Mmap idx.log (always uncompressed).
+	idxFile, err := os.Open(filepath.Clean(idxPath))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = idxFile.Close() }()
+
+	idxInfo, err := idxFile.Stat()
+	if err != nil {
+		return err
+	}
+	recordCount := RecordCount(idxInfo.Size())
+	if recordCount == 0 {
+		return nil
+	}
+
+	idxData, err := syscall.Mmap(int(idxFile.Fd()), 0, int(idxInfo.Size()), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: safe on 64-bit
+	if err != nil {
+		return err
+	}
+	defer func() { _ = syscall.Munmap(idxData) }()
+
+	// Open attr.log (may be compressed or mmap'd).
+	attrData, attrMmap, attrFile, attrSeek, err := openDataFile(attrPath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if attrSeek != nil {
+			_ = attrSeek.Close()
+		}
+		if attrMmap != nil {
+			_ = syscall.Munmap(attrMmap)
+		}
+		if attrFile != nil {
+			_ = attrFile.Close()
+		}
+	}()
+
+	for i := startPos; i < recordCount; i++ {
+		idxOffset := int(IdxHeaderSize) + int(i)*IdxEntrySize //nolint:gosec // G115: bounded by record count
+		if idxOffset+IdxEntrySize > len(idxData) {
+			return ErrInvalidRecordIdx
+		}
+		entry := DecodeIdxEntry(idxData[idxOffset : idxOffset+IdxEntrySize])
+
+		var attrBuf []byte
+		if attrSeek != nil {
+			attrBuf = make([]byte, entry.AttrSize)
+			if _, err := attrSeek.ReadAt(attrBuf, int64(entry.AttrOffset)); err != nil {
+				return err
+			}
+		} else {
+			attrStart := int(entry.AttrOffset)
+			attrEnd := attrStart + int(entry.AttrSize)
+			if attrEnd > len(attrData) {
+				return ErrInvalidEntry
+			}
+			attrBuf = attrData[attrStart:attrEnd]
+		}
+
+		attrs, err := chunk.DecodeWithDict(attrBuf, dict)
+		if err != nil {
+			return err
+		}
+
+		if !fn(entry.WriteTS, attrs) {
+			return nil
+		}
+	}
+	return nil
+}
+
+// scanAttrsActive iterates all records in the active (unsealed) chunk using
+// stdio reads of idx.log and attr.log, skipping raw.log. Loads the dict from
+// disk to avoid racing with concurrent Append calls on the live dict.
+func scanAttrsActive(idxPath, attrPath, dictPath string, startPos uint64, fn func(writeTS time.Time, attrs chunk.Attributes) bool) error {
+	dict, err := loadDict(dictPath)
+	if err != nil {
+		return err
+	}
+
+	idxFile, err := os.Open(filepath.Clean(idxPath))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = idxFile.Close() }()
+
+	idxInfo, err := idxFile.Stat()
+	if err != nil {
+		return err
+	}
+	recordCount := RecordCount(idxInfo.Size())
+	if recordCount == 0 {
+		return nil
+	}
+
+	attrFile, err := os.Open(filepath.Clean(attrPath))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = attrFile.Close() }()
+
+	var entryBuf [IdxEntrySize]byte
+	for i := startPos; i < recordCount; i++ {
+		if _, err := idxFile.ReadAt(entryBuf[:], IdxFileOffset(i)); err != nil {
+			return err
+		}
+		entry := DecodeIdxEntry(entryBuf[:])
+
+		attrOffset := int64(format.HeaderSize) + int64(entry.AttrOffset)
+		attrBuf := make([]byte, entry.AttrSize)
+		if _, err := attrFile.ReadAt(attrBuf, attrOffset); err != nil {
+			return err
+		}
+
+		attrs, err := chunk.DecodeWithDict(attrBuf, dict)
+		if err != nil {
+			return err
+		}
+
+		if !fn(entry.WriteTS, attrs) {
+			return nil
+		}
+	}
+	return nil
+}
 
 func openDataFile(path string) (data []byte, mmapRegion []byte, file *os.File, seek seekable.Reader, err error) {
 	compressed, err := isCompressed(path)

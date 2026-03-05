@@ -485,6 +485,35 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	return newStdioCursor(id, rawPath, idxPath, attrPath, dictPath)
 }
 
+// ScanAttrs iterates all records in a chunk reading only idx.log + attr.log,
+// skipping raw.log entirely. This enables O(~88 bytes/record) scans for
+// aggregation queries that never inspect message bodies.
+func (m *Manager) ScanAttrs(id chunk.ChunkID, startPos uint64, fn func(writeTS time.Time, attrs chunk.Attributes) bool) error {
+	m.mu.Lock()
+	meta, ok := m.metas[id]
+	if !ok {
+		m.mu.Unlock()
+		return chunk.ErrChunkNotFound
+	}
+
+	m.mu.Unlock()
+
+	idxPath := m.idxLogPath(id)
+	attrPath := m.attrLogPath(id)
+	dictPath := m.dictLogPath(id)
+
+	if meta.sealed {
+		return scanAttrsSealed(idxPath, attrPath, dictPath, startPos, fn)
+	}
+
+	// Active chunk: load dict from disk (not the live in-memory dict)
+	// to avoid racing with concurrent Append calls.
+	return scanAttrsActive(idxPath, attrPath, dictPath, startPos, fn)
+}
+
+// Compile-time check that Manager implements AttrScanner.
+var _ chunk.AttrScanner = (*Manager)(nil)
+
 func (m *Manager) loadExisting() error {
 	entries, err := os.ReadDir(m.cfg.Dir)
 	if err != nil {

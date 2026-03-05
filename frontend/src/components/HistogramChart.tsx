@@ -93,6 +93,7 @@ export function HistogramChart({
   dark,
   barHeight: barHeightProp,
   showHeader = true,
+  truncated = false,
   onBrushSelect,
   onPan,
   onSegmentClick,
@@ -101,6 +102,7 @@ export function HistogramChart({
   dark: boolean;
   barHeight?: number;
   showHeader?: boolean;
+  truncated?: boolean;
   onBrushSelect?: (start: Date, end: Date) => void;
   onPan?: (start: Date, end: Date) => void;
   onSegmentClick?: (level: string) => void;
@@ -499,8 +501,9 @@ export function HistogramChart({
           </div>
           <span
             className={`font-mono text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}
+            title={truncated ? "Approximate — scan limit reached" : undefined}
           >
-            {totalCount.toLocaleString()} records
+            {truncated ? "~" : ""}{totalCount.toLocaleString()} records
           </span>
         </div>
       ) : (

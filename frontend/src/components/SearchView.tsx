@@ -927,6 +927,7 @@ export function SearchView() {
                 <HistogramChart
                   data={histogramData}
                   dark={dark}
+                  truncated={histogramTableResult?.truncated}
                   onBrushSelect={(start, end) => {
                     setRangeStart(start);
                     setRangeEnd(end);
