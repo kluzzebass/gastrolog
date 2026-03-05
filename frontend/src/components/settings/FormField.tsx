@@ -1,5 +1,12 @@
-import { useState } from "react";
+import { createContext, useContext, useId, useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
+
+const FormFieldIdContext = createContext<string | undefined>(undefined);
+
+/** Returns the auto-generated id from the enclosing FormField, if any. */
+export function useFormFieldId() {
+  return useContext(FormFieldIdContext);
+}
 
 interface FormFieldProps {
   label: string;
@@ -14,23 +21,27 @@ export function FormField({
   dark,
   children,
 }: Readonly<FormFieldProps>) {
+  const id = useId();
   const c = useThemeClass(dark);
   return (
-    <div className="flex flex-col gap-1">
-      <label
-        className={`text-[0.8em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}
-      >
-        {label}
-      </label>
-      {children}
-      {description && (
-        <div
-          className={`text-[0.85em] leading-relaxed ${c("text-text-muted", "text-light-text-muted")}`}
+    <FormFieldIdContext.Provider value={id}>
+      <div className="flex flex-col gap-1">
+        <label
+          htmlFor={id}
+          className={`text-[0.8em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}
         >
-          {description}
-        </div>
-      )}
-    </div>
+          {label}
+        </label>
+        {children}
+        {description && (
+          <div
+            className={`text-[0.85em] leading-relaxed ${c("text-text-muted", "text-light-text-muted")}`}
+          >
+            {description}
+          </div>
+        )}
+      </div>
+    </FormFieldIdContext.Provider>
   );
 }
 
@@ -91,10 +102,12 @@ export function TextInput({
   mono,
   examples,
 }: Readonly<TextInputProps>) {
+  const id = useFormFieldId();
   const c = useThemeClass(dark);
   return (
     <>
       <input
+        id={id}
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -127,9 +140,11 @@ export function SelectInput({
   dark,
   disabled,
 }: Readonly<SelectInputProps>) {
+  const id = useFormFieldId();
   const c = useThemeClass(dark);
   return (
     <select
+      id={id}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
@@ -166,10 +181,12 @@ export function NumberInput({
   min,
   examples,
 }: Readonly<NumberInputProps>) {
+  const id = useFormFieldId();
   const c = useThemeClass(dark);
   return (
     <>
       <input
+        id={id}
         type="text"
         inputMode="numeric"
         value={value}
@@ -211,9 +228,11 @@ export function TextArea({
   rows = 4,
   className,
 }: Readonly<TextAreaProps>) {
+  const id = useFormFieldId();
   const c = useThemeClass(dark);
   return (
     <textarea
+      id={id}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
