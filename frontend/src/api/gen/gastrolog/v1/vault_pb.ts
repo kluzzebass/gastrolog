@@ -1598,6 +1598,14 @@ export class ExportRecord extends Message<ExportRecord> {
    */
   pos = protoInt64.zero;
 
+  /**
+   * Original write timestamp. Populated during cross-node migration to
+   * preserve chunk ordering on the destination node.
+   *
+   * @generated from field: google.protobuf.Timestamp write_ts = 8;
+   */
+  writeTs?: Timestamp;
+
   constructor(data?: PartialMessage<ExportRecord>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1613,6 +1621,7 @@ export class ExportRecord extends Message<ExportRecord> {
     { no: 5, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 6, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 7, name: "pos", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 8, name: "write_ts", kind: "message", T: Timestamp },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ExportRecord {

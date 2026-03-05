@@ -110,7 +110,7 @@ func (o *Orchestrator) scheduleCompression(registryKey uuid.UUID, chunkID chunk.
 // The IndexManager handles deduplication of concurrent builds for the same chunk.
 func (o *Orchestrator) scheduleIndexBuild(registryKey uuid.UUID, chunkID chunk.ChunkID) {
 	vault := o.vaults[registryKey]
-	if vault == nil {
+	if vault == nil || vault.Indexes == nil {
 		return
 	}
 

@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -384,6 +385,80 @@ func (m *Manager) CheckRotation() *string {
 		return nil
 	}
 	return trigger
+}
+
+// ImportRecords creates a new sealed chunk by consuming records from the
+// iterator, preserving each record's WriteTS. The new chunk is independent
+// of the active chunk.
+func (m *Manager) ImportRecords(next chunk.RecordIterator) (chunk.ChunkMeta, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	id := chunk.NewChunkID()
+	state := &chunkState{
+		meta: chunk.ChunkMeta{
+			ID:     id,
+			Sealed: true,
+		},
+		createdAt: m.cfg.Now(),
+	}
+
+	for {
+		rec, iterErr := next()
+		if errors.Is(iterErr, chunk.ErrNoMoreRecords) {
+			break
+		}
+		if iterErr != nil {
+			return chunk.ChunkMeta{}, iterErr
+		}
+
+		if rec.WriteTS.IsZero() {
+			return chunk.ChunkMeta{}, chunk.ErrMissingWriteTS
+		}
+		state.records = append(state.records, rec)
+
+		recBytes := int64(len(rec.Raw))
+		for k, v := range rec.Attrs {
+			recBytes += int64(len(k) + len(v))
+		}
+		state.size += recBytes
+
+		// Track StartTS/EndTS (WriteTS is monotonically non-decreasing).
+		if state.meta.StartTS.IsZero() {
+			state.meta.StartTS = rec.WriteTS
+		}
+		state.meta.EndTS = rec.WriteTS
+
+		// Compute IngestTS and SourceTS bounds inline.
+		if state.meta.IngestStart.IsZero() || rec.IngestTS.Before(state.meta.IngestStart) {
+			state.meta.IngestStart = rec.IngestTS
+		}
+		if state.meta.IngestEnd.IsZero() || rec.IngestTS.After(state.meta.IngestEnd) {
+			state.meta.IngestEnd = rec.IngestTS
+		}
+		if !rec.SourceTS.IsZero() {
+			if state.meta.SourceStart.IsZero() || rec.SourceTS.Before(state.meta.SourceStart) {
+				state.meta.SourceStart = rec.SourceTS
+			}
+			if state.meta.SourceEnd.IsZero() || rec.SourceTS.After(state.meta.SourceEnd) {
+				state.meta.SourceEnd = rec.SourceTS
+			}
+		}
+	}
+
+	if len(state.records) == 0 {
+		return chunk.ChunkMeta{}, nil
+	}
+
+	state.meta.RecordCount = int64(len(state.records))
+	state.meta.Bytes = state.size
+
+	if err := m.cfg.MetaStore.Save(state.meta); err != nil {
+		return chunk.ChunkMeta{}, err
+	}
+	m.chunks = append(m.chunks, state)
+
+	return state.meta, nil
 }
 
 // Close releases resources. For memory manager, this clears internal state.

@@ -55,6 +55,14 @@ type RecordForwarder interface {
 	Forward(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error
 }
 
+// RemoteTransferrer sends records to a remote node for cross-node chunk
+// migration. Unlike RecordForwarder (fire-and-forget for ingestion), this
+// is synchronous and reliable — the caller blocks until the remote node
+// confirms the records have been imported as a sealed chunk.
+type RemoteTransferrer interface {
+	TransferRecords(ctx context.Context, nodeID string, vaultID uuid.UUID, next chunk.RecordIterator) error
+}
+
 // Orchestrator coordinates ingestion, indexing, and querying.
 // It filters records to chunk managers, observes seal events to trigger
 // index builds, and delegates queries to query engines.
@@ -106,6 +114,9 @@ type Orchestrator struct {
 
 	// Record forwarder for cross-node delivery (nil in single-node mode).
 	forwarder RecordForwarder
+
+	// Remote transferrer for cross-node chunk migration (nil in single-node mode).
+	transferrer RemoteTransferrer
 
 	// Ingest channel and lifecycle.
 	ingestCh   chan IngestMessage
@@ -224,6 +235,12 @@ func New(cfg Config) (*Orchestrator, error) {
 // Must be called before Start(). Safe to leave nil for single-node mode.
 func (o *Orchestrator) SetRecordForwarder(f RecordForwarder) {
 	o.forwarder = f
+}
+
+// SetRemoteTransferrer injects the cross-node chunk transferrer.
+// Must be called before Start(). Safe to leave nil for single-node mode.
+func (o *Orchestrator) SetRemoteTransferrer(t RemoteTransferrer) {
+	o.transferrer = t
 }
 
 // Logger returns a child logger scoped for a subcomponent.

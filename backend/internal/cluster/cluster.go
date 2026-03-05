@@ -35,6 +35,10 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// maxChunkTransferBytes is the max gRPC receive message size for the cluster
+// port. Covers the unary ForwardRecords batch ingestion RPC.
+const maxChunkTransferBytes = 128 * 1024 * 1024 // 128 MB
+
 // Config holds cluster server configuration.
 type Config struct {
 	// ClusterAddr is the listen address for the cluster gRPC port (e.g., ":4566").
@@ -90,6 +94,10 @@ type Server struct {
 	// recordAppender writes forwarded records into local vaults.
 	// Set after the orchestrator is created, before forwarding starts.
 	recordAppender RecordAppender
+
+	// recordImporter imports records as a sealed chunk in a local vault.
+	// Set after the orchestrator is created, before chunk transfer starts.
+	recordImporter RecordImporter
 
 	// searchExecutor runs a search on a local vault for remote search requests.
 	// Set after the orchestrator is created, before search forwarding starts.
@@ -258,6 +266,7 @@ func (s *Server) SetNodeSuffrageFn(fn func(ctx context.Context, nodeID, nodeAddr
 // The listener was already bound in New().
 func (s *Server) Start() error {
 	var opts []grpc.ServerOption
+	opts = append(opts, grpc.MaxRecvMsgSize(maxChunkTransferBytes))
 
 	if s.cfg.TLS != nil {
 		tlsCfg := s.cfg.TLS.ServerTLSConfig()

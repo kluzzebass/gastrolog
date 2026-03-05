@@ -2,6 +2,8 @@ package cluster
 
 import (
 	"context"
+	"errors"
+	"io"
 	"maps"
 
 	"gastrolog/internal/chunk"
@@ -36,10 +38,20 @@ type GetIndexesExecutor func(ctx context.Context, vaultID uuid.UUID, chunkID chu
 // ValidateVaultExecutor validates a local vault and returns the result.
 type ValidateVaultExecutor func(ctx context.Context, vaultID uuid.UUID) (*gastrologv1.ValidateVaultResponse, error)
 
+// RecordImporter imports records as a new sealed chunk in a vault.
+// Used by the ForwardImportRecords handler for cross-node chunk migration.
+type RecordImporter func(ctx context.Context, vaultID uuid.UUID, next chunk.RecordIterator) error
+
 // SetRecordAppender injects the callback for writing forwarded records.
 // Must be called before the cluster server receives ForwardRecords RPCs.
 func (s *Server) SetRecordAppender(fn RecordAppender) {
 	s.recordAppender = fn
+}
+
+// SetRecordImporter injects the callback for importing transferred records.
+// Must be called before ForwardImportRecords RPCs.
+func (s *Server) SetRecordImporter(fn RecordImporter) {
+	s.recordImporter = fn
 }
 
 // SetSearchExecutor injects the callback for handling remote search requests.
@@ -101,6 +113,77 @@ func (s *Server) forwardRecords(ctx context.Context, req *gastrologv1.ForwardRec
 	}
 
 	return &gastrologv1.ForwardRecordsResponse{RecordsWritten: written}, nil
+}
+
+// exportRecordToChunk converts a proto ExportRecord to a chunk.Record.
+func exportRecordToChunk(er *gastrologv1.ExportRecord) chunk.Record {
+	rec := chunk.Record{Raw: er.GetRaw()}
+	if er.GetSourceTs() != nil {
+		rec.SourceTS = er.GetSourceTs().AsTime()
+	}
+	if er.GetIngestTs() != nil {
+		rec.IngestTS = er.GetIngestTs().AsTime()
+	}
+	if er.GetWriteTs() != nil {
+		rec.WriteTS = er.GetWriteTs().AsTime()
+	}
+	if len(er.GetAttrs()) > 0 {
+		rec.Attrs = make(chunk.Attributes, len(er.GetAttrs()))
+		maps.Copy(rec.Attrs, er.GetAttrs())
+	}
+	return rec
+}
+
+// forwardImportRecordsStreamHandler handles the client-streaming
+// ForwardImportRecords RPC. Each message carries a single record; the server
+// wraps the stream as a RecordIterator and feeds it into ImportRecords so at
+// most one ExportRecord lives in memory at a time.
+func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error {
+	s := srv.(*Server)
+	if s.recordImporter == nil {
+		return status.Error(codes.Unavailable, "record importer not configured")
+	}
+
+	// Read first message to get vault_id.
+	first := &gastrologv1.ImportRecordMessage{}
+	if err := stream.RecvMsg(first); err != nil {
+		if errors.Is(err, io.EOF) {
+			// Empty stream — send zero-record response.
+			return stream.SendMsg(&gastrologv1.ForwardRecordsResponse{})
+		}
+		return status.Errorf(codes.InvalidArgument, "receive first message: %v", err)
+	}
+	vaultID, err := uuid.Parse(first.GetVaultId())
+	if err != nil {
+		return status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+	}
+
+	// Build iterator: yields first record, then reads from stream.
+	var count int64
+	firstConsumed := false
+	next := chunk.RecordIterator(func() (chunk.Record, error) {
+		var msg *gastrologv1.ImportRecordMessage
+		if !firstConsumed {
+			msg = first
+			firstConsumed = true
+		} else {
+			msg = &gastrologv1.ImportRecordMessage{}
+			if err := stream.RecvMsg(msg); err != nil {
+				if errors.Is(err, io.EOF) {
+					return chunk.Record{}, chunk.ErrNoMoreRecords
+				}
+				return chunk.Record{}, err
+			}
+		}
+		count++
+		return exportRecordToChunk(msg.GetRecord()), nil
+	})
+
+	if err := s.recordImporter(stream.Context(), vaultID, next); err != nil {
+		return status.Errorf(codes.Internal, "import records: %v", err)
+	}
+
+	return stream.SendMsg(&gastrologv1.ForwardRecordsResponse{RecordsWritten: count})
 }
 
 // forwardSearch handles the ForwardSearch RPC. Executes a search on a local
@@ -344,6 +427,13 @@ var clusterServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ForwardSetNodeSuffrage",
 			Handler:    forwardSetNodeSuffrageHandler,
+		},
+	},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "ForwardImportRecords",
+			Handler:       forwardImportRecordsStreamHandler,
+			ClientStreams: true,
 		},
 	},
 }

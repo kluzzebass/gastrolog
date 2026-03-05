@@ -256,6 +256,10 @@ message ExportRecord {
   string vault_id = 5;
   string chunk_id = 6;
   uint64 pos = 7;
+
+  // Original write timestamp. Populated during cross-node migration to
+  // preserve chunk ordering on the destination node.
+  google.protobuf.Timestamp write_ts = 8;
 }
 
 // ImportRecords appends a batch of records to a vault.

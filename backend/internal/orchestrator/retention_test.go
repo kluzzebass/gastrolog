@@ -49,6 +49,7 @@ func (f *retentionFakeChunkManager) ReadWriteTimestamps(id chunk.ChunkID, positi
 }
 func (f *retentionFakeChunkManager) SetRotationPolicy(policy chunk.RotationPolicy) {}
 func (f *retentionFakeChunkManager) CheckRotation() *string                        { return nil }
+func (f *retentionFakeChunkManager) ImportRecords(chunk.RecordIterator) (chunk.ChunkMeta, error) { return chunk.ChunkMeta{}, nil }
 func (f *retentionFakeChunkManager) Close() error                                  { return nil }
 
 // ---------- fake index manager ----------

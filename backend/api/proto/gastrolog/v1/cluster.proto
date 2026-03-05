@@ -203,3 +203,10 @@ message ForwardSetNodeSuffrageRequest {
 }
 
 message ForwardSetNodeSuffrageResponse {}
+
+// ImportRecordMessage carries a single record for client-streaming import.
+// vault_id is set on every message; the server validates consistency.
+message ImportRecordMessage {
+  string vault_id = 1;
+  ExportRecord record = 2;
+}

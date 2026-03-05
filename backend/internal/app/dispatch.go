@@ -98,6 +98,12 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id uuid.UUID) {
 	}
 
 	if vaultCfg.NodeID != "" && vaultCfg.NodeID != d.localNodeID {
+		// Vault reassigned from local to remote — warn but don't act.
+		// Automated migration on reassignment is a future enhancement.
+		if slices.Contains(d.orch.ListVaults(), id) {
+			d.logger.Warn("dispatch: vault reassigned to remote node, local data remains until retention migrates it",
+				"vault", id, "name", vaultCfg.Name, "node", vaultCfg.NodeID)
+		}
 		return
 	}
 

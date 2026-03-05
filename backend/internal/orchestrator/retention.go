@@ -35,8 +35,9 @@ type retentionRunner struct {
 	vaultID  uuid.UUID
 	cm       chunk.ChunkManager
 	im       index.IndexManager
-	rules []retentionRule
-	orch     *Orchestrator // for MoveChunk on migrate action
+	rules    []retentionRule
+	inflight map[chunk.ChunkID]bool // chunks currently being processed
+	orch     *Orchestrator          // for MoveChunk on migrate action
 	now      func() time.Time
 	logger   *slog.Logger
 }
@@ -52,6 +53,9 @@ func (r *retentionRunner) setRules(rules []retentionRule) {
 func (r *retentionRunner) sweep() {
 	r.mu.Lock()
 	rules := r.rules
+	if r.inflight == nil {
+		r.inflight = make(map[chunk.ChunkID]bool)
+	}
 	r.mu.Unlock()
 
 	if len(rules) == 0 {
@@ -96,16 +100,35 @@ func (r *retentionRunner) sweep() {
 			}
 			processed[id] = true
 
-			switch b.action {
-			case config.RetentionActionExpire:
-				r.expireChunk(id)
-			case config.RetentionActionMigrate:
-				r.migrateChunk(id, b.destination)
-			default:
-				r.logger.Error("retention: unknown action", "vault", r.vaultID, "action", b.action)
+			// Skip chunks already being processed by an overlapping sweep.
+			r.mu.Lock()
+			if r.inflight[id] {
+				r.mu.Unlock()
+				continue
 			}
+			r.inflight[id] = true
+			r.mu.Unlock()
+
+			func() {
+				defer r.clearInflight(id)
+				switch b.action {
+				case config.RetentionActionExpire:
+					r.expireChunk(id)
+				case config.RetentionActionMigrate:
+					r.migrateChunk(id, b.destination)
+				default:
+					r.logger.Error("retention: unknown action", "vault", r.vaultID, "action", b.action)
+				}
+			}()
 		}
 	}
+}
+
+// clearInflight removes a chunk from the in-flight set.
+func (r *retentionRunner) clearInflight(id chunk.ChunkID) {
+	r.mu.Lock()
+	delete(r.inflight, id)
+	r.mu.Unlock()
 }
 
 // expireChunk deletes a chunk's indexes then data.

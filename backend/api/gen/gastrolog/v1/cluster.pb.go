@@ -1697,6 +1697,60 @@ func (*ForwardSetNodeSuffrageResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{27}
 }
 
+// ImportRecordMessage carries a single record for client-streaming import.
+// vault_id is set on every message; the server validates consistency.
+type ImportRecordMessage struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	VaultId       string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	Record        *ExportRecord          `protobuf:"bytes,2,opt,name=record,proto3" json:"record,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ImportRecordMessage) Reset() {
+	*x = ImportRecordMessage{}
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ImportRecordMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ImportRecordMessage) ProtoMessage() {}
+
+func (x *ImportRecordMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_cluster_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ImportRecordMessage.ProtoReflect.Descriptor instead.
+func (*ImportRecordMessage) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *ImportRecordMessage) GetVaultId() string {
+	if x != nil {
+		return x.VaultId
+	}
+	return ""
+}
+
+func (x *ImportRecordMessage) GetRecord() *ExportRecord {
+	if x != nil {
+		return x.Record
+	}
+	return nil
+}
+
 var File_gastrolog_v1_cluster_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_cluster_proto_rawDesc = "" +
@@ -1814,7 +1868,10 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1b\n" +
 	"\tnode_addr\x18\x02 \x01(\tR\bnodeAddr\x12\x14\n" +
 	"\x05voter\x18\x03 \x01(\bR\x05voter\" \n" +
-	"\x1eForwardSetNodeSuffrageResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"\x1eForwardSetNodeSuffrageResponse\"d\n" +
+	"\x13ImportRecordMessage\x12\x19\n" +
+	"\bvault_id\x18\x01 \x01(\tR\avaultId\x122\n" +
+	"\x06record\x18\x02 \x01(\v2\x1a.gastrolog.v1.ExportRecordR\x06recordB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_cluster_proto_rawDescOnce sync.Once
@@ -1828,7 +1885,7 @@ func file_gastrolog_v1_cluster_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_cluster_proto_rawDescData
 }
 
-var file_gastrolog_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
+var file_gastrolog_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
 var file_gastrolog_v1_cluster_proto_goTypes = []any{
 	(*ForwardApplyRequest)(nil),            // 0: gastrolog.v1.ForwardApplyRequest
 	(*ForwardApplyResponse)(nil),           // 1: gastrolog.v1.ForwardApplyResponse
@@ -1858,35 +1915,37 @@ var file_gastrolog_v1_cluster_proto_goTypes = []any{
 	(*ForwardRemoveNodeResponse)(nil),      // 25: gastrolog.v1.ForwardRemoveNodeResponse
 	(*ForwardSetNodeSuffrageRequest)(nil),  // 26: gastrolog.v1.ForwardSetNodeSuffrageRequest
 	(*ForwardSetNodeSuffrageResponse)(nil), // 27: gastrolog.v1.ForwardSetNodeSuffrageResponse
-	(*timestamppb.Timestamp)(nil),          // 28: google.protobuf.Timestamp
-	(*Job)(nil),                            // 29: gastrolog.v1.Job
-	(*VaultStats)(nil),                     // 30: gastrolog.v1.VaultStats
-	(*ExportRecord)(nil),                   // 31: gastrolog.v1.ExportRecord
-	(*ChunkMeta)(nil),                      // 32: gastrolog.v1.ChunkMeta
-	(*IndexInfo)(nil),                      // 33: gastrolog.v1.IndexInfo
-	(*ChunkValidation)(nil),                // 34: gastrolog.v1.ChunkValidation
+	(*ImportRecordMessage)(nil),            // 28: gastrolog.v1.ImportRecordMessage
+	(*timestamppb.Timestamp)(nil),          // 29: google.protobuf.Timestamp
+	(*Job)(nil),                            // 30: gastrolog.v1.Job
+	(*VaultStats)(nil),                     // 31: gastrolog.v1.VaultStats
+	(*ExportRecord)(nil),                   // 32: gastrolog.v1.ExportRecord
+	(*ChunkMeta)(nil),                      // 33: gastrolog.v1.ChunkMeta
+	(*IndexInfo)(nil),                      // 34: gastrolog.v1.IndexInfo
+	(*ChunkValidation)(nil),                // 35: gastrolog.v1.ChunkValidation
 }
 var file_gastrolog_v1_cluster_proto_depIdxs = []int32{
 	6,  // 0: gastrolog.v1.BroadcastRequest.message:type_name -> gastrolog.v1.BroadcastMessage
-	28, // 1: gastrolog.v1.BroadcastMessage.timestamp:type_name -> google.protobuf.Timestamp
+	29, // 1: gastrolog.v1.BroadcastMessage.timestamp:type_name -> google.protobuf.Timestamp
 	8,  // 2: gastrolog.v1.BroadcastMessage.node_stats:type_name -> gastrolog.v1.NodeStats
 	7,  // 3: gastrolog.v1.BroadcastMessage.node_jobs:type_name -> gastrolog.v1.NodeJobs
-	29, // 4: gastrolog.v1.NodeJobs.jobs:type_name -> gastrolog.v1.Job
-	30, // 5: gastrolog.v1.NodeStats.vaults:type_name -> gastrolog.v1.VaultStats
+	30, // 4: gastrolog.v1.NodeJobs.jobs:type_name -> gastrolog.v1.Job
+	31, // 5: gastrolog.v1.NodeStats.vaults:type_name -> gastrolog.v1.VaultStats
 	9,  // 6: gastrolog.v1.NodeStats.ingesters:type_name -> gastrolog.v1.IngesterNodeStats
-	31, // 7: gastrolog.v1.ForwardRecordsRequest.records:type_name -> gastrolog.v1.ExportRecord
-	31, // 8: gastrolog.v1.ForwardSearchResponse.records:type_name -> gastrolog.v1.ExportRecord
-	31, // 9: gastrolog.v1.ForwardGetContextResponse.before:type_name -> gastrolog.v1.ExportRecord
-	31, // 10: gastrolog.v1.ForwardGetContextResponse.anchor:type_name -> gastrolog.v1.ExportRecord
-	31, // 11: gastrolog.v1.ForwardGetContextResponse.after:type_name -> gastrolog.v1.ExportRecord
-	32, // 12: gastrolog.v1.ForwardListChunksResponse.chunks:type_name -> gastrolog.v1.ChunkMeta
-	33, // 13: gastrolog.v1.ForwardGetIndexesResponse.indexes:type_name -> gastrolog.v1.IndexInfo
-	34, // 14: gastrolog.v1.ForwardValidateVaultResponse.chunks:type_name -> gastrolog.v1.ChunkValidation
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	32, // 7: gastrolog.v1.ForwardRecordsRequest.records:type_name -> gastrolog.v1.ExportRecord
+	32, // 8: gastrolog.v1.ForwardSearchResponse.records:type_name -> gastrolog.v1.ExportRecord
+	32, // 9: gastrolog.v1.ForwardGetContextResponse.before:type_name -> gastrolog.v1.ExportRecord
+	32, // 10: gastrolog.v1.ForwardGetContextResponse.anchor:type_name -> gastrolog.v1.ExportRecord
+	32, // 11: gastrolog.v1.ForwardGetContextResponse.after:type_name -> gastrolog.v1.ExportRecord
+	33, // 12: gastrolog.v1.ForwardListChunksResponse.chunks:type_name -> gastrolog.v1.ChunkMeta
+	34, // 13: gastrolog.v1.ForwardGetIndexesResponse.indexes:type_name -> gastrolog.v1.IndexInfo
+	35, // 14: gastrolog.v1.ForwardValidateVaultResponse.chunks:type_name -> gastrolog.v1.ChunkValidation
+	32, // 15: gastrolog.v1.ImportRecordMessage.record:type_name -> gastrolog.v1.ExportRecord
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_cluster_proto_init() }
@@ -1906,7 +1965,7 @@ func file_gastrolog_v1_cluster_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_cluster_proto_rawDesc), len(file_gastrolog_v1_cluster_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   28,
+			NumMessages:   29,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

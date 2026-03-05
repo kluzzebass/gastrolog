@@ -1390,3 +1390,49 @@ export class ForwardSetNodeSuffrageResponse extends Message<ForwardSetNodeSuffra
   }
 }
 
+/**
+ * ImportRecordMessage carries a single record for client-streaming import.
+ * vault_id is set on every message; the server validates consistency.
+ *
+ * @generated from message gastrolog.v1.ImportRecordMessage
+ */
+export class ImportRecordMessage extends Message<ImportRecordMessage> {
+  /**
+   * @generated from field: string vault_id = 1;
+   */
+  vaultId = "";
+
+  /**
+   * @generated from field: gastrolog.v1.ExportRecord record = 2;
+   */
+  record?: ExportRecord;
+
+  constructor(data?: PartialMessage<ImportRecordMessage>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ImportRecordMessage";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "record", kind: "message", T: ExportRecord },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ImportRecordMessage {
+    return new ImportRecordMessage().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ImportRecordMessage {
+    return new ImportRecordMessage().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ImportRecordMessage {
+    return new ImportRecordMessage().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ImportRecordMessage | PlainMessage<ImportRecordMessage> | undefined, b: ImportRecordMessage | PlainMessage<ImportRecordMessage> | undefined): boolean {
+    return proto3.util.equals(ImportRecordMessage, a, b);
+  }
+}
+

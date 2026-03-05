@@ -16,54 +16,136 @@ import (
 
 // MoveChunk moves a single sealed chunk from source to destination vault.
 // Used by retention-triggered migration to move individual chunks.
-// Supports both filesystem-level moves (ChunkMover) and record-level copy.
+// Supports filesystem-level moves (local), record-level import (local), and
+// cross-node transfer (remote destination via RemoteTransferrer).
 func (o *Orchestrator) MoveChunk(ctx context.Context, chunkID chunk.ChunkID, srcID, dstID uuid.UUID) error {
 	srcCM, err := o.chunkManager(srcID)
 	if err != nil {
 		return err
 	}
+
+	// Check if the destination vault is on a remote node.
+	dstNodeID, remote, err := o.isRemoteVault(ctx, dstID)
+	if err != nil {
+		return err
+	}
+	if remote {
+		return o.moveChunkRemote(ctx, chunkID, srcID, srcCM, dstID, dstNodeID)
+	}
+
 	dstCM, dstIM, err := o.vaultManagers(dstID)
 	if err != nil {
 		return err
 	}
 
-	// Try filesystem move first.
+	// Try filesystem move first (O(1) rename, only works for file-backed vaults).
 	srcMover, srcOk := srcCM.(chunk.ChunkMover)
 	dstMover, dstOk := dstCM.(chunk.ChunkMover)
 	if srcOk && dstOk {
 		return o.moveChunkFS(ctx, chunkID, srcMover, dstMover, dstIM)
 	}
 
-	// Fallback: copy records for the single chunk.
+	// Fallback: stream records as a new sealed chunk (works for any vault type).
+	cursor, err := srcCM.OpenCursor(chunkID)
+	if err != nil {
+		return fmt.Errorf("open chunk %s: %w", chunkID, err)
+	}
+	defer func() { _ = cursor.Close() }()
+	imported, err := dstCM.ImportRecords(chunk.CursorIterator(cursor))
+	if err != nil {
+		return fmt.Errorf("import records into destination: %w", err)
+	}
+	if dstIM != nil && imported.ID != (chunk.ChunkID{}) {
+		if err := dstIM.BuildIndexes(ctx, imported.ID); err != nil {
+			o.logger.Warn("retention migrate: failed to build indexes for imported chunk",
+				"chunk", imported.ID.String(), "error", err)
+		}
+	}
+
+	// Delete from source after successful import.
+	if err := o.deleteSourceChunk(srcID, srcCM, chunkID); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// moveChunkRemote transfers a sealed chunk to a vault on another node.
+// Reads records from the source chunk and sends them via the RemoteTransferrer.
+// The destination imports them as a new sealed chunk (no mixing with active chunk).
+func (o *Orchestrator) moveChunkRemote(ctx context.Context, chunkID chunk.ChunkID, srcID uuid.UUID, srcCM chunk.ChunkManager, dstID uuid.UUID, dstNodeID string) error {
+	if o.transferrer == nil {
+		return fmt.Errorf("remote vault %s on node %s: no remote transferrer configured (single-node mode)", dstID, dstNodeID)
+	}
+
 	cursor, err := srcCM.OpenCursor(chunkID)
 	if err != nil {
 		return fmt.Errorf("open chunk %s: %w", chunkID, err)
 	}
 	defer func() { _ = cursor.Close() }()
 
-	for {
-		rec, _, readErr := cursor.Next()
-		if errors.Is(readErr, chunk.ErrNoMoreRecords) {
-			break
-		}
-		if readErr != nil {
-			return fmt.Errorf("read chunk %s: %w", chunkID, readErr)
-		}
-		rec = rec.Copy()
-		if _, _, appendErr := dstCM.AppendPreserved(rec); appendErr != nil {
-			return fmt.Errorf("append record: %w", appendErr)
-		}
+	if err := o.transferrer.TransferRecords(ctx, dstNodeID, dstID, chunk.CursorIterator(cursor)); err != nil {
+		return fmt.Errorf("transfer chunk %s to node %s: %w", chunkID, dstNodeID, err)
 	}
 
-	// Delete from source after successful copy.
-	if err := o.vaults[srcID].Indexes.DeleteIndexes(chunkID); err != nil {
-		o.logger.Warn("retention migrate: failed to delete source indexes",
-			"chunk", chunkID.String(), "error", err)
+	// Delete from source after successful transfer.
+	if err := o.deleteSourceChunk(srcID, srcCM, chunkID); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// resolveVaultNode loads config and returns the NodeID for the given vault.
+func (o *Orchestrator) resolveVaultNode(ctx context.Context, vaultID uuid.UUID) (string, error) {
+	if o.cfgLoader == nil {
+		return "", errors.New("config loader not configured")
+	}
+	cfg, err := o.cfgLoader.Load(ctx)
+	if err != nil {
+		return "", fmt.Errorf("load config: %w", err)
+	}
+	for _, v := range cfg.Vaults {
+		if v.ID == vaultID {
+			return v.NodeID, nil
+		}
+	}
+	return "", fmt.Errorf("%w: %s (not in config)", ErrVaultNotFound, vaultID)
+}
+
+// isRemoteVault reports whether a vault lives on another node.
+// Returns the destination node ID and whether it's remote.
+func (o *Orchestrator) isRemoteVault(ctx context.Context, vaultID uuid.UUID) (string, bool, error) {
+	// If the vault is registered locally, it's not remote.
+	if o.VaultExists(vaultID) {
+		return "", false, nil
+	}
+
+	nodeID, err := o.resolveVaultNode(ctx, vaultID)
+	if err != nil {
+		return "", false, err
+	}
+	if nodeID == "" || nodeID == o.localNodeID {
+		// Vault should be local but isn't registered — real ErrVaultNotFound.
+		return "", false, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+	}
+	return nodeID, true, nil
+}
+
+// deleteSourceChunk removes indexes and the chunk from the source vault.
+func (o *Orchestrator) deleteSourceChunk(srcID uuid.UUID, srcCM chunk.ChunkManager, chunkID chunk.ChunkID) error {
+	o.mu.RLock()
+	srcVault := o.vaults[srcID]
+	o.mu.RUnlock()
+	if srcVault != nil && srcVault.Indexes != nil {
+		if err := srcVault.Indexes.DeleteIndexes(chunkID); err != nil {
+			o.logger.Warn("retention migrate: failed to delete source indexes",
+				"chunk", chunkID.String(), "error", err)
+		}
 	}
 	if err := srcCM.Delete(chunkID); err != nil {
 		return fmt.Errorf("delete source chunk %s: %w", chunkID, err)
 	}
-
 	return nil
 }
 

@@ -137,6 +137,31 @@ func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.
 	return cid, pos, nil
 }
 
+// ImportChunkRecords creates a new sealed chunk from the given records in the
+// target vault. Used by the ForwardImportRecords handler to receive cross-node
+// chunk migrations. Works with any ChunkManager type (file or memory).
+// Compression and index builds are scheduled asynchronously via the scheduler.
+func (o *Orchestrator) ImportChunkRecords(ctx context.Context, vaultID uuid.UUID, next chunk.RecordIterator) error {
+	cm, _, err := o.vaultManagers(vaultID)
+	if err != nil {
+		return err
+	}
+
+	meta, err := cm.ImportRecords(next)
+	if err != nil {
+		return fmt.Errorf("import records: %w", err)
+	}
+
+	if meta.ID != (chunk.ChunkID{}) {
+		o.mu.RLock()
+		o.scheduleCompression(vaultID, meta.ID)
+		o.scheduleIndexBuild(vaultID, meta.ID)
+		o.mu.RUnlock()
+	}
+
+	return nil
+}
+
 // SealActive seals the active chunk if it has records. No-op if empty or no active chunk.
 // After sealing, schedules compression and index builds (same as ingest-triggered seal).
 func (o *Orchestrator) SealActive(vaultID uuid.UUID) error {

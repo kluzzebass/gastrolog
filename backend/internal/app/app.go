@@ -237,6 +237,12 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		return err
 	})
 
+	// Wire cross-node chunk migration (retention migrate to remote vaults).
+	chunkTransferrer := cluster.NewChunkTransferrer(peerConns)
+	orch.SetRemoteTransferrer(chunkTransferrer)
+
+	clusterSrv.SetRecordImporter(orch.ImportChunkRecords)
+
 	searchForwarder := cluster.NewSearchForwarder(peerConns)
 	clusterSrv.SetSearchExecutor(newSearchExecutor(orch))
 	clusterSrv.SetContextExecutor(newContextExecutor(orch))

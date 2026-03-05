@@ -1179,6 +1179,202 @@ func (m *Manager) setSealedFlag(file *os.File) error {
 	return file.Sync()
 }
 
+// importFiles holds the four log files needed for a chunk import.
+type importFiles struct {
+	raw, idx, attr, dict *os.File
+	chunkDir             string
+}
+
+// cleanup closes all files and removes the chunk directory.
+func (f *importFiles) cleanup() {
+	_ = f.raw.Close()
+	_ = f.idx.Close()
+	_ = f.attr.Close()
+	_ = f.dict.Close()
+	_ = os.RemoveAll(f.chunkDir)
+}
+
+// openImportFiles creates the chunk directory and all four log files.
+// On failure, any already-created resources are cleaned up.
+func (m *Manager) openImportFiles(id chunk.ChunkID, createdAt time.Time) (*importFiles, error) {
+	dir := m.chunkDir(id)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return nil, err
+	}
+
+	rawFile, err := m.createRawFile(id)
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return nil, err
+	}
+	idxFile, err := m.createIdxFile(id, createdAt)
+	if err != nil {
+		_ = rawFile.Close()
+		_ = os.RemoveAll(dir)
+		return nil, err
+	}
+	attrFile, err := m.createAttrFile(id)
+	if err != nil {
+		_ = rawFile.Close()
+		_ = idxFile.Close()
+		_ = os.RemoveAll(dir)
+		return nil, err
+	}
+	dictFile, err := m.createDictFile(id)
+	if err != nil {
+		_ = rawFile.Close()
+		_ = idxFile.Close()
+		_ = attrFile.Close()
+		_ = os.RemoveAll(dir)
+		return nil, err
+	}
+
+	return &importFiles{
+		raw: rawFile, idx: idxFile, attr: attrFile, dict: dictFile,
+		chunkDir: dir,
+	}, nil
+}
+
+// importState tracks per-record offsets during ImportRecords.
+type importState struct {
+	files     *importFiles
+	dict      *chunk.StringDict
+	meta      *chunkMeta
+	rawOffset uint64
+	attrOffset uint64
+	count     int64
+}
+
+// writeRecord writes a single record to the import files and updates offsets/metadata.
+func (s *importState) writeRecord(rec chunk.Record) error {
+	if rec.WriteTS.IsZero() {
+		return chunk.ErrMissingWriteTS
+	}
+
+	attrBytes, newKeys, err := chunk.EncodeWithDict(rec.Attrs, s.dict)
+	if err != nil {
+		return err
+	}
+
+	for _, key := range newKeys {
+		entry := chunk.EncodeDictEntry(key)
+		if err := writeAll(s.files.dict, entry); err != nil {
+			return err
+		}
+	}
+
+	var idxBuf [IdxEntrySize]byte
+	EncodeIdxEntry(IdxEntry{
+		SourceTS:   rec.SourceTS,
+		IngestTS:   rec.IngestTS,
+		WriteTS:    rec.WriteTS,
+		RawOffset:  uint32(s.rawOffset),  //nolint:gosec // G115: bounded by rotation policy
+		RawSize:    uint32(len(rec.Raw)),  //nolint:gosec // G115: bounded by chunk size
+		AttrOffset: uint32(s.attrOffset), //nolint:gosec // G115: bounded by rotation policy
+		AttrSize:   uint16(len(attrBytes)), //nolint:gosec // G115: bounded by attr encoding
+	}, idxBuf[:])
+
+	rawPos := int64(format.HeaderSize) + int64(s.rawOffset)  //nolint:gosec // G115: bounded by rotation policy
+	attrPos := int64(format.HeaderSize) + int64(s.attrOffset) //nolint:gosec // G115: bounded by rotation policy
+	idxPos := int64(IdxHeaderSize) + s.count*int64(IdxEntrySize)
+
+	if _, err := s.files.raw.WriteAt(rec.Raw, rawPos); err != nil {
+		return fmt.Errorf("write raw record %d: %w", s.count, err)
+	}
+	if _, err := s.files.attr.WriteAt(attrBytes, attrPos); err != nil {
+		return fmt.Errorf("write attr record %d: %w", s.count, err)
+	}
+	if _, err := s.files.idx.WriteAt(idxBuf[:], idxPos); err != nil {
+		return fmt.Errorf("write idx record %d: %w", s.count, err)
+	}
+
+	s.rawOffset += uint64(len(rec.Raw))
+	s.attrOffset += uint64(len(attrBytes))
+	s.count++
+
+	if s.meta.startTS.IsZero() {
+		s.meta.startTS = rec.WriteTS
+	}
+	s.meta.endTS = rec.WriteTS
+	expandBounds(&s.meta.ingestStart, &s.meta.ingestEnd, rec.IngestTS)
+	if !rec.SourceTS.IsZero() {
+		expandBounds(&s.meta.sourceStart, &s.meta.sourceEnd, rec.SourceTS)
+	}
+	return nil
+}
+
+// ImportRecords creates a new sealed chunk by consuming records from the
+// iterator, preserving each record's WriteTS. The records are written to a new
+// chunk directory separate from the active chunk; concurrent Append calls are
+// not affected.
+func (m *Manager) ImportRecords(next chunk.RecordIterator) (chunk.ChunkMeta, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.closed {
+		return chunk.ChunkMeta{}, ErrManagerClosed
+	}
+
+	id := chunk.NewChunkID()
+	files, err := m.openImportFiles(id, m.cfg.Now())
+	if err != nil {
+		return chunk.ChunkMeta{}, err
+	}
+
+	s := &importState{
+		files: files,
+		dict:  chunk.NewStringDict(),
+		meta:  &chunkMeta{id: id},
+	}
+
+	for {
+		rec, iterErr := next()
+		if errors.Is(iterErr, chunk.ErrNoMoreRecords) {
+			break
+		}
+		if iterErr != nil {
+			files.cleanup()
+			return chunk.ChunkMeta{}, iterErr
+		}
+		if err := s.writeRecord(rec); err != nil {
+			files.cleanup()
+			return chunk.ChunkMeta{}, err
+		}
+	}
+
+	if s.count == 0 {
+		files.cleanup()
+		return chunk.ChunkMeta{}, nil
+	}
+
+	s.meta.recordCount = s.count
+	dataBytes := int64(s.rawOffset + s.attrOffset + uint64(s.count)*IdxEntrySize) //nolint:gosec // G115: count is always non-negative
+	s.meta.logicalDataBytes = dataBytes
+
+	// Seal the files.
+	for _, f := range []*os.File{files.raw, files.idx, files.attr, files.dict} {
+		if err := m.setSealedFlag(f); err != nil {
+			files.cleanup()
+			return chunk.ChunkMeta{}, err
+		}
+	}
+
+	// Close files.
+	for _, f := range []*os.File{files.raw, files.idx, files.attr, files.dict} {
+		if err := f.Close(); err != nil {
+			_ = os.RemoveAll(files.chunkDir)
+			return chunk.ChunkMeta{}, err
+		}
+	}
+
+	s.meta.sealed = true
+	s.meta.bytes = m.computeTotalLogicalBytes(id, s.meta.logicalDataBytes)
+	s.meta.diskBytes = m.computeDiskBytes(id)
+
+	m.metas[id] = s.meta
+	return s.meta.toChunkMeta(), nil
+}
+
 // Close closes the active chunk files without sealing.
 // The manager should not be used after Close is called.
 func (m *Manager) Close() error {

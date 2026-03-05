@@ -281,4 +281,5 @@ func (n *noopChunkManager) FindStartPosition(chunk.ChunkID, time.Time) (uint64, 
 func (n *noopChunkManager) ReadWriteTimestamps(chunk.ChunkID, []uint64) ([]time.Time, error)   { return nil, nil }
 func (n *noopChunkManager) SetRotationPolicy(chunk.RotationPolicy)                             {}
 func (n *noopChunkManager) CheckRotation() *string                                             { return nil }
+func (n *noopChunkManager) ImportRecords(chunk.RecordIterator) (chunk.ChunkMeta, error)        { return chunk.ChunkMeta{}, nil }
 func (n *noopChunkManager) Close() error                                                       { return nil }

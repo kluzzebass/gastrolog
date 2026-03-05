@@ -64,6 +64,13 @@ type ChunkManager interface {
 	// occurred, nil otherwise. Safe to call from background sweeps.
 	CheckRotation() *string
 
+	// ImportRecords creates a new sealed chunk by consuming records from the
+	// iterator, preserving each record's WriteTS. All records must have non-zero
+	// WriteTS values with monotonically non-decreasing order. The new chunk is
+	// independent of the active chunk; concurrent Append calls are not affected.
+	// Returns the metadata of the newly created sealed chunk.
+	ImportRecords(next RecordIterator) (ChunkMeta, error)
+
 	// Close releases resources held by the manager (file locks, mmap regions, etc).
 	// After Close, the manager must not be used.
 	Close() error
@@ -120,6 +127,32 @@ type RecordCursor interface {
 	Prev() (Record, RecordRef, error)
 	Seek(ref RecordRef) error
 	Close() error
+}
+
+// RecordIterator yields records one at a time. Returns ErrNoMoreRecords when
+// exhausted. Records are valid at least until the next call. Callers that
+// store records beyond the next call must Copy() them.
+type RecordIterator func() (Record, error)
+
+// CursorIterator adapts a RecordCursor into a RecordIterator.
+func CursorIterator(c RecordCursor) RecordIterator {
+	return func() (Record, error) {
+		rec, _, err := c.Next()
+		return rec, err
+	}
+}
+
+// SliceIterator adapts a []Record into a RecordIterator.
+func SliceIterator(records []Record) RecordIterator {
+	i := 0
+	return func() (Record, error) {
+		if i >= len(records) {
+			return Record{}, ErrNoMoreRecords
+		}
+		rec := records[i]
+		i++
+		return rec, nil
+	}
 }
 
 // MetaStore persists chunk metadata.
