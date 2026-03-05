@@ -697,7 +697,7 @@ func (s *QueryServer) readAnchor(ctx context.Context, vaultID uuid.UUID, chunkID
 	eng := s.orch.MultiVaultQueryEngine()
 	anchor, err := eng.ReadRecord(ctx, vaultID, chunkID, pos)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read anchor vault=%s chunk=%s pos=%d: %w", vaultID, chunkID, pos, err)
 	}
 	return recordToProto(anchor), nil
 }
@@ -1161,7 +1161,7 @@ func protoToResumeToken(data []byte) (*query.ResumeToken, error) {
 	// Decode proto message
 	var protoToken apiv1.ResumeToken
 	if err := proto.Unmarshal(data, &protoToken); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unmarshal resume token: %w", err)
 	}
 
 	// Convert to internal type

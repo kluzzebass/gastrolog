@@ -173,14 +173,14 @@ func NewManager(cfg Config) (*Manager, error) {
 	}
 
 	if err := os.MkdirAll(cfg.Dir, 0o750); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create vault dir %s: %w", cfg.Dir, err)
 	}
 
 	// Acquire exclusive lock on vault directory.
 	lockPath := filepath.Join(cfg.Dir, lockFileName)
 	lockFile, err := os.OpenFile(filepath.Clean(lockPath), os.O_CREATE|os.O_RDWR, cfg.FileMode)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open lock file %s: %w", lockPath, err)
 	}
 	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil { //nolint:gosec // G115: uintptr->int is safe on 64-bit
 		_ = lockFile.Close()
@@ -212,7 +212,7 @@ func NewManager(cfg Config) (*Manager, error) {
 	}
 	if err := manager.loadExisting(); err != nil {
 		_ = lockFile.Close()
-		return nil, err
+		return nil, fmt.Errorf("load existing chunks in %s: %w", cfg.Dir, err)
 	}
 
 	if cfg.ExpectExisting && !dirExisted {
@@ -308,13 +308,13 @@ func (m *Manager) doAppend(record chunk.Record, preserveWriteTS bool) (chunk.Chu
 	defer active.writeMu.Unlock()
 
 	if _, err := active.rawFile.WriteAt(record.Raw, rawPos); err != nil {
-		return chunk.ChunkID{}, 0, err
+		return chunk.ChunkID{}, 0, fmt.Errorf("write raw at offset %d: %w", rawPos, err)
 	}
 	if _, err := active.attrFile.WriteAt(attrBytes, attrPos); err != nil {
-		return chunk.ChunkID{}, 0, err
+		return chunk.ChunkID{}, 0, fmt.Errorf("write attr at offset %d: %w", attrPos, err)
 	}
 	if _, err := active.idxFile.WriteAt(idxBuf[:], idxPos); err != nil {
-		return chunk.ChunkID{}, 0, err
+		return chunk.ChunkID{}, 0, fmt.Errorf("write idx at offset %d: %w", idxPos, err)
 	}
 
 	return chunkID, recordIndex, nil
@@ -517,7 +517,7 @@ var _ chunk.AttrScanner = (*Manager)(nil)
 func (m *Manager) loadExisting() error {
 	entries, err := os.ReadDir(m.cfg.Dir)
 	if err != nil {
-		return err
+		return fmt.Errorf("read vault dir %s: %w", m.cfg.Dir, err)
 	}
 
 	// Collect all unsealed chunks to find the newest one.
@@ -539,7 +539,7 @@ func (m *Manager) loadExisting() error {
 
 		meta, err := m.loadChunkMeta(id)
 		if err != nil {
-			return err
+			return fmt.Errorf("load chunk meta for %s: %w", id, err)
 		}
 
 		m.metas[id] = meta
@@ -560,7 +560,7 @@ func (m *Manager) loadExisting() error {
 		for _, id := range unsealedIDs[:len(unsealedIDs)-1] {
 			m.logger.Info("sealing orphaned active chunk", "chunk", id.String())
 			if err := m.sealChunkOnDisk(id); err != nil {
-				return err
+				return fmt.Errorf("seal orphaned chunk %s: %w", id, err)
 			}
 			m.metas[id].sealed = true
 		}
@@ -573,7 +573,7 @@ func (m *Manager) loadExisting() error {
 	if len(unsealedIDs) == 1 {
 		id := unsealedIDs[0]
 		if err := m.openActiveChunk(id); err != nil {
-			return err
+			return fmt.Errorf("open active chunk %s: %w", id, err)
 		}
 	}
 
@@ -664,25 +664,25 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 
 	rawFile, err := m.openRawFile(id)
 	if err != nil {
-		return err
+		return fmt.Errorf("open raw.log for chunk %s: %w", id, err)
 	}
 	idxFile, err := m.openIdxFile(id)
 	if err != nil {
 		_ = rawFile.Close()
-		return err
+		return fmt.Errorf("open idx.log for chunk %s: %w", id, err)
 	}
 	attrFile, err := m.openAttrFile(id)
 	if err != nil {
 		_ = rawFile.Close()
 		_ = idxFile.Close()
-		return err
+		return fmt.Errorf("open attr.log for chunk %s: %w", id, err)
 	}
 	dictFile, err := m.openDictFile(id)
 	if err != nil {
 		_ = rawFile.Close()
 		_ = idxFile.Close()
 		_ = attrFile.Close()
-		return err
+		return fmt.Errorf("open attr_dict.log for chunk %s: %w", id, err)
 	}
 
 	closeAll := func() {
@@ -696,11 +696,11 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 	var headerBuf [IdxHeaderSize]byte
 	if _, err := idxFile.ReadAt(headerBuf[:], 0); err != nil {
 		closeAll()
-		return err
+		return fmt.Errorf("read idx.log header for chunk %s: %w", id, err)
 	}
 	if _, err := format.DecodeAndValidate(headerBuf[:format.HeaderSize], format.TypeIdxLog, IdxLogVersion); err != nil {
 		closeAll()
-		return err
+		return fmt.Errorf("invalid idx.log header for chunk %s: %w", id, err)
 	}
 	createdAtNanos := binary.LittleEndian.Uint64(headerBuf[format.HeaderSize:])
 	createdAt := time.Unix(0, int64(createdAtNanos)) //nolint:gosec // G115: nanosecond timestamp fits in int64
@@ -709,7 +709,7 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 	idxInfo, err := idxFile.Stat()
 	if err != nil {
 		closeAll()
-		return err
+		return fmt.Errorf("stat idx.log for chunk %s: %w", id, err)
 	}
 	recordCount := RecordCount(idxInfo.Size())
 
@@ -722,7 +722,7 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 		var entryBuf [IdxEntrySize]byte
 		if _, err := idxFile.ReadAt(entryBuf[:], lastOffset); err != nil {
 			closeAll()
-			return err
+			return fmt.Errorf("read last idx entry for chunk %s: %w", id, err)
 		}
 		lastEntry := DecodeIdxEntry(entryBuf[:])
 		expectedRawSize = int64(format.HeaderSize) + int64(lastEntry.RawOffset) + int64(lastEntry.RawSize)
@@ -736,12 +736,12 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 	rawInfo, err := rawFile.Stat()
 	if err != nil {
 		closeAll()
-		return err
+		return fmt.Errorf("stat raw.log for chunk %s: %w", id, err)
 	}
 	if rawInfo.Size() > expectedRawSize {
 		if err := rawFile.Truncate(expectedRawSize); err != nil {
 			closeAll()
-			return err
+			return fmt.Errorf("truncate raw.log for chunk %s: %w", id, err)
 		}
 		m.logger.Info("truncated orphaned raw.log data",
 			"chunk", id.String(),
@@ -753,12 +753,12 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 	attrInfo, err := attrFile.Stat()
 	if err != nil {
 		closeAll()
-		return err
+		return fmt.Errorf("stat attr.log for chunk %s: %w", id, err)
 	}
 	if attrInfo.Size() > expectedAttrSize {
 		if err := attrFile.Truncate(expectedAttrSize); err != nil {
 			closeAll()
-			return err
+			return fmt.Errorf("truncate attr.log for chunk %s: %w", id, err)
 		}
 		m.logger.Info("truncated orphaned attr.log data",
 			"chunk", id.String(),
@@ -773,7 +773,7 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 	dictInfo, err := dictFile.Stat()
 	if err != nil {
 		closeAll()
-		return err
+		return fmt.Errorf("stat attr_dict.log for chunk %s: %w", id, err)
 	}
 	var dict *chunk.StringDict
 	if dictInfo.Size() <= int64(format.HeaderSize) {
@@ -782,12 +782,12 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 		dictData := make([]byte, dictInfo.Size()-int64(format.HeaderSize))
 		if _, err := dictFile.ReadAt(dictData, int64(format.HeaderSize)); err != nil {
 			closeAll()
-			return err
+			return fmt.Errorf("read attr_dict.log for chunk %s: %w", id, err)
 		}
 		dict, err = chunk.DecodeDictData(dictData)
 		if err != nil {
 			closeAll()
-			return err
+			return fmt.Errorf("decode attr_dict.log for chunk %s: %w", id, err)
 		}
 	}
 
@@ -816,23 +816,23 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 
 	idxFile, err := os.Open(filepath.Clean(idxPath))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open idx.log for chunk %s: %w", id, err)
 	}
 	defer func() { _ = idxFile.Close() }()
 
 	var headerBuf [IdxHeaderSize]byte
 	if _, err := io.ReadFull(idxFile, headerBuf[:]); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read idx.log header for chunk %s: %w", id, err)
 	}
 	header, err := format.DecodeAndValidate(headerBuf[:format.HeaderSize], format.TypeIdxLog, IdxLogVersion)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid idx.log header for chunk %s: %w", id, err)
 	}
 	sealed := header.Flags&format.FlagSealed != 0
 
 	info, err := idxFile.Stat()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("stat idx.log for chunk %s: %w", id, err)
 	}
 	recordCount := RecordCount(info.Size())
 
@@ -849,7 +849,7 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 
 	firstEntry, lastEntry, err := m.readFirstLastEntries(idxFile, recordCount)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read first/last entries for chunk %s: %w", id, err)
 	}
 
 	meta.startTS = firstEntry.WriteTS
@@ -893,16 +893,16 @@ func (m *Manager) checkCompressionFlag(id chunk.ChunkID) bool {
 func (m *Manager) readFirstLastEntries(idxFile *os.File, recordCount uint64) (IdxEntry, IdxEntry, error) {
 	var entryBuf [IdxEntrySize]byte
 	if _, err := io.ReadFull(idxFile, entryBuf[:]); err != nil {
-		return IdxEntry{}, IdxEntry{}, err
+		return IdxEntry{}, IdxEntry{}, fmt.Errorf("read first idx entry: %w", err)
 	}
 	firstEntry := DecodeIdxEntry(entryBuf[:])
 
 	lastOffset := IdxFileOffset(recordCount - 1)
 	if _, err := idxFile.Seek(lastOffset, io.SeekStart); err != nil {
-		return IdxEntry{}, IdxEntry{}, err
+		return IdxEntry{}, IdxEntry{}, fmt.Errorf("seek to last idx entry (record %d): %w", recordCount-1, err)
 	}
 	if _, err := io.ReadFull(idxFile, entryBuf[:]); err != nil {
-		return IdxEntry{}, IdxEntry{}, err
+		return IdxEntry{}, IdxEntry{}, fmt.Errorf("read last idx entry: %w", err)
 	}
 	lastEntry := DecodeIdxEntry(entryBuf[:])
 
@@ -1322,21 +1322,21 @@ func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, boo
 	idxPath := m.idxLogPath(id)
 	idxFile, err := os.Open(filepath.Clean(idxPath))
 	if err != nil {
-		return 0, false, err
+		return 0, false, fmt.Errorf("open idx.log for chunk %s: %w", id, err)
 	}
 	defer func() { _ = idxFile.Close() }()
 
 	// Validate header.
 	var headerBuf [format.HeaderSize]byte
 	if _, err := idxFile.ReadAt(headerBuf[:], 0); err != nil {
-		return 0, false, err
+		return 0, false, fmt.Errorf("read idx.log header for chunk %s: %w", id, err)
 	}
 	if _, err := format.DecodeAndValidate(headerBuf[:], format.TypeIdxLog, IdxLogVersion); err != nil {
-		return 0, false, err
+		return 0, false, fmt.Errorf("invalid idx.log header for chunk %s: %w", id, err)
 	}
 	info, err := idxFile.Stat()
 	if err != nil {
-		return 0, false, err
+		return 0, false, fmt.Errorf("stat idx.log for chunk %s: %w", id, err)
 	}
 	recordCount := RecordCount(info.Size())
 	if recordCount == 0 {
@@ -1353,7 +1353,7 @@ func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, boo
 
 		offset := IdxFileOffset(mid)
 		if _, err := idxFile.ReadAt(entryBuf[:], offset); err != nil {
-			return 0, false, err
+			return 0, false, fmt.Errorf("read idx entry at pos %d in chunk %s: %w", mid, id, err)
 		}
 		entry := DecodeIdxEntry(entryBuf[:])
 
@@ -1389,7 +1389,7 @@ func (m *Manager) ReadWriteTimestamps(id chunk.ChunkID, positions []uint64) ([]t
 	idxPath := m.idxLogPath(id)
 	idxFile, err := os.Open(filepath.Clean(idxPath))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open idx.log for chunk %s: %w", id, err)
 	}
 	defer func() { _ = idxFile.Close() }()
 
@@ -1428,7 +1428,7 @@ func (m *Manager) Delete(id chunk.ChunkID) error {
 	}
 
 	if err := os.RemoveAll(m.chunkDir(id)); err != nil {
-		return err
+		return fmt.Errorf("remove chunk dir %s: %w", id, err)
 	}
 
 	delete(m.metas, id)

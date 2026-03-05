@@ -2,6 +2,7 @@ package file
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -21,10 +22,10 @@ var (
 func loadDict(dictPath string) (*chunk.StringDict, error) {
 	data, err := os.ReadFile(filepath.Clean(dictPath))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read attr_dict %s: %w", dictPath, err)
 	}
 	if _, err := format.DecodeAndValidate(data[:format.HeaderSize], format.TypeAttrDict, AttrDictVersion); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid attr_dict header in %s: %w", dictPath, err)
 	}
 	return chunk.DecodeDictData(data[format.HeaderSize:])
 }
@@ -63,18 +64,18 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath s
 	// Load dictionary from attr_dict.log.
 	dict, err := loadDict(dictPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("chunk %s: %w", chunkID, err)
 	}
 
 	// Open and mmap idx.log.
 	idxFile, err := os.Open(filepath.Clean(idxPath))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open idx.log for chunk %s: %w", chunkID, err)
 	}
 	idxInfo, err := idxFile.Stat()
 	if err != nil {
 		_ = idxFile.Close()
-		return nil, err
+		return nil, fmt.Errorf("stat idx.log for chunk %s: %w", chunkID, err)
 	}
 
 	recordCount := RecordCount(idxInfo.Size())
@@ -94,14 +95,14 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath s
 	idxData, err := syscall.Mmap(int(idxFile.Fd()), 0, int(idxInfo.Size()), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: uintptr->int and int64->int are safe on 64-bit
 	if err != nil {
 		_ = idxFile.Close()
-		return nil, err
+		return nil, fmt.Errorf("mmap idx.log for chunk %s: %w", chunkID, err)
 	}
 
 	rawData, rawMmap, rawFile, rawSeek, err := openDataFile(rawPath)
 	if err != nil {
 		_ = syscall.Munmap(idxData)
 		_ = idxFile.Close()
-		return nil, err
+		return nil, fmt.Errorf("open raw.log for chunk %s: %w", chunkID, err)
 	}
 
 	cleanupRaw := func() {
@@ -121,7 +122,7 @@ func newMmapCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath s
 	attrData, attrMmap, attrFile, attrSeek, err := openDataFile(attrPath)
 	if err != nil {
 		cleanupRaw()
-		return nil, err
+		return nil, fmt.Errorf("open attr.log for chunk %s: %w", chunkID, err)
 	}
 
 	return &mmapCursor{
@@ -321,25 +322,25 @@ func newStdioCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath 
 	// Load dictionary from attr_dict.log.
 	dict, err := loadDict(dictPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("chunk %s: %w", chunkID, err)
 	}
 
 	rawFile, err := os.Open(filepath.Clean(rawPath))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open raw.log for chunk %s: %w", chunkID, err)
 	}
 
 	idxFile, err := os.Open(filepath.Clean(idxPath))
 	if err != nil {
 		_ = rawFile.Close()
-		return nil, err
+		return nil, fmt.Errorf("open idx.log for chunk %s: %w", chunkID, err)
 	}
 
 	attrFile, err := os.Open(filepath.Clean(attrPath))
 	if err != nil {
 		_ = rawFile.Close()
 		_ = idxFile.Close()
-		return nil, err
+		return nil, fmt.Errorf("open attr.log for chunk %s: %w", chunkID, err)
 	}
 
 	// Get current record count.
@@ -348,7 +349,7 @@ func newStdioCursor(chunkID chunk.ChunkID, rawPath, idxPath, attrPath, dictPath 
 		_ = rawFile.Close()
 		_ = idxFile.Close()
 		_ = attrFile.Close()
-		return nil, err
+		return nil, fmt.Errorf("stat idx.log for chunk %s: %w", chunkID, err)
 	}
 	recordCount := RecordCount(idxInfo.Size())
 
@@ -495,13 +496,13 @@ func scanAttrsSealed(idxPath, attrPath, dictPath string, startPos uint64, fn fun
 	// Mmap idx.log (always uncompressed).
 	idxFile, err := os.Open(filepath.Clean(idxPath))
 	if err != nil {
-		return err
+		return fmt.Errorf("open idx.log %s: %w", idxPath, err)
 	}
 	defer func() { _ = idxFile.Close() }()
 
 	idxInfo, err := idxFile.Stat()
 	if err != nil {
-		return err
+		return fmt.Errorf("stat idx.log %s: %w", idxPath, err)
 	}
 	recordCount := RecordCount(idxInfo.Size())
 	if recordCount == 0 {
@@ -510,7 +511,7 @@ func scanAttrsSealed(idxPath, attrPath, dictPath string, startPos uint64, fn fun
 
 	idxData, err := syscall.Mmap(int(idxFile.Fd()), 0, int(idxInfo.Size()), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: safe on 64-bit
 	if err != nil {
-		return err
+		return fmt.Errorf("mmap idx.log %s: %w", idxPath, err)
 	}
 	defer func() { _ = syscall.Munmap(idxData) }()
 
@@ -542,7 +543,7 @@ func scanAttrsSealed(idxPath, attrPath, dictPath string, startPos uint64, fn fun
 		if attrSeek != nil {
 			attrBuf = make([]byte, entry.AttrSize)
 			if _, err := attrSeek.ReadAt(attrBuf, int64(entry.AttrOffset)); err != nil {
-				return err
+				return fmt.Errorf("read compressed attr at record %d: %w", i, err)
 			}
 		} else {
 			attrStart := int(entry.AttrOffset)
@@ -555,7 +556,7 @@ func scanAttrsSealed(idxPath, attrPath, dictPath string, startPos uint64, fn fun
 
 		attrs, err := chunk.DecodeWithDict(attrBuf, dict)
 		if err != nil {
-			return err
+			return fmt.Errorf("decode attrs at record %d: %w", i, err)
 		}
 
 		if !fn(entry.WriteTS, attrs) {
@@ -576,13 +577,13 @@ func scanAttrsActive(idxPath, attrPath, dictPath string, startPos uint64, fn fun
 
 	idxFile, err := os.Open(filepath.Clean(idxPath))
 	if err != nil {
-		return err
+		return fmt.Errorf("open idx.log %s: %w", idxPath, err)
 	}
 	defer func() { _ = idxFile.Close() }()
 
 	idxInfo, err := idxFile.Stat()
 	if err != nil {
-		return err
+		return fmt.Errorf("stat idx.log %s: %w", idxPath, err)
 	}
 	recordCount := RecordCount(idxInfo.Size())
 	if recordCount == 0 {
@@ -591,26 +592,26 @@ func scanAttrsActive(idxPath, attrPath, dictPath string, startPos uint64, fn fun
 
 	attrFile, err := os.Open(filepath.Clean(attrPath))
 	if err != nil {
-		return err
+		return fmt.Errorf("open attr.log %s: %w", attrPath, err)
 	}
 	defer func() { _ = attrFile.Close() }()
 
 	var entryBuf [IdxEntrySize]byte
 	for i := startPos; i < recordCount; i++ {
 		if _, err := idxFile.ReadAt(entryBuf[:], IdxFileOffset(i)); err != nil {
-			return err
+			return fmt.Errorf("read idx entry at record %d: %w", i, err)
 		}
 		entry := DecodeIdxEntry(entryBuf[:])
 
 		attrOffset := int64(format.HeaderSize) + int64(entry.AttrOffset)
 		attrBuf := make([]byte, entry.AttrSize)
 		if _, err := attrFile.ReadAt(attrBuf, attrOffset); err != nil {
-			return err
+			return fmt.Errorf("read attr at record %d: %w", i, err)
 		}
 
 		attrs, err := chunk.DecodeWithDict(attrBuf, dict)
 		if err != nil {
-			return err
+			return fmt.Errorf("decode attrs at record %d: %w", i, err)
 		}
 
 		if !fn(entry.WriteTS, attrs) {
@@ -623,26 +624,29 @@ func scanAttrsActive(idxPath, attrPath, dictPath string, startPos uint64, fn fun
 func openDataFile(path string) (data []byte, mmapRegion []byte, file *os.File, seek seekable.Reader, err error) {
 	compressed, err := isCompressed(path)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, fmt.Errorf("check compression for %s: %w", path, err)
 	}
 	if compressed {
 		seek, file, err = openSeekableReader(path)
-		return nil, nil, file, seek, err
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("open seekable %s: %w", path, err)
+		}
+		return nil, nil, file, seek, nil
 	}
 
 	file, err = os.Open(filepath.Clean(path))
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	info, err := file.Stat()
 	if err != nil {
 		_ = file.Close()
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, fmt.Errorf("stat %s: %w", path, err)
 	}
 	mmapRegion, err = syscall.Mmap(int(file.Fd()), 0, int(info.Size()), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: uintptr->int and int64->int are safe on 64-bit
 	if err != nil {
 		_ = file.Close()
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, fmt.Errorf("mmap %s: %w", path, err)
 	}
 	return mmapRegion[format.HeaderSize:], mmapRegion, file, nil, nil
 }
