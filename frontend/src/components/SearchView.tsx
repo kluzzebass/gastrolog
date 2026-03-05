@@ -61,6 +61,7 @@ import { ChangePasswordDialog } from "./ChangePasswordDialog";
 import { PreferencesDialog } from "./PreferencesDialog";
 import { HelpDialog } from "./HelpDialog";
 import { HelpProvider } from "../hooks/useHelp";
+import { DetailPanelProvider } from "../hooks/useDetailPanel";
 import { ResultsToolbar } from "./ResultsToolbar";
 import { QueryBar } from "./QueryBar";
 import { useConfig } from "../api/hooks/useConfig";
@@ -626,6 +627,26 @@ export function SearchView() {
     }
   };
 
+  const handleContextRecordSelect = (rec: ProtoRecord) => {
+    const ts = rec.writeTs?.toDate();
+    if (ts) {
+      const start = new Date(ts.getTime() - 30_000);
+      const end = new Date(ts.getTime() + 30_000);
+      const newQuery = `start=${start.toISOString()} end=${end.toISOString()} reverse=true`;
+      setTimeRange("custom");
+      setRangeStart(start);
+      setRangeEnd(end);
+      setSelectedRecord(rec);
+      navigate({
+        to: "/search",
+        search: (prev) => ({ ...prev, q: newQuery }),
+        replace: false,
+      });
+    } else {
+      setSelectedRecord(rec);
+    }
+  };
+
   const histogramData = histogramTableResult
     ? tableResultToHistogramData(histogramTableResult.columns, histogramTableResult.rows)
     : null;
@@ -1164,49 +1185,34 @@ export function SearchView() {
           </div>
         </main>
 
-        {isTablet && !detailCollapsed && (
-          <div className="fixed inset-0 bg-black/30 z-20" role="presentation" onClick={() => setDetailCollapsed(true)} />
-        )}
-        <DetailSidebar
-          dark={dark}
-          isTablet={isTablet}
-          detailWidth={detailWidth}
-          detailCollapsed={detailCollapsed}
-          setDetailCollapsed={setDetailCollapsed}
-          detailPinned={detailPinned}
-          setDetailPinned={setDetailPinned}
-          detailResizeProps={detailResizeProps}
-          resizing={resizing}
-          selectedRecord={selectedRecord}
-          onFieldSelect={handleFieldSelect}
-          onChunkSelect={handleChunkSelect}
-          onVaultSelect={handleVaultSelect}
-          onPosSelect={handlePosSelect}
-          contextBefore={contextBefore}
-          contextAfter={contextAfter}
-          contextLoading={contextLoading}
-          contextReversed={isReversed}
-          highlightMode={highlightMode}
-          onContextRecordSelect={(rec) => {
-            const ts = rec.writeTs?.toDate();
-            if (ts) {
-              const start = new Date(ts.getTime() - 30_000);
-              const end = new Date(ts.getTime() + 30_000);
-              const newQuery = `start=${start.toISOString()} end=${end.toISOString()} reverse=true`;
-              setTimeRange("custom");
-              setRangeStart(start);
-              setRangeEnd(end);
-              setSelectedRecord(rec);
-              navigate({
-                to: "/search",
-                search: (prev) => ({ ...prev, q: newQuery }),
-                replace: false,
-              });
-            } else {
-              setSelectedRecord(rec);
-            }
-          }}
-        />
+        <DetailPanelProvider value={{
+          onFieldSelect: handleFieldSelect,
+          onChunkSelect: handleChunkSelect,
+          onVaultSelect: handleVaultSelect,
+          onPosSelect: handlePosSelect,
+          contextBefore,
+          contextAfter,
+          contextLoading,
+          contextReversed: isReversed,
+          onContextRecordSelect: handleContextRecordSelect,
+          highlightMode,
+        }}>
+          {isTablet && !detailCollapsed && (
+            <div className="fixed inset-0 bg-black/30 z-20" role="presentation" onClick={() => setDetailCollapsed(true)} />
+          )}
+          <DetailSidebar
+            dark={dark}
+            isTablet={isTablet}
+            detailWidth={detailWidth}
+            detailCollapsed={detailCollapsed}
+            setDetailCollapsed={setDetailCollapsed}
+            detailPinned={detailPinned}
+            setDetailPinned={setDetailPinned}
+            detailResizeProps={detailResizeProps}
+            resizing={resizing}
+            selectedRecord={selectedRecord}
+          />
+        </DetailPanelProvider>
       </div>
     </div>
     </HelpProvider>

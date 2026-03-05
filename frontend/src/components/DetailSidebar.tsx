@@ -1,7 +1,6 @@
 import { Record as ProtoRecord } from "../api/client";
 import { DetailPanelContent } from "./DetailPanel";
 import { useThemeClass } from "../hooks/useThemeClass";
-import type { HighlightMode } from "../syntax";
 import type { ResizeProps } from "../hooks/usePanelResize";
 
 interface DetailSidebarProps {
@@ -15,16 +14,6 @@ interface DetailSidebarProps {
   detailResizeProps: ResizeProps;
   resizing: boolean;
   selectedRecord: ProtoRecord | null;
-  onFieldSelect: (key: string, value: string) => void;
-  onChunkSelect: (chunkId: string) => void;
-  onVaultSelect: (vaultId: string) => void;
-  onPosSelect: (chunkId: string, pos: string) => void;
-  contextBefore: ProtoRecord[];
-  contextAfter: ProtoRecord[];
-  contextLoading: boolean;
-  contextReversed: boolean;
-  onContextRecordSelect: (rec: ProtoRecord) => void;
-  highlightMode?: HighlightMode;
 }
 
 function asideLayoutCls(
@@ -51,16 +40,6 @@ export function DetailSidebar({
   detailResizeProps,
   resizing,
   selectedRecord,
-  onFieldSelect,
-  onChunkSelect,
-  onVaultSelect,
-  onPosSelect,
-  contextBefore,
-  contextAfter,
-  contextLoading,
-  contextReversed,
-  onContextRecordSelect,
-  highlightMode = "full",
 }: Readonly<DetailSidebarProps>) {
   const c = useThemeClass(dark);
 
@@ -154,16 +133,6 @@ export function DetailSidebar({
           <DetailPanelContent
             record={selectedRecord}
             dark={dark}
-            onFieldSelect={onFieldSelect}
-            onChunkSelect={onChunkSelect}
-            onVaultSelect={onVaultSelect}
-            onPosSelect={onPosSelect}
-            contextBefore={contextBefore}
-            contextAfter={contextAfter}
-            contextLoading={contextLoading}
-            contextReversed={contextReversed}
-            onContextRecordSelect={onContextRecordSelect}
-            highlightMode={highlightMode}
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-48 px-4">
