@@ -73,7 +73,7 @@ func testAfterConfigApply(orch *orchestrator.Orchestrator, cfgStore config.Store
 			if !cfg.Enabled {
 				return
 			}
-			factory, ok := factories.Ingesters[cfg.Type]
+			reg, ok := factories.IngesterTypes[cfg.Type]
 			if !ok {
 				return
 			}
@@ -83,7 +83,7 @@ func testAfterConfigApply(orch *orchestrator.Orchestrator, cfgStore config.Store
 				maps.Copy(params, cfg.Params)
 				params["_state_dir"] = factories.HomeDir
 			}
-			ing, err := factory(cfg.ID, params, factories.Logger)
+			ing, err := reg.Factory(cfg.ID, params, factories.Logger)
 			if err != nil {
 				return
 			}

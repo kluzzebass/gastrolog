@@ -181,7 +181,7 @@ func (d *configDispatcher) handleIngesterPut(ctx context.Context, id uuid.UUID) 
 		return
 	}
 
-	factory, ok := d.factories.Ingesters[ingCfg.Type]
+	reg, ok := d.factories.IngesterTypes[ingCfg.Type]
 	if !ok {
 		d.logger.Error("dispatch: unknown ingester type", "id", id, "name", ingCfg.Name, "type", ingCfg.Type)
 		return
@@ -194,7 +194,7 @@ func (d *configDispatcher) handleIngesterPut(ctx context.Context, id uuid.UUID) 
 		params["_state_dir"] = d.factories.HomeDir
 	}
 
-	ingester, err := factory(ingCfg.ID, params, d.factories.Logger)
+	ingester, err := reg.Factory(ingCfg.ID, params, d.factories.Logger)
 	if err != nil {
 		d.logger.Error("dispatch: create ingester", "id", id, "name", ingCfg.Name, "type", ingCfg.Type, "error", err)
 		return

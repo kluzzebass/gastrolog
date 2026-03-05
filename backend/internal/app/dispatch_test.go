@@ -139,7 +139,7 @@ func newTestDispatcher(orch orchActions, store config.Store, h *captureHandler) 
 	return &configDispatcher{
 		orch:        orch,
 		cfgStore:    store,
-		factories:   orchestrator.Factories{Ingesters: map[string]orchestrator.IngesterFactory{}},
+		factories:   orchestrator.Factories{IngesterTypes: map[string]orchestrator.IngesterRegistration{}},
 		localNodeID: "local",
 		logger:      slog.New(h),
 	}
@@ -350,9 +350,9 @@ func TestHandle_IngesterPut(t *testing.T) {
 		d := newTestDispatcher(&mockOrch{}, &stubCfgStore{
 			ingester: &config.IngesterConfig{ID: id, NodeID: "local", Enabled: true, Type: "test"},
 		}, h)
-		d.factories.Ingesters["test"] = func(uuid.UUID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
+		d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{Factory: func(uuid.UUID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
 			return nil, errors.New("bad params")
-		}
+		}}
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
 
@@ -367,9 +367,9 @@ func TestHandle_IngesterPut(t *testing.T) {
 		d := newTestDispatcher(mo, &stubCfgStore{
 			ingester: &config.IngesterConfig{ID: id, NodeID: "local", Enabled: true, Type: "test"},
 		}, h)
-		d.factories.Ingesters["test"] = func(uuid.UUID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
+		d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{Factory: func(uuid.UUID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
 			return noopIngester{}, nil
-		}
+		}}
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
 
@@ -387,9 +387,9 @@ func TestHandle_IngesterPut(t *testing.T) {
 		d := newTestDispatcher(mo, &stubCfgStore{
 			ingester: &config.IngesterConfig{ID: id, NodeID: "local", Enabled: true, Type: "test"},
 		}, h)
-		d.factories.Ingesters["test"] = func(uuid.UUID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
+		d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{Factory: func(uuid.UUID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
 			return noopIngester{}, nil
-		}
+		}}
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
 

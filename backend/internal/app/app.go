@@ -672,62 +672,33 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 }
 
 func buildFactories(logger *slog.Logger, homeDir string, cfgStore config.Store, orch *orchestrator.Orchestrator, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler) orchestrator.Factories {
-	ingesters := map[string]orchestrator.IngesterFactory{
-		"chatterbox": chatterbox.NewIngester,
-		"docker":     ingestdocker.NewFactory(cfgStore),
-		"fluentfwd":  ingestfluentfwd.NewFactory(),
-		"http":       ingesthttp.NewFactory(),
-		"kafka":      ingestkafka.NewFactory(),
-		"mqtt":       ingestmqtt.NewFactory(),
-		"metrics":    ingestmetrics.NewFactory(orch),
-		"otlp":       ingestotlp.NewFactory(),
-		"relp":       ingestrelp.NewFactory(),
-		"syslog":     ingestsyslog.NewFactory(),
-		"tail":       ingesttail.NewFactory(),
+	reg := func(factory orchestrator.IngesterFactory, defaults func() map[string]string, tester orchestrator.ConnectionTester) orchestrator.IngesterRegistration {
+		return orchestrator.IngesterRegistration{Factory: factory, Defaults: defaults, Tester: tester}
 	}
-	defaults := map[string]func() map[string]string{
-		"chatterbox": chatterbox.ParamDefaults,
-		"docker":     ingestdocker.ParamDefaults,
-		"fluentfwd":  ingestfluentfwd.ParamDefaults,
-		"http":       ingesthttp.ParamDefaults,
-		"kafka":      ingestkafka.ParamDefaults,
-		"mqtt":       ingestmqtt.ParamDefaults,
-		"metrics":    ingestmetrics.ParamDefaults,
-		"otlp":       ingestotlp.ParamDefaults,
-		"relp":       ingestrelp.ParamDefaults,
-		"syslog":     ingestsyslog.ParamDefaults,
-		"tail":       ingesttail.ParamDefaults,
+	noCtx := func(fn func(map[string]string) (string, error)) orchestrator.ConnectionTester {
+		return func(_ context.Context, params map[string]string) (string, error) { return fn(params) }
 	}
-	testers := map[string]orchestrator.ConnectionTester{
-		"docker":    func(ctx context.Context, params map[string]string) (string, error) {
-			return ingestdocker.TestConnection(ctx, params, cfgStore)
-		},
-		"mqtt":      ingestmqtt.TestConnection,
-		"kafka":     ingestkafka.TestConnection,
-		"syslog":    func(_ context.Context, params map[string]string) (string, error) {
-			return ingestsyslog.TestConnection(params)
-		},
-		"relp":      func(_ context.Context, params map[string]string) (string, error) {
-			return ingestrelp.TestConnection(params)
-		},
-		"http":      func(_ context.Context, params map[string]string) (string, error) {
-			return ingesthttp.TestConnection(params)
-		},
-		"fluentfwd": func(_ context.Context, params map[string]string) (string, error) {
-			return ingestfluentfwd.TestConnection(params)
-		},
-		"otlp":      func(_ context.Context, params map[string]string) (string, error) {
-			return ingestotlp.TestConnection(params)
-		},
+	ingesterTypes := map[string]orchestrator.IngesterRegistration{
+		"chatterbox": reg(chatterbox.NewIngester, chatterbox.ParamDefaults, nil),
+		"docker": reg(ingestdocker.NewFactory(cfgStore), ingestdocker.ParamDefaults,
+			func(ctx context.Context, params map[string]string) (string, error) {
+				return ingestdocker.TestConnection(ctx, params, cfgStore)
+			}),
+		"fluentfwd": reg(ingestfluentfwd.NewFactory(), ingestfluentfwd.ParamDefaults, noCtx(ingestfluentfwd.TestConnection)),
+		"http":      reg(ingesthttp.NewFactory(), ingesthttp.ParamDefaults, noCtx(ingesthttp.TestConnection)),
+		"kafka":     reg(ingestkafka.NewFactory(), ingestkafka.ParamDefaults, ingestkafka.TestConnection),
+		"mqtt":      reg(ingestmqtt.NewFactory(), ingestmqtt.ParamDefaults, ingestmqtt.TestConnection),
+		"metrics":   reg(ingestmetrics.NewFactory(orch), ingestmetrics.ParamDefaults, nil),
+		"otlp":      reg(ingestotlp.NewFactory(), ingestotlp.ParamDefaults, noCtx(ingestotlp.TestConnection)),
+		"relp":      reg(ingestrelp.NewFactory(), ingestrelp.ParamDefaults, noCtx(ingestrelp.TestConnection)),
+		"syslog":    reg(ingestsyslog.NewFactory(), ingestsyslog.ParamDefaults, noCtx(ingestsyslog.TestConnection)),
+		"tail":      reg(ingesttail.NewFactory(), ingesttail.ParamDefaults, nil),
 	}
 	if slogCh != nil {
-		ingesters["self"] = ingestself.NewFactory(slogCh, slogCapture)
-		defaults["self"] = ingestself.ParamDefaults
+		ingesterTypes["self"] = reg(ingestself.NewFactory(slogCh, slogCapture), ingestself.ParamDefaults, nil)
 	}
 	return orchestrator.Factories{
-		Ingesters:           ingesters,
-		IngesterDefaults:    defaults,
-		ConnectionTesters:   testers,
+		IngesterTypes: ingesterTypes,
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"file":   chunkfile.NewFactory(),
 			"memory": chunkmem.NewFactory(),

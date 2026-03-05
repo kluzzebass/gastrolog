@@ -164,10 +164,10 @@ func TestApplyConfigIngesters(t *testing.T) {
 	}
 
 	factories := Factories{
-		Ingesters: map[string]IngesterFactory{
-			"test": func(id uuid.UUID, params map[string]string, logger *slog.Logger) (Ingester, error) {
+		IngesterTypes: map[string]IngesterRegistration{
+			"test": {Factory: func(id uuid.UUID, params map[string]string, logger *slog.Logger) (Ingester, error) {
 				return &fakeIngester{}, nil
-			},
+			}},
 		},
 	}
 
@@ -251,7 +251,7 @@ func TestApplyConfigUnknownIngesterType(t *testing.T) {
 	}
 
 	err = orch.ApplyConfig(cfg, Factories{
-		Ingesters: map[string]IngesterFactory{},
+		IngesterTypes: map[string]IngesterRegistration{},
 	})
 	if err == nil {
 		t.Error("expected error for unknown ingester type")
@@ -298,10 +298,10 @@ func TestApplyConfigDuplicateIngesterID(t *testing.T) {
 	}
 
 	factories := Factories{
-		Ingesters: map[string]IngesterFactory{
-			"test": func(id uuid.UUID, params map[string]string, logger *slog.Logger) (Ingester, error) {
+		IngesterTypes: map[string]IngesterRegistration{
+			"test": {Factory: func(id uuid.UUID, params map[string]string, logger *slog.Logger) (Ingester, error) {
 				return &fakeIngester{}, nil
-			},
+			}},
 		},
 	}
 
@@ -388,10 +388,10 @@ func TestApplyConfigIngesterFactoryError(t *testing.T) {
 	}
 
 	factories := Factories{
-		Ingesters: map[string]IngesterFactory{
-			"test": func(id uuid.UUID, params map[string]string, logger *slog.Logger) (Ingester, error) {
+		IngesterTypes: map[string]IngesterRegistration{
+			"test": {Factory: func(id uuid.UUID, params map[string]string, logger *slog.Logger) (Ingester, error) {
 				return nil, errors.New("factory error")
-			},
+			}},
 		},
 	}
 
@@ -415,11 +415,11 @@ func TestApplyConfigParamsPassedToIngesterFactory(t *testing.T) {
 
 	var receivedParams map[string]string
 	factories := Factories{
-		Ingesters: map[string]IngesterFactory{
-			"test": func(id uuid.UUID, params map[string]string, logger *slog.Logger) (Ingester, error) {
+		IngesterTypes: map[string]IngesterRegistration{
+			"test": {Factory: func(id uuid.UUID, params map[string]string, logger *slog.Logger) (Ingester, error) {
 				receivedParams = params
 				return &fakeIngester{}, nil
-			},
+			}},
 		},
 	}
 

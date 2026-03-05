@@ -161,7 +161,7 @@ func (s *ConfigServer) PutIngester(
 }
 
 func (s *ConfigServer) validateIngester(ingCfg config.IngesterConfig) error {
-	factory, ok := s.factories.Ingesters[ingCfg.Type]
+	reg, ok := s.factories.IngesterTypes[ingCfg.Type]
 	if !ok {
 		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("unknown ingester type: %s", ingCfg.Type))
 	}
@@ -174,7 +174,7 @@ func (s *ConfigServer) validateIngester(ingCfg config.IngesterConfig) error {
 		maps.Copy(params, ingCfg.Params)
 		params["_state_dir"] = s.factories.HomeDir
 	}
-	if _, err := factory(ingCfg.ID, params, s.factories.Logger); err != nil {
+	if _, err := reg.Factory(ingCfg.ID, params, s.factories.Logger); err != nil {
 		return connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	return nil
@@ -223,9 +223,11 @@ func (s *ConfigServer) GetIngesterDefaults(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetIngesterDefaultsRequest],
 ) (*connect.Response[apiv1.GetIngesterDefaultsResponse], error) {
-	types := make(map[string]*apiv1.IngesterTypeDefaults, len(s.factories.IngesterDefaults))
-	for name, fn := range s.factories.IngesterDefaults {
-		types[name] = &apiv1.IngesterTypeDefaults{Params: fn()}
+	types := make(map[string]*apiv1.IngesterTypeDefaults, len(s.factories.IngesterTypes))
+	for name, reg := range s.factories.IngesterTypes {
+		if reg.Defaults != nil {
+			types[name] = &apiv1.IngesterTypeDefaults{Params: reg.Defaults()}
+		}
 	}
 	return connect.NewResponse(&apiv1.GetIngesterDefaultsResponse{Types: types}), nil
 }
@@ -235,15 +237,15 @@ func (s *ConfigServer) TestIngester(
 	ctx context.Context,
 	req *connect.Request[apiv1.TestIngesterRequest],
 ) (*connect.Response[apiv1.TestIngesterResponse], error) {
-	tester, ok := s.factories.ConnectionTesters[req.Msg.Type]
-	if !ok {
+	reg, ok := s.factories.IngesterTypes[req.Msg.Type]
+	if !ok || reg.Tester == nil {
 		return connect.NewResponse(&apiv1.TestIngesterResponse{
 			Success: false,
 			Message: fmt.Sprintf("connection test not supported for ingester type %q", req.Msg.Type),
 		}), nil
 	}
 
-	msg, err := tester(ctx, req.Msg.Params)
+	msg, err := reg.Tester(ctx, req.Msg.Params)
 
 	if err != nil {
 		return connect.NewResponse(&apiv1.TestIngesterResponse{ //nolint:nilerr // test failure is reported in the response body, not as an RPC error

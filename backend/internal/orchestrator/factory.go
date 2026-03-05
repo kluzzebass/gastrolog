@@ -32,12 +32,20 @@ import (
 // or an error describing the failure.
 type ConnectionTester func(ctx context.Context, params map[string]string) (string, error)
 
+// IngesterRegistration bundles an ingester's factory, default parameters,
+// and optional connection tester into a single registration unit.
+// This prevents the factory, defaults, and tester maps from diverging
+// when new ingester types are added.
+type IngesterRegistration struct {
+	Factory  IngesterFactory
+	Defaults func() map[string]string
+	Tester   ConnectionTester // nil if not supported
+}
+
 type Factories struct {
-	Ingesters           map[string]IngesterFactory
-	IngesterDefaults    map[string]func() map[string]string
-	ConnectionTesters   map[string]ConnectionTester
-	ChunkManagers       map[string]chunk.ManagerFactory
-	IndexManagers       map[string]index.ManagerFactory
+	IngesterTypes map[string]IngesterRegistration
+	ChunkManagers map[string]chunk.ManagerFactory
+	IndexManagers map[string]index.ManagerFactory
 
 	// Logger is the base logger passed to component factories.
 	// Components derive child loggers with their own scope.
@@ -286,7 +294,7 @@ func (o *Orchestrator) applyIngesters(cfg *config.Config, factories Factories) e
 		}
 
 		// Look up ingester factory.
-		recvFactory, ok := factories.Ingesters[recvCfg.Type]
+		reg, ok := factories.IngesterTypes[recvCfg.Type]
 		if !ok {
 			return fmt.Errorf("unknown ingester type: %s", recvCfg.Type)
 		}
@@ -305,7 +313,7 @@ func (o *Orchestrator) applyIngesters(cfg *config.Config, factories Factories) e
 		if factories.Logger != nil {
 			recvLogger = factories.Logger.With("ingester_id", recvCfg.ID)
 		}
-		recv, err := recvFactory(recvCfg.ID, params, recvLogger)
+		recv, err := reg.Factory(recvCfg.ID, params, recvLogger)
 		if err != nil {
 			return fmt.Errorf("create ingester %s: %w", recvCfg.ID, err)
 		}
