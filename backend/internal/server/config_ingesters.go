@@ -13,14 +13,6 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/config"
 	"gastrolog/internal/config/raftfsm"
-	"gastrolog/internal/ingester/docker"
-	"gastrolog/internal/ingester/fluentfwd"
-	inghttp "gastrolog/internal/ingester/http"
-	"gastrolog/internal/ingester/kafka"
-	"gastrolog/internal/ingester/mqtt"
-	"gastrolog/internal/ingester/otlp"
-	"gastrolog/internal/ingester/relp"
-	"gastrolog/internal/ingester/syslog"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -243,32 +235,15 @@ func (s *ConfigServer) TestIngester(
 	ctx context.Context,
 	req *connect.Request[apiv1.TestIngesterRequest],
 ) (*connect.Response[apiv1.TestIngesterResponse], error) {
-	var msg string
-	var err error
-
-	switch req.Msg.Type {
-	case "docker":
-		msg, err = docker.TestConnection(ctx, req.Msg.Params, s.cfgStore)
-	case "mqtt":
-		msg, err = mqtt.TestConnection(ctx, req.Msg.Params)
-	case "kafka":
-		msg, err = kafka.TestConnection(ctx, req.Msg.Params)
-	case "syslog":
-		msg, err = syslog.TestConnection(req.Msg.Params)
-	case "relp":
-		msg, err = relp.TestConnection(req.Msg.Params)
-	case "http":
-		msg, err = inghttp.TestConnection(req.Msg.Params)
-	case "fluentfwd":
-		msg, err = fluentfwd.TestConnection(req.Msg.Params)
-	case "otlp":
-		msg, err = otlp.TestConnection(req.Msg.Params)
-	default:
+	tester, ok := s.factories.ConnectionTesters[req.Msg.Type]
+	if !ok {
 		return connect.NewResponse(&apiv1.TestIngesterResponse{
 			Success: false,
 			Message: fmt.Sprintf("connection test not supported for ingester type %q", req.Msg.Type),
 		}), nil
 	}
+
+	msg, err := tester(ctx, req.Msg.Params)
 
 	if err != nil {
 		return connect.NewResponse(&apiv1.TestIngesterResponse{ //nolint:nilerr // test failure is reported in the response body, not as an RPC error

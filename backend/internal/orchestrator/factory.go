@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -26,11 +27,17 @@ import (
 //   - Logger is passed to factories that support it
 //   - Factories create child loggers scoped to their component
 //   - If Logger is nil, components use discard loggers
+// ConnectionTester validates connectivity for an ingester configuration
+// without saving or starting it. Returns a human-readable success message
+// or an error describing the failure.
+type ConnectionTester func(ctx context.Context, params map[string]string) (string, error)
+
 type Factories struct {
-	Ingesters        map[string]IngesterFactory
-	IngesterDefaults map[string]func() map[string]string
-	ChunkManagers    map[string]chunk.ManagerFactory
-	IndexManagers    map[string]index.ManagerFactory
+	Ingesters           map[string]IngesterFactory
+	IngesterDefaults    map[string]func() map[string]string
+	ConnectionTesters   map[string]ConnectionTester
+	ChunkManagers       map[string]chunk.ManagerFactory
+	IndexManagers       map[string]index.ManagerFactory
 
 	// Logger is the base logger passed to component factories.
 	// Components derive child loggers with their own scope.

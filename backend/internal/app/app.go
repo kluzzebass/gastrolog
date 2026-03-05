@@ -698,13 +698,36 @@ func buildFactories(logger *slog.Logger, homeDir string, cfgStore config.Store, 
 		"syslog":     ingestsyslog.ParamDefaults,
 		"tail":       ingesttail.ParamDefaults,
 	}
+	testers := map[string]orchestrator.ConnectionTester{
+		"docker":    func(ctx context.Context, params map[string]string) (string, error) {
+			return ingestdocker.TestConnection(ctx, params, cfgStore)
+		},
+		"mqtt":      ingestmqtt.TestConnection,
+		"kafka":     ingestkafka.TestConnection,
+		"syslog":    func(_ context.Context, params map[string]string) (string, error) {
+			return ingestsyslog.TestConnection(params)
+		},
+		"relp":      func(_ context.Context, params map[string]string) (string, error) {
+			return ingestrelp.TestConnection(params)
+		},
+		"http":      func(_ context.Context, params map[string]string) (string, error) {
+			return ingesthttp.TestConnection(params)
+		},
+		"fluentfwd": func(_ context.Context, params map[string]string) (string, error) {
+			return ingestfluentfwd.TestConnection(params)
+		},
+		"otlp":      func(_ context.Context, params map[string]string) (string, error) {
+			return ingestotlp.TestConnection(params)
+		},
+	}
 	if slogCh != nil {
 		ingesters["self"] = ingestself.NewFactory(slogCh, slogCapture)
 		defaults["self"] = ingestself.ParamDefaults
 	}
 	return orchestrator.Factories{
-		Ingesters:        ingesters,
-		IngesterDefaults: defaults,
+		Ingesters:           ingesters,
+		IngesterDefaults:    defaults,
+		ConnectionTesters:   testers,
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"file":   chunkfile.NewFactory(),
 			"memory": chunkmem.NewFactory(),
