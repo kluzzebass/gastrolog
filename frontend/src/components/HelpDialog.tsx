@@ -155,150 +155,8 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
     });
   }
 
-  function topicButtonCls(isActive: boolean, isTopLevel: boolean): string {
-    if (isActive) return "bg-copper/15 text-copper";
-    if (isTopLevel) return c("text-text-bright hover:bg-ink-hover", "text-light-text-bright hover:bg-light-hover");
-    return c(
-      "text-text-muted hover:text-text-bright hover:bg-ink-hover",
-      "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
-    );
-  }
-
-  function renderTopic(t: HelpTopic, depth: number, index: number) {
-    const isActive = activeId === t.id;
-    const hasChildren = !!t.children;
-    const isExpanded = hasChildren && expanded.has(t.id);
-    const isTopLevel = depth === 0;
-
-    return (
-      <div key={t.id} className={isTopLevel && index > 0 ? "mt-1.5" : undefined}>
-        <button
-          onClick={() => selectTopic(t)}
-          className={`flex items-center w-full text-left rounded transition-colors mb-0.5 ${
-            isTopLevel ? "text-[0.85em] font-medium" : "text-[0.8em]"
-          } ${
-            topicButtonCls(isActive, isTopLevel)
-          }`}
-          style={{ paddingLeft: `${0.5 + depth * 0.75}rem`, paddingRight: '0.5rem', paddingTop: '0.375rem', paddingBottom: '0.375rem' }}
-        >
-          <span className="w-3 h-3 mr-1 shrink-0 flex items-center justify-center">
-            {hasChildren && (
-              <svg
-                onClick={(e) => { e.stopPropagation(); toggleExpanded(t.id); }}
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); toggleExpanded(t.id); } }}
-                role="button"
-                tabIndex={0}
-                aria-label={isExpanded ? "Collapse section" : "Expand section"}
-                className={`w-3 h-3 transition-transform cursor-pointer ${isExpanded ? "rotate-90" : ""}`}
-                viewBox="0 0 12 12"
-                fill="currentColor"
-              >
-                <path d="M4.5 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            )}
-          </span>
-          {t.title}
-        </button>
-        {isExpanded && (
-          <div>
-            {t.children!.map((child, i) => renderTopic(child, depth + 1, i))}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  /** Extract a short snippet around the first match in the content. */
-  function getSnippet(entry: SearchEntry): string | null {
-    const q = search.trim().toLowerCase();
-    if (!q || entry.titleLower.includes(q)) return null;
-    const terms = q.split(/\s+/);
-    let idx = -1;
-    for (const term of terms) {
-      const i = entry.plainText.indexOf(term);
-      if (i !== -1 && (idx < 0 || i < idx)) idx = i;
-    }
-    if (idx < 0) return null;
-    const start = Math.max(0, idx - 30);
-    const end = Math.min(entry.plainText.length, idx + 60);
-    return (start > 0 ? "..." : "") + entry.plainText.slice(start, end) + (end < entry.plainText.length ? "..." : "");
-  }
-
-
-  function renderContent() {
-    if (topic && topicContent && !loadingContent) {
-      return (
-        <MarkdownContent
-          dark={dark}
-          content={topicContent}
-          onNavigate={navigate}
-          onOpenSettings={onOpenSettings}
-        />
-      );
-    }
-    if (topic) {
-      return (
-        <p className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
-          Loading...
-        </p>
-      );
-    }
-    return (
-      <p className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
-        Select a topic from the sidebar.
-      </p>
-    );
-  }
-
-  function renderSidebarContent() {
-    if (!searchResults) {
-      return (
-        <>
-          <h2
-            className={`text-[0.75em] uppercase tracking-wider font-medium mb-2 px-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
-          >
-            Topics
-          </h2>
-          {helpTopics.map((t, i) => renderTopic(t, 0, i))}
-        </>
-      );
-    }
-    if (searchResults.length === 0) {
-      return (
-        <p className={`text-[0.8em] px-2 py-1 ${c("text-text-ghost", "text-light-text-ghost")}`}>
-          No results
-        </p>
-      );
-    }
-    return (
-      <>
-        {searchResults.map((entry) => {
-          const snippet = getSnippet(entry);
-          return (
-            <button
-              key={entry.topic.id}
-              onClick={() => selectTopic(entry.topic)}
-              className={`flex flex-col w-full text-left rounded text-[0.85em] transition-colors mb-0.5 px-2 py-1.5 ${
-                activeId === entry.topic.id
-                  ? "bg-copper/15 text-copper font-medium"
-                  : c(
-                      "text-text-muted hover:text-text-bright hover:bg-ink-hover",
-                      "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
-                    )
-              }`}
-            >
-              <span>{entry.topic.title}</span>
-              {snippet && (
-                <span className={`text-[0.8em] truncate ${c("text-text-ghost", "text-light-text-ghost")}`}>
-                  {snippet}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </>
-    );
-  }
+  const sidebarProps = { dark, activeId, expanded, searchResults, search, onSelectTopic: selectTopic, onToggleExpanded: toggleExpanded };
+  const contentProps = { dark, topic, topicContent, loadingContent, onNavigate: navigate, onOpenSettings };
   return (
     <Dialog onClose={onClose} ariaLabel="Help" dark={dark} size="xl">
       <div className="flex h-full overflow-hidden">
@@ -346,17 +204,216 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
 
           {/* Topic tree or search results */}
           <div className="flex-1 overflow-y-auto app-scroll px-3 pb-3">
-            {renderSidebarContent()}
+            <SidebarContent {...sidebarProps} />
           </div>
         </nav>
 
         {/* Content */}
         <div ref={contentRef} className="flex-1 overflow-y-auto app-scroll p-6">
-          {renderContent()}
+          <ContentPanel {...contentProps} />
         </div>
 
       </div>
     </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Extracted sub-components for stable reconciliation boundaries
+// ---------------------------------------------------------------------------
+
+function topicButtonCls(c: (d: string, l: string) => string, isActive: boolean, isTopLevel: boolean): string {
+  if (isActive) return "bg-copper/15 text-copper";
+  if (isTopLevel) return c("text-text-bright hover:bg-ink-hover", "text-light-text-bright hover:bg-light-hover");
+  return c(
+    "text-text-muted hover:text-text-bright hover:bg-ink-hover",
+    "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
+  );
+}
+
+function TopicItem({ topic: t, depth, index, activeId, expanded, onSelect, onToggle, dark }: Readonly<{
+  topic: HelpTopic;
+  depth: number;
+  index: number;
+  activeId: string;
+  expanded: Set<string>;
+  onSelect: (t: HelpTopic) => void;
+  onToggle: (id: string) => void;
+  dark: boolean;
+}>) {
+  const c = useThemeClass(dark);
+  const isActive = activeId === t.id;
+  const hasChildren = !!t.children;
+  const isExpanded = hasChildren && expanded.has(t.id);
+  const isTopLevel = depth === 0;
+
+  return (
+    <div className={isTopLevel && index > 0 ? "mt-1.5" : undefined}>
+      <button
+        onClick={() => onSelect(t)}
+        className={`flex items-center w-full text-left rounded transition-colors mb-0.5 ${
+          isTopLevel ? "text-[0.85em] font-medium" : "text-[0.8em]"
+        } ${
+          topicButtonCls(c, isActive, isTopLevel)
+        }`}
+        style={{ paddingLeft: `${0.5 + depth * 0.75}rem`, paddingRight: '0.5rem', paddingTop: '0.375rem', paddingBottom: '0.375rem' }}
+      >
+        <span className="w-3 h-3 mr-1 shrink-0 flex items-center justify-center">
+          {hasChildren && (
+            <svg
+              onClick={(e) => { e.stopPropagation(); onToggle(t.id); }}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); onToggle(t.id); } }}
+              role="button"
+              tabIndex={0}
+              aria-label={isExpanded ? "Collapse section" : "Expand section"}
+              className={`w-3 h-3 transition-transform cursor-pointer ${isExpanded ? "rotate-90" : ""}`}
+              viewBox="0 0 12 12"
+              fill="currentColor"
+            >
+              <path d="M4.5 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
+        </span>
+        {t.title}
+      </button>
+      {isExpanded && (
+        <div>
+          {t.children!.map((child, i) => (
+            <TopicItem
+              key={child.id}
+              topic={child}
+              depth={depth + 1}
+              index={i}
+              activeId={activeId}
+              expanded={expanded}
+              onSelect={onSelect}
+              onToggle={onToggle}
+              dark={dark}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Extract a short snippet around the first match in the content. */
+function getSnippet(search: string, entry: SearchEntry): string | null {
+  const q = search.trim().toLowerCase();
+  if (!q || entry.titleLower.includes(q)) return null;
+  const terms = q.split(/\s+/);
+  let idx = -1;
+  for (const term of terms) {
+    const i = entry.plainText.indexOf(term);
+    if (i !== -1 && (idx < 0 || i < idx)) idx = i;
+  }
+  if (idx < 0) return null;
+  const start = Math.max(0, idx - 30);
+  const end = Math.min(entry.plainText.length, idx + 60);
+  return (start > 0 ? "..." : "") + entry.plainText.slice(start, end) + (end < entry.plainText.length ? "..." : "");
+}
+
+function SidebarContent({ dark, activeId, expanded, searchResults, search, onSelectTopic, onToggleExpanded }: Readonly<{
+  dark: boolean;
+  activeId: string;
+  expanded: Set<string>;
+  searchResults: SearchEntry[] | null;
+  search: string;
+  onSelectTopic: (t: HelpTopic) => void;
+  onToggleExpanded: (id: string) => void;
+}>) {
+  const c = useThemeClass(dark);
+  if (!searchResults) {
+    return (
+      <>
+        <h2
+          className={`text-[0.75em] uppercase tracking-wider font-medium mb-2 px-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
+        >
+          Topics
+        </h2>
+        {helpTopics.map((t, i) => (
+          <TopicItem
+            key={t.id}
+            topic={t}
+            depth={0}
+            index={i}
+            activeId={activeId}
+            expanded={expanded}
+            onSelect={onSelectTopic}
+            onToggle={onToggleExpanded}
+            dark={dark}
+          />
+        ))}
+      </>
+    );
+  }
+  if (searchResults.length === 0) {
+    return (
+      <p className={`text-[0.8em] px-2 py-1 ${c("text-text-ghost", "text-light-text-ghost")}`}>
+        No results
+      </p>
+    );
+  }
+  return (
+    <>
+      {searchResults.map((entry) => {
+        const snippet = getSnippet(search, entry);
+        return (
+          <button
+            key={entry.topic.id}
+            onClick={() => onSelectTopic(entry.topic)}
+            className={`flex flex-col w-full text-left rounded text-[0.85em] transition-colors mb-0.5 px-2 py-1.5 ${
+              activeId === entry.topic.id
+                ? "bg-copper/15 text-copper font-medium"
+                : c(
+                    "text-text-muted hover:text-text-bright hover:bg-ink-hover",
+                    "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
+                  )
+            }`}
+          >
+            <span>{entry.topic.title}</span>
+            {snippet && (
+              <span className={`text-[0.8em] truncate ${c("text-text-ghost", "text-light-text-ghost")}`}>
+                {snippet}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </>
+  );
+}
+
+function ContentPanel({ dark, topic, topicContent, loadingContent, onNavigate, onOpenSettings }: Readonly<{
+  dark: boolean;
+  topic: HelpTopic | undefined;
+  topicContent: string | null;
+  loadingContent: boolean;
+  onNavigate: (topicId: string) => void;
+  onOpenSettings?: (tab: string) => void;
+}>) {
+  const c = useThemeClass(dark);
+  if (topic && topicContent && !loadingContent) {
+    return (
+      <MarkdownContent
+        dark={dark}
+        content={topicContent}
+        onNavigate={onNavigate}
+        onOpenSettings={onOpenSettings}
+      />
+    );
+  }
+  if (topic) {
+    return (
+      <p className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+        Loading...
+      </p>
+    );
+  }
+  return (
+    <p className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+      Select a topic from the sidebar.
+    </p>
   );
 }
 
