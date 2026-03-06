@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef, type MutableRefObject } from 
 import { ConnectError, Code } from "@connectrpc/connect";
 import { queryClient, Query, Record, refreshAuth } from "../client";
 
-const DEFAULT_MAX_RECORDS = 5000;
+const DEFAULT_MAX_RECORDS = 100;
 const INITIAL_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 30_000;
 

@@ -135,7 +135,7 @@ export function useSearchView() {
   const [followBufferSize, setFollowBufferSize] = useState(() => {
     const stored = localStorage.getItem("gastrolog:followBufferSize");
     const n = stored ? parseInt(stored, 10) : NaN;
-    return n > 0 ? n : 5000;
+    return n > 0 ? n : 100;
   });
   const handleFollowBufferSizeChange = (size: number) => {
     setFollowBufferSize(size);
