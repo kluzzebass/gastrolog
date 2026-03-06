@@ -715,6 +715,7 @@ func TestChunkDir(t *testing.T) {
 }
 
 func TestDisown(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -749,6 +750,7 @@ func TestDisown(t *testing.T) {
 }
 
 func TestDisownActiveChunkFails(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -769,6 +771,7 @@ func TestDisownActiveChunkFails(t *testing.T) {
 }
 
 func TestDisownUnsealedChunkFails(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -784,6 +787,7 @@ func TestDisownUnsealedChunkFails(t *testing.T) {
 }
 
 func TestAdopt(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {

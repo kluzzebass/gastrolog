@@ -561,6 +561,7 @@ func TestOTLPBodyTypes(t *testing.T) {
 // --- Backpressure Tests ---
 
 func TestOTLPHTTPBackpressure(t *testing.T) {
+	t.Parallel()
 	// Channel size 2: backpressure triggers at 90% → 2*9/10 = 1, so len >= 1 fires after one message.
 	httpAddr, _, _ := listenAndStartOTLP(t, 2)
 
@@ -588,6 +589,7 @@ func TestOTLPHTTPBackpressure(t *testing.T) {
 }
 
 func TestOTLPGRPCBackpressure(t *testing.T) {
+	t.Parallel()
 	_, grpcAddr, _ := listenAndStartOTLP(t, 2)
 
 	conn, err := grpc.NewClient(grpcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -624,6 +626,7 @@ func TestOTLPGRPCBackpressure(t *testing.T) {
 // --- Factory Tests ---
 
 func TestOTLPFactory(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	// Default addrs.
@@ -657,6 +660,7 @@ func TestOTLPFactory(t *testing.T) {
 // --- Empty Request ---
 
 func TestOTLPEmptyRequest(t *testing.T) {
+	t.Parallel()
 	httpAddr, _, _ := listenAndStartOTLP(t, 10)
 
 	req := &collogspb.ExportLogsServiceRequest{}
@@ -672,6 +676,7 @@ func TestOTLPEmptyRequest(t *testing.T) {
 // --- Multiple ResourceLogs ---
 
 func TestOTLPMultipleResourceLogs(t *testing.T) {
+	t.Parallel()
 	httpAddr, _, out := listenAndStartOTLP(t, 10)
 
 	ts := time.Now()
@@ -718,6 +723,7 @@ func TestOTLPMultipleResourceLogs(t *testing.T) {
 // --- Zstd Compression Tests ---
 
 func TestOTLPHTTPZstd(t *testing.T) {
+	t.Parallel()
 	httpAddr, _, out := listenAndStartOTLP(t, 10)
 
 	ts := time.Now().Truncate(time.Microsecond)
@@ -749,6 +755,7 @@ func TestOTLPHTTPZstd(t *testing.T) {
 }
 
 func TestOTLPHTTPZstdProtobuf(t *testing.T) {
+	t.Parallel()
 	httpAddr, _, out := listenAndStartOTLP(t, 10)
 
 	ts := time.Now().Truncate(time.Microsecond)
@@ -780,6 +787,7 @@ func TestOTLPHTTPZstdProtobuf(t *testing.T) {
 }
 
 func TestOTLPHTTPUnsupportedEncoding(t *testing.T) {
+	t.Parallel()
 	httpAddr, _, _ := listenAndStartOTLP(t, 10)
 
 	httpReq, _ := http.NewRequest("POST", "http://"+httpAddr+"/v1/logs", bytes.NewReader([]byte("data")))

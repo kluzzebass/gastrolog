@@ -271,6 +271,7 @@ func TestSearchTimeRangeFilter(t *testing.T) {
 }
 
 func TestSearchLimit(t *testing.T) {
+	t.Parallel()
 	records := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
 		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
@@ -296,6 +297,7 @@ func TestSearchLimit(t *testing.T) {
 }
 
 func TestSearchMultiChunkMerge(t *testing.T) {
+	t.Parallel()
 	batch1 := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("c1r1")},
 		{IngestTS: t2, Attrs: attrsA, Raw: []byte("c1r2")},
@@ -323,6 +325,7 @@ func TestSearchMultiChunkMerge(t *testing.T) {
 }
 
 func TestSearchMultiChunkLimit(t *testing.T) {
+	t.Parallel()
 	batch1 := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("c1r1")},
 		{IngestTS: t2, Attrs: attrsA, Raw: []byte("c1r2")},
@@ -351,6 +354,7 @@ func TestSearchMultiChunkLimit(t *testing.T) {
 }
 
 func TestSearchContextCancellation(t *testing.T) {
+	t.Parallel()
 	records := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
 	}
@@ -367,6 +371,7 @@ func TestSearchContextCancellation(t *testing.T) {
 }
 
 func TestSearchSkipsNonOverlappingChunks(t *testing.T) {
+	t.Parallel()
 	early := []chunk.Record{
 		{IngestTS: t0, Attrs: attrsA, Raw: []byte("early")},
 	}
@@ -393,6 +398,7 @@ func TestSearchSkipsNonOverlappingChunks(t *testing.T) {
 }
 
 func TestSearchEarlyBreak(t *testing.T) {
+	t.Parallel()
 	records := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
 		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
@@ -426,6 +432,7 @@ func TestSearchEarlyBreak(t *testing.T) {
 }
 
 func TestSearchContextCancelledMidIteration(t *testing.T) {
+	t.Parallel()
 	batch1 := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("c1r1")},
 		{IngestTS: t2, Attrs: attrsA, Raw: []byte("c1r2")},
